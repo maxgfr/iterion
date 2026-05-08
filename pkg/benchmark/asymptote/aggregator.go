@@ -48,7 +48,7 @@ func AggregateGroup(label string, runs []RunSeries) GroupAggregate {
 			agg.MeanScore = sum / float64(count)
 			agg.PassRate = float64(passes) / float64(count)
 			if count > 1 {
-				variance := (sumSq/float64(count)) - (agg.MeanScore * agg.MeanScore)
+				variance := (sumSq / float64(count)) - (agg.MeanScore * agg.MeanScore)
 				if variance < 0 {
 					variance = 0
 				}

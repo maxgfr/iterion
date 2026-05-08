@@ -15,10 +15,10 @@ type IterationScore struct {
 	RunID     string    `json:"run_id"`
 	LoopName  string    `json:"loop_name"`
 	Iteration int       `json:"iteration"`
-	Score     float64   `json:"score"`           // canonical 0..1
-	Approved  bool      `json:"approved"`        // true when score >= ApprovalThreshold
-	NodeID    string    `json:"node_id"`         // judge node that produced the verdict
-	RawValue  string    `json:"raw_value"`       // the raw string before mapping (for debug)
+	Score     float64   `json:"score"`     // canonical 0..1
+	Approved  bool      `json:"approved"`  // true when score >= ApprovalThreshold
+	NodeID    string    `json:"node_id"`   // judge node that produced the verdict
+	RawValue  string    `json:"raw_value"` // the raw string before mapping (for debug)
 	At        time.Time `json:"at"`
 }
 
@@ -39,10 +39,10 @@ type RunSeries struct {
 // iteration index: the per-iteration mean, the count of runs that reached
 // that iteration, and the stderr.
 type GroupAggregate struct {
-	Label      string                `json:"label"` // "single-model" / "alternated"
-	Runs       []RunSeries           `json:"runs"`
-	PerIter    []IterationAggregate  `json:"per_iter"` // index = iteration number
-	MaxIter    int                   `json:"max_iter"`
+	Label   string               `json:"label"` // "single-model" / "alternated"
+	Runs    []RunSeries          `json:"runs"`
+	PerIter []IterationAggregate `json:"per_iter"` // index = iteration number
+	MaxIter int                  `json:"max_iter"`
 }
 
 // IterationAggregate is the aggregate score across a group at a given
