@@ -89,15 +89,24 @@ export class CDPClient {
   // send issues a CDP method call and resolves with the `result`
   // map (or rejects on protocol-level error). Bytes are sent as
   // utf-8 JSON over a binary frame to mirror the upstream pipe.
+  //
+  // sessionId targets a flat-mode child session attached via
+  // Target.attachToTarget({flatten: true}). When omitted the message
+  // goes to the root browser session — which exposes Browser/Target/
+  // Tracing but NOT Page domains. To drive Page.* you MUST attach
+  // to a page target first and pass its sessionId here.
   async send(
     method: string,
     params: Record<string, unknown> = {},
+    sessionId?: string,
   ): Promise<Record<string, unknown>> {
     if (this.closed) throw new Error("cdp: client closed");
     await this.connect();
     if (!this.ws) throw new Error("cdp: ws not initialised");
     const id = this.nextId++;
-    const msg = JSON.stringify({ id, method, params });
+    const env: Record<string, unknown> = { id, method, params };
+    if (sessionId) env.sessionId = sessionId;
+    const msg = JSON.stringify(env);
     return new Promise<Record<string, unknown>>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       try {

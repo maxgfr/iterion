@@ -1,0 +1,87 @@
+## Fixture : browser_demo
+##
+## End-to-end demo of the run-console "Browser" pane, covering the
+## three surfaces of the browser-simulation feature:
+##   PR 1  iframe viewer        → tool stdout `[iterion] preview_url=...`
+##   PR 2  screenshots scrubber → tool stdout `[iterion] preview_screenshot=...`
+##   PR 4  live mode (CDP)      → Playwright MCP + HostChromiumRunner on host
+##
+## Pre-requisites:
+##   - chromium (or google-chrome) installed on host (apt install chromium)
+##   - npx accessible (devbox provides Node 22)
+##   - LLM API key exported (ANTHROPIC_API_KEY or OPENAI_API_KEY) for live_browse
+##
+## Run:
+##   devbox run -- ./iterion run examples/browser_demo.iter --merge-into none
+##   devbox run -- ./iterion editor --port 8080
+##   # open http://127.0.0.1:8080 → "Browser" tab auto-reveals
+##   # PR 1+2 visible without intervention
+##   # PR 4   click "attach live" once live_browse is active
+
+## ─── Schemas ────────────────────────────────────────────────────────
+
+schema announce_result:
+  ok: bool
+
+schema page_check:
+  ok: bool
+  title: string
+
+## ─── PR 1 : preview URL ─────────────────────────────────────────────
+
+tool announce_url:
+  command: "echo '[iterion] preview_url=https://example.com kind=docs scope=external' && echo \\{\\\"ok\\\":true\\}"
+  output: announce_result
+
+## ─── PR 2 : screenshot scrubber ────────────────────────────────────
+## Decodes a 1x1 PNG to /tmp and emits the directive on stdout. The
+## runtime persists it as an attachment; the editor scrubber lets you
+## travel back to the seq where this tool ran and renders the image
+## in place of the live iframe.
+##
+## Note: the runtime applies os.ExpandEnv() to tool commands before
+## sh -c, so any `$VAR` reference is replaced with the parent process'
+## env value (empty in this case). We hardcode the path on every
+## occurrence rather than use a shell variable.
+
+tool snap:
+  command: "printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAUAAeIVWzAAAAAASUVORK5CYII=' | base64 -d > /tmp/iterion-browser-demo.png && echo '[iterion] preview_screenshot=/tmp/iterion-browser-demo.png' && echo \\{\\\"ok\\\":true\\}"
+  output: announce_result
+
+## ─── PR 4 : live mode via Playwright MCP + HostChromiumRunner ──────
+
+mcp_server playwright:
+  transport: stdio
+  command: "npx"
+  args: ["-y", "@playwright/mcp@latest"]
+
+agent live_browse:
+  model: "anthropic/claude-sonnet-4-6"
+  output: page_check
+  mcp:
+    servers: [playwright]
+  user: live_browse_user
+
+prompt live_browse_user:
+  Use the Playwright MCP browser tools:
+    1. Call browser_navigate with url=https://example.com
+    2. Call browser_snapshot to capture the page
+    3. Return {ok: true, title: <observed title>}
+
+  Stay on the page after the snapshot — keep the session alive long
+  enough for the editor to attach via "attach live".
+
+## ─── Workflow ───────────────────────────────────────────────────────
+
+workflow browser_demo:
+  ## No sandbox: HostChromiumRunner spawns Chromium on the host so
+  ## this demo works without pulling iterion-sandbox-browser. Switch
+  ## to `sandbox: { mode: inline, image: "ghcr.io/socialgouv/iterion-sandbox-browser:edge" }`
+  ## if you want isolated runs (PR 3 path).
+  budget:
+    max_duration: "5m"
+
+  entry: announce_url
+  announce_url -> snap
+  snap -> live_browse
+  live_browse -> done

@@ -10,6 +10,8 @@ const (
 	eventMenuOpenProject   = "menu:open-project"
 	eventMenuNewProject    = "menu:new-project"
 	eventMenuAbout         = "menu:about"
+	eventMenuUndo          = "menu:undo"
+	eventMenuRedo          = "menu:redo"
 
 	eventUpdateAvailable = "update:available"
 	eventUpdateApplied   = "update:applied"

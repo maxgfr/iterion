@@ -60,7 +60,10 @@ for f in "$DIR"/iterion-desktop-*; do
     echo "Missing required signature for $f (expected $sigfile)" >&2
     exit 1
   fi
-  sig=$(cat "$sigfile")
+  # Strip every CR/LF defensively. A stray newline inside a JSON string
+  # value produces an invalid control character that the desktop
+  # auto-updater cannot parse — see the v0.8.0 incident.
+  sig=$(tr -d '\r\n' < "$sigfile")
   if [ -z "$sig" ]; then
     echo "Empty signature file for $f ($sigfile)" >&2
     exit 1
@@ -96,6 +99,19 @@ released_at=$(date -u +%FT%TZ)
   printf '"release_notes_url":"https://github.com/SocialGouv/iterion/releases/tag/%s"' "$VERSION"
   printf '}'
 } > "$MANIFEST"
+
+# Sanity check: ensure the manifest is valid JSON before signing.
+# Catches future regressions in the signature pipeline before we
+# publish garbage. `jq` is available on every standard GitHub-hosted
+# runner; we skip if it's missing locally rather than block.
+if command -v jq >/dev/null 2>&1; then
+  if ! jq -e . "$MANIFEST" >/dev/null; then
+    echo "ERROR: manifest is not valid JSON: $MANIFEST" >&2
+    exit 1
+  fi
+else
+  echo "warning: jq not found; skipping manifest JSON validation" >&2
+fi
 
 # Sign the manifest with the same script used for artefacts.
 "$(dirname "$0")"/sign-release.sh "$MANIFEST"

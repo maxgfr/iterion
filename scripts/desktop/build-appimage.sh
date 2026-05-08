@@ -5,10 +5,11 @@
 # Usage:
 #   ./scripts/desktop/build-appimage.sh <amd64|arm64>
 #
-# Pre-requisites (managed by CI; locally install with `apt`):
-#   - linuxdeploy / linuxdeploy-plugin-gtk
-#   - appimagetool
-#   - libfuse2 (for mounting / running the resulting AppImage)
+# Pre-requisites:
+#   - linuxdeploy / linuxdeploy-plugin-gtk    (auto-downloaded to ~/.cache)
+#   - appimagetool                            (auto-downloaded to ~/.cache)
+#   - libfuse2 / libfuse2t64                  (only required to RUN the
+#     produced .AppImage — the build itself uses --appimage-extract-and-run)
 #
 # The build/bin/iterion-desktop binary is expected to exist (run
 # `task desktop:build:linux:<arch>` first).
@@ -80,10 +81,26 @@ cp -a "$WEBKIT_HELPER_SRC"/. "$WEBKIT_HELPER_DIR/"
 # at runtime with: "undefined symbol: gpgrt_add_post_log_func".
 # linuxdeploy-plugin-gtk doesn't honour --exclude-library on its own
 # transitive deps, so we also strip the leftovers from AppDir post-bundle.
-if ! command -v linuxdeploy >/dev/null 2>&1; then
-  echo "linuxdeploy not found in PATH — install it to package the AppImage" >&2
-  exit 1
+# Auto-bootstrap linuxdeploy + plugin-gtk if not on PATH. The CI runner
+# does this via apt-style wget into /usr/local/bin; locally we cache in
+# ~/.cache/iterion-linuxdeploy and prepend to PATH so `--plugin gtk`
+# resolves the helper. Mirrors the appimagetool pattern further down.
+LINUXDEPLOY_CACHE="$HOME/.cache/iterion-linuxdeploy-${APPIMAGE_ARCH}"
+mkdir -p "$LINUXDEPLOY_CACHE"
+LINUXDEPLOY_BIN="$LINUXDEPLOY_CACHE/linuxdeploy"
+LINUXDEPLOY_PLUGIN_GTK="$LINUXDEPLOY_CACHE/linuxdeploy-plugin-gtk"
+if [ ! -x "$LINUXDEPLOY_BIN" ]; then
+  curl -fsSL -o "$LINUXDEPLOY_BIN" \
+    "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${APPIMAGE_ARCH}.AppImage"
+  chmod +x "$LINUXDEPLOY_BIN"
 fi
+if [ ! -x "$LINUXDEPLOY_PLUGIN_GTK" ]; then
+  curl -fsSL -o "$LINUXDEPLOY_PLUGIN_GTK" \
+    "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh"
+  chmod +x "$LINUXDEPLOY_PLUGIN_GTK"
+fi
+# linuxdeploy looks up `linuxdeploy-plugin-gtk` on PATH, hence the prepend.
+export PATH="$LINUXDEPLOY_CACHE:$PATH"
 
 EXCLUDES=(
   --exclude-library=libgcrypt.so\*
@@ -93,7 +110,7 @@ EXCLUDES=(
 )
 
 TARGET_NAME="iterion-desktop-linux-${ARCH}.AppImage"
-ARCH="$APPIMAGE_ARCH" linuxdeploy --appimage-extract-and-run \
+ARCH="$APPIMAGE_ARCH" "$LINUXDEPLOY_BIN" --appimage-extract-and-run \
   --appdir "$APPDIR" --plugin gtk --output appimage "${EXCLUDES[@]}"
 
 # Belt-and-suspenders: linuxdeploy-plugin-gtk re-deploys some host-only

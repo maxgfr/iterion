@@ -18,6 +18,7 @@ import { onDesktopEvent } from "@/lib/desktopBridge";
 import { DesktopEvent } from "@/lib/desktopEvents";
 import { AuthProvider, useAuth } from "@/auth/AuthContext";
 import { setUnauthorizedHandler } from "@/api/client";
+import { useDocumentStore } from "@/store/document";
 
 export default function App() {
   return (
@@ -57,15 +58,24 @@ function AuthGate() {
 function AuthedApp() {
   const { isDesktop, ready, firstRunPending, refresh } = useDesktop();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<string>("api-keys");
   const [switcherOpen, setSwitcherOpen] = useState(false);
 
   useEffect(() => {
     const offs = [
-      onDesktopEvent(DesktopEvent.MenuSettings, () => setSettingsOpen(true)),
+      onDesktopEvent(DesktopEvent.MenuSettings, () => {
+        setSettingsTab("api-keys");
+        setSettingsOpen(true);
+      }),
       onDesktopEvent(DesktopEvent.MenuSwitchProject, () => setSwitcherOpen(true)),
       onDesktopEvent(DesktopEvent.MenuOpenProject, () => setSwitcherOpen(true)),
       onDesktopEvent(DesktopEvent.MenuNewProject, () => setSwitcherOpen(true)),
-      onDesktopEvent(DesktopEvent.MenuAbout, () => setSettingsOpen(true)),
+      onDesktopEvent(DesktopEvent.MenuAbout, () => {
+        setSettingsTab("about");
+        setSettingsOpen(true);
+      }),
+      onDesktopEvent(DesktopEvent.MenuUndo, () => useDocumentStore.getState().undo()),
+      onDesktopEvent(DesktopEvent.MenuRedo, () => useDocumentStore.getState().redo()),
     ];
     return () => offs.forEach((off) => off());
   }, []);
@@ -78,6 +88,7 @@ function AuthedApp() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key === ",") {
         e.preventDefault();
+        setSettingsTab("api-keys");
         setSettingsOpen(true);
       }
     };
@@ -109,7 +120,12 @@ function AuthedApp() {
       <ToastContainer />
       {isDesktop && (
         <>
-          <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+          <Settings
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            tab={settingsTab}
+            onTabChange={setSettingsTab}
+          />
           <ProjectSwitcher open={switcherOpen} onClose={() => setSwitcherOpen(false)} />
         </>
       )}

@@ -265,6 +265,12 @@ tasks:
   # cmd/iterion-desktop/ and is gated by `//go:build desktop` so the
   # default `go test ./...` does not require Wails to be installed.
 
+  desktop:install-deps:linux:
+    desc: Install the apt prerequisites + Wails CLI to build iterion-desktop on Debian/Ubuntu/Mint (idempotent)
+    cmds:
+      - ./scripts/desktop/install-linux-deps.sh
+      - task: desktop:install-tools
+
   desktop:install-tools:
     desc: Install Wails CLI and tools needed for desktop builds
     cmds:
@@ -393,6 +399,28 @@ tasks:
       - |
         export PATH="/usr/bin:$PATH"
         ./scripts/desktop/build-appimage.sh arm64
+
+  desktop:package:linux:amd64:deb:
+    desc: Package Linux amd64 build as a Debian .deb (also produces AppImage)
+    # Depend on the AppImage task so a single command yields all three
+    # local artefacts (binary, AppImage, .deb), matching the CI release
+    # job that bundles them together.
+    deps: [desktop:package:linux:amd64]
+    cmds:
+      - |
+        # dpkg-deb lives in /usr/bin and devbox's PATH may shadow it
+        # (Nix wrappers don't ship dpkg). The prepend is harmless on CI
+        # runners where /usr/bin already comes first.
+        export PATH="/usr/bin:$PATH"
+        ./scripts/desktop/build-deb.sh amd64
+
+  desktop:package:linux:arm64:deb:
+    desc: Package Linux arm64 build as a Debian .deb (also produces AppImage)
+    deps: [desktop:package:linux:arm64]
+    cmds:
+      - |
+        export PATH="/usr/bin:$PATH"
+        ./scripts/desktop/build-deb.sh arm64
 
   desktop:sign-release:
     desc: Sign all desktop release artefacts with Ed25519 (requires UPDATER_ED25519_PRIVATE)
