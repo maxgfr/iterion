@@ -46,14 +46,24 @@ func buildMenu(a *App) *menu.Menu {
 	}
 
 	// Edit ────────────────────────────────────────────────────────────────
+	// On Linux/WebKit2GTK the menu accelerator captures the keystroke at
+	// the GTK level — if the callback is nil, Ctrl+Z never reaches the
+	// SPA. So we forward Undo/Redo through Wails events; App.tsx listens
+	// globally and dispatches into the document store.
 	editMenu := m.AddSubmenu("Edit")
-	editMenu.AddText("Undo", keys.CmdOrCtrl("z"), nil)
-	editMenu.AddText("Redo", keys.Combo("z", keys.ShiftKey, keys.CmdOrCtrlKey), nil)
+	editMenu.AddText("Undo", keys.CmdOrCtrl("z"), func(_ *menu.CallbackData) {
+		wruntime.EventsEmit(a.ctx, eventMenuUndo)
+	})
+	editMenu.AddText("Redo", keys.Combo("z", keys.ShiftKey, keys.CmdOrCtrlKey), func(_ *menu.CallbackData) {
+		wruntime.EventsEmit(a.ctx, eventMenuRedo)
+	})
 	editMenu.AddSeparator()
-	editMenu.AddText("Cut", keys.CmdOrCtrl("x"), nil)
-	editMenu.AddText("Copy", keys.CmdOrCtrl("c"), nil)
-	editMenu.AddText("Paste", keys.CmdOrCtrl("v"), nil)
-	editMenu.AddText("Select All", keys.CmdOrCtrl("a"), nil)
+	// Cut/Copy/Paste/Select All: no accelerator so WebKit handles them
+	// natively in focused inputs. Items remain visible for discoverability.
+	editMenu.AddText("Cut", nil, nil)
+	editMenu.AddText("Copy", nil, nil)
+	editMenu.AddText("Paste", nil, nil)
+	editMenu.AddText("Select All", nil, nil)
 
 	// View ────────────────────────────────────────────────────────────────
 	viewMenu := m.AddSubmenu("View")

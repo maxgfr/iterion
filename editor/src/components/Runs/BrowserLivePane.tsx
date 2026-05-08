@@ -22,6 +22,9 @@ interface BrowserLivePaneProps {
 export default function BrowserLivePane({ runId, sessionId }: BrowserLivePaneProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const clientRef = useRef<CDPClient | null>(null);
+  // pageSessionRef holds the flat-mode CDP sessionId returned by
+  // Target.attachToTarget. All Page.*/Input.* calls must include it.
+  const pageSessionRef = useRef<string | null>(null);
   const [status, setStatus] = useState<
     "connecting" | "ready" | "error" | "closed"
   >("connecting");
@@ -40,6 +43,41 @@ export default function BrowserLivePane({ runId, sessionId }: BrowserLivePanePro
       try {
         await client.connect();
         if (cancelled) return;
+
+        // CDP `--remote-debugging-pipe` exposes the browser-level
+        // session, which only carries Browser/Target/Tracing domains.
+        // Page.* live on a page target's session. Find (or create) a
+        // page target, attach in flat mode, and route subsequent
+        // Page.* calls through that sessionId.
+        const targetsResp = await client.send("Target.getTargets");
+        const infos = (targetsResp.targetInfos ?? []) as Array<{
+          targetId: string;
+          type: string;
+        }>;
+        let pageTargetId =
+          infos.find((t) => t.type === "page")?.targetId ?? null;
+        if (!pageTargetId) {
+          // Fresh browser without an open tab: create one. about:blank
+          // renders as a white page so the canvas isn't an empty void.
+          const created = (await client.send("Target.createTarget", {
+            url: "about:blank",
+          })) as { targetId?: string };
+          pageTargetId = created.targetId ?? null;
+        }
+        if (!pageTargetId) {
+          throw new Error("cdp: could not find or create a page target");
+        }
+        const attachResp = (await client.send("Target.attachToTarget", {
+          targetId: pageTargetId,
+          flatten: true,
+        })) as { sessionId?: string };
+        const pageSessionId = attachResp.sessionId;
+        if (!pageSessionId) {
+          throw new Error("cdp: Target.attachToTarget returned no sessionId");
+        }
+        pageSessionRef.current = pageSessionId;
+
+        if (cancelled) return;
         setStatus("ready");
 
         stopOff = client.on("Page.screencastFrame", (params) => {
@@ -48,25 +86,27 @@ export default function BrowserLivePane({ runId, sessionId }: BrowserLivePanePro
             deviceWidth?: number;
             deviceHeight?: number;
           };
-          const ackId = (params.sessionId ?? params["sessionId"]) as
-            | number
-            | string
-            | undefined;
+          // Chromium's frame ack id is `sessionId` *inside* the params
+          // (it's the screencast session, NOT the CDP attach session).
+          const ackId = params.sessionId as number | string | undefined;
           drawFrame(data, meta).catch(() => undefined);
-          // Always ack so Chromium keeps streaming.
           if (typeof ackId === "number") {
             void client
-              .send("Page.screencastFrameAck", { sessionId: ackId })
+              .send(
+                "Page.screencastFrameAck",
+                { sessionId: ackId },
+                pageSessionId,
+              )
               .catch(() => undefined);
           }
         });
 
-        await client.send("Page.enable");
-        await client.send("Page.startScreencast", {
-          format: "jpeg",
-          quality: 60,
-          everyNthFrame: 2,
-        });
+        await client.send("Page.enable", {}, pageSessionId);
+        await client.send(
+          "Page.startScreencast",
+          { format: "jpeg", quality: 60, everyNthFrame: 2 },
+          pageSessionId,
+        );
       } catch (err) {
         if (cancelled) return;
         setErrorMsg(err instanceof Error ? err.message : String(err));
@@ -111,11 +151,13 @@ export default function BrowserLivePane({ runId, sessionId }: BrowserLivePanePro
     return () => {
       cancelled = true;
       if (stopOff) stopOff();
+      const pageSession = pageSessionRef.current ?? undefined;
       void client
-        .send("Page.stopScreencast")
+        .send("Page.stopScreencast", {}, pageSession)
         .catch(() => undefined)
         .finally(() => {
           client.close();
+          pageSessionRef.current = null;
           setStatus("closed");
         });
     };
@@ -138,24 +180,29 @@ export default function BrowserLivePane({ runId, sessionId }: BrowserLivePanePro
     e: React.MouseEvent<HTMLCanvasElement>,
   ) => {
     const client = clientRef.current;
-    if (!client || status !== "ready") return;
+    const pageSession = pageSessionRef.current;
+    if (!client || !pageSession || status !== "ready") return;
     const coords = toBrowserCoords(e);
     if (!coords) return;
     void client
-      .send("Input.dispatchMouseEvent", {
-        type,
-        x: coords.x,
-        y: coords.y,
-        button:
-          type === "mouseMoved"
-            ? "none"
-            : e.button === 2
-              ? "right"
-              : e.button === 1
-                ? "middle"
-                : "left",
-        clickCount: type === "mousePressed" ? 1 : 0,
-      })
+      .send(
+        "Input.dispatchMouseEvent",
+        {
+          type,
+          x: coords.x,
+          y: coords.y,
+          button:
+            type === "mouseMoved"
+              ? "none"
+              : e.button === 2
+                ? "right"
+                : e.button === 1
+                  ? "middle"
+                  : "left",
+          clickCount: type === "mousePressed" ? 1 : 0,
+        },
+        pageSession,
+      )
       .catch(() => undefined);
   };
 
@@ -164,15 +211,14 @@ export default function BrowserLivePane({ runId, sessionId }: BrowserLivePanePro
     e: React.KeyboardEvent<HTMLCanvasElement>,
   ) => {
     const client = clientRef.current;
-    if (!client || status !== "ready") return;
+    const pageSession = pageSessionRef.current;
+    if (!client || !pageSession || status !== "ready") return;
     void client
-      .send("Input.dispatchKeyEvent", {
-        type,
-        key: e.key,
-        code: e.code,
-        // Chromium also accepts text + windowsVirtualKeyCode; this
-        // minimal form is enough for printable + navigation keys.
-      })
+      .send(
+        "Input.dispatchKeyEvent",
+        { type, key: e.key, code: e.code },
+        pageSession,
+      )
       .catch(() => undefined);
   };
 

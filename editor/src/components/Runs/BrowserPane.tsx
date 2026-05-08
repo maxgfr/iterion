@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRunStore, type BrowserScreenshot } from "@/store/run";
 import BrowserLivePane from "./BrowserLivePane";
 
+export type BrowserDock = "bottom" | "right";
+
 interface BrowserPaneProps {
   runId: string;
   // When non-null, the run console's scrubber is parked at this seq.
@@ -11,6 +13,12 @@ interface BrowserPaneProps {
   // the run's visual timeline. Live iframe returns when scrubSeq
   // becomes null again.
   scrubSeq?: number | null;
+  // dock controls where this pane is rendered. The button in the
+  // header just toggles; the parent decides where to mount the
+  // component. Optional (defaults to "bottom") so external callers
+  // that don't yet support docking keep working.
+  dock?: BrowserDock;
+  onDockChange?: (next: BrowserDock) => void;
 }
 
 // pickScreenshotAt returns the latest screenshot with seq <= target,
@@ -44,7 +52,12 @@ function pickScreenshotAt(
 // set), time-travel screenshot (when the run-console scrubber is
 // parked), or viewer iframe (the default). Mode priority is
 // live > time-travel > viewer.
-export default function BrowserPane({ runId, scrubSeq = null }: BrowserPaneProps) {
+export default function BrowserPane({
+  runId,
+  scrubSeq = null,
+  dock = "bottom",
+  onDockChange,
+}: BrowserPaneProps) {
   const browser = useRunStore((s) => s.browser);
   const setManualPreviewUrl = useRunStore((s) => s.setManualPreviewUrl);
   const setLiveSession = useRunStore((s) => s.setLiveSession);
@@ -204,6 +217,20 @@ export default function BrowserPane({ runId, scrubSeq = null }: BrowserPaneProps
             {attachBusy ? "attaching…" : "attach live"}
           </button>
         )}
+        {onDockChange ? (
+          <button
+            type="button"
+            onClick={() => onDockChange(dock === "bottom" ? "right" : "bottom")}
+            className="text-xs text-text-2 hover:text-text-1"
+            title={
+              dock === "bottom"
+                ? "Dock the browser pane on the right side"
+                : "Dock the browser pane at the bottom"
+            }
+          >
+            {dock === "bottom" ? "↦ right" : "↧ bottom"}
+          </button>
+        ) : null}
       </div>
       {attachError ? (
         <div className="border-b border-red-700 bg-red-950/40 px-3 py-1 text-[11px] text-red-300">

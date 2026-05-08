@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 import { Dialog, Tabs } from "@/components/ui";
 
 import ApiKeysTab from "./ApiKeysTab";
@@ -10,6 +8,8 @@ import AboutTab from "./AboutTab";
 interface Props {
   open: boolean;
   onClose: () => void;
+  tab: string;
+  onTabChange: (tab: string) => void;
 }
 
 const tabItems = [
@@ -19,8 +19,7 @@ const tabItems = [
   { value: "about", label: "About" },
 ];
 
-export default function Settings({ open, onClose }: Props) {
-  const [tab, setTab] = useState<string>("api-keys");
+export default function Settings({ open, onClose, tab, onTabChange }: Props) {
   return (
     <Dialog
       open={open}
@@ -30,7 +29,7 @@ export default function Settings({ open, onClose }: Props) {
     >
       <Tabs
         value={tab}
-        onValueChange={setTab}
+        onValueChange={onTabChange}
         items={tabItems}
         panels={{
           "api-keys": <ApiKeysTab />,

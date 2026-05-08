@@ -48,8 +48,16 @@ for f in "$@"; do
     *.sig) continue ;;
   esac
   sig="${f}.sig"
+  # Hex-encode on a single line. Earlier versions used `xxd -p -c 0`,
+  # but `-c 0` is honored only by recent xxd builds — on others it
+  # falls back to 60-column wrapping, which embeds a literal newline
+  # into the hex string and later breaks the manifest JSON. `od + tr`
+  # is portable across coreutils versions and produces a guaranteed
+  # single-line hex string.
   "$OPENSSL" pkeyutl -sign -inkey "$KEYFILE" -rawin -in "$f" \
-    | xxd -p -c 0 \
+    | od -An -v -tx1 \
+    | tr -d ' \n\r' \
     > "$sig"
+  printf '\n' >> "$sig"
   echo "Signed $f -> $sig"
 done

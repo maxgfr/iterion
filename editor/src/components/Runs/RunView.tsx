@@ -15,7 +15,7 @@ import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
 
 import { buildExecutionsAt } from "@/lib/snapshotReducer";
 
-import BrowserPane from "./BrowserPane";
+import BrowserPane, { type BrowserDock } from "./BrowserPane";
 import EventLog from "./EventLog";
 import FileDiffDialog from "./FileDiffDialog";
 import HumanInteractionPanel from "./HumanInteractionPanel";
@@ -38,6 +38,24 @@ interface RuntimeLLMOverride {
 
 const DETAIL_COLLAPSED_KEY = "run-console-v1.detail-collapsed";
 const EVENTLOG_COLLAPSED_KEY = "run-console-v1.eventlog-collapsed";
+const BROWSER_DOCK_KEY = "run-console-v1.browser-dock";
+
+function readBrowserDock(): BrowserDock {
+  try {
+    const raw = window.localStorage.getItem(BROWSER_DOCK_KEY);
+    return raw === "right" ? "right" : "bottom";
+  } catch {
+    return "bottom";
+  }
+}
+
+function writeBrowserDock(dock: BrowserDock): void {
+  try {
+    window.localStorage.setItem(BROWSER_DOCK_KEY, dock);
+  } catch {
+    // storage may be unavailable
+  }
+}
 
 export default function RunView() {
   const params = useParams<{ id: string }>();
@@ -130,6 +148,21 @@ export default function RunView() {
     "run-console-v1.horizontal",
     { canvas: 70, detail: 30 },
   );
+  // Separate layout key so the right-dock split (canvas / detail /
+  // browser) doesn't collide with the canvas/detail-only layout when
+  // the user toggles the dock.
+  const horizontalLayoutWithBrowser = useLayoutPersistence(
+    "run-console-v1.horizontal-with-browser",
+    { canvas: 50, detail: 25, browserRight: 25 },
+  );
+
+  const [browserDock, setBrowserDockState] = useState<BrowserDock>(() =>
+    readBrowserDock(),
+  );
+  const setBrowserDock = useCallback((next: BrowserDock) => {
+    setBrowserDockState(next);
+    writeBrowserDock(next);
+  }, []);
 
   const [detailCollapsed, setDetailCollapsed] = useState<boolean>(() =>
     readBooleanFlag(DETAIL_COLLAPSED_KEY),
@@ -168,16 +201,27 @@ export default function RunView() {
 
   // Auto-reveal the Browser tab the first time a preview URL becomes
   // available, but only if the user hasn't already pinned a different
-  // tab during this view.
+  // tab during this view AND the user hasn't moved the pane to the
+  // right side.
   useEffect(() => {
     if (
       !bottomTabPinned &&
       browserAvailable &&
-      bottomTab !== "browser"
+      bottomTab !== "browser" &&
+      browserDock === "bottom"
     ) {
       setBottomTab("browser");
     }
-  }, [browserAvailable, bottomTab, bottomTabPinned]);
+  }, [browserAvailable, bottomTab, bottomTabPinned, browserDock]);
+
+  // If the user moves the browser pane to the right side while it was
+  // the active bottom tab, redirect them to "logs" so the bottom panel
+  // doesn't render an empty/duplicated pane.
+  useEffect(() => {
+    if (browserDock === "right" && bottomTab === "browser") {
+      setBottomTab("logs");
+    }
+  }, [browserDock, bottomTab]);
 
   useEffect(() => {
     setRunId(runId);
@@ -316,6 +360,10 @@ export default function RunView() {
   const eventLogSelection = detailExec?.execution_id ?? null;
   const liveSeq = snapshot.last_seq;
   const scrubbing = scrubSeq !== null;
+  // The browser pane mounts on the right column only when the user
+  // chose that dock AND there's something to display. Otherwise it
+  // either stays in the bottom tab list, or stays hidden.
+  const browserRightDocked = browserDock === "right" && browserAvailable;
 
   // Pre-pickup state: the run sits on the NATS queue. RunMetrics and
   // Scrubber render nothing useful (no events yet, no budget consumed),
@@ -361,10 +409,28 @@ export default function RunView() {
               <Group
                 orientation="horizontal"
                 className="h-full w-full"
-                defaultLayout={horizontalLayout.layout}
-                onLayoutChanged={horizontalLayout.onChange}
+                // The Group's panel set changes when the browser docks
+                // right, so use a different layout key (and React key)
+                // for that mode — react-resizable-panels otherwise keeps
+                // the previous flexGrow distribution and flips badly.
+                key={browserRightDocked ? "with-browser" : "no-browser"}
+                defaultLayout={
+                  browserRightDocked
+                    ? horizontalLayoutWithBrowser.layout
+                    : horizontalLayout.layout
+                }
+                onLayoutChanged={
+                  browserRightDocked
+                    ? horizontalLayoutWithBrowser.onChange
+                    : horizontalLayout.onChange
+                }
               >
-                <Panel id="canvas" defaultSize={70} minSize={30} className="min-h-0">
+                <Panel
+                  id="canvas"
+                  defaultSize={browserRightDocked ? 50 : 70}
+                  minSize={30}
+                  className="min-h-0"
+                >
                   <div className={scrubbing ? "h-full w-full saturate-50" : "h-full w-full"}>
                     <RunCanvasIR
                       runId={runId}
@@ -382,7 +448,7 @@ export default function RunView() {
                     <ResizeSeparator orientation="horizontal" />
                     <Panel
                       id="detail"
-                      defaultSize={30}
+                      defaultSize={browserRightDocked ? 25 : 30}
                       minSize={18}
                       className="min-h-0"
                     >
@@ -395,6 +461,26 @@ export default function RunView() {
                           followLive={followLiveNode}
                           onToggleFollowLive={handleToggleFollowLive}
                           onCollapse={toggleDetailCollapsed}
+                        />
+                      </div>
+                    </Panel>
+                  </>
+                )}
+                {browserRightDocked && (
+                  <>
+                    <ResizeSeparator orientation="horizontal" />
+                    <Panel
+                      id="browserRight"
+                      defaultSize={25}
+                      minSize={20}
+                      className="min-h-0"
+                    >
+                      <div className="h-full border-l border-border-default min-h-0 overflow-hidden animate-fade-in-opacity">
+                        <BrowserPane
+                          runId={runId}
+                          scrubSeq={scrubSeq}
+                          dock={browserDock}
+                          onDockChange={setBrowserDock}
                         />
                       </div>
                     </Panel>
@@ -423,7 +509,7 @@ export default function RunView() {
                         { value: "events", label: "Events" },
                         { value: "logs", label: "Logs" },
                         { value: "report", label: "Report" },
-                        ...(browserAvailable
+                        ...(browserAvailable && !browserRightDocked
                           ? [{ value: "browser", label: "Browser" }]
                           : []),
                       ]}
@@ -449,7 +535,12 @@ export default function RunView() {
                           onCollapse={toggleEventlogCollapsed}
                         />
                       ) : bottomTab === "browser" && runId ? (
-                        <BrowserPane runId={runId} scrubSeq={scrubSeq} />
+                        <BrowserPane
+                          runId={runId}
+                          scrubSeq={scrubSeq}
+                          dock={browserDock}
+                          onDockChange={setBrowserDock}
+                        />
                       ) : (
                         <ReportTab onSelectNode={handleSelectNode} />
                       )}

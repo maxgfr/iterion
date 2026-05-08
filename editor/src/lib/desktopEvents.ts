@@ -10,6 +10,8 @@ export const DesktopEvent = {
   MenuOpenProject: "menu:open-project",
   MenuNewProject: "menu:new-project",
   MenuAbout: "menu:about",
+  MenuUndo: "menu:undo",
+  MenuRedo: "menu:redo",
 
   UpdateAvailable: "update:available",
   UpdateApplied: "update:applied",

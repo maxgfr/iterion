@@ -110,7 +110,15 @@ func (u *Updater) CheckForUpdate(ctx context.Context, channel string) (*Release,
 	}
 	var m manifest
 	if err := json.Unmarshal(body, &m); err != nil {
-		return nil, fmt.Errorf("updater: parse manifest: %w", err)
+		// Surface the first chunk of the body so a misformed manifest
+		// (e.g. v0.8.0's stray newline inside an Ed25519 hex string)
+		// is debuggable from the user-facing error message.
+		snippet := string(body)
+		const max = 200
+		if len(snippet) > max {
+			snippet = snippet[:max] + "…"
+		}
+		return nil, fmt.Errorf("updater: parse manifest (%d bytes from %s): %w; body[:%d]=%q", len(body), url, err, max, snippet)
 	}
 	if !versionGreater(m.Version, currentVersion()) {
 		return nil, nil
