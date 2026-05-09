@@ -99,6 +99,23 @@ export function isDesktop(): boolean {
   );
 }
 
+// isWailsHosted reports whether the SPA is loading from a Wails AssetServer
+// origin (wails:// on Mac/Linux, http://wails.localhost on Windows). This is
+// orthogonal to isDesktop(): the page can be hosted by Wails even before the
+// /wails/ipc.js script has finished injecting `window.go.main.App`. Treat
+// this as "we will be in desktop mode soon, don't fall through to a relative
+// WS URL that can't possibly resolve".
+export function isWailsHosted(): boolean {
+  if (typeof window === "undefined") return false;
+  const host = window.location.host;
+  const proto = window.location.protocol;
+  return (
+    proto === "wails:" ||
+    host === "wails" ||
+    host === "wails.localhost"
+  );
+}
+
 // call invokes the Wails binding identified by `key` with the given args.
 // In browser mode it returns a rejected Promise so callers can rely on
 // the wrappers being uniformly async (no synchronous throw).
