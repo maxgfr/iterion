@@ -348,7 +348,7 @@ func (r *Run) Cleanup(ctx context.Context) error {
 // driver's logger so users see install progress.
 func (r *Run) runPostCreate(ctx context.Context, snippet string) error {
 	r.driver.logger.Info("sandbox: running postCreateCommand")
-	return sandbox.RunPostCreate(ctx, r, snippet)
+	return sandbox.RunPostCreate(ctx, r, snippet, r.driver.logger)
 }
 
 // containerNameFor maps a run ID to a deterministic container name.
