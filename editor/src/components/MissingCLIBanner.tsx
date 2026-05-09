@@ -21,7 +21,13 @@ export default function MissingCLIBanner() {
     desktop
       .detectExternalCLIs(false)
       .then((all) => {
-        if (!cancelled) setMissing(all.filter((s) => !s.found));
+        // codex is "supported but discouraged" (CLAUDE.md, IR diag C030,
+        // detect.go auto-detect prefs exclude it). A missing codex binary
+        // shouldn't nag the user — Welcome > CliCheck still surfaces it
+        // for those who explicitly opt in.
+        if (!cancelled) {
+          setMissing(all.filter((s) => !s.found && s.name !== "codex"));
+        }
       })
       .catch(() => {
         if (!cancelled) setMissing([]);
