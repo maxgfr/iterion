@@ -321,7 +321,11 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 			s.runs = svc
 		}
 	case storeDir != "":
-		svc, svcErr := runview.NewService(storeDir, runview.WithLogger(logger))
+		svcOpts := []runview.ServiceOption{runview.WithLogger(logger)}
+		if cfg.WorkDir != "" {
+			svcOpts = append(svcOpts, runview.WithWorkDir(cfg.WorkDir))
+		}
+		svc, svcErr := runview.NewService(storeDir, svcOpts...)
 		if svcErr != nil {
 			logger.Warn("run console disabled: %v", svcErr)
 		} else {

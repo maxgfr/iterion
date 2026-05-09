@@ -141,10 +141,29 @@ type ArtifactSummary struct {
 // manager. The HTTP server, the editor, and (optionally) the CLI all
 // route through here — keeping a single source of truth for run
 // lifecycle, validation, and event fan-out.
+// WithWorkDir sets the working directory the engine should use for
+// `${PROJECT_DIR}` expansion and as the seed for the worktree git-repo
+// lookup. Without this, the engine falls back to os.Getwd() at Run()
+// time, which in the desktop server case is whatever cwd the desktop
+// process was launched from (typically the user's home dir, not the
+// project root). Set this to the same directory the host server's
+// WorkDir was configured with.
+func WithWorkDir(dir string) ServiceOption {
+	return func(s *Service) {
+		s.workDir = dir
+	}
+}
+
 type Service struct {
 	store    store.RunStore
 	storeDir string
-	logger   *iterlog.Logger
+	// workDir is the directory the engine should treat as ${PROJECT_DIR}
+	// and as the repo-lookup seed for worktree: auto. Empty means
+	// "default to os.Getwd() at Run() time" — the right thing for the
+	// CLI (which runs in the user's cwd) but wrong for the desktop
+	// server (whose process cwd is the user's home).
+	workDir string
+	logger  *iterlog.Logger
 	broker   *EventBroker
 	manager  *Manager
 
@@ -1384,6 +1403,9 @@ func (s *Service) engineOptions(runLogger *iterlog.Logger, hash, filePath, runNa
 		runtime.WithLogger(runLogger),
 		runtime.WithRecoveryDispatch(s.recoveryDispatch),
 		runtime.WithEventObserver(s.broker.Publish),
+	}
+	if s.workDir != "" {
+		opts = append(opts, runtime.WithWorkDir(s.workDir))
 	}
 	for _, obs := range s.extraObservers {
 		opts = append(opts, runtime.WithEventObserver(obs))

@@ -514,17 +514,31 @@ func (s *Server) materializeInlineSource(filePath, source string) (string, bool)
 }
 
 // inlineSourceCacheDir picks the directory under which inline-source
-// recipes are materialised. Order: configured StoreDir, then a
-// .iterion subdir under WorkDir, then a process-temp fallback.
+// recipes are materialised. Mirrors store.ResolveStoreDir's git-style
+// discovery (walks up from WorkDir looking for an existing .iterion)
+// so the cache lands alongside the actual run store. A divergent
+// fallback would let materialisation succeed but leave the spawned
+// runner subprocess unable to find the recipe (the runner resolves
+// its store via the same git-style walk, so it would look at the
+// ancestor .iterion, not <workDir>/.iterion).
 func (s *Server) inlineSourceCacheDir() string {
-	storeDir := s.cfg.StoreDir
-	if storeDir == "" && s.cfg.WorkDir != "" {
-		storeDir = filepath.Join(s.cfg.WorkDir, ".iterion")
-	}
+	storeDir := s.resolvedStoreDir()
 	if storeDir == "" {
 		storeDir = filepath.Join(os.TempDir(), "iterion-inline-sources")
 	}
 	return filepath.Join(storeDir, "inline-sources")
+}
+
+// resolvedStoreDir returns the canonical run-store directory the
+// runview Service is rooted at, mirroring the resolution rule used
+// at server construction (server.go: store.ResolveStoreDir(...)).
+// Empty when neither StoreDir nor WorkDir was configured (e.g. tests
+// that build a Config{} directly with no FS context).
+func (s *Server) resolvedStoreDir() string {
+	if s.cfg.StoreDir == "" && s.cfg.WorkDir == "" {
+		return ""
+	}
+	return store.ResolveStoreDir(s.cfg.WorkDir, s.cfg.StoreDir)
 }
 
 // materializeEmbeddedRecipe writes an embedded recipe into a stable
@@ -567,14 +581,14 @@ func (s *Server) materializeEmbeddedRecipe(filePath string) (string, bool) {
 
 // embeddedRecipeCacheDir returns the directory under the run store
 // where embedded recipes are materialised, or "" when no store dir is
-// configured (in which case embedded recipes are unavailable). Falls
-// back to the OS temp dir as a last resort so `iterion run` from a
-// non-store context (e.g. tests) still works.
+// configured (in which case embedded recipes are unavailable). Mirrors
+// store.ResolveStoreDir's git-style discovery so the cache lands
+// alongside the actual run store — a divergent fallback (e.g.
+// <workDir>/.iterion when ResolveStoreDir picked an ancestor's
+// .iterion) would create stale recipes in a directory the engine
+// never reads.
 func (s *Server) embeddedRecipeCacheDir() string {
-	storeDir := s.cfg.StoreDir
-	if storeDir == "" && s.cfg.WorkDir != "" {
-		storeDir = filepath.Join(s.cfg.WorkDir, ".iterion")
-	}
+	storeDir := s.resolvedStoreDir()
 	if storeDir == "" {
 		storeDir = filepath.Join(os.TempDir(), "iterion-embedded-recipes")
 	}
