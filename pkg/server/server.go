@@ -1047,6 +1047,21 @@ func (s *Server) handleOpenFile(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := os.ReadFile(absPath)
 	if err != nil {
+		// Embedded-recipe fallback: the example picker sets
+		// currentFilePath to "examples/<name>" after loading an
+		// embedded recipe (see editor Toolbar handlePickFile). When
+		// the project has no on-disk examples/ dir, every later flow
+		// that re-reads via /files/open (LaunchView's pre-launch
+		// document fetch, the file watcher, hot-reload) would 404
+		// without this fallback.
+		if filepath.Dir(req.Path) == "examples" {
+			if embedded, ok := examples.Get(filepath.Base(req.Path)); ok {
+				data = embedded
+				err = nil
+			}
+		}
+	}
+	if err != nil {
 		httpError(w, http.StatusNotFound, "file not found: %s", req.Path)
 		return
 	}
