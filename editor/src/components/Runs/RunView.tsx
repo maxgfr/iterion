@@ -231,17 +231,36 @@ export default function RunView() {
   // Initial snapshot via REST so the page renders immediately even if
   // the WS is still connecting; the hook's `applySnapshot` on connect
   // will replace it.
+  //
+  // Retry on 404: the launch API returns the run_id as soon as the
+  // engine goroutine is scheduled, but the goroutine still needs a
+  // beat to call store.CreateRun before run.json exists on disk.
+  // Fetching too early therefore 404s, and without a retry the page
+  // gets stuck in <RunViewSkeleton/> until the user reloads — the
+  // WS path was supposed to fill the gap but doesn't always push the
+  // initial snapshot eagerly. A short backoff loop closes the race
+  // for the common case (run.json typically lands within ~50–200ms)
+  // without papering over a genuinely missing run.
   useEffect(() => {
     if (!runId) return;
     let cancelled = false;
-    getRun(runId)
-      .then((snap) => {
-        if (!cancelled) applySnapshot(snap);
-      })
-      .catch(() => {
-        // Surface via the WS error path; REST 404 races are common
-        // when navigating immediately after launch.
-      });
+    let attempt = 0;
+    const fetchWithRetry = () => {
+      getRun(runId)
+        .then((snap) => {
+          if (!cancelled) applySnapshot(snap);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          attempt += 1;
+          // ~5s budget total: 250ms × 20 = 5000ms, more than enough
+          // for the local launch → CreateRun race.
+          if (attempt < 20) {
+            setTimeout(fetchWithRetry, 250);
+          }
+        });
+    };
+    fetchWithRetry();
     return () => {
       cancelled = true;
     };
