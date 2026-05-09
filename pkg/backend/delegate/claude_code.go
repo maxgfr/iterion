@@ -82,6 +82,20 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 	// --print mode. The SDK always uses stream-json, so we must enable verbose.
 	opts = append(opts, claudesdk.WithVerbose(true))
 
+	// Forward stderr from the CLI to the backend logger so silent-failure
+	// modes ("session ended without result message") leave a trail of the
+	// underlying process output instead of being completely opaque. Auth
+	// errors, network errors, config parse errors all emit on stderr —
+	// without this they vanish into the SDK's pump and only the wrapping
+	// "no result message" surfaces upstream.
+	if b.Logger != nil {
+		opts = append(opts, claudesdk.WithStderrCallback(func(line string) {
+			if line != "" {
+				b.Logger.Warn("claude-code [stderr]: %s", line)
+			}
+		}))
+	}
+
 	model := task.Model
 	if model == "" {
 		model = defaultClaudeCodeModel
