@@ -883,9 +883,24 @@ void sendShowInspectorMessage() {
 
 void InstallF12Hotkey(void *window)
 {
-    // When the user presses Ctrl+Shift+F12, call ShowInspector
+    // Bind several keyboard shortcuts for the WebKit inspector so users
+    // hit at least one familiar combo regardless of muscle memory or
+    // upstream apps that swallow some keys (Monaco eats F12 alone for
+    // "Go to Definition" — Ctrl+Shift+I and Ctrl+Shift+F12 escape it).
+    //
+    // Bindings:
+    //   - F12                — single-key, classic
+    //   - Ctrl+Shift+I       — Chromium DevTools convention
+    //   - Ctrl+Shift+F12     — Wails default (kept for backwards-compat)
     GtkAccelGroup *accel_group = gtk_accel_group_new();
     gtk_window_add_accel_group(GTK_WINDOW(window), accel_group);
-    GClosure *closure = g_cclosure_new(G_CALLBACK(sendShowInspectorMessage), window, NULL);
-    gtk_accel_group_connect(accel_group, GDK_KEY_F12, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GTK_ACCEL_VISIBLE, closure);
+
+    GClosure *c1 = g_cclosure_new(G_CALLBACK(sendShowInspectorMessage), window, NULL);
+    gtk_accel_group_connect(accel_group, GDK_KEY_F12, 0, GTK_ACCEL_VISIBLE, c1);
+
+    GClosure *c2 = g_cclosure_new(G_CALLBACK(sendShowInspectorMessage), window, NULL);
+    gtk_accel_group_connect(accel_group, GDK_KEY_i, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GTK_ACCEL_VISIBLE, c2);
+
+    GClosure *c3 = g_cclosure_new(G_CALLBACK(sendShowInspectorMessage), window, NULL);
+    gtk_accel_group_connect(accel_group, GDK_KEY_F12, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GTK_ACCEL_VISIBLE, c3);
 }
