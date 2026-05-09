@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -19,12 +20,20 @@ import (
 // is more likely a misconfiguration than transient contention.
 const appendEventMaxRetries = 3
 
+// appendEventBackoffBase is the base delay before retrying after a
+// duplicate-key error. The actual delay grows linearly with the attempt
+// number (0 ms on first attempt, base on the second, 2×base on the
+// third) and carries ±25% jitter to spread retries when two processes
+// genuinely race. Kept small because the underlying conflict is rare
+// and resolves once one writer wins the next allocSeq round.
+const appendEventBackoffBase = 20 * time.Millisecond
+
 // AppendEvent allocates a monotonic per-run sequence via run_seq,
 // then inserts the event document. The (run_id, seq) UNIQUE index on
 // `events` is the safety net against two processes racing on seq
 // allocation; on conflict we retry up to appendEventMaxRetries times,
-// reallocating seq each iteration so a transient race does not surface
-// as a hard run failure.
+// reallocating seq each iteration with a jittered backoff so a
+// transient race does not surface as a hard run failure.
 //
 // Plan §D.3.
 func (s *Store) AppendEvent(ctx context.Context, runID string, evt store.Event) (*store.Event, error) {
@@ -37,6 +46,12 @@ func (s *Store) AppendEvent(ctx context.Context, runID string, evt store.Event) 
 	var lastSeq int64
 	var lastErr error
 	for attempt := 0; attempt < appendEventMaxRetries; attempt++ {
+		if attempt > 0 {
+			if err := backoffOrCancel(ctx, attempt); err != nil {
+				return nil, err
+			}
+		}
+
 		seq, err := s.allocSeq(ctx, runID)
 		if err != nil {
 			return nil, err
@@ -46,7 +61,8 @@ func (s *Store) AppendEvent(ctx context.Context, runID string, evt store.Event) 
 
 		if _, err := s.events.InsertOne(ctx, evt); err != nil {
 			if mongo.IsDuplicateKeyError(err) {
-				// Another writer beat us at this seq; reallocate.
+				// Another writer beat us at this seq; reallocate after a
+				// brief jittered pause to let the winning writer commit.
 				lastErr = err
 				continue
 			}
@@ -55,6 +71,25 @@ func (s *Store) AppendEvent(ctx context.Context, runID string, evt store.Event) 
 		return &evt, nil
 	}
 	return nil, fmt.Errorf("store/mongo: race on seq for run %s seq %d after %d attempts: %w", runID, lastSeq, appendEventMaxRetries, lastErr)
+}
+
+// backoffOrCancel sleeps for the attempt's jittered backoff window,
+// returning the context error if the deadline fires first. attempt is
+// 1-based on entry (callers skip the first attempt's pre-call so the
+// happy path has zero delay).
+func backoffOrCancel(ctx context.Context, attempt int) error {
+	base := time.Duration(attempt) * appendEventBackoffBase
+	jitter := time.Duration(rand.Int63n(int64(appendEventBackoffBase / 2)))
+	delay := base - appendEventBackoffBase/4 + jitter
+
+	t := time.NewTimer(delay)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // allocSeq is the FindOneAndUpdate $inc pattern from plan §D.3. The
