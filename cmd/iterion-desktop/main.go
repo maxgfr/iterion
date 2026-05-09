@@ -57,13 +57,20 @@ func main() {
 		// runs on http://127.0.0.1:* in the desktop binary (only the
 		// proxy's outbound calls do).
 		BindingsAllowedOrigins: "http://127.0.0.1:*,http://localhost:*",
-		BackgroundColour:       &options.RGBA{R: 10, G: 10, B: 10, A: 255},
-		OnStartup:              app.onStartup,
-		OnShutdown:             app.onShutdown,
-		OnDomReady:             app.onDomReady,
-		OnBeforeClose:          app.onBeforeClose,
-		Bind:                   []interface{}{app},
-		Menu:                   buildMenu(app),
+		// Surface the WebView's native context menu (incl. "Inspect Element")
+		// in production builds. Combined with the `-devtools` build flag this
+		// gives users a working inspector via right-click; the keyboard
+		// counterpart on Linux/WebKit2GTK is Ctrl+Shift+F12 (Wails's
+		// hard-wired hotkey, see window.go's InstallF12Hotkey). Without this
+		// option Wails calls DisableContextMenu() and right-click is a no-op.
+		EnableDefaultContextMenu: true,
+		BackgroundColour:         &options.RGBA{R: 10, G: 10, B: 10, A: 255},
+		OnStartup:                app.onStartup,
+		OnShutdown:               app.onShutdown,
+		OnDomReady:               app.onDomReady,
+		OnBeforeClose:            app.onBeforeClose,
+		Bind:                     []interface{}{app},
+		Menu:                     buildMenu(app),
 	})
 	if err != nil {
 		log.Fatalf("iterion-desktop: wails run failed: %v", err)
