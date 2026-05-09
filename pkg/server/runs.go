@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/SocialGouv/iterion/examples"
 	"github.com/SocialGouv/iterion/pkg/runtime"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -442,11 +445,80 @@ func (s *Server) handleResumeRun(w http.ResponseWriter, r *http.Request) {
 // supplied (cloud mode — server pod has no shared FS with the editor)
 // filePath is treated as a logical label and returned as-is. When
 // source is empty (local mode) the path is run through safePath.
+//
+// On a safePath miss in local mode, when the request's filePath is a
+// bare basename (no directory component) and matches an embedded
+// recipe shipped with the binary, the embedded content is materialised
+// into the run store and that absolute path is returned. This makes
+// `iterion run secured-renovacy.iter` work from any working directory
+// — including the desktop, where the launch button on a built-in
+// recipe sends just the basename.
 func (s *Server) resolveWorkflowPath(filePath, source string) (string, error) {
 	if source != "" {
 		return filePath, nil
 	}
-	return s.safePath(filePath)
+	abs, err := s.safePath(filePath)
+	if err == nil {
+		return abs, nil
+	}
+	if cached, ok := s.materializeEmbeddedRecipe(filePath); ok {
+		return cached, nil
+	}
+	return "", err
+}
+
+// materializeEmbeddedRecipe writes an embedded recipe into a stable
+// per-run-store directory (one copy per binary release) and returns
+// its absolute path. The lookup key is filePath as given; the caller
+// passes whatever the API received, so a UI that lists recipes by
+// basename ("minimal_linear.iter", "skill/minimal_linear.iter", or
+// "secured-renovacy.iter") all resolve correctly.
+//
+// We materialise rather than reading from embed.FS at execution time
+// because the engine, parser, and several runtime helpers operate on
+// real filesystem paths (worktree relative paths, file-watcher,
+// sandbox bind-mounts). Materialisation keeps that contract intact at
+// the cost of a tiny one-time disk write per recipe per run-store.
+//
+// Returns ok=false when the recipe is not in the embed FS, or when
+// the server has no writable store dir to cache it under.
+func (s *Server) materializeEmbeddedRecipe(filePath string) (string, bool) {
+	data, ok := examples.Get(filePath)
+	if !ok {
+		return "", false
+	}
+	cacheRoot := s.embeddedRecipeCacheDir()
+	if cacheRoot == "" {
+		return "", false
+	}
+	dst := filepath.Join(cacheRoot, filePath)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return "", false
+	}
+	// Idempotent: skip the write if the cached file already matches.
+	if existing, err := os.ReadFile(dst); err == nil && len(existing) == len(data) {
+		return dst, true
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		return "", false
+	}
+	return dst, true
+}
+
+// embeddedRecipeCacheDir returns the directory under the run store
+// where embedded recipes are materialised, or "" when no store dir is
+// configured (in which case embedded recipes are unavailable). Falls
+// back to the OS temp dir as a last resort so `iterion run` from a
+// non-store context (e.g. tests) still works.
+func (s *Server) embeddedRecipeCacheDir() string {
+	storeDir := s.cfg.StoreDir
+	if storeDir == "" && s.cfg.WorkDir != "" {
+		storeDir = filepath.Join(s.cfg.WorkDir, ".iterion")
+	}
+	if storeDir == "" {
+		storeDir = filepath.Join(os.TempDir(), "iterion-embedded-recipes")
+	}
+	return filepath.Join(storeDir, "embedded-recipes")
 }
 
 // parseTimeout accepts an empty string (no timeout) or a Go duration
