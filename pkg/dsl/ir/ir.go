@@ -603,6 +603,14 @@ type Ref struct {
 	Kind RefKind
 	Path []string // dotted path segments after the namespace
 	Raw  string   // original template expression, e.g. "{{outputs.node.field}}"
+	// Unquoted indicates the author requested raw substitution by writing
+	// `{{!input.X}}` (bang prefix). The runtime substitutes the value
+	// verbatim into shell tool commands instead of running it through
+	// shellEscape — useful when the substituted value is itself a shell
+	// snippet that must be re-interpreted (e.g. a command line emitted
+	// upstream by a stack-detection agent). Trades shell-injection
+	// containment for re-interpretability; only use on trusted inputs.
+	Unquoted bool
 }
 
 // ---------------------------------------------------------------------------
