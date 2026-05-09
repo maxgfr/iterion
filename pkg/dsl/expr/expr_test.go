@@ -443,6 +443,60 @@ func TestExpr_FuncCall_Contains(t *testing.T) {
 	}
 }
 
+func TestExpr_FuncCall_Join(t *testing.T) {
+	ctx := makeCtx(
+		map[string]interface{}{
+			"files":  []interface{}{"src/index.js", "package.json", "README.md"},
+			"single": []interface{}{"only.txt"},
+			"empty":  []interface{}{},
+			"mixed":  []interface{}{int64(1), "two", true},
+		},
+		nil, nil, nil,
+	)
+	cases := []struct {
+		src    string
+		expect string
+	}{
+		{`join(vars.files, ",")`, "src/index.js,package.json,README.md"},
+		{`join(vars.files, "\n")`, "src/index.js\npackage.json\nREADME.md"},
+		{`join(vars.files, "")`, "src/index.jspackage.jsonREADME.md"},
+		{`join(vars.single, ",")`, "only.txt"},
+		{`join(vars.empty, ",")`, ""},
+		{`join(vars.missing, ",")`, ""},
+		{`join(vars.mixed, "|")`, "1|two|true"},
+	}
+	for _, c := range cases {
+		ast, err := Parse(c.src)
+		if err != nil {
+			t.Fatalf("Parse(%q) error: %v", c.src, err)
+		}
+		got, err := ast.Eval(ctx)
+		if err != nil {
+			t.Fatalf("Eval(%q) error: %v", c.src, err)
+		}
+		if got != c.expect {
+			t.Errorf("Eval(%q) = %q, want %q", c.src, got, c.expect)
+		}
+	}
+
+	// Error cases.
+	errCases := []string{
+		`join(vars.files)`,                  // arity
+		`join(vars.files, ",", "extra")`,    // arity
+		`join(vars.files, 42)`,              // wrong sep type
+		`join("not-array", ",")`,            // wrong arr type
+	}
+	for _, src := range errCases {
+		ast, err := Parse(src)
+		if err != nil {
+			continue // parse-time error is also acceptable
+		}
+		if _, err := ast.Eval(ctx); err == nil {
+			t.Errorf("Eval(%q) expected error, got nil", src)
+		}
+	}
+}
+
 func TestExpr_FuncCall_Nested(t *testing.T) {
 	// Mirrors the iterion review-workflow accumulator:
 	// unique(concat(loop.l.previous_output.cumulative, input.scanned_areas))
