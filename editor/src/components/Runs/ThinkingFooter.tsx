@@ -81,7 +81,7 @@ export function ThinkingFooter({ active }: { active: boolean }) {
   useEffect(() => {
     if (!active) return;
     setCharCount(0);
-    const word = WORDS[idx];
+    const word = WORDS[idx] ?? "";
     const id = window.setInterval(() => {
       setCharCount((n) => {
         if (n >= word.length) {
@@ -96,7 +96,7 @@ export function ThinkingFooter({ active }: { active: boolean }) {
 
   if (!active) return null;
 
-  const word = WORDS[idx];
+  const word = WORDS[idx] ?? "";
   const shown = word.slice(0, charCount);
   const done = charCount >= word.length;
 

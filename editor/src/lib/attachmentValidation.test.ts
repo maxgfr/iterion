@@ -21,7 +21,6 @@ const file = (name: string, size: number, type: string): File => {
 };
 
 const imageField: AttachmentField = { name: "logo", type: "image" };
-const fileField: AttachmentField = { name: "spec", type: "file" };
 
 describe("mimeMatches", () => {
   it("matches exact MIME", () => {
