@@ -289,6 +289,24 @@ jobs:
           rm -rf "$stage"
           ls -la "${ARTIFACT_NAME}.tar.gz"
 
+      - name: Build iterion CLI for Linux .deb bundling
+        if: matrix.package == 'appimage'
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          # The .deb ships both the desktop wrapper AND the iterion CLI
+          # so users get `iterion run`, `iterion validate`, etc. on PATH
+          # without a separate install step. Built from the same source
+          # revision as the desktop binary so the editor and CLI cannot
+          # drift between releases.
+          ARCH="${PLATFORM##*/}"
+          case "$ARCH" in
+            amd64|arm64) task "cli:build:linux:${ARCH}" ;;
+            *) echo "Unsupported arch: $ARCH" >&2; exit 1 ;;
+          esac
+
       - name: Bundle Linux .deb package
         if: matrix.package == 'appimage'
         shell: bash
@@ -302,6 +320,11 @@ jobs:
           # extract a tarball or run an AppImage. The runtime payload is
           # the same raw binary as the .tar.gz; only the surrounding
           # metadata + dpkg dep-resolution differs.
+          #
+          # The package now installs two executables to /usr/bin:
+          #   iterion-desktop  — the GUI
+          #   iterion          — the CLI (run, validate, diagram, …)
+          # both pinned to the same source revision.
           ARCH="${PLATFORM##*/}"
           version="$(node -p "require('./package.json').version")"
           stage="$(mktemp -d)"
@@ -312,6 +335,7 @@ jobs:
             "$stage/usr/share/icons/hicolor/256x256/apps" \
             "$stage/usr/share/doc/iterion-desktop"
           install -m 755 "build/bin/${ARTIFACT_NAME}" "$stage/usr/bin/iterion-desktop"
+          install -m 755 "build/bin/iterion-linux-${ARCH}" "$stage/usr/bin/iterion"
           install -m 644 build/linux/iterion.desktop \
             "$stage/usr/share/applications/iterion-desktop.desktop"
           if [ -f build/appicon.png ]; then
@@ -337,7 +361,11 @@ jobs:
           Homepage: https://github.com/SocialGouv/iterion
           Installed-Size: ${installed_size}
           Description: Iterion Desktop — workflow orchestration for AI agents
-           Native desktop wrapper around the iterion editor and runtime.
+           Native desktop wrapper around the iterion editor and runtime,
+           plus the iterion CLI (run, validate, diagram, inspect, resume,
+           report, …). Both binaries are built from the same source
+           revision so the editor and the CLI cannot drift between
+           releases.
            Runs against the system WebKitGTK 4.1 stack (smaller than the
            AppImage variant).
           EOF

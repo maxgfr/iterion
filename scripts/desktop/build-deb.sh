@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Build a .deb package from an already-compiled iterion-desktop
-# binary. Mirrors the "Bundle Linux .deb package" step of the CI
-# workflow (.github/workflows/desktop-release.yml) so local iteration
-# doesn't require a tag-and-push round-trip.
+# Build a .deb package from already-compiled iterion-desktop and
+# iterion CLI binaries. Mirrors the "Bundle Linux .deb package" step
+# of the CI workflow (.github/workflows/desktop-release.yml) so local
+# iteration doesn't require a tag-and-push round-trip.
 #
 # Usage:
 #   ./scripts/desktop/build-deb.sh <arch>
@@ -11,6 +11,7 @@
 #
 # Requires:
 #   - build/bin/iterion-desktop-linux-<arch>      (run task desktop:build:linux:<arch> first)
+#   - build/bin/iterion-linux-<arch>              (run task cli:build:linux:<arch> first)
 #   - build/linux/iterion.desktop                 (in-tree)
 #   - build/appicon.png                           (in-tree)
 #   - dpkg-deb on PATH                            (apt install dpkg-dev)
@@ -20,6 +21,11 @@
 #   build/bin/iterion-desktop-linux-<arch>.deb
 #
 # Install the result with `sudo dpkg -i ...` or `sudo apt install ./...`.
+# The package installs:
+#   /usr/bin/iterion-desktop  — the GUI
+#   /usr/bin/iterion          — the CLI (run, validate, diagram, …)
+# both pinned to the same source revision so editor and CLI cannot
+# drift between releases.
 
 set -euo pipefail
 
@@ -37,10 +43,16 @@ cd "$ROOT"
 
 ARTIFACT_NAME="iterion-desktop-linux-${ARCH}"
 BIN_PATH="build/bin/${ARTIFACT_NAME}"
+CLI_BIN_PATH="build/bin/iterion-linux-${ARCH}"
 
 if [ ! -f "$BIN_PATH" ]; then
   echo "ERROR: $BIN_PATH not found." >&2
   echo "Run 'devbox run -- task desktop:build:linux:${ARCH}' first." >&2
+  exit 1
+fi
+if [ ! -f "$CLI_BIN_PATH" ]; then
+  echo "ERROR: $CLI_BIN_PATH not found." >&2
+  echo "Run 'devbox run -- task cli:build:linux:${ARCH}' first." >&2
   exit 1
 fi
 if ! command -v dpkg-deb >/dev/null 2>&1; then
@@ -61,6 +73,7 @@ mkdir -p \
   "$stage/usr/share/doc/iterion-desktop"
 
 install -m 755 "$BIN_PATH" "$stage/usr/bin/iterion-desktop"
+install -m 755 "$CLI_BIN_PATH" "$stage/usr/bin/iterion"
 install -m 644 build/linux/iterion.desktop \
   "$stage/usr/share/applications/iterion-desktop.desktop"
 if [ -f build/appicon.png ]; then
@@ -88,7 +101,10 @@ Maintainer: SocialGouv <opensource@social.gouv.fr>
 Homepage: https://github.com/SocialGouv/iterion
 Installed-Size: ${installed_size}
 Description: Iterion Desktop — workflow orchestration for AI agents
- Native desktop wrapper around the iterion editor and runtime.
+ Native desktop wrapper around the iterion editor and runtime,
+ plus the iterion CLI (run, validate, diagram, inspect, resume,
+ report, …). Both binaries are built from the same source revision
+ so the editor and the CLI cannot drift between releases.
  Runs against the system WebKitGTK 4.1 stack (smaller than the
  AppImage variant).
 EOF
