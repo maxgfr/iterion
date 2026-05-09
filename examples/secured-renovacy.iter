@@ -731,9 +731,15 @@ schema commit_intent:
   files: string[]
   committed: bool
 
+schema commit_files_input:
+  files: string[]
+
+schema commit_files_output:
+  files_lines: string
+
 schema commit_tool_input:
   full_message: string
-  files: string[]
+  files_lines: string
   workspace_dir: string
 
 schema commit_result:
@@ -950,8 +956,19 @@ agent prepare_commit:
   tools: [bash, read_file, list_files, git_diff, git_status, git_log]
   tool_max_steps: 10
 
+## join_files turns the agent-emitted `files: string[]` into a single
+## newline-delimited string so the tool below can pipe it through
+## `tr '\n' '\0' | xargs -0 git add --` — passing each path as its own
+## shell argument without the JSON-array-as-one-token bug that broke the
+## previous shape of `git add -- {{input.files}}`.
+compute join_files:
+  input: commit_files_input
+  output: commit_files_output
+  expr:
+    files_lines: "join(input.files, '\n')"
+
 tool commit_changes:
-  command: "git -C {{input.workspace_dir}} add -- {{input.files}} && (git -C {{input.workspace_dir}} diff --cached --quiet || git -C {{input.workspace_dir}} commit -m {{input.full_message}}) && (! git -C {{input.workspace_dir}} status --porcelain | grep -q . || (git -C {{input.workspace_dir}} add -- {{input.files}} && git -C {{input.workspace_dir}} commit --amend --no-edit)) ; echo '{\"success\":true,\"output\":\"committed\"}'"
+  command: "cd {{input.workspace_dir}} && printf '%s' {{input.files_lines}} | tr '\\n' '\\0' | xargs -0 git add -- && (git diff --cached --quiet || printf '%s' {{input.full_message}} | git commit -F -) && (! git status --porcelain | grep -q . || (printf '%s' {{input.files_lines}} | tr '\\n' '\\0' | xargs -0 git add -- && git commit --amend --no-edit)) ; printf '{\"success\":true,\"output\":\"committed\"}\\n'"
   input: commit_tool_input
   output: commit_result
 
@@ -1193,11 +1210,15 @@ workflow secured_renovacy:
     install_cmd: "{{outputs.detect_stack.install_cmd}}"
   }
 
-  ## Successful upgrade path → prepare commit, then commit.
-  prepare_commit -> commit_changes with {
+  ## Successful upgrade path → prepare commit → join files → commit.
+  prepare_commit -> join_files with {
+    files: "{{outputs.prepare_commit.files}}"
+  }
+
+  join_files -> commit_changes with {
     workspace_dir: "{{vars.workspace_dir}}",
     full_message: "{{outputs.prepare_commit.full_message}}",
-    files: "{{outputs.prepare_commit.files}}"
+    files_lines: "{{outputs.join_files.files_lines}}"
   }
 
   ## Loop back: pick the next package.
