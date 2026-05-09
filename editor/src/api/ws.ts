@@ -1,4 +1,4 @@
-import { getDesktopWsBase, isDesktop } from "@/lib/desktopBridge";
+import { getDesktopWsBase, isDesktop, isWailsHosted } from "@/lib/desktopBridge";
 import type { FileEvent } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
@@ -14,6 +14,13 @@ async function deriveWsUrl(): Promise<string> {
   if (isDesktop()) {
     const desktopUrl = await getDesktopWsBase("/api/ws");
     if (desktopUrl) return desktopUrl;
+  }
+  // Wails-hosted page without ready bindings: surface a transient error so
+  // the caller's reconnect timer re-runs deriveWsUrl on the next tick. The
+  // alternative — falling through to ws://wails/api/ws — produces a DNS
+  // failure that never recovers because window.location.host doesn't change.
+  if (isWailsHosted()) {
+    throw new Error("desktop bindings not ready");
   }
   if (BASE_URL.startsWith("http")) {
     return BASE_URL.replace(/^http/, "ws") + "/ws";
