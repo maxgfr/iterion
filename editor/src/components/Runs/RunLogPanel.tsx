@@ -192,15 +192,40 @@ export default function RunLogPanel({ runId, subscribeLogs, unsubscribeLogs, onC
             leadingIcon={<span className="text-[10px]">⌕</span>}
           />
         </div>
-        <a
-          href={`/api/runs/${encodeURIComponent(runId)}/log`}
-          target="_blank"
-          rel="noreferrer"
+        <button
+          type="button"
+          onClick={() => {
+            // target="_blank" on a Wails desktop AssetServer origin spawns
+            // a new WebView window that the Wails runtime can't manage and
+            // closes immediately, so we trigger a programmatic download
+            // via blob+anchor.click(). Works identically in browser/CLI
+            // mode where the same path resolves through the relative URL.
+            void (async () => {
+              try {
+                const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/log`, {
+                  credentials: "include",
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `${runId}.log`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error("[RunLogPanel] download log failed:", err);
+              }
+            })();
+          }}
           className="text-[10px] text-fg-subtle hover:text-fg-default underline"
-          title="Open the full log in a new tab"
+          title="Save the full run.log to a file"
         >
           download
-        </a>
+        </button>
         <Popover
           side="bottom"
           align="end"
