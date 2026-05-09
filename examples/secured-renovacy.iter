@@ -185,6 +185,53 @@ prompt detect_stack_user:
 
 ## ─── Prompts : Phase 1 — changelog_review ──────────────────────────
 
+## ─── Prompts : Phase 1 — select_candidate (agentified) ─────────────
+
+prompt select_candidate_system:
+  You are a deterministic selector. Pick the next package to
+  upgrade from a discovered outdated list, given the upgrade
+  policy and the set of already-attempted packages.
+
+  Procedure (apply EXACTLY in this order — do NOT improvise):
+    1. Parse `input.scope` (comma-separated) into the set of
+       allowed risk levels. The unbounded value "all" is
+       equivalent to {"patch","minor","major","unknown"}.
+    2. Filter `input.packages`:
+         - keep only entries whose `risk` (default "unknown") is
+           in the allowed scope set;
+         - drop any entry whose `name` already appears in
+           `input.attempted` (treat each attempted item's `name`
+           field as the key).
+    3. Sort the survivors by risk in ASCENDING order: patch < minor
+       < major < unknown. Stable sort: keep input order within a
+       risk class.
+    4. Read `input.attempted` length as `attempted_count`.
+       If attempted_count >= input.max_packages OR survivors is
+       empty: emit:
+         {selected_package:"", current_version:"", target_version:"",
+          risk:"unknown", has_more:false, attempted_count: <count>,
+          cumulative_attempted: input.attempted, fix_loop_max:0}
+    5. Otherwise pick survivors[0] as `p` and emit:
+         {selected_package: p.name,
+          current_version: (p.current // ""),
+          target_version: (p.target // ""),
+          risk: (p.risk // "unknown"),
+          has_more: true,
+          attempted_count: <count>,
+          cumulative_attempted: input.attempted ++ [{name: p.name}],
+          fix_loop_max: (5 if risk=="major" else 3)}
+
+  Be strict about the JSON shape. No prose. No commentary. Output
+  EXACTLY the structured object the schema demands.
+
+prompt select_candidate_user:
+  Pick the next package.
+
+  packages:        {{input.packages}}
+  scope:           {{input.scope}}
+  attempted:       {{input.attempted}}
+  max_packages:    {{input.max_packages}}
+
 prompt changelog_review_system:
   You analyse the upcoming version bump for ONE package and decide
   whether it is likely to break the consuming repository. You do
@@ -777,10 +824,13 @@ tool capture_start_sha:
 
 ## discover_outdated runs the stack-specific outdated command and
 ## emits a normalised JSON list of {name, current, target, risk}.
-## We don't enforce schema in the tool — the downstream
-## select_candidate trusts whatever shape detect_stack produced.
+## Uses {{!input.outdated_cmd}} raw substitution: the command line
+## upstream-emitted by detect_stack is itself shell (quotes, pipes,
+## jq, npx invocations) and must be re-interpreted by sh, not
+## treated as a single shell-escaped argument. The other refs use
+## the default shell-escape so user-controlled paths stay safe.
 tool discover_outdated:
-  command: "bash -lc 'cd {{input.workspace_dir}} && OUT=$({{input.outdated_cmd}} 2>&1 || true); CNT=$(echo \"$OUT\" | jq -c \"if type == \\\"array\\\" then . else [] end | length\" 2>/dev/null || echo 0); jq -nc --arg raw \"$OUT\" --argjson cnt \"$CNT\" \"{packages: (\\$raw | fromjson? // []), count: \\$cnt, raw: \\$raw}\"'"
+  command: "cd {{input.workspace_dir}} && OUT=\"$( ( {{!input.outdated_cmd}} ) 2>&1 || true )\" && printf '%s' \"$OUT\" | jq -nc --rawfile r /dev/stdin '($r | (try fromjson catch [])) as $parsed | (if ($parsed|type) == \"array\" then $parsed else [] end) as $pkgs | {packages: $pkgs, count: ($pkgs|length), raw: $r}'"
   input: discover_input
   output: outdated_list
 
@@ -788,11 +838,21 @@ tool discover_outdated:
 ## risk (patch < minor < major), within the requested scope. It
 ## accumulates `cumulative_attempted` across iterations and exposes
 ## `has_more=false` when nothing remains in scope or
-## max_packages_per_run is hit.
-tool select_candidate:
-  command: "bash -lc 'jq -nc --argjson pkgs \"{{input.packages}}\" --argjson att \"{{input.attempted}}\" --arg scope \"{{input.scope}}\" --argjson maxp {{input.max_packages}} \"def rank(r): if r==\\\"patch\\\" then 0 elif r==\\\"minor\\\" then 1 elif r==\\\"major\\\" then 2 else 3 end; def attempted_names: \\$att | map(.name); def scope_arr: \\$scope | split(\\\",\\\"); def in_scope(p): scope_arr | index((p.risk // \\\"unknown\\\")) != null; def remaining: \\$pkgs | map(select(in_scope(.)) | select(attempted_names | index(.name) | not)) | sort_by(rank(.risk // \\\"unknown\\\")); def attempted_count: \\$att | length; if (attempted_count >= \\$maxp) or (remaining | length == 0) then {selected_package:\\\"\\\",current_version:\\\"\\\",target_version:\\\"\\\",risk:\\\"unknown\\\",has_more:false,attempted_count:attempted_count,cumulative_attempted:\\$att,fix_loop_max:0} else (remaining[0]) as \\$p | {selected_package:\\$p.name,current_version:(\\$p.current // \\\"\\\"),target_version:(\\$p.target // \\\"\\\"),risk:(\\$p.risk // \\\"unknown\\\"),has_more:true,attempted_count:attempted_count,cumulative_attempted:(\\$att + [{name:\\$p.name}]),fix_loop_max:(if (\\$p.risk // \\\"unknown\\\") == \\\"major\\\" then 5 else 3 end)} end\"'"
+## max_packages_per_run is hit. Implemented as a Sonnet agent
+## (rather than a jq tool) because the inputs are JSON arrays:
+## shell-quoting them through --argjson is fragile, and Sonnet
+## already does this kind of structured selection trivially.
+agent select_candidate:
+  backend: "claude_code"
+  model: "claude-sonnet-4-6"
+  reasoning_effort: "medium"
   input: select_input
   output: candidate
+  system: select_candidate_system
+  user: select_candidate_user
+  session: inherit
+  readonly: true
+  tool_max_steps: 0
 
 ## ─── Nodes : Phase 1 — security_audit ──────────────────────────────
 
@@ -802,7 +862,7 @@ tool select_candidate:
 ## upgrade what we can't audit. The agent then decides per-package
 ## (using the raw output) whether the SPECIFIC target version is safe.
 tool security_audit:
-  command: "bash -lc 'cd {{input.workspace_dir}} && PROJ_AUDIT=$({{input.audit_cmd}} 2>&1 || true); LOCK={{input.lock_files}}; OSV=$(npx --yes osv-scanner --lockfile=\"${LOCK%% *}\" 2>&1 || true); RAW=\"--- project audit ---\\n$PROJ_AUDIT\\n--- osv scanner ---\\n$OSV\"; SAFE=true; CVES=\"[]\"; MALWARE=\"[]\"; if echo \"$PROJ_AUDIT\" | grep -qiE \"high|critical|malware|malicious\"; then SAFE=false; fi; if echo \"$OSV\" | grep -qiE \"malware|malicious\"; then SAFE=false; MALWARE=\"[\\\"osv flagged malicious\\\"]\"; fi; jq -nc --arg raw \"$RAW\" --arg safe \"$SAFE\" --argjson cves \"$CVES\" --argjson mw \"$MALWARE\" \"{safe:(\\$safe == \\\"true\\\"),cves:\\$cves,malware_signals:\\$mw,source:\\\"composite\\\",raw:\\$raw}\"'"
+  command: "cd {{input.workspace_dir}} && PROJ_AUDIT=\"$( ( {{!input.audit_cmd}} ) 2>&1 || true )\" && LOCK_FIRST=\"$( printf '%s' '{{!input.lock_files}}' | jq -r 'if type == \"array\" then (.[0] // \"\") else \"\" end' 2>/dev/null )\" && if [ -n \"$LOCK_FIRST\" ]; then OSV=\"$( npx --yes osv-scanner --lockfile=\"$LOCK_FIRST\" 2>&1 || true )\"; else OSV='(no lockfile passed)'; fi && SAFE=true && (printf '%s' \"$PROJ_AUDIT\" | grep -qiE 'high|critical|malware|malicious' && SAFE=false || true) && (printf '%s' \"$OSV\" | grep -qiE 'malware|malicious' && SAFE=false || true) && RAW=$(printf -- '--- project audit ---\\n%s\\n--- osv scanner ---\\n%s' \"$PROJ_AUDIT\" \"$OSV\") && jq -nc --arg raw \"$RAW\" --arg safe \"$SAFE\" '{safe: ($safe == \"true\"), cves: [], malware_signals: [], source: \"composite\", raw: $raw}'"
   input: audit_input
   output: security_report
 
@@ -824,12 +884,12 @@ agent changelog_review:
 ## ─── Nodes : Phase 1 — upgrade & install ───────────────────────────
 
 tool upgrade:
-  command: "bash -lc 'cd {{input.workspace_dir}} && {{input.upgrade_cmd}} {{input.selected_package}}@{{input.target_version}} 2>&1; ec=$?; jq -nc --arg out \"$(cat)\" --arg ec \"$ec\" \"{success:(\\$ec == \\\"0\\\"),exit_code:(\\$ec | tonumber),output:\\$out}\" <<< \"$(cd {{input.workspace_dir}} && {{input.upgrade_cmd}} {{input.selected_package}}@{{input.target_version}} 2>&1; echo $?)\"'"
+  command: "cd {{input.workspace_dir}} && OUT=\"$( {{!input.upgrade_cmd}} {{input.selected_package}}@{{input.target_version}} 2>&1 )\" ; ec=$? ; jq -nc --arg out \"$OUT\" --arg ec \"$ec\" '{success: ($ec == \"0\"), exit_code: ($ec | tonumber), output: $out}'"
   input: upgrade_input
   output: upgrade_result
 
 tool install:
-  command: "bash -lc 'cd {{input.workspace_dir}} && OUT=$({{input.install_cmd}} 2>&1); ec=$?; jq -nc --arg out \"$OUT\" --arg ec \"$ec\" \"{success:(\\$ec == \\\"0\\\"),exit_code:(\\$ec | tonumber),output:\\$out}\"'"
+  command: "cd {{input.workspace_dir}} && OUT=\"$( {{!input.install_cmd}} 2>&1 )\" ; ec=$? ; jq -nc --arg out \"$OUT\" --arg ec \"$ec\" '{success: ($ec == \"0\"), exit_code: ($ec | tonumber), output: $out}'"
   input: install_input
   output: install_result
 
@@ -898,14 +958,19 @@ tool commit_changes:
 ## ─── Nodes : Phase 1 — revert + mark_failed ────────────────────────
 
 tool revert_changes:
-  command: "bash -lc 'cd {{input.workspace_dir}} && git checkout -- . && git clean -fd && {{input.install_cmd}} 2>&1; echo \"{\\\"success\\\":true,\\\"output\\\":\\\"reverted\\\"}\"'"
+  command: "cd {{input.workspace_dir}} && (git checkout -- . 2>&1 || true) && (git clean -fd 2>&1 || true) && ({{!input.install_cmd}} 2>&1 || true) ; printf '{\"success\":true,\"output\":\"reverted\"}\\n'"
   input: revert_input
   output: revert_result
 
-tool mark_failed_and_continue:
-  command: "echo '{\"package\":\"{{input.selected_package}}\",\"reason\":\"{{input.reason}}\"}'"
-  input: mark_failed_input
+## mark_failed_and_continue is a deterministic passthrough — it just
+## relays the package name + reason for the next select_candidate
+## iteration to bookkeep. Implemented as `compute` instead of a
+## shell `echo` to avoid any quoting risk on the {{input.X}} values.
+compute mark_failed_and_continue:
   output: mark_failed_result
+  expr:
+    package: "input.selected_package"
+    reason: "input.reason"
 
 ## ─── Nodes : Phase 2 — review/fix loop ─────────────────────────────
 
@@ -978,7 +1043,7 @@ agent fix_gpt:
 ## per-package commits in Phase 1 already carry the rich semantic
 ## messages.
 tool review_commit_auto:
-  command: "bash -lc 'cd {{input.workspace_dir}} && git add -A && (git diff --cached --quiet || git commit -m \"fix(review): cumulative review fix\") ; echo \"{\\\"success\\\":true,\\\"output\\\":\\\"committed\\\"}\"'"
+  command: "cd {{input.workspace_dir}} && (git add -A 2>&1 || true) ; if git diff --cached --quiet; then printf '{\"success\":true,\"output\":\"no review fix changes\"}\\n'; else git commit -m 'fix(review): cumulative review fix' 2>&1 || true ; printf '{\"success\":true,\"output\":\"committed\"}\\n'; fi"
   input: review_commit_input
   output: commit_result
 
