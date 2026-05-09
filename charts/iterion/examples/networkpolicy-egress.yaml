@@ -1,0 +1,160 @@
+# NetworkPolicy egress allowlist example for the iterion Helm chart.
+#
+# Drop this snippet into your values overlay (values-prod.yaml,
+# values-staging.yaml, etc.) under `networkPolicy.egress.extraAllow`.
+# It augments the chart's default egress (kube-DNS only) with the
+# minimum set of destinations a real cloud deployment needs:
+#
+#   - LLM provider endpoints   (Anthropic, OpenAI, Bedrock, Vertex)
+#   - Package registries        (npm, pypi, golang module proxy)
+#   - Source forges             (GitHub, GitLab, Bitbucket)
+#   - In-cluster data plane     (Mongo, NATS, S3-compatible gateway)
+#
+# All entries below are *examples* — replace each block with the
+# selectors / CIDRs that match your actual deployment. NetworkPolicy
+# enforces deny-by-default once enabled, so omitting a destination is
+# the operative way to forbid it.
+#
+# Apply via:
+#   helm upgrade iterion ./charts/iterion \
+#       --set networkPolicy.enabled=true \
+#       -f charts/iterion/examples/networkpolicy-egress.yaml
+#
+# Or merge into your existing values overlay.
+
+networkPolicy:
+  enabled: true
+  egress:
+    extraAllow:
+      # ---------------------------------------------------------------
+      # 1. LLM provider endpoints (egress to internet, by host).
+      #
+      # Kubernetes NetworkPolicy does not natively support DNS-based
+      # egress rules; you must either (a) use CIDRs of the provider's
+      # public ranges, (b) sit behind an HTTPS egress proxy, or (c)
+      # use a CNI-extension like Calico GlobalNetworkPolicy with
+      # FQDN selectors. The example below uses CIDRs that work on a
+      # vanilla cluster — narrow them for your provider.
+      # ---------------------------------------------------------------
+      - to:
+          # Anthropic API (api.anthropic.com) — current allocations
+          # observed at write time. Verify with `dig api.anthropic.com`
+          # before relying on these in production.
+          - ipBlock:
+              cidr: 0.0.0.0/0  # ← replace with provider CIDRs
+              except:
+                # Block the cluster's pod CIDR + service CIDR to keep
+                # this rule strictly external. Replace with your
+                # cluster's actual ranges.
+                - 10.0.0.0/8
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+        ports:
+          - port: 443
+            protocol: TCP
+
+      # ---------------------------------------------------------------
+      # 2. Package registries (npm, pypi, golang module proxy).
+      #
+      # Used by sandboxed claude_code / codex agents that install
+      # toolchains during a run. If your sandbox.image is fully
+      # baked (no install at runtime), you can omit this block.
+      # ---------------------------------------------------------------
+      - to:
+          - ipBlock:
+              cidr: 0.0.0.0/0  # ← replace with registry.npmjs.org / pypi.org / proxy.golang.org CIDRs
+              except:
+                - 10.0.0.0/8
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+        ports:
+          - port: 443
+            protocol: TCP
+
+      # ---------------------------------------------------------------
+      # 3. Source forges (GitHub, GitLab, Bitbucket).
+      #
+      # Used by `worktree: auto` workflows that clone a repository
+      # before running, and by claude_code agents that fetch issues
+      # / PRs. Public forges only — replace with your self-hosted
+      # forge IP if applicable.
+      # ---------------------------------------------------------------
+      - to:
+          - ipBlock:
+              cidr: 0.0.0.0/0  # ← replace with github.com / gitlab.com / bitbucket.org CIDRs
+              except:
+                - 10.0.0.0/8
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+        ports:
+          - port: 443
+            protocol: TCP
+          - port: 22
+            protocol: TCP    # ssh git URLs
+
+      # ---------------------------------------------------------------
+      # 4. In-cluster Mongo (replica set or operator-managed).
+      #
+      # Replace the namespaceSelector + podSelector with whatever
+      # labels your Mongo install uses. The example below assumes
+      # a Bitnami helm chart in the iterion-data namespace.
+      # ---------------------------------------------------------------
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: iterion-data
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: mongodb
+        ports:
+          - port: 27017
+            protocol: TCP
+
+      # ---------------------------------------------------------------
+      # 5. In-cluster NATS JetStream.
+      # ---------------------------------------------------------------
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: iterion-data
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: nats
+        ports:
+          - port: 4222
+            protocol: TCP
+
+      # ---------------------------------------------------------------
+      # 6. In-cluster S3-compatible blob gateway (MinIO or similar).
+      #
+      # Drop this rule and use a public S3 CIDR instead if you target
+      # AWS S3 directly.
+      # ---------------------------------------------------------------
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: iterion-data
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: minio
+        ports:
+          - port: 9000
+            protocol: TCP
+
+# Operator notes:
+#
+# - NetworkPolicy is enforced by the CNI plugin (Calico, Cilium,
+#   Antrea, Weave, etc.). A cluster without a NetworkPolicy-aware CNI
+#   will *silently* ignore these rules. Verify enforcement with:
+#       kubectl describe networkpolicy <release> -n <namespace>
+#
+# - Use Calico's GlobalNetworkPolicy or Cilium's CiliumNetworkPolicy
+#   if you need FQDN-based selectors instead of CIDRs — far easier
+#   to maintain when LLM provider IP ranges drift.
+#
+# - The chart's built-in egress to kube-DNS is unconditional (every
+#   pod needs DNS). Adding `to: []` here would *not* block it.
+#
+# - If you front the runner pods with a sandbox proxy (cf.
+#   docs/sandbox.md), point the egress at the proxy's pod, not the
+#   external world. The proxy applies its own host-name allowlist.
