@@ -25,6 +25,7 @@ func RunDiagram(opts DiagramOptions, p *Printer) error {
 	if opts.File == "" {
 		return fmt.Errorf("no file specified")
 	}
+	opts.File = ResolveRecipePath(opts.File)
 
 	wf, err := compileWorkflow(opts.File)
 	if err != nil {

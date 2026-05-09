@@ -358,6 +358,7 @@ func resolveWorkflow(opts RunOptions) (wf *ir.Workflow, hash, filePath, displayN
 		if filePath == "" {
 			return nil, "", "", "", fmt.Errorf("recipe %q does not specify a workflow path; provide --file", spec.Name)
 		}
+		filePath = ResolveRecipePath(filePath)
 		raw, h, compileErr := runview.CompileWorkflowWithHash(filePath)
 		if compileErr != nil {
 			return nil, "", "", "", compileErr
@@ -371,11 +372,12 @@ func resolveWorkflow(opts RunOptions) (wf *ir.Workflow, hash, filePath, displayN
 	if opts.File == "" {
 		return nil, "", "", "", fmt.Errorf("provide a .iter file or --recipe")
 	}
-	raw, h, compileErr := runview.CompileWorkflowWithHash(opts.File)
+	resolved := ResolveRecipePath(opts.File)
+	raw, h, compileErr := runview.CompileWorkflowWithHash(resolved)
 	if compileErr != nil {
 		return nil, "", "", "", compileErr
 	}
-	return raw, h, opts.File, raw.Name, nil
+	return raw, h, resolved, raw.Name, nil
 }
 
 // startPrometheusFromEnv builds a PrometheusExporter and serves /metrics

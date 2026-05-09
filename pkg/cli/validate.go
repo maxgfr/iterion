@@ -24,6 +24,7 @@ type ValidateResult struct {
 
 // RunValidate parses, compiles, and validates an .iter file.
 func RunValidate(path string, p *Printer) error {
+	path = ResolveRecipePath(path)
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("cannot read file: %w", err)
