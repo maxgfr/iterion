@@ -91,7 +91,7 @@ export function formatBytes(n: number): string {
 }
 
 /** Sum the size of every selected attachment for the running total. */
-export function totalSize(values: Record<string, { file: File } | undefined>): number {
+export function totalSize(values: Record<string, { file: File } | null | undefined>): number {
   let s = 0;
   for (const v of Object.values(values)) {
     if (v?.file) s += v.file.size;
