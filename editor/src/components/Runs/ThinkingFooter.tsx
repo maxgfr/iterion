@@ -62,11 +62,13 @@ const WORDS: readonly string[] = [
 ];
 
 const ROTATE_MS = 2400;
+const TYPE_MS = 35;
 
 export function ThinkingFooter({ active }: { active: boolean }) {
   const [idx, setIdx] = useState(() =>
     Math.floor(Math.random() * WORDS.length),
   );
+  const [charCount, setCharCount] = useState(0);
 
   useEffect(() => {
     if (!active) return;
@@ -76,7 +78,27 @@ export function ThinkingFooter({ active }: { active: boolean }) {
     return () => window.clearInterval(id);
   }, [active]);
 
+  useEffect(() => {
+    if (!active) return;
+    setCharCount(0);
+    const word = WORDS[idx];
+    const id = window.setInterval(() => {
+      setCharCount((n) => {
+        if (n >= word.length) {
+          window.clearInterval(id);
+          return n;
+        }
+        return n + 1;
+      });
+    }, TYPE_MS);
+    return () => window.clearInterval(id);
+  }, [idx, active]);
+
   if (!active) return null;
+
+  const word = WORDS[idx];
+  const shown = word.slice(0, charCount);
+  const done = charCount >= word.length;
 
   return (
     <div
@@ -84,7 +106,8 @@ export function ThinkingFooter({ active }: { active: boolean }) {
       className="font-mono text-[11px] text-info-fg italic px-1 py-0.5 animate-fade-in-opacity"
     >
       <span className="mr-1 inline-block animate-pulse">✻</span>
-      {WORDS[idx]}…
+      {shown}
+      {done ? "…" : ""}
     </div>
   );
 }
