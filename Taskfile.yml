@@ -365,7 +365,14 @@ tasks:
         # -devtools keeps Inspect Element / Ctrl+Shift+I available in release
         # builds so users can debug WebView issues before native devtools
         # menus are wired up. Stripping it later is a one-line change.
-        wails build -tags desktop,webkit2_41 -platform linux/amd64 -clean -trimpath -skipbindings -s -devtools -ldflags "{{.LDFLAGS}}" -o iterion-desktop-linux-amd64
+        # -clean intentionally omitted: wails would wipe the entire
+        # build/bin/ directory before producing its own binary, racing the
+        # parallel cli:build:linux:amd64 task that lands its artefact in
+        # the same dir. Since wails always overwrites its own output file
+        # (-o iterion-desktop-linux-amd64) and the AppImage/deb scripts
+        # tear down their own staging dirs, dropping -clean is safe and
+        # lets the deb task fan out its sub-builds in parallel.
+        wails build -tags desktop,webkit2_41 -platform linux/amd64 -trimpath -skipbindings -s -devtools -ldflags "{{.LDFLAGS}}" -o iterion-desktop-linux-amd64
 
   desktop:build:linux:arm64:
     desc: Build Iterion Desktop for Linux arm64 (production with DevTools enabled)
@@ -378,7 +385,8 @@ tasks:
         fi
         export PKG_CONFIG="${PKG_CONFIG:-/usr/bin/pkg-config}"
         export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
-        wails build -tags desktop,webkit2_41 -platform linux/arm64 -clean -trimpath -skipbindings -s -devtools -ldflags "{{.LDFLAGS}}" -o iterion-desktop-linux-arm64
+        # See desktop:build:linux:amd64 for why -clean is intentionally absent.
+        wails build -tags desktop,webkit2_41 -platform linux/arm64 -trimpath -skipbindings -s -devtools -ldflags "{{.LDFLAGS}}" -o iterion-desktop-linux-arm64
 
   desktop:package:linux:amd64:
     desc: Package Linux amd64 build as AppImage
@@ -428,16 +436,14 @@ tasks:
 
   desktop:package:linux:amd64:deb:
     desc: Package Linux amd64 build as a Debian .deb (ships desktop + CLI; also produces AppImage)
-    # Order matters: the wails build inside desktop:build:linux:amd64 runs
-    # with `-clean`, which wipes build/bin/ before producing its own binary.
-    # If cli:build:linux:amd64 was a sibling `deps:` entry it would race
-    # the wails clean and lose its output (build-deb.sh would then fail
-    # with "iterion-linux-amd64 not found"). Chaining via `cmds: - task:`
-    # serialises the two builds, guaranteeing the CLI binary is produced
-    # AFTER wails has finished cleaning.
+    # Both prerequisites can run in parallel because the wails build no
+    # longer passes -clean (see desktop:build:linux:amd64). cli:build and
+    # desktop:build write distinct filenames into build/bin/ and the
+    # AppImage / deb scripts manage their own staging dirs, so there is
+    # no contention. editor:build is shared between both prerequisites
+    # and Task dedupes it, so it runs once.
+    deps: [desktop:package:linux:amd64, cli:build:linux:amd64]
     cmds:
-      - task: desktop:package:linux:amd64
-      - task: cli:build:linux:amd64
       - |
         # dpkg-deb lives in /usr/bin and devbox's PATH may shadow it
         # (Nix wrappers don't ship dpkg). The prepend is harmless on CI
@@ -447,9 +453,8 @@ tasks:
 
   desktop:package:linux:arm64:deb:
     desc: Package Linux arm64 build as a Debian .deb (ships desktop + CLI; also produces AppImage)
+    deps: [desktop:package:linux:arm64, cli:build:linux:arm64]
     cmds:
-      - task: desktop:package:linux:arm64
-      - task: cli:build:linux:arm64
       - |
         export PATH="/usr/bin:$PATH"
         ./scripts/desktop/build-deb.sh arm64
