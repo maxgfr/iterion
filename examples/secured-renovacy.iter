@@ -31,8 +31,14 @@
 ##     → validate_upgrade → fix_after_upgrade → prepare_commit (fork)
 ##     all share one Claude session. The chain extends across
 ##     iterations via _session_id passthrough on the loop edge.
-##   - Sonnet 4.6 for orchestration / changelog / verdict / commit
-##     formatting; Opus 4.7 only on code-mutating nodes.
+##   - Opus 4.7 max-effort across the board (claude_code via the
+##     workflow default_backend). Configurable per-run via
+##     ITERION_RENOVACY_EFFORT_CLAUDE; defaults to max so the recipe
+##     can take its time when it must — package upgrades reward
+##     getting it right once, not getting it cheap.
+##   - claw + GPT-5.5 (override via ITERION_RENOVACY_MODEL_GPT —
+##     fall back to gpt-5.4 if 5.5 is not enabled in your account)
+##     at max reasoning_effort for the cross-family review/fix.
 ##   - Soft-approve on low confidence to avoid false-positive fix
 ##     cycles (vibe_review_alternating pattern).
 ##
@@ -751,8 +757,8 @@ schema review_commit_intent:
 
 agent detect_stack:
   backend: "claude_code"
-  model: "claude-sonnet-4-6"
-  reasoning_effort: "medium"
+  model: "claude-opus-4-7"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   output: stack_profile
   publish: stack_profile_artifact
   system: detect_stack_system
@@ -804,8 +810,8 @@ tool security_audit:
 
 agent changelog_review:
   backend: "claude_code"
-  model: "claude-sonnet-4-6"
-  reasoning_effort: "medium"
+  model: "claude-opus-4-7"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: changelog_input
   output: changelog_summary
   system: changelog_review_system
@@ -832,7 +838,7 @@ tool install:
 agent align_code:
   backend: "claude_code"
   model: "claude-opus-4-7"
-  reasoning_effort: "high"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: align_input
   output: align_result
   system: align_code_system
@@ -845,8 +851,8 @@ agent align_code:
 
 agent validate_upgrade:
   backend: "claude_code"
-  model: "claude-sonnet-4-6"
-  reasoning_effort: "medium"
+  model: "claude-opus-4-7"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: validate_input
   output: verdict
   system: validate_upgrade_system
@@ -860,7 +866,7 @@ agent validate_upgrade:
 agent fix_after_upgrade:
   backend: "claude_code"
   model: "claude-opus-4-7"
-  reasoning_effort: "high"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: fix_after_input
   output: fix_after_result
   system: fix_after_upgrade_system
@@ -873,8 +879,8 @@ agent fix_after_upgrade:
 
 agent prepare_commit:
   backend: "claude_code"
-  model: "claude-sonnet-4-6"
-  reasoning_effort: "medium"
+  model: "claude-opus-4-7"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: commit_intent_input
   output: commit_intent
   system: prepare_commit_system
@@ -909,7 +915,7 @@ router alt_review:
 judge reviewer_claude:
   backend: "claude_code"
   model: "claude-opus-4-7"
-  reasoning_effort: "high"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: review_input
   output: review_verdict
   system: review_system
@@ -920,8 +926,8 @@ judge reviewer_claude:
 
 judge reviewer_gpt:
   backend: "claw"
-  model: "openai/gpt-5.5"
-  reasoning_effort: "high"
+  model: "openai/${ITERION_RENOVACY_MODEL_GPT:-gpt-5.5}"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_GPT:-max}"
   input: review_input
   output: review_verdict
   system: review_system
@@ -943,7 +949,7 @@ compute streak_check:
 agent fix_claude:
   backend: "claude_code"
   model: "claude-opus-4-7"
-  reasoning_effort: "high"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: review_fix_input
   output: review_fix_result
   system: fix_system
@@ -954,8 +960,8 @@ agent fix_claude:
 
 agent fix_gpt:
   backend: "claw"
-  model: "openai/gpt-5.5"
-  reasoning_effort: "high"
+  model: "openai/${ITERION_RENOVACY_MODEL_GPT:-gpt-5.5}"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_GPT:-max}"
   input: review_fix_input
   output: review_fix_result
   system: fix_system
