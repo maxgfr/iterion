@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
+
+	iterlog "github.com/SocialGouv/iterion/pkg/log"
 )
 
 // ExecCmd runs a prepared [*exec.Cmd], wiring stdout/stderr per opts and
@@ -57,16 +60,69 @@ func ExecCmd(c *exec.Cmd, opts ExecOpts) (ExecResult, error) {
 // returns a friendly error on non-zero exit (with stdout/stderr
 // embedded for diagnostics). Used by drivers that honour
 // [Spec.PostCreate] — currently docker and kubernetes.
-func RunPostCreate(ctx context.Context, run Run, snippet string) error {
-	res, err := run.Exec(ctx, []string{"sh", "-c", snippet}, ExecOpts{})
+//
+// When logger is non-nil the snippet's stdout and stderr are also
+// streamed to the logger as Info / Warn lines so operators see
+// install progress live in run.log instead of waiting for a terminal
+// failure to dump a buffered blob. Pass nil to suppress streaming.
+func RunPostCreate(ctx context.Context, run Run, snippet string, logger *iterlog.Logger) error {
+	opts := ExecOpts{}
+	var bufOut, bufErr bytes.Buffer
+	if logger != nil {
+		// Stream + buffer in parallel so the on-error message keeps the
+		// embedded captures it always had.
+		opts.Stdout = io.MultiWriter(&bufOut, &lineLogger{l: logger, level: "info"})
+		opts.Stderr = io.MultiWriter(&bufErr, &lineLogger{l: logger, level: "warn"})
+	}
+	res, err := run.Exec(ctx, []string{"sh", "-c", snippet}, opts)
 	if err != nil {
 		return fmt.Errorf("postCreateCommand: %w", err)
+	}
+	stdout := res.Stdout
+	stderr := res.Stderr
+	if logger != nil {
+		stdout = bufOut.Bytes()
+		stderr = bufErr.Bytes()
 	}
 	if res.ExitCode != 0 {
 		return fmt.Errorf(
 			"postCreateCommand exited %d:\nstdout:\n%s\nstderr:\n%s",
-			res.ExitCode, string(res.Stdout), string(res.Stderr),
+			res.ExitCode, string(stdout), string(stderr),
 		)
 	}
 	return nil
+}
+
+// lineLogger fans bytes into a leveled iterlog logger one line at a time.
+// Designed for live-streaming subprocess output where each newline
+// completes a logical message. Partial trailing lines are buffered
+// until the next newline arrives or Close() is called (we don't call
+// Close because Run.Exec terminates the writer anyway when the process
+// exits).
+type lineLogger struct {
+	l     *iterlog.Logger
+	level string
+	buf   bytes.Buffer
+}
+
+func (lw *lineLogger) Write(p []byte) (int, error) {
+	lw.buf.Write(p)
+	for {
+		idx := bytes.IndexByte(lw.buf.Bytes(), '\n')
+		if idx < 0 {
+			break
+		}
+		line := string(lw.buf.Next(idx + 1))
+		line = line[:len(line)-1] // drop newline
+		if line == "" {
+			continue
+		}
+		switch lw.level {
+		case "warn":
+			lw.l.Warn("sandbox: postCreate: %s", line)
+		default:
+			lw.l.Info("sandbox: postCreate: %s", line)
+		}
+	}
+	return len(p), nil
 }

@@ -379,7 +379,7 @@ func (r *Run) Cleanup(_ context.Context) error {
 // freshly started pod.
 func (r *Run) runPostCreate(ctx context.Context, snippet string) error {
 	r.driver.logger.Info("sandbox: running postCreateCommand in pod %s", r.podName)
-	return sandbox.RunPostCreate(ctx, r, snippet)
+	return sandbox.RunPostCreate(ctx, r, snippet, r.driver.logger)
 }
 
 // podNameFor maps a run ID to a deterministic pod name. The k8s API
