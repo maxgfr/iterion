@@ -62,6 +62,7 @@ export default function Toolbar() {
   const setActiveWorkflowName = useUIStore((s) => s.setActiveWorkflowName);
   const addToast = useUIStore((s) => s.addToast);
   const pushRecent = useRecentsStore((s) => s.pushRecent);
+  const removeRecent = useRecentsStore((s) => s.removeRecent);
 
   const filePickerOpen = useUIStore((s) => s.filePickerOpen);
   const setFilePickerOpen = useUIStore((s) => s.setFilePickerOpen);
@@ -129,12 +130,25 @@ export default function Toolbar() {
         }
       } catch (err) {
         console.error("Open failed:", err);
-        addToast("Open failed", "error");
+        // Auto-clean stale recents: a 404 from /files/open means the
+        // file underlying this recent entry no longer exists (deleted,
+        // moved, or the workspace was switched to a project that
+        // doesn't contain it). Pruning here means the next time the
+        // picker opens, the dead row is gone — instead of the user
+        // having to manually click the trash icon on every stale row.
+        const message = (err as Error).message ?? "";
+        const isMissing = /file not found|no such file|404/i.test(message);
+        if (kind === "file" && isMissing) {
+          removeRecent(path);
+          addToast(`Removed missing file from recents: ${path}`, "warning");
+        } else {
+          addToast("Open failed", "error");
+        }
       } finally {
         setLoading(false);
       }
     },
-    [setDocument, setDiagnostics, setCurrentFilePath, markSaved, isDirty, pushRecent, addToast],
+    [setDocument, setDiagnostics, setCurrentFilePath, markSaved, isDirty, pushRecent, removeRecent, addToast],
   );
 
   const handleImport = useCallback(
