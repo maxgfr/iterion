@@ -1085,20 +1085,37 @@ workflow secured_renovacy:
   ## execute that chain on the host means a malicious package's
   ## postinstall script runs with the operator's user permissions.
   ##
-  ## `mode: auto` first looks for a .devcontainer/devcontainer.json in
-  ## the target project (modjo, alerte-secours, …) and reuses its
-  ## image + post-create — keeping the agent inside the same toolchain
-  ## the human contributor would use. If the project has no
-  ## devcontainer, iterion falls back to its slim image
-  ## (ghcr.io/socialgouv/iterion-sandbox-slim) which already ships
-  ## node, git, jq, yarn, and the npx wrapper this recipe needs.
+  ## We pin an explicit `image:` (inline mode) instead of `mode: auto`
+  ## because `auto` reuses the target project's
+  ## .devcontainer/devcontainer.json — and many devcontainers (e.g.
+  ## modjo's) rely on the `features:` block to layer in node/npm,
+  ## which iterion does not honour yet (devcontainer features support
+  ## is V2 work). The result was a container with no npm, postCreate
+  ## that "succeeded" with claude-code never installed, and runs
+  ## ending instantly with "claude session ended without result".
+  ##
+  ## `iterion-sandbox-slim` already ships node 22, npm, git, jq, curl,
+  ## devbox + Nix — i.e. everything any package-manager-aware recipe
+  ## needs to bootstrap regardless of target project. We layer
+  ## claude-code on top via post_create.
+  ##
+  ## Mounting `${localEnv:HOME}/.claude` into the container's
+  ## `/home/devbox/.claude` carries the operator's existing OAuth /
+  ## API-key credentials so the in-sandbox claude CLI can talk to
+  ## Anthropic without a fresh login flow per run.
   ##
   ## Network stays default (egress allowed) because the workflow MUST
   ## reach the npm registry, GitHub release notes, and osv-scanner's
   ## OSV database. A future tightening would set
   ## `network.preset: package-managers` once that preset lands.
   sandbox:
-    mode: auto
+    image: "ghcr.io/socialgouv/iterion-sandbox-slim:latest"
+    user: "devbox"
+    workspace_folder: "/workspace"
+    env:
+      CLAUDE_CONFIG_DIR: "/home/devbox/.claude"
+    mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=/home/devbox/.claude,consistency=cached"]
+    post_create: "set -e; command -v claude >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code"
 
   budget:
     max_parallel_branches: 1
