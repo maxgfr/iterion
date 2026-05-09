@@ -19,7 +19,7 @@
 // `vars`, `input`, `outputs`, `artifacts`, `loop.<name>.{iteration,max,previous_output[.field]}`,
 // and `run.{id}` are the standard ones.
 //
-// Builtin functions: `length`, `concat`, `unique`, `contains`. See the
+// Builtin functions: `length`, `concat`, `unique`, `contains`, `join`. See the
 // builtins map below for signatures and semantics. Function calls are
 // disambiguated from path lookups purely by the presence of `(` directly
 // after the leading IDENT — there is no separate keyword set.
@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 )
 
 // AST is the parsed form of an expression. It is opaque outside the package.
@@ -937,6 +938,7 @@ var builtins = map[string]func(args []interface{}) (interface{}, error){
 	"concat":   builtinConcat,
 	"unique":   builtinUnique,
 	"contains": builtinContains,
+	"join":     builtinJoin,
 }
 
 func evalFuncCall(n *funcCallNode, ctx *Context) (interface{}, error) {
@@ -1049,6 +1051,28 @@ func builtinContains(args []interface{}) (interface{}, error) {
 		}
 	}
 	return false, nil
+}
+
+func builtinJoin(args []interface{}) (interface{}, error) {
+	if len(args) != 2 {
+		return nil, fmt.Errorf("expr: join() takes 2 arguments, got %d", len(args))
+	}
+	sep, ok := args[1].(string)
+	if !ok {
+		return nil, fmt.Errorf("expr: join() expects string as second argument, got %T", args[1])
+	}
+	if args[0] == nil {
+		return "", nil
+	}
+	arr, ok := args[0].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("expr: join() expects array as first argument, got %T", args[0])
+	}
+	parts := make([]string, len(arr))
+	for i, v := range arr {
+		parts[i] = fmt.Sprintf("%v", v)
+	}
+	return strings.Join(parts, sep), nil
 }
 
 func walkRefs(n node, fn func(Ref)) {
