@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SocialGouv/iterion/examples"
 	"github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/auth/oidc"
 	"github.com/SocialGouv/iterion/pkg/backend/detect"
@@ -667,23 +668,52 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListExamples(w http.ResponseWriter, _ *http.Request) {
-	dir := s.cfg.ExamplesDir
-	if dir == "" {
-		writeJSON(w, []string{})
-		return
-	}
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		writeJSON(w, []string{})
-		return
-	}
-
+	// Two sources, merged + de-duplicated:
+	//   1. <ExamplesDir>/*.iter — examples shipped alongside the workdir
+	//      (e.g. <repo>/examples/ when the user opens an iterion repo).
+	//   2. The recipes embedded in the binary (examples/embed.go), so a
+	//      fresh project that doesn't ship its own examples still gets
+	//      the canonical built-ins (vibe_*, ci_fix_until_green,
+	//      secured-renovacy, …) in the editor's example picker.
+	// On-disk wins on name collision: a project that overrides an
+	// embedded recipe by placing one with the same basename in its
+	// examples/ dir gets to override what the SPA loads.
+	seen := map[string]struct{}{}
 	var names []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".iter") {
-			names = append(names, e.Name())
+
+	if dir := s.cfg.ExamplesDir; dir != "" {
+		if entries, err := os.ReadDir(dir); err == nil {
+			for _, e := range entries {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".iter") {
+					continue
+				}
+				name := e.Name()
+				if _, dup := seen[name]; dup {
+					continue
+				}
+				seen[name] = struct{}{}
+				names = append(names, name)
+			}
 		}
+	}
+
+	for _, p := range examples.List() {
+		// Top-level only — handleLoadExample's name validator rejects
+		// path separators, so embedded recipes under skill/ etc. would
+		// be unreachable through this endpoint and listing them would
+		// just produce dead entries in the picker.
+		if strings.ContainsAny(p, `/\`) {
+			continue
+		}
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		names = append(names, p)
+	}
+
+	if names == nil {
+		names = []string{}
 	}
 	writeJSON(w, names)
 }
@@ -701,15 +731,21 @@ func (s *Server) handleLoadExample(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dir := s.cfg.ExamplesDir
-	if dir == "" {
-		httpError(w, http.StatusNotFound, "no examples directory configured")
-		return
+	// Try on-disk first (lets a project's <ExamplesDir>/<name>
+	// override an embedded recipe of the same basename), then fall
+	// back to the binary-embedded recipe set (examples/embed.go).
+	var data []byte
+	if dir := s.cfg.ExamplesDir; dir != "" {
+		if d, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
+			data = d
+		}
 	}
-
-	path := filepath.Join(dir, name)
-	data, err := os.ReadFile(path)
-	if err != nil {
+	if data == nil {
+		if d, ok := examples.Get(name); ok {
+			data = d
+		}
+	}
+	if data == nil {
 		httpError(w, http.StatusNotFound, "example not found: %s", name)
 		return
 	}
