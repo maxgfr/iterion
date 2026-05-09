@@ -428,13 +428,16 @@ tasks:
 
   desktop:package:linux:amd64:deb:
     desc: Package Linux amd64 build as a Debian .deb (ships desktop + CLI; also produces AppImage)
-    # Depend on the AppImage task so a single command yields all three
-    # local artefacts (binary, AppImage, .deb), matching the CI release
-    # job that bundles them together. The CLI dep ensures
-    # /usr/bin/iterion ships alongside /usr/bin/iterion-desktop so users
-    # don't have to install the CLI separately.
-    deps: [desktop:package:linux:amd64, cli:build:linux:amd64]
+    # Order matters: the wails build inside desktop:build:linux:amd64 runs
+    # with `-clean`, which wipes build/bin/ before producing its own binary.
+    # If cli:build:linux:amd64 was a sibling `deps:` entry it would race
+    # the wails clean and lose its output (build-deb.sh would then fail
+    # with "iterion-linux-amd64 not found"). Chaining via `cmds: - task:`
+    # serialises the two builds, guaranteeing the CLI binary is produced
+    # AFTER wails has finished cleaning.
     cmds:
+      - task: desktop:package:linux:amd64
+      - task: cli:build:linux:amd64
       - |
         # dpkg-deb lives in /usr/bin and devbox's PATH may shadow it
         # (Nix wrappers don't ship dpkg). The prepend is harmless on CI
@@ -444,8 +447,9 @@ tasks:
 
   desktop:package:linux:arm64:deb:
     desc: Package Linux arm64 build as a Debian .deb (ships desktop + CLI; also produces AppImage)
-    deps: [desktop:package:linux:arm64, cli:build:linux:arm64]
     cmds:
+      - task: desktop:package:linux:arm64
+      - task: cli:build:linux:arm64
       - |
         export PATH="/usr/bin:$PATH"
         ./scripts/desktop/build-deb.sh arm64
