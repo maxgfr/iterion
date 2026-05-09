@@ -400,12 +400,46 @@ tasks:
         export PATH="/usr/bin:$PATH"
         ./scripts/desktop/build-appimage.sh arm64
 
+  cli:build:linux:amd64:
+    desc: Build the iterion CLI for Linux amd64 (output build/bin/iterion-linux-amd64)
+    deps: [editor:build]
+    env:
+      CGO_ENABLED: "0"
+      GOOS: linux
+      GOARCH: amd64
+    cmds:
+      - go build -trimpath -ldflags "{{.LDFLAGS}}" -o build/bin/iterion-linux-amd64 {{.CMD}}
+    sources:
+      - "**/*.go"
+      - go.mod
+      - pkg/server/static/**
+    generates:
+      - build/bin/iterion-linux-amd64
+
+  cli:build:linux:arm64:
+    desc: Build the iterion CLI for Linux arm64 (output build/bin/iterion-linux-arm64)
+    deps: [editor:build]
+    env:
+      CGO_ENABLED: "0"
+      GOOS: linux
+      GOARCH: arm64
+    cmds:
+      - go build -trimpath -ldflags "{{.LDFLAGS}}" -o build/bin/iterion-linux-arm64 {{.CMD}}
+    sources:
+      - "**/*.go"
+      - go.mod
+      - pkg/server/static/**
+    generates:
+      - build/bin/iterion-linux-arm64
+
   desktop:package:linux:amd64:deb:
-    desc: Package Linux amd64 build as a Debian .deb (also produces AppImage)
+    desc: Package Linux amd64 build as a Debian .deb (ships desktop + CLI; also produces AppImage)
     # Depend on the AppImage task so a single command yields all three
     # local artefacts (binary, AppImage, .deb), matching the CI release
-    # job that bundles them together.
-    deps: [desktop:package:linux:amd64]
+    # job that bundles them together. The CLI dep ensures
+    # /usr/bin/iterion ships alongside /usr/bin/iterion-desktop so users
+    # don't have to install the CLI separately.
+    deps: [desktop:package:linux:amd64, cli:build:linux:amd64]
     cmds:
       - |
         # dpkg-deb lives in /usr/bin and devbox's PATH may shadow it
@@ -415,8 +449,8 @@ tasks:
         ./scripts/desktop/build-deb.sh amd64
 
   desktop:package:linux:arm64:deb:
-    desc: Package Linux arm64 build as a Debian .deb (also produces AppImage)
-    deps: [desktop:package:linux:arm64]
+    desc: Package Linux arm64 build as a Debian .deb (ships desktop + CLI; also produces AppImage)
+    deps: [desktop:package:linux:arm64, cli:build:linux:arm64]
     cmds:
       - |
         export PATH="/usr/bin:$PATH"
