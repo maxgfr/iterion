@@ -21,6 +21,19 @@ import (
 // any devcontainer.json that mounts `${localEnv:HOME}/.claude` (which
 // is the canonical Claude Code dev pattern) blows up at `docker run`
 // with "invalid mount path: '${localEnv:HOME}/...' must be absolute".
+// ExpandLocalVars resolves `${localEnv:VAR}`, `${localEnv:VAR:default}`,
+// `${localWorkspaceFolder}`, and `${localWorkspaceFolderBasename}` in
+// the input string. Same semantics as ExpandLocalVarsInFile but on a
+// raw string — used by the runtime to expand inline `sandbox:` blocks
+// in .iter files (Mounts, PostCreate, etc.) just like devcontainer.json.
+//
+// Container-side variables (`${containerEnv:...}`,
+// `${containerWorkspaceFolder*}`) are left untouched; they are
+// resolved at runtime inside the container by lifecycle commands.
+func ExpandLocalVars(s, repoRoot string) string {
+	return expandLocalVars(s, repoRoot)
+}
+
 func expandLocalVars(s, repoRoot string) string {
 	if s == "" {
 		return s

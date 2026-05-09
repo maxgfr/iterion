@@ -457,6 +457,13 @@ func resolveSandboxSpec(
 			return nil, source, fmt.Errorf("runtime: sandbox: mode=inline but no sandbox: block on the workflow")
 		}
 		spec := fromIRSpec(wf.Sandbox)
+		// Expand devcontainer-style host-side variables in the inline
+		// block too, so a recipe author can write
+		//   mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=..."]
+		// the same way they would in a devcontainer.json. Without
+		// expansion docker run rejects the literal `${localEnv:HOME}`
+		// string with "mount path must be absolute".
+		expandSandboxSpec(&spec, repoRoot)
 		return &spec, source, nil
 	}
 
@@ -522,6 +529,38 @@ func fromIRSpec(s *ir.SandboxSpec) sandbox.Spec {
 		}
 	}
 	return out
+}
+
+// expandSandboxSpec applies devcontainer-style host-side variable
+// expansion (${localEnv:VAR}, ${localWorkspaceFolder*}) to every
+// host-relevant field of an inline sandbox.Spec. Mirrors
+// devcontainer.ExpandLocalVarsInFile but operates on the runtime
+// shape so inline blocks in .iter files behave identically.
+//
+// Container-side vars (${containerEnv:...}, ${containerWorkspaceFolder*})
+// are intentionally left as-is — they're resolved at runtime by
+// lifecycle commands inside the container.
+func expandSandboxSpec(s *sandbox.Spec, repoRoot string) {
+	if s == nil {
+		return
+	}
+	s.Image = devcontainer.ExpandLocalVars(s.Image, repoRoot)
+	s.User = devcontainer.ExpandLocalVars(s.User, repoRoot)
+	s.WorkspaceFolder = devcontainer.ExpandLocalVars(s.WorkspaceFolder, repoRoot)
+	s.PostCreate = devcontainer.ExpandLocalVars(s.PostCreate, repoRoot)
+	for i, m := range s.Mounts {
+		s.Mounts[i] = devcontainer.ExpandLocalVars(m, repoRoot)
+	}
+	for k, v := range s.Env {
+		s.Env[k] = devcontainer.ExpandLocalVars(v, repoRoot)
+	}
+	if s.Build != nil {
+		s.Build.Dockerfile = devcontainer.ExpandLocalVars(s.Build.Dockerfile, repoRoot)
+		s.Build.Context = devcontainer.ExpandLocalVars(s.Build.Context, repoRoot)
+		for k, v := range s.Build.Args {
+			s.Build.Args[k] = devcontainer.ExpandLocalVars(v, repoRoot)
+		}
+	}
 }
 
 func cloneStringMap(m map[string]string) map[string]string {
