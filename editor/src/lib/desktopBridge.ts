@@ -197,7 +197,11 @@ export const desktop = {
 let cachedDesktopWsBase: { serverURL: string; wsBase: string } | null = null;
 
 export async function getDesktopWsBase(path: string): Promise<string | null> {
-  if (!isDesktop()) return null;
+  if (!isDesktop()) {
+    // eslint-disable-next-line no-console
+    console.warn("[desktopBridge] getDesktopWsBase: window.go.main.App not present yet (Wails bindings still loading)");
+    return null;
+  }
   let serverURL: string;
   let token: string;
   try {
@@ -205,10 +209,16 @@ export async function getDesktopWsBase(path: string): Promise<string | null> {
       desktop.getServerURL(),
       desktop.getSessionToken(),
     ]);
-  } catch {
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[desktopBridge] getDesktopWsBase: binding call rejected", err);
     return null;
   }
-  if (!serverURL) return null;
+  if (!serverURL) {
+    // eslint-disable-next-line no-console
+    console.warn("[desktopBridge] getDesktopWsBase: GetServerURL returned empty (embedded HTTP server not bound — see desktop log for server start failures)");
+    return null;
+  }
   // Recompute when the server URL changes (project switch rebinds the
   // embedded server on a fresh ephemeral port).
   if (!cachedDesktopWsBase || cachedDesktopWsBase.serverURL !== serverURL) {
