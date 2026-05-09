@@ -1079,6 +1079,27 @@ workflow secured_renovacy:
 
   interaction: llm_or_human
 
+  ## Sandboxing rationale: this recipe runs `yarn install`, `yarn up`,
+  ## `npx`, post-install hooks, etc. — exactly the supply-chain attack
+  ## surface it tries to surface via security_audit. Letting agents
+  ## execute that chain on the host means a malicious package's
+  ## postinstall script runs with the operator's user permissions.
+  ##
+  ## `mode: auto` first looks for a .devcontainer/devcontainer.json in
+  ## the target project (modjo, alerte-secours, …) and reuses its
+  ## image + post-create — keeping the agent inside the same toolchain
+  ## the human contributor would use. If the project has no
+  ## devcontainer, iterion falls back to its slim image
+  ## (ghcr.io/socialgouv/iterion-sandbox-slim) which already ships
+  ## node, git, jq, yarn, and the npx wrapper this recipe needs.
+  ##
+  ## Network stays default (egress allowed) because the workflow MUST
+  ## reach the npm registry, GitHub release notes, and osv-scanner's
+  ## OSV database. A future tightening would set
+  ## `network.preset: package-managers` once that preset lands.
+  sandbox:
+    mode: auto
+
   budget:
     max_parallel_branches: 1
     max_duration: "12h"
