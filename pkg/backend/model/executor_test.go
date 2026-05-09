@@ -887,6 +887,32 @@ func TestResolveCommandTemplate(t *testing.T) {
 			input:   map[string]interface{}{"files": []string{"only"}},
 			want:    "echo 'only'",
 		},
+		{
+			// Raw substitution ({{!ref}}) bypasses shellEscape so the value
+			// is re-interpreted by the wrapping shell — useful when the
+			// upstream node emitted a shell snippet (a command line, a
+			// pipe, an inline jq filter) that the downstream tool needs
+			// to RUN, not pass as a single quoted token.
+			name:    "raw substitution skips shell escape",
+			command: "OUT=$( {{!input.cmd}} 2>&1 )",
+			input:   map[string]interface{}{"cmd": "echo hi | jq -c '.'"},
+			want:    "OUT=$( echo hi | jq -c '.' 2>&1 )",
+		},
+		{
+			// Raw mode JSON-encodes complex types (matches formatValue's
+			// prompt convention).
+			name:    "raw substitution json-encodes slice",
+			command: "echo {{!input.list}}",
+			input:   map[string]interface{}{"list": []interface{}{"a", "b"}},
+			want:    `echo ["a","b"]`,
+		},
+		{
+			// Default substitution still escapes — raw mode is opt-in.
+			name:    "raw and default coexist",
+			command: "{{!input.cmd}} {{input.arg}}",
+			input:   map[string]interface{}{"cmd": "yarn up --exact", "arg": "lodash@1.0"},
+			want:    "yarn up --exact 'lodash@1.0'",
+		},
 	}
 
 	for _, tt := range tests {
@@ -898,6 +924,63 @@ func TestResolveCommandTemplate(t *testing.T) {
 			got := resolveCommandTemplate(tt.command, refs, tt.input, nil)
 			if got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExpandBracedEnv(t *testing.T) {
+	t.Setenv("ITERION_TEST_MODEL", "claude-opus-4-7")
+	t.Setenv("ITERION_TEST_EFFORT", "max")
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "braced env expands",
+			in:   "model: ${ITERION_TEST_MODEL}",
+			want: "model: claude-opus-4-7",
+		},
+		{
+			name: "braced env with default falls back when set",
+			in:   "effort: ${ITERION_TEST_EFFORT:-medium}",
+			want: "effort: max",
+		},
+		{
+			name: "braced env with default falls back when unset",
+			in:   "effort: ${ITERION_TEST_UNSET:-medium}",
+			want: "effort: medium",
+		},
+		{
+			// The bare $NAME form is preserved verbatim so shell-level
+			// constructs (positional args, exit codes, captured stdout)
+			// reach the runtime sh -c without being eaten by ExpandEnv.
+			name: "bare $NAME passes through",
+			in:   "OUT=$(foo); ec=$?; echo \"$OUT $ec\"",
+			want: "OUT=$(foo); ec=$?; echo \"$OUT $ec\"",
+		},
+		{
+			name: "shell positional args pass through",
+			in:   `bash -c 'cd "$1" && eval "$2"' _ /tmp 'echo hi'`,
+			want: `bash -c 'cd "$1" && eval "$2"' _ /tmp 'echo hi'`,
+		},
+		{
+			name: "unterminated brace passes through",
+			in:   "echo ${UNCLOSED hello",
+			want: "echo ${UNCLOSED hello",
+		},
+		{
+			name: "mixed forms",
+			in:   "${ITERION_TEST_MODEL} -- script.sh \"$@\"",
+			want: `claude-opus-4-7 -- script.sh "$@"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := expandBracedEnv(tc.in)
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
 	}

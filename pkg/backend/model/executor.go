@@ -1459,7 +1459,16 @@ func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNo
 	// before substitution, only the .iter author's own `$VAR` references in
 	// the static command template are expanded; substituted values stay safely
 	// quoted.
-	expandedCommand := os.ExpandEnv(node.Command)
+	//
+	// Only the BRACED form `${NAME}` is treated as an env var reference —
+	// matching the SKILL.md documentation ("Environment variables are
+	// supported with ${ENV_VAR} syntax"). Bare `$NAME`, `$ec`, `$?`, `$1`
+	// etc. are passed through verbatim so shell-level variables (positional
+	// args, exit-status, captured stdout) survive into the resolved command
+	// for sh -c to interpret. The previous os.ExpandEnv call ate those,
+	// silently turning `$ec` into `""` and breaking any tool that wanted to
+	// capture exit codes or compose intermediate shell values.
+	expandedCommand := expandBracedEnv(node.Command)
 
 	// Resolve template references in the (env-expanded) command.
 	resolved := resolveCommandTemplate(expandedCommand, node.CommandRefs, input, e.vars)
@@ -1550,6 +1559,13 @@ func looksLikeShellCommand(cmd string) bool {
 // a command string with values from the input map and workflow variables.
 // Values are shell-escaped to prevent command injection when the resolved
 // string is passed to sh -c.
+//
+// Refs flagged as `Raw` (authored as `{{!input.X}}` / `{{!vars.X}}`) bypass
+// shellEscape and are inserted verbatim. Use only for trusted values that
+// are intentionally shell snippets (e.g. an upstream node returns a
+// command line that the wrapping tool needs to RE-INTERPRET as shell, not
+// pass as a single quoted token). Untrusted external inputs MUST keep the
+// default escaping.
 func resolveCommandTemplate(command string, refs []*ir.Ref, input map[string]interface{}, vars map[string]interface{}) string {
 	resolved := command
 	for _, ref := range refs {
@@ -1563,9 +1579,83 @@ func resolveCommandTemplate(command string, refs []*ir.Ref, input map[string]int
 		if val == nil {
 			continue
 		}
-		resolved = strings.ReplaceAll(resolved, ref.Raw, shellEscapeValue(val))
+		var rendered string
+		if ref.Unquoted {
+			rendered = rawTemplateValue(val)
+		} else {
+			rendered = shellEscapeValue(val)
+		}
+		resolved = strings.ReplaceAll(resolved, ref.Raw, rendered)
 	}
 	return resolved
+}
+
+// rawTemplateValue renders a value verbatim (without shell-escaping) for
+// the {{!ref}} raw substitution mode. Strings pass through; complex types
+// are JSON-encoded (matches formatValue's prompt-rendering convention so
+// authors can reason about both contexts uniformly).
+func rawTemplateValue(val interface{}) string {
+	if s, ok := val.(string); ok {
+		return s
+	}
+	return formatValue(val)
+}
+
+// expandBracedEnv expands ${NAME} and ${NAME:-default} env references in
+// the author-controlled command template. Bare $NAME (and shell-special
+// $1, $?, $@, $ec, $OUT, ...) are passed through verbatim so shell-level
+// constructs survive into the resolved command for sh -c to interpret.
+//
+// The previous implementation called os.ExpandEnv which treats both forms
+// the same — silently eating any bare $NAME and breaking tool authors who
+// wanted to capture exit codes (`ec=$?`), compose intermediate shell
+// values (`OUT=$(...) ; echo "$OUT"`), or use positional args from
+// `bash -c '...' _ "$1" "$2"`. The braced form is also the only form
+// SKILL.md documents, so tightening to it is BC for documented usage.
+func expandBracedEnv(s string) string {
+	var out strings.Builder
+	out.Grow(len(s))
+	i := 0
+	for i < len(s) {
+		if s[i] == '$' && i+1 < len(s) && s[i+1] == '{' {
+			// Find matching '}'.
+			end := strings.IndexByte(s[i+2:], '}')
+			if end == -1 {
+				// Unterminated — pass through verbatim.
+				out.WriteByte(s[i])
+				i++
+				continue
+			}
+			body := s[i+2 : i+2+end]
+			out.WriteString(resolveBracedEnvBody(body))
+			i += 2 + end + 1
+			continue
+		}
+		out.WriteByte(s[i])
+		i++
+	}
+	return out.String()
+}
+
+// resolveBracedEnvBody handles the body of a ${...} reference. Supports
+// the bash-style default form ${NAME:-fallback} so authors can write
+// recipes that work both with and without the env var set.
+func resolveBracedEnvBody(body string) string {
+	name := body
+	defaultVal := ""
+	hasDefault := false
+	if idx := strings.Index(body, ":-"); idx != -1 {
+		name = body[:idx]
+		defaultVal = body[idx+2:]
+		hasDefault = true
+	}
+	if v, ok := os.LookupEnv(name); ok {
+		return v
+	}
+	if hasDefault {
+		return defaultVal
+	}
+	return ""
 }
 
 // shellEscapeValue formats val for safe interpolation into a sh -c command.

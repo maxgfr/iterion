@@ -34,7 +34,20 @@ func ParseRefs(s string) ([]*Ref, error) {
 }
 
 // parseRef parses a single template expression like "outputs.node.field".
+//
+// A leading `!` flags the reference as "unquoted" (raw substitution) for
+// tool command rendering. `{{!input.cmd}}` substitutes input.cmd verbatim
+// into the resolved shell command instead of running through shellEscape.
+// The bang prefix is stripped before namespace parsing so the rest of the
+// expression behaves exactly as without it. The flag has no effect on
+// non-shell template contexts (prompts, edge data mappings) — they always
+// render values via formatValue.
 func parseRef(expr, raw string) (*Ref, error) {
+	unquoted := false
+	if strings.HasPrefix(expr, "!") {
+		unquoted = true
+		expr = strings.TrimSpace(expr[1:])
+	}
 	parts := strings.Split(expr, ".")
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("invalid reference %q: expected namespace.path", raw)
@@ -63,8 +76,9 @@ func parseRef(expr, raw string) (*Ref, error) {
 	}
 
 	return &Ref{
-		Kind: kind,
-		Path: path,
-		Raw:  raw,
+		Kind:     kind,
+		Path:     path,
+		Raw:      raw,
+		Unquoted: unquoted,
 	}, nil
 }
