@@ -520,6 +520,35 @@ prompt review_system:
   {{input.prior_pushback_justification}}. Do NOT re-flag them
   unless new evidence has emerged.
 
+  REQUIRED JSON OUTPUT SCHEMA (use these EXACT field names — no
+  aliases, no nested objects). Your final message MUST be a single
+  fenced ```json block containing one object with all 6 fields:
+    approved       bool      — true iff the diff is shippable as-is.
+                               When the diff is empty (no upgrades
+                               this iteration), still return true
+                               with `blockers: []` and `fix_plan: ""`.
+    family         string    — one of: "claude", "gpt". Set this to
+                               match your assigned family (the user
+                               prompt will tell you which).
+    blockers       string[]  — short bullet-style descriptions of
+                               each blocking issue. Empty array when
+                               approved=true.
+    fix_plan       string    — short free-form text describing what
+                               the fixer should change to address the
+                               blockers. Empty string when
+                               approved=true.
+    confidence     string    — one of: "low", "medium", "high".
+                               See definitions above.
+    scanned_areas  string[]  — short labels of the surfaces you
+                               actually inspected (e.g. "lockfile
+                               coherence", "yarn.lock", "tsconfig",
+                               "ci workflows"). Empty array on a
+                               no-diff iteration.
+
+  Do NOT use field aliases like `verdict`, `notes`, `recommendation`,
+  `issues`, or `summary` — those will be REJECTED by schema
+  validation. Stick to the 6 field names listed above.
+
   ### Project context (operator)
   {{vars.user_prompt}}
 
