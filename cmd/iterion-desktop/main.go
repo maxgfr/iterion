@@ -11,6 +11,15 @@ import (
 )
 
 func main() {
+	// Source ~/.iterion/env (or $ITERION_ENV_FILE) BEFORE the editor
+	// server starts so provider credentials a launching shell didn't
+	// export are still available to the runtime — notably so
+	// ClawBackend.executeViaSandboxRunner can forward OPENAI_API_KEY
+	// and friends into the sandbox runner. .desktop-launched runs
+	// have no shell to source ~/.bashrc; this is the file-based
+	// equivalent for that path.
+	loadIterionEnvFile()
+
 	// Prime GTK with the system's color-scheme preference (Linux only)
 	// before Wails boots the GTK runtime. No-op on macOS / Windows.
 	applyLinuxSystemTheme()
