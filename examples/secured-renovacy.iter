@@ -170,6 +170,31 @@ prompt detect_stack_system:
       strict peerDependencies, presence of a pre-commit hook that
       may rewrite commits).
 
+  REQUIRED JSON OUTPUT SCHEMA (use these EXACT field names — no
+  aliases, no nested objects). Your final message MUST be a single
+  fenced ```json block containing one object with all 9 fields:
+    pkg_manager   string  — one of: yarn, npm, pnpm, bun, cargo,
+                            pip, poetry, uv, bundler, composer,
+                            maven, gradle, mix, go.
+    repo_kind     string  — "monorepo" if package.json declares
+                            workspaces (or equivalent), else
+                            "single".
+    workspaces    string[]— relative sub-package directories;
+                            empty array for single-repo.
+    outdated_cmd  string  — see CRITICAL command-shape rules above.
+    upgrade_cmd   string  — TEMPLATE that the workflow appends a
+                            single ` <pkg>@<version>` argument to.
+    install_cmd   string  — fresh install command after an upgrade.
+    audit_cmd     string  — security audit command emitting JSON.
+    lock_files    string[]— absolute or repo-relative lockfile
+                            paths.
+    notes         string  — short free-form text. Empty string OK.
+
+  Do NOT use field aliases like `manager`, `manager_version`,
+  `node_engine`, `monorepo` (boolean), or `manager_pinned_via` —
+  those will be REJECTED by schema validation. Stick to the 9
+  field names listed above.
+
   ### Project context (operator)
   {{vars.user_prompt}}
 
