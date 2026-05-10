@@ -132,35 +132,57 @@ prompt detect_stack_system:
        JSON or easily-parsed output. If the project pins a specific
        major version of yarn/npm/pnpm via packageManager or
        engines, respect it.
-    4. If the user provided overrides via vars
+    4. **VERIFY each command empirically before returning it.**
+       Use bash to actually run your candidate `outdated_cmd` and
+       `audit_cmd` against the repo. Inspect the output:
+         - outdated_cmd MUST exit 0 (or near-0 with usable
+           stdout) AND produce a JSON array of objects shaped
+           `{name, current, target, risk?}` on stdout. If the
+           array is empty, that's only acceptable when the
+           project is genuinely up-to-date — verify by spot-
+           checking one or two dependency versions in
+           package.json against the registry (e.g. `npm view
+           <name> version`). If the output is an error, the
+           wrong shape, or empty due to tool failure, ITERATE:
+           pick a different approach and re-test until the
+           command actually returns the upgrades the repo has.
+         - audit_cmd MUST exit 0/1 (1 is fine for "vulns
+           found") and produce parseable JSON or NDJSON. Same
+           verification loop on failure.
+       Treat your first guess as a hypothesis, not the answer.
+       Many ecosystem tools have surprising failure modes
+       (yarn 3+ has no native `outdated`; npm-check-updates
+       output shape varies by flag combination; jq pipelines
+       break silently when stdin isn't an array; etc.) — test
+       what actually works on this repo, not what the docs say
+       should work.
+    5. If the user provided overrides via vars
        (override_outdated_cmd, override_install_cmd,
-       override_upgrade_cmd, override_audit_cmd), USE THEM verbatim
-       and ignore your own derivation for that field. Empty string
+       override_upgrade_cmd, override_audit_cmd), USE THEM
+       verbatim and skip steps 3-4 for that field. Empty string
        means no override.
 
-  CRITICAL command-shape rules:
+  CRITICAL command-shape contracts (the workflow consumes these
+  literally — derived commands must satisfy them):
     - outdated_cmd: produces a JSON array on stdout with at least
-      {name, current, target} per entry. If the native tool emits
-      another shape, wrap it with jq. Each entry SHOULD also expose
-      `risk` ∈ {patch, minor, major} when derivable from semver
-      diff; emit "unknown" otherwise. Suggested wrappers:
-        yarn 4: yarn outdated --json | jq -c '[.[] | {name:.name,current:.current,target:.latest}]'
-        npm:    npm outdated --json | jq -c '[to_entries[] | {name:.key,current:.value.current,target:.value.latest}]'
-        pnpm:   pnpm outdated --format json | jq -c '...'
-        cargo:  cargo outdated --format=json | jq -c '...'
-        poetry: poetry show -o --no-ansi | awk ...
+      `{name, current, target}` per entry. Each entry SHOULD also
+      expose `risk` ∈ {patch, minor, major} when derivable from a
+      semver diff; emit "unknown" otherwise. The workflow will
+      `( <outdated_cmd> ) 2>&1 || true` so partial-failure stderr
+      does not block the pipeline — but the JSON array must still
+      be the LAST `[...]` shape on stdout (the runtime extracts
+      `(arrays | first)`).
     - install_cmd: must run with --immutable=false equivalent —
       installing fresh after an upgrade.
     - upgrade_cmd: a TEMPLATE string that the workflow appends a
       single argument to, of the form `<pkg>@<target_version>`.
-      Example for yarn: `yarn up --exact` (workflow appends ` <pkg>@<v>`).
-    - audit_cmd: emits machine-readable security audit output. If
-      the native tool covers vulnerabilities only, prefer combining
-      with `osv-scanner` for malware detection. Suggested:
-        yarn 4: `yarn npm audit --json --severity moderate`
-        npm:    `npm audit --json`
-        cargo:  `cargo audit --json`
-        always: also try `npx --yes osv-scanner --lockfile=<lock>`
+      Example shape (NOT a verbatim instruction — derive what fits
+      the actual manager): `yarn up --exact` (workflow appends
+      ` <pkg>@<v>`).
+    - audit_cmd: emits machine-readable security audit output
+      (JSON or NDJSON). For ecosystems whose native auditor only
+      covers vulnerabilities, combine with a malware/SCA scanner
+      that DOES work on this repo's lockfile (verify it does).
     - lock_files: absolute or repo-relative paths to lock files
       relevant to security_audit.
     - workspaces: list of monorepo sub-package directories
@@ -168,7 +190,8 @@ prompt detect_stack_system:
     - notes: short free-form text capturing peculiarities the rest
       of the pipeline must respect (e.g., yarn resolutions block,
       strict peerDependencies, presence of a pre-commit hook that
-      may rewrite commits).
+      may rewrite commits, the verification approach you used to
+      validate outdated_cmd if it was non-obvious).
 
   REQUIRED JSON OUTPUT SCHEMA (use these EXACT field names — no
   aliases, no nested objects). Your final message MUST be a single
