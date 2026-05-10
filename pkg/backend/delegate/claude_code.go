@@ -216,7 +216,17 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 	defer cancelStream()
 	var pendingQuestion atomic.Value // string
 
-	if task.InteractionEnabled {
+	// Native ask_user is unsupported when the run is sandboxed. The MCP
+	// stdio server would point at the iterion binary's host path
+	// (os.Executable) which doesn't exist inside the container, and the
+	// claudesdk writes the resolved --mcp-config JSON to the host's /tmp
+	// — also invisible to `docker exec`. claude rejects the missing
+	// config file and exits before producing a result message. The
+	// system prompt's [INTERACTION PROTOCOL] suffix already carries a
+	// JSON-output fallback, so the LLM can still surface questions
+	// without the native tool. This mirrors the claw backend limitation
+	// announced via EventSandboxClawRoutedViaRunner.
+	if task.InteractionEnabled && task.Sandbox == nil {
 		if selfPath, err := os.Executable(); err == nil {
 			opts = append(opts, claudesdk.WithMCPServer(askUserMCPServerName, &claudesdk.MCPStdioServer{
 				Command: selfPath,
