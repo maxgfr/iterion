@@ -115,6 +115,26 @@ type foreignPrepared struct{}
 
 func (foreignPrepared) DriverName() string { return "not-docker" }
 
+// The docker driver must bind the network proxy on 0.0.0.0, not the
+// engine-default 127.0.0.1, because the container reaches the proxy via
+// host.docker.internal (resolved to host-gateway, e.g. 172.17.0.1) —
+// not the host's loopback. A 127.0.0.1 bind silently lands every
+// outbound HTTPS_PROXY connection in ECONNREFUSED, which surfaces in
+// claude as "API Error: Unable to connect to API (ConnectionRefused)".
+func TestProxyConfigBindsAllInterfaces(t *testing.T) {
+	d := &Driver{rt: RuntimeDocker}
+	bind, advertise, err := d.ProxyConfig()
+	if err != nil {
+		t.Fatalf("ProxyConfig: %v", err)
+	}
+	if bind != "0.0.0.0:0" {
+		t.Errorf("bind = %q, want 0.0.0.0:0 (loopback bind is unreachable from container via host.docker.internal)", bind)
+	}
+	if advertise != "host.docker.internal" {
+		t.Errorf("advertise = %q, want host.docker.internal", advertise)
+	}
+}
+
 // Run.Command must add `docker exec --interactive` whenever Stdin is
 // attached OR KeepStdinOpen is set. The latter exists for callers that
 // build the *exec.Cmd here and then attach stdin via cmd.StdinPipe()
