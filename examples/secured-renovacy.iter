@@ -1063,7 +1063,7 @@ judge reviewer_claude:
 judge reviewer_gpt:
   backend: "claw"
   model: "openai/${ITERION_RENOVACY_MODEL_GPT:-gpt-5.5}"
-  reasoning_effort: "${ITERION_RENOVACY_EFFORT_GPT:-max}"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_GPT:-xhigh}"
   input: review_input
   output: review_verdict
   system: review_system
@@ -1100,7 +1100,7 @@ agent fix_claude:
 agent fix_gpt:
   backend: "claw"
   model: "openai/${ITERION_RENOVACY_MODEL_GPT:-gpt-5.5}"
-  reasoning_effort: "${ITERION_RENOVACY_EFFORT_GPT:-max}"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_GPT:-xhigh}"
   input: review_fix_input
   output: review_fix_result
   system: fix_system
