@@ -326,8 +326,12 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 	}
 
 	// Two-pass execution: when tools + schema are both present, Pass 1 output
-	// is free-form text. We always run Pass 2 with WithOutputFormat to guarantee
-	// structured output conforming to the schema via session resume.
+	// is free-form text. We try Pass 2 (WithOutputFormat via session resume)
+	// to get a guaranteed-structured output, but FIRST we keep Pass 1's parse
+	// as a baseline so a Pass 2 failure (e.g. sandboxed runs where the host
+	// claude can't resume the in-container session: "No conversation found")
+	// can fall back to it instead of dropping the agent's work entirely.
+	pass1Output, pass1RawLen, pass1Fallback := parseSDKOutput(rm.Result, rm.StructuredOutput, task.OutputSchema)
 	if needsTwoPass && rm.SessionID != "" {
 		const maxFmtAttempts = 2
 		for attempt := 1; attempt <= maxFmtAttempts; attempt++ {
@@ -352,6 +356,16 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 				b.Logger.Warn("claude-code [formatting pass %d/%d] produced fallback text, retrying", attempt, maxFmtAttempts)
 				continue
 			}
+			// Pass 2 produced empty output (typical for sandboxed runs where
+			// the host claude can't resume the in-container session). Use
+			// Pass 1's parse if it has anything usable rather than failing
+			// the run with no output at all.
+			if len(output) == 0 && len(pass1Output) > 0 {
+				b.Logger.Warn("claude-code [formatting pass %d/%d] produced empty output — falling back to Pass 1 parse (%d chars)", attempt, maxFmtAttempts, pass1RawLen)
+				output = pass1Output
+				rawLen = pass1RawLen
+				fallback = pass1Fallback
+			}
 			result.Output = output
 			result.RawOutputLen = rawLen
 			result.ParseFallback = fallback
@@ -360,7 +374,9 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 		}
 	}
 
-	output, rawLen, fallback := parseSDKOutput(rm.Result, rm.StructuredOutput, task.OutputSchema)
+	// Single-pass path: same parse, distinct call so the variables aren't
+	// shadowed across the two-pass branch above.
+	output, rawLen, fallback := pass1Output, pass1RawLen, pass1Fallback
 	result.Output = output
 	result.RawOutputLen = rawLen
 	result.ParseFallback = fallback
