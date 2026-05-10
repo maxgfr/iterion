@@ -476,7 +476,15 @@ func (b *ClawBackend) executeViaSandboxRunner(ctx context.Context, task delegate
 	// expected to ship `iterion` on PATH (the production Dockerfile
 	// installs it; bind-mount workflows on local hosts can mount
 	// the host binary into /usr/local/bin/iterion when arches match).
-	cmd := run.Command(ctx, []string{"iterion", "__claw-runner"}, sandbox.ExecOpts{})
+	//
+	// KeepStdinOpen tells the docker driver to add `--interactive`
+	// to the docker exec invocation. Without it, the container's
+	// stdin is closed before we get to wire cmd.StdinPipe() below,
+	// the runner reads EOF on its very first envelope read, and
+	// dies with "read pre-task envelope: EOF (exit: exit status 1)"
+	// — the same class of failure the claudesdk Session path hit
+	// before 0ab267c.
+	cmd := run.Command(ctx, []string{"iterion", "__claw-runner"}, sandbox.ExecOpts{KeepStdinOpen: true})
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
