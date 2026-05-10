@@ -517,6 +517,19 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 	sess := claudesdk.NewSession(opts...)
 	defer func() { _ = sess.Close() }()
 
+	// silentExitErr enriches the "session ended without result message" error
+	// with the CLI's exit code when available. The bare error is useless for
+	// diagnosing why claude died — closing the session forces cmd.Wait() to
+	// resolve so ExitCode is populated. Exit 0 means claude exited cleanly
+	// without surfacing a result (e.g. unhandled internal error before init,
+	// auth pre-flight rejection); non-zero means it crashed (e.g. 127 = "exec
+	// not found in container PATH" surfaced by docker exec, signal exits
+	// reported as 128+signum).
+	silentExitErr := func() error {
+		_ = sess.Close()
+		return fmt.Errorf("claude session ended without result message (cli_exit_code=%d)", sess.ExitCode())
+	}
+
 	if err := sess.Send(ctx, prompt); err != nil {
 		return nil, err
 	}
@@ -587,7 +600,7 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 			if !ok {
 				// Stream closed without surfacing an error.
 				if result == nil {
-					return nil, fmt.Errorf("claude session ended without result message")
+					return nil, silentExitErr()
 				}
 				return result, nil
 			}
