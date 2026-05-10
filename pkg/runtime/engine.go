@@ -78,6 +78,7 @@ type Engine struct {
 	validateOutputs     bool                  // when true, validate node outputs against declared schemas
 	forceResume         bool                  // when true, skip workflow hash check on resume
 	workDir             string                // working directory for subprocesses + PROJECT_DIR expansion; defaults to os.Getwd() at Run() time
+	containerWorkspace  string                // when sandbox is active, the in-container path the host workDir is bind-mounted to (e.g. "/workspace"); used to remap ${PROJECT_DIR} so prompts and tool nodes see paths the in-container processes can actually open
 	sandboxOverride     string                // CLI/Launch-level sandbox mode override; "" means "no override" (workflow + global default win); set via WithSandboxOverride
 	sandboxDefault      string                // global ITERION_SANDBOX_DEFAULT value snapshot; set via WithSandboxDefault
 	sandboxDefaultImage string                // image ref used as fallback when sandbox: auto and no .devcontainer/devcontainer.json is found; "" lets the runtime pick the built-in pinned to the iterion version; set via WithSandboxDefaultImage
@@ -515,8 +516,17 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 		if s, ok := e.executor.(sandboxSetter); ok {
 			s.SetSandbox(active.run)
 		}
+		// Stash the in-container bind-mount target so resolveVars can
+		// remap ${PROJECT_DIR} to a path that processes RUNNING in
+		// the sandbox can actually open. Without this, tool nodes
+		// like `git -C ${PROJECT_DIR}` get a host worktree path
+		// (/home/<user>/.iterion/.../worktrees/run_xxx) which the
+		// container has no view of, and fail with ENOENT — the
+		// failure mode that broke capture_start_sha after detect_stack
+		// finally landed structured output.
+		e.containerWorkspace = active.workspaceFolder
 		if e.logger != nil {
-			e.logger.Info("runtime: sandbox active (driver=%s)", active.run.Driver())
+			e.logger.Info("runtime: sandbox active (driver=%s, workspace=%s)", active.run.Driver(), active.workspaceFolder)
 		}
 	}
 
@@ -1221,6 +1231,17 @@ func (e *Engine) resolveVars(inputs map[string]interface{}) map[string]interface
 	// whether it came from the workflow default or the form input.
 	expandFn := func(key string) string {
 		if key == "PROJECT_DIR" {
+			// In sandbox mode, ${PROJECT_DIR} must resolve to the
+			// in-container bind-mount target (e.g. /workspace), not
+			// the host worktree path. Tool nodes and prompts using
+			// this var are consumed by processes RUNNING inside the
+			// container — they cannot open /home/<host-user>/...
+			// paths because they're not mounted there. The container
+			// workspace IS the host worktree, just at a different
+			// pathname.
+			if e.containerWorkspace != "" {
+				return e.containerWorkspace
+			}
 			return e.workDir
 		}
 		return os.Getenv(key)
