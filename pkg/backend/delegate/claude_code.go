@@ -67,8 +67,24 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 	if systemPrompt != "" {
 		opts = append(opts, claudesdk.WithSystemPrompt(systemPrompt))
 	}
-	if task.WorkDir != "" {
+	// Cwd handling differs by sandbox state. On the host (no sandbox)
+	// we pass the workdir straight through to claudesdk → cmd.Dir.
+	// In the sandbox it's the host worktree path that doesn't exist
+	// inside the container — the docker driver's Command falls back
+	// to the spec's WorkspaceFolder (the bind-mount target) when
+	// Cwd is empty, which is the path we actually want.
+	if task.WorkDir != "" && task.Sandbox == nil {
 		opts = append(opts, claudesdk.WithCwd(task.WorkDir))
+	}
+	// Same lifetime trade-off for the CLI binary path: the SDK's
+	// default exec.LookPath("claude") runs on the host and returns
+	// the operator's host path (e.g. /home/jo/.local/bin/claude).
+	// Forwarded into a `docker exec` invocation that path doesn't
+	// exist inside the container, and claude exits silently with
+	// "session ended without result message" upstream. Pin to the
+	// bare name so the in-container PATH lookup wins.
+	if task.Sandbox != nil {
+		opts = append(opts, claudesdk.WithCLIPath("claude"))
 	}
 	if len(task.AllowedTools) > 0 {
 		opts = append(opts, claudesdk.WithAllowedTools(task.AllowedTools...))
