@@ -99,9 +99,23 @@ func runClawRunner(ctx context.Context, stdin io.Reader, stdout, stderr io.Write
 	task := delegate.FromIOTask(ioTask)
 	// Sandbox is intentionally nil — we ARE the sandbox now.
 	task.Sandbox = nil
-	// V2-2: hydrate task.ToolDefs from the wire-form IOToolDef list,
-	// wrapping each in a proxy that forwards execution to the launcher.
-	task.ToolDefs = makeProxyToolDefs(ioTask.ToolDefs, dispatcher)
+	// V2-2 (refined): builtins (bash, read_file, glob, grep, file_edit,
+	// web_fetch, write_file) execute LOCALLY inside the runner so their
+	// filesystem effects land on the sandbox bind-mount, not on the
+	// launcher's host cwd. Everything else (MCP tools, ask_user, custom
+	// engine-side tools) still IPC-proxies back to the launcher.
+	//
+	// Without this hybrid, a sandboxed `bash ls` from an LLM ran in the
+	// launcher process's cwd — typically a wholly unrelated host
+	// directory — and recipe runs that wrote files (commit_changes
+	// downstream, fix_after_upgrade scaffolding, etc.) clobbered the
+	// operator's environment instead of the run worktree. Worst observed
+	// case: a `git clone` issued by an LLM "fixer" wiped the host cwd
+	// (see SESSION-CONTINUITY trash post-mortem).
+	workspace, _ := os.Getwd() // docker exec --workdir lands us at the
+	// bind-mount target (default /workspace); fall back gracefully when
+	// Getwd fails — bash/read_file relative paths still work via cwd.
+	task.ToolDefs = makeHybridToolDefs(ioTask.ToolDefs, dispatcher, workspace, stderr)
 
 	// V2-4: build a local session store, seed it from any
 	// session_replay snapshots the launcher sent, and wire a sink that
