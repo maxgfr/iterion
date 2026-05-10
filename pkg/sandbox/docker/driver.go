@@ -62,6 +62,26 @@ func (d *Driver) WithLogger(l *iterlog.Logger) *Driver {
 // Name returns the underlying runtime ("docker" or "podman").
 func (d *Driver) Name() string { return string(d.rt) }
 
+// Compile-time guard: Driver satisfies the optional ProxyConfigurer
+// interface so the engine routes proxyAddressesForDriver to ProxyConfig
+// instead of the loopback-only fallback (which is unreachable from a
+// container via host.docker.internal).
+var _ sandbox.ProxyConfigurer = (*Driver)(nil)
+
+// ProxyConfig binds the network proxy on all interfaces and advertises
+// the canonical "host.docker.internal" alias (which we wire via
+// --add-host host-gateway in Start). The default bind 127.0.0.1 only
+// listens on the host's loopback, but Docker's host-gateway resolves to
+// the bridge IP (e.g. 172.17.0.1 on Linux), so the container's outbound
+// CONNECTs land on a different interface and get ECONNREFUSED. Binding
+// 0.0.0.0 covers both. The proxy enforces per-run bearer-token auth on
+// every request, so this doesn't open it to unauthenticated host
+// processes — only the sibling sandbox container that received the
+// token in HTTPS_PROXY can use it.
+func (d *Driver) ProxyConfig() (string, string, error) {
+	return "0.0.0.0:0", "host.docker.internal", nil
+}
+
 // Capabilities advertises the features the driver supports today.
 // Phase 1 implements image, mounts, env, remote user, and post-create.
 // V2-6 adds Build (Dockerfile-at-run-start) via `docker buildx build`
