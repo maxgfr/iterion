@@ -241,6 +241,16 @@ type ExecOpts struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+
+	// KeepStdinOpen tells container-runtime drivers to allocate a
+	// forwarded stdin (e.g. `docker exec --interactive`) even when
+	// Stdin is nil. Callers that build the *exec.Cmd via Run.Command
+	// and then attach stdin themselves via cmd.StdinPipe() — notably
+	// the claudesdk Session path through CommandBuilder — must set
+	// this so the runtime doesn't close stdin on the child before the
+	// pipe is wired. Ignored by drivers without an interactive flag
+	// (noop just respects Stdin directly).
+	KeepStdinOpen bool
 }
 
 // ExecResult captures the outcome of [Run.Exec].

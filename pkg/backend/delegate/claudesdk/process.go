@@ -221,7 +221,7 @@ func spawnProcess(ctx context.Context, cliPath string, args []string, opts spawn
 		// Sandbox-routed path: the builder owns Cwd/Env propagation
 		// (typically via --workdir / --env flags to `docker exec`),
 		// so the SDK does not apply them to the returned cmd.
-		cmd = opts.CommandBuilder(ctx, cliPath, args, opts.Cwd, opts.Env)
+		cmd = opts.CommandBuilder(ctx, cliPath, args, opts.Cwd, opts.Env, opts.OpenStdin)
 		if cmd == nil {
 			return nil, fmt.Errorf("claude: CommandBuilder returned nil cmd")
 		}
