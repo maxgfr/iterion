@@ -163,6 +163,21 @@ func (s *Session) Stream(ctx context.Context) iter.Seq2[Message, error] {
 	}
 }
 
+// ExitCode returns the CLI subprocess's exit code after it has terminated.
+// Returns -1 when the process never started, when ProcessState is not yet
+// populated (call Close first), or when the process was killed by a signal.
+// Useful for diagnosing silent failures where Stream closes without yielding
+// a ResultMessage and we need to know whether the CLI exited cleanly (0) or
+// crashed.
+func (s *Session) ExitCode() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.proc == nil {
+		return -1
+	}
+	return s.proc.exitCode()
+}
+
 // Close shuts down the session and its subprocess.
 func (s *Session) Close() error {
 	s.mu.Lock()
