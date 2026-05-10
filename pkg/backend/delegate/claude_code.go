@@ -130,18 +130,25 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 	// application when a builder is set.
 	if task.Sandbox != nil {
 		run := task.Sandbox
-		opts = append(opts, claudesdk.WithCommandBuilder(func(ctx context.Context, path string, args []string, cwd string, env map[string]string) *exec.Cmd {
+		opts = append(opts, claudesdk.WithCommandBuilder(func(ctx context.Context, path string, args []string, cwd string, env map[string]string, openStdin bool) *exec.Cmd {
 			if b.Logger != nil {
 				// Surface the resolved CLI invocation so failures like
 				// "session ended without result" can be traced back to a
 				// concrete `docker exec` command. Without this every
 				// silent claude exit is opaque even with stderr capture.
 				preview := append([]string{path}, args...)
-				b.Logger.Info("claude-code: exec %v (cwd=%s, env_keys=%d)", preview, cwd, len(env))
+				b.Logger.Info("claude-code: exec %v (cwd=%s, env_keys=%d, stdin=%v)", preview, cwd, len(env), openStdin)
 			}
+			// KeepStdinOpen mirrors the SDK's OpenStdin flag so the docker
+			// driver adds `--interactive` to docker exec. Without this,
+			// Session-mode (NDJSON over stdin) silently fails: the SDK
+			// later wires cmd.StdinPipe() but docker has already closed
+			// stdin on the child, claude reads EOF, and exits 0 with no
+			// output — matching the cli_exit_code=0 silent-failure path.
 			return run.Command(ctx, append([]string{path}, args...), sandbox.ExecOpts{
-				WorkDir: cwd,
-				Env:     env,
+				WorkDir:       cwd,
+				Env:           env,
+				KeepStdinOpen: openStdin,
 			})
 		}))
 	}

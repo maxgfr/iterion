@@ -249,7 +249,7 @@ func (r *Run) Command(ctx context.Context, cmd []string, opts sandbox.ExecOpts) 
 	}
 
 	args := []string{"exec"}
-	if opts.Stdin != nil {
+	if opts.Stdin != nil || opts.KeepStdinOpen {
 		args = append(args, "--interactive")
 	}
 	workDir := opts.WorkDir

@@ -13,7 +13,7 @@ import (
 // This guards against the regression where bb95150's WithCLIPath("claude")
 // was rejected because the host had no ./claude file.
 func TestResolveCLIPath_SandboxRoutedSkipsHostValidation(t *testing.T) {
-	cb := func(ctx context.Context, path string, args []string, cwd string, env map[string]string) *exec.Cmd {
+	cb := func(ctx context.Context, path string, args []string, cwd string, env map[string]string, openStdin bool) *exec.Cmd {
 		return exec.CommandContext(ctx, "true")
 	}
 	cfg := applyOptions([]Option{
@@ -33,7 +33,7 @@ func TestResolveCLIPath_SandboxRoutedSkipsHostValidation(t *testing.T) {
 // Same path with no explicit cliPath: defaults to "claude" so the container
 // PATH lookup wins. Host-side findCLI must NOT be consulted.
 func TestResolveCLIPath_SandboxRoutedDefaultsToClaude(t *testing.T) {
-	cb := func(ctx context.Context, path string, args []string, cwd string, env map[string]string) *exec.Cmd {
+	cb := func(ctx context.Context, path string, args []string, cwd string, env map[string]string, openStdin bool) *exec.Cmd {
 		return exec.CommandContext(ctx, "true")
 	}
 	cfg := applyOptions([]Option{WithCommandBuilder(cb)})

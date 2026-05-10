@@ -114,3 +114,46 @@ func TestStartRejectsForeignPreparedSpec(t *testing.T) {
 type foreignPrepared struct{}
 
 func (foreignPrepared) DriverName() string { return "not-docker" }
+
+// Run.Command must add `docker exec --interactive` whenever Stdin is
+// attached OR KeepStdinOpen is set. The latter exists for callers that
+// build the *exec.Cmd here and then attach stdin via cmd.StdinPipe()
+// after the fact (claudesdk Session via CommandBuilder); without the
+// flag, docker closes the child's stdin before the pipe is wired and
+// the in-container CLI exits silently with no result.
+func TestRunCommandKeepStdinOpenAddsInteractiveFlag(t *testing.T) {
+	d := &Driver{rt: RuntimeDocker}
+	r := &Run{
+		driver:      d,
+		containerID: "deadbeef",
+		prepared: &Prepared{
+			workspace: "/workspace",
+			spec:      sandbox.Spec{},
+			runtime:   RuntimeDocker,
+		},
+	}
+
+	cases := []struct {
+		name string
+		opts sandbox.ExecOpts
+		want bool
+	}{
+		{"empty opts", sandbox.ExecOpts{}, false},
+		{"keep stdin open", sandbox.ExecOpts{KeepStdinOpen: true}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := r.Command(context.Background(), []string{"true"}, tc.opts)
+			got := false
+			for _, a := range cmd.Args {
+				if a == "--interactive" {
+					got = true
+					break
+				}
+			}
+			if got != tc.want {
+				t.Errorf("--interactive present=%v, want %v; args=%v", got, tc.want, cmd.Args)
+			}
+		})
+	}
+}

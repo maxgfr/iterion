@@ -22,7 +22,16 @@ import (
 //
 // Stdin/Stdout/Stderr on the returned cmd are wired by claudesdk
 // after this function returns; builders should not set them.
-type CommandBuilder func(ctx context.Context, path string, args []string, cwd string, env map[string]string) *exec.Cmd
+//
+// openStdin signals whether the SDK will subsequently call
+// cmd.StdinPipe() to feed NDJSON to the CLI. Builders that route
+// through a container runtime MUST keep stdin forwarded (e.g.
+// `docker exec --interactive`) when this is true, otherwise the
+// runtime closes the child's stdin and the CLI exits cleanly with
+// no result message — the failure mode that motivated this flag.
+// false means one-shot Prompt() mode (prompt is a CLI argument,
+// stdin will be /dev/null).
+type CommandBuilder func(ctx context.Context, path string, args []string, cwd string, env map[string]string, openStdin bool) *exec.Cmd
 
 // Option configures a Session or Prompt call.
 type Option func(*config)
