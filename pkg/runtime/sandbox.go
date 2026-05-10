@@ -34,8 +34,9 @@ import (
 // that backs it. Both lifecycle handles are owned by the engine and
 // must be shut down on Run() exit.
 type activeSandbox struct {
-	run   sandbox.Run
-	proxy *netproxy.Proxy
+	run             sandbox.Run
+	proxy           *netproxy.Proxy
+	workspaceFolder string // in-container path the host worktree is bind-mounted to (Spec.WorkspaceFolder, e.g. "/workspace"); used by Engine to remap ${PROJECT_DIR}
 }
 
 // shutdown tears down both handles best-effort. Safe to call multiple
@@ -197,7 +198,7 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 		if err != nil {
 			return nil, fmt.Errorf("runtime: sandbox: noop start: %w", err)
 		}
-		return &activeSandbox{run: run}, nil
+		return &activeSandbox{run: run, workspaceFolder: spec.WorkspaceFolder}, nil
 	}
 
 	// Optionally start the network proxy. When the workflow has no
@@ -289,7 +290,7 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 		"image":           resolvedImage,
 		"has_post_create": spec.PostCreate != "",
 	})
-	return &activeSandbox{run: run, proxy: proxy}, nil
+	return &activeSandbox{run: run, proxy: proxy, workspaceFolder: spec.WorkspaceFolder}, nil
 }
 
 // startNetworkProxy compiles the spec's network policy (with sensible
