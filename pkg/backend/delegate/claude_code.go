@@ -578,6 +578,16 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 	// or other long tool calls).
 	receivedAny := false
 	var result *claudesdk.ResultMessage
+	// Pass-1 fallback: claude-code's stream-json output sometimes
+	// emits the final `result` event with an empty `result` text
+	// (only token/duration metadata), even when the assistant
+	// produced a substantive final message. Track the last text
+	// content from any AssistantMessage so parseSDKOutput can fall
+	// back to it when ResultMessage.Result is empty — critical for
+	// sandboxed runs where the formatOutput Pass 2 can't recover
+	// (the in-container session is unreachable from the host
+	// claude that runs the formatting prompt).
+	var lastAssistantText string
 	currentTimeout := coldTimeout
 	idle := time.NewTimer(currentTimeout)
 	defer idle.Stop()
@@ -609,6 +619,18 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 				if result == nil {
 					return nil, silentExitErr()
 				}
+				// Backfill an empty Result with the captured last
+				// assistant text. This is the load-bearing recovery
+				// for sandboxed agents that produce structured JSON
+				// in their final assistant message but emit a result
+				// event with no `result` text — observed on Opus 4.7
+				// xhigh + tools, where claude-code seems to defer
+				// the final text to a separate AssistantMessage and
+				// the result event carries only stats.
+				if (result.Result == nil || *result.Result == "") && lastAssistantText != "" {
+					txt := lastAssistantText
+					result.Result = &txt
+				}
 				return result, nil
 			}
 			if it.err != nil {
@@ -634,11 +656,27 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 			case *claudesdk.AssistantMessage:
 				if m.Message != nil {
 					logAssistantContent(b.Logger, task.NodeID, m.Message.Content)
+					// Capture the latest non-empty text block — the
+					// final assistant message is what the LLM intended
+					// as its "answer" and is where it puts the JSON
+					// when the recipe asks for one. Overwriting on
+					// each AssistantMessage means we always end with
+					// the most recent text, mirroring how a human
+					// reads the conversation.
+					for _, block := range m.Message.Content {
+						if tb, ok := block.(*claudesdk.TextBlock); ok && tb.Text != "" {
+							lastAssistantText = tb.Text
+						}
+					}
 				}
 			case *claudesdk.UserMessage:
 				b.Logger.Debug("[%s/claude-code] 👤 user message echoed back", task.NodeID)
 			case *claudesdk.ResultMessage:
 				result = m
+				if (result.Result == nil || *result.Result == "") && lastAssistantText != "" {
+					txt := lastAssistantText
+					result.Result = &txt
+				}
 			default:
 				if it.msg != nil {
 					b.Logger.Debug("[%s/claude-code] 📨 %T message", task.NodeID, it.msg)
