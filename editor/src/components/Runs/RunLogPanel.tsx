@@ -7,6 +7,7 @@ import { IconButton, Input, Popover } from "@/components/ui";
 import { desktop, isDesktop } from "@/lib/desktopBridge";
 import { formatBytes } from "@/lib/format";
 import { useRunStore } from "@/store/run";
+import { useUIStore } from "@/store/ui";
 
 import { ThinkingFooter } from "./ThinkingFooter";
 
@@ -193,6 +194,30 @@ export default function RunLogPanel({ runId, subscribeLogs, unsubscribeLogs, onC
             leadingIcon={<span className="text-[10px]">⌕</span>}
           />
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            void (async () => {
+              try {
+                const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/log`, {
+                  credentials: "include",
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const text = await res.text();
+                await navigator.clipboard.writeText(text);
+                useUIStore.getState().addToast("Log copied to clipboard", "success");
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error("[RunLogPanel] copy log failed:", err);
+                useUIStore.getState().addToast("Copy failed", "error");
+              }
+            })();
+          }}
+          className="text-[10px] text-fg-subtle hover:text-fg-default underline"
+          title="Copy the full run.log to the clipboard"
+        >
+          copy
+        </button>
         <button
           type="button"
           onClick={() => {
