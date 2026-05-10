@@ -139,6 +139,24 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 		}
 	}
 
+	// When the workflow uses claw nodes, route them through the
+	// iterion-claw-runner sub-process inside the sandbox. The runner
+	// is the same iterion binary, invoked via `iterion __claw-runner`
+	// from the container — so the binary must be reachable on the
+	// container PATH. Production sandbox images bake iterion in, but
+	// local-host iteration with the slim image needs a bind-mount of
+	// the host binary at /usr/local/bin/iterion. Skip silently when no
+	// host binary can be located (the existing
+	// "exec: iterion: executable file not found" error from the runner
+	// invocation will then surface the gap clearly).
+	if wf != nil && containsClawNode(wf) {
+		if hostBin := locateHostIterionBinary(); hostBin != "" {
+			spec.Mounts = append(spec.Mounts,
+				fmt.Sprintf("source=%s,target=/usr/local/bin/iterion,type=bind,readonly", hostBin),
+			)
+		}
+	}
+
 	// When a worktree is active AND the host repo's .git lives outside
 	// the bind-mounted workspace (the common case: worktrees are stored
 	// under the iterion data dir, not inside the source repo), bind-
@@ -644,6 +662,42 @@ func backendIsClaw(name string) bool {
 // with iterion.
 func defaultDriverRegistry() map[string]sandbox.DriverConstructor {
 	return registry.Default()
+}
+
+// locateHostIterionBinary finds an `iterion` executable on the host
+// suitable for bind-mounting into a sandbox container. Search order:
+//
+//  1. Sibling of the running executable (covers `dpkg -i` installs
+//     where iterion-desktop and iterion live in the same /usr/bin
+//     and the operator launches iterion-desktop directly).
+//  2. ITERION_BIN env var override (escape hatch for unusual installs).
+//  3. /usr/local/bin/iterion → /usr/bin/iterion → ~/.local/bin/iterion
+//     (standard Linux install paths).
+//
+// Returns "" when no binary can be located — the caller falls back to
+// expecting the sandbox image to ship its own copy on PATH.
+func locateHostIterionBinary() string {
+	if exe, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(exe), "iterion")
+		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0 {
+			return candidate
+		}
+	}
+	if env := strings.TrimSpace(os.Getenv("ITERION_BIN")); env != "" {
+		if info, statErr := os.Stat(env); statErr == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0 {
+			return env
+		}
+	}
+	candidates := []string{"/usr/local/bin/iterion", "/usr/bin/iterion"}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, ".local", "bin", "iterion"))
+	}
+	for _, p := range candidates {
+		if info, statErr := os.Stat(p); statErr == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0 {
+			return p
+		}
+	}
+	return ""
 }
 
 // engineRepoRoot returns the path the sandbox should treat as the repo
