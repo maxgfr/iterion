@@ -125,10 +125,13 @@ func (a *App) onBeforeClose(ctx context.Context) bool {
 
 func (a *App) onShutdown(_ context.Context) {
 	// Order matters: stop the server first so in-flight runs flip to
-	// failed_resumable, then drop the single-instance lock.
+	// failed_resumable, then drop the single-instance lock. Clear the
+	// discovery file last so the iterion-control MCP doesn't keep
+	// pointing at a dead port after the desktop exits.
 	if a.server != nil {
 		a.server.Stop()
 	}
+	removeDesktopURLFile()
 	if a.instLock != nil {
 		_ = a.instLock.Release()
 	}
@@ -182,7 +185,9 @@ func (a *App) startServerForCurrentProject(ctx context.Context) error {
 	}
 	a.mu.Lock()
 	a.serverURL = "http://" + addr + "/"
+	url := a.serverURL
 	a.mu.Unlock()
+	writeDesktopURLFile(url)
 	return nil
 }
 
@@ -221,7 +226,9 @@ func (a *App) restartServerForCurrentProject(ctx context.Context) (*Project, err
 	}
 	a.mu.Lock()
 	a.serverURL = "http://" + addr + "/"
+	url := a.serverURL
 	a.mu.Unlock()
+	writeDesktopURLFile(url)
 	a.reloadWindowApp(ctx)
 	return current, nil
 }
