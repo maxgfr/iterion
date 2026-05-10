@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
+	"github.com/SocialGouv/iterion/pkg/backend/tool"
 )
 
 // proxyDispatcher is the runner-side counterpart to the launcher-side
@@ -242,6 +243,64 @@ func makeProxyToolDefs(defs []delegate.IOToolDef, d *proxyDispatcher) []delegate
 	out := make([]delegate.ToolDef, len(defs))
 	for i, td := range defs {
 		name := td.Name
+		out[i] = delegate.ToolDef{
+			Name:        name,
+			Description: td.Description,
+			InputSchema: td.InputSchema,
+			Execute: func(ctx context.Context, input json.RawMessage) (string, error) {
+				return d.callTool(ctx, name, input)
+			},
+		}
+	}
+	return out
+}
+
+// makeHybridToolDefs is makeProxyToolDefs's sandbox-aware sibling: for
+// each tool the launcher advertised, prefer in-runner LOCAL execution
+// when the name matches a builtin we can register against the
+// container's filesystem, and fall back to the IPC proxy otherwise.
+//
+// Why a hybrid: V2-2's pure-IPC proxy was correct for MCP routing
+// (only the launcher has those servers wired) but wrong for filesystem
+// builtins — a sandboxed `bash`/`read_file`/`file_edit` invoked from
+// the runner used to round-trip back to the launcher and execute on
+// the launcher's host cwd, blowing past the sandbox isolation entirely.
+// The post-mortem trash-clone of an LLM-driven `git clone` writing the
+// iterion repo into the operator's working directory was the failure
+// mode that made this a hard requirement.
+//
+// Builtins are registered locally with workspace = the runner's cwd
+// (docker exec sets it to the bind-mount target). Tools the launcher
+// advertised but whose names don't match the local builtin set keep
+// the IPC proxy: ask_user, MCP-prefixed tools, and any custom engine-
+// registered tool that depends on launcher state. Errors registering
+// the local set fall through to the all-proxy behaviour with a
+// stderr warning so the runner stays functional even if claw-code-go
+// adds a builtin we can't bind in this build.
+func makeHybridToolDefs(defs []delegate.IOToolDef, d *proxyDispatcher, workspace string, stderr io.Writer) []delegate.ToolDef {
+	if len(defs) == 0 {
+		return nil
+	}
+	localReg := tool.NewRegistry()
+	if err := tool.RegisterClawBuiltins(localReg, workspace); err != nil {
+		fmt.Fprintf(stderr, "iterion-claw-runner: warn: register local builtins (workspace=%q): %v — falling back to all-proxy\n", workspace, err)
+		return makeProxyToolDefs(defs, d)
+	}
+	out := make([]delegate.ToolDef, len(defs))
+	for i, td := range defs {
+		name := td.Name
+		if local, err := localReg.Resolve(name); err == nil && local != nil && local.Origin.Kind == tool.OriginBuiltin {
+			localExec := local.Execute
+			out[i] = delegate.ToolDef{
+				Name:        name,
+				Description: td.Description, // keep launcher's description verbatim — it carries any per-recipe wording
+				InputSchema: td.InputSchema, // and the launcher's schema is the contract the LLM was prompted against
+				Execute: func(ctx context.Context, input json.RawMessage) (string, error) {
+					return localExec(ctx, input)
+				},
+			}
+			continue
+		}
 		out[i] = delegate.ToolDef{
 			Name:        name,
 			Description: td.Description,
