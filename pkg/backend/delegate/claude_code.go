@@ -115,6 +115,14 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 	if task.Sandbox != nil {
 		run := task.Sandbox
 		opts = append(opts, claudesdk.WithCommandBuilder(func(ctx context.Context, path string, args []string, cwd string, env map[string]string) *exec.Cmd {
+			if b.Logger != nil {
+				// Surface the resolved CLI invocation so failures like
+				// "session ended without result" can be traced back to a
+				// concrete `docker exec` command. Without this every
+				// silent claude exit is opaque even with stderr capture.
+				preview := append([]string{path}, args...)
+				b.Logger.Info("claude-code: exec %v (cwd=%s, env_keys=%d)", preview, cwd, len(env))
+			}
 			return run.Command(ctx, append([]string{path}, args...), sandbox.ExecOpts{
 				WorkDir: cwd,
 				Env:     env,
