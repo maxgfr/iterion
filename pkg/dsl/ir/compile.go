@@ -909,7 +909,7 @@ func (c *compiler) compileTools() {
 			c.errorf(DiagBadTemplateRef, "tool %q: must declare either `command:` or `script:`", t.Name)
 		case t.Command != "" && t.Script != "":
 			c.errorf(DiagBadTemplateRef, "tool %q: `command:` and `script:` are mutually exclusive", t.Name)
-		case t.Command == "" && t.Language != "":
+		case t.Script == "" && t.Language != "":
 			// language without script makes no sense.
 			c.errorf(DiagBadTemplateRef, "tool %q: `language:` is only valid alongside `script:`", t.Name)
 		}
