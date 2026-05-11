@@ -200,12 +200,20 @@ type HumanNode struct {
 // NodeKind implements Node.
 func (n *HumanNode) NodeKind() NodeKind { return NodeHuman }
 
-// ToolNode executes a shell command directly (no LLM).
+// ToolNode executes a shell command or higher-level script directly (no LLM).
+//
+// A node carries EITHER Command (raw shell snippet, executed via `sh -c`)
+// OR Script (interpreter snippet, written to a temp file and executed
+// via the interpreter named by Language). Setting both is a compile-time
+// validation error; setting neither is also an error.
 type ToolNode struct {
 	BaseNode
 	SchemaFields
 	Command     string // command to execute, may contain {{...}} template refs
 	CommandRefs []*Ref // parsed template references in Command (resolved at runtime)
+	Script      string // script body (interpreter snippet); mutually exclusive with Command
+	ScriptRefs  []*Ref // parsed template references in Script
+	Language    string // interpreter for Script: "js"|"py"|"sh"|"bash" (empty defaults to "sh")
 	Session     SessionMode
 	AwaitMode   AwaitMode
 	Sandbox     *SandboxSpec // node-level sandbox override (nil = inherit workflow)

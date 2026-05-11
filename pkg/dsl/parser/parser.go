@@ -1274,6 +1274,12 @@ func (p *parser) parseToolNodeProp(td *ast.ToolNodeDecl, propTok Token) {
 	case TokenCommand:
 		p.expect(TokenColon)
 		td.Command = p.expectString()
+	case TokenScript:
+		p.expect(TokenColon)
+		td.Script = p.expectString()
+	case TokenLanguage:
+		p.expect(TokenColon)
+		td.Language = p.expectIdent()
 	case TokenInput:
 		p.expect(TokenColon)
 		td.Input = p.expectIdent()

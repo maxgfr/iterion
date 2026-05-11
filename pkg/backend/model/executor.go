@@ -10,6 +10,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -1369,6 +1370,12 @@ func extractJSON(text string) string {
 // The tool policy is checked before execution; denied tools produce an
 // explicit error with the tool_called hook fired (Error != nil).
 func (e *ClawExecutor) executeToolNode(ctx context.Context, node *ir.ToolNode, input map[string]interface{}) (map[string]interface{}, error) {
+	// `script:` body takes precedence over `command:` (IR validation
+	// ensures they're mutually exclusive at compile time, so this is
+	// just a clean dispatch).
+	if node.Script != "" {
+		return e.executeToolNodeScript(ctx, node, input)
+	}
 	// When the command contains template refs ({{input.X}}) or looks like a
 	// shell command (contains spaces or shell operators), execute as a direct
 	// shell command. Otherwise, use the tool registry.
@@ -1508,6 +1515,114 @@ func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNo
 	}
 
 	return output, nil
+}
+
+// executeToolNodeScript handles tool nodes declared with `script:` +
+// optional `language:`. The script body is resolved (template refs
+// substituted), written to a temp file inside the workspace, and
+// executed via the interpreter named by Language (defaulting to sh
+// when empty). The temp file lives in the workspace so it is visible
+// from inside the sandbox bind-mount, and is removed on success or
+// failure.
+func (e *ClawExecutor) executeToolNodeScript(ctx context.Context, node *ir.ToolNode, input map[string]interface{}) (map[string]interface{}, error) {
+	// Same env-then-substitution ordering as executeToolNodeShell: only
+	// the author-controlled `${NAME}` braces are env-expanded so injected
+	// values from inputs/vars stay inert.
+	expanded := expandBracedEnv(node.Script)
+	resolved := resolveCommandTemplate(expanded, node.ScriptRefs, input, e.vars)
+
+	interp, ext := scriptInterpreter(node.Language)
+	if interp == "" {
+		return nil, fmt.Errorf("model: tool node %q: unsupported language %q", node.ID, node.Language)
+	}
+
+	// Determine the workspace directory the temp file should live in.
+	// Inside a sandbox, e.workDir is the host-side bind source which the
+	// container also sees, so a basename written there is reachable from
+	// both sides via the same relative path.
+	wd := e.workDir
+	if wd == "" {
+		wd = "."
+	}
+	tmpFile, err := os.CreateTemp(wd, ".iterion-script-*"+ext)
+	if err != nil {
+		return nil, fmt.Errorf("model: tool node %q: create temp script: %w", node.ID, err)
+	}
+	tmpPath := tmpFile.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if _, werr := tmpFile.WriteString(resolved); werr != nil {
+		_ = tmpFile.Close()
+		return nil, fmt.Errorf("model: tool node %q: write temp script: %w", node.ID, werr)
+	}
+	if cerr := tmpFile.Close(); cerr != nil {
+		return nil, fmt.Errorf("model: tool node %q: close temp script: %w", node.ID, cerr)
+	}
+
+	// Compute the relative basename for the in-sandbox view (the bind
+	// mount uses the same path; passing just the basename keeps it
+	// portable whether we run via sandbox or host).
+	scriptBasename := filepath.Base(tmpPath)
+
+	toolName := "script:" + node.Language + ":" + node.ID
+
+	start := time.Now()
+	cmd := e.toolNodeScriptCommand(ctx, interp, scriptBasename)
+	out, runErr := cmd.CombinedOutput()
+	outputStr := string(out)
+	duration := time.Since(start)
+
+	if e.hooks.OnToolCall != nil {
+		e.hooks.OnToolCall(node.ID, LLMToolCallInfo{
+			ToolName: toolName,
+			Duration: duration,
+			Error:    runErr,
+		})
+	}
+	if e.hooks.OnToolNodeResult != nil {
+		e.hooks.OnToolNodeResult(node.ID, toolName, []byte(resolved), outputStr, duration, runErr)
+	}
+	if runErr != nil {
+		return nil, fmt.Errorf("model: tool node %q: script failed: %w\noutput: %s", node.ID, runErr, outputStr)
+	}
+
+	var output map[string]interface{}
+	if jsonErr := json.Unmarshal([]byte(outputStr), &output); jsonErr != nil {
+		output = map[string]interface{}{"result": strings.TrimSpace(outputStr)}
+	}
+	return output, nil
+}
+
+// scriptInterpreter maps a `language:` token to the executable name on
+// PATH and a file extension hint (extension is informational, not
+// required by any interpreter). An empty language defaults to sh.
+func scriptInterpreter(language string) (cmd string, ext string) {
+	switch language {
+	case "", "sh":
+		return "sh", ".sh"
+	case "bash":
+		return "bash", ".sh"
+	case "js", "node":
+		return "node", ".js"
+	case "py", "python", "python3":
+		return "python3", ".py"
+	default:
+		return "", ""
+	}
+}
+
+// toolNodeScriptCommand returns a configured *exec.Cmd that invokes the
+// interpreter on the basename of the script temp file. Mirrors
+// toolNodeCommand for the script-mode path: sandbox-routed if a sandbox
+// is active and the node has not opted out.
+func (e *ClawExecutor) toolNodeScriptCommand(ctx context.Context, interpreter, scriptBasename string) *exec.Cmd {
+	if e.sandbox != nil && !e.nodeOptsOutOfSandbox(toolNodeOptOut) {
+		return e.sandbox.Command(ctx, []string{interpreter, scriptBasename}, sandbox.ExecOpts{})
+	}
+	cmd := exec.CommandContext(ctx, interpreter, scriptBasename)
+	if e.workDir != "" {
+		cmd.Dir = e.workDir
+	}
+	return cmd
 }
 
 // toolNodeCommand returns a configured *exec.Cmd for a tool node's

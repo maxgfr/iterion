@@ -279,12 +279,14 @@ type jsonHumanDecl struct {
 }
 
 type jsonToolNodeDecl struct {
-	Name    string            `json:"name,omitempty"`
-	Command string            `json:"command,omitempty"`
-	Input   string            `json:"input,omitempty"`
-	Output  string            `json:"output,omitempty"`
-	Await   string            `json:"await,omitempty"`
-	Sandbox *jsonSandboxBlock `json:"sandbox,omitempty"`
+	Name     string            `json:"name,omitempty"`
+	Command  string            `json:"command,omitempty"`
+	Script   string            `json:"script,omitempty"`
+	Language string            `json:"language,omitempty"`
+	Input    string            `json:"input,omitempty"`
+	Output   string            `json:"output,omitempty"`
+	Await    string            `json:"await,omitempty"`
+	Sandbox  *jsonSandboxBlock `json:"sandbox,omitempty"`
 }
 
 // jsonSandboxBlock is the JSON form of an ast.SandboxBlock. The
@@ -513,12 +515,14 @@ func toJSON(f *File) *jsonFile {
 	}
 	for _, t := range f.Tools {
 		jf.Tools = append(jf.Tools, &jsonToolNodeDecl{
-			Name:    t.Name,
-			Command: t.Command,
-			Input:   t.Input,
-			Output:  t.Output,
-			Await:   awaitModeToStr[t.Await],
-			Sandbox: sandboxBlockToJSON(t.Sandbox),
+			Name:     t.Name,
+			Command:  t.Command,
+			Script:   t.Script,
+			Language: t.Language,
+			Input:    t.Input,
+			Output:   t.Output,
+			Await:    awaitModeToStr[t.Await],
+			Sandbox:  sandboxBlockToJSON(t.Sandbox),
 		})
 	}
 	for _, c := range f.Computes {
@@ -902,12 +906,14 @@ func fromJSON(jf *jsonFile) (*File, error) {
 			return nil, fmt.Errorf("astjson: unknown await mode %q", jt.Await)
 		}
 		f.Tools = append(f.Tools, &ToolNodeDecl{
-			Name:    jt.Name,
-			Command: jt.Command,
-			Input:   jt.Input,
-			Output:  jt.Output,
-			Await:   aw,
-			Sandbox: sandboxBlockFromJSON(jt.Sandbox),
+			Name:     jt.Name,
+			Command:  jt.Command,
+			Script:   jt.Script,
+			Language: jt.Language,
+			Input:    jt.Input,
+			Output:   jt.Output,
+			Await:    aw,
+			Sandbox:  sandboxBlockFromJSON(jt.Sandbox),
 		})
 	}
 
