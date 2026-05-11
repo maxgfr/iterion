@@ -1304,20 +1304,25 @@ agent discover_outdated:
 ## filter/sort/slice with no need for an LLM. The previous Sonnet
 ## implementation absorbed whatever wrapper shape `packages` arrived
 ## in (object map, `{list: [...]}` wrapper, …), which made each run
-## non-reproducible. The jq filter below normalises both common
-## shapes (object keyed by name OR array of {name, current, target,
-## risk}) into a uniform survivor list, then applies the policy.
+## non-reproducible. The jq filter below normalises common shapes
+## (object keyed by name, array of objects, or single-key wrapper
+## like `{list: [...]}`) into a uniform survivor list, then applies
+## the policy.
 ##
-## JSON inputs are passed via shell variables assigned from raw
-## `{{!input.X}}` substitutions, then fed to jq through `--argjson`.
-## Single-quoted assignments survive nested double quotes inside
-## the JSON payload (npm/PyPI/etc. names and version strings never
-## contain `'`); a previous attempt that wrote inputs to temp files
-## under `/tmp` died on the sandbox-mounted /tmp tmpfs.
+## Inputs are written to per-run files inside `input.workspace_dir`
+## (the sandbox-mounted bind volume) and fed to jq via --slurpfile.
+## This sidesteps two failures seen in earlier passes:
+##   - /tmp tmpfs in the sandbox image is too restrictive: `mktemp
+##     -d` returned a path that wasn't actually writable.
+##   - sh single-quoted variable assignment of multi-KB raw JSON
+##     was rejected by jq (some escape-survival edge case in
+##     iterion's raw substitution / shell handoff). Going via file
+##     avoids both shell-quoting and the JSON-on-the-command-line
+##     limits entirely.
 tool select_candidate:
   input: select_input
   output: candidate
-  command: "set -euo pipefail; PKGS_JSON='{{!input.packages}}'; ATT_JSON='{{!input.attempted}}'; SCOPE={{input.scope}}; MAX={{input.max_packages}}; jq -nc --argjson packages \"$PKGS_JSON\" --argjson attempted \"$ATT_JSON\" --arg scope \"$SCOPE\" --argjson max \"$MAX\" '($scope | split(\",\") | map(gsub(\"^\\\\s+|\\\\s+$\";\"\"))) as $raw_scope | (if ($raw_scope | any(. == \"all\")) then [\"patch\",\"minor\",\"major\",\"unknown\"] else $raw_scope end) as $allowed | ({\"patch\":1,\"minor\":2,\"major\":3,\"unknown\":4}) as $rank | ($packages // {}) as $pkgs_in | ($attempted // {}) as $atts_in | (if ($pkgs_in | type) == \"object\" then (if (($pkgs_in.list // null) | type) == \"array\" then $pkgs_in.list elif (($pkgs_in.items // null) | type) == \"array\" then $pkgs_in.items elif (($pkgs_in.packages // null) | type) == \"array\" then $pkgs_in.packages elif (($pkgs_in.data // null) | type) == \"array\" then $pkgs_in.data else null end) // $pkgs_in else $pkgs_in end) as $pkgs | (if ($atts_in | type) == \"object\" then (if (($atts_in.list // null) | type) == \"array\" then $atts_in.list else null end) // $atts_in else $atts_in end) as $atts | (if ($pkgs | type) == \"object\" then ($pkgs | to_entries | map({name: .key, current: (.value.current // \"\"), target: (.value.target // \"\"), risk: (.value.risk // \"unknown\")})) elif ($pkgs | type) == \"array\" then ($pkgs | map({name: (.name // \"\"), current: (.current // \"\"), target: (.target // \"\"), risk: (.risk // \"unknown\")})) else [] end) as $all | (if ($atts | type) == \"object\" then ($atts | keys) elif ($atts | type) == \"array\" then ($atts | map(.name // .) | map(select(. != null))) else [] end) as $attempted_names | ($attempted_names | length) as $attempted_count | ($all | map(select(.name as $n | ($attempted_names | index($n)) == null)) | map(select(.risk as $r | $allowed | index($r) != null)) | sort_by($rank[.risk] // 4)) as $survivors | if ($attempted_count >= $max) or (($survivors | length) == 0) then {selected_package:\"\", current_version:\"\", target_version:\"\", risk:\"unknown\", has_more:false, attempted_count:$attempted_count, cumulative_attempted:$atts, fix_loop_max:0} else $survivors[0] as $p | {selected_package:$p.name, current_version:$p.current, target_version:$p.target, risk:$p.risk, has_more:true, attempted_count:$attempted_count, cumulative_attempted:(($atts // {}) + {($p.name): {current:$p.current, target:$p.target, risk:$p.risk}}), fix_loop_max:(if $p.risk == \"major\" then 5 else 3 end)} end'"
+  command: "set -euo pipefail; cd {{input.workspace_dir}}; PKGS_FILE=\".iterion-select-pkgs-$$.json\"; ATT_FILE=\".iterion-select-att-$$.json\"; trap 'rm -f \"$PKGS_FILE\" \"$ATT_FILE\"' EXIT; printf %s '{{!input.packages}}' > \"$PKGS_FILE\"; printf %s '{{!input.attempted}}' > \"$ATT_FILE\"; SCOPE={{input.scope}}; MAX={{input.max_packages}}; jq -n --slurpfile packages \"$PKGS_FILE\" --slurpfile attempted \"$ATT_FILE\" --arg scope \"$SCOPE\" --argjson max \"$MAX\" '($scope | split(\",\") | map(gsub(\"^\\\\s+|\\\\s+$\";\"\"))) as $raw_scope | (if ($raw_scope | any(. == \"all\")) then [\"patch\",\"minor\",\"major\",\"unknown\"] else $raw_scope end) as $allowed | ({\"patch\":1,\"minor\":2,\"major\":3,\"unknown\":4}) as $rank | (($packages[0]) // {}) as $pkgs_in | (($attempted[0]) // {}) as $atts_in | (if ($pkgs_in | type) == \"object\" then (if (($pkgs_in.list // null) | type) == \"array\" then $pkgs_in.list elif (($pkgs_in.items // null) | type) == \"array\" then $pkgs_in.items elif (($pkgs_in.packages // null) | type) == \"array\" then $pkgs_in.packages elif (($pkgs_in.data // null) | type) == \"array\" then $pkgs_in.data else null end) // $pkgs_in else $pkgs_in end) as $pkgs | (if ($atts_in | type) == \"object\" then (if (($atts_in.list // null) | type) == \"array\" then $atts_in.list else null end) // $atts_in else $atts_in end) as $atts | (if ($pkgs | type) == \"object\" then ($pkgs | to_entries | map({name: .key, current: (.value.current // \"\"), target: (.value.target // \"\"), risk: (.value.risk // \"unknown\")})) elif ($pkgs | type) == \"array\" then ($pkgs | map({name: (.name // \"\"), current: (.current // \"\"), target: (.target // \"\"), risk: (.risk // \"unknown\")})) else [] end) as $all | (if ($atts | type) == \"object\" then ($atts | keys) elif ($atts | type) == \"array\" then ($atts | map(.name // .) | map(select(. != null))) else [] end) as $attempted_names | ($attempted_names | length) as $attempted_count | ($all | map(select(.name as $n | ($attempted_names | index($n)) == null)) | map(select(.risk as $r | $allowed | index($r) != null)) | sort_by($rank[.risk] // 4)) as $survivors | if ($attempted_count >= $max) or (($survivors | length) == 0) then {selected_package:\"\", current_version:\"\", target_version:\"\", risk:\"unknown\", has_more:false, attempted_count:$attempted_count, cumulative_attempted:$atts, fix_loop_max:0} else $survivors[0] as $p | {selected_package:$p.name, current_version:$p.current, target_version:$p.target, risk:$p.risk, has_more:true, attempted_count:$attempted_count, cumulative_attempted:(($atts // {}) + {($p.name): {current:$p.current, target:$p.target, risk:$p.risk}}), fix_loop_max:(if $p.risk == \"major\" then 5 else 3 end)} end'"
 
 ## ─── Nodes : Phase 1 — security_audit ──────────────────────────────
 
@@ -1793,14 +1798,14 @@ workflow secured_renovacy:
     _session_id: "{{outputs.validate_upgrade._session_id}}"
   }
 
-  ## fix_loop budget is GLOBAL across the run, not per-package — the
-  ## iterion engine accumulates loopCounters in run state and never
-  ## resets them on package_loop re-entry. To preserve a real per-
-  ## package retry budget (5 majors × max_packages), we widen the
-  ## bound here. Once the engine grows per-entry loop scoping, drop
-  ## this to the canonical 5 (or read from
-  ## outputs.select_candidate.fix_loop_max).
-  fix_after_upgrade -> validate_upgrade as fix_loop(150) with {
+  ## fix_loop is per-package: the runtime resets the counter on the
+  ## first non-loop edge that re-enters this loop's body from outside
+  ## (typically `align_code -> validate_upgrade` after the next
+  ## package's upgrade lands). 5 retries per package — enough for
+  ## majors that need a few alignment passes, tight enough that a
+  ## genuinely stuck package gets reverted instead of burning the
+  ## whole budget.
+  fix_after_upgrade -> validate_upgrade as fix_loop(5) with {
     selected_package: "{{outputs.select_candidate.selected_package}}",
     current_version: "{{outputs.select_candidate.current_version}}",
     target_version: "{{outputs.select_candidate.target_version}}",
