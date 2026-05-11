@@ -109,9 +109,12 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 		CompactPreserveRecent: task.CompactPreserveRecent,
 	}
 
-	// Reasoning effort via ProviderOptions.
-	if popts := providerOptsForNode(task.ReasoningEffort); popts != nil {
-		opts.ProviderOptions = popts
+	// Reasoning effort via ProviderOptions. Coerce against the model's
+	// supported matrix — claw-code-go does NOT clamp on its own, so a
+	// recipe asking for "max" on an OpenAI model would otherwise reach
+	// the API with an unsupported value and bounce as 400.
+	if effort := coerceEffortForModel(task.ReasoningEffort, modelID); effort != "" {
+		opts.ProviderOptions = providerOptsForNode(effort)
 	}
 
 	// System prompt (optionally augmented with the interaction protocol)
