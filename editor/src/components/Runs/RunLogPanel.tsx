@@ -70,6 +70,10 @@ export default function RunLogPanel({ runId, subscribeLogs, unsubscribeLogs, onC
   // as a user intent to disable follow-tail when an actual scroll is in
   // flight.
   const isScrollingRef = useRef<boolean>(false);
+  // True when the most recent follow-tail disable came from a scroll-up
+  // (vs the checkbox). Lets us auto-re-engage when the user scrolls back
+  // to the tail, while keeping a manual uncheck sticky.
+  const disabledByScrollRef = useRef<boolean>(false);
 
   // Subscribe on mount (this component is mounted only when the Logs
   // tab is active) and unsubscribe on unmount.
@@ -139,6 +143,9 @@ export default function RunLogPanel({ runId, subscribeLogs, unsubscribeLogs, onC
   }, [followTail, filtered.length]);
 
   const handleToggleFollow = (next: boolean) => {
+    // A direct checkbox interaction is always treated as manual intent,
+    // overriding any prior "disabled by scroll" memory.
+    disabledByScrollRef.current = false;
     setFollowTail(next);
     // Re-engaging the toggle while scrolled up shouldn't wait for the
     // next log line to arrive — jump to the tail immediately.
@@ -364,7 +371,19 @@ export default function RunLogPanel({ runId, subscribeLogs, unsubscribeLogs, onC
             }}
             atBottomStateChange={(atBottom) => {
               if (!atBottom && followTail && isScrollingRef.current) {
+                disabledByScrollRef.current = true;
                 setFollowTail(false);
+              } else if (
+                atBottom &&
+                !followTail &&
+                disabledByScrollRef.current
+              ) {
+                // No isScrolling guard: atBottomStateChange(true) can race
+                // with isScrolling(false) on momentum scrolls, leaving the
+                // ref already cleared. disabledByScrollRef alone is enough
+                // to distinguish scroll-disabled from manually-disabled.
+                disabledByScrollRef.current = false;
+                setFollowTail(true);
               }
             }}
             itemContent={(_, line) => <LogLineRow line={line} />}

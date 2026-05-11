@@ -73,6 +73,10 @@ export default function EventLog({
   // as a user intent to disable follow-tail when an actual scroll is in
   // flight.
   const isScrollingRef = useRef<boolean>(false);
+  // True when the most recent follow-tail disable came from a scroll-up
+  // (vs the checkbox). Lets us auto-re-engage when the user scrolls back
+  // to the tail, while keeping a manual uncheck sticky.
+  const disabledByScrollRef = useRef<boolean>(false);
 
   // Incremental cache: when `events` only grows by appending at the
   // tail (the common live case once history is replayed), reuse the
@@ -184,6 +188,9 @@ export default function EventLog({
   }, [followTail, filtered.length]);
 
   const handleToggleFollow = (next: boolean) => {
+    // A direct checkbox interaction is always treated as manual intent,
+    // overriding any prior "disabled by scroll" memory.
+    disabledByScrollRef.current = false;
     onToggleFollow(next);
     // Re-engaging the toggle while scrolled up shouldn't wait for the
     // next event to arrive — jump to the tail immediately.
@@ -298,7 +305,19 @@ export default function EventLog({
             }}
             atBottomStateChange={(atBottom) => {
               if (!atBottom && followTail && isScrollingRef.current) {
+                disabledByScrollRef.current = true;
                 onToggleFollow(false);
+              } else if (
+                atBottom &&
+                !followTail &&
+                disabledByScrollRef.current
+              ) {
+                // No isScrolling guard: atBottomStateChange(true) can race
+                // with isScrolling(false) on momentum scrolls, leaving the
+                // ref already cleared. disabledByScrollRef alone is enough
+                // to distinguish scroll-disabled from manually-disabled.
+                disabledByScrollRef.current = false;
+                onToggleFollow(true);
               }
             }}
             itemContent={(_, ann) => (
