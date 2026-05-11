@@ -401,6 +401,37 @@ func TestToolNodeWithInput(t *testing.T) {
 	assertEq(t, "Output", td.Output, "commit_result")
 }
 
+func TestToolNodeWithScript(t *testing.T) {
+	src := "tool pick:\n" +
+		"  language: js\n" +
+		"  script: `console.log(JSON.stringify({ok: true}))`\n" +
+		"  output: result\n"
+	res := parser.Parse("test.iter", src)
+	assertNoDiags(t, res)
+
+	td := res.File.Tools[0]
+	assertEq(t, "Name", td.Name, "pick")
+	assertEq(t, "Language", td.Language, "js")
+	assertEq(t, "Script", td.Script, `console.log(JSON.stringify({ok: true}))`)
+	assertEq(t, "Command", td.Command, "")
+}
+
+func TestToolNodeBlockScalarScript(t *testing.T) {
+	src := "tool pick:\n" +
+		"  language: js\n" +
+		"  script: |\n" +
+		"    const fs = require('fs')\n" +
+		"    console.log('hello')\n" +
+		"  output: result\n"
+	res := parser.Parse("test.iter", src)
+	assertNoDiags(t, res)
+
+	td := res.File.Tools[0]
+	want := "const fs = require('fs')\nconsole.log('hello')\n"
+	assertEq(t, "Script", td.Script, want)
+	assertEq(t, "Language", td.Language, "js")
+}
+
 func TestRouterDecl(t *testing.T) {
 	src := `router dispatch:
   mode: condition
@@ -1321,5 +1352,173 @@ func TestLexerRawStringUnterminated(t *testing.T) {
 	tok := lex.Next()
 	if tok.Type != parser.TokenError {
 		t.Fatalf("type = %v, want TokenError", tok.Type)
+	}
+}
+
+// TestLexerStrictEscape exercises the `## strict-escape: on` directive
+// that flips `"..."` from verbatim-preserve to standard escape
+// interpretation (\", \\, \n, \t, \r). Default behaviour is preserved
+// when the directive is absent.
+func TestLexerStrictEscape(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "directive enables quote escape",
+			src:  "## strict-escape: on\n\"\\\"hi\\\"\"",
+			want: `"hi"`,
+		},
+		{
+			name: "directive enables backslash escape",
+			src:  "## strict-escape: on\n\"a\\\\b\"",
+			want: `a\b`,
+		},
+		{
+			name: "directive enables newline escape",
+			src:  "## strict-escape: on\n\"line1\\nline2\"",
+			want: "line1\nline2",
+		},
+		{
+			name: "without directive: legacy verbatim preservation",
+			src:  "\"\\\"hi\\\"\"",
+			want: `\"hi\"`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			lex := parser.NewLexer("test.iter", c.src)
+			// Pull tokens until we find a TokenString
+			var got parser.Token
+			for {
+				tk := lex.Next()
+				if tk.Type == parser.TokenEOF {
+					t.Fatalf("no string token in %q", c.src)
+				}
+				if tk.Type == parser.TokenString {
+					got = tk
+					break
+				}
+				if tk.Type == parser.TokenError {
+					t.Fatalf("unexpected lex error: %s", tk.Value)
+				}
+			}
+			if got.Value != c.want {
+				t.Errorf("value = %q, want %q", got.Value, c.want)
+			}
+		})
+	}
+}
+
+func TestLexerStrictEscapeUnknown(t *testing.T) {
+	lex := parser.NewLexer("test.iter", "## strict-escape: on\n\"oops \\x\"")
+	for {
+		tk := lex.Next()
+		if tk.Type == parser.TokenError {
+			return
+		}
+		if tk.Type == parser.TokenEOF {
+			t.Fatalf("expected lex error on unknown escape")
+		}
+	}
+}
+
+// TestLexerBlockScalar covers the YAML-style `|` multi-line opener.
+// The opener line ends in `|` (optionally followed by whitespace/comment),
+// the body is the indented block that follows, and the block ends on
+// the first less-indented line (or EOF). The content is emitted as a
+// single TokenString followed by a virtual TokenNewline.
+func TestLexerBlockScalar(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "two indented lines preserve newlines",
+			src:  "cmd: |\n  hello\n  world\n",
+			want: "hello\nworld\n",
+		},
+		{
+			name: "blank line in middle preserved",
+			src:  "cmd: |\n  a\n\n  b\n",
+			want: "a\n\nb\n",
+		},
+		{
+			name: "nested indentation relative to base preserved",
+			src:  "cmd: |\n  outer\n    inner\n  back\n",
+			want: "outer\n  inner\nback\n",
+		},
+		{
+			name: "EOF ends block cleanly",
+			src:  "cmd: |\n  only line",
+			want: "only line",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			lex := parser.NewLexer("test.iter", c.src)
+			var got parser.Token
+			seenString := false
+			for {
+				tk := lex.Next()
+				if tk.Type == parser.TokenError {
+					t.Fatalf("lex error: %s", tk.Value)
+				}
+				if tk.Type == parser.TokenEOF {
+					break
+				}
+				if tk.Type == parser.TokenString && !seenString {
+					got = tk
+					seenString = true
+				}
+			}
+			if !seenString {
+				t.Fatalf("no string token in %q", c.src)
+			}
+			if got.Value != c.want {
+				t.Errorf("value = %q, want %q", got.Value, c.want)
+			}
+		})
+	}
+}
+
+// TestLexerBlockScalarTerminatedByDedent verifies that a less-indented
+// follow-up property correctly ends the block, with the parser still
+// seeing well-formed token shape afterwards.
+func TestLexerBlockScalarTerminatedByDedent(t *testing.T) {
+	src := "tool foo:\n  command: |\n    echo hi\n  input: bar\n"
+	lex := parser.NewLexer("test.iter", src)
+	var strings []string
+	for {
+		tk := lex.Next()
+		if tk.Type == parser.TokenError {
+			t.Fatalf("lex error: %s", tk.Value)
+		}
+		if tk.Type == parser.TokenEOF {
+			break
+		}
+		if tk.Type == parser.TokenString {
+			strings = append(strings, tk.Value)
+		}
+	}
+	if len(strings) < 1 || strings[0] != "echo hi\n" {
+		t.Fatalf("expected first string %q, got %v", "echo hi\n", strings)
+	}
+}
+
+// TestLexerBlockScalarBareError ensures a stray `|` outside a value
+// position is a lex error (not a silent block scalar).
+func TestLexerBlockScalarBareError(t *testing.T) {
+	lex := parser.NewLexer("test.iter", "| stray")
+	for {
+		tk := lex.Next()
+		if tk.Type == parser.TokenError {
+			return
+		}
+		if tk.Type == parser.TokenEOF {
+			t.Fatalf("expected lex error on bare |")
+		}
 	}
 }

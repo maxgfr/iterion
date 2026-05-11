@@ -351,14 +351,22 @@ type HumanDecl struct {
 
 // ToolNodeDecl represents a `tool <name>:` node that executes
 // a command directly without an LLM call.
+//
+// A tool node carries EITHER `Command` (an inline shell snippet, executed
+// via `sh -c`) OR `Script` (the body of a higher-level interpreter
+// snippet such as Node or Python, written to a temp file inside the
+// workspace and executed by the interpreter named by `Language`).
+// Setting both is a validation error; setting neither is also an error.
 type ToolNodeDecl struct {
-	Name    string
-	Command string        // command to execute, may contain ${...} env refs and {{...}} template refs
-	Input   string        // optional input schema reference name
-	Output  string        // schema reference name
-	Await   AwaitMode     // convergence strategy (none/wait_all/best_effort)
-	Sandbox *SandboxBlock // node-level sandbox override; nil inherits from workflow
-	Span    Span
+	Name     string
+	Command  string        // command to execute, may contain ${...} env refs and {{...}} template refs
+	Script   string        // script body for higher-level interpreters (mutually exclusive with Command)
+	Language string        // interpreter selector for Script: js | py | sh | bash. Defaults to sh when empty.
+	Input    string        // optional input schema reference name
+	Output   string        // schema reference name
+	Await    AwaitMode     // convergence strategy (none/wait_all/best_effort)
+	Sandbox  *SandboxBlock // node-level sandbox override; nil inherits from workflow
+	Span     Span
 }
 
 // ---------------------------------------------------------------------------

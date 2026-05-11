@@ -74,6 +74,8 @@ const (
 	TokenRequire
 	TokenInstructions
 	TokenCommand
+	TokenScript
+	TokenLanguage
 	TokenArgs
 	TokenURL
 	TokenAuth
@@ -201,6 +203,8 @@ var tokenNames = map[TokenType]string{
 	TokenRequire:           "require",
 	TokenInstructions:      "instructions",
 	TokenCommand:           "command",
+	TokenScript:            "script",
+	TokenLanguage:          "language",
 	TokenArgs:              "args",
 	TokenURL:               "url",
 	TokenReadonly:          "readonly",
@@ -299,6 +303,8 @@ var keywords = map[string]TokenType{
 	"require":               TokenRequire,
 	"instructions":          TokenInstructions,
 	"command":               TokenCommand,
+	"script":                TokenScript,
+	"language":              TokenLanguage,
 	"args":                  TokenArgs,
 	"url":                   TokenURL,
 	"auth":                  TokenAuth,

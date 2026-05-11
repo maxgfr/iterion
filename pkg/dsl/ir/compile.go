@@ -903,11 +903,43 @@ func (c *compiler) compileTools() {
 			c.validateSchemaRef(t.Name, "input", t.Input)
 		}
 
+		// command and script are mutually exclusive; exactly one must be set.
+		switch {
+		case t.Command == "" && t.Script == "":
+			c.errorf(DiagBadTemplateRef, "tool %q: must declare either `command:` or `script:`", t.Name)
+		case t.Command != "" && t.Script != "":
+			c.errorf(DiagBadTemplateRef, "tool %q: `command:` and `script:` are mutually exclusive", t.Name)
+		case t.Command == "" && t.Language != "":
+			// language without script makes no sense.
+			c.errorf(DiagBadTemplateRef, "tool %q: `language:` is only valid alongside `script:`", t.Name)
+		}
+
 		var cmdRefs []*Ref
-		if refs, err := ParseRefs(t.Command); err != nil {
-			c.errorf(DiagBadTemplateRef, "tool %q command: %v", t.Name, err)
-		} else {
-			cmdRefs = refs
+		if t.Command != "" {
+			if refs, err := ParseRefs(t.Command); err != nil {
+				c.errorf(DiagBadTemplateRef, "tool %q command: %v", t.Name, err)
+			} else {
+				cmdRefs = refs
+			}
+		}
+
+		var scriptRefs []*Ref
+		if t.Script != "" {
+			if refs, err := ParseRefs(t.Script); err != nil {
+				c.errorf(DiagBadTemplateRef, "tool %q script: %v", t.Name, err)
+			} else {
+				scriptRefs = refs
+			}
+		}
+
+		// Validate language token if provided.
+		if t.Language != "" {
+			switch t.Language {
+			case "js", "node", "py", "python", "python3", "sh", "bash":
+				// known
+			default:
+				c.errorf(DiagBadTemplateRef, "tool %q: unsupported language %q (want one of: js, node, py, python, python3, sh, bash)", t.Name, t.Language)
+			}
 		}
 
 		c.nodes[t.Name] = &ToolNode{
@@ -918,6 +950,9 @@ func (c *compiler) compileTools() {
 			},
 			Command:     t.Command,
 			CommandRefs: cmdRefs,
+			Script:      t.Script,
+			ScriptRefs:  scriptRefs,
+			Language:    t.Language,
 			AwaitMode:   t.Await,
 			Sandbox:     c.compileSandboxBlock(t.Sandbox, "tool", t.Name),
 		}
