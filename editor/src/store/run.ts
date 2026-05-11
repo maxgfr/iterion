@@ -206,24 +206,60 @@ export const useRunStore = create<RunStoreState>((set) => ({
     set((s) => ({ wsReconnectToken: s.wsReconnectToken + 1 })),
 
   applySnapshot: (snap) => {
-    const map = new Map<string, ExecutionState>();
-    for (const e of snap.executions) {
-      map.set(e.execution_id, e);
-    }
-    const rehydrated = rehydratePendingHumanInput(snap);
     set((state) => {
-      // Keep already-applied events that fall within the snapshot's
-      // window. Wiping them broke edge rendering on revisit of finished
-      // runs: the WS subscribe path computes from_seq from the snapshot
-      // and never replays the historical tail. Preserving them lets the
-      // hook detect "empty store" and trigger a full replay (from_seq=0)
-      // while reconnect mid-run keeps incremental replay efficient.
-      const trimmed = state.events.filter((e) => e.seq <= snap.last_seq);
+      // Stale-snapshot guard: REST `getRun` and the WS "snapshot"
+      // envelope are TWO concurrent sources of the same data. If the
+      // REST round-trip is slower and resolves AFTER the WS already
+      // pushed a newer snapshot (or after WS events advanced the
+      // store past snap.last_seq), the older snapshot would regress
+      // executionsById — leaving a finished node still showing
+      // "running" because the snapshot at that moment had it
+      // mid-flight. Detect the case via last_seq and bail.
+      if (state.snapshot && state.snapshot.last_seq > snap.last_seq) {
+        return state;
+      }
+
+      const map = new Map<string, ExecutionState>();
+      for (const e of snap.executions) {
+        map.set(e.execution_id, e);
+      }
+      const rehydrated = rehydratePendingHumanInput(snap);
+
+      // Re-apply any events the WS already delivered that are NEWER
+      // than the snapshot. Without this, those events were silently
+      // dropped (the old filter `seq <= last_seq` discarded them) and
+      // their state mutations were lost — the dominant root cause of
+      // "two nodes show as running" UI glitches on initial mount.
+      const newerEvents = state.events.filter((e) => e.seq > snap.last_seq);
+      if (newerEvents.length === 0) {
+        return {
+          snapshot: snap,
+          executionsById: map,
+          events: state.events.filter((e) => e.seq <= snap.last_seq),
+          pendingHumanInput: rehydrated,
+        };
+      }
+      // Reduce newer events against the snapshot's base. We pass an
+      // empty events array so reduceEvents' lastSeq tracker starts
+      // below newerEvents[0].seq and processes them all (the tracker
+      // exists to drop out-of-order replays, not to gate fresh
+      // application).
+      const partial = reduceEvents(
+        {
+          events: [],
+          executionsById: map,
+          snapshot: snap,
+          pendingHumanInput: rehydrated,
+          browser: state.browser,
+        },
+        newerEvents,
+      );
       return {
-        snapshot: snap,
-        executionsById: map,
-        events: trimmed,
-        pendingHumanInput: rehydrated,
+        ...partial,
+        // Preserve the full event history (snapshot + post-snapshot)
+        // so timeline scrubbing and edge rendering have the full
+        // record.
+        events: [...state.events.filter((e) => e.seq <= snap.last_seq), ...newerEvents],
       };
     });
   },
