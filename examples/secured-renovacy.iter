@@ -1429,20 +1429,48 @@ tool select_candidate:
     const scopeStr = "{{!input.scope}}";
     const maxPackages = {{!input.max_packages}};
 
+    // Absorb LLM drift on row-field naming. discover_outdated's
+    // schema is loose (`packages: json`), so different models / runs
+    // pick different keys for the same semantic. fieldAlias does a
+    // case-insensitive lookup against an ordered alias list and
+    // extractVersion lifts versions out of objects (some LLMs put
+    // declared as {"plugins/foo": "^3.5.10"} — take the first string
+    // leaf).
+    function fieldAlias(row, aliases) {
+      if (!row || typeof row !== "object") return undefined;
+      const lower = {};
+      for (const k of Object.keys(row)) lower[k.toLowerCase()] = row[k];
+      for (const a of aliases) {
+        const v = lower[a.toLowerCase()];
+        if (v !== undefined && v !== null && v !== "") return v;
+      }
+      return undefined;
+    }
+    function extractVersion(v) {
+      if (v == null) return "";
+      if (typeof v === "string") return v;
+      if (typeof v === "object" && !Array.isArray(v)) {
+        for (const k of Object.keys(v)) {
+          if (typeof v[k] === "string" && v[k]) return v[k];
+        }
+      }
+      return String(v);
+    }
+    function normaliseRow(row, fallbackName) {
+      if (!row || typeof row !== "object") return null;
+      const name = fieldAlias(row, ["name", "package", "pkg"]) || fallbackName || "";
+      const target = extractVersion(fieldAlias(row, ["target", "latest", "to", "targetVersion", "next"]));
+      const current = extractVersion(fieldAlias(row, ["current", "from", "declared", "currentVersion", "installed", "version"]));
+      const rawRisk = fieldAlias(row, ["risk", "bump", "severity", "type", "semver"]);
+      const risk = String(rawRisk || "unknown").toLowerCase();
+      return { name, current, target, risk };
+    }
+
     function unwrap(value, wrapperKeys) {
       if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-      // Try the explicit wrapper-key list first (stable contract for
-      // common LLM-emitted shapes: {list:[...]}, {items:[...]}, etc.).
       for (const key of wrapperKeys) {
         if (Array.isArray(value[key])) return value[key];
       }
-      // Fallback: any single-key object whose value is an array is
-      // unwrapped automatically. This is what saves us when the
-      // upstream LLM decides to wrap under a semantically-meaningful
-      // key we didn't anticipate ("outdated", "results", "deps", ...).
-      // The shape contract says "array", so we treat any wrapper as
-      // noise. If multiple keys are present we leave the object as-is
-      // and let downstream report empty so the failure is visible.
       const keys = Object.keys(value);
       if (keys.length === 1 && Array.isArray(value[keys[0]])) {
         return value[keys[0]];
@@ -1452,20 +1480,12 @@ tool select_candidate:
 
     function normaliseEntries(pkgs) {
       if (Array.isArray(pkgs)) {
-        return pkgs.map((p) => ({
-          name: p.name || "",
-          current: p.current || "",
-          target: p.target || "",
-          risk: p.risk || "unknown",
-        }));
+        return pkgs.map((p) => normaliseRow(p)).filter((r) => r && r.name);
       }
       if (pkgs && typeof pkgs === "object") {
-        return Object.entries(pkgs).map(([name, v]) => ({
-          name,
-          current: (v && v.current) || "",
-          target: (v && v.target) || "",
-          risk: (v && v.risk) || "unknown",
-        }));
+        return Object.entries(pkgs)
+          .map(([name, v]) => normaliseRow(v, name))
+          .filter((r) => r && r.name);
       }
       return [];
     }
@@ -2016,39 +2036,82 @@ tool bucket_patches:
     const raw = {{!input.packages}};
     const scopeStr = "{{!input.scope}}";
 
-    // Normalise discover_outdated's `packages` field to an array of
-    // {name, current, target, risk} rows regardless of the shape the
-    // LLM emitted. Three shapes seen in practice:
-    //   1. proper array: [{name, current, target, risk}, ...] — keep as-is
-    //   2. single-key wrap: {list: [...]} / {items: [...]} / etc. — unwrap
-    //   3. object-keyed-by-name: {"@apollo/client": {current, target, risk}, ...}
-    //      — emitted whenever the discover_outdated schema is `packages: json`
-    //      (which JSON Schema validates as `type: object`). The formatter
-    //      then can coerce the array into a name → row map. Merge the key
-    //      back into each row as `name`.
-    // Anything else → empty array (the batch lane safely degrades to
-    // `has_patches: false` and the per-package loop picks up).
-    function toRowArray(value) {
-      if (Array.isArray(value)) return value;
+    // Normalise discover_outdated's `packages` field. We absorb LLM
+    // drift on BOTH the container shape (array / wrap / map-by-name)
+    // AND the row-field naming (different LLMs and different runs
+    // pick different keys for the same semantic — see fieldAlias).
+    //
+    // Container shapes seen in practice:
+    //   1. proper array: [{name, current, target, risk}, ...] — keep
+    //   2. single-key wrap: {list: [...]} / {items: [...]} — unwrap
+    //   3. object-keyed-by-name: {"@apollo/client": {row...}, ...}
+    //      The discover_outdated schema is `packages: json` which
+    //      JSON Schema validates as `type: object`, so the formatter
+    //      can coerce the array form into a name-keyed map.
+    //
+    // Row-field aliases (case-insensitive on lookup):
+    //   target  ← target | latest | to | targetVersion | next
+    //   current ← current | from | declared | currentVersion |
+    //             installed | version (when paired with target/latest)
+    //   risk    ← risk | bump | severity | type | semver
+    function fieldAlias(row, aliases) {
+      if (!row || typeof row !== "object") return undefined;
+      const lower = {};
+      for (const k of Object.keys(row)) lower[k.toLowerCase()] = row[k];
+      for (const a of aliases) {
+        const v = lower[a.toLowerCase()];
+        if (v !== undefined && v !== null && v !== "") return v;
+      }
+      return undefined;
+    }
+
+    function extractVersion(v) {
+      // Some LLMs put declared/current as an object keyed by workspace
+      // path (e.g. {"plugins/foo": "^3.5.10"}). Take the first leaf
+      // string value; otherwise coerce to string.
+      if (v == null) return "";
+      if (typeof v === "string") return v;
+      if (typeof v === "object" && !Array.isArray(v)) {
+        for (const k of Object.keys(v)) {
+          if (typeof v[k] === "string" && v[k]) return v[k];
+        }
+      }
+      return String(v);
+    }
+
+    function normaliseRow(row, fallbackName) {
+      if (!row || typeof row !== "object") return null;
+      const name = fieldAlias(row, ["name", "package", "pkg"]) || fallbackName || "";
+      const target = extractVersion(fieldAlias(row, ["target", "latest", "to", "targetVersion", "next"]));
+      const current = extractVersion(fieldAlias(row, ["current", "from", "declared", "currentVersion", "installed", "version"]));
+      const rawRisk = fieldAlias(row, ["risk", "bump", "severity", "type", "semver"]);
+      const risk = String(rawRisk || "unknown").toLowerCase();
+      return { name, current, target, risk };
+    }
+
+    function toNormalisedRows(value) {
+      if (Array.isArray(value)) return value.map((r) => normaliseRow(r)).filter(Boolean);
       if (!value || typeof value !== "object") return [];
       const keys = Object.keys(value);
-      if (keys.length === 1 && Array.isArray(value[keys[0]])) return value[keys[0]];
+      if (keys.length === 1 && Array.isArray(value[keys[0]])) {
+        return value[keys[0]].map((r) => normaliseRow(r)).filter(Boolean);
+      }
       for (const k of ["list", "items", "packages", "data", "outdated"]) {
-        if (Array.isArray(value[k])) return value[k];
+        if (Array.isArray(value[k])) {
+          return value[k].map((r) => normaliseRow(r)).filter(Boolean);
+        }
       }
-      // Object-keyed-by-name: every value is itself an object with at least
-      // one of the expected row fields. Guard against {_meta: {...}}-style
-      // sidecar keys by requiring a recognisable field.
-      const ROW_FIELDS = ["current", "target", "risk", "version", "from", "to"];
-      const looksLikePackageMap = keys.length > 0 && keys.every((k) => {
+      // Object-keyed-by-name. Don't require specific row fields — any
+      // object value gets normalised; rows without a target are
+      // filtered out below.
+      const rows = [];
+      for (const k of keys) {
         const v = value[k];
-        if (!v || typeof v !== "object" || Array.isArray(v)) return false;
-        return ROW_FIELDS.some((f) => Object.prototype.hasOwnProperty.call(v, f));
-      });
-      if (looksLikePackageMap) {
-        return keys.map((k) => Object.assign({ name: k }, value[k]));
+        if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+        const row = normaliseRow(v, k);
+        if (row && row.name) rows.push(row);
       }
-      return [];
+      return rows;
     }
 
     // Operator-side scope filter. When scope excludes "patch" (e.g. a
@@ -2060,21 +2123,14 @@ tool bucket_patches:
       : scopeStr.split(",").map((s) => s.trim()).filter(Boolean);
     const patchesAllowed = allowedRisks.includes("patch");
 
-    const list = toRowArray(raw);
+    const list = toNormalisedRows(raw);
 
     let patches = [];
     if (patchesAllowed) {
       for (const p of list) {
-        if (!p || typeof p !== "object") continue;
-        // case-insensitive: defensive against LLM drift on discover_outdated
-        // emitting "Patch" / "PATCH" instead of the schema's canonical "patch".
-        if (String(p.risk || "unknown").toLowerCase() !== "patch") continue;
-        patches.push({
-          name: p.name || "",
-          current: p.current || "",
-          target: p.target || "",
-          risk: "patch",
-        });
+        if (!p || !p.name || !p.target) continue;
+        if (p.risk !== "patch") continue;
+        patches.push({ name: p.name, current: p.current || "", target: p.target, risk: "patch" });
       }
     }
 
