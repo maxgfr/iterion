@@ -1676,11 +1676,22 @@ func (e *ClawExecutor) toolNodeScriptCommand(ctx context.Context, interpreter, s
 // Per-node opt-out lets a workflow run mostly sandboxed but cherry-pick
 // a tool node that needs host access (e.g. `gh` configured against
 // the host's keychain).
+//
+// Shell selection: we invoke `bash -c` (not `sh -c`) so recipe authors
+// can use modern bashisms (`set -o pipefail`, arrays `BLOCKERS=()`,
+// `[[ ... ]]`, process substitution, etc.) without surprises. On
+// Debian/Ubuntu-derived containers and hosts, `/bin/sh` is dash —
+// strict POSIX, no arrays, no pipefail, errors with
+// `Syntax error: "(" unexpected` on `X=()`. The iterion-sandbox-slim
+// image ships bash 5+; modern Linux desktops always have bash. If
+// bash is genuinely absent (extremely minimal containers), the recipe
+// author should either install bash via post_create or rewrite the
+// tool body in POSIX shell.
 func (e *ClawExecutor) toolNodeCommand(ctx context.Context, resolved string) *exec.Cmd {
 	if e.sandbox != nil && !e.nodeOptsOutOfSandbox(toolNodeOptOut) {
-		return e.sandbox.Command(ctx, []string{"sh", "-c", resolved}, sandbox.ExecOpts{})
+		return e.sandbox.Command(ctx, []string{"bash", "-c", resolved}, sandbox.ExecOpts{})
 	}
-	cmd := exec.CommandContext(ctx, "sh", "-c", resolved)
+	cmd := exec.CommandContext(ctx, "bash", "-c", resolved)
 	if e.workDir != "" {
 		cmd.Dir = e.workDir
 	}
