@@ -516,6 +516,7 @@ function reduceEvents(
         break;
       }
       case "run_failed": {
+        const errMsg = (evt.data?.error as string) ?? null;
         const exec = currentExec(executionsById, branch, evt.node_id);
         if (exec) {
           ensureExecCopy();
@@ -523,21 +524,58 @@ function reduceEvents(
             ...exec,
             status: "failed",
             finished_at: exec.finished_at ?? evt.timestamp,
-            error: (evt.data?.error as string) ?? exec.error,
+            error: errMsg ?? exec.error,
             current_event_seq: evt.seq,
             last_seq: evt.seq,
           });
         }
+        // Mirror server's closeInFlightExecs: any OTHER exec still
+        // marked "running" when the run fails should also be closed.
+        // Parallel-branch shapes leave siblings in flight that the
+        // engine has stopped driving.
+        closeInFlightOnRunTermination(
+          executionsById,
+          ensureExecCopy,
+          "failed",
+          evt.timestamp,
+          evt.seq,
+          errMsg ?? undefined,
+        );
         runStatusOverride = "failed_resumable";
-        runErrorOverride = (evt.data?.error as string) ?? null;
+        runErrorOverride = errMsg;
         break;
       }
-      case "run_finished":
+      case "run_finished": {
+        // Any execution still flagged "running" when the run terminates is,
+        // by definition, no longer in flight — the engine has stopped
+        // driving it. Mirrors `pkg/runview/snapshot.go::closeInFlightExecs`
+        // (commit 97f7c1a) on the live-WS path: without this the canvas
+        // keeps pulsing the spinner on whatever node was last running
+        // even after `run_finished` arrived.
+        closeInFlightOnRunTermination(
+          executionsById,
+          ensureExecCopy,
+          "finished",
+          evt.timestamp,
+          evt.seq,
+          undefined,
+        );
         runStatusOverride = "finished";
         break;
-      case "run_cancelled":
+      }
+      case "run_cancelled": {
+        const reason = (evt.data?.reason as string) ?? "cancelled by user";
+        closeInFlightOnRunTermination(
+          executionsById,
+          ensureExecCopy,
+          "failed",
+          evt.timestamp,
+          evt.seq,
+          reason,
+        );
         runStatusOverride = "cancelled";
         break;
+      }
       case "run_paused":
         runStatusOverride = "paused_waiting_human";
         break;
@@ -712,6 +750,37 @@ function currentExec(
     }
   }
   return best;
+}
+
+// closeInFlightOnRunTermination flips every still-"running" execution to
+// a terminal status when the run itself terminates. Mirrors the
+// server-side `pkg/runview/snapshot.go::closeInFlightExecs` so the live
+// WebSocket path stays consistent with what the snapshot API returns.
+function closeInFlightOnRunTermination(
+  execs: Map<string, ExecutionState>,
+  ensureCopy: () => void,
+  finalStatus: ExecutionState["status"],
+  timestamp: string,
+  seq: number,
+  errorReason: string | undefined,
+): void {
+  let mutated = false;
+  for (const e of execs.values()) {
+    if (e.status === "running") {
+      if (!mutated) {
+        ensureCopy();
+        mutated = true;
+      }
+      execs.set(e.execution_id, {
+        ...e,
+        status: finalStatus,
+        finished_at: e.finished_at ?? timestamp,
+        error: errorReason ?? e.error,
+        current_event_seq: seq,
+        last_seq: seq,
+      });
+    }
+  }
 }
 
 function lastPausedExec(execs: Map<string, ExecutionState>): ExecutionState | null {
