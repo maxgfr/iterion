@@ -320,6 +320,9 @@ func (l *Lexer) scanToken() {
 	case ch == '"':
 		l.scanString(startLine, startCol)
 
+	case ch == '`':
+		l.scanRawString(startLine, startCol)
+
 	case unicode.IsDigit(ch):
 		l.scanNumber(startLine, startCol)
 
@@ -355,6 +358,29 @@ func (l *Lexer) scanString(startLine, startCol int) {
 		l.emit(TokenError, "unterminated string literal", startLine, startCol)
 		return
 	}
+	l.emit(TokenString, string(buf), startLine, startCol)
+}
+
+// scanRawString reads a backtick-delimited raw string literal. No
+// escape processing is performed — every byte between the opening
+// and closing backtick (including newlines, double quotes, and
+// backslashes) lands verbatim in the token. Used for recipe content
+// that would otherwise drown in `\"`/`\\` escapes: inline shell
+// pipelines with embedded JSON, jq filters, Node/Python snippets, …
+// To embed a literal backtick, splice another string at concatenation
+// time (the lexer offers no escape inside a raw string by design).
+func (l *Lexer) scanRawString(startLine, startCol int) {
+	l.advance() // skip opening `
+	var buf []rune
+	for l.pos < len(l.src) && l.src[l.pos] != '`' {
+		buf = append(buf, l.src[l.pos])
+		l.advance()
+	}
+	if l.pos >= len(l.src) {
+		l.emit(TokenError, "unterminated raw string literal (missing closing backtick)", startLine, startCol)
+		return
+	}
+	l.advance() // skip closing `
 	l.emit(TokenString, string(buf), startLine, startCol)
 }
 

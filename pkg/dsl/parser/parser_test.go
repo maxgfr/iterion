@@ -1265,3 +1265,61 @@ workflow flow:
 	}
 	assertEq(t, "judge server", judge.MCP.Servers[0], "claude_code")
 }
+
+// TestLexerRawString covers the backtick-delimited raw string form.
+// Inside a raw string every byte (including ", \, newline, $) lands
+// verbatim — no escape processing, no need for the operator to
+// double-escape `\"` through nested DSL/shell layers.
+func TestLexerRawString(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "double quotes preserved",
+			in:   "`a\"b\"c`",
+			want: `a"b"c`,
+		},
+		{
+			name: "backslashes preserved",
+			in:   "`one\\two\\\\three`",
+			want: `one\two\\three`,
+		},
+		{
+			name: "newlines allowed",
+			in:   "`line1\nline2\nline3`",
+			want: "line1\nline2\nline3",
+		},
+		{
+			name: "empty raw string",
+			in:   "``",
+			want: "",
+		},
+		{
+			name: "jq filter no escape needed",
+			in:   "`($scope | split(\",\") | map(gsub(\"^\\\\s+|\\\\s+$\";\"\")))`",
+			want: `($scope | split(",") | map(gsub("^\\s+|\\s+$";"")))`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			lex := parser.NewLexer("test.iter", c.in)
+			tok := lex.Next()
+			if tok.Type != parser.TokenString {
+				t.Fatalf("type = %v, want TokenString", tok.Type)
+			}
+			if tok.Value != c.want {
+				t.Errorf("value = %q, want %q", tok.Value, c.want)
+			}
+		})
+	}
+}
+
+func TestLexerRawStringUnterminated(t *testing.T) {
+	lex := parser.NewLexer("test.iter", "`no closing backtick")
+	tok := lex.Next()
+	if tok.Type != parser.TokenError {
+		t.Fatalf("type = %v, want TokenError", tok.Type)
+	}
+}
