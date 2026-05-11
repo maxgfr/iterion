@@ -2021,14 +2021,39 @@ tool bucket_patches:
     const raw = {{!input.packages}};
     const scopeStr = "{{!input.scope}}";
 
-    function unwrap(value) {
-      if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+    // Normalise discover_outdated's `packages` field to an array of
+    // {name, current, target, risk} rows regardless of the shape the
+    // LLM emitted. Three shapes seen in practice:
+    //   1. proper array: [{name, current, target, risk}, ...] — keep as-is
+    //   2. single-key wrap: {list: [...]} / {items: [...]} / etc. — unwrap
+    //   3. object-keyed-by-name: {"@apollo/client": {current, target, risk}, ...}
+    //      — emitted whenever the discover_outdated schema is `packages: json`
+    //      (which JSON Schema validates as `type: object`). The formatter
+    //      then can coerce the array into a name → row map. Merge the key
+    //      back into each row as `name`.
+    // Anything else → empty array (the batch lane safely degrades to
+    // `has_patches: false` and the per-package loop picks up).
+    function toRowArray(value) {
+      if (Array.isArray(value)) return value;
+      if (!value || typeof value !== "object") return [];
       const keys = Object.keys(value);
       if (keys.length === 1 && Array.isArray(value[keys[0]])) return value[keys[0]];
       for (const k of ["list", "items", "packages", "data", "outdated"]) {
         if (Array.isArray(value[k])) return value[k];
       }
-      return value;
+      // Object-keyed-by-name: every value is itself an object with at least
+      // one of the expected row fields. Guard against {_meta: {...}}-style
+      // sidecar keys by requiring a recognisable field.
+      const ROW_FIELDS = ["current", "target", "risk", "version", "from", "to"];
+      const looksLikePackageMap = keys.length > 0 && keys.every((k) => {
+        const v = value[k];
+        if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+        return ROW_FIELDS.some((f) => Object.prototype.hasOwnProperty.call(v, f));
+      });
+      if (looksLikePackageMap) {
+        return keys.map((k) => Object.assign({ name: k }, value[k]));
+      }
+      return [];
     }
 
     // Operator-side scope filter. When scope excludes "patch" (e.g. a
@@ -2040,7 +2065,7 @@ tool bucket_patches:
       : scopeStr.split(",").map((s) => s.trim()).filter(Boolean);
     const patchesAllowed = allowedRisks.includes("patch");
 
-    const list = Array.isArray(raw) ? raw : Array.isArray(unwrap(raw)) ? unwrap(raw) : [];
+    const list = toRowArray(raw);
 
     let patches = [];
     if (patchesAllowed) {
