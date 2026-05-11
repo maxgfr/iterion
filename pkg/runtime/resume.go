@@ -178,6 +178,22 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 	// defaults) applies on resume too.
 	e.restoreRunEnv(r)
 
+	// Re-bootstrap the sandbox container (see resumeFromFailure for the
+	// rationale — same lifecycle issue applies here: the original Run()
+	// deferred shutdown when it exited to pause, so e.sandbox is nil
+	// on resume and tool nodes downstream of the human would fall back
+	// to host execution).
+	repoRoot := r.RepoRoot
+	if repoRoot == "" {
+		repoRoot = engineRepoRoot(e.workDir)
+	}
+	sandboxCleanup, sbErr := e.startSandbox(ctx, runID, repoRoot)
+	if sbErr != nil {
+		_ = e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, sbErr.Error())
+		return fmt.Errorf("runtime: sandbox: %w", sbErr)
+	}
+	defer sandboxCleanup()
+
 	rs := e.newRunState(runID, r.Inputs)
 	rs.vars = e.resolveVars(r.Inputs)
 	rs.outputs = outputs
@@ -270,6 +286,26 @@ func (e *Engine) resumeFromFailure(ctx context.Context, r *store.Run) error {
 	// would re-fail at the same node even after a fixed binary takes
 	// over.
 	e.restoreRunEnv(r)
+
+	// Re-bootstrap the sandbox container. The original Run() process
+	// owned it through a defer that ran on exit, so a resumed run finds
+	// e.sandbox == nil and would otherwise fall back to running every
+	// tool node on the host. Without this, recipes that rely on the
+	// sandbox toolchain (modern dash for `set -o pipefail`, /workspace
+	// bind mount, the slim image's git/jq/curl/node pinned versions,
+	// ...) silently fail in confusing ways post-resume. r.RepoRoot is
+	// the source of truth for the original repo root; engineRepoRoot
+	// is the worktree-less fallback for older runs.
+	repoRoot := r.RepoRoot
+	if repoRoot == "" {
+		repoRoot = engineRepoRoot(e.workDir)
+	}
+	sandboxCleanup, sbErr := e.startSandbox(ctx, runID, repoRoot)
+	if sbErr != nil {
+		_ = e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, sbErr.Error())
+		return fmt.Errorf("runtime: sandbox: %w", sbErr)
+	}
+	defer sandboxCleanup()
 
 	rs := e.newRunState(runID, r.Inputs)
 	rs.vars = e.resolveVars(r.Inputs)
