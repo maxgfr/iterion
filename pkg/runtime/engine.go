@@ -471,64 +471,20 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 	}
 
 	// Sandbox lifecycle: when the workflow opts in, start a long-lived
-	// container that hosts every delegate invocation for this run. The
-	// resolver consults workflow > global default > CLI override; an
-	// active mode that the host can't honour (no docker/podman) emits
-	// a sandbox_skipped event and falls back to a noop run so the
-	// rest of the engine code stays uniform.
+	// container that hosts every delegate invocation for this run.
+	// startSandbox handles the workflow/global/CLI resolution, executor
+	// wiring, and containerWorkspace stash so resumes can share the
+	// exact same path.
 	repoRoot := wtCtx.repoRoot
 	if repoRoot == "" {
 		repoRoot = engineRepoRoot(e.workDir)
 	}
-	emitForSandbox := func(t store.EventType, data map[string]interface{}) error {
-		return e.emit(ctx, runID, t, "", data)
-	}
-	var attachHost string
-	if e.store != nil && e.store.Root() != "" {
-		attachHost = filepath.Join(e.store.Root(), "runs", runID, "attachments")
-	}
-	active, sbErr := resolveAndStartSandbox(ctx, SandboxParams{
-		Workflow:                 e.workflow,
-		RunID:                    runID,
-		FriendlyName:             e.runName,
-		RepoRoot:                 repoRoot,
-		WorkspacePath:            e.workDir,
-		CLIOverride:              e.sandboxOverride,
-		GlobalDefault:            e.sandboxDefault,
-		DefaultImage:             e.sandboxDefaultImage,
-		EmitEvent:                emitForSandbox,
-		Logger:                   e.logger,
-		AttachmentsHostDir:       attachHost,
-		AttachmentsContainerPath: "/run/iterion/attachments",
-	})
+	sandboxCleanup, sbErr := e.startSandbox(ctx, runID, repoRoot)
 	if sbErr != nil {
 		_ = e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, sbErr.Error())
 		return fmt.Errorf("runtime: sandbox: %w", sbErr)
 	}
-	defer func() {
-		if active != nil {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			active.shutdown(cleanupCtx, e.logger)
-		}
-	}()
-	if active != nil && active.run != nil {
-		if s, ok := e.executor.(sandboxSetter); ok {
-			s.SetSandbox(active.run)
-		}
-		// Stash the in-container bind-mount target so resolveVars can
-		// remap ${PROJECT_DIR} to a path that processes RUNNING in
-		// the sandbox can actually open. Without this, tool nodes
-		// like `git -C ${PROJECT_DIR}` get a host worktree path
-		// (/home/<user>/.iterion/.../worktrees/run_xxx) which the
-		// container has no view of, and fail with ENOENT — the
-		// failure mode that broke capture_start_sha after detect_stack
-		// finally landed structured output.
-		e.containerWorkspace = active.workspaceFolder
-		if e.logger != nil {
-			e.logger.Info("runtime: sandbox active (driver=%s, workspace=%s)", active.run.Driver(), active.workspaceFolder)
-		}
-	}
+	defer sandboxCleanup()
 
 	// Emit run_started.
 	if err := e.emit(ctx, runID, store.EventRunStarted, "", nil); err != nil {

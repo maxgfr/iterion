@@ -727,3 +727,72 @@ func engineRepoRoot(workDir string) string {
 type sandboxSetter interface {
 	SetSandbox(run sandbox.Run)
 }
+
+// startSandbox boots the run's sandbox container (if the workflow opts
+// in), wires it into the executor, stashes the in-container workspace
+// path, and returns a no-arg cleanup the caller must defer.
+//
+// Used by both [Engine.Run] (fresh launches) and the resume paths so
+// resumed runs inherit the same filesystem/toolchain isolation as the
+// original. Before this helper existed, resumeFromFailure / resumeFromPause
+// skipped the bootstrap entirely, leaving e.sandbox == nil — tool nodes
+// then ran on the host (host /bin/sh, host paths, host env), which broke
+// recipes that depend on the container's toolchain (e.g. `set -o pipefail`
+// requires a modern dash, host paths differ from /workspace, etc.).
+//
+// repoRoot is the absolute path of the git repo backing the run's
+// workspace (used by sandbox driver to mount .git on worktree-active
+// runs). Pass engineRepoRoot(e.workDir) on resume when no
+// worktreeContext is available.
+//
+// A non-nil error means the sandbox was requested but couldn't start.
+// The caller is responsible for failing the run; the returned cleanup
+// is a noop in that case but safe to defer.
+func (e *Engine) startSandbox(ctx context.Context, runID string, repoRoot string) (func(), error) {
+	noopCleanup := func() {}
+	emitForSandbox := func(t store.EventType, data map[string]interface{}) error {
+		return e.emit(ctx, runID, t, "", data)
+	}
+	var attachHost string
+	if e.store != nil && e.store.Root() != "" {
+		attachHost = filepath.Join(e.store.Root(), "runs", runID, "attachments")
+	}
+	active, sbErr := resolveAndStartSandbox(ctx, SandboxParams{
+		Workflow:                 e.workflow,
+		RunID:                    runID,
+		FriendlyName:             e.runName,
+		RepoRoot:                 repoRoot,
+		WorkspacePath:            e.workDir,
+		CLIOverride:              e.sandboxOverride,
+		GlobalDefault:            e.sandboxDefault,
+		DefaultImage:             e.sandboxDefaultImage,
+		EmitEvent:                emitForSandbox,
+		Logger:                   e.logger,
+		AttachmentsHostDir:       attachHost,
+		AttachmentsContainerPath: "/run/iterion/attachments",
+	})
+	if sbErr != nil {
+		return noopCleanup, sbErr
+	}
+	if active != nil && active.run != nil {
+		if s, ok := e.executor.(sandboxSetter); ok {
+			s.SetSandbox(active.run)
+		}
+		// Stash the in-container bind-mount target so resolveVars can
+		// remap ${PROJECT_DIR} to a path processes RUNNING in the
+		// sandbox can actually open.
+		e.containerWorkspace = active.workspaceFolder
+		if e.logger != nil {
+			e.logger.Info("runtime: sandbox active (driver=%s, workspace=%s)", active.run.Driver(), active.workspaceFolder)
+		}
+	}
+	cleanup := func() {
+		if active == nil {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		active.shutdown(cleanupCtx, e.logger)
+	}
+	return cleanup, nil
+}
