@@ -890,6 +890,9 @@ func (p *parser) parseAgentProp(ad *ast.AgentDecl, propTok Token) {
 	case TokenBackend:
 		p.expect(TokenColon)
 		ad.Backend = p.expectString()
+	case TokenProvider:
+		p.expect(TokenColon)
+		ad.Provider = p.expectString()
 	case TokenInteraction:
 		p.expect(TokenColon)
 		ad.Interaction = p.parseInteractionMode()
@@ -1000,6 +1003,9 @@ func (p *parser) parseJudgeProp(jd *ast.JudgeDecl, propTok Token) {
 	case TokenBackend:
 		p.expect(TokenColon)
 		jd.Backend = p.expectString()
+	case TokenProvider:
+		p.expect(TokenColon)
+		jd.Provider = p.expectString()
 	case TokenInteraction:
 		p.expect(TokenColon)
 		jd.Interaction = p.parseInteractionMode()
@@ -1069,6 +1075,10 @@ func (p *parser) parseRouterDecl() *ast.RouterDecl {
 			p.next()
 			p.expect(TokenColon)
 			rd.Backend = p.expectString()
+		case TokenProvider:
+			p.next()
+			p.expect(TokenColon)
+			rd.Provider = p.expectString()
 		case TokenSystem:
 			p.next()
 			p.expect(TokenColon)
@@ -2255,7 +2265,7 @@ func isKeywordToken(tt TokenType) bool {
 		TokenDisable, TokenAutoloadProject, TokenModel, TokenInput, TokenOutput,
 		TokenPublish, TokenSystem, TokenUser, TokenSession, TokenTools, TokenToolPolicy,
 		TokenToolMaxSteps, TokenReasoningEffort, TokenMode, TokenStrategy, TokenRequire,
-		TokenInstructions, TokenCommand, TokenArgs, TokenURL, TokenBackend, TokenAwait, TokenWhen, TokenNot, TokenAs,
+		TokenInstructions, TokenCommand, TokenArgs, TokenURL, TokenBackend, TokenProvider, TokenAwait, TokenWhen, TokenNot, TokenAs,
 		TokenWith, TokenEnum, TokenFresh, TokenInherit, TokenArtifactsOnly,
 		TokenFanOutAll, TokenCondition, TokenWaitAll, TokenBestEffort,
 		TokenTrue, TokenFalse,

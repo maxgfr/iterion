@@ -184,6 +184,16 @@ type Task struct {
 	// In-process backends (claw) refuse to start when this is set —
 	// see runtime.containsClawNode for the compile-time guard.
 	Sandbox sandbox.Run
+
+	// ProviderHint is the resolved per-node credential-routing hint
+	// from the DSL `provider:` field (post env-expansion). When
+	// non-empty, backends honour it to override the default process-env
+	// precedence. Known values: "anthropic" (force Anthropic-direct,
+	// skip z.ai even when ZAI_API_KEY is set), "zai" (force z.ai
+	// facade), "openai" (force OpenAI-direct, skip OPENAI_BASE_URL
+	// overrides). Empty string means "auto" — current
+	// environment-driven precedence.
+	ProviderHint string
 }
 
 // SystemPromptWithInteraction returns the task's SystemPrompt augmented

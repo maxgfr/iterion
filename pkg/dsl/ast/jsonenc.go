@@ -206,6 +206,7 @@ type jsonAgentDecl struct {
 	Name              string               `json:"name,omitempty"`
 	Model             string               `json:"model,omitempty"`
 	Backend           string               `json:"backend,omitempty"`
+	Provider          string               `json:"provider,omitempty"`
 	MCP               *jsonMCPConfigDecl   `json:"mcp,omitempty"`
 	Input             string               `json:"input,omitempty"`
 	Output            string               `json:"output,omitempty"`
@@ -231,6 +232,7 @@ type jsonJudgeDecl struct {
 	Name              string               `json:"name,omitempty"`
 	Model             string               `json:"model,omitempty"`
 	Backend           string               `json:"backend,omitempty"`
+	Provider          string               `json:"provider,omitempty"`
 	MCP               *jsonMCPConfigDecl   `json:"mcp,omitempty"`
 	Input             string               `json:"input,omitempty"`
 	Output            string               `json:"output,omitempty"`
@@ -257,6 +259,7 @@ type jsonRouterDecl struct {
 	Mode            string `json:"mode,omitempty"`
 	Model           string `json:"model,omitempty"`
 	Backend         string `json:"backend,omitempty"`
+	Provider        string `json:"provider,omitempty"`
 	System          string `json:"system,omitempty"`
 	User            string `json:"user,omitempty"`
 	Multi           bool   `json:"multi,omitempty"`
@@ -504,6 +507,7 @@ func toJSON(f *File) *jsonFile {
 			Mode:            routerModeToStr[r.Mode],
 			Model:           r.Model,
 			Backend:         r.Backend,
+			Provider:        r.Provider,
 			System:          r.System,
 			User:            r.User,
 			Multi:           r.Multi,
@@ -680,6 +684,7 @@ func agentToJSON(a *AgentDecl) *jsonAgentDecl {
 		Name:              a.Name,
 		Model:             a.Model,
 		Backend:           a.Backend,
+		Provider:          a.Provider,
 		MCP:               mcpConfigToJSON(a.MCP),
 		Input:             a.Input,
 		Output:            a.Output,
@@ -707,6 +712,7 @@ func judgeToJSON(j *JudgeDecl) *jsonJudgeDecl {
 		Name:              j.Name,
 		Model:             j.Model,
 		Backend:           j.Backend,
+		Provider:          j.Provider,
 		MCP:               mcpConfigToJSON(j.MCP),
 		Input:             j.Input,
 		Output:            j.Output,
@@ -885,6 +891,7 @@ func fromJSON(jf *jsonFile) (*File, error) {
 			Mode:            mode,
 			Model:           jr.Model,
 			Backend:         jr.Backend,
+			Provider:        jr.Provider,
 			System:          jr.System,
 			User:            jr.User,
 			Multi:           jr.Multi,
@@ -1061,6 +1068,7 @@ func agentFromJSON(ja *jsonAgentDecl) (*AgentDecl, error) {
 		Name:              ja.Name,
 		Model:             ja.Model,
 		Backend:           ja.Backend,
+		Provider:          ja.Provider,
 		MCP:               mcpConfigFromJSON(ja.MCP),
 		Input:             ja.Input,
 		Output:            ja.Output,
@@ -1100,6 +1108,7 @@ func judgeFromJSON(jj *jsonJudgeDecl) (*JudgeDecl, error) {
 		Name:              jj.Name,
 		Model:             jj.Model,
 		Backend:           jj.Backend,
+		Provider:          jj.Provider,
 		MCP:               mcpConfigFromJSON(jj.MCP),
 		Input:             jj.Input,
 		Output:            jj.Output,

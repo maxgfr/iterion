@@ -131,3 +131,80 @@ func TestResolveBackend_FallbackToClawWhenNothing(t *testing.T) {
 		t.Fatalf("got %q, want claw (last-resort)", got)
 	}
 }
+
+// nodeWithBackendProvider returns an AgentNode carrying both literal
+// backend and provider strings so resolveBackend / resolveProvider
+// tests can exercise their respective env-expansion paths.
+func nodeWithBackendProvider(backend, provider string) *ir.AgentNode {
+	n := &ir.AgentNode{}
+	n.LLMFields.Backend = backend
+	n.LLMFields.Provider = provider
+	return n
+}
+
+func TestResolveBackend_EnvVarExpansion(t *testing.T) {
+	resetEnvForResolve(t)
+	t.Setenv("MY_BACKEND", "claude_code")
+	e := newExecutorForResolveTest("")
+	got := e.resolveBackendName(nodeWithBackendProvider("${MY_BACKEND}", ""))
+	if got != "claude_code" {
+		t.Fatalf("got %q, want claude_code (env-expanded)", got)
+	}
+}
+
+func TestResolveBackend_EnvVarDefaultExpansion(t *testing.T) {
+	resetEnvForResolve(t)
+	// MY_BACKEND unset → default form wins.
+	e := newExecutorForResolveTest("")
+	got := e.resolveBackendName(nodeWithBackendProvider("${MY_BACKEND:-codex}", ""))
+	if got != "codex" {
+		t.Fatalf("got %q, want codex (env default)", got)
+	}
+}
+
+func TestResolveProvider_NodeExplicit(t *testing.T) {
+	resetEnvForResolve(t)
+	e := newExecutorForResolveTest("")
+	got := e.resolveProvider(nodeWithBackendProvider("claude_code", "anthropic"))
+	if got != "anthropic" {
+		t.Fatalf("got %q, want anthropic", got)
+	}
+}
+
+func TestResolveProvider_EnvVarExpansion(t *testing.T) {
+	resetEnvForResolve(t)
+	t.Setenv("RESCUE_PROVIDER", "anthropic")
+	e := newExecutorForResolveTest("")
+	got := e.resolveProvider(nodeWithBackendProvider("claude_code", "${RESCUE_PROVIDER:-zai}"))
+	if got != "anthropic" {
+		t.Fatalf("got %q, want anthropic (env-expanded)", got)
+	}
+}
+
+func TestResolveProvider_EnvVarDefaultExpansion(t *testing.T) {
+	resetEnvForResolve(t)
+	// RESCUE_PROVIDER unset → default "zai" wins.
+	e := newExecutorForResolveTest("")
+	got := e.resolveProvider(nodeWithBackendProvider("claude_code", "${RESCUE_PROVIDER:-zai}"))
+	if got != "zai" {
+		t.Fatalf("got %q, want zai (env default)", got)
+	}
+}
+
+func TestResolveProvider_AutoNormalizesToEmpty(t *testing.T) {
+	resetEnvForResolve(t)
+	e := newExecutorForResolveTest("")
+	got := e.resolveProvider(nodeWithBackendProvider("claude_code", "auto"))
+	if got != "" {
+		t.Fatalf("got %q, want '' (auto → blank lets cred resolver fall to its default precedence)", got)
+	}
+}
+
+func TestResolveProvider_EmptyWhenUnset(t *testing.T) {
+	resetEnvForResolve(t)
+	e := newExecutorForResolveTest("")
+	got := e.resolveProvider(&ir.AgentNode{})
+	if got != "" {
+		t.Fatalf("got %q, want '' for unset Provider", got)
+	}
+}

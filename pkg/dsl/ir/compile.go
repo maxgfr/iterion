@@ -667,6 +667,7 @@ func (c *compiler) compileAgents() {
 			LLMFields: LLMFields{
 				Model:           model,
 				Backend:         a.Backend,
+				Provider:        a.Provider,
 				SystemPrompt:    a.System,
 				UserPrompt:      a.User,
 				MaxTokens:       a.MaxTokens,
@@ -728,6 +729,7 @@ func (c *compiler) compileJudges() {
 			LLMFields: LLMFields{
 				Model:           model,
 				Backend:         j.Backend,
+				Provider:        j.Provider,
 				SystemPrompt:    j.System,
 				UserPrompt:      j.User,
 				MaxTokens:       j.MaxTokens,
@@ -800,6 +802,7 @@ func (c *compiler) compileRouters() {
 			}
 			node.Model = model
 			node.Backend = r.Backend
+			node.Provider = r.Provider
 			c.warnCodexDiscouraged("router", r.Name, r.Backend)
 			if r.System != "" {
 				c.validatePromptRef(r.Name, "system", r.System)

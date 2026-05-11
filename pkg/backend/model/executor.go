@@ -559,7 +559,9 @@ func (e *ClawExecutor) SetWorkDir(dir string) {
 // resolveBackendName returns the effective backend name for a node.
 //
 // Resolution chain (first non-empty wins):
-//  1. node.Backend (set on AgentNode/JudgeNode/RouterNode)
+//  1. node.Backend (set on AgentNode/JudgeNode/RouterNode); supports
+//     ${VAR}/${VAR:-default} env-var expansion so workflows can pick
+//     a backend per environment (e.g. `backend: "${RESCUE_BACKEND:-claude_code}"`).
 //  2. workflow-level default (e.defaultBackend, from `default_backend:` or
 //     IR Preferences.BackendOrder[0])
 //  3. ITERION_DEFAULT_BACKEND env var (legacy explicit override)
@@ -579,6 +581,7 @@ func (e *ClawExecutor) resolveBackendName(node ir.Node) string {
 	case *ir.RouterNode:
 		backend = n.Backend
 	}
+	backend = ir.ExpandEnvWithDefault(backend)
 	if backend != "" && backend != "auto" {
 		return backend
 	}
@@ -592,6 +595,43 @@ func (e *ClawExecutor) resolveBackendName(node ir.Node) string {
 		return resolved
 	}
 	return delegate.BackendClaw
+}
+
+// resolveProvider returns the per-node credential-routing hint, or ""
+// to defer to the global precedence (process env + sandboxed
+// credentials). Supports the same ${VAR}/${VAR:-default} env-var
+// expansion as resolveBackendName so a single recipe can flip a node
+// between providers without an edit:
+//
+//	judge reviewer_claude:
+//	  backend: claude_code
+//	  provider: "${RESCUE_PROVIDER:-zai}"    # set RESCUE_PROVIDER=anthropic
+//	                                          # in ~/.iterion/env to escalate
+//
+// Known values (matched by anthropicCredOptsForCLI / the claw registry):
+//   - "anthropic" — force ANTHROPIC_API_KEY / CLAUDE_CONFIG_DIR, skip z.ai
+//     even when ZAI_API_KEY is set on the process. Useful when a node
+//     needs Anthropic's larger context window.
+//   - "zai" — force z.ai routing (ANTHROPIC_BASE_URL=z.ai facade +
+//     ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY).
+//   - "openai" — for claw/OpenAI-compat: force OPENAI_API_KEY direct
+//     (skip OPENAI_BASE_URL-overridden routes).
+//   - "auto" / "" — current process-env-driven precedence.
+func (e *ClawExecutor) resolveProvider(node ir.Node) string {
+	var provider string
+	switch n := node.(type) {
+	case *ir.AgentNode:
+		provider = n.Provider
+	case *ir.JudgeNode:
+		provider = n.Provider
+	case *ir.RouterNode:
+		provider = n.Provider
+	}
+	provider = ir.ExpandEnvWithDefault(provider)
+	if provider == "auto" {
+		return ""
+	}
+	return provider
 }
 
 // detectorResolve picks the first available backend in
@@ -661,6 +701,7 @@ type backendFields struct {
 	id               string
 	model            string
 	backend          string
+	provider         string
 	systemPrompt     string
 	userPrompt       string
 	reasoningEffort  string
@@ -678,7 +719,7 @@ func extractBackendFields(node ir.Node) backendFields {
 	switch n := node.(type) {
 	case *ir.AgentNode:
 		return backendFields{
-			id: n.ID, model: n.Model, backend: n.Backend,
+			id: n.ID, model: n.Model, backend: n.Backend, provider: n.Provider,
 			systemPrompt: n.SystemPrompt, userPrompt: n.UserPrompt,
 			reasoningEffort: n.ReasoningEffort, outputSchema: n.OutputSchema,
 			tools: n.Tools, toolMaxSteps: n.ToolMaxSteps,
@@ -690,7 +731,7 @@ func extractBackendFields(node ir.Node) backendFields {
 		}
 	case *ir.JudgeNode:
 		return backendFields{
-			id: n.ID, model: n.Model, backend: n.Backend,
+			id: n.ID, model: n.Model, backend: n.Backend, provider: n.Provider,
 			systemPrompt: n.SystemPrompt, userPrompt: n.UserPrompt,
 			reasoningEffort: n.ReasoningEffort, outputSchema: n.OutputSchema,
 			tools: n.Tools, toolMaxSteps: n.ToolMaxSteps,
@@ -783,6 +824,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		CompactThresholdRatio: compactRatio,
 		CompactPreserveRecent: compactPreserve,
 		Sandbox:               e.sandbox,
+		ProviderHint:          e.resolveProvider(node),
 	}
 
 	// When interaction is enabled, ensure `ask_user` is in the node's
@@ -1950,6 +1992,7 @@ func (e *ClawExecutor) executeLLMRouterUnified(ctx context.Context, node *ir.Rou
 		WorkDir:         e.workDir,
 		ReasoningEffort: resolveReasoningEffort(node.ReasoningEffort, input),
 		Sandbox:         e.sandbox,
+		ProviderHint:    e.resolveProvider(node),
 	}
 
 	// Emit backend started event.
