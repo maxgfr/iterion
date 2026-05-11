@@ -473,6 +473,12 @@ func (c *compiler) compile() *Workflow {
 		Sandbox:        c.compileSandboxBlock(wf.Sandbox, "workflow", wf.Name),
 	}
 
+	// Compute each loop's body — the set of nodes that participate in
+	// the loop's iteration cycle. Required so the runtime can reset a
+	// loop's counter on re-entry from outside the body (turns a
+	// run-global budget into a per-entry budget).
+	computeLoopBodies(w)
+
 	// Static validation pass (P2-02).
 	c.validate(w)
 
@@ -1233,5 +1239,105 @@ func convertVarType(te ast.TypeExpr) VarType {
 		return VarStringArray
 	default:
 		return VarString
+	}
+}
+
+// computeLoopBodies populates Loop.Body for each loop in the workflow.
+// A loop's body is the set of nodes on a non-loop-edge path from one of
+// the loop's edge targets back to one of its edge sources, plus those
+// endpoints. The runtime uses this body to detect "re-entry from
+// outside" (a non-loop edge whose target is in the body and whose source
+// is not) and reset the counter for a fresh iteration budget.
+//
+// Why non-loop edges only? With nested loops (e.g. a fix_loop inside a
+// package_loop), traversing loop edges during the BFS pulls nodes from
+// the OUTER cycle into the INNER loop's body — fix_loop would absorb
+// select_candidate and commit_changes through the package_loop edge.
+// Restricting to non-loop edges gives each loop its natural minimal
+// scope, which is what the reset rule needs (resetting on entry to a
+// non-shared portion of the inner loop's body).
+//
+// Algorithm per loop:
+//  1. Collect all (from, to) pairs of edges that carry this loop's name.
+//     Seed the body with their endpoints.
+//  2. From every loop-edge target, do a forward BFS over non-loop edges:
+//     these are the nodes reachable while staying inside the loop's
+//     iteration without crossing any loop boundary.
+//  3. From every loop-edge source, do a reverse BFS over non-loop edges.
+//  4. Body = endpoints ∪ (forward ∩ reverse).
+//
+// Workflows without loops keep Loop.Body == nil. Loops whose endpoints
+// share a single source/target node still compute correctly (Body is at
+// minimum the {from, to} pair).
+func computeLoopBodies(w *Workflow) {
+	if len(w.Loops) == 0 || len(w.Edges) == 0 {
+		return
+	}
+	// Build forward / reverse adjacency lists from NON-LOOP edges only.
+	// Loop edges are explicitly skipped so the BFS cannot cross loop
+	// boundaries and absorb nodes that belong to an enclosing or
+	// neighbouring loop's cycle.
+	forwardAdj := make(map[string][]string, len(w.Nodes))
+	reverseAdj := make(map[string][]string, len(w.Nodes))
+	for _, edge := range w.Edges {
+		if edge == nil || edge.LoopName != "" {
+			continue
+		}
+		forwardAdj[edge.From] = append(forwardAdj[edge.From], edge.To)
+		reverseAdj[edge.To] = append(reverseAdj[edge.To], edge.From)
+	}
+
+	bfs := func(seeds []string, adj map[string][]string) map[string]bool {
+		visited := make(map[string]bool, len(seeds))
+		queue := make([]string, 0, len(seeds))
+		for _, s := range seeds {
+			if !visited[s] {
+				visited[s] = true
+				queue = append(queue, s)
+			}
+		}
+		for len(queue) > 0 {
+			n := queue[0]
+			queue = queue[1:]
+			for _, next := range adj[n] {
+				if !visited[next] {
+					visited[next] = true
+					queue = append(queue, next)
+				}
+			}
+		}
+		return visited
+	}
+
+	for name, loop := range w.Loops {
+		if loop == nil {
+			continue
+		}
+		var sources, targets []string
+		seen := make(map[string]bool)
+		for _, edge := range w.Edges {
+			if edge == nil || edge.LoopName != name {
+				continue
+			}
+			sources = append(sources, edge.From)
+			targets = append(targets, edge.To)
+			seen[edge.From] = true
+			seen[edge.To] = true
+		}
+		if len(sources) == 0 {
+			continue
+		}
+		forward := bfs(targets, forwardAdj)
+		reverse := bfs(sources, reverseAdj)
+		body := make(map[string]bool, len(seen))
+		for n := range seen {
+			body[n] = true
+		}
+		for n := range forward {
+			if reverse[n] {
+				body[n] = true
+			}
+		}
+		loop.Body = body
 	}
 }

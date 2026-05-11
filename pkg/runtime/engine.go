@@ -924,6 +924,33 @@ func (e *Engine) selectEdgeRS(rs *runState, fromNodeID string, output map[string
 		}
 	}
 
+	// Reset loop counters whose body we are re-entering from outside.
+	// A non-loop edge entering a body node from a non-body source marks
+	// the start of a fresh loop instance (e.g. the package_loop edge
+	// drives a new iteration into Phase 1, which transitively re-enters
+	// the fix_loop body via align_code -> validate_upgrade). Without
+	// this, loop counters are globally cumulative across the run, so
+	// once any single package exhausts fix_loop every subsequent
+	// package gets zero retry budget.
+	if selected.LoopName == "" {
+		for loopName, loop := range e.workflow.Loops {
+			if loop == nil || len(loop.Body) == 0 {
+				continue
+			}
+			if !loop.Body[selected.To] || loop.Body[selected.From] {
+				continue
+			}
+			if prior, ok := rs.loopCounters[loopName]; ok && prior > 0 {
+				e.logger.Debug("loop %q: re-entered via edge %s→%s — counter reset from %d", loopName, selected.From, selected.To, prior)
+				rs.loopCounters[loopName] = 0
+				if rs.loopPreviousOutput != nil {
+					delete(rs.loopPreviousOutput, loopName)
+					delete(rs.loopCurrentOutput, loopName)
+				}
+			}
+		}
+	}
+
 	if selected.LoopName != "" {
 		rs.loopCounters[selected.LoopName] = rs.loopCounters[selected.LoopName] + 1
 		// Rotate snapshots so {{loop.<name>.previous_output}} reads the
