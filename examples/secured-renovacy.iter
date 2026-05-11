@@ -1866,17 +1866,32 @@ tool write_audit_md:
   script: |
     const fs = require("fs");
     const path = require("path");
-    const wd = {{!input.workspace_dir}};
-    const pkg = {{!input.package_name}};
-    const from = {{!input.current_version}};
-    const to = {{!input.target_version}};
-    const risk = {{!input.risk}};
-    const changelog = {{!input.changelog_summary}};
-    const security = {{!input.security_report}};
-    const align = {{!input.align_summary}};
-    const validate = {{!input.validate_report}};
-    const sha = {{!input.commit_sha}};
-    const batchPackages = {{!input.batch_packages}};
+    // All inputs come through the standard {{input.X}} form. Iterion
+    // shell-escapes EVERYTHING — strings get single-quoted (JS string
+    // literal), maps and slices get JSON-encoded then shell-escaped
+    // (JS string of JSON, parse with maybeParse below). This keeps
+    // the script syntactically valid regardless of whether the input
+    // is empty, a primitive, or a structured object.
+    const wd = {{input.workspace_dir}};
+    const pkg = {{input.package_name}};
+    const from = {{input.current_version}};
+    const to = {{input.target_version}};
+    const risk = {{input.risk}};
+    const align = {{input.align_summary}};
+    const validate = {{input.validate_report}};
+    const sha = {{input.commit_sha}};
+    // changelog_summary / security_report / batch_packages may arrive
+    // as strings (empty in some paths) or as JSON-serialised objects/
+    // arrays (per-package / batch paths). maybeParse lifts back into
+    // structured form when the input looks like JSON, otherwise leaves
+    // the string in place.
+    const maybeParse = (v) => {
+      if (typeof v !== "string" || !v) return v;
+      try { return JSON.parse(v); } catch { return v; }
+    };
+    const changelog = maybeParse({{input.changelog_summary}});
+    const security = maybeParse({{input.security_report}});
+    const batchPackages = Array.isArray(maybeParse({{input.batch_packages}})) ? maybeParse({{input.batch_packages}}) : [];
 
     const sanitize = (s) => String(s || "")
       .replace(/^@/, "")
