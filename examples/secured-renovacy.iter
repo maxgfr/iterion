@@ -61,10 +61,10 @@ vars:
   ## Optional overrides — empty strings let detect_stack provide
   ## the canonical commands. These exist mainly as escape hatches
   ## for unusual setups (custom registries, monorepo wrappers, …).
-  override_outdated_cmd: string = ""
+  ## Discovery (`outdated`) and security audit are agentic and
+  ## decide their own commands per-run, so they have no overrides.
   override_install_cmd:  string = ""
   override_upgrade_cmd:  string = ""
-  override_audit_cmd:    string = ""
 
   ## Policy
   scope: string = "patch,minor,major"
@@ -113,13 +113,21 @@ prompt escalation_guidance:
 ## ─── Prompts : Phase 0 — detect_stack ──────────────────────────────
 
 prompt detect_stack_system:
-  You are a stack-detection agent. Your job is to inspect the
-  repository at {{vars.workspace_dir}} (read-only) and emit a
-  structured profile of its package manager and the canonical
-  shell commands needed to discover outdated packages, install,
-  upgrade, and audit them.
+  You are a stack-identification agent. Inspect the repository at
+  {{vars.workspace_dir}} (read-only) and emit a structured profile
+  of its package manager, layout, and best-guess hint commands
+  for install and upgrade.
 
-  Procedure (follow exactly, in order):
+  Every downstream node that runs a manager command is itself an
+  agent (discover_outdated, security_audit, upgrade, install,
+  revert_changes). They consume your `install_cmd` and
+  `upgrade_cmd` as HINTS — starting points they may adapt at
+  runtime — and they read `notes` for the operational details
+  (vendored releases, corepack shims, peer constraints, registry
+  setup). Your job is to give them the most informative profile
+  you can, NOT to deliver verbatim-runnable shell strings.
+
+  Procedure:
     1. List the top-level files (ls / glob) and look for lockfiles
        and manifests: yarn.lock, package-lock.json, pnpm-lock.yaml,
        bun.lockb, Cargo.lock, go.sum, go.mod, requirements.txt,
@@ -127,75 +135,51 @@ prompt detect_stack_system:
        composer.lock, pom.xml, build.gradle*, Pipfile.lock.
     2. Read package.json / pyproject.toml / Cargo.toml /
        composer.json (whichever exist) to confirm the manager and
-       detect monorepo workspaces.
-    3. Decide the canonical commands. Prefer commands that emit
-       JSON or easily-parsed output. If the project pins a specific
+       detect monorepo workspaces. If the project pins a specific
        major version of yarn/npm/pnpm via packageManager or
        engines, respect it.
-    4. **VERIFY each command empirically before returning it.**
-       Use bash to actually run your candidate `outdated_cmd` and
-       `audit_cmd` against the repo. Inspect the output:
-         - outdated_cmd MUST exit 0 (or near-0 with usable
-           stdout) AND produce a JSON array of objects shaped
-           `{name, current, target, risk?}` on stdout. If the
-           array is empty, that's only acceptable when the
-           project is genuinely up-to-date — verify by spot-
-           checking one or two dependency versions in
-           package.json against the registry (e.g. `npm view
-           <name> version`). If the output is an error, the
-           wrong shape, or empty due to tool failure, ITERATE:
-           pick a different approach and re-test until the
-           command actually returns the upgrades the repo has.
-         - audit_cmd MUST exit 0/1 (1 is fine for "vulns
-           found") and produce parseable JSON or NDJSON. Same
-           verification loop on failure.
-       Treat your first guess as a hypothesis, not the answer.
-       Many ecosystem tools have surprising failure modes
-       (yarn 3+ has no native `outdated`; npm-check-updates
-       output shape varies by flag combination; jq pipelines
-       break silently when stdin isn't an array; etc.) — test
-       what actually works on this repo, not what the docs say
-       should work.
-    5. If the user provided overrides via vars
-       (override_outdated_cmd, override_install_cmd,
-       override_upgrade_cmd, override_audit_cmd), USE THEM
-       verbatim and skip steps 3-4 for that field. Empty string
-       means no override.
+    3. Decide best-guess hint commands for install + upgrade. The
+       canonical native form is fine even if the bare binary is
+       not on PATH right now (e.g. `yarn install` / `yarn up
+       --exact` for any yarn project) — downstream agents handle
+       toolchain shimming. If the situation is unusual (no global
+       binary, vendored release, corepack required, private
+       registry), describe the workaround in `notes` so the
+       downstream agent picks it up.
+    4. If the user provided overrides via vars
+       (override_install_cmd, override_upgrade_cmd), USE THEM
+       verbatim and skip the derivation for that field. Empty
+       string means no override.
 
-  CRITICAL command-shape contracts (the workflow consumes these
-  literally — derived commands must satisfy them):
-    - outdated_cmd: produces a JSON array on stdout with at least
-      `{name, current, target}` per entry. Each entry SHOULD also
-      expose `risk` ∈ {patch, minor, major} when derivable from a
-      semver diff; emit "unknown" otherwise. The workflow will
-      `( <outdated_cmd> ) 2>&1 || true` so partial-failure stderr
-      does not block the pipeline — but the JSON array must still
-      be the LAST `[...]` shape on stdout (the runtime extracts
-      `(arrays | first)`).
-    - install_cmd: must run with --immutable=false equivalent —
-      installing fresh after an upgrade.
-    - upgrade_cmd: a TEMPLATE string that the workflow appends a
-      single argument to, of the form `<pkg>@<target_version>`.
-      Example shape (NOT a verbatim instruction — derive what fits
-      the actual manager): `yarn up --exact` (workflow appends
-      ` <pkg>@<v>`).
-    - audit_cmd: emits machine-readable security audit output
-      (JSON or NDJSON). For ecosystems whose native auditor only
-      covers vulnerabilities, combine with a malware/SCA scanner
-      that DOES work on this repo's lockfile (verify it does).
+  Field semantics:
+    - install_cmd: hint for the post-upgrade fresh install (yarn:
+      `yarn install`; npm: `npm install`; pnpm: `pnpm install
+      --no-frozen-lockfile`; pip: `pip install -r requirements.txt
+      --upgrade`; cargo: `cargo build`). Downstream `install` agent
+      may rewrite for shim/PATH reality.
+    - upgrade_cmd: hint for the per-package upgrade — typically a
+      TEMPLATE the downstream `upgrade` agent appends `<pkg>@<v>` to
+      (e.g. `yarn up --exact`, `npm install`, `pnpm update`,
+      `pip install`, `cargo update --package`). Translate for the
+      manager; downstream adapts.
     - lock_files: absolute or repo-relative paths to lock files
-      relevant to security_audit.
+      (consumed by security_audit for SCA scans).
     - workspaces: list of monorepo sub-package directories
       (relative paths). Empty list for non-monorepo.
     - notes: short free-form text capturing peculiarities the rest
-      of the pipeline must respect (e.g., yarn resolutions block,
-      strict peerDependencies, presence of a pre-commit hook that
-      may rewrite commits, the verification approach you used to
-      validate outdated_cmd if it was non-obvious).
+      of the pipeline must respect — be SPECIFIC. Examples:
+      "yarn berry 3.6.1 with vendored release at
+      .yarn/releases/yarn-3.6.1.cjs; invoke via `corepack yarn …`
+      or `node .yarn/releases/yarn-3.6.1.cjs …` since `yarn`
+      itself is not on PATH"; "pre-commit hook runs eslint --fix
+      on staged files"; "private npm registry at
+      npm.pkg.example.com requires NPM_TOKEN in env". The
+      downstream agents READ this — they cannot succeed without
+      it when the canonical command would fail.
 
   REQUIRED JSON OUTPUT SCHEMA (use these EXACT field names — no
   aliases, no nested objects). Your final message MUST be a single
-  fenced ```json block containing one object with all 9 fields:
+  fenced ```json block containing one object with all 7 fields:
     pkg_manager   string  — one of: yarn, npm, pnpm, bun, cargo,
                             pip, poetry, uv, bundler, composer,
                             maven, gradle, mix, go.
@@ -204,18 +188,16 @@ prompt detect_stack_system:
                             "single".
     workspaces    string[]— relative sub-package directories;
                             empty array for single-repo.
-    outdated_cmd  string  — see CRITICAL command-shape rules above.
-    upgrade_cmd   string  — TEMPLATE that the workflow appends a
+    upgrade_cmd   string  — TEMPLATE that the pipeline appends a
                             single ` <pkg>@<version>` argument to.
     install_cmd   string  — fresh install command after an upgrade.
-    audit_cmd     string  — security audit command emitting JSON.
     lock_files    string[]— absolute or repo-relative lockfile
                             paths.
     notes         string  — short free-form text. Empty string OK.
 
   Do NOT use field aliases like `manager`, `manager_version`,
   `node_engine`, `monorepo` (boolean), or `manager_pinned_via` —
-  those will be REJECTED by schema validation. Stick to the 9
+  those will be REJECTED by schema validation. Stick to the 7
   field names listed above.
 
   ### Project context (operator)
@@ -226,59 +208,231 @@ prompt detect_stack_user:
   Run only readonly commands. Do not modify any file.
 
   Operator overrides (apply VERBATIM where non-empty):
-    override_outdated_cmd: "{{vars.override_outdated_cmd}}"
     override_install_cmd:  "{{vars.override_install_cmd}}"
     override_upgrade_cmd:  "{{vars.override_upgrade_cmd}}"
-    override_audit_cmd:    "{{vars.override_audit_cmd}}"
 
-## ─── Prompts : Phase 1 — changelog_review ──────────────────────────
+## ─── Prompts : Phase 1 — discover_outdated (agentified) ───────────
+
+prompt discover_outdated_system:
+  You are an outdated-package discovery agent. Produce the
+  authoritative list of packages whose installed version is below
+  the latest compatible release available from the registry, for
+  the package manager identified upstream.
+
+  Procedure (adapt to the manager — do not follow blindly):
+    1. Read `input.pkg_manager`, `input.workspaces`, `input.notes`
+       to orient yourself. The notes from detect_stack may flag
+       peculiarities (private registries, monorepo wrappers, peer
+       constraints) that change the right approach.
+    2. Choose the most reliable native tool for this manager.
+       Plausible starting points by ecosystem (NOT prescriptive):
+         - yarn classic / berry: `yarn outdated --json` (classic),
+           or for berry where it does not exist, query the lock
+           file + `npm view` per package, or `yarn npm info`.
+         - npm:      `npm outdated --json` (object-keyed by name).
+         - pnpm:     `pnpm outdated --format=json`.
+         - bun:      `bun outdated --json` if available, else lock
+                     + registry probe.
+         - cargo:    `cargo outdated --format=json` (cargo-outdated
+                     plugin); install if missing or fall back to
+                     `cargo update --dry-run` parsing.
+         - pip:      `pip list --outdated --format=json`.
+         - poetry:   `poetry show --outdated --top-level --json`.
+         - uv:       `uv pip list --outdated --format=json`.
+         - composer: `composer outdated --format=json`.
+         - bundler:  `bundle outdated --parseable`.
+         - go:       `go list -u -m -json all` (filter Update !=
+                     null).
+         - maven:    `mvn versions:display-dependency-updates`.
+         - gradle:   `gradle dependencyUpdates` (with the
+                     com.github.ben-manes.versions plugin).
+       Whichever you pick: run it via bash, inspect the output,
+       and iterate if the result is empty, errors out, or has an
+       unexpected shape. Treat the first try as a hypothesis.
+    3. For monorepo (`workspaces` non-empty): either run the
+       manager's monorepo-aware variant (e.g. `yarn workspaces
+       foreach ...`), or iterate the workspaces yourself. Merge
+       duplicates by package name, keeping the entry whose
+       `current` lags the most.
+    4. Normalise every entry to the exact shape:
+         {name: string, current: string, target: string,
+          risk: "patch"|"minor"|"major"|"unknown"}
+       - `target` is the LATEST STABLE release the registry
+         publishes for this package — NOT clipped to the
+         project's declared range. The downstream scope policy
+         is what decides whether to attempt patch/minor/major,
+         and align_code is the place where breaking changes get
+         resolved. If you cap target to the declared range here,
+         majors are unreachable forever.
+       - `risk` is the semver diff between `current` and `target`
+         (patch / minor / major). Use "unknown" only when versions
+         are non-semver or genuinely indeterminate. Do not invent.
+    5. Include BOTH runtime and dev-only dependencies — the
+       downstream scope filter is the single source of truth for
+       which packages get attempted. Skipping dev deps here would
+       silently exclude them from major-bump policy too.
+
+  Tools at your disposal: bash, read_file, list_files, glob, grep.
+  Read-only. Use bash freely to retry candidates and probe the
+  registry. Be thorough — this list is the source of truth for
+  the entire Phase 1 loop.
+
+  REQUIRED JSON OUTPUT SCHEMA (exact field names):
+    packages json     — ARRAY (NOT an object map) of objects with
+                        these four exact fields: {name, current,
+                        target, risk}. Empty array if the project
+                        is genuinely up-to-date. Many ecosystem
+                        tools emit an object keyed by package name
+                        (e.g. `npm outdated --json`) — you MUST
+                        transpose that to an array, otherwise the
+                        downstream `select_candidate` cannot index
+                        survivors[0] and the pipeline stalls.
+    count    int      — packages.length (recompute, do not trust
+                        the manager's tally).
+    raw      string   — the most informative raw tool output you
+                        produced (one-shot, not the whole bash
+                        transcript). Used by humans to diagnose
+                        if the agent missed packages.
+
+  Example output (illustrative shape — not the real data):
+    ```json
+    {
+      "packages": [
+        {"name": "lodash", "current": "4.17.20", "target": "4.17.21", "risk": "patch"},
+        {"name": "react",  "current": "17.0.2",  "target": "18.3.1",  "risk": "major"}
+      ],
+      "count": 2,
+      "raw": "<concise tool output…>"
+    }
+    ```
+
+  ### Project context (operator)
+  {{vars.user_prompt}}
+
+prompt discover_outdated_user:
+  Discover outdated packages for this repo.
+
+  Workspace:    {{vars.workspace_dir}}
+  Pkg manager:  {{input.pkg_manager}}
+  Workspaces:   {{input.workspaces}}
+  Lock files:   {{input.lock_files}}
+  Notes:        {{input.notes}}
+
+  Emit the structured outdated list. Read-only.
+
+## ─── Prompts : Phase 1 — security_audit (agentified) ──────────────
+
+prompt security_audit_system:
+  You are a security-audit agent. For ONE candidate package
+  upgrade, decide whether applying the upgrade is safe — i.e. the
+  target version is not known-malicious and the project's current
+  dependency tree does not depend on the candidate via a path
+  that introduces a critical vulnerability the upgrade does not
+  resolve.
+
+  Procedure:
+    1. Read `input.pkg_manager`, `input.lock_files`, `input.notes`
+       to pick the right native auditor. Plausible starting points
+       (NOT prescriptive):
+         - yarn:     `yarn npm audit --json --recursive` (berry)
+                     or `yarn audit --json` (classic).
+         - npm:      `npm audit --json`.
+         - pnpm:     `pnpm audit --json`.
+         - bun:      `bun audit --json` (Bun 1.2+); otherwise
+                     `bun pm pack --dry-run` + osv lookup, or
+                     fall back to npm-audit semantics on the
+                     bun.lockb companion package-lock.json.
+         - cargo:    `cargo audit --json` (install if needed).
+         - pip:      `pip-audit --format json`.
+         - poetry:   `poetry export -f requirements.txt | pip-audit
+                     --requirement /dev/stdin --format json`.
+         - uv:       `uv export --format requirements-txt |
+                     pip-audit --requirement /dev/stdin
+                     --format json`.
+         - composer: `composer audit --format json`.
+         - bundler:  `bundle audit check --update`.
+         - go:       `govulncheck -json ./...`.
+         - maven:    `mvn -q org.owasp:dependency-check-maven:check
+                     -Dformats=JSON -DfailBuildOnCVSS=11` (use 11
+                     to never fail-on-find; we read the report).
+         - gradle:   `gradle dependencyCheckAnalyze
+                     -PoutputFormat=JSON` with the OWASP plugin.
+         - mix:      `mix deps.audit` (hex_audit). Combine with
+                     `mix hex.audit` for retired packages.
+       Run via bash, parse the JSON/NDJSON output, iterate if
+       the tool errors or produces an unexpected shape. If the
+       native auditor is unavailable in this sandbox, fall back
+       to the OSV API for `input.selected_package` at
+       `input.target_version` (`curl -sS -X POST
+       https://api.osv.dev/v1/query -d '{"package":{"name":...,
+       "ecosystem":<eco>},"version":"<target>"}'`).
+    2. If `input.lock_files` is non-empty, ALSO run osv-scanner
+       on the first lockfile to cover the SCA / malware angle:
+         `npx --yes osv-scanner --lockfile=<path> --format json`.
+       Parse the JSON. osv-scanner gracefully reports zero
+       vulnerabilities as an empty list.
+    3. Cross-reference: extract every CVE/advisory affecting
+       `input.selected_package` at `input.target_version` from
+       BOTH sources. Decide:
+         - safe=false if any HIGH or CRITICAL CVE affects the
+           target version AND has no fix available.
+         - safe=false if osv-scanner flags the target version as
+           malware/malicious.
+         - safe=true if the target version is clean OR all
+           remaining issues are LOW/MEDIUM severity AND the
+           upgrade resolves more vulnerabilities than it
+           introduces.
+       Reason carefully — most upgrades RESOLVE vulnerabilities
+       rather than introduce them. Do not block a package just
+       because the project's overall audit reports issues
+       unrelated to this package.
+    4. Populate `cves` (string IDs, e.g. "CVE-2024-12345",
+       "GHSA-xxxx-yyyy-zzzz") and `malware_signals` (short text
+       per signal, e.g. "osv: known typosquat of <real_pkg>").
+
+  Tools at your disposal: bash, read_file, list_files, glob, grep.
+  Read-only.
+
+  REQUIRED JSON OUTPUT SCHEMA (exact field names):
+    safe              bool     — overall verdict for this upgrade.
+    cves              string[] — advisory IDs you considered.
+                                 Empty array if none.
+    malware_signals   string[] — short strings flagging malware
+                                 indicators from osv-scanner or
+                                 the native auditor. Empty array
+                                 if none.
+    source            string   — short label of the tools used
+                                 (e.g. "yarn npm audit + osv").
+    raw               string   — condensed raw output, sized for
+                                 a human to skim. Trim noise.
+
+  ### Project context (operator)
+  {{vars.user_prompt}}
+
+prompt security_audit_user:
+  Audit this upgrade.
+
+  Workspace:        {{vars.workspace_dir}}
+  Package:          {{input.selected_package}}
+  Target version:   {{input.target_version}}
+  Pkg manager:      {{input.pkg_manager}}
+  Lock files:       {{input.lock_files}}
+  Notes:            {{input.notes}}
+
+  Decide `safe` for this specific upgrade. Read-only.
 
 ## ─── Prompts : Phase 1 — select_candidate (agentified) ─────────────
 
+## Note: select_candidate was an LLM agent in earlier drafts. It now
+## runs as a deterministic jq tool — selection is pure filter / sort /
+## slice, and absorbing whatever shape `packages` arrived in (object,
+## wrapped-array, …) used to break reproducibility silently. The
+## prompts below are kept as documentation only.
 prompt select_candidate_system:
-  You are a deterministic selector. Pick the next package to
-  upgrade from a discovered outdated list, given the upgrade
-  policy and the set of already-attempted packages.
-
-  Procedure (apply EXACTLY in this order — do NOT improvise):
-    1. Parse `input.scope` (comma-separated) into the set of
-       allowed risk levels. The unbounded value "all" is
-       equivalent to {"patch","minor","major","unknown"}.
-    2. Filter `input.packages`:
-         - keep only entries whose `risk` (default "unknown") is
-           in the allowed scope set;
-         - drop any entry whose `name` already appears in
-           `input.attempted` (treat each attempted item's `name`
-           field as the key).
-    3. Sort the survivors by risk in ASCENDING order: patch < minor
-       < major < unknown. Stable sort: keep input order within a
-       risk class.
-    4. Read `input.attempted` length as `attempted_count`.
-       If attempted_count >= input.max_packages OR survivors is
-       empty: emit:
-         {selected_package:"", current_version:"", target_version:"",
-          risk:"unknown", has_more:false, attempted_count: <count>,
-          cumulative_attempted: input.attempted, fix_loop_max:0}
-    5. Otherwise pick survivors[0] as `p` and emit:
-         {selected_package: p.name,
-          current_version: (p.current // ""),
-          target_version: (p.target // ""),
-          risk: (p.risk // "unknown"),
-          has_more: true,
-          attempted_count: <count>,
-          cumulative_attempted: input.attempted ++ [{name: p.name}],
-          fix_loop_max: (5 if risk=="major" else 3)}
-
-  Be strict about the JSON shape. No prose. No commentary. Output
-  EXACTLY the structured object the schema demands.
+  (unused — select_candidate is a deterministic tool, see node below)
 
 prompt select_candidate_user:
-  Pick the next package.
-
-  packages:        {{input.packages}}
-  scope:           {{input.scope}}
-  attempted:       {{input.attempted}}
-  max_packages:    {{input.max_packages}}
+  (unused — select_candidate is a deterministic tool, see node below)
 
 prompt changelog_review_system:
   You analyse the upcoming version bump for ONE package and decide
@@ -329,6 +483,181 @@ prompt changelog_review_user:
   Workspace: {{vars.workspace_dir}}
 
   Produce the structured changelog summary. Read-only.
+
+## ─── Prompts : Phase 1 — upgrade / install / revert (agentified) ──
+
+prompt upgrade_system:
+  You upgrade ONE specific package in the consuming repository to
+  the target version, using whatever invocation works in THIS
+  sandbox right now. You then emit a structured result.
+
+  Procedure:
+    1. Read `input.pkg_manager`, `input.notes`, `input.upgrade_cmd_hint`
+       (a best-guess command from detect_stack — treat as a hint,
+       not a contract). `input.notes` often flags shim requirements
+       (e.g. yarn berry with no global binary on PATH, corepack
+       activation needed, vendored `.yarn/releases/yarn-X.Y.Z.cjs`).
+    2. Test the candidate invocation cheaply BEFORE running the
+       upgrade — `<manager> --version` or equivalent — to confirm
+       the binary resolves. If it does not, try the alternates:
+         - yarn berry: `corepack yarn ...` (after `corepack enable`
+           if missing) or `node .yarn/releases/yarn-<version>.cjs ...`
+         - npm/pnpm: corepack-prepared shim or direct npm
+         - cargo:    `cargo --version` to confirm rustup activation
+         - poetry/uv: invoke through `python -m poetry` or `uvx` if
+           the bare binary is unavailable
+       Iterate until you find an invocation that runs end-to-end.
+    3. Execute the upgrade for exactly ONE package. Per-manager
+       syntax (NOT verbatim — adapt to the actual binary):
+         - yarn:     `yarn up --exact <pkg>@<version>`
+         - npm:      `npm install <pkg>@<version> --save-exact`
+         - pnpm:     `pnpm update <pkg>@<version>` (or
+                     `pnpm add <pkg>@<version>` if not present)
+         - bun:      `bun update <pkg>@<version>`
+         - pip:      edit pyproject.toml / requirements.txt to
+                     `<pkg>==<version>`, then let install resolve;
+                     or `pip install <pkg>==<version>` for direct
+         - poetry:   `poetry add <pkg>@<version>` (preserves group)
+         - uv:       `uv add <pkg>==<version>` (preserves group)
+         - cargo:    edit Cargo.toml to `<pkg> = "=<version>"`,
+                     then `cargo update -p <pkg> --precise <version>`
+         - go:       `go get <module>@v<version>` (handle the `v`
+                     prefix per go module convention)
+         - composer: `composer require <pkg>:<version>` (preserves
+                     "require-dev" if it was there)
+         - bundler:  edit Gemfile to pin the version, then
+                     `bundle update <pkg> --conservative`
+         - maven:    edit pom.xml `<version>` element (in-place);
+                     verify with `mvn -q dependency:tree`
+         - gradle:   edit build.gradle dependency line; verify
+                     with `gradle dependencies --refresh-dependencies`
+       Some managers require workspace-targeted invocations in a
+       monorepo (e.g. yarn berry's `yarn workspace <ws> up …`).
+       Use `input.workspaces` to pick the right scope if the
+       package only lives in one workspace.
+    4. Capture stdout+stderr of the upgrade command. Note the exit
+       code. Do NOT chain the install step here — `install` is a
+       separate downstream node.
+    5. Stay inside `input.workspace_dir`. Do not modify files
+       outside the dependency manifests/lockfiles the manager
+       touches on its own.
+
+  Tools: bash, read_file, list_files, glob, grep. WRITE-capable
+  via bash (running the upgrade IS the write action).
+
+  REQUIRED JSON OUTPUT SCHEMA (exact field names):
+    success    bool   — true iff the manager's upgrade command
+                        exited 0 AND the package's version pinning
+                        moved from current to target (spot-check
+                        the resulting manifest/lockfile).
+    exit_code  int    — the manager's exit code.
+    output     string — concise tool output (head + tail if long).
+                        Trim noise; preserve any error line that
+                        would help diagnose a failed upgrade.
+
+  ### Project context (operator)
+  {{vars.user_prompt}}
+
+prompt upgrade_user:
+  Upgrade ONE package.
+
+  Workspace:         {{vars.workspace_dir}}
+  Pkg manager:       {{input.pkg_manager}}
+  Workspaces:        {{input.workspaces}}
+  Package:           {{input.selected_package}}
+  Target version:    {{input.target_version}}
+  upgrade_cmd hint:  {{input.upgrade_cmd_hint}}
+  install_cmd hint:  {{input.install_cmd_hint}}
+  Notes:             {{input.notes}}
+
+  Apply the upgrade. Emit the structured result.
+
+prompt install_system:
+  You perform a fresh dependency install for the repository (called
+  AFTER an upgrade so the manager picks up the new version's
+  transitive deps and rewrites the lockfile). Same toolchain-resolution
+  approach as upgrade: pick whatever invocation actually runs in
+  this sandbox, using `input.notes` for guidance.
+
+  Procedure:
+    1. Read `input.pkg_manager`, `input.notes`, `input.install_cmd_hint`.
+    2. Verify the candidate invocation runs (`--version` probe).
+       Fall back to corepack/vendored-release shims if the bare
+       binary is missing — same fallbacks as the upgrade prompt.
+    3. Run the install with --immutable=false equivalent (yarn:
+       `yarn install`; yarn berry honours .yarnrc.yml's
+       `enableImmutableInstalls: false` by default in dev; pnpm:
+       `pnpm install --no-frozen-lockfile`; npm: `npm install`;
+       pip: `pip install -r requirements.txt --upgrade` if the
+       upgrade touched a lock file; cargo: `cargo build` to
+       resolve fresh).
+    4. Capture stdout+stderr + exit code.
+    5. Stay inside `input.workspace_dir`.
+
+  Tools: bash, read_file, list_files, glob, grep.
+
+  REQUIRED JSON OUTPUT SCHEMA (exact field names):
+    success    bool   — true iff the manager exited 0 AND the
+                        install completed (lockfile present, no
+                        unresolved conflicts).
+    exit_code  int    — the manager's exit code.
+    output     string — concise tool output, trimmed.
+
+  ### Project context (operator)
+  {{vars.user_prompt}}
+
+prompt install_user:
+  Reinstall dependencies for this repo after the in-progress upgrade.
+
+  Workspace:         {{vars.workspace_dir}}
+  Pkg manager:       {{input.pkg_manager}}
+  Workspaces:        {{input.workspaces}}
+  install_cmd hint:  {{input.install_cmd_hint}}
+  Notes:             {{input.notes}}
+
+  Run the install. Emit the structured result.
+
+prompt revert_changes_system:
+  You roll back the repository to its pre-upgrade state and
+  reinstall dependencies. Used when an upgrade attempt failed
+  partway through (validate_upgrade rejected, fix loop exhausted,
+  install errored, etc.).
+
+  Procedure:
+    1. `git -C input.workspace_dir status --porcelain` to see what's
+       dirty.
+    2. `git -C input.workspace_dir checkout -- .` to discard
+       tracked changes; `git -C input.workspace_dir clean -fd` to
+       remove untracked files the manager may have written
+       (caches, node_modules diffs, etc. — but be mindful of
+       legitimate untracked operator files; if you see anything
+       that looks user-authored, leave it).
+    3. Reinstall dependencies using the same fallback-aware
+       toolchain resolution as upgrade/install (use
+       `input.install_cmd_hint` + `input.notes`).
+    4. Capture a short summary of what was reverted.
+    5. Stay inside `input.workspace_dir`.
+
+  Tools: bash, read_file, list_files, glob, grep.
+
+  REQUIRED JSON OUTPUT SCHEMA (exact field names):
+    success bool   — true once the worktree is back to clean and
+                     the reinstall finished without manager errors.
+    output  string — concise summary.
+
+  ### Project context (operator)
+  {{vars.user_prompt}}
+
+prompt revert_changes_user:
+  Roll back any in-progress upgrade for this run.
+
+  Workspace:         {{vars.workspace_dir}}
+  Pkg manager:       {{input.pkg_manager}}
+  Workspaces:        {{input.workspaces}}
+  install_cmd hint:  {{input.install_cmd_hint}}
+  Notes:             {{input.notes}}
+
+  Revert and reinstall. Emit the structured result.
 
 ## ─── Prompts : Phase 1 — align_code ────────────────────────────────
 
@@ -390,20 +719,49 @@ prompt validate_upgrade_system:
        inherited session). Identify the relevant validation
        layers: lint, type-check, unit tests, build / compile
        smoke. Prefer a fast smoke before slow full tests:
-         JS: yarn lint || npm run lint, then yarn test, then yarn
-             build for affected sub-packages.
-         Python: ruff/flake8, then pytest, then `python -c "import
-                 <pkg>"` smoke.
-         Rust: cargo check, cargo clippy --all-targets,
-               cargo test (when fast), cargo build.
-         Go: go vet ./..., go test ./....
+         JS:     yarn lint || npm run lint, then yarn test,
+                 then yarn build for affected sub-packages.
+                 Use `tsc --noEmit` as a fast type-only check
+                 when a typescript project is involved.
+         Python: ruff/flake8, then pytest, then `python -c
+                 "import <pkg>"` smoke.
+         Rust:   cargo check, cargo clippy --all-targets,
+                 cargo test (when fast), cargo build.
+         Go:    go vet ./..., go test ./....
+         Ruby:  bundle exec rubocop (if present), then
+                bundle exec rspec or rake test; `bundle check`
+                as a manifest smoke.
+         PHP:   composer dump-autoload --strict-psr; then
+                phpstan/psalm if configured, then phpunit /
+                pest. `composer validate` as a manifest smoke.
+         Maven: mvn -q -DskipTests verify (fast compile +
+                static checks); mvn test for full test run.
+         Gradle: gradle check (compile + tests bundled); use
+                gradle assemble for a build smoke.
+         Elixir/mix: mix compile --warnings-as-errors, then
+                mix test; mix dialyzer if configured (slow).
+         Bun: bun run lint || bun run check, then bun test.
     2. Skip e2e / android emulator / browser tests unless they
        are the only meaningful guard for this package — they are
        slow and flaky in headless CI.
     3. Run commands via bash. Capture exit codes. Stop early on
        a clear failure that you can describe — but include the
        failing command's tail in the verdict.
-    4. Emit:
+    4. After build/test passes, run a POST-INSTALL native security
+       audit against the NOW-installed dependency tree. This
+       catches transitive CVEs that the pre-upgrade `security_audit`
+       could not see (the pre-audit reads the OLD lockfile and
+       advisory databases, which only know about installed
+       versions). If the native auditor reports CRITICAL findings
+       affecting `input.selected_package` or its transitive
+       closure, flag `stable: false` with a blocker like:
+         "post-install audit reports CRITICAL CVE-XXXX-NNNNN in
+         <pkg>@<v>, no fix available". The downstream fix loop
+         or revert will react accordingly.
+       Use the same per-manager auditor command set listed in
+       `security_audit_system` (yarn npm audit, npm audit, cargo
+       audit, pip-audit, govulncheck, …).
+    5. Emit:
          stable: true iff all chosen commands passed (or the only
                  failures are known-flaky and unrelated to the
                  package upgraded).
@@ -667,10 +1025,8 @@ schema stack_profile:
   pkg_manager: string
   repo_kind: string
   workspaces: string[]
-  outdated_cmd: string
   upgrade_cmd: string
   install_cmd: string
-  audit_cmd: string
   lock_files: string[]
   notes: string
 
@@ -682,7 +1038,10 @@ schema sha_output:
 
 schema discover_input:
   workspace_dir: string
-  outdated_cmd: string
+  pkg_manager: string
+  workspaces: string[]
+  lock_files: string[]
+  notes: string
 
 schema outdated_list:
   packages: json
@@ -710,8 +1069,9 @@ schema audit_input:
   workspace_dir: string
   selected_package: string
   target_version: string
-  audit_cmd: string
+  pkg_manager: string
   lock_files: string[]
+  notes: string
 
 schema security_report:
   safe: bool
@@ -736,9 +1096,13 @@ schema changelog_summary:
 
 schema upgrade_input:
   workspace_dir: string
-  upgrade_cmd: string
+  pkg_manager: string
+  upgrade_cmd_hint: string
+  install_cmd_hint: string
   selected_package: string
   target_version: string
+  workspaces: string[]
+  notes: string
 
 schema upgrade_result:
   success: bool
@@ -747,7 +1111,10 @@ schema upgrade_result:
 
 schema install_input:
   workspace_dir: string
-  install_cmd: string
+  pkg_manager: string
+  install_cmd_hint: string
+  workspaces: string[]
+  notes: string
 
 schema install_result:
   success: bool
@@ -825,7 +1192,10 @@ schema commit_result:
 
 schema revert_input:
   workspace_dir: string
-  install_cmd: string
+  pkg_manager: string
+  install_cmd_hint: string
+  workspaces: string[]
+  notes: string
 
 schema revert_result:
   success: bool
@@ -898,56 +1268,79 @@ agent detect_stack:
   tools: [bash, read_file, list_files, glob, grep]
   tool_max_steps: 15
 
+## Emit JSON so the runtime maps the SHA onto the declared
+## `sha` field. A bare stdout string gets auto-wrapped as
+## `{result: "..."}`, leaving `outputs.capture_start_sha.sha`
+## empty — and Phase 2's review nodes diff against an empty
+## base, which silently degrades to "review the whole repo".
 tool capture_start_sha:
-  command: "git -C {{input.workspace_dir}} rev-parse HEAD"
+  command: "printf '{\"sha\":\"%s\"}' \"$(git -C {{input.workspace_dir}} rev-parse HEAD)\""
   input: sha_input
   output: sha_output
 
 ## ─── Nodes : Phase 1 — discover & select ───────────────────────────
 
-## discover_outdated runs the stack-specific outdated command and
-## emits a normalised JSON list of {name, current, target, risk}.
-## Uses {{!input.outdated_cmd}} raw substitution: the command line
-## upstream-emitted by detect_stack is itself shell (quotes, pipes,
-## jq, npx invocations) and must be re-interpreted by sh, not
-## treated as a single shell-escaped argument. The other refs use
-## the default shell-escape so user-controlled paths stay safe.
-tool discover_outdated:
-  command: "cd {{input.workspace_dir}} && OUT=\"$( ( {{!input.outdated_cmd}} ) 2>&1 || true )\" && printf '%s' \"$OUT\" | jq -nc --rawfile r /dev/stdin '($r | (try fromjson catch [])) as $parsed | ([$parsed|arrays] | first // []) as $pkgs | {packages: $pkgs, count: ($pkgs|length), raw: $r}'"
+## discover_outdated decides for itself how to enumerate outdated
+## packages for the manager identified by detect_stack. Agentified
+## because no single shell pipeline normalises across yarn berry,
+## npm, pnpm, pip, poetry, cargo, go, composer, bundler, maven,
+## gradle without ecosystem-specific quirks — pushing that
+## complexity into deterministic jq made the pipeline silently
+## return count=0 on yarn berry monorepos and similar setups.
+agent discover_outdated:
+  backend: "claude_code"
+  model: "claude-opus-4-7"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: discover_input
   output: outdated_list
-
-## select_candidate picks the next non-attempted package, ranked by
-## risk (patch < minor < major), within the requested scope. It
-## accumulates `cumulative_attempted` across iterations and exposes
-## `has_more=false` when nothing remains in scope or
-## max_packages_per_run is hit. Implemented as a Sonnet agent
-## (rather than a jq tool) because the inputs are JSON arrays:
-## shell-quoting them through --argjson is fragile, and Sonnet
-## already does this kind of structured selection trivially.
-agent select_candidate:
-  backend: "claude_code"
-  model: "claude-sonnet-4-6"
-  reasoning_effort: "medium"
-  input: select_input
-  output: candidate
-  system: select_candidate_system
-  user: select_candidate_user
+  system: discover_outdated_system
+  user: discover_outdated_user
   session: inherit
   readonly: true
-  tool_max_steps: 0
+  tools: [bash, read_file, list_files, glob, grep]
+  tool_max_steps: 25
+
+## select_candidate is a deterministic jq tool — selection is pure
+## filter/sort/slice with no need for an LLM. The previous Sonnet
+## implementation absorbed whatever wrapper shape `packages` arrived
+## in (object map, `{list: [...]}` wrapper, …), which made each run
+## non-reproducible. The jq filter below normalises both common
+## shapes (object keyed by name OR array of {name, current, target,
+## risk}) into a uniform survivor list, then applies the policy.
+##
+## JSON inputs are passed via shell variables assigned from raw
+## `{{!input.X}}` substitutions, then fed to jq through `--argjson`.
+## Single-quoted assignments survive nested double quotes inside
+## the JSON payload (npm/PyPI/etc. names and version strings never
+## contain `'`); a previous attempt that wrote inputs to temp files
+## under `/tmp` died on the sandbox-mounted /tmp tmpfs.
+tool select_candidate:
+  input: select_input
+  output: candidate
+  command: "set -euo pipefail; PKGS_JSON='{{!input.packages}}'; ATT_JSON='{{!input.attempted}}'; SCOPE={{input.scope}}; MAX={{input.max_packages}}; jq -nc --argjson packages \"$PKGS_JSON\" --argjson attempted \"$ATT_JSON\" --arg scope \"$SCOPE\" --argjson max \"$MAX\" '($scope | split(\",\") | map(gsub(\"^\\\\s+|\\\\s+$\";\"\"))) as $raw_scope | (if ($raw_scope | any(. == \"all\")) then [\"patch\",\"minor\",\"major\",\"unknown\"] else $raw_scope end) as $allowed | ({\"patch\":1,\"minor\":2,\"major\":3,\"unknown\":4}) as $rank | ($packages // {}) as $pkgs_in | ($attempted // {}) as $atts_in | (if ($pkgs_in | type) == \"object\" then (if (($pkgs_in.list // null) | type) == \"array\" then $pkgs_in.list elif (($pkgs_in.items // null) | type) == \"array\" then $pkgs_in.items elif (($pkgs_in.packages // null) | type) == \"array\" then $pkgs_in.packages elif (($pkgs_in.data // null) | type) == \"array\" then $pkgs_in.data else null end) // $pkgs_in else $pkgs_in end) as $pkgs | (if ($atts_in | type) == \"object\" then (if (($atts_in.list // null) | type) == \"array\" then $atts_in.list else null end) // $atts_in else $atts_in end) as $atts | (if ($pkgs | type) == \"object\" then ($pkgs | to_entries | map({name: .key, current: (.value.current // \"\"), target: (.value.target // \"\"), risk: (.value.risk // \"unknown\")})) elif ($pkgs | type) == \"array\" then ($pkgs | map({name: (.name // \"\"), current: (.current // \"\"), target: (.target // \"\"), risk: (.risk // \"unknown\")})) else [] end) as $all | (if ($atts | type) == \"object\" then ($atts | keys) elif ($atts | type) == \"array\" then ($atts | map(.name // .) | map(select(. != null))) else [] end) as $attempted_names | ($attempted_names | length) as $attempted_count | ($all | map(select(.name as $n | ($attempted_names | index($n)) == null)) | map(select(.risk as $r | $allowed | index($r) != null)) | sort_by($rank[.risk] // 4)) as $survivors | if ($attempted_count >= $max) or (($survivors | length) == 0) then {selected_package:\"\", current_version:\"\", target_version:\"\", risk:\"unknown\", has_more:false, attempted_count:$attempted_count, cumulative_attempted:$atts, fix_loop_max:0} else $survivors[0] as $p | {selected_package:$p.name, current_version:$p.current, target_version:$p.target, risk:$p.risk, has_more:true, attempted_count:$attempted_count, cumulative_attempted:(($atts // {}) + {($p.name): {current:$p.current, target:$p.target, risk:$p.risk}}), fix_loop_max:(if $p.risk == \"major\" then 5 else 3 end)} end'"
 
 ## ─── Nodes : Phase 1 — security_audit ──────────────────────────────
 
-## security_audit composes the project's audit command with osv-scanner
-## (when a lockfile is known) and emits a `safe` boolean. Hard failures
-## of the audit command itself are treated as `safe: false` — we don't
-## upgrade what we can't audit. The agent then decides per-package
-## (using the raw output) whether the SPECIFIC target version is safe.
-tool security_audit:
-  command: "cd {{input.workspace_dir}} && PROJ_AUDIT=\"$( ( {{!input.audit_cmd}} ) 2>&1 || true )\" && LOCK_FIRST=\"$( printf '%s' '{{!input.lock_files}}' | jq -r 'arrays | .[0]?' 2>/dev/null )\" && if [ -n \"$LOCK_FIRST\" ]; then OSV=\"$( npx --yes osv-scanner --lockfile=\"$LOCK_FIRST\" 2>&1 || true )\"; else OSV='(no lockfile passed)'; fi && SAFE=true && (printf '%s' \"$PROJ_AUDIT\" | grep -qiE 'high|critical|malware|malicious' && SAFE=false || true) && (printf '%s' \"$OSV\" | grep -qiE 'malware|malicious' && SAFE=false || true) && RAW=$(printf -- '--- project audit ---\n%s\n--- osv scanner ---\n%s' \"$PROJ_AUDIT\" \"$OSV\") && jq -nc --arg raw \"$RAW\" --arg safe \"$SAFE\" --arg t true --arg src composite '{safe: ($safe == $t), cves: [], malware_signals: [], source: $src, raw: $raw}'"
+## security_audit reasons about whether THIS specific upgrade is
+## safe. Agentified because a deterministic `grep -qiE
+## 'high|critical|malware|malicious'` over multi-format auditor
+## output produces both false positives (the word "critical" in a
+## comment header) and false negatives (json-nested severity that
+## the regex never sees). The agent picks the right native auditor
+## per ecosystem, parses structured output, and judges per-package
+## instead of returning a project-wide boolean.
+agent security_audit:
+  backend: "claude_code"
+  model: "claude-opus-4-7"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: audit_input
   output: security_report
+  system: security_audit_system
+  user: security_audit_user
+  session: inherit
+  readonly: true
+  tools: [bash, read_file, list_files, glob, grep]
+  tool_max_steps: 25
 
 ## ─── Nodes : Phase 1 — changelog_review ────────────────────────────
 
@@ -966,15 +1359,35 @@ agent changelog_review:
 
 ## ─── Nodes : Phase 1 — upgrade & install ───────────────────────────
 
-tool upgrade:
-  command: "cd {{input.workspace_dir}} && OUT=\"$( {{!input.upgrade_cmd}} {{input.selected_package}}@{{input.target_version}} 2>&1 )\" ; ec=$? ; jq -nc --arg out \"$OUT\" --arg ec \"$ec\" --arg z 0 '{success: ($ec == $z), exit_code: ($ec | tonumber), output: $out}'"
+## upgrade is agentic so it can adapt to the sandbox's available
+## toolchain at runtime. A deterministic shell tool died on yarn berry
+## monorepos where `yarn` itself isn't on PATH (vendored release) and
+## a static `upgrade_cmd` string from detect_stack therefore fails. The
+## agent invokes the manager via whatever shim works (corepack, direct
+## `node .yarn/releases/yarn-X.Y.Z.cjs`, …) using `notes` as guidance.
+agent upgrade:
+  backend: "claude_code"
+  model: "claude-opus-4-7"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: upgrade_input
   output: upgrade_result
+  system: upgrade_system
+  user: upgrade_user
+  session: inherit
+  tools: [bash, read_file, list_files, glob, grep]
+  tool_max_steps: 15
 
-tool install:
-  command: "cd {{input.workspace_dir}} && OUT=\"$( {{!input.install_cmd}} 2>&1 )\" ; ec=$? ; jq -nc --arg out \"$OUT\" --arg ec \"$ec\" --arg z 0 '{success: ($ec == $z), exit_code: ($ec | tonumber), output: $out}'"
+agent install:
+  backend: "claude_code"
+  model: "claude-opus-4-7"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: install_input
   output: install_result
+  system: install_system
+  user: install_user
+  session: inherit
+  tools: [bash, read_file, list_files, glob, grep]
+  tool_max_steps: 15
 
 ## ─── Nodes : Phase 1 — align_code ──────────────────────────────────
 
@@ -1044,17 +1457,36 @@ compute join_files:
   expr:
     files_lines: "join(input.files, '\n')"
 
+## set -euo pipefail + explicit exit-code checks on every git call
+## so a failed `git commit` (missing identity, hook rejection, …)
+## surfaces as a real tool failure instead of being papered over by
+## a trailing `printf {success:true}`. The previous shape silently
+## skipped every package upgrade when the sandbox lacked
+## GIT_AUTHOR_EMAIL — all 30 iterations of the loop reported
+## "committed" while git refused them all.
 tool commit_changes:
-  command: "cd {{input.workspace_dir}} && printf '%s' {{input.files_lines}} | tr '\n' '\0' | xargs -0 git add -- && (git diff --cached --quiet || printf '%s' {{input.full_message}} | git commit -F -) && (! git status --porcelain | grep -q . || (printf '%s' {{input.files_lines}} | tr '\n' '\0' | xargs -0 git add -- && git commit --amend --no-edit)) ; printf '{\042success\042:true,\042output\042:\042committed\042}\n'"
+  command: "set -euo pipefail; cd {{input.workspace_dir}}; FILES_LINES={{input.files_lines}}; MSG={{input.full_message}}; printf '%s' \"$FILES_LINES\" | tr '\n' '\0' | xargs -0 git add --; if git diff --cached --quiet; then printf '{\"success\":false,\"output\":\"nothing staged to commit\"}\n'; exit 1; fi; if ! printf '%s' \"$MSG\" | git commit -F -; then printf '{\"success\":false,\"output\":\"git commit failed\"}\n'; exit 1; fi; if git status --porcelain | grep -q .; then printf '%s' \"$FILES_LINES\" | tr '\n' '\0' | xargs -0 git add --; if ! git commit --amend --no-edit; then printf '{\"success\":false,\"output\":\"git commit --amend failed\"}\n'; exit 1; fi; fi; SHA=$(git rev-parse HEAD); printf '{\"success\":true,\"output\":\"committed %s\"}\n' \"$SHA\""
   input: commit_tool_input
   output: commit_result
 
 ## ─── Nodes : Phase 1 — revert + mark_failed ────────────────────────
 
-tool revert_changes:
-  command: "cd {{input.workspace_dir}} && (git checkout -- . 2>&1 || true) && (git clean -fd 2>&1 || true) && ({{!input.install_cmd}} 2>&1 || true) ; printf '{\042success\042:true,\042output\042:\042reverted\042}\n'"
+## revert_changes is agentic so the post-revert reinstall can adapt
+## to the same manager-shim concerns as upgrade/install — the
+## deterministic `install_cmd` substitution had identical brittleness
+## here. The agent restores the worktree to its pre-upgrade state and
+## reinstalls dependencies fresh.
+agent revert_changes:
+  backend: "claude_code"
+  model: "claude-opus-4-7"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: revert_input
   output: revert_result
+  system: revert_changes_system
+  user: revert_changes_user
+  session: inherit
+  tools: [bash, read_file, list_files, glob, grep]
+  tool_max_steps: 12
 
 ## mark_failed_and_continue is a deterministic passthrough — it just
 ## relays the package name + reason for the next select_candidate
@@ -1086,7 +1518,7 @@ judge reviewer_claude:
 judge reviewer_gpt:
   backend: "claw"
   model: "openai/${ITERION_RENOVACY_MODEL_GPT:-gpt-5.5}"
-  reasoning_effort: "${ITERION_RENOVACY_EFFORT_GPT:-xhigh}"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_GPT:-max}"
   input: review_input
   output: review_verdict
   system: review_system
@@ -1123,7 +1555,7 @@ agent fix_claude:
 agent fix_gpt:
   backend: "claw"
   model: "openai/${ITERION_RENOVACY_MODEL_GPT:-gpt-5.5}"
-  reasoning_effort: "${ITERION_RENOVACY_EFFORT_GPT:-xhigh}"
+  reasoning_effort: "${ITERION_RENOVACY_EFFORT_GPT:-max}"
   input: review_fix_input
   output: review_fix_result
   system: fix_system
@@ -1140,8 +1572,12 @@ agent fix_gpt:
 ## with the recovery_loop iteration counter for traceability; the
 ## per-package commits in Phase 1 already carry the rich semantic
 ## messages.
+## set -euo pipefail + exit on git commit failure — same hardening as
+## commit_changes. A nothing-to-commit case is legitimate success
+## (review pass produced no actionable diff); a real git error must
+## fail the node, not silently report committed.
 tool review_commit_auto:
-  command: "cd {{input.workspace_dir}} && (git add -A 2>&1 || true) ; if git diff --cached --quiet; then printf '{\042success\042:true,\042output\042:\042no review fix changes\042}\n'; else git commit -m 'fix(review): cumulative review fix' 2>&1 || true ; printf '{\042success\042:true,\042output\042:\042committed\042}\n'; fi"
+  command: "set -euo pipefail; cd {{input.workspace_dir}}; git add -A; if git diff --cached --quiet; then printf '{\"success\":true,\"output\":\"no review fix changes\"}\n'; else if ! git commit -m 'fix(review): cumulative review fix'; then printf '{\"success\":false,\"output\":\"git commit failed\"}\n'; exit 1; fi; SHA=$(git rev-parse HEAD); printf '{\"success\":true,\"output\":\"committed %s\"}\n' \"$SHA\"; fi"
   input: review_commit_input
   output: commit_result
 
@@ -1186,13 +1622,40 @@ workflow secured_renovacy:
   ## OSV database. A future tightening would set
   ## `network.preset: package-managers` once that preset lands.
   sandbox:
+    ## Image is `:latest` for convenience; pin to an immutable
+    ## digest (`ghcr.io/socialgouv/iterion-sandbox-slim@sha256:...`)
+    ## once the recipe goes to production so identical runs land on
+    ## identical toolchains. The slim image ships Node 22, npm,
+    ## git, jq, curl, devbox/Nix. Operators upgrading to
+    ## multi-ecosystem repos (Rust, Go, PHP, Maven, Gradle, Ruby,
+    ## Elixir, Python — beyond the ones included) need to swap
+    ## image for `iterion-sandbox-full` or use devbox/Nix in
+    ## post_create to materialise the toolchain.
     image: "ghcr.io/socialgouv/iterion-sandbox-slim:latest"
     user: "devbox"
     workspace_folder: "/workspace"
     env:
       CLAUDE_CONFIG_DIR: "/home/devbox/.claude"
+      ## Git identity for in-sandbox `git commit` calls. Without
+      ## these the pipeline's commit step fails with "Author
+      ## identity unknown" but the shell tool would still report
+      ## success — silent loss of every per-package commit.
+      GIT_AUTHOR_NAME: "iterion-secured-renovacy"
+      GIT_AUTHOR_EMAIL: "iterion@noreply.local"
+      GIT_COMMITTER_NAME: "iterion-secured-renovacy"
+      GIT_COMMITTER_EMAIL: "iterion@noreply.local"
     mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=/home/devbox/.claude,consistency=cached"]
-    post_create: "set -e; command -v claude >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code"
+    ## post_create:
+    ##   - install claude-code CLI (the agentic backbone). Pin to
+    ##     a known-good version (currently 2.1.138 per `npm view
+    ##     @anthropic-ai/claude-code version` on 2026-05-11) once
+    ##     the recipe goes to production; `latest` here lets the
+    ##     CLI drift between runs.
+    ##   - activate corepack so yarn/pnpm/bun shims resolve from
+    ##     the project's `packageManager` field without each
+    ##     downstream agent re-discovering the right invocation.
+    ##     Corepack ships with Node 22 (no extra install).
+    post_create: "set -e; command -v claude >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest; sudo corepack enable 2>/dev/null || true; corepack prepare --activate 2>/dev/null || true"
 
   budget:
     max_parallel_branches: 1
@@ -1213,7 +1676,10 @@ workflow secured_renovacy:
 
   capture_start_sha -> discover_outdated with {
     workspace_dir: "{{vars.workspace_dir}}",
-    outdated_cmd: "{{outputs.detect_stack.outdated_cmd}}"
+    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
+    workspaces: "{{outputs.detect_stack.workspaces}}",
+    lock_files: "{{outputs.detect_stack.lock_files}}",
+    notes: "{{outputs.detect_stack.notes}}"
   }
 
   ## ═══ Phase 1 : Per-package loop ══════════════════════════════════
@@ -1234,8 +1700,9 @@ workflow secured_renovacy:
     workspace_dir: "{{vars.workspace_dir}}",
     selected_package: "{{outputs.select_candidate.selected_package}}",
     target_version: "{{outputs.select_candidate.target_version}}",
-    audit_cmd: "{{outputs.detect_stack.audit_cmd}}",
-    lock_files: "{{outputs.detect_stack.lock_files}}"
+    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
+    lock_files: "{{outputs.detect_stack.lock_files}}",
+    notes: "{{outputs.detect_stack.notes}}"
   }
 
   ## Unsafe → mark and skip (no revert needed: nothing applied yet).
@@ -1256,24 +1723,37 @@ workflow secured_renovacy:
 
   changelog_review -> upgrade with {
     workspace_dir: "{{vars.workspace_dir}}",
-    upgrade_cmd: "{{outputs.detect_stack.upgrade_cmd}}",
+    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
+    upgrade_cmd_hint: "{{outputs.detect_stack.upgrade_cmd}}",
+    install_cmd_hint: "{{outputs.detect_stack.install_cmd}}",
     selected_package: "{{outputs.select_candidate.selected_package}}",
-    target_version: "{{outputs.select_candidate.target_version}}"
+    target_version: "{{outputs.select_candidate.target_version}}",
+    workspaces: "{{outputs.detect_stack.workspaces}}",
+    notes: "{{outputs.detect_stack.notes}}"
   }
 
   upgrade -> revert_changes when not success with {
     workspace_dir: "{{vars.workspace_dir}}",
-    install_cmd: "{{outputs.detect_stack.install_cmd}}"
+    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
+    install_cmd_hint: "{{outputs.detect_stack.install_cmd}}",
+    workspaces: "{{outputs.detect_stack.workspaces}}",
+    notes: "{{outputs.detect_stack.notes}}"
   }
 
   upgrade -> install when success with {
     workspace_dir: "{{vars.workspace_dir}}",
-    install_cmd: "{{outputs.detect_stack.install_cmd}}"
+    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
+    install_cmd_hint: "{{outputs.detect_stack.install_cmd}}",
+    workspaces: "{{outputs.detect_stack.workspaces}}",
+    notes: "{{outputs.detect_stack.notes}}"
   }
 
   install -> revert_changes when not success with {
     workspace_dir: "{{vars.workspace_dir}}",
-    install_cmd: "{{outputs.detect_stack.install_cmd}}"
+    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
+    install_cmd_hint: "{{outputs.detect_stack.install_cmd}}",
+    workspaces: "{{outputs.detect_stack.workspaces}}",
+    notes: "{{outputs.detect_stack.notes}}"
   }
 
   install -> align_code when success with {
@@ -1313,7 +1793,14 @@ workflow secured_renovacy:
     _session_id: "{{outputs.validate_upgrade._session_id}}"
   }
 
-  fix_after_upgrade -> validate_upgrade as fix_loop(5) with {
+  ## fix_loop budget is GLOBAL across the run, not per-package — the
+  ## iterion engine accumulates loopCounters in run state and never
+  ## resets them on package_loop re-entry. To preserve a real per-
+  ## package retry budget (5 majors × max_packages), we widen the
+  ## bound here. Once the engine grows per-entry loop scoping, drop
+  ## this to the canonical 5 (or read from
+  ## outputs.select_candidate.fix_loop_max).
+  fix_after_upgrade -> validate_upgrade as fix_loop(150) with {
     selected_package: "{{outputs.select_candidate.selected_package}}",
     current_version: "{{outputs.select_candidate.current_version}}",
     target_version: "{{outputs.select_candidate.target_version}}",
@@ -1326,7 +1813,10 @@ workflow secured_renovacy:
   ## fix_loop exhausted → revert + skip
   fix_after_upgrade -> revert_changes with {
     workspace_dir: "{{vars.workspace_dir}}",
-    install_cmd: "{{outputs.detect_stack.install_cmd}}"
+    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
+    install_cmd_hint: "{{outputs.detect_stack.install_cmd}}",
+    workspaces: "{{outputs.detect_stack.workspaces}}",
+    notes: "{{outputs.detect_stack.notes}}"
   }
 
   ## Successful upgrade path → prepare commit → join files → commit.
