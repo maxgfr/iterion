@@ -984,8 +984,12 @@ func (e *ClawExecutor) executeHumanLLM(ctx context.Context, node *ir.HumanNode, 
 	}
 
 	// Reasoning effort (dynamic override from input, then static node property).
-	if popts := providerOptsForNode(resolveReasoningEffort("", input)); popts != nil {
-		genOpts.ProviderOptions = popts
+	// Coerce against the model's supported matrix so a recipe asking for "max"
+	// on an OpenAI model is silently clamped rather than rejected at the API.
+	if _, modelID, perr := ParseModelSpec(modelSpec); perr == nil {
+		if effort := coerceEffortForModel(resolveReasoningEffort("", input), modelID); effort != "" {
+			genOpts.ProviderOptions = providerOptsForNode(effort)
+		}
 	}
 
 	td := TemplateDataFromContext(ctx)
