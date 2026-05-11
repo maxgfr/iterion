@@ -752,6 +752,15 @@ var AttachmentSubFields = map[string]struct{}{
 type Loop struct {
 	Name          string
 	MaxIterations int
+	// Body is the set of node IDs that participate in the loop's cycle —
+	// each node from which the loop's edge target is reachable and which
+	// can reach the loop's edge source (i.e. nodes on a path that closes
+	// the iteration). Computed at compile time. The runtime resets the
+	// loop's counter when a non-loop edge enters a body node from a
+	// non-body source, so the budget becomes per-entry rather than
+	// global to the whole run (a fix loop nested inside a package loop
+	// gets a fresh budget every package).
+	Body map[string]bool
 }
 
 // ---------------------------------------------------------------------------

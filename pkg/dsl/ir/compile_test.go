@@ -340,6 +340,194 @@ func TestCompileEdges(t *testing.T) {
 	if loop.MaxIterations != 5 {
 		t.Errorf("loop max_iterations: expected 5, got %d", loop.MaxIterations)
 	}
+	// Body must include check and refine (the cycle endpoints) and
+	// nothing else — `done` is on the exit branch and should NOT be in
+	// the body even though it's reachable forward from `check`.
+	if len(loop.Body) != 2 {
+		t.Errorf("loop body size: expected 2 (check, refine), got %d (%v)", len(loop.Body), loop.Body)
+	}
+	if !loop.Body["check"] || !loop.Body["refine"] {
+		t.Errorf("loop body missing cycle endpoints, got %v", loop.Body)
+	}
+	if loop.Body["done"] {
+		t.Errorf("loop body should not include exit-only node 'done', got %v", loop.Body)
+	}
+}
+
+// TestComputeLoopBodies_NestedLoops covers a fix_loop nested inside a
+// package_loop — the exact shape that motivated the per-entry reset.
+// The package loop's body subsumes the fix loop's body; an edge entering
+// the inner-loop body from outside it (but inside the outer loop) is
+// what the runtime resets on.
+func TestComputeLoopBodies_NestedLoops(t *testing.T) {
+	const src = `
+schema s:
+  ok: bool
+
+prompt sys:
+  S.
+
+prompt usr:
+  U.
+
+agent select_pkg:
+  model: "m"
+  input: s
+  output: s
+  system: sys
+  user: usr
+
+agent validate:
+  model: "m"
+  input: s
+  output: s
+  system: sys
+  user: usr
+
+agent fix:
+  model: "m"
+  input: s
+  output: s
+  system: sys
+  user: usr
+
+agent commit:
+  model: "m"
+  input: s
+  output: s
+  system: sys
+  user: usr
+
+workflow nested:
+  entry: select_pkg
+  select_pkg -> validate
+  validate -> commit when ok
+  validate -> fix when not ok
+  fix -> validate as fix_loop(3)
+  commit -> select_pkg as pkg_loop(50)
+`
+	w := mustCompile(t, src)
+
+	fixLoop, ok := w.Loops["fix_loop"]
+	if !ok {
+		t.Fatal("fix_loop not found")
+	}
+	// fix_loop body = {validate, fix} only.
+	if len(fixLoop.Body) != 2 || !fixLoop.Body["validate"] || !fixLoop.Body["fix"] {
+		t.Errorf("fix_loop.Body = %v, want {validate, fix}", fixLoop.Body)
+	}
+
+	pkgLoop, ok := w.Loops["pkg_loop"]
+	if !ok {
+		t.Fatal("pkg_loop not found")
+	}
+	// pkg_loop body = the non-loop-edge cycle from select_pkg back to
+	// commit: {select_pkg, validate, commit}. `fix` is intentionally
+	// excluded — it sits on a branch reachable from validate but can
+	// only return to commit by traversing fix_loop's loop edge, which
+	// computeLoopBodies skips. This separation is what lets the
+	// runtime reset fix_loop on edges that re-enter validate from
+	// outside fix_loop's body without also resetting pkg_loop.
+	for _, n := range []string{"select_pkg", "validate", "commit"} {
+		if !pkgLoop.Body[n] {
+			t.Errorf("pkg_loop.Body missing %q, got %v", n, pkgLoop.Body)
+		}
+	}
+	if pkgLoop.Body["fix"] {
+		t.Errorf("pkg_loop.Body should not include 'fix' (only reachable via fix_loop edge); got %v", pkgLoop.Body)
+	}
+}
+
+// TestEngineLoopReset_NestedLoops exercises the runtime reset on
+// re-entry. We don't run the full engine here — that's covered by the
+// integration tests — but we verify the data the runtime consults
+// (Loop.Body) is correctly populated for the nested-loop shape so the
+// engine's per-entry reset works.
+func TestEngineLoopReset_PerEntryRule(t *testing.T) {
+	const src = `
+schema s:
+  ok: bool
+
+prompt sys:
+  S.
+
+prompt usr:
+  U.
+
+agent select_pkg:
+  model: "m"
+  input: s
+  output: s
+  system: sys
+  user: usr
+
+agent validate:
+  model: "m"
+  input: s
+  output: s
+  system: sys
+  user: usr
+
+agent fix:
+  model: "m"
+  input: s
+  output: s
+  system: sys
+  user: usr
+
+agent commit:
+  model: "m"
+  input: s
+  output: s
+  system: sys
+  user: usr
+
+workflow nested:
+  entry: select_pkg
+  select_pkg -> validate
+  validate -> commit when ok
+  validate -> fix when not ok
+  fix -> validate as fix_loop(3)
+  commit -> select_pkg as pkg_loop(50)
+`
+	w := mustCompile(t, src)
+	fixLoop := w.Loops["fix_loop"]
+	pkgLoop := w.Loops["pkg_loop"]
+	if fixLoop == nil || pkgLoop == nil {
+		t.Fatal("missing loops")
+	}
+
+	// Engine reset rule: for a non-loop edge with target in body, source NOT
+	// in body, reset that loop's counter. Replicate the predicate here.
+	wouldReset := func(loop *Loop, from, to string, loopName string) bool {
+		if loopName != "" {
+			return false
+		}
+		return loop.Body[to] && !loop.Body[from]
+	}
+
+	// select_pkg -> validate (non-loop): enters fix_loop body via validate.
+	// fix_loop should reset; pkg_loop should not (select_pkg is in its body).
+	if !wouldReset(fixLoop, "select_pkg", "validate", "") {
+		t.Errorf("fix_loop should reset on select_pkg->validate")
+	}
+	if wouldReset(pkgLoop, "select_pkg", "validate", "") {
+		t.Errorf("pkg_loop should NOT reset on select_pkg->validate (select_pkg in body)")
+	}
+
+	// validate -> fix (non-loop within fix_loop body): no reset for either.
+	if wouldReset(fixLoop, "validate", "fix", "") {
+		t.Errorf("fix_loop should NOT reset on internal validate->fix")
+	}
+	if wouldReset(pkgLoop, "validate", "fix", "") {
+		t.Errorf("pkg_loop should NOT reset on validate->fix (fix not in pkg_loop body anyway)")
+	}
+
+	// commit -> select_pkg as pkg_loop (loop edge): no reset (the firing
+	// loop's own edge skips the reset block entirely).
+	if wouldReset(fixLoop, "commit", "select_pkg", "pkg_loop") {
+		t.Errorf("reset rule must not fire on loop edges")
+	}
 }
 
 // ---------------------------------------------------------------------------
