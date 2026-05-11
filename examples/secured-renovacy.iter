@@ -1706,21 +1706,26 @@ compute join_files:
 ## "committed" while git refused them all.
 tool commit_changes:
   command: `set -euo pipefail
-cd {{input.workspace_dir}}
+cd {{input.workspace_dir}} >&2
 FILES_LINES={{input.files_lines}}
 MSG={{input.full_message}}
-printf '%s' "$FILES_LINES" | tr '\n' '\0' | xargs -0 git add --
+# All git output goes to stderr so the tool's stdout is dedicated to
+# the final JSON line. Without these redirects, "[detached HEAD <SHA>]
+# <subject>" mixes with the JSON and iterion's parser falls back to
+# wrapping the whole blob as {"result": "..."} — losing the "output"
+# field that downstream edges (write_audit_md, etc.) read for the SHA.
+printf '%s' "$FILES_LINES" | tr '\n' '\0' | xargs -0 git add -- >&2
 if git diff --cached --quiet; then
   printf '{"success":false,"output":"nothing staged to commit"}\n'
   exit 1
 fi
-if ! printf '%s' "$MSG" | git commit -F -; then
+if ! printf '%s' "$MSG" | git commit -F - >&2; then
   printf '{"success":false,"output":"git commit failed"}\n'
   exit 1
 fi
 if git status --porcelain | grep -q .; then
-  printf '%s' "$FILES_LINES" | tr '\n' '\0' | xargs -0 git add --
-  if ! git commit --amend --no-edit; then
+  printf '%s' "$FILES_LINES" | tr '\n' '\0' | xargs -0 git add -- >&2
+  if ! git commit --amend --no-edit >&2; then
     printf '{"success":false,"output":"git commit --amend failed"}\n'
     exit 1
   fi
