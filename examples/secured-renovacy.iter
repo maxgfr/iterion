@@ -2046,7 +2046,9 @@ tool bucket_patches:
     if (patchesAllowed) {
       for (const p of list) {
         if (!p || typeof p !== "object") continue;
-        if ((p.risk || "unknown") !== "patch") continue;
+        // case-insensitive: defensive against LLM drift on discover_outdated
+        // emitting "Patch" / "PATCH" instead of the schema's canonical "patch".
+        if (String(p.risk || "unknown").toLowerCase() !== "patch") continue;
         patches.push({
           name: p.name || "",
           current: p.current || "",
@@ -2112,7 +2114,8 @@ case "$PKG_MGR" in
   yarn|yarn3|yarn4) CMD="yarn up $SPECS" ;;
   npm)              CMD="npm install $SPECS" ;;
   pnpm)             CMD="pnpm update $SPECS" ;;
-  *)                CMD="yarn up $SPECS" ;;
+  bun)              CMD="bun update $SPECS" ;;
+  *)                printf '{"success":false,"output":"batch_upgrade_patches: unsupported pkg_manager %s — extend the case block to add it","upgraded_specs":[]}\n' "$PKG_MGR"; exit 1 ;;
 esac
 if ! eval "$CMD"; then
   printf '{"success":false,"output":"batch upgrade failed: %s","upgraded_specs":[]}\n' "$CMD"
@@ -2164,28 +2167,29 @@ run_check() {
   fi
 }
 
-# Tests: try the canonical script for each manager. Missing-script
-# exit code 1 with a recognisable message is NOT a failure; a real
-# test failure (non-1 exit OR script ran with assertions failing) is.
+# Tests: try the canonical script for each manager. jq targets
+# .scripts.<name> precisely so a dep called "test-runner" or a
+# devDependency key matching "lint" can't trigger a phantom run.
+# Missing-script => skip the check (no failure). Real failure =>
+# non-zero exit from the script => batch unstable.
+has_script() { jq -e --arg n "$1" '.scripts[$n] // empty' package.json >/dev/null 2>&1; }
 case "$PKG_MGR" in
   yarn|yarn3|yarn4)
-    if grep -q '"test"' package.json 2>/dev/null; then
-      run_check tests "yarn test" || true
-    fi
-    if grep -q '"lint"' package.json 2>/dev/null; then
-      run_check lint "yarn lint" || true
-    fi
-    if grep -q '"typecheck"' package.json 2>/dev/null; then
-      run_check typecheck "yarn typecheck" || true
-    fi ;;
+    has_script test      && run_check tests     "yarn test"      || true
+    has_script lint      && run_check lint      "yarn lint"      || true
+    has_script typecheck && run_check typecheck "yarn typecheck" || true ;;
   npm)
-    grep -q '"test"' package.json && run_check tests "npm test --silent" || true
-    grep -q '"lint"' package.json && run_check lint "npm run lint --silent" || true
-    grep -q '"typecheck"' package.json && run_check typecheck "npm run typecheck --silent" || true ;;
+    has_script test      && run_check tests     "npm test --silent"          || true
+    has_script lint      && run_check lint      "npm run lint --silent"      || true
+    has_script typecheck && run_check typecheck "npm run typecheck --silent" || true ;;
   pnpm)
-    grep -q '"test"' package.json && run_check tests "pnpm test" || true
-    grep -q '"lint"' package.json && run_check lint "pnpm lint" || true
-    grep -q '"typecheck"' package.json && run_check typecheck "pnpm typecheck" || true ;;
+    has_script test      && run_check tests     "pnpm test"      || true
+    has_script lint      && run_check lint      "pnpm lint"      || true
+    has_script typecheck && run_check typecheck "pnpm typecheck" || true ;;
+  bun)
+    has_script test      && run_check tests     "bun test"           || true
+    has_script lint      && run_check lint      "bun run lint"       || true
+    has_script typecheck && run_check typecheck "bun run typecheck"  || true ;;
 esac
 
 BLOCKERS_JSON=$(printf '%s\n' "${BLOCKERS[@]:-}" | node -e "
