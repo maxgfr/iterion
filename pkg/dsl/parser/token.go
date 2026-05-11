@@ -82,6 +82,7 @@ const (
 	TokenReadonly
 	TokenBackend
 	TokenDefaultBackend
+	TokenProvider
 	TokenInteraction
 	TokenInteractionPrompt
 	TokenInteractionModel
@@ -210,6 +211,7 @@ var tokenNames = map[TokenType]string{
 	TokenReadonly:          "readonly",
 	TokenBackend:           "backend",
 	TokenDefaultBackend:    "default_backend",
+	TokenProvider:          "provider",
 	TokenInteraction:       "interaction",
 	TokenInteractionPrompt: "interaction_prompt",
 	TokenInteractionModel:  "interaction_model",
@@ -311,6 +313,7 @@ var keywords = map[string]TokenType{
 	"readonly":              TokenReadonly,
 	"backend":               TokenBackend,
 	"default_backend":       TokenDefaultBackend,
+	"provider":              TokenProvider,
 	"interaction":           TokenInteraction,
 	"interaction_prompt":    TokenInteractionPrompt,
 	"interaction_model":     TokenInteractionModel,

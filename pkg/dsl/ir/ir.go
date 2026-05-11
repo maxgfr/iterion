@@ -105,7 +105,8 @@ func (b BaseNode) NodeID() string { return b.ID }
 // LLMFields groups fields shared by LLM-capable nodes (Agent, Judge, Router-LLM).
 type LLMFields struct {
 	Model           string // model identifier (env refs already noted)
-	Backend         string // execution backend name (empty = direct LLM call)
+	Backend         string // execution backend name (empty = direct LLM call); may contain ${VAR} env refs
+	Provider        string // credential routing hint ("anthropic", "zai", "openai", ""=auto); may contain ${VAR} env refs
 	SystemPrompt    string // prompt reference name
 	UserPrompt      string // prompt reference name
 	MaxTokens       int    // per-node cap on output tokens (0 = backend default)

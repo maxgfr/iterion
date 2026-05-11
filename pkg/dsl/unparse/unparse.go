@@ -105,7 +105,7 @@ func Unparse(f *ast.File) string {
 		if a.MCP != nil {
 			writeMCPConfigBlock(&b, a.MCP, "  ")
 		}
-		writeAgentFields(&b, a.Model, a.Backend, a.Input, a.Output, a.Publish,
+		writeAgentFields(&b, a.Model, a.Backend, a.Provider, a.Input, a.Output, a.Publish,
 			a.System, a.User, a.Session, a.Tools, a.ToolPolicy, a.ToolMaxSteps, a.MaxTokens, a.ReasoningEffort, a.Readonly,
 			a.Interaction, a.InteractionPrompt, a.InteractionModel, a.Await)
 		if a.Compaction != nil {
@@ -121,7 +121,7 @@ func Unparse(f *ast.File) string {
 		if j.MCP != nil {
 			writeMCPConfigBlock(&b, j.MCP, "  ")
 		}
-		writeAgentFields(&b, j.Model, j.Backend, j.Input, j.Output, j.Publish,
+		writeAgentFields(&b, j.Model, j.Backend, j.Provider, j.Input, j.Output, j.Publish,
 			j.System, j.User, j.Session, j.Tools, j.ToolPolicy, j.ToolMaxSteps, j.MaxTokens, j.ReasoningEffort, j.Readonly,
 			j.Interaction, j.InteractionPrompt, j.InteractionModel, j.Await)
 		if j.Compaction != nil {
@@ -141,6 +141,9 @@ func Unparse(f *ast.File) string {
 			}
 			if r.Backend != "" {
 				writeQuotedProp(&b, "backend", r.Backend)
+			}
+			if r.Provider != "" {
+				writeQuotedProp(&b, "provider", r.Provider)
 			}
 			if r.System != "" {
 				writeProp(&b, "system", r.System)
@@ -423,12 +426,15 @@ func quoteList(vals []string) string {
 	return strings.Join(quoted, ", ")
 }
 
-func writeAgentFields(b *strings.Builder, model, backend, input, output, publish, system, user string, session ast.SessionMode, tools []string, toolPolicy []string, toolMaxSteps int, maxTokens int, reasoningEffort string, readonly bool, interaction ast.InteractionMode, interactionPrompt, interactionModel string, await ast.AwaitMode) {
+func writeAgentFields(b *strings.Builder, model, backend, provider, input, output, publish, system, user string, session ast.SessionMode, tools []string, toolPolicy []string, toolMaxSteps int, maxTokens int, reasoningEffort string, readonly bool, interaction ast.InteractionMode, interactionPrompt, interactionModel string, await ast.AwaitMode) {
 	if model != "" {
 		writeQuotedProp(b, "model", model)
 	}
 	if backend != "" {
 		writeQuotedProp(b, "backend", backend)
+	}
+	if provider != "" {
+		writeQuotedProp(b, "provider", provider)
 	}
 	if input != "" {
 		writeProp(b, "input", input)

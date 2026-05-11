@@ -211,6 +211,7 @@ type AgentDecl struct {
 	Name              string
 	Model             string // string literal, may contain ${...} env refs
 	Backend           string // execution backend name (e.g. "claude_code"); when set, bypasses direct LLM API
+	Provider          string // credential routing hint ("anthropic", "zai", "openai", ""=auto); may contain ${...} env refs
 	MCP               *MCPConfigDecl
 	Input             string           // schema reference name
 	Output            string           // schema reference name
@@ -244,6 +245,7 @@ type JudgeDecl struct {
 	Name              string
 	Model             string
 	Backend           string // execution backend name; when set, bypasses direct LLM API
+	Provider          string // credential routing hint ("anthropic", "zai", "openai", ""=auto); may contain ${...} env refs
 	MCP               *MCPConfigDecl
 	Input             string
 	Output            string
@@ -288,6 +290,7 @@ type RouterDecl struct {
 	Mode            RouterMode
 	Model           string // only for mode: llm
 	Backend         string // execution backend name, only for mode: llm
+	Provider        string // credential routing hint, only for mode: llm; may contain ${...} env refs
 	System          string // prompt ref, only for mode: llm
 	User            string // prompt ref, only for mode: llm
 	Multi           bool   // multi-route selection, only for mode: llm

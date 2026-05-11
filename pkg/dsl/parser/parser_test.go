@@ -1118,6 +1118,67 @@ func TestJudgeBackend(t *testing.T) {
 	assertEq(t, "Model", j.Model, "")
 }
 
+// TestAgentProvider covers the per-node `provider:` field: parsing the
+// keyword, accepting a quoted string, and exposing the literal in the
+// AST (env-var expansion happens later, at executor.resolveProvider).
+func TestAgentProvider(t *testing.T) {
+	src := `agent reviewer:
+  backend: "claude_code"
+  provider: "anthropic"
+  input: in_s
+  output: out_s
+  system: sys
+  user: usr
+  session: fresh
+`
+	res := parser.Parse("test.iter", src)
+	assertNoDiags(t, res)
+
+	a := res.File.Agents[0]
+	assertEq(t, "Provider", a.Provider, "anthropic")
+	assertEq(t, "Backend", a.Backend, "claude_code")
+}
+
+// TestJudgeProviderTemplated verifies that `provider:` accepts the
+// `${VAR:-default}` env-var template form. The parser stores the
+// literal — expansion happens at resolution time in the executor so
+// changing the env between runs flips routing without a recipe edit.
+func TestJudgeProviderTemplated(t *testing.T) {
+	src := `judge verdict:
+  backend: "claude_code"
+  provider: "${RESCUE_PROVIDER:-zai}"
+  input: in_s
+  output: out_s
+  system: sys
+  user: usr
+  session: fresh
+`
+	res := parser.Parse("test.iter", src)
+	assertNoDiags(t, res)
+
+	j := res.File.Judges[0]
+	assertEq(t, "Provider", j.Provider, "${RESCUE_PROVIDER:-zai}")
+}
+
+// TestRouterLLMProvider checks that `provider:` is accepted on LLM
+// routers, same shape as agent/judge. Non-LLM routers reject backend/
+// provider via DiagRouterLLMOnlyProperty (covered by compile tests).
+func TestRouterLLMProvider(t *testing.T) {
+	src := `router triage:
+  mode: llm
+  model: "claude-opus-4-7"
+  backend: "claude_code"
+  provider: "anthropic"
+  system: sys
+  user: usr
+`
+	res := parser.Parse("test.iter", src)
+	assertNoDiags(t, res)
+
+	r := res.File.Routers[0]
+	assertEq(t, "Provider", r.Provider, "anthropic")
+}
+
 func TestDottedToolNames(t *testing.T) {
 	src := `agent worker:
   model: "claude-4"
