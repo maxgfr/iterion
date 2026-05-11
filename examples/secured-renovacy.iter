@@ -1242,8 +1242,16 @@ schema review_fix_result:
   pushback: string[]
   pushback_justification: string
 
+## review_commit_input carries everything review_commit_auto needs to
+## build a meaningful commit subject + body. `family` and `iteration`
+## are tags for traceability; `summary` is the fixer's free-form
+## description that becomes the commit subject (first line, 72ch cap)
+## and body.
 schema review_commit_input:
   workspace_dir: string
+  family: string
+  iteration: int
+  summary: string
 
 schema review_commit_intent:
   type: string
@@ -1326,8 +1334,21 @@ tool select_candidate:
 
     function unwrap(value, wrapperKeys) {
       if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+      // Try the explicit wrapper-key list first (stable contract for
+      // common LLM-emitted shapes: {list:[...]}, {items:[...]}, etc.).
       for (const key of wrapperKeys) {
         if (Array.isArray(value[key])) return value[key];
+      }
+      // Fallback: any single-key object whose value is an array is
+      // unwrapped automatically. This is what saves us when the
+      // upstream LLM decides to wrap under a semantically-meaningful
+      // key we didn't anticipate ("outdated", "results", "deps", ...).
+      // The shape contract says "array", so we treat any wrapper as
+      // noise. If multiple keys are present we leave the object as-is
+      // and let downstream report empty so the failure is visible.
+      const keys = Object.keys(value);
+      if (keys.length === 1 && Array.isArray(value[keys[0]])) {
+        return value[keys[0]];
       }
       return value;
     }
@@ -1673,10 +1694,11 @@ agent fix_gpt:
 ## Deterministic auto-commit for review fixes. We don't fork an LLM
 ## session here — fix_X may converge from either family (claude or
 ## gpt) into this single tool, and `session: fork` would be forbidden
-## on a convergence point. The commit message is a stable template
-## with the recovery_loop iteration counter for traceability; the
-## per-package commits in Phase 1 already carry the rich semantic
-## messages.
+## on a convergence point. The commit subject is built from the fixer's
+## summary (first line, capped at 72 chars to satisfy conventional
+## commit / git log readability) and tagged with family + recovery_loop
+## iteration so the git log makes the alternation visible. Body carries
+## the full summary for any LLM/operator running `git log -1`.
 ## set -euo pipefail + exit on git commit failure — same hardening as
 ## commit_changes. A nothing-to-commit case is legitimate success
 ## (review pass produced no actionable diff); a real git error must
@@ -1688,7 +1710,16 @@ git add -A
 if git diff --cached --quiet; then
   printf '{"success":true,"output":"no review fix changes"}\n'
 else
-  if ! git commit -m 'fix(review): cumulative review fix'; then
+  SUMMARY={{input.summary}}
+  FAMILY={{input.family}}
+  ITER={{input.iteration}}
+  # Subject: first line of summary, truncated to 72 chars; fall back
+  # to a generic message if the fixer didn't produce one.
+  SUBJECT=$(printf '%s' "$SUMMARY" | head -n1 | cut -c1-72)
+  [ -n "$SUBJECT" ] || SUBJECT="cumulative review fix"
+  [ -n "$FAMILY" ] || FAMILY="unknown"
+  [ -n "$ITER" ] || ITER="0"
+  if ! git commit -m "fix(review/${FAMILY}#${ITER}): ${SUBJECT}" -m "${SUMMARY}"; then
     printf '{"success":false,"output":"git commit failed"}\n'
     exit 1
   fi
@@ -1820,7 +1851,19 @@ workflow secured_renovacy:
     workspace_dir: "{{vars.workspace_dir}}"
   }
 
-  ## No more candidates → exit Phase 1, enter Phase 2.
+  ## First-iteration short-circuit: when `discover_outdated` finds 0
+  ## upgradable packages AND no upgrade has been attempted yet, route
+  ## directly to `done` instead of running the cumulative review loop.
+  ## Without this guard, a "nothing to upgrade" run still spends ~$3 of
+  ## LLM time polishing pre-existing state for no useful diff — entirely
+  ## wasted cycles. attempted_count==0 distinguishes "genuinely empty"
+  ## from "we did N upgrades, the (N+1)th iteration has nothing left to
+  ## try" — the latter SHOULD still enter Phase 2 to validate the
+  ## cumulative diff produced by the loop's earlier passes.
+  select_candidate -> done when "!has_more && attempted_count == 0"
+
+  ## No more candidates after at least one attempt → exit Phase 1,
+  ## enter Phase 2 (cumulative review on the upgrades we just made).
   select_candidate -> alt_review when not has_more
 
   ## More candidates → audit the next one.
@@ -2036,10 +2079,16 @@ workflow secured_renovacy:
   ## tool — that's a convergence point, but tool nodes have no
   ## session inheritance so C009 does not apply.
   fix_claude -> review_commit_auto with {
-    workspace_dir: "{{vars.workspace_dir}}"
+    workspace_dir: "{{vars.workspace_dir}}",
+    family: "claude",
+    iteration: "{{loop.recovery_loop.iteration}}",
+    summary: "{{outputs.fix_claude.summary}}"
   }
   fix_gpt -> review_commit_auto with {
-    workspace_dir: "{{vars.workspace_dir}}"
+    workspace_dir: "{{vars.workspace_dir}}",
+    family: "gpt",
+    iteration: "{{loop.recovery_loop.iteration}}",
+    summary: "{{outputs.fix_gpt.summary}}"
   }
 
   review_commit_auto -> alt_review as recovery_loop(20)
