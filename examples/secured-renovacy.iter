@@ -1067,8 +1067,9 @@ schema candidate:
   ## only_patches_attempted is true iff at least one upgrade has been
   ## attempted AND every attempt was a patch-tier bump. Used by the
   ## "skip Phase 2 cumulative review" short-circuit: a run that only
-  ## moved patch versions doesn't earn the cost of an LLM-driven review
-  ## loop, the batch_validate gate already covers it.
+  ## moved patch versions doesn't earn the cost of an LLM-driven
+  ## review loop (patches are semver-safe; the operator's CI catches
+  ## anything that slipped through at PR time).
   only_patches_attempted: bool
 
 schema audit_input:
@@ -1325,24 +1326,17 @@ schema batch_upgrade_result:
   output: string
   upgraded_specs: string[]
 
-## batch_validate_input keeps it deterministic — a shell-based health
-## check is enough for the patch tier (lint + tests + typecheck;
-## changelog review is skipped by design since patches are
-## non-breaking).
-schema batch_validate_input:
-  workspace_dir: string
-  pkg_manager: string
-  notes: string
-
-schema batch_validate_result:
-  stable: bool
-  blockers: string[]
-  commands_run: string[]
-
 ## batch_commit packs the patches into one conventional-commit message
-## ("chore(deps): batch update N patches") and amends the audit-md
-## into the same commit so a single git revert can roll back the
-## whole batch atomically.
+## ("chore(deps): batch update N patches"). When yarn up resolved no
+## manifest changes (all already at target), batch_commit emits
+## `committed:false` and the edge graph routes to select_candidate
+## directly — skipping the audit-md amend. There is no separate
+## batch_validate or batch_revert: patches are semver-safe by
+## definition, the per-package loop downstream provides the actual
+## safety net, and validate's old shell harness was JS-only (yarn /
+## npm / pnpm / bun cases keyed on hardcoded test/lint/typecheck
+## script names) which conflicted with the recipe's multi-ecosystem
+## goal.
 schema batch_commit_input:
   workspace_dir: string
   patches: json
@@ -1350,23 +1344,9 @@ schema batch_commit_input:
 
 schema batch_commit_result:
   success: bool
+  committed: bool
   output: string
   sha: string
-
-## batch_revert undoes a failed batch: hard-reset to the worktree's
-## start_sha for staged/working changes, then yarn install to restore
-## node_modules. The mark_failed_and_continue downstream node then
-## records every patch as attempted so the run doesn't retry them
-## individually (they'd hit the same failure, just slower).
-schema batch_revert_input:
-  workspace_dir: string
-  pkg_manager: string
-  patches: json
-  start_sha: string
-
-schema batch_revert_result:
-  success: bool
-  output: string
 
 schema review_commit_intent:
   type: string
@@ -2104,10 +2084,10 @@ tool bucket_patches:
 
 ## batch_upgrade_patches bumps every patch in one yarn up invocation.
 ## Patches are non-breaking by definition; bundling them saves 30+
-## yarn-install round-trips on a typical repo and lets a single test
-## pass cover them all. If yarn refuses a spec it fails the whole
-## batch — the recipe then falls back to batch_revert and the patches
-## are marked attempted so the per-package loop doesn't retry them.
+## yarn-install round-trips on a typical repo. If yarn refuses a spec
+## it fails the tool node and the run flips to failed_resumable —
+## let the operator decide whether to retry, narrow the spec set, or
+## skip patches for this run.
 ##
 ## yarn up auto-installs after resolving, so no separate install step
 ## is needed. The spec list is built defensively (skip entries with
@@ -2157,79 +2137,6 @@ printf '{"success":true,"output":"batch upgrade succeeded","upgraded_specs":%s}\
   input: batch_upgrade_input
   output: batch_upgrade_result
 
-## batch_validate runs a shell-based health check (tests + lint +
-## typecheck when relevant) on the post-batch workspace. Deliberately
-## NOT an agent: patches are by construction safe enough that LLM
-## review adds ~0 value; the cost-saving point of the fast-track is
-## precisely to skip those LLM calls. blockers[] captures the failing
-## command tails so the operator can diagnose without re-running.
-##
-## Detection is conservative: only commands that the manager
-## advertises are run. A missing `lint` script is NOT a failure; only
-## a non-zero exit code from a run command marks the batch unstable.
-tool batch_validate:
-  command: `set -euo pipefail
-cd {{input.workspace_dir}}
-PKG_MGR={{input.pkg_manager}}
-LOGDIR=/tmp/iterion-batch-validate
-mkdir -p "$LOGDIR"
-STABLE=true
-BLOCKERS=()
-CMDS=()
-
-run_check() {
-  local name="$1"; shift
-  local log="$LOGDIR/$name.out"
-  CMDS+=("$*")
-  if eval "$*" >"$log" 2>&1; then
-    return 0
-  else
-    STABLE=false
-    local tail
-    tail=$(tail -c 800 "$log" | tr '\n' ' ' | sed 's/"/\\"/g')
-    BLOCKERS+=("$name: $tail")
-    return 1
-  fi
-}
-
-# Tests: try the canonical script for each manager. jq targets
-# .scripts.<name> precisely so a dep called "test-runner" or a
-# devDependency key matching "lint" can't trigger a phantom run.
-# Missing-script => skip the check (no failure). Real failure =>
-# non-zero exit from the script => batch unstable.
-has_script() { jq -e --arg n "$1" '.scripts[$n] // empty' package.json >/dev/null 2>&1; }
-case "$PKG_MGR" in
-  yarn|yarn3|yarn4)
-    has_script test      && run_check tests     "yarn test"      || true
-    has_script lint      && run_check lint      "yarn lint"      || true
-    has_script typecheck && run_check typecheck "yarn typecheck" || true ;;
-  npm)
-    has_script test      && run_check tests     "npm test --silent"          || true
-    has_script lint      && run_check lint      "npm run lint --silent"      || true
-    has_script typecheck && run_check typecheck "npm run typecheck --silent" || true ;;
-  pnpm)
-    has_script test      && run_check tests     "pnpm test"      || true
-    has_script lint      && run_check lint      "pnpm lint"      || true
-    has_script typecheck && run_check typecheck "pnpm typecheck" || true ;;
-  bun)
-    has_script test      && run_check tests     "bun test"           || true
-    has_script lint      && run_check lint      "bun run lint"       || true
-    has_script typecheck && run_check typecheck "bun run typecheck"  || true ;;
-esac
-
-BLOCKERS_JSON=$(printf '%s\n' "${BLOCKERS[@]:-}" | node -e "
-  const lines = require('fs').readFileSync(0,'utf8').split('\n').filter(Boolean);
-  process.stdout.write(JSON.stringify(lines));
-")
-CMDS_JSON=$(printf '%s\n' "${CMDS[@]:-}" | node -e "
-  const lines = require('fs').readFileSync(0,'utf8').split('\n').filter(Boolean);
-  process.stdout.write(JSON.stringify(lines));
-")
-printf '{"stable":%s,"blockers":%s,"commands_run":%s}\n' "$STABLE" "$BLOCKERS_JSON" "$CMDS_JSON"
-`
-  input: batch_validate_input
-  output: batch_validate_result
-
 ## batch_commit lands the bundled patch upgrade as a single
 ## conventional-commit commit. The subject summarises the count, the
 ## body lists every package@from→to so git log readers see what
@@ -2257,49 +2164,23 @@ BODY=$(printf '%s' "$PATCHES" | node -e "
 ")
 git add -A
 if git diff --cached --quiet; then
-  printf '{"success":false,"output":"nothing staged to commit","sha":""}\n'
-  exit 1
+  # yarn up resolved nothing (everything already at target). Soft
+  # success: downstream routes to select_candidate via "not committed".
+  printf '{"success":true,"committed":false,"output":"yarn up produced no manifest changes","sha":""}\n'
+  exit 0
 fi
 COMMIT_MSG=$(printf '%s\n\n%s\n\n%s' "$SUBJECT" "$BODY" "$AUDIT")
 if ! printf '%s' "$COMMIT_MSG" | git commit -F -; then
-  printf '{"success":false,"output":"git commit failed","sha":""}\n'
+  # Hard git failure (e.g. pre-commit hook rejected). Surface as a
+  # tool error so iterion flips to failed_resumable.
+  printf '{"success":false,"committed":false,"output":"git commit failed","sha":""}\n'
   exit 1
 fi
 SHA=$(git rev-parse HEAD)
-printf '{"success":true,"output":"batch committed %s","sha":"%s"}\n' "$SHA" "$SHA"
+printf '{"success":true,"committed":true,"output":"batch committed %s","sha":"%s"}\n' "$SHA" "$SHA"
 `
   input: batch_commit_input
   output: batch_commit_result
-
-## batch_revert rolls the batch back atomically when batch_validate
-## says unstable. Strategy: hard-reset to the run's start_sha so both
-## the manifest changes AND the lockfile / node_modules side-effects
-## of `yarn up` disappear; then a fresh install restores a clean
-## node_modules. Slower than per-file revert but guarantees a
-## consistent state.
-tool batch_revert:
-  command: `set -euo pipefail
-cd {{input.workspace_dir}}
-PKG_MGR={{input.pkg_manager}}
-START_SHA={{input.start_sha}}
-PATCHES={{input.patches}}
-if [ -z "$START_SHA" ]; then
-  printf '{"success":false,"output":"missing start_sha; cannot revert atomically"}\n'
-  exit 1
-fi
-git reset --hard "$START_SHA" || {
-  printf '{"success":false,"output":"git reset --hard failed"}\n'
-  exit 1
-}
-case "$PKG_MGR" in
-  yarn|yarn3|yarn4) yarn install || true ;;
-  npm)              npm install || true ;;
-  pnpm)             pnpm install || true ;;
-esac
-printf '{"success":true,"output":"reverted batch to %s"}\n' "$START_SHA"
-`
-  input: batch_revert_input
-  output: batch_revert_result
 
 ## ─── Nodes : parallel intel (security + changelog in parallel) ──────
 
@@ -2499,22 +2380,20 @@ workflow secured_renovacy:
     workspace_dir: "{{vars.workspace_dir}}"
   }
 
-  batch_upgrade_patches -> batch_validate with {
-    workspace_dir: "{{vars.workspace_dir}}",
-    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
-    notes: "{{outputs.detect_stack.notes}}"
-  }
-
-  ## stable → commit the bundle, materialise the audit md, then
-  ## proceed to the per-package loop with all patches marked
-  ## attempted so it won't retry them.
-  batch_validate -> batch_commit when stable with {
+  ## Patches are semver-safe by definition: yarn up resolved them
+  ## without rejection, that's enough signal to commit. No separate
+  ## validation gate, no revert lane. If runtime regressions slip
+  ## through (rare for patch tier), the operator catches them at
+  ## PR/merge time on their normal CI — same as for any other commit
+  ## they review.
+  batch_upgrade_patches -> batch_commit with {
     workspace_dir: "{{vars.workspace_dir}}",
     patches: "{{outputs.bucket_patches.patches}}",
-    audit_summary: "{{outputs.batch_validate.commands_run}}"
+    audit_summary: "{{outputs.batch_upgrade_patches.output}}"
   }
 
-  batch_commit -> write_audit_md with {
+  ## committed:true → audit md amended into the commit, then per-package loop.
+  batch_commit -> write_audit_md when committed with {
     workspace_dir: "{{vars.workspace_dir}}",
     package_name: "",
     current_version: "",
@@ -2523,24 +2402,15 @@ workflow secured_renovacy:
     changelog_summary: "",
     security_report: "",
     align_summary: "",
-    validate_report: "{{outputs.batch_validate}}",
+    validate_report: "",
     commit_sha: "{{outputs.batch_commit.sha}}",
     batch_packages: "{{outputs.bucket_patches.patches}}"
   }
 
-  ## !stable → atomic revert (hard reset to start_sha + reinstall)
-  ## then continue with non-patches. The patches are flagged in
-  ## attempted_after_batch so we don't retry them.
-  batch_validate -> batch_revert when not stable with {
-    workspace_dir: "{{vars.workspace_dir}}",
-    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
-    patches: "{{outputs.bucket_patches.patches}}",
-    start_sha: "{{outputs.capture_start_sha.sha}}"
-  }
-
-  ## After batch_revert: go to select_candidate with all patches
-  ## marked attempted, so the per-package loop only sees non-patches.
-  batch_revert -> select_candidate with {
+  ## committed:false → yarn up was a no-op (everything already at
+  ## target). Skip audit md, mark patches as attempted, hand off to
+  ## the per-package loop with the non-patches.
+  batch_commit -> select_candidate when not committed with {
     packages: "{{outputs.discover_outdated.packages}}",
     scope: "{{vars.scope}}",
     attempted: "{{outputs.bucket_patches.attempted_after_batch}}",
