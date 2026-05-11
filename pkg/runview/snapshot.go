@@ -215,7 +215,7 @@ func (b *SnapshotBuilder) Apply(evt *store.Event) {
 	case store.EventRunFinished:
 		b.accumulateActive(evt.Timestamp)
 	case store.EventRunCancelled:
-		b.accumulateActive(evt.Timestamp)
+		b.handleRunCancelled(evt)
 	case store.EventRunInterrupted:
 		// Server drain — freeze the timer like a pause. The matching
 		// resume re-anchors. Without this case the event would fall
@@ -339,23 +339,59 @@ func (b *SnapshotBuilder) handleRunFailed(evt *store.Event, branch string) {
 	// Always close the active window — a failure terminates execution
 	// regardless of which node id (if any) the event carries.
 	b.accumulateActive(evt.Timestamp)
-	if evt.NodeID == "" {
-		return
+	errMsg, _ := evt.Data["error"].(string)
+	if evt.NodeID != "" {
+		exec := b.currentExec(branch, evt.NodeID)
+		if exec != nil {
+			ts := evt.Timestamp
+			exec.Status = ExecStatusFailed
+			if exec.FinishedAt == nil {
+				exec.FinishedAt = &ts
+			}
+			if errMsg != "" {
+				exec.Error = errMsg
+			}
+			exec.CurrentEventSeq = evt.Seq
+			exec.LastSeq = evt.Seq
+		}
 	}
-	exec := b.currentExec(branch, evt.NodeID)
-	if exec == nil {
-		return
+	// Any other execution still marked running when the run terminates
+	// is, by definition, no longer running — the engine has stopped
+	// driving it. Close them so the canvas spinner clears.
+	b.closeInFlightExecs(ExecStatusFailed, evt.Timestamp, evt.Seq, errMsg)
+}
+
+// handleRunCancelled flips every still-running execution to "failed" with
+// a cancelled-by-user marker. Without this, the canvas keeps spinning on
+// whatever node was in flight when the operator hit cancel.
+func (b *SnapshotBuilder) handleRunCancelled(evt *store.Event) {
+	b.accumulateActive(evt.Timestamp)
+	reason, _ := evt.Data["reason"].(string)
+	if reason == "" {
+		reason = "run cancelled"
 	}
-	ts := evt.Timestamp
-	exec.Status = ExecStatusFailed
-	if exec.FinishedAt == nil {
-		exec.FinishedAt = &ts
+	b.closeInFlightExecs(ExecStatusFailed, evt.Timestamp, evt.Seq, reason)
+}
+
+// closeInFlightExecs terminates every execution still marked running
+// (or paused) when a terminal run-level event arrives. Idempotent —
+// already-closed executions are left untouched.
+func (b *SnapshotBuilder) closeInFlightExecs(status ExecStatus, ts time.Time, seq int64, errMsg string) {
+	for _, exec := range b.execs {
+		if exec.Status != ExecStatusRunning && exec.Status != ExecStatusPaused {
+			continue
+		}
+		exec.Status = status
+		if exec.FinishedAt == nil {
+			finished := ts
+			exec.FinishedAt = &finished
+		}
+		if errMsg != "" && exec.Error == "" {
+			exec.Error = errMsg
+		}
+		exec.CurrentEventSeq = seq
+		exec.LastSeq = seq
 	}
-	if msg, ok := evt.Data["error"].(string); ok && msg != "" {
-		exec.Error = msg
-	}
-	exec.CurrentEventSeq = evt.Seq
-	exec.LastSeq = evt.Seq
 }
 
 func (b *SnapshotBuilder) handleHumanInputRequested(evt *store.Event, branch string) {

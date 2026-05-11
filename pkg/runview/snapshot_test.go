@@ -176,6 +176,68 @@ func TestSnapshotReducer_NodeFailure(t *testing.T) {
 	}
 }
 
+func TestSnapshotReducer_RunCancelledClosesInflight(t *testing.T) {
+	b := NewSnapshotBuilder(&store.Run{ID: "r1"})
+	events := []*store.Event{
+		evt(0, store.EventNodeStarted, "", "build", map[string]interface{}{"kind": "tool"}),
+		evt(1, store.EventNodeFinished, "", "build", nil),
+		evt(2, store.EventNodeStarted, "", "deploy", map[string]interface{}{"kind": "agent"}),
+		// User hits cancel while "deploy" is still running. The event
+		// carries no node_id (run-level), so the old code left deploy
+		// stuck in ExecStatusRunning and the spinner never cleared.
+		evt(3, store.EventRunCancelled, "", "", map[string]interface{}{"reason": "user cancelled"}),
+	}
+	for _, e := range events {
+		b.Apply(e)
+	}
+	snap := b.Snapshot()
+	if len(snap.Executions) != 2 {
+		t.Fatalf("Executions = %d, want 2", len(snap.Executions))
+	}
+	for _, ex := range snap.Executions {
+		if ex.Status == ExecStatusRunning {
+			t.Errorf("execution %q still running after cancel", ex.IRNodeID)
+		}
+		if ex.FinishedAt == nil {
+			t.Errorf("execution %q has no FinishedAt after cancel", ex.IRNodeID)
+		}
+	}
+	deploy := snap.Executions[1]
+	if deploy.IRNodeID != "deploy" {
+		t.Fatalf("Executions[1] = %q, want deploy", deploy.IRNodeID)
+	}
+	if deploy.Status != ExecStatusFailed {
+		t.Errorf("deploy.Status = %q, want failed (cancelled inflight)", deploy.Status)
+	}
+	if deploy.Error == "" {
+		t.Errorf("deploy.Error empty, want a cancellation reason")
+	}
+}
+
+func TestSnapshotReducer_RunFailedClosesInflight(t *testing.T) {
+	b := NewSnapshotBuilder(&store.Run{ID: "r1"})
+	events := []*store.Event{
+		evt(0, store.EventNodeStarted, "", "fetch", map[string]interface{}{"kind": "agent"}),
+		// run-level failure with no node_id (e.g. budget exceeded) —
+		// in-flight node must still be closed.
+		evt(1, store.EventRunFailed, "", "", map[string]interface{}{"error": "budget exhausted"}),
+	}
+	for _, e := range events {
+		b.Apply(e)
+	}
+	snap := b.Snapshot()
+	if len(snap.Executions) != 1 {
+		t.Fatalf("Executions = %d, want 1", len(snap.Executions))
+	}
+	ex := snap.Executions[0]
+	if ex.Status != ExecStatusFailed {
+		t.Errorf("Status = %q, want failed", ex.Status)
+	}
+	if ex.Error != "budget exhausted" {
+		t.Errorf("Error = %q, want budget exhausted", ex.Error)
+	}
+}
+
 func TestSnapshotReducer_RunningNodeTouchesLastSeqForStructuredEvents(t *testing.T) {
 	b := NewSnapshotBuilder(&store.Run{ID: "r1"})
 	events := []*store.Event{
