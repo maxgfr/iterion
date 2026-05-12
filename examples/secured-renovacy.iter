@@ -1502,6 +1502,35 @@ tool select_candidate:
     const allowed = scope.includes("all") ? ["patch", "minor", "major", "unknown"] : scope;
     const rank = { patch: 1, minor: 2, major: 3, unknown: 4 };
 
+    // Defensive workspace state check. discover_outdated runs once
+    // per run and its `current` versions go stale as soon as we land
+    // the first upgrade. If the attempted ledger fails to mark a
+    // landed package (observed: iterion edge wiring sometimes delivers
+    // the batch attempted instead of cumulative), `survivors` would
+    // still contain a package whose workspace state is already at
+    // target — yarn up no-ops, commit_changes noops, and the loop
+    // burns iterations rediscovering the same dead candidate. Read
+    // yarn.lock once and treat any package whose resolution matches
+    // target as if it were already attempted.
+    const fs = require("fs");
+    const path = require("path");
+    const workspaceDir = "{{!input.workspace_dir}}" || "";
+    let lockText = "";
+    try {
+      if (workspaceDir) {
+        lockText = fs.readFileSync(path.join(workspaceDir, "yarn.lock"), "utf8");
+      }
+    } catch (_e) {
+      lockText = "";
+    }
+    function isAtTarget(pkgName, target) {
+      if (!lockText || !pkgName || !target) return false;
+      // yarn berry entries: `"<pkg>@npm:<spec>":` followed by
+      // `version: <resolved>`. The resolved version is the source of
+      // truth; check for any resolution at target across all entries.
+      return lockText.indexOf(pkgName + "@npm:" + target) !== -1;
+    }
+
     const all = normaliseEntries(packages);
     const attemptedList = attemptedNames(attempted);
     const attemptedCount = attemptedList.length;
@@ -1509,6 +1538,7 @@ tool select_candidate:
     const survivors = all
       .filter((p) => !attemptedList.includes(p.name))
       .filter((p) => allowed.includes(p.risk))
+      .filter((p) => !isAtTarget(p.name, p.target))
       .sort((a, b) => (rank[a.risk] || 4) - (rank[b.risk] || 4));
 
     // only_patches_attempted: drives the Phase 2 short-circuit. True
@@ -1716,8 +1746,15 @@ MSG={{input.full_message}}
 # field that downstream edges (write_audit_md, etc.) read for the SHA.
 printf '%s' "$FILES_LINES" | tr '\n' '\0' | xargs -0 git add -- >&2
 if git diff --cached --quiet; then
-  printf '{"success":false,"output":"nothing staged to commit"}\n'
-  exit 1
+  ## Nothing staged is a soft no-op: select_candidate may have
+  ## re-selected an already-upgraded package, yarn up may have been
+  ## idempotent, or prepare_commit may have decided there are no
+  ## files to commit (files=[]). Returning success with the current
+  ## HEAD lets the loop continue with write_audit_md (which detects
+  ## the no-op marker) instead of hard-failing the whole run.
+  SHA=$(git rev-parse HEAD)
+  printf '{"success":true,"output":"noop: nothing staged (HEAD=%s)"}\n' "$SHA"
+  exit 0
 fi
 if ! printf '%s' "$MSG" | git commit -F - >&2; then
   printf '{"success":false,"output":"git commit failed"}\n'
