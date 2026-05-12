@@ -160,6 +160,17 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 	}
 	opts = append(opts, claudesdk.WithEnv("CLAUDE_CODE_EFFORT_LEVEL", effort))
 
+	// tool_max_steps caps agentic tool-use iterations. Until now this
+	// field was defined in delegate.Task but never wired into the CLI,
+	// so recipe authors who set `tool_max_steps: 25` got silent infinity
+	// — observed with GLM running discover_outdated through 60+ tool
+	// calls instead of stopping at 25. Map it to claude's --max-turns
+	// (the closest semantic: one turn = one assistant message exchange,
+	// which usually contains one tool call + response).
+	if task.ToolMaxSteps > 0 {
+		opts = append(opts, claudesdk.WithMaxTurns(task.ToolMaxSteps))
+	}
+
 	// Inject Anthropic-flavoured credentials into the CLI subprocess.
 	// Single helper so Pass 1 and Pass 2 (formatter) stay symmetric.
 	opts = append(opts, anthropicCredOptsForCLI(ctx, task.ProviderHint)...)
@@ -697,6 +708,21 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 					for _, block := range m.Message.Content {
 						if tb, ok := block.(*claudesdk.TextBlock); ok && tb.Text != "" {
 							lastAssistantText = tb.Text
+							// Rate-limit detection: Anthropic forfait
+							// surfaces quota exhaustion as a plain assistant
+							// text block ("You've hit your limit · resets …")
+							// followed by a normal result event with the
+							// limit text as Result. Without an early bail,
+							// the downstream parseSDKOutput / schema
+							// validation turns this into a misleading
+							// "missing required field" error. Fail fast
+							// with a typed error so the runtime can
+							// surface clear "switch provider" guidance.
+							if isRateLimitMessage(tb.Text) {
+								b.Logger.Warn("[%s/claude-code] 🚦 rate-limit signal in assistant text — aborting: %s", task.NodeID, truncate(tb.Text, 200))
+								cancelStream()
+								return result, &ErrRateLimited{Provider: BackendClaudeCode, Detail: strings.TrimSpace(tb.Text)}
+							}
 						}
 					}
 				}
@@ -758,6 +784,38 @@ func logAssistantContent(logger *iterlog.Logger, nodeID string, blocks []claudes
 			}
 		}
 	}
+}
+
+// rateLimitSignals are case-insensitive substrings of assistant text
+// that indicate the upstream provider has cut us off — primarily the
+// Anthropic forfait quota ("You've hit your limit · resets …"), which
+// surfaces as a short standalone assistant text rather than a 429.
+// Kept narrow on purpose: generic substrings like "rate_limit_error"
+// were dropped because security-audit agents legitimately mention
+// them in prose. The 200-char length cap is the second guard against
+// agents quoting these phrases mid-paragraph.
+var rateLimitSignals = []string{
+	"hit your limit",
+	"rate limit exceeded",
+	"quota exceeded",
+}
+
+// isRateLimitMessage reports whether an assistant text block carries
+// a quota / rate-limit signal from the upstream provider. The text
+// length cap is load-bearing: real rate-limit notices are short
+// one-liners, whereas agents that reason aloud about rate limiting
+// produce much longer paragraphs that would false-positive otherwise.
+func isRateLimitMessage(text string) bool {
+	if len(text) == 0 || len(text) > 200 {
+		return false
+	}
+	lower := strings.ToLower(text)
+	for _, sig := range rateLimitSignals {
+		if strings.Contains(lower, sig) {
+			return true
+		}
+	}
+	return false
 }
 
 // toolUseDetail extracts a human-readable detail from tool input.

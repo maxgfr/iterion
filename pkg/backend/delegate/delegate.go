@@ -229,6 +229,25 @@ func (e *ErrAskUser) Error() string {
 	return "ask_user: " + e.Question
 }
 
+// ErrRateLimited is returned by a backend when the upstream provider
+// signals a rate-limit / quota-exhausted condition during streaming —
+// e.g. Anthropic forfait emitting "You've hit your limit · resets …"
+// as an assistant text block before the result event. The runtime
+// classifies this as a clean fail (not a schema-validation crash) so
+// callers can surface "switch provider" guidance instead of a
+// misleading "missing required field" parse error.
+type ErrRateLimited struct {
+	Provider string // "claude_code", "claw", "codex", etc.
+	Detail   string // raw upstream message for diagnostics
+}
+
+func (e *ErrRateLimited) Error() string {
+	if e.Provider != "" {
+		return "rate_limited (" + e.Provider + "): " + e.Detail
+	}
+	return "rate_limited: " + e.Detail
+}
+
 // AskUserQuestionKey is the canonical key under which iterion files an
 // ask_user question in the Interaction record (and looks up the answer
 // on resume). Stable across runs so workflow authors can reference
