@@ -116,9 +116,9 @@ func findDaemonForProject(projectDir string) (string, bool) {
 }
 
 // listLiveDaemons returns every daemon currently registered with a live
-// pid + accepting port. Used by the quit popup to surface "background
-// runs in progress: modjo, alerte-secours" before the operator decides
-// whether to stop them.
+// pid + accepting port. Used by the quit popup to surface the list of
+// projects whose daemons would survive a GUI close, so the operator
+// can decide whether to stop them or keep them running.
 func listLiveDaemons() []daemonInfo {
 	dir := daemonRegistryDir()
 	if dir == "" {
@@ -183,8 +183,8 @@ func daemonAlive(pid int, url string) bool {
 // become "-", colons too (Windows drive letters), and a leading "-" is
 // guaranteed so the result is a single safe filesystem component.
 //
-//	/home/jo/lab/devthefuture/modjo
-//	  -> -home-jo-lab-devthefuture-modjo
+//	/home/user/work/<project>  ->  -home-user-work-<project>
+//	C:\users\u\<project>       ->  -C-users-u-<project>
 //
 // Keep this in sync with pkg/store/storedir.go if that encoding changes.
 func encodeProjectDirKey(absPath string) string {
