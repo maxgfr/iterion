@@ -479,6 +479,22 @@ prompt changelog_review_system:
   NOT modify any file in this node — your output is a structured
   summary the next phase will act on.
 
+  ## Budget discipline (mandatory)
+
+  This node is bounded by tool_max_steps. Aim for ≤ 6 tool calls
+  total: at most 2–3 calls to locate authoritative info (changelog /
+  release notes / tag diff), then synthesise. **Do not crawl** —
+  every additional registry probe, tarball extraction, or commit-log
+  fetch past the third should pay for itself with a concrete
+  breaking-change finding, otherwise stop and emit your current
+  best verdict at the appropriate `confidence` level.
+
+  When the authoritative changelog cannot be found in 2 probes:
+  prefer `confidence: low` with a verdict inferred from the semver
+  delta + any tag/release notes you DID see. A low-confidence
+  verdict is fine; running out of turns is not — the next phase
+  cannot make its safety decision without an output.
+
   Procedure:
     1. Identify the package's source: npm registry, PyPI, crates.io,
        GitHub releases. Use bash to fetch the relevant CHANGELOG /
@@ -491,7 +507,9 @@ prompt changelog_review_system:
     2. Cross-check by skimming the diff of the package's exposed
        API between the two versions if accessible (e.g. `git log`
        in the installed module, or its release-tagged tarball).
-       This catches breaking changes the changelog forgot.
+       This catches breaking changes the changelog forgot. Cap
+       this step at ONE tarball extraction + ONE diff — don't
+       walk every internal file.
     3. Decide `has_breaking`: true iff there is a non-cosmetic API
        change, removed export, signature change, behaviour change
        on a documented surface, or hard runtime requirement
@@ -1781,7 +1799,11 @@ agent changelog_review:
   session: fork
   readonly: true
   tools: [bash, read_file, list_files, glob, grep]
-  tool_max_steps: 35
+  ## 50 is the observed ceiling for repos with rich multi-version
+  ## changelogs (e.g. @asyncapi/parser 3.3 → 3.6 walks several
+  ## tagged tarballs + GitHub release notes). The prompt's "Budget
+  ## discipline" clause keeps the median around 6-10 calls.
+  tool_max_steps: 50
 
 ## ─── Nodes : Phase 1 — upgrade & install ───────────────────────────
 
