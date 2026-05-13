@@ -293,18 +293,47 @@ func (b *SnapshotBuilder) handleNodeStarted(evt *store.Event, branch string) {
 		exec.Kind = kind
 	}
 	// Collision (retry of the same (node, iteration) after a recovery
-	// loop): preserve original started_at / first_seq / kind so the
-	// timeline still anchors on the first attempt instead of jumping
-	// to the retry.
+	// loop, or runtime re-emission when the node is not on a loop edge
+	// directly and currentLoopIteration returns the same value for
+	// successive runs): preserve original started_at / first_seq / kind
+	// so the timeline still anchors on the first attempt.
+	//
+	// Monotonic guard (mirror of editor T2.4 9bcccff): a duplicate
+	// node_started must NOT downgrade an already-terminal execution
+	// back to running. paused_waiting_human is monotonic too — only an
+	// explicit run_resumed transitions it back to running, via
+	// handleRunResumed.
 	if existing != nil {
 		exec.StartedAt = existing.StartedAt
 		exec.FirstSeq = existing.FirstSeq
 		if exec.Kind == "" {
 			exec.Kind = existing.Kind
 		}
+		if isTerminalExecStatus(existing.Status) {
+			exec.Status = existing.Status
+			exec.FinishedAt = existing.FinishedAt
+			exec.Error = existing.Error
+		}
+		b.execs[id] = exec
+		// Already in b.order — don't re-append, otherwise Snapshot()
+		// would emit the same execution twice.
+		return
 	}
 	b.execs[id] = exec
 	b.order = append(b.order, id)
+}
+
+// isTerminalExecStatus reports whether an exec status is monotonic —
+// once reached, a stale or duplicate node_started must not downgrade
+// it back to running. paused_waiting_human counts as terminal here
+// because only run_resumed (explicit operator action) can transition
+// it back, never a re-emitted node_started.
+func isTerminalExecStatus(s ExecStatus) bool {
+	switch s {
+	case ExecStatusFinished, ExecStatusFailed, ExecStatusSkipped, ExecStatusPaused:
+		return true
+	}
+	return false
 }
 
 func (b *SnapshotBuilder) handleNodeFinished(evt *store.Event, branch string) {

@@ -100,6 +100,91 @@ func TestSnapshotReducer_LoopIterations(t *testing.T) {
 	}
 }
 
+func TestSnapshotReducer_MonotonicGuardAgainstDuplicateNodeStarted(t *testing.T) {
+	// Mirror of editor T2.4 (9bcccff). The runtime can re-emit
+	// node_started for the same (branch, node, iteration) when the
+	// node is not on a loop edge directly and currentLoopIteration
+	// returns the same value for successive runs (observed live as
+	// family_upgrade#0 flickering finished -> running -> finished).
+	// A duplicate node_started must NOT downgrade an already-terminal
+	// execution back to running, and must NOT add a second entry to
+	// the order slice (otherwise Snapshot() emits the same exec twice).
+	b := NewSnapshotBuilder(&store.Run{ID: "r1", Status: store.RunStatusRunning})
+	events := []*store.Event{
+		evt(0, store.EventNodeStarted, "", "family_upgrade",
+			map[string]interface{}{"kind": "compute", "iteration": 0}),
+		evt(1, store.EventNodeFinished, "", "family_upgrade", nil),
+		// Stale or runtime re-emission for the same (node, iter) —
+		// must be ignored at status level, must not duplicate order.
+		evt(2, store.EventNodeStarted, "", "family_upgrade",
+			map[string]interface{}{"kind": "compute", "iteration": 0}),
+	}
+	for _, e := range events {
+		b.Apply(e)
+	}
+	snap := b.Snapshot()
+	if got := len(snap.Executions); got != 1 {
+		t.Fatalf("Executions = %d, want 1 (duplicate node_started must not append)", got)
+	}
+	if snap.Executions[0].Status != ExecStatusFinished {
+		t.Errorf("Status = %q, want finished (terminal must not downgrade)", snap.Executions[0].Status)
+	}
+	// FirstSeq is anchored on the original start, not the duplicate.
+	if got := snap.Executions[0].FirstSeq; got != 0 {
+		t.Errorf("FirstSeq = %d, want 0 (preserved across duplicate)", got)
+	}
+}
+
+func TestSnapshotReducer_MonotonicGuardAgainstStaleStartAfterFailure(t *testing.T) {
+	// A node that failed must not be flipped back to running by a
+	// duplicate node_started event. Same rule as Finished above; this
+	// covers the path where the runtime emits a retry node_started
+	// without first emitting a fresh exec id.
+	b := NewSnapshotBuilder(&store.Run{ID: "r1", Status: store.RunStatusRunning})
+	events := []*store.Event{
+		evt(0, store.EventNodeStarted, "", "build", map[string]interface{}{"iteration": 0}),
+		evt(1, store.EventRunFailed, "", "build", map[string]interface{}{"error": "boom"}),
+		evt(2, store.EventNodeStarted, "", "build", map[string]interface{}{"iteration": 0}),
+	}
+	for _, e := range events {
+		b.Apply(e)
+	}
+	snap := b.Snapshot()
+	if got := len(snap.Executions); got != 1 {
+		t.Fatalf("Executions = %d, want 1", got)
+	}
+	ex := snap.Executions[0]
+	if ex.Status != ExecStatusFailed {
+		t.Errorf("Status = %q, want failed (terminal must not downgrade)", ex.Status)
+	}
+	if ex.Error != "boom" {
+		t.Errorf("Error = %q, want boom (preserved)", ex.Error)
+	}
+}
+
+func TestSnapshotReducer_MonotonicGuardAgainstStaleStartAfterPause(t *testing.T) {
+	// A node paused waiting for human input must not flip back to
+	// running on a stale node_started — only run_resumed transitions
+	// out of paused (handleRunResumed).
+	b := NewSnapshotBuilder(&store.Run{ID: "r1", Status: store.RunStatusRunning})
+	events := []*store.Event{
+		evt(0, store.EventNodeStarted, "", "ask", map[string]interface{}{"kind": "human", "iteration": 0}),
+		evt(1, store.EventHumanInputRequested, "", "ask", nil),
+		// Spurious replay of node_started while still awaiting input.
+		evt(2, store.EventNodeStarted, "", "ask", map[string]interface{}{"kind": "human", "iteration": 0}),
+	}
+	for _, e := range events {
+		b.Apply(e)
+	}
+	snap := b.Snapshot()
+	if got := len(snap.Executions); got != 1 {
+		t.Fatalf("Executions = %d, want 1", got)
+	}
+	if snap.Executions[0].Status != ExecStatusPaused {
+		t.Errorf("Status = %q, want paused_waiting_human", snap.Executions[0].Status)
+	}
+}
+
 func TestSnapshotReducer_FanOutBranches(t *testing.T) {
 	b := NewSnapshotBuilder(&store.Run{ID: "r1"})
 	// Fan-out: same node ID runs in two different branches in parallel.
