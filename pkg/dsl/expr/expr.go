@@ -19,10 +19,11 @@
 // `vars`, `input`, `outputs`, `artifacts`, `loop.<name>.{iteration,max,previous_output[.field]}`,
 // and `run.{id}` are the standard ones.
 //
-// Builtin functions: `length`, `concat`, `unique`, `contains`, `join`. See the
-// builtins map below for signatures and semantics. Function calls are
-// disambiguated from path lookups purely by the presence of `(` directly
-// after the leading IDENT — there is no separate keyword set.
+// Builtin functions: `length`, `concat`, `unique`, `contains`, `join`,
+// `if(cond, then, else)`. See the builtins map below for signatures and
+// semantics. Function calls are disambiguated from path lookups purely by
+// the presence of `(` directly after the leading IDENT — there is no
+// separate keyword set.
 package expr
 
 import (
@@ -939,6 +940,7 @@ var builtins = map[string]func(args []interface{}) (interface{}, error){
 	"unique":   builtinUnique,
 	"contains": builtinContains,
 	"join":     builtinJoin,
+	"if":       builtinIf,
 }
 
 func evalFuncCall(n *funcCallNode, ctx *Context) (interface{}, error) {
@@ -1051,6 +1053,28 @@ func builtinContains(args []interface{}) (interface{}, error) {
 		}
 	}
 	return false, nil
+}
+
+// builtinIf is a ternary-style selector: if(cond, then, else) returns
+// then when cond is truthy, else otherwise. Both branches are evaluated
+// eagerly — function calls are not special forms — so the caller is
+// responsible for keeping side effects out of either branch (compute
+// nodes are side-effect-free by construction, so this is fine for the
+// recipe use case).
+//
+// Motivation: the DSL has no native ternary or if-expression, which
+// pushed any conditional value-selection downstream to a JS tool. For
+// simple choices like "effective_risk = if(has_breaking && length(
+// alignment_steps) >= 3, 'major', risk)" the JS overhead is wasteful;
+// a builtin closes that gap.
+func builtinIf(args []interface{}) (interface{}, error) {
+	if len(args) != 3 {
+		return nil, fmt.Errorf("expr: if() takes 3 arguments (cond, then, else), got %d", len(args))
+	}
+	if truthy(args[0]) {
+		return args[1], nil
+	}
+	return args[2], nil
 }
 
 func builtinJoin(args []interface{}) (interface{}, error) {
