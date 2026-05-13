@@ -29,12 +29,13 @@ import RunMetrics from "./RunMetrics";
 import ReportTab from "./ReportTab";
 import Scrubber from "./Scrubber";
 
-// Runtime override captured from llm_request events. Keyed by IR node id.
-// Each value is the most-recent llm_request payload seen for that node.
-interface RuntimeLLMOverride {
-  model?: string;
-  reasoning_effort?: string;
-}
+import { readNodeOutputMeta, type DelegateOutputMeta } from "@/lib/delegateMeta";
+
+// `RuntimeLLMOverride` aliases the cross-file `DelegateOutputMeta`
+// shape — kept under this name locally so its run-view role (override
+// of the .iter-declared model/effort for the canvas "live" badge) is
+// obvious at call sites.
+type RuntimeLLMOverride = DelegateOutputMeta;
 
 const DETAIL_COLLAPSED_KEY = "run-console-v1.detail-collapsed";
 const EVENTLOG_COLLAPSED_KEY = "run-console-v1.eventlog-collapsed";
@@ -327,21 +328,35 @@ export default function RunView() {
     return events.filter((e) => e.seq <= scrubSeq);
   }, [scrubSeq, events]);
 
-  // Fold llm_request events into a per-node "what was actually sent to
-  // the LLM" map. Latest event wins because seq is monotonic. We use
-  // displayedEvents rather than raw events so the time-travel scrubber
-  // also rewinds the runtime override.
+  // Fold llm_request and node_finished events into a per-node "what
+  // actually ran" map. Latest event wins because seq is monotonic.
+  // displayedEvents (not raw) so the time-travel scrubber rewinds too.
+  // llm_request carries mid-flight overrides (claw); node_finished
+  // carries the executor-stamped effective model + context window
+  // (claude_code) via output._model / _context_*. See
+  // pkg/backend/model/executor.go stampDelegateOutputMeta.
   const runtimeOverrideByNode = useMemo(() => {
     const m = new Map<string, RuntimeLLMOverride>();
+    const update = (nodeID: string, patch: Partial<RuntimeLLMOverride>) => {
+      const prev = m.get(nodeID) ?? {};
+      m.set(nodeID, { ...prev, ...patch });
+    };
     for (const e of displayedEvents) {
-      if (e.type !== "llm_request" || !e.node_id) continue;
+      if (!e.node_id) continue;
       const data = e.data ?? {};
-      const override: RuntimeLLMOverride = {};
-      if (typeof data.model === "string") override.model = data.model;
-      if (typeof data.reasoning_effort === "string")
-        override.reasoning_effort = data.reasoning_effort;
-      if (override.model || override.reasoning_effort) {
-        m.set(e.node_id, override);
+      if (e.type === "llm_request") {
+        const patch: Partial<RuntimeLLMOverride> = {};
+        if (typeof data.model === "string") patch.model = data.model;
+        if (typeof data.reasoning_effort === "string")
+          patch.reasoning_effort = data.reasoning_effort;
+        if (patch.model || patch.reasoning_effort) update(e.node_id, patch);
+        continue;
+      }
+      if (e.type === "node_finished") {
+        const patch = readNodeOutputMeta(
+          data.output as Record<string, unknown> | undefined,
+        );
+        if (Object.keys(patch).length > 0) update(e.node_id, patch);
       }
     }
     return m;

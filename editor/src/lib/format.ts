@@ -42,6 +42,29 @@ export function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(2)}M`;
 }
 
+// Compact + full forms for the context-usage gauge shared between the
+// canvas card (ContextUsageBar) and the node detail panel header.
+// Returns null when the inputs are insufficient to render a meaningful
+// gauge so callers can early-bail uniformly.
+export interface ContextUsage {
+  pct: number;
+  label: string;
+  title: string;
+}
+
+export function formatContextUsage(
+  used: number | undefined,
+  window: number | undefined,
+): ContextUsage | null {
+  if (!window || window <= 0 || used === undefined || used <= 0) return null;
+  const pct = Math.min(100, (used / window) * 100);
+  return {
+    pct,
+    label: `${formatTokens(used)}/${formatTokens(window)}`,
+    title: `context: ${used.toLocaleString()} / ${window.toLocaleString()} tokens (${Math.round(pct)}%)`,
+  };
+}
+
 // formatRelative renders an ISO timestamp as "5m ago" / "2h ago" /
 // "3d ago". Used by the run list and the commits panel; both want the
 // same rounding behaviour so they stay in lockstep on screen.

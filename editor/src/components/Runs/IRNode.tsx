@@ -5,6 +5,7 @@ import { Handle, Position } from "@xyflow/react";
 import type { ExecutionState } from "@/api/runs";
 import type { NodeKind } from "@/api/types";
 import { Popover } from "@/components/ui";
+import { ContextUsageBar } from "@/components/ui/ContextUsageBar";
 import { EffortBar, isEffortLevel } from "@/components/ui/EffortBar";
 import { ProviderIcon } from "@/components/icons/ProviderIcon";
 import { BackendBadge } from "@/components/icons/BackendBadge";
@@ -45,6 +46,9 @@ export function iterationColor(index: number): string {
 // `effortSupported` carries the model's supported effort levels so
 // EffortBar can normalise to the model's max (a gpt-5 node at "high"
 // shows a full bar instead of 3/5).
+// `contextWindow`/`contextUsed` drive the ContextUsageBar; both come
+// from the backend's effective-model metadata and stay undefined for
+// backends/proxies that don't report the window.
 export interface LLMMeta {
   model?: string;
   backend?: string;
@@ -53,6 +57,8 @@ export interface LLMMeta {
   runtimeOverriddenEffort?: boolean;
   effortIsResolvedDefault?: boolean;
   effortSupported?: string[];
+  contextWindow?: number;
+  contextUsed?: number;
 }
 
 interface IRNodeData {
@@ -152,6 +158,10 @@ export default function IRNode({ data }: NodeProps) {
               )}
             </div>
           )}
+          <ContextUsageBar
+            used={meta?.contextUsed}
+            window={meta?.contextWindow}
+          />
           <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-fg-subtle flex-wrap">
             <BackendBadge backend={meta?.backend} size={10} />
             {isEffortLevel(meta?.reasoningEffort) && (

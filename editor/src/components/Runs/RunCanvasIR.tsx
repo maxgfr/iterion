@@ -17,6 +17,7 @@ import type {
 } from "@/api/runs";
 import { getRunWorkflow } from "@/api/runs";
 import { autoLayout } from "@/lib/autoLayout";
+import type { DelegateOutputMeta } from "@/lib/delegateMeta";
 import {
   effortBackendKey,
   fetchAndCacheEffortCapabilities,
@@ -40,19 +41,16 @@ interface Props {
   // computed from `executions` (current > paused > latest).
   iterationByNode: Map<string, number>;
   onSelectIteration: (nodeId: string, iteration: number) => void;
-  // Latest model / reasoning_effort observed in llm_request events,
+  // Latest runtime meta observed in llm_request / node_finished events,
   // keyed by IR node id. Empty before any LLM call has happened.
-  // Merged with WireNode declarative metadata to compute the node's
-  // displayed `meta` and the "live" badge flags.
-  runtimeOverrideByNode: Map<
-    string,
-    { model?: string; reasoning_effort?: string }
-  >;
+  // Populated by RunView's fold (see DelegateOutputMeta for the shape
+  // and which event sources feed which field).
+  runtimeOverrideByNode: Map<string, DelegateOutputMeta>;
 }
 
 function buildLLMMeta(
   node: WireNode,
-  override: { model?: string; reasoning_effort?: string } | undefined,
+  override: DelegateOutputMeta | undefined,
   effortCapsByPair: Map<string, EffortCapabilities>,
 ): LLMMeta | undefined {
   const declared = {
@@ -99,6 +97,8 @@ function buildLLMMeta(
       override.reasoning_effort !== declared.effort,
     effortIsResolvedDefault,
     effortSupported: caps?.supported ?? undefined,
+    contextWindow: override?.contextWindow,
+    contextUsed: override?.contextUsed,
   };
 }
 

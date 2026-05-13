@@ -320,4 +320,29 @@ type Result struct {
 	// answer in PendingConversation. Required when PendingConversation
 	// is non-nil.
 	PendingToolUseID string
+
+	// EffectiveModel is the model the backend actually used, as reported
+	// by the provider — distinct from the workflow-declared `model:`.
+	// For claude_code this is captured from the CLI's init SystemMessage
+	// after env vars and settings.json have been resolved, so it reflects
+	// overrides like ANTHROPIC_MODEL or third-party proxies (GLM, Kimi,
+	// DeepSeek via ANTHROPIC_BASE_URL). Empty when the backend doesn't
+	// report it.
+	EffectiveModel string
+
+	// ContextWindow is the effective model's context window size in
+	// tokens, as reported by the provider via its usage payload. Zero
+	// when unknown (proxy didn't fill it, or backend doesn't expose it).
+	ContextWindow int
+
+	// MaxOutputTokens is the per-call output cap reported by the provider
+	// for the effective model. Zero when unknown.
+	MaxOutputTokens int
+
+	// PeakInputTokens is the largest "context loaded" observed across
+	// the backend session — the sum of input + cache_creation +
+	// cache_read tokens on a single assistant turn. Combined with
+	// ContextWindow it yields the peak usage ratio displayed on the
+	// run-view node. Zero when unknown.
+	PeakInputTokens int
 }

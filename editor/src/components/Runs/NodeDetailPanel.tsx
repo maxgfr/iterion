@@ -6,7 +6,8 @@ import type { ArtifactSummary, ExecutionState, RunEvent } from "@/api/runs";
 import { listArtifacts } from "@/api/runs";
 import { IconButton, Input, StatusBadge, Tabs } from "@/components/ui";
 import { stepIteration } from "@/lib/eventIter";
-import { formatDurationBetween, formatMs } from "@/lib/format";
+import { formatContextUsage, formatDurationBetween, formatMs } from "@/lib/format";
+import { readNodeOutputMeta } from "@/lib/delegateMeta";
 
 import ArtifactDiff from "./ArtifactDiff";
 import PauseForm from "./PauseForm";
@@ -291,22 +292,30 @@ function DetailHeader({
   // matching events is just to defensively merge if the engine ever
   // emits multiple (e.g. on retry within a node) — the common case is
   // exactly one row.
-  const { costUsd, tokens, model } = useMemo(() => {
+  const { costUsd, tokens, model, contextWindow, contextUsed } = useMemo(() => {
     let costUsd = 0;
     let tokens = 0;
     let model = "";
+    let contextWindow = 0;
+    let contextUsed = 0;
     for (const e of events) {
       if (e.type !== "node_finished" || !e.data) continue;
       const c = e.data["_cost_usd"];
       if (typeof c === "number") costUsd += c;
       const t = e.data["_tokens"];
       if (typeof t === "number") tokens += t;
-      const out = e.data["output"] as Record<string, unknown> | undefined;
-      const m = out?.["_model"];
-      if (typeof m === "string" && m && !model) model = m;
+      const meta = readNodeOutputMeta(
+        e.data["output"] as Record<string, unknown> | undefined,
+      );
+      if (meta.model && !model) model = meta.model;
+      if (meta.contextWindow && meta.contextWindow > contextWindow)
+        contextWindow = meta.contextWindow;
+      if (meta.contextUsed && meta.contextUsed > contextUsed)
+        contextUsed = meta.contextUsed;
     }
-    return { costUsd, tokens, model };
+    return { costUsd, tokens, model, contextWindow, contextUsed };
   }, [events]);
+  const contextUsage = formatContextUsage(contextUsed, contextWindow);
   const [copied, setCopied] = useState(false);
   const onCopyError = async () => {
     if (!exec.error) return;
@@ -347,6 +356,11 @@ function DetailHeader({
               </span>
             )}
             {model && <span className="font-mono">{model}</span>}
+            {contextUsage && (
+              <span title={contextUsage.title}>
+                ctx: {contextUsage.label} ({Math.round(contextUsage.pct)}%)
+              </span>
+            )}
           </div>
         </div>
         {filePath && (
