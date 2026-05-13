@@ -3029,6 +3029,25 @@ router intel_fanout:
 ## have completed. The expr block re-projects the relevant fields so
 ## the downstream upgrade edge doesn't need to know which agent
 ## produced which key.
+## intel_join also re-evaluates the package's risk class against the
+## changelog evidence. discover_outdated classifies risk by strict
+## semver diff (current.major == target.major → "minor"), but real
+## libraries violate semver in both directions: axios 1.7.7 → 1.16.0
+## ships 12 breaking-change alignment steps despite same-major, while
+## many @types/* "major" bumps are declaration-only no-ops. The
+## downstream loop caps (fix_loop, future per-risk budgets) are sized
+## off the *actual* difficulty, so we expose:
+##
+##   - effective_risk: bumped to "major" when changelog_review found
+##     non-trivial breaking changes (has_breaking AND ≥3 alignment
+##     steps). The 3-step threshold filters cosmetic "rename one
+##     export" callouts — those don't justify the major's wider
+##     fix_loop budget. The original risk is preserved otherwise.
+##
+##   - fix_loop_max: 5 when effective_risk is major, else 3. Matches
+##     the select_candidate constant so the loop cap aligns with the
+##     per-risk budget policy. Routed onto the `fix_after_upgrade ->
+##     validate_upgrade` loop edge via T2.2's templated cap support.
 compute intel_join:
   await: wait_all
   output: intel_join_output
@@ -3040,6 +3059,8 @@ compute intel_join:
     has_breaking: "outputs.changelog_review.has_breaking"
     breaking_changes: "outputs.changelog_review.breaking_changes"
     alignment_steps: "outputs.changelog_review.alignment_steps"
+    effective_risk: "if(outputs.changelog_review.has_breaking && length(outputs.changelog_review.alignment_steps) >= 3, 'major', outputs.select_candidate.risk)"
+    fix_loop_max: "if(outputs.changelog_review.has_breaking && length(outputs.changelog_review.alignment_steps) >= 3, 5, 3)"
 
 ## intel_join_output is consumed by the upgrade edge for routing
 ## (safe?) and prompt-context (changelog_summary). Defined late
@@ -3052,6 +3073,8 @@ schema intel_join_output:
   has_breaking: bool
   breaking_changes: json
   alignment_steps: json
+  effective_risk: string
+  fix_loop_max: int
 
 ## phase2_decider routes select_candidate's "no more candidates"
 ## verdict to the right terminal. Splitting the decision into a
@@ -3489,7 +3512,7 @@ workflow secured_renovacy:
     selected_package: "{{outputs.select_candidate.selected_package}}",
     current_version: "{{outputs.select_candidate.current_version}}",
     target_version: "{{outputs.select_candidate.target_version}}",
-    risk: "{{outputs.select_candidate.risk}}",
+    risk: "{{outputs.intel_join.effective_risk}}",
     align_summary: "{{outputs.align_code.summary}}",
     workspace_dir: "{{vars.workspace_dir}}",
     _session_id: "{{outputs.detect_stack._session_id}}",
@@ -3517,17 +3540,21 @@ workflow secured_renovacy:
   ## fix_loop is per-package: the runtime resets the counter on the
   ## first non-loop edge that re-enters this loop's body from outside
   ## (typically `align_code -> validate_upgrade` after the next
-  ## package's upgrade lands). Cap of 3 retries — tight on purpose:
-  ## a package that doesn't validate after 3 alignment passes is
-  ## almost certainly stuck on something the fix agent can't resolve
-  ## (CI-only failures, missing peer deps, env-specific breakage),
-  ## and the marginal $/iter from fix attempt #4-#5 rarely pays off.
-  ## Revert + mark_failed_and_continue is the cheaper outcome.
-  fix_after_upgrade -> validate_upgrade as fix_loop(3) with {
+  ## package's upgrade lands). The cap is templated off
+  ## intel_join.fix_loop_max — 3 for patch/minor, 5 when the
+  ## changelog evidence promotes effective_risk to major (axios-style
+  ## semver violations with ≥3 alignment steps). Both budgets stay
+  ## tight on purpose: a package that doesn't validate after its
+  ## risk-sized fix budget is almost certainly stuck on something
+  ## the fix agent can't resolve (CI-only failures, missing peer
+  ## deps, env-specific breakage), and the marginal $/iter from
+  ## further attempts rarely pays off. Revert + mark_failed_and_
+  ## continue is the cheaper outcome.
+  fix_after_upgrade -> validate_upgrade as fix_loop("{{outputs.intel_join.fix_loop_max}}") with {
     selected_package: "{{outputs.select_candidate.selected_package}}",
     current_version: "{{outputs.select_candidate.current_version}}",
     target_version: "{{outputs.select_candidate.target_version}}",
-    risk: "{{outputs.select_candidate.risk}}",
+    risk: "{{outputs.intel_join.effective_risk}}",
     align_summary: "{{outputs.fix_after_upgrade.summary}}",
     workspace_dir: "{{vars.workspace_dir}}",
     _session_id: "{{outputs.fix_after_upgrade._session_id}}",
@@ -3566,7 +3593,7 @@ workflow secured_renovacy:
     package_name: "{{outputs.select_candidate.selected_package}}",
     current_version: "{{outputs.select_candidate.current_version}}",
     target_version: "{{outputs.select_candidate.target_version}}",
-    risk: "{{outputs.select_candidate.risk}}",
+    risk: "{{outputs.intel_join.effective_risk}}",
     changelog_summary: "{{outputs.changelog_review}}",
     security_report: "{{outputs.security_audit}}",
     align_summary: "{{outputs.align_code.summary}}",
