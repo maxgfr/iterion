@@ -550,6 +550,27 @@ function reduceEvents(
         const kind = (evt.data?.kind as string) ?? undefined;
         ensureExecCopy();
         const existing = executionsById.get(id);
+        // Monotonic status: a duplicate `node_started` (history replay
+        // on WS reconnect, REST snapshot landing after the WS already
+        // saw node_finished, runtime re-emitting the same iter for any
+        // reason) must NEVER downgrade a terminal state back to
+        // "running". Preserve the full terminal snapshot and just bump
+        // the event seq markers — that fixes the "finished node keeps
+        // showing as running" glitch the operator reported as a
+        // recurring UI issue.
+        if (
+          existing &&
+          (existing.status === "finished" ||
+            existing.status === "failed" ||
+            existing.status === "paused_waiting_human")
+        ) {
+          executionsById.set(id, {
+            ...existing,
+            current_event_seq: evt.seq,
+            last_seq: evt.seq,
+          });
+          break;
+        }
         executionsById.set(id, {
           execution_id: id,
           ir_node_id: evt.node_id,
