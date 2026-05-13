@@ -43,11 +43,23 @@ func instanceDir() (string, error) {
 // an error if the file is already locked (i.e. another instance is
 // running).
 func AcquireSingleInstanceLock() (*SingleInstance, error) {
+	return acquireLockFile("iterion-desktop.lock")
+}
+
+// acquireDaemonLock is the headless-server variant of
+// AcquireSingleInstanceLock — a separate lock file lets a daemon and a
+// GUI process coexist (the GUI takes the GUI lock; the daemon takes the
+// daemon lock).
+func acquireDaemonLock() (*SingleInstance, error) {
+	return acquireLockFile("iterion-desktop-daemon.lock")
+}
+
+func acquireLockFile(name string) (*SingleInstance, error) {
 	dir, err := instanceDir()
 	if err != nil {
 		return nil, err
 	}
-	lockPath := filepath.Join(dir, "iterion-desktop.lock")
+	lockPath := filepath.Join(dir, name)
 	lock := flock.New(lockPath)
 	ok, err := lock.TryLock()
 	if err != nil {
