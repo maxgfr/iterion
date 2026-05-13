@@ -32,10 +32,14 @@
 ##     all share one Claude session. The chain extends across
 ##     iterations via _session_id passthrough on the loop edge.
 ##   - Opus 4.7 max-effort across the board (claude_code via the
-##     workflow default_backend). Configurable per-run via
-##     ITERION_RENOVACY_EFFORT_CLAUDE; defaults to max so the recipe
-##     can take its time when it must — package upgrades reward
-##     getting it right once, not getting it cheap.
+##     workflow default_backend). Configurable per-run via env vars
+##     `ITERION_RENOVACY_MODEL_CLAUDE` (defaults to claude-opus-4-7;
+##     swap to claude-sonnet-4-6 for a cheaper / faster pass) and
+##     `ITERION_RENOVACY_EFFORT_CLAUDE` (defaults to max; drop to
+##     high / medium during test cycles). Package upgrades reward
+##     getting it right once, not getting it cheap — bias to the
+##     stronger combo for production runs and use the env-var
+##     escape hatches for iteration speed.
 ##   - claw + GPT-5.5 (override via ITERION_RENOVACY_MODEL_GPT —
 ##     fall back to gpt-5.4 if 5.5 is not enabled in your account)
 ##     at max reasoning_effort for the cross-family review/fix.
@@ -1672,7 +1676,7 @@ schema review_commit_intent:
 agent detect_stack:
   backend: "claude_code"
   provider: "${RESCUE_PROVIDER:-zai}"
-  model: "claude-opus-4-7"
+  model: "${ITERION_RENOVACY_MODEL_CLAUDE:-claude-opus-4-7}"
   reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   output: stack_profile
   publish: stack_profile_artifact
@@ -1705,7 +1709,7 @@ tool capture_start_sha:
 agent discover_outdated:
   backend: "claude_code"
   provider: "${RESCUE_PROVIDER:-zai}"
-  model: "claude-opus-4-7"
+  model: "${ITERION_RENOVACY_MODEL_CLAUDE:-claude-opus-4-7}"
   reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: discover_input
   output: outdated_list
@@ -1909,7 +1913,7 @@ tool select_candidate:
 agent security_audit:
   backend: "claude_code"
   provider: "${RESCUE_PROVIDER:-zai}"
-  model: "claude-opus-4-7"
+  model: "${ITERION_RENOVACY_MODEL_CLAUDE:-claude-opus-4-7}"
   reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: audit_input
   output: security_report
@@ -1925,7 +1929,7 @@ agent security_audit:
 agent changelog_review:
   backend: "claude_code"
   provider: "${RESCUE_PROVIDER:-zai}"
-  model: "claude-opus-4-7"
+  model: "${ITERION_RENOVACY_MODEL_CLAUDE:-claude-opus-4-7}"
   reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: changelog_input
   output: changelog_summary
@@ -1951,7 +1955,7 @@ agent changelog_review:
 agent upgrade:
   backend: "claude_code"
   provider: "${RESCUE_PROVIDER:-zai}"
-  model: "claude-opus-4-7"
+  model: "${ITERION_RENOVACY_MODEL_CLAUDE:-claude-opus-4-7}"
   reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: upgrade_input
   output: upgrade_result
@@ -1964,7 +1968,7 @@ agent upgrade:
 agent install:
   backend: "claude_code"
   provider: "${RESCUE_PROVIDER:-zai}"
-  model: "claude-opus-4-7"
+  model: "${ITERION_RENOVACY_MODEL_CLAUDE:-claude-opus-4-7}"
   reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: install_input
   output: install_result
@@ -1979,7 +1983,7 @@ agent install:
 agent align_code:
   backend: "claude_code"
   provider: "${RESCUE_PROVIDER:-zai}"
-  model: "claude-opus-4-7"
+  model: "${ITERION_RENOVACY_MODEL_CLAUDE:-claude-opus-4-7}"
   reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: align_input
   output: align_result
@@ -1994,7 +1998,7 @@ agent align_code:
 agent validate_upgrade:
   backend: "claude_code"
   provider: "${RESCUE_PROVIDER:-zai}"
-  model: "claude-opus-4-7"
+  model: "${ITERION_RENOVACY_MODEL_CLAUDE:-claude-opus-4-7}"
   reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: validate_input
   output: verdict
@@ -2014,7 +2018,7 @@ agent validate_upgrade:
 agent fix_after_upgrade:
   backend: "claude_code"
   provider: "${RESCUE_PROVIDER:-zai}"
-  model: "claude-opus-4-7"
+  model: "${ITERION_RENOVACY_MODEL_CLAUDE:-claude-opus-4-7}"
   reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: fix_after_input
   output: fix_after_result
@@ -2057,22 +2061,35 @@ tool prepare_commit:
     const alignSum = {{input.alignment_summary}};
     const workspaceDir = {{input.workspace_dir}};
 
-    // Collect dirty files via git status --porcelain. Untracked files
-    // (`??`) are excluded — the upgrade chain controls whether to
-    // surface them; prepare_commit's job is just to stage what was
-    // modified/added/deleted/renamed by the upgrade and its
-    // alignment. Renamed entries appear as "R  old -> new" — keep
-    // the destination path for staging.
-    const status = execSync(`git -C "${workspaceDir}" status --porcelain`, { encoding: "utf8" });
+    // Collect files to stage. We need:
+    //   - tracked files that differ from HEAD (modified, deleted,
+    //     staged-add, renamed, copied) — `git diff --name-only HEAD`
+    //   - untracked files that aren't ignored (new files created by
+    //     align_code / fix_after_upgrade, e.g. eslint flat-config
+    //     migration emits `eslint.config.js` brand-new) — `git ls-
+    //     files --others --exclude-standard`
+    //
+    // The earlier `git status --porcelain` approach surfaced two
+    // failure modes: (a) untracked new files were filtered out by
+    // the `??` skip, so align_code's flat-config rewrites never got
+    // committed; (b) `AD` / `MD` / `RD` entries (staged then deleted
+    // from disk, observed live when fix_after_upgrade iterations
+    // restage-then-revert a file) were emitted into `files`, and
+    // commit_changes's `git add --` failed with "pathspec did not
+    // match any files" — taking the whole run to failed_resumable.
+    // The two-source split sidesteps both: `diff --name-only HEAD`
+    // never lists added-and-then-deleted paths (they're identical
+    // to HEAD), and `ls-files --others` only lists existing-on-disk
+    // untracked files.
+    const tracked = execSync(`git -C "${workspaceDir}" diff --name-only HEAD`, { encoding: "utf8" });
+    const untracked = execSync(`git -C "${workspaceDir}" ls-files --others --exclude-standard`, { encoding: "utf8" });
+    const seen = new Set();
     const files = [];
-    for (const rawLine of status.split("\n")) {
-      const line = rawLine.replace(/\r?$/, "");
-      if (!line) continue;
-      const code = line.slice(0, 2);
-      let p = line.slice(3);
-      if (code.startsWith("?")) continue;
-      const arrow = p.indexOf(" -> ");
-      if (arrow !== -1) p = p.slice(arrow + 4);
+    for (const raw of (tracked + "\n" + untracked).split("\n")) {
+      const p = raw.replace(/\r?$/, "").trim();
+      if (!p) continue;
+      if (seen.has(p)) continue;
+      seen.add(p);
       files.push(p);
     }
 
@@ -2164,7 +2181,7 @@ printf '{"success":true,"output":"committed %s"}\n' "$SHA"
 agent revert_changes:
   backend: "claude_code"
   provider: "${RESCUE_PROVIDER:-zai}"
-  model: "claude-opus-4-7"
+  model: "${ITERION_RENOVACY_MODEL_CLAUDE:-claude-opus-4-7}"
   reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: revert_input
   output: revert_result
@@ -2192,7 +2209,7 @@ router alt_review:
 judge reviewer_claude:
   backend: "claude_code"
   provider: "${RESCUE_PROVIDER:-zai}"
-  model: "claude-opus-4-7"
+  model: "${ITERION_RENOVACY_MODEL_CLAUDE:-claude-opus-4-7}"
   reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: review_input
   output: review_verdict
@@ -2230,7 +2247,7 @@ compute streak_check:
 agent fix_claude:
   backend: "claude_code"
   provider: "${RESCUE_PROVIDER:-zai}"
-  model: "claude-opus-4-7"
+  model: "${ITERION_RENOVACY_MODEL_CLAUDE:-claude-opus-4-7}"
   reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: review_fix_input
   output: review_fix_result
@@ -3019,7 +3036,7 @@ printf '{"success":true,"committed":true,"output":"family %s committed %s","sha"
 agent family_align_code:
   backend: "claude_code"
   provider: "${RESCUE_PROVIDER:-zai}"
-  model: "claude-opus-4-7"
+  model: "${ITERION_RENOVACY_MODEL_CLAUDE:-claude-opus-4-7}"
   reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: family_align_input
   output: family_align_output
