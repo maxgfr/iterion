@@ -481,10 +481,10 @@ func TestExpr_FuncCall_Join(t *testing.T) {
 
 	// Error cases.
 	errCases := []string{
-		`join(vars.files)`,                  // arity
-		`join(vars.files, ",", "extra")`,    // arity
-		`join(vars.files, 42)`,              // wrong sep type
-		`join("not-array", ",")`,            // wrong arr type
+		`join(vars.files)`,               // arity
+		`join(vars.files, ",", "extra")`, // arity
+		`join(vars.files, 42)`,           // wrong sep type
+		`join("not-array", ",")`,         // wrong arr type
 	}
 	for _, src := range errCases {
 		ast, err := Parse(src)
