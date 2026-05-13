@@ -3037,6 +3037,9 @@ compute intel_join:
     security_blockers: "outputs.security_audit.blockers"
     security_fix_plan: "outputs.security_audit.fix_plan"
     changelog_summary: "outputs.changelog_review"
+    has_breaking: "outputs.changelog_review.has_breaking"
+    breaking_changes: "outputs.changelog_review.breaking_changes"
+    alignment_steps: "outputs.changelog_review.alignment_steps"
 
 ## intel_join_output is consumed by the upgrade edge for routing
 ## (safe?) and prompt-context (changelog_summary). Defined late
@@ -3046,6 +3049,9 @@ schema intel_join_output:
   security_blockers: string[]
   security_fix_plan: string
   changelog_summary: json
+  has_breaking: bool
+  breaking_changes: json
+  alignment_steps: json
 
 ## phase2_decider routes select_candidate's "no more candidates"
 ## verdict to the right terminal. Splitting the decision into a
@@ -3464,9 +3470,9 @@ workflow secured_renovacy:
     selected_package: "{{outputs.select_candidate.selected_package}}",
     current_version: "{{outputs.select_candidate.current_version}}",
     target_version: "{{outputs.select_candidate.target_version}}",
-    has_breaking: "{{outputs.changelog_review.has_breaking}}",
-    breaking_changes: "{{outputs.changelog_review.breaking_changes}}",
-    alignment_steps: "{{outputs.changelog_review.alignment_steps}}",
+    has_breaking: "{{outputs.intel_join.has_breaking}}",
+    breaking_changes: "{{outputs.intel_join.breaking_changes}}",
+    alignment_steps: "{{outputs.intel_join.alignment_steps}}",
     workspace_dir: "{{vars.workspace_dir}}",
     _session_id: "{{outputs.detect_stack._session_id}}"
   }
