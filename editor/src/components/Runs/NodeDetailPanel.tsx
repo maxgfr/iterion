@@ -10,6 +10,7 @@ import { formatContextUsage, formatDurationBetween, formatMs } from "@/lib/forma
 import { readNodeOutputMeta } from "@/lib/delegateMeta";
 
 import ArtifactDiff from "./ArtifactDiff";
+import LogLinesView from "./LogLinesView";
 import PauseForm from "./PauseForm";
 
 interface Props {
@@ -24,6 +25,11 @@ interface Props {
   // parent implements by clearing the manual pin in handleToggle.
   followLive?: boolean;
   onToggleFollowLive?: () => void;
+  // Imperative log subscription handles forwarded from RunView. The
+  // per-node Logs tab subscribes while it's mounted; the hook
+  // ref-counts so this coexists with the bottom RunLogPanel.
+  subscribeLogs: (fromOffset?: number) => void;
+  unsubscribeLogs: () => void;
   onCollapse?: () => void;
 }
 
@@ -79,7 +85,7 @@ function FollowLivePill({
   );
 }
 
-type TabValue = "pause" | "trace" | "tools" | "artifact" | "events";
+type TabValue = "pause" | "trace" | "tools" | "artifact" | "events" | "logs";
 
 export default function NodeDetailPanel({
   runId,
@@ -88,6 +94,8 @@ export default function NodeDetailPanel({
   events,
   followLive,
   onToggleFollowLive,
+  subscribeLogs,
+  unsubscribeLogs,
   onCollapse,
 }: Props) {
   const [artifactVersions, setArtifactVersions] = useState<ArtifactSummary[]>([]);
@@ -188,6 +196,7 @@ export default function NodeDetailPanel({
       disabled: !hasArtifact,
     },
     { value: "events" as TabValue, label: `Events (${matching.length})` },
+    { value: "logs" as TabValue, label: "Logs" },
   ];
 
   return (
@@ -258,6 +267,16 @@ export default function NodeDetailPanel({
             <div className="overflow-hidden h-full">
               <EventsTabContent events={matching} />
             </div>
+          ),
+          logs: (
+            <LogLinesView
+              runId={runId}
+              subscribeLogs={subscribeLogs}
+              unsubscribeLogs={unsubscribeLogs}
+              filterNodeId={exec.ir_node_id}
+              filterIteration={exec.loop_iteration}
+              showTitle={false}
+            />
           ),
         }}
       />

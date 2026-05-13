@@ -322,8 +322,11 @@ func (e *Engine) execBranch(ctx context.Context, rs *runState, branchID string, 
 		mergedArt := mergeOutputs(parentArtifacts, result.artifacts)
 		nodeInput := e.buildNodeInputRS(currentNodeID, vars, merged, runInputs, mergedArt, rs)
 
-		// Execute.
-		output, err := e.executor.Execute(ctx, node, nodeInput)
+		// Loop edges inside fan-out branches are skipped (see helpers.go),
+		// so iteration is always 0 here — but we stamp it explicitly so
+		// the per-node log filter still matches.
+		execCtx := e.ctxWithIteration(ctx, currentNodeID, rs.loopCounters)
+		output, err := e.executor.Execute(execCtx, node, nodeInput)
 		if err != nil {
 			result.err = fmt.Errorf("node %q in branch %s: %w", currentNodeID, branchID, err)
 			if emitErr := e.emitBranch(ctx, runID, branchID, store.EventNodeFinished, currentNodeID, map[string]interface{}{

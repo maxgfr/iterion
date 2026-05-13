@@ -9,7 +9,7 @@ const baseRun: RunHeader = {
   status: "running",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
-} as RunHeader;
+} as unknown as RunHeader;
 
 function exec(node: string, status: ExecutionState["status"], iter = 0, seq = 0): ExecutionState {
   return {

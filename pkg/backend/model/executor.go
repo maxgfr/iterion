@@ -465,7 +465,8 @@ func (e *ClawExecutor) Compact(ctx context.Context, nodeID string) error {
 		return fmt.Errorf("claw executor (node %q): nothing to compact: %w", nodeID, ErrCompactionUnsupported)
 	}
 	if e.logger != nil {
-		e.logger.Info("recovery: compacted node %q session (%d messages dropped)", nodeID, removed)
+		iter := LoopIterationFromContext(ctx)
+		e.logger.Info("[%s#%d/claw] recovery: compacted session (%d messages dropped)", nodeID, iter, removed)
 	}
 	return nil
 }
@@ -844,6 +845,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 
 	task := delegate.Task{
 		NodeID:                f.id,
+		Iteration:             LoopIterationFromContext(ctx),
 		SystemPrompt:          systemText,
 		UserPrompt:            userText,
 		UserContent:           userContent,
@@ -977,7 +979,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 				// returned non-JSON output (transient SDK issue). Retry once
 				// before giving up.
 				if result.ParseFallback {
-					e.logger.Warn("node %q: structured output validation failed with parse fallback, retrying backend: %v", f.id, err)
+					e.logger.Warn("[%s#%d/%s] structured output validation failed with parse fallback, retrying backend: %v", f.id, task.Iteration, backendName, err)
 					retryResult, retryErr := backend.Execute(ctx, task)
 					if retryErr == nil && !retryResult.ParseFallback {
 						result = retryResult
@@ -1353,8 +1355,8 @@ func (e *ClawExecutor) retryDelegateLoop(ctx context.Context, nodeID string, bac
 	for attempt := 1; err != nil && isDelegateRetryable(err) && attempt < maxAttempts; attempt++ {
 		delay := e.retry.backoff(attempt - 1)
 
-		e.logger.Warn("node %q: delegate retry %d/%d after error: %v (backoff %s)",
-			nodeID, attempt, maxAttempts-1, err, delay.Round(time.Millisecond))
+		e.logger.Warn("[%s#%d/%s] delegate retry %d/%d after error: %v (backoff %s)",
+			nodeID, LoopIterationFromContext(ctx), backendName, attempt, maxAttempts-1, err, delay.Round(time.Millisecond))
 
 		if e.hooks.OnDelegateRetry != nil {
 			e.hooks.OnDelegateRetry(nodeID, DelegateInfo{
@@ -2238,6 +2240,7 @@ func (e *ClawExecutor) executeLLMRouterUnified(ctx context.Context, node *ir.Rou
 
 	task := delegate.Task{
 		NodeID:          node.ID,
+		Iteration:       LoopIterationFromContext(ctx),
 		SystemPrompt:    systemText,
 		UserPrompt:      userText,
 		OutputSchema:    jsonSchema,

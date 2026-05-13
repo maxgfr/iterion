@@ -205,7 +205,7 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 		stderrBuf.WriteString(line)
 		stderrBuf.WriteString("\n")
 		if line != "" {
-			b.Logger.Info("[%s/claude-code:err] %s", task.NodeID, line)
+			b.Logger.Info("[%s#%d/claude-code:err] %s", task.NodeID, task.Iteration, line)
 		}
 	}))
 
@@ -262,7 +262,7 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 				},
 			}))
 		} else {
-			b.Logger.Warn("[%s/claude-code] could not resolve iterion binary path; native ask_user MCP server disabled (falling back to JSON _needs_interaction protocol): %v", task.NodeID, err)
+			b.Logger.Warn("[%s#%d/claude-code] could not resolve iterion binary path; native ask_user MCP server disabled (falling back to JSON _needs_interaction protocol): %v", task.NodeID, task.Iteration, err)
 		}
 	}
 
@@ -274,7 +274,7 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 	// fired, the resulting context cancellation surfaces here as ctx.Err(),
 	// which we must not treat as a failure.
 	if q, ok := pendingQuestion.Load().(string); ok && q != "" {
-		b.Logger.Info("[%s/claude-code] 🛑 ask_user escalated via native MCP tool", task.NodeID)
+		b.Logger.Info("[%s#%d/claude-code] 🛑 ask_user escalated via native MCP tool", task.NodeID, task.Iteration)
 		sessID := ""
 		if rm != nil {
 			sessID = rm.SessionID
@@ -424,7 +424,7 @@ func (b *ClaudeCodeBackend) formatOutput(ctx context.Context, task Task, session
 		claudesdk.WithVerbose(true),
 		claudesdk.WithStderrCallback(func(line string) {
 			if line != "" {
-				b.Logger.Info("[%s/fmt] %s", task.NodeID, line)
+				b.Logger.Info("[%s#%d/fmt] %s", task.NodeID, task.Iteration, line)
 			}
 		}),
 	}
@@ -717,11 +717,11 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 				if (result.Result == nil || *result.Result == "") && lastAssistantText != "" {
 					txt := lastAssistantText
 					result.Result = &txt
-					b.Logger.Info("[%s/claude-code] ↩️  backfilled empty Result with last assistant text at stream close", task.NodeID)
+					b.Logger.Info("[%s#%d/claude-code] ↩️  backfilled empty Result with last assistant text at stream close", task.NodeID, task.Iteration)
 				} else if result.Result != nil {
-					b.Logger.Info("[%s/claude-code] 🏁 stream close: Result already populated (%d chars)", task.NodeID, len(*result.Result))
+					b.Logger.Info("[%s#%d/claude-code] 🏁 stream close: Result already populated (%d chars)", task.NodeID, task.Iteration, len(*result.Result))
 				} else {
-					b.Logger.Info("[%s/claude-code] 🏁 stream close: Result nil and no assistant text captured", task.NodeID)
+					b.Logger.Info("[%s#%d/claude-code] 🏁 stream close: Result nil and no assistant text captured", task.NodeID, task.Iteration)
 				}
 				return result, meta, nil
 			}
@@ -739,8 +739,8 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 				// hook_progress) fire repeatedly during a session and would
 				// flood the log; route them to debug.
 				if m.Subtype == "init" {
-					b.Logger.Info("[%s/claude-code] ⚙️  system/init session=%s model=%s tools=%d mcp=%d",
-						task.NodeID, m.SessionID, m.Model, m.ToolCount(), m.MCPServerCount())
+					b.Logger.Info("[%s#%d/claude-code] ⚙️  system/init session=%s model=%s tools=%d mcp=%d",
+						task.NodeID, task.Iteration, m.SessionID, m.Model, m.ToolCount(), m.MCPServerCount())
 					// Capture the effective model the CLI resolved to —
 					// after env vars (ANTHROPIC_MODEL, ANTHROPIC_BASE_URL)
 					// and settings.json have taken effect. Differs from
@@ -750,12 +750,12 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 						meta.effectiveModel = m.Model
 					}
 				} else {
-					b.Logger.Debug("[%s/claude-code] ⚙️  system/%s session=%s",
-						task.NodeID, m.Subtype, m.SessionID)
+					b.Logger.Debug("[%s#%d/claude-code] ⚙️  system/%s session=%s",
+						task.NodeID, task.Iteration, m.Subtype, m.SessionID)
 				}
 			case *claudesdk.AssistantMessage:
 				if m.Message != nil {
-					logAssistantContent(b.Logger, task.NodeID, m.Message.Content)
+					logAssistantContent(b.Logger, task.NodeID, task.Iteration, m.Message.Content)
 					// Peak prompt size across turns ≈ how full the
 					// context window got at its busiest moment.
 					u := m.Message.Usage
@@ -784,7 +784,7 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 							// with a typed error so the runtime can
 							// surface clear "switch provider" guidance.
 							if isRateLimitMessage(tb.Text) {
-								b.Logger.Warn("[%s/claude-code] 🚦 rate-limit signal in assistant text — aborting: %s", task.NodeID, truncate(tb.Text, 200))
+								b.Logger.Warn("[%s#%d/claude-code] 🚦 rate-limit signal in assistant text — aborting: %s", task.NodeID, task.Iteration, truncate(tb.Text, 200))
 								cancelStream()
 								return result, meta, &ErrRateLimited{Provider: BackendClaudeCode, Detail: strings.TrimSpace(tb.Text)}
 							}
@@ -792,7 +792,7 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 					}
 				}
 			case *claudesdk.UserMessage:
-				b.Logger.Debug("[%s/claude-code] 👤 user message echoed back", task.NodeID)
+				b.Logger.Debug("[%s#%d/claude-code] 👤 user message echoed back", task.NodeID, task.Iteration)
 			case *claudesdk.ResultMessage:
 				result = m
 				if (result.Result == nil || *result.Result == "") && lastAssistantText != "" {
@@ -801,7 +801,7 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 				}
 			default:
 				if it.msg != nil {
-					b.Logger.Debug("[%s/claude-code] 📨 %T message", task.NodeID, it.msg)
+					b.Logger.Debug("[%s#%d/claude-code] 📨 %T message", task.NodeID, task.Iteration, it.msg)
 				}
 			}
 		case <-idle.C:
@@ -815,8 +815,8 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 				phase = "hot"
 				envHint = "ITERION_CLAUDE_CODE_STREAM_IDLE_TIMEOUT"
 			}
-			b.Logger.Warn("[%s/claude-code] no SDK message for %s (%s phase) — aborting",
-				task.NodeID, currentTimeout, phase)
+			b.Logger.Warn("[%s#%d/claude-code] no SDK message for %s (%s phase) — aborting",
+				task.NodeID, task.Iteration, currentTimeout, phase)
 			return result, meta, fmt.Errorf("claude session idle for %s (%s phase) — aborting (set %s to extend, or 0 to disable)", currentTimeout, phase, envHint)
 		case <-ctx.Done():
 			cancelStream()
@@ -827,7 +827,7 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 
 // logAssistantContent emits human-readable info logs for tool calls, tool
 // errors, and text deltas from a single assistant message.
-func logAssistantContent(logger *iterlog.Logger, nodeID string, blocks []claudesdk.ContentBlock) {
+func logAssistantContent(logger *iterlog.Logger, nodeID string, iteration int, blocks []claudesdk.ContentBlock) {
 	for _, block := range blocks {
 		switch bl := block.(type) {
 		case *claudesdk.ToolUseBlock:
@@ -838,14 +838,14 @@ func logAssistantContent(logger *iterlog.Logger, nodeID string, blocks []claudes
 					break
 				}
 			}
-			logger.Info("[%s/claude-code] 🔧 %s %s", nodeID, displayName, toolUseDetail(bl.Name, bl.Input))
+			logger.Info("[%s#%d/claude-code] 🔧 %s %s", nodeID, iteration, displayName, toolUseDetail(bl.Name, bl.Input))
 		case *claudesdk.ToolResultBlock:
 			if bl.IsError {
-				logger.Info("[%s/claude-code] ❌ tool error: %v", nodeID, bl.Content)
+				logger.Info("[%s#%d/claude-code] ❌ tool error: %v", nodeID, iteration, bl.Content)
 			}
 		case *claudesdk.TextBlock:
 			if bl.Text != "" {
-				logger.Info("[%s/claude-code] 💬 %s", nodeID, truncate(bl.Text, 300))
+				logger.Info("[%s#%d/claude-code] 💬 %s", nodeID, iteration, truncate(bl.Text, 300))
 			}
 		}
 	}
@@ -859,6 +859,7 @@ func logAssistantContent(logger *iterlog.Logger, nodeID string, blocks []claudes
 //   - ZAI / Anthropic-shaped facade: "API Error: Request rejected (429)
 //     · Usage limit reached for 5 hour. Your limit will reset at …" —
 //     the CLI relays the upstream 429 into assistant text.
+//
 // Kept narrow: generic substrings like "rate_limit_error" were dropped
 // because security-audit agents legitimately mention them in prose.
 // The 200-char length cap is the second guard against agents quoting

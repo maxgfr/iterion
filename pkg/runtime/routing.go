@@ -114,7 +114,8 @@ func (e *Engine) execLLMRouter(ctx context.Context, rs *runState, routerNodeID s
 	}
 
 	// Execute LLM call via the executor.
-	output, err := e.executor.Execute(ctx, node, routerInput)
+	execCtx := e.ctxWithIteration(ctx, routerNodeID, rs.loopCounters)
+	output, err := e.executor.Execute(execCtx, node, routerInput)
 	if err != nil {
 		return "", fmt.Errorf("llm router %q: %w", routerNodeID, err)
 	}
