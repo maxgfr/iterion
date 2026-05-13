@@ -5,6 +5,7 @@ import EditorView from "@/components/EditorView";
 import LaunchView from "@/components/Runs/LaunchView";
 import RunListView from "@/components/Runs/RunListView";
 import RunView from "@/components/Runs/RunView";
+import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import ToastContainer from "@/components/shared/Toast";
 import MissingCLIBanner from "@/components/MissingCLIBanner";
 import Welcome from "@/views/Welcome";
@@ -119,9 +120,23 @@ function AuthedApp() {
     <>
       {isDesktop && <MissingCLIBanner />}
       <Switch>
-        <Route path="/runs/new" component={LaunchView} />
-        <Route path="/runs/:id" component={RunView} />
-        <Route path="/runs" component={RunListView} />
+        <Route path="/runs/new">
+          <ErrorBoundary area="Launch view">
+            <LaunchView />
+          </ErrorBoundary>
+        </Route>
+        <Route path="/runs/:id">
+          {(params) => (
+            <ErrorBoundary area="Run view" resetKey={params.id ?? null}>
+              <RunView />
+            </ErrorBoundary>
+          )}
+        </Route>
+        <Route path="/runs">
+          <ErrorBoundary area="Runs list">
+            <RunListView />
+          </ErrorBoundary>
+        </Route>
         <Route path="/account" component={SettingsPage} />
         <Route path="/teams/:id" component={TeamPage} />
         <Route component={EditorViewWithChrome} />
