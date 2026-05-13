@@ -189,7 +189,15 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 	}
 	sandboxCleanup, sbErr := e.startSandbox(ctx, runID, repoRoot)
 	if sbErr != nil {
-		_ = e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, sbErr.Error())
+		// Same rationale as resumeFromFailure: a sandbox-start failure
+		// at resume time is almost always recoverable (stale container,
+		// docker hiccup, image pull race). Marking failed_resumable
+		// preserves the captured human answers + checkpoint so a
+		// follow-up /resume can complete once docker is unblocked.
+		stubCp := &store.Checkpoint{NodeID: humanNodeID}
+		if err := e.store.FailRunResumable(ctx, runID, stubCp, sbErr.Error()); err != nil {
+			_ = e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, sbErr.Error())
+		}
 		return fmt.Errorf("runtime: sandbox: %w", sbErr)
 	}
 	defer sandboxCleanup()
@@ -302,7 +310,21 @@ func (e *Engine) resumeFromFailure(ctx context.Context, r *store.Run) error {
 	}
 	sandboxCleanup, sbErr := e.startSandbox(ctx, runID, repoRoot)
 	if sbErr != nil {
-		_ = e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, sbErr.Error())
+		// Sandbox-start failures on resume are almost always recoverable
+		// from the operator's side: stale containers (force-removable),
+		// docker daemon hiccups, image pull races, etc. Marking the run
+		// `failed_resumable` instead of `failed` keeps the door open for
+		// a second /resume after the operator addresses the underlying
+		// cause — the alternative (status=failed) is terminal and forces
+		// a fresh launch that loses all committed per-package work.
+		restartNode := restartNodeID
+		if cp == nil {
+			restartNode = e.workflow.Entry
+		}
+		stubCp := &store.Checkpoint{NodeID: restartNode}
+		if err := e.store.FailRunResumable(ctx, runID, stubCp, sbErr.Error()); err != nil {
+			_ = e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, sbErr.Error())
+		}
 		return fmt.Errorf("runtime: sandbox: %w", sbErr)
 	}
 	defer sandboxCleanup()
