@@ -158,10 +158,10 @@ func (a *App) onBeforeClose(ctx context.Context) bool {
 		return false
 	}
 
-	// Build a human-readable list — "modjo (3 packages), alerte-secours"
-	// style. The discovery file doesn't carry a friendly name (it's a
-	// daemon-side concept); use the project dir's basename which is
-	// what the SPA's project picker already shows.
+	// Build a human-readable project list — "modjo, alerte-secours"
+	// style. The discovery file doesn't carry a friendly name; use
+	// the project dir's basename, which is what the SPA's project
+	// picker already shows.
 	names := make([]string, 0, len(daemons))
 	for _, d := range daemons {
 		base := filepath.Base(d.ProjectDir)
@@ -170,38 +170,35 @@ func (a *App) onBeforeClose(ctx context.Context) bool {
 		}
 		names = append(names, base)
 	}
+	// Wails Linux/GTK collapses custom Buttons labels onto the
+	// native Yes/No buttons, which made the 3-button "Keep/Stop/
+	// Cancel" prompt look like a binary question with mismatched
+	// text and buttons. Stick to a single yes/no question phrased so
+	// Yes = stop, No = keep — and make No the default so the safest
+	// outcome (preserve in-flight work) is one Enter away. An
+	// explicit "Stop all daemons" menu item handles the operator
+	// who wants to wipe state without quitting the GUI.
 	msg := fmt.Sprintf(
-		"%d background daemon(s) are still running: %s.\n\n"+
-			"Keep them running so their in-flight runs survive, or stop them with the GUI?",
+		"%d background daemon(s) are still running:\n  %s\n\n"+
+			"Stop them now? (No keeps them running so their in-flight runs survive.)",
 		len(daemons),
 		strings.Join(names, ", "),
 	)
-	const (
-		btnKeep   = "Keep running"
-		btnStop   = "Stop daemons"
-		btnCancel = "Cancel"
-	)
 	result, err := wruntime.MessageDialog(ctx, wruntime.MessageDialogOptions{
 		Type:          wruntime.QuestionDialog,
-		Title:         "Background daemons active",
+		Title:         "Stop background daemons?",
 		Message:       msg,
-		Buttons:       []string{btnKeep, btnStop, btnCancel},
-		DefaultButton: btnKeep,
-		CancelButton:  btnCancel,
+		DefaultButton: "No",
+		CancelButton:  "No",
 	})
 	if err != nil {
-		log.Printf("desktop: quit dialog failed: %v — allowing close", err)
+		log.Printf("desktop: quit dialog failed: %v — allowing close (daemons keep running)", err)
 		return false
 	}
-	switch result {
-	case btnCancel:
-		return true
-	case btnStop:
+	if strings.EqualFold(result, "Yes") {
 		stopAllDaemons(daemons)
-		return false
-	default: // btnKeep (and any unknown — fail-safe to "keep")
-		return false
 	}
+	return false
 }
 
 // stopAllDaemons sends SIGTERM to every daemon in the list, best-effort.
