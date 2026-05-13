@@ -57,6 +57,20 @@ type LLMToolCallInfo struct {
 	Error     error
 }
 
+// LLMToolStartedInfo describes a tool call about to execute, passed to the
+// OnToolStarted hook. Emitted immediately before the tool runs so observers
+// can render an in-flight indicator (e.g. the editor's "Running <tool>"
+// footer) while waiting for completion.
+type LLMToolStartedInfo struct {
+	ToolName  string
+	InputSize int
+	// ToolUseID correlates start↔completion when the same node fires
+	// multiple parallel tool calls (e.g. claude_code's assistant message
+	// with several tool_use blocks). Empty when the path can't provide
+	// one (direct tool nodes, claw single tool loop).
+	ToolUseID string
+}
+
 // LLMCompactInfo describes a mid-tool-loop compaction round, passed to the
 // OnLLMCompacted hook. Emitted when claw's pure-function compactor shrinks
 // the running message history before the next StreamResponse call so
@@ -124,6 +138,14 @@ func toLLMToolCallInfo(info ToolCallInfo) LLMToolCallInfo {
 	}
 }
 
+func toLLMToolStartedInfo(info ToolCallInfo) LLMToolStartedInfo {
+	return LLMToolStartedInfo{
+		ToolName:  info.ToolName,
+		InputSize: info.InputSize,
+		ToolUseID: info.ToolUseID,
+	}
+}
+
 func toLLMCompactInfo(info CompactInfo) LLMCompactInfo {
 	return LLMCompactInfo{
 		BeforeMessages:      info.BeforeMessages,
@@ -157,6 +179,12 @@ func applyHooks(nodeID string, h EventHooks, opts *GenerationOptions) {
 		fn := h.OnLLMStepFinish
 		opts.OnStepFinish = func(step StepResult) {
 			fn(nodeID, toLLMStepInfo(step))
+		}
+	}
+	if h.OnToolStarted != nil {
+		fn := h.OnToolStarted
+		opts.OnToolStarted = func(info ToolCallInfo) {
+			fn(nodeID, toLLMToolStartedInfo(info))
 		}
 	}
 	if h.OnToolCall != nil {

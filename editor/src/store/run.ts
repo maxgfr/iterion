@@ -110,6 +110,24 @@ const initialBrowserState: BrowserPaneState = {
   liveSession: null,
 };
 
+// InFlightTool tracks a tool call the engine has reported as started but
+// not yet completed. Populated on `tool_started`, cleared on
+// `tool_called` / `tool_error` (matched by toolUseID when present,
+// otherwise the oldest entry with the same toolName). Drives the Logs
+// panel footer: when any in-flight entry exists for the active filter,
+// the random-words "thinking" footer steps aside for a `Running <tool>`
+// spinner.
+export interface InFlightTool {
+  toolName: string;
+  // toolUseID correlates start↔completion. Empty when the path doesn't
+  // surface one (claw single tool loop, direct tool nodes); in that
+  // case completion clears the oldest entry sharing the toolName.
+  toolUseID: string;
+  // Unix ms when the start event was received — drives the elapsed
+  // counter in the footer.
+  startedAt: number;
+}
+
 export interface RunLogState {
   // start is the byte offset in the run's logical log stream where
   // text begins. start > 0 means the older bytes were evicted.
@@ -132,6 +150,9 @@ interface RunStoreState {
   snapshot: RunSnapshot | null;
   events: RunEvent[];
   executionsById: Map<string, ExecutionState>;
+  // In-flight tools, keyed by execution_id. Sorted by start time
+  // (insertion order). Empty entries are pruned to keep the map lean.
+  inFlightToolsByExec: Map<string, InFlightTool[]>;
   pendingHumanInput: PendingHumanInput | null;
   wsState: WsState;
   followTail: boolean;
@@ -188,6 +209,7 @@ const initialState = {
   snapshot: null,
   events: [] as RunEvent[],
   executionsById: new Map<string, ExecutionState>(),
+  inFlightToolsByExec: new Map<string, InFlightTool[]>(),
   pendingHumanInput: null as PendingHumanInput | null,
   wsState: "idle" as WsState,
   followTail: true,
@@ -235,6 +257,10 @@ export const useRunStore = create<RunStoreState>((set) => ({
         return {
           snapshot: snap,
           executionsById: map,
+          // Snapshots don't carry "currently in-flight tool" state, so
+          // drop any stale entries — the live event stream will
+          // repopulate from the next tool_started onward.
+          inFlightToolsByExec: new Map(),
           events: state.events.filter((e) => e.seq <= snap.last_seq),
           pendingHumanInput: rehydrated,
         };
@@ -248,6 +274,7 @@ export const useRunStore = create<RunStoreState>((set) => ({
         {
           events: [],
           executionsById: map,
+          inFlightToolsByExec: new Map(),
           snapshot: snap,
           pendingHumanInput: rehydrated,
           browser: state.browser,
@@ -370,7 +397,13 @@ export const useRunStore = create<RunStoreState>((set) => ({
 
   clearLog: () => set({ log: initialLogState }),
 
-  reset: () => set({ ...initialState, executionsById: new Map(), log: initialLogState }),
+  reset: () =>
+    set({
+      ...initialState,
+      executionsById: new Map(),
+      inFlightToolsByExec: new Map(),
+      log: initialLogState,
+    }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -424,7 +457,12 @@ function rehydratePendingHumanInput(
 
 type ReduceInput = Pick<
   RunStoreState,
-  "events" | "executionsById" | "snapshot" | "pendingHumanInput" | "browser"
+  | "events"
+  | "executionsById"
+  | "inFlightToolsByExec"
+  | "snapshot"
+  | "pendingHumanInput"
+  | "browser"
 >;
 
 // reduceEvents applies a contiguous run of events in a single pass and
@@ -443,6 +481,7 @@ function reduceEvents(
   let lastSeq = tail?.seq ?? -1;
 
   let executionsById = state.executionsById;
+  let inFlightToolsByExec = state.inFlightToolsByExec;
   let snapshot = state.snapshot;
   let pendingHumanInput = state.pendingHumanInput;
   let browser = state.browser;
@@ -455,6 +494,29 @@ function reduceEvents(
       executionsById = new Map(executionsById);
       execMutated = true;
     }
+  };
+  // Same lazy-copy pattern for the in-flight map: pure-event batches
+  // (no tool starts/completions) leave the map identity untouched.
+  let inFlightMutated = false;
+  const ensureInFlightCopy = () => {
+    if (!inFlightMutated) {
+      inFlightToolsByExec = new Map(inFlightToolsByExec);
+      inFlightMutated = true;
+    }
+  };
+  // Clear in-flight entries for an execution. Used on node_finished and
+  // every run-termination case so a missed tool_called event can't
+  // leave a phantom spinner on the canvas forever.
+  const clearInFlightFor = (execId: string) => {
+    if (!inFlightToolsByExec.has(execId)) return;
+    ensureInFlightCopy();
+    inFlightToolsByExec.delete(execId);
+  };
+  const clearAllInFlight = () => {
+    if (inFlightToolsByExec.size === 0) return;
+    ensureInFlightCopy();
+    inFlightToolsByExec = new Map();
+    inFlightMutated = true;
   };
 
   let runStatusOverride: RunHeader["status"] | null = null;
@@ -502,6 +564,52 @@ function reduceEvents(
           current_event_seq: evt.seq,
           last_seq: evt.seq,
         });
+        clearInFlightFor(exec.execution_id);
+        break;
+      }
+      case "tool_started": {
+        const exec = currentExec(executionsById, branch, evt.node_id);
+        if (!exec) break;
+        const toolName = (evt.data?.tool as string) ?? "";
+        const toolUseID = (evt.data?.tool_use_id as string) ?? "";
+        ensureInFlightCopy();
+        const prev = inFlightToolsByExec.get(exec.execution_id) ?? [];
+        const next = prev.concat({
+          toolName,
+          toolUseID,
+          // Prefer the event timestamp so the elapsed counter stays
+          // accurate even if the WS replays older events on reconnect.
+          startedAt: Date.parse(evt.timestamp) || Date.now(),
+        });
+        inFlightToolsByExec.set(exec.execution_id, next);
+        break;
+      }
+      case "tool_called":
+      case "tool_error": {
+        const exec = currentExec(executionsById, branch, evt.node_id);
+        if (!exec) break;
+        const prev = inFlightToolsByExec.get(exec.execution_id);
+        if (!prev || prev.length === 0) break;
+        const toolUseID = (evt.data?.tool_use_id as string) ?? "";
+        const toolName = (evt.data?.tool as string) ?? "";
+        // Prefer matching by toolUseID (only claude_code paths carry
+        // one); fall back to the oldest entry with the same toolName,
+        // and as a last resort drop the oldest entry to avoid leaks.
+        let dropIdx = -1;
+        if (toolUseID) {
+          dropIdx = prev.findIndex((t) => t.toolUseID === toolUseID);
+        }
+        if (dropIdx < 0 && toolName) {
+          dropIdx = prev.findIndex((t) => t.toolName === toolName);
+        }
+        if (dropIdx < 0) dropIdx = 0;
+        ensureInFlightCopy();
+        const next = prev.slice(0, dropIdx).concat(prev.slice(dropIdx + 1));
+        if (next.length === 0) {
+          inFlightToolsByExec.delete(exec.execution_id);
+        } else {
+          inFlightToolsByExec.set(exec.execution_id, next);
+        }
         break;
       }
       case "artifact_written": {
@@ -577,6 +685,7 @@ function reduceEvents(
           evt.seq,
           errMsg ?? undefined,
         );
+        clearAllInFlight();
         runStatusOverride = "failed_resumable";
         runErrorOverride = errMsg;
         break;
@@ -596,6 +705,7 @@ function reduceEvents(
           evt.seq,
           undefined,
         );
+        clearAllInFlight();
         runStatusOverride = "finished";
         break;
       }
@@ -609,6 +719,7 @@ function reduceEvents(
           evt.seq,
           reason,
         );
+        clearAllInFlight();
         runStatusOverride = "cancelled";
         break;
       }
@@ -752,6 +863,9 @@ function reduceEvents(
   if (browser !== state.browser) {
     next.browser = browser;
   }
+  if (inFlightMutated) {
+    next.inFlightToolsByExec = inFlightToolsByExec;
+  }
   return next;
 }
 
@@ -853,6 +967,45 @@ function orderedExecutionIds(
     if (!seen.has(id)) out.push(id);
   }
   return out;
+}
+
+// selectInFlightTool returns the most recently started in-flight tool
+// for the given filter, or null when nothing is running. The Logs
+// panel uses this to swap its footer between the random-words
+// "thinking" loader and a per-tool spinner.
+//
+// When filterNodeId is set we scope to (filterNodeId, filterIteration ??
+// 0) — the same scoping the existing `active` selector uses — so a
+// sibling node running in parallel can't leak a spinner into the
+// per-node Logs tab.
+//
+// When filterNodeId is null we return the most recently started entry
+// across all executions; the global Logs panel is intentionally
+// loud-and-coarse here, mirroring how the random-words footer already
+// fires on any execution running anywhere.
+export function selectInFlightTool(
+  state: Pick<RunStoreState, "inFlightToolsByExec" | "executionsById">,
+  filterNodeId: string | null = null,
+  filterIteration: number | null = null,
+): InFlightTool | null {
+  if (state.inFlightToolsByExec.size === 0) return null;
+  let best: InFlightTool | null = null;
+  for (const [execId, tools] of state.inFlightToolsByExec) {
+    if (tools.length === 0) continue;
+    if (filterNodeId) {
+      const exec = state.executionsById.get(execId);
+      if (!exec) continue;
+      if (exec.ir_node_id !== filterNodeId) continue;
+      if (exec.loop_iteration !== (filterIteration ?? 0)) continue;
+    }
+    // tools is insertion-ordered (oldest first); the most recently
+    // started is the tail entry.
+    const candidate = tools[tools.length - 1]!;
+    if (!best || candidate.startedAt >= best.startedAt) {
+      best = candidate;
+    }
+  }
+  return best;
 }
 
 // Re-export header type for component imports.

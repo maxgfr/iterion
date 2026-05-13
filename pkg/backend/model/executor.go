@@ -121,6 +121,7 @@ type EventHooks struct {
 	OnLLMRetry      func(nodeID string, info RetryInfo)
 	OnLLMStepFinish func(nodeID string, step LLMStepInfo)
 	OnLLMCompacted  func(nodeID string, info LLMCompactInfo)
+	OnToolStarted   func(nodeID string, info LLMToolStartedInfo)
 	OnToolCall      func(nodeID string, info LLMToolCallInfo)
 	// OnToolNodeResult is called for direct tool nodes (not LLM tool loops)
 	// with full input/output content for detailed logging.
@@ -199,6 +200,15 @@ func ChainHooks(a, b EventHooks) EventHooks {
 				return a.OnLLMCompacted
 			}
 			return func(n string, i LLMCompactInfo) { a.OnLLMCompacted(n, i); b.OnLLMCompacted(n, i) }
+		}(),
+		OnToolStarted: func() func(string, LLMToolStartedInfo) {
+			if a.OnToolStarted == nil {
+				return b.OnToolStarted
+			}
+			if b.OnToolStarted == nil {
+				return a.OnToolStarted
+			}
+			return func(n string, i LLMToolStartedInfo) { a.OnToolStarted(n, i); b.OnToolStarted(n, i) }
 		}(),
 		OnToolCall: func() func(string, LLMToolCallInfo) {
 			if a.OnToolCall == nil {
@@ -571,6 +581,36 @@ func (e *ClawExecutor) SetWorkDir(dir string) {
 //     on credentials present on the host)
 //  5. delegate.BackendClaw (hardcoded last-resort fallback)
 //
+// delegateHooksFor builds the TaskHooks block passed to a delegate
+// backend. It bridges the executor's own EventHooks into the simpler
+// callback surface backends consume. Returns a zero-value TaskHooks
+// when neither hook is wired, which backends handle as "no observers".
+func (e *ClawExecutor) delegateHooksFor(nodeID string) delegate.TaskHooks {
+	var h delegate.TaskHooks
+	if e.hooks.OnToolStarted != nil {
+		fn := e.hooks.OnToolStarted
+		h.OnToolStarted = func(toolName string, toolUseID string) {
+			fn(nodeID, LLMToolStartedInfo{
+				ToolName:  toolName,
+				ToolUseID: toolUseID,
+			})
+		}
+	}
+	if e.hooks.OnToolCall != nil {
+		fn := e.hooks.OnToolCall
+		h.OnToolCalled = func(toolName string, toolUseID string, isError bool) {
+			info := LLMToolCallInfo{
+				ToolName: toolName,
+			}
+			if isError {
+				info.Error = fmt.Errorf("tool error")
+			}
+			fn(nodeID, info)
+		}
+	}
+	return h
+}
+
 // Step 4 is what makes the editor's empty default template "just work" when
 // the user has any credential configured.
 func (e *ClawExecutor) resolveBackendName(node ir.Node) string {
@@ -862,6 +902,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		CompactPreserveRecent: compactPreserve,
 		Sandbox:               e.sandbox,
 		ProviderHint:          e.resolveProvider(node),
+		Hooks:                 e.delegateHooksFor(f.id),
 	}
 
 	// When interaction is enabled, ensure `ask_user` is in the node's
@@ -1483,6 +1524,13 @@ func (e *ClawExecutor) executeToolNode(ctx context.Context, node *ir.ToolNode, i
 		return nil, fmt.Errorf("model: tool node %q: marshal input: %w", node.ID, err)
 	}
 
+	if e.hooks.OnToolStarted != nil {
+		e.hooks.OnToolStarted(node.ID, LLMToolStartedInfo{
+			ToolName:  toolName,
+			InputSize: len(inputJSON),
+		})
+	}
+
 	start := time.Now()
 	outputStr, err := resolved.Execute(ctx, inputJSON)
 	duration := time.Since(start)
@@ -1552,6 +1600,13 @@ func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNo
 	resolved := resolveCommandTemplate(expandedCommand, node.CommandRefs, input, e.vars)
 
 	toolName := "shell:" + node.ID
+
+	if e.hooks.OnToolStarted != nil {
+		e.hooks.OnToolStarted(node.ID, LLMToolStartedInfo{
+			ToolName:  toolName,
+			InputSize: len(resolved),
+		})
+	}
 
 	start := time.Now()
 	cmd := e.toolNodeCommand(ctx, resolved)
@@ -1676,6 +1731,13 @@ func (e *ClawExecutor) executeToolNodeScript(ctx context.Context, node *ir.ToolN
 	scriptBasename := filepath.Base(tmpPath)
 
 	toolName := "script:" + node.Language + ":" + node.ID
+
+	if e.hooks.OnToolStarted != nil {
+		e.hooks.OnToolStarted(node.ID, LLMToolStartedInfo{
+			ToolName:  toolName,
+			InputSize: len(resolved),
+		})
+	}
 
 	start := time.Now()
 	cmd := e.toolNodeScriptCommand(ctx, interp, scriptBasename)

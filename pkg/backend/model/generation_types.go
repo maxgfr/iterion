@@ -73,13 +73,19 @@ type CompactInfo struct {
 	RemovedMessageCount int
 }
 
-// ToolCallInfo is passed to the OnToolCall hook after a tool executes.
+// ToolCallInfo is passed to the OnToolCall / OnToolStarted hooks before
+// (started) and after (completed) a tool executes.
 type ToolCallInfo struct {
 	// ToolName is the name of the tool that was called.
 	ToolName string
 
 	// InputSize is the byte length of the tool input JSON.
 	InputSize int
+
+	// ToolUseID correlates start↔completion when multiple parallel tool
+	// calls share a node. Populated for OnToolStarted; the post-execution
+	// OnToolCall path leaves it empty (existing callers don't need it).
+	ToolUseID string
 
 	// Duration is how long the tool execution took.
 	Duration time.Duration

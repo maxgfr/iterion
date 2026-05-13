@@ -330,6 +330,7 @@ func executeToolsDirect(
 	ctx context.Context,
 	toolUses []toolUseBlock,
 	toolMap map[string]*GenerationTool,
+	onToolStarted func(ToolCallInfo),
 	onToolCall func(ToolCallInfo),
 	runner *hooks.Runner,
 ) ([]api.ContentBlock, error) {
@@ -383,6 +384,14 @@ func executeToolsDirect(
 				})
 			}
 			continue
+		}
+
+		if onToolStarted != nil {
+			onToolStarted(ToolCallInfo{
+				ToolName:  tu.Name,
+				InputSize: len(tu.PartialJSON),
+				ToolUseID: tu.ID,
+			})
 		}
 
 		start := time.Now()
@@ -584,7 +593,7 @@ func GenerateTextDirect(ctx context.Context, client api.APIClient, opts Generati
 		messages = append(messages, assistantToolUseMessage(agg.text, agg.toolUses))
 
 		// Execute tools and append tool_result message.
-		toolResults, toolErr := executeToolsDirect(ctx, agg.toolUses, toolMap, opts.OnToolCall, opts.Hooks)
+		toolResults, toolErr := executeToolsDirect(ctx, agg.toolUses, toolMap, opts.OnToolStarted, opts.OnToolCall, opts.Hooks)
 		if toolErr != nil {
 			// ErrAskUser (and any future suspension signal) bubbles up to
 			// the backend, which converts it into iterion's pause flow.

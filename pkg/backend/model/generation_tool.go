@@ -82,6 +82,11 @@ type GenerationOptions struct {
 	// OnStepFinish is called after each tool-loop step completes.
 	OnStepFinish func(StepResult)
 
+	// OnToolStarted is called immediately before each tool executes,
+	// once the PreToolUse lifecycle hook (if any) has allowed the call.
+	// Mirrors OnToolCall but carries no duration/error.
+	OnToolStarted func(ToolCallInfo)
+
 	// OnToolCall is called after each tool execution.
 	OnToolCall func(ToolCallInfo)
 

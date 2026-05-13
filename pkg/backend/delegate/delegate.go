@@ -201,6 +201,32 @@ type Task struct {
 	// overrides). Empty string means "auto" — current
 	// environment-driven precedence.
 	ProviderHint string
+
+	// Hooks lets the backend surface mid-execution events back to the
+	// engine without returning. Currently used by the claude_code
+	// delegate to emit `tool_started` and `tool_called` events as the
+	// stream parser observes ToolUseBlock / ToolResultBlock content
+	// blocks — the editor's Logs panel uses these to switch its footer
+	// between the LLM "thinking" loader and an in-flight tool spinner.
+	// All callbacks are optional.
+	Hooks TaskHooks
+}
+
+// TaskHooks are optional callbacks a backend can fire during execution
+// to stream observability events back to the engine. Each callback runs
+// synchronously on the backend's stream-handling goroutine, so handlers
+// must not block.
+type TaskHooks struct {
+	// OnToolStarted fires the moment the backend observes a tool is
+	// about to run. For claude_code, that's when an AssistantMessage's
+	// ToolUseBlock is decoded — the tool then executes inside the CLI
+	// subprocess and the engine has no other way to know it has begun.
+	// ToolUseID identifies the call so OnToolCalled can correlate.
+	OnToolStarted func(toolName string, toolUseID string)
+
+	// OnToolCalled fires when the matching ToolResultBlock arrives,
+	// indicating the tool has returned (successfully or with an error).
+	OnToolCalled func(toolName string, toolUseID string, isError bool)
 }
 
 // SystemPromptWithInteraction returns the task's SystemPrompt augmented

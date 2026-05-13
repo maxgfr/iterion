@@ -675,6 +675,10 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 	// claude that runs the formatting prompt).
 	var lastAssistantText string
 	var meta sessionMeta
+	// Per-session map correlating tool_use_id → tool name so we can echo
+	// the name on the completion hook (ToolResultBlock only carries the
+	// correlation ID).
+	inFlightTools := make(map[string]string)
 	currentTimeout := coldTimeout
 	idle := time.NewTimer(currentTimeout)
 	defer idle.Stop()
@@ -756,6 +760,7 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 			case *claudesdk.AssistantMessage:
 				if m.Message != nil {
 					logAssistantContent(b.Logger, task.NodeID, task.Iteration, m.Message.Content)
+					emitToolHooks(task.Hooks, m.Message.Content, inFlightTools)
 					// Peak prompt size across turns ≈ how full the
 					// context window got at its busiest moment.
 					u := m.Message.Usage
@@ -793,6 +798,9 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 				}
 			case *claudesdk.UserMessage:
 				b.Logger.Debug("[%s#%d/claude-code] 👤 user message echoed back", task.NodeID, task.Iteration)
+				if m.Message != nil {
+					emitToolHooks(task.Hooks, m.Message.Content, inFlightTools)
+				}
 			case *claudesdk.ResultMessage:
 				result = m
 				if (result.Result == nil || *result.Result == "") && lastAssistantText != "" {
@@ -821,6 +829,35 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 		case <-ctx.Done():
 			cancelStream()
 			return result, meta, ctx.Err()
+		}
+	}
+}
+
+// emitToolHooks walks the content blocks of an AssistantMessage or
+// UserMessage and fires the matching TaskHooks callbacks so the engine
+// can persist `tool_started` / `tool_called` events for tools that run
+// inside the Claude Code CLI subprocess. AssistantMessage carries
+// ToolUseBlock (the model has requested a tool); UserMessage carries
+// ToolResultBlock (the tool's result is being fed back to the model).
+//
+// inFlight is a per-session map[tool_use_id]toolName that lets us echo
+// the tool's name back on the completion event — the SDK's
+// ToolResultBlock only carries the correlation ID. Empty hooks make
+// the whole function a no-op.
+func emitToolHooks(hooks TaskHooks, blocks []claudesdk.ContentBlock, inFlight map[string]string) {
+	for _, block := range blocks {
+		switch bl := block.(type) {
+		case *claudesdk.ToolUseBlock:
+			inFlight[bl.ID] = bl.Name
+			if hooks.OnToolStarted != nil {
+				hooks.OnToolStarted(bl.Name, bl.ID)
+			}
+		case *claudesdk.ToolResultBlock:
+			name := inFlight[bl.ToolUseID]
+			delete(inFlight, bl.ToolUseID)
+			if hooks.OnToolCalled != nil {
+				hooks.OnToolCalled(name, bl.ToolUseID, bl.IsError)
+			}
 		}
 	}
 }
