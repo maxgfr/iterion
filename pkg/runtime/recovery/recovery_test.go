@@ -3,10 +3,12 @@ package recovery
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/SocialGouv/claw-code-go/pkg/api"
 
+	"github.com/SocialGouv/iterion/pkg/backend/delegate"
 	"github.com/SocialGouv/iterion/pkg/runtime"
 )
 
@@ -113,6 +115,28 @@ func TestClassify_RateLimit429(t *testing.T) {
 	apiErr := &api.APIError{StatusCode: 429, Message: "Too many requests"}
 	if got := Classify(apiErr); got != runtime.ErrCodeRateLimited {
 		t.Errorf("expected RATE_LIMITED, got %v", got)
+	}
+}
+
+func TestClassify_DelegateRateLimited(t *testing.T) {
+	// Regression: CLI-backend rate-limit signal arrives as the typed
+	// delegate.ErrRateLimited (raised by isRateLimitMessage). Before
+	// this entry was added, Classify fell through to EXECUTION_FAILED,
+	// triggering the 1-retry-then-resumable path instead of the
+	// RateLimitRecipe's backoff+pause-for-human cascade. Operators saw
+	// `failed_resumable` for a 5h ZAI quota wall — bad UX.
+	err := &delegate.ErrRateLimited{
+		Provider: "claude_code",
+		Detail:   "API Error: Request rejected (429) · Usage limit reached for 5 hour. Your limit will reset at 2026-05-13 20:59:41",
+	}
+	if got := Classify(err); got != runtime.ErrCodeRateLimited {
+		t.Errorf("direct: expected RATE_LIMITED, got %v", got)
+	}
+	// Same chain shape the executor produces: fmt.Errorf %w wrapping.
+	wrapped := fmt.Errorf("model: node %q: backend %q failed: %w", "align_code", "claude_code",
+		fmt.Errorf("delegate: claude-code failed: %w", err))
+	if got := Classify(wrapped); got != runtime.ErrCodeRateLimited {
+		t.Errorf("wrapped: expected RATE_LIMITED, got %v", got)
 	}
 }
 

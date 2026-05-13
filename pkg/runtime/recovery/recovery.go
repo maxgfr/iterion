@@ -20,6 +20,7 @@ import (
 
 	"github.com/SocialGouv/claw-code-go/pkg/api"
 
+	"github.com/SocialGouv/iterion/pkg/backend/delegate"
 	"github.com/SocialGouv/iterion/pkg/runtime"
 )
 
@@ -232,6 +233,10 @@ func Dispatch(recipes map[runtime.ErrorCode]Recipe) runtime.RecoveryDispatch {
 // for it. It recognises:
 //
 //   - *runtime.RuntimeError → its declared Code
+//   - *delegate.ErrRateLimited → RATE_LIMITED (CLI-backend rate-limit
+//     signal raised when the assistant text matches the provider's
+//     quota wording; not an api.APIError because the CLI's wire is
+//     pre-parsed JSON, so the 429 never reaches the SDK as such)
 //   - *api.APIError with StatusCode 429 → RATE_LIMITED
 //   - *api.APIError with body containing "context_length_exceeded"
 //     or "context length" → CONTEXT_LENGTH_EXCEEDED
@@ -246,6 +251,10 @@ func Classify(err error) runtime.ErrorCode {
 	var rerr *runtime.RuntimeError
 	if errors.As(err, &rerr) {
 		return rerr.Code
+	}
+	var rateLimited *delegate.ErrRateLimited
+	if errors.As(err, &rateLimited) {
+		return runtime.ErrCodeRateLimited
 	}
 	var apiErr *api.APIError
 	if errors.As(err, &apiErr) {
