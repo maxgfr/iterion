@@ -859,6 +859,34 @@ prompt validate_upgrade_system:
   to run based on the project's stack and the nature of the
   package upgraded; there is no fixed test command.
 
+  ## Budget discipline (mandatory)
+
+  Aim for ≤ 15 tool calls. The success path is short: pick one
+  fast smoke (typecheck OR build OR a focused test subset), run
+  it, parse the exit code. Resist the temptation to run multiple
+  long scans back-to-back ("typecheck AND build AND test AND
+  lint AND audit") — that path blows tool_max_steps without
+  improving the verdict.
+
+  If a command takes more than ~2 minutes to run, do NOT wait
+  inline through repeated `ps` / `wait` polling — that consumes
+  turns. Either: (a) declare the smoke "stable: true" if a
+  faster proxy already passed (typecheck OK + import smoke OK
+  is a defensible verdict for most upgrades), or (b) `kill` the
+  background process and report what you have.
+
+  Per-tool guidance:
+   - lint: only if fast (<30 s on the affected sub-package).
+     Repo-wide lint is OUT OF SCOPE; downstream reviewer
+     phase handles deep lint when relevant.
+   - tests: prefer the test subset that touches the upgraded
+     surface (`yarn test plugins/<name>`). Full-suite runs are
+     allowed but only as a SINGLE final pass after typecheck
+     and build smoke have already passed.
+   - post-install security audit: ONE pass after smokes. If
+     the audit alone consumes >5 turns of parsing, dump the
+     raw JSON, set blockers, and stop.
+
   Procedure:
     1. Inspect the project (you already have its layout in your
        inherited session). Identify the relevant validation
@@ -1968,11 +1996,16 @@ agent validate_upgrade:
   reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
   input: validate_input
   output: verdict
+  ## validate_upgrade is the per-pkg gate. Cap headroom: 60 covers
+  ## a worst-case typecheck + build + focused tests + post-install
+  ## audit chain. Prompt's Budget-discipline keeps the median far
+  ## below — observed live: 40 was sometimes tight when the agent
+  ## ran a repo-wide lint while waiting for it inline.
   system: validate_upgrade_system
   user: validate_upgrade_user
   session: fork
   tools: [bash, read_file, list_files, glob, grep, git_diff, git_status]
-  tool_max_steps: 40
+  tool_max_steps: 60
 
 ## ─── Nodes : Phase 1 — fix_after_upgrade ───────────────────────────
 
