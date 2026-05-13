@@ -306,8 +306,8 @@ export default function Toolbar() {
   return (
     <div className="flex items-center gap-1 px-3 h-full text-sm">
       <span className="font-bold tracking-wide mr-2">ITERION</span>
-      <BackendStatusPill />
       <ProjectLabel variant="toolbar" />
+      <BackendStatusPill />
 
       {/* File ops */}
       <ToolbarGroup>
