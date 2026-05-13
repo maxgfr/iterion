@@ -775,10 +775,13 @@ func (e *Engine) evaluateEdgesWithLoopsRS(fromNodeID, logPrefix string, output m
 
 		if edge.LoopName != "" {
 			loop, ok := e.workflow.Loops[edge.LoopName]
-			if ok && rs.loopCounters[edge.LoopName] >= loop.MaxIterations {
-				e.logger.Warn("%s: node %q: edge to %q skipped — loop %q exhausted (%d/%d)",
-					logPrefix, fromNodeID, edge.To, edge.LoopName, rs.loopCounters[edge.LoopName], loop.MaxIterations)
-				continue
+			if ok {
+				maxIter := e.resolveLoopMax(loop, rs)
+				if rs.loopCounters[edge.LoopName] >= maxIter {
+					e.logger.Warn("%s: node %q: edge to %q skipped — loop %q exhausted (%d/%d)",
+						logPrefix, fromNodeID, edge.To, edge.LoopName, rs.loopCounters[edge.LoopName], maxIter)
+					continue
+				}
 			}
 		}
 
@@ -851,7 +854,7 @@ func (e *Engine) exprContext(rs *runState, input map[string]interface{}) *expr.C
 		if len(path) < 2 {
 			return nil
 		}
-		return resolveLoopPath(path, rs, e.workflow.Loops)
+		return e.resolveLoopPath(path, rs)
 	}
 	runResolver := func(path []string) interface{} {
 		if len(path) == 1 && path[0] == "id" {

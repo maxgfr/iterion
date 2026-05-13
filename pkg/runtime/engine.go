@@ -1080,7 +1080,7 @@ func (e *Engine) resolveRef(ref *ir.Ref, vars map[string]interface{}, outputs ma
 		if rs == nil || len(ref.Path) < 2 {
 			return nil
 		}
-		return resolveLoopPath(ref.Path, rs, e.workflow.Loops)
+		return e.resolveLoopPath(ref.Path, rs)
 	case ir.RefRun:
 		if rs == nil || len(ref.Path) == 0 {
 			return nil
@@ -1097,23 +1097,83 @@ func (e *Engine) resolveRef(ref *ir.Ref, vars map[string]interface{}, outputs ma
 // Recognized fields:
 //
 //	iteration       — current loop counter (int64)
-//	max             — declared maximum iterations (int64)
+//	max             — effective cap (int64): the literal int for plain
+//	                   caps, the resolved template value for templated caps
 //	previous_output — snapshot of the source node output at the previous
 //	                   traversal of this loop's edge; sub-fields drill in.
-func resolveLoopPath(path []string, rs *runState, loops map[string]*ir.Loop) interface{} {
+func (e *Engine) resolveLoopPath(path []string, rs *runState) interface{} {
 	loopName := path[0]
 	switch path[1] {
 	case "iteration":
 		return int64(rs.loopCounters[loopName])
 	case "max":
-		if l, ok := loops[loopName]; ok {
-			return int64(l.MaxIterations)
+		if l, ok := e.workflow.Loops[loopName]; ok {
+			return int64(e.resolveLoopMax(l, rs))
 		}
 		return nil
 	case "previous_output":
 		return drillPath(rs.loopPreviousOutput[loopName], path[2:])
 	}
 	return nil
+}
+
+// resolveLoopMax returns the effective cap for a loop. Literal-int
+// declarations (`as fix_loop(3)`) yield MaxIterations directly.
+// Template declarations (`as fix_loop("{{outputs.X.cap}}")`) resolve
+// the refs against the runState and coerce the result to int. The
+// fallback when resolution / coercion fails is loop.MaxIterations
+// (typically 0 for the template form) — that surfaces as a "loop
+// exhausted on iteration 0" log line at the edge check, which is the
+// loudest visible failure mode we can offer without aborting the run.
+func (e *Engine) resolveLoopMax(loop *ir.Loop, rs *runState) int {
+	if loop.MaxIterationsExpr == "" || len(loop.MaxIterationsExprRefs) == 0 {
+		return loop.MaxIterations
+	}
+	var resolved interface{}
+	for _, ref := range loop.MaxIterationsExprRefs {
+		v := e.resolveRef(ref, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
+		if v != nil {
+			resolved = v
+		}
+	}
+	if resolved == nil {
+		return loop.MaxIterations
+	}
+	if n, ok := coerceToInt(resolved); ok {
+		return n
+	}
+	return loop.MaxIterations
+}
+
+// coerceToInt accepts the common shapes that an output/var ref can
+// carry for a numeric value: native ints, float64 (the JSON decoder
+// default), json.Number, and decimal-string scalars (some JS nodes
+// emit numbers as strings). Returns false for anything else.
+func coerceToInt(v interface{}) (int, bool) {
+	switch x := v.(type) {
+	case int:
+		return x, true
+	case int64:
+		return int(x), true
+	case int32:
+		return int(x), true
+	case float64:
+		return int(x), true
+	case float32:
+		return int(x), true
+	case json.Number:
+		if n, err := x.Int64(); err == nil {
+			return int(n), true
+		}
+		if f, err := x.Float64(); err == nil {
+			return int(f), true
+		}
+	case string:
+		if n, err := strconv.Atoi(x); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
 }
 
 // buildTemplateData assembles a model.TemplateData snapshot from the
@@ -1125,7 +1185,7 @@ func (e *Engine) buildTemplateData(rs *runState) *model.TemplateData {
 	loopMax := make(map[string]int, len(e.workflow.Loops))
 	for name, l := range e.workflow.Loops {
 		if l != nil {
-			loopMax[name] = l.MaxIterations
+			loopMax[name] = e.resolveLoopMax(l, rs)
 		}
 	}
 	return &model.TemplateData{

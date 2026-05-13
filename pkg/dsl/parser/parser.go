@@ -2006,7 +2006,19 @@ func (p *parser) parseLoopClause() *ast.LoopClause {
 		p.addError(DiagExpectedToken, t, "expected loop name after 'as'")
 	}
 	p.expect(TokenLParen)
-	lc.MaxIterations = p.expectInt()
+	// The cap is either a literal int (`as fix_loop(3)`) or a quoted
+	// template (`as fix_loop("{{outputs.X.cap}}")`) resolved at runtime.
+	// Anything else is an error reported at the offending token; we
+	// still consume it to keep the parser advancing past the cap.
+	switch nt := p.peek(); nt.Type {
+	case TokenInt:
+		lc.MaxIterations = p.expectInt()
+	case TokenString:
+		lc.MaxIterationsExpr = p.expectString()
+	default:
+		p.addError(DiagExpectedToken, nt, "expected integer or template string for loop cap, got "+nt.Type.String())
+		p.next()
+	}
 	p.expect(TokenRParen)
 	return lc
 }

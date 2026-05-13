@@ -354,6 +354,64 @@ func TestCompileEdges(t *testing.T) {
 	}
 }
 
+// TestCompileLoopTemplatedCap pins the compile-time handling of
+// templated loop caps: the expression is preserved verbatim, refs are
+// parsed once at compile time so the runtime lookup is a pure
+// substitution, and MaxIterations stays at 0 (the runtime falls back
+// to it when template resolution fails — see resolveLoopMax).
+func TestCompileLoopTemplatedCap(t *testing.T) {
+	const src = `
+schema s:
+  ok: bool
+
+prompt sys:
+  S.
+
+prompt usr:
+  U.
+
+agent select:
+  model: "m"
+  input: s
+  output: s
+  system: sys
+  user: usr
+
+agent refine:
+  model: "m"
+  input: s
+  output: s
+  system: sys
+  user: usr
+
+workflow tpl:
+  entry: select
+  select -> refine
+  refine -> select as fix_loop("{{outputs.select.cap}}")
+`
+	w := mustCompile(t, src)
+	loop, ok := w.Loops["fix_loop"]
+	if !ok {
+		t.Fatal("fix_loop not registered")
+	}
+	if loop.MaxIterations != 0 {
+		t.Errorf("MaxIterations literal slot: expected 0, got %d", loop.MaxIterations)
+	}
+	if loop.MaxIterationsExpr != "{{outputs.select.cap}}" {
+		t.Errorf("MaxIterationsExpr: expected template preserved, got %q", loop.MaxIterationsExpr)
+	}
+	if len(loop.MaxIterationsExprRefs) != 1 {
+		t.Fatalf("expected 1 parsed ref, got %d", len(loop.MaxIterationsExprRefs))
+	}
+	r := loop.MaxIterationsExprRefs[0]
+	if r.Kind != RefOutputs {
+		t.Errorf("ref kind: expected RefOutputs, got %v", r.Kind)
+	}
+	if len(r.Path) < 2 || r.Path[0] != "select" || r.Path[1] != "cap" {
+		t.Errorf("ref path: expected [select cap], got %v", r.Path)
+	}
+}
+
 // TestComputeLoopBodies_NestedLoops covers a fix_loop nested inside a
 // package_loop — the exact shape that motivated the per-entry reset.
 // The package loop's body subsumes the fix loop's body; an edge entering

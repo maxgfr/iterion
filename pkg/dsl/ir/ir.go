@@ -761,6 +761,12 @@ var AttachmentSubFields = map[string]struct{}{
 type Loop struct {
 	Name          string
 	MaxIterations int
+	// MaxIterationsExpr carries the raw template source when the cap
+	// was declared as `as <name>("{{outputs.X.cap}}")`. Empty for
+	// literal-int caps. Refs are pre-parsed at compile time so the
+	// runtime lookup is a pure string interpolation against rs.
+	MaxIterationsExpr     string
+	MaxIterationsExprRefs []*Ref
 	// Body is the set of node IDs that participate in the loop's cycle —
 	// each node from which the loop's edge target is reachable and which
 	// can reach the loop's edge source (i.e. nodes on a path that closes

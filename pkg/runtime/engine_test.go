@@ -239,6 +239,110 @@ func TestBoundedLoop(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Test: templated loop cap resolves from upstream output
+// ---------------------------------------------------------------------------
+
+// TestLoopTemplatedCap_FromOutput pins that a loop declared with a
+// template-string cap (`as <name>("{{outputs.X.cap}}")`) reads the
+// cap from the resolved ref at edge-evaluation time. This is the
+// dynamic-3/5-by-risk shape used in secured-renovacy where
+// select_candidate emits a fix_loop_max output that callers want to
+// honour without hard-coding a single literal.
+func TestLoopTemplatedCap_FromOutput(t *testing.T) {
+	wf := &ir.Workflow{
+		Name:  "tpl_loop_test",
+		Entry: "fix",
+		Nodes: map[string]ir.Node{
+			"fix":    &ir.AgentNode{BaseNode: ir.BaseNode{ID: "fix"}, Publish: "fix_out"},
+			"verify": &ir.JudgeNode{BaseNode: ir.BaseNode{ID: "verify"}, Publish: "verdict"},
+			"done":   &ir.DoneNode{BaseNode: ir.BaseNode{ID: "done"}},
+			"fail":   &ir.FailNode{BaseNode: ir.BaseNode{ID: "fail"}},
+		},
+		Edges: []*ir.Edge{
+			{From: "fix", To: "verify"},
+			{From: "verify", To: "done", Condition: "pass"},
+			{From: "verify", To: "fix", Condition: "pass", Negated: true, LoopName: "retry"},
+		},
+		Schemas: map[string]*ir.Schema{},
+		Prompts: map[string]*ir.Prompt{},
+		Vars:    map[string]*ir.Var{},
+		Loops: map[string]*ir.Loop{
+			"retry": {
+				Name:              "retry",
+				MaxIterations:     0,
+				MaxIterationsExpr: "{{outputs.fix.cap}}",
+				MaxIterationsExprRefs: []*ir.Ref{{
+					Kind: ir.RefOutputs,
+					Path: []string{"fix", "cap"},
+					Raw:  "{{outputs.fix.cap}}",
+				}},
+			},
+		},
+	}
+
+	callCount := 0
+	exec := newStubExecutor()
+	exec.on("fix", func(_ map[string]interface{}) (map[string]interface{}, error) {
+		callCount++
+		// Emit a cap of 2 so the loop runs fix exactly 2 times (initial + 1
+		// retry), then verify finally returns pass=true.
+		return map[string]interface{}{"patch": fmt.Sprintf("attempt-%d", callCount), "cap": 2}, nil
+	})
+	exec.on("verify", func(_ map[string]interface{}) (map[string]interface{}, error) {
+		// Pass on the second fix call so the loop must take one retry.
+		return map[string]interface{}{"pass": callCount >= 2}, nil
+	})
+
+	s := tmpStore(t)
+	eng := New(wf, s, exec)
+	if err := eng.Run(context.Background(), "run-tpl-loop", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if callCount != 2 {
+		t.Errorf("expected fix called 2 times (cap from output), got %d", callCount)
+	}
+
+	r, err := s.LoadRun(context.Background(), "run-tpl-loop")
+	if err != nil {
+		t.Fatalf("load run: %v", err)
+	}
+	if r.Status != store.RunStatusFinished {
+		t.Errorf("expected status finished, got %s", r.Status)
+	}
+}
+
+func TestCoerceToInt(t *testing.T) {
+	// Cover the shapes that templated loop caps can carry through
+	// outputs/vars — the JSON decoder lands floats, JS-tool outputs
+	// land strings, and some compute nodes pass through native ints.
+	for _, tc := range []struct {
+		name  string
+		in    interface{}
+		want  int
+		ok    bool
+	}{
+		{"int", 7, 7, true},
+		{"int64", int64(8), 8, true},
+		{"float64-whole", 3.0, 3, true},
+		{"float64-trunc", 3.7, 3, true},
+		{"decimal-string", "12", 12, true},
+		{"non-numeric-string", "hello", 0, false},
+		{"nil", nil, 0, false},
+		{"map", map[string]interface{}{"k": 1}, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := coerceToInt(tc.in)
+			if ok != tc.ok {
+				t.Fatalf("ok: got %v, want %v", ok, tc.ok)
+			}
+			if ok && got != tc.want {
+				t.Errorf("value: got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Test: loop exhaustion leads to failure
 // ---------------------------------------------------------------------------
 

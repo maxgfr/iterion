@@ -1052,17 +1052,33 @@ func (c *compiler) compileEdges(astEdges []*ast.Edge) ([]*Edge, map[string]*Loop
 		if ae.Loop != nil {
 			e.LoopName = ae.Loop.Name
 			if existing, ok := loops[ae.Loop.Name]; ok {
-				// Multiple edges can share a loop, but max_iterations must agree.
-				if existing.MaxIterations != ae.Loop.MaxIterations {
+				// Multiple edges can share a loop, but the cap must
+				// agree across both literal-int and template forms —
+				// otherwise the runtime resolution would be ambiguous.
+				if existing.MaxIterations != ae.Loop.MaxIterations ||
+					existing.MaxIterationsExpr != ae.Loop.MaxIterationsExpr {
 					c.errorf(DiagDuplicateLoop,
-						"loop %q has conflicting max_iterations: %d vs %d",
-						ae.Loop.Name, existing.MaxIterations, ae.Loop.MaxIterations)
+						"loop %q has conflicting max_iterations: %d/%q vs %d/%q",
+						ae.Loop.Name,
+						existing.MaxIterations, existing.MaxIterationsExpr,
+						ae.Loop.MaxIterations, ae.Loop.MaxIterationsExpr)
 				}
 			} else {
-				loops[ae.Loop.Name] = &Loop{
-					Name:          ae.Loop.Name,
-					MaxIterations: ae.Loop.MaxIterations,
+				loop := &Loop{
+					Name:              ae.Loop.Name,
+					MaxIterations:     ae.Loop.MaxIterations,
+					MaxIterationsExpr: ae.Loop.MaxIterationsExpr,
 				}
+				if ae.Loop.MaxIterationsExpr != "" {
+					refs, err := ParseRefs(ae.Loop.MaxIterationsExpr)
+					if err != nil {
+						c.errorf(DiagBadTemplateRef,
+							"loop %q: template cap %q: %v",
+							ae.Loop.Name, ae.Loop.MaxIterationsExpr, err)
+					}
+					loop.MaxIterationsExprRefs = refs
+				}
+				loops[ae.Loop.Name] = loop
 			}
 		}
 
