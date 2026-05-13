@@ -40,16 +40,17 @@ export function buildExecutionsAt(
         const iter = stepIteration(counts, evt);
         const id = `exec:${branch}:${evt.node_id}:${iter}`;
         const kind = (evt.data?.["kind"] as string) ?? undefined;
+        const existing = execs.get(id);
         execs.set(id, {
           execution_id: id,
           ir_node_id: evt.node_id,
           branch_id: branch,
           loop_iteration: iter,
           status: "running",
-          kind,
-          started_at: evt.timestamp,
+          kind: existing?.kind ?? kind,
+          started_at: existing?.started_at ?? evt.timestamp,
           current_event_seq: evt.seq,
-          first_seq: evt.seq,
+          first_seq: existing?.first_seq ?? evt.seq,
           last_seq: evt.seq,
         });
         break;

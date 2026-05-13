@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
@@ -48,6 +49,7 @@ func (e *Engine) execRoundRobin(ctx context.Context, rs *runState, routerNodeID 
 	if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, routerNodeID, map[string]interface{}{
 		"kind":              "router",
 		"mode":              "round_robin",
+		"iteration":         e.currentLoopIteration(routerNodeID, rs.loopCounters),
 		"round_robin_index": counter,
 		"selected_target":   selected.To,
 	}); err != nil {
@@ -81,9 +83,11 @@ func (e *Engine) execLLMRouter(ctx context.Context, rs *runState, routerNodeID s
 	}
 
 	// Emit node_started.
+	iter := e.currentLoopIteration(routerNodeID, rs.loopCounters)
 	if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, routerNodeID, map[string]interface{}{
-		"kind": "router",
-		"mode": "llm",
+		"kind":      "router",
+		"mode":      "llm",
+		"iteration": iter,
 	}); err != nil {
 		return "", err
 	}
@@ -114,7 +118,7 @@ func (e *Engine) execLLMRouter(ctx context.Context, rs *runState, routerNodeID s
 	}
 
 	// Execute LLM call via the executor.
-	execCtx := e.ctxWithIteration(ctx, routerNodeID, rs.loopCounters)
+	execCtx := model.WithLoopIteration(ctx, iter)
 	output, err := e.executor.Execute(execCtx, node, routerInput)
 	if err != nil {
 		return "", fmt.Errorf("llm router %q: %w", routerNodeID, err)

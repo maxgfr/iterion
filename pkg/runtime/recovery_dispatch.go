@@ -106,6 +106,7 @@ func (e *Engine) tryCompact(ctx context.Context, nodeID string) {
 func (e *Engine) pauseForRecovery(rs *runState, nodeID string, code ErrorCode, reason string, execErr error) error {
 	if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, nodeID, map[string]interface{}{
 		"kind":            "recovery_pause",
+		"iteration":       e.currentLoopIteration(nodeID, rs.loopCounters),
 		"recovery_code":   string(code),
 		"recovery_reason": reason,
 	}); err != nil {

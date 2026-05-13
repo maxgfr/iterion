@@ -9,9 +9,12 @@ export function iterationKey(branch: string, nodeId: string): string {
 }
 
 // stepIteration mutates the counts map and returns the iteration the
-// given event belongs to. node_started increments first; everything
-// else returns the current iteration. For events without a node_id,
-// returns 0 (caller should typically guard upstream).
+// given event belongs to. When node_started carries a backend-supplied
+// `iteration` field (loop-counter semantics from the runtime), that
+// value is used directly. Otherwise we fall back to the legacy
+// exec-count heuristic where node_started increments by one. Non-started
+// events return the most recent iteration recorded for their (branch,
+// node) pair.
 export function stepIteration(
   counts: Map<string, number>,
   evt: RunEvent,
@@ -21,7 +24,14 @@ export function stepIteration(
   const key = iterationKey(branch, evt.node_id);
   let cur = counts.get(key);
   if (cur === undefined) cur = -1;
-  if (evt.type === "node_started") cur += 1;
+  if (evt.type === "node_started") {
+    const rawIter = evt.data?.iteration;
+    if (typeof rawIter === "number") {
+      cur = rawIter;
+    } else {
+      cur += 1;
+    }
+  }
   counts.set(key, cur);
   return cur < 0 ? 0 : cur;
 }

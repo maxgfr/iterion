@@ -379,8 +379,10 @@ func (e *Engine) pushExecutorVars(vars map[string]interface{}) {
 // Returns (true, nil) if the run was paused, (false, nil) if the LLM answered.
 func (e *Engine) execAutoOrPauseHuman(ctx context.Context, rs *runState, nodeID string, node ir.Node) (bool, error) {
 	// Emit node_started.
+	iter := e.currentLoopIteration(nodeID, rs.loopCounters)
 	if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, nodeID, map[string]interface{}{
-		"kind": node.NodeKind().String(),
+		"kind":      node.NodeKind().String(),
+		"iteration": iter,
 	}); err != nil {
 		return false, err
 	}
@@ -392,7 +394,7 @@ func (e *Engine) execAutoOrPauseHuman(ctx context.Context, rs *runState, nodeID 
 
 	// Build input and execute LLM.
 	nodeInput := e.buildNodeInputRS(nodeID, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
-	execCtx := e.ctxWithIteration(ctx, nodeID, rs.loopCounters)
+	execCtx := model.WithLoopIteration(ctx, iter)
 	output, err := e.executor.Execute(execCtx, node, nodeInput)
 	if err != nil {
 		return false, e.failRunWithCheckpoint(rs, nodeID, fmt.Sprintf("human node %q auto_or_pause execution failed: %v", nodeID, err))
@@ -470,7 +472,8 @@ func (e *Engine) execAutoOrPauseHuman(ctx context.Context, rs *runState, nodeID 
 func (e *Engine) pauseAtHuman(rs *runState, nodeID string, node ir.Node) error {
 	// Emit node_started for the human node.
 	if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, nodeID, map[string]interface{}{
-		"kind": node.NodeKind().String(),
+		"kind":      node.NodeKind().String(),
+		"iteration": e.currentLoopIteration(nodeID, rs.loopCounters),
 	}); err != nil {
 		return err
 	}
