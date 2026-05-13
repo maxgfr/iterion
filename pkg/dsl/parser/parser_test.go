@@ -355,6 +355,29 @@ func TestEdgeWithAllClauses(t *testing.T) {
 	assertEq(t, "with[0].Value", e.With[0].Value, "{{outputs.a}}")
 }
 
+func TestEdgeLoopTemplatedCap(t *testing.T) {
+	// The cap of `as <name>(N)` accepts a quoted template string in
+	// addition to a literal int. The template is preserved verbatim in
+	// the AST; resolution against outputs/vars happens at runtime so
+	// per-iteration variation (e.g. tighter fix_loop for safe pkgs,
+	// looser for risky ones) becomes expressible from upstream nodes.
+	src := `workflow test:
+  entry: a
+
+  a -> b as fix_loop("{{outputs.select.cap}}")
+`
+	res := parser.Parse("test.iter", src)
+	assertNoDiags(t, res)
+
+	e := res.File.Workflows[0].Edges[0]
+	if e.Loop == nil {
+		t.Fatal("expected loop clause")
+	}
+	assertEq(t, "Loop.Name", e.Loop.Name, "fix_loop")
+	assertEq(t, "Loop.MaxIterations", e.Loop.MaxIterations, 0)
+	assertEq(t, "Loop.MaxIterationsExpr", e.Loop.MaxIterationsExpr, "{{outputs.select.cap}}")
+}
+
 func TestEdgeWhenNot(t *testing.T) {
 	src := `workflow test:
   entry: a
