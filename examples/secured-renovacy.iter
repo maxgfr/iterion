@@ -2045,11 +2045,17 @@ tool prepare_commit:
   script: |
     const { execSync } = require("child_process");
 
-    const pkg = {{!input.selected_package}};
-    const tgt = {{!input.target_version}};
-    const hasBreaking = {{!input.has_breaking}};
-    const alignSum = {{!input.alignment_summary}};
-    const workspaceDir = {{!input.workspace_dir}};
+    // No-bang form `{{input.X}}` renders as a JSON literal — strings
+    // arrive properly quoted (and escaped) for JS. The bang form is
+    // raw passthrough and would emit `4.18.1` instead of `"4.18.1"`,
+    // crashing the parser. Booleans, numbers, objects and arrays are
+    // valid JS literals under JSON encoding too, so the no-bang form
+    // is the right default everywhere here.
+    const pkg = {{input.selected_package}};
+    const tgt = {{input.target_version}};
+    const hasBreaking = {{input.has_breaking}};
+    const alignSum = {{input.alignment_summary}};
+    const workspaceDir = {{input.workspace_dir}};
 
     // Collect dirty files via git status --porcelain. Untracked files
     // (`??`) are excluded — the upgrade chain controls whether to
