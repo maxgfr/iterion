@@ -1346,6 +1346,8 @@ schema commit_intent_input:
   current_version: string
   target_version: string
   workspace_dir: string
+  has_breaking: bool
+  alignment_summary: string
 
 schema commit_intent:
   type: string
@@ -2024,22 +2026,70 @@ agent fix_after_upgrade:
 
 ## ─── Nodes : Phase 1 — prepare_commit & commit ─────────────────────
 
-agent prepare_commit:
-  backend: "claude_code"
-  provider: "${RESCUE_PROVIDER:-zai}"
-  model: "claude-opus-4-7"
-  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
+## prepare_commit was an LLM agent in earlier drafts. Observed across
+## ~50 bench commits: the agent always emits `chore(deps): update <pkg>
+## to <target>` with files = whatever the upgrade chain dirtied — the
+## decision space is deterministic. Replacing it with a JS tool saves
+## ~$0.10 + ~10s per package without behavioural change. If a future
+## bench needs a different commit convention, route via a recipe
+## variable (`vars.commit_type`, `vars.commit_scope`) instead of
+## reintroducing an agent.
+##
+## Runs through the sandbox bind-mount (script: tools route through
+## the active sandbox by default), so `git -C ${workspaceDir}` and
+## the JSON output land in the same workspace the agent path used.
+tool prepare_commit:
   input: commit_intent_input
   output: commit_intent
-  system: prepare_commit_system
-  user: prepare_commit_user
-  ## Read-only git-log + diff inspection + commit message format —
-  ## no need for head-session repo exploration context. Fresh keeps
-  ## the per-pkg invocation lean (~10s savings vs fork reload).
-  session: fresh
-  readonly: true
-  tools: [bash, read_file, list_files, git_diff, git_status, git_log]
-  tool_max_steps: 20
+  language: js
+  script: |
+    const { execSync } = require("child_process");
+
+    const pkg = {{!input.selected_package}};
+    const tgt = {{!input.target_version}};
+    const hasBreaking = {{!input.has_breaking}};
+    const alignSum = {{!input.alignment_summary}};
+    const workspaceDir = {{!input.workspace_dir}};
+
+    // Collect dirty files via git status --porcelain. Untracked files
+    // (`??`) are excluded — the upgrade chain controls whether to
+    // surface them; prepare_commit's job is just to stage what was
+    // modified/added/deleted/renamed by the upgrade and its
+    // alignment. Renamed entries appear as "R  old -> new" — keep
+    // the destination path for staging.
+    const status = execSync(`git -C "${workspaceDir}" status --porcelain`, { encoding: "utf8" });
+    const files = [];
+    for (const rawLine of status.split("\n")) {
+      const line = rawLine.replace(/\r?$/, "");
+      if (!line) continue;
+      const code = line.slice(0, 2);
+      let p = line.slice(3);
+      if (code.startsWith("?")) continue;
+      const arrow = p.indexOf(" -> ");
+      if (arrow !== -1) p = p.slice(arrow + 4);
+      files.push(p);
+    }
+
+    const subject = `update ${pkg} to ${tgt}`;
+    const fullSubject = `chore(deps): ${subject}`;
+    const trimmedSum = (alignSum || "").trim().slice(0, 400);
+    let fullMessage;
+    if (hasBreaking && trimmedSum) {
+      fullMessage = `${fullSubject}\n\nBreaking-change alignment applied during upgrade.\n\n${trimmedSum}`;
+    } else if (hasBreaking) {
+      fullMessage = `${fullSubject}\n\nBreaking-change alignment applied during upgrade.`;
+    } else {
+      fullMessage = fullSubject;
+    }
+
+    process.stdout.write(JSON.stringify({
+      type: "chore",
+      scope: "deps",
+      subject: subject,
+      full_message: fullMessage,
+      files: files,
+      committed: false,
+    }));
 
 ## join_files turns the agent-emitted `files: string[]` into a single
 ## newline-delimited string so the tool below can pipe it through
@@ -3560,8 +3610,8 @@ workflow secured_renovacy:
     current_version: "{{outputs.select_candidate.current_version}}",
     target_version: "{{outputs.select_candidate.target_version}}",
     workspace_dir: "{{vars.workspace_dir}}",
-    _session_id: "{{outputs.detect_stack._session_id}}",
-    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
+    has_breaking: "{{outputs.intel_join.has_breaking}}",
+    alignment_summary: "{{outputs.align_code.summary}}"
   }
 
   validate_upgrade -> fix_after_upgrade when not stable with {
