@@ -189,9 +189,18 @@ export default function LogLinesView({
   // and check for that prefix. Continuation lines (BLOCK_INDENT) are
   // detected by the annotator above and inherit their parent header's
   // match decision so multi-line tool blocks stay grouped.
+  //
+  // When filtering, the `NodeID#iter/` segment is redundant — the
+  // panel is already scoped to that exact (node, iteration). We
+  // rewrite the tag to keep only the component (e.g. "claude-code",
+  // "claw") so the user sees `[claude-code]` instead of
+  // `[discover_outdated#0/claude-code]`. The component itself is
+  // meaningful (distinguishes engine/runtime/delegate stripes), so we
+  // keep it.
   const nodeFiltered = useMemo<AnnotatedLine[]>(() => {
     if (!filterNodeId) return annotated;
     const tagPrefix = `[${filterNodeId}#${filterIteration ?? 0}/`;
+    const tagPrefixLen = tagPrefix.length;
     const out: AnnotatedLine[] = [];
     let headerMatched = false;
     for (const line of annotated) {
@@ -201,7 +210,11 @@ export default function LogLinesView({
       }
       const idx = line.text.indexOf("[");
       headerMatched = idx >= LOG_TAG_MIN_OFFSET && line.text.startsWith(tagPrefix, idx);
-      if (headerMatched) out.push(line);
+      if (headerMatched) {
+        const stripped =
+          line.text.slice(0, idx + 1) + line.text.slice(idx + tagPrefixLen);
+        out.push({ ...line, text: stripped });
+      }
     }
     return out;
   }, [annotated, filterNodeId, filterIteration]);

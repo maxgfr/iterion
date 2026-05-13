@@ -239,13 +239,13 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				Data:   data,
 			})
 
-			// Console output.
+			// Console output: errors only — the success case is fully
+			// captured by the tool_called event (duration + tool name)
+			// and rendered by the Tools tab + in-flight footer in the
+			// run view, so a per-call log line is just noise.
 			if info.Error != nil {
 				logger.Error("Tool error [%s]: %s — %v (%dms)",
 					nodeID, info.ToolName, info.Error, info.Duration.Milliseconds())
-			} else {
-				logger.Logf(iterlog.LevelInfo, "🔧", "Tool done [%s]: %s (%dms)",
-					nodeID, info.ToolName, info.Duration.Milliseconds())
 			}
 		},
 

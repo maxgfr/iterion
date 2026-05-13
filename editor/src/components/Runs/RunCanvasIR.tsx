@@ -25,7 +25,10 @@ import {
 } from "@/hooks/useEffortCapabilities";
 import type { EffortCapabilities } from "@/api/client";
 
+import { useUIStore } from "@/store/ui";
+
 import IRNode, { iterationColor, type LLMMeta } from "./IRNode";
+import RunCanvasToolbar from "./RunCanvasToolbar";
 
 const nodeTypes = { ir: IRNode };
 
@@ -174,6 +177,11 @@ export default function RunCanvasIR({
     effortCapsByPairRef.current = effortCapsByPair;
   }, [effortCapsByPair]);
   const reactFlow = useReactFlow();
+  // Shared with the editor canvas so the user's TB/LR preference
+  // persists across views; the toggle button in RunCanvasToolbar
+  // flips this and the layout effect below picks it up.
+  const layoutDirection = useUIStore((s) => s.layoutDirection);
+  const toggleLayoutDirection = useUIStore((s) => s.toggleLayoutDirection);
 
   useEffect(() => {
     setWf(null);
@@ -343,7 +351,7 @@ export default function RunCanvasIR({
       };
     });
 
-    autoLayout(baseNodes, baseEdges, "DOWN")
+    autoLayout(baseNodes, baseEdges, layoutDirection)
       .then((laid) => {
         if (cancelled) return;
         // Re-derive meta with the latest caps: the prefetch effect
@@ -378,12 +386,12 @@ export default function RunCanvasIR({
     return () => {
       cancelled = true;
     };
-    // Layout runs once per `wf` change; iteration/execution flips,
+    // Layout runs on `wf` change and on `layoutDirection` toggle —
+    // both warrant a full ELK relayout. Iteration/execution flips,
     // selection, dimming, and async-arriving effort defaults all flow
-    // through the patch effect below. Including those deps here would
-    // trigger a full ELK relayout per update.
+    // through the patch effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wf]);
+  }, [wf, layoutDirection]);
 
   // Index WireWorkflow nodes for the patch effect's meta refresh —
   // avoids re-walking wf.nodes on every patch.
@@ -468,6 +476,19 @@ export default function RunCanvasIR({
     return { running, paused, failed };
   }, [execsByNode]);
 
+  // Distinct IR node ids that currently have at least one running
+  // execution. Drives RunCanvasToolbar's "focus running" action: a
+  // single click reframes the viewport onto these nodes. Empty when
+  // the run is finished/paused/failed — the toolbar disables the
+  // button in that case.
+  const runningNodeIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const [nodeId, execs] of execsByNode) {
+      if (execs.some((ex) => ex.status === "running")) set.add(nodeId);
+    }
+    return set;
+  }, [execsByNode]);
+
   const toggleFilter = (f: StatusFilter) => {
     setActiveFilters((prev) => {
       const next = new Set(prev);
@@ -520,7 +541,7 @@ export default function RunCanvasIR({
           structure shown may differ from what executed.
         </div>
       )}
-      <div className="absolute top-2 right-2 z-10 flex items-center gap-1">
+      <div className="absolute top-2 right-2 z-40 flex items-center gap-1">
         {filterChips
           .filter((c) => c.count > 0)
           .map((c) => {
@@ -547,6 +568,23 @@ export default function RunCanvasIR({
               </button>
             );
           })}
+        <RunCanvasToolbar
+          onFitView={() =>
+            reactFlow.fitView({ padding: 0.2, duration: 300 })
+          }
+          onFocusRunning={() => {
+            if (runningNodeIds.size === 0) return;
+            reactFlow.fitView({
+              nodes: Array.from(runningNodeIds).map((id) => ({ id })),
+              padding: 0.3,
+              duration: 350,
+              minZoom: 0.5,
+              maxZoom: 1.5,
+            });
+          }}
+          runningCount={runningNodeIds.size}
+          onToggleLayoutDirection={toggleLayoutDirection}
+        />
       </div>
       <ReactFlow
         nodes={nodes}
@@ -564,7 +602,7 @@ export default function RunCanvasIR({
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={16} size={1} />
-        <Controls showInteractive={false} />
+        <Controls showInteractive={true} />
       </ReactFlow>
     </div>
   );
