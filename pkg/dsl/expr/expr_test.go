@@ -497,6 +497,67 @@ func TestExpr_FuncCall_Join(t *testing.T) {
 	}
 }
 
+func TestExpr_FuncCall_If(t *testing.T) {
+	// if(cond, then, else) — picks `then` on truthy cond, `else` otherwise.
+	// Used by recipes to derive policy values without falling back to a
+	// JS tool (e.g. "effective_risk = if(has_breaking, 'major', risk)").
+	ctx := makeCtx(
+		map[string]interface{}{
+			"flag_true":  true,
+			"flag_false": false,
+			"missing":    nil,
+			"empty_str":  "",
+			"zero":       int64(0),
+			"three":      int64(3),
+			"items":      []interface{}{"a", "b", "c"},
+			"risk":       "minor",
+		},
+		nil, nil, nil,
+	)
+	cases := []struct {
+		src    string
+		expect interface{}
+	}{
+		{`if(vars.flag_true, "yes", "no")`, "yes"},
+		{`if(vars.flag_false, "yes", "no")`, "no"},
+		{`if(vars.missing, "yes", "no")`, "no"},
+		{`if(vars.empty_str, "yes", "no")`, "no"},
+		{`if(vars.zero, "yes", "no")`, "no"},
+		{`if(vars.three, "yes", "no")`, "yes"},
+		// Common idiom: if(has_breaking && length(steps) >= N, "major", risk).
+		{`if(vars.flag_true && length(vars.items) >= 3, "major", vars.risk)`, "major"},
+		{`if(vars.flag_false && length(vars.items) >= 3, "major", vars.risk)`, "minor"},
+		{`if(vars.flag_true && length(vars.items) >= 10, "major", vars.risk)`, "minor"},
+		// Non-string branches.
+		{`if(vars.flag_true, 5, 3)`, int64(5)},
+		{`if(vars.flag_false, 5, 3)`, int64(3)},
+	}
+	for _, c := range cases {
+		ast, err := Parse(c.src)
+		if err != nil {
+			t.Fatalf("Parse(%q) error: %v", c.src, err)
+		}
+		got, err := ast.Eval(ctx)
+		if err != nil {
+			t.Fatalf("Eval(%q) error: %v", c.src, err)
+		}
+		if got != c.expect {
+			t.Errorf("Eval(%q) = %v (%T), want %v (%T)", c.src, got, got, c.expect, c.expect)
+		}
+	}
+
+	// Arity error.
+	for _, bad := range []string{`if(vars.flag_true)`, `if(vars.flag_true, 1)`, `if(vars.flag_true, 1, 2, 3)`} {
+		ast, err := Parse(bad)
+		if err != nil {
+			continue
+		}
+		if _, err := ast.Eval(ctx); err == nil {
+			t.Errorf("Eval(%q) expected arity error, got nil", bad)
+		}
+	}
+}
+
 func TestExpr_FuncCall_Nested(t *testing.T) {
 	// Mirrors the iterion review-workflow accumulator:
 	// unique(concat(loop.l.previous_output.cumulative, input.scanned_areas))
