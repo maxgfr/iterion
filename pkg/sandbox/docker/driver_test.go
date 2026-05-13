@@ -177,3 +177,30 @@ func TestRunCommandKeepStdinOpenAddsInteractiveFlag(t *testing.T) {
 		})
 	}
 }
+
+func TestIsContainerNameConflict(t *testing.T) {
+	// Real docker daemon message (capture from a live `docker run --name X`
+	// against an existing container). The substring match must hold
+	// across docker / podman wording variations.
+	dockerMsg := []byte(`docker: Error response from daemon: Conflict. The container name "/iterion-run_12345" is already in use by container "abcdef0123456789". You have to remove (or rename) that container to be able to reuse that name.
+
+Run 'docker run --help' for more information
+`)
+	if !isContainerNameConflict(dockerMsg) {
+		t.Error("expected docker conflict message to match")
+	}
+	// Podman-flavoured wording.
+	podmanMsg := []byte(`Error: the container name "iterion-run_12345" is already in use by 0123... You have to remove that container to be able to reuse that name`)
+	if !isContainerNameConflict(podmanMsg) {
+		t.Error("expected podman conflict message to match")
+	}
+	// Unrelated docker error must NOT match — otherwise we'd silently
+	// force-remove containers we shouldn't.
+	other := []byte(`docker: Error response from daemon: pull access denied for iterion/missing`)
+	if isContainerNameConflict(other) {
+		t.Error("unrelated docker error must not match")
+	}
+	if isContainerNameConflict(nil) {
+		t.Error("nil/empty must not match")
+	}
+}

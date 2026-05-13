@@ -189,6 +189,23 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 	args = append(args, p.spec.Image, "sleep", "infinity")
 
 	out, err := runtimeCmdContext(ctx, d.rt, args...).CombinedOutput()
+	if err != nil && isContainerNameConflict(out) {
+		// A leftover container with the same name (one per run-id) is
+		// a recoverable state, not a hard failure. The two common
+		// causes are both transient:
+		//   - prior daemon was SIGTERM-killed while a sandbox was
+		//     up; --rm cleanup raced with shutdown and lost.
+		//   - prior run failed without reaching Cleanup (e.g. a panic
+		//     between Start return and the engine's defer).
+		// Force-remove the stale container and retry once. If the
+		// retry also fails, surface the original error chain so the
+		// operator sees the underlying cause.
+		d.logger.Warn("sandbox: container %q already exists from a prior run — force-removing and retrying", containerName)
+		if rmErr := forceRemoveContainer(ctx, d.rt, containerName); rmErr != nil {
+			return nil, fmt.Errorf("docker: run: %w\noutput: %s\n(also tried force-remove of stale container: %v)", err, string(out), rmErr)
+		}
+		out, err = runtimeCmdContext(ctx, d.rt, args...).CombinedOutput()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("docker: run: %w\noutput: %s", err, string(out))
 	}
@@ -391,6 +408,36 @@ func containerShortID(sha string) string {
 		return sha[:12]
 	}
 	return sha
+}
+
+// isContainerNameConflict matches the docker-daemon error message that
+// `docker run --name X` produces when a container with name X already
+// exists (running, stopped, or paused). The message is stable enough
+// across docker / podman / runc versions to substring-match without
+// over-fitting:
+//
+//	docker: Error response from daemon: Conflict. The container name
+//	"/iterion-run_xxx" is already in use by container "<sha>". You have
+//	to remove (or rename) that container to be able to reuse that name.
+//
+// `podman` produces the slightly different "the container name … is
+// already in use by …" — covering both with a shared substring.
+func isContainerNameConflict(stderr []byte) bool {
+	s := strings.ToLower(string(stderr))
+	return strings.Contains(s, "is already in use")
+}
+
+// forceRemoveContainer issues `docker rm -f <name>` to evict a leftover
+// container that's blocking a name reuse. Best-effort: returns the
+// underlying error so the caller can decide whether to surface a
+// combined diagnostic. Idempotent — removing a missing container is
+// not treated as a hard error by the caller path.
+func forceRemoveContainer(ctx context.Context, rt Runtime, name string) error {
+	out, err := runtimeCmdContext(ctx, rt, "rm", "-f", name).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("rm -f %s: %w (output: %s)", name, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // Compile-time interface checks.
