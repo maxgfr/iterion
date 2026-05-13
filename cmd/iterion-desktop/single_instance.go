@@ -46,12 +46,23 @@ func AcquireSingleInstanceLock() (*SingleInstance, error) {
 	return acquireLockFile("iterion-desktop.lock")
 }
 
-// acquireDaemonLock is the headless-server variant of
-// AcquireSingleInstanceLock — a separate lock file lets a daemon and a
-// GUI process coexist (the GUI takes the GUI lock; the daemon takes the
-// daemon lock).
+// acquireDaemonLock is the legacy single-daemon variant (Phase 1).
+// Kept for callers that don't have a project context.
 func acquireDaemonLock() (*SingleInstance, error) {
 	return acquireLockFile("iterion-desktop-daemon.lock")
+}
+
+// acquireDaemonLockForProject is the Phase 2 per-project variant. Each
+// daemon hosts one project; many daemons can coexist (one per project)
+// by taking distinct lock files derived from the project's directory.
+// The project key encoding matches daemon_discovery.go's
+// encodeProjectDirKey so the lock and the discovery file always agree
+// on what counts as "the same project".
+func acquireDaemonLockForProject(projectDir string) (*SingleInstance, error) {
+	if projectDir == "" {
+		return acquireDaemonLock()
+	}
+	return acquireLockFile("iterion-desktop-daemon" + encodeProjectDirKey(projectDir) + ".lock")
 }
 
 func acquireLockFile(name string) (*SingleInstance, error) {
