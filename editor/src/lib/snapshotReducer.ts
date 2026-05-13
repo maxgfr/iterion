@@ -41,6 +41,25 @@ export function buildExecutionsAt(
         const id = `exec:${branch}:${evt.node_id}:${iter}`;
         const kind = (evt.data?.["kind"] as string) ?? undefined;
         const existing = execs.get(id);
+        // Monotonic status: mirror the live store reducer (see
+        // store/run.ts) — a duplicate node_started for an exec id that
+        // already reached a terminal state must not flip it back to
+        // "running". The time-travel scrubber would otherwise lose
+        // finished_at when replaying a stream that includes a recovery
+        // retry that the runtime emitted as a fresh node_started.
+        if (
+          existing &&
+          (existing.status === "finished" ||
+            existing.status === "failed" ||
+            existing.status === "paused_waiting_human")
+        ) {
+          execs.set(id, {
+            ...existing,
+            current_event_seq: evt.seq,
+            last_seq: evt.seq,
+          });
+          break;
+        }
         execs.set(id, {
           execution_id: id,
           ir_node_id: evt.node_id,

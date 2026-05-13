@@ -28,7 +28,7 @@ function snap(executions: ExecutionState[], last_seq: number): RunSnapshot {
   return { run: baseRun, executions, last_seq };
 }
 
-function nodeStarted(node: string, seq: number): RunEvent {
+function nodeStarted(node: string, seq: number, iter = 0): RunEvent {
   return {
     seq,
     timestamp: "2026-01-01T00:00:01Z",
@@ -36,7 +36,13 @@ function nodeStarted(node: string, seq: number): RunEvent {
     run_id: "run_test",
     branch_id: "main",
     node_id: node,
-    data: { kind: "agent" },
+    // Pass iteration explicitly so the reducer doesn't auto-bump it
+    // via nextIteration() — the bug fix targets duplicate events for
+    // the SAME iter, which is what WS history replay produces. The
+    // nextIteration fallback (which legitimately bumps for recovery
+    // retries) is a different code path that already creates a new
+    // exec id.
+    data: { kind: "agent", iteration: iter },
   };
 }
 
@@ -132,5 +138,66 @@ describe("applySnapshot", () => {
     expect(discover?.status).toBe(
       "running",
     );
+  });
+});
+
+describe("applyEventsBatch — monotonic status", () => {
+  // Regression for the "finished node continues to show running"
+  // glitch. A duplicate node_started for an exec id that already
+  // reached node_finished must NOT downgrade the status back to
+  // running, and must NOT clear finished_at. The runtime can re-emit
+  // node_started in legit cases (WS history replay on reconnect,
+  // recovery retry that reuses the same iteration) — the reducer is
+  // responsible for treating terminal statuses as immutable in this
+  // direction.
+  it("does not downgrade finished -> running on duplicate node_started", () => {
+    useRunStore.getState().applyEventsBatch([
+      nodeStarted("detect_stack", 1),
+      nodeFinished("detect_stack", 2),
+    ]);
+    {
+      const st = useRunStore.getState();
+      const e = Array.from(st.executionsById.values())[0]!;
+      expect(e.status).toBe("finished");
+      expect(e.finished_at).toBeDefined();
+    }
+
+    // Duplicate node_started arrives (history replay or server
+    // re-emission). Higher seq than the prior finished — the
+    // dedupe filter at the top of the reducer doesn't drop it.
+    useRunStore.getState().applyEventsBatch([nodeStarted("detect_stack", 3)]);
+
+    const st = useRunStore.getState();
+    const e = Array.from(st.executionsById.values())[0]!;
+    expect(e.status).toBe("finished");
+    expect(e.finished_at).toBeDefined();
+    expect(e.last_seq).toBe(3); // seq markers still advance
+  });
+
+  it("does not downgrade failed -> running on duplicate node_started", () => {
+    // Build the failed state through the public API: node_started ->
+    // run_failed. run_failed flips the current exec to status=failed.
+    useRunStore.getState().applyEventsBatch([
+      nodeStarted("validate", 1),
+      {
+        seq: 2,
+        timestamp: "2026-01-01T00:00:02Z",
+        type: "run_failed",
+        run_id: "run_test",
+        branch_id: "main",
+        node_id: "validate",
+        data: { error: "boom" },
+      } as RunEvent,
+    ]);
+    {
+      const st = useRunStore.getState();
+      const e = Array.from(st.executionsById.values())[0]!;
+      expect(e.status).toBe("failed");
+    }
+
+    useRunStore.getState().applyEventsBatch([nodeStarted("validate", 3)]);
+    const st = useRunStore.getState();
+    const e = Array.from(st.executionsById.values())[0]!;
+    expect(e.status).toBe("failed");
   });
 });
