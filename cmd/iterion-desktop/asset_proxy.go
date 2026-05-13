@@ -3,11 +3,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"sync"
+	"time"
 )
 
 // assetProxyHandler is the http.Handler the desktop binary plugs into Wails'
@@ -78,17 +80,14 @@ func (h *assetProxyHandler) proxyFor(serverURL string) (*httputil.ReverseProxy, 
 }
 
 func (h *assetProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.app.mu.RLock()
-	serverURL := h.app.serverURL
-	h.app.mu.RUnlock()
-
+	serverURL := h.waitForServerURL(r.Context(), 30*time.Second)
 	if serverURL == "" {
-		// Server not yet bound (or failed to start). Wails AssetServer's
-		// runtime-injection wrapper records 5xx but doesn't substitute its
-		// default index — the SPA bootstrap will simply retry on its next
-		// load. Return a friendly message so the user sees something other
-		// than a blank page if they manually navigate.
-		http.Error(w, "Iterion editor server is starting…", http.StatusServiceUnavailable)
+		// Still no URL after the wait window — either the embedded
+		// server failed to bind or daemon spawn timed out. The Wails
+		// runtime-injection wrapper records 5xx but doesn't substitute
+		// its default index; surface a friendly stuck-state message so
+		// the user sees something other than a blank page.
+		http.Error(w, "Iterion editor server failed to start within 30s — check daemon logs at ~/.iterion/daemons/", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -99,4 +98,32 @@ func (h *assetProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxy.ServeHTTP(w, r)
+}
+
+// waitForServerURL polls a.serverURL with a short backoff until the
+// onStartup flow finishes attaching/spawning. The WebView issues its
+// initial GET / within ~100ms of process launch — well before the
+// daemon spawn polls succeed (cli.RunEditor cold start is 5-10s). If
+// we return 5xx on that first hit the WebView shows the error text
+// permanently because no JS has loaded to retry. Blocking here makes
+// the WebView appear to "load slowly" instead of showing a stuck
+// error message, and the eventual load is the real SPA.
+func (h *assetProxyHandler) waitForServerURL(ctx context.Context, max time.Duration) string {
+	deadline := time.Now().Add(max)
+	for {
+		h.app.mu.RLock()
+		serverURL := h.app.serverURL
+		h.app.mu.RUnlock()
+		if serverURL != "" {
+			return serverURL
+		}
+		if time.Now().After(deadline) {
+			return ""
+		}
+		select {
+		case <-ctx.Done():
+			return ""
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
 }
