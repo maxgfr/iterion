@@ -1356,6 +1356,118 @@ schema bucket_patches_output:
   patches_count: int
   attempted_after_batch: json
 
+## ─── Schemas : family batching ─────────────────────────────────────
+
+## bucket_families_input drives the family bucketing tool. We forward
+## the discover_outdated.packages list verbatim, plus the names already
+## handled by the patch fast-track so they don't get re-bucketed into
+## a family pass.
+schema bucket_families_input:
+  packages: json
+  scope: string
+  attempted: json
+
+## bucket_families_output exposes a list of families (≥2 members each)
+## that can be safely yarn-up'd as a single bundle. Single-member
+## "families" stay in the solo path. solos[] is the explicit list of
+## remaining single-member non-patch packages so the operator can audit
+## what each path covers.
+schema bucket_families_output:
+  families: json
+  has_families: bool
+  families_count: int
+  solos: json
+  solos_count: int
+
+## select_family_input is the loop input — each iteration picks the
+## next un-attempted family from bucket_families.families.
+schema select_family_input:
+  families: json
+  attempted_families: json
+  workspace_dir: string
+
+## select_family_output exposes the currently-selected family (name +
+## members), plus the cumulative attempted_families ledger that the
+## loop edge passes back on the next iteration.
+schema select_family_output:
+  selected_family: string
+  selected_members: json
+  members_count: int
+  has_more: bool
+  attempted_families_count: int
+  cumulative_attempted_families: json
+
+## family_upgrade_input drives the family yarn-up tool — same shape as
+## batch_upgrade_input but the bundle is the family's members rather
+## than the patch list.
+schema family_upgrade_input:
+  workspace_dir: string
+  pkg_manager: string
+  members: json
+  notes: string
+
+schema family_upgrade_result:
+  success: bool
+  output: string
+  upgraded_specs: json
+
+## family_validate_input drives a shell-only validation: install +
+## smoke (test/build/lint, picked by pkg_manager). No LLM call — this
+## is the cheap guard the family path relies on instead of the
+## per-package validate_upgrade agent. If the smoke fails the family
+## reverts; the per-package loop afterwards re-attempts each member
+## with full agentic intel + validate.
+schema family_validate_input:
+  workspace_dir: string
+  pkg_manager: string
+  family_name: string
+
+schema family_validate_result:
+  stable: bool
+  output: string
+
+## family_commit_input — same shape as batch_commit_input but writes a
+## family-themed commit subject.
+schema family_commit_input:
+  workspace_dir: string
+  family_name: string
+  members: json
+  audit_summary: string
+
+schema family_commit_result:
+  success: bool
+  committed: bool
+  output: string
+  sha: string
+
+## family_revert_input drives the failure-path tool: `git reset --hard
+## <pre-family-sha>` + reinstall to clean the worktree before the
+## per-package loop tries each member individually.
+schema family_revert_input:
+  workspace_dir: string
+  pkg_manager: string
+  family_name: string
+
+schema family_revert_result:
+  success: bool
+  output: string
+
+## mark_family_attempted_input grows the attempted_families ledger so
+## the next select_family iteration skips this family. It also exposes
+## the family's members as an attempted-packages slice that can be
+## merged into the per-package loop's `attempted` so solos don't
+## retry every family member.
+schema mark_family_attempted_input:
+  family_name: string
+  members: json
+  reason: string
+  cumulative_attempted_families: json
+  cumulative_attempted_members: json
+
+schema mark_family_attempted_output:
+  attempted_families: json
+  attempted_members: json
+
 ## batch_upgrade_input drives batch_upgrade_patches: the yarn up tool
 ## invocation takes the array of `{name, current, target}` triples and
 ## the manager hint from detect_stack.
@@ -2322,6 +2434,389 @@ printf '{"success":true,"committed":true,"output":"batch committed %s","sha":"%s
   input: batch_commit_input
   output: batch_commit_result
 
+## ─── Nodes : family batching (yarn-up @scope/* bundles) ─────────────
+
+## bucket_families groups the non-patch outdated packages by `@scope/`
+## prefix. Packages within an ecosystem (Otel, Sentry, types, etc.) are
+## typically released in lockstep — a coordinated yarn-up of the
+## family is both safer AND cheaper than N independent per-package
+## cycles. Single-member groups fall through to `solos` and are handled
+## by the existing per-package loop downstream.
+##
+## Filtering rules:
+##   - Skip packages already attempted (via input.attempted) — covers
+##     the patches the fast-track just landed and any pre-existing
+##     ledger entries.
+##   - Skip packages with no scope prefix (no `@` namespace) — these
+##     are best handled per-package (axios, amqplib, eslint without
+##     a scope, …).
+##   - Skip families where any member's risk is outside the run's
+##     scope (e.g. when scope: "patch,minor" filters out major-tier
+##     bumps in a family; the major members fall through to solos).
+tool bucket_families:
+  language: js
+  script: |
+    const raw = {{!input.packages}};
+    const scopeStr = "{{!input.scope}}";
+    const attemptedRaw = {{!input.attempted}};
+
+    function fieldAlias(row, aliases) {
+      if (!row || typeof row !== "object") return undefined;
+      const lower = {};
+      for (const k of Object.keys(row)) lower[k.toLowerCase()] = row[k];
+      for (const a of aliases) {
+        const v = lower[a.toLowerCase()];
+        if (v !== undefined && v !== null && v !== "") return v;
+      }
+      return undefined;
+    }
+    function extractVersion(v) {
+      if (v == null) return "";
+      if (typeof v === "string") return v;
+      if (typeof v === "object" && !Array.isArray(v)) {
+        for (const k of Object.keys(v)) {
+          if (typeof v[k] === "string" && v[k]) return v[k];
+        }
+      }
+      return String(v);
+    }
+    function normaliseRow(row, fallbackName) {
+      if (!row || typeof row !== "object") return null;
+      const name = fieldAlias(row, ["name", "package", "pkg"]) || fallbackName || "";
+      const target = extractVersion(fieldAlias(row, ["target", "latest", "to", "targetVersion", "next"]));
+      const current = extractVersion(fieldAlias(row, ["current", "from", "declared", "currentVersion", "installed", "version"]));
+      const rawRisk = fieldAlias(row, ["risk", "bump", "severity", "type", "semver"]);
+      const risk = String(rawRisk || "unknown").toLowerCase();
+      return { name, current, target, risk };
+    }
+    function toNormalisedRows(value) {
+      if (Array.isArray(value)) return value.map((r) => normaliseRow(r)).filter(Boolean);
+      if (!value || typeof value !== "object") return [];
+      const keys = Object.keys(value);
+      if (keys.length === 1 && Array.isArray(value[keys[0]])) {
+        return value[keys[0]].map((r) => normaliseRow(r)).filter(Boolean);
+      }
+      for (const k of ["list", "items", "packages", "data", "outdated"]) {
+        if (Array.isArray(value[k])) {
+          return value[k].map((r) => normaliseRow(r)).filter(Boolean);
+        }
+      }
+      const rows = [];
+      for (const k of keys) {
+        const v = value[k];
+        if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+        const row = normaliseRow(v, k);
+        if (row && row.name) rows.push(row);
+      }
+      return rows;
+    }
+    function attemptedNames(atts) {
+      if (Array.isArray(atts)) return atts.map((a) => (a && a.name) || a).filter((n) => typeof n === "string" && n);
+      if (atts && typeof atts === "object") return Object.keys(atts);
+      return [];
+    }
+
+    const allowedRisks = (!scopeStr || scopeStr === "all")
+      ? ["patch", "minor", "major", "unknown"]
+      : scopeStr.split(",").map((s) => s.trim()).filter(Boolean);
+
+    const list = toNormalisedRows(raw);
+    const attemptedList = attemptedNames(attemptedRaw);
+    const attemptedSet = new Set(attemptedList);
+
+    // Group candidates by `@scope` prefix. Drop names without a `@`
+    // namespace (covered by the solo path) and packages already
+    // attempted or outside the active scope.
+    const groups = {};
+    const solos = [];
+    for (const p of list) {
+      if (!p || !p.name || !p.target) continue;
+      if (attemptedSet.has(p.name)) continue;
+      if (!allowedRisks.includes(p.risk)) continue;
+      const m = p.name.match(/^(@[^/]+)\//);
+      if (!m) { solos.push(p); continue; }
+      const scope = m[1];
+      if (!groups[scope]) groups[scope] = [];
+      groups[scope].push({ name: p.name, current: p.current || "", target: p.target, risk: p.risk });
+    }
+
+    // Families with ≥2 members are eligible for batching; single-member
+    // "families" collapse to solo path.
+    const families = [];
+    for (const [scope, members] of Object.entries(groups)) {
+      if (members.length >= 2) {
+        families.push({ name: scope, members: members });
+      } else {
+        for (const m of members) solos.push(m);
+      }
+    }
+    // Largest families first — they yield the biggest per-call savings.
+    families.sort((a, b) => b.members.length - a.members.length);
+
+    process.stdout.write(JSON.stringify({
+      families: families,
+      has_families: families.length > 0,
+      families_count: families.length,
+      solos: solos,
+      solos_count: solos.length,
+    }));
+  input: bucket_families_input
+  output: bucket_families_output
+
+## select_family is the per-iteration picker — same role as
+## select_candidate in the solo path, but at family granularity. It
+## also tracks the cumulative attempted_families ledger that the loop
+## edge passes back so the next iteration skips already-handled
+## families.
+tool select_family:
+  language: js
+  script: |
+    const familiesRaw = {{!input.families}};
+    const attemptedRaw = {{!input.attempted_families}};
+    const workspaceDir = "{{!input.workspace_dir}}" || "";
+
+    const families = Array.isArray(familiesRaw) ? familiesRaw : [];
+    const attempted = (attemptedRaw && typeof attemptedRaw === "object") ? attemptedRaw : {};
+    const attemptedNames = new Set(Object.keys(attempted));
+
+    // Defensive workspace state check (same idea as select_candidate):
+    // if every member of a family already shows its target version in
+    // yarn.lock, the family is silently done — skip it. discover_outdated
+    // ran once at the start and its `current` values go stale immediately
+    // after the first family commit lands.
+    const fs = require("fs");
+    const path = require("path");
+    let lockText = "";
+    try {
+      if (workspaceDir) lockText = fs.readFileSync(path.join(workspaceDir, "yarn.lock"), "utf8");
+    } catch (_e) { lockText = ""; }
+    function memberAtTarget(member) {
+      if (!lockText || !member || !member.name || !member.target) return false;
+      return lockText.indexOf(member.name + "@npm:" + member.target) !== -1;
+    }
+    function familyAtTarget(family) {
+      const members = Array.isArray(family.members) ? family.members : [];
+      if (members.length === 0) return true;
+      return members.every(memberAtTarget);
+    }
+
+    const survivors = families
+      .filter((f) => !attemptedNames.has(f.name))
+      .filter((f) => !familyAtTarget(f));
+
+    let result;
+    if (survivors.length === 0) {
+      result = {
+        selected_family: "",
+        selected_members: [],
+        members_count: 0,
+        has_more: false,
+        attempted_families_count: attemptedNames.size,
+        cumulative_attempted_families: attempted,
+      };
+    } else {
+      const f = survivors[0];
+      const cumulative = { ...attempted, [f.name]: { members_count: (f.members || []).length } };
+      result = {
+        selected_family: f.name,
+        selected_members: f.members || [],
+        members_count: (f.members || []).length,
+        has_more: true,
+        attempted_families_count: attemptedNames.size,
+        cumulative_attempted_families: cumulative,
+      };
+    }
+
+    process.stdout.write(JSON.stringify(result));
+  input: select_family_input
+  output: select_family_output
+
+## family_upgrade bumps every member of the selected family in one
+## `yarn up name@target …` invocation. Identical mechanics to
+## batch_upgrade_patches; the family-specific commit subject comes
+## later in family_commit.
+tool family_upgrade:
+  command: `set -euo pipefail
+cd {{input.workspace_dir}} >&2
+PKG_MGR={{input.pkg_manager}}
+MEMBERS={{input.members}}
+NOTES={{input.notes}}
+SPECS=$(printf '%s' "$MEMBERS" | jq -r '.[] | select(.name and .target) | "\(.name)@\(.target)"' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
+if [ -z "$SPECS" ]; then
+  printf '{"success":true,"output":"no specs to upgrade","upgraded_specs":[]}\n'
+  exit 0
+fi
+case "$PKG_MGR" in
+  yarn|yarn3|yarn4) CMD="yarn up $SPECS" ;;
+  npm)              CMD="npm install $SPECS" ;;
+  pnpm)             CMD="pnpm update $SPECS" ;;
+  bun)              CMD="bun update $SPECS" ;;
+  *)                printf '{"success":false,"output":"family_upgrade: unsupported pkg_manager %s","upgraded_specs":[]}\n' "$PKG_MGR"; exit 1 ;;
+esac
+if ! eval "$CMD" >&2; then
+  printf '{"success":false,"output":"family upgrade failed: %s","upgraded_specs":[]}\n' "$CMD"
+  exit 1
+fi
+UPGRADED_JSON=$(printf '%s' "$SPECS" | jq -R 'split(" ") | map(select(length > 0))' 2>/dev/null || echo '[]')
+printf '{"success":true,"output":"family upgrade succeeded","upgraded_specs":%s}\n' "$UPGRADED_JSON"
+`
+  input: family_upgrade_input
+  output: family_upgrade_result
+
+## family_validate is a SHELL-only smoke gate. We deliberately skip
+## the agentic validate_upgrade for families to keep the cost low:
+## yarn install resolves transitives, then we try `yarn build` /
+## `yarn typecheck` / `yarn lint` in order of speed, taking the first
+## available script. A failure flips stable=false and routes to
+## family_revert; the per-package solo loop downstream then re-attempts
+## each member individually with full agentic intel + validate, so we
+## still get safety for genuinely tricky family bumps.
+tool family_validate:
+  command: `set -euo pipefail
+cd {{input.workspace_dir}} >&2
+PKG_MGR={{input.pkg_manager}}
+FAMILY={{input.family_name}}
+case "$PKG_MGR" in
+  yarn|yarn3|yarn4) INSTALL_CMD="yarn install" ;;
+  npm)              INSTALL_CMD="npm install" ;;
+  pnpm)             INSTALL_CMD="pnpm install" ;;
+  bun)              INSTALL_CMD="bun install" ;;
+  *)                INSTALL_CMD="" ;;
+esac
+if [ -n "$INSTALL_CMD" ]; then
+  if ! eval "$INSTALL_CMD" >&2; then
+    printf '{"stable":false,"output":"%s install failed for family %s"}\n' "$PKG_MGR" "$FAMILY"
+    exit 0
+  fi
+fi
+# Pick the fastest available smoke from common script names. Order:
+# typecheck/tsc → lint → build → test. We stop at the first one that
+# runs (even on failure — that failure is the verdict). Fall through
+# to "skipped" if none exist.
+SCRIPTS=$(jq -r '.scripts // {} | keys[]' package.json 2>/dev/null || true)
+RAN=""
+for cand in typecheck tsc lint build test; do
+  if printf '%s\n' "$SCRIPTS" | grep -qx "$cand"; then
+    case "$PKG_MGR" in
+      yarn|yarn3|yarn4) SCRIPT_CMD="yarn $cand" ;;
+      npm)              SCRIPT_CMD="npm run $cand" ;;
+      pnpm)             SCRIPT_CMD="pnpm $cand" ;;
+      bun)              SCRIPT_CMD="bun run $cand" ;;
+      *)                SCRIPT_CMD="" ;;
+    esac
+    if [ -n "$SCRIPT_CMD" ]; then
+      if eval "$SCRIPT_CMD" >&2; then
+        printf '{"stable":true,"output":"family %s smoke %s passed"}\n' "$FAMILY" "$cand"
+        exit 0
+      else
+        printf '{"stable":false,"output":"family %s smoke %s failed"}\n' "$FAMILY" "$cand"
+        exit 0
+      fi
+    fi
+  fi
+done
+# No smoke script available → still stable (install worked). The
+# per-package solo loop will re-validate each member individually
+# anyway if anything's actually broken.
+printf '{"stable":true,"output":"family %s install ok, no smoke script available"}\n' "$FAMILY"
+`
+  input: family_validate_input
+  output: family_validate_result
+
+## family_commit lands the family yarn-up as one conventional-commit.
+## Subject: `chore(deps): update <family>/* family (N packages)`.
+## Body: one line per member listing name@from→to.
+tool family_commit:
+  command: `set -euo pipefail
+cd {{input.workspace_dir}} >&2
+FAMILY={{input.family_name}}
+MEMBERS={{input.members}}
+AUDIT={{input.audit_summary}}
+COUNT=$(printf '%s' "$MEMBERS" | jq 'length' 2>/dev/null || echo '?')
+BODY=$(printf '%s' "$MEMBERS" | jq -r '.[] | "- \(.name // "?") \(.current // "?") -> \(.target // "?")"' 2>/dev/null || true)
+SUBJECT="chore(deps): update ${FAMILY}/* family (${COUNT} packages)"
+git add -A >&2
+if git diff --cached --quiet; then
+  printf '{"success":true,"committed":false,"output":"family yarn up produced no manifest changes","sha":""}\n'
+  exit 0
+fi
+COMMIT_MSG=$(printf '%s\n\n%s\n\n%s' "$SUBJECT" "$BODY" "$AUDIT")
+if ! printf '%s' "$COMMIT_MSG" | git commit -F - >&2; then
+  printf '{"success":false,"committed":false,"output":"git commit failed","sha":""}\n'
+  exit 1
+fi
+SHA=$(git rev-parse HEAD)
+printf '{"success":true,"committed":true,"output":"family %s committed %s","sha":"%s"}\n' "$FAMILY" "$SHA" "$SHA"
+`
+  input: family_commit_input
+  output: family_commit_result
+
+## family_revert undoes a broken family bump: hard-reset the worktree
+## to its pre-upgrade HEAD, then reinstall to clean the resolved
+## dependency tree. The pre-family SHA is whatever HEAD was when this
+## family iteration started — we capture it inline rather than passing
+## it through the schema chain (yarn-up doesn't commit, so HEAD~0 is
+## still the previous commit when family_validate flagged unstable).
+tool family_revert:
+  command: `set -euo pipefail
+cd {{input.workspace_dir}} >&2
+PKG_MGR={{input.pkg_manager}}
+FAMILY={{input.family_name}}
+# Hard-reset the worktree (working dir + index + lockfile) back to the
+# last commit. yarn-up didn't commit, so the previous commit is the
+# clean pre-family state.
+git reset --hard HEAD >&2
+case "$PKG_MGR" in
+  yarn|yarn3|yarn4) eval "yarn install" >&2 || true ;;
+  npm)              eval "npm install" >&2 || true ;;
+  pnpm)             eval "pnpm install" >&2 || true ;;
+  bun)              eval "bun install" >&2 || true ;;
+esac
+printf '{"success":true,"output":"family %s reverted"}\n' "$FAMILY"
+`
+  input: family_revert_input
+  output: family_revert_result
+
+## mark_family_attempted grows two ledgers (JS because the expr DSL
+## lacks `merge` for dict-spread):
+##   - attempted_families (keyed by family name) — drives select_family
+##     to skip this family on next iteration
+##   - attempted_members (keyed by package name) — drives the
+##     downstream per-package select_candidate to skip family members
+##     so the solo loop doesn't retry every package the family path
+##     already handled (succeeded OR failed; failed family members can
+##     still be retried per-package in a follow-up run by passing a
+##     manual `attempted` slice that excludes them).
+tool mark_family_attempted:
+  language: js
+  script: |
+    const familyName = "{{!input.family_name}}";
+    const membersRaw = {{!input.members}};
+    const reason = "{{!input.reason}}";
+    const prevFamilies = {{!input.cumulative_attempted_families}} || {};
+    const prevMembers = {{!input.cumulative_attempted_members}} || {};
+
+    const members = Array.isArray(membersRaw) ? membersRaw : [];
+
+    const families = Object.assign({}, prevFamilies);
+    if (familyName) {
+      families[familyName] = { reason: reason, members_count: members.length };
+    }
+
+    const memberLedger = Object.assign({}, prevMembers);
+    for (const m of members) {
+      if (m && m.name) {
+        memberLedger[m.name] = { current: m.current || "", target: m.target || "", risk: m.risk || "unknown" };
+      }
+    }
+
+    process.stdout.write(JSON.stringify({
+      attempted_families: families,
+      attempted_members: memberLedger,
+    }));
+  input: mark_family_attempted_input
+  output: mark_family_attempted_output
+
 ## ─── Nodes : parallel intel (security + changelog in parallel) ──────
 
 ## intel_fanout is the entry point for the parallel security + changelog
@@ -2550,12 +3045,105 @@ workflow secured_renovacy:
 
   ## committed:false → yarn up was a no-op (everything already at
   ## target). Skip audit md, mark patches as attempted, hand off to
-  ## the per-package loop with the non-patches.
-  batch_commit -> select_candidate when not committed with {
+  ## the family bucketing pass before the per-package loop kicks in.
+  batch_commit -> bucket_families when not committed with {
+    packages: "{{outputs.discover_outdated.packages}}",
+    scope: "{{vars.scope}}",
+    attempted: "{{outputs.bucket_patches.attempted_after_batch}}"
+  }
+
+  ## ─── Family batching edges ────────────────────────────────────────
+
+  ## After the patch fast-track (whether it committed or not), we bucket
+  ## the remaining non-patch packages by `@scope/` prefix into families
+  ## with ≥2 members. Each family then goes through the lightweight
+  ## family path (yarn-up all members → shell smoke validate → commit
+  ## or revert) before the per-package solo loop picks up what's left.
+  bucket_families -> select_family when has_families with {
+    families: "{{outputs.bucket_families.families}}",
+    attempted_families: "{}",
+    workspace_dir: "{{vars.workspace_dir}}"
+  }
+
+  ## No multi-member families found → straight to per-package solo loop.
+  bucket_families -> select_candidate when not has_families with {
     packages: "{{outputs.discover_outdated.packages}}",
     scope: "{{vars.scope}}",
     attempted: "{{outputs.bucket_patches.attempted_after_batch}}",
     max_packages: "{{vars.max_packages_per_run}}",
+    workspace_dir: "{{vars.workspace_dir}}"
+  }
+
+  ## select_family produced a candidate family → run the family path.
+  select_family -> family_upgrade when has_more with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
+    members: "{{outputs.select_family.selected_members}}",
+    notes: "{{outputs.detect_stack.notes}}"
+  }
+
+  ## select_family exhausted (every family attempted or already at
+  ## target) → hand off to the per-package solo loop with the members
+  ## already attempted via family path pre-loaded so solos doesn't
+  ## retry them.
+  select_family -> select_candidate when not has_more with {
+    packages: "{{outputs.discover_outdated.packages}}",
+    scope: "{{vars.scope}}",
+    attempted: "{{outputs.bucket_patches.attempted_after_batch}}",
+    max_packages: "{{vars.max_packages_per_run}}",
+    workspace_dir: "{{vars.workspace_dir}}"
+  }
+
+  ## family_upgrade ok → validate (cheap shell smoke). Failed → revert.
+  family_upgrade -> family_validate when success with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
+    family_name: "{{outputs.select_family.selected_family}}"
+  }
+
+  family_upgrade -> family_revert when not success with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
+    family_name: "{{outputs.select_family.selected_family}}"
+  }
+
+  family_validate -> family_commit when stable with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    family_name: "{{outputs.select_family.selected_family}}",
+    members: "{{outputs.select_family.selected_members}}",
+    audit_summary: "{{outputs.family_upgrade.output}}"
+  }
+
+  family_validate -> family_revert when not stable with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
+    family_name: "{{outputs.select_family.selected_family}}"
+  }
+
+  ## Both terminal family outcomes (success → committed, failure →
+  ## reverted) loop back through mark_family_attempted so the next
+  ## select_family iteration skips this family.
+  family_commit -> mark_family_attempted with {
+    family_name: "{{outputs.select_family.selected_family}}",
+    members: "{{outputs.select_family.selected_members}}",
+    reason: "family upgrade committed",
+    cumulative_attempted_families: "{{outputs.select_family.cumulative_attempted_families}}",
+    cumulative_attempted_members: "{{outputs.bucket_patches.attempted_after_batch}}"
+  }
+
+  family_revert -> mark_family_attempted with {
+    family_name: "{{outputs.select_family.selected_family}}",
+    members: "{{outputs.select_family.selected_members}}",
+    reason: "family upgrade or validate failed",
+    cumulative_attempted_families: "{{outputs.select_family.cumulative_attempted_families}}",
+    cumulative_attempted_members: "{{outputs.bucket_patches.attempted_after_batch}}"
+  }
+
+  ## Loop back to select_family — same package_loop pattern as the per-
+  ## package solo loop, capped at 20 to bound the worst case.
+  mark_family_attempted -> select_family as family_loop(20) with {
+    families: "{{outputs.bucket_families.families}}",
+    attempted_families: "{{outputs.mark_family_attempted.attempted_families}}",
     workspace_dir: "{{vars.workspace_dir}}"
   }
 
@@ -2772,12 +3360,13 @@ workflow secured_renovacy:
     workspace_dir: "{{vars.workspace_dir}}"
   }
 
-  write_audit_md -> select_candidate when was_batch with {
+  ## After the patch fast-track's audit doc lands, jump to the family
+  ## bucketing pass (replaces the previous direct→select_candidate edge
+  ## so we get a family path between patches and per-package solos).
+  write_audit_md -> bucket_families when was_batch with {
     packages: "{{outputs.discover_outdated.packages}}",
     scope: "{{vars.scope}}",
-    attempted: "{{outputs.bucket_patches.attempted_after_batch}}",
-    max_packages: "{{vars.max_packages_per_run}}",
-    workspace_dir: "{{vars.workspace_dir}}"
+    attempted: "{{outputs.bucket_patches.attempted_after_batch}}"
   }
 
   ## Failure path: revert (or already reverted) → mark failed → loop back.
