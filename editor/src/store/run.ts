@@ -535,20 +535,31 @@ function reduceEvents(
     switch (evt.type) {
       case "node_started": {
         if (!evt.node_id) break;
-        const iter = nextIteration(executionsById, branch, evt.node_id);
+        // Prefer the runtime-supplied iteration (loop-counter semantics
+        // — only bumps on actual loop-edge traversal). Falls back to
+        // the local exec-count heuristic for events emitted before
+        // this field existed. Without the backend value, a recovery
+        // retry of the same node was being counted as a new iteration
+        // and the per-(node, iter) log filter couldn't find its lines.
+        const rawIter = evt.data?.iteration;
+        const iter =
+          typeof rawIter === "number"
+            ? rawIter
+            : nextIteration(executionsById, branch, evt.node_id);
         const id = makeExecutionId(branch, evt.node_id, iter);
         const kind = (evt.data?.kind as string) ?? undefined;
         ensureExecCopy();
+        const existing = executionsById.get(id);
         executionsById.set(id, {
           execution_id: id,
           ir_node_id: evt.node_id,
           branch_id: branch,
           loop_iteration: iter,
           status: "running",
-          kind,
-          started_at: evt.timestamp,
+          kind: existing?.kind ?? kind,
+          started_at: existing?.started_at ?? evt.timestamp,
           current_event_seq: evt.seq,
-          first_seq: evt.seq,
+          first_seq: existing?.first_seq ?? evt.seq,
           last_seq: evt.seq,
         });
         break;

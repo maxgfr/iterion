@@ -274,9 +274,10 @@ func (b *SnapshotBuilder) handleNodeStarted(evt *store.Event, branch string) {
 	if evt.NodeID == "" {
 		return
 	}
-	iter := b.allocIteration(branch, evt.NodeID)
+	iter := b.resolveIteration(branch, evt)
 	id := MakeExecutionID(branch, evt.NodeID, iter)
 	ts := evt.Timestamp
+	existing := b.execs[id]
 	exec := &ExecutionState{
 		ExecutionID:     id,
 		IRNodeID:        evt.NodeID,
@@ -290,6 +291,17 @@ func (b *SnapshotBuilder) handleNodeStarted(evt *store.Event, branch string) {
 	}
 	if kind, ok := evt.Data["kind"].(string); ok {
 		exec.Kind = kind
+	}
+	// Collision (retry of the same (node, iteration) after a recovery
+	// loop): preserve original started_at / first_seq / kind so the
+	// timeline still anchors on the first attempt instead of jumping
+	// to the retry.
+	if existing != nil {
+		exec.StartedAt = existing.StartedAt
+		exec.FirstSeq = existing.FirstSeq
+		if exec.Kind == "" {
+			exec.Kind = existing.Kind
+		}
 	}
 	b.execs[id] = exec
 	b.order = append(b.order, id)
@@ -467,6 +479,40 @@ func (b *SnapshotBuilder) allocIteration(branch, nodeID string) int {
 	iter := b.nodeCount[branch][nodeID]
 	b.nodeCount[branch][nodeID] = iter + 1
 	return iter
+}
+
+// resolveIteration honors the runtime-supplied iteration field on
+// node_started when present (loop-counter semantics — does not bump
+// on recovery retries). Falls back to the legacy auto-increment for
+// pre-fix events. Keeps b.nodeCount[branch][nodeID] >= iter+1 so the
+// fallback path stays monotonic.
+func (b *SnapshotBuilder) resolveIteration(branch string, evt *store.Event) int {
+	if raw, ok := evt.Data["iteration"]; ok {
+		switch v := raw.(type) {
+		case int:
+			b.bumpNodeCount(branch, evt.NodeID, v)
+			return v
+		case int64:
+			b.bumpNodeCount(branch, evt.NodeID, int(v))
+			return int(v)
+		case float64:
+			b.bumpNodeCount(branch, evt.NodeID, int(v))
+			return int(v)
+		}
+	}
+	return b.allocIteration(branch, evt.NodeID)
+}
+
+// bumpNodeCount ensures the per-(branch, nodeID) counter is at least
+// iter+1 so subsequent allocIteration calls (e.g. older events
+// without iteration in the same run) don't collide retroactively.
+func (b *SnapshotBuilder) bumpNodeCount(branch, nodeID string, iter int) {
+	if b.nodeCount[branch] == nil {
+		b.nodeCount[branch] = make(map[string]int)
+	}
+	if iter+1 > b.nodeCount[branch][nodeID] {
+		b.nodeCount[branch][nodeID] = iter + 1
+	}
 }
 
 // currentExec returns the most recently started execution of (branch,

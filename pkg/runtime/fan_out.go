@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
@@ -19,8 +20,9 @@ import (
 func (e *Engine) execFanOut(ctx context.Context, rs *runState, routerNodeID string) (string, error) {
 	// Emit router node_started.
 	if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, routerNodeID, map[string]interface{}{
-		"kind": "router",
-		"mode": "fan_out_all",
+		"kind":      "router",
+		"mode":      "fan_out_all",
+		"iteration": e.currentLoopIteration(routerNodeID, rs.loopCounters),
 	}); err != nil {
 		return "", err
 	}
@@ -306,9 +308,14 @@ func (e *Engine) execBranch(ctx context.Context, rs *runState, branchID string, 
 			}
 		}
 
+		// Loop edges inside fan-out branches are skipped (see helpers.go),
+		// so iteration here reflects the parent loop counters only.
+		iter := e.currentLoopIteration(currentNodeID, rs.loopCounters)
+
 		// Emit node_started.
 		if err := e.emitBranch(ctx, runID, branchID, store.EventNodeStarted, currentNodeID, map[string]interface{}{
-			"kind": node.NodeKind().String(),
+			"kind":      node.NodeKind().String(),
+			"iteration": iter,
 		}); err != nil {
 			e.logger.Warn("branch %s: failed to emit node_started: %v", branchID, err)
 			result.eventErrors++
@@ -322,10 +329,7 @@ func (e *Engine) execBranch(ctx context.Context, rs *runState, branchID string, 
 		mergedArt := mergeOutputs(parentArtifacts, result.artifacts)
 		nodeInput := e.buildNodeInputRS(currentNodeID, vars, merged, runInputs, mergedArt, rs)
 
-		// Loop edges inside fan-out branches are skipped (see helpers.go),
-		// so iteration is always 0 here — but we stamp it explicitly so
-		// the per-node log filter still matches.
-		execCtx := e.ctxWithIteration(ctx, currentNodeID, rs.loopCounters)
+		execCtx := model.WithLoopIteration(ctx, iter)
 		output, err := e.executor.Execute(execCtx, node, nodeInput)
 		if err != nil {
 			result.err = fmt.Errorf("node %q in branch %s: %w", currentNodeID, branchID, err)

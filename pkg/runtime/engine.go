@@ -583,7 +583,8 @@ func (e *Engine) execLoop(ctx context.Context, rs *runState, startNodeID string)
 		// --- Terminal nodes ---
 		switch node.(type) {
 		case *ir.DoneNode:
-			if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, currentNodeID, nil); err != nil {
+			terminalIter := map[string]interface{}{"iteration": e.currentLoopIteration(currentNodeID, rs.loopCounters)}
+			if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, currentNodeID, terminalIter); err != nil {
 				return err
 			}
 			if err := e.emit(rs.ctx, rs.runID, store.EventNodeFinished, currentNodeID, nil); err != nil {
@@ -594,7 +595,8 @@ func (e *Engine) execLoop(ctx context.Context, rs *runState, startNodeID string)
 			}
 			return e.emit(rs.ctx, rs.runID, store.EventRunFinished, "", nil)
 		case *ir.FailNode:
-			if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, currentNodeID, nil); err != nil {
+			terminalIter := map[string]interface{}{"iteration": e.currentLoopIteration(currentNodeID, rs.loopCounters)}
+			if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, currentNodeID, terminalIter); err != nil {
 				return err
 			}
 			if err := e.emit(rs.ctx, rs.runID, store.EventNodeFinished, currentNodeID, nil); err != nil {
@@ -676,8 +678,16 @@ func (e *Engine) execLoop(ctx context.Context, rs *runState, startNodeID string)
 		}
 
 		// --- Emit node_started ---
+		// Compute the loop iteration once so the event payload and the
+		// executor's Task.Iteration agree. The frontend uses
+		// data.iteration as the source of truth for executionsById's
+		// loop_iteration key, so a recovery retry of the same node
+		// (loop counter unchanged) updates the existing execution in
+		// place instead of synthesising a phantom new iteration.
+		iter := e.currentLoopIteration(currentNodeID, rs.loopCounters)
 		if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, currentNodeID, map[string]interface{}{
-			"kind": node.NodeKind().String(),
+			"kind":      node.NodeKind().String(),
+			"iteration": iter,
 		}); err != nil {
 			return err
 		}
@@ -712,7 +722,7 @@ func (e *Engine) execLoop(ctx context.Context, rs *runState, startNodeID string)
 				attribute.String("iterion.node_kind", node.NodeKind().String()),
 			),
 		)
-		spanCtx = e.ctxWithIteration(spanCtx, currentNodeID, rs.loopCounters)
+		spanCtx = model.WithLoopIteration(spanCtx, iter)
 		output, err := e.executor.Execute(spanCtx, node, nodeInput)
 		if err != nil {
 			span.RecordError(err)
@@ -815,7 +825,8 @@ func (e *Engine) execLoop(ctx context.Context, rs *runState, startNodeID string)
 // without invoking the executor backend.
 func (e *Engine) execCompute(rs *runState, nodeID string, cn *ir.ComputeNode) (string, error) {
 	if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, nodeID, map[string]interface{}{
-		"kind": "compute",
+		"kind":      "compute",
+		"iteration": e.currentLoopIteration(nodeID, rs.loopCounters),
 	}); err != nil {
 		return "", err
 	}
