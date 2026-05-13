@@ -204,8 +204,14 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
             default:
               break;
           }
-        } catch {
-          // ignore malformed messages
+        } catch (err) {
+          // A single malformed envelope shouldn't kill the stream, but
+          // silently swallowing it hid genuine bugs (reducer crashes on
+          // unexpected payload shape) until users reported "the run
+          // view is frozen". Log once per error so issues surface in
+          // devtools without spamming on a flapping payload.
+          // eslint-disable-next-line no-console
+          console.warn("[run ws] dropped message:", err);
         }
       };
 
