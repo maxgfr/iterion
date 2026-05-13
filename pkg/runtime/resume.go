@@ -820,11 +820,36 @@ func (e *Engine) doPause(rs *runState, nodeID string, questions map[string]inter
 // Returns 0 if the node is not in any loop.
 func (e *Engine) currentLoopIteration(nodeID string, loopCounters map[string]int) int {
 	maxIter := 0
+	// Loop body membership is the authoritative signal — a node is "inside"
+	// loop L iff it's reachable from L's entry within L.Body. Using the
+	// edge endpoints alone misses body nodes that aren't directly on the
+	// loop-bearing edge (observed live: package_loop with edge
+	// write_audit_md -> select_candidate left intel_fanout, upgrade,
+	// install, align_code, prepare_commit all reporting iter=0 across
+	// every package iteration). The snapshot reducer keys exec IDs on
+	// (branch, node, iter) and collapses the body-node executions of
+	// every package onto one exec, which leaves the canvas stuck on
+	// the first package's "finished" status for every body node.
+	for loopName, loop := range e.workflow.Loops {
+		if loop == nil {
+			continue
+		}
+		if !loop.Body[nodeID] {
+			continue
+		}
+		if count, ok := loopCounters[loopName]; ok && count > maxIter {
+			maxIter = count
+		}
+	}
+	// Belt-and-suspenders: a node sitting exactly on a loop-bearing edge
+	// (the loop's entry or back-edge endpoint) gets counted via the body
+	// path above when the compiler marks it as such, but fall back to the
+	// edge-endpoint scan for workflows whose Loop.Body is empty (older
+	// IRs / hand-written test fixtures).
 	for _, edge := range e.workflow.Edges {
 		if edge.LoopName == "" {
 			continue
 		}
-		// Check if this node is on a loop-bearing edge.
 		if edge.From == nodeID || edge.To == nodeID {
 			if count, ok := loopCounters[edge.LoopName]; ok && count > maxIter {
 				maxIter = count
