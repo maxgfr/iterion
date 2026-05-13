@@ -3177,7 +3177,8 @@ workflow secured_renovacy:
     workspaces: "{{outputs.detect_stack.workspaces}}",
     lock_files: "{{outputs.detect_stack.lock_files}}",
     notes: "{{outputs.detect_stack.notes}}",
-    _session_id: "{{outputs.detect_stack._session_id}}"
+    _session_id: "{{outputs.detect_stack._session_id}}",
+    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   ## ═══ Phase 1 : Patch fast-track + per-package loop ══════════════
@@ -3402,7 +3403,8 @@ workflow secured_renovacy:
     pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
     lock_files: "{{outputs.detect_stack.lock_files}}",
     notes: "{{outputs.detect_stack.notes}}",
-    _session_id: "{{outputs.detect_stack._session_id}}"
+    _session_id: "{{outputs.detect_stack._session_id}}",
+    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   intel_fanout -> changelog_review with {
@@ -3411,7 +3413,8 @@ workflow secured_renovacy:
     target_version: "{{outputs.select_candidate.target_version}}",
     risk: "{{outputs.select_candidate.risk}}",
     workspace_dir: "{{vars.workspace_dir}}",
-    _session_id: "{{outputs.detect_stack._session_id}}"
+    _session_id: "{{outputs.detect_stack._session_id}}",
+    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   ## Both converge on intel_join. Routing decision (safe vs unsafe)
@@ -3436,7 +3439,8 @@ workflow secured_renovacy:
     target_version: "{{outputs.select_candidate.target_version}}",
     workspaces: "{{outputs.detect_stack.workspaces}}",
     notes: "{{outputs.detect_stack.notes}}",
-    _session_id: "{{outputs.detect_stack._session_id}}"
+    _session_id: "{{outputs.detect_stack._session_id}}",
+    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   upgrade -> revert_changes when not success with {
@@ -3445,7 +3449,8 @@ workflow secured_renovacy:
     install_cmd_hint: "{{outputs.detect_stack.install_cmd}}",
     workspaces: "{{outputs.detect_stack.workspaces}}",
     notes: "{{outputs.detect_stack.notes}}",
-    _session_id: "{{outputs.detect_stack._session_id}}"
+    _session_id: "{{outputs.detect_stack._session_id}}",
+    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   upgrade -> install when success with {
@@ -3454,7 +3459,8 @@ workflow secured_renovacy:
     install_cmd_hint: "{{outputs.detect_stack.install_cmd}}",
     workspaces: "{{outputs.detect_stack.workspaces}}",
     notes: "{{outputs.detect_stack.notes}}",
-    _session_id: "{{outputs.detect_stack._session_id}}"
+    _session_id: "{{outputs.detect_stack._session_id}}",
+    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   install -> revert_changes when not success with {
@@ -3463,7 +3469,8 @@ workflow secured_renovacy:
     install_cmd_hint: "{{outputs.detect_stack.install_cmd}}",
     workspaces: "{{outputs.detect_stack.workspaces}}",
     notes: "{{outputs.detect_stack.notes}}",
-    _session_id: "{{outputs.detect_stack._session_id}}"
+    _session_id: "{{outputs.detect_stack._session_id}}",
+    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   install -> align_code when success with {
@@ -3474,7 +3481,8 @@ workflow secured_renovacy:
     breaking_changes: "{{outputs.intel_join.breaking_changes}}",
     alignment_steps: "{{outputs.intel_join.alignment_steps}}",
     workspace_dir: "{{vars.workspace_dir}}",
-    _session_id: "{{outputs.detect_stack._session_id}}"
+    _session_id: "{{outputs.detect_stack._session_id}}",
+    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   align_code -> validate_upgrade with {
@@ -3484,7 +3492,8 @@ workflow secured_renovacy:
     risk: "{{outputs.select_candidate.risk}}",
     align_summary: "{{outputs.align_code.summary}}",
     workspace_dir: "{{vars.workspace_dir}}",
-    _session_id: "{{outputs.detect_stack._session_id}}"
+    _session_id: "{{outputs.detect_stack._session_id}}",
+    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   validate_upgrade -> prepare_commit when stable with {
@@ -3492,7 +3501,8 @@ workflow secured_renovacy:
     current_version: "{{outputs.select_candidate.current_version}}",
     target_version: "{{outputs.select_candidate.target_version}}",
     workspace_dir: "{{vars.workspace_dir}}",
-    _session_id: "{{outputs.detect_stack._session_id}}"
+    _session_id: "{{outputs.detect_stack._session_id}}",
+    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   validate_upgrade -> fix_after_upgrade when not stable with {
@@ -3500,7 +3510,8 @@ workflow secured_renovacy:
     blockers: "{{outputs.validate_upgrade.blockers}}",
     fix_plan: "{{outputs.validate_upgrade.fix_plan}}",
     workspace_dir: "{{vars.workspace_dir}}",
-    _session_id: "{{outputs.detect_stack._session_id}}"
+    _session_id: "{{outputs.detect_stack._session_id}}",
+    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   ## fix_loop is per-package: the runtime resets the counter on the
@@ -3519,7 +3530,8 @@ workflow secured_renovacy:
     risk: "{{outputs.select_candidate.risk}}",
     align_summary: "{{outputs.fix_after_upgrade.summary}}",
     workspace_dir: "{{vars.workspace_dir}}",
-    _session_id: "{{outputs.fix_after_upgrade._session_id}}"
+    _session_id: "{{outputs.fix_after_upgrade._session_id}}",
+    _session_fingerprint: "{{outputs.fix_after_upgrade._session_fingerprint}}"
   }
 
   ## fix_loop exhausted → revert + skip
@@ -3529,7 +3541,8 @@ workflow secured_renovacy:
     install_cmd_hint: "{{outputs.detect_stack.install_cmd}}",
     workspaces: "{{outputs.detect_stack.workspaces}}",
     notes: "{{outputs.detect_stack.notes}}",
-    _session_id: "{{outputs.detect_stack._session_id}}"
+    _session_id: "{{outputs.detect_stack._session_id}}",
+    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   ## Successful upgrade path → prepare commit → join files → commit.
@@ -3607,7 +3620,8 @@ workflow secured_renovacy:
     prior_pushback_justification: "{{outputs.fix_gpt.pushback_justification}}",
     previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}",
     workspace_dir: "{{vars.workspace_dir}}",
-    _session_id: "{{outputs.detect_stack._session_id}}"
+    _session_id: "{{outputs.detect_stack._session_id}}",
+    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   alt_review -> reviewer_gpt with {
@@ -3642,12 +3656,14 @@ workflow secured_renovacy:
   streak_check -> fix_claude when "!approved && family == 'claude' && length(blockers) > 0" with {
     blockers: "{{outputs.streak_check.blockers}}",
     fix_plan: "{{outputs.streak_check.fix_plan}}",
-    _session_id: "{{outputs.detect_stack._session_id}}"
+    _session_id: "{{outputs.detect_stack._session_id}}",
+    _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
   streak_check -> fix_gpt when "!approved && family == 'gpt' && length(blockers) > 0" with {
     blockers: "{{outputs.streak_check.blockers}}",
     fix_plan: "{{outputs.streak_check.fix_plan}}",
-    _session_id: "{{outputs.reviewer_gpt._session_id}}"
+    _session_id: "{{outputs.reviewer_gpt._session_id}}",
+    _session_fingerprint: "{{outputs.reviewer_gpt._session_fingerprint}}"
   }
 
   ## After each fix round, commit (deterministic) then resume
