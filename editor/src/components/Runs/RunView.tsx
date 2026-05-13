@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useParams } from "wouter";
 import { Group, Panel, Separator } from "react-resizable-panels";
@@ -349,6 +349,25 @@ export default function RunView() {
     }
   }, [snapshot?.run?.status]);
 
+  // Per-run component-local state outlives the store's reset() (which
+  // only nukes the zustand store), so navigating run A → run B would
+  // otherwise drag scrub position, selected node, pinned iterations,
+  // the diff dialog, the bottom-tab pin, and the sticky last-running
+  // node id into the new run — producing empty/truncated timelines,
+  // "ghost" node selections (when B's IR doesn't contain A's nodes),
+  // and an unexpectedly pinned bottom tab. Layout/dock preferences
+  // persisted to localStorage are intentionally left alone.
+  useEffect(() => {
+    setScrubSeq(null);
+    setManualSelectedNodeId(null);
+    setFollowLiveNode(true);
+    setIterationByNode(new Map());
+    setLastRunningNodeId(null);
+    setDiffFile(null);
+    setDiffMode("");
+    setBottomTabPinned(false);
+  }, [runId]);
+
   // Live-follow node id with sticky fallback. When `runningExec` is
   // non-null we always use its node id (truth). When it's null but the
   // run is still active, we fall back to `lastRunningNodeId` — typically
@@ -382,15 +401,22 @@ export default function RunView() {
 
   // When scrubbing, derive a virtual snapshot at the chosen seq.
   // Otherwise use the live executions map.
+  //
+  // The range input on the Scrubber can fire onChange faster than 60 Hz
+  // on drag, and `buildExecutionsAt` folds the full events array (up to
+  // MAX_EVENTS = 5000) on each call. useDeferredValue lets React keep
+  // the slider responsive while the heavier downstream computations
+  // (executions snapshot, filtered events) catch up one frame behind.
+  const deferredScrubSeq = useDeferredValue(scrubSeq);
   const displayedExecutions = useMemo(() => {
-    if (scrubSeq === null) return liveExecutions;
-    return buildExecutionsAt(events, scrubSeq);
-  }, [scrubSeq, events, liveExecutions]);
+    if (deferredScrubSeq === null) return liveExecutions;
+    return buildExecutionsAt(events, deferredScrubSeq);
+  }, [deferredScrubSeq, events, liveExecutions]);
 
   const displayedEvents = useMemo(() => {
-    if (scrubSeq === null) return events;
-    return events.filter((e) => e.seq <= scrubSeq);
-  }, [scrubSeq, events]);
+    if (deferredScrubSeq === null) return events;
+    return events.filter((e) => e.seq <= deferredScrubSeq);
+  }, [deferredScrubSeq, events]);
 
   // Fold llm_request and node_finished events into a per-node "what
   // actually ran" map. Latest event wins because seq is monotonic.

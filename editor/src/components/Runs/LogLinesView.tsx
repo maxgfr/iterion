@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { Components } from "react-virtuoso";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { ChevronDownIcon, MixerHorizontalIcon } from "@radix-ui/react-icons";
@@ -221,8 +221,13 @@ export default function LogLinesView({
     [active, inFlightTool],
   );
 
+  // useDeferredValue keeps keystrokes responsive on runs with very long
+  // logs (50k+ lines): the input updates immediately while the filtered
+  // list lags one frame behind, so typing doesn't stutter while React
+  // re-runs the O(n) text scan.
+  const deferredSearch = useDeferredValue(search);
   const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
+    const query = deferredSearch.trim().toLowerCase();
     if (activeLevels.size === 0 && !query) return nodeFiltered;
     return nodeFiltered.filter((line) => {
       if (activeLevels.size > 0) {
@@ -232,13 +237,13 @@ export default function LogLinesView({
       if (query && !line.text.toLowerCase().includes(query)) return false;
       return true;
     });
-  }, [nodeFiltered, search, activeLevels]);
+  }, [nodeFiltered, deferredSearch, activeLevels]);
 
   // Group continuation lines under their header into foldable blocks.
   // When the user is searching, fall back to flat rows so every match is
   // visible — collapsed blocks would hide hits inside the body.
   const items = useMemo<LogItem[]>(() => {
-    if (search.trim()) {
+    if (deferredSearch.trim()) {
       return filtered.map((line) => ({
         kind: "line" as const,
         line,
@@ -246,7 +251,7 @@ export default function LogLinesView({
       }));
     }
     return groupLog(filtered);
-  }, [filtered, search]);
+  }, [filtered, deferredSearch]);
 
   useEffect(() => {
     if (followTail && items.length > 0) {
