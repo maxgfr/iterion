@@ -35,8 +35,13 @@ import (
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
+// StaticFS embeds the built editor SPA so any importer (the server
+// itself, and the desktop GUI's asset proxy) can serve it. Exported
+// because cmd/iterion-desktop relies on it to ship the SPA inside the
+// GUI binary — that way UI updates don't require a daemon restart.
+//
 //go:embed all:static
-var staticFS embed.FS
+var StaticFS embed.FS
 
 // Config holds the server configuration.
 type Config struct {
@@ -485,7 +490,7 @@ func (s *Server) routes() {
 	}
 
 	// Serve static frontend files.
-	staticSub, err := fs.Sub(staticFS, "static")
+	staticSub, err := fs.Sub(StaticFS, "static")
 	if err != nil {
 		log.Fatalf("failed to create sub filesystem: %v", err)
 	}

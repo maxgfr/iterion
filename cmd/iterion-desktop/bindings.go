@@ -104,6 +104,18 @@ func (a *App) Quit() {
 	wruntime.Quit(a.ctx)
 }
 
+// SetWindowTitle updates the native window title. The SPA calls this
+// from useDocumentTitle so the title bar stays in sync with the open
+// file / run / project. On Linux WebKit2GTK `document.title` does NOT
+// automatically propagate to the window manager — only the explicit
+// runtime call does. macOS / Windows behave the same way under Wails.
+func (a *App) SetWindowTitle(title string) {
+	if title == "" {
+		title = "Iterion"
+	}
+	wruntime.WindowSetTitle(a.ctx, title)
+}
+
 // OpenExternal opens the given URL in the user's default browser.
 func (a *App) OpenExternal(url string) error {
 	wruntime.BrowserOpenURL(a.ctx, url)

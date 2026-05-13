@@ -1,9 +1,9 @@
+import { FolderOpen } from "lucide-react";
+
 import { useProjectInfo } from "@/hooks/useProjectInfo";
 
 interface Props {
-  // Visual variant: "toolbar" (next to BackendStatusPill) uses the
-  // pill style; "header" (RunHeader) is slightly larger to match the
-  // header typography.
+  // Visual variant tunes typography for the host surface.
   variant?: "toolbar" | "header";
 }
 
@@ -23,21 +23,23 @@ export default function ProjectLabel({ variant = "toolbar" }: Props) {
 
   const clickable = source === "desktop";
   const tooltip = dir
-    ? `${name}\n${dir}${clickable ? "\n\nClick to switch project" : ""}`
+    ? `Project: ${name}\n${dir}${clickable ? "\n\nClick to switch project" : ""}`
     : name;
 
-  const baseClasses =
-    variant === "toolbar"
-      ? "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border border-border-subtle text-fg-muted bg-surface-2/60 max-w-[180px]"
-      : "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border border-border-subtle text-fg-muted bg-surface-2/60 max-w-[220px]";
+  const size = variant === "header" ? "text-xs" : "text-xs";
+  const iconSize = 13;
 
+  const base =
+    "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium " +
+    size +
+    " border border-accent/40 bg-accent-soft text-accent leading-none max-w-[220px]";
   const interactive = clickable
-    ? " hover:bg-surface-3 hover:text-fg-default cursor-pointer"
+    ? " hover:border-accent hover:bg-accent/20 cursor-pointer transition-colors"
     : " cursor-default";
 
   const content = (
     <>
-      <span aria-hidden className="text-fg-subtle">▸</span>
+      <FolderOpen size={iconSize} className="shrink-0" />
       <span className="truncate">{name}</span>
     </>
   );
@@ -46,7 +48,7 @@ export default function ProjectLabel({ variant = "toolbar" }: Props) {
     return (
       <button
         type="button"
-        className={baseClasses + interactive}
+        className={base + interactive}
         title={tooltip}
         onClick={() =>
           window.dispatchEvent(new CustomEvent("iterion:open-project-switcher"))
@@ -57,7 +59,7 @@ export default function ProjectLabel({ variant = "toolbar" }: Props) {
     );
   }
   return (
-    <span className={baseClasses + interactive} title={tooltip}>
+    <span className={base + interactive} title={tooltip}>
       {content}
     </span>
   );

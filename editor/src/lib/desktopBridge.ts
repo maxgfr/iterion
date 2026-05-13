@@ -57,6 +57,7 @@ interface WailsBindings {
   SaveTextFile: (suggestedFilename: string, content: string) => Promise<string>;
   GetAppInfo: () => Promise<AppInfo>;
   Quit: () => Promise<void>;
+  SetWindowTitle: (title: string) => Promise<void>;
   OpenExternal: (url: string) => Promise<void>;
   RevealInFinder: (path: string) => Promise<void>;
   ListProjects: () => Promise<Project[]>;
@@ -146,6 +147,7 @@ export const desktop = {
     call("SaveTextFile", suggestedFilename, content),
   getAppInfo: () => call("GetAppInfo"),
   quit: () => call("Quit"),
+  setWindowTitle: (title: string) => call("SetWindowTitle", title),
   openExternal: (url: string) => call("OpenExternal", url),
   revealInFinder: (path: string) => call("RevealInFinder", path),
 

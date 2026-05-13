@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useLocation } from "wouter";
 
 import { useProjectInfo } from "@/hooks/useProjectInfo";
+import { desktop, isDesktop } from "@/lib/desktopBridge";
 import { useDocumentStore } from "@/store/document";
 import { useRunStore } from "@/store/run";
 
@@ -59,5 +60,13 @@ export function useDocumentTitle() {
       title = `${parts[0]} · ${parts[1]}`;
     }
     document.title = title;
+    // On Linux WebKit2GTK the window manager doesn't pick up
+    // `document.title` automatically — Wails exposes WindowSetTitle for
+    // that. Best-effort; silently ignored in browser mode.
+    if (isDesktop()) {
+      desktop.setWindowTitle(title).catch(() => {
+        /* binding may not be ready yet — re-runs on next deps change */
+      });
+    }
   }, [location, projectName, currentFilePath, runHeader]);
 }

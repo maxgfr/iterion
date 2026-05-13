@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { listRuns, type RunStatus, type RunSummary } from "@/api/runs";
 import { formatRelative } from "@/lib/format";
+import ProjectLabel from "@/components/shared/ProjectLabel";
 import QueueDepthBar from "./QueueDepthBar";
 
 const POLL_INTERVAL_FAST_MS = 3000;
@@ -95,6 +96,7 @@ export default function RunListView() {
     <div className="h-full flex flex-col overflow-hidden bg-surface-1 text-fg-default">
       <header className="border-b border-border-default px-4 py-3 flex items-center gap-3">
         <h1 className="text-sm font-bold">Runs</h1>
+        <ProjectLabel variant="header" />
         <span className="text-xs text-fg-subtle">{runs.length} total</span>
         <button
           className="ml-auto text-xs px-2 py-1 rounded bg-surface-2 hover:bg-surface-3 text-fg-default"

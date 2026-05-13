@@ -5,25 +5,32 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
+
+	iserver "github.com/SocialGouv/iterion/pkg/server"
 )
 
 // assetProxyHandler is the http.Handler the desktop binary plugs into Wails'
 // AssetServer. Wails treats it as the origin of all assets served at the
 // AssetServer URL (wails:// on Mac/Linux, http://wails.localhost on Windows).
-// We forward GET/POST/etc. requests to the embedded pkg/server (HTTP API +
-// SPA static assets) and let Wails do its standard runtime injection on the
-// HTML response, which makes window.go.main.App.* and window.runtime.*
-// available to the editor SPA — exactly the cross-origin gap that motivated
-// this proxy in the first place.
+//
+// SPA assets (HTML, JS, CSS, images) are served from the GUI binary's own
+// embed (pkg/server.StaticFS) so UI updates ship with the desktop binary
+// and don't require a daemon restart. Only /api/* requests are forwarded
+// to the daemon's embedded HTTP server — that's the inter-process contract.
+// Wails' runtime injection still wraps HTML responses regardless of source,
+// so window.go.main.App.* and window.runtime.* remain available.
 //
 // WebSocket traffic NEVER reaches this handler: Wails' AssetServer
 // short-circuits WS upgrades with 501 (intentional, AssetServer is HTTP-only).
-// The editor SPA dials WS endpoints directly at the local server's
+// The editor SPA dials WS endpoints directly at the daemon's
 // http://127.0.0.1:<port>/api/ws[/runs/...] address.
 //
 // In local desktop mode the embedded server runs with DisableAuth=true so
@@ -31,6 +38,8 @@ import (
 // Origin allowlisting.
 type assetProxyHandler struct {
 	app *App
+
+	spa http.Handler // serves the SPA from the GUI's embedded StaticFS
 
 	mu     sync.Mutex
 	cached *cachedProxy
@@ -42,7 +51,15 @@ type cachedProxy struct {
 }
 
 func newAssetProxyHandler(app *App) *assetProxyHandler {
-	return &assetProxyHandler{app: app}
+	subFS, err := fs.Sub(iserver.StaticFS, "static")
+	if err != nil {
+		// pkg/server panics in this case too — keep parity.
+		log.Fatalf("desktop asset_proxy: sub-FS init failed: %v", err)
+	}
+	return &assetProxyHandler{
+		app: app,
+		spa: http.FileServer(http.FS(subFS)),
+	}
 }
 
 // proxyFor returns a *httputil.ReverseProxy targeting serverURL, reusing the
@@ -80,13 +97,20 @@ func (h *assetProxyHandler) proxyFor(serverURL string) (*httputil.ReverseProxy, 
 }
 
 func (h *assetProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// SPA assets (everything not under /api/) are served from the GUI's
+	// own embed. The SPA loads instantly even before the daemon is up;
+	// the first /api/* fetch then waits on serverURL below.
+	if !strings.HasPrefix(r.URL.Path, "/api/") {
+		h.spa.ServeHTTP(w, r)
+		return
+	}
+
 	serverURL := h.waitForServerURL(r.Context(), 30*time.Second)
 	if serverURL == "" {
 		// Still no URL after the wait window — either the embedded
-		// server failed to bind or daemon spawn timed out. The Wails
-		// runtime-injection wrapper records 5xx but doesn't substitute
-		// its default index; surface a friendly stuck-state message so
-		// the user sees something other than a blank page.
+		// server failed to bind or daemon spawn timed out. The SPA is
+		// already loaded at this point so the JS can surface a useful
+		// error from the rejected fetch rather than a blank page.
 		http.Error(w, "Iterion editor server failed to start within 30s — check daemon logs at ~/.iterion/daemons/", http.StatusServiceUnavailable)
 		return
 	}
