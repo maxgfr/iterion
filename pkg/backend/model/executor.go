@@ -747,6 +747,40 @@ func extractBackendFields(node ir.Node) backendFields {
 	}
 }
 
+// stampDelegateOutputMeta writes per-call observability keys onto the
+// output map: _tokens, _backend, _session_id, plus the effective
+// model / context window / peak load / output cap (claude_code; left
+// unset by backends that don't report them). The four "_model" /
+// "_context_*" / "_max_output_tokens" keys drive the run-view's
+// per-node model label and context-usage gauge.
+//
+// `output` is passed explicitly so the LLM router path can re-stamp
+// after a `{"text": …}` fallback has reassigned to a fresh map.
+func stampDelegateOutputMeta(output map[string]interface{}, result delegate.Result, backendName string) {
+	if output == nil {
+		return
+	}
+	if output["_tokens"] == nil {
+		output["_tokens"] = result.Tokens
+	}
+	output["_backend"] = backendName
+	if result.SessionID != "" {
+		output["_session_id"] = result.SessionID
+	}
+	if result.EffectiveModel != "" {
+		output["_model"] = result.EffectiveModel
+	}
+	if result.ContextWindow > 0 {
+		output["_context_window"] = result.ContextWindow
+	}
+	if result.PeakInputTokens > 0 {
+		output["_context_used"] = result.PeakInputTokens
+	}
+	if result.MaxOutputTokens > 0 {
+		output["_max_output_tokens"] = result.MaxOutputTokens
+	}
+}
+
 // executeBackend is the unified execution path for agent and judge nodes.
 // It resolves the backend, builds a Task, and dispatches to the backend.
 func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input map[string]interface{}) (map[string]interface{}, error) {
@@ -933,15 +967,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 	}
 
 	// Attach metadata.
-	if result.Output["_tokens"] == nil {
-		result.Output["_tokens"] = result.Tokens
-	}
-	result.Output["_backend"] = backendName
-
-	// Expose session ID for downstream nodes.
-	if result.SessionID != "" {
-		result.Output["_session_id"] = result.SessionID
-	}
+	stampDelegateOutputMeta(result.Output, result, backendName)
 
 	// Validate output against schema if present.
 	if f.outputSchema != "" {
@@ -956,13 +982,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 					if retryErr == nil && !retryResult.ParseFallback {
 						result = retryResult
 						// Re-attach metadata and re-validate.
-						if result.Output["_tokens"] == nil {
-							result.Output["_tokens"] = result.Tokens
-						}
-						result.Output["_backend"] = backendName
-						if result.SessionID != "" {
-							result.Output["_session_id"] = result.SessionID
-						}
+						stampDelegateOutputMeta(result.Output, result, backendName)
 						if retryValErr := ValidateOutput(result.Output, schema); retryValErr != nil {
 							return nil, fmt.Errorf("model: node %q: structured output invalid after retry: %w", f.id, retryValErr)
 						}
@@ -1800,7 +1820,7 @@ func resolveCommandTemplate(command string, refs []*ir.Ref, input map[string]int
 // SCRIPT contexts (JS / Python / Ruby / any JSON-superset language) want
 // JSON-encoded values, not shell-escaped ones — shell-escape wraps
 // strings in single quotes (and renders embedded apostrophes as the
-// shell-only `'\''` escape sequence) which then breaks the script
+// shell-only `'\”` escape sequence) which then breaks the script
 // language's string-literal parser. JSON encoding produces valid
 // literals in all major scripting languages: `"foo"` is a JS / Python /
 // Ruby string, `{"k":"v"}` is an object/dict literal, `[1,2,3]` is an
@@ -2292,10 +2312,7 @@ func (e *ClawExecutor) executeLLMRouterUnified(ctx context.Context, node *ir.Rou
 	}
 
 	// Attach metadata.
-	if output["_tokens"] == nil {
-		output["_tokens"] = result.Tokens
-	}
-	output["_backend"] = backendName
+	stampDelegateOutputMeta(output, result, backendName)
 
 	return output, nil
 }

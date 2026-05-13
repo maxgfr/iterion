@@ -267,7 +267,7 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 	}
 
 	startTime := time.Now()
-	rm, streamErr := b.runSession(streamCtx, prompt, task, opts)
+	rm, sessMeta, streamErr := b.runSession(streamCtx, prompt, task, opts)
 	duration := time.Since(startTime)
 
 	// Native ask_user capture takes precedence over any error: if the hook
@@ -279,7 +279,7 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 		if rm != nil {
 			sessID = rm.SessionID
 		}
-		return Result{
+		askResult := Result{
 			Output: map[string]interface{}{
 				"_needs_interaction": true,
 				"_interaction_questions": map[string]interface{}{
@@ -291,16 +291,20 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 			Stderr:      stderrBuf.String(),
 			BackendName: BackendClaudeCode,
 			SessionID:   sessID,
-		}, nil
+		}
+		applyClaudeCodeSessionMeta(&askResult, rm, sessMeta)
+		return askResult, nil
 	}
 
 	if streamErr != nil {
-		return Result{
+		errResult := Result{
 			Duration:    duration,
 			ExitCode:    -1,
 			Stderr:      stderrBuf.String(),
 			BackendName: BackendClaudeCode,
-		}, fmt.Errorf("delegate: claude-code failed: %w", streamErr)
+		}
+		applyClaudeCodeSessionMeta(&errResult, rm, sessMeta)
+		return errResult, fmt.Errorf("delegate: claude-code failed: %w", streamErr)
 	}
 
 	result := Result{
@@ -310,6 +314,7 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 		BackendName: BackendClaudeCode,
 		SessionID:   rm.SessionID,
 	}
+	applyClaudeCodeSessionMeta(&result, rm, sessMeta)
 
 	var totalIn, totalOut int
 	if rm.Usage != nil {
@@ -544,6 +549,50 @@ func resolveStreamHotTimeout() time.Duration {
 	return defaultStreamHotTimeout
 }
 
+// sessionMeta captures cross-cutting metadata extracted from the Claude
+// Code message stream that the runtime needs to surface upstream: the
+// resolved effective model (after env/settings overrides) and the peak
+// "context loaded" — input + cache_creation + cache_read — observed on
+// any single assistant turn. Combined with ResultMessage.ModelUsage it
+// drives the run-view's per-node model name and context-usage gauge.
+type sessionMeta struct {
+	effectiveModel  string
+	peakContextLoad int
+}
+
+// applyClaudeCodeSessionMeta merges the streamed session metadata and
+// the final ResultMessage's per-model usage into Result so the runtime
+// can stamp them on the node's output for the editor's run view. The
+// effective model comes from system/init; the context window + output
+// cap come from result.ModelUsage[effective]. When the effective model
+// is unknown but ModelUsage has exactly one entry, we use that — some
+// proxies key ModelUsage by a name that differs from system/init.
+func applyClaudeCodeSessionMeta(out *Result, rm *claudesdk.ResultMessage, sm sessionMeta) {
+	if out == nil {
+		return
+	}
+	out.EffectiveModel = sm.effectiveModel
+	out.PeakInputTokens = sm.peakContextLoad
+	if rm == nil {
+		return
+	}
+	if mu, ok := rm.ModelUsage[sm.effectiveModel]; ok {
+		out.ContextWindow = mu.ContextWindow
+		out.MaxOutputTokens = mu.MaxOutputTokens
+		return
+	}
+	if len(rm.ModelUsage) == 1 {
+		for name, mu := range rm.ModelUsage {
+			out.ContextWindow = mu.ContextWindow
+			out.MaxOutputTokens = mu.MaxOutputTokens
+			if out.EffectiveModel == "" {
+				out.EffectiveModel = name
+			}
+			return
+		}
+	}
+}
+
 // runSession opens an interactive Session with the Claude CLI, sends the
 // prompt, and consumes the message stream until a ResultMessage arrives. It
 // streams agent activity (tool_use, tool_result, text) directly from the typed
@@ -557,7 +606,7 @@ func resolveStreamHotTimeout() time.Duration {
 // stuck in ep_poll without any propagated error). The aborted session
 // returns an error the runtime classifies as resumable, so the recovery
 // dispatcher retries automatically.
-func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task Task, opts []claudesdk.Option) (*claudesdk.ResultMessage, error) {
+func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task Task, opts []claudesdk.Option) (*claudesdk.ResultMessage, sessionMeta, error) {
 	sess := claudesdk.NewSession(opts...)
 	defer func() { _ = sess.Close() }()
 
@@ -575,7 +624,7 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 	}
 
 	if err := sess.Send(ctx, prompt); err != nil {
-		return nil, err
+		return nil, sessionMeta{}, err
 	}
 
 	coldTimeout := resolveStreamColdTimeout()
@@ -625,6 +674,7 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 	// (the in-container session is unreachable from the host
 	// claude that runs the formatting prompt).
 	var lastAssistantText string
+	var meta sessionMeta
 	currentTimeout := coldTimeout
 	idle := time.NewTimer(currentTimeout)
 	defer idle.Stop()
@@ -654,7 +704,7 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 			if !ok {
 				// Stream closed without surfacing an error.
 				if result == nil {
-					return nil, silentExitErr()
+					return nil, meta, silentExitErr()
 				}
 				// Backfill an empty Result with the captured last
 				// assistant text. This is the load-bearing recovery
@@ -673,10 +723,10 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 				} else {
 					b.Logger.Info("[%s/claude-code] 🏁 stream close: Result nil and no assistant text captured", task.NodeID)
 				}
-				return result, nil
+				return result, meta, nil
 			}
 			if it.err != nil {
-				return result, it.err
+				return result, meta, it.err
 			}
 			// Any incoming item proves the SDK is alive — flip into
 			// hot-timeout mode for the rest of the session.
@@ -691,6 +741,14 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 				if m.Subtype == "init" {
 					b.Logger.Info("[%s/claude-code] ⚙️  system/init session=%s model=%s tools=%d mcp=%d",
 						task.NodeID, m.SessionID, m.Model, m.ToolCount(), m.MCPServerCount())
+					// Capture the effective model the CLI resolved to —
+					// after env vars (ANTHROPIC_MODEL, ANTHROPIC_BASE_URL)
+					// and settings.json have taken effect. Differs from
+					// the workflow-declared `model:` when a proxy (GLM,
+					// Kimi, …) or an Anthropic alias is in play.
+					if m.Model != "" {
+						meta.effectiveModel = m.Model
+					}
 				} else {
 					b.Logger.Debug("[%s/claude-code] ⚙️  system/%s session=%s",
 						task.NodeID, m.Subtype, m.SessionID)
@@ -698,6 +756,13 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 			case *claudesdk.AssistantMessage:
 				if m.Message != nil {
 					logAssistantContent(b.Logger, task.NodeID, m.Message.Content)
+					// Peak prompt size across turns ≈ how full the
+					// context window got at its busiest moment.
+					u := m.Message.Usage
+					load := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+					if load > meta.peakContextLoad {
+						meta.peakContextLoad = load
+					}
 					// Capture the latest non-empty text block — the
 					// final assistant message is what the LLM intended
 					// as its "answer" and is where it puts the JSON
@@ -721,7 +786,7 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 							if isRateLimitMessage(tb.Text) {
 								b.Logger.Warn("[%s/claude-code] 🚦 rate-limit signal in assistant text — aborting: %s", task.NodeID, truncate(tb.Text, 200))
 								cancelStream()
-								return result, &ErrRateLimited{Provider: BackendClaudeCode, Detail: strings.TrimSpace(tb.Text)}
+								return result, meta, &ErrRateLimited{Provider: BackendClaudeCode, Detail: strings.TrimSpace(tb.Text)}
 							}
 						}
 					}
@@ -752,10 +817,10 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 			}
 			b.Logger.Warn("[%s/claude-code] no SDK message for %s (%s phase) — aborting",
 				task.NodeID, currentTimeout, phase)
-			return result, fmt.Errorf("claude session idle for %s (%s phase) — aborting (set %s to extend, or 0 to disable)", currentTimeout, phase, envHint)
+			return result, meta, fmt.Errorf("claude session idle for %s (%s phase) — aborting (set %s to extend, or 0 to disable)", currentTimeout, phase, envHint)
 		case <-ctx.Done():
 			cancelStream()
-			return result, ctx.Err()
+			return result, meta, ctx.Err()
 		}
 	}
 }
