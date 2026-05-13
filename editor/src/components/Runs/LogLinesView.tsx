@@ -6,10 +6,11 @@ import { ChevronDownIcon, MixerHorizontalIcon } from "@radix-ui/react-icons";
 import { IconButton, Input, Popover } from "@/components/ui";
 import { desktop, isDesktop } from "@/lib/desktopBridge";
 import { formatBytes } from "@/lib/format";
-import { useRunStore } from "@/store/run";
+import { selectInFlightTool, useRunStore } from "@/store/run";
 import { useUIStore } from "@/store/ui";
 
 import { ThinkingFooter } from "./ThinkingFooter";
+import { ToolRunningFooter } from "./ToolRunningFooter";
 
 interface Props {
   runId: string;
@@ -103,6 +104,13 @@ export default function LogLinesView({
     }
     return false;
   });
+  // When a tool is in flight we swap the random-words footer for a
+  // structured "Running <tool> · <elapsed>" spinner. The random-words
+  // affordance stays for genuine LLM waits, where we can't say what's
+  // happening anyway.
+  const inFlightTool = useRunStore((s) =>
+    selectInFlightTool(s, filterNodeId, filterIteration),
+  );
   const [search, setSearch] = useState("");
   const [activeLevels, setActiveLevels] = useState<Set<string>>(() => new Set());
   const [followTail, setFollowTail] = useState(true);
@@ -166,9 +174,17 @@ export default function LogLinesView({
 
   const virtuosoComponents = useMemo<Components<AnnotatedLine>>(
     () => ({
-      Footer: () => <ThinkingFooter active={active} />,
+      Footer: () =>
+        inFlightTool ? (
+          <ToolRunningFooter
+            toolName={inFlightTool.toolName}
+            startedAt={inFlightTool.startedAt}
+          />
+        ) : (
+          <ThinkingFooter active={active} />
+        ),
     }),
-    [active],
+    [active, inFlightTool],
   );
 
   const filtered = useMemo(() => {

@@ -204,6 +204,22 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				nodeID, info.BeforeMessages, info.AfterMessages, info.RemovedMessageCount)
 		},
 
+		OnToolStarted: func(nodeID string, info LLMToolStartedInfo) {
+			data := map[string]interface{}{
+				"tool":       info.ToolName,
+				"input_size": info.InputSize,
+			}
+			if info.ToolUseID != "" {
+				data["tool_use_id"] = info.ToolUseID
+			}
+			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
+				Type:   store.EventToolStarted,
+				RunID:  runID,
+				NodeID: nodeID,
+				Data:   data,
+			})
+		},
+
 		OnToolCall: func(nodeID string, info LLMToolCallInfo) {
 			data := map[string]interface{}{
 				"tool":        info.ToolName,

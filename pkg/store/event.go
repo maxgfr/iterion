@@ -28,6 +28,7 @@ const (
 	EventNodeRecovery         EventType = "node_recovery"
 	EventLLMStepFinished      EventType = "llm_step_finished"
 	EventLLMCompacted         EventType = "llm_compacted"
+	EventToolStarted          EventType = "tool_started"
 	EventToolCalled           EventType = "tool_called"
 	EventToolError            EventType = "tool_error"
 	EventArtifactWritten      EventType = "artifact_written"

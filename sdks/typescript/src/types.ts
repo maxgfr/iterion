@@ -99,6 +99,7 @@ export type EventType =
   | "llm_retry"
   | "node_recovery"
   | "llm_step_finished"
+  | "tool_started"
   | "tool_called"
   | "tool_error"
   | "artifact_written"
