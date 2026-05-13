@@ -70,6 +70,40 @@ interface AnnotatedLine {
   isContinuation: boolean;
 }
 
+// A LogItem is one Virtuoso row. Continuation lines are folded under
+// their parent header into a single "block" item that the user can
+// expand/collapse; lines without continuation render as plain rows.
+type LogItem =
+  | { kind: "line"; line: AnnotatedLine; key: number }
+  | { kind: "block"; header: AnnotatedLine; body: AnnotatedLine[]; key: number };
+
+function groupLog(lines: AnnotatedLine[]): LogItem[] {
+  const out: LogItem[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.isContinuation) {
+      // Orphan continuation (parent header filtered out by something
+      // upstream of grouping) — render as a standalone line so it stays
+      // visible.
+      out.push({ kind: "line", line, key: line.idx });
+      continue;
+    }
+    const body: AnnotatedLine[] = [];
+    let j = i + 1;
+    while (j < lines.length && lines[j]!.isContinuation) {
+      body.push(lines[j]!);
+      j++;
+    }
+    if (body.length === 0) {
+      out.push({ kind: "line", line, key: line.idx });
+    } else {
+      out.push({ kind: "block", header: line, body, key: line.idx });
+      i = j - 1;
+    }
+  }
+  return out;
+}
+
 export default function LogLinesView({
   runId,
   subscribeLogs,
@@ -172,7 +206,7 @@ export default function LogLinesView({
     return out;
   }, [annotated, filterNodeId, filterIteration]);
 
-  const virtuosoComponents = useMemo<Components<AnnotatedLine>>(
+  const virtuosoComponents = useMemo<Components<LogItem>>(
     () => ({
       Footer: () =>
         inFlightTool ? (
@@ -200,22 +234,36 @@ export default function LogLinesView({
     });
   }, [nodeFiltered, search, activeLevels]);
 
+  // Group continuation lines under their header into foldable blocks.
+  // When the user is searching, fall back to flat rows so every match is
+  // visible — collapsed blocks would hide hits inside the body.
+  const items = useMemo<LogItem[]>(() => {
+    if (search.trim()) {
+      return filtered.map((line) => ({
+        kind: "line" as const,
+        line,
+        key: line.idx,
+      }));
+    }
+    return groupLog(filtered);
+  }, [filtered, search]);
+
   useEffect(() => {
-    if (followTail && filtered.length > 0) {
+    if (followTail && items.length > 0) {
       virtuosoRef.current?.scrollToIndex({
-        index: filtered.length - 1,
+        index: items.length - 1,
         align: "end",
         behavior: "auto",
       });
     }
-  }, [followTail, filtered.length]);
+  }, [followTail, items.length]);
 
   const handleToggleFollow = (next: boolean) => {
     disabledByScrollRef.current = false;
     setFollowTail(next);
-    if (next && filtered.length > 0) {
+    if (next && items.length > 0) {
       virtuosoRef.current?.scrollToIndex({
-        index: filtered.length - 1,
+        index: items.length - 1,
         align: "end",
         behavior: "auto",
       });
@@ -424,10 +472,10 @@ export default function LogLinesView({
           <Virtuoso
             ref={virtuosoRef}
             className="h-full"
-            data={filtered}
+            data={items}
             initialTopMostItemIndex={
               followTail
-                ? { index: filtered.length - 1, align: "end" }
+                ? { index: items.length - 1, align: "end" }
                 : 0
             }
             followOutput={followTail ? "auto" : false}
@@ -448,8 +496,14 @@ export default function LogLinesView({
                 setFollowTail(true);
               }
             }}
-            itemContent={(_, line) => <LogLineRow line={line} />}
-            computeItemKey={(_, line) => line.idx}
+            itemContent={(_, item) =>
+              item.kind === "line" ? (
+                <LogLineRow line={item.line} />
+              ) : (
+                <LogBlockRow header={item.header} body={item.body} />
+              )
+            }
+            computeItemKey={(_, item) => item.key}
             components={virtuosoComponents}
           />
         )}
@@ -467,6 +521,45 @@ function LogLineRow({ line }: { line: AnnotatedLine }) {
       className={`font-mono text-[10px] whitespace-pre overflow-x-auto py-0.5 ${cls}`}
     >
       {line.text || " "}
+    </div>
+  );
+}
+
+function LogBlockRow({
+  header,
+  body,
+}: {
+  header: AnnotatedLine;
+  body: AnnotatedLine[];
+}) {
+  const [open, setOpen] = useState(false);
+  const cls = header.level
+    ? LEVEL_GLYPHS.find((g) => g.key === header.level)?.cls ?? "text-fg-default"
+    : "text-fg-default";
+  return (
+    <div className={`font-mono text-[10px] py-0.5 ${cls}`}>
+      <div className="flex items-baseline gap-2">
+        <div className="whitespace-pre overflow-x-auto flex-1 min-w-0">
+          {header.text || " "}
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="shrink-0 text-fg-subtle hover:text-fg-default px-1 rounded hover:bg-surface-2"
+          title={open ? "Replier le corps" : "Déplier le corps"}
+        >
+          {open ? "▾" : `▸ +${body.length}`}
+        </button>
+      </div>
+      {open &&
+        body.map((line) => (
+          <div
+            key={line.idx}
+            className="whitespace-pre overflow-x-auto"
+          >
+            {line.text || " "}
+          </div>
+        ))}
     </div>
   );
 }
