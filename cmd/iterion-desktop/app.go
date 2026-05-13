@@ -158,10 +158,10 @@ func (a *App) onBeforeClose(ctx context.Context) bool {
 		return false
 	}
 
-	// Build a human-readable project list — "modjo, alerte-secours"
-	// style. The discovery file doesn't carry a friendly name; use
-	// the project dir's basename, which is what the SPA's project
-	// picker already shows.
+	// Build a human-readable project list ("proj-a, proj-b" style).
+	// The discovery file doesn't carry a friendly name; use the
+	// project dir's basename, which is what the SPA's project picker
+	// already shows.
 	names := make([]string, 0, len(daemons))
 	for _, d := range daemons {
 		base := filepath.Base(d.ProjectDir)
