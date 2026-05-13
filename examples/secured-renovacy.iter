@@ -2690,12 +2690,15 @@ if [ -n "$INSTALL_CMD" ]; then
   fi
 fi
 # Pick the fastest available smoke from common script names. Order:
-# typecheck/tsc → lint → build → test. We stop at the first one that
-# runs (even on failure — that failure is the verdict). Fall through
-# to "skipped" if none exist.
+# typecheck/tsc → build → test. Skip lint deliberately: it's far too
+# noisy on most repos (warnings-as-errors, formatting drift, stylistic
+# preferences) and produces false-negative reverts even when the
+# upgrade itself is clean. The per-package solo loop's agentic
+# validate_upgrade is the right place to weigh lint signal vs.
+# pre-existing noise on a per-package basis.
 SCRIPTS=$(jq -r '.scripts // {} | keys[]' package.json 2>/dev/null || true)
 RAN=""
-for cand in typecheck tsc lint build test; do
+for cand in typecheck tsc build test; do
   if printf '%s\n' "$SCRIPTS" | grep -qx "$cand"; then
     case "$PKG_MGR" in
       yarn|yarn3|yarn4) SCRIPT_CMD="yarn $cand" ;;
@@ -3083,13 +3086,15 @@ workflow secured_renovacy:
   }
 
   ## select_family exhausted (every family attempted or already at
-  ## target) → hand off to the per-package solo loop with the members
-  ## already attempted via family path pre-loaded so solos doesn't
-  ## retry them.
+  ## target) → hand off to the per-package solo loop. We pass the
+  ## family-attempted members ledger as `attempted` so solos skip the
+  ## packages the family path already handled; mark_family_attempted
+  ## seeded it with bucket_patches.attempted_after_batch on the first
+  ## iteration so the patch-batched members are also covered.
   select_family -> select_candidate when not has_more with {
     packages: "{{outputs.discover_outdated.packages}}",
     scope: "{{vars.scope}}",
-    attempted: "{{outputs.bucket_patches.attempted_after_batch}}",
+    attempted: "{{outputs.mark_family_attempted.attempted_members}}",
     max_packages: "{{vars.max_packages_per_run}}",
     workspace_dir: "{{vars.workspace_dir}}"
   }
