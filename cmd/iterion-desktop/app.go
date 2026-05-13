@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -22,6 +23,11 @@ type App struct {
 	ctx       context.Context
 	server    serverController
 	serverURL string
+	// usingDaemon is true when the GUI attached to an externally-owned
+	// HTTP server (iterion-desktop --server-only). In that mode the GUI
+	// must NOT stop the server on shutdown and must NOT mutate the
+	// daemon's desktop.json discovery file — both belong to the daemon.
+	usingDaemon bool
 
 	mu       sync.RWMutex
 	config   *Config
@@ -92,16 +98,27 @@ func (a *App) onStartup(ctx context.Context) {
 	a.keychain = NewKeychain()
 	a.applyKeychainToEnv()
 
-	// Bring up the HTTP server for the current project (or no project on
-	// first run — the editor SPA's useDesktop hook routes to /welcome based
-	// on IsFirstRunPending).
-	a.server = NewServerHost()
-	if err := a.startServerForCurrentProject(ctx); err != nil {
-		log.Printf("desktop: server failed to start: %v", err)
-		// Surface the error: GetServerURL stays "" and the AssetServer
-		// reverse-proxy returns 503 to the WebView until the next
-		// successful start (e.g. after a project switch).
-		return
+	// If a headless daemon (iterion-desktop --server-only) is already
+	// running, the GUI piggy-backs on its server instead of starting its
+	// own. This is what makes runs survive GUI rebuild + relaunch cycles:
+	// the daemon owns the runtime; the GUI is a UI shell. Detection runs
+	// before our own server start so we never spawn a duplicate.
+	if url, ok := detectDaemonURL(); ok {
+		a.serverURL = url
+		a.usingDaemon = true
+		log.Printf("desktop: attached to existing daemon at %s", url)
+	} else {
+		// No daemon — bring up the embedded server for the current project
+		// (or no project on first run — the editor SPA's useDesktop hook
+		// routes to /welcome based on IsFirstRunPending).
+		a.server = NewServerHost()
+		if err := a.startServerForCurrentProject(ctx); err != nil {
+			log.Printf("desktop: server failed to start: %v", err)
+			// Surface the error: GetServerURL stays "" and the AssetServer
+			// reverse-proxy returns 503 to the WebView until the next
+			// successful start (e.g. after a project switch).
+			return
+		}
 	}
 
 	// Wire the auto-updater. CheckForUpdate is non-blocking; if the user
@@ -124,10 +141,21 @@ func (a *App) onBeforeClose(ctx context.Context) bool {
 }
 
 func (a *App) onShutdown(_ context.Context) {
-	// Order matters: stop the server first so in-flight runs flip to
-	// failed_resumable, then drop the single-instance lock. Clear the
+	// Order matters: stop the embedded server first so in-flight runs flip
+	// to failed_resumable, then drop the single-instance lock. Clear the
 	// discovery file last so the iterion-control MCP doesn't keep
 	// pointing at a dead port after the desktop exits.
+	//
+	// When we're attached to an external daemon (a.usingDaemon), the
+	// daemon OWNS the server + the desktop.json discovery file — leave
+	// them alone so the next GUI launch can re-attach and operator-side
+	// run continues across GUI rebuild cycles.
+	if a.usingDaemon {
+		if a.instLock != nil {
+			_ = a.instLock.Release()
+		}
+		return
+	}
 	if a.server != nil {
 		a.server.Stop()
 	}
@@ -209,6 +237,16 @@ func (a *App) startServerForCurrentProject(ctx context.Context) error {
 // on a JS-side window.location.reload — which is now a no-op anyway,
 // since the page origin doesn't change between restarts).
 func (a *App) restartServerForCurrentProject(ctx context.Context) (*Project, error) {
+	// In daemon-attached mode, the server lives in a separate process
+	// that the GUI doesn't own — bouncing it from here would crash the
+	// nil a.server, and even if we plumbed it the daemon would lose any
+	// in-flight run. Project switching against a daemon requires a
+	// daemon-side HTTP API (not yet wired in Phase 1); for now we error
+	// loudly so the user knows to restart the daemon explicitly.
+	if a.usingDaemon {
+		return nil, fmt.Errorf("project switching not supported while attached to a headless daemon — restart the daemon to change project")
+	}
+
 	a.mu.Lock()
 	p := a.config.CurrentProject()
 	var current *Project

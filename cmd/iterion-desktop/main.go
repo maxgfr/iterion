@@ -4,6 +4,7 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -19,6 +20,24 @@ func main() {
 	// have no shell to source ~/.bashrc; this is the file-based
 	// equivalent for that path.
 	loadIterionEnvFile()
+
+	// `--server-only` runs the HTTP server headless (no Wails GUI),
+	// so runs survive `iterion-desktop` GUI rebuild + relaunch cycles.
+	// Typical operator workflow:
+	//   1. start the daemon once:  iterion-desktop --server-only &
+	//   2. launch the GUI normally; GUI detects the running daemon
+	//      via ~/.iterion/desktop.json and proxies to its URL instead
+	//      of starting its own server
+	//   3. close + rebuild + relaunch the GUI as often as needed; the
+	//      daemon (and any in-flight runs) keeps running
+	// In headless mode we skip Wails, GTK, macOS PATH fixes — none of
+	// that is reachable without a windowing system anyway.
+	for _, a := range os.Args[1:] {
+		if a == "--server-only" || a == "--headless" {
+			runHeadless()
+			return
+		}
+	}
 
 	// Prime GTK with the system's color-scheme preference (Linux only)
 	// before Wails boots the GTK runtime. No-op on macOS / Windows.
