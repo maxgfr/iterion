@@ -3,10 +3,10 @@
 // directory.
 //
 // Lookup order at launch time (see pkg/server.resolveWorkflowPath):
-//   1. resolve the requested path against the server WorkDir;
-//   2. on miss, if the path is a bare basename matching an embedded
-//      recipe, materialise the embedded content into the run store
-//      and use that path.
+//  1. resolve the requested path against the server WorkDir;
+//  2. on miss, if the path is a bare basename matching an embedded
+//     recipe, materialise the embedded content into the run store
+//     and use that path.
 //
 // Only top-level *.iter files and the proven `skill/*.iter` minimal
 // recipes are embedded. Companion .md design journals and large

@@ -164,8 +164,8 @@ type Service struct {
 	// server (whose process cwd is the user's home).
 	workDir string
 	logger  *iterlog.Logger
-	broker   *EventBroker
-	manager  *Manager
+	broker  *EventBroker
+	manager *Manager
 
 	// recoveryDispatch is built once on construction so each Launch /
 	// Resume reuses the same dispatcher rather than allocating a new

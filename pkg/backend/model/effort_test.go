@@ -103,7 +103,7 @@ func TestCoerceEffortForModel(t *testing.T) {
 		},
 		{
 			name:   "xhigh on gpt-5.4 collapses to high",
-			effort:  "xhigh",
+			effort: "xhigh",
 			model:  "gpt-5.4",
 			want:   "high",
 		},

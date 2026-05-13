@@ -607,6 +607,7 @@ func (b *ClawBackend) executeViaSandboxRunner(ctx context.Context, task delegate
 //     into the host's nodeSessionStore so CompactAndRetry compacts the
 //     latest history. Pre-spawn, the launcher seeds a session_replay
 //     envelope from the host store (see [executeViaSandboxRunner]).
+//
 // providerCredentialEnvVars enumerates the env-var names the in-runner
 // model registry consults to authenticate against each provider. Listed
 // explicitly (rather than forwarding the full host env) so the sandbox
