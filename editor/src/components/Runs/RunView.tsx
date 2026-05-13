@@ -4,7 +4,12 @@ import { useParams } from "wouter";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { ChevronLeftIcon, ChevronUpIcon } from "@radix-ui/react-icons";
 
-import { getRun, type RunFile, type RunFilesMode } from "@/api/runs";
+import {
+  getRun,
+  type ExecutionState,
+  type RunFile,
+  type RunFilesMode,
+} from "@/api/runs";
 import { IconButton, Skeleton, Tabs } from "@/components/ui";
 import { selectRunningExecution, useRunStore } from "@/store/run";
 import { useRunWebSocket } from "@/hooks/useRunWebSocket";
@@ -453,23 +458,40 @@ export default function RunView() {
   }, [displayedEvents]);
 
   // Workflow view: detail panel reflects the selected node's currently-
-  // picked iteration. If the user hasn't picked an iteration, fall back
-  // to defaultIterationFor (running > paused > latest). No execution at
-  // all → panel stays empty.
-  const detailExec = useMemo(() => {
-    if (!wfSelectedNodeId) return null;
-    const matching = displayedExecutions.filter(
-      (e) => e.ir_node_id === wfSelectedNodeId,
-    );
-    if (matching.length === 0) return null;
-    const iter =
-      iterationByNode.get(wfSelectedNodeId) ?? defaultIterationFor(matching);
+  // picked iteration. We expose the full per-node execution list plus
+  // the resolved iteration so the panel can render an in-place pill
+  // strip and switch which exec drives the tabs without round-tripping
+  // through the parent. Executions are sorted ascending by
+  // loop_iteration to keep pip order stable.
+  const selectedNodeExecutions = useMemo(() => {
+    if (!wfSelectedNodeId) return [] as ExecutionState[];
+    return displayedExecutions
+      .filter((e) => e.ir_node_id === wfSelectedNodeId)
+      .slice()
+      .sort((a, b) => a.loop_iteration - b.loop_iteration);
+  }, [wfSelectedNodeId, displayedExecutions]);
+
+  const selectedNodeIteration = useMemo(() => {
+    if (!wfSelectedNodeId || selectedNodeExecutions.length === 0) return 0;
     return (
-      matching.find((e) => e.loop_iteration === iter) ??
-      matching[matching.length - 1] ??
+      iterationByNode.get(wfSelectedNodeId) ??
+      defaultIterationFor(selectedNodeExecutions)
+    );
+  }, [wfSelectedNodeId, iterationByNode, selectedNodeExecutions]);
+
+  // Kept as a local resolved value for the EventLog filter + queued
+  // banner predicate below. Mirrors the resolution the detail panel
+  // does internally.
+  const detailExec = useMemo(() => {
+    if (selectedNodeExecutions.length === 0) return null;
+    return (
+      selectedNodeExecutions.find(
+        (e) => e.loop_iteration === selectedNodeIteration,
+      ) ??
+      selectedNodeExecutions[selectedNodeExecutions.length - 1] ??
       null
     );
-  }, [wfSelectedNodeId, iterationByNode, displayedExecutions]);
+  }, [selectedNodeExecutions, selectedNodeIteration]);
 
   if (!runId) {
     return <div className="p-4 text-xs text-fg-subtle">Missing run id.</div>;
@@ -580,7 +602,9 @@ export default function RunView() {
                         <NodeDetailPanel
                           runId={runId}
                           filePath={snapshot.run.file_path}
-                          exec={detailExec}
+                          executions={selectedNodeExecutions}
+                          selectedIteration={selectedNodeIteration}
+                          onSelectIteration={handleSelectIteration}
                           events={displayedEvents}
                           followLive={followLiveNode}
                           onToggleFollowLive={handleToggleFollowLive}

@@ -17,14 +17,24 @@ import { formatContextUsage, formatDurationBetween, formatMs } from "@/lib/forma
 import { readNodeOutputMeta } from "@/lib/delegateMeta";
 
 import ArtifactDiff from "./ArtifactDiff";
+import { iterationColor } from "./IRNode";
 import LogLinesView from "./LogLinesView";
 import PauseForm from "./PauseForm";
+import { statusClasses } from "./runStatusClasses";
+import { formatToolCall, type ToolField } from "./toolFormatters";
 
 interface Props {
   runId: string;
   // The .iter source path for this run; used to wire "Open in editor".
   filePath?: string;
-  exec: ExecutionState | null;
+  // All executions of the selected IR node, ordered by loop_iteration.
+  // Empty array = no node selected. The active `exec` is derived from
+  // this list + `selectedIteration` inside the panel so the iteration
+  // pills can switch which exec drives every tab without round-trip
+  // through the parent.
+  executions: ExecutionState[];
+  selectedIteration: number;
+  onSelectIteration: (nodeId: string, iteration: number) => void;
   events: RunEvent[];
   // followLive == true → the parent is auto-tracking the running
   // execution; clicking the toggle off pins the panel on the current
@@ -92,12 +102,65 @@ function FollowLivePill({
   );
 }
 
+// IterationPills mirrors the per-iteration pip strip already shown on
+// the canvas node (IRNode), but in the right-panel header. The colors
+// come from the same ITERATION_PALETTE so a user scanning the canvas
+// for "iter 3" sees the same amber tint in both places. Status is
+// overlaid as a ring/animation so the pill carries two dimensions:
+// which iteration (color) and how it went (ring/pulse/opacity).
+function IterationPills({
+  executions,
+  selectedIteration,
+  onSelect,
+}: {
+  executions: ExecutionState[];
+  selectedIteration: number;
+  onSelect: (iteration: number) => void;
+}) {
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1">
+      <span className="text-[9px] text-fg-subtle mr-0.5">iter:</span>
+      {executions.map((e) => {
+        const isSelected = e.loop_iteration === selectedIteration;
+        const s = statusClasses(e.status);
+        const color = iterationColor(e.loop_iteration);
+        // Selection is rendered as a thicker ring in accent color so
+        // the active pill pops; the iteration color stays as the
+        // fill. Status drives extra cues:
+        //   running → animate-pulse (matches StatusBadge running)
+        //   failed  → red ring overlay
+        //   skipped → desaturated/opacity (engine bypassed this iter)
+        const pulse = e.status === "running" ? "animate-pulse" : "";
+        const opacity = e.status === "skipped" ? "opacity-50" : "";
+        const failedRing = e.status === "failed" ? "ring-1 ring-danger" : "";
+        const selectedRing = isSelected
+          ? "ring-2 ring-accent shadow-sm"
+          : "ring-1 ring-border-default/30";
+        return (
+          <button
+            key={e.execution_id}
+            type="button"
+            onClick={() => onSelect(e.loop_iteration)}
+            title={`iter ${e.loop_iteration + 1} · ${s.label}`}
+            className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[9px] font-mono text-fg-default transition-all ${pulse} ${opacity} ${selectedRing} ${failedRing}`}
+            style={{ backgroundColor: `${color}66` }}
+          >
+            {e.loop_iteration + 1}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 type TabValue = "pause" | "trace" | "tools" | "artifact" | "events" | "logs";
 
 export default function NodeDetailPanel({
   runId,
   filePath,
-  exec,
+  executions,
+  selectedIteration,
+  onSelectIteration,
   events,
   followLive,
   onToggleFollowLive,
@@ -107,6 +170,19 @@ export default function NodeDetailPanel({
 }: Props) {
   const [artifactVersions, setArtifactVersions] = useState<ArtifactSummary[]>([]);
   const [activeTab, setActiveTab] = useState<TabValue | null>(null);
+
+  // The active execution drives every tab. Prefer the user-selected
+  // iteration; fall back to the latest available exec so the panel
+  // stays useful when the selection points to an iteration that
+  // hasn't been emitted yet (e.g. transient race during a fan-in).
+  const exec = useMemo<ExecutionState | null>(() => {
+    if (executions.length === 0) return null;
+    return (
+      executions.find((e) => e.loop_iteration === selectedIteration) ??
+      executions[executions.length - 1] ??
+      null
+    );
+  }, [executions, selectedIteration]);
 
   // Load only the version index here; ArtifactDiff handles fetching the
   // body for each selected version on demand.
@@ -213,6 +289,9 @@ export default function NodeDetailPanel({
         runId={runId}
         filePath={filePath}
         exec={exec}
+        executions={executions}
+        selectedIteration={selectedIteration}
+        onSelectIteration={onSelectIteration}
         events={matching}
         followLive={followLive}
         onToggleFollowLive={onToggleFollowLive}
@@ -299,6 +378,9 @@ function DetailHeader({
   runId,
   filePath,
   exec,
+  executions,
+  selectedIteration,
+  onSelectIteration,
   events,
   followLive,
   onToggleFollowLive,
@@ -306,6 +388,9 @@ function DetailHeader({
   runId: string;
   filePath?: string;
   exec: ExecutionState;
+  executions: ExecutionState[];
+  selectedIteration: number;
+  onSelectIteration: (nodeId: string, iteration: number) => void;
   events: RunEvent[];
   followLive?: boolean;
   onToggleFollowLive?: () => void;
@@ -388,6 +473,13 @@ function DetailHeader({
               </span>
             )}
           </div>
+          {executions.length > 1 && (
+            <IterationPills
+              executions={executions}
+              selectedIteration={selectedIteration}
+              onSelect={(iter) => onSelectIteration(exec.ir_node_id, iter)}
+            />
+          )}
         </div>
         {filePath && (
           <IconButton
@@ -742,8 +834,39 @@ function ToolPayloadBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
+// ToolFieldList renders the curated key/value pairs produced by
+// formatToolCall() — path, pattern, command, etc. — as a compact grid
+// at the top of each tool card. Always visible (unlike the raw
+// input/output blocks) so the caller can see at a glance *what*
+// arguments the agent invoked the tool with.
+function ToolFieldList({ fields }: { fields: ToolField[] }) {
+  return (
+    <ul className="mb-1.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-[10px]">
+      {fields.map((f, i) => (
+        <li key={`${f.label}-${i}`} className="contents">
+          <span className="text-fg-subtle">{f.label}:</span>
+          <span
+            className={`text-fg-default break-all ${f.mono ? "font-mono" : ""}`}
+            title={f.value}
+          >
+            {f.value}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function ToolCallCard({ call }: { call: ToolCall }) {
   const [showRaw, setShowRaw] = useState(false);
+  // The tool input lives on event.data.input — already on the
+  // ToolCall via `input` (stringified). Parsers expect a parsable
+  // shape, so we feed them the raw object from rawData first and
+  // fall back to the string if needed.
+  const summary = useMemo(() => {
+    const raw = call.rawData?.["input"];
+    return formatToolCall(call.toolName, raw ?? call.input);
+  }, [call.toolName, call.rawData, call.input]);
   return (
     <li
       className={`rounded border p-2 ${
@@ -766,12 +889,13 @@ function ToolCallCard({ call }: { call: ToolCall }) {
           seq {call.seq}
         </span>
       </div>
+      {summary.fields.length > 0 && <ToolFieldList fields={summary.fields} />}
       {call.errorMsg && (
         <div className="text-[10px] font-mono text-danger-fg whitespace-pre-wrap break-words mb-1">
           {call.errorMsg}
         </div>
       )}
-      {call.input && <ToolPayloadBlock label="input" value={call.input} />}
+      {call.input && <ToolPayloadBlock label="raw input" value={call.input} />}
       {call.output && <ToolPayloadBlock label="output" value={call.output} />}
       <button
         type="button"
