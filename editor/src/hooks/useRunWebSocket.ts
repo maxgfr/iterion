@@ -67,6 +67,11 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
   // reconnect can re-subscribe automatically — symmetric with the
   // event from_seq replay below. Reset on runId change.
   const logsRequestedRef = useRef(false);
+  // Ref-count log subscribers so the bottom RunLogPanel and the
+  // NodeDetailPanel "Logs" tab can independently subscribe without one
+  // unmount canceling the other. We only send subscribe_logs /
+  // unsubscribe_logs on the 0↔1 transitions.
+  const logSubscriberCountRef = useRef(0);
   // Bump from the store after Resume/Cancel HTTP actions to redial the
   // WS — the broker drops subscribers on terminal status, so the only
   // way the resumed run reaches this client is a fresh subscribe.
@@ -248,6 +253,12 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
         ws.close();
         wsRef.current = null;
       }
+      // Reset log subscription state so a navigation to a different
+      // run starts with a clean slate. Without this, a count >0 from
+      // the previous run leaks into the new WS and unsubscribe_logs
+      // never fires when the user closes the tab.
+      logSubscriberCountRef.current = 0;
+      logsRequestedRef.current = false;
       useRunStore.getState().setWsState("closed");
     };
   }, [runId, reconnectToken]);
@@ -260,6 +271,8 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
       }
     },
     subscribeLogs: (fromOffset) => {
+      logSubscriberCountRef.current += 1;
+      if (logSubscriberCountRef.current > 1) return;
       logsRequestedRef.current = true;
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -279,6 +292,9 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
       useRunStore.getState().setLogSubscribed(true);
     },
     unsubscribeLogs: () => {
+      if (logSubscriberCountRef.current === 0) return;
+      logSubscriberCountRef.current -= 1;
+      if (logSubscriberCountRef.current > 0) return;
       logsRequestedRef.current = false;
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {

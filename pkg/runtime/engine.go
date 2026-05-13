@@ -712,6 +712,7 @@ func (e *Engine) execLoop(ctx context.Context, rs *runState, startNodeID string)
 				attribute.String("iterion.node_kind", node.NodeKind().String()),
 			),
 		)
+		spanCtx = e.ctxWithIteration(spanCtx, currentNodeID, rs.loopCounters)
 		output, err := e.executor.Execute(spanCtx, node, nodeInput)
 		if err != nil {
 			span.RecordError(err)

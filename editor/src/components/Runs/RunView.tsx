@@ -494,6 +494,8 @@ export default function RunView() {
                           events={displayedEvents}
                           followLive={followLiveNode}
                           onToggleFollowLive={handleToggleFollowLive}
+                          subscribeLogs={wsHandle.subscribeLogs}
+                          unsubscribeLogs={wsHandle.unsubscribeLogs}
                           onCollapse={toggleDetailCollapsed}
                         />
                       </div>

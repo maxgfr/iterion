@@ -106,7 +106,7 @@ func (b *CodexBackend) Execute(ctx context.Context, task Task) (Result, error) {
 		stderrBuf.WriteString(line)
 		stderrBuf.WriteString("\n")
 		if line != "" {
-			b.Logger.Info("[%s] %s", task.NodeID, line)
+			b.Logger.Info("[%s#%d/codex:err] %s", task.NodeID, task.Iteration, line)
 		}
 	}))
 
@@ -246,7 +246,7 @@ func (b *CodexBackend) runQueryWithRetry(ctx context.Context, task Task, prompt 
 			}
 			switch m := msg.(type) {
 			case *codexsdk.AssistantMessage:
-				b.logAssistantActivity(task.NodeID, m)
+				b.logAssistantActivity(task.NodeID, task.Iteration, m)
 			case *codexsdk.ResultMessage:
 				resultMsg = m
 			case *codexsdk.SystemMessage:
@@ -256,7 +256,7 @@ func (b *CodexBackend) runQueryWithRetry(ctx context.Context, task Task, prompt 
 						lastThreadID = tid
 					}
 				case "thread.token_usage.updated":
-					b.logTokenUsage(task.NodeID, m.Data)
+					b.logTokenUsage(task.NodeID, task.Iteration, m.Data)
 				}
 			}
 		}
@@ -286,9 +286,9 @@ func (b *CodexBackend) runQueryWithRetry(ctx context.Context, task Task, prompt 
 			default:
 			}
 			if diag != "" {
-				b.Logger.Warn("[%s] codex returned no result (attempt %d/%d, %s), retrying", task.NodeID, attempt, maxCodexRetries, diag)
+				b.Logger.Warn("[%s#%d/codex] returned no result (attempt %d/%d, %s), retrying", task.NodeID, task.Iteration, attempt, maxCodexRetries, diag)
 			} else {
-				b.Logger.Warn("[%s] codex returned no result (attempt %d/%d), retrying", task.NodeID, attempt, maxCodexRetries)
+				b.Logger.Warn("[%s#%d/codex] returned no result (attempt %d/%d), retrying", task.NodeID, task.Iteration, attempt, maxCodexRetries)
 			}
 		}
 	}
@@ -307,7 +307,7 @@ func (b *CodexBackend) formatOutput(ctx context.Context, task Task, sessionID st
 		codexsdk.WithPermissionMode("bypassPermissions"),
 		codexsdk.WithStderr(func(line string) {
 			if line != "" {
-				b.Logger.Info("[%s/fmt] %s", task.NodeID, line)
+				b.Logger.Info("[%s#%d/fmt] %s", task.NodeID, task.Iteration, line)
 			}
 		}),
 	}
@@ -340,7 +340,7 @@ func (b *CodexBackend) formatOutput(ctx context.Context, task Task, sessionID st
 // logs them live. Codex emits this a few times per turn; surfacing it lets
 // operators see context growth before a silent overflow (inspectCodexRollout
 // remains the post-mortem safety net). Data shape: tokenUsage.last.{total,input,cached,output,reasoning}Tokens.
-func (b *CodexBackend) logTokenUsage(nodeID string, data map[string]any) {
+func (b *CodexBackend) logTokenUsage(nodeID string, iteration int, data map[string]any) {
 	tu, ok := data["tokenUsage"].(map[string]any)
 	if !ok {
 		return
@@ -357,8 +357,8 @@ func (b *CodexBackend) logTokenUsage(nodeID string, data map[string]any) {
 	if total == 0 && input == 0 && output == 0 {
 		return
 	}
-	b.Logger.Info("[%s/codex] 📊 tokens total=%d (input=%d cached=%d output=%d reasoning=%d)",
-		nodeID, total, input, cached, output, reasoning)
+	b.Logger.Info("[%s#%d/codex] 📊 tokens total=%d (input=%d cached=%d output=%d reasoning=%d)",
+		nodeID, iteration, total, input, cached, output, reasoning)
 }
 
 func asInt(v any) int {
@@ -379,19 +379,19 @@ func asInt(v any) int {
 // logAssistantActivity logs tool calls, text output, and tool errors from an
 // AssistantMessage in real-time, mirroring the claude_code backend's activity
 // streaming.
-func (b *CodexBackend) logAssistantActivity(nodeID string, msg *codexsdk.AssistantMessage) {
+func (b *CodexBackend) logAssistantActivity(nodeID string, iteration int, msg *codexsdk.AssistantMessage) {
 	for _, block := range msg.Content {
 		switch blk := block.(type) {
 		case *codexsdk.ToolUseBlock:
 			detail := toolUseDetail(blk.Name, blk.Input)
-			b.Logger.Info("[%s/codex] 🔧 %s %s", nodeID, blk.Name, detail)
+			b.Logger.Info("[%s#%d/codex] 🔧 %s %s", nodeID, iteration, blk.Name, detail)
 		case *codexsdk.ToolResultBlock:
 			if blk.IsError {
-				b.Logger.Info("[%s/codex] ❌ tool error: %s", nodeID, contentBlocksText(blk.Content))
+				b.Logger.Info("[%s#%d/codex] ❌ tool error: %s", nodeID, iteration, contentBlocksText(blk.Content))
 			}
 		case *codexsdk.TextBlock:
 			if blk.Text != "" {
-				b.Logger.Info("[%s/codex] 💬 %s", nodeID, truncate(blk.Text, 300))
+				b.Logger.Info("[%s#%d/codex] 💬 %s", nodeID, iteration, truncate(blk.Text, 300))
 			}
 		}
 	}

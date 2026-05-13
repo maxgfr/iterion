@@ -392,7 +392,8 @@ func (e *Engine) execAutoOrPauseHuman(ctx context.Context, rs *runState, nodeID 
 
 	// Build input and execute LLM.
 	nodeInput := e.buildNodeInputRS(nodeID, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
-	output, err := e.executor.Execute(ctx, node, nodeInput)
+	execCtx := e.ctxWithIteration(ctx, nodeID, rs.loopCounters)
+	output, err := e.executor.Execute(execCtx, node, nodeInput)
 	if err != nil {
 		return false, e.failRunWithCheckpoint(rs, nodeID, fmt.Sprintf("human node %q auto_or_pause execution failed: %v", nodeID, err))
 	}
@@ -616,7 +617,8 @@ func (e *Engine) reInvokeBackend(ctx context.Context, rs *runState, nodeID strin
 
 	// Re-execute the node. The executor will use the session ID for
 	// delegate re-invocation if the backend supports it.
-	output, err := e.executor.Execute(ctx, node, nodeInput)
+	execCtx := e.ctxWithIteration(ctx, nodeID, rs.loopCounters)
+	output, err := e.executor.Execute(execCtx, node, nodeInput)
 	if err != nil {
 		// Check for another interaction request (recursive). depth+1
 		// so the maxInteractionDepth guard in handleNeedsInteraction
@@ -805,4 +807,11 @@ func (e *Engine) currentLoopIteration(nodeID string, loopCounters map[string]int
 		}
 	}
 	return maxIter
+}
+
+// ctxWithIteration wraps ctx with the current loop iteration for nodeID
+// so the executor can stamp Task.Iteration and downstream backends can
+// tag their log output as [NodeID#iter/...].
+func (e *Engine) ctxWithIteration(ctx context.Context, nodeID string, loopCounters map[string]int) context.Context {
+	return model.WithLoopIteration(ctx, e.currentLoopIteration(nodeID, loopCounters))
 }

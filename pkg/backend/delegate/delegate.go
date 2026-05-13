@@ -80,6 +80,13 @@ type Task struct {
 	// NodeID is the IR node identifier, used for observability hooks.
 	NodeID string
 
+	// Iteration is the 0-based loop iteration counter for this
+	// execution. Aligned with the loop_iteration field exposed in
+	// events / ExecutionState. Zero for nodes outside any loop.
+	// Backends use it to tag log lines as [NodeID#iter/...] so the
+	// editor can filter run.log per (node, iteration).
+	Iteration int
+
 	// SystemPrompt is the fully resolved system prompt text.
 	SystemPrompt string
 
