@@ -2645,11 +2645,13 @@ workflow secured_renovacy:
   ## fix_loop is per-package: the runtime resets the counter on the
   ## first non-loop edge that re-enters this loop's body from outside
   ## (typically `align_code -> validate_upgrade` after the next
-  ## package's upgrade lands). 5 retries per package — enough for
-  ## majors that need a few alignment passes, tight enough that a
-  ## genuinely stuck package gets reverted instead of burning the
-  ## whole budget.
-  fix_after_upgrade -> validate_upgrade as fix_loop(5) with {
+  ## package's upgrade lands). Cap of 3 retries — tight on purpose:
+  ## a package that doesn't validate after 3 alignment passes is
+  ## almost certainly stuck on something the fix agent can't resolve
+  ## (CI-only failures, missing peer deps, env-specific breakage),
+  ## and the marginal $/iter from fix attempt #4-#5 rarely pays off.
+  ## Revert + mark_failed_and_continue is the cheaper outcome.
+  fix_after_upgrade -> validate_upgrade as fix_loop(3) with {
     selected_package: "{{outputs.select_candidate.selected_package}}",
     current_version: "{{outputs.select_candidate.current_version}}",
     target_version: "{{outputs.select_candidate.target_version}}",
