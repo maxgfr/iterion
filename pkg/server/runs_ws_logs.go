@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -59,6 +60,23 @@ func (c *runConn) handleSubscribeLogs(env runWSEnvelope) {
 // at the cutoff so bytes never go out twice.
 func (c *runConn) streamLogs(buf *runview.RunLogBuffer, fromOffset int64) {
 	startOffset, snapshot, _ := buf.Snapshot(fromOffset)
+
+	// The ring is a 1 MiB tail (pkg/runview.runLogRingCap). On long
+	// runs the early bytes are evicted; reopening the editor after a
+	// disconnect resubscribes from offset 0 and would otherwise miss
+	// everything before the ring's lower bound — the per-node Logs
+	// tab then shows "No log lines tagged with this node yet" for
+	// any node whose output was emitted in the evicted prefix.
+	// Fill the gap from run.log, which is the authoritative source
+	// (file_log_source pumps disk → ring, so disk_size >= ring's
+	// start offset). Best-effort: a missing file just degrades to
+	// the previous behaviour.
+	if startOffset > fromOffset {
+		if !c.replayPersistedLogRange(fromOffset, startOffset) {
+			return
+		}
+	}
+
 	cutoff := startOffset + int64(len(snapshot))
 
 	if len(snapshot) > 0 {
@@ -135,6 +153,41 @@ func (c *runConn) replayPersistedLog(fromOffset int64) {
 		Offset: fromOffset,
 		Text:   string(tail),
 		Total:  int64(len(data)),
+	}, "")
+}
+
+// replayPersistedLogRange reads bytes [from, until) from run.log and
+// emits them as a single log_chunk envelope. Used by streamLogs when
+// the in-memory ring has evicted bytes older than the client's
+// requested offset. Returns false on a send failure (caller stops the
+// stream); a missing file or short read is best-effort and returns
+// true so the live stream can still take over.
+func (c *runConn) replayPersistedLogRange(from, until int64) bool {
+	if from >= until {
+		return true
+	}
+	storeDir := c.server.runs.StoreDir()
+	if storeDir == "" {
+		return true
+	}
+	logPath := filepath.Join(storeDir, "runs", c.runID, "run.log")
+	f, err := os.Open(logPath)
+	if err != nil {
+		return true
+	}
+	defer f.Close()
+	if _, err := f.Seek(from, 0); err != nil {
+		return true
+	}
+	buf := make([]byte, until-from)
+	n, _ := io.ReadFull(f, buf)
+	if n == 0 {
+		return true
+	}
+	return c.sendEnvelope(wsTypeLogChunk, wsLogChunkPayload{
+		Offset: from,
+		Text:   string(buf[:n]),
+		Total:  from + int64(n),
 	}, "")
 }
 
