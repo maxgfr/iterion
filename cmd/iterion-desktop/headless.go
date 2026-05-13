@@ -13,68 +13,52 @@ import (
 	"github.com/SocialGouv/iterion/pkg/cli"
 )
 
-// attachDaemonEnabled reports whether the GUI should auto-attach to an
-// existing headless daemon at startup. Opt-in via ITERION_DESKTOP_ATTACH_DAEMON
-// because Phase 1 daemon mode disables project switching from the GUI;
-// surprising operators with that limitation just because a daemon was
-// running broke too much muscle memory. Phase 2 (daemon-side
-// project-switch HTTP API) will make auto-attach safe to flip back to
-// opt-out.
+// attachDaemonEnabled was the Phase 1 env gate for GUI-side daemon
+// attach. Phase 2 makes attach the default (daemons are per-project and
+// project switching from the GUI works again), but the gate stays as an
+// escape hatch: ITERION_DESKTOP_ATTACH_DAEMON=0 / false / off forces
+// the GUI to start its own embedded server even when a daemon is alive.
 func attachDaemonEnabled() bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv("ITERION_DESKTOP_ATTACH_DAEMON")))
-	return v == "1" || v == "true" || v == "yes" || v == "on"
+	switch v {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 // runHeadless is the entry point when `iterion-desktop --server-only`
 // (or `--headless`) is set. It runs the HTTP server in the foreground
-// without Wails, writes the canonical discovery file ~/.iterion/desktop.json
-// (same path the GUI publishes when it owns the server), and blocks until
-// SIGTERM / SIGINT.
+// without Wails, writes both the per-project daemon registry file
+// (~/.iterion/daemons/<key>.json) and the legacy global desktop.json
+// (~/.iterion/desktop.json — kept for the iterion-control MCP), then
+// blocks until SIGTERM / SIGINT.
 //
-// The daemon is the run-owner: launched once by the operator (or by a
-// future GUI auto-spawn), it keeps running across GUI rebuild + relaunch
-// cycles so in-flight `secured-renovacy.iter` runs survive the operator
-// closing the desktop window or installing a newer binary on top.
-//
-// State sharing with a co-running GUI process:
-//   - the daemon writes desktop.json with its URL + pid + started_at
-//   - the GUI on startup reads desktop.json, sees the daemon is alive,
-//     skips starting its embedded server, and points its AssetServer
-//     proxy at the daemon's URL (wiring lives in app.go onStartup)
-//   - on GUI close (Wails window-close), the GUI's onShutdown only tears
-//     down GUI-local resources; the daemon process is untouched
-//
-// The daemon holds a separate single-instance lock from the GUI
-// (acquireDaemonLock) so the two processes coexist. Project switching
-// and other server-mutating App methods route through the daemon's HTTP
-// API in this mode; the GUI's local mutation methods become advisory.
+// Multi-project: each daemon hosts ONE project. The GUI auto-spawns a
+// daemon per project the operator opens, and attaches by reading the
+// per-project file. A separate `iterion-desktop-daemon-<key>.lock`
+// flock guarantees at most one daemon per project; many can coexist.
 func runHeadless() {
+	projectDir, projectStoreDir := resolveDaemonProject()
+
 	cfg, err := LoadConfig()
 	if err != nil {
 		log.Printf("daemon: failed to load config (using defaults): %v", err)
 		cfg = NewConfig()
 	}
+	_ = cfg
 
-	// Use a daemon-specific instance lock so the GUI's single_instance
-	// guard doesn't preempt us (and vice-versa).
-	lock, err := acquireDaemonLock()
+	if projectDir == "" {
+		log.Fatalf("daemon: no project resolved (pass --project=<dir> or set ITERION_PROJECT, or select a current project in config)")
+	}
+
+	lock, err := acquireDaemonLockForProject(projectDir)
 	if err != nil {
-		log.Fatalf("daemon: another instance is already running: %v", err)
+		log.Fatalf("daemon: another daemon is already running for project %s: %v", projectDir, err)
 	}
 	defer func() { _ = lock.Release() }()
 
-	// Resolve the project directory the daemon will host. Mirror the
-	// GUI's fallback path so first-run daemons get a small, safe dir
-	// rather than dumping a recursive watcher on $HOME.
-	dir, storeDir := currentProjectDirsFromConfig(cfg)
-	if dir == "" {
-		dir = defaultFallbackProjectDir()
-	}
-
-	// Bring up the server. We use cli.RunEditor directly (rather than the
-	// ServerHost wrapper the GUI uses for restart-on-project-switch) since
-	// the daemon doesn't need restart semantics — config edits that
-	// require a project switch should bounce the daemon explicitly.
 	rootCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -85,8 +69,8 @@ func runHeadless() {
 		opts := cli.EditorOptions{
 			Port:      -1,
 			Bind:      "127.0.0.1",
-			Dir:       dir,
-			StoreDir:  storeDir,
+			Dir:       projectDir,
+			StoreDir:  projectStoreDir,
 			NoBrowser: true,
 			OnReady: func(addr string) {
 				select {
@@ -111,17 +95,59 @@ func runHeadless() {
 	}
 
 	url := "http://" + addr + "/"
-	writeDesktopURLFile(url)
+	writeDaemonInfo(projectDir, url)
+	writeDesktopURLFile(url) // legacy global discovery file for MCP
+	defer removeDaemonInfo(projectDir)
 	defer removeDesktopURLFile()
-	log.Printf("daemon: serving on %s (pid=%d, project=%s)", url, os.Getpid(), dir)
+	log.Printf("daemon: serving on %s (pid=%d, project=%s)", url, os.Getpid(), projectDir)
 
-	// Block until the operator (or systemd / launchd / a manager) sends
-	// SIGTERM or SIGINT. The deferred cancel + removeDesktopURLFile tear
-	// down cleanly so the next daemon launch starts from a clean slate.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	sig := <-sigCh
 	log.Printf("daemon: received %s, shutting down", sig)
+}
+
+// resolveDaemonProject picks the project directory the daemon will host.
+// Precedence:
+//  1. CLI flag --project=<dir>  (highest — most explicit)
+//  2. ITERION_PROJECT env var
+//  3. Currently-selected project from the GUI config
+//
+// The store dir is derived the same way (--project-store, env, config).
+// Returning "" lets runHeadless surface a clear "no project" error
+// before binding any port or grabbing any lock.
+func resolveDaemonProject() (string, string) {
+	var dir, storeDir string
+	for _, a := range os.Args[1:] {
+		switch {
+		case strings.HasPrefix(a, "--project="):
+			dir = strings.TrimPrefix(a, "--project=")
+		case strings.HasPrefix(a, "--project-store="):
+			storeDir = strings.TrimPrefix(a, "--project-store=")
+		}
+	}
+	if dir == "" {
+		dir = os.Getenv("ITERION_PROJECT")
+	}
+	if storeDir == "" {
+		storeDir = os.Getenv("ITERION_PROJECT_STORE")
+	}
+	if dir == "" {
+		// Fall back to the GUI config's current project so a bare
+		// `iterion-desktop --server-only` Just Works for the operator's
+		// most-recently-opened project (matches the GUI's own startup
+		// behaviour).
+		if cfg, err := LoadConfig(); err == nil {
+			d, sd := currentProjectDirsFromConfig(cfg)
+			if d != "" {
+				dir = d
+			}
+			if storeDir == "" && sd != "" {
+				storeDir = sd
+			}
+		}
+	}
+	return dir, storeDir
 }
 
 // currentProjectDirsFromConfig returns the (dir, storeDir) pair for the

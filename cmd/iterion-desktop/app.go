@@ -4,9 +4,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -97,33 +101,26 @@ func (a *App) onStartup(ctx context.Context) {
 	a.keychain = NewKeychain()
 	a.applyKeychainToEnv()
 
-	// Phase 1 daemon attach is OPT-IN: the GUI only piggy-backs on a
-	// running `iterion-desktop --server-only` when ITERION_DESKTOP_ATTACH_DAEMON=1
-	// (or =true). Default behaviour stays "own embedded server" so
-	// project switching keeps working out of the box.
-	//
-	// Why opt-in: Phase 1 daemon mode disables project switching from the
-	// GUI (the daemon doesn't yet expose a HTTP API for switch — Phase 2).
-	// Auto-attaching whenever a daemon was visible silently broke
-	// everyday workflows for operators who started a daemon for one
-	// purpose and then forgot it was running. Phase 2 will lift the
-	// project-switch limitation and we can flip this to opt-out.
-	if attachDaemonEnabled() {
-		if url, ok := detectDaemonURL(); ok {
-			a.serverURL = url
-			a.usingDaemon = true
-			log.Printf("desktop: attached to existing daemon at %s", url)
-		}
-	} else {
-		if url, ok := detectDaemonURL(); ok {
-			log.Printf("desktop: headless daemon detected at %s (ignored — set ITERION_DESKTOP_ATTACH_DAEMON=1 to attach)", url)
+	// Phase 2 daemon attach is ON by default (per-project daemons,
+	// project switching from the GUI works). ITERION_DESKTOP_ATTACH_DAEMON=0
+	// (or false/off) opts out — the GUI then starts an in-process server
+	// like the pre-daemon era, mainly useful for daemon-development
+	// loops where the operator wants to be sure the GUI isn't talking
+	// to a stale daemon binary.
+	a.mu.Lock()
+	dir, _ := a.currentProjectServerDirsLocked()
+	a.mu.Unlock()
+	if attachDaemonEnabled() && dir != "" {
+		if err := a.attachOrSpawnDaemonForProject(ctx, dir); err != nil {
+			log.Printf("desktop: daemon attach for %s failed: %v — falling back to embedded server", dir, err)
 		}
 	}
 
 	if !a.usingDaemon {
-		// No daemon — bring up the embedded server for the current project
-		// (or no project on first run — the editor SPA's useDesktop hook
-		// routes to /welcome based on IsFirstRunPending).
+		// No daemon (opted out, or attach/spawn failed) — bring up the
+		// embedded server for the current project (or no project on
+		// first run — the editor SPA's useDesktop hook routes to /welcome
+		// based on IsFirstRunPending).
 		a.server = NewServerHost()
 		if err := a.startServerForCurrentProject(ctx); err != nil {
 			log.Printf("desktop: server failed to start: %v", err)
@@ -146,11 +143,81 @@ func (a *App) onStartup(ctx context.Context) {
 
 func (a *App) onDomReady(_ context.Context) {}
 
-// onBeforeClose lets us persist the window state before Wails tears down.
-// Returning true would cancel the close — we always allow it.
+// onBeforeClose lets us persist the window state before Wails tears
+// down — and, when headless daemons are still running per-project, ask
+// the operator whether to stop them or leave them running in the
+// background. Returning true cancels the close; false allows it.
+//
+// The popup is skipped when no daemon is alive (the close is just a
+// normal GUI exit) so first-time / single-shot users never see it.
 func (a *App) onBeforeClose(ctx context.Context) bool {
 	a.persistWindowState(ctx)
-	return false
+
+	daemons := listLiveDaemons()
+	if len(daemons) == 0 {
+		return false
+	}
+
+	// Build a human-readable list — "modjo (3 packages), alerte-secours"
+	// style. The discovery file doesn't carry a friendly name (it's a
+	// daemon-side concept); use the project dir's basename which is
+	// what the SPA's project picker already shows.
+	names := make([]string, 0, len(daemons))
+	for _, d := range daemons {
+		base := filepath.Base(d.ProjectDir)
+		if base == "" || base == "." {
+			base = d.ProjectDir
+		}
+		names = append(names, base)
+	}
+	msg := fmt.Sprintf(
+		"%d background daemon(s) are still running: %s.\n\n"+
+			"Keep them running so their in-flight runs survive, or stop them with the GUI?",
+		len(daemons),
+		strings.Join(names, ", "),
+	)
+	const (
+		btnKeep   = "Keep running"
+		btnStop   = "Stop daemons"
+		btnCancel = "Cancel"
+	)
+	result, err := wruntime.MessageDialog(ctx, wruntime.MessageDialogOptions{
+		Type:          wruntime.QuestionDialog,
+		Title:         "Background daemons active",
+		Message:       msg,
+		Buttons:       []string{btnKeep, btnStop, btnCancel},
+		DefaultButton: btnKeep,
+		CancelButton:  btnCancel,
+	})
+	if err != nil {
+		log.Printf("desktop: quit dialog failed: %v — allowing close", err)
+		return false
+	}
+	switch result {
+	case btnCancel:
+		return true
+	case btnStop:
+		stopAllDaemons(daemons)
+		return false
+	default: // btnKeep (and any unknown — fail-safe to "keep")
+		return false
+	}
+}
+
+// stopAllDaemons sends SIGTERM to every daemon in the list, best-effort.
+// Each daemon's own signal handler tears down the server + clears the
+// discovery file. We don't wait for shutdown to complete; the dialog
+// flow needs to be responsive and the daemon's drain timeout already
+// bounds shutdown time.
+func stopAllDaemons(daemons []daemonInfo) {
+	for _, d := range daemons {
+		proc, err := os.FindProcess(d.PID)
+		if err != nil {
+			continue
+		}
+		_ = proc.Signal(syscall.SIGTERM)
+		log.Printf("desktop: sent SIGTERM to daemon pid=%d project=%s", d.PID, d.ProjectDir)
+	}
 }
 
 func (a *App) onShutdown(_ context.Context) {
@@ -250,13 +317,6 @@ func (a *App) startServerForCurrentProject(ctx context.Context) error {
 // on a JS-side window.location.reload — which is now a no-op anyway,
 // since the page origin doesn't change between restarts).
 func (a *App) restartServerForCurrentProject(ctx context.Context) (*Project, error) {
-	// In daemon-attached mode, the server lives in a separate process
-	// the GUI doesn't own. Soft no-op: return the daemon's current
-	// project (read from shared config) and skip the server bounce —
-	// the SPA's on-mount sync calls this and would otherwise fail
-	// every GUI launch with a hard error. A genuine project change
-	// against a daemon still requires restarting the daemon (Phase 2
-	// will add a daemon-side HTTP API for this).
 	a.mu.Lock()
 	p := a.config.CurrentProject()
 	var current *Project
@@ -264,13 +324,25 @@ func (a *App) restartServerForCurrentProject(ctx context.Context) (*Project, err
 		cp := *p
 		current = &cp
 	}
-	if a.usingDaemon {
-		a.mu.Unlock()
-		log.Printf("desktop: restartServerForCurrentProject is a no-op in daemon mode; restart daemon to change project")
+	dir, storeDir := a.currentProjectServerDirsLocked()
+	wasUsingDaemon := a.usingDaemon
+	a.mu.Unlock()
+
+	// Daemon-attached mode (Phase 2): each project has its own daemon.
+	// On SwitchProject we just attach to (or spawn) the daemon for the
+	// NEW project — the previous project's daemon stays alive so its
+	// in-flight runs keep going in the background. The WebView reloads
+	// against the new daemon's URL via reloadWindowApp.
+	if wasUsingDaemon {
+		if dir == "" {
+			return current, nil
+		}
+		if err := a.attachOrSpawnDaemonForProject(ctx, dir); err != nil {
+			return nil, err
+		}
+		a.reloadWindowApp(ctx)
 		return current, nil
 	}
-	dir, storeDir := a.currentProjectServerDirsLocked()
-	a.mu.Unlock()
 
 	a.server.Stop()
 	addr, err := a.server.Start(ctx, dir, storeDir)
@@ -284,6 +356,33 @@ func (a *App) restartServerForCurrentProject(ctx context.Context) (*Project, err
 	writeDesktopURLFile(url)
 	a.reloadWindowApp(ctx)
 	return current, nil
+}
+
+// attachOrSpawnDaemonForProject is the daemon-mode core: find the
+// running daemon for projectDir, or spawn one if none exists, then
+// point the GUI's AssetServer proxy at its URL. Called from onStartup
+// and from restartServerForCurrentProject on project switch — same
+// logic both times so the daemon lifecycle is centralized here.
+//
+// On success, sets a.serverURL + a.usingDaemon under the mutex; the
+// caller is responsible for triggering the WebView reload when the
+// URL actually changed.
+func (a *App) attachOrSpawnDaemonForProject(_ context.Context, projectDir string) error {
+	url, ok := findDaemonForProject(projectDir)
+	if !ok {
+		spawned, err := spawnDaemonForProject(projectDir)
+		if err != nil {
+			return err
+		}
+		url = spawned
+	} else {
+		log.Printf("desktop: attached to existing daemon for %s at %s", projectDir, url)
+	}
+	a.mu.Lock()
+	a.serverURL = url
+	a.usingDaemon = true
+	a.mu.Unlock()
+	return nil
 }
 
 // reloadWindowApp re-bootstraps the Wails webview against the Wails
