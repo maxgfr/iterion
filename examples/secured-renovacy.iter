@@ -1561,10 +1561,11 @@ agent discover_outdated:
   session: fork
   readonly: true
   tools: [bash, read_file, list_files, glob, grep]
-  ## 120 covers a worst-case repo with ~60 deps where the agent
+  ## 90 covers a worst-case repo with ~60 deps where the agent
   ## probes each package's registry latest individually (observed
-  ## with GLM on modjo: ~70 tool calls vs Claude's ~30).
-  tool_max_steps: 120
+  ## upper bound ~70 tool calls in real runs). Bump only if timeout
+  ## ratio rises above 5% on future runs.
+  tool_max_steps: 90
 
 ## select_candidate is a deterministic Node tool — selection is pure
 ## filter/sort/slice with no need for an LLM. The previous Sonnet
@@ -1872,7 +1873,10 @@ agent prepare_commit:
   output: commit_intent
   system: prepare_commit_system
   user: prepare_commit_user
-  session: fork
+  ## Read-only git-log + diff inspection + commit message format —
+  ## no need for head-session repo exploration context. Fresh keeps
+  ## the per-pkg invocation lean (~10s savings vs fork reload).
+  session: fresh
   readonly: true
   tools: [bash, read_file, list_files, git_diff, git_status, git_log]
   tool_max_steps: 20
@@ -2959,7 +2963,7 @@ workflow secured_renovacy:
     post_create: "set -e; command -v claude >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest; sudo corepack enable 2>/dev/null || true; corepack prepare --activate 2>/dev/null || true"
 
   budget:
-    max_parallel_branches: 1
+    max_parallel_branches: 4
     max_duration: "12h"
     max_cost_usd: 100.0
     max_iterations: 500
