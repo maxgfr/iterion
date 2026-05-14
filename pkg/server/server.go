@@ -231,6 +231,11 @@ type Server struct {
 	listener  net.Listener
 	addrReady chan struct{}
 
+	// shutdown is closed by Shutdown so background goroutines (upload
+	// reaper, future periodic tasks) can stop without polling the HTTP
+	// server's state.
+	shutdown chan struct{}
+
 	// browserSessions is the per-run Chromium CDP session registry,
 	// shared with the runtime. Nil disables the Browser pane's live
 	// mode (the iframe + screenshot scrubber paths still work).
@@ -270,6 +275,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		logger:          logger,
 		mux:             http.NewServeMux(),
 		addrReady:       make(chan struct{}),
+		shutdown:        make(chan struct{}),
 		authSvc:         cfg.AuthService,
 		signer:          cfg.AuthSigner,
 		oidcRegistry:    cfg.OIDCRegistry,
@@ -384,6 +390,15 @@ func (s *Server) ListenAndServe() error {
 		s.cfg.Port = tcpAddr.Port
 	}
 	close(s.addrReady)
+	// Sweep abandoned upload staging dirs in the background. Without
+	// this, attachments uploaded for runs that never launched (operator
+	// closed the modal, browser crashed mid-upload, etc.) accumulate
+	// under <store>/uploads/ until the disk fills. The reaper itself
+	// is best-effort — it walks the staging root, deletes dirs older
+	// than uploadStagingTTL, and stops when s.shutdown closes.
+	if s.runs != nil {
+		go s.runStagedUploadReaper()
+	}
 	// Truthful URL in the log: if the operator chose a non-loopback bind we
 	// print the actual address so they know the editor is exposed beyond the
 	// local machine. Previously we always printed http://localhost:<port>
@@ -417,6 +432,15 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		s.watcher.Stop()
 	}
 	s.hub.Stop()
+	// Close shutdown last so background goroutines (upload reaper)
+	// observe it after the drain has settled and HTTP handlers have
+	// stopped accepting new requests.
+	select {
+	case <-s.shutdown:
+		// already closed (idempotent shutdown)
+	default:
+		close(s.shutdown)
+	}
 	return s.server.Shutdown(ctx)
 }
 
