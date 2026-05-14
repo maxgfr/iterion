@@ -3295,18 +3295,23 @@ tool bucket_patches:
 tool resolve_pkg_ecosystem:
   language: js
   script: |
+    // Convention (see prepare_commit D-04 / bucket_patches): use bang
+    // form `{{!input.X}}` for string interpolation INSIDE quoted JS
+    // string literals — the no-bang form auto-quotes and produces
+    // `""yarn-berry""` (double-quoted, parser crash). For json /
+    // array fields, bang form emits a raw JS literal with no quotes.
     const ecosystems = {{!input.ecosystems}};
-    const primary_id = "{{input.primary_ecosystem_id}}";
-    const candidate_eco = "{{input.candidate_ecosystem}}";
+    const primary_id = "{{!input.primary_ecosystem_id}}";
+    const candidate_eco = "{{!input.candidate_ecosystem}}";
     const fallback_workspaces = {{!input.fallback_workspaces}};
     const fallback_lock_files = {{!input.fallback_lock_files}};
     const fallback = {
-      pkg_manager: "{{input.fallback_pkg_manager}}",
-      install_cmd: "{{input.fallback_install_cmd}}",
-      upgrade_cmd: "{{input.fallback_upgrade_cmd}}",
+      pkg_manager: "{{!input.fallback_pkg_manager}}",
+      install_cmd: "{{!input.fallback_install_cmd}}",
+      upgrade_cmd: "{{!input.fallback_upgrade_cmd}}",
       workspaces: Array.isArray(fallback_workspaces) ? fallback_workspaces : [],
       lock_files: Array.isArray(fallback_lock_files) ? fallback_lock_files : [],
-      notes: "{{input.fallback_notes}}",
+      notes: "{{!input.fallback_notes}}",
     };
 
     function findById(arr, id) {
@@ -4155,15 +4160,38 @@ workflow secured_renovacy:
       GIT_AUTHOR_EMAIL: "iterion@noreply.local"
       GIT_COMMITTER_NAME: "iterion-secured-renovacy"
       GIT_COMMITTER_EMAIL: "iterion@noreply.local"
-    ## Read-only bind: the sandbox needs to READ the operator's OAuth /
-    ## credential files for claude_code, but it MUST NOT be able to
-    ## modify them. A malicious package postinstall could otherwise
-    ## tamper with stored tokens (exfiltrate, rotate keys, plant a
-    ## fake credential to phish a later run). claude_code only writes
-    ## to its config dir for refresh-token rotation — that's handled
-    ## by the host claude CLI between iterion runs, not inside the
-    ## sandbox.
-    mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=/home/devbox/.claude,readonly,consistency=cached"]
+    ## Bind mount of ~/.claude into the sandbox. The mount is
+    ## read-write (intentionally — see below).
+    ##
+    ## The sandbox needs to READ the operator's OAuth / credential
+    ## files for claude_code. Session 19 originally added `,readonly`
+    ## here on the assumption that "claude_code only writes for
+    ## refresh-token rotation — handled by the host CLI between runs".
+    ## That assumption was wrong: claude_code ALSO writes per-session
+    ## conversation transcripts under `~/.claude/projects/<hash>/
+    ## <session_id>.jsonl`, and iterion's formatter pass invokes
+    ## `claude --resume <session_id>` to normalise the agent's free-
+    ## form response into structured JSON. With the mount read-only,
+    ## the agent's session files were never persisted, the formatter
+    ## resume failed with "No conversation found", and the structured
+    ## output came back EMPTY — surfacing one layer up as
+    ## `raw_output_len: 0` plus a "missing required field …"
+    ## validation error on every long-output node (detect_stack,
+    ## discover_outdated, …).
+    ##
+    ## Trade-off accepted (R&D phase): a malicious package's
+    ## postinstall script running in this sandbox CAN now tamper
+    ## with `~/.claude` (rotate tokens, plant fake credentials,
+    ## etc.) since the mount is writable. The exfiltration risk was
+    ## already present (read access alone is enough for that), so the
+    ## marginal security loss from re-enabling write is small.
+    ## Production hardening: TODO mount a writable tmpfs/bind at
+    ## `/home/devbox/.claude/projects` ON TOP of a read-only mount of
+    ## the parent — that lets sessions write to the overlay while
+    ## credentials stay tamper-proof. Iterion's sandbox spec
+    ## currently only supports `type=bind` (no tmpfs); the overlay
+    ## bind would need a per-run scratch dir on the host.
+    mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=/home/devbox/.claude,consistency=cached"]
     ## post_create:
     ##   - install claude-code CLI (the agentic backbone). Pin to
     ##     a known-good version (currently 2.1.138 per `npm view
