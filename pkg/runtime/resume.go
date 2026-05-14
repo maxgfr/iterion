@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
@@ -821,15 +823,11 @@ func (e *Engine) doPause(rs *runState, nodeID string, questions map[string]inter
 func (e *Engine) currentLoopIteration(nodeID string, loopCounters map[string]int) int {
 	maxIter := 0
 	// Loop body membership is the authoritative signal — a node is "inside"
-	// loop L iff it's reachable from L's entry within L.Body. Using the
-	// edge endpoints alone misses body nodes that aren't directly on the
-	// loop-bearing edge (observed live: package_loop with edge
-	// write_audit_md -> select_candidate left intel_fanout, upgrade,
-	// install, align_code, prepare_commit all reporting iter=0 across
-	// every package iteration). The snapshot reducer keys exec IDs on
-	// (branch, node, iter) and collapses the body-node executions of
-	// every package onto one exec, which leaves the canvas stuck on
-	// the first package's "finished" status for every body node.
+	// loop L iff it's reachable from L's entry within L.Body. The snapshot
+	// reducer also consumes `iteration_path` (see currentLoopIterationPath
+	// below) to disambiguate executions of the same node across nested
+	// loops; this scalar `iteration` is retained for the editor's pip strip
+	// + the legacy reducer fallback.
 	for loopName, loop := range e.workflow.Loops {
 		if loop == nil {
 			continue
@@ -857,6 +855,59 @@ func (e *Engine) currentLoopIteration(nodeID string, loopCounters map[string]int
 		}
 	}
 	return maxIter
+}
+
+// currentLoopIterationPath returns a stable string encoding of the
+// counters of EVERY loop currently containing nodeID. The snapshot
+// reducers (backend + editor) use it to build a unique exec_id when a
+// node sits in nested loops — observed live: validate_upgrade lives in
+// fix_loop ⊂ package_loop ⊂ family_loop, and the single-int iteration
+// scheme collapsed pkg N's attempt 0 and pkg N+1's attempt 0 onto the
+// same exec because the family_loop counter dominated the max. Encoding
+// `family=5,package=0,fix=3` gives each execution attempt a strictly
+// unique identity regardless of which loop's counter happens to win.
+//
+// The encoding is `<loopName>=<count>` segments joined by `;` in
+// LEXICOGRAPHIC loop-name order so the same {loops × counters} set
+// always renders to the same string (stable across runs, replay-safe).
+// Empty string when the node is in zero loops — reducers fall back to
+// the scalar `iteration` field.
+//
+// Edge endpoint membership is also honoured here for the same belt-
+// and-suspenders reason as currentLoopIteration: a workflow whose
+// Loop.Body is empty (older IRs / hand-written fixtures) still gets a
+// usable path keyed on the loop-bearing edges the node touches.
+func (e *Engine) currentLoopIterationPath(nodeID string, loopCounters map[string]int) string {
+	memberOf := make(map[string]struct{})
+	for loopName, loop := range e.workflow.Loops {
+		if loop == nil {
+			continue
+		}
+		if loop.Body[nodeID] {
+			memberOf[loopName] = struct{}{}
+		}
+	}
+	for _, edge := range e.workflow.Edges {
+		if edge.LoopName == "" {
+			continue
+		}
+		if edge.From == nodeID || edge.To == nodeID {
+			memberOf[edge.LoopName] = struct{}{}
+		}
+	}
+	if len(memberOf) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(memberOf))
+	for n := range memberOf {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, n := range names {
+		parts = append(parts, fmt.Sprintf("%s=%d", n, loopCounters[n]))
+	}
+	return strings.Join(parts, ";")
 }
 
 // ctxWithIteration wraps ctx with the current loop iteration for nodeID

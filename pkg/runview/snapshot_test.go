@@ -238,6 +238,81 @@ func TestSnapshotReducer_PreResumeDuplicateStillGuarded(t *testing.T) {
 	}
 }
 
+func TestSnapshotReducer_NestedLoopIterationPathDisambiguates(t *testing.T) {
+	// Recurring "no node running" bug, nested-loop manifestation:
+	// validate_upgrade lives in fix_loop ⊂ package_loop ⊂ family_loop.
+	// The runtime's currentLoopIteration returns max() across all
+	// containing loops, so every package's attempt at fix=0,pkg=0
+	// resolved to whatever family_loop's counter was (e.g. 5),
+	// collapsing N package attempts onto ONE exec_id. The monotonic
+	// terminal guard then locked the canvas on the first attempt's
+	// finished status.
+	//
+	// Option 3 (this test): the runtime additionally stamps a stable
+	// `iteration_path` string encoding all containing loops' counters
+	// onto the node_started payload. makeExecutionIDFromEvent prefers
+	// the path over the scalar, so each (loop counters tuple) gets a
+	// strictly distinct exec_id even when the scalar iteration is the
+	// same. Two sequential package attempts with the same `iteration`
+	// must therefore produce TWO executions, not one.
+	b := NewSnapshotBuilder(&store.Run{ID: "r1", Status: store.RunStatusRunning})
+	events := []*store.Event{
+		evt(0, store.EventNodeStarted, "", "validate_upgrade", map[string]interface{}{
+			"kind":           "judge",
+			"iteration":      5,
+			"iteration_path": "family_loop=5;fix_loop=0;package_loop=0",
+		}),
+		evt(1, store.EventNodeFinished, "", "validate_upgrade", nil),
+		evt(2, store.EventNodeStarted, "", "validate_upgrade", map[string]interface{}{
+			"kind":           "judge",
+			"iteration":      5,
+			"iteration_path": "family_loop=5;fix_loop=0;package_loop=1",
+		}),
+		evt(3, store.EventNodeFinished, "", "validate_upgrade", nil),
+	}
+	for _, e := range events {
+		b.Apply(e)
+	}
+	snap := b.Snapshot()
+	if got := len(snap.Executions); got != 2 {
+		t.Fatalf("Executions = %d, want 2 (distinct iteration_path must not collapse)", got)
+	}
+	seen := make(map[string]bool)
+	for i, ex := range snap.Executions {
+		if seen[ex.ExecutionID] {
+			t.Errorf("duplicate execution_id %q at index %d", ex.ExecutionID, i)
+		}
+		seen[ex.ExecutionID] = true
+		if ex.Status != ExecStatusFinished {
+			t.Errorf("[%d] Status = %q, want finished", i, ex.Status)
+		}
+	}
+}
+
+func TestSnapshotReducer_LegacyEventsWithoutIterationPathFallBack(t *testing.T) {
+	// Backward compat: historical event streams emitted by runtimes
+	// older than Option 3 don't carry `iteration_path`. They must
+	// still replay deterministically through the scalar `iteration`
+	// path so cold replays of archived runs render correctly.
+	b := NewSnapshotBuilder(&store.Run{ID: "r1", Status: store.RunStatusRunning})
+	events := []*store.Event{
+		evt(0, store.EventNodeStarted, "", "build", map[string]interface{}{"iteration": 0}),
+		evt(1, store.EventNodeFinished, "", "build", nil),
+		evt(2, store.EventNodeStarted, "", "build", map[string]interface{}{"iteration": 1}),
+		evt(3, store.EventNodeFinished, "", "build", nil),
+	}
+	for _, e := range events {
+		b.Apply(e)
+	}
+	snap := b.Snapshot()
+	if got := len(snap.Executions); got != 2 {
+		t.Fatalf("Executions = %d, want 2 (legacy int-iter must still disambiguate)", got)
+	}
+	if snap.Executions[0].ExecutionID == snap.Executions[1].ExecutionID {
+		t.Errorf("legacy exec_ids collided: %q", snap.Executions[0].ExecutionID)
+	}
+}
+
 func TestSnapshotReducer_MonotonicGuardAgainstStaleStartAfterPause(t *testing.T) {
 	// A node paused waiting for human input must not flip back to
 	// running on a stale node_started — only run_resumed transitions

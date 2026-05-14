@@ -561,7 +561,17 @@ function reduceEvents(
           typeof rawIter === "number"
             ? rawIter
             : nextIteration(executionsById, branch, evt.node_id);
-        const id = makeExecutionId(branch, evt.node_id, iter);
+        // Prefer iteration_path (encodes EVERY containing loop's counter)
+        // for the exec_id when present — a single int collapses nested-
+        // loop executions onto the same id and locks the canvas on the
+        // first attempt's terminal status. The path is a stable string
+        // emitted by the runtime; older events without it fall back to
+        // the legacy int form transparently.
+        const rawPath = evt.data?.iteration_path;
+        const id =
+          typeof rawPath === "string" && rawPath.length > 0
+            ? `exec:${branch || "main"}:${evt.node_id}:${rawPath}`
+            : makeExecutionId(branch, evt.node_id, iter);
         const kind = (evt.data?.kind as string) ?? undefined;
         ensureExecCopy();
         const existing = executionsById.get(id);
@@ -582,6 +592,17 @@ function reduceEvents(
         // entry was last touched BEFORE the most recent run_resumed
         // event, it is a pre-resume artefact and a node_started
         // arriving now is a fresh attempt that gets to flip status.
+        // Collision triage at the same exec_id (mirror of
+        // pkg/runview/snapshot.go::handleNodeStarted):
+        //   1. existing non-terminal — same execution, refresh seq.
+        //   2. existing terminal + post-resume — flip back to running
+        //      with fresh started_at (lastResumedSeq rule).
+        //   3. existing terminal + no resume between — WS-history
+        //      replay or runtime re-emission inside the same attempt;
+        //      preserve terminal status, just advance seq markers.
+        // With iteration_path keyed exec_ids, two distinct executions
+        // never share an id, so cases 1 and 3 are purely about replays
+        // of the SAME attempt.
         const isTerminal =
           existing !== undefined &&
           (existing.status === "finished" ||
@@ -592,6 +613,8 @@ function reduceEvents(
           lastResumedSeq >= 0 &&
           existing!.last_seq < lastResumedSeq;
         if (isTerminal && !preResumeArtefact) {
+          // Case 3 — monotonic guard preserves terminal status, only
+          // seq markers advance so subscribers know we saw the event.
           executionsById.set(id, {
             ...existing!,
             current_event_seq: evt.seq,
@@ -599,11 +622,11 @@ function reduceEvents(
           });
           break;
         }
-        // Fresh execution or post-resume re-run: issue a clean
-        // running entry. On post-resume we keep first_seq anchored
-        // on the original event (scrubber + log-window still find
-        // the historical attempt) but reset started_at / finished_at /
-        // error so the user-visible "running for Xs" timer restarts.
+        // Fresh execution OR post-resume re-run: issue a clean running
+        // entry. On post-resume we keep first_seq anchored on the
+        // original event (scrubber + log-window still find the historical
+        // attempt) but reset started_at / finished_at / error so the
+        // user-visible "running for Xs" timer restarts.
         const baseStartedAt = preResumeArtefact
           ? evt.timestamp
           : existing?.started_at ?? evt.timestamp;
