@@ -19,7 +19,7 @@ npx skills add https://github.com/SocialGouv/iterion --skill iterion-dsl
 | [`references/dsl-grammar.md`](references/dsl-grammar.md) | Formal grammar specification (EBNF) |
 | [`references/patterns.md`](references/patterns.md) | 10 reusable workflow patterns with annotated snippets |
 | [`references/diagnostics.md`](references/diagnostics.md) | All validation diagnostic codes (C001–C043) with causes and fixes |
-| [`examples/skill/`](../examples/skill/) | 4 minimal, self-contained `.iter` examples |
+| [`.archive/examples/skill/`](../.archive/examples/skill/) | 4 minimal, self-contained workflow examples (`.iter`) — archived didactic primitives |
 
 ## Usage
 

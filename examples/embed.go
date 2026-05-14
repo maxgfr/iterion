@@ -8,10 +8,12 @@
 //     recipe, materialise the embedded content into the run store
 //     and use that path.
 //
-// Only top-level *.iter files and the proven `skill/*.iter` minimal
-// recipes are embedded. Companion .md design journals and large
-// non-recipe assets (images, mcp test servers, github-actions YAML)
-// are intentionally excluded to keep the binary slim.
+// Only top-level workflow files (.iter / .bot) and the curated
+// `bots/*.bot` productized recipes are embedded. Companion .md design
+// journals and large non-recipe assets (images, mcp test servers,
+// github-actions YAML) are intentionally excluded to keep the binary
+// slim. Archived legacy examples live under `.archive/examples/` and
+// are NOT embedded.
 package examples
 
 import (
@@ -20,11 +22,11 @@ import (
 	"sort"
 )
 
-//go:embed *.iter skill/*.iter
+//go:embed *.iter bots/*.bot
 var Files embed.FS
 
 // Get returns the contents of the embedded example with the given
-// basename (e.g. "secured-renovacy.iter" or "skill/minimal_linear.iter").
+// basename (e.g. "secured-renovacy.iter" or "skill/human_gate.bot").
 // Returns ok=false if no such embedded recipe exists.
 func Get(name string) ([]byte, bool) {
 	data, err := Files.ReadFile(name)
@@ -35,7 +37,7 @@ func Get(name string) ([]byte, bool) {
 }
 
 // List returns the relative paths (within the embed FS) of all embedded
-// .iter recipes, sorted alphabetically.
+// workflow recipes, sorted alphabetically.
 func List() []string {
 	var out []string
 	_ = fs.WalkDir(Files, ".", func(path string, d fs.DirEntry, err error) error {

@@ -43,7 +43,7 @@ var resumeCmd = &cobra.Command{
 func init() {
 	f := resumeCmd.Flags()
 	f.StringVar(&resumeOpts.runID, "run-id", "", "Run to resume")
-	f.StringVar(&resumeOpts.file, "file", "", "Workflow file (.iter)")
+	f.StringVar(&resumeOpts.file, "file", "", "Workflow file (.iter or .bot)")
 	f.StringVar(&resumeOpts.storeDir, "store-dir", "", "Store directory (default: .iterion)")
 	f.StringVar(&resumeOpts.answersFile, "answers-file", "", "JSON file with answers")
 	f.StringArrayVar(&resumeOpts.answerFlags, "answer", nil, "Set answer (key=value, repeatable)")

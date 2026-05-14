@@ -23,7 +23,7 @@ func parseFixtureB(b *testing.B, path string) *parser.ParseResult {
 var compileSink *CompileResult
 
 func BenchmarkCompile_Minimal(b *testing.B) {
-	pr := parseFixtureB(b, "../../../examples/skill/minimal_linear.iter")
+	pr := parseFixtureB(b, "../testdata/skill/minimal_linear.iter")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		compileSink = Compile(pr.File)
@@ -31,7 +31,7 @@ func BenchmarkCompile_Minimal(b *testing.B) {
 }
 
 func BenchmarkCompile_Medium(b *testing.B) {
-	pr := parseFixtureB(b, "../../../examples/pr_refine_single_model.iter")
+	pr := parseFixtureB(b, "../testdata/pr_refine_single_model.iter")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		compileSink = Compile(pr.File)
@@ -39,7 +39,7 @@ func BenchmarkCompile_Medium(b *testing.B) {
 }
 
 func BenchmarkCompile_Large(b *testing.B) {
-	pr := parseFixtureB(b, "../../../examples/rust_to_go_port.iter")
+	pr := parseFixtureB(b, "../testdata/rust_to_go_port.iter")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		compileSink = Compile(pr.File)
@@ -47,7 +47,7 @@ func BenchmarkCompile_Large(b *testing.B) {
 }
 
 func BenchmarkCompile_Exhaustive(b *testing.B) {
-	pr := parseFixtureB(b, "../../../examples/exhaustive_dsl_coverage.iter")
+	pr := parseFixtureB(b, "../testdata/exhaustive_dsl_coverage.iter")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		compileSink = Compile(pr.File)

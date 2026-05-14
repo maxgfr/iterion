@@ -14,7 +14,7 @@ import (
 //	iter1: claude approves   → streak_check.stop = false (no previous)
 //	iter2: gpt approves      → streak_check.stop = true  → done
 func TestVibeReviewAlternating_HappyPath(t *testing.T) {
-	wf := compileFixture(t, "vibe_review_alternating.iter")
+	wf := compileFixture(t, "bots/vibe_review_alternating.bot")
 	exec := newScenarioExecutor()
 
 	exec.on("reviewer_claude", func(_ map[string]interface{}) (map[string]interface{}, error) {
@@ -76,7 +76,7 @@ func TestVibeReviewAlternating_HappyPath(t *testing.T) {
 // claude→streak_check sees previous=gpt's approval, current=claude's
 // approval, families differ → stop.
 func TestVibeReviewAlternating_FixThenApprove(t *testing.T) {
-	wf := compileFixture(t, "vibe_review_alternating.iter")
+	wf := compileFixture(t, "bots/vibe_review_alternating.bot")
 	exec := newScenarioExecutor()
 
 	claudeCalls := 0
@@ -139,7 +139,7 @@ func TestVibeReviewAlternating_FixThenApprove(t *testing.T) {
 // run should fall through to the unconditional `streak_check -> done`
 // fallback.
 func TestVibeReviewAlternating_LoopExhausted(t *testing.T) {
-	wf := compileFixture(t, "vibe_review_alternating.iter")
+	wf := compileFixture(t, "bots/vibe_review_alternating.bot")
 	exec := newScenarioExecutor()
 
 	exec.on("reviewer_claude", func(_ map[string]interface{}) (map[string]interface{}, error) {

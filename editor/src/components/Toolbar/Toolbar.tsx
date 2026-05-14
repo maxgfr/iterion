@@ -209,14 +209,17 @@ export default function Toolbar() {
       }
     } else {
       const name = document.workflows?.[0]?.name || "workflow";
-      setSaveFileName(`${name}.iter`);
+      setSaveFileName(`${name}.bot`);
       setShowSaveDialog(true);
     }
   }, [document, currentFilePath, setCurrentSource, markSaved, addToast, pushRecent]);
 
   const handleSaveAs = useCallback(async () => {
     if (!document || !saveFileName) return;
-    const fileName = saveFileName.endsWith(".iter") ? saveFileName : `${saveFileName}.iter`;
+    const fileName =
+      saveFileName.endsWith(".iter") || saveFileName.endsWith(".bot")
+        ? saveFileName
+        : `${saveFileName}.bot`;
     try {
       const result = await api.saveFile(fileName, document);
       setCurrentFilePath(result.path);
@@ -264,7 +267,7 @@ export default function Toolbar() {
       const a = window.document.createElement("a");
       a.href = url;
       const name = document.workflows?.[0]?.name || "workflow";
-      a.download = `${name}.iter`;
+      a.download = `${name}.bot`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -346,7 +349,7 @@ export default function Toolbar() {
             <div className="absolute top-full left-0 mt-1 z-50 min-w-[180px] rounded-md border border-border-default bg-surface-1 shadow-xl py-1">
               <OverflowItem
                 icon={<UploadIcon />}
-                label="Import .iter file"
+                label="Import workflow file"
                 onClick={() => {
                   setOverflowOpen(false);
                   fileInputRef.current?.click();
@@ -354,7 +357,7 @@ export default function Toolbar() {
               />
               <OverflowItem
                 icon={<DownloadIcon />}
-                label="Download as .iter"
+                label="Download as .bot"
                 onClick={() => {
                   setOverflowOpen(false);
                   handleDownload();
@@ -460,7 +463,7 @@ export default function Toolbar() {
         </ToolbarGroup>
       )}
 
-      <input ref={fileInputRef} type="file" accept=".iter" className="hidden" onChange={handleImport} />
+      <input ref={fileInputRef} type="file" accept=".iter,.bot" className="hidden" onChange={handleImport} />
 
       {/* Right-aligned: file path + help + run console */}
       <div className="ml-auto flex items-center gap-2">
@@ -549,7 +552,7 @@ export default function Toolbar() {
           autoFocus
           value={saveFileName}
           onChange={(e) => setSaveFileName(e.target.value)}
-          placeholder="filename.iter"
+          placeholder="filename.bot"
           size="md"
           onKeyDown={(e) => {
             if (e.key === "Enter") handleSaveAs();

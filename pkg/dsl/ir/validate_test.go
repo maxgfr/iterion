@@ -768,7 +768,7 @@ func TestValidateReferenceFixturesClean(t *testing.T) {
 
 	for _, fixture := range fixtures {
 		t.Run(fixture, func(t *testing.T) {
-			path := "../../../examples/" + fixture
+			path := "../testdata/" + fixture
 			src := readFixture(t, path)
 			if src == "" {
 				t.Skip("fixture not found")

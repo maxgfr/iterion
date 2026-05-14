@@ -19,7 +19,7 @@ func readFixtureB(b *testing.B, path string) string {
 var parseSink *parser.ParseResult
 
 func BenchmarkParse_Minimal(b *testing.B) {
-	src := readFixtureB(b, "../../../examples/skill/minimal_linear.iter")
+	src := readFixtureB(b, "../testdata/skill/minimal_linear.iter")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		parseSink = parser.Parse("bench.iter", src)
@@ -27,7 +27,7 @@ func BenchmarkParse_Minimal(b *testing.B) {
 }
 
 func BenchmarkParse_Medium(b *testing.B) {
-	src := readFixtureB(b, "../../../examples/pr_refine_single_model.iter")
+	src := readFixtureB(b, "../testdata/pr_refine_single_model.iter")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		parseSink = parser.Parse("bench.iter", src)
@@ -35,7 +35,7 @@ func BenchmarkParse_Medium(b *testing.B) {
 }
 
 func BenchmarkParse_Large(b *testing.B) {
-	src := readFixtureB(b, "../../../examples/rust_to_go_port.iter")
+	src := readFixtureB(b, "../testdata/rust_to_go_port.iter")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		parseSink = parser.Parse("bench.iter", src)
@@ -43,7 +43,7 @@ func BenchmarkParse_Large(b *testing.B) {
 }
 
 func BenchmarkParse_Exhaustive(b *testing.B) {
-	src := readFixtureB(b, "../../../examples/exhaustive_dsl_coverage.iter")
+	src := readFixtureB(b, "../testdata/exhaustive_dsl_coverage.iter")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		parseSink = parser.Parse("bench.iter", src)

@@ -64,7 +64,7 @@ docker run --rm \
   -v "$PWD:/work" -w /work \
   -e ANTHROPIC_API_KEY \
   ghcr.io/socialgouv/iterion:latest \
-  run workflow.iter --var pr_title="..."
+  run workflow.bot --var pr_title="..."   # .iter is also accepted
 
 # Editor/server on http://localhost:4891
 docker run --rm -p 4891:4891 -v "$PWD:/work" -w /work \

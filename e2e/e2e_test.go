@@ -29,10 +29,12 @@ import (
 // Helpers
 // ---------------------------------------------------------------------------
 
-// compileFixture parses and compiles a .iter file from the examples directory.
+// compileFixture parses and compiles a workflow file (.iter / .bot)
+// from either examples/ (active) or .archive/examples/ (historical
+// fixtures used only by the test suite).
 func compileFixture(t *testing.T, name string) *ir.Workflow {
 	t.Helper()
-	path := filepath.Join("..", "examples", name)
+	path := resolveFixturePath(t, name)
 	src, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read fixture %s: %v", name, err)
@@ -57,6 +59,21 @@ func compileFixture(t *testing.T, name string) *ir.Workflow {
 	}
 
 	return cr.Workflow
+}
+
+// resolveFixturePath looks up a fixture in examples/ first, then falls
+// back to .archive/examples/ (where historical fixtures used only by
+// the test suite live).
+func resolveFixturePath(t *testing.T, name string) string {
+	t.Helper()
+	for _, base := range []string{"../examples", "../.archive/examples"} {
+		path := filepath.Join(base, name)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	t.Fatalf("fixture not found in examples/ or .archive/examples/: %s", name)
+	return ""
 }
 
 // compileFixtureStubSafe compiles the fixture and strips tools from all

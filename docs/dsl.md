@@ -4,6 +4,8 @@
 
 Workflows are written in a declarative, indentation-significant language. The formal grammar is in [`grammar/iterion_v1.ebnf`](grammar/iterion_v1.ebnf).
 
+> Workflow files use either the `.iter` or `.bot` extension — the two are technically identical (same parser, same runtime). The distinction is narrative: see [`.iter` vs `.bot`](../README.md#iter-vs-bot) in the README.
+
 ## Variables
 
 Define typed variables at the top level. These can be set at runtime with `--var key=value`:
