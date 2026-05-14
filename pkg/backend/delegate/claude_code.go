@@ -900,7 +900,12 @@ func logAssistantContent(logger *iterlog.Logger, nodeID string, iteration int, b
 			}
 		case *claudesdk.TextBlock:
 			if bl.Text != "" {
-				logger.Info("[%s#%d/claude-code] 💬 %s", nodeID, iteration, truncate(bl.Text, 300))
+				// LogBlock so the assistant text folds in the editor's
+				// run log; full content, no truncation (the SPA log
+				// view handles wrap + per-block expand/collapse).
+				logger.LogBlock(iterlog.LevelInfo, "ℹ️ ",
+					fmt.Sprintf("[%s#%d/claude-code] 💬", nodeID, iteration),
+					bl.Text)
 			}
 		}
 	}
