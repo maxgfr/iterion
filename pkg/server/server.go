@@ -490,13 +490,13 @@ func (s *Server) routes() {
 		s.registerOAuthForfaitRoutes()
 	}
 
-	// Serve static frontend files.
+	// Serve static frontend files with SPA fallback so client-side routes
+	// (e.g. /runs/abc) render index.html instead of 404.
 	staticSub, err := fs.Sub(StaticFS, "static")
 	if err != nil {
 		log.Fatalf("failed to create sub filesystem: %v", err)
 	}
-	fileServer := http.FileServer(http.FS(staticSub))
-	s.mux.Handle("GET /", fileServer)
+	s.mux.Handle("GET /", SPAHandler(staticSub))
 }
 
 // --- Request/Response types ---
