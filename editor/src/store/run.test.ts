@@ -63,6 +63,7 @@ beforeEach(() => {
   useRunStore.setState({
     snapshot: null,
     executionsById: new Map(),
+    lastExecIDByNode: new Map(),
     events: [],
     pendingHumanInput: null,
   } as never);
@@ -199,5 +200,62 @@ describe("applyEventsBatch — monotonic status", () => {
     const st = useRunStore.getState();
     const e = Array.from(st.executionsById.values())[0]!;
     expect(e.status).toBe("failed");
+  });
+});
+
+describe("applyEventsBatch — nested-loop exec_id attribution", () => {
+  // Reproduces the post-Option-3 "half the nodes show as running" bug.
+  // Two consecutive package iterations of the same node emit
+  // node_started events keyed on distinct iteration_path values
+  // (package_loop=11 vs package_loop=12) but the SAME scalar
+  // `iteration`. The reducer must route each node_finished to the
+  // node_started that immediately preceded it — not to the highest
+  // scalar loop_iteration entry, which was the legacy heuristic and
+  // is non-deterministic when distinct execs share loop_iteration.
+  it("routes node_finished by lastExecIDByNode, not max(loop_iteration)", () => {
+    const path11 = "family_loop=5;fix_loop=0;package_loop=11";
+    const path12 = "family_loop=5;fix_loop=0;package_loop=12";
+    const evtStarted = (path: string, seq: number, iter: number): RunEvent => ({
+      seq,
+      timestamp: `2026-01-01T00:00:0${seq}Z`,
+      type: "node_started",
+      run_id: "run_test",
+      branch_id: "main",
+      node_id: "validate_upgrade",
+      data: { kind: "judge", iteration: iter, iteration_path: path },
+    } as RunEvent);
+    const evtFinished = (seq: number): RunEvent => ({
+      seq,
+      timestamp: `2026-01-01T00:00:0${seq}Z`,
+      type: "node_finished",
+      run_id: "run_test",
+      branch_id: "main",
+      node_id: "validate_upgrade",
+    } as RunEvent);
+
+    useRunStore.getState().applyEventsBatch([
+      evtStarted(path11, 1, 0),
+      evtFinished(2),
+      evtStarted(path12, 3, 0),
+      evtFinished(4),
+    ]);
+
+    const st = useRunStore.getState();
+    const execs = Array.from(st.executionsById.values()).filter(
+      (e) => e.ir_node_id === "validate_upgrade",
+    );
+    expect(execs).toHaveLength(2);
+    // Both attempts MUST be terminal. Pre-fix, currentExec's
+    // max(loop_iteration) scan was non-deterministic across map order
+    // since both shared loop_iteration=0; node_finished could land on
+    // either, leaving the other forever "running".
+    for (const e of execs) {
+      expect(e.status).toBe("finished");
+    }
+    // Verify the lastExecIDByNode map points at the LATEST
+    // node_started (pkg=12) so any further downstream event in this
+    // (branch, node) attributes there.
+    const recorded = st.lastExecIDByNode.get("main\tvalidate_upgrade");
+    expect(recorded).toBe(`exec:main:validate_upgrade:${path12}`);
   });
 });

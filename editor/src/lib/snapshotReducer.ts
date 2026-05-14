@@ -28,11 +28,27 @@ export function buildExecutionsAt(
   // terminal exec whose last_seq predates the latest run_resumed is
   // a pre-resume artefact and the new node_started is a fresh attempt.
   let lastResumedSeq = -1;
+  // (branch, node) → most recent exec_id seen on node_started. Mirror
+  // of the live store's lastExecIDByNode and the backend's
+  // SnapshotBuilder.lastExecID. Without this lookup, currentExecFor
+  // fell back to a max(loop_iteration) scan that picks
+  // non-deterministically when nested-loop iteration_path execs share
+  // the same scalar loop_iteration (post-Option-3): a node_finished
+  // could land on the wrong attempt and leave the actual running exec
+  // locked as running in the scrubber's reconstructed snapshot.
+  const lastExecID = new Map<string, string>();
+  const execKey = (branch: string, nodeId: string): string =>
+    `${branch || "main"}\t${nodeId}`;
 
   const currentExecFor = (
     branch: string,
     nodeId: string,
   ): ExecutionState | null => {
+    const recorded = lastExecID.get(execKey(branch, nodeId));
+    if (recorded) {
+      const e = execs.get(recorded);
+      if (e) return e;
+    }
     let best: ExecutionState | null = null;
     for (const e of execs.values()) {
       if (e.branch_id === branch && e.ir_node_id === nodeId) {
@@ -88,6 +104,10 @@ export function buildExecutionsAt(
             current_event_seq: evt.seq,
             last_seq: evt.seq,
           });
+          // Stamp lastExecID even in the guard branch — every
+          // node_started, including replayed duplicates, is by
+          // definition the latest event for this (branch, node).
+          lastExecID.set(execKey(branch, evt.node_id), id);
           break;
         }
         // Fresh execution (no existing entry) OR post-resume re-run of a
@@ -111,6 +131,7 @@ export function buildExecutionsAt(
           first_seq: existing?.first_seq ?? evt.seq,
           last_seq: evt.seq,
         });
+        lastExecID.set(execKey(branch, evt.node_id), id);
         break;
       }
       case "node_finished": {
