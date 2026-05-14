@@ -1891,6 +1891,44 @@ schema bucket_patches_output:
   patches_count: int
   attempted_after_batch: json
 
+## ─── Schemas : per-package ecosystem resolution ────────────────────
+
+## resolve_pkg_eco_input picks the right ecosystem profile for a single
+## candidate package. detect_stack populates ecosystems[] as the source
+## of truth; select_candidate stamps each candidate with its owning
+## ecosystem id. This tool joins the two so per-package agents
+## (security_audit, upgrade, install, fix_after_upgrade, …) target the
+## correct manager on a polyglot repo instead of always falling back
+## to detect_stack's primary fields. The fallback_* fields carry the
+## legacy primary so single-ecosystem repos and pre-multi-ecosystem
+## discoveries (where candidate.ecosystem is empty) still work.
+schema resolve_pkg_eco_input:
+  ecosystems: json
+  primary_ecosystem_id: string
+  candidate_ecosystem: string
+  fallback_pkg_manager: string
+  fallback_install_cmd: string
+  fallback_upgrade_cmd: string
+  fallback_workspaces: string[]
+  fallback_lock_files: string[]
+  fallback_notes: string
+
+## resolve_pkg_eco_output mirrors the legacy outputs.detect_stack
+## per-package fields so downstream edges can swap
+## outputs.detect_stack.X → outputs.resolve_pkg_ecosystem.X with a
+## one-line rename. resolved_id surfaces which ecosystem actually
+## matched (empty when no match → fallback was used); matched is true
+## iff the candidate's ecosystem id was found verbatim in ecosystems[].
+schema resolve_pkg_eco_output:
+  pkg_manager: string
+  install_cmd: string
+  upgrade_cmd: string
+  workspaces: string[]
+  lock_files: string[]
+  notes: string
+  resolved_id: string
+  matched: bool
+
 ## ─── Schemas : family batching ─────────────────────────────────────
 
 ## bucket_families_input drives the family bucketing tool. We forward
@@ -3177,6 +3215,76 @@ tool bucket_patches:
   input: bucket_patches_input
   output: bucket_patches_output
 
+## resolve_pkg_ecosystem joins outputs.detect_stack.ecosystems[] with
+## outputs.select_candidate.ecosystem so per-package agents target the
+## correct manager on a polyglot repo. Resolution cascade:
+##   1. exact match on candidate.ecosystem (the per-package id stamped
+##      by discover_outdated)
+##   2. detect_stack.primary_ecosystem_id (operator-perceived primary,
+##      used when candidate had no ecosystem stamp — happens on legacy
+##      single-ecosystem discoveries that didn't populate per-row)
+##   3. ecosystems[0] (any first entry — last-resort fallback for a
+##      malformed primary_ecosystem_id)
+##   4. legacy fallback_* from detect_stack's primary mirror fields
+##      (when ecosystems[] itself is empty / non-array)
+##
+## A JS tool rather than a compute node because iterion's compute expr
+## language doesn't ship array filter / lambda primitives — same
+## reasoning as bucket_patches above. Sub-millisecond, $0.
+tool resolve_pkg_ecosystem:
+  language: js
+  script: |
+    const ecosystems = {{!input.ecosystems}};
+    const primary_id = "{{input.primary_ecosystem_id}}";
+    const candidate_eco = "{{input.candidate_ecosystem}}";
+    const fallback_workspaces = {{!input.fallback_workspaces}};
+    const fallback_lock_files = {{!input.fallback_lock_files}};
+    const fallback = {
+      pkg_manager: "{{input.fallback_pkg_manager}}",
+      install_cmd: "{{input.fallback_install_cmd}}",
+      upgrade_cmd: "{{input.fallback_upgrade_cmd}}",
+      workspaces: Array.isArray(fallback_workspaces) ? fallback_workspaces : [],
+      lock_files: Array.isArray(fallback_lock_files) ? fallback_lock_files : [],
+      notes: "{{input.fallback_notes}}",
+    };
+
+    function findById(arr, id) {
+      if (!Array.isArray(arr) || !id) return null;
+      return arr.find((e) => e && e.id === id) || null;
+    }
+    function nonEmptyArr(v) { return Array.isArray(v) && v.length > 0; }
+    function nonEmptyStr(v) { return typeof v === "string" && v.length > 0; }
+
+    let target = findById(ecosystems, candidate_eco);
+    if (!target) target = findById(ecosystems, primary_id);
+    if (!target && Array.isArray(ecosystems) && ecosystems.length > 0) target = ecosystems[0];
+
+    const out = target
+      ? {
+          pkg_manager: nonEmptyStr(target.pkg_manager) ? target.pkg_manager : fallback.pkg_manager,
+          install_cmd: nonEmptyStr(target.install_cmd) ? target.install_cmd : fallback.install_cmd,
+          upgrade_cmd: nonEmptyStr(target.upgrade_cmd) ? target.upgrade_cmd : fallback.upgrade_cmd,
+          workspaces: nonEmptyArr(target.workspaces) ? target.workspaces : fallback.workspaces,
+          lock_files: nonEmptyArr(target.lock_files) ? target.lock_files : fallback.lock_files,
+          notes: nonEmptyStr(target.notes) ? target.notes : fallback.notes,
+          resolved_id: target.id || "",
+          matched: target.id === candidate_eco && nonEmptyStr(candidate_eco),
+        }
+      : {
+          pkg_manager: fallback.pkg_manager,
+          install_cmd: fallback.install_cmd,
+          upgrade_cmd: fallback.upgrade_cmd,
+          workspaces: fallback.workspaces,
+          lock_files: fallback.lock_files,
+          notes: fallback.notes,
+          resolved_id: "",
+          matched: false,
+        };
+
+    process.stdout.write(JSON.stringify(out));
+  input: resolve_pkg_eco_input
+  output: resolve_pkg_eco_output
+
 ## batch_upgrade_patches bumps every patch in one yarn up invocation.
 ## Patches are non-breaking by definition; bundling them saves 30+
 ## yarn-install round-trips on a typical repo. If yarn refuses a spec
@@ -4244,19 +4352,29 @@ workflow secured_renovacy:
   }
   phase2_decider -> alt_review when not go_done
 
-  ## More candidates → parallel intel: security_audit and
+  ## More candidates → resolve which ecosystem owns this candidate
+  ## BEFORE the intel fan-out so security_audit/upgrade/install/revert
+  ## see the right pkg_manager + install_cmd + upgrade_cmd + workspaces
+  ## + lock_files + notes for THIS package, not detect_stack's primary
+  ## (which would be wrong on a polyglot repo). resolve_pkg_ecosystem
+  ## is a sub-millisecond JS tool; the resolution cascade is documented
+  ## on its declaration above.
+  select_candidate -> resolve_pkg_ecosystem when has_more with {
+    ecosystems: "{{outputs.detect_stack.ecosystems}}",
+    primary_ecosystem_id: "{{outputs.detect_stack.primary_ecosystem_id}}",
+    candidate_ecosystem: "{{outputs.select_candidate.ecosystem}}",
+    fallback_pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
+    fallback_install_cmd: "{{outputs.detect_stack.install_cmd}}",
+    fallback_upgrade_cmd: "{{outputs.detect_stack.upgrade_cmd}}",
+    fallback_workspaces: "{{outputs.detect_stack.workspaces}}",
+    fallback_lock_files: "{{outputs.detect_stack.lock_files}}",
+    fallback_notes: "{{outputs.detect_stack.notes}}"
+  }
+
+  ## After resolution, parallel intel: security_audit and
   ## changelog_review run simultaneously instead of sequentially.
   ## intel_join converges both and routes based on safety verdict.
-  select_candidate -> intel_fanout when has_more with {
-    workspace_dir: "{{vars.workspace_dir}}",
-    selected_package: "{{outputs.select_candidate.selected_package}}",
-    current_version: "{{outputs.select_candidate.current_version}}",
-    target_version: "{{outputs.select_candidate.target_version}}",
-    risk: "{{outputs.select_candidate.risk}}",
-    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
-    lock_files: "{{outputs.detect_stack.lock_files}}",
-    notes: "{{outputs.detect_stack.notes}}"
-  }
+  resolve_pkg_ecosystem -> intel_fanout
 
   ## Fan-out to the two read-only analyses. Both fire concurrently;
   ## intel_join awaits wait_all before routing.
@@ -4264,9 +4382,9 @@ workflow secured_renovacy:
     workspace_dir: "{{vars.workspace_dir}}",
     selected_package: "{{outputs.select_candidate.selected_package}}",
     target_version: "{{outputs.select_candidate.target_version}}",
-    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
-    lock_files: "{{outputs.detect_stack.lock_files}}",
-    notes: "{{outputs.detect_stack.notes}}",
+    pkg_manager: "{{outputs.resolve_pkg_ecosystem.pkg_manager}}",
+    lock_files: "{{outputs.resolve_pkg_ecosystem.lock_files}}",
+    notes: "{{outputs.resolve_pkg_ecosystem.notes}}",
     _session_id: "{{outputs.detect_stack._session_id}}",
     _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
@@ -4296,43 +4414,43 @@ workflow secured_renovacy:
 
   intel_join -> upgrade when safe with {
     workspace_dir: "{{vars.workspace_dir}}",
-    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
-    upgrade_cmd_hint: "{{outputs.detect_stack.upgrade_cmd}}",
-    install_cmd_hint: "{{outputs.detect_stack.install_cmd}}",
+    pkg_manager: "{{outputs.resolve_pkg_ecosystem.pkg_manager}}",
+    upgrade_cmd_hint: "{{outputs.resolve_pkg_ecosystem.upgrade_cmd}}",
+    install_cmd_hint: "{{outputs.resolve_pkg_ecosystem.install_cmd}}",
     selected_package: "{{outputs.select_candidate.selected_package}}",
     target_version: "{{outputs.select_candidate.target_version}}",
-    workspaces: "{{outputs.detect_stack.workspaces}}",
-    notes: "{{outputs.detect_stack.notes}}",
+    workspaces: "{{outputs.resolve_pkg_ecosystem.workspaces}}",
+    notes: "{{outputs.resolve_pkg_ecosystem.notes}}",
     _session_id: "{{outputs.detect_stack._session_id}}",
     _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   upgrade -> revert_changes when not success with {
     workspace_dir: "{{vars.workspace_dir}}",
-    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
-    install_cmd_hint: "{{outputs.detect_stack.install_cmd}}",
-    workspaces: "{{outputs.detect_stack.workspaces}}",
-    notes: "{{outputs.detect_stack.notes}}",
+    pkg_manager: "{{outputs.resolve_pkg_ecosystem.pkg_manager}}",
+    install_cmd_hint: "{{outputs.resolve_pkg_ecosystem.install_cmd}}",
+    workspaces: "{{outputs.resolve_pkg_ecosystem.workspaces}}",
+    notes: "{{outputs.resolve_pkg_ecosystem.notes}}",
     _session_id: "{{outputs.detect_stack._session_id}}",
     _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   upgrade -> install when success with {
     workspace_dir: "{{vars.workspace_dir}}",
-    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
-    install_cmd_hint: "{{outputs.detect_stack.install_cmd}}",
-    workspaces: "{{outputs.detect_stack.workspaces}}",
-    notes: "{{outputs.detect_stack.notes}}",
+    pkg_manager: "{{outputs.resolve_pkg_ecosystem.pkg_manager}}",
+    install_cmd_hint: "{{outputs.resolve_pkg_ecosystem.install_cmd}}",
+    workspaces: "{{outputs.resolve_pkg_ecosystem.workspaces}}",
+    notes: "{{outputs.resolve_pkg_ecosystem.notes}}",
     _session_id: "{{outputs.detect_stack._session_id}}",
     _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
 
   install -> revert_changes when not success with {
     workspace_dir: "{{vars.workspace_dir}}",
-    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
-    install_cmd_hint: "{{outputs.detect_stack.install_cmd}}",
-    workspaces: "{{outputs.detect_stack.workspaces}}",
-    notes: "{{outputs.detect_stack.notes}}",
+    pkg_manager: "{{outputs.resolve_pkg_ecosystem.pkg_manager}}",
+    install_cmd_hint: "{{outputs.resolve_pkg_ecosystem.install_cmd}}",
+    workspaces: "{{outputs.resolve_pkg_ecosystem.workspaces}}",
+    notes: "{{outputs.resolve_pkg_ecosystem.notes}}",
     _session_id: "{{outputs.detect_stack._session_id}}",
     _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
@@ -4405,10 +4523,10 @@ workflow secured_renovacy:
   ## fix_loop exhausted → revert + skip
   fix_after_upgrade -> revert_changes with {
     workspace_dir: "{{vars.workspace_dir}}",
-    pkg_manager: "{{outputs.detect_stack.pkg_manager}}",
-    install_cmd_hint: "{{outputs.detect_stack.install_cmd}}",
-    workspaces: "{{outputs.detect_stack.workspaces}}",
-    notes: "{{outputs.detect_stack.notes}}",
+    pkg_manager: "{{outputs.resolve_pkg_ecosystem.pkg_manager}}",
+    install_cmd_hint: "{{outputs.resolve_pkg_ecosystem.install_cmd}}",
+    workspaces: "{{outputs.resolve_pkg_ecosystem.workspaces}}",
+    notes: "{{outputs.resolve_pkg_ecosystem.notes}}",
     _session_id: "{{outputs.detect_stack._session_id}}",
     _session_fingerprint: "{{outputs.detect_stack._session_fingerprint}}"
   }
