@@ -50,15 +50,31 @@ export function buildExecutionsAt(
       case "node_started": {
         if (!evt.node_id) break;
         const iter = stepIteration(counts, evt);
-        const id = `exec:${branch}:${evt.node_id}:${iter}`;
+        // Prefer iteration_path (encodes EVERY containing loop's counter)
+        // for the exec_id when present — a single int collapses nested-
+        // loop executions onto the same id and locks the scrubber on
+        // the first attempt's terminal status. The path is a stable
+        // string emitted by the runtime; older events without it fall
+        // back to the legacy int form transparently. Must mirror the
+        // live store reducer (editor/src/store/run.ts) and the backend
+        // (pkg/runview/snapshot.go) so the time-travel snapshot stays
+        // aligned with the live view.
+        const rawPath = evt.data?.["iteration_path"];
+        const id =
+          typeof rawPath === "string" && rawPath.length > 0
+            ? `exec:${branch}:${evt.node_id}:${rawPath}`
+            : `exec:${branch}:${evt.node_id}:${iter}`;
         const kind = (evt.data?.["kind"] as string) ?? undefined;
         const existing = execs.get(id);
-        // Monotonic status: mirror the live store reducer (see
-        // store/run.ts) — a duplicate node_started for an exec id that
-        // already reached a terminal state must not flip it back to
-        // "running". The time-travel scrubber would otherwise lose
-        // finished_at when replaying a stream that includes a recovery
-        // retry that the runtime emitted as a fresh node_started.
+        // Collision triage at the same exec_id (mirror of the live
+        // store and pkg/runview/snapshot.go::handleNodeStarted):
+        //   - existing non-terminal — same execution, refresh seq.
+        //   - existing terminal + post-resume — flip back to running.
+        //   - existing terminal + no resume between — WS-history
+        //     replay or runtime re-emission inside the same attempt;
+        //     preserve terminal status, advance seq markers only.
+        // With iteration_path keyed exec_ids, distinct executions
+        // never share an id by construction.
         const isTerminal =
           existing &&
           (existing.status === "finished" ||

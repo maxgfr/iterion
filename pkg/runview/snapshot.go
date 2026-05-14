@@ -138,8 +138,16 @@ type SnapshotBuilder struct {
 	header    RunHeader
 	execs     map[string]*ExecutionState
 	order     []string                  // execution_id in first-seen order; defines snapshot.Executions order
-	nodeCount map[string]map[string]int // branch_id → ir_node_id → next iteration index
-	lastSeq   int64
+	nodeCount map[string]map[string]int // branch_id → ir_node_id → next iteration index (LEGACY, for fallback int-iter path)
+	// lastExecID maps (branch → nodeID → exec_id) to the most recent
+	// node_started exec_id for that node. currentExec uses it to find
+	// the in-flight execution for downstream events (node_finished,
+	// artifact_written, run_failed, …) when the exec_id is derived from
+	// `iteration_path` (a stable encoding of all containing loop
+	// counters) rather than the scalar `iteration`. nodeCount alone
+	// can't reconstruct a path-based id; this map is the bridge.
+	lastExecID map[string]map[string]string
+	lastSeq    int64
 	// lastResumedSeq is the seq of the most recent EventRunResumed.
 	// The monotonic guard in handleNodeStarted refuses to downgrade a
 	// terminal exec back to running on a duplicate node_started, which
@@ -169,6 +177,7 @@ func NewSnapshotBuilder(run *store.Run) *SnapshotBuilder {
 	b := &SnapshotBuilder{
 		execs:          make(map[string]*ExecutionState),
 		nodeCount:      make(map[string]map[string]int),
+		lastExecID:     make(map[string]map[string]string),
 		lastSeq:        NoEventsSeq,
 		lastResumedSeq: NoEventsSeq,
 	}
@@ -296,7 +305,18 @@ func (b *SnapshotBuilder) handleNodeStarted(evt *store.Event, branch string) {
 		return
 	}
 	iter := b.resolveIteration(branch, evt)
-	id := MakeExecutionID(branch, evt.NodeID, iter)
+	// Exec-id disambiguation: when the runtime stamps `iteration_path`
+	// (a stable encoding of EVERY containing loop's counter) we key on
+	// it instead of the scalar `iteration`. Single-int iter collapsed
+	// executions of a node living in NESTED loops onto the same exec
+	// (observed live: validate_upgrade in fix_loop ⊂ package_loop ⊂
+	// family_loop; max() returned the frozen family_loop counter so
+	// every package's attempt landed on the SAME exec_id, the canvas
+	// then locked on the first attempt's terminal status). The path
+	// gives every (loop counters tuple) a strictly unique identity.
+	// LoopIteration on the exec stays as the scalar iter for the
+	// editor's pip strips + per-iteration filtering.
+	id := makeExecutionIDFromEvent(branch, evt.NodeID, iter, evt.Data)
 	ts := evt.Timestamp
 	existing := b.execs[id]
 	exec := &ExecutionState{
@@ -366,12 +386,14 @@ func (b *SnapshotBuilder) handleNodeStarted(evt *store.Event, branch string) {
 			exec.Error = ""
 		}
 		b.execs[id] = exec
+		b.rememberCurrentExec(branch, evt.NodeID, id)
 		// Already in b.order — don't re-append, otherwise Snapshot()
 		// would emit the same execution twice.
 		return
 	}
 	b.execs[id] = exec
 	b.order = append(b.order, id)
+	b.rememberCurrentExec(branch, evt.NodeID, id)
 }
 
 // isTerminalExecStatus reports whether an exec status is monotonic —
@@ -602,9 +624,23 @@ func (b *SnapshotBuilder) bumpNodeCount(branch, nodeID string, iter int) {
 }
 
 // currentExec returns the most recently started execution of (branch,
-// nodeID) — i.e. the highest iteration index. Subsequent events
-// (node_finished, artifact_written, run_failed) are attributed there.
+// nodeID) — i.e. the latest node_started for that node. Subsequent
+// events (node_finished, artifact_written, run_failed) are attributed
+// there.
+//
+// Resolution order: (1) the lastExecID map populated by
+// handleNodeStarted (path-aware, works for both legacy int-iter and
+// iteration_path exec_ids); (2) the legacy nodeCount-based fallback
+// for snapshots constructed before lastExecID existed (cold replays
+// of old event streams, hand-built test fixtures).
 func (b *SnapshotBuilder) currentExec(branch, nodeID string) *ExecutionState {
+	if perBranch, ok := b.lastExecID[branch]; ok {
+		if id, ok := perBranch[nodeID]; ok {
+			if e := b.execs[id]; e != nil {
+				return e
+			}
+		}
+	}
 	counts := b.nodeCount[branch]
 	if counts == nil {
 		return nil
@@ -626,6 +662,39 @@ func MakeExecutionID(branch, nodeID string, iteration int) string {
 		branch = MainBranch
 	}
 	return fmt.Sprintf("exec:%s:%s:%d", branch, nodeID, iteration)
+}
+
+// makeExecutionIDFromEvent prefers `iteration_path` (a stable string
+// encoding of EVERY containing loop's counter — see runtime's
+// currentLoopIterationPath) over the scalar `iteration` when building
+// an exec_id. The path disambiguates executions of the same node
+// across nested loops where a single int counter would collapse them
+// (e.g., validate_upgrade in fix_loop ⊂ package_loop ⊂ family_loop:
+// the scalar `iteration` was returning the frozen family_loop counter
+// for every package's attempt, locking the canvas on the first
+// attempt's terminal status). Events emitted by older runtime builds
+// don't carry `iteration_path` — fall back to the legacy int form
+// transparently so historical event streams still replay deterministically.
+func makeExecutionIDFromEvent(branch, nodeID string, iteration int, data map[string]interface{}) string {
+	if branch == "" {
+		branch = MainBranch
+	}
+	if data != nil {
+		if p, ok := data["iteration_path"].(string); ok && p != "" {
+			return fmt.Sprintf("exec:%s:%s:%s", branch, nodeID, p)
+		}
+	}
+	return fmt.Sprintf("exec:%s:%s:%d", branch, nodeID, iteration)
+}
+
+// rememberCurrentExec stamps the latest exec_id seen for (branch,
+// nodeID). currentExec consults the map for downstream events whose
+// payload doesn't carry the iteration_path the node_started used.
+func (b *SnapshotBuilder) rememberCurrentExec(branch, nodeID, execID string) {
+	if b.lastExecID[branch] == nil {
+		b.lastExecID[branch] = make(map[string]string)
+	}
+	b.lastExecID[branch][nodeID] = execID
 }
 
 // ParseExecutionID is the inverse of MakeExecutionID. It returns the

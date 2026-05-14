@@ -680,15 +680,22 @@ func (e *Engine) execLoop(ctx context.Context, rs *runState, startNodeID string)
 		// --- Emit node_started ---
 		// Compute the loop iteration once so the event payload and the
 		// executor's Task.Iteration agree. The frontend uses
-		// data.iteration as the source of truth for executionsById's
-		// loop_iteration key, so a recovery retry of the same node
-		// (loop counter unchanged) updates the existing execution in
-		// place instead of synthesising a phantom new iteration.
+		// data.iteration as the source of truth for the pip-strip UI,
+		// but the reducer keys exec_id on data.iteration_path because a
+		// single int collapses nested-loop executions onto the same id
+		// (observed live: solo body nodes were stuck on the family_loop
+		// counter so every package's validate_upgrade collided on
+		// iter=5 → canvas showed nothing as running across 5+ pkgs).
 		iter := e.currentLoopIteration(currentNodeID, rs.loopCounters)
-		if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, currentNodeID, map[string]interface{}{
+		iterPath := e.currentLoopIterationPath(currentNodeID, rs.loopCounters)
+		payload := map[string]interface{}{
 			"kind":      node.NodeKind().String(),
 			"iteration": iter,
-		}); err != nil {
+		}
+		if iterPath != "" {
+			payload["iteration_path"] = iterPath
+		}
+		if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, currentNodeID, payload); err != nil {
 			return err
 		}
 
@@ -824,10 +831,14 @@ func (e *Engine) execLoop(ctx context.Context, rs *runState, startNodeID string)
 // envelope (node_started → output → node_finished → checkpoint → edge select)
 // without invoking the executor backend.
 func (e *Engine) execCompute(rs *runState, nodeID string, cn *ir.ComputeNode) (string, error) {
-	if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, nodeID, map[string]interface{}{
+	startedPayload := map[string]interface{}{
 		"kind":      "compute",
 		"iteration": e.currentLoopIteration(nodeID, rs.loopCounters),
-	}); err != nil {
+	}
+	if p := e.currentLoopIterationPath(nodeID, rs.loopCounters); p != "" {
+		startedPayload["iteration_path"] = p
+	}
+	if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, nodeID, startedPayload); err != nil {
 		return "", err
 	}
 
