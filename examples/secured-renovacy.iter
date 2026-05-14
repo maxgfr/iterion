@@ -2229,6 +2229,12 @@ compute mark_failed_and_continue:
 
 ## ─── Nodes : Phase 2 — review/fix loop ─────────────────────────────
 
+## alt_review is a ROUTER, not a fan-out. Each invocation routes to
+## exactly ONE successor in round-robin order; the next invocation
+## alternates to the other reviewer. A full Phase-2 cross-family
+## approval streak (streak_check.stop) therefore needs at least TWO
+## alt_review rounds — one per reviewer — so the runtime never starts
+## reviewer_claude and reviewer_gpt in parallel.
 router alt_review:
   mode: round_robin
 
@@ -2243,7 +2249,12 @@ judge reviewer_claude:
   user: review_user_claude
   session: fork
   tools: [bash, read_file, glob, grep, git_diff, git_log, git_status]
-  tool_max_steps: 40
+  ## Bumped from 40 → 80 after a Phase-2 observation run hit
+  ## error_max_turns mid-review of a 14-commit cumulative diff. The
+  ## reviewer was exhaustively running `node --test` per workspace
+  ## package, which eats steps quickly. 80 fits a cumulative diff of
+  ## ~25 commits before becoming the new bottleneck.
+  tool_max_steps: 80
 
 judge reviewer_gpt:
   backend: "claw"
@@ -2258,7 +2269,8 @@ judge reviewer_gpt:
   ## (those are claude_code-only — see pkg/backend/tool/claw_builtins.go).
   ## bash + standard git invocations cover the same reviewer needs.
   tools: [bash, read_file, glob, grep]
-  tool_max_steps: 40
+  ## Same rationale as reviewer_claude — see tool_max_steps comment there.
+  tool_max_steps: 80
 
 compute streak_check:
   output: streak_state
