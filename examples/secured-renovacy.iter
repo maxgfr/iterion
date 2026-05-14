@@ -284,27 +284,88 @@ prompt detect_stack_system:
       it when the canonical command would fail.
 
   REQUIRED JSON OUTPUT SCHEMA (use these EXACT field names — no
-  aliases, no nested objects). Your final message MUST be a single
-  fenced ```json block containing one object with all 7 fields:
+  aliases, no nested objects beyond what's specified for
+  `ecosystems`). Your final message MUST be a single fenced ```json
+  block containing one object with ALL 9 top-level fields below.
+  Emit nothing else after the closing ``` — the runtime parses
+  the LAST fenced ```json block in your message as the structured
+  output.
+
+    ecosystems    array  — REQUIRED. One entry per recognised
+                           package manager found in the tree (see
+                           "Multi-ecosystem coverage" above). Each
+                           entry is an object with these fields:
+                              id           string   short kebab-case
+                                                    id ("yarn-berry",
+                                                    "cargo", "pip-
+                                                    poetry", "go").
+                                                    Unique within
+                                                    the array.
+                              pkg_manager  string   canonical name
+                                                    (see allowed
+                                                    list below).
+                              repo_kind    string   "monorepo" |
+                                                    "single".
+                              workspaces   string[] sub-package
+                                                    dirs (relative).
+                              upgrade_cmd  string   TEMPLATE.
+                              install_cmd  string   fresh install
+                                                    cmd.
+                              lock_files   string[] lockfile paths.
+                              manifests    string[] primary manifest
+                                                    files for this
+                                                    ecosystem
+                                                    (package.json,
+                                                    Cargo.toml,
+                                                    pyproject.toml,
+                                                    …).
+                              notes        string   free-form,
+                                                    ecosystem-
+                                                    specific.
+                           Empty array allowed only if the repo
+                           has NO recognised manager (terminates
+                           the run cleanly downstream).
+
+    primary_ecosystem_id  string  — REQUIRED. The id of the
+                                    operator-perceived primary
+                                    ecosystem (drives CI / owns
+                                    the canonical lockfile / is
+                                    the largest by line-count).
+                                    MUST exactly match one
+                                    `ecosystems[*].id`. Empty only
+                                    if `ecosystems` is empty.
+
     pkg_manager   string  — one of: yarn, npm, pnpm, bun, cargo,
                             pip, poetry, uv, bundler, composer,
-                            maven, gradle, mix, go.
+                            maven, gradle, mix, go. MIRROR of the
+                            primary ecosystem's `pkg_manager` so
+                            single-ecosystem downstream consumers
+                            don't iterate ecosystems[].
     repo_kind     string  — "monorepo" if package.json declares
                             workspaces (or equivalent), else
-                            "single".
-    workspaces    string[]— relative sub-package directories;
-                            empty array for single-repo.
-    upgrade_cmd   string  — TEMPLATE that the pipeline appends a
+                            "single". MIRROR of the primary's
+                            `repo_kind`.
+    workspaces    string[]— MIRROR of the primary's `workspaces`.
+                            Empty array for single-repo.
+    upgrade_cmd   string  — MIRROR of the primary's `upgrade_cmd`.
+                            TEMPLATE that the pipeline appends a
                             single ` <pkg>@<version>` argument to.
-    install_cmd   string  — fresh install command after an upgrade.
-    lock_files    string[]— absolute or repo-relative lockfile
-                            paths.
-    notes         string  — short free-form text. Empty string OK.
+    install_cmd   string  — MIRROR of the primary's `install_cmd`.
+                            Fresh install command after an upgrade.
+    lock_files    string[]— MIRROR of the primary's `lock_files`.
+                            Absolute or repo-relative paths.
+    notes         string  — MIRROR of the primary's `notes`. Short
+                            free-form text. Empty string OK.
 
   Do NOT use field aliases like `manager`, `manager_version`,
   `node_engine`, `monorepo` (boolean), or `manager_pinned_via` —
-  those will be REJECTED by schema validation. Stick to the 7
-  field names listed above.
+  those will be REJECTED by schema validation. Stick to the 9
+  top-level field names listed above (and the per-ecosystem field
+  names inside `ecosystems[]`).
+
+  Single-ecosystem repos: still emit `ecosystems` as a 1-element
+  array with the same data the legacy mirror fields carry. Don't
+  skip the array.
 
   ### Project context (operator)
   {{vars.user_prompt}}
