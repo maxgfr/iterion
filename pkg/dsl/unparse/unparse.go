@@ -668,7 +668,11 @@ func writeEdge(b *strings.Builder, e *ast.Edge) {
 		}
 	}
 	if e.Loop != nil {
-		fmt.Fprintf(b, " as %s(%d)", e.Loop.Name, e.Loop.MaxIterations)
+		if e.Loop.MaxIterationsExpr != "" {
+			fmt.Fprintf(b, " as %s(%q)", e.Loop.Name, e.Loop.MaxIterationsExpr)
+		} else {
+			fmt.Fprintf(b, " as %s(%d)", e.Loop.Name, e.Loop.MaxIterations)
+		}
 	}
 	if len(e.With) > 0 {
 		if len(e.With) == 1 {

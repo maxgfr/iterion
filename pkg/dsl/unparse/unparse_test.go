@@ -339,3 +339,36 @@ func TestUnparseCriticalEditorFields(t *testing.T) {
 		}
 	}
 }
+
+func TestUnparseLoopMaxIterationsExpr(t *testing.T) {
+	f := &ast.File{
+		Workflows: []*ast.WorkflowDecl{{
+			Name:  "wf",
+			Entry: "a",
+			Edges: []*ast.Edge{
+				{
+					From: "a",
+					To:   "b",
+					Loop: &ast.LoopClause{
+						Name:              "fix_loop",
+						MaxIterationsExpr: "{{outputs.intel_join.fix_loop_max}}",
+					},
+				},
+				{
+					From: "c",
+					To:   "d",
+					Loop: &ast.LoopClause{Name: "lit_loop", MaxIterations: 7},
+				},
+			},
+		}},
+	}
+	got := Unparse(f)
+	for _, want := range []string{
+		`a -> b as fix_loop("{{outputs.intel_join.fix_loop_max}}")`,
+		`c -> d as lit_loop(7)`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output missing expected fragment %q\nfull output:\n%s", want, got)
+		}
+	}
+}
