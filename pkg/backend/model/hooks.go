@@ -58,11 +58,17 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				Data:   data,
 			})
 
+			// Use LogBlock so the prompt body folds under the header
+			// in the editor's run log. Pass the full text — truncating
+			// at the source loses signal (the editor already provides
+			// a Wrap toggle + per-block expand/collapse).
 			if userMessage != "" {
-				logger.Logf(iterlog.LevelInfo, "💬", "Prompt [%s]: %s", nodeID, preview(userMessage, 300))
+				logger.LogBlock(iterlog.LevelInfo, "💬",
+					fmt.Sprintf("Prompt [%s]:", nodeID), userMessage)
 			}
 			if systemPrompt != "" {
-				logger.Logf(iterlog.LevelDebug, "📝", "System prompt [%s]: %s", nodeID, preview(systemPrompt, 500))
+				logger.LogBlock(iterlog.LevelDebug, "📝",
+					fmt.Sprintf("System prompt [%s]:", nodeID), systemPrompt)
 			}
 		},
 
@@ -163,9 +169,11 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			})
 
 			if step.Text != "" {
+				// Full response, no preview cap — the editor folds the
+				// body under the header so length doesn't crowd the log.
 				logger.LogBlock(iterlog.LevelInfo, "💬",
 					fmt.Sprintf("LLM response [%s] step %d:", nodeID, step.Number),
-					iterlog.BlockPreview(step.Text, 2000))
+					step.Text)
 			}
 			// Per-tool log line for the claw (in-process) path. The
 			// claude_code delegate prints its own
@@ -184,10 +192,12 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 					if body := tooldisplay.BlockBody(tc.Name, tc.Input); body != "" {
 						logger.LogBlock(iterlog.LevelInfo, "🔧",
 							fmt.Sprintf("Tool input [%s/%s]:", nodeID, tc.Name),
-							iterlog.BlockPreview(body, 2000))
+							body)
 					}
 					if logger.IsEnabled(iterlog.LevelDebug) {
-						logger.Logf(iterlog.LevelDebug, "🔧", "  raw input: %s", preview(string(tc.Input), 400))
+						logger.LogBlock(iterlog.LevelDebug, "🔧",
+							fmt.Sprintf("raw input [%s/%s]:", nodeID, tc.Name),
+							string(tc.Input))
 					}
 				}
 			}
@@ -317,7 +327,8 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				logger.Warn("Delegation [%s]: structured output parsing fell back to text wrapper", nodeID)
 			}
 			if info.Stderr != "" {
-				logger.Logf(iterlog.LevelDebug, "⚠️", "Delegation stderr [%s]: %s", nodeID, preview(info.Stderr, 500))
+				logger.LogBlock(iterlog.LevelDebug, "⚠️",
+					fmt.Sprintf("Delegation stderr [%s]:", nodeID), info.Stderr)
 			}
 		},
 
@@ -547,30 +558,6 @@ func sanitizeAttachmentSegment(s string) string {
 	return out
 }
 
-// preview returns the first n bytes of s, adding "..." if truncated.
-// It also replaces newlines with spaces for single-line display.
-func preview(s string, n int) string {
-	if len(s) == 0 {
-		return "(empty)"
-	}
-	truncated := len(s) > n
-	if truncated {
-		s = s[:n]
-	}
-	// Replace newlines for compact display.
-	cleaned := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' || s[i] == '\r' {
-			cleaned = append(cleaned, ' ')
-		} else {
-			cleaned = append(cleaned, s[i])
-		}
-	}
-	if truncated {
-		return string(cleaned) + "..."
-	}
-	return string(cleaned)
-}
 
 // humanSize formats a byte count as a human-readable string.
 func humanSize(bytes int) string {
