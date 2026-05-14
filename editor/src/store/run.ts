@@ -150,6 +150,18 @@ interface RunStoreState {
   snapshot: RunSnapshot | null;
   events: RunEvent[];
   executionsById: Map<string, ExecutionState>;
+  // Most recent exec_id observed per (branch, node) — populated by
+  // node_started, consulted by every downstream event that carries
+  // node_id (node_finished, tool_*, artifact_written, etc.). Mirror of
+  // the backend's SnapshotBuilder.lastExecID. Without this the local
+  // reducer had to fall back to a max(loop_iteration) scan to attribute
+  // events, which became non-deterministic post-Option-3: nested-loop
+  // exec_ids (e.g. fix_loop=0;package_loop=12 vs ...=11) share the
+  // same scalar loop_iteration so node_finished could land on the
+  // wrong attempt, leaving the actual running exec locked as running
+  // forever in the local view (canvas shows half the nodes still
+  // running even though the backend snapshot reports them finished).
+  lastExecIDByNode: Map<string, string>;
   // In-flight tools, keyed by execution_id. Sorted by start time
   // (insertion order). Empty entries are pruned to keep the map lean.
   inFlightToolsByExec: Map<string, InFlightTool[]>;
@@ -209,6 +221,7 @@ const initialState = {
   snapshot: null,
   events: [] as RunEvent[],
   executionsById: new Map<string, ExecutionState>(),
+  lastExecIDByNode: new Map<string, string>(),
   inFlightToolsByExec: new Map<string, InFlightTool[]>(),
   pendingHumanInput: null as PendingHumanInput | null,
   wsState: "idle" as WsState,
@@ -245,6 +258,14 @@ export const useRunStore = create<RunStoreState>((set) => ({
       for (const e of snap.executions) {
         map.set(e.execution_id, e);
       }
+      // Rebuild lastExecIDByNode from the snapshot. `snap.executions`
+      // is ordered by start time (backend's `b.order`) so the last
+      // occurrence per (branch, node) is the most recently started —
+      // exactly what node_finished and friends need to target.
+      const lastExecIDByNode = new Map<string, string>();
+      for (const e of snap.executions) {
+        lastExecIDByNode.set(execKey(e.branch_id || "main", e.ir_node_id), e.execution_id);
+      }
       const rehydrated = rehydratePendingHumanInput(snap);
 
       // Re-apply any events the WS already delivered that are NEWER
@@ -257,6 +278,7 @@ export const useRunStore = create<RunStoreState>((set) => ({
         return {
           snapshot: snap,
           executionsById: map,
+          lastExecIDByNode,
           // Snapshots don't carry "currently in-flight tool" state, so
           // drop any stale entries — the live event stream will
           // repopulate from the next tool_started onward.
@@ -274,6 +296,7 @@ export const useRunStore = create<RunStoreState>((set) => ({
         {
           events: [],
           executionsById: map,
+          lastExecIDByNode,
           inFlightToolsByExec: new Map(),
           snapshot: snap,
           pendingHumanInput: rehydrated,
@@ -401,6 +424,7 @@ export const useRunStore = create<RunStoreState>((set) => ({
     set({
       ...initialState,
       executionsById: new Map(),
+      lastExecIDByNode: new Map(),
       inFlightToolsByExec: new Map(),
       log: initialLogState,
     }),
@@ -459,11 +483,19 @@ type ReduceInput = Pick<
   RunStoreState,
   | "events"
   | "executionsById"
+  | "lastExecIDByNode"
   | "inFlightToolsByExec"
   | "snapshot"
   | "pendingHumanInput"
   | "browser"
 >;
+
+// execKey composes the (branch, node) lookup key used by
+// lastExecIDByNode. The `\t` separator is forbidden in both branch
+// ids and IR node ids so the encoding is unambiguous.
+function execKey(branch: string, nodeID: string): string {
+  return `${branch || "main"}\t${nodeID}`;
+}
 
 // reduceEvents applies a contiguous run of events in a single pass and
 // returns a partial state diff for zustand. Splitting the per-event
@@ -496,6 +528,7 @@ function reduceEvents(
   }
 
   let executionsById = state.executionsById;
+  let lastExecIDByNode = state.lastExecIDByNode;
   let inFlightToolsByExec = state.inFlightToolsByExec;
   let snapshot = state.snapshot;
   let pendingHumanInput = state.pendingHumanInput;
@@ -508,6 +541,15 @@ function reduceEvents(
     if (!execMutated) {
       executionsById = new Map(executionsById);
       execMutated = true;
+    }
+  };
+  // Same lazy-copy pattern for the lookup map: a batch that doesn't
+  // include any node_started leaves the map identity untouched.
+  let lastExecIDMutated = false;
+  const ensureLastExecIDCopy = () => {
+    if (!lastExecIDMutated) {
+      lastExecIDByNode = new Map(lastExecIDByNode);
+      lastExecIDMutated = true;
     }
   };
   // Same lazy-copy pattern for the in-flight map: pure-event batches
@@ -620,6 +662,12 @@ function reduceEvents(
             current_event_seq: evt.seq,
             last_seq: evt.seq,
           });
+          // Stamp lastExecID even in the guard branch — every
+          // node_started, including replayed duplicates, is by
+          // definition the latest event for this (branch, node), so
+          // downstream events should attribute to it.
+          ensureLastExecIDCopy();
+          lastExecIDByNode.set(execKey(branch, evt.node_id), id);
           break;
         }
         // Fresh execution OR post-resume re-run: issue a clean running
@@ -642,10 +690,17 @@ function reduceEvents(
           first_seq: existing?.first_seq ?? evt.seq,
           last_seq: evt.seq,
         });
+        // Stamp the (branch, node) → exec_id pointer so downstream
+        // events (node_finished, tool_*, artifact_written) attribute
+        // to the right exec. Required by Option 3: nested-loop
+        // exec_ids can share scalar loop_iteration so the legacy
+        // max-iter scan inside currentExec is non-deterministic.
+        ensureLastExecIDCopy();
+        lastExecIDByNode.set(execKey(branch, evt.node_id), id);
         break;
       }
       case "node_finished": {
-        const exec = currentExec(executionsById, branch, evt.node_id);
+        const exec = currentExec(executionsById, lastExecIDByNode, branch, evt.node_id);
         if (!exec) break;
         ensureExecCopy();
         executionsById.set(exec.execution_id, {
@@ -659,7 +714,7 @@ function reduceEvents(
         break;
       }
       case "tool_started": {
-        const exec = currentExec(executionsById, branch, evt.node_id);
+        const exec = currentExec(executionsById, lastExecIDByNode, branch, evt.node_id);
         if (!exec) break;
         const toolName = (evt.data?.tool as string) ?? "";
         const toolUseID = (evt.data?.tool_use_id as string) ?? "";
@@ -677,7 +732,7 @@ function reduceEvents(
       }
       case "tool_called":
       case "tool_error": {
-        const exec = currentExec(executionsById, branch, evt.node_id);
+        const exec = currentExec(executionsById, lastExecIDByNode, branch, evt.node_id);
         if (!exec) break;
         const prev = inFlightToolsByExec.get(exec.execution_id);
         if (!prev || prev.length === 0) break;
@@ -704,7 +759,7 @@ function reduceEvents(
         break;
       }
       case "artifact_written": {
-        const exec = currentExec(executionsById, branch, evt.node_id);
+        const exec = currentExec(executionsById, lastExecIDByNode, branch, evt.node_id);
         if (!exec) break;
         const v = numericVersion(evt.data?.version);
         ensureExecCopy();
@@ -717,7 +772,7 @@ function reduceEvents(
         break;
       }
       case "human_input_requested": {
-        const exec = currentExec(executionsById, branch, evt.node_id);
+        const exec = currentExec(executionsById, lastExecIDByNode, branch, evt.node_id);
         if (exec) {
           ensureExecCopy();
           executionsById.set(exec.execution_id, {
@@ -758,7 +813,7 @@ function reduceEvents(
       }
       case "run_failed": {
         const errMsg = (evt.data?.error as string) ?? null;
-        const exec = currentExec(executionsById, branch, evt.node_id);
+        const exec = currentExec(executionsById, lastExecIDByNode, branch, evt.node_id);
         if (exec) {
           ensureExecCopy();
           executionsById.set(exec.execution_id, {
@@ -963,6 +1018,9 @@ function reduceEvents(
   if (inFlightMutated) {
     next.inFlightToolsByExec = inFlightToolsByExec;
   }
+  if (lastExecIDMutated) {
+    next.lastExecIDByNode = lastExecIDByNode;
+  }
   return next;
 }
 
@@ -984,12 +1042,29 @@ function nextIteration(
   return max + 1;
 }
 
+// currentExec returns the exec that downstream events for (branch,
+// node) should attribute to — i.e. the most recently started exec.
+// Resolution order:
+//   1. lastExecIDByNode (path-aware, populated by node_started for
+//      every event the runtime emits) — mirror of the backend's
+//      SnapshotBuilder.lastExecID.
+//   2. legacy max(loop_iteration) scan for historical snapshots
+//      pre-Option-3 where lastExecIDByNode wasn't populated yet.
+//      Sufficient when each new exec strictly increments
+//      loop_iteration, breaks down under nested loops where multiple
+//      iteration_path execs can share the same scalar loop_iteration.
 function currentExec(
   execs: Map<string, ExecutionState>,
+  lastExecIDByNode: Map<string, string>,
   branch: string,
   nodeId: string | undefined,
 ): ExecutionState | null {
   if (!nodeId) return null;
+  const recorded = lastExecIDByNode.get(execKey(branch, nodeId));
+  if (recorded) {
+    const e = execs.get(recorded);
+    if (e) return e;
+  }
   let best: ExecutionState | null = null;
   for (const e of execs.values()) {
     if (e.branch_id === branch && e.ir_node_id === nodeId) {
