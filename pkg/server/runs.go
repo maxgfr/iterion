@@ -344,14 +344,27 @@ func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 		s.logger.Info("server: cancel run %q via HTTP from %s", id, r.RemoteAddr)
 	}
 	if err := s.runs.Cancel(id); err != nil {
-		// If the run is not currently active in this process, surface
-		// the current persisted status so the client can still get a
-		// useful response (e.g. already-finished runs).
+		// If the run is not currently active in this process, the
+		// operator's "cancel" intent depends on the persisted status:
+		//   - already terminal (finished / failed / cancelled / merged):
+		//     idempotent — return current state, no-op.
+		//   - paused_waiting_human / failed_resumable: the operator
+		//     wants to abandon the partial work. Flip the persisted
+		//     status to cancelled, emit run_cancelled, and finalize the
+		//     worktree so the editor's merge UI can act on whatever
+		//     commits the run produced before it stalled.
 		if errors.Is(err, runview.ErrRunNotActive) {
 			r2, loadErr := s.runs.LoadRun(id)
 			if loadErr != nil {
 				s.httpErrorFor(w, r, http.StatusNotFound, "run not active and not on disk: %v", loadErr)
 				return
+			}
+			if cancelled, cancelErr := s.runs.CancelInactive(id); cancelErr == nil && cancelled {
+				w.WriteHeader(http.StatusAccepted)
+				s.writeJSONFor(w, r, cancelRunResponse{RunID: id, Status: string(store.RunStatusCancelled)})
+				return
+			} else if cancelErr != nil {
+				s.logger.Warn("server: cancel inactive run %s: %v", id, cancelErr)
 			}
 			w.WriteHeader(http.StatusAccepted)
 			s.writeJSONFor(w, r, cancelRunResponse{RunID: id, Status: string(r2.Status)})

@@ -84,6 +84,97 @@ func TestReconcileOrphans(t *testing.T) {
 	}
 }
 
+// TestCancelInactive_FlipsResumableStatuses verifies that operator
+// "cancel" of a paused_waiting_human or failed_resumable run that's
+// NOT held by an active goroutine flips the persisted status to
+// cancelled. The runtime can then RecoverFinalize on that status so
+// the editor's merge UI exposes the partial commits.
+func TestCancelInactive_FlipsResumableStatuses(t *testing.T) {
+	for _, fromStatus := range []store.RunStatus{
+		store.RunStatusPausedWaitingHuman,
+		store.RunStatusFailedResumable,
+	} {
+		t.Run(string(fromStatus), func(t *testing.T) {
+			dir := t.TempDir()
+			logger := iterlog.Nop()
+			seed, err := store.New(dir, store.WithLogger(logger))
+			if err != nil {
+				t.Fatalf("seed store: %v", err)
+			}
+			runID := "run-cancel-" + string(fromStatus)
+			if _, err := seed.CreateRun(context.Background(), runID, "wf", nil); err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			if err := seed.UpdateRunStatus(context.Background(), runID, fromStatus, "setup"); err != nil {
+				t.Fatalf("update status: %v", err)
+			}
+			svc, err := NewService(dir, WithLogger(logger))
+			if err != nil {
+				t.Fatalf("NewService: %v", err)
+			}
+			cancelled, err := svc.CancelInactive(runID)
+			if err != nil {
+				t.Fatalf("CancelInactive: %v", err)
+			}
+			if !cancelled {
+				t.Errorf("CancelInactive returned cancelled=false for %s", fromStatus)
+			}
+			r, err := seed.LoadRun(context.Background(), runID)
+			if err != nil {
+				t.Fatalf("reload: %v", err)
+			}
+			if r.Status != store.RunStatusCancelled {
+				t.Errorf("status after cancel = %q, want cancelled", r.Status)
+			}
+		})
+	}
+}
+
+// TestCancelInactive_NoOpOnTerminal verifies that calling CancelInactive
+// on a run that's ALREADY terminal (finished / failed / cancelled) is a
+// no-op — returns (false, nil) and leaves the persisted status alone.
+// Important because the HTTP handler dispatches here optimistically when
+// manager.Cancel returns ErrRunNotActive, regardless of the run's
+// terminal state.
+func TestCancelInactive_NoOpOnTerminal(t *testing.T) {
+	for _, terminal := range []store.RunStatus{
+		store.RunStatusFinished,
+		store.RunStatusFailed,
+		store.RunStatusCancelled,
+	} {
+		t.Run(string(terminal), func(t *testing.T) {
+			dir := t.TempDir()
+			logger := iterlog.Nop()
+			seed, err := store.New(dir, store.WithLogger(logger))
+			if err != nil {
+				t.Fatalf("seed store: %v", err)
+			}
+			runID := "run-terminal-" + string(terminal)
+			if _, err := seed.CreateRun(context.Background(), runID, "wf", nil); err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			if err := seed.UpdateRunStatus(context.Background(), runID, terminal, "setup"); err != nil {
+				t.Fatalf("update status: %v", err)
+			}
+			svc, err := NewService(dir, WithLogger(logger))
+			if err != nil {
+				t.Fatalf("NewService: %v", err)
+			}
+			cancelled, err := svc.CancelInactive(runID)
+			if err != nil {
+				t.Fatalf("CancelInactive on terminal returned error: %v", err)
+			}
+			if cancelled {
+				t.Errorf("CancelInactive returned cancelled=true for terminal %s — expected no-op", terminal)
+			}
+			r, _ := seed.LoadRun(context.Background(), runID)
+			if r.Status != terminal {
+				t.Errorf("status mutated from %q to %q — expected no-op", terminal, r.Status)
+			}
+		})
+	}
+}
+
 // TestReconcileOrphans_LiveProcessLeftAlone verifies that a "running"
 // run held by a live lock is NOT clobbered. Mimics two iterion
 // processes sharing a store dir.

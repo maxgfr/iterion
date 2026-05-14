@@ -915,6 +915,43 @@ func (s *Service) Cancel(runID string) error {
 	return s.manager.Cancel(runID)
 }
 
+// CancelInactive flips a persisted-but-not-active run to cancelled status
+// when the operator clicked Cancel on a paused_waiting_human or
+// failed_resumable run. Returns (cancelled, error): cancelled=true means
+// the status was actually flipped; false+nil means the run was already
+// terminal (no-op). Cross-process cancel of a held run is still not
+// supported — this only handles the case where no goroutine owns it.
+//
+// After flipping, RecoverFinalize fires so the editor's merge UI can act
+// on whatever commits the run produced before it stalled (counterpart to
+// the post-cancel finalize in spawnRun).
+func (s *Service) CancelInactive(runID string) (bool, error) {
+	if runID == "" {
+		return false, errors.New("runview: run_id is required")
+	}
+	r, err := s.store.LoadRun(context.Background(), runID)
+	if err != nil {
+		return false, fmt.Errorf("load run: %w", err)
+	}
+	switch r.Status {
+	case store.RunStatusPausedWaitingHuman, store.RunStatusFailedResumable:
+		// flippable
+	default:
+		return false, nil // already terminal — no-op
+	}
+	if err := s.store.UpdateRunStatus(context.Background(), runID, store.RunStatusCancelled, "cancelled by operator (was "+string(r.Status)+")"); err != nil {
+		return false, fmt.Errorf("update status: %w", err)
+	}
+	// Re-load post-flip so RecoverFinalize sees the new status.
+	r, err = s.store.LoadRun(context.Background(), runID)
+	if err == nil {
+		if recErr := runtime.RecoverFinalize(context.Background(), s.store, r, s.logger); recErr != nil {
+			s.logger.Warn("runview: post-cancel-inactive finalize for %s: %v", runID, recErr)
+		}
+	}
+	return true, nil
+}
+
 // MergeRequest carries the parameters of a UI-driven merge action. The
 // HTTP handler builds it from the request body; the Service translates
 // it into a runtime.PerformDeferredMerge call and persists the outcome.
@@ -1422,7 +1459,22 @@ func (s *Service) spawnRun(
 			defer cancelTimeout()
 		}
 
-		s.logRunOutcome(runID, body(ctx, eng))
+		bodyErr := body(ctx, eng)
+		s.logRunOutcome(runID, bodyErr)
+		// On cancel, the engine flipped run.Status to cancelled but didn't
+		// run finalizeWorktree (that's the success path only). If the run
+		// produced commits, RecoverFinalize promotes the worktree HEAD to
+		// a storage branch so the editor's "Squash and merge" button can
+		// act on it without waiting for a daemon restart. Idempotent +
+		// scoped to worktree runs with no FinalBranch yet, so it's safe to
+		// call unconditionally.
+		if errors.Is(bodyErr, runtime.ErrRunCancelled) {
+			if r, loadErr := s.store.LoadRun(context.Background(), runID); loadErr == nil {
+				if recErr := runtime.RecoverFinalize(context.Background(), s.store, r, s.logger); recErr != nil {
+					s.logger.Warn("runview: post-cancel finalize for %s: %v", runID, recErr)
+				}
+			}
+		}
 	}()
 
 	return &LaunchResult{RunID: runID, Done: done}, nil
