@@ -31,6 +31,7 @@ import RunCanvasIR, { defaultIterationFor } from "./RunCanvasIR";
 import RunHeader from "./RunHeader";
 import RunLogPanel from "./RunLogPanel";
 import RunMetrics from "./RunMetrics";
+import ArtifactFilesPanel from "./ArtifactFilesPanel";
 import ReportTab from "./ReportTab";
 import Scrubber from "./Scrubber";
 
@@ -187,14 +188,14 @@ export default function RunView() {
     readBooleanFlag(EVENTLOG_COLLAPSED_KEY),
   );
   const [bottomTab, setBottomTab] = useState<
-    "events" | "logs" | "report" | "browser"
+    "events" | "logs" | "report" | "browser" | "artifacts"
   >("logs");
   // Tracks whether the user has manually changed the bottom tab during
   // this run view, so we don't yank the tab back to "browser" on every
   // new preview_url event after they explicitly picked another panel.
   const [bottomTabPinned, setBottomTabPinned] = useState<boolean>(false);
   const handleSetBottomTab = useCallback(
-    (tab: "events" | "logs" | "report" | "browser") => {
+    (tab: "events" | "logs" | "report" | "browser" | "artifacts") => {
       setBottomTab(tab);
       setBottomTabPinned(true);
     },
@@ -660,13 +661,14 @@ export default function RunView() {
                       value={bottomTab}
                       onValueChange={(v) =>
                         handleSetBottomTab(
-                          v as "events" | "logs" | "report" | "browser",
+                          v as "events" | "logs" | "report" | "browser" | "artifacts",
                         )
                       }
                       items={[
                         { value: "events", label: "Events" },
                         { value: "logs", label: "Logs" },
                         { value: "report", label: "Report" },
+                        { value: "artifacts", label: "Artifacts" },
                         ...(browserAvailable && !browserRightDocked
                           ? [{ value: "browser", label: "Browser" }]
                           : []),
@@ -699,6 +701,8 @@ export default function RunView() {
                           dock={browserDock}
                           onDockChange={setBrowserDock}
                         />
+                      ) : bottomTab === "artifacts" ? (
+                        <ArtifactFilesPanel runId={runId} />
                       ) : (
                         <ReportTab onSelectNode={handleSelectNode} />
                       )}
