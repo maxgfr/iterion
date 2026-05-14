@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SocialGouv/iterion/pkg/internal/appinfo"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 )
 
@@ -169,20 +170,26 @@ func (s *FilesystemRunStore) Root() string { return s.root }
 // Run lifecycle
 // ---------------------------------------------------------------------------
 
-// CreateRun persists a new run with status "running".
+// CreateRun persists a new run with status "running". Captures the
+// iterion-relevant launch env (model/effort/provider knobs) and
+// iterion build version so the run record is reproducible later —
+// without these, "why did the same recipe + same inputs produce
+// different outputs across two daemon builds" is unanswerable.
 func (s *FilesystemRunStore) CreateRun(_ context.Context, id, workflowName string, inputs map[string]interface{}) (*Run, error) {
 	if err := sanitizePathComponent("run ID", id); err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
 	r := &Run{
-		FormatVersion: RunFormatVersion,
-		ID:            id,
-		WorkflowName:  workflowName,
-		Status:        RunStatusRunning,
-		Inputs:        inputs,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		FormatVersion:  RunFormatVersion,
+		ID:             id,
+		WorkflowName:   workflowName,
+		Status:         RunStatusRunning,
+		Inputs:         inputs,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		LaunchEnv:      CaptureLaunchEnv(),
+		IterionVersion: appinfo.FullVersion(),
 	}
 	if err := s.writeRun(r); err != nil {
 		return nil, err

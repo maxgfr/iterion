@@ -10,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
+	"github.com/SocialGouv/iterion/pkg/internal/appinfo"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
@@ -19,16 +20,18 @@ import (
 func (s *Store) CreateRun(ctx context.Context, id, workflowName string, inputs map[string]interface{}) (*store.Run, error) {
 	now := time.Now().UTC()
 	r := &store.Run{
-		FormatVersion: store.RunFormatVersion,
-		ID:            id,
-		WorkflowName:  workflowName,
-		Status:        store.RunStatusQueued,
-		Inputs:        inputs,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-		QueuedAt:      &now,
-		SchemaVersion: SchemaVersion,
-		CASVersion:    1,
+		FormatVersion:  store.RunFormatVersion,
+		ID:             id,
+		WorkflowName:   workflowName,
+		Status:         store.RunStatusQueued,
+		Inputs:         inputs,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		QueuedAt:       &now,
+		SchemaVersion:  SchemaVersion,
+		CASVersion:     1,
+		LaunchEnv:      store.CaptureLaunchEnv(),
+		IterionVersion: appinfo.FullVersion(),
 	}
 	stampTenant(ctx, r)
 	if _, err := s.runs.InsertOne(ctx, r); err != nil {

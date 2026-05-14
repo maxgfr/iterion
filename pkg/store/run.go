@@ -168,6 +168,26 @@ type Run struct {
 	// stays light enough that a Mongo document with attachments
 	// remains well under the 16 MB BSON ceiling.
 	Attachments map[string]AttachmentRecord `json:"attachments,omitempty" bson:"attachments,omitempty"`
+
+	// LaunchEnv captures the iterion-relevant env vars active at run
+	// creation. Operators tune model + effort + provider via env
+	// (ITERION_RENOVACY_MODEL_CLAUDE, ITERION_RENOVACY_EFFORT_*,
+	// RESCUE_PROVIDER, …); the run's behaviour depends on those
+	// values, so the run record needs them to be reproducible months
+	// later. Only env vars whose name starts with the configured
+	// prefixes (ITERION_, RESCUE_, …; see store/run_env.go) are
+	// captured — process-wide PATH / HOME / etc. would bloat the
+	// record without adding signal. Empty for legacy runs predating
+	// this field.
+	LaunchEnv map[string]string `json:"launch_env,omitempty" bson:"launch_env,omitempty"`
+
+	// IterionVersion is the iterion build identifier (commit SHA, or
+	// version string for tagged releases) at the moment the run was
+	// created. Different daemon builds can drive the same recipe to
+	// different outcomes — capturing the version makes "why did the
+	// 2026-05-10 run finish but the 2026-05-15 run fail" answerable
+	// without git-bisecting blindly. Empty for legacy runs.
+	IterionVersion string `json:"iterion_version,omitempty" bson:"iterion_version,omitempty"`
 }
 
 // MergeStrategy enumerates how the run's commits are landed on the
