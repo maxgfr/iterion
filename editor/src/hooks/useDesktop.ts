@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { create } from "zustand";
 
 import {
@@ -172,14 +172,12 @@ export function useDesktop(): UseDesktopAPI {
     };
   }, [acquire, release]);
 
-  return {
-    isDesktop: isDesktopVal,
-    ready,
-    firstRunPending,
-    projects,
-    currentProject,
-    refresh,
-    switchProject: async (id: string) => {
+  // Action closures use `refresh` from the store which is stable; the
+  // useCallback wrappers keep the returned identities stable too so
+  // consumers can put them in useEffect deps without re-triggering
+  // every render (relevant for the App.tsx menu listener wiring).
+  const switchProject = useCallback(
+    async (id: string) => {
       try {
         await desktop.switchProject(id);
       } catch (err) {
@@ -188,7 +186,10 @@ export function useDesktop(): UseDesktopAPI {
       }
       await refresh();
     },
-    addProject: async (dir: string) => {
+    [refresh],
+  );
+  const addProject = useCallback(
+    async (dir: string) => {
       let p: Project;
       try {
         p = await desktop.addProject(dir);
@@ -199,7 +200,10 @@ export function useDesktop(): UseDesktopAPI {
       await refresh();
       return p;
     },
-    removeProject: async (id: string) => {
+    [refresh],
+  );
+  const removeProject = useCallback(
+    async (id: string) => {
       try {
         await desktop.removeProject(id);
       } catch (err) {
@@ -208,19 +212,33 @@ export function useDesktop(): UseDesktopAPI {
       }
       await refresh();
     },
-    pickAndAddProject: async () => {
-      const dir = await desktop.pickProjectDirectory();
-      if (!dir) return null;
-      let p: Project;
-      try {
-        p = await desktop.addProject(dir);
-      } catch (err) {
-        notifyDesktopError("Add project failed", err);
-        throw err;
-      }
-      await refresh();
-      return p;
-    },
+    [refresh],
+  );
+  const pickAndAddProject = useCallback(async () => {
+    const dir = await desktop.pickProjectDirectory();
+    if (!dir) return null;
+    let p: Project;
+    try {
+      p = await desktop.addProject(dir);
+    } catch (err) {
+      notifyDesktopError("Add project failed", err);
+      throw err;
+    }
+    await refresh();
+    return p;
+  }, [refresh]);
+
+  return {
+    isDesktop: isDesktopVal,
+    ready,
+    firstRunPending,
+    projects,
+    currentProject,
+    refresh,
+    switchProject,
+    addProject,
+    removeProject,
+    pickAndAddProject,
   };
 }
 
