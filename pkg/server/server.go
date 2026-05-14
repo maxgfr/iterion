@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -712,29 +713,36 @@ func (s *Server) handleListExamples(w http.ResponseWriter, _ *http.Request) {
 	var names []string
 
 	if dir := s.cfg.ExamplesDir; dir != "" {
-		if entries, err := os.ReadDir(dir); err == nil {
-			for _, e := range entries {
-				if e.IsDir() || !workflowfile.IsWorkflowFile(e.Name()) {
-					continue
-				}
-				name := e.Name()
-				if _, dup := seen[name]; dup {
-					continue
-				}
-				seen[name] = struct{}{}
-				names = append(names, name)
+		_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
 			}
-		}
+			if d.IsDir() {
+				if path != dir && isSkippedDir(d.Name()) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !workflowfile.IsWorkflowFile(d.Name()) {
+				return nil
+			}
+			rel, err := filepath.Rel(dir, path)
+			if err != nil {
+				return nil
+			}
+			// Normalize to forward slashes so the name matches the
+			// embed FS convention and the load endpoint.
+			rel = filepath.ToSlash(rel)
+			if _, dup := seen[rel]; dup {
+				return nil
+			}
+			seen[rel] = struct{}{}
+			names = append(names, rel)
+			return nil
+		})
 	}
 
 	for _, p := range examples.List() {
-		// Top-level only — handleLoadExample's name validator rejects
-		// path separators, so embedded recipes under skill/ etc. would
-		// be unreachable through this endpoint and listing them would
-		// just produce dead entries in the picker.
-		if strings.ContainsAny(p, `/\`) {
-			continue
-		}
 		if _, dup := seen[p]; dup {
 			continue
 		}
@@ -755,9 +763,15 @@ func (s *Server) handleLoadExample(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sanitize: only allow simple filenames ending in an accepted
-	// workflow extension (.iter or .bot).
-	if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.HasPrefix(name, ".") || !workflowfile.IsWorkflowFile(name) {
+	// Sanitize: allow forward-slash relative paths (e.g. "bots/foo.bot")
+	// but reject backslashes, leading dots, parent traversal, and
+	// absolute paths. Must end in an accepted workflow extension.
+	if strings.Contains(name, "\\") || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "/") || !workflowfile.IsWorkflowFile(name) {
+		httpError(w, http.StatusBadRequest, "invalid example name")
+		return
+	}
+	cleaned := path.Clean(name)
+	if cleaned != name || strings.HasPrefix(cleaned, "..") || strings.Contains(cleaned, "/../") {
 		httpError(w, http.StatusBadRequest, "invalid example name")
 		return
 	}
@@ -767,7 +781,7 @@ func (s *Server) handleLoadExample(w http.ResponseWriter, r *http.Request) {
 	// back to the binary-embedded recipe set (examples/embed.go).
 	var data []byte
 	if dir := s.cfg.ExamplesDir; dir != "" {
-		if d, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
+		if d, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name))); err == nil {
 			data = d
 		}
 	}

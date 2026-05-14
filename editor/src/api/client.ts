@@ -78,7 +78,10 @@ export async function listExamples(): Promise<string[]> {
 export async function loadExample(
   name: string,
 ): Promise<{ source: string; document: IterDocument; diagnostics: string[] }> {
-  return request(`/examples/${encodeURIComponent(name)}`);
+  // Encode each path segment but keep the slashes so subdirectory
+  // examples (e.g. "bots/vibe_feature_dev.bot") route correctly.
+  const encoded = name.split("/").map(encodeURIComponent).join("/");
+  return request(`/examples/${encoded}`);
 }
 
 // File management
