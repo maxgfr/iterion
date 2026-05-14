@@ -3295,23 +3295,27 @@ tool bucket_patches:
 tool resolve_pkg_ecosystem:
   language: js
   script: |
-    // Convention (see prepare_commit D-04 / bucket_patches): use bang
-    // form `{{!input.X}}` for string interpolation INSIDE quoted JS
-    // string literals — the no-bang form auto-quotes and produces
-    // `""yarn-berry""` (double-quoted, parser crash). For json /
-    // array fields, bang form emits a raw JS literal with no quotes.
-    const ecosystems = {{!input.ecosystems}};
-    const primary_id = "{{!input.primary_ecosystem_id}}";
-    const candidate_eco = "{{!input.candidate_ecosystem}}";
-    const fallback_workspaces = {{!input.fallback_workspaces}};
-    const fallback_lock_files = {{!input.fallback_lock_files}};
+    // Convention (see prepare_commit at line 2644): no-bang form
+    // `{{input.X}}` emits a JSON literal — strings arrive properly
+    // quoted AND escaped, so values containing backticks, double
+    // quotes, newlines, or backslashes (e.g. detect_stack.notes
+    // describing yarn-berry vendored releases) round-trip safely.
+    // No surrounding quotes — iterion's encoding includes them.
+    // Bang form `{{!input.X}}` is raw passthrough; only correct for
+    // values that already happen to be valid JS literals (numeric,
+    // bare-word ecosystem ids, etc.) — fragile, avoid.
+    const ecosystems = {{input.ecosystems}};
+    const primary_id = {{input.primary_ecosystem_id}};
+    const candidate_eco = {{input.candidate_ecosystem}};
+    const fallback_workspaces = {{input.fallback_workspaces}};
+    const fallback_lock_files = {{input.fallback_lock_files}};
     const fallback = {
-      pkg_manager: "{{!input.fallback_pkg_manager}}",
-      install_cmd: "{{!input.fallback_install_cmd}}",
-      upgrade_cmd: "{{!input.fallback_upgrade_cmd}}",
+      pkg_manager: {{input.fallback_pkg_manager}},
+      install_cmd: {{input.fallback_install_cmd}},
+      upgrade_cmd: {{input.fallback_upgrade_cmd}},
       workspaces: Array.isArray(fallback_workspaces) ? fallback_workspaces : [],
       lock_files: Array.isArray(fallback_lock_files) ? fallback_lock_files : [],
-      notes: "{{!input.fallback_notes}}",
+      notes: {{input.fallback_notes}},
     };
 
     function findById(arr, id) {
@@ -4152,6 +4156,18 @@ workflow secured_renovacy:
       mode: open
     env:
       CLAUDE_CONFIG_DIR: "/home/devbox/.claude"
+      ## Provider routing for in-container `claude` is handled by
+      ## iterion's claude_code backend per-agent: every Claude-side
+      ## agent in this recipe declares `provider: "${RESCUE_PROVIDER:-
+      ## zai}"`, which iterion's anthropicCredEnvForCLI translates
+      ## into `--env ANTHROPIC_BASE_URL=… --env ANTHROPIC_AUTH_TOKEN=…`
+      ## on the docker exec when `ZAI_API_KEY` is set on the daemon
+      ## process. We therefore do NOT propagate ANTHROPIC_* via
+      ## sandbox.env here — an empty `${localEnv:ANTHROPIC_BASE_URL}`
+      ## (the common case when the daemon is on Anthropic OAuth)
+      ## would set ANTHROPIC_BASE_URL="" in the container, which
+      ## the claude CLI treats as a real (broken) URL and short-
+      ## circuits "model not found" before hitting the api.
       ## Git identity for in-sandbox `git commit` calls. Without
       ## these the pipeline's commit step fails with "Author
       ## identity unknown" but the shell tool would still report
