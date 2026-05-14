@@ -141,7 +141,7 @@ func (w *Watcher) handleEvent(ev fsnotify.Event) {
 		}
 	}
 
-	if !isIterFile(absPath) {
+	if !isWorkflowFile(absPath) {
 		return
 	}
 

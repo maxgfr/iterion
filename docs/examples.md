@@ -2,33 +2,32 @@
 
 # Examples
 
-The [`examples/`](../examples/) directory contains workflows of increasing complexity. Start simple and work your way up:
+The [`examples/`](../examples/) directory ships a curated set of
+proven, productized bots and one actively-developed workflow.
 
-## 🟢 Starter
+> **Extensions.** Iterion accepts both `.iter` and `.bot`. We use
+> `.iter` for raw DSL or work-in-progress workflows and `.bot` for
+> productized operational bots — workflows meant to run unmodified
+> against real systems with human gates, mitigation steps and reports
+> (see [`.iter` vs `.bot`](../README.md#iter-vs-bot)). The parser,
+> runtime, and editor treat them identically.
 
-| File | Description |
-|------|-------------|
-| [`skill/minimal_linear.iter`](../examples/skill/minimal_linear.iter) | 28 lines — single agent with conditional pass/fail |
-| [`skill/human_gate.iter`](../examples/skill/human_gate.iter) | Human approval gate pattern |
-| [`skill/loop_with_judge.iter`](../examples/skill/loop_with_judge.iter) | Simple bounded loop with judge evaluation |
-| [`skill/parallel_fan_out_join.iter`](../examples/skill/parallel_fan_out_join.iter) | Basic fan-out/join parallelism |
-
-## 🟡 Intermediate
-
-| File | Description |
-|------|-------------|
-| [`pr_refine_single_model.iter`](../examples/pr_refine_single_model.iter) | PR refinement: review → plan → compliance → act → verify loop |
-| [`ci_fix_until_green.iter`](../examples/ci_fix_until_green.iter) | Automated CI fix loop: diagnose → plan → fix → rerun tests |
-| [`session_review_fix.iter`](../examples/session_review_fix.iter) | Session continuity with `inherit` and `fork` modes |
-| [`llm_router_task_dispatch.iter`](../examples/llm_router_task_dispatch.iter) | LLM-driven routing decisions |
-
-## 🔴 Advanced
+## 🤖 Productized bots ([`examples/bots/`](../examples/bots/))
 
 | File | Description |
 |------|-------------|
-| [`pr_review.iter`](../examples/pr_review.iter) | Parallel dual-reviewer PR analysis with judge synthesis |
-| [`pr_refine_dual_model_parallel.iter`](../examples/pr_refine_dual_model_parallel.iter) | Dual-model parallel review with router/join |
-| [`dual_model_plan_implement_review.iter`](../examples/dual_model_plan_implement_review.iter) | Enterprise dual-LLM orchestration with round-robin routing and delegation |
-| [`recipe_benchmark.iter`](../examples/recipe_benchmark.iter) | Model/prompt benchmarking with recipe presets |
+| [`bots/vibe_feature_dev.bot`](../examples/bots/vibe_feature_dev.bot) | Self-driven feature development bot: plan → implement → review → refine loop with judge gates |
+| [`bots/vibe_review_alternating.bot`](../examples/bots/vibe_review_alternating.bot) | Alternating Claude/GPT review-and-fix pattern with cross-family streak detection |
 
-See [`examples/FIXTURES.md`](../examples/FIXTURES.md) for detailed documentation on each example.
+## 🚧 In active development
+
+| File | Description |
+|------|-------------|
+| [`secured-renovacy.iter`](../examples/secured-renovacy.iter) | Autonomous, security-aware dependency upgrades for any stack (yarn/npm/pnpm/pip/poetry/uv/cargo/go/bundler/composer/maven) — will graduate to a `.bot` once stabilized |
+
+## 📦 Archived
+
+Older `.iter` workflows that were useful at one time but are no longer
+maintained have moved to [`.archive/examples/`](../.archive/examples/).
+They are not embedded in the binary and are kept only for historical
+reference and as fixtures for the test suite.

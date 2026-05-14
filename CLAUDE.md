@@ -1,6 +1,6 @@
 # Iterion
 
-Workflow orchestration engine with a custom DSL (`.iter` files).
+Workflow orchestration engine with a custom DSL (`.iter` / `.bot` files — identical semantics, see [README "`.iter` vs `.bot`"](README.md#iter-vs-bot)).
 
 ## Project nature
 

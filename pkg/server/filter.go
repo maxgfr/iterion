@@ -1,13 +1,18 @@
 package server
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/SocialGouv/iterion/pkg/dsl/workflowfile"
+)
 
 // isSkippedDir returns true for directories that should not be walked or watched.
 func isSkippedDir(name string) bool {
 	return strings.HasPrefix(name, ".") || name == "node_modules"
 }
 
-// isIterFile returns true if the path ends with .iter.
-func isIterFile(path string) bool {
-	return strings.HasSuffix(path, ".iter")
+// isWorkflowFile returns true if the path is a recognised workflow file
+// (.iter or .bot). See pkg/dsl/workflowfile for the canonical list.
+func isWorkflowFile(path string) bool {
+	return workflowfile.IsWorkflowFile(path)
 }

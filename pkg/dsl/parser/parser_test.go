@@ -15,12 +15,17 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestFixtures(t *testing.T) {
-	fixtures, err := filepath.Glob("../../../examples/*.iter")
+	iterFixtures, err := filepath.Glob("../../../examples/*.iter")
 	if err != nil {
 		t.Fatal(err)
 	}
+	botFixtures, err := filepath.Glob("../../../examples/*.bot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtures := append(iterFixtures, botFixtures...)
 	if len(fixtures) == 0 {
-		t.Fatal("no .iter fixtures found in ../examples/")
+		t.Fatal("no workflow fixtures found in ../examples/")
 	}
 
 	for _, path := range fixtures {
@@ -45,7 +50,7 @@ func TestFixtures(t *testing.T) {
 
 // TestFixturePRRefineSingleModel validates detailed AST structure.
 func TestFixturePRRefineSingleModel(t *testing.T) {
-	src := readFixture(t, "../../../examples/pr_refine_single_model.iter")
+	src := readFixture(t, "../testdata/pr_refine_single_model.iter")
 	res := parser.Parse("pr_refine_single_model.iter", src)
 	assertNoDiags(t, res)
 
@@ -111,7 +116,7 @@ func TestFixturePRRefineSingleModel(t *testing.T) {
 
 // TestFixtureCIFixUntilGreen validates the CI fix fixture structure.
 func TestFixtureCIFixUntilGreen(t *testing.T) {
-	src := readFixture(t, "../../../examples/ci_fix_until_green.iter")
+	src := readFixture(t, "../testdata/ci_fix_until_green.iter")
 	res := parser.Parse("ci_fix_until_green.iter", src)
 	assertNoDiags(t, res)
 
@@ -142,7 +147,7 @@ func TestFixtureCIFixUntilGreen(t *testing.T) {
 
 // TestFixtureRecipeBenchmark validates router/join/fan-out patterns.
 func TestFixtureRecipeBenchmark(t *testing.T) {
-	src := readFixture(t, "../../../examples/recipe_benchmark.iter")
+	src := readFixture(t, "../testdata/recipe_benchmark.iter")
 	res := parser.Parse("recipe_benchmark.iter", src)
 	assertNoDiags(t, res)
 

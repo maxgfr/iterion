@@ -13,10 +13,15 @@ import (
 // FuzzParse — detect panics in the parser on malformed inputs
 // ---------------------------------------------------------------------------
 
-// loadFixtureSeeds adds all .iter fixtures from examples/ as seed corpus entries.
+// loadFixtureSeeds adds all workflow fixtures (.iter / .bot) from examples/ as seed corpus entries.
 func loadFixtureSeeds(f *testing.F) {
 	f.Helper()
-	for _, glob := range []string{"../../../examples/*.iter", "../../../examples/skill/*.iter"} {
+	for _, glob := range []string{
+		"../../../examples/*.iter",
+		"../../../examples/*.bot",
+		"../../../examples/skill/*.iter",
+		"../../../examples/skill/*.bot",
+	} {
 		paths, err := filepath.Glob(glob)
 		if err != nil {
 			f.Fatal(err)

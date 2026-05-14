@@ -424,5 +424,5 @@ iterion resume --run-id <id> --file f --answers-file a.json  # resume paused run
 - [references/dsl-grammar.md](references/dsl-grammar.md) — formal grammar specification
 - [references/patterns.md](references/patterns.md) — common workflow patterns with examples
 - [references/diagnostics.md](references/diagnostics.md) — all validation diagnostic codes
-- [examples/skill/](examples/skill/) — minimal self-contained .iter examples
-- [examples/](examples/) — production-grade workflow examples
+- [examples/bots/](examples/bots/) — productized `.bot` bots (proven, runnable)
+- [.archive/examples/skill/](.archive/examples/skill/) — archived minimal self-contained `.iter` didactic primitives

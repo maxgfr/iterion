@@ -11,14 +11,19 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dsl/unparse"
 )
 
-// TestRoundtripExamples verifies that for every example .iter file:
-// parse → unparse → re-parse → re-compile produces a valid workflow
-// with the same number of nodes and edges.
+// TestRoundtripExamples verifies that for every example workflow file
+// (.iter / .bot): parse → unparse → re-parse → re-compile produces a
+// valid workflow with the same number of nodes and edges.
 func TestRoundtripExamples(t *testing.T) {
-	examples, err := filepath.Glob(filepath.Join("..", "..", "..", "examples", "*.iter"))
+	iterEx, err := filepath.Glob(filepath.Join("..", "..", "..", "examples", "*.iter"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	botEx, err := filepath.Glob(filepath.Join("..", "..", "..", "examples", "*.bot"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	examples := append(iterEx, botEx...)
 	if len(examples) == 0 {
 		t.Skip("no example files found")
 	}

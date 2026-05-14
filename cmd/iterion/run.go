@@ -25,7 +25,7 @@ var runOpts struct {
 }
 
 var runCmd = &cobra.Command{
-	Use:   "run <file.iter>",
+	Use:   "run <file.iter|file.bot>",
 	Short: "Execute a workflow",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

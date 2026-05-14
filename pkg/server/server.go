@@ -29,6 +29,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	"github.com/SocialGouv/iterion/pkg/dsl/parser"
 	"github.com/SocialGouv/iterion/pkg/dsl/unparse"
+	"github.com/SocialGouv/iterion/pkg/dsl/workflowfile"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/secrets"
@@ -689,7 +690,7 @@ func (s *Server) handleListExamples(w http.ResponseWriter, _ *http.Request) {
 	if dir := s.cfg.ExamplesDir; dir != "" {
 		if entries, err := os.ReadDir(dir); err == nil {
 			for _, e := range entries {
-				if e.IsDir() || !strings.HasSuffix(e.Name(), ".iter") {
+				if e.IsDir() || !workflowfile.IsWorkflowFile(e.Name()) {
 					continue
 				}
 				name := e.Name()
@@ -730,8 +731,9 @@ func (s *Server) handleLoadExample(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sanitize: only allow simple filenames ending in .iter.
-	if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".iter") {
+	// Sanitize: only allow simple filenames ending in an accepted
+	// workflow extension (.iter or .bot).
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.HasPrefix(name, ".") || !workflowfile.IsWorkflowFile(name) {
 		httpError(w, http.StatusBadRequest, "invalid example name")
 		return
 	}
@@ -1019,7 +1021,7 @@ func (s *Server) handleListFiles(w http.ResponseWriter, _ *http.Request) {
 			}
 			return nil
 		}
-		if !isIterFile(d.Name()) {
+		if !isWorkflowFile(d.Name()) {
 			return nil
 		}
 		info, err := d.Info()
@@ -1106,8 +1108,8 @@ func (s *Server) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
 		return
 	}
-	if !strings.HasSuffix(req.Path, ".iter") {
-		httpError(w, http.StatusBadRequest, "filename must end in .iter")
+	if !workflowfile.IsWorkflowFile(req.Path) {
+		httpError(w, http.StatusBadRequest, "filename must end in .iter or .bot")
 		return
 	}
 	absPath, err := s.safePath(req.Path)

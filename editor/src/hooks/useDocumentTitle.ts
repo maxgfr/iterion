@@ -45,7 +45,7 @@ export function useDocumentTitle() {
     } else if (currentFilePath) {
       context = basename(currentFilePath);
     } else {
-      context = "untitled.iter";
+      context = "untitled.bot";
     }
 
     const parts = [context];

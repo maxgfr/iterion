@@ -6,7 +6,7 @@
 
 **Declarative workflow orchestration for AI agents.**
 
-Define complex, multi-agent LLM workflows as readable `.iter` files — chain agents, judges, routers, human gates, parallel branches, bounded loops, and budget caps into a single, auditable execution graph.
+Define complex, multi-agent LLM workflows as readable `.iter` / `.bot` files — chain agents, judges, routers, human gates, parallel branches, bounded loops, and budget caps into a single, auditable execution graph.
 
 > ⚠️ **This project is highly experimental.** APIs, DSL syntax, and storage formats may change without notice. Use at your own risk in production environments. Feedback and contributions are welcome!
 
@@ -20,6 +20,7 @@ Define complex, multi-agent LLM workflows as readable `.iter` files — chain ag
 - [What is Iterion?](#what-is-iterion)
 - [Features](#features)
 - [Quick Start](#quick-start)
+- [`.iter` vs `.bot`](#iter-vs-bot)
 - [A Taste of the DSL](#a-taste-of-the-dsl)
 - [Documentation](#documentation)
 - [License](#license)
@@ -140,6 +141,12 @@ iterion report --run-id <id>             # Generate a detailed report
 ```
 
 All run data (events, artifacts, interactions) is stored in `.iterion/runs/`.
+
+---
+
+## 🤖 `.iter` vs `.bot`
+
+Iterion accepts two interchangeable file extensions: **`.iter`** for raw or experimental DSL (didactic examples, coverage tests, single-purpose scripts) and **`.bot`** for productized, operational bots (with human gates, mitigation steps, reports, and a documented runbook). The parser, compiler, runtime, and editor treat them identically — the distinction is narrative only. `iterion init` produces a `.bot` file by default; the `examples/` directory ships both, with `.bot` reserved for examples meant to be run unmodified against real systems.
 
 ---
 
