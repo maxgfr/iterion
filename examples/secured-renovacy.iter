@@ -77,6 +77,37 @@ vars:
   fix_loop_default: int = 3
   fix_loop_major:   int = 5
 
+  ## Update scope — what kinds of dependencies the run should touch.
+  ## Free-form string parsed (loosely) by detect_stack + discover_outdated
+  ## + select_candidate. Default empty means "everything the package
+  ## managers track" (libraries, languages, tooling, devops, CI/CD).
+  ##
+  ## Operators can restrict by passing a comma-separated list of any of:
+  ##   libraries     runtime/dev/peer/optional/bundled deps
+  ##   languages     language toolchains / engines (Node, Python,
+  ##                 Rust, etc.) when tracked by a manager (rust-
+  ##                 toolchain.toml, .nvmrc, package.json engines)
+  ##   tooling       linters, formatters, type checkers, test
+  ##                 runners, build tools (eslint, prettier, tsc,
+  ##                 vitest, esbuild, …)
+  ##   devops        infra-as-code helpers tracked in the project
+  ##                 (husky, lint-staged, semantic-release, …)
+  ##   ci_cd         CI/CD config files when their dependencies
+  ##                 are tracked (.github/workflows/*.yml action
+  ##                 references, GitLab CI image tags, …)
+  ## Or pass a custom free-form sentence (e.g. "only deps under
+  ## packages/api"). Agents read it verbatim from
+  ## {{vars.update_scope}}.
+  ##
+  ## Examples:
+  ##   --var update_scope="libraries"         # only application deps
+  ##   --var update_scope="tooling,ci_cd"     # only build tooling
+  ##   --var update_scope="libraries,languages"
+  ##   --var update_scope="only packages whose name starts with @internal/"
+  ##
+  ## Empty = no filter; the entire dep graph is in scope.
+  update_scope: string = ""
+
 ## ─── Prompts : workflow-level escalation policy ────────────────────
 
 prompt escalation_guidance:
@@ -119,10 +150,46 @@ prompt escalation_guidance:
 prompt detect_stack_system:
   You are a stack-identification AND repo-exploration agent.
   Inspect the repository at {{vars.workspace_dir}} (read-only) and
-  emit a structured profile of its package manager, layout, and
-  best-guess hint commands. Additionally, build a working mental
-  model of the codebase so downstream per-package agents that
-  FORK this session can skip redundant exploration.
+  emit a structured profile of EVERY package ecosystem you find,
+  the layout, and best-guess hint commands. Additionally, build a
+  working mental model of the codebase so downstream per-package
+  agents that FORK this session can skip redundant exploration.
+
+  ## Multi-ecosystem coverage (mandatory)
+
+  Modern projects often mix several package ecosystems: a JS app
+  with a Rust addon, a Python service with Node tooling, a Java
+  monolith with shell scripts driving deploys. ALL of these are
+  in scope. Build the `ecosystems` array with one entry per
+  recognised manager found in the tree:
+    - yarn / yarn-berry / npm / pnpm / bun (one entry; pick the
+      flavour the lockfile/packageManager indicates).
+    - cargo, go-modules, pip (with venv / requirements.txt),
+      poetry, uv, composer, bundler, maven, gradle, mix, swift,
+      conan, vcpkg, nimble, dub, rebar3 — anything where you see
+      a manifest + lockfile pair in the tree.
+    - Don't invent ecosystems. A `Makefile` is not an ecosystem.
+      A `Dockerfile` that just `apt install`s system packages is
+      not an ecosystem unless there's also a manager-tracked
+      manifest (e.g. Aptfile, brewfile) in the repo.
+
+  Designate ONE primary ecosystem (the one driving CI / owning
+  the canonical lockfile / the largest by line-count). Set
+  `primary_ecosystem_id` to its id. The legacy top-level fields
+  (`pkg_manager`, `workspaces`, `lock_files`, …) MIRROR the
+  primary ecosystem so single-ecosystem consumers downstream
+  don't need to iterate.
+
+  ## Update scope filter (operator-supplied)
+
+  If `vars.update_scope` is non-empty, treat it as a guidance
+  hint for downstream filtering — DO NOT skip detection. The
+  scope filter narrows what `discover_outdated` and
+  `select_candidate` will eventually process, but you should
+  still surface every ecosystem you find so the operator sees
+  the full picture in `outputs.detect_stack`. Capture the scope
+  verbatim in `notes` so the downstream agents see it without
+  re-reading vars.
 
   WHY exploration matters: this run will iterate through
   potentially 50+ dependency upgrades. Every per-package agent
@@ -259,8 +326,38 @@ prompt detect_stack_user:
 prompt discover_outdated_system:
   You are an outdated-package discovery agent. Produce the
   authoritative list of packages whose installed version is below
-  the latest compatible release available from the registry, for
-  the package manager identified upstream.
+  the latest compatible release available from the registry —
+  ACROSS EVERY ecosystem detect_stack found, NOT just the primary
+  one. A polyglot monorepo's "all outdated" list is the union of
+  the per-ecosystem outdated lists.
+
+  ## Multi-ecosystem iteration (mandatory)
+
+  For each entry in `outputs.detect_stack.ecosystems`:
+    1. Pick the ecosystem-appropriate outdated command (yarn / npm /
+       pnpm / pip / cargo / go / composer / bundler / maven / …).
+    2. Run it via bash. Normalise the output into the
+       per-package shape (see step 4 below).
+    3. Stamp every emitted entry with the ecosystem's `id` so
+       downstream `select_candidate` and per-package agents know
+       which manager to use.
+
+  The output's `packages` array is the union of all per-ecosystem
+  lists. `per_ecosystem_counts` is a JSON object mapping each
+  ecosystem id to its outdated count — used by humans + the
+  operator's run summary.
+
+  ## Scope filter (operator-supplied)
+
+  If `outputs.detect_stack.notes` carries an `update_scope:` hint
+  (which detect_stack copies from `vars.update_scope`), or
+  `vars.update_scope` itself is non-empty, treat the listed
+  categories (libraries / languages / tooling / devops / ci_cd)
+  as a HINT for what `kind` values to populate on each emitted
+  entry. You should STILL enumerate every outdated package —
+  the actual filtering happens in `select_candidate` (deterministic
+  tool), not here. Misclassifying `kind` is preferable to
+  silently dropping entries.
 
   ## Budget discipline (mandatory)
 
@@ -351,30 +448,53 @@ prompt discover_outdated_system:
   the entire Phase 1 loop.
 
   REQUIRED JSON OUTPUT SCHEMA (exact field names):
-    packages json     — ARRAY (NOT an object map) of objects with
-                        these four exact fields: {name, current,
-                        target, risk}. Empty array if the project
-                        is genuinely up-to-date. Many ecosystem
-                        tools emit an object keyed by package name
-                        (e.g. `npm outdated --json`) — you MUST
-                        transpose that to an array, otherwise the
-                        downstream `select_candidate` cannot index
-                        survivors[0] and the pipeline stalls.
+    packages json     — ARRAY (NOT an object map) of objects.
+                        Each entry MUST carry these exact fields:
+                          name        string
+                          current     string
+                          target      string
+                          risk        "patch"|"minor"|"major"|"unknown"
+                          ecosystem   string  // stack_profile.ecosystems[i].id
+                          kind        string  // "library"|"language"|"tooling"
+                                              //  |"devops"|"ci_cd"|""
+                          dep_type    string  // "runtime"|"dev"|"peer"|
+                                              //  "optional"|"bundled"|"engine"
+                          workspace   string  // workspace path or ""
+                        Many ecosystem tools emit an object keyed
+                        by package name (e.g. `npm outdated --json`)
+                        — you MUST transpose to an array, otherwise
+                        the downstream `select_candidate` cannot
+                        index survivors[0] and the pipeline stalls.
+                        Empty array if the project is genuinely up
+                        to date.
     count    int      — packages.length (recompute, do not trust
                         the manager's tally).
     raw      string   — the most informative raw tool output you
                         produced (one-shot, not the whole bash
                         transcript). Used by humans to diagnose
                         if the agent missed packages.
+    per_ecosystem_counts json
+                      — object mapping each ecosystem id to its
+                        outdated count, e.g. {"yarn-berry": 17,
+                        "cargo": 3, "pip-poetry": 5}. The sum
+                        equals `count`.
 
-  Example output (illustrative shape — not the real data):
+  Example output (illustrative — not real data):
     ```json
     {
       "packages": [
-        {"name": "lodash", "current": "4.17.20", "target": "4.17.21", "risk": "patch"},
-        {"name": "react",  "current": "17.0.2",  "target": "18.3.1",  "risk": "major"}
+        {"name": "lodash", "current": "4.17.20", "target": "4.17.21",
+         "risk": "patch", "ecosystem": "yarn-berry", "kind": "library",
+         "dep_type": "runtime", "workspace": ""},
+        {"name": "tokio", "current": "1.40", "target": "1.42",
+         "risk": "minor", "ecosystem": "cargo", "kind": "library",
+         "dep_type": "runtime", "workspace": ""},
+        {"name": "eslint", "current": "8.57", "target": "9.13",
+         "risk": "major", "ecosystem": "yarn-berry", "kind": "tooling",
+         "dep_type": "dev", "workspace": ""}
       ],
-      "count": 2,
+      "count": 3,
+      "per_ecosystem_counts": {"yarn-berry": 2, "cargo": 1},
       "raw": "<concise tool output…>"
     }
     ```
@@ -1354,7 +1474,51 @@ prompt prepare_review_commit_user:
 
 ## ─── Schemas ───────────────────────────────────────────────────────
 
+## Per-ecosystem block. A monorepo can declare several of these
+## (e.g. yarn + cargo + pip in the same tree). All downstream
+## per-package agents key off one entry of `ecosystems[]` via the
+## `ecosystem` field carried on each `candidate`.
+schema ecosystem_profile:
+  ## Stable short ID — used as the cross-reference key from
+  ## outdated_list.packages[i].ecosystem onwards. Operator-readable
+  ## (e.g. "yarn", "yarn-berry", "cargo", "pip-poetry", "go", "maven").
+  ## Lower-case, kebab-case. Unique within the run.
+  id: string
+  ## Canonical manager name. Same value as the legacy stack_profile.
+  ## pkg_manager field carried for the primary ecosystem.
+  pkg_manager: string
+  ## Free-form layout label — "monorepo", "single-package", "multi-
+  ## tenant", etc. Mostly informational; downstream agents use
+  ## workspaces to do the real work.
+  repo_kind: string
+  workspaces: string[]
+  upgrade_cmd: string
+  install_cmd: string
+  lock_files: string[]
+  ## manifests: every primary manifest file managed by this ecosystem
+  ## (package.json, Cargo.toml, pyproject.toml, …). Useful for security
+  ## audit + SBOM diffing.
+  manifests: string[]
+  notes: string
+
 schema stack_profile:
+  ## ecosystems[] is the source of truth for multi-language repos.
+  ## detect_stack populates every ecosystem it finds — runtime, build,
+  ## CI/CD, infra-as-code. Empty for repos with no recognised manager
+  ## (the run terminates cleanly via phase2_decider's "nothing to do"
+  ## path).
+  ecosystems: json
+  ## primary_ecosystem_id is the operator-perceived "main" ecosystem
+  ## (the one driving CI, owning the lockfile that the team treats as
+  ## canonical). It exists so legacy single-ecosystem consumers
+  ## (mark_failed_and_continue, prepare_commit) can keep working
+  ## without iterating ecosystems[]. Set to the FIRST element of
+  ## ecosystems[] when detect_stack can't decide.
+  primary_ecosystem_id: string
+  ## Backward-compatible mirror of ecosystems[0]'s pkg_manager etc.
+  ## so per-package agents that consume `outputs.detect_stack.pkg_manager`
+  ## directly stay valid. New code should prefer indexing into
+  ## `ecosystems[]` via the `candidate.ecosystem` link.
   pkg_manager: string
   repo_kind: string
   workspaces: string[]
@@ -1377,9 +1541,32 @@ schema discover_input:
   notes: string
 
 schema outdated_list:
+  ## packages is a JSON array. Each element is:
+  ##   {
+  ##     name: string,
+  ##     current: string,
+  ##     target: string,
+  ##     risk: "patch"|"minor"|"major"|"unknown",
+  ##     ecosystem: string,   // matches stack_profile.ecosystems[i].id
+  ##     kind: string,        // "library" | "language" | "tooling" |
+  ##                          //   "devops" | "ci_cd" | "" (unknown)
+  ##     dep_type: string,    // "runtime" | "dev" | "peer" | "optional" |
+  ##                          //   "bundled" | "engine" (mapped from the
+  ##                          //   manager's category)
+  ##     workspace: string    // empty for single-package repos, or the
+  ##                          //   workspace path for monorepo entries
+  ##   }
+  ## Downstream filtering on `kind` / `dep_type` / `workspace` is how
+  ## `vars.update_scope` constrains the per-package loop.
   packages: json
   count: int
   raw: string
+  ## per_ecosystem_counts: map of ecosystem.id → number of outdated
+  ## packages found. Surfaces to the operator how the work is split
+  ## across stacks at a glance — useful when a run lands on a polyglot
+  ## monorepo and the operator wants to know "is most of the backlog
+  ## on the Python side or the JS side?".
+  per_ecosystem_counts: json
 
 schema select_input:
   packages: json
@@ -1387,6 +1574,12 @@ schema select_input:
   attempted: json
   max_packages: int
   workspace_dir: string
+  ## update_scope: operator-supplied free-form scope filter
+  ## (libraries/languages/tooling/devops/ci_cd, or arbitrary text).
+  ## When the value contains any of the canonical kind keywords,
+  ## select_candidate filters survivors on each entry's `kind`.
+  ## Empty string disables the filter — everything is in scope.
+  update_scope: string
 
 schema candidate:
   selected_package: string
@@ -1397,6 +1590,18 @@ schema candidate:
   attempted_count: int
   cumulative_attempted: json
   fix_loop_max: int
+  ## ecosystem is the stack_profile.ecosystems[i].id that owns this
+  ## package. Carried so downstream upgrade/install/align_code know
+  ## which manager to invoke without re-detecting. Empty string for
+  ## the legacy single-ecosystem path (when discover_outdated didn't
+  ## populate per-package ecosystem — fallback uses primary_ecosystem_id).
+  ecosystem: string
+  ## kind + dep_type + workspace are forwarded from outdated_list so
+  ## the per-package agents (changelog_review, align_code) can render
+  ## the right context in their prompts.
+  kind: string
+  dep_type: string
+  workspace: string
   ## only_patches_attempted is true iff at least one upgrade has been
   ## attempted AND every attempt was a patch-tier bump. Used by the
   ## "skip Phase 2 cumulative review" short-circuit: a run that only
@@ -1995,7 +2200,17 @@ tool select_candidate:
       const current = extractVersion(fieldAlias(row, ["current", "from", "declared", "currentVersion", "installed", "version"]));
       const rawRisk = fieldAlias(row, ["risk", "bump", "severity", "type", "semver"]);
       const risk = String(rawRisk || "unknown").toLowerCase();
-      return { name, current, target, risk };
+      // Multi-ecosystem fields. discover_outdated stamps these per-row;
+      // legacy single-ecosystem discoveries leave them blank, in which
+      // case downstream agents fall back to outputs.detect_stack's
+      // primary fields. We use a dedicated `dep_scope` alias check to
+      // avoid colliding with the outer `scope` variable (scope=patch/
+      // minor/major) — they're distinct concerns.
+      const ecosystem = String(fieldAlias(row, ["ecosystem", "manager"]) || "").toLowerCase();
+      const kind = String(fieldAlias(row, ["kind", "category"]) || "").toLowerCase();
+      const depType = String(fieldAlias(row, ["dep_type", "deptype", "dep_scope"]) || "").toLowerCase();
+      const workspace = String(fieldAlias(row, ["workspace", "workspace_path", "package_dir"]) || "");
+      return { name, current, target, risk, ecosystem, kind, dep_type: depType, workspace };
     }
 
     function unwrap(value, wrapperKeys) {
@@ -2027,6 +2242,22 @@ tool select_candidate:
       if (atts && typeof atts === "object") return Object.keys(atts);
       return [];
     }
+
+    // Operator-supplied update_scope filter. Empty disables. When the
+    // value contains canonical kind keywords (libraries / languages /
+    // tooling / devops / ci_cd), we filter survivors on each entry's
+    // .kind. Otherwise we leave the value as a downstream hint
+    // (agents see the verbatim string via {{vars.update_scope}}) and
+    // skip the .kind filter to avoid silently dropping entries.
+    const updateScopeStr = "{{!input.update_scope}}";
+    const KIND_KEYWORDS = ["libraries", "languages", "tooling", "devops", "ci_cd"];
+    const updateScopeKinds = (function () {
+      if (!updateScopeStr) return null; // empty = no filter
+      const tokens = updateScopeStr.toLowerCase().split(/[,\s]+/).filter(Boolean);
+      const matched = tokens.filter((t) => KIND_KEYWORDS.includes(t));
+      if (matched.length === 0) return null; // free-form text, no kind filter
+      return new Set(matched.map((k) => k === "libraries" ? "library" : k === "languages" ? "language" : k));
+    })();
 
     const packages = unwrap(packagesRaw, ["list", "items", "packages", "data"]);
     const attempted = unwrap(attemptedRaw, ["list"]) || {};
@@ -2070,6 +2301,13 @@ tool select_candidate:
     const survivors = all
       .filter((p) => !attemptedList.includes(p.name))
       .filter((p) => allowed.includes(p.risk))
+      // Apply update_scope filter only when the operator passed
+      // canonical kind keywords. Free-form text → no filter (handled
+      // above in updateScopeKinds = null). Entries with empty kind
+      // pass through to avoid silently dropping packages whose
+      // ecosystem couldn't classify them (downstream gets a chance
+      // to flag them via blockers).
+      .filter((p) => !updateScopeKinds || !p.kind || updateScopeKinds.has(p.kind))
       .filter((p) => !isAtTarget(p.name, p.target))
       .sort((a, b) => (rank[a.risk] || 4) - (rank[b.risk] || 4));
 
@@ -2109,6 +2347,10 @@ tool select_candidate:
         only_patches_attempted: computeOnlyPatches(attempted),
         remaining_count: remaining,
         cap_reason: capReason,
+        ecosystem: "",
+        kind: "",
+        dep_type: "",
+        workspace: "",
       };
     } else {
       const p = survivors[0];
@@ -2129,6 +2371,14 @@ tool select_candidate:
         // and read this on each select_candidate output to gauge ETA.
         remaining_count: survivors.length - 1,
         cap_reason: "",
+        // Multi-ecosystem context forwarded so downstream upgrade/install/
+        // align_code/changelog_review know which manager owns this pkg
+        // without re-detecting. Empty strings on the legacy single-ecosystem
+        // path; downstream agents fall back to outputs.detect_stack defaults.
+        ecosystem: p.ecosystem || "",
+        kind: p.kind || "",
+        dep_type: p.dep_type || "",
+        workspace: p.workspace || "",
       };
     }
 
@@ -3670,7 +3920,8 @@ workflow secured_renovacy:
     scope: "{{vars.scope}}",
     attempted: "[]",
     max_packages: "{{vars.max_packages_per_run}}",
-    workspace_dir: "{{vars.workspace_dir}}"
+    workspace_dir: "{{vars.workspace_dir}}",
+    update_scope: "{{vars.update_scope}}"
   }
 
   ## Patches are semver-safe by definition: yarn up resolved them
@@ -3728,7 +3979,8 @@ workflow secured_renovacy:
     scope: "{{vars.scope}}",
     attempted: "{{outputs.bucket_patches.attempted_after_batch}}",
     max_packages: "{{vars.max_packages_per_run}}",
-    workspace_dir: "{{vars.workspace_dir}}"
+    workspace_dir: "{{vars.workspace_dir}}",
+    update_scope: "{{vars.update_scope}}"
   }
 
   ## select_family produced a candidate family → run the family path.
@@ -3750,7 +4002,8 @@ workflow secured_renovacy:
     scope: "{{vars.scope}}",
     attempted: "{{outputs.mark_family_attempted.attempted_members}}",
     max_packages: "{{vars.max_packages_per_run}}",
-    workspace_dir: "{{vars.workspace_dir}}"
+    workspace_dir: "{{vars.workspace_dir}}",
+    update_scope: "{{vars.update_scope}}"
   }
 
   ## family_upgrade ok → validate (cheap shell smoke). Failed → revert.
@@ -4049,7 +4302,8 @@ workflow secured_renovacy:
     scope: "{{vars.scope}}",
     attempted: "{{outputs.select_candidate.cumulative_attempted}}",
     max_packages: "{{vars.max_packages_per_run}}",
-    workspace_dir: "{{vars.workspace_dir}}"
+    workspace_dir: "{{vars.workspace_dir}}",
+    update_scope: "{{vars.update_scope}}"
   }
 
   ## After the patch fast-track's audit doc lands, jump to the family
@@ -4072,7 +4326,8 @@ workflow secured_renovacy:
     scope: "{{vars.scope}}",
     attempted: "{{outputs.select_candidate.cumulative_attempted}}",
     max_packages: "{{vars.max_packages_per_run}}",
-    workspace_dir: "{{vars.workspace_dir}}"
+    workspace_dir: "{{vars.workspace_dir}}",
+    update_scope: "{{vars.update_scope}}"
   }
 
   ## ═══ Phase 2 : Alternating review/fix on cumulative diff ═════════
