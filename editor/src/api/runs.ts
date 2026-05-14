@@ -13,6 +13,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// apiURL returns the full URL for a given API path, suitable for
+// hand-off to <a href> / browser download (no JSON parsing). Same
+// BASE_URL resolution as `request` so dev / prod / cloud mode all
+// work without callers knowing the deployment.
+export function apiURL(path: string): string {
+  return `${BASE_URL}${path}`;
+}
+
 export type RunStatus =
   | "running"
   | "paused_waiting_human"
@@ -262,6 +270,33 @@ export async function getArtifact(
   return request(
     `/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(nodeId)}/${version}`,
   );
+}
+
+// ArtifactFile is one tool-produced file from the run's artifact_files
+// area (renovacy reports, SBOMs, …). Distinct from `Artifact` (the
+// versioned per-node JSON output) — these are arbitrary files that
+// in-sandbox tools wrote via $ITERION_ARTIFACT_FILES_DIR.
+export interface ArtifactFile {
+  path: string; // area-relative, slash-separated
+  size: number;
+  modified_at: string;
+}
+
+export async function listArtifactFiles(runId: string): Promise<ArtifactFile[]> {
+  const res = await request<{ files: ArtifactFile[] }>(
+    `/runs/${encodeURIComponent(runId)}/artifact-files`,
+  );
+  return res.files ?? [];
+}
+
+// Build the URL to download a single artifact file. Returns a string
+// (not a fetch wrapper) because the caller hands it straight to an
+// `<a href>` for browser download / new-tab preview.
+export function artifactFileURL(runId: string, relPath: string): string {
+  // The path can contain `/` segments; encodeURIComponent would clobber
+  // them. Encode each segment individually so subdirs survive.
+  const segments = relPath.split("/").map(encodeURIComponent).join("/");
+  return apiURL(`/runs/${encodeURIComponent(runId)}/artifact-files/${segments}`);
 }
 
 export interface CreateRunRequest {
