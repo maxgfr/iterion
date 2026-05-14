@@ -900,47 +900,11 @@ prompt install_user:
 
   Run the install. Emit the structured result.
 
-prompt revert_changes_system:
-  You roll back the repository to its pre-upgrade state and
-  reinstall dependencies. Used when an upgrade attempt failed
-  partway through (validate_upgrade rejected, fix loop exhausted,
-  install errored, etc.).
-
-  Procedure:
-    1. `git -C input.workspace_dir status --porcelain` to see what's
-       dirty.
-    2. `git -C input.workspace_dir checkout -- .` to discard
-       tracked changes; `git -C input.workspace_dir clean -fd` to
-       remove untracked files the manager may have written
-       (caches, node_modules diffs, etc. — but be mindful of
-       legitimate untracked operator files; if you see anything
-       that looks user-authored, leave it).
-    3. Reinstall dependencies using the same fallback-aware
-       toolchain resolution as upgrade/install (use
-       `input.install_cmd_hint` + `input.notes`).
-    4. Capture a short summary of what was reverted.
-    5. Stay inside `input.workspace_dir`.
-
-  Tools: bash, read_file, list_files, glob, grep.
-
-  REQUIRED JSON OUTPUT SCHEMA (exact field names):
-    success bool   — true once the worktree is back to clean and
-                     the reinstall finished without manager errors.
-    output  string — concise summary.
-
-  ### Project context (operator)
-  {{vars.user_prompt}}
-
-prompt revert_changes_user:
-  Roll back any in-progress upgrade for this run.
-
-  Workspace:         {{vars.workspace_dir}}
-  Pkg manager:       {{input.pkg_manager}}
-  Workspaces:        {{input.workspaces}}
-  install_cmd hint:  {{input.install_cmd_hint}}
-  Notes:             {{input.notes}}
-
-  Revert and reinstall. Emit the structured result.
+## revert_changes is now a deterministic shell tool (see the node
+## declaration further down). Its previous agentic prompts
+## (revert_changes_system, revert_changes_user) were dropped — the
+## tool is git reset --hard + git clean + reinstall via a fixed
+## script, no LLM judgement involved.
 
 ## ─── Prompts : Phase 1 — align_code ────────────────────────────────
 
@@ -2708,23 +2672,68 @@ printf '{"success":true,"output":"committed %s"}\n' "$SHA"
 
 ## ─── Nodes : Phase 1 — revert + mark_failed ────────────────────────
 
-## revert_changes is agentic so the post-revert reinstall can adapt
-## to the same manager-shim concerns as upgrade/install — the
-## deterministic `install_cmd` substitution had identical brittleness
-## here. The agent restores the worktree to its pre-upgrade state and
-## reinstalls dependencies fresh.
-agent revert_changes:
-  backend: "claude_code"
-  provider: "${RESCUE_PROVIDER:-zai}"
-  model: "${ITERION_RENOVACY_MODEL_CLAUDE:-claude-opus-4-7}"
-  reasoning_effort: "${ITERION_RENOVACY_EFFORT_CLAUDE:-max}"
+## revert_changes is now a deterministic shell tool. The previous LLM-
+## agent shape was a reliability hazard: each invocation interpreted
+## "revert the worktree" via free-form bash, and a confused LLM could
+## leave stray files (untracked patches, partial fixes from align_code
+## not git-cleaned, etc.) that contaminated the next package upgrade's
+## starting state.
+##
+## The deterministic implementation is git-canonical:
+##   1. git reset --hard HEAD         — discard all tracked-file changes
+##                                      (manifests, lockfiles, source).
+##   2. git clean -fd                  — remove every untracked file +
+##                                      directory the upgrade introduced
+##                                      (build artefacts, generated
+##                                      configs, etc.). Honours .gitignore
+##                                      for files iterion-script-* etc.
+##                                      that are local-only.
+##   3. install_cmd_hint via bash      — reinstall against the now-
+##                                      restored manifest/lockfile pair
+##                                      so node_modules / target / venv
+##                                      are consistent. Best-effort: a
+##                                      failed reinstall is logged but
+##                                      doesn't fail the revert (the
+##                                      git state is already correct;
+##                                      the next select_candidate
+##                                      iteration's `upgrade` agent will
+##                                      reinstall as part of its own work).
+##
+## Reinstall caveat for multi-ecosystem: install_cmd_hint comes from
+## detect_stack's PRIMARY ecosystem. If the failed package belonged to
+## a non-primary ecosystem (e.g. cargo in a yarn-primary monorepo), the
+## reinstall runs the WRONG manager. That's safe — the git reset/clean
+## has already restored the cargo state to pre-upgrade, the wrong
+## reinstall just no-ops on its way through. The downstream upgrade
+## agent for the next candidate re-resolves the right manager from
+## the candidate's ecosystem field.
+tool revert_changes:
   input: revert_input
   output: revert_result
-  system: revert_changes_system
-  user: revert_changes_user
-  session: fork
-  tools: [bash, read_file, list_files, glob, grep]
-  tool_max_steps: 25
+  command: `set -uo pipefail
+cd {{input.workspace_dir}} >&2
+echo "revert: git reset --hard HEAD" >&2
+if ! git reset --hard HEAD >&2; then
+  printf '{"success":false,"output":"git reset --hard failed"}\n'
+  exit 1
+fi
+echo "revert: git clean -fd" >&2
+if ! git clean -fd >&2; then
+  printf '{"success":false,"output":"git clean -fd failed (worktree may still be dirty)"}\n'
+  exit 1
+fi
+INSTALL_CMD={{input.install_cmd_hint}}
+if [ -n "$INSTALL_CMD" ]; then
+  echo "revert: reinstall via: $INSTALL_CMD" >&2
+  # Best-effort: a failed reinstall doesn't fail the revert (git
+  # state is already restored; downstream upgrade reinstalls anyway).
+  if ! eval "$INSTALL_CMD" >&2; then
+    printf '{"success":true,"output":"reverted; reinstall non-zero (downstream upgrade will refresh)"}\n'
+    exit 0
+  fi
+fi
+printf '{"success":true,"output":"reverted + reinstalled"}\n'
+`
 
 ## mark_failed_and_continue is a deterministic passthrough — it just
 ## relays the package name + reason for the next select_candidate
@@ -3692,6 +3701,19 @@ tool mark_family_attempted:
 ## changelog_review tokens (~$1-3). Acceptable because unsafe verdicts
 ## are rare in practice (most upgrades clear); the time saved on the
 ## safe path dominates.
+##
+## Cost mutualisation: both agents `session: fork` from detect_stack, so
+## their shared input prefix (detect_stack's whole exploration) hits
+## Anthropic's prompt cache. With a 30-package run the cached prefix
+## pays once at detect_stack and is reused on every per-package intel
+## call (within the 5-minute TTL ; back-to-back package processing
+## stays inside the window). Going further — collapsing security_audit
+## + changelog_review into a single `intel_assess` agent that emits
+## BOTH security_report and changelog_summary in one LLM call — would
+## genuinely halve the per-package intel cost AND let the agent reason
+## about both signals together. Not done here: structural change to
+## intel_fanout/intel_join shape, defer to a session with bandwidth
+## for the edge rewiring + parallel-validation benchmark.
 router intel_fanout:
   mode: fan_out_all
 
