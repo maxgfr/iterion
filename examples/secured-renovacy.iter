@@ -1768,6 +1768,33 @@ schema mark_failed_result:
   package: string
   reason: string
 
+## emit_sbom input + output. The SBOM is a per-run software bill of
+## materials emitted right before the run terminates (both via the
+## phase2_decider!go_done shortcut and via the streak_check.stop Phase-2
+## success path). It's a JSON file under docs/renovacy/sbom-<run>.json
+## summarising every package the run actually changed, plus the start /
+## end SHAs and the iterion version. Operators and downstream supply-
+## chain auditors (sigstore, in-toto, SLSA) can read it as a stable
+## audit trail without diffing the lockfile themselves.
+schema sbom_input:
+  workspace_dir: string
+  start_sha: string
+  ## attempted is outputs.select_candidate.cumulative_attempted, a JSON
+  ## object keyed by package name. Each value carries {current, target,
+  ## risk}. The tool transposes it to an array for the SBOM.
+  attempted: json
+  ## iterion_version_hint: ignored when empty (the tool reads its own
+  ## $ITERION_VERSION or falls back to "dev"); reserved so a future
+  ## upstream runtime change can inject the canonical version through
+  ## the edge `with {}` block instead of relying on the env var.
+  iterion_version_hint: string
+
+schema sbom_output:
+  written: bool
+  path: string
+  package_count: int
+  end_sha: string
+
 schema review_input:
   start_sha: string
   prior_pushback: string[]
@@ -3791,6 +3818,101 @@ compute phase2_decider:
 schema phase2_decider_output:
   go_done: bool
 
+## ─── Nodes : SBOM emission ─────────────────────────────────────────
+
+## emit_sbom writes a per-run software bill of materials right before
+## the workflow terminates. Both terminal paths feed into it:
+##   - phase2_decider!go_done → emit_sbom → done (no Phase 2 needed)
+##   - streak_check.stop → emit_sbom → done (Phase 2 reached cross-
+##                                            family approval)
+##
+## The SBOM is a JSON file written under docs/renovacy/sbom-<short>.json
+## inside the workspace. It is committed by the run's normal commit
+## pipeline (the file shows up as untracked → caught by the next
+## prepare_commit or, if this is the final node, picked up by the
+## run's finalize step that promotes the worktree HEAD). Operators
+## reading the audit trail post-run get a stable record of what the
+## run actually changed without diffing the lockfile by hand.
+##
+## Deterministic shell tool: no LLM judgement involved. The package
+## list comes from outputs.select_candidate.cumulative_attempted
+## (which spans patches + families + solos by the time the loop
+## exits — see select_candidate's attempted ledger growth path).
+tool emit_sbom:
+  input: sbom_input
+  output: sbom_output
+  language: js
+  script: |
+    const fs = require("fs");
+    const path = require("path");
+    const { execSync } = require("child_process");
+
+    const wd = {{input.workspace_dir}};
+    const startSha = {{input.start_sha}} || "";
+    const attempted = {{!input.attempted}};
+    const versionHint = {{input.iterion_version_hint}} || "";
+
+    function endSHA() {
+      try {
+        return execSync(`git -C "${wd}" rev-parse HEAD`, { encoding: "utf8" }).trim();
+      } catch (_e) {
+        return "";
+      }
+    }
+    const endSha = endSHA();
+    const shortSha = (endSha || "unknown").slice(0, 12);
+
+    // Transpose cumulative_attempted {name: {current, target, risk}}
+    // into an array. Empty / missing input becomes an empty array, NOT
+    // an error — the run may have legitimately attempted zero packages
+    // (no candidates passed the scope filter) and the SBOM should
+    // still emit to document that fact.
+    const packages = [];
+    if (attempted && typeof attempted === "object" && !Array.isArray(attempted)) {
+      for (const [name, meta] of Object.entries(attempted)) {
+        if (!meta || typeof meta !== "object") continue;
+        packages.push({
+          name,
+          from: String(meta.current || ""),
+          to: String(meta.target || ""),
+          risk: String(meta.risk || "unknown"),
+          ecosystem: String(meta.ecosystem || ""),
+          kind: String(meta.kind || ""),
+        });
+      }
+    }
+
+    // Sort deterministically (alphabetical by name) so two runs against
+    // the same set of upgrades produce byte-identical SBOMs — useful for
+    // diffing and for hash-based caching downstream.
+    packages.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+
+    const iterionVersion = versionHint || process.env.ITERION_VERSION || "dev";
+
+    const sbom = {
+      $schema: "https://github.com/SocialGouv/iterion/sbom/v1.json",
+      generator: "iterion secured-renovacy.iter",
+      iterion_version: iterionVersion,
+      generated_at: new Date().toISOString(),
+      base_sha: startSha,
+      head_sha: endSha,
+      package_count: packages.length,
+      packages,
+    };
+
+    const dir = path.join(wd, "docs", "renovacy");
+    fs.mkdirSync(dir, { recursive: true });
+    const fname = "sbom-" + shortSha + ".json";
+    const fpath = path.join(dir, fname);
+    fs.writeFileSync(fpath, JSON.stringify(sbom, null, 2) + "\n");
+
+    process.stdout.write(JSON.stringify({
+      written: true,
+      path: path.posix.join("docs", "renovacy", fname),
+      package_count: packages.length,
+      end_sha: endSha,
+    }));
+
 ## ─── Workflow ──────────────────────────────────────────────────────
 
 workflow secured_renovacy:
@@ -4108,10 +4230,18 @@ workflow secured_renovacy:
     only_patches_attempted: "{{outputs.select_candidate.only_patches_attempted}}"
   }
 
-  ## phase2_decider routes either to terminal `done` (no useful Phase 2
-  ## work to do — either zero attempts or patches-only) or to Phase 2's
-  ## cumulative review loop.
-  phase2_decider -> done when go_done
+  ## phase2_decider routes either to emit_sbom + terminal `done` (no
+  ## useful Phase 2 work to do — either zero attempts or patches-only)
+  ## or to Phase 2's cumulative review loop. emit_sbom writes the
+  ## per-run software bill of materials before terminating so the
+  ## operator (and downstream supply-chain auditors) have a
+  ## reproducible record of what changed.
+  phase2_decider -> emit_sbom when go_done with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    start_sha: "{{outputs.capture_start_sha.sha}}",
+    attempted: "{{outputs.select_candidate.cumulative_attempted}}",
+    iterion_version_hint: ""
+  }
   phase2_decider -> alt_review when not go_done
 
   ## More candidates → parallel intel: security_audit and
@@ -4389,7 +4519,15 @@ workflow secured_renovacy:
     scanned_areas: "{{outputs.reviewer_gpt.scanned_areas}}"
   }
 
-  streak_check -> done when stop
+  streak_check -> emit_sbom when stop with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    start_sha: "{{outputs.capture_start_sha.sha}}",
+    attempted: "{{outputs.select_candidate.cumulative_attempted}}",
+    iterion_version_hint: ""
+  }
+
+  ## Both terminal-approach paths converge on emit_sbom → done.
+  emit_sbom -> done
 
   streak_check -> alt_review when "approved"
 
