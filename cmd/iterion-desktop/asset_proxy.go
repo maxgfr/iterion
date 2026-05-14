@@ -58,7 +58,7 @@ func newAssetProxyHandler(app *App) *assetProxyHandler {
 	}
 	return &assetProxyHandler{
 		app: app,
-		spa: http.FileServer(http.FS(subFS)),
+		spa: iserver.SPAHandler(subFS),
 	}
 }
 
