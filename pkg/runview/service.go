@@ -19,6 +19,7 @@ import (
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/runtime"
 	"github.com/SocialGouv/iterion/pkg/runtime/recovery"
+	dockersandbox "github.com/SocialGouv/iterion/pkg/sandbox/docker"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
@@ -307,7 +308,46 @@ func NewService(storeDir string, opts ...ServiceOption) (*Service, error) {
 	}
 
 	s.reconcileOrphans()
+	s.reconcileSandboxContainers()
 	return s, nil
+}
+
+// reconcileSandboxContainers force-removes managed docker/podman
+// containers whose run has reached a terminal status (or vanished from
+// the store entirely). Without this, a daemon SIGTERM mid-run leaves
+// the container up (--rm only fires on graceful exit) and the next
+// boot of the same run trips on container-name conflict — or worse,
+// the operator accumulates orphan sandboxes consuming RAM until
+// `docker ps -a` is manually pruned.
+//
+// Safe to call when docker/podman isn't installed: dockersandbox.Detect
+// returns an error which we swallow as "nothing to reconcile."
+func (s *Service) reconcileSandboxContainers() {
+	rt, err := dockersandbox.Detect()
+	if err != nil {
+		return
+	}
+	reaped, err := dockersandbox.ReapOrphanContainers(context.Background(), rt, func(runID string) bool {
+		if runID == "" {
+			return true
+		}
+		r, loadErr := s.store.LoadRun(context.Background(), runID)
+		if loadErr != nil {
+			return true
+		}
+		switch r.Status {
+		case store.RunStatusRunning, store.RunStatusPausedWaitingHuman:
+			return false
+		default:
+			return true
+		}
+	})
+	if err != nil {
+		s.logger.Warn("runview: reap orphan containers: %v", err)
+	}
+	if len(reaped) > 0 {
+		s.logger.Info("runview: reaped %d orphan sandbox container(s)", len(reaped))
+	}
 }
 
 // reconcileOrphans flips runs whose status is "running" but whose
