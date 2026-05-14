@@ -58,7 +58,8 @@ function AuthGate() {
 }
 
 function AuthedApp() {
-  const { isDesktop, ready, firstRunPending, refresh } = useDesktop();
+  const { isDesktop, ready, firstRunPending, refresh, pickAndAddProject } =
+    useDesktop();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<string>("api-keys");
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -72,7 +73,13 @@ function AuthedApp() {
         setSettingsOpen(true);
       }),
       onDesktopEvent(DesktopEvent.MenuSwitchProject, () => setSwitcherOpen(true)),
-      onDesktopEvent(DesktopEvent.MenuNewProject, () => setSwitcherOpen(true)),
+      // MenuNewProject opens the native directory picker directly —
+      // previously it opened the switcher (same as MenuSwitchProject),
+      // which forced users through an extra step. The picker is also
+      // what the "+ Add project…" button inside the switcher uses.
+      onDesktopEvent(DesktopEvent.MenuNewProject, () => {
+        void pickAndAddProject();
+      }),
       onDesktopEvent(DesktopEvent.MenuAbout, () => {
         setSettingsTab("about");
         setSettingsOpen(true);
@@ -88,7 +95,7 @@ function AuthedApp() {
       offs.forEach((off) => off());
       window.removeEventListener("iterion:open-project-switcher", onOpenSwitcher);
     };
-  }, []);
+  }, [pickAndAddProject]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
