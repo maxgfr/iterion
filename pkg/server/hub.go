@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -71,12 +72,13 @@ var upgrader = websocket.Upgrader{
 			// Browsers always send Origin on cross-origin WS handshakes.
 			return true
 		}
-		if currentOriginCheck == nil {
+		check := loadOriginCheck()
+		if check == nil {
 			// Defensive fallback: refuse rather than re-open the hole if
 			// the Hub forgot to register an origin checker.
 			return false
 		}
-		return currentOriginCheck(origin)
+		return check(origin)
 	},
 }
 
@@ -84,12 +86,31 @@ var upgrader = websocket.Upgrader{
 // by the HTTP CORS path. Keeping it as a package-level var avoids changing
 // gorilla/websocket's CheckOrigin signature, which can't carry a closure
 // per-Hub instance without forking the upgrader struct per Hub.
-var currentOriginCheck func(origin string) bool
+//
+// Stored via atomic.Pointer so parallel server.New() calls (notably the
+// `go test -race` test setup) don't race writes against the read path
+// inside upgrader.CheckOrigin. The function is replaced wholesale; no
+// CAS required.
+var currentOriginCheck atomic.Pointer[originCheckFn]
+
+type originCheckFn func(origin string) bool
+
+func loadOriginCheck() originCheckFn {
+	if p := currentOriginCheck.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
 
 // SetWebSocketOriginCheck registers the origin allowlist function used by
 // the WebSocket upgrader. Called by Server during routes() setup.
 func SetWebSocketOriginCheck(fn func(origin string) bool) {
-	currentOriginCheck = fn
+	if fn == nil {
+		currentOriginCheck.Store(nil)
+		return
+	}
+	wrapped := originCheckFn(fn)
+	currentOriginCheck.Store(&wrapped)
 }
 
 // NewHub creates a new Hub.
