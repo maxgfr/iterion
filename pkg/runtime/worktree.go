@@ -694,10 +694,33 @@ func RecoverFinalize(ctx context.Context, st store.RunStore, r *store.Run, logge
 	if r.FinalBranch != "" || r.FinalCommit != "" {
 		return nil // already finalized
 	}
-	// Only finalize cleanly-terminated runs. failed_resumable / failed
-	// keep their worktree for inspection per the engine's policy; the
-	// user resolves them via resume, not via post-mortem finalize.
-	if r.Status != store.RunStatusFinished {
+	// Finalize any terminally-stopped run that left work in the
+	// worktree. The happy path is `finished` (the original case that
+	// motivated RecoverFinalize). `cancelled` also benefits: when the
+	// operator stops a run with commits in flight, they commonly want
+	// to merge whatever partial work the run produced — and the merge
+	// UI requires FinalCommit+FinalBranch, so without recovery the
+	// "Squash and merge" button fails with "no storage branch".
+	//
+	// `failed_resumable` is deliberately NOT recovered: those runs are
+	// designed to be resumed (the engine left a checkpoint specifically
+	// for that). Pre-creating a storage branch here would land at the
+	// partial HEAD; when the operator resumes and finalize runs
+	// normally on completion, createBranchSafely sees the existing
+	// branch and falls back to a suffixed name, leaving the user with
+	// two branches for one logical run. The operator's path on a
+	// failed_resumable is either resume-to-finish (normal finalize
+	// fires) OR cancel-then-merge (this RecoverFinalize fires on the
+	// `cancelled` status).
+	//
+	// `failed` is excluded for a different reason: a hard failure
+	// suggests the commits aren't safe to expose for a one-click
+	// merge; the operator can still salvage by hand via the run's
+	// WorkDir + `git branch`.
+	switch r.Status {
+	case store.RunStatusFinished, store.RunStatusCancelled:
+		// recover
+	default:
 		return nil
 	}
 	wc := worktreeContext{

@@ -612,22 +612,69 @@ func TestRecoverFinalize_SkipsNonWorktree(t *testing.T) {
 	}
 }
 
-// TestRecoverFinalize_SkipsNonFinished — a run that's still running,
-// failed_resumable, etc. must be a no-op. failed_resumable runs keep
-// their worktree for resume; finalize there would race with resume.
+// TestRecoverFinalize_SkipsNonFinished — failed_resumable + failed
+// runs must be no-ops. failed_resumable runs keep their worktree for
+// resume; pre-finalizing there would leave a stale branch the operator
+// then has to disambiguate from the post-resume finalize's branch.
+// failed runs are excluded for a different reason: a hard failure
+// suggests the commits aren't safe to expose to a one-click merge.
 func TestRecoverFinalize_SkipsNonFinished(t *testing.T) {
-	st, _ := store.New(t.TempDir())
+	for _, status := range []store.RunStatus{store.RunStatusFailedResumable, store.RunStatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			st, _ := store.New(t.TempDir())
+			r := &store.Run{
+				ID:       "run_" + string(status),
+				Status:   status,
+				Worktree: true,
+				WorkDir:  "/tmp/wt",
+				RepoRoot: "/tmp/repo",
+			}
+			if err := RecoverFinalize(context.Background(), st, r, nil); err != nil {
+				t.Fatalf("non-finished path errored: %v", err)
+			}
+			if r.FinalCommit != "" || r.FinalBranch != "" {
+				t.Errorf("non-finished path mutated state: %+v", r)
+			}
+		})
+	}
+}
+
+// TestRecoverFinalize_CancelledRun — a run the operator cancelled with
+// commits in the worktree MUST be finalized so the merge UI can act on
+// the partial work. Without this, "Squash and merge" fails with "no
+// storage branch" and the operator has to recover by hand.
+func TestRecoverFinalize_CancelledRun(t *testing.T) {
+	repo, originalTip := initBareishRepo(t)
+	wt := filepath.Join(t.TempDir(), "wt")
+	mustRun(t, repo, "git", "worktree", "add", wt, "HEAD")
+	t.Cleanup(func() { _ = exec.Command("git", "-C", repo, "worktree", "remove", "--force", wt).Run() })
+
+	finalSHA := addCommit(t, wt, "partial.go", "package main\n", "feat: partial work")
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store new: %v", err)
+	}
 	r := &store.Run{
-		ID:       "run_failed_resumable",
-		Status:   store.RunStatusFailedResumable,
-		Worktree: true,
-		WorkDir:  "/tmp/wt",
-		RepoRoot: "/tmp/repo",
+		ID:         "run_cancelled_partial",
+		Name:       "fierce-oak-c9d4",
+		Status:     store.RunStatusCancelled,
+		Worktree:   true,
+		WorkDir:    wt,
+		RepoRoot:   repo,
+		BaseCommit: originalTip,
 	}
+	if err := st.SaveRun(context.Background(), r); err != nil {
+		t.Fatalf("seed save: %v", err)
+	}
+
 	if err := RecoverFinalize(context.Background(), st, r, nil); err != nil {
-		t.Fatalf("non-finished path errored: %v", err)
+		t.Fatalf("recover: %v", err)
 	}
-	if r.FinalCommit != "" || r.FinalBranch != "" {
-		t.Errorf("non-finished path mutated state: %+v", r)
+	if r.FinalCommit != finalSHA {
+		t.Errorf("FinalCommit = %q, want %q", r.FinalCommit, finalSHA)
+	}
+	if r.FinalBranch != "iterion/run/fierce-oak-c9d4" {
+		t.Errorf("FinalBranch = %q", r.FinalBranch)
 	}
 }
