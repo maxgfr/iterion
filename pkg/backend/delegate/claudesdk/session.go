@@ -124,7 +124,7 @@ func (s *Session) Stream(ctx context.Context) iter.Seq2[Message, error] {
 
 			// Handle control protocol messages.
 			if isControlRequest(rm) {
-				s.handleControlRequest(rm.Data)
+				s.handleControlRequest(ctx, rm.Data)
 				continue
 			}
 			if isControlResponse(rm) {
@@ -320,7 +320,7 @@ func (s *Session) sendInitialize() error {
 }
 
 // handleControlRequest dispatches incoming control requests from the CLI.
-func (s *Session) handleControlRequest(data json.RawMessage) {
+func (s *Session) handleControlRequest(ctx context.Context, data json.RawMessage) {
 	var req controlRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		return
@@ -335,7 +335,7 @@ func (s *Session) handleControlRequest(data json.RawMessage) {
 	case "can_use_tool":
 		handleCanUseTool(s.cfg, s.ctrl, req)
 	case "hook_callback":
-		s.handleHookCallback(req)
+		s.handleHookCallback(ctx, req)
 	default:
 		_ = s.ctrl.sendErrorResponse(req.RequestID, "unsupported: "+subtype)
 	}
@@ -351,7 +351,7 @@ func (s *Session) handleControlResponse(data json.RawMessage) {
 }
 
 // handleHookCallback processes hook callbacks from the CLI.
-func (s *Session) handleHookCallback(req controlRequest) {
+func (s *Session) handleHookCallback(ctx context.Context, req controlRequest) {
 	var body struct {
 		CallbackID string         `json:"callback_id"`
 		Input      map[string]any `json:"input"`
@@ -373,7 +373,7 @@ func (s *Session) handleHookCallback(req controlRequest) {
 	_ = json.Unmarshal(inputJSON, &input)
 	input.ToolUseID = body.ToolUseID
 
-	output, err := handler(context.TODO(), input)
+	output, err := handler(ctx, input)
 	if err != nil {
 		_ = s.ctrl.sendErrorResponse(req.RequestID, err.Error())
 		return
