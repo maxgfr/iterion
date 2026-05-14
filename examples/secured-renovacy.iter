@@ -3042,7 +3042,24 @@ tool write_audit_md:
       .replace(/-+/g, "-")
       .replace(/^-|-$/g, "");
 
-    const dir = path.join(wd, "docs", "renovacy");
+    // Write reports to iterion's per-run artifact-files area instead
+    // of `<wd>/docs/renovacy/`. Two reasons:
+    //   1. The bench repo stays clean — operators don't want N+
+    //      `chore(deps): update X / docs/renovacy/X.md` commits in
+    //      their git history; the upgrade commit alone is the
+    //      durable record they merge into their main branch.
+    //   2. Operators (and downstream auditors) get the reports via
+    //      iterion's editor Artifacts panel + /api/runs/<id>/artifact-
+    //      files HTTP API — same place SBOMs land.
+    // The dir is bind-mounted by iterion's runtime at sandbox start
+    // (see pkg/runtime/sandbox.go) and exposed as
+    // ITERION_ARTIFACT_FILES_DIR. When unset (older iterion versions
+    // or non-bind-mount drivers), fall back to `<wd>/docs/renovacy/`
+    // so the recipe still produces something the operator can find.
+    const artifactsDir = process.env.ITERION_ARTIFACT_FILES_DIR;
+    const dir = artifactsDir
+      ? path.join(artifactsDir, "renovacy")
+      : path.join(wd, "docs", "renovacy");
     fs.mkdirSync(dir, { recursive: true });
 
     function renderSummary(v) {
@@ -3125,17 +3142,29 @@ tool write_audit_md:
     }
     fs.appendFileSync(indexPath, appendRows);
 
-    // Amend the upgrade commit so the audit md ships in the same SHA.
-    // git add the new/updated files, then `commit --amend --no-edit`.
-    const { execSync } = require("child_process");
-    try {
-      execSync("git add docs/renovacy/", { cwd: wd, stdio: "pipe" });
-      execSync("git commit --amend --no-edit", { cwd: wd, stdio: "pipe" });
-      process.stdout.write(JSON.stringify({ success: true, output: `audit md amended into ${sha.slice(0, 7)} (${fname})`, was_batch: isBatch }));
-    } catch (e) {
-      // Treat amend failure as soft — the audit doc still landed on
-      // disk; the operator can manually fold it into the next commit.
-      process.stdout.write(JSON.stringify({ success: true, output: `audit md written to ${fname}; amend failed: ${e.message}`, was_batch: isBatch }));
+    // When writing into ITERION_ARTIFACT_FILES_DIR, do NOT amend the
+    // upgrade commit — the report lives outside the worktree and is
+    // surfaced via iterion's Artifacts API. Amending would also fail
+    // (no path under `wd` to add). For the legacy fallback path
+    // (`<wd>/docs/renovacy/`), keep the amend so old runs without
+    // the artifact-files mount still produce a self-contained commit.
+    if (artifactsDir) {
+      process.stdout.write(JSON.stringify({
+        success: true,
+        output: `audit md written to artifact-files: ${path.relative(artifactsDir, fpath)}`,
+        was_batch: isBatch,
+      }));
+    } else {
+      const { execSync } = require("child_process");
+      try {
+        execSync("git add docs/renovacy/", { cwd: wd, stdio: "pipe" });
+        execSync("git commit --amend --no-edit", { cwd: wd, stdio: "pipe" });
+        process.stdout.write(JSON.stringify({ success: true, output: `audit md amended into ${sha.slice(0, 7)} (${fname})`, was_batch: isBatch }));
+      } catch (e) {
+        // Treat amend failure as soft — the audit doc still landed on
+        // disk; the operator can manually fold it into the next commit.
+        process.stdout.write(JSON.stringify({ success: true, output: `audit md written to ${fname}; amend failed: ${e.message}`, was_batch: isBatch }));
+      }
     }
   input: audit_md_input
   output: audit_md_result
@@ -4078,7 +4107,17 @@ tool emit_sbom:
       packages,
     };
 
-    const dir = path.join(wd, "docs", "renovacy");
+    // Write to iterion's per-run artifact-files area so the SBOM
+    // doesn't get committed into the bench repo (operators want the
+    // code commits clean, not littered with `docs/renovacy/sbom-*.json`
+    // entries). When ITERION_ARTIFACT_FILES_DIR is unset (older
+    // iterion or non-bind-mount drivers), fall back to
+    // `<wd>/docs/renovacy/` so the SBOM still produces something the
+    // operator can find — matches write_audit_md's same fallback.
+    const artifactsDir = process.env.ITERION_ARTIFACT_FILES_DIR;
+    const dir = artifactsDir
+      ? path.join(artifactsDir, "renovacy")
+      : path.join(wd, "docs", "renovacy");
     fs.mkdirSync(dir, { recursive: true });
     const fname = "sbom-" + shortSha + ".json";
     const fpath = path.join(dir, fname);
@@ -4086,7 +4125,9 @@ tool emit_sbom:
 
     process.stdout.write(JSON.stringify({
       written: true,
-      path: path.posix.join("docs", "renovacy", fname),
+      path: artifactsDir
+        ? path.posix.join("renovacy", fname)
+        : path.posix.join("docs", "renovacy", fname),
       package_count: packages.length,
       end_sha: endSha,
     }));
