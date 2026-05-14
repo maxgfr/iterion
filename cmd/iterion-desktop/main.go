@@ -30,6 +30,17 @@ import (
 var appIcon []byte
 
 func main() {
+	// Set GLib's program name BEFORE Wails boots GTK. gtk_init reads
+	// g_get_prgname() when realising windows and stamps WM_CLASS from
+	// it — Wails calls g_set_prgname too but only AFTER NewWindow,
+	// which is too late to influence the X server's class. A fresh
+	// WM_CLASS class is needed because Cinnamon's window matcher
+	// poisoned its "Iterion-desktop" cache after the 2026-05-14
+	// upstream upgrade cascade and won't refresh through reboots or
+	// cinnamon --replace; "Iterion" is unseen so it re-reads from
+	// scratch and picks up our _NET_WM_ICON.
+	setPrgname("iterion")
+
 	// Source ~/.iterion/env (or $ITERION_ENV_FILE) BEFORE the editor
 	// server starts so provider credentials a launching shell didn't
 	// export are still available to the runtime — notably so
