@@ -903,20 +903,31 @@ func (e *Engine) selectEdgeRS(rs *runState, fromNodeID string, output map[string
 		}
 	}
 
-	// Reset loop counters whose body we are re-entering from outside.
-	// A non-loop edge entering a body node from a non-body source marks
-	// the start of a fresh loop instance (e.g. the package_loop edge
-	// drives a new iteration into Phase 1, which transitively re-enters
-	// the fix_loop body via align_code -> validate_upgrade). Without
-	// this, loop counters are globally cumulative across the run, so
-	// once any single package exhausts fix_loop every subsequent
-	// package gets zero retry budget.
+	// Reset loop counters when we re-enter the loop at its TOP — i.e.
+	// when a non-loop edge targets one of the loop's entry nodes
+	// (target of a loop-bearing back-edge) from a source that isn't
+	// part of the loop body. That signals a fresh outer iteration
+	// driving a fresh loop instance (e.g. package_loop pushes into
+	// Phase 1, which lands on validate_upgrade — the fix_loop entry —
+	// from outside the body via align_code).
+	//
+	// Earlier this fired on ANY body-node target, which over-reset
+	// when computeLoopBodies couldn't intersect forward+reverse BFS
+	// past intermediate loop edges and yielded a minimal-endpoints
+	// body. Concrete case: recovery_loop's body was just {alt_review,
+	// review_commit_auto} because the cycle goes through review_loop's
+	// back-edge; the non-loop edge fix_X → review_commit_auto then
+	// reset the counter every cycle and review_commit_auto's
+	// iteration_path stuck at recovery_loop=0, collapsing every
+	// invocation into one snapshot row. Scoping the reset to the
+	// loop's entries fixes the false positive while still resetting
+	// when a parent iteration legitimately re-enters.
 	if selected.LoopName == "" {
 		for loopName, loop := range e.workflow.Loops {
-			if loop == nil || len(loop.Body) == 0 {
+			if loop == nil || len(loop.Entries) == 0 {
 				continue
 			}
-			if !loop.Body[selected.To] || loop.Body[selected.From] {
+			if !loop.Entries[selected.To] || loop.Body[selected.From] {
 				continue
 			}
 			if prior, ok := rs.loopCounters[loopName]; ok && prior > 0 {
