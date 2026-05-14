@@ -1369,6 +1369,7 @@ func computeLoopBodies(w *Workflow) {
 		}
 		var sources, targets []string
 		seen := make(map[string]bool)
+		entries := make(map[string]bool)
 		for _, edge := range w.Edges {
 			if edge == nil || edge.LoopName != name {
 				continue
@@ -1377,6 +1378,7 @@ func computeLoopBodies(w *Workflow) {
 			targets = append(targets, edge.To)
 			seen[edge.From] = true
 			seen[edge.To] = true
+			entries[edge.To] = true
 		}
 		if len(sources) == 0 {
 			continue
@@ -1393,5 +1395,6 @@ func computeLoopBodies(w *Workflow) {
 			}
 		}
 		loop.Body = body
+		loop.Entries = entries
 	}
 }

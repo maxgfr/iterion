@@ -776,6 +776,18 @@ type Loop struct {
 	// global to the whole run (a fix loop nested inside a package loop
 	// gets a fresh budget every package).
 	Body map[string]bool
+	// Entries is the set of node IDs that serve as the loop's entry
+	// point — i.e. the targets of the loop-bearing back-edges. Used by
+	// the runtime to scope the counter-reset rule precisely to "we are
+	// re-entering the loop at its top", instead of "we are entering
+	// any body node from outside the body". The looser rule misfires
+	// when the body is computed too narrowly (e.g. a nested loop whose
+	// non-loop forward+reverse BFS yields only the back-edge endpoints
+	// — see recovery_loop in examples/secured-renovacy.iter: the body
+	// was {alt_review, review_commit_auto}, so the edge
+	// fix_X → review_commit_auto reset the counter every cycle and
+	// review_commit_auto's iteration_path stuck at recovery_loop=0).
+	Entries map[string]bool
 }
 
 // ---------------------------------------------------------------------------
