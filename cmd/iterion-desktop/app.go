@@ -141,7 +141,16 @@ func (a *App) onStartup(ctx context.Context) {
 	}
 }
 
-func (a *App) onDomReady(_ context.Context) {}
+func (a *App) onDomReady(_ context.Context) {
+	// Post _NET_WM_ICON directly on our X window. Wails's
+	// gtk_window_set_icon path only set WM_HINTS.icon_pixmap on this
+	// WebKitGTK config, leaving Cinnamon (which reads _NET_WM_ICON
+	// exclusively after the 2026-05-14 cinnamon-settings-daemon
+	// + mutter + GTK4 upgrade cascade) to fall back to the
+	// StartupWMClass → .desktop → hicolor lookup that the upgrade
+	// broke. The helper is a no-op on non-Linux builds.
+	installWindowIcon()
+}
 
 // onBeforeClose lets us persist the window state before Wails tears
 // down — and, when headless daemons are still running per-project, ask
