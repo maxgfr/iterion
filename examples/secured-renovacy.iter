@@ -3852,18 +3852,31 @@ workflow secured_renovacy:
   ## alternation. fix_claude and fix_gpt both feed into the same
   ## tool — that's a convergence point, but tool nodes have no
   ## session inheritance so C009 does not apply.
-  fix_claude -> review_commit_auto with {
+  ##
+  ## `when applied`: the fixer changed the working tree. Route through
+  ## review_commit_auto so the commit lands with a meaningful subject.
+  ## `when not applied`: the fixer pushed back on every blocker (no
+  ## working-tree changes). review_commit_auto would `git commit` an
+  ## empty tree and fail — wasted recovery_loop budget and a noisy
+  ## audit trail. Skip straight to alt_review so the next reviewer
+  ## (with the pushback already wired into its `prior_pushback` input
+  ## at the alt_review→reviewer_X edges above) gets to weigh in.
+  ## Both edges land on the same recovery_loop back-edge target so
+  ## the counter ticks identically regardless of which path was taken.
+  fix_claude -> review_commit_auto when applied with {
     workspace_dir: "{{vars.workspace_dir}}",
     family: "claude",
     iteration: "{{loop.recovery_loop.iteration}}",
     summary: "{{outputs.fix_claude.summary}}"
   }
-  fix_gpt -> review_commit_auto with {
+  fix_gpt -> review_commit_auto when applied with {
     workspace_dir: "{{vars.workspace_dir}}",
     family: "gpt",
     iteration: "{{loop.recovery_loop.iteration}}",
     summary: "{{outputs.fix_gpt.summary}}"
   }
+  fix_claude -> alt_review when not applied as recovery_loop(20)
+  fix_gpt    -> alt_review when not applied as recovery_loop(20)
 
   review_commit_auto -> alt_review as recovery_loop(20)
 
