@@ -457,8 +457,8 @@ func sniffMIMEAndHash(p string) (string, string, error) {
 	return mime, hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// reapStagedUploads sweeps abandoned uploads. Best-effort: errors
-// are logged but never propagated. Called periodically by the server.
+// reapStagedUploads sweeps abandoned uploads. Best-effort: errors are
+// silently dropped. Called periodically by runStagedUploadReaper.
 func (s *Server) reapStagedUploads() {
 	staging, err := s.stagingRoot()
 	if err != nil {
@@ -479,6 +479,32 @@ func (s *Server) reapStagedUploads() {
 		}
 		if fi.ModTime().Before(cutoff) {
 			_ = os.RemoveAll(path.Join(staging, e.Name()))
+		}
+	}
+}
+
+// uploadReaperInterval governs how often the staged-upload reaper
+// scans the staging root. Shorter = lower max disk usage; longer =
+// less filesystem churn. The TTL itself (uploadStagingTTL) bounds the
+// staleness window, so the interval just trades off how quickly we
+// reclaim expired dirs.
+const uploadReaperInterval = 10 * time.Minute
+
+// runStagedUploadReaper drives reapStagedUploads on a fixed interval
+// until the server shuts down. Spawned as a goroutine from
+// ListenAndServe.
+func (s *Server) runStagedUploadReaper() {
+	// Fire once on startup so a freshly restarted server reclaims dirs
+	// older than the TTL without waiting a full interval.
+	s.reapStagedUploads()
+	t := time.NewTicker(uploadReaperInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.shutdown:
+			return
+		case <-t.C:
+			s.reapStagedUploads()
 		}
 	}
 }
