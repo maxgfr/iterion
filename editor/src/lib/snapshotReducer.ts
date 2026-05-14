@@ -193,17 +193,28 @@ export function buildExecutionsAt(
         break;
       }
       case "run_failed": {
+        const errMsg = (evt.data?.["error"] as string) ?? null;
         const cur = currentExecFor(branch, evt.node_id ?? "");
         if (cur) {
           execs.set(cur.execution_id, {
             ...cur,
             status: "failed",
             finished_at: cur.finished_at ?? evt.timestamp,
-            error: (evt.data?.["error"] as string) ?? cur.error,
+            error: errMsg ?? cur.error,
             current_event_seq: evt.seq,
             last_seq: evt.seq,
           });
         }
+        closeInFlightExecs(execs, "failed", evt.timestamp, evt.seq, errMsg);
+        break;
+      }
+      case "run_finished": {
+        closeInFlightExecs(execs, "finished", evt.timestamp, evt.seq, null);
+        break;
+      }
+      case "run_cancelled": {
+        const reason = (evt.data?.["reason"] as string) ?? "run cancelled";
+        closeInFlightExecs(execs, "failed", evt.timestamp, evt.seq, reason);
         break;
       }
       default:
@@ -212,6 +223,32 @@ export function buildExecutionsAt(
   }
 
   return Array.from(execs.values());
+}
+
+// closeInFlightExecs mirrors pkg/runview/snapshot.go::closeInFlightExecs:
+// any execution still flagged "running" or "paused_waiting_human" when a
+// terminal run-level event arrives is, by definition, no longer in flight
+// — the engine has stopped driving it. Without this the scrubber leaves
+// the canvas spinner pulsing on the node that was active at cancel/finish/
+// fail time.
+function closeInFlightExecs(
+  execs: Map<string, ExecutionState>,
+  status: "failed" | "finished",
+  timestamp: string,
+  seq: number,
+  errMsg: string | null,
+): void {
+  for (const e of execs.values()) {
+    if (e.status !== "running" && e.status !== "paused_waiting_human") continue;
+    execs.set(e.execution_id, {
+      ...e,
+      status,
+      finished_at: e.finished_at ?? timestamp,
+      error: errMsg && !e.error ? errMsg : e.error,
+      current_event_seq: seq,
+      last_seq: seq,
+    });
+  }
 }
 
 // timelineMarks scans the events stream and returns the seq positions
