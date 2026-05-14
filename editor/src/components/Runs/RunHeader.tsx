@@ -27,6 +27,11 @@ export default function RunHeader({ run, active, wsState }: Props) {
   //   - paused_waiting_human:  user gives up on the workflow without
   //                            answering — engine drops the goroutine
   //                            and the run terminates.
+  //   - failed_resumable:      operator abandons the partial work. The
+  //                            backend flips the persisted status to
+  //                            cancelled and RecoverFinalize promotes
+  //                            the worktree HEAD to a storage branch so
+  //                            the "Squash and merge" button can act.
   //   - queued:                cloud-mode run on the NATS queue;
   //                            cancel removes the message before any
   //                            runner picks it up.
@@ -36,6 +41,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
   const canCancel =
     (run.status === "running" && active) ||
     run.status === "paused_waiting_human" ||
+    run.status === "failed_resumable" ||
     run.status === "queued";
   // Resume from header is a "best-effort" trigger — for paused_waiting_human
   // runs the user normally fills the Pause form in the detail panel
