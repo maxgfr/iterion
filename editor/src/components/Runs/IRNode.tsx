@@ -11,7 +11,7 @@ import { ProviderIcon } from "@/components/icons/ProviderIcon";
 import { BackendBadge } from "@/components/icons/BackendBadge";
 import { NodeIcon } from "@/components/icons/NodeIcon";
 
-import { statusClasses } from "./runStatusClasses";
+import { statusClasses, type UnifiedStatus } from "./runStatusClasses";
 
 // Maximum pips to show inline before condensing into a "+N" overflow
 // affordance. Tuned to match the 200px node width — beyond ~6 the strip
@@ -92,8 +92,22 @@ export default function IRNode({ data }: NodeProps) {
   // Clamp the index in case the executions array shrunk (run reset).
   const activeIdx = Math.min(Math.max(selectedIteration, 0), executions.length - 1);
   const activeExec = executions[activeIdx] ?? null;
-  const status = activeExec?.status ?? "none";
-  const c = statusClasses(status);
+  const selectedStatus: UnifiedStatus = activeExec?.status ?? "none";
+  // Card color reflects the DOMINANT status across all attempts: a
+  // running attempt anywhere on this node should pop blue/running even
+  // when the user scrubbed back to inspect a prior finished attempt
+  // (the iteration pip strip still flags the live one via its play
+  // glyph). Priority: running > paused_waiting_human > selected exec's
+  // status. The pip strip + detail panel still key off the selected
+  // attempt, so this only changes the card backdrop.
+  let dominantStatus: UnifiedStatus = selectedStatus;
+  for (const e of executions) {
+    if (e.status === "running") { dominantStatus = "running"; break; }
+    if (e.status === "paused_waiting_human" && dominantStatus !== "running") {
+      dominantStatus = "paused_waiting_human";
+    }
+  }
+  const c = statusClasses(dominantStatus);
 
   return (
     <div
@@ -130,8 +144,8 @@ export default function IRNode({ data }: NodeProps) {
           {executions.length === 0
             ? "—"
             : executions.length === 1
-            ? status
-            : `${status} · iter ${activeIdx + 1}/${executions.length}`}
+            ? selectedStatus
+            : `${selectedStatus} · iter ${activeIdx + 1}/${executions.length}`}
         </span>
       </div>
 
