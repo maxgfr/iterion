@@ -167,15 +167,28 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 					fmt.Sprintf("LLM response [%s] step %d:", nodeID, step.Number),
 					iterlog.BlockPreview(step.Text, 2000))
 			}
-			// Tool calls are logged at OnToolStarted (fired by
-			// executeToolsDirect just before each tool runs) so the
-			// console line shows up before — not after — the tool
-			// executes. The DEBUG-level raw input dump stays here for
-			// step-level diagnostics that bundle every call in one place.
-			if len(step.ToolCalls) > 0 && logger.IsEnabled(iterlog.LevelDebug) {
+			// Per-tool log line for the claw (in-process) path. The
+			// claude_code delegate prints its own
+			// `[node#iter/claude-code] 🔧 <Tool> <detail>` line during
+			// stream decoding, so we skip those here — the bridge
+			// hook in executor.go only ferries event payloads, and
+			// the LLMStepInfo arrives only for claw's direct loop.
+			if len(step.ToolCalls) > 0 {
 				for _, tc := range step.ToolCalls {
-					logger.Logf(iterlog.LevelDebug, "🔧", "  step %d tool input [%s/%s]: %s",
-						step.Number, nodeID, tc.Name, preview(string(tc.Input), 400))
+					detail := tooldisplay.HeaderDetail(tc.Name, tc.Input, tooldisplay.SnakeCaseKeys)
+					if detail != "" {
+						logger.Logf(iterlog.LevelInfo, "🔧", "Tool call [%s]: %s %s", nodeID, tc.Name, detail)
+					} else {
+						logger.Logf(iterlog.LevelInfo, "🔧", "Tool call [%s]: %s", nodeID, tc.Name)
+					}
+					if body := tooldisplay.BlockBody(tc.Name, tc.Input); body != "" {
+						logger.LogBlock(iterlog.LevelInfo, "🔧",
+							fmt.Sprintf("Tool input [%s/%s]:", nodeID, tc.Name),
+							iterlog.BlockPreview(body, 2000))
+					}
+					if logger.IsEnabled(iterlog.LevelDebug) {
+						logger.Logf(iterlog.LevelDebug, "🔧", "  raw input: %s", preview(string(tc.Input), 400))
+					}
 				}
 			}
 			if step.CacheReadTokens > 0 || step.CacheWriteTokens > 0 {
@@ -227,22 +240,11 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				NodeID: nodeID,
 				Data:   data,
 			})
-
-			// Console echo for the in-process (claw) path. The claude_code
-			// delegate logs its own `🔧 <Tool> <detail>` line as it streams
-			// SDK blocks; here we mirror that for tool calls that come
-			// straight from the model executor so the operator sees the
-			// same level of detail regardless of backend.
-			if detail := tooldisplay.HeaderDetail(info.ToolName, info.Input, tooldisplay.SnakeCaseKeys); detail != "" {
-				logger.Logf(iterlog.LevelInfo, "🔧", "Tool call [%s]: %s %s", nodeID, info.ToolName, detail)
-			} else if info.ToolName != "" {
-				logger.Logf(iterlog.LevelInfo, "🔧", "Tool call [%s]: %s", nodeID, info.ToolName)
-			}
-			if body := tooldisplay.BlockBody(info.ToolName, info.Input); body != "" {
-				logger.LogBlock(iterlog.LevelInfo, "🔧",
-					fmt.Sprintf("Tool input [%s/%s]:", nodeID, info.ToolName),
-					iterlog.BlockPreview(body, 2000))
-			}
+			// No console echo here: the claude_code delegate already
+			// emits its own `[node#iter/claude-code] 🔧 <Tool> <detail>`
+			// line as the SDK stream is decoded, and the claw path logs
+			// its step's tool calls from OnLLMStepFinish below — adding
+			// a third line here would double-up every entry.
 		},
 
 		OnToolCall: func(nodeID string, info LLMToolCallInfo) {
