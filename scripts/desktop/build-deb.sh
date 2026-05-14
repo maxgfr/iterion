@@ -69,16 +69,39 @@ mkdir -p \
   "$stage/DEBIAN" \
   "$stage/usr/bin" \
   "$stage/usr/share/applications" \
-  "$stage/usr/share/icons/hicolor/256x256/apps" \
   "$stage/usr/share/doc/iterion-desktop"
 
 install -m 755 "$BIN_PATH" "$stage/usr/bin/iterion-desktop"
 install -m 755 "$CLI_BIN_PATH" "$stage/usr/bin/iterion"
 install -m 644 build/linux/iterion.desktop \
   "$stage/usr/share/applications/iterion-desktop.desktop"
+
+# Install the app icon at every freedesktop standard size + the
+# scalable slot. Taskbars and window decorations pick the size that
+# matches their target pixel density; shipping ONLY the 256x256
+# variant left systems whose taskbar wants a 22x22 / 24x24 / 48x48
+# rendition falling back to the generic "missing application" icon.
+# We resize from build/appicon.png (the canonical 694x694 source)
+# via ImageMagick `convert`; if `convert` is not on PATH, fall back
+# to the legacy single-size install so the .deb still builds.
 if [ -f build/appicon.png ]; then
-  install -m 644 build/appicon.png \
-    "$stage/usr/share/icons/hicolor/256x256/apps/iterion-desktop.png"
+  if command -v convert >/dev/null 2>&1; then
+    for size in 16 22 24 32 48 64 96 128 192 256 512; do
+      mkdir -p "$stage/usr/share/icons/hicolor/${size}x${size}/apps"
+      convert build/appicon.png -resize "${size}x${size}" \
+        "$stage/usr/share/icons/hicolor/${size}x${size}/apps/iterion-desktop.png"
+    done
+    # Scalable: ship the original PNG as a fallback for scalable
+    # contexts. A proper SVG would be nicer; the current source is
+    # a PNG so this is the best we can do without a vector master.
+    mkdir -p "$stage/usr/share/icons/hicolor/scalable/apps"
+    install -m 644 build/appicon.png \
+      "$stage/usr/share/icons/hicolor/scalable/apps/iterion-desktop.png"
+  else
+    mkdir -p "$stage/usr/share/icons/hicolor/256x256/apps"
+    install -m 644 build/appicon.png \
+      "$stage/usr/share/icons/hicolor/256x256/apps/iterion-desktop.png"
+  fi
 fi
 
 cat > "$stage/usr/share/doc/iterion-desktop/copyright" <<'EOF'
