@@ -1,11 +1,14 @@
 package runtime
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/SocialGouv/iterion/pkg/store"
 )
 
 func mustRun(t *testing.T, dir string, name string, args ...string) {
@@ -506,5 +509,125 @@ func TestResolveMergeTarget(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestRecoverFinalize_HappyPath simulates a run that reached
+// status=finished but lost its finalization metadata (daemon SIGTERM
+// between "Run finished" and SaveRun(final_*)). RecoverFinalize on
+// startup should detect the orphan, promote the worktree HEAD to a
+// persistent branch, and persist FinalCommit/FinalBranch/MergeStatus
+// to run.json. Reproduces the 2026-05-14 run_1778749561103 scenario.
+func TestRecoverFinalize_HappyPath(t *testing.T) {
+	repo, originalTip := initBareishRepo(t)
+	wt := filepath.Join(t.TempDir(), "wt")
+	mustRun(t, repo, "git", "worktree", "add", wt, "HEAD")
+	t.Cleanup(func() { _ = exec.Command("git", "-C", repo, "worktree", "remove", "--force", wt).Run() })
+
+	finalSHA := addCommit(t, wt, "feature.go", "package main\n", "feat: add feature")
+
+	// Filesystem store with a temp root.
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store new: %v", err)
+	}
+	r := &store.Run{
+		ID:         "run_test_recover_finalize",
+		Name:       "swift-cedar-a3f2",
+		Status:     store.RunStatusFinished, // engine got this far
+		Worktree:   true,
+		WorkDir:    wt,
+		RepoRoot:   repo,
+		BaseCommit: originalTip,
+		// FinalCommit / FinalBranch deliberately empty — the failure
+		// mode RecoverFinalize is meant to repair.
+	}
+	if err := st.SaveRun(context.Background(), r); err != nil {
+		t.Fatalf("seed save: %v", err)
+	}
+
+	if err := RecoverFinalize(context.Background(), st, r, nil); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if r.FinalCommit != finalSHA {
+		t.Errorf("FinalCommit = %q, want %q", r.FinalCommit, finalSHA)
+	}
+	if r.FinalBranch != "iterion/run/swift-cedar-a3f2" {
+		t.Errorf("FinalBranch = %q", r.FinalBranch)
+	}
+	// And the run was persisted back: re-load and check.
+	r2, err := st.LoadRun(context.Background(), r.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if r2.FinalCommit != finalSHA || r2.FinalBranch != "iterion/run/swift-cedar-a3f2" {
+		t.Errorf("persisted final_* mismatch: %+v", r2)
+	}
+	// And the branch actually exists in the repo.
+	out, _ := exec.Command("git", "-C", repo, "rev-parse", "iterion/run/swift-cedar-a3f2").Output()
+	if got := strings.TrimSpace(string(out)); got != finalSHA {
+		t.Errorf("branch tip = %q, want %q", got, finalSHA)
+	}
+}
+
+// TestRecoverFinalize_Idempotent — calling RecoverFinalize a second
+// time on an already-finalized run must be a no-op (no error, no
+// re-creation). Important because reconcileOrphans calls it on every
+// run scanned at startup.
+func TestRecoverFinalize_Idempotent(t *testing.T) {
+	st, _ := store.New(t.TempDir())
+	r := &store.Run{
+		ID:          "run_already_done",
+		Status:      store.RunStatusFinished,
+		Worktree:    true,
+		WorkDir:     "/tmp/wt",
+		RepoRoot:    "/tmp/repo",
+		BaseCommit:  "abc",
+		FinalCommit: "def",
+		FinalBranch: "iterion/run/already",
+	}
+	if err := RecoverFinalize(context.Background(), st, r, nil); err != nil {
+		t.Fatalf("idempotent call errored: %v", err)
+	}
+	if r.FinalCommit != "def" || r.FinalBranch != "iterion/run/already" {
+		t.Errorf("idempotent call mutated state: %+v", r)
+	}
+}
+
+// TestRecoverFinalize_SkipsNonWorktree — a run without worktree
+// (worktree: none in the workflow, or never set) must be a no-op
+// regardless of status — there's no worktree HEAD to promote.
+func TestRecoverFinalize_SkipsNonWorktree(t *testing.T) {
+	st, _ := store.New(t.TempDir())
+	r := &store.Run{
+		ID:       "run_no_worktree",
+		Status:   store.RunStatusFinished,
+		Worktree: false,
+	}
+	if err := RecoverFinalize(context.Background(), st, r, nil); err != nil {
+		t.Fatalf("non-worktree path errored: %v", err)
+	}
+	if r.FinalCommit != "" || r.FinalBranch != "" {
+		t.Errorf("non-worktree path mutated state: %+v", r)
+	}
+}
+
+// TestRecoverFinalize_SkipsNonFinished — a run that's still running,
+// failed_resumable, etc. must be a no-op. failed_resumable runs keep
+// their worktree for resume; finalize there would race with resume.
+func TestRecoverFinalize_SkipsNonFinished(t *testing.T) {
+	st, _ := store.New(t.TempDir())
+	r := &store.Run{
+		ID:       "run_failed_resumable",
+		Status:   store.RunStatusFailedResumable,
+		Worktree: true,
+		WorkDir:  "/tmp/wt",
+		RepoRoot: "/tmp/repo",
+	}
+	if err := RecoverFinalize(context.Background(), st, r, nil); err != nil {
+		t.Fatalf("non-finished path errored: %v", err)
+	}
+	if r.FinalCommit != "" || r.FinalBranch != "" {
+		t.Errorf("non-finished path mutated state: %+v", r)
 	}
 }

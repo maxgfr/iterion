@@ -15,6 +15,7 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -662,6 +663,76 @@ func branchOrDetached(branch string) string {
 		return "detached HEAD"
 	}
 	return branch
+}
+
+// RecoverFinalize re-runs the worktree promotion step for a run that
+// reached a terminal status but never persisted its finalization metadata
+// (FinalCommit / FinalBranch / MergeStatus). This happens when the daemon
+// is killed between "Run finished" being written and finalizeWorktree
+// completing — observed on 2026-05-14 when a dpkg post-install trigger
+// SIGTERM'd the daemon ~50ms after run_1778749561103 hit `done`, leaving
+// the worktree with 11 commits but the editor showing "no commits to
+// merge" because run.json had no final_branch.
+//
+// The recovery is idempotent: it bails immediately if the run already
+// has FinalBranch set or if it's not a worktree run. Reads the worktree
+// HEAD via git rev-parse, rebuilds a minimal worktreeContext from the
+// run's persisted RepoRoot/BaseCommit/WorkDir, and calls finalizeWorktree
+// with autoMerge=false so the user retains UI control over the deferred
+// merge (the same default as a non-recovery finalize).
+//
+// Designed to be invoked from the daemon's reconcileOrphans pass at
+// startup so the gap between "daemon up" and "metadata recovered"
+// stays sub-second.
+func RecoverFinalize(ctx context.Context, st store.RunStore, r *store.Run, logger *iterlog.Logger) error {
+	if r == nil {
+		return fmt.Errorf("nil run")
+	}
+	if !r.Worktree || r.WorkDir == "" || r.RepoRoot == "" {
+		return nil // not a worktree run — nothing to recover
+	}
+	if r.FinalBranch != "" || r.FinalCommit != "" {
+		return nil // already finalized
+	}
+	// Only finalize cleanly-terminated runs. failed_resumable / failed
+	// keep their worktree for inspection per the engine's policy; the
+	// user resolves them via resume, not via post-mortem finalize.
+	if r.Status != store.RunStatusFinished {
+		return nil
+	}
+	wc := worktreeContext{
+		repoRoot:    r.RepoRoot,
+		wtPath:      r.WorkDir,
+		originalTip: r.BaseCommit,
+		// originalBranch left empty — recovery has no source for the
+		// branch name the user was on at launch. finalizeWorktree's
+		// merge target resolution treats empty originalBranch as a
+		// reason to skip the merge (MergeStatus="skipped"), which is
+		// the right default here: the run's main result is the
+		// persistent branch; the user merges via the UI.
+	}
+	res := finalizeWorktree(wc, finalizeOptions{
+		runName:   r.Name,
+		runID:     r.ID,
+		mergeInto: "none", // skip auto-merge on recovery path; user drives via UI
+	}, logger)
+	if res.FinalCommit == "" && res.FinalBranch == "" {
+		return nil // worktree gone, HEAD == base, or branch creation failed
+	}
+	r.FinalCommit = res.FinalCommit
+	r.FinalBranch = res.FinalBranch
+	r.MergeStatus = store.MergeStatus(res.MergeStatus)
+	if res.MergedInto != "" {
+		r.MergedInto = res.MergedInto
+	}
+	if res.MergedCommit != "" {
+		r.MergedCommit = res.MergedCommit
+	}
+	if logger != nil {
+		logger.Info("runtime: recovered finalize for run %s → branch %s (commit %s, status %s)",
+			r.ID, res.FinalBranch, shortSHA(res.FinalCommit), res.MergeStatus)
+	}
+	return st.SaveRun(ctx, r)
 }
 
 // findGitRoot walks up parent directories from `dir` until it finds a `.git`

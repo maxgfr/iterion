@@ -337,6 +337,16 @@ func (s *Service) reconcileOrphans() {
 		if err != nil {
 			continue
 		}
+		// Recover missed finalization for worktree runs whose daemon
+		// died between "Run finished" and finalizeWorktree completing.
+		// The recovery is idempotent (bails when FinalBranch is set or
+		// the run isn't a finished-worktree case), so it's safe to call
+		// for every run scanned. Without this, a SIGTERM landing during
+		// the ~50ms window between status=finished and SaveRun(final_*)
+		// leaves the run forever stuck with no merge UI affordance.
+		if recErr := runtime.RecoverFinalize(context.Background(), s.store, r, s.logger); recErr != nil {
+			s.logger.Warn("runview: recover finalize %s: %v", id, recErr)
+		}
 		if r.Status != store.RunStatusRunning {
 			continue
 		}
