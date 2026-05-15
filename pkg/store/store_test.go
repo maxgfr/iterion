@@ -268,6 +268,66 @@ func TestAppendAndLoadEvents(t *testing.T) {
 	}
 }
 
+func TestAppendEventStampsLogOffsetFromCallback(t *testing.T) {
+	s := tmpStore(t)
+	if _, err := s.CreateRun(context.Background(), "run-log", "wf", nil); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	// Simulate the runview Service's per-run log buffer: a counter
+	// that the AppendEvent path reads via the installed callback.
+	var pos int64
+	s.SetLogPositionFn(func(runID string) int64 {
+		if runID != "run-log" {
+			t.Errorf("callback runID = %q, want run-log", runID)
+		}
+		return pos
+	})
+
+	pos = 0
+	first, err := s.AppendEvent(context.Background(), "run-log", Event{Type: EventRunStarted})
+	if err != nil {
+		t.Fatalf("AppendEvent #1: %v", err)
+	}
+	if first.LogOffset != 0 {
+		t.Errorf("first.LogOffset = %d, want 0", first.LogOffset)
+	}
+
+	pos = 1234
+	second, err := s.AppendEvent(context.Background(), "run-log", Event{Type: EventNodeStarted, NodeID: "x"})
+	if err != nil {
+		t.Fatalf("AppendEvent #2: %v", err)
+	}
+	if second.LogOffset != 1234 {
+		t.Errorf("second.LogOffset = %d, want 1234", second.LogOffset)
+	}
+
+	// Caller-supplied LogOffset is preserved (e.g. Mongo-mode replay
+	// or synthetic test events).
+	pos = 9999
+	third, err := s.AppendEvent(context.Background(), "run-log", Event{
+		Type:      EventNodeFinished,
+		NodeID:    "x",
+		LogOffset: 5555,
+	})
+	if err != nil {
+		t.Fatalf("AppendEvent #3: %v", err)
+	}
+	if third.LogOffset != 5555 {
+		t.Errorf("third.LogOffset = %d, want 5555 (caller value preserved)", third.LogOffset)
+	}
+
+	// No callback installed → LogOffset stays 0.
+	s.SetLogPositionFn(nil)
+	fourth, err := s.AppendEvent(context.Background(), "run-log", Event{Type: EventRunFinished})
+	if err != nil {
+		t.Fatalf("AppendEvent #4: %v", err)
+	}
+	if fourth.LogOffset != 0 {
+		t.Errorf("fourth.LogOffset = %d, want 0 (no callback)", fourth.LogOffset)
+	}
+}
+
 func TestAllEventTypesPersistable(t *testing.T) {
 	s := tmpStore(t)
 	s.CreateRun(context.Background(), "run-all-evt", "wf", nil)

@@ -170,4 +170,12 @@ type Event struct {
 	// Stamped from ctx at write time in cloud mode; empty for local
 	// runs and legacy filesystem events.
 	TenantID string `json:"tenant_id,omitempty" bson:"tenant_id,omitempty"`
+	// LogOffset is the byte position in the run's log buffer at the
+	// moment this event was persisted. Stamped by the store from the
+	// per-run log buffer's running total (filesystem mode only;
+	// cloud-mode runs have no local log buffer so the field stays 0).
+	// Consumers (editor time-travel scrubber, replay) slice the live
+	// log up to this offset to show "what was logged at the moment
+	// this event fired" without parsing log line timestamps.
+	LogOffset int64 `json:"log_offset,omitempty" bson:"log_offset,omitempty"`
 }

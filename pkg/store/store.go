@@ -122,7 +122,22 @@ type FilesystemRunStore struct {
 	seq        map[string]int64 // run_id → next event sequence number
 	seqSeed    map[string]bool  // run_id → seq has been seeded from disk
 	signingKey []byte           // HMAC key for presigned attachment URLs (lazy)
+
+	// logPositionFn returns the current per-run log buffer byte total
+	// for stamping Event.LogOffset at AppendEvent time. nil disables
+	// stamping (LogOffset stays 0). Wired post-construction by the
+	// runview Service, which owns the buffer registry; concrete-type
+	// setter rather than constructor option because the buffer
+	// lifecycle outlives any single store option pass.
+	logPositionMu sync.RWMutex
+	logPositionFn LogPositionFn
 }
+
+// LogPositionFn is the callback signature the store uses to stamp
+// Event.LogOffset. Returns the byte position in the run's log
+// buffer at the moment of invocation; 0 when no buffer exists yet
+// for runID (early bootstrap events before the buffer is created).
+type LogPositionFn func(runID string) int64
 
 // StoreOption configures a FilesystemRunStore.
 type StoreOption func(*FilesystemRunStore)
@@ -130,6 +145,18 @@ type StoreOption func(*FilesystemRunStore)
 // WithLogger sets a leveled logger on the store.
 func WithLogger(l *iterlog.Logger) StoreOption {
 	return func(s *FilesystemRunStore) { s.logger = l }
+}
+
+// SetLogPositionFn installs (or replaces) the callback used by
+// AppendEvent to stamp Event.LogOffset. Pass nil to disable stamping.
+// Setter rather than constructor option because the per-run log
+// buffer that backs the callback is created on demand by the runview
+// Service AFTER the store is wired; the same Service instance
+// installs the callback once it's ready.
+func (s *FilesystemRunStore) SetLogPositionFn(fn LogPositionFn) {
+	s.logPositionMu.Lock()
+	s.logPositionFn = fn
+	s.logPositionMu.Unlock()
 }
 
 // New creates a FilesystemRunStore rooted at the given directory.
@@ -394,6 +421,21 @@ func (s *FilesystemRunStore) AppendEvent(_ context.Context, runID string, evt Ev
 	// Assign seq but don't increment the counter yet — only advance on
 	// successful write to prevent gaps from failed marshals or I/O.
 	evt.Seq = s.seq[runID]
+
+	// Stamp the current log-buffer byte position when the runview
+	// Service has wired a callback; lets the editor's time-travel
+	// scrubber slice "log up to event seq N" without parsing log
+	// line timestamps. Only overwrites when the caller didn't set
+	// LogOffset explicitly (Mongo-mode replays / synthetic test
+	// events can pre-fill).
+	if evt.LogOffset == 0 {
+		s.logPositionMu.RLock()
+		fn := s.logPositionFn
+		s.logPositionMu.RUnlock()
+		if fn != nil {
+			evt.LogOffset = fn(runID)
+		}
+	}
 
 	line, err := json.Marshal(evt)
 	if err != nil {

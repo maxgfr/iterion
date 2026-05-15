@@ -453,6 +453,32 @@ export default function RunView() {
     return events.filter((e) => e.seq <= deferredScrubSeq);
   }, [deferredScrubSeq, events]);
 
+  // Absolute byte offset to clamp the bottom log panel during scrub /
+  // replay: the backend stamps each event with the log buffer's byte
+  // total at emission time (Event.log_offset). Take the latest event
+  // with seq <= scrubSeq and use its offset. Falls back to undefined
+  // for legacy runs whose events predate the feature — the log panel
+  // then stays in live mode rather than going blank, which is the
+  // less-bad degradation.
+  const logClampBytes = useMemo<number | null | undefined>(() => {
+    if (deferredScrubSeq === null) return null;
+    if (events.length === 0) return 0;
+    let lo = 0;
+    let hi = events.length - 1;
+    let best: number | undefined;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const evt = events[mid]!;
+      if (evt.seq <= deferredScrubSeq) {
+        best = evt.log_offset;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return best;
+  }, [deferredScrubSeq, events]);
+
   // Fold llm_request and node_finished events into a per-node "what
   // actually ran" map. Latest event wins because seq is monotonic.
   // displayedEvents (not raw) so the time-travel scrubber rewinds too.
@@ -649,6 +675,7 @@ export default function RunView() {
                           subscribeLogs={wsHandle.subscribeLogs}
                           unsubscribeLogs={wsHandle.unsubscribeLogs}
                           onCollapse={toggleDetailCollapsed}
+                          logClampBytes={logClampBytes}
                         />
                       </div>
                     </Panel>
@@ -722,6 +749,7 @@ export default function RunView() {
                           subscribeLogs={wsHandle.subscribeLogs}
                           unsubscribeLogs={wsHandle.unsubscribeLogs}
                           onCollapse={toggleEventlogCollapsed}
+                          clampToBytes={logClampBytes}
                         />
                       ) : bottomTab === "browser" && runId ? (
                         <BrowserPane

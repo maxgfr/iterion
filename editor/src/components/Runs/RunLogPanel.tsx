@@ -8,6 +8,11 @@ interface Props {
   subscribeLogs: (fromOffset?: number) => void;
   unsubscribeLogs: () => void;
   onCollapse?: () => void;
+  // Absolute byte offset to clamp the displayed log to. Wired by
+  // RunView from events[scrubSeq].log_offset so the bottom log panel
+  // rewinds in lockstep with the canvas + EventLog during scrub /
+  // replay. Null means live (no clamp).
+  clampToBytes?: number | null;
 }
 
 export default function RunLogPanel({
@@ -15,6 +20,7 @@ export default function RunLogPanel({
   subscribeLogs,
   unsubscribeLogs,
   onCollapse,
+  clampToBytes = null,
 }: Props) {
   return (
     <LogLinesView
@@ -25,6 +31,7 @@ export default function RunLogPanel({
       filterIteration={null}
       showTitle
       onCollapse={onCollapse}
+      clampToBytes={clampToBytes}
     />
   );
 }

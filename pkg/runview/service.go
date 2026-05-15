@@ -311,6 +311,17 @@ func NewService(storeDir string, opts ...ServiceOption) (*Service, error) {
 		s.storeDir = ".iterion"
 	}
 
+	// Wire log-position stamping when the store is a local
+	// FilesystemRunStore. The closure reads the current byte total
+	// from the per-run RunLogBuffer (created lazily by
+	// prepareRunLog); a missing entry returns 0, which the editor
+	// interprets as "no offset info — show live tail". Cloud
+	// (Mongo) stores skip this wiring — they have no on-host log
+	// buffer to attach.
+	if fs, ok := s.store.(*store.FilesystemRunStore); ok {
+		fs.SetLogPositionFn(s.logPositionForRun)
+	}
+
 	s.reconcileOrphans()
 	s.reconcileSandboxContainers()
 	return s, nil
@@ -582,6 +593,20 @@ func (s *Service) GetLogBuffer(runID string) *RunLogBuffer {
 	s.runLogsMu.RLock()
 	defer s.runLogsMu.RUnlock()
 	return s.runLogs[runID]
+}
+
+// logPositionForRun is the callback shape the store uses to stamp
+// Event.LogOffset: returns the current byte total of the per-run log
+// buffer, or 0 when no buffer exists yet (bootstrap events emitted
+// before prepareRunLog ran). Cheap: one atomic read under an RLock.
+func (s *Service) logPositionForRun(runID string) int64 {
+	s.runLogsMu.RLock()
+	buf := s.runLogs[runID]
+	s.runLogsMu.RUnlock()
+	if buf == nil {
+		return 0
+	}
+	return buf.Total()
 }
 
 // prepareRunLog creates a per-run log buffer (also persisting to
