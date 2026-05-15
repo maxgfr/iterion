@@ -222,6 +222,7 @@ func (c *Conductor) buildSpec(cfg *Config, iss tracker.Issue, runID, wsPath stri
 		StoreDir:      c.storeDir,
 		Vars:          vars,
 		Attachments:   attachments,
+		Assignee:      iss.Assignee,
 		OnEvent: func(name string) {
 			select {
 			case c.cmds <- cmdEvent{issueID: iss.ID, eventName: name}:

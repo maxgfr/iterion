@@ -216,6 +216,52 @@ The set of references is **closed at parse time**: typos like
 `{{issue.tilte}}` fail config validation rather than silently rendering
 an empty string at dispatch.
 
+## Routing by issue assignee
+
+By default the conductor dispatches a single workflow (`workflow:`)
+for every eligible issue. To dispatch **different workflows for
+different assignees** — without running multiple conductor instances —
+add an `assignee_workflows:` map:
+
+```yaml
+name: dev-loop
+tracker:
+  kind: native
+
+workflow: workflows/triage.bot                  # default fallback
+
+assignee_workflows:
+  vibe_feature_dev:        examples/bots/vibe_feature_dev.bot
+  vibe_review_alternating: examples/bots/vibe_review_alternating.bot
+  secured-renovacy:        examples/secured-renovacy/bot.bot
+```
+
+Resolution rules at dispatch time:
+
+1. If `issue.Assignee` is non-empty AND present in
+   `assignee_workflows`, the conductor uses the mapped workflow.
+2. Otherwise (empty assignee, or assignee not in the map), it falls
+   back to `workflow:`.
+
+Matching is **exact** and **case-sensitive**. There is no glob /
+regex / pattern syntax — keep the keys aligned with what the
+producer stamps into `--assignee`. For the native tracker, the
+`iterion issue create --assignee <name>` flag drops `name` straight
+into `issue.assignee`; GitHub and Forgejo adapters use the first
+assignee's login.
+
+Each `assignee_workflows` workflow is pre-compiled at startup and
+reused across dispatches — the same lifecycle as the default
+`workflow:`. Path resolution is relative to the conductor config
+file (same convention as `workflow:`). Missing files fail
+`iterion conduct` startup with a precise error.
+
+This is what makes whats-next.bot's kanban output auto-pilot: the
+bot stamps each issue with `--assignee vibe_feature_dev` (or any
+catalogued bot), and the conductor — with the mapping above —
+dispatches the matching workflow without any operator
+intervention.
+
 ## Hot-reload
 
 The conductor watches `iterion.conductor.yaml` via fsnotify with a
