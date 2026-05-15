@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -2881,6 +2882,9 @@ func writeLiveTestReport(t *testing.T, runID, workspaceDir, storeDir string, s s
 // is BudgetExceeded / LoopExhausted / ExecutionFailed (context
 // cancel) is treated as a graceful exit — the bot did meaningful work
 // even if it didn't reach `done`. Returns (acceptable, reason).
+//
+// Smoke tests use this. `_Real` tests use the stricter
+// [liveRunResultAcceptableReal] — see its godoc for why.
 func liveRunResultAcceptable(err error) (bool, string) {
 	if err == nil {
 		return true, "no error"
@@ -2900,6 +2904,68 @@ func liveRunResultAcceptable(err error) (bool, string) {
 		}
 	}
 	return false, fmt.Sprintf("%v", err)
+}
+
+// liveRunResultAcceptableReal is the stricter variant used by `_Real`
+// tests. It does NOT treat ExecutionFailed as acceptable — that mask
+// hid a real SIGKILL (post_create crash) as a green test in attempt 4
+// of the sandboxed vibe_feature_dev_real iteration. `_Real` tests
+// must catch genuine subprocess failures; `ExecutionFailed (context
+// deadline)` would still show as a hard failure here, which is the
+// correct signal for a "did the realistic bot actually work?" probe.
+//
+// Callers should additionally assert a workspace commit-count delta
+// via [requireWorkspaceCommitGrowth] — `acceptable` covers the engine
+// side, the commit delta covers the "did anything land?" side.
+func liveRunResultAcceptableReal(err error) (bool, string) {
+	if err == nil {
+		return true, "no error"
+	}
+	if errors.Is(err, runtime.ErrBudgetExceeded) {
+		return true, "ErrBudgetExceeded"
+	}
+	var rtErr *runtime.RuntimeError
+	if errors.As(err, &rtErr) {
+		switch rtErr.Code {
+		case runtime.ErrCodeBudgetExceeded, runtime.ErrCodeLoopExhausted:
+			return true, string(rtErr.Code)
+		}
+	}
+	return false, fmt.Sprintf("%v", err)
+}
+
+// workspaceCommitCount returns `git rev-list --count HEAD` for the
+// workspace, or 0 if the command fails (tests should record this
+// before AND after the run, and assert growth via
+// [requireWorkspaceCommitGrowth]).
+func workspaceCommitCount(t *testing.T, dir string) int {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "rev-list", "--count", "HEAD").Output()
+	if err != nil {
+		t.Logf("git rev-list failed in %s: %v", dir, err)
+		return 0
+	}
+	n, parseErr := strconv.Atoi(strings.TrimSpace(string(out)))
+	if parseErr != nil {
+		t.Logf("could not parse commit count %q: %v", string(out), parseErr)
+		return 0
+	}
+	return n
+}
+
+// requireWorkspaceCommitGrowth fails the test if the workspace did not
+// gain at least one commit during the run. Use after `_Real` tests —
+// a bot that doesn't commit anything has done nothing the operator
+// can review.
+func requireWorkspaceCommitGrowth(t *testing.T, workspaceDir string, before int) {
+	t.Helper()
+	after := workspaceCommitCount(t, workspaceDir)
+	if after <= before {
+		// dump recent log for diagnostic value
+		recent, _ := exec.Command("git", "-C", workspaceDir, "log", "--oneline", "-10").CombinedOutput()
+		t.Fatalf("expected the workspace HEAD to advance by ≥1 commit, got before=%d after=%d (no work landed).\nRecent log:\n%s", before, after, string(recent))
+	}
+	t.Logf("Workspace commits: %d → %d (Δ=%d)", before, after, after-before)
 }
 
 // ---------------------------------------------------------------------------
@@ -3398,12 +3464,13 @@ func TestLive_VibeFeatureDev_Real(t *testing.T) {
 		"feature_prompt": featurePrompt,
 	}
 
+	commitsBefore := workspaceCommitCount(t, workspaceDir)
 	t.Log("Starting vibe_feature_dev (real fixture) live run…")
 	start := time.Now()
 	runErr := eng.Run(ctx, runID, inputs)
 	t.Logf("Run finished in %s", time.Since(start).Round(time.Second))
 
-	acceptable, reason := liveRunResultAcceptable(runErr)
+	acceptable, reason := liveRunResultAcceptableReal(runErr)
 	if !acceptable {
 		t.Fatalf("unacceptable run error: %v", runErr)
 	}
@@ -3413,11 +3480,9 @@ func TestLive_VibeFeatureDev_Real(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEvents: %v", err)
 	}
-	cmd := exec.Command("git", "-C", workspaceDir, "rev-list", "--count", "HEAD")
+	requireWorkspaceCommitGrowth(t, workspaceDir, commitsBefore)
+	cmd := exec.Command("git", "-C", workspaceDir, "log", "--oneline", "-10")
 	out, _ := cmd.CombinedOutput()
-	t.Logf("Total commits: %s (seed = 1, expect ≥2 with the feature commit)", strings.TrimSpace(string(out)))
-	cmd = exec.Command("git", "-C", workspaceDir, "log", "--oneline", "-10")
-	out, _ = cmd.CombinedOutput()
 	t.Logf("Recent commits:\n%s", string(out))
 
 	writeLiveTestReport(t, runID, workspaceDir, storeDir, s, events)
@@ -3470,12 +3535,13 @@ func TestLive_VibeReviewAlternating_Real(t *testing.T) {
 		"scope_notes": scopeNotes,
 	}
 
+	commitsBefore := workspaceCommitCount(t, workspaceDir)
 	t.Log("Starting vibe_review_alternating (real fixture) live run…")
 	start := time.Now()
 	runErr := eng.Run(ctx, runID, inputs)
 	t.Logf("Run finished in %s", time.Since(start).Round(time.Second))
 
-	acceptable, reason := liveRunResultAcceptable(runErr)
+	acceptable, reason := liveRunResultAcceptableReal(runErr)
 	if !acceptable {
 		t.Fatalf("unacceptable run error: %v", runErr)
 	}
@@ -3485,6 +3551,7 @@ func TestLive_VibeReviewAlternating_Real(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEvents: %v", err)
 	}
+	requireWorkspaceCommitGrowth(t, workspaceDir, commitsBefore)
 	cmd := exec.Command("git", "-C", workspaceDir, "diff", "--stat", "HEAD")
 	out, _ := cmd.CombinedOutput()
 	if len(strings.TrimSpace(string(out))) > 0 {
@@ -3564,12 +3631,13 @@ func TestLive_SecuredRenovacy_Real(t *testing.T) {
 		"update_scope":         "libraries",
 	}
 
+	commitsBefore := workspaceCommitCount(t, workspaceDir)
 	t.Log("Starting secured-renovacy (real polyglot fixture) live run…")
 	start := time.Now()
 	runErr := eng.Run(ctx, runID, inputs)
 	t.Logf("Run finished in %s", time.Since(start).Round(time.Second))
 
-	acceptable, reason := liveRunResultAcceptable(runErr)
+	acceptable, reason := liveRunResultAcceptableReal(runErr)
 	if !acceptable {
 		t.Fatalf("unacceptable run error: %v", runErr)
 	}
@@ -3579,6 +3647,7 @@ func TestLive_SecuredRenovacy_Real(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEvents: %v", err)
 	}
+	requireWorkspaceCommitGrowth(t, workspaceDir, commitsBefore)
 	cmd := exec.Command("git", "-C", workspaceDir, "log", "--oneline", "-30")
 	out, _ := cmd.CombinedOutput()
 	t.Logf("Commits in workspace:\n%s", string(out))
