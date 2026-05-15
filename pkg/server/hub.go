@@ -62,6 +62,13 @@ type wsClient struct {
 // tighten it via ITERION_REQUIRE_WS_ORIGIN=1, which refuses any
 // upgrade without a valid Origin header.
 var upgrader = websocket.Upgrader{
+	// Per-message deflate (RFC 7692). Event payloads are very
+	// JSON-ish — repetitive keys, monotonic seqs, similar event types
+	// page-to-page — so the compression ratio is typically 5–10× for
+	// the replay path and ~3× for live events. On localhost the win
+	// is mostly CPU (less time spent JSON-parsing on the frontend);
+	// on remote dev/cloud the bandwidth saving compounds.
+	EnableCompression: true,
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		if origin == "" {
