@@ -1,0 +1,317 @@
+package native
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/SocialGouv/iterion/pkg/conductor/tracker"
+)
+
+func newTestStore(t *testing.T) *Store {
+	t.Helper()
+	dir := t.TempDir()
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	return s
+}
+
+func TestNewStoreInitializesBoard(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "board.json")); err != nil {
+		t.Fatalf("board.json not created: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "issues")); err != nil {
+		t.Fatalf("issues dir not created: %v", err)
+	}
+	b := s.Board()
+	if len(b.States) == 0 {
+		t.Fatal("board has no states")
+	}
+}
+
+func TestCreateAndGet(t *testing.T) {
+	s := newTestStore(t)
+	iss, err := s.Create(Issue{Title: "first", State: "ready"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if !strings.HasPrefix(iss.ID, "native:") {
+		t.Fatalf("ID should be native:<uuid>, got %q", iss.ID)
+	}
+	if iss.CreatedAt.IsZero() {
+		t.Fatal("CreatedAt zero")
+	}
+	got, err := s.Get(iss.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Title != "first" || got.State != "ready" {
+		t.Fatalf("round-trip mismatch: %+v", got)
+	}
+}
+
+func TestCreateRejectsUnknownState(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.Create(Issue{Title: "x", State: "noplace"})
+	if err == nil || !strings.Contains(err.Error(), "unknown state") {
+		t.Fatalf("want unknown state error, got %v", err)
+	}
+}
+
+func TestCreateDefaultsToFirstState(t *testing.T) {
+	s := newTestStore(t)
+	iss, err := s.Create(Issue{Title: "x"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if iss.State != s.Board().States[0].Name {
+		t.Fatalf("default state mismatch: got %q want %q", iss.State, s.Board().States[0].Name)
+	}
+}
+
+func TestCreateRequiresTitle(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.Create(Issue{}); err == nil {
+		t.Fatal("expected error for empty title")
+	}
+}
+
+func TestGetNotFound(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.Get("native:does-not-exist")
+	if !errors.Is(err, tracker.ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestListFilterAndSort(t *testing.T) {
+	s := newTestStore(t)
+	a, _ := s.Create(Issue{Title: "A", State: "ready", Priority: 1, Labels: []string{"x"}})
+	b, _ := s.Create(Issue{Title: "B", State: "ready", Priority: 10, Labels: []string{"x", "y"}})
+	c, _ := s.Create(Issue{Title: "C", State: "in_progress", Priority: 5, Assignee: "alice"})
+
+	all, err := s.List(ListFilter{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("want 3 issues, got %d", len(all))
+	}
+	// priority desc → B(10), C(5), A(1)
+	if all[0].ID != b.ID || all[1].ID != c.ID || all[2].ID != a.ID {
+		t.Fatalf("sort order wrong: %s %s %s", all[0].ID, all[1].ID, all[2].ID)
+	}
+
+	ready, _ := s.List(ListFilter{States: []string{"ready"}})
+	if len(ready) != 2 {
+		t.Fatalf("want 2 ready, got %d", len(ready))
+	}
+
+	withY, _ := s.List(ListFilter{Labels: []string{"y"}})
+	if len(withY) != 1 || withY[0].ID != b.ID {
+		t.Fatalf("label filter wrong: %v", withY)
+	}
+
+	alice, _ := s.List(ListFilter{Assignee: "alice"})
+	if len(alice) != 1 || alice[0].ID != c.ID {
+		t.Fatalf("assignee filter wrong: %v", alice)
+	}
+}
+
+func TestUpdateChangesAndEvents(t *testing.T) {
+	s := newTestStore(t)
+	iss, _ := s.Create(Issue{Title: "old", State: "ready"})
+
+	newTitle := "new"
+	prio := 7
+	updated, err := s.Update(iss.ID, Patch{Title: &newTitle, Priority: &prio})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Title != "new" || updated.Priority != 7 {
+		t.Fatalf("patch not applied: %+v", updated)
+	}
+
+	var changed []string
+	_ = s.ScanEvents(func(e *Event) bool {
+		if e.Type == EvtIssueUpdated && e.IssueID == iss.ID {
+			if c, ok := e.Payload["changed"].([]any); ok {
+				for _, v := range c {
+					changed = append(changed, v.(string))
+				}
+			}
+		}
+		return true
+	})
+	if len(changed) != 2 {
+		t.Fatalf("expected 2 changed fields, got %v", changed)
+	}
+}
+
+func TestUpdateFieldsValidates(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.SetBoard(&Board{
+		States: []State{{Name: "ready"}},
+		Fields: []Field{{Name: "sev", Type: FieldEnum, EnumValues: []string{"low", "high"}}},
+	}); err != nil {
+		t.Fatalf("SetBoard: %v", err)
+	}
+	iss, _ := s.Create(Issue{Title: "x", State: "ready"})
+	if _, err := s.Update(iss.ID, Patch{Fields: map[string]any{"sev": "boom"}}); err == nil {
+		t.Fatal("expected enum validation error")
+	}
+	if _, err := s.Update(iss.ID, Patch{Fields: map[string]any{"sev": "high"}}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+}
+
+func TestSetStateTransition(t *testing.T) {
+	s := newTestStore(t)
+	iss, _ := s.Create(Issue{Title: "x", State: "ready"})
+
+	if _, err := s.SetState(iss.ID, "noplace"); !errors.Is(err, tracker.ErrTransitionRejected) {
+		t.Fatalf("want ErrTransitionRejected, got %v", err)
+	}
+	upd, err := s.SetState(iss.ID, "in_progress")
+	if err != nil {
+		t.Fatalf("SetState: %v", err)
+	}
+	if upd.State != "in_progress" {
+		t.Fatalf("state not updated")
+	}
+
+	// no-op when state unchanged
+	same, err := s.SetState(iss.ID, "in_progress")
+	if err != nil || same.State != "in_progress" {
+		t.Fatalf("no-op SetState mishandled: %v %v", err, same)
+	}
+}
+
+func TestDelete(t *testing.T) {
+	s := newTestStore(t)
+	iss, _ := s.Create(Issue{Title: "x", State: "ready"})
+	if err := s.Delete(iss.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := s.Get(iss.ID); !errors.Is(err, tracker.ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+	if err := s.Delete(iss.ID); !errors.Is(err, tracker.ErrNotFound) {
+		t.Fatalf("second delete want ErrNotFound, got %v", err)
+	}
+}
+
+func TestClaimRelease(t *testing.T) {
+	s := newTestStore(t)
+	iss, _ := s.Create(Issue{Title: "x", State: "ready"})
+
+	if err := s.Claim(iss.ID, "host-1"); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	got, _ := s.Get(iss.ID)
+	if got.Claim != "host-1" {
+		t.Fatalf("claim not stored: %q", got.Claim)
+	}
+
+	// same marker is idempotent
+	if err := s.Claim(iss.ID, "host-1"); err != nil {
+		t.Fatalf("re-claim same marker: %v", err)
+	}
+
+	// different marker → conflict
+	if err := s.Claim(iss.ID, "host-2"); !errors.Is(err, tracker.ErrClaimConflict) {
+		t.Fatalf("want ErrClaimConflict, got %v", err)
+	}
+
+	// release with wrong marker → conflict
+	if err := s.Release(iss.ID, "host-2"); !errors.Is(err, tracker.ErrClaimConflict) {
+		t.Fatalf("want ErrClaimConflict on release, got %v", err)
+	}
+
+	// correct marker releases
+	if err := s.Release(iss.ID, "host-1"); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if g, _ := s.Get(iss.ID); g.Claim != "" {
+		t.Fatalf("claim should be cleared")
+	}
+
+	// release on unclaimed is a no-op
+	if err := s.Release(iss.ID, "host-1"); err != nil {
+		t.Fatalf("Release on unclaimed: %v", err)
+	}
+}
+
+func TestEventSequenceMonotonic(t *testing.T) {
+	s := newTestStore(t)
+	iss, _ := s.Create(Issue{Title: "x", State: "ready"})
+	_, _ = s.SetState(iss.ID, "in_progress")
+	_ = s.Claim(iss.ID, "marker")
+	_ = s.Release(iss.ID, "marker")
+	_ = s.Delete(iss.ID)
+
+	var seqs []int64
+	if err := s.ScanEvents(func(e *Event) bool {
+		seqs = append(seqs, e.Seq)
+		return true
+	}); err != nil {
+		t.Fatalf("ScanEvents: %v", err)
+	}
+	if len(seqs) != 5 {
+		t.Fatalf("want 5 events, got %d (%v)", len(seqs), seqs)
+	}
+	for i := 1; i < len(seqs); i++ {
+		if seqs[i] != seqs[i-1]+1 {
+			t.Fatalf("seq not monotonic: %v", seqs)
+		}
+	}
+}
+
+func TestReopenPersists(t *testing.T) {
+	dir := t.TempDir()
+	s1, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	iss, _ := s1.Create(Issue{Title: "persist me", State: "ready"})
+
+	s2, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("reopen NewStore: %v", err)
+	}
+	got, err := s2.Get(iss.ID)
+	if err != nil {
+		t.Fatalf("Get after reopen: %v", err)
+	}
+	if got.Title != "persist me" {
+		t.Fatalf("round trip after reopen mismatch")
+	}
+
+	// sequence continues from the existing log
+	_, _ = s2.SetState(iss.ID, "in_progress")
+	var seqs []int64
+	_ = s2.ScanEvents(func(e *Event) bool {
+		seqs = append(seqs, e.Seq)
+		return true
+	})
+	if len(seqs) < 2 || seqs[len(seqs)-1] <= seqs[0] {
+		t.Fatalf("seq did not advance after reopen: %v", seqs)
+	}
+}
+
+func TestSetBoardValidation(t *testing.T) {
+	s := newTestStore(t)
+	bad := &Board{States: []State{{Name: "a"}, {Name: "a"}}}
+	if err := s.SetBoard(bad); err == nil {
+		t.Fatal("expected validation error")
+	}
+}
