@@ -3345,7 +3345,15 @@ func TestLive_VibeFeatureDev_Real(t *testing.T) {
 		"feature_prompt": featurePrompt,
 	})
 
-	eng := runtime.New(wf, s, executor, runtime.WithWorkDir(workspaceDir))
+	// vibe_feature_dev declares `sandbox: auto`. The fixture is a Go
+	// project with no .devcontainer, so the auto-resolver falls back
+	// to iterion-sandbox-slim — which ships Node + devbox but NOT Go.
+	// Override to -full (slim + Go + Python + pnpm) for the test so
+	// `go build` / `go test` calls inside the container succeed.
+	eng := runtime.New(wf, s, executor,
+		runtime.WithWorkDir(workspaceDir),
+		runtime.WithSandboxDefaultImage("ghcr.io/socialgouv/iterion-sandbox-full:edge"),
+	)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Minute)
 	defer cancel()
 	inputs := map[string]interface{}{
@@ -3415,7 +3423,12 @@ func TestLive_VibeReviewAlternating_Real(t *testing.T) {
 		"scope_notes":   "Review every Go file across queue/, worker/, auth/, storage/, config/, and main.go. Focus on production-blocking correctness, concurrency, and security issues. Skip stylistic nits.",
 	})
 
-	eng := runtime.New(wf, s, executor, runtime.WithWorkDir(workspaceDir))
+	// Same sandbox image override as TestLive_VibeFeatureDev_Real — the
+	// review fixture is also pure Go, slim doesn't have Go.
+	eng := runtime.New(wf, s, executor,
+		runtime.WithWorkDir(workspaceDir),
+		runtime.WithSandboxDefaultImage("ghcr.io/socialgouv/iterion-sandbox-full:edge"),
+	)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 	inputs := map[string]interface{}{

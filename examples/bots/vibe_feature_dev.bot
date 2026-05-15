@@ -750,6 +750,17 @@ workflow vibe_feature_dev:
   ## still has to discriminate — but on a much smaller noise floor.
   worktree: auto
 
+  ## Container isolation on top of the worktree. The `act` / `simplify`
+  ## phase runs arbitrary build/test commands (`go test`, `npm install`,
+  ## `cargo build`, …) that the bot infers from the project — the worktree
+  ## alone doesn't sandbox those. `sandbox: auto` reads the workspace's
+  ## `.devcontainer/devcontainer.json` when present, else falls back to
+  ## the published `iterion-sandbox-slim` image. Operators with Go/Python/
+  ## Rust toolchains can either commit a devcontainer (recommended) or
+  ## point ITERION_SANDBOX_DEFAULT_IMAGE / --sandbox-default-image at
+  ## `iterion-sandbox-full`, which bundles those toolchains.
+  sandbox: auto
+
   budget:
     max_parallel_branches: 1
     max_duration: "4h"
