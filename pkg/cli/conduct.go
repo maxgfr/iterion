@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,12 +14,9 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/conductor"
 	"github.com/SocialGouv/iterion/pkg/conductor/native"
-	"github.com/SocialGouv/iterion/pkg/conductor/tracker"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/server"
 	"github.com/SocialGouv/iterion/pkg/store"
-
-	"io/fs"
 )
 
 // ConductOptions captures CLI flags for `iterion conduct`.
@@ -29,8 +27,13 @@ type ConductOptions struct {
 	NoServer   bool // overrides cfg.Server.Port to disable HTTP
 }
 
-// RunConduct loads the config, opens the necessary stores, builds the
-// conductor and HTTP surface, and runs until SIGINT/SIGTERM.
+// RunConduct loads the config, opens the necessary stores, builds a
+// Manager + starts a conductor, then serves the REST/WS surface until
+// SIGINT/SIGTERM.
+//
+// This is the standalone CLI path — same Manager primitive that the
+// editor server uses, just driven by a YAML on disk instead of the
+// SPA's PUT /api/v1/conductor/config endpoint.
 func RunConduct(p *Printer, opts ConductOptions) error {
 	logger := iterlog.New(iterlog.LevelInfo, os.Stderr)
 
@@ -50,25 +53,13 @@ func RunConduct(p *Printer, opts ConductOptions) error {
 		return fmt.Errorf("native store: %w", err)
 	}
 
-	trk, err := buildTracker(cfg, nativeStore)
-	if err != nil {
-		return err
-	}
-
 	wsRoot := cfg.Workspace.Root
 	if wsRoot == "" {
 		wsRoot = filepath.Join(storeDir, "conductor", "workspaces")
 	}
-	workspaces, err := conductor.NewWorkspaces(wsRoot)
-	if err != nil {
-		return err
+	if err := os.MkdirAll(wsRoot, 0o755); err != nil {
+		return fmt.Errorf("conductor: mkdir workspace root: %w", err)
 	}
-
-	runner, err := conductor.NewEngineRunner(cfg.Workflow, logger)
-	if err != nil {
-		return err
-	}
-
 	lockPath := filepath.Join(wsRoot, ".conductor.lock")
 	lk, err := store.AcquireFileLock(lockPath, "conductor workspace "+wsRoot)
 	if err != nil {
@@ -80,24 +71,31 @@ func RunConduct(p *Printer, opts ConductOptions) error {
 		}
 	}()
 
-	c, err := conductor.New(conductor.Options{
-		Config:     cfg,
-		Tracker:    trk,
-		Runner:     runner,
-		Workspaces: workspaces,
-		Logger:     logger,
-		StoreDir:   storeDir,
+	mgr, err := conductor.NewManager(conductor.ManagerOptions{
+		StoreDir:    storeDir,
+		NativeStore: nativeStore,
+		Logger:      logger,
 	})
 	if err != nil {
 		return err
 	}
+	if err := mgr.SaveConfig(cfg); err != nil {
+		return err
+	}
+	if err := mgr.Start(); err != nil {
+		return err
+	}
+	defer mgr.Stop()
 
-	// Hot-reload wiring.
 	watcher, err := conductor.NewConfigWatcher(opts.ConfigPath, logger)
 	if err != nil {
 		return err
 	}
-	if err := watcher.Start(c.Reload); err != nil {
+	if err := watcher.Start(func(c *conductor.Config) {
+		if err := mgr.SaveConfig(c); err != nil {
+			logger.Warn("conductor: reload: %v", err)
+		}
+	}); err != nil {
 		return err
 	}
 	defer watcher.Stop()
@@ -105,26 +103,20 @@ func RunConduct(p *Printer, opts ConductOptions) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	c.Start(ctx)
-	defer c.Stop()
-
 	port := pickPort(cfg, opts)
 	var httpSrv *http.Server
 	if port > 0 {
 		mux := http.NewServeMux()
-		c.RegisterRoutes(mux, "/api/v1/conductor")
+		mgr.RegisterRoutes(mux, "/api/v1/conductor")
 		nativeStore.RegisterRoutes(mux, "/api/v1/native")
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("ok"))
 		})
-		// /api/server/info minimally so the SPA detects available views.
 		mux.HandleFunc("/api/server/info", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"mode":"conduct","auth_required":false,"limits":{"upload":{}},"native_tracker_enabled":true,"conductor_enabled":true}`))
 		})
-		// SPA: serve the embedded editor so users can open the
-		// dashboard at the same URL without running `iterion editor`.
 		if sub, err := fs.Sub(server.StaticFS, "static"); err == nil {
 			mux.Handle("/", server.SPAHandler(sub))
 		} else {
@@ -148,8 +140,8 @@ func RunConduct(p *Printer, opts ConductOptions) error {
 	}
 
 	p.Line("iterion conduct: workflow %s", cfg.Workflow)
-	p.Line("iterion conduct: tracker %s", trk.Name())
-	p.Line("iterion conduct: workspaces under %s", workspaces.Root())
+	p.Line("iterion conduct: tracker %s", cfg.Tracker.Kind)
+	p.Line("iterion conduct: workspaces under %s", wsRoot)
 	p.Line("iterion conduct: polling every %s, stall timeout %s", cfg.PollingInterval(), cfg.StallTimeout())
 	p.Line("iterion conduct: ctrl-c to stop")
 
@@ -161,62 +153,6 @@ func RunConduct(p *Printer, opts ConductOptions) error {
 		_ = httpSrv.Shutdown(shutdownCtx)
 	}
 	return nil
-}
-
-func buildTracker(cfg *conductor.Config, ns *native.Store) (tracker.Tracker, error) {
-	switch cfg.Tracker.Kind {
-	case conductor.TrackerKindNative:
-		return native.NewAdapter(ns), nil
-	case conductor.TrackerKindGitHub:
-		return buildGitHubTracker(cfg.Tracker.GitHub)
-	case conductor.TrackerKindForgejo:
-		return buildForgejoTracker(cfg.Tracker.Forgejo)
-	default:
-		return nil, fmt.Errorf("conductor: unsupported tracker kind %q", cfg.Tracker.Kind)
-	}
-}
-
-func buildGitHubTracker(cfg *conductor.GitHubTrackerConfig) (tracker.Tracker, error) {
-	if cfg == nil {
-		return nil, errors.New("conductor: tracker.kind=github requires tracker.github block")
-	}
-	mapping := make(map[string]tracker.LabelSelector, len(cfg.StateMapping))
-	for state, sel := range cfg.StateMapping {
-		mapping[state] = tracker.LabelSelector{
-			LabelsInclude: sel.LabelsInclude,
-			LabelsExclude: sel.LabelsExclude,
-		}
-	}
-	return tracker.NewGitHub(tracker.GitHubOptions{
-		Repo:          cfg.Repo,
-		Token:         cfg.Token,
-		IncludeLabels: cfg.IncludeLabels,
-		ExcludeLabels: cfg.ExcludeLabels,
-		ClaimedLabel:  cfg.ClaimedLabel,
-		StateMapping:  mapping,
-	})
-}
-
-func buildForgejoTracker(cfg *conductor.ForgejoTrackerConfig) (tracker.Tracker, error) {
-	if cfg == nil {
-		return nil, errors.New("conductor: tracker.kind=forgejo requires tracker.forgejo block")
-	}
-	mapping := make(map[string]tracker.LabelSelector, len(cfg.StateMapping))
-	for state, sel := range cfg.StateMapping {
-		mapping[state] = tracker.LabelSelector{
-			LabelsInclude: sel.LabelsInclude,
-			LabelsExclude: sel.LabelsExclude,
-		}
-	}
-	return tracker.NewForgejo(tracker.ForgejoOptions{
-		Host:          cfg.Host,
-		Repo:          cfg.Repo,
-		Token:         cfg.Token,
-		IncludeLabels: cfg.IncludeLabels,
-		ExcludeLabels: cfg.ExcludeLabels,
-		ClaimedLabel:  cfg.ClaimedLabel,
-		StateMapping:  mapping,
-	})
 }
 
 func pickPort(cfg *conductor.Config, opts ConductOptions) int {

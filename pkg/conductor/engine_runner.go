@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/SocialGouv/iterion/pkg/bundle"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/runtime"
@@ -15,10 +16,17 @@ import (
 // EngineRunner is the production Runner: each Dispatch compiles a
 // fresh executor for the requested RunID and drives the iterion
 // runtime engine until completion or cancellation.
+//
+// The workflow source can be a plain `.iter` / `.bot` file, a `.botz`
+// archive, or an unpacked bundle directory. Bundles are opened once
+// at NewEngineRunner — the bundle handle is shared across dispatches,
+// then released via Close() when the conductor shuts down.
 type EngineRunner struct {
 	workflow     *ir.Workflow
 	workflowPath string
 	workflowHash string
+	bundle       *bundle.Bundle // nil for plain .iter/.bot
+	bundleClean  func() error   // no-op when bundle is nil
 	logger       *iterlog.Logger
 }
 
@@ -29,22 +37,72 @@ func NewEngineRunner(workflowPath string, logger *iterlog.Logger) (*EngineRunner
 	if workflowPath == "" {
 		return nil, fmt.Errorf("engine runner: workflow path required")
 	}
-	wf, hash, err := runview.CompileWorkflowWithHash(workflowPath)
-	if err != nil {
-		return nil, fmt.Errorf("engine runner: compile %s: %w", workflowPath, err)
-	}
-	return &EngineRunner{
-		workflow:     wf,
+	r := &EngineRunner{
 		workflowPath: workflowPath,
-		workflowHash: hash,
 		logger:       logger,
-	}, nil
+		bundleClean:  func() error { return nil },
+	}
+
+	kind, err := bundle.Detect(workflowPath)
+	if err != nil {
+		return nil, fmt.Errorf("engine runner: detect %s: %w", workflowPath, err)
+	}
+	switch kind {
+	case bundle.KindBundle:
+		opened, cleanup, openErr := bundle.Open(workflowPath, "")
+		if openErr != nil {
+			return nil, fmt.Errorf("engine runner: open bundle %s: %w", workflowPath, openErr)
+		}
+		wf, h, compileErr := runview.CompileBundleWorkflow(opened.IterPath, opened)
+		if compileErr != nil {
+			_ = cleanup()
+			return nil, fmt.Errorf("engine runner: compile bundle %s: %w", workflowPath, compileErr)
+		}
+		r.workflow = wf
+		r.workflowHash = h
+		r.workflowPath = opened.IterPath
+		r.bundle = opened
+		r.bundleClean = cleanup
+	case bundle.KindBundleDir:
+		opened, openErr := bundle.OpenDir(workflowPath)
+		if openErr != nil {
+			return nil, fmt.Errorf("engine runner: open bundle dir %s: %w", workflowPath, openErr)
+		}
+		wf, h, compileErr := runview.CompileBundleWorkflow(opened.IterPath, opened)
+		if compileErr != nil {
+			return nil, fmt.Errorf("engine runner: compile bundle dir %s: %w", workflowPath, compileErr)
+		}
+		r.workflow = wf
+		r.workflowHash = h
+		r.workflowPath = opened.IterPath
+		r.bundle = opened
+	default:
+		wf, h, compileErr := runview.CompileWorkflowWithHash(workflowPath)
+		if compileErr != nil {
+			return nil, fmt.Errorf("engine runner: compile %s: %w", workflowPath, compileErr)
+		}
+		r.workflow = wf
+		r.workflowHash = h
+	}
+	return r, nil
 }
 
 // Workflow returns the compiled IR. Useful for callers that want to
 // validate dispatch.vars keys against the workflow's declared vars at
 // startup.
 func (r *EngineRunner) Workflow() *ir.Workflow { return r.workflow }
+
+// Close releases any resources tied to the workflow source — in
+// particular, removes the extraction directory of a `.botz` archive.
+// Safe to call multiple times.
+func (r *EngineRunner) Close() error {
+	if r.bundleClean == nil {
+		return nil
+	}
+	clean := r.bundleClean
+	r.bundleClean = func() error { return nil }
+	return clean()
+}
 
 // Dispatch implements Runner. Opens the store, builds an executor for
 // this RunID, registers an event observer that bridges every event to
@@ -77,7 +135,7 @@ func (r *EngineRunner) Dispatch(ctx context.Context, spec DispatchSpec) error {
 		}()
 	}
 
-	eng := runtime.New(r.workflow, s, exec,
+	opts := []runtime.EngineOption{
 		runtime.WithLogger(r.logger),
 		runtime.WithWorkflowHash(r.workflowHash),
 		runtime.WithFilePath(r.workflowPath),
@@ -87,7 +145,11 @@ func (r *EngineRunner) Dispatch(ctx context.Context, spec DispatchSpec) error {
 				spec.OnEvent(string(evt.Type))
 			}
 		}),
-	)
+	}
+	if r.bundle != nil {
+		opts = append(opts, runtime.WithBundle(r.bundle))
+	}
+	eng := runtime.New(r.workflow, s, exec, opts...)
 
 	return eng.Run(ctx, spec.RunID, spec.Vars)
 }
