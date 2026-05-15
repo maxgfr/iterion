@@ -15,6 +15,7 @@ import type {
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
 import NavLinks from "@/components/shared/NavLinks";
+import ConfirmDialog from "@/components/shared/ConfirmDialog";
 import { useDocumentStore } from "@/store/document";
 
 import AttachmentFieldInput, {
@@ -65,6 +66,16 @@ function pickAttachments(doc: IterDocument | null): AttachmentField[] {
   return doc.attachments?.fields ?? [];
 }
 
+/** isSandboxActive mirrors pkg/dsl/ir/sandbox.go SandboxSpec.IsActive:
+ *  the workflow declares a sandbox block whose mode is "auto" or
+ *  "inline". Absent block or mode: "none" → host runs the tools. */
+function isSandboxActive(doc: IterDocument | null): boolean {
+  const sb = doc?.workflows?.[0]?.sandbox;
+  if (!sb) return false;
+  const m = (sb.mode ?? "").toLowerCase();
+  return m === "auto" || m === "inline";
+}
+
 export default function LaunchView() {
   const [, setLocation] = useLocation();
   const search = useSearch();
@@ -82,6 +93,11 @@ export default function LaunchView() {
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Set when the user clicks Launch on a workflow with no sandbox
+  // active. Surfaces the ConfirmDialog so they make a deliberate
+  // choice (host execution carries real risk: any tool the bot calls
+  // runs against the operator's machine).
+  const [showNoSandboxConfirm, setShowNoSandboxConfirm] = useState(false);
   // Worktree finalization overrides — only meaningful when the
   // workflow declares `worktree: auto`. We always render the controls
   // (collapsed) even for non-worktree runs so the UI is predictable;
@@ -224,7 +240,10 @@ export default function LaunchView() {
     }
   };
 
-  const onSubmit = async () => {
+  // launchRun runs the actual createRun call. Separated from the
+  // user-facing onSubmit so the no-sandbox ConfirmDialog can reach it
+  // directly when the user accepts the warning.
+  const launchRun = async () => {
     setSubmitting(true);
     setError(null);
     try {
@@ -250,6 +269,17 @@ export default function LaunchView() {
       setError((e as Error).message);
       setSubmitting(false);
     }
+  };
+
+  // onSubmit is the click target. Intercepts the launch when the
+  // workflow has no sandbox declared and opens the ConfirmDialog;
+  // otherwise calls launchRun directly.
+  const onSubmit = () => {
+    if (!isSandboxActive(doc)) {
+      setShowNoSandboxConfirm(true);
+      return;
+    }
+    void launchRun();
   };
 
   // Surface the worktree config so the user knows whether the
@@ -524,7 +554,7 @@ export default function LaunchView() {
             <div className="mt-6 flex items-center gap-2">
               <Button
                 variant="primary"
-                onClick={() => void onSubmit()}
+                onClick={onSubmit}
                 disabled={submitting || !doc || missingRequired}
                 title={missingRequired ? "Provide every required attachment first" : undefined}
               >
@@ -537,6 +567,40 @@ export default function LaunchView() {
           </>
         )}
       </div>
+
+      <ConfirmDialog
+        open={showNoSandboxConfirm}
+        title="Launch without sandbox?"
+        message={
+          <>
+            <p>
+              This workflow doesn't declare a <code>sandbox:</code> block,
+              so its tools and shell commands will run directly on the
+              host. The bot can read, modify, or delete any file the
+              iterion process has access to.
+            </p>
+            <p>
+              Add <code>sandbox: auto</code> (devcontainer-aware) or an
+              inline block with an image in the workflow file to opt into
+              container isolation.
+            </p>
+          </>
+        }
+        confirmLabel="Launch unsandboxed"
+        confirmVariant="danger"
+        secondaryAction={{
+          label: "Edit workflow first",
+          onClick: () => {
+            setShowNoSandboxConfirm(false);
+            setLocation("/editor");
+          },
+        }}
+        onConfirm={() => {
+          setShowNoSandboxConfirm(false);
+          void launchRun();
+        }}
+        onCancel={() => setShowNoSandboxConfirm(false)}
+      />
     </div>
   );
 }

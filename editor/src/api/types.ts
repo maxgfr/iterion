@@ -342,7 +342,19 @@ export interface WorkflowDecl {
   // Worktree isolation mode. Omit or set to "none" to run in place;
   // "auto" runs the workflow inside a per-run git worktree.
   worktree?: WorktreeMode;
+  // Sandbox declaration. Omit / mode: "none" → tools and shell run on
+  // the host. mode: "auto" / "inline" + an image → container-isolated
+  // per-run. Mirrors pkg/dsl/ir/sandbox.go SandboxSpec — only the
+  // fields the editor currently reads are typed (mode + image for
+  // active-state detection; build for build-vs-pull surfacing).
+  sandbox?: SandboxDecl;
   edges: Edge[];
+}
+
+export interface SandboxDecl {
+  mode?: "none" | "auto" | "inline" | string;
+  image?: string;
+  build?: { dockerfile?: string; context?: string };
 }
 
 export interface BudgetBlock {
