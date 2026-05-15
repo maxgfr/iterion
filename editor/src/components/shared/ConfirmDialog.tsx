@@ -1,14 +1,25 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+
+interface SecondaryAction {
+  label: string;
+  onClick: () => void;
+  variant?: "default" | "danger";
+}
 
 interface Props {
   open: boolean;
   title: string;
-  message: string;
+  message: ReactNode;
   confirmLabel?: string;
   confirmVariant?: "danger" | "default";
   onConfirm: () => void;
   onCancel: () => void;
+  // Optional middle button — useful when the dialog has three real
+  // outcomes ("Cancel" / "Do X" / "Do Y") rather than the default
+  // confirm-or-cancel split. Sits between Cancel and the primary
+  // action so the visual reading order is left→right destructive.
+  secondaryAction?: SecondaryAction;
 }
 
 export default function ConfirmDialog({
@@ -19,6 +30,7 @@ export default function ConfirmDialog({
   confirmVariant = "default",
   onConfirm,
   onCancel,
+  secondaryAction,
 }: Props) {
   const cancelRef = useRef<HTMLButtonElement>(null);
 
@@ -42,15 +54,30 @@ export default function ConfirmDialog({
       ? "bg-danger hover:bg-danger text-fg-default"
       : "bg-accent hover:bg-accent-hover text-fg-default";
 
+  const secondaryClass =
+    secondaryAction?.variant === "danger"
+      ? "bg-danger hover:bg-danger text-fg-default"
+      : "bg-surface-2 hover:bg-surface-3 text-fg-default";
+
+  // Strings render inside a <p> for the historical layout; ReactNode
+  // bodies (multi-paragraph, inline strong, etc) render inside a div
+  // so callers can supply their own structure.
+  const messageNode =
+    typeof message === "string" ? (
+      <p className="text-xs text-fg-muted mb-4">{message}</p>
+    ) : (
+      <div className="text-xs text-fg-muted mb-4 space-y-2">{message}</div>
+    );
+
   // Portal to document.body and pin z-[60] so the dialog always stacks
   // above a parent modal that opened it. Inline rendering at z-50 lost
   // the DOM-order tiebreaker against Radix's body-portaled Dialog (also
   // z-50), making the confirm appear behind the ProjectSwitcher modal.
   const content = (
     <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center">
-      <div className="bg-surface-1 border border-border-strong rounded-lg p-4 min-w-[300px] max-w-[400px]">
+      <div className="bg-surface-1 border border-border-strong rounded-lg p-4 min-w-[300px] max-w-[440px]">
         <h3 className="text-sm font-bold text-fg-default mb-2">{title}</h3>
-        <p className="text-xs text-fg-muted mb-4">{message}</p>
+        {messageNode}
         <div className="flex justify-end gap-2">
           <button
             ref={cancelRef}
@@ -59,6 +86,14 @@ export default function ConfirmDialog({
           >
             Cancel
           </button>
+          {secondaryAction && (
+            <button
+              className={`px-3 py-1.5 rounded text-xs ${secondaryClass}`}
+              onClick={secondaryAction.onClick}
+            >
+              {secondaryAction.label}
+            </button>
+          )}
           <button
             className={`px-3 py-1.5 rounded text-xs ${confirmClass}`}
             onClick={onConfirm}
