@@ -3,15 +3,19 @@ import type { ComponentPropsWithRef } from "react";
 import type { Components, ScrollerProps } from "react-virtuoso";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { ChevronDownIcon, MixerHorizontalIcon } from "@radix-ui/react-icons";
+import { useShallow } from "zustand/react/shallow";
 
 import { IconButton, Input, Popover } from "@/components/ui";
 import { desktop, isDesktop } from "@/lib/desktopBridge";
 import { formatBytes } from "@/lib/format";
-import { selectInFlightTool, useRunStore } from "@/store/run";
+import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
+import { selectInFlightTools, useRunStore } from "@/store/run";
 import { useUIStore } from "@/store/ui";
 
-import { ThinkingFooter } from "./ThinkingFooter";
-import { ToolRunningFooter } from "./ToolRunningFooter";
+import { ActiveFooter } from "./ActiveFooter";
+import { LogSidePanel } from "./LogSidePanel";
+
+const SIDE_PANEL_FLAG_KEY = "iterion.logs.sidePanel";
 
 interface Props {
   runId: string;
@@ -139,12 +143,13 @@ export default function LogLinesView({
     }
     return false;
   });
-  // When a tool is in flight we swap the random-words footer for a
-  // structured "Running <tool> · <elapsed>" spinner. The random-words
-  // affordance stays for genuine LLM waits, where we can't say what's
-  // happening anyway.
-  const inFlightTool = useRunStore((s) =>
-    selectInFlightTool(s, filterNodeId, filterIteration),
+  // ActiveFooter partitions this list: a synchronous tool (Bash,
+  // Read, Edit, …) commands the footer with "Running <tool>"; agentic
+  // tools (Agent/Task) are mostly an LLM wait under the hood and are
+  // left to the side panel's count so the footer can keep showing the
+  // random-words "thinking" loader.
+  const inFlightTools = useRunStore(
+    useShallow((s) => selectInFlightTools(s, filterNodeId, filterIteration)),
   );
   const [search, setSearch] = useState("");
   const [activeLevels, setActiveLevels] = useState<Set<string>>(() => new Set());
@@ -155,6 +160,15 @@ export default function LogLinesView({
   // grew on every line. When on, lines wrap to the next visible line
   // and no horizontal scroll is needed.
   const [wordWrap, setWordWrap] = useState(false);
+  // Side panel (task list + pending agents) toggle. Persisted globally so
+  // the operator's choice survives reloads and follows them across runs.
+  const [showSidePanel, setShowSidePanelState] = useState<boolean>(() =>
+    readBooleanFlag(SIDE_PANEL_FLAG_KEY, false),
+  );
+  const setShowSidePanel = (next: boolean) => {
+    setShowSidePanelState(next);
+    writeBooleanFlag(SIDE_PANEL_FLAG_KEY, next);
+  };
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isScrollingRef = useRef<boolean>(false);
   const disabledByScrollRef = useRef<boolean>(false);
@@ -233,18 +247,12 @@ export default function LogLinesView({
   // whole list instead of one per row.
   const virtuosoComponents = useMemo<Components<LogItem>>(
     () => ({
-      Footer: () =>
-        inFlightTool ? (
-          <ToolRunningFooter
-            toolName={inFlightTool.toolName}
-            startedAt={inFlightTool.startedAt}
-          />
-        ) : (
-          <ThinkingFooter active={active} />
-        ),
+      Footer: () => (
+        <ActiveFooter inFlightTools={inFlightTools} active={active} />
+      ),
       Scroller: wordWrap ? WrapScroller : HScroller,
     }),
-    [active, inFlightTool, wordWrap],
+    [active, inFlightTools, wordWrap],
   );
 
   // useDeferredValue keeps keystrokes responsive on runs with very long
@@ -477,6 +485,15 @@ export default function LogLinesView({
         <label className="ml-auto inline-flex items-center gap-1.5 cursor-pointer">
           <input
             type="checkbox"
+            checked={showSidePanel}
+            onChange={(e) => setShowSidePanel(e.target.checked)}
+            className="accent-accent"
+          />
+          Tasks
+        </label>
+        <label className="inline-flex items-center gap-1.5 cursor-pointer">
+          <input
+            type="checkbox"
             checked={wordWrap}
             onChange={(e) => setWordWrap(e.target.checked)}
             className="accent-accent"
@@ -503,53 +520,63 @@ export default function LogLinesView({
           </IconButton>
         )}
       </div>
-      <div className="flex-1 min-h-0 px-3 py-1">
-        {filtered.length === 0 ? (
-          <div className="text-fg-subtle py-2 text-[11px]">
-            {emptyMessage(lineCount, isFiltered, log.subscribed)}
-          </div>
-        ) : (
-          <Virtuoso
-            ref={virtuosoRef}
-            className="h-full"
-            data={items}
-            initialTopMostItemIndex={
-              followTail
-                ? { index: items.length - 1, align: "end" }
-                : 0
-            }
-            followOutput={followTail ? "auto" : false}
-            atBottomThreshold={AT_BOTTOM_THRESHOLD_PX}
-            isScrolling={(s) => {
-              isScrollingRef.current = s;
-            }}
-            atBottomStateChange={(atBottom) => {
-              if (!atBottom && followTail && isScrollingRef.current) {
-                disabledByScrollRef.current = true;
-                setFollowTail(false);
-              } else if (
-                atBottom &&
-                !followTail &&
-                disabledByScrollRef.current
-              ) {
-                disabledByScrollRef.current = false;
-                setFollowTail(true);
+      <div className="flex-1 min-h-0 flex">
+        <div className="flex-1 min-w-0 min-h-0 px-3 py-1">
+          {filtered.length === 0 ? (
+            <div className="text-fg-subtle py-2 text-[11px]">
+              {emptyMessage(lineCount, isFiltered, log.subscribed)}
+            </div>
+          ) : (
+            <Virtuoso
+              ref={virtuosoRef}
+              className="h-full"
+              data={items}
+              initialTopMostItemIndex={
+                followTail
+                  ? { index: items.length - 1, align: "end" }
+                  : 0
               }
-            }}
-            itemContent={(_, item) =>
-              item.kind === "line" ? (
-                <LogLineRow line={item.line} wrap={wordWrap} />
-              ) : (
-                <LogBlockRow
-                  header={item.header}
-                  body={item.body}
-                  wrap={wordWrap}
-                />
-              )
-            }
-            computeItemKey={(_, item) => item.key}
-            components={virtuosoComponents}
-          />
+              followOutput={followTail ? "auto" : false}
+              atBottomThreshold={AT_BOTTOM_THRESHOLD_PX}
+              isScrolling={(s) => {
+                isScrollingRef.current = s;
+              }}
+              atBottomStateChange={(atBottom) => {
+                if (!atBottom && followTail && isScrollingRef.current) {
+                  disabledByScrollRef.current = true;
+                  setFollowTail(false);
+                } else if (
+                  atBottom &&
+                  !followTail &&
+                  disabledByScrollRef.current
+                ) {
+                  disabledByScrollRef.current = false;
+                  setFollowTail(true);
+                }
+              }}
+              itemContent={(_, item) =>
+                item.kind === "line" ? (
+                  <LogLineRow line={item.line} wrap={wordWrap} />
+                ) : (
+                  <LogBlockRow
+                    header={item.header}
+                    body={item.body}
+                    wrap={wordWrap}
+                  />
+                )
+              }
+              computeItemKey={(_, item) => item.key}
+              components={virtuosoComponents}
+            />
+          )}
+        </div>
+        {showSidePanel && (
+          <div className="flex-none w-72 border-l border-border-default bg-surface-1">
+            <LogSidePanel
+              filterNodeId={filterNodeId ?? null}
+              filterIteration={filterIteration ?? null}
+            />
+          </div>
         )}
       </div>
     </div>
