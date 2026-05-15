@@ -1,6 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { useParams } from "wouter";
+import { useLocation, useParams } from "wouter";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { ChevronLeftIcon, ChevronUpIcon } from "@radix-ui/react-icons";
 
@@ -17,6 +17,7 @@ import { useLayoutPersistence } from "@/hooks/useLayoutPersistence";
 import { useRunToasts } from "@/hooks/useRunToasts";
 import { useRunKeyboard } from "@/hooks/useRunKeyboard";
 import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
+import AppHeader from "@/components/shared/AppHeader";
 
 import { buildExecutionsAt } from "@/lib/snapshotReducer";
 
@@ -89,6 +90,12 @@ export default function RunView() {
   // live data flows through. Lives in component state because it's
   // purely UI-driven; the store remains the source of truth for live.
   const [scrubSeq, setScrubSeq] = useState<number | null>(null);
+  // Tracks whether the initial snapshot fetch has exhausted its retries
+  // without success. Flipped true so the skeleton swaps for a clear
+  // "Run not found" message instead of pulsing forever. Distinguishes
+  // "loading" (snapshot null + !loadFailed) from "no such run on this
+  // daemon" (snapshot null + loadFailed). Reset on runId change.
+  const [loadFailed, setLoadFailed] = useState<{ status: number; message: string } | null>(null);
   // Workflow view selects by IR node id (not execution id). The detail
   // panel is driven by the selected node's currently-picked iteration
   // (per-node, default = "current"). Manual picks live alongside a
@@ -279,18 +286,32 @@ export default function RunView() {
     if (!runId) return;
     let cancelled = false;
     let attempt = 0;
+    // Reset failure state on every runId change so a navigation to a
+    // different (valid) run rehydrates cleanly after a prior 404.
+    setLoadFailed(null);
     const fetchWithRetry = () => {
       getRun(runId)
         .then((snap) => {
           if (!cancelled) applySnapshot(snap);
         })
-        .catch(() => {
+        .catch((err: Error) => {
           if (cancelled) return;
           attempt += 1;
-          // ~5s budget total: 250ms × 20 = 5000ms, more than enough
-          // for the local launch → CreateRun race.
-          if (attempt < 20) {
+          // 404 = "this daemon's store doesn't have this run". The
+          // launch→CreateRun race can produce one initially, but if
+          // it's STILL 404ing after a few attempts the run isn't
+          // here — flip to a clear error state instead of looping
+          // the skeleton + spamming the network tab.
+          //
+          // Other errors (network blip, 5xx) keep the longer 5s
+          // budget — those are transient.
+          const msg = err?.message ?? "";
+          const is404 = msg.includes("API error 404");
+          const cap = is404 ? 3 : 20;
+          if (attempt < cap) {
             setTimeout(fetchWithRetry, 250);
+          } else if (!cancelled) {
+            setLoadFailed({ status: is404 ? 404 : 0, message: msg });
           }
         });
     };
@@ -561,6 +582,9 @@ export default function RunView() {
     return <div className="p-4 text-xs text-fg-subtle">Missing run id.</div>;
   }
   if (!snapshot) {
+    if (loadFailed) {
+      return <RunViewLoadError runId={runId} status={loadFailed.status} message={loadFailed.message} />;
+    }
     return <RunViewSkeleton />;
   }
 
@@ -840,6 +864,59 @@ function ResizeSeparator({
       }
       aria-label={isHorizontalGroup ? "Resize detail panel" : "Resize event log"}
     />
+  );
+}
+
+// RunViewLoadError renders when the initial REST snapshot fetch fails
+// past the retry budget. Replaces the indefinite skeleton so the user
+// sees a clear "not found" / error message + an actionable Back link.
+// Common cause: clicking a run whose store the current daemon can't
+// reach (e.g. a `~/.iterion/runs/...` global-slot run from a per-
+// project desktop daemon — Open → 404).
+function RunViewLoadError({
+  runId,
+  status,
+  message,
+}: {
+  runId: string;
+  status: number;
+  message: string;
+}) {
+  const [, setLocation] = useLocation();
+  const isNotFound = status === 404;
+  return (
+    <div className="h-screen w-screen flex flex-col items-center justify-center bg-surface-0 gap-4 p-8">
+      <AppHeader active="runs" />
+      <div className="max-w-md text-center space-y-3 mt-4">
+        <h2 className="text-base font-semibold text-fg-default">
+          {isNotFound ? "Run not found" : "Run failed to load"}
+        </h2>
+        <p className="text-xs text-fg-muted font-mono break-all">{runId}</p>
+        {isNotFound ? (
+          <p className="text-xs text-fg-muted">
+            This daemon&apos;s store doesn&apos;t have this run. It may live in a
+            different iterion store (e.g. the global <code>~/.iterion/runs/</code> slot
+            served by a different daemon, or a per-project store you haven&apos;t opened).
+          </p>
+        ) : (
+          <p className="text-xs text-fg-muted">{message}</p>
+        )}
+        <div className="flex justify-center gap-2 pt-2">
+          <button
+            className="bg-surface-2 hover:bg-surface-3 px-3 py-1.5 rounded text-xs text-fg-default"
+            onClick={() => setLocation("/runs")}
+          >
+            Back to runs
+          </button>
+          <button
+            className="bg-surface-2 hover:bg-surface-3 px-3 py-1.5 rounded text-xs text-fg-default"
+            onClick={() => window.location.reload()}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
