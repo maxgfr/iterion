@@ -157,6 +157,13 @@ export interface RunEvent {
   branch_id?: string;
   node_id?: string;
   data?: Record<string, unknown>;
+  // Byte position in the run's log buffer at the moment this event
+  // was persisted. Stamped by the backend store from the per-run log
+  // buffer total. Used by the time-travel scrubber / replay to slice
+  // the live log "up to where the log was when this event fired".
+  // Absent on legacy events (pre-feature) and on cloud-mode events
+  // where there is no on-host log buffer to attach.
+  log_offset?: number;
 }
 
 export interface ArtifactSummary {

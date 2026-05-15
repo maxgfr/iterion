@@ -38,6 +38,14 @@ interface Props {
   // NodeDetailPanel suppresses it (the tab label already says "Logs").
   showTitle?: boolean;
   onCollapse?: () => void;
+  // Absolute byte offset to clamp the displayed log to. When set,
+  // only bytes with absolute position < clampToBytes appear — used
+  // by the time-travel scrubber / replay to show "what the log
+  // looked like at this point in the run". Null/undefined disables
+  // clamping (show everything in the buffer). Offsets below
+  // log.start fall outside the in-memory window and render as empty
+  // — that part of the log has been evicted from the 1 MB ring.
+  clampToBytes?: number | null;
 }
 
 // Level glyphs used by the iterion leveled logger (pkg/log/log.go).
@@ -117,6 +125,7 @@ export default function LogLinesView({
   filterIteration = null,
   showTitle = true,
   onCollapse,
+  clampToBytes = null,
 }: Props) {
   const log = useRunStore((s) => s.log);
   // Drives the "thinking" footer. When filtering to a specific node,
@@ -186,9 +195,21 @@ export default function LogLinesView({
   // Annotate lines with their inferred level. Continuation lines (from
   // LogBlock) inherit the level of the most recent header so a level
   // filter doesn't strand a multi-line block's body.
+  //
+  // When clampToBytes is set, slice the buffer to the absolute byte
+  // position the time-travel scrubber asks for (events[scrubSeq].log_
+  // offset on the parent side). Bytes BEFORE the ring's lower bound
+  // (log.start) have been evicted from the 1 MB window — those are
+  // silently absent until we wire a /api/runs/{id}/log fetch fallback.
   const annotated = useMemo<AnnotatedLine[]>(() => {
     if (!log.text) return [];
-    const raw = log.text.endsWith("\n") ? log.text.slice(0, -1) : log.text;
+    let body = log.text;
+    if (clampToBytes !== null && clampToBytes !== undefined) {
+      const rel = clampToBytes - log.start;
+      if (rel <= 0) return [];
+      if (rel < body.length) body = body.slice(0, rel);
+    }
+    const raw = body.endsWith("\n") ? body.slice(0, -1) : body;
     const split = raw.split("\n");
     const out: AnnotatedLine[] = new Array(split.length);
     let lastLevel: string | null = null;
@@ -203,7 +224,7 @@ export default function LogLinesView({
       }
     }
     return out;
-  }, [log.text]);
+  }, [log.text, log.start, clampToBytes]);
 
   // Per-(node, iteration) pre-filter. Backends prefix every node-bound
   // line as [NodeID#iter/component]; we scan past the timestamp+emoji

@@ -50,6 +50,10 @@ interface Props {
   subscribeLogs: (fromOffset?: number) => void;
   unsubscribeLogs: () => void;
   onCollapse?: () => void;
+  // Byte offset to clamp the per-node Logs tab to during scrub /
+  // replay. Forwarded from RunView's events[scrubSeq].log_offset so
+  // the panel mirrors the bottom-log panel's rewind.
+  logClampBytes?: number | null;
 }
 
 function CollapseButton({ onCollapse }: { onCollapse?: () => void }): ReactNode {
@@ -171,6 +175,7 @@ export default function NodeDetailPanel({
   subscribeLogs,
   unsubscribeLogs,
   onCollapse,
+  logClampBytes = null,
 }: Props) {
   const [artifactVersions, setArtifactVersions] = useState<ArtifactSummary[]>([]);
   const [activeTab, setActiveTab] = useState<TabValue | null>(null);
@@ -376,6 +381,7 @@ export default function NodeDetailPanel({
               filterNodeId={exec.ir_node_id}
               filterIteration={exec.loop_iteration}
               showTitle={false}
+              clampToBytes={logClampBytes}
             />
           ),
         }}
