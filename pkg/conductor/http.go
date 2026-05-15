@@ -6,8 +6,26 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
+)
+
+const (
+	// wsWriteWait caps a single WriteMessage. A stuck client cannot
+	// hold the writer goroutine forever; the connection is dropped
+	// instead.
+	wsWriteWait = 10 * time.Second
+	// wsPongWait is the longest the reader will accept silence from
+	// the client. The pong handler resets it on each pong frame.
+	wsPongWait = 60 * time.Second
+	// wsPingPeriod is the cadence at which the writer sends a ping.
+	// Smaller than pongWait so the client always has time to respond.
+	wsPingPeriod = (wsPongWait * 9) / 10
+	// wsReadLimit caps a single inbound message size. Conductor
+	// clients don't speak — anything over this is a misuse and the
+	// reader drops the connection.
+	wsReadLimit = 1 << 16
 )
 
 // Routes returns an http.Handler exposing the conductor's REST + WS
@@ -105,21 +123,51 @@ type wsClientConn struct {
 }
 
 // wsBridge fans Snapshot publications out to every connected client.
+// It is also responsible for protocol-level keepalive (ping/pong) and
+// for forcibly dropping slow or unreachable clients via write
+// deadlines, so the conductor never leaks goroutines waiting on a
+// dead network peer.
 type wsBridge struct {
 	mu      sync.Mutex
 	clients map[*wsClientConn]struct{}
+	closed  bool
+
+	stopOnce sync.Once
+	stop     chan struct{}
 }
 
 func newWsBridge() *wsBridge {
-	return &wsBridge{clients: map[*wsClientConn]struct{}{}}
+	return &wsBridge{
+		clients: map[*wsClientConn]struct{}{},
+		stop:    make(chan struct{}),
+	}
+}
+
+// Stop closes every connected client and prevents new ones from
+// attaching. Idempotent.
+func (b *wsBridge) Stop() {
+	b.stopOnce.Do(func() {
+		close(b.stop)
+		b.mu.Lock()
+		b.closed = true
+		for c := range b.clients {
+			_ = c.conn.Close()
+		}
+		b.mu.Unlock()
+	})
 }
 
 func (b *wsBridge) attach(conn *websocket.Conn, initial Snapshot) {
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		_ = conn.Close()
+		return
+	}
 	client := &wsClientConn{
 		conn: conn,
 		send: make(chan []byte, 16),
 	}
-	b.mu.Lock()
 	b.clients[client] = struct{}{}
 	b.mu.Unlock()
 
@@ -155,23 +203,53 @@ func (b *wsBridge) broadcast(s Snapshot) {
 		select {
 		case client.send <- data:
 		default:
-			// slow consumer: drop, let the writer's close kick them off.
+			// slow consumer: drop the message; the writer's deadline
+			// will kick them off if they stay unresponsive.
 		}
 	}
 }
 
+// writer drains the send channel and emits a periodic ping so the
+// TCP layer notices a dead peer instead of silently leaking.
 func (c *wsClientConn) writer(b *wsBridge) {
-	defer b.drop(c)
-	for data := range c.send {
-		if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+	ticker := time.NewTicker(wsPingPeriod)
+	defer func() {
+		ticker.Stop()
+		b.drop(c)
+	}()
+	for {
+		select {
+		case data, ok := <-c.send:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if !ok {
+				_ = c.conn.WriteMessage(websocket.CloseMessage, nil)
+				return
+			}
+			if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				return
+			}
+		case <-ticker.C:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		case <-b.stop:
 			return
 		}
 	}
 }
 
+// reader keeps the connection alive by enforcing a pong-driven read
+// deadline. The conductor doesn't accept client-side messages — any
+// read that fails (close, pong timeout, frame too large) drops the
+// connection.
 func (c *wsClientConn) reader(b *wsBridge) {
 	defer b.drop(c)
-	c.conn.SetReadLimit(1 << 16)
+	c.conn.SetReadLimit(wsReadLimit)
+	_ = c.conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	c.conn.SetPongHandler(func(string) error {
+		return c.conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	})
 	for {
 		if _, _, err := c.conn.ReadMessage(); err != nil {
 			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) &&

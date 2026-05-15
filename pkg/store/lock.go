@@ -28,3 +28,17 @@ func (s *FilesystemRunStore) LockRun(_ context.Context, runID string) (RunLock, 
 	dir := s.runDir(runID)
 	return lockRun(dir, fmt.Sprintf("run %s", runID))
 }
+
+// AcquireFileLock returns an exclusive lock pinned to a specific file
+// path. It is the directory-agnostic surface of the same flock /
+// PID-lock primitive that backs LockRun, exposed so consumers outside
+// pkg/store (typically the conductor's process-level lock on the
+// workspace root) can reuse the implementation instead of reinventing
+// it cross-platform.
+//
+// The lock is non-blocking — if another process already holds the
+// file, AcquireFileLock returns an error rather than waiting. The OS
+// releases the lock automatically when the holding process exits.
+func AcquireFileLock(path, label string) (RunLock, error) {
+	return lockFile(path, label)
+}

@@ -113,23 +113,89 @@ func (a *GitHubAdapter) ListCandidates(ctx context.Context) ([]Issue, error) {
 // RefreshStates returns the current state for each ID (which on the
 // GitHub side means: read the current labels and re-derive the
 // state_mapping result).
+//
+// One `gh api` call covers the entire set instead of spawning one `gh
+// issue view <num>` per ID. The trade-off: GH returns 100 issues max
+// per page, which is enough for any realistic conductor's running set
+// (gated by agent.max_concurrent, typically single digits).
 func (a *GitHubAdapter) RefreshStates(ctx context.Context, ids []string) (map[string]string, error) {
-	out := make(map[string]string, len(ids))
+	if len(ids) == 0 {
+		return map[string]string{}, nil
+	}
+	wanted := make(map[int]string, len(ids))
 	for _, id := range ids {
-		num, ok := parseGitHubID(a.opts.Repo, id)
-		if !ok {
+		if num, ok := parseGitHubID(a.opts.Repo, id); ok {
+			wanted[num] = id
+		}
+	}
+	if len(wanted) == 0 {
+		return map[string]string{}, nil
+	}
+
+	// Pull every open or closed issue in one call and filter locally.
+	// state=all so we still see issues an operator closed externally
+	// (the conductor's reconcileStalled path needs to detect that).
+	args := []string{
+		"api",
+		fmt.Sprintf("repos/%s/issues?state=all&per_page=100&filter=all", a.opts.Repo),
+		"-H", "Accept: application/vnd.github+json",
+	}
+	raw, err := a.opts.Command(ctx, args, a.env())
+	if err != nil {
+		return nil, fmt.Errorf("gh api repos/%s/issues: %w", a.opts.Repo, err)
+	}
+	// gh api emits REST-shaped issues — labels are objects with `name`,
+	// number is `number`, etc. — so the existing ghIssue struct fits
+	// after a minor mapping pass for the `state` field naming.
+	var raws []apiIssue
+	if err := json.Unmarshal(raw, &raws); err != nil {
+		return nil, fmt.Errorf("gh api parse: %w", err)
+	}
+
+	out := make(map[string]string, len(wanted))
+	for _, r := range raws {
+		id, want := wanted[r.Number]
+		if !want {
 			continue
 		}
-		raw, err := a.viewIssue(ctx, num)
-		if err != nil {
-			continue
-		}
-		iss := a.toIssue(raw)
+		iss := a.toIssue(r.toGhIssue())
 		if iss.WorkflowState != "" {
 			out[id] = iss.WorkflowState
 		}
 	}
 	return out, nil
+}
+
+// apiIssue mirrors the REST shape that `gh api repos/.../issues`
+// returns, which differs slightly from `gh issue list --json` (camelCase
+// vs snake_case fields). The two are converged into ghIssue here so the
+// rest of the adapter stays uniform.
+type apiIssue struct {
+	Number    int       `json:"number"`
+	Title     string    `json:"title"`
+	Body      string    `json:"body"`
+	State     string    `json:"state"`
+	Labels    []ghLabel `json:"labels"`
+	Assignees []ghUser  `json:"assignees"`
+	User      ghUser    `json:"user"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	HTMLURL   string    `json:"html_url"`
+}
+
+func (a apiIssue) toGhIssue() ghIssue {
+	return ghIssue{
+		Number:    a.Number,
+		Title:     a.Title,
+		Body:      a.Body,
+		State:     a.State,
+		Labels:    a.Labels,
+		Assignees: a.Assignees,
+		Author:    a.User,
+		CreatedAt: a.CreatedAt,
+		UpdatedAt: a.UpdatedAt,
+		URL:       a.HTMLURL,
+	}
 }
 
 // UpdateState transitions an issue by adjusting labels per the
@@ -289,23 +355,6 @@ func quoteLabel(l string) string {
 		return `"` + l + `"`
 	}
 	return l
-}
-
-func (a *GitHubAdapter) viewIssue(ctx context.Context, num int) (ghIssue, error) {
-	args := []string{
-		"issue", "view", fmt.Sprintf("%d", num),
-		"--repo", a.opts.Repo,
-		"--json", "number,title,body,labels,state,assignees,author,createdAt,updatedAt,url",
-	}
-	out, err := a.opts.Command(ctx, args, a.env())
-	if err != nil {
-		return ghIssue{}, fmt.Errorf("gh issue view: %w", err)
-	}
-	var g ghIssue
-	if err := json.Unmarshal(out, &g); err != nil {
-		return ghIssue{}, fmt.Errorf("gh issue view parse: %w", err)
-	}
-	return g, nil
 }
 
 func parseGitHubID(repo, id string) (int, bool) {

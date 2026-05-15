@@ -39,6 +39,13 @@ type Store struct {
 	mu    sync.Mutex
 	board *Board
 	seq   int64
+
+	// index is a hot in-memory mirror of issues/<id>.json. Filesystem
+	// remains authoritative — index is populated at NewStore and kept
+	// in sync on every write. List + Get walk the index instead of
+	// hitting the filesystem, so a board with hundreds of issues
+	// doesn't pay N file reads per query.
+	index map[string]*Issue
 }
 
 // NewStore opens (or initializes) the native tracker at root. If
@@ -50,7 +57,7 @@ func NewStore(root string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Join(root, issuesDir), dirPerm); err != nil {
 		return nil, fmt.Errorf("native store: mkdir: %w", err)
 	}
-	s := &Store{root: root}
+	s := &Store{root: root, index: map[string]*Issue{}}
 	if err := s.loadOrInitBoard(); err != nil {
 		return nil, err
 	}
@@ -66,11 +73,56 @@ func NewStore(root string) (*Store, error) {
 		}
 		return true
 	}); err != nil {
-		// Don't fail NewStore; the next append will recover.
 		_ = err
 	}
 	s.seq = maxSeq + 1
+
+	// Populate the index from disk. Corrupt files are skipped (a
+	// warning would be nice but the store doesn't carry a logger).
+	if err := s.populateIndex(); err != nil {
+		return nil, err
+	}
 	return s, nil
+}
+
+func (s *Store) populateIndex() error {
+	entries, err := os.ReadDir(filepath.Join(s.root, issuesDir))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("native store: scan issues: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".tmp") {
+			continue
+		}
+		id := decodeID(strings.TrimSuffix(e.Name(), ".json"))
+		iss, err := s.readIssueFromDisk(id)
+		if err != nil {
+			continue
+		}
+		s.index[id] = iss
+	}
+	return nil
+}
+
+// readIssueFromDisk bypasses the index — used only at NewStore to
+// populate the cache from the authoritative on-disk files. Post-init
+// reads should go through the index via readIssueLocked.
+func (s *Store) readIssueFromDisk(id string) (*Issue, error) {
+	data, err := os.ReadFile(s.issuePath(id))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, tracker.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("native store: read issue: %w", err)
+	}
+	var iss Issue
+	if err := json.Unmarshal(data, &iss); err != nil {
+		return nil, fmt.Errorf("native store: parse issue %s: %w", id, err)
+	}
+	return &iss, nil
 }
 
 // Root returns the on-disk root directory.
@@ -126,6 +178,7 @@ func (s *Store) Create(in Issue) (*Issue, error) {
 	if err := s.writeIssueLocked(&in); err != nil {
 		return nil, err
 	}
+	s.index[in.ID] = cloneIssue(&in)
 	if err := s.appendEventLocked(Event{
 		Type:    EvtIssueCreated,
 		IssueID: in.ID,
@@ -137,11 +190,14 @@ func (s *Store) Create(in Issue) (*Issue, error) {
 	return &out, nil
 }
 
-// Get returns the issue with the given ID.
+// Get returns a defensive copy of the issue with the given ID.
 func (s *Store) Get(id string) (*Issue, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.readIssueLocked(id)
+	if iss, ok := s.index[id]; ok {
+		return cloneIssue(iss), nil
+	}
+	return nil, tracker.ErrNotFound
 }
 
 // ListFilter constrains the result of List. Zero-value fields don't filter.
@@ -152,32 +208,18 @@ type ListFilter struct {
 	Claimed  *bool
 }
 
-// List returns issues matching the filter, sorted by priority desc, then
-// created_at asc.
+// List returns defensive copies of issues matching the filter, sorted
+// by priority desc, then created_at asc. Walks the in-memory index —
+// no filesystem I/O on the hot path.
 func (s *Store) List(filter ListFilter) ([]*Issue, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entries, err := os.ReadDir(filepath.Join(s.root, issuesDir))
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("native store: list: %w", err)
-	}
-	out := make([]*Issue, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".tmp") {
-			continue
-		}
-		id := decodeID(strings.TrimSuffix(e.Name(), ".json"))
-		iss, err := s.readIssueLocked(id)
-		if err != nil {
-			continue
-		}
+	out := make([]*Issue, 0, len(s.index))
+	for _, iss := range s.index {
 		if !filter.match(iss) {
 			continue
 		}
-		out = append(out, iss)
+		out = append(out, cloneIssue(iss))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Priority != out[j].Priority {
@@ -186,6 +228,25 @@ func (s *Store) List(filter ListFilter) ([]*Issue, error) {
 		return out[i].CreatedAt.Before(out[j].CreatedAt)
 	})
 	return out, nil
+}
+
+// cloneIssue returns a deep copy of an issue so callers receive their
+// own mutable instance and cannot mutate the in-memory cache.
+func cloneIssue(in *Issue) *Issue {
+	c := *in
+	if in.Labels != nil {
+		c.Labels = append([]string(nil), in.Labels...)
+	}
+	if in.Blockers != nil {
+		c.Blockers = append([]string(nil), in.Blockers...)
+	}
+	if in.Fields != nil {
+		c.Fields = make(map[string]any, len(in.Fields))
+		for k, v := range in.Fields {
+			c.Fields[k] = v
+		}
+	}
+	return &c
 }
 
 func (f ListFilter) match(iss *Issue) bool {
@@ -282,6 +343,7 @@ func (s *Store) Update(id string, p Patch) (*Issue, error) {
 	if err := s.writeIssueLocked(iss); err != nil {
 		return nil, err
 	}
+	s.index[iss.ID] = cloneIssue(iss)
 	if err := s.appendEventLocked(Event{
 		Type:    EvtIssueUpdated,
 		IssueID: iss.ID,
@@ -313,6 +375,7 @@ func (s *Store) SetState(id, newState string) (*Issue, error) {
 	if err := s.writeIssueLocked(iss); err != nil {
 		return nil, err
 	}
+	s.index[iss.ID] = cloneIssue(iss)
 	if err := s.appendEventLocked(Event{
 		Type:    EvtIssueState,
 		IssueID: iss.ID,
@@ -327,13 +390,13 @@ func (s *Store) SetState(id, newState string) (*Issue, error) {
 func (s *Store) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	p := s.issuePath(id)
-	if _, err := os.Stat(p); errors.Is(err, fs.ErrNotExist) {
+	if _, ok := s.index[id]; !ok {
 		return tracker.ErrNotFound
 	}
-	if err := os.Remove(p); err != nil {
+	if err := os.Remove(s.issuePath(id)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("native store: remove issue: %w", err)
 	}
+	delete(s.index, id)
 	return s.appendEventLocked(Event{Type: EvtIssueDeleted, IssueID: id})
 }
 
@@ -358,6 +421,7 @@ func (s *Store) Claim(id, marker string) error {
 	if err := s.writeIssueLocked(iss); err != nil {
 		return err
 	}
+	s.index[iss.ID] = cloneIssue(iss)
 	return s.appendEventLocked(Event{
 		Type: EvtIssueClaimed, IssueID: id,
 		Payload: map[string]any{"marker": marker},
@@ -384,6 +448,7 @@ func (s *Store) Release(id, marker string) error {
 	if err := s.writeIssueLocked(iss); err != nil {
 		return err
 	}
+	s.index[iss.ID] = cloneIssue(iss)
 	return s.appendEventLocked(Event{
 		Type: EvtIssueReleased, IssueID: id,
 		Payload: map[string]any{"marker": marker},
@@ -393,24 +458,17 @@ func (s *Store) Release(id, marker string) error {
 // Resolve returns the full issue ID matching the given prefix. The
 // prefix may be the bare UUID (without the "native:" scheme) or the
 // full ID. Returns tracker.ErrNotFound if no issue matches and a
-// distinct error if multiple match.
+// distinct error if multiple match. Walks the in-memory index, so
+// O(N) over distinct issues with no filesystem I/O.
 func (s *Store) Resolve(prefix string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entries, err := os.ReadDir(filepath.Join(s.root, issuesDir))
-	if err != nil {
-		return "", err
-	}
 	want := prefix
 	if !strings.HasPrefix(prefix, "native:") {
 		want = "native:" + prefix
 	}
 	var matches []string
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".tmp") {
-			continue
-		}
-		id := decodeID(strings.TrimSuffix(e.Name(), ".json"))
+	for id := range s.index {
 		if id == want || strings.HasPrefix(id, want) {
 			matches = append(matches, id)
 		}
@@ -509,19 +567,14 @@ func (s *Store) writeIssueLocked(iss *Issue) error {
 	return os.Rename(tmp, p)
 }
 
+// readIssueLocked returns a defensive copy of the indexed issue.
+// Reads after init always hit the in-memory cache; the on-disk files
+// stay authoritative for crash recovery via populateIndex at NewStore.
 func (s *Store) readIssueLocked(id string) (*Issue, error) {
-	data, err := os.ReadFile(s.issuePath(id))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, tracker.ErrNotFound
+	if iss, ok := s.index[id]; ok {
+		return cloneIssue(iss), nil
 	}
-	if err != nil {
-		return nil, fmt.Errorf("native store: read issue: %w", err)
-	}
-	var iss Issue
-	if err := json.Unmarshal(data, &iss); err != nil {
-		return nil, fmt.Errorf("native store: parse issue %s: %w", id, err)
-	}
-	return &iss, nil
+	return nil, tracker.ErrNotFound
 }
 
 func (s *Store) issuePath(id string) string {

@@ -67,11 +67,30 @@ func newFakeForgejo(t *testing.T) (*httptest.Server, *map[string]int) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`[]`))
 	})
+	mux.HandleFunc("/api/v1/repos/owner/repo/issues/1/labels/42", func(w http.ResponseWriter, r *http.Request) {
+		calls[r.Method+" labels1/42"]++
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/api/v1/repos/owner/repo/labels", func(w http.ResponseWriter, r *http.Request) {
+		calls[r.Method+" labels"]++
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 42, "name": "iterion-claimed"},
+			})
+		case http.MethodPost:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 42, "name": "iterion-claimed"})
+		}
+	})
 	mux.HandleFunc("/api/v1/repos/owner/repo/issues/1/comments", func(w http.ResponseWriter, r *http.Request) {
 		calls[r.Method+" comments1"]++
 		w.WriteHeader(http.StatusCreated)
 	})
 	mux.HandleFunc("/api/v1/repos/owner/repo/issues/999", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	mux.HandleFunc("/api/v1/repos/owner/repo/issues/999/labels", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
@@ -135,9 +154,23 @@ func TestForgejoClaimAndRelease(t *testing.T) {
 	if err := a.Release(context.Background(), id, "h-1"); err != nil {
 		t.Fatalf("Release: %v", err)
 	}
-	// Both should have hit PUT /labels (via replaceLabels).
-	if (*calls)["PUT labels1"] < 2 {
-		t.Fatalf("expected 2 PUT labels1 calls, got %d", (*calls)["PUT labels1"])
+	// Claim now goes through POST /issues/1/labels (one HTTP call),
+	// Release goes through DELETE /issues/1/labels/{id} (one HTTP call).
+	// The label-id cache is populated by a single GET /labels.
+	if (*calls)["POST labels1"] != 1 {
+		t.Fatalf("expected 1 POST labels1 (claim), got %d", (*calls)["POST labels1"])
+	}
+	if (*calls)["DELETE labels1/42"] != 1 {
+		t.Fatalf("expected 1 DELETE labels1/42 (release), got %d", (*calls)["DELETE labels1/42"])
+	}
+	if (*calls)["GET labels"] != 1 {
+		t.Fatalf("expected 1 GET labels (cache fill), got %d", (*calls)["GET labels"])
+	}
+	// A second claim/release pair must hit the cache — no extra GET labels.
+	_ = a.Claim(context.Background(), id, "h-1")
+	_ = a.Release(context.Background(), id, "h-1")
+	if (*calls)["GET labels"] != 1 {
+		t.Fatalf("label cache miss on second pass: %d", (*calls)["GET labels"])
 	}
 }
 

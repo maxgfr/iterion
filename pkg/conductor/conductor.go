@@ -232,6 +232,7 @@ func (c *Conductor) shutdown() {
 			e.Timer.Stop()
 		}
 	}
+	c.ws.Stop()
 }
 
 // fireSnapshot publishes the current snapshot to the WS bridge and to

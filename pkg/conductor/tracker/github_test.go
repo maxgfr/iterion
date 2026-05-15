@@ -16,7 +16,7 @@ import (
 type fakeGH struct {
 	mu      sync.Mutex
 	listOut []byte
-	viewOut map[int][]byte
+	apiOut  []byte // response for `gh api repos/<...>/issues...` (RefreshStates)
 	calls   [][]string
 	failNum int
 }
@@ -31,13 +31,8 @@ func (f *fakeGH) cmd(_ context.Context, args []string, _ []string) ([]byte, erro
 	switch {
 	case args[0] == "issue" && args[1] == "list":
 		return f.listOut, nil
-	case args[0] == "issue" && args[1] == "view":
-		var n int
-		_, _ = fmt.Sscanf(args[2], "%d", &n)
-		if data, ok := f.viewOut[n]; ok {
-			return data, nil
-		}
-		return nil, errors.New("not found")
+	case args[0] == "api":
+		return f.apiOut, nil
 	case args[0] == "issue" && (args[1] == "edit" || args[1] == "comment"):
 		if f.failNum != 0 {
 			var n int
@@ -131,17 +126,28 @@ func TestGitHubResolveStateOrder(t *testing.T) {
 }
 
 func TestGitHubRefreshStates(t *testing.T) {
+	// The adapter now batches RefreshStates into a single `gh api` call
+	// and filters locally. The fake returns a REST-shaped list.
 	fake := &fakeGH{
-		viewOut: map[int][]byte{
-			7: mustJSON(map[string]any{
-				"number":    7,
-				"title":     "x",
-				"labels":    []map[string]string{{"name": "ready"}},
-				"state":     "open",
-				"createdAt": "2026-05-01T00:00:00Z",
-				"updatedAt": "2026-05-01T00:00:00Z",
-			}),
-		},
+		apiOut: mustJSON([]map[string]any{
+			{
+				"number":     7,
+				"title":      "x",
+				"labels":     []map[string]string{{"name": "ready"}},
+				"state":      "open",
+				"created_at": "2026-05-01T00:00:00Z",
+				"updated_at": "2026-05-01T00:00:00Z",
+			},
+			{
+				// Same repo, different issue, not in our wanted set.
+				"number":     11,
+				"title":      "stranger",
+				"labels":     []map[string]string{{"name": "ready"}},
+				"state":      "open",
+				"created_at": "2026-05-01T00:00:00Z",
+				"updated_at": "2026-05-01T00:00:00Z",
+			},
+		}),
 	}
 	a := newGHAdapter(t, fake, map[string]tracker.LabelSelector{
 		"ready": {LabelsInclude: []string{"ready"}},
@@ -155,6 +161,19 @@ func TestGitHubRefreshStates(t *testing.T) {
 	}
 	if _, ok := got["github:owner/repo#9999"]; ok {
 		t.Fatal("missing ID should be omitted")
+	}
+	if _, ok := got["github:owner/repo#11"]; ok {
+		t.Fatal("issue outside the wanted set should be filtered out")
+	}
+	// One API call covers any number of IDs.
+	apiCalls := 0
+	for _, c := range fake.calls {
+		if len(c) > 0 && c[0] == "api" {
+			apiCalls++
+		}
+	}
+	if apiCalls != 1 {
+		t.Fatalf("expected 1 `gh api` call (batch), got %d", apiCalls)
 	}
 }
 

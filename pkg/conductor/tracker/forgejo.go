@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -35,6 +36,9 @@ type ForgejoOptions struct {
 type ForgejoAdapter struct {
 	opts ForgejoOptions
 	hc   *http.Client
+
+	labelMu  sync.RWMutex
+	labelIDs map[string]int64 // name → ID cache, lazily populated on first Claim/Release
 }
 
 // NewForgejo returns a configured adapter.
@@ -155,35 +159,93 @@ func (a *ForgejoAdapter) Comment(ctx context.Context, id, body string) error {
 	return a.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/comments", a.opts.Repo, num), in, nil)
 }
 
-// Claim adds ClaimedLabel.
+// Claim adds ClaimedLabel via a single POST /issues/{n}/labels call.
+// The previous implementation issued a GET-then-PUT round trip; the
+// add endpoint expresses the intent directly and is half the HTTP
+// cost. We resolve the label name to its numeric ID on first use and
+// cache the mapping; if the label doesn't exist yet on the repo we
+// create it so a fresh repository can be conducted without manual
+// label setup.
 func (a *ForgejoAdapter) Claim(ctx context.Context, id, marker string) error {
 	num, ok := parseForgejoID(a.opts.Host, a.opts.Repo, id)
 	if !ok {
 		return ErrNotFound
 	}
-	var current forgejoIssue
-	if err := a.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/issues/%d", a.opts.Repo, num), nil, &current); err != nil {
+	lid, err := a.resolveLabelID(ctx, a.opts.ClaimedLabel)
+	if err != nil {
 		return err
 	}
-	have := labelNames(current.Labels)
-	if !containsString(have, a.opts.ClaimedLabel) {
-		have = append(have, a.opts.ClaimedLabel)
-	}
-	return a.replaceLabels(ctx, num, have)
+	body := struct {
+		Labels []int64 `json:"labels"`
+	}{Labels: []int64{lid}}
+	return a.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/labels", a.opts.Repo, num), body, nil)
 }
 
-// Release removes ClaimedLabel.
+// Release removes ClaimedLabel via DELETE /issues/{n}/labels/{labelID}.
+// Idempotent: 404 from Forgejo (label not present on the issue) is
+// folded into success.
 func (a *ForgejoAdapter) Release(ctx context.Context, id, marker string) error {
 	num, ok := parseForgejoID(a.opts.Host, a.opts.Repo, id)
 	if !ok {
 		return ErrNotFound
 	}
-	var current forgejoIssue
-	if err := a.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/issues/%d", a.opts.Repo, num), nil, &current); err != nil {
+	lid, err := a.resolveLabelID(ctx, a.opts.ClaimedLabel)
+	if err != nil {
 		return err
 	}
-	have := filterOutString(labelNames(current.Labels), a.opts.ClaimedLabel)
-	return a.replaceLabels(ctx, num, have)
+	err = a.do(ctx, http.MethodDelete, fmt.Sprintf("/repos/%s/issues/%d/labels/%d", a.opts.Repo, num, lid), nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+// resolveLabelID looks up a label by name on the configured repo and
+// returns its numeric ID. Results are cached for the lifetime of the
+// adapter. If the label doesn't exist yet, it is created.
+func (a *ForgejoAdapter) resolveLabelID(ctx context.Context, name string) (int64, error) {
+	a.labelMu.RLock()
+	if id, ok := a.labelIDs[name]; ok {
+		a.labelMu.RUnlock()
+		return id, nil
+	}
+	a.labelMu.RUnlock()
+
+	a.labelMu.Lock()
+	defer a.labelMu.Unlock()
+	if id, ok := a.labelIDs[name]; ok {
+		return id, nil
+	}
+	if a.labelIDs == nil {
+		a.labelIDs = map[string]int64{}
+	}
+
+	var labels []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := a.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/labels?limit=200", a.opts.Repo), nil, &labels); err != nil {
+		return 0, err
+	}
+	for _, l := range labels {
+		a.labelIDs[l.Name] = l.ID
+	}
+	if id, ok := a.labelIDs[name]; ok {
+		return id, nil
+	}
+
+	// Label missing on the repo — create it. Color is required by the
+	// API; pick a neutral grey so iterion's labels don't visually clash
+	// with the user's palette.
+	in := map[string]any{"name": name, "color": "#888888"}
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	if err := a.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/labels", a.opts.Repo), in, &created); err != nil {
+		return 0, err
+	}
+	a.labelIDs[name] = created.ID
+	return created.ID, nil
 }
 
 // ---------------------------------------------------------------------------
