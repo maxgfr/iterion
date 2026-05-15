@@ -3618,7 +3618,16 @@ func TestLive_SecuredRenovacy_Real(t *testing.T) {
 		"user_prompt":          "Multi-stack fixture with deliberately vulnerable pins. Pay extra attention to node-ipc — version 10.1.1 is the documented protestware/sabotage release; upgrade it past the compromised range.",
 	})
 
-	eng := runtime.New(wf, s, executor, runtime.WithWorkDir(workspaceDir))
+	eng := runtime.New(wf, s, executor,
+		runtime.WithWorkDir(workspaceDir),
+		// Attach the bundle so the runtime mirrors `<bundle>/skills/*.md`
+		// into `<workspaceDir>/.claude/skills/`. The bot's
+		// `batch_upgrade_patches` agent reads
+		// `package-manager-upgrades.md` from there; without this option
+		// the agent runs blind on ecosystem conventions and stops on
+		// missing toolchain (observed 2026-05-15 23:05).
+		runtime.WithBundle(b),
+	)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Hour)
 	defer cancel()
 	inputs := map[string]interface{}{

@@ -4257,10 +4257,17 @@ workflow secured_renovacy:
   ## that "succeeded" with claude-code never installed, and runs
   ## ending instantly with "claude session ended without result".
   ##
-  ## `iterion-sandbox-slim` already ships node 22, npm, git, jq, curl,
-  ## devbox + Nix — i.e. everything any package-manager-aware recipe
-  ## needs to bootstrap regardless of target project. We layer
-  ## claude-code on top via post_create.
+  ## `iterion-sandbox-full` ships node 22 + npm, Go, Python 3, pnpm,
+  ## and the usual devops tooling on top of the slim base (git, jq,
+  ## curl, devbox/Nix). Defaulting to `full` keeps the bot's "any
+  ## ecosystem" promise true out of the box — slim image is JS-only-
+  ## friendly and forces the upgrade agents to bootstrap missing
+  ## toolchains via devbox/Nix at runtime (30-90s per call). When
+  ## an operator KNOWS their target repos are JS-only, they can swap
+  ## back to slim:latest to save image weight; the upgrade nodes
+  ## still work for that subset.
+  ##
+  ## We layer claude-code on top via post_create regardless of image.
   ##
   ## Mounting `${localEnv:HOME}/.claude` into the container's
   ## `/home/devbox/.claude` carries the operator's existing OAuth /
@@ -4273,15 +4280,15 @@ workflow secured_renovacy:
   ## `network.preset: package-managers` once that preset lands.
   sandbox:
     ## Image is `:latest` for convenience; pin to an immutable
-    ## digest (`ghcr.io/socialgouv/iterion-sandbox-slim@sha256:...`)
+    ## digest (`ghcr.io/socialgouv/iterion-sandbox-full@sha256:...`)
     ## once the recipe goes to production so identical runs land on
-    ## identical toolchains. The slim image ships Node 22, npm,
-    ## git, jq, curl, devbox/Nix. Operators upgrading to
-    ## multi-ecosystem repos (Rust, Go, PHP, Maven, Gradle, Ruby,
-    ## Elixir, Python — beyond the ones included) need to swap
-    ## image for `iterion-sandbox-full` or use devbox/Nix in
-    ## post_create to materialise the toolchain.
-    image: "ghcr.io/socialgouv/iterion-sandbox-slim:latest"
+    ## identical toolchains. `iterion-sandbox-full` layers Go, Python,
+    ## pnpm and the multi-stack devops tools onto the slim base
+    ## (Node 22, npm, git, jq, curl, devbox/Nix). Operators targeting
+    ## JS-only repos can downgrade to `iterion-sandbox-slim:latest`
+    ## to save image weight; agents still bootstrap missing
+    ## toolchains via devbox/Nix at runtime in either case.
+    image: "ghcr.io/socialgouv/iterion-sandbox-full:latest"
     user: "devbox"
     workspace_folder: "/workspace"
     ## R&D phase: egress is fully open. Every domain the
