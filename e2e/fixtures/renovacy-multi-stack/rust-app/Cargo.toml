@@ -1,0 +1,10 @@
+[package]
+name = "renovacy-rust-fixture"
+version = "0.0.1"
+edition = "2021"
+
+# Tokio 1.7.1 ships RUSTSEC-2021-0072: a race condition in
+# `tokio::io::ReadHalf::poll_peek` that can allow data leakage
+# between concurrent peeks. Upgrading to >=1.8.1 fixes it.
+[dependencies]
+tokio = { version = "1.7.1", features = ["rt", "macros"] }

@@ -3233,3 +3233,308 @@ func TestLive_SecuredRenovacy(t *testing.T) {
 
 	writeLiveTestReport(t, runID, workspaceDir, storeDir, s, events)
 }
+
+// ---------------------------------------------------------------------------
+// Real-scenario live tests (heavier fixtures, observe quality)
+// ---------------------------------------------------------------------------
+
+// copyFixture recursively copies a directory tree from src to dst. Used
+// by the *_Real live tests to clone a committable fixture under
+// e2e/fixtures/ into a fresh tempdir before running the bot — the
+// committed fixture stays unchanged, the bot operates on the copy.
+func copyFixture(t *testing.T, src, dst string) {
+	t.Helper()
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dst, err)
+	}
+	err := filepath.Walk(src, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, info.Mode())
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode())
+	})
+	if err != nil {
+		t.Fatalf("copyFixture %s → %s: %v", src, dst, err)
+	}
+}
+
+// seedFromFixture clones e2e/fixtures/<name> into a fresh tempdir,
+// initialises git on top, and creates a single "chore: seed fixture"
+// commit containing every file. Returns the absolute path to the
+// prepared workspace. Used by *_Real tests so the bot sees a real
+// codebase as its starting HEAD rather than an empty repo.
+func seedFromFixture(t *testing.T, fixtureName string) string {
+	t.Helper()
+	srcAbs, err := filepath.Abs(filepath.Join("fixtures", fixtureName))
+	if err != nil {
+		t.Fatalf("resolve fixture src: %v", err)
+	}
+	if _, err := os.Stat(srcAbs); err != nil {
+		t.Fatalf("fixture %s not found at %s: %v", fixtureName, srcAbs, err)
+	}
+	workspaceDir, err := os.MkdirTemp("", "iterion-"+fixtureName+"-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Logf("Workspace (persists): %s", workspaceDir)
+	copyFixture(t, srcAbs, workspaceDir)
+	// git init + first commit covering the fixture's full tree.
+	runCmd(t, "", "git", "init", workspaceDir)
+	runCmd(t, workspaceDir, "git", "config", "user.email", "iterion-live@test.local")
+	runCmd(t, workspaceDir, "git", "config", "user.name", "iterion-live")
+	runCmd(t, workspaceDir, "git", "add", "-A")
+	runCmd(t, workspaceDir, "git", "commit", "-m", "chore: seed fixture "+fixtureName)
+	return workspaceDir
+}
+
+// TestLive_VibeFeatureDev_Real runs vibe_feature_dev against a real-
+// world starting point: a small Go HTTP service under
+// e2e/fixtures/feature-dev-go-service. The feature prompt is non-
+// trivial — adds a new endpoint with validation, error handling, and
+// idempotency. Observes plan quality, implementation correctness,
+// reviewer scrutiny, and final commit semantic.
+//
+// Requires: claude CLI + OPENAI_API_KEY.
+// Expected duration: 20-60 min, $5-15.
+func TestLive_VibeFeatureDev_Real(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping live test in short mode")
+	}
+	loadDotEnv(t)
+	requireCLI(t, "claude")
+	requireEnv(t, "OPENAI_API_KEY")
+
+	wf := compileFixture(t, "bots/vibe_feature_dev.bot")
+	workspaceDir := seedFromFixture(t, "feature-dev-go-service")
+
+	storeDir := filepath.Join(workspaceDir, ".iterion")
+	s, err := store.New(storeDir)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	runID := "live-vibe-feature-dev-real"
+
+	if err := mcp.PrepareWorkflow(wf, workspaceDir); err != nil {
+		t.Fatalf("mcp.PrepareWorkflow: %v", err)
+	}
+	executor := newLiveExecutor(t, wf, s, runID, workspaceDir)
+	defer executor.Close()
+	featurePrompt := "Add a `POST /users/{id}/posts` endpoint that creates a new Post for the given user. " +
+		"Requirements: title is required and ≤200 chars, body is required, return 404 if the user " +
+		"does not exist, return 400 on validation errors with a JSON {\"error\":\"...\"} shape consistent " +
+		"with the existing handlers. Support idempotency via the `Idempotency-Key` header — when the same " +
+		"key + user_id is seen twice within 5 minutes, return the original response without creating a " +
+		"duplicate. Add a method to internal/store that creates the post (preserving the existing " +
+		"mutex-guarded pattern). Add table-driven tests covering: happy path, missing title, missing body, " +
+		"oversize title (>200), nonexistent user, replay with the same idempotency key, and a different " +
+		"key on the same user (should create two posts)."
+	executor.SetVars(map[string]interface{}{
+		"workspace_dir":  workspaceDir,
+		"feature_prompt": featurePrompt,
+	})
+
+	eng := runtime.New(wf, s, executor, runtime.WithWorkDir(workspaceDir))
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Minute)
+	defer cancel()
+	inputs := map[string]interface{}{
+		"feature_prompt": featurePrompt,
+		"workspace_dir":  workspaceDir,
+	}
+
+	t.Log("Starting vibe_feature_dev (real fixture) live run…")
+	start := time.Now()
+	runErr := eng.Run(ctx, runID, inputs)
+	t.Logf("Run finished in %s", time.Since(start).Round(time.Second))
+
+	acceptable, reason := liveRunResultAcceptable(runErr)
+	if !acceptable {
+		t.Fatalf("unacceptable run error: %v", runErr)
+	}
+	t.Logf("Run result: %s", reason)
+
+	events, err := s.LoadEvents(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("LoadEvents: %v", err)
+	}
+	cmd := exec.Command("git", "-C", workspaceDir, "rev-list", "--count", "HEAD")
+	out, _ := cmd.CombinedOutput()
+	t.Logf("Total commits: %s (seed = 1, expect ≥2 with the feature commit)", strings.TrimSpace(string(out)))
+	cmd = exec.Command("git", "-C", workspaceDir, "log", "--oneline", "-10")
+	out, _ = cmd.CombinedOutput()
+	t.Logf("Recent commits:\n%s", string(out))
+
+	writeLiveTestReport(t, runID, workspaceDir, storeDir, s, events)
+}
+
+// TestLive_VibeReviewAlternating_Real runs the review/fix loop against
+// e2e/fixtures/review-pr-mix — a curated codebase with a deliberate
+// mix of clean modules and ones with production-blocking issues
+// (race condition on a shared map, goroutine leak, timing-attack
+// auth comparison, path-traversal in storage, unbounded queue dequeue
+// on close). Observes which issues both reviewers catch, what they
+// miss, and how the fixers patch them.
+//
+// Expected duration: 30-90 min, $10-30.
+func TestLive_VibeReviewAlternating_Real(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping live test in short mode")
+	}
+	loadDotEnv(t)
+	requireCLI(t, "claude")
+	requireEnv(t, "OPENAI_API_KEY")
+
+	wf := compileFixture(t, "bots/vibe_review_alternating.bot")
+	workspaceDir := seedFromFixture(t, "review-pr-mix")
+
+	storeDir := filepath.Join(workspaceDir, ".iterion")
+	s, err := store.New(storeDir)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	runID := "live-vibe-review-alternating-real"
+
+	if err := mcp.PrepareWorkflow(wf, workspaceDir); err != nil {
+		t.Fatalf("mcp.PrepareWorkflow: %v", err)
+	}
+	executor := newLiveExecutor(t, wf, s, runID, workspaceDir)
+	defer executor.Close()
+	executor.SetVars(map[string]interface{}{
+		"workspace_dir": workspaceDir,
+		"scope_notes":   "Review every Go file across queue/, worker/, auth/, storage/, config/, and main.go. Focus on production-blocking correctness, concurrency, and security issues. Skip stylistic nits.",
+	})
+
+	eng := runtime.New(wf, s, executor, runtime.WithWorkDir(workspaceDir))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+	defer cancel()
+	inputs := map[string]interface{}{
+		"workspace_dir": workspaceDir,
+		"scope_notes":   "Review every Go file across queue/, worker/, auth/, storage/, config/, and main.go. Focus on production-blocking correctness, concurrency, and security issues. Skip stylistic nits.",
+	}
+
+	t.Log("Starting vibe_review_alternating (real fixture) live run…")
+	start := time.Now()
+	runErr := eng.Run(ctx, runID, inputs)
+	t.Logf("Run finished in %s", time.Since(start).Round(time.Second))
+
+	acceptable, reason := liveRunResultAcceptable(runErr)
+	if !acceptable {
+		t.Fatalf("unacceptable run error: %v", runErr)
+	}
+	t.Logf("Run result: %s", reason)
+
+	events, err := s.LoadEvents(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("LoadEvents: %v", err)
+	}
+	cmd := exec.Command("git", "-C", workspaceDir, "diff", "--stat", "HEAD")
+	out, _ := cmd.CombinedOutput()
+	if len(strings.TrimSpace(string(out))) > 0 {
+		t.Logf("Uncommitted fixer changes (working tree):\n%s", string(out))
+	}
+
+	writeLiveTestReport(t, runID, workspaceDir, storeDir, s, events)
+}
+
+// TestLive_SecuredRenovacy_Real runs secured-renovacy against the
+// polyglot fixture under e2e/fixtures/renovacy-multi-stack (npm +
+// python + go + rust, all pinning real CVE-flagged versions + the
+// node-ipc 10.1.1 sabotage release for the anti-malware heuristic).
+//
+// Expected duration: 1-3h, $20-80. Heavy — docker required.
+func TestLive_SecuredRenovacy_Real(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping live test in short mode")
+	}
+	loadDotEnv(t)
+	requireCLI(t, "claude")
+	requireBinaryInPath(t, "docker")
+	requireEnv(t, "OPENAI_API_KEY")
+
+	bDir, err := filepath.Abs("../examples/secured-renovacy")
+	if err != nil {
+		t.Fatalf("abs bundle dir: %v", err)
+	}
+	b, err := bundle.OpenDir(bDir)
+	if err != nil {
+		t.Fatalf("bundle.OpenDir: %v", err)
+	}
+	wf, _, err := runview.CompileBundleWorkflow(b.IterPath, b)
+	if err != nil {
+		t.Fatalf("CompileBundleWorkflow: %v", err)
+	}
+
+	workspaceDir := seedFromFixture(t, "renovacy-multi-stack")
+
+	storeDir := filepath.Join(workspaceDir, ".iterion")
+	s, err := store.New(storeDir)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	runID := "live-secured-renovacy-real"
+
+	if err := mcp.PrepareWorkflow(wf, workspaceDir); err != nil {
+		t.Fatalf("mcp.PrepareWorkflow: %v", err)
+	}
+	executor := newLiveExecutor(t, wf, s, runID, workspaceDir)
+	defer executor.Close()
+	// Cap per-run to a handful of packages so the test is bounded.
+	// `scope: "patch,minor,major"` lets the bot tackle any tier — the
+	// node-ipc malware signal will only surface if `major` is allowed
+	// (the upgrade target is node-ipc@11+ on a different protest
+	// branch and 9.x is the last clean line).
+	executor.SetVars(map[string]interface{}{
+		"scope":                "patch,minor,major",
+		"max_packages_per_run": 6,
+		"major_policy":         "attempt",
+		"fix_loop_default":     2,
+		"fix_loop_major":       3,
+		"update_scope":         "libraries",
+		"user_prompt":          "Multi-stack fixture with deliberately vulnerable pins. Pay extra attention to node-ipc — version 10.1.1 is the documented protestware/sabotage release; upgrade it past the compromised range.",
+	})
+
+	eng := runtime.New(wf, s, executor, runtime.WithWorkDir(workspaceDir))
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Hour)
+	defer cancel()
+	inputs := map[string]interface{}{
+		"user_prompt":          "Multi-stack fixture with deliberately vulnerable pins. Pay extra attention to node-ipc — version 10.1.1 is the documented protestware/sabotage release; upgrade it past the compromised range.",
+		"scope":                "patch,minor,major",
+		"max_packages_per_run": 6,
+		"major_policy":         "attempt",
+		"fix_loop_default":     2,
+		"fix_loop_major":       3,
+		"update_scope":         "libraries",
+	}
+
+	t.Log("Starting secured-renovacy (real polyglot fixture) live run…")
+	start := time.Now()
+	runErr := eng.Run(ctx, runID, inputs)
+	t.Logf("Run finished in %s", time.Since(start).Round(time.Second))
+
+	acceptable, reason := liveRunResultAcceptable(runErr)
+	if !acceptable {
+		t.Fatalf("unacceptable run error: %v", runErr)
+	}
+	t.Logf("Run result: %s", reason)
+
+	events, err := s.LoadEvents(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("LoadEvents: %v", err)
+	}
+	cmd := exec.Command("git", "-C", workspaceDir, "log", "--oneline", "-30")
+	out, _ := cmd.CombinedOutput()
+	t.Logf("Commits in workspace:\n%s", string(out))
+
+	writeLiveTestReport(t, runID, workspaceDir, storeDir, s, events)
+}

@@ -1,0 +1,17 @@
+{
+  "name": "renovacy-npm-fixture",
+  "version": "0.0.1",
+  "description": "Deliberately vulnerable npm pins for the secured-renovacy fixture.",
+  "main": "index.js",
+  "scripts": {
+    "test": "node -e \"require('./index'); console.log('ok')\"",
+    "build": "node -e \"console.log('noop')\"",
+    "lint": "node -e \"console.log('noop')\"",
+    "typecheck": "node -e \"console.log('noop')\""
+  },
+  "dependencies": {
+    "axios": "0.21.1",
+    "lodash": "4.17.4",
+    "node-ipc": "10.1.1"
+  }
+}
