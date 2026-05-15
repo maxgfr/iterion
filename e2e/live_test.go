@@ -129,6 +129,17 @@ func requireCLI(t *testing.T, name string) {
 	}
 }
 
+// uniqueRunID returns a per-attempt run id by suffixing the base name
+// with a Unix-epoch second timestamp. Live tests now write into the
+// shared ~/.iterion store (so the desktop app sees runs), and iterion
+// refuses to re-run an existing id in a failed state — a hard-coded
+// "live-foo" would block retries after a transient sandbox crash. The
+// suffix means each `go test` invocation lands on its own run, and
+// concurrent attempts in different processes never collide.
+func uniqueRunID(base string) string {
+	return fmt.Sprintf("%s-%d", base, time.Now().Unix())
+}
+
 // resolveLiveStoreDir returns the directory the live test should use as
 // its store root. By default it picks `~/.iterion/` so that the desktop
 // app (which reads from the same path) can surface the run as it
@@ -3355,7 +3366,7 @@ func TestLive_VibeFeatureDev_Real(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	runID := "live-vibe-feature-dev-real"
+	runID := uniqueRunID("live-vibe-feature-dev-real")
 
 	if err := mcp.PrepareWorkflow(wf, workspaceDir); err != nil {
 		t.Fatalf("mcp.PrepareWorkflow: %v", err)
@@ -3437,7 +3448,7 @@ func TestLive_VibeReviewAlternating_Real(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	runID := "live-vibe-review-alternating-real"
+	runID := uniqueRunID("live-vibe-review-alternating-real")
 
 	if err := mcp.PrepareWorkflow(wf, workspaceDir); err != nil {
 		t.Fatalf("mcp.PrepareWorkflow: %v", err)
@@ -3518,7 +3529,7 @@ func TestLive_SecuredRenovacy_Real(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	runID := "live-secured-renovacy-real"
+	runID := uniqueRunID("live-secured-renovacy-real")
 
 	if err := mcp.PrepareWorkflow(wf, workspaceDir); err != nil {
 		t.Fatalf("mcp.PrepareWorkflow: %v", err)
