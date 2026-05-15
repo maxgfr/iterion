@@ -525,20 +525,18 @@ workflow vibe_review_alternating:
 
   ## Container isolation. Reviewers run `git diff`, `go test`,
   ## linters, smoke-runs, etc. — all of which we'd rather not expose
-  ## to the host. `sandbox: auto` reads the workspace's
-  ## `.devcontainer/devcontainer.json` when present, else falls back
-  ## to `iterion-sandbox-slim`. For non-JS stacks (Go/Python/Rust)
-  ## commit a devcontainer or point ITERION_SANDBOX_DEFAULT_IMAGE at
-  ## `iterion-sandbox-full`, which bundles those toolchains.
-  ##
-  ## Mount + post_create install / wire claude_code inside the
-  ## container — see vibe_feature_dev.bot for the rationale.
+  ## to the host. Inline mode (vs `mode: auto`) chosen so the
+  ## post_create script that installs claude inside the container is
+  ## honoured — see vibe_feature_dev.bot for the full rationale.
   sandbox:
-    mode: auto
+    ## See vibe_feature_dev.bot for the rationale on full vs slim.
+    image: "ghcr.io/socialgouv/iterion-sandbox-full:edge"
+    user: "devbox"
+    workspace_folder: "/workspace"
     mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=/home/devbox/.claude,consistency=cached"]
     env:
       CLAUDE_CONFIG_DIR: "/home/devbox/.claude"
-    post_create: "set -e; command -v claude >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest"
+    post_create: "set -e; command -v claude >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest; if [ -f /workspace/devbox.json ]; then cd /workspace && devbox install >/tmp/devbox-install.log 2>&1 || echo 'devbox install failed — see /tmp/devbox-install.log'; fi"
 
   budget:
     max_parallel_branches: 1
