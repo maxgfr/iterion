@@ -600,10 +600,11 @@ func (e *ClawExecutor) delegateHooksFor(nodeID string) delegate.TaskHooks {
 	}
 	if e.hooks.OnToolCall != nil {
 		fn := e.hooks.OnToolCall
-		h.OnToolCalled = func(toolName string, toolUseID string, isError bool) {
+		h.OnToolCalled = func(toolName string, toolUseID string, isError bool, output string) {
 			info := LLMToolCallInfo{
 				ToolName:  toolName,
 				ToolUseID: toolUseID,
+				Output:    output,
 			}
 			if isError {
 				info.Error = fmt.Errorf("tool error")

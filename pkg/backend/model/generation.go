@@ -404,6 +404,7 @@ func executeToolsDirect(
 				ToolName:  tu.Name,
 				InputSize: len(tu.PartialJSON),
 				ToolUseID: tu.ID,
+				Output:    output,
 				Duration:  dur,
 				Error:     err,
 			})

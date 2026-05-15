@@ -266,6 +266,13 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			if info.ToolUseID != "" {
 				data["tool_use_id"] = info.ToolUseID
 			}
+			// Persist the tool's result so the editor's per-node Tools
+			// tab renders in+out side-by-side (matching Claude Code's
+			// inline display). Truncated to maxFieldSize (1 MB) to bound
+			// events.jsonl growth for chatty Bash/Read calls.
+			if info.Output != "" {
+				data["output"] = iterlog.Truncate(info.Output, maxFieldSize)
+			}
 
 			evtType := store.EventToolCalled
 			if info.Error != nil {

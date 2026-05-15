@@ -873,9 +873,50 @@ func emitToolHooks(hooks TaskHooks, blocks []claudesdk.ContentBlock, inFlight ma
 			name := inFlight[bl.ToolUseID]
 			delete(inFlight, bl.ToolUseID)
 			if hooks.OnToolCalled != nil {
-				hooks.OnToolCalled(name, bl.ToolUseID, bl.IsError)
+				hooks.OnToolCalled(name, bl.ToolUseID, bl.IsError, toolResultContentText(bl.Content))
 			}
 		}
+	}
+}
+
+// toolResultContentText flattens the SDK's ToolResultBlock.Content (any —
+// bare string or []claudesdk.ContentBlock) to a single string for the
+// engine's tool_called event payload. TextBlocks contribute their Text;
+// other block kinds render as a `<type>` sentinel so the operator at least
+// knows non-text content was returned. Falls back to JSON marshalling for
+// shapes the SDK might add later.
+func toolResultContentText(content any) string {
+	switch c := content.(type) {
+	case nil:
+		return ""
+	case string:
+		return c
+	case []claudesdk.ContentBlock:
+		var sb strings.Builder
+		for i, blk := range c {
+			if i > 0 {
+				sb.WriteByte('\n')
+			}
+			switch b := blk.(type) {
+			case *claudesdk.TextBlock:
+				sb.WriteString(b.Text)
+			case *claudesdk.ThinkingBlock:
+				sb.WriteString("<thinking>")
+			case *claudesdk.ToolUseBlock:
+				sb.WriteString("<tool_use>")
+			case *claudesdk.ToolResultBlock:
+				sb.WriteString("<tool_result>")
+			default:
+				sb.WriteString("<unknown>")
+			}
+		}
+		return sb.String()
+	default:
+		b, err := json.Marshal(c)
+		if err != nil {
+			return fmt.Sprintf("%v", c)
+		}
+		return string(b)
 	}
 }
 

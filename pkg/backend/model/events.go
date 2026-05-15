@@ -61,8 +61,14 @@ type LLMToolCallInfo struct {
 	// falls through and the card renders with whatever data the
 	// tool_called event alone carries.
 	ToolUseID string
-	Duration  time.Duration
-	Error     error
+	// Output is the string the tool returned to the LLM. The hooks layer
+	// truncates and persists it on the tool_called event so the editor's
+	// per-node Tools tab can render in+out the way Claude Code does.
+	// Empty when the backend can't surface a result (e.g. tool blocked
+	// pre-execution by a lifecycle hook, unknown tool dispatch).
+	Output   string
+	Duration time.Duration
+	Error    error
 }
 
 // LLMToolStartedInfo describes a tool call about to execute, passed to the
@@ -149,6 +155,7 @@ func toLLMToolCallInfo(info ToolCallInfo) LLMToolCallInfo {
 		ToolName:  info.ToolName,
 		InputSize: info.InputSize,
 		ToolUseID: info.ToolUseID,
+		Output:    info.Output,
 		Duration:  info.Duration,
 		Error:     info.Error,
 	}
