@@ -1,5 +1,7 @@
 // Run-console HTTP client. Mirrors the Go service in pkg/runview/.
 
+import { desktop, isDesktop } from "@/lib/desktopBridge";
+
 const BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -320,28 +322,73 @@ export async function fetchArtifactFile(
   };
 }
 
-// downloadArtifactFile fetches the file and triggers a browser save
-// via a transient blob URL. Bypasses two failure modes of the bare
-// `<a download>` approach: (1) the HTML5 `download` attribute is
-// silently ignored by some browsers when the response sets
-// `Content-Disposition: inline`; (2) embedded WebViews (Wails
-// webkit2gtk on Linux, WebView2 on Windows) often have no download
-// handler wired, so plain anchor clicks act as no-ops.
+// DownloadOutcome describes what happened on the save side. `cancelled`
+// is desktop-only — it fires when the user dismisses the native save
+// dialog. In browser mode the SPA can't observe the user's choice
+// (the download is handed off to the browser's download manager) so
+// `cancelled` is always false there.
+export interface DownloadOutcome {
+  cancelled: boolean;
+  // Absolute path of the saved file. Only populated in desktop mode
+  // when the save dialog completed; undefined in browser mode (the
+  // browser's downloads folder is opaque to the SPA).
+  localPath?: string;
+  contentType: string;
+}
+
+// downloadArtifactFile fetches the file and saves it to disk. In
+// desktop mode (Wails) it routes through the SaveBinaryFile native
+// binding so a real save dialog opens — the embedded WebKit silently
+// swallows `<a download>` blob URLs, which is why this can't just
+// rely on the DOM trick. In browser mode we fall back to the blob
+// URL approach, which the user's browser handles natively.
 export async function downloadArtifactFile(
   runId: string,
   relPath: string,
-): Promise<void> {
-  const { blob } = await fetchArtifactFile(runId, relPath, { download: true });
+): Promise<DownloadOutcome> {
+  const { blob, contentType } = await fetchArtifactFile(runId, relPath, { download: true });
+  const basename = relPath.includes("/")
+    ? relPath.slice(relPath.lastIndexOf("/") + 1)
+    : relPath;
+
+  if (isDesktop()) {
+    const b64 = await blobToBase64(blob);
+    const localPath = await desktop.saveBinaryFile(basename, b64);
+    if (!localPath) {
+      // User cancelled the native save dialog.
+      return { cancelled: true, contentType };
+    }
+    return { cancelled: false, localPath, contentType };
+  }
+
   const blobURL = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = blobURL;
-  a.download = relPath.includes("/") ? relPath.slice(relPath.lastIndexOf("/") + 1) : relPath;
+  a.download = basename;
   a.style.display = "none";
   document.body.appendChild(a);
   a.click();
   a.remove();
   // Defer revoke so the browser has a tick to start the download.
   setTimeout(() => URL.revokeObjectURL(blobURL), 0);
+  return { cancelled: false, contentType };
+}
+
+// blobToBase64 strips the `data:<mime>;base64,` prefix from FileReader
+// output and hands back the raw payload — the Wails SaveBinaryFile
+// binding decodes plain base64 (no data-URL wrapper).
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  // For large blobs this is the most memory-efficient approach short
+  // of streaming chunks; FileReader.readAsDataURL would force the same
+  // full encoding plus a string slice on top.
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
 }
 
 export interface CreateRunRequest {

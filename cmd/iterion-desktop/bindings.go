@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -81,6 +82,35 @@ func (a *App) SaveTextFile(suggestedFilename string, content string) (string, er
 		return "", nil
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("write %s: %w", path, err)
+	}
+	return path, nil
+}
+
+// SaveBinaryFile is the binary counterpart of SaveTextFile. The SPA
+// can't ship raw bytes through the JSON-bridge boundary, so callers
+// base64-encode the payload first; this binding decodes it before
+// writing. Used by the Artifacts panel's Download flow in desktop
+// mode (where <a download> blob URLs are silently swallowed by the
+// embedded WebKit).
+func (a *App) SaveBinaryFile(suggestedFilename string, base64Data string) (string, error) {
+	data, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return "", fmt.Errorf("decode base64: %w", err)
+	}
+	path, err := wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
+		Title:                "Save file",
+		DefaultFilename:      suggestedFilename,
+		CanCreateDirectories: true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("save dialog: %w", err)
+	}
+	if path == "" {
+		// User cancelled.
+		return "", nil
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
 	return path, nil
