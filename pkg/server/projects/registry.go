@@ -125,7 +125,56 @@ func loadFrom(path string) (*Config, error) {
 	if cfg.Version == 0 {
 		cfg.Version = schemaVersion
 	}
+	// Auto-prune entries whose Dir no longer exists. This heals
+	// historic pollution from the era when `newTestServer(t)` would
+	// register the test's t.TempDir() into the shared user config —
+	// /tmp paths get cleaned by the OS, so their entries become dead
+	// references on the next load. Without this, a single test run
+	// could leave dozens of phantom rows in the project switcher.
+	if pruned := pruneDeadProjects(cfg.RecentProjects); len(pruned) != len(cfg.RecentProjects) {
+		cfg.RecentProjects = pruned
+		// If CurrentProjectID pointed at a pruned entry, promote the
+		// most-recently-opened surviving project instead of leaving
+		// the launcher in "no project" mode. cfg.RecentProjects has
+		// already been MRU-sorted on previous saves, so element 0 is
+		// the next-best default.
+		if cfg.CurrentProjectID != "" && cfg.ByID(cfg.CurrentProjectID) == nil {
+			if len(cfg.RecentProjects) > 0 {
+				cfg.CurrentProjectID = cfg.RecentProjects[0].ID
+			} else {
+				cfg.CurrentProjectID = ""
+			}
+		}
+	}
 	return cfg, nil
+}
+
+// pruneDeadProjects filters out entries whose Dir no longer resolves
+// to an existing directory on disk. The check is best-effort: a
+// transient Stat error (permissions, removable media) keeps the entry
+// so a brief filesystem hiccup doesn't nuke the list. Only definite
+// "does not exist" outcomes drop the row.
+func pruneDeadProjects(in []Project) []Project {
+	out := make([]Project, 0, len(in))
+	for _, p := range in {
+		if p.Dir == "" {
+			continue
+		}
+		info, err := os.Stat(p.Dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			// Best-effort: keep on other errors (perms, IO).
+			out = append(out, p)
+			continue
+		}
+		if !info.IsDir() {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // Save atomically writes the registry, preserving every Extras key

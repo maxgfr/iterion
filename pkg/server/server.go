@@ -56,6 +56,15 @@ type Config struct {
 	StoreDir    string // run store directory (default: <WorkDir>/.iterion)
 	OpenBrowser bool   // open browser on start
 
+	// SkipProjectRegistration disables the boot-time call to the
+	// shared project registry (~/.config/Iterion/config.json's
+	// recent_projects). Tests set this to true so the user's real
+	// recents list isn't polluted with /tmp paths from every
+	// `newTestServer(t)`. Production (desktop launcher + CLI editor
+	// mode) leaves it false so the launched WorkDir surfaces in the
+	// switcher.
+	SkipProjectRegistration bool
+
 	// AuthService is the multitenant authentication service. When
 	// non-nil, every /api/* request is gated by authMiddleware. CLI
 	// local mode leaves this nil and DisableAuth=true so the editor
