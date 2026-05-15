@@ -110,16 +110,28 @@ export default function RunHeader({ run, active, wsState }: Props) {
         <div className="ml-auto flex items-center gap-2">
           <span className="text-[10px] text-fg-subtle font-mono">{run.id}</span>
           <WSStatusDot state={wsState} />
-          {canCancel && (
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => void onCancel()}
-              disabled={busy}
-            >
-              Cancel
-            </Button>
-          )}
+          {/*
+            Always render the Cancel button so the operator has a
+            stable affordance regardless of run state — disable it
+            (grey) when the run is no longer cancellable (terminal:
+            finished/failed/cancelled, or a remote-running run this
+            server isn't tracking). Hiding the button on terminal
+            runs left users wondering whether cancel had silently
+            taken effect; greying makes the state unambiguous.
+          */}
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => void onCancel()}
+            disabled={!canCancel || busy}
+            title={
+              canCancel
+                ? "Cancel this run"
+                : "Cancel is unavailable — the run has reached a terminal state or is not tracked by this server"
+            }
+          >
+            Cancel
+          </Button>
           {canResume && (
             <Button
               variant="primary"
