@@ -753,28 +753,41 @@ workflow vibe_feature_dev:
   ## Container isolation on top of the worktree. The `act` / `simplify`
   ## phase runs arbitrary build/test commands (`go test`, `npm install`,
   ## `cargo build`, …) that the bot infers from the project — the worktree
-  ## alone doesn't sandbox those. `sandbox: auto` reads the workspace's
-  ## `.devcontainer/devcontainer.json` when present, else falls back to
-  ## the published `iterion-sandbox-slim` image. Operators with Go/Python/
-  ## Rust toolchains can either commit a devcontainer (recommended) or
-  ## point ITERION_SANDBOX_DEFAULT_IMAGE / --sandbox-default-image at
-  ## `iterion-sandbox-full`, which bundles those toolchains.
+  ## alone doesn't sandbox those.
   ##
-  ## Mount + post_create are required because the iterion-sandbox-{slim,
-  ## full} images don't ship `claude` — every claude_code agent in this
-  ## workflow shells out to the CLI, so it must exist inside the
-  ## container. Mounting ~/.claude carries the host's OAuth /
-  ## ANTHROPIC_API_KEY credentials so the in-container CLI doesn't need
-  ## a fresh login each run. Writable (rw, no :ro) because claude_code
-  ## persists per-session transcripts under
-  ## ~/.claude/projects/<hash>/<session>.jsonl and iterion's
-  ## formatter-pass resumes them via `claude --resume`.
+  ## Why inline mode (not `mode: auto`)?
+  ## The iterion-sandbox-{slim,full} images don't ship `claude` — every
+  ## claude_code agent here shells out to the CLI, so post_create MUST
+  ## install it. iterion currently drops post_create / mounts / env when
+  ## `mode: auto` falls back to the default image (pkg/runtime/sandbox.go),
+  ## so we can't combine "auto fallback" with "install claude into the
+  ## container". Inline mode lets us pin both the image and the bootstrap
+  ## script. Operators wanting a different image just edit this block —
+  ## the inline `image:` ref is the single override point.
+  ##
+  ## Mounting ~/.claude carries the host's OAuth / ANTHROPIC_API_KEY
+  ## credentials so the in-container CLI doesn't need a fresh login
+  ## each run. Writable because claude_code persists per-session
+  ## transcripts under ~/.claude/projects/<hash>/<session>.jsonl and
+  ## iterion's formatter-pass resumes them via `claude --resume`.
   sandbox:
-    mode: auto
+    ## `iterion-sandbox-full` = slim + Go + Python 3 + pnpm. Pulled
+    ## once, cached locally. Operators with a different toolchain
+    ## (Java, Ruby, Elixir, …) point this at their own image — or
+    ## switch to slim and add a `devbox install` step in post_create
+    ## with the workspace's devbox.json.
+    image: "ghcr.io/socialgouv/iterion-sandbox-full:edge"
+    user: "devbox"
+    workspace_folder: "/workspace"
     mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=/home/devbox/.claude,consistency=cached"]
     env:
       CLAUDE_CONFIG_DIR: "/home/devbox/.claude"
-    post_create: "set -e; command -v claude >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest"
+    ## post_create installs claude_code if absent (the sandbox images
+    ## don't ship it). If the workspace has a devbox.json, also
+    ## materialise its toolchain so any extra packages (rust, php,
+    ## elixir, …) beyond full's defaults are on PATH for the agent's
+    ## docker exec calls.
+    post_create: "set -e; command -v claude >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest; if [ -f /workspace/devbox.json ]; then cd /workspace && devbox install >/tmp/devbox-install.log 2>&1 || echo 'devbox install failed — see /tmp/devbox-install.log'; fi"
 
   budget:
     max_parallel_branches: 1
