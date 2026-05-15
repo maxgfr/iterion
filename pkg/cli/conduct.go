@@ -15,7 +15,10 @@ import (
 	"github.com/SocialGouv/iterion/pkg/conductor/native"
 	"github.com/SocialGouv/iterion/pkg/conductor/tracker"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/server"
 	"github.com/SocialGouv/iterion/pkg/store"
+
+	"io/fs"
 )
 
 // ConductOptions captures CLI flags for `iterion conduct`.
@@ -115,6 +118,18 @@ func RunConduct(p *Printer, opts ConductOptions) error {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("ok"))
 		})
+		// /api/server/info minimally so the SPA detects available views.
+		mux.HandleFunc("/api/server/info", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"mode":"conduct","auth_required":false,"limits":{"upload":{}},"native_tracker_enabled":true,"conductor_enabled":true}`))
+		})
+		// SPA: serve the embedded editor so users can open the
+		// dashboard at the same URL without running `iterion editor`.
+		if sub, err := fs.Sub(server.StaticFS, "static"); err == nil {
+			mux.Handle("/", server.SPAHandler(sub))
+		} else {
+			logger.Warn("conductor: SPA assets not available: %v", err)
+		}
 
 		httpSrv = &http.Server{
 			Addr:              fmt.Sprintf("127.0.0.1:%d", port),

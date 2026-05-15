@@ -6,6 +6,8 @@ import HomeView from "@/components/Home/HomeView";
 import LaunchView from "@/components/Runs/LaunchView";
 import RunListView from "@/components/Runs/RunListView";
 import RunView from "@/components/Runs/RunView";
+import BoardView from "@/views/Board";
+import ConductorView from "@/views/Conductor";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import UserTeamChip from "@/components/shared/UserTeamChip";
 import ToastContainer from "@/components/shared/Toast";
@@ -155,6 +157,16 @@ function AuthedApp() {
         </Route>
         <Route path="/account" component={SettingsPage} />
         <Route path="/teams/:id" component={TeamPage} />
+        <Route path="/board">
+          <ErrorBoundary area="Board view">
+            <BoardView />
+          </ErrorBoundary>
+        </Route>
+        <Route path="/conductor">
+          <ErrorBoundary area="Conductor view">
+            <ConductorView />
+          </ErrorBoundary>
+        </Route>
         <Route path="/editor" component={EditorViewWithChrome} />
         <Route path="/" component={HomeViewWithChrome} />
         <Route component={HomeViewWithChrome} />

@@ -3,9 +3,13 @@ import {
   HomeIcon,
   Pencil2Icon,
   ListBulletIcon,
+  ViewGridIcon,
+  RocketIcon,
 } from "@radix-ui/react-icons";
 
-type Section = "home" | "editor" | "runs";
+import { useServerInfoStore } from "@/store/serverInfo";
+
+type Section = "home" | "editor" | "runs" | "board" | "conductor";
 
 interface Props {
   // Override which link is rendered as active. When omitted, the
@@ -14,12 +18,14 @@ interface Props {
   active?: Section;
 }
 
-const LINKS: Array<{
+interface LinkDef {
   section: Section;
   href: string;
   label: string;
   icon: typeof HomeIcon;
-}> = [
+}
+
+const BASE_LINKS: LinkDef[] = [
   { section: "home", href: "/", label: "Home", icon: HomeIcon },
   { section: "editor", href: "/editor", label: "Editor", icon: Pencil2Icon },
   { section: "runs", href: "/runs", label: "Runs", icon: ListBulletIcon },
@@ -29,16 +35,27 @@ function sectionFromPath(path: string): Section {
   if (path === "/") return "home";
   if (path.startsWith("/runs") || path.startsWith("/launch")) return "runs";
   if (path.startsWith("/editor")) return "editor";
+  if (path.startsWith("/board")) return "board";
+  if (path.startsWith("/conductor")) return "conductor";
   return "home";
 }
 
 export default function NavLinks({ active }: Props) {
   const [location] = useLocation();
   const current = active ?? sectionFromPath(location);
+  const info = useServerInfoStore((s) => s.info);
+
+  const links: LinkDef[] = [...BASE_LINKS];
+  if (info?.native_tracker_enabled) {
+    links.push({ section: "board", href: "/board", label: "Board", icon: ViewGridIcon });
+  }
+  if (info?.conductor_enabled) {
+    links.push({ section: "conductor", href: "/conductor", label: "Conductor", icon: RocketIcon });
+  }
 
   return (
     <nav className="flex items-center gap-0.5" aria-label="Primary navigation">
-      {LINKS.map(({ section, href, label, icon: Icon }) => {
+      {links.map(({ section, href, label, icon: Icon }) => {
         const isActive = current === section;
         return (
           <Link
