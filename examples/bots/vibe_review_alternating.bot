@@ -432,6 +432,13 @@ judge reviewer_claude:
   interaction: human
 
 judge reviewer_gpt:
+  ## Explicit backend pin: model "openai/gpt-5.5" only works via the
+  ## claw backend. Without this, the auto-resolver falls back to
+  ## ITERION_BACKEND_PREFERENCE (default "claude_code,claw") and
+  ## routes the node through claude_code, which doesn't recognise
+  ## openai/* models — the agent returns a meta-error string instead
+  ## of the structured verdict and the schema validator fails the run.
+  backend: "claw"
   model: "openai/gpt-5.5"
   reasoning_effort: "${ITERION_VIBE_EFFORT_GPT:-high}"
   input: review_input
@@ -496,6 +503,8 @@ agent fix_claude:
   interaction: human
 
 agent fix_gpt:
+  ## See reviewer_gpt comment — same backend pin rationale.
+  backend: "claw"
   model: "openai/gpt-5.5"
   reasoning_effort: "${ITERION_VIBE_EFFORT_GPT:-high}"
   input: fix_input
