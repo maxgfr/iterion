@@ -86,6 +86,24 @@ function clip(s: string, max = 140): string {
 // "no usable fields, render fallback".
 type Parser = (input: Record<string, unknown>) => ToolField[];
 
+// Sub-agent dispatch (Claude Code "Task"/"Agent", claw "task"/"agent")
+// share the same input shape: subagent_type, description, prompt,
+// plus optional name/model. Surface all the operator-useful bits with
+// `prompt` distilled to a single-line preview (the full text is still
+// available via the "raw input" expander).
+function parseAgentInvocation(i: Record<string, unknown>): ToolField[] {
+  const out: ToolField[] = [];
+  const sub = asString(i["subagent_type"]);
+  if (sub) out.push({ label: "agent", value: sub, mono: true });
+  const desc = asString(i["description"]);
+  if (desc) out.push({ label: "description", value: clip(desc, 120) });
+  const prompt = asString(i["prompt"]);
+  if (prompt) out.push({ label: "prompt", value: singleLine(prompt, 200) });
+  const model = asString(i["model"]);
+  if (model) out.push({ label: "model", value: model, mono: true });
+  return out;
+}
+
 const PARSERS: Record<string, Parser> = {
   Read: (i) => {
     const out: ToolField[] = [];
@@ -149,14 +167,8 @@ const PARSERS: Record<string, Parser> = {
     }
     return out;
   },
-  Task: (i) => {
-    const out: ToolField[] = [];
-    const sub = asString(i["subagent_type"]);
-    if (sub) out.push({ label: "agent", value: sub, mono: true });
-    const desc = asString(i["description"]);
-    if (desc) out.push({ label: "description", value: clip(desc, 120) });
-    return out;
-  },
+  Task: parseAgentInvocation,
+  Agent: parseAgentInvocation,
   WebFetch: (i) => {
     const out: ToolField[] = [];
     const url = asString(i["url"]);
@@ -181,6 +193,8 @@ const PARSERS: Record<string, Parser> = {
     if (editMode) out.push({ label: "mode", value: editMode });
     return out;
   },
+  agent: parseAgentInvocation,
+  task: parseAgentInvocation,
   TodoWrite: (i) => {
     // The full list is surfaced via summary.todos (see formatToolCall);
     // here we add a single compact field with the per-status counts so

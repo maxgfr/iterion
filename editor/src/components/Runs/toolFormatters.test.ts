@@ -26,14 +26,41 @@ describe("formatToolCall — header detail coverage", () => {
     );
   });
 
-  it("Task surfaces description + subagent", () => {
+  it("Task surfaces description + subagent + prompt", () => {
     const r = formatToolCall("Task", {
       description: "Audit security",
       subagent_type: "security-reviewer",
+      prompt: "Look for hardcoded secrets in src/**",
     });
     const labels = r.fields.map((f) => f.label);
     expect(labels).toContain("description");
     expect(labels).toContain("agent");
+    expect(labels).toContain("prompt");
+  });
+
+  it("Agent (CamelCase) surfaces description + subagent + prompt + model", () => {
+    const r = formatToolCall("Agent", {
+      description: "Locate handler",
+      subagent_type: "Explore",
+      prompt: "Where is auth.ts?",
+      model: "sonnet",
+    });
+    const labels = r.fields.map((f) => f.label);
+    expect(labels).toEqual(["agent", "description", "prompt", "model"]);
+    const sub = r.fields.find((f) => f.label === "agent");
+    expect(sub?.value).toBe("Explore");
+  });
+
+  it("agent (snake_case) shares the same parser", () => {
+    const r = formatToolCall("agent", {
+      description: "Find foo",
+      subagent_type: "general-purpose",
+      prompt: "investigate",
+    });
+    const labels = r.fields.map((f) => f.label);
+    expect(labels).toContain("agent");
+    expect(labels).toContain("description");
+    expect(labels).toContain("prompt");
   });
 
   it("Unknown tool falls back to generic fields", () => {

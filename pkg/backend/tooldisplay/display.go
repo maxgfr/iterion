@@ -23,8 +23,13 @@ import (
 // CamelCaseKeys maps the CamelCase tool name surfaced by the Claude Code
 // SDK (and the OpenAI-shaped codex SDK) to the ordered list of input
 // fields whose value best identifies the call. First non-empty string
-// wins. Tools producing structured headers (TodoWrite, AskUserQuestion)
-// use sentinel keys handled by HeaderDetail below.
+// wins. Tools producing structured headers (TodoWrite, AskUserQuestion,
+// Task/Agent sub-agent dispatch) use sentinel keys handled by
+// HeaderDetail below.
+//
+// Both "Task" (legacy Claude Code SDK name) and "Agent" (current SDK
+// name) are registered because the SDK alias has shifted across
+// versions and the live name flows straight from `ToolUseBlock.Name`.
 var CamelCaseKeys = map[string][]string{
 	"Read":            {"file_path"},
 	"Write":           {"file_path"},
@@ -38,7 +43,8 @@ var CamelCaseKeys = map[string][]string{
 	"Grep":            {"pattern"},
 	"WebFetch":        {"url"},
 	"WebSearch":       {"query"},
-	"Task":            {"description"},
+	"Task":            {sentinelAgent},
+	"Agent":           {sentinelAgent},
 	"TodoWrite":       {sentinelTodos},
 	"ToolSearch":      {"query"},
 	"SlashCommand":    {"command_name", "command"},
@@ -60,19 +66,20 @@ var SnakeCaseKeys = map[string][]string{
 	"web_fetch":     {"url"},
 	"web_search":    {"query"},
 	"skill":         {"skill", "name"},
-	"agent":         {"description"},
+	"agent":         {sentinelAgent},
 	"ask_user":      {"question"},
 	"task_create":   {"description"},
 	"tool_search":   {"query"},
 	"sleep":         {"seconds", "duration"},
 	"todo_write":    {sentinelTodos},
-	"task":          {"description", "prompt"},
+	"task":          {sentinelAgent},
 	"slash_command": {"command_name", "command"},
 }
 
 const (
 	sentinelTodos     = "_todos_summary"
 	sentinelQuestions = "_questions_summary"
+	sentinelAgent     = "_agent_summary"
 )
 
 // fallbackKeys is the priority order tried when the tool name is not in
@@ -84,17 +91,20 @@ var fallbackKeys = []string{"file_path", "path", "pattern", "command"}
 // StructuredInputTools is the whitelist of tools whose JSON input is
 // always persisted in the `tool_started` event payload (in addition to
 // the bare name + size). Used by the editor's per-node Tools tab to
-// render rich cards (todo lists, web fetches, search queries). Other
-// tools still log their detail to console but keep the event payload
-// minimal — Bash/Read can carry MB of content and would bloat events.jsonl.
+// render rich cards (todo lists, web fetches, search queries,
+// sub-agent dispatches). Other tools still log their detail to console
+// but keep the event payload minimal — Bash/Read can carry MB of
+// content and would bloat events.jsonl.
 //
 // Both name spaces are listed because the same event consumer (UI)
 // receives events from both backends, and `claude_code` uses CamelCase
-// names whereas `claw` uses snake_case.
+// names whereas `claw` uses snake_case. "Agent" and "Task" are
+// SDK-version aliases for the same sub-agent dispatch tool.
 var StructuredInputTools = map[string]struct{}{
 	"TodoWrite":       {},
 	"AskUserQuestion": {},
 	"Task":            {},
+	"Agent":           {},
 	"WebFetch":        {},
 	"WebSearch":       {},
 	"ToolSearch":      {},
@@ -151,6 +161,10 @@ func HeaderDetail(toolName string, input []byte, keys map[string][]string) strin
 			if s := summarizeQuestionsOneLine(raw["questions"]); s != "" {
 				return s
 			}
+		case sentinelAgent:
+			if s := summarizeAgentOneLine(raw); s != "" {
+				return s
+			}
 		default:
 			if s := stringFromInput(raw[k]); s != "" {
 				return truncate(firstLine(s), 100)
@@ -177,6 +191,11 @@ func BlockBody(toolName string, input []byte) string {
 		return formatTodoList(raw["todos"])
 	case "AskUserQuestion":
 		return formatQuestionList(raw["questions"])
+	case "Agent", "Task", "agent", "task":
+		if p, ok := raw["prompt"].(string); ok && p != "" {
+			return p
+		}
+		return ""
 	}
 	if c, ok := raw["command"].(string); ok && strings.ContainsRune(c, '\n') {
 		return c
@@ -284,6 +303,28 @@ func formatTodoList(v any) string {
 		fmt.Fprintf(&b, "%s %s", glyph, truncate(firstLine(content), 200))
 	}
 	return b.String()
+}
+
+// summarizeAgentOneLine produces a header detail for Agent/Task tool
+// calls that combines the sub-agent type with the short description so
+// the operator can tell at a glance which sub-agent was dispatched and
+// for what. Falls back gracefully: missing subagent_type yields just
+// the description, missing description yields just the subagent_type,
+// and missing both returns "" (caller renders the bare tool name).
+func summarizeAgentOneLine(raw map[string]any) string {
+	sub, _ := raw["subagent_type"].(string)
+	desc, _ := raw["description"].(string)
+	sub = firstLine(strings.TrimSpace(sub))
+	desc = firstLine(strings.TrimSpace(desc))
+	switch {
+	case sub != "" && desc != "":
+		return truncate(fmt.Sprintf("%s: %s", sub, desc), 120)
+	case sub != "":
+		return truncate(sub, 120)
+	case desc != "":
+		return truncate(desc, 120)
+	}
+	return ""
 }
 
 // summarizeQuestionsOneLine produces a header detail for AskUserQuestion:
