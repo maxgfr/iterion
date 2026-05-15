@@ -759,7 +759,22 @@ workflow vibe_feature_dev:
   ## Rust toolchains can either commit a devcontainer (recommended) or
   ## point ITERION_SANDBOX_DEFAULT_IMAGE / --sandbox-default-image at
   ## `iterion-sandbox-full`, which bundles those toolchains.
-  sandbox: auto
+  ##
+  ## Mount + post_create are required because the iterion-sandbox-{slim,
+  ## full} images don't ship `claude` — every claude_code agent in this
+  ## workflow shells out to the CLI, so it must exist inside the
+  ## container. Mounting ~/.claude carries the host's OAuth /
+  ## ANTHROPIC_API_KEY credentials so the in-container CLI doesn't need
+  ## a fresh login each run. Writable (rw, no :ro) because claude_code
+  ## persists per-session transcripts under
+  ## ~/.claude/projects/<hash>/<session>.jsonl and iterion's
+  ## formatter-pass resumes them via `claude --resume`.
+  sandbox:
+    mode: auto
+    mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=/home/devbox/.claude,consistency=cached"]
+    env:
+      CLAUDE_CONFIG_DIR: "/home/devbox/.claude"
+    post_create: "set -e; command -v claude >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest"
 
   budget:
     max_parallel_branches: 1

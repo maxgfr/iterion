@@ -530,7 +530,15 @@ workflow vibe_review_alternating:
   ## to `iterion-sandbox-slim`. For non-JS stacks (Go/Python/Rust)
   ## commit a devcontainer or point ITERION_SANDBOX_DEFAULT_IMAGE at
   ## `iterion-sandbox-full`, which bundles those toolchains.
-  sandbox: auto
+  ##
+  ## Mount + post_create install / wire claude_code inside the
+  ## container — see vibe_feature_dev.bot for the rationale.
+  sandbox:
+    mode: auto
+    mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=/home/devbox/.claude,consistency=cached"]
+    env:
+      CLAUDE_CONFIG_DIR: "/home/devbox/.claude"
+    post_create: "set -e; command -v claude >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest"
 
   budget:
     max_parallel_branches: 1
