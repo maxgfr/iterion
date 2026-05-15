@@ -345,13 +345,33 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 	// the container where Pass 1 created it.
 	if needsTwoPass && rm.SessionID != "" {
 		const maxFmtAttempts = 2
+		var lastFmtErr error
 		for attempt := 1; attempt <= maxFmtAttempts; attempt++ {
 			b.Logger.Debug("claude-code [formatting pass %d/%d] starting structured output extraction (session=%s)", attempt, maxFmtAttempts, rm.SessionID)
 			fmtRM, fmtErr := b.formatOutput(ctx, task, rm.SessionID)
 			if fmtErr != nil {
+				lastFmtErr = fmtErr
 				if attempt < maxFmtAttempts {
 					b.Logger.Warn("claude-code [formatting pass %d/%d] failed, retrying: %v", attempt, maxFmtAttempts, fmtErr)
 					continue
+				}
+				// Both attempts exhausted. Before failing the whole delegation,
+				// try parsing Pass 1's free-form output: agents typically emit
+				// a fenced ```json block matching the schema as their final
+				// message, and parseSDKOutput already extracts that. This
+				// recovers from the common infra failure where the sandbox
+				// container dies mid-formatting (observed: container SIGKILL
+				// at formatting-pass invocation → claude exits 137 →
+				// "container is not running" on retry → whole delegation
+				// fails despite Pass 1 having produced shippable output).
+				output, rawLen, fallback := parseSDKOutput(rm.Result, rm.StructuredOutput, task.OutputSchema)
+				if len(output) > 0 && !fallback {
+					b.Logger.Warn("claude-code [formatting pass] failed (%v); recovered structured output from Pass 1 free-form result", fmtErr)
+					result.Output = output
+					result.RawOutputLen = rawLen
+					result.ParseFallback = false
+					cost.Annotate(result.Output, task.Model, totalIn, totalOut)
+					return result, nil
 				}
 				return result, fmt.Errorf("delegate: claude-code formatting pass failed: %w", fmtErr)
 			}
@@ -372,6 +392,12 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 			result.ParseFallback = fallback
 			cost.Annotate(result.Output, task.Model, totalIn, totalOut)
 			return result, nil
+		}
+		// Defensive: loop fell through without returning. Shouldn't happen
+		// (every iteration either returns or continues), but if it did,
+		// surface the last formatting error rather than a generic one.
+		if lastFmtErr != nil {
+			return result, fmt.Errorf("delegate: claude-code formatting pass failed: %w", lastFmtErr)
 		}
 	}
 
