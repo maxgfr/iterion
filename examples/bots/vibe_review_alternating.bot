@@ -523,6 +523,15 @@ agent fix_gpt:
 workflow vibe_review_alternating:
   entry: alt
 
+  ## Container isolation. Reviewers run `git diff`, `go test`,
+  ## linters, smoke-runs, etc. — all of which we'd rather not expose
+  ## to the host. `sandbox: auto` reads the workspace's
+  ## `.devcontainer/devcontainer.json` when present, else falls back
+  ## to `iterion-sandbox-slim`. For non-JS stacks (Go/Python/Rust)
+  ## commit a devcontainer or point ITERION_SANDBOX_DEFAULT_IMAGE at
+  ## `iterion-sandbox-full`, which bundles those toolchains.
+  sandbox: auto
+
   budget:
     max_parallel_branches: 1
     max_duration: "2h"

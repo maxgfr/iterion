@@ -79,17 +79,24 @@ func resolveFixturePath(t *testing.T, name string) string {
 // compileFixtureStubSafe compiles the fixture and strips tools from all
 // nodes so the workspace safety check doesn't reject parallel branches
 // when running with stub executors (tools are never actually called).
+// Also clears workflow- and node-level Sandbox specs — stub runs have
+// no docker available and the executor never shells out anyway, so
+// `sandbox: auto` in the bot would otherwise cause `runtime.Engine.Run`
+// to fail trying to start a container or parse the host's devcontainer.
 func compileFixtureStubSafe(t *testing.T, name string) *ir.Workflow {
 	t.Helper()
 	wf := compileFixture(t, name)
+	wf.Sandbox = nil
 	for _, node := range wf.Nodes {
 		switch n := node.(type) {
 		case *ir.AgentNode:
 			n.Tools = nil
 			n.ToolMaxSteps = 0
+			n.Sandbox = nil
 		case *ir.JudgeNode:
 			n.Tools = nil
 			n.ToolMaxSteps = 0
+			n.Sandbox = nil
 		}
 	}
 	return wf
