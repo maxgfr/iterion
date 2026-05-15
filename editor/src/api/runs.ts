@@ -204,6 +204,27 @@ export async function listRuns(params: ListRunsParams = {}): Promise<RunSummary[
   return res.runs ?? [];
 }
 
+// Shape of GET /api/runs/global-active — runs currently active in
+// ANY iterion store on the host (the global ~/.iterion slot plus
+// every per-project store under ~/.iterion/projects/). Surfaced on
+// the Home view so an operator sees in-flight work without having
+// to open each project first.
+export interface GlobalActiveRun {
+  id: string;
+  name?: string;
+  workflow_name: string;
+  status: RunStatus;
+  created_at: string;
+  updated_at: string;
+  store_path: string;
+  workspace_dir?: string;
+}
+
+export async function listGlobalActiveRuns(): Promise<GlobalActiveRun[]> {
+  const res = await request<{ runs: GlobalActiveRun[] }>(`/runs/global-active`);
+  return res.runs ?? [];
+}
+
 export async function getRun(runId: string): Promise<RunSnapshot> {
   return request(`/runs/${encodeURIComponent(runId)}`);
 }
