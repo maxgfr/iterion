@@ -269,14 +269,32 @@ func (c *runConn) streamEvents(fromSeq, snapshotSeq int64) {
 // streamEventsLocal is the original broker-backed path: replay disk
 // events [fromSeq, snapshotSeq+1) then drain the broker channel,
 // dedup'ing against the replay window.
+//
+// LoadEvents caps at runview.MaxEventsPerPage so for runs whose
+// replay window exceeds the cap we MUST paginate — otherwise the
+// tail of the events stream silently disappears, including any
+// terminal run_failed/run_finished events, which leaves the
+// editor's status pill stuck on whatever pre-terminal status the
+// last replayed event implied.
 func (c *runConn) streamEventsLocal(fromSeq, snapshotSeq int64) {
 	if snapshotSeq != runview.NoEventsSeq && (fromSeq > 0 || snapshotSeq > 0) {
-		events, err := c.server.runs.LoadEvents(c.runID, fromSeq, snapshotSeq+1)
-		if err == nil {
+		next := fromSeq
+		for {
+			events, err := c.server.runs.LoadEvents(c.runID, next, snapshotSeq+1)
+			if err != nil {
+				break
+			}
 			for _, ev := range events {
 				if !c.sendEnvelope(wsTypeEvent, ev, "") {
 					return
 				}
+			}
+			if len(events) < runview.MaxEventsPerPage {
+				break
+			}
+			next = events[len(events)-1].Seq + 1
+			if next > snapshotSeq {
+				break
 			}
 		}
 	}

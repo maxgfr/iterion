@@ -147,6 +147,60 @@ func TestRunsWS_FromSeqReplaysHistorical(t *testing.T) {
 	}
 }
 
+func TestRunsWS_ReplayPaginatesPastMaxEventsPerPage(t *testing.T) {
+	srv, hs := newTestServer(t)
+	st, err := store.New(srv.cfg.StoreDir)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	const runID = "run-big-replay"
+	if _, err := st.CreateRun(context.Background(), runID, "wf", nil); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	// Seed MaxEventsPerPage+50 events so a single LoadEvents page can't
+	// cover the whole replay window. The pre-pagination implementation
+	// silently dropped the tail past the cap, including any terminal
+	// run_failed/run_finished — leaving the editor's pill stuck on
+	// whatever pre-terminal status the last replayed event implied.
+	n := runview.MaxEventsPerPage + 50
+	for i := 0; i < n; i++ {
+		evt := store.Event{Type: store.EventNodeStarted, RunID: runID, NodeID: "x"}
+		if _, err := st.AppendEvent(context.Background(), runID, evt); err != nil {
+			t.Fatalf("seed event %d: %v", i, err)
+		}
+	}
+	if err := st.UpdateRunStatus(context.Background(), runID, store.RunStatusFinished, ""); err != nil {
+		t.Fatalf("UpdateRunStatus: %v", err)
+	}
+
+	c := dialRunWS(t, hs, runID)
+	writeJSONMessage(t, c, runWSEnvelope{Type: wsTypeSubscribe})
+	_ = readEnvelope(t, c, wsTypeSnapshot)
+
+	received := 0
+	var lastSeq int64 = -1
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) && received < n {
+		env := readEnvelope(t, c, wsTypeEvent, wsTypeTerminated)
+		if env.Type == wsTypeTerminated {
+			break
+		}
+		var ev store.Event
+		if err := json.Unmarshal(env.Payload, &ev); err != nil {
+			t.Fatalf("decode event: %v", err)
+		}
+		received++
+		lastSeq = ev.Seq
+	}
+	if received != n {
+		t.Errorf("received = %d events, want %d (replay must paginate past MaxEventsPerPage=%d)",
+			received, n, runview.MaxEventsPerPage)
+	}
+	if want := int64(n - 1); lastSeq != want {
+		t.Errorf("lastSeq = %d, want %d (terminal event must reach the client)", lastSeq, want)
+	}
+}
+
 func TestRunsWS_AckOnUnsubscribe(t *testing.T) {
 	srv, hs := newTestServer(t)
 	seedRun(t, srv, "run-1", "wf", store.RunStatusFinished)
