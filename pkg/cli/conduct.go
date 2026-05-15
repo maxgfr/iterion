@@ -70,7 +70,7 @@ func RunConduct(p *Printer, opts ConductOptions) error {
 	}
 
 	lockPath := filepath.Join(wsRoot, ".conductor.lock")
-	lk, err := conductor.Lock(lockPath)
+	lk, err := store.AcquireFileLock(lockPath, "conductor workspace "+wsRoot)
 	if err != nil {
 		return err
 	}

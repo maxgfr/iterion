@@ -24,21 +24,25 @@ func lockRun(runDir, label string) (RunLock, error) {
 	if err := os.MkdirAll(runDir, dirPerm); err != nil {
 		return nil, fmt.Errorf("store: mkdir for lock: %w", err)
 	}
-	p := filepath.Join(runDir, ".lock")
-	pid := os.Getpid()
+	return lockFile(filepath.Join(runDir, ".lock"), label)
+}
 
-	// Try to create exclusively.
-	if err := tryCreateLockfile(p, pid); err == nil {
-		return &pidLock{path: p}, nil
+// lockFile is the shared primitive used by lockRun and the exported
+// AcquireFileLock. It locks an exact path (caller is responsible for
+// ensuring the parent directory exists).
+func lockFile(path, label string) (RunLock, error) {
+	if err := os.MkdirAll(filepath.Dir(path), dirPerm); err != nil {
+		return nil, fmt.Errorf("store: mkdir for lock: %w", err)
 	}
-
-	// File exists — check if the owning process is still alive.
-	if removeStaleLock(p) {
-		if err := tryCreateLockfile(p, pid); err == nil {
-			return &pidLock{path: p}, nil
+	pid := os.Getpid()
+	if err := tryCreateLockfile(path, pid); err == nil {
+		return &pidLock{path: path}, nil
+	}
+	if removeStaleLock(path) {
+		if err := tryCreateLockfile(path, pid); err == nil {
+			return &pidLock{path: path}, nil
 		}
 	}
-
 	return nil, fmt.Errorf("store: %s is locked by another process", label)
 }
 
