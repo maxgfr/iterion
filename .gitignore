@@ -80,3 +80,13 @@ cmd/iterion-desktop/frontend-stub/dist/
 # canonical pin; CI / operators run `task chart:lint` to re-fetch.
 charts/iterion/charts/
 charts/iterion/Chart.lock
+
+# .botz bundles — produced by `iterion bundle pack <dir>`. Source dirs
+# (`examples/<bot-name>/{bot.iter,manifest.yaml,...}`) ARE committed;
+# the resulting archive is not — it's a deterministic build artefact
+# regenerable from source. The default `iterion bundle init` scaffolds
+# a per-bundle .gitignore that excludes `*.botz` inside its own dir,
+# but that doesn't catch archives written one level up (the common
+# layout: source at examples/X/ + archive at examples/X.botz). Anchor
+# at the repo root so any *.botz at any depth is excluded.
+*.botz
