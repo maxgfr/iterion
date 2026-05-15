@@ -136,21 +136,39 @@ func (c *Conductor) Refresh() {
 // Cancel asks the conductor to cancel an in-flight dispatch for the
 // given issue. The corresponding worker goroutine receives ctx.Done()
 // and the issue is released for re-dispatch on the next tick (subject
-// to tracker state).
+// to tracker state). No-op after Stop.
 func (c *Conductor) Cancel(issueID string) {
-	c.cmds <- cmdCancel{issueID: issueID}
+	select {
+	case c.cmds <- cmdCancel{issueID: issueID}:
+	case <-c.stop:
+	}
 }
 
 // Reload swaps in a fresh config. Typically wired to ConfigWatcher.
+// No-op after Stop.
 func (c *Conductor) Reload(cfg *Config) {
-	c.cmds <- cmdReload{cfg: cfg}
+	select {
+	case c.cmds <- cmdReload{cfg: cfg}:
+	case <-c.stop:
+	}
 }
 
-// Snapshot returns a consistent view of the actor's state.
+// Snapshot returns a consistent view of the actor's state. After Stop
+// (or before Start) it returns a zero Snapshot rather than blocking
+// the caller indefinitely.
 func (c *Conductor) Snapshot() Snapshot {
 	reply := make(chan Snapshot, 1)
-	c.cmds <- cmdSnapshot{reply: reply}
-	return <-reply
+	select {
+	case c.cmds <- cmdSnapshot{reply: reply}:
+	case <-c.stop:
+		return Snapshot{}
+	}
+	select {
+	case s := <-reply:
+		return s
+	case <-c.stop:
+		return Snapshot{}
+	}
 }
 
 // SetSnapshotPublisher swaps the fan-out hook (used to wire/unwire WS).
@@ -209,8 +227,10 @@ func (c *Conductor) shutdown() {
 			r.Cancel()
 		}
 	}
-	for _, t := range c.state.retryTimers {
-		t.Stop()
+	for _, e := range c.state.retries {
+		if e.Timer != nil {
+			e.Timer.Stop()
+		}
 	}
 }
 
@@ -261,15 +281,19 @@ func (c *Conductor) buildSnapshot() Snapshot {
 			Attempt:       r.Attempt,
 		})
 	}
-	rids := make([]string, 0, len(c.state.retryTimers))
-	for id := range c.state.retryTimers {
+	rids := make([]string, 0, len(c.state.retries))
+	for id := range c.state.retries {
 		rids = append(rids, id)
 	}
 	sort.Strings(rids)
 	for _, id := range rids {
+		e := c.state.retries[id]
 		snap.Retries = append(snap.Retries, RetryView{
-			IssueID: id,
-			Attempt: c.state.retryAttempts[id],
+			IssueID:    e.IssueID,
+			Identifier: e.Identifier,
+			Attempt:    e.Attempt,
+			DueAt:      e.DueAt,
+			Error:      e.LastError,
 		})
 	}
 	return snap

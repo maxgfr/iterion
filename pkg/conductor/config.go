@@ -33,11 +33,22 @@ type Config struct {
 // TrackerConfig is the discriminated tracker definition. Kind selects
 // which sibling block (Native, GitHub, Forgejo) is consulted.
 type TrackerConfig struct {
-	Kind    string                `yaml:"kind"`
+	Kind    TrackerKind           `yaml:"kind"`
 	Native  *NativeTrackerConfig  `yaml:"native,omitempty"`
 	GitHub  *GitHubTrackerConfig  `yaml:"github,omitempty"`
 	Forgejo *ForgejoTrackerConfig `yaml:"forgejo,omitempty"`
 }
+
+// TrackerKind is the typed discriminator for TrackerConfig.Kind. Using
+// constants instead of raw strings catches typos at compile-time and
+// makes adding a new adapter a search-and-add affair.
+type TrackerKind string
+
+const (
+	TrackerKindNative  TrackerKind = "native"
+	TrackerKindGitHub  TrackerKind = "github"
+	TrackerKindForgejo TrackerKind = "forgejo"
+)
 
 // NativeTrackerConfig is intentionally empty in v1 — the native store
 // is configured via board.json, not here.
@@ -96,8 +107,37 @@ type AgentConfig struct {
 
 // WorkspaceConfig controls where per-issue workspaces live.
 type WorkspaceConfig struct {
-	Root    string `yaml:"root,omitempty"`
-	Persist string `yaml:"persist,omitempty"` // keep | cleanup_on_done | cleanup_on_terminal
+	Root    string                 `yaml:"root,omitempty"`
+	Persist WorkspacePersistPolicy `yaml:"persist,omitempty"`
+}
+
+// WorkspacePersistPolicy decides whether per-issue workspaces are
+// cleaned up after a successful dispatch.
+type WorkspacePersistPolicy string
+
+const (
+	// WorkspacePersistKeep keeps every workspace forever (the default
+	// when the field is empty). Operators clean up manually.
+	WorkspacePersistKeep WorkspacePersistPolicy = "keep"
+	// WorkspacePersistCleanupOnDone removes the workspace on a clean
+	// dispatch return (err == nil from the runner). Failed / cancelled
+	// dispatches retain the workspace so retries can resume from it.
+	WorkspacePersistCleanupOnDone WorkspacePersistPolicy = "cleanup_on_done"
+	// WorkspacePersistCleanupOnTerminal removes the workspace on a
+	// clean dispatch return when the issue has reached a terminal
+	// tracker state. v1 treats it the same as cleanup_on_done; v2
+	// will branch on the post-run state.
+	WorkspacePersistCleanupOnTerminal WorkspacePersistPolicy = "cleanup_on_terminal"
+)
+
+// shouldCleanupOnSuccess reports whether a clean dispatch return
+// should trigger workspace removal.
+func (p WorkspacePersistPolicy) shouldCleanupOnSuccess() bool {
+	switch p {
+	case WorkspacePersistCleanupOnDone, WorkspacePersistCleanupOnTerminal:
+		return true
+	}
+	return false
 }
 
 // StallConfig is the inactivity timeout for running issues.
@@ -164,10 +204,10 @@ func (c *Config) applyDefaults() {
 	if c.Stall.TimeoutMS == 0 {
 		c.Stall.TimeoutMS = DefaultStallTimeoutMS
 	}
-	if c.Tracker.Kind == "github" && c.Tracker.GitHub != nil && c.Tracker.GitHub.ClaimedLabel == "" {
+	if c.Tracker.Kind == TrackerKindGitHub && c.Tracker.GitHub != nil && c.Tracker.GitHub.ClaimedLabel == "" {
 		c.Tracker.GitHub.ClaimedLabel = DefaultGitHubClaimedLabel
 	}
-	if c.Tracker.Kind == "forgejo" && c.Tracker.Forgejo != nil && c.Tracker.Forgejo.ClaimedLabel == "" {
+	if c.Tracker.Kind == TrackerKindForgejo && c.Tracker.Forgejo != nil && c.Tracker.Forgejo.ClaimedLabel == "" {
 		c.Tracker.Forgejo.ClaimedLabel = DefaultForgejoClaimedLabel
 	}
 }
@@ -207,9 +247,9 @@ func (c *Config) Validate() error {
 	switch c.Tracker.Kind {
 	case "":
 		return errors.New("config: tracker.kind is required (native | github | forgejo)")
-	case "native":
+	case TrackerKindNative:
 		// nothing to validate beyond presence
-	case "github":
+	case TrackerKindGitHub:
 		if c.Tracker.GitHub == nil {
 			return errors.New("config: tracker.kind=github requires tracker.github block")
 		}
@@ -219,7 +259,7 @@ func (c *Config) Validate() error {
 		if !githubRepoRe.MatchString(c.Tracker.GitHub.Repo) {
 			return fmt.Errorf("config: tracker.github.repo %q must be owner/repo", c.Tracker.GitHub.Repo)
 		}
-	case "forgejo":
+	case TrackerKindForgejo:
 		if c.Tracker.Forgejo == nil {
 			return errors.New("config: tracker.kind=forgejo requires tracker.forgejo block")
 		}
@@ -234,7 +274,7 @@ func (c *Config) Validate() error {
 	}
 	if c.Workspace.Persist != "" {
 		switch c.Workspace.Persist {
-		case "keep", "cleanup_on_done", "cleanup_on_terminal":
+		case WorkspacePersistKeep, WorkspacePersistCleanupOnDone, WorkspacePersistCleanupOnTerminal:
 		default:
 			return fmt.Errorf("config: workspace.persist %q invalid", c.Workspace.Persist)
 		}

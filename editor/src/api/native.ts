@@ -1,20 +1,12 @@
 // Native kanban tracker — REST client. Mirrors pkg/conductor/native/http.go.
-// All paths are relative to the editor's /api base via the shared client.
+// All paths are relative to the editor's same-origin server.
+
+import { apiRequest } from "./client";
 
 const BASE = "/api/v1/native";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-    ...init,
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`native API ${res.status}: ${text || res.statusText}`);
-  }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return apiRequest<T>(BASE + path, init);
 }
 
 // ---------------------------------------------------------------------------

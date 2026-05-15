@@ -33,22 +33,22 @@ func (c *Conductor) RegisterRoutes(mux *http.ServeMux, prefix string) {
 }
 
 func (c *Conductor) handleState(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, c.Snapshot())
+	WriteJSON(w, http.StatusOK, c.Snapshot())
 }
 
 func (c *Conductor) handleRefresh(w http.ResponseWriter, _ *http.Request) {
 	c.Refresh()
-	writeJSON(w, http.StatusAccepted, map[string]bool{"queued": true})
+	WriteJSON(w, http.StatusAccepted, map[string]bool{"queued": true})
 }
 
 func (c *Conductor) handleReload(w http.ResponseWriter, _ *http.Request) {
 	cfg, err := Load(c.cfg.Load().SourcePath)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	c.Reload(cfg)
-	writeJSON(w, http.StatusOK, map[string]any{"reloaded": true, "polling_interval_s": cfg.PollingInterval().Seconds()})
+	WriteJSON(w, http.StatusOK, map[string]any{"reloaded": true, "polling_interval_s": cfg.PollingInterval().Seconds()})
 }
 
 func (c *Conductor) handleIssueDetail(w http.ResponseWriter, r *http.Request) {
@@ -56,13 +56,13 @@ func (c *Conductor) handleIssueDetail(w http.ResponseWriter, r *http.Request) {
 	snap := c.Snapshot()
 	for _, r := range snap.Running {
 		if r.IssueID == id {
-			writeJSON(w, http.StatusOK, r)
+			WriteJSON(w, http.StatusOK, r)
 			return
 		}
 	}
 	for _, r := range snap.Retries {
 		if r.IssueID == id {
-			writeJSON(w, http.StatusOK, r)
+			WriteJSON(w, http.StatusOK, r)
 			return
 		}
 	}
@@ -72,7 +72,7 @@ func (c *Conductor) handleIssueDetail(w http.ResponseWriter, r *http.Request) {
 func (c *Conductor) handleIssueCancel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	c.Cancel(id)
-	writeJSON(w, http.StatusAccepted, map[string]string{"issue_id": id, "status": "cancel_requested"})
+	WriteJSON(w, http.StatusAccepted, map[string]string{"issue_id": id, "status": "cancel_requested"})
 }
 
 // ---------------------------------------------------------------------------
@@ -181,10 +181,4 @@ func (c *wsClientConn) reader(b *wsBridge) {
 			return
 		}
 	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }
