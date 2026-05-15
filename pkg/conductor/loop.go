@@ -14,11 +14,20 @@ import (
 // tick is the conductor's heartbeat. Runs entirely on the actor
 // goroutine: reconciles stalled runs, refreshes tracker states for
 // running issues, then dispatches new candidates until slots fill up.
+//
+// When the conductor is paused, the dispatch step is skipped — runs
+// already in flight continue, stall detection still fires, retries
+// still queue. Paused means "no new work", not "stop everything".
 func (c *Conductor) tick(ctx context.Context) {
 	cfg := c.cfg.Load()
 
 	c.reconcileStalled(ctx, cfg)
 	c.refreshRunningStates(ctx)
+
+	if c.paused.Load() {
+		c.fireSnapshot()
+		return
+	}
 
 	candidates, err := c.tracker.ListCandidates(ctx)
 	if err != nil {

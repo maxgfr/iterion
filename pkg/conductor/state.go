@@ -78,9 +78,12 @@ type Snapshot struct {
 	GeneratedAt      time.Time     `json:"generated_at"`
 	PollingIntervalS float64       `json:"polling_interval_seconds"`
 	StallTimeoutS    float64       `json:"stall_timeout_seconds"`
-	Running          []RunningView `json:"running"`
-	Retries          []RetryView   `json:"retries"`
-	Slots            SlotsView     `json:"slots"`
+	// Paused is true when new dispatches are currently suspended via
+	// Pause(); runs in flight are not affected.
+	Paused  bool          `json:"paused"`
+	Running []RunningView `json:"running"`
+	Retries []RetryView   `json:"retries"`
+	Slots   SlotsView     `json:"slots"`
 }
 
 // RunningView is one row of the dashboard's "running" table.

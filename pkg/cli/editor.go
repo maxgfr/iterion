@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
+	"github.com/SocialGouv/iterion/pkg/conductor"
 	"github.com/SocialGouv/iterion/pkg/conductor/native"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/server"
@@ -114,12 +115,27 @@ func RunEditor(ctx context.Context, opts EditorOptions, p *Printer) error {
 	// view works without a separately-running `iterion conduct`. The
 	// store lives at <store-dir>/conductor/ and is auto-initialized
 	// with the default board on first use.
+	logger := iterlog.New(iterlog.LevelInfo, os.Stderr)
 	resolvedStoreDir := store.ResolveStoreDir(dir, opts.StoreDir)
-	if ns, err := native.NewStore(filepath.Join(resolvedStoreDir, "conductor")); err == nil {
+	ns, nsErr := native.NewStore(filepath.Join(resolvedStoreDir, "conductor"))
+	if nsErr == nil {
 		cfg.NativeTrackerStore = ns
+		// A Manager sits idle alongside the native store. The SPA can
+		// configure + start + pause + stop the conductor entirely
+		// from the Board / Conductor views; no separate `iterion
+		// conduct` process required.
+		mgr, mgrErr := conductor.NewManager(conductor.ManagerOptions{
+			StoreDir:    resolvedStoreDir,
+			NativeStore: ns,
+			Logger:      logger,
+		})
+		if mgrErr == nil {
+			cfg.Conductor = mgr
+		} else {
+			logger.Warn("editor: conductor manager init: %v", mgrErr)
+		}
 	}
 
-	logger := iterlog.New(iterlog.LevelInfo, os.Stderr)
 	srv := server.New(cfg, logger)
 
 	// Open browser in background — only meaningful when port is fixed

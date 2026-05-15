@@ -182,10 +182,13 @@ type Config struct {
 	NativeTrackerStore *native.Store
 
 	// Conductor, when non-nil, exposes the long-running dispatcher
-	// under /api/v1/conductor/* (state, refresh, cancel, reload, WS).
-	// The editor SPA's Conductor dashboard view consumes these
-	// endpoints and is hidden when this field is nil.
-	Conductor *conductor.Conductor
+	// lifecycle + operational endpoints under /api/v1/conductor/*.
+	// The Manager owns the full surface (config GET/PUT, start/stop/
+	// pause/resume, state, refresh, issue cancel, WS) so the editor
+	// SPA can configure and pilot the conductor without a separate
+	// `iterion conduct` process. When nil the SPA hides the
+	// Conductor + Board controls beyond plain CRUD.
+	Conductor *conductor.Manager
 
 	// MaxUploadSize bounds the bytes the upload endpoint will accept
 	// per attachment. Zero is replaced with a mode-specific default

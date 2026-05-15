@@ -64,6 +64,11 @@ type Conductor struct {
 	stop      chan struct{}
 	done      chan struct{}
 
+	// paused, when true, makes tick() skip new dispatches without
+	// touching runs in flight or scheduled retries. Toggled via the
+	// Pause/Resume public API or the corresponding REST endpoints.
+	paused atomic.Bool
+
 	ws *wsBridge
 }
 
@@ -152,6 +157,25 @@ func (c *Conductor) Reload(cfg *Config) {
 	case <-c.stop:
 	}
 }
+
+// Pause stops new dispatches without touching runs already in flight
+// or pending retries. Idempotent. The change is observed atomically
+// by the next tick().
+func (c *Conductor) Pause() {
+	c.paused.Store(true)
+	c.logger.Info("conductor: paused (new dispatches suspended)")
+	c.Refresh()
+}
+
+// Resume undoes Pause. Idempotent.
+func (c *Conductor) Resume() {
+	c.paused.Store(false)
+	c.logger.Info("conductor: resumed")
+	c.Refresh()
+}
+
+// IsPaused reports whether new dispatches are currently suspended.
+func (c *Conductor) IsPaused() bool { return c.paused.Load() }
 
 // Snapshot returns a consistent view of the actor's state. After Stop
 // (or before Start) it returns a zero Snapshot rather than blocking
@@ -256,6 +280,7 @@ func (c *Conductor) buildSnapshot() Snapshot {
 		GeneratedAt:      time.Now().UTC(),
 		PollingIntervalS: cfg.PollingInterval().Seconds(),
 		StallTimeoutS:    cfg.StallTimeout().Seconds(),
+		Paused:           c.paused.Load(),
 		Slots: SlotsView{
 			GlobalMax:    cfg.Agent.MaxConcurrent,
 			GlobalUsed:   len(c.state.running),

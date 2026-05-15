@@ -12,31 +12,39 @@ import (
 	"go.yaml.in/yaml/v2"
 )
 
-// Config is the parsed iterion.conductor.yaml. SourcePath is the
-// resolved absolute path of the file on disk and is set by Load (not
-// from YAML).
+// Config is the parsed conductor configuration. Sources:
+//   - YAML on disk (`iterion.conductor.yaml`) — for hand-edited or
+//     git-versioned setups (consumed by `iterion conduct <yaml>`).
+//   - JSON via the editor SPA's PUT /api/v1/conductor/config endpoint
+//     (persisted as <store-dir>/conductor/conductor.json).
+//
+// Both representations decode into the same struct — JSON and YAML
+// field names match (snake_case throughout).
+//
+// SourcePath is the resolved absolute path of the file on disk and is
+// set by the loader (not parsed from the wire format).
 type Config struct {
-	Name      string          `yaml:"name,omitempty"`
-	Workflow  string          `yaml:"workflow"`
-	Tracker   TrackerConfig   `yaml:"tracker"`
-	Dispatch  DispatchConfig  `yaml:"dispatch,omitempty"`
-	Polling   PollingConfig   `yaml:"polling,omitempty"`
-	Agent     AgentConfig     `yaml:"agent,omitempty"`
-	Workspace WorkspaceConfig `yaml:"workspace,omitempty"`
-	Hooks     Hooks           `yaml:"hooks,omitempty"`
-	Stall     StallConfig     `yaml:"stall,omitempty"`
-	Server    ServerConfig    `yaml:"server,omitempty"`
+	Name      string          `yaml:"name,omitempty" json:"name,omitempty"`
+	Workflow  string          `yaml:"workflow" json:"workflow"`
+	Tracker   TrackerConfig   `yaml:"tracker" json:"tracker"`
+	Dispatch  DispatchConfig  `yaml:"dispatch,omitempty" json:"dispatch,omitempty"`
+	Polling   PollingConfig   `yaml:"polling,omitempty" json:"polling,omitempty"`
+	Agent     AgentConfig     `yaml:"agent,omitempty" json:"agent,omitempty"`
+	Workspace WorkspaceConfig `yaml:"workspace,omitempty" json:"workspace,omitempty"`
+	Hooks     Hooks           `yaml:"hooks,omitempty" json:"hooks,omitempty"`
+	Stall     StallConfig     `yaml:"stall,omitempty" json:"stall,omitempty"`
+	Server    ServerConfig    `yaml:"server,omitempty" json:"server,omitempty"`
 
-	SourcePath string `yaml:"-"`
+	SourcePath string `yaml:"-" json:"-"`
 }
 
 // TrackerConfig is the discriminated tracker definition. Kind selects
 // which sibling block (Native, GitHub, Forgejo) is consulted.
 type TrackerConfig struct {
-	Kind    TrackerKind           `yaml:"kind"`
-	Native  *NativeTrackerConfig  `yaml:"native,omitempty"`
-	GitHub  *GitHubTrackerConfig  `yaml:"github,omitempty"`
-	Forgejo *ForgejoTrackerConfig `yaml:"forgejo,omitempty"`
+	Kind    TrackerKind           `yaml:"kind" json:"kind"`
+	Native  *NativeTrackerConfig  `yaml:"native,omitempty" json:"native,omitempty"`
+	GitHub  *GitHubTrackerConfig  `yaml:"github,omitempty" json:"github,omitempty"`
+	Forgejo *ForgejoTrackerConfig `yaml:"forgejo,omitempty" json:"forgejo,omitempty"`
 }
 
 // TrackerKind is the typed discriminator for TrackerConfig.Kind. Using
@@ -59,56 +67,56 @@ type NativeTrackerConfig struct{}
 // from iterion.conductor.yaml without the tracker package needing YAML
 // tags.
 type LabelSelector struct {
-	LabelsInclude []string `yaml:"labels_include,omitempty"`
-	LabelsExclude []string `yaml:"labels_exclude,omitempty"`
+	LabelsInclude []string `yaml:"labels_include,omitempty" json:"labels_include,omitempty"`
+	LabelsExclude []string `yaml:"labels_exclude,omitempty" json:"labels_exclude,omitempty"`
 }
 
 // GitHubTrackerConfig configures the github_issues adapter.
 type GitHubTrackerConfig struct {
-	Repo          string                   `yaml:"repo"`
-	Token         string                   `yaml:"token,omitempty"`
-	StateMapping  map[string]LabelSelector `yaml:"state_mapping,omitempty"`
-	ClaimedLabel  string                   `yaml:"claimed_label,omitempty"`
-	IncludeLabels []string                 `yaml:"include_labels,omitempty"`
-	ExcludeLabels []string                 `yaml:"exclude_labels,omitempty"`
+	Repo          string                   `yaml:"repo" json:"repo"`
+	Token         string                   `yaml:"token,omitempty" json:"token,omitempty"`
+	StateMapping  map[string]LabelSelector `yaml:"state_mapping,omitempty" json:"state_mapping,omitempty"`
+	ClaimedLabel  string                   `yaml:"claimed_label,omitempty" json:"claimed_label,omitempty"`
+	IncludeLabels []string                 `yaml:"include_labels,omitempty" json:"include_labels,omitempty"`
+	ExcludeLabels []string                 `yaml:"exclude_labels,omitempty" json:"exclude_labels,omitempty"`
 }
 
 // ForgejoTrackerConfig configures the forgejo (Gitea-compatible) adapter.
 type ForgejoTrackerConfig struct {
-	Host          string                   `yaml:"host"`
-	Repo          string                   `yaml:"repo"`
-	Token         string                   `yaml:"token,omitempty"`
-	StateMapping  map[string]LabelSelector `yaml:"state_mapping,omitempty"`
-	ClaimedLabel  string                   `yaml:"claimed_label,omitempty"`
-	IncludeLabels []string                 `yaml:"include_labels,omitempty"`
-	ExcludeLabels []string                 `yaml:"exclude_labels,omitempty"`
+	Host          string                   `yaml:"host" json:"host"`
+	Repo          string                   `yaml:"repo" json:"repo"`
+	Token         string                   `yaml:"token,omitempty" json:"token,omitempty"`
+	StateMapping  map[string]LabelSelector `yaml:"state_mapping,omitempty" json:"state_mapping,omitempty"`
+	ClaimedLabel  string                   `yaml:"claimed_label,omitempty" json:"claimed_label,omitempty"`
+	IncludeLabels []string                 `yaml:"include_labels,omitempty" json:"include_labels,omitempty"`
+	ExcludeLabels []string                 `yaml:"exclude_labels,omitempty" json:"exclude_labels,omitempty"`
 }
 
 // DispatchConfig describes how issue fields flow into a workflow run.
 // Vars maps workflow `vars:` names to template strings using
 // {{issue.x}} / {{conductor.y}} references.
 type DispatchConfig struct {
-	Vars        map[string]string `yaml:"vars,omitempty"`
-	Attachments map[string]string `yaml:"attachments,omitempty"`
+	Vars        map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
+	Attachments map[string]string `yaml:"attachments,omitempty" json:"attachments,omitempty"`
 }
 
 // PollingConfig sets the tick cadence.
 type PollingConfig struct {
-	IntervalMS int `yaml:"interval_ms,omitempty"`
+	IntervalMS int `yaml:"interval_ms,omitempty" json:"interval_ms,omitempty"`
 }
 
 // AgentConfig sets concurrency and retry caps.
 type AgentConfig struct {
-	MaxConcurrent        int            `yaml:"max_concurrent,omitempty"`
-	MaxConcurrentByState map[string]int `yaml:"max_concurrent_by_state,omitempty"`
-	MaxTurns             int            `yaml:"max_turns,omitempty"`
-	MaxRetryBackoffMS    int            `yaml:"max_retry_backoff_ms,omitempty"`
+	MaxConcurrent        int            `yaml:"max_concurrent,omitempty" json:"max_concurrent,omitempty"`
+	MaxConcurrentByState map[string]int `yaml:"max_concurrent_by_state,omitempty" json:"max_concurrent_by_state,omitempty"`
+	MaxTurns             int            `yaml:"max_turns,omitempty" json:"max_turns,omitempty"`
+	MaxRetryBackoffMS    int            `yaml:"max_retry_backoff_ms,omitempty" json:"max_retry_backoff_ms,omitempty"`
 }
 
 // WorkspaceConfig controls where per-issue workspaces live.
 type WorkspaceConfig struct {
-	Root    string                 `yaml:"root,omitempty"`
-	Persist WorkspacePersistPolicy `yaml:"persist,omitempty"`
+	Root    string                 `yaml:"root,omitempty" json:"root,omitempty"`
+	Persist WorkspacePersistPolicy `yaml:"persist,omitempty" json:"persist,omitempty"`
 }
 
 // WorkspacePersistPolicy decides whether per-issue workspaces are
@@ -142,12 +150,12 @@ func (p WorkspacePersistPolicy) shouldCleanupOnSuccess() bool {
 
 // StallConfig is the inactivity timeout for running issues.
 type StallConfig struct {
-	TimeoutMS int `yaml:"timeout_ms,omitempty"`
+	TimeoutMS int `yaml:"timeout_ms,omitempty" json:"timeout_ms,omitempty"`
 }
 
 // ServerConfig opens the conductor's HTTP/WS surface.
 type ServerConfig struct {
-	Port int `yaml:"port,omitempty"`
+	Port int `yaml:"port,omitempty" json:"port,omitempty"`
 }
 
 // Defaults applied to optional fields after parse.
