@@ -246,7 +246,14 @@ type TaskHooks struct {
 
 	// OnToolCalled fires when the matching ToolResultBlock arrives,
 	// indicating the tool has returned (successfully or with an error).
-	OnToolCalled func(toolName string, toolUseID string, isError bool)
+	//
+	// output carries the tool's result content as a string (flattened
+	// from ToolResultBlock.Content, which the SDK exposes as `any` —
+	// either a bare string or a slice of nested content blocks). The
+	// engine persists it on the tool_called event so the editor's
+	// per-node Tools tab can render in+out side-by-side the way Claude
+	// Code does. May be empty for backends that cannot surface a result.
+	OnToolCalled func(toolName string, toolUseID string, isError bool, output string)
 }
 
 // SystemPromptWithInteraction returns the task's SystemPrompt augmented
