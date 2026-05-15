@@ -765,14 +765,13 @@ interface ToolCall {
   errorMsg?: string;
 }
 
-// useToolCalls merges `tool_started` (now carrying the JSON input for
-// whitelisted tools — see backend pkg/backend/tooldisplay.StructuredInputTools)
-// with `tool_called` / `tool_error` events by `tool_use_id`, so the per-node
-// Tools tab can render the tool's target (URL, query, todo list, …) without
-// the post-execution `tool_called` event needing to duplicate it.
+// useToolCalls merges `tool_started` (carrying the JSON input) with
+// `tool_called` / `tool_error` (carrying duration, error, and the tool's
+// output result) by `tool_use_id`, so the per-node Tools tab can render
+// in+out side-by-side for every tool call.
 //
 // Falls back to no-merge when `tool_use_id` is absent on either side (legacy
-// events from runs that predate the structured-input change). The
+// events from runs that predate this plumbing). The
 // `tool_called`/`tool_error` event remains the entry's identity (its seq is
 // used as the key), so already-rendered cards don't disappear from older
 // runs and the in-flight state is not surfaced here (a separate concern).

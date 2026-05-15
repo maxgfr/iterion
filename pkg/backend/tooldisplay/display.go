@@ -88,49 +88,6 @@ const (
 // detail they used to produce.
 var fallbackKeys = []string{"file_path", "path", "pattern", "command"}
 
-// StructuredInputTools is the whitelist of tools whose JSON input is
-// always persisted in the `tool_started` event payload (in addition to
-// the bare name + size). Used by the editor's per-node Tools tab to
-// render rich cards (todo lists, web fetches, search queries,
-// sub-agent dispatches). Other tools still log their detail to console
-// but keep the event payload minimal — Bash/Read can carry MB of
-// content and would bloat events.jsonl.
-//
-// Both name spaces are listed because the same event consumer (UI)
-// receives events from both backends, and `claude_code` uses CamelCase
-// names whereas `claw` uses snake_case. "Agent" and "Task" are
-// SDK-version aliases for the same sub-agent dispatch tool.
-var StructuredInputTools = map[string]struct{}{
-	"TodoWrite":       {},
-	"AskUserQuestion": {},
-	"Task":            {},
-	"Agent":           {},
-	"WebFetch":        {},
-	"WebSearch":       {},
-	"ToolSearch":      {},
-	"Grep":            {},
-	"Glob":            {},
-	"NotebookEdit":    {},
-
-	"todo_write":    {},
-	"ask_user":      {},
-	"task":          {},
-	"web_fetch":     {},
-	"web_search":    {},
-	"tool_search":   {},
-	"grep":          {},
-	"glob":          {},
-	"notebook_edit": {},
-	"agent":         {},
-}
-
-// IsStructured reports whether the given tool name is on the whitelist of
-// tools whose input is persisted in the tool_started event payload.
-func IsStructured(toolName string) bool {
-	_, ok := StructuredInputTools[toolName]
-	return ok
-}
-
 // HeaderDetail returns the single-line detail string appended after the
 // tool name in console logs, e.g. "🔧 WebFetch https://example.com/api".
 // Returns "" when no informative argument can be extracted.

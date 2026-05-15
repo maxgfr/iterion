@@ -1540,11 +1540,21 @@ func (e *ClawExecutor) executeToolNode(ctx context.Context, node *ir.ToolNode, i
 		return nil, fmt.Errorf("model: tool node %q: marshal input: %w", node.ID, err)
 	}
 
+	// Persistence-aware redaction: privacy_filter carries raw PII as
+	// input; privacy_unfilter produces raw PII as output. The hooks
+	// below feed the persisted event log, so apply redaction up-front
+	// (input) and after Execute (output). The in-memory values handed
+	// to Execute and downstream nodes are untouched.
+	inputForEvent := inputJSON
+	if toolName == privacy.FilterToolName {
+		inputForEvent = redactJSONTextField(inputJSON)
+	}
+
 	if e.hooks.OnToolStarted != nil {
 		e.hooks.OnToolStarted(node.ID, LLMToolStartedInfo{
 			ToolName:  toolName,
 			InputSize: len(inputJSON),
-			Input:     json.RawMessage(inputJSON),
+			Input:     json.RawMessage(inputForEvent),
 		})
 	}
 
@@ -1559,17 +1569,8 @@ func (e *ClawExecutor) executeToolNode(ctx context.Context, node *ir.ToolNode, i
 			Error:     err,
 		})
 	}
-	// Persistence-aware redaction: privacy_filter/unfilter carry raw
-	// PII through the tool boundary, but the persisted event log
-	// must not. Strip the sensitive `text` field on the way to the
-	// hook; the in-memory output passed to downstream nodes is
-	// untouched.
-	inputForEvent := inputJSON
 	outputForEvent := outputStr
-	switch toolName {
-	case privacy.FilterToolName:
-		inputForEvent = redactJSONTextField(inputJSON)
-	case privacy.UnfilterToolName:
+	if toolName == privacy.UnfilterToolName {
 		outputForEvent = string(redactJSONTextField([]byte(outputStr)))
 	}
 	// Emit detailed tool I/O via the prompt hook (reused for tool node logging).

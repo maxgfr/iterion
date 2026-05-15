@@ -85,10 +85,10 @@ type LLMToolStartedInfo struct {
 	ToolUseID string
 	// Input is the raw JSON arguments the LLM produced for this call.
 	// May be empty when the backend cannot surface it. The hooks layer
-	// uses it to persist a structured payload on the tool_started event
-	// for tools whitelisted by pkg/backend/tooldisplay.StructuredInputTools
-	// (TodoWrite, WebFetch, WebSearch, …) so the editor's Tools tab can
-	// render rich cards instead of bare names.
+	// persists it (truncated) on the tool_started event so the editor's
+	// per-node Tools tab can render parameters (command, file_path,
+	// todos, …) for every tool — symmetric with the post-execution
+	// `output` field on LLMToolCallInfo.
 	Input json.RawMessage
 }
 
