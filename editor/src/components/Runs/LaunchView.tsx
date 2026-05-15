@@ -14,6 +14,7 @@ import type {
 } from "@/api/types";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
+import NavLinks from "@/components/shared/NavLinks";
 import { useDocumentStore } from "@/store/document";
 
 import AttachmentFieldInput, {
@@ -267,11 +268,12 @@ export default function LaunchView() {
 
   return (
     <div className="h-full flex flex-col bg-surface-1 text-fg-default">
-      <header className="border-b border-border-default px-4 py-3 flex items-center gap-3">
-        <h1 className="text-sm font-bold">Launch run</h1>
+      <header className="border-b border-border-default px-4 py-2.5 flex items-center gap-3">
+        <NavLinks active="runs" />
+        <h1 className="text-xs font-semibold text-fg-muted">Launch run</h1>
         <span className="text-xs text-fg-subtle font-mono truncate">{filePath}</span>
         <button
-          className="ml-auto text-xs px-2 py-1 rounded bg-surface-2 hover:bg-surface-3"
+          className="ml-auto text-xs px-2 py-1 rounded text-fg-muted hover:bg-surface-2 hover:text-fg-default"
           onClick={() => setLocation("/editor")}
         >
           Cancel

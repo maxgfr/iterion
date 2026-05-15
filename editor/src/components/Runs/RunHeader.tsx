@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
 
 import type { RunHeader as RunHeaderType } from "@/api/runs";
 import { cancelRun } from "@/api/runs";
 import { Button, StatusBadge } from "@/components/ui";
 import ProjectLabel from "@/components/shared/ProjectLabel";
+import NavLinks from "@/components/shared/NavLinks";
+import WSStatusDot from "@/components/shared/WSStatusDot";
 
 import ResumeDialog from "./ResumeDialog";
 
@@ -15,7 +16,6 @@ interface Props {
 }
 
 export default function RunHeader({ run, active, wsState }: Props) {
-  const [, setLocation] = useLocation();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resumeOpen, setResumeOpen] = useState(false);
@@ -67,12 +67,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
   return (
     <header className="border-b border-border-default">
       <div className="px-4 py-2 flex items-center gap-3 text-sm">
-        <button
-          className="text-xs px-2 py-1 rounded bg-surface-2 hover:bg-surface-3"
-          onClick={() => setLocation("/runs")}
-        >
-          ← Runs
-        </button>
+        <NavLinks active="runs" />
         <ProjectLabel variant="header" />
         <div className="flex flex-col leading-tight min-w-0 max-w-md">
           <div className="font-medium truncate">
@@ -96,12 +91,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
         )}
         <div className="ml-auto flex items-center gap-2">
           <span className="text-[10px] text-fg-subtle font-mono">{run.id}</span>
-          <span
-            className="text-[10px] text-fg-subtle"
-            title={`WebSocket: ${wsState}`}
-          >
-            {wsState}
-          </span>
+          <WSStatusDot state={wsState} />
           {canCancel && (
             <Button
               variant="danger"
