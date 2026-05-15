@@ -66,9 +66,10 @@ prompt plan_system:
        - risks and points of attention
 
   Do NOT call Write, Edit, or any tool that modifies state
-  (mkdir, touch, mv, rm, npm install, git add/commit, etc.) until
-  the next phase. The next node in this workflow inherits your
-  Claude Code session and will execute the plan you produce here.
+  (file mutations, directory creation, package-manager installs,
+  git commits, etc.) until the next phase. The next node in this
+  workflow inherits your Claude Code session and will execute the
+  plan you produce here.
 
 prompt plan_user:
   Feature to implement:
@@ -396,8 +397,8 @@ prompt fix_system:
      of the feature, even if you notice issues.
   2. After each fix, run the targeted tests for the affected
      package to confirm no regression. If the host project has
-     a top-level test task (e.g. `devbox run -- task test`,
-     `npm test`), run it before declaring success.
+     a top-level test task (whatever invocation the repo's CI
+     uses), run it before declaring success.
 
   PUSHBACK:
   You MAY refuse a blocker by listing it in `pushback` with a
