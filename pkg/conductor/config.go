@@ -43,6 +43,15 @@ type TrackerConfig struct {
 // is configured via board.json, not here.
 type NativeTrackerConfig struct{}
 
+// LabelSelector is the shared shape for label-driven state mappings.
+// It mirrors tracker.LabelSelector with YAML tags so it can be parsed
+// from iterion.conductor.yaml without the tracker package needing YAML
+// tags.
+type LabelSelector struct {
+	LabelsInclude []string `yaml:"labels_include,omitempty"`
+	LabelsExclude []string `yaml:"labels_exclude,omitempty"`
+}
+
 // GitHubTrackerConfig configures the github_issues adapter.
 type GitHubTrackerConfig struct {
 	Repo          string                   `yaml:"repo"`
@@ -62,12 +71,6 @@ type ForgejoTrackerConfig struct {
 	ClaimedLabel  string                   `yaml:"claimed_label,omitempty"`
 	IncludeLabels []string                 `yaml:"include_labels,omitempty"`
 	ExcludeLabels []string                 `yaml:"exclude_labels,omitempty"`
-}
-
-// LabelSelector restricts which issues map to a given workflow state.
-type LabelSelector struct {
-	LabelsInclude []string `yaml:"labels_include,omitempty"`
-	LabelsExclude []string `yaml:"labels_exclude,omitempty"`
 }
 
 // DispatchConfig describes how issue fields flow into a workflow run.
