@@ -1,0 +1,113 @@
+package conductor
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os/exec"
+	"strings"
+	"time"
+
+	iterlog "github.com/SocialGouv/iterion/pkg/log"
+)
+
+// Hook is a single lifecycle hook. Exactly one of Script or Path must be
+// set: Script is an inline shell snippet (passed to `sh -lc`); Path is
+// a path to a script (the path itself is the command — the file's
+// shebang controls the interpreter).
+type Hook struct {
+	Script    string `yaml:"script,omitempty" json:"script,omitempty"`
+	Path      string `yaml:"path,omitempty" json:"path,omitempty"`
+	TimeoutMS int    `yaml:"timeout_ms,omitempty" json:"timeout_ms,omitempty"`
+}
+
+// Hooks groups the four workspace-lifecycle hooks. Any field can be nil.
+type Hooks struct {
+	AfterCreate  *Hook `yaml:"after_create,omitempty" json:"after_create,omitempty"`
+	BeforeRun    *Hook `yaml:"before_run,omitempty" json:"before_run,omitempty"`
+	AfterRun     *Hook `yaml:"after_run,omitempty" json:"after_run,omitempty"`
+	BeforeRemove *Hook `yaml:"before_remove,omitempty" json:"before_remove,omitempty"`
+}
+
+// defaultHookTimeout caps any hook missing an explicit timeout_ms.
+const defaultHookTimeout = 60 * time.Second
+
+// Validate checks that each hook in the group sets exactly one of
+// Script or Path.
+func (h *Hooks) Validate() error {
+	cases := []struct {
+		name string
+		hook *Hook
+	}{
+		{"after_create", h.AfterCreate},
+		{"before_run", h.BeforeRun},
+		{"after_run", h.AfterRun},
+		{"before_remove", h.BeforeRemove},
+	}
+	for _, c := range cases {
+		if c.hook == nil {
+			continue
+		}
+		if (c.hook.Script == "") == (c.hook.Path == "") {
+			return fmt.Errorf("hook %q: exactly one of script/path required", c.name)
+		}
+	}
+	return nil
+}
+
+// Run executes the hook with cwd set to workspace and the additional
+// env vars appended to the inherited environment. stdout/stderr lines
+// are streamed to the logger. A nil hook is a no-op.
+func (h *Hook) Run(ctx context.Context, logger *iterlog.Logger, name, workspace string, env []string) error {
+	if h == nil {
+		return nil
+	}
+	timeout := time.Duration(h.TimeoutMS) * time.Millisecond
+	if timeout <= 0 {
+		timeout = defaultHookTimeout
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	command := h.Script
+	if command == "" {
+		command = h.Path
+	}
+	if command == "" {
+		return fmt.Errorf("hook %s: empty command", name)
+	}
+
+	cmd := exec.CommandContext(cctx, "sh", "-lc", command)
+	cmd.Dir = workspace
+	cmd.Env = env
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	logger.Info("conductor: hook %s starting (cwd=%s timeout=%s)", name, workspace, timeout)
+	start := time.Now()
+	err := cmd.Run()
+	dur := time.Since(start)
+
+	if out := strings.TrimSpace(stdout.String()); out != "" {
+		for _, line := range strings.Split(out, "\n") {
+			logger.Info("conductor: hook %s: %s", name, line)
+		}
+	}
+	if errOut := strings.TrimSpace(stderr.String()); errOut != "" {
+		for _, line := range strings.Split(errOut, "\n") {
+			logger.Warn("conductor: hook %s [stderr]: %s", name, line)
+		}
+	}
+
+	if err != nil {
+		if errors.Is(cctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("hook %s: timeout after %s", name, timeout)
+		}
+		return fmt.Errorf("hook %s: %w (after %s)", name, err, dur)
+	}
+	logger.Info("conductor: hook %s ok (%s)", name, dur)
+	return nil
+}
