@@ -109,27 +109,23 @@ export default function RunHeader({ run, active, wsState }: Props) {
           <span className="text-[10px] text-fg-subtle font-mono">{run.id}</span>
           <WSStatusDot state={wsState} />
           {/*
-            Always render the Cancel button so the operator has a
-            stable affordance regardless of run state — disable it
-            (grey) when the run is no longer cancellable (terminal:
-            finished/failed/cancelled, or a remote-running run this
-            server isn't tracking). Hiding the button on terminal
-            runs left users wondering whether cancel had silently
-            taken effect; greying makes the state unambiguous.
+            Only render the Cancel button when the run is actually
+            cancellable. A disabled button on a terminal/untracked run
+            is visual noise — the StatusBadge already says "finished"
+            / "failed" / "cancelled" so the user knows there's nothing
+            to act on. Hiding it cleans up the header.
           */}
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => void onCancel()}
-            disabled={!canCancel || busy}
-            title={
-              canCancel
-                ? "Cancel this run"
-                : "Cancel is unavailable — the run has reached a terminal state or is not tracked by this server"
-            }
-          >
-            Cancel
-          </Button>
+          {canCancel && (
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => void onCancel()}
+              disabled={busy}
+              title="Cancel this run"
+            >
+              Cancel
+            </Button>
+          )}
           {canResume && (
             <Button
               variant="primary"
