@@ -153,12 +153,55 @@ func buildTracker(cfg *conductor.Config, ns *native.Store) (tracker.Tracker, err
 	case "native":
 		return native.NewAdapter(ns), nil
 	case "github":
-		return nil, fmt.Errorf("conductor: github tracker not yet wired (coming in v1.1)")
+		return buildGitHubTracker(cfg.Tracker.GitHub)
 	case "forgejo":
-		return nil, fmt.Errorf("conductor: forgejo tracker not yet wired (coming in v1.1)")
+		return buildForgejoTracker(cfg.Tracker.Forgejo)
 	default:
 		return nil, fmt.Errorf("conductor: unsupported tracker kind %q", cfg.Tracker.Kind)
 	}
+}
+
+func buildGitHubTracker(cfg *conductor.GitHubTrackerConfig) (tracker.Tracker, error) {
+	if cfg == nil {
+		return nil, errors.New("conductor: tracker.kind=github requires tracker.github block")
+	}
+	mapping := make(map[string]tracker.LabelSelector, len(cfg.StateMapping))
+	for state, sel := range cfg.StateMapping {
+		mapping[state] = tracker.LabelSelector{
+			LabelsInclude: sel.LabelsInclude,
+			LabelsExclude: sel.LabelsExclude,
+		}
+	}
+	return tracker.NewGitHub(tracker.GitHubOptions{
+		Repo:          cfg.Repo,
+		Token:         cfg.Token,
+		IncludeLabels: cfg.IncludeLabels,
+		ExcludeLabels: cfg.ExcludeLabels,
+		ClaimedLabel:  cfg.ClaimedLabel,
+		StateMapping:  mapping,
+	})
+}
+
+func buildForgejoTracker(cfg *conductor.ForgejoTrackerConfig) (tracker.Tracker, error) {
+	if cfg == nil {
+		return nil, errors.New("conductor: tracker.kind=forgejo requires tracker.forgejo block")
+	}
+	mapping := make(map[string]tracker.LabelSelector, len(cfg.StateMapping))
+	for state, sel := range cfg.StateMapping {
+		mapping[state] = tracker.LabelSelector{
+			LabelsInclude: sel.LabelsInclude,
+			LabelsExclude: sel.LabelsExclude,
+		}
+	}
+	return tracker.NewForgejo(tracker.ForgejoOptions{
+		Host:          cfg.Host,
+		Repo:          cfg.Repo,
+		Token:         cfg.Token,
+		IncludeLabels: cfg.IncludeLabels,
+		ExcludeLabels: cfg.ExcludeLabels,
+		ClaimedLabel:  cfg.ClaimedLabel,
+		StateMapping:  mapping,
+	})
 }
 
 func pickPort(cfg *conductor.Config, opts ConductOptions) int {
