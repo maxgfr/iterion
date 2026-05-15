@@ -16,6 +16,11 @@ type DispatchSpec struct {
 	Vars          map[string]any
 	Attachments   map[string]any
 
+	// Assignee is the issue's assignee at dispatch time. Empty when
+	// the issue has no assignee (or the tracker doesn't carry one).
+	// A RoutingRunner inspects this to pick a per-assignee workflow.
+	Assignee string
+
 	// OnEvent is invoked for every observation point of the run
 	// (event_appended, node_started, …). The conductor uses it to
 	// update its last-event watermark for stall detection. Runners
@@ -29,6 +34,15 @@ type DispatchSpec struct {
 // engine; tests provide a fake.
 type Runner interface {
 	Dispatch(ctx context.Context, spec DispatchSpec) error
+}
+
+// ManagedRunner is a Runner whose lifetime is owned by a Manager:
+// the Manager constructs it at Start, hands it to the Conductor, and
+// calls Close when stopping or when an error aborts startup. Both
+// EngineRunner and RoutingRunner satisfy this contract.
+type ManagedRunner interface {
+	Runner
+	Close() error
 }
 
 // ErrRunnerNotConfigured is returned by the stub runner used in tests

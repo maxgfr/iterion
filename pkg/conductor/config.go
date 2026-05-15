@@ -24,16 +24,17 @@ import (
 // SourcePath is the resolved absolute path of the file on disk and is
 // set by the loader (not parsed from the wire format).
 type Config struct {
-	Name      string          `yaml:"name,omitempty" json:"name,omitempty"`
-	Workflow  string          `yaml:"workflow" json:"workflow"`
-	Tracker   TrackerConfig   `yaml:"tracker" json:"tracker"`
-	Dispatch  DispatchConfig  `yaml:"dispatch,omitempty" json:"dispatch,omitempty"`
-	Polling   PollingConfig   `yaml:"polling,omitempty" json:"polling,omitempty"`
-	Agent     AgentConfig     `yaml:"agent,omitempty" json:"agent,omitempty"`
-	Workspace WorkspaceConfig `yaml:"workspace,omitempty" json:"workspace,omitempty"`
-	Hooks     Hooks           `yaml:"hooks,omitempty" json:"hooks,omitempty"`
-	Stall     StallConfig     `yaml:"stall,omitempty" json:"stall,omitempty"`
-	Server    ServerConfig    `yaml:"server,omitempty" json:"server,omitempty"`
+	Name              string            `yaml:"name,omitempty" json:"name,omitempty"`
+	Workflow          string            `yaml:"workflow" json:"workflow"`
+	AssigneeWorkflows map[string]string `yaml:"assignee_workflows,omitempty" json:"assignee_workflows,omitempty"`
+	Tracker           TrackerConfig     `yaml:"tracker" json:"tracker"`
+	Dispatch          DispatchConfig    `yaml:"dispatch,omitempty" json:"dispatch,omitempty"`
+	Polling           PollingConfig     `yaml:"polling,omitempty" json:"polling,omitempty"`
+	Agent             AgentConfig       `yaml:"agent,omitempty" json:"agent,omitempty"`
+	Workspace         WorkspaceConfig   `yaml:"workspace,omitempty" json:"workspace,omitempty"`
+	Hooks             Hooks             `yaml:"hooks,omitempty" json:"hooks,omitempty"`
+	Stall             StallConfig       `yaml:"stall,omitempty" json:"stall,omitempty"`
+	Server            ServerConfig      `yaml:"server,omitempty" json:"server,omitempty"`
 
 	SourcePath string `yaml:"-" json:"-"`
 }
@@ -223,6 +224,9 @@ func (c *Config) applyDefaults() {
 func (c *Config) applyEnvAndPaths() {
 	dir := filepath.Dir(c.SourcePath)
 	c.Workflow = resolveRelPath(dir, expandEnv(c.Workflow))
+	for assignee, wfPath := range c.AssigneeWorkflows {
+		c.AssigneeWorkflows[assignee] = resolveRelPath(dir, expandEnv(wfPath))
+	}
 	if c.Workspace.Root != "" {
 		c.Workspace.Root = expandHome(expandEnv(c.Workspace.Root))
 		if !filepath.IsAbs(c.Workspace.Root) {
@@ -251,6 +255,17 @@ func (c *Config) Validate() error {
 	}
 	if _, err := os.Stat(c.Workflow); err != nil {
 		return fmt.Errorf("config: workflow %s: %w", c.Workflow, err)
+	}
+	for assignee, wfPath := range c.AssigneeWorkflows {
+		if assignee == "" {
+			return errors.New("config: assignee_workflows contains an empty key")
+		}
+		if wfPath == "" {
+			return fmt.Errorf("config: assignee_workflows[%q] is empty", assignee)
+		}
+		if _, err := os.Stat(wfPath); err != nil {
+			return fmt.Errorf("config: assignee_workflows[%q] %s: %w", assignee, wfPath, err)
+		}
 	}
 	switch c.Tracker.Kind {
 	case "":

@@ -135,11 +135,19 @@ func newTestConductor(t *testing.T, runner Runner, ft *fakeTracker, polling time
 
 func TestConductorDispatchAndFinish(t *testing.T) {
 	ft := newFakeTracker()
-	ft.add(tracker.Issue{ID: "fake:1", Identifier: "fake#1", Title: "go", WorkflowState: "ready"})
+	ft.add(tracker.Issue{
+		ID: "fake:1", Identifier: "fake#1",
+		Title: "go", WorkflowState: "ready",
+		Assignee: "vibe_feature_dev",
+	})
 
-	dispatched := make(chan string, 1)
+	type capture struct {
+		runID    string
+		assignee string
+	}
+	dispatched := make(chan capture, 1)
 	runner := &StubRunner{Handler: func(_ context.Context, spec DispatchSpec) error {
-		dispatched <- spec.RunID
+		dispatched <- capture{runID: spec.RunID, assignee: spec.Assignee}
 		return nil
 	}}
 
@@ -150,9 +158,12 @@ func TestConductorDispatchAndFinish(t *testing.T) {
 	defer c.Stop()
 
 	select {
-	case runID := <-dispatched:
-		if runID == "" {
+	case got := <-dispatched:
+		if got.runID == "" {
 			t.Fatal("empty run ID")
+		}
+		if got.assignee != "vibe_feature_dev" {
+			t.Fatalf("dispatch spec dropped issue.Assignee: got %q want %q", got.assignee, "vibe_feature_dev")
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for dispatch")

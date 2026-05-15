@@ -56,7 +56,7 @@ type Manager struct {
 	cfg       *Config
 	state     ManagerState
 	cur       *Conductor
-	runner    *EngineRunner
+	runner    ManagedRunner
 	cancel    context.CancelFunc
 	lastErr   error
 	startedAt time.Time
@@ -163,7 +163,11 @@ func (m *Manager) Start() error {
 		return errors.New("manager: no config — save one first")
 	}
 
-	runner, err := NewEngineRunner(cfg.Workflow, m.logger)
+	// NewRoutingRunner returns a plain EngineRunner when
+	// cfg.AssigneeWorkflows is empty (backward-compatible) or a
+	// RoutingRunner that dispatches per assignee with cfg.Workflow as
+	// the fallback.
+	runner, err := NewRoutingRunner(cfg, m.logger)
 	if err != nil {
 		m.setError(err)
 		return err
