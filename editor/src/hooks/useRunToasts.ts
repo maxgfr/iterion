@@ -3,33 +3,35 @@ import { useEffect, useRef } from "react";
 import type { RunEvent } from "@/api/runs";
 import { useUIStore } from "@/store/ui";
 
-// useRunToasts surfaces run-level milestones as transient toasts. Only
-// fires for events that came in since the previous render, tracked via
-// a high-water-mark seq. Resets when the events array contracts (new
-// run, snapshot replay) so a fresh subscription doesn't double-toast.
-export function useRunToasts(events: RunEvent[]): void {
+// useRunToasts surfaces run-level milestones as transient toasts. The
+// high-water mark is seeded from `snapshotLastSeq` so historical
+// events (events already covered by the snapshot the user landed on,
+// or fetched lazily via /events for the EventLog / Scrubber replay)
+// don't dump a burst of past milestone toasts on screen. Only events
+// with seq > snapshot.last_seq fire — i.e., genuinely live updates
+// the user hasn't seen before. Re-anchors when snapshotLastSeq
+// changes (navigating to a different run).
+export function useRunToasts(
+  events: RunEvent[],
+  snapshotLastSeq: number | null | undefined,
+): void {
   const addToast = useUIStore((s) => s.addToast);
-  const lastSeenSeqRef = useRef<number>(-1);
+  const anchorRef = useRef<number | null>(null);
+  const anchoredAtRef = useRef<number | null | undefined>(undefined);
 
   useEffect(() => {
-    const tail = events[events.length - 1];
-    if (!tail) {
-      lastSeenSeqRef.current = -1;
-      return;
+    if (anchoredAtRef.current !== snapshotLastSeq) {
+      anchoredAtRef.current = snapshotLastSeq;
+      anchorRef.current = snapshotLastSeq ?? null;
     }
-    // The events array can shrink when the WS hook re-applies a fresh
-    // snapshot; rewind the high-water-mark accordingly so we don't
-    // skip toasts for the new run.
-    if (tail.seq < lastSeenSeqRef.current) {
-      lastSeenSeqRef.current = -1;
-    }
+    if (anchorRef.current === null) return;
     for (const e of events) {
-      if (e.seq <= lastSeenSeqRef.current) continue;
+      if (e.seq <= anchorRef.current) continue;
       const toast = toastForEvent(e);
       if (toast) addToast(toast.message, toast.type);
+      anchorRef.current = e.seq;
     }
-    lastSeenSeqRef.current = tail.seq;
-  }, [events, addToast]);
+  }, [events, snapshotLastSeq, addToast]);
 }
 
 function toastForEvent(

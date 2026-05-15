@@ -312,7 +312,7 @@ export default function RunView() {
   }, [runId, applySnapshot]);
 
   const wsHandle = useRunWebSocket(runId);
-  useRunToasts(events);
+  useRunToasts(events, snapshot?.last_seq);
 
   const liveExecutions = useMemo(
     () => Array.from(executionsById.values()),
@@ -395,17 +395,29 @@ export default function RunView() {
   // non-null we always use its node id (truth). When it's null but the
   // run is still active, we fall back to `lastRunningNodeId` — typically
   // the just-finished node — so the follow-live UI doesn't blank out
-  // mid-transition. Scrubbing already null-ed `runningExec` above, so
-  // we don't double-check `scrubSeq` here.
+  // mid-transition. When scrubbing/replaying, derive the running node
+  // from the historical exec map at scrubSeq so the canvas focus
+  // advances with the timeline instead of staying stuck on the user's
+  // last manual pick.
   const followLiveNodeId = useMemo(() => {
+    if (scrubSeq !== null) {
+      const execs = buildExecutionsAt(events, scrubSeq);
+      let best: ExecutionState | null = null;
+      for (const e of execs) {
+        if (e.status !== "running") continue;
+        if (!best || (e.started_at ?? "") > (best.started_at ?? "")) {
+          best = e;
+        }
+      }
+      return best?.ir_node_id ?? null;
+    }
     if (runningExec) return runningExec.ir_node_id;
-    if (scrubSeq !== null) return null;
     const status = snapshot?.run?.status;
     if (status === "running" || status === "paused_waiting_human") {
       return lastRunningNodeId;
     }
     return null;
-  }, [runningExec, scrubSeq, snapshot?.run?.status, lastRunningNodeId]);
+  }, [runningExec, scrubSeq, events, snapshot?.run?.status, lastRunningNodeId]);
 
   const wfSelectedNodeId =
     followLiveNode && followLiveNodeId ? followLiveNodeId : manualSelectedNodeId;
