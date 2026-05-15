@@ -236,12 +236,12 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			if info.ToolUseID != "" {
 				data["tool_use_id"] = info.ToolUseID
 			}
-			// Persist the raw JSON input for tools the editor renders as
-			// structured cards (TodoWrite list, WebFetch URL, …). Other
-			// tools are excluded by name: Bash/Read can carry MB and
-			// would bloat events.jsonl, while their console log already
-			// surfaces the target via tooldisplay.HeaderDetail.
-			if len(info.Input) > 0 && tooldisplay.IsStructured(info.ToolName) {
+			// Persist the raw JSON input so the editor's per-node Tools
+			// tab can render parameters (command, file_path, todos, …)
+			// for every call. Truncated to maxFieldSize (1 MB) to bound
+			// events.jsonl growth — matches the symmetric `output`
+			// treatment on OnToolCall below.
+			if len(info.Input) > 0 {
 				data["input"] = iterlog.Truncate(string(info.Input), maxFieldSize)
 			}
 			_, _ = emitter.AppendEvent(ctx, runID, store.Event{

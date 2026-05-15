@@ -254,16 +254,3 @@ func TestBlockBody_Agent(t *testing.T) {
 		t.Fatalf("Agent with no prompt should return empty body, got %q", got)
 	}
 }
-
-func TestIsStructured(t *testing.T) {
-	for _, name := range []string{"TodoWrite", "WebFetch", "todo_write", "web_fetch", "Agent", "Task", "agent", "task"} {
-		if !IsStructured(name) {
-			t.Errorf("%q should be structured", name)
-		}
-	}
-	for _, name := range []string{"Read", "Bash", "read_file", "bash"} {
-		if IsStructured(name) {
-			t.Errorf("%q should NOT be structured (volumetric)", name)
-		}
-	}
-}
