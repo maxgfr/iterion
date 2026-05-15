@@ -180,6 +180,15 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
             case "event":
               queueEvent(env.payload as RunEvent);
               break;
+            case "event_batch":
+              // Server-side bulk envelope (replay path): payload is
+              // already an array. Drain the live-event microtask
+              // buffer first so seq order is preserved across
+              // batches, then push the whole array in one shot —
+              // bypasses the per-event microtask round-trip.
+              flushEvents();
+              applyEventsBatch(env.payload as RunEvent[]);
+              break;
             case "log_chunk":
               applyLogChunk(env.payload as LogChunkPayload);
               break;

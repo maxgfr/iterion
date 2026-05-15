@@ -132,18 +132,40 @@ func TestRunsWS_FromSeqReplaysHistorical(t *testing.T) {
 	got := []int64{}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) && len(got) < 2 {
-		env := readEnvelope(t, c, wsTypeEvent, wsTypeTerminated)
+		env := readEnvelope(t, c, wsTypeEvent, wsTypeEventBatch, wsTypeTerminated)
 		if env.Type == wsTypeTerminated {
 			break
 		}
+		for _, ev := range decodeEventEnvelope(t, env) {
+			got = append(got, ev.Seq)
+		}
+	}
+	if len(got) < 2 || got[0] != 1 || got[1] != 2 {
+		t.Errorf("replayed seqs = %v, want [1 2]", got)
+	}
+}
+
+// decodeEventEnvelope normalises a server→client event-bearing envelope
+// (wsTypeEvent for a single event or wsTypeEventBatch for an array)
+// into a flat slice so tests don't have to fork on payload shape.
+func decodeEventEnvelope(t *testing.T, env runWSEnvelope) []store.Event {
+	t.Helper()
+	switch env.Type {
+	case wsTypeEvent:
 		var ev store.Event
 		if err := json.Unmarshal(env.Payload, &ev); err != nil {
 			t.Fatalf("decode event: %v", err)
 		}
-		got = append(got, ev.Seq)
-	}
-	if len(got) < 2 || got[0] != 1 || got[1] != 2 {
-		t.Errorf("replayed seqs = %v, want [1 2]", got)
+		return []store.Event{ev}
+	case wsTypeEventBatch:
+		var evs []store.Event
+		if err := json.Unmarshal(env.Payload, &evs); err != nil {
+			t.Fatalf("decode event_batch: %v", err)
+		}
+		return evs
+	default:
+		t.Fatalf("decodeEventEnvelope: unexpected type %q", env.Type)
+		return nil
 	}
 }
 
@@ -181,16 +203,14 @@ func TestRunsWS_ReplayPaginatesPastMaxEventsPerPage(t *testing.T) {
 	var lastSeq int64 = -1
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) && received < n {
-		env := readEnvelope(t, c, wsTypeEvent, wsTypeTerminated)
+		env := readEnvelope(t, c, wsTypeEvent, wsTypeEventBatch, wsTypeTerminated)
 		if env.Type == wsTypeTerminated {
 			break
 		}
-		var ev store.Event
-		if err := json.Unmarshal(env.Payload, &ev); err != nil {
-			t.Fatalf("decode event: %v", err)
+		for _, ev := range decodeEventEnvelope(t, env) {
+			received++
+			lastSeq = ev.Seq
 		}
-		received++
-		lastSeq = ev.Seq
 	}
 	if received != n {
 		t.Errorf("received = %d events, want %d (replay must paginate past MaxEventsPerPage=%d)",
@@ -198,6 +218,30 @@ func TestRunsWS_ReplayPaginatesPastMaxEventsPerPage(t *testing.T) {
 	}
 	if want := int64(n - 1); lastSeq != want {
 		t.Errorf("lastSeq = %d, want %d (terminal event must reach the client)", lastSeq, want)
+	}
+}
+
+// TestRunsWS_ReplayUsesEventBatch asserts the replay path emits a
+// wsTypeEventBatch envelope (the bulk shape) rather than N individual
+// wsTypeEvent envelopes. Catches accidental regressions to the
+// per-event send pattern, which would re-introduce O(events) WS
+// frames + marshal overhead on every reconnect.
+func TestRunsWS_ReplayUsesEventBatch(t *testing.T) {
+	srv, hs := newTestServer(t)
+	seedRun(t, srv, "run-batch", "wf", store.RunStatusFinished)
+	// seedRun appends 3 events.
+
+	c := dialRunWS(t, hs, "run-batch")
+	writeJSONMessage(t, c, runWSEnvelope{Type: wsTypeSubscribe})
+	_ = readEnvelope(t, c, wsTypeSnapshot)
+
+	env := readEnvelope(t, c, wsTypeEvent, wsTypeEventBatch, wsTypeTerminated)
+	if env.Type != wsTypeEventBatch {
+		t.Fatalf("Type = %q, want %q (replay must batch events)", env.Type, wsTypeEventBatch)
+	}
+	evs := decodeEventEnvelope(t, env)
+	if len(evs) != 3 {
+		t.Errorf("batch length = %d, want 3", len(evs))
 	}
 }
 

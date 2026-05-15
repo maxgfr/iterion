@@ -25,8 +25,16 @@ type runWSEnvelope struct {
 
 // Server→client message types.
 const (
-	wsTypeSnapshot   = "snapshot"
-	wsTypeEvent      = "event"
+	wsTypeSnapshot = "snapshot"
+	wsTypeEvent    = "event"
+	// wsTypeEventBatch is the bulk equivalent of wsTypeEvent: payload is
+	// an array of events instead of one. Used for historical replay so
+	// the server marshals one envelope per page (up to MaxEventsPerPage)
+	// instead of one per event, and the frontend dispatches one state
+	// update per page instead of one per event. Live (broker-driven)
+	// events keep using wsTypeEvent — they arrive one at a time and
+	// batching them would just add latency without saving any frames.
+	wsTypeEventBatch = "event_batch"
 	wsTypeError      = "error"
 	wsTypeAck        = "ack"
 	wsTypeTerminated = "terminated"
@@ -284,8 +292,13 @@ func (c *runConn) streamEventsLocal(fromSeq, snapshotSeq int64) {
 			if err != nil {
 				break
 			}
-			for _, ev := range events {
-				if !c.sendEnvelope(wsTypeEvent, ev, "") {
+			if len(events) > 0 {
+				// Ship the whole page as one batch envelope: cuts
+				// per-envelope marshal + WS-frame overhead by the
+				// page size (up to MaxEventsPerPage×). The frontend
+				// dispatches one state update per page instead of
+				// one per event.
+				if !c.sendEnvelope(wsTypeEventBatch, events, "") {
 					return
 				}
 			}
