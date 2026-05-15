@@ -221,9 +221,17 @@ const PARSERS: Record<string, Parser> = {
   },
 };
 
-// extractTodos pulls the well-formed TodoItem[] out of a TodoWrite input.
-// Returns an empty array when the shape doesn't match, leaving the card
-// to fall back to its standard fields-only rendering.
+// extractTodosFromInput pulls the well-formed TodoItem[] out of a raw
+// TodoWrite/todo_write input (JSON string or already-parsed object).
+// Returns null when the shape doesn't match, so callers can distinguish
+// "no todos here" from "empty list".
+export function extractTodosFromInput(rawInput: unknown): TodoItem[] | null {
+  const obj = toObject(rawInput);
+  if (!obj) return null;
+  const todos = extractTodos(obj);
+  return todos.length > 0 ? todos : null;
+}
+
 function extractTodos(input: Record<string, unknown>): TodoItem[] {
   const todos = input["todos"];
   if (!Array.isArray(todos)) return [];

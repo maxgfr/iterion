@@ -6,6 +6,10 @@ import type {
   RunSnapshot,
   RunHeader,
 } from "@/api/runs";
+import {
+  extractTodosFromInput,
+  type TodoItem,
+} from "@/components/Runs/toolFormatters";
 
 // NoEventsSeq mirrors runview.NoEventsSeq on the Go side. Disambiguates
 // "no events have been applied" from "the most recent event has seq 0".
@@ -128,6 +132,42 @@ export interface InFlightTool {
   startedAt: number;
 }
 
+// AGENTIC_TOOL_NAMES groups tool names that themselves block on an
+// internal LLM call (Claude Code's `Agent`/`Task` sub-agents and claw's
+// lowercase `agent`/`task`). They look like a tool to the engine but
+// spend almost all their wall-clock waiting on a model, so the UI
+// treats them differently: the Logs footer keeps showing the
+// random-words "thinking" loader instead of "Running <tool>", and the
+// side panel surfaces a count of pending agents.
+export const AGENTIC_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "Agent",
+  "Task",
+  "agent",
+  "task",
+]);
+
+// TODO_LIST_TOOL_NAMES groups tool names that emit a todo list payload.
+// Claude Code's SDK uses CamelCase `TodoWrite`; claw exposes the same
+// concept as `todo_write` (snake_case). Both write a `todos` array on
+// the tool input that we surface in the side panel.
+const TODO_LIST_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "TodoWrite",
+  "todo_write",
+]);
+
+// TodoListSnapshot captures the latest todo list a tool call emitted
+// for one execution. Populated on `tool_started` (which carries
+// `data.input`) and never cleared by sibling tool calls — only a new
+// TodoWrite/todo_write call from the same execution replaces it.
+export interface TodoListSnapshot {
+  todos: TodoItem[];
+  updatedAt: number;
+  // Source tool name as observed (`TodoWrite` or `todo_write`). The UI
+  // doesn't branch on it currently but keeping it lets us label the
+  // panel without re-deriving the source from elsewhere.
+  source: string;
+}
+
 export interface RunLogState {
   // start is the byte offset in the run's logical log stream where
   // text begins. start > 0 means the older bytes were evicted.
@@ -165,6 +205,10 @@ interface RunStoreState {
   // In-flight tools, keyed by execution_id. Sorted by start time
   // (insertion order). Empty entries are pruned to keep the map lean.
   inFlightToolsByExec: Map<string, InFlightTool[]>;
+  // Latest todo list per execution, populated on TodoWrite/todo_write
+  // tool_started events. Cleared when the execution finishes so the
+  // side panel only shows live data.
+  latestTodosByExec: Map<string, TodoListSnapshot>;
   pendingHumanInput: PendingHumanInput | null;
   wsState: WsState;
   followTail: boolean;
@@ -223,6 +267,7 @@ const initialState = {
   executionsById: new Map<string, ExecutionState>(),
   lastExecIDByNode: new Map<string, string>(),
   inFlightToolsByExec: new Map<string, InFlightTool[]>(),
+  latestTodosByExec: new Map<string, TodoListSnapshot>(),
   pendingHumanInput: null as PendingHumanInput | null,
   wsState: "idle" as WsState,
   followTail: true,
@@ -283,6 +328,7 @@ export const useRunStore = create<RunStoreState>((set) => ({
           // drop any stale entries — the live event stream will
           // repopulate from the next tool_started onward.
           inFlightToolsByExec: new Map(),
+          latestTodosByExec: new Map(),
           events: state.events.filter((e) => e.seq <= snap.last_seq),
           pendingHumanInput: rehydrated,
         };
@@ -298,6 +344,7 @@ export const useRunStore = create<RunStoreState>((set) => ({
           executionsById: map,
           lastExecIDByNode,
           inFlightToolsByExec: new Map(),
+          latestTodosByExec: new Map(),
           snapshot: snap,
           pendingHumanInput: rehydrated,
           browser: state.browser,
@@ -426,6 +473,7 @@ export const useRunStore = create<RunStoreState>((set) => ({
       executionsById: new Map(),
       lastExecIDByNode: new Map(),
       inFlightToolsByExec: new Map(),
+      latestTodosByExec: new Map(),
       log: initialLogState,
     }),
 }));
@@ -485,6 +533,7 @@ type ReduceInput = Pick<
   | "executionsById"
   | "lastExecIDByNode"
   | "inFlightToolsByExec"
+  | "latestTodosByExec"
   | "snapshot"
   | "pendingHumanInput"
   | "browser"
@@ -530,6 +579,7 @@ function reduceEvents(
   let executionsById = state.executionsById;
   let lastExecIDByNode = state.lastExecIDByNode;
   let inFlightToolsByExec = state.inFlightToolsByExec;
+  let latestTodosByExec = state.latestTodosByExec;
   let snapshot = state.snapshot;
   let pendingHumanInput = state.pendingHumanInput;
   let browser = state.browser;
@@ -574,6 +624,24 @@ function reduceEvents(
     ensureInFlightCopy();
     inFlightToolsByExec = new Map();
     inFlightMutated = true;
+  };
+  // Same lazy-copy pattern for the latest-todos map.
+  let todosMutated = false;
+  const ensureTodosCopy = () => {
+    if (!todosMutated) {
+      latestTodosByExec = new Map(latestTodosByExec);
+      todosMutated = true;
+    }
+  };
+  const clearTodosFor = (execId: string) => {
+    if (!latestTodosByExec.has(execId)) return;
+    ensureTodosCopy();
+    latestTodosByExec.delete(execId);
+  };
+  const clearAllTodos = () => {
+    if (latestTodosByExec.size === 0) return;
+    ensureTodosCopy();
+    latestTodosByExec = new Map();
   };
 
   let runStatusOverride: RunHeader["status"] | null = null;
@@ -711,6 +779,7 @@ function reduceEvents(
           last_seq: evt.seq,
         });
         clearInFlightFor(exec.execution_id);
+        clearTodosFor(exec.execution_id);
         break;
       }
       case "tool_started": {
@@ -728,6 +797,21 @@ function reduceEvents(
           startedAt: Date.parse(evt.timestamp) || Date.now(),
         });
         inFlightToolsByExec.set(exec.execution_id, next);
+        // TodoWrite (claude_code) and todo_write (claw) carry the live
+        // task list on `data.input`. Capture the latest payload per
+        // execution so the side panel can render it without scanning
+        // the whole events array on every selector call.
+        if (TODO_LIST_TOOL_NAMES.has(toolName)) {
+          const todos = extractTodosFromInput(evt.data?.input);
+          if (todos && todos.length > 0) {
+            ensureTodosCopy();
+            latestTodosByExec.set(exec.execution_id, {
+              todos,
+              updatedAt: Date.parse(evt.timestamp) || Date.now(),
+              source: toolName,
+            });
+          }
+        }
         break;
       }
       case "tool_called":
@@ -838,6 +922,7 @@ function reduceEvents(
           errMsg ?? undefined,
         );
         clearAllInFlight();
+        clearAllTodos();
         runStatusOverride = "failed_resumable";
         runErrorOverride = errMsg;
         break;
@@ -858,6 +943,7 @@ function reduceEvents(
           undefined,
         );
         clearAllInFlight();
+        clearAllTodos();
         runStatusOverride = "finished";
         break;
       }
@@ -872,6 +958,7 @@ function reduceEvents(
           reason,
         );
         clearAllInFlight();
+        clearAllTodos();
         runStatusOverride = "cancelled";
         break;
       }
@@ -1018,6 +1105,9 @@ function reduceEvents(
   if (inFlightMutated) {
     next.inFlightToolsByExec = inFlightToolsByExec;
   }
+  if (todosMutated) {
+    next.latestTodosByExec = latestTodosByExec;
+  }
   if (lastExecIDMutated) {
     next.lastExecIDByNode = lastExecIDByNode;
   }
@@ -1141,27 +1231,29 @@ function orderedExecutionIds(
   return out;
 }
 
-// selectInFlightTool returns the most recently started in-flight tool
-// for the given filter, or null when nothing is running. The Logs
-// panel uses this to swap its footer between the random-words
-// "thinking" loader and a per-tool spinner.
+// selectInFlightTools returns every in-flight tool matching the given
+// filter, ordered by `startedAt` ascending (oldest first). The Logs
+// panel partitions this list into synchronous tools (which dominate
+// the footer with "Running <tool>") and asynchronous ones (Agent/Task
+// sub-agents — surfaced as a secondary count chip while the footer
+// shows the random-words "thinking" loader).
 //
 // When filterNodeId is set we scope to (filterNodeId, filterIteration ??
 // 0) — the same scoping the existing `active` selector uses — so a
 // sibling node running in parallel can't leak a spinner into the
 // per-node Logs tab.
 //
-// When filterNodeId is null we return the most recently started entry
-// across all executions; the global Logs panel is intentionally
-// loud-and-coarse here, mirroring how the random-words footer already
-// fires on any execution running anywhere.
-export function selectInFlightTool(
+// When filterNodeId is null we return entries across all executions;
+// the global Logs panel is intentionally loud-and-coarse here,
+// mirroring how the random-words footer already fires on any execution
+// running anywhere.
+export function selectInFlightTools(
   state: Pick<RunStoreState, "inFlightToolsByExec" | "executionsById">,
   filterNodeId: string | null = null,
   filterIteration: number | null = null,
-): InFlightTool | null {
-  if (state.inFlightToolsByExec.size === 0) return null;
-  let best: InFlightTool | null = null;
+): InFlightTool[] {
+  if (state.inFlightToolsByExec.size === 0) return [];
+  const out: InFlightTool[] = [];
   for (const [execId, tools] of state.inFlightToolsByExec) {
     if (tools.length === 0) continue;
     if (filterNodeId) {
@@ -1170,14 +1262,52 @@ export function selectInFlightTool(
       if (exec.ir_node_id !== filterNodeId) continue;
       if (exec.loop_iteration !== (filterIteration ?? 0)) continue;
     }
-    // tools is insertion-ordered (oldest first); the most recently
-    // started is the tail entry.
-    const candidate = tools[tools.length - 1]!;
-    if (!best || candidate.startedAt >= best.startedAt) {
-      best = candidate;
+    for (const t of tools) out.push(t);
+  }
+  out.sort((a, b) => a.startedAt - b.startedAt);
+  return out;
+}
+
+// selectActiveTodos returns the most recently updated todo list snapshot
+// for the given filter scope, or null when nothing has been emitted. The
+// side panel uses this to render the live task list. Scoping mirrors
+// `selectInFlightTools`: a node-filtered tab is scoped to (filterNodeId,
+// filterIteration ?? 0); the global tab returns the most recent snapshot
+// across all executions.
+export function selectActiveTodos(
+  state: Pick<
+    RunStoreState,
+    "latestTodosByExec" | "executionsById"
+  >,
+  filterNodeId: string | null = null,
+  filterIteration: number | null = null,
+): TodoListSnapshot | null {
+  if (state.latestTodosByExec.size === 0) return null;
+  let best: TodoListSnapshot | null = null;
+  for (const [execId, snap] of state.latestTodosByExec) {
+    if (filterNodeId) {
+      const exec = state.executionsById.get(execId);
+      if (!exec) continue;
+      if (exec.ir_node_id !== filterNodeId) continue;
+      if (exec.loop_iteration !== (filterIteration ?? 0)) continue;
     }
+    if (!best || snap.updatedAt >= best.updatedAt) best = snap;
   }
   return best;
+}
+
+// selectPendingAgents returns the list of in-flight agentic tool calls
+// (Agent/Task / agent/task) within the filter scope, oldest first. The
+// side panel surfaces a count + the oldest elapsed time so the operator
+// knows how many sub-agents are currently pending even though they're
+// not visible in the footer.
+export function selectPendingAgents(
+  state: Pick<RunStoreState, "inFlightToolsByExec" | "executionsById">,
+  filterNodeId: string | null = null,
+  filterIteration: number | null = null,
+): InFlightTool[] {
+  const all = selectInFlightTools(state, filterNodeId, filterIteration);
+  return all.filter((t) => AGENTIC_TOOL_NAMES.has(t.toolName));
 }
 
 // Re-export header type for component imports.
