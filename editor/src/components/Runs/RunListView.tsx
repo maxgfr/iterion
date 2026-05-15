@@ -4,8 +4,7 @@ import { useLocation } from "wouter";
 import { Badge } from "@/components/ui/Badge";
 import { type RunStatus } from "@/api/runs";
 import { formatRelative } from "@/lib/format";
-import ProjectLabel from "@/components/shared/ProjectLabel";
-import NavLinks from "@/components/shared/NavLinks";
+import AppHeader from "@/components/shared/AppHeader";
 import { useRuns } from "@/hooks/useRuns";
 import { STATUS_VARIANT, labelForStatus } from "./runStatusMeta";
 import QueueDepthBar from "./QueueDepthBar";
@@ -30,11 +29,12 @@ export default function RunListView() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-surface-1 text-fg-default">
-      <header className="border-b border-border-default px-4 py-2.5 flex items-center gap-3">
-        <NavLinks active="runs" />
-        <ProjectLabel />
-        <span className="text-xs text-fg-subtle">{runs.length} total</span>
-      </header>
+      <AppHeader
+        active="runs"
+        rightActions={
+          <span className="text-xs text-fg-subtle">{runs.length} total</span>
+        }
+      />
 
       <QueueDepthBar counts={counts} />
 

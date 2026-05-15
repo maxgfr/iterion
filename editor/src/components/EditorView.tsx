@@ -10,6 +10,7 @@ import DiagnosticsPanel from "@/components/Diagnostics/DiagnosticsPanel";
 import LibraryPanel from "@/components/Library/LibraryPanel";
 import SubNodePalette from "@/components/Canvas/SubNodePalette";
 import SourceView from "@/components/SourceView/SourceView";
+import AppHeader from "@/components/shared/AppHeader";
 import { IconButton } from "@/components/ui";
 import { useUIStore } from "@/store/ui";
 import { useDocumentStore } from "@/store/document";
@@ -156,6 +157,7 @@ export default function EditorView() {
   return (
     <ReactFlowProvider>
       <div className="h-screen w-screen overflow-hidden flex flex-col bg-surface-0 text-fg-default">
+        {!expanded && <AppHeader active="editor" />}
         {bannerRunId && (
           <div className="flex items-center gap-2 px-3 py-1.5 text-xs bg-accent-soft text-accent-fg border-b border-border-default">
             <span aria-hidden>↗</span>
@@ -191,12 +193,12 @@ export default function EditorView() {
             ? { gridTemplateColumns: "1fr", gridTemplateRows: "1fr" }
             : {
                 gridTemplateColumns: `${leftWidth}px 1fr ${effectiveInspectorWidth}px`,
-                gridTemplateRows: `48px 1fr ${diagnosticsPanelOpen ? "160px" : "0px"}`,
+                gridTemplateRows: `40px 1fr ${diagnosticsPanelOpen ? "160px" : "0px"}`,
               }
         }
       >
         {!expanded && (
-          <div className="col-span-3 border-b border-border-default">
+          <div className="col-span-3">
             <Toolbar />
           </div>
         )}

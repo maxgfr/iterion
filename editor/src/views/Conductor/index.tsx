@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import PageShell from "@/components/shared/PageShell";
 import ConductorControlBar from "@/components/shared/ConductorControlBar";
-import NavLinks from "@/components/shared/NavLinks";
-import ProjectLabel from "@/components/shared/ProjectLabel";
+import { Button } from "@/components/ui/Button";
 import {
   cancelIssue,
   getState,
@@ -90,13 +90,21 @@ export default function ConductorView() {
     }
   }, []);
 
-  if (loading) return <div className="p-8 text-fg-muted">Loading conductor state…</div>;
+  if (loading) {
+    return (
+      <PageShell active="conductor">
+        <div className="p-8 text-fg-muted">Loading conductor state…</div>
+      </PageShell>
+    );
+  }
   if (!snap) {
     return (
-      <div className="p-8 text-fg-muted">
-        Conductor not available.{" "}
-        <code className="text-xs">iterion conduct &lt;config.yaml&gt;</code> exposes this view.
-      </div>
+      <PageShell active="conductor">
+        <div className="p-8 text-fg-muted">
+          Conductor not available.{" "}
+          <code className="text-xs">iterion conduct &lt;config.yaml&gt;</code> exposes this view.
+        </div>
+      </PageShell>
     );
   }
 
@@ -104,27 +112,19 @@ export default function ConductorView() {
   const retries = snap.retries ?? [];
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-surface-0 text-fg-default">
-      <header className="border-b border-border-default px-4 py-2.5 flex items-center gap-3 bg-surface-1">
-        <span className="text-sm font-bold tracking-wide">ITERION</span>
-        <NavLinks active="conductor" />
-        <ProjectLabel />
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            className="text-xs px-2 py-1 rounded border border-border-default hover:bg-surface-2"
-            onClick={() => void doRefresh()}
-          >
+    <PageShell
+      active="conductor"
+      rightActions={
+        <>
+          <Button variant="secondary" size="sm" onClick={() => void doRefresh()}>
             Force tick
-          </button>
-          <button
-            className="text-xs px-2 py-1 rounded border border-border-default hover:bg-surface-2"
-            onClick={() => void doReload()}
-          >
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => void doReload()}>
             Reload config
-          </button>
-        </div>
-      </header>
-
+          </Button>
+        </>
+      }
+    >
       <ConductorControlBar onOpenSettings={() => setSettingsOpen(true)} />
       <SettingsDrawer
         open={settingsOpen}
@@ -143,7 +143,7 @@ export default function ConductorView() {
         <RunningTable rows={running} onCancel={doCancel} />
         <RetriesTable rows={retries} />
       </main>
-    </div>
+    </PageShell>
   );
 }
 

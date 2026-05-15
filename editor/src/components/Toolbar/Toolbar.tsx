@@ -8,9 +8,6 @@ import * as api from "@/api/client";
 import ConfirmDialog from "../shared/ConfirmDialog";
 import ShortcutsHelp from "../shared/ShortcutsHelp";
 import FilePicker from "../FilePicker/FilePicker";
-import BackendStatusPill from "./BackendStatusPill";
-import ProjectLabel from "@/components/shared/ProjectLabel";
-import NavLinks from "@/components/shared/NavLinks";
 import {
   Button,
   IconButton,
@@ -18,7 +15,6 @@ import {
   Dialog,
   Input,
 } from "@/components/ui";
-import ThemeToggle from "@/components/ui/ThemeToggle";
 import ToolbarGroup from "./ToolbarGroup";
 import {
   FilePlusIcon,
@@ -68,8 +64,7 @@ export default function Toolbar() {
 
   const filePickerOpen = useUIStore((s) => s.filePickerOpen);
   const setFilePickerOpen = useUIStore((s) => s.setFilePickerOpen);
-  const backendReport = useBackendDetectStore((s) => s.report);
-  const hasResolvedBackend = !!backendReport?.resolved_default;
+  const hasResolvedBackend = useBackendDetectStore((s) => !!s.report?.resolved_default);
   const [loading, setLoading] = useState(false);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveFileName, setSaveFileName] = useState("");
@@ -308,12 +303,7 @@ export default function Toolbar() {
   const workflows = document?.workflows ?? [];
 
   return (
-    <div className="flex items-center gap-1 px-3 h-full text-sm">
-      <span className="font-bold tracking-wide mr-1">ITERION</span>
-      <NavLinks active="editor" />
-      <ProjectLabel />
-      <BackendStatusPill />
-
+    <div className="flex items-center gap-1 px-4 h-10 text-sm bg-surface-1 border-b border-border-default">
       {/* File ops */}
       <ToolbarGroup>
         <IconButton label="New (Ctrl+N)" tooltip="New workflow" onClick={handleNew} size="sm">
@@ -431,7 +421,6 @@ export default function Toolbar() {
         >
           <ExclamationTriangleIcon />
         </IconButton>
-        <ThemeToggle />
       </ToolbarGroup>
 
       {/* Workflow */}

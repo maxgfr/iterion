@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import PageShell from "@/components/shared/PageShell";
 import ConductorControlBar from "@/components/shared/ConductorControlBar";
-import NavLinks from "@/components/shared/NavLinks";
-import ProjectLabel from "@/components/shared/ProjectLabel";
+import { Button } from "@/components/ui/Button";
 import {
   cancelIssue,
   getState,
@@ -177,38 +177,37 @@ export default function BoardView() {
   );
 
   if (loading) {
-    return <div className="p-8 text-fg-muted">Loading kanban…</div>;
+    return (
+      <PageShell active="board">
+        <div className="p-8 text-fg-muted">Loading kanban…</div>
+      </PageShell>
+    );
   }
   if (!board) {
     return (
-      <div className="p-8 text-fg-muted">
-        Native tracker not available.{" "}
-        <code className="text-xs">iterion editor --dir &lt;project&gt;</code> creates one on first launch.
-      </div>
+      <PageShell active="board">
+        <div className="p-8 text-fg-muted">
+          Native tracker not available.{" "}
+          <code className="text-xs">iterion editor --dir &lt;project&gt;</code> creates one on first launch.
+        </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-surface-0 text-fg-default">
-      <header className="border-b border-border-default px-4 py-2.5 flex items-center gap-3 bg-surface-1">
-        <span className="text-sm font-bold tracking-wide">ITERION</span>
-        <NavLinks active="board" />
-        <ProjectLabel />
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            className="text-xs px-2 py-1 rounded border border-border-default hover:bg-surface-2"
-            onClick={() => void refresh()}
-          >
+    <PageShell
+      active="board"
+      rightActions={
+        <>
+          <Button variant="secondary" size="sm" onClick={() => void refresh()}>
             Refresh
-          </button>
-          <button
-            className="text-xs px-2 py-1 rounded bg-accent text-on-accent hover:opacity-90"
-            onClick={() => setCreating(true)}
-          >
+          </Button>
+          <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
             + New issue
-          </button>
-        </div>
-      </header>
+          </Button>
+        </>
+      }
+    >
 
       <ConductorControlBar onOpenSettings={() => setSettingsOpen(true)} />
       <SettingsDrawer
@@ -274,7 +273,7 @@ export default function BoardView() {
           onDelete={() => void onDelete(editing.id)}
         />
       )}
-    </div>
+    </PageShell>
   );
 }
 

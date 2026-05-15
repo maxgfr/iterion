@@ -9,7 +9,6 @@ import RunView from "@/components/Runs/RunView";
 import BoardView from "@/views/Board";
 import ConductorView from "@/views/Conductor";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
-import UserTeamChip from "@/components/shared/UserTeamChip";
 import ToastContainer from "@/components/shared/Toast";
 import MissingCLIBanner from "@/components/MissingCLIBanner";
 import Welcome from "@/views/Welcome";
@@ -167,9 +166,9 @@ function AuthedApp() {
             <ConductorView />
           </ErrorBoundary>
         </Route>
-        <Route path="/editor" component={EditorViewWithChrome} />
-        <Route path="/" component={HomeViewWithChrome} />
-        <Route component={HomeViewWithChrome} />
+        <Route path="/editor" component={EditorView} />
+        <Route path="/" component={HomeView} />
+        <Route component={HomeView} />
       </Switch>
       <ToastContainer />
       {isDesktop && (
@@ -191,25 +190,3 @@ function AuthedApp() {
   );
 }
 
-// EditorViewWithChrome wraps the editor with the floating top-right
-// team/account chip. The chip is in a fixed-position layer so it
-// floats above the editor's own toolbars without disrupting layout.
-function EditorViewWithChrome() {
-  return (
-    <div className="relative h-full">
-      <UserTeamChip />
-      <EditorView />
-    </div>
-  );
-}
-
-// HomeViewWithChrome mirrors EditorViewWithChrome: same floating chip,
-// different body. Keeps team-switching reachable from the landing page.
-function HomeViewWithChrome() {
-  return (
-    <div className="relative h-full">
-      <UserTeamChip />
-      <HomeView />
-    </div>
-  );
-}
