@@ -892,8 +892,8 @@ func logAssistantContent(logger *iterlog.Logger, nodeID string, iteration int, b
 					break
 				}
 			}
-			header := fmt.Sprintf("[%s#%d/claude-code] 🔧 %s %s", nodeID, iteration, displayName, toolUseDetail(bl.Name, bl.Input))
-			logger.LogBlock(iterlog.LevelInfo, "ℹ️ ", header, toolUseBody(bl.Name, bl.Input))
+			header := fmt.Sprintf("[%s#%d/claude-code] 🔧 %s %s", nodeID, iteration, displayName, toolUseDetail(displayName, bl.Input))
+			logger.LogBlock(iterlog.LevelInfo, "ℹ️ ", header, toolUseBody(displayName, bl.Input))
 		case *claudesdk.ToolResultBlock:
 			if bl.IsError {
 				logger.Info("[%s#%d/claude-code] ❌ tool error: %v", nodeID, iteration, bl.Content)

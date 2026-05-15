@@ -48,10 +48,40 @@ func TestHeaderDetail_CamelCase(t *testing.T) {
 			want:  "iterion docs",
 		},
 		{
-			name:  "Task shows description",
+			name:  "Task combines subagent_type and description",
+			tool:  "Task",
+			input: map[string]any{"subagent_type": "code-reviewer", "description": "Run audit", "prompt": "long..."},
+			want:  "code-reviewer: Run audit",
+		},
+		{
+			name:  "Task falls back to description when subagent_type missing",
 			tool:  "Task",
 			input: map[string]any{"description": "Run audit", "prompt": "long..."},
 			want:  "Run audit",
+		},
+		{
+			name:  "Agent combines subagent_type and description",
+			tool:  "Agent",
+			input: map[string]any{"subagent_type": "Explore", "description": "Locate handler", "prompt": "Where is auth.ts?"},
+			want:  "Explore: Locate handler",
+		},
+		{
+			name:  "Agent falls back to description-only",
+			tool:  "Agent",
+			input: map[string]any{"description": "Locate handler"},
+			want:  "Locate handler",
+		},
+		{
+			name:  "Agent falls back to subagent_type-only",
+			tool:  "Agent",
+			input: map[string]any{"subagent_type": "Explore"},
+			want:  "Explore",
+		},
+		{
+			name:  "Agent with neither field returns empty",
+			tool:  "Agent",
+			input: map[string]any{"prompt": "just a prompt"},
+			want:  "",
 		},
 		{
 			name:  "ToolSearch shows query",
@@ -126,7 +156,10 @@ func TestHeaderDetail_SnakeCase(t *testing.T) {
 	}{
 		{"read_file", map[string]any{"path": "/tmp/x"}, "/tmp/x"},
 		{"web_fetch", map[string]any{"url": "https://x"}, "https://x"},
+		{"agent", map[string]any{"subagent_type": "explore", "description": "Find foo"}, "explore: Find foo"},
+		{"agent", map[string]any{"description": "Find foo"}, "Find foo"},
 		{"task", map[string]any{"description": "Audit"}, "Audit"},
+		{"task", map[string]any{"subagent_type": "verification", "description": "Audit"}, "verification: Audit"},
 		{"slash_command", map[string]any{"command_name": "/help"}, "/help"},
 		{"slash_command", map[string]any{"command": "/help"}, "/help"},
 	}
@@ -203,8 +236,27 @@ func TestBlockBody_NonStructured(t *testing.T) {
 	}
 }
 
+func TestBlockBody_Agent(t *testing.T) {
+	prompt := "Step 1: investigate the auth handler.\nStep 2: report back."
+	for _, name := range []string{"Agent", "Task", "agent", "task"} {
+		t.Run(name, func(t *testing.T) {
+			got := BlockBody(name, mustJSON(t, map[string]any{
+				"subagent_type": "Explore",
+				"description":   "Locate handler",
+				"prompt":        prompt,
+			}))
+			if got != prompt {
+				t.Fatalf("BlockBody(%q) = %q, want full prompt", name, got)
+			}
+		})
+	}
+	if got := BlockBody("Agent", mustJSON(t, map[string]any{"description": "no prompt here"})); got != "" {
+		t.Fatalf("Agent with no prompt should return empty body, got %q", got)
+	}
+}
+
 func TestIsStructured(t *testing.T) {
-	for _, name := range []string{"TodoWrite", "WebFetch", "todo_write", "web_fetch"} {
+	for _, name := range []string{"TodoWrite", "WebFetch", "todo_write", "web_fetch", "Agent", "Task", "agent", "task"} {
 		if !IsStructured(name) {
 			t.Errorf("%q should be structured", name)
 		}
