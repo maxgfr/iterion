@@ -88,10 +88,10 @@ type PollingConfig struct {
 
 // AgentConfig sets concurrency and retry caps.
 type AgentConfig struct {
-	MaxConcurrent       int            `yaml:"max_concurrent,omitempty"`
+	MaxConcurrent        int            `yaml:"max_concurrent,omitempty"`
 	MaxConcurrentByState map[string]int `yaml:"max_concurrent_by_state,omitempty"`
-	MaxTurns            int            `yaml:"max_turns,omitempty"`
-	MaxRetryBackoffMS   int            `yaml:"max_retry_backoff_ms,omitempty"`
+	MaxTurns             int            `yaml:"max_turns,omitempty"`
+	MaxRetryBackoffMS    int            `yaml:"max_retry_backoff_ms,omitempty"`
 }
 
 // WorkspaceConfig controls where per-issue workspaces live.

@@ -106,13 +106,13 @@ func newTestConductor(t *testing.T, runner Runner, ft *fakeTracker, polling time
 	dir := t.TempDir()
 	wsDir := dir + "/ws"
 	cfg := &Config{
-		Name:     "test",
-		Workflow: t.TempDir() + "/fake.iter",
-		Tracker:  TrackerConfig{Kind: "fake"},
-		Polling:  PollingConfig{IntervalMS: int(polling.Milliseconds())},
-		Agent:    AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000},
+		Name:      "test",
+		Workflow:  t.TempDir() + "/fake.iter",
+		Tracker:   TrackerConfig{Kind: "fake"},
+		Polling:   PollingConfig{IntervalMS: int(polling.Milliseconds())},
+		Agent:     AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000},
 		Workspace: WorkspaceConfig{Root: wsDir},
-		Stall:    StallConfig{TimeoutMS: 0},
+		Stall:     StallConfig{TimeoutMS: 0},
 	}
 	cfg.applyDefaults()
 	ws, err := NewWorkspaces(wsDir)

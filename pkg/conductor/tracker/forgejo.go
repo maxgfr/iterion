@@ -192,16 +192,16 @@ func (a *ForgejoAdapter) Release(ctx context.Context, id, marker string) error {
 // ---------------------------------------------------------------------------
 
 type forgejoIssue struct {
-	Number    int             `json:"number"`
-	Title     string          `json:"title"`
-	Body      string          `json:"body"`
-	State     string          `json:"state"`
-	Labels    []forgejoLabel  `json:"labels"`
-	Assignees []forgejoUser   `json:"assignees"`
-	User      forgejoUser     `json:"user"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
-	URL       string          `json:"html_url"`
+	Number    int            `json:"number"`
+	Title     string         `json:"title"`
+	Body      string         `json:"body"`
+	State     string         `json:"state"`
+	Labels    []forgejoLabel `json:"labels"`
+	Assignees []forgejoUser  `json:"assignees"`
+	User      forgejoUser    `json:"user"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	URL       string         `json:"html_url"`
 }
 
 type forgejoLabel struct {

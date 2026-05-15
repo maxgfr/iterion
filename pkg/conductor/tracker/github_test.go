@@ -68,24 +68,24 @@ func TestGitHubListCandidates(t *testing.T) {
 	fake := &fakeGH{
 		listOut: mustJSON([]map[string]any{
 			{
-				"number":   42,
-				"title":    "fix the bug",
-				"body":     "body",
-				"state":    "open",
-				"labels":   []map[string]string{{"name": "ready"}},
+				"number":    42,
+				"title":     "fix the bug",
+				"body":      "body",
+				"state":     "open",
+				"labels":    []map[string]string{{"name": "ready"}},
 				"createdAt": "2026-05-01T00:00:00Z",
 				"updatedAt": "2026-05-01T00:00:00Z",
-				"url":      "https://github.com/owner/repo/issues/42",
+				"url":       "https://github.com/owner/repo/issues/42",
 			},
 			{
 				// no matching label → filtered out
-				"number":   99,
-				"title":    "untriaged",
-				"state":    "open",
-				"labels":   []map[string]string{{"name": "noise"}},
+				"number":    99,
+				"title":     "untriaged",
+				"state":     "open",
+				"labels":    []map[string]string{{"name": "noise"}},
 				"createdAt": "2026-05-02T00:00:00Z",
 				"updatedAt": "2026-05-02T00:00:00Z",
-				"url":      "https://github.com/owner/repo/issues/99",
+				"url":       "https://github.com/owner/repo/issues/99",
 			},
 		}),
 	}
@@ -134,10 +134,10 @@ func TestGitHubRefreshStates(t *testing.T) {
 	fake := &fakeGH{
 		viewOut: map[int][]byte{
 			7: mustJSON(map[string]any{
-				"number": 7,
-				"title":  "x",
-				"labels": []map[string]string{{"name": "ready"}},
-				"state":  "open",
+				"number":    7,
+				"title":     "x",
+				"labels":    []map[string]string{{"name": "ready"}},
+				"state":     "open",
 				"createdAt": "2026-05-01T00:00:00Z",
 				"updatedAt": "2026-05-01T00:00:00Z",
 			}),

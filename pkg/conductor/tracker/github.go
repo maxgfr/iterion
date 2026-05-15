@@ -205,16 +205,16 @@ func (a *GitHubAdapter) Release(ctx context.Context, id, marker string) error {
 
 // ghIssue is the JSON subset we ask gh to emit.
 type ghIssue struct {
-	Number    int            `json:"number"`
-	Title     string         `json:"title"`
-	Body      string         `json:"body"`
-	State     string         `json:"state"`
-	Labels    []ghLabel      `json:"labels"`
-	Assignees []ghUser       `json:"assignees"`
-	Author    ghUser         `json:"author"`
-	CreatedAt time.Time      `json:"createdAt"`
-	UpdatedAt time.Time      `json:"updatedAt"`
-	URL       string         `json:"url"`
+	Number    int       `json:"number"`
+	Title     string    `json:"title"`
+	Body      string    `json:"body"`
+	State     string    `json:"state"`
+	Labels    []ghLabel `json:"labels"`
+	Assignees []ghUser  `json:"assignees"`
+	Author    ghUser    `json:"author"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	URL       string    `json:"url"`
 }
 
 type ghLabel struct {
@@ -252,9 +252,9 @@ func (a *GitHubAdapter) toIssue(g ghIssue) Issue {
 		Labels:        labels,
 		Assignee:      assignee,
 		Metadata: map[string]string{
-			"url":       g.URL,
+			"url":          g.URL,
 			"github_state": g.State,
-			"author":    g.Author.Login,
+			"author":       g.Author.Login,
 		},
 	}
 }
