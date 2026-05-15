@@ -136,6 +136,28 @@ tasks:
       - task: test:live:vibe-feature-dev
       - task: test:live:secured-renovacy
 
+  test:live:vibe-feature-dev-real:
+    desc: Live e2e for vibe_feature_dev against a real Go HTTP service fixture (20-60min, $5-15)
+    cmds:
+      - go test -v -tags live -count=1 -run "TestLive_VibeFeatureDev_Real$" -timeout 2h ./e2e/...
+
+  test:live:vibe-review-alternating-real:
+    desc: Live e2e for vibe_review_alternating against a curated bug-mix fixture (30-90min, $10-30)
+    cmds:
+      - go test -v -tags live -count=1 -run "TestLive_VibeReviewAlternating_Real$" -timeout 3h ./e2e/...
+
+  test:live:secured-renovacy-real:
+    desc: Live e2e for secured-renovacy against polyglot CVE fixture incl. node-ipc malware (1-3h, $20-80)
+    cmds:
+      - go test -v -tags live -count=1 -run "TestLive_SecuredRenovacy_Real$" -timeout 4h ./e2e/...
+
+  test:live:bots-real:
+    desc: Run all three real-scenario bot live tests in sequence (very slow + very costly)
+    cmds:
+      - task: test:live:vibe-review-alternating-real
+      - task: test:live:vibe-feature-dev-real
+      - task: test:live:secured-renovacy-real
+
   test:bundle:
     desc: Bundle pack/open/compile integration tests (no live)
     cmds:
