@@ -129,6 +129,37 @@ func requireCLI(t *testing.T, name string) {
 	}
 }
 
+// resolveLiveStoreDir returns the directory the live test should use as
+// its store root. By default it picks `~/.iterion/` so that the desktop
+// app (which reads from the same path) can surface the run as it
+// happens. The previous behaviour — store inside the per-test
+// workspace tempdir — kept runs invisible to the operator's editor.
+//
+// Override by exporting `ITERION_TEST_STORE_DIR=<path>`:
+//   - empty / unset      → ~/.iterion
+//   - "workspace"        → fall back to <workspaceDir>/.iterion (the
+//                          historical isolated-per-test layout)
+//   - any absolute path  → used verbatim
+//
+// Falls back to <workspaceDir>/.iterion when $HOME is unset (CI
+// environments without a HOME) so the test still has somewhere to
+// write.
+func resolveLiveStoreDir(t *testing.T, workspaceDir string) string {
+	t.Helper()
+	switch v := os.Getenv("ITERION_TEST_STORE_DIR"); v {
+	case "":
+		// Default: shared store so the desktop app sees the run.
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			return filepath.Join(home, ".iterion")
+		}
+		return filepath.Join(workspaceDir, ".iterion")
+	case "workspace":
+		return filepath.Join(workspaceDir, ".iterion")
+	default:
+		return v
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Live E2E test — Dual-model plan/implement/review with round-robin
 // ---------------------------------------------------------------------------
@@ -181,7 +212,7 @@ func TestLive_Lite_DualModel_PlanImplementReview(t *testing.T) {
 	installValidateSyntax(t, workspaceDir)
 
 	// Create store inside the workspace for easy post-run inspection.
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, storeErr := store.New(storeDir)
 	if storeErr != nil {
 		t.Fatalf("Failed to create store: %v", storeErr)
@@ -533,7 +564,7 @@ func TestLive_Lite_SessionContinuity_ReviewFix(t *testing.T) {
 
 	installValidateSyntax(t, workspaceDir)
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, storeErr := store.New(storeDir)
 	if storeErr != nil {
 		t.Fatalf("Failed to create store: %v", storeErr)
@@ -806,7 +837,7 @@ func TestLive_Full_ExhaustiveDSLCoverage(t *testing.T) {
 
 	installValidateSyntax(t, workspaceDir)
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, storeErr := store.New(storeDir)
 	if storeErr != nil {
 		t.Fatalf("Failed to create store: %v", storeErr)
@@ -1140,7 +1171,7 @@ func TestLive_Lite_SessionInheritValidation(t *testing.T) {
 		t.Fatalf("git init failed: %v\n%s", gitErr, out)
 	}
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, storeErr := store.New(storeDir)
 	if storeErr != nil {
 		t.Fatalf("Failed to create store: %v", storeErr)
@@ -1308,7 +1339,7 @@ func TestLive_Lite_ClawComprehensive(t *testing.T) {
 	}
 	t.Logf("Workspace directory (persists after test): %s", workspaceDir)
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, storeErr := store.New(storeDir)
 	if storeErr != nil {
 		t.Fatalf("Failed to create store: %v", storeErr)
@@ -1626,7 +1657,7 @@ func TestLive_Lite_ClawBuiltinTools(t *testing.T) {
 		t.Fatalf("write go.mod: %v", werr)
 	}
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, storeErr := store.New(storeDir)
 	if storeErr != nil {
 		t.Fatalf("Failed to create store: %v", storeErr)
@@ -1800,7 +1831,7 @@ func TestLive_Lite_ClawReadImage(t *testing.T) {
 		t.Fatalf("write png fixture: %v", werr)
 	}
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, storeErr := store.New(storeDir)
 	if storeErr != nil {
 		t.Fatalf("Failed to create store: %v", storeErr)
@@ -1957,7 +1988,7 @@ func TestLive_Lite_ClawReasoningEffort(t *testing.T) {
 	}
 	t.Logf("Workspace directory (persists after test): %s", workspaceDir)
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, storeErr := store.New(storeDir)
 	if storeErr != nil {
 		t.Fatalf("Failed to create store: %v", storeErr)
@@ -2056,7 +2087,7 @@ func TestLive_Lite_ClawMCP(t *testing.T) {
 	}
 	t.Logf("Workspace directory (persists after test): %s", workspaceDir)
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, storeErr := store.New(storeDir)
 	if storeErr != nil {
 		t.Fatalf("Failed to create store: %v", storeErr)
@@ -2209,7 +2240,7 @@ func TestLive_Lite_ClawLongContext(t *testing.T) {
 	}
 	t.Logf("Workspace directory (persists after test): %s", workspaceDir)
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, storeErr := store.New(storeDir)
 	if storeErr != nil {
 		t.Fatalf("Failed to create store: %v", storeErr)
@@ -2356,7 +2387,7 @@ func TestLive_Lite_ClawSubagents(t *testing.T) {
 	}
 	t.Logf("Workspace directory (persists after test): %s", workspaceDir)
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, storeErr := store.New(storeDir)
 	if storeErr != nil {
 		t.Fatalf("Failed to create store: %v", storeErr)
@@ -2893,7 +2924,7 @@ func TestLive_VibeFeatureDev(t *testing.T) {
 	t.Logf("Workspace (persists): %s", workspaceDir)
 	seedGitRepo(t, workspaceDir)
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, err := store.New(storeDir)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
@@ -3036,7 +3067,7 @@ func Multiply(a, b int) int {
 	runCmd(t, workspaceDir, "git", "add", "add.go", "multiply.go", "go.mod")
 	runCmd(t, workspaceDir, "git", "commit", "-m", "chore: seed code under review")
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, err := store.New(storeDir)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
@@ -3159,7 +3190,7 @@ func TestLive_SecuredRenovacy(t *testing.T) {
 	runCmd(t, workspaceDir, "git", "add", "package.json", "index.js")
 	runCmd(t, workspaceDir, "git", "commit", "-m", "chore: seed npm fixture")
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, err := store.New(storeDir)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
@@ -3319,7 +3350,7 @@ func TestLive_VibeFeatureDev_Real(t *testing.T) {
 	wf := compileFixture(t, "bots/vibe_feature_dev.bot")
 	workspaceDir := seedFromFixture(t, "feature-dev-go-service")
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, err := store.New(storeDir)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
@@ -3401,7 +3432,7 @@ func TestLive_VibeReviewAlternating_Real(t *testing.T) {
 	wf := compileFixture(t, "bots/vibe_review_alternating.bot")
 	workspaceDir := seedFromFixture(t, "review-pr-mix")
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, err := store.New(storeDir)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
@@ -3482,7 +3513,7 @@ func TestLive_SecuredRenovacy_Real(t *testing.T) {
 
 	workspaceDir := seedFromFixture(t, "renovacy-multi-stack")
 
-	storeDir := filepath.Join(workspaceDir, ".iterion")
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
 	s, err := store.New(storeDir)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
