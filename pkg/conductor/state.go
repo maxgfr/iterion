@@ -52,14 +52,14 @@ type runningEntry struct {
 // demand from inside the actor so callers always see a consistent
 // snapshot of running/retries/slots.
 type Snapshot struct {
-	Name             string         `json:"name"`
-	Tracker          string         `json:"tracker"`
-	GeneratedAt      time.Time      `json:"generated_at"`
-	PollingIntervalS float64        `json:"polling_interval_seconds"`
-	StallTimeoutS    float64        `json:"stall_timeout_seconds"`
-	Running          []RunningView  `json:"running"`
-	Retries          []RetryView    `json:"retries"`
-	Slots            SlotsView      `json:"slots"`
+	Name             string        `json:"name"`
+	Tracker          string        `json:"tracker"`
+	GeneratedAt      time.Time     `json:"generated_at"`
+	PollingIntervalS float64       `json:"polling_interval_seconds"`
+	StallTimeoutS    float64       `json:"stall_timeout_seconds"`
+	Running          []RunningView `json:"running"`
+	Retries          []RetryView   `json:"retries"`
+	Slots            SlotsView     `json:"slots"`
 }
 
 // RunningView is one row of the dashboard's "running" table.
@@ -86,8 +86,8 @@ type RetryView struct {
 
 // SlotsView reports concurrency usage at the moment of capture.
 type SlotsView struct {
-	GlobalMax   int            `json:"global_max"`
-	GlobalUsed  int            `json:"global_used"`
-	PerStateMax map[string]int `json:"per_state_max,omitempty"`
+	GlobalMax    int            `json:"global_max"`
+	GlobalUsed   int            `json:"global_used"`
+	PerStateMax  map[string]int `json:"per_state_max,omitempty"`
 	PerStateUsed map[string]int `json:"per_state_used,omitempty"`
 }
