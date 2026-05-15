@@ -3340,25 +3340,20 @@ func TestLive_VibeFeatureDev_Real(t *testing.T) {
 		"mutex-guarded pattern). Add table-driven tests covering: happy path, missing title, missing body, " +
 		"oversize title (>200), nonexistent user, replay with the same idempotency key, and a different " +
 		"key on the same user (should create two posts)."
+	// Do NOT set workspace_dir here. The bot's `vars.workspace_dir`
+	// defaults to ${PROJECT_DIR} which iterion remaps to /workspace
+	// (the container bind-mount) once the sandbox is up. Overriding
+	// would replace it with the host tempdir path, which doesn't
+	// exist inside the container and every shell tool would fail.
 	executor.SetVars(map[string]interface{}{
-		"workspace_dir":  workspaceDir,
 		"feature_prompt": featurePrompt,
 	})
 
-	// vibe_feature_dev declares `sandbox: auto`. The fixture is a Go
-	// project with no .devcontainer, so the auto-resolver falls back
-	// to iterion-sandbox-slim — which ships Node + devbox but NOT Go.
-	// Override to -full (slim + Go + Python + pnpm) for the test so
-	// `go build` / `go test` calls inside the container succeed.
-	eng := runtime.New(wf, s, executor,
-		runtime.WithWorkDir(workspaceDir),
-		runtime.WithSandboxDefaultImage("ghcr.io/socialgouv/iterion-sandbox-full:edge"),
-	)
+	eng := runtime.New(wf, s, executor, runtime.WithWorkDir(workspaceDir))
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Minute)
 	defer cancel()
 	inputs := map[string]interface{}{
 		"feature_prompt": featurePrompt,
-		"workspace_dir":  workspaceDir,
 	}
 
 	t.Log("Starting vibe_feature_dev (real fixture) live run…")
@@ -3418,22 +3413,19 @@ func TestLive_VibeReviewAlternating_Real(t *testing.T) {
 	}
 	executor := newLiveExecutor(t, wf, s, runID, workspaceDir)
 	defer executor.Close()
+	// Don't override workspace_dir — same rationale as
+	// TestLive_VibeFeatureDev_Real. Let ${PROJECT_DIR} resolve to
+	// /workspace inside the sandbox.
+	scopeNotes := "Review every Go file across queue/, worker/, auth/, storage/, config/, and main.go. Focus on production-blocking correctness, concurrency, and security issues. Skip stylistic nits."
 	executor.SetVars(map[string]interface{}{
-		"workspace_dir": workspaceDir,
-		"scope_notes":   "Review every Go file across queue/, worker/, auth/, storage/, config/, and main.go. Focus on production-blocking correctness, concurrency, and security issues. Skip stylistic nits.",
+		"scope_notes": scopeNotes,
 	})
 
-	// Same sandbox image override as TestLive_VibeFeatureDev_Real — the
-	// review fixture is also pure Go, slim doesn't have Go.
-	eng := runtime.New(wf, s, executor,
-		runtime.WithWorkDir(workspaceDir),
-		runtime.WithSandboxDefaultImage("ghcr.io/socialgouv/iterion-sandbox-full:edge"),
-	)
+	eng := runtime.New(wf, s, executor, runtime.WithWorkDir(workspaceDir))
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 	inputs := map[string]interface{}{
-		"workspace_dir": workspaceDir,
-		"scope_notes":   "Review every Go file across queue/, worker/, auth/, storage/, config/, and main.go. Focus on production-blocking correctness, concurrency, and security issues. Skip stylistic nits.",
+		"scope_notes": scopeNotes,
 	}
 
 	t.Log("Starting vibe_review_alternating (real fixture) live run…")
