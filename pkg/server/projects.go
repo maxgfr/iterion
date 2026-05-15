@@ -30,6 +30,9 @@ func (s *Server) registerInitialProject() {
 	if !s.projectsEnabled() || s.cfg.WorkDir == "" {
 		return
 	}
+	if s.cfg.SkipProjectRegistration {
+		return
+	}
 	abs, err := filepath.Abs(s.cfg.WorkDir)
 	if err != nil {
 		s.logger.Warn("projects: abs workdir %q: %v", s.cfg.WorkDir, err)

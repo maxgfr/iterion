@@ -27,8 +27,9 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 
 	logger := iterlog.New(iterlog.LevelError, os.Stderr) // quiet
 	srv := New(Config{
-		WorkDir:  workDir,
-		StoreDir: storeDir,
+		WorkDir:                 workDir,
+		StoreDir:                storeDir,
+		SkipProjectRegistration: true, // tests must not pollute ~/.config/Iterion/config.json
 	}, logger)
 	if srv.runs == nil {
 		t.Fatalf("expected run console service to be wired")
@@ -320,7 +321,7 @@ func TestResolveWorkflowPath_InlineCacheFallback(t *testing.T) {
 	workDir := t.TempDir()
 	storeDir := filepath.Join(t.TempDir(), ".iterion")
 	logger := iterlog.New(iterlog.LevelError, os.Stderr)
-	srv := New(Config{WorkDir: workDir, StoreDir: storeDir}, logger)
+	srv := New(Config{WorkDir: workDir, StoreDir: storeDir, SkipProjectRegistration: true}, logger)
 
 	cacheRoot := srv.inlineSourceCacheDir()
 	if cacheRoot == "" {
@@ -369,7 +370,7 @@ func TestMaterializeInlineSource_NoOverwriteAcrossContent(t *testing.T) {
 	workDir := t.TempDir()
 	storeDir := filepath.Join(t.TempDir(), ".iterion")
 	logger := iterlog.New(iterlog.LevelError, os.Stderr)
-	srv := New(Config{WorkDir: workDir, StoreDir: storeDir}, logger)
+	srv := New(Config{WorkDir: workDir, StoreDir: storeDir, SkipProjectRegistration: true}, logger)
 
 	srcA := "workflow a:\n  entry: x\n"
 	srcB := "workflow b:\n  entry: y\n"
