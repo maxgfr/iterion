@@ -123,9 +123,10 @@ func TestRunsWS_FromSeqReplaysHistorical(t *testing.T) {
 	c := dialRunWS(t, hs, "run-replay")
 	// Ask to replay starting at seq 1 — should see seq 1 and 2
 	// (seedRun's middle and final events) replayed via the stream.
+	// Lazy mode is the new default; opt back in with replay_history.
 	writeJSONMessage(t, c, runWSEnvelope{
 		Type:    wsTypeSubscribe,
-		Payload: json.RawMessage(`{"from_seq":1}`),
+		Payload: json.RawMessage(`{"from_seq":1,"replay_history":true}`),
 	})
 	_ = readEnvelope(t, c, wsTypeSnapshot)
 
@@ -196,7 +197,10 @@ func TestRunsWS_ReplayPaginatesPastMaxEventsPerPage(t *testing.T) {
 	}
 
 	c := dialRunWS(t, hs, runID)
-	writeJSONMessage(t, c, runWSEnvelope{Type: wsTypeSubscribe})
+	writeJSONMessage(t, c, runWSEnvelope{
+		Type:    wsTypeSubscribe,
+		Payload: json.RawMessage(`{"replay_history":true}`),
+	})
 	_ = readEnvelope(t, c, wsTypeSnapshot)
 
 	received := 0
@@ -232,7 +236,10 @@ func TestRunsWS_ReplayUsesEventBatch(t *testing.T) {
 	// seedRun appends 3 events.
 
 	c := dialRunWS(t, hs, "run-batch")
-	writeJSONMessage(t, c, runWSEnvelope{Type: wsTypeSubscribe})
+	writeJSONMessage(t, c, runWSEnvelope{
+		Type:    wsTypeSubscribe,
+		Payload: json.RawMessage(`{"replay_history":true}`),
+	})
 	_ = readEnvelope(t, c, wsTypeSnapshot)
 
 	env := readEnvelope(t, c, wsTypeEvent, wsTypeEventBatch, wsTypeTerminated)
@@ -243,6 +250,40 @@ func TestRunsWS_ReplayUsesEventBatch(t *testing.T) {
 	if len(evs) != 3 {
 		t.Errorf("batch length = %d, want 3", len(evs))
 	}
+}
+
+// TestRunsWS_LazyModeSkipsHistoricalReplay asserts the default subscribe
+// (no replay_history flag, or replay_history:false) only sends the
+// snapshot — no event envelopes for events already persisted on disk.
+// The frontend pulls history on demand via the REST /events endpoint.
+func TestRunsWS_LazyModeSkipsHistoricalReplay(t *testing.T) {
+	srv, hs := newTestServer(t)
+	seedRun(t, srv, "run-lazy", "wf", store.RunStatusFinished)
+	// seedRun appends 3 events at seq 0,1,2.
+
+	c := dialRunWS(t, hs, "run-lazy")
+	writeJSONMessage(t, c, runWSEnvelope{Type: wsTypeSubscribe})
+	_ = readEnvelope(t, c, wsTypeSnapshot)
+
+	// Try to read the next envelope with a short timeout. If lazy mode
+	// works, no event/event_batch envelope should arrive — the read
+	// either times out (broker quiet on a finished run) or returns
+	// terminated. Either outcome is fine; an event envelope means the
+	// replay path leaked.
+	_ = c.SetReadDeadline(time.Now().Add(750 * time.Millisecond))
+	_, raw, err := c.ReadMessage()
+	if err != nil {
+		// Timeout or close — both are acceptable in lazy mode.
+		return
+	}
+	var env runWSEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	if env.Type == wsTypeTerminated {
+		return
+	}
+	t.Fatalf("lazy mode leaked %q envelope; expected only snapshot then quiet/terminated", env.Type)
 }
 
 func TestRunsWS_AckOnUnsubscribe(t *testing.T) {

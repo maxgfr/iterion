@@ -1,10 +1,11 @@
 import { create } from "zustand";
 
-import type {
-  ExecutionState,
-  RunEvent,
-  RunSnapshot,
-  RunHeader,
+import {
+  loadEvents,
+  type ExecutionState,
+  type RunEvent,
+  type RunSnapshot,
+  type RunHeader,
 } from "@/api/runs";
 import {
   extractTodosFromInput,
@@ -189,6 +190,10 @@ interface RunStoreState {
   runId: string | null;
   snapshot: RunSnapshot | null;
   events: RunEvent[];
+  // historyFetchedForRun is the runId whose persisted history has
+  // been pulled via /events. Null means lazy-mode hydration is still
+  // pending. See loadEventHistoryIfMissing for the trigger contract.
+  historyFetchedForRun: string | null;
   executionsById: Map<string, ExecutionState>;
   // Most recent exec_id observed per (branch, node) — populated by
   // node_started, consulted by every downstream event that carries
@@ -229,6 +234,13 @@ interface RunStoreState {
   applySnapshot: (snap: RunSnapshot) => void;
   applyEvent: (evt: RunEvent) => void;
   applyEventsBatch: (evts: RunEvent[]) => void;
+  // loadEventHistoryIfMissing pulls the persisted event log via the REST
+  // /events endpoint and folds it into the store. Idempotent per runId:
+  // a second call for the same run is a no-op until reset(). Decoupled
+  // from the WS subscribe path so consumers that need history (the
+  // EventLog tab, the Scrubber) can pay the cost on demand while
+  // canvas-only views skip it.
+  loadEventHistoryIfMissing: (runId: string) => Promise<void>;
   // Optimistic header status flip — used after Resume/Cancel HTTP calls
   // so the UI doesn't wait for the corresponding event to arrive.
   setRunStatus: (status: RunHeader["status"]) => void;
@@ -264,6 +276,12 @@ const initialState = {
   runId: null,
   snapshot: null,
   events: [] as RunEvent[],
+  // historyFetchedForRun marks which run's persisted event log has
+  // already been hydrated via the REST /events endpoint. The WS no
+  // longer auto-replays history (lazy mode), so the store tracks
+  // whether it owes a hydration. Reset on reset() so a new run
+  // navigation re-fetches.
+  historyFetchedForRun: null as string | null,
   executionsById: new Map<string, ExecutionState>(),
   lastExecIDByNode: new Map<string, string>(),
   inFlightToolsByExec: new Map<string, InFlightTool[]>(),
@@ -368,6 +386,28 @@ export const useRunStore = create<RunStoreState>((set) => ({
   applyEventsBatch: (evts) => {
     if (evts.length === 0) return;
     set((state) => reduceEvents(state, evts));
+  },
+
+  loadEventHistoryIfMissing: async (runId) => {
+    const state = useRunStore.getState();
+    if (state.historyFetchedForRun === runId) return;
+    if (state.runId !== null && state.runId !== runId) return;
+    // Mark optimistically so concurrent triggers (EventLog + Scrubber
+    // mounting in the same render pass) collapse to one fetch.
+    set({ historyFetchedForRun: runId });
+    try {
+      const fetched = await loadEvents(runId);
+      if (useRunStore.getState().runId !== runId) return;
+      // applyEventsBatch dedupes by seq, so any live events that
+      // landed concurrently via WS stay correctly ordered.
+      useRunStore.getState().applyEventsBatch(fetched);
+    } catch (err) {
+      // Allow a retry — reset the marker so a later trigger re-fetches.
+      if (useRunStore.getState().historyFetchedForRun === runId) {
+        set({ historyFetchedForRun: null });
+      }
+      throw err;
+    }
   },
 
   setRunStatus: (status) => {

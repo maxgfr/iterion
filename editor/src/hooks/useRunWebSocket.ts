@@ -140,13 +140,24 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
         // events-less store with last_seq=N would otherwise request
         // from_seq=N+1 and miss the entire history (the bug that hid
         // edges on finished runs).
+        //
+        // replay_history is true ONLY when we already have events
+        // locally (i.e., this is a reconnect after an outage): the
+        // server fills the gap between FromSeq and snapshotSeq. On
+        // initial connect (empty store) we run lazy — snapshot only,
+        // then live tail — and let loadEventHistoryIfMissing pull
+        // the historical events via HTTP if and when something needs
+        // them. Eliminates the 30s replay-stall on first open.
         const events = useRunStore.getState().events;
         const fromSeq =
           events.length > 0 ? events[events.length - 1]!.seq + 1 : 0;
         ws.send(
           JSON.stringify({
             type: "subscribe",
-            payload: fromSeq > 0 ? { from_seq: fromSeq } : undefined,
+            payload: {
+              from_seq: fromSeq,
+              replay_history: events.length > 0,
+            },
           } satisfies WsEnvelope),
         );
 
