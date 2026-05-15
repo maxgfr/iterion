@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/SocialGouv/claw-code-go/pkg/api"
 
@@ -160,6 +161,63 @@ func TestClassify_PlainError(t *testing.T) {
 	}
 }
 
+func TestClassify_NetworkTransient(t *testing.T) {
+	// Live observation: anthropic claude CLI emits the FailedToOpenSocket
+	// phrase verbatim when the host loses connectivity mid-request. We
+	// also cover the other lower-layer phrasings so iterion routes them
+	// all through the longer NetworkTransientRecipe instead of the
+	// catch-all 1-shot ExecutionFailedRecipe.
+	cases := []string{
+		`API Error: Unable to connect to API (FailedToOpenSocket)`,
+		`UNABLE TO CONNECT TO API`, // case-insensitive
+		`dial tcp: connection refused`,
+		`read: connection reset by peer`,
+		`dial tcp: lookup api.anthropic.com on 1.1.1.1:53: no such host`,
+		`Post "https://api.anthropic.com/v1/messages": context deadline exceeded`,
+		`tls handshake timeout`,
+		`read tcp 10.0.0.1:443->10.0.0.2:443: i/o timeout`,
+		`network is unreachable`,
+		`no route to host`,
+		`unexpected EOF`,
+	}
+	for _, msg := range cases {
+		t.Run(msg, func(t *testing.T) {
+			if got := Classify(errors.New(msg)); got != runtime.ErrCodeNetworkTransient {
+				t.Errorf("expected NETWORK_TRANSIENT for %q, got %v", msg, got)
+			}
+		})
+	}
+}
+
+func TestNetworkTransientRecipe_BackoffShape(t *testing.T) {
+	// Default-cap recipe should retry 6 times with exponential backoff
+	// up to 60s. Past the cap → FailTerminal.
+	r := NetworkTransientRecipe(0)
+	cases := []struct {
+		attempts  int
+		wantKind  ActionKind
+		wantDelay time.Duration
+	}{
+		{0, ActionRetrySameNode, 5 * time.Second},
+		{1, ActionRetrySameNode, 10 * time.Second},
+		{2, ActionRetrySameNode, 20 * time.Second},
+		{3, ActionRetrySameNode, 40 * time.Second},
+		{4, ActionRetrySameNode, 60 * time.Second}, // capped
+		{5, ActionRetrySameNode, 60 * time.Second}, // capped
+		{6, ActionFailTerminal, 0},
+		{99, ActionFailTerminal, 0},
+	}
+	for _, tc := range cases {
+		got := r.Apply(context.Background(), nil, tc.attempts)
+		if got.Kind != tc.wantKind {
+			t.Errorf("attempts=%d: kind=%v want %v", tc.attempts, got.Kind, tc.wantKind)
+		}
+		if got.Kind == ActionRetrySameNode && got.Delay != tc.wantDelay {
+			t.Errorf("attempts=%d: delay=%v want %v", tc.attempts, got.Delay, tc.wantDelay)
+		}
+	}
+}
+
 func TestClassify_Nil(t *testing.T) {
 	if got := Classify(nil); got != "" {
 		t.Errorf("expected empty for nil err, got %v", got)
@@ -174,6 +232,7 @@ func TestDefaultRecipes_HasAllClasses(t *testing.T) {
 		runtime.ErrCodeBudgetExceeded,
 		runtime.ErrCodeToolFailedTransient,
 		runtime.ErrCodeToolFailedPermanent,
+		runtime.ErrCodeNetworkTransient,
 	}
 	for _, code := range want {
 		if _, ok := r[code]; !ok {

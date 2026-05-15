@@ -27,6 +27,16 @@ const (
 	ErrCodeContextLengthExceeded ErrorCode = "CONTEXT_LENGTH_EXCEEDED"
 	ErrCodeToolFailedTransient   ErrorCode = "TOOL_FAILED_TRANSIENT"
 	ErrCodeToolFailedPermanent   ErrorCode = "TOOL_FAILED_PERMANENT"
+	// ErrCodeNetworkTransient: occasional ISP / DNS / TCP / TLS hiccup
+	// reaching the upstream model API. Distinct from ErrCodeExecutionFailed
+	// so the recovery dispatcher can apply a longer exponential-backoff
+	// budget — a 2-second single retry is plenty for "stale token" or
+	// "race on the tool subprocess", but useless against a 30-second
+	// captive-portal handoff or a multi-minute datacenter routing blip.
+	// Surfaced via Classify when the error string matches a known
+	// network-failure phrase (FailedToOpenSocket, "Unable to connect to
+	// API", "no such host", "connection refused", "i/o timeout", etc.).
+	ErrCodeNetworkTransient ErrorCode = "NETWORK_TRANSIENT"
 )
 
 // RuntimeError is a structured error carrying a machine-readable code,

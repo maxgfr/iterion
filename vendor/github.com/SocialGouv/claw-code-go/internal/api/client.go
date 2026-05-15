@@ -114,11 +114,27 @@ func (c *Client) StreamResponse(ctx context.Context, req CreateMessageRequest) (
 
 		resp, lastErr = c.HTTPClient.Do(httpReq)
 		if lastErr != nil {
+			// Transport errors are routinely transient (DNS flutter,
+			// dropped TCP, TLS handshake flap, captive-portal handoff).
+			// Retry with the same backoff loop the 5xx path uses; the
+			// iterion runtime layer adds another 6-attempt network-
+			// transient recipe on top for true multi-minute outages
+			// (see pkg/runtime/recovery in the iterion repo). Mirror
+			// of the change in .works/claw-code-go/internal/api/client.go.
+			retryable := true
 			if c.Tracer != nil {
-				c.Tracer.RecordHTTPRequestFailed(attempt, "POST", "/v1/messages", lastErr.Error(), false, nil)
+				c.Tracer.RecordHTTPRequestFailed(attempt, "POST", "/v1/messages", lastErr.Error(), retryable, nil)
 			}
-			// Transport errors are not retryable.
-			return nil, fmt.Errorf("do request: %w", lastErr)
+			if attempt == defaultMaxRetries {
+				return nil, fmt.Errorf("do request: %w", lastErr)
+			}
+			delay := retryBaseDelay * time.Duration(1<<(attempt-1))
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			continue
 		}
 
 		if resp.StatusCode == http.StatusOK {
