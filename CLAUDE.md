@@ -100,7 +100,10 @@ Other top-level directories: `editor/` (React/Vite frontend), `examples/` (.iter
 - `pkg/runtime/` — Workflow execution engine (branch scheduling, events, budget, recovery dispatch)
 - `pkg/store/` — Run persistence (JSON-based, versioned artifacts, events.jsonl)
 - `pkg/server/` — HTTP server for editor backend (embedded static UI)
-- `pkg/cli/` — CLI command implementations (init, validate, run, inspect, resume, diagram, editor, version)
+- `pkg/conductor/` — Long-running dispatcher: native kanban store, polling actor, tracker adapters (native, github, forgejo)
+  - `tracker/` — `Tracker` interface + normalized `Issue` type + GitHub/Forgejo adapters
+  - `native/` — Filesystem-backed kanban (board.json, issues/, events.jsonl) + REST + adapter
+- `pkg/cli/` — CLI command implementations (init, validate, run, inspect, resume, diagram, editor, conduct, issue, version)
 - `pkg/benchmark/` — Metrics collection and reporting
 - `pkg/log/` — Leveled logger (error, warn, info, debug, trace) — public so e2e tests can construct it
 - `pkg/internal/` — Internal utilities (not importable outside `pkg/`)
@@ -256,6 +259,33 @@ On error, the worktree is preserved at `<store-dir>/worktrees/<run-id>`
 for inspection and finalization is skipped — the operator decides what
 to do with any partial commits.
 
+### Conductor layer (`iterion conduct`)
+
+Iterion ships a long-running dispatcher on top of the runtime engine:
+`iterion conduct <config.yaml>` polls an issue tracker (native kanban,
+GitHub Issues, or Forgejo/Gitea) and dispatches a workflow run per
+eligible issue, with retry, stall detection, per-state concurrency,
+and lifecycle hooks (`after_create`, `before_run`, `after_run`,
+`before_remove`).
+
+The conductor uses an **actor pattern** — a single goroutine owns all
+mutable state; outside callers send typed commands on a channel. The
+architecture is fully documented in [docs/conductor.md](docs/conductor.md);
+the native tracker (the default, locally-owned kanban) is documented
+in [docs/native-tracker.md](docs/native-tracker.md).
+
+Key files: [pkg/conductor/conductor.go](pkg/conductor/conductor.go) (actor +
+public API), [pkg/conductor/loop.go](pkg/conductor/loop.go) (polling + dispatch),
+[pkg/conductor/tracker/tracker.go](pkg/conductor/tracker/tracker.go) (the
+`Tracker` interface), [pkg/conductor/native/store.go](pkg/conductor/native/store.go)
+(the JSON kanban store), [pkg/cli/conduct.go](pkg/cli/conduct.go) (daemon
+wiring including the embedded SPA).
+
+The editor's SPA exposes two new routes when the corresponding server
+flags are set: `/board` (kanban CRUD with drag-and-drop, gated on
+`server_info.native_tracker_enabled`) and `/conductor` (live dashboard
+with running + retry tables, gated on `server_info.conductor_enabled`).
+
 ## Building the desktop app
 
 The Wails desktop wrapper (`cmd/iterion-desktop/`) has its own pipeline
@@ -299,6 +329,8 @@ iterion resume --run-id --file [--answers-file] [--force]  # Resume paused/faile
 iterion diagram <file.iter> [--view]    # Generate Mermaid diagram (compact|detailed|full)
 iterion editor [--port] [--dir]         # Launch visual workflow editor
 iterion report --run-id <id> [--store-dir] [--output]  # Generate chronological run report
+iterion conduct <config.yaml> [--port]  # Long-running dispatcher (tracker → workflow per issue)
+iterion issue create|list|show|move|update|close|board  # Native kanban tracker
 iterion version                         # Print version
 ```
 

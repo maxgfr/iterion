@@ -105,9 +105,10 @@ Same engine, six delivery modes — pick the one that fits your workflow:
 | 🪟 **Desktop app** | Native window, multi-project, OS keychain, auto-update | Download `iterion-desktop` from [Releases](https://github.com/SocialGouv/iterion/releases/latest) | [desktop.md](docs/desktop.md) |
 | 🐳 **Docker** | Zero-install runs, reproducible CI | `docker run --rm ghcr.io/socialgouv/iterion:latest` | [install.md#docker](docs/install.md#docker) |
 | ☁️ **Cloud / server** | Multi-tenant deployment, shared run store, REST/WS API | `helm install iterion oci://ghcr.io/socialgouv/charts/iterion` | [cloud.md](docs/cloud.md) |
+| 🎼 **Conductor** | Autonomous loop — poll a tracker, dispatch a workflow per issue | Bundled: `iterion conduct iterion.conductor.yaml` | [conductor.md](docs/conductor.md) |
 | 📦 **TypeScript SDK** | Programmatic invocation from Node/Deno/Bun | `npm install @iterion/sdk` | [sdks/typescript/](sdks/typescript/) |
 
-All six invoke the same Go core. The DSL, runtime, persistence and observability are identical — they only differ in how you reach them.
+All seven invoke the same Go core. The DSL, runtime, persistence and observability are identical — they only differ in how you reach them.
 
 ### Your first workflow
 
