@@ -3251,7 +3251,16 @@ tool bucket_patches:
       const current = extractVersion(fieldAlias(row, ["current", "from", "declared", "currentVersion", "installed", "version"]));
       const rawRisk = fieldAlias(row, ["risk", "bump", "severity", "type", "semver"]);
       const risk = String(rawRisk || "unknown").toLowerCase();
-      return { name, current, target, risk };
+      // ecosystem is set per-package by discover_outdated (line 518:
+      // "ecosystem string // stack_profile.ecosystems[i].id"). Keep
+      // it through normalisation so downstream nodes
+      // (batch_upgrade_patches, family handlers) can dispatch the
+      // right CLI per group. Without it, multi-stack fixtures fall
+      // back to `pkg_manager`'s "primary ecosystem" value, which sent
+      // Go patches through `npm install` in production (test #3,
+      // 2026-05-15).
+      const ecosystem = String(fieldAlias(row, ["ecosystem", "manager", "pkg_manager"]) || "").toLowerCase();
+      return { name, current, target, risk, ecosystem };
     }
 
     function toNormalisedRows(value) {
@@ -3295,7 +3304,7 @@ tool bucket_patches:
       for (const p of list) {
         if (!p || !p.name || !p.target) continue;
         if (p.risk !== "patch") continue;
-        patches.push({ name: p.name, current: p.current || "", target: p.target, risk: "patch" });
+        patches.push({ name: p.name, current: p.current || "", target: p.target, risk: "patch", ecosystem: p.ecosystem || "" });
       }
     }
 
@@ -3397,49 +3406,130 @@ tool resolve_pkg_ecosystem:
   input: resolve_pkg_eco_input
   output: resolve_pkg_eco_output
 
-## batch_upgrade_patches bumps every patch in one yarn up invocation.
-## Patches are non-breaking by definition; bundling them saves 30+
-## yarn-install round-trips on a typical repo. If yarn refuses a spec
-## it fails the tool node and the run flips to failed_resumable —
-## let the operator decide whether to retry, narrow the spec set, or
-## skip patches for this run.
+## batch_upgrade_patches bumps every patch in one invocation per
+## ecosystem. Patches are non-breaking by definition; bundling them
+## saves 30+ install round-trips on a typical repo.
 ##
-## yarn up auto-installs after resolving, so no separate install step
-## is needed. The spec list is built defensively (skip entries with
-## empty target) and split on whitespace to keep `yarn up` happy with
-## a single shell line.
+## Multi-ecosystem: each patch carries its own `ecosystem` field
+## (preserved through bucket_patches from discover_outdated, which is
+## instructed to fill it from stack_profile.ecosystems[i].id). We
+## group patches by ecosystem and run ONE command per group with the
+## right CLI — passing Go module names to `npm install` (as happened
+## before this fix) fails with cryptic "npm ERR! 128 git permission
+## denied" because npm tries to git-clone the Go path.
+##
+## Fallback: when patches have no ecosystem (legacy LLM output or
+## single-ecosystem run), use input.pkg_manager as the group key.
+##
+## If ANY ecosystem command fails the tool node fails and the run
+## flips to failed_resumable — the operator decides whether to retry,
+## narrow the spec set, or skip patches for this run. Prior groups
+## that succeeded leave their modifications in the workspace; the
+## subsequent batch_commit step will see them in git diff and commit
+## the partial progress.
 tool batch_upgrade_patches:
   command: `set -euo pipefail
 cd {{input.workspace_dir}} >&2
 PKG_MGR={{input.pkg_manager}}
 PATCHES={{input.patches}}
 NOTES={{input.notes}}
-# Build the spec list (name@target) using jq — shape-tolerant and
-# present in iterion-sandbox-slim's toolchain. Skip entries that lack
-# either name or target so a half-formed row can't break the whole
-# upgrade.
-SPECS=$(printf '%s' "$PATCHES" | jq -r '.[] | select(.name and .target) | "\(.name)@\(.target)"' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
-if [ -z "$SPECS" ]; then
+# Group patches by ecosystem. Missing/empty ecosystem falls back to
+# input.pkg_manager so single-ecosystem repos and legacy LLM output
+# (no per-patch ecosystem) keep working unchanged.
+GROUPS=$(printf '%s' "$PATCHES" | jq -r --arg fallback "$PKG_MGR" '
+  [ .[]
+    | select(.name and .target)
+    | { name: .name, target: .target, ecosystem: ((.ecosystem // "") | ascii_downcase | if . == "" then $fallback else . end) }
+  ]
+  | group_by(.ecosystem)
+  | .[] | { ecosystem: .[0].ecosystem, specs: [.[] | { name, target }] }
+  | @json
+' 2>/dev/null)
+if [ -z "$GROUPS" ]; then
   printf '{"success":true,"output":"no specs to upgrade","upgraded_specs":[]}\n'
   exit 0
 fi
-case "$PKG_MGR" in
-  yarn|yarn3|yarn4) CMD="yarn up $SPECS" ;;
-  npm)              CMD="npm install $SPECS" ;;
-  pnpm)             CMD="pnpm update $SPECS" ;;
-  bun)              CMD="bun update $SPECS" ;;
-  *)                printf '{"success":false,"output":"batch_upgrade_patches: unsupported pkg_manager %s — extend the case block to add it","upgraded_specs":[]}\n' "$PKG_MGR"; exit 1 ;;
-esac
-# Run the upgrade with stdout piped to stderr — keeps the tool's
-# stdout dedicated to the final JSON line. The yarn/npm/pnpm/bun
-# output is still in run.log via stderr capture.
-if ! eval "$CMD" >&2; then
-  printf '{"success":false,"output":"batch upgrade failed: %s","upgraded_specs":[]}\n' "$CMD"
+# Map ecosystem id to install command form. Spec format varies:
+# name@target for npm-family + go + cargo (cargo handled
+# per-spec below); name==target for pip-family.
+spec_format_for() {
+  case "$1" in
+    pip|pip-poetry|pip-uv|poetry|uv|python|pip-pipenv|pipenv) echo "pip" ;;
+    cargo|rust)                                               echo "cargo" ;;
+    *)                                                        echo "npm" ;; # the @-form covers npm/yarn/pnpm/bun/go
+  esac
+}
+build_specs() {
+  ECO="$1"
+  GROUP_JSON="$2"
+  case "$(spec_format_for "$ECO")" in
+    pip)  printf '%s' "$GROUP_JSON" | jq -r '.specs[] | "\(.name)==\(.target)"' | tr '\n' ' ' | sed 's/ $//' ;;
+    *)    printf '%s' "$GROUP_JSON" | jq -r '.specs[] | "\(.name)@\(.target)"' | tr '\n' ' ' | sed 's/ $//' ;;
+  esac
+}
+run_for_eco() {
+  ECO="$1"
+  SPECS="$2"
+  GROUP_JSON="$3"
+  [ -z "$SPECS" ] && return 0
+  case "$ECO" in
+    yarn-classic)                       CMD="yarn upgrade $SPECS" ;;
+    yarn|yarn3|yarn4|yarn-berry)        CMD="yarn up $SPECS" ;;
+    npm)                                CMD="npm install $SPECS" ;;
+    pnpm)                               CMD="pnpm update $SPECS" ;;
+    bun)                                CMD="bun update $SPECS" ;;
+    go|go-modules|gomod)                CMD="go get $SPECS" ;;
+    pip)                                CMD="pip install --upgrade $SPECS" ;;
+    pip-poetry|poetry)                  CMD="poetry add $SPECS" ;;
+    pip-uv|uv)                          CMD="uv pip install --upgrade $SPECS" ;;
+    pip-pipenv|pipenv)                  CMD="pipenv install $SPECS" ;;
+    cargo|rust)
+      # cargo update wants "-p name --precise version" per crate; chain them.
+      CMD=$(printf '%s' "$GROUP_JSON" | jq -r '.specs[] | "cargo update -p \(.name) --precise \(.target)"' | paste -sd' && ' -)
+      ;;
+    composer|php)                       CMD="composer require $SPECS" ;;
+    bundler|ruby|gem)                   CMD="bundle update $SPECS" ;;
+    *)
+      printf '{"success":false,"output":"batch_upgrade_patches: unsupported ecosystem %s — extend run_for_eco to add it","upgraded_specs":[]}\n' "$ECO"
+      exit 1
+      ;;
+  esac
+  echo ">>> batch_upgrade [$ECO]: $CMD" >&2
+  eval "$CMD" >&2
+}
+# Stage groups in a temp file so the per-line loop reads from a real
+# fd (NOT a pipe). Piped "while ... done" runs in a subshell on POSIX
+# shells, which would silently swallow our "exit 1" on failure.
+TMPF=$(mktemp -t batch_upgrade.XXXXXX)
+printf '%s\n' "$GROUPS" > "$TMPF"
+ALL_UPGRADED=""
+FAILED_ECO=""
+while IFS= read -r GROUP_JSON; do
+  [ -z "$GROUP_JSON" ] && continue
+  ECO=$(printf '%s' "$GROUP_JSON" | jq -r '.ecosystem')
+  SPECS=$(build_specs "$ECO" "$GROUP_JSON")
+  if ! run_for_eco "$ECO" "$SPECS" "$GROUP_JSON"; then
+    FAILED_ECO="$ECO"
+    break
+  fi
+  if [ -z "$ALL_UPGRADED" ]; then
+    ALL_UPGRADED="$SPECS"
+  else
+    ALL_UPGRADED="$ALL_UPGRADED $SPECS"
+  fi
+done < "$TMPF"
+rm -f "$TMPF"
+if [ -n "$FAILED_ECO" ]; then
+  # Prior ecosystems (if any) left their changes in the workspace —
+  # batch_commit's git diff will see them and the run becomes
+  # failed_resumable so the operator can decide. Report what landed.
+  UPGRADED_JSON=$(printf '%s' "$ALL_UPGRADED" | jq -R 'split(" ") | map(select(length > 0))' 2>/dev/null || echo '[]')
+  printf '{"success":false,"output":"batch upgrade failed for ecosystem %s — partial upgrades may be in the workspace","upgraded_specs":%s}\n' "$FAILED_ECO" "$UPGRADED_JSON"
   exit 1
 fi
 # Emit upgraded_specs as a JSON array via jq.
-UPGRADED_JSON=$(printf '%s' "$SPECS" | jq -R 'split(" ") | map(select(length > 0))' 2>/dev/null || echo '[]')
-printf '{"success":true,"output":"batch upgrade succeeded","upgraded_specs":%s}\n' "$UPGRADED_JSON"
+UPGRADED_JSON=$(printf '%s' "$ALL_UPGRADED" | jq -R 'split(" ") | map(select(length > 0))' 2>/dev/null || echo '[]')
+printf '{"success":true,"output":"batch upgrade succeeded across all ecosystems","upgraded_specs":%s}\n' "$UPGRADED_JSON"
 `
   input: batch_upgrade_input
   output: batch_upgrade_result
@@ -3537,7 +3627,16 @@ tool bucket_families:
       const current = extractVersion(fieldAlias(row, ["current", "from", "declared", "currentVersion", "installed", "version"]));
       const rawRisk = fieldAlias(row, ["risk", "bump", "severity", "type", "semver"]);
       const risk = String(rawRisk || "unknown").toLowerCase();
-      return { name, current, target, risk };
+      // ecosystem is set per-package by discover_outdated (line 518:
+      // "ecosystem string // stack_profile.ecosystems[i].id"). Keep
+      // it through normalisation so downstream nodes
+      // (batch_upgrade_patches, family handlers) can dispatch the
+      // right CLI per group. Without it, multi-stack fixtures fall
+      // back to `pkg_manager`'s "primary ecosystem" value, which sent
+      // Go patches through `npm install` in production (test #3,
+      // 2026-05-15).
+      const ecosystem = String(fieldAlias(row, ["ecosystem", "manager", "pkg_manager"]) || "").toLowerCase();
+      return { name, current, target, risk, ecosystem };
     }
     function toNormalisedRows(value) {
       if (Array.isArray(value)) return value.map((r) => normaliseRow(r)).filter(Boolean);
