@@ -1,31 +1,20 @@
 import { useState } from "react";
-import { Link } from "wouter";
 import ApiKeysPanel from "./ApiKeys";
 import OAuthConnections from "./OAuthConnections";
 import { useAuth } from "@/auth/AuthContext";
+import AppHeader from "@/components/shared/AppHeader";
 
 type Tab = "api-keys" | "oauth" | "profile";
 
 export default function SettingsPage() {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const [tab, setTab] = useState<Tab>("api-keys");
 
   return (
     <div className="min-h-screen bg-surface-0 text-fg-default">
-      <header className="bg-surface-1 border-b border-border-subtle px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href="/" className="text-fg-muted hover:underline">
-            ← Editor
-          </Link>
-          <h1 className="text-lg font-semibold">Settings</h1>
-        </div>
-        <div className="flex items-center gap-3 text-sm">
-          <span className="text-fg-muted">{user?.email}</span>
-          <button onClick={signOut} className="underline text-fg-muted">
-            Sign out
-          </button>
-        </div>
-      </header>
+      <AppHeader showBackendPill={false}>
+        <span className="text-sm font-semibold">Settings</span>
+      </AppHeader>
 
       <div className="max-w-5xl mx-auto p-6 grid grid-cols-[200px,1fr] gap-6">
         <nav className="space-y-1">

@@ -5,8 +5,7 @@ import { Pencil1Icon } from "@radix-ui/react-icons";
 import type { RunHeader as RunHeaderType } from "@/api/runs";
 import { cancelRun } from "@/api/runs";
 import { Button, IconButton, StatusBadge } from "@/components/ui";
-import ProjectLabel from "@/components/shared/ProjectLabel";
-import NavLinks from "@/components/shared/NavLinks";
+import AppHeader from "@/components/shared/AppHeader";
 import WSStatusDot from "@/components/shared/WSStatusDot";
 
 import ResumeDialog from "./ResumeDialog";
@@ -68,10 +67,9 @@ export default function RunHeader({ run, active, wsState }: Props) {
   const showFinalization = Boolean(run.final_commit);
 
   return (
-    <header className="border-b border-border-default">
-      <div className="px-4 py-2 flex items-center gap-3 text-sm">
-        <NavLinks active="runs" />
-        <ProjectLabel />
+    <>
+      <AppHeader active="runs" />
+      <div className="shrink-0 border-b border-border-default px-4 py-2 flex items-center gap-3 text-sm">
         <div className="flex flex-col leading-tight min-w-0 max-w-md">
           <div className="font-medium truncate">
             {run.name || run.workflow_name}
@@ -153,7 +151,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
           onOpenChange={setResumeOpen}
         />
       )}
-    </header>
+    </>
   );
 }
 
@@ -182,7 +180,7 @@ function FinalizationRow({ run }: { run: RunHeaderType }) {
   };
 
   return (
-    <div className="px-4 py-1.5 bg-surface-2/40 flex items-center gap-3 text-[11px] flex-wrap">
+    <div className="shrink-0 px-4 py-1.5 bg-surface-2/40 border-b border-border-default flex items-center gap-3 text-[11px] flex-wrap">
       <span className="text-fg-muted">commit</span>
       <button
         className="font-mono text-fg-default hover:text-info"

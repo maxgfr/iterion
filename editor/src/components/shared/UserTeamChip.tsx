@@ -3,8 +3,6 @@ import { useLocation } from "wouter";
 
 import { useAuth } from "@/auth/AuthContext";
 
-// Floating top-right chip: shows active team + user email, opens a
-// dropdown for switching teams and reaching account / admin / sign-out.
 // Hidden entirely in local dev mode (user id "dev"), where the desktop
 // app's native menus drive Settings / ProjectSwitcher instead.
 export default function UserTeamChip() {
@@ -16,7 +14,7 @@ export default function UserTeamChip() {
   if (isLocal) return null;
 
   return (
-    <div className="fixed top-2 right-3 z-50">
+    <div className="relative inline-flex">
       <button
         onClick={() => setOpen((v) => !v)}
         className="bg-surface-1/95 border border-border-subtle rounded px-3 py-1 text-xs flex items-center gap-2 shadow"
@@ -27,7 +25,7 @@ export default function UserTeamChip() {
       </button>
       {open && (
         <div
-          className="absolute right-0 mt-1 w-72 bg-surface-1 border border-border-subtle rounded shadow-lg p-2 text-sm"
+          className="absolute right-0 top-full mt-1 w-72 bg-surface-1 border border-border-subtle rounded shadow-lg p-2 text-sm z-50"
           onMouseLeave={() => setOpen(false)}
         >
           <div className="px-2 py-1 text-xs uppercase tracking-wider text-fg-muted">

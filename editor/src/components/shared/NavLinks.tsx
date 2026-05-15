@@ -1,4 +1,4 @@
-import { Link, useLocation } from "wouter";
+import { Link } from "wouter";
 import {
   HomeIcon,
   Pencil2Icon,
@@ -9,12 +9,9 @@ import {
 
 import { useServerInfoStore } from "@/store/serverInfo";
 
-type Section = "home" | "editor" | "runs" | "board" | "conductor";
+export type Section = "home" | "editor" | "runs" | "board" | "conductor";
 
 interface Props {
-  // Override which link is rendered as active. When omitted, the
-  // current route decides — useful for views that own a sub-route
-  // (e.g. /runs/:id should keep "Runs" highlighted).
   active?: Section;
 }
 
@@ -31,18 +28,7 @@ const BASE_LINKS: LinkDef[] = [
   { section: "runs", href: "/runs", label: "Runs", icon: ListBulletIcon },
 ];
 
-function sectionFromPath(path: string): Section {
-  if (path === "/") return "home";
-  if (path.startsWith("/runs") || path.startsWith("/launch")) return "runs";
-  if (path.startsWith("/editor")) return "editor";
-  if (path.startsWith("/board")) return "board";
-  if (path.startsWith("/conductor")) return "conductor";
-  return "home";
-}
-
 export default function NavLinks({ active }: Props) {
-  const [location] = useLocation();
-  const current = active ?? sectionFromPath(location);
   const info = useServerInfoStore((s) => s.info);
 
   const links: LinkDef[] = [...BASE_LINKS];
@@ -56,7 +42,7 @@ export default function NavLinks({ active }: Props) {
   return (
     <nav className="flex items-center gap-0.5" aria-label="Primary navigation">
       {links.map(({ section, href, label, icon: Icon }) => {
-        const isActive = current === section;
+        const isActive = active === section;
         return (
           <Link
             key={section}

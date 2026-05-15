@@ -14,7 +14,7 @@ import type {
 } from "@/api/types";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
-import NavLinks from "@/components/shared/NavLinks";
+import AppHeader from "@/components/shared/AppHeader";
 import ConfirmDialog from "@/components/shared/ConfirmDialog";
 import { useDocumentStore } from "@/store/document";
 
@@ -298,17 +298,23 @@ export default function LaunchView() {
 
   return (
     <div className="h-full flex flex-col bg-surface-1 text-fg-default">
-      <header className="border-b border-border-default px-4 py-2.5 flex items-center gap-3">
-        <NavLinks active="runs" />
-        <h1 className="text-xs font-semibold text-fg-muted">Launch run</h1>
-        <span className="text-xs text-fg-subtle font-mono truncate">{filePath}</span>
-        <button
-          className="ml-auto text-xs px-2 py-1 rounded text-fg-muted hover:bg-surface-2 hover:text-fg-default"
-          onClick={() => setLocation("/editor")}
-        >
-          Cancel
-        </button>
-      </header>
+      <AppHeader
+        active="runs"
+        rightActions={
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setLocation("/editor")}
+          >
+            Cancel
+          </Button>
+        }
+      >
+        <span className="text-xs font-semibold text-fg-muted">Launch run</span>
+        <span className="text-xs text-fg-subtle font-mono truncate max-w-md" title={filePath}>
+          {filePath}
+        </span>
+      </AppHeader>
 
       <div className="flex-1 overflow-auto px-4 py-4 max-w-3xl">
         {error && (
