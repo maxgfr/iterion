@@ -26,6 +26,8 @@ import (
 	"github.com/SocialGouv/iterion/pkg/backend/detect"
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
 	"github.com/SocialGouv/iterion/pkg/cloud/metrics"
+	"github.com/SocialGouv/iterion/pkg/conductor"
+	"github.com/SocialGouv/iterion/pkg/conductor/native"
 	"github.com/SocialGouv/iterion/pkg/dsl/ast"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	"github.com/SocialGouv/iterion/pkg/dsl/parser"
@@ -173,6 +175,17 @@ type Config struct {
 	// registry shared with the runtime; tests can pass a hand-rolled
 	// mock to validate the WS proxy independently of Chromium.
 	BrowserRegistry mcp.BrowserRegistry
+
+	// NativeTrackerStore, when non-nil, exposes the conductor's native
+	// kanban tracker under /api/v1/native/* (issues CRUD + board) so
+	// the editor SPA can render the Board view.
+	NativeTrackerStore *native.Store
+
+	// Conductor, when non-nil, exposes the long-running dispatcher
+	// under /api/v1/conductor/* (state, refresh, cancel, reload, WS).
+	// The editor SPA's Conductor dashboard view consumes these
+	// endpoints and is hidden when this field is nil.
+	Conductor *conductor.Conductor
 
 	// MaxUploadSize bounds the bytes the upload endpoint will accept
 	// per attachment. Zero is replaced with a mode-specific default
@@ -545,6 +558,19 @@ func (s *Server) routes() {
 	// user OAuthForfait store.
 	if s.oauthStore != nil && s.sealer != nil && s.authSvc != nil {
 		s.registerOAuthForfaitRoutes()
+	}
+
+	// Conductor + native tracker — both optional, both safe to
+	// register on the editor's mux. The native tracker exposes the
+	// kanban store CRUD that the SPA's Board view consumes; the
+	// conductor exposes the dispatcher's live state for the
+	// Conductor view. SPA hides views whose corresponding endpoint
+	// returns 404.
+	if s.cfg.NativeTrackerStore != nil {
+		s.cfg.NativeTrackerStore.RegisterRoutes(s.mux, "/api/v1/native")
+	}
+	if s.cfg.Conductor != nil {
+		s.cfg.Conductor.RegisterRoutes(s.mux, "/api/v1/conductor")
 	}
 
 	// Serve static frontend files with SPA fallback so client-side routes

@@ -38,6 +38,12 @@ type serverInfoResponse struct {
 	// or "" when the feature is disabled. The SPA shows the Browse
 	// button in the AddProject dialog only when this is non-empty.
 	BrowseRoot string `json:"browse_root,omitempty"`
+	// NativeTrackerEnabled is true when the server has the native
+	// kanban store wired. The SPA conditionally exposes the Board view.
+	NativeTrackerEnabled bool `json:"native_tracker_enabled"`
+	// ConductorEnabled is true when a Conductor instance is running on
+	// the server. The SPA conditionally exposes the Conductor view.
+	ConductorEnabled bool `json:"conductor_enabled"`
 }
 
 type serverLimitsBlock struct {
@@ -71,6 +77,8 @@ func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
 				AllowedMIME:    s.cfg.AllowedUploadMIMEs,
 			},
 		},
+		NativeTrackerEnabled: s.cfg.NativeTrackerStore != nil,
+		ConductorEnabled:     s.cfg.Conductor != nil,
 	}
 	if mode == "local" {
 		resp.WorkDir = s.cfg.WorkDir

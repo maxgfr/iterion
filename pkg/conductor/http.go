@@ -20,39 +20,28 @@ func (c *Conductor) Routes() http.Handler {
 
 // RegisterRoutes registers the conductor's HTTP handlers on the given
 // mux under the supplied prefix. Pass "" to mount at the mux root.
-// Idempotent only per-mux: calling twice on the same mux panics
-// because Go's ServeMux rejects duplicate patterns.
+// Method-specific patterns are used so registration coexists with
+// other method+path routes (e.g. the editor server's CORS preflight).
 func (c *Conductor) RegisterRoutes(mux *http.ServeMux, prefix string) {
 	p := strings.TrimSuffix(prefix, "/")
-	mux.HandleFunc(p+"/state", c.handleState)
-	mux.HandleFunc(p+"/refresh", c.handleRefresh)
-	mux.HandleFunc(p+"/reload", c.handleReload)
-	mux.HandleFunc(p+"/issues/", c.handleIssueAction)
-	mux.HandleFunc(p+"/ws", c.handleWS)
+	mux.HandleFunc("GET "+p+"/state", c.handleState)
+	mux.HandleFunc("POST "+p+"/refresh", c.handleRefresh)
+	mux.HandleFunc("POST "+p+"/reload", c.handleReload)
+	mux.HandleFunc("GET "+p+"/issues/{id}", c.handleIssueDetail)
+	mux.HandleFunc("POST "+p+"/issues/{id}/cancel", c.handleIssueCancel)
+	mux.HandleFunc("GET "+p+"/ws", c.handleWS)
 }
 
-func (c *Conductor) handleState(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+func (c *Conductor) handleState(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, c.Snapshot())
 }
 
-func (c *Conductor) handleRefresh(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+func (c *Conductor) handleRefresh(w http.ResponseWriter, _ *http.Request) {
 	c.Refresh()
 	writeJSON(w, http.StatusAccepted, map[string]bool{"queued": true})
 }
 
-func (c *Conductor) handleReload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+func (c *Conductor) handleReload(w http.ResponseWriter, _ *http.Request) {
 	cfg, err := Load(c.cfg.Load().SourcePath)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -62,28 +51,8 @@ func (c *Conductor) handleReload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"reloaded": true, "polling_interval_s": cfg.PollingInterval().Seconds()})
 }
 
-// handleIssueAction routes /issues/<id> (GET) and /issues/<id>/cancel (POST).
-func (c *Conductor) handleIssueAction(w http.ResponseWriter, r *http.Request) {
-	prefix := r.URL.Path
-	parts := strings.Split(prefix, "/issues/")
-	if len(parts) != 2 || parts[1] == "" {
-		http.NotFound(w, r)
-		return
-	}
-	rest := strings.TrimSuffix(parts[1], "/")
-	segments := strings.Split(rest, "/")
-	id := segments[0]
-	switch {
-	case len(segments) == 1 && r.Method == http.MethodGet:
-		c.handleIssueDetail(w, r, id)
-	case len(segments) == 2 && segments[1] == "cancel" && r.Method == http.MethodPost:
-		c.handleIssueCancel(w, r, id)
-	default:
-		http.NotFound(w, r)
-	}
-}
-
-func (c *Conductor) handleIssueDetail(w http.ResponseWriter, _ *http.Request, id string) {
+func (c *Conductor) handleIssueDetail(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
 	snap := c.Snapshot()
 	for _, r := range snap.Running {
 		if r.IssueID == id {
@@ -100,7 +69,8 @@ func (c *Conductor) handleIssueDetail(w http.ResponseWriter, _ *http.Request, id
 	http.Error(w, "issue not tracked by conductor", http.StatusNotFound)
 }
 
-func (c *Conductor) handleIssueCancel(w http.ResponseWriter, _ *http.Request, id string) {
+func (c *Conductor) handleIssueCancel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
 	c.Cancel(id)
 	writeJSON(w, http.StatusAccepted, map[string]string{"issue_id": id, "status": "cancel_requested"})
 }

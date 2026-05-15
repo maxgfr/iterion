@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
+	"github.com/SocialGouv/iterion/pkg/conductor/native"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/server"
+	"github.com/SocialGouv/iterion/pkg/store"
 )
 
 // EditorOptions holds options for the editor command.
@@ -106,6 +108,15 @@ func RunEditor(ctx context.Context, opts EditorOptions, p *Printer) error {
 	// the Server reference exposed below.
 	if !opts.NoBrowserPane {
 		cfg.BrowserRegistry = mcp.NewMemoryBrowserRegistry()
+	}
+
+	// Open the native kanban tracker eagerly so the editor's Board
+	// view works without a separately-running `iterion conduct`. The
+	// store lives at <store-dir>/conductor/ and is auto-initialized
+	// with the default board on first use.
+	resolvedStoreDir := store.ResolveStoreDir(dir, opts.StoreDir)
+	if ns, err := native.NewStore(filepath.Join(resolvedStoreDir, "conductor")); err == nil {
+		cfg.NativeTrackerStore = ns
 	}
 
 	logger := iterlog.New(iterlog.LevelInfo, os.Stderr)

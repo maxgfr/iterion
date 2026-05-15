@@ -114,6 +114,12 @@ export interface ServerInfo {
   // when ITERION_BROWSE_ROOT is unset — the SPA shows the Browse
   // button in AddProjectDialog only when this is non-empty.
   browse_root?: string;
+  // native_tracker_enabled is true when the editor server has the
+  // kanban store wired. The SPA exposes the Board view conditionally.
+  native_tracker_enabled?: boolean;
+  // conductor_enabled is true when a long-running conductor is
+  // attached. The SPA exposes the Conductor dashboard conditionally.
+  conductor_enabled?: boolean;
 }
 
 // Response shape of POST /api/runs/uploads.
