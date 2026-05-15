@@ -165,11 +165,11 @@ func RunConduct(p *Printer, opts ConductOptions) error {
 
 func buildTracker(cfg *conductor.Config, ns *native.Store) (tracker.Tracker, error) {
 	switch cfg.Tracker.Kind {
-	case "native":
+	case conductor.TrackerKindNative:
 		return native.NewAdapter(ns), nil
-	case "github":
+	case conductor.TrackerKindGitHub:
 		return buildGitHubTracker(cfg.Tracker.GitHub)
-	case "forgejo":
+	case conductor.TrackerKindForgejo:
 		return buildForgejoTracker(cfg.Tracker.Forgejo)
 	default:
 		return nil, fmt.Errorf("conductor: unsupported tracker kind %q", cfg.Tracker.Kind)

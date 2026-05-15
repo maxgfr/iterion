@@ -12,11 +12,19 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
 }
 
 // request is exported so other api/*.ts modules (api/projects.ts,
-// future per-domain clients) share the same 401-handling and
-// JSON-decoding semantics. Existing callers in this file continue to
-// use the unprefixed name.
+// future per-domain clients) share the same 401-handling and JSON-
+// decoding semantics. It prefixes BASE_URL on the supplied path.
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  return apiRequest<T>(`${BASE_URL}${path}`, init);
+}
+
+// apiRequest is the same fetch wrapper but takes a fully-qualified
+// path. Used by /api/v1/conductor/* and /api/v1/native/* clients that
+// don't sit under the BASE_URL /api root. 204 No Content returns
+// `undefined as T` so DELETE-style endpoints don't trip over an empty
+// body.
+export async function apiRequest<T>(fullPath: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(fullPath, {
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,

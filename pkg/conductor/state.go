@@ -10,22 +10,32 @@ import (
 // state is the in-memory bookkeeping the conductor's actor goroutine
 // owns. Outside callers must reach it through typed commands posted on
 // Conductor.cmds — never read these maps directly.
+//
+// "Claimed" is not a separate field — the union (running ∪ retries)
+// is the live claim set. Dispatch checks both maps before picking up
+// a candidate.
 type state struct {
-	running       map[string]*runningEntry
-	claimed       map[string]struct{}
-	retryAttempts map[string]int
-	retryTimers   map[string]*time.Timer
-	slotsByState  map[string]int // running count per workflow state
+	running      map[string]*runningEntry
+	retries      map[string]*retryEntry
+	slotsByState map[string]int // running count per workflow state
 }
 
 func newState() *state {
 	return &state{
-		running:       map[string]*runningEntry{},
-		claimed:       map[string]struct{}{},
-		retryAttempts: map[string]int{},
-		retryTimers:   map[string]*time.Timer{},
-		slotsByState:  map[string]int{},
+		running:      map[string]*runningEntry{},
+		retries:      map[string]*retryEntry{},
+		slotsByState: map[string]int{},
 	}
+}
+
+// isClaimed reports whether the actor is currently treating issueID
+// as "ours" — either in flight or queued for retry.
+func (s *state) isClaimed(issueID string) bool {
+	if _, ok := s.running[issueID]; ok {
+		return true
+	}
+	_, ok := s.retries[issueID]
+	return ok
 }
 
 // runningEntry tracks one in-flight dispatch. It outlives the actor's
@@ -46,6 +56,17 @@ type runningEntry struct {
 	// dispatch.vars. Kept so the conductor can render a fresh prompt
 	// on retry without re-fetching from the tracker.
 	issueSnapshot tracker.Issue
+}
+
+// retryEntry tracks one pending retry. Used both for the timer
+// bookkeeping (Timer + DueAt) and to render the dashboard row.
+type retryEntry struct {
+	IssueID    string
+	Identifier string
+	Attempt    int
+	DueAt      time.Time
+	LastError  string
+	Timer      *time.Timer
 }
 
 // Snapshot is the read-only view the dashboard consumes. Built on

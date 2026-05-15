@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -80,7 +81,10 @@ func (h *Hook) Run(ctx context.Context, logger *iterlog.Logger, name, workspace 
 
 	cmd := exec.CommandContext(cctx, "sh", "-lc", command)
 	cmd.Dir = workspace
-	cmd.Env = env
+	// Inherit the host environment so hooks can find `git`, `gh`, …
+	// on $PATH. The conductor-supplied env (ITERION_*) is appended so
+	// it overrides any conflicting parent value.
+	cmd.Env = append(os.Environ(), env...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

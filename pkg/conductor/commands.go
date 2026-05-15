@@ -81,52 +81,65 @@ func (m cmdRunFinished) apply(c *Conductor, ctx context.Context) {
 		}
 	}
 	// Always release the tracker claim — if the issue is still active
-	// on the tracker side, the next tick (or retry due) will re-pick it.
+	// on the tracker side, the next tick will re-pick it (unless we
+	// schedule a retry below).
 	if relErr := c.tracker.Release(ctx, m.issueID, c.hostMarker); relErr != nil &&
 		!errors.Is(relErr, tracker.ErrNotFound) &&
 		!errors.Is(relErr, tracker.ErrClaimConflict) {
 		c.logger.Warn("conductor: release %s: %v", r.Identifier, relErr)
 	}
 
-	if m.err == nil {
+	switch {
+	case m.err == nil:
 		c.logger.Info("conductor: %s finished cleanly (run=%s)", r.Identifier, r.RunID)
-		delete(c.state.claimed, m.issueID)
-		delete(c.state.retryAttempts, m.issueID)
-		c.runAfterRun(ctx, r)
-		c.fireSnapshot()
-		return
-	}
-
-	// Cancellation: leave claim intact only if ctx is shutting down;
-	// otherwise release for re-pickup.
-	if errors.Is(m.err, context.Canceled) {
+		// Successful dispatches clear any prior retry bookkeeping and
+		// honor the workspace-persist policy.
+		if cur, ok := c.state.retries[m.issueID]; ok {
+			if cur.Timer != nil {
+				cur.Timer.Stop()
+			}
+			delete(c.state.retries, m.issueID)
+		}
+		c.cleanupWorkspace(r)
+	case errors.Is(m.err, context.Canceled):
+		// Cancellation is a soft stop. Keep the workspace and any
+		// pending retry entry so the next tick can re-pick the issue.
 		c.logger.Info("conductor: %s cancelled (run=%s)", r.Identifier, r.RunID)
-		delete(c.state.claimed, m.issueID)
-		c.runAfterRun(ctx, r)
-		c.fireSnapshot()
-		return
+	default:
+		c.logger.Warn("conductor: %s failed (run=%s): %v", r.Identifier, r.RunID, m.err)
+		c.scheduleRetry(m.issueID, r, m.err)
 	}
-
-	c.logger.Warn("conductor: %s failed (run=%s): %v", r.Identifier, r.RunID, m.err)
-	c.scheduleRetry(m.issueID, r, m.err)
-	c.runAfterRun(ctx, r)
 	c.fireSnapshot()
 }
 
-// cmdRetryDue fires when a retry timer expires.
+// cleanupWorkspace removes the per-issue workspace directory when the
+// active persist policy calls for it. Best-effort — failures are logged.
+func (c *Conductor) cleanupWorkspace(r *runningEntry) {
+	if !c.cfg.Load().Workspace.Persist.shouldCleanupOnSuccess() {
+		return
+	}
+	if err := c.workspaces.Remove(r.IssueID); err != nil {
+		c.logger.Warn("conductor: cleanup workspace %s: %v", r.Identifier, err)
+	}
+}
+
+// cmdRetryDue fires when a retry timer expires. We simply drop the
+// retry entry so the issue becomes eligible again; the next polling
+// tick redispatches. We intentionally do NOT trigger an immediate
+// tick — if N retries fire simultaneously, the regular ticker handles
+// them in one pass instead of running N back-to-back ListCandidates
+// calls on the actor goroutine.
 type cmdRetryDue struct {
 	issueID string
 }
 
-func (m cmdRetryDue) apply(c *Conductor, ctx context.Context) {
-	if t, ok := c.state.retryTimers[m.issueID]; ok {
-		t.Stop()
-		delete(c.state.retryTimers, m.issueID)
+func (m cmdRetryDue) apply(c *Conductor, _ context.Context) {
+	if cur, ok := c.state.retries[m.issueID]; ok {
+		if cur.Timer != nil {
+			cur.Timer.Stop()
+		}
+		delete(c.state.retries, m.issueID)
 	}
-	delete(c.state.claimed, m.issueID)
-	// The next tick handles the actual re-dispatch — we just remove
-	// the timer and let the polling loop reconsider.
-	c.tick(ctx)
 }
 
 // cmdCancel cancels an in-flight run from outside (HTTP handler).

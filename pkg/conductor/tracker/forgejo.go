@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 )
@@ -80,10 +79,10 @@ func (a *ForgejoAdapter) ListCandidates(ctx context.Context) ([]Issue, error) {
 	out := make([]Issue, 0, len(raw))
 	for _, r := range raw {
 		labels := labelNames(r.Labels)
-		if hasAny(labels, a.opts.ExcludeLabels) {
+		if anyOfString(labels, a.opts.ExcludeLabels) {
 			continue
 		}
-		if contains(labels, a.opts.ClaimedLabel) {
+		if containsString(labels, a.opts.ClaimedLabel) {
 			continue
 		}
 		iss := a.toIssue(r)
@@ -136,10 +135,10 @@ func (a *ForgejoAdapter) UpdateState(ctx context.Context, id, newState string) e
 	}
 	have := labelNames(current.Labels)
 	for _, l := range sel.LabelsExclude {
-		have = removeString(have, l)
+		have = filterOutString(have, l)
 	}
 	for _, l := range sel.LabelsInclude {
-		if !contains(have, l) {
+		if !containsString(have, l) {
 			have = append(have, l)
 		}
 	}
@@ -167,7 +166,7 @@ func (a *ForgejoAdapter) Claim(ctx context.Context, id, marker string) error {
 		return err
 	}
 	have := labelNames(current.Labels)
-	if !contains(have, a.opts.ClaimedLabel) {
+	if !containsString(have, a.opts.ClaimedLabel) {
 		have = append(have, a.opts.ClaimedLabel)
 	}
 	return a.replaceLabels(ctx, num, have)
@@ -183,7 +182,7 @@ func (a *ForgejoAdapter) Release(ctx context.Context, id, marker string) error {
 	if err := a.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/issues/%d", a.opts.Repo, num), nil, &current); err != nil {
 		return err
 	}
-	have := removeString(labelNames(current.Labels), a.opts.ClaimedLabel)
+	have := filterOutString(labelNames(current.Labels), a.opts.ClaimedLabel)
 	return a.replaceLabels(ctx, num, have)
 }
 
@@ -213,7 +212,7 @@ type forgejoUser struct {
 }
 
 func (a *ForgejoAdapter) toIssue(r forgejoIssue) Issue {
-	labels := filterOut(labelNames(r.Labels), a.opts.ClaimedLabel)
+	labels := filterOutString(labelNames(r.Labels), a.opts.ClaimedLabel)
 	id := fmt.Sprintf("forgejo:%s/%s#%d", trimHost(a.opts.Host), a.opts.Repo, r.Number)
 	assignee := ""
 	if len(r.Assignees) > 0 {
@@ -238,17 +237,7 @@ func (a *ForgejoAdapter) toIssue(r forgejoIssue) Issue {
 }
 
 func (a *ForgejoAdapter) resolveState(labels []string) string {
-	names := make([]string, 0, len(a.opts.StateMapping))
-	for k := range a.opts.StateMapping {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if labelsMatch(labels, a.opts.StateMapping[name]) {
-			return name
-		}
-	}
-	return ""
+	return resolveStateByLabels(labels, a.opts.StateMapping)
 }
 
 func (a *ForgejoAdapter) replaceLabels(ctx context.Context, num int, labels []string) error {
@@ -307,25 +296,6 @@ func labelNames(in []forgejoLabel) []string {
 	out := make([]string, 0, len(in))
 	for _, l := range in {
 		out = append(out, l.Name)
-	}
-	return out
-}
-
-func hasAny(haystack, needles []string) bool {
-	for _, n := range needles {
-		if contains(haystack, n) {
-			return true
-		}
-	}
-	return false
-}
-
-func removeString(in []string, drop string) []string {
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if s != drop {
-			out = append(out, s)
-		}
 	}
 	return out
 }

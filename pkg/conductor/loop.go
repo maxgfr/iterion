@@ -32,10 +32,7 @@ func (c *Conductor) tick(ctx context.Context) {
 		if !c.hasSlot(iss.WorkflowState, cfg) {
 			break
 		}
-		if _, ok := c.state.claimed[iss.ID]; ok {
-			continue
-		}
-		if _, ok := c.state.retryTimers[iss.ID]; ok {
+		if c.state.isClaimed(iss.ID) {
 			continue
 		}
 		c.dispatch(ctx, iss)
@@ -142,7 +139,10 @@ func (c *Conductor) dispatch(ctx context.Context, iss tracker.Issue) {
 		return
 	}
 
-	attempt := c.state.retryAttempts[iss.ID]
+	attempt := 0
+	if cur, ok := c.state.retries[iss.ID]; ok {
+		attempt = cur.Attempt
+	}
 	runID := newRunID(iss.ID, attempt)
 	runCtx, cancel := context.WithCancel(ctx)
 
@@ -159,7 +159,6 @@ func (c *Conductor) dispatch(ctx context.Context, iss tracker.Issue) {
 		issueSnapshot: iss,
 	}
 	c.state.running[iss.ID] = entry
-	c.state.claimed[iss.ID] = struct{}{}
 	c.state.slotsByState[iss.WorkflowState]++
 
 	spec := c.buildSpec(cfg, iss, runID, wsPath, attempt)
@@ -225,17 +224,21 @@ func (c *Conductor) buildSpec(cfg *Config, iss tracker.Issue, runID, wsPath stri
 
 // runWorker is the dispatch goroutine. Runs all hooks and the workflow,
 // then posts cmdRunFinished. Hook failures fail the run.
+//
+// All sends on c.cmds are guarded by c.stop so a shutdown that races
+// a late-finishing worker doesn't leak a goroutine blocked forever on
+// a full channel.
 func (c *Conductor) runWorker(ctx context.Context, entry *runningEntry, created bool, spec DispatchSpec) {
 	env := c.dispatchEnv(entry, spec)
 
 	if created && c.hooks.AfterCreate != nil {
 		if err := c.hooks.AfterCreate.Run(ctx, c.logger, "after_create", entry.WorkspacePath, env); err != nil {
-			c.cmds <- cmdRunFinished{issueID: entry.IssueID, err: fmt.Errorf("after_create hook: %w", err)}
+			c.postFinished(entry.IssueID, fmt.Errorf("after_create hook: %w", err))
 			return
 		}
 	}
 	if err := c.hooks.BeforeRun.Run(ctx, c.logger, "before_run", entry.WorkspacePath, env); err != nil {
-		c.cmds <- cmdRunFinished{issueID: entry.IssueID, err: fmt.Errorf("before_run hook: %w", err)}
+		c.postFinished(entry.IssueID, fmt.Errorf("before_run hook: %w", err))
 		return
 	}
 
@@ -247,7 +250,14 @@ func (c *Conductor) runWorker(ctx context.Context, entry *runningEntry, created 
 		c.logger.Warn("conductor: after_run hook for %s: %v", entry.Identifier, err)
 	}
 
-	c.cmds <- cmdRunFinished{issueID: entry.IssueID, err: dispatchErr}
+	c.postFinished(entry.IssueID, dispatchErr)
+}
+
+func (c *Conductor) postFinished(issueID string, err error) {
+	select {
+	case c.cmds <- cmdRunFinished{issueID: issueID, err: err}:
+	case <-c.stop:
+	}
 }
 
 func (c *Conductor) dispatchEnv(entry *runningEntry, spec DispatchSpec) []string {
@@ -263,11 +273,6 @@ func (c *Conductor) dispatchEnv(entry *runningEntry, spec DispatchSpec) []string
 	}
 	return env
 }
-
-// runAfterRun is called on the actor goroutine after cmdRunFinished.
-// In the current design hooks run inside runWorker, so this is a hook
-// for future fan-out logic and intentionally a no-op today.
-func (c *Conductor) runAfterRun(_ context.Context, _ *runningEntry) {}
 
 // newRunID produces a deterministic-ish, sortable run ID for dispatch.
 func newRunID(issueID string, attempt int) string {

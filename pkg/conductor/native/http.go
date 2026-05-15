@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/SocialGouv/iterion/pkg/conductor"
 	"github.com/SocialGouv/iterion/pkg/conductor/tracker"
 )
 
@@ -52,16 +53,16 @@ func (s *Store) handleListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	issues, err := s.List(filter)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+		conductor.WriteErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, issues)
+	conductor.WriteJSON(w, http.StatusOK, issues)
 }
 
 func (s *Store) handleCreateIssue(w http.ResponseWriter, r *http.Request) {
 	var in issueCreateReq
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		conductor.WriteErr(w, http.StatusBadRequest, err)
 		return
 	}
 	iss := Issue{
@@ -76,10 +77,10 @@ func (s *Store) handleCreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := s.Create(iss)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		conductor.WriteErr(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, out)
+	conductor.WriteJSON(w, http.StatusCreated, out)
 }
 
 // ---------------------------------------------------------------------------
@@ -115,7 +116,7 @@ func (s *Store) resolvePathID(w http.ResponseWriter, r *http.Request) (string, b
 			http.Error(w, "issue not found", http.StatusNotFound)
 			return "", false
 		}
-		writeErr(w, http.StatusBadRequest, err)
+		conductor.WriteErr(w, http.StatusBadRequest, err)
 		return "", false
 	}
 	return id, true
@@ -128,10 +129,10 @@ func (s *Store) handleGetIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	iss, err := s.Get(id)
 	if err != nil {
-		writeErr(w, statusForErr(err), err)
+		conductor.WriteErr(w, statusForErr(err), err)
 		return
 	}
-	writeJSON(w, http.StatusOK, iss)
+	conductor.WriteJSON(w, http.StatusOK, iss)
 }
 
 func (s *Store) handlePatchIssue(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +142,7 @@ func (s *Store) handlePatchIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	var in issuePatchReq
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		conductor.WriteErr(w, http.StatusBadRequest, err)
 		return
 	}
 	out, err := s.Update(id, Patch{
@@ -154,10 +155,10 @@ func (s *Store) handlePatchIssue(w http.ResponseWriter, r *http.Request) {
 		Fields:   in.Fields,
 	})
 	if err != nil {
-		writeErr(w, statusForErr(err), err)
+		conductor.WriteErr(w, statusForErr(err), err)
 		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	conductor.WriteJSON(w, http.StatusOK, out)
 }
 
 func (s *Store) handleDeleteIssue(w http.ResponseWriter, r *http.Request) {
@@ -166,7 +167,7 @@ func (s *Store) handleDeleteIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.Delete(id); err != nil {
-		writeErr(w, statusForErr(err), err)
+		conductor.WriteErr(w, statusForErr(err), err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -179,19 +180,19 @@ func (s *Store) handleTransitionIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	var in transitionReq
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		conductor.WriteErr(w, http.StatusBadRequest, err)
 		return
 	}
 	if in.To == "" {
-		writeErr(w, http.StatusBadRequest, errors.New("transition: to is required"))
+		conductor.WriteErr(w, http.StatusBadRequest, errors.New("transition: to is required"))
 		return
 	}
 	iss, err := s.SetState(id, in.To)
 	if err != nil {
-		writeErr(w, statusForErr(err), err)
+		conductor.WriteErr(w, statusForErr(err), err)
 		return
 	}
-	writeJSON(w, http.StatusOK, iss)
+	conductor.WriteJSON(w, http.StatusOK, iss)
 }
 
 // ---------------------------------------------------------------------------
@@ -199,20 +200,20 @@ func (s *Store) handleTransitionIssue(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Store) handleGetBoard(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.Board())
+	conductor.WriteJSON(w, http.StatusOK, s.Board())
 }
 
 func (s *Store) handlePutBoard(w http.ResponseWriter, r *http.Request) {
 	var b Board
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		conductor.WriteErr(w, http.StatusBadRequest, err)
 		return
 	}
 	if err := s.SetBoard(&b); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		conductor.WriteErr(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.Board())
+	conductor.WriteJSON(w, http.StatusOK, s.Board())
 }
 
 // ---------------------------------------------------------------------------
@@ -229,14 +230,4 @@ func statusForErr(err error) int {
 	default:
 		return http.StatusBadRequest
 	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeErr(w http.ResponseWriter, status int, err error) {
-	writeJSON(w, status, map[string]string{"error": err.Error()})
 }

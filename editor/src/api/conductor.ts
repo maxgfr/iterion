@@ -1,18 +1,11 @@
 // Conductor REST client — mirrors pkg/conductor/http.go.
 
+import { apiRequest } from "./client";
+
 const BASE = "/api/v1/conductor";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-    ...init,
-  });
-  if (!res.ok) {
-    throw new Error(`conductor API ${res.status}: ${await res.text()}`);
-  }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return apiRequest<T>(BASE + path, init);
 }
 
 // Mirror pkg/conductor/state.go Snapshot.

@@ -7,23 +7,37 @@ import (
 
 // scheduleRetry queues a retry for the given issue, using exponential
 // backoff capped by cfg.MaxRetryBackoff. Must be called from the actor.
-func (c *Conductor) scheduleRetry(issueID string, prev *runningEntry, _ error) {
+func (c *Conductor) scheduleRetry(issueID string, prev *runningEntry, runErr error) {
 	cfg := c.cfg.Load()
-	c.state.retryAttempts[issueID] = c.state.retryAttempts[issueID] + 1
-	attempt := c.state.retryAttempts[issueID]
-	delay := computeBackoff(attempt, cfg.MaxRetryBackoff())
-
-	if t, ok := c.state.retryTimers[issueID]; ok {
-		t.Stop()
+	prevAttempt := 0
+	if cur, ok := c.state.retries[issueID]; ok {
+		prevAttempt = cur.Attempt
+		if cur.Timer != nil {
+			cur.Timer.Stop()
+		}
 	}
+	attempt := prevAttempt + 1
+	delay := computeBackoff(attempt, cfg.MaxRetryBackoff())
+	due := time.Now().Add(delay)
+
 	timer := time.AfterFunc(delay, func() {
-		// Send through the actor channel so the actor handles the retry.
 		select {
 		case c.cmds <- cmdRetryDue{issueID: issueID}:
 		case <-c.stop:
 		}
 	})
-	c.state.retryTimers[issueID] = timer
+	errStr := ""
+	if runErr != nil {
+		errStr = runErr.Error()
+	}
+	c.state.retries[issueID] = &retryEntry{
+		IssueID:    issueID,
+		Identifier: prev.Identifier,
+		Attempt:    attempt,
+		DueAt:      due,
+		LastError:  errStr,
+		Timer:      timer,
+	}
 	c.logger.Info("conductor: %s retry queued (attempt=%d, in=%s)", prev.Identifier, attempt, delay)
 }
 

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"sort"
 	"strings"
 	"time"
 )
@@ -232,7 +231,7 @@ func (a *GitHubAdapter) toIssue(g ghIssue) Issue {
 	}
 	// Exclude the claimed label from the surfaced labels so dispatch
 	// templates render a stable view.
-	labels = filterOut(labels, a.opts.ClaimedLabel)
+	labels = filterOutString(labels, a.opts.ClaimedLabel)
 
 	id := fmt.Sprintf("github:%s#%d", a.opts.Repo, g.Number)
 	assignee := ""
@@ -259,55 +258,9 @@ func (a *GitHubAdapter) toIssue(g ghIssue) Issue {
 	}
 }
 
-// resolveState walks StateMapping in deterministic order (sorted by
-// state name to compensate for Go map randomness) and returns the
-// first state whose selector matches the given labels.
+// resolveState delegates to the shared label helper.
 func (a *GitHubAdapter) resolveState(labels []string) string {
-	names := make([]string, 0, len(a.opts.StateMapping))
-	for k := range a.opts.StateMapping {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		sel := a.opts.StateMapping[name]
-		if labelsMatch(labels, sel) {
-			return name
-		}
-	}
-	return ""
-}
-
-func labelsMatch(have []string, sel LabelSelector) bool {
-	for _, want := range sel.LabelsInclude {
-		if !contains(have, want) {
-			return false
-		}
-	}
-	for _, no := range sel.LabelsExclude {
-		if contains(have, no) {
-			return false
-		}
-	}
-	return true
-}
-
-func contains(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
-}
-
-func filterOut(in []string, drop string) []string {
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if s != drop {
-			out = append(out, s)
-		}
-	}
-	return out
+	return resolveStateByLabels(labels, a.opts.StateMapping)
 }
 
 func (a *GitHubAdapter) env() []string {

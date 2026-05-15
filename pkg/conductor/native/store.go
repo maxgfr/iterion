@@ -36,10 +36,9 @@ const (
 type Store struct {
 	root string
 
-	mu      sync.Mutex
-	board   *Board
-	seq     int64
-	seqSeed bool
+	mu    sync.Mutex
+	board *Board
+	seq   int64
 }
 
 // NewStore opens (or initializes) the native tracker at root. If
@@ -55,6 +54,22 @@ func NewStore(root string) (*Store, error) {
 	if err := s.loadOrInitBoard(); err != nil {
 		return nil, err
 	}
+	// Seed the event sequence counter from any existing log so a
+	// fresh process opening a pre-existing store doesn't restart Seq
+	// at 0 and produce duplicate sequence numbers in events.jsonl.
+	// Best-effort: a partial scan still advances seq past the
+	// readable prefix; the warning is for the operator.
+	var maxSeq int64 = -1
+	if err := s.ScanEvents(func(e *Event) bool {
+		if e.Seq > maxSeq {
+			maxSeq = e.Seq
+		}
+		return true
+	}); err != nil {
+		// Don't fail NewStore; the next append will recover.
+		_ = err
+	}
+	s.seq = maxSeq + 1
 	return s, nil
 }
 
@@ -514,17 +529,6 @@ func (s *Store) issuePath(id string) string {
 }
 
 func (s *Store) appendEventLocked(evt Event) error {
-	if !s.seqSeed {
-		var max int64 = -1
-		_ = s.ScanEvents(func(e *Event) bool {
-			if e.Seq > max {
-				max = e.Seq
-			}
-			return true
-		})
-		s.seq = max + 1
-		s.seqSeed = true
-	}
 	evt.Seq = s.seq
 	if evt.Timestamp.IsZero() {
 		evt.Timestamp = time.Now().UTC()
