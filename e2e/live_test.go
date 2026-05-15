@@ -2934,13 +2934,17 @@ func liveRunResultAcceptableReal(err error) (bool, string) {
 	return false, fmt.Sprintf("%v", err)
 }
 
-// workspaceCommitCount returns `git rev-list --count HEAD` for the
-// workspace, or 0 if the command fails (tests should record this
-// before AND after the run, and assert growth via
-// [requireWorkspaceCommitGrowth]).
+// workspaceCommitCount returns `git rev-list --count --all` for the
+// workspace, or 0 if the command fails. Counts commits on ALL refs
+// (HEAD + every branch + the worktree's storage branch) so callers
+// see the bot's commits regardless of whether auto_merge fast-
+// forwarded them onto HEAD. Default `worktree: auto` runs land
+// commits on `iterion/run/<name>` and leave HEAD on the user's
+// branch with `merge_status=pending` — counting --all captures
+// both shapes.
 func workspaceCommitCount(t *testing.T, dir string) int {
 	t.Helper()
-	out, err := exec.Command("git", "-C", dir, "rev-list", "--count", "HEAD").Output()
+	out, err := exec.Command("git", "-C", dir, "rev-list", "--count", "--all").Output()
 	if err != nil {
 		t.Logf("git rev-list failed in %s: %v", dir, err)
 		return 0
@@ -2954,18 +2958,19 @@ func workspaceCommitCount(t *testing.T, dir string) int {
 }
 
 // requireWorkspaceCommitGrowth fails the test if the workspace did not
-// gain at least one commit during the run. Use after `_Real` tests —
-// a bot that doesn't commit anything has done nothing the operator
-// can review.
+// gain at least one commit (on any ref) during the run. Use after
+// `_Real` tests — a bot that doesn't commit anything has done nothing
+// the operator can review.
 func requireWorkspaceCommitGrowth(t *testing.T, workspaceDir string, before int) {
 	t.Helper()
 	after := workspaceCommitCount(t, workspaceDir)
 	if after <= before {
-		// dump recent log for diagnostic value
-		recent, _ := exec.Command("git", "-C", workspaceDir, "log", "--oneline", "-10").CombinedOutput()
-		t.Fatalf("expected the workspace HEAD to advance by ≥1 commit, got before=%d after=%d (no work landed).\nRecent log:\n%s", before, after, string(recent))
+		// Dump recent commits across every ref so failure diagnostics
+		// surface storage-branch work too.
+		recent, _ := exec.Command("git", "-C", workspaceDir, "log", "--all", "--oneline", "-10").CombinedOutput()
+		t.Fatalf("expected ≥1 new commit on any ref, got before=%d after=%d (no work landed).\nRecent log (all refs):\n%s", before, after, string(recent))
 	}
-	t.Logf("Workspace commits: %d → %d (Δ=%d)", before, after, after-before)
+	t.Logf("Workspace commits across all refs: %d → %d (Δ=%d)", before, after, after-before)
 }
 
 // ---------------------------------------------------------------------------
