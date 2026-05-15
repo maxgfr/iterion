@@ -95,20 +95,32 @@ export default function ProjectSwitcher({ open, onClose }: Props) {
               return (
                 <li
                   key={p.id}
-                  className="group relative flex items-center gap-2 pr-2"
+                  className="group relative flex items-center gap-2 pr-2 min-w-0"
                 >
+                  {/*
+                    `min-w-0` on the flex-1 button is what lets the
+                    inner truncate actually clip — without it the
+                    button refuses to shrink below the project name's
+                    intrinsic width, and the confirm-Remove buttons
+                    get pushed past the right edge of the popover
+                    (requiring the operator to scroll horizontally
+                    to reach the dangerous click target). Pair with
+                    `shrink-0` on the confirm cluster below so the
+                    buttons keep their natural size and the name
+                    takes the leftover space.
+                  */}
                   <button
-                    className="flex-1 text-left pl-2 py-2 rounded hover:bg-surface-2 disabled:opacity-60"
+                    className="flex-1 min-w-0 text-left pl-2 py-2 rounded hover:bg-surface-2 disabled:opacity-60"
                     disabled={isPending || isBusy}
                     onClick={async () => {
                       await switchProject(p.id);
                       onClose();
                     }}
                   >
-                    <div className="font-semibold flex items-center gap-2">
-                      {p.name}
+                    <div className="font-semibold flex items-center gap-2 truncate">
+                      <span className="truncate">{p.name}</span>
                       {isCurrent && (
-                        <span className="text-[10px] uppercase tracking-wider text-accent">
+                        <span className="text-[10px] uppercase tracking-wider text-accent shrink-0">
                           current
                         </span>
                       )}
@@ -118,7 +130,7 @@ export default function ProjectSwitcher({ open, onClose }: Props) {
                     </div>
                   </button>
                   {isPending ? (
-                    <div className="flex items-center gap-1 text-[11px]">
+                    <div className="flex items-center gap-1 text-[11px] shrink-0">
                       <span className="text-fg-subtle mr-1">Remove?</span>
                       <Button
                         size="sm"
