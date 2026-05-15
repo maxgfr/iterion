@@ -58,6 +58,17 @@ const (
 
 type wsSubscribeRequest struct {
 	FromSeq int64 `json:"from_seq,omitempty"`
+	// ReplayHistory tells the server whether to send disk-persisted
+	// events in the catch-up phase between snapshot and live tail.
+	// Default (false) means "lazy": the client gets the snapshot and
+	// the live tail, but no historical replay — saving the cost of
+	// streaming thousands of events the editor doesn't need to render
+	// the canvas or status pill. Consumers that DO need history
+	// (EventLog tab, Scrubber) fetch it via GET /api/runs/{id}/events
+	// when they mount. Set explicitly to true on WS reconnect after a
+	// transient disconnect so the gap between FromSeq and snapshotSeq
+	// is recovered.
+	ReplayHistory bool `json:"replay_history,omitempty"`
 }
 
 type wsSubscribeLogsRequest struct {
@@ -251,7 +262,15 @@ func (c *runConn) handleSubscribe(env runWSEnvelope) {
 	}
 	c.sendEnvelope(wsTypeSnapshot, snap, env.AckID)
 
-	go c.streamEvents(req.FromSeq, snap.LastSeq)
+	// Lazy mode: advance the effective replay floor past the snapshot
+	// so both the local pagination loop and the cloud event-source
+	// see "nothing to replay". Live tail still flows unaffected. The
+	// frontend pulls history on demand via /api/runs/{id}/events.
+	effectiveFromSeq := req.FromSeq
+	if !req.ReplayHistory && snap.LastSeq != runview.NoEventsSeq {
+		effectiveFromSeq = snap.LastSeq + 1
+	}
+	go c.streamEvents(effectiveFromSeq, snap.LastSeq)
 }
 
 // streamEvents replays historical events then tails the live source.

@@ -71,6 +71,7 @@ export default function RunView() {
   const setRunId = useRunStore((s) => s.setRunId);
   const reset = useRunStore((s) => s.reset);
   const applySnapshot = useRunStore((s) => s.applySnapshot);
+  const loadEventHistoryIfMissing = useRunStore((s) => s.loadEventHistoryIfMissing);
   const snapshot = useRunStore((s) => s.snapshot);
   const events = useRunStore((s) => s.events);
   const executionsById = useRunStore((s) => s.executionsById);
@@ -244,6 +245,22 @@ export default function RunView() {
     setRunId(runId);
     return () => reset();
   }, [runId, setRunId, reset]);
+
+  // Lazy hydration of the persisted event log. WS subscribe now runs
+  // in lazy mode (snapshot + live tail only), so we pay the history
+  // cost only when something on screen actually needs it: the
+  // EventLog tab or the time-travel Scrubber. Canvas + status pill
+  // run off the snapshot alone, so users who never open the bottom
+  // panel never wait for thousands of events to stream in. The
+  // action dedupes per run, so toggling tabs is cheap.
+  useEffect(() => {
+    if (!runId) return;
+    if (bottomTab !== "events" && scrubSeq === null) return;
+    loadEventHistoryIfMissing(runId).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn("[run] event history hydration failed:", err);
+    });
+  }, [runId, bottomTab, scrubSeq, loadEventHistoryIfMissing]);
 
   // Initial snapshot via REST so the page renders immediately even if
   // the WS is still connecting; the hook's `applySnapshot` on connect
