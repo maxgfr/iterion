@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   artifactFileURL,
@@ -7,8 +7,10 @@ import {
   listArtifactFiles,
   type ArtifactFile,
 } from "@/api/runs";
-import { Dialog } from "@/components/ui";
+import { Dialog, Popover } from "@/components/ui";
+import { desktop, isDesktop } from "@/lib/desktopBridge";
 import { useRunStore } from "@/store/run";
+import { useDownloadsStore, type DownloadEntry } from "@/store/downloads";
 import { useUIStore } from "@/store/ui";
 
 // Events that suggest a tool just dropped a new file. Refresh on
@@ -34,7 +36,11 @@ interface Props {
 }
 
 interface PreviewState {
-  file: ArtifactFile;
+  // Minimal shape — populated either from an ArtifactFile (the table)
+  // or a DownloadEntry (the history popover, where the file may no
+  // longer be in the current run's manifest).
+  path: string;
+  size: number;
   loading: boolean;
   error: string | null;
   // Exactly one of textBody / blobURL is populated once loaded.
@@ -45,15 +51,13 @@ interface PreviewState {
 
 // ArtifactFilesPanel surfaces the contents of runs/<id>/artifact_files
 // — the per-run scratch area where in-sandbox tools (write_audit_md,
-// emit_sbom, …) drop arbitrary report/SBOM/manifest files. This
-// replaces the prior pattern of committing `docs/renovacy/*.md` into
-// the bench repo (which leaked info + cluttered the operator's git
-// history).
+// emit_sbom, …) drop arbitrary report/SBOM/manifest files.
 export default function ArtifactFilesPanel({ runId }: Props) {
   const [files, setFiles] = useState<ArtifactFile[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [downloadsOpen, setDownloadsOpen] = useState(false);
   const lastSeenSeqRef = useRef<number>(-1);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const genRef = useRef(0);
@@ -61,6 +65,15 @@ export default function ArtifactFilesPanel({ runId }: Props) {
 
   const events = useRunStore((s) => s.events);
   const addToast = useUIStore((s) => s.addToast);
+  const allDownloads = useDownloadsStore((s) => s.entries);
+  const recordDownload = useDownloadsStore((s) => s.recordDownload);
+  const removeDownload = useDownloadsStore((s) => s.removeDownload);
+  const clearForRun = useDownloadsStore((s) => s.clearForRun);
+
+  const runDownloads = useMemo(
+    () => (runId ? allDownloads.filter((e) => e.runId === runId) : []),
+    [allDownloads, runId],
+  );
 
   const fetchNow = useCallback(() => {
     if (!runId) return;
@@ -123,25 +136,27 @@ export default function ArtifactFilesPanel({ runId }: Props) {
   }, []);
 
   const openPreview = useCallback(
-    (file: ArtifactFile) => {
+    (target: { path: string; size: number }) => {
       if (!runId) return;
       const myGen = ++previewGenRef.current;
       setPreview({
-        file,
+        path: target.path,
+        size: target.size,
         loading: true,
         error: null,
         textBody: null,
         blobURL: null,
         contentType: "",
       });
-      fetchArtifactFile(runId, file.path)
+      fetchArtifactFile(runId, target.path)
         .then(async ({ blob, contentType }) => {
           if (myGen !== previewGenRef.current) return;
           const isText = TEXT_MIME_PREFIXES.some((p) => contentType.startsWith(p));
           if (isText) {
             const textBody = await blob.text();
             setPreview({
-              file,
+              path: target.path,
+              size: target.size,
               loading: false,
               error: null,
               textBody,
@@ -151,7 +166,8 @@ export default function ArtifactFilesPanel({ runId }: Props) {
           } else {
             const blobURL = URL.createObjectURL(blob);
             setPreview({
-              file,
+              path: target.path,
+              size: target.size,
               loading: false,
               error: null,
               textBody: null,
@@ -163,7 +179,8 @@ export default function ArtifactFilesPanel({ runId }: Props) {
         .catch((err: unknown) => {
           if (myGen !== previewGenRef.current) return;
           setPreview({
-            file,
+            path: target.path,
+            size: target.size,
             loading: false,
             error: err instanceof Error ? err.message : "Failed to load preview",
             textBody: null,
@@ -176,16 +193,37 @@ export default function ArtifactFilesPanel({ runId }: Props) {
   );
 
   const triggerDownload = useCallback(
-    (file: ArtifactFile) => {
+    (target: { path: string; size: number }) => {
       if (!runId) return;
-      downloadArtifactFile(runId, file.path).catch((err: unknown) => {
-        addToast(
-          `Download failed: ${err instanceof Error ? err.message : "unknown error"}`,
-          "error",
-        );
-      });
+      const basename = target.path.includes("/")
+        ? target.path.slice(target.path.lastIndexOf("/") + 1)
+        : target.path;
+      downloadArtifactFile(runId, target.path)
+        .then((outcome) => {
+          if (outcome.cancelled) return;
+          recordDownload({
+            runId,
+            path: target.path,
+            basename,
+            size: target.size,
+            contentType: outcome.contentType,
+            localPath: outcome.localPath,
+          });
+          addToast(`Téléchargé : ${basename}`, "success", {
+            action: {
+              label: "Afficher",
+              onClick: () => openPreview(target),
+            },
+          });
+        })
+        .catch((err: unknown) => {
+          addToast(
+            `Download failed: ${err instanceof Error ? err.message : "unknown error"}`,
+            "error",
+          );
+        });
     },
-    [runId, addToast],
+    [runId, recordDownload, addToast, openPreview],
   );
 
   if (!runId) {
@@ -216,86 +254,115 @@ export default function ArtifactFilesPanel({ runId }: Props) {
       </div>
     );
   }
-  if (!files || files.length === 0) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center text-fg-subtle text-xs px-4 text-center gap-1">
-        <div>No artifact files yet.</div>
-        <div className="opacity-70">
-          In-sandbox tools writing into{" "}
-          <code className="px-1 rounded bg-surface-2">
-            $ITERION_ARTIFACT_FILES_DIR
-          </code>{" "}
-          appear here as they land.
-        </div>
-      </div>
-    );
-  }
+
+  const downloadsButton = (
+    <DownloadsButton
+      count={runDownloads.length}
+      open={downloadsOpen}
+      onOpenChange={setDownloadsOpen}
+      entries={runDownloads}
+      onShow={(e) => {
+        setDownloadsOpen(false);
+        openPreview({ path: e.path, size: e.size });
+      }}
+      onRedownload={(e) => {
+        setDownloadsOpen(false);
+        triggerDownload({ path: e.path, size: e.size });
+      }}
+      onReveal={(e) => {
+        if (!e.localPath) return;
+        desktop.revealInFinder(e.localPath).catch((err: unknown) => {
+          addToast(
+            `Reveal failed: ${err instanceof Error ? err.message : "unknown error"}`,
+            "error",
+          );
+        });
+      }}
+      onRemove={(e) => removeDownload(e.id)}
+      onClearAll={() => clearForRun(runId)}
+    />
+  );
 
   return (
     <>
-      <div className="h-full overflow-auto text-xs">
-        <table className="w-full">
-          <thead className="sticky top-0 bg-surface-1 border-b border-border-default">
-            <tr className="text-left text-fg-subtle">
-              <th className="px-3 py-2 font-normal">Path</th>
-              <th className="px-3 py-2 font-normal text-right whitespace-nowrap">
-                Size
-              </th>
-              <th className="px-3 py-2 font-normal whitespace-nowrap">
-                Modified
-              </th>
-              <th className="px-3 py-2 font-normal text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {files.map((f) => (
-              <tr
-                key={f.path}
-                className="border-b border-border-subtle hover:bg-surface-2"
-              >
-                <td className="px-3 py-1.5 font-mono">
-                  {/* Anchor (not button) so middle-click in browser
-                      mode still opens the raw URL in a new tab — the
-                      onClick handles the common left-click case
-                      uniformly across browser + Wails. */}
-                  <a
-                    href={artifactFileURL(runId, f.path)}
-                    onClick={(e) => {
-                      if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
-                      e.preventDefault();
-                      openPreview(f);
-                    }}
-                    className="text-fg-link hover:underline"
+      <div className="h-full flex flex-col text-xs">
+        <div className="flex items-center justify-between border-b border-border-subtle px-3 py-1.5 text-fg-subtle">
+          <span>{(files ?? []).length} fichier(s)</span>
+          {downloadsButton}
+        </div>
+        {!files || files.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-fg-subtle px-4 text-center gap-1">
+            <div>No artifact files yet.</div>
+            <div className="opacity-70">
+              In-sandbox tools writing into{" "}
+              <code className="px-1 rounded bg-surface-2">
+                $ITERION_ARTIFACT_FILES_DIR
+              </code>{" "}
+              appear here as they land.
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-auto">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-surface-1 border-b border-border-default">
+                <tr className="text-left text-fg-subtle">
+                  <th className="px-3 py-2 font-normal">Path</th>
+                  <th className="px-3 py-2 font-normal text-right whitespace-nowrap">
+                    Size
+                  </th>
+                  <th className="px-3 py-2 font-normal whitespace-nowrap">
+                    Modified
+                  </th>
+                  <th className="px-3 py-2 font-normal text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {files.map((f) => (
+                  <tr
+                    key={f.path}
+                    className="border-b border-border-subtle hover:bg-surface-2"
                   >
-                    {f.path}
-                  </a>
-                </td>
-                <td className="px-3 py-1.5 text-right text-fg-subtle whitespace-nowrap">
-                  {formatSize(f.size)}
-                </td>
-                <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">
-                  {formatModified(f.modified_at)}
-                </td>
-                <td className="px-3 py-1.5 text-right whitespace-nowrap">
-                  <button
-                    type="button"
-                    className="text-fg-link hover:underline mr-3"
-                    onClick={() => triggerDownload(f)}
-                  >
-                    download
-                  </button>
-                  <button
-                    type="button"
-                    className="text-fg-link hover:underline"
-                    onClick={() => openPreview(f)}
-                  >
-                    open
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    <td className="px-3 py-1.5 font-mono">
+                      <a
+                        href={artifactFileURL(runId, f.path)}
+                        onClick={(e) => {
+                          if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+                          e.preventDefault();
+                          openPreview(f);
+                        }}
+                        className="text-fg-link hover:underline"
+                      >
+                        {f.path}
+                      </a>
+                    </td>
+                    <td className="px-3 py-1.5 text-right text-fg-subtle whitespace-nowrap">
+                      {formatSize(f.size)}
+                    </td>
+                    <td className="px-3 py-1.5 text-fg-subtle whitespace-nowrap">
+                      {formatModified(f.modified_at)}
+                    </td>
+                    <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="text-fg-link hover:underline mr-3"
+                        onClick={() => triggerDownload(f)}
+                      >
+                        download
+                      </button>
+                      <button
+                        type="button"
+                        className="text-fg-link hover:underline"
+                        onClick={() => openPreview(f)}
+                      >
+                        open
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
       {preview && (
         <Dialog
@@ -305,17 +372,17 @@ export default function ArtifactFilesPanel({ runId }: Props) {
           }}
           widthClass="max-w-4xl"
           title={
-            <span className="font-mono text-xs">{preview.file.path}</span>
+            <span className="font-mono text-xs">{preview.path}</span>
           }
           description={
             <span>
-              {formatSize(preview.file.size)} · {preview.contentType || "loading…"}
+              {formatSize(preview.size)} · {preview.contentType || "loading…"}
             </span>
           }
           footer={
             <button
               type="button"
-              onClick={() => triggerDownload(preview.file)}
+              onClick={() => triggerDownload({ path: preview.path, size: preview.size })}
               className="px-3 py-1.5 text-xs rounded border border-border-default hover:bg-surface-2"
             >
               Download
@@ -326,6 +393,127 @@ export default function ArtifactFilesPanel({ runId }: Props) {
         </Dialog>
       )}
     </>
+  );
+}
+
+interface DownloadsButtonProps {
+  count: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  entries: DownloadEntry[];
+  onShow: (entry: DownloadEntry) => void;
+  onRedownload: (entry: DownloadEntry) => void;
+  onReveal: (entry: DownloadEntry) => void;
+  onRemove: (entry: DownloadEntry) => void;
+  onClearAll: () => void;
+}
+
+function DownloadsButton({
+  count,
+  open,
+  onOpenChange,
+  entries,
+  onShow,
+  onRedownload,
+  onReveal,
+  onRemove,
+  onClearAll,
+}: DownloadsButtonProps) {
+  const desktopMode = isDesktop();
+  return (
+    <Popover
+      open={open}
+      onOpenChange={onOpenChange}
+      side="bottom"
+      align="end"
+      contentClassName="w-[28rem] max-h-[60vh] flex flex-col"
+      trigger={
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-border-subtle hover:bg-surface-2 text-fg-default"
+          title="Téléchargements"
+        >
+          <span>Téléchargements</span>
+          <span className="ml-1 inline-flex items-center justify-center min-w-[1.25rem] h-4 px-1 rounded bg-surface-2 text-fg-subtle text-[10px] font-mono">
+            {count}
+          </span>
+        </button>
+      }
+    >
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border-subtle">
+        <span className="text-xs font-semibold">Téléchargements de ce run</span>
+        <button
+          type="button"
+          disabled={entries.length === 0}
+          onClick={onClearAll}
+          className="text-[11px] text-fg-link hover:underline disabled:text-fg-subtle disabled:no-underline"
+        >
+          Tout effacer
+        </button>
+      </div>
+      {entries.length === 0 ? (
+        <div className="px-3 py-6 text-center text-xs text-fg-subtle">
+          Aucun téléchargement pour ce run.
+        </div>
+      ) : (
+        <div className="flex-1 overflow-auto">
+          <ul className="divide-y divide-border-subtle">
+            {entries.map((e) => (
+              <li key={e.id} className="px-3 py-2 hover:bg-surface-2">
+                <div className="flex items-baseline justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onShow(e)}
+                    className="font-mono text-xs text-fg-link hover:underline truncate text-left"
+                    title={e.path}
+                  >
+                    {e.basename}
+                  </button>
+                  <span className="text-[10px] text-fg-subtle whitespace-nowrap">
+                    {formatModified(new Date(e.downloadedAt).toISOString())}
+                  </span>
+                </div>
+                <div className="text-[11px] text-fg-subtle truncate" title={e.localPath ?? e.path}>
+                  {e.localPath ?? e.path} · {formatSize(e.size)}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => onShow(e)}
+                    className="text-fg-link hover:underline"
+                  >
+                    Afficher
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRedownload(e)}
+                    className="text-fg-link hover:underline"
+                  >
+                    Re-télécharger
+                  </button>
+                  {desktopMode && e.localPath && (
+                    <button
+                      type="button"
+                      onClick={() => onReveal(e)}
+                      className="text-fg-link hover:underline"
+                    >
+                      Ouvrir le dossier
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onRemove(e)}
+                    className="text-fg-subtle hover:underline ml-auto"
+                  >
+                    Retirer
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Popover>
   );
 }
 
@@ -352,7 +540,7 @@ function PreviewBody({ preview }: { preview: PreviewState }) {
   if (preview.blobURL && preview.contentType.startsWith("image/")) {
     return (
       <div className="max-h-[70vh] overflow-auto flex items-center justify-center bg-surface-0 p-3 rounded">
-        <img src={preview.blobURL} alt={preview.file.path} className="max-w-full" />
+        <img src={preview.blobURL} alt={preview.path} className="max-w-full" />
       </div>
     );
   }

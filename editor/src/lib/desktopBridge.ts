@@ -55,6 +55,7 @@ interface WailsBindings {
   GetServerURL: () => Promise<string>;
   GetSessionToken: () => Promise<string>;
   SaveTextFile: (suggestedFilename: string, content: string) => Promise<string>;
+  SaveBinaryFile: (suggestedFilename: string, base64Data: string) => Promise<string>;
   GetAppInfo: () => Promise<AppInfo>;
   Quit: () => Promise<void>;
   SetWindowTitle: (title: string) => Promise<void>;
@@ -145,6 +146,8 @@ export const desktop = {
   getSessionToken: () => call("GetSessionToken"),
   saveTextFile: (suggestedFilename: string, content: string) =>
     call("SaveTextFile", suggestedFilename, content),
+  saveBinaryFile: (suggestedFilename: string, base64Data: string) =>
+    call("SaveBinaryFile", suggestedFilename, base64Data),
   getAppInfo: () => call("GetAppInfo"),
   quit: () => call("Quit"),
   setWindowTitle: (title: string) => call("SetWindowTitle", title),
