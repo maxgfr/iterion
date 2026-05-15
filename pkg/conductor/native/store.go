@@ -1,0 +1,572 @@
+// Package native implements iterion's first-class issue/kanban tracker.
+// Issues live as one JSON file per issue under <root>/issues/, a board
+// config sits at <root>/board.json, and every mutation appends a
+// monotonically-sequenced record to <root>/events.jsonl. All writes are
+// serialized through a single mutex; reads scan the filesystem.
+package native
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/SocialGouv/iterion/pkg/conductor/tracker"
+	"github.com/google/uuid"
+)
+
+const (
+	boardFile  = "board.json"
+	issuesDir  = "issues"
+	eventsFile = "events.jsonl"
+
+	dirPerm  fs.FileMode = 0o755
+	filePerm fs.FileMode = 0o644
+)
+
+// Store is the filesystem-backed native tracker store. Safe for
+// concurrent use.
+type Store struct {
+	root string
+
+	mu      sync.Mutex
+	board   *Board
+	seq     int64
+	seqSeed bool
+}
+
+// NewStore opens (or initializes) the native tracker at root. If
+// board.json is absent a default board is written.
+func NewStore(root string) (*Store, error) {
+	if root == "" {
+		return nil, errors.New("native store: root path required")
+	}
+	if err := os.MkdirAll(filepath.Join(root, issuesDir), dirPerm); err != nil {
+		return nil, fmt.Errorf("native store: mkdir: %w", err)
+	}
+	s := &Store{root: root}
+	if err := s.loadOrInitBoard(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// Root returns the on-disk root directory.
+func (s *Store) Root() string { return s.root }
+
+// Board returns a defensive copy of the current board config.
+func (s *Store) Board() *Board {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneBoard(s.board)
+}
+
+// SetBoard validates and replaces the board configuration.
+func (s *Store) SetBoard(b *Board) error {
+	if err := b.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.board = cloneBoard(b)
+	if err := s.writeBoardLocked(); err != nil {
+		return err
+	}
+	return s.appendEventLocked(Event{Type: EvtBoardUpdated})
+}
+
+// Create persists a new issue. The State must be one of the configured
+// board states; if empty, the first state is used. ID is generated if
+// missing.
+func (s *Store) Create(in Issue) (*Issue, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if in.Title == "" {
+		return nil, errors.New("issue: title required")
+	}
+	if in.State == "" {
+		in.State = s.board.States[0].Name
+	}
+	if s.board.StateByName(in.State) == nil {
+		return nil, fmt.Errorf("issue: unknown state %q", in.State)
+	}
+	if err := s.board.ValidateFieldValues(in.Fields); err != nil {
+		return nil, err
+	}
+
+	if in.ID == "" {
+		in.ID = "native:" + uuid.NewString()
+	}
+	now := time.Now().UTC()
+	in.CreatedAt = now
+	in.UpdatedAt = now
+	if err := s.writeIssueLocked(&in); err != nil {
+		return nil, err
+	}
+	if err := s.appendEventLocked(Event{
+		Type:    EvtIssueCreated,
+		IssueID: in.ID,
+		Payload: map[string]any{"state": in.State, "title": in.Title},
+	}); err != nil {
+		return nil, err
+	}
+	out := in
+	return &out, nil
+}
+
+// Get returns the issue with the given ID.
+func (s *Store) Get(id string) (*Issue, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.readIssueLocked(id)
+}
+
+// ListFilter constrains the result of List. Zero-value fields don't filter.
+type ListFilter struct {
+	States   []string
+	Labels   []string
+	Assignee string
+	Claimed  *bool
+}
+
+// List returns issues matching the filter, sorted by priority desc, then
+// created_at asc.
+func (s *Store) List(filter ListFilter) ([]*Issue, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries, err := os.ReadDir(filepath.Join(s.root, issuesDir))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("native store: list: %w", err)
+	}
+	out := make([]*Issue, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".tmp") {
+			continue
+		}
+		id := decodeID(strings.TrimSuffix(e.Name(), ".json"))
+		iss, err := s.readIssueLocked(id)
+		if err != nil {
+			continue
+		}
+		if !filter.match(iss) {
+			continue
+		}
+		out = append(out, iss)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Priority != out[j].Priority {
+			return out[i].Priority > out[j].Priority
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+func (f ListFilter) match(iss *Issue) bool {
+	if len(f.States) > 0 && !containsString(f.States, iss.State) {
+		return false
+	}
+	for _, want := range f.Labels {
+		if !containsString(iss.Labels, want) {
+			return false
+		}
+	}
+	if f.Assignee != "" && iss.Assignee != f.Assignee {
+		return false
+	}
+	if f.Claimed != nil {
+		hasClaim := iss.Claim != ""
+		if *f.Claimed != hasClaim {
+			return false
+		}
+	}
+	return true
+}
+
+// Patch describes a partial update to an issue. Pointer fields are nil
+// when the corresponding field is not being changed.
+type Patch struct {
+	Title    *string
+	Body     *string
+	Labels   *[]string
+	Priority *int
+	Assignee *string
+	Blockers *[]string
+	// Fields is merged into the issue's Fields. A nil value deletes the key.
+	Fields map[string]any
+}
+
+// Update applies the patch and emits an issue_updated event with the
+// list of changed top-level fields. State changes are not supported here;
+// use SetState.
+func (s *Store) Update(id string, p Patch) (*Issue, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	iss, err := s.readIssueLocked(id)
+	if err != nil {
+		return nil, err
+	}
+	changed := []string{}
+	if p.Title != nil && *p.Title != iss.Title {
+		iss.Title = *p.Title
+		changed = append(changed, "title")
+	}
+	if p.Body != nil && *p.Body != iss.Body {
+		iss.Body = *p.Body
+		changed = append(changed, "body")
+	}
+	if p.Labels != nil {
+		iss.Labels = append([]string(nil), (*p.Labels)...)
+		changed = append(changed, "labels")
+	}
+	if p.Priority != nil && *p.Priority != iss.Priority {
+		iss.Priority = *p.Priority
+		changed = append(changed, "priority")
+	}
+	if p.Assignee != nil && *p.Assignee != iss.Assignee {
+		iss.Assignee = *p.Assignee
+		changed = append(changed, "assignee")
+	}
+	if p.Blockers != nil {
+		iss.Blockers = append([]string(nil), (*p.Blockers)...)
+		changed = append(changed, "blockers")
+	}
+	if len(p.Fields) > 0 {
+		merged := map[string]any{}
+		for k, v := range iss.Fields {
+			merged[k] = v
+		}
+		for k, v := range p.Fields {
+			if v == nil {
+				delete(merged, k)
+			} else {
+				merged[k] = v
+			}
+		}
+		if err := s.board.ValidateFieldValues(merged); err != nil {
+			return nil, err
+		}
+		iss.Fields = merged
+		changed = append(changed, "fields")
+	}
+	if len(changed) == 0 {
+		return iss, nil
+	}
+	iss.UpdatedAt = time.Now().UTC()
+	if err := s.writeIssueLocked(iss); err != nil {
+		return nil, err
+	}
+	if err := s.appendEventLocked(Event{
+		Type:    EvtIssueUpdated,
+		IssueID: iss.ID,
+		Payload: map[string]any{"changed": changed},
+	}); err != nil {
+		return nil, err
+	}
+	return iss, nil
+}
+
+// SetState transitions an issue, validating against the board. Returns
+// tracker.ErrTransitionRejected if newState is unknown.
+func (s *Store) SetState(id, newState string) (*Issue, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	iss, err := s.readIssueLocked(id)
+	if err != nil {
+		return nil, err
+	}
+	if s.board.StateByName(newState) == nil {
+		return nil, fmt.Errorf("%w: unknown state %q", tracker.ErrTransitionRejected, newState)
+	}
+	if iss.State == newState {
+		return iss, nil
+	}
+	old := iss.State
+	iss.State = newState
+	iss.UpdatedAt = time.Now().UTC()
+	if err := s.writeIssueLocked(iss); err != nil {
+		return nil, err
+	}
+	if err := s.appendEventLocked(Event{
+		Type:    EvtIssueState,
+		IssueID: iss.ID,
+		Payload: map[string]any{"from": old, "to": newState},
+	}); err != nil {
+		return nil, err
+	}
+	return iss, nil
+}
+
+// Delete removes the issue file and emits an issue_deleted event.
+func (s *Store) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.issuePath(id)
+	if _, err := os.Stat(p); errors.Is(err, fs.ErrNotExist) {
+		return tracker.ErrNotFound
+	}
+	if err := os.Remove(p); err != nil {
+		return fmt.Errorf("native store: remove issue: %w", err)
+	}
+	return s.appendEventLocked(Event{Type: EvtIssueDeleted, IssueID: id})
+}
+
+// Claim sets the claim marker. Returns tracker.ErrClaimConflict if the
+// issue is already claimed by a different marker. Idempotent for the
+// same marker.
+func (s *Store) Claim(id, marker string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	iss, err := s.readIssueLocked(id)
+	if err != nil {
+		return err
+	}
+	if iss.Claim != "" && iss.Claim != marker {
+		return fmt.Errorf("%w: held by %s", tracker.ErrClaimConflict, iss.Claim)
+	}
+	if iss.Claim == marker {
+		return nil
+	}
+	iss.Claim = marker
+	iss.UpdatedAt = time.Now().UTC()
+	if err := s.writeIssueLocked(iss); err != nil {
+		return err
+	}
+	return s.appendEventLocked(Event{
+		Type: EvtIssueClaimed, IssueID: id,
+		Payload: map[string]any{"marker": marker},
+	})
+}
+
+// Release clears the claim if it matches the given marker. Releasing an
+// already-unclaimed issue is a no-op.
+func (s *Store) Release(id, marker string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	iss, err := s.readIssueLocked(id)
+	if err != nil {
+		return err
+	}
+	if iss.Claim == "" {
+		return nil
+	}
+	if iss.Claim != marker {
+		return fmt.Errorf("%w: held by %s", tracker.ErrClaimConflict, iss.Claim)
+	}
+	iss.Claim = ""
+	iss.UpdatedAt = time.Now().UTC()
+	if err := s.writeIssueLocked(iss); err != nil {
+		return err
+	}
+	return s.appendEventLocked(Event{
+		Type: EvtIssueReleased, IssueID: id,
+		Payload: map[string]any{"marker": marker},
+	})
+}
+
+// Resolve returns the full issue ID matching the given prefix. The
+// prefix may be the bare UUID (without the "native:" scheme) or the
+// full ID. Returns tracker.ErrNotFound if no issue matches and a
+// distinct error if multiple match.
+func (s *Store) Resolve(prefix string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries, err := os.ReadDir(filepath.Join(s.root, issuesDir))
+	if err != nil {
+		return "", err
+	}
+	want := prefix
+	if !strings.HasPrefix(prefix, "native:") {
+		want = "native:" + prefix
+	}
+	var matches []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".tmp") {
+			continue
+		}
+		id := decodeID(strings.TrimSuffix(e.Name(), ".json"))
+		if id == want || strings.HasPrefix(id, want) {
+			matches = append(matches, id)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", tracker.ErrNotFound
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("native store: ambiguous prefix %q matches %d issues", prefix, len(matches))
+	}
+}
+
+// ScanEvents streams events from events.jsonl through visit, in file
+// order. Returning false from visit stops the scan. Safe to call
+// concurrently with writes — the file is append-only.
+func (s *Store) ScanEvents(visit func(*Event) bool) error {
+	p := filepath.Join(s.root, eventsFile)
+	f, err := os.Open(p)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1<<16), 10*1024*1024)
+	for scanner.Scan() {
+		var e Event
+		if err := json.Unmarshal(scanner.Bytes(), &e); err != nil {
+			continue
+		}
+		if !visit(&e) {
+			return nil
+		}
+	}
+	return scanner.Err()
+}
+
+// ---------------------------------------------------------------------------
+// internals — must be called with s.mu held
+// ---------------------------------------------------------------------------
+
+// loadOrInitBoard runs at construction time, before s is exposed to any
+// concurrent caller, so it does not lock.
+func (s *Store) loadOrInitBoard() error {
+	p := filepath.Join(s.root, boardFile)
+	data, err := os.ReadFile(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		s.board = DefaultBoard()
+		return s.writeBoardLocked()
+	}
+	if err != nil {
+		return fmt.Errorf("native store: read board: %w", err)
+	}
+	var b Board
+	if err := json.Unmarshal(data, &b); err != nil {
+		return fmt.Errorf("native store: parse board: %w", err)
+	}
+	if err := b.Validate(); err != nil {
+		return fmt.Errorf("native store: invalid board: %w", err)
+	}
+	s.board = &b
+	return nil
+}
+
+func (s *Store) writeBoardLocked() error {
+	s.board.UpdatedAt = time.Now().UTC()
+	data, err := json.MarshalIndent(s.board, "", "  ")
+	if err != nil {
+		return fmt.Errorf("native store: marshal board: %w", err)
+	}
+	p := filepath.Join(s.root, boardFile)
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, data, filePerm); err != nil {
+		return fmt.Errorf("native store: write board: %w", err)
+	}
+	return os.Rename(tmp, p)
+}
+
+func (s *Store) writeIssueLocked(iss *Issue) error {
+	if err := os.MkdirAll(filepath.Join(s.root, issuesDir), dirPerm); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(iss, "", "  ")
+	if err != nil {
+		return fmt.Errorf("native store: marshal issue: %w", err)
+	}
+	p := s.issuePath(iss.ID)
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, data, filePerm); err != nil {
+		return fmt.Errorf("native store: write issue: %w", err)
+	}
+	return os.Rename(tmp, p)
+}
+
+func (s *Store) readIssueLocked(id string) (*Issue, error) {
+	data, err := os.ReadFile(s.issuePath(id))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, tracker.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("native store: read issue: %w", err)
+	}
+	var iss Issue
+	if err := json.Unmarshal(data, &iss); err != nil {
+		return nil, fmt.Errorf("native store: parse issue %s: %w", id, err)
+	}
+	return &iss, nil
+}
+
+func (s *Store) issuePath(id string) string {
+	return filepath.Join(s.root, issuesDir, encodeID(id)+".json")
+}
+
+func (s *Store) appendEventLocked(evt Event) error {
+	if !s.seqSeed {
+		var max int64 = -1
+		_ = s.ScanEvents(func(e *Event) bool {
+			if e.Seq > max {
+				max = e.Seq
+			}
+			return true
+		})
+		s.seq = max + 1
+		s.seqSeed = true
+	}
+	evt.Seq = s.seq
+	if evt.Timestamp.IsZero() {
+		evt.Timestamp = time.Now().UTC()
+	}
+	line, err := json.Marshal(evt)
+	if err != nil {
+		return fmt.Errorf("native store: marshal event: %w", err)
+	}
+	line = append(line, '\n')
+	p := filepath.Join(s.root, eventsFile)
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, filePerm)
+	if err != nil {
+		return fmt.Errorf("native store: open events: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.Write(line); err != nil {
+		return fmt.Errorf("native store: write event: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("native store: sync event: %w", err)
+	}
+	s.seq++
+	return nil
+}
+
+// Colon is illegal in NTFS filenames; encode "native:<uuid>" → "native__<uuid>"
+// for safe cross-platform storage. UUIDs never contain a literal "__".
+func encodeID(id string) string { return strings.ReplaceAll(id, ":", "__") }
+func decodeID(s string) string  { return strings.ReplaceAll(s, "__", ":") }
+
+func cloneBoard(b *Board) *Board {
+	c := *b
+	c.States = append([]State(nil), b.States...)
+	c.Fields = append([]Field(nil), b.Fields...)
+	return &c
+}
+
+func containsString(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
