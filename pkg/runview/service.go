@@ -836,13 +836,21 @@ func (s *Service) Snapshot(runID string) (*RunSnapshot, error) {
 }
 
 // MaxEventsPerPage caps the number of events any single LoadEvents
-// response materialises. A 200MB events.jsonl from a long-running run
-// with hundreds of LLM I/O events would otherwise allocate the full
-// file into memory on every reconnect / scrubber drag — exhausting
-// memory in typical devcontainers. Callers paginate by passing the
-// next page's `from` as previous_last.Seq+1; len(out) == cap means
-// "more available".
-const MaxEventsPerPage = 5000
+// response materialises. The original 5000 was tuned for a world where
+// tool I/O bodies (multi-MB Bash stdout, LLM thinking blocks) were
+// inlined into events.jsonl, so a single page could easily exceed
+// 100MB of allocation. The sidecar-blob migration moved those bodies
+// out (preview ≤4KB stays inline; the rest lives in
+// runs/<id>/tools/<tool_use_id>/{input,output}), bounding per-event
+// size to a few KB regardless of payload size.
+//
+// 25000 keeps the worst-case per-page allocation in the low tens of
+// MB on typical events while letting most full runs replay in a
+// single round-trip (the WS subscriber + the /events HTTP endpoint
+// both paginate, so this is a per-page knob, not a hard ceiling).
+// Callers paginate by passing the next page's `from` as
+// previous_last.Seq+1; len(out) == cap means "more available".
+const MaxEventsPerPage = 25000
 
 // LoadEvents returns events in [from, to] (inclusive on from, exclusive
 // on to), capped at MaxEventsPerPage. Pass to=0 for "no upper bound".
