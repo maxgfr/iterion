@@ -184,6 +184,51 @@ func ExecutionFailedRecipe(maxRetries int) Recipe {
 	})
 }
 
+// NetworkTransientRecipe: longer exponential-backoff loop for transient
+// network failures reaching the upstream model API (ISP blip, captive
+// portal handoff, DNS flutter, datacenter routing change). Each attempt
+// doubles the delay up to a 60s cap; with the default 6 retries that
+// covers ~10 min of cumulative wait — enough to ride out the kind of
+// outages an operator would expect a long-running pipeline to recover
+// from on its own. Beyond that we surface as failed_resumable so the
+// operator can /resume after the network is verified back.
+//
+// Why a separate recipe (not just a bigger ExecutionFailedRecipe):
+// non-network execution failures (schema mismatch, missing fs entry,
+// in-sandbox script crash) usually won't fix themselves on retry —
+// burning 6 * 60s on a deterministic bug wastes operator time. Network
+// transients DO routinely fix themselves; rewarding the right pattern
+// matters for unattended overnight runs.
+//
+// Default cap = 6 attempts, 60s max backoff. Hosts override via
+// DefaultRecipes map mutation if they want a different shape.
+func NetworkTransientRecipe(maxRetries int) Recipe {
+	if maxRetries <= 0 {
+		maxRetries = 6
+	}
+	const baseDelay = 5 * time.Second
+	const maxDelay = 60 * time.Second
+	return RecipeFunc(func(_ context.Context, _ *runtime.RuntimeError, attempts int) Action {
+		if attempts >= maxRetries {
+			return Action{
+				Kind:   ActionFailTerminal,
+				Reason: "network outage exceeded retry budget; surfacing as failed_resumable — verify connectivity, then /resume",
+			}
+		}
+		// Exponential backoff capped at maxDelay: 5, 10, 20, 40, 60, 60.
+		delay := baseDelay << attempts
+		if delay > maxDelay || delay < 0 {
+			delay = maxDelay
+		}
+		return Action{
+			Kind:         ActionRetrySameNode,
+			Delay:        delay,
+			AttemptsLeft: maxRetries - attempts - 1,
+			Reason:       "transient network failure; retrying with exponential backoff",
+		}
+	})
+}
+
 // DefaultRecipes maps each well-known error code to its default
 // recipe. Hosts can override individual entries before installing.
 func DefaultRecipes() map[runtime.ErrorCode]Recipe {
@@ -194,6 +239,7 @@ func DefaultRecipes() map[runtime.ErrorCode]Recipe {
 		runtime.ErrCodeToolFailedTransient:   TransientToolRecipe(2),
 		runtime.ErrCodeToolFailedPermanent:   PermanentToolRecipe(),
 		runtime.ErrCodeExecutionFailed:       ExecutionFailedRecipe(1),
+		runtime.ErrCodeNetworkTransient:      NetworkTransientRecipe(6),
 	}
 }
 
@@ -267,5 +313,44 @@ func Classify(err error) runtime.ErrorCode {
 		}
 		return runtime.ErrCodeExecutionFailed
 	}
+	// String-pattern fallback for unstructured errors that bubble up
+	// from out-of-process backends (claude_code CLI, iterion sandbox
+	// drivers). The Anthropic CLI emits "API Error: Unable to connect
+	// to API (FailedToOpenSocket)" when the host loses the socket
+	// mid-request; OpenAI tools emit variations on "connection refused"
+	// / "connection reset"; Go's net/http surface prints "no such host"
+	// for DNS failures + "i/o timeout" for read/dial timeouts. None of
+	// these arrive as *api.APIError because the upstream never produced
+	// an HTTP response; the wrapping layers stringify the lower-level
+	// error and we don't have a typed channel for it. Match the known
+	// phrases case-insensitively and route to NETWORK_TRANSIENT so the
+	// recovery dispatcher applies the longer exponential backoff
+	// instead of the catch-all 1-shot retry.
+	msg := strings.ToLower(err.Error())
+	for _, needle := range networkTransientNeedles {
+		if strings.Contains(msg, needle) {
+			return runtime.ErrCodeNetworkTransient
+		}
+	}
 	return runtime.ErrCodeExecutionFailed
+}
+
+// networkTransientNeedles enumerates the lowercase substrings that
+// indicate a transient connectivity failure to the upstream model API.
+// Kept as a plain slice so hosts patching this file can append site-
+// specific phrases (corporate proxy timeouts, etc.) without touching
+// the matcher logic. ALL entries MUST be lowercase — Classify lowercases
+// the err string before checking.
+var networkTransientNeedles = []string{
+	"failedtoopensocket",       // anthropic claude CLI verbatim ("Unable to connect to API (FailedToOpenSocket)")
+	"unable to connect to api", // anthropic claude CLI prefix
+	"connection refused",       // tcp refused (host present, port closed / firewall)
+	"connection reset",         // tcp reset by peer (mid-request drop)
+	"no such host",             // dns failure (transient resolver outage)
+	"i/o timeout",              // go net package timeouts (dial / read / write)
+	"context deadline exceeded", // request-level timeout in upstream client
+	"network is unreachable",   // host has no route (eg vpn dropped)
+	"no route to host",         // routing-table drop (often transient)
+	"tls handshake timeout",    // tls negotiation hung (proxy / mitm flap)
+	"eof",                      // bare EOF mid-stream — usually peer dropped during sse
 }
