@@ -12,13 +12,37 @@ interface WsEnvelope {
   ack_id?: string;
 }
 
+// readStoreOverrideFromURL returns the current page's `?store=` query
+// param, if any. Same helper as in api/runs.ts but inlined to avoid an
+// import cycle (hooks → api → hooks would not actually cycle, but
+// keeping it local minimises coupling). The WS URL must carry the
+// override so the daemon's WS handler routes via resolveCrossStore
+// AND streams events from the foreign store (pkg/server/runs_ws.go's
+// streamEventsCrossStore path).
+function readStoreOverrideFromURL(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const v = new URLSearchParams(window.location.search).get("store");
+    return v && v.length > 0 ? v : "";
+  } catch {
+    return "";
+  }
+}
+
+function appendStoreParam(wsURL: string): string {
+  const override = readStoreOverrideFromURL();
+  if (!override) return wsURL;
+  const sep = wsURL.includes("?") ? "&" : "?";
+  return `${wsURL}${sep}store=${encodeURIComponent(override)}`;
+}
+
 // Desktop mode: SPA loads on the Wails AssetServer origin (wails:// or
 // http://wails.localhost), but Wails AssetServer rejects WS upgrades (501).
 // We dial the local server directly with the session token in the query.
 async function deriveWsUrl(runId: string): Promise<string> {
   if (isDesktop()) {
     const desktopUrl = await getDesktopWsBase(`/api/ws/runs/${encodeURIComponent(runId)}`);
-    if (desktopUrl) return desktopUrl;
+    if (desktopUrl) return appendStoreParam(desktopUrl);
   }
   // In a Wails-hosted page the AssetServer host (window.location.host ===
   // "wails" / "wails.localhost") cannot accept WS upgrades and DNS won't
@@ -30,10 +54,10 @@ async function deriveWsUrl(runId: string): Promise<string> {
     throw new Error("desktop bindings not ready");
   }
   if (BASE_URL.startsWith("http")) {
-    return BASE_URL.replace(/^http/, "ws") + `/ws/runs/${encodeURIComponent(runId)}`;
+    return appendStoreParam(BASE_URL.replace(/^http/, "ws") + `/ws/runs/${encodeURIComponent(runId)}`);
   }
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}${BASE_URL}/ws/runs/${encodeURIComponent(runId)}`;
+  return appendStoreParam(`${proto}//${window.location.host}${BASE_URL}/ws/runs/${encodeURIComponent(runId)}`);
 }
 
 interface LogChunkPayload {
