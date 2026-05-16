@@ -81,6 +81,32 @@ func (s *Server) handleListGlobalActiveRuns(w http.ResponseWriter, r *http.Reque
 			if !isActiveStatus(rec.Status) {
 				continue
 			}
+			// Stale-orphan filter: a run.json with status=running (or
+			// paused_waiting_human) whose events.jsonl hasn't been
+			// touched in staleRunCutoff is almost certainly an orphan
+			// — the owning test/CLI process died without
+			// UpdateRunStatus ever firing, so the status is frozen
+			// even though nothing is driving it. Showing these in the
+			// banner is noise (operator clicks → cross-store load →
+			// "running" snapshot that never advances) and the user
+			// flagged it as confusing. We filter them out without
+			// mutating run.json so the orphans remain visible to
+			// `iterion inspect --store-dir <path>` for forensics.
+			//
+			// Heartbeat = events.jsonl mtime. The engine appends
+			// events continuously while alive (tool_started /
+			// tool_called / llm_request / …); once dead, mtime
+			// freezes. run.json's updated_at fires only on
+			// UpdateRunStatus (sparse — mostly terminal transitions)
+			// so it's not a reliable liveness signal.
+			if rec.Status == store.RunStatusRunning || rec.Status == store.RunStatusPausedWaitingHuman {
+				evPath := runEventsFilenameForStore(root, rec.ID)
+				if st, statErr := os.Stat(evPath); statErr == nil {
+					if time.Since(st.ModTime()) > staleRunCutoff {
+						continue
+					}
+				}
+			}
 			out = append(out, globalActiveRun{
 				ID:           rec.ID,
 				Name:         rec.Name,
@@ -131,6 +157,23 @@ func isActiveStatus(s store.RunStatus) bool {
 	}
 	return false
 }
+
+// staleRunCutoff is the maximum gap between events.jsonl mtime and
+// "now" before a status=running / paused_waiting_human run is treated
+// as an orphan. Live runs flush events at minute-scale during normal
+// work (every tool_started / tool_called / llm_request); a 15-minute
+// silence on an actively-driven workflow is rare, and the cost of
+// occasionally hiding a real long-paused run is much lower than the
+// cost of showing every test-process orphan as "running" forever
+// (operator confusion, 404 clicks).
+const staleRunCutoff = 15 * time.Minute
+
+// runEventsFilenameForStore mirrors store.FilesystemRunStore's events
+// path layout WITHOUT importing the store package's internals.
+func runEventsFilenameForStore(root, runID string) string {
+	return filepath.Join(root, "runs", runID, "events.jsonl")
+}
+
 
 // globalStoreRoots returns every iterion store directory the daemon
 // should scan for cross-folder runs. Always includes:
