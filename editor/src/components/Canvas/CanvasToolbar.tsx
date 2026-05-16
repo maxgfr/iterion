@@ -1,13 +1,9 @@
 import {
-  ArrowDownIcon,
-  ArrowRightIcon,
   Crosshair2Icon,
   DotsHorizontalIcon,
   EnterFullScreenIcon,
   ExitFullScreenIcon,
-  FrameIcon,
   SizeIcon,
-  StackIcon,
 } from "@radix-ui/react-icons";
 import type { ReactNode } from "react";
 
@@ -21,8 +17,6 @@ import { parseGroups } from "@/lib/groups";
 const LAYER_KINDS: LayerKind[] = ["schemas", "prompts", "vars"];
 
 interface Props {
-  onArrange: () => void;
-  onFitView: () => void;
   onFocusNode: (() => void) | null;
   onBrowserFullscreen: () => void;
   onFitViewAfterDelay: () => void;
@@ -50,16 +44,12 @@ function MenuItem({ icon, label, onSelect }: MenuItemProps) {
 }
 
 export default function CanvasToolbar({
-  onArrange,
-  onFitView,
   onFocusNode,
   onBrowserFullscreen,
   onFitViewAfterDelay,
 }: Props) {
   const activeLayers = useUIStore((s) => s.activeLayers);
   const toggleLayer = useUIStore((s) => s.toggleLayer);
-  const layoutDirection = useUIStore((s) => s.layoutDirection);
-  const toggleLayoutDirection = useUIStore((s) => s.toggleLayoutDirection);
   const expanded = useUIStore((s) => s.expanded);
   const toggleExpanded = useUIStore((s) => s.toggleExpanded);
   const browserFullscreen = useUIStore((s) => s.browserFullscreen);
@@ -68,10 +58,6 @@ export default function CanvasToolbar({
   const document = useDocumentStore((s) => s.document);
   const hasGroups = document ? parseGroups(document.comments ?? []).length > 0 : false;
 
-  const layoutSwitchLabel =
-    layoutDirection === "DOWN"
-      ? "Switch to horizontal layout (left→right)"
-      : "Switch to vertical layout (top→bottom)";
   const expandLabel = expanded ? "Collapse canvas" : "Expand canvas (hide chrome)";
   const fullscreenLabel = browserFullscreen ? "Exit fullscreen" : "Enter fullscreen";
 
@@ -110,20 +96,10 @@ export default function CanvasToolbar({
         )}
       </div>
 
-      {/* Right-side toolbar — icon-only to leave room for the centered breadcrumb */}
+      {/* Right-side toolbar — situational canvas actions only. Layout
+          direction, Arrange and Fit-view live in the top Toolbar's View
+          group so they're one click away regardless of canvas focus. */}
       <div className="absolute top-2 right-2 z-40 flex gap-1">
-        <IconButton
-          size="sm"
-          variant="secondary"
-          label={layoutSwitchLabel}
-          onClick={() => {
-            toggleLayoutDirection();
-            onFitViewAfterDelay();
-          }}
-          className="bg-surface-1/90 border-border-strong"
-        >
-          {layoutDirection === "DOWN" ? <ArrowRightIcon /> : <ArrowDownIcon />}
-        </IconButton>
         <Popover
           side="bottom"
           align="end"
@@ -140,8 +116,6 @@ export default function CanvasToolbar({
           }
         >
           <div className="flex flex-col">
-            <MenuItem icon={<StackIcon />} label="Arrange" onSelect={onArrange} />
-            <MenuItem icon={<FrameIcon />} label="Fit view" onSelect={onFitView} />
             {onFocusNode && (
               <MenuItem
                 icon={<Crosshair2Icon />}
