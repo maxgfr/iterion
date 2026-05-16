@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,16 +63,40 @@ func loadDotEnv(t *testing.T) {
 	}
 }
 
+// liveExecutorOption configures newLiveExecutor for callers that need
+// to override defaults (currently: the logger, used by `_Real` tests
+// that tee to <storeDir>/runs/<runID>/run.log so the desktop app's
+// cross-store log pane shows live test output).
+type liveExecutorOption func(*liveExecutorConfig)
+
+type liveExecutorConfig struct {
+	logger *iterlog.Logger
+}
+
+// withLiveLogger overrides the default stderr-only logger. Pass a
+// tee'd logger (e.g. from prepareLiveRunLog) so the executor's
+// hooks + backend output land in run.log alongside stderr.
+func withLiveLogger(l *iterlog.Logger) liveExecutorOption {
+	return func(c *liveExecutorConfig) { c.logger = l }
+}
+
 // newLiveExecutor creates a ClawExecutor with all standard backends registered
 // AND the standard claw built-in tool set (bash, read_file, write_file,
 // file_edit, glob, grep, web_fetch, …) wired into a tool registry rooted at
 // workDir. Without the tool registration step, any workflow node that
 // declares `backend: claw` plus `tools: [bash, ...]` errors out at runtime
 // with "unknown tool 'bash'" — observed in whole_improve_loop run3.
-func newLiveExecutor(t *testing.T, wf *ir.Workflow, s store.RunStore, runID, workDir string) *model.ClawExecutor {
+func newLiveExecutor(t *testing.T, wf *ir.Workflow, s store.RunStore, runID, workDir string, opts ...liveExecutorOption) *model.ClawExecutor {
 	t.Helper()
+	cfg := &liveExecutorConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
 	reg := model.NewRegistry()
-	logger := iterlog.New(iterlog.LevelDebug, os.Stderr)
+	logger := cfg.logger
+	if logger == nil {
+		logger = iterlog.New(iterlog.LevelDebug, os.Stderr)
+	}
 	hooks := model.NewStoreEventHooks(context.Background(), s, runID, logger)
 
 	backendReg := delegate.DefaultRegistry(logger)
@@ -102,6 +127,39 @@ func newLiveExecutor(t *testing.T, wf *ir.Workflow, s store.RunStore, runID, wor
 		model.WithWorkDir(workDir),
 		model.WithEventHooks(hooks),
 	)
+}
+
+// prepareLiveRunLog opens <storeDir>/runs/<runID>/run.log and returns
+// a logger that tees writes to both stderr AND the file, matching the
+// teeing pkg/cli/run.go does for CLI-launched runs. Pass the returned
+// logger to both `newLiveExecutor(..., withLiveLogger(logger))` and
+// `runtime.WithLogger(logger)` so the executor's + engine's output
+// land on disk.
+//
+// Without this, runs launched directly via `runtime.New(...)` (live
+// e2e tests) never produce a run.log — the desktop app's cross-store
+// log pane then shows "No log captured." because the file the WS tail
+// expects simply doesn't exist. Best-effort: if the file can't be
+// opened (no writable store dir, etc.) the returned logger falls back
+// to stderr-only so the test still runs.
+func prepareLiveRunLog(t *testing.T, storeDir, runID string) *iterlog.Logger {
+	t.Helper()
+	base := iterlog.New(iterlog.LevelDebug, os.Stderr)
+	if storeDir == "" {
+		return base
+	}
+	runDir := filepath.Join(storeDir, "runs", runID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Logf("prepareLiveRunLog mkdir %s: %v — logs to stderr only", runDir, err)
+		return base
+	}
+	f, err := os.OpenFile(filepath.Join(runDir, "run.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Logf("prepareLiveRunLog open run.log: %v — logs to stderr only", err)
+		return base
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	return iterlog.New(iterlog.LevelDebug, io.MultiWriter(os.Stderr, f))
 }
 
 // installValidateSyntax copies the validate_syntax.js script into the
@@ -3498,7 +3556,8 @@ func TestLive_VibeFeatureDev_Real(t *testing.T) {
 	if err := mcp.PrepareWorkflow(wf, workspaceDir); err != nil {
 		t.Fatalf("mcp.PrepareWorkflow: %v", err)
 	}
-	executor := newLiveExecutor(t, wf, s, runID, workspaceDir)
+	teeLogger := prepareLiveRunLog(t, storeDir, runID)
+	executor := newLiveExecutor(t, wf, s, runID, workspaceDir, withLiveLogger(teeLogger))
 	defer executor.Close()
 	featurePrompt := "Add a `POST /users/{id}/posts` endpoint that creates a new Post for the given user. " +
 		"Requirements: title is required and ≤200 chars, body is required, return 404 if the user " +
@@ -3518,7 +3577,7 @@ func TestLive_VibeFeatureDev_Real(t *testing.T) {
 		"feature_prompt": featurePrompt,
 	})
 
-	eng := runtime.New(wf, s, executor, runtime.WithWorkDir(workspaceDir))
+	eng := runtime.New(wf, s, executor, runtime.WithWorkDir(workspaceDir), runtime.WithLogger(teeLogger))
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Minute)
 	defer cancel()
 	inputs := map[string]interface{}{
@@ -3580,7 +3639,8 @@ func TestLive_VibeReviewAlternating_Real(t *testing.T) {
 	if err := mcp.PrepareWorkflow(wf, workspaceDir); err != nil {
 		t.Fatalf("mcp.PrepareWorkflow: %v", err)
 	}
-	executor := newLiveExecutor(t, wf, s, runID, workspaceDir)
+	teeLogger := prepareLiveRunLog(t, storeDir, runID)
+	executor := newLiveExecutor(t, wf, s, runID, workspaceDir, withLiveLogger(teeLogger))
 	defer executor.Close()
 	// Don't override workspace_dir — same rationale as
 	// TestLive_VibeFeatureDev_Real. Let ${PROJECT_DIR} resolve to
@@ -3590,7 +3650,7 @@ func TestLive_VibeReviewAlternating_Real(t *testing.T) {
 		"scope_notes": scopeNotes,
 	})
 
-	eng := runtime.New(wf, s, executor, runtime.WithWorkDir(workspaceDir))
+	eng := runtime.New(wf, s, executor, runtime.WithWorkDir(workspaceDir), runtime.WithLogger(teeLogger))
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 	inputs := map[string]interface{}{
@@ -3664,7 +3724,11 @@ func TestLive_SecuredRenovacy_Real(t *testing.T) {
 	if err := mcp.PrepareWorkflow(wf, workspaceDir); err != nil {
 		t.Fatalf("mcp.PrepareWorkflow: %v", err)
 	}
-	executor := newLiveExecutor(t, wf, s, runID, workspaceDir)
+	// Tee logger to <storeDir>/runs/<runID>/run.log so the desktop
+	// app's cross-store log pane sees live test output instead of
+	// "No log captured." — see prepareLiveRunLog godoc.
+	teeLogger := prepareLiveRunLog(t, storeDir, runID)
+	executor := newLiveExecutor(t, wf, s, runID, workspaceDir, withLiveLogger(teeLogger))
 	defer executor.Close()
 	// Cap per-run to a handful of packages so the test is bounded.
 	// `scope: "patch,minor,major"` lets the bot tackle any tier — the
@@ -3683,6 +3747,7 @@ func TestLive_SecuredRenovacy_Real(t *testing.T) {
 
 	eng := runtime.New(wf, s, executor,
 		runtime.WithWorkDir(workspaceDir),
+		runtime.WithLogger(teeLogger),
 		// Attach the bundle so the runtime mirrors `<bundle>/skills/*.md`
 		// into `<workspaceDir>/.claude/skills/`. The bot's
 		// `batch_upgrade_patches` agent reads
@@ -3778,7 +3843,8 @@ func TestLive_SecuredRenovacy_Protestware(t *testing.T) {
 	if err := mcp.PrepareWorkflow(wf, workspaceDir); err != nil {
 		t.Fatalf("mcp.PrepareWorkflow: %v", err)
 	}
-	executor := newLiveExecutor(t, wf, s, runID, workspaceDir)
+	teeLogger := prepareLiveRunLog(t, storeDir, runID)
+	executor := newLiveExecutor(t, wf, s, runID, workspaceDir, withLiveLogger(teeLogger))
 	defer executor.Close()
 	// `scope: "major"` skips the patch/minor fast-tracks entirely so
 	// node-ipc (the lone major in the fixture) is the very first
@@ -3798,6 +3864,7 @@ func TestLive_SecuredRenovacy_Protestware(t *testing.T) {
 
 	eng := runtime.New(wf, s, executor,
 		runtime.WithWorkDir(workspaceDir),
+		runtime.WithLogger(teeLogger),
 		runtime.WithBundle(b),
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
