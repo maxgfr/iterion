@@ -448,7 +448,7 @@ func (s *FilesystemRunStore) AppendEvent(_ context.Context, runID string, evt Ev
 		// corruption — but we don't gate on it.
 		next, err := s.scanMaxSeqLocked(runID)
 		s.seq[runID] = next
-		if err != nil {
+		if err != nil && s.logger != nil {
 			s.logger.Warn("store: partial seq seed for run %s: %v (resuming from %d — best-effort)", runID, err, next)
 		}
 		s.seqSeed[runID] = true
@@ -554,7 +554,7 @@ func (s *FilesystemRunStore) ScanEvents(_ context.Context, runID string, visit f
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("store: scan events: %w", err)
 	}
-	if skipped > 0 {
+	if skipped > 0 && s.logger != nil {
 		s.logger.Warn("skipped %d corrupt event line(s) in run %s (valid=%d)", skipped, runID, valid)
 	}
 	if eventsCorruptionExceeded(skipped, valid) {
@@ -634,7 +634,7 @@ func (s *FilesystemRunStore) LoadEvents(_ context.Context, runID string) ([]*Eve
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("store: scan events: %w", err)
 	}
-	if skipped > 0 {
+	if skipped > 0 && s.logger != nil {
 		s.logger.Warn("skipped %d corrupt event line(s) in run %s (valid=%d)", skipped, runID, len(events))
 	}
 	if eventsCorruptionExceeded(skipped, len(events)) {
