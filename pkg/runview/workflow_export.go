@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/SocialGouv/iterion/pkg/bundle"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
@@ -131,17 +132,45 @@ func BuildWireWorkflowFromStore(ctx context.Context, s store.RunStore, runID str
 // buildWireWorkflowFromRun centralises the IR-→-wire projection so both
 // the per-Service LoadWireWorkflow (cache-aware) and the cross-store
 // helper share the same shape. A nil cache disables memoisation.
+//
+// Two compile-source flavours:
+//   - r.FilePath set: a launched-from-`.iter` run. CompileWorkflowWithHash
+//     reads the file directly.
+//   - r.BundlePath set (FilePath empty): a launched-from-`.botz` run
+//     (e.g. `iterion run examples/secured-renovacy/` or any live test
+//     using bundle.OpenDir + runview.CompileBundleWorkflow). Open the
+//     bundle directory, compile via CompileBundleWorkflow so node-level
+//     prompt references resolve against the bundle's prompts/ resources.
+//
+// Cache key uses whichever path is set so bundle and file flavours
+// don't collide on the same logical workflow name.
 func buildWireWorkflowFromRun(r *store.Run, cache *wireWorkflowCache) (*WireWorkflow, error) {
-	if r.FilePath == "" {
-		return nil, fmt.Errorf("run %s has no persisted file_path", r.ID)
+	var (
+		wf       *ir.Workflow
+		hash     string
+		cacheKey string
+		err      error
+	)
+	switch {
+	case r.FilePath != "":
+		cacheKey = r.FilePath
+		wf, hash, err = CompileWorkflowWithHash(r.FilePath)
+	case r.BundlePath != "":
+		cacheKey = r.BundlePath
+		b, oerr := bundle.OpenDir(r.BundlePath)
+		if oerr != nil {
+			return nil, fmt.Errorf("open bundle %s: %w", r.BundlePath, oerr)
+		}
+		wf, hash, err = CompileBundleWorkflow(b.IterPath, b)
+	default:
+		return nil, fmt.Errorf("run %s has no persisted file_path or bundle_path", r.ID)
 	}
-	wf, hash, err := CompileWorkflowWithHash(r.FilePath)
 	if err != nil {
 		return nil, err
 	}
 	staleHash := r.WorkflowHash != "" && r.WorkflowHash != hash
 	if cache != nil {
-		if cached := cache.get(r.FilePath, hash); cached != nil {
+		if cached := cache.get(cacheKey, hash); cached != nil {
 			copied := *cached
 			copied.StaleHash = staleHash
 			return &copied, nil
@@ -172,7 +201,7 @@ func buildWireWorkflowFromRun(r *store.Run, cache *wireWorkflowCache) (*WireWork
 	// we don't need to sort here. Callers wanting a stable diff can
 	// post-process.
 	if cache != nil {
-		cache.put(r.FilePath, hash, out)
+		cache.put(cacheKey, hash, out)
 	}
 	return out, nil
 }
