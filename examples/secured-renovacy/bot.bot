@@ -594,20 +594,31 @@ prompt security_audit_system:
        Parse the JSON. osv-scanner gracefully reports zero
        vulnerabilities as an empty list.
     3. Cross-reference: extract every CVE/advisory affecting
-       `input.selected_package` at `input.target_version` from
-       BOTH sources. Decide:
+       `input.selected_package` from BOTH sources, for BOTH the
+       current pin (`input.current_version`) AND the upgrade target
+       (`input.target_version`). Decide:
          - safe=false if any HIGH or CRITICAL CVE affects the
            target version AND has no fix available.
-         - safe=false if osv-scanner flags the target version as
-           malware/malicious.
-         - safe=true if the target version is clean OR all
-           remaining issues are LOW/MEDIUM severity AND the
-           upgrade resolves more vulnerabilities than it
-           introduces.
+         - safe=false if any auditor flags the target version as
+           malware / malicious.
+         - safe=false if the CURRENT pin (input.current_version)
+           is flagged as malware / supply-chain-sabotage by any
+           auditor — even if the target version is clean. Auto-
+           bumping silently out of a known-malicious pin is an
+           operator decision: the operator may need to investigate
+           how the pin got there (compromise? rollback?) before the
+           bump, and a silent auto-fix obscures the incident.
+           Surface this as a malware_signal AND set
+           safe=false with a fix_plan asking for operator review.
+         - safe=true if BOTH the current pin AND the target version
+           are clean OR all remaining issues are LOW/MEDIUM
+           severity AND the upgrade resolves more vulnerabilities
+           than it introduces.
        Reason carefully — most upgrades RESOLVE vulnerabilities
        rather than introduce them. Do not block a package just
        because the project's overall audit reports issues
-       unrelated to this package.
+       unrelated to this package. BUT do not silently auto-bump
+       past a malware pin without operator review either.
     4. Populate `cves` (string IDs, e.g. "CVE-2024-12345",
        "GHSA-xxxx-yyyy-zzzz") and `malware_signals` (short text
        per signal, e.g. "osv: known typosquat of <real_pkg>").

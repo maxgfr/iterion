@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
+	"github.com/SocialGouv/iterion/pkg/store"
 )
 
 // WireWorkflow is the JSON projection of an IR workflow used by the
@@ -111,20 +112,40 @@ func (s *Service) LoadWireWorkflow(runID string) (*WireWorkflow, error) {
 	if err != nil {
 		return nil, err
 	}
+	return buildWireWorkflowFromRun(r, &s.wireWFCache)
+}
+
+// BuildWireWorkflowFromStore is the store-agnostic projection used by
+// LoadWireWorkflow and by cross-store HTTP handlers that need to
+// surface a run living in a different iterion store than the daemon's
+// primary. The cache argument may be nil for one-shot reads where
+// memoisation isn't worth the lock contention.
+func BuildWireWorkflowFromStore(ctx context.Context, s store.RunStore, runID string) (*WireWorkflow, error) {
+	r, err := s.LoadRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	return buildWireWorkflowFromRun(r, nil)
+}
+
+// buildWireWorkflowFromRun centralises the IR-→-wire projection so both
+// the per-Service LoadWireWorkflow (cache-aware) and the cross-store
+// helper share the same shape. A nil cache disables memoisation.
+func buildWireWorkflowFromRun(r *store.Run, cache *wireWorkflowCache) (*WireWorkflow, error) {
 	if r.FilePath == "" {
-		return nil, fmt.Errorf("run %s has no persisted file_path", runID)
+		return nil, fmt.Errorf("run %s has no persisted file_path", r.ID)
 	}
 	wf, hash, err := CompileWorkflowWithHash(r.FilePath)
 	if err != nil {
 		return nil, err
 	}
 	staleHash := r.WorkflowHash != "" && r.WorkflowHash != hash
-	if cached := s.wireWFCache.get(r.FilePath, hash); cached != nil {
-		// Stale flag depends on the run, not the file — clone the cached
-		// projection with the per-request stale value.
-		copied := *cached
-		copied.StaleHash = staleHash
-		return &copied, nil
+	if cache != nil {
+		if cached := cache.get(r.FilePath, hash); cached != nil {
+			copied := *cached
+			copied.StaleHash = staleHash
+			return &copied, nil
+		}
 	}
 	out := &WireWorkflow{
 		Name:      wf.Name,
@@ -150,7 +171,9 @@ func (s *Service) LoadWireWorkflow(runID string) (*WireWorkflow, error) {
 	// frontend re-runs autoLayout (ELK) which is order-insensitive, so
 	// we don't need to sort here. Callers wanting a stable diff can
 	// post-process.
-	s.wireWFCache.put(r.FilePath, hash, out)
+	if cache != nil {
+		cache.put(r.FilePath, hash, out)
+	}
 	return out, nil
 }
 
