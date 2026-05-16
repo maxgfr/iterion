@@ -654,6 +654,19 @@ func (c *runConn) streamEventsLocal(fromSeq, snapshotSeq int64) {
 		next := fromSeq
 		for {
 			events, err := c.server.runs.LoadEventsCtx(c.authCtx(), c.runID, next, snapshotSeq+1)
+			// LoadEventsCtx returns both partial events AND
+			// ErrEventsCorrupted when a run's events.jsonl is too
+			// damaged to trust. Surface that to the client as an
+			// error envelope BEFORE breaking so the editor can
+			// raise a banner instead of silently rendering a
+			// truncated history as if it were complete.
+			if errors.Is(err, store.ErrEventsCorrupted) {
+				if len(events) > 0 {
+					_ = c.sendEnvelope(wsTypeEventBatch, events, "")
+				}
+				c.sendError("events_corrupted", err.Error(), "")
+				return
+			}
 			if err != nil {
 				break
 			}

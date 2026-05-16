@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/SocialGouv/iterion/pkg/backend/llmtypes"
 	"github.com/SocialGouv/iterion/pkg/backend/tool"
@@ -165,6 +166,11 @@ func (m *Manager) EnsureServers(ctx context.Context, registry *tool.Registry, se
 // Pings run in parallel — sequential dispatch with a global ctx
 // deadline would let an early slow server consume the whole budget
 // and leave the tail un-checked while still appearing to pass.
+//
+// Each Ping gets its own per-server ctx timeout: a misbehaving
+// stdio MCP server whose Ping ignores ctx cancellation would
+// otherwise leak the goroutine for the lifetime of the daemon
+// even after HealthCheck returns. The timeout bounds that leak.
 func (m *Manager) HealthCheck(ctx context.Context, servers []string) error {
 	if len(servers) == 0 {
 		return nil
@@ -191,8 +197,11 @@ func (m *Manager) HealthCheck(ctx context.Context, servers []string) error {
 				results <- result{server: server, err: fmt.Errorf("mcp: health-check %q: connect failed: %w", server, err)}
 				return
 			}
-			if err := client.Ping(ctx); err != nil {
-				results <- result{server: server, err: fmt.Errorf("mcp: health-check %q: ping failed: %w", server, err)}
+			pingCtx, cancel := context.WithTimeout(ctx, mcpHealthPingTimeout)
+			pingErr := client.Ping(pingCtx)
+			cancel()
+			if pingErr != nil {
+				results <- result{server: server, err: fmt.Errorf("mcp: health-check %q: ping failed: %w", server, pingErr)}
 				return
 			}
 			results <- result{server: server}
@@ -208,6 +217,12 @@ func (m *Manager) HealthCheck(ctx context.Context, servers []string) error {
 	}
 	return errors.Join(errs...)
 }
+
+// mcpHealthPingTimeout bounds the per-server Ping in HealthCheck. An
+// MCP stdio child whose Ping implementation ignores the parent ctx
+// would otherwise leak its health-check goroutine until process
+// exit; the per-call timeout caps the leak window.
+const mcpHealthPingTimeout = 5 * time.Second
 
 // ServerNames returns the names of every server known to the catalog
 // (whether or not it has been connected yet). The order is stable but

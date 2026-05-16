@@ -180,7 +180,7 @@ func (c *compiler) validateCompaction(w *Workflow) {
 			c.errorf(DiagInvalidCompaction, "%s %q: compaction.threshold must be in (0, 1], got %g", scope, id, cp.Threshold)
 		}
 		if cp.PreserveRecent < 0 {
-			c.errorf(DiagInvalidCompaction, "%s %q: compaction.preserve_recent must be >= 1, got %d", scope, id, cp.PreserveRecent)
+			c.errorf(DiagInvalidCompaction, "%s %q: compaction.preserve_recent must be >= 1 when set (0 = inherit), got %d", scope, id, cp.PreserveRecent)
 		}
 	}
 	check("workflow", w.Name, w.Compaction)

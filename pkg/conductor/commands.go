@@ -97,11 +97,21 @@ func (c *Conductor) finishRun(ctx context.Context, issueID string, err error) {
 	// Always release the tracker claim — if the issue is still active
 	// on the tracker side, the next tick will re-pick it (unless we
 	// schedule a retry below).
-	if relErr := c.tracker.Release(ctx, issueID, c.hostMarker); relErr != nil &&
+	//
+	// Detach the release from the caller's ctx: refreshRunningStates
+	// may invoke finishRun on the actor's ctx which is itself in the
+	// shutdown-cancel state, and we don't want the tracker.Release
+	// to short-circuit just because the conductor is winding down —
+	// a stuck "claimed" label on GitHub blocks the next conductor
+	// from re-picking the issue until the label is manually removed.
+	relCtx, relCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if relErr := c.tracker.Release(relCtx, issueID, c.hostMarker); relErr != nil &&
 		!errors.Is(relErr, tracker.ErrNotFound) &&
 		!errors.Is(relErr, tracker.ErrClaimConflict) {
 		c.logger.Warn("conductor: release %s: %v", r.Identifier, relErr)
 	}
+	relCancel()
+	_ = ctx // caller ctx not used for the release; kept in signature for future audit hooks
 
 	switch {
 	case err == nil:

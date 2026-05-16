@@ -116,7 +116,7 @@ func (s *FilesystemRunStore) WriteAttachment(ctx context.Context, runID string, 
 	// the read-modify-write paths use to avoid losing parallel writes.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, err := s.LoadRun(ctx, runID)
+	r, err := s.loadRunRaw(runID)
 	if err != nil {
 		// If run.json doesn't exist yet (race on CreateRun), the
 		// bytes are written and the meta sidecar is canonical;
@@ -200,7 +200,7 @@ func (s *FilesystemRunStore) RemoveAttachment(ctx context.Context, runID, name s
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, err := s.LoadRun(ctx, runID)
+	r, err := s.loadRunRaw(runID)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -229,7 +229,7 @@ func (s *FilesystemRunStore) DeleteRunAttachments(ctx context.Context, runID str
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, err := s.LoadRun(ctx, runID)
+	r, err := s.loadRunRaw(runID)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
