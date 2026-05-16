@@ -3727,3 +3727,164 @@ func TestLive_SecuredRenovacy_Real(t *testing.T) {
 
 	writeLiveTestReport(t, runID, workspaceDir, storeDir, s, events)
 }
+
+// TestLive_SecuredRenovacy_Protestware exercises the bot's
+// anti-malware heuristic with a single-package npm fixture pinning
+// `node-ipc@10.1.1` — the documented peacenotwar sabotage release
+// (GHSA-97m3-w2cp-4xx6). Where TestLive_SecuredRenovacy_Real runs
+// the broad multi-stack pipeline (with a max-packages cap that lets
+// node-ipc fall out of scope), THIS test forces the bot to land on
+// node-ipc and run `security_audit` on it — `osv-scanner` (and any
+// secondary auditor available in the sandbox) MUST surface the
+// advisory.
+//
+// Expected duration: 5-15 min, ~$2-5.
+//
+// Assertion: at least one of the security_audit verdict's three
+// indicator fields (safe=false, malware_signals non-empty, or cves
+// containing a node-ipc-related advisory) MUST fire. Failure on all
+// three means the heuristic is silently broken.
+func TestLive_SecuredRenovacy_Protestware(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping live test in short mode")
+	}
+	loadDotEnv(t)
+	requireCLI(t, "claude")
+	requireBinaryInPath(t, "docker")
+	requireEnv(t, "OPENAI_API_KEY")
+
+	bDir, err := filepath.Abs("../examples/secured-renovacy")
+	if err != nil {
+		t.Fatalf("abs bundle dir: %v", err)
+	}
+	b, err := bundle.OpenDir(bDir)
+	if err != nil {
+		t.Fatalf("bundle.OpenDir: %v", err)
+	}
+	wf, _, err := runview.CompileBundleWorkflow(b.IterPath, b)
+	if err != nil {
+		t.Fatalf("CompileBundleWorkflow: %v", err)
+	}
+
+	workspaceDir := seedFromFixture(t, "protestware-node-ipc")
+
+	storeDir := resolveLiveStoreDir(t, workspaceDir)
+	s, err := store.New(storeDir)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	runID := uniqueRunID("live-secured-renovacy-protestware")
+
+	if err := mcp.PrepareWorkflow(wf, workspaceDir); err != nil {
+		t.Fatalf("mcp.PrepareWorkflow: %v", err)
+	}
+	executor := newLiveExecutor(t, wf, s, runID, workspaceDir)
+	defer executor.Close()
+	// `scope: "major"` skips the patch/minor fast-tracks entirely so
+	// node-ipc (the lone major in the fixture) is the very first
+	// thing select_candidate hands to security_audit. The 3-package
+	// cap is a safety floor; we expect the bot to terminate after
+	// node-ipc anyway.
+	const userPrompt = "Single-package npm fixture pinning node-ipc@10.1.1, the documented peacenotwar / protestware sabotage release. The security_audit node MUST detect it via osv-scanner --lockfile=package-lock.json (advisory GHSA-97m3-w2cp-4xx6) and refuse the upgrade as malware-flagged."
+	executor.SetVars(map[string]interface{}{
+		"scope":                "major",
+		"max_packages_per_run": 3,
+		"major_policy":         "attempt",
+		"fix_loop_default":     1,
+		"fix_loop_major":       1,
+		"update_scope":         "libraries",
+		"user_prompt":          userPrompt,
+	})
+
+	eng := runtime.New(wf, s, executor,
+		runtime.WithWorkDir(workspaceDir),
+		runtime.WithBundle(b),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+	defer cancel()
+	inputs := map[string]interface{}{
+		"user_prompt":          userPrompt,
+		"scope":                "major",
+		"max_packages_per_run": 3,
+		"major_policy":         "attempt",
+		"fix_loop_default":     1,
+		"fix_loop_major":       1,
+		"update_scope":         "libraries",
+	}
+
+	t.Log("Starting secured-renovacy (protestware fixture) live run…")
+	start := time.Now()
+	runErr := eng.Run(ctx, runID, inputs)
+	t.Logf("Run finished in %s", time.Since(start).Round(time.Second))
+
+	acceptable, reason := liveRunResultAcceptableReal(runErr)
+	if !acceptable {
+		captureSandboxDiagnostics(t, runID)
+		t.Fatalf("unacceptable run error: %v", runErr)
+	}
+	t.Logf("Run result: %s", reason)
+
+	events, err := s.LoadEvents(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("LoadEvents: %v", err)
+	}
+
+	// Assert the anti-malware heuristic fired. security_audit's
+	// artifact (latest version is the one for node-ipc since it's
+	// the sole package in the fixture) must carry at least one
+	// indicator that node-ipc was flagged:
+	//   - safe == false
+	//   - malware_signals contains a non-empty string
+	//   - cves mentions a node-ipc-relevant advisory
+	auditArtifact, aErr := s.LoadLatestArtifact(context.Background(), runID, "security_audit")
+	if aErr != nil {
+		writeLiveTestReport(t, runID, workspaceDir, storeDir, s, events)
+		t.Fatalf("security_audit artifact missing — bot did not reach the audit step: %v", aErr)
+	}
+	verdict, _ := auditArtifact.Output.(map[string]interface{})
+	safe, _ := verdict["safe"].(bool)
+	malware, _ := verdict["malware_signals"].([]interface{})
+	cves, _ := verdict["cves"].([]interface{})
+
+	cveText := func() string {
+		b := strings.Builder{}
+		for _, v := range cves {
+			if s, ok := v.(string); ok {
+				if b.Len() > 0 {
+					b.WriteString(",")
+				}
+				b.WriteString(s)
+			}
+		}
+		return b.String()
+	}()
+	malwareText := func() string {
+		b := strings.Builder{}
+		for _, v := range malware {
+			if s, ok := v.(string); ok {
+				if b.Len() > 0 {
+					b.WriteString("; ")
+				}
+				b.WriteString(s)
+			}
+		}
+		return b.String()
+	}()
+	cveTextLower := strings.ToLower(cveText)
+	mentionsNodeIPCAdvisory := strings.Contains(cveTextLower, "node-ipc") ||
+		strings.Contains(cveTextLower, "ghsa-97m3-w2cp-4xx6") ||
+		strings.Contains(cveTextLower, "peacenotwar") ||
+		strings.Contains(strings.ToLower(malwareText), "node-ipc") ||
+		strings.Contains(strings.ToLower(malwareText), "peacenotwar") ||
+		strings.Contains(strings.ToLower(malwareText), "protestware")
+
+	flagged := !safe || len(malware) > 0 || mentionsNodeIPCAdvisory
+	t.Logf("security_audit verdict: safe=%v cves=%q malware_signals=%q", safe, cveText, malwareText)
+	if !flagged {
+		writeLiveTestReport(t, runID, workspaceDir, storeDir, s, events)
+		t.Fatalf("anti-malware heuristic silent: security_audit returned safe=true with no malware_signals / no node-ipc cve for the peacenotwar protestware release — this is the very signal the bot exists to surface")
+	}
+	t.Logf("✅ Anti-malware heuristic fired (safe=%v, malware_signals=%d, mentions_advisory=%v)", safe, len(malware), mentionsNodeIPCAdvisory)
+
+	writeLiveTestReport(t, runID, workspaceDir, storeDir, s, events)
+}
