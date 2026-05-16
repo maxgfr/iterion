@@ -68,6 +68,14 @@ interface UIState {
   // target node once the document has finished loading. Consumers must
   // clear it via setPendingFitNodeId(null) after applying.
   pendingFitNodeId: string | null;
+  // Imperative bridge so the top Toolbar can trigger canvas-scoped
+  // actions (Arrange, Fit view) that rely on React Flow's `useReactFlow`
+  // hook — only callable inside the `<ReactFlowProvider>` subtree.
+  // Canvas registers handlers on mount and clears them on unmount.
+  canvasActions: {
+    arrange: (() => void) | null;
+    fitView: (() => void) | null;
+  };
   setActiveTab: (tab: SidebarTab) => void;
   toggleSourceView: () => void;
   toggleDiagnosticsPanel: () => void;
@@ -100,6 +108,8 @@ interface UIState {
   notifyFilesChanged: () => void;
   // Pending fit (URL-driven canvas centering)
   setPendingFitNodeId: (id: string | null) => void;
+  // Canvas action bridge
+  setCanvasActions: (actions: { arrange: () => void; fitView: () => void } | null) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -122,6 +132,7 @@ export const useUIStore = create<UIState>((set) => ({
   filePickerOpen: false,
   filesChangedAt: 0,
   pendingFitNodeId: null,
+  canvasActions: { arrange: null, fitView: null },
   setActiveTab: (activeTab) => set({ activeTab }),
   toggleSourceView: () => set((s) => ({ sourceViewOpen: !s.sourceViewOpen })),
   toggleDiagnosticsPanel: () => set((s) => ({ diagnosticsPanelOpen: !s.diagnosticsPanelOpen })),
@@ -203,4 +214,9 @@ export const useUIStore = create<UIState>((set) => ({
   notifyFilesChanged: () => set({ filesChangedAt: Date.now() }),
   // Pending fit
   setPendingFitNodeId: (id) => set({ pendingFitNodeId: id }),
+  // Canvas action bridge — clearing (null) returns both handlers to null
+  // so the Toolbar's Arrange/Fit-view buttons re-disable until Canvas
+  // remounts (route switch away and back).
+  setCanvasActions: (actions) =>
+    set({ canvasActions: actions ?? { arrange: null, fitView: null } }),
 }));

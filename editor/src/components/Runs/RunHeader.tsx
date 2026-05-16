@@ -22,28 +22,26 @@ export default function RunHeader({ run, active, wsState }: Props) {
   const [resumeOpen, setResumeOpen] = useState(false);
   const [, setLocation] = useLocation();
 
-  // canCancel covers every state where a cancel is meaningful:
+  // canCancel covers every state where a cancel actually does something
+  // distinct from Resume:
   //   - running:               abort an in-flight execution (local mode
   //                            additionally requires the engine to be
   //                            "active" in this server's process).
   //   - paused_waiting_human:  user gives up on the workflow without
   //                            answering — engine drops the goroutine
   //                            and the run terminates.
-  //   - failed_resumable:      operator abandons the partial work. The
-  //                            backend flips the persisted status to
-  //                            cancelled and RecoverFinalize promotes
-  //                            the worktree HEAD to a storage branch so
-  //                            the "Squash and merge" button can act.
   //   - queued:                cloud-mode run on the NATS queue;
   //                            cancel removes the message before any
   //                            runner picks it up.
+  // `failed_resumable` is intentionally excluded — no in-flight work to
+  // abort, and the Resume button already handles the common case. The
+  // rare "give up on a failed run" path is Resume → cancel-from-pause.
   // The "active" flag is only meaningful for in-process running runs
   // (local mode); cloud and paused/queued runs are never "active" in
   // this server's process. See cloud-ready plan §F (T-14).
   const canCancel =
     (run.status === "running" && active) ||
     run.status === "paused_waiting_human" ||
-    run.status === "failed_resumable" ||
     run.status === "queued";
   // Resume from header is a "best-effort" trigger — for paused_waiting_human
   // runs the user normally fills the Pause form in the detail panel

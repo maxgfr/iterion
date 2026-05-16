@@ -27,7 +27,10 @@ export default function FilePicker({ open, onOpenChange, onPick }: FilePickerPro
     api.listFiles().then(setFiles).catch(() => setFiles([]));
     api.listExamples().then(setExamples).catch(() => setExamples([]));
     setQuery("");
-    setTab(recents.length > 0 ? "recents" : "files");
+    // Fresh / first-time users have no recents — Examples is a better
+    // discovery surface than the raw workspace file listing. Returning
+    // users keep Recents as the default once they've opened anything.
+    setTab(recents.length > 0 ? "recents" : "examples");
   }, [open, recents.length]);
 
   const isSearching = query.trim() !== "";

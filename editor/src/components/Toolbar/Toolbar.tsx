@@ -14,6 +14,8 @@ import {
   Select,
   Dialog,
   Input,
+  Popover,
+  PopoverClose,
 } from "@/components/ui";
 import ToolbarGroup from "./ToolbarGroup";
 import {
@@ -23,6 +25,7 @@ import {
   UploadIcon,
   CopyIcon,
   ResetIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
   CheckCircledIcon,
   EyeOpenIcon,
@@ -30,7 +33,10 @@ import {
   QuestionMarkCircledIcon,
   PlusIcon,
   MinusIcon,
-  DotsHorizontalIcon,
+  ArrowDownIcon,
+  ArrowRightIcon,
+  StackIcon,
+  FrameIcon,
   ListBulletIcon,
   PlayIcon,
 } from "@radix-ui/react-icons";
@@ -58,6 +64,9 @@ export default function Toolbar() {
   const toggleDiagnosticsPanel = useUIStore((s) => s.toggleDiagnosticsPanel);
   const activeWorkflowName = useUIStore((s) => s.activeWorkflowName);
   const setActiveWorkflowName = useUIStore((s) => s.setActiveWorkflowName);
+  const layoutDirection = useUIStore((s) => s.layoutDirection);
+  const toggleLayoutDirection = useUIStore((s) => s.toggleLayoutDirection);
+  const canvasActions = useUIStore((s) => s.canvasActions);
   const addToast = useUIStore((s) => s.addToast);
   const pushRecent = useRecentsStore((s) => s.pushRecent);
   const removeRecent = useRecentsStore((s) => s.removeRecent);
@@ -68,23 +77,9 @@ export default function Toolbar() {
   const [loading, setLoading] = useState(false);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveFileName, setSaveFileName] = useState("");
-  const [overflowOpen, setOverflowOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const overflowRef = useRef<HTMLDivElement>(null);
   const [confirmRemoveWorkflow, setConfirmRemoveWorkflow] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
-
-  // Close overflow menu on outside click
-  useEffect(() => {
-    if (!overflowOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (overflowRef.current && !overflowRef.current.contains(e.target as Node)) {
-        setOverflowOpen(false);
-      }
-    };
-    window.document.addEventListener("mousedown", handler);
-    return () => window.document.removeEventListener("mousedown", handler);
-  }, [overflowOpen]);
 
   const handleNew = useCallback(() => {
     if (isDirty() && !window.confirm("You have unsaved changes. Discard them?")) return;
@@ -210,6 +205,19 @@ export default function Toolbar() {
     }
   }, [document, currentFilePath, setCurrentSource, markSaved, addToast, pushRecent]);
 
+  // Always opens the Save As dialog regardless of whether a file path
+  // is already bound — distinct from handleSave which fast-paths to the
+  // current path when one exists.
+  const handleSaveAsRequest = useCallback(() => {
+    if (!document) return;
+    const fallback = document.workflows?.[0]?.name || "workflow";
+    const seed = currentFilePath
+      ? currentFilePath.split("/").pop() || `${fallback}.bot`
+      : `${fallback}.bot`;
+    setSaveFileName(seed);
+    setShowSaveDialog(true);
+  }, [document, currentFilePath]);
+
   const handleSaveAs = useCallback(async () => {
     if (!document || !saveFileName) return;
     const fileName =
@@ -304,70 +312,81 @@ export default function Toolbar() {
 
   return (
     <div className="flex items-center gap-1 px-4 h-10 text-sm bg-surface-1 border-b border-border-default">
-      {/* File ops */}
+      {/* File menu (VSCode-style unified dropdown) + inline primary Save */}
       <ToolbarGroup>
-        <IconButton label="New (Ctrl+N)" tooltip="New workflow" onClick={handleNew} size="sm">
-          <FilePlusIcon />
-        </IconButton>
-        <IconButton
-          label="Open (Ctrl+O)"
-          tooltip="Open file"
-          size="sm"
-          onClick={() => setFilePickerOpen(true)}
+        <Popover
+          side="bottom"
+          align="start"
+          contentClassName="p-1 min-w-[220px]"
+          trigger={
+            <Button
+              variant="secondary"
+              size="sm"
+              trailingIcon={<ChevronDownIcon />}
+              aria-label="File menu"
+              title="File"
+            >
+              File
+            </Button>
+          }
         >
-          <Pencil2Icon />
-        </IconButton>
+          <div className="flex flex-col">
+            <FileMenuItem
+              icon={<FilePlusIcon />}
+              label="New"
+              shortcut="Ctrl+N"
+              onSelect={handleNew}
+            />
+            <FileMenuItem
+              icon={<Pencil2Icon />}
+              label="Open…"
+              shortcut="Ctrl+O"
+              onSelect={() => setFilePickerOpen(true)}
+            />
+            <MenuSeparator />
+            <FileMenuItem
+              icon={<DownloadIcon />}
+              label="Save"
+              shortcut="Ctrl+S"
+              onSelect={handleSave}
+              disabled={!document}
+            />
+            <FileMenuItem
+              icon={<DownloadIcon />}
+              label="Save As…"
+              onSelect={handleSaveAsRequest}
+              disabled={!document}
+            />
+            <MenuSeparator />
+            <FileMenuItem
+              icon={<UploadIcon />}
+              label="Import workflow file"
+              onSelect={() => fileInputRef.current?.click()}
+            />
+            <FileMenuItem
+              icon={<DownloadIcon />}
+              label="Download as .bot"
+              onSelect={handleDownload}
+              disabled={!document}
+            />
+            <FileMenuItem
+              icon={<CopyIcon />}
+              label="Copy source to clipboard"
+              onSelect={handleCopySource}
+              disabled={!document}
+            />
+          </div>
+        </Popover>
         <Button
           variant="primary"
           size="sm"
           leadingIcon={<DownloadIcon />}
           onClick={handleSave}
           disabled={!document}
-          title={currentFilePath ? `Save to ${currentFilePath}` : "Save as..."}
+          title={currentFilePath ? `Save to ${currentFilePath} (Ctrl+S)` : "Save as… (Ctrl+S)"}
         >
           {currentFilePath ? "Save" : "Save As"}
         </Button>
-        <div className="relative" ref={overflowRef}>
-          <IconButton
-            label="More file actions"
-            tooltip="More"
-            size="sm"
-            onClick={() => setOverflowOpen((v) => !v)}
-            active={overflowOpen}
-          >
-            <DotsHorizontalIcon />
-          </IconButton>
-          {overflowOpen && (
-            <div className="absolute top-full left-0 mt-1 z-50 min-w-[180px] rounded-md border border-border-default bg-surface-1 shadow-xl py-1">
-              <OverflowItem
-                icon={<UploadIcon />}
-                label="Import workflow file"
-                onClick={() => {
-                  setOverflowOpen(false);
-                  fileInputRef.current?.click();
-                }}
-              />
-              <OverflowItem
-                icon={<DownloadIcon />}
-                label="Download as .bot"
-                onClick={() => {
-                  setOverflowOpen(false);
-                  handleDownload();
-                }}
-                disabled={!document}
-              />
-              <OverflowItem
-                icon={<CopyIcon />}
-                label="Copy source to clipboard"
-                onClick={() => {
-                  setOverflowOpen(false);
-                  handleCopySource();
-                }}
-                disabled={!document}
-              />
-            </div>
-          )}
-        </div>
       </ToolbarGroup>
 
       {/* Edit */}
@@ -421,6 +440,36 @@ export default function Toolbar() {
         >
           <ExclamationTriangleIcon />
         </IconButton>
+        <IconButton
+          label={
+            layoutDirection === "DOWN"
+              ? "Switch to horizontal layout (left→right)"
+              : "Switch to vertical layout (top→bottom)"
+          }
+          tooltip="Layout direction"
+          size="sm"
+          onClick={toggleLayoutDirection}
+        >
+          {layoutDirection === "DOWN" ? <ArrowRightIcon /> : <ArrowDownIcon />}
+        </IconButton>
+        <IconButton
+          label="Arrange (auto-layout)"
+          tooltip="Arrange"
+          size="sm"
+          onClick={() => canvasActions.arrange?.()}
+          disabled={!canvasActions.arrange}
+        >
+          <StackIcon />
+        </IconButton>
+        <IconButton
+          label="Fit view"
+          tooltip="Fit view"
+          size="sm"
+          onClick={() => canvasActions.fitView?.()}
+          disabled={!canvasActions.fitView}
+        >
+          <FrameIcon />
+        </IconButton>
       </ToolbarGroup>
 
       {/* Workflow */}
@@ -456,51 +505,52 @@ export default function Toolbar() {
 
       <input ref={fileInputRef} type="file" accept=".iter,.bot" className="hidden" onChange={handleImport} />
 
-      {/* Right-aligned: file path + help + run console */}
-      <div className="ml-auto flex items-center gap-2">
-        {currentFilePath && (
-          <span className="text-[10px] text-fg-subtle truncate max-w-[280px]" title={currentFilePath}>
-            {isDirty() && <span className="text-warning">* </span>}
-            {currentFilePath}
-          </span>
-        )}
-        {!currentFilePath && document && isDirty() && (
-          <span className="text-[10px] text-warning">* unsaved</span>
-        )}
+      {/* Right-aligned: file status → Launch run; then navigation icons */}
+      <div className="ml-auto flex items-center gap-3">
         {loading && <span className="text-xs text-fg-subtle">Loading...</span>}
-        <IconButton
-          label="Launch run"
-          tooltip={
-            !currentFilePath
-              ? "Save the workflow first to launch a run"
-              : !hasResolvedBackend
-              ? "No LLM credentials detected — click the status pill on the left to configure."
-              : `Launch ${currentFilePath}`
-          }
-          size="sm"
-          onClick={() =>
-            setLocation(`/runs/new?file=${encodeURIComponent(currentFilePath ?? "")}`)
-          }
-          disabled={!currentFilePath || !hasResolvedBackend}
-        >
-          <PlayIcon />
-        </IconButton>
-        <IconButton
-          label="Run console"
-          tooltip="Open run console"
-          size="sm"
-          onClick={() => setLocation("/runs")}
-        >
-          <ListBulletIcon />
-        </IconButton>
-        <IconButton
-          label="Keyboard shortcuts (?)"
-          tooltip="Shortcuts"
-          size="sm"
-          onClick={() => setShowShortcuts(true)}
-        >
-          <QuestionMarkCircledIcon />
-        </IconButton>
+        <div className="flex items-center gap-2">
+          <FileStatusBadge
+            currentFilePath={currentFilePath}
+            hasDocument={!!document}
+            isDirty={isDirty()}
+          />
+          <Button
+            variant="primary"
+            size="sm"
+            leadingIcon={<PlayIcon />}
+            onClick={() =>
+              setLocation(`/runs/new?file=${encodeURIComponent(currentFilePath ?? "")}`)
+            }
+            disabled={!currentFilePath || !hasResolvedBackend}
+            title={
+              !currentFilePath
+                ? "Save the workflow first to launch a run"
+                : !hasResolvedBackend
+                ? "No LLM credentials detected — click the status pill on the left to configure."
+                : `Launch ${currentFilePath}`
+            }
+          >
+            Run
+          </Button>
+        </div>
+        <div className="flex items-center gap-1 pl-2 border-l border-border-default">
+          <IconButton
+            label="Run console"
+            tooltip="Open run console"
+            size="sm"
+            onClick={() => setLocation("/runs")}
+          >
+            <ListBulletIcon />
+          </IconButton>
+          <IconButton
+            label="Keyboard shortcuts (?)"
+            tooltip="Shortcuts"
+            size="sm"
+            onClick={() => setShowShortcuts(true)}
+          >
+            <QuestionMarkCircledIcon />
+          </IconButton>
+        </div>
       </div>
 
       <FilePicker
@@ -557,26 +607,82 @@ export default function Toolbar() {
   );
 }
 
-function OverflowItem({
+function FileMenuItem({
   icon,
   label,
-  onClick,
+  shortcut,
+  onSelect,
   disabled,
 }: {
   icon: React.ReactNode;
   label: string;
-  onClick: () => void;
+  shortcut?: string;
+  onSelect: () => void;
   disabled?: boolean;
 }) {
-  return (
+  // PopoverClose closes the popover on activation; wrapping it around
+  // the menu button means each choice dismisses the menu automatically
+  // — no manual open-state plumbing on the parent.
+  const button = (
     <button
       type="button"
-      onClick={onClick}
+      onClick={onSelect}
       disabled={disabled}
-      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-fg-default hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed"
+      className="w-full flex items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-fg-default hover:bg-surface-2 focus:outline-none focus:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed"
     >
-      {icon}
-      <span>{label}</span>
+      <span className="text-fg-muted">{icon}</span>
+      <span className="flex-1">{label}</span>
+      {shortcut && (
+        <span className="text-[10px] text-fg-subtle font-mono">{shortcut}</span>
+      )}
     </button>
+  );
+  // Disabled items don't dismiss the popover — let users keep
+  // exploring other menu entries without the menu collapsing.
+  return disabled ? button : <PopoverClose asChild>{button}</PopoverClose>;
+}
+
+function MenuSeparator() {
+  return <div className="my-1 h-px bg-border-default" aria-hidden />;
+}
+
+function FileStatusBadge({
+  currentFilePath,
+  hasDocument,
+  isDirty,
+}: {
+  currentFilePath: string | null;
+  hasDocument: boolean;
+  isDirty: boolean;
+}) {
+  // Render nothing when the editor has no document at all — the toolbar
+  // is in its empty state and the right-side group is just navigation.
+  if (!hasDocument) return null;
+  const basename = currentFilePath
+    ? currentFilePath.split("/").pop() || currentFilePath
+    : "Untitled";
+  const subtitle = !currentFilePath
+    ? "Unsaved"
+    : isDirty
+    ? "Modified"
+    : null;
+  return (
+    <div
+      className="flex items-center gap-1.5 max-w-[280px] border border-border-default rounded px-2 py-0.5 bg-surface-1"
+      title={currentFilePath ?? "Untitled — save the workflow to give it a path"}
+    >
+      {isDirty && (
+        <span
+          aria-hidden
+          className="inline-block w-1.5 h-1.5 rounded-full bg-warning shrink-0"
+        />
+      )}
+      <span className="truncate text-xs text-fg-default font-medium">
+        {basename}
+      </span>
+      {subtitle && (
+        <span className="text-[10px] text-fg-subtle shrink-0">{subtitle}</span>
+      )}
+    </div>
   );
 }

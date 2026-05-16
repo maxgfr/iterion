@@ -346,12 +346,20 @@ export default function Canvas() {
     if (selectedNodeId) fitView({ nodes: [{ id: selectedNodeId }], padding: 0.5 });
   }, [selectedNodeId, fitView]);
 
+  // Expose Arrange / Fit-view to the top-level Toolbar (which sits
+  // outside the ReactFlowProvider subtree and can't call useReactFlow
+  // directly). The setter is stable across renders, so this effect
+  // re-runs only when the handlers themselves change.
+  const setCanvasActions = useUIStore((s) => s.setCanvasActions);
+  useEffect(() => {
+    setCanvasActions({ arrange: handleArrange, fitView: handleFitView });
+    return () => setCanvasActions(null);
+  }, [setCanvasActions, handleArrange, handleFitView]);
+
   return (
     <div className={`h-full w-full relative${canvasTool === "pan" ? " cursor-grab" : ""}`} ref={reactFlowWrapper} onKeyDown={onKeyDown} tabIndex={0}>
       <ToolPalette />
       <CanvasToolbar
-        onArrange={handleArrange}
-        onFitView={handleFitView}
         onFocusNode={selectedNodeId ? handleFocusNode : null}
         onBrowserFullscreen={toggleFullscreen}
         onFitViewAfterDelay={() => setTimeout(() => fitView({ padding: 0.2 }), DEBOUNCE_FIT_VIEW_MS)}
