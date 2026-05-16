@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	iterlog "github.com/SocialGouv/iterion/pkg/log"
 )
 
 // GitHubOptions configures the GitHub Issues adapter. The Token field
@@ -44,6 +46,11 @@ type GitHubOptions struct {
 	// Used by tests to inject fake responses. Production leaves it
 	// nil so the adapter shells out to the real `gh`.
 	Command func(ctx context.Context, args []string, env []string) ([]byte, error)
+
+	// Logger, when non-nil, receives warnings about silent
+	// degradations (e.g. ListCandidates hitting the per-poll cap).
+	// Optional — adapter is fully functional without it.
+	Logger *iterlog.Logger
 }
 
 // LabelSelector restricts a state mapping by label allowlist / blocklist.
@@ -77,6 +84,14 @@ func NewGitHub(opts GitHubOptions) (*GitHubAdapter, error) {
 // Name implements Tracker.
 func (a *GitHubAdapter) Name() string { return "github" }
 
+// ghCandidateListLimit caps the number of candidates we pull per poll.
+// gh CLI paginates internally up to --limit, so a single invocation
+// covers very large backlogs without us implementing pagination
+// ourselves. Set high enough that an active repo never silently drops
+// candidates; if a poll returns exactly this many we log a warning
+// so the operator knows to investigate.
+const ghCandidateListLimit = 1000
+
 // ListCandidates returns open issues matching include/exclude labels
 // and not carrying ClaimedLabel.
 func (a *GitHubAdapter) ListCandidates(ctx context.Context) ([]Issue, error) {
@@ -85,7 +100,7 @@ func (a *GitHubAdapter) ListCandidates(ctx context.Context) ([]Issue, error) {
 		"issue", "list",
 		"--repo", a.opts.Repo,
 		"--state", "open",
-		"--limit", "100",
+		"--limit", fmt.Sprintf("%d", ghCandidateListLimit),
 		"--json", "number,title,body,labels,state,assignees,author,createdAt,updatedAt,url",
 	}
 	if search != "" {
@@ -98,6 +113,10 @@ func (a *GitHubAdapter) ListCandidates(ctx context.Context) ([]Issue, error) {
 	var raw []ghIssue
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return nil, fmt.Errorf("gh issue list parse: %w", err)
+	}
+	if len(raw) >= ghCandidateListLimit && a.opts.Logger != nil {
+		a.opts.Logger.Warn("github tracker: ListCandidates hit the %d-issue cap on repo %s — beyond this point issues are silently dropped from dispatch; consider tightening label filters",
+			ghCandidateListLimit, a.opts.Repo)
 	}
 	out2 := make([]Issue, 0, len(raw))
 	for _, r := range raw {
@@ -385,7 +404,37 @@ func runGH(ctx context.Context, args []string, env []string) ([]byte, error) {
 		if msg == "" {
 			msg = err.Error()
 		}
-		return nil, fmt.Errorf("%s", msg)
+		return nil, fmt.Errorf("%s", redactGHSecrets(msg))
 	}
 	return stdout.Bytes(), nil
 }
+
+// redactGHSecrets blanks out token-shaped substrings the gh CLI may
+// echo back on failure (e.g. "Invalid token: ghp_xxxx…"). Without
+// this, a misconfigured GH_TOKEN leaks via the bubbled-up error into
+// downstream logs and centralized log aggregation.
+func redactGHSecrets(s string) string {
+	for _, prefix := range ghTokenPrefixes {
+		for {
+			i := strings.Index(s, prefix)
+			if i < 0 {
+				break
+			}
+			// Trim everything from the prefix to the next whitespace
+			// or end-of-string and replace with a redaction marker.
+			tail := s[i+len(prefix):]
+			end := strings.IndexAny(tail, " \t\n\r\"'")
+			if end < 0 {
+				end = len(tail)
+			}
+			s = s[:i] + prefix + "***REDACTED***" + tail[end:]
+		}
+	}
+	return s
+}
+
+// ghTokenPrefixes lists the documented prefixes GitHub uses for
+// personal access tokens, OAuth tokens, server-to-server tokens, and
+// fine-grained tokens. Keep in sync with
+// https://github.blog/2021-04-05-behind-githubs-new-authentication-token-formats/
+var ghTokenPrefixes = []string{"ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"}

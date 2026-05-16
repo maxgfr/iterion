@@ -199,29 +199,48 @@ func (s *Server) promoteStaged(ctx context.Context, runID string, mapping map[st
 		return nil, 0, err
 	}
 	out := make(map[string]store.AttachmentRecord, len(mapping))
+	written := make([]string, 0, len(mapping))     // names persisted, used for rollback
+	stagingDirs := make([]string, 0, len(mapping)) // staging dirs to clean only on full success
 	var cumulative int64
+
+	// rollback removes every attachment we persisted before the error so
+	// the run doesn't end up with a half-populated Attachments map after
+	// the Launch handler returns 400. Best-effort; logs are emitted by
+	// the store on partial failure.
+	rollback := func() {
+		for _, name := range written {
+			_ = s.runs.RemoveAttachment(ctx, runID, name)
+		}
+	}
+
 	for name, uploadID := range mapping {
 		if err := store.SanitizePathComponent("attachment_name", name); err != nil {
+			rollback()
 			return nil, 0, fmt.Errorf("invalid attachment name %q: %w", name, err)
 		}
 		if err := store.SanitizePathComponent("upload_id", uploadID); err != nil {
+			rollback()
 			return nil, 0, fmt.Errorf("invalid upload id %q: %w", uploadID, err)
 		}
 		dir := filepath.Join(staging, uploadID)
 		metaBytes, err := os.ReadFile(filepath.Join(dir, uploadMetaFilename))
 		if err != nil {
+			rollback()
 			return nil, 0, fmt.Errorf("upload %q not found", uploadID)
 		}
 		var meta stagedUpload
 		if err := json.Unmarshal(metaBytes, &meta); err != nil {
+			rollback()
 			return nil, 0, fmt.Errorf("decode upload meta: %w", err)
 		}
 		cumulative += meta.Size
 		if cumulative > s.cfg.MaxTotalUploadSize {
+			rollback()
 			return nil, 0, fmt.Errorf("cumulative upload size exceeds max_total_upload_size (%d bytes)", s.cfg.MaxTotalUploadSize)
 		}
 		body, err := os.Open(filepath.Join(dir, meta.OriginalFilename))
 		if err != nil {
+			rollback()
 			return nil, 0, fmt.Errorf("open upload %q: %w", uploadID, err)
 		}
 		rec := store.AttachmentRecord{
@@ -233,11 +252,17 @@ func (s *Server) promoteStaged(ctx context.Context, runID string, mapping map[st
 		}
 		if err := s.runs.WriteAttachment(ctx, runID, rec, body); err != nil {
 			body.Close()
+			rollback()
 			return nil, 0, fmt.Errorf("persist attachment %q: %w", name, err)
 		}
 		body.Close()
 		out[name] = rec
-		_ = os.RemoveAll(dir)
+		written = append(written, name)
+		stagingDirs = append(stagingDirs, dir)
+	}
+	// All attachments persisted — only now is it safe to clear staging.
+	for _, d := range stagingDirs {
+		_ = os.RemoveAll(d)
 	}
 	// Refresh once after the loop so the returned map carries the
 	// canonical StorageRef + any meta WriteAttachment recomputed.

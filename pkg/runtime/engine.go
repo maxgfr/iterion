@@ -891,7 +891,7 @@ func (e *Engine) execCompute(rs *runState, nodeID string, cn *ir.ComputeNode) (s
 
 	exprCtx := e.exprContext(rs, nodeInput)
 	for _, ce := range cn.Exprs {
-		v, err := ce.AST.Eval(exprCtx)
+		v, err := evalComputeExpr(ce.AST, exprCtx)
 		if err != nil {
 			return "", &RuntimeError{
 				Code:    ErrCodeExecutionFailed,

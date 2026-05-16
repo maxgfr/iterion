@@ -20,7 +20,19 @@ const (
 
 	// defaultMaxTokens is the default max tokens per response.
 	defaultMaxTokens = 8192
+
+	// maxToolInputJSONSize caps the accumulated input_json_delta
+	// fragments for a single tool_use block. A misbehaving provider
+	// (or a malformed stream that never sends content_block_stop)
+	// would otherwise grow the PartialJSON buffer without bound and
+	// OOM the runner. 10 MB is well above any realistic tool input
+	// while still cheap to fail loud on.
+	maxToolInputJSONSize = 10 * 1024 * 1024
 )
+
+// ErrToolInputTooLarge signals that a streamed tool_use block's
+// accumulated input JSON exceeded maxToolInputJSONSize.
+var ErrToolInputTooLarge = errors.New("aggregateStream: tool_use input exceeded max size")
 
 // ---------------------------------------------------------------------------
 // Stream aggregation
@@ -99,6 +111,11 @@ func aggregateStream(ctx context.Context, ch <-chan api.StreamEvent) aggregatedR
 				case "text_delta":
 					bs.text += event.Delta.Text
 				case "input_json_delta":
+					if len(bs.toolUse.PartialJSON)+len(event.Delta.PartialJSON) > maxToolInputJSONSize {
+						res.err = fmt.Errorf("%w: tool %q exceeded %d bytes", ErrToolInputTooLarge, bs.toolUse.Name, maxToolInputJSONSize)
+						res.text, res.toolUses = collectBlocks(blocks)
+						return res
+					}
 					bs.toolUse.PartialJSON += event.Delta.PartialJSON
 				}
 
@@ -354,12 +371,30 @@ func executeToolsDirect(
 			continue
 		}
 
-		// Lazy-decoded hook input: only parse when a runner is
-		// installed. Underlying Execute unmarshals separately, so
-		// skipping this when nil avoids a redundant parse per call.
+		// Validate that PartialJSON is well-formed JSON before either
+		// firing hooks with stale/empty input or invoking Execute with
+		// a payload its decoder can't parse. A malformed PartialJSON
+		// at this point indicates either a truncated stream the
+		// upstream aggregateStream missed, or a provider that emits
+		// invalid JSON; both warrant a tool_result-isError, not a
+		// silent empty-args call that the LLM would never recover
+		// from cleanly.
 		var hookInput map[string]any
-		if runner != nil {
-			_ = json.Unmarshal([]byte(tu.PartialJSON), &hookInput)
+		if jsonErr := json.Unmarshal([]byte(tu.PartialJSON), &hookInput); jsonErr != nil {
+			results = append(results, api.ToolResult{
+				ToolUseID: tu.ID,
+				Content:   fmt.Sprintf("malformed tool input: %v", jsonErr),
+				IsError:   true,
+			}.ToContentBlock())
+			if onToolCall != nil {
+				onToolCall(ToolCallInfo{
+					ToolName:  tu.Name,
+					InputSize: len(tu.PartialJSON),
+					ToolUseID: tu.ID,
+					Error:     fmt.Errorf("malformed tool input: %w", jsonErr),
+				})
+			}
+			continue
 		}
 
 		if dec, _ := runner.Fire(ctx, hooks.Context{
@@ -657,7 +692,15 @@ func assistantToolUseMessage(text string, toolUses []toolUseBlock) api.Message {
 		})
 	}
 	for _, tu := range toolUses {
-		var inputMap map[string]any
+		// inputMap is the structured args the next API turn replays
+		// back as the assistant message context. A nil Input on a
+		// tool_use block produces a malformed-looking history that
+		// confuses some providers; fall back to an empty object so
+		// the block is at least syntactically intact. Malformed
+		// PartialJSON at this point is rare (aggregateStream guards
+		// against truncation) so we don't bubble it up — the
+		// corresponding tool_result already carries the failure.
+		inputMap := map[string]any{}
 		if tu.PartialJSON != "" {
 			_ = json.Unmarshal([]byte(tu.PartialJSON), &inputMap)
 		}
@@ -749,9 +792,18 @@ func GenerateObjectDirect[T any](ctx context.Context, client api.APIClient, opts
 	// Find the synthetic tool_use block.
 	for _, tu := range agg.toolUses {
 		if tu.Name == schemaName {
+			if tu.PartialJSON == "" {
+				return nil, fmt.Errorf("parse structured output: model returned tool_use %q with empty input (stream may have been interrupted before content_block_stop)", schemaName)
+			}
 			var obj T
 			if err := json.Unmarshal([]byte(tu.PartialJSON), &obj); err != nil {
-				return nil, fmt.Errorf("parse structured output: %w (raw: %s)", err, tu.PartialJSON)
+				// Cap the raw payload in the error so a 5 MB
+				// truncated JSON doesn't flood logs.
+				raw := tu.PartialJSON
+				if len(raw) > 500 {
+					raw = raw[:500] + "…"
+				}
+				return nil, fmt.Errorf("parse structured output: %w (raw: %s)", err, raw)
 			}
 			return &ObjectResult[T]{
 				Object:       obj,

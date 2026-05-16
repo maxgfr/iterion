@@ -121,43 +121,89 @@ func NewManager(catalog map[string]*ServerConfig, opts ...ManagerOption) *Manage
 
 // EnsureServers discovers tools for the given servers and registers them into
 // the provided registry. Connections and tool catalogs are opened lazily and
-// cached for the lifetime of the manager. If some servers fail, discovery
-// continues for the remaining servers and a combined error is returned.
+// cached for the lifetime of the manager.
+//
+// Transactional: if ANY configured server fails to discover, every
+// server registered earlier in this call is unregistered before the
+// combined error is returned. Without this, a workflow that declares
+// {github, slack} and whose slack server is misconfigured would run
+// with only github tools live — silently producing "unknown tool"
+// errors on the first slack-bound LLM call instead of surfacing the
+// misconfiguration up-front.
 func (m *Manager) EnsureServers(ctx context.Context, registry *tool.Registry, servers []string) error {
 	var errs []error
+	var landed []string
 	for _, server := range servers {
 		if err := m.ensureServer(ctx, registry, server); err != nil {
 			errs = append(errs, err)
+			continue
 		}
+		landed = append(landed, server)
+	}
+	if len(errs) > 0 {
+		for _, server := range landed {
+			registry.UnregisterServer(server)
+			if state, err := m.state(server); err == nil {
+				state.mu.Lock()
+				state.discovered = false
+				state.mu.Unlock()
+			}
+		}
+		return errors.Join(errs...)
 	}
 	// Persist fingerprints once after all servers are discovered.
 	if m.fingerprints != nil {
 		_ = m.fingerprints.Save()
 	}
-	return errors.Join(errs...)
+	return nil
 }
 
 // HealthCheck verifies that each listed server is reachable by connecting and
 // sending an MCP ping. Connections are cached, so a subsequent EnsureServers
 // call reuses the same client (no double-spawn for stdio servers).
+//
+// Pings run in parallel — sequential dispatch with a global ctx
+// deadline would let an early slow server consume the whole budget
+// and leave the tail un-checked while still appearing to pass.
 func (m *Manager) HealthCheck(ctx context.Context, servers []string) error {
-	var errs []error
+	if len(servers) == 0 {
+		return nil
+	}
+	type result struct {
+		server string
+		err    error
+	}
+	results := make(chan result, len(servers))
+	var wg sync.WaitGroup
 	for _, server := range servers {
-		state, err := m.state(server)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("mcp: health-check %q: %w", server, err))
-			continue
-		}
-		state.mu.Lock()
-		client, err := m.clientForState(state)
-		if err != nil {
+		wg.Add(1)
+		go func(server string) {
+			defer wg.Done()
+			state, err := m.state(server)
+			if err != nil {
+				results <- result{server: server, err: fmt.Errorf("mcp: health-check %q: %w", server, err)}
+				return
+			}
+			state.mu.Lock()
+			client, err := m.clientForState(state)
 			state.mu.Unlock()
-			errs = append(errs, fmt.Errorf("mcp: health-check %q: connect failed: %w", server, err))
-			continue
-		}
-		state.mu.Unlock()
-		if err := client.Ping(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("mcp: health-check %q: ping failed: %w", server, err))
+			if err != nil {
+				results <- result{server: server, err: fmt.Errorf("mcp: health-check %q: connect failed: %w", server, err)}
+				return
+			}
+			if err := client.Ping(ctx); err != nil {
+				results <- result{server: server, err: fmt.Errorf("mcp: health-check %q: ping failed: %w", server, err)}
+				return
+			}
+			results <- result{server: server}
+		}(server)
+	}
+	wg.Wait()
+	close(results)
+	var errs []error
+	for r := range results {
+		if r.err != nil {
+			errs = append(errs, r.err)
 		}
 	}
 	return errors.Join(errs...)

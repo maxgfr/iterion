@@ -130,6 +130,24 @@ func (s *Server) handleRunWebSocket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// Authorize access to runID BEFORE upgrading. requireAuth has
+	// already validated the bearer token (via authMiddleware) and
+	// stamped the tenant identity on r.Context(). For the primary-
+	// store path we now confirm the run is visible to that identity
+	// — mongo's LoadRun applies the tenant filter, so a cross-team
+	// or unknown ID yields not-found. Returning HTTP 404/403 here
+	// instead of completing the upgrade and replying with a WS
+	// error envelope makes the wire behavior unambiguous and stops
+	// us from accounting WSConnections for forbidden subscriptions.
+	// Cross-store mode skips this — the foreign FS store has no
+	// tenant scoping and the resolveCrossStore() above already
+	// gated the path under $HOME/.iterion/**.
+	if xStore == nil {
+		if _, lerr := s.runs.LoadRunCtx(r.Context(), runID); lerr != nil {
+			http.Error(w, "run not found", http.StatusNotFound)
+			return
+		}
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.logger.Error("ws upgrade error: %v", err)

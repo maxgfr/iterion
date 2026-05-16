@@ -72,6 +72,12 @@ type Client interface {
 	// (e.g. 7 days for SigV4).
 	PresignAttachment(ctx context.Context, runID, name, filename string, ttl time.Duration) (string, error)
 
+	// DeleteAttachment removes the blob for a single attachment
+	// (`attachments/<runID>/<name>/<filename>`). Used by transactional
+	// rollback paths where only one of several uploads must be undone.
+	// Idempotent: deleting a non-existent key returns nil.
+	DeleteAttachment(ctx context.Context, runID, name, filename string) error
+
 	// DeleteRunAttachments removes every blob under
 	// `attachments/<runID>/` in a single sweep. Best-effort: partial
 	// failures must be logged but should not break sweepers.

@@ -23,6 +23,36 @@ import (
 // Events with large LLM outputs can exceed the default 64KB scanner buffer.
 const maxEventLineSize = 10 * 1024 * 1024 // 10 MB
 
+// Event-stream corruption thresholds. A skipped line is one that failed
+// json.Unmarshal — typically a torn write at process kill. A single
+// skipped line at EOF is benign; massive skipping means the audit
+// trail is unreliable and callers should surface that rather than
+// silently serving a near-empty event log as if it were complete.
+const (
+	eventsCorruptionAbsThreshold   = 100
+	eventsCorruptionRatioThreshold = 2 // skipped > valid/2 i.e. > ~33% corruption
+)
+
+// ErrEventsCorrupted signals that an events.jsonl file had so many
+// unparseable lines (above eventsCorruptionAbsThreshold absolute or
+// eventsCorruptionRatioThreshold ratio) that the returned data should
+// not be treated as a complete audit trail. The error wraps with the
+// counts so callers can errors.As() it or display a banner.
+var ErrEventsCorrupted = fmt.Errorf("store: events.jsonl is severely corrupted")
+
+// eventsCorruptionExceeded returns true when skipped lines exceed the
+// safety threshold. Single trailing skip lines (e.g. a torn write at
+// the very end) are tolerated; mass corruption is not.
+func eventsCorruptionExceeded(skipped, valid int) bool {
+	if skipped <= 1 {
+		return false
+	}
+	if skipped > eventsCorruptionAbsThreshold {
+		return true
+	}
+	return valid > 0 && skipped*eventsCorruptionRatioThreshold > valid
+}
+
 // File and directory permissions for store data.
 // Restrictive by default — artifacts and interactions may contain sensitive data.
 const (
@@ -226,8 +256,14 @@ func (s *FilesystemRunStore) CreateRun(_ context.Context, id, workflowName strin
 	return r, nil
 }
 
-// SaveRun persists the run metadata to disk.
+// SaveRun persists the run metadata to disk. Protected by mu so it
+// cannot race against UpdateRunStatus / SaveCheckpoint / WriteArtifact
+// — two runners reconciling the same orphan via RecoverFinalize, or a
+// finalize path concurrent with an engine status update, would
+// otherwise read-modify-write through each other and lose fields.
 func (s *FilesystemRunStore) SaveRun(_ context.Context, r *Run) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.writeRun(r)
 }
 
@@ -499,7 +535,7 @@ func (s *FilesystemRunStore) ScanEvents(_ context.Context, runID string, visit f
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxEventLineSize)
-	var skipped int
+	var skipped, valid int
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -510,6 +546,7 @@ func (s *FilesystemRunStore) ScanEvents(_ context.Context, runID string, visit f
 			skipped++
 			continue
 		}
+		valid++
 		if !visit(evt) {
 			break
 		}
@@ -518,7 +555,10 @@ func (s *FilesystemRunStore) ScanEvents(_ context.Context, runID string, visit f
 		return fmt.Errorf("store: scan events: %w", err)
 	}
 	if skipped > 0 {
-		s.logger.Warn("skipped %d corrupt event line(s) in run %s", skipped, runID)
+		s.logger.Warn("skipped %d corrupt event line(s) in run %s (valid=%d)", skipped, runID, valid)
+	}
+	if eventsCorruptionExceeded(skipped, valid) {
+		return fmt.Errorf("%w: run %s, skipped=%d valid=%d", ErrEventsCorrupted, runID, skipped, valid)
 	}
 	return nil
 }
@@ -595,7 +635,10 @@ func (s *FilesystemRunStore) LoadEvents(_ context.Context, runID string) ([]*Eve
 		return nil, fmt.Errorf("store: scan events: %w", err)
 	}
 	if skipped > 0 {
-		s.logger.Warn("skipped %d corrupt event line(s) in run %s", skipped, runID)
+		s.logger.Warn("skipped %d corrupt event line(s) in run %s (valid=%d)", skipped, runID, len(events))
+	}
+	if eventsCorruptionExceeded(skipped, len(events)) {
+		return events, fmt.Errorf("%w: run %s, skipped=%d valid=%d", ErrEventsCorrupted, runID, skipped, len(events))
 	}
 	return events, nil
 }
@@ -616,14 +659,23 @@ func (s *FilesystemRunStore) WriteArtifact(ctx context.Context, a *Artifact) err
 	if a.WrittenAt.IsZero() {
 		a.WrittenAt = time.Now().UTC()
 	}
-	dir := filepath.Join(s.root, "runs", a.RunID, "artifacts", a.NodeID)
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
-		return fmt.Errorf("store: mkdir artifact: %w", err)
-	}
-	p := filepath.Join(dir, fmt.Sprintf("%d.json", a.Version))
 	data, err := json.MarshalIndent(a, "", "  ")
 	if err != nil {
 		return fmt.Errorf("store: marshal artifact: %w", err)
+	}
+	dir := filepath.Join(s.root, "runs", a.RunID, "artifacts", a.NodeID)
+	p := filepath.Join(dir, fmt.Sprintf("%d.json", a.Version))
+
+	// Hold s.mu across the artifact file write AND the index update so
+	// the on-disk file and the cached pointer in run.json land together.
+	// Without this, a concurrent LoadRun/SaveRun could observe an index
+	// that points to a version not yet on disk (or miss one already
+	// written), and a crash between the two writes would leave the
+	// artifact orphan to a directory-scan fallback every read.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := os.MkdirAll(dir, dirPerm); err != nil {
+		return fmt.Errorf("store: mkdir artifact: %w", err)
 	}
 	if err := writeFileAtomic(p, data, filePerm); err != nil {
 		return err
@@ -637,8 +689,6 @@ func (s *FilesystemRunStore) WriteArtifact(ctx context.Context, a *Artifact) err
 	// silently dropped index update can cause downstream nodes to read a
 	// stale artifact version, which is a correctness bug, not a performance
 	// degradation. Callers can decide to retry or fail the run.
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	r, err := s.LoadRun(ctx, a.RunID)
 	if err != nil {
 		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {

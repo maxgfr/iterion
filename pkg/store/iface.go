@@ -78,6 +78,10 @@ type RunStore interface {
 	WriteAttachment(ctx context.Context, runID string, rec AttachmentRecord, body io.Reader) error
 	OpenAttachment(ctx context.Context, runID, name string) (io.ReadCloser, AttachmentRecord, error)
 	ListAttachments(ctx context.Context, runID string) ([]AttachmentRecord, error)
+	// RemoveAttachment deletes a single attachment by name, including
+	// its metadata in Run.Attachments. Used for transactional rollback
+	// of partial multi-attachment writes (cf. promoteStaged).
+	RemoveAttachment(ctx context.Context, runID, name string) error
 	DeleteRunAttachments(ctx context.Context, runID string) error
 	// PresignAttachment returns a URL the caller can hand to a third
 	// party (browser, agent's HTTP fetch) to retrieve the bytes

@@ -130,6 +130,20 @@ func (d *Driver) Prepare(ctx context.Context, spec sandbox.Spec) (sandbox.Prepar
 	}, nil
 }
 
+// validateEnvVar rejects an env var whose name or value contains
+// control characters that would break docker's --env arg parser.
+// docker's parser tokenises by whitespace, so a value containing
+// "\nDOCKER_HOST=tcp://attacker" would inject a second flag.
+func validateEnvVar(k, v string) error {
+	if strings.ContainsAny(k, "=\n\r\x00") {
+		return fmt.Errorf("invalid env var name (contains '=', newline, or NUL): %q", k)
+	}
+	if strings.ContainsAny(v, "\n\r\x00") {
+		return fmt.Errorf("env var value contains a newline, carriage return, or NUL — refusing to inject")
+	}
+	return nil
+}
+
 // Start creates and starts a long-lived container holding the run for
 // its lifetime. The caller invokes [Run.Command] / [Run.Exec] for each
 // delegate (claude_code, tool node) — startup cost is amortised across
@@ -165,6 +179,9 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 		args = append(args, "--mount", m)
 	}
 	for k, v := range p.spec.Env {
+		if err := validateEnvVar(k, v); err != nil {
+			return nil, fmt.Errorf("docker driver: env %s: %w", k, err)
+		}
 		args = append(args, "--env", k+"="+v)
 	}
 	if info.ProxyEndpoint != "" {

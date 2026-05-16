@@ -59,9 +59,15 @@ func (e *Engine) handleNodeFailure(ctx context.Context, rs *runState, nodeID str
 	switch action.Kind {
 	case RecoveryRetrySameNode, RecoveryCompactAndRetry:
 		if action.Delay > 0 {
+			// time.NewTimer + Stop avoids leaking the underlying
+			// Timer when ctx fires before the delay elapses;
+			// time.After leaves the Timer running until the delay
+			// even after the parent context completes.
+			timer := time.NewTimer(action.Delay)
 			select {
-			case <-time.After(action.Delay):
+			case <-timer.C:
 			case <-ctx.Done():
+				timer.Stop()
 				return false, e.handleContextDoneWithCheckpoint(rs, nodeID, ctx.Err())
 			}
 		}

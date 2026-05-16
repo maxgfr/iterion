@@ -563,6 +563,12 @@ func (s *Service) ListAttachments(ctx context.Context, runID string) ([]store.At
 	return s.store.ListAttachments(ctx, runID)
 }
 
+// RemoveAttachment forwards to the underlying RunStore. Used by the
+// HTTP layer's transactional rollback in promoteStaged.
+func (s *Service) RemoveAttachment(ctx context.Context, runID, name string) error {
+	return s.store.RemoveAttachment(ctx, runID, name)
+}
+
 // PresignAttachment forwards to the underlying RunStore.
 func (s *Service) PresignAttachment(ctx context.Context, runID, name string, ttl time.Duration) (string, error) {
 	return s.store.PresignAttachment(ctx, runID, name, ttl)
@@ -762,8 +768,20 @@ func (s *Service) markInterrupted(runID string) {
 // ---------------------------------------------------------------------------
 
 // LoadRun returns the persisted Run metadata for runID.
+//
+// Uses context.Background — does NOT carry caller identity. Cloud
+// callers that need tenant-scoped lookup (e.g. authorize a WS
+// subscription before upgrading) must use LoadRunCtx.
 func (s *Service) LoadRun(runID string) (*store.Run, error) {
 	return s.store.LoadRun(context.Background(), runID)
+}
+
+// LoadRunCtx is the tenant-aware variant of LoadRun: it propagates the
+// caller's ctx so the mongo store applies the tenant_id filter
+// stamped by requireAuth (store.WithIdentity). A cross-tenant ID
+// resolves to not-found instead of leaking the run document.
+func (s *Service) LoadRunCtx(ctx context.Context, runID string) (*store.Run, error) {
+	return s.store.LoadRun(ctx, runID)
 }
 
 // List returns every run in the store filtered by f. The result is
