@@ -16,7 +16,7 @@
 ##       → prepare_commit → commit_changes → loop back
 ##     (revert + mark_failed_and_continue on hard failures)
 ##   Phase 2: alternating Claude/GPT review/fix on cumulative diff
-##            (vibe_review_alternating pattern, with per-fix commits)
+##            (whole_improve_loop pattern, with per-fix commits)
 ##
 ## Stops when
 ##   - all candidates exhausted in scope, OR
@@ -44,7 +44,7 @@
 ##     fall back to gpt-5.4 if 5.5 is not enabled in your account)
 ##     at max reasoning_effort for the cross-family review/fix.
 ##   - Soft-approve on low confidence to avoid false-positive fix
-##     cycles (vibe_review_alternating pattern).
+##     cycles (whole_improve_loop pattern).
 ##
 ## Human-in-the-loop
 ##   `interaction: llm_or_human` at workflow scope — every agent /

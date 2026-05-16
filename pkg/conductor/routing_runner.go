@@ -22,7 +22,7 @@ import (
 //	workflow: workflows/default.bot                    # fallback
 //	assignee_workflows:
 //	  vibe_feature_dev:        examples/bots/vibe_feature_dev.bot
-//	  vibe_review_alternating: examples/bots/vibe_review_alternating.bot
+//	  whole_improve_loop: examples/bots/whole_improve_loop.bot
 //	  secured-renovacy:        examples/secured-renovacy/bot.bot
 type RoutingRunner struct {
 	// Default is invoked when the issue's assignee is empty or not

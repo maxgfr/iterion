@@ -28,13 +28,13 @@ func (r *recordingRunner) Close() error {
 func TestRoutingRunnerPicksByAssignee(t *testing.T) {
 	def := &recordingRunner{name: "default"}
 	vfd := &recordingRunner{name: "vibe_feature_dev"}
-	rev := &recordingRunner{name: "vibe_review_alternating"}
+	rev := &recordingRunner{name: "whole_improve_loop"}
 
 	rr := &RoutingRunner{
 		Default: def,
 		ByAssignee: map[string]Runner{
-			"vibe_feature_dev":        vfd,
-			"vibe_review_alternating": rev,
+			"vibe_feature_dev":   vfd,
+			"whole_improve_loop": rev,
 		},
 	}
 
@@ -43,7 +43,7 @@ func TestRoutingRunnerPicksByAssignee(t *testing.T) {
 		want     *recordingRunner
 	}{
 		{"vibe_feature_dev", vfd},
-		{"vibe_review_alternating", rev},
+		{"whole_improve_loop", rev},
 		{"", def},                 // empty → default
 		{"unknown-bot", def},      // miss → default
 		{"VIBE_FEATURE_DEV", def}, // case-sensitive miss → default

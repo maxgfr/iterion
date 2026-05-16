@@ -1,7 +1,7 @@
 # jobqueue (iterion fixture — review-pr-mix)
 
 A small worker-pool / job-queue used as a realistic codebase for
-`iterion`'s `vibe_review_alternating` live test. The code contains a
+`iterion`'s `whole_improve_loop` live test. The code contains a
 deliberate mix of clean modules and ones with production-blocking
 issues — the bot's reviewers are expected to surface the latter
 without re-flagging the former.

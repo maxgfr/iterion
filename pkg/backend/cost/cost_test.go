@@ -25,7 +25,7 @@ func TestEstimateUSD(t *testing.T) {
 		{"gpt-5 1m+1m", "openai/gpt-5", 1_000_000, 1_000_000, 11.25, false},
 		// Newer OpenAI tiers — exercised by claw delegate; previously
 		// missing from the table they silently reported $0 in run
-		// observability (vibe_review_alternating run_1777560043656).
+		// observability (whole_improve_loop run_1777560043656).
 		{"gpt-5.5 1m+1m", "openai/gpt-5.5", 1_000_000, 1_000_000, 17.00, false},
 		{"gpt-5.4-mini 1m+1m", "openai/gpt-5.4-mini", 1_000_000, 1_000_000, 2.70, false},
 		{"opus 4-6 inherits opus rate", "claude-opus-4-6", 1_000_000, 1_000_000, 90.00, false},

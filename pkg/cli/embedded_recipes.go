@@ -12,7 +12,7 @@ import (
 // requested path does not exist on disk. This makes commands like
 //
 //	iterion run skill/minimal_linear.iter
-//	iterion run bots/vibe_review_alternating.bot
+//	iterion run bots/whole_improve_loop.bot
 //
 // work from any working directory — the user does not have to
 // explicitly point at `<repo>/examples/...`. Bundle directories

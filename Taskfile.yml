@@ -119,8 +119,8 @@ tasks:
     cmds:
       - go test -v -tags live -count=1 -run TestLive_VibeFeatureDev -timeout 90m ./e2e/...
 
-  test:live:vibe-review-alternating:
-    desc: Live e2e for vibe_review_alternating bot (requires claude CLI + OPENAI_API_KEY)
+  test:live:whole-improve-loop:
+    desc: Live e2e for whole_improve_loop bot (requires claude CLI + OPENAI_API_KEY)
     cmds:
       - go test -v -tags live -count=1 -run TestLive_VibeReviewAlternating -timeout 45m ./e2e/...
 
@@ -132,7 +132,7 @@ tasks:
   test:live:bots:
     desc: Run all three example-bot live tests in sequence (slow + costly)
     cmds:
-      - task: test:live:vibe-review-alternating
+      - task: test:live:whole-improve-loop
       - task: test:live:vibe-feature-dev
       - task: test:live:secured-renovacy
 
@@ -141,8 +141,8 @@ tasks:
     cmds:
       - go test -v -tags live -count=1 -run "TestLive_VibeFeatureDev_Real$" -timeout 2h ./e2e/...
 
-  test:live:vibe-review-alternating-real:
-    desc: Live e2e for vibe_review_alternating against a curated bug-mix fixture (30-90min, $10-30)
+  test:live:whole-improve-loop-real:
+    desc: Live e2e for whole_improve_loop against a curated bug-mix fixture (30-90min, $10-30)
     cmds:
       - go test -v -tags live -count=1 -run "TestLive_VibeReviewAlternating_Real$" -timeout 3h ./e2e/...
 
@@ -159,7 +159,7 @@ tasks:
   test:live:bots-real:
     desc: Run all three real-scenario bot live tests in sequence (very slow + very costly)
     cmds:
-      - task: test:live:vibe-review-alternating-real
+      - task: test:live:whole-improve-loop-real
       - task: test:live:vibe-feature-dev-real
       - task: test:live:secured-renovacy-real
 
