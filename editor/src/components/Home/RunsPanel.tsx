@@ -164,16 +164,28 @@ export default function RunsPanel({ runs, loading, error }: Props) {
 }
 
 // openRunCrossDaemon resolves the daemon URL serving the given run's
-// store and navigates to its /runs/<id> route. Empty URL → same daemon
-// (graceful fallback for the global slot served by the current daemon
-// itself). Errors fall back to a same-daemon navigation so the worst
-// case is the historical 404, not a swallowed click.
+// store and navigates to its /runs/<id> route. When the resolved
+// daemon's store dir DOESN'T match the run's store_path (typically:
+// global ~/.iterion/runs/ runs viewed from a per-project daemon), the
+// `?store=<store_path>` query is appended so the daemon's read
+// handlers route via the cross-store proxy (pkg/server/runs.go::
+// resolveCrossStore) and the SPA's API helpers
+// (readStoreOverrideFromURL in api/runs.ts) carry the override on
+// every subsequent fetch. Errors fall back to a same-daemon
+// navigation so the worst case is the historical 404, not a swallowed
+// click.
 async function openRunCrossDaemon(run: GlobalActiveRun): Promise<void> {
   const target = `/runs/${encodeURIComponent(run.id)}`;
+  // Always carry the run's store_path as a query so the destination
+  // daemon's read handlers know which store to read from when the
+  // run lives outside the daemon's primary store. Same-store
+  // navigations include the param harmlessly — the handler accepts
+  // it and the path validates under $HOME/.iterion either way.
+  const targetWithStore = `${target}?store=${encodeURIComponent(run.store_path)}`;
   try {
     const daemonURL = await desktop.getDaemonURLForStore(run.store_path);
     if (daemonURL) {
-      window.location.replace(daemonURL.replace(/\/$/, "") + target);
+      window.location.replace(daemonURL.replace(/\/$/, "") + targetWithStore);
       return;
     }
   } catch (err) {
@@ -181,8 +193,9 @@ async function openRunCrossDaemon(run: GlobalActiveRun): Promise<void> {
       console.warn("openRunCrossDaemon: GetDaemonURLForStore failed:", err);
     }
   }
-  // Fallback: current daemon, relative.
-  window.location.assign(target);
+  // Fallback: current daemon, relative, still carrying ?store= so
+  // the per-project daemon can proxy reads from the foreign store.
+  window.location.assign(targetWithStore);
 }
 
 function GlobalRunRow({ run }: { run: GlobalActiveRun }) {

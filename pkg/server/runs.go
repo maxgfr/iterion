@@ -250,10 +250,68 @@ func (s *Server) handleLaunchRun(w http.ResponseWriter, r *http.Request) {
 	s.writeJSONFor(w, r, launchRunResponse{RunID: res.RunID, Status: string(store.RunStatusRunning)})
 }
 
+// resolveCrossStore inspects the `?store=` query parameter and, when
+// it's a permitted iterion store path under $HOME/.iterion/, returns a
+// fresh read-only RunStore rooted there. Used by the read-only run
+// endpoints so the desktop banner can deep-link into a run living in a
+// different store (typically the global ~/.iterion/runs/ slot, or a
+// per-project store not currently attached) without spawning a
+// dedicated daemon.
+//
+// Returns (nil, "", nil) when ?store= is absent → callers fall through
+// to the daemon's primary s.runs Service.
+//
+// Security: the path MUST resolve under $HOME/.iterion/ after symlink
+// resolution; anything else is rejected with a clear error so a
+// malicious ?store=/etc/.. can't read arbitrary host paths.
+func (s *Server) resolveCrossStore(r *http.Request) (store.RunStore, string, error) {
+	raw := r.URL.Query().Get("store")
+	if raw == "" {
+		return nil, "", nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil, "", fmt.Errorf("cross-store: $HOME not resolvable")
+	}
+	abs, err := filepath.Abs(raw)
+	if err != nil {
+		return nil, "", fmt.Errorf("cross-store: invalid path: %w", err)
+	}
+	// Symlink-safe containment check.
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return nil, "", fmt.Errorf("cross-store: resolve %s: %w", abs, err)
+	}
+	allowedRoot, err := filepath.EvalSymlinks(filepath.Join(home, ".iterion"))
+	if err != nil {
+		return nil, "", fmt.Errorf("cross-store: resolve allowed root: %w", err)
+	}
+	if resolved != allowedRoot && !strings.HasPrefix(resolved, allowedRoot+string(filepath.Separator)) {
+		return nil, "", fmt.Errorf("cross-store: %q is outside $HOME/.iterion/ — refused", raw)
+	}
+	rs, err := store.New(resolved)
+	if err != nil {
+		return nil, "", fmt.Errorf("cross-store: open %s: %w", resolved, err)
+	}
+	return rs, resolved, nil
+}
+
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "missing run id")
+		return
+	}
+	if xs, _, err := s.resolveCrossStore(r); err != nil {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "%v", err)
+		return
+	} else if xs != nil {
+		snap, err := runview.BuildSnapshot(r.Context(), xs, id)
+		if err != nil {
+			s.httpErrorFor(w, r, http.StatusNotFound, "run not found in cross-store: %v", err)
+			return
+		}
+		s.writeJSONFor(w, r, snap)
 		return
 	}
 	snap, err := s.runs.Snapshot(id)
@@ -273,6 +331,21 @@ func (s *Server) handleGetRunEvents(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	from, _ := strconv.ParseInt(q.Get("from"), 10, 64)
 	to, _ := strconv.ParseInt(q.Get("to"), 10, 64)
+	if xs, _, err := s.resolveCrossStore(r); err != nil {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "%v", err)
+		return
+	} else if xs != nil {
+		events, err := xs.LoadEventsRange(r.Context(), id, from, to, runview.MaxEventsPerPage)
+		if err != nil {
+			s.httpErrorFor(w, r, http.StatusInternalServerError, "load events from cross-store: %v", err)
+			return
+		}
+		if events == nil {
+			events = []*store.Event{}
+		}
+		s.writeJSONFor(w, r, map[string]interface{}{"events": events})
+		return
+	}
 	events, err := s.runs.LoadEvents(id, from, to)
 	if err != nil {
 		s.httpErrorFor(w, r, http.StatusInternalServerError, "load events: %v", err)
@@ -288,6 +361,22 @@ func (s *Server) handleGetRunWorkflow(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "missing run id")
+		return
+	}
+	if xs, _, err := s.resolveCrossStore(r); err != nil {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "%v", err)
+		return
+	} else if xs != nil {
+		// Cross-store: re-use the IR-→-wire projection so the editor
+		// receives the same shape it expects from the same-store path.
+		// One-shot — no cache (the daemon serves cross-store reads
+		// rarely; cache-hit ratio wouldn't justify the lock).
+		wf, err := runview.BuildWireWorkflowFromStore(r.Context(), xs, id)
+		if err != nil {
+			s.httpErrorFor(w, r, http.StatusNotFound, "load workflow from cross-store: %v", err)
+			return
+		}
+		s.writeJSONFor(w, r, wf)
 		return
 	}
 	wf, err := s.runs.LoadWireWorkflow(id)

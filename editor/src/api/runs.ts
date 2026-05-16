@@ -225,8 +225,36 @@ export async function listGlobalActiveRuns(): Promise<GlobalActiveRun[]> {
   return res.runs ?? [];
 }
 
+// readStoreOverrideFromURL returns the current page's `?store=` query
+// param, if any. The Home banner appends it when navigating to a run
+// living in a foreign iterion store (typically the global ~/.iterion/
+// slot) so this daemon's read endpoints route via the cross-store
+// proxy (pkg/server/runs.go::resolveCrossStore).
+//
+// Empty string when not in a browser context, when no override is set,
+// or when the value isn't a non-empty string.
+function readStoreOverrideFromURL(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const v = new URLSearchParams(window.location.search).get("store");
+    return v && v.length > 0 ? v : "";
+  } catch {
+    return "";
+  }
+}
+
+// withStoreParam appends `store=<override>` to the given URLSearchParams
+// when a cross-store override is active. No-op otherwise. Centralised
+// here so every run-scoped API call routes consistently.
+function withStoreParam(qs: URLSearchParams): URLSearchParams {
+  const override = readStoreOverrideFromURL();
+  if (override) qs.set("store", override);
+  return qs;
+}
+
 export async function getRun(runId: string): Promise<RunSnapshot> {
-  return request(`/runs/${encodeURIComponent(runId)}`);
+  const qs = withStoreParam(new URLSearchParams()).toString();
+  return request(`/runs/${encodeURIComponent(runId)}${qs ? `?${qs}` : ""}`);
 }
 
 export async function loadEvents(
@@ -237,6 +265,7 @@ export async function loadEvents(
   const qs = new URLSearchParams();
   if (from > 0) qs.set("from", String(from));
   if (to > 0) qs.set("to", String(to));
+  withStoreParam(qs);
   const suffix = qs.toString();
   const res = await request<{ events: RunEvent[] }>(
     `/runs/${encodeURIComponent(runId)}/events${suffix ? `?${suffix}` : ""}`,
@@ -317,7 +346,8 @@ export interface WireSchemaField {
 }
 
 export async function getRunWorkflow(runId: string): Promise<WireWorkflow> {
-  return request(`/runs/${encodeURIComponent(runId)}/workflow`);
+  const qs = withStoreParam(new URLSearchParams()).toString();
+  return request(`/runs/${encodeURIComponent(runId)}/workflow${qs ? `?${qs}` : ""}`);
 }
 
 export async function listArtifacts(
