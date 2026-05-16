@@ -1,0 +1,15 @@
+{
+  "name": "protestware-fixture",
+  "version": "0.0.1",
+  "description": "Minimal npm fixture pinning node-ipc@10.1.1 (peacenotwar/protestware sabotage release) for the iterion secured-renovacy anti-malware heuristic test.",
+  "main": "index.js",
+  "scripts": {
+    "test": "node -e \"console.log('noop')\"",
+    "build": "node -e \"console.log('noop')\"",
+    "lint": "node -e \"console.log('noop')\"",
+    "typecheck": "node -e \"console.log('noop')\""
+  },
+  "dependencies": {
+    "node-ipc": "10.1.1"
+  }
+}

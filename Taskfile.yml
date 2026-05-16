@@ -151,6 +151,11 @@ tasks:
     cmds:
       - go test -v -tags live -count=1 -run "TestLive_SecuredRenovacy_Real$" -timeout 4h ./e2e/...
 
+  test:live:secured-renovacy-protestware:
+    desc: Live e2e for secured-renovacy's anti-malware heuristic (single-package fixture, node-ipc@10.1.1, 5-15min, $2-5)
+    cmds:
+      - go test -v -tags live -count=1 -run "TestLive_SecuredRenovacy_Protestware$" -timeout 1h ./e2e/...
+
   test:live:bots-real:
     desc: Run all three real-scenario bot live tests in sequence (very slow + very costly)
     cmds:
