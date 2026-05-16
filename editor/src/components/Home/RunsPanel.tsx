@@ -248,9 +248,18 @@ function GlobalRunRow({ run }: { run: GlobalActiveRun }) {
       </button>
     );
   }
+  // Non-desktop fallback (browser mode served by the daemon itself,
+  // OR a transient render before Wails injects window.go.main.App).
+  // Both observed: the SPA was loaded via http://<daemon>/ instead of
+  // wails://wails.localhost/, so the click navigates same-daemon and
+  // MUST still carry the store= query so the destination daemon's
+  // cross-store proxy can read from the foreign store. Without this,
+  // /api/runs/<id> 404s with "open ... no such file or directory"
+  // (observed: store_path=~/.iterion run viewed from a per-project
+  // daemon).
   return (
     <Link
-      href={`/runs/${encodeURIComponent(run.id)}`}
+      href={`/runs/${encodeURIComponent(run.id)}?store=${encodeURIComponent(run.store_path)}`}
       className="w-full px-4 py-2.5 flex items-center gap-3 bg-info-soft/20 hover:bg-info-soft/40 border-l-2 border-info"
     >
       {inner}
