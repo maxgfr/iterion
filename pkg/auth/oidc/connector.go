@@ -117,6 +117,47 @@ func (s *MemoryStateStore) Take(_ context.Context, state string) (PendingAuth, e
 	return p, nil
 }
 
+// Sweep evicts every PendingAuth older than the configured TTL. Take
+// already discards expired entries lazily, but a user who clicked
+// "Sign in with Google" then closed the tab never returns — without
+// this the entry sits in memory until process restart. Returns the
+// number of entries evicted so a caller can wire it into a metric.
+//
+// Safe to call concurrently with Put/Take.
+func (s *MemoryStateStore) Sweep() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	evicted := 0
+	now := time.Now()
+	for state, p := range s.m {
+		if now.Sub(p.IssuedAt) > s.ttl {
+			delete(s.m, state)
+			evicted++
+		}
+	}
+	return evicted
+}
+
+// StartSweeper runs Sweep on a fixed cadence until ctx is cancelled.
+// Blocks; callers typically launch it in a goroutine. Recommended
+// interval is the store's TTL so even an attacker spamming Put never
+// keeps more than ~2× TTL worth of entries in memory.
+func (s *MemoryStateStore) StartSweeper(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = s.ttl
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			_ = s.Sweep()
+		}
+	}
+}
+
 // GenerateStateAndPKCE returns a random state value (~32 bytes
 // base64url) and a PKCE pair (verifier + S256 challenge).
 func GenerateStateAndPKCE() (state, verifier, challenge string, err error) {

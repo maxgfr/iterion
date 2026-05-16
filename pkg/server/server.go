@@ -441,6 +441,22 @@ func (s *Server) ListenAndServe() error {
 	if s.runs != nil {
 		go s.runStagedUploadReaper()
 	}
+	// Sweep abandoned OIDC PendingAuth entries — a user who clicks
+	// "Sign in with Google" then closes the tab never returns to
+	// trigger the lazy eviction inside Take, so without this the
+	// in-memory store grows unbounded under brute-force attempts
+	// or distracted users.
+	if mss, ok := s.oidcStates.(*oidc.MemoryStateStore); ok {
+		go func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go func() {
+				<-s.shutdown
+				cancel()
+			}()
+			mss.StartSweeper(ctx, 0) // 0 = use store TTL as interval
+		}()
+	}
 	// Truthful URL in the log: if the operator chose a non-loopback bind we
 	// print the actual address so they know the editor is exposed beyond the
 	// local machine. Previously we always printed http://localhost:<port>
