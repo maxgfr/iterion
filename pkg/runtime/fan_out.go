@@ -161,14 +161,32 @@ func (e *Engine) execFanOut(ctx context.Context, rs *runState, routerNodeID stri
 
 	// Determine convergence point. Prefer the one reported by successful branches;
 	// if all branches failed, discover it from the graph topology.
+	//
+	// Under best_effort, branches may legitimately end at different
+	// nodes — e.g. one branch hits a fail node, another times out and
+	// is cancelled, a third completes. We keep the first non-empty
+	// joinNodeID and log the divergence rather than aborting the whole
+	// fan-out (which would discard the successful branches and is
+	// exactly the failure mode best_effort exists to avoid).
 	convergenceNodeID := ""
+	isBestEffort := !cancelOnFirstFailure
 	for _, r := range results {
-		if r.joinNodeID != "" {
-			if convergenceNodeID == "" {
-				convergenceNodeID = r.joinNodeID
-			} else if convergenceNodeID != r.joinNodeID {
-				return "", fmt.Errorf("branches converge to different nodes: %s vs %s", convergenceNodeID, r.joinNodeID)
+		if r.joinNodeID == "" {
+			continue
+		}
+		if convergenceNodeID == "" {
+			convergenceNodeID = r.joinNodeID
+			continue
+		}
+		if convergenceNodeID != r.joinNodeID {
+			if isBestEffort {
+				if e.logger != nil {
+					e.logger.Warn("fan_out from %s: branches converge to different nodes (%s vs %s in branch %s) — best_effort, keeping first",
+						routerNodeID, convergenceNodeID, r.joinNodeID, r.branchID)
+				}
+				continue
 			}
+			return "", fmt.Errorf("branches converge to different nodes: %s vs %s", convergenceNodeID, r.joinNodeID)
 		}
 	}
 	if convergenceNodeID == "" {
@@ -544,10 +562,21 @@ func (e *Engine) findConvergencePoint(routerNodeID string, fanEdges []*ir.Edge) 
 	}
 
 	// BFS from each fan-out target to find a convergence point.
+	// maxVisits guards against a malformed graph where a cycle slipped
+	// past compile-time validation (C012/C013): without it the queue
+	// could grow without bound. Cap at the workflow's node count —
+	// any honest BFS visits each node at most once.
+	maxVisits := len(e.workflow.Nodes) + 1
 	for _, startEdge := range fanEdges {
 		visited := map[string]bool{}
 		queue := []string{startEdge.To}
 		for len(queue) > 0 {
+			if len(visited) > maxVisits {
+				if e.logger != nil {
+					e.logger.Warn("findConvergencePoint: BFS exceeded %d visits — likely an undetected graph cycle, aborting search", maxVisits)
+				}
+				break
+			}
 			nodeID := queue[0]
 			queue = queue[1:]
 			if visited[nodeID] {

@@ -183,6 +183,40 @@ func (s *FilesystemRunStore) ListAttachments(_ context.Context, runID string) ([
 	return out, nil
 }
 
+// RemoveAttachment deletes a single attachment by name from disk and
+// from Run.Attachments. Used by callers performing transactional
+// promotion (e.g. promoteStaged) to roll back partial writes. Safe to
+// call on a name that was never persisted.
+func (s *FilesystemRunStore) RemoveAttachment(ctx context.Context, runID, name string) error {
+	if err := sanitizePathComponent("run ID", runID); err != nil {
+		return err
+	}
+	if err := sanitizePathComponent("attachment name", name); err != nil {
+		return err
+	}
+	dir := s.attachmentDir(runID, name)
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("store: rm attachment dir: %w", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, err := s.LoadRun(ctx, runID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if r.Attachments == nil {
+		return nil
+	}
+	if _, ok := r.Attachments[name]; !ok {
+		return nil
+	}
+	delete(r.Attachments, name)
+	return s.writeRun(r)
+}
+
 // DeleteRunAttachments removes every attachment under the run directory
 // and clears Run.Attachments. Safe to call on runs without attachments.
 func (s *FilesystemRunStore) DeleteRunAttachments(ctx context.Context, runID string) error {

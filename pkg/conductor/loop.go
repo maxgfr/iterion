@@ -105,6 +105,13 @@ func (c *Conductor) refreshRunningStates(ctx context.Context) {
 			if r.Cancel != nil {
 				r.Cancel()
 			}
+			// Reap the slot immediately. A worker that swallows ctx
+			// cancellation (some claude_code subprocesses ignore
+			// SIGINT) would otherwise hold the slot until process
+			// exit, gradually starving max_concurrent. finishRun is
+			// idempotent, so if the worker later posts cmdRunFinished
+			// the duplicate is a no-op.
+			c.finishRun(ctx, id, context.Canceled)
 			continue
 		}
 		if newState != r.WorkflowState {

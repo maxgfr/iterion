@@ -336,6 +336,20 @@ func (c *S3Client) PresignAttachment(ctx context.Context, runID, name, filename 
 	return req.URL, nil
 }
 
+// DeleteAttachment removes a single attachment blob. Idempotent: a
+// missing key returns nil so callers performing rollback don't error
+// on a write that never reached S3.
+func (c *S3Client) DeleteAttachment(ctx context.Context, runID, name, filename string) error {
+	key := attachmentKey(runID, name, filename)
+	if _, err := c.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	}); err != nil {
+		return fmt.Errorf("blob: delete attachment %s: %w", key, err)
+	}
+	return nil
+}
+
 // DeleteRunAttachments sweeps every blob under attachments/<runID>/.
 // Mirrors DeleteRun's batched, best-effort semantics.
 func (c *S3Client) DeleteRunAttachments(ctx context.Context, runID string) error {

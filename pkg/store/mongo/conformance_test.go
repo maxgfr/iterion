@@ -161,6 +161,11 @@ func (b *inMemoryBlob) PresignAttachment(_ context.Context, runID, name, filenam
 	return "memory://" + blob.AttachmentKey(runID, name, filename), nil
 }
 
+func (b *inMemoryBlob) DeleteAttachment(_ context.Context, runID, name, filename string) error {
+	delete(b.data, blob.AttachmentKey(runID, name, filename))
+	return nil
+}
+
 func (b *inMemoryBlob) DeleteRunAttachments(_ context.Context, runID string) error {
 	prefix := blob.AttachmentRunPrefix(runID)
 	for k := range b.data {

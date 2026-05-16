@@ -2,6 +2,7 @@ package ir
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"strings"
@@ -175,7 +176,7 @@ func (c *compiler) validateCompaction(w *Workflow) {
 		if cp == nil {
 			return
 		}
-		if cp.Threshold != 0 && (cp.Threshold <= 0 || cp.Threshold > 1) {
+		if cp.Threshold != 0 && (math.IsNaN(cp.Threshold) || math.IsInf(cp.Threshold, 0) || cp.Threshold <= 0 || cp.Threshold > 1) {
 			c.errorf(DiagInvalidCompaction, "%s %q: compaction.threshold must be in (0, 1], got %g", scope, id, cp.Threshold)
 		}
 		if cp.PreserveRecent < 0 {

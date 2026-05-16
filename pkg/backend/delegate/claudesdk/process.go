@@ -15,6 +15,12 @@ import (
 	"time"
 )
 
+// maxTurnsCeiling caps the per-call max-turns the claude CLI is asked
+// for. A workflow misconfigured to allow ~unbounded iterations would
+// otherwise let one node burn through hours of LLM time before the
+// iterion budget tracker observes the result.
+const maxTurnsCeiling = 200
+
 // processConfig holds parameters that map to CLI flags.
 type processConfig struct {
 	Model              string
@@ -85,7 +91,18 @@ func buildArgs(cfg processConfig, streaming bool) []string {
 	}
 
 	if cfg.MaxTurns > 0 {
-		args = append(args, "--max-turns", fmt.Sprintf("%d", cfg.MaxTurns))
+		// Clamp at maxTurnsCeiling. The Claude CLI accepts any
+		// positive int, but workflows that pass an unbounded value
+		// (e.g. a misconfigured `tool_max_steps`) can have the CLI
+		// burn tokens for hours before exiting — and the iterion
+		// budget tracker only sees the result after the fact. The
+		// ceiling matches the realistic upper bound for any single
+		// node (humans rarely benefit beyond ~100 iterations).
+		turns := cfg.MaxTurns
+		if turns > maxTurnsCeiling {
+			turns = maxTurnsCeiling
+		}
+		args = append(args, "--max-turns", fmt.Sprintf("%d", turns))
 	}
 	if cfg.MaxBudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", fmt.Sprintf("%g", cfg.MaxBudgetUSD))

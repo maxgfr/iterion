@@ -99,6 +99,31 @@ func (s *Store) ListAttachments(ctx context.Context, runID string) ([]store.Atta
 	return out, nil
 }
 
+func (s *Store) RemoveAttachment(ctx context.Context, runID, name string) error {
+	r, err := s.LoadRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	rec, ok := r.Attachments[name]
+	if !ok {
+		return nil
+	}
+	if err := s.blob.DeleteAttachment(ctx, runID, name, rec.OriginalFilename); err != nil {
+		return fmt.Errorf("store/mongo: blob delete attachment %s/%s: %w", runID, name, err)
+	}
+	_, err = s.runs.UpdateOne(ctx,
+		bson.M{"_id": runID},
+		bson.M{
+			"$unset": bson.M{"attachments." + name: ""},
+			"$set":   bson.M{"updated_at": time.Now().UTC()},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("store/mongo: clear attachment %s/%s: %w", runID, name, err)
+	}
+	return nil
+}
+
 func (s *Store) DeleteRunAttachments(ctx context.Context, runID string) error {
 	if err := s.blob.DeleteRunAttachments(ctx, runID); err != nil {
 		return fmt.Errorf("store/mongo: blob delete attachments: %w", err)

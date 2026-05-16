@@ -69,11 +69,25 @@ type cmdRunFinished struct {
 }
 
 func (m cmdRunFinished) apply(c *Conductor, ctx context.Context) {
-	r, ok := c.state.running[m.issueID]
+	c.finishRun(ctx, m.issueID, m.err)
+}
+
+// finishRun is the actor-goroutine-side teardown for a running entry.
+// Idempotent — a second call (e.g. the worker eventually returns and
+// posts cmdRunFinished after refreshRunningStates already reaped the
+// slot) finds c.state.running[issueID] empty and returns.
+//
+// Called both by cmdRunFinished.apply (the normal worker-return path)
+// and by refreshRunningStates when an issue disappears from the
+// tracker — without the second path, a worker that swallows ctx
+// cancellation would leave the slot held indefinitely and the
+// conductor would eventually starve itself out of concurrency budget.
+func (c *Conductor) finishRun(ctx context.Context, issueID string, err error) {
+	r, ok := c.state.running[issueID]
 	if !ok {
 		return
 	}
-	delete(c.state.running, m.issueID)
+	delete(c.state.running, issueID)
 	if r.WorkflowState != "" {
 		c.state.slotsByState[r.WorkflowState]--
 		if c.state.slotsByState[r.WorkflowState] <= 0 {
@@ -83,31 +97,31 @@ func (m cmdRunFinished) apply(c *Conductor, ctx context.Context) {
 	// Always release the tracker claim — if the issue is still active
 	// on the tracker side, the next tick will re-pick it (unless we
 	// schedule a retry below).
-	if relErr := c.tracker.Release(ctx, m.issueID, c.hostMarker); relErr != nil &&
+	if relErr := c.tracker.Release(ctx, issueID, c.hostMarker); relErr != nil &&
 		!errors.Is(relErr, tracker.ErrNotFound) &&
 		!errors.Is(relErr, tracker.ErrClaimConflict) {
 		c.logger.Warn("conductor: release %s: %v", r.Identifier, relErr)
 	}
 
 	switch {
-	case m.err == nil:
+	case err == nil:
 		c.logger.Info("conductor: %s finished cleanly (run=%s)", r.Identifier, r.RunID)
 		// Successful dispatches clear any prior retry bookkeeping and
 		// honor the workspace-persist policy.
-		if cur, ok := c.state.retries[m.issueID]; ok {
+		if cur, ok := c.state.retries[issueID]; ok {
 			if cur.Timer != nil {
 				cur.Timer.Stop()
 			}
-			delete(c.state.retries, m.issueID)
+			delete(c.state.retries, issueID)
 		}
 		c.cleanupWorkspace(r)
-	case errors.Is(m.err, context.Canceled):
+	case errors.Is(err, context.Canceled):
 		// Cancellation is a soft stop. Keep the workspace and any
 		// pending retry entry so the next tick can re-pick the issue.
 		c.logger.Info("conductor: %s cancelled (run=%s)", r.Identifier, r.RunID)
 	default:
-		c.logger.Warn("conductor: %s failed (run=%s): %v", r.Identifier, r.RunID, m.err)
-		c.scheduleRetry(m.issueID, r, m.err)
+		c.logger.Warn("conductor: %s failed (run=%s): %v", r.Identifier, r.RunID, err)
+		c.scheduleRetry(issueID, r, err)
 	}
 	c.fireSnapshot()
 }
