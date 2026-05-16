@@ -286,6 +286,46 @@ func TestCancel_Missing404(t *testing.T) {
 	}
 }
 
+// TestStateChangingEndpoints_RejectCrossStore covers the symmetric
+// counterpart to the WS handlers' cross_store_readonly rejection: any
+// POST /api/runs/{id}/... with ?store= must return 409 before any
+// other validation, regardless of payload validity. Without this the
+// pre-fix UX surfaced a confusing 404 pointing at the LOCAL store
+// path when the operator clicked Cancel on a foreign-store run from
+// the cross-daemon banner.
+func TestStateChangingEndpoints_RejectCrossStore(t *testing.T) {
+	_, hs := newTestServer(t)
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"cancel", "/api/runs/any-id/cancel"},
+		{"resume", "/api/runs/any-id/resume"},
+		{"merge", "/api/runs/any-id/merge"},
+		{"browser_attach", "/api/runs/any-id/browser/attach"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := http.Post(
+				hs.URL+tc.path+"?store=/some/foreign/path",
+				"application/json",
+				bytes.NewReader([]byte(`{}`)),
+			)
+			if err != nil {
+				t.Fatalf("POST: %v", err)
+			}
+			if resp.StatusCode != http.StatusConflict {
+				t.Errorf("status = %d, want 409", resp.StatusCode)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if !bytes.Contains(body, []byte("cross_store_readonly")) {
+				t.Errorf("body = %q, want it to contain cross_store_readonly", string(body))
+			}
+		})
+	}
+}
+
 func TestLaunch_RejectsMissingFilePath(t *testing.T) {
 	_, hs := newTestServer(t)
 	resp, err := http.Post(hs.URL+"/api/runs", "application/json", bytes.NewReader([]byte(`{}`)))

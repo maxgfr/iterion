@@ -28,6 +28,18 @@ func (c *runConn) handleSubscribeLogs(env runWSEnvelope) {
 		c.sendAck(env.AckID)
 		return
 	}
+	// Cross-store: the in-process broker (GetLogBuffer) and the local
+	// run.log file (replayPersistedLog → c.server.runs.StoreDir()) both
+	// belong to the daemon driving the run. For a foreign-store run we
+	// tail <c.xStorePath>/runs/<id>/run.log directly; see
+	// streamLogsCrossStore for the full contract.
+	if c.xStore != nil {
+		c.logSubscribed = true
+		c.mu.Unlock()
+		c.sendAck(env.AckID)
+		go c.streamLogsCrossStore(req.FromOffset)
+		return
+	}
 	buf := c.server.runs.GetLogBuffer(c.runID)
 	if buf == nil {
 		// Terminated run — no live buffer. Replay the persisted log

@@ -192,6 +192,9 @@ func (s *Server) handleBrowserAttach(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSafeOrigin(w, r) {
 		return
 	}
+	if s.rejectCrossStoreWrite(w, r) {
+		return
+	}
 	runID := r.PathValue("id")
 	if runID == "" {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "run id required")

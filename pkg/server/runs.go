@@ -296,6 +296,22 @@ func (s *Server) resolveCrossStore(r *http.Request) (store.RunStore, string, err
 	return rs, resolved, nil
 }
 
+// rejectCrossStoreWrite returns true (and writes 409 cross_store_readonly)
+// when the request carries ?store= — symmetric to the WS handlers'
+// rejection of cancel/answer on cross-store connections. Callers must
+// `return` immediately when this returns true. The path itself isn't
+// re-validated here (resolveCrossStore covers that on the read paths);
+// any write attempt with ?store= set is refused, on the principle that
+// only the owning daemon may mutate a run.
+func (s *Server) rejectCrossStoreWrite(w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.Query().Get("store") == "" {
+		return false
+	}
+	s.httpErrorFor(w, r, http.StatusConflict,
+		"cross_store_readonly: this operation is not available for cross-store runs — open the owning daemon")
+	return true
+}
+
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -594,6 +610,9 @@ func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSafeOrigin(w, r) {
 		return
 	}
+	if s.rejectCrossStoreWrite(w, r) {
+		return
+	}
 	id := r.PathValue("id")
 	if id == "" {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "missing run id")
@@ -643,6 +662,9 @@ func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleResumeRun(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSafeOrigin(w, r) {
+		return
+	}
+	if s.rejectCrossStoreWrite(w, r) {
 		return
 	}
 	id := r.PathValue("id")
