@@ -174,7 +174,6 @@ func runEventsFilenameForStore(root, runID string) string {
 	return filepath.Join(root, "runs", runID, "events.jsonl")
 }
 
-
 // globalStoreRoots returns every iterion store directory the daemon
 // should scan for cross-folder runs. Always includes:
 //

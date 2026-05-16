@@ -37,6 +37,9 @@ func (s *Server) handleMergeRun(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSafeOrigin(w, r) {
 		return
 	}
+	if s.rejectCrossStoreWrite(w, r) {
+		return
+	}
 	id := r.PathValue("id")
 	if id == "" {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "missing run id")
