@@ -267,19 +267,14 @@ func (s *FilesystemRunStore) SaveRun(_ context.Context, r *Run) error {
 	return s.writeRun(r)
 }
 
-// LoadRun reads run.json for the given run ID.
-//
-// The run ID is sanitised before path-joining so a hostile or
-// network-sourced ID cannot escape the store root. The write side
-// (CreateRun/WriteArtifact/WriteInteraction) already sanitises its inputs;
-// the read paths must do the same so the defence is symmetric.
-//
-// As a one-shot migration step, a legacy run with empty Name gets a
-// deterministic friendly label generated and persisted on read. After
-// the first call the field is on disk; subsequent LoadRuns skip the
-// fixup. The seed mirrors the CLI/launch path (file_path:run_id) so the
-// backfill produces the exact name a new launch would have produced.
-func (s *FilesystemRunStore) LoadRun(_ context.Context, id string) (*Run, error) {
+// loadRunRaw is the pure-read variant of LoadRun: it parses run.json
+// and returns the Run without firing the name backfill or
+// finished_at heal. Used by every method that holds s.mu around its
+// own read-modify-write — the public LoadRun's healing side-effects
+// would otherwise sneak a second writeRun into a critical section
+// the caller didn't account for (its own follow-up writeRun would
+// then race the persisted state against its own in-memory copy).
+func (s *FilesystemRunStore) loadRunRaw(id string) (*Run, error) {
 	if err := sanitizePathComponent("run ID", id); err != nil {
 		return nil, err
 	}
@@ -292,26 +287,55 @@ func (s *FilesystemRunStore) LoadRun(_ context.Context, id string) (*Run, error)
 	if err := json.Unmarshal(data, &r); err != nil {
 		return nil, fmt.Errorf("store: decode run %s: %w", id, err)
 	}
+	return &r, nil
+}
+
+// healRun applies the on-read fixups (legacy-name backfill,
+// finished_at sanity check) and returns true if a write is needed.
+// Pure data manipulation; the caller decides when to persist.
+func healRun(r *Run) bool {
+	changed := false
 	if r.Name == "" {
 		r.Name = GenerateRunName(r.FilePath + ":" + r.ID)
+		changed = true
+	}
+	if r.Status == RunStatusRunning && r.FinishedAt != nil {
+		r.FinishedAt = nil
+		changed = true
+	}
+	return changed
+}
+
+// LoadRun reads run.json for the given run ID.
+//
+// The run ID is sanitised before path-joining so a hostile or
+// network-sourced ID cannot escape the store root. The write side
+// (CreateRun/WriteArtifact/WriteInteraction) already sanitises its inputs;
+// the read paths must do the same so the defence is symmetric.
+//
+// As a one-shot migration step, a legacy run with empty Name gets a
+// deterministic friendly label generated and persisted on read. After
+// the first call the field is on disk; subsequent LoadRuns skip the
+// fixup. The seed mirrors the CLI/launch path (file_path:run_id) so the
+// backfill produces the exact name a new launch would have produced.
+//
+// Callers that already hold s.mu and intend to write the run
+// themselves should use loadRunRaw to avoid the embedded writeRun
+// from the heal path interleaving with their own write.
+func (s *FilesystemRunStore) LoadRun(_ context.Context, id string) (*Run, error) {
+	r, err := s.loadRunRaw(id)
+	if err != nil {
+		return nil, err
+	}
+	if healRun(r) {
 		// Best-effort persist; a write failure (read-only fs, racing
 		// process) leaves the in-memory name set and lets the next
 		// successful write fix it up. Never fail LoadRun on this path.
-		if writeErr := s.writeRun(&r); writeErr != nil && s.logger != nil {
-			s.logger.Warn("store: backfill name for run %s failed: %v", id, writeErr)
+		if writeErr := s.writeRun(r); writeErr != nil && s.logger != nil {
+			s.logger.Warn("store: heal-on-read for run %s failed: %v", id, writeErr)
 		}
 	}
-	// Heal runs persisted by an older binary that left FinishedAt set
-	// across a resume into Running. The duration ticker in the editor
-	// keys on finished_at, so a stale value freezes the displayed run
-	// time. Best-effort persist mirrors the name-backfill above.
-	if r.Status == RunStatusRunning && r.FinishedAt != nil {
-		r.FinishedAt = nil
-		if writeErr := s.writeRun(&r); writeErr != nil && s.logger != nil {
-			s.logger.Warn("store: heal stale finished_at on run %s failed: %v", id, writeErr)
-		}
-	}
-	return &r, nil
+	return r, nil
 }
 
 // UpdateRunStatus updates the status (and optional error) of a run.
@@ -320,7 +344,7 @@ func (s *FilesystemRunStore) UpdateRunStatus(ctx context.Context, id string, sta
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	r, err := s.LoadRun(ctx, id)
+	r, err := s.loadRunRaw(id)
 	if err != nil {
 		return err
 	}
@@ -354,7 +378,7 @@ func (s *FilesystemRunStore) UpdateRunStatusIf(ctx context.Context, id string, s
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	r, err := s.LoadRun(ctx, id)
+	r, err := s.loadRunRaw(id)
 	if err != nil {
 		return false, err
 	}
@@ -393,7 +417,7 @@ func (s *FilesystemRunStore) SaveCheckpoint(ctx context.Context, id string, cp *
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	r, err := s.LoadRun(ctx, id)
+	r, err := s.loadRunRaw(id)
 	if err != nil {
 		return err
 	}
@@ -409,7 +433,7 @@ func (s *FilesystemRunStore) PauseRun(ctx context.Context, id string, cp *Checkp
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	r, err := s.LoadRun(ctx, id)
+	r, err := s.loadRunRaw(id)
 	if err != nil {
 		return err
 	}
@@ -426,7 +450,7 @@ func (s *FilesystemRunStore) FailRunResumable(ctx context.Context, id string, cp
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	r, err := s.LoadRun(ctx, id)
+	r, err := s.loadRunRaw(id)
 	if err != nil {
 		return err
 	}
@@ -732,7 +756,7 @@ func (s *FilesystemRunStore) WriteArtifact(ctx context.Context, a *Artifact) err
 	// silently dropped index update can cause downstream nodes to read a
 	// stale artifact version, which is a correctness bug, not a performance
 	// degradation. Callers can decide to retry or fail the run.
-	r, err := s.LoadRun(ctx, a.RunID)
+	r, err := s.loadRunRaw(a.RunID)
 	if err != nil {
 		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {
 			// No run.json yet (e.g. early CreateRun race) — artifact written,
