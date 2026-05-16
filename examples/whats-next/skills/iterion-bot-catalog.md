@@ -46,7 +46,9 @@ Walk top-to-bottom; first match wins.
 | If the work sounds like… | → `assignee` |
 |---|---|
 | "implement feature X", "add capability", "build the thing" | `vibe_feature_dev` |
-| "review for production", "audit correctness", "find bugs" | `vibe_review_alternating` |
+| "review the whole codebase", "audit production-readiness", "find bugs anywhere" | `whole_improve_loop` |
+| "focus on axis X" (security / observability / perf …) across the codebase | `whole_improve_loop` (with `--var improvement_prompt=…`) |
+| "review this branch", "review the PR", "fix the diff against main" | `branch_improve_loop` |
 | "upgrade dependencies", "patch CVEs", "bump versions" | `secured-renovacy` |
 | architectural choice, hiring, prioritisation meeting, alignment | `""` |
 | operator is vague or it's cross-cutting | `""` |
@@ -75,17 +77,46 @@ Example `args` payload for a roadmap_item:
 {"feature_prompt": "Add a CSV-export button to the reports page that POSTs to /api/export and saves to ~/Downloads. Include a Playwright test."}
 ```
 
-### `vibe_review_alternating`
+### `whole_improve_loop`
 
-- **Path**: `examples/bots/vibe_review_alternating.bot`
+- **Path**: `examples/bots/whole_improve_loop.bot` (formerly
+  `vibe_review_alternating`).
 - **Vars**: `workspace_dir` (default), `scope_notes: string=""`
   — free-text steering ("focus on auth and persistence",
-  "ignore the editor").
+  "ignore the editor"); `improvement_prompt: string=""` —
+  optional axis override. Empty (default) uses the full
+  production-ready grid; non-empty REPLACES the grid as the
+  reviewer/fixer focus (e.g. `"Focus exclusively on
+  observability: structured logs, traces, metrics, lost error
+  signals."`).
 - **Pipeline**: alternating Claude/GPT review → fix loop until
   two consecutive cross-family approvals (max 15 iterations).
+  No auto-commit — edits land in the working tree, operator
+  commits.
 - **Budget**: 1 branch, 2h, $60.
 - **Use when**: existing code, operator wants rigorous
-  production-readiness, doesn't yet know what's wrong.
+  production-readiness audit across the whole codebase, or
+  wants to drive iterative improvement on a specific axis.
+
+### `branch_improve_loop`
+
+- **Path**: `examples/bots/branch_improve_loop.bot`.
+- **Vars**: `workspace_dir` (default), `scope_notes: string=""`,
+  `base_ref: string="main"` — branch comparison base. The
+  bot reviews the diff `git diff base_ref...HEAD` only.
+- **Pipeline**: same alternating Claude/GPT review/fix loop as
+  `whole_improve_loop`, but scoped to the branch footprint;
+  on cross-family convergence, `prepare_commit` + the
+  `commit_changes` tool write a semantic commit covering the
+  improvements applied. Runs in a `worktree: auto` so the
+  operator's main checkout is shielded; the worktree
+  finalizer creates `iterion/run/<name>` and fast-forwards
+  the current branch.
+- **Budget**: 1 branch, 2h, $60.
+- **Use when**: an existing branch/PR needs a rigorous
+  production-readiness review + fix + commit before merge.
+  Pass `--var base_ref=develop` (or another integration
+  branch) when reviewing against a non-main base.
 
 ### `secured-renovacy`
 
@@ -125,9 +156,11 @@ dispatched bot.
 Before creating each issue:
 
 1. If `assignee != ""`, look it up in the table above. If it's
-   not one of the three known bots, AND it doesn't correspond
-   to a `.bot` file the explorer surfaced — strip to `""` and
-   add label `needs-manual-triage`. NEVER invent.
+   not one of the four known bots (`vibe_feature_dev`,
+   `whole_improve_loop`, `branch_improve_loop`,
+   `secured-renovacy`), AND it doesn't correspond to a `.bot`
+   file the explorer surfaced — strip to `""` and add label
+   `needs-manual-triage`. NEVER invent.
 2. Empty assignee is FINE. The issue lands without an assignee
    and the operator triages.
 

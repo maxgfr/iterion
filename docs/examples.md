@@ -17,7 +17,7 @@ proven, productized bots and one actively-developed workflow.
 | File | Description |
 |------|-------------|
 | [`bots/vibe_feature_dev.bot`](../examples/bots/vibe_feature_dev.bot) | Self-driven feature development bot: plan → implement → review → refine loop with judge gates |
-| [`bots/vibe_review_alternating.bot`](../examples/bots/vibe_review_alternating.bot) | Alternating Claude/GPT review-and-fix pattern with cross-family streak detection |
+| [`bots/whole_improve_loop.bot`](../examples/bots/whole_improve_loop.bot) | Alternating Claude/GPT review-and-fix pattern with cross-family streak detection |
 
 ## 🚧 In active development
 

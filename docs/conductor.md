@@ -232,7 +232,7 @@ workflow: workflows/triage.bot                  # default fallback
 
 assignee_workflows:
   vibe_feature_dev:        examples/bots/vibe_feature_dev.bot
-  vibe_review_alternating: examples/bots/vibe_review_alternating.bot
+  whole_improve_loop: examples/bots/whole_improve_loop.bot
   secured-renovacy:        examples/secured-renovacy/bot.bot
 ```
 

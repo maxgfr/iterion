@@ -9,13 +9,13 @@ import (
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
-// TestVibeReviewAlternating_HappyPath simulates the canonical "two
+// TestWholeImproveLoop_HappyPath simulates the canonical "two
 // consecutive cross-family approvals" scenario:
 //
 //	iter1: claude approves   → streak_check.stop = false (no previous)
 //	iter2: gpt approves      → streak_check.stop = true  → done
-func TestVibeReviewAlternating_HappyPath(t *testing.T) {
-	wf := compileFixture(t, "bots/vibe_review_alternating.bot")
+func TestWholeImproveLoop_HappyPath(t *testing.T) {
+	wf := compileFixture(t, "bots/whole_improve_loop.bot")
 	exec := newScenarioExecutor()
 
 	exec.on("reviewer_claude", func(_ map[string]interface{}) (map[string]interface{}, error) {
@@ -63,7 +63,7 @@ func TestVibeReviewAlternating_HappyPath(t *testing.T) {
 	}
 }
 
-// TestVibeReviewAlternating_FixThenApprove simulates a scenario where
+// TestWholeImproveLoop_FixThenApprove simulates a scenario where
 // the first reviewer rejects, fix runs, then two cross-family approvals
 // trigger the stop:
 //
@@ -76,8 +76,8 @@ func TestVibeReviewAlternating_HappyPath(t *testing.T) {
 // reviewer→streak_check edge which snapshots gpt's verdict. Then iter3
 // claude→streak_check sees previous=gpt's approval, current=claude's
 // approval, families differ → stop.
-func TestVibeReviewAlternating_FixThenApprove(t *testing.T) {
-	wf := compileFixture(t, "bots/vibe_review_alternating.bot")
+func TestWholeImproveLoop_FixThenApprove(t *testing.T) {
+	wf := compileFixture(t, "bots/whole_improve_loop.bot")
 	exec := newScenarioExecutor()
 
 	claudeCalls := 0
@@ -134,13 +134,13 @@ func TestVibeReviewAlternating_FixThenApprove(t *testing.T) {
 	}
 }
 
-// TestVibeReviewAlternating_LoopExhausted simulates 6 iterations where
+// TestWholeImproveLoop_LoopExhausted simulates 6 iterations where
 // the reviewers never agree across families (claude always approves,
 // gpt always rejects). The review_loop bound should kick in and the
 // run should fall through to the unconditional `streak_check -> done`
 // fallback.
-func TestVibeReviewAlternating_LoopExhausted(t *testing.T) {
-	wf := compileFixture(t, "bots/vibe_review_alternating.bot")
+func TestWholeImproveLoop_LoopExhausted(t *testing.T) {
+	wf := compileFixture(t, "bots/whole_improve_loop.bot")
 	exec := newScenarioExecutor()
 
 	exec.on("reviewer_claude", func(_ map[string]interface{}) (map[string]interface{}, error) {
@@ -177,13 +177,13 @@ func TestVibeReviewAlternating_LoopExhausted(t *testing.T) {
 	}
 }
 
-// TestVibeReviewAlternating_EventTrace establishes the event-coherence
+// TestWholeImproveLoop_EventTrace establishes the event-coherence
 // baseline: a happy-path run must persist a complete trace covering
 // node lifecycle, edge selection, and round-robin reviewer dispatch.
 // This is the regression net for any future refactor of the engine's
 // event emission — a missing event type surfaces here first.
-func TestVibeReviewAlternating_EventTrace(t *testing.T) {
-	wf := compileFixture(t, "bots/vibe_review_alternating.bot")
+func TestWholeImproveLoop_EventTrace(t *testing.T) {
+	wf := compileFixture(t, "bots/whole_improve_loop.bot")
 	exec := newScenarioExecutor()
 	exec.on("reviewer_claude", func(_ map[string]interface{}) (map[string]interface{}, error) {
 		return map[string]interface{}{
@@ -235,14 +235,14 @@ func TestVibeReviewAlternating_EventTrace(t *testing.T) {
 	}
 }
 
-// TestVibeReviewAlternating_RecoveryLoopExhausted forces the
+// TestWholeImproveLoop_RecoveryLoopExhausted forces the
 // recovery_loop to dominate by making each family approve its OWN
 // pushback but reject the OTHER family's work. This produces a fix
 // cycle on every iteration; the bounded `recovery_loop(20)` should
 // terminate the cascade and fall through to the unconditional
 // fix_X → done edge. Asserts the total fixer count is close to the cap.
-func TestVibeReviewAlternating_RecoveryLoopExhausted(t *testing.T) {
-	wf := compileFixture(t, "bots/vibe_review_alternating.bot")
+func TestWholeImproveLoop_RecoveryLoopExhausted(t *testing.T) {
+	wf := compileFixture(t, "bots/whole_improve_loop.bot")
 	exec := newScenarioExecutor()
 
 	// Both reviewers always reject with concrete blockers so each
@@ -295,15 +295,15 @@ func TestVibeReviewAlternating_RecoveryLoopExhausted(t *testing.T) {
 	}
 }
 
-// TestVibeReviewAlternating_SessionInheritStructural is a structural
+// TestWholeImproveLoop_SessionInheritStructural is a structural
 // assertion on the bot's IR rather than a runtime trace: it confirms
 // the fix_* agents are declared with `session: inherit` so the
 // runtime can splice them into the same Claude/GPT conversation the
 // reviewer was using. Drift on this property silently breaks
 // prompt-cache hits and reviewer-context continuity — the live runs
 // would still pass but cost more, so we pin it here.
-func TestVibeReviewAlternating_SessionInheritStructural(t *testing.T) {
-	wf := compileFixture(t, "bots/vibe_review_alternating.bot")
+func TestWholeImproveLoop_SessionInheritStructural(t *testing.T) {
+	wf := compileFixture(t, "bots/whole_improve_loop.bot")
 
 	for _, id := range []string{"fix_claude", "fix_gpt"} {
 		node, ok := wf.Nodes[id]

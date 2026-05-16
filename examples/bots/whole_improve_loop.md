@@ -1,8 +1,9 @@
-# vibe_review_alternating — companion notes
+# whole_improve_loop — companion notes
 
-Companion to the [`vibe_review_alternating.iter`](vibe_review_alternating.iter)
-workflow. This document is a **design journal**: what works in practice,
-what is still an open problem, and what should be improved.
+Companion to the [`whole_improve_loop.bot`](whole_improve_loop.bot)
+workflow (previously known as `vibe_review_alternating`). This document
+is a **design journal**: what works in practice, what is still an open
+problem, and what should be improved.
 
 ## Workflow intent
 

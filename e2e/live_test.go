@@ -67,7 +67,7 @@ func loadDotEnv(t *testing.T) {
 // file_edit, glob, grep, web_fetch, …) wired into a tool registry rooted at
 // workDir. Without the tool registration step, any workflow node that
 // declares `backend: claw` plus `tools: [bash, ...]` errors out at runtime
-// with "unknown tool 'bash'" — observed in vibe_review_alternating run3.
+// with "unknown tool 'bash'" — observed in whole_improve_loop run3.
 func newLiveExecutor(t *testing.T, wf *ir.Workflow, s store.RunStore, runID, workDir string) *model.ClawExecutor {
 	t.Helper()
 	reg := model.NewRegistry()
@@ -3145,7 +3145,7 @@ func TestLive_VibeFeatureDev(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Live E2E — vibe_review_alternating.bot
+// Live E2E — whole_improve_loop.bot
 // ---------------------------------------------------------------------------
 
 // TestLive_VibeReviewAlternating runs the alternating review/fix loop
@@ -3165,9 +3165,9 @@ func TestLive_VibeReviewAlternating(t *testing.T) {
 	requireCLI(t, "claude")
 	requireEnv(t, "OPENAI_API_KEY")
 
-	wf := compileFixture(t, "bots/vibe_review_alternating.bot")
+	wf := compileFixture(t, "bots/whole_improve_loop.bot")
 
-	workspaceDir, err := os.MkdirTemp("", "iterion-vibe-review-alt-*")
+	workspaceDir, err := os.MkdirTemp("", "iterion-whole-improve-loop-*")
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
@@ -3210,7 +3210,7 @@ func Multiply(a, b int) int {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	runID := "live-vibe-review-alternating"
+	runID := "live-whole-improve-loop"
 
 	if err := mcp.PrepareWorkflow(wf, workspaceDir); err != nil {
 		t.Fatalf("mcp.PrepareWorkflow: %v", err)
@@ -3230,7 +3230,7 @@ func Multiply(a, b int) int {
 		"scope_notes":   "Review every .go file at the repository root for correctness, focus on logic bugs.",
 	}
 
-	t.Log("Starting vibe_review_alternating live run…")
+	t.Log("Starting whole_improve_loop live run…")
 	start := time.Now()
 	runErr := eng.Run(ctx, runID, inputs)
 	elapsed := time.Since(start)
@@ -3567,7 +3567,7 @@ func TestLive_VibeReviewAlternating_Real(t *testing.T) {
 	requireCLI(t, "claude")
 	requireEnv(t, "OPENAI_API_KEY")
 
-	wf := compileFixture(t, "bots/vibe_review_alternating.bot")
+	wf := compileFixture(t, "bots/whole_improve_loop.bot")
 	workspaceDir := seedFromFixture(t, "review-pr-mix")
 
 	storeDir := resolveLiveStoreDir(t, workspaceDir)
@@ -3575,7 +3575,7 @@ func TestLive_VibeReviewAlternating_Real(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	runID := uniqueRunID("live-vibe-review-alternating-real")
+	runID := uniqueRunID("live-whole-improve-loop-real")
 
 	if err := mcp.PrepareWorkflow(wf, workspaceDir); err != nil {
 		t.Fatalf("mcp.PrepareWorkflow: %v", err)
@@ -3598,7 +3598,7 @@ func TestLive_VibeReviewAlternating_Real(t *testing.T) {
 	}
 
 	commitsBefore := workspaceCommitCount(t, workspaceDir)
-	t.Log("Starting vibe_review_alternating (real fixture) live run…")
+	t.Log("Starting whole_improve_loop (real fixture) live run…")
 	start := time.Now()
 	runErr := eng.Run(ctx, runID, inputs)
 	t.Logf("Run finished in %s", time.Since(start).Round(time.Second))

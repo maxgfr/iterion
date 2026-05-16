@@ -488,7 +488,7 @@ func NewClawExecutor(registry *Registry, wf *ir.Workflow, opts ...ClawExecutorOp
 	// when the var is not overridden via CLI --var or resume inputs.
 	// Without this, an unoverridden var with a default rendered as the
 	// literal "{{vars.X}}" string in the LLM prompt — a silent prompt
-	// corruption observed in vibe_review_alternating where scope_notes
+	// corruption observed in whole_improve_loop where scope_notes
 	// (default "") leaked the placeholder into every reviewer call.
 	var seed map[string]interface{}
 	if len(wf.Vars) > 0 {

@@ -1,18 +1,23 @@
 ## ─────────────────────────────────────────────────────────────────
-## whole_improve_loop
+## branch_improve_loop
 ##
-## Whole-codebase improvement loop. Alternating Claude / GPT code
-## review with deterministic "two consecutive positive verdicts"
-## stop condition. When a verdict is negative, apply fix-all in a
-## fresh same-family session before retrying. Edits are left in the
-## working tree — no auto-commit (use branch_improve_loop.bot for
-## the branch-scoped, commit-on-convergence variant).
+## Branch-scoped improvement loop. Alternating Claude / GPT code
+## review of the diff between `base_ref` (default: main) and HEAD,
+## with deterministic "two consecutive positive verdicts" stop
+## condition. When a verdict is negative, apply fix-all in a fresh
+## same-family session before retrying. On convergence, a structured
+## `prepare_commit` agent picks the exact file set and writes a
+## semantic commit via the `commit_changes` tool.
 ##
-## Improvement axis: defaults to the full production-ready grid
+## Sibling bot for whole-codebase scope (no commit, axis overridable):
+## see `whole_improve_loop.bot`.
+##
+## Improvement axis: locked to the full production-ready grid
 ## (security, robustness, data, concurrency, observability,
-## performance, boundaries). Pass --var improvement_prompt="..."
-## to override and focus the review/fix loop on a single axis
-## (e.g. observability, security, perf).
+## performance, boundaries). The branch scope already constrains
+## the surface, so no per-run axis override is exposed — operators
+## who want a single-axis pass on a branch can edit the prompts
+## directly in a fork.
 ##
 ##   Loop 1: claude_code + opus 4.7
 ##   Loop 2: claw + gpt-5.5
@@ -48,50 +53,43 @@
 vars:
   workspace_dir: string = "${PROJECT_DIR}"
   scope_notes: string = ""
-  ## Optional override of the improvement axis. Empty (default) means
-  ## "audit against the full production-ready grid defined in the
-  ## review_system prompt below". When non-empty, the value REPLACES
-  ## the default grid as the reviewer's and fixer's focus — only
-  ## blockers that fall under this axis are reported / fixed, other
-  ## findings are demoted to informational notes in scanned_areas.
-  ## Example: --var improvement_prompt="Focus exclusively on
-  ## observability: structured logs, traces, metrics, lost error
-  ## signals."
-  improvement_prompt: string = ""
+  ## Branch comparison base. The reviewers and fixers operate on the
+  ## diff `git diff {{vars.base_ref}}...HEAD` — meaning the changes
+  ## introduced by the current branch on top of `base_ref`. Default
+  ## "main" covers the GitHub/GitLab/Forgejo conventions; pass
+  ## `--var base_ref=develop` (or any local ref) when reviewing
+  ## against a different integration branch.
+  base_ref: string = "main"
 
 prompt review_system:
   Tu es un reviewer de code TRES exigeant et methodique
-  en charge d'une revue PRODUCTION-READY GLOBALE — pas
-  une revue de diff, pas une revue de "ce qui a change
-  recemment", mais une revue complete du code en
-  exploitation reelle.
+  en charge d'une revue PRODUCTION-READY de la BRANCHE
+  par rapport a une base. Tu reviews les changements
+  introduits par la branche courante par-dessus la base
+  (`base_ref`), pas le code pre-existant que la branche
+  n'a pas touche.
 
   PERIMETRE DE LA REVUE (CRUCIAL) :
-  1. Tu reviews TOUT le code dans le workspace, comme un
-     SRE qui prend en charge le service. Le hash HEAD du
-     git n'a aucun privilege — un bug introduit il y a
-     six mois compte autant qu'un bug du dernier commit.
-  2. NE TE LIMITE PAS aux derniers commits, au diff, ou
-     aux fichiers que tu as touches lors d'iterations
-     precedentes. `git log` peut servir d'orientation
-     mais JAMAIS de perimetre.
+  1. Enumere le footprint de la branche via
+     `git diff {{vars.base_ref}}...HEAD --name-only`
+     (note le `...` triple-dot : on veut bien la diff
+     "tout ce qui a change sur la branche depuis la
+     base", pas le diff symetrique). C'est ton scope.
+  2. Lis le code environnant (package hote, callers,
+     conventions) UNIQUEMENT pour juger comment les
+     changements de la branche s'integrent. NE FLAGUE
+     PAS de blockers sur du code pre-existant que la
+     branche ne touche pas, meme si tu y vois des
+     problemes : ces observations vont dans
+     `scanned_areas` comme notes informationnelles, pas
+     dans `blockers`. La source de verite du scope est
+     la diff `base_ref...HEAD`.
+  3. Tu peux consulter `git log {{vars.base_ref}}..HEAD`
+     pour comprendre l'intention de la branche, mais ce
+     n'est pas une contrainte de perimetre — la diff
+     est.
 
-  AXE D'AMELIORATION (override optionnel) :
-  L'utilisateur peut t'indiquer un axe d'amelioration
-  cible dans son prompt user (champ `improvement_prompt`).
-  - Si cet axe est VIDE : applique la grille
-    production-ready complete ci-dessous par defaut
-    (comportement historique).
-  - Si cet axe est NON-VIDE : focus EXCLUSIVEMENT sur cet
-    axe. La grille production-ready ci-dessous devient
-    secondaire — tu ne flagues comme `blockers` QUE les
-    problemes qui relevent de l'axe demande. Tu peux
-    toujours mentionner d'autres problemes observes dans
-    `scanned_areas` comme notes informationnelles, mais
-    ne les comptabilise PAS comme blockers sauf si l'axe
-    les couvre explicitement.
-
-  3. Couvre les axes production-ready (grille par defaut) :
+  4. Couvre les axes production-ready (grille complete) :
        - Securite : auth, validation des entrees, fuites
          de secrets, injection (shell/SQL/template),
          path traversal, deserialisation non sure.
@@ -113,30 +111,31 @@ prompt review_system:
        - Boundaries : reprise apres crash/panic,
          resilience aux entrees corrompues, comportement
          sur saturation.
-  4. ITERATIONS — usage concret de l'historique :
-     - Sur la premiere iteration, choisis 3-5 surfaces
-       et fouille a fond.
-     - Sur les iterations suivantes, choisis des
-       surfaces NON COUVERTES par les iterations
-       precedentes (utilise `previous_scanned_areas` en
-       input). Les surfaces deja examinees sont, par
-       defaut, considerees vetees.
-     - Tu peux re-examiner une surface deja couverte
-       UNIQUEMENT si tu as une nouvelle hypothese
-       concrete a tester (preuve specifique d'un bug
-       qui aurait ete rate).
-     - Renseigne `scanned_areas` avec les paquets,
-       fichiers, ou domaines que tu as effectivement
+  5. ITERATIONS — usage concret de l'historique :
+     - Sur la premiere iteration, audite l'ensemble du
+       footprint de la branche sur 3-5 axes parmi la
+       grille ci-dessus.
+     - Sur les iterations suivantes, choisis des AXES
+       NON COUVERTS par les iterations precedentes
+       (utilise `previous_scanned_areas` en input). Les
+       combinaisons (axe, fichier branche) deja
+       examinees sont, par defaut, considerees vetees.
+     - Tu peux re-examiner une (axe, fichier) deja
+       couverte UNIQUEMENT si tu as une nouvelle
+       hypothese concrete a tester (preuve specifique
+       d'un bug qui aurait ete rate, ou un fix recent
+       a verifier).
+     - Renseigne `scanned_areas` avec les (axe,
+       fichier-de-la-branche) que tu as effectivement
        audites cette iteration. Sois precis et concis.
-  5. Le PRINCIPE D'ELARGISSEMENT s'applique : si tu n'as
-     trouve aucun blocker apres avoir epuise les
-     surfaces evidentes, ELARGIS — passe aux surfaces
-     subtiles (concurrence, recovery, observabilite,
-     entrees corrompues, edge cases). Ne donne pas
-     `approved=true` simplement parce que la zone que tu
-     as regardee est propre. Approved=true exige que la
-     COUVERTURE CUMULATIVE entre les iterations soit
-     suffisante.
+  6. PRINCIPE D'EXHAUSTIVITE : approved=true exige que
+     tous les axes pertinents de la grille aient ete
+     verifies sur le footprint de la branche. Ne donne
+     pas `approved=true` simplement parce que la
+     premiere iteration n'a rien trouve. Approved=true
+     exige que la COUVERTURE CUMULATIVE des axes entre
+     les iterations soit suffisante par rapport au
+     scope de la branche.
 
   ADR TRACEABILITY (apply to decisions made by the fixer
   across recent iterations of this run):
@@ -207,11 +206,10 @@ prompt review_system:
   sur.
 
 prompt review_user_claude:
-  Review le code dans {{vars.workspace_dir}}.
-
-  Axe d'amelioration cible (vide = grille production-ready
-  complete par defaut) :
-  {{vars.improvement_prompt}}
+  Review les changements de la branche courante dans
+  {{vars.workspace_dir}}, par rapport a la base
+  `{{vars.base_ref}}`. Footprint a enumerer via
+  `git diff {{vars.base_ref}}...HEAD --name-only`.
 
   Notes de portee :
   {{vars.scope_notes}}
@@ -238,9 +236,10 @@ prompt review_user_claude:
 
   Produis un verdict structure :
     - approved: true UNIQUEMENT si la couverture
-      cumulative entre les iterations est suffisante
-      ET aucun blocker n'a ete trouve — pas si tu n'as
-      regarde qu'une partie du code.
+      cumulative des axes sur le footprint de la
+      branche est suffisante ET aucun blocker (sur le
+      scope branche) n'a ete trouve — pas si tu n'as
+      audite qu'une partie des axes.
     - family: "claude" pour ce reviewer
     - blockers: liste des problemes vraiment bloquants
       (apres auto-critique — exclure les preferences)
@@ -254,11 +253,10 @@ prompt review_user_claude:
       Sera relaye au prochain reviewer.
 
 prompt review_user_gpt:
-  Review le code dans {{vars.workspace_dir}}.
-
-  Axe d'amelioration cible (vide = grille production-ready
-  complete par defaut) :
-  {{vars.improvement_prompt}}
+  Review les changements de la branche courante dans
+  {{vars.workspace_dir}}, par rapport a la base
+  `{{vars.base_ref}}`. Footprint a enumerer via
+  `git diff {{vars.base_ref}}...HEAD --name-only`.
 
   Notes de portee :
   {{vars.scope_notes}}
@@ -285,9 +283,10 @@ prompt review_user_gpt:
 
   Produis un verdict structure :
     - approved: true UNIQUEMENT si la couverture
-      cumulative entre les iterations est suffisante
-      ET aucun blocker n'a ete trouve — pas si tu n'as
-      regarde qu'une partie du code.
+      cumulative des axes sur le footprint de la
+      branche est suffisante ET aucun blocker (sur le
+      scope branche) n'a ete trouve — pas si tu n'as
+      audite qu'une partie des axes.
     - family: "gpt" pour ce reviewer
     - blockers: liste des problemes vraiment bloquants
       (apres auto-critique — exclure les preferences)
@@ -300,16 +299,21 @@ prompt review_user_gpt:
 prompt fix_system:
   Tu es un developpeur expert. Tu corriges les problemes
   bloquants signales par un reviewer en appliquant des
-  modifications concretes au code.
+  modifications concretes au code de la BRANCHE.
 
-  AXE D'AMELIORATION : si l'utilisateur a defini un axe
-  d'amelioration custom dans son prompt user, applique
-  des fixes UNIQUEMENT sur les problemes qui relevent de
-  cet axe. Ne refactore PAS sur d'autres dimensions (ex.
-  ne touche pas la concurrence si l'axe est
-  "observabilite"), meme si tu remarques des problemes
-  — ils seront pris en charge par un autre run cible sur
-  cet autre axe.
+  SCOPE :
+  1. Applique tes fixes sur les fichiers de la diff
+     `git diff {{vars.base_ref}}...HEAD --name-only`
+     (footprint de la branche). Tu peux modifier ces
+     fichiers librement.
+  2. Si un fix necessite de toucher un fichier HORS du
+     footprint branche (parce que le bug deborde), tu
+     peux le faire — mais documente-le clairement dans
+     ton `summary` pour que prepare_commit puisse decider
+     d'inclure ou non ce fichier dans le commit.
+  3. NE REFACTORE PAS du code pre-existant juste parce
+     que tu y vois des problemes : reste dans le scope
+     des blockers signales.
 
   Tu peux REFUSER un item de la liste de blockers si tu
   juges qu'il n'est pas reellement bloquant pour la
@@ -364,11 +368,9 @@ prompt fix_system:
 
 prompt fix_user:
   Pour le code dans {{vars.workspace_dir}}, examine cette
-  liste de blockers et applique des fixes concrets.
-
-  Axe d'amelioration cible (vide = production-ready par
-  defaut, fixe tout ce qui est bloquant) :
-  {{vars.improvement_prompt}}
+  liste de blockers et applique des fixes concrets. Reste
+  prioritairement dans le footprint de la branche
+  (`git diff {{vars.base_ref}}...HEAD --name-only`).
 
   Blockers signales :
   {{input.blockers}}
@@ -390,6 +392,65 @@ prompt fix_user:
     - summary: resume des fixes appliques
     - pushback: items refuses (vide si tous fixes)
     - pushback_justification: explication du pushback
+
+## ─── Prompts : Commit ───────────────────────────────────────────
+
+prompt prepare_commit_system:
+  Your job in this session is to pick the EXACT set of files
+  that should be committed to capture the improvements applied
+  during this run, and produce a semantic commit message for
+  them. You do NOT run `git commit` yourself — a deterministic
+  shell tool downstream stages your file list and applies your
+  message.
+
+  Procedure (follow exactly, in order):
+    1. Run `git status` and `git diff HEAD` (read-only) to
+       enumerate all files in the working tree.
+    2. Cross-reference with the branch footprint
+       `git diff {{vars.base_ref}}...HEAD --name-only`: the
+       core scope is files the branch touched. Files modified
+       by this run that are inside the branch footprint
+       ALWAYS belong in the commit.
+    3. Files modified by this run OUTSIDE the branch
+       footprint (touched only by the fixer to address a
+       blocker that deborded) MAY also be staged when the
+       fix is clearly part of the same logical improvement.
+       Read your conversation history to decide.
+    4. EXCLUDE any file that does NOT belong to the
+       improvements applied, even if it is dirty in the
+       working tree:
+         - pre-existing user WIP unrelated to the fix
+         - build artifacts not produced for the fix
+           (binaries, coverage reports, lockfiles created
+           by an agent's bash but not part of the
+           improvement)
+         - editor / IDE scratch files
+         - LLM scratch files (`notes.md`, `plan.txt`, etc.)
+       When in doubt, EXCLUDE. Under-staging is recoverable
+       (operator commits the missing file in a follow-up);
+       over-staging pollutes the commit and is much harder
+       to undo.
+    5. Build the structured output:
+         - type, scope, subject, full_message: the semantic
+           parts of the commit message (Conventional Commits)
+         - files: the exact list of repo-relative paths to
+           stage
+         - committed: false (you do NOT commit yourself; the
+           downstream tool will set the actual commit result
+           on its own output).
+
+  Subject rules: imperative mood, present tense, ≤ 72 chars,
+  no trailing period, single line. The `scope` is typically
+  the most-touched package or area.
+
+prompt prepare_commit_user:
+  Pick the files and produce the semantic commit name for
+  the improvements applied during this branch_improve_loop
+  run. Do not run `git commit` yourself — only output the
+  structured object.
+
+  Workspace: {{vars.workspace_dir}}
+  Base ref:  {{vars.base_ref}}
 
 ## ─── Schemas ────────────────────────────────────────────────────
 
@@ -462,6 +523,27 @@ schema fix_output:
   summary: string
   pushback: string[]
   pushback_justification: string
+
+## Commit-phase schemas. Mirrors vibe_feature_dev: prepare_commit
+## emits the structured intent (semantic message + file list),
+## commit_changes deterministically applies it via `git add` +
+## `git commit`.
+schema commit_output:
+  type: string [enum: "feat", "fix", "refactor", "test", "docs", "chore"]
+  scope: string
+  subject: string
+  full_message: string
+  files: string[]
+  committed: bool
+
+schema commit_tool_input:
+  full_message: string
+  files: string[]
+  workspace_dir: string
+
+schema commit_result:
+  success: bool
+  output: string
 
 ## ─── Nodes ──────────────────────────────────────────────────────
 
@@ -573,10 +655,48 @@ agent fix_gpt:
   tool_max_steps: 30
   interaction: human
 
+## ─── Nodes : Commit ─────────────────────────────────────────────
+
+## prepare_commit runs in a fresh session — it does NOT inherit
+## from any reviewer/fixer session because no single session has
+## the full multi-iteration context of N fixes across both
+## families. Instead, prepare_commit reads `git status` +
+## `git diff HEAD` + the branch footprint to determine the file
+## set from scratch. readonly: true protects against accidental
+## mutations during the commit-planning phase.
+agent prepare_commit:
+  backend: "claude_code"
+  model: "claude-opus-4-7"
+  reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-max}"
+  output: commit_output
+  system: prepare_commit_system
+  user: prepare_commit_user
+  session: fresh
+  readonly: true
+
+## commit_changes is a deterministic shell tool — no LLM. It
+## stages exactly the file list produced by prepare_commit and
+## commits with the semantic message. The guard
+## `git diff --cached --quiet || git commit` skips the commit
+## if `git add` ended up staging nothing.
+tool commit_changes:
+  command: "git -C {{input.workspace_dir}} add -- {{input.files}} && (git -C {{input.workspace_dir}} diff --cached --quiet || git -C {{input.workspace_dir}} commit -m {{input.full_message}})"
+  input: commit_tool_input
+  output: commit_result
+
 ## ─── Workflow ───────────────────────────────────────────────────
 
-workflow whole_improve_loop:
+workflow branch_improve_loop:
   entry: alt
+
+  ## Run in an isolated git worktree at .iterion/worktrees/<run-id>/.
+  ## The bot mutates code AND commits; the worktree + finalize FF
+  ## guarantees: (a) the operator's main checkout is untouched
+  ## during the run, (b) on convergence the commits land on a
+  ## persistent branch `iterion/run/<friendly-name>` AND
+  ## fast-forward the operator's currently-checked-out branch
+  ## (best-effort, skipped with a warning on conflict).
+  worktree: auto
 
   ## Container isolation. Reviewers run `git diff`, `go test`,
   ## linters, smoke-runs, etc. — all of which we'd rather not expose
@@ -643,7 +763,17 @@ workflow whole_improve_loop:
   }
 
   ## Stop when streak detected (cross-family double approval).
-  streak_check -> done when stop
+  ## Route to prepare_commit instead of done — the commit phase
+  ## materialises the improvements into a semantic commit.
+  streak_check -> prepare_commit when stop
+
+  prepare_commit -> commit_changes with {
+    full_message: "{{outputs.prepare_commit.full_message}}",
+    files: "{{outputs.prepare_commit.files}}",
+    workspace_dir: "{{vars.workspace_dir}}"
+  }
+
+  commit_changes -> done
 
   ## Otherwise approved (no streak yet, OR low-confidence rejection
   ## treated as soft-approved, OR rejection without concrete blockers
@@ -672,7 +802,7 @@ workflow whole_improve_loop:
   ## "cumulative coverage is partial at iteration 0/15") with no
   ## production-blocking issue identified. In that case the fixer
   ## has nothing to fix — burning a session round-trip and tokens
-  ## (~$0.15/$0.43 observed in vibe_review run_1777560043656) only
+  ## (~$0.15/$0.43 observed in whole_improve_loop run_1777560043656) only
   ## to push back. The unconditional alt fallthrough below picks
   ## those up so alternation continues without a wasted fix call.
   ##
