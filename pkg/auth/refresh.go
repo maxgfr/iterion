@@ -37,6 +37,14 @@ type SessionStore interface {
 	CreateSession(ctx context.Context, s Session) error
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
 	RevokeSession(ctx context.Context, id string, at time.Time) error
+	// RevokeSessionIfNotRevoked is a compare-and-set on revoked_at:
+	// the write only lands when the field is currently absent.
+	// Returns revoked=true when this call performed the revocation,
+	// false when the session had already been revoked by a concurrent
+	// caller. Used by Refresh to prevent a TOCTOU where two parallel
+	// refresh attempts both pass the "not revoked" check and both
+	// proceed to mint a fresh access token from the same refresh.
+	RevokeSessionIfNotRevoked(ctx context.Context, id string, at time.Time) (revoked bool, err error)
 	RevokeUserSessions(ctx context.Context, userID string, at time.Time) error
 	DeleteExpired(ctx context.Context, before time.Time) (int64, error)
 }
@@ -177,6 +185,22 @@ func (m *MemorySessionStore) RevokeSession(_ context.Context, id string, at time
 	return nil
 }
 
+func (m *MemorySessionStore) RevokeSessionIfNotRevoked(_ context.Context, id string, at time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.byID[id]
+	if !ok {
+		return false, ErrSessionNotFound
+	}
+	if s.RevokedAt != nil {
+		return false, nil
+	}
+	t := at
+	s.RevokedAt = &t
+	m.byID[id] = s
+	return true, nil
+}
+
 func (m *MemorySessionStore) RevokeUserSessions(_ context.Context, userID string, at time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -263,6 +287,17 @@ func (s *MongoSessionStore) RevokeSession(ctx context.Context, id string, at tim
 		return fmt.Errorf("auth: revoke session: %w", err)
 	}
 	return nil
+}
+
+func (s *MongoSessionStore) RevokeSessionIfNotRevoked(ctx context.Context, id string, at time.Time) (bool, error) {
+	res, err := s.coll.UpdateOne(ctx,
+		bson.M{"_id": id, "revoked_at": bson.M{"$exists": false}},
+		bson.M{"$set": bson.M{"revoked_at": at}},
+	)
+	if err != nil {
+		return false, fmt.Errorf("auth: revoke session if-not-revoked: %w", err)
+	}
+	return res.MatchedCount > 0, nil
 }
 
 func (s *MongoSessionStore) RevokeUserSessions(ctx context.Context, userID string, at time.Time) error {

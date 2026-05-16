@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/SocialGouv/iterion/pkg/identity"
+	iterlog "github.com/SocialGouv/iterion/pkg/log"
 )
 
 // Sentinel errors raised by Service. Handlers map them to HTTP
@@ -53,6 +54,10 @@ type Service struct {
 	signupMode SignupMode
 	now        func() time.Time
 	refreshTTL time.Duration
+	// logger, when non-nil, receives audit-grade events like
+	// "stored hash unparseable for user X" that we don't want to
+	// silently swallow into a generic ErrInvalidCredentials response.
+	logger *iterlog.Logger
 }
 
 // Config wires the Service.
@@ -62,6 +67,7 @@ type Config struct {
 	Signer     *JWTSigner
 	SignupMode SignupMode
 	RefreshTTL time.Duration
+	Logger     *iterlog.Logger
 }
 
 // NewService validates the config and returns a wired Service.
@@ -93,6 +99,7 @@ func NewService(cfg Config) (*Service, error) {
 		signupMode: cfg.SignupMode,
 		refreshTTL: cfg.RefreshTTL,
 		now:        time.Now,
+		logger:     cfg.Logger,
 	}, nil
 }
 
@@ -131,7 +138,19 @@ func (s *Service) Login(ctx context.Context, email, password, userAgent, ip stri
 		return LoginResult{}, ErrInvalidCredentials
 	}
 	ok, err := VerifyPassword(password, u.PasswordHash)
-	if err != nil || !ok {
+	if err != nil {
+		// A non-nil error from VerifyPassword is structural (corrupt
+		// stored hash, unknown algorithm prefix) — distinct from a
+		// plain mismatch. Swallowing it as ErrInvalidCredentials
+		// leaves the account permanently un-loginable with no signal
+		// for the operator. Log the failure under the user id so it
+		// surfaces in audit aggregation without leaking the hash.
+		if s.logger != nil {
+			s.logger.Error("auth: stored password hash for user %s is unparseable: %v", u.ID, err)
+		}
+		return LoginResult{}, ErrInvalidCredentials
+	}
+	if !ok {
 		return LoginResult{}, ErrInvalidCredentials
 	}
 
@@ -224,9 +243,20 @@ func (s *Service) Refresh(ctx context.Context, presented, userAgent, ip string) 
 	if u.Status == identity.UserStatusDisabled {
 		return LoginResult{}, ErrAccountDisabled
 	}
-	// Rotate.
-	if err := s.sessions.RevokeSession(ctx, prev.ID, now); err != nil {
+	// Rotate. CAS-revoke prevents two parallel refresh calls from
+	// both passing the "not yet revoked" check above and both
+	// proceeding to issueLogin — without it the same refresh token
+	// could mint two access tokens that outlive each other.
+	revoked, err := s.sessions.RevokeSessionIfNotRevoked(ctx, prev.ID, now)
+	if err != nil {
 		return LoginResult{}, err
+	}
+	if !revoked {
+		// A concurrent Refresh already rotated this session. Treat as
+		// reuse: revoke every session of the user and surface the
+		// stronger error so the SPA forces a clean re-login.
+		_ = s.sessions.RevokeUserSessions(ctx, prev.UserID, now)
+		return LoginResult{}, ErrSessionRevoked
 	}
 	return s.issueLogin(ctx, u, userAgent, ip)
 }
