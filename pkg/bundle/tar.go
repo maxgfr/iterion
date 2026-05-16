@@ -128,6 +128,13 @@ func guardEntry(hdr *tar.Header) error {
 // root. Defends against symlink-free traversal: a tar entry named
 // `./foo/../../etc/passwd` would clean to `../etc/passwd` and escape
 // even without symlinks.
+//
+// Also walks every existing component of the resolved path and
+// rejects the entry if any intermediate component is a symlink that
+// resolves outside root. Without that check a pre-existing
+// `dest/foo → /etc` lets a tar entry `foo/bar.txt` land outside root
+// even though the lexical join stays inside (the OS follows the
+// symlink at open time).
 func safeJoin(root, rel string) (string, error) {
 	joined := filepath.Join(root, filepath.FromSlash(rel))
 	abs, err := filepath.Abs(joined)
@@ -137,7 +144,49 @@ func safeJoin(root, rel string) (string, error) {
 	if abs != root && !strings.HasPrefix(abs, root+string(os.PathSeparator)) {
 		return "", fmt.Errorf("bundle: entry escapes bundle root: %s", rel)
 	}
+	if err := assertNoEscapingSymlink(root, abs); err != nil {
+		return "", err
+	}
 	return abs, nil
+}
+
+// assertNoEscapingSymlink walks every existing prefix of abs (root..abs)
+// and refuses the path if a component is a symlink whose resolved
+// target escapes root. New (not-yet-created) suffix components are
+// ignored — they cannot be symlinks since they don't exist.
+func assertNoEscapingSymlink(root, abs string) error {
+	if !strings.HasPrefix(abs, root) {
+		return fmt.Errorf("bundle: internal: abs %s outside root %s", abs, root)
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return fmt.Errorf("bundle: rel %s: %w", abs, err)
+	}
+	cur := root
+	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+		if part == "" || part == "." {
+			continue
+		}
+		cur = filepath.Join(cur, part)
+		info, err := os.Lstat(cur)
+		if os.IsNotExist(err) {
+			return nil // remaining suffix doesn't exist yet
+		}
+		if err != nil {
+			return fmt.Errorf("bundle: stat %s: %w", cur, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		resolved, err := filepath.EvalSymlinks(cur)
+		if err != nil {
+			return fmt.Errorf("bundle: eval symlink %s: %w", cur, err)
+		}
+		if resolved != root && !strings.HasPrefix(resolved, root+string(os.PathSeparator)) {
+			return fmt.Errorf("bundle: refusing entry: component %s is a symlink escaping bundle root", cur)
+		}
+	}
+	return nil
 }
 
 // hashingReader wraps a Reader and feeds every byte read into the given
