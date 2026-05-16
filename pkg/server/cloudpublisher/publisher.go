@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -76,6 +77,12 @@ type Publisher struct {
 	runSecrets   secrets.RunSecretsStore
 	sealer       secrets.Sealer
 	oauthForfait secrets.OAuthStore
+
+	// detached tracks fire-and-forget goroutines (e.g. MarkUsed
+	// observability writes) so Drain can wait for them on shutdown
+	// rather than letting orphan Mongo writes pile up against a
+	// pod that's already past the SIGTERM mark.
+	detached sync.WaitGroup
 }
 
 // New builds a Publisher.
@@ -128,7 +135,15 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 	if p.runSecrets == nil || p.sealer == nil {
 		return "", nil
 	}
+	// Defence in depth: every caller (SubmitLaunch, SubmitResume)
+	// already derives tenantID from either auth.FromContext or the
+	// prior run document, but a future caller that forgets to thread
+	// the identity must not silently produce a bundle keyed under
+	// the empty tenant — that would let any team's runner unseal it.
 	if tenantID == "" {
+		if runID != "" && p.logger != nil {
+			p.logger.Warn("cloudpublisher: refusing to seal credentials for run %s without a tenant_id", runID)
+		}
 		return "", nil
 	}
 	bundle := secrets.RunBundle{
@@ -156,7 +171,9 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 		// timeout so a slow Mongo write doesn't block the NATS
 		// publish.
 		if len(usedIDs) > 0 {
+			p.detached.Add(1)
 			go func(ids []string, t time.Time) {
+				defer p.detached.Done()
 				bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				for _, id := range ids {
@@ -310,8 +327,35 @@ func (p *Publisher) CancelRun(ctx context.Context, runID string) error {
 	case store.RunStatusFinished, store.RunStatusFailed, store.RunStatusCancelled:
 		return nil // already terminal
 	}
-	if err := p.store.UpdateRunStatus(ctx, runID, store.RunStatusCancelled, "cancelled by user"); err != nil {
+	// CAS on the cancellable statuses. A SubmitResume that races this
+	// call can flip queued → running between our LoadRun and the
+	// UpdateRunStatus below; without the conditional update we'd
+	// silently overwrite the in-flight resume back to cancelled with
+	// no visible warning. The expectedFrom set lists every status we
+	// consider cancellable here.
+	cancellable := []store.RunStatus{
+		store.RunStatusQueued,
+		store.RunStatusRunning,
+		store.RunStatusPausedWaitingHuman,
+		store.RunStatusFailedResumable,
+	}
+	changed, err := p.store.UpdateRunStatusIf(ctx, runID, store.RunStatusCancelled, "cancelled by user", cancellable)
+	if err != nil {
 		return fmt.Errorf("cloudpublisher: flip status: %w", err)
+	}
+	if !changed {
+		// Status raced from under us — re-read and decide if this is
+		// an actual no-op (already terminal) or a transient state we
+		// should surface for the operator to retry.
+		r2, _ := p.store.LoadRun(ctx, runID)
+		if r2 != nil {
+			switch r2.Status {
+			case store.RunStatusFinished, store.RunStatusFailed, store.RunStatusCancelled:
+				return nil
+			}
+			return fmt.Errorf("cloudpublisher: cancel raced (status now %s) — retry", r2.Status)
+		}
+		return nil
 	}
 	if err := p.nats.CancelRun(runID); err != nil {
 		p.logger.Warn("cloudpublisher: nats cancel %s: %v", runID, err)
@@ -454,6 +498,27 @@ func marshalIRFromSpec(path, source string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("cloudpublisher: marshal IR: %w", err)
 	}
 	return body, nil
+}
+
+// Drain waits for any in-flight fire-and-forget goroutines (MarkUsed
+// writes, etc.) to complete or the supplied ctx to fire — whichever
+// comes first. Returns the ctx error on timeout so the server's
+// graceful-shutdown path can log how many writes were lost.
+//
+// Safe to call multiple times; concurrent calls all observe the same
+// WaitGroup.
+func (p *Publisher) Drain(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		p.detached.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // varsAsAny upgrades a string-keyed map to interface{} so the wire

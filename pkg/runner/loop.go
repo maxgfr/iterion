@@ -295,7 +295,19 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 	// handler is responsible for flipping the Mongo doc; the
 	// JetStream message becomes a no-op signal.
 	preRun, preErr := r.cfg.Store.LoadRun(runCtx, msg.RunID)
-	if preErr == nil && preRun != nil && preRun.Status == store.RunStatusCancelled {
+	// A message whose run document we can't load is unsafe to execute:
+	// either the publisher's SaveRun never landed (orphan publish), the
+	// run was deleted out from under us, or the message is forged /
+	// replayed against a runID that never belonged to this control plane.
+	// In every case, terming the delivery is the conservative call —
+	// re-delivery would just hit the same NotFound on the next runner.
+	if preErr != nil || preRun == nil {
+		logger.Error("runner: run %s not found in store (err=%v) — terming", msg.RunID, preErr)
+		finalStatus = "store_load_failed"
+		_ = delivery.Term()
+		return
+	}
+	if preRun.Status == store.RunStatusCancelled {
 		logger.Info("runner: run %s already cancelled — skipping", msg.RunID)
 		finalStatus = "cancelled"
 		_ = delivery.Ack()
@@ -305,8 +317,12 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 	// A mismatch implies either a corrupted publish (publisher
 	// stamped the wrong tenant) or a malicious / replayed message.
 	// Either way the run is unsafe to execute under either tenant's
-	// scope; term the delivery so it doesn't redeliver.
-	if preErr == nil && preRun != nil && preRun.TenantID != msg.TenantID {
+	// scope; term the delivery so it doesn't redeliver. The previous
+	// condition (preErr == nil && preRun != nil && …) silently passed
+	// through when preErr was non-nil — which let a forged message
+	// targeting a non-existent run skip the tenant check entirely.
+	// The early term above closes that path.
+	if preRun.TenantID != msg.TenantID {
 		logger.Error("runner: tenant mismatch for run %s (msg=%q stored=%q) — terming", msg.RunID, msg.TenantID, preRun.TenantID)
 		finalStatus = "tenant_mismatch"
 		_ = delivery.Term()

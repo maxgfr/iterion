@@ -49,6 +49,13 @@ type RunStore interface {
 
 	// Status & checkpoint
 	UpdateRunStatus(ctx context.Context, id string, status RunStatus, runErr string) error
+	// UpdateRunStatusIf is a compare-and-set on the status field: the
+	// write only lands when the current status is in expectedFrom.
+	// Returns changed=true when the write applied, false when the
+	// status had drifted (different goroutine racing — e.g. a Cancel
+	// firing concurrently with a Resume republish). Used by the
+	// cloud publisher to avoid stomping on raced state transitions.
+	UpdateRunStatusIf(ctx context.Context, id string, status RunStatus, runErr string, expectedFrom []RunStatus) (changed bool, err error)
 	SaveCheckpoint(ctx context.Context, id string, cp *Checkpoint) error
 	PauseRun(ctx context.Context, id string, cp *Checkpoint) error
 	FailRunResumable(ctx context.Context, id string, cp *Checkpoint, runErr string) error

@@ -344,6 +344,49 @@ func (s *FilesystemRunStore) UpdateRunStatus(ctx context.Context, id string, sta
 	return s.writeRun(r)
 }
 
+// UpdateRunStatusIf is a compare-and-set on the status field: the
+// write only lands when the current status is in expectedFrom. Used
+// by callers that need to avoid racing with a concurrent transition
+// (e.g. a Cancel firing while a Resume is republishing). Returns
+// changed=true on a successful write, false if the status had
+// drifted since the caller's last read.
+func (s *FilesystemRunStore) UpdateRunStatusIf(ctx context.Context, id string, status RunStatus, runErr string, expectedFrom []RunStatus) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	r, err := s.LoadRun(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	matched := false
+	for _, want := range expectedFrom {
+		if r.Status == want {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return false, nil
+	}
+	r.Status = status
+	r.UpdatedAt = time.Now().UTC()
+	r.Error = runErr
+	switch status {
+	case RunStatusFinished, RunStatusFailed, RunStatusFailedResumable, RunStatusCancelled:
+		t := r.UpdatedAt
+		r.FinishedAt = &t
+	case RunStatusRunning, RunStatusPausedWaitingHuman:
+		r.FinishedAt = nil
+	}
+	if status == RunStatusRunning || status == RunStatusFinished || status == RunStatusFailed {
+		r.Checkpoint = nil
+	}
+	if err := s.writeRun(r); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // SaveCheckpoint persists a checkpoint on a paused run.
 // Protected by mu to prevent concurrent read-modify-write races.
 func (s *FilesystemRunStore) SaveCheckpoint(ctx context.Context, id string, cp *Checkpoint) error {

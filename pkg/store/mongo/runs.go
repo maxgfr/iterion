@@ -140,6 +140,42 @@ func (s *Store) UpdateRunStatus(ctx context.Context, id string, status store.Run
 	return nil
 }
 
+// UpdateRunStatusIf is a compare-and-set on the status field
+// implemented as a conditional UpdateOne — the write only lands when
+// the persisted status matches one of expectedFrom. Returns
+// changed=true on a successful write, false if the status had drifted
+// since the caller's last read (concurrent transition by another
+// publisher, runner, or operator).
+func (s *Store) UpdateRunStatusIf(ctx context.Context, id string, status store.RunStatus, runErr string, expectedFrom []store.RunStatus) (bool, error) {
+	now := time.Now().UTC()
+	set := bson.M{
+		"status":     status,
+		"updated_at": now,
+		"error":      runErr,
+	}
+	unset := bson.M{}
+	switch status {
+	case store.RunStatusFinished, store.RunStatusFailed, store.RunStatusFailedResumable, store.RunStatusCancelled:
+		set["finished_at"] = now
+	case store.RunStatusRunning:
+		set["error"] = ""
+		unset["finished_at"] = ""
+	}
+	update := bson.M{"$set": set, "$inc": bson.M{"version": 1}}
+	if len(unset) > 0 {
+		update["$unset"] = unset
+	}
+	filter := withTenantFilter(ctx, bson.M{"_id": id})
+	if len(expectedFrom) > 0 {
+		filter["status"] = bson.M{"$in": expectedFrom}
+	}
+	res, err := s.runs.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return false, fmt.Errorf("store/mongo: update status if %s: %w", id, err)
+	}
+	return res.MatchedCount > 0, nil
+}
+
 // SaveCheckpoint writes the checkpoint document and bumps CAS. Plan
 // §F T-33 layers an explicit version-conditional update on top; this
 // method is the simple "no contention" form used by the engine itself.
