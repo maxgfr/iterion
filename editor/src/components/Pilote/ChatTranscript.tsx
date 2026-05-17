@@ -41,15 +41,34 @@ export default function ChatTranscript({
   busyMessageId = null,
 }: Props) {
   const endRef = useRef<HTMLDivElement | null>(null);
-  // Auto-scroll to the latest message on every change. Cheap given
-  // the transcript stays under ~50 messages in practice (a whats-next
-  // session is bounded by approval_loop(10)).
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  // Track whether the user is scrolled near the bottom. We only
+  // auto-scroll on new messages when they are — otherwise reading older
+  // turns gets yanked down every time a banner update arrives, which
+  // is the bug F-TS-7 was about.
+  const atBottomRef = useRef(true);
+
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    // Treat "within 48px of the bottom" as still pinned — small enough
+    // that brief overshoot during smooth-scroll doesn't unpin, large
+    // enough that the user only has to nudge up once to escape.
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    atBottomRef.current = distanceFromBottom < 48;
+  };
+
   useEffect(() => {
+    if (!atBottomRef.current) return;
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+    <div
+      ref={scrollContainerRef}
+      onScroll={handleScroll}
+      className="flex-1 overflow-y-auto px-4 py-3 space-y-4"
+    >
       {messages.map((m) => (
         <MessageRow
           key={m.id}

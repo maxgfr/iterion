@@ -22,6 +22,13 @@ export const NO_EVENTS_SEQ = -1;
 // it needs them.
 const MAX_EVENTS = 5000;
 
+// inflightHistoryFetches keys runId → in-flight history fetch promise.
+// Module-level (not inside the store) so callers that arrive while a
+// fetch is in flight await the same promise instead of starting their
+// own, even when they slip past the optimistic `historyFetchedForRun`
+// marker due to React 18's concurrent rendering.
+const inflightHistoryFetches = new Map<string, Promise<void>>();
+
 // MAX_LOG_BYTES caps the in-memory log tail so a verbose run doesn't
 // bloat the React heap. Older bytes fall off the front; the start
 // offset advances accordingly. Matches the backend ring of 1 MiB so
@@ -398,22 +405,34 @@ export const useRunStore = create<RunStoreState>((set) => ({
     const state = useRunStore.getState();
     if (state.historyFetchedForRun === runId) return;
     if (state.runId !== null && state.runId !== runId) return;
-    // Mark optimistically so concurrent triggers (EventLog + Scrubber
-    // mounting in the same render pass) collapse to one fetch.
-    set({ historyFetchedForRun: runId });
-    try {
-      const fetched = await loadEvents(runId);
-      if (useRunStore.getState().runId !== runId) return;
-      // applyEventsBatch dedupes by seq, so any live events that
-      // landed concurrently via WS stay correctly ordered.
-      useRunStore.getState().applyEventsBatch(fetched);
-    } catch (err) {
-      // Allow a retry — reset the marker so a later trigger re-fetches.
-      if (useRunStore.getState().historyFetchedForRun === runId) {
-        set({ historyFetchedForRun: null });
-      }
-      throw err;
+    // Coalesce concurrent callers (EventLog + Scrubber mounting in the
+    // same render pass, or several mounts before `set()` lands) on a
+    // single fetch. The optimistic marker below also helps, but there
+    // is a micro-race between the getState() check above and the set()
+    // call — multiple callers can pass both before either has stored
+    // the marker, leading to duplicate `/events` GETs.
+    const inflight = inflightHistoryFetches.get(runId);
+    if (inflight) {
+      await inflight;
+      return;
     }
+    set({ historyFetchedForRun: runId });
+    const fetchPromise = (async () => {
+      try {
+        const fetched = await loadEvents(runId);
+        if (useRunStore.getState().runId !== runId) return;
+        useRunStore.getState().applyEventsBatch(fetched);
+      } catch (err) {
+        if (useRunStore.getState().historyFetchedForRun === runId) {
+          set({ historyFetchedForRun: null });
+        }
+        throw err;
+      } finally {
+        inflightHistoryFetches.delete(runId);
+      }
+    })();
+    inflightHistoryFetches.set(runId, fetchPromise);
+    await fetchPromise;
   },
 
   setRunStatus: (status) => {
