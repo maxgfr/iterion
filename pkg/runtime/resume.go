@@ -124,8 +124,15 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 		return err
 	}
 
-	// Store human answers as the output of the human node.
-	outputs := cp.Outputs
+	// Store human answers as the output of the human node. Deep-copy
+	// the checkpoint's outputs so subsequent rs.outputs writes do not
+	// retroactively mutate the persisted checkpoint object — sibling
+	// to the fan-out deep-copy guarantee in commit bb34f844. Initialize
+	// when the legacy/Mongo-omitted-shape produces a nil map.
+	outputs := copyOutputs(cp.Outputs)
+	if outputs == nil {
+		outputs = make(map[string]map[string]interface{})
+	}
 	outputs[humanNodeID] = answers
 
 	// Persist artifact if node has publish.
@@ -134,6 +141,9 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 		return fmt.Errorf("runtime: human node %q not found in workflow", humanNodeID)
 	}
 	artifactVersions := cp.ArtifactVersions
+	if artifactVersions == nil {
+		artifactVersions = make(map[string]int)
+	}
 	if pub := nodePublish(humanNode); pub != "" {
 		version := artifactVersions[humanNodeID]
 		artifact := &store.Artifact{
@@ -166,7 +176,13 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 	}
 
 	// Build runState before edge selection so failures are resumable.
+	// Init maps when the checkpoint deserialised with omitted fields
+	// (Mongo bson omitempty, legacy stores) — a nil map here would
+	// crash selectEdgeRS the first time it tries `rs.loopCounters[X]++`.
 	loopCounters := cp.LoopCounters
+	if loopCounters == nil {
+		loopCounters = make(map[string]int)
+	}
 	roundRobinCounters := cp.RoundRobinCounters
 	if roundRobinCounters == nil {
 		roundRobinCounters = make(map[string]int)
@@ -341,9 +357,21 @@ func (e *Engine) resumeFromFailure(ctx context.Context, r *store.Run) error {
 	rs.vars = e.resolveVars(r.Inputs)
 
 	if cp != nil {
-		rs.outputs = cp.Outputs
-		rs.artifacts = e.rebuildArtifacts(cp.Outputs)
-		rs.loopCounters = cp.LoopCounters
+		// Deep-copy outputs so subsequent writes on rs.outputs don't
+		// retroactively mutate r.Checkpoint (which any HTTP read still
+		// holding the run pointer could iterate concurrently). Same
+		// sibling-isolation discipline as fan_out.go's copyOutputs.
+		rs.outputs = copyOutputs(cp.Outputs)
+		if rs.outputs == nil {
+			rs.outputs = make(map[string]map[string]interface{})
+		}
+		rs.artifacts = e.rebuildArtifacts(rs.outputs)
+		// Each below: init when the checkpoint deserialised with omitted
+		// fields, otherwise selectEdgeRS / loop-counter increments
+		// panic on the first write.
+		if cp.LoopCounters != nil {
+			rs.loopCounters = cp.LoopCounters
+		}
 		if cp.RoundRobinCounters != nil {
 			rs.roundRobinCounters = cp.RoundRobinCounters
 		}

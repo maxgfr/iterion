@@ -728,12 +728,16 @@ func RecoverFinalize(ctx context.Context, st store.RunStore, r *store.Run, logge
 	// fires) OR cancel-then-merge (this RecoverFinalize fires on the
 	// `cancelled` status).
 	//
-	// `failed` is excluded for a different reason: a hard failure
-	// suggests the commits aren't safe to expose for a one-click
-	// merge; the operator can still salvage by hand via the run's
-	// WorkDir + `git branch`.
+	// `failed` is now also recovered (F-RT-5): a hard failure may
+	// still leave partial commits the operator wants to inspect, and
+	// without a persistent branch they only survive in reflog. The
+	// `finalSHA == originalTip` guard in finalizeWorktree means a
+	// no-op when the failed run produced nothing. The operator can
+	// still salvage hand-built work via the run's WorkDir + a manual
+	// `git branch`, but the recovery path now matches the symmetry
+	// expected by RunHeader's "view final branch" link.
 	switch r.Status {
-	case store.RunStatusFinished, store.RunStatusCancelled:
+	case store.RunStatusFinished, store.RunStatusCancelled, store.RunStatusFailed:
 		// recover
 	default:
 		return nil
