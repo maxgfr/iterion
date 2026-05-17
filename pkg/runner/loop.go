@@ -27,6 +27,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/SocialGouv/iterion/pkg/backend/cost"
 	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/cloud/metrics"
 	"github.com/SocialGouv/iterion/pkg/dsl/ast"
@@ -295,7 +296,27 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 	// for sibling runs collapses immediately. The server's cancel
 	// handler is responsible for flipping the Mongo doc; the
 	// JetStream message becomes a no-op signal.
-	preRun, preErr := r.cfg.Store.LoadRun(runCtx, msg.RunID)
+	//
+	// Detached context: runCtx descends from r.cancel(); if Shutdown
+	// fires between the cancel-subscribe above and this LoadRun, the
+	// store would return context.Canceled and the current code would
+	// Term a perfectly valid delivery (losing the run). Use a fresh
+	// background-rooted ctx with a 5s budget for the pre-lock read,
+	// carrying the tenant identity LoadRun needs.
+	loadCtx, loadCancel := context.WithTimeout(
+		store.WithIdentity(context.Background(), msg.TenantID, msg.OwnerID),
+		5*time.Second)
+	preRun, preErr := r.cfg.Store.LoadRun(loadCtx, msg.RunID)
+	loadCancel()
+	// Transient store errors (timeout) get Nak'd so the message
+	// redelivers to a healthier runner; only persistent NotFound /
+	// forged-message shapes warrant a Term.
+	if preErr != nil && (errors.Is(preErr, context.DeadlineExceeded) || errors.Is(preErr, context.Canceled)) {
+		logger.Warn("runner: pre-lock LoadRun %s transient: %v — naking", msg.RunID, preErr)
+		finalStatus = "store_load_transient"
+		_ = delivery.Nak()
+		return
+	}
 	// A message whose run document we can't load is unsafe to execute:
 	// either the publisher's SaveRun never landed (orphan publish), the
 	// run was deleted out from under us, or the message is forged /
@@ -457,6 +478,18 @@ func (r *Runner) heartbeat(ctx context.Context, runCancel context.CancelFunc, lo
 // engine + Claw executor, then dispatches to Run or Resume based on
 // the message shape.
 func (r *Runner) executeRun(ctx context.Context, msg *queue.RunMessage) error {
+	// Honour the publisher's per-run wall-clock budget. Without this,
+	// queue.RunMessage.TimeoutSec — wired from `iterion run --timeout`
+	// and the editor Launch modal — has no effect in cloud mode: the
+	// runner ignores the field and the engine inherits an undeadlined
+	// ctx. The DSL budget (max_duration) is still enforced inside the
+	// engine; this guard catches the operator-level deadline.
+	if msg.TimeoutSec > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(msg.TimeoutSec)*time.Second)
+		defer cancel()
+	}
+
 	wf, err := loadWorkflow(msg)
 	if err != nil {
 		return err
@@ -705,6 +738,20 @@ func (m *metricsEmitter) observe(evt store.Event) {
 		m.addTokens(backend, modelName, "output", evt.Data["output_tokens"])
 		m.addTokens(backend, modelName, "cache_read", evt.Data["cache_read_tokens"])
 		m.addTokens(backend, modelName, "cache_write", evt.Data["cache_write_tokens"])
+		// LLMCostUSDTotal counter: until Sprint-8 the counter was
+		// registered but never updated, so the cost Prometheus tap
+		// was permanently zero. Compute the step's USD cost from the
+		// same pricing table the runtime uses for `_cost_usd`; a
+		// model the table doesn't recognise yields 0 and the counter
+		// stays untouched — observers can distinguish "no data" from
+		// "$0" via the absence of samples.
+		if modelName != "" && modelName != "unknown" {
+			inputT := int(toFloat(evt.Data["input_tokens"]))
+			outputT := int(toFloat(evt.Data["output_tokens"]))
+			if c := cost.EstimateUSD(modelName, inputT, outputT); c > 0 {
+				m.reg.LLMCostUSDTotal.WithLabelValues(backend, normalizeModelLabel(modelName)).Add(c)
+			}
+		}
 	case store.EventDelegateFinished:
 		backend, _ := evt.Data["backend"].(string)
 		if backend == "" {

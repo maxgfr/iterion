@@ -69,7 +69,14 @@ func parseLog(raw []byte) ([]CommitInfo, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.Split(line, "\t")
+		// SplitN with N=6 lets a TAB inside the subject (real commits
+		// occasionally carry one: copy-pasted patches, generated msgs)
+		// stay attached to the subject field instead of corrupting the
+		// next column and failing the whole repo's Commits tab. The
+		// format string emits exactly five TABs, so 6 parts is the
+		// canonical shape and a tabbed subject is the only producer of
+		// >6 fields in real-world output.
+		parts := strings.SplitN(line, "\t", 6)
 		if len(parts) != 6 {
 			return nil, fmt.Errorf("git log: malformed entry %q", line)
 		}
