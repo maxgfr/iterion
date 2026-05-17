@@ -86,7 +86,7 @@ func TestCapabilities_MalformedEmitsError(t *testing.T) {
 	// `Board.Create` (uppercase) doesn't match the lowercase shape.
 	// We test the IR validator directly to bypass parser-level keyword constraints.
 	w := &Workflow{
-		Name:  "w",
+		Name: "w",
 		Nodes: map[string]Node{
 			"po": &AgentNode{
 				BaseNode:     BaseNode{ID: "po"},

@@ -407,32 +407,32 @@ prompt emit_action_system:
 
   ## Board contract
 
-  Each `roadmap_item` you receive becomes ONE kanban issue:
+  Each `roadmap_item` you receive becomes ONE kanban issue created
+  via the **board MCP tools** the iterion runtime registers for
+  you under `mcp__iterion_board__*`:
 
-    item.title    → issue --title
-    item.body     → issue --body  (write a multi-line markdown
-                    string capturing rationale + acceptance
-                    criteria — this is what the operator and
-                    the assigned bot will read)
-    item.assignee → issue --assignee (the bot name, e.g.
-                    "vibe_feature_dev"; or omit when "")
-    item.args     → issue --field bot_args=<flat string array>
-                    (see step 5 below for the exact shape)
+    item.title    → create_issue.title
+    item.body     → create_issue.body (multi-line markdown
+                    capturing rationale + acceptance criteria —
+                    this is what the assigned bot will read)
+    item.assignee → assign_issue (called separately after create)
+    item.args     → store in create_issue.fields.bot_args (a
+                    comma-separated string, see step 5 below)
 
-  Labels carry horizon + provenance:
+  Labels carry horizon + provenance — passed via
+  create_issue.labels (or fixed up after creation via set_labels):
 
-    long_term   → --labels horizon:long-term,source:whats-next
-    short_term  → --labels horizon:short-term,source:whats-next
-    next_action → --labels horizon:next-action,source:whats-next
+    long_term   → ["horizon:long-term", "source:whats-next"]
+    short_term  → ["horizon:short-term", "source:whats-next"]
+    next_action → ["horizon:next-action", "source:whats-next"]
 
-  Use `iterion issue create` (the CLI is auto-loaded by the
-  workspace's iterion binary; it writes to
-  `<workspace>/.iterion/conductor/issues/`). If the board has
-  not been initialised, run `iterion issue create` once anyway —
-  the native store will lazily create the directory; if it fails
-  with "no board.json", create one with sensible defaults via
-  `iterion issue board init` (look up the exact subcommand with
-  `iterion issue --help` if needed).
+  Always create issues in state `ready` so the conductor picks
+  them up. (Default state is `backlog` — drafts that are not yet
+  ready to dispatch.) If you need to flip an already-created
+  issue from `backlog` → `ready`, use transition_issue.
+
+  Read skills/iterion-board.md for the exhaustive tool reference,
+  capability mapping, and error-handling patterns.
 
   ## Your steps
 
@@ -446,11 +446,16 @@ prompt emit_action_system:
      `whats-next-YYYYMMDD-HHMMSS.md`.
 
   3. For each `roadmap_item` (in this order: next_action, then
-     each short_term, then each long_term), invoke
-     `iterion issue create` with the mapping above. Capture
-     the new issue ID from stdout (or pass `--json` and parse).
-     On per-item failure, add to `failed_issues` with the error
-     message and continue — do NOT abort the run.
+     each short_term, then each long_term):
+       a. Call `mcp__iterion_board__create_issue` with title, body,
+          labels (`["horizon:<h>", "source:whats-next"]`), state
+          `ready`, and `fields.bot_args` set to the encoded args
+          string from step 5.
+       b. If `item.assignee` validated in step 1, call
+          `mcp__iterion_board__assign_issue` with the new issue's
+          ID and the assignee.
+       c. On per-item failure, add to `failed_issues` with the
+          error message and continue — do NOT abort the run.
 
   4. Write the audit markdown to the pre-allocated path. Content:
        - Title `# What's Next — plan recorded YYYY-MM-DD HH:MM`
@@ -469,15 +474,14 @@ prompt emit_action_system:
          routing feature (which whats-next may have proposed as
          next_action in this very plan).
 
-  5. Encode each item's `args` object into a flat string[] under
-     `issue.fields.bot_args` so the eventual router workflow can
-     pass them through to the bot verbatim:
+  5. Encode each item's `args` object into a single comma-separated
+     string under `fields.bot_args` so the eventual router workflow
+     can pass them through to the bot verbatim:
        args={"feature_prompt":"Add CSV export"}
        ↓
-       --field bot_args=--var,feature_prompt=Add CSV export
-     (Comma-separated list; the conductor router will split on
-     comma and emit `--var` flags. Do NOT include shell
-     metacharacters in values.)
+       bot_args="--var,feature_prompt=Add CSV export"
+     (The conductor router will split on comma and emit `--var`
+     flags. Do NOT include shell metacharacters in values.)
 
   6. Return the structured emit_output:
        - plan_path: absolute path to the markdown file.
@@ -615,7 +619,14 @@ agent emit_action:
   ## claude_code also uses snake_case tool names (see
   ## examples/bots/vibe_feature_dev.bot:670).
   tools: [bash, read_file, write_file, glob, grep]
-  tool_max_steps: 20
+  ## Board capabilities: the runtime registers an internal __mcp-board
+  ## server that exposes capability-gated mcp__iterion_board__* tools
+  ## (create_issue, transition_issue, assign_issue, set_labels,
+  ## close_issue, list_issues, get_issue). See skills/iterion-board.md
+  ## for the full reference; the emit_action_system prompt walks
+  ## through the canonical create + assign + move-to-ready sequence.
+  capabilities: [board.read, board.create, board.move, board.assign, board.label, board.close]
+  tool_max_steps: 30
 
 ## (No post-emit nodes: with the board pivot, emit_action both
 ## records the markdown audit AND creates the kanban issues. The

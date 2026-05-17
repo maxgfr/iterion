@@ -104,6 +104,7 @@ agent_prop = "model"              ":" STRING_LIT              NEWLINE
            | "session"            ":" session_mode             NEWLINE
            | "tools"              ":" tool_list                NEWLINE
            | "tool_policy"        ":" tool_policy_list         NEWLINE
+           | "capabilities"       ":" capability_list          NEWLINE
            | "tool_max_steps"     ":" INT_LIT                 NEWLINE
            | "max_tokens"         ":" INT_LIT                 NEWLINE
            | "reasoning_effort"   ":" reasoning_effort_value   NEWLINE
@@ -118,6 +119,8 @@ agent_prop = "model"              ":" STRING_LIT              NEWLINE
 tool_policy_list = "[" tool_ref { "," tool_ref } "]" ;
 tool_list        = "[" tool_ref { "," tool_ref } "]" ;
 tool_ref         = IDENT { "." IDENT } [ "." "*" ] ;
+capability_list  = "[" capability_ref { "," capability_ref } "]" ;
+capability_ref   = IDENT [ "." IDENT ] ; (* lowercase domain or domain.action *)
 ```
 
 `backend` accepts the names of built-in delegation backends —
@@ -364,6 +367,6 @@ DEDENT       = (* decrease in indentation level *) ;
 
 ## Reserved Keywords
 
-`vars`, `prompt`, `schema`, `agent`, `judge`, `router`, `human`, `tool`, `compute`, `workflow`, `entry`, `mcp`, `mcp_server`, `budget`, `compaction`, `worktree`, `model`, `backend`, `default_backend`, `input`, `output`, `publish`, `system`, `user`, `session`, `tools`, `tool_policy`, `tool_max_steps`, `reasoning_effort`, `readonly`, `interaction`, `interaction_prompt`, `interaction_model`, `await`, `mode`, `instructions`, `min_answers`, `command`, `expr`, `multi`, `transport`, `args`, `url`, `auth`, `type`, `auth_url`, `token_url`, `revoke_url`, `client_id`, `scopes`, `autoload_project`, `inherit`, `servers`, `disable`, `threshold`, `preserve_recent`, `when`, `not`, `as`, `with`, `enum`, `fresh`, `fork`, `artifacts_only`, `fan_out_all`, `condition`, `round_robin`, `llm`, `wait_all`, `best_effort`, `none`, `human`, `llm_or_human`, `auto`, `done`, `fail`, `true`, `false`, `string`, `bool`, `int`, `float`, `json`, `string[]`, `max_parallel_branches`, `max_duration`, `max_cost_usd`, `max_tokens`, `max_iterations`, `low`, `medium`, `high`, `xhigh`, `max`, `stdio`, `http`, `sse`, `oauth2`.
+`vars`, `prompt`, `schema`, `agent`, `judge`, `router`, `human`, `tool`, `compute`, `workflow`, `entry`, `mcp`, `mcp_server`, `budget`, `compaction`, `worktree`, `model`, `backend`, `default_backend`, `input`, `output`, `publish`, `system`, `user`, `session`, `tools`, `tool_policy`, `capabilities`, `tool_max_steps`, `reasoning_effort`, `readonly`, `interaction`, `interaction_prompt`, `interaction_model`, `await`, `mode`, `instructions`, `min_answers`, `command`, `expr`, `multi`, `transport`, `args`, `url`, `auth`, `type`, `auth_url`, `token_url`, `revoke_url`, `client_id`, `scopes`, `autoload_project`, `inherit`, `servers`, `disable`, `threshold`, `preserve_recent`, `when`, `not`, `as`, `with`, `enum`, `fresh`, `fork`, `artifacts_only`, `fan_out_all`, `condition`, `round_robin`, `llm`, `wait_all`, `best_effort`, `none`, `human`, `llm_or_human`, `auto`, `done`, `fail`, `true`, `false`, `string`, `bool`, `int`, `float`, `json`, `string[]`, `max_parallel_branches`, `max_duration`, `max_cost_usd`, `max_tokens`, `max_iterations`, `low`, `medium`, `high`, `xhigh`, `max`, `stdio`, `http`, `sse`, `oauth2`.
 
 The `delegate` keyword from earlier drafts has been removed — use `backend:` everywhere it was used (delegation backends are selected by name: `claw`, `claude_code`, `codex`).
