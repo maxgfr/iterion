@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -70,8 +69,8 @@ type GitHubAdapter struct {
 // NewGitHub returns a configured adapter. Returns an error if the
 // minimum config (repo) is missing.
 func NewGitHub(opts GitHubOptions) (*GitHubAdapter, error) {
-	if opts.Repo == "" {
-		return nil, errors.New("github tracker: repo is required (owner/repo)")
+	if err := ValidateRepoPath(opts.Repo); err != nil {
+		return nil, fmt.Errorf("github tracker: %w", err)
 	}
 	if opts.ClaimedLabel == "" {
 		opts.ClaimedLabel = "iterion-claimed"
