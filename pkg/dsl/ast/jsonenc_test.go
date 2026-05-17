@@ -544,3 +544,54 @@ func TestEditorCriticalFieldsRoundtrip(t *testing.T) {
 		t.Fatalf("critical field roundtrip mismatch.\nOriginal JSON:\n%s\n\nRestored JSON:\n%s", origJSON, restJSON)
 	}
 }
+
+// TestCapabilitiesRoundtrip guards the data-integrity fix for the
+// JSON serialiser silently dropping `capabilities` on AgentDecl,
+// JudgeDecl and WorkflowDecl. An editor save / bundle load that
+// stripped board.* caps would turn a privileged agent into one
+// without any board access.
+func TestCapabilitiesRoundtrip(t *testing.T) {
+	original := &ast.File{
+		Agents: []*ast.AgentDecl{
+			{
+				Name:         "writer",
+				Model:        "anthropic/claude-sonnet-4-6",
+				Capabilities: []string{"board.create", "board.move"},
+			},
+		},
+		Judges: []*ast.JudgeDecl{
+			{
+				Name:         "reviewer",
+				Model:        "anthropic/claude-sonnet-4-6",
+				Capabilities: []string{"board.read"},
+			},
+		},
+		Workflows: []*ast.WorkflowDecl{
+			{
+				Name:         "wf",
+				Entry:        "writer",
+				Capabilities: []string{"board.read", "board.label"},
+			},
+		},
+	}
+	data, err := ast.MarshalFile(original)
+	if err != nil {
+		t.Fatalf("MarshalFile: %v", err)
+	}
+	restored, err := ast.UnmarshalFile(data)
+	if err != nil {
+		t.Fatalf("UnmarshalFile: %v", err)
+	}
+	if !reflect.DeepEqual(restored.Agents[0].Capabilities, original.Agents[0].Capabilities) {
+		t.Errorf("agent capabilities lost: got %v, want %v",
+			restored.Agents[0].Capabilities, original.Agents[0].Capabilities)
+	}
+	if !reflect.DeepEqual(restored.Judges[0].Capabilities, original.Judges[0].Capabilities) {
+		t.Errorf("judge capabilities lost: got %v, want %v",
+			restored.Judges[0].Capabilities, original.Judges[0].Capabilities)
+	}
+	if !reflect.DeepEqual(restored.Workflows[0].Capabilities, original.Workflows[0].Capabilities) {
+		t.Errorf("workflow capabilities lost: got %v, want %v",
+			restored.Workflows[0].Capabilities, original.Workflows[0].Capabilities)
+	}
+}
