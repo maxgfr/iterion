@@ -5,11 +5,18 @@ import {
   ListBulletIcon,
   ViewGridIcon,
   RocketIcon,
+  PaperPlaneIcon,
 } from "@radix-ui/react-icons";
 
 import { useServerInfoStore } from "@/store/serverInfo";
 
-export type Section = "home" | "editor" | "runs" | "board" | "conductor";
+export type Section =
+  | "home"
+  | "pilote"
+  | "editor"
+  | "runs"
+  | "board"
+  | "conductor";
 
 interface Props {
   active?: Section;
@@ -24,6 +31,7 @@ interface LinkDef {
 
 const BASE_LINKS: LinkDef[] = [
   { section: "home", href: "/", label: "Home", icon: HomeIcon },
+  { section: "pilote", href: "/pilote", label: "Pilote", icon: PaperPlaneIcon },
   { section: "editor", href: "/editor", label: "Editor", icon: Pencil2Icon },
   { section: "runs", href: "/runs", label: "Runs", icon: ListBulletIcon },
 ];
