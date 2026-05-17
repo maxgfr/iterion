@@ -319,6 +319,20 @@ The conductor's `Claim` adds `iterion-claimed`; `Release` removes it.
 `ListCandidates` filters via `gh issue list --search` so pagination
 and rate-limit handling come for free.
 
+**Environment hygiene.** When `tracker.github.token` is set, iterion
+exports it as `GH_TOKEN` / `GITHUB_TOKEN` only to the `gh` subprocess,
+and restricts the inherited environment to a curated allowlist
+(`PATH`, `HOME`, locale, proxy, ssh-agent, gh and git config vars).
+This prevents unrelated secrets in iterion's environment
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `FORGEJO_TOKEN`, …) from
+leaking to gh's children via `/proc/<pid>/environ`. `GH_TOKEN` itself
+remains visible to gh's direct subprocesses (e.g. the `git` it shells
+out to for clone/push) — that is intrinsic to the env-based auth and
+only avoidable by writing the token into gh's on-disk credentials
+file via `gh auth login --with-token`. If your threat model includes
+co-located untrusted same-uid processes, prefer pre-authenticating
+`gh` interactively and leaving `tracker.github.token` empty.
+
 ### `tracker.kind: forgejo`
 
 Direct REST client against the Forgejo (Gitea-compatible) API. Auth

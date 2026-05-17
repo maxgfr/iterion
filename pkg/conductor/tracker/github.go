@@ -399,12 +399,16 @@ func parseGitHubID(repo, id string) (int, bool) {
 func runGH(ctx context.Context, args []string, env []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	if env != nil {
-		// Inherit host env (PATH, HOME, GH_CONFIG_DIR, …) and layer the
-		// caller's vars on top. Go's os/exec treats a non-nil cmd.Env
-		// as the exact environment with no inheritance, so without this
-		// `gh` would run with only the two GH_TOKEN entries and nothing
-		// else — which breaks every gh subcommand.
-		cmd.Env = append(os.Environ(), env...)
+		// Restrict the inherited environment to the variables gh and
+		// its children (git, ssh, openssl, …) actually need. Pulling
+		// in the full parent env via os.Environ() would expose every
+		// secret iterion holds (ANTHROPIC_API_KEY, OPENAI_API_KEY,
+		// FORGEJO_TOKEN, …) to gh's subprocesses via /proc/PID/environ,
+		// readable by any same-uid process. Note: GH_TOKEN itself
+		// remains inheritable to gh's direct subprocesses — that is
+		// unavoidable without writing to gh's on-disk credentials
+		// file (out of scope here, see docs/conductor.md).
+		cmd.Env = append(inheritedGHEnv(), env...)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -417,6 +421,34 @@ func runGH(ctx context.Context, args []string, env []string) ([]byte, error) {
 		return nil, fmt.Errorf("%s", redactGHSecrets(msg))
 	}
 	return stdout.Bytes(), nil
+}
+
+// ghEnvAllowlist names the host environment variables propagated to
+// `gh` invocations. Anything not listed here is dropped so unrelated
+// secrets in iterion's env don't leak to gh's subprocesses.
+var ghEnvAllowlist = []string{
+	"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TMP", "TEMP",
+	"LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "TZ", "TERM",
+	"GH_CONFIG_DIR", "GH_HOST", "GH_REPO", "GH_EDITOR", "GH_BROWSER",
+	"GH_PAGER", "GH_PROMPT_DISABLED", "GH_NO_UPDATE_NOTIFIER",
+	"GH_DEBUG", "GH_FORCE_TTY", "GH_MDWIDTH",
+	"HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+	"https_proxy", "http_proxy", "no_proxy",
+	"SSH_AUTH_SOCK", "SSH_AGENT_PID",
+	"XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR",
+	"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_AUTHOR_NAME",
+	"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
+	"GIT_SSH", "GIT_SSH_COMMAND", "GIT_TERMINAL_PROMPT",
+}
+
+func inheritedGHEnv() []string {
+	out := make([]string, 0, len(ghEnvAllowlist))
+	for _, k := range ghEnvAllowlist {
+		if v, ok := os.LookupEnv(k); ok {
+			out = append(out, k+"="+v)
+		}
+	}
+	return out
 }
 
 // redactGHSecrets blanks out token-shaped substrings the gh CLI may

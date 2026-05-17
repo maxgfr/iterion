@@ -31,6 +31,8 @@ package netproxy
 import (
 	"net"
 	"strings"
+
+	"golang.org/x/net/idna"
 )
 
 // Mode is the egress default for unmatched hosts.
@@ -122,8 +124,11 @@ func (p *Policy) Allow(host string) bool {
 	return allowed
 }
 
-// canonicalHost lowercases, trims whitespace, and strips a trailing
-// :port from the input. Returns "" for malformed inputs.
+// canonicalHost lowercases, trims whitespace, strips a trailing :port
+// and a trailing root-zone dot, and folds IDN labels to their ASCII
+// (Punycode) form so a rule of `*.example.com` matches both `example.com.`
+// and the IDN equivalent `пример.example.com`. Returns "" for
+// malformed inputs.
 func canonicalHost(s string) string {
 	s = strings.TrimSpace(strings.ToLower(s))
 	if s == "" {
@@ -135,14 +140,28 @@ func canonicalHost(s string) string {
 		if end < 0 {
 			return ""
 		}
-		return s[1:end]
-	}
-	if i := strings.LastIndex(s, ":"); i >= 0 {
+		s = s[1:end]
+	} else if i := strings.LastIndex(s, ":"); i >= 0 {
 		// Distinguish "host:port" from "v6literal" — the v6 case is
 		// handled above; bare v6 without brackets isn't supported.
 		if !strings.Contains(s[:i], ":") {
 			s = s[:i]
 		}
+	}
+	// Trailing-dot ("example.com.") is the absolute-FQDN form. A
+	// resolver treats it identically to "example.com" but our pattern
+	// matcher uses literal string suffix comparison, so without the
+	// trim a `*.example.com` rule would silently miss this variant.
+	s = strings.TrimSuffix(s, ".")
+	// IDN fold: an attacker can otherwise bypass an ASCII allowlist by
+	// supplying the Unicode form of an allowed host. idna.Lookup
+	// follows the strict "lookup" profile (no mapping of disallowed
+	// codepoints), which is the right side of the conservative/liberal
+	// trade-off for a security filter. On error we fall back to the
+	// pre-fold value so plain-ASCII hosts (the common case) keep
+	// working even if idna's internal tables disagree at the margins.
+	if a, err := idna.Lookup.ToASCII(s); err == nil && a != "" {
+		s = a
 	}
 	return s
 }

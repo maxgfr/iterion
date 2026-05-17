@@ -258,7 +258,12 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	factory := sandbox.NewFactory(sandbox.FactoryOptions{
 		AvailableDrivers: defaultDriverRegistry(),
 	})
-	driver, err := factory.Driver()
+	// DriverForSpec hard-errors when an active mode (auto/inline) would
+	// silently fall through to noop. We want operators to know that the
+	// host is missing a container runtime rather than continue running
+	// unsandboxed under the impression that the workflow's `sandbox:`
+	// directive took effect.
+	driver, err := factory.DriverForSpec(spec)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: sandbox: select driver: %w", err)
 	}
@@ -279,15 +284,15 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	}
 
 	if driver.Name() == "noop" {
-		// Active mode requested but no real driver available — emit the
-		// skip event so operators can see in events.jsonl that the run
-		// is NOT actually sandboxed, then continue with the noop Run
-		// so callers don't need a special path.
+		// We only reach this branch when the operator explicitly opted
+		// into noop (PreferredDriver="noop") for an active spec —
+		// DriverForSpec hard-errors otherwise. Emit the skip event so
+		// it still surfaces in events.jsonl and reports.
 		_ = emitEvent(store.EventSandboxSkipped, map[string]interface{}{
 			"driver": "noop",
 			"mode":   string(spec.Mode),
 			"source": source,
-			"reason": "no container runtime available on this host (install Docker or Podman to enable real sandboxing)",
+			"reason": "operator opted into the noop driver; the run is NOT actually sandboxed",
 		})
 		prepared, err := driver.Prepare(ctx, *spec)
 		if err != nil {

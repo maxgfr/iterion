@@ -191,6 +191,36 @@ func (f *Factory) tryDriverLocked(name string) (Driver, error) {
 	return ctor()
 }
 
+// DriverForSpec is the spec-aware variant of [Factory.Driver]. When
+// spec.Mode is active (ModeAuto or ModeInline) and the selection would
+// otherwise fall through to the noop driver, this returns an explicit
+// error instead of silently degrading. That matches user intent: the
+// workflow asked for a sandbox; the only honest answer when no
+// container runtime is available is "I cannot do that" so the operator
+// can install Docker/Podman (or downgrade the workflow to
+// `sandbox: none`) — not "I will pretend, hope you noticed the
+// EventSandboxSkipped, and run unsandboxed anyway."
+//
+// An explicit `--sandbox-driver=noop` (PreferredDriver) bypasses this
+// refusal so power users can intentionally opt back into the soft path
+// for local dev iterations.
+func (f *Factory) DriverForSpec(spec *Spec) (Driver, error) {
+	d, err := f.Driver()
+	if err != nil {
+		return nil, err
+	}
+	if spec == nil || !spec.Mode.IsActive() {
+		return d, nil
+	}
+	if f.preferred == "noop" {
+		return d, nil
+	}
+	if d != nil && d.Name() == "noop" {
+		return nil, fmt.Errorf("sandbox: mode %q requested but no container runtime is available (install Docker or Podman, set --sandbox-driver=noop to bypass)", spec.Mode)
+	}
+	return d, nil
+}
+
 // preferenceOrder returns the driver-name precedence for a host.
 // Phase 0 only wires the noop driver, so the lists are
 // forward-looking; the unregistered names are silently skipped by

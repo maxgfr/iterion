@@ -30,13 +30,22 @@ func (s *Store) WriteAttachment(ctx context.Context, runID string, rec store.Att
 	if filename == "" {
 		filename = rec.Name
 	}
-	// Stream-read into memory while hashing. The runs queue today
-	// caps uploads at 50 MB so this is bounded; if larger uploads
-	// land we'll switch to the SDK's streaming PUT here.
+	// Stream-read into memory while hashing, bounded by the configured
+	// cap so an unbounded body can't push the runner pod into OOM.
+	// LimitReader+1 lets us detect overflow: if we got past `cap` bytes,
+	// the body was over the limit and we reject it.
+	maxBytes := s.maxAttachmentBytes
+	if maxBytes <= 0 {
+		maxBytes = defaultMaxAttachmentBytes
+	}
 	hasher := sha256.New()
-	buf, err := io.ReadAll(io.TeeReader(body, hasher))
+	limited := io.LimitReader(body, maxBytes+1)
+	buf, err := io.ReadAll(io.TeeReader(limited, hasher))
 	if err != nil {
 		return fmt.Errorf("store/mongo: read attachment body: %w", err)
+	}
+	if int64(len(buf)) > maxBytes {
+		return fmt.Errorf("store/mongo: attachment %q exceeds %d-byte limit", rec.Name, maxBytes)
 	}
 	if rec.MIME == "" {
 		rec.MIME = "application/octet-stream"
