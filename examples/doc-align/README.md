@@ -1,8 +1,26 @@
-# doc-align (v0.8.0)
+# doc-align (v0.9.0)
 
 A dogfood-friendly iterion bot that detects mismatches between
 project documentation and actual code state, then fixes the
 **documentation** (never the code) and auto-commits on convergence.
+
+**v0.9.0 changes** (reviewer discipline tightening):
+- New `STEP 0b — First-iteration triage` in the verification
+  checklist instructs the iter-0 reviewer to do a fast
+  inventory pass over `doc_files[]` (add every touched file
+  to `audited_docs` for coverage) before deep-diving. Targets
+  the v0.3.0 dogfood pattern where iter 0 covered ~25% of
+  files and the cross-family reviewers spent iters 1-7
+  chasing the long tail.
+- New `STEP 1b — Adversarial spot-check` requires every
+  reviewer to re-grep 3 random entries from
+  `input.previous_audited_pairs` before voting `approved=true`.
+  Makes cross-family alternation a MECHANICAL honesty check
+  rather than a statistical one: padding `audited_docs` to
+  fake coverage now requires the next reviewer's randomly
+  sampled spot-check to miss the padding, which is unlikely
+  over a 5-iteration loop.
+- No bot.bot or schema changes — pure skill discipline.
 
 **v0.8.0 changes** (configurable exclusion → multi-repo audit):
 - `excluded_dirs` is now a `--var`-overridable comma-separated

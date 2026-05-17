@@ -23,6 +23,30 @@ tool node. It is NOT a suggestion; it is the contract.
   in `input.previous_audited_pairs` (the cumulative coverage from
   prior iterations)?
 
+## STEP 0b — First-iteration triage (v0.9.0)
+
+When `input.previous_audited_pairs` is empty (you are the first
+reviewer of this run), spend the FIRST third of your tool
+budget on a fast inventory pass over `input.doc_files[]`:
+open each file once, scan headings + first paragraph + any
+code blocks, and note in your notes/working area which files
+look "obvious drift surface" (heavy CLI references, lots of
+file paths, long lists, version strings, etc.) versus "low
+risk" (architecture prose, conceptual content). This first
+inventory pass IS auditing — add each file to your
+`audited_docs` output as you touch it, even if you found
+nothing.
+
+THEN deep-dive into the high-risk surfaces in the remaining
+two-thirds of your budget. The point is to get coverage to
+~100% as early in the loop as possible — every file you skip
+on iter 0 becomes a coverage burden for the cross-family
+reviewer on iter 1.
+
+This addresses the v0.3.0 dogfood pattern where iter 0 only
+covered ~25% of doc_files at the deep-audit level, leaving
+iters 1-7 to chase the long tail of drift.
+
 ## STEP 1 — Audit uncovered files first
 
 For each file in your working set (not-yet-audited entries of
@@ -42,6 +66,31 @@ For each file in your working set (not-yet-audited entries of
 For every (doc_path, code_anchor) pair you verified — pass or
 fail — append `"doc_path::code_anchor"` to your output's
 `audited_pairs[]`.
+
+## STEP 1b — Adversarial spot-check of prior audits (v0.9.0)
+
+Before voting `approved=true`, pick 3 random entries from
+`input.previous_audited_pairs` (the previous reviewer's claimed
+verifications, possibly from a different family) and re-grep
+their `code_anchor` yourself. Confirm what the previous reviewer
+claimed: the cited symbol/line/file still exists in the form
+that justified the audit.
+
+If your spot-check finds drift the previous reviewer missed:
+
+- The previous reviewer's verification was a façade or sloppy.
+- Raise a blocker with `severity: high` and a note in
+  `suggested_fix` describing the gap: e.g. "FAÇADE-SPOT-CHECK:
+  the previous review claimed verification of
+  `docs/foo.md::pkg/bar.go:Handler`, but `Handler` no longer
+  exists in `pkg/bar.go`; the doc claim about Handler is in
+  fact stale."
+
+The pigeon-cost is small (3 grep calls) and the alternation
+honesty mechanism becomes mechanical instead of statistical:
+padding `audited_docs` to fake coverage requires the next
+reviewer's spot-check to randomly miss the padded entries,
+which is unlikely over a 5-iteration loop.
 
 ## STEP 2 — Re-verify any fixes from this iteration
 
