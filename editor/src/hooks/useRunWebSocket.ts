@@ -283,7 +283,11 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
       };
 
       ws.onclose = () => {
-        wsRef.current = null;
+        // Drop the wsRef only if it still points at THIS socket — a
+        // rapid runId change can race two connect() invocations, and
+        // we don't want the older socket's late onclose to null out
+        // the newer one.
+        if (wsRef.current === ws) wsRef.current = null;
         if (!aliveRef.current) {
           setWsState("closed");
           return;
@@ -318,6 +322,14 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
       }
       const ws = wsRef.current;
       if (ws) {
+        // Detach our handlers BEFORE closing so the in-flight FIN
+        // can't fire a stale onclose that would observe aliveRef=true
+        // (set by a re-mount on rapid navigation) and schedule a
+        // bogus reconnect on a dangling socket.
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
         try {
           ws.send(JSON.stringify({ type: "unsubscribe" } satisfies WsEnvelope));
         } catch {

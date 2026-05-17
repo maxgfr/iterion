@@ -36,6 +36,17 @@ export default function ConductorView() {
     void reload();
     let cancelled = false;
     let retryTimer: number | null = null;
+    let attempt = 0;
+
+    const scheduleRetry = () => {
+      if (cancelled) return;
+      // Exponential backoff capped at 30s. The prior implementation
+      // hammered the server at 1.5s intervals indefinitely whenever
+      // the conductor was offline.
+      const delay = Math.min(1500 * 2 ** attempt, 30_000);
+      attempt += 1;
+      retryTimer = window.setTimeout(() => void connect(), delay);
+    };
 
     const connect = async () => {
       if (cancelled) return;
@@ -45,6 +56,7 @@ export default function ConductorView() {
           ws.close();
           return;
         }
+        attempt = 0;
         wsRef.current = ws;
         ws.onmessage = (e) => {
           try {
@@ -55,22 +67,34 @@ export default function ConductorView() {
         };
         ws.onclose = () => {
           if (cancelled) return;
-          retryTimer = window.setTimeout(() => void connect(), 1500);
+          // Drop our ref so a stale handler can't observe the closed
+          // socket as "live" on the next render.
+          if (wsRef.current === ws) wsRef.current = null;
+          scheduleRetry();
         };
         ws.onerror = () => ws.close();
       } catch (e) {
-        // fallback to polling if WS unavailable
         setError(e instanceof Error ? e.message : String(e));
-        if (!cancelled) {
-          retryTimer = window.setTimeout(() => void connect(), 1500);
-        }
+        scheduleRetry();
       }
     };
     void connect();
     return () => {
       cancelled = true;
-      if (retryTimer != null) window.clearTimeout(retryTimer);
-      wsRef.current?.close();
+      if (retryTimer != null) {
+        window.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      const ws = wsRef.current;
+      wsRef.current = null;
+      if (ws) {
+        // Detach close handler so the in-flight FIN doesn't kick off
+        // a new reconnect cycle after the effect tore down.
+        ws.onclose = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.close();
+      }
     };
   }, [reload]);
 

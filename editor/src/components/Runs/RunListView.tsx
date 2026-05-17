@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 
 import { Badge } from "@/components/ui/Badge";
@@ -26,6 +26,24 @@ export default function RunListView() {
   const [, setLocation] = useLocation();
   const [status, setStatus] = useState<RunStatus | "">("");
   const { runs, counts, loading, error } = useRuns({ status });
+
+  // Force a re-render once per second while at least one run is
+  // still in-flight (no finished_at), so the duration column ticks
+  // forward instead of freezing on whatever value the last poll
+  // produced. Idle when every visible run has finished.
+  const hasLiveRun = useMemo(
+    () => runs.some((r) => !r.finished_at),
+    [runs],
+  );
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!hasLiveRun) return;
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [hasLiveRun]);
+  // Read tick so React preserves the dependency edge — the explicit
+  // void prevents the linter from treating it as dead.
+  void tick;
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-surface-1 text-fg-default">

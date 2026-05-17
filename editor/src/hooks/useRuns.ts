@@ -97,13 +97,35 @@ export function useRuns(opts: UseRunsOptions = {}): UseRunsResult {
         }
       }
       if (!cancelled) {
-        timer = window.setTimeout(fetchRuns, pollMsRef.current);
+        // Skip the poll while the tab is hidden — browsers throttle
+        // setTimeout but the burst of stale requests on focus-back
+        // still hammered the server. Re-arm via visibilitychange.
+        const delay =
+          typeof document !== "undefined" && document.hidden
+            ? Math.max(pollMsRef.current * 4, 15_000)
+            : pollMsRef.current;
+        timer = window.setTimeout(fetchRuns, delay);
       }
     };
     fetchRuns();
+    const onVisibility = () => {
+      if (!document.hidden && !cancelled) {
+        if (timer != null) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        fetchRuns();
+      }
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibility);
+    }
     return () => {
       cancelled = true;
       if (timer != null) clearTimeout(timer);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibility);
+      }
     };
   }, [status, limit]);
 

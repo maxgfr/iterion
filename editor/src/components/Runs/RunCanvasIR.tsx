@@ -492,6 +492,13 @@ export default function RunCanvasIR({
   // navigation), centre the canvas on the selected node. Only triggers
   // when the selection actually exists in the layout — otherwise the
   // initial fitView (run open) is what handles it.
+  //
+  // The effect re-runs only on selectedNodeId changes (not on every
+  // events tick that produces a fresh `nodes` array) so the canvas
+  // doesn't fire a fresh 350ms setCenter animation per event during
+  // long live runs. nodes is referenced inside but intentionally NOT
+  // in the deps — setCenter is meant to fire on jump-to events, not
+  // on every node-layout patch.
   useEffect(() => {
     if (!selectedNodeId) return;
     const node = nodes.find((n) => n.id === selectedNodeId);
@@ -501,7 +508,8 @@ export default function RunCanvasIR({
       node.position.y + 40,
       { zoom: 1, duration: 350 },
     );
-  }, [selectedNodeId, nodes, reactFlow]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNodeId]);
 
   const filterCounts = useMemo(() => {
     let running = 0,

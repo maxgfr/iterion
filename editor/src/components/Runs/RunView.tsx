@@ -296,6 +296,7 @@ export default function RunView() {
     if (!runId) return;
     let cancelled = false;
     let attempt = 0;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
     // Reset failure state on every runId change so a navigation to a
     // different (valid) run rehydrates cleanly after a prior 404.
     setLoadFailed(null);
@@ -307,19 +308,18 @@ export default function RunView() {
         .catch((err: Error) => {
           if (cancelled) return;
           attempt += 1;
-          // 404 = "this daemon's store doesn't have this run". The
-          // launch→CreateRun race can produce one initially, but if
-          // it's STILL 404ing after a few attempts the run isn't
-          // here — flip to a clear error state instead of looping
-          // the skeleton + spamming the network tab.
-          //
-          // Other errors (network blip, 5xx) keep the longer 5s
-          // budget — those are transient.
           const msg = err?.message ?? "";
           const is404 = msg.includes("API error 404");
           const cap = is404 ? 3 : 20;
           if (attempt < cap) {
-            setTimeout(fetchWithRetry, 250);
+            // Track the timer so the cleanup can cancel it. The
+            // prior implementation only flipped `cancelled` for the
+            // setState path; the timer kept firing for the full
+            // retry budget after navigation, hammering the network.
+            timerId = setTimeout(() => {
+              timerId = null;
+              if (!cancelled) fetchWithRetry();
+            }, 250);
           } else if (!cancelled) {
             setLoadFailed({ status: is404 ? 404 : 0, message: msg });
           }
@@ -328,6 +328,10 @@ export default function RunView() {
     fetchWithRetry();
     return () => {
       cancelled = true;
+      if (timerId != null) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
     };
   }, [runId, applySnapshot]);
 

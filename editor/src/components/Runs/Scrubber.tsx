@@ -91,7 +91,7 @@ export default function Scrubber({
           if (scrubSeq === null) onChange(0);
           setPlaying(true);
         }}
-        title={playing ? "Pause replay" : "Play replay from current position"}
+        title={playing ? "Pause replay" : (scrubSeq === null ? "Play replay from the start" : "Play replay from current position")}
         className="text-[10px] px-2 py-0.5 rounded bg-surface-2 hover:bg-surface-3 border border-border-default font-mono"
         aria-label={playing ? "Pause replay" : "Play replay"}
       >

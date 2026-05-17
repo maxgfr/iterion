@@ -551,15 +551,24 @@ function rehydratePendingHumanInput(
   if (snap.run.status !== "paused_waiting_human") return null;
   const cp = snap.run.checkpoint;
   if (!cp || typeof cp !== "object") return null;
-  const checkpoint = cp as {
-    node_id?: string;
-    interaction_id?: string;
-    interaction_questions?: Record<string, unknown>;
-  };
+  // Narrow each field with runtime type checks before reading. The
+  // server-side Checkpoint shape is opaque (any subset of fields may
+  // be missing on legacy snapshots), so a blind cast left
+  // PendingHumanInput populated with undefined when the payload
+  // didn't match expectations — the panel then rendered with no
+  // questions and no interaction_id.
+  const obj = cp as Record<string, unknown>;
+  const nodeID = typeof obj.node_id === "string" ? obj.node_id : undefined;
+  const interactionID =
+    typeof obj.interaction_id === "string" ? obj.interaction_id : undefined;
+  const questions =
+    obj.interaction_questions && typeof obj.interaction_questions === "object"
+      ? (obj.interaction_questions as Record<string, unknown>)
+      : {};
   return {
-    interaction_id: checkpoint.interaction_id,
-    node_id: checkpoint.node_id,
-    questions: checkpoint.interaction_questions ?? {},
+    interaction_id: interactionID,
+    node_id: nodeID,
+    questions,
   };
 }
 

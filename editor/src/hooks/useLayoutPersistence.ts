@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Layout } from "react-resizable-panels";
 
@@ -22,6 +22,7 @@ export function useLayoutPersistence(
     (next: Layout) => {
       if (writeTimerRef.current) clearTimeout(writeTimerRef.current);
       writeTimerRef.current = setTimeout(() => {
+        writeTimerRef.current = null;
         try {
           window.localStorage.setItem(key, JSON.stringify(next));
         } catch {
@@ -31,6 +32,18 @@ export function useLayoutPersistence(
     },
     [key],
   );
+  // Clear any pending write on unmount. Without this the timer
+  // survives the host component and a stale layout (the one captured
+  // by the closure at the last drag) lands in localStorage after the
+  // panel has already gone away.
+  useEffect(() => {
+    return () => {
+      if (writeTimerRef.current != null) {
+        clearTimeout(writeTimerRef.current);
+        writeTimerRef.current = null;
+      }
+    };
+  }, []);
   return { layout, onChange };
 }
 

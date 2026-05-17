@@ -479,8 +479,12 @@ export async function downloadArtifactFile(
   document.body.appendChild(a);
   a.click();
   a.remove();
-  // Defer revoke so the browser has a tick to start the download.
-  setTimeout(() => URL.revokeObjectURL(blobURL), 0);
+  // Defer revoke so the browser has time to start the download.
+  // 0ms wasn't enough on WebKit (Safari/Wails) — the a.click() handoff
+  // sometimes hadn't kicked the download by the next microtask, and
+  // the revoke nuked the blob, producing "blob URL not found"
+  // download failures. 5s lines up with LogLinesView's pattern.
+  setTimeout(() => URL.revokeObjectURL(blobURL), 5000);
   return { cancelled: false, contentType };
 }
 
