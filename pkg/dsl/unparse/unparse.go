@@ -74,7 +74,12 @@ func Unparse(f *ast.File) string {
 	for _, p := range f.Prompts {
 		blankLine()
 		fmt.Fprintf(&b, "prompt %s:\n", p.Name)
-		for _, line := range strings.Split(p.Body, "\n") {
+		// Trim trailing newlines so a body ending in "\n" (the standard
+		// text-block shape) doesn't unparse into a trailing indented
+		// blank line that the lexer would re-read as an extra prompt
+		// line, breaking parse → unparse → re-parse round-trip stability.
+		body := strings.TrimRight(p.Body, "\n")
+		for _, line := range strings.Split(body, "\n") {
 			b.WriteString("  ")
 			b.WriteString(line)
 			b.WriteByte('\n')

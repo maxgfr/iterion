@@ -218,7 +218,7 @@ func (c *Client) buildResponsesRequest(req api.CreateMessageRequest) (*oaiRespon
 
 	r := &oaiResponsesRequest{
 		Model:        wireModel,
-		Instructions: req.System,
+		Instructions: coalesceSystemPrompt(req),
 		Input:        convertMessagesToResponsesInput(req.Messages),
 		Tools:        tools,
 		Stream:       true,
@@ -237,6 +237,32 @@ func (c *Client) buildResponsesRequest(req api.CreateMessageRequest) (*oaiRespon
 	}
 
 	return r, nil
+}
+
+// coalesceSystemPrompt returns the system-prompt text to send to OpenAI,
+// preferring req.System (plain string) and falling back to extracting text
+// from req.SystemBlocks. Callers that always populate SystemBlocks (e.g.
+// upstream consumers reaching for Anthropic prompt caching) would otherwise
+// silently send an empty system prompt through the OpenAI path — both
+// chat completions and /v1/responses ignore SystemBlocks natively.
+func coalesceSystemPrompt(req api.CreateMessageRequest) string {
+	if req.System != "" {
+		return req.System
+	}
+	if len(req.SystemBlocks) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for _, b := range req.SystemBlocks {
+		if b.Text == "" {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(b.Text)
+	}
+	return sb.String()
 }
 
 // convertMessagesToResponsesInput maps Anthropic-style messages onto the

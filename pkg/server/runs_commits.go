@@ -47,7 +47,7 @@ func (s *Server) handleListRunCommits(w http.ResponseWriter, r *http.Request) {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "missing run id")
 		return
 	}
-	run, err := s.runs.LoadRun(id)
+	run, err := s.runs.LoadRunCtx(r.Context(), id)
 	if err != nil {
 		s.httpErrorFor(w, r, http.StatusNotFound, "run not found: %v", err)
 		return
@@ -166,7 +166,7 @@ func (s *Server) handleGetRunCommit(w http.ResponseWriter, r *http.Request) {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "invalid commit sha")
 		return
 	}
-	run, err := s.runs.LoadRun(id)
+	run, err := s.runs.LoadRunCtx(r.Context(), id)
 	if err != nil {
 		s.httpErrorFor(w, r, http.StatusNotFound, "run not found: %v", err)
 		return
@@ -221,7 +221,7 @@ func (s *Server) handleGetRunCommitFileDiff(w http.ResponseWriter, r *http.Reque
 		s.httpErrorFor(w, r, http.StatusBadRequest, "invalid path: %v", err)
 		return
 	}
-	run, err := s.runs.LoadRun(id)
+	run, err := s.runs.LoadRunCtx(r.Context(), id)
 	if err != nil {
 		s.httpErrorFor(w, r, http.StatusNotFound, "run not found: %v", err)
 		return

@@ -32,6 +32,7 @@ func loadYAML(path string, cfg *Config) error {
 // YAML overwrite cfg.
 type yamlConfig struct {
 	Mode    *string            `yaml:"mode"`
+	Sandbox *yamlSandboxConfig `yaml:"sandbox"`
 	NATS    *yamlNATSConfig    `yaml:"nats"`
 	Mongo   *yamlMongoConfig   `yaml:"mongo"`
 	S3      *yamlS3Config      `yaml:"s3"`
@@ -42,16 +43,42 @@ type yamlConfig struct {
 	Auth    *yamlAuthConfig    `yaml:"auth"`
 }
 
+type yamlSandboxConfig struct {
+	Default *string `yaml:"default"`
+}
+
 type yamlAuthConfig struct {
-	JWTSecret           *string `yaml:"jwt_secret"`
-	SecretsKey          *string `yaml:"secrets_key"`
-	AccessTTL           *string `yaml:"access_ttl"`
-	RefreshTTL          *string `yaml:"refresh_ttl"`
-	BootstrapAdminEmail *string `yaml:"bootstrap_admin_email"`
-	SignupMode          *string `yaml:"signup_mode"`
-	PublicURL           *string `yaml:"public_url"`
-	CookieDomain        *string `yaml:"cookie_domain"`
-	CookieSecure        *bool   `yaml:"cookie_secure"`
+	JWTSecret           *string                 `yaml:"jwt_secret"`
+	SecretsKey          *string                 `yaml:"secrets_key"`
+	AccessTTL           *string                 `yaml:"access_ttl"`
+	RefreshTTL          *string                 `yaml:"refresh_ttl"`
+	BootstrapAdminEmail *string                 `yaml:"bootstrap_admin_email"`
+	SignupMode          *string                 `yaml:"signup_mode"`
+	PublicURL           *string                 `yaml:"public_url"`
+	CookieDomain        *string                 `yaml:"cookie_domain"`
+	CookieSecure        *bool                   `yaml:"cookie_secure"`
+	OIDC                *yamlOIDCConfig         `yaml:"oidc"`
+	OAuthForfait        *yamlOAuthForfaitConfig `yaml:"oauth_forfait"`
+}
+
+type yamlOIDCConfig struct {
+	Google  *yamlOIDCProviderConfig `yaml:"google"`
+	GitHub  *yamlOIDCProviderConfig `yaml:"github"`
+	Generic *yamlOIDCProviderConfig `yaml:"generic"`
+}
+
+type yamlOIDCProviderConfig struct {
+	Enabled      *bool     `yaml:"enabled"`
+	IssuerURL    *string   `yaml:"issuer_url"`
+	ClientID     *string   `yaml:"client_id"`
+	ClientSecret *string   `yaml:"client_secret"`
+	Scopes       *[]string `yaml:"scopes"`
+	DisplayName  *string   `yaml:"display_name"`
+}
+
+type yamlOAuthForfaitConfig struct {
+	AnthropicClientID *string `yaml:"anthropic_client_id"`
+	CodexClientID     *string `yaml:"codex_client_id"`
 }
 
 type yamlNATSConfig struct {
@@ -175,8 +202,36 @@ func (y *yamlConfig) applyTo(cfg *Config) error {
 		if y.Auth.CookieSecure != nil {
 			cfg.Auth.CookieSecure = *y.Auth.CookieSecure
 		}
+		if y.Auth.OIDC != nil {
+			applyOIDCProvider(y.Auth.OIDC.Google, &cfg.Auth.OIDC.Google)
+			applyOIDCProvider(y.Auth.OIDC.GitHub, &cfg.Auth.OIDC.GitHub)
+			applyOIDCProvider(y.Auth.OIDC.Generic, &cfg.Auth.OIDC.Generic)
+		}
+		if y.Auth.OAuthForfait != nil {
+			applyString(y.Auth.OAuthForfait.AnthropicClientID, &cfg.Auth.OAuthForfait.AnthropicClientID)
+			applyString(y.Auth.OAuthForfait.CodexClientID, &cfg.Auth.OAuthForfait.CodexClientID)
+		}
+	}
+	if y.Sandbox != nil {
+		applyString(y.Sandbox.Default, &cfg.Sandbox.Default)
 	}
 	return nil
+}
+
+func applyOIDCProvider(src *yamlOIDCProviderConfig, dst *OIDCProviderConfig) {
+	if src == nil {
+		return
+	}
+	if src.Enabled != nil {
+		dst.Enabled = *src.Enabled
+	}
+	applyString(src.IssuerURL, &dst.IssuerURL)
+	applyString(src.ClientID, &dst.ClientID)
+	applyString(src.ClientSecret, &dst.ClientSecret)
+	if src.Scopes != nil {
+		dst.Scopes = *src.Scopes
+	}
+	applyString(src.DisplayName, &dst.DisplayName)
 }
 
 func applyString(src *string, dst *string) {

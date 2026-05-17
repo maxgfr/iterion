@@ -29,8 +29,13 @@ type GenericConnector struct {
 	scopes       []string
 	httpClient   *http.Client
 
-	once   sync.Once
+	// docMu guards doc, docOK, docErr — and serialises discovery
+	// attempts so concurrent SSO starts only fire one HTTP request at
+	// a time. Permanent caching via sync.Once would brick the
+	// connector after any transient boot-time error.
+	docMu  sync.Mutex
 	doc    discoveryDoc
+	docOK  bool
 	docErr error
 }
 
@@ -68,35 +73,40 @@ func (c *GenericConnector) Display() string    { return c.display }
 func (c *GenericConnector) SupportsPKCE() bool { return true }
 
 func (c *GenericConnector) discover(ctx context.Context) (discoveryDoc, error) {
-	c.once.Do(func() {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.issuerURL+"/.well-known/openid-configuration", nil)
-		if err != nil {
-			c.docErr = fmt.Errorf("oidc/generic: build discovery req: %w", err)
-			return
-		}
-		req.Header.Set("Accept", "application/json")
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			c.docErr = fmt.Errorf("oidc/generic: discovery: %w", err)
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode/100 != 2 {
-			c.docErr = fmt.Errorf("oidc/generic: discovery %d", resp.StatusCode)
-			return
-		}
-		var doc discoveryDoc
-		if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
-			c.docErr = fmt.Errorf("oidc/generic: decode discovery: %w", err)
-			return
-		}
-		if doc.AuthorizeURL == "" || doc.TokenURL == "" || doc.UserInfoURL == "" {
-			c.docErr = fmt.Errorf("oidc/generic: discovery missing endpoints")
-			return
-		}
-		c.doc = doc
-	})
-	return c.doc, c.docErr
+	c.docMu.Lock()
+	defer c.docMu.Unlock()
+	if c.docOK {
+		return c.doc, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.issuerURL+"/.well-known/openid-configuration", nil)
+	if err != nil {
+		c.docErr = fmt.Errorf("oidc/generic: build discovery req: %w", err)
+		return discoveryDoc{}, c.docErr
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		c.docErr = fmt.Errorf("oidc/generic: discovery: %w", err)
+		return discoveryDoc{}, c.docErr
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		c.docErr = fmt.Errorf("oidc/generic: discovery %d", resp.StatusCode)
+		return discoveryDoc{}, c.docErr
+	}
+	var doc discoveryDoc
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		c.docErr = fmt.Errorf("oidc/generic: decode discovery: %w", err)
+		return discoveryDoc{}, c.docErr
+	}
+	if doc.AuthorizeURL == "" || doc.TokenURL == "" || doc.UserInfoURL == "" {
+		c.docErr = fmt.Errorf("oidc/generic: discovery missing endpoints")
+		return discoveryDoc{}, c.docErr
+	}
+	c.doc = doc
+	c.docOK = true
+	c.docErr = nil
+	return c.doc, nil
 }
 
 func (c *GenericConnector) AuthorizeURL(ctx context.Context, redirectURI, state, codeVerifier string) (string, error) {
@@ -162,7 +172,10 @@ func (c *GenericConnector) ExchangeCode(ctx context.Context, code, redirectURI, 
 		return ExternalUser{}, fmt.Errorf("oidc/generic: empty access token")
 	}
 
-	uReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, doc.UserInfoURL, nil)
+	uReq, err := http.NewRequestWithContext(ctx, http.MethodGet, doc.UserInfoURL, nil)
+	if err != nil {
+		return ExternalUser{}, fmt.Errorf("oidc/generic: build userinfo req: %w", err)
+	}
 	uReq.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 	uReq.Header.Set("Accept", "application/json")
 	uResp, err := c.httpClient.Do(uReq)
@@ -185,6 +198,12 @@ func (c *GenericConnector) ExchangeCode(ctx context.Context, code, redirectURI, 
 	}
 	if info.Email == "" {
 		return ExternalUser{}, ErrEmailMissing
+	}
+	if !info.EmailVerified {
+		// Reject unverified emails so an adversary who can register the
+		// address at the IdP before the owner verifies it cannot claim
+		// the iterion account associated with that email.
+		return ExternalUser{}, ErrEmailNotVerified
 	}
 	name := info.Name
 	if name == "" {

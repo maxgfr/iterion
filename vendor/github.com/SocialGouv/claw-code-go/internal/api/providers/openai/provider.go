@@ -212,7 +212,7 @@ func (c *Client) buildRequest(req api.CreateMessageRequest) (*oaiRequest, error)
 
 	r := &oaiRequest{
 		Model:            wireModel,
-		Messages:         openaiwire.ConvertMessages(req.System, req.Messages),
+		Messages:         openaiwire.ConvertMessages(coalesceSystemPrompt(req), req.Messages),
 		Tools:            tools,
 		Stream:           true,
 		MaxTokens:        maxTokens,

@@ -3,6 +3,7 @@ package netproxy
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -228,7 +229,8 @@ func (p *Proxy) checkAuth(r *http.Request) bool {
 	// Basic). For Basic, the token may appear as the password.
 	switch {
 	case strings.HasPrefix(header, "Bearer "):
-		return strings.TrimSpace(strings.TrimPrefix(header, "Bearer ")) == p.token
+		presented := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
+		return constantTimeEqual(presented, p.token)
 	case strings.HasPrefix(header, "Basic "):
 		// Decode "user:pass"
 		raw := strings.TrimPrefix(header, "Basic ")
@@ -242,9 +244,17 @@ func (p *Proxy) checkAuth(r *http.Request) bool {
 		if !ok {
 			return false
 		}
-		return pass == p.token
+		return constantTimeEqual(pass, p.token)
 	}
 	return false
+}
+
+// constantTimeEqual compares two strings in time independent of the
+// common prefix length, defending against timing side-channels on the
+// proxy token. The threat is narrow (only containers that already
+// received the token can connect), but the discipline is cheap.
+func constantTimeEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 // notifyBlocked fires the OnBlocked hook safely.

@@ -416,7 +416,9 @@ func trySquashMerge(repoRoot, target, branchToMerge, originalBranch, message str
 
 	// Step 2: commit the squashed index. --no-edit prevents the editor
 	// from being invoked when MERGE_MSG was populated by --squash; -m
-	// supplies our aggregated message regardless.
+	// supplies our aggregated message regardless. `-m` consumes the
+	// very next argv element as the value, so a leading "-" in the
+	// message is fine here — exec.Command bypasses the shell.
 	if out, err := gitCmd("-C", repoRoot, "commit", "-m", message).CombinedOutput(); err != nil {
 		// `git commit` exits non-zero with "nothing to commit" if the
 		// squash diff was empty (e.g. branch already merged). Treat

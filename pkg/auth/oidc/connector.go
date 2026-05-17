@@ -58,9 +58,10 @@ type ExternalUser struct {
 
 // Sentinel errors raised by connectors. The HTTP layer maps them.
 var (
-	ErrUnknownProvider = errors.New("oidc: unknown provider")
-	ErrStateNotFound   = errors.New("oidc: state expired or unknown")
-	ErrEmailMissing    = errors.New("oidc: provider returned no email")
+	ErrUnknownProvider  = errors.New("oidc: unknown provider")
+	ErrStateNotFound    = errors.New("oidc: state expired or unknown")
+	ErrEmailMissing     = errors.New("oidc: provider returned no email")
+	ErrEmailNotVerified = errors.New("oidc: provider returned an unverified email")
 )
 
 // PendingAuth captures the per-flow state held server-side between
