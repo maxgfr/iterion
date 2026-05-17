@@ -415,6 +415,13 @@ func trySquashMerge(repoRoot, target, branchToMerge, originalBranch, message str
 		return "", err
 	}
 
+	// Capture the pre-merge HEAD so the "nothing to commit" soft-success
+	// path returns the genuine base SHA. `git merge --squash` does not
+	// move HEAD, so a post-failure readHEAD happens to give the same
+	// answer today — but if any future cleanup ever does move HEAD on
+	// the failure path, the return value would silently lie. Pin it now.
+	baseHead := readHEAD(repoRoot)
+
 	// Step 1: stage the squashed diff via `git merge --squash`. This
 	// updates the index + working tree to match branchToMerge but does
 	// NOT create a commit on its own; we follow up with `git commit`.
@@ -438,7 +445,7 @@ func trySquashMerge(repoRoot, target, branchToMerge, originalBranch, message str
 		// that as a soft success: nothing changed, target stays put.
 		// Anything else is a real failure — reset the index.
 		if strings.Contains(string(out), "nothing to commit") || strings.Contains(string(out), "no changes added to commit") {
-			return readHEAD(repoRoot), nil
+			return baseHead, nil
 		}
 		_ = gitCmd("-C", repoRoot, "reset", "--merge").Run()
 		return "", fmt.Errorf("git commit (squash) failed: %v\noutput: %s", err, string(out))

@@ -29,13 +29,18 @@ func newState() *state {
 }
 
 // isClaimed reports whether the actor is currently treating issueID
-// as "ours" — either in flight or queued for retry.
+// as "ours" — either in flight or queued for retry (but not yet fired:
+// once the retry timer fires we want the next tick to pick the issue
+// up so the dispatch can carry the accumulated Attempt count).
 func (s *state) isClaimed(issueID string) bool {
 	if _, ok := s.running[issueID]; ok {
 		return true
 	}
-	_, ok := s.retries[issueID]
-	return ok
+	r, ok := s.retries[issueID]
+	if !ok {
+		return false
+	}
+	return !r.Fired
 }
 
 // runningEntry tracks one in-flight dispatch. It outlives the actor's
@@ -73,6 +78,13 @@ type retryEntry struct {
 	DueAt      time.Time
 	LastError  string
 	Timer      *time.Timer
+	// Fired is true once the backoff timer has expired and the entry
+	// is ready for re-dispatch. We keep the entry around (with the
+	// running Attempt count) instead of deleting it on timer fire so
+	// the next dispatch can pick up the correct attempt number — the
+	// old code deleted on fire and re-derived attempt as 0 on the
+	// next tick.
+	Fired bool
 }
 
 // Snapshot is the read-only view the dashboard consumes. Built on

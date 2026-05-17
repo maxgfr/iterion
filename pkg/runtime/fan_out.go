@@ -192,6 +192,16 @@ func (e *Engine) execFanOut(ctx context.Context, rs *runState, routerNodeID stri
 		}
 	}
 	if convergenceNodeID == "" {
+		// All-done topology under best_effort: every branch ran to its
+		// own *ir.DoneNode without sharing a convergence point and no
+		// branch failed. Hand a terminal node ID back to the engine's
+		// main loop so it routes to run_finished — falling through to
+		// preComputedConvergence (empty here, since the branches diverge)
+		// would synthesize a "no convergence point" error and waste the
+		// successful work.
+		if isBestEffort && allTerminatedAtDone(results) {
+			return e.processConvergenceTerminal(rs, results)
+		}
 		// All branches failed before reaching convergence. Use the
 		// pre-computed convergence point (already computed above).
 		convergenceNodeID = preComputedConvergence
@@ -202,6 +212,22 @@ func (e *Engine) execFanOut(ctx context.Context, rs *runState, routerNodeID stri
 
 	// Process convergence.
 	return e.processConvergence(rs, convergenceNodeID, results)
+}
+
+// allTerminatedAtDone reports whether every branch finished cleanly at
+// an *ir.DoneNode. Branches with err != nil count as non-terminating —
+// best_effort tolerates them but the all-done shortcut requires every
+// branch to have produced a terminal exit.
+func allTerminatedAtDone(results []*branchResult) bool {
+	if len(results) == 0 {
+		return false
+	}
+	for _, r := range results {
+		if r.err != nil || !r.terminatedAtDone || r.terminalNodeID == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +243,15 @@ type branchResult struct {
 	joinNodeID       string // the join node this branch converged to (empty if terminal)
 	err              error
 	eventErrors      int // count of event emission failures (best-effort events)
+	// terminatedAtDone is true when the branch loop exited at an
+	// *ir.DoneNode rather than at a convergence/error/cancel. Used by
+	// best_effort fan_out to recognise the "every branch finished at
+	// its own done" topology — without this flag the post-loop
+	// convergence search would fail because joinNodeID is empty on each
+	// branch and preComputedConvergence is also empty (the branches
+	// diverge to distinct terminals).
+	terminatedAtDone bool
+	terminalNodeID   string // the *ir.DoneNode ID when terminatedAtDone
 }
 
 // execBranch runs a single parallel branch starting from the target of
@@ -292,6 +327,8 @@ func (e *Engine) execBranch(ctx context.Context, rs *runState, branchID string, 
 		// Stop at terminal nodes within a branch.
 		switch node.(type) {
 		case *ir.DoneNode:
+			result.terminatedAtDone = true
+			result.terminalNodeID = currentNodeID
 			return result
 		case *ir.FailNode:
 			result.err = fmt.Errorf("branch %s reached fail node %q", branchID, currentNodeID)
@@ -544,6 +581,35 @@ func (e *Engine) processConvergence(rs *runState, convergenceNodeID string, resu
 
 	// Return the convergence node ID — the main loop will execute it normally.
 	return convergenceNodeID, nil
+}
+
+// processConvergenceTerminal handles the best_effort all-done topology
+// (every branch ran to its own *ir.DoneNode and no branch failed).
+// Merges branch outputs/artifacts into the run state and hands back one
+// of the terminal node IDs so the engine's main loop emits run_finished.
+func (e *Engine) processConvergenceTerminal(rs *runState, results []*branchResult) (string, error) {
+	for _, r := range results {
+		for nodeID, output := range r.outputs {
+			rs.outputs[nodeID] = output
+		}
+		for name, output := range r.artifacts {
+			rs.artifacts[name] = output
+		}
+		for nodeID, version := range r.artifactVersions {
+			rs.artifactVersions[nodeID] = version
+		}
+	}
+	// Use the first branch's terminal node — the engine treats any Done
+	// node as run_finished, so picking one is unambiguous.
+	terminal := results[0].terminalNodeID
+	if err := e.emit(rs.ctx, rs.runID, store.EventJoinReady, terminal, map[string]interface{}{
+		"strategy":       ir.AwaitBestEffort.String(),
+		"terminal_join":  true,
+		"branches_total": len(results),
+	}); err != nil {
+		e.logger.Warn("failed to emit terminal convergence join_ready: %v", err)
+	}
+	return terminal, nil
 }
 
 // findConvergencePoint walks outgoing edges from the router's targets to
