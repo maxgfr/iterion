@@ -161,10 +161,39 @@ func TestCanonicalHostStripsPort(t *testing.T) {
 		"  GitHub.com:8080  ": "github.com",
 		"[::1]:443":           "::1",
 		"":                    "",
+		// Trailing root-zone dot: same host, must collapse so a literal
+		// rule like `github.com` keeps matching the absolute-FQDN form.
+		"github.com.":     "github.com",
+		"github.com.:443": "github.com",
+		// IDN: the Punycode and Unicode forms must canonicalise to the
+		// same ASCII label so an allowlist of "xn--bcher-kva.example"
+		// covers a CONNECT line for "bücher.example".
+		"xn--bcher-kva.example": "xn--bcher-kva.example",
+		"bücher.example":        "xn--bcher-kva.example",
 	}
 	for in, want := range cases {
 		if got := canonicalHost(in); got != want {
 			t.Errorf("canonicalHost(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestAllowFoldsTrailingDotAndIDN(t *testing.T) {
+	p, err := Compile(ModeAllowlist, []string{"github.com", "xn--bcher-kva.example"})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	cases := map[string]bool{
+		"github.com":            true,
+		"github.com.":           true, // trailing dot was previously dropped
+		"github.com:443":        true,
+		"bücher.example":        true, // IDN form matches the Punycode rule
+		"xn--bcher-kva.example": true,
+		"evil.example":          false,
+	}
+	for host, want := range cases {
+		if got := p.Allow(host); got != want {
+			t.Errorf("Allow(%q) = %v, want %v", host, got, want)
 		}
 	}
 }

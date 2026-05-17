@@ -243,6 +243,24 @@ func TestPromptBody(t *testing.T) {
 	}
 }
 
+// TestPromptBodyRecoveryDiagnostic guards F-DSL-13: a stray non-prompt
+// token inside the indented prompt body now produces a positioned
+// diagnostic instead of being silently swallowed.
+func TestPromptBodyRecoveryDiagnostic(t *testing.T) {
+	// The trailing `not_a_prompt_line:` would previously be eaten by
+	// the parser's `else { p.next() }` recovery with no signal. The
+	// lexer here keeps prompt mode active up to the dedent.
+	src := `prompt greeting:
+  Bonjour,
+  Comment allez-vous ?
+not_a_prompt_line:
+`
+	res := parser.Parse("test.iter", src)
+	if !hasDiagCode(res, parser.DiagUnexpectedToken) && !hasDiagCode(res, parser.DiagExpectedToken) {
+		t.Fatal("expected DiagUnexpectedToken or DiagExpectedToken once the prompt block dedents into a malformed top-level token")
+	}
+}
+
 func TestSchemaWithEnum(t *testing.T) {
 	src := `schema verdict:
   approved: bool

@@ -48,7 +48,18 @@ type Config struct {
 	Logger        *iterlog.Logger
 	Blob          blob.Client  // S3 / blob backend for artifact bodies
 	LockProvider  LockProvider // optional NATS KV-backed lock; nil → no-op
+	// MaxAttachmentBytes caps WriteAttachment payloads in bytes. Zero
+	// applies the default (defaultMaxAttachmentBytes). The cap is
+	// enforced server-side via io.LimitReader so a malicious or buggy
+	// uploader can't push the runner pod into OOM by streaming an
+	// arbitrarily large body.
+	MaxAttachmentBytes int64
 }
+
+// defaultMaxAttachmentBytes matches the documented upload cap on the
+// runs queue (50 MiB). Increase only after switching WriteAttachment to
+// stream into the blob backend instead of buffering into memory.
+const defaultMaxAttachmentBytes = 50 * 1024 * 1024
 
 // LockProvider is the abstraction MongoRunStore consults for
 // distributed run locks. The runner injects a NATS-KV-backed
@@ -71,15 +82,16 @@ type LockProvider interface {
 
 // Store implements store.RunStore on top of Mongo + a blob backend.
 type Store struct {
-	client       *mongo.Client
-	db           *mongo.Database
-	runs         *mongo.Collection
-	events       *mongo.Collection
-	runSeq       *mongo.Collection
-	interactions *mongo.Collection
-	blob         blob.Client
-	logger       *iterlog.Logger
-	lockProv     LockProvider
+	client             *mongo.Client
+	db                 *mongo.Database
+	runs               *mongo.Collection
+	events             *mongo.Collection
+	runSeq             *mongo.Collection
+	interactions       *mongo.Collection
+	blob               blob.Client
+	logger             *iterlog.Logger
+	lockProv           LockProvider
+	maxAttachmentBytes int64
 }
 
 // New connects to Mongo, pings to validate credentials, then ensures
@@ -109,17 +121,22 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 		return nil, fmt.Errorf("store/mongo: ping: %w", err)
 	}
 
+	maxAttach := cfg.MaxAttachmentBytes
+	if maxAttach <= 0 {
+		maxAttach = defaultMaxAttachmentBytes
+	}
 	db := cli.Database(cfg.Database)
 	s := &Store{
-		client:       cli,
-		db:           db,
-		runs:         db.Collection(colRuns),
-		events:       db.Collection(colEvents),
-		runSeq:       db.Collection(colRunSeq),
-		interactions: db.Collection(colInteractions),
-		blob:         cfg.Blob,
-		logger:       cfg.Logger,
-		lockProv:     cfg.LockProvider,
+		client:             cli,
+		db:                 db,
+		runs:               db.Collection(colRuns),
+		events:             db.Collection(colEvents),
+		runSeq:             db.Collection(colRunSeq),
+		interactions:       db.Collection(colInteractions),
+		blob:               cfg.Blob,
+		logger:             cfg.Logger,
+		lockProv:           cfg.LockProvider,
+		maxAttachmentBytes: maxAttach,
 	}
 	if err := s.EnsureSchema(ctx, cfg.EventsTTLDays); err != nil {
 		_ = cli.Disconnect(context.Background())

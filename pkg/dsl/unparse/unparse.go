@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/SocialGouv/iterion/pkg/dsl/ast"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
@@ -184,7 +185,14 @@ func Unparse(f *ast.File) string {
 		if h.Publish != "" {
 			writeProp(&b, "publish", h.Publish)
 		}
-		writeProp(&b, "interaction", h.Interaction.String())
+		// Skip when it matches the implicit Human default. Emitting it
+		// unconditionally introduced parse → unparse → re-parse noise
+		// (every authored human node gained a synthetic
+		// `interaction: human` line), and mirrors the same skip-if-default
+		// guard already applied to `session:` further down.
+		if h.Interaction != ast.InteractionHuman {
+			writeProp(&b, "interaction", h.Interaction.String())
+		}
 		if h.InteractionPrompt != "" {
 			writeProp(&b, "interaction_prompt", h.InteractionPrompt)
 		}
@@ -319,6 +327,41 @@ func writeProp(b *strings.Builder, key, value string) {
 
 func writeQuotedProp(b *strings.Builder, key, value string) {
 	fmt.Fprintf(b, "  %s: %q\n", key, value)
+}
+
+// writeIdentProp emits an identifier-shaped property (input, output,
+// publish, system, user, …). Iterion's grammar requires these to be
+// bare identifiers — but the AST is also constructed programmatically
+// (JSON round-trip, refactoring tools) where nothing forbids stuffing
+// a space or punctuation into the field. If we wrote those values
+// unquoted via writeProp, the round-trip Unparse → Parse would fail
+// with a cryptic lexer error far away from the offending field. Quote
+// the fallback so the malformed value at least round-trips into a
+// TokenString the parser can complain about precisely.
+func writeIdentProp(b *strings.Builder, key, value string) {
+	if isBareIdent(value) {
+		writeProp(b, key, value)
+		return
+	}
+	writeQuotedProp(b, key, value)
+}
+
+func isBareIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		if i == 0 {
+			if r != '_' && !unicode.IsLetter(r) {
+				return false
+			}
+			continue
+		}
+		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // writeReasoningEffortProp emits a reasoning_effort field. Bare enum
@@ -475,19 +518,19 @@ func writeAgentFields(b *strings.Builder, model, backend, provider, input, outpu
 		writeQuotedProp(b, "provider", provider)
 	}
 	if input != "" {
-		writeProp(b, "input", input)
+		writeIdentProp(b, "input", input)
 	}
 	if output != "" {
-		writeProp(b, "output", output)
+		writeIdentProp(b, "output", output)
 	}
 	if publish != "" {
-		writeProp(b, "publish", publish)
+		writeIdentProp(b, "publish", publish)
 	}
 	if system != "" {
-		writeProp(b, "system", system)
+		writeIdentProp(b, "system", system)
 	}
 	if user != "" {
-		writeProp(b, "user", user)
+		writeIdentProp(b, "user", user)
 	}
 	// Only emit session: when it's non-default. The previous if/else
 	// emitted it unconditionally — both branches called the same

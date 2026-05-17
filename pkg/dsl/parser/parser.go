@@ -604,7 +604,12 @@ func (p *parser) parsePromptDecl() *ast.PromptDecl {
 		return nil
 	}
 
-	// Collect prompt lines
+	// Collect prompt lines. Anything inside the indented block that is
+	// not a TokenPromptLine is a structural error — the lexer should
+	// only emit prompt-line tokens here. Without a diagnostic the
+	// parser silently swallowed the bad token and the resulting prompt
+	// was missing content with no signal to the author. Emit once per
+	// stray token so the report points at the precise offset.
 	var lines []string
 	for {
 		t := p.peek()
@@ -617,7 +622,7 @@ func (p *parser) parsePromptDecl() *ast.PromptDecl {
 		} else if t.Type == TokenEOF {
 			break
 		} else {
-			// Unexpected token in prompt body
+			p.addError(DiagUnexpectedToken, t, "unexpected "+t.Type.String()+" in prompt body (expected an indented text line)")
 			p.next()
 		}
 	}

@@ -90,7 +90,7 @@ schema empty:
   ok: bool
 
 prompt sys:
-  ## body
+  body
   hello
 
 agent entry_node:
@@ -133,7 +133,7 @@ schema empty:
   ok: bool
 
 prompt sys:
-  ## body
+  body
   hello
 
 agent writer:
@@ -159,7 +159,7 @@ schema empty:
   ok: bool
 
 prompt sys:
-  ## body
+  body
   hello
 
 agent writer:

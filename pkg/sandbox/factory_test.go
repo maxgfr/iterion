@@ -103,6 +103,55 @@ func TestFactoryCachesDriver(t *testing.T) {
 	}
 }
 
+func TestDriverForSpecRefusesNoopOnActiveMode(t *testing.T) {
+	registry := map[string]DriverConstructor{
+		"docker": func() (Driver, error) {
+			return nil, &ErrUnavailable{Driver: "docker", Reason: "not installed"}
+		},
+		"noop": func() (Driver, error) { return mkDriver("noop"), nil },
+	}
+	f := NewFactory(FactoryOptions{
+		Host:             HostLocal,
+		AvailableDrivers: registry,
+	})
+	// Active mode + noop fallback must hard-error.
+	if _, err := f.DriverForSpec(&Spec{Mode: ModeAuto}); err == nil {
+		t.Error("DriverForSpec(ModeAuto) should error when only noop is available")
+	}
+	if _, err := f.DriverForSpec(&Spec{Mode: ModeInline, Image: "alpine"}); err == nil {
+		t.Error("DriverForSpec(ModeInline) should error when only noop is available")
+	}
+	// Inactive modes degrade silently as before.
+	if _, err := f.DriverForSpec(&Spec{Mode: ModeNone}); err != nil {
+		t.Errorf("DriverForSpec(ModeNone) unexpected err = %v", err)
+	}
+	if _, err := f.DriverForSpec(nil); err != nil {
+		t.Errorf("DriverForSpec(nil) unexpected err = %v", err)
+	}
+}
+
+func TestDriverForSpecHonoursPreferredNoop(t *testing.T) {
+	registry := map[string]DriverConstructor{
+		"docker": func() (Driver, error) {
+			return nil, &ErrUnavailable{Driver: "docker", Reason: "not installed"}
+		},
+		"noop": func() (Driver, error) { return mkDriver("noop"), nil },
+	}
+	f := NewFactory(FactoryOptions{
+		Host:             HostLocal,
+		AvailableDrivers: registry,
+		PreferredDriver:  "noop",
+	})
+	// Operator explicitly selected noop → don't second-guess.
+	d, err := f.DriverForSpec(&Spec{Mode: ModeAuto})
+	if err != nil {
+		t.Fatalf("DriverForSpec with PreferredDriver=noop should succeed, got %v", err)
+	}
+	if d.Name() != "noop" {
+		t.Errorf("DriverForSpec().Name() = %q, want noop", d.Name())
+	}
+}
+
 func TestErrUnavailableMessage(t *testing.T) {
 	e := &ErrUnavailable{Driver: "docker", Reason: "binary not in PATH"}
 	got := e.Error()
