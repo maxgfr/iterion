@@ -1,8 +1,40 @@
-# doc-align (v0.11.0)
+# doc-align (v0.12.0)
 
 A dogfood-friendly iterion bot that detects mismatches between
 project documentation and actual code state, then fixes the
 **documentation** (never the code) and auto-commits on convergence.
+
+**v0.12.0 changes** (scope-honesty gate — reviewer-mediated
+feedback on repeated over-reach):
+- The v0.11 dogfood showed `enforce_fix_scope` correctly
+  reverting out-of-declaration edits — BUT `fix_claude` then
+  repeated the EXACT SAME 2-file scope violation
+  (`docs/cli-reference.md` + `docs/development.md`) on iters
+  2, 3, AND 4. The filet works mechanically; the fixer never
+  learned. v0.10 over-reach (fix_gpt editing the bot's own
+  skill) was a one-off; the v0.11 dogfood revealed a chronic
+  pattern instead.
+- v0.12 wires the revert history into the REVIEWER, not into
+  the fixer. The reviewer now reads
+  `input.cumulative_reverted_paths` (every revert, duplicates
+  preserved, fed forward via streak_check) and raises ONE
+  blocker per path appearing ≥ 3 times. The fixer learns from
+  the next reviewer's CRITIQUE channel, not from a direct
+  "you were reverted" signal — which would risk Goodhart's
+  law (pre-declare-everything games the contract).
+- New schema fields: `streak_state.cumulative_reverted_paths`
+  + `review_input.{previous,cumulative}_reverted_paths`. New
+  edge mappings: reviewer→streak_check now carries
+  `enforce_reverted_paths`; alt→reviewer now carries the
+  history. streak_check accumulates WITHOUT `unique()` —
+  duplicates are the signal.
+- Rule lives in `review_system` point 6 (SCOPE-HONESTY GATE)
+  with mechanical thresholds (≥ 3 = blocker, < 3 = silence).
+  The blocker reuses `mismatch_kind: stale_behavior_description`
+  to match the existing G4 contract-violation pattern; no
+  taxonomy growth required.
+- Bot graph unchanged (still 14 nodes, 21 edges) — pure
+  schema + prompt + edge-mapping change.
 
 **v0.11.0 changes** (mechanical fix-scope enforcement):
 - New tool node `enforce_fix_scope` runs between every
