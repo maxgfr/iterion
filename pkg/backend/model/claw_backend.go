@@ -413,6 +413,17 @@ func (b *ClawBackend) generateTextWithToolsAndSchema(ctx context.Context, client
 	recoveryOpts.MaxSteps = 1
 	recoveryOpts.ExplicitSchema = task.OutputSchema
 
+	// Emit an OnLLMRequest before the recovery pass so the timeline /
+	// Prometheus exporter sees two distinct LLM steps for a recovered
+	// tool loop instead of one (the recovery's tokens then attach to
+	// the original step in the aggregate, with no per-step accounting).
+	if b.hooks.OnLLMRequest != nil {
+		b.hooks.OnLLMRequest(task.NodeID, LLMRequestInfo{
+			Model:        task.Model,
+			MessageCount: len(recoveryOpts.Messages),
+			Timestamp:    time.Now(),
+		})
+	}
 	obj, recErr := GenerateObjectDirect[map[string]interface{}](ctx, client, recoveryOpts)
 	if recErr == nil && obj != nil && obj.Object != nil {
 		tokens := cost.Annotate(obj.Object, task.Model,

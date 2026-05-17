@@ -1081,8 +1081,34 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 				// before giving up.
 				if result.ParseFallback {
 					e.logger.Warn("[%s#%d/%s] structured output validation failed with parse fallback, retrying backend: %v", f.id, task.Iteration, backendName, err)
+					// Fire OnDelegateRetry so observers (Prometheus exporter,
+					// event sink) see the retry attempt — previously the
+					// schema-validation retry was invisible because the
+					// outer retryDelegateLoop only knows about transient
+					// errors, not schema-shape failures.
+					if e.hooks.OnDelegateRetry != nil {
+						e.hooks.OnDelegateRetry(f.id, DelegateInfo{
+							BackendName:        backendName,
+							Duration:           result.Duration,
+							Tokens:             result.Tokens,
+							ExitCode:           result.ExitCode,
+							Stderr:             result.Stderr,
+							RawOutputLen:       result.RawOutputLen,
+							ParseFallback:      result.ParseFallback,
+							FormattingPassUsed: result.FormattingPassUsed,
+							Error:              err,
+							Attempt:            1,
+						})
+					}
 					retryResult, retryErr := backend.Execute(ctx, task)
 					if retryErr == nil && !retryResult.ParseFallback {
+						// Accumulate token/duration/cost from the first
+						// attempt so per-node accounting reflects the full
+						// cost paid (dropping it understated the run's
+						// real usage and broke budget enforcement at the
+						// margins).
+						retryResult.Tokens += result.Tokens
+						retryResult.Duration += result.Duration
 						result = retryResult
 						// Re-attach metadata and re-validate.
 						stampDelegateOutputMeta(result.Output, result, backendName)
@@ -1389,9 +1415,22 @@ func statusCodeOf(err error) int {
 // OOM, SIGTERM, etc.) and I/O errors are retried. Permanent failures like
 // exit 1 (application error), exit 2 (misuse), or exit 127 (command not
 // found) are not retried.
+//
+// Typed-error fast paths come first: an *ErrTransient or *ErrRateLimited
+// raised explicitly by a backend bypasses the legacy stderr-string
+// heuristics, which are kept as a fallback for backends that haven't
+// been migrated yet (and for SDK-internal errors we don't own).
 func isDelegateRetryable(err error) bool {
 	if err == nil {
 		return false
+	}
+	var transient *delegate.ErrTransient
+	if errors.As(err, &transient) {
+		return true
+	}
+	var rateLimited *delegate.ErrRateLimited
+	if errors.As(err, &rateLimited) {
+		return true
 	}
 	msg := err.Error()
 	// Subprocess killed by signal (OOM, timeout, etc.).

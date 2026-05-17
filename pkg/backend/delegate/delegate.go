@@ -336,6 +336,27 @@ func (e *ErrRateLimited) Error() string {
 	return "rate_limited: " + e.Detail
 }
 
+// ErrTransient marks a backend failure the dispatcher should retry
+// (subprocess killed by OOM, peer reset, network blip, …). CLI
+// backends wrap stderr-matched indicators in this type so the executor's
+// retry classifier doesn't have to keep regex-matching error strings.
+//
+// Distinct from ErrRateLimited: rate-limit cases get their own retry
+// policy (longer backoff, provider-aware budgeting) and a separate
+// user-facing message.
+type ErrTransient struct {
+	Provider string // "claude_code", "codex", "claw", …
+	Reason   string // short human-readable category ("subprocess killed", "5xx upstream")
+	Detail   string // raw upstream message for diagnostics
+}
+
+func (e *ErrTransient) Error() string {
+	if e.Provider != "" {
+		return "transient (" + e.Provider + ", " + e.Reason + "): " + e.Detail
+	}
+	return "transient (" + e.Reason + "): " + e.Detail
+}
+
 // AskUserQuestionKey is the canonical key under which iterion files an
 // ask_user question in the Interaction record (and looks up the answer
 // on resume). Stable across runs so workflow authors can reference

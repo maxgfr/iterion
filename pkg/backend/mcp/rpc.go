@@ -158,6 +158,16 @@ func (c *sdkClient) ensureStarted(ctx context.Context) error {
 		}
 		c.startMu.Lock()
 		defer c.startMu.Unlock()
+		// Rewrap a starter-side context error so the waiter doesn't
+		// inherit a foreign deadline / cancellation. Otherwise a short
+		// HealthCheck-ctx starter would poison every concurrent
+		// CallTool waiter with the starter's DeadlineExceeded, hiding
+		// what is actually a peer-induced failure under an error that
+		// looks local to the waiter (errors.Is(err, context.Deadline)
+		// would return true even though the waiter's own ctx is fine).
+		if c.startErr != nil && isContextErr(c.startErr) {
+			return fmt.Errorf("mcp: peer start aborted: %w", c.startErr)
+		}
 		return c.startErr
 	}
 	if c.startErr != nil && !isContextErr(c.startErr) {
