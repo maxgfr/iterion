@@ -25,6 +25,10 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  # cosign keyless OIDC signing + SBOM attestations need an OIDC token
+  # at workflow level. The signing step itself runs in jobs that
+  # explicitly mount this permission.
+  id-token: write
 
 env:
   REGISTRY: ghcr.io
@@ -81,6 +85,42 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # ── Supply-chain attestation (Sprint-8 hardening) ─────────────
+      # Only sign + attest when we actually pushed an image (skipped on
+      # PR builds that only `load` into the local daemon). The digest is
+      # the unique address — signing the tag would let a later push
+      # under the same tag claim the signature.
+      - name: Install cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Generate SBOM (syft)
+        if: github.event_name != 'pull_request'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: iterion-image.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Sign image (cosign keyless OIDC)
+        if: github.event_name != 'pull_request'
+        run: |
+          cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      - name: Attest SBOM
+        if: github.event_name != 'pull_request'
+        run: |
+          cosign attest --yes \
+            --predicate iterion-image.spdx.json \
+            --type spdx \
+            "${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+
   # ----------------------------------------------------------------------
   # iterion-sandbox-slim — default image used by `sandbox: auto` when no
   # .devcontainer/devcontainer.json is found. Pinned to the iterion
@@ -131,6 +171,17 @@ jobs:
           labels: ${{ steps.meta-slim.outputs.labels }}
           cache-from: type=gha,scope=sandbox-slim
           cache-to: type=gha,mode=max,scope=sandbox-slim
+
+      - name: Install cosign (slim)
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign sandbox-slim image
+        if: github.event_name != 'pull_request'
+        run: |
+          cosign sign --yes "${REGISTRY}/${SANDBOX_IMAGE_NAME}@${DIGEST}"
+        env:
+          DIGEST: ${{ steps.build-slim.outputs.digest }}
 
   # ----------------------------------------------------------------------
   # iterion-sandbox-full — opt-in richer variant FROM the slim image.
@@ -201,4 +252,15 @@ jobs:
             BASE=${{ env.SANDBOX_FULL_BASE }}
           cache-from: type=gha,scope=sandbox-full
           cache-to: type=gha,mode=max,scope=sandbox-full
+
+      - name: Install cosign (full)
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign sandbox-full image
+        if: github.event_name != 'pull_request'
+        run: |
+          cosign sign --yes "${REGISTRY}/${SANDBOX_IMAGE_NAME}@${DIGEST}"
+        env:
+          DIGEST: ${{ steps.build-full.outputs.digest }}
 

@@ -185,7 +185,17 @@ Plumb it into your log aggregator (Loki, ELK, Datadog) and add a
 dashboard panel — useful both for cost attribution and as your
 defence-in-depth for the CGU guard discussed in §7.
 
-## 10. Troubleshooting
+## 10. Backup & restore
+
+The data plane's durable state lives in Mongo (runs, events,
+identity, sealed secrets) + the blob bucket (artifact bodies). The
+backup + restore drill — including the
+"Mongo and blob snapshot must overlap in time" invariant — lives in
+[docs/cloud-backup.md](cloud-backup.md). Run the restore drill
+quarterly against a sacrificial namespace; an unverified backup is no
+backup.
+
+## 11. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
