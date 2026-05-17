@@ -63,6 +63,8 @@ All diagnostic codes emitted during compilation (`ir.Compile`) and validation (`
 | **C070** | error | Preset references unknown variable | A `presets:` entry sets a key that does not match any name in `vars:` | Add the variable to `vars:`, or remove/rename the preset key |
 | **C071** | error | Preset value type mismatch | A `presets:` value's type (string/int/bool/list) does not match the declared `vars:` type | Cast the value to the declared type, or change the var's type |
 | **C072** | error | Duplicate preset name | The same preset name appears more than once in the `presets:` block | Rename or merge the duplicate preset |
+| **C080** | warning | Unknown capability | A `capabilities:` entry isn't in the built-in registry (currently: `board.read`, `board.create`, `board.move`, `board.assign`, `board.label`, `board.close`) | Either fix the typo or accept the warning — unknown caps still propagate to the executor (the registry is open for extension) |
+| **C081** | error | Malformed capability | A `capabilities:` entry doesn't match the shape `domain` or `domain.action` (lowercase letters/digits/underscores) | Use the lowercase `domain.action` form, e.g. `board.create` |
 
 > **Code reuse note:** `C030` is currently emitted with two distinct
 > meanings — the compile-time *Codex backend discouraged* warning shown

@@ -103,7 +103,8 @@ Other top-level directories: `editor/` (React/Vite frontend), `examples/` (.iter
 - `pkg/conductor/` — Long-running dispatcher: native kanban store, polling actor, tracker adapters (native, github, forgejo)
   - `tracker/` — `Tracker` interface + normalized `Issue` type + GitHub/Forgejo adapters
   - `native/` — Filesystem-backed kanban (board.json, issues/, events.jsonl) + REST + adapter
-- `pkg/cli/` — CLI command implementations (init, validate, run, inspect, resume, diagram, editor, report, conduct, issue, bench, bundle, sandbox, version)
+  - `native/boardops/` — capability-gated board operations shared by the `__mcp-board` stdio server, the `/api/v1/mcp/board` HTTP handler, and the claw in-process tools (`mcp.iterion_board.*`)
+- `pkg/cli/` — CLI command implementations (init, validate, run, inspect, resume, diagram, editor, report, conduct, issue, bench, bots, bundle, sandbox, version)
 - `pkg/benchmark/` — Metrics collection and reporting
 - `pkg/log/` — Leveled logger (error, warn, info, debug, trace) — public so e2e tests can construct it
 - `pkg/auth/` — Operator authentication primitives (SSO, session cookies) for cloud-mode endpoints
@@ -298,6 +299,29 @@ The editor's SPA exposes two new routes when the corresponding server
 flags are set: `/board` (kanban CRUD with drag-and-drop, gated on
 `server_info.native_tracker_enabled`) and `/conductor` (live dashboard
 with running + retry tables, gated on `server_info.conductor_enabled`).
+
+### Bot board access (capabilities)
+
+Agent and judge nodes can write to the native board by declaring a
+`capabilities:` list in the `.iter` DSL (e.g.
+`capabilities: [board.create, board.move, board.read]`). The runtime
+opens the matching tools transparently based on the backend:
+
+- **claude_code (default)** — registers an internal `__mcp-board` stdio
+  MCP server (subcommand of the iterion binary) and extends the
+  AllowedTools list with the granted `mcp__iterion_board__*` FQNs.
+- **claude_code (sandboxed)** — falls back to an HTTP transport at
+  `/api/v1/mcp/board` on the iterion server, authenticated via an
+  ephemeral `X-Iterion-Run` token registered by the runtime.
+- **claw** — registers the operations as in-process tools under
+  `mcp.iterion_board.*` via `pkg/backend/tool/claw_board_tools.go`.
+
+All three paths route through the same
+[pkg/conductor/native/boardops](pkg/conductor/native/boardops/ops.go)
+package, so validation and event semantics are identical. Capability
+diagnostics are `C080` (unknown cap, warning) and `C081` (malformed,
+error). The bot catalog used by `whats-next` is regenerated via
+`iterion bots list --format=skill --paths examples/`.
 
 ## Building the desktop app
 

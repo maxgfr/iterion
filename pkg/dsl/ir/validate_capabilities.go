@@ -4,9 +4,9 @@ import "regexp"
 
 // Capability diagnostics.
 const (
-	DiagUnknownCapability    DiagCode = "C080" // unknown capability name (warning, registry is open)
-	DiagMalformedCapability  DiagCode = "C081" // capability name does not match the required shape
-	DiagBoardCapInSandbox    DiagCode = "C082" // board.* capability requested while sandboxed (HTTP transport needed)
+	DiagUnknownCapability   DiagCode = "C080" // unknown capability name (warning, registry is open)
+	DiagMalformedCapability DiagCode = "C081" // capability name does not match the required shape
+	DiagBoardCapInSandbox   DiagCode = "C082" // board.* capability requested while sandboxed (HTTP transport needed)
 )
 
 // KnownCapabilities is the set of capabilities the iterion runtime understands

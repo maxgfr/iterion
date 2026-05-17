@@ -149,4 +149,3 @@ func dispatchMCPBoard(req mcpRequest, store *native.Store, caps boardops.Capabil
 	}
 	return resp
 }
-
