@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // HostKind identifies the iterion deployment topology.
@@ -74,8 +75,10 @@ func (e *ErrUnavailable) Error() string {
 
 // Factory selects and instantiates a [Driver] for a run.
 type Factory struct {
-	host       HostKind
-	preferred  string
+	host      HostKind
+	preferred string
+
+	mu         sync.Mutex
 	registry   map[string]DriverConstructor
 	cached     Driver // memoised result of [Factory.Driver]
 	cachedErr  error  // memoised error
@@ -105,16 +108,28 @@ func (f *Factory) Host() HostKind { return f.host }
 
 // Register adds (or replaces) a driver constructor. Driver sub-packages
 // register themselves via init() side-effects in package main / cmd
-// init code. Registration is not thread-safe and should happen during
-// process bootstrap.
+// init code. Registration is expected to happen during process
+// bootstrap; the mutex is here to prevent a torn read against the
+// concurrent [Factory.Driver] callers that show up during integration
+// tests rather than to support hot registration.
 func (f *Factory) Register(name string, ctor DriverConstructor) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.registry[name] = ctor
 	f.cacheValid = false
+	f.cached = nil
+	f.cachedErr = nil
 }
 
 // Available returns the names of registered drivers in stable order.
 // Useful for `iterion sandbox doctor` output.
 func (f *Factory) Available() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.availableLocked()
+}
+
+func (f *Factory) availableLocked() []string {
 	out := make([]string, 0, len(f.registry))
 	for k := range f.registry {
 		out = append(out, k)
@@ -132,8 +147,13 @@ func (f *Factory) Available() []string {
 //  3. If none succeed, return the noop driver (which is always
 //     constructible — see pkg/sandbox/noop).
 //
-// The result is cached for the lifetime of the Factory.
+// The result is cached for the lifetime of the Factory. Concurrent
+// callers serialize on f.mu so the cache is filled exactly once
+// (otherwise the read/write of cacheValid/cached racing across runs
+// could see cacheValid=true with cached=nil).
 func (f *Factory) Driver() (Driver, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.cacheValid {
 		return f.cached, f.cachedErr
 	}
@@ -142,7 +162,7 @@ func (f *Factory) Driver() (Driver, error) {
 	var err error
 
 	if f.preferred != "" {
-		d, err = f.tryDriver(f.preferred)
+		d, err = f.tryDriverLocked(f.preferred)
 		if err != nil {
 			f.cached, f.cachedErr, f.cacheValid = nil, fmt.Errorf("preferred driver %q: %w", f.preferred, err), true
 			return f.cached, f.cachedErr
@@ -152,18 +172,18 @@ func (f *Factory) Driver() (Driver, error) {
 	}
 
 	for _, name := range preferenceOrder(f.host) {
-		d, err = f.tryDriver(name)
+		d, err = f.tryDriverLocked(name)
 		if err == nil {
 			f.cached, f.cachedErr, f.cacheValid = d, nil, true
 			return d, nil
 		}
 	}
 
-	f.cached, f.cachedErr, f.cacheValid = nil, fmt.Errorf("no usable sandbox driver found (registry: %v)", f.Available()), true
+	f.cached, f.cachedErr, f.cacheValid = nil, fmt.Errorf("no usable sandbox driver found (registry: %v)", f.availableLocked()), true
 	return f.cached, f.cachedErr
 }
 
-func (f *Factory) tryDriver(name string) (Driver, error) {
+func (f *Factory) tryDriverLocked(name string) (Driver, error) {
 	ctor, ok := f.registry[name]
 	if !ok {
 		return nil, fmt.Errorf("driver %q not registered", name)

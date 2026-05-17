@@ -143,8 +143,17 @@ func (r *RecipeSpec) Apply(wf *ir.Workflow) (*ir.Workflow, error) {
 			}
 			cp := *existing
 			cp.Body = body
-			// Re-parse template refs is not needed at this layer;
-			// the runtime resolves templates from Body at execution time.
+			// Re-parse template refs from the new body so downstream
+			// validation passes (and any other consumer of
+			// Prompt.TemplateRefs) sees refs consistent with the body
+			// the runtime will resolve. Without this the field still
+			// carried refs from the original body, which the audit
+			// flagged as a defense-in-depth gap.
+			if refs, refErr := ir.ParseRefs(body); refErr == nil {
+				cp.TemplateRefs = refs
+			} else {
+				cp.TemplateRefs = nil
+			}
 			newPrompts[name] = &cp
 		}
 		applied.Prompts = newPrompts

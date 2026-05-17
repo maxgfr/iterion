@@ -180,6 +180,12 @@ func (c *Conductor) IsPaused() bool { return c.paused.Load() }
 // Snapshot returns a consistent view of the actor's state. After Stop
 // (or before Start) it returns a zero Snapshot rather than blocking
 // the caller indefinitely.
+//
+// The 5-second cap on the reply select guards against the actor
+// panicking between consuming the command and writing the reply
+// (the recovery is in actorLoop's defer, but a recovered panic still
+// drops the in-flight command). HTTP handlers calling Snapshot during
+// shutdown were observed wedged on the bare <-reply read.
 func (c *Conductor) Snapshot() Snapshot {
 	reply := make(chan Snapshot, 1)
 	select {
@@ -191,6 +197,8 @@ func (c *Conductor) Snapshot() Snapshot {
 	case s := <-reply:
 		return s
 	case <-c.stop:
+		return Snapshot{}
+	case <-time.After(5 * time.Second):
 		return Snapshot{}
 	}
 }

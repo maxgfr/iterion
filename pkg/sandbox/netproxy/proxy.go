@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -157,7 +158,16 @@ func (p *Proxy) Start(addr string) error {
 		Handler:           http.HandlerFunc(p.handle),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	go p.server.Serve(ln)
+	go func() {
+		// Serve always returns a non-nil error when it stops. The
+		// ordinary shutdown path produces http.ErrServerClosed; any
+		// other return is something we want to know about so the
+		// proxy doesn't quietly stop accepting connections while the
+		// rest of the run keeps trying to use it.
+		if err := p.server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fmt.Fprintf(os.Stderr, "netproxy: serve stopped with error: %v\n", err)
+		}
+	}()
 	p.running = true
 	return nil
 }
@@ -370,7 +380,16 @@ func tunnel(a, b net.Conn) {
 	<-done
 	_ = a.Close()
 	_ = b.Close()
-	<-done
+	// Wait for the second goroutine, but cap the wait so a peer in a
+	// pathological TCP state (half-closed, RST swallowed by netfilter,
+	// etc.) can't keep an io.Copy parked indefinitely. The first Close
+	// above should unblock it; if it doesn't within a few seconds the
+	// goroutine is genuinely wedged and waiting longer would only leak
+	// us along with it.
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+	}
 }
 
 var hopByHopHeaders = [...]string{

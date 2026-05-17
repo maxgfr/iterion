@@ -6,6 +6,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -178,7 +179,18 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 	for _, m := range p.spec.Mounts {
 		args = append(args, "--mount", m)
 	}
-	for k, v := range p.spec.Env {
+	// Iterate Env in sorted key order so validation errors and the
+	// resulting `docker run` argv are deterministic — Go's map
+	// iteration randomises order, which produced flaky tests when two
+	// env vars were both invalid (the error message would refer to
+	// whichever happened to be visited first).
+	envKeys := make([]string, 0, len(p.spec.Env))
+	for k := range p.spec.Env {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(envKeys)
+	for _, k := range envKeys {
+		v := p.spec.Env[k]
 		if err := validateEnvVar(k, v); err != nil {
 			return nil, fmt.Errorf("docker driver: env %s: %w", k, err)
 		}
@@ -391,8 +403,16 @@ func (r *Run) Cleanup(ctx context.Context) error {
 
 	// Then force-remove any lingering container with our run-id label,
 	// independent of the captured containerID (covers the case where
-	// the container died but didn't get auto-removed).
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// the container died but didn't get auto-removed). Use the
+	// caller's ctx as parent so a cancelled run aborts cleanup quickly
+	// (10s is a cap on the cleanup itself, not an extension past the
+	// caller's deadline). Falling back to context.Background when ctx
+	// is nil keeps the prior behaviour for niche callers.
+	parent := ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	cleanupCtx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 	out, err := runtimeCmdContext(cleanupCtx, r.driver.rt, "rm", "--force", r.containerID).CombinedOutput()
 	if err != nil {

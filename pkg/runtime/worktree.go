@@ -110,10 +110,16 @@ func setupWorktree(storeRoot, runID, repoHint string, logger *iterlog.Logger) (w
 	cleanup := func() {
 		// `--force` overrides protections; we accept the risk because the
 		// engine owns the worktree's lifecycle. Best-effort: errors are
-		// logged but do not fail the run.
+		// logged but do not fail the run. When no logger is configured
+		// the failure goes to stderr so it isn't completely silent —
+		// otherwise the worktree directory leaks on disk with no trace.
 		out, rmErr := gitCmd("-C", repoRoot, "worktree", "remove", "--force", wtPath).CombinedOutput()
-		if rmErr != nil && logger != nil {
-			logger.Warn("runtime: git worktree remove %s failed: %v\noutput: %s", wtPath, rmErr, string(out))
+		if rmErr != nil {
+			if logger != nil {
+				logger.Warn("runtime: git worktree remove %s failed: %v\noutput: %s", wtPath, rmErr, string(out))
+			} else {
+				fmt.Fprintf(os.Stderr, "runtime: git worktree remove %s failed: %v\noutput: %s\n", wtPath, rmErr, string(out))
+			}
 		}
 	}
 	return worktreeContext{
@@ -381,10 +387,17 @@ func guardMergeTarget(repoRoot, target, originalBranch, opName string) error {
 	if target != currentBranch {
 		return fmt.Errorf("%s of %q skipped: only the currently-checked-out branch (%q) is supported", opName, target, currentBranch)
 	}
-	if out, err := gitCmd("-C", repoRoot, "status", "--porcelain").Output(); err == nil {
-		if len(strings.TrimSpace(string(out))) > 0 {
-			return fmt.Errorf("main working tree has uncommitted changes")
-		}
+	// A failure of `git status --porcelain` itself must not be
+	// interpreted as "tree is clean" — that lets a transient git error
+	// (file lock, repo corruption, missing index) bypass the safety
+	// check and merge over potentially-dirty state. Treat any error as
+	// dirty / unknown.
+	out, err := gitCmd("-C", repoRoot, "status", "--porcelain").Output()
+	if err != nil {
+		return fmt.Errorf("git status check failed before %s: %w", opName, err)
+	}
+	if len(strings.TrimSpace(string(out))) > 0 {
+		return fmt.Errorf("main working tree has uncommitted changes")
 	}
 	return nil
 }
