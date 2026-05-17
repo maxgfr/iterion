@@ -26,11 +26,13 @@ import type { FirstClassBot } from "@/lib/pilote/firstClassBots";
 import {
   asEmitOutput,
   asRoadmapDoc,
+  asSurveyOutput,
   type PiloteMessage,
   type BannerMessage,
   type HumanQuestionMessage,
   type RoadmapCardMessage,
   type IssuesSummaryMessage,
+  type SurveyCardMessage,
 } from "./messages";
 
 interface MapInputs {
@@ -244,6 +246,20 @@ export function messagesFromEvents({
                 planPath: emit.planPath,
                 summary: emit.summary,
               } satisfies IssuesSummaryMessage);
+            }
+          } else if (entry.followCardKind === "survey") {
+            const survey = asSurveyOutput(checkpointOutput(snapshot, nodeId));
+            if (survey) {
+              out.push({
+                kind: "survey-card",
+                id: `${nodeId}:${iter}:survey`,
+                nodeId,
+                summary: survey.summary,
+                openQuestions: survey.openQuestions,
+                observations: survey.observations,
+                toplevelDirs: survey.toplevelDirs,
+                recentCommits: survey.recentCommits,
+              } satisfies SurveyCardMessage);
             }
           }
         }

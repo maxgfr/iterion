@@ -21,9 +21,8 @@ export interface PiloteNodeMapEntry {
   // Label shown in the progress banner ("Surveying repository…").
   label?: string;
   // For agent nodes whose output should be promoted to a typed card
-  // after the banner closes. Currently used for `roadmap` and
-  // `issuesSummary` follow-up renders.
-  followCardKind?: "roadmap" | "issuesSummary";
+  // after the banner closes. Each kind has its own renderer.
+  followCardKind?: "roadmap" | "issuesSummary" | "survey";
   // For "banner" entries: pluck this field from the node output as the
   // collapsed summary text. Optional — if absent, the banner closes
   // without a summary line.
@@ -74,7 +73,7 @@ export const FIRST_CLASS_BOTS: Readonly<Record<string, FirstClassBot>> = {
       explore: {
         kind: "banner",
         label: "Surveying the repository",
-        summaryField: "summary",
+        followCardKind: "survey",
       },
       ask_priorities: {
         kind: "human",

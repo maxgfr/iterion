@@ -6,6 +6,7 @@ import HumanChatTurn from "./HumanChatTurn";
 import IssuesSummaryCard from "./IssuesSummaryCard";
 import NodeBanner from "./NodeBanner";
 import RoadmapCard from "./RoadmapCard";
+import SurveyCard from "./SurveyCard";
 
 interface Props {
   messages: PiloteMessage[];
@@ -83,6 +84,8 @@ function MessageRow({
       return <RoadmapCard message={message} />;
     case "issues-summary":
       return <IssuesSummaryCard message={message} />;
+    case "survey-card":
+      return <SurveyCard message={message} />;
     case "session-closed":
       return <SessionClosedRow message={message} />;
   }
