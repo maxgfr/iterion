@@ -301,7 +301,22 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 			b.Logger.Warn("[%s#%d/claude-code] could not resolve iterion binary path; board MCP server disabled: %v", task.NodeID, task.Iteration, err)
 		}
 	} else if HasBoardCapability(task.Capabilities) && task.Sandbox != nil {
-		b.Logger.Warn("[%s#%d/claude-code] board capabilities granted but workflow is sandboxed; stdio MCP transport unavailable (HTTP loopback path will be wired in a follow-up)", task.NodeID, task.Iteration)
+		if task.BoardHTTPEndpoint != "" && task.BoardRunToken != "" {
+			opts = append(opts, claudesdk.WithMCPServer(boardMCPServerName, &claudesdk.MCPHTTPServer{
+				URL: task.BoardHTTPEndpoint,
+				Headers: map[string]string{
+					"X-Iterion-Run":  task.BoardRunToken,
+					"X-Iterion-Caps": strings.Join(task.Capabilities, ","),
+				},
+			}))
+			if len(task.AllowedTools) > 0 {
+				combined := append([]string(nil), task.AllowedTools...)
+				combined = append(combined, BoardToolsFor(task.Capabilities)...)
+				opts = append(opts, claudesdk.WithAllowedTools(combined...))
+			}
+		} else {
+			b.Logger.Warn("[%s#%d/claude-code] board capabilities granted but workflow is sandboxed and BoardHTTPEndpoint/BoardRunToken not configured; board MCP disabled for this node", task.NodeID, task.Iteration)
+		}
 	}
 
 	startTime := time.Now()
