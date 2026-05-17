@@ -348,3 +348,77 @@ jobs:
             echo "=== logs label app.kubernetes.io/name=$app ==="
             kubectl -n "${NS}" logs --tail=200 -l "app.kubernetes.io/name=$app" || true
           done
+
+  # ─── Hardening jobs (Sprint-8) ────────────────────────────────────
+  #
+  # These run in parallel with `test` and gate any push/PR independently
+  # of the heavier cloud-e2e cluster spin-up. They are intentionally
+  # cheap (~1 min each) so they catch their failure class fast.
+
+  vendor-check:
+    # `go mod vendor` regenerates vendor/ from the module cache. A
+    # divergence between go.mod and vendor/ silently changes what the
+    # CI runner compiles vs what a fresh clone compiles — the kind of
+    # drift that caused Sprint-8 to find 14h-old modules.txt against a
+    # fresher go.mod. Fail the PR before the drift lands.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: go mod verify
+        run: go mod verify
+      - name: Vendor + go.mod / go.sum freshness
+        run: |
+          set -euo pipefail
+          go mod tidy
+          go mod vendor
+          # `git diff --exit-code` fails when the previous two commands
+          # changed anything — that's exactly the condition we want to
+          # surface as a CI error rather than as a silent build skew.
+          git diff --exit-code go.mod go.sum vendor/
+
+  helm-lint:
+    # Catches values typing drift cheaply (~30s) so a broken values.yaml
+    # surfaces before the 25-minute cloud-e2e kind cluster bootstrap. The
+    # --strict pass on values-prod.yaml additionally rejects unknown
+    # keys, the most common foot-gun on a Helm chart upgrade.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v4
+      - name: helm dependency update
+        run: helm dependency update charts/iterion
+      - name: helm lint (values-dev.yaml)
+        run: helm lint charts/iterion -f charts/iterion/values-dev.yaml
+      - name: helm lint --strict (values-prod.yaml)
+        run: helm lint charts/iterion -f charts/iterion/values-prod.yaml --strict
+
+  govulncheck:
+    # govulncheck is call-graph aware (only reports CVEs whose vulnerable
+    # functions are actually reachable from this codebase). Trivy's
+    # filesystem scan catches the broader set including unused-import
+    # noise — we keep both. Advisory-only for now: a zero-day disclosure
+    # mid-release shouldn't gate a hotfix; results surface in the GitHub
+    # Security tab via SARIF so an operator can still triage.
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck (SARIF)
+        # `|| true` keeps the step non-blocking. The findings flow to
+        # the Security tab via the upload step below.
+        run: govulncheck -format sarif ./... > govulncheck.sarif || true
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: govulncheck.sarif
+          category: govulncheck

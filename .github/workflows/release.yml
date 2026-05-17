@@ -75,12 +75,57 @@ jobs:
           else
             shasum -a 256 "${OUTPUT}" > "${OUTPUT}.sha256"
           fi
+          # Expose the resolved output filename to subsequent steps via
+          # GITHUB_ENV so cosign + syft don't have to recompute it.
+          echo "BIN=${OUTPUT}" >> "$GITHUB_ENV"
+
+      # ─── Supply-chain attestation (Sprint-8 hardening) ─────────────
+      # Only run on the linux/amd64 leg: SBOM is per-source, not per-
+      # arch, so producing one artifact (rather than six copies) keeps
+      # the release page tidy. The binary signatures themselves still
+      # run on every matrix combination below.
+      - name: Generate SBOM (syft, SPDX + CycloneDX)
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: iterion-sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate SBOM (CycloneDX flavour)
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: iterion-sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign binary (cosign keyless OIDC)
+        # Keyless mode uses the GH Actions OIDC token issued under
+        # `id-token: write` (already declared at workflow level), so no
+        # private key is needed and the certificate is logged to the
+        # public Rekor transparency log. Brew + AUR consumers can
+        # verify with `cosign verify-blob --certificate <pem> \
+        # --signature <sig> --certificate-identity-regexp ...`.
+        run: |
+          cosign sign-blob --yes "${BIN}" \
+            --output-signature "${BIN}.sig" \
+            --output-certificate "${BIN}.pem"
 
       - uses: actions/upload-artifact@v7
         with:
           name: iterion-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
             iterion-${{ matrix.goos }}-${{ matrix.goarch }}*
+            iterion-sbom.spdx.json
+            iterion-sbom.cdx.json
 
   release:
     needs: build-binaries
@@ -118,6 +163,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write  # cosign keyless OIDC
     steps:
       - uses: actions/checkout@v6
 
@@ -143,5 +189,26 @@ jobs:
           helm package charts/iterion --destination dist/
 
       - name: Push chart to OCI
+        id: chart-push
+        # Capture the push output so we can resolve the digest for
+        # cosign — `helm push` prints `Digest: sha256:...` to stderr
+        # which we tee into a temp file.
         run: |
-          helm push dist/iterion-*.tgz "oci://ghcr.io/${REPO_LC}/charts"
+          set -euo pipefail
+          OUT=$(helm push dist/iterion-*.tgz "oci://ghcr.io/${REPO_LC}/charts" 2>&1 | tee /dev/stderr)
+          DIGEST=$(printf '%s\n' "$OUT" | awk '/^Digest:/ {print $2}')
+          VERSION=$(ls dist/iterion-*.tgz | sed -E 's|.*iterion-(.*)\.tgz|\1|')
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign chart OCI artifact (cosign keyless)
+        # OCI references must point at the digest, not the tag, so a
+        # later re-push under the same version can't claim our signature.
+        run: |
+          cosign sign --yes \
+            "ghcr.io/${REPO_LC}/charts/iterion@${DIGEST}"
+        env:
+          DIGEST: ${{ steps.chart-push.outputs.digest }}

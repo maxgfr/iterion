@@ -1,0 +1,39 @@
+# Default code owners. Branch-protection rules pull from this file to
+# require review on every PR; keep paths narrow enough that the owners
+# named here actually know the area.
+#
+# Syntax: <path or glob> <space-separated owners (@user, @org/team)>
+# Order matters: the last matching pattern wins.
+
+# Catch-all for the repo.
+* @SocialGouv/iterion-maintainers
+
+# DSL + runtime core — touching this should pull in the engine reviewers.
+/pkg/dsl/                @SocialGouv/iterion-maintainers
+/pkg/runtime/            @SocialGouv/iterion-maintainers
+/pkg/backend/            @SocialGouv/iterion-maintainers
+
+# Auth + identity surface — security-sensitive.
+/pkg/auth/               @SocialGouv/iterion-maintainers
+/pkg/identity/           @SocialGouv/iterion-maintainers
+/pkg/secrets/            @SocialGouv/iterion-maintainers
+
+# Cloud + ops surface.
+/pkg/cloud/              @SocialGouv/iterion-maintainers
+/pkg/runner/             @SocialGouv/iterion-maintainers
+/charts/                 @SocialGouv/iterion-maintainers
+/deploy/                 @SocialGouv/iterion-maintainers
+/.github/                @SocialGouv/iterion-maintainers
+/docker-compose*.yml     @SocialGouv/iterion-maintainers
+/Dockerfile              @SocialGouv/iterion-maintainers
+
+# Editor SPA.
+/editor/                 @SocialGouv/iterion-maintainers
+
+# Desktop wrapper.
+/cmd/iterion-desktop/    @SocialGouv/iterion-maintainers
+
+# Vendored dependencies — bumps should be deliberate.
+/vendor/                 @SocialGouv/iterion-maintainers
+/go.mod                  @SocialGouv/iterion-maintainers
+/go.sum                  @SocialGouv/iterion-maintainers
