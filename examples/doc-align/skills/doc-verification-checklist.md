@@ -107,6 +107,23 @@ your current iteration is folded in. Use it to plan: if coverage
 is at 60% and the target is 80%, you need to add ~10 files (of
 51) to `audited_docs` this iteration to meet the gate.
 
+## STEP 4b — Anchor consistency self-check (v0.4.0)
+
+Before submitting `blockers[]`, walk each entry once and confirm the
+`(anchor_kind, code_anchor)` pair is self-consistent per the
+table in `doc-mismatch-taxonomy.md`:
+
+- `symbol`     → anchor MUST contain `<path>:<identifier>`, NOT `<no longer exists>`
+- `line_range` → anchor MUST end with `:N` or `:N-M`
+- `removed`    → anchor MUST mention removal (e.g. `<no longer exists>` or "(removed in …)")
+- `external`   → anchor MUST be a path/URL without `:N` line markers
+
+Fix the inconsistency before emitting (or drop the blocker if you
+can't classify it cleanly). A blocker that the fixer cannot
+verify is worse than no blocker — it routes a fix-iteration
+session for nothing and the next reviewer will see the inconsistency
+as a contract violation.
+
 ## STEP 5 — Self-critique
 
 For each blocker you're about to emit, ask:

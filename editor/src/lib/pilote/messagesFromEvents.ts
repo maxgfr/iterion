@@ -26,11 +26,13 @@ import type { FirstClassBot } from "@/lib/pilote/firstClassBots";
 import {
   asEmitOutput,
   asRoadmapDoc,
+  asSurveyOutput,
   type PiloteMessage,
   type BannerMessage,
   type HumanQuestionMessage,
   type RoadmapCardMessage,
   type IssuesSummaryMessage,
+  type SurveyCardMessage,
 } from "./messages";
 
 interface MapInputs {
@@ -58,6 +60,70 @@ function getString(obj: Record<string, unknown> | null, key: string): string {
   return typeof v === "string" ? v : "";
 }
 
+// pickToolHint extracts a short human-readable hint from a tool_started
+// event's data. The runtime's tool data shape varies by tool; we try
+// a handful of well-known fields and fall back to undefined when none
+// fits. Defensive against arbitrary tool plugins — never throws.
+function pickToolHint(
+  data: Record<string, unknown>,
+  toolName: string | undefined,
+): string | undefined {
+  const input = (data.input ?? data.arguments ?? null) as
+    | Record<string, unknown>
+    | string
+    | null;
+  if (typeof input === "string") {
+    // Some tools serialise input as a JSON string; try to parse and
+    // recurse, otherwise treat the whole string as the hint.
+    try {
+      const parsed = JSON.parse(input) as Record<string, unknown>;
+      return pickToolHintFromObject(parsed, toolName);
+    } catch {
+      return truncateHint(input);
+    }
+  }
+  if (input && typeof input === "object") {
+    return pickToolHintFromObject(input as Record<string, unknown>, toolName);
+  }
+  return undefined;
+}
+
+function pickToolHintFromObject(
+  input: Record<string, unknown>,
+  toolName: string | undefined,
+): string | undefined {
+  // Common single-argument tools — most informative field first.
+  const priorityKeys = [
+    "command", // bash
+    "file_path", // read_file / write_file
+    "path",
+    "pattern", // glob / grep
+    "query",
+    "url",
+    "title", // create_issue
+    "id", // get_issue / transition_issue
+  ];
+  for (const key of priorityKeys) {
+    const v = input[key];
+    if (typeof v === "string" && v.length > 0) {
+      return truncateHint(v);
+    }
+  }
+  // Last resort: the first string field, if any.
+  for (const v of Object.values(input)) {
+    if (typeof v === "string" && v.length > 0) {
+      return truncateHint(v);
+    }
+  }
+  return toolName;
+}
+
+function truncateHint(s: string): string {
+  const flat = s.replace(/\s+/g, " ").trim();
+  if (flat.length <= 60) return flat;
+  return flat.slice(0, 57) + "…";
+}
+
 function iterationOf(evt: RunEvent): number {
   const raw = evt.data?.iteration;
   return typeof raw === "number" ? raw : 0;
@@ -83,6 +149,11 @@ export function messagesFromEvents({
   // (WS replay) doesn't push a second banner.
   const bannerIdx = new Map<string, number>(); // key -> index in `out`
   const humanIdx = new Map<string, number>();
+
+  // Latest banner index per node id — used by tool_started/llm_request
+  // to attribute live progress without having to know the iteration.
+  // Cleared on node_finished.
+  const activeBannerByNode = new Map<string, number>();
 
   // Track the latest pending human-question so we know which one
   // to flip to "answered" if the runtime ever sends a
@@ -113,6 +184,7 @@ export function messagesFromEvents({
             status: "running",
           } satisfies BannerMessage);
           bannerIdx.set(key, idx);
+          activeBannerByNode.set(nodeId, idx);
         } else if (entry.kind === "human") {
           // We push a *pending* human question on the matching
           // `human_input_requested`, not on node_started — the request
@@ -143,8 +215,12 @@ export function messagesFromEvents({
             ...(out[idx] as BannerMessage),
             status: "done",
             summary: summary || undefined,
+            // Drop the live progress once the banner is done — the
+            // summary takes its place.
+            progress: undefined,
           };
           out[idx] = updated;
+          activeBannerByNode.delete(nodeId);
 
           // Post-banner follow-up cards (roadmap, issues-summary).
           if (entry.followCardKind === "roadmap") {
@@ -171,8 +247,43 @@ export function messagesFromEvents({
                 summary: emit.summary,
               } satisfies IssuesSummaryMessage);
             }
+          } else if (entry.followCardKind === "survey") {
+            const survey = asSurveyOutput(checkpointOutput(snapshot, nodeId));
+            if (survey) {
+              out.push({
+                kind: "survey-card",
+                id: `${nodeId}:${iter}:survey`,
+                nodeId,
+                summary: survey.summary,
+                openQuestions: survey.openQuestions,
+                observations: survey.observations,
+                toplevelDirs: survey.toplevelDirs,
+                recentCommits: survey.recentCommits,
+              } satisfies SurveyCardMessage);
+            }
           }
         }
+        break;
+      }
+
+      case "tool_started": {
+        const nodeId = evt.node_id;
+        if (!nodeId) break;
+        const idx = activeBannerByNode.get(nodeId);
+        if (idx === undefined) break;
+        const banner = out[idx] as BannerMessage;
+        const data = evt.data ?? {};
+        const toolName =
+          typeof data.tool === "string" && data.tool ? data.tool : undefined;
+        const prev = banner.progress ?? { toolCount: 0 };
+        out[idx] = {
+          ...banner,
+          progress: {
+            toolCount: prev.toolCount + 1,
+            latestTool: toolName ?? prev.latestTool,
+            latestToolHint: pickToolHint(data, toolName) ?? prev.latestToolHint,
+          },
+        };
         break;
       }
 
