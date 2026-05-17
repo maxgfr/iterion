@@ -14,7 +14,7 @@ This is not a substitute for a full security review. It is the minimum bar.
 
 - [ ] **Auth enforcement on** in the server config: confirm `DisableAuth` is **not** set in the iterion server config (cloud mode requires auth by default; see `pkg/config/config.go`). There is no `AUTH_REQUIRED` env var — auth is gated by the `DisableAuth` config field, which must remain `false`/unset in any public deployment.
 - [ ] **Every `/api/*` route** is gated by `requireAuth` (verified in `pkg/server/server.go`). The health endpoints (`/healthz`, `/readyz`) and auth bootstrap routes are the only intentional exceptions; both are read-only and reveal no tenant state.
-- [ ] **JWT signing key** rotated from the chart default. `ITERION_JWT_SECRET` set to a 32+ character random value held in a Kubernetes Secret, not the values file.
+- [ ] **JWT signing key** rotated from the chart default. `ITERION_JWT_SECRET` must be a base64-encoded signing key with at least 32 decoded random bytes (for example, `openssl rand -base64 48`), held in a Kubernetes Secret, not the values file.
 - [ ] **SSO / OIDC** wired if you have ≥ 2 users. See [cloud-admin.md](cloud-admin.md) for OIDC bootstrap.
 - [ ] **Super-admin account** created with a strong password and 2FA enabled where the IdP supports it.
 

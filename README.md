@@ -117,18 +117,20 @@ All seven invoke the same Go core. The DSL, runtime, persistence and observabili
 mkdir my-project && cd my-project
 iterion init
 
-# Configure your API key
+# Authenticate Claude Code (the scaffolded workflow's backend)
+claude login
+
+# Optional: copy .env.example to .env to override PROJECT_DIR
 cp .env.example .env
-# Edit .env → set ANTHROPIC_API_KEY (or OPENAI_API_KEY)
-source .env && export ANTHROPIC_API_KEY
 
 # Validate the workflow
-iterion validate pr_refine_single_model.iter
+iterion validate pr_refine_single_model_backend.bot
 
 # Run it
-iterion run pr_refine_single_model.iter \
+iterion run pr_refine_single_model_backend.bot \
   --var pr_title="Fix auth middleware" \
-  --var review_rules="No SQL injection, no hardcoded secrets"
+  --var review_rules="No SQL injection, no hardcoded secrets" \
+  --var compliance_rules="Must satisfy the review rules and keep tests passing"
 ```
 
 `iterion init` creates a complete PR refinement workflow (review → plan → compliance check → act → verify) that you can run immediately.

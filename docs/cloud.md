@@ -41,7 +41,7 @@ queue:
 - **Local stack** for testing cloud mode end-to-end: `docker compose -f docker-compose.cloud.yml up` brings up Mongo + NATS + MinIO + iterion server + runner — see [`docker/`](../docker/) for init scripts
 - **Container image**: `ghcr.io/socialgouv/iterion:latest` (built by `.github/workflows/image.yml` on every main push and tag; scanned by `.github/workflows/trivy.yml` post-build and weekly — non-blocking, findings land in the repo Security tab)
 - **Health probes**: `GET /healthz` (liveness, always 200) and `GET /readyz` (200 when Mongo/NATS/S3 are reachable in cloud mode)
-- **Auth**: `ITERION_SESSION_TOKEN` and `ITERION_AUTH_TOKEN` env vars gate the API; health endpoints are auth-exempt
+- **Auth**: JWT/cookie based — `ITERION_JWT_SECRET` signs access tokens issued by login/refresh, `ITERION_SECRETS_KEY` seals credentials, API clients present the access JWT as `Authorization: Bearer`, the `iterion_auth` cookie, or WS `?t=`, and health/auth bootstrap endpoints are auth-exempt
 
 ---
 
