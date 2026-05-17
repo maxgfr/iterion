@@ -25,6 +25,7 @@ blocker for this bot**. Either fit it into the taxonomy or drop it.
 | `obsolete_capability` | Docs list a feature or capability the code no longer supports (or has not yet shipped). | README lists `--web-ui` as a flag, the web UI was extracted to a separate binary. |
 | `wrong_directory_layout` | A directory / package tree shown in docs (e.g. ASCII tree, table of `pkg/` contents) is incomplete or misaligned with the filesystem. | CLAUDE.md's `pkg/` breakdown omits `pkg/conductor/native/` which exists on disk. |
 | `comment_lies_about_function` | A Go (`//` or `/* */`) comment on a function, method, or package misstates what the code does. Only applies when `go_comment_globs` is non-empty. | `// fetchUser loads a user by ID` but the function loads users by email, not ID. |
+| `undocumented_capability` | A code-exposed identifier (CLI command, CLI flag, diagnostic code) exists in the code but no doc in scope lists it. Counter-omission audit direction (code→doc), distinct from `obsolete_capability` (doc lists feature, code removed it). Reviewer extracts the surface from `input.cli_commands`/`cli_flags`/`diagnostic_codes` (v0.6.0). | `cmd/iterion/runner.go` exposes `iterion runner` but `docs/cli-reference.md` doesn't list it. |
 
 ## Severity guidance
 
