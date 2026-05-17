@@ -34,7 +34,7 @@ func TestDetect_BotzArchive(t *testing.T) {
 
 func TestDetect_BundleDir(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "bot.iter"), []byte("# stub"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.bot"), []byte("# stub"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	kind, err := Detect(dir)
@@ -176,12 +176,12 @@ func TestOpen_RejectsBundleWithoutBotIter(t *testing.T) {
 		{Name: "manifest.yaml", Body: []byte("name: ghost\nschema_version: 1\n")},
 	})
 	_, _, err := Open(dest, t.TempDir())
-	errContains(t, err, "no bot.iter")
+	errContains(t, err, "no main.bot")
 }
 
 func TestOpenDir_DiscoversResources(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "bot.iter"), []byte(minimalBotIter), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.bot"), []byte(minimalBotIter), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "skills"), 0o755); err != nil {

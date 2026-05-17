@@ -176,7 +176,7 @@ The whats-next pipeline almost never needs to author DSL. If
    (`vibe_feature_dev`, `whole_improve_loop`,
    `secured-renovacy`) covers the use case. Usually one does.
 2. If a new bot really is needed, the `next_action` should be
-   "manually author a new bot at `examples/<slug>/bot.bot`"
+   "manually author a new bot at `examples/<slug>/main.bot`"
    (with `bot_to_run="none"`) — NOT "auto-invoke
    `iterion run` on a non-existent file".
 3. Record the desired bot shape in the plan markdown's "Next

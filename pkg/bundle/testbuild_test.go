@@ -96,12 +96,12 @@ workflow demo:
   runner -> done
 `
 
-// fixtureMinimalBundle builds the smallest valid `.botz` (just `bot.iter`).
+// fixtureMinimalBundle builds the smallest valid `.botz` (just `main.bot`).
 func fixtureMinimalBundle(t *testing.T) string {
 	t.Helper()
 	dest := filepath.Join(t.TempDir(), "minimal.botz")
 	buildBotz(t, dest, []tarEntry{
-		{Name: "bot.iter", Body: []byte(minimalBotIter)},
+		{Name: "main.bot", Body: []byte(minimalBotIter)},
 	})
 	return dest
 }
@@ -112,7 +112,7 @@ func fixtureBundleWithSkillsPrompts(t *testing.T) string {
 	t.Helper()
 	dest := filepath.Join(t.TempDir(), "with-skills.botz")
 	buildBotz(t, dest, []tarEntry{
-		{Name: "bot.iter", Body: []byte(minimalBotIter)},
+		{Name: "main.bot", Body: []byte(minimalBotIter)},
 		{Name: "manifest.yaml", Body: []byte("name: test-bundle\nversion: 0.1.0\nschema_version: 1\n")},
 		{Name: "skills/", Typeflag: tar.TypeDir},
 		{Name: "skills/probe.md", Body: []byte("# Probe skill\n\nReturn the string 'ok'.\n")},
@@ -126,7 +126,7 @@ func fixturePathTraversal(t *testing.T) string {
 	t.Helper()
 	dest := filepath.Join(t.TempDir(), "traversal.botz")
 	buildBotz(t, dest, []tarEntry{
-		{Name: "bot.iter", Body: []byte(minimalBotIter)},
+		{Name: "main.bot", Body: []byte(minimalBotIter)},
 		{Name: "../evil.txt", Body: []byte("pwned")},
 	})
 	return dest
@@ -136,7 +136,7 @@ func fixtureAbsolutePath(t *testing.T) string {
 	t.Helper()
 	dest := filepath.Join(t.TempDir(), "abs.botz")
 	buildBotz(t, dest, []tarEntry{
-		{Name: "bot.iter", Body: []byte(minimalBotIter)},
+		{Name: "main.bot", Body: []byte(minimalBotIter)},
 		{Name: "/etc/abs.txt", Body: []byte("nope")},
 	})
 	return dest
@@ -146,7 +146,7 @@ func fixtureSymlinkEscape(t *testing.T) string {
 	t.Helper()
 	dest := filepath.Join(t.TempDir(), "symlink.botz")
 	buildBotz(t, dest, []tarEntry{
-		{Name: "bot.iter", Body: []byte(minimalBotIter)},
+		{Name: "main.bot", Body: []byte(minimalBotIter)},
 		{Name: "link", Typeflag: tar.TypeSymlink, Linkname: "../../escape"},
 	})
 	return dest
@@ -158,7 +158,7 @@ func fixtureOversize(t *testing.T) string {
 	// We rely on ITERION_BUNDLE_MAX_BYTES being lowered for the test.
 	big := bytes.Repeat([]byte{'a'}, 1024)
 	buildBotz(t, dest, []tarEntry{
-		{Name: "bot.iter", Body: []byte(minimalBotIter)},
+		{Name: "main.bot", Body: []byte(minimalBotIter)},
 		{Name: "big.bin", Body: big},
 	})
 	return dest

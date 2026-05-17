@@ -86,7 +86,7 @@ func onceTrueThenFalse() func() bool {
 // Asserts: emit_sbom ran once, no per-package nodes touched, no
 // reviewer ran (phase2_decider short-circuits to done).
 func TestSecuredRenovacy_PatchFastTrack(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "secured-renovacy/bot.bot")
+	wf := compileFixtureStubSafe(t, "secured-renovacy/main.bot")
 	exec := newScenarioExecutor()
 
 	exec.on("detect_stack", func(_ map[string]interface{}) (map[string]interface{}, error) {
@@ -234,7 +234,7 @@ func TestSecuredRenovacy_PatchFastTrack(t *testing.T) {
 //	alt_review → reviewer_claude(approve) → streak_check → alt_review →
 //	reviewer_gpt(approve) → streak_check.stop → emit_sbom → done
 func TestSecuredRenovacy_PerPackageMinor(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "secured-renovacy/bot.bot")
+	wf := compileFixtureStubSafe(t, "secured-renovacy/main.bot")
 	exec := newScenarioExecutor()
 
 	exec.on("detect_stack", func(_ map[string]interface{}) (map[string]interface{}, error) {
@@ -416,7 +416,7 @@ func TestSecuredRenovacy_PerPackageMinor(t *testing.T) {
 // returns stable=true on the second invocation. The run then proceeds
 // through commit and exits via the phase2 reviewers.
 func TestSecuredRenovacy_FixLoopThenCommit(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "secured-renovacy/bot.bot")
+	wf := compileFixtureStubSafe(t, "secured-renovacy/main.bot")
 	exec := newScenarioExecutor()
 
 	// Reuse all per-package stubs from PerPackageMinor.

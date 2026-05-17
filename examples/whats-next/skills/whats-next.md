@@ -137,7 +137,7 @@ costs nothing here; a wrong recommendation is expensive.
 
 ## How this skill is wired
 
-The companion workflow `examples/whats-next/bot.bot` operationalises
+The companion workflow `examples/whats-next/main.bot` operationalises
 this playbook as a 9-node iterion graph: explore → ask_priorities →
 propose_roadmap → carry_roadmap → human_review ⇄ revise_roadmap →
 emit_action → done. The graph guarantees the phases happen in order

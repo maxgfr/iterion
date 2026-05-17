@@ -10,11 +10,11 @@ import (
 )
 
 // TestEngineRunnerAcceptsBundleDir verifies that an unpacked bundle
-// directory (manifest.yaml + bot.iter alongside) is a valid workflow
+// directory (manifest.yaml + main.bot alongside) is a valid workflow
 // source — the conductor can run it just like a plain `.iter`.
 func TestEngineRunnerAcceptsBundleDir(t *testing.T) {
 	// examples/secured-renovacy/ has the canonical bundle shape:
-	// manifest.yaml + bot.iter + prompts/. Walk up from the test
+	// manifest.yaml + main.bot + prompts/. Walk up from the test
 	// binary's working dir (pkg/conductor) to the repo root.
 	repoRoot, err := filepath.Abs("../..")
 	if err != nil {

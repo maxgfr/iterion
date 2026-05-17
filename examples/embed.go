@@ -13,13 +13,13 @@
 // journals and large non-recipe assets (images, mcp test servers,
 // github-actions YAML) are intentionally excluded to keep the binary
 // slim. Archived legacy examples live under `.archive/examples/` and
-// are NOT embedded. Bundle directories (`<name>/bot.iter` + manifest
+// are NOT embedded. Bundle directories (`<name>/main.bot` + manifest
 // + skills + prompts + attachments) are NOT embedded either — they
 // have to be loaded by explicit path (`iterion run examples/<name>/`
 // or against the packed `<name>.botz`); embedding them would lose
 // the adjacent skills/prompts/attachments resources that make a
 // bundle a bundle, plus encoding the whole tree as embedded bytes
-// inflates the binary far more than a single .iter does.
+// inflates the binary far more than a single .bot does.
 package examples
 
 import (

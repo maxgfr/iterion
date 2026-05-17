@@ -48,8 +48,8 @@ type PackResult struct {
 
 // PackDir creates a .botz tar.gz archive at outPath from the contents
 // of srcDir. The bundle layout is the same as accepted by [Open] /
-// [OpenDir]: bot.iter (or bot.bot) at the root, plus optional
-// manifest.yaml, skills/, prompts/, attachments/.
+// [OpenDir]: main.bot at the root, plus optional manifest.yaml,
+// skills/, prompts/, attachments/.
 //
 // The archive is deterministic — entries are sorted alphabetically,
 // timestamps zeroed, ownership stripped, modes uniformly set — so two
@@ -59,7 +59,7 @@ type PackResult struct {
 //
 // Returns an error when:
 //   - srcDir is not a directory
-//   - srcDir contains no bot.iter or bot.bot at root
+//   - srcDir contains no main.bot at root
 //   - any entry is a symlink, device, or non-regular file
 //   - outPath already exists (use --force at the CLI layer to overwrite)
 func PackDir(srcDir, outPath string) (*PackResult, error) {
@@ -84,7 +84,7 @@ func PackDir(srcDir, outPath string) (*PackResult, error) {
 		}
 	}
 	if !hasBot {
-		return nil, fmt.Errorf("bundle/pack: %s contains no bot.iter or bot.bot at root", absSrc)
+		return nil, fmt.Errorf("bundle/pack: %s contains no main.bot at root", absSrc)
 	}
 
 	absOut, err := filepath.Abs(outPath)

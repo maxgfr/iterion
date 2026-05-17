@@ -75,7 +75,7 @@ for the generator (the seed for a future `generate-skills.bot`).
 
 ```bash
 # From the source directory
-devbox run -- iterion run examples/whats-next/bot.bot
+devbox run -- iterion run examples/whats-next/main.bot
 
 # Or from the packed bundle
 devbox run -- iterion bundle pack examples/whats-next/
@@ -85,7 +85,7 @@ devbox run -- iterion run examples/whats-next.botz
 You can override `workspace_dir` and pass optional `scope_notes`:
 
 ```bash
-devbox run -- iterion run examples/whats-next/bot.bot \
+devbox run -- iterion run examples/whats-next/main.bot \
   --var workspace_dir=/path/to/my-repo \
   --var scope_notes="focus on the conductor layer, ignore the editor"
 ```
