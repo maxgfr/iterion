@@ -1,8 +1,25 @@
-# doc-align (v0.7.0)
+# doc-align (v0.8.0)
 
 A dogfood-friendly iterion bot that detects mismatches between
 project documentation and actual code state, then fixes the
 **documentation** (never the code) and auto-commits on convergence.
+
+**v0.8.0 changes** (configurable exclusion → multi-repo audit):
+- `excluded_dirs` is now a `--var`-overridable comma-separated
+  list (was hardcoded in scan_docs's python). Default still
+  covers `.iterion`, `.works`, `.claude`, `vendor`,
+  `node_modules`, `.git`, `dist`, `build`, `out`.
+- Drop `.works` from the list to audit sibling repos checked
+  out under `.works/<name>/` in the same run:
+  ```bash
+  iterion run examples/doc-align/ \
+    --var excluded_dirs=".iterion,.claude,vendor,node_modules,.git,dist,build,out" \
+    --var doc_globs="README.md,CLAUDE.md,docs/**/*.md,.works/*/README.md,.works/*/docs/**/*.md"
+  ```
+- Cross-repo references (an iterion doc citing
+  `.works/claw-code-go/...`) were already supported at the
+  reviewer level (read_file is unrestricted); v0.8.0 makes the
+  scanner symmetric.
 
 **v0.7.0 changes** (GPT session inherit, finally):
 - `reviewer_gpt` now declares `session: inherit_if_available` —
