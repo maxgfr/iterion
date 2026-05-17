@@ -121,3 +121,50 @@ func TestIOResultDurationMillisecondPrecision(t *testing.T) {
 		t.Errorf("expected sub-ms duration to round to 0, got %v", got.Duration)
 	}
 }
+
+// TestIOTaskCarriesCapabilitiesAndBoardWiring guards the data-integrity
+// fix for the capability + board-wiring fields that were previously
+// dropped at the IPC boundary, so a capability-gated agent running
+// inside a sandbox lost its board access and provider routing.
+func TestIOTaskCarriesCapabilitiesAndBoardWiring(t *testing.T) {
+	original := Task{
+		NodeID:             "agent-1",
+		Capabilities:       []string{"board.create", "board.read"},
+		StoreDir:           "/tmp/iterion-store",
+		BoardHTTPEndpoint:  "http://host.docker.internal:7000/api/v1/mcp/board",
+		BoardRunToken:      "deadbeef",
+		ProviderHint:       "anthropic",
+		SessionFingerprint: "anthropic-direct",
+	}
+	wire := ToIOTask(original)
+	data, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded IOTask
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	got := FromIOTask(decoded)
+
+	if len(got.Capabilities) != 2 ||
+		got.Capabilities[0] != "board.create" ||
+		got.Capabilities[1] != "board.read" {
+		t.Errorf("Capabilities lost: %v", got.Capabilities)
+	}
+	if got.StoreDir != original.StoreDir {
+		t.Errorf("StoreDir = %q", got.StoreDir)
+	}
+	if got.BoardHTTPEndpoint != original.BoardHTTPEndpoint {
+		t.Errorf("BoardHTTPEndpoint = %q", got.BoardHTTPEndpoint)
+	}
+	if got.BoardRunToken != original.BoardRunToken {
+		t.Errorf("BoardRunToken = %q", got.BoardRunToken)
+	}
+	if got.ProviderHint != original.ProviderHint {
+		t.Errorf("ProviderHint = %q", got.ProviderHint)
+	}
+	if got.SessionFingerprint != original.SessionFingerprint {
+		t.Errorf("SessionFingerprint = %q", got.SessionFingerprint)
+	}
+}
