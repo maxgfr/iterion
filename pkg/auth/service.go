@@ -150,6 +150,11 @@ func (s *Service) Login(ctx context.Context, email, password, userAgent, ip stri
 		return LoginResult{}, ErrAccountDisabled
 	}
 	if u.LockedUntil != nil && s.now().Before(*u.LockedUntil) {
+		// Spend the same argon2id cycles a real attempt would, so a
+		// network observer can't distinguish "locked" from "wrong
+		// password" by response timing. The LockoutDuration docstring
+		// promises this; the gate must honour it.
+		_, _ = VerifyPassword(password, dummyHash)
 		return LoginResult{}, ErrInvalidCredentials
 	}
 	ok, err := VerifyPassword(password, u.PasswordHash)
