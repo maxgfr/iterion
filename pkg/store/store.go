@@ -1075,13 +1075,20 @@ func (s *FilesystemRunStore) OpenRunFile(_ context.Context, runID, relPath strin
 	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
 		return nil, RunFileInfo{}, fmt.Errorf("store: run file not found")
 	}
-	info, err := os.Stat(absReal)
-	if err != nil || info.IsDir() {
+	// Open with O_NOFOLLOW on the final component to close the TOCTOU
+	// window between EvalSymlinks/Stat above and Open: an attacker who
+	// could swap absReal for a symlink to /etc/shadow between the
+	// resolve and the open would be defeated — the open returns ELOOP
+	// instead of following the new symlink. Stat the descriptor itself
+	// (not the path) so the size/mtime reflect what we actually opened.
+	f, err := openNoFollow(absReal)
+	if err != nil {
 		return nil, RunFileInfo{}, fmt.Errorf("store: run file not found")
 	}
-	f, err := os.Open(absReal)
-	if err != nil {
-		return nil, RunFileInfo{}, fmt.Errorf("store: open run file: %w", err)
+	info, err := f.Stat()
+	if err != nil || info.IsDir() {
+		_ = f.Close()
+		return nil, RunFileInfo{}, fmt.Errorf("store: run file not found")
 	}
 	return f, RunFileInfo{
 		Path:       filepath.ToSlash(rel),

@@ -352,6 +352,13 @@ func (m *Manager) ensureServer(ctx context.Context, registry *tool.Registry, ser
 	for _, info := range toolsList {
 		serverName := server
 		toolName := info.Name
+		// Pre-compute whether this tool actually declares a `limit`
+		// integer property in its input schema. The auto-retry below
+		// only fires when both the tool name is "Read" AND the schema
+		// shape matches the Claude Code Read tool. A third-party MCP
+		// server that exposes a tool literally named "Read" with a
+		// different signature won't have its args overwritten.
+		toolHasLimitParam := schemaDeclaresLimit(info.InputSchema)
 		if err := registry.RegisterMCP(serverName, toolName, info.Description, info.InputSchema, func(callCtx context.Context, input json.RawMessage) (string, error) {
 			var args map[string]interface{}
 			if len(input) > 0 && string(input) != "null" {
@@ -366,13 +373,21 @@ func (m *Manager) ensureServer(ctx context.Context, registry *tool.Registry, ser
 			}
 			text, fmtErr := formatToolResult(result)
 			// Auto-retry Read with a smaller limit on "exceeds maximum tokens".
-			if fmtErr != nil && toolName == "Read" && strings.Contains(fmtErr.Error(), "exceeds maximum allowed tokens") {
-				args["limit"] = float64(300)
-				retryResult, retryErr := client.CallTool(callCtx, toolName, args)
-				if retryErr != nil {
-					return "", retryErr
+			// Gated on (a) tool name, (b) error string, (c) schema declares limit,
+			// (d) caller didn't already set a limit (don't clobber).
+			if fmtErr != nil && toolName == "Read" && toolHasLimitParam &&
+				strings.Contains(fmtErr.Error(), "exceeds maximum allowed tokens") {
+				if args == nil {
+					args = make(map[string]interface{})
 				}
-				return formatToolResult(retryResult)
+				if _, callerSet := args["limit"]; !callerSet {
+					args["limit"] = float64(300)
+					retryResult, retryErr := client.CallTool(callCtx, toolName, args)
+					if retryErr != nil {
+						return "", retryErr
+					}
+					return formatToolResult(retryResult)
+				}
 			}
 			return text, fmtErr
 		}); err != nil {
@@ -522,6 +537,25 @@ func isFatalMCPError(msg string) bool {
 		}
 	}
 	return false
+}
+
+// schemaDeclaresLimit reports whether an MCP tool's JSON-schema input
+// declares a `limit` property (any type). Used to gate the Read
+// auto-retry: we only mutate args[limit] when the tool actually
+// accepts that parameter, so a third-party server exposing an
+// unrelated tool literally named "Read" stays untouched.
+func schemaDeclaresLimit(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var s struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return false
+	}
+	_, ok := s.Properties["limit"]
+	return ok
 }
 
 func formatToolResult(result *ToolCallResult) (string, error) {
