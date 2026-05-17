@@ -89,7 +89,7 @@ Backend rules:
 src -> dst                                        # unconditional
 src -> dst when approved                          # bool field on src.output
 src -> dst when not approved
-src -> dst when "!approved && len(blockers)>0"   # expression
+src -> dst when "!approved && length(blockers) > 0"   # expression
 src -> dst as loop_name(10)                       # bounded loop
 src -> dst with { field: "{{outputs.src.x}}" }    # data mapping
 ```
@@ -108,8 +108,8 @@ Rules:
 | `{{input.field}}` | this node's input |
 | `{{outputs.id}}` / `{{outputs.id.field}}` | upstream node output |
 | `{{outputs.id.history}}` | array across loop iterations |
-| `{{loop.name.iteration}}` | current loop count |
-| `{{loop.name.previous_output}}` | last iter's output of the loop's tail |
+| `{{loop.<name>.iteration}}` | current loop count |
+| `{{loop.<name>.previous_output}}` | last iter's output of the loop's tail |
 | `{{artifacts.name}}` | published artifact |
 | `${ENV_VAR}` | compile-time env substitution |
 
@@ -135,7 +135,7 @@ compute pass_through:
 ```
 
 `expr:` values are quoted expressions (CEL-like), NOT templates.
-Reference `input.x`, `outputs.x.y`, `loop.name.previous_output.x`
+Reference `input.x`, `outputs.x.y`, `loop.<name>.previous_output.x`
 directly without `{{...}}`.
 
 ## Workflow block
@@ -171,9 +171,10 @@ Sandbox modes: `auto`, `none`, or a block form (`image:`,
 The whats-next pipeline almost never needs to author DSL. If
 `emit_action` is genuinely about to recommend a new `.bot` file:
 
-1. Check that none of the three existing bots
+1. Check that none of the four existing bots
    (`vibe_feature_dev`, `whole_improve_loop`,
-   `secured-renovacy`) covers the use case. Usually one does.
+   `branch_improve_loop`, `secured-renovacy`) covers the use
+   case. Usually one does.
 2. If a new bot really is needed, the `next_action` should be
    "manually author a new bot at `examples/<slug>/main.bot`"
    (with `bot_to_run="none"`) — NOT "auto-invoke

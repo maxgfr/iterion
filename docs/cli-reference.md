@@ -23,7 +23,7 @@ Parse, compile, and validate a workflow without running it:
 iterion validate workflow.iter
 ```
 
-Reports errors and warnings with diagnostic codes (C001–C072, sparse — see [references/diagnostics.md](references/diagnostics.md) for the authoritative list), file positions, and descriptions.
+Reports errors and warnings with diagnostic codes (C001–C082, sparse — see [references/diagnostics.md](references/diagnostics.md) for the authoritative list), file positions, and descriptions.
 
 ## `iterion run`
 
@@ -55,11 +55,28 @@ iterion run workflow.iter [flags]
 View run state and history:
 
 ```bash
-iterion inspect                          # List all runs
-iterion inspect --run-id <id>            # View a specific run
-iterion inspect --run-id <id> --events   # Include event log
-iterion inspect --run-id <id> --full     # Show full artifact contents
+iterion inspect                                      # List all runs
+iterion inspect --run-id <id>                        # View a specific run
+iterion inspect --run-id <id> --events               # Include event log
+iterion inspect --run-id <id> --full                 # Show full artifact contents
+iterion inspect --run-id <id> --list-nodes           # List node executions
+iterion inspect --run-id <id> --node review          # View a node-scoped report
+iterion inspect --run-id <id> --node review --section trace
+iterion inspect --run-id <id> --node review --branch main --iteration -1
+iterion inspect --run-id <id> --exec exec:main:review:0 --log-tail 8192
 ```
+
+Node-scoped inspection flags:
+
+| Flag | Description |
+|---|---|
+| `--list-nodes` | List node executions for the run, one row per branch × iteration. |
+| `--node <id>` | Focus on a specific IR node and return a node-scoped report. |
+| `--branch <id>` | Optional branch ID when `--node` is ambiguous (defaults to `main`). |
+| `--iteration <n>` | 0-based loop iteration for `--node`; use `-1` for the latest started iteration. |
+| `--exec <execution-id>` | Select an exact execution such as `exec:<branch>:<node>:<iter>` instead of using `--node`. |
+| `--section <name>` | Restrict a node report to `summary`, `events`, `trace`, `tools`, `artifacts`, `interactions`, `log`, or `all`. |
+| `--log-tail <bytes>` | Cap the log slice in bytes (`0` = uncapped). |
 
 ## `iterion resume`
 
@@ -123,8 +140,15 @@ Launch the visual workflow editor:
 iterion editor                     # Default port 4891
 iterion editor --port 8080         # Custom port
 iterion editor --dir ./workflows   # Custom directory
+iterion editor --bind 0.0.0.0      # Expose on the LAN
 iterion editor --no-browser        # Don't auto-open browser
 ```
+
+Networking flags:
+
+| Flag | Description |
+|---|---|
+| `--bind <addr>` | Bind address for the editor HTTP listener. Defaults to `127.0.0.1` (loopback only). Use `0.0.0.0` or an interface IP only when you intentionally want LAN exposure; the editor exposes unauthenticated file read/write endpoints, so do not bind it to untrusted networks. |
 
 See [visual-editor.md](visual-editor.md) for features.
 
@@ -206,6 +230,21 @@ iterion sandbox doctor   # Report the active driver (Docker/Podman), image cache
 ## `iterion server`
 
 Start the long-running HTTP server (editor SPA + run console + cloud API). Used both for the local web editor and for cloud mode deployments — install via [`oci://ghcr.io/socialgouv/charts/iterion`](https://github.com/SocialGouv/iterion/pkgs/container/charts%2Fiterion) (chart sources in [`charts/iterion/`](../charts/iterion/)).
+
+```bash
+iterion server --port 4891 --bind 0.0.0.0
+iterion server --config ./cloud.yaml
+```
+
+Flags:
+
+| Flag | Description |
+|---|---|
+| `--port <n>` | HTTP port (default `4891`). |
+| `--bind <addr>` | Bind address (default `0.0.0.0` for cloud pods, so the service listens on all interfaces unless overridden). |
+| `--dir <path>` | Working directory. |
+| `--store-dir <path>` | Run store directory in local mode only. |
+| `--config <path>` | YAML config file; environment variables take precedence. |
 
 ## `iterion runner`
 
