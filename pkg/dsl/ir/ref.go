@@ -7,7 +7,12 @@ import (
 
 // ParseRefs extracts all {{...}} template references from a string.
 // Returns the parsed Ref values. Returns an error if a template
-// expression is malformed.
+// expression is malformed or nests another {{ inside an open block.
+//
+// Nested templates like "{{outer{{inner}}}}" used to silently match
+// the first `}}` as the closing fence, producing "outer{{inner" as
+// the expression and a confusing "unknown namespace" error. The
+// pre-scan for a nested `{{` now surfaces the real problem.
 func ParseRefs(s string) ([]*Ref, error) {
 	var refs []*Ref
 	rest := s
@@ -21,7 +26,11 @@ func ParseRefs(s string) ([]*Ref, error) {
 			return nil, fmt.Errorf("unterminated template expression at %q", rest[start:])
 		}
 		end += start // adjust to absolute position
-		expr := strings.TrimSpace(rest[start+2 : end])
+		inner := rest[start+2 : end]
+		if nested := strings.Index(inner, "{{"); nested != -1 {
+			return nil, fmt.Errorf("nested template expression at %q: '{{' may not appear inside an open template block", rest[start:end+2])
+		}
+		expr := strings.TrimSpace(inner)
 		raw := rest[start : end+2]
 		ref, err := parseRef(expr, raw)
 		if err != nil {

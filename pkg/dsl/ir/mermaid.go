@@ -180,10 +180,16 @@ func edgeLabel(e *Edge, w *Workflow, view MermaidView) string {
 
 	if e.LoopName != "" {
 		loop, ok := w.Loops[e.LoopName]
-		if ok {
-			parts = append(parts, fmt.Sprintf("loop:%s(%d)", loop.Name, loop.MaxIterations))
-		} else {
+		switch {
+		case !ok:
 			parts = append(parts, "loop:"+e.LoopName)
+		case loop.MaxIterationsExpr != "":
+			// A templated cap (e.g. `as fix_loop("{{vars.attempts}}")`)
+			// resolves at runtime; rendering MaxIterations here
+			// shows 0, which the audit flagged as misleading.
+			parts = append(parts, fmt.Sprintf("loop:%s(%s)", loop.Name, loop.MaxIterationsExpr))
+		default:
+			parts = append(parts, fmt.Sprintf("loop:%s(%d)", loop.Name, loop.MaxIterations))
 		}
 	}
 

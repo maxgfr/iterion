@@ -77,8 +77,17 @@ func checkFieldType(f *ir.SchemaField, val interface{}) error {
 			return fmt.Errorf("field %q: expected string array, got %T", f.Name, val)
 		}
 		for i, item := range arr {
-			if _, ok := item.(string); !ok {
+			s, ok := item.(string)
+			if !ok {
 				return fmt.Errorf("field %q[%d]: expected string, got %T", f.Name, i, item)
+			}
+			// String arrays inherit the field's enum constraint
+			// (FieldTypeString applies it per scalar — without this
+			// check the schema-level enum was advertised to the LLM
+			// but never enforced server-side, so a stray value would
+			// flow downstream unchecked).
+			if len(f.EnumValues) > 0 && !contains(f.EnumValues, s) {
+				return fmt.Errorf("field %q[%d]: value %q not in enum %v", f.Name, i, s, f.EnumValues)
 			}
 		}
 	}
