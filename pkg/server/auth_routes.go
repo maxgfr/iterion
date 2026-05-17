@@ -121,6 +121,28 @@ func (s *Server) toUserView(u identity.User) userView {
 	}
 }
 
+// isBrowserClient reports whether the caller is a browser. We use it
+// to suppress the access_token field from the JSON body: browsers
+// receive the JWT via the HttpOnly cookie set by setAuthCookies, so
+// echoing it in the body would defeat the HttpOnly protection and
+// expose the token to any future XSS in the SPA. CLI/SDK clients
+// can't read Set-Cookie reliably and still need the token in the body.
+//
+// Browsers send Origin on cross-origin fetches and Sec-Fetch-Site on
+// every request (Chrome/Firefox/Safari since 2020). Treating their
+// presence as the browser tell is conservative — false positives
+// only force a CLI client to fall back to the cookie path, never the
+// reverse.
+func isBrowserClient(r *http.Request) bool {
+	if r.Header.Get("Sec-Fetch-Site") != "" || r.Header.Get("Sec-Fetch-Mode") != "" {
+		return true
+	}
+	if r.Header.Get("Origin") != "" {
+		return true
+	}
+	return false
+}
+
 func (s *Server) renderAuthResponse(w http.ResponseWriter, r *http.Request, res auth.LoginResult) {
 	teams := make([]membershipView, 0, len(res.Memberships))
 	for _, m := range res.Memberships {
@@ -137,14 +159,17 @@ func (s *Server) renderAuthResponse(w http.ResponseWriter, r *http.Request, res 
 		})
 	}
 	s.setAuthCookies(w, res.AccessToken, res.AccessExpires, res.RefreshToken, res.RefreshExpires)
-	writeJSON(w, authResponse{
-		User:        s.toUserView(res.User),
-		Teams:       teams,
-		ActiveTeam:  res.ActiveTeamID,
-		ActiveRole:  string(res.ActiveRole),
-		AccessToken: res.AccessToken,
-		ExpiresAt:   res.AccessExpires.Format(time.RFC3339),
-	})
+	resp := authResponse{
+		User:       s.toUserView(res.User),
+		Teams:      teams,
+		ActiveTeam: res.ActiveTeamID,
+		ActiveRole: string(res.ActiveRole),
+		ExpiresAt:  res.AccessExpires.Format(time.RFC3339),
+	}
+	if !isBrowserClient(r) {
+		resp.AccessToken = res.AccessToken
+	}
+	writeJSON(w, resp)
 }
 
 // authStore returns the identity.Store used by the embedded auth
@@ -516,13 +541,16 @@ func (s *Server) handleSwitchTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setAuthCookies(w, access, exp, "", time.Time{})
-	writeJSON(w, authResponse{
-		User:        s.toUserView(identity.User{ID: newID.UserID, Email: newID.Email}),
-		ActiveTeam:  newID.TeamID,
-		ActiveRole:  string(newID.Role),
-		AccessToken: access,
-		ExpiresAt:   exp.Format(time.RFC3339),
-	})
+	resp := authResponse{
+		User:       s.toUserView(identity.User{ID: newID.UserID, Email: newID.Email}),
+		ActiveTeam: newID.TeamID,
+		ActiveRole: string(newID.Role),
+		ExpiresAt:  exp.Format(time.RFC3339),
+	}
+	if !isBrowserClient(r) {
+		resp.AccessToken = access
+	}
+	writeJSON(w, resp)
 }
 
 // ---- Team management ----
