@@ -6,6 +6,19 @@ import (
 	"time"
 )
 
+// Default state names emitted by [DefaultBoard]. Callers that
+// customise the board can ignore these; tests and skills referring to
+// the shipped defaults should use the constants so renames stay
+// compile-checked.
+const (
+	StateBacklog    = "backlog"
+	StateReady      = "ready"
+	StateInProgress = "in_progress"
+	StateReview     = "review"
+	StateDone       = "done"
+	StateBlocked    = "blocked"
+)
+
 // FieldType enumerates the supported custom-field value kinds.
 type FieldType string
 
@@ -47,12 +60,12 @@ type Board struct {
 func DefaultBoard() *Board {
 	return &Board{
 		States: []State{
-			{Name: "backlog", Display: "Backlog"},
-			{Name: "ready", Display: "Ready", Eligible: true},
-			{Name: "in_progress", Display: "In progress", Eligible: true},
-			{Name: "review", Display: "Review"},
-			{Name: "done", Display: "Done", Terminal: true},
-			{Name: "blocked", Display: "Blocked", Terminal: true},
+			{Name: StateBacklog, Display: "Backlog"},
+			{Name: StateReady, Display: "Ready", Eligible: true},
+			{Name: StateInProgress, Display: "In progress", Eligible: true},
+			{Name: StateReview, Display: "Review"},
+			{Name: StateDone, Display: "Done", Terminal: true},
+			{Name: StateBlocked, Display: "Blocked", Terminal: true},
 		},
 		UpdatedAt: time.Now().UTC(),
 	}

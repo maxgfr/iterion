@@ -1,6 +1,10 @@
 package ir
 
-import "regexp"
+import (
+	"regexp"
+
+	"github.com/SocialGouv/iterion/pkg/conductor/native/boardops"
+)
 
 // Capability diagnostics.
 const (
@@ -17,12 +21,12 @@ const (
 // Capability naming convention: lowercase `domain` or `domain.action`,
 // e.g. `board.create`, `board.read`. Enforced by C081.
 var KnownCapabilities = map[string]bool{
-	"board.read":   true,
-	"board.create": true,
-	"board.move":   true,
-	"board.assign": true,
-	"board.label":  true,
-	"board.close":  true,
+	boardops.CapBoardRead:   true,
+	boardops.CapBoardCreate: true,
+	boardops.CapBoardMove:   true,
+	boardops.CapBoardAssign: true,
+	boardops.CapBoardLabel:  true,
+	boardops.CapBoardClose:  true,
 }
 
 // capShapeRe enforces the lowercase `domain` or `domain.action` shape.

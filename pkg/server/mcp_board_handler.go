@@ -13,17 +13,17 @@ import (
 
 // BoardMCPTokenRegistry is the ephemeral token store used to authorize
 // sandbox-running bots that talk to the host's board MCP HTTP endpoint.
-// The runtime calls Register at the start of every run, then Revoke at
-// the end. A token grants exactly the capabilities recorded at registration
-// time; the bot sends them back as `X-Iterion-Caps` so the handler can run
-// a consistent capability check.
+// The runtime MUST call Register at the start of every run and Revoke
+// at the end — a missed Revoke leaks the entry until process exit
+// (the registry is unbounded by design; bound it in a follow-up if
+// daemon lifetimes grow beyond what a per-run leak can tolerate).
 type BoardMCPTokenRegistry struct {
 	mu     sync.RWMutex
 	tokens map[string]boardMCPGrant
 }
 
 type boardMCPGrant struct {
-	Capabilities map[string]bool
+	Capabilities boardops.Capabilities
 }
 
 // NewBoardMCPTokenRegistry returns an empty registry.
@@ -34,7 +34,7 @@ func NewBoardMCPTokenRegistry() *BoardMCPTokenRegistry {
 // Register stores a token with its grant. A subsequent call with the same
 // token replaces the grant.
 func (r *BoardMCPTokenRegistry) Register(token string, caps []string) {
-	grant := boardMCPGrant{Capabilities: map[string]bool{}}
+	grant := boardMCPGrant{Capabilities: boardops.Capabilities{}}
 	for _, c := range caps {
 		grant.Capabilities[c] = true
 	}
@@ -122,10 +122,9 @@ func (h *boardMCPHandler) serve(w http.ResponseWriter, r *http.Request) {
 	writeJSONStatus(w, http.StatusOK, resp)
 }
 
-func dispatchHTTP(req mcpReq, store *native.Store, grants map[string]bool) mcpResp {
+func dispatchHTTP(req mcpReq, store *native.Store, caps boardops.Capabilities) mcpResp {
 	resp := mcpResp{JSONRPC: "2.0", ID: req.ID}
 
-	caps := boardops.Capabilities(grants)
 	switch req.Method {
 	case "initialize":
 		resp.Result = map[string]any{

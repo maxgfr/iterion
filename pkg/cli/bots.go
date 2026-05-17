@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v2"
+
+	"github.com/SocialGouv/iterion/pkg/bundle"
 )
 
 // BotEntry is one bot discovered by [BotsList]. Source carries the file
@@ -134,20 +136,16 @@ func discoverBots(roots []string) ([]BotEntry, error) {
 
 // parseBundle reads bundle/manifest.yaml + (optional) front-matter from
 // bundle/main.bot to produce a single entry whose Path points at the
-// bundle directory.
+// bundle directory. Schema-version validation comes from
+// [bundle.LoadManifest] so the catalog rejects bundles built for a
+// future iterion.
 func parseBundle(dir string) (*BotEntry, error) {
-	manifestRaw, err := os.ReadFile(filepath.Join(dir, "manifest.yaml"))
+	m, err := bundle.LoadManifest(filepath.Join(dir, "manifest.yaml"))
 	if err != nil {
-		return nil, fmt.Errorf("bots: read manifest in %s: %w", dir, err)
+		return nil, fmt.Errorf("bots: %w", err)
 	}
-	var m struct {
-		Name         string   `yaml:"name"`
-		Description  string   `yaml:"description"`
-		Triggers     []string `yaml:"triggers"`
-		Capabilities []string `yaml:"capabilities"`
-	}
-	if err := yaml.Unmarshal(manifestRaw, &m); err != nil {
-		return nil, fmt.Errorf("bots: parse manifest in %s: %w", dir, err)
+	if m == nil {
+		m = &bundle.Manifest{}
 	}
 	if m.Name == "" {
 		m.Name = filepath.Base(dir)

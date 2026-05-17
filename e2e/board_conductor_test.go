@@ -53,7 +53,7 @@ func TestBoardConductor_E2E_BotCreatesAndDispatches(t *testing.T) {
 	for _, title := range []string{"Refactor X", "Implement Y"} {
 		args, _ := json.Marshal(map[string]any{
 			"title":    title,
-			"state":    "ready",
+			"state":    native.StateReady,
 			"assignee": "vibe_feature_dev",
 			"labels":   []string{"horizon:short-term", "source:whats-next"},
 		})
@@ -121,7 +121,7 @@ func TestBoardConductor_E2E_BotMovesIssueToReady(t *testing.T) {
 
 	args, _ := json.Marshal(map[string]any{
 		"title": "Draft for triage",
-		"state": "backlog",
+		"state": native.StateBacklog,
 	})
 	res, err := boardops.Call(ns, caps, "create_issue", args)
 	if err != nil {
@@ -140,7 +140,7 @@ func TestBoardConductor_E2E_BotMovesIssueToReady(t *testing.T) {
 	}
 
 	// Now the bot promotes it to `ready` via transition_issue.
-	args, _ = json.Marshal(map[string]string{"id": iss.ID, "to": "ready"})
+	args, _ = json.Marshal(map[string]string{"id": iss.ID, "to": native.StateReady})
 	if _, err := boardops.Call(ns, caps, "transition_issue", args); err != nil {
 		t.Fatalf("transition_issue: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestBoardConductor_E2E_BotMovesIssueToReady(t *testing.T) {
 	// If the run already finished, the snapshot is empty — verify the
 	// issue is no longer in `ready` (it was claimed and released).
 	got, _ := ns.Get(iss.ID)
-	if got != nil && got.State == "ready" && got.Claim == "" {
+	if got != nil && got.State == native.StateReady && got.Claim == "" {
 		t.Fatalf("issue %s never moved out of ready", iss.ID)
 	}
 }
@@ -187,7 +187,7 @@ func TestBoardConductor_E2E_CapabilityGate(t *testing.T) {
 	defer cleanup()
 
 	caps := boardops.NewCapabilities("board.read") // no create
-	args, _ := json.Marshal(map[string]any{"title": "x", "state": "ready"})
+	args, _ := json.Marshal(map[string]any{"title": "x", "state": native.StateReady})
 	_, err := boardops.Call(ns, caps, "create_issue", args)
 	if err == nil || !strings.Contains(err.Error(), "capability denied") {
 		t.Fatalf("expected capability-denied error, got %v", err)

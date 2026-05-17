@@ -305,8 +305,7 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 			opts = append(opts, claudesdk.WithMCPServer(boardMCPServerName, &claudesdk.MCPHTTPServer{
 				URL: task.BoardHTTPEndpoint,
 				Headers: map[string]string{
-					"X-Iterion-Run":  task.BoardRunToken,
-					"X-Iterion-Caps": strings.Join(task.Capabilities, ","),
+					"X-Iterion-Run": task.BoardRunToken,
 				},
 			}))
 			if len(task.AllowedTools) > 0 {
