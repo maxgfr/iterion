@@ -45,6 +45,17 @@ type Manifest struct {
 	// paths inside the bundle's `attachments/` directory (relative).
 	// Runtime uploads (Launch modal) override these.
 	Attachments map[string]string `yaml:"attachments,omitempty"`
+
+	// Triggers are free-form labels the orchestrator uses to match
+	// issues to this bundle (e.g. "refactor", "feature_request").
+	// Consumed by `iterion bots list` to build the bot catalog;
+	// the runtime itself doesn't read them today.
+	Triggers []string `yaml:"triggers,omitempty"`
+
+	// Capabilities lists the host capabilities this bundle expects
+	// to be granted (e.g. "board.create"). Documentation-only — the
+	// runtime gates capabilities per node, not per bundle.
+	Capabilities []string `yaml:"capabilities,omitempty"`
 }
 
 // LoadManifest reads and parses a manifest.yaml file. Missing file

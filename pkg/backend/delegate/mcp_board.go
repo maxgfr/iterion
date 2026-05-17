@@ -1,6 +1,10 @@
 package delegate
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/SocialGouv/iterion/pkg/conductor/native/boardops"
+)
 
 // boardMCPServerName is the name under which iterion registers its internal
 // board MCP server with the claude_code CLI subprocess. The MCP convention
@@ -15,24 +19,6 @@ const boardMCPSubcommand = "__mcp-board"
 // addressing the board. Capabilities outside this prefix are ignored by the
 // board wiring (they may be honoured by other future subsystems).
 const boardCapabilityPrefix = "board."
-
-// boardToolByName maps each board tool to the capability that gates it. The
-// list is the canonical source of truth for the FQN exposed to bots and the
-// AllowedTools extension applied to CLI backends.
-//
-// Keep in sync with pkg/conductor/native/boardops.Tools().
-var boardToolByName = []struct {
-	Tool string // bare tool name (no FQN prefix)
-	Cap  string // gating capability
-}{
-	{"create_issue", "board.create"},
-	{"transition_issue", "board.move"},
-	{"assign_issue", "board.assign"},
-	{"set_labels", "board.label"},
-	{"close_issue", "board.close"},
-	{"list_issues", "board.read"},
-	{"get_issue", "board.read"},
-}
 
 // boardToolFQN returns the MCP fully-qualified name a bot sees for the given
 // bare tool name.
@@ -52,25 +38,18 @@ func HasBoardCapability(caps []string) bool {
 	return false
 }
 
-// BoardToolsFor returns the MCP FQN list the granted capabilities unlock.
-// Order matches boardToolByName so AllowedTools extensions are deterministic.
+// BoardToolsFor returns the MCP FQN list the granted capabilities unlock,
+// derived from boardops.ToolsFor so the tool→capability mapping has a
+// single source of truth. Order matches boardops.ToolsFor (sorted by name).
 func BoardToolsFor(caps []string) []string {
-	grants := map[string]bool{}
-	for _, c := range caps {
-		grants[c] = true
+	c := boardops.Capabilities{}
+	for _, name := range caps {
+		c[name] = true
 	}
-	var out []string
-	seen := map[string]bool{}
-	for _, m := range boardToolByName {
-		if !grants[m.Cap] {
-			continue
-		}
-		fqn := boardToolFQN(m.Tool)
-		if seen[fqn] {
-			continue
-		}
-		out = append(out, fqn)
-		seen[fqn] = true
+	tools := boardops.ToolsFor(c)
+	out := make([]string, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, boardToolFQN(t.Name))
 	}
 	return out
 }

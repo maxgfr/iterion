@@ -45,9 +45,9 @@ func init() {
 }
 
 // openBoardStoreFromEnv resolves the conductor store root and opens it.
-// On a first-time open, native.NewStore creates the board.json + issues
-// dir + events.jsonl automatically, so a standalone `iterion run` can hit
-// a fresh store without any prior `iterion issue board init`.
+// native.NewStore owns directory creation (it MkdirAlls root + issues/
+// itself), so a standalone `iterion run` hitting a fresh workspace
+// gets a board lazily without any prior `iterion issue board init`.
 func openBoardStoreFromEnv() (*native.Store, error) {
 	root := os.Getenv("ITERION_STORE_DIR")
 	if root == "" {
@@ -56,9 +56,6 @@ func openBoardStoreFromEnv() (*native.Store, error) {
 			return nil, fmt.Errorf("resolve cwd: %w", err)
 		}
 		root = filepath.Join(cwd, ".iterion", "conductor")
-	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return nil, fmt.Errorf("create store dir: %w", err)
 	}
 	return native.NewStore(root)
 }

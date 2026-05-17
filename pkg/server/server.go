@@ -287,11 +287,19 @@ type Server struct {
 	// mode (the iframe + screenshot scrubber paths still work).
 	browserSessions mcp.BrowserRegistry
 
-	// BoardMCPTokens authorizes sandboxed bots that hit the board MCP
-	// HTTP endpoint. Backends call Register/Revoke around each run.
-	// Non-nil iff cfg.NativeTrackerStore is non-nil (handler is only
-	// mounted when the board exists).
-	BoardMCPTokens *BoardMCPTokenRegistry
+	// boardMCPTokens authorizes sandboxed bots that hit the board MCP
+	// HTTP endpoint. The runtime obtains the handle via [Server.BoardMCPTokens]
+	// and calls Register/Revoke around each run. Non-nil iff
+	// cfg.NativeTrackerStore is non-nil (handler is only mounted when
+	// the board exists).
+	boardMCPTokens *BoardMCPTokenRegistry
+}
+
+// BoardMCPTokens returns the per-run token registry the runtime uses
+// to authorize sandboxed bots talking to the board MCP HTTP endpoint.
+// Returns nil when the server was built without a NativeTrackerStore.
+func (s *Server) BoardMCPTokens() *BoardMCPTokenRegistry {
+	return s.boardMCPTokens
 }
 
 // New creates a new editor server.
@@ -340,7 +348,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		browserSessions: cfg.BrowserRegistry,
 	}
 	if cfg.NativeTrackerStore != nil {
-		s.BoardMCPTokens = NewBoardMCPTokenRegistry()
+		s.boardMCPTokens = NewBoardMCPTokenRegistry()
 	}
 	s.hub = NewHub(logger)
 	go s.hub.Run()
@@ -615,10 +623,10 @@ func (s *Server) routes() {
 	if s.cfg.NativeTrackerStore != nil {
 		s.cfg.NativeTrackerStore.RegisterRoutes(s.mux, "/api/v1/native")
 		// Board MCP over HTTP for sandbox-running bots. The runtime
-		// registers per-run tokens on s.BoardMCPTokens via the board
-		// handle returned at New(); bots in containers reach this
-		// endpoint via the host loopback proxy.
-		RegisterBoardMCPRoutes(s.mux, "/api/v1/mcp/board", s.cfg.NativeTrackerStore, s.BoardMCPTokens)
+		// registers per-run tokens via Server.BoardMCPTokens(); bots
+		// in containers reach this endpoint via the host loopback
+		// proxy.
+		RegisterBoardMCPRoutes(s.mux, "/api/v1/mcp/board", s.cfg.NativeTrackerStore, s.boardMCPTokens)
 	}
 	if s.cfg.Conductor != nil {
 		s.cfg.Conductor.RegisterRoutes(s.mux, "/api/v1/conductor")

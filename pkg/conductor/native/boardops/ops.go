@@ -12,10 +12,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/SocialGouv/iterion/pkg/conductor/native"
+)
+
+// Capability names. Use these constants instead of string literals so a
+// typo at any call site becomes a compile error and the registry below
+// (KnownCapabilities in pkg/dsl/ir) tracks the single source of truth.
+const (
+	CapBoardRead   = "board.read"
+	CapBoardCreate = "board.create"
+	CapBoardMove   = "board.move"
+	CapBoardAssign = "board.assign"
+	CapBoardLabel  = "board.label"
+	CapBoardClose  = "board.close"
 )
 
 // Capabilities is a granted-cap set. Use NewCapabilities to parse a
@@ -52,118 +63,145 @@ type Tool struct {
 	InputSchema json.RawMessage `json:"inputSchema"`
 }
 
-// Tools returns the seven board tools, in stable order. The returned
-// slice can be filtered by caller via the granted Capabilities.
-func Tools() []Tool {
-	return []Tool{
-		{
-			Name:        "create_issue",
-			Capability:  "board.create",
-			Description: "Create a new issue on the native kanban board. Returns the created issue.",
-			InputSchema: json.RawMessage(`{
-              "type":"object",
-              "properties":{
-                "title":{"type":"string","description":"Short title (required)."},
-                "body":{"type":"string","description":"Markdown body (optional)."},
-                "state":{"type":"string","description":"Initial state name (default: first state of the board)."},
-                "labels":{"type":"array","items":{"type":"string"}},
-                "priority":{"type":"integer","description":"Higher = more important. Default 0."},
-                "assignee":{"type":"string","description":"Bot or user handle this issue is assigned to."},
-                "blockers":{"type":"array","items":{"type":"string"},"description":"IDs of issues that must be terminal before this one is eligible."},
-                "fields":{"type":"object","description":"Custom board fields (validated against board schema)."}
-              },
-              "required":["title"]
-            }`),
-		},
-		{
-			Name:        "transition_issue",
-			Capability:  "board.move",
-			Description: "Move an issue to a different state. Accepts short ID prefixes.",
-			InputSchema: json.RawMessage(`{
-              "type":"object",
-              "properties":{
-                "id":{"type":"string","description":"Issue ID or unambiguous prefix."},
-                "to":{"type":"string","description":"Target state name."}
-              },
-              "required":["id","to"]
-            }`),
-		},
-		{
-			Name:        "assign_issue",
-			Capability:  "board.assign",
-			Description: "Set the assignee on an issue.",
-			InputSchema: json.RawMessage(`{
-              "type":"object",
-              "properties":{
-                "id":{"type":"string"},
-                "assignee":{"type":"string","description":"Bot or user handle. Empty string clears the assignee."}
-              },
-              "required":["id","assignee"]
-            }`),
-		},
-		{
-			Name:        "set_labels",
-			Capability:  "board.label",
-			Description: "Replace the label list on an issue.",
-			InputSchema: json.RawMessage(`{
-              "type":"object",
-              "properties":{
-                "id":{"type":"string"},
-                "labels":{"type":"array","items":{"type":"string"}}
-              },
-              "required":["id","labels"]
-            }`),
-		},
-		{
-			Name:        "close_issue",
-			Capability:  "board.close",
-			Description: "Transition an issue to a terminal state. Defaults to the first terminal state on the board.",
-			InputSchema: json.RawMessage(`{
-              "type":"object",
-              "properties":{
-                "id":{"type":"string"},
-                "to":{"type":"string","description":"Optional explicit terminal state."}
-              },
-              "required":["id"]
-            }`),
-		},
-		{
-			Name:        "list_issues",
-			Capability:  "board.read",
-			Description: "List issues with optional filters.",
-			InputSchema: json.RawMessage(`{
-              "type":"object",
-              "properties":{
-                "state":{"type":"string"},
-                "label":{"type":"string"},
-                "assignee":{"type":"string"}
-              }
-            }`),
-		},
-		{
-			Name:        "get_issue",
-			Capability:  "board.read",
-			Description: "Fetch one issue by ID or unambiguous prefix.",
-			InputSchema: json.RawMessage(`{
-              "type":"object",
-              "properties":{"id":{"type":"string"}},
-              "required":["id"]
-            }`),
-		},
-	}
+// allTools is the sorted-by-name singleton consulted by every Tools(),
+// ToolsFor(), and Call() invocation. Building it once eliminates the
+// per-call slice allocation that ToolsFor used to pay and the linear
+// scan Call used to perform.
+var allTools = []Tool{
+	{
+		Name:        "assign_issue",
+		Capability:  CapBoardAssign,
+		Description: "Set the assignee on an issue.",
+		InputSchema: json.RawMessage(`{
+          "type":"object",
+          "properties":{
+            "id":{"type":"string"},
+            "assignee":{"type":"string","description":"Bot or user handle. Empty string clears the assignee."}
+          },
+          "required":["id","assignee"]
+        }`),
+	},
+	{
+		Name:        "close_issue",
+		Capability:  CapBoardClose,
+		Description: "Transition an issue to a terminal state. Defaults to the first terminal state on the board.",
+		InputSchema: json.RawMessage(`{
+          "type":"object",
+          "properties":{
+            "id":{"type":"string"},
+            "to":{"type":"string","description":"Optional explicit terminal state."}
+          },
+          "required":["id"]
+        }`),
+	},
+	{
+		Name:        "create_issue",
+		Capability:  CapBoardCreate,
+		Description: "Create a new issue on the native kanban board. Returns the created issue.",
+		InputSchema: json.RawMessage(`{
+          "type":"object",
+          "properties":{
+            "title":{"type":"string","description":"Short title (required)."},
+            "body":{"type":"string","description":"Markdown body (optional)."},
+            "state":{"type":"string","description":"Initial state name (default: first state of the board)."},
+            "labels":{"type":"array","items":{"type":"string"}},
+            "priority":{"type":"integer","description":"Higher = more important. Default 0."},
+            "assignee":{"type":"string","description":"Bot or user handle this issue is assigned to."},
+            "blockers":{"type":"array","items":{"type":"string"},"description":"IDs of issues that must be terminal before this one is eligible."},
+            "fields":{"type":"object","description":"Custom board fields (validated against board schema)."}
+          },
+          "required":["title"]
+        }`),
+	},
+	{
+		Name:        "get_issue",
+		Capability:  CapBoardRead,
+		Description: "Fetch one issue by ID or unambiguous prefix.",
+		InputSchema: json.RawMessage(`{
+          "type":"object",
+          "properties":{"id":{"type":"string"}},
+          "required":["id"]
+        }`),
+	},
+	{
+		Name:        "list_issues",
+		Capability:  CapBoardRead,
+		Description: "List issues with optional filters.",
+		InputSchema: json.RawMessage(`{
+          "type":"object",
+          "properties":{
+            "state":{"type":"string"},
+            "label":{"type":"string"},
+            "assignee":{"type":"string"}
+          }
+        }`),
+	},
+	{
+		Name:        "set_labels",
+		Capability:  CapBoardLabel,
+		Description: "Replace the label list on an issue.",
+		InputSchema: json.RawMessage(`{
+          "type":"object",
+          "properties":{
+            "id":{"type":"string"},
+            "labels":{"type":"array","items":{"type":"string"}}
+          },
+          "required":["id","labels"]
+        }`),
+	},
+	{
+		Name:        "transition_issue",
+		Capability:  CapBoardMove,
+		Description: "Move an issue to a different state. Accepts short ID prefixes.",
+		InputSchema: json.RawMessage(`{
+          "type":"object",
+          "properties":{
+            "id":{"type":"string","description":"Issue ID or unambiguous prefix."},
+            "to":{"type":"string","description":"Target state name."}
+          },
+          "required":["id","to"]
+        }`),
+	},
 }
 
-// ToolsFor returns the subset of Tools() the granted capability set unlocks,
-// sorted by name for determinism.
+// toolByName is the O(1) lookup index for Call. Populated once at init.
+var toolByName = func() map[string]*Tool {
+	m := make(map[string]*Tool, len(allTools))
+	for i := range allTools {
+		m[allTools[i].Name] = &allTools[i]
+	}
+	return m
+}()
+
+// dispatchByName maps a tool name to its handler. Populated once at init
+// so Call can dispatch in O(1).
+var dispatchByName = map[string]func(*native.Store, json.RawMessage) (json.RawMessage, error){
+	"create_issue":     doCreate,
+	"transition_issue": doTransition,
+	"assign_issue":     doAssign,
+	"set_labels":       doSetLabels,
+	"close_issue":      doClose,
+	"list_issues":      doList,
+	"get_issue":        doGet,
+}
+
+// Tools returns the seven board tools, sorted by name. The slice is a
+// defensive copy so callers can sort/filter without mutating package state.
+func Tools() []Tool {
+	out := make([]Tool, len(allTools))
+	copy(out, allTools)
+	return out
+}
+
+// ToolsFor returns the subset of Tools() the granted capability set unlocks.
+// Order matches Tools() (sorted by name) so output is deterministic.
 func ToolsFor(caps Capabilities) []Tool {
-	all := Tools()
-	out := make([]Tool, 0, len(all))
-	for _, t := range all {
-		if caps.Has(t.Capability) {
-			out = append(out, t)
+	out := make([]Tool, 0, len(allTools))
+	for i := range allTools {
+		if caps.Has(allTools[i].Capability) {
+			out = append(out, allTools[i])
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
@@ -171,36 +209,14 @@ func ToolsFor(caps Capabilities) []Tool {
 // suitable for direct embedding in an MCP `content[0].text` field or an
 // HTTP response body.
 func Call(store *native.Store, caps Capabilities, name string, rawArgs json.RawMessage) (json.RawMessage, error) {
-	for _, t := range Tools() {
-		if t.Name != name {
-			continue
-		}
-		if !caps.Has(t.Capability) {
-			return nil, fmt.Errorf("%w: tool %q needs capability %q", ErrCapabilityDenied, name, t.Capability)
-		}
-		return dispatch(store, name, rawArgs)
+	t, ok := toolByName[name]
+	if !ok {
+		return nil, fmt.Errorf("unknown tool %q", name)
 	}
-	return nil, fmt.Errorf("unknown tool %q", name)
-}
-
-func dispatch(store *native.Store, name string, raw json.RawMessage) (json.RawMessage, error) {
-	switch name {
-	case "create_issue":
-		return doCreate(store, raw)
-	case "transition_issue":
-		return doTransition(store, raw)
-	case "assign_issue":
-		return doAssign(store, raw)
-	case "set_labels":
-		return doSetLabels(store, raw)
-	case "close_issue":
-		return doClose(store, raw)
-	case "list_issues":
-		return doList(store, raw)
-	case "get_issue":
-		return doGet(store, raw)
+	if !caps.Has(t.Capability) {
+		return nil, fmt.Errorf("%w: tool %q needs capability %q", ErrCapabilityDenied, name, t.Capability)
 	}
-	return nil, fmt.Errorf("unknown tool %q", name)
+	return dispatchByName[name](store, rawArgs)
 }
 
 // ---------------------------------------------------------------------------
