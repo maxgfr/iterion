@@ -1,5 +1,15 @@
 # Board capabilities — next steps (handoff to a sandboxed agent)
 
+> **2026-05-17 update.** Task A executed and passed; a `--store-dir`
+> isolation bug surfaced and was fixed during the session. Task C
+> partially staged but not run. Full debrief + open findings (F1–F6,
+> including a correction to the "Known gaps" section below) are in
+> [.plans/whats-next-live-2026-05-17.md](whats-next-live-2026-05-17.md).
+> In particular: the *"no router maps assignee → workflow yet"* claim
+> in **Task C → Known gaps** is **obsolete** — `RoutingRunner` and
+> `assignee_workflows:` exist and are documented in
+> [docs/conductor.md](../docs/conductor.md#routing-by-issue-assignee).
+
 ## Context
 
 The `iterion/board-caps` branch (worktree `.works/board-capabilities`,

@@ -95,12 +95,23 @@ func BuildExecutor(spec ExecutorSpec) (*model.ClawExecutor, error) {
 		planDir = ""
 	}
 
+	// Conductor sub-store: capability-gated tools (the board MCP server) read
+	// and write under <run-root>/conductor/. Translate the run-level store dir
+	// every caller passes into the conductor-specific path the model layer
+	// forwards to backends as task.StoreDir. Without this, __mcp-board falls
+	// back to <cwd>/.iterion/conductor and any --store-dir isolation is lost.
+	conductorStoreDir := ""
+	if spec.StoreDir != "" {
+		conductorStoreDir = filepath.Join(spec.StoreDir, "conductor")
+	}
+
 	opts := []model.ClawExecutorOption{
 		model.WithBackendRegistry(backendReg),
 		model.WithEventHooks(hooks),
 		model.WithToolRegistry(toolReg),
 		model.WithLogger(spec.Logger),
 		model.WithLifecycleHooks(lifecycle),
+		model.WithStoreDir(conductorStoreDir),
 	}
 
 	checker := buildToolChecker(spec.Workflow)

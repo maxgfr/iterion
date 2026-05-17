@@ -1,0 +1,67 @@
+## ─────────────────────────────────────────────────────────────────
+## board_smoke.bot
+##
+## End-to-end smoke for the bot capabilities -> __mcp-board stdio
+## MCP server (Task A in .plans/board-capabilities-next-steps.md).
+##
+## A single claude_code agent is granted board.{read,create,move}.
+## At run time, the runtime registers the internal __mcp-board MCP
+## server and extends AllowedTools with mcp__iterion_board__*. The
+## agent then performs three deterministic tool calls:
+##
+##   1. mcp__iterion_board__create_issue (title: "Smoke A …")
+##   2. mcp__iterion_board__create_issue (title: "Smoke B …")
+##   3. mcp__iterion_board__transition_issue (id: A, to: "ready")
+##
+## Run:
+##   ./iterion run bots/smoke/board_smoke.bot \
+##       --store-dir /tmp/iterion-board-smoke
+##
+## Verify:
+##   ./iterion issue list  --store-dir /tmp/iterion-board-smoke
+##   ./iterion issue board --store-dir /tmp/iterion-board-smoke
+## ─────────────────────────────────────────────────────────────────
+
+schema smoke_output:
+  first_id:   string
+  second_id:  string
+  summary:    string
+
+prompt smoke_system:
+  You are exercising the iterion native kanban board through its MCP
+  server. You MUST perform EXACTLY these three tool calls, in order,
+  and NOTHING else (no Read, no Bash, no Glob, no Grep):
+
+    1. mcp__iterion_board__create_issue
+         title: "Smoke A - board capabilities create"
+         body:  "First issue created by board_smoke.bot."
+         state: "backlog"
+
+    2. mcp__iterion_board__create_issue
+         title: "Smoke B - board capabilities create"
+         body:  "Second issue created by board_smoke.bot."
+         state: "backlog"
+
+    3. mcp__iterion_board__transition_issue
+         id:    <identifier returned by step 1>
+         to:    "ready"
+
+  After step 3, return the structured smoke_output with first_id and
+  second_id set to the identifiers you received from create_issue,
+  and a one-sentence summary describing what you did.
+
+prompt smoke_user:
+  Run the three-step board smoke test now. Do not ask questions.
+
+agent smoke:
+  backend: "claude_code"
+  model:   "claude-opus-4-7"
+  output:  smoke_output
+  system:  smoke_system
+  user:    smoke_user
+  capabilities: [board.read, board.create, board.move]
+  tool_max_steps: 12
+
+workflow board_smoke:
+  entry: smoke
+  smoke -> done
