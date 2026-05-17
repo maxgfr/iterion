@@ -1,0 +1,718 @@
+## ─────────────────────────────────────────────────────────────────
+## doc-align
+##
+## Detects mismatches between documentation (README, docs/*.md,
+## CLAUDE.md, bundled skills, optionally Go code comments) and the
+## actual current state of the code, then fixes the DOCUMENTATION
+## (never the code) and auto-commits on convergence.
+##
+## Workflow shape mirrors branch_improve_loop:
+##   - Alternating Claude (claude_code/opus) and GPT (claw/gpt-5.5)
+##     reviewers via round_robin router
+##   - Deterministic `streak_check` (compute) requiring two
+##     consecutive cross-family approvals
+##   - `prepare_commit` agent + `commit_changes` shell tool finalize
+##
+## Specificity vs branch_improve_loop:
+##   - A deterministic upstream `scan_docs` tool node enumerates the
+##     doc footprint ONCE (python3 + sha1) so the audit set is
+##     IMMUTABLE — agents cannot truncate it (anti-Goodhart, see
+##     `docs/workflow_authoring_pitfalls.md`).
+##   - The verdict schema carries `audited_pairs` (doc_path::code_anchor
+##     tuples verified this iteration) and `escalate_to_human` (set
+##     when a blocker has `is_code_bug=true`).
+##   - The fix schema carries `modified_doc_files` and
+##     `code_files_touched`; the latter MUST be empty — non-empty is
+##     a workflow contract violation that the next reviewer flags
+##     as a high-confidence blocker.
+##
+## Inviolable rules (enforced by skills + prompts):
+##   1. Docs follow code; code does NOT follow docs.
+##   2. Fixer writeable set: `.md` files in scope + Go code comments
+##      when `go_comment_globs` is non-empty.
+##   3. The audit footprint is determined by the scanner tool, not
+##      by agents.
+##   4. Escape valve: when the doc is correct and the code is wrong,
+##      set `is_code_bug=true` and call `ask_user` — never silently
+##      rewrite a correct doc to match buggy code.
+##
+## Skills shipped: doc-align (playbook), doc-mismatch-taxonomy (10-
+## value enum), doc-scope-enumeration (scanner contract),
+## anti-facade-fix-rules (substantive fix discipline),
+## doc-verification-checklist (judge STEP-0 preamble).
+## ─────────────────────────────────────────────────────────────────
+
+vars:
+  workspace_dir: string = "${PROJECT_DIR}"
+
+  ## Doc footprint scope (comma-separated globs). The scan_docs tool
+  ## node enumerates files matching these globs once, at run start.
+  ## Hidden / vendored dirs (.iterion, .works, .claude, vendor,
+  ## node_modules, .git, dist, build, out) are excluded
+  ## unconditionally inside the scanner.
+  doc_globs: string = "README.md,CLAUDE.md,docs/**/*.md,**/CLAUDE.md,examples/*/skills/*.md"
+
+  ## Go code comment scope (comma-separated globs). Empty (default)
+  ## means: do NOT audit Go function/package comments — speeds up
+  ## first runs. When non-empty, reviewers also check `//` and
+  ## `/* */` comments inside matching files; fixers may edit those
+  ## comments (but never the code statements around them).
+  go_comment_globs: string = ""
+
+  ## Where reviewers MAY grep / read to verify doc claims. They
+  ## do not modify these files — they only consult them as ground
+  ## truth for the doc audit.
+  code_scope_globs: string = "pkg/**/*.go,cmd/**/*.go,internal/**/*.go"
+
+  ## Optional free-text notes pinning the reviewers' attention to a
+  ## recent area of churn or a known issue. Empty by default.
+  scope_notes: string = ""
+
+  ## Loop bounds. review_loop counts reviewer iterations;
+  ## recovery_loop counts fixer iterations. Total fix attempts
+  ## across both families share recovery_loop.
+  max_review_iterations: int = 15
+  max_recovery_iterations: int = 20
+
+
+## ─── Prompts ────────────────────────────────────────────────────
+
+prompt review_system:
+  You are a rigorous documentation reviewer for the `doc-align`
+  workflow. Your job is to detect mismatches between project
+  documentation and the actual current state of the code, and to
+  produce a structured verdict.
+
+  LOAD YOUR SKILLS FIRST. The workflow ships five skills under
+  `.claude/skills/` describing the discipline you MUST follow:
+    - `doc-align.md` — operating playbook, the why and the
+      inviolable rules
+    - `doc-mismatch-taxonomy.md` — the 10 mismatch_kind enum
+      values you must use to tag every blocker
+    - `doc-scope-enumeration.md` — the immutable scan_docs
+      footprint contract
+    - `doc-verification-checklist.md` — the STEP-0 preamble you
+      MUST run before voting approved=true
+    - `anti-facade-fix-rules.md` — what a façade fix looks like
+      (used to detect façades in prior iterations)
+
+  Read them before reasoning. Then run STEP 0 through STEP 6 of
+  `doc-verification-checklist.md` literally. Skipping steps
+  defeats the workflow's false-positive defenses.
+
+  THE INVIOLABLE RULES (restated for emphasis):
+   1. Docs follow code; code does NOT follow docs. You correct
+      documentation to match the code, not the other way around.
+   2. The audit footprint is `input.doc_files[]` from `scan_docs`.
+      It is immutable. You cannot drop files; if you cannot verify
+      a file, raise a coverage gap, do not silently skip.
+   3. If a doc is correct and the code is wrong, set
+      `is_code_bug=true` on the blocker and call `ask_user`. Do
+      NOT raise it as a fixable mismatch — the bot does not edit
+      code.
+   4. Pre-iteration check: examine `outputs.fix_claude.code_files_touched`
+      and `outputs.fix_gpt.code_files_touched` from the previous
+      fix iteration. Both MUST be `[]`. If either is non-empty,
+      raise an automatic blocker (`severity: high`,
+      `confidence: high`) describing the contract violation. This
+      is the G4 gate from the bot's design.
+
+  PATH-OF-LEAST-RESISTANCE WARNING:
+   You will be tempted to focus on docs colocated with code that
+   has been recently changed. Resist. Audit every file in
+   `input.doc_files[]` over the course of the loop. Coverage of
+   the full footprint is the success criterion, not coverage of
+   the obvious surfaces.
+
+  HUMAN ESCALATION:
+   When you hit genuine ambiguity (doc and code disagree and you
+   cannot tell which is wrong from the code alone, or a doc claim
+   depends on intent you cannot infer), call `ask_user` with a
+   precise question. The run will pause, the operator will answer,
+   and you will be re-invoked with the answer in context. Use this
+   sparingly — for ordinary judgment calls, decide yourself and
+   lower `confidence` if uncertain.
+
+prompt review_user_claude:
+  Audit the documentation in {{vars.workspace_dir}} against the
+  actual code state.
+
+  Doc footprint (immutable — the complete audit set):
+  {{input.doc_files}}
+
+  Doc count: {{input.doc_count}}
+  Footprint hash: {{input.footprint_hash}}
+  Scope globs: {{input.scope_globs}}
+
+  Code scope for verification (read-only consult):
+  {{vars.code_scope_globs}}
+
+  Go comment scope (empty = skip Go comments):
+  {{vars.go_comment_globs}}
+
+  Scope notes (operator's attention pin):
+  {{vars.scope_notes}}
+
+  Iteration: {{loop.review_loop.iteration}}/{{loop.review_loop.max}}
+
+  Previous reviewer's verdict (other family, immediately prior
+  iteration — empty on first iteration):
+  {{loop.review_loop.previous_output}}
+
+  Cumulative audited pairs across all prior iterations (use to
+  prioritise uncovered files):
+  {{input.previous_audited_pairs}}
+
+  Items already pushed back by the fixer (do NOT re-flag without
+  fresh evidence):
+  {{input.prior_pushback}}
+
+  Pushback justification:
+  {{input.prior_pushback_justification}}
+
+  Previous fix iteration's `code_files_touched` (MUST be empty —
+  non-empty = automatic contract violation blocker):
+  {{outputs.fix_claude.code_files_touched}} / {{outputs.fix_gpt.code_files_touched}}
+
+  Now run STEP 0 through STEP 6 of `doc-verification-checklist.md`
+  and emit a verdict with these fields:
+    - approved: bool (true only when coverage AND no blockers)
+    - family: "claude"
+    - blockers: array of structured mismatch objects (see
+      `doc-mismatch-taxonomy.md` for the 10 mismatch_kind enum
+      values and the required fields: doc_path, doc_line_start,
+      doc_line_end, doc_excerpt, code_anchor, code_state,
+      mismatch_kind, severity, suggested_fix, is_code_bug)
+    - fix_plan: concrete instruction set for the fixer (short)
+    - confidence: "low" / "medium" / "high"
+    - audited_pairs: list of "doc_path::code_anchor" strings you
+      ACTUALLY verified this iteration
+    - escalate_to_human: true if ANY blocker has is_code_bug=true
+
+prompt review_user_gpt:
+  Audit the documentation in {{vars.workspace_dir}} against the
+  actual code state.
+
+  Doc footprint (immutable — the complete audit set):
+  {{input.doc_files}}
+
+  Doc count: {{input.doc_count}}
+  Footprint hash: {{input.footprint_hash}}
+  Scope globs: {{input.scope_globs}}
+
+  Code scope for verification (read-only consult):
+  {{vars.code_scope_globs}}
+
+  Go comment scope (empty = skip Go comments):
+  {{vars.go_comment_globs}}
+
+  Scope notes (operator's attention pin):
+  {{vars.scope_notes}}
+
+  Iteration: {{loop.review_loop.iteration}}/{{loop.review_loop.max}}
+
+  Previous reviewer's verdict (other family, immediately prior
+  iteration — empty on first iteration):
+  {{loop.review_loop.previous_output}}
+
+  Cumulative audited pairs across all prior iterations:
+  {{input.previous_audited_pairs}}
+
+  Items already pushed back by the fixer:
+  {{input.prior_pushback}}
+
+  Pushback justification:
+  {{input.prior_pushback_justification}}
+
+  Previous fix iteration's `code_files_touched` (MUST be empty):
+  {{outputs.fix_claude.code_files_touched}} / {{outputs.fix_gpt.code_files_touched}}
+
+  Now run STEP 0 through STEP 6 of `doc-verification-checklist.md`
+  and emit a verdict with these fields:
+    - approved: bool
+    - family: "gpt"
+    - blockers: array of structured mismatch objects (see
+      `doc-mismatch-taxonomy.md`)
+    - fix_plan: short concrete instruction set for the fixer
+    - confidence: "low" / "medium" / "high"
+    - audited_pairs: list of "doc_path::code_anchor" you verified
+    - escalate_to_human: true if any blocker has is_code_bug=true
+
+prompt fix_system:
+  You are the fixer for the `doc-align` workflow. You apply
+  corrections to DOCUMENTATION files based on blockers a reviewer
+  has identified.
+
+  LOAD YOUR SKILLS FIRST. Especially:
+    - `anti-facade-fix-rules.md` — the discipline rules. A fix
+      where your `summary` does not cite the tool invocation
+      (read_file / grep) that verified the cited `code_anchor`
+      is a façade, and the next reviewer will reject it.
+    - `doc-mismatch-taxonomy.md` — the kind / severity meanings.
+    - `doc-scope-enumeration.md` — what you may and may not
+      write to.
+
+  HARD CONSTRAINTS:
+   1. Writeable extensions: `.md` only, AND (when go_comment_globs
+      is non-empty) Go code comments inside files matching that
+      scope. You may NEVER write to a `.go` statement, expression,
+      or declaration body.
+   2. `fix_output.code_files_touched[]` MUST be empty in your
+      output. The next reviewer will flag non-empty as a workflow
+      contract violation (high-confidence blocker).
+   3. `fix_output.modified_doc_files[]` MUST be a subset of
+      `input.doc_files` (the scanner footprint). You cannot
+      introduce new doc files; you cannot edit docs outside scope.
+   4. For each fix you apply, your `summary` MUST contain the
+      tool invocation (`read_file` or `grep`) you used to verify
+      the current code state at the cited `code_anchor`. Without
+      that evidence the fix is a façade.
+
+  ESCAPE VALVE:
+   If a blocker has `is_code_bug=true`, do NOT attempt to fix it.
+   Add it to `pushback` with a justification explaining that the
+   doc appears correct and the code is the problem. Call
+   `ask_user` to surface the question to the operator if you
+   need confirmation.
+
+  PUSHBACK:
+   You may refuse a blocker by adding its exact description to
+   `pushback[]` with a clear justification in
+   `pushback_justification`. Use this for false positives or
+   stylistic findings the reviewer should not have raised.
+   Pushback is the supported "this is not a real mismatch"
+   channel; silent skip is not.
+
+prompt fix_user:
+  Apply doc-only fixes for these blockers in
+  {{vars.workspace_dir}}.
+
+  Doc footprint (your writeable set, plus Go code comments inside
+  go_comment_globs when non-empty):
+  {{vars.doc_globs}}
+
+  Go comment scope (empty = no Go comments may be edited):
+  {{vars.go_comment_globs}}
+
+  Blockers to address:
+  {{input.blockers}}
+
+  Fix plan from the reviewer:
+  {{input.fix_plan}}
+
+  For EACH blocker:
+   1. Read the code at the cited `code_anchor` to verify the
+      current state. Paste the tool invocation and an excerpt
+      into your `summary`.
+   2. If the blocker is genuine and is_code_bug is false: apply
+      the fix to the doc. Run the negative-space check
+      (`git grep` for stale cross-references to whatever you
+      removed) and fix those too in the same pass.
+   3. If `is_code_bug=true`: do NOT fix. Push back with a
+      justification.
+   4. If the blocker is a false positive: push back with
+      justification.
+
+  Output fields:
+   - applied: true if at least one fix landed
+   - summary: list of fixes with their tool-invocation evidence
+     (see `anti-facade-fix-rules.md` for the expected shape)
+   - modified_doc_files: exact list of repo-relative paths you
+     wrote to (must be subset of input.doc_files)
+   - code_files_touched: MUST be []
+   - pushback: items refused
+   - pushback_justification: explanation
+
+
+## ─── Prompts : Commit ──────────────────────────────────────────
+
+prompt prepare_commit_system:
+  Your job is to pick the EXACT set of doc files that should be
+  committed to capture the alignment fixes applied during this
+  run, and produce a semantic commit message. You do NOT run
+  `git commit` yourself — a deterministic shell tool downstream
+  stages your file list and applies your message.
+
+  Procedure (in order):
+   1. Run `git status` and `git diff HEAD` (read-only) to
+      enumerate working-tree changes.
+   2. Cross-reference with the original scanner footprint
+      (visible in your conversation history if you scroll back,
+      or rerun the equivalent `find`). The commit set must be a
+      subset of that footprint, plus any Go file whose comments
+      were edited (no Go file should be on the list with code
+      changes — verify by running `git diff HEAD -- <file>` and
+      confirming only comment lines changed).
+   3. EXCLUDE any non-doc file. EXCLUDE any LLM scratch
+      (`notes.md`, `plan.txt`, etc.) the fixer accidentally
+      created. EXCLUDE editor scratch and build artefacts.
+   4. Build the structured output:
+       - type: "docs" (default) or "fix" (only when you fixed a
+         demonstrably misleading code COMMENT that would have led
+         readers astray)
+       - scope: typical package/area name, lowercase
+       - subject: imperative present, ≤ 72 chars, no trailing
+         period (e.g. "align CLI examples with current flags")
+       - full_message: type(scope): subject — plus an optional
+         body summarising what was aligned
+       - files: exact list of repo-relative paths to stage
+       - committed: false (the tool will set this on its own
+         output)
+
+prompt prepare_commit_user:
+  Pick the files and produce the semantic commit name for the
+  doc alignment fixes applied during this doc-align run.
+
+  Workspace: {{vars.workspace_dir}}
+
+
+## ─── Schemas ────────────────────────────────────────────────────
+
+## scan_output is the immutable doc footprint emitted by the
+## upstream scan_docs tool node. It anchors the audit set for the
+## entire run.
+schema scan_output:
+  doc_files: string[]
+  doc_count: int
+  footprint_hash: string
+  scope_globs: string[]
+
+## review_input: what each reviewer sees on entry. doc_files /
+## doc_count / footprint_hash / scope_globs come from scan_docs
+## (relayed through the alt router). previous_audited_pairs
+## accumulates audit coverage across all prior iterations (both
+## families).
+schema review_input:
+  doc_files: string[]
+  doc_count: int
+  footprint_hash: string
+  scope_globs: string[]
+  prior_pushback: string[]
+  prior_pushback_justification: string
+  previous_audited_pairs: string[]
+
+## verdict_output: a reviewer's structured judgment. `blockers` is
+## JSON to allow nested mismatch objects (the DSL schema parser
+## only supports primitive types and string[], so structured
+## arrays go through json). The per-blocker fields are described
+## in skills/doc-mismatch-taxonomy.md and enforced at the prompt
+## level.
+##
+## family is enum-locked: a hallucinated value would otherwise
+## bypass both family-aware fix routes and silently terminate the
+## workflow. The enum forces structured-output validation to
+## reject the verdict, triggering parse_fallback retry.
+schema verdict_output:
+  approved: bool
+  family: string [enum: "claude", "gpt"]
+  blockers: json
+  fix_plan: string
+  confidence: string [enum: "low", "medium", "high"]
+  audited_pairs: string[]
+  escalate_to_human: bool
+
+## streak_state: passthrough from the current verdict + the
+## deterministic cross-family streak detection. Mirrors the
+## pattern in whole_improve_loop.bot. cumulative_audited_pairs
+## accumulates monotonically via
+## `unique(concat(outputs.streak_check.cumulative_audited_pairs,
+## input.audited_pairs))`.
+schema streak_state:
+  stop: bool
+  approved: bool
+  family: string
+  blockers: json
+  fix_plan: string
+  cumulative_audited_pairs: string[]
+
+## fix_input: blockers + plan handed to the same-family fixer.
+schema fix_input:
+  blockers: json
+  fix_plan: string
+
+## fix_output: the fixer's report. code_files_touched MUST be
+## empty — non-empty is a contract violation flagged by the next
+## reviewer (G4 gate).
+schema fix_output:
+  applied: bool
+  summary: string
+  modified_doc_files: string[]
+  code_files_touched: string[]
+  pushback: string[]
+  pushback_justification: string
+
+## Commit-phase schemas, mirroring branch_improve_loop.
+## type enum is narrower here — only `docs` and `fix` make sense
+## for a docs-only bot (`fix` reserved for misleading Go-comment
+## corrections).
+schema commit_output:
+  type: string [enum: "docs", "fix"]
+  scope: string
+  subject: string
+  full_message: string
+  files: string[]
+  committed: bool
+
+schema commit_tool_input:
+  full_message: string
+  files: string[]
+  workspace_dir: string
+
+schema commit_result:
+  success: bool
+  output: string
+
+
+## ─── Nodes ──────────────────────────────────────────────────────
+
+## scan_docs is the deterministic upstream scanner. It runs ONCE
+## per workflow run (before the review loop opens) and emits the
+## immutable doc footprint that anchors the entire run.
+##
+## Implementation: python3 -c "..." with env vars WS and GLOBS
+## injected from iterion vars at template-resolution time. Python
+## handles ** globs natively (`glob.glob(recursive=True)`) and the
+## EXCLUDE set unconditionally drops hidden / vendored / runtime
+## directories (.iterion, .works, .claude, vendor, node_modules,
+## .git, dist, build, out) so they cannot leak into the audit
+## footprint even if a permissive glob is configured.
+##
+## Output is JSON on stdout; the iterion tool-node executor parses
+## it into the scan_output schema fields automatically.
+##
+## Raw-string (backtick) form chosen because the python snippet
+## contains many quote characters that would drown in `\"` escapes
+## in the standard "..." string form.
+tool scan_docs:
+  command: `WS={{vars.workspace_dir}} GLOBS={{vars.doc_globs}} python3 -c "
+import os, json, glob, hashlib
+ws = os.environ['WS']
+globs = [g.strip() for g in os.environ['GLOBS'].split(',') if g.strip()]
+os.chdir(ws)
+EXCLUDE = {'.iterion', '.works', '.claude', 'vendor', 'node_modules', '.git', 'dist', 'build', 'out'}
+files = sorted({f for g in globs for f in glob.glob(g, recursive=True) if os.path.isfile(f) and not any(p in EXCLUDE for p in f.split(os.sep))})
+h = hashlib.sha1(chr(10).join(files).encode()).hexdigest()
+print(json.dumps({'doc_files': files, 'doc_count': len(files), 'footprint_hash': h, 'scope_globs': globs}))
+"`
+  output: scan_output
+
+router alt:
+  mode: round_robin
+
+judge reviewer_claude:
+  backend: "claude_code"
+  model: "claude-opus-4-7"
+  reasoning_effort: "${ITERION_DOC_ALIGN_EFFORT_CLAUDE:-max}"
+  input: review_input
+  output: verdict_output
+  system: review_system
+  user: review_user_claude
+  session: fresh
+  interaction: human
+
+judge reviewer_gpt:
+  ## Explicit backend pin: openai/gpt-5.5 only runs on claw.
+  ## Without it the auto-resolver picks claude_code, which doesn't
+  ## know the model id, and the agent returns a meta-error.
+  backend: "claw"
+  model: "openai/gpt-5.5"
+  reasoning_effort: "${ITERION_DOC_ALIGN_EFFORT_GPT:-high}"
+  input: review_input
+  output: verdict_output
+  system: review_system
+  user: review_user_gpt
+  session: fresh
+  ## claw builtin tools use snake_case names. Read-only set: the
+  ## reviewer NEVER writes.
+  tools: [bash, read_file, glob, grep]
+  tool_max_steps: 40
+  interaction: human
+
+## Deterministic streak detector. Two consecutive cross-family
+## approvals → stop. Soft-approval (low-confidence rejection) is
+## passed through as approved for routing (alternation continues
+## without invoking the fixer) but does NOT count toward the stop
+## streak.
+compute streak_check:
+  output: streak_state
+  expr:
+    stop: "input.approved && loop.review_loop.previous_output.approved && input.family != loop.review_loop.previous_output.family"
+    approved: "input.approved || input.confidence == 'low'"
+    family: "input.family"
+    blockers: "input.blockers"
+    fix_plan: "input.fix_plan"
+    cumulative_audited_pairs: "unique(concat(outputs.streak_check.cumulative_audited_pairs, input.audited_pairs))"
+
+agent fix_claude:
+  backend: "claude_code"
+  model: "claude-opus-4-7"
+  reasoning_effort: "${ITERION_DOC_ALIGN_EFFORT_CLAUDE:-max}"
+  input: fix_input
+  output: fix_output
+  system: fix_system
+  user: fix_user
+  session: inherit
+  interaction: human
+
+agent fix_gpt:
+  backend: "claw"
+  model: "openai/gpt-5.5"
+  reasoning_effort: "${ITERION_DOC_ALIGN_EFFORT_GPT:-high}"
+  input: fix_input
+  output: fix_output
+  system: fix_system
+  user: fix_user
+  session: inherit
+  ## claw needs read+write tools for fixers to actually edit docs.
+  tools: [bash, read_file, write_file, file_edit, glob, grep]
+  tool_max_steps: 40
+  interaction: human
+
+
+## ─── Nodes : Commit ─────────────────────────────────────────────
+
+agent prepare_commit:
+  backend: "claude_code"
+  model: "claude-opus-4-7"
+  reasoning_effort: "${ITERION_DOC_ALIGN_EFFORT_CLAUDE:-max}"
+  output: commit_output
+  system: prepare_commit_system
+  user: prepare_commit_user
+  session: fresh
+  readonly: true
+
+## commit_changes: deterministic shell tool. Stages exactly the
+## file list prepare_commit chose; commits with the semantic
+## message. The `diff --cached --quiet` guard skips the commit
+## if `git add` resolved to nothing (e.g. all listed files were
+## clean by the time we reached this node).
+tool commit_changes:
+  command: "git -C {{input.workspace_dir}} add -- {{input.files}} && (git -C {{input.workspace_dir}} diff --cached --quiet || git -C {{input.workspace_dir}} commit -m {{input.full_message}})"
+  input: commit_tool_input
+  output: commit_result
+
+
+## ─── Workflow ───────────────────────────────────────────────────
+
+workflow doc_align:
+  entry: scan_docs
+
+  budget:
+    max_parallel_branches: 1
+    max_duration: "4h"
+    max_cost_usd: 120
+
+  compaction:
+    threshold: 0.9
+    preserve_recent: 8
+
+  ## scan_docs runs ONCE upstream of the review loop. Its output
+  ## (doc_files, doc_count, footprint_hash, scope_globs) is
+  ## relayed to every reviewer iteration via the alt -> reviewer_*
+  ## edges below. Because outputs.scan_docs.* is referenced
+  ## (not loop.scan_docs), the value resolved on every reviewer
+  ## invocation is the single, immutable scanner output from the
+  ## first iteration.
+  scan_docs -> alt
+
+  ## Round-robin alternates: 1st pass → claude, 2nd → gpt, repeat.
+  ## Each reviewer receives:
+  ##   - the immutable scanner footprint (doc_files / doc_count /
+  ##     footprint_hash / scope_globs)
+  ##   - the OTHER family's most recent fixer pushback
+  ##   - the cumulative audited pairs from prior iterations
+  alt -> reviewer_claude with {
+    doc_files: "{{outputs.scan_docs.doc_files}}",
+    doc_count: "{{outputs.scan_docs.doc_count}}",
+    footprint_hash: "{{outputs.scan_docs.footprint_hash}}",
+    scope_globs: "{{outputs.scan_docs.scope_globs}}",
+    prior_pushback: "{{outputs.fix_gpt.pushback}}",
+    prior_pushback_justification: "{{outputs.fix_gpt.pushback_justification}}",
+    previous_audited_pairs: "{{outputs.streak_check.cumulative_audited_pairs}}"
+  }
+  alt -> reviewer_gpt with {
+    doc_files: "{{outputs.scan_docs.doc_files}}",
+    doc_count: "{{outputs.scan_docs.doc_count}}",
+    footprint_hash: "{{outputs.scan_docs.footprint_hash}}",
+    scope_globs: "{{outputs.scan_docs.scope_globs}}",
+    prior_pushback: "{{outputs.fix_claude.pushback}}",
+    prior_pushback_justification: "{{outputs.fix_claude.pushback_justification}}",
+    previous_audited_pairs: "{{outputs.streak_check.cumulative_audited_pairs}}"
+  }
+
+  ## reviewer → streak_check carries the review_loop counter so
+  ## `loop.review_loop.previous_output` snapshots the prior
+  ## verdict for the next iteration. Bounded at 15 iterations
+  ## per loop-counter — exhaustion falls through to the
+  ## unconditional reviewer → done edges below.
+  reviewer_claude -> streak_check as review_loop(15) with {
+    approved: "{{outputs.reviewer_claude.approved}}",
+    family: "{{outputs.reviewer_claude.family}}",
+    blockers: "{{outputs.reviewer_claude.blockers}}",
+    fix_plan: "{{outputs.reviewer_claude.fix_plan}}",
+    confidence: "{{outputs.reviewer_claude.confidence}}",
+    audited_pairs: "{{outputs.reviewer_claude.audited_pairs}}"
+  }
+  reviewer_gpt -> streak_check as review_loop(15) with {
+    approved: "{{outputs.reviewer_gpt.approved}}",
+    family: "{{outputs.reviewer_gpt.family}}",
+    blockers: "{{outputs.reviewer_gpt.blockers}}",
+    fix_plan: "{{outputs.reviewer_gpt.fix_plan}}",
+    confidence: "{{outputs.reviewer_gpt.confidence}}",
+    audited_pairs: "{{outputs.reviewer_gpt.audited_pairs}}"
+  }
+
+  ## Stop on cross-family double approval — route to commit phase.
+  streak_check -> prepare_commit when stop
+
+  prepare_commit -> commit_changes with {
+    full_message: "{{outputs.prepare_commit.full_message}}",
+    files: "{{outputs.prepare_commit.files}}",
+    workspace_dir: "{{vars.workspace_dir}}"
+  }
+
+  commit_changes -> done
+
+  ## Soft-approval (no streak yet, or low-confidence rejection):
+  ## keep alternating without invoking the fixer. This edge
+  ## does NOT carry review_loop so the loop counter is incremented
+  ## once per cycle on the reviewer→streak_check edges above.
+  streak_check -> alt when "approved"
+
+  ## Medium/high-confidence rejection with concrete blockers:
+  ## route to the SAME-family fixer so it inherits the reviewer's
+  ## session (one session per iteration per family). The
+  ## length(blockers) > 0 guard avoids invoking the fixer on
+  ## coverage-only rejections (the unconditional alt fallthrough
+  ## handles those).
+  ##
+  ## Edge order matters: iterion evaluates conditional edges top-
+  ## down, first match wins. Family-specific fixers listed before
+  ## the unconditional fallthroughs.
+  streak_check -> fix_claude when "!approved && family == 'claude' && length(blockers) > 0" with {
+    blockers: "{{outputs.streak_check.blockers}}",
+    fix_plan: "{{outputs.streak_check.fix_plan}}",
+    _session_id: "{{outputs.reviewer_claude._session_id}}"
+  }
+  streak_check -> fix_gpt when "!approved && family == 'gpt' && length(blockers) > 0" with {
+    blockers: "{{outputs.streak_check.blockers}}",
+    fix_plan: "{{outputs.streak_check.fix_plan}}",
+    _session_id: "{{outputs.reviewer_gpt._session_id}}"
+  }
+
+  ## Recovery cycle uses a separate loop name. Both fixers share
+  ## the loop counter — total fix attempts capped at 20.
+  fix_claude -> alt as recovery_loop(20)
+  fix_gpt    -> alt as recovery_loop(20)
+
+  ## Loop-exhaustion fallthroughs.
+  reviewer_claude -> done
+  reviewer_gpt    -> done
+  fix_claude      -> done
+  fix_gpt         -> done
+  ## streak_check's catch-all routes back to alt (not done) so an
+  ## unmatched conditional state (e.g. a hallucinated family that
+  ## escaped the enum) keeps the loop cycling rather than silently
+  ## terminating. The bounded review_loop counter still guarantees
+  ## exit via the reviewer→done fallthroughs.
+  streak_check    -> alt
