@@ -196,6 +196,16 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 	// defaults) applies on resume too.
 	e.restoreRunEnv(r)
 
+	// Re-mirror bundle skills on resume so a `.botz` upgrade between
+	// the original launch and the resume picks up the new skill bodies
+	// inside <workDir>/.claude/skills/. Without this, an agent inside
+	// a resumed paused run reads the v0.1.0 skill content even though
+	// the host has v0.2.0 — the marker file logic preserves any user
+	// customisation. See F-RT-7.
+	if err := mirrorBundleSkills(e.workDir, e.bundle, e.logger); err != nil {
+		return fmt.Errorf("runtime: bundle skills (resume): %w", err)
+	}
+
 	// Re-bootstrap the sandbox container (see resumeFromFailure for the
 	// rationale — same lifecycle issue applies here: the original Run()
 	// deferred shutdown when it exited to pause, so e.sandbox is nil
@@ -318,6 +328,13 @@ func (e *Engine) resumeFromFailure(ctx context.Context, r *store.Run) error {
 	// would re-fail at the same node even after a fixed binary takes
 	// over.
 	e.restoreRunEnv(r)
+
+	// Re-mirror bundle skills on resume (F-RT-7) — same rationale as
+	// resumeFromPause: a bundle upgrade between launch and resume
+	// would otherwise leave the agent reading stale skill content.
+	if err := mirrorBundleSkills(e.workDir, e.bundle, e.logger); err != nil {
+		return fmt.Errorf("runtime: bundle skills (resume): %w", err)
+	}
 
 	// Re-bootstrap the sandbox container. The original Run() process
 	// owned it through a defer that ran on exit, so a resumed run finds

@@ -37,7 +37,11 @@ type cmdReload struct {
 func (m cmdReload) apply(c *Conductor, _ context.Context) {
 	old := c.cfg.Load()
 	c.cfg.Store(m.cfg)
-	c.hooks = m.cfg.Hooks
+	// c.hooks is no longer the source of truth — worker goroutines
+	// read hooks via c.cfg.Load().Hooks each time so the atomic
+	// pointer swap above is the single visibility boundary. See
+	// F-CD-10: the previous parallel c.hooks write was racy against
+	// worker reads.
 	if old.PollingInterval() != m.cfg.PollingInterval() {
 		c.logger.Info("conductor: polling interval %s → %s", old.PollingInterval(), m.cfg.PollingInterval())
 	}

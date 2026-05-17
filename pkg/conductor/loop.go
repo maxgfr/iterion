@@ -187,7 +187,11 @@ func (c *Conductor) dispatch(ctx context.Context, iss tracker.Issue) {
 
 	c.logger.Info("conductor: dispatching %s → run=%s (attempt=%d, workspace=%s)", iss.Identifier, runID, attempt, wsPath)
 
-	go c.runWorker(runCtx, entry, created, spec)
+	c.workersWG.Add(1)
+	go func() {
+		defer c.workersWG.Done()
+		c.runWorker(runCtx, entry, created, spec)
+	}()
 }
 
 func (c *Conductor) buildSpec(cfg *Config, iss tracker.Issue, runID, wsPath string, attempt int) DispatchSpec {
@@ -254,13 +258,19 @@ func (c *Conductor) buildSpec(cfg *Config, iss tracker.Issue, runID, wsPath stri
 func (c *Conductor) runWorker(ctx context.Context, entry *runningEntry, created bool, spec DispatchSpec) {
 	env := c.dispatchEnv(entry, spec)
 
-	if created && c.hooks.AfterCreate != nil {
-		if err := c.hooks.AfterCreate.Run(ctx, c.logger, "after_create", entry.WorkspacePath, env); err != nil {
+	// Snapshot the hooks struct from the atomic config pointer once,
+	// at the start of the worker. A mid-flight reload doesn't suddenly
+	// swap callback bodies, and the read is guaranteed consistent
+	// across the three Run invocations below (F-CD-10).
+	hooks := c.cfg.Load().Hooks
+
+	if created && hooks.AfterCreate != nil {
+		if err := hooks.AfterCreate.Run(ctx, c.logger, "after_create", entry.WorkspacePath, env); err != nil {
 			c.postFinished(entry.IssueID, fmt.Errorf("after_create hook: %w", err))
 			return
 		}
 	}
-	if err := c.hooks.BeforeRun.Run(ctx, c.logger, "before_run", entry.WorkspacePath, env); err != nil {
+	if err := hooks.BeforeRun.Run(ctx, c.logger, "before_run", entry.WorkspacePath, env); err != nil {
 		c.postFinished(entry.IssueID, fmt.Errorf("before_run hook: %w", err))
 		return
 	}
@@ -269,7 +279,7 @@ func (c *Conductor) runWorker(ctx context.Context, entry *runningEntry, created 
 
 	// after_run is best-effort: log failures but don't override the
 	// dispatch result.
-	if err := c.hooks.AfterRun.Run(ctx, c.logger, "after_run", entry.WorkspacePath, env); err != nil {
+	if err := hooks.AfterRun.Run(ctx, c.logger, "after_run", entry.WorkspacePath, env); err != nil {
 		c.logger.Warn("conductor: after_run hook for %s: %v", entry.Identifier, err)
 	}
 

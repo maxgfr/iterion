@@ -216,13 +216,20 @@ func NetworkTransientRecipe(maxRetries int) Recipe {
 			}
 		}
 		// Exponential backoff capped at maxDelay: 5, 10, 20, 40, 60, 60.
-		// Shift via uint(attempts) so the math is in plain integers; a
-		// raw `time.Duration << attempts` is well-defined but reads as
-		// "shifting nanoseconds," which is needlessly surprising.
-		shift := uint(attempts)
-		if shift > 62 {
-			shift = 62 // ceiling so 1<<shift can't overflow int64
+		// Short-circuit when the desired delay is bound to exceed
+		// maxDelay anyway — avoids needing to reason about whether
+		// `baseDelay * (1 << shift)` over- or underflowed before the
+		// `delay > maxDelay` clamp can catch it. For 5s base, shift=4
+		// already produces 80s which is well beyond the 60s cap.
+		if attempts >= 4 {
+			return Action{
+				Kind:         ActionRetrySameNode,
+				Delay:        maxDelay,
+				AttemptsLeft: maxRetries - attempts - 1,
+				Reason:       "transient network failure; retrying with exponential backoff",
+			}
 		}
+		shift := uint(attempts)
 		delay := baseDelay * (1 << shift)
 		if delay > maxDelay || delay <= 0 {
 			delay = maxDelay
