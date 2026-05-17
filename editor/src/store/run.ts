@@ -336,7 +336,10 @@ export const useRunStore = create<RunStoreState>((set) => ({
       // dropped (the old filter `seq <= last_seq` discarded them) and
       // their state mutations were lost — the dominant root cause of
       // "two nodes show as running" UI glitches on initial mount.
-      const newerEvents = state.events.filter((e) => e.seq > snap.last_seq);
+      const newerEvents =
+        state.events.length === 0
+          ? []
+          : state.events.filter((e) => e.seq > snap.last_seq);
       if (newerEvents.length === 0) {
         return {
           snapshot: snap,
@@ -347,7 +350,10 @@ export const useRunStore = create<RunStoreState>((set) => ({
           // repopulate from the next tool_started onward.
           inFlightToolsByExec: new Map(),
           latestTodosByExec: new Map(),
-          events: state.events.filter((e) => e.seq <= snap.last_seq),
+          events:
+            state.events.length === 0
+              ? state.events
+              : state.events.filter((e) => e.seq <= snap.last_seq),
           pendingHumanInput: rehydrated,
         };
       }
