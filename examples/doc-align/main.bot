@@ -108,6 +108,18 @@ vars:
   ## for nightly / per-PR runs (`--var diff_since=main`).
   diff_since: string = ""
 
+  ## Code-surface scan scope (v0.6.0). Globs for the
+  ## `scan_code_surface` tool which greps cmd/iterion/*.go and
+  ## pkg/dsl/ir/*.go (and similar locations) for "publicly-exposed
+  ## identifiers" the docs ought to mention: CLI commands, CLI
+  ## flags, diagnostic codes. Reviewers receive the surface as a
+  ## counter-omission audit list — for each identifier in the
+  ## surface, they verify it appears in at least one doc in scope.
+  ## Empty string disables the surface scan (legacy doc→code-only
+  ## audit).
+  cli_surface_globs: string = "cmd/iterion/*.go,cmd/iterion/*/*.go"
+  diagnostic_surface_globs: string = "pkg/dsl/ir/*.go,pkg/dsl/parser/*.go"
+
   ## Inter-run audit cache (v0.5.0). Path to the JSON cache file
   ## that stores `{doc_path: {sha, refs: [{path, sha}]}}` from the
   ## previous successful run. scan_docs reads this and emits
@@ -132,7 +144,7 @@ prompt review_system:
   `.claude/skills/` describing the discipline you MUST follow:
     - `doc-align.md` — operating playbook, the why and the
       inviolable rules
-    - `doc-mismatch-taxonomy.md` — the 10 mismatch_kind enum
+    - `doc-mismatch-taxonomy.md` — the 11 mismatch_kind enum
       values AND the `anchor_kind` enum you must use to tag
       every blocker
     - `doc-scope-enumeration.md` — the immutable scan_docs
@@ -226,6 +238,22 @@ prompt review_user_claude:
   next run:
   {{input.pre_verified_docs}}
 
+  Code surface (v0.6.0) — counter-omission audit set. These
+  identifiers were extracted from cmd/iterion/ and pkg/dsl/ir/
+  by the deterministic `scan_code_surface` tool. For each one,
+  verify that at least one doc in `input.doc_files` mentions it.
+  If a CLI command, flag, or diagnostic code exists in the code
+  but no doc lists it, raise an `undocumented_capability`
+  blocker pointing at the most relevant doc (typically
+  `docs/cli-reference.md` for commands/flags or
+  `docs/references/diagnostics.md` for codes). This is the
+  inverse audit direction — the rest of your review covers
+  doc→code drift; this covers code→doc omission.
+
+  CLI commands:           {{input.cli_commands}}
+  CLI flags:              {{input.cli_flags}}
+  Diagnostic codes:       {{input.diagnostic_codes}}
+
   Scope notes (operator's attention pin):
   {{vars.scope_notes}}
 
@@ -259,7 +287,7 @@ prompt review_user_claude:
       no blockers)
     - family: "claude"
     - blockers: array of structured mismatch objects (see
-      `doc-mismatch-taxonomy.md` for the 10 mismatch_kind enum
+      `doc-mismatch-taxonomy.md` for the 11 mismatch_kind enum
       values, the `anchor_kind` enum, and the required fields:
       doc_path, doc_line_start, doc_line_end, doc_excerpt,
       code_anchor, anchor_kind, code_state, mismatch_kind,
@@ -311,6 +339,22 @@ prompt review_user_gpt:
   blocker — that's a real bug and the cache will be invalidated
   next run:
   {{input.pre_verified_docs}}
+
+  Code surface (v0.6.0) — counter-omission audit set. These
+  identifiers were extracted from cmd/iterion/ and pkg/dsl/ir/
+  by the deterministic `scan_code_surface` tool. For each one,
+  verify that at least one doc in `input.doc_files` mentions it.
+  If a CLI command, flag, or diagnostic code exists in the code
+  but no doc lists it, raise an `undocumented_capability`
+  blocker pointing at the most relevant doc (typically
+  `docs/cli-reference.md` for commands/flags or
+  `docs/references/diagnostics.md` for codes). This is the
+  inverse audit direction — the rest of your review covers
+  doc→code drift; this covers code→doc omission.
+
+  CLI commands:           {{input.cli_commands}}
+  CLI flags:              {{input.cli_flags}}
+  Diagnostic codes:       {{input.diagnostic_codes}}
 
   Scope notes (operator's attention pin):
   {{vars.scope_notes}}
@@ -485,6 +529,18 @@ prompt prepare_commit_user:
 
 ## ─── Schemas ────────────────────────────────────────────────────
 
+## code_surface (v0.6.0): the inventory of "publicly-exposed"
+## identifiers extracted from the workspace by the
+## `scan_code_surface` tool. Reviewers receive these as a
+## counter-omission audit list — for each identifier, verify it
+## appears in at least one doc in scope. Mismatch_kind for missed
+## items: `undocumented_capability`.
+schema code_surface:
+  cli_commands: string[]
+  cli_flags: string[]
+  diagnostic_codes: string[]
+  scan_skipped: string
+
 ## scan_output is the immutable doc footprint emitted by the
 ## upstream scan_docs tool node. recently_changed_code_files is
 ## populated from `git diff` when vars.diff_since is set
@@ -521,6 +577,9 @@ schema review_input:
   scope_globs: string[]
   recently_changed_code_files: string[]
   pre_verified_docs: string[]
+  cli_commands: string[]
+  cli_flags: string[]
+  diagnostic_codes: string[]
   prior_pushback: string[]
   prior_pushback_justification: string
   prior_code_files_touched_claude: string[]
@@ -700,6 +759,59 @@ if cache_path:
 print(json.dumps({'doc_files': files, 'doc_count': len(files), 'footprint_hash': h, 'scope_globs': globs, 'recently_changed_code_files': recent, 'bundle_self_path': bundle_self, 'pre_verified_docs': pre_verified, 'cache_hits': hits, 'cache_misses': misses}))
 "`
   output: scan_output
+
+## scan_code_surface (v0.6.0): runs after scan_docs and extracts
+## "publicly-exposed identifiers" from the workspace via grep so
+## reviewers can audit code→doc presence (the inverse direction
+## of the existing doc→code audit). Categories:
+##   - cli_commands: cobra `Use:` literals in cmd/iterion/*.go
+##   - cli_flags: --flag-name tokens in StringVar/BoolVar/...Var
+##     calls inside the same files
+##   - diagnostic_codes: "Cxxx" constants in pkg/dsl/ir/*.go and
+##     pkg/dsl/parser/*.go
+##
+## When `cli_surface_globs` AND `diagnostic_surface_globs` are
+## both empty, the scan is skipped and the output is empty lists
+## with scan_skipped set to a reason string. Useful for runs
+## targeting docs that have no CLI / diagnostic surface (e.g.
+## a library-only repo).
+tool scan_code_surface:
+  command: `WS={{vars.workspace_dir}} CLI_GLOBS={{vars.cli_surface_globs}} DIAG_GLOBS={{vars.diagnostic_surface_globs}} python3 -c "
+import os, json, glob, re
+ws = os.environ['WS']
+cli_globs = [g.strip() for g in os.environ.get('CLI_GLOBS','').split(',') if g.strip()]
+diag_globs = [g.strip() for g in os.environ.get('DIAG_GLOBS','').split(',') if g.strip()]
+os.chdir(ws)
+if not cli_globs and not diag_globs:
+    print(json.dumps({'cli_commands': [], 'cli_flags': [], 'diagnostic_codes': [], 'scan_skipped': 'both globs empty'}))
+    raise SystemExit(0)
+cli_files = sorted({f for g in cli_globs for f in glob.glob(g, recursive=True) if os.path.isfile(f)})
+diag_files = sorted({f for g in diag_globs for f in glob.glob(g, recursive=True) if os.path.isfile(f)})
+cmd_re = re.compile(r'Use:\s*\"([a-zA-Z0-9_\-]+)\"')
+flag_re = re.compile(r'(?:StringVar|BoolVar|IntVar|DurationVar|Int64Var|Float64Var|StringSliceVar|StringArrayVar)\(\s*&[a-zA-Z0-9_.]+\s*,\s*\"([a-zA-Z0-9_\-]+)\"')
+diag_const_re = re.compile(r'\"(C[0-9]{3})\"')
+cli_commands = set()
+cli_flags = set()
+for path in cli_files:
+    try:
+        with open(path) as fh: src = fh.read()
+    except: continue
+    for m in cmd_re.finditer(src): cli_commands.add(m.group(1))
+    for m in flag_re.finditer(src): cli_flags.add(m.group(1))
+diagnostic_codes = set()
+for path in diag_files:
+    try:
+        with open(path) as fh: src = fh.read()
+    except: continue
+    for m in diag_const_re.finditer(src): diagnostic_codes.add(m.group(1))
+print(json.dumps({
+    'cli_commands': sorted(cli_commands),
+    'cli_flags': sorted(cli_flags),
+    'diagnostic_codes': sorted(diagnostic_codes),
+    'scan_skipped': ''
+}))
+"`
+  output: code_surface
 
 router alt:
   mode: round_robin
@@ -910,7 +1022,8 @@ workflow doc_align:
     threshold: 0.9
     preserve_recent: 8
 
-  scan_docs -> alt
+  scan_docs -> scan_code_surface
+  scan_code_surface -> alt
 
   ## Round-robin alternates: 1st pass → claude, 2nd → gpt, repeat.
   ## Each reviewer receives via edge `with {}` (which iterion DOES
@@ -931,6 +1044,9 @@ workflow doc_align:
     scope_globs: "{{outputs.scan_docs.scope_globs}}",
     recently_changed_code_files: "{{outputs.scan_docs.recently_changed_code_files}}",
     pre_verified_docs: "{{outputs.scan_docs.pre_verified_docs}}",
+    cli_commands: "{{outputs.scan_code_surface.cli_commands}}",
+    cli_flags: "{{outputs.scan_code_surface.cli_flags}}",
+    diagnostic_codes: "{{outputs.scan_code_surface.diagnostic_codes}}",
     prior_pushback: "{{outputs.fix_gpt.pushback}}",
     prior_pushback_justification: "{{outputs.fix_gpt.pushback_justification}}",
     prior_code_files_touched_claude: "{{outputs.fix_claude.code_files_touched}}",
@@ -947,6 +1063,9 @@ workflow doc_align:
     scope_globs: "{{outputs.scan_docs.scope_globs}}",
     recently_changed_code_files: "{{outputs.scan_docs.recently_changed_code_files}}",
     pre_verified_docs: "{{outputs.scan_docs.pre_verified_docs}}",
+    cli_commands: "{{outputs.scan_code_surface.cli_commands}}",
+    cli_flags: "{{outputs.scan_code_surface.cli_flags}}",
+    diagnostic_codes: "{{outputs.scan_code_surface.diagnostic_codes}}",
     prior_pushback: "{{outputs.fix_claude.pushback}}",
     prior_pushback_justification: "{{outputs.fix_claude.pushback_justification}}",
     prior_code_files_touched_claude: "{{outputs.fix_claude.code_files_touched}}",

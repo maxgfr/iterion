@@ -1,8 +1,26 @@
-# doc-align (v0.5.0)
+# doc-align (v0.6.0)
 
 A dogfood-friendly iterion bot that detects mismatches between
 project documentation and actual code state, then fixes the
 **documentation** (never the code) and auto-commits on convergence.
+
+**v0.6.0 changes** (counter-omission audit):
+- New deterministic tool node `scan_code_surface` extracts
+  "publicly-exposed identifiers" from the workspace via grep:
+  CLI commands (cobra `Use:` literals), CLI flags
+  (`StringVar`/`BoolVar`/… registrations), and diagnostic codes
+  (`Cxxx` constants). Run on this repo it surfaced 26 commands,
+  70 flags, 54 diagnostic codes in 50ms.
+- New `mismatch_kind` value `undocumented_capability` captures
+  the counter-omission case: a code-exposed identifier exists
+  but no doc in scope lists it. Distinct from
+  `obsolete_capability` (the doc→code direction).
+- Reviewers receive the surface lists in `input.cli_commands` /
+  `cli_flags` / `diagnostic_codes` and audit code→doc presence
+  alongside the existing doc→code audit.
+- `--var cli_surface_globs=""` and `--var diagnostic_surface_globs=""`
+  both empty disables the surface scan — for library-only repos
+  with no CLI or diagnostic surface to document.
 
 **v0.5.0 changes** (inter-run audit cache):
 - `scan_docs` now reads `.iterion/doc-align/audit-cache.json`
