@@ -174,9 +174,21 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 		args = append(args, "--label", "iterion.io/run-name="+info.FriendlyName)
 	}
 	if p.spec.User != "" {
+		if err := validatePlainArg("docker --user", p.spec.User); err != nil {
+			return nil, err
+		}
 		args = append(args, "--user", p.spec.User)
 	}
+	if err := validatePlainArg("docker image", p.spec.Image); err != nil {
+		return nil, err
+	}
+	if err := validatePlainArg("docker --workdir", p.workspace); err != nil {
+		return nil, err
+	}
 	for _, m := range p.spec.Mounts {
+		if err := validateMount(m); err != nil {
+			return nil, fmt.Errorf("docker driver: %w", err)
+		}
 		args = append(args, "--mount", m)
 	}
 	// Iterate Env in sorted key order so validation errors and the

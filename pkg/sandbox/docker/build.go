@@ -84,6 +84,20 @@ func (d *Driver) Build(ctx context.Context, prepared sandbox.PreparedSpec, info 
 	}
 	absCtx := filepath.Join(info.WorkspacePath, ctxRel)
 	absDf := filepath.Join(info.WorkspacePath, dfRel)
+	// filepath.Join collapses `..` segments but happily produces an
+	// absolute path that escapes the workspace when given inputs like
+	// `../../../etc`. An attacker-controlled devcontainer.json (or a
+	// hostile inline build block) can otherwise tell BuildKit to COPY/
+	// ADD any host file readable by the iterion process into the
+	// resulting image — readable later via `docker history` and the
+	// local layer cache. Refuse build inputs that don't stay inside
+	// the workspace.
+	if err := validateContainsWorkspace(info.WorkspacePath, absCtx, "build context"); err != nil {
+		return nil, fmt.Errorf("docker build: %w", err)
+	}
+	if err := validateContainsWorkspace(info.WorkspacePath, absDf, "Dockerfile"); err != nil {
+		return nil, fmt.Errorf("docker build: %w", err)
+	}
 
 	args := []string{
 		"buildx", "build",
