@@ -123,8 +123,8 @@ Other top-level directories: `editor/` (React/Vite frontend), `examples/` (.iter
 
 ## Key Dependencies
 
-- Go 1.25.0
-- `claw-code-go` (sibling repo, vendored under `vendor/claw-code-go/`) — native multi-provider LLM client. iterion uses `claw-code-go/pkg/api.Client.StreamResponse` directly via `pkg/backend/model/generation.go` for in-process LLM calls (anthropic + openai validated; bedrock/vertex/foundry available but untested).
+- Go 1.26.0
+- `claw-code-go` (sibling repo, vendored under `vendor/github.com/SocialGouv/claw-code-go/`) — native multi-provider LLM client. iterion uses `claw-code-go/pkg/api.Client.StreamResponse` directly via `pkg/backend/model/generation.go` for in-process LLM calls (anthropic + openai validated; bedrock/vertex/foundry available but untested).
 
 ## Architecture
 

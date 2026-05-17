@@ -86,4 +86,4 @@ iterion/
 └── vendor/              # Vendored Go modules (incl. claw-code-go)
 ```
 
-**Key dependencies:** Go 1.25.0 and [`claw-code-go`](https://github.com/ethpandaops/claw-code-go) (vendored under `vendor/claw-code-go/`) — a multi-provider LLM client. iterion uses `claw-code-go/pkg/api.Client.StreamResponse` directly for in-process LLM calls (Anthropic and OpenAI validated; Bedrock/Vertex/Foundry available).
+**Key dependencies:** Go 1.26.0 and [`claw-code-go`](https://github.com/SocialGouv/claw-code-go) (vendored under `vendor/github.com/SocialGouv/claw-code-go/`) — a multi-provider LLM client. iterion uses `claw-code-go/pkg/api.Client.StreamResponse` directly for in-process LLM calls (Anthropic and OpenAI validated; Bedrock/Vertex/Foundry available).

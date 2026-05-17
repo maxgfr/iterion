@@ -12,8 +12,8 @@ This is not a substitute for a full security review. It is the minimum bar.
 
 ## 1. Authentication is enforced on every public route
 
-- [ ] **`AUTH_REQUIRED=true`** (or equivalent) on the server pod's environment. Iterion's auth middleware refuses unauthenticated traffic when this is set.
-- [ ] **Every `/api/*` route** is gated by `requireAuth` (verified in `pkg/server/server.go`). Health (`/readyz`, `/livez`) and auth bootstrap routes are the only intentional exceptions; both are read-only and reveal no tenant state.
+- [ ] **Auth enforcement on** in the server config: confirm `DisableAuth` is **not** set in the iterion server config (cloud mode requires auth by default; see `pkg/config/config.go`). There is no `AUTH_REQUIRED` env var — auth is gated by the `DisableAuth` config field, which must remain `false`/unset in any public deployment.
+- [ ] **Every `/api/*` route** is gated by `requireAuth` (verified in `pkg/server/server.go`). The health endpoints (`/healthz`, `/readyz`) and auth bootstrap routes are the only intentional exceptions; both are read-only and reveal no tenant state.
 - [ ] **JWT signing key** rotated from the chart default. `ITERION_JWT_SECRET` set to a 32+ character random value held in a Kubernetes Secret, not the values file.
 - [ ] **SSO / OIDC** wired if you have ≥ 2 users. See [cloud-admin.md](cloud-admin.md) for OIDC bootstrap.
 - [ ] **Super-admin account** created with a strong password and 2FA enabled where the IdP supports it.

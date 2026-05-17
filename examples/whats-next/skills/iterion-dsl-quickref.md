@@ -54,7 +54,6 @@ workflow my_workflow:
 | `agent` | LLM with tools and structured I/O | Most common |
 | `judge` | LLM verdict, no mutation | Tools optional |
 | `router` | Branch selection | Modes: `fan_out_all`, `condition`, `round_robin`, `llm` |
-| `join` | Branch convergence | `wait_all` or `best_effort` |
 | `human` | Pause for human input | `interaction: human | llm | llm_or_human` |
 | `tool` | Deterministic shell | No LLM; uses `{{input.x}}` templates with auto shell-escape |
 | `compute` | Deterministic expression | No LLM, no shell. Use for passthrough, derived booleans, loop guards. |
@@ -71,7 +70,7 @@ agent w:
   output:  result_schema
   system:  w_system
   user:    w_user
-  session: fresh                # fresh | inherit | fork
+  session: fresh                # fresh | inherit | fork | artifacts_only
   tools:   [bash, read_file, glob, grep, write_file, file_edit]
   tool_max_steps: 30
   readonly: true                # runtime-blocks mutation tools

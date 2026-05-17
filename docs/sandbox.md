@@ -295,7 +295,7 @@ existing tool registry / MCP manager / ask_user channel; the runner
 builds proxy ToolDef closures that round-trip each invocation back
 across the channel.
 
-**Status of V1 limitations** (tracked in `.plans/sandbox-v2-plan.md`):
+**Status of V1 limitations**:
 
 - ✅ **MCP-routed tools** are now visible to claw nodes inside the
   sandbox (V2-2). The launcher passes ToolDef metadata over the

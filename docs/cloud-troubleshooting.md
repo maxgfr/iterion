@@ -10,8 +10,8 @@ For deployment / install instructions see [cloud-deployment.md](cloud-deployment
 
 ```bash
 # Server-side health
+curl -fsS http://<server-host>:4891/healthz
 curl -fsS http://<server-host>:4891/readyz
-curl -fsS http://<server-host>:4891/livez
 curl -fsS http://<server-host>:4891/metrics | head -20
 
 # Runner pool status (Kubernetes)

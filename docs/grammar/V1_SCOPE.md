@@ -20,7 +20,7 @@
 | When | `when [not] <cond>` or `when "<expr>"` | `WhenClause` | Simple boolean-field shorthand plus quoted expressions with boolean operators, comparisons, and built-ins such as length, concat, unique, contains, join |
 | Loop | `as <name>(<N>)` | `LoopClause` | Named and bounded loop |
 | With | `with { ... }` | `WithEntry` | Inter-node data mapping |
-| Session | `session:` | `SessionMode` | fresh, inherit, artifacts_only |
+| Session | `session:` | `SessionMode` | fresh, inherit, fork, artifacts_only |
 | Publish | `publish:` | Field on Agent/Judge/Human | Persistent artifact |
 | Template | `{{...}}` | In string values | vars.X, input.X, outputs.X[.Y], artifacts.X |
 | Env refs | `${...}` | In string values | Runtime resolution |

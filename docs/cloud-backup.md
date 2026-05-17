@@ -8,7 +8,7 @@ This runbook covers the durable state iterion owns in cloud-mode:
 | Events stream | Mongo (`events` collection, TTL) | Observability replay | Editor "run console" goes blank for affected runs |
 | Interactions | Mongo (`interactions`) | Pause/resume answers | Affected runs stuck at `paused_waiting_human` |
 | Identity + auth | Mongo (`users`/`teams`/`memberships`/`sessions`/`oidc_links`) | Login + RBAC | All users logged out, RBAC lost |
-| Secrets (BYOK, OAuth, run secrets) | Mongo, encrypted with `ITERION_KMS_KEY` | Per-tenant credentials | Secrets unrecoverable if KMS key also lost |
+| Secrets (BYOK, OAuth, run secrets) | Mongo, encrypted with `ITERION_SECRETS_KEY` | Per-tenant credentials | Secrets unrecoverable if the secrets key is also lost |
 | Artifact bodies | S3 / blob | Versioned `artifacts/<node>/<v>.json` | Artifacts lost; checkpoints reference dead keys |
 
 **Critical invariant:** the Mongo backup and the blob backup must

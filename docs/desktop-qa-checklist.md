@@ -47,7 +47,7 @@ For every platform row, walk every scenario column. Mark `✓` (pass), `✗` (fa
 
 ### 4. Onboarding (Welcome wizard)
 
-- [ ] CLI detection step finds installed `claude`, `codex`, `claw` binaries when present.
+- [ ] CLI detection step finds installed `claude` and `codex` binaries when present. (Note: `claw` is in-process and has no external binary to detect.)
 - [ ] Missing-CLI banner appears for absent binaries with a working install link.
 - [ ] Wizard completes → main editor view loads with the selected backend pre-selected.
 
