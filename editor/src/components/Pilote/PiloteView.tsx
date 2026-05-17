@@ -35,19 +35,32 @@ export default function PiloteView() {
   );
 
   // submit is shaped to match HumanChatTurn's contract:
-  //   outcome = { text, approved? }
-  // We look up the message's nodeId in the bot.nodeMap to learn the
-  // schema field names. ask_priorities expects `context`,
-  // human_review expects `feedback` + `approved`. Bot authors who
-  // want a different schema add the right textField/approvedField
-  // entries to nodeMap.
+  //   outcome = { text, approved?, formAnswer? }
+  //
+  // When a node declares a rich `form:` in nodeMap, the FormAnswer's
+  // question ids ARE the answer keys, so we forward verbatim.
+  // Otherwise we look up textField/approvedField to build the
+  // answers object from the legacy text + actions UI:
+  //   ask_priorities → { context: text }
+  //   human_review   → { feedback: text, approved: bool }
   const onHumanSubmit = useCallback(
-    (messageId: string, outcome: { text: string; approved?: boolean }) => {
+    (
+      messageId: string,
+      outcome: {
+        text: string;
+        approved?: boolean;
+        formAnswer?: Record<string, string | string[]>;
+      },
+    ) => {
       if (!bot) return;
       const m = session.messages.find((x) => x.id === messageId);
       if (!m || m.kind !== "human-question") return;
       const entry = bot.nodeMap[m.nodeId];
       if (!entry) return;
+      if (outcome.formAnswer) {
+        void session.submitHumanAnswer(messageId, outcome.formAnswer);
+        return;
+      }
       const answers: Record<string, unknown> = {};
       if (entry.textField) {
         answers[entry.textField] = outcome.text;
@@ -100,6 +113,7 @@ export default function PiloteView() {
             ) : (
               <ChatTranscript
                 messages={session.messages}
+                bot={bot}
                 onHumanSubmit={onHumanSubmit}
                 busyMessageId={session.busyMessageId}
               />
