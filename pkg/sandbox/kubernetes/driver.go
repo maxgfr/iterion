@@ -205,26 +205,36 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 	// own IP. Enforcement requires a NetworkPolicy-aware CNI (Calico,
 	// Cilium, ...) — see docs/sandbox.md § cloud.
 	if info.ProxyEndpoint != "" {
-		if runnerIP := os.Getenv(PodIPEnvVar); runnerIP != "" {
-			netpolicy, err := BuildNetworkPolicy(NetworkPolicyInput{
-				Namespace:    d.namespace,
-				Name:         podName,
-				RunID:        info.RunID,
-				FriendlyName: info.FriendlyName,
-				RunnerPodIP:  runnerIP,
-			})
-			if err != nil {
-				_ = r.Cleanup(ctx)
-				return nil, fmt.Errorf("kubernetes: build netpolicy: %w", err)
-			}
-			if err := applyManifest(ctx, d.namespace, netpolicy); err != nil {
-				_ = r.Cleanup(ctx)
-				return nil, fmt.Errorf("kubernetes: apply netpolicy: %w", err)
-			}
-			r.networkPolicyApplied = true
-		} else {
-			d.logger.Warn("sandbox: kubernetes: %s unset, skipping per-run NetworkPolicy synthesis (egress relies on proxy alone)", PodIPEnvVar)
+		runnerIP := os.Getenv(PodIPEnvVar)
+		if runnerIP == "" {
+			// Fail-closed: the workflow requested isolated network
+			// (sandbox.network with an allowlist), the proxy alone
+			// cannot enforce it (anything bypassing HTTPS_PROXY hits
+			// the kube API or whatever in-cluster service it can
+			// reach), and the runner Helm chart didn't wire the
+			// downward API to give us this pod's IP. Refuse to start
+			// — better a loud failure the operator fixes than a
+			// silent isolation downgrade. The previous behaviour
+			// (Warn + continue) was the F-SB-6 footgun.
+			_ = r.Cleanup(ctx)
+			return nil, fmt.Errorf("kubernetes: %s env is required when sandbox.network is active (Helm chart must wire the downward API)", PodIPEnvVar)
 		}
+		netpolicy, err := BuildNetworkPolicy(NetworkPolicyInput{
+			Namespace:    d.namespace,
+			Name:         podName,
+			RunID:        info.RunID,
+			FriendlyName: info.FriendlyName,
+			RunnerPodIP:  runnerIP,
+		})
+		if err != nil {
+			_ = r.Cleanup(ctx)
+			return nil, fmt.Errorf("kubernetes: build netpolicy: %w", err)
+		}
+		if err := applyManifest(ctx, d.namespace, netpolicy); err != nil {
+			_ = r.Cleanup(ctx)
+			return nil, fmt.Errorf("kubernetes: apply netpolicy: %w", err)
+		}
+		r.networkPolicyApplied = true
 	}
 
 	if err := waitForPodRunning(ctx, d.namespace, podName, DefaultPodReadyTimeoutSecs); err != nil {

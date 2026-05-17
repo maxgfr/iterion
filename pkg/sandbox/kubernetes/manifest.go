@@ -89,7 +89,20 @@ func BuildPodManifest(in PodManifestInput) ([]byte, error) {
 	if in.ProxyEndpoint != "" {
 		envSlice = upsertEnv(envSlice, "HTTPS_PROXY", in.ProxyEndpoint)
 		envSlice = upsertEnv(envSlice, "HTTP_PROXY", in.ProxyEndpoint)
-		envSlice = upsertEnv(envSlice, "NO_PROXY", "localhost,127.0.0.1,.svc,.cluster.local")
+		// NO_PROXY=localhost,127.0.0.1 only. The previous default
+		// added .svc and .cluster.local — those let the sandboxed
+		// workload bypass the iterion proxy and reach in-cluster
+		// services (kube API at kubernetes.default.svc.cluster.local,
+		// internal Prometheus / Vault / Mongo, ...) WITHOUT going
+		// through the allowlist. The synthesised NetworkPolicy (see
+		// driver.go) locks egress to runner pod + kube-dns and blocks
+		// in-cluster bypass on a NetworkPolicy-aware CNI (Calico,
+		// Cilium). On CNIs that don't enforce NetworkPolicy
+		// (kindnet, weave-net without policy controller) the
+		// cluster-suffix carve-outs were a real proxy bypass. Drop
+		// them so the network posture matches the documented
+		// "allowlist via iterion proxy" promise.
+		envSlice = upsertEnv(envSlice, "NO_PROXY", "localhost,127.0.0.1")
 	}
 
 	// V2-7: parse spec.Mounts (devcontainer-style strings) into k8s
