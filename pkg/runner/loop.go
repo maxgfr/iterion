@@ -546,7 +546,15 @@ func (r *Runner) injectCredentials(ctx context.Context, msg *queue.RunMessage) (
 	if err != nil {
 		return ctx, nil, fmt.Errorf("fetch run_secrets %s: %w", msg.SecretsRef, err)
 	}
-	if rec.TenantID != "" && rec.TenantID != msg.TenantID {
+	// Tenant binding: rec.TenantID and msg.TenantID must match exactly.
+	// The old code allowed empty rec.TenantID to bypass the check, on
+	// the assumption that legacy records predated multitenancy — but
+	// once a tenant_id is on the wire (msg.TenantID), a SecretsRef
+	// stamped without a tenant could be served to a different tenant
+	// that happened to request the same ref. New writes always stamp
+	// tenant_id; if you see this error for a legacy ref, backfill its
+	// tenant via the migration script before resuming the run.
+	if rec.TenantID != msg.TenantID {
 		return ctx, nil, fmt.Errorf("run_secrets tenant mismatch (msg=%q sealed=%q)", msg.TenantID, rec.TenantID)
 	}
 	bundle, err := secrets.OpenRunBundle(r.cfg.Sealer, msg.RunID, rec.SealedBundle)

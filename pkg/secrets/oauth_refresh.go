@@ -3,7 +3,6 @@ package secrets
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -55,9 +54,9 @@ func RefreshAnthropic(ctx context.Context, hc *http.Client, clientID, refreshTok
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	resp, err := hc.Do(req)
+	resp, err := doWithRetry(hc, req, "anthropic refresh")
 	if err != nil {
-		return RefreshResult{}, fmt.Errorf("secrets: anthropic refresh: %w", err)
+		return RefreshResult{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
@@ -73,8 +72,8 @@ func RefreshAnthropic(ctx context.Context, hc *http.Client, clientID, refreshTok
 	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil {
 		return RefreshResult{}, fmt.Errorf("secrets: decode anthropic refresh: %w", err)
 	}
-	if tok.AccessToken == "" {
-		return RefreshResult{}, errors.New("secrets: anthropic refresh returned empty access_token")
+	if err := validateAccessToken("anthropic", tok.AccessToken); err != nil {
+		return RefreshResult{}, err
 	}
 	out := RefreshResult{
 		AccessToken:  tok.AccessToken,
@@ -139,9 +138,9 @@ func RefreshCodex(ctx context.Context, hc *http.Client, clientID, refreshToken s
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	resp, err := hc.Do(req)
+	resp, err := doWithRetry(hc, req, "codex refresh")
 	if err != nil {
-		return RefreshResult{}, fmt.Errorf("secrets: codex refresh: %w", err)
+		return RefreshResult{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
@@ -157,8 +156,8 @@ func RefreshCodex(ctx context.Context, hc *http.Client, clientID, refreshToken s
 	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil {
 		return RefreshResult{}, fmt.Errorf("secrets: decode codex refresh: %w", err)
 	}
-	if tok.AccessToken == "" {
-		return RefreshResult{}, errors.New("secrets: codex refresh returned empty access_token")
+	if err := validateAccessToken("codex", tok.AccessToken); err != nil {
+		return RefreshResult{}, err
 	}
 	out := RefreshResult{
 		AccessToken:  tok.AccessToken,
@@ -197,4 +196,71 @@ func ApplyCodexRefresh(payload []byte, r RefreshResult) ([]byte, error) {
 	raw["tokens"] = tokens
 	raw["last_refresh"] = time.Now().UTC().Format(time.RFC3339)
 	return json.MarshalIndent(raw, "", "  ")
+}
+
+// refreshRetrySchedule defines the per-attempt backoff for OAuth
+// refresh on transient failures. Three attempts total (0/200ms/600ms);
+// total wall-clock ceiling is ~800ms so the editor stays responsive
+// when the IdP is briefly flaky. Only 5xx and connection-level errors
+// retry — 4xx responses (invalid_grant, unauthorized_client, …) are
+// terminal and propagated immediately.
+var refreshRetrySchedule = []time.Duration{0, 200 * time.Millisecond, 600 * time.Millisecond}
+
+func doWithRetry(hc *http.Client, req *http.Request, opName string) (*http.Response, error) {
+	var (
+		lastResp *http.Response
+		lastErr  error
+	)
+	for i, delay := range refreshRetrySchedule {
+		if delay > 0 {
+			select {
+			case <-time.After(delay):
+			case <-req.Context().Done():
+				if lastResp != nil {
+					lastResp.Body.Close()
+				}
+				return nil, fmt.Errorf("secrets: %s cancelled: %w", opName, req.Context().Err())
+			}
+		}
+		// Make sure the body is replayable across retries — OAuth
+		// refresh bodies are small form-encoded payloads stored in
+		// the Request via NewRequestWithContext(..., strings.NewReader),
+		// which sets GetBody. Calling it on attempt 0 is a no-op clone.
+		if i > 0 && req.GetBody != nil {
+			b, err := req.GetBody()
+			if err != nil {
+				return nil, fmt.Errorf("secrets: %s body clone: %w", opName, err)
+			}
+			req.Body = b
+		}
+		resp, err := hc.Do(req)
+		if err == nil && resp.StatusCode < 500 {
+			return resp, nil
+		}
+		if lastResp != nil {
+			lastResp.Body.Close()
+		}
+		lastResp, lastErr = resp, err
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("secrets: %s after %d attempts: %w", opName, len(refreshRetrySchedule), lastErr)
+	}
+	return lastResp, nil
+}
+
+// validateAccessToken is the cheap shape check we run before storing a
+// refreshed token. A successful 200 response from a malformed gateway
+// can otherwise hand us a 0-byte or 8-byte "token" that overwrites a
+// good one in the credentials file — far better to fail the refresh
+// than to brick the next CLI invocation. The 16-byte floor is well
+// below the shortest format we've seen in the wild (Anthropic sk-…
+// tokens are ~100B, Codex OAuth access tokens ~32-64B).
+func validateAccessToken(provider, token string) error {
+	if token == "" {
+		return fmt.Errorf("secrets: %s refresh returned empty access_token", provider)
+	}
+	if len(token) < 16 {
+		return fmt.Errorf("secrets: %s refresh returned implausibly short access_token (%d bytes)", provider, len(token))
+	}
+	return nil
 }
