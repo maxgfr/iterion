@@ -463,12 +463,22 @@ function DetailHeader({
   }, [events]);
   const contextUsage = formatContextUsage(contextUsed, contextWindow);
   const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current != null) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
   const onCopyError = async () => {
     if (!exec.error) return;
     try {
       await navigator.clipboard.writeText(exec.error);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
+      if (copyTimerRef.current != null) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => {
+        copyTimerRef.current = null;
+        setCopied(false);
+      }, 1200);
     } catch {
       // ignore — clipboard may be unavailable
     }
@@ -1396,6 +1406,12 @@ function useExecutionEvents(events: RunEvent[], exec: ExecutionState | null) {
 
 function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (timerRef.current != null) clearTimeout(timerRef.current);
+    };
+  }, []);
   return (
     <button
       type="button"
@@ -1405,7 +1421,11 @@ function CopyButton({ value }: { value: string }) {
         try {
           await navigator.clipboard.writeText(value);
           setCopied(true);
-          setTimeout(() => setCopied(false), 1200);
+          if (timerRef.current != null) clearTimeout(timerRef.current);
+          timerRef.current = setTimeout(() => {
+            timerRef.current = null;
+            setCopied(false);
+          }, 1200);
         } catch {
           // ignore
         }

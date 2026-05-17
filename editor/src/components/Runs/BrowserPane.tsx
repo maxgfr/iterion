@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useRunStore, type BrowserScreenshot } from "@/store/run";
 import BrowserLivePane from "./BrowserLivePane";
@@ -65,6 +65,12 @@ export default function BrowserPane({
   const [draftUrl, setDraftUrl] = useState<string>(browser.currentUrl ?? "");
   const [attachBusy, setAttachBusy] = useState<boolean>(false);
   const [attachError, setAttachError] = useState<string | null>(null);
+  // Track the previous store-driven URL so the resync effect can
+  // compare against THAT, not against the new value that just
+  // arrived. Without this, a workflow event landing the same render
+  // as user typing would clobber the keystroke (prev === new is true
+  // even though the user actually changed prev mid-render).
+  const lastStoreUrlRef = useRef<string | undefined>(browser.currentUrl);
 
   const handleAttach = useCallback(async () => {
     setAttachBusy(true);
@@ -107,12 +113,15 @@ export default function BrowserPane({
     browser.liveSession.sessionId !== "";
 
   // Re-sync the URL bar when a new workflow event lands while the
-  // user hasn't typed anything. We avoid clobbering an in-progress
-  // draft by only syncing when the bar matches the prior store URL
-  // (or is empty on first mount).
+  // user hasn't typed anything. The previous-URL ref lets us compare
+  // the draft against what the store used to say, not the new value
+  // that just arrived — a keystroke landing in the same render as a
+  // workflow URL update used to be silently rewritten.
   useEffect(() => {
+    const previousStoreUrl = lastStoreUrlRef.current;
+    lastStoreUrlRef.current = browser.currentUrl;
     setDraftUrl((prev) => {
-      if (prev === "" || prev === browser.currentUrl) {
+      if (prev === "" || prev === previousStoreUrl) {
         return browser.currentUrl ?? "";
       }
       return prev;

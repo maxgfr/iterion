@@ -134,7 +134,12 @@ export default function EventLog({
       cache.annotated[cachedLen - 1]!.event === events[cachedLen - 1];
 
     if (reusable) {
-      baseAnnotated = cache.annotated;
+      // Start a fresh array so consumers (useMemo dep, downstream
+      // filter passes) see a new reference when events grow — the
+      // previous in-place push kept the same array identity and
+      // relied on the events dep change as a fence, which is fragile
+      // if any caller ever mutated the source events array in place.
+      baseAnnotated = cache.annotated.slice();
       counts = new Map(cache.counts);
       typeCountsMap = new Map(cache.typeCounts);
       execIndexCounts = new Map(cache.execIndexCounts);

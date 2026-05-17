@@ -36,11 +36,22 @@ export function useFileWatcher() {
         case "file_modified":
           if (event.path !== filePath) break;
           if (!dirty) {
-            // Debounce auto-reload to avoid rapid re-parses.
+            // Debounce auto-reload to avoid rapid re-parses. The
+            // path is re-read inside the timer so a user switching
+            // the open file between the event arrival and the 500ms
+            // fire doesn't get the OLD file's contents stomped onto
+            // the new one. The original logic captured event.path
+            // and ran api.openFile(event.path) blindly.
+            const targetPath = event.path;
             clearTimeout(reloadTimerRef.current);
             reloadTimerRef.current = setTimeout(() => {
-              api.openFile(event.path).then((result) => {
+              const current = useDocumentStore.getState();
+              if (current.currentFilePath !== targetPath || current.isDirty()) {
+                return;
+              }
+              api.openFile(targetPath).then((result) => {
                 const store = useDocumentStore.getState();
+                if (store.currentFilePath !== targetPath) return;
                 store.setDocument(result.document);
                 store.setDiagnostics(result.diagnostics);
                 store.setCurrentSource(result.source);

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { Pencil1Icon } from "@radix-ui/react-icons";
 
@@ -163,11 +163,21 @@ function FinalizationRow({ run }: { run: RunHeaderType }) {
   const strategy = run.merge_strategy;
   const mergedShort = (run.merged_commit ?? "").slice(0, 7);
 
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current != null) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
   const copy = async (text: string, key: string) => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(key);
-      setTimeout(() => setCopied(null), 1500);
+      if (copyTimerRef.current != null) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => {
+        copyTimerRef.current = null;
+        setCopied(null);
+      }, 1500);
     } catch {
       // clipboard may be unavailable (insecure context) — silent
     }

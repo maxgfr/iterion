@@ -26,6 +26,27 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
     return out;
   });
 
+  // Re-seed the form when the caller swaps to a different issue
+  // without an unmount in between. The parent guards with
+  // setEditing(null) before opening another card, but a fast-paced
+  // refresh() after a delete or a parent re-fetch can reuse the
+  // mounted modal with a fresh `initial`, leaving the form showing
+  // the previous card's values until the user closed and reopened.
+  useEffect(() => {
+    setTitle(initial?.title ?? "");
+    setBody(initial?.body ?? "");
+    setState(initial?.state ?? board.states[0]?.name ?? "");
+    setLabels((initial?.labels ?? []).join(", "));
+    setPriority(initial?.priority ?? 0);
+    setAssignee(initial?.assignee ?? "");
+    const out: Record<string, string> = {};
+    for (const f of board.fields ?? []) {
+      const v = initial?.fields?.[f.name];
+      out[f.name] = v == null ? "" : String(v);
+    }
+    setFields(out);
+  }, [initial, board]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;

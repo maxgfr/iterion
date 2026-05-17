@@ -40,10 +40,18 @@ export default function BoardView() {
   // empty would be more disruptive than keeping stale data.
   useEffect(() => {
     let alive = true;
+    let inflight = false;
+    let gen = 0;
     const tick = async () => {
+      if (!alive || inflight) return;
+      inflight = true;
+      const myGen = ++gen;
       try {
         const snap = await getState();
-        if (!alive) return;
+        // Drop responses that arrive after a newer request has
+        // started — without the gen guard, a slow getState resolving
+        // after a fresh tick would clobber the newer state.
+        if (!alive || myGen !== gen) return;
         const rmap = new Map<string, RunningView>();
         for (const r of snap.running ?? []) rmap.set(r.issue_id, r);
         const xmap = new Map<string, RetryView>();
@@ -52,6 +60,8 @@ export default function BoardView() {
         setRetryingByIssue(xmap);
       } catch {
         // swallow: conductor may be unreachable / not wired
+      } finally {
+        inflight = false;
       }
     };
     void tick();
@@ -107,14 +117,15 @@ export default function BoardView() {
 
   const onDrop = useCallback(
     async (issueID: string, toState: string) => {
-      // Capture the snapshot via the functional updater so two
-      // rapid concurrent drops each see the state at the time their
-      // OWN optimistic update fired. A naive `const before = issues`
-      // would let the slower drop's rollback revert the first drop's
-      // optimistic change.
-      let before: NativeIssue[] = [];
+      // Capture this invocation's pre-state in a per-call closure so
+      // two near-simultaneous drops don't race over the same `before`
+      // variable. The prior implementation hoisted `before` to the
+      // outer scope and the second drop would overwrite the first
+      // drop's snapshot before its async transitionIssue had a chance
+      // to fail / roll back, restoring the wrong row.
+      const draft: { snapshot: NativeIssue[] } = { snapshot: [] };
       setIssues((cur) => {
-        before = cur;
+        draft.snapshot = cur;
         return cur.map((i) => (i.id === issueID ? { ...i, state: toState } : i));
       });
       try {
@@ -123,10 +134,11 @@ export default function BoardView() {
         setError(e instanceof Error ? e.message : String(e));
         // Only revert this issue's row to its pre-drop state — leave
         // other concurrent edits in place. Falls back to full revert
-        // when the row was reordered out of `before`.
+        // when the row was reordered out of the snapshot.
+        const previous = draft.snapshot;
         setIssues((cur) => {
-          const prev = before.find((i) => i.id === issueID);
-          if (!prev) return before;
+          const prev = previous.find((i) => i.id === issueID);
+          if (!prev) return previous;
           return cur.map((i) => (i.id === issueID ? prev : i));
         });
       }

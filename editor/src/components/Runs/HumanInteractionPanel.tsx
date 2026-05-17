@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { getRun, resumeRun } from "@/api/runs";
 import { Button } from "@/components/ui";
@@ -31,9 +31,21 @@ export default function HumanInteractionPanel({ runId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const interactionId = pending?.interaction_id;
+  // Belt-and-braces post-resume snapshot fetch lives on this timer
+  // ref so a panel torn down within the 600ms window doesn't have
+  // its applySnapshot fire against another run.
+  const snapshotTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (interactionId) setSubmitted(false);
   }, [interactionId]);
+  useEffect(() => {
+    return () => {
+      if (snapshotTimerRef.current != null) {
+        clearTimeout(snapshotTimerRef.current);
+        snapshotTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // drafts live up here so the quick-action buttons (Approve / Reject)
   // can read the user's comments even though the form internally just
@@ -70,7 +82,11 @@ export default function HumanInteractionPanel({ runId }: Props) {
       // short-lived run (resume → done in <2s) that finishes before
       // the WS redial completes still surfaces in the canvas. The WS
       // tail catches up afterwards for longer-running runs.
-      window.setTimeout(() => {
+      if (snapshotTimerRef.current != null) {
+        clearTimeout(snapshotTimerRef.current);
+      }
+      snapshotTimerRef.current = setTimeout(() => {
+        snapshotTimerRef.current = null;
         getRun(runId)
           .then(applySnapshot)
           .catch(() => {});

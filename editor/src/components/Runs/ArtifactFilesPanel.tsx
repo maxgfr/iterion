@@ -120,14 +120,27 @@ export default function ArtifactFilesPanel({ runId }: Props) {
     if (!touched) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(fetchNow, DEBOUNCE_MS);
+    // Clear the pending timer on unmount so a panel torn down within
+    // the debounce window doesn't fire fetchNow after it's gone.
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+    };
   }, [events, runId, fetchNow]);
 
-  // Revoke any blob URL we created for a previous preview so the
-  // browser can release the bytes when the modal closes or swaps to
-  // another file.
+  // Revoke the blob URL we created for the *previous* preview when
+  // the URL value changes. Capture the URL in the closure so the
+  // cleanup function frees the right one — the prior implementation
+  // dereferenced `preview?.blobURL` at cleanup time, which already
+  // pointed at the NEW preview because state had been committed
+  // before React ran the cleanup of the old effect version.
   useEffect(() => {
+    const url = preview?.blobURL;
+    if (!url) return;
     return () => {
-      if (preview?.blobURL) URL.revokeObjectURL(preview.blobURL);
+      URL.revokeObjectURL(url);
     };
   }, [preview?.blobURL]);
 
