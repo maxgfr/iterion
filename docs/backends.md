@@ -45,7 +45,7 @@ claude_code → claw
 ```
 
 `codex` is intentionally **not** in the default list. The codex SDK
-has known limitations (see [codex C030](../pkg/dsl/ir/validate.go))
+has known limitations (see [codex C030](../pkg/dsl/ir/compile.go))
 and we'd rather have authors opt in explicitly than auto-select it.
 You can still set `backend: codex` per-node, or include it in
 `ITERION_BACKEND_PREFERENCE` to make it eligible for auto-selection.

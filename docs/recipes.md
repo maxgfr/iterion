@@ -8,8 +8,8 @@ Recipes let you run the same workflow with different configurations without edit
 {
   "name": "fast_review",
   "workflow_ref": {
-    "name": "pr_refine_single_model",
-    "path": "examples/pr_refine_single_model.iter"
+    "name": "branch_improve_loop",
+    "path": "examples/bots/branch_improve_loop.bot"
   },
   "preset_vars": {
     "review_rules": "Focus on security only"

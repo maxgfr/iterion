@@ -27,7 +27,7 @@ router fix_router:
   multi: true                             # select multiple routes (default: false)
 ```
 
-Using `model` makes a direct API call (via the in-process `claw` backend — supports `anthropic/...`, `openai/...`, etc.). Using `backend` routes through an external CLI agent — `claude_code` is the recommended CLI backend. (`codex` is also supported but discouraged; see the [Delegation](../README.md#delegation) section of the README for the rationale.) If neither is set, the engine falls back to a built-in default model.
+Using `model` makes a direct API call (via the in-process `claw` backend — supports `anthropic/...`, `openai/...`, etc.). Using `backend` routes through an external CLI agent — `claude_code` is the recommended CLI backend. (`codex` is also supported but discouraged; see [Delegation](delegation.md) for the rationale.) If neither is set, the engine falls back to a built-in default model.
 
 ---
 

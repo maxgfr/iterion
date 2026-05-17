@@ -20,7 +20,7 @@ For each run in the input set, the bench:
 4. Maps the verdict to a `[0..1]` score (booleans become `1.0`/`0.0`; numerics pass through clamped).
 5. Aggregates across runs in the same group: per-iteration mean, std-error, pass-rate, and a count of how many runs reached that iteration.
 
-The output is markdown (or JSON via `--json`) with a side-by-side comparison when a `--variant-runs` group is also supplied.
+The output is markdown (written to `--output <path>` or stdout) with a side-by-side comparison when a `--variant-runs` group is also supplied.
 
 ## Quick start
 
