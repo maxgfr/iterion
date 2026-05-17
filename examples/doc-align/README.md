@@ -1,8 +1,26 @@
-# doc-align (v0.6.0)
+# doc-align (v0.7.0)
 
 A dogfood-friendly iterion bot that detects mismatches between
 project documentation and actual code state, then fixes the
 **documentation** (never the code) and auto-commits on convergence.
+
+**v0.7.0 changes** (GPT session inherit, finally):
+- `reviewer_gpt` now declares `session: inherit_if_available` —
+  a new iterion runtime mode that behaves as `inherit` when
+  `_session_id` resolves to a non-empty value, and silently
+  falls back to `fresh` otherwise. Logs which path fired.
+- The `alt -> reviewer_gpt` edge wires
+  `_session_id: "{{outputs.fix_gpt._session_id}}"`. On iter 1
+  (cold) fix_gpt hasn't run and the substitution is empty → run
+  fresh. On iter 2+ the reviewer rides fix_gpt's prompt cache,
+  cutting per-iter cost roughly 30-50% (v0.2.0 cold reviewer_gpt
+  cost up to $7.49; expected $2-4 with cache).
+- This is the realisation of the v0.2.0-attempted-and-reverted
+  Fix 3. The original revert was correct under the diagnosis-of-
+  the-moment (we thought empty session_id broke claw) but the
+  real cause was an OpenAI quota issue. With v0.5.0's SSE-error
+  surfacing in claw + the new tolerant mode, the optimisation
+  is safe to land.
 
 **v0.6.0 changes** (counter-omission audit):
 - New deterministic tool node `scan_code_surface` extracts

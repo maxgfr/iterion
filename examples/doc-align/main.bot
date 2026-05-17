@@ -840,20 +840,19 @@ judge reviewer_gpt:
   output: verdict_output
   system: review_system
   user: review_user_gpt
-  ## Fix 3 ATTEMPTED + REVERTED: v0.2.0 tried `session: inherit`
-  ## here to share fix_gpt's prompt cache. It broke iter 1 (the
-  ## first GPT iteration) because no fix_gpt has run yet — the
-  ## _session_id substitutes to "" and claw's OpenAI provider
-  ## returns 0 tokens twice (initial generation + structured-
-  ## output recovery), failing with "model did not produce a
-  ## structured_output tool_use block". The fresh-session cost
-  ## penalty ($7.49 worst case in v0.1.0) is preferable to a hard
-  ## failure on every run's first GPT iteration. A future fix
-  ## would require iterion DSL support for conditional session
-  ## (e.g. inherit when upstream is set, fresh otherwise) — see
-  ## `session: fork` and the iter-aware substitution syntax in
-  ## docs/dsl.md. Until that lands, stay fresh.
-  session: fresh
+  ## v0.7.0: session: inherit_if_available finally lands the cost
+  ## optimisation that v0.2.0 attempted and had to revert. Plain
+  ## `inherit` requires a non-empty `_session_id` from the edge —
+  ## on iter 1 fix_gpt hasn't run, the template resolves to "",
+  ## and the original v0.2.0 reading of the symptom blamed claw's
+  ## OpenAI provider (it turned out to be insufficient_quota
+  ## confounded with empty session_id). `inherit_if_available`
+  ## logs the fallback and behaves as `fresh` when no session is
+  ## wired, so iter 1 works and iter 2+ rides fix_gpt's prompt
+  ## cache. The wire-up uses `_session_id:
+  ## "{{outputs.fix_gpt._session_id}}"` on the alt -> reviewer_gpt
+  ## edge — see below.
+  session: inherit_if_available
   ## claw builtin tools — read-only set, the reviewer NEVER writes.
   tools: [bash, read_file, glob, grep]
   tool_max_steps: 40
@@ -1073,7 +1072,11 @@ workflow doc_align:
     previous_audited_pairs: "{{outputs.streak_check.cumulative_audited_pairs}}",
     previous_audited_docs: "{{outputs.streak_check.cumulative_audited_docs}}",
     coverage_pct: "{{outputs.streak_check.coverage_pct}}",
-    coverage_target_pct: "{{vars.coverage_target_pct}}"
+    coverage_target_pct: "{{vars.coverage_target_pct}}",
+    ## v0.7.0: inherit fix_gpt's session on iter 2+ to ride its
+    ## prompt cache. Empty on iter 1 (fix_gpt hasn't run);
+    ## inherit_if_available tolerates that with a fresh fallback.
+    _session_id: "{{outputs.fix_gpt._session_id}}"
   }
 
   reviewer_claude -> streak_check as review_loop(15) with {
