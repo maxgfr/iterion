@@ -1,17 +1,34 @@
 import { useState } from "react";
 
 import type { HumanQuestionMessage } from "@/lib/pilote/messages";
+import type { FormAnswer, FormSpec } from "@/lib/pilote/questionForm";
 import { Button, Textarea } from "@/components/ui";
+
+import QuestionForm from "./QuestionForm";
 
 interface Props {
   message: HumanQuestionMessage;
+  // Optional rich form. When present, the chat renders QuestionForm
+  // and the resulting FormAnswer is forwarded verbatim to the parent
+  // (question.id is the answer key). When absent the legacy
+  // textarea + optional approve/reject UI is used.
+  form?: FormSpec;
   // Called by the user. Wired in Étape 3 — for Étape 1 the parent
   // passes a no-op (or local-state updater for mock progression).
-  onSubmit?: (outcome: { text: string; approved?: boolean }) => void;
+  onSubmit?: (outcome: {
+    text: string;
+    approved?: boolean;
+    formAnswer?: FormAnswer;
+  }) => void;
   busy?: boolean;
 }
 
-export default function HumanChatTurn({ message, onSubmit, busy = false }: Props) {
+export default function HumanChatTurn({
+  message,
+  form,
+  onSubmit,
+  busy = false,
+}: Props) {
   const [draft, setDraft] = useState("");
   const [reviseOpen, setReviseOpen] = useState(false);
 
@@ -20,7 +37,12 @@ export default function HumanChatTurn({ message, onSubmit, busy = false }: Props
   }
 
   const hasActions = (message.actions?.length ?? 0) > 0;
-  const isFreeText = !hasActions;
+  // The rich form takes precedence over both the legacy free-text
+  // and the approve/reject UI. When a form is present we ignore
+  // textField/approvedField: the form's question.id is the answer
+  // key directly.
+  const hasForm = !!form && form.questions.length > 0;
+  const isFreeText = !hasForm && !hasActions;
 
   const submit = (approved?: boolean) => {
     if (!onSubmit || busy) return;
@@ -29,9 +51,20 @@ export default function HumanChatTurn({ message, onSubmit, busy = false }: Props
     setReviseOpen(false);
   };
 
+  const submitForm = (formAnswer: FormAnswer) => {
+    if (!onSubmit || busy) return;
+    onSubmit({ text: "", formAnswer });
+  };
+
   return (
     <div className="space-y-2">
       <AssistantBubble text={message.prompt} />
+
+      {hasForm && (
+        <div className="ml-6">
+          <QuestionForm spec={form!} onSubmit={submitForm} busy={busy} />
+        </div>
+      )}
 
       {isFreeText && (
         <div className="flex items-stretch gap-2 ml-6">
