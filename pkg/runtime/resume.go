@@ -251,6 +251,12 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 
 	loopErr := e.execLoop(ctx, rs, nextNodeID)
 	e.evictRunSessions(runID, loopErr)
+	// Resumed worktree runs need the same persistent-branch + FF step
+	// fresh launches get; without this the GC guard never lands and
+	// commits are reachable only via reflog. See F-RT-1.
+	if wtCtx := e.reconstructWorktreeContext(r); wtCtx != nil {
+		e.finalizeOnExit(ctx, runID, wtCtx, nil, loopErr)
+	}
 	return loopErr
 }
 
@@ -355,6 +361,12 @@ func (e *Engine) resumeFromFailure(ctx context.Context, r *store.Run) error {
 
 	loopErr := e.execLoop(ctx, rs, restartNodeID)
 	e.evictRunSessions(runID, loopErr)
+	// Mirrors resumeFromPause: a worktree run that fails resumably and
+	// then completes on resume must finalize, otherwise its commits
+	// stay reflog-only. See F-RT-1.
+	if wtCtx := e.reconstructWorktreeContext(r); wtCtx != nil {
+		e.finalizeOnExit(ctx, runID, wtCtx, nil, loopErr)
+	}
 	return loopErr
 }
 

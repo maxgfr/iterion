@@ -555,42 +555,88 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 	// branch), then remove the worktree dir. On error, preserve the
 	// worktree so the operator can inspect what was produced.
 	if worktreeActive {
-		if loopErr == nil {
-			finRes := finalizeWorktree(wtCtx, finalizeOptions{
-				runName:       e.runName,
-				runID:         runID,
-				branchName:    e.branchName,
-				mergeInto:     e.mergeInto,
-				mergeStrategy: e.mergeStrategy,
-				autoMerge:     e.autoMerge,
-			}, e.logger)
-			// Persist whatever the finalization decided. Best-effort:
-			// a save failure logs but doesn't fail the run.
-			if finRes.FinalCommit != "" || finRes.FinalBranch != "" || finRes.MergedInto != "" || finRes.MergeStatus != "" {
-				if r2, err := e.store.LoadRun(ctx, runID); err == nil {
-					r2.FinalCommit = finRes.FinalCommit
-					r2.FinalBranch = finRes.FinalBranch
-					r2.MergedInto = finRes.MergedInto
-					r2.MergeStatus = store.MergeStatus(finRes.MergeStatus)
-					r2.MergedCommit = finRes.MergedCommit
-					if e.mergeStrategy != "" {
-						r2.MergeStrategy = store.MergeStrategy(e.mergeStrategy)
-					}
-					r2.AutoMerge = e.autoMerge
-					if saveErr := e.store.SaveRun(ctx, r2); saveErr != nil && e.logger != nil {
-						e.logger.Warn("runtime: persist finalization metadata: %v", saveErr)
-					}
-				}
-			}
-			if worktreeCleanup != nil {
-				worktreeCleanup()
-			}
-		} else if e.logger != nil {
-			e.logger.Info("runtime: worktree preserved for inspection: %s", e.workDir)
-		}
+		e.finalizeOnExit(ctx, runID, &wtCtx, worktreeCleanup, loopErr)
 	}
 
 	return loopErr
+}
+
+// finalizeOnExit applies the worktree-finalization step at the end of a
+// run. Called from Run() (which captures wtCtx during setupWorktree)
+// and from both resume paths (which reconstruct wtCtx from the
+// persisted run record). Persistence + cleanup are best-effort: a save
+// failure logs but never fails the run, since the work has completed.
+//
+// Without this on the resume paths, a `worktree: auto` run that paused
+// and resumed via CLI ended with no final_branch / final_commit
+// persisted, the worktree dir leaked, and the run's commits were
+// reachable only via reflog (eligible for `git gc` after ~30 days) —
+// see F-RT-1 in docs/reviews/codebase-2026-05-17.md.
+func (e *Engine) finalizeOnExit(ctx context.Context, runID string, wtCtx *worktreeContext, cleanup func(), loopErr error) {
+	if wtCtx == nil {
+		return
+	}
+	if loopErr != nil {
+		if e.logger != nil {
+			e.logger.Info("runtime: worktree preserved for inspection: %s", e.workDir)
+		}
+		return
+	}
+	finRes := finalizeWorktree(*wtCtx, finalizeOptions{
+		runName:       e.runName,
+		runID:         runID,
+		branchName:    e.branchName,
+		mergeInto:     e.mergeInto,
+		mergeStrategy: e.mergeStrategy,
+		autoMerge:     e.autoMerge,
+	}, e.logger)
+	if finRes.FinalCommit != "" || finRes.FinalBranch != "" || finRes.MergedInto != "" || finRes.MergeStatus != "" {
+		if r2, err := e.store.LoadRun(ctx, runID); err == nil {
+			r2.FinalCommit = finRes.FinalCommit
+			r2.FinalBranch = finRes.FinalBranch
+			r2.MergedInto = finRes.MergedInto
+			r2.MergeStatus = store.MergeStatus(finRes.MergeStatus)
+			r2.MergedCommit = finRes.MergedCommit
+			if e.mergeStrategy != "" {
+				r2.MergeStrategy = store.MergeStrategy(e.mergeStrategy)
+			}
+			r2.AutoMerge = e.autoMerge
+			if saveErr := e.store.SaveRun(ctx, r2); saveErr != nil && e.logger != nil {
+				e.logger.Warn("runtime: persist finalization metadata: %v", saveErr)
+			}
+		}
+	}
+	if cleanup != nil {
+		cleanup()
+	}
+}
+
+// reconstructWorktreeContext rebuilds a worktreeContext from a persisted
+// run record on the resume path. The original setupWorktree-time
+// `originalBranch` is not in `r.*` — re-read it from the live repo so
+// finalizeWorktree can attempt the FF when the operator hasn't switched
+// branches since launch. Returns nil when the run isn't a worktree run
+// or when the persisted paths are empty.
+func (e *Engine) reconstructWorktreeContext(r *store.Run) *worktreeContext {
+	if r == nil || !r.Worktree || r.WorkDir == "" || r.RepoRoot == "" {
+		return nil
+	}
+	// Skip if the worktree directory is gone (already finalized, or
+	// operator removed it manually). finalizeWorktree handles a missing
+	// dir gracefully, but skipping here avoids an unnecessary git call.
+	if _, err := os.Stat(r.WorkDir); err != nil {
+		return nil
+	}
+	originalBranch := ""
+	if out, brErr := gitCmd("-C", r.RepoRoot, "symbolic-ref", "--quiet", "--short", "HEAD").Output(); brErr == nil {
+		originalBranch = strings.TrimSpace(string(out))
+	}
+	return &worktreeContext{
+		repoRoot:       r.RepoRoot,
+		wtPath:         r.WorkDir,
+		originalBranch: originalBranch,
+		originalTip:    r.BaseCommit,
+	}
 }
 
 // evictRunSessions clears any per-node session state still held by
