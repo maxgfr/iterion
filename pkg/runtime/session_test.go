@@ -253,3 +253,101 @@ func TestSessionFork(t *testing.T) {
 		t.Errorf("fork_b: expected _session_id %q, got %q", "sess-parent-000", capturedB)
 	}
 }
+
+// TestSessionInheritIfAvailable_FallsBackToFreshWhenNoSession verifies the
+// v0.6.0 tolerant variant: when a node declares `session:
+// inherit_if_available` and the upstream `_session_id` is empty (e.g.
+// because the producer hasn't run yet — typical of the first iteration
+// of an alternating loop), the node behaves as `session: fresh` rather
+// than routing into the backend with an empty session_id.
+func TestSessionInheritIfAvailable_FallsBackToFreshWhenNoSession(t *testing.T) {
+	wf := &ir.Workflow{
+		Name:  "session_inherit_if_available_test",
+		Entry: "consumer",
+		Nodes: map[string]ir.Node{
+			"consumer": &ir.AgentNode{BaseNode: ir.BaseNode{ID: "consumer"}, Session: ir.SessionInheritIfAvailable},
+			"done":     &ir.DoneNode{BaseNode: ir.BaseNode{ID: "done"}},
+		},
+		Edges: []*ir.Edge{
+			{From: "consumer", To: "done"},
+		},
+		Schemas: map[string]*ir.Schema{},
+		Prompts: map[string]*ir.Prompt{},
+		Vars:    map[string]*ir.Var{},
+		Loops:   map[string]*ir.Loop{},
+	}
+
+	var sawInput map[string]interface{}
+	exec := newStubExecutor()
+	exec.on("consumer", func(input map[string]interface{}) (map[string]interface{}, error) {
+		sawInput = input
+		return map[string]interface{}{"ok": true}, nil
+	})
+
+	eng := New(wf, tmpStore(t), exec)
+	if err := eng.Run(context.Background(), "run-session-iiav", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No _session_id is wired through; tolerant mode must NOT block,
+	// and the consumer must have been reached and executed.
+	if sawInput == nil {
+		t.Fatal("consumer was not invoked")
+	}
+	if sid, ok := sawInput["_session_id"]; ok && sid != "" {
+		t.Errorf("expected no _session_id (fresh fallback), got %v", sid)
+	}
+}
+
+// TestSessionInheritIfAvailable_InheritsWhenSessionPresent verifies the
+// happy path: when `_session_id` IS wired through, inherit_if_available
+// behaves identically to plain `inherit`.
+func TestSessionInheritIfAvailable_InheritsWhenSessionPresent(t *testing.T) {
+	wf := &ir.Workflow{
+		Name:  "session_inherit_if_available_happy",
+		Entry: "producer",
+		Nodes: map[string]ir.Node{
+			"producer": &ir.AgentNode{BaseNode: ir.BaseNode{ID: "producer"}},
+			"consumer": &ir.AgentNode{BaseNode: ir.BaseNode{ID: "consumer"}, Session: ir.SessionInheritIfAvailable},
+			"done":     &ir.DoneNode{BaseNode: ir.BaseNode{ID: "done"}},
+		},
+		Edges: []*ir.Edge{
+			{
+				From: "producer",
+				To:   "consumer",
+				With: []*ir.DataMapping{
+					{
+						Key:  "_session_id",
+						Refs: []*ir.Ref{{Kind: ir.RefOutputs, Path: []string{"producer", "_session_id"}, Raw: "{{outputs.producer._session_id}}"}},
+						Raw:  "{{outputs.producer._session_id}}",
+					},
+				},
+			},
+			{From: "consumer", To: "done"},
+		},
+		Schemas: map[string]*ir.Schema{},
+		Prompts: map[string]*ir.Prompt{},
+		Vars:    map[string]*ir.Var{},
+		Loops:   map[string]*ir.Loop{},
+	}
+
+	var capturedSessionID string
+	exec := newStubExecutor()
+	exec.on("producer", func(_ map[string]interface{}) (map[string]interface{}, error) {
+		return map[string]interface{}{"_session_id": "sess-iiav-happy"}, nil
+	})
+	exec.on("consumer", func(input map[string]interface{}) (map[string]interface{}, error) {
+		if sid, ok := input["_session_id"].(string); ok {
+			capturedSessionID = sid
+		}
+		return map[string]interface{}{"ok": true}, nil
+	})
+
+	eng := New(wf, tmpStore(t), exec)
+	if err := eng.Run(context.Background(), "run-session-iiav-happy", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedSessionID != "sess-iiav-happy" {
+		t.Errorf("expected inherited _session_id %q, got %q", "sess-iiav-happy", capturedSessionID)
+	}
+}

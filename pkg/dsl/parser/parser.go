@@ -2201,12 +2201,14 @@ func (p *parser) parseSessionMode() ast.SessionMode {
 		return ast.SessionFresh
 	case TokenInherit:
 		return ast.SessionInherit
+	case TokenInheritIfAvailable:
+		return ast.SessionInheritIfAvailable
 	case TokenArtifactsOnly:
 		return ast.SessionArtifactsOnly
 	case TokenFork:
 		return ast.SessionFork
 	default:
-		p.addError(DiagInvalidValue, t, "expected session mode (fresh, inherit, fork, artifacts_only), got '"+t.Value+"'")
+		p.addError(DiagInvalidValue, t, "expected session mode (fresh, inherit, inherit_if_available, fork, artifacts_only), got '"+t.Value+"'")
 		return ast.SessionFresh
 	}
 }

@@ -970,8 +970,15 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		task.HasTools = true // claw needs the tool loop active for ask_user
 	}
 
-	// Session continuity.
-	if f.session == ir.SessionInherit || f.session == ir.SessionFork {
+	// Session continuity. SessionInheritIfAvailable is a tolerant
+	// variant of SessionInherit added for workflows where the
+	// upstream session may legitimately not exist yet (e.g. the
+	// first iteration of an alternating loop where the producer
+	// hasn't run): when _session_id is empty the node falls back
+	// to fresh-session behaviour instead of routing into the
+	// backend with an empty session id (which has produced silent
+	// 0-token failures on at least the OpenAI provider).
+	if f.session == ir.SessionInherit || f.session == ir.SessionInheritIfAvailable || f.session == ir.SessionFork {
 		if sid, ok := input["_session_id"].(string); ok && sid != "" {
 			task.SessionID = sid
 			if f.session == ir.SessionFork {
@@ -986,6 +993,11 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 			if fp, ok := input["_session_fingerprint"].(string); ok && fp != "" {
 				task.SessionFingerprint = fp
 			}
+		} else if f.session == ir.SessionInheritIfAvailable && e.logger != nil {
+			// Tolerant fallback: surface the decision so authors
+			// can tell whether the cache-hit path or the cold path
+			// fired. Plain `inherit` stays silent here for BC.
+			e.logger.Info("[%s/inherit_if_available] no upstream _session_id; running fresh", f.id)
 		}
 	}
 
