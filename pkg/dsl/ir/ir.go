@@ -423,11 +423,11 @@ func appendLLMPromptRefs(refs []string, f *LLMFields) []string {
 type SessionMode = types.SessionMode
 
 const (
-	SessionFresh             = types.SessionFresh
-	SessionInherit           = types.SessionInherit
+	SessionFresh              = types.SessionFresh
+	SessionInherit            = types.SessionInherit
 	SessionInheritIfAvailable = types.SessionInheritIfAvailable
-	SessionArtifactsOnly     = types.SessionArtifactsOnly
-	SessionFork              = types.SessionFork
+	SessionArtifactsOnly      = types.SessionArtifactsOnly
+	SessionFork               = types.SessionFork
 )
 
 type RouterMode = types.RouterMode
