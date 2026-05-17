@@ -878,12 +878,25 @@ func compare(op string, a, b interface{}) (bool, error) {
 
 func arith(op string, a, b interface{}) (interface{}, error) {
 	// String concatenation for "+" with at least one string operand.
+	// Both operands must be strings OR numerics — concatenating a
+	// string with an array/map used to produce Go's debug format
+	// `[a b c]`, surprising the workflow author. Reject mixed types
+	// explicitly so the failure is loud (F-DSL-8).
 	if op == "+" {
-		if as, ok := a.(string); ok {
-			return as + fmt.Sprintf("%v", b), nil
+		if as, aok := a.(string); aok {
+			if bs, bok := b.(string); bok {
+				return as + bs, nil
+			}
+			if _, bnum := toFloat(b); bnum {
+				return as + fmt.Sprintf("%v", b), nil
+			}
+			return nil, fmt.Errorf("expr: cannot concatenate string with %T", b)
 		}
-		if bs, ok := b.(string); ok {
-			return fmt.Sprintf("%v", a) + bs, nil
+		if bs, bok := b.(string); bok {
+			if _, anum := toFloat(a); anum {
+				return fmt.Sprintf("%v", a) + bs, nil
+			}
+			return nil, fmt.Errorf("expr: cannot concatenate %T with string", a)
 		}
 	}
 	ai, aiok := toInt(a)
@@ -891,11 +904,20 @@ func arith(op string, a, b interface{}) (interface{}, error) {
 	if aiok && biok {
 		switch op {
 		case "+":
-			return ai + bi, nil
+			if r, ok := addCheckedInt64(ai, bi); ok {
+				return r, nil
+			}
+			return nil, fmt.Errorf("expr: integer addition overflow (%d + %d)", ai, bi)
 		case "-":
-			return ai - bi, nil
+			if r, ok := subCheckedInt64(ai, bi); ok {
+				return r, nil
+			}
+			return nil, fmt.Errorf("expr: integer subtraction overflow (%d - %d)", ai, bi)
 		case "*":
-			return ai * bi, nil
+			if r, ok := mulCheckedInt64(ai, bi); ok {
+				return r, nil
+			}
+			return nil, fmt.Errorf("expr: integer multiplication overflow (%d * %d)", ai, bi)
 		case "/":
 			if bi == 0 {
 				return nil, fmt.Errorf("expr: integer division by zero")
@@ -929,11 +951,50 @@ func arith(op string, a, b interface{}) (interface{}, error) {
 }
 
 func toInt(v interface{}) (int64, bool) {
+	// Cover the common numeric types JSON or Context.* callbacks can
+	// produce. The prior implementation only handled int / int64 — so
+	// a uint64(0) was "non-numeric" (truthy by default), a float32
+	// value couldn't be added, and a json.Number always failed
+	// integer coercion. Defaults to the JSON-decoded shape
+	// (float64) when the value is fractional; for exact-int float
+	// inputs we still report ok so `truthy(2.0)` matches `truthy(2)`.
 	switch t := v.(type) {
 	case int:
 		return int64(t), true
+	case int8:
+		return int64(t), true
+	case int16:
+		return int64(t), true
+	case int32:
+		return int64(t), true
 	case int64:
 		return t, true
+	case uint:
+		if uint64(t) > uint64(1)<<63-1 {
+			return 0, false
+		}
+		return int64(t), true
+	case uint8:
+		return int64(t), true
+	case uint16:
+		return int64(t), true
+	case uint32:
+		return int64(t), true
+	case uint64:
+		if t > uint64(1)<<63-1 {
+			return 0, false
+		}
+		return int64(t), true
+	case float32:
+		if t != float32(int64(t)) {
+			return 0, false
+		}
+		return int64(t), true
+	case float64:
+		if t != float64(int64(t)) {
+			return 0, false
+		}
+		return int64(t), true
 	}
 	return 0, false
 }
@@ -942,12 +1003,62 @@ func toFloat(v interface{}) (float64, bool) {
 	switch t := v.(type) {
 	case int:
 		return float64(t), true
+	case int8:
+		return float64(t), true
+	case int16:
+		return float64(t), true
+	case int32:
+		return float64(t), true
 	case int64:
+		return float64(t), true
+	case uint:
+		return float64(t), true
+	case uint8:
+		return float64(t), true
+	case uint16:
+		return float64(t), true
+	case uint32:
+		return float64(t), true
+	case uint64:
+		return float64(t), true
+	case float32:
 		return float64(t), true
 	case float64:
 		return t, true
 	}
 	return 0, false
+}
+
+// addCheckedInt64 / subCheckedInt64 / mulCheckedInt64 perform int64
+// arithmetic with overflow detection. The DSL surfaces overflow as a
+// loud runtime error rather than the silent wraparound the bare
+// operators would produce — a templated loop cap that overflows used
+// to come out tiny/negative without explanation (F-DSL-7).
+func addCheckedInt64(a, b int64) (int64, bool) {
+	r := a + b
+	if (b > 0 && r < a) || (b < 0 && r > a) {
+		return 0, false
+	}
+	return r, true
+}
+
+func subCheckedInt64(a, b int64) (int64, bool) {
+	r := a - b
+	if (b > 0 && r > a) || (b < 0 && r < a) {
+		return 0, false
+	}
+	return r, true
+}
+
+func mulCheckedInt64(a, b int64) (int64, bool) {
+	if a == 0 || b == 0 {
+		return 0, true
+	}
+	r := a * b
+	if r/b != a {
+		return 0, false
+	}
+	return r, true
 }
 
 // ---------------------------------------------------------------------------
