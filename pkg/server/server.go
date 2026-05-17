@@ -1076,10 +1076,18 @@ func (s *Server) requireSafeOrigin(w http.ResponseWriter, r *http.Request) bool 
 //     pre-planted symlink at parent dir would otherwise let WriteFile
 //     follow it through.
 func (s *Server) safePath(relPath string) (string, error) {
-	if s.cfg.WorkDir == "" {
+	// Snapshot WorkDir under the read lock so a concurrent
+	// /api/projects/switch can't intersect baseAbs and baseReal
+	// derivations against two different roots. Without the snapshot,
+	// the containment check below could be satisfied by an OLD workdir
+	// while the actual write lands under the NEW one — or vice versa.
+	s.stateMu.RLock()
+	workDir := s.cfg.WorkDir
+	s.stateMu.RUnlock()
+	if workDir == "" {
 		return "", fmt.Errorf("no working directory configured")
 	}
-	baseAbs, err := filepath.Abs(s.cfg.WorkDir)
+	baseAbs, err := filepath.Abs(workDir)
 	if err != nil {
 		return "", fmt.Errorf("workdir abs: %w", err)
 	}
@@ -1161,12 +1169,15 @@ func evalSymlinksLongestPrefix(abs string) (string, error) {
 // --- File management handlers ---
 
 func (s *Server) handleListFiles(w http.ResponseWriter, _ *http.Request) {
-	if s.cfg.WorkDir == "" {
+	s.stateMu.RLock()
+	workDir := s.cfg.WorkDir
+	s.stateMu.RUnlock()
+	if workDir == "" {
 		writeJSON(w, listFilesResponse{Files: []fileEntry{}})
 		return
 	}
 	var files []fileEntry
-	filepath.WalkDir(s.cfg.WorkDir, func(path string, d fs.DirEntry, err error) error {
+	filepath.WalkDir(workDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -1183,7 +1194,7 @@ func (s *Server) handleListFiles(w http.ResponseWriter, _ *http.Request) {
 		if err != nil {
 			return nil
 		}
-		rel, _ := filepath.Rel(s.cfg.WorkDir, path)
+		rel, _ := filepath.Rel(workDir, path)
 		files = append(files, fileEntry{Name: rel, Size: info.Size()})
 		return nil
 	})
