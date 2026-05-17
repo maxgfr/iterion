@@ -79,7 +79,17 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// SSRF policy:
+	//  - cloud mode (always strict)
+	//  - local mode bound to a non-loopback address (multi-user dev
+	//    box, devcontainer-shared host, LAN exposure): also strict.
+	//    A logged-in user who can reach the editor on 0.0.0.0 should
+	//    not be able to gateway requests to the host's loopback /
+	//    private network through us. (F-S4)
+	//  - local mode bound to 127.0.0.1 / ::1 / localhost: permissive
+	//    so the editor can embed the user's own dev servers.
 	cloudMode := s.cfg.Mode == "cloud"
+	strict := cloudMode || !isLoopbackBind(s.cfg.Bind)
 
 	host := parsed.Hostname()
 	port := parsed.Port()
@@ -91,7 +101,7 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	pinnedIP, err := resolvePreviewHost(r.Context(), host, cloudMode)
+	pinnedIP, err := resolvePreviewHost(r.Context(), host, strict)
 	if err != nil {
 		s.httpErrorFor(w, r, http.StatusForbidden, "target rejected: %v", err)
 		return
@@ -171,29 +181,34 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 }
 
 // resolvePreviewHost resolves host and returns a single IP that is
-// safe to dial. In cloud mode, every resolved IP must be a public
+// safe to dial. When strict, every resolved IP must be a public
 // unicast address: any private/link-local/loopback/multicast/cloud-
-// metadata hit causes a refusal. In local mode the first resolved
+// metadata hit causes a refusal. When non-strict, the first resolved
 // address is returned regardless — the editor is loopback-bound and
 // the user is supposed to be able to embed dev servers.
-func resolvePreviewHost(ctx context.Context, host string, cloudMode bool) (net.IP, error) {
+//
+// strict is set when (a) the server runs in cloud mode, or (b) the
+// server is bound to a non-loopback address (multi-user dev box, LAN
+// exposure) — both cases would otherwise let an authenticated user
+// gateway requests to the host's private network (F-S4).
+func resolvePreviewHost(ctx context.Context, host string, strict bool) (net.IP, error) {
 	if host == "" {
 		return nil, errors.New("empty host")
 	}
 
 	// Already a numeric address: validate and return.
 	if ip := net.ParseIP(host); ip != nil {
-		if cloudMode && !isPublicUnicast(ip) {
+		if strict && !isPublicUnicast(ip) {
 			return nil, fmt.Errorf("address %s is not a public unicast IP", ip)
 		}
 		return ip, nil
 	}
 
-	// Refuse some hostnames outright in cloud mode regardless of DNS
+	// Refuse some hostnames outright in strict mode regardless of DNS
 	// resolution — they're conventional aliases for cluster-internal
 	// services that may not exist in DNS but get re-routed by service
 	// meshes.
-	if cloudMode {
+	if strict {
 		lower := strings.ToLower(host)
 		if strings.HasSuffix(lower, ".svc.cluster.local") ||
 			strings.HasSuffix(lower, ".svc") ||
@@ -213,11 +228,25 @@ func resolvePreviewHost(ctx context.Context, host string, cloudMode bool) (net.I
 	}
 
 	for _, a := range addrs {
-		if cloudMode && !isPublicUnicast(a.IP) {
+		if strict && !isPublicUnicast(a.IP) {
 			return nil, fmt.Errorf("resolved address %s is not a public unicast IP", a.IP)
 		}
 	}
 	return addrs[0].IP, nil
+}
+
+// isLoopbackBind returns true when bind is one of the conventional
+// loopback identifiers. Used by the SSRF gate to decide whether the
+// permissive "let the user embed their own dev servers" mode is safe.
+func isLoopbackBind(bind string) bool {
+	switch strings.ToLower(strings.TrimSpace(bind)) {
+	case "", "127.0.0.1", "localhost", "::1", "[::1]":
+		return true
+	}
+	if ip := net.ParseIP(bind); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	return false
 }
 
 // isPublicUnicast reports whether ip is safe to fetch from a cloud

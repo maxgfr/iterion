@@ -34,10 +34,38 @@ const oidcAgentBindingCookie = "iterion_oidc_agent"
 // registerAuthRoutes wires every /api/auth/* and /api/teams/*
 // endpoint. Called from routes() when AuthService is non-nil.
 func (s *Server) registerAuthRoutes() {
+	if s.authLimiter == nil {
+		s.authLimiter = newAuthRateLimiter()
+	}
+	// Per-route token-bucket rate limits (F-C1). Conservative bursts
+	// so a legitimate user with sticky-keyboard / multiple devices
+	// isn't surprised, but distributed brute-force is throttled.
+	loginLimit := s.limitRoute(
+		authBucketCfg{rate: 1.0 / 12.0, burst: 5}, // 5/min sustained, burst 5
+		func(r *http.Request) string {
+			// Second tier: rate-limit by email so distributed IPs
+			// hammering one account also throttle. Extracted as a
+			// pre-flight peek; if the body can't be parsed we fall
+			// back to IP-only — the handler will return 400 anyway.
+			email := peekJSONField(r, "email")
+			if email == "" {
+				return ""
+			}
+			return "email:" + strings.ToLower(email)
+		},
+	)
+	registerLimit := s.limitRoute(
+		authBucketCfg{rate: 1.0 / 30.0, burst: 3}, // 2/min sustained
+		nil,
+	)
+	refreshLimit := s.limitRoute(
+		authBucketCfg{rate: 1.0 / 2.0, burst: 30}, // 30/min — normal under long sessions
+		nil,
+	)
 	// Anonymous routes (public via isPublicPath).
-	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
-	s.mux.HandleFunc("POST /api/auth/register", s.handleRegister)
-	s.mux.HandleFunc("POST /api/auth/refresh", s.handleRefresh)
+	s.mux.HandleFunc("POST /api/auth/login", loginLimit(s.handleLogin))
+	s.mux.HandleFunc("POST /api/auth/register", registerLimit(s.handleRegister))
+	s.mux.HandleFunc("POST /api/auth/refresh", refreshLimit(s.handleRefresh))
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
 	s.mux.HandleFunc("GET /api/auth/providers", s.handleListProviders)
 	s.mux.HandleFunc("GET /api/auth/oidc/{provider}/start", s.handleOIDCStart)

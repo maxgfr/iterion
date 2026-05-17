@@ -256,6 +256,7 @@ type Server struct {
 	runs             *runview.Service // run console service; nil disables /api/runs endpoints
 
 	authSvc      *auth.Service
+	authLimiter  *authRateLimiter
 	signer       *auth.JWTSigner
 	oidcRegistry *oidc.Registry
 	oidcStates   oidc.StateStore
