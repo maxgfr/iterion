@@ -182,12 +182,34 @@ func detectClaw(prov []ProviderStatus) BackendStatus {
 }
 
 func detectProviders() []ProviderStatus {
+	// z.ai exposes an Anthropic-API-compatible endpoint via
+	// ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN (or its dedicated
+	// ZAI_API_KEY). Treat that combination as a distinct provider so
+	// "anthropic" only flags as Available when the user really has
+	// Anthropic credentials — otherwise the BYOK selection UI happily
+	// claimed anthropic was available when in fact only the z.ai
+	// façade was configured, and the resolver would pick anthropic
+	// models that 401'd against z.ai.
+	anthropicBase := strings.ToLower(os.Getenv("ANTHROPIC_BASE_URL"))
+	hasZAIBaseURL := strings.Contains(anthropicBase, "z.ai") ||
+		strings.Contains(anthropicBase, "bigmodel")
+	hasZAIKey := os.Getenv("ZAI_API_KEY") != ""
+	zaiAvailable := hasZAIKey ||
+		(hasZAIBaseURL && os.Getenv("ANTHROPIC_AUTH_TOKEN") != "")
+	anthropicAvailable := os.Getenv("ANTHROPIC_API_KEY") != "" && !hasZAIBaseURL
+
 	out := []ProviderStatus{
 		{
 			Name:           "anthropic",
-			Available:      os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("ANTHROPIC_AUTH_TOKEN") != "",
-			Source:         envSource("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
+			Available:      anthropicAvailable,
+			Source:         envSource("ANTHROPIC_API_KEY"),
 			SuggestedModel: "anthropic/claude-sonnet-4-6",
+		},
+		{
+			Name:           "zai",
+			Available:      zaiAvailable,
+			Source:         envSource("ZAI_API_KEY", "ANTHROPIC_BASE_URL"),
+			SuggestedModel: "anthropic/glm-4.6",
 		},
 		{
 			Name:           "openai",
