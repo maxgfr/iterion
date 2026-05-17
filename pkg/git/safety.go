@@ -24,6 +24,13 @@ func ValidateRelPath(p string) error {
 	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") {
 		return fmt.Errorf("git: path must be relative")
 	}
+	// Reject a leading dash. showAt (range.go) passes `ref:<relPath>`
+	// as a single positional arg to `git show`; a path starting with
+	// "-" would be parsed as a git flag (e.g. `git show HEAD:-v` ⇒
+	// verbose mode), leaking unrelated output to the caller.
+	if strings.HasPrefix(p, "-") {
+		return fmt.Errorf("git: path %q must not start with '-' (would be parsed as a flag)", p)
+	}
 	// filepath.IsLocal (Go 1.20+) rejects "..", "" segments, drive
 	// letters, and other escape attempts using the OS rules. We
 	// normalise to OS separators just for this check so the same input

@@ -107,8 +107,13 @@ func New(level Level, w io.Writer) *Logger {
 	return NewWithFormat(level, w, FormatHuman)
 }
 
-// NewWithFormat creates a new Logger with an explicit format.
+// NewWithFormat creates a new Logger with an explicit format. A nil
+// writer is treated as io.Discard so callers using the "silence all
+// output" idiom (passing nil) don't panic on the first log line.
 func NewWithFormat(level Level, w io.Writer, format Format) *Logger {
+	if w == nil {
+		w = io.Discard
+	}
 	return &Logger{level: level, w: w, format: format, mu: &sync.Mutex{}}
 }
 

@@ -1465,7 +1465,12 @@ func (s *Service) Resume(parent context.Context, spec ResumeSpec) (*LaunchResult
 		return s.resumeDetached(parent, spec)
 	}
 
-	wf, hash, err := CompileWorkflowWithHash(spec.FilePath)
+	// Honour spec.Source when supplied (cloud-mode callers materialise
+	// .iter contents inline; the runner pod may have no FilePath on
+	// disk). The publish path above already uses compileForLaunch for
+	// the same reason — this branch was the only one still routing
+	// through the disk-only CompileWorkflowWithHash.
+	wf, hash, err := compileForLaunch(spec.FilePath, spec.Source)
 	if err != nil {
 		return nil, err
 	}
