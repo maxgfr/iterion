@@ -1,8 +1,29 @@
-# doc-align (v0.10.0)
+# doc-align (v0.11.0)
 
 A dogfood-friendly iterion bot that detects mismatches between
 project documentation and actual code state, then fixes the
 **documentation** (never the code) and auto-commits on convergence.
+
+**v0.11.0 changes** (mechanical fix-scope enforcement):
+- New tool node `enforce_fix_scope` runs between every
+  `fix_claude`/`fix_gpt` and `alt`. It walks
+  `git diff --name-only` against the fixer's declared
+  `modified_doc_files[]` and runs `git checkout --` on every
+  edit that's NOT in the declaration. The fixer's own
+  output is the contract — out-of-declaration writes are
+  reverted before the next reviewer sees them.
+- Catches the v0.10 dogfood gap: fix_gpt edited
+  `examples/doc-align/skills/doc-verification-checklist.md`
+  (the bot's own skill) despite `bundle_self_path` excluding
+  it from `doc_files`. The fixer's tool access (write_file,
+  file_edit) is filesystem-wide; previous releases relied on
+  skill-level discipline ("you may not write outside scope")
+  which the agent occasionally over-reached.
+- `reverted_paths[]` is emitted in events for visibility — a
+  non-empty list signals the prompt needs reinforcement or the
+  agent is consistently over-stepping.
+- Workflow grows by 1 node / 3 edges (14 nodes, 21 edges
+  pre-rest). Loop count unchanged (still 20 recovery iters).
 
 **v0.10.0 changes** (telemetry trailer for post-run analysis):
 - `prepare_commit` now requires the commit message to end with a
