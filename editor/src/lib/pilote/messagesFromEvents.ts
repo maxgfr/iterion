@@ -138,12 +138,79 @@ function humanId(nodeId: string, iter: number) {
   return `${nodeId}:${iter}:question`;
 }
 
-export function messagesFromEvents({
-  bot,
-  events,
-  snapshot,
-}: MapInputs): PiloteMessage[] {
-  const out: PiloteMessage[] = [];
+// FolderState carries the mutable bookkeeping the per-event handler
+// needs. Exported so callers (the Pilote hook) can persist it across
+// renders and resume folding from a cursor instead of replaying the
+// whole event stream every push.
+export interface FolderState {
+  out: PiloteMessage[];
+  bannerIdx: Map<string, number>;
+  humanIdx: Map<string, number>;
+  activeBannerByNode: Map<string, number>;
+  latestPendingHumanKey: string | null;
+}
+
+export function newFolderState(): FolderState {
+  return {
+    out: [],
+    bannerIdx: new Map(),
+    humanIdx: new Map(),
+    activeBannerByNode: new Map(),
+    latestPendingHumanKey: null,
+  };
+}
+
+// MessagesFoldCache snapshots the folder state plus enough event-stream
+// identity to recognise an append (same firstSeq, monotonic lastSeq) vs
+// a replay (firstSeq mismatched → must full-refold). Bot identity is
+// part of the key because nodeMap changes alter how events fold.
+export interface MessagesFoldCache {
+  bot: FirstClassBot;
+  firstSeq: number | null;
+  lastSeq: number;
+  state: FolderState;
+}
+
+export function messagesFromEvents(inputs: MapInputs): PiloteMessage[] {
+  return messagesFromEventsCached(inputs, null).messages;
+}
+
+// messagesFromEventsCached is the incremental variant. When `prev` is
+// compatible (same bot, same first-event seq), it resumes folding from
+// `prev.lastSeq + 1` and mutates `prev.state.out` in place. Otherwise
+// it folds from scratch.
+//
+// Snapshot identity is intentionally NOT part of the cache key: the
+// fold reads snapshot only at node_finished time to materialise the
+// banner summary; once that summary is baked into `out[idx]`, later
+// snapshot updates don't retroactively change it. So a stale-snapshot
+// resume produces the same output as a fresh refold would.
+export function messagesFromEventsCached(
+  inputs: MapInputs,
+  prev: MessagesFoldCache | null,
+): { messages: PiloteMessage[]; cache: MessagesFoldCache } {
+  const { bot, events, snapshot } = inputs;
+  const firstSeq = events.length > 0 ? events[0]?.seq ?? null : null;
+
+  const canResume =
+    prev !== null &&
+    prev.bot === bot &&
+    prev.firstSeq !== null &&
+    prev.firstSeq === firstSeq;
+
+  let state: FolderState;
+  let lastSeq: number;
+  let toProcess: ReadonlyArray<RunEvent>;
+
+  if (canResume) {
+    state = prev!.state;
+    lastSeq = prev!.lastSeq;
+    toProcess = events;
+  } else {
+    state = newFolderState();
+    lastSeq = -1;
+    toProcess = events;
+  }
 
   // Sort by monotonic seq before folding. The runtime emits events
   // with strictly increasing seq, but the store's applyEventsBatch
@@ -152,31 +219,42 @@ export function messagesFromEvents({
   // before its parent node_started would otherwise be silently
   // dropped (no banner to attribute to). Stable sort: equal seq —
   // shouldn't happen but tolerate — keeps the original order.
-  const sortedEvents = events
+  const sortedEvents = toProcess
     .slice()
     .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
 
-  // Track which banner is currently "running" for each (node, iter) so
-  // node_finished can flip it in place and so a duplicate node_started
-  // (WS replay) doesn't push a second banner.
-  const bannerIdx = new Map<string, number>(); // key -> index in `out`
-  const humanIdx = new Map<string, number>();
-
-  // Latest banner index per node id — used by tool_started/llm_request
-  // to attribute live progress without having to know the iteration.
-  // Cleared on node_finished.
-  const activeBannerByNode = new Map<string, number>();
-
-  // Track the latest pending human-question so we know which one
-  // to flip to "answered" if the runtime ever sends a
-  // human_answers_recorded event without a node_id (defence in depth
-  // — the runtime always stamps node_id today, but we tolerate older
-  // event shapes).
-  let latestPendingHumanKey: string | null = null;
-
   for (const evt of sortedEvents) {
-    if (!evt.type) continue;
-    switch (evt.type) {
+    const seq = evt.seq ?? 0;
+    if (seq <= lastSeq) continue;
+    processEvent(evt, state, bot, snapshot);
+    if (seq > lastSeq) lastSeq = seq;
+  }
+
+  return {
+    messages: state.out,
+    cache: {
+      bot,
+      firstSeq,
+      lastSeq,
+      state,
+    },
+  };
+}
+
+function processEvent(
+  evt: RunEvent,
+  state: FolderState,
+  bot: FirstClassBot,
+  snapshot: RunSnapshot | null,
+): void {
+  const out = state.out;
+  const bannerIdx = state.bannerIdx;
+  const humanIdx = state.humanIdx;
+  const activeBannerByNode = state.activeBannerByNode;
+  let latestPendingHumanKey = state.latestPendingHumanKey;
+
+  if (!evt.type) return;
+  switch (evt.type) {
       case "node_started": {
         const nodeId = evt.node_id;
         if (!nodeId) break;
@@ -308,6 +386,16 @@ export function messagesFromEvents({
         const iter = iterationOf(evt);
         const key = humanId(nodeId, iter);
         if (humanIdx.has(key)) break; // dedupe replay
+        // Pull through the runtime-supplied questions payload (set when
+        // the engine resolved field definitions from the workflow's
+        // human node or from an LLM-fill step). The form renderer uses
+        // it to label inputs, hint at allowed values, etc. — without
+        // this the LLM-fill output was discarded and the form fell
+        // back to the bot's static prompt.
+        const questions =
+          evt.data?.questions && typeof evt.data.questions === "object"
+            ? (evt.data.questions as Record<string, unknown>)
+            : undefined;
         const idx = out.length;
         out.push({
           kind: "human-question",
@@ -316,6 +404,7 @@ export function messagesFromEvents({
           prompt: entry.prompt ?? "Reply to continue.",
           status: "pending",
           actions: entry.actions,
+          questions,
         } satisfies HumanQuestionMessage);
         humanIdx.set(key, idx);
         latestPendingHumanKey = key;
@@ -414,12 +503,10 @@ export function messagesFromEvents({
         });
         break;
 
-      default:
-        break;
-    }
+    default:
+      break;
   }
-
-  return out;
+  state.latestPendingHumanKey = latestPendingHumanKey;
 }
 
 // finalizeActiveBanners coerces every banner still flagged as running

@@ -23,7 +23,10 @@ import type { PiloteMessage } from "@/lib/pilote/messages";
 import { useRunStore } from "@/store/run";
 import { useServerInfoStore } from "@/store/serverInfo";
 
-import { messagesFromEvents } from "./messagesFromEvents";
+import {
+  messagesFromEventsCached,
+  type MessagesFoldCache,
+} from "./messagesFromEvents";
 import {
   forgetSessionRunId,
   recallSessionRunId,
@@ -208,12 +211,27 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
     }
   }, [bot.id, projectId, runId, runStatus, status]);
 
-  // Derive the transcript. Memoised on the array identity of events
-  // (Zustand swaps the reference on each fold) + snapshot identity.
-  const messages = useMemo(
-    () => messagesFromEvents({ bot, events, snapshot }),
-    [bot, events, snapshot],
-  );
+  // Derive the transcript with an incremental fold. The cached folder
+  // resumes from the last processed seq instead of replaying the whole
+  // event stream every push (O(K) per tick instead of O(N)). The cache
+  // is invalidated implicitly when bot changes (new session) or when
+  // the first event seq differs (full replay after reconnect).
+  // Snapshot updates don't invalidate: the fold reads snapshot only at
+  // node_finished time and bakes the summary into the message, so a
+  // resumed fold under a stale snapshot produces the same output a
+  // fresh refold would have.
+  const transcriptCacheRef = useRef<MessagesFoldCache | null>(null);
+  const messages = useMemo(() => {
+    const { messages: out, cache } = messagesFromEventsCached(
+      { bot, events, snapshot },
+      transcriptCacheRef.current,
+    );
+    transcriptCacheRef.current = cache;
+    // Return a fresh array reference so memo consumers see a new value
+    // when new events land. (Mutating `out` in place wouldn't propagate
+    // through React.)
+    return out.slice();
+  }, [bot, events, snapshot]);
 
   // Track the latest pending human message id so submitHumanAnswer
   // can route to the right turn without the caller having to look it

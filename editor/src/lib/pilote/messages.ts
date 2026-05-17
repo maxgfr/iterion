@@ -53,6 +53,13 @@ export interface HumanQuestionMessage {
   outcome?: Record<string, unknown>;
   // For human_review etc., which action buttons to render.
   actions?: ReadonlyArray<"approve" | "request_revision">;
+  // Runtime-resolved questions payload (the same data the engine
+  // writes into checkpoint.InteractionQuestions). Carries field
+  // schema / labels / hints the bot or LLM produced — set when the
+  // `human_input_requested` event arrived with a `questions` map.
+  // The form renderer falls back to the bot's static `prompt` when
+  // this is empty.
+  questions?: Record<string, unknown>;
 }
 
 export interface RoadmapItem {
