@@ -898,7 +898,7 @@ function ToolCallList({ calls, runId }: { calls: ToolCall[]; runId: string }) {
 }
 
 // FETCH_CHUNK_BYTES is the page size for lazy tool-blob reads. 64 KB is
-// large enough that "voir plus" feels responsive (one chunk fully fills
+// large enough that "load more" feels responsive (one chunk fully fills
 // the visible expanded pane), small enough that a megabyte-scale output
 // streams in ~16 round trips rather than one giant request that blocks
 // the user's first paint.
@@ -907,11 +907,11 @@ const FETCH_CHUNK_BYTES = 64 * 1024;
 // ToolPayloadBlock renders the preview (or full inline body) of a tool's
 // I/O payload as a collapsible <details>. When the call exceeded the
 // backend's inline threshold, props `toolUseID` + `totalSize` are set:
-// expanding the details shows the 4 KB preview plus a "voir plus / load
-// more" button that paginates through the sidecar blob via
-// fetchToolBlob. The fetched bytes are appended in-component (not in
-// the run store) so reopening the same card later re-fetches — keeps
-// the in-memory event cache lean.
+// expanding the details shows the 4 KB preview plus a "load more"
+// button that paginates through the sidecar blob via fetchToolBlob.
+// The fetched bytes are appended in-component (not in the run store)
+// so reopening the same card later re-fetches — keeps the in-memory
+// event cache lean.
 function ToolPayloadBlock({
   label,
   value,
@@ -931,7 +931,7 @@ function ToolPayloadBlock({
   const [expanded, setExpanded] = useState(false);
   const [overflow, setOverflow] = useState(false);
   // Fetched extras concatenated after the preview. Empty until the user
-  // hits "voir plus" / triggers an infinite-scroll boundary. Re-set on
+  // hits "load more" / triggers an infinite-scroll boundary. Re-set on
   // collapse so the next expansion starts fresh — avoids unbounded
   // retention of MBs of stdout in the editor heap.
   const [extra, setExtra] = useState("");
@@ -1033,7 +1033,7 @@ function ToolPayloadBlock({
             onClick={() => setExpanded((v) => !v)}
             className="text-[10px] text-fg-subtle hover:text-fg-default px-1 py-0.5 rounded hover:bg-surface-2"
           >
-            {expanded ? "réduire" : "voir tout"}
+            {expanded ? "collapse" : "expand"}
           </button>
         )}
         {hasMore && (
@@ -1044,8 +1044,8 @@ function ToolPayloadBlock({
             className="text-[10px] text-fg-subtle hover:text-fg-default px-1 py-0.5 rounded hover:bg-surface-2 disabled:opacity-50"
           >
             {loading
-              ? "chargement…"
-              : `voir plus (+${formatBytes(Math.min(FETCH_CHUNK_BYTES, (totalSize ?? loaded) - loaded))})`}
+              ? "loading…"
+              : `load more (+${formatBytes(Math.min(FETCH_CHUNK_BYTES, (totalSize ?? loaded) - loaded))})`}
           </button>
         )}
       </div>
