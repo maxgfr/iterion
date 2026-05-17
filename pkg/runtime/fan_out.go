@@ -622,18 +622,46 @@ func mergeOutputs(parent, branch map[string]map[string]interface{}) map[string]m
 	return merged
 }
 
-// copyOutputs creates a two-level copy of the outputs map so that concurrent
-// branches cannot mutate shared parent state at the top two levels.
+// copyOutputs creates a deep copy of the outputs map so that concurrent
+// branches cannot mutate shared parent state. Naive two-level copying
+// (the previous implementation) left nested maps and slices aliased
+// between branches: a fan-out where two branches both received an
+// upstream output containing a nested map would race on that map's
+// internal hashtable.
 func copyOutputs(src map[string]map[string]interface{}) map[string]map[string]interface{} {
 	dst := make(map[string]map[string]interface{}, len(src))
 	for k, v := range src {
 		inner := make(map[string]interface{}, len(v))
 		for ik, iv := range v {
-			inner[ik] = iv
+			inner[ik] = deepCopyValue(iv)
 		}
 		dst[k] = inner
 	}
 	return dst
+}
+
+// deepCopyValue recursively copies a value tree of the shapes produced
+// by JSON unmarshalling (map[string]interface{}, []interface{}, plus
+// scalars). Other concrete types pass through unchanged — the runtime
+// only stores JSON-shaped values in node outputs, so this covers the
+// real cases without paying the cost of reflection-based cloning.
+func deepCopyValue(v interface{}) interface{} {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(t))
+		for k, val := range t {
+			out[k] = deepCopyValue(val)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(t))
+		for i, val := range t {
+			out[i] = deepCopyValue(val)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // ---------------------------------------------------------------------------

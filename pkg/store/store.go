@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/internal/appinfo"
@@ -117,7 +119,40 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("store: rename temp file: %w", err)
 	}
+	// fsync the parent directory so the rename itself is durably on
+	// disk. Without this, ext4 (and other journalling filesystems) can
+	// commit the file data and the rename out-of-order on crash, leaving
+	// the prior name pointing nowhere — the run.json we just "atomically"
+	// replaced can vanish after a power loss. fsync-on-dir is the
+	// well-known second half of a durable atomic write; missing it was
+	// the long-standing footgun.
+	if err := fsyncDir(dir); err != nil {
+		return fmt.Errorf("store: sync dir: %w", err)
+	}
 	return nil
+}
+
+// fsyncDir opens dir and calls Sync on the descriptor so the directory
+// entry update from the most recent rename/create reaches the platter.
+// On platforms where opening a directory for sync isn't supported the
+// fallback is a best-effort no-op (see openat_other.go's companions).
+func fsyncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	syncErr := d.Sync()
+	closeErr := d.Close()
+	if syncErr != nil {
+		// On some platforms (notably Windows) Sync on a directory
+		// handle returns EBADF/ENOTSUP. Swallow those — the atomic
+		// rename semantics differ on those filesystems anyway.
+		if errors.Is(syncErr, syscall.EINVAL) || errors.Is(syncErr, syscall.ENOTSUP) {
+			return closeErr
+		}
+		return syncErr
+	}
+	return closeErr
 }
 
 // SanitizePathComponent validates that a path component (RunID, NodeID,

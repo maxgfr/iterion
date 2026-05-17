@@ -8,11 +8,21 @@ import (
 // IOTask is the on-the-wire form of a [Task] used by the claw
 // runner sub-binary IPC.
 //
-// It mirrors [Task] with one intentional omission:
+// Two [Task] fields are intentionally NOT carried over the wire:
 //
 //   - Sandbox: the [sandbox.Run] handle is not portable across
 //     processes (it wraps a live container). The runner is, by
 //     definition, *already inside* the sandbox so it doesn't need it.
+//   - Hooks: a [TaskHooks] struct of closures. Go closures don't
+//     survive process boundaries; intermediate observability events
+//     are surfaced via the envelope channel (see [Envelope]) and the
+//     launcher fires the hooks on the parent side after demuxing.
+//
+// All other [Task] fields are carried — including [Task.Capabilities],
+// [Task.StoreDir], [Task.BoardHTTPEndpoint], [Task.BoardRunToken],
+// [Task.ProviderHint] and [Task.SessionFingerprint] — so a capability-
+// gated agent running inside a sandbox sees the same board access
+// and provider routing it would see on the host.
 //
 // V2-1+ wire format: NDJSON envelopes (see [Envelope]). The launcher
 // emits one [EnvelopeTask] wrapping an IOTask; the runner emits any
@@ -31,6 +41,10 @@ type IOTask struct {
 	SystemPrompt           string          `json:"system_prompt,omitempty"`
 	UserPrompt             string          `json:"user_prompt,omitempty"`
 	AllowedTools           []string        `json:"allowed_tools,omitempty"`
+	Capabilities           []string        `json:"capabilities,omitempty"`
+	StoreDir               string          `json:"store_dir,omitempty"`
+	BoardHTTPEndpoint      string          `json:"board_http_endpoint,omitempty"`
+	BoardRunToken          string          `json:"board_run_token,omitempty"`
 	ToolDefs               []IOToolDef     `json:"tool_defs,omitempty"`
 	OutputSchema           json.RawMessage `json:"output_schema,omitempty"`
 	Model                  string          `json:"model,omitempty"`
@@ -44,6 +58,8 @@ type IOTask struct {
 	CompactPreserveRecent  int             `json:"compact_preserve_recent,omitempty"`
 	SessionID              string          `json:"session_id,omitempty"`
 	ForkSession            bool            `json:"fork_session,omitempty"`
+	SessionFingerprint     string          `json:"session_fingerprint,omitempty"`
+	ProviderHint           string          `json:"provider_hint,omitempty"`
 	InteractionEnabled     bool            `json:"interaction_enabled,omitempty"`
 	ResumeConversation     json.RawMessage `json:"resume_conversation,omitempty"`
 	ResumePendingToolUseID string          `json:"resume_pending_tool_use_id,omitempty"`
@@ -102,6 +118,10 @@ func ToIOTask(t Task) IOTask {
 		SystemPrompt:           t.SystemPrompt,
 		UserPrompt:             t.UserPrompt,
 		AllowedTools:           t.AllowedTools,
+		Capabilities:           t.Capabilities,
+		StoreDir:               t.StoreDir,
+		BoardHTTPEndpoint:      t.BoardHTTPEndpoint,
+		BoardRunToken:          t.BoardRunToken,
 		ToolDefs:               ioToolDefs,
 		OutputSchema:           t.OutputSchema,
 		Model:                  t.Model,
@@ -115,6 +135,8 @@ func ToIOTask(t Task) IOTask {
 		CompactPreserveRecent:  t.CompactPreserveRecent,
 		SessionID:              t.SessionID,
 		ForkSession:            t.ForkSession,
+		SessionFingerprint:     t.SessionFingerprint,
+		ProviderHint:           t.ProviderHint,
 		InteractionEnabled:     t.InteractionEnabled,
 		ResumeConversation:     t.ResumeConversation,
 		ResumePendingToolUseID: t.ResumePendingToolUseID,
@@ -124,13 +146,19 @@ func ToIOTask(t Task) IOTask {
 
 // FromIOTask converts an [IOTask] back to a [Task]. Sandbox is left
 // nil (the runner is inside the sandbox already); ToolDefs is left
-// nil (the runner registers them on its own).
+// nil (the runner registers them on its own); Hooks is left zero
+// (closures don't cross processes — intermediate events are surfaced
+// through the envelope channel).
 func FromIOTask(t IOTask) Task {
 	return Task{
 		NodeID:                 t.NodeID,
 		SystemPrompt:           t.SystemPrompt,
 		UserPrompt:             t.UserPrompt,
 		AllowedTools:           t.AllowedTools,
+		Capabilities:           t.Capabilities,
+		StoreDir:               t.StoreDir,
+		BoardHTTPEndpoint:      t.BoardHTTPEndpoint,
+		BoardRunToken:          t.BoardRunToken,
 		OutputSchema:           t.OutputSchema,
 		Model:                  t.Model,
 		HasTools:               t.HasTools,
@@ -143,6 +171,8 @@ func FromIOTask(t IOTask) Task {
 		CompactPreserveRecent:  t.CompactPreserveRecent,
 		SessionID:              t.SessionID,
 		ForkSession:            t.ForkSession,
+		SessionFingerprint:     t.SessionFingerprint,
+		ProviderHint:           t.ProviderHint,
 		InteractionEnabled:     t.InteractionEnabled,
 		ResumeConversation:     t.ResumeConversation,
 		ResumePendingToolUseID: t.ResumePendingToolUseID,
