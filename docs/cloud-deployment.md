@@ -75,30 +75,53 @@ exercises this path end-to-end on a kind cluster.
 | KEDA (optional) | 2.13+ if `runner.keda.enabled=true` |
 | Prometheus Operator (optional) | for `metrics.podMonitor.enabled=true` |
 
-## Session token
+## Auth bundle and access tokens
 
-Every cloud server requires `ITERION_SESSION_TOKEN` to gate `/api/*`.
-Without it, boot aborts with an explicit error (override only via
-`ITERION_DISABLE_AUTH=true` for local smoke tests).
+Every cloud server requires an auth bundle at boot:
 
-Generate + apply:
+| Env var | Purpose | Generate with |
+|---|---|---|
+| `ITERION_JWT_SECRET` | Server-side HS256 signing key for short-lived access JWTs (at least 32 random bytes) | `openssl rand -base64 48` |
+| `ITERION_SECRETS_KEY` | AES-256-GCM master key for sealing BYOK, OAuth, and run-scoped credentials (exactly 32 bytes before base64) | `openssl rand -base64 32` |
+
+Without those values, cloud-mode validation aborts with an explicit
+error (use `ITERION_DISABLE_AUTH=true` only for local smoke tests, not
+for shared deployments). The server pods need `ITERION_JWT_SECRET`;
+both server and runner pods must agree on `ITERION_SECRETS_KEY` so
+runners can unseal the credential bundle attached to each run.
+
+Generate + apply the Secret:
 
 ```bash
-kubectl create secret generic iterion-session \
-  --from-literal=ITERION_SESSION_TOKEN=$(openssl rand -hex 32) \
+kubectl create secret generic iterion-auth \
+  --from-literal=ITERION_JWT_SECRET="$(openssl rand -base64 48)" \
+  --from-literal=ITERION_SECRETS_KEY="$(openssl rand -base64 32)" \
+  --from-literal=ITERION_BOOTSTRAP_ADMIN_EMAIL=ops@example.com \
   --namespace iterion
 ```
 
-Reference from values-prod.yaml:
+Reference it from values-prod.yaml:
 
 ```yaml
 secrets:
-  session:
-    existingSecret: iterion-session
+  auth:
+    existingSecret: iterion-auth
 ```
 
-Rotation = create a new secret + `helm upgrade`. Active WS clients are
-disconnected on the next rolling-restart of the server pods.
+On the first boot of an empty users collection,
+`ITERION_BOOTSTRAP_ADMIN_EMAIL` creates a super-admin account with a
+one-time password printed in the server logs. Capture that password,
+sign in, change it, and remove the bootstrap env var on the next deploy.
+
+API clients do not send a static deployment token. They authenticate
+with an access JWT issued by login/refresh, passed as
+`Authorization: Bearer <access-jwt>` or via the `iterion_auth` cookie.
+WebSocket clients that cannot set headers may pass the same access JWT
+as `?t=<access-jwt>` on `/api/ws/*`. Health probes, server info, and
+auth bootstrap routes remain public.
+
+For rotation details, including JWT signing-key rotation and
+`ITERION_SECRETS_KEY` impact, see [cloud-admin.md](cloud-admin.md).
 
 ## NetworkPolicy egress
 
@@ -215,7 +238,7 @@ pod has no operator filesystem:
 
 ```bash
 curl -X POST https://iterion.example.com/api/runs/$RUN_ID/resume \
-  -H "Authorization: Bearer $ITERION_SESSION_TOKEN" \
+  -H "Authorization: Bearer $ITERION_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "source": "'"$(jq -Rs . workflow.iter)"'",
