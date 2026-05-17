@@ -53,8 +53,8 @@ func NewForgejo(opts ForgejoOptions) (*ForgejoAdapter, error) {
 	if opts.Host == "" {
 		return nil, errors.New("forgejo tracker: host is required")
 	}
-	if opts.Repo == "" {
-		return nil, errors.New("forgejo tracker: repo is required (owner/repo)")
+	if err := ValidateRepoPath(opts.Repo); err != nil {
+		return nil, fmt.Errorf("forgejo tracker: %w", err)
 	}
 	if opts.ClaimedLabel == "" {
 		opts.ClaimedLabel = "iterion-claimed"
