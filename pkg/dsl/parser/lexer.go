@@ -54,6 +54,16 @@ func NewLexer(filename, src string) *Lexer {
 		l.tokens = []Token{{Type: TokenError, Value: fmt.Sprintf("source file exceeds maximum size (%d bytes > %d)", len(src), maxSourceSize), Line: 1, Column: 1}}
 		return l
 	}
+	// Normalize the source before tokenising:
+	//  - strip a leading UTF-8 BOM (macOS / Windows editors occasionally
+	//    save it; the lexer would otherwise emit a confusing
+	//    TokenError on line 1 referencing U+FEFF).
+	//  - collapse CRLF to LF so the indent-sensitive line handling and
+	//    string-literal scanner don't drag \r into tokens or buffers.
+	//    Stray lone \r is left alone — that's vanishingly rare and a
+	//    legitimate-as-content scenario in heredocs.
+	src = strings.TrimPrefix(src, "\ufeff")
+	src = strings.ReplaceAll(src, "\r\n", "\n")
 	l := &Lexer{
 		src:          []rune(src),
 		file:         filename,
@@ -165,6 +175,25 @@ func (l *Lexer) handleLineStart() {
 	for l.pos < len(l.src) && l.src[l.pos] == ' ' {
 		spaces++
 		l.advance()
+	}
+
+	// Reject tabs as indentation: the DSL is indent-significant via
+	// spaces only. A silent tab would be counted as 0-indent, then
+	// swallowed as inline whitespace by scanToken, parsing the line at
+	// top-level with a cascade of misleading "unexpected token" errors
+	// on later lines. Surface the cause directly. Permitted in block-
+	// scalar mode (heredocs preserve tab content verbatim) and in
+	// prompt body lines (handled below the dispatch).
+	if !l.blockScalarMode && !l.promptMode && l.pos < len(l.src) && l.src[l.pos] == '\t' {
+		l.emit(TokenError, "tabs are not allowed for indentation; use spaces", startLine, spaces+1)
+		// Consume the rest of the line so we don't loop on the same tab.
+		for l.pos < len(l.src) && l.src[l.pos] != '\n' {
+			l.advance()
+		}
+		if l.pos < len(l.src) {
+			l.advance() // consume '\n'
+		}
+		return
 	}
 
 	// Block scalar mode owns line handling end-to-end (including blank lines,

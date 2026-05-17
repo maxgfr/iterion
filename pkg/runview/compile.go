@@ -6,12 +6,56 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
 	"github.com/SocialGouv/iterion/pkg/bundle"
+	"github.com/SocialGouv/iterion/pkg/dsl/ast"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	"github.com/SocialGouv/iterion/pkg/dsl/parser"
 )
+
+// computeWorkflowHash hashes the workflow source bytes together with
+// any bundle resources whose content materially affects the compiled
+// workflow. Used by `iterion resume`'s change-detection: if the hash
+// changes between original run and resume, the operator must pass
+// --force.
+//
+// Without bundle inclusion, a bundle upgrade that swaps a prompt body
+// produces the same hash as the original run — silently changing what
+// the agent reads on resume.
+func computeWorkflowHash(src []byte, b *bundle.Bundle, _ *ast.File) string {
+	h := sha256.New()
+	h.Write(src)
+	if b != nil && b.PromptsDir != "" {
+		if entries, err := os.ReadDir(b.PromptsDir); err == nil {
+			names := make([]string, 0, len(entries))
+			for _, e := range entries {
+				if e.IsDir() {
+					continue
+				}
+				if !strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
+					continue
+				}
+				names = append(names, e.Name())
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				body, err := os.ReadFile(filepath.Join(b.PromptsDir, name))
+				if err != nil {
+					continue
+				}
+				h.Write([]byte("\x00bundle.prompt:"))
+				h.Write([]byte(name))
+				h.Write([]byte{0})
+				h.Write(body)
+			}
+		}
+	}
+	sum := h.Sum(nil)
+	return hex.EncodeToString(sum)
+}
 
 // CompileWorkflow parses and compiles a .iter file at path. It returns
 // the compiled workflow or an error with the first parse / compile
@@ -74,12 +118,6 @@ func compileWith(path, inline string, withHash bool, b *bundle.Bundle) (*ir.Work
 		src = body
 	}
 
-	hash := ""
-	if withHash {
-		sum := sha256.Sum256(src)
-		hash = hex.EncodeToString(sum[:])
-	}
-
 	parserPath := path
 	if parserPath == "" {
 		parserPath = "<inline>"
@@ -100,6 +138,16 @@ func compileWith(path, inline string, withHash bool, b *bundle.Bundle) (*ir.Work
 		if err := MergeBundlePrompts(pr.File, b); err != nil {
 			return nil, "", err
 		}
+	}
+
+	// Compute the workflow hash AFTER the bundle merge so bundle prompt
+	// changes invalidate `iterion resume`'s change-detection. Hashing
+	// just the .iter source bytes (the previous behaviour) let a bundle
+	// upgrade swap the prompt body without bumping the hash, defeating
+	// the whole point of the gate.
+	hash := ""
+	if withHash {
+		hash = computeWorkflowHash(src, b, pr.File)
 	}
 
 	cr := ir.Compile(pr.File)
