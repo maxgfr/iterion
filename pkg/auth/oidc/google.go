@@ -133,6 +133,14 @@ func (g *GoogleConnector) ExchangeCode(ctx context.Context, code, redirectURI, c
 	if info.Email == "" {
 		return ExternalUser{}, ErrEmailMissing
 	}
+	if !info.EmailVerified {
+		// Don't let an unverified address claim an iterion account —
+		// the uniqueness-by-email assumption in the user store would
+		// be broken by attackers who register the address at the IdP
+		// before its owner verifies it. Mirrors github.go's
+		// e.Verified gate in fetchPrimaryEmail.
+		return ExternalUser{}, ErrEmailNotVerified
+	}
 	return ExternalUser{
 		Provider: g.Name(),
 		Subject:  info.Sub,

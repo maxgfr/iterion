@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/backend/tool/privacy"
@@ -341,19 +342,24 @@ func (e *Engine) failRunErrWithCheckpoint(rs *runState, nodeID string, origErr e
 // ---------------------------------------------------------------------------
 
 // handleContextDoneWithCheckpoint handles context cancellation or deadline
-// exceeded, preserving the checkpoint so the run can be resumed.
+// exceeded, preserving the checkpoint so the run can be resumed. rs.ctx is
+// already done when we get here, so we detach for the store writes using
+// context.WithoutCancel — values (tenant/user identity for cloud mode) are
+// preserved but cancellation isn't. Bounded by a 5s timeout, well under the
+// typical k8s pod-termination grace period.
 func (e *Engine) handleContextDoneWithCheckpoint(rs *runState, nodeID string, ctxErr error) error {
+	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(rs.ctx), 5*time.Second)
+	defer cancel()
+
 	if errors.Is(ctxErr, context.Canceled) {
-		// Save checkpoint so the cancelled run can be resumed.
 		cp := buildCheckpoint(rs, nodeID)
-		if err := e.store.SaveCheckpoint(rs.ctx, rs.runID, cp); err != nil {
+		if err := e.store.SaveCheckpoint(storeCtx, rs.runID, cp); err != nil {
 			e.logger.Error("failed to save checkpoint on cancellation: %v", err)
 		}
-		// Keep "cancelled" status but with checkpoint preserved.
-		if err := e.store.UpdateRunStatus(rs.ctx, rs.runID, store.RunStatusCancelled, "run cancelled"); err != nil {
+		if err := e.store.UpdateRunStatus(storeCtx, rs.runID, store.RunStatusCancelled, "run cancelled"); err != nil {
 			e.logger.Error("failed to persist cancellation status: %v", err)
 		}
-		if err := e.emit(rs.ctx, rs.runID, store.EventRunCancelled, nodeID, map[string]interface{}{
+		if err := e.emit(storeCtx, rs.runID, store.EventRunCancelled, nodeID, map[string]interface{}{
 			"reason": "context cancelled",
 		}); err != nil {
 			e.logger.Warn("failed to emit run_cancelled event: %v", err)
@@ -361,8 +367,26 @@ func (e *Engine) handleContextDoneWithCheckpoint(rs *runState, nodeID string, ct
 		return fmt.Errorf("%w: interrupted at node %s", ErrRunCancelled, nodeID)
 	}
 	// context.DeadlineExceeded → save checkpoint and mark as resumable.
+	// Inline the failRunWithCheckpoint logic so it runs on storeCtx, not
+	// the already-expired rs.ctx.
 	reason := fmt.Sprintf("timeout: %s", ctxErr.Error())
-	return e.failRunWithCheckpoint(rs, nodeID, reason)
+	cp := buildCheckpoint(rs, nodeID)
+	if storeErr := e.store.FailRunResumable(storeCtx, rs.runID, cp, reason); storeErr != nil {
+		e.logger.Error("failed to persist resumable failure: %v", storeErr)
+		return e.failRun(storeCtx, rs.runID, nodeID, reason)
+	}
+	if err := e.emit(storeCtx, rs.runID, store.EventRunFailed, nodeID, map[string]interface{}{
+		"error":     reason,
+		"code":      string(ErrCodeExecutionFailed),
+		"resumable": true,
+	}); err != nil {
+		e.logger.Warn("failed to emit run_failed event: %v", err)
+	}
+	return &RuntimeError{
+		Code:    ErrCodeExecutionFailed,
+		Message: reason,
+		NodeID:  nodeID,
+	}
 }
 
 // wrapContextErr wraps a context error for branch-level reporting.

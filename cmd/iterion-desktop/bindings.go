@@ -204,7 +204,10 @@ func (a *App) RevealInFinder(path string) error {
 	case "darwin":
 		cmd = exec.Command("open", "-R", path)
 	case "windows":
-		cmd = exec.Command("explorer", "/select,", path)
+		// `explorer /select,<path>` must be a SINGLE argument — Windows
+		// shell32 doesn't join positional args around `/select,`, so
+		// passing them separately opens the folder without selecting.
+		cmd = exec.Command("explorer", "/select,"+path)
 	default:
 		cmd = exec.Command("xdg-open", filepath.Dir(path))
 	}

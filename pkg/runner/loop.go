@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -729,10 +730,42 @@ func (m *metricsEmitter) addTokens(backend, modelName, direction string, raw int
 	if n <= 0 || backend == "" {
 		return
 	}
-	if modelName == "" {
-		modelName = "unknown"
+	m.reg.LLMTokensTotal.WithLabelValues(backend, normalizeModelLabel(modelName), direction).Add(n)
+}
+
+// normalizeModelLabel bounds the prometheus `model` label cardinality
+// by stripping trailing date-style version suffixes (e.g. "-20260427",
+// "-2026-04-27") and truncating overlong identifiers. Without this,
+// label values churn every time a provider ships a new dated snapshot,
+// growing the time-series set without bound.
+func normalizeModelLabel(s string) string {
+	if s == "" {
+		return "unknown"
 	}
-	m.reg.LLMTokensTotal.WithLabelValues(backend, modelName, direction).Add(n)
+	// Strip trailing -<digits[-digits...]> patterns.
+	for {
+		i := strings.LastIndexByte(s, '-')
+		if i < 0 || i == len(s)-1 {
+			break
+		}
+		tail := s[i+1:]
+		alldigit := true
+		for _, r := range tail {
+			if r < '0' || r > '9' {
+				alldigit = false
+				break
+			}
+		}
+		if !alldigit {
+			break
+		}
+		s = s[:i]
+	}
+	const maxLen = 64
+	if len(s) > maxLen {
+		s = s[:maxLen]
+	}
+	return s
 }
 
 // toFloat coerces the JSON-decoded scalar (always float64 in Go's

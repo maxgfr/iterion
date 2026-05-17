@@ -241,6 +241,10 @@ func (s *Service) Refresh(ctx context.Context, presented, userAgent, ip string) 
 		return LoginResult{}, err
 	}
 	if u.Status == identity.UserStatusDisabled {
+		// Revoke the presented session so a disabled account doesn't
+		// leave a refresh-token slot alive until refreshTTL expires.
+		// Re-enabling the user later should not resurrect old sessions.
+		_, _ = s.sessions.RevokeSessionIfNotRevoked(ctx, prev.ID, now)
 		return LoginResult{}, ErrAccountDisabled
 	}
 	// Rotate. CAS-revoke prevents two parallel refresh calls from
@@ -309,9 +313,14 @@ func (s *Service) SwitchTeam(ctx context.Context, userID, teamID string) (Identi
 	if err != nil {
 		return Identity{}, "", time.Time{}, err
 	}
-	// Persist the choice as the user's new default.
+	// Persist the choice as the user's new default. The JWT is already
+	// issued and carries the chosen team — a persistence failure here
+	// means the next session won't auto-resume to this team, but the
+	// current login is still good. Log so an operator can investigate.
 	u.DefaultTeamID = teamID
-	_ = s.store.UpdateUser(ctx, u)
+	if uerr := s.store.UpdateUser(ctx, u); uerr != nil && s.logger != nil {
+		s.logger.Warn("auth: persist default team for user %s failed: %v", u.ID, uerr)
+	}
 	return id, tok, exp, nil
 }
 

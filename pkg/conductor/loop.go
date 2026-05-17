@@ -38,8 +38,14 @@ func (c *Conductor) tick(ctx context.Context) {
 	sortCandidates(candidates)
 
 	for _, iss := range candidates {
-		if !c.hasSlot(iss.WorkflowState, cfg) {
+		// Global cap full → no further candidate can run; stop scanning.
+		if len(c.state.running) >= cfg.Agent.MaxConcurrent {
 			break
+		}
+		// Per-state cap full → skip this candidate but keep scanning;
+		// other candidates may be in states that still have room.
+		if !c.hasSlot(iss.WorkflowState, cfg) {
+			continue
 		}
 		if c.state.isClaimed(iss.ID) {
 			continue

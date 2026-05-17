@@ -85,6 +85,15 @@ func (s *FilesystemRunStore) WriteAttachment(ctx context.Context, runID string, 
 		os.Remove(tmp.Name())
 		return fmt.Errorf("store: copy attachment: %w", err)
 	}
+	// fsync before rename: matches WriteFileAtomic semantics. Without
+	// this, a crash between rename landing in the directory and the
+	// data blocks being flushed can surface a zero-length or partial
+	// file at dstPath while meta.json records the full size + sha256.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return fmt.Errorf("store: sync attachment: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmp.Name())
 		return fmt.Errorf("store: close tempfile: %w", err)
@@ -329,7 +338,10 @@ func (s *FilesystemRunStore) presignKey() []byte {
 		h := sha256.Sum256([]byte("iterion-attachment-fallback:" + s.root))
 		buf = h[:]
 	}
-	_ = os.WriteFile(keyPath, buf, 0o600)
+	// Atomic write so a crash between truncate and the data flush
+	// doesn't leave a zero-byte file — that would silently invalidate
+	// every outstanding presigned URL on the next boot.
+	_ = writeFileAtomic(keyPath, buf, 0o600)
 	s.signingKey = buf
 	return s.signingKey
 }

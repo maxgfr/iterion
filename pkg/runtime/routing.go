@@ -300,10 +300,9 @@ func (e *Engine) execLLMRouterMulti(ctx context.Context, rs *runState, routerNod
 		branchID := fmt.Sprintf("branch_%s_%s", routerNodeID, edge.To)
 
 		go func(edge *ir.Edge, branchID string) {
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			// Recover from panics so a single branch doesn't crash the process.
+			// Register the panic-recovery defer FIRST so a panic anywhere
+			// in the goroutine — including during sem acquire — is
+			// caught and reported back to the drain loop.
 			defer func() {
 				if r := recover(); r != nil {
 					resultsCh <- &branchResult{
@@ -313,6 +312,8 @@ func (e *Engine) execLLMRouterMulti(ctx context.Context, rs *runState, routerNod
 					}
 				}
 			}()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
 			result := e.execBranch(branchCtx, rs, branchID, edge, parentOutputs, parentArtifacts, llmPreComputedConvergence)
 			if result != nil && result.err != nil && errors.Is(result.err, ErrBudgetExceeded) {

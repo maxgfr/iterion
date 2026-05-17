@@ -105,8 +105,15 @@ func (l *Lock) Release(ctx context.Context) error {
 
 // Unlock satisfies store.RunLock so the Mongo store can return *Lock
 // directly from LockRun without an adapter shim.
+//
+// Bounded by a 5s timeout so a NATS partition during shutdown can't
+// stall `defer lock.Unlock()` in the engine forever. NATS reconnect
+// logic caps the wait in practice, but the explicit deadline keeps
+// the shutdown path predictable.
 func (l *Lock) Unlock() error {
-	return l.Release(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return l.Release(ctx)
 }
 
 // LockProvider adapts a Conn for consumption by mongo.Config.

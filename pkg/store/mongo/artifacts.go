@@ -123,12 +123,16 @@ func (s *Store) ListArtifactVersions(ctx context.Context, runID, nodeID string) 
 	// filesystem store. A missing event is tolerated — we fall back
 	// to zero time, matching the filesystem reader's behaviour.
 	tsByVersion := map[int]any{}
-	cur, err := s.events.Find(ctx, bson.M{
+	cur, err := s.events.Find(ctx, withTenantFilter(ctx, bson.M{
 		"run_id":  runID,
 		"node_id": nodeID,
 		"type":    store.EventArtifactWritten,
-	}, options.Find().SetProjection(bson.M{"data.version": 1, "ts": 1}))
-	if err == nil {
+	}), options.Find().SetProjection(bson.M{"data.version": 1, "ts": 1}))
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("store/mongo: list versions %s/%s: events fold failed (timestamps will be zero): %v", runID, nodeID, err)
+		}
+	} else {
 		defer cur.Close(ctx)
 		for cur.Next(ctx) {
 			var doc struct {

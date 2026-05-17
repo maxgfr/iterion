@@ -98,10 +98,10 @@ func (e *Engine) execFanOut(ctx context.Context, rs *runState, routerNodeID stri
 		branchID := fmt.Sprintf("branch_%s_%s", routerNodeID, edge.To)
 
 		go func(edge *ir.Edge, branchID string) {
-			sem <- struct{}{}        // acquire semaphore slot
-			defer func() { <-sem }() // release
-
-			// Recover from panics so a single branch doesn't crash the process.
+			// Register the panic-recovery defer FIRST, before the
+			// semaphore acquire — otherwise a panic between the goroutine
+			// starting and the recover() defer being registered (e.g. if
+			// sem is ever closed externally) would be unrecoverable.
 			defer func() {
 				if r := recover(); r != nil {
 					resultsCh <- &branchResult{
@@ -111,6 +111,8 @@ func (e *Engine) execFanOut(ctx context.Context, rs *runState, routerNodeID stri
 					}
 				}
 			}()
+			sem <- struct{}{}        // acquire semaphore slot
+			defer func() { <-sem }() // release
 
 			result := e.execBranch(branchCtx, rs, branchID, edge, parentOutputs, parentArtifacts, preComputedConvergence)
 			// Cancel siblings to stop them calling executor.Execute when:

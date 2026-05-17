@@ -833,9 +833,10 @@ func (c *runConn) handleAnswer(env runWSEnvelope) {
 		c.sendError("invalid_file_path", err.Error(), env.AckID)
 		return
 	}
-	// Detach from WS-connection ctx: closing the browser tab must not
-	// cancel an in-flight resume. The service's manager owns lifecycle.
-	if _, err := c.server.runs.Resume(context.Background(), runview.ResumeSpec{
+	// Use authCtx (Background-derived, carries tenant/user identity) so
+	// closing the browser tab doesn't cancel the resume but the mongo
+	// tenant_id filter still applies on writes.
+	if _, err := c.server.runs.Resume(c.authCtx(), runview.ResumeSpec{
 		RunID:    c.runID,
 		FilePath: absPath,
 		Source:   req.Source,

@@ -120,7 +120,10 @@ func (g *GitHubConnector) ExchangeCode(ctx context.Context, code, redirectURI, c
 }
 
 func (g *GitHubConnector) fetchUser(ctx context.Context, accessToken string) (ExternalUser, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, githubUserURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, githubUserURL, nil)
+	if err != nil {
+		return ExternalUser{}, fmt.Errorf("oidc/github: build user req: %w", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
@@ -155,7 +158,10 @@ func (g *GitHubConnector) fetchUser(ctx context.Context, accessToken string) (Ex
 }
 
 func (g *GitHubConnector) fetchPrimaryEmail(ctx context.Context, accessToken string) (string, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, githubEmailsURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, githubEmailsURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("oidc/github: build emails req: %w", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")

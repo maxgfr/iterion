@@ -185,17 +185,23 @@ func StreamEvents(ctx context.Context, resp *http.Response, ch chan<- api.Stream
 	// InputTokens off MessageStart; this second emission overwrites
 	// the zero we sent at the top. Mirrors the Anthropic SDK shape
 	// where input-token counts arrive in the final usage payload.
+	// Guard each send: if ctx is done now, dropping these silently
+	// would zero out the cost accounting downstream.
 	if inputTokens > 0 {
-		send(api.StreamEvent{
+		if !send(api.StreamEvent{
 			Type:        api.EventMessageStart,
 			InputTokens: inputTokens,
-		})
+		}) {
+			return
+		}
 	}
 
-	send(api.StreamEvent{
+	if !send(api.StreamEvent{
 		Type:       api.EventMessageDelta,
 		StopReason: stopReason,
 		Usage:      api.UsageDelta{OutputTokens: outputTokens},
-	})
+	}) {
+		return
+	}
 	send(api.StreamEvent{Type: api.EventMessageStop})
 }

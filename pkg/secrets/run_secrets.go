@@ -202,9 +202,17 @@ func (s *MemoryRunSecretsStore) Get(ctx context.Context, id string) (RunSecretsR
 	return rec, nil
 }
 
-func (s *MemoryRunSecretsStore) Delete(_ context.Context, id string) error {
+func (s *MemoryRunSecretsStore) Delete(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	rec, ok := s.m[id]
+	if !ok {
+		return nil
+	}
+	if tenantID, has := store.TenantFromContext(ctx); has && rec.TenantID != "" && rec.TenantID != tenantID {
+		// Don't reveal cross-tenant ID existence — treat as not-found.
+		return nil
+	}
 	delete(s.m, id)
 	return nil
 }

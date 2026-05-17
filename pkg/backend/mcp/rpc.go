@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -19,11 +20,15 @@ type sdkClient struct {
 	cfg  *ServerConfig
 	info clientInfo
 
-	startOnce sync.Once
-	startMu   sync.Mutex // guards session for Close()
-	started   bool
-	startErr  error
-	session   *mcp.ClientSession
+	// startMu guards started, startErr, startInFlight, session. It is
+	// NOT held across the actual start() call — concurrent callers
+	// either wait on startInFlight (if a start is already running) or
+	// observe the cached result.
+	startMu       sync.Mutex
+	startInFlight chan struct{} // non-nil + open while a start is running
+	started       bool
+	startErr      error
+	session       *mcp.ClientSession
 }
 
 func newSDKClient(cfg *ServerConfig, info clientInfo) *sdkClient {
@@ -132,22 +137,57 @@ func (c *sdkClient) Close() error {
 }
 
 func (c *sdkClient) ensureStarted(ctx context.Context) error {
-	// Use sync.Once so concurrent ListTools/CallTool callers don't
-	// serialise on a mutex held across slow I/O (HTTP dial / process
-	// spawn). Once.Do is safe for concurrent callers and runs the
-	// init function exactly once.
-	c.startOnce.Do(func() {
-		err := c.start(ctx)
-		c.startMu.Lock()
-		c.startErr = err
-		if err == nil {
-			c.started = true
-		}
-		c.startMu.Unlock()
-	})
+	// Concurrent ListTools/CallTool callers must not serialise on a
+	// mutex held across slow I/O (HTTP dial / process spawn). We also
+	// must not permanently cache a context.DeadlineExceeded from one
+	// caller's short-lived ctx (e.g. a 5s HealthCheck Ping) — the next
+	// caller with a longer-lived ctx should get a fresh attempt.
 	c.startMu.Lock()
-	defer c.startMu.Unlock()
-	return c.startErr
+	if c.started {
+		c.startMu.Unlock()
+		return nil
+	}
+	if c.startInFlight != nil {
+		// Another goroutine is starting; wait for it.
+		ch := c.startInFlight
+		c.startMu.Unlock()
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		c.startMu.Lock()
+		defer c.startMu.Unlock()
+		return c.startErr
+	}
+	if c.startErr != nil && !isContextErr(c.startErr) {
+		// Prior permanent failure — don't retry.
+		err := c.startErr
+		c.startMu.Unlock()
+		return err
+	}
+	// We're the starter. Clear any cached context error so this attempt
+	// is observed regardless of outcome.
+	c.startErr = nil
+	ch := make(chan struct{})
+	c.startInFlight = ch
+	c.startMu.Unlock()
+
+	err := c.start(ctx)
+
+	c.startMu.Lock()
+	c.startErr = err
+	if err == nil {
+		c.started = true
+	}
+	c.startInFlight = nil
+	c.startMu.Unlock()
+	close(ch)
+	return err
+}
+
+func isContextErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (c *sdkClient) start(ctx context.Context) error {
