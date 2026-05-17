@@ -106,8 +106,10 @@ func extractBearer(r *http.Request) string {
 		return c.Value
 	}
 	// Browsers can't attach Authorization headers to a WS upgrade,
-	// so we accept ?t=<jwt> on /api/ws/* (same-origin only).
-	if t := r.URL.Query().Get("t"); t != "" && strings.HasPrefix(r.URL.Path, "/api/ws/") {
+	// so we accept ?t=<jwt> on the WS endpoints (same-origin only).
+	// We match both /api/ws (the file-event hub at exactly that path)
+	// and /api/ws/* (per-run streams under /api/ws/runs/<id>).
+	if t := r.URL.Query().Get("t"); t != "" && (r.URL.Path == "/api/ws" || strings.HasPrefix(r.URL.Path, "/api/ws/")) {
 		return t
 	}
 	return ""
