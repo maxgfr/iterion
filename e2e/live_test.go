@@ -3109,6 +3109,7 @@ func TestLive_VibeFeatureDev(t *testing.T) {
 	}
 	loadDotEnv(t)
 	requireCLI(t, "claude")
+	requireBinaryInPath(t, "docker")
 	requireEnv(t, "OPENAI_API_KEY")
 
 	wf := compileFixture(t, "bots/vibe_feature_dev.bot")
@@ -3221,6 +3222,7 @@ func TestLive_VibeReviewAlternating(t *testing.T) {
 	}
 	loadDotEnv(t)
 	requireCLI(t, "claude")
+	requireBinaryInPath(t, "docker")
 	requireEnv(t, "OPENAI_API_KEY")
 
 	wf := compileFixture(t, "bots/whole_improve_loop.bot")
@@ -3541,6 +3543,7 @@ func TestLive_VibeFeatureDev_Real(t *testing.T) {
 	}
 	loadDotEnv(t)
 	requireCLI(t, "claude")
+	requireBinaryInPath(t, "docker")
 	requireEnv(t, "OPENAI_API_KEY")
 
 	wf := compileFixture(t, "bots/vibe_feature_dev.bot")
@@ -3624,6 +3627,7 @@ func TestLive_VibeReviewAlternating_Real(t *testing.T) {
 	}
 	loadDotEnv(t)
 	requireCLI(t, "claude")
+	requireBinaryInPath(t, "docker")
 	requireEnv(t, "OPENAI_API_KEY")
 
 	wf := compileFixture(t, "bots/whole_improve_loop.bot")
