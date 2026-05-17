@@ -286,6 +286,12 @@ type Server struct {
 	// shared with the runtime. Nil disables the Browser pane's live
 	// mode (the iframe + screenshot scrubber paths still work).
 	browserSessions mcp.BrowserRegistry
+
+	// BoardMCPTokens authorizes sandboxed bots that hit the board MCP
+	// HTTP endpoint. Backends call Register/Revoke around each run.
+	// Non-nil iff cfg.NativeTrackerStore is non-nil (handler is only
+	// mounted when the board exists).
+	BoardMCPTokens *BoardMCPTokenRegistry
 }
 
 // New creates a new editor server.
@@ -332,6 +338,9 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		oauthStore:      cfg.OAuthForfait,
 		httpClient:      &http.Client{Timeout: 15 * time.Second},
 		browserSessions: cfg.BrowserRegistry,
+	}
+	if cfg.NativeTrackerStore != nil {
+		s.BoardMCPTokens = NewBoardMCPTokenRegistry()
 	}
 	s.hub = NewHub(logger)
 	go s.hub.Run()
@@ -605,6 +614,11 @@ func (s *Server) routes() {
 	// returns 404.
 	if s.cfg.NativeTrackerStore != nil {
 		s.cfg.NativeTrackerStore.RegisterRoutes(s.mux, "/api/v1/native")
+		// Board MCP over HTTP for sandbox-running bots. The runtime
+		// registers per-run tokens on s.BoardMCPTokens via the board
+		// handle returned at New(); bots in containers reach this
+		// endpoint via the host loopback proxy.
+		RegisterBoardMCPRoutes(s.mux, "/api/v1/mcp/board", s.cfg.NativeTrackerStore, s.BoardMCPTokens)
 	}
 	if s.cfg.Conductor != nil {
 		s.cfg.Conductor.RegisterRoutes(s.mux, "/api/v1/conductor")

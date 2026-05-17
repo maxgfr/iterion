@@ -119,6 +119,20 @@ type Task struct {
 	// explicitly whenever they want a specific store binding.
 	StoreDir string
 
+	// BoardHTTPEndpoint is the URL of the iterion-host board MCP HTTP
+	// endpoint, used for sandboxed runs that can't reach the host
+	// `iterion __mcp-board` subprocess via stdio. When non-empty AND the
+	// task is sandboxed AND has board capabilities, backends register an
+	// HTTP MCP server pointing here, with BoardRunToken sent as the
+	// X-Iterion-Run header. Empty disables the HTTP path (stdio path
+	// still works for non-sandboxed runs).
+	BoardHTTPEndpoint string
+
+	// BoardRunToken is the ephemeral token registered with the iterion
+	// server's BoardMCPTokens registry for this run. The runtime
+	// generates it, registers grants, and revokes on run completion.
+	BoardRunToken string
+
 	// ToolDefs provides full tool definitions for backends that manage tool
 	// loops internally (e.g. claw). CLI-based backends ignore this field.
 	ToolDefs []ToolDef
