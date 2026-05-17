@@ -48,7 +48,6 @@ type Conductor struct {
 	runner  Runner
 
 	workspaces *Workspaces
-	hooks      Hooks
 	logger     *iterlog.Logger
 	storeDir   string
 	hostMarker string
@@ -63,6 +62,13 @@ type Conductor struct {
 	stopOnce  sync.Once
 	stop      chan struct{}
 	done      chan struct{}
+	// workersWG counts active worker goroutines spawned by runWorker.
+	// Stop() blocks on this AFTER the actor exits, so the EngineRunner
+	// the workers still reference isn't released until they've all
+	// returned — closing the F-CD-1 window where Runner.Close ran
+	// while workers were still inside Runner.Dispatch reading the
+	// extracted bundle dir.
+	workersWG sync.WaitGroup
 
 	// paused, when true, makes tick() skip new dispatches without
 	// touching runs in flight or scheduled retries. Toggled via the
@@ -97,7 +103,6 @@ func New(opts Options) (*Conductor, error) {
 		tracker:    opts.Tracker,
 		runner:     opts.Runner,
 		workspaces: opts.Workspaces,
-		hooks:      opts.Config.Hooks,
 		logger:     opts.Logger,
 		storeDir:   opts.StoreDir,
 		hostMarker: opts.HostMarker,
@@ -121,12 +126,17 @@ func (c *Conductor) Start(ctx context.Context) {
 }
 
 // Stop signals the actor to exit and waits for it. Safe to call more
-// than once.
+// than once. After the actor exits, also blocks until every worker
+// goroutine spawned by runWorker returns — Manager.Stop closes the
+// EngineRunner immediately after, and that runner's bundleClean()
+// would otherwise race the workers still inside Runner.Dispatch
+// (see F-CD-1).
 func (c *Conductor) Stop() {
 	c.stopOnce.Do(func() {
 		close(c.stop)
 	})
 	<-c.done
+	c.workersWG.Wait()
 }
 
 // Refresh enqueues an immediate poll tick, bypassing the regular cadence.
