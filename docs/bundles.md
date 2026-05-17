@@ -125,8 +125,17 @@ locally).
 When `iterion run my.botz` (or a directory bundle) executes:
 
 1. **Skills** in `skills/` are copied into `<workDir>/.claude/skills/`
-   (workspace files take precedence on name collision — shadowed
-   bundle skills are warn-logged).
+   with marker-aware collision handling
+   (`<workDir>/.claude/skills/.iterion-managed/<name>.sha256` records
+   the hash of each file we last mirrored):
+   - File doesn't exist → copy, record marker.
+   - File exists & content matches source → no-op (already current).
+   - File exists & content matches marker → refresh from source (we
+     wrote it last, user hasn't customised — fixes the
+     v0.1.0-shadows-bundle-upgrade trap).
+   - File exists & content matches neither → SHADOW with a warning
+     (genuine user customisation OR a different bundle owns the
+     name; "workspace wins" contract preserved).
 2. **Prompts** in `prompts/*.md` are merged into the AST `prompts:`
    table **before** static validation runs, so node-level
    `system:`/`user:` references against bundle filenames type-check.
