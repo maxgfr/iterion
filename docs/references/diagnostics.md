@@ -14,7 +14,7 @@ All diagnostic codes emitted during compilation (`ir.Compile`) and validation (`
 | **C006** | error | No workflow found | The file has no `workflow` declaration | Add a `workflow name:` block |
 | **C007** | error | Multiple workflows | More than one `workflow` block found | V1 supports one workflow per file — remove extras |
 | **C008** | error | Missing entry node | The `entry:` node name doesn't match any declared node | Fix the entry name or declare the node |
-| **C018** | error | Missing model or backend | An agent/judge has neither `model:` nor `backend:`, and `ITERION_DEFAULT_SUPERVISOR_MODEL` is not set | Add `model: "..."` or `backend: "..."` to the node |
+| **C018** | error/warning | Missing model/backend or LLM interaction requirements | Agents/judges without `model:` or `backend:` are errors only when no default supervisor model and no auto-detectable runtime credentials are available. `mode: llm` routers without either value produce a warning and use the built-in runtime default. Human nodes using `interaction: llm` or `interaction: llm_or_human` must set `model:` or `interaction_model:` and must declare `output:`. | Add `model: "..."`, `backend: "..."`, or configure detectable credentials/defaults for agents/judges; set explicit model/backend for LLM routers when you do not want runtime defaulting; for LLM-backed human nodes add the interaction model and output schema. |
 | **C024** | error | Duplicate MCP server | A `mcp_server` name is declared more than once | Use unique names for each MCP server |
 | **C025** | error | Invalid MCP server config | MCP server misconfigured (e.g., stdio without command, http without url) | Match properties to transport type: stdio needs `command`, http needs `url` |
 | **C030** | warning | Codex backend discouraged | A node uses `backend: "codex"` | Codex is still supported but has limitations (cannot configure tool set, fills its own context window, weaker integration). Prefer `backend: "claude_code"` for tool-using agents or `claw` (default) with an OpenAI model (`model: "openai/gpt-5.4-mini"`) for judges/reviewers. |
@@ -22,6 +22,8 @@ All diagnostic codes emitted during compilation (`ir.Compile`) and validation (`
 | **C040** | error | Expression failed to parse | An expression in a `compute` node, in a quoted `when "..."` clause, or in a template ref isn't valid | Check operators, parentheses, namespace prefixes (`vars / input / outputs / artifacts / loop / run`), and built-in calls (`length`, `concat`, `unique`, `contains`) |
 | **C041** | error | Duplicate node id | Two declarations share the same node name across agents/judges/routers/humans/tools/computes | Rename one — node ids are a single global namespace |
 | **C042** | error | Reserved node name | A user node is named `done` or `fail` (those are reserved terminal targets) | Pick a different node name |
+| **C044** | error | Invalid sandbox mode | A node or workflow's `sandbox:` mode is outside the accepted set (`""`, `none`, `auto`, `inline`); or inline mode is missing an image/build or sets both | Set `sandbox:` to `auto`, `none`, `inline`, or omit it. Block-form sandbox config with `image:`, `build:`, `env:`, `mounts:`, or `network:` compiles as inline mode unless `mode:` is specified; inline requires exactly one of `image:` or `build:`. |
+| **C045** | error | Sandbox auto without config | Reserved diagnostic code; not currently emitted by compile/validation. Normal CLI/runtime auto mode supplies a default `iterion-sandbox-slim:<version>` fallback when no `.devcontainer/devcontainer.json` is present | No compile-time action. If an embedder disables the default image and runtime reports a missing devcontainer, add `.devcontainer/devcontainer.json`, provide a default image, or use inline `sandbox:` with `image:`/`build:` (see [docs/sandbox.md](../sandbox.md)). |
 
 ## Validation Diagnostics
 
@@ -52,6 +54,15 @@ All diagnostic codes emitted during compilation (`ir.Compile`) and validation (`
 | **C037** | warning | Node max_tokens exceeds workflow budget | A node-level `max_tokens` is greater than the workflow's `budget.max_tokens` | Lower the node cap, or raise the workflow budget |
 | **C038** | error | Unsupported MCP auth type | `mcp_server.auth.type` is something other than `oauth2` (the only wired type) | Drop the `auth:` block, or change `type` to `oauth2` |
 | **C043** | error | Invalid compaction values | `compaction.threshold` is outside `(0, 1]` or `compaction.preserve_recent` is `< 1` | Use a fraction like `0.85` for `threshold` and an integer `>= 1` for `preserve_recent`; omit either to inherit the default |
+| **C050** | error | Duplicate attachment | An attachment name is declared more than once across file-level and workflow-level `attachments:` blocks | Rename the duplicate, or merge the definitions |
+| **C051** | error | Attachment / var name collision | An attachment name collides with a declared `vars:` entry | Rename one of them — attachments and vars share a single template namespace |
+| **C052** | error | Invalid attachment MIME | An `accept_mime:` entry is not in `type/subtype` form (e.g. `image/png`, `application/pdf`) | Use `type/subtype` MIME values, optionally with `*` subtype wildcards |
+| **C053** | error | Unknown attachment reference | `{{attachments.X}}` references an attachment that is not declared in a file-level or workflow-level `attachments:` block | Declare the attachment, or fix the name |
+| **C054** | error | Unknown attachment sub-field | `{{attachments.<name>.<subfield>}}` uses a sub-field the runtime does not expose | Drop the sub-field or pick a supported one (`path`, `url`, `mime`, `size`, `sha256`) |
+| **C060** | error | Playwright MCP server requires browser-capable sandbox image | An MCP server with the Playwright transport is configured but the workflow's sandbox image is not browser-capable | Use the published `iterion-sandbox-full` image (or another image with Playwright browser deps), or remove the Playwright MCP server |
+| **C070** | error | Preset references unknown variable | A `presets:` entry sets a key that does not match any name in `vars:` | Add the variable to `vars:`, or remove/rename the preset key |
+| **C071** | error | Preset value type mismatch | A `presets:` value's type (string/int/bool/list) does not match the declared `vars:` type | Cast the value to the declared type, or change the var's type |
+| **C072** | error | Duplicate preset name | The same preset name appears more than once in the `presets:` block | Rename or merge the duplicate preset |
 
 > **Code reuse note:** `C030` is currently emitted with two distinct
 > meanings — the compile-time *Codex backend discouraged* warning shown
@@ -77,4 +88,4 @@ Nodes that receive from multiple branches (via `await:` or fan-out) cannot use `
 If you have `when approved`, you need either `when not approved` or an unconditional edge from the same source. Conditions must be exhaustive.
 
 **"I get C018 (missing model or backend)"**
-Every agent and judge needs either `model: "..."` or `backend: "..."`. You can also set the `ITERION_DEFAULT_SUPERVISOR_MODEL` environment variable as a fallback.
+For agents and judges, add `model: "..."` or `backend: "..."`, set `ITERION_DEFAULT_SUPERVISOR_MODEL`, or configure detectable backend credentials. For `mode: llm` routers, either set an explicit `model:`/`backend:` or accept the warning and runtime default. For human nodes with `interaction: llm` or `interaction: llm_or_human`, add `model:` or `interaction_model:` and declare an `output:` schema.

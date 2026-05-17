@@ -38,7 +38,7 @@ echo "[iterion] preview_url=https://my-preview.example.com"
   refuses RFC1918, link-local, cloud-metadata, and `*.svc.cluster.local`
   addresses to mitigate SSRF.
 
-The full demo is `examples/preview_url_demo.iter`.
+The full demo is archived at [`.archive/examples/preview_url_demo.iter`](../.archive/examples/preview_url_demo.iter); see also [`.archive/examples/browser_demo.iter`](../.archive/examples/browser_demo.iter).
 
 ## Capturing screenshots
 

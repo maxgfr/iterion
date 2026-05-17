@@ -17,7 +17,7 @@ iterion editor --no-browser        # Don't auto-open browser
 - **Node library** — Drag pre-built node types (agent, judge, router, join, human, tool) onto the canvas
 - **Property editor** — Edit node properties, schemas, prompts, and edge conditions in a side panel
 - **Source view** — Split-pane view showing the raw workflow source (`.iter` / `.bot`) alongside the visual graph
-- **Live diagnostics** — Real-time validation errors and warnings as you edit (codes C001–C043)
+- **Live diagnostics** — Real-time validation errors and warnings as you edit (codes C001–C072, sparse)
 - **File watching** — Detects external file changes via WebSocket and syncs automatically
 - **Undo/redo** — Full edit history
 - **Run console** — Launch a workflow from the editor and watch events stream live

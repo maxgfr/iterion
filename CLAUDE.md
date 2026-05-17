@@ -103,9 +103,20 @@ Other top-level directories: `editor/` (React/Vite frontend), `examples/` (.iter
 - `pkg/conductor/` — Long-running dispatcher: native kanban store, polling actor, tracker adapters (native, github, forgejo)
   - `tracker/` — `Tracker` interface + normalized `Issue` type + GitHub/Forgejo adapters
   - `native/` — Filesystem-backed kanban (board.json, issues/, events.jsonl) + REST + adapter
-- `pkg/cli/` — CLI command implementations (init, validate, run, inspect, resume, diagram, editor, conduct, issue, version)
+- `pkg/cli/` — CLI command implementations (init, validate, run, inspect, resume, diagram, editor, report, conduct, issue, bench, bundle, sandbox, version)
 - `pkg/benchmark/` — Metrics collection and reporting
 - `pkg/log/` — Leveled logger (error, warn, info, debug, trace) — public so e2e tests can construct it
+- `pkg/auth/` — Operator authentication primitives (SSO, session cookies) for cloud-mode endpoints
+- `pkg/bundle/` — `.botz` bundle loader (workflow + skills + recipes packaged together)
+- `pkg/cloud/` — Cloud-mode runtime wiring (queue dispatch, runner orchestration, multitenancy)
+- `pkg/config/` — Config-file loader (`iterion conduct` YAML + cloud config)
+- `pkg/git/` — Git helpers (worktree create/finalize, branch detection, fast-forward checks)
+- `pkg/identity/` — Operator identity types shared between auth, cloud and conductor
+- `pkg/queue/` — NATS-backed work queue used by cloud-mode dispatcher → runner pods
+- `pkg/runner/` — Cloud runner pod logic: claim a queued run, execute, report status back
+- `pkg/runview/` — Read-only run console API (REST + WS) consumed by the editor SPA
+- `pkg/sandbox/` — Sandbox engine: Docker/Kubernetes drivers, devcontainer parsing, CONNECT proxy
+- `pkg/secrets/` — Secret resolution (env / file / KMS) shared across backends and sandbox
 - `pkg/internal/` — Internal utilities (not importable outside `pkg/`)
   - `appinfo/` — Build-time version/commit injection (LDFLAGS targets)
 
@@ -116,14 +127,14 @@ Other top-level directories: `editor/` (React/Vite frontend), `examples/` (.iter
 
 ## Architecture
 
-`.iter` files are parsed into an **AST**, compiled into an **IR** (directed graph of nodes and edges), validated, then executed by the **runtime** engine. Nodes include Agent (LLM), Judge, Router, Join, Human (pause/resume), Tool, and terminal nodes (Done/Fail). The runtime supports parallel branch scheduling, loop detection, budget enforcement, and resumable execution.
+`.iter` files are parsed into an **AST**, compiled into an **IR** (directed graph of nodes and edges), validated, then executed by the **runtime** engine. Nodes include Agent (LLM), Judge, Router, Human (pause/resume), Tool, Compute, and terminal nodes (Done/Fail). Parallel branches converge on downstream nodes via `await: wait_all` or `await: best_effort`; there is no top-level Join node. The runtime supports parallel branch scheduling, loop detection, budget enforcement, and resumable execution.
 
 ### Compilation Pipeline
 
 ```
 .iter source → Lexer (indent-sensitive tokens) → Parser (recursive-descent) → AST
   → ir.Compile() → IR Workflow (nodes + edges + schemas + prompts + budget)
-  → ir.Validate() → Diagnostics (codes C001–C019: reachability, routing, cycles, etc.)
+  → Diagnostics from ir.Compile() / ir.Validate() (sparse codes C001–C072: compile errors, reachability, routing, cycles, attachments, presets, etc.)
   → runtime.Engine.Run() → execution with events, budget, and persistence
 ```
 
@@ -134,15 +145,15 @@ Other top-level directories: `editor/` (React/Vite frontend), `examples/` (.iter
 | **Agent** | LLM node with tools, structured I/O, optional delegation (claude_code, codex) |
 | **Judge** | LLM node producing verdicts (typically no tools) |
 | **Router** | Routing node with 4 modes: `fan_out_all`, `condition`, `round_robin`, `llm` (see `docs/routers.md`) |
-| **Join** | Branch aggregation: `wait_all` or `best_effort` strategy, with `require` list |
-| **Human** | Pause/resume: `pause_until_answers`, `auto_answer`, or `auto_or_pause` mode |
+| **Human** | Pause/resume via `interaction: human` (default for human nodes); optional `interaction: llm` or `llm_or_human` can auto-answer or escalate |
 | **Tool** | Direct shell command execution (no LLM) |
+| **Compute** | Deterministic expression node for derived structured output (no LLM, no shell) |
 | **Done** | Terminal: workflow success |
 | **Fail** | Terminal: workflow failure |
 
 ### DSL Quick Reference
 
-**Top-level blocks:** `vars:`, `attachments:`, `prompt <name>:`, `schema <name>:`, node declarations (`agent`, `judge`, `router`, `join`, `human`, `tool`), `workflow <name>:`
+**Top-level blocks:** `vars:`, `attachments:`, `prompt <name>:`, `schema <name>:`, node declarations (`agent`, `judge`, `router`, `human`, `tool`, `compute`), `workflow <name>:`
 
 **Edge syntax:**
 ```
@@ -154,6 +165,8 @@ src -> dst with {field: "{{ref}}"}      # data mapping
 ```
 
 **Reference syntax:** `{{input.field}}`, `{{vars.name}}`, `{{outputs.node_id}}`, `{{outputs.node_id.field}}`, `{{artifacts.name}}`
+
+**Convergence:** nodes with multiple incoming branches declare `await: wait_all` or `await: best_effort`; aggregation is a property of the downstream agent/judge/human/tool/compute node, not a separate `join` declaration.
 
 **Budget block:** `max_parallel_branches`, `max_duration`, `max_cost_usd`, `max_tokens`, `max_iterations`
 
@@ -168,7 +181,7 @@ Three backends are wired:
 
 ### Sandbox
 
-Workflows can opt into per-run container isolation via `sandbox: auto` (reads `.devcontainer/devcontainer.json`, falling back to a published `iterion-sandbox-slim:<version>` image when no devcontainer is present) or `sandbox: none` (explicit opt-out). When active, claude_code and tool nodes execute through `docker exec` against a long-lived container that bind-mounts the worktree at `/workspace`; an HTTP CONNECT proxy on the host enforces a network allowlist (default preset: LLM endpoints + npm/pypi/golang + github/gitlab/bitbucket + Nix cache). The `claw` backend cannot be sandboxed yet — Phase 4 will split it via a `cmd/iterion-claw-runner/` sub-binary. See [docs/sandbox.md](docs/sandbox.md) for the full reference (incl. the published `iterion-sandbox-slim`/`iterion-sandbox-full` variants and the `--sandbox-default-image` override) and `iterion sandbox doctor` for host diagnostics.
+Workflows can opt into per-run container isolation via `sandbox: auto` (reads `.devcontainer/devcontainer.json`, falling back to a published `iterion-sandbox-slim:<version>` image when no devcontainer is present), block-form inline configuration (`sandbox:` with `image:` or `build:`), or `sandbox: none` (explicit opt-out). When active, claude_code, claw, and tool nodes execute against a long-lived container that bind-mounts the worktree at `/workspace`; an HTTP CONNECT proxy on the host enforces a network allowlist (default preset: LLM endpoints + npm/pypi/golang + github/gitlab/bitbucket + Nix cache). Sandboxed `claw` calls are routed through the hidden `iterion __claw-runner` subprocess inside the container, so the `iterion` binary must be present on the container PATH (or bind-mounted by the host when available). See [docs/sandbox.md](docs/sandbox.md) for the full reference (incl. the published `iterion-sandbox-slim`/`iterion-sandbox-full` variants and the `--sandbox-default-image` override) and `iterion sandbox doctor` for host diagnostics.
 
 V2-6 wires `sandbox.build:` via `docker buildx build` on the local docker driver — BuildKit lives inside the Docker daemon, so no extra service. The kubernetes driver rejects `sandbox.build:` by design; cloud workflows reference pre-built images via `sandbox.image:` with a CI-built digest (production path). See [docs/sandbox.md](docs/sandbox.md#buildkit-local-docker-only--v2-6).
 
@@ -184,7 +197,7 @@ V2-6 wires `sandbox.build:` via `docker buildx build` on the local docker driver
 
 - **RuntimeError** (`pkg/runtime/errors.go`) — structured error with `ErrorCode`, `Message`, `NodeID`, `Hint`, `Cause`
   - Codes: `NODE_NOT_FOUND`, `NO_OUTGOING_EDGE`, `LOOP_EXHAUSTED`, `BUDGET_EXCEEDED`, `EXECUTION_FAILED`, `WORKSPACE_SAFETY`, `TIMEOUT`, `CANCELLED`, `JOIN_FAILED`, `RESUME_INVALID`
-- **Diagnostics** (`pkg/dsl/ir/validate.go`) — compile-time warnings/errors with codes C001–C019 (unknown refs, routing issues, unreachable nodes, undeclared cycles, etc.)
+- **Diagnostics** (`pkg/dsl/ir/compile.go`, `pkg/dsl/ir/validate.go`) — compile-time warnings/errors with sparse codes C001–C072 (unknown refs, routing issues, unreachable nodes, undeclared cycles, attachments, presets, etc.)
 - **Sentinel errors**: `ErrRunPaused` (resumable), `ErrRunCancelled` (resumable with checkpoint), `ErrBudgetExceeded`
 - **Resumable failures**: Most runtime failures produce `failed_resumable` status with a checkpoint. See `docs/resume.md` for the exhaustive matrix.
 
@@ -201,7 +214,7 @@ V2-6 wires `sandbox.build:` via `docker buildx build` on the local docker driver
 
 The checkpoint embedded in `run.json` is the authoritative source for resume — events are observational only. See `docs/persisted-formats.md` for field semantics.
 
-**Run statuses:** `running` → `paused_waiting_human` → `finished` | `failed` | `failed_resumable` | `cancelled`
+**Run statuses:** `queued` (cloud mode only — submitted to the NATS queue, not yet claimed by a runner pod) → `running` → `paused_waiting_human` → `finished` | `failed` | `failed_resumable` | `cancelled`
 
 **Key event types:** `run_started`, `node_started`, `llm_request`, `llm_retry`, `tool_called`, `artifact_written`, `human_input_requested`, `run_paused`, `run_resumed`, `join_ready`, `edge_selected`, `budget_warning`, `budget_exceeded`, `run_finished`, `run_failed`
 
@@ -223,7 +236,7 @@ See `docs/resume.md` for the exhaustive failure matrix.
 
 ### Concurrency
 
-- **Fan-out/join**: Router `fan_out_all` spawns parallel branches, Join aggregates results
+- **Fan-out/convergence**: Router `fan_out_all` spawns parallel branches; downstream nodes aggregate via `await: wait_all` or `await: best_effort`
 - **Semaphore**: buffered channel enforces `max_parallel_branches` budget
 - **Workspace safety**: only one mutating branch allowed (agents/humans with tools); multiple read-only branches OK
 - **Shared budget**: mutex-protected token/cost/duration tracking across all branches
@@ -372,7 +385,16 @@ iterion editor [--port] [--dir]         # Launch visual workflow editor
 iterion report --run-id <id> [--store-dir] [--output]  # Generate chronological run report
 iterion conduct <config.yaml> [--port]  # Long-running dispatcher (tracker → workflow per issue)
 iterion issue create|list|show|move|update|close|board  # Native kanban tracker
+iterion bench asymptote [flags]         # Asymptote benchmark (see docs/asymptote-bench.md)
+iterion bundle init|pack                # Scaffold or pack a .botz bundle (see docs/bundles.md)
+iterion sandbox doctor                  # Diagnose host sandbox prerequisites (see docs/sandbox.md)
+iterion migrate to-cloud [flags]        # Migrate a local store into a cloud (Mongo + S3) backend
+iterion server [--port] [--store-dir]   # HTTP server (run console + editor SPA), without the editor launcher
 iterion version                         # Print version
+
+# Operational runner and hidden subprocess entry points:
+# `iterion runner`, `iterion __claw-runner`, `iterion __mcp-ask-user`, `iterion __mcp-control`
+# Only the double-underscore commands are hidden internal subprocess entry points.
 ```
 
 Global flags: `--json` (machine output), `--help`

@@ -20,7 +20,7 @@
 
 1. **Parse** (`pkg/dsl/parser/`) — Indent-sensitive lexer + recursive-descent parser produces an AST
 2. **Compile** (`pkg/dsl/ir/compile.go`) — Transforms AST to IR, resolves template references, binds schemas and prompts
-3. **Validate** (`pkg/dsl/ir/validate.go`) — Static analysis with 43 diagnostic codes (C001–C043): reachability, routing correctness, cycle detection, schema validation, and more
+3. **Validate** (`pkg/dsl/ir/validate.go`) — Static analysis with diagnostic codes spanning C001–C072 (sparse, ~35 codes today): reachability, routing correctness, cycle detection, schema validation, and more. See [references/diagnostics.md](references/diagnostics.md) for the full table.
 
 ## Runtime Engine
 
@@ -28,12 +28,12 @@
 ┌─────────────────────────────────────────────────┐
 │                 Runtime Engine                   │
 │                                                  │
-│  ┌──────┐   ┌───────┐   ┌────────┐   ┌──────┐  │
-│  │Agent │   │ Judge │   │ Router │   │ Join │  │
-│  │      │   │       │   │        │   │      │  │
-│  │ LLM  │   │ LLM   │   │fan_out │   │merge │  │
-│  │+tools│   │verdict│   │  cond  │   │wait  │  │
-│  └──────┘   └───────┘   └────────┘   └──────┘  │
+│  ┌──────┐   ┌───────┐   ┌────────┐   ┌───────┐ │
+│  │Agent │   │ Judge │   │ Router │   │Compute│ │
+│  │      │   │       │   │        │   │       │ │
+│  │ LLM  │   │ LLM   │   │fan_out │   │ expr  │ │
+│  │+tools│   │verdict│   │  cond  │   │derive │ │
+│  └──────┘   └───────┘   └────────┘   └───────┘ │
 │                                                  │
 │  ┌──────┐   ┌───────┐   ┌────────┐   ┌──────┐  │
 │  │Human │   │ Tool  │   │  Done  │   │ Fail │  │
@@ -53,7 +53,7 @@ The engine walks the IR graph, executing nodes and selecting edges. Key runtime 
 - **Checkpoint-based pause/resume** — the checkpoint in `run.json` is the authoritative resume source
 - **Event sourcing** — every step is recorded in `events.jsonl` for observability and debugging
 
-**Run lifecycle:** `running` → `paused_waiting_human` → `running` → `finished` | `failed` | `cancelled`
+**Run lifecycle:** local runs start as `running`; cloud-submitted runs may start as `queued` before a runner claims them. Runs may pause as `paused_waiting_human` and later resume to `running`, then finish as `finished`, `failed`, `failed_resumable` (checkpointed failure that can be resumed), or `cancelled`.
 
 ## Persistence
 

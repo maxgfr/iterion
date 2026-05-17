@@ -23,8 +23,9 @@ attachments:
 ```
 
 The block is valid at file-level (parallel to `vars:`) and
-workflow-level (inside a `workflow <name>:` body). Workflow-level
-declarations override file-level ones with the same name.
+workflow-level (inside a `workflow <name>:` body). Attachment names
+must be unique across file and workflow scopes; a duplicate emits
+C050 and the later declaration is skipped.
 
 | Field          | Required | Notes                                                                                       |
 | -------------- | -------- | ------------------------------------------------------------------------------------------- |
@@ -95,14 +96,19 @@ Unreferenced uploads are reaped after one hour (`uploadStagingTTL`).
 
 ### Limits
 
-The server applies four limits, each adjustable via flags:
+The upload handler enforces four limits. In local editor mode,
+`iterion editor` exposes flags for these settings; the cloud
+`iterion server` command currently exposes only its server flags
+(port/bind/dir/store-dir/config), so upload limits there use the
+server configuration defaults unless an embedder wires explicit
+`server.Config` values.
 
-| Flag                       | Default (web/cloud) | Default (desktop) |
-| -------------------------- | -------------------- | ----------------- |
-| `--max-upload-size`        | 50 MB                | 1 GB              |
-| `--max-total-upload-size`  | 5 × max-upload-size  | 5 × max-upload-size |
-| `--max-uploads-per-run`    | 20                   | 20                |
-| `--allow-upload-mime`      | safe defaults        | safe defaults     |
+| `iterion editor` flag       | Default (web/cloud) | Default (desktop) |
+| --------------------------- | -------------------- | ----------------- |
+| `--max-upload-size`         | 50 MB                | 1 GB              |
+| `--max-total-upload-size`   | 5 × max-upload-size  | 5 × max-upload-size |
+| `--max-uploads-per-run`     | 20                   | 20                |
+| `--allow-upload-mime`       | safe defaults        | safe defaults     |
 
 The default MIME allowlist covers `image/{png,jpeg,gif,webp}`,
 `application/{pdf,json,zip,gzip,x-tar}`, `text/{plain,markdown,csv}`,
@@ -114,10 +120,10 @@ Errors are mapped to standard codes:
 
 | Status | Cause                                                          |
 | ------ | -------------------------------------------------------------- |
-| 413    | upload exceeds `--max-upload-size` (per file or cumulative)    |
-| 415    | sniffed MIME not in `--allow-upload-mime`                      |
+| 413    | upload exceeds the configured per-file or cumulative size limit |
+| 415    | sniffed MIME is not in the configured upload MIME allowlist     |
 | 422    | declared name not present in the workflow's `attachments:`     |
-| 409    | more attachments referenced than `--max-uploads-per-run`       |
+| 409    | more attachments referenced than the configured per-run limit   |
 
 ## Storage layout
 
@@ -192,8 +198,10 @@ malicious agent cannot corrupt the run store.
   MinIO) when a node opens an attachment by URL or path. No shared
   filesystem is required.
 - Upload limits are advisory at the SPA level; the server pod
-  re-validates each upload against its config (set via
-  `ITERION_MAX_UPLOAD_SIZE` etc. in `charts/iterion/values.yaml`).
+  re-validates each upload with its compiled server configuration.
+  Today the cloud command has no upload-limit surface in `pkg/config`
+  or `charts/iterion`, so it uses code defaults unless a future
+  deployment wrapper or embedder passes explicit values.
 
 ## Authoring tips
 

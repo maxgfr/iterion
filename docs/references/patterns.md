@@ -208,11 +208,11 @@ workflow gated:
 
 ## 7. Delegation (Claude Code / Codex)
 
-Use `delegate` instead of `model` to run the node as an external CLI agent.
+Use `backend` instead of `model` to run the node as an external CLI agent.
 
 ```iter
 agent implementer:
-  delegate: "claude_code"
+  backend: "claude_code"
   input: task_input
   output: task_output
   system: impl_system
@@ -223,7 +223,7 @@ agent implementer:
 ```
 
 **Key points:**
-- `delegate: "claude_code"` (recommended) — bypasses LLM API, uses CLI subprocess. `delegate: "codex"` is also accepted but discouraged (compiler emits a `C030` warning); prefer `claude_code` for tool-using agents or `claw` + OpenAI (`model: "openai/gpt-5.4-mini"`) for read-only judges/reviewers
+- `backend: "claude_code"` (recommended) — bypasses LLM API, uses CLI subprocess. `backend: "codex"` is also accepted but discouraged (compiler emits a `C030` warning); prefer `claude_code` for tool-using agents or `claw` + OpenAI (`model: "openai/gpt-5.4-mini"`) for read-only judges/reviewers
 - Delegation supports `interaction` (forwarding human input to the subprocess)
 - `readonly: true` marks the node as non-mutating for workspace safety
 - Multiple mutating delegates cannot run in parallel (workspace safety constraint)
@@ -245,7 +245,7 @@ judge verify:
   output: verify_output
 
 agent fixer:
-  delegate: "claude_code"
+  backend: "claude_code"
   input: fix_input
   output: fix_output
   tools: [Read, Edit, Write, Bash]
@@ -276,7 +276,7 @@ Fork a session to let multiple readonly agents extract information without consu
 
 ```iter
 agent worker:
-  delegate: "claude_code"
+  backend: "claude_code"
   session: fresh
   tools: [Read, Edit, Write, Bash]
 
@@ -284,13 +284,13 @@ router extract_router:
   mode: fan_out_all
 
 agent summarizer:
-  delegate: "claude_code"
+  backend: "claude_code"
   session: fork
   readonly: true
   tools: [Read, Glob, Grep]
 
 agent commit_namer:
-  delegate: "claude_code"
+  backend: "claude_code"
   session: fork
   readonly: true
   tools: [Read, Bash]

@@ -112,7 +112,6 @@ tool scan_secrets:
 
 router gate:
   mode: condition
-  input: scan_result
 
 judge review:
   model: "anthropic/claude-sonnet-4-6"
@@ -144,6 +143,9 @@ schema triage:
   severity: string
   summary: string
 
+prompt triage_prompt:
+  Classify the redacted ticket by category and severity, and write a concise summary.
+
 tool sanitize:
   command: "privacy_filter"
   input: ticket_in
@@ -153,7 +155,7 @@ agent classify:
   model: "anthropic/claude-sonnet-4-6"
   input: redacted
   output: triage
-  prompt: triage_prompt
+  user: triage_prompt
 
 workflow main:
   start -> sanitize -> classify -> done
@@ -195,6 +197,10 @@ public pages in your `events.jsonl`.
 schema email_in:
   body: string
 
+prompt draft_reply_prompt:
+  Draft a reply. The text contains tokens like [PII_xxx] —
+  PRESERVE THEM VERBATIM. Do not rewrite, translate, or remove them.
+
 tool redact_email:
   command: "privacy_filter"
   input: email_in
@@ -204,9 +210,7 @@ agent draft_reply:
   model: "anthropic/claude-sonnet-4-6"
   input: clean_email
   output: draft
-  prompt: |
-    Draft a reply. The text contains tokens like [PII_xxx] —
-    PRESERVE THEM VERBATIM. Do not rewrite, translate, or remove them.
+  user: draft_reply_prompt
 
 tool restore_pii:
   command: "privacy_unfilter"
@@ -214,7 +218,7 @@ tool restore_pii:
   output: final_reply
 
 human approve:
-  mode: pause_until_answers
+  interaction: human
   input: final_reply
   output: approval
 
@@ -240,18 +244,14 @@ tool list_artifacts:
 
 router fan:
   mode: fan_out_all
-  input: file_list
 
 tool redact_artifact:
   command: "privacy_filter"
   output: clean_artifact
 
-join collect:
-  strategy: wait_all
-
 workflow main:
   start -> list_artifacts -> fan
-  fan -> redact_artifact -> collect -> done
+  fan -> redact_artifact -> done
 ```
 
 Convert real-data run traces into shareable demo material. Combine with
@@ -261,7 +261,7 @@ Convert real-data run traces into shareable demo material. Combine with
 
 ```iter
 human collect_context:
-  mode: pause_until_answers
+  interaction: human
   output: raw_context
 
 tool sanitize:
@@ -284,6 +284,11 @@ artifacts.
 ### 7. Pure detect-mode audit / compliance scan
 
 ```iter
+prompt report_prompt:
+  Produce a markdown report listing: spans per category, highest-risk
+  documents, recommended actions. Use the `rule` field to identify
+  which detection rule matched.
+
 tool scan:
   command: "privacy_filter"
   input: doc_in
@@ -293,10 +298,7 @@ tool scan:
 agent report:
   input: scan_report
   output: human_report
-  prompt: |
-    Produce a markdown report listing: spans per category, highest-risk
-    documents, recommended actions. Use the `rule` field to identify
-    which detection rule matched.
+  user: report_prompt
 
 workflow main:
   start -> scan -> report -> done

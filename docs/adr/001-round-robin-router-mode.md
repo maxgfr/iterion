@@ -3,14 +3,15 @@
 - **Status**: Accepted
 - **Date**: 2026-04-01
 - **Authors**: devthejo
-- **Workflow context**: `examples/dual_model_plan_implement_review.iter`
+- **Workflow context**: [`.archive/examples/dual_model_plan_implement_review.iter`](../../.archive/examples/dual_model_plan_implement_review.iter) (archived)
 
 ## Context
 
 The Iterion v1 DSL orchestrates multi-agent workflows with a small set of
-primitives: `agent`, `judge`, `router`, `join`, `human`, `tool`. The router
-currently supports a single mode — `fan_out_all` — which spawns every
-outgoing branch in parallel.
+primitives: `agent`, `judge`, `router`, `human`, `tool`, `compute`, plus
+convergence via `await:` on downstream nodes. The router originally
+supported a single mode — `fan_out_all` — which spawns every outgoing
+branch in parallel.
 
 When a workflow needs to **alternate between two agents** at each iteration
 of a loop (e.g. Claude refines on turn 1, Codex on turn 2), the v1 DSL
@@ -65,11 +66,11 @@ router refine_selector:
   mode: round_robin
 
 agent claude_refine:
-  delegate: "claude_code"
+  backend: "claude_code"
   ...
 
 agent codex_refine:
-  delegate: "codex"
+  backend: "codex"
   ...
 
 workflow example:
@@ -94,12 +95,12 @@ With `round_robin`, the `dual_model_plan_implement_review.iter` workflow
 collapses to:
 
 ```
-plan_fanout (fan_out_all) → claude_plan + codex_plan → plans_join → merge_plans
-  → val_fanout (fan_out_all) → claude_val + codex_val → val_join → val_judge
+plan_fanout (fan_out_all) → claude_plan + codex_plan → plans_converge → merge_plans
+  → val_fanout (fan_out_all) → claude_val + codex_val → val_converge → val_judge
     → [ready] → impl_selector (round_robin) → claude_implement | codex_implement
     → [not ready] → refine_selector (round_robin) → claude_refine | codex_refine
       → val_fanout (loop)
-  → review_fanout (fan_out_all) → claude_review + codex_review → review_join → review_judge
+  → review_fanout (fan_out_all) → claude_review + codex_review → review_converge → review_judge
     → [approved] → done
     → [not approved] → plan_fanout (outer loop with reviews)
 ```
@@ -111,8 +112,7 @@ plan_fanout (fan_out_all) → claude_plan + codex_plan → plans_join → merge_
 ### 1. Status quo — cross-pair pattern only
 
 The cross-pair pattern works and requires no runtime changes. It is used
-in several existing examples (`todo_app_full_dual_model_delegate.iter`,
-`feature_request_dual_model.iter`).
+in existing examples such as [`.archive/examples/feature_request_dual_model.iter`](../../.archive/examples/feature_request_dual_model.iter).
 
 **Rejected because**: duplication grows combinatorially. Alternation
 between 2 agents doubles the node count. With 3 agents the cross-pair
@@ -292,10 +292,9 @@ func (e *Engine) execRouter(ctx context.Context, rs *RunState, nodeID string) (s
 
 Once `round_robin` is implemented, the
 `dual_model_plan_implement_review.iter` workflow can be simplified from
-46 to 23 nodes. Existing examples that use the cross-pair pattern
-(`todo_app_full_dual_model_delegate.iter`,
-`feature_request_dual_model.iter`) remain valid — cross-pair is a
-usage pattern, not a DSL constraint.
+46 to 23 nodes. Existing examples that use the cross-pair pattern (e.g.
+[`.archive/examples/feature_request_dual_model.iter`](../../.archive/examples/feature_request_dual_model.iter))
+remain valid — cross-pair is a usage pattern, not a DSL constraint.
 
 ## Consequences
 
@@ -331,5 +330,5 @@ For new workflows using `round_robin`, prefer alternating between:
   `openai/gpt-...`).
 
 Historical examples that used `codex` in this role have been migrated in
-the same commit; see `examples/dual_model_plan_implement_review.iter`
-for the current version.
+the same commit; see [`.archive/examples/dual_model_plan_implement_review.iter`](../../.archive/examples/dual_model_plan_implement_review.iter)
+for the current (archived) version.

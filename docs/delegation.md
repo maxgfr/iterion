@@ -6,7 +6,7 @@ For tasks that need full tool access (file editing, shell commands, git operatio
 
 ```iter
 agent implementer:
-  delegate: "claude_code"          # recommended (codex is supported but discouraged)
+  backend: "claude_code"          # recommended (codex is supported but discouraged)
   input: plan_schema
   output: result_schema
   system: implementation_prompt
@@ -23,7 +23,7 @@ agent implementer:
 
 Delegation is useful for agents that need to *act* on the codebase (write files, run tests, execute commands). For agents that only need to *think* (review, judge, plan), use `model:` directly — it's lighter weight and faster.
 
-You can mix both in the same workflow. A common pattern is using `model:` for reviewers and judges, and `delegate:` for implementers:
+You can mix both in the same workflow. A common pattern is using `model:` for reviewers and judges, and `backend:` for implementers:
 
 ```iter
 agent reviewer:
@@ -31,6 +31,6 @@ agent reviewer:
   readonly: true
 
 agent implementer:
-  delegate: "claude_code"              # Full agent — can edit files
+  backend: "claude_code"              # Full agent — can edit files
   tools: [read_file, write_file, patch, run_command]
 ```

@@ -58,6 +58,7 @@ reconciler on next server boot.
 
 | Status                  | Meaning                                          | Resumable? |
 |-------------------------|--------------------------------------------------|------------|
+| `queued`                | Cloud mode only: submitted to the NATS queue, not yet claimed by a runner pod (`RunStatusQueued`, pkg/store/run.go) | —          |
 | `running`               | Execution in progress                            | —          |
 | `paused_waiting_human`  | Paused at a human node, awaiting answers         | Yes (needs answers) |
 | `finished`              | Completed successfully (reached done node)       | No         |

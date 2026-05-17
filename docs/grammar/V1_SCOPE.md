@@ -9,15 +9,15 @@
 | Schemas | `schema <name>:` | `SchemaDecl`, `SchemaField` | Types: string, bool, int, float, json, string[]; enum constraint |
 | Agent | `agent <name>:` | `AgentDecl` | model, input, output, publish, system, user, session, tools, tool_max_steps |
 | Judge | `judge <name>:` | `JudgeDecl` | Structurally identical to agent |
-| Router | `router <name>:` | `RouterDecl` | Modes: fan_out_all, condition, round_robin |
-| Join | `join <name>:` | `JoinDecl` | Strategies: wait_all, best_effort; require, output |
-| Human | `human <name>:` | `HumanDecl` | input, output, publish, instructions, mode, model, system, min_answers. Modes: pause_until_answers (default), auto_answer, auto_or_pause |
+| Router | `router <name>:` | `RouterDecl` | Modes: fan_out_all, condition, round_robin, llm |
+| Await / convergence | `await: wait_all` / `await: best_effort` | `AwaitMode` on supported nodes | Declared on agent, judge, human, tool, or compute nodes that consume multiple incoming branches |
+| Human | `human <name>:` | `HumanDecl` | input, output, publish, instructions, interaction, interaction_prompt, interaction_model, model, system, min_answers. Interaction values: human (default), llm, llm_or_human, none |
 | Tool (node) | `tool <name>:` | `ToolNodeDecl` | command, output (direct execution without LLM) |
 | done / fail | (reserved) | Edge targets | No declaration, recognized by the parser |
 | Workflow | `workflow <name>:` | `WorkflowDecl` | vars, entry, budget, edges |
 | Budget | `budget:` | `BudgetBlock` | max_parallel_branches, max_duration, max_cost_usd, max_tokens, max_iterations |
 | Edge | `src -> dst` | `Edge` | with, when, as (loop) |
-| When | `when [not] <cond>` | `WhenClause` | Condition + negation |
+| When | `when [not] <cond>` or `when "<expr>"` | `WhenClause` | Simple boolean-field shorthand plus quoted expressions with boolean operators, comparisons, and built-ins such as length, concat, unique, contains, join |
 | Loop | `as <name>(<N>)` | `LoopClause` | Named and bounded loop |
 | With | `with { ... }` | `WithEntry` | Inter-node data mapping |
 | Session | `session:` | `SessionMode` | fresh, inherit, artifacts_only |
@@ -33,8 +33,6 @@
 | **Imports / includes** | One file = one workflow. No module system in V1. |
 | **Node inheritance** | No `extends` or node composition. Duplication is acceptable. |
 | **Composite types in schemas** | No nested types or `map`. `json` serves as a catch-all type. |
-| **Complex conditional expressions** | `when` takes a simple identifier, no compound boolean expressions (&&, \|\|). |
-| **Router mode: condition with expressions** | The `condition` mode is declared but complex conditional routing rules are out of V1. |
 | **Sub-workflows / workflow calls** | A workflow cannot call another workflow. |
 | **Retry / backoff on nodes** | Handled at runtime/policy level, not in the DSL. |
 | **Per-node timeouts** | Only the global budget `max_duration` is supported in V1. |

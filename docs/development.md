@@ -50,7 +50,7 @@ iterion/
 │   ├── dsl/             # DSL pipeline
 │   │   ├── parser/      # Lexer, recursive-descent parser, diagnostics
 │   │   ├── ast/         # AST definitions and JSON marshaling
-│   │   ├── ir/          # IR compilation and validation (43 diagnostic codes)
+│   │   ├── ir/          # IR compilation and validation (~35 diagnostic codes, C001–C072 sparse)
 │   │   ├── unparse/     # IR → .iter serialization
 │   │   └── types/       # Shared enums (transports, session/router modes…)
 │   ├── backend/         # Execution stack (LLM + tools)

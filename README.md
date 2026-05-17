@@ -38,7 +38,7 @@ Iterion is a workflow engine that turns `.iter` files into executable AI pipelin
                                             │
                     ┌───────────────────────┐│
                     │  agents, judges,      ││
-                    │  routers, joins,      ││
+                    │  routers, await,      ││
                     │  humans, tools        ││
                     │  running in parallel  ││
                     │  with budget tracking ││
@@ -56,10 +56,10 @@ Think of it as a DAG runner purpose-built for LLM workflows — with first-class
 ### Authoring & orchestration
 
 - 📝 **Declarative DSL** — Human-readable `.iter` files with indentation-based syntax
-- 🤖 **Multi-agent orchestration** — Chain agents, judges, routers, and joins into complex graphs
+- 🤖 **Multi-agent orchestration** — Chain agents, judges, routers, and await-based convergence into complex graphs
 - 🖥️ **Visual editor** — Browser-based workflow builder with drag-and-drop, live validation, and source view
 - 🙋 **Human-in-the-loop** — Pause for human input, auto-answer via LLM, or let the LLM decide when to ask
-- 🔀 **Parallel branching** — Fan-out via routers, converge with join nodes (`wait_all` / `best_effort`)
+- 🔀 **Parallel branching** — Fan-out via routers, converge at downstream nodes with `await: wait_all` / `await: best_effort`
 - 🧭 **4 routing modes** — `fan_out_all`, `condition`, `round_robin`, and `llm`-driven routing
 - 🔁 **Bounded loops** — Retry and refinement cycles with configurable iteration limits
 - 🔲 **Structured I/O** — Typed schemas for inputs and outputs with enum constraints
@@ -207,7 +207,7 @@ The full documentation lives under [`docs/`](docs/) — start with the [document
 - [docs/dsl.md](docs/dsl.md) — full `.iter` DSL reference
 - [docs/routers.md](docs/routers.md) — routing modes deep dive
 - [docs/recipes.md](docs/recipes.md) — preset-driven runs (benchmarking, prompt comparison)
-- [docs/delegation.md](docs/delegation.md) — `model:` vs `delegate:` (claude_code, codex)
+- [docs/delegation.md](docs/delegation.md) — `model:` vs `backend:` (claude_code, codex)
 - [docs/attachments.md](docs/attachments.md) — file/image attachments in prompts
 - [docs/privacy_filter.md](docs/privacy_filter.md) — built-in PII redaction tools
 - [docs/workflow_authoring_pitfalls.md](docs/workflow_authoring_pitfalls.md) — required reading before authoring workflows that commit code
@@ -227,7 +227,7 @@ The full documentation lives under [`docs/`](docs/) — start with the [document
 
 **References**
 - [docs/references/dsl-grammar.md](docs/references/dsl-grammar.md) — readable grammar
-- [docs/references/diagnostics.md](docs/references/diagnostics.md) — all C001–C043 codes
+- [docs/references/diagnostics.md](docs/references/diagnostics.md) — all C001–C072 codes (sparse)
 - [docs/references/patterns.md](docs/references/patterns.md) — 10 reusable workflow patterns
 - [docs/grammar/iterion_v1.ebnf](docs/grammar/iterion_v1.ebnf) — formal EBNF grammar
 

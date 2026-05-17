@@ -84,8 +84,8 @@ Every failure path in the engine, its resulting status, and whether it's resumab
 | Failure | Status | Resumable | Restart node |
 |---------|--------|-----------|--------------|
 | Edge selection after human answers | `failed_resumable` | Yes | Human node |
-| Human auto_or_pause execution error | `failed_resumable` | Yes | Human node |
-| Schema validation in auto mode | `failed_resumable` | Yes | Human node |
+| Human `interaction: llm_or_human` execution error | `failed_resumable` | Yes | Human node |
+| Schema validation during LLM interaction | `failed_resumable` | Yes | Human node |
 
 ### Non-Resumable Failures
 
