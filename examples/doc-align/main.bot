@@ -108,6 +108,16 @@ vars:
   ## for nightly / per-PR runs (`--var diff_since=main`).
   diff_since: string = ""
 
+  ## Hard-excluded directories (v0.8.0). Comma-separated list of
+  ## directory names whose presence anywhere in a path
+  ## disqualifies it from `doc_files` (regardless of `doc_globs`).
+  ## Defaults exclude runtime / scratch / vendor / artifact dirs
+  ## that should never be audited. Override to enable multi-repo
+  ## audit — e.g. drop `.works` to include sibling repos checked
+  ## out under `.works/<repo>/`. Setting to empty disables all
+  ## exclusion (NOT recommended — picks up `.git/`).
+  excluded_dirs: string = ".iterion,.works,.claude,vendor,node_modules,.git,dist,build,out"
+
   ## Code-surface scan scope (v0.6.0). Globs for the
   ## `scan_code_surface` tool which greps cmd/iterion/*.go and
   ## pkg/dsl/ir/*.go (and similar locations) for "publicly-exposed
@@ -692,7 +702,7 @@ schema update_audit_cache_output:
 ## are then exposed to python via shell env vars (WS, GLOBS,
 ## BUNDLE_SELF, DIFF_SINCE).
 tool scan_docs:
-  command: `WS={{vars.workspace_dir}} GLOBS={{vars.doc_globs}} BUNDLE_SELF={{vars.bundle_self_path}} DIFF_SINCE={{vars.diff_since}} CACHE_PATH={{vars.audit_cache_path}} python3 -c "
+  command: `WS={{vars.workspace_dir}} GLOBS={{vars.doc_globs}} BUNDLE_SELF={{vars.bundle_self_path}} DIFF_SINCE={{vars.diff_since}} CACHE_PATH={{vars.audit_cache_path}} EXCLUDED_DIRS={{vars.excluded_dirs}} python3 -c "
 import os, json, glob, hashlib, subprocess
 ws = os.environ['WS']
 globs = [g.strip() for g in os.environ['GLOBS'].split(',') if g.strip()]
@@ -700,7 +710,7 @@ bundle_self = os.environ.get('BUNDLE_SELF', '').strip().rstrip(os.sep)
 diff_since = os.environ.get('DIFF_SINCE', '').strip()
 cache_path = os.environ.get('CACHE_PATH', '').strip()
 os.chdir(ws)
-EXCLUDE_DIRS = {'.iterion', '.works', '.claude', 'vendor', 'node_modules', '.git', 'dist', 'build', 'out'}
+EXCLUDE_DIRS = {d.strip() for d in os.environ.get('EXCLUDED_DIRS', '').split(',') if d.strip()}
 def excluded(p):
     if any(part in EXCLUDE_DIRS for part in p.split(os.sep)):
         return True
