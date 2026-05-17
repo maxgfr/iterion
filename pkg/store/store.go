@@ -157,8 +157,12 @@ func fsyncDir(dir string) error {
 
 // SanitizePathComponent validates that a path component (RunID, NodeID,
 // InteractionID) does not contain path traversal sequences, separators,
-// or null bytes. Used at every store/runview/blob entry point that
-// path-joins user-derived IDs into the run directory.
+// null bytes, or control characters. Used at every store/runview/blob
+// entry point that path-joins user-derived IDs into the run directory,
+// and also at the HMAC-signing entry points where control characters in
+// a component could collide with a separator in the MAC plaintext (see
+// PresignAttachment) and make one signature accidentally valid for a
+// different (runID, name) pair.
 func SanitizePathComponent(name, component string) error {
 	if component == "" {
 		return fmt.Errorf("store: %s must not be empty", name)
@@ -169,8 +173,10 @@ func SanitizePathComponent(name, component string) error {
 	if strings.ContainsAny(component, "/\\") {
 		return fmt.Errorf("store: %s %q contains path separator", name, component)
 	}
-	if strings.ContainsRune(component, 0) {
-		return fmt.Errorf("store: %s %q contains null byte", name, component)
+	for _, r := range component {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("store: %s %q contains control character", name, component)
+		}
 	}
 	return nil
 }

@@ -276,7 +276,10 @@ func (s *FilesystemRunStore) PresignAttachment(_ context.Context, runID, name st
 		ttl = 10 * time.Minute
 	}
 	exp := time.Now().Add(ttl).Unix()
-	key := s.presignKey()
+	key, err := s.presignKey()
+	if err != nil {
+		return "", fmt.Errorf("presign attachment: %w", err)
+	}
 	mac := hmac.New(sha256.New, key)
 	fmt.Fprintf(mac, "%s\n%s\n%d", runID, name, exp)
 	sig := hex.EncodeToString(mac.Sum(nil))
@@ -297,11 +300,26 @@ func (s *FilesystemRunStore) VerifyAttachmentSignature(runID, name, exp, sig str
 	if exp == "" || sig == "" {
 		return false
 	}
+	// The HMAC plaintext joins runID and name with newlines; if either
+	// component carries a newline (or any control char), the issuer
+	// and the verifier could disagree on which delimiter is real,
+	// making one valid signature match a different (runID, name) pair.
+	// Reject the same shapes PresignAttachment rejects so the contract
+	// matches on both sides.
+	if err := sanitizePathComponent("run ID", runID); err != nil {
+		return false
+	}
+	if err := sanitizePathComponent("attachment name", name); err != nil {
+		return false
+	}
 	expN, err := strconv.ParseInt(exp, 10, 64)
 	if err != nil || expN < time.Now().Unix() {
 		return false
 	}
-	key := s.presignKey()
+	key, err := s.presignKey()
+	if err != nil {
+		return false
+	}
 	mac := hmac.New(sha256.New, key)
 	fmt.Fprintf(mac, "%s\n%s\n%d", runID, name, expN)
 	want := hex.EncodeToString(mac.Sum(nil))
@@ -315,35 +333,38 @@ func (s *FilesystemRunStore) VerifyAttachmentSignature(runID, name, exp, sig str
 
 // presignKey returns the per-store HMAC signing key. It is derived
 // from a stable file under the store root, generated lazily on first
-// use, so URLs survive process restarts. Failure to read or generate
-// the key falls back to a fixed in-memory secret — that path keeps
-// presigning available but log-warns on the next launch.
-func (s *FilesystemRunStore) presignKey() []byte {
+// use, so URLs survive process restarts.
+//
+// If crypto/rand is unavailable (a misconfigured container without
+// /dev/urandom, a kernel CSPRNG failure), presignKey returns an error
+// rather than falling back to a deterministic key. A path-derived
+// fallback would be persisted forever — making any third party that
+// learns the store path able to forge URLs for every run in the store.
+// Fail-closed is the correct posture: presigning becomes unavailable
+// until the operator fixes the entropy source.
+func (s *FilesystemRunStore) presignKey() ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.signingKey) > 0 {
-		return s.signingKey
+		return s.signingKey, nil
 	}
 	keyPath := filepath.Join(s.root, attachmentSigningKeyFile)
 	if data, err := os.ReadFile(keyPath); err == nil && len(data) >= 32 {
 		s.signingKey = data
-		return s.signingKey
+		return s.signingKey, nil
 	}
 	buf := make([]byte, 32)
-	_, err := readRandom(buf)
-	if err != nil {
-		// Deterministic fallback derived from the root path. This is
-		// far weaker than crypto/rand but never returns an empty key,
-		// which would mint trivially forgeable URLs.
-		h := sha256.Sum256([]byte("iterion-attachment-fallback:" + s.root))
-		buf = h[:]
+	if _, err := readRandom(buf); err != nil {
+		return nil, fmt.Errorf("generate attachment signing key: %w", err)
 	}
 	// Atomic write so a crash between truncate and the data flush
 	// doesn't leave a zero-byte file — that would silently invalidate
 	// every outstanding presigned URL on the next boot.
-	_ = writeFileAtomic(keyPath, buf, 0o600)
+	if err := writeFileAtomic(keyPath, buf, 0o600); err != nil {
+		return nil, fmt.Errorf("persist attachment signing key: %w", err)
+	}
 	s.signingKey = buf
-	return s.signingKey
+	return s.signingKey, nil
 }
 
 // loadAttachmentMeta reads the on-disk meta sidecar for a single
