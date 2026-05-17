@@ -2065,16 +2065,42 @@ func (p *parser) parseEdge() *ast.Edge {
 		Span: ast.Span{Start: p.pos(fromT)},
 	}
 
-	// Optional clauses: when, as, with (in any order before newline)
+	// Optional clauses: when, as, with (in any order before newline).
+	// Reject duplicates — `... when foo when not bar` used to accept
+	// the line with the second clause silently overwriting the first.
+	// Track each by token kind so the error message points the operator
+	// at the right culprit.
+	var sawWhen, sawAs, sawWith bool
 	for {
 		t := p.peek()
 		switch t.Type {
 		case TokenWhen:
-			edge.When = p.parseWhenClause()
+			if sawWhen {
+				p.addError(DiagDuplicateEdgeClause, t, "duplicate 'when' clause on edge")
+			}
+			parsed := p.parseWhenClause()
+			if !sawWhen {
+				edge.When = parsed
+			}
+			sawWhen = true
 		case TokenAs:
-			edge.Loop = p.parseLoopClause()
+			if sawAs {
+				p.addError(DiagDuplicateEdgeClause, t, "duplicate 'as' clause on edge")
+			}
+			parsed := p.parseLoopClause()
+			if !sawAs {
+				edge.Loop = parsed
+			}
+			sawAs = true
 		case TokenWith:
-			edge.With = p.parseWithBlock()
+			if sawWith {
+				p.addError(DiagDuplicateEdgeClause, t, "duplicate 'with' clause on edge")
+			}
+			parsed := p.parseWithBlock()
+			if !sawWith {
+				edge.With = parsed
+			}
+			sawWith = true
 		default:
 			goto done
 		}

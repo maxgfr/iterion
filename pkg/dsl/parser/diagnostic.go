@@ -21,6 +21,9 @@ const (
 	// Value errors
 	DiagInvalidValue DiagCode = "E020" // invalid value (e.g. bad session mode)
 	DiagInvalidType  DiagCode = "E021" // invalid type expression
+
+	// Edge clause errors
+	DiagDuplicateEdgeClause DiagCode = "E030" // duplicate when/as/with clause on an edge
 )
 
 // Severity indicates the severity of a diagnostic.

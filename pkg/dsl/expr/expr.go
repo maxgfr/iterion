@@ -143,7 +143,16 @@ func truthy(v interface{}) bool {
 	case bool:
 		return t
 	case string:
-		return t != ""
+		// LLM tool outputs and JSON-decoded env vars commonly carry
+		// boolean-shaped data as strings. Treat "false" / "0" / "no"
+		// as falsy so `when not approved` with approved="false" behaves
+		// the way the workflow author wrote it. Empty string stays
+		// falsy (consistent with the prior contract).
+		switch strings.ToLower(strings.TrimSpace(t)) {
+		case "", "false", "no", "0":
+			return false
+		}
+		return true
 	case int:
 		return t != 0
 	case int64:
@@ -814,7 +823,25 @@ func equals(a, b interface{}) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
-	return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
+	// Type-aware string compare. The prior fallback used
+	// fmt.Sprintf("%v", ...) on both sides, which coerced 5 == "5" and
+	// true == "true" to true via lexical equality — producing silent
+	// type confusion whenever an LLM stringified a value the schema
+	// declared numeric/boolean. Require both operands to be strings
+	// before comparing; otherwise return false (heterogeneous types
+	// are not equal under the new contract). Bools compare via direct
+	// equality already (Go interface compare handles same-typed bools).
+	as, aIsStr := a.(string)
+	bs, bIsStr := b.(string)
+	if aIsStr && bIsStr {
+		return as == bs
+	}
+	ab, aIsBool := a.(bool)
+	bb, bIsBool := b.(bool)
+	if aIsBool && bIsBool {
+		return ab == bb
+	}
+	return false
 }
 
 func compare(op string, a, b interface{}) (bool, error) {
