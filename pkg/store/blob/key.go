@@ -28,6 +28,14 @@ func artifactKey(runID, nodeID string, version int) string {
 
 // attachmentKey builds the canonical S3 key for an attachment body.
 // Format: attachments/<run_id>/<name>/<filename>.
+//
+// The filename is run through SanitizePathComponent so it satisfies
+// the same "no separators, no control chars, no traversal" invariant
+// as runID and name. The FS-mirror path uses filepath.Base — keeping
+// the S3 key shape consistent prevents `migrate to-cloud` from
+// producing keys the FS layer would have flattened, and avoids any
+// future caller surfacing an unsanitised value as a probe vector
+// (F-ST-10).
 func attachmentKey(runID, name, filename string) string {
 	if err := store.SanitizePathComponent("run_id", runID); err != nil {
 		panic(err)
@@ -35,11 +43,8 @@ func attachmentKey(runID, name, filename string) string {
 	if err := store.SanitizePathComponent("attachment_name", name); err != nil {
 		panic(err)
 	}
-	// Filename comes from the upload — strip path separators
-	// before sanitising. Empty or "." filenames panic since they
-	// indicate a programmer bug upstream.
-	if filename == "" || filename == "." || filename == ".." {
-		panic(fmt.Sprintf("blob: invalid attachment filename %q", filename))
+	if err := store.SanitizePathComponent("attachment_filename", filename); err != nil {
+		panic(err)
 	}
 	return fmt.Sprintf("attachments/%s/%s/%s", runID, name, filename)
 }

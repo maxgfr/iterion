@@ -1294,6 +1294,13 @@ func edgeFromJSON(je *jsonEdge) (*Edge, error) {
 		To:   je.To,
 	}
 	if je.When != nil {
+		// Reject ambiguous shapes where both Condition and Expr are
+		// set: ir.Compile silently prefers Expr and drops Condition,
+		// so a reviewer auditing the JSON sees one predicate while
+		// the runtime executes another (F-DSL-9).
+		if je.When.Expr != "" && je.When.Condition != "" {
+			return nil, fmt.Errorf("edge %s→%s: when clause has both .expr and .condition — use exactly one", je.From, je.To)
+		}
 		e.When = &WhenClause{
 			Condition: je.When.Condition,
 			Negated:   je.When.Negated,
