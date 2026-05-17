@@ -271,11 +271,31 @@ func (a *ForgejoAdapter) resolveLabelID(ctx context.Context, name string) (int64
 	var created struct {
 		ID int64 `json:"id"`
 	}
-	if err := a.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/labels", a.opts.Repo), in, &created); err != nil {
-		return 0, err
+	err := a.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/labels", a.opts.Repo), in, &created)
+	if err == nil {
+		a.labelIDs[name] = created.ID
+		return created.ID, nil
 	}
-	a.labelIDs[name] = created.ID
-	return created.ID, nil
+	// 409 means another conductor process won the race and created the
+	// label between our GET above and this POST. Re-fetch and use
+	// theirs instead of returning the conflict to the caller.
+	if errors.Is(err, errForgejoConflict) {
+		var labels2 []struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		}
+		if rerr := a.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/labels?limit=200", a.opts.Repo), nil, &labels2); rerr != nil {
+			return 0, fmt.Errorf("forgejo: re-list labels after 409: %w", rerr)
+		}
+		for _, l := range labels2 {
+			a.labelIDs[l.Name] = l.ID
+		}
+		if id, ok := a.labelIDs[name]; ok {
+			return id, nil
+		}
+		return 0, fmt.Errorf("forgejo: label %q reported as conflict but not visible on re-list", name)
+	}
+	return 0, err
 }
 
 // ---------------------------------------------------------------------------
@@ -372,6 +392,8 @@ func (a *ForgejoAdapter) do(ctx context.Context, method, path string, in any, ou
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
 		return ErrNotFound
+	case resp.StatusCode == http.StatusConflict:
+		return errForgejoConflict
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		if out == nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
@@ -383,6 +405,13 @@ func (a *ForgejoAdapter) do(ctx context.Context, method, path string, in any, ou
 		return fmt.Errorf("forgejo: %s %s: status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(buf)))
 	}
 }
+
+// errForgejoConflict signals a 409 from a Forgejo write — typically a
+// "label already exists" when two conductor processes race to create
+// the same `iterion-claimed` label on first Claim. Callers that own a
+// fallback path (refresh the GET, then proceed) recognise it via
+// errors.Is.
+var errForgejoConflict = errors.New("forgejo: conflict (409)")
 
 func labelNames(in []forgejoLabel) []string {
 	out := make([]string, 0, len(in))
