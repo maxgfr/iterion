@@ -141,13 +141,14 @@ func (s *Store) Board() *Board {
 // both the live store and on-disk state consistent on the old board
 // — the previous order (swap → write) silently diverged in-memory
 // from disk on EIO / quota / permission errors (F-CD-9).
-func (s *Store) SetBoard(b *Board) error {
+func (s *Store) SetBoard(b *Board) (err error) {
 	if err := b.Validate(); err != nil {
 		return err
 	}
 	clone := cloneBoard(b)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.recoverMutator("SetBoard", &err)
 	prev := s.board
 	s.board = clone
 	if err := s.writeBoardLocked(); err != nil {
@@ -160,9 +161,10 @@ func (s *Store) SetBoard(b *Board) error {
 // Create persists a new issue. The State must be one of the configured
 // board states; if empty, the first state is used. ID is generated if
 // missing.
-func (s *Store) Create(in Issue) (*Issue, error) {
+func (s *Store) Create(in Issue) (created *Issue, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.recoverMutator("Create", &err)
 
 	if in.Title == "" {
 		return nil, errors.New("issue: title required")
@@ -194,8 +196,33 @@ func (s *Store) Create(in Issue) (*Issue, error) {
 	}); err != nil {
 		return nil, err
 	}
-	out := in
-	return &out, nil
+	clone := in
+	return &clone, nil
+}
+
+// recoverMutator wraps a Store mutator in defer-recover. A panic
+// during disk I/O, index mutation, or event emission would otherwise
+// take down the conductor process; here we reload the index from disk
+// so any partially-applied in-memory state is replaced with the
+// canonical on-disk view, and surface the panic as a returned error
+// so the caller (HTTP handler, MCP tool, etc.) reports it instead of
+// crashing.
+func (s *Store) recoverMutator(name string, err *error) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	// Best-effort: drop the in-memory index and rebuild from disk so
+	// later reads don't see a half-mutated state. A reload failure
+	// here is folded into the returned error so the caller knows the
+	// store is in a degraded state and the process should probably
+	// be restarted to recover.
+	s.index = map[string]*Issue{}
+	if reloadErr := s.populateIndex(); reloadErr != nil {
+		*err = fmt.Errorf("native store: %s panicked (%v) and index reload failed (%v) — restart recommended", name, r, reloadErr)
+		return
+	}
+	*err = fmt.Errorf("native store: %s panicked: %v", name, r)
 }
 
 // Get returns a defensive copy of the issue with the given ID.
@@ -302,9 +329,10 @@ type Patch struct {
 // Update applies the patch and emits an issue_updated event with the
 // list of changed top-level fields. State changes are not supported here;
 // use SetState.
-func (s *Store) Update(id string, p Patch) (*Issue, error) {
+func (s *Store) Update(id string, p Patch) (updated *Issue, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.recoverMutator("Update", &err)
 	iss, err := s.readIssueLocked(id)
 	if err != nil {
 		return nil, err
@@ -372,9 +400,10 @@ func (s *Store) Update(id string, p Patch) (*Issue, error) {
 
 // SetState transitions an issue, validating against the board. Returns
 // tracker.ErrTransitionRejected if newState is unknown.
-func (s *Store) SetState(id, newState string) (*Issue, error) {
+func (s *Store) SetState(id, newState string) (updated *Issue, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.recoverMutator("SetState", &err)
 	iss, err := s.readIssueLocked(id)
 	if err != nil {
 		return nil, err
@@ -403,9 +432,10 @@ func (s *Store) SetState(id, newState string) (*Issue, error) {
 }
 
 // Delete removes the issue file and emits an issue_deleted event.
-func (s *Store) Delete(id string) error {
+func (s *Store) Delete(id string) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.recoverMutator("Delete", &err)
 	if _, ok := s.index[id]; !ok {
 		return tracker.ErrNotFound
 	}
@@ -419,9 +449,10 @@ func (s *Store) Delete(id string) error {
 // Claim sets the claim marker. Returns tracker.ErrClaimConflict if the
 // issue is already claimed by a different marker. Idempotent for the
 // same marker.
-func (s *Store) Claim(id, marker string) error {
+func (s *Store) Claim(id, marker string) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.recoverMutator("Claim", &err)
 	iss, err := s.readIssueLocked(id)
 	if err != nil {
 		return err
@@ -446,9 +477,10 @@ func (s *Store) Claim(id, marker string) error {
 
 // Release clears the claim if it matches the given marker. Releasing an
 // already-unclaimed issue is a no-op.
-func (s *Store) Release(id, marker string) error {
+func (s *Store) Release(id, marker string) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.recoverMutator("Release", &err)
 	iss, err := s.readIssueLocked(id)
 	if err != nil {
 		return err

@@ -6,41 +6,70 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/SocialGouv/iterion/pkg/conductor/native"
 	"github.com/SocialGouv/iterion/pkg/conductor/native/boardops"
 )
 
+// boardMCPDefaultTTL caps how long a board MCP run token stays alive
+// without an explicit Revoke. A run that crashes mid-flight would
+// otherwise leak its token until process exit. The window is long
+// enough to cover any realistic single-run duration (sandboxed agent
+// runs are typically minutes to single-digit hours).
+const boardMCPDefaultTTL = 24 * time.Hour
+
+// boardMCPMaxTokens bounds the registry so a misbehaving caller that
+// Registers without Revoking can't grow it unbounded.
+const boardMCPMaxTokens = 1024
+
 // BoardMCPTokenRegistry is the ephemeral token store used to authorize
 // sandbox-running bots that talk to the host's board MCP HTTP endpoint.
 // The runtime MUST call Register at the start of every run and Revoke
-// at the end — a missed Revoke leaks the entry until process exit
-// (the registry is unbounded by design; bound it in a follow-up if
-// daemon lifetimes grow beyond what a per-run leak can tolerate).
+// at the end. Even with a missed Revoke, entries are reaped after
+// boardMCPDefaultTTL and the registry is capped at boardMCPMaxTokens.
 type BoardMCPTokenRegistry struct {
 	mu     sync.RWMutex
 	tokens map[string]boardMCPGrant
+	now    func() time.Time // injectable for tests
 }
 
 type boardMCPGrant struct {
 	Capabilities boardops.Capabilities
+	ExpiresAt    time.Time
 }
 
 // NewBoardMCPTokenRegistry returns an empty registry.
 func NewBoardMCPTokenRegistry() *BoardMCPTokenRegistry {
-	return &BoardMCPTokenRegistry{tokens: map[string]boardMCPGrant{}}
+	return &BoardMCPTokenRegistry{
+		tokens: map[string]boardMCPGrant{},
+		now:    time.Now,
+	}
 }
 
 // Register stores a token with its grant. A subsequent call with the same
 // token replaces the grant.
 func (r *BoardMCPTokenRegistry) Register(token string, caps []string) {
-	grant := boardMCPGrant{Capabilities: boardops.Capabilities{}}
+	grant := boardMCPGrant{
+		Capabilities: boardops.Capabilities{},
+		ExpiresAt:    r.now().Add(boardMCPDefaultTTL),
+	}
 	for _, c := range caps {
 		grant.Capabilities[c] = true
 	}
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Sweep expired entries on every write so a long-running daemon
+	// doesn't accumulate dead tokens between explicit Revokes.
+	r.sweepLocked()
+	if len(r.tokens) >= boardMCPMaxTokens {
+		// Hard cap: refuse to grow the registry beyond the limit.
+		// Callers see this as a silent no-op on Register; the
+		// subsequent CallTool from the affected run will 401 since
+		// the lookup misses. Logging is the caller's responsibility.
+		return
+	}
 	r.tokens[token] = grant
-	r.mu.Unlock()
 }
 
 // Revoke removes the token. A revoked token's subsequent calls fail with 401.
@@ -52,9 +81,33 @@ func (r *BoardMCPTokenRegistry) Revoke(token string) {
 
 func (r *BoardMCPTokenRegistry) lookup(token string) (boardMCPGrant, bool) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	g, ok := r.tokens[token]
-	return g, ok
+	r.mu.RUnlock()
+	if !ok {
+		return boardMCPGrant{}, false
+	}
+	if !g.ExpiresAt.IsZero() && r.now().After(g.ExpiresAt) {
+		// TTL elapsed — drop lazily on first failed lookup.
+		r.mu.Lock()
+		// Re-check under write lock to avoid evicting a freshly-renewed
+		// token that another goroutine just Registered.
+		if cur, stillThere := r.tokens[token]; stillThere && !cur.ExpiresAt.IsZero() && r.now().After(cur.ExpiresAt) {
+			delete(r.tokens, token)
+		}
+		r.mu.Unlock()
+		return boardMCPGrant{}, false
+	}
+	return g, true
+}
+
+// sweepLocked removes every expired entry. Caller must hold r.mu.
+func (r *BoardMCPTokenRegistry) sweepLocked() {
+	now := r.now()
+	for k, v := range r.tokens {
+		if !v.ExpiresAt.IsZero() && now.After(v.ExpiresAt) {
+			delete(r.tokens, k)
+		}
+	}
 }
 
 // RegisterBoardMCPRoutes wires the board MCP HTTP endpoints onto the given
