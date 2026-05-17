@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/conductor/tracker"
+	"github.com/SocialGouv/iterion/pkg/store"
 	"github.com/google/uuid"
 )
 
@@ -146,7 +147,7 @@ func (s *Store) SetBoard(b *Board) error {
 	if err := s.writeBoardLocked(); err != nil {
 		return err
 	}
-	return s.appendEventLocked(Event{Type: EvtBoardUpdated})
+	return s.emitPostCommitEvent(Event{Type: EvtBoardUpdated})
 }
 
 // Create persists a new issue. The State must be one of the configured
@@ -179,7 +180,7 @@ func (s *Store) Create(in Issue) (*Issue, error) {
 		return nil, err
 	}
 	s.index[in.ID] = cloneIssue(&in)
-	if err := s.appendEventLocked(Event{
+	if err := s.emitPostCommitEvent(Event{
 		Type:    EvtIssueCreated,
 		IssueID: in.ID,
 		Payload: map[string]any{"state": in.State, "title": in.Title},
@@ -344,7 +345,7 @@ func (s *Store) Update(id string, p Patch) (*Issue, error) {
 		return nil, err
 	}
 	s.index[iss.ID] = cloneIssue(iss)
-	if err := s.appendEventLocked(Event{
+	if err := s.emitPostCommitEvent(Event{
 		Type:    EvtIssueUpdated,
 		IssueID: iss.ID,
 		Payload: map[string]any{"changed": changed},
@@ -376,7 +377,7 @@ func (s *Store) SetState(id, newState string) (*Issue, error) {
 		return nil, err
 	}
 	s.index[iss.ID] = cloneIssue(iss)
-	if err := s.appendEventLocked(Event{
+	if err := s.emitPostCommitEvent(Event{
 		Type:    EvtIssueState,
 		IssueID: iss.ID,
 		Payload: map[string]any{"from": old, "to": newState},
@@ -397,7 +398,7 @@ func (s *Store) Delete(id string) error {
 		return fmt.Errorf("native store: remove issue: %w", err)
 	}
 	delete(s.index, id)
-	return s.appendEventLocked(Event{Type: EvtIssueDeleted, IssueID: id})
+	return s.emitPostCommitEvent(Event{Type: EvtIssueDeleted, IssueID: id})
 }
 
 // Claim sets the claim marker. Returns tracker.ErrClaimConflict if the
@@ -422,7 +423,7 @@ func (s *Store) Claim(id, marker string) error {
 		return err
 	}
 	s.index[iss.ID] = cloneIssue(iss)
-	return s.appendEventLocked(Event{
+	return s.emitPostCommitEvent(Event{
 		Type: EvtIssueClaimed, IssueID: id,
 		Payload: map[string]any{"marker": marker},
 	})
@@ -449,7 +450,7 @@ func (s *Store) Release(id, marker string) error {
 		return err
 	}
 	s.index[iss.ID] = cloneIssue(iss)
-	return s.appendEventLocked(Event{
+	return s.emitPostCommitEvent(Event{
 		Type: EvtIssueReleased, IssueID: id,
 		Payload: map[string]any{"marker": marker},
 	})
@@ -544,11 +545,10 @@ func (s *Store) writeBoardLocked() error {
 		return fmt.Errorf("native store: marshal board: %w", err)
 	}
 	p := filepath.Join(s.root, boardFile)
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, data, filePerm); err != nil {
+	if err := store.WriteFileAtomic(p, data, filePerm); err != nil {
 		return fmt.Errorf("native store: write board: %w", err)
 	}
-	return os.Rename(tmp, p)
+	return nil
 }
 
 func (s *Store) writeIssueLocked(iss *Issue) error {
@@ -560,11 +560,10 @@ func (s *Store) writeIssueLocked(iss *Issue) error {
 		return fmt.Errorf("native store: marshal issue: %w", err)
 	}
 	p := s.issuePath(iss.ID)
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, data, filePerm); err != nil {
+	if err := store.WriteFileAtomic(p, data, filePerm); err != nil {
 		return fmt.Errorf("native store: write issue: %w", err)
 	}
-	return os.Rename(tmp, p)
+	return nil
 }
 
 // readIssueLocked returns a defensive copy of the indexed issue.
@@ -604,6 +603,21 @@ func (s *Store) appendEventLocked(evt Event) error {
 		return fmt.Errorf("native store: sync event: %w", err)
 	}
 	s.seq++
+	return nil
+}
+
+// emitPostCommitEvent appends an event after a successful issue write.
+// The issue file is the authoritative source for state recovery
+// (populateIndex reads them at startup, not events.jsonl), so an event
+// write failure here doesn't corrupt state — but it does leave a
+// silent gap in the event stream. Surface that loudly on stderr so an
+// operator notices, and return the error so HTTP handlers can include
+// it in their reply. State is still consistent on disk.
+func (s *Store) emitPostCommitEvent(evt Event) error {
+	if err := s.appendEventLocked(evt); err != nil {
+		fmt.Fprintf(os.Stderr, "native store: WARN event log diverged from state (issue persisted, event missing): %v\n", err)
+		return err
+	}
 	return nil
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/conductor/native"
 	"github.com/SocialGouv/iterion/pkg/conductor/tracker"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/store"
 )
 
 // ManagerState describes where the Manager is in its lifecycle.
@@ -359,11 +360,10 @@ func saveConfigJSON(path string, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("config json: marshal: %w", err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := store.WriteFileAtomic(path, data, 0o644); err != nil {
 		return fmt.Errorf("config json: write: %w", err)
 	}
-	return os.Rename(tmp, path)
+	return nil
 }
 
 func errString(err error) string {
