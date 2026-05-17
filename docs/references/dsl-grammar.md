@@ -259,7 +259,7 @@ compilation.
 stays untouched; on a clean exit the worktree is removed automatically,
 on failure it is preserved so the operator can inspect. Omit the
 field (or set `none`) to run in place. See
-[examples/vibe_feature_dev.iter](../../examples/vibe_feature_dev.iter)
+[examples/bots/vibe_feature_dev.bot](../../examples/bots/vibe_feature_dev.bot)
 for a workflow that opts in.
 
 ```ebnf

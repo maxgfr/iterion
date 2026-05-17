@@ -3,8 +3,8 @@
 - **Status**: Accepted
 - **Date**: 2026-05-06
 - **Authors**: devthejo
-- **Workflow context**: `examples/privacy_pipeline.iter`,
-  `docs/privacy_filter.md`
+- **Workflow context**: [`.archive/examples/privacy_pipeline.iter`](../../.archive/examples/privacy_pipeline.iter) (archived),
+  [`docs/privacy_filter.md`](../privacy_filter.md)
 
 ## Context
 

@@ -73,7 +73,7 @@ You can also drag `Iterion.app` to `/Applications/` for a permanent install.
 The desktop app boots into a Welcome wizard that asks you to:
 1. Pick or create a project folder (a directory containing `.iter` files).
 2. Configure API keys (stored in the OS keychain — Keychain on macOS, Credential Manager on Windows, Secret Service on Linux). Skippable; you can also rely on environment variables in your shell.
-3. Verify external CLIs (`claude`, `codex`) detection — only needed if you use `delegate:` in your workflows.
+3. Verify external CLIs (`claude`, `codex`) detection — only needed if you use `backend: "claude_code"` or `backend: "codex"` in your workflows.
 
 After onboarding the editor opens on your project. Multi-project switcher is in the top-left.
 

@@ -29,14 +29,14 @@ Welcome to the Iterion docs. Pages are organised by audience and topic.
 | [dsl.md](dsl.md) | Full DSL reference — variables, prompts, schemas, node types, edges, templates, MCP, budget, worktree/sandbox. |
 | [routers.md](routers.md) | Deep dive on routing modes (`fan_out_all`, `condition`, `round_robin`, `llm`) and convergence patterns. |
 | [recipes.md](recipes.md) | Run the same workflow with different presets (vars, prompts, budget, success criteria). |
-| [delegation.md](delegation.md) | When to use `delegate:` (claude_code, codex) vs `model:` (claw). |
+| [delegation.md](delegation.md) | When to use `backend:` (claude_code, codex) vs `model:` (claw). |
 | [attachments.md](attachments.md) | Attaching files / images to prompts. |
 | [bundles.md](bundles.md) | Packaging a workflow + skills + prompts as a deterministic `.botz` archive. |
 | [privacy_filter.md](privacy_filter.md) | Built-in PII redaction tools. |
 | [workflow_authoring_pitfalls.md](workflow_authoring_pitfalls.md) | **Required reading before authoring workflows that commit code.** Goodhart's law, façade patterns, prompt + judge anti-patterns. |
 | [references/dsl-grammar.md](references/dsl-grammar.md) | Readable grammar reference. |
 | [references/patterns.md](references/patterns.md) | 10 reusable workflow patterns with annotated snippets. |
-| [references/diagnostics.md](references/diagnostics.md) | All validation diagnostic codes (C001–C043). |
+| [references/diagnostics.md](references/diagnostics.md) | All validation diagnostic codes (C001–C072, sparse). |
 | [grammar/iterion_v1.ebnf](grammar/iterion_v1.ebnf) | Formal EBNF grammar. |
 
 ## Running and operating

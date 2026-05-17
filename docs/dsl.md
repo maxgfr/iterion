@@ -76,7 +76,7 @@ agent reviewer:
 | Property | Description |
 |----------|-------------|
 | `model` | LLM model identifier (supports `${ENV_VAR}`) |
-| `delegate` | Offload to external agent: `claude_code` (recommended) or `codex` (discouraged, see [Delegation](delegation.md)) |
+| `backend` | Execution backend: `claw` (default, in-process LLM), `claude_code` (recommended for tool use), `codex` (discouraged, see [Delegation](delegation.md)) |
 | `input` / `output` | Schema references for structured I/O |
 | `publish` | Persist output as a named artifact |
 | `system` / `user` | Prompt references |
@@ -122,19 +122,29 @@ router smart:
 
 > For a deep dive on routing modes, edge rules, and convergence patterns, see [`routers.md`](routers.md).
 
-### Join
+### Convergence with `await`
 
-Converges parallel branches back into a single path:
+Parallel branches converge at a real downstream node (agent, judge, human, tool, or compute) that declares how it waits for multiple incoming edges:
 
 ```iter
-join merge:
-  strategy: wait_all     # Wait for all branches (or: best_effort)
-  require: [branch_a, branch_b]
+agent merge:
+  model: "claude-sonnet-4-20250514"
+  input: branch_results
   output: merged_result
+  user: merge_prompt
+  await: wait_all        # or: best_effort
+
+workflow example:
+  fan -> branch_a
+  fan -> branch_b
+  branch_a -> merge
+  branch_b -> merge
 ```
 
-- `wait_all` — waits for every incoming branch
-- `best_effort` — proceeds when required branches finish, tolerates failures on others
+- `await: wait_all` — waits for every incoming branch
+- `await: best_effort` — proceeds with successful branches and tolerates failures on others
+
+Dedicated `join` node declarations are no longer supported; put `await:` on the node that consumes the parallel branch outputs.
 
 ### Human
 
@@ -146,19 +156,19 @@ human approval:
   input: approval_request
   output: approval_response
   instructions: approval_prompt
-  mode: pause_until_answers
+  interaction: human
   min_answers: 1
 
 ## LLM auto-answers (never pauses)
 human auto_review:
-  mode: auto_answer
+  interaction: llm
   model: "claude-sonnet-4-20250514"
   system: auto_review_prompt
   output: review_decision
 
 ## LLM decides whether to pause or auto-answer
 human conditional:
-  mode: auto_or_pause
+  interaction: llm_or_human
   model: "claude-sonnet-4-20250514"
   system: decision_guidance
   instructions: review_questions
@@ -290,7 +300,7 @@ workflow safe_pr_fix:
 ```
 
 - **`worktree: auto`** — the engine creates `<store-dir>/worktrees/<run-id>`, executes the workflow there, then on a clean exit creates a persistent branch (default `iterion/run/<friendly-name>`) and fast-forwards the user's currently-checked-out branch to that HEAD. Override with `--merge-into`, `--branch-name`, `--merge-strategy`, or `--auto-merge=false`. See [resume.md](resume.md).
-- **`sandbox: auto`** — reads `.devcontainer/devcontainer.json` and runs each agent/tool node inside an isolated container with the worktree bind-mounted at `/workspace`, plus an HTTP CONNECT proxy enforcing a network allowlist. Use `iterion sandbox doctor` to verify host capabilities. The `claw` backend cannot yet be sandboxed (a future `cmd/iterion-claw-runner` binary will close that gap). See [sandbox.md](sandbox.md).
+- **`sandbox: auto`** — reads `.devcontainer/devcontainer.json` (or falls back to the default iterion sandbox image) and runs each agent/tool node inside an isolated container with the worktree bind-mounted at `/workspace`, plus an HTTP CONNECT proxy enforcing a network allowlist. `claw` backend calls run through the hidden `iterion __claw-runner` subprocess inside the container, so custom images must provide `iterion` on PATH or allow the host binary to be bind-mounted. Use `iterion sandbox doctor` to verify host capabilities. See [sandbox.md](sandbox.md).
 
 ---
 
@@ -298,7 +308,7 @@ workflow safe_pr_fix:
 
 - [`grammar/iterion_v1.ebnf`](grammar/iterion_v1.ebnf) — formal EBNF grammar
 - [`references/dsl-grammar.md`](references/dsl-grammar.md) — readable grammar reference
-- [`references/diagnostics.md`](references/diagnostics.md) — all validation diagnostic codes (C001–C043)
+- [`references/diagnostics.md`](references/diagnostics.md) — all validation diagnostic codes (C001–C072, sparse)
 - [`references/patterns.md`](references/patterns.md) — 10 reusable workflow patterns
 - [`attachments.md`](attachments.md) — attachment handling
 - [`workflow_authoring_pitfalls.md`](workflow_authoring_pitfalls.md) — required reading before authoring workflows that commit code

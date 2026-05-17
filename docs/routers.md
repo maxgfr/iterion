@@ -21,30 +21,36 @@ LLM routers accept additional properties:
 ```iter
 router fix_router:
   mode: llm
-  model: "anthropic/claude-sonnet-4-6"   # or delegate: "claude_code"
+  model: "anthropic/claude-sonnet-4-6"   # or backend: "claude_code"
   system: routing_prompt                  # optional prompt ref
   user: user_prompt                       # optional prompt ref
   multi: true                             # select multiple routes (default: false)
 ```
 
-Using `model` makes a direct API call (via the in-process `claw` backend — supports `anthropic/...`, `openai/...`, etc.). Using `delegate` routes through a delegation backend — `claude_code` is the recommended CLI backend. (`codex` is also supported but discouraged; see the [Delegation](../README.md#delegation) section of the README for the rationale.) If neither is set, the engine falls back to a built-in default model.
+Using `model` makes a direct API call (via the in-process `claw` backend — supports `anthropic/...`, `openai/...`, etc.). Using `backend` routes through an external CLI agent — `claude_code` is the recommended CLI backend. (`codex` is also supported but discouraged; see the [Delegation](../README.md#delegation) section of the README for the rationale.) If neither is set, the engine falls back to a built-in default model.
 
 ---
 
 ## `fan_out_all` — parallel dispatch
 
-This is the default mode. The router sends execution to **every** outgoing edge simultaneously. Each target runs in its own branch, and branches converge at a downstream `join` node.
+This is the default mode. The router sends execution to **every** outgoing edge simultaneously. Each target runs in its own branch, and branches converge at a downstream node that declares `await: wait_all` or `await: best_effort`.
 
 ```iter
 router review_fanout:
   mode: fan_out_all
 
+agent synthesize_reviews:
+  model: "anthropic/claude-sonnet-4-6"
+  user: synthesize_prompt
+  await: wait_all
+
 workflow example:
   ...
   review_fanout -> claude_review
   review_fanout -> gpt_review
-  claude_review -> review_join
-  gpt_review -> review_join
+  claude_review -> synthesize_reviews
+  gpt_review -> synthesize_reviews
+  synthesize_reviews -> done
 ```
 
 The router itself is a pass-through — it forwards its input unchanged to all targets. The number of concurrent branches is bounded by the `max_parallel_branches` budget setting. For workspace safety, only one mutating branch (an agent or human with tools) is allowed at a time; read-only branches can run freely in parallel.
@@ -132,12 +138,12 @@ workflow example:
 
 ### Multi route example
 
-With `multi: true`, the LLM can select several routes at once. Selected targets run in parallel and converge at a join node.
+With `multi: true`, the LLM can select several routes at once. Selected targets run in parallel and converge at a downstream node that declares `await: wait_all` or `await: best_effort`.
 
 ```iter
 router fix_router:
   mode: llm
-  delegate: "claude_code"
+  backend: "claude_code"
   system: routing_prompt
   multi: true
 
@@ -146,9 +152,14 @@ workflow example:
   fix_router -> fix_code
   fix_router -> fix_docs
   fix_router -> fix_tests
-  fix_code -> fix_join
-  fix_docs -> fix_join
-  fix_tests -> fix_join
+  fix_code -> verify_fixes
+  fix_docs -> verify_fixes
+  fix_tests -> verify_fixes
+
+agent verify_fixes:
+  model: "anthropic/claude-sonnet-4-6"
+  user: verify_prompt
+  await: wait_all
 ```
 
 ### Model resolution
@@ -158,13 +169,15 @@ When using `model`, the engine resolves the model identifier through this chain:
 2. The `ITERION_DEFAULT_SUPERVISOR_MODEL` environment variable
 3. Built-in default: `anthropic/claude-sonnet-4-6`
 
-When using `delegate`, the named backend (e.g. `claude_code`) handles the LLM call entirely — no API key or model configuration needed on the Iterion side. (`codex` is also accepted but discouraged.)
+When using `backend`, the named backend (e.g. `claude_code`) handles the LLM call entirely — no API key or model configuration needed on the Iterion side. (`codex` is also accepted but discouraged.)
 
 ---
 
-## Convergence and joins
+## Convergence with `await`
 
-Parallel branches — whether from `fan_out_all` or `llm` multi-mode — must converge at a `join` node downstream. The engine detects the convergence point automatically. See the join node documentation for `wait_all` vs `best_effort` strategies.
+Parallel branches — whether from `fan_out_all` or `llm` multi-mode — converge at a real downstream node (agent, judge, human, tool, or compute) with multiple incoming edges. That target node declares `await: wait_all` to require every branch, or `await: best_effort` to continue with successful branches while tolerating failures.
+
+Routers are fan-out sources and do not declare `await:` themselves.
 
 ---
 
@@ -172,6 +185,6 @@ Parallel branches — whether from `fan_out_all` or `llm` multi-mode — must co
 
 The compiler catches common mistakes at compile time:
 
-- **LLM-only properties on non-LLM routers** — using `model`, `delegate`, `system`, `user`, or `multi` on a `fan_out_all`, `condition`, or `round_robin` router is an error.
-- **Missing model and delegate on LLM routers** — if neither `model` nor `delegate` is set, a warning is emitted (the built-in default model will be used at runtime).
+- **LLM-only properties on non-LLM routers** — using `model`, `backend`, `system`, `user`, or `multi` on a `fan_out_all`, `condition`, or `round_robin` router is an error.
+- **Missing model and backend on LLM routers** — if neither `model` nor `backend` is set, a warning is emitted (the built-in default model will be used at runtime).
 - **Conditional edges on LLM routers** — LLM routers must use unconditional edges because the LLM decides the route, not edge conditions.

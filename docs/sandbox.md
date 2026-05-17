@@ -20,8 +20,8 @@ The shortest path to a sandboxed run:
    ```
 
 3. Run the workflow as usual. iterion will pull the image, start the
-   container, route claude_code and tool nodes through it, and tear
-   the container down on exit.
+   container, route claude_code, claw, and tool nodes through it, and
+   tear the container down on exit.
 
 To enable sandboxing without touching the workflow source, pass
 `--sandbox=auto` to `iterion run`:
@@ -46,8 +46,8 @@ runStart
 ```
 
 A **single container** hosts the entire run. Multiple `docker exec`
-calls amortise the create+start cost over every claude_code, codex,
-or tool node invocation. The container's PID 1 is `sleep infinity` —
+calls amortise the create+start cost over every claude_code, claw,
+codex, or tool node invocation. The container's PID 1 is `sleep infinity` —
 iterion deliberately ignores the image's CMD/ENTRYPOINT in favour of
 treating the container as a long-lived "ssh-like" target.
 
@@ -111,14 +111,36 @@ Blocked requests surface to the run as a `network_blocked` event in
 
 ### `.iter` workflow
 
-Today only the simple form is parsed:
+The DSL accepts both short-form modes and block-form inline specs:
 
 ```iter
 workflow x:
-  sandbox: auto      # read .devcontainer/devcontainer.json
-                     # (or fall back to the default image — see below)
-  # OR
-  sandbox: none      # explicit opt-out (overrides global default)
+  # Short form: read .devcontainer/devcontainer.json, or fall back to
+  # the default image when no devcontainer is present.
+  sandbox: auto
+
+  # OR: explicit opt-out (overrides global/default settings).
+  sandbox: none
+
+  # OR: block form. When the block has image/build/env/mount/network
+  # fields and no explicit mode, it compiles as mode: inline.
+  sandbox:
+    image: "ghcr.io/acme/workflow-sandbox:sha256..."
+    # build:                         # mutually exclusive with image
+    #   dockerfile: "Dockerfile"
+    #   context: "."
+    #   args:
+    #     VERSION: "1.2.3"
+    user: "1000:1000"
+    workspace_folder: "/workspace"
+    post_create: "npm ci"
+    env:
+      NODE_ENV: "test"
+    mounts: ["type=bind,source=${localEnv:HOME}/.cache,target=/cache"]
+    network:
+      mode: allowlist
+      preset: "iterion-default"
+      rules: ["api.github.com", "!evil.site"]
 ```
 
 `sandbox: auto` reads `.devcontainer/devcontainer.json` from the
@@ -128,18 +150,29 @@ That fallback ships with `git`, Node 22, devbox, and Nix preinstalled,
 so the typical "agent installs deps, edits code, opens a PR" workflow
 runs out of the box. See [Default image](#default-image) below.
 
-Per-node overrides accept the same simple form on `agent`, `judge`,
-`tool`:
+Block form without `mode:` is treated as `mode: inline`. You may also
+write `mode: inline` explicitly. Inline mode must declare exactly one of
+`image:` or `build:`. `image:` uses a pre-built image reference;
+`build:` asks the local docker driver to run `docker buildx build`
+against the workflow workspace before starting the container. `env:`,
+`mounts:`, `network:`, `user:`, `workspace_folder:`, and
+`post_create:` are copied into the runtime sandbox spec for both inline
+and auto-mode fallback cases.
+
+Per-node overrides accept the same short or block form on `agent`,
+`judge`, and `tool`:
 
 ```iter
 agent shell_helper:
   sandbox: none      # this node runs on the host even though the
                      # workflow has sandbox: auto
-```
 
-The block form (inline image / mounts / network) is on the roadmap
-but not yet shipped — use `sandbox: auto` with a
-`.devcontainer/devcontainer.json` for full configuration.
+agent custom_env:
+  sandbox:
+    image: "python:3.12-bookworm"
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+```
 
 ### CLI
 
@@ -488,10 +521,17 @@ devcontainer. The fix is to either supply an image ref or commit a
 `.devcontainer/devcontainer.json` (see
 [`examples/devcontainer-devbox/`](../examples/devcontainer-devbox/)).
 
-### `sandbox: workflow contains a node using backend=claw`
+### `claw backend: spawn runner: exec: "iterion": executable file not found`
 
-The claw backend cannot be sandboxed yet (Phase 4). Either drop the
-sandbox, or change the affected nodes to `backend: claude_code`.
+Sandboxed `claw` calls are executed by running the hidden
+`iterion __claw-runner` command inside the container. The runtime emits
+`sandbox_claw_routed_via_runner` when this path is used and, on local
+hosts, tries to bind-mount a discovered host `iterion` binary at
+`/usr/local/bin/iterion`. If the container still cannot find `iterion`,
+use an iterion sandbox image that includes the binary, add it to your
+custom image, set `ITERION_BIN` so the host can mount it, or add an
+explicit read-only mount that places a compatible `iterion` binary on
+the container PATH.
 
 ### `network_blocked` events you don't expect
 
