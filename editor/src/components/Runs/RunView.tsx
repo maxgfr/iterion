@@ -12,6 +12,7 @@ import {
 } from "@/api/runs";
 import { IconButton, Skeleton, Tabs } from "@/components/ui";
 import { selectRunningExecution, useRunStore } from "@/store/run";
+import { useUIStore } from "@/store/ui";
 import { useRunWebSocket } from "@/hooks/useRunWebSocket";
 import { useLayoutPersistence } from "@/hooks/useLayoutPersistence";
 import { useRunToasts } from "@/hooks/useRunToasts";
@@ -264,8 +265,17 @@ export default function RunView() {
     if (!runId) return;
     if (bottomTab !== "events" && scrubSeq === null) return;
     loadEventHistoryIfMissing(runId).catch((err) => {
+      // The store rolls back its historyFetchedForRun marker, but the
+      // user-visible Events tab / scrubber would otherwise render
+      // empty with no indication of why. Surface a toast so the
+      // operator knows the next retry is on them (re-open the tab).
       // eslint-disable-next-line no-console
       console.warn("[run] event history hydration failed:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      useUIStore.getState().addToast(
+        `Couldn't load event history: ${msg}`,
+        "error",
+      );
     });
   }, [runId, bottomTab, scrubSeq, loadEventHistoryIfMissing]);
 
