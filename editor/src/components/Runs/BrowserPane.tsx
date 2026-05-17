@@ -72,7 +72,7 @@ export default function BrowserPane({
     try {
       const res = await fetch(
         `/api/runs/${encodeURIComponent(runId)}/browser/attach`,
-        { method: "POST" },
+        { method: "POST", credentials: "include" },
       );
       if (!res.ok) {
         const text = await res.text();
@@ -260,7 +260,14 @@ export default function BrowserPane({
             src={iframeSrc}
             title="Preview"
             className="h-full w-full border-0"
-            sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
+            // Intentionally NOT including allow-same-origin: in the
+            // internal/proxied scope, the iframe loads under the SPA
+            // origin, and combining allow-scripts + allow-same-origin
+            // would let workflow-published HTML remove the sandbox and
+            // touch parent state (window.parent, localStorage,
+            // cookies). The unique opaque origin a sandboxed iframe
+            // gets without this token is exactly what we want.
+            sandbox="allow-scripts allow-forms allow-popups"
           />
         ) : (
           <div className="flex h-full items-center justify-center p-6 text-center text-sm text-text-2">
