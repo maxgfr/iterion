@@ -207,12 +207,31 @@ export function messagesFromEvents({
         // out of the node's nodeMap entry — different human nodes use
         // different schema field names (ask_priorities → context;
         // human_review → feedback).
-        const nodeId = evt.node_id;
+        //
+        // Fallback: when an older event payload arrives without a
+        // node_id, use the most recent pending-human key as a last
+        // resort. The runtime always stamps node_id today; this kept
+        // the tolerance the previous TODO comment promised but never
+        // actually wired.
+        let nodeId = evt.node_id;
+        let key: string;
+        if (nodeId) {
+          const iter = iterationOf(evt);
+          key = humanId(nodeId, iter);
+        } else if (latestPendingHumanKey) {
+          key = latestPendingHumanKey;
+          const fallbackEntry = humanIdx.get(key);
+          if (fallbackEntry === undefined) break;
+          // Recover the nodeId from the pending message so downstream
+          // logic that needs the nodeMap lookup still works.
+          const pending = out[fallbackEntry] as HumanQuestionMessage | undefined;
+          nodeId = pending?.nodeId;
+        } else {
+          break;
+        }
         if (!nodeId) break;
         const entry = bot.nodeMap[nodeId];
         if (!entry || entry.kind !== "human") break;
-        const iter = iterationOf(evt);
-        const key = humanId(nodeId, iter);
         const idx = humanIdx.get(key);
         if (idx === undefined) break;
         const current = out[idx] as HumanQuestionMessage;

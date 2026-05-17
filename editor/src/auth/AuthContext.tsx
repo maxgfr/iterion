@@ -101,18 +101,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState(localIdentity);
       return;
     }
-    try {
-      const me = await getMe();
-      setState((prev) => applyResponse(prev, me));
-      return;
-    } catch (err) {
-      // Only fall through to refresh when the access cookie is
-      // actually invalid (401). A 5xx / network blip is transient —
-      // don't burn a refresh-token rotation on a server hiccup.
-      if (err instanceof ApiError && err.status !== 401) {
-        setState({ ...initial, status: "anonymous" });
+    // Try getMe up to 3 times with exponential backoff on transient
+    // 5xx errors so a server hiccup at startup doesn't bounce a
+    // user with a valid session out to the login screen.
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const me = await getMe();
+        setState((prev) => applyResponse(prev, me));
         return;
+      } catch (err) {
+        lastErr = err;
+        if (err instanceof ApiError && err.status === 401) {
+          break;
+        }
+        // Transient (network blip / 5xx) — wait and try again.
+        await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
       }
+    }
+    if (lastErr instanceof ApiError && lastErr.status !== 401) {
+      setState({ ...initial, status: "anonymous" });
+      return;
     }
     try {
       const r = await apiRefresh();
