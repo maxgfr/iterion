@@ -108,6 +108,17 @@ vars:
   ## for nightly / per-PR runs (`--var diff_since=main`).
   diff_since: string = ""
 
+  ## Inter-run audit cache (v0.5.0). Path to the JSON cache file
+  ## that stores `{doc_path: {sha, refs: [{path, sha}]}}` from the
+  ## previous successful run. scan_docs reads this and emits
+  ## `pre_verified_docs` for entries whose doc content AND all
+  ## cited code-file SHAs are unchanged. update_audit_cache (the
+  ## terminal tool node) writes the merged state after commit.
+  ## Empty string disables both reads and writes — useful for
+  ## the first run on a workspace or when you want a guaranteed
+  ## fresh audit.
+  audit_cache_path: string = ".iterion/doc-align/audit-cache.json"
+
 
 ## ─── Prompts ────────────────────────────────────────────────────
 
@@ -204,6 +215,17 @@ prompt review_user_claude:
   for prioritisation — full footprint still required):
   {{input.recently_changed_code_files}}
 
+  Pre-verified docs from inter-run cache (v0.5.0). These were
+  audited in a previous run and BOTH their content AND every
+  referenced code file's content are unchanged since — so they
+  are already counted toward the cumulative coverage gate. You
+  may skip deep auditing them this iteration; prefer focusing
+  on `input.doc_files - input.pre_verified_docs`. If you DO
+  re-audit one and find drift the cache missed, raise it as a
+  blocker — that's a real bug and the cache will be invalidated
+  next run:
+  {{input.pre_verified_docs}}
+
   Scope notes (operator's attention pin):
   {{vars.scope_notes}}
 
@@ -278,6 +300,17 @@ prompt review_user_gpt:
   Recently changed code files (diff_since={{vars.diff_since}}, hint
   for prioritisation — full footprint still required):
   {{input.recently_changed_code_files}}
+
+  Pre-verified docs from inter-run cache (v0.5.0). These were
+  audited in a previous run and BOTH their content AND every
+  referenced code file's content are unchanged since — so they
+  are already counted toward the cumulative coverage gate. You
+  may skip deep auditing them this iteration; prefer focusing
+  on `input.doc_files - input.pre_verified_docs`. If you DO
+  re-audit one and find drift the cache missed, raise it as a
+  blocker — that's a real bug and the cache will be invalidated
+  next run:
+  {{input.pre_verified_docs}}
 
   Scope notes (operator's attention pin):
   {{vars.scope_notes}}
@@ -457,6 +490,14 @@ prompt prepare_commit_user:
 ## populated from `git diff` when vars.diff_since is set
 ## (otherwise empty array). bundle_self_path is echoed for
 ## transparency.
+##
+## v0.5.0 adds `pre_verified_docs`: docs whose content AND all
+## referenced code-file SHAs match what was recorded in
+## `.iterion/doc-align/audit-cache.json` after the previous
+## successful run. These docs are seeded into
+## `cumulative_audited_docs` from iter 0, lifting the coverage
+## gate immediately for unchanged regions. Reviewers focus on
+## `doc_files - pre_verified_docs`.
 schema scan_output:
   doc_files: string[]
   doc_count: int
@@ -464,6 +505,9 @@ schema scan_output:
   scope_globs: string[]
   recently_changed_code_files: string[]
   bundle_self_path: string
+  pre_verified_docs: string[]
+  cache_hits: int
+  cache_misses: int
 
 ## review_input v0.2.0: the v0.1.0 fields plus the four new
 ## fields that route fix-iteration metadata + coverage signal
@@ -476,6 +520,7 @@ schema review_input:
   footprint_hash: string
   scope_globs: string[]
   recently_changed_code_files: string[]
+  pre_verified_docs: string[]
   prior_pushback: string[]
   prior_pushback_justification: string
   prior_code_files_touched_claude: string[]
@@ -558,6 +603,22 @@ schema commit_result:
   success: bool
   output: string
 
+## update_audit_cache I/O (v0.5.0). The `audited_pairs: string[]`
+## field is shell-tokenised by iterion's template substitution
+## (`'pair1' 'pair2' 'pair3'`) so each element lands as a separate
+## argv entry to python3 — env var passing breaks on internal
+## whitespace, JSON encoding is unreachable via the {{!...}} raw
+## form because raw values still go through env-var assignment.
+schema update_audit_cache_input:
+  workspace_dir: string
+  cache_path: string
+  audited_pairs: string[]
+
+schema update_audit_cache_output:
+  cache_path: string
+  entries_written: int
+  skipped: string
+
 
 ## ─── Nodes ──────────────────────────────────────────────────────
 
@@ -572,12 +633,13 @@ schema commit_result:
 ## are then exposed to python via shell env vars (WS, GLOBS,
 ## BUNDLE_SELF, DIFF_SINCE).
 tool scan_docs:
-  command: `WS={{vars.workspace_dir}} GLOBS={{vars.doc_globs}} BUNDLE_SELF={{vars.bundle_self_path}} DIFF_SINCE={{vars.diff_since}} python3 -c "
+  command: `WS={{vars.workspace_dir}} GLOBS={{vars.doc_globs}} BUNDLE_SELF={{vars.bundle_self_path}} DIFF_SINCE={{vars.diff_since}} CACHE_PATH={{vars.audit_cache_path}} python3 -c "
 import os, json, glob, hashlib, subprocess
 ws = os.environ['WS']
 globs = [g.strip() for g in os.environ['GLOBS'].split(',') if g.strip()]
 bundle_self = os.environ.get('BUNDLE_SELF', '').strip().rstrip(os.sep)
 diff_since = os.environ.get('DIFF_SINCE', '').strip()
+cache_path = os.environ.get('CACHE_PATH', '').strip()
 os.chdir(ws)
 EXCLUDE_DIRS = {'.iterion', '.works', '.claude', 'vendor', 'node_modules', '.git', 'dist', 'build', 'out'}
 def excluded(p):
@@ -586,6 +648,12 @@ def excluded(p):
     if bundle_self and (p == bundle_self or p.startswith(bundle_self + os.sep)):
         return True
     return False
+def sha_of_file(p):
+    try:
+        with open(p, 'rb') as fh:
+            return hashlib.sha1(fh.read()).hexdigest()
+    except (FileNotFoundError, IsADirectoryError, PermissionError):
+        return 'missing'
 files = sorted({f for g in globs for f in glob.glob(g, recursive=True) if os.path.isfile(f) and not excluded(f)})
 h = hashlib.sha1(chr(10).join(files).encode()).hexdigest()
 recent = []
@@ -595,7 +663,41 @@ if diff_since:
         recent = sorted([l for l in proc.stdout.splitlines() if l and not excluded(l)])
     except Exception:
         recent = []
-print(json.dumps({'doc_files': files, 'doc_count': len(files), 'footprint_hash': h, 'scope_globs': globs, 'recently_changed_code_files': recent, 'bundle_self_path': bundle_self}))
+pre_verified = []
+hits = 0
+misses = 0
+if cache_path:
+    try:
+        with open(cache_path) as cf:
+            cache = json.load(cf)
+        doc_entries = cache.get('doc', {})
+        for doc_path in files:
+            entry = doc_entries.get(doc_path)
+            if not entry:
+                misses += 1
+                continue
+            current_sha = sha_of_file(doc_path)
+            if entry.get('sha') != current_sha:
+                misses += 1
+                continue
+            refs_ok = True
+            for ref in entry.get('refs', []):
+                p = ref.get('p', '')
+                s = ref.get('s', '')
+                if not p:
+                    continue
+                current = sha_of_file(p) if os.path.exists(p) else 'missing'
+                if current != s:
+                    refs_ok = False
+                    break
+            if refs_ok:
+                pre_verified.append(doc_path)
+                hits += 1
+            else:
+                misses += 1
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+print(json.dumps({'doc_files': files, 'doc_count': len(files), 'footprint_hash': h, 'scope_globs': globs, 'recently_changed_code_files': recent, 'bundle_self_path': bundle_self, 'pre_verified_docs': pre_verified, 'cache_hits': hits, 'cache_misses': misses}))
 "`
   output: scan_output
 
@@ -675,15 +777,22 @@ judge reviewer_gpt:
 compute streak_check:
   output: streak_state
   expr:
-    stop: "(input.approved || input.blocker_count == 0) && (loop.review_loop.previous_output.approved || loop.review_loop.previous_output.blocker_count == 0) && input.family != loop.review_loop.previous_output.family && if(outputs.scan_docs.doc_count > 0, length(unique(concat(outputs.streak_check.cumulative_audited_docs, input.audited_docs))) * 100 / outputs.scan_docs.doc_count, 0) >= vars.coverage_target_pct"
+    stop: "(input.approved || input.blocker_count == 0) && (loop.review_loop.previous_output.approved || loop.review_loop.previous_output.blocker_count == 0) && input.family != loop.review_loop.previous_output.family && if(outputs.scan_docs.doc_count > 0, length(unique(concat(outputs.scan_docs.pre_verified_docs, outputs.streak_check.cumulative_audited_docs, input.audited_docs))) * 100 / outputs.scan_docs.doc_count, 0) >= vars.coverage_target_pct"
     approved: "input.approved || input.confidence == 'low' || input.blocker_count == 0"
     family: "input.family"
     blockers: "input.blockers"
     blocker_count: "input.blocker_count"
     fix_plan: "input.fix_plan"
     cumulative_audited_pairs: "unique(concat(outputs.streak_check.cumulative_audited_pairs, input.audited_pairs))"
-    cumulative_audited_docs: "unique(concat(outputs.streak_check.cumulative_audited_docs, input.audited_docs))"
-    coverage_pct: "if(outputs.scan_docs.doc_count > 0, if(length(unique(concat(outputs.streak_check.cumulative_audited_docs, input.audited_docs))) * 100 / outputs.scan_docs.doc_count > 100, 100, length(unique(concat(outputs.streak_check.cumulative_audited_docs, input.audited_docs))) * 100 / outputs.scan_docs.doc_count), 0)"
+    ## v0.5.0: pre_verified_docs (from the inter-run cache via
+    ## scan_docs) is folded into cumulative_audited_docs from the
+    ## first compute call. This is what gives the cache its
+    ## speedup: docs unchanged since the previous run are counted
+    ## as covered immediately, so coverage_pct >= target can fire
+    ## on the first reviewer's audit_docs without re-reading the
+    ## unchanged majority.
+    cumulative_audited_docs: "unique(concat(outputs.scan_docs.pre_verified_docs, outputs.streak_check.cumulative_audited_docs, input.audited_docs))"
+    coverage_pct: "if(outputs.scan_docs.doc_count > 0, if(length(unique(concat(outputs.scan_docs.pre_verified_docs, outputs.streak_check.cumulative_audited_docs, input.audited_docs))) * 100 / outputs.scan_docs.doc_count > 100, 100, length(unique(concat(outputs.scan_docs.pre_verified_docs, outputs.streak_check.cumulative_audited_docs, input.audited_docs))) * 100 / outputs.scan_docs.doc_count), 0)"
 
 agent fix_claude:
   backend: "claude_code"
@@ -727,6 +836,65 @@ tool commit_changes:
   input: commit_tool_input
   output: commit_result
 
+## update_audit_cache (v0.5.0): rewrites
+## `<workspace_dir>/<audit_cache_path>` from the run's cumulative
+## audited_pairs. Each pair `"<doc>::<anchor>"` contributes a
+## reference entry; the anchor's path component is extracted with
+## a permissive regex (everything up to the first `:`, space, or
+## `(`). The current sha1 of each referenced path is captured so
+## the NEXT run can pre-verify untouched (doc, refs) tuples.
+##
+## Empty cache_path disables the write — useful for one-shot CI
+## runs that don't want to persist state.
+##
+## Runs after commit_changes so a failed commit doesn't poison
+## the cache with audit data that wasn't actually shipped.
+tool update_audit_cache:
+  command: `python3 -c "
+import os, json, hashlib, re, sys, pathlib
+ws = sys.argv[1]
+cache_path = sys.argv[2]
+pairs = sys.argv[3:]
+if not cache_path:
+    print(json.dumps({'cache_path': '', 'entries_written': 0, 'skipped': 'no cache_path'}))
+    sys.exit(0)
+os.chdir(ws)
+def sha_of_file(p):
+    try:
+        with open(p, 'rb') as fh:
+            return hashlib.sha1(fh.read()).hexdigest()
+    except (FileNotFoundError, IsADirectoryError, PermissionError):
+        return 'missing'
+def extract_path(anchor):
+    a = (anchor or '').strip()
+    if not a or a.startswith('<'):
+        return None
+    m = re.match(r'([^\s:()]+)', a)
+    return m.group(1) if m else None
+by_doc = {}
+for pair in pairs:
+    if not isinstance(pair, str) or '::' not in pair:
+        continue
+    doc, anchor = pair.split('::', 1)
+    p = extract_path(anchor)
+    if not p:
+        continue
+    by_doc.setdefault(doc, set()).add(p)
+doc_entries = {}
+for doc, refs in by_doc.items():
+    doc_entries[doc] = {
+        'sha': sha_of_file(doc),
+        'refs': sorted(({'p': p, 's': sha_of_file(p) if os.path.exists(p) else 'missing'} for p in refs), key=lambda r: r['p']),
+    }
+out_path = pathlib.Path(cache_path)
+out_path.parent.mkdir(parents=True, exist_ok=True)
+with open(out_path, 'w') as out:
+    json.dump({'v': 1, 'doc': doc_entries}, out, indent=2, sort_keys=True)
+print(json.dumps({'cache_path': str(out_path), 'entries_written': len(doc_entries), 'skipped': ''}))
+" {{input.workspace_dir}} {{input.cache_path}} {{input.audited_pairs}}`
+  input: update_audit_cache_input
+  output: update_audit_cache_output
+
 
 ## ─── Workflow ───────────────────────────────────────────────────
 
@@ -762,6 +930,7 @@ workflow doc_align:
     footprint_hash: "{{outputs.scan_docs.footprint_hash}}",
     scope_globs: "{{outputs.scan_docs.scope_globs}}",
     recently_changed_code_files: "{{outputs.scan_docs.recently_changed_code_files}}",
+    pre_verified_docs: "{{outputs.scan_docs.pre_verified_docs}}",
     prior_pushback: "{{outputs.fix_gpt.pushback}}",
     prior_pushback_justification: "{{outputs.fix_gpt.pushback_justification}}",
     prior_code_files_touched_claude: "{{outputs.fix_claude.code_files_touched}}",
@@ -777,6 +946,7 @@ workflow doc_align:
     footprint_hash: "{{outputs.scan_docs.footprint_hash}}",
     scope_globs: "{{outputs.scan_docs.scope_globs}}",
     recently_changed_code_files: "{{outputs.scan_docs.recently_changed_code_files}}",
+    pre_verified_docs: "{{outputs.scan_docs.pre_verified_docs}}",
     prior_pushback: "{{outputs.fix_claude.pushback}}",
     prior_pushback_justification: "{{outputs.fix_claude.pushback_justification}}",
     prior_code_files_touched_claude: "{{outputs.fix_claude.code_files_touched}}",
@@ -817,7 +987,17 @@ workflow doc_align:
     workspace_dir: "{{vars.workspace_dir}}"
   }
 
-  commit_changes -> done
+  ## v0.5.0: inter-run cache is updated AFTER a successful commit
+  ## so a failed commit doesn't poison the cache with un-shipped
+  ## audit state. update_audit_cache is a deterministic tool
+  ## (no LLM cost) so this adds ~ms to the run.
+  commit_changes -> update_audit_cache with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    cache_path: "{{vars.audit_cache_path}}",
+    audited_pairs: "{{outputs.streak_check.cumulative_audited_pairs}}"
+  }
+
+  update_audit_cache -> done
 
   ## Soft-approval (no streak yet, or low-confidence rejection):
   ## keep alternating without invoking the fixer.
@@ -843,7 +1023,8 @@ workflow doc_align:
   fix_claude -> alt as recovery_loop(20)
   fix_gpt    -> alt as recovery_loop(20)
 
-  ## Loop-exhaustion fallthroughs.
+  ## Loop-exhaustion fallthroughs (update_audit_cache has its
+  ## unconditional `→ done` declared in the main commit path).
   reviewer_claude -> done
   reviewer_gpt    -> done
   fix_claude      -> done
