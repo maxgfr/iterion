@@ -1,0 +1,268 @@
+// messagesFromEvents folds a chronologically-ordered RunEvent[] stream
+// into the PiloteMessage[] the chat transcript consumes.
+//
+// The mapping is driven by the bot's `nodeMap`: each known node id has
+// a `kind` ("banner" | "human" | "silent" | …) and optional rules
+// (summaryField, followCardKind, prompt, actions). Events for unknown
+// nodes are silently dropped — keeps the chat focused on the steps
+// the bot author chose to surface.
+//
+// Output ordering: messages are pushed in the order of the originating
+// events. Each agent node produces a banner; the banner closes when
+// the matching `node_finished` arrives and (for `followCardKind`) a
+// typed card is pushed right after. Human nodes produce a single
+// human-question message that flips from "pending" to "answered" when
+// the next `run_resumed` lands.
+//
+// Iteration: the runtime stamps `iteration` on `node_started.data`.
+// For nodes inside `approval_loop(10)` (revise_roadmap, human_review,
+// carry_roadmap), this lets us key one message per iteration so the
+// transcript shows the loop progression instead of mutating a single
+// entry.
+
+import type { RunEvent, RunSnapshot } from "@/api/runs";
+import type { FirstClassBot } from "@/lib/pilote/firstClassBots";
+
+import {
+  asEmitOutput,
+  asRoadmapDoc,
+  type PiloteMessage,
+  type BannerMessage,
+  type HumanQuestionMessage,
+  type RoadmapCardMessage,
+  type IssuesSummaryMessage,
+} from "./messages";
+
+interface MapInputs {
+  bot: FirstClassBot;
+  events: ReadonlyArray<RunEvent>;
+  snapshot: RunSnapshot | null;
+}
+
+// Generic accessor for snapshot.run.checkpoint.outputs[nodeId]. Used
+// to pull the structured agent output keyed by node id. The runtime
+// embeds the same outputs map in artifact_written events, but the
+// checkpoint is the source of truth and survives WS reconnects.
+function checkpointOutput(
+  snapshot: RunSnapshot | null,
+  nodeId: string,
+): Record<string, unknown> | null {
+  const checkpoint = (snapshot?.run.checkpoint ?? null) as
+    | { outputs?: Record<string, Record<string, unknown>> }
+    | null;
+  return checkpoint?.outputs?.[nodeId] ?? null;
+}
+
+function getString(obj: Record<string, unknown> | null, key: string): string {
+  const v = obj?.[key];
+  return typeof v === "string" ? v : "";
+}
+
+function iterationOf(evt: RunEvent): number {
+  const raw = evt.data?.iteration;
+  return typeof raw === "number" ? raw : 0;
+}
+
+function bannerId(nodeId: string, iter: number) {
+  return `${nodeId}:${iter}`;
+}
+
+function humanId(nodeId: string, iter: number) {
+  return `${nodeId}:${iter}:question`;
+}
+
+export function messagesFromEvents({
+  bot,
+  events,
+  snapshot,
+}: MapInputs): PiloteMessage[] {
+  const out: PiloteMessage[] = [];
+
+  // Track which banner is currently "running" for each (node, iter) so
+  // node_finished can flip it in place and so a duplicate node_started
+  // (WS replay) doesn't push a second banner.
+  const bannerIdx = new Map<string, number>(); // key -> index in `out`
+  const humanIdx = new Map<string, number>();
+
+  // Track the latest pending human-question so we know which one
+  // to flip to "answered" if the runtime ever sends a
+  // human_answers_recorded event without a node_id (defence in depth
+  // — the runtime always stamps node_id today, but we tolerate older
+  // event shapes).
+  let latestPendingHumanKey: string | null = null;
+
+  for (const evt of events) {
+    if (!evt.type) continue;
+    switch (evt.type) {
+      case "node_started": {
+        const nodeId = evt.node_id;
+        if (!nodeId) break;
+        const entry = bot.nodeMap[nodeId];
+        if (!entry) break;
+
+        const iter = iterationOf(evt);
+        if (entry.kind === "banner") {
+          const key = bannerId(nodeId, iter);
+          if (bannerIdx.has(key)) break; // dedupe replay
+          const idx = out.length;
+          out.push({
+            kind: "banner",
+            id: key,
+            nodeId,
+            label: entry.label ?? nodeId,
+            status: "running",
+          } satisfies BannerMessage);
+          bannerIdx.set(key, idx);
+        } else if (entry.kind === "human") {
+          // We push a *pending* human question on the matching
+          // `human_input_requested`, not on node_started — the request
+          // event carries the resolved `questions` map. node_started
+          // alone is enough to know the human node is *about* to ask,
+          // but Step 3 needs the schema/questions to render the form
+          // correctly. So: nothing to do here for human entries.
+        }
+        // "silent" and other kinds: ignored.
+        break;
+      }
+
+      case "node_finished": {
+        const nodeId = evt.node_id;
+        if (!nodeId) break;
+        const entry = bot.nodeMap[nodeId];
+        if (!entry) break;
+
+        const iter = iterationOf(evt);
+        if (entry.kind === "banner") {
+          const key = bannerId(nodeId, iter);
+          const idx = bannerIdx.get(key);
+          if (idx === undefined) break;
+          const summary = entry.summaryField
+            ? getString(checkpointOutput(snapshot, nodeId), entry.summaryField)
+            : "";
+          const updated: BannerMessage = {
+            ...(out[idx] as BannerMessage),
+            status: "done",
+            summary: summary || undefined,
+          };
+          out[idx] = updated;
+
+          // Post-banner follow-up cards (roadmap, issues-summary).
+          if (entry.followCardKind === "roadmap") {
+            const roadmap = asRoadmapDoc(checkpointOutput(snapshot, nodeId));
+            if (roadmap) {
+              out.push({
+                kind: "roadmap-card",
+                id: `${nodeId}:${iter}:roadmap`,
+                nodeId,
+                iteration: iter,
+                roadmap,
+              } satisfies RoadmapCardMessage);
+            }
+          } else if (entry.followCardKind === "issuesSummary") {
+            const emit = asEmitOutput(checkpointOutput(snapshot, nodeId));
+            if (emit) {
+              out.push({
+                kind: "issues-summary",
+                id: `${nodeId}:${iter}:issues`,
+                nodeId,
+                createdIssues: emit.createdIssues,
+                failedIssues: emit.failedIssues,
+                planPath: emit.planPath,
+                summary: emit.summary,
+              } satisfies IssuesSummaryMessage);
+            }
+          }
+        }
+        break;
+      }
+
+      case "human_input_requested": {
+        const nodeId = evt.node_id;
+        if (!nodeId) break;
+        const entry = bot.nodeMap[nodeId];
+        if (!entry || entry.kind !== "human") break;
+
+        const iter = iterationOf(evt);
+        const key = humanId(nodeId, iter);
+        if (humanIdx.has(key)) break; // dedupe replay
+        const idx = out.length;
+        out.push({
+          kind: "human-question",
+          id: key,
+          nodeId,
+          prompt: entry.prompt ?? "Reply to continue.",
+          status: "pending",
+          actions: entry.actions,
+        } satisfies HumanQuestionMessage);
+        humanIdx.set(key, idx);
+        latestPendingHumanKey = key;
+        break;
+      }
+
+      case "human_answers_recorded": {
+        // The runtime stamps the user's answers on the human node.
+        // Match the answered turn by node_id (more reliable than
+        // following a "latestPending" cursor, which gets confused by
+        // the carry_roadmap silent loop). Pull the user-visible text
+        // out of the node's nodeMap entry — different human nodes use
+        // different schema field names (ask_priorities → context;
+        // human_review → feedback).
+        const nodeId = evt.node_id;
+        if (!nodeId) break;
+        const entry = bot.nodeMap[nodeId];
+        if (!entry || entry.kind !== "human") break;
+        const iter = iterationOf(evt);
+        const key = humanId(nodeId, iter);
+        const idx = humanIdx.get(key);
+        if (idx === undefined) break;
+        const current = out[idx] as HumanQuestionMessage;
+        const answers = (evt.data?.answers ?? null) as Record<string, unknown> | null;
+        const textKey = entry.textField;
+        const approvedKey = entry.approvedField;
+        const text =
+          (textKey && typeof answers?.[textKey] === "string"
+            ? (answers[textKey] as string)
+            : "") || "";
+        const approved =
+          approvedKey && typeof answers?.[approvedKey] === "boolean"
+            ? (answers[approvedKey] as boolean)
+            : undefined;
+        out[idx] = {
+          ...current,
+          status: "answered",
+          userReply: text || current.userReply,
+          outcome: approved !== undefined ? { approved } : current.outcome,
+        };
+        if (latestPendingHumanKey === key) latestPendingHumanKey = null;
+        break;
+      }
+
+      case "run_finished":
+        out.push({
+          kind: "session-closed",
+          id: `closed:${evt.seq}`,
+          reason: "finished",
+        });
+        break;
+      case "run_failed":
+        out.push({
+          kind: "session-closed",
+          id: `closed:${evt.seq}`,
+          reason: "failed",
+        });
+        break;
+      case "run_cancelled":
+        out.push({
+          kind: "session-closed",
+          id: `closed:${evt.seq}`,
+          reason: "cancelled",
+        });
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  return out;
+}

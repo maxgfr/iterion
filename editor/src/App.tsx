@@ -3,6 +3,7 @@ import { Route, Switch } from "wouter";
 
 import EditorView from "@/components/EditorView";
 import HomeView from "@/components/Home/HomeView";
+import PiloteView from "@/components/Pilote/PiloteView";
 import LaunchView from "@/components/Runs/LaunchView";
 import RunListView from "@/components/Runs/RunListView";
 import RunView from "@/components/Runs/RunView";
@@ -171,6 +172,11 @@ function AuthedApp() {
           </Route>
         )}
         <Route path="/editor" component={EditorView} />
+        <Route path="/pilote">
+          <ErrorBoundary area="Pilote view">
+            <PiloteView />
+          </ErrorBoundary>
+        </Route>
         <Route path="/" component={HomeView} />
         <Route component={HomeView} />
       </Switch>
