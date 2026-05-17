@@ -73,6 +73,18 @@ type PendingAuth struct {
 	RedirectURI  string
 	NextURL      string // post-login redirect target (sanitized to relative paths)
 	IssuedAt     time.Time
+	// AgentBinding is a per-flow random token the HTTP layer sets as
+	// an HttpOnly cookie at /start and verifies at /callback. RFC 9700
+	// (OAuth 2.0 Security BCP) §4.7.1 mandates a CSRF mechanism beyond
+	// `state`; the state parameter alone proves freshness/uniqueness
+	// but does not bind the flow to the user agent that initiated it.
+	// Without this binding, an attacker who completes /start in their
+	// browser and lures a victim into hitting /callback with that
+	// state pins the victim into the attacker's account on iterion
+	// (the classic login-CSRF / session-fixation against OAuth).
+	// Empty string for non-browser callers (CLI / SDK) where the
+	// transport guarantees agent binding by other means.
+	AgentBinding string
 }
 
 // StateStore is the persistence interface for PendingAuth records.

@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -14,6 +17,19 @@ import (
 	"github.com/SocialGouv/iterion/pkg/auth/oidc"
 	"github.com/SocialGouv/iterion/pkg/identity"
 )
+
+// oidcAgentBindingCookie is the per-flow HttpOnly cookie set at
+// /api/auth/oidc/<provider>/start and verified at the matching
+// /callback. RFC 9700 (OAuth 2.0 Security BCP) §4.7.1: the `state`
+// parameter proves freshness/uniqueness but does NOT bind the flow to
+// the user agent. Without this cookie an attacker who completes
+// /start in their browser and lures the victim into the resulting
+// callback pins the victim into the attacker's account on iterion
+// (classic login-CSRF / session fixation against OAuth/OIDC).
+//
+// Path-scoped to /api/auth/oidc/ so unrelated requests don't carry
+// the value. 10 min MaxAge matches the StateStore TTL.
+const oidcAgentBindingCookie = "iterion_oidc_agent"
 
 // registerAuthRoutes wires every /api/auth/* and /api/teams/*
 // endpoint. Called from routes() when AuthService is non-nil.
@@ -392,6 +408,11 @@ func (s *Server) handleOIDCStart(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, "build authorize URL: %v", err)
 		return
 	}
+	binding, err := newAgentBindingToken()
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 	if err := s.oidcStates.Put(r.Context(), oidc.PendingAuth{
 		Provider:     name,
 		State:        state,
@@ -399,15 +420,58 @@ func (s *Server) handleOIDCStart(w http.ResponseWriter, r *http.Request) {
 		RedirectURI:  redirectURI,
 		NextURL:      next,
 		IssuedAt:     time.Now().UTC(),
+		AgentBinding: binding,
 	}); err != nil {
 		httpError(w, http.StatusInternalServerError, "persist state: %v", err)
 		return
 	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     oidcAgentBindingCookie,
+		Value:    binding,
+		Path:     "/api/auth/oidc/",
+		Domain:   s.cfg.CookieDomain,
+		HttpOnly: true,
+		Secure:   s.cfg.CookieSecure,
+		// SameSite=Lax is required: the callback is a top-level GET
+		// navigation from the IdP and Strict would block the cookie.
+		// Lax is sufficient because we additionally require the cookie
+		// value to match PendingAuth.AgentBinding at /callback — a
+		// cross-site script can't read the cookie (HttpOnly) and can't
+		// set a cookie for iterion's origin (same-origin policy).
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int((10 * time.Minute).Seconds()),
+	})
 	if r.URL.Query().Get("format") == "json" {
 		writeJSON(w, map[string]string{"authorize_url": authURL})
 		return
 	}
 	http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+// newAgentBindingToken returns a 32-byte base64url-encoded random
+// token used as the OIDC flow's user-agent binding cookie.
+func newAgentBindingToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// clearOIDCAgentBindingCookie deletes the per-flow agent-binding
+// cookie. Called at /callback (regardless of outcome) so each cookie
+// is used at most once.
+func clearOIDCAgentBindingCookie(w http.ResponseWriter, domain string, secure bool) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     oidcAgentBindingCookie,
+		Value:    "",
+		Path:     "/api/auth/oidc/",
+		Domain:   domain,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
 }
 
 func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
@@ -448,6 +512,18 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	if pending.Provider != name {
 		httpError(w, http.StatusBadRequest, "state/provider mismatch")
 		return
+	}
+	// Verify the user-agent binding cookie matches the one issued at
+	// /start (login-CSRF guard per RFC 9700 §4.7.1). Constant-time
+	// compare avoids timing leaks on near-miss values. The cookie is
+	// cleared regardless of outcome — single-use semantics.
+	if pending.AgentBinding != "" {
+		c, cerr := r.Cookie(oidcAgentBindingCookie)
+		clearOIDCAgentBindingCookie(w, s.cfg.CookieDomain, s.cfg.CookieSecure)
+		if cerr != nil || subtle.ConstantTimeCompare([]byte(c.Value), []byte(pending.AgentBinding)) != 1 {
+			httpError(w, http.StatusBadRequest, "agent binding mismatch")
+			return
+		}
 	}
 	ext, err := c.ExchangeCode(r.Context(), code, pending.RedirectURI, pending.CodeVerifier)
 	if err != nil {
