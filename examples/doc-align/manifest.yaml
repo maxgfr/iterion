@@ -1,0 +1,28 @@
+name: doc-align
+version: 0.1.0
+description: |
+  Documentation alignment bot. Detects mismatches between project
+  documentation (README, docs/*.md, CLAUDE.md, bundled skills,
+  Go code comments) and the actual current state of the code, then
+  fixes the DOCS (never the code) and auto-commits on convergence.
+
+  Workflow shape mirrors branch_improve_loop: alternating
+  claude_code (opus-4-7) and claw (openai/gpt-5.5) reviewers,
+  deterministic streak_check requiring two cross-family approvals,
+  prepare_commit + commit_changes phase.
+
+  Specificity vs branch_improve_loop: a deterministic upstream
+  scan_docs tool node enumerates the doc footprint once (find +
+  sha1sum) so agents cannot truncate the audit set. Reviewers and
+  fixers operate against this immutable footprint. The fixer is
+  forbidden from touching anything but `.md` files in scope and
+  Go code comments — code logic edits are an automatic blocker
+  on the next iteration.
+
+  The bot ships 5 skills capturing the anti-Goodhart rules:
+  doc-align (playbook), doc-mismatch-taxonomy (10-value enum),
+  doc-scope-enumeration (scanner contract), anti-facade-fix-rules
+  (substantive fix discipline), doc-verification-checklist (judge
+  STEP-0 preamble).
+author: SocialGouv (devthejo) — doc-align/main.bot
+schema_version: 1
