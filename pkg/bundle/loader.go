@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 )
 
 // botFileNames is the set of accepted workflow source file names at the
@@ -111,32 +113,58 @@ func Open(path, cacheRoot string) (*Bundle, func() error, error) {
 	}
 	hash := hr.Sum()
 
-	// Truncate the hash for the directory name to avoid Windows long-path
-	// limits; the full hash is recoverable from the lock file we write.
-	cacheSlot := filepath.Join(cacheRoot, hash[:16])
+	// Use the full hash on non-Windows hosts to make collision
+	// astronomically rare even against an adversary who controls
+	// bundle contents (the previous 64-bit truncation was crackable
+	// under <2^32 work, opening a cache-poisoning path). Windows
+	// keeps the 16-char truncation to stay under MAX_PATH for deeply
+	// nested skill dirs. Sub-shard by the first two chars so the
+	// cache root doesn't become one mega-directory.
+	slotName := hash
+	if runtime.GOOS == "windows" {
+		slotName = hash[:16]
+	}
+	shard := slotName[:2]
+	cacheSlot := filepath.Join(cacheRoot, shard, slotName)
 	readySentinel := filepath.Join(cacheSlot, ".ready")
 	if _, err := os.Stat(readySentinel); err == nil {
 		// Slot already populated by an earlier (or concurrent) run.
 		cleanupTmp()
 	} else {
-		// Atomic install: rename tmpDir → cacheSlot. If a concurrent
-		// process beat us to it, accept the slot they created.
+		// Race-safe install: write the .ready sentinel and lock file
+		// INSIDE tmpDir before the rename. The rename atomically
+		// publishes a slot that is already complete from a consumer's
+		// point of view. The previous order (rename → writeLock →
+		// touch sentinel) had two observable intermediate states a
+		// concurrent reader could trip on.
+		if err := writeLock(tmpDir, hash, abs); err != nil {
+			cleanupTmp()
+			return nil, nil, err
+		}
+		if err := touch(filepath.Join(tmpDir, ".ready")); err != nil {
+			cleanupTmp()
+			return nil, nil, err
+		}
+		if err := os.MkdirAll(filepath.Join(cacheRoot, shard), 0o755); err != nil {
+			cleanupTmp()
+			return nil, nil, fmt.Errorf("bundle: create cache shard: %w", err)
+		}
 		if err := os.Rename(tmpDir, cacheSlot); err != nil {
-			// Either the cacheSlot now exists (race won by peer) or a
-			// rename across filesystems would fail; in either case we
-			// fall back to checking the sentinel.
+			// Either a peer beat us to it (cacheSlot exists with a
+			// sentinel) or the rename failed for another reason. Wait
+			// briefly for the peer's sentinel to land, then re-stat.
+			deadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(deadline) {
+				if _, statErr := os.Stat(readySentinel); statErr == nil {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
 			if _, statErr := os.Stat(readySentinel); statErr != nil {
 				cleanupTmp()
 				return nil, nil, fmt.Errorf("bundle: install cache slot %s: %w", cacheSlot, err)
 			}
 			cleanupTmp()
-		} else {
-			if err := writeLock(cacheSlot, hash, abs); err != nil {
-				return nil, nil, err
-			}
-			if err := touch(readySentinel); err != nil {
-				return nil, nil, err
-			}
 		}
 	}
 
