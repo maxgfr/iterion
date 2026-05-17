@@ -1067,7 +1067,12 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 	// Attach metadata.
 	stampDelegateOutputMeta(result.Output, result, backendName)
 
-	// Validate output against schema if present.
+	// Validate output against schema if present. Defence-in-depth: the
+	// IR compiler should reject any node whose `output:` names a schema
+	// absent from e.schemas (DiagUnknownSchema), so the "key missing"
+	// branch here normally cannot happen. Log it loudly if it does —
+	// silently skipping validation in that case would mask either an
+	// IR regression or a programmatic schema-map mutation.
 	if f.outputSchema != "" {
 		if schema, ok := e.schemas[f.outputSchema]; ok {
 			if err := ValidateOutput(result.Output, schema); err != nil {
@@ -1089,6 +1094,9 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 				}
 				return nil, fmt.Errorf("model: node %q: structured output invalid: %w", f.id, err)
 			}
+		} else {
+			e.logger.Warn("[%s#%d/%s] node declares output schema %q but no schema with that name is registered — IR compiler should have rejected this; output passes through unvalidated",
+				f.id, task.Iteration, backendName, f.outputSchema)
 		}
 	}
 validated:

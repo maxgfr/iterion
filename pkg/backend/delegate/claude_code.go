@@ -106,13 +106,14 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 	// errors, network errors, config parse errors all emit on stderr —
 	// without this they vanish into the SDK's pump and only the wrapping
 	// "no result message" surfaces upstream.
-	if b.Logger != nil {
-		opts = append(opts, claudesdk.WithStderrCallback(func(line string) {
-			if line != "" {
-				b.Logger.Warn("claude-code [stderr]: %s", line)
-			}
-		}))
-	}
+	// *iterlog.Logger methods are nil-safe (see pkg/log/log.go), so the
+	// per-call guard is redundant; the stderr stream is always worth
+	// wiring and the nil-receiver short-circuit costs nothing.
+	opts = append(opts, claudesdk.WithStderrCallback(func(line string) {
+		if line != "" {
+			b.Logger.Warn("claude-code [stderr]: %s", line)
+		}
+	}))
 
 	model := task.Model
 	if model == "" {
@@ -133,14 +134,13 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 	if task.Sandbox != nil {
 		run := task.Sandbox
 		opts = append(opts, claudesdk.WithCommandBuilder(func(ctx context.Context, path string, args []string, cwd string, env map[string]string, openStdin bool) *exec.Cmd {
-			if b.Logger != nil {
-				// Surface the resolved CLI invocation so failures like
-				// "session ended without result" can be traced back to a
-				// concrete `docker exec` command. Without this every
-				// silent claude exit is opaque even with stderr capture.
-				preview := append([]string{path}, args...)
-				b.Logger.Info("claude-code: exec %v (cwd=%s, env_keys=%d, stdin=%v)", preview, cwd, len(env), openStdin)
-			}
+			// Surface the resolved CLI invocation so failures like
+			// "session ended without result" can be traced back to a
+			// concrete `docker exec` command. Without this every silent
+			// claude exit is opaque even with stderr capture. (Logger
+			// methods are nil-safe — no guard needed.)
+			preview := append([]string{path}, args...)
+			b.Logger.Info("claude-code: exec %v (cwd=%s, env_keys=%d, stdin=%v)", preview, cwd, len(env), openStdin)
 			// KeepStdinOpen mirrors the SDK's OpenStdin flag so the docker
 			// driver adds `--interactive` to docker exec. Without this,
 			// Session-mode (NDJSON over stdin) silently fails: the SDK
@@ -536,10 +536,8 @@ func (b *ClaudeCodeBackend) formatOutput(ctx context.Context, task Task, session
 	if task.Sandbox != nil {
 		run := task.Sandbox
 		opts = append(opts, claudesdk.WithCommandBuilder(func(ctx context.Context, path string, args []string, cwd string, env map[string]string, openStdin bool) *exec.Cmd {
-			if b.Logger != nil {
-				preview := append([]string{path}, args...)
-				b.Logger.Info("claude-code [fmt]: exec %v (cwd=%s, env_keys=%d, stdin=%v)", preview, cwd, len(env), openStdin)
-			}
+			preview := append([]string{path}, args...)
+			b.Logger.Info("claude-code [fmt]: exec %v (cwd=%s, env_keys=%d, stdin=%v)", preview, cwd, len(env), openStdin)
 			return run.Command(ctx, append([]string{path}, args...), sandbox.ExecOpts{
 				WorkDir:       cwd,
 				Env:           env,

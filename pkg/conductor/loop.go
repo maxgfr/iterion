@@ -174,6 +174,13 @@ func (c *Conductor) dispatch(ctx context.Context, iss tracker.Issue) {
 	attempt := 0
 	if cur, ok := c.state.retries[iss.ID]; ok {
 		attempt = cur.Attempt
+		// The retry entry has done its job — surrender it now so the
+		// new runningEntry is the sole bookkeeping. (cmdRetryDue
+		// already stopped the timer when it fired.)
+		if cur.Timer != nil {
+			cur.Timer.Stop()
+		}
+		delete(c.state.retries, iss.ID)
 	}
 	runID := newRunID(iss.ID, attempt)
 	runCtx, cancel := context.WithCancel(ctx)

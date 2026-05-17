@@ -166,7 +166,11 @@ func (m cmdRetryDue) apply(c *Conductor, _ context.Context) {
 		if cur.Timer != nil {
 			cur.Timer.Stop()
 		}
-		delete(c.state.retries, m.issueID)
+		// Keep the entry around so the next tick's dispatch can read
+		// the Attempt count. The Fired flag flips isClaimed off so the
+		// issue becomes eligible again; dispatch then consumes the
+		// entry as it constructs the runningEntry.
+		cur.Fired = true
 	}
 }
 

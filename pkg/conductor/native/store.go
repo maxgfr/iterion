@@ -219,6 +219,14 @@ type ListFilter struct {
 // List returns defensive copies of issues matching the filter, sorted
 // by priority desc, then created_at asc. Walks the in-memory index —
 // no filesystem I/O on the hot path.
+//
+// Note: every match incurs a full cloneIssue under the store mutex.
+// At the current sub-1k-issue usage this is invisible; once a board
+// holds more than ~1k open issues the conductor poller (which calls
+// List on every tick) starts to contend with mutators. The cheap
+// remediation is to filter-and-count first under the read lock, drop
+// the lock, then clone outside it — defer until benchmarks show real
+// contention.
 func (s *Store) List(filter ListFilter) ([]*Issue, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
