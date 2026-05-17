@@ -9,6 +9,7 @@ Welcome to the Iterion docs. Pages are organised by audience and topic.
 | Page | Read this if… |
 |---|---|
 | [why-iterion.md](why-iterion.md) | …you want the origin story, the patterns we've seen work, the asymptote lens that motivated the engine, and the workflow-lab dimension. Helps you decide whether Iterion fits how you work. |
+| [why-not-prompt-orchestration.md](why-not-prompt-orchestration.md) | …you're wondering whether a single Claude Code (or similar) session calling sub-agents could replace Iterion. Lays out the structural guarantees a compiled IR provides and the three-question heuristic for choosing between the two approaches. |
 | [asymptote-bench.md](asymptote-bench.md) | …you want to measure a workflow's inter-session reliability curve via `iterion bench asymptote`. |
 
 ## Getting started
