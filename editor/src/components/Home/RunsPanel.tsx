@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useLocation } from "wouter";
 
 import { Badge } from "@/components/ui/Badge";
@@ -206,6 +207,12 @@ function GlobalRunRow({ run }: { run: GlobalActiveRun }) {
     // Strip the user's home so the path stays readable.
     run.store_path.replace(/^\/home\/[^/]+/, "~");
 
+  // Pending state for the desktop cross-daemon click. The Wails
+  // binding can block up to ~20s while spawning a fresh per-project
+  // daemon (Go server boot + sandbox engine init). Without feedback
+  // the row looks dead; flagging "Opening…" keeps the user oriented.
+  const [opening, setOpening] = useState(false);
+
   // In desktop mode we resolve the correct daemon for this store (a
   // per-project daemon for project slots, the current daemon for the
   // global slot or any unrecognised path) and navigate via
@@ -229,7 +236,7 @@ function GlobalRunRow({ run }: { run: GlobalActiveRun }) {
         </div>
       </div>
       <Badge variant={variant} className="shrink-0">
-        {label}
+        {opening ? "Opening…" : label}
       </Badge>
       <span className="text-[10px] text-fg-subtle shrink-0 w-16 text-right">
         {formatRelative(run.updated_at)}
@@ -241,8 +248,17 @@ function GlobalRunRow({ run }: { run: GlobalActiveRun }) {
     return (
       <button
         type="button"
-        onClick={() => void openRunCrossDaemon(run)}
-        className="w-full px-4 py-2.5 flex items-center gap-3 text-left bg-info-soft/20 hover:bg-info-soft/40 border-l-2 border-info"
+        disabled={opening}
+        aria-busy={opening || undefined}
+        onClick={() => {
+          if (opening) return;
+          setOpening(true);
+          // openRunCrossDaemon navigates the window on success, so the
+          // pending state only needs to clear when the call rejects
+          // (the fallback navigation also unmounts the component).
+          void openRunCrossDaemon(run).catch(() => setOpening(false));
+        }}
+        className="w-full px-4 py-2.5 flex items-center gap-3 text-left bg-info-soft/20 hover:bg-info-soft/40 border-l-2 border-info disabled:opacity-70 disabled:cursor-wait"
       >
         {inner}
       </button>
