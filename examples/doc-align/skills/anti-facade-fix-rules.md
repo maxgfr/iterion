@@ -71,6 +71,27 @@ common case or a misleading claim?), call `ask_user`. Do NOT pick
 the interpretation that minimises your edit; that's the path-of-
 least-resistance failure mode.
 
+### Rule 6 — Pushback on inconsistent `(anchor_kind, code_anchor)`
+
+The reviewer is supposed to emit blockers whose `anchor_kind` matches
+the shape of `code_anchor` (see the consistency table in
+`doc-mismatch-taxonomy.md`). If you receive a blocker where these
+disagree — e.g. `anchor_kind: symbol` but `code_anchor: "<no longer
+exists>"`, or `anchor_kind: external` but the anchor contains `:42` —
+you cannot reliably verify it. Push it back with a justification
+naming the inconsistency:
+
+> Pushback: B3 has anchor_kind=symbol but code_anchor="<no longer
+> exists>" — these are mutually exclusive. If the symbol is gone,
+> the blocker's kind should be `removed` with an anchor like
+> `"pkg/foo/old.go (removed in commit X)"`. Re-emit with the
+> correct kind if the underlying mismatch is real.
+
+Don't try to "fix it for the reviewer" by guessing what they meant.
+The next reviewer will see the pushback and either correct the
+classification or drop the blocker, both of which are healthier
+outcomes than a fix you can't ground in real code state.
+
 ## Pushback is allowed; silent skip is not
 
 If you receive a blocker you believe is not a real mismatch, you
