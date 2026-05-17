@@ -1,8 +1,32 @@
-# doc-align (v0.4.0)
+# doc-align (v0.5.0)
 
 A dogfood-friendly iterion bot that detects mismatches between
 project documentation and actual code state, then fixes the
 **documentation** (never the code) and auto-commits on convergence.
+
+**v0.5.0 changes** (inter-run audit cache):
+- `scan_docs` now reads `.iterion/doc-align/audit-cache.json`
+  (path configurable via `--var audit_cache_path`). For each
+  doc whose content sha1 AND every previously-cited code-file
+  sha1 are unchanged since the last successful run, the doc is
+  emitted in `pre_verified_docs` and seeded directly into the
+  coverage gate's `cumulative_audited_docs`. Repeat runs on an
+  already-aligned workspace can hit the streak gate on the
+  first iteration without re-reading the unchanged majority —
+  5-10× speedup on incremental usage (nightly / per-PR).
+- New terminal tool node `update_audit_cache` runs after
+  `commit_changes` and rewrites the cache from
+  `streak_check.cumulative_audited_pairs`. A failed commit
+  short-circuits before this node, so the cache only records
+  audit state that was actually shipped.
+- Cache invalidation is conservative: ANY change to ANY
+  referenced code file invalidates the doc's pre-verification.
+  No anchor-level precision (we'd need a language-aware
+  parser); the trade-off is a slightly higher miss rate for a
+  much simpler implementation.
+- Empty `audit_cache_path` disables both the read and the
+  write — for one-shot CI runs that want a guaranteed fresh
+  audit.
 
 **v0.4.0 changes** (anchor_kind tightening):
 - `doc-mismatch-taxonomy.md` now carries a STRICT consistency table
