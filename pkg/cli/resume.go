@@ -215,7 +215,9 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 	)
 
 	// Acquire exclusive run lock to prevent concurrent processes.
-	lock, err := s.LockRun(context.Background(), opts.RunID)
+	// Use the SIGINT-aware ctx so a contended lock can still be
+	// interrupted by Ctrl-C rather than blocking forever.
+	lock, err := s.LockRun(ctx, opts.RunID)
 	if err != nil {
 		return fmt.Errorf("cannot acquire run lock: %w", err)
 	}

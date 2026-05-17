@@ -274,7 +274,9 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 	}
 
 	// Acquire exclusive run lock to prevent concurrent processes.
-	lock, err := s.LockRun(context.Background(), runID)
+	// Use the SIGINT-aware ctx so a contended lock can still be
+	// interrupted by Ctrl-C rather than blocking forever.
+	lock, err := s.LockRun(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("cannot acquire run lock: %w", err)
 	}

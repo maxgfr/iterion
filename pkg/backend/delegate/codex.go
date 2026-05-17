@@ -280,20 +280,31 @@ func (b *CodexBackend) runQueryWithRetry(ctx context.Context, task Task, prompt 
 		}
 
 		if attempt < maxCodexRetries {
+			// Exponential backoff: 1s, 2s, 4s … capped at 8s. Without
+			// this, three retries fire back-to-back in microseconds on
+			// rate-limit / 5xx errors, hammering the API without giving
+			// it any recovery window.
+			backoff := time.Duration(1<<uint(attempt-1)) * time.Second
+			if backoff > 8*time.Second {
+				backoff = 8 * time.Second
+			}
 			select {
 			case <-ctx.Done():
 				return nil, totalDuration, lastThreadID, fmt.Errorf("delegate: codex: context cancelled during retry: %w", ctx.Err())
-			default:
+			case <-time.After(backoff):
 			}
 			if diag != "" {
-				b.Logger.Warn("[%s#%d/codex] returned no result (attempt %d/%d, %s), retrying", task.NodeID, task.Iteration, attempt, maxCodexRetries, diag)
+				b.Logger.Warn("[%s#%d/codex] returned no result (attempt %d/%d, %s), retrying after %s", task.NodeID, task.Iteration, attempt, maxCodexRetries, diag, backoff)
 			} else {
-				b.Logger.Warn("[%s#%d/codex] returned no result (attempt %d/%d), retrying", task.NodeID, task.Iteration, attempt, maxCodexRetries)
+				b.Logger.Warn("[%s#%d/codex] returned no result (attempt %d/%d), retrying after %s", task.NodeID, task.Iteration, attempt, maxCodexRetries, backoff)
 			}
 		}
 	}
 
-	return nil, totalDuration, lastThreadID, nil
+	// All attempts exhausted with no result and no terminal error from
+	// codex itself — surface that explicitly so the caller's retry
+	// classifier can distinguish this from a clean exit.
+	return nil, totalDuration, lastThreadID, fmt.Errorf("delegate: codex: no result after %d attempts", maxCodexRetries)
 }
 
 // formatOutput performs a second pass: resumes the work-pass session with

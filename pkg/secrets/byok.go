@@ -481,9 +481,21 @@ func (s *MongoApiKeyStore) MarkUsed(ctx context.Context, id string, at time.Time
 func (s *MongoApiKeyStore) ClearDefault(ctx context.Context, teamID, userID string, provider Provider, exceptID string) error {
 	filter := bson.M{
 		"scope_team": teamID,
-		"scope_user": userID,
 		"provider":   provider,
 		"is_default": true,
+	}
+	if userID == "" {
+		// Team-wide rows are persisted with scope_user omitted (the
+		// field has `bson:"...,omitempty"`), so a literal "" filter
+		// never matches them and the "at most one default per tuple"
+		// invariant silently fractures. Match both absent and empty
+		// forms here. See pattern in ListByTeam.
+		filter["$or"] = []bson.M{
+			{"scope_user": bson.M{"$exists": false}},
+			{"scope_user": ""},
+		}
+	} else {
+		filter["scope_user"] = userID
 	}
 	if exceptID != "" {
 		filter["_id"] = bson.M{"$ne": exceptID}

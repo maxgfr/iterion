@@ -9,8 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -324,10 +324,12 @@ func (s *Server) handleServeAttachment(w http.ResponseWriter, r *http.Request) {
 	if rec.Size > 0 {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", rec.Size))
 	}
+	// RFC 6266: quote the filename parameter. mime.FormatMediaType
+	// handles quoting + escaping for us; a filename with spaces or
+	// semicolons would otherwise be parsed as multiple disposition
+	// parameters by strict consumers.
 	w.Header().Set("Content-Disposition",
-		fmt.Sprintf("inline; filename=%s",
-			url.PathEscape(rec.OriginalFilename),
-		),
+		mime.FormatMediaType("inline", map[string]string{"filename": rec.OriginalFilename}),
 	)
 	if _, err := io.Copy(w, rc); err != nil {
 		s.logger.Warn("serve attachment %s/%s: %v", id, name, err)

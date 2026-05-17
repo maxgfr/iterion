@@ -54,7 +54,7 @@ func (s *Store) WriteArtifact(ctx context.Context, a *store.Artifact) error {
 	// fast path. Best-effort — the event is the canonical record.
 	_, _ = s.runs.UpdateOne(
 		ctx,
-		bson.M{"_id": a.RunID},
+		withTenantFilter(ctx, bson.M{"_id": a.RunID}),
 		bson.M{"$set": bson.M{
 			fmt.Sprintf("artifact_index.%s", a.NodeID): a.Version,
 			"updated_at": a.WrittenAt,

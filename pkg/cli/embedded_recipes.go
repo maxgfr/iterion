@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 
@@ -49,7 +50,10 @@ func ResolveRecipePath(path string) string {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return path
 	}
-	if existing, err := os.ReadFile(dst); err == nil && len(existing) == len(data) {
+	// Compare full content, not just length: a same-length edit
+	// would otherwise be cached forever, and a same-length upstream
+	// refresh would never propagate to the user's cache.
+	if existing, err := os.ReadFile(dst); err == nil && bytes.Equal(existing, data) {
 		return dst
 	}
 	if err := os.WriteFile(dst, data, 0o644); err != nil {

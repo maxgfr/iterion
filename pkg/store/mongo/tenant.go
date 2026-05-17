@@ -54,3 +54,13 @@ func stampTenantOnEvent(ctx context.Context, e *store.Event) {
 		e.TenantID = id
 	}
 }
+
+// stampTenantOnInteraction does the same for Interaction documents.
+func stampTenantOnInteraction(ctx context.Context, i *store.Interaction) {
+	if i == nil || i.TenantID != "" {
+		return
+	}
+	if id, ok := store.TenantFromContext(ctx); ok {
+		i.TenantID = id
+	}
+}

@@ -312,6 +312,16 @@ func (r *Run) Command(ctx context.Context, cmd []string, opts sandbox.ExecOpts) 
 	}
 	args = append(args, "--workdir", workDir)
 	for k, v := range opts.Env {
+		// Validate every per-call env var. Without this a newline (or
+		// other control char) embedded in a value — e.g. coming from
+		// an artifact field interpolated into a tool command — could
+		// split the argument and inject arbitrary `docker exec` flags.
+		// Driver.Start applies the same check at container-creation
+		// time; the per-exec path here needs it too.
+		if err := validateEnvVar(k, v); err != nil {
+			r.driver.logger.Warn("docker exec: skipping invalid env %s: %v", k, err)
+			continue
+		}
 		args = append(args, "--env", k+"="+v)
 	}
 	if r.prepared.spec.User != "" {

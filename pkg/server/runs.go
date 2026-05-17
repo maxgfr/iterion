@@ -410,6 +410,14 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "missing id or node")
 		return
 	}
+	// Tenant scoping: load the run under the caller's context first so
+	// the mongo tenant filter rejects cross-tenant requests before we
+	// touch the filesystem-backed ListArtifacts (which has no tenant
+	// awareness of its own).
+	if _, err := s.runs.LoadRunCtx(r.Context(), id); err != nil {
+		s.httpErrorFor(w, r, http.StatusNotFound, "run not found: %v", err)
+		return
+	}
 	out, err := s.runs.ListArtifacts(id, node)
 	if err != nil {
 		s.httpErrorFor(w, r, http.StatusInternalServerError, "list artifacts: %v", err)

@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
@@ -56,7 +57,18 @@ func Init(ctx context.Context, serviceName string, logger *iterlog.Logger) (func
 		return func(context.Context) error { return nil }, nil
 	}
 
-	exp, err := otlptrace.New(ctx, otlptracehttp.NewClient())
+	// Pass the resolved endpoint explicitly. Without this, the OTLP
+	// client only honours OTEL_EXPORTER_OTLP_ENDPOINT — so an
+	// operator who set the spec-canonical
+	// OTEL_EXPORTER_OTLP_TRACES_ENDPOINT (which we *do* check above
+	// for the guard) would silently send spans nowhere.
+	clientOpts := []otlptracehttp.Option{}
+	if strings.Contains(endpoint, "://") {
+		clientOpts = append(clientOpts, otlptracehttp.WithEndpointURL(endpoint))
+	} else {
+		clientOpts = append(clientOpts, otlptracehttp.WithEndpoint(endpoint))
+	}
+	exp, err := otlptrace.New(ctx, otlptracehttp.NewClient(clientOpts...))
 	if err != nil {
 		return nil, fmt.Errorf("tracing: build OTLP exporter: %w", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -151,30 +152,35 @@ func (a *GitHubAdapter) RefreshStates(ctx context.Context, ids []string) (map[st
 		return map[string]string{}, nil
 	}
 
-	// Pull every open or closed issue in one call and filter locally.
-	// state=all so we still see issues an operator closed externally
-	// (the conductor's reconcileStalled path needs to detect that).
-	args := []string{
-		"api",
-		fmt.Sprintf("repos/%s/issues?state=all&per_page=100&filter=all", a.opts.Repo),
-		"-H", "Accept: application/vnd.github+json",
-	}
-	raw, err := a.opts.Command(ctx, args, a.env())
-	if err != nil {
-		return nil, fmt.Errorf("gh api repos/%s/issues: %w", a.opts.Repo, err)
-	}
-	// gh api emits REST-shaped issues — labels are objects with `name`,
-	// number is `number`, etc. — so the existing ghIssue struct fits
-	// after a minor mapping pass for the `state` field naming.
-	var raws []apiIssue
-	if err := json.Unmarshal(raw, &raws); err != nil {
-		return nil, fmt.Errorf("gh api parse: %w", err)
-	}
-
+	// Fetch each issue we care about individually rather than scanning
+	// the whole repo. The previous single-page repo scan silently
+	// truncated at 100 issues — repos with more open issues than
+	// per_page caused running-but-not-on-page-1 issues to appear as
+	// "disappeared", which the dispatcher would then cancel. Fetching
+	// by ID is O(running set), which is bounded by MaxConcurrent.
 	out := make(map[string]string, len(wanted))
-	for _, r := range raws {
-		id, want := wanted[r.Number]
-		if !want {
+	for num, id := range wanted {
+		args := []string{
+			"api",
+			fmt.Sprintf("repos/%s/issues/%d", a.opts.Repo, num),
+			"-H", "Accept: application/vnd.github+json",
+		}
+		raw, err := a.opts.Command(ctx, args, a.env())
+		if err != nil {
+			// Don't fail the whole sweep on a single issue's transient
+			// error — log + skip so the other running issues keep
+			// their state. Logging instead of swallowing silently was
+			// the agent's specific complaint.
+			if a.opts.Logger != nil {
+				a.opts.Logger.Warn("conductor: github RefreshStates: gh api issue %d: %v", num, err)
+			}
+			continue
+		}
+		var r apiIssue
+		if err := json.Unmarshal(raw, &r); err != nil {
+			if a.opts.Logger != nil {
+				a.opts.Logger.Warn("conductor: github RefreshStates: parse issue %d: %v", num, err)
+			}
 			continue
 		}
 		iss := a.toIssue(r.toGhIssue())
@@ -394,7 +400,12 @@ func parseGitHubID(repo, id string) (int, bool) {
 func runGH(ctx context.Context, args []string, env []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	if env != nil {
-		cmd.Env = append(cmd.Env, env...)
+		// Inherit host env (PATH, HOME, GH_CONFIG_DIR, …) and layer the
+		// caller's vars on top. Go's os/exec treats a non-nil cmd.Env
+		// as the exact environment with no inheritance, so without this
+		// `gh` would run with only the two GH_TOKEN entries and nothing
+		// else — which breaks every gh subcommand.
+		cmd.Env = append(os.Environ(), env...)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -57,7 +57,7 @@ func (s *Store) WriteAttachment(ctx context.Context, runID string, rec store.Att
 	// concurrent attachment write to a different name doesn't lose
 	// the document-level race.
 	_, err = s.runs.UpdateOne(ctx,
-		bson.M{"_id": runID},
+		withTenantFilter(ctx, bson.M{"_id": runID}),
 		bson.M{
 			"$set": bson.M{
 				"attachments." + rec.Name: rec,
@@ -112,7 +112,7 @@ func (s *Store) RemoveAttachment(ctx context.Context, runID, name string) error 
 		return fmt.Errorf("store/mongo: blob delete attachment %s/%s: %w", runID, name, err)
 	}
 	_, err = s.runs.UpdateOne(ctx,
-		bson.M{"_id": runID},
+		withTenantFilter(ctx, bson.M{"_id": runID}),
 		bson.M{
 			"$unset": bson.M{"attachments." + name: ""},
 			"$set":   bson.M{"updated_at": time.Now().UTC()},
@@ -129,7 +129,7 @@ func (s *Store) DeleteRunAttachments(ctx context.Context, runID string) error {
 		return fmt.Errorf("store/mongo: blob delete attachments: %w", err)
 	}
 	_, err := s.runs.UpdateOne(ctx,
-		bson.M{"_id": runID},
+		withTenantFilter(ctx, bson.M{"_id": runID}),
 		bson.M{"$unset": bson.M{"attachments": ""}, "$set": bson.M{"updated_at": time.Now().UTC()}},
 	)
 	if err != nil {

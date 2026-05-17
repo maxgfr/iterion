@@ -203,5 +203,10 @@ func openBrowser(url string) {
 	default:
 		cmd = exec.Command("xdg-open", url)
 	}
-	_ = cmd.Start()
+	if err := cmd.Start(); err == nil {
+		// Reap the child to avoid a zombie process for the lifetime
+		// of `iterion editor`. xdg-open / open / rundll32 typically
+		// exit within milliseconds after spawning the actual browser.
+		go func() { _ = cmd.Wait() }()
+	}
 }

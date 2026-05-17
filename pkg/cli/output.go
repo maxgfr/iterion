@@ -32,11 +32,17 @@ func NewPrinter(format OutputFormat) *Printer {
 	return &Printer{W: os.Stdout, Format: format}
 }
 
-// JSON emits v as indented JSON.
+// JSON emits v as indented JSON. If encoding fails (non-marshalable
+// value: channels, cycles, etc.), write a JSON error envelope to
+// stderr so machine consumers see a parse-able failure signal rather
+// than an empty stdout that looks like a clean success.
 func (p *Printer) JSON(v interface{}) {
 	enc := json.NewEncoder(p.W)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(v)
+	if err := enc.Encode(v); err != nil {
+		fmt.Fprintf(os.Stderr, "{\"error\":\"cli: json encode failed: %s\"}\n",
+			strings.ReplaceAll(err.Error(), `"`, `'`))
+	}
 }
 
 // Line prints a formatted line.

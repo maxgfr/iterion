@@ -171,23 +171,46 @@ func TestClassifierCheckerConcurrentSafe(t *testing.T) {
 }
 
 // TestClassifierCheckerLogsErrors verifies the optional logger receives
-// classifier errors and JSON decoding failures.
+// classifier errors and JSON decoding failures. FailOpen is set so this
+// test focuses on the logging behaviour rather than the (separately
+// tested) fail-closed default — see TestClassifierCheckerFailsClosed.
 func TestClassifierCheckerLogsErrors(t *testing.T) {
 	rec := &recordingLogger{}
 	cc := &ClassifierChecker{
 		Classifier: classifierFunc(func(_ context.Context, _ string, _ map[string]any) (permissions.Decision, error) {
 			return permissions.DecisionAsk, errors.New("model down")
 		}),
-		Base:   allowAllChecker{},
-		Logger: rec,
+		Base:     allowAllChecker{},
+		Logger:   rec,
+		FailOpen: true,
 	}
 	if err := cc.CheckContext(PolicyContext{ToolName: "bash", Input: json.RawMessage("not-json")}); err != nil {
-		t.Fatalf("base should allow, got %v", err)
+		t.Fatalf("base should allow with FailOpen, got %v", err)
 	}
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	if rec.warns < 2 {
 		t.Errorf("expected at least 2 warns (decode + classifier err), got %d", rec.warns)
+	}
+}
+
+// TestClassifierCheckerFailsClosed verifies the default behaviour:
+// when the classifier itself errors, the call is denied rather than
+// silently deferring to a permissive Base. FailOpen=true restores the
+// legacy fall-through.
+func TestClassifierCheckerFailsClosed(t *testing.T) {
+	cc := &ClassifierChecker{
+		Classifier: classifierFunc(func(_ context.Context, _ string, _ map[string]any) (permissions.Decision, error) {
+			return permissions.DecisionAsk, errors.New("model down")
+		}),
+		Base: allowAllChecker{},
+	}
+	err := cc.CheckContext(PolicyContext{ToolName: "bash"})
+	if err == nil {
+		t.Fatal("expected fail-closed deny, got nil")
+	}
+	if !errors.Is(err, ErrToolDenied) {
+		t.Fatalf("expected ErrToolDenied wrap, got %v", err)
 	}
 }
 

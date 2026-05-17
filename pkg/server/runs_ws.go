@@ -726,7 +726,7 @@ func (c *runConn) streamEventsLocal(fromSeq, snapshotSeq int64) {
 // c.closed via Close() in the defer, so we don't need a separate
 // goroutine to translate the channel into a cancel.
 func (c *runConn) streamEventsCloud(fromSeq int64) {
-	sub, err := c.server.runs.SubscribeEventStream(context.Background(), c.runID, fromSeq)
+	sub, err := c.server.runs.SubscribeEventStream(c.authCtx(), c.runID, fromSeq)
 	if err != nil {
 		c.sendError("event_stream_failed", err.Error(), "")
 		return

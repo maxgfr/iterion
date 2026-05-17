@@ -50,6 +50,16 @@ type globalActiveRun struct {
 // second on the typical ~10-50 stored runs. Wire an in-process LRU
 // + inotify watcher if this grows past a few hundred runs.
 func (s *Server) handleListGlobalActiveRuns(w http.ResponseWriter, r *http.Request) {
+	// This endpoint is a desktop-daemon affordance: it walks the local
+	// $HOME/.iterion/** filesystem looking for active runs across every
+	// project the user has on this machine. In cloud mode the server
+	// pod's $HOME is shared infrastructure that may contain runs from
+	// other tenants (or the cloud store's local mirror), so we refuse
+	// here rather than risk a cross-tenant leak.
+	if s.cfg.Mode == "cloud" {
+		s.writeJSONFor(w, r, map[string]interface{}{"runs": []globalActiveRun{}})
+		return
+	}
 	roots, err := globalStoreRoots()
 	if err != nil {
 		s.httpErrorFor(w, r, http.StatusInternalServerError, "resolve global stores: %v", err)

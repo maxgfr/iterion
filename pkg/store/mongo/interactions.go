@@ -27,6 +27,7 @@ type interactionDoc struct {
 // the initial pause writes the questions, and the resume path writes
 // the answers; both go through this single method.
 func (s *Store) WriteInteraction(ctx context.Context, i *store.Interaction) error {
+	stampTenantOnInteraction(ctx, i)
 	doc := interactionDoc{
 		ID: interactionID{
 			RunID:         i.RunID,
@@ -36,7 +37,7 @@ func (s *Store) WriteInteraction(ctx context.Context, i *store.Interaction) erro
 	}
 	_, err := s.interactions.ReplaceOne(
 		ctx,
-		bson.M{"_id": doc.ID},
+		withTenantFilter(ctx, bson.M{"_id": doc.ID}),
 		doc,
 		options.Replace().SetUpsert(true),
 	)
@@ -49,7 +50,7 @@ func (s *Store) WriteInteraction(ctx context.Context, i *store.Interaction) erro
 // LoadInteraction looks up the composite key directly.
 func (s *Store) LoadInteraction(ctx context.Context, runID, interactionID2 string) (*store.Interaction, error) {
 	var doc interactionDoc
-	err := s.interactions.FindOne(ctx, bson.M{"_id": interactionID{RunID: runID, InteractionID: interactionID2}}).Decode(&doc)
+	err := s.interactions.FindOne(ctx, withTenantFilter(ctx, bson.M{"_id": interactionID{RunID: runID, InteractionID: interactionID2}})).Decode(&doc)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, fmt.Errorf("store/mongo: interaction %s/%s not found", runID, interactionID2)
@@ -68,7 +69,7 @@ func (s *Store) LoadInteraction(ctx context.Context, runID, interactionID2 strin
 func (s *Store) ListInteractions(ctx context.Context, runID string) ([]string, error) {
 	cur, err := s.interactions.Find(
 		ctx,
-		bson.M{"run_id": runID},
+		withTenantFilter(ctx, bson.M{"run_id": runID}),
 		options.Find().
 			SetProjection(bson.M{"_id": 1}).
 			SetSort(bson.D{{Key: "requested_at", Value: 1}}),

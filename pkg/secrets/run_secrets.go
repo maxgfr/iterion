@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/SocialGouv/iterion/pkg/internal/mongoutil"
+	"github.com/SocialGouv/iterion/pkg/store"
 )
 
 // RunBundle is the per-run sealed payload the runner needs in order
@@ -136,7 +138,7 @@ func (s *MongoRunSecretsStore) Put(ctx context.Context, rec RunSecretsRecord) er
 
 func (s *MongoRunSecretsStore) Get(ctx context.Context, id string) (RunSecretsRecord, error) {
 	var rec RunSecretsRecord
-	err := s.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&rec)
+	err := s.coll.FindOne(ctx, withRunSecretsTenantFilter(ctx, bson.M{"_id": id})).Decode(&rec)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return RunSecretsRecord{}, ErrRunSecretsNotFound
 	}
@@ -147,16 +149,33 @@ func (s *MongoRunSecretsStore) Get(ctx context.Context, id string) (RunSecretsRe
 }
 
 func (s *MongoRunSecretsStore) Delete(ctx context.Context, id string) error {
-	_, err := s.coll.DeleteOne(ctx, bson.M{"_id": id})
+	_, err := s.coll.DeleteOne(ctx, withRunSecretsTenantFilter(ctx, bson.M{"_id": id}))
 	if err != nil {
 		return fmt.Errorf("secrets: delete run secrets: %w", err)
 	}
 	return nil
 }
 
+// withRunSecretsTenantFilter mirrors the mongo package's withTenantFilter:
+// when ctx carries a tenant, scope by it; otherwise pass through for
+// privileged callers (cluster admin, bootstrap, migration tooling).
+func withRunSecretsTenantFilter(ctx context.Context, base bson.M) bson.M {
+	tenantID, ok := store.TenantFromContext(ctx)
+	if !ok {
+		return base
+	}
+	out := make(bson.M, len(base)+1)
+	for k, v := range base {
+		out[k] = v
+	}
+	out["tenant_id"] = tenantID
+	return out
+}
+
 // MemoryRunSecretsStore is the test variant.
 type MemoryRunSecretsStore struct {
-	m map[string]RunSecretsRecord
+	mu sync.Mutex
+	m  map[string]RunSecretsRecord
 }
 
 func NewMemoryRunSecretsStore() *MemoryRunSecretsStore {
@@ -164,19 +183,28 @@ func NewMemoryRunSecretsStore() *MemoryRunSecretsStore {
 }
 
 func (s *MemoryRunSecretsStore) Put(_ context.Context, rec RunSecretsRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.m[rec.ID] = rec
 	return nil
 }
 
-func (s *MemoryRunSecretsStore) Get(_ context.Context, id string) (RunSecretsRecord, error) {
+func (s *MemoryRunSecretsStore) Get(ctx context.Context, id string) (RunSecretsRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	rec, ok := s.m[id]
 	if !ok {
+		return RunSecretsRecord{}, ErrRunSecretsNotFound
+	}
+	if tenantID, has := store.TenantFromContext(ctx); has && rec.TenantID != "" && rec.TenantID != tenantID {
 		return RunSecretsRecord{}, ErrRunSecretsNotFound
 	}
 	return rec, nil
 }
 
 func (s *MemoryRunSecretsStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	delete(s.m, id)
 	return nil
 }

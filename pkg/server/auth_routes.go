@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -257,8 +258,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "email and password required")
 		return
 	}
-	res, err := s.authSvc.Login(r.Context(), req.Email, req.Password, r.UserAgent(), clientIP(r))
+	res, err := s.authSvc.Login(r.Context(), req.Email, req.Password, r.UserAgent(), s.clientIP(r))
 	if err != nil {
+		// Collapse "account disabled" and "invalid credentials" to the
+		// same wire message so an attacker can't enumerate which
+		// addresses correspond to disabled accounts. The detailed err
+		// stays available in logs.
+		if errors.Is(err, auth.ErrAccountDisabled) || errors.Is(err, auth.ErrInvalidCredentials) {
+			httpError(w, http.StatusUnauthorized, "invalid credentials")
+			return
+		}
 		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
 		return
 	}
@@ -275,7 +284,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "email and password required")
 		return
 	}
-	res, err := s.authSvc.Register(r.Context(), req.Email, req.Password, req.Name, req.Invitation, r.UserAgent(), clientIP(r))
+	res, err := s.authSvc.Register(r.Context(), req.Email, req.Password, req.Name, req.Invitation, r.UserAgent(), s.clientIP(r))
 	if err != nil {
 		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
 		return
@@ -289,7 +298,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusUnauthorized, "no refresh token")
 		return
 	}
-	res, err := s.authSvc.Refresh(r.Context(), tok, r.UserAgent(), clientIP(r))
+	res, err := s.authSvc.Refresh(r.Context(), tok, r.UserAgent(), s.clientIP(r))
 	if err != nil {
 		s.clearAuthCookies(w)
 		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
@@ -379,7 +388,16 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
-		httpError(w, http.StatusBadRequest, "oauth error: %s — %s", oauthErr, r.URL.Query().Get("error_description"))
+		// Don't reflect the provider's error_description verbatim:
+		// some providers include server-side context (account ids,
+		// internal flags) that we shouldn't surface to the SPA. The
+		// short OAuth error code is sufficient for the UI; full
+		// detail (if needed) is in the server log.
+		if s.logger != nil {
+			s.logger.Warn("oidc callback error from %s: code=%s description=%q",
+				name, oauthErr, r.URL.Query().Get("error_description"))
+		}
+		httpError(w, http.StatusBadRequest, "oauth error: %s", oauthErr)
 		return
 	}
 	state := r.URL.Query().Get("state")
@@ -402,7 +420,7 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "exchange: %v", err)
 		return
 	}
-	res, err := s.authSvc.LoginWithExternal(r.Context(), ext, r.UserAgent(), clientIP(r))
+	res, err := s.authSvc.LoginWithExternal(r.Context(), ext, r.UserAgent(), s.clientIP(r))
 	if err != nil {
 		httpError(w, mapAuthErrorStatus(err), "sso login: %v", err)
 		return
@@ -851,7 +869,17 @@ func (s *Server) canManageTeam(ctx context.Context, id auth.Identity, teamID str
 	return mb.Role.AtLeast(identity.RoleAdmin)
 }
 
-func clientIP(r *http.Request) string {
+// clientIP picks the audit IP for an inbound request. The default
+// is r.RemoteAddr — the only field a client can't forge. We only
+// consult X-Forwarded-For / X-Real-IP when the immediate peer is in
+// s.cfg.TrustedProxyCIDRs, which the operator has explicitly
+// configured. Without this guard a client could spoof its audit IP
+// (and undermine any future IP-based throttling) just by sending an
+// X-Forwarded-For header.
+func (s *Server) clientIP(r *http.Request) string {
+	if !s.peerIsTrusted(r) {
+		return r.RemoteAddr
+	}
 	if h := r.Header.Get("X-Forwarded-For"); h != "" {
 		if i := strings.Index(h, ","); i > 0 {
 			return strings.TrimSpace(h[:i])
@@ -862,4 +890,28 @@ func clientIP(r *http.Request) string {
 		return h
 	}
 	return r.RemoteAddr
+}
+
+func (s *Server) peerIsTrusted(r *http.Request) bool {
+	if s == nil || len(s.cfg.TrustedProxyCIDRs) == 0 {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	for _, cidr := range s.cfg.TrustedProxyCIDRs {
+		_, network, perr := net.ParseCIDR(cidr)
+		if perr != nil {
+			continue
+		}
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }

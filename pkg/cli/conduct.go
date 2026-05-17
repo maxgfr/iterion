@@ -128,29 +128,35 @@ func RunConduct(p *Printer, opts ConductOptions) error {
 			Handler:           mux,
 			ReadHeaderTimeout: 5 * time.Second,
 		}
-		p.Line("iterion conduct: HTTP on http://%s", httpSrv.Addr)
+		if p.Format == OutputHuman {
+			p.Line("iterion conduct: HTTP on http://%s", httpSrv.Addr)
+		}
 		go func() {
 			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Error("conductor http server: %v", err)
 				cancel()
 			}
 		}()
-	} else {
+	} else if p.Format == OutputHuman {
 		p.Line("iterion conduct: HTTP disabled (cfg.server.port=0)")
 	}
 
-	p.Line("iterion conduct: workflow %s", cfg.Workflow)
-	p.Line("iterion conduct: tracker %s", cfg.Tracker.Kind)
-	p.Line("iterion conduct: workspaces under %s", wsRoot)
-	p.Line("iterion conduct: polling every %s, stall timeout %s", cfg.PollingInterval(), cfg.StallTimeout())
-	p.Line("iterion conduct: ctrl-c to stop")
+	if p.Format == OutputHuman {
+		p.Line("iterion conduct: workflow %s", cfg.Workflow)
+		p.Line("iterion conduct: tracker %s", cfg.Tracker.Kind)
+		p.Line("iterion conduct: workspaces under %s", wsRoot)
+		p.Line("iterion conduct: polling every %s, stall timeout %s", cfg.PollingInterval(), cfg.StallTimeout())
+		p.Line("iterion conduct: ctrl-c to stop")
+	}
 
 	<-ctx.Done()
-	p.Line("iterion conduct: shutting down…")
+	if p.Format == OutputHuman {
+		p.Line("iterion conduct: shutting down…")
+	}
 	if httpSrv != nil {
 		shutdownCtx, sc := context.WithTimeout(context.Background(), 5*time.Second)
-		defer sc()
 		_ = httpSrv.Shutdown(shutdownCtx)
+		sc()
 	}
 	return nil
 }

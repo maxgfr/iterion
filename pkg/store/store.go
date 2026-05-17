@@ -76,10 +76,25 @@ const (
 // Exported so other on-disk subsystems (e.g. the privacy vault) can reuse
 // the same write semantics without duplicating the algorithm.
 func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	// Use os.CreateTemp for a unique temp name. The previous fixed
+	// `path+".tmp"` collided when two concurrent writers (e.g. an
+	// in-process write racing an external process touching the same
+	// file) both staged through the same temp path, producing torn
+	// renames. CreateTemp + chmod gives us per-call isolation.
+	dir, base := filepath.Split(path)
+	if dir == "" {
+		dir = "."
+	}
+	f, err := os.CreateTemp(dir, "."+base+".atomic-*")
 	if err != nil {
 		return fmt.Errorf("store: open temp file: %w", err)
+	}
+	tmp := f.Name()
+	// Apply the requested mode now; CreateTemp uses 0600.
+	if err := os.Chmod(tmp, perm); err != nil {
+		f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("store: chmod temp file: %w", err)
 	}
 	if _, err := f.Write(data); err != nil {
 		f.Close()

@@ -293,7 +293,7 @@ func (r *Run) Command(ctx context.Context, cmd []string, opts sandbox.ExecOpts) 
 	}
 
 	args := []string{"--namespace", r.namespace, "exec"}
-	if opts.Stdin != nil {
+	if opts.Stdin != nil || opts.KeepStdinOpen {
 		args = append(args, "--stdin")
 	}
 	args = append(args, r.podName, "--container", "workload", "--")

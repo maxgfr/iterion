@@ -19,10 +19,11 @@ type sdkClient struct {
 	cfg  *ServerConfig
 	info clientInfo
 
-	startMu  sync.Mutex
-	started  bool
-	startErr error
-	session  *mcp.ClientSession
+	startOnce sync.Once
+	startMu   sync.Mutex // guards session for Close()
+	started   bool
+	startErr  error
+	session   *mcp.ClientSession
 }
 
 func newSDKClient(cfg *ServerConfig, info clientInfo) *sdkClient {
@@ -131,15 +132,21 @@ func (c *sdkClient) Close() error {
 }
 
 func (c *sdkClient) ensureStarted(ctx context.Context) error {
+	// Use sync.Once so concurrent ListTools/CallTool callers don't
+	// serialise on a mutex held across slow I/O (HTTP dial / process
+	// spawn). Once.Do is safe for concurrent callers and runs the
+	// init function exactly once.
+	c.startOnce.Do(func() {
+		err := c.start(ctx)
+		c.startMu.Lock()
+		c.startErr = err
+		if err == nil {
+			c.started = true
+		}
+		c.startMu.Unlock()
+	})
 	c.startMu.Lock()
 	defer c.startMu.Unlock()
-	if c.started {
-		return c.startErr
-	}
-	c.startErr = c.start(ctx)
-	if c.startErr == nil {
-		c.started = true
-	}
 	return c.startErr
 }
 

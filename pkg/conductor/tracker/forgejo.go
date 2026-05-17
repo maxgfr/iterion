@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	iterlog "github.com/SocialGouv/iterion/pkg/log"
 )
 
 // ForgejoOptions configures the Forgejo (Gitea-compatible) adapter.
@@ -28,6 +30,11 @@ type ForgejoOptions struct {
 	// HTTPClient overrides the default net/http client. Useful for
 	// tests; production leaves it nil.
 	HTTPClient *http.Client
+
+	// Logger lets the adapter surface per-issue HTTP errors during
+	// state refresh without failing the whole sweep. nil disables
+	// such warnings (legacy behaviour).
+	Logger *iterlog.Logger
 }
 
 // ForgejoAdapter implements Tracker against the Forgejo/Gitea API. It
@@ -67,33 +74,49 @@ func (a *ForgejoAdapter) Name() string { return "forgejo" }
 // label filters (filter executed locally — Forgejo doesn't have
 // negative-label search in the same syntax as GitHub).
 func (a *ForgejoAdapter) ListCandidates(ctx context.Context) ([]Issue, error) {
-	q := url.Values{}
-	q.Set("state", "open")
-	q.Set("type", "issues")
-	q.Set("limit", "50")
-	if len(a.opts.IncludeLabels) > 0 {
-		q.Set("labels", strings.Join(a.opts.IncludeLabels, ","))
-	}
-	endpoint := fmt.Sprintf("/repos/%s/issues?%s", a.opts.Repo, q.Encode())
+	const pageSize = 50
+	out := make([]Issue, 0)
+	for page := 1; ; page++ {
+		q := url.Values{}
+		q.Set("state", "open")
+		q.Set("type", "issues")
+		q.Set("limit", fmt.Sprintf("%d", pageSize))
+		q.Set("page", fmt.Sprintf("%d", page))
+		if len(a.opts.IncludeLabels) > 0 {
+			q.Set("labels", strings.Join(a.opts.IncludeLabels, ","))
+		}
+		endpoint := fmt.Sprintf("/repos/%s/issues?%s", a.opts.Repo, q.Encode())
 
-	var raw []forgejoIssue
-	if err := a.do(ctx, http.MethodGet, endpoint, nil, &raw); err != nil {
-		return nil, err
-	}
-	out := make([]Issue, 0, len(raw))
-	for _, r := range raw {
-		labels := labelNames(r.Labels)
-		if anyOfString(labels, a.opts.ExcludeLabels) {
-			continue
+		var raw []forgejoIssue
+		if err := a.do(ctx, http.MethodGet, endpoint, nil, &raw); err != nil {
+			return nil, err
 		}
-		if containsString(labels, a.opts.ClaimedLabel) {
-			continue
+		for _, r := range raw {
+			labels := labelNames(r.Labels)
+			if anyOfString(labels, a.opts.ExcludeLabels) {
+				continue
+			}
+			if containsString(labels, a.opts.ClaimedLabel) {
+				continue
+			}
+			iss := a.toIssue(r)
+			if iss.WorkflowState == "" {
+				continue
+			}
+			out = append(out, iss)
 		}
-		iss := a.toIssue(r)
-		if iss.WorkflowState == "" {
-			continue
+		// Stop when the page is short or empty — Forgejo doesn't ship
+		// a reliable Link header on every release, so the cheapest
+		// portable signal is "got fewer than pageSize entries".
+		if len(raw) < pageSize {
+			break
 		}
-		out = append(out, iss)
+		// Belt + suspenders: cap total pages to avoid runaway loops on
+		// pathological responses (e.g. a buggy server returning
+		// pageSize entries forever).
+		if page >= 100 {
+			break
+		}
 	}
 	return out, nil
 }
@@ -109,6 +132,13 @@ func (a *ForgejoAdapter) RefreshStates(ctx context.Context, ids []string) (map[s
 		}
 		var r forgejoIssue
 		if err := a.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/issues/%d", a.opts.Repo, num), nil, &r); err != nil {
+			// Log + skip on per-issue errors so a transient network
+			// blip on one issue doesn't make the conductor treat the
+			// rest as "disappeared from tracker" (which would cancel
+			// their in-flight runs).
+			if a.opts.Logger != nil {
+				a.opts.Logger.Warn("conductor: forgejo RefreshStates: issue %d: %v", num, err)
+			}
 			continue
 		}
 		iss := a.toIssue(r)
