@@ -302,12 +302,6 @@ prompt review_user_gpt:
    - claude fixer: {{input.prior_code_files_touched_claude}}
    - gpt fixer:    {{input.prior_code_files_touched_gpt}}
 
-  GPT-SESSION NOTE (v0.2.0): on iterations >= 2 you may inherit
-  a session from a prior fix_gpt run. The workspace files you
-  already read are cached — do NOT re-grep what you've seen
-  unless evidence has changed. Prefer NEW surfaces from
-  `input.doc_files` minus `input.previous_audited_docs`.
-
   Now run STEP 0 through STEP 6 of `doc-verification-checklist.md`
   and emit a verdict with these fields:
     - approved: bool
@@ -611,20 +605,20 @@ judge reviewer_gpt:
   output: verdict_output
   system: review_system
   user: review_user_gpt
-  ## Fix 3: session inherit from the prior fix_gpt session when
-  ## present. v0.1.0 ran every reviewer_gpt in `session: fresh`
-  ## and burned $7.49 / 2.2M tokens on a single iteration because
-  ## each review re-read the full workspace. With inherit, iter
-  ## 2+ rides on fix_gpt's already-loaded context. On iter 0 the
-  ## inherit silently falls through (no upstream session yet) so
-  ## the first review still starts fresh.
-  ##
-  ## Discipline guard: review_user_gpt now reminds the reviewer
-  ## NOT to re-grep what the inherited session already covered,
-  ## and to prefer doc_files - previous_audited_docs as the next
-  ## working set. This protects the "fresh look" property while
-  ## reaping the cache benefit.
-  session: inherit
+  ## Fix 3 ATTEMPTED + REVERTED: v0.2.0 tried `session: inherit`
+  ## here to share fix_gpt's prompt cache. It broke iter 1 (the
+  ## first GPT iteration) because no fix_gpt has run yet — the
+  ## _session_id substitutes to "" and claw's OpenAI provider
+  ## returns 0 tokens twice (initial generation + structured-
+  ## output recovery), failing with "model did not produce a
+  ## structured_output tool_use block". The fresh-session cost
+  ## penalty ($7.49 worst case in v0.1.0) is preferable to a hard
+  ## failure on every run's first GPT iteration. A future fix
+  ## would require iterion DSL support for conditional session
+  ## (e.g. inherit when upstream is set, fresh otherwise) — see
+  ## `session: fork` and the iter-aware substitution syntax in
+  ## docs/dsl.md. Until that lands, stay fresh.
+  session: fresh
   ## claw builtin tools — read-only set, the reviewer NEVER writes.
   tools: [bash, read_file, glob, grep]
   tool_max_steps: 40
@@ -753,13 +747,7 @@ workflow doc_align:
     previous_audited_pairs: "{{outputs.streak_check.cumulative_audited_pairs}}",
     previous_audited_docs: "{{outputs.streak_check.cumulative_audited_docs}}",
     coverage_pct: "{{outputs.streak_check.coverage_pct}}",
-    coverage_target_pct: "{{vars.coverage_target_pct}}",
-    ## Fix 3 session inherit: reviewer_gpt inherits the most
-    ## recent fix_gpt session so subsequent reviews ride on the
-    ## prompt cache. _session_id is a metadata field iterion
-    ## reads at edge-time. On iter 0 outputs.fix_gpt is nil →
-    ## empty → inherit silently falls through to fresh.
-    _session_id: "{{outputs.fix_gpt._session_id}}"
+    coverage_target_pct: "{{vars.coverage_target_pct}}"
   }
 
   reviewer_claude -> streak_check as review_loop(15) with {
