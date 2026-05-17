@@ -168,11 +168,17 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
   // on store.runId (loadEventHistoryIfMissing, setRunStatus, etc.)
   // actually fire. Without this the store stays at runId=null and
   // applyEventsBatch silently no-ops after the await fence.
+  //
+  // Crucially: do NOT reset the store on unmount. A common navigation
+  // pattern (Pilote → RunView console for the same run id) mounts the
+  // destination consumer at almost the same instant Pilote unmounts;
+  // the null-reset here would briefly clear store.runId and any
+  // inflight loadEventHistoryIfMissing await would drop events on the
+  // floor when its post-await guard re-reads state.runId. Leave the
+  // store's runId untouched — the next consumer's mount writes the
+  // correct id; explicit reset() is the user's Pilote → Home path.
   useEffect(() => {
     setStoreRunId(runId);
-    return () => {
-      setStoreRunId(null);
-    };
   }, [runId, setStoreRunId]);
 
   // Promote the run status to our high-level status. The transitions:

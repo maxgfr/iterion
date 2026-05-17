@@ -80,8 +80,22 @@ function RadioInput({
   const [otherText, setOtherText] = useState(() =>
     valueIsOther(value, question.options) ? value : "",
   );
+  // Track "Other is the explicitly-selected row" as local state, NOT
+  // derived from value-match. Otherwise typing a free-text answer
+  // that happens to equal a canned option value (e.g. user types
+  // "Ship a specific feature" into Other and that string is also an
+  // option) immediately highlights the canned row and unchecks Other.
+  const [otherSelected, setOtherSelected] = useState(() =>
+    valueIsOther(value, question.options),
+  );
   const selectedSentinel =
-    value === "" ? "" : matchesOption(value, question.options) ? value : OTHER_SENTINEL;
+    value === ""
+      ? ""
+      : otherSelected
+        ? OTHER_SENTINEL
+        : matchesOption(value, question.options)
+          ? value
+          : OTHER_SENTINEL;
 
   return (
     <div className="space-y-1.5">
@@ -93,7 +107,10 @@ function RadioInput({
           option={opt}
           checked={selectedSentinel === opt.value}
           disabled={disabled}
-          onSelect={() => onChange(opt.value)}
+          onSelect={() => {
+            setOtherSelected(false);
+            onChange(opt.value);
+          }}
         />
       ))}
       {question.allow_other && (
@@ -103,9 +120,13 @@ function RadioInput({
           checked={selectedSentinel === OTHER_SENTINEL}
           otherText={otherText}
           disabled={disabled}
-          onSelect={() => onChange(otherText || OTHER_SENTINEL)}
+          onSelect={() => {
+            setOtherSelected(true);
+            onChange(otherText || OTHER_SENTINEL);
+          }}
           onOtherTextChange={(t) => {
             setOtherText(t);
+            setOtherSelected(true);
             // Re-emit so the form-level submit gate sees the
             // up-to-date text. Empty text keeps OTHER_SENTINEL so
             // the row stays "selected" but the form submit stays

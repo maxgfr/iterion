@@ -145,6 +145,17 @@ export function messagesFromEvents({
 }: MapInputs): PiloteMessage[] {
   const out: PiloteMessage[] = [];
 
+  // Sort by monotonic seq before folding. The runtime emits events
+  // with strictly increasing seq, but the store's applyEventsBatch
+  // dedupes-by-seq without re-sorting, and replay + live tail can
+  // interleave their respective arrivals. A tool_started landing
+  // before its parent node_started would otherwise be silently
+  // dropped (no banner to attribute to). Stable sort: equal seq —
+  // shouldn't happen but tolerate — keeps the original order.
+  const sortedEvents = events
+    .slice()
+    .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+
   // Track which banner is currently "running" for each (node, iter) so
   // node_finished can flip it in place and so a duplicate node_started
   // (WS replay) doesn't push a second banner.
@@ -163,7 +174,7 @@ export function messagesFromEvents({
   // event shapes).
   let latestPendingHumanKey: string | null = null;
 
-  for (const evt of events) {
+  for (const evt of sortedEvents) {
     if (!evt.type) continue;
     switch (evt.type) {
       case "node_started": {
