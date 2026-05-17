@@ -17,13 +17,17 @@ A long-running server deployment that targets multi-tenant teams. Same Go core a
 
 ```yaml
 # values.yaml — minimal example (see charts/iterion/values.yaml for the full schema)
-mongo:
-  uri: "mongodb://mongo:27017/iterion"
-blob:
-  endpoint: "https://s3.example.com"
-  bucket: "iterion-runs"
-queue:
-  nats: "nats://nats:4222"
+config:
+  mongo:
+    uri: "mongodb://mongo:27017/iterion"
+    database: "iterion"
+  nats:
+    url: "nats://nats:4222"
+  s3:
+    endpoint: "https://s3.example.com"
+    bucket: "iterion-runs"
+    region: "us-east-1"
+    usePathStyle: true
 ```
 
 ## Deploy

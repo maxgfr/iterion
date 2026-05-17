@@ -9,21 +9,22 @@ All diagnostic codes emitted during compilation (`ir.Compile`) and validation (`
 | **C001** | error | Unknown node reference | An edge references a node that is not declared | Declare the node or fix the name typo |
 | **C002** | error | Unknown schema reference | A node's `input:` or `output:` references an undeclared schema | Declare the schema or fix the name |
 | **C003** | error | Unknown prompt reference | A node's `system:` or `user:` references an undeclared prompt | Declare the prompt or fix the name |
-| **C004** | error | Bad template reference | A `{{...}}` template expression is malformed | Use `{{vars.X}}`, `{{input.X}}`, `{{outputs.node.field}}`, or `{{artifacts.X}}` |
+| **C004** | error | Bad template reference | A `{{...}}` template expression is malformed | Use `{{vars.X}}`, `{{input.X}}`, `{{outputs.node.field}}`, `{{artifacts.X}}`, `{{attachments.X}}`, `{{loop.name.iteration}}`, or `{{run.id}}` |
 | **C005** | error | Duplicate loop definition | Multiple edges share a loop name but disagree on `max_iterations` | Use the same `max_iterations` value or use different loop names |
 | **C006** | error | No workflow found | The file has no `workflow` declaration | Add a `workflow name:` block |
 | **C007** | error | Multiple workflows | More than one `workflow` block found | V1 supports one workflow per file — remove extras |
 | **C008** | error | Missing entry node | The `entry:` node name doesn't match any declared node | Fix the entry name or declare the node |
 | **C018** | error/warning | Missing model/backend or LLM interaction requirements | Agents/judges without `model:` or `backend:` are errors only when no default supervisor model and no auto-detectable runtime credentials are available. `mode: llm` routers without either value produce a warning and use the built-in runtime default. Human nodes using `interaction: llm` or `interaction: llm_or_human` must set `model:` or `interaction_model:` and must declare `output:`. | Add `model: "..."`, `backend: "..."`, or configure detectable credentials/defaults for agents/judges; set explicit model/backend for LLM routers when you do not want runtime defaulting; for LLM-backed human nodes add the interaction model and output schema. |
 | **C024** | error | Duplicate MCP server | A `mcp_server` name is declared more than once | Use unique names for each MCP server |
-| **C025** | error | Invalid MCP server config | MCP server misconfigured (e.g., stdio without command, http without url) | Match properties to transport type: stdio needs `command`, http needs `url` |
+| **C025** | error | Invalid MCP server config | MCP server misconfigured (e.g., stdio without command, http/sse without url) | Match properties to transport type: stdio needs `command`; http and sse need `url` and must not set `command` or `args` |
 | **C030** | warning | Codex backend discouraged | A node uses `backend: "codex"` | Codex is still supported but has limitations (cannot configure tool set, fills its own context window, weaker integration). Prefer `backend: "claude_code"` for tool-using agents or `claw` (default) with an OpenAI model (`model: "openai/gpt-5.4-mini"`) for judges/reviewers. |
 | **C039** | error | Compute node has no expressions | A `compute` node was declared without any `expr: key: "<expression>"` entries | Add at least one expression mapping an output schema field to an expression — or remove the node |
-| **C040** | error | Expression failed to parse | An expression in a `compute` node, in a quoted `when "..."` clause, or in a template ref isn't valid | Check operators, parentheses, namespace prefixes (`vars / input / outputs / artifacts / loop / run`), and built-in calls (`length`, `concat`, `unique`, `contains`) |
+| **C040** | error | Expression failed to parse | An expression in a `compute` node or in a quoted `when "..."` clause isn't valid | Check operators, parentheses, namespace prefixes (`vars / input / outputs / artifacts / loop / run`), and built-in calls (`length`, `concat`, `unique`, `contains`, `join`, `if`) |
 | **C041** | error | Duplicate node id | Two declarations share the same node name across agents/judges/routers/humans/tools/computes | Rename one — node ids are a single global namespace |
 | **C042** | error | Reserved node name | A user node is named `done` or `fail` (those are reserved terminal targets) | Pick a different node name |
 | **C044** | error | Invalid sandbox mode | A node or workflow's `sandbox:` mode is outside the accepted set (`""`, `none`, `auto`, `inline`); or inline mode is missing an image/build or sets both | Set `sandbox:` to `auto`, `none`, `inline`, or omit it. Block-form sandbox config with `image:`, `build:`, `env:`, `mounts:`, or `network:` compiles as inline mode unless `mode:` is specified; inline requires exactly one of `image:` or `build:`. |
 | **C045** | error | Sandbox auto without config | Reserved diagnostic code; not currently emitted by compile/validation. Normal CLI/runtime auto mode supplies a default `iterion-sandbox-slim:<version>` fallback when no `.devcontainer/devcontainer.json` is present | No compile-time action. If an embedder disables the default image and runtime reports a missing devcontainer, add `.devcontainer/devcontainer.json`, provide a default image, or use inline `sandbox:` with `image:`/`build:` (see [docs/sandbox.md](../sandbox.md)). |
+| **C046** | error | Invalid budget cost | `budget.max_cost_usd` is negative, NaN, or infinity | Use a non-negative finite USD amount, or omit the field to disable the cost cap. |
 
 ## Validation Diagnostics
 
@@ -42,9 +43,10 @@ All diagnostic codes emitted during compilation (`ir.Compile`) and validation (`
 | **C021** | error | LLM router too few edges | An `llm` router has fewer than 2 outgoing edges | Add at least 2 outgoing edges for the LLM to choose from |
 | **C022** | error | LLM router edge has condition | An edge from an `llm` router has a `when` clause | Remove the `when` clause — LLM routers select targets directly |
 | **C023** | error | LLM-only property on non-LLM router | Properties `model`, `backend`, `system`, `user`, `multi`, or `reasoning_effort` are set on a router that isn't `mode: llm` | Remove these properties or change the mode to `llm` |
-| **C024** | error | Invalid reasoning effort | `reasoning_effort` has a value other than `low`, `medium`, `high`, `xhigh`, `max` | Use one of the five valid values |
 | **C026** | error | Invalid loop iterations | A loop's `max_iterations` is less than 1 | Set `max_iterations` to at least 1 |
+| **C027** | error | Invalid reasoning effort | `reasoning_effort` has a value other than `low`, `medium`, `high`, `xhigh`, `max` | Use one of the five valid values |
 | **C028** | error | Duplicate with-mapping key | The same `with` key appears on multiple non-conditional edges to the same target | Use unique keys, or make edges conditional/convergent |
+| **C029** | error | Unknown outputs node reference | A `{{outputs.<node>...}}` template targets a node not declared anywhere in the file | Declare the node or fix the typo |
 | **C031** | error | outputs ref field not in output schema | `{{outputs.<node>.<field>}}` references a field absent from that node's `output:` schema | Reference an existing field, or add the field to the schema |
 | **C032** | warning | outputs ref on schemaless node | `{{outputs.<node>.<field>}}` targets a node that has no `output:` schema, so the field cannot be verified | Add an `output:` schema to the source node, or drop the field access |
 | **C033** | error | Undeclared variable | `{{vars.X}}` (or `vars.X` inside an expression) targets a variable not declared in the file-level or workflow-level `vars:` block | Declare the variable, or fix the name |
@@ -65,15 +67,14 @@ All diagnostic codes emitted during compilation (`ir.Compile`) and validation (`
 | **C072** | error | Duplicate preset name | The same preset name appears more than once in the `presets:` block | Rename or merge the duplicate preset |
 | **C080** | warning | Unknown capability | A `capabilities:` entry isn't in the built-in registry (currently: `board.read`, `board.create`, `board.move`, `board.assign`, `board.label`, `board.close`) | Either fix the typo or accept the warning — unknown caps still propagate to the executor (the registry is open for extension) |
 | **C081** | error | Malformed capability | A `capabilities:` entry doesn't match the shape `domain` or `domain.action` (lowercase letters/digits/underscores) | Use the lowercase `domain.action` form, e.g. `board.create` |
+| **C082** | warning | Board capability inside sandbox | A node grants a `board.*` capability while running under a sandbox — the stdio `__mcp-board` transport is unavailable, the runtime falls back to the HTTP transport on the iterion server | No action required if the iterion HTTP server is reachable from the sandbox; otherwise drop the capability or disable the sandbox for that node |
 
-> **Code reuse note:** `C030` is currently emitted with two distinct
-> meanings — the compile-time *Codex backend discouraged* warning shown
-> above, **and** a validator-side error for `outputs.<node>` references
-> targeting a non-existent node. The latter is reported as code `C030`
-> in error messages even though the row above describes the codex
-> case. When you see `C030` for an `outputs.<unknown>` reference, fix
-> the reference; when you see it for `backend: "codex"`, treat it as a
-> warning. Disambiguating the codes is tracked as a follow-up.
+> **Historical code-reuse note:** earlier releases reused `C030` for
+> two cases. `C029` was introduced for the validator-side
+> *unknown outputs node reference* error; `C030` now only flags the
+> compile-time *Codex backend discouraged* warning. If an older log
+> shows `C030` on an `outputs.<unknown>` reference, treat it as the
+> modern `C029`.
 
 ## Quick Troubleshooting
 

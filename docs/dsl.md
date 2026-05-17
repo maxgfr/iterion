@@ -243,6 +243,16 @@ Templates use `{{...}}` interpolation:
 | `{{outputs.node_id.field}}` | Specific field from a node's output |
 | `{{outputs.node_id.history}}` | Array of all outputs across loop iterations |
 | `{{artifacts.name}}` | Published artifact by name |
+| `{{attachments.name}}` | Declared attachment by name; resolves to the host path (same as `.path`) |
+| `{{attachments.name.path}}` | Attachment host path |
+| `{{attachments.name.url}}` | Presigned attachment URL |
+| `{{attachments.name.mime}}` | Attachment MIME type |
+| `{{attachments.name.size}}` | Attachment size in bytes |
+| `{{attachments.name.sha256}}` | Attachment SHA-256 digest |
+| `{{loop.name.iteration}}` | Current 0-based iteration count for a declared loop |
+| `{{loop.name.max}}` | Effective loop iteration cap |
+| `{{loop.name.previous_output}}` | Previous iteration output snapshot; append subfields to drill in |
+| `{{run.id}}` | Current run identifier |
 
 Environment variables are supported with `${ENV_VAR}` syntax (resolved at compile time).
 
@@ -270,7 +280,7 @@ agent worker:
     servers: [code_tools, api_server]
 ```
 
-Supported transports: `stdio` (requires `command`), `http` (requires `url`).
+Supported transports: `stdio` (requires `command` and forbids `url`), plus `http` and `sse` (both require `url` and must not set `command` or `args`; they share the streamable transport path at runtime).
 
 ## Budget
 
@@ -308,7 +318,7 @@ workflow safe_pr_fix:
 
 - [`grammar/iterion_v1.ebnf`](grammar/iterion_v1.ebnf) — formal EBNF grammar
 - [`references/dsl-grammar.md`](references/dsl-grammar.md) — readable grammar reference
-- [`references/diagnostics.md`](references/diagnostics.md) — all validation diagnostic codes (C001–C072, sparse)
+- [`references/diagnostics.md`](references/diagnostics.md) — all validation diagnostic codes (C001–C082, sparse)
 - [`references/patterns.md`](references/patterns.md) — 10 reusable workflow patterns
 - [`attachments.md`](attachments.md) — attachment handling
 - [`workflow_authoring_pitfalls.md`](workflow_authoring_pitfalls.md) — required reading before authoring workflows that commit code

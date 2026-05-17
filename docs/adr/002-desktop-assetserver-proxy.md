@@ -1,4 +1,4 @@
-# ADR-002: Desktop editor SPA hosted via Wails AssetServer reverse-proxy
+# ADR-002: Desktop editor SPA hosted via Wails AssetServer handler
 
 - **Status**: Accepted
 - **Date**: 2026-05-05
@@ -16,8 +16,8 @@ SPA can do on its own.
 The original design (Phase 1 of the desktop plan) loaded a tiny embedded
 "bootstrap stub" in the Wails AssetServer, called `GetServerURL` /
 `GetSessionToken` on `window.go.main.App`, and **navigated the WebView**
-to `http://127.0.0.1:<port>/?t=<token>` so the editor SPA loaded from the
-embedded HTTP server.
+to the embedded loopback HTTP server so the editor SPA loaded from the
+server directly.
 
 That design has a fatal architectural flaw discovered in iteration 10 of
 the desktop feature review:
@@ -50,40 +50,50 @@ runtime.
 
 ## Decision
 
-The Wails AssetServer hosts the editor SPA via a reverse-proxy
+The Wails AssetServer hosts the editor SPA through a custom
 `http.Handler` (`cmd/iterion-desktop/asset_proxy.go`). The WebView's main
 origin stays on the AssetServer URL (`wails://wails/` on Mac/Linux,
 `http://wails.localhost/` on Windows) for the lifetime of the app, and:
 
-- HTTP traffic (REST API + SPA static assets) is forwarded to the embedded
-  `pkg/server` via `httputil.NewSingleHostReverseProxy`. Wails detects the
-  `text/html` response on `GET /` and injects `/wails/runtime.js` +
-  `/wails/ipc.js`, which is what makes `window.go.main.App.*` reachable to
-  the editor SPA — the exact gap that was the production blocker.
-- The proxy `Director` rewrites the `Origin` header to the loopback target
-  (so `pkg/server`'s `requireSafeOrigin` allowlist passes without having to
-  teach it the `wails://` origin scheme) and **always** strips any inbound
-  `iterion_session` cookie before re-attaching the canonical token so the
-  local server's session middleware authenticates the proxied call. The
-  SPA never has to learn or echo the token over the wire.
+- The AssetServer handler serves SPA/static responses — every path outside
+  `/api/*`, including `GET /` and hashed chunks under `/assets/*` — from
+  the GUI binary's own `pkg/server.StaticFS` embed. Wails detects the
+  handler's `text/html` response on `GET /` and injects
+  `/wails/runtime.js` + `/wails/ipc.js`, which is what makes
+  `window.go.main.App.*` reachable to the editor SPA — the exact gap that
+  was the production blocker.
+- Only `/api/*` HTTP traffic is forwarded to the selected loopback server
+  through `httputil.ReverseProxy`. The proxy's `Rewrite` calls `SetURL`,
+  forces `Host` to the loopback target, and rewrites any inbound `Origin`
+  header to `http://<targetHost>`. That keeps `pkg/server`'s loopback
+  Origin checks and CORS reflection satisfied without teaching HTTP
+  handlers about the `wails://` origin scheme. The proxy does not attach
+  or strip desktop auth cookies.
+- Default GUI startup uses per-project headless daemons: it finds or
+  launches `iterion-desktop --server-only --project=<dir>` and points the
+  `/api/*` proxy plus direct WS URLs at that daemon. The in-process
+  `cmd/iterion-desktop/server_host.go` path is the opt-out/fallback used
+  when `ITERION_DESKTOP_ATTACH_DAEMON=0` (also `false`, `no`, or `off`) is
+  set or daemon attach/spawn fails; that fallback starts `cli.RunEditor`
+  with `Port=-1`, `Bind="127.0.0.1"`, and `NoBrowser=true`.
+- Both the default headless daemon and the in-process fallback use
+  `cli.RunEditor`, which builds `pkg/server.Config` with
+  `DisableAuth=true`, the same local-editor trust model used by
+  `iterion editor`; there is no desktop-specific `SessionToken` field in
+  `pkg/server.Config`.
+- `GetSessionToken` remains a Wails binding because the SPA's desktop WS
+  helper calls it together with `GetServerURL`. In current local desktop
+  builds it returns `""`, and the SPA omits the token query parameter when
+  the value is empty.
 - WebSocket upgrades (`/api/ws`, `/api/ws/runs/*`) **cannot** flow through
   the proxy: Wails' AssetServer rejects WS upgrades with `501` by design
   (`vendor/.../assetserver.go:110-114`). The editor SPA dials WS endpoints
   directly at `ws://127.0.0.1:<port>/api/ws...` using the absolute URL
   resolved through `getDesktopWsBase()` in
-  `editor/src/lib/desktopBridge.ts`, with the session token on the query
-  string.
-- `pkg/server/session.go` accepts the same `?t=<token>` query string on
-  any path (not just bootstrap `GET /`), so cross-origin WS handshakes
-  authenticate without the HttpOnly cookie scoped to the loopback domain.
-  The non-bootstrap query path **does not** set a cookie — the WS
-  handshake is short-lived and shouldn't persist the token in browser
-  storage on a non-bootstrap origin.
-- `pkg/server/server.go`'s WS-origin allowlist is extended in desktop mode
-  (when `cfg.SessionToken != ""`) to include `wails://wails` and
-  `http://wails.localhost`, so the upgrader's `CheckOrigin` accepts the
-  SPA's true origin. The token gates entry; the origin allowlist is
-  defense-in-depth.
+  `editor/src/lib/desktopBridge.ts`. In local desktop mode those dials have
+  no token query parameter; if a future hosted-auth desktop flow supplies a
+  real token, the auth implementation that consumes it should document that
+  conditional behaviour.
 
 The bootstrap-stub directory (`cmd/iterion-desktop/frontend-stub/`) and
 the `embed.go` that wired it up are deleted — they're obsolete with the
@@ -139,40 +149,42 @@ wouldn't include that prefix, so `window.go` would still be empty.
 - `window.go.main.App.*` is reachable on the editor SPA in desktop mode.
   Welcome, Settings, ProjectSwitcher, MissingCLIBanner, and the
   native-menu event subscriptions all work as designed.
-- The session-cookie flow stays simple for the SPA — the proxy attaches
-  the cookie on every forwarded request; the SPA never sees or echoes the
-  token.
-- `iterion editor` (CLI) is byte-identical to before: `SessionToken` is
-  empty, the session middleware is not installed, the WS-origin allowlist
-  doesn't get the Wails extensions, the proxy code is desktop-only via
-  `//go:build desktop`.
+- The HTTP proxy is deliberately small: it only forwards `/api/*` to the
+  current loopback server, forces the target Host, and rewrites Origin to
+  match the loopback target. It does not own authentication state.
+- `iterion editor`, the default desktop headless daemon, and the
+  in-process fallback use the same `cli.RunEditor` / `DisableAuth=true`
+  local trust model; desktop only changes how the SPA is hosted and how WS
+  URLs are resolved.
 - The reviewer's blocker is resolved without restructuring the binding
   surface or vendoring more Wails internals.
 
 ### Negative
 
-- Adds ~150 LOC of proxy code (`asset_proxy.go` + tests).
-- The desktop binary now has TWO HTTP servers in the request path: the
-  Wails AssetServer (intercepting `wails://` / `wails.localhost`) and the
-  embedded `pkg/server`. Latency overhead is one extra in-process hop
-  (negligible) but every observability story has to account for both
-  layers. We mitigate by keeping the proxy minimal (no caching, no
-  body-rewriting, only Director-time header tweaks).
-- The session middleware gains a second auth path (?t= query for
-  non-bootstrap requests). It's narrowly scoped (the local server still
-  rejects without either cookie or matching token) but the surface is
-  larger than the cookie-only design. Tests in
-  `pkg/server/session_test.go` lock in both paths.
-- The WS-origin allowlist grows by two entries when SessionToken is set.
-  This is desktop-only and gated by `cfg.SessionToken != ""`, but it does
-  introduce two CLI-vs-desktop-divergent strings in `pkg/server`. We mark
-  them clearly as "desktop mode" so future edits don't accidentally
-  permit `wails://` origins on the CLI server.
+- Adds proxy code (`asset_proxy.go` + tests).
+- Desktop REST calls have TWO HTTP servers in the request path: the Wails
+  AssetServer (intercepting `wails://` / `wails.localhost`) and the selected
+  loopback `pkg/server` daemon/fallback. Latency overhead is one extra
+  in-process hop (negligible) but every observability story has to account
+  for both layers. SPA/static responses are served directly from the GUI
+  embed; only `/api/*` uses the proxy hop. We mitigate by keeping the proxy
+  minimal (no caching, no body-rewriting, only rewrite-time URL/Host/Origin
+  tweaks).
+- WebSockets are the exception to the single AssetServer origin: they dial
+  the loopback server directly because Wails rejects WS upgrades. Origin
+  allow-listing in `pkg/server` must continue to include the Wails origins
+  for this desktop path.
+- `GetSessionToken` is still part of the desktop binding contract even
+  though local desktop returns an empty string. This keeps the SPA helper
+  stable today, but a future hosted-auth token flow must wire both the
+  producer and the server-side consumer before documenting tokenized WS
+  dials as active behaviour.
 
 ### Operational
 
-- `docs/desktop-architecture.md` updated to reflect the proxy + WS
-  carve-out.
+- `docs/desktop-architecture.md` updated to reflect the AssetServer
+  handler's GUI-embedded SPA/static path, `/api/*` proxy, default daemon
+  mode, and WS carve-out.
 - `docs/desktop-qa.md` first checkbox now exercises the actual production
   path (bindings reachable on editor SPA), so a regression of the original
   blocker would surface immediately on the next QA pass.

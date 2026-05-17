@@ -14,6 +14,8 @@ The DSL uses **significant indentation** (2 spaces per level). `INDENT` and `DED
 file = { top_level_decl } ;
 
 top_level_decl = vars_decl
+               | presets_decl
+               | attachments_decl
                | mcp_server_decl
                | prompt_decl
                | schema_decl
@@ -44,6 +46,39 @@ type_expr = "string" | "bool" | "int" | "float" | "json" | "string[]" ;
 literal   = STRING_LIT | INT_LIT | FLOAT_LIT | BOOL_LIT ;
 ```
 
+## Presets
+
+```ebnf
+presets_decl = "presets" ":" NEWLINE INDENT { preset_entry } DEDENT ;
+preset_entry = IDENT ":" NEWLINE INDENT { preset_value } DEDENT ;
+preset_value = IDENT ":" literal NEWLINE ;
+```
+
+A `presets:` block is top-level only. Each entry is a named bundle of
+`vars:` values selected at run time (for example via `--preset <name>`).
+Preset keys must name declared variables and values must match the variable
+type; mismatches raise C070/C071, and duplicate preset names raise C072.
+
+## Attachments
+
+```ebnf
+attachments_decl = "attachments" ":" NEWLINE INDENT { attachment_field } DEDENT ;
+
+attachment_field = IDENT ":" attachment_type NEWLINE
+                   [ INDENT { attachment_prop } DEDENT ] ;
+attachment_type  = "file" | "image" ;
+
+attachment_prop = "description" ":" STRING_LIT NEWLINE
+                | "accept_mime"  ":" "[" STRING_LIT { "," STRING_LIT } "]" NEWLINE
+                | "required"     ":" BOOL_LIT NEWLINE ;
+```
+
+`attachments:` may appear at top level and inside a workflow body. It
+declares binary inputs uploaded for a run. Names are referenced with
+`{{attachments.<name>}}` (the host path) or the subfields documented in
+[attachments.md](../attachments.md): `path`, `url`, `mime`, `size`, and
+`sha256`. Attachment names must not collide with `vars:` names.
+
 ## MCP Server Declarations
 
 ```ebnf
@@ -69,7 +104,7 @@ Only `auth.type: "oauth2"` is wired today; other types raise C038.
 
 - `stdio` requires `command`, forbids `url`
 - `http` requires `url`, forbids `command` and `args`
-- `sse` is recognized but not supported in V1
+- `sse` is supported with the same URL/command/args rules as `http` and uses the streamable HTTP transport path
 
 ## Prompts
 
@@ -78,7 +113,7 @@ prompt_decl = "prompt" IDENT ":" NEWLINE INDENT prompt_body DEDENT ;
 prompt_body = { PROMPT_TEXT_LINE } ;
 ```
 
-Prompt text may contain template interpolations: `{{vars.X}}`, `{{input.X}}`, `{{outputs.node.field}}`, `{{artifacts.X}}`. Environment variables use `${VAR_NAME}` syntax.
+Prompt text may contain template interpolations: `{{vars.X}}`, `{{input.X}}`, `{{outputs.node.field}}`, `{{artifacts.X}}`, `{{attachments.X}}` (and supported subfields), `{{loop.name.iteration}}`, and `{{run.id}}`. Environment variables use `${VAR_NAME}` syntax.
 
 ## Schemas
 
@@ -114,7 +149,8 @@ agent_prop = "model"              ":" STRING_LIT              NEWLINE
            | "interaction_model"  ":" STRING_LIT               NEWLINE
            | "await"              ":" await_mode                NEWLINE
            | "mcp"                ":" NEWLINE INDENT { mcp_config_prop } DEDENT
-           | "compaction"         ":" NEWLINE INDENT { compaction_prop } DEDENT ;
+           | "compaction"         ":" NEWLINE INDENT { compaction_prop } DEDENT
+           | sandbox_decl ;
 
 tool_policy_list = "[" tool_ref { "," tool_ref } "]" ;
 tool_list        = "[" tool_ref { "," tool_ref } "]" ;
@@ -179,13 +215,25 @@ human_prop = "input"              ":" IDENT           NEWLINE
 ```ebnf
 tool_node_decl = "tool" IDENT ":" NEWLINE INDENT { tool_node_prop } DEDENT ;
 
-tool_node_prop = "command" ":" STRING_LIT  NEWLINE
-               | "input"   ":" IDENT       NEWLINE
-               | "output"  ":" IDENT       NEWLINE
-               | "await"   ":" await_mode   NEWLINE ;
+tool_node_prop = "command"  ":" STRING_LIT  NEWLINE
+               | "script"   ":" STRING_LIT  NEWLINE
+               | "language" ":" IDENT       NEWLINE
+               | "input"    ":" IDENT       NEWLINE
+               | "output"   ":" IDENT       NEWLINE
+               | "await"    ":" await_mode  NEWLINE
+               | sandbox_decl ;
 ```
 
-`input:` is optional but useful when the command renders structured data via `{{input.field}}` template substitution. String-array fields (`string[]`) expand into the command line as space-joined items.
+A tool must declare exactly one of `command:` or `script:`. `command:` is a
+raw shell snippet; `script:` is written to a temporary file and executed by
+`language:` (empty defaults to `sh`). Supported `language:` values are `js`,
+`node`, `py`, `python`, `python3`, `sh`, and `bash`; `language:` is only valid
+with `script:`. `sandbox:` is a node-level override with the same syntax as
+workflow sandbox configuration.
+
+`input:` is optional but useful when the command or script renders structured
+data via `{{input.field}}` template substitution. String-array fields
+(`string[]`) expand into the command line as space-joined items.
 
 ## Compute
 
@@ -209,7 +257,8 @@ compute_expr_entry  = IDENT ":" STRING_LIT NEWLINE ;
 The `expr` block maps every output schema field that should be
 populated by the compute node to a quoted expression. Built-ins
 available inside expressions: `length(x)`, `concat(a, b, …)`,
-`unique(list)`, `contains(list, item)`. A `compute` node with no
+`unique(list)`, `contains(list, item)`, `join(list, sep)`, and
+`if(cond, then, else)`. A `compute` node with no
 `expr` entries raises C039.
 
 Example:
@@ -222,8 +271,8 @@ schema streak_state:
 compute streak:
   output: streak_state
   expr:
-    consecutive_passes: "loop.refine.iter"
-    ready: "outputs.review.passed && loop.refine.iter >= 2"
+    consecutive_passes: "loop.refine.iteration"
+    ready: "outputs.review.passed && loop.refine.iteration >= 2"
 ```
 
 ## Workflow
@@ -234,6 +283,7 @@ workflow_decl = "workflow" IDENT ":" NEWLINE INDENT
                 DEDENT ;
 
 workflow_prop = workflow_vars
+              | workflow_attachments
               | workflow_entry
               | workflow_default_backend
               | workflow_tool_policy
@@ -241,9 +291,11 @@ workflow_prop = workflow_vars
               | workflow_mcp
               | workflow_budget
               | workflow_compaction
-              | workflow_interaction ;
+              | workflow_interaction
+              | sandbox_decl ;
 
 workflow_vars            = "vars"            ":" NEWLINE INDENT { var_field } DEDENT ;
+workflow_attachments     = attachments_decl ;
 workflow_entry           = "entry"           ":" IDENT NEWLINE ;
 workflow_default_backend = "default_backend" ":" STRING_LIT NEWLINE ;
 workflow_tool_policy     = "tool_policy"     ":" tool_policy_list NEWLINE ;
@@ -289,6 +341,45 @@ compaction_prop = "threshold"       ":" NUMBER_LIT NEWLINE
 workflow_interaction = "interaction" ":" interaction_mode NEWLINE ;
 ```
 
+Workflow-level `attachments:` entries are accepted in the same form as
+top-level `attachments:` and are merged into the workflow's declared binary
+inputs.
+
+```ebnf
+sandbox_decl = "sandbox" ":" sandbox_mode NEWLINE
+             | "sandbox" ":" NEWLINE INDENT { sandbox_prop } DEDENT ;
+
+sandbox_mode = "auto" | "none" | "inline" ;
+
+sandbox_prop = "mode"             ":" sandbox_mode NEWLINE
+             | "image"            ":" STRING_LIT  NEWLINE
+             | "user"             ":" STRING_LIT  NEWLINE
+             | "workspace_folder" ":" STRING_LIT  NEWLINE
+             | "post_create"      ":" STRING_LIT  NEWLINE
+             | "env"              ":" string_map
+             | "mounts"           ":" string_or_ident_list NEWLINE
+             | "network"          ":" NEWLINE INDENT { sandbox_network_prop } DEDENT
+             | "build"            ":" NEWLINE INDENT { sandbox_build_prop } DEDENT ;
+
+sandbox_network_prop = "mode"    ":" IDENT NEWLINE
+                     | "preset"  ":" ( STRING_LIT | IDENT ) NEWLINE
+                     | "inherit" ":" IDENT NEWLINE
+                     | "rules"   ":" string_or_ident_list NEWLINE ;
+
+sandbox_build_prop = "dockerfile" ":" STRING_LIT NEWLINE
+                   | "context"    ":" STRING_LIT NEWLINE
+                   | "args"       ":" string_map ;
+
+string_map           = "{" IDENT ":" ( STRING_LIT | IDENT ) { "," IDENT ":" ( STRING_LIT | IDENT ) } "}" NEWLINE
+                     | NEWLINE INDENT { IDENT ":" ( STRING_LIT | IDENT ) NEWLINE } DEDENT ;
+string_or_ident_list = "[" ( STRING_LIT | IDENT ) { "," ( STRING_LIT | IDENT ) } "]" ;
+```
+
+`sandbox:` is accepted on workflows, agents, judges, and tools. Short-form
+`auto` reads `.devcontainer/devcontainer.json` or the configured default
+image; `none` opts out. Block form without explicit `mode:` compiles as
+`inline` and must declare exactly one of `image:` or `build:`.
+
 `compaction.threshold` is a fraction of the model's context window in
 `(0, 1]` (default `0.85`), and `compaction.preserve_recent` is the
 minimum number of recent turns kept verbatim (default `4`). The block
@@ -313,11 +404,11 @@ Two `when` forms:
   identifier must reference a `bool` field in the source node's output
   schema (validated by C013/C014).
 - **Quoted expression:** `when "approved && batch_complete"` or
-  `when "loop.refine.iter < 3"`. The body is parsed at compile time and
+  `when "loop.refine.iteration < 3"`. The body is parsed at compile time and
   may use the same namespaces as a compute expression
   (`vars / input / outputs / artifacts / loop / run`), comparison and
   boolean operators, and the built-ins `length`, `concat`, `unique`,
-  `contains`. Useful for compound predicates that don't fit a single
+  `contains`, `join`, and `if`. Useful for compound predicates that don't fit a single
   schema field.
 
 ## Shared Enumerations
@@ -343,13 +434,17 @@ template_ref = "vars"      "." IDENT
              | "input"     "." IDENT
              | "outputs"   "." IDENT [ "." IDENT ]
              | "artifacts" "." IDENT
+             | "attachments" "." IDENT [ "." IDENT ]
              | "loop"      "." IDENT [ "." IDENT { "." IDENT } ]
              | "run"       "." IDENT ;
 ```
 
+`{{attachments.<name>}}` is equivalent to `{{attachments.<name>.path}}`; the
+other valid attachment subfields are `url`, `mime`, `size`, and `sha256`.
+
 Special: `{{outputs.node_id.history}}` returns the array of all outputs from a node across loop iterations. Only valid if the node is in a declared loop.
 
-The `loop.<name>.iter` reference exposes the current 0-based iteration counter of a declared loop, and `loop.<name>.previous.<field>` resolves to the previous iteration's value of a field on the loop's controlling node. The `run` namespace exposes a small set of run-scoped values (`run.id`, `run.store_dir`). Both namespaces are also usable inside compute expressions and the quoted `when` form.
+The `loop.<name>.iteration` reference exposes the current 0-based iteration counter of a declared loop, `loop.<name>.max` exposes the loop's effective cap, and `loop.<name>.previous_output` exposes the previous iteration's output snapshot for the loop's controlling node. Add field segments such as `loop.<name>.previous_output.score` to drill into that snapshot. The `run` namespace exposes the current run identifier (`run.id`). Both namespaces are also usable inside compute expressions and the quoted `when` form.
 
 ## Terminal Tokens
 
@@ -367,6 +462,6 @@ DEDENT       = (* decrease in indentation level *) ;
 
 ## Reserved Keywords
 
-`vars`, `prompt`, `schema`, `agent`, `judge`, `router`, `human`, `tool`, `compute`, `workflow`, `entry`, `mcp`, `mcp_server`, `budget`, `compaction`, `worktree`, `model`, `backend`, `default_backend`, `input`, `output`, `publish`, `system`, `user`, `session`, `tools`, `tool_policy`, `capabilities`, `tool_max_steps`, `reasoning_effort`, `readonly`, `interaction`, `interaction_prompt`, `interaction_model`, `await`, `mode`, `instructions`, `min_answers`, `command`, `expr`, `multi`, `transport`, `args`, `url`, `auth`, `type`, `auth_url`, `token_url`, `revoke_url`, `client_id`, `scopes`, `autoload_project`, `inherit`, `servers`, `disable`, `threshold`, `preserve_recent`, `when`, `not`, `as`, `with`, `enum`, `fresh`, `fork`, `artifacts_only`, `fan_out_all`, `condition`, `round_robin`, `llm`, `wait_all`, `best_effort`, `none`, `human`, `llm_or_human`, `auto`, `done`, `fail`, `true`, `false`, `string`, `bool`, `int`, `float`, `json`, `string[]`, `max_parallel_branches`, `max_duration`, `max_cost_usd`, `max_tokens`, `max_iterations`, `low`, `medium`, `high`, `xhigh`, `max`, `stdio`, `http`, `sse`, `oauth2`.
+`vars`, `presets`, `attachments`, `prompt`, `schema`, `agent`, `judge`, `router`, `human`, `tool`, `compute`, `workflow`, `entry`, `mcp`, `mcp_server`, `budget`, `compaction`, `worktree`, `model`, `backend`, `default_backend`, `input`, `output`, `publish`, `system`, `user`, `session`, `tools`, `tool_policy`, `capabilities`, `tool_max_steps`, `reasoning_effort`, `readonly`, `interaction`, `interaction_prompt`, `interaction_model`, `await`, `mode`, `instructions`, `min_answers`, `command`, `script`, `language`, `expr`, `multi`, `transport`, `args`, `url`, `auth`, `type`, `auth_url`, `token_url`, `revoke_url`, `client_id`, `scopes`, `autoload_project`, `inherit`, `servers`, `disable`, `threshold`, `preserve_recent`, `sandbox`, `when`, `not`, `as`, `with`, `enum`, `fresh`, `fork`, `artifacts_only`, `fan_out_all`, `condition`, `round_robin`, `llm`, `wait_all`, `best_effort`, `none`, `human`, `llm_or_human`, `auto`, `done`, `fail`, `true`, `false`, `string`, `bool`, `int`, `float`, `json`, `string[]`, `file`, `image`, `max_parallel_branches`, `max_duration`, `max_cost_usd`, `max_tokens`, `max_iterations`, `low`, `medium`, `high`, `xhigh`, `max`, `stdio`, `http`, `sse`, `oauth2`.
 
 The `delegate` keyword from earlier drafts has been removed — use `backend:` everywhere it was used (delegation backends are selected by name: `claw`, `claude_code`, `codex`).

@@ -12,9 +12,9 @@
 | Router | `router <name>:` | `RouterDecl` | Modes: fan_out_all, condition, round_robin, llm |
 | Await / convergence | `await: wait_all` / `await: best_effort` | `AwaitMode` on supported nodes | Declared on agent, judge, human, tool, or compute nodes that consume multiple incoming branches |
 | Human | `human <name>:` | `HumanDecl` | input, output, publish, instructions, interaction, interaction_prompt, interaction_model, model, system, min_answers. Interaction values: human (default), llm, llm_or_human, none |
-| Tool (node) | `tool <name>:` | `ToolNodeDecl` | command, output (direct execution without LLM) |
+| Tool (node) | `tool <name>:` | `ToolNodeDecl` | command or script (mutually exclusive), language, input, output, await, sandbox; direct execution without LLM |
 | done / fail | (reserved) | Edge targets | No declaration, recognized by the parser |
-| Workflow | `workflow <name>:` | `WorkflowDecl` | vars, entry, budget, edges |
+| Workflow | `workflow <name>:` | `WorkflowDecl` | vars, attachments, entry, default_backend, tool_policy/capabilities, mcp, budget, compaction, interaction, worktree, sandbox, edges |
 | Budget | `budget:` | `BudgetBlock` | max_parallel_branches, max_duration, max_cost_usd, max_tokens, max_iterations |
 | Edge | `src -> dst` | `Edge` | with, when, as (loop) |
 | When | `when [not] <cond>` or `when "<expr>"` | `WhenClause` | Simple boolean-field shorthand plus quoted expressions with boolean operators, comparisons, and built-ins such as length, concat, unique, contains, join |

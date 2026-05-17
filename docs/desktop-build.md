@@ -14,10 +14,13 @@ sources alone.
   `//go:build desktop`. The default `go test ./...` does not require Wails.
 - Wails config: [cmd/iterion-desktop/wails.json](../cmd/iterion-desktop/wails.json)
   (and **not** at the repo root — see "wails.json location" below).
-- AssetServer: `Assets = nil`, all requests go through a reverse-proxy
-  ([asset_proxy.go](../cmd/iterion-desktop/asset_proxy.go)) to the embedded
-  `pkg/server` HTTP API. The editor SPA is served from `pkg/server/static`
-  via `//go:embed all:static` — never copied into the Wails frontend dir.
+- AssetServer: `Assets = nil`, so Wails delegates to the custom handler in
+  [asset_proxy.go](../cmd/iterion-desktop/asset_proxy.go). That handler
+  serves SPA/static paths from the GUI binary's embedded
+  `pkg/server.StaticFS` and reverse-proxies only `/api/*` HTTP requests to
+  the selected loopback `pkg/server` (the default per-project headless
+  daemon, or the in-process fallback). The editor SPA is embedded via
+  `//go:embed all:static` — never copied into the Wails frontend dir.
 - Build tasks: [Taskfile.yml § Desktop](../Taskfile.yml). One target per
   GOOS/GOARCH plus `desktop:package:linux:<arch>` for AppImage.
 
@@ -35,9 +38,11 @@ We pass two Wails flags that aren't part of the default scaffold:
   globals injected by the Wails runtime, not via the static JS shims Wails
   generates. Skipping bindings generation removes a redundant codegen step.
 - `-s` (`--skip-frontend`): there is no frontend to build under
-  `cmd/iterion-desktop/`. The SPA is built by `task editor:build` and embedded
-  into `pkg/server/static`. The proxy in [asset_proxy.go](../cmd/iterion-desktop/asset_proxy.go)
-  forwards every request — including the index — to that embedded server.
+  `cmd/iterion-desktop/`. The SPA is built by `task editor:build` and
+  embedded into `pkg/server/static`. The handler in
+  [asset_proxy.go](../cmd/iterion-desktop/asset_proxy.go) serves the index
+  and static chunks directly from that GUI embed, while `/api/*` is the only
+  traffic reverse-proxied to the selected loopback server.
 
 `-tags desktop,webkit2_41` is required on Linux to opt into the modern WebKit2
 GTK 4.1 ABI. Without `webkit2_41` Wails would target webkit2gtk-4.0, which

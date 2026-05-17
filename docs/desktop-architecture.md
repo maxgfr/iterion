@@ -15,12 +15,14 @@ Iterion.app  /  iterion-desktop.exe  /  Iterion.AppImage
    ├─ Wails AssetServer  (asset_proxy.go)
    │     ├─ /wails/runtime.js, /wails/ipc.js  (Wails-injected, gives
    │     │       the SPA window.go.main.App.* and window.runtime.*)
-   │     └─ everything else  → reverse-proxy → embedded HTTP server
-   ├─ Embedded HTTP server  (cli.RunEditor with Port=-1, NoBrowser=true)
+   │     ├─ /, /assets/*       SPA/static from the GUI binary's embedded
+   │     │                     pkg/server.StaticFS
+   │     └─ /api/*             reverse-proxy → selected loopback server
+   ├─ Selected loopback server (default: per-project headless daemon;
+   │  fallback/opt-out: in-process ServerHost via cli.RunEditor)
    │     ├─ /api/*            REST   (proxied via AssetServer)
-   │     ├─ /api/ws/runs/*    WebSocket runs   (DIRECT — Wails AssetServer
-   │     │                                       returns 501 on WS upgrade)
-   │     └─ /                 SPA (pkg/server/static, go:embed)
+   │     └─ /api/ws/runs/*    WebSocket runs   (DIRECT — Wails AssetServer
+   │                                             returns 501 on WS upgrade)
    ├─ Wails Bindings (Go ↔ JS — reachable because SPA loads on
    │     AssetServer origin where /wails/runtime.js was injected)
    │     ListProjects / SwitchProject / AddProject / RemoveProject
@@ -28,8 +30,8 @@ Iterion.app  /  iterion-desktop.exe  /  Iterion.AppImage
    │     DetectExternalCLIs / IsFirstRunPending / MarkFirstRunDone
    │     CheckForUpdate / DownloadAndApplyUpdate
    │     OpenExternal / RevealInFinder
-   │     GetServerURL / GetSessionToken (used by SPA WS dialer for
-   │     the cross-origin ws://127.0.0.1:<port>/api/ws... handshake)
+   │     GetServerURL / GetSessionToken (SPA WS helper; local desktop
+   │     returns an empty token and dials ws://127.0.0.1:<port>/api/ws...)
    ├─ Native menus + window state persistence
    └─ Single-instance lock + IPC for "focus existing"
 ```
@@ -47,37 +49,64 @@ into "browser mode". (See [ADR-002](adr/002-desktop-assetserver-proxy.md)
 for the full investigation that surfaced this in iteration 10.)
 
 The current design solves this by hosting the editor SPA via the Wails
-AssetServer's `Handler` (a `httputil.ReverseProxy` in
-`cmd/iterion-desktop/asset_proxy.go`), so the WebView's main origin stays
-on the AssetServer URL for the lifetime of the app. Wails injects the
-runtime into the proxied HTML; bindings remain reachable; and the SPA
-runs on the same origin even after the embedded server rebinds on a
-fresh port (project switch).
+AssetServer's `Handler` (`cmd/iterion-desktop/asset_proxy.go`), so the
+WebView's main origin stays on the AssetServer URL for the lifetime of
+the app. The handler serves every non-`/api` SPA/static request from the
+GUI binary's own `pkg/server.StaticFS` embed; Wails injects the runtime
+into the handler's HTML response; bindings remain reachable; and only
+`/api/*` HTTP requests are reverse-proxied to the selected loopback
+server.
 
 WebSocket upgrades (`/api/ws`, `/api/ws/runs/*`) **cannot** flow through
-the proxy — Wails' AssetServer rejects WS with `501` by design — so the
-SPA dials them directly at `ws://127.0.0.1:<port>/api/ws...?t=<token>`.
-This is the only surface where the SPA touches the loopback origin
-directly; HTTP traffic stays on the proxy. We keep a real loopback
-server (rather than running everything inside the AssetServer) because:
+the AssetServer handler — Wails' AssetServer rejects WS with `501` by
+design — so the SPA dials them directly at
+`ws://127.0.0.1:<port>/api/ws...`. In current local desktop builds
+`GetSessionToken` returns an empty string for SPA compatibility, so the
+WS dialer omits any token query parameter. This is the only surface where
+the SPA touches the loopback origin directly; normal page/static traffic
+is served by the AssetServer handler from the GUI embed, and REST traffic
+stays on the AssetServer origin while being proxied to `/api/*`. We keep
+a real loopback server (rather than running everything inside the
+AssetServer) because:
 
 - `pkg/server` stays 1:1 between CLI (`iterion editor`) and desktop;
 - WebSockets keep working without any AssetServer shim;
-- the bind interface is loopback-only, plus a per-launch session token,
-  so the surface area is no worse than the CLI path.
+- the selected server binds to loopback only and runs through the same
+  local-editor `DisableAuth=true` path as `iterion editor`, while Origin
+  checks still protect browser-initiated writes and WS upgrades.
 
-### Session token
+### Local desktop auth model
 
-Random 32-byte hex generated once per launch. The
-**HTTP path** uses an `iterion_session` HttpOnly cookie attached by the
-AssetServer reverse-proxy on every forwarded request — the SPA never has
-to learn or echo the token for proxied calls. The **WS path** uses
-`?t=<token>` on the upgrade URL because cookies set on the loopback
-domain are not sent cross-origin from the AssetServer's `wails://` /
-`wails.localhost` page origin. The session middleware accepts both paths;
-the WS query path does NOT issue a cookie (the handshake is short-lived).
-CLI mode (`iterion editor`) leaves `SessionToken` empty and the
-middleware is not installed — byte-identical behaviour.
+By default the desktop host uses per-project headless daemons. On startup
+and project switch it finds or launches `iterion-desktop --server-only
+--project=<dir>` and points the AssetServer handler's `/api/*` proxy and
+direct WS URL at that daemon. Multiple project daemons may coexist; when
+the GUI switches projects it attaches to or spawns the new project's
+daemon and leaves the previous daemon alive so background runs can
+continue.
+
+The in-process `ServerHost` path in `cmd/iterion-desktop/server_host.go`
+is now an escape hatch: set `ITERION_DESKTOP_ATTACH_DAEMON=0` (also
+`false`, `no`, or `off`) to opt out, or rely on it as the fallback when
+daemon attach/spawn fails. That path starts `cli.RunEditor` on
+`127.0.0.1` with `Port=-1` and `NoBrowser=true`.
+
+Both the default headless daemon and the in-process fallback use
+`cli.RunEditor`, which constructs `pkg/server.Config` with
+`DisableAuth=true`. Local desktop mode therefore does not mint a
+per-launch session token and does not install cookie/query-token
+middleware. The AssetServer handler proxies only `/api/*` HTTP requests to
+the loopback server, forces Host to the loopback target, and rewrites
+`Origin` to that loopback origin; it does not attach or strip desktop
+session cookies. SPA/static requests never reach the loopback server in
+current builds; they are served from the GUI embed.
+
+`GetSessionToken` remains exposed on the Wails binding because the SPA's
+desktop WS helper calls it together with `GetServerURL`. Today it returns
+`""`, and the SPA skips adding a token parameter when the value is empty.
+If a future hosted-auth desktop flow wires a real token into this binding,
+that token handling should be documented with the auth implementation that
+consumes it.
 
 ### No tray in v1
 
@@ -112,14 +141,14 @@ flips the right CGO/cross flags).
 | `cmd/iterion-desktop/menu.go` | Native menus |
 | `cmd/iterion-desktop/window_state.go` | Persisted geometry |
 | `cmd/iterion-desktop/single_instance.go` + `_unix.go` + `_windows.go` | Single-instance + IPC |
-| `cmd/iterion-desktop/server_host.go` | Wraps `cli.RunEditor` |
+| `cmd/iterion-desktop/server_host.go` | In-process `cli.RunEditor` fallback when daemon attach is disabled or fails |
 | `cmd/iterion-desktop/config.go` | User config (no build tag — testable) |
 | `cmd/iterion-desktop/keychain.go` | go-keyring wrapper |
 | `cmd/iterion-desktop/external_cli.go` | claude/codex/git detection |
 | `cmd/iterion-desktop/path_fix_darwin.go` | macOS PATH fix |
 | `cmd/iterion-desktop/path_fix_other.go` | No-op on non-darwin |
 | `cmd/iterion-desktop/updater*.go` | Ed25519-signed auto-update |
-| `cmd/iterion-desktop/asset_proxy.go` | Wails AssetServer reverse-proxy to the embedded HTTP server (see ADR-002) |
+| `cmd/iterion-desktop/asset_proxy.go` | Wails AssetServer handler: GUI-embedded SPA/static plus `/api/*` reverse-proxy to the selected loopback server (see ADR-002) |
 | `editor/src/lib/desktopBridge.ts` | Typed `window.go.main.App.*` wrappers |
 | `editor/src/hooks/useDesktop.ts` | React hook for desktop state |
 | `editor/src/views/Welcome/` | First-run wizard |
@@ -129,7 +158,7 @@ flips the right CGO/cross flags).
 ## Backwards compatibility
 
 The `iterion` CLI is unchanged. `iterion editor` still listens on 4891
-without a session token — the CLI flag flows are untouched. Two binaries
+with the same local `DisableAuth=true` behaviour — the CLI flag flows are untouched. Two binaries
 ship from the same module: `iterion` (Cobra CLI) and `iterion-desktop`
 (Wails app). Both share `pkg/cli`, `pkg/server`, the SPA, and the run
 store on disk.

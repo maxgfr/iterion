@@ -141,7 +141,7 @@ Other top-level directories: `editor/` (React/Vite frontend), `examples/` (.iter
 ```
 .iter source → Lexer (indent-sensitive tokens) → Parser (recursive-descent) → AST
   → ir.Compile() → IR Workflow (nodes + edges + schemas + prompts + budget)
-  → Diagnostics from ir.Compile() / ir.Validate() (sparse codes C001–C072: compile errors, reachability, routing, cycles, attachments, presets, etc.)
+  → Diagnostics from ir.Compile() / ir.Validate() (sparse codes C001–C082: compile errors, reachability, routing, cycles, attachments, presets, capability checks (C080–C082), etc.)
   → runtime.Engine.Run() → execution with events, budget, and persistence
 ```
 
@@ -204,7 +204,7 @@ V2-6 wires `sandbox.build:` via `docker buildx build` on the local docker driver
 
 - **RuntimeError** (`pkg/runtime/errors.go`) — structured error with `ErrorCode`, `Message`, `NodeID`, `Hint`, `Cause`
   - Codes: `NODE_NOT_FOUND`, `NO_OUTGOING_EDGE`, `LOOP_EXHAUSTED`, `BUDGET_EXCEEDED`, `EXECUTION_FAILED`, `WORKSPACE_SAFETY`, `TIMEOUT`, `CANCELLED`, `JOIN_FAILED`, `RESUME_INVALID`
-- **Diagnostics** (`pkg/dsl/ir/compile.go`, `pkg/dsl/ir/validate.go`) — compile-time warnings/errors with sparse codes C001–C072 (unknown refs, routing issues, unreachable nodes, undeclared cycles, attachments, presets, etc.)
+- **Diagnostics** (`pkg/dsl/ir/compile.go`, `pkg/dsl/ir/validate.go`) — compile-time warnings/errors with sparse codes C001–C082 (unknown refs, routing issues, unreachable nodes, undeclared cycles, attachments, presets, capability checks (C080–C082), etc.)
 - **Sentinel errors**: `ErrRunPaused` (resumable), `ErrRunCancelled` (resumable with checkpoint), `ErrBudgetExceeded`
 - **Resumable failures**: Most runtime failures produce `failed_resumable` status with a checkpoint. See `docs/resume.md` for the exhaustive matrix.
 

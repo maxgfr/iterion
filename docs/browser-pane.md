@@ -60,12 +60,14 @@ saw at any point in the run.
 
 Two paths today:
 
-1. **Manual debug attach** (any run, no Playwright required) — click
-   **attach live** in the Browser tab. The editor POSTs to
-   `/api/runs/:id/browser/attach`, the server spawns Chromium on the
-   host via `--remote-debugging-pipe`, registers a session in the
-   in-memory `BrowserRegistry`, and the pane connects via the CDP WS
-   proxy. Useful for testing the live UI on a fresh run.
+1. **Manual debug attach** (local editor mode only, no Playwright
+   required) — click **attach live** in the Browser tab. The editor POSTs
+   to `/api/runs/:id/browser/attach`, the local editor server spawns
+   Chromium on the host via `--remote-debugging-pipe`, registers a
+   session in its in-memory `BrowserRegistry`, and the pane connects via
+   the CDP WS proxy. Useful for testing the live UI on a fresh run. The
+   cloud `iterion server` path does not currently wire a
+   `BrowserRegistry`, so live attach/CDP endpoints are unavailable there.
 
 2. **Auto-attach via Playwright MCP** *(staged for a follow-up PR)* —
    when a workflow declares the Playwright MCP server and runs in a
@@ -126,11 +128,15 @@ intended for development.
   inside the SPA cannot open a WS via relative paths because Wails'
   AssetServer rejects WS upgrades. The CDP client honours
   `serverBase + sessionToken` overrides for this case — pass the actual
-  loopback `http://127.0.0.1:<port>` plus the desktop bindings'
-  session token.
+  loopback base from `GetServerURL` (`http://127.0.0.1:<port>`) and append a
+  token only when `GetSessionToken` returns a non-empty value. Current local
+  desktop builds return `""` and omit `?t=`, relying on `DisableAuth=true`
+  plus loopback/Origin checks.
 - **Local web**: SPA in the user's browser, server on localhost. Works
   out of the box; iframe + WS use relative paths.
-- **Cloud (k8s)**: worker pod = workflow pod, so Chromium launches
-  in-pod via `--remote-debugging-pipe`. CDP travels through the
-  ingress like any other run-console traffic. The preview proxy
-  enforces strict SSRF rules for any cross-origin URL.
+- **Cloud (k8s)**: the current cloud `iterion server` does not wire a
+  `BrowserRegistry` or live CDP attach path, so the Browser pane is
+  limited to preview URLs and time-travel screenshots. Cloud live mode
+  (for example, launching Chromium in the workflow pod and carrying CDP
+  through ingress) is future work, not shipped behavior. The preview
+  proxy still enforces strict SSRF rules for any cross-origin URL.

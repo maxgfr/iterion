@@ -263,8 +263,19 @@ ITERION_MONGO_DB=iterion \
 ITERION_S3_ENDPOINT=https://s3.amazonaws.com \
 ITERION_S3_BUCKET=iterion-prod \
 ITERION_S3_REGION=eu-west-3 \
-  iterion migrate to-cloud --store-dir ./.iterion --concurrency 4
+  iterion migrate to-cloud --store-dir ./.iterion --concurrency 4 --tenant <tenant-id> --owner <user-id>
 ```
+
+Migration flags:
+
+| Flag | Description |
+|---|---|
+| `--store-dir <path>` | Filesystem `.iterion/` store to migrate from (default `.iterion`). |
+| `--config <path>` | YAML config file for Mongo/S3 settings; environment variables take precedence. |
+| `--dry-run` | Print what would be uploaded without writing to Mongo or S3. |
+| `--concurrency <n>` | Number of parallel run uploads (default `4`). |
+| `--tenant <id>` | Tenant ID assigned to migrated runs; required for multitenant cloud deployments. |
+| `--owner <id>` | Optional owner user ID attributed to migrated runs. |
 
 Re-run safely if interrupted; runs already in Mongo are no-ops.
 

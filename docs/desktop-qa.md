@@ -10,12 +10,12 @@ Walk this list before tagging a release.
       Welcome only renders when `isDesktop && firstRunPending`, both of which
       require the SPA to have access to `window.go.main.App.*`. If you see
       the regular editor home page on a clean config, bindings are gone and
-      the AssetServer reverse-proxy / runtime injection is broken (the bug
+      the AssetServer handler / runtime injection path is broken (the bug
       [ADR-002](adr/002-desktop-assetserver-proxy.md) was created to fix).
 - [ ] Open the WebView's DevTools (View → Toggle DevTools in dev builds)
       and confirm `window.go.main.App` and `window.runtime` are both
-      defined. If undefined, the AssetServer reverse-proxy isn't injecting
-      the runtime into proxied HTML (regression of ADR-002).
+      defined. If undefined, Wails is not injecting the runtime into the
+      AssetServer handler's HTML response (regression of ADR-002).
 - [ ] Second launch restores the previous project + window geometry.
 - [ ] `Help → About` shows the correct version + commit SHA.
 
@@ -25,25 +25,29 @@ Walk this list before tagging a release.
       switcher. All appear in the recent list.
 - [ ] Cmd+P opens the switcher, fuzzy match works on name and path.
 - [ ] Switching projects reloads the SPA on the right working directory.
-- [ ] **Post-onboarding sanity (the embedded HTTP server rebinds on a
-      fresh ephemeral port at every restart; the AssetServer reverse-proxy
-      must rebind to the new target):** complete the Welcome flow on a
-      clean config, then on the editor home page verify that
+- [ ] **Post-onboarding sanity:** complete the Welcome flow on a clean
+      config, then on the editor home page verify that
         * the file list at the left actually populates (no spinner stuck +
           no `ERR_CONNECTION_REFUSED`),
         * a workflow can be opened and the Run console connects its
           `/api/ws/runs/...` WebSocket without errors in DevTools.
-      Any of these failing means the WindowReloadApp re-bootstrap regressed
-      OR the AssetServer reverse-proxy isn't picking up the new
-      `serverURL` (regression of asset_proxy.go cache invalidation).
+      In default daemon mode this proves the GUI attached to or spawned the
+      selected project's headless daemon and that the AssetServer handler's
+      `/api/*` proxy points at its `serverURL`. With
+      `ITERION_DESKTOP_ATTACH_DAEMON=0`, the same check covers the fallback
+      in-process server's fresh ephemeral bind and proxy cache invalidation.
 - [ ] Cmd+P switch between two projects, then on the new project verify
       the same two checks above. The window URL in DevTools should remain
       the AssetServer URL (`wails://wails/` on Mac/Linux, `http://wails.
-      localhost/` on Windows) — the proxy rebinds invisibly to the new
-      `127.0.0.1:<port>` upstream. The DevTools "Network" tab should show
-      `/api/*` requests resolving against the AssetServer origin (forwarded
-      to the new local server) and `/api/ws/...` requests dialing
-      `ws://127.0.0.1:<new_port>/api/ws/runs/...?t=<token>` directly.
+      localhost/` on Windows) — the handler retargets invisibly to the
+      selected project's loopback upstream. The DevTools "Network" tab
+      should show `/api/*` requests resolving against the AssetServer
+      origin (forwarded to that selected local server) and `/api/ws/...`
+      requests dialing
+      `ws://127.0.0.1:<selected_port>/api/ws/runs/...` directly. Current local
+      desktop builds omit any token query parameter because
+      `GetSessionToken` returns an empty string; only a future hosted-auth
+      desktop flow should add one.
 - [ ] Removing a project leaves its filesystem untouched.
 
 ## Settings

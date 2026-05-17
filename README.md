@@ -229,7 +229,7 @@ The full documentation lives under [`docs/`](docs/) — start with the [document
 
 **References**
 - [docs/references/dsl-grammar.md](docs/references/dsl-grammar.md) — readable grammar
-- [docs/references/diagnostics.md](docs/references/diagnostics.md) — all C001–C072 codes (sparse)
+- [docs/references/diagnostics.md](docs/references/diagnostics.md) — all C001–C082 codes (sparse)
 - [docs/references/patterns.md](docs/references/patterns.md) — 10 reusable workflow patterns
 - [docs/grammar/iterion_v1.ebnf](docs/grammar/iterion_v1.ebnf) — formal EBNF grammar
 
