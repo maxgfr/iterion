@@ -321,7 +321,7 @@ func (c *compiler) validateInheritAtConvergence(w *Workflow) {
 		if awaitMode == AwaitNone {
 			continue
 		}
-		if session == SessionInherit || session == SessionFork {
+		if session == SessionInherit || session == SessionInheritIfAvailable || session == SessionFork {
 			c.errorf(DiagSessionAfterConvergence,
 				"node %q has session: %s but has await: %s (convergence point); only fresh or artifacts_only are allowed",
 				nodeID, session, awaitMode)

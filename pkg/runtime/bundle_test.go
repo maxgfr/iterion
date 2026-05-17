@@ -85,3 +85,85 @@ func TestMirrorBundleSkills_EmptySkillsDirIsNoop(t *testing.T) {
 		t.Errorf("empty SkillsDir should be a no-op, got %v", err)
 	}
 }
+
+// TestMirrorBundleSkills_RefreshesPreviouslyMirroredFile validates the
+// v0.2.0→v0.3.0 upgrade case: when a bundle's skill content changes
+// between runs and the workspace file still matches what we last
+// wrote (user hasn't customized), the next mirror should refresh
+// with the new content. Pre-v2-marker behavior silently shadowed,
+// so users running iterion against a freshly-built bundle would see
+// stale skills indefinitely.
+func TestMirrorBundleSkills_RefreshesPreviouslyMirroredFile(t *testing.T) {
+	workDir := t.TempDir()
+	skillsSrc := filepath.Join(t.TempDir(), "skills")
+	if err := os.MkdirAll(skillsSrc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// First mirror: v1 content.
+	if err := os.WriteFile(filepath.Join(skillsSrc, "alpha.md"), []byte("v1 content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := mirrorBundleSkills(workDir, &bundle.Bundle{SkillsDir: skillsSrc}, nil); err != nil {
+		t.Fatalf("first mirror: %v", err)
+	}
+	mirrored, _ := os.ReadFile(filepath.Join(workDir, ".claude", "skills", "alpha.md"))
+	if string(mirrored) != "v1 content" {
+		t.Fatalf("after first mirror: got %q, want %q", string(mirrored), "v1 content")
+	}
+
+	// Bundle author ships v2: edit the source.
+	if err := os.WriteFile(filepath.Join(skillsSrc, "alpha.md"), []byte("v2 content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second mirror: workspace file still matches the v1 marker so it
+	// must be refreshed to v2.
+	if err := mirrorBundleSkills(workDir, &bundle.Bundle{SkillsDir: skillsSrc}, nil); err != nil {
+		t.Fatalf("second mirror: %v", err)
+	}
+	refreshed, _ := os.ReadFile(filepath.Join(workDir, ".claude", "skills", "alpha.md"))
+	if string(refreshed) != "v2 content" {
+		t.Errorf("v2 refresh did not land: got %q, want %q", string(refreshed), "v2 content")
+	}
+}
+
+// TestMirrorBundleSkills_PreservesUserCustomizationOnUpgrade
+// complements the refresh path: if the workspace file diverges from
+// the marker (user manually edited the mirrored skill), the next
+// mirror must NOT clobber the user's change, regardless of whether
+// the bundle's source content has also moved on. "Workspace wins on
+// genuine collision" is still the contract.
+func TestMirrorBundleSkills_PreservesUserCustomizationOnUpgrade(t *testing.T) {
+	workDir := t.TempDir()
+	skillsSrc := filepath.Join(t.TempDir(), "skills")
+	if err := os.MkdirAll(skillsSrc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(skillsSrc, "beta.md"), []byte("v1 content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := mirrorBundleSkills(workDir, &bundle.Bundle{SkillsDir: skillsSrc}, nil); err != nil {
+		t.Fatalf("first mirror: %v", err)
+	}
+
+	// User customises the mirrored skill.
+	destPath := filepath.Join(workDir, ".claude", "skills", "beta.md")
+	if err := os.WriteFile(destPath, []byte("user-edited"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Bundle author ships v2.
+	if err := os.WriteFile(filepath.Join(skillsSrc, "beta.md"), []byte("v2 content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mirrorBundleSkills(workDir, &bundle.Bundle{SkillsDir: skillsSrc}, nil); err != nil {
+		t.Fatalf("second mirror: %v", err)
+	}
+	got, _ := os.ReadFile(destPath)
+	if string(got) != "user-edited" {
+		t.Errorf("user customisation overwritten: got %q, want %q", string(got), "user-edited")
+	}
+}

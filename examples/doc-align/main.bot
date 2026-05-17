@@ -108,6 +108,39 @@ vars:
   ## for nightly / per-PR runs (`--var diff_since=main`).
   diff_since: string = ""
 
+  ## Hard-excluded directories (v0.8.0). Comma-separated list of
+  ## directory names whose presence anywhere in a path
+  ## disqualifies it from `doc_files` (regardless of `doc_globs`).
+  ## Defaults exclude runtime / scratch / vendor / artifact dirs
+  ## that should never be audited. Override to enable multi-repo
+  ## audit — e.g. drop `.works` to include sibling repos checked
+  ## out under `.works/<repo>/`. Setting to empty disables all
+  ## exclusion (NOT recommended — picks up `.git/`).
+  excluded_dirs: string = ".iterion,.works,.claude,vendor,node_modules,.git,dist,build,out"
+
+  ## Code-surface scan scope (v0.6.0). Globs for the
+  ## `scan_code_surface` tool which greps cmd/iterion/*.go and
+  ## pkg/dsl/ir/*.go (and similar locations) for "publicly-exposed
+  ## identifiers" the docs ought to mention: CLI commands, CLI
+  ## flags, diagnostic codes. Reviewers receive the surface as a
+  ## counter-omission audit list — for each identifier in the
+  ## surface, they verify it appears in at least one doc in scope.
+  ## Empty string disables the surface scan (legacy doc→code-only
+  ## audit).
+  cli_surface_globs: string = "cmd/iterion/*.go,cmd/iterion/*/*.go"
+  diagnostic_surface_globs: string = "pkg/dsl/ir/*.go,pkg/dsl/parser/*.go"
+
+  ## Inter-run audit cache (v0.5.0). Path to the JSON cache file
+  ## that stores `{doc_path: {sha, refs: [{path, sha}]}}` from the
+  ## previous successful run. scan_docs reads this and emits
+  ## `pre_verified_docs` for entries whose doc content AND all
+  ## cited code-file SHAs are unchanged. update_audit_cache (the
+  ## terminal tool node) writes the merged state after commit.
+  ## Empty string disables both reads and writes — useful for
+  ## the first run on a workspace or when you want a guaranteed
+  ## fresh audit.
+  audit_cache_path: string = ".iterion/doc-align/audit-cache.json"
+
 
 ## ─── Prompts ────────────────────────────────────────────────────
 
@@ -121,7 +154,7 @@ prompt review_system:
   `.claude/skills/` describing the discipline you MUST follow:
     - `doc-align.md` — operating playbook, the why and the
       inviolable rules
-    - `doc-mismatch-taxonomy.md` — the 10 mismatch_kind enum
+    - `doc-mismatch-taxonomy.md` — the 11 mismatch_kind enum
       values AND the `anchor_kind` enum you must use to tag
       every blocker
     - `doc-scope-enumeration.md` — the immutable scan_docs
@@ -204,6 +237,33 @@ prompt review_user_claude:
   for prioritisation — full footprint still required):
   {{input.recently_changed_code_files}}
 
+  Pre-verified docs from inter-run cache (v0.5.0). These were
+  audited in a previous run and BOTH their content AND every
+  referenced code file's content are unchanged since — so they
+  are already counted toward the cumulative coverage gate. You
+  may skip deep auditing them this iteration; prefer focusing
+  on `input.doc_files - input.pre_verified_docs`. If you DO
+  re-audit one and find drift the cache missed, raise it as a
+  blocker — that's a real bug and the cache will be invalidated
+  next run:
+  {{input.pre_verified_docs}}
+
+  Code surface (v0.6.0) — counter-omission audit set. These
+  identifiers were extracted from cmd/iterion/ and pkg/dsl/ir/
+  by the deterministic `scan_code_surface` tool. For each one,
+  verify that at least one doc in `input.doc_files` mentions it.
+  If a CLI command, flag, or diagnostic code exists in the code
+  but no doc lists it, raise an `undocumented_capability`
+  blocker pointing at the most relevant doc (typically
+  `docs/cli-reference.md` for commands/flags or
+  `docs/references/diagnostics.md` for codes). This is the
+  inverse audit direction — the rest of your review covers
+  doc→code drift; this covers code→doc omission.
+
+  CLI commands:           {{input.cli_commands}}
+  CLI flags:              {{input.cli_flags}}
+  Diagnostic codes:       {{input.diagnostic_codes}}
+
   Scope notes (operator's attention pin):
   {{vars.scope_notes}}
 
@@ -237,7 +297,7 @@ prompt review_user_claude:
       no blockers)
     - family: "claude"
     - blockers: array of structured mismatch objects (see
-      `doc-mismatch-taxonomy.md` for the 10 mismatch_kind enum
+      `doc-mismatch-taxonomy.md` for the 11 mismatch_kind enum
       values, the `anchor_kind` enum, and the required fields:
       doc_path, doc_line_start, doc_line_end, doc_excerpt,
       code_anchor, anchor_kind, code_state, mismatch_kind,
@@ -278,6 +338,33 @@ prompt review_user_gpt:
   Recently changed code files (diff_since={{vars.diff_since}}, hint
   for prioritisation — full footprint still required):
   {{input.recently_changed_code_files}}
+
+  Pre-verified docs from inter-run cache (v0.5.0). These were
+  audited in a previous run and BOTH their content AND every
+  referenced code file's content are unchanged since — so they
+  are already counted toward the cumulative coverage gate. You
+  may skip deep auditing them this iteration; prefer focusing
+  on `input.doc_files - input.pre_verified_docs`. If you DO
+  re-audit one and find drift the cache missed, raise it as a
+  blocker — that's a real bug and the cache will be invalidated
+  next run:
+  {{input.pre_verified_docs}}
+
+  Code surface (v0.6.0) — counter-omission audit set. These
+  identifiers were extracted from cmd/iterion/ and pkg/dsl/ir/
+  by the deterministic `scan_code_surface` tool. For each one,
+  verify that at least one doc in `input.doc_files` mentions it.
+  If a CLI command, flag, or diagnostic code exists in the code
+  but no doc lists it, raise an `undocumented_capability`
+  blocker pointing at the most relevant doc (typically
+  `docs/cli-reference.md` for commands/flags or
+  `docs/references/diagnostics.md` for codes). This is the
+  inverse audit direction — the rest of your review covers
+  doc→code drift; this covers code→doc omission.
+
+  CLI commands:           {{input.cli_commands}}
+  CLI flags:              {{input.cli_flags}}
+  Diagnostic codes:       {{input.diagnostic_codes}}
 
   Scope notes (operator's attention pin):
   {{vars.scope_notes}}
@@ -452,11 +539,31 @@ prompt prepare_commit_user:
 
 ## ─── Schemas ────────────────────────────────────────────────────
 
+## code_surface (v0.6.0): the inventory of "publicly-exposed"
+## identifiers extracted from the workspace by the
+## `scan_code_surface` tool. Reviewers receive these as a
+## counter-omission audit list — for each identifier, verify it
+## appears in at least one doc in scope. Mismatch_kind for missed
+## items: `undocumented_capability`.
+schema code_surface:
+  cli_commands: string[]
+  cli_flags: string[]
+  diagnostic_codes: string[]
+  scan_skipped: string
+
 ## scan_output is the immutable doc footprint emitted by the
 ## upstream scan_docs tool node. recently_changed_code_files is
 ## populated from `git diff` when vars.diff_since is set
 ## (otherwise empty array). bundle_self_path is echoed for
 ## transparency.
+##
+## v0.5.0 adds `pre_verified_docs`: docs whose content AND all
+## referenced code-file SHAs match what was recorded in
+## `.iterion/doc-align/audit-cache.json` after the previous
+## successful run. These docs are seeded into
+## `cumulative_audited_docs` from iter 0, lifting the coverage
+## gate immediately for unchanged regions. Reviewers focus on
+## `doc_files - pre_verified_docs`.
 schema scan_output:
   doc_files: string[]
   doc_count: int
@@ -464,6 +571,9 @@ schema scan_output:
   scope_globs: string[]
   recently_changed_code_files: string[]
   bundle_self_path: string
+  pre_verified_docs: string[]
+  cache_hits: int
+  cache_misses: int
 
 ## review_input v0.2.0: the v0.1.0 fields plus the four new
 ## fields that route fix-iteration metadata + coverage signal
@@ -476,6 +586,10 @@ schema review_input:
   footprint_hash: string
   scope_globs: string[]
   recently_changed_code_files: string[]
+  pre_verified_docs: string[]
+  cli_commands: string[]
+  cli_flags: string[]
+  diagnostic_codes: string[]
   prior_pushback: string[]
   prior_pushback_justification: string
   prior_code_files_touched_claude: string[]
@@ -558,6 +672,22 @@ schema commit_result:
   success: bool
   output: string
 
+## update_audit_cache I/O (v0.5.0). The `audited_pairs: string[]`
+## field is shell-tokenised by iterion's template substitution
+## (`'pair1' 'pair2' 'pair3'`) so each element lands as a separate
+## argv entry to python3 — env var passing breaks on internal
+## whitespace, JSON encoding is unreachable via the {{!...}} raw
+## form because raw values still go through env-var assignment.
+schema update_audit_cache_input:
+  workspace_dir: string
+  cache_path: string
+  audited_pairs: string[]
+
+schema update_audit_cache_output:
+  cache_path: string
+  entries_written: int
+  skipped: string
+
 
 ## ─── Nodes ──────────────────────────────────────────────────────
 
@@ -572,20 +702,27 @@ schema commit_result:
 ## are then exposed to python via shell env vars (WS, GLOBS,
 ## BUNDLE_SELF, DIFF_SINCE).
 tool scan_docs:
-  command: `WS={{vars.workspace_dir}} GLOBS={{vars.doc_globs}} BUNDLE_SELF={{vars.bundle_self_path}} DIFF_SINCE={{vars.diff_since}} python3 -c "
+  command: `WS={{vars.workspace_dir}} GLOBS={{vars.doc_globs}} BUNDLE_SELF={{vars.bundle_self_path}} DIFF_SINCE={{vars.diff_since}} CACHE_PATH={{vars.audit_cache_path}} EXCLUDED_DIRS={{vars.excluded_dirs}} python3 -c "
 import os, json, glob, hashlib, subprocess
 ws = os.environ['WS']
 globs = [g.strip() for g in os.environ['GLOBS'].split(',') if g.strip()]
 bundle_self = os.environ.get('BUNDLE_SELF', '').strip().rstrip(os.sep)
 diff_since = os.environ.get('DIFF_SINCE', '').strip()
+cache_path = os.environ.get('CACHE_PATH', '').strip()
 os.chdir(ws)
-EXCLUDE_DIRS = {'.iterion', '.works', '.claude', 'vendor', 'node_modules', '.git', 'dist', 'build', 'out'}
+EXCLUDE_DIRS = {d.strip() for d in os.environ.get('EXCLUDED_DIRS', '').split(',') if d.strip()}
 def excluded(p):
     if any(part in EXCLUDE_DIRS for part in p.split(os.sep)):
         return True
     if bundle_self and (p == bundle_self or p.startswith(bundle_self + os.sep)):
         return True
     return False
+def sha_of_file(p):
+    try:
+        with open(p, 'rb') as fh:
+            return hashlib.sha1(fh.read()).hexdigest()
+    except (FileNotFoundError, IsADirectoryError, PermissionError):
+        return 'missing'
 files = sorted({f for g in globs for f in glob.glob(g, recursive=True) if os.path.isfile(f) and not excluded(f)})
 h = hashlib.sha1(chr(10).join(files).encode()).hexdigest()
 recent = []
@@ -595,9 +732,96 @@ if diff_since:
         recent = sorted([l for l in proc.stdout.splitlines() if l and not excluded(l)])
     except Exception:
         recent = []
-print(json.dumps({'doc_files': files, 'doc_count': len(files), 'footprint_hash': h, 'scope_globs': globs, 'recently_changed_code_files': recent, 'bundle_self_path': bundle_self}))
+pre_verified = []
+hits = 0
+misses = 0
+if cache_path:
+    try:
+        with open(cache_path) as cf:
+            cache = json.load(cf)
+        doc_entries = cache.get('doc', {})
+        for doc_path in files:
+            entry = doc_entries.get(doc_path)
+            if not entry:
+                misses += 1
+                continue
+            current_sha = sha_of_file(doc_path)
+            if entry.get('sha') != current_sha:
+                misses += 1
+                continue
+            refs_ok = True
+            for ref in entry.get('refs', []):
+                p = ref.get('p', '')
+                s = ref.get('s', '')
+                if not p:
+                    continue
+                current = sha_of_file(p) if os.path.exists(p) else 'missing'
+                if current != s:
+                    refs_ok = False
+                    break
+            if refs_ok:
+                pre_verified.append(doc_path)
+                hits += 1
+            else:
+                misses += 1
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+print(json.dumps({'doc_files': files, 'doc_count': len(files), 'footprint_hash': h, 'scope_globs': globs, 'recently_changed_code_files': recent, 'bundle_self_path': bundle_self, 'pre_verified_docs': pre_verified, 'cache_hits': hits, 'cache_misses': misses}))
 "`
   output: scan_output
+
+## scan_code_surface (v0.6.0): runs after scan_docs and extracts
+## "publicly-exposed identifiers" from the workspace via grep so
+## reviewers can audit code→doc presence (the inverse direction
+## of the existing doc→code audit). Categories:
+##   - cli_commands: cobra `Use:` literals in cmd/iterion/*.go
+##   - cli_flags: --flag-name tokens in StringVar/BoolVar/...Var
+##     calls inside the same files
+##   - diagnostic_codes: "Cxxx" constants in pkg/dsl/ir/*.go and
+##     pkg/dsl/parser/*.go
+##
+## When `cli_surface_globs` AND `diagnostic_surface_globs` are
+## both empty, the scan is skipped and the output is empty lists
+## with scan_skipped set to a reason string. Useful for runs
+## targeting docs that have no CLI / diagnostic surface (e.g.
+## a library-only repo).
+tool scan_code_surface:
+  command: `WS={{vars.workspace_dir}} CLI_GLOBS={{vars.cli_surface_globs}} DIAG_GLOBS={{vars.diagnostic_surface_globs}} python3 -c "
+import os, json, glob, re
+ws = os.environ['WS']
+cli_globs = [g.strip() for g in os.environ.get('CLI_GLOBS','').split(',') if g.strip()]
+diag_globs = [g.strip() for g in os.environ.get('DIAG_GLOBS','').split(',') if g.strip()]
+os.chdir(ws)
+if not cli_globs and not diag_globs:
+    print(json.dumps({'cli_commands': [], 'cli_flags': [], 'diagnostic_codes': [], 'scan_skipped': 'both globs empty'}))
+    raise SystemExit(0)
+cli_files = sorted({f for g in cli_globs for f in glob.glob(g, recursive=True) if os.path.isfile(f)})
+diag_files = sorted({f for g in diag_globs for f in glob.glob(g, recursive=True) if os.path.isfile(f)})
+cmd_re = re.compile(r'Use:\s*\"([a-zA-Z0-9_\-]+)\"')
+flag_re = re.compile(r'(?:StringVar|BoolVar|IntVar|DurationVar|Int64Var|Float64Var|StringSliceVar|StringArrayVar)\(\s*&[a-zA-Z0-9_.]+\s*,\s*\"([a-zA-Z0-9_\-]+)\"')
+diag_const_re = re.compile(r'\"(C[0-9]{3})\"')
+cli_commands = set()
+cli_flags = set()
+for path in cli_files:
+    try:
+        with open(path) as fh: src = fh.read()
+    except: continue
+    for m in cmd_re.finditer(src): cli_commands.add(m.group(1))
+    for m in flag_re.finditer(src): cli_flags.add(m.group(1))
+diagnostic_codes = set()
+for path in diag_files:
+    try:
+        with open(path) as fh: src = fh.read()
+    except: continue
+    for m in diag_const_re.finditer(src): diagnostic_codes.add(m.group(1))
+print(json.dumps({
+    'cli_commands': sorted(cli_commands),
+    'cli_flags': sorted(cli_flags),
+    'diagnostic_codes': sorted(diagnostic_codes),
+    'scan_skipped': ''
+}))
+"`
+  output: code_surface
 
 router alt:
   mode: round_robin
@@ -626,20 +850,19 @@ judge reviewer_gpt:
   output: verdict_output
   system: review_system
   user: review_user_gpt
-  ## Fix 3 ATTEMPTED + REVERTED: v0.2.0 tried `session: inherit`
-  ## here to share fix_gpt's prompt cache. It broke iter 1 (the
-  ## first GPT iteration) because no fix_gpt has run yet — the
-  ## _session_id substitutes to "" and claw's OpenAI provider
-  ## returns 0 tokens twice (initial generation + structured-
-  ## output recovery), failing with "model did not produce a
-  ## structured_output tool_use block". The fresh-session cost
-  ## penalty ($7.49 worst case in v0.1.0) is preferable to a hard
-  ## failure on every run's first GPT iteration. A future fix
-  ## would require iterion DSL support for conditional session
-  ## (e.g. inherit when upstream is set, fresh otherwise) — see
-  ## `session: fork` and the iter-aware substitution syntax in
-  ## docs/dsl.md. Until that lands, stay fresh.
-  session: fresh
+  ## v0.7.0: session: inherit_if_available finally lands the cost
+  ## optimisation that v0.2.0 attempted and had to revert. Plain
+  ## `inherit` requires a non-empty `_session_id` from the edge —
+  ## on iter 1 fix_gpt hasn't run, the template resolves to "",
+  ## and the original v0.2.0 reading of the symptom blamed claw's
+  ## OpenAI provider (it turned out to be insufficient_quota
+  ## confounded with empty session_id). `inherit_if_available`
+  ## logs the fallback and behaves as `fresh` when no session is
+  ## wired, so iter 1 works and iter 2+ rides fix_gpt's prompt
+  ## cache. The wire-up uses `_session_id:
+  ## "{{outputs.fix_gpt._session_id}}"` on the alt -> reviewer_gpt
+  ## edge — see below.
+  session: inherit_if_available
   ## claw builtin tools — read-only set, the reviewer NEVER writes.
   tools: [bash, read_file, glob, grep]
   tool_max_steps: 40
@@ -675,15 +898,22 @@ judge reviewer_gpt:
 compute streak_check:
   output: streak_state
   expr:
-    stop: "(input.approved || input.blocker_count == 0) && (loop.review_loop.previous_output.approved || loop.review_loop.previous_output.blocker_count == 0) && input.family != loop.review_loop.previous_output.family && if(outputs.scan_docs.doc_count > 0, length(unique(concat(outputs.streak_check.cumulative_audited_docs, input.audited_docs))) * 100 / outputs.scan_docs.doc_count, 0) >= vars.coverage_target_pct"
+    stop: "(input.approved || input.blocker_count == 0) && (loop.review_loop.previous_output.approved || loop.review_loop.previous_output.blocker_count == 0) && input.family != loop.review_loop.previous_output.family && if(outputs.scan_docs.doc_count > 0, length(unique(concat(outputs.scan_docs.pre_verified_docs, outputs.streak_check.cumulative_audited_docs, input.audited_docs))) * 100 / outputs.scan_docs.doc_count, 0) >= vars.coverage_target_pct"
     approved: "input.approved || input.confidence == 'low' || input.blocker_count == 0"
     family: "input.family"
     blockers: "input.blockers"
     blocker_count: "input.blocker_count"
     fix_plan: "input.fix_plan"
     cumulative_audited_pairs: "unique(concat(outputs.streak_check.cumulative_audited_pairs, input.audited_pairs))"
-    cumulative_audited_docs: "unique(concat(outputs.streak_check.cumulative_audited_docs, input.audited_docs))"
-    coverage_pct: "if(outputs.scan_docs.doc_count > 0, if(length(unique(concat(outputs.streak_check.cumulative_audited_docs, input.audited_docs))) * 100 / outputs.scan_docs.doc_count > 100, 100, length(unique(concat(outputs.streak_check.cumulative_audited_docs, input.audited_docs))) * 100 / outputs.scan_docs.doc_count), 0)"
+    ## v0.5.0: pre_verified_docs (from the inter-run cache via
+    ## scan_docs) is folded into cumulative_audited_docs from the
+    ## first compute call. This is what gives the cache its
+    ## speedup: docs unchanged since the previous run are counted
+    ## as covered immediately, so coverage_pct >= target can fire
+    ## on the first reviewer's audit_docs without re-reading the
+    ## unchanged majority.
+    cumulative_audited_docs: "unique(concat(outputs.scan_docs.pre_verified_docs, outputs.streak_check.cumulative_audited_docs, input.audited_docs))"
+    coverage_pct: "if(outputs.scan_docs.doc_count > 0, if(length(unique(concat(outputs.scan_docs.pre_verified_docs, outputs.streak_check.cumulative_audited_docs, input.audited_docs))) * 100 / outputs.scan_docs.doc_count > 100, 100, length(unique(concat(outputs.scan_docs.pre_verified_docs, outputs.streak_check.cumulative_audited_docs, input.audited_docs))) * 100 / outputs.scan_docs.doc_count), 0)"
 
 agent fix_claude:
   backend: "claude_code"
@@ -727,6 +957,65 @@ tool commit_changes:
   input: commit_tool_input
   output: commit_result
 
+## update_audit_cache (v0.5.0): rewrites
+## `<workspace_dir>/<audit_cache_path>` from the run's cumulative
+## audited_pairs. Each pair `"<doc>::<anchor>"` contributes a
+## reference entry; the anchor's path component is extracted with
+## a permissive regex (everything up to the first `:`, space, or
+## `(`). The current sha1 of each referenced path is captured so
+## the NEXT run can pre-verify untouched (doc, refs) tuples.
+##
+## Empty cache_path disables the write — useful for one-shot CI
+## runs that don't want to persist state.
+##
+## Runs after commit_changes so a failed commit doesn't poison
+## the cache with audit data that wasn't actually shipped.
+tool update_audit_cache:
+  command: `python3 -c "
+import os, json, hashlib, re, sys, pathlib
+ws = sys.argv[1]
+cache_path = sys.argv[2]
+pairs = sys.argv[3:]
+if not cache_path:
+    print(json.dumps({'cache_path': '', 'entries_written': 0, 'skipped': 'no cache_path'}))
+    sys.exit(0)
+os.chdir(ws)
+def sha_of_file(p):
+    try:
+        with open(p, 'rb') as fh:
+            return hashlib.sha1(fh.read()).hexdigest()
+    except (FileNotFoundError, IsADirectoryError, PermissionError):
+        return 'missing'
+def extract_path(anchor):
+    a = (anchor or '').strip()
+    if not a or a.startswith('<'):
+        return None
+    m = re.match(r'([^\s:()]+)', a)
+    return m.group(1) if m else None
+by_doc = {}
+for pair in pairs:
+    if not isinstance(pair, str) or '::' not in pair:
+        continue
+    doc, anchor = pair.split('::', 1)
+    p = extract_path(anchor)
+    if not p:
+        continue
+    by_doc.setdefault(doc, set()).add(p)
+doc_entries = {}
+for doc, refs in by_doc.items():
+    doc_entries[doc] = {
+        'sha': sha_of_file(doc),
+        'refs': sorted(({'p': p, 's': sha_of_file(p) if os.path.exists(p) else 'missing'} for p in refs), key=lambda r: r['p']),
+    }
+out_path = pathlib.Path(cache_path)
+out_path.parent.mkdir(parents=True, exist_ok=True)
+with open(out_path, 'w') as out:
+    json.dump({'v': 1, 'doc': doc_entries}, out, indent=2, sort_keys=True)
+print(json.dumps({'cache_path': str(out_path), 'entries_written': len(doc_entries), 'skipped': ''}))
+" {{input.workspace_dir}} {{input.cache_path}} {{input.audited_pairs}}`
+  input: update_audit_cache_input
+  output: update_audit_cache_output
+
 
 ## ─── Workflow ───────────────────────────────────────────────────
 
@@ -742,7 +1031,8 @@ workflow doc_align:
     threshold: 0.9
     preserve_recent: 8
 
-  scan_docs -> alt
+  scan_docs -> scan_code_surface
+  scan_code_surface -> alt
 
   ## Round-robin alternates: 1st pass → claude, 2nd → gpt, repeat.
   ## Each reviewer receives via edge `with {}` (which iterion DOES
@@ -762,6 +1052,10 @@ workflow doc_align:
     footprint_hash: "{{outputs.scan_docs.footprint_hash}}",
     scope_globs: "{{outputs.scan_docs.scope_globs}}",
     recently_changed_code_files: "{{outputs.scan_docs.recently_changed_code_files}}",
+    pre_verified_docs: "{{outputs.scan_docs.pre_verified_docs}}",
+    cli_commands: "{{outputs.scan_code_surface.cli_commands}}",
+    cli_flags: "{{outputs.scan_code_surface.cli_flags}}",
+    diagnostic_codes: "{{outputs.scan_code_surface.diagnostic_codes}}",
     prior_pushback: "{{outputs.fix_gpt.pushback}}",
     prior_pushback_justification: "{{outputs.fix_gpt.pushback_justification}}",
     prior_code_files_touched_claude: "{{outputs.fix_claude.code_files_touched}}",
@@ -777,6 +1071,10 @@ workflow doc_align:
     footprint_hash: "{{outputs.scan_docs.footprint_hash}}",
     scope_globs: "{{outputs.scan_docs.scope_globs}}",
     recently_changed_code_files: "{{outputs.scan_docs.recently_changed_code_files}}",
+    pre_verified_docs: "{{outputs.scan_docs.pre_verified_docs}}",
+    cli_commands: "{{outputs.scan_code_surface.cli_commands}}",
+    cli_flags: "{{outputs.scan_code_surface.cli_flags}}",
+    diagnostic_codes: "{{outputs.scan_code_surface.diagnostic_codes}}",
     prior_pushback: "{{outputs.fix_claude.pushback}}",
     prior_pushback_justification: "{{outputs.fix_claude.pushback_justification}}",
     prior_code_files_touched_claude: "{{outputs.fix_claude.code_files_touched}}",
@@ -784,7 +1082,11 @@ workflow doc_align:
     previous_audited_pairs: "{{outputs.streak_check.cumulative_audited_pairs}}",
     previous_audited_docs: "{{outputs.streak_check.cumulative_audited_docs}}",
     coverage_pct: "{{outputs.streak_check.coverage_pct}}",
-    coverage_target_pct: "{{vars.coverage_target_pct}}"
+    coverage_target_pct: "{{vars.coverage_target_pct}}",
+    ## v0.7.0: inherit fix_gpt's session on iter 2+ to ride its
+    ## prompt cache. Empty on iter 1 (fix_gpt hasn't run);
+    ## inherit_if_available tolerates that with a fresh fallback.
+    _session_id: "{{outputs.fix_gpt._session_id}}"
   }
 
   reviewer_claude -> streak_check as review_loop(15) with {
@@ -817,7 +1119,17 @@ workflow doc_align:
     workspace_dir: "{{vars.workspace_dir}}"
   }
 
-  commit_changes -> done
+  ## v0.5.0: inter-run cache is updated AFTER a successful commit
+  ## so a failed commit doesn't poison the cache with un-shipped
+  ## audit state. update_audit_cache is a deterministic tool
+  ## (no LLM cost) so this adds ~ms to the run.
+  commit_changes -> update_audit_cache with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    cache_path: "{{vars.audit_cache_path}}",
+    audited_pairs: "{{outputs.streak_check.cumulative_audited_pairs}}"
+  }
+
+  update_audit_cache -> done
 
   ## Soft-approval (no streak yet, or low-confidence rejection):
   ## keep alternating without invoking the fixer.
@@ -843,7 +1155,8 @@ workflow doc_align:
   fix_claude -> alt as recovery_loop(20)
   fix_gpt    -> alt as recovery_loop(20)
 
-  ## Loop-exhaustion fallthroughs.
+  ## Loop-exhaustion fallthroughs (update_audit_cache has its
+  ## unconditional `→ done` declared in the main commit path).
   reviewer_claude -> done
   reviewer_gpt    -> done
   fix_claude      -> done

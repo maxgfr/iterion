@@ -71,7 +71,7 @@ describe("messagesFromEvents", () => {
     });
   });
 
-  it("flips the banner to done on node_finished, populating summary from checkpoint", () => {
+  it("flips the banner to done on node_finished (summary lives on the survey card)", () => {
     nextSeq = 1;
     const out = messagesFromEvents({
       bot: whatsNext,
@@ -81,10 +81,14 @@ describe("messagesFromEvents", () => {
       ],
       snapshot: snapshotWith({ explore: { summary: "A short summary." } }),
     });
-    expect(out).toHaveLength(1);
+    // Banner closes + survey-card with the summary appears below it.
+    expect(out).toHaveLength(2);
     expect(out[0]).toMatchObject({
       kind: "banner",
       status: "done",
+    });
+    expect(out[1]).toMatchObject({
+      kind: "survey-card",
       summary: "A short summary.",
     });
   });
@@ -208,6 +212,40 @@ describe("messagesFromEvents", () => {
     expect(out.filter((m) => m.kind === "roadmap-card")).toHaveLength(2);
   });
 
+  it("emits a survey-card after explore with summary + open_questions", () => {
+    nextSeq = 1;
+    const out = messagesFromEvents({
+      bot: whatsNext,
+      events: [
+        evt("node_started", { node_id: "explore" }),
+        evt("node_finished", { node_id: "explore" }),
+      ],
+      snapshot: snapshotWith({
+        explore: {
+          summary: "Surveyed iterion. 3 active areas.",
+          open_questions: [
+            "Should we prioritise board work?",
+            "Sandbox or runtime?",
+          ],
+          observations: "Long-form observation text...",
+          toplevel_dirs: ["pkg", "cmd", "examples"],
+          recent_commits: [{ hash: "abc", subject: "hi" }],
+        },
+      }),
+    });
+    // Banner + survey-card
+    expect(out).toHaveLength(2);
+    const card = out[1];
+    if (card?.kind === "survey-card") {
+      expect(card.summary).toBe("Surveyed iterion. 3 active areas.");
+      expect(card.openQuestions).toHaveLength(2);
+      expect(card.observations).toBe("Long-form observation text...");
+      expect(card.toplevelDirs).toEqual(["pkg", "cmd", "examples"]);
+    } else {
+      throw new Error("expected survey-card");
+    }
+  });
+
   it("emits an issues-summary card after emit_action", () => {
     nextSeq = 1;
     const out = messagesFromEvents({
@@ -238,6 +276,59 @@ describe("messagesFromEvents", () => {
       expect(card.createdIssues).toHaveLength(1);
       expect(card.createdIssues[0]!.id).toBe("native:1");
       expect(card.summary).toBe("Created 1 issue.");
+    }
+  });
+
+  it("accumulates tool_started progress on the active banner", () => {
+    nextSeq = 1;
+    const out = messagesFromEvents({
+      bot: whatsNext,
+      events: [
+        evt("node_started", { node_id: "explore" }),
+        evt("tool_started", {
+          node_id: "explore",
+          data: { tool: "bash", input: { command: "ls -la" } },
+        }),
+        evt("tool_started", {
+          node_id: "explore",
+          data: { tool: "read_file", input: { file_path: "README.md" } },
+        }),
+        evt("tool_started", {
+          node_id: "explore",
+          data: { tool: "glob", input: { pattern: "**/*.go" } },
+        }),
+      ],
+      snapshot: null,
+    });
+    expect(out).toHaveLength(1);
+    const banner = out[0];
+    if (banner?.kind === "banner") {
+      expect(banner.progress?.toolCount).toBe(3);
+      expect(banner.progress?.latestTool).toBe("glob");
+      expect(banner.progress?.latestToolHint).toBe("**/*.go");
+    }
+  });
+
+  it("drops banner progress once the node finishes", () => {
+    nextSeq = 1;
+    const out = messagesFromEvents({
+      bot: whatsNext,
+      events: [
+        evt("node_started", { node_id: "explore" }),
+        evt("tool_started", {
+          node_id: "explore",
+          data: { tool: "bash", input: { command: "ls" } },
+        }),
+        evt("node_finished", { node_id: "explore" }),
+      ],
+      snapshot: snapshotWith({ explore: { summary: "Surveyed." } }),
+    });
+    // Banner + survey-card.
+    expect(out).toHaveLength(2);
+    const banner = out[0];
+    if (banner?.kind === "banner") {
+      expect(banner.status).toBe("done");
+      expect(banner.progress).toBeUndefined();
     }
   });
 

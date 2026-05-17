@@ -23,10 +23,11 @@ var fieldTypeToStr = map[FieldType]string{
 var strToFieldType = reverseMap(fieldTypeToStr)
 
 var sessionModeToStr = map[SessionMode]string{
-	SessionFresh:         "fresh",
-	SessionInherit:       "inherit",
-	SessionArtifactsOnly: "artifacts_only",
-	SessionFork:          "fork",
+	SessionFresh:             "fresh",
+	SessionInherit:           "inherit",
+	SessionInheritIfAvailable: "inherit_if_available",
+	SessionArtifactsOnly:     "artifacts_only",
+	SessionFork:              "fork",
 }
 
 var strToSessionMode = reverseMap(sessionModeToStr)

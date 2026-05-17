@@ -227,10 +227,11 @@ const (
 type SessionMode = types.SessionMode
 
 const (
-	SessionFresh         = types.SessionFresh
-	SessionInherit       = types.SessionInherit
-	SessionArtifactsOnly = types.SessionArtifactsOnly
-	SessionFork          = types.SessionFork
+	SessionFresh             = types.SessionFresh
+	SessionInherit           = types.SessionInherit
+	SessionInheritIfAvailable = types.SessionInheritIfAvailable
+	SessionArtifactsOnly     = types.SessionArtifactsOnly
+	SessionFork              = types.SessionFork
 )
 
 // AgentDecl represents an `agent <name>:` node declaration.

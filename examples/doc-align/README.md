@@ -1,8 +1,98 @@
-# doc-align (v0.3.0)
+# doc-align (v0.8.0)
 
 A dogfood-friendly iterion bot that detects mismatches between
 project documentation and actual code state, then fixes the
 **documentation** (never the code) and auto-commits on convergence.
+
+**v0.8.0 changes** (configurable exclusion → multi-repo audit):
+- `excluded_dirs` is now a `--var`-overridable comma-separated
+  list (was hardcoded in scan_docs's python). Default still
+  covers `.iterion`, `.works`, `.claude`, `vendor`,
+  `node_modules`, `.git`, `dist`, `build`, `out`.
+- Drop `.works` from the list to audit sibling repos checked
+  out under `.works/<name>/` in the same run:
+  ```bash
+  iterion run examples/doc-align/ \
+    --var excluded_dirs=".iterion,.claude,vendor,node_modules,.git,dist,build,out" \
+    --var doc_globs="README.md,CLAUDE.md,docs/**/*.md,.works/*/README.md,.works/*/docs/**/*.md"
+  ```
+- Cross-repo references (an iterion doc citing
+  `.works/claw-code-go/...`) were already supported at the
+  reviewer level (read_file is unrestricted); v0.8.0 makes the
+  scanner symmetric.
+
+**v0.7.0 changes** (GPT session inherit, finally):
+- `reviewer_gpt` now declares `session: inherit_if_available` —
+  a new iterion runtime mode that behaves as `inherit` when
+  `_session_id` resolves to a non-empty value, and silently
+  falls back to `fresh` otherwise. Logs which path fired.
+- The `alt -> reviewer_gpt` edge wires
+  `_session_id: "{{outputs.fix_gpt._session_id}}"`. On iter 1
+  (cold) fix_gpt hasn't run and the substitution is empty → run
+  fresh. On iter 2+ the reviewer rides fix_gpt's prompt cache,
+  cutting per-iter cost roughly 30-50% (v0.2.0 cold reviewer_gpt
+  cost up to $7.49; expected $2-4 with cache).
+- This is the realisation of the v0.2.0-attempted-and-reverted
+  Fix 3. The original revert was correct under the diagnosis-of-
+  the-moment (we thought empty session_id broke claw) but the
+  real cause was an OpenAI quota issue. With v0.5.0's SSE-error
+  surfacing in claw + the new tolerant mode, the optimisation
+  is safe to land.
+
+**v0.6.0 changes** (counter-omission audit):
+- New deterministic tool node `scan_code_surface` extracts
+  "publicly-exposed identifiers" from the workspace via grep:
+  CLI commands (cobra `Use:` literals), CLI flags
+  (`StringVar`/`BoolVar`/… registrations), and diagnostic codes
+  (`Cxxx` constants). Run on this repo it surfaced 26 commands,
+  70 flags, 54 diagnostic codes in 50ms.
+- New `mismatch_kind` value `undocumented_capability` captures
+  the counter-omission case: a code-exposed identifier exists
+  but no doc in scope lists it. Distinct from
+  `obsolete_capability` (the doc→code direction).
+- Reviewers receive the surface lists in `input.cli_commands` /
+  `cli_flags` / `diagnostic_codes` and audit code→doc presence
+  alongside the existing doc→code audit.
+- `--var cli_surface_globs=""` and `--var diagnostic_surface_globs=""`
+  both empty disables the surface scan — for library-only repos
+  with no CLI or diagnostic surface to document.
+
+**v0.5.0 changes** (inter-run audit cache):
+- `scan_docs` now reads `.iterion/doc-align/audit-cache.json`
+  (path configurable via `--var audit_cache_path`). For each
+  doc whose content sha1 AND every previously-cited code-file
+  sha1 are unchanged since the last successful run, the doc is
+  emitted in `pre_verified_docs` and seeded directly into the
+  coverage gate's `cumulative_audited_docs`. Repeat runs on an
+  already-aligned workspace can hit the streak gate on the
+  first iteration without re-reading the unchanged majority —
+  5-10× speedup on incremental usage (nightly / per-PR).
+- New terminal tool node `update_audit_cache` runs after
+  `commit_changes` and rewrites the cache from
+  `streak_check.cumulative_audited_pairs`. A failed commit
+  short-circuits before this node, so the cache only records
+  audit state that was actually shipped.
+- Cache invalidation is conservative: ANY change to ANY
+  referenced code file invalidates the doc's pre-verification.
+  No anchor-level precision (we'd need a language-aware
+  parser); the trade-off is a slightly higher miss rate for a
+  much simpler implementation.
+- Empty `audit_cache_path` disables both the read and the
+  write — for one-shot CI runs that want a guaranteed fresh
+  audit.
+
+**v0.4.0 changes** (anchor_kind tightening):
+- `doc-mismatch-taxonomy.md` now carries a STRICT consistency table
+  between `anchor_kind` and `code_anchor` shape. A blocker with
+  `anchor_kind: symbol` but `code_anchor: "<no longer exists>"`
+  is now defined as an inconsistency the fixer pushes back on.
+- New `STEP 4b — Anchor consistency self-check` in the reviewer
+  checklist; new `Rule 6` in the fixer's anti-façade rules.
+- iterion's expr can't validate the json-typed `blockers` field
+  mechanically (no JSON parsing in expressions), so the gate is
+  prompt-and-skill discipline, ratified through cross-family
+  alternation. A future iterion compute primitive could move
+  this check into a deterministic node.
 
 **v0.3.0 changes** (lessons from the v0.2.0 dogfood deadlock):
 - Streak gate now treats `blocker_count == 0` as effective
