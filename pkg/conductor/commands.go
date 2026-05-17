@@ -74,6 +74,11 @@ type cmdRunFinished struct {
 
 func (m cmdRunFinished) apply(c *Conductor, ctx context.Context) {
 	c.finishRun(ctx, m.issueID, m.err)
+	// The worker has now actually exited (this command is sent from
+	// the dispatch goroutine's defer). Clear any tombstone refreshRunningStates
+	// may have planted while the worker was draining so the next tick
+	// can re-dispatch the issue when it reappears on the tracker side.
+	delete(c.state.tombstones, m.issueID)
 }
 
 // finishRun is the actor-goroutine-side teardown for a running entry.

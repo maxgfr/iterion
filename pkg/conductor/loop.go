@@ -127,6 +127,13 @@ func (c *Conductor) refreshRunningStates(ctx context.Context) {
 			// exit, gradually starving max_concurrent. finishRun is
 			// idempotent, so if the worker later posts cmdRunFinished
 			// the duplicate is a no-op.
+			//
+			// Plant a tombstone so isClaimed keeps blocking re-dispatch
+			// until the worker actually exits. Without it, the next
+			// tick could grant the slot to a sibling dispatch that
+			// lands on the same workspace before the original worker
+			// has released its file locks / mid-flight git operations.
+			c.state.tombstones[id] = struct{}{}
 			c.finishRun(ctx, id, context.Canceled)
 			continue
 		}

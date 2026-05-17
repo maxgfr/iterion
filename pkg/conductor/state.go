@@ -18,6 +18,12 @@ type state struct {
 	running      map[string]*runningEntry
 	retries      map[string]*retryEntry
 	slotsByState map[string]int // running count per workflow state
+	// tombstones holds issueIDs whose slot was reaped by
+	// refreshRunningStates while the worker goroutine was still draining.
+	// dispatch treats a tombstoned id as claimed so we don't land a
+	// sibling dispatch on the same workspace; cmdRunFinished removes
+	// the entry once the worker has actually exited.
+	tombstones map[string]struct{}
 }
 
 func newState() *state {
@@ -25,15 +31,20 @@ func newState() *state {
 		running:      map[string]*runningEntry{},
 		retries:      map[string]*retryEntry{},
 		slotsByState: map[string]int{},
+		tombstones:   map[string]struct{}{},
 	}
 }
 
 // isClaimed reports whether the actor is currently treating issueID
 // as "ours" — either in flight or queued for retry (but not yet fired:
 // once the retry timer fires we want the next tick to pick the issue
-// up so the dispatch can carry the accumulated Attempt count).
+// up so the dispatch can carry the accumulated Attempt count), or
+// tombstoned (slot reaped but worker still draining).
 func (s *state) isClaimed(issueID string) bool {
 	if _, ok := s.running[issueID]; ok {
+		return true
+	}
+	if _, ok := s.tombstones[issueID]; ok {
 		return true
 	}
 	r, ok := s.retries[issueID]
