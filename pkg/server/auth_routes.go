@@ -299,6 +299,12 @@ func mapAuthErrorStatus(err error) int {
 		errors.Is(err, auth.ErrInvitationMismatch),
 		errors.Is(err, auth.ErrPasswordWeak):
 		return http.StatusBadRequest
+	case errors.Is(err, auth.ErrLinkRequiresConsent):
+		// 409 Conflict: an account exists with the same email but we
+		// refuse to auto-link the new SSO identity. The UI should
+		// prompt the user to log in with their password, then link
+		// the SSO connection from settings.
+		return http.StatusConflict
 	case errors.Is(err, auth.ErrInvitationNotFound),
 		errors.Is(err, auth.ErrTeamNotFound),
 		errors.Is(err, identity.ErrNotFound):

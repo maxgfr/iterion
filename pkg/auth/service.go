@@ -20,6 +20,7 @@ var (
 	ErrPasswordChangeRequired = errors.New("auth: password change required")
 	ErrPasswordWeak           = errors.New("auth: password too weak")
 	ErrSignupClosed           = errors.New("auth: signup is invite-only")
+	ErrLinkRequiresConsent    = errors.New("auth: SSO login matched an existing account by email — link explicitly from settings")
 	ErrInvitationNotFound     = errors.New("auth: invitation not found")
 	ErrInvitationMismatch     = errors.New("auth: invitation does not match user")
 	ErrTeamNotFound           = errors.New("auth: team not found")
@@ -69,6 +70,13 @@ type Service struct {
 	signupMode SignupMode
 	now        func() time.Time
 	refreshTTL time.Duration
+	// trustedAutoLinkProviders names the OIDC providers whose verified
+	// email may be used to link a fresh external identity onto an
+	// existing password-account user without an explicit "link this
+	// connection" UI step. Empty = no auto-link (the default).
+	// Operators only enroll providers here when they fully trust the
+	// IdP's email verification (e.g. an in-house SSO they control).
+	trustedAutoLinkProviders map[string]struct{}
 	// logger, when non-nil, receives audit-grade events like
 	// "stored hash unparseable for user X" that we don't want to
 	// silently swallow into a generic ErrInvalidCredentials response.
@@ -82,7 +90,14 @@ type Config struct {
 	Signer     *JWTSigner
 	SignupMode SignupMode
 	RefreshTTL time.Duration
-	Logger     *iterlog.Logger
+	// TrustedAutoLinkProviders is the operator-configured allowlist of
+	// OIDC providers whose verified email is safe to auto-link onto a
+	// pre-existing password-account user. Empty = no auto-link; a fresh
+	// SSO login that finds an existing user by email returns
+	// ErrLinkRequiresConsent so the UI can prompt the user to link
+	// manually from their settings.
+	TrustedAutoLinkProviders []string
+	Logger                   *iterlog.Logger
 }
 
 // NewService validates the config and returns a wired Service.
@@ -107,14 +122,21 @@ func NewService(cfg Config) (*Service, error) {
 	default:
 		return nil, fmt.Errorf("auth: invalid signup mode %q", cfg.SignupMode)
 	}
+	trusted := make(map[string]struct{}, len(cfg.TrustedAutoLinkProviders))
+	for _, p := range cfg.TrustedAutoLinkProviders {
+		if p != "" {
+			trusted[p] = struct{}{}
+		}
+	}
 	return &Service{
-		store:      cfg.Store,
-		sessions:   cfg.Sessions,
-		signer:     cfg.Signer,
-		signupMode: cfg.SignupMode,
-		refreshTTL: cfg.RefreshTTL,
-		now:        time.Now,
-		logger:     cfg.Logger,
+		store:                    cfg.Store,
+		sessions:                 cfg.Sessions,
+		signer:                   cfg.Signer,
+		signupMode:               cfg.SignupMode,
+		refreshTTL:               cfg.RefreshTTL,
+		now:                      time.Now,
+		trustedAutoLinkProviders: trusted,
+		logger:                   cfg.Logger,
 	}, nil
 }
 

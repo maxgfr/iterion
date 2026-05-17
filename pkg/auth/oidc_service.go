@@ -50,7 +50,19 @@ func (s *Service) LoginWithExternal(ctx context.Context, ext oidc.ExternalUser, 
 		if u.Status == identity.UserStatusDisabled {
 			return LoginResult{}, ErrAccountDisabled
 		}
-		// Link the new external identity to the existing user.
+		// Auto-link the new external identity onto the existing user
+		// only when the operator has explicitly trusted this OIDC
+		// provider's email verification. Otherwise return
+		// ErrLinkRequiresConsent so the UI prompts the user to link
+		// the connection from settings — the previous code
+		// auto-linked unconditionally, which let any IdP that happened
+		// to claim a registered user's email take over the account
+		// (only mitigated by hoping every IdP rigorously verifies
+		// email, which is not always the case for self-hosted /
+		// emerging providers).
+		if _, ok := s.trustedAutoLinkProviders[ext.Provider]; !ok {
+			return LoginResult{}, ErrLinkRequiresConsent
+		}
 		if err := s.store.UpsertOIDCLink(ctx, identity.OIDCLink{
 			Provider:       ext.Provider,
 			ProviderUserID: ext.Subject,

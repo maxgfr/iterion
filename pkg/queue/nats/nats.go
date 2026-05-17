@@ -239,7 +239,15 @@ func (c *Conn) PublishRun(ctx context.Context, msg *queue.RunMessage) (*jetstrea
 		headers.Set("iterion-span-id", msg.Trace.SpanID)
 	}
 
-	return c.js.PublishMsg(ctx, &nats.Msg{
+	// Per-publish timeout: the NATS client is configured with
+	// MaxReconnects(-1) so a downed broker leaves PublishMsg blocked
+	// indefinitely waiting for ack — that froze editor handlers
+	// (Launch run) under broker outage. 5s is long enough for normal
+	// hiccups and short enough that the editor surfaces "queue down"
+	// to the user instead of hanging.
+	pubCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return c.js.PublishMsg(pubCtx, &nats.Msg{
 		Subject: SubjectRuns,
 		Data:    body,
 		Header:  headers,
