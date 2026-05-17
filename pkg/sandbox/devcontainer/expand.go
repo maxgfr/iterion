@@ -51,11 +51,55 @@ func expandLocalVars(s, repoRoot string) string {
 		if i := strings.Index(inner, ":"); i >= 0 {
 			name, def = inner[:i], inner[i+1:]
 		}
+		if !localEnvAllowed(name) {
+			// An attacker-controlled devcontainer.json could otherwise
+			// reference credentials (AWS_SECRET_ACCESS_KEY,
+			// ANTHROPIC_API_KEY, SSH_AUTH_SOCK, ...) and exfiltrate the
+			// value via Mounts / ContainerEnv / RunArgs. Resolve to the
+			// default (or empty) instead, mirroring the "name not set"
+			// branch — the substitution mechanism stays functional for
+			// the common HOME / XDG_* / locale cases.
+			return def
+		}
 		if v, ok := os.LookupEnv(name); ok {
 			return v
 		}
 		return def
 	})
+}
+
+// localEnvAllowed reports whether a host environment variable name can
+// be substituted via ${localEnv:NAME}. The list is small and explicit:
+// names that legitimately drive devcontainer paths (HOME / XDG_* /
+// locale / display) plus a handful of cache-locating vars commonly used
+// in published devcontainer.json templates. Credentials, tokens,
+// SSH-agent sockets, and provider-specific keys are deliberately not
+// here — see F-SB-1 in docs/reviews/codebase-2026-05-17.md for the
+// threat model.
+//
+// Operators who need a different allowlist must extend this in source;
+// the explicit list is intentional, not a config knob.
+func localEnvAllowed(name string) bool {
+	switch name {
+	case "HOME",
+		"USER", "USERNAME", "LOGNAME",
+		"LANG", "LANGUAGE", "TERM", "TZ",
+		"XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
+		"XDG_STATE_HOME", "XDG_RUNTIME_DIR",
+		"PWD", "OLDPWD",
+		"DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY",
+		"PUID", "PGID",
+		// Devcontainer-spec implementers commonly let template authors
+		// pick a variant via a benign env var; keep this allowed so
+		// upstream templates keep working.
+		"VARIANT":
+		return true
+	}
+	// LC_* locale variables are a family; allow them all.
+	if strings.HasPrefix(name, "LC_") {
+		return true
+	}
+	return false
 }
 
 // Variable names per the spec are word characters (letters, digits,
