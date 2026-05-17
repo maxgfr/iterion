@@ -331,6 +331,8 @@ type ClawExecutor struct {
 	workDir         string // working directory for backend subprocesses
 	defaultBackend  string // workflow-level default backend (empty = use "claw")
 	wfCompaction    *ir.Compaction
+	wfCapabilities  []string // workflow-level default host capabilities (nil = none)
+	storeDir        string   // conductor store root (empty = backend default)
 	lifecycleHooks  *hooks.Runner
 
 	// sandbox is the live [sandbox.Run] for the current iterion run,
@@ -411,6 +413,13 @@ func WithWorkDir(dir string) ClawExecutorOption {
 // WithDefaultBackend sets the workflow-level default backend.
 func WithDefaultBackend(name string) ClawExecutorOption {
 	return func(e *ClawExecutor) { e.defaultBackend = name }
+}
+
+// WithStoreDir sets the conductor store root forwarded to capability-gated
+// backend tools (currently the board MCP server). Backends translate this to
+// the ITERION_STORE_DIR env var on spawned MCP children.
+func WithStoreDir(dir string) ClawExecutorOption {
+	return func(e *ClawExecutor) { e.storeDir = dir }
 }
 
 // WithLogger sets a leveled logger for the executor.
@@ -512,6 +521,7 @@ func NewClawExecutor(registry *Registry, wf *ir.Workflow, opts ...ClawExecutorOp
 		imageAttachs:   imageAttachs,
 		defaultBackend: wf.DefaultBackend,
 		wfCompaction:   wf.Compaction,
+		wfCapabilities: wf.Capabilities,
 		sessions:       newNodeSessionStore(),
 		vars:           seed,
 		detector:       detect.NewCachedDetector(5 * time.Minute),
@@ -759,6 +769,7 @@ type backendFields struct {
 	interaction      ir.InteractionMode
 	activeMCPServers []string
 	compaction       *ir.Compaction
+	capabilities     []string
 }
 
 func extractBackendFields(node ir.Node) backendFields {
@@ -774,6 +785,7 @@ func extractBackendFields(node ir.Node) backendFields {
 			interaction:      n.Interaction,
 			activeMCPServers: n.ActiveMCPServers,
 			compaction:       n.Compaction,
+			capabilities:     n.Capabilities,
 		}
 	case *ir.JudgeNode:
 		return backendFields{
@@ -786,6 +798,7 @@ func extractBackendFields(node ir.Node) backendFields {
 			interaction:      n.Interaction,
 			activeMCPServers: n.ActiveMCPServers,
 			compaction:       n.Compaction,
+			capabilities:     n.Capabilities,
 		}
 	default:
 		panic(fmt.Sprintf("model: extractBackendFields called with unsupported node type %T", node))
@@ -890,6 +903,11 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		resolvedModel = e.detectorSuggestedModel()
 	}
 
+	effectiveCaps := f.capabilities
+	if effectiveCaps == nil {
+		effectiveCaps = e.wfCapabilities
+	}
+
 	task := delegate.Task{
 		NodeID:                f.id,
 		Iteration:             LoopIterationFromContext(ctx),
@@ -897,6 +915,8 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		UserPrompt:            userText,
 		UserContent:           userContent,
 		AllowedTools:          f.tools,
+		Capabilities:          effectiveCaps,
+		StoreDir:              e.storeDir,
 		OutputSchema:          outputSchema,
 		Model:                 resolvedModel,
 		HasTools:              len(f.tools) > 0,
@@ -919,6 +939,13 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 	effectiveTools := f.tools
 	if f.interaction != ir.InteractionNone {
 		effectiveTools = ensureAskUser(effectiveTools)
+	}
+	// When board capabilities are granted and the node already restricts
+	// its tool set (non-empty tools:), append the board MCP tools so
+	// the CLI backend's allowlist exposes them. Empty tools: means "no
+	// restriction" — the MCP server is still registered and discoverable.
+	if delegate.HasBoardCapability(effectiveCaps) && len(effectiveTools) > 0 {
+		effectiveTools = append(effectiveTools, delegate.BoardToolsFor(effectiveCaps)...)
 	}
 	// CLI-based backends can't accept inline images on stdin: forward
 	// the image path via {{attachments.X}} text interpolation and

@@ -954,6 +954,9 @@ func (p *parser) parseAgentProp(ad *ast.AgentDecl, propTok Token) {
 	case TokenToolPolicy:
 		p.expect(TokenColon)
 		ad.ToolPolicy = p.parseToolList()
+	case TokenCapabilities:
+		p.expect(TokenColon)
+		ad.Capabilities = p.parseToolList()
 	case TokenToolMaxSteps:
 		p.expect(TokenColon)
 		ad.ToolMaxSteps = p.expectInt()
@@ -1067,6 +1070,9 @@ func (p *parser) parseJudgeProp(jd *ast.JudgeDecl, propTok Token) {
 	case TokenToolPolicy:
 		p.expect(TokenColon)
 		jd.ToolPolicy = p.parseToolList()
+	case TokenCapabilities:
+		p.expect(TokenColon)
+		jd.Capabilities = p.parseToolList()
 	case TokenToolMaxSteps:
 		p.expect(TokenColon)
 		jd.ToolMaxSteps = p.expectInt()
@@ -1577,6 +1583,12 @@ func (p *parser) parseWorkflowDecl() *ast.WorkflowDecl {
 			p.next() // consume "tool_policy"
 			p.expect(TokenColon)
 			wd.ToolPolicy = p.parseToolList()
+			p.skipNewlines()
+
+		case TokenCapabilities:
+			p.next() // consume "capabilities"
+			p.expect(TokenColon)
+			wd.Capabilities = p.parseToolList()
 			p.skipNewlines()
 
 		case TokenInteraction:
@@ -2359,7 +2371,7 @@ func isKeywordToken(tt TokenType) bool {
 		TokenEntry, TokenMCP, TokenBudget, TokenTransport, TokenServers,
 		TokenDisable, TokenAutoloadProject, TokenModel, TokenInput, TokenOutput,
 		TokenPublish, TokenSystem, TokenUser, TokenSession, TokenTools, TokenToolPolicy,
-		TokenToolMaxSteps, TokenReasoningEffort, TokenMode, TokenStrategy, TokenRequire,
+		TokenCapabilities, TokenToolMaxSteps, TokenReasoningEffort, TokenMode, TokenStrategy, TokenRequire,
 		TokenInstructions, TokenCommand, TokenArgs, TokenURL, TokenBackend, TokenProvider, TokenAwait, TokenWhen, TokenNot, TokenAs,
 		TokenWith, TokenEnum, TokenFresh, TokenInherit, TokenArtifactsOnly,
 		TokenFanOutAll, TokenCondition, TokenWaitAll, TokenBestEffort,

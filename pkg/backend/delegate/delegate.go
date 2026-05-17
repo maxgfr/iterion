@@ -105,6 +105,20 @@ type Task struct {
 	// Used by CLI-based backends; API-based backends use ToolDefs instead.
 	AllowedTools []string
 
+	// Capabilities are the host-side capability names granted to this node
+	// (e.g. "board.create", "board.read"). Backends wire them through to
+	// the internal MCP servers / in-process tools they expose: an unwanted
+	// capability is not advertised, so the agent never sees it. Empty =
+	// no capabilities granted.
+	Capabilities []string
+
+	// StoreDir is the absolute path to the conductor store root used by
+	// capability-gated tools (currently: board operations). Backends pass
+	// this to the __mcp-board subcommand via ITERION_STORE_DIR. Empty
+	// means "fall back to the cwd default"; backends should set this
+	// explicitly whenever they want a specific store binding.
+	StoreDir string
+
 	// ToolDefs provides full tool definitions for backends that manage tool
 	// loops internally (e.g. claw). CLI-based backends ignore this field.
 	ToolDefs []ToolDef

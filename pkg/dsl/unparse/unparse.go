@@ -117,7 +117,7 @@ func Unparse(f *ast.File) string {
 			writeMCPConfigBlock(&b, a.MCP, "  ")
 		}
 		writeAgentFields(&b, a.Model, a.Backend, a.Provider, a.Input, a.Output, a.Publish,
-			a.System, a.User, a.Session, a.Tools, a.ToolPolicy, a.ToolMaxSteps, a.MaxTokens, a.ReasoningEffort, a.Readonly,
+			a.System, a.User, a.Session, a.Tools, a.ToolPolicy, a.Capabilities, a.ToolMaxSteps, a.MaxTokens, a.ReasoningEffort, a.Readonly,
 			a.Interaction, a.InteractionPrompt, a.InteractionModel, a.Await)
 		if a.Compaction != nil {
 			writeCompaction(&b, a.Compaction, "  ", false)
@@ -133,7 +133,7 @@ func Unparse(f *ast.File) string {
 			writeMCPConfigBlock(&b, j.MCP, "  ")
 		}
 		writeAgentFields(&b, j.Model, j.Backend, j.Provider, j.Input, j.Output, j.Publish,
-			j.System, j.User, j.Session, j.Tools, j.ToolPolicy, j.ToolMaxSteps, j.MaxTokens, j.ReasoningEffort, j.Readonly,
+			j.System, j.User, j.Session, j.Tools, j.ToolPolicy, j.Capabilities, j.ToolMaxSteps, j.MaxTokens, j.ReasoningEffort, j.Readonly,
 			j.Interaction, j.InteractionPrompt, j.InteractionModel, j.Await)
 		if j.Compaction != nil {
 			writeCompaction(&b, j.Compaction, "  ", false)
@@ -279,6 +279,10 @@ func Unparse(f *ast.File) string {
 
 		if len(w.ToolPolicy) > 0 {
 			fmt.Fprintf(&b, "  tool_policy: [%s]\n", strings.Join(w.ToolPolicy, ", "))
+		}
+
+		if len(w.Capabilities) > 0 {
+			fmt.Fprintf(&b, "  capabilities: [%s]\n", strings.Join(w.Capabilities, ", "))
 		}
 
 		if w.Worktree != "" {
@@ -460,7 +464,7 @@ func quoteList(vals []string) string {
 	return strings.Join(quoted, ", ")
 }
 
-func writeAgentFields(b *strings.Builder, model, backend, provider, input, output, publish, system, user string, session ast.SessionMode, tools []string, toolPolicy []string, toolMaxSteps int, maxTokens int, reasoningEffort string, readonly bool, interaction ast.InteractionMode, interactionPrompt, interactionModel string, await ast.AwaitMode) {
+func writeAgentFields(b *strings.Builder, model, backend, provider, input, output, publish, system, user string, session ast.SessionMode, tools []string, toolPolicy []string, capabilities []string, toolMaxSteps int, maxTokens int, reasoningEffort string, readonly bool, interaction ast.InteractionMode, interactionPrompt, interactionModel string, await ast.AwaitMode) {
 	if model != "" {
 		writeQuotedProp(b, "model", model)
 	}
@@ -498,6 +502,9 @@ func writeAgentFields(b *strings.Builder, model, backend, provider, input, outpu
 	}
 	if len(toolPolicy) > 0 {
 		fmt.Fprintf(b, "  tool_policy: [%s]\n", strings.Join(toolPolicy, ", "))
+	}
+	if len(capabilities) > 0 {
+		fmt.Fprintf(b, "  capabilities: [%s]\n", strings.Join(capabilities, ", "))
 	}
 	if toolMaxSteps > 0 {
 		fmt.Fprintf(b, "  tool_max_steps: %d\n", toolMaxSteps)
