@@ -192,7 +192,7 @@ func (c *runConn) checkCrossStoreLogTerminal(logPath string, offset *int64) bool
 		return false
 	}
 	switch run.Status {
-	case store.RunStatusFinished, store.RunStatusFailed, store.RunStatusCancelled:
+	case store.RunStatusFinished, store.RunStatusFailed, store.RunStatusFailedResumable, store.RunStatusCancelled:
 		*offset = c.drainCrossStoreLog(logPath, *offset)
 		c.sendEnvelope(wsTypeLogTerminated, map[string]string{"run_id": c.runID}, "")
 		return true

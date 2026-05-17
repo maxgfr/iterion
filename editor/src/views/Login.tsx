@@ -38,6 +38,17 @@ export default function Login() {
     }
   }, []);
 
+  // returnTo captures the in-app URL the user was on before being
+  // bounced to /login (typically by AuthGate on session expiry). We
+  // restrict to relative same-origin paths so a hostile `?next=`
+  // injection can't open-redirect after login.
+  const returnTo = (): string => {
+    const here = window.location.pathname + window.location.search + window.location.hash;
+    if (!here || here.startsWith("/login")) return "/";
+    if (!here.startsWith("/") || here.startsWith("//")) return "/";
+    return here;
+  };
+
   const submit = async (ev: React.FormEvent) => {
     ev.preventDefault();
     setErr(null);
@@ -48,7 +59,7 @@ export default function Login() {
       } else {
         await register({ email, password, name, invitation: invitation || undefined });
       }
-      navigate("/");
+      navigate(returnTo());
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : (e as Error).message;
       setErr(msg);
@@ -58,7 +69,7 @@ export default function Login() {
   };
 
   const oidcStart = (name: string) => {
-    const next = encodeURIComponent("/");
+    const next = encodeURIComponent(returnTo());
     window.location.href = `${BASE}/auth/oidc/${encodeURIComponent(name)}/start?next=${next}`;
   };
 

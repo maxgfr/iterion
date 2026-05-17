@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { resumeRun } from "@/api/runs";
 import { Button, Textarea } from "@/components/ui";
@@ -21,6 +21,16 @@ export default function PauseForm({ runId, questions, message, onSubmitted }: Pr
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(fieldNames.map((k) => [k, ""])),
   );
+  // Reset draft answers when the question set changes (e.g. a second
+  // pause on the same run with different fields, or a navigation
+  // between two paused runs without unmount). The lazy initialiser
+  // above runs once; without this, new field names show old values
+  // and old field names leak into the submit payload.
+  const fieldKey = fieldNames.join("\x00");
+  useEffect(() => {
+    setValues(Object.fromEntries(fieldNames.map((k) => [k, ""])));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId, fieldKey]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const currentSource = useDocumentStore((s) => s.currentSource);

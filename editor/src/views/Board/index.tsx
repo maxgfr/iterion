@@ -107,17 +107,31 @@ export default function BoardView() {
 
   const onDrop = useCallback(
     async (issueID: string, toState: string) => {
-      const before = issues;
-      // optimistic update
-      setIssues((cur) => cur.map((i) => (i.id === issueID ? { ...i, state: toState } : i)));
+      // Capture the snapshot via the functional updater so two
+      // rapid concurrent drops each see the state at the time their
+      // OWN optimistic update fired. A naive `const before = issues`
+      // would let the slower drop's rollback revert the first drop's
+      // optimistic change.
+      let before: NativeIssue[] = [];
+      setIssues((cur) => {
+        before = cur;
+        return cur.map((i) => (i.id === issueID ? { ...i, state: toState } : i));
+      });
       try {
         await transitionIssue(issueID, toState);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
-        setIssues(before);
+        // Only revert this issue's row to its pre-drop state — leave
+        // other concurrent edits in place. Falls back to full revert
+        // when the row was reordered out of `before`.
+        setIssues((cur) => {
+          const prev = before.find((i) => i.id === issueID);
+          if (!prev) return before;
+          return cur.map((i) => (i.id === issueID ? prev : i));
+        });
       }
     },
-    [issues],
+    [],
   );
 
   const onCreate = useCallback(

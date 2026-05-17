@@ -198,6 +198,24 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
               Invitation token (copy + email this — it appears once):
               <br />
               {issuedToken}
+              <div className="mt-2 flex gap-2 font-sans">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(issuedToken);
+                  }}
+                  className="text-fg-accent hover:underline"
+                >
+                  Copy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIssuedToken(null)}
+                  className="text-fg-muted hover:text-fg-default"
+                >
+                  Done — hide
+                </button>
+              </div>
             </div>
           )}
         </section>

@@ -226,8 +226,14 @@ export default function NodeDetailPanel({
   // the active iteration's status is paused (even mid-node).
   const nodeId = exec?.ir_node_id ?? null;
   const isPausedExec = exec?.status === "paused_waiting_human";
+  // Derive kind as a stable scalar so we can add it to the effect
+  // dep list without resetting on every exec reference change. Without
+  // this, an exec that arrives in the same React batch as a nodeId
+  // change has the stale closure see exec === null and set
+  // activeTab = null, blanking the panel.
+  const execKind = exec?.kind ?? null;
   useEffect(() => {
-    if (!exec) {
+    if (!execKind) {
       setActiveTab(null);
       return;
     }
@@ -235,15 +241,13 @@ export default function NodeDetailPanel({
       setActiveTab("pause");
       return;
     }
-    const kind = exec.kind;
-    if (kind === "agent" || kind === "judge") setActiveTab("trace");
-    else if (kind === "tool") setActiveTab("tools");
+    if (execKind === "agent" || execKind === "judge") setActiveTab("trace");
+    else if (execKind === "tool") setActiveTab("tools");
     else setActiveTab("events");
-    // exec is referenced for kind/status reads above, but we only want
-    // the default-tab logic to fire on node identity change — not on
-    // every exec swap (iteration flips reuse the user's pick).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeId, isPausedExec]);
+    // Iteration flips reuse the user's tab pick — that's why we don't
+    // dep on the full `exec` object. nodeId + execKind + isPausedExec
+    // cover the cases that warrant a default-tab reset.
+  }, [nodeId, execKind, isPausedExec]);
 
   if (!exec) {
     return (

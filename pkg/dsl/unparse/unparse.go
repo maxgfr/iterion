@@ -485,11 +485,12 @@ func writeAgentFields(b *strings.Builder, model, backend, provider, input, outpu
 	if user != "" {
 		writeProp(b, "user", user)
 	}
-	// Only emit session if non-default (fresh is the default/zero value)
+	// Only emit session: when it's non-default. The previous if/else
+	// emitted it unconditionally — both branches called the same
+	// writeProp — which broke parse → unparse → re-parse round-trip
+	// stability (every agent/judge would gain a synthetic
+	// `session: fresh` line that wasn't in the source).
 	if session != ast.SessionFresh {
-		writeProp(b, "session", session.String())
-	} else {
-		// Emit it always since the reference shows it explicitly
 		writeProp(b, "session", session.String())
 	}
 	if len(tools) > 0 {

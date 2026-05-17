@@ -156,16 +156,20 @@ function AuthedApp() {
         </Route>
         <Route path="/account" component={SettingsPage} />
         <Route path="/teams/:id" component={TeamPage} />
-        <Route path="/board">
-          <ErrorBoundary area="Board view">
-            <BoardView />
-          </ErrorBoundary>
-        </Route>
-        <Route path="/conductor">
-          <ErrorBoundary area="Conductor view">
-            <ConductorView />
-          </ErrorBoundary>
-        </Route>
+        {serverInfo?.native_tracker_enabled && (
+          <Route path="/board">
+            <ErrorBoundary area="Board view">
+              <BoardView />
+            </ErrorBoundary>
+          </Route>
+        )}
+        {serverInfo?.conductor_enabled && (
+          <Route path="/conductor">
+            <ErrorBoundary area="Conductor view">
+              <ConductorView />
+            </ErrorBoundary>
+          </Route>
+        )}
         <Route path="/editor" component={EditorView} />
         <Route path="/" component={HomeView} />
         <Route component={HomeView} />

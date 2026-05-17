@@ -99,9 +99,13 @@ function DiagnosticList({
         const hint = d.code ? getHint(d.code) : undefined;
         const sevColor =
           d.severity === "error" ? "text-danger" : "text-warning";
+        // Composite key: code+attribution+message is stable across
+        // reorders (array index is not — animations / focus / aria
+        // tooltips get reused on the wrong row otherwise).
+        const stableKey = `${d.code ?? ""}|${d.nodeId ?? d.edgeId ?? ""}|${d.message}`;
         return (
           <li
-            key={i}
+            key={stableKey || i}
             className={`flex items-start gap-2 cursor-pointer hover:bg-surface-2 rounded px-1 -mx-1 py-0.5 ${sevColor}`}
             onClick={() => onClick(d)}
           >

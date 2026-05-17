@@ -62,9 +62,20 @@ export function useRuns(opts: UseRunsOptions = {}): UseRunsResult {
   }, [runs]);
 
   const pollMs = computePollingInterval(counts);
+  // Hold the latest pollMs in a ref so we can vary the next-tick
+  // delay without ripping down the polling effect every time the
+  // queue depth crosses the threshold. The previous version had
+  // pollMs in the effect deps, which on a fast→slow transition
+  // would discard a freshly-scheduled tick and wait the full slow
+  // interval before the next fetch.
+  const pollMsRef = useRef(pollMs);
+  useEffect(() => {
+    pollMsRef.current = pollMs;
+  }, [pollMs]);
 
   useEffect(() => {
     let cancelled = false;
+    let timer: number | null = null;
     const fetchRuns = async () => {
       try {
         const out = await listRuns({
@@ -85,14 +96,16 @@ export function useRuns(opts: UseRunsOptions = {}): UseRunsResult {
           setLoading(false);
         }
       }
+      if (!cancelled) {
+        timer = window.setTimeout(fetchRuns, pollMsRef.current);
+      }
     };
     fetchRuns();
-    const id = setInterval(fetchRuns, pollMs);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (timer != null) clearTimeout(timer);
     };
-  }, [status, limit, pollMs]);
+  }, [status, limit]);
 
   return { runs, counts, loading, error };
 }

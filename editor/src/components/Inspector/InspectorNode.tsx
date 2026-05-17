@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDocumentStore } from "@/store/document";
 import { useSelectionStore } from "@/store/selection";
 import { NODE_COLORS, NODE_ICONS } from "@/lib/constants";
@@ -133,6 +133,14 @@ function NodeHeader({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
+  // Re-sync `draft` whenever the canonical `name` prop changes from
+  // the outside (e.g. an AgentForm CommittedTextField rename routed
+  // through the store). Without this, clicking the header to edit
+  // shows the pre-rename draft and committing it would silently
+  // rename back to the old name.
+  useEffect(() => {
+    if (!editing) setDraft(name);
+  }, [name, editing]);
   const color = NODE_COLORS[kind];
   const icon = NODE_ICONS[kind];
 

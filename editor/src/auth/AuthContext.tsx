@@ -106,9 +106,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState((prev) => applyResponse(prev, me));
       return;
     } catch (err) {
-      if (!(err instanceof ApiError) || err.status !== 401) {
-        // Non-401 = transient; retry through refresh just in case the
-        // access cookie expired between page reloads.
+      // Only fall through to refresh when the access cookie is
+      // actually invalid (401). A 5xx / network blip is transient —
+      // don't burn a refresh-token rotation on a server hiccup.
+      if (err instanceof ApiError && err.status !== 401) {
+        setState({ ...initial, status: "anonymous" });
+        return;
       }
     }
     try {

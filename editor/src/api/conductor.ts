@@ -4,8 +4,10 @@
 // reload / issue cancel / ws) endpoints.
 
 import { apiRequest } from "./client";
+import { getDesktopWsBase, isDesktop, isWailsHosted } from "@/lib/desktopBridge";
 
 const BASE = "/api/v1/conductor";
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
 function request<T>(path: string, init?: RequestInit): Promise<T> {
   return apiRequest<T>(BASE + path, init);
@@ -218,8 +220,23 @@ export function cancelIssue(id: string): Promise<{ status: string }> {
 // openWS returns a connected WebSocket that broadcasts Snapshot
 // updates. The caller must close it. Reconnection is the caller's
 // responsibility.
-export function openWS(): WebSocket {
+//
+// Mirrors api/ws.ts:deriveWsUrl for the desktop bridge — without it,
+// window.location.host on Wails is "wails.localhost" which can't
+// accept WS upgrades, so the dashboard would only show the static
+// snapshot with no live updates.
+export async function openWS(): Promise<WebSocket> {
+  const path = `${BASE}/ws`;
+  if (isDesktop()) {
+    const desktopUrl = await getDesktopWsBase(path);
+    if (desktopUrl) return new WebSocket(desktopUrl);
+  }
+  if (isWailsHosted()) {
+    throw new Error("desktop bindings not ready");
+  }
+  if (API_BASE.startsWith("http")) {
+    return new WebSocket(API_BASE.replace(/^http/, "ws") + BASE + "/ws");
+  }
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const url = `${proto}//${window.location.host}${BASE}/ws`;
-  return new WebSocket(url);
+  return new WebSocket(`${proto}//${window.location.host}${path}`);
 }
