@@ -352,5 +352,6 @@ var networkTransientNeedles = []string{
 	"network is unreachable",    // host has no route (eg vpn dropped)
 	"no route to host",          // routing-table drop (often transient)
 	"tls handshake timeout",     // tls negotiation hung (proxy / mitm flap)
-	"eof",                       // bare EOF mid-stream — usually peer dropped during sse
+	"unexpected eof",            // SSE / streaming response cut short by peer
+	"http: eof",                 // net/http verbatim: server hung up mid-stream
 }

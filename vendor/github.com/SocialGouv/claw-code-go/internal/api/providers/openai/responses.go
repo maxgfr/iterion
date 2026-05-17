@@ -423,6 +423,7 @@ func (c *Client) streamResponsesEvents(ctx context.Context, resp *http.Response,
 		fnOpenOrder   []string
 		stopReason    = "end_turn"
 		outputTokens  int
+		inputTokens   int
 	)
 
 	closeText := func(itemID string) bool {
@@ -559,6 +560,7 @@ func (c *Client) streamResponsesEvents(ctx context.Context, resp *http.Response,
 		case "response.completed":
 			if ev.Response != nil && ev.Response.Usage != nil {
 				outputTokens = ev.Response.Usage.OutputTokens
+				inputTokens = ev.Response.Usage.InputTokens
 			}
 			// stopReason is the source-of-truth set when each output_item
 			// was observed: "tool_use" the moment a function_call item
@@ -596,6 +598,20 @@ func (c *Client) streamResponsesEvents(ctx context.Context, resp *http.Response,
 			continue
 		}
 		if !sendAll(acc.Finish()) {
+			return
+		}
+	}
+
+	// Emit a supplemental MessageStart now that we know the prompt
+	// token count from the final response.completed event.
+	// aggregateStream reads InputTokens off MessageStart; this second
+	// emission overwrites the zero we sent at the top. Mirrors the
+	// Anthropic SDK shape where input-token counts arrive late.
+	if inputTokens > 0 {
+		if !send(api.StreamEvent{
+			Type:        api.EventMessageStart,
+			InputTokens: inputTokens,
+		}) {
 			return
 		}
 	}

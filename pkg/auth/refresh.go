@@ -107,8 +107,20 @@ func RotateSession(ctx context.Context, store SessionStore, presentedToken, user
 	if !prev.ExpiresAt.IsZero() && now.After(prev.ExpiresAt) {
 		return "", Session{}, prev, ErrSessionExpired
 	}
-	if err := store.RevokeSession(ctx, prev.ID, now); err != nil {
+	// CAS-revoke: prevent two parallel RotateSession calls from both
+	// passing the "not yet revoked" check above and both proceeding to
+	// mint a new refresh token. Mirrors auth.Service.Refresh which is
+	// the canonical pattern.
+	revoked, err := store.RevokeSessionIfNotRevoked(ctx, prev.ID, now)
+	if err != nil {
 		return "", Session{}, prev, fmt.Errorf("auth: revoke previous: %w", err)
+	}
+	if !revoked {
+		// A concurrent rotation already consumed this token. Treat as
+		// reuse: revoke every session of the user and surface the
+		// stronger error so callers force a clean re-login.
+		_ = store.RevokeUserSessions(ctx, prev.UserID, now)
+		return "", Session{}, prev, ErrSessionRevoked
 	}
 	rawTok, _, err := GenerateRandomToken(48)
 	if err != nil {

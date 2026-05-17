@@ -171,6 +171,15 @@ type Config struct {
 	// that don't set it.
 	Mode string
 
+	// TrustedProxyCIDRs is the allowlist of CIDR ranges whose
+	// X-Forwarded-For headers we believe. Empty (the default) means
+	// we never trust forwarded headers — audit IPs come from
+	// r.RemoteAddr only, defeating spoofing by an unprivileged
+	// client that sends its own X-Forwarded-For. Set this only when
+	// the server sits behind a known L7 proxy/ingress and the proxy
+	// rewrites the header on every request.
+	TrustedProxyCIDRs []string
+
 	// Metrics, when non-nil, lets the server publish iterion_ws_connections
 	// gauge updates as run-console clients connect / disconnect. Other
 	// cloud metrics live on the runner / publisher side.

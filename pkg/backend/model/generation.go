@@ -64,6 +64,13 @@ type blockState struct {
 
 // aggregateStream reads all events from ch and builds an aggregatedResponse.
 // It tracks content blocks by index and concatenates deltas.
+//
+// On early ctx-cancel return, the upstream goroutine inside
+// claw-code-go's StreamResponse is still trying to push the rest of
+// the response into ch. If we return immediately, that goroutine
+// blocks at the next send (ch is buffered ~64) and never releases
+// the underlying TCP connection. To avoid that leak we spawn a
+// discarding drainer that lives until the upstream channel closes.
 func aggregateStream(ctx context.Context, ch <-chan api.StreamEvent) aggregatedResponse {
 	var res aggregatedResponse
 	blocks := make(map[int]*blockState)
@@ -72,6 +79,10 @@ func aggregateStream(ctx context.Context, ch <-chan api.StreamEvent) aggregatedR
 		select {
 		case <-ctx.Done():
 			res.err = ctx.Err()
+			go func() {
+				for range ch {
+				}
+			}()
 			return res
 		case event, ok := <-ch:
 			if !ok {

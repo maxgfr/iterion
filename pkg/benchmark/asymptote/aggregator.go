@@ -48,11 +48,17 @@ func AggregateGroup(label string, runs []RunSeries) GroupAggregate {
 			agg.MeanScore = sum / float64(count)
 			agg.PassRate = float64(passes) / float64(count)
 			if count > 1 {
-				variance := (sumSq / float64(count)) - (agg.MeanScore * agg.MeanScore)
-				if variance < 0 {
-					variance = 0
+				// Sample variance with Bessel's correction (n-1
+				// denominator). For small n (typical bench sample
+				// sizes are 3–10), the population formula
+				// systematically underestimates the spread and makes
+				// the runs look more consistent than they are.
+				n := float64(count)
+				sampleVar := (sumSq - sum*sum/n) / (n - 1)
+				if sampleVar < 0 {
+					sampleVar = 0
 				}
-				agg.StdErr = math.Sqrt(variance) / math.Sqrt(float64(count))
+				agg.StdErr = math.Sqrt(sampleVar / n)
 			}
 		}
 		g.PerIter[iter] = agg

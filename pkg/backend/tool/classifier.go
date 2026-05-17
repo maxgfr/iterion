@@ -31,10 +31,18 @@ type ClassifierLogger interface {
 // Logger is optional; when set, classifier errors and JSON decoding
 // failures are surfaced at Warn level. Without a logger, errors fall
 // through silently to the base checker (legacy behavior).
+//
+// FailOpen controls behaviour when the classifier itself fails
+// (LLM timeout, API outage). The safer default is fail-closed: a
+// classifier error denies the call rather than silently falling
+// through to a permissive base policy that the operator wanted the
+// classifier to override. Set FailOpen=true to preserve the legacy
+// behaviour (defer to Base on classifier error).
 type ClassifierChecker struct {
 	Classifier permissions.Classifier
 	Base       ToolChecker
 	Logger     ClassifierLogger
+	FailOpen   bool
 }
 
 // CheckContext implements ToolChecker.
@@ -62,6 +70,9 @@ func (cc *ClassifierChecker) CheckContext(pctx PolicyContext) error {
 	if err != nil {
 		if cc.Logger != nil {
 			cc.Logger.Warn("tool classifier: error classifying %q (node=%q): %v", pctx.ToolName, pctx.NodeID, err)
+		}
+		if !cc.FailOpen {
+			return fmt.Errorf("%w: classifier unavailable (%v) for %q", ErrToolDenied, err, pctx.ToolName)
 		}
 	} else {
 		switch d {

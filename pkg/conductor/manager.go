@@ -410,7 +410,31 @@ func (m *Manager) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "no config persisted yet"})
 		return
 	}
-	WriteJSON(w, http.StatusOK, cfg)
+	WriteJSON(w, http.StatusOK, redactedConfig(cfg))
+}
+
+// redactedConfig returns a deep-ish copy of cfg with secret values
+// (tracker tokens) masked. Without this masking, GET /config
+// surfaces the raw OAuth/PAT tokens to anyone who can reach the
+// management port — they're loaded from env at boot but stay
+// in-memory in their literal form.
+func redactedConfig(cfg *Config) *Config {
+	out := *cfg
+	if out.Tracker.GitHub != nil {
+		gh := *out.Tracker.GitHub
+		if gh.Token != "" {
+			gh.Token = "***"
+		}
+		out.Tracker.GitHub = &gh
+	}
+	if out.Tracker.Forgejo != nil {
+		fj := *out.Tracker.Forgejo
+		if fj.Token != "" {
+			fj.Token = "***"
+		}
+		out.Tracker.Forgejo = &fj
+	}
+	return &out
 }
 
 func (m *Manager) handlePutConfig(w http.ResponseWriter, r *http.Request) {

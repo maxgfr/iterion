@@ -216,9 +216,30 @@ func (c *Conductor) actorLoop(ctx context.Context) {
 	ticker := time.NewTicker(cfg.PollingInterval())
 	defer ticker.Stop()
 
+	// safeTick / safeCmdApply wrap each per-iteration unit of work in
+	// a deferred recover so that one panicking tracker adapter or
+	// command handler can't kill the actor goroutine (which would
+	// deadlock Stop() callers waiting on c.done).
+	safeTick := func() {
+		defer func() {
+			if r := recover(); r != nil {
+				c.logger.Error("conductor: panic in tick: %v", r)
+			}
+		}()
+		c.tick(ctx)
+	}
+	safeCmdApply := func(command cmd) {
+		defer func() {
+			if r := recover(); r != nil {
+				c.logger.Error("conductor: panic in command %T: %v", command, r)
+			}
+		}()
+		command.apply(c, ctx)
+	}
+
 	// Kick off an immediate first tick so the user sees activity
 	// without waiting for the cadence.
-	c.tick(ctx)
+	safeTick()
 
 	for {
 		select {
@@ -229,13 +250,13 @@ func (c *Conductor) actorLoop(ctx context.Context) {
 			c.shutdown()
 			return
 		case <-ticker.C:
-			c.tick(ctx)
+			safeTick()
 		case cmd, ok := <-c.cmds:
 			if !ok {
 				c.shutdown()
 				return
 			}
-			cmd.apply(c, ctx)
+			safeCmdApply(cmd)
 			// Re-tick ticker cadence when polling interval changes via Reload.
 			if cur := c.cfg.Load(); cur.PollingInterval() != cfg.PollingInterval() {
 				ticker.Reset(cur.PollingInterval())
