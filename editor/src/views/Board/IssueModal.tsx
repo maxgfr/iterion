@@ -28,7 +28,19 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // Don't swallow ESC that's meant to dismiss a textarea, an
+      // input, or a native <select>'s dropdown — closing the modal
+      // there would destroy unsaved edits.
+      const t = e.target as Element | null;
+      if (
+        t instanceof HTMLTextAreaElement ||
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+      onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

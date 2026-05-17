@@ -23,7 +23,14 @@ function readStoreOverrideFromURL(): string {
   if (typeof window === "undefined") return "";
   try {
     const v = new URLSearchParams(window.location.search).get("store");
-    return v && v.length > 0 ? v : "";
+    // Defence-in-depth: validate the shape before forwarding to the
+    // daemon WS. Server still does its own check via resolveCrossStore,
+    // but a malformed value should be dropped client-side too. Mirrors
+    // api/runs.ts:isSafeStoreParam.
+    if (!v || v.length === 0 || v.length > 512) return "";
+    if (!/^[A-Za-z0-9_./-]+$/.test(v)) return "";
+    if (v.includes("..")) return "";
+    return v;
   } catch {
     return "";
   }

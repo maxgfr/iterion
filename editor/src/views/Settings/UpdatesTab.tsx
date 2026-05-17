@@ -49,7 +49,15 @@ export default function UpdatesTab() {
           </p>
           <button
             className="text-xs text-accent underline self-start"
-            onClick={() => desktop.openExternal(release.release_notes_url)}
+            onClick={() => {
+              // Defence-in-depth: refuse anything that isn't a plain
+              // https:// URL before handing off to the OS shell. The
+              // update manifest is signed but a future channel change
+              // could let a release_notes_url with a custom protocol
+              // (file:, javascript:, ms-...) ride along.
+              const url = release.release_notes_url ?? "";
+              if (url.startsWith("https://")) desktop.openExternal(url);
+            }}
           >
             View release notes
           </button>

@@ -183,6 +183,16 @@ export default function RunCanvasIR({
   useEffect(() => {
     effortCapsByPairRef.current = effortCapsByPair;
   }, [effortCapsByPair]);
+  // Mirrors of the data inputs used inside the async ELK .then() so
+  // a layout that takes ~50–200ms doesn't commit stale executions /
+  // selection / runtime meta on top of the patch effect's update.
+  // The patch effect (below) already deps on these directly; these
+  // refs are read only by the .then() callback so it sees the values
+  // that exist when the promise resolves, not when the effect fired.
+  const execsByNodeRef = useRef<Map<string, ExecutionState[]>>(new Map());
+  const iterationByNodeRef = useRef(iterationByNode);
+  const runtimeOverrideByNodeRef = useRef(runtimeOverrideByNode);
+  const selectedNodeIdRef = useRef(selectedNodeId);
   const reactFlow = useReactFlow();
   // Shared with the editor canvas so the user's TB/LR preference
   // persists across views; the toggle button in RunCanvasToolbar
@@ -286,6 +296,14 @@ export default function RunCanvasIR({
     }
     return m;
   }, [executions]);
+  // Keep the .then() refs in sync with the latest derived/incoming
+  // values.
+  useEffect(() => {
+    execsByNodeRef.current = execsByNode;
+    iterationByNodeRef.current = iterationByNode;
+    runtimeOverrideByNodeRef.current = runtimeOverrideByNode;
+    selectedNodeIdRef.current = selectedNodeId;
+  }, [execsByNode, iterationByNode, runtimeOverrideByNode, selectedNodeId]);
 
   const handleSelectIteration = useCallback(
     (nodeId: string, iteration: number) => {
@@ -365,22 +383,34 @@ export default function RunCanvasIR({
     autoLayout(baseNodes, baseEdges, layoutDirection)
       .then((laid) => {
         if (cancelled) return;
-        // Re-derive meta with the latest caps: the prefetch effect
-        // may have populated effortCapsByPair while autoLayout was
-        // running. Otherwise the layout's setNodes would clobber the
-        // patch effect's normalised bar (gpt-5 high → 4/4 cells).
+        // Re-derive data from REFS pointing at the current state —
+        // not the snapshot captured when this effect fired. ELK
+        // layout is ~50–200ms; in that window node_started events,
+        // selection changes, and effortCapsByPair fetches can all
+        // arrive. Without these refs the layout's setNodes commits
+        // stale `executions: []` / `selected: false` on top of the
+        // patch effect's already-applied update.
         const finalNodes = laid.map((fn) => {
           const wireNode = wireNodeById.get(fn.id);
+          const execs = execsByNodeRef.current.get(fn.id) ?? [];
+          const selectedIteration =
+            iterationByNodeRef.current.get(fn.id) ?? defaultIterationFor(execs);
           const meta = wireNode
             ? buildLLMMeta(
                 wireNode,
-                runtimeOverrideByNode.get(fn.id),
+                runtimeOverrideByNodeRef.current.get(fn.id),
                 effortCapsByPairRef.current,
               )
             : undefined;
           return {
             ...fn,
-            data: { ...(fn.data as Record<string, unknown>), meta },
+            data: {
+              ...(fn.data as Record<string, unknown>),
+              executions: execs,
+              selectedIteration,
+              selected: fn.id === selectedNodeIdRef.current,
+              meta,
+            },
           };
         });
         setNodes(finalNodes);

@@ -1,18 +1,18 @@
 // Run-console HTTP client. Mirrors the Go service in pkg/runview/.
 
 import { desktop, isDesktop } from "@/lib/desktopBridge";
+import { apiRequest } from "./client";
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
-  if (!res.ok) {
-    throw new Error(`API error ${res.status}: ${await res.text()}`);
-  }
-  return res.json() as Promise<T>;
+// Delegate to the shared apiRequest so this module picks up:
+//   - credentials: "include" (needed in cross-origin cloud deployments)
+//   - the 401 → onUnauthorized hook the AuthProvider registers
+// Without this, every run-console call (list, get, launch, cancel,
+// resume, ...) silently broke in cloud mode and failed to surface
+// expired-session 401s.
+function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return apiRequest<T>(`${BASE_URL}${path}`, init);
 }
 
 // apiURL returns the full URL for a given API path, suitable for
@@ -237,10 +237,22 @@ function readStoreOverrideFromURL(): string {
   if (typeof window === "undefined") return "";
   try {
     const v = new URLSearchParams(window.location.search).get("store");
-    return v && v.length > 0 ? v : "";
+    return isSafeStoreParam(v) ? (v as string) : "";
   } catch {
     return "";
   }
+}
+
+// isSafeStoreParam validates the cross-store override path shape before
+// forwarding it to the daemon. The server-side resolveCrossStore guard
+// rejects unknown stores, but client-side filtering is defence-in-depth
+// against a hostile `?store=...` URL handed to a victim — keep the
+// charset tight and reject path-traversal segments.
+function isSafeStoreParam(v: string | null): boolean {
+  if (!v || v.length === 0 || v.length > 512) return false;
+  if (!/^[A-Za-z0-9_./-]+$/.test(v)) return false;
+  if (v.includes("..")) return false;
+  return true;
 }
 
 // withStoreParam appends `store=<override>` to the given URLSearchParams
@@ -299,7 +311,7 @@ export async function fetchToolBlob(
   if (limit > 0) qs.set("limit", String(limit));
   const suffix = qs.toString();
   const url = `${BASE_URL}/runs/${encodeURIComponent(runId)}/tools/${encodeURIComponent(toolUseID)}/${kind}${suffix ? `?${suffix}` : ""}`;
-  const res = await fetch(url);
+  const res = await fetch(url, { credentials: "include" });
   if (!res.ok) {
     throw new Error(`API error ${res.status}: ${await res.text()}`);
   }

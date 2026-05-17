@@ -125,6 +125,12 @@ func (s *Store) UpdateRunStatus(ctx context.Context, id string, status store.Run
 		// freezes mid-run (mirrors FilesystemRunStore).
 		set["error"] = ""
 		unset["finished_at"] = ""
+	case store.RunStatusPausedWaitingHuman:
+		// Mirror the FS store: a generic UpdateRunStatus that crosses
+		// from a previously-terminal (failed_resumable) state into
+		// paused-waiting-human must also clear finished_at so the
+		// elapsed-time UI doesn't stay frozen.
+		unset["finished_at"] = ""
 	}
 	update := bson.M{"$set": set, "$inc": bson.M{"version": 1}}
 	if len(unset) > 0 {
@@ -159,6 +165,8 @@ func (s *Store) UpdateRunStatusIf(ctx context.Context, id string, status store.R
 		set["finished_at"] = now
 	case store.RunStatusRunning:
 		set["error"] = ""
+		unset["finished_at"] = ""
+	case store.RunStatusPausedWaitingHuman:
 		unset["finished_at"] = ""
 	}
 	update := bson.M{"$set": set, "$inc": bson.M{"version": 1}}

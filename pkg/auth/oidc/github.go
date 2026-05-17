@@ -105,17 +105,21 @@ func (g *GitHubConnector) ExchangeCode(ctx context.Context, code, redirectURI, c
 	if err != nil {
 		return ExternalUser{}, err
 	}
-	if user.Email == "" {
-		// Some accounts hide their email; fetch the verified primary.
-		email, err := g.fetchPrimaryEmail(ctx, tok.AccessToken)
-		if err != nil {
-			return ExternalUser{}, err
-		}
-		user.Email = email
+	// Always route the email through /user/emails (which checks
+	// e.Verified). /user.email is the publicly visible profile email
+	// — a display setting the user can write to without verification,
+	// so trusting it directly would let an attacker who sets their
+	// public email to victim@example.com claim that iterion account.
+	// Mirror the unverified-email gate that google.go and generic.go
+	// enforce via ErrEmailNotVerified.
+	email, err := g.fetchPrimaryEmail(ctx, tok.AccessToken)
+	if err != nil {
+		return ExternalUser{}, err
 	}
-	if user.Email == "" {
+	if email == "" {
 		return ExternalUser{}, ErrEmailMissing
 	}
+	user.Email = email
 	return user, nil
 }
 

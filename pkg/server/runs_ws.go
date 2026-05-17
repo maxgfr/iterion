@@ -631,7 +631,7 @@ func (c *runConn) checkCrossStoreTerminal(eventsPath string, offset *int64, last
 		return false
 	}
 	switch run.Status {
-	case store.RunStatusFinished, store.RunStatusFailed, store.RunStatusCancelled:
+	case store.RunStatusFinished, store.RunStatusFailed, store.RunStatusFailedResumable, store.RunStatusCancelled:
 		*offset = c.drainNewCrossStoreEvents(eventsPath, *offset, lastSeq)
 		c.sendEnvelope(wsTypeTerminated, map[string]string{"run_id": c.runID}, "")
 		return true

@@ -37,10 +37,14 @@ export default function ConductorView() {
     let cancelled = false;
     let retryTimer: number | null = null;
 
-    const connect = () => {
+    const connect = async () => {
       if (cancelled) return;
       try {
-        const ws = openWS();
+        const ws = await openWS();
+        if (cancelled) {
+          ws.close();
+          return;
+        }
         wsRef.current = ws;
         ws.onmessage = (e) => {
           try {
@@ -51,15 +55,18 @@ export default function ConductorView() {
         };
         ws.onclose = () => {
           if (cancelled) return;
-          retryTimer = window.setTimeout(connect, 1500);
+          retryTimer = window.setTimeout(() => void connect(), 1500);
         };
         ws.onerror = () => ws.close();
       } catch (e) {
         // fallback to polling if WS unavailable
         setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) {
+          retryTimer = window.setTimeout(() => void connect(), 1500);
+        }
       }
     };
-    connect();
+    void connect();
     return () => {
       cancelled = true;
       if (retryTimer != null) window.clearTimeout(retryTimer);
