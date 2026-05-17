@@ -100,6 +100,23 @@ export interface IssuesSummaryMessage {
   summary: string;
 }
 
+// SurveyCardMessage carries the structured output of an agent that
+// surveyed the workspace (whats-next's `explore` node today). The
+// matching nodeMap entry sets `followCardKind: "survey"` so the
+// runtime mapper pushes one of these right after the banner closes.
+export interface SurveyCardMessage {
+  kind: "survey-card";
+  id: string;
+  nodeId: string;
+  summary: string;
+  openQuestions: string[];
+  observations: string;
+  // Free-form maps. Surfaced under "Show details" — we don't try to
+  // schematise them since their shape varies by repo.
+  toplevelDirs: unknown;
+  recentCommits: unknown;
+}
+
 export interface SessionClosedMessage {
   kind: "session-closed";
   id: string;
@@ -114,6 +131,7 @@ export type PiloteMessage =
   | HumanQuestionMessage
   | RoadmapCardMessage
   | IssuesSummaryMessage
+  | SurveyCardMessage
   | SessionClosedMessage;
 
 // Helper for components: extract a roadmap doc from a raw node output
@@ -139,6 +157,39 @@ export function asRoadmapDoc(value: unknown): RoadmapDoc | null {
     return null;
   }
   return { long_term, short_term, next_action, rationale };
+}
+
+export function asSurveyOutput(value: unknown): {
+  summary: string;
+  openQuestions: string[];
+  observations: string;
+  toplevelDirs: unknown;
+  recentCommits: unknown;
+} | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  const summary = typeof v.summary === "string" ? v.summary : "";
+  const observations =
+    typeof v.observations === "string" ? v.observations : "";
+  const openQuestions = Array.isArray(v.open_questions)
+    ? (v.open_questions.filter((q): q is string => typeof q === "string") as string[])
+    : [];
+  if (
+    summary === "" &&
+    observations === "" &&
+    openQuestions.length === 0 &&
+    v.toplevel_dirs === undefined &&
+    v.recent_commits === undefined
+  ) {
+    return null;
+  }
+  return {
+    summary,
+    openQuestions,
+    observations,
+    toplevelDirs: v.toplevel_dirs,
+    recentCommits: v.recent_commits,
+  };
 }
 
 export function asEmitOutput(value: unknown): {
