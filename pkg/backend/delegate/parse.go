@@ -103,9 +103,9 @@ func validateWorkDir(workDir, baseDir string) error {
 //
 // The block scanner treats the opening fence as `\`\`\`<lang?>\n` — i.e. the
 // language tag, if present, runs from the fence to the first newline and
-// is dropped. A fenced block missing the newline (`\`\`\`json{...}\`\`\``)
-// or with no language tag (`\`\`\`{...}\`\`\``) is recognised: the body
-// is whatever sits between the opening and the next `\`\`\`` after the
+// is dropped. A fenced block missing the newline (`\`\`\`json{...}\`\`\“)
+// or with no language tag (`\`\`\`{...}\`\`\“) is recognised: the body
+// is whatever sits between the opening and the next `\`\`\“ after the
 // language line is consumed. Previously, the language-tag skip pinned
 // to an unconditional IndexByte('\n') and a one-line fenced block
 // silently lost its body to the outer loop's advance.

@@ -73,11 +73,11 @@ func (ft FieldType) String() string {
 type SessionMode int
 
 const (
-	SessionFresh             SessionMode = iota // new context
-	SessionInherit                              // inherit parent session — hard-requires _session_id
-	SessionInheritIfAvailable                   // inherit when _session_id resolves, otherwise fall back to fresh (v0.6.0+)
-	SessionArtifactsOnly                        // only persistent artifacts
-	SessionFork                                 // non-consuming fork from parent session
+	SessionFresh              SessionMode = iota // new context
+	SessionInherit                               // inherit parent session — hard-requires _session_id
+	SessionInheritIfAvailable                    // inherit when _session_id resolves, otherwise fall back to fresh (v0.6.0+)
+	SessionArtifactsOnly                         // only persistent artifacts
+	SessionFork                                  // non-consuming fork from parent session
 )
 
 func (sm SessionMode) String() string {
