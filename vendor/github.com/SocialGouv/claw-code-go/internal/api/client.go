@@ -15,8 +15,15 @@ import (
 const (
 	defaultBaseURL         = "https://api.anthropic.com"
 	anthropicVersion       = "2023-06-01"
-	anthropicBetaHeader    = "anthropic-beta"
-	anthropicBetaValue     = "prompt-caching-2024-07-31"
+	anthropicBetaHeader = "anthropic-beta"
+	// Comma-separated beta flags. The prompt-caching-2024-07-31 token
+	// enables the per-block cache_control marker; pinning the
+	// caching-scope token additionally lets the API recognise scope
+	// directives on individual system blocks instead of treating
+	// system as a monolithic cache zone. Without scope, long-lived
+	// iterion server prompts miss the cache after the smallest
+	// rotating field flips and pay full input-token cost every call.
+	anthropicBetaValue     = "prompt-caching-2024-07-31,prompt-caching-scope-2026-01-05"
 	anthropicVersionHeader = "anthropic-version"
 
 	// defaultMaxRetries is the maximum number of retry attempts for retryable
@@ -114,13 +121,20 @@ func (c *Client) StreamResponse(ctx context.Context, req CreateMessageRequest) (
 
 		resp, lastErr = c.HTTPClient.Do(httpReq)
 		if lastErr != nil {
-			// Transport errors are routinely transient (DNS flutter,
-			// dropped TCP, TLS handshake flap, captive-portal handoff).
-			// Retry with the same backoff loop the 5xx path uses; the
-			// iterion runtime layer adds another 6-attempt network-
-			// transient recipe on top for true multi-minute outages
-			// (see pkg/runtime/recovery in the iterion repo). Mirror
-			// of the change in .works/claw-code-go/internal/api/client.go.
+			// Transport errors (DNS flutter, dropped TCP, TLS handshake
+			// flap, captive-portal handoff, etc.) are surprisingly
+			// retryable: in practice they recover within seconds-to-
+			// minutes when the local network blip clears. The previous
+			// "transport errors are not retryable" assumption made
+			// long-running unattended pipelines fragile to occasional
+			// network outages — a 5-second ISP hiccup mid-request
+			// would surface as a hard run failure even though a single
+			// retry would have succeeded. Now we treat them like a 5xx
+			// and ride the same exponential-backoff loop, capped at
+			// defaultMaxRetries so we never block forever on a real
+			// outage. The iterion runtime layer adds another 6-attempt
+			// network-transient recipe on top of this for true multi-
+			// minute outages (see pkg/runtime/recovery).
 			retryable := true
 			if c.Tracer != nil {
 				c.Tracer.RecordHTTPRequestFailed(attempt, "POST", "/v1/messages", lastErr.Error(), retryable, nil)
@@ -159,7 +173,18 @@ func (c *Client) StreamResponse(ctx context.Context, req CreateMessageRequest) (
 		if !retryable || attempt == defaultMaxRetries {
 			// Enrich 401 errors when sk-ant-* is used as Bearer token.
 			enriched := EnrichBearerAuthError(errMsg, resp.StatusCode, c.Auth)
-			return nil, fmt.Errorf("%s", enriched)
+			// Return a typed APIError so callers' errors.As checks pick
+			// up StatusCode + Retryable instead of having to parse the
+			// free-form message. Without this, iterion's retry
+			// classification falls through to the generic "unknown"
+			// path on every non-retryable upstream failure.
+			return nil, &APIError{
+				Provider:   "anthropic",
+				StatusCode: resp.StatusCode,
+				Message:    enriched,
+				Body:       string(errBody),
+				Retryable:  false,
+			}
 		}
 
 		// Exponential backoff before next attempt.
@@ -169,7 +194,15 @@ func (c *Client) StreamResponse(ctx context.Context, req CreateMessageRequest) (
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		lastErr = fmt.Errorf("%s", errMsg)
+		// Preserve typed retryable shape on the loop carry so the final
+		// "all retries exhausted" return surfaces an APIError too.
+		lastErr = &APIError{
+			Provider:   "anthropic",
+			StatusCode: resp.StatusCode,
+			Message:    errMsg,
+			Body:       string(errBody),
+			Retryable:  true,
+		}
 	}
 
 	ch := make(chan StreamEvent, 64)

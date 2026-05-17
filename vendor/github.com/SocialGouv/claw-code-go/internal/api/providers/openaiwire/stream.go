@@ -68,7 +68,6 @@ func StreamEvents(ctx context.Context, resp *http.Response, ch chan<- api.Stream
 		toolCalls    = make(map[int]*sseutil.ToolCallAccumulator)
 		finishReason string
 		outputTokens int
-		inputTokens  int
 	)
 
 	for scanner.Scan() {
@@ -90,14 +89,11 @@ func StreamEvents(ctx context.Context, resp *http.Response, ch chan<- api.Stream
 		}
 
 		// Capture usage from the final usage chunk (choices will be empty
-		// there). Both prompt and completion tokens are surfaced so
-		// downstream cost accounting can compute total spend; the
-		// prompt-token value is shipped via a supplemental MessageStart
-		// after the stream completes (see below) because UsageDelta on
-		// MessageDelta only carries OutputTokens.
+		// there). Only output tokens are surfaced via UsageDelta; input
+		// tokens travel via the provider's own request bookkeeping and are
+		// intentionally discarded here.
 		if chunk.Usage != nil {
 			outputTokens = chunk.Usage.CompletionTokens
-			inputTokens = chunk.Usage.PromptTokens
 		}
 
 		for _, choice := range chunk.Choices {
@@ -180,28 +176,10 @@ func StreamEvents(ctx context.Context, resp *http.Response, ch chan<- api.Stream
 		stopReason = "tool_use"
 	}
 
-	// Emit a supplemental MessageStart now that we know the prompt
-	// token count from the final usage chunk. aggregateStream reads
-	// InputTokens off MessageStart; this second emission overwrites
-	// the zero we sent at the top. Mirrors the Anthropic SDK shape
-	// where input-token counts arrive in the final usage payload.
-	// Guard each send: if ctx is done now, dropping these silently
-	// would zero out the cost accounting downstream.
-	if inputTokens > 0 {
-		if !send(api.StreamEvent{
-			Type:        api.EventMessageStart,
-			InputTokens: inputTokens,
-		}) {
-			return
-		}
-	}
-
-	if !send(api.StreamEvent{
+	send(api.StreamEvent{
 		Type:       api.EventMessageDelta,
 		StopReason: stopReason,
 		Usage:      api.UsageDelta{OutputTokens: outputTokens},
-	}) {
-		return
-	}
+	})
 	send(api.StreamEvent{Type: api.EventMessageStop})
 }

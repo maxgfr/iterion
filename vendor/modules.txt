@@ -66,7 +66,7 @@ github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/shared
 github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/version
 github.com/AzureAD/microsoft-authentication-library-for-go/apps/managedidentity
 github.com/AzureAD/microsoft-authentication-library-for-go/apps/public
-# github.com/SocialGouv/claw-code-go v0.1.0
+# github.com/SocialGouv/claw-code-go v0.1.0 => ../../.works/claw-code-go
 ## explicit; go 1.25.0
 github.com/SocialGouv/claw-code-go/hooks
 github.com/SocialGouv/claw-code-go/internal/api
@@ -905,6 +905,9 @@ google.golang.org/protobuf/types/known/fieldmaskpb
 google.golang.org/protobuf/types/known/structpb
 google.golang.org/protobuf/types/known/timestamppb
 google.golang.org/protobuf/types/known/wrapperspb
+# gopkg.in/yaml.v3 v3.0.1
+## explicit
+gopkg.in/yaml.v3
 # modernc.org/libc v1.70.0
 ## explicit; go 1.24.0
 modernc.org/libc
@@ -942,3 +945,4 @@ modernc.org/memory
 # modernc.org/sqlite v1.48.0
 ## explicit; go 1.25.0
 modernc.org/sqlite/lib
+# github.com/SocialGouv/claw-code-go => ../../.works/claw-code-go
