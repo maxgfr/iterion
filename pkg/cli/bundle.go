@@ -11,7 +11,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/bundle"
 )
 
-//go:embed templates/bundle_bot.bot
+//go:embed templates/bundle_main.bot
 var bundleStubBotIter []byte
 
 //go:embed templates/bundle_manifest.yaml
@@ -51,7 +51,7 @@ func RunBundleInit(dir string, p *Printer) error {
 		path string
 		body []byte
 	}{
-		{"bot.bot", bundleStubBotIter},
+		{"main.bot", bundleStubBotIter},
 		{"manifest.yaml", bundleStubManifest},
 		{"README.md", bundleStubReadme},
 	}
@@ -104,7 +104,7 @@ func RunBundleInit(dir string, p *Printer) error {
 	}
 	p.Blank()
 	p.Line("  Next steps:")
-	p.Line("    1. Edit bot.bot to match your workflow.")
+	p.Line("    1. Edit main.bot to match your workflow.")
 	p.Line("    2. Drop skills/prompts under skills/ and prompts/ (optional).")
 	p.Line("    3. Build the archive:")
 	p.Line("         iterion bundle pack %s", absDir)
@@ -123,8 +123,7 @@ type BundlePackResult struct {
 
 // RunBundlePack writes a deterministic `.botz` archive from srcDir.
 //
-//   - srcDir must be an existing directory containing `bot.iter`/`bot.bot`
-//     at the root.
+//   - srcDir must be an existing directory containing `main.bot` at the root.
 //   - outPath, when empty, defaults to "<srcDir>.botz" in srcDir's parent.
 //   - force, when true, removes any existing output before packing.
 //

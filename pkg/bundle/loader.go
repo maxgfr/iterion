@@ -10,9 +10,9 @@ import (
 )
 
 // botFileNames is the set of accepted workflow source file names at the
-// bundle root. Both `.iter` and `.bot` are recognised — they have
-// identical semantics (see README).
-var botFileNames = []string{"bot.iter", "bot.bot"}
+// bundle root. The canonical name is `main.bot` (familiar `main.go` /
+// `main.rs` convention, independent of the bundle directory name).
+var botFileNames = []string{"main.bot"}
 
 // Detect classifies path as a plain `.iter`/`.bot` file, a `.botz`
 // archive, or a directory bundle. The classifier reads the extension
@@ -24,13 +24,13 @@ func Detect(path string) (Kind, error) {
 		return KindIter, fmt.Errorf("bundle: stat %s: %w", path, err)
 	}
 	if info.IsDir() {
-		// Directory bundle: look for a `bot.iter`/`bot.bot` at the root.
+		// Directory bundle: look for `main.bot` at the root.
 		for _, name := range botFileNames {
 			if _, err := os.Stat(filepath.Join(path, name)); err == nil {
 				return KindBundleDir, nil
 			}
 		}
-		return KindIter, fmt.Errorf("bundle: %s is a directory but contains no bot.iter at root", path)
+		return KindIter, fmt.Errorf("bundle: %s is a directory but contains no main.bot at root", path)
 	}
 	lower := strings.ToLower(path)
 	if strings.HasSuffix(lower, ".botz") {
@@ -186,7 +186,7 @@ func assembleBundle(dir string) (*Bundle, error) {
 		}
 	}
 	if b.IterPath == "" {
-		return nil, fmt.Errorf("bundle: %s contains no bot.iter or bot.bot at root", dir)
+		return nil, fmt.Errorf("bundle: %s contains no main.bot at root", dir)
 	}
 	if info, err := os.Stat(filepath.Join(dir, "skills")); err == nil && info.IsDir() {
 		b.SkillsDir = filepath.Join(dir, "skills")

@@ -233,7 +233,7 @@ workflow: workflows/triage.bot                  # default fallback
 assignee_workflows:
   vibe_feature_dev:        examples/bots/vibe_feature_dev.bot
   whole_improve_loop: examples/bots/whole_improve_loop.bot
-  secured-renovacy:        examples/secured-renovacy/bot.bot
+  secured-renovacy:        examples/secured-renovacy/main.bot
 ```
 
 Resolution rules at dispatch time:

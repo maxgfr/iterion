@@ -120,7 +120,7 @@ Example `args` payload for a roadmap_item:
 
 ### `secured-renovacy`
 
-- **Path**: `examples/secured-renovacy/bot.bot` (or packed
+- **Path**: `examples/secured-renovacy/main.bot` (or packed
   `examples/secured-renovacy.botz`).
 - **Vars**: `scope: "patch"|"minor"|"patch,minor,major"`,
   `max_packages_per_run`, `major_policy:

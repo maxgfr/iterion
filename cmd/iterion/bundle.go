@@ -10,7 +10,7 @@ var bundleCmd = &cobra.Command{
 	Short: "Create and inspect .botz workflow bundles",
 	Long: `Create and inspect .botz workflow bundles.
 
-A .botz is a tar.gz packaging a workflow (bot.iter) with adjacent
+A .botz is a tar.gz packaging a workflow (main.bot) with adjacent
 resources: skills/, prompts/, attachments/, and an optional
 manifest.yaml. See docs/bundles.md for the format reference.
 

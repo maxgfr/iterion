@@ -4,7 +4,7 @@ A packaged iterion workflow (`.botz` bundle).
 
 ## Layout
 
-- `bot.iter` — the workflow source. Replace with your own.
+- `main.bot` — the workflow source. Replace with your own.
 - `manifest.yaml` — bundle metadata (name, version, schema_version).
 - `skills/` — Claude Code skills shipped with the bundle. Files here
   are mirrored into `<workDir>/.claude/skills/` at run time.

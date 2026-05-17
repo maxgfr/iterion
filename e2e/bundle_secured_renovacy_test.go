@@ -62,7 +62,7 @@ func TestBundle_SecuredRenovacy_PackOpenCompile(t *testing.T) {
 		t.Fatalf("PackDir: %v", err)
 	}
 	if packRes.Entries < 4 {
-		t.Errorf("packed only %d entries, expected at least bot.bot + manifest.yaml + README.md", packRes.Entries)
+		t.Errorf("packed only %d entries, expected at least main.bot + manifest.yaml + README.md", packRes.Entries)
 	}
 
 	kind, err := bundle.Detect(out)

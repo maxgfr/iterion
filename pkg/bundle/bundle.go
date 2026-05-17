@@ -1,5 +1,5 @@
 // Package bundle implements the `.botz` archive format: a tar.gz that
-// packages an iterion workflow (`bot.iter`) with adjacent resources
+// packages an iterion workflow (`main.bot`) with adjacent resources
 // (skills, prompts, default attachments, manifest). A bundle is loaded
 // once per run, extracted into a content-addressed cache directory, and
 // then exposed to the engine as a *Bundle so skills/prompts become
@@ -16,7 +16,7 @@ const (
 	// KindBundle is a `.botz` tar.gz archive.
 	KindBundle
 	// KindBundleDir is a directory whose root already contains a
-	// recognised bundle layout (`bot.iter` or `bot.bot` at the top).
+	// recognised bundle layout (`main.bot` at the top).
 	// Useful for dev workflows that author bundles in-place.
 	KindBundleDir
 )
@@ -46,7 +46,7 @@ type Bundle struct {
 	Manifest *Manifest
 
 	// IterPath is the absolute path of the workflow source file
-	// inside the bundle (`bot.iter` or `bot.bot`, at the bundle root).
+	// inside the bundle (`main.bot`, at the bundle root).
 	IterPath string
 
 	// SkillsDir is `<Dir>/skills` when the directory exists, else "".

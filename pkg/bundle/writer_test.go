@@ -14,7 +14,7 @@ func buildSampleSource(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	files := map[string]string{
-		"bot.iter":          minimalBotIter,
+		"main.bot":          minimalBotIter,
 		"manifest.yaml":     "name: writer-test\nversion: 0.1.0\nschema_version: 1\n",
 		"skills/probe.md":   "# probe\n",
 		"prompts/helper.md": "Helper body.\n",
@@ -105,7 +105,7 @@ func TestPackDir_RefusesMissingBotIter(t *testing.T) {
 	}
 	out := filepath.Join(t.TempDir(), "no-bot.botz")
 	_, err := PackDir(src, out)
-	errContains(t, err, "no bot.iter")
+	errContains(t, err, "no main.bot")
 }
 
 func TestPackDir_RefusesSymlinks(t *testing.T) {

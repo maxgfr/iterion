@@ -70,7 +70,7 @@ prompt gen_skills_system:
      ship in examples/. Inspect these three files in particular:
        - examples/bots/whole_improve_loop.bot
        - examples/bots/vibe_feature_dev.bot
-       - examples/secured-renovacy/bot.bot
+       - examples/secured-renovacy/main.bot
      For each: one-line purpose, key inputs from the workflow vars
      block, the shape of its iterion run invocation, and a "use
      this when …" recommendation rule. This skill is

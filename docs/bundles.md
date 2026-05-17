@@ -2,7 +2,7 @@
 
 # Bundles — `.botz` packaged workflows
 
-A **bundle** is a tar.gz that ships a workflow (`bot.iter`) alongside
+A **bundle** is a tar.gz that ships a workflow (`main.bot`) alongside
 the resources it depends on — Claude Code skills, reusable prompts,
 default attachments, a manifest. The result is a single `.botz` file
 you can email, commit, or drop into S3, and that any `iterion` install
@@ -10,14 +10,14 @@ can run with one command.
 
 ```bash
 iterion bundle init  my-bot         # scaffold
-$EDITOR my-bot/bot.iter             # write your workflow
+$EDITOR my-bot/main.bot             # write your workflow
 iterion bundle pack  my-bot         # → my-bot.botz
 iterion run          my-bot.botz    # run it
 ```
 
 ## Why bundles
 
-A plain `.iter` is one file. As soon as the workflow needs adjacent
+A plain `.bot` is one file. As soon as the workflow needs adjacent
 resources — a project-local Claude Code skill, a reviewer prompt,
 sample input PDFs — those files have to live on every machine the
 workflow runs on. Bundles solve that: everything ships together, with
@@ -33,8 +33,8 @@ workflows (templates, examples, organisation-internal recipes).
 # 1. Scaffold a layout under ./my-bot.
 iterion bundle init my-bot
 
-# 2. Edit bot.iter, drop skills/prompts/attachments as needed.
-$EDITOR my-bot/bot.iter
+# 2. Edit main.bot, drop skills/prompts/attachments as needed.
+$EDITOR my-bot/main.bot
 echo "# my skill" > my-bot/skills/probe.md
 echo "Hello {{vars.topic}}" > my-bot/prompts/helper.md
 
@@ -44,14 +44,14 @@ iterion bundle pack my-bot
 
 # 4. Run it like any workflow file.
 iterion run my-bot.botz
-iterion run my-bot.botz --preset quick    # named preset from bot.iter
+iterion run my-bot.botz --preset quick    # named preset from main.bot
 ```
 
 ## Layout
 
 ```
 my-bot/
-├── bot.iter           # required (or bot.bot — same semantics)
+├── main.bot           # required — the workflow source
 ├── manifest.yaml      # optional
 ├── README.md          # optional, for human readers
 ├── skills/            # optional — Claude Code skills
@@ -64,10 +64,10 @@ my-bot/
 
 | Entry             | Purpose |
 | ----------------- | ------- |
-| `bot.iter`        | The workflow source. Must live at the bundle root. |
+| `main.bot`        | The workflow source. Must live at the bundle root. |
 | `manifest.yaml`   | Bundle metadata (name, version, schema_version, optional `attachments:` map). Optional. |
 | `skills/`         | Claude Code skills. Mirrored into `<workDir>/.claude/skills/` at run time. Workspace files always win on collision (warn-logged). |
-| `prompts/`        | Reusable `.md` prompts. Each file is auto-registered with name equal to the filename stem — `prompts/helper.md` makes `system: helper` resolvable from `bot.iter`. Workflow-declared prompts always win on collision. |
+| `prompts/`        | Reusable `.md` prompts. Each file is auto-registered with name equal to the filename stem — `prompts/helper.md` makes `system: helper` resolvable from `main.bot`. Workflow-declared prompts always win on collision. |
 | `attachments/`    | Default binary inputs the manifest can map to declared `attachments:` entries. Runtime uploads (Launch modal, cloud) override these. |
 
 ## Manifest schema
@@ -122,7 +122,7 @@ locally).
 
 ## Resource resolution at run time
 
-When `iterion run my.botz` (or a `.bot` directory bundle) executes:
+When `iterion run my.botz` (or a directory bundle) executes:
 
 1. **Skills** in `skills/` are copied into `<workDir>/.claude/skills/`
    (workspace files take precedence on name collision — shadowed

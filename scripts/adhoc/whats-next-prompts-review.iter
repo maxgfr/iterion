@@ -1,14 +1,14 @@
 ## ─────────────────────────────────────────────────────────────────
 ## whats-next-prompts-review (ad-hoc, throwaway)
 ##
-## Second dogfood pass. The prompts in examples/whats-next/bot.bot
+## Second dogfood pass. The prompts in examples/whats-next/main.bot
 ## were written by Claude Opus. Three of the four LLM nodes in that
 ## bot run on `claw + openai/gpt-5.5`, so the *consumer* is GPT-5.5
 ## — and the producer (Claude) cannot reliably introspect what the
 ## consumer will misread. Have GPT-5.5 review its own future input.
 ##
 ## Single agent, read-only, structured output. The reviewer must:
-##   - read examples/whats-next/bot.bot
+##   - read examples/whats-next/main.bot
 ##   - evaluate EACH `prompt X:` block
 ##   - report only real, concrete issues (no "could be clearer"
 ##     filler); for each, propose a one-paragraph revision
@@ -23,7 +23,7 @@
 ## ─────────────────────────────────────────────────────────────────
 
 vars:
-  bot_file: string = "examples/whats-next/bot.bot"
+  bot_file: string = "examples/whats-next/main.bot"
 
 schema review_finding:
   prompt_name:        string

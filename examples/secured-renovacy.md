@@ -1,4 +1,4 @@
-# `secured-renovacy/bot.bot` — design notes & observations
+# `secured-renovacy/main.bot` — design notes & observations
 
 A running log of what we learn iterating on this recipe. Append-only when possible; rewrite a section when a previous claim is invalidated by a new experiment.
 
