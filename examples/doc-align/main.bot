@@ -691,6 +691,23 @@ schema update_audit_cache_output:
   entries_written: int
   skipped: string
 
+## enforce_fix_scope I/O (v0.11.0). The fixer DECLARES the files
+## it modified via `fix_output.modified_doc_files`; this tool
+## walks `git diff --name-only` against that declaration and
+## reverts any out-of-declaration change so the fixer can't
+## silently edit files outside its writeable set. Catches the
+## v0.10 dogfood gap where fix_gpt edited the bot's own skill
+## despite scan_docs excluding it via bundle_self_path.
+schema enforce_fix_scope_input:
+  workspace_dir: string
+  declared_paths: string[]
+
+schema enforce_fix_scope_output:
+  reverted_paths: string[]
+  kept_paths: int
+  declared_count: int
+  changed_count: int
+
 
 ## ─── Nodes ──────────────────────────────────────────────────────
 
@@ -960,6 +977,54 @@ tool commit_changes:
   input: commit_tool_input
   output: commit_result
 
+## enforce_fix_scope (v0.11.0): mechanical revert of any fix-stage
+## edit outside the fixer's declared `modified_doc_files` set.
+##
+## Discovered during the v0.10 dogfood: fix_gpt edited
+## `examples/doc-align/skills/doc-verification-checklist.md` —
+## doc-align's own skill — despite scan_docs excluding it via
+## `bundle_self_path`. The fixer's tool access (write_file,
+## file_edit) is filesystem-wide; the skill-level constraint
+## "you may not write outside doc_files" was unenforced.
+##
+## This node closes the gap mechanically: after every fix
+## iteration, walk `git diff --name-only` and `git checkout --`
+## anything that isn't in `input.declared_paths`. The fixer's
+## own declaration is the contract — out-of-declaration edits
+## are reverted before they reach the next reviewer.
+##
+## Emits `reverted_paths[]` for visibility; non-empty in events
+## stream is the signal that the fixer needs prompt-side
+## reinforcement (or the agent occasionally over-reaches).
+tool enforce_fix_scope:
+  command: `python3 -c "
+import os, json, subprocess, sys
+ws = sys.argv[1]
+declared = set(sys.argv[2:])
+os.chdir(ws)
+try:
+    proc = subprocess.run(['git', 'diff', '--name-only'], capture_output=True, text=True, check=True)
+    changed = set(l for l in proc.stdout.splitlines() if l)
+except Exception:
+    changed = set()
+out_of_scope = sorted(changed - declared)
+reverted = []
+for path in out_of_scope:
+    try:
+        subprocess.run(['git', 'checkout', '--', path], check=True, capture_output=True)
+        reverted.append(path)
+    except subprocess.CalledProcessError:
+        pass
+print(json.dumps({
+    'reverted_paths': reverted,
+    'kept_paths': len(changed) - len(reverted),
+    'declared_count': len(declared),
+    'changed_count': len(changed),
+}))
+" {{input.workspace_dir}} {{input.declared_paths}}`
+  input: enforce_fix_scope_input
+  output: enforce_fix_scope_output
+
 ## update_audit_cache (v0.5.0): rewrites
 ## `<workspace_dir>/<audit_cache_path>` from the run's cumulative
 ## audited_pairs. Each pair `"<doc>::<anchor>"` contributes a
@@ -1155,8 +1220,19 @@ workflow doc_align:
     _session_id: "{{outputs.reviewer_gpt._session_id}}"
   }
 
-  fix_claude -> alt as recovery_loop(20)
-  fix_gpt    -> alt as recovery_loop(20)
+  ## v0.11.0: interpose enforce_fix_scope between fix_* and alt
+  ## so out-of-declaration edits are reverted before the next
+  ## reviewer sees them. The loop counter follows the inbound
+  ## edge — recovery_loop still bounds total fix attempts at 20.
+  fix_claude -> enforce_fix_scope as recovery_loop(20) with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    declared_paths: "{{outputs.fix_claude.modified_doc_files}}"
+  }
+  fix_gpt -> enforce_fix_scope as recovery_loop(20) with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    declared_paths: "{{outputs.fix_gpt.modified_doc_files}}"
+  }
+  enforce_fix_scope -> alt
 
   ## Loop-exhaustion fallthroughs (update_audit_cache has its
   ## unconditional `→ done` declared in the main commit path).
