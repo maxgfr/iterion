@@ -1,8 +1,21 @@
-# doc-align (v0.3.0)
+# doc-align (v0.4.0)
 
 A dogfood-friendly iterion bot that detects mismatches between
 project documentation and actual code state, then fixes the
 **documentation** (never the code) and auto-commits on convergence.
+
+**v0.4.0 changes** (anchor_kind tightening):
+- `doc-mismatch-taxonomy.md` now carries a STRICT consistency table
+  between `anchor_kind` and `code_anchor` shape. A blocker with
+  `anchor_kind: symbol` but `code_anchor: "<no longer exists>"`
+  is now defined as an inconsistency the fixer pushes back on.
+- New `STEP 4b — Anchor consistency self-check` in the reviewer
+  checklist; new `Rule 6` in the fixer's anti-façade rules.
+- iterion's expr can't validate the json-typed `blockers` field
+  mechanically (no JSON parsing in expressions), so the gate is
+  prompt-and-skill discipline, ratified through cross-family
+  alternation. A future iterion compute primitive could move
+  this check into a deterministic node.
 
 **v0.3.0 changes** (lessons from the v0.2.0 dogfood deadlock):
 - Streak gate now treats `blocker_count == 0` as effective

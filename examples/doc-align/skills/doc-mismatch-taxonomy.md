@@ -69,6 +69,30 @@ Hallucinating a kind outside the enum fails schema validation and
 triggers iterion's parse_fallback retry path — pick from the
 four values above.
 
+## Consistency contract (v0.4.0 — STRICT)
+
+The combination `(anchor_kind, code_anchor)` must be self-consistent.
+Mismatches make the G3 round-trip impossible (a `symbol` kind with
+a `<no longer exists>` anchor cannot be re-grepped; an `external`
+kind with a `:42` line marker hides whether the anchor is a doc
+path or a code citation). Self-check each blocker before submitting:
+
+| If `anchor_kind` is… | `code_anchor` MUST… | …and MUST NOT |
+|---|---|---|
+| `symbol` | Contain `<path>:<identifier>` with a non-empty identifier (a Go/TS/Python/Rust name, `func X`, `type X`, `const X`, etc.) | Be `<no longer exists>` or contain only a line marker |
+| `line_range` | End with `:N` or `:N-M` where N, M are positive integers | Be `<no longer exists>` (use `removed` instead) |
+| `removed` | Mention removal (`<no longer exists>`, "removed in commit X", "deleted at version Y") | Cite a current-resolving symbol or line — that's `symbol` or `line_range` |
+| `external` | Be a filesystem path or URL that does NOT reference code | Contain `:N` or `:N-M` line markers (the doc/path doesn't have line semantics) |
+
+If you find yourself wanting a fifth kind, pick the closest existing
+one and put precision into `code_anchor` itself. The enum is
+deliberately locked.
+
+**Fixer-side enforcement**: per `anti-facade-fix-rules.md`, a fixer
+that receives a blocker with an inconsistent `(anchor_kind,
+code_anchor)` pair pushes it back rather than guessing the
+reviewer's intent.
+
 ## Output shape (reminder)
 
 Every blocker in `verdict_output.blockers[]` must include:
