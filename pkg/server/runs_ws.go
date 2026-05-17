@@ -862,10 +862,21 @@ func (c *runConn) sendEnvelope(t string, payload interface{}, ackID string) bool
 		c.server.logger.Error("ws marshal envelope: %v", err)
 		return true
 	}
+	// Drop-on-full to avoid pinning the broker goroutine on a slow
+	// (frozen browser tab, throttled connection) client. The blocking
+	// send would otherwise hold up to writeWait per stalled write
+	// before the write deadline fires — fine for one client, but
+	// accumulates badly under many parked tabs. The SPA's reconnect
+	// path re-anchors the run so a closed connection here is not data
+	// loss for the user.
 	select {
 	case c.sendCh <- data:
 		return true
 	case <-c.closed:
+		return false
+	default:
+		c.server.logger.Warn("ws: send buffer full for run %s — closing slow consumer", c.runID)
+		c.close()
 		return false
 	}
 }
