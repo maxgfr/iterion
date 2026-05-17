@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/SocialGouv/iterion/pkg/dsl/expr"
 )
 
 // ---------------------------------------------------------------------------
@@ -26,10 +28,10 @@ const (
 	DiagLLMRouterTooFewEdges    DiagCode = "C021" // llm router with fewer than 2 outgoing edges
 	DiagLLMRouterConditionEdge  DiagCode = "C022" // llm router edge has a 'when' condition
 	DiagRouterLLMOnlyProperty   DiagCode = "C023" // LLM-only property on non-llm router
-	DiagInvalidReasoningEffort  DiagCode = "C024" // invalid reasoning_effort value
+	DiagInvalidReasoningEffort  DiagCode = "C027" // invalid reasoning_effort value (was C024, clashed with DiagDuplicateMCPServer)
 	DiagInvalidLoopIterations   DiagCode = "C026" // loop max_iterations must be >= 1
 	DiagDuplicateWithKey        DiagCode = "C028" // duplicate with-mapping key across edges to same target
-	DiagUnknownRefNode          DiagCode = "C030" // outputs ref to non-existent node
+	DiagUnknownRefNode          DiagCode = "C029" // outputs ref to non-existent node (was C030, clashed with DiagCodexDiscouraged)
 	DiagRefFieldNotInSchema     DiagCode = "C031" // outputs ref field not in output schema
 	DiagRefNodeNoSchema         DiagCode = "C032" // outputs ref field on node without output schema
 	DiagUndeclaredVar           DiagCode = "C033" // vars ref to undeclared variable
@@ -563,40 +565,56 @@ func (c *compiler) checkAmbiguousConditions(nodeID string, edges []*Edge) {
 
 func (c *compiler) validateConditionFields(w *Workflow) {
 	for _, e := range w.Edges {
-		if e.Condition == "" {
-			continue
-		}
-
 		src, ok := w.Nodes[e.From]
 		if !ok {
 			continue
 		}
-
-		// Only validate if the source node has an output schema.
 		outSchema := NodeOutputSchema(src)
-		if outSchema == "" {
-			continue
-		}
+		schema, _ := w.Schemas[outSchema]
 
-		schema, ok := w.Schemas[outSchema]
-		if !ok {
-			continue // already reported by C002
-		}
+		switch {
+		case e.Condition != "":
+			if outSchema == "" || schema == nil {
+				continue
+			}
+			field := findField(schema, e.Condition)
+			if field == nil {
+				c.errorfAt(DiagConditionFieldNotFound, e.From, edgeID(e.From, e.To),
+					"edge %s -> %s: condition field %q not found in output schema %q of node %q",
+					e.From, e.To, e.Condition, outSchema, e.From)
+				continue
+			}
+			if field.Type != FieldTypeBool {
+				c.errorfAt(DiagConditionNotBool, e.From, edgeID(e.From, e.To),
+					"edge %s -> %s: condition field %q is %s, not bool, in output schema %q",
+					e.From, e.To, e.Condition, field.Type, outSchema)
+			}
 
-		// Find the field in the schema.
-		field := findField(schema, e.Condition)
-		if field == nil {
-			c.errorfAt(DiagConditionFieldNotFound, e.From, edgeID(e.From, e.To),
-				"edge %s -> %s: condition field %q not found in output schema %q of node %q",
-				e.From, e.To, e.Condition, outSchema, e.From)
-			continue
-		}
-
-		// C013: field must be boolean.
-		if field.Type != FieldTypeBool {
-			c.errorfAt(DiagConditionNotBool, e.From, edgeID(e.From, e.To),
-				"edge %s -> %s: condition field %q is %s, not bool, in output schema %q",
-				e.From, e.To, e.Condition, field.Type, outSchema)
+		case e.Expression != nil:
+			// Expression form (`when "expr"`). Walk every
+			// outputs.<source>.<field> reference and check the
+			// field exists on the source node's schema. Other
+			// namespaces (vars, input, attachments) are checked
+			// by validateTemplateRefs via collectAllRefs.
+			if outSchema == "" || schema == nil {
+				continue
+			}
+			for _, r := range e.Expression.Refs() {
+				if r.Namespace != "outputs" {
+					continue
+				}
+				// Path is [<node>, <field>, ...]. Only validate the field
+				// when the reference targets the source node itself —
+				// cross-node refs are validated elsewhere.
+				if len(r.Path) < 2 || r.Path[0] != e.From {
+					continue
+				}
+				if findField(schema, r.Path[1]) == nil {
+					c.errorfAt(DiagConditionFieldNotFound, e.From, edgeID(e.From, e.To),
+						"edge %s -> %s: expression references field %q not found in output schema %q of node %q",
+						e.From, e.To, r.Path[1], outSchema, e.From)
+				}
+			}
 		}
 	}
 }
@@ -774,10 +792,6 @@ func (c *compiler) validateHistoryRefs(w *Workflow) {
 // loop on any of their edges. Such cycles would cause infinite execution
 // if no budget is set.
 func (c *compiler) validateUndeclaredCycles(w *Workflow) {
-	if w.Entry == "" {
-		return
-	}
-
 	// Build set of nodes that participate in a declared loop.
 	// A cycle is considered bounded if ANY edge in the cycle carries a
 	// LoopName — the runtime enforces max_iterations on that edge.
@@ -823,7 +837,20 @@ func (c *compiler) validateUndeclaredCycles(w *Workflow) {
 		color[node] = black
 	}
 
-	dfs(w.Entry)
+	// Walk from Entry first (preserves prior visit order so the same
+	// graph still emits the same diagnostic for the same back-edge),
+	// then sweep over every other node so cycles in components that
+	// aren't directly reachable from Entry are also detected. The
+	// reachability check (C016) handles "cycle in unreachable region"
+	// separately — both diagnostics may now fire on the same workflow.
+	if w.Entry != "" {
+		dfs(w.Entry)
+	}
+	for n := range adj {
+		if color[n] == white {
+			dfs(n)
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1063,7 +1090,10 @@ func collectAllRefs(w *Workflow) []refContext {
 		}
 	}
 
-	// Tool node command refs.
+	// Tool node command + script refs. ScriptRefs used to be skipped,
+	// so {{outputs.X.history}} inside a tool's script never went
+	// through C030–C036 validation — typos were caught only at
+	// runtime, after the script had already started executing.
 	for _, n := range w.Nodes {
 		if t, ok := n.(*ToolNode); ok {
 			for _, ref := range t.CommandRefs {
@@ -1073,10 +1103,77 @@ func collectAllRefs(w *Workflow) []refContext {
 					Location: fmt.Sprintf("tool node %q command", t.ID),
 				})
 			}
+			for _, ref := range t.ScriptRefs {
+				out = append(out, refContext{
+					Ref:      ref,
+					NodeID:   t.ID,
+					Location: fmt.Sprintf("tool node %q script", t.ID),
+				})
+			}
+		}
+	}
+
+	// Compute node expressions. Each ComputeExpr.AST exposes its
+	// vars/input/outputs/... references — convert them to ir.Ref
+	// shape and feed them into the same C030–C036 pipeline so a
+	// typo'd `outputs.unknown.field` in a compute expression is
+	// caught at compile time instead of at first evaluation.
+	for _, n := range w.Nodes {
+		cn, ok := n.(*ComputeNode)
+		if !ok {
+			continue
+		}
+		for _, e := range cn.Exprs {
+			if e.AST == nil {
+				continue
+			}
+			for _, r := range e.AST.Refs() {
+				ref := refFromExpr(r)
+				if ref == nil {
+					continue
+				}
+				out = append(out, refContext{
+					Ref:      ref,
+					NodeID:   cn.ID,
+					Location: fmt.Sprintf("compute node %q expr %q", cn.ID, e.Key),
+				})
+			}
 		}
 	}
 
 	return out
+}
+
+// refFromExpr converts an [expr.Ref] (namespace + path) to an [ir.Ref]
+// so the shared template-ref validator can check compute-node refs
+// alongside prompt / edge / tool refs. Returns nil when the namespace
+// isn't one of the kinds the template validator handles (e.g. `loop`,
+// `run` — both legitimate but consumed by separate validators).
+func refFromExpr(r expr.Ref) *Ref {
+	var kind RefKind
+	switch r.Namespace {
+	case "vars":
+		kind = RefVars
+	case "input":
+		kind = RefInput
+	case "outputs":
+		kind = RefOutputs
+	case "artifacts":
+		kind = RefArtifacts
+	case "attachments":
+		kind = RefAttachments
+	default:
+		return nil
+	}
+	raw := r.Namespace
+	for _, p := range r.Path {
+		raw += "." + p
+	}
+	return &Ref{
+		Kind: kind,
+		Path: append([]string(nil), r.Path...),
+		Raw:  "{{" + raw + "}}",
+	}
 }
 
 // nodePromptRefs delegates to the exported NodePromptRefs in ir.go.

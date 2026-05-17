@@ -1955,8 +1955,20 @@ func resolveScriptTemplate(script string, refs []*ir.Ref, input map[string]inter
 // dispatch to rawTemplateValue (bang form) or the renderer the caller
 // provided (default form). Keeps shell- and script-mode template logic
 // in one place.
+//
+// Substitution is single-pass over the original template: we build a
+// map[ref.Raw]rendered and then scan the template once, replacing
+// each {{...}} occurrence by its rendered value. The previous
+// strings.ReplaceAll loop fed each substitution's output back into
+// subsequent passes, so an input value that happened to contain a
+// {{...}} literal matching a later ref would be silently rewritten
+// (the "cascade" bug). The single-pass walk only touches positions
+// that were in the source template.
 func resolveTemplateWith(template string, refs []*ir.Ref, input map[string]interface{}, vars map[string]interface{}, defaultRender func(interface{}) string, substituteNil bool) string {
-	resolved := template
+	if len(refs) == 0 {
+		return template
+	}
+	subs := make(map[string]string, len(refs))
 	for _, ref := range refs {
 		var val interface{}
 		var handled bool
@@ -1968,8 +1980,6 @@ func resolveTemplateWith(template string, refs []*ir.Ref, input map[string]inter
 			val = vars[ref.Path[0]]
 			handled = true
 		}
-		// Skip refs we don't resolve here (e.g. outputs.* refs handled
-		// upstream by the edge-binding renderer).
 		if !handled {
 			continue
 		}
@@ -1982,15 +1992,38 @@ func resolveTemplateWith(template string, refs []*ir.Ref, input map[string]inter
 		if val == nil && !substituteNil {
 			continue
 		}
-		var rendered string
 		if ref.Unquoted {
-			rendered = rawTemplateValue(val)
+			subs[ref.Raw] = rawTemplateValue(val)
 		} else {
-			rendered = defaultRender(val)
+			subs[ref.Raw] = defaultRender(val)
 		}
-		resolved = strings.ReplaceAll(resolved, ref.Raw, rendered)
 	}
-	return resolved
+	if len(subs) == 0 {
+		return template
+	}
+	var b strings.Builder
+	b.Grow(len(template))
+	i := 0
+	for i < len(template) {
+		if i+1 < len(template) && template[i] == '{' && template[i+1] == '{' {
+			end := strings.Index(template[i:], "}}")
+			if end == -1 {
+				b.WriteString(template[i:])
+				return b.String()
+			}
+			raw := template[i : i+end+2]
+			if rendered, ok := subs[raw]; ok {
+				b.WriteString(rendered)
+			} else {
+				b.WriteString(raw)
+			}
+			i += end + 2
+			continue
+		}
+		b.WriteByte(template[i])
+		i++
+	}
+	return b.String()
 }
 
 // jsonLiteralValue renders val as a valid JSON literal suitable for

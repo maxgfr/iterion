@@ -2284,7 +2284,7 @@ agent discover_outdated:
 ## like `{list: [...]}`) into a uniform survivor list, then applies
 ## the policy.
 ##
-## Inputs flow as raw JSON via `{{!input.X}}` substitution into JS
+## Inputs flow as raw JSON via the bang-form !input.X template substitution into JS
 ## object/array literals — JSON is a strict subset of JS literal
 ## syntax, so the substituted text parses verbatim, no jq/shell
 ## escape juggling. The standalone source-of-truth lives at
@@ -2696,8 +2696,9 @@ tool prepare_commit:
   script: |
     const { execSync } = require("child_process");
 
-    // No-bang form `{{input.X}}` renders as a JSON literal — strings
-    // arrive properly quoted (and escaped) for JS. The bang form is
+    // No-bang form `input.X` (with the double-brace template wrapper)
+    // renders as a JSON literal — strings arrive properly quoted
+    // (and escaped) for JS. The bang form is
     // raw passthrough and would emit `4.18.1` instead of `"4.18.1"`,
     // crashing the parser. Booleans, numbers, objects and arrays are
     // valid JS literals under JSON encoding too, so the no-bang form
@@ -2912,7 +2913,7 @@ printf '{"success":true,"output":"reverted + reinstalled"}\n'
 ## mark_failed_and_continue is a deterministic passthrough — it just
 ## relays the package name + reason for the next select_candidate
 ## iteration to bookkeep. Implemented as `compute` instead of a
-## shell `echo` to avoid any quoting risk on the {{input.X}} values.
+## shell `echo` to avoid any quoting risk on the input.X values.
 compute mark_failed_and_continue:
   output: mark_failed_result
   expr:
@@ -3068,10 +3069,13 @@ tool write_audit_md:
   script: |
     const fs = require("fs");
     const path = require("path");
-    // {{input.X}} now substitutes as a valid JS literal regardless of
-    // type (iterion's script template renderer JSON-encodes everything).
-    // Strings → "foo"; maps → {"k":"v"}; arrays → [...]. No wrappers
-    // needed; the JS lexer reads the substituted text directly.
+    // input.X placeholders below substitute as valid JS literals
+    // regardless of type (iterion's script template renderer
+    // JSON-encodes everything). Strings to "foo"; maps to {"k":"v"};
+    // arrays to [...]. No wrappers needed; the JS lexer reads the
+    // substituted text directly. (We avoid writing the double-brace
+    // form inline so the IR script-ref validator doesn't mistake the
+    // comment for a real ref.)
     const wd = {{input.workspace_dir}};
     const pkg = {{input.package_name}};
     const from = {{input.current_version}};
@@ -3382,12 +3386,13 @@ tool resolve_pkg_ecosystem:
   language: js
   script: |
     // Convention (see prepare_commit at line 2644): no-bang form
-    // `{{input.X}}` emits a JSON literal — strings arrive properly
-    // quoted AND escaped, so values containing backticks, double
+    // `input.X` (in iterion's template syntax) emits a JSON literal —
+    // strings arrive properly quoted AND escaped, so values
+    // containing backticks, double
     // quotes, newlines, or backslashes (e.g. detect_stack.notes
     // describing yarn-berry vendored releases) round-trip safely.
     // No surrounding quotes — iterion's encoding includes them.
-    // Bang form `{{!input.X}}` is raw passthrough; only correct for
+    // Bang form !input.X (in iterion's template syntax) is raw passthrough; only correct for
     // values that already happen to be valid JS literals (numeric,
     // bare-word ecosystem ids, etc.) — fragile, avoid.
     const ecosystems = {{input.ecosystems}};

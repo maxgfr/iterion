@@ -3,6 +3,7 @@ package ir
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -38,6 +39,7 @@ const (
 	DiagReservedNodeName      DiagCode = "C042" // user node uses reserved name (done/fail)
 	DiagInvalidSandboxMode    DiagCode = "C044" // sandbox mode value is not one of "", none, auto
 	DiagSandboxAutoNoConfig   DiagCode = "C045" // sandbox: auto requested but no .devcontainer/devcontainer.json found
+	DiagBudgetCostInvalid     DiagCode = "C046" // budget.max_cost_usd negative, NaN or Inf
 )
 
 // codexBackendName is the literal value of the discouraged backend.
@@ -560,7 +562,19 @@ func (c *compiler) validateMCPServer(s *MCPServer) {
 // ---------------------------------------------------------------------------
 
 func (c *compiler) compileSchemas() {
+	seen := make(map[string]bool, len(c.file.Schemas))
 	for _, s := range c.file.Schemas {
+		if seen[s.Name] {
+			// Without this check a second `schema foo:` silently
+			// overwrote the first in c.schemas — every downstream
+			// validation then only saw the survivor, so an attacker
+			// could slip an unaudited schema past a review pipeline
+			// that inspected only the first occurrence.
+			c.errorf(DiagDuplicateNodeID,
+				"duplicate schema name %q: schemas must be unique within a file", s.Name)
+			continue
+		}
+		seen[s.Name] = true
 		fields := make([]*SchemaField, len(s.Fields))
 		for i, f := range s.Fields {
 			fields[i] = &SchemaField{
@@ -621,7 +635,17 @@ func (c *compiler) canAutoResolveBackend() bool {
 // ---------------------------------------------------------------------------
 
 func (c *compiler) compilePrompts() {
+	seen := make(map[string]bool, len(c.file.Prompts))
 	for _, p := range c.file.Prompts {
+		if seen[p.Name] {
+			// Mirror compileSchemas: a second `prompt foo:` used to
+			// silently overwrite the first in c.prompts, leaving the
+			// audit-relevant earlier body invisible.
+			c.errorf(DiagDuplicateNodeID,
+				"duplicate prompt name %q: prompts must be unique within a file", p.Name)
+			continue
+		}
+		seen[p.Name] = true
 		refs, err := ParseRefs(p.Body)
 		if err != nil {
 			c.errorf(DiagBadTemplateRef, "prompt %q: %v", p.Name, err)
@@ -1296,10 +1320,21 @@ func isValidMIME(m string) bool {
 // ---------------------------------------------------------------------------
 
 func (c *compiler) compileBudget(b *ast.BudgetBlock) *Budget {
+	cost := b.MaxCostUSD
+	if cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
+		// Negative / NaN / Inf cost caps would silently disable the
+		// budget enforcer (it compares against the running tally and
+		// the comparison degenerates). Treat them as misconfiguration
+		// and clamp to 0 (= "no cap") with an explicit diagnostic so
+		// the operator notices.
+		c.errorf(DiagBudgetCostInvalid,
+			"workflow.budget.max_cost_usd %v is not a finite non-negative number; treating as unset", cost)
+		cost = 0
+	}
 	return &Budget{
 		MaxParallelBranches: b.MaxParallelBranches,
 		MaxDuration:         b.MaxDuration,
-		MaxCostUSD:          b.MaxCostUSD,
+		MaxCostUSD:          cost,
 		MaxTokens:           b.MaxTokens,
 		MaxIterations:       b.MaxIterations,
 	}

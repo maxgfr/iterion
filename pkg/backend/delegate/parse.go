@@ -100,6 +100,15 @@ func validateWorkDir(workDir, baseDir string) error {
 // extractJSONFromMarkdown extracts the last JSON object from markdown code blocks.
 // It looks for ```json ... ``` or ``` ... ``` blocks and returns the last one
 // that contains valid JSON.
+//
+// The block scanner treats the opening fence as `\`\`\`<lang?>\n` — i.e. the
+// language tag, if present, runs from the fence to the first newline and
+// is dropped. A fenced block missing the newline (`\`\`\`json{...}\`\`\``)
+// or with no language tag (`\`\`\`{...}\`\`\``) is recognised: the body
+// is whatever sits between the opening and the next `\`\`\`` after the
+// language line is consumed. Previously, the language-tag skip pinned
+// to an unconditional IndexByte('\n') and a one-line fenced block
+// silently lost its body to the outer loop's advance.
 func extractJSONFromMarkdown(text string) string {
 	const fence = "```"
 	result := ""
@@ -108,18 +117,21 @@ func extractJSONFromMarkdown(text string) string {
 		if start == -1 {
 			break
 		}
-		// Skip the opening fence and optional language tag.
 		inner := text[start+len(fence):]
-		// Skip language tag (e.g., "json").
+		// A leading "{" means there was no language tag and no newline;
+		// jump straight to the body. Otherwise advance past the language
+		// tag if a newline appears before the closing fence.
 		if nl := strings.IndexByte(inner, '\n'); nl != -1 {
-			inner = inner[nl+1:]
+			fenceIdx := strings.Index(inner, fence)
+			if fenceIdx == -1 || nl < fenceIdx {
+				inner = inner[nl+1:]
+			}
 		}
 		end := strings.Index(inner, fence)
 		if end == -1 {
 			break
 		}
 		block := strings.TrimSpace(inner[:end])
-		// Check if it looks like a JSON object.
 		if len(block) > 0 && block[0] == '{' {
 			result = block
 		}

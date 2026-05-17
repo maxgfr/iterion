@@ -75,14 +75,23 @@ func (p *parser) skipNewlines() {
 }
 
 // skipToNextTopLevel skips tokens until we reach something that looks like a top-level declaration.
+//
+// The list must stay in sync with parseFile's dispatch table — any
+// top-level keyword missing here gets silently consumed by skip after
+// an error in an earlier block, masking the user's actual code.
+// Previously TokenPresets and TokenAttachments were missing, so an
+// error in `vars:` followed by `presets:` / `attachments:` produced
+// "vanished" declarations and confusing downstream diagnostics.
 func (p *parser) skipToNextTopLevel() {
 	for {
 		t := p.peek()
 		switch t.Type {
 		case TokenEOF:
 			return
-		case TokenVars, TokenMCPServer, TokenPrompt, TokenSchema, TokenAgent, TokenJudge,
-			TokenRouter, TokenHuman, TokenTool, TokenCompute, TokenWorkflow:
+		case TokenVars, TokenPresets, TokenAttachments,
+			TokenMCPServer, TokenPrompt, TokenSchema,
+			TokenAgent, TokenJudge, TokenRouter, TokenHuman,
+			TokenTool, TokenCompute, TokenWorkflow:
 			return
 		case TokenDedent:
 			p.next()
@@ -171,8 +180,14 @@ func (p *parser) parseFile() *ast.File {
 			if pd != nil {
 				if ast.ReservedTargets[pd.Name] {
 					p.addError(DiagReservedName, t, "cannot use reserved name '"+pd.Name+"' as prompt name")
+					// Drop the reserved-name decl rather than appending
+					// it: downstream consumers iterating f.Prompts (the
+					// JSON marshaller, the unparse path) used to surface
+					// a phantom `prompt done:` entry alongside the
+					// diagnostic.
+				} else {
+					f.Prompts = append(f.Prompts, pd)
 				}
-				f.Prompts = append(f.Prompts, pd)
 			}
 
 		case TokenSchema:
@@ -180,8 +195,9 @@ func (p *parser) parseFile() *ast.File {
 			if sd != nil {
 				if ast.ReservedTargets[sd.Name] {
 					p.addError(DiagReservedName, t, "cannot use reserved name '"+sd.Name+"' as schema name")
+				} else {
+					f.Schemas = append(f.Schemas, sd)
 				}
-				f.Schemas = append(f.Schemas, sd)
 			}
 
 		case TokenAgent:
@@ -189,8 +205,9 @@ func (p *parser) parseFile() *ast.File {
 			if ad != nil {
 				if ast.ReservedTargets[ad.Name] {
 					p.addError(DiagReservedName, t, "cannot use reserved name '"+ad.Name+"' as agent name")
+				} else {
+					f.Agents = append(f.Agents, ad)
 				}
-				f.Agents = append(f.Agents, ad)
 			}
 
 		case TokenJudge:
@@ -198,8 +215,9 @@ func (p *parser) parseFile() *ast.File {
 			if jd != nil {
 				if ast.ReservedTargets[jd.Name] {
 					p.addError(DiagReservedName, t, "cannot use reserved name '"+jd.Name+"' as judge name")
+				} else {
+					f.Judges = append(f.Judges, jd)
 				}
-				f.Judges = append(f.Judges, jd)
 			}
 
 		case TokenRouter:
@@ -225,8 +243,9 @@ func (p *parser) parseFile() *ast.File {
 			if cd != nil {
 				if ast.ReservedTargets[cd.Name] {
 					p.addError(DiagReservedName, t, "cannot use reserved name '"+cd.Name+"' as compute name")
+				} else {
+					f.Computes = append(f.Computes, cd)
 				}
-				f.Computes = append(f.Computes, cd)
 			}
 
 		case TokenWorkflow:
@@ -238,6 +257,16 @@ func (p *parser) parseFile() *ast.File {
 		case TokenDedent:
 			// Stray dedent at top level — skip
 			p.next()
+
+		case TokenError:
+			// The lexer packs its diagnostic message into t.Value (e.g.
+			// "source file exceeds maximum size", "maximum nesting depth
+			// exceeded"). Surface it directly instead of wrapping it as
+			// an opaque "unexpected token 'X' at top level" — that
+			// previously hid the actual cause from the operator.
+			p.addError(DiagUnexpectedToken, t, t.Value)
+			p.next()
+			p.skipToNextTopLevel()
 
 		default:
 			p.addError(DiagUnexpectedToken, t, "unexpected token '"+t.Value+"' at top level")
@@ -2366,15 +2395,22 @@ func tokenAsIdent(t Token) string {
 
 func isKeywordToken(tt TokenType) bool {
 	switch tt {
-	case TokenVars, TokenMCPServer, TokenPrompt, TokenSchema, TokenAgent, TokenJudge,
+	case TokenVars, TokenPresets, TokenMCPServer, TokenPrompt, TokenSchema, TokenAgent, TokenJudge,
 		TokenRouter, TokenHuman, TokenTool, TokenCompute, TokenWorkflow,
+		TokenJoin,
 		TokenEntry, TokenMCP, TokenBudget, TokenTransport, TokenServers,
 		TokenDisable, TokenAutoloadProject, TokenModel, TokenInput, TokenOutput,
 		TokenPublish, TokenSystem, TokenUser, TokenSession, TokenTools, TokenToolPolicy,
 		TokenCapabilities, TokenToolMaxSteps, TokenReasoningEffort, TokenMode, TokenStrategy, TokenRequire,
-		TokenInstructions, TokenCommand, TokenArgs, TokenURL, TokenBackend, TokenProvider, TokenAwait, TokenWhen, TokenNot, TokenAs,
+		TokenInstructions, TokenCommand, TokenScript, TokenLanguage, TokenArgs, TokenURL,
+		TokenAuth, TokenReadonly,
+		TokenDefaultBackend,
+		TokenInteraction, TokenInteractionPrompt, TokenInteractionModel,
+		TokenBackend, TokenProvider, TokenAwait, TokenWhen, TokenNot, TokenAs,
 		TokenWith, TokenEnum, TokenFresh, TokenInherit, TokenArtifactsOnly,
-		TokenFanOutAll, TokenCondition, TokenWaitAll, TokenBestEffort,
+		TokenFork,
+		TokenFanOutAll, TokenCondition, TokenRoundRobin, TokenLLM, TokenMulti,
+		TokenWaitAll, TokenBestEffort,
 		TokenTrue, TokenFalse,
 		TokenTypeString, TokenTypeBool, TokenTypeInt, TokenTypeFloat,
 		TokenTypeJSON, TokenTypeStringArray,

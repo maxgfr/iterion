@@ -34,13 +34,18 @@ func RunDiagram(opts DiagramOptions, p *Printer) error {
 
 	var view ir.MermaidView
 	switch opts.View {
+	case "", "compact":
+		view = ir.MermaidCompact
+		opts.View = "compact"
 	case "detailed":
 		view = ir.MermaidDetailed
 	case "full":
 		view = ir.MermaidFull
 	default:
-		view = ir.MermaidCompact
-		opts.View = "compact"
+		// Refuse unknown values rather than silently coercing to
+		// compact: the previous behaviour ignored typos like
+		// --view detaild and gave the operator no signal.
+		return fmt.Errorf("invalid --view %q: expected one of compact, detailed, full", opts.View)
 	}
 
 	mermaid := wf.ToMermaid(view)
