@@ -80,6 +80,7 @@ func (c *compiler) validate(w *Workflow) {
 	c.validateMCPAuth(w)
 	c.validateCompaction(w)
 	c.validatePlaywrightMCP(w)
+	c.validateCapabilities(w)
 }
 
 // validatePlaywrightMCP checks that any declared MCP server which

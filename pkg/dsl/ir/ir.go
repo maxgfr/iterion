@@ -32,6 +32,7 @@ type Workflow struct {
 	MCP            *MCPConfig             // workflow-level MCP activation/filtering
 	DefaultBackend string                 // workflow-level default backend (empty = not set)
 	ToolPolicy     []string               // workflow-level tool policy patterns (nil = open)
+	Capabilities   []string               // workflow-level default host capabilities (nil = inherit none)
 	Interaction    *InteractionMode       // workflow-level default interaction mode (nil = not set)
 	Worktree       string                 // "auto" runs in a per-run git worktree; "" or "none" runs in-place
 	Sandbox        *SandboxSpec           // workflow-level sandbox spec (nil = inherit global / no sandbox)
@@ -144,6 +145,7 @@ type AgentNode struct {
 	Session          SessionMode
 	Tools            []string // tool capability names
 	ToolPolicy       []string // per-node tool policy patterns (nil = inherit workflow)
+	Capabilities     []string // host-side capabilities (e.g. board.create); nil = inherit workflow
 	ToolMaxSteps     int      // max tool-use iterations (0 = not set)
 	AwaitMode        AwaitMode
 	Compaction       *Compaction  // per-node compaction overrides (nil = inherit workflow)
@@ -165,6 +167,7 @@ type JudgeNode struct {
 	Session          SessionMode
 	Tools            []string
 	ToolPolicy       []string // per-node tool policy patterns (nil = inherit workflow)
+	Capabilities     []string // host-side capabilities (e.g. board.read); nil = inherit workflow
 	ToolMaxSteps     int
 	AwaitMode        AwaitMode
 	Compaction       *Compaction  // per-node compaction overrides (nil = inherit workflow)

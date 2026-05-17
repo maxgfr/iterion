@@ -275,6 +275,35 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (Result, err
 		}
 	}
 
+	// Board MCP wiring. When the node was granted any board.* capability,
+	// register the internal __mcp-board server so the bot can mutate the
+	// kanban from inside its reasoning loop. Same sandbox limitation as
+	// ask_user — Phase 2 (HTTP transport) addresses the sandboxed path.
+	if HasBoardCapability(task.Capabilities) && task.Sandbox == nil {
+		if selfPath, err := os.Executable(); err == nil {
+			env := map[string]string{
+				"ITERION_BOARD_CAPS": strings.Join(task.Capabilities, ","),
+			}
+			if task.StoreDir != "" {
+				env["ITERION_STORE_DIR"] = task.StoreDir
+			}
+			opts = append(opts, claudesdk.WithMCPServer(boardMCPServerName, &claudesdk.MCPStdioServer{
+				Command: selfPath,
+				Args:    []string{boardMCPSubcommand},
+				Env:     env,
+			}))
+			if len(task.AllowedTools) > 0 {
+				combined := append([]string(nil), task.AllowedTools...)
+				combined = append(combined, BoardToolsFor(task.Capabilities)...)
+				opts = append(opts, claudesdk.WithAllowedTools(combined...))
+			}
+		} else {
+			b.Logger.Warn("[%s#%d/claude-code] could not resolve iterion binary path; board MCP server disabled: %v", task.NodeID, task.Iteration, err)
+		}
+	} else if HasBoardCapability(task.Capabilities) && task.Sandbox != nil {
+		b.Logger.Warn("[%s#%d/claude-code] board capabilities granted but workflow is sandboxed; stdio MCP transport unavailable (HTTP loopback path will be wired in a follow-up)", task.NodeID, task.Iteration)
+	}
+
 	startTime := time.Now()
 	rm, sessMeta, streamErr := b.runSession(streamCtx, prompt, task, opts)
 	duration := time.Since(startTime)

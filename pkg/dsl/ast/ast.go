@@ -248,6 +248,7 @@ type AgentDecl struct {
 	Session           SessionMode      // defaults to SessionFresh
 	Tools             []string         // tool capability names
 	ToolPolicy        []string         // per-node tool policy patterns (nil = inherit workflow)
+	Capabilities      []string         // host-side capabilities granted to the node (e.g. board.create)
 	ToolMaxSteps      int              // max tool-use iterations (0 = not set)
 	MaxTokens         int              // max output tokens per LLM call (0 = inherit backend default)
 	ReasoningEffort   string           // reasoning effort level: "low", "medium", "high", "xhigh", "max"
@@ -282,6 +283,7 @@ type JudgeDecl struct {
 	Session           SessionMode
 	Tools             []string // usually empty for judges, but allowed
 	ToolPolicy        []string // per-node tool policy patterns (nil = inherit workflow)
+	Capabilities      []string // host-side capabilities granted to the node (e.g. board.read)
 	ToolMaxSteps      int
 	MaxTokens         int              // max output tokens per LLM call (0 = inherit backend default)
 	ReasoningEffort   string           // reasoning effort level: "low", "medium", "high", "xhigh", "max"
@@ -444,6 +446,7 @@ type WorkflowDecl struct {
 	Entry          string            // entry node name
 	DefaultBackend string            // workflow-level default backend (empty = not set)
 	ToolPolicy     []string          // workflow-level tool policy patterns (nil = open)
+	Capabilities   []string          // workflow-level default host capabilities (nil = inherit none)
 	MCP            *MCPConfigDecl    // workflow-level MCP activation/filtering
 	Budget         *BudgetBlock      // execution limits (optional)
 	Compaction     *CompactionBlock  // session compaction defaults for all nodes (optional)
