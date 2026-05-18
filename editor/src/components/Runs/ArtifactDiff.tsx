@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { Artifact, ArtifactSummary } from "@/api/runs";
 import { getArtifact } from "@/api/runs";
+import { CopyButton } from "@/components/ui";
 
 interface Props {
   runId: string;
@@ -148,9 +149,16 @@ export default function ArtifactDiff({ runId, nodeId, versions }: Props) {
         </label>
       </div>
       {fromV === toV ? (
-        <pre className="bg-surface-2 rounded p-2 text-[10px] font-mono whitespace-pre-wrap break-all max-h-[60vh] overflow-auto">
-          {toBody ? JSON.stringify(toBody.data, null, 2) : "Loading…"}
-        </pre>
+        <div className="relative">
+          {toBody && (
+            <div className="absolute right-1 top-1 z-10">
+              <CopyButton value={JSON.stringify(toBody.data, null, 2)} />
+            </div>
+          )}
+          <pre className="bg-surface-2 rounded p-2 text-[10px] font-mono whitespace-pre-wrap break-all max-h-[60vh] overflow-auto">
+            {toBody ? JSON.stringify(toBody.data, null, 2) : "Loading…"}
+          </pre>
+        </div>
       ) : !diff ? (
         <div className="text-fg-subtle text-[10px]">Loading diff…</div>
       ) : (

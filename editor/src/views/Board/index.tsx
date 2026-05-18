@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useSearch } from "wouter";
+
+import { formatRelative } from "@/lib/format";
 
 import PageShell from "@/components/shared/PageShell";
 import ConductorControlBar from "@/components/shared/ConductorControlBar";
@@ -21,8 +24,15 @@ import {
 } from "@/api/native";
 import IssueModal from "./IssueModal";
 import SettingsDrawer from "@/views/Conductor/SettingsDrawer";
+import TrackerErrorBanner from "@/components/shared/TrackerErrorBanner";
+import { useBoardKeyboard } from "@/hooks/useBoardKeyboard";
 
 export default function BoardView() {
+  const [, setLocation] = useLocation();
+  const search = useSearch();
+  const focusFromUrl = useMemo(() => {
+    return new URLSearchParams(search).get("focus");
+  }, [search]);
   const [board, setBoard] = useState<NativeBoard | null>(null);
   const [issues, setIssues] = useState<NativeIssue[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +42,20 @@ export default function BoardView() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [runningByIssue, setRunningByIssue] = useState<Map<string, RunningView>>(new Map());
   const [retryingByIssue, setRetryingByIssue] = useState<Map<string, RetryView>>(new Map());
+  const [trackerError, setTrackerError] = useState<{ tracker: string; message: string } | null>(
+    null,
+  );
+  const [conductorPaused, setConductorPaused] = useState(false);
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
+  // History of recent column transitions, so Ctrl+Z reverts the last
+  // one. Bounded at 10 entries — the board's drag-undo intent is the
+  // immediate "oops, wrong column", not full session replay.
+  const transitionHistoryRef = useRef<Array<{ id: string; from: string }>>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [labelFilter, setLabelFilter] = useState<Set<string>>(() => new Set());
+  const [assigneeFilter, setAssigneeFilter] = useState("");
 
   // Poll the conductor snapshot every 2s so each card can show a
   // running/retrying badge + cancel button. We ignore failures: when
@@ -58,6 +82,23 @@ export default function BoardView() {
         for (const r of snap.retries ?? []) xmap.set(r.issue_id, r);
         setRunningByIssue(rmap);
         setRetryingByIssue(xmap);
+        // Guard the tracker error update on value equality so a stable
+        // poll doesn't churn an identical object reference each tick
+        // and re-render the whole board.
+        setTrackerError((prev) => {
+          const message = snap.last_tracker_error ?? "";
+          if (!message) return prev === null ? prev : null;
+          if (
+            prev &&
+            prev.tracker === snap.tracker &&
+            prev.message === message
+          ) {
+            return prev;
+          }
+          return { tracker: snap.tracker, message };
+        });
+        setConductorPaused(!!snap.paused);
+        setLastSyncAt(Date.now());
       } catch {
         // swallow: conductor may be unreachable / not wired
       } finally {
@@ -97,15 +138,72 @@ export default function BoardView() {
     void refresh();
   }, [refresh]);
 
-  // Group issues by state for column rendering. Issues whose state
-  // does not appear on the board land in an "unmapped" bucket so they
-  // are not silently lost when the operator renames a state.
+  // Apply the ?focus=<issueID> deep-link from the Conductor view's
+  // retry-queue rows. Runs once after issues load so the auto-selected
+  // card is actually present in state. Self-clears the param so a hard
+  // reload doesn't re-focus on an issue the user has since moved on
+  // from.
+  useEffect(() => {
+    if (!focusFromUrl) return;
+    if (issues.length === 0) return;
+    const match = issues.find((i) => i.id === focusFromUrl);
+    if (!match) return;
+    setSelectedId(match.id);
+    setLocation("/board", { replace: true });
+  }, [focusFromUrl, issues, setLocation]);
+
+  // Distinct values exposed in the filter dropdowns. Derived from the
+  // current issues list so the dropdowns track what the user actually
+  // sees — including labels created on the fly by bots.
+  const { allLabels, allAssignees } = useMemo(() => {
+    const labels = new Set<string>();
+    const assignees = new Set<string>();
+    for (const iss of issues) {
+      for (const l of iss.labels ?? []) labels.add(l);
+      if (iss.assignee) assignees.add(iss.assignee);
+    }
+    return {
+      allLabels: Array.from(labels).sort(),
+      allAssignees: Array.from(assignees).sort(),
+    };
+  }, [issues]);
+
+  // filteredIssues applies the search query + active label/assignee
+  // filters to the raw issues list. Keep filtering client-side: the
+  // backend's listIssues filter would force a full network round-trip
+  // on every keystroke, which makes the search feel laggy on
+  // multi-hundred-issue boards. Title/body substring is case-insensitive.
+  const filteredIssues = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const labels = labelFilter;
+    const assignee = assigneeFilter.trim();
+    if (!q && labels.size === 0 && !assignee) return issues;
+    return issues.filter((iss) => {
+      if (q) {
+        const hay =
+          (iss.title ?? "") + "\t" + (iss.body ?? "") + "\t" + iss.id;
+        if (!hay.toLowerCase().includes(q)) return false;
+      }
+      if (labels.size > 0) {
+        const have = new Set(iss.labels ?? []);
+        for (const l of labels) {
+          if (!have.has(l)) return false;
+        }
+      }
+      if (assignee && iss.assignee !== assignee) return false;
+      return true;
+    });
+  }, [issues, searchQuery, labelFilter, assigneeFilter]);
+
+  // Group filtered issues by state for column rendering. Issues whose
+  // state does not appear on the board land in an "unmapped" bucket so
+  // they are not silently lost when the operator renames a state.
   const byState = useMemo(() => {
     const m = new Map<string, NativeIssue[]>();
     if (!board) return m;
     for (const s of board.states) m.set(s.name, []);
     m.set("__unmapped__", []);
-    for (const iss of issues) {
+    for (const iss of filteredIssues) {
       const bucket = m.has(iss.state) ? iss.state : "__unmapped__";
       m.get(bucket)!.push(iss);
     }
@@ -113,23 +211,66 @@ export default function BoardView() {
       list.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
     }
     return m;
-  }, [board, issues]);
+  }, [board, filteredIssues]);
+
+  // Eligible counts surfaced in the browser tab title so operators
+  // with the board pinned in a background tab see new ready/
+  // in-progress work without focusing it. Derived as a stable string
+  // first so the effect only runs when the rendered counts actually
+  // change — `byState` gets a fresh Map identity every render, which
+  // would otherwise rewrite document.title every 2s on every poll
+  // tick.
+  const tabBadge = useMemo(() => {
+    if (!board) return null;
+    const eligible = board.states.filter((s) => s.eligible);
+    if (eligible.length === 0) return null;
+    const parts: string[] = [];
+    for (const s of eligible) {
+      const count = (byState.get(s.name) ?? []).length;
+      if (count > 0) parts.push(`${count} ${s.display ?? s.name}`);
+    }
+    return parts.length > 0 ? `(${parts.join(", ")})` : null;
+  }, [board, byState]);
+
+  useEffect(() => {
+    if (!tabBadge) return;
+    const prev = document.title;
+    document.title = `${tabBadge} ${prev}`;
+    return () => {
+      document.title = prev;
+    };
+  }, [tabBadge]);
+
+  const recordTransition = useCallback((id: string, from: string) => {
+    const hist = transitionHistoryRef.current;
+    hist.push({ id, from });
+    if (hist.length > 10) hist.shift();
+  }, []);
 
   const onDrop = useCallback(
-    async (issueID: string, toState: string) => {
+    async (issueID: string, toState: string, opts?: { recordHistory?: boolean }) => {
+      const recordHistory = opts?.recordHistory ?? true;
       // Capture this invocation's pre-state in a per-call closure so
       // two near-simultaneous drops don't race over the same `before`
       // variable. The prior implementation hoisted `before` to the
       // outer scope and the second drop would overwrite the first
       // drop's snapshot before its async transitionIssue had a chance
       // to fail / roll back, restoring the wrong row.
-      const draft: { snapshot: NativeIssue[] } = { snapshot: [] };
+      const draft: { snapshot: NativeIssue[]; prevState: string | null } = {
+        snapshot: [],
+        prevState: null,
+      };
       setIssues((cur) => {
         draft.snapshot = cur;
+        const found = cur.find((i) => i.id === issueID);
+        draft.prevState = found?.state ?? null;
         return cur.map((i) => (i.id === issueID ? { ...i, state: toState } : i));
       });
       try {
         await transitionIssue(issueID, toState);
+        if (recordHistory && draft.prevState && draft.prevState !== toState) {
+          recordTransition(issueID, draft.prevState);
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         // Only revert this issue's row to its pre-drop state — leave
@@ -143,8 +284,36 @@ export default function BoardView() {
         });
       }
     },
-    [],
+    [recordTransition],
   );
+
+  const undoLastTransition = useCallback(() => {
+    const last = transitionHistoryRef.current.pop();
+    if (!last) return;
+    // Avoid re-recording the undo as a new history entry — otherwise
+    // the user would just toggle between two columns forever.
+    void onDrop(last.id, last.from, { recordHistory: false });
+  }, [onDrop]);
+
+  // Wire Ctrl+Z to the undo-last-transition. Skip when a modal owns
+  // focus or an input is active so we don't fight form fields.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key !== "z" || e.shiftKey) return;
+      const target = e.target as HTMLElement | null;
+      const inInput =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable;
+      if (inInput) return;
+      if (creating || editing || helpOpen || settingsOpen) return;
+      if (transitionHistoryRef.current.length === 0) return;
+      e.preventDefault();
+      undoLastTransition();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [creating, editing, helpOpen, settingsOpen, undoLastTransition]);
 
   const onCreate = useCallback(
     async (input: Partial<NativeIssue>) => {
@@ -194,6 +363,7 @@ export default function BoardView() {
       try {
         await deleteIssue(id);
         setEditing(null);
+        setSelectedId((cur) => (cur === id ? null : cur));
         await refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -201,6 +371,22 @@ export default function BoardView() {
     },
     [refresh],
   );
+
+  useBoardKeyboard({
+    board,
+    byState,
+    selectedId,
+    modalOpen: creating || editing !== null || helpOpen || settingsOpen,
+    onSelect: setSelectedId,
+    onCreate: () => setCreating(true),
+    onEdit: (id) => {
+      const iss = issues.find((i) => i.id === id);
+      if (iss) setEditing(iss);
+    },
+    onDelete: (id) => void onDelete(id),
+    onTransition: (id, toState) => void onDrop(id, toState),
+    onShowHelp: () => setHelpOpen((v) => !v),
+  });
 
   if (loading) {
     return (
@@ -212,10 +398,7 @@ export default function BoardView() {
   if (!board) {
     return (
       <PageShell active="board">
-        <div className="p-8 text-fg-muted">
-          Native tracker not available.{" "}
-          <code className="text-xs">iterion editor --dir &lt;project&gt;</code> creates one on first launch.
-        </div>
+        <EmptyBoard kind="missing" />
       </PageShell>
     );
   }
@@ -225,6 +408,7 @@ export default function BoardView() {
       active="board"
       rightActions={
         <>
+          <LastSyncBadge lastSyncAt={lastSyncAt} />
           <Button variant="secondary" size="sm" onClick={() => void refresh()}>
             Refresh
           </Button>
@@ -247,7 +431,52 @@ export default function BoardView() {
           {error}
         </div>
       )}
+      {trackerError && (
+        <TrackerErrorBanner
+          tracker={trackerError.tracker}
+          message={trackerError.message}
+        />
+      )}
+      {conductorPaused && (
+        <div className="bg-yellow-500/10 border-b border-yellow-500/40 px-4 py-2 text-xs text-yellow-200 flex items-center gap-2">
+          <span className="font-medium">Conductor paused</span>
+          <span className="text-yellow-200/80">
+            New issues won't be dispatched until you resume from the toolbar
+            above. In-flight runs continue unaffected.
+          </span>
+        </div>
+      )}
 
+      <BoardFilters
+        searchQuery={searchQuery}
+        labelFilter={labelFilter}
+        assigneeFilter={assigneeFilter}
+        allLabels={allLabels}
+        allAssignees={allAssignees}
+        total={issues.length}
+        filtered={filteredIssues.length}
+        onSearchChange={setSearchQuery}
+        onLabelToggle={(l) =>
+          setLabelFilter((prev) => {
+            const next = new Set(prev);
+            if (next.has(l)) next.delete(l);
+            else next.add(l);
+            return next;
+          })
+        }
+        onAssigneeChange={setAssigneeFilter}
+        onReset={() => {
+          setSearchQuery("");
+          setLabelFilter(new Set());
+          setAssigneeFilter("");
+        }}
+      />
+
+      {issues.length === 0 ? (
+        <main className="flex-1 overflow-auto p-3">
+          <EmptyBoard kind="no-issues" onCreate={() => setCreating(true)} />
+        </main>
+      ) : (
       <main className="flex-1 overflow-auto p-3">
         <div className="flex gap-3 min-w-fit">
           {board.states.map((s) => (
@@ -257,12 +486,17 @@ export default function BoardView() {
               display={s.display ?? s.name}
               terminal={!!s.terminal}
               eligible={!!s.eligible}
+              color={s.color ?? defaultStateColor(s.name, !!s.eligible, !!s.terminal)}
               issues={byState.get(s.name) ?? []}
+              selectedId={selectedId}
               runningByIssue={runningByIssue}
               retryingByIssue={retryingByIssue}
               onDrop={onDrop}
+              onSelectCard={setSelectedId}
               onClickCard={(iss) => setEditing(iss)}
               onCancelRun={onCancelRun}
+              onOpenRun={(runId) => setLocation(`/runs/${encodeURIComponent(runId)}`)}
+              dimmed={conductorPaused}
             />
           ))}
           {(byState.get("__unmapped__")?.length ?? 0) > 0 && (
@@ -271,16 +505,22 @@ export default function BoardView() {
               display="Unmapped"
               terminal={false}
               eligible={false}
+              color="#64748b"
               issues={byState.get("__unmapped__") ?? []}
+              selectedId={selectedId}
               runningByIssue={runningByIssue}
               retryingByIssue={retryingByIssue}
               onDrop={onDrop}
+              onSelectCard={setSelectedId}
               onClickCard={(iss) => setEditing(iss)}
               onCancelRun={onCancelRun}
+              onOpenRun={(runId) => setLocation(`/runs/${encodeURIComponent(runId)}`)}
+              dimmed={conductorPaused}
             />
           )}
         </div>
       </main>
+      )}
 
       {creating && (
         <IssueModal
@@ -299,7 +539,264 @@ export default function BoardView() {
           onDelete={() => void onDelete(editing.id)}
         />
       )}
+      {helpOpen && <BoardKeyboardHelp onClose={() => setHelpOpen(false)} />}
     </PageShell>
+  );
+}
+
+// LastSyncBadge reads the most-recent conductor-snapshot timestamp the
+// poller stored and renders a transient pill in the toolbar so the
+// user knows whether the running/retrying badges are fresh. Ticks
+// every second on its own so it stays accurate between the 2-second
+// poll intervals. Falls back to "—" while the first request hasn't
+// landed yet. Hidden when polling fails for >30s.
+function LastSyncBadge({ lastSyncAt }: { lastSyncAt: number | null }) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => force((v) => v + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  if (!lastSyncAt) return null;
+  const seconds = Math.max(0, Math.floor((Date.now() - lastSyncAt) / 1000));
+  if (seconds > 30) return null;
+  return (
+    <span
+      className="text-[10px] text-fg-subtle px-1 self-center"
+      title="Time since the conductor snapshot was last fetched. Updates every 2s."
+    >
+      synced {seconds}s ago
+    </span>
+  );
+}
+
+// EmptyBoard renders the two empty-state guides:
+//   missing   — no native tracker has been initialised on disk yet
+//   no-issues — board exists, no issues yet (most common at first
+//               launch). Surfaces a "Create your first issue" CTA + a
+//               short orientation hint pointing at the conductor.
+function EmptyBoard({
+  kind,
+  onCreate,
+}: {
+  kind: "missing" | "no-issues";
+  onCreate?: () => void;
+}) {
+  if (kind === "missing") {
+    return (
+      <div className="p-8 max-w-lg mx-auto text-fg-default space-y-4">
+        <div className="text-lg font-semibold">Native tracker not initialised</div>
+        <p className="text-sm text-fg-muted">
+          The board view persists issues under the project's{" "}
+          <code className="text-xs bg-surface-2 px-1 rounded">.iterion/conductor/native/</code>{" "}
+          directory. iterion creates one automatically on first launch.
+        </p>
+        <div className="text-sm">
+          <p className="mb-1 text-fg-default">Start it from the workspace:</p>
+          <pre className="bg-surface-2 rounded p-2 text-xs font-mono overflow-x-auto">
+            iterion editor --dir &lt;your-project&gt;
+          </pre>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="p-8 max-w-xl mx-auto text-fg-default space-y-5">
+      <div className="text-lg font-semibold">Your kanban is empty</div>
+      <p className="text-sm text-fg-muted">
+        Issues live as JSON under{" "}
+        <code className="text-xs bg-surface-2 px-1 rounded">
+          .iterion/conductor/native/issues/
+        </code>
+        . Each card represents a unit of work the conductor can pick up and dispatch
+        to a workflow.
+      </p>
+      <div className="grid gap-3 text-sm">
+        <div className="rounded border border-border-default p-3 bg-surface-1">
+          <div className="font-medium text-fg-default mb-1">1. Create an issue</div>
+          <p className="text-fg-muted">
+            Click below, or press{" "}
+            <kbd className="font-mono text-xs px-1 rounded bg-surface-2 border border-border-default">
+              c
+            </kbd>{" "}
+            anywhere on this page. Issues land in the first <em>eligible</em>{" "}
+            column (green dot in the header) so a running conductor can pick them
+            up immediately.
+          </p>
+        </div>
+        <div className="rounded border border-border-default p-3 bg-surface-1">
+          <div className="font-medium text-fg-default mb-1">
+            2. Wire a conductor (optional)
+          </div>
+          <p className="text-fg-muted">
+            Without a conductor, the board is just a task list. Configure one at{" "}
+            <code className="text-xs bg-surface-2 px-1 rounded">/conductor</code>{" "}
+            to have iterion auto-dispatch a workflow per eligible card.
+          </p>
+        </div>
+        <div className="rounded border border-border-default p-3 bg-surface-1">
+          <div className="font-medium text-fg-default mb-1">3. Keyboard shortcuts</div>
+          <p className="text-fg-muted">
+            Press{" "}
+            <kbd className="font-mono text-xs px-1 rounded bg-surface-2 border border-border-default">
+              ?
+            </kbd>{" "}
+            anywhere to see the full list — c (new), arrow keys (navigate / move
+            between columns), Enter (open), Del (delete).
+          </p>
+        </div>
+      </div>
+      {onCreate && (
+        <div>
+          <Button variant="primary" onClick={onCreate}>
+            + Create your first issue
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BoardFilters({
+  searchQuery,
+  labelFilter,
+  assigneeFilter,
+  allLabels,
+  allAssignees,
+  total,
+  filtered,
+  onSearchChange,
+  onLabelToggle,
+  onAssigneeChange,
+  onReset,
+}: {
+  searchQuery: string;
+  labelFilter: Set<string>;
+  assigneeFilter: string;
+  allLabels: string[];
+  allAssignees: string[];
+  total: number;
+  filtered: number;
+  onSearchChange: (v: string) => void;
+  onLabelToggle: (l: string) => void;
+  onAssigneeChange: (v: string) => void;
+  onReset: () => void;
+}) {
+  const filtersActive =
+    searchQuery.trim() !== "" || labelFilter.size > 0 || assigneeFilter !== "";
+  return (
+    <div className="px-3 py-2 border-b border-border-default bg-surface-1 flex flex-wrap items-center gap-2 text-xs">
+      <input
+        type="search"
+        value={searchQuery}
+        onChange={(e) => onSearchChange(e.target.value)}
+        placeholder="Search title / body / id…"
+        className="px-2 py-1 rounded border border-border-default bg-surface-0 text-fg-default text-xs min-w-[200px] flex-shrink-0"
+      />
+      {allAssignees.length > 0 && (
+        <select
+          value={assigneeFilter}
+          onChange={(e) => onAssigneeChange(e.target.value)}
+          className="px-2 py-1 rounded border border-border-default bg-surface-0 text-fg-default text-xs"
+        >
+          <option value="">All assignees</option>
+          {allAssignees.map((a) => (
+            <option key={a} value={a}>
+              @{a}
+            </option>
+          ))}
+        </select>
+      )}
+      {allLabels.length > 0 && (
+        <div className="flex flex-wrap gap-1 items-center">
+          <span className="text-fg-muted">labels:</span>
+          {allLabels.map((l) => {
+            const active = labelFilter.has(l);
+            return (
+              <button
+                key={l}
+                type="button"
+                onClick={() => onLabelToggle(l)}
+                className={`px-1.5 py-0.5 rounded border text-[10px] ${
+                  active
+                    ? "bg-accent text-fg-onAccent border-accent"
+                    : "bg-surface-0 text-fg-muted border-border-default hover:text-fg-default"
+                }`}
+              >
+                {l}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <span className="ml-auto text-fg-muted">
+        {filtersActive ? `${filtered} / ${total}` : `${total} issue${total === 1 ? "" : "s"}`}
+      </span>
+      {filtersActive && (
+        <button
+          type="button"
+          onClick={onReset}
+          className="text-fg-subtle hover:text-fg-default underline text-[10px]"
+        >
+          reset
+        </button>
+      )}
+    </div>
+  );
+}
+
+function BoardKeyboardHelp({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" || e.key === "?") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center"
+      onClick={onClose}
+    >
+      <div
+        className="bg-surface-1 border border-border-default rounded shadow-lg p-5 max-w-sm text-sm"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="font-semibold text-fg-default mb-3">
+          Keyboard shortcuts
+        </div>
+        <ul className="space-y-1.5 text-fg-default">
+          <ShortcutRow keys="c / n" desc="New issue" />
+          <ShortcutRow keys="↑ ↓" desc="Navigate cards in column" />
+          <ShortcutRow keys="← →" desc="Move card to previous/next column" />
+          <ShortcutRow keys="Enter / e" desc="Open selected issue" />
+          <ShortcutRow keys="Del / Bksp" desc="Delete selected issue" />
+          <ShortcutRow keys="Esc" desc="Clear selection or close" />
+          <ShortcutRow keys="?" desc="Toggle this help" />
+        </ul>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-4 text-xs text-fg-subtle hover:text-fg-default"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ShortcutRow({ keys, desc }: { keys: string; desc: string }) {
+  return (
+    <li className="flex items-center justify-between gap-4">
+      <kbd className="font-mono text-xs px-1.5 py-0.5 rounded bg-surface-2 border border-border-default">
+        {keys}
+      </kbd>
+      <span className="text-fg-muted text-xs">{desc}</span>
+    </li>
   );
 }
 
@@ -307,17 +804,57 @@ export default function BoardView() {
 // Column + Card
 // ---------------------------------------------------------------------------
 
+// defaultStateColor maps the conventional native-tracker state names
+// (backlog/ready/in_progress/review/done/blocked) to a sensible palette
+// so columns are scannable out of the box. Custom states fall back to a
+// semantic colour from the eligible/terminal flags; truly unknown states
+// get a neutral slate. Custom boards can always override per-state via
+// the `color:` field — this helper only fires when `State.Color` is
+// empty.
+function defaultStateColor(name: string, eligible: boolean, terminal: boolean): string {
+  switch (name) {
+    case "backlog":
+      return "#64748b"; // slate-500
+    case "ready":
+      return "#22c55e"; // green-500
+    case "in_progress":
+      return "#3b82f6"; // blue-500
+    case "review":
+      return "#a855f7"; // purple-500
+    case "done":
+      return "#94a3b8"; // slate-400 (terminal success)
+    case "blocked":
+      return "#ef4444"; // red-500
+    default:
+      if (terminal) return "#94a3b8";
+      if (eligible) return "#22c55e";
+      return "#64748b";
+  }
+}
+
 interface ColumnProps {
   name: string;
   display: string;
   terminal: boolean;
   eligible: boolean;
+  // Hex or CSS color string used to tint the column header strip and the
+  // count chip. Always provided by the parent — either from State.Color
+  // (board config) or from `defaultStateColor()` (semantic fallback).
+  color: string;
   issues: NativeIssue[];
+  selectedId: string | null;
   runningByIssue: Map<string, RunningView>;
   retryingByIssue: Map<string, RetryView>;
   onDrop: (issueID: string, toState: string) => void;
+  onSelectCard: (id: string | null) => void;
   onClickCard: (iss: NativeIssue) => void;
   onCancelRun: (issueID: string) => void;
+  onOpenRun: (runId: string) => void;
+  // dimmed: tells the column to render at reduced opacity. Used when the
+  // conductor is paused so eligible columns visually fade — the cards
+  // are still draggable, but the user gets a clear "nothing will pick
+  // these up" signal.
+  dimmed?: boolean;
 }
 
 function Column({
@@ -325,19 +862,31 @@ function Column({
   display,
   terminal,
   eligible,
+  color,
   issues,
+  selectedId,
   runningByIssue,
   retryingByIssue,
   onDrop,
+  onSelectCard,
   onClickCard,
   onCancelRun,
+  onOpenRun,
+  dimmed,
 }: ColumnProps) {
   const [dragOver, setDragOver] = useState(false);
+  // Dim only the eligible columns when the conductor is paused — the
+  // terminal / backlog columns aren't being actively dispatched even
+  // when the conductor runs, so muting them carries no extra signal.
+  const fadeForPause = dimmed && eligible;
   return (
     <div
-      className={`w-72 shrink-0 rounded border ${
-        dragOver ? "border-accent/60 bg-accent-soft/30" : "border-border-default bg-surface-1"
-      } flex flex-col`}
+      className={`w-72 shrink-0 rounded border-2 transition-colors ${
+        dragOver
+          ? "border-accent bg-accent-soft/30 ring-2 ring-accent/40"
+          : "border-border-default bg-surface-1"
+      } flex flex-col ${fadeForPause ? "opacity-60" : ""}`}
+      style={{ borderTopColor: color, borderTopWidth: 3 }}
       onDragOver={(e) => {
         e.preventDefault();
         setDragOver(true);
@@ -351,7 +900,16 @@ function Column({
       }}
     >
       <div className="px-3 py-2 border-b border-border-default flex items-center justify-between text-xs">
-        <span className="font-semibold uppercase tracking-wide text-fg-default">{display}</span>
+        <span className="flex items-center gap-2 min-w-0">
+          <span
+            className="inline-block h-2 w-2 rounded-full shrink-0"
+            style={{ backgroundColor: color }}
+            aria-hidden="true"
+          />
+          <span className="font-semibold uppercase tracking-wide text-fg-default truncate">
+            {display}
+          </span>
+        </span>
         <span className="text-fg-muted">
           {issues.length}
           {eligible && <span className="ml-1 text-emerald-400">●</span>}
@@ -363,10 +921,14 @@ function Column({
           <IssueCard
             key={iss.id}
             iss={iss}
+            selected={iss.id === selectedId}
             running={runningByIssue.get(iss.id)}
             retrying={retryingByIssue.get(iss.id)}
+            onSelect={() => onSelectCard(iss.id)}
             onClick={() => onClickCard(iss)}
             onCancelRun={() => onCancelRun(iss.id)}
+            onOpenRun={onOpenRun}
+            onShowRetryDetails={() => onClickCard(iss)}
           />
         ))}
         {issues.length === 0 && (
@@ -379,23 +941,80 @@ function Column({
 
 interface IssueCardProps {
   iss: NativeIssue;
+  selected: boolean;
   running?: RunningView;
   retrying?: RetryView;
+  onSelect: () => void;
   onClick: () => void;
   onCancelRun: () => void;
+  onOpenRun: (runId: string) => void;
+  onShowRetryDetails: () => void;
 }
 
-function IssueCard({ iss, running, retrying, onClick, onCancelRun }: IssueCardProps) {
+function IssueCard({
+  iss,
+  selected,
+  running,
+  retrying,
+  onSelect,
+  onClick,
+  onCancelRun,
+  onOpenRun,
+  onShowRetryDetails,
+}: IssueCardProps) {
+  // Hover preview: synthesise a multi-line title combining body
+  // (truncated) + key fields + blocker count so the OS-native tooltip
+  // provides a quick peek without forcing a modal open. Title strings
+  // render with newlines on all major browsers.
+  const previewLines: string[] = [];
+  if (iss.body) {
+    const trimmed = iss.body.trim();
+    previewLines.push(trimmed.length > 240 ? trimmed.slice(0, 237) + "…" : trimmed);
+  }
+  if (iss.fields && Object.keys(iss.fields).length > 0) {
+    previewLines.push(
+      Object.entries(iss.fields)
+        .map(([k, v]) => `${k}: ${String(v)}`)
+        .join("\n"),
+    );
+  }
+  if ((iss.blockers?.length ?? 0) > 0) {
+    previewLines.push(`Blocked by: ${iss.blockers!.join(", ")}`);
+  }
+  const hoverTitle = previewLines.length > 0 ? previewLines.join("\n\n") : undefined;
+  const [dragging, setDragging] = useState(false);
+  const pinnedFields = iss.fields ? pickPinnedFields(iss.fields) : [];
   return (
     <div
       role="button"
       draggable
+      title={hoverTitle}
       onDragStart={(e) => {
         e.dataTransfer.setData("text/plain", iss.id);
         e.dataTransfer.effectAllowed = "move";
+        setDragging(true);
+        onSelect();
       }}
-      onClick={onClick}
-      className="bg-surface-0 border border-border-default rounded p-2 text-sm cursor-grab hover:border-accent/40 active:cursor-grabbing"
+      onDragEnd={() => setDragging(false)}
+      onClick={(e) => {
+        // Single click selects (so keyboard nav has an anchor); a second
+        // click on the already-selected card opens the modal — mirroring
+        // file-manager double-click idioms but with a much shorter delay.
+        if (selected) {
+          onClick();
+        } else {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      onDoubleClick={onClick}
+      className={`bg-surface-0 border rounded p-2 text-sm cursor-grab active:cursor-grabbing transition-transform ${
+        dragging ? "scale-[1.02] shadow-lg" : ""
+      } ${
+        selected
+          ? "border-accent ring-1 ring-accent/40"
+          : "border-border-default hover:border-accent/40"
+      }`}
     >
       <div className="flex items-start gap-2">
         <span className="text-fg-default flex-1">{iss.title}</span>
@@ -405,31 +1024,65 @@ function IssueCard({ iss, running, retrying, onClick, onCancelRun }: IssueCardPr
           </span>
         ) : null}
       </div>
-      {(iss.labels?.length ?? 0) > 0 && (
-        <div className="mt-1 flex flex-wrap gap-1">
-          {iss.labels!.map((l) => (
-            <span
-              key={l}
-              className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-fg-muted"
-            >
-              {l}
+      {pinnedFields.length > 0 && (
+        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-fg-subtle flex-wrap">
+          {pinnedFields.map(([k, v]) => (
+            <span key={k} className="flex items-center gap-1">
+              <span className="font-mono opacity-70">{k}:</span>
+              <span className="text-fg-default">{String(v)}</span>
             </span>
           ))}
         </div>
       )}
-      <div className="mt-1 flex items-center gap-2 text-[10px] text-fg-muted">
+      {(iss.labels?.length ?? 0) > 0 && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {iss.labels!.map((l) => {
+            const palette = labelPalette(l);
+            return (
+              <span
+                key={l}
+                className="text-[10px] px-1.5 py-0.5 rounded"
+                style={palette}
+              >
+                {l}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      <div className="mt-1 flex items-center gap-2 text-[10px] text-fg-muted flex-wrap">
         <code className="opacity-70">{shortID(iss.id)}</code>
         {iss.assignee && <span>@{iss.assignee}</span>}
-        {iss.claim && <span className="text-amber-300">claimed</span>}
+        {iss.claim && (
+          <span
+            className="text-amber-300"
+            title={`Locked by ${iss.claim} — the conductor holds the claim until the run finishes.`}
+          >
+            claimed by {iss.claim}
+          </span>
+        )}
+        {iss.updated_at && (
+          <span className="text-fg-subtle" title={iss.updated_at}>
+            · updated {formatRelative(iss.updated_at)}
+          </span>
+        )}
       </div>
       {running && (
         <div className="mt-1 flex items-center justify-between gap-2 rounded bg-green-500/10 px-1.5 py-1 text-[10px] text-green-300">
-          <span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenRun(running.run_id);
+            }}
+            className="text-left flex-1 hover:underline cursor-pointer"
+            title={`Open run ${running.run_id}`}
+          >
             ● running
             {running.last_event_name && (
               <span className="ml-1 text-green-200/70">— {running.last_event_name}</span>
             )}
-          </span>
+          </button>
           <button
             className="rounded border border-green-500/40 px-1.5 py-0.5 text-[10px] hover:bg-green-500/20"
             onClick={(e) => {
@@ -443,13 +1096,75 @@ function IssueCard({ iss, running, retrying, onClick, onCancelRun }: IssueCardPr
         </div>
       )}
       {!running && retrying && (
-        <div className="mt-1 rounded bg-amber-500/10 px-1.5 py-1 text-[10px] text-amber-300">
+        <div
+          className="mt-1 rounded bg-amber-500/10 px-1.5 py-1 text-[10px] text-amber-300 cursor-pointer hover:bg-amber-500/20"
+          onClick={(e) => {
+            e.stopPropagation();
+            onShowRetryDetails();
+          }}
+          title={retrying.error ? `Last error: ${retrying.error}` : undefined}
+        >
           ⏳ retrying (attempt {retrying.attempt})
+          {retrying.error && (
+            <span className="ml-1 text-amber-200/80 truncate">— {retrying.error}</span>
+          )}
         </div>
       )}
     </div>
   );
 }
+
+// labelPalette derives a stable pastel background + foreground colour
+// from a label name. Two cards with the label "urgent" always render
+// the same colour, but "infra" and "urgent" land on visibly distinct
+// palettes. Hashing avoids the need for a label-colour schema in the
+// backend — operators get colour scanning today without configuration.
+// A small alias table covers common semantic labels with sensible
+// presets (red for "urgent" / "bug", green for "ready", etc.).
+function labelPalette(label: string): { backgroundColor: string; color: string } {
+  const aliases: Record<string, { backgroundColor: string; color: string }> = {
+    urgent: { backgroundColor: "rgba(239,68,68,0.18)", color: "#fecaca" },
+    blocker: { backgroundColor: "rgba(239,68,68,0.18)", color: "#fecaca" },
+    bug: { backgroundColor: "rgba(244,63,94,0.18)", color: "#fecdd3" },
+    infra: { backgroundColor: "rgba(59,130,246,0.18)", color: "#bfdbfe" },
+    docs: { backgroundColor: "rgba(168,85,247,0.18)", color: "#e9d5ff" },
+    feature: { backgroundColor: "rgba(16,185,129,0.18)", color: "#bbf7d0" },
+    ready: { backgroundColor: "rgba(16,185,129,0.18)", color: "#bbf7d0" },
+  };
+  const hit = aliases[label.toLowerCase()];
+  if (hit) return hit;
+  // Stable 32-bit FNV-1a hash → hue. Fixed S/L keeps the palette readable
+  // against both light and dark surfaces.
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < label.length; i++) {
+    h ^= label.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  const hue = h % 360;
+  return {
+    backgroundColor: `hsl(${hue}, 60%, 28%)`,
+    color: `hsl(${hue}, 80%, 88%)`,
+  };
+}
+
+// pickPinnedFields returns up to two scalar field entries from a card's
+// `fields` map so the card body can surface high-signal data (enum
+// statuses, customer IDs) inline without expanding the modal. Skips
+// fields whose value is too long for a card row — those belong in the
+// hover preview / modal view.
+function pickPinnedFields(fields: Record<string, unknown>): Array<[string, unknown]> {
+  const picked: Array<[string, unknown]> = [];
+  for (const [k, v] of Object.entries(fields)) {
+    if (picked.length >= 2) break;
+    if (v === null || v === undefined) continue;
+    if (typeof v === "object") continue;
+    const str = String(v);
+    if (str.length === 0 || str.length > 32) continue;
+    picked.push([k, v]);
+  }
+  return picked;
+}
+
 
 function shortID(id: string) {
   const bare = id.replace(/^native:/, "").replace(/^github:[^#]+#/, "#");

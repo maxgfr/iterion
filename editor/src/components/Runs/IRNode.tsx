@@ -109,11 +109,21 @@ export default function IRNode({ data }: NodeProps) {
   }
   const c = statusClasses(dominantStatus);
 
+  // Tooltip for nodes the run never reached. Without this the IR canvas
+  // shows greyed-out cards with no affordance, leaving the operator to
+  // wonder whether the node is broken or simply on a branch that wasn't
+  // taken. Surfaced as `title=` so it works on hover everywhere.
+  const idleTitle =
+    executions.length === 0
+      ? "Not yet reached by this run. Routers that didn't pick this destination, conditional edges that evaluated false, or nodes downstream of an unfinished branch all land here."
+      : undefined;
+
   return (
     <div
       className={`relative rounded-xl border px-3 py-2 shadow-sm w-[200px] text-xs transition-colors duration-300 ${c.bg} ${c.border} ${c.text} ${
         selected ? "ring-2 ring-accent" : ""
       }`}
+      title={idleTitle}
       // Inner ring tinted by the selected iteration index so the user
       // can scan the canvas and see "iteration 3 → all the violet
       // borders". Subtle so it doesn't fight the status color.

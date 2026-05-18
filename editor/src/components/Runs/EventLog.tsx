@@ -23,6 +23,47 @@ interface Props {
   // in the toolbar when an execution is selected).
   onClearSelection?: () => void;
   onCollapse?: () => void;
+  // When provided, the search query and type filter chips are persisted
+  // to localStorage under a per-run key so coming back to the same run
+  // restores the previous filter state.
+  runId?: string | null;
+}
+
+// Per-run filter persistence: `run-console.event-filters.v1.<runId>`.
+// Schema is intentionally minimal so older entries can stay readable
+// when fields grow; missing keys fall back to defaults.
+interface PersistedFilters {
+  search?: string;
+  types?: string[];
+}
+
+function filterStorageKey(runId: string): string {
+  return `run-console.event-filters.v1.${runId}`;
+}
+
+function loadPersistedFilters(runId: string): PersistedFilters | null {
+  try {
+    const raw = window.localStorage.getItem(filterStorageKey(runId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedFilters;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePersistedFilters(runId: string, value: PersistedFilters) {
+  try {
+    // Treat all-default as "delete entry" to keep storage clean. The
+    // common case (no filter applied) writes nothing.
+    if ((!value.search || value.search === "") && (!value.types || value.types.length === 0)) {
+      window.localStorage.removeItem(filterStorageKey(runId));
+      return;
+    }
+    window.localStorage.setItem(filterStorageKey(runId), JSON.stringify(value));
+  } catch {
+    // quota / privacy mode → silently degrade to non-persistent
+  }
 }
 
 // Slack the bottom-detection threshold so dynamic-height row reflows
@@ -77,9 +118,34 @@ export default function EventLog({
   onSelectNodeIteration,
   onClearSelection,
   onCollapse,
+  runId,
 }: Props) {
-  const [search, setSearch] = useState("");
-  const [activeTypes, setActiveTypes] = useState<Set<string>>(() => new Set());
+  // Lazy initial value: read localStorage once on mount so the chips
+  // and search box render with the persisted state from the get-go.
+  const initialPersisted = useMemo<PersistedFilters | null>(
+    () => (runId ? loadPersistedFilters(runId) : null),
+    // The runId is treated as stable for this component's lifetime
+    // (RunView remounts EventLog when navigating between runs), so this
+    // memo intentionally runs once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const [search, setSearch] = useState(initialPersisted?.search ?? "");
+  const [activeTypes, setActiveTypes] = useState<Set<string>>(
+    () => new Set(initialPersisted?.types ?? []),
+  );
+
+  // Persist on every change. We avoid debouncing the search input
+  // because the writes are small and infrequent compared to typing
+  // bursts in other inputs, and an immediate write means a hard reload
+  // never loses keystrokes.
+  useEffect(() => {
+    if (!runId) return;
+    savePersistedFilters(runId, {
+      search: search || undefined,
+      types: activeTypes.size > 0 ? Array.from(activeTypes) : undefined,
+    });
+  }, [runId, search, activeTypes]);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   // Tracks whether virtuoso is currently scrolling. atBottomStateChange
   // also fires on data/filter changes; we only treat "left the bottom"
@@ -207,28 +273,68 @@ export default function EventLog({
     [typeCounts],
   );
 
-  const filtered = useMemo(() => {
+  // Event types that the run console should surface as "errors" — the
+  // user wants these immediately visible without scrolling. budget_*
+  // sits next to the hard failures because exceeding budget is a
+  // workflow-level abort, not a soft warning.
+  const errorEventTypes = useMemo(
+    () => new Set<string>(["run_failed", "tool_error", "budget_exceeded"]),
+    [],
+  );
+  const errorCount = useMemo(() => {
+    let n = 0;
+    for (const t of errorEventTypes) n += typeCounts.get(t) ?? 0;
+    return n;
+  }, [typeCounts, errorEventTypes]);
+
+  // Compute the filtered list and the indices of error events in one
+  // pass. Walking `filtered` again on every "next error" click would
+  // be O(N) on a 100k-event log; deriving alongside the filter keeps
+  // the click handler O(1).
+  const { filtered, errorIndices } = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return annotated.filter(({ event: e, executionId }) => {
-      // Execution selection filter (cross-highlight from the canvas).
-      // Match on the annotated executionId, which already accounts for
-      // iteration_path-keyed exec_ids and inherits the right exec for
-      // non-node_started events.
-      if (selectedExecutionId) {
-        if (executionId !== selectedExecutionId) return false;
+    const out: AnnotatedEvent[] = [];
+    const errIdx: number[] = [];
+    for (const ann of annotated) {
+      const e = ann.event;
+      if (selectedExecutionId && ann.executionId !== selectedExecutionId) continue;
+      if (activeTypes.size > 0 && !activeTypes.has(e.type)) continue;
+      if (query) {
+        let matches = false;
+        if (e.type.toLowerCase().includes(query)) matches = true;
+        else if (e.node_id?.toLowerCase().includes(query)) matches = true;
+        else if (e.data && JSON.stringify(e.data).toLowerCase().includes(query))
+          matches = true;
+        if (!matches) continue;
       }
-      if (activeTypes.size > 0 && !activeTypes.has(e.type)) return false;
-      if (!query) return true;
-      if (e.type.toLowerCase().includes(query)) return true;
-      if (e.node_id?.toLowerCase().includes(query)) return true;
-      if (e.data && JSON.stringify(e.data).toLowerCase().includes(query))
-        return true;
-      return false;
-    });
+      const idx = out.length;
+      out.push(ann);
+      if (errorEventTypes.has(e.type)) errIdx.push(idx);
+    }
+    return { filtered: out, errorIndices: errIdx };
     // `annotated` is mutated in place when the cache extends — depend
     // on `events` so this memo invalidates on every batch flush even
     // when the array reference is unchanged.
-  }, [annotated, events, selectedExecutionId, activeTypes, search]);
+  }, [annotated, events, selectedExecutionId, activeTypes, search, errorEventTypes]);
+
+  // Cycle through error events on repeated clicks of the "n errors"
+  // badge: scroll to the first one, then the next, etc. — wraps around
+  // at the end. The cursor sits in a ref so the parent doesn't
+  // re-render between clicks.
+  const errorCursorRef = useRef<number>(-1);
+  const jumpToNextError = () => {
+    if (errorIndices.length === 0) return;
+    errorCursorRef.current = (errorCursorRef.current + 1) % errorIndices.length;
+    const target = errorIndices[errorCursorRef.current]!;
+    virtuosoRef.current?.scrollToIndex({
+      index: target,
+      align: "center",
+      behavior: "smooth",
+    });
+    // Disengage tail-follow so the auto-scroll doesn't immediately
+    // yank the user back to live.
+    if (followTail) onToggleFollow(false);
+  };
 
   // Virtuoso's `followOutput="auto"` only fires when it considers the
   // user "at bottom", which is unreliable on a live run where events
@@ -279,6 +385,19 @@ export default function EventLog({
         <span className="text-fg-subtle">
           {filtered.length} / {events.length}
         </span>
+        {errorCount > 0 && (
+          <button
+            type="button"
+            onClick={jumpToNextError}
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-danger-soft text-danger-fg border border-danger/40 hover:bg-danger-soft/80 transition-colors"
+            title={`${errorCount} error event${errorCount === 1 ? "" : "s"} — click to jump to the next`}
+          >
+            <span aria-hidden="true">●</span>
+            <span>
+              {errorCount} error{errorCount === 1 ? "" : "s"}
+            </span>
+          </button>
+        )}
         {selectedExecutionId && (
           <button
             type="button"
@@ -400,6 +519,28 @@ export default function EventLog({
   );
 }
 
+// indentForType returns a visual nesting level for the event log. The
+// goal is to make multi-turn LLM rounds and their tool calls visually
+// "owned" by the surrounding llm_request, so the eye can scan
+// turn-boundaries instead of treating every event as a sibling. The
+// runtime doesn't carry an explicit parent_seq on retries / tool calls,
+// so we lean on the event taxonomy itself.
+function indentForType(t: string): number {
+  switch (t) {
+    case "llm_step_finished":
+    case "llm_retry":
+    case "tool_started":
+    case "tool_called":
+    case "tool_error":
+    case "human_input_requested":
+      return 1;
+    case "artifact_written":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
 function EventRow({
   ann,
   onSelect,
@@ -409,6 +550,7 @@ function EventRow({
 }) {
   const e = ann.event;
   const badge = EVENT_BADGE[e.type] ?? "bg-surface-2 text-fg-muted";
+  const indent = indentForType(e.type);
   return (
     <button
       type="button"
@@ -421,7 +563,17 @@ function EventRow({
       }
     >
       <span className="text-fg-subtle">{e.seq.toString().padStart(4, "0")}</span>
-      <span className={`px-1.5 rounded ${badge}`}>{e.type}</span>
+      <span
+        className={`px-1.5 rounded ${badge}`}
+        style={indent > 0 ? { marginLeft: indent * 12 } : undefined}
+      >
+        {indent > 0 && (
+          <span className="text-fg-subtle mr-1" aria-hidden="true">
+            ↳
+          </span>
+        )}
+        {e.type}
+      </span>
       <span className="text-fg-default truncate">{e.node_id ?? "-"}</span>
       <span className="text-fg-subtle truncate">{ann.preview}</span>
     </button>

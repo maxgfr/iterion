@@ -18,6 +18,23 @@ export interface EventDrivenMetrics {
   pausedCount: number;
   // First failed execution id (for "jump to failed" affordance).
   firstFailedNodeId: string | null;
+  // Most recent budget_warning fields, when the runtime has fired at
+  // least one. The backend warns once per dimension at the 80%
+  // threshold; the latest message is the one worth surfacing because
+  // the user already saw the earlier dimensions.
+  budgetWarning: BudgetWarning | null;
+  // True once a budget_exceeded event has been seen — the run will
+  // fail (or has failed) hitting a hard cap.
+  budgetExceeded: boolean;
+}
+
+export interface BudgetWarning {
+  dimension: string;
+  used: number;
+  limit: number;
+  // 0..1; UI multiplies by 100 for "%". Computed defensively from
+  // used/limit when the event doesn't carry a ratio.
+  ratio: number;
 }
 
 export interface RunMetrics extends EventDrivenMetrics {
@@ -40,6 +57,8 @@ export function useEventDrivenMetrics(): EventDrivenMetrics {
       failedCount: 0,
       pausedCount: 0,
       firstFailedNodeId: null,
+      budgetWarning: null,
+      budgetExceeded: false,
     };
 
     for (const e of events) {
@@ -58,6 +77,25 @@ export function useEventDrivenMetrics(): EventDrivenMetrics {
         const c = e.data["_cost_usd"];
         if (typeof c === "number") m.costUsd += c;
       }
+      if (e.type === "budget_warning" && e.data) {
+        const dim = pickString(e.data, "dimension");
+        const used = pickNumber(e.data, "used");
+        const limit = pickNumber(e.data, "limit");
+        const ratio =
+          pickNumber(e.data, "ratio") ??
+          (used != null && limit != null && limit > 0 ? used / limit : null);
+        if (dim && ratio != null) {
+          m.budgetWarning = {
+            dimension: dim,
+            used: used ?? 0,
+            limit: limit ?? 0,
+            ratio,
+          };
+        }
+      }
+      if (e.type === "budget_exceeded") {
+        m.budgetExceeded = true;
+      }
     }
 
     for (const ex of executionsById.values()) {
@@ -71,6 +109,16 @@ export function useEventDrivenMetrics(): EventDrivenMetrics {
 
     return m;
   }, [events, executionsById]);
+}
+
+function pickString(data: Record<string, unknown>, key: string): string | null {
+  const v = data[key];
+  return typeof v === "string" ? v : null;
+}
+
+function pickNumber(data: Record<string, unknown>, key: string): number | null {
+  const v = data[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
 // useRunMetrics composes the event-driven metrics with a duration
