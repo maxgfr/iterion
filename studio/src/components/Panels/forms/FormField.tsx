@@ -1,21 +1,101 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { RefAwareInput, RefAwareTextarea } from "@/components/ui/RefAwareInput";
 import PromptOverlayHighlight from "@/components/ui/PromptOverlayHighlight";
 import type { RefContext } from "@/lib/refCompletion";
 import { Pencil1Icon } from "@radix-ui/react-icons";
 
 const labelClass = "block text-xs text-fg-subtle mb-1";
-const inputClass = "w-full bg-surface-1 border border-border-strong rounded px-2 py-1 text-sm text-fg-default focus:border-accent focus:outline-none";
+const inputClass = "w-full bg-surface-1 border border-border-strong rounded px-2 py-1 text-sm text-fg-default focus:border-accent focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed";
 const selectClass = inputClass;
 
-function FieldLabel({ label, help }: { label: string; help?: string }) {
+function FieldLabel({
+  label,
+  help,
+  htmlFor,
+  helpId,
+}: {
+  label: string;
+  help?: string;
+  htmlFor?: string;
+  helpId?: string;
+}) {
   return (
-    <label className={labelClass}>
+    <label className={labelClass} htmlFor={htmlFor}>
       {label}
       {help && (
-        <span className="text-fg-subtle hover:text-fg-muted cursor-help ml-1" title={help}>?</span>
+        <span
+          id={helpId}
+          className="text-fg-subtle hover:text-fg-muted cursor-help ml-1"
+          title={help}
+          aria-label={help}
+        >
+          ?
+        </span>
       )}
     </label>
+  );
+}
+
+interface FieldRowChildArgs {
+  /** id to apply to the primary control inside the row. */
+  inputId: string;
+  /** Space-separated ids to feed `aria-describedby` (help + error). */
+  describedBy: string | undefined;
+}
+
+interface FieldRowProps {
+  label: string;
+  help?: string;
+  error?: string;
+  className?: string;
+  children: ReactNode | ((args: FieldRowChildArgs) => ReactNode);
+}
+
+/**
+ * Standard label + control + error layout used by every text-like
+ * field. Owns the id generation + aria-describedby plumbing so screen
+ * readers correctly announce the help icon and the error message
+ * alongside the input. Fields that take an `error` prop only need to
+ * pipe `inputId` and `describedBy` through; the FieldRow renders the
+ * <p role="alert"> automatically.
+ */
+function FieldRow({
+  label,
+  help,
+  error,
+  className = "mb-2",
+  children,
+}: FieldRowProps) {
+  const baseId = useId();
+  const inputId = `${baseId}-input`;
+  const helpId = help ? `${baseId}-help` : undefined;
+  const errorId = error ? `${baseId}-err` : undefined;
+  const describedBy = [helpId, errorId].filter(Boolean).join(" ") || undefined;
+  return (
+    <div className={className}>
+      <FieldLabel label={label} help={help} htmlFor={inputId} helpId={helpId} />
+      {typeof children === "function"
+        ? children({ inputId, describedBy })
+        : children}
+      {error && (
+        <p
+          id={errorId}
+          role="alert"
+          className="text-[10px] text-danger mt-0.5"
+        >
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -27,49 +107,55 @@ interface TextFieldProps {
   multiline?: boolean;
   rows?: number;
   help?: string;
+  error?: string;
   /** When provided, enables {{...}} reference autocomplete for this field. */
   refContext?: RefContext;
 }
 
-export function TextField({ label, value, onChange, placeholder, multiline, rows = 3, help, refContext }: TextFieldProps) {
+export function TextField({ label, value, onChange, placeholder, multiline, rows = 3, help, error, refContext }: TextFieldProps) {
   return (
-    <div className="mb-2">
-      <FieldLabel label={label} help={help} />
-      {multiline ? (
-        refContext ? (
-          <RefAwareTextarea
+    <FieldRow label={label} help={help} error={error}>
+      {({ inputId, describedBy }) =>
+        multiline ? (
+          refContext ? (
+            <RefAwareTextarea
+              value={value}
+              onChange={onChange}
+              placeholder={placeholder}
+              rows={rows}
+              refContext={refContext}
+            />
+          ) : (
+            <textarea
+              id={inputId}
+              aria-describedby={describedBy}
+              className={inputClass + " resize-y"}
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder={placeholder}
+              rows={rows}
+            />
+          )
+        ) : refContext ? (
+          <RefAwareInput
             value={value}
             onChange={onChange}
             placeholder={placeholder}
-            rows={rows}
             refContext={refContext}
           />
         ) : (
-          <textarea
-            className={inputClass + " resize-y"}
+          <input
+            id={inputId}
+            aria-describedby={describedBy}
+            className={inputClass}
+            type="text"
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
-            rows={rows}
           />
         )
-      ) : refContext ? (
-        <RefAwareInput
-          value={value}
-          onChange={onChange}
-          placeholder={placeholder}
-          refContext={refContext}
-        />
-      ) : (
-        <input
-          className={inputClass}
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-        />
-      )}
-    </div>
+      }
+    </FieldRow>
   );
 }
 
@@ -138,36 +224,40 @@ export function CommittedTextField({ label, value, onChange, onCommit, validate,
   const isDirty = draft.trim() !== value;
 
   return (
-    <div className="mb-2">
-      <FieldLabel label={label} help={help} />
-      <div className="flex gap-1">
-        <input
-          className={`${inputClass} flex-1${error ? " ring-1 ring-red-500 border-danger" : ""}`}
-          type="text"
-          value={draft}
-          onChange={(e) => { setDraft(e.target.value); setError(null); }}
-          onFocus={() => { focusedRef.current = true; }}
-          onBlur={handleBlur}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          title={error ?? undefined}
-        />
-        {isDirty && (
-          <button
-            className="bg-accent hover:bg-accent text-fg-default text-xs px-1.5 rounded shrink-0"
-            onMouseDown={(e) => {
-              e.preventDefault(); // prevent blur before commit
-              commit();
-              (document.activeElement as HTMLInputElement)?.blur();
-            }}
-            title="Confirm"
-          >
-            &#x2713;
-          </button>
-        )}
-      </div>
-      {error && <p className="text-[10px] text-danger mt-0.5">{error}</p>}
-    </div>
+    <FieldRow label={label} help={help} error={error ?? undefined}>
+      {({ inputId, describedBy }) => (
+        <div className="flex gap-1">
+          <input
+            id={inputId}
+            aria-describedby={describedBy}
+            aria-invalid={error ? true : undefined}
+            className={`${inputClass} flex-1${error ? " ring-1 ring-danger border-danger" : ""}`}
+            type="text"
+            value={draft}
+            onChange={(e) => { setDraft(e.target.value); setError(null); }}
+            onFocus={() => { focusedRef.current = true; }}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+          />
+          {isDirty && (
+            <button
+              type="button"
+              className="bg-accent hover:bg-accent text-fg-default text-xs px-1.5 rounded shrink-0"
+              onMouseDown={(e) => {
+                e.preventDefault(); // prevent blur before commit
+                commit();
+                (document.activeElement as HTMLInputElement)?.blur();
+              }}
+              title="Confirm"
+              aria-label="Confirm edit"
+            >
+              &#x2713;
+            </button>
+          )}
+        </div>
+      )}
+    </FieldRow>
   );
 }
 
@@ -178,21 +268,26 @@ interface NumberFieldProps {
   placeholder?: string;
   min?: number;
   help?: string;
+  error?: string;
 }
 
-export function NumberField({ label, value, onChange, placeholder, min, help }: NumberFieldProps) {
+export function NumberField({ label, value, onChange, placeholder, min, help, error }: NumberFieldProps) {
   return (
-    <div className="mb-2">
-      <FieldLabel label={label} help={help} />
-      <input
-        className={inputClass}
-        type="number"
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
-        placeholder={placeholder}
-        min={min}
-      />
-    </div>
+    <FieldRow label={label} help={help} error={error}>
+      {({ inputId, describedBy }) => (
+        <input
+          id={inputId}
+          aria-describedby={describedBy}
+          aria-invalid={error ? true : undefined}
+          className={inputClass}
+          type="number"
+          value={value ?? ""}
+          onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
+          placeholder={placeholder}
+          min={min}
+        />
+      )}
+    </FieldRow>
   );
 }
 
@@ -204,21 +299,30 @@ interface SelectFieldProps {
   allowEmpty?: boolean;
   emptyLabel?: string;
   help?: string;
+  error?: string;
 }
 
-export function SelectField({ label, value, onChange, options, allowEmpty, emptyLabel = "-- none --", help }: SelectFieldProps) {
+export function SelectField({ label, value, onChange, options, allowEmpty, emptyLabel = "-- none --", help, error }: SelectFieldProps) {
   return (
-    <div className="mb-2">
-      <FieldLabel label={label} help={help} />
-      <select className={selectClass} value={value} onChange={(e) => onChange(e.target.value)}>
-        {allowEmpty && <option value="">{emptyLabel}</option>}
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </div>
+    <FieldRow label={label} help={help} error={error}>
+      {({ inputId, describedBy }) => (
+        <select
+          id={inputId}
+          aria-describedby={describedBy}
+          aria-invalid={error ? true : undefined}
+          className={selectClass}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          {allowEmpty && <option value="">{emptyLabel}</option>}
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      )}
+    </FieldRow>
   );
 }
 
@@ -226,32 +330,41 @@ interface SelectFieldWithCreateProps extends SelectFieldProps {
   onCreate: () => string; // returns the new name
 }
 
-export function SelectFieldWithCreate({ label, value, onChange, options, allowEmpty, emptyLabel, onCreate, help }: SelectFieldWithCreateProps) {
+export function SelectFieldWithCreate({ label, value, onChange, options, allowEmpty, emptyLabel, onCreate, help, error }: SelectFieldWithCreateProps) {
   return (
-    <div className="mb-2">
-      <FieldLabel label={label} help={help} />
-      <div className="flex gap-1">
-        <select className={selectClass + " flex-1"} value={value} onChange={(e) => onChange(e.target.value)}>
-          {allowEmpty && <option value="">{emptyLabel ?? "-- none --"}</option>}
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          className="bg-success hover:bg-success text-xs px-1.5 rounded shrink-0"
-          onClick={() => {
-            const newName = onCreate();
-            onChange(newName);
-          }}
-          title={`Create new ${label.toLowerCase()}`}
-        >
-          +
-        </button>
-      </div>
-    </div>
+    <FieldRow label={label} help={help} error={error}>
+      {({ inputId, describedBy }) => (
+        <div className="flex gap-1">
+          <select
+            id={inputId}
+            aria-describedby={describedBy}
+            aria-invalid={error ? true : undefined}
+            className={selectClass + " flex-1"}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+          >
+            {allowEmpty && <option value="">{emptyLabel ?? "-- none --"}</option>}
+            {options.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="bg-success hover:bg-success text-xs px-1.5 rounded shrink-0"
+            onClick={() => {
+              const newName = onCreate();
+              onChange(newName);
+            }}
+            title={`Create new ${label.toLowerCase()}`}
+            aria-label={`Create new ${label.toLowerCase()}`}
+          >
+            +
+          </button>
+        </div>
+      )}
+    </FieldRow>
   );
 }
 
@@ -360,6 +473,7 @@ interface PromptPickerFieldProps {
   allowEmpty?: boolean;
   emptyLabel?: string;
   help?: string;
+  error?: string;
 }
 
 /**
@@ -380,6 +494,7 @@ export function PromptPickerField({
   allowEmpty,
   emptyLabel = "-- select prompt --",
   help,
+  error,
 }: PromptPickerFieldProps) {
   const previewLines = useMemo(() => {
     if (!body) return "";
@@ -389,63 +504,70 @@ export function PromptPickerField({
   }, [body]);
 
   return (
-    <div className="mb-2">
-      <FieldLabel label={label} help={help} />
-      <div className="flex gap-1">
-        <select
-          className={selectClass + " flex-1"}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          {allowEmpty && <option value="">{emptyLabel}</option>}
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          className="bg-surface-2 hover:bg-surface-3 text-xs px-1.5 rounded shrink-0 inline-flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
-          onClick={() => value && onEdit(value)}
-          disabled={!value}
-          title={value ? `Edit prompt "${value}"` : "Select a prompt to edit"}
-          aria-label={value ? `Edit prompt ${value}` : "Edit prompt"}
-        >
-          <Pencil1Icon />
-        </button>
-        <button
-          type="button"
-          className="bg-success hover:bg-success text-xs px-1.5 rounded shrink-0"
-          onClick={() => {
-            const newName = onCreate();
-            onChange(newName);
-            onEdit(newName);
-          }}
-          title={`Create new ${label.toLowerCase()}`}
-        >
-          +
-        </button>
-      </div>
-      {value && body && (
-        <button
-          type="button"
-          className="mt-1 w-full text-left rounded border border-border-default bg-surface-0 hover:border-accent transition-colors"
-          onClick={() => onEdit(value)}
-          title="Click to edit in large editor"
-        >
-          <PromptOverlayHighlight
-            value={previewLines}
-            inline
-            className="px-2 py-1 text-[11px] font-mono text-fg-muted leading-snug"
-            maxHeight="4.5em"
-          />
-        </button>
+    <FieldRow label={label} help={help} error={error}>
+      {({ inputId, describedBy }) => (
+        <>
+          <div className="flex gap-1">
+            <select
+              id={inputId}
+              aria-describedby={describedBy}
+              aria-invalid={error ? true : undefined}
+              className={selectClass + " flex-1"}
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+            >
+              {allowEmpty && <option value="">{emptyLabel}</option>}
+              {options.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="bg-surface-2 hover:bg-surface-3 text-xs px-1.5 rounded shrink-0 inline-flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
+              onClick={() => value && onEdit(value)}
+              disabled={!value}
+              title={value ? `Edit prompt "${value}"` : "Select a prompt to edit"}
+              aria-label={value ? `Edit prompt ${value}` : "Edit prompt"}
+            >
+              <Pencil1Icon />
+            </button>
+            <button
+              type="button"
+              className="bg-success hover:bg-success text-xs px-1.5 rounded shrink-0"
+              onClick={() => {
+                const newName = onCreate();
+                onChange(newName);
+                onEdit(newName);
+              }}
+              title={`Create new ${label.toLowerCase()}`}
+              aria-label={`Create new ${label.toLowerCase()}`}
+            >
+              +
+            </button>
+          </div>
+          {value && body && (
+            <button
+              type="button"
+              className="mt-1 w-full text-left rounded border border-border-default bg-surface-0 hover:border-accent transition-colors"
+              onClick={() => onEdit(value)}
+              title="Click to edit in large editor"
+            >
+              <PromptOverlayHighlight
+                value={previewLines}
+                inline
+                className="px-2 py-1 text-[11px] font-mono text-fg-muted leading-snug"
+                maxHeight="4.5em"
+              />
+            </button>
+          )}
+          {value && !body && (
+            <p className="mt-1 text-[10px] text-fg-subtle italic">Empty prompt body — click the pencil to write it.</p>
+          )}
+        </>
       )}
-      {value && !body && (
-        <p className="mt-1 text-[10px] text-fg-subtle italic">Empty prompt body — click the pencil to write it.</p>
-      )}
-    </div>
+    </FieldRow>
   );
 }
 

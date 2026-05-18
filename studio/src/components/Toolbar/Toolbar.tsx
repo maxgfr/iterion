@@ -7,6 +7,7 @@ import { createEmptyDocument } from "@/lib/defaults";
 import * as api from "@/api/client";
 import ConfirmDialog from "../shared/ConfirmDialog";
 import { useConfirm } from "@/hooks/useConfirm";
+import { DISCARD_CHANGES_PROMPT } from "@/lib/copy";
 import ShortcutsHelp from "../shared/ShortcutsHelp";
 import FilePicker from "../FilePicker/FilePicker";
 import {
@@ -85,12 +86,7 @@ export default function Toolbar() {
 
   const confirmDiscard = useCallback(async () => {
     if (!isDirty()) return true;
-    return confirm({
-      title: "Discard unsaved changes?",
-      message: "You have unsaved changes that will be lost.",
-      confirmLabel: "Discard",
-      confirmVariant: "danger",
-    });
+    return confirm(DISCARD_CHANGES_PROMPT);
   }, [isDirty, confirm]);
 
   const handleNew = useCallback(async () => {

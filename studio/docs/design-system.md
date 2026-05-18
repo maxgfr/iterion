@@ -159,7 +159,28 @@ markerEnd: { type: MarkerType.ArrowClosed, color: "var(--color-fg-subtle)", widt
 
 ### Themes
 
-The studio supports dark and light themes via `[data-theme="..."]` on `<html>` (managed by [`store/theme.ts`](../src/store/theme.ts)). Light-mode canvas support is still **partial** — the node-kind tokens currently keep their dark-friendly values in both themes. Improving this is on the roadmap; until then, the dark canvas + light chrome combination is the supported configuration.
+The studio supports dark and light themes via `[data-theme="..."]` on `<html>` (managed by [`store/theme.ts`](../src/store/theme.ts)). The full token palette — including the **canvas tokens** (`node-*`, `layer-*`, `selected`, `sub-tool`, `library-pattern`) — has light-mode overrides using the Tailwind-700 family for contrast against the lighter surface.
+
+When adding a new color token to `@theme`, **always** add the matching `[data-theme="light"]` override. If you forget, light mode falls back to the dark default and prints poorly on white surfaces.
+
+## Accessibility
+
+What's already wired:
+- `:focus-visible` global outline ([app.css:148](../src/app.css#L148)).
+- All `disabled:` controls pair their visual change with `disabled:cursor-not-allowed` (Q4).
+- `ConfirmDialog` traps focus and exits on Escape.
+- `useConfirm` returns a Promise so call-sites stay synchronous-shaped.
+- `Skeleton` renders `aria-hidden` so screen readers skip the shimmer.
+- Toast component is announced via the toast bus.
+- FormField inputs wire `aria-describedby` to their help icon and error message via the `FieldRow` wrapper. Set the `error` prop to render `<p role="alert">` and add `aria-invalid` on the input.
+
+Open items (need human / axe-core verification):
+- Light mode contrast on status badges (severity tokens currently desaturated for light — sample with WCAG checker).
+- Canvas node text contrast on `softColor(color, 10)` backgrounds, both themes.
+- Skip-link from the page chrome to the main work surface (editor canvas, run view, etc.). Not yet present.
+- Full keyboard reachability of the canvas — recent commits added aux + sub-node keyboard nav, but cycling between root nodes via `Tab` alone is not yet exhaustive.
+
+Run an axe-core sweep (e.g. `axe-core` browser extension) on `/`, `/editor`, `/runs/:id`, `/board`, `/dispatcher`, `/settings` to surface anything missed.
 
 ## Don'ts
 
@@ -182,12 +203,9 @@ Before adding a new primitive, ask:
 2. **Is this a one-off vs reusable?** A one-off form layout is fine inline; a pattern repeated 3+ times deserves a primitive.
 3. **Where does this fit in the tokens?** If you can't name the design tokens you'd use, the design isn't finished yet — pause and define them.
 
-## Open items (roadmap)
+## Open items
 
-These were captured in the design-system audit and are intentionally **not** done yet — they need their own focused passes:
-
-- **M3** — Unified fetch abstraction (TanStack Query or thin wrapper) to replace the ad-hoc polling in `useRuns`, `useRunFiles`, `useEffortCapabilities`. This unblocks consistent loading/error semantics in consumers.
-- **M4** — Micro-copy lexicon (`lib/copy.ts`) for centralized strings. Most useful once i18n becomes a concrete request.
-- **L1** — `FormField` primitive (`<FormField label="" help="" error="">`) to dedupe the ~15× repeated label+control+help pattern across the inspector forms.
-- **L2** — Light-mode canvas + WCAG AA audit. Once the canvas node tokens have a proper light variant, run axe-core on Home/Editor/RunView/Board/Dispatcher and fix violations.
 - **Status pulse semantics** — `animate-pulse` is currently used for 5 different meanings (WS live, run running, diagnostic urgent, node running, info). Worth a separate audit to assign clear visual vocabulary.
+- **WCAG AA contrast audit on every theme** — light mode overrides shipped, but no automated pass yet. Run axe-core (browser extension) on `/`, `/editor`, `/runs/:id`, `/board`, `/dispatcher`, `/settings`.
+- **Skip-link** for keyboard users from the page header to the main work surface.
+- **Mobile / responsive** — explicitly out of scope until a use-case demands it.
