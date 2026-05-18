@@ -6,6 +6,8 @@
 import { readFile } from "node:fs/promises";
 import { basename, join, normalize } from "node:path";
 
+import { IterionStoreParseError } from "./errors.js";
+
 export const DEFAULT_STORE_DIR = ".iterion";
 
 export function resolveStoreDir(storeDir: string | undefined): string {
@@ -75,5 +77,9 @@ export function artifactDir(
 
 export async function readJSON<T>(path: string): Promise<T> {
   const raw = await readFile(path, "utf8");
-  return JSON.parse(raw) as T;
+  try {
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    throw new IterionStoreParseError(path, err);
+  }
 }

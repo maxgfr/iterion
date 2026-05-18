@@ -311,6 +311,14 @@ export class IterionClient {
    * Tail the events.jsonl for a run. Reads directly from the store
    * (no child process). With `follow: true` the iterator stays open
    * until the supplied AbortSignal fires.
+   *
+   * Lifecycle: the underlying file handle is closed by the generator's
+   * `finally` block, which runs when iteration terminates normally OR when
+   * the caller exits via `break`, `return`, or a thrown error inside the
+   * loop. To guarantee cleanup, consumers must drive the iterable with
+   * `for await (...) of` (or call `.return()` on the iterator). Storing
+   * the iterable and abandoning it without iteration leaks the file
+   * handle until garbage collection finalises the generator.
    */
   events(runId: string, opts: TailEventsOptions = {}): AsyncIterable<Event> {
     return tailEvents(runId, {

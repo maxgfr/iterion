@@ -52,6 +52,11 @@ export async function execIterion(
     let timedOut = false;
     let aborted = false;
     let settled = false;
+    // Pending escalation timer (SIGKILL after SIGTERM grace) — held so we can
+    // clear it when the child exits before the grace window elapses; without
+    // this the timer and its closure linger until 2s expires even though the
+    // process is already gone.
+    let killTimer: NodeJS.Timeout | null = null;
 
     const stderrLines = opts.onStderrLine
       ? createInterface({ input: child.stderr as Readable, crlfDelay: Infinity })
@@ -86,8 +91,10 @@ export async function execIterion(
         ? setTimeout(() => {
             timedOut = true;
             child.kill("SIGTERM");
-            // Hard kill if SIGTERM is ignored.
-            setTimeout(() => child.kill("SIGKILL"), 2000).unref();
+            // Hard kill if SIGTERM is ignored. Tracked so the `close`/`error`
+            // handlers can cancel it when the child exits within the grace.
+            killTimer = setTimeout(() => child.kill("SIGKILL"), 2000);
+            killTimer.unref?.();
           }, opts.timeoutMs)
         : null;
 
@@ -114,6 +121,7 @@ export async function execIterion(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
       const stdout = Buffer.concat(stdoutChunks).toString("utf8");
       const stderr = Buffer.concat(stderrChunks).toString("utf8");
@@ -134,6 +142,7 @@ export async function execIterion(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
       stderrLines?.close();
       const stdout = Buffer.concat(stdoutChunks).toString("utf8");
