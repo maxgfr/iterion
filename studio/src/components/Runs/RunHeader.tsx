@@ -7,17 +7,18 @@ import { cancelRun, getRun, loadEvents } from "@/api/runs";
 import { Button, CopyButton, IconButton, LiveDot, StatusBadge, Tooltip } from "@/components/ui";
 import AppHeader from "@/components/shared/AppHeader";
 import WSStatusDot from "@/components/shared/WSStatusDot";
-import { useRunStore } from "@/store/run";
+import { useRunStore, type WsState } from "@/store/run";
 
 import ResumeDialog from "./ResumeDialog";
 
 interface Props {
   run: RunHeaderType;
   active: boolean;
-  wsState: string;
+  wsState: WsState;
 }
 
 export default function RunHeader({ run, active, wsState }: Props) {
+  const requestWsReconnect = useRunStore((s) => s.requestWsReconnect);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resumeOpen, setResumeOpen] = useState(false);
@@ -197,7 +198,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
           )}
         </div>
       </div>
-      <WSDisconnectBanner state={wsState} />
+      <WSDisconnectBanner state={wsState} onReconnect={requestWsReconnect} />
       {showFinalization && <FinalizationRow run={run} />}
       <ErrorHintRow run={run} onResume={() => setResumeOpen(true)} />
 
@@ -212,14 +213,16 @@ export default function RunHeader({ run, active, wsState }: Props) {
   );
 }
 
-// WSDisconnectBanner shows an inline warning row when the run-console
-// WebSocket has been closed for at least 2 seconds. Without this banner
-// the only signal that live updates have stopped is the small WSStatusDot
-// in the header — easy to miss while watching the event log. The 2-second
-// debounce avoids flicker during normal reconnect blips.
-function WSDisconnectBanner({ state }: { state: string }) {
+// 2-second debounce on the visible banner avoids flicker during normal
+// reconnect blips — anything shorter than that the user shouldn't see.
+function WSDisconnectBanner({
+  state,
+  onReconnect,
+}: {
+  state: WsState;
+  onReconnect: () => void;
+}) {
   const [showStale, setShowStale] = useState(false);
-  const requestReconnect = useRunStore((s) => s.requestWsReconnect);
   useEffect(() => {
     if (state !== "closed") {
       setShowStale(false);
@@ -237,12 +240,7 @@ function WSDisconnectBanner({ state }: { state: string }) {
     >
       <LiveDot tone="danger" size="sm" pulse={false} />
       <span>Live updates disconnected — data may be stale.</span>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="ml-auto"
-        onClick={() => requestReconnect()}
-      >
+      <Button variant="ghost" size="sm" className="ml-auto" onClick={onReconnect}>
         Reconnect
       </Button>
     </div>

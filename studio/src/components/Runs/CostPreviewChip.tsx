@@ -2,48 +2,36 @@ import { useQuery } from "@tanstack/react-query";
 
 import { previewRunCost } from "@/api/runs";
 import { Tooltip } from "@/components/ui/Tooltip";
+import { formatCost, formatTokens } from "@/lib/format";
 
 interface Props {
-  // The .iter file path the workflow was loaded from. The server uses
-  // it as a parser anchor and (in local mode) as a filesystem fallback
-  // when `source` is empty.
   filePath?: string;
-  // Inline workflow body. Wins over filePath when both are set, matching
-  // the launch endpoint's precedence.
   source?: string;
 }
 
-const fmtUSD = (v: number): string => {
-  if (v >= 1) return `$${v.toFixed(2)}`;
-  if (v >= 0.01) return `$${v.toFixed(2)}`;
-  return `$${v.toFixed(3)}`;
-};
+// Cheap, non-cryptographic source digest for the react-query cache key.
+// Stringifying the entire .iter source as a key causes lookups to
+// stringify-then-compare on every render; the digest collapses that to
+// a fixed-length number while still invalidating on real edits.
+function digest(s: string | undefined): number {
+  if (!s) return 0;
+  let h = 0x811c9dc5; // FNV-1a 32-bit seed
+  for (let i = 0; i < s.length; i++) {
+    h = ((h ^ s.charCodeAt(i)) * 0x01000193) >>> 0;
+  }
+  return h;
+}
 
-const fmtTokens = (n: number): string => {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.round(n / 1000)}k`;
-  return String(n);
-};
-
-// CostPreviewChip surfaces an inline best-effort cost estimate next to
-// the Launch button so the operator catches accidental five-dollar
-// runs before clicking. Silently hidden when:
-//   - the endpoint hasn't responded yet (initial fetch)
-//   - the workflow has no LLM nodes (notes contains "no_llm_nodes")
-//   - none of the resolved models has pricing data ("no_pricing_data")
-//   - the source can't be parsed yet ("workflow_unparseable")
-//   - the fetch fails (network / 5xx)
-// The chip is decoration, not a gate; the Launch button stays the
-// authoritative validation surface.
+// The chip is decoration, not a gate — the Launch button remains the
+// authoritative validation surface, so we silently hide on any failure
+// mode rather than surface an error.
 export default function CostPreviewChip({ filePath, source }: Props) {
   const enabled = (source ?? "").length > 0 || (filePath ?? "").length > 0;
   const { data, isLoading, error } = useQuery({
-    queryKey: ["preview-cost", filePath, source],
+    queryKey: ["preview-cost", filePath, digest(source)],
     queryFn: () => previewRunCost({ file_path: filePath, source }),
     enabled,
     staleTime: 30_000,
-    // Cost estimates are advisory — don't surface transient network
-    // errors as toasts or banners. The chip just stays hidden.
     retry: false,
   });
 
@@ -53,9 +41,9 @@ export default function CostPreviewChip({ filePath, source }: Props) {
 
   const range =
     data.cost_min_usd > 0
-      ? `${fmtUSD(data.cost_min_usd)}–${fmtUSD(data.cost_max_usd)}`
-      : fmtUSD(data.cost_max_usd);
-  const tokens = fmtTokens(Math.round((data.tokens_min + data.tokens_max) / 2));
+      ? `${formatCost(data.cost_min_usd)}–${formatCost(data.cost_max_usd)}`
+      : formatCost(data.cost_max_usd);
+  const tokens = formatTokens(Math.round((data.tokens_min + data.tokens_max) / 2));
 
   const tooltip = (
     <div className="space-y-1">
@@ -77,7 +65,7 @@ export default function CostPreviewChip({ filePath, source }: Props) {
               </span>
             )}
             <span className="ml-auto text-fg-muted tabular-nums">
-              {n.cost_min_usd > 0 ? fmtUSD(n.cost_min_usd) : "—"}
+              {n.cost_min_usd > 0 ? formatCost(n.cost_min_usd) : "—"}
             </span>
           </li>
         ))}

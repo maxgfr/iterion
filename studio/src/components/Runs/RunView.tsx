@@ -56,6 +56,13 @@ const EVENTLOG_COLLAPSED_KEY = "run-console-v1.eventlog-collapsed";
 const BOTTOM_TAB_KEY = "run-console-v1.bottom-tab";
 const BOTTOM_TABS = ["events", "logs", "report", "browser", "artifacts"] as const;
 type BottomTab = (typeof BOTTOM_TABS)[number];
+const BOTTOM_TAB_LABELS: Record<BottomTab, string> = {
+  events: "Events",
+  logs: "Logs",
+  report: "Report",
+  browser: "Browser",
+  artifacts: "Artifacts",
+};
 const BROWSER_DOCK_KEY = "run-console-v1.browser-dock";
 
 function readBrowserDock(): BrowserDock {
@@ -774,15 +781,9 @@ export default function RunView() {
                     <Tabs
                       value={bottomTab}
                       onValueChange={(v) => handleSetBottomTab(v as BottomTab)}
-                      items={[
-                        { value: "events", label: "Events" },
-                        { value: "logs", label: "Logs" },
-                        { value: "report", label: "Report" },
-                        { value: "artifacts", label: "Artifacts" },
-                        ...(browserAvailable && !browserRightDocked
-                          ? [{ value: "browser", label: "Browser" }]
-                          : []),
-                      ]}
+                      items={BOTTOM_TABS.filter(
+                        (t) => t !== "browser" || (browserAvailable && !browserRightDocked),
+                      ).map((t) => ({ value: t, label: BOTTOM_TAB_LABELS[t] }))}
                       variant="underline"
                       listClassName="px-3"
                     />

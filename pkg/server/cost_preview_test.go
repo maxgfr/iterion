@@ -100,7 +100,8 @@ func TestPreviewCost_UnparseableSource(t *testing.T) {
 }
 
 func TestPreviewCost_MissingBoth(t *testing.T) {
-	resp, err := http.Post((&newTestHSAdapter{t: t}).URL()+"/api/runs/preview-cost", "application/json", bytes.NewReader([]byte("{}")))
+	_, hs := newTestServer(t)
+	resp, err := http.Post(hs.URL+"/api/runs/preview-cost", "application/json", bytes.NewReader([]byte("{}")))
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
@@ -141,15 +142,4 @@ func containsNote(notes []string, want string) bool {
 		}
 	}
 	return false
-}
-
-// newTestHSAdapter wraps newTestServer in a struct so TestPreviewCost_MissingBoth
-// (which spawns its own server inline) can call .URL() without re-declaring vars.
-type newTestHSAdapter struct {
-	t *testing.T
-}
-
-func (a *newTestHSAdapter) URL() string {
-	_, hs := newTestServer(a.t)
-	return hs.URL
 }

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import { useUIStore, type Toast } from "@/store/ui";
 
@@ -30,19 +30,23 @@ export default function ToastContainer() {
   const toasts = useUIStore((s) => s.toasts);
   const removeToast = useUIStore((s) => s.removeToast);
 
-  // Escape dismisses the most-recent toast. The container is a region
-  // landmark, not a focus trap, so Escape doesn't interfere with modal
-  // dialogs above (they grab Escape before this fires through Radix).
+  // Escape dismisses the most-recent toast. The listener registers once
+  // and reads `toasts` via a ref so it doesn't churn on every toast
+  // add/remove. The container is a region landmark, not a focus trap,
+  // so Escape doesn't interfere with modal dialogs above them (Radix
+  // grabs the event first inside any open modal).
+  const toastsRef = useRef(toasts);
+  toastsRef.current = toasts;
   useEffect(() => {
-    if (toasts.length === 0) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      const top = toasts[toasts.length - 1];
+      const list = toastsRef.current;
+      const top = list[list.length - 1];
       if (top) removeToast(top.id);
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [toasts, removeToast]);
+  }, [removeToast]);
 
   if (toasts.length === 0) return null;
 
