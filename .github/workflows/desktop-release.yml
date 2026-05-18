@@ -64,6 +64,12 @@ jobs:
       # GOTOOLCHAIN=local (setup-go default), `go build` would refuse to
       # run instead of fetching the requested toolchain.
       GOTOOLCHAIN: auto
+      # macOS runners cap Node old-space at 2 GB and the production
+      # vite build (NodeIcon ~1.8 MB chunk) blows past it with SIGABRT.
+      # Apply at the job level so every shell step — including the
+      # `task desktop:build:*` invocation which re-runs studio:build
+      # via deps — inherits it.
+      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - uses: actions/checkout@v6
 
@@ -134,12 +140,8 @@ jobs:
       - name: Build studio frontend
         shell: bash
         working-directory: studio
-        env:
-          # macOS runners cap Node's old-space at 2 GB by default which
-          # is too tight for the production vite build (NodeIcon chunk
-          # pushes v8 to SIGABRT). 4096 MiB clears it with headroom on
-          # every runner OS.
-          NODE_OPTIONS: --max-old-space-size=4096
+        # NODE_OPTIONS=--max-old-space-size=4096 inherited from the job
+        # env so the vite build clears macOS's 2 GB old-space cap.
         run: |
           # Cross-platform inline of the studio:build Taskfile target.
           # On Windows runners go-task v3 falls back to mvdan/sh for POSIX
