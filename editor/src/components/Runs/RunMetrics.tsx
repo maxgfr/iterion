@@ -23,7 +23,36 @@ export default function RunMetrics({ active, onJumpToFailed }: Props) {
     <div className="px-4 py-1.5 border-b border-border-default flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] bg-surface-1">
       <Metric label="duration" value={formatMs(m.durationMs)} live={active} />
       {m.llmStepCount > 0 && (
-        <Metric label="cost" value={formatCost(m.costUsd)} />
+        <Metric
+          label="cost"
+          value={formatCost(m.costUsd)}
+          tone={
+            m.budgetExceeded
+              ? "danger"
+              : m.budgetWarning?.dimension === "cost_usd"
+              ? "warning"
+              : undefined
+          }
+          tooltip={
+            m.budgetWarning?.dimension === "cost_usd"
+              ? `Budget warning: ${Math.round(m.budgetWarning.ratio * 100)}% of $${m.budgetWarning.limit.toFixed(2)} consumed.`
+              : undefined
+          }
+        />
+      )}
+      {m.budgetWarning && (
+        <span
+          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border ${
+            m.budgetExceeded
+              ? "bg-danger-soft text-danger-fg border-danger/40"
+              : "bg-warning-soft text-warning-fg border-warning/40"
+          }`}
+          title={`The runtime hit ${Math.round(m.budgetWarning.ratio * 100)}% of the ${m.budgetWarning.dimension} budget (${m.budgetWarning.used} / ${m.budgetWarning.limit}). ${
+            m.budgetExceeded ? "Hard cap reached." : "Soft threshold; the run will be cancelled once the hard cap is hit."
+          }`}
+        >
+          budget {m.budgetWarning.dimension} {Math.round(m.budgetWarning.ratio * 100)}%
+        </span>
       )}
       {(m.inputTokens > 0 || m.outputTokens > 0) && (
         <Metric
@@ -85,7 +114,7 @@ function Metric({
   label: string;
   value: string;
   live?: boolean;
-  tone?: "info" | "warning";
+  tone?: "info" | "warning" | "danger";
   tooltip?: string;
 }) {
   const valueColor =
@@ -93,6 +122,8 @@ function Metric({
       ? "text-info-fg"
       : tone === "warning"
       ? "text-warning-fg"
+      : tone === "danger"
+      ? "text-danger-fg"
       : "text-fg-default";
   return (
     <span className="inline-flex items-center gap-1" title={tooltip}>

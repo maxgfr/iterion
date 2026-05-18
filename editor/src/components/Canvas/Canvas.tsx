@@ -5,7 +5,7 @@ import { useDocumentStore } from "@/store/document";
 import { useSelectionStore } from "@/store/selection";
 import { useUIStore } from "@/store/ui";
 import { useThemeStore } from "@/store/theme";
-import { NODE_COLORS, DEBOUNCE_FIT_VIEW_MS, DEBOUNCE_LAYOUT_SETTLE_MS } from "@/lib/constants";
+import { NODE_COLORS, DEBOUNCE_FIT_VIEW_MS, DEBOUNCE_LAYOUT_SETTLE_MS, type LayerKind } from "@/lib/constants";
 import { parseGroups } from "@/lib/groups";
 import { useActiveWorkflow } from "@/hooks/useActiveWorkflow";
 import { useCanvasSearch } from "@/hooks/useCanvasSearch";
@@ -36,6 +36,8 @@ import ToolPalette from "./ToolPalette";
 import QuickAddMenu from "./QuickAddMenu";
 import SchemaRoleDialog from "./SchemaRoleDialog";
 import SearchOverlay from "./SearchOverlay";
+import CommandPalette, { type CommandAction } from "@/components/shared/CommandPalette";
+import { useLocation } from "wouter";
 
 const nodeTypes = { workflowNode: WorkflowNode, auxiliaryNode: AuxiliaryNode, detailSubNode: DetailSubNode, groupNode: GroupNode };
 const edgeTypes = { conditionalEdge: ConditionalEdge, referenceEdge: ReferenceEdge };
@@ -88,6 +90,31 @@ export default function Canvas() {
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
+
+  // Command-palette state. Triggered by Cmd+K / Ctrl+K. Lives on the
+  // Canvas because every action wired below depends on Canvas-scoped
+  // handlers — promoting it higher would mean re-wiring the action list
+  // through context. The window-level listener captures Cmd+K from any
+  // focused element except text inputs.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [, setLocation] = useLocation();
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        const target = e.target as HTMLElement | null;
+        // Allow Cmd+K to open the palette even from inputs — that's
+        // the established VS Code / Linear convention. The shortcut
+        // is rare enough in inputs that the override is net-positive.
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+        // Drop focus on the underlying element so the palette's input
+        // wins focus reliably.
+        if (target && typeof target.blur === "function") target.blur();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   // Schema role dialog state (for existing schema drops without relation)
   const [schemaRoleDialog, setSchemaRoleDialog] = useState<{
@@ -376,6 +403,26 @@ export default function Canvas() {
         />
       )}
 
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        actions={buildPaletteActions({
+          selectedNodeId,
+          fitView: () => fitView({ padding: 0.2 }),
+          navigate: setLocation,
+          undo: () => useDocumentStore.getState().undo(),
+          redo: () => useDocumentStore.getState().redo(),
+          duplicate: (id) => useDocumentStore.getState().duplicateNode(id),
+          remove: (id) => useDocumentStore.getState().removeNode(id),
+          toggleExpanded: () => useUIStore.getState().toggleExpanded(),
+          toggleLayer: (layer) => useUIStore.getState().toggleLayer(layer),
+          toggleLibrary: () => useUIStore.getState().toggleLibraryPanel(),
+          openSearch: search.openSearch,
+          openFilePicker: () => useUIStore.getState().setFilePickerOpen(true),
+          clearSelection,
+        })}
+      />
+
       {/* Connection error feedback */}
       {connections.connectionError && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-50 bg-danger-soft text-danger-fg text-xs px-3 py-1.5 rounded-lg shadow-lg border border-danger">
@@ -503,4 +550,150 @@ export default function Canvas() {
       )}
     </div>
   );
+}
+
+// buildPaletteActions assembles the Cmd+K action list. Kept outside the
+// component so we don't recreate every action callback on every render
+// (each action is just a thunk over store getters, which are stable).
+function buildPaletteActions(deps: {
+  selectedNodeId: string | null;
+  fitView: () => void;
+  navigate: (path: string) => void;
+  undo: () => void;
+  redo: () => void;
+  duplicate: (id: string) => void;
+  remove: (id: string) => void;
+  toggleExpanded: () => void;
+  toggleLayer: (l: LayerKind) => void;
+  toggleLibrary: () => void;
+  openSearch: () => void;
+  openFilePicker: () => void;
+  clearSelection: () => void;
+}): CommandAction[] {
+  const hasSelection = deps.selectedNodeId !== null && isEditableNode(deps.selectedNodeId);
+  return [
+    {
+      id: "edit.undo",
+      group: "Edit",
+      title: "Undo",
+      shortcut: "Ctrl+Z",
+      keywords: ["revert", "back"],
+      run: deps.undo,
+    },
+    {
+      id: "edit.redo",
+      group: "Edit",
+      title: "Redo",
+      shortcut: "Ctrl+Y",
+      keywords: ["forward"],
+      run: deps.redo,
+    },
+    {
+      id: "edit.duplicate",
+      group: "Edit",
+      title: "Duplicate selected node",
+      shortcut: "Ctrl+D",
+      disabled: !hasSelection,
+      run: () => {
+        if (deps.selectedNodeId) deps.duplicate(deps.selectedNodeId);
+      },
+    },
+    {
+      id: "edit.delete",
+      group: "Edit",
+      title: "Delete selected node",
+      shortcut: "Del",
+      disabled: !hasSelection,
+      run: () => {
+        if (deps.selectedNodeId) deps.remove(deps.selectedNodeId);
+      },
+    },
+    {
+      id: "edit.clear-selection",
+      group: "Edit",
+      title: "Clear selection",
+      shortcut: "Esc",
+      run: deps.clearSelection,
+    },
+    {
+      id: "view.fit",
+      group: "View",
+      title: "Fit view to graph",
+      run: deps.fitView,
+    },
+    {
+      id: "view.expand",
+      group: "View",
+      title: "Toggle expanded view",
+      run: deps.toggleExpanded,
+    },
+    {
+      id: "view.library",
+      group: "View",
+      title: "Toggle library panel",
+      run: deps.toggleLibrary,
+    },
+    {
+      id: "view.layer.schemas",
+      group: "View",
+      title: "Toggle schemas layer",
+      shortcut: "Alt+1",
+      run: () => deps.toggleLayer("schemas"),
+    },
+    {
+      id: "view.layer.prompts",
+      group: "View",
+      title: "Toggle prompts layer",
+      shortcut: "Alt+2",
+      run: () => deps.toggleLayer("prompts"),
+    },
+    {
+      id: "view.layer.vars",
+      group: "View",
+      title: "Toggle vars layer",
+      shortcut: "Alt+3",
+      run: () => deps.toggleLayer("vars"),
+    },
+    {
+      id: "file.search-nodes",
+      group: "File",
+      title: "Search nodes on canvas",
+      shortcut: "/",
+      run: deps.openSearch,
+    },
+    {
+      id: "file.open",
+      group: "File",
+      title: "Open file…",
+      keywords: ["recents", "examples", "browse"],
+      run: deps.openFilePicker,
+    },
+    {
+      id: "nav.runs",
+      group: "Navigate",
+      title: "Runs",
+      keywords: ["run console", "history"],
+      run: () => deps.navigate("/runs"),
+    },
+    {
+      id: "nav.board",
+      group: "Navigate",
+      title: "Board",
+      keywords: ["kanban", "issues"],
+      run: () => deps.navigate("/board"),
+    },
+    {
+      id: "nav.conductor",
+      group: "Navigate",
+      title: "Conductor",
+      keywords: ["dispatcher", "retries"],
+      run: () => deps.navigate("/conductor"),
+    },
+    {
+      id: "nav.home",
+      group: "Navigate",
+      title: "Home",
+      run: () => deps.navigate("/"),
+    },
+  ];
 }

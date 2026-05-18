@@ -516,6 +516,28 @@ export default function EventLog({
   );
 }
 
+// indentForType returns a visual nesting level for the event log. The
+// goal is to make multi-turn LLM rounds and their tool calls visually
+// "owned" by the surrounding llm_request, so the eye can scan
+// turn-boundaries instead of treating every event as a sibling. The
+// runtime doesn't carry an explicit parent_seq on retries / tool calls,
+// so we lean on the event taxonomy itself.
+function indentForType(t: string): number {
+  switch (t) {
+    case "llm_step_finished":
+    case "llm_retry":
+    case "tool_started":
+    case "tool_called":
+    case "tool_error":
+    case "human_input_requested":
+      return 1;
+    case "artifact_written":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
 function EventRow({
   ann,
   onSelect,
@@ -525,6 +547,7 @@ function EventRow({
 }) {
   const e = ann.event;
   const badge = EVENT_BADGE[e.type] ?? "bg-surface-2 text-fg-muted";
+  const indent = indentForType(e.type);
   return (
     <button
       type="button"
@@ -537,7 +560,17 @@ function EventRow({
       }
     >
       <span className="text-fg-subtle">{e.seq.toString().padStart(4, "0")}</span>
-      <span className={`px-1.5 rounded ${badge}`}>{e.type}</span>
+      <span
+        className={`px-1.5 rounded ${badge}`}
+        style={indent > 0 ? { marginLeft: indent * 12 } : undefined}
+      >
+        {indent > 0 && (
+          <span className="text-fg-subtle mr-1" aria-hidden="true">
+            ↳
+          </span>
+        )}
+        {e.type}
+      </span>
       <span className="text-fg-default truncate">{e.node_id ?? "-"}</span>
       <span className="text-fg-subtle truncate">{ann.preview}</span>
     </button>
