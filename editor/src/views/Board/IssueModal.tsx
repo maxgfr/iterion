@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { Dialog } from "@/components/ui/Dialog";
 import type { NativeBoard, NativeIssue } from "@/api/native";
 
 interface Props {
@@ -47,26 +48,6 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
     setFields(out);
   }, [initial, board]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      // Don't swallow ESC that's meant to dismiss a textarea, an
-      // input, or a native <select>'s dropdown — closing the modal
-      // there would destroy unsaved edits.
-      const t = e.target as Element | null;
-      if (
-        t instanceof HTMLTextAreaElement ||
-        t instanceof HTMLInputElement ||
-        t instanceof HTMLSelectElement
-      ) {
-        return;
-      }
-      onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const out: Partial<NativeIssue> = {
@@ -88,31 +69,18 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-      onClick={onClose}
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+      title={initial ? "Edit issue" : "New issue"}
+      widthClass="max-w-[36rem]"
     >
       <form
-        onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
-        className="bg-surface-1 border border-border-default rounded shadow-2xl w-[36rem] max-w-[95vw] max-h-[90vh] overflow-auto"
+        className="max-h-[80vh] overflow-auto"
       >
-        <header className="px-4 py-2.5 border-b border-border-default flex items-center justify-between">
-          <h2 className="text-sm font-semibold">
-            {initial ? "Edit issue" : "New issue"}
-          </h2>
-          <button
-            type="button"
-            className="text-fg-muted hover:text-fg-default text-xl leading-none"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </header>
-
         <div className="p-4 space-y-3">
           <Field label="Title">
             <input
@@ -249,7 +217,7 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
           </div>
         </footer>
       </form>
-    </div>
+    </Dialog>
   );
 }
 

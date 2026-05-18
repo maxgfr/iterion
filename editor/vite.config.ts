@@ -13,6 +13,28 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
     sourcemap: true,
+    // Split heavy third-party deps into named chunks so the initial
+    // download stays close to the per-route shell (which is now
+    // React.lazy'd per route in App.tsx). Without manual chunks the
+    // single index-*.js bundle was >3 MB minified (892 kB gzipped),
+    // which dominated cold load on slow links. Each chunk maps to a
+    // dep cluster that ships together — splitting finer doesn't help
+    // because the chunks share runtime modules.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          reactflow: ["@xyflow/react"],
+          monaco: ["@monaco-editor/react", "monaco-editor"],
+          radix: [
+            "@radix-ui/react-dialog",
+            "@radix-ui/react-icons",
+            "@radix-ui/react-popover",
+            "@radix-ui/react-tabs",
+            "@radix-ui/react-tooltip",
+          ],
+        },
+      },
+    },
   },
   resolve: {
     alias: {

@@ -1,23 +1,28 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { Route, Switch } from "wouter";
 
-import EditorView from "@/components/EditorView";
-import HomeView from "@/components/Home/HomeView";
-import PiloteView from "@/components/Pilote/PiloteView";
-import LaunchView from "@/components/Runs/LaunchView";
-import RunListView from "@/components/Runs/RunListView";
-import RunView from "@/components/Runs/RunView";
-import BoardView from "@/views/Board";
-import ConductorView from "@/views/Conductor";
+// Routes are React.lazy'd so each view ships its own chunk and the
+// initial download covers only the shell + AuthGate. The eager imports
+// below are the always-needed shell pieces (Login lives off the auth
+// gate; everything else is conditional on a route match).
+const EditorView = lazy(() => import("@/components/EditorView"));
+const HomeView = lazy(() => import("@/components/Home/HomeView"));
+const PiloteView = lazy(() => import("@/components/Pilote/PiloteView"));
+const LaunchView = lazy(() => import("@/components/Runs/LaunchView"));
+const RunListView = lazy(() => import("@/components/Runs/RunListView"));
+const RunView = lazy(() => import("@/components/Runs/RunView"));
+const BoardView = lazy(() => import("@/views/Board"));
+const ConductorView = lazy(() => import("@/views/Conductor"));
+const Welcome = lazy(() => import("@/views/Welcome"));
+const Settings = lazy(() => import("@/views/Settings"));
+const ProjectSwitcher = lazy(() => import("@/views/ProjectSwitcher"));
+const SettingsPage = lazy(() => import("@/views/settings/SettingsPage"));
+const TeamPage = lazy(() => import("@/views/teams/TeamPage"));
+
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import ToastContainer from "@/components/shared/Toast";
 import MissingCLIBanner from "@/components/MissingCLIBanner";
-import Welcome from "@/views/Welcome";
-import Settings from "@/views/Settings";
-import ProjectSwitcher from "@/views/ProjectSwitcher";
 import Login from "@/views/Login";
-import SettingsPage from "@/views/settings/SettingsPage";
-import TeamPage from "@/views/teams/TeamPage";
 import { useDesktop } from "@/hooks/useDesktop";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useProjectSwitchListener } from "@/hooks/useProjectSwitchListener";
@@ -131,71 +136,91 @@ function AuthedApp() {
   }
 
   if (isDesktop && firstRunPending) {
-    return <Welcome onComplete={refresh} />;
+    return (
+      <Suspense
+        fallback={
+          <div className="h-screen bg-surface-0 text-fg-default p-8">Loading…</div>
+        }
+      >
+        <Welcome onComplete={refresh} />
+      </Suspense>
+    );
   }
 
   return (
     <>
       {isDesktop && <MissingCLIBanner />}
-      <Switch>
-        <Route path="/runs/new">
-          <ErrorBoundary area="Launch view">
-            <LaunchView />
-          </ErrorBoundary>
-        </Route>
-        <Route path="/runs/:id">
-          {(params) => (
-            <ErrorBoundary area="Run view" resetKey={params.id ?? null}>
-              <RunView />
+      <Suspense
+        fallback={
+          <div className="h-screen flex items-center justify-center bg-surface-0 text-fg-muted">
+            Loading view…
+          </div>
+        }
+      >
+        <Switch>
+          <Route path="/runs/new">
+            <ErrorBoundary area="Launch view">
+              <LaunchView />
             </ErrorBoundary>
+          </Route>
+          <Route path="/runs/:id">
+            {(params) => (
+              <ErrorBoundary area="Run view" resetKey={params.id ?? null}>
+                <RunView />
+              </ErrorBoundary>
+            )}
+          </Route>
+          <Route path="/runs">
+            <ErrorBoundary area="Runs list">
+              <RunListView />
+            </ErrorBoundary>
+          </Route>
+          <Route path="/account" component={SettingsPage} />
+          <Route path="/teams/:id" component={TeamPage} />
+          {serverInfo?.native_tracker_enabled && (
+            <Route path="/board">
+              <ErrorBoundary area="Board view">
+                <BoardView />
+              </ErrorBoundary>
+            </Route>
           )}
-        </Route>
-        <Route path="/runs">
-          <ErrorBoundary area="Runs list">
-            <RunListView />
-          </ErrorBoundary>
-        </Route>
-        <Route path="/account" component={SettingsPage} />
-        <Route path="/teams/:id" component={TeamPage} />
-        {serverInfo?.native_tracker_enabled && (
-          <Route path="/board">
-            <ErrorBoundary area="Board view">
-              <BoardView />
+          {serverInfo?.conductor_enabled && (
+            <Route path="/conductor">
+              <ErrorBoundary area="Conductor view">
+                <ConductorView />
+              </ErrorBoundary>
+            </Route>
+          )}
+          <Route path="/editor" component={EditorView} />
+          <Route path="/pilote">
+            <ErrorBoundary area="Pilote view">
+              <PiloteView />
             </ErrorBoundary>
           </Route>
-        )}
-        {serverInfo?.conductor_enabled && (
-          <Route path="/conductor">
-            <ErrorBoundary area="Conductor view">
-              <ConductorView />
-            </ErrorBoundary>
-          </Route>
-        )}
-        <Route path="/editor" component={EditorView} />
-        <Route path="/pilote">
-          <ErrorBoundary area="Pilote view">
-            <PiloteView />
-          </ErrorBoundary>
-        </Route>
-        <Route path="/" component={HomeView} />
-        <Route component={HomeView} />
-      </Switch>
+          <Route path="/" component={HomeView} />
+          <Route component={HomeView} />
+        </Switch>
+      </Suspense>
       <ToastContainer />
-      {isDesktop && (
-        <Settings
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-          tab={settingsTab}
-          onTabChange={setSettingsTab}
-        />
-      )}
-      {/* ProjectSwitcher renders in both desktop and local-server modes.
-          Cloud mode (no work_dir) renders nothing useful; we still mount
-          it so the Ctrl+P shortcut and ProjectLabel chip have somewhere
-          to dispatch — the dialog just shows an empty list there. */}
-      {serverInfo?.mode !== "cloud" && (
-        <ProjectSwitcher open={switcherOpen} onClose={() => setSwitcherOpen(false)} />
-      )}
+      {/* Settings + ProjectSwitcher are also lazy and need their own
+          Suspense boundary because they unmount/remount on open/close. */}
+      <Suspense fallback={null}>
+        {isDesktop && (
+          <Settings
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            tab={settingsTab}
+            onTabChange={setSettingsTab}
+          />
+        )}
+        {/* ProjectSwitcher renders in both desktop and local-server modes.
+            Cloud mode (no work_dir) renders nothing useful; we still mount
+            it so the Ctrl+P shortcut and ProjectLabel chip have somewhere
+            to dispatch — the dialog just shows an empty list there. */}
+        {serverInfo?.mode !== "cloud" && (
+          <ProjectSwitcher open={switcherOpen} onClose={() => setSwitcherOpen(false)} />
+        )}
+      </Suspense>
     </>
   );
 }
