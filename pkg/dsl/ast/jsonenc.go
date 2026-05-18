@@ -202,6 +202,15 @@ type jsonCompactionBlock struct {
 	PreserveRecent *int     `json:"preserve_recent,omitempty"`
 }
 
+type jsonMemoryBlock struct {
+	Enabled          *bool    `json:"enabled,omitempty"`
+	Scope            *string  `json:"scope,omitempty"`
+	Autoload         []string `json:"autoload,omitempty"`
+	Read             *bool    `json:"read,omitempty"`
+	Write            *bool    `json:"write,omitempty"`
+	PreCompactInject *bool    `json:"pre_compact_inject,omitempty"`
+}
+
 type jsonPromptDecl struct {
 	Name string `json:"name,omitempty"`
 	Body string `json:"body,omitempty"`
@@ -242,6 +251,7 @@ type jsonAgentDecl struct {
 	InteractionModel  string               `json:"interaction_model,omitempty"`
 	Await             string               `json:"await,omitempty"`
 	Compaction        *jsonCompactionBlock `json:"compaction,omitempty"`
+	Memory            *jsonMemoryBlock     `json:"memory,omitempty"`
 	Sandbox           *jsonSandboxBlock    `json:"sandbox,omitempty"`
 }
 
@@ -269,6 +279,7 @@ type jsonJudgeDecl struct {
 	InteractionModel  string               `json:"interaction_model,omitempty"`
 	Await             string               `json:"await,omitempty"`
 	Compaction        *jsonCompactionBlock `json:"compaction,omitempty"`
+	Memory            *jsonMemoryBlock     `json:"memory,omitempty"`
 	Sandbox           *jsonSandboxBlock    `json:"sandbox,omitempty"`
 }
 
@@ -614,6 +625,20 @@ func compactionToJSON(c *CompactionBlock) *jsonCompactionBlock {
 	return &jsonCompactionBlock{Threshold: c.Threshold, PreserveRecent: c.PreserveRecent}
 }
 
+func memoryToJSON(m *MemoryBlock) *jsonMemoryBlock {
+	if m == nil {
+		return nil
+	}
+	return &jsonMemoryBlock{
+		Enabled:          m.Enabled,
+		Scope:            m.Scope,
+		Autoload:         m.Autoload,
+		Read:             m.Read,
+		Write:            m.Write,
+		PreCompactInject: m.PreCompactInject,
+	}
+}
+
 func attachmentsBlockToJSON(a *AttachmentsBlock) *jsonAttachmentsBlock {
 	if a == nil {
 		return nil
@@ -763,6 +788,7 @@ func agentToJSON(a *AgentDecl) *jsonAgentDecl {
 		InteractionModel:  a.InteractionModel,
 		Await:             awaitModeToStr[a.Await],
 		Compaction:        compactionToJSON(a.Compaction),
+		Memory:            memoryToJSON(a.Memory),
 		Sandbox:           sandboxBlockToJSON(a.Sandbox),
 	}
 }
@@ -792,6 +818,7 @@ func judgeToJSON(j *JudgeDecl) *jsonJudgeDecl {
 		InteractionModel:  j.InteractionModel,
 		Await:             awaitModeToStr[j.Await],
 		Compaction:        compactionToJSON(j.Compaction),
+		Memory:            memoryToJSON(j.Memory),
 		Sandbox:           sandboxBlockToJSON(j.Sandbox),
 	}
 }
@@ -1070,6 +1097,20 @@ func compactionFromJSON(jc *jsonCompactionBlock) *CompactionBlock {
 	return &CompactionBlock{Threshold: jc.Threshold, PreserveRecent: jc.PreserveRecent}
 }
 
+func memoryFromJSON(jm *jsonMemoryBlock) *MemoryBlock {
+	if jm == nil {
+		return nil
+	}
+	return &MemoryBlock{
+		Enabled:          jm.Enabled,
+		Scope:            jm.Scope,
+		Autoload:         jm.Autoload,
+		Read:             jm.Read,
+		Write:            jm.Write,
+		PreCompactInject: jm.PreCompactInject,
+	}
+}
+
 func varsBlockFromJSON(jv *jsonVarsBlock) (*VarsBlock, error) {
 	v := &VarsBlock{}
 	for _, jf := range jv.Fields {
@@ -1158,6 +1199,7 @@ func agentFromJSON(ja *jsonAgentDecl) (*AgentDecl, error) {
 		InteractionModel:  ja.InteractionModel,
 		Await:             aw,
 		Compaction:        compactionFromJSON(ja.Compaction),
+		Memory:            memoryFromJSON(ja.Memory),
 		Sandbox:           sandboxBlockFromJSON(ja.Sandbox),
 	}, nil
 }
@@ -1199,6 +1241,7 @@ func judgeFromJSON(jj *jsonJudgeDecl) (*JudgeDecl, error) {
 		InteractionModel:  jj.InteractionModel,
 		Await:             aw,
 		Compaction:        compactionFromJSON(jj.Compaction),
+		Memory:            memoryFromJSON(jj.Memory),
 		Sandbox:           sandboxBlockFromJSON(jj.Sandbox),
 	}, nil
 }

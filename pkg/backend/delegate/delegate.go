@@ -75,6 +75,17 @@ type ToolDef struct {
 	Execute     func(ctx context.Context, input json.RawMessage) (string, error)
 }
 
+// MemorySpec opts the node into the iterion workspace memory
+// tree (under ~/.iterion/projects/<encoded>/memory/<Scope>/).
+// Honored by backends that maintain their own session history (claw).
+type MemorySpec struct {
+	Scope            string
+	Autoload         []string
+	Read             bool
+	Write            bool
+	PreCompactInject bool
+}
+
 // Task describes the work to execute on a backend.
 type Task struct {
 	// NodeID is the IR node identifier, used for observability hooks.
@@ -177,6 +188,10 @@ type Task struct {
 	// CompactPreserveRecent is the number of recent messages kept verbatim
 	// during compaction (0 = use backend default of 4).
 	CompactPreserveRecent int
+
+	// Memory opts the node into the iterion workspace memory tree.
+	// Honored only by backends that maintain their own session history (claw).
+	Memory *MemorySpec
 
 	// SessionID is an optional session ID to resume (empty = fresh session).
 	SessionID string

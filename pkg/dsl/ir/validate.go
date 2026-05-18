@@ -41,6 +41,8 @@ const (
 	DiagNodeMaxTokensVsBudget   DiagCode = "C037" // node-level max_tokens exceeds workflow.budget.max_tokens
 	DiagUnsupportedMCPAuth      DiagCode = "C038" // MCP server Auth.Type not supported (only "oauth2" is wired)
 	DiagInvalidCompaction       DiagCode = "C043" // compaction.threshold or compaction.preserve_recent out of range
+	DiagMemoryNotSupported      DiagCode = "C047" // memory: enabled on a backend that does not consume it (only claw does today)
+	DiagMemoryMissingScope      DiagCode = "C048" // memory: enabled without a scope: name
 
 	// Attachments diagnostics
 	DiagDuplicateAttachment       DiagCode = "C050" // attachment name declared more than once
@@ -81,8 +83,37 @@ func (c *compiler) validate(w *Workflow) {
 	c.validateNodeMaxTokensVsBudget(w)
 	c.validateMCPAuth(w)
 	c.validateCompaction(w)
+	c.validateMemory(w)
 	c.validatePlaywrightMCP(w)
 	c.validateCapabilities(w)
+}
+
+// validateMemory enforces shape on the per-node `memory:` block and
+// warns on backends that do not consume it. Scope is mandatory when
+// enabled. C047 is a warning (run still proceeds); C048 is an error.
+func (c *compiler) validateMemory(w *Workflow) {
+	check := func(scope, id, backend string, m *Memory) {
+		if m == nil || !m.Enabled {
+			return
+		}
+		if m.Scope == "" {
+			c.errorf(DiagMemoryMissingScope,
+				"%s %q: memory: enabled requires a scope: name", scope, id)
+		}
+		if backend != "" && backend != "claw" {
+			c.warnf(DiagMemoryNotSupported,
+				"%s %q: memory: is only consumed by backend=claw; backend=%q ignores it",
+				scope, id, backend)
+		}
+	}
+	for _, n := range w.Nodes {
+		switch nn := n.(type) {
+		case *AgentNode:
+			check("agent", nn.ID, nn.Backend, nn.Memory)
+		case *JudgeNode:
+			check("judge", nn.ID, nn.Backend, nn.Memory)
+		}
+	}
 }
 
 // validatePlaywrightMCP checks that any declared MCP server which

@@ -769,6 +769,7 @@ type backendFields struct {
 	interaction      ir.InteractionMode
 	activeMCPServers []string
 	compaction       *ir.Compaction
+	memory           *ir.Memory
 	capabilities     []string
 }
 
@@ -785,6 +786,7 @@ func extractBackendFields(node ir.Node) backendFields {
 			interaction:      n.Interaction,
 			activeMCPServers: n.ActiveMCPServers,
 			compaction:       n.Compaction,
+			memory:           n.Memory,
 			capabilities:     n.Capabilities,
 		}
 	case *ir.JudgeNode:
@@ -798,6 +800,7 @@ func extractBackendFields(node ir.Node) backendFields {
 			interaction:      n.Interaction,
 			activeMCPServers: n.ActiveMCPServers,
 			compaction:       n.Compaction,
+			memory:           n.Memory,
 			capabilities:     n.Capabilities,
 		}
 	default:
@@ -930,6 +933,15 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		Sandbox:               e.sandbox,
 		ProviderHint:          e.resolveProvider(node),
 		Hooks:                 e.delegateHooksFor(f.id),
+	}
+	if m := f.memory; m != nil && m.Enabled {
+		task.Memory = &delegate.MemorySpec{
+			Scope:            m.Scope,
+			Autoload:         m.Autoload,
+			Read:             m.Read,
+			Write:            m.Write,
+			PreCompactInject: m.PreCompactInject,
+		}
 	}
 
 	// When interaction is enabled, ensure `ask_user` is in the node's

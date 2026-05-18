@@ -90,6 +90,13 @@ type GenerationOptions struct {
 	// OnToolCall is called after each tool execution.
 	OnToolCall func(ToolCallInfo)
 
+	// OnBeforeCompact fires only when in-loop compaction is about to
+	// shrink the history. The callback may return a modified slice
+	// (e.g. with an injected session-memory user turn) that feeds the
+	// summariser; the live history keeps the originals. Returning nil
+	// is a no-op.
+	OnBeforeCompact func(messages []api.Message) []api.Message
+
 	// OnCompact is called once after each in-loop compaction round
 	// that actually shrunk the message history. No-op compactions
 	// (transcript too short) do not fire the callback.

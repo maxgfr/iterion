@@ -69,10 +69,10 @@ func ResolveStoreDir(start, override string) string {
 // globalProjectStoreDir returns the per-project subdir of the global
 // iterion data dir for absWorkDir. Layout: <iterionHome>/projects/<key>/.
 func globalProjectStoreDir(absWorkDir string) string {
-	return filepath.Join(globalIterionDataDir(), "projects", encodeWorkDirKey(absWorkDir))
+	return filepath.Join(GlobalIterionDataDir(), "projects", EncodeWorkDirKey(absWorkDir))
 }
 
-// globalIterionDataDir locates the user's iterion data dir, checked
+// GlobalIterionDataDir locates the user's iterion data dir, checked
 // in this order:
 //  1. $ITERION_HOME — operator escape hatch
 //  2. ~/.iterion    — matches the convention iterion already uses
@@ -81,7 +81,7 @@ func globalProjectStoreDir(absWorkDir string) string {
 //
 // Trailing path separators are normalised away so callers can join
 // safely.
-func globalIterionDataDir() string {
+func GlobalIterionDataDir() string {
 	if dir := strings.TrimRight(os.Getenv("ITERION_HOME"), string(filepath.Separator)); dir != "" {
 		return dir
 	}
@@ -91,7 +91,7 @@ func globalIterionDataDir() string {
 	return filepath.Join(os.TempDir(), "iterion-data")
 }
 
-// encodeWorkDirKey produces a deterministic, filesystem-safe key
+// EncodeWorkDirKey produces a deterministic, filesystem-safe key
 // from an absolute workdir path. Path separators are replaced with
 // "-"; on Windows the drive ":" is also collapsed; the result always
 // starts with "-" so a relative-looking input still produces a
@@ -106,7 +106,7 @@ func globalIterionDataDir() string {
 //
 // Different absolute paths therefore yield different keys, including
 // when one project is a clone of another at a different location.
-func encodeWorkDirKey(absPath string) string {
+func EncodeWorkDirKey(absPath string) string {
 	p := filepath.ToSlash(absPath)
 	// Replace both separator flavours regardless of the runtime OS
 	// so the key for a given path is the same whether iterion sees
