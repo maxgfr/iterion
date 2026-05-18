@@ -182,6 +182,22 @@ export function useCanvasLayout() {
     [graphNodes, graphEdges, layoutDirection],
   );
 
+  // selectNodes flips the `selected` flag on each layoutNode whose id
+  // matches an entry in `ids` (or all editable nodes when ids === null).
+  // Used by the Cmd+A handler in useCanvasKeyboard so xyflow's native
+  // multi-selection machinery picks the selection up without needing
+  // a second selection store.
+  const selectNodes = useCallback((ids: string[] | null) => {
+    setLayoutNodes((nds) => {
+      const target = ids ? new Set(ids) : null;
+      return nds.map((n) => {
+        const selected = target ? target.has(n.id) : false;
+        if (n.selected === selected) return n;
+        return { ...n, selected };
+      });
+    });
+  }, []);
+
   return {
     layoutNodes,
     layoutEdges,
@@ -189,5 +205,6 @@ export function useCanvasLayout() {
     onNodesChange,
     onEdgesChange,
     handleArrange,
+    selectNodes,
   };
 }

@@ -406,7 +406,23 @@ export default function LaunchView() {
             )}
             {presets.length > 0 && (
               <section className="mb-6">
-                <h2 className="text-xs font-medium text-fg-muted mb-2">Preset</h2>
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-xs font-medium text-fg-muted">Preset</h2>
+                  {filePath && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLocation(
+                          `/editor?file=${encodeURIComponent(filePath)}&focus=presets`,
+                        )
+                      }
+                      className="text-[10px] text-fg-subtle hover:text-fg-default underline"
+                      title="Edit presets in the workflow editor"
+                    >
+                      edit in editor →
+                    </button>
+                  )}
+                </div>
                 <Select
                   value={selectedPreset}
                   onChange={(e) => applyPreset(e.target.value)}

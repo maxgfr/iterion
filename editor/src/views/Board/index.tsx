@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 
 import PageShell from "@/components/shared/PageShell";
@@ -43,6 +43,11 @@ export default function BoardView() {
     null,
   );
   const [conductorPaused, setConductorPaused] = useState(false);
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
+  // History of recent column transitions, so Ctrl+Z reverts the last
+  // one. Bounded at 10 entries — the board's drag-undo intent is the
+  // immediate "oops, wrong column", not full session replay.
+  const transitionHistoryRef = useRef<Array<{ id: string; from: string }>>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -80,6 +85,7 @@ export default function BoardView() {
             : null,
         );
         setConductorPaused(!!snap.paused);
+        setLastSyncAt(Date.now());
       } catch {
         // swallow: conductor may be unreachable / not wired
       } finally {
@@ -118,6 +124,28 @@ export default function BoardView() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Surface eligible counts in the browser tab so operators with the
+  // board pinned in a background tab see new ready/in-progress work
+  // without having to focus the tab. Only kicks in when the board
+  // actually has eligible columns — for purely terminal layouts the
+  // existing useDocumentTitle string is more informative.
+  useEffect(() => {
+    if (!board) return;
+    const eligible = board.states.filter((s) => s.eligible);
+    if (eligible.length === 0) return;
+    const parts: string[] = [];
+    for (const s of eligible) {
+      const count = (byState.get(s.name) ?? []).length;
+      if (count > 0) parts.push(`${count} ${s.display ?? s.name}`);
+    }
+    if (parts.length === 0) return;
+    const prev = document.title;
+    document.title = `(${parts.join(", ")}) ${prev}`;
+    return () => {
+      document.title = prev;
+    };
+  }, [board, byState]);
 
   // Apply the ?focus=<issueID> deep-link from the Conductor view's
   // retry-queue rows. Runs once after issues load so the auto-selected
@@ -194,21 +222,36 @@ export default function BoardView() {
     return m;
   }, [board, filteredIssues]);
 
+  const recordTransition = useCallback((id: string, from: string) => {
+    const hist = transitionHistoryRef.current;
+    hist.push({ id, from });
+    if (hist.length > 10) hist.shift();
+  }, []);
+
   const onDrop = useCallback(
-    async (issueID: string, toState: string) => {
+    async (issueID: string, toState: string, opts?: { recordHistory?: boolean }) => {
+      const recordHistory = opts?.recordHistory ?? true;
       // Capture this invocation's pre-state in a per-call closure so
       // two near-simultaneous drops don't race over the same `before`
       // variable. The prior implementation hoisted `before` to the
       // outer scope and the second drop would overwrite the first
       // drop's snapshot before its async transitionIssue had a chance
       // to fail / roll back, restoring the wrong row.
-      const draft: { snapshot: NativeIssue[] } = { snapshot: [] };
+      const draft: { snapshot: NativeIssue[]; prevState: string | null } = {
+        snapshot: [],
+        prevState: null,
+      };
       setIssues((cur) => {
         draft.snapshot = cur;
+        const found = cur.find((i) => i.id === issueID);
+        draft.prevState = found?.state ?? null;
         return cur.map((i) => (i.id === issueID ? { ...i, state: toState } : i));
       });
       try {
         await transitionIssue(issueID, toState);
+        if (recordHistory && draft.prevState && draft.prevState !== toState) {
+          recordTransition(issueID, draft.prevState);
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         // Only revert this issue's row to its pre-drop state — leave
@@ -222,8 +265,36 @@ export default function BoardView() {
         });
       }
     },
-    [],
+    [recordTransition],
   );
+
+  const undoLastTransition = useCallback(() => {
+    const last = transitionHistoryRef.current.pop();
+    if (!last) return;
+    // Avoid re-recording the undo as a new history entry — otherwise
+    // the user would just toggle between two columns forever.
+    void onDrop(last.id, last.from, { recordHistory: false });
+  }, [onDrop]);
+
+  // Wire Ctrl+Z to the undo-last-transition. Skip when a modal owns
+  // focus or an input is active so we don't fight form fields.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key !== "z" || e.shiftKey) return;
+      const target = e.target as HTMLElement | null;
+      const inInput =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable;
+      if (inInput) return;
+      if (creating || editing || helpOpen || settingsOpen) return;
+      if (transitionHistoryRef.current.length === 0) return;
+      e.preventDefault();
+      undoLastTransition();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [creating, editing, helpOpen, settingsOpen, undoLastTransition]);
 
   const onCreate = useCallback(
     async (input: Partial<NativeIssue>) => {
@@ -318,6 +389,7 @@ export default function BoardView() {
       active="board"
       rightActions={
         <>
+          <LastSyncBadge lastSyncAt={lastSyncAt} />
           <Button variant="secondary" size="sm" onClick={() => void refresh()}>
             Refresh
           </Button>
@@ -451,6 +523,31 @@ export default function BoardView() {
       )}
       {helpOpen && <BoardKeyboardHelp onClose={() => setHelpOpen(false)} />}
     </PageShell>
+  );
+}
+
+// LastSyncBadge reads the most-recent conductor-snapshot timestamp the
+// poller stored and renders a transient pill in the toolbar so the
+// user knows whether the running/retrying badges are fresh. Ticks
+// every second on its own so it stays accurate between the 2-second
+// poll intervals. Falls back to "—" while the first request hasn't
+// landed yet. Hidden when polling fails for >30s.
+function LastSyncBadge({ lastSyncAt }: { lastSyncAt: number | null }) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => force((v) => v + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  if (!lastSyncAt) return null;
+  const seconds = Math.max(0, Math.floor((Date.now() - lastSyncAt) / 1000));
+  if (seconds > 30) return null;
+  return (
+    <span
+      className="text-[10px] text-fg-subtle px-1 self-center"
+      title="Time since the conductor snapshot was last fetched. Updates every 2s."
+    >
+      synced {seconds}s ago
+    </span>
   );
 }
 
@@ -766,8 +863,10 @@ function Column({
   const fadeForPause = dimmed && eligible;
   return (
     <div
-      className={`w-72 shrink-0 rounded border ${
-        dragOver ? "border-accent/60 bg-accent-soft/30" : "border-border-default bg-surface-1"
+      className={`w-72 shrink-0 rounded border-2 transition-colors ${
+        dragOver
+          ? "border-accent bg-accent-soft/30 ring-2 ring-accent/40"
+          : "border-border-default bg-surface-1"
       } flex flex-col ${fadeForPause ? "opacity-60" : ""}`}
       style={{ borderTopColor: color, borderTopWidth: 3 }}
       onDragOver={(e) => {
@@ -845,15 +944,39 @@ function IssueCard({
   onOpenRun,
   onShowRetryDetails,
 }: IssueCardProps) {
+  // Hover preview: synthesise a multi-line title combining body
+  // (truncated) + key fields + blocker count so the OS-native tooltip
+  // provides a quick peek without forcing a modal open. Title strings
+  // render with newlines on all major browsers.
+  const previewLines: string[] = [];
+  if (iss.body) {
+    const trimmed = iss.body.trim();
+    previewLines.push(trimmed.length > 240 ? trimmed.slice(0, 237) + "…" : trimmed);
+  }
+  if (iss.fields && Object.keys(iss.fields).length > 0) {
+    previewLines.push(
+      Object.entries(iss.fields)
+        .map(([k, v]) => `${k}: ${String(v)}`)
+        .join("\n"),
+    );
+  }
+  if ((iss.blockers?.length ?? 0) > 0) {
+    previewLines.push(`Blocked by: ${iss.blockers!.join(", ")}`);
+  }
+  const hoverTitle = previewLines.length > 0 ? previewLines.join("\n\n") : undefined;
+  const [dragging, setDragging] = useState(false);
   return (
     <div
       role="button"
       draggable
+      title={hoverTitle}
       onDragStart={(e) => {
         e.dataTransfer.setData("text/plain", iss.id);
         e.dataTransfer.effectAllowed = "move";
+        setDragging(true);
         onSelect();
       }}
+      onDragEnd={() => setDragging(false)}
       onClick={(e) => {
         // Single click selects (so keyboard nav has an anchor); a second
         // click on the already-selected card opens the modal — mirroring
@@ -866,7 +989,9 @@ function IssueCard({
         }
       }}
       onDoubleClick={onClick}
-      className={`bg-surface-0 border rounded p-2 text-sm cursor-grab active:cursor-grabbing ${
+      className={`bg-surface-0 border rounded p-2 text-sm cursor-grab active:cursor-grabbing transition-transform ${
+        dragging ? "scale-[1.02] shadow-lg" : ""
+      } ${
         selected
           ? "border-accent ring-1 ring-accent/40"
           : "border-border-default hover:border-accent/40"
@@ -880,22 +1005,48 @@ function IssueCard({
           </span>
         ) : null}
       </div>
-      {(iss.labels?.length ?? 0) > 0 && (
-        <div className="mt-1 flex flex-wrap gap-1">
-          {iss.labels!.map((l) => (
-            <span
-              key={l}
-              className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-fg-muted"
-            >
-              {l}
+      {iss.fields && pickPinnedFields(iss.fields).length > 0 && (
+        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-fg-subtle flex-wrap">
+          {pickPinnedFields(iss.fields).map(([k, v]) => (
+            <span key={k} className="flex items-center gap-1">
+              <span className="font-mono opacity-70">{k}:</span>
+              <span className="text-fg-default">{String(v)}</span>
             </span>
           ))}
         </div>
       )}
-      <div className="mt-1 flex items-center gap-2 text-[10px] text-fg-muted">
+      {(iss.labels?.length ?? 0) > 0 && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {iss.labels!.map((l) => {
+            const palette = labelPalette(l);
+            return (
+              <span
+                key={l}
+                className="text-[10px] px-1.5 py-0.5 rounded"
+                style={palette}
+              >
+                {l}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      <div className="mt-1 flex items-center gap-2 text-[10px] text-fg-muted flex-wrap">
         <code className="opacity-70">{shortID(iss.id)}</code>
         {iss.assignee && <span>@{iss.assignee}</span>}
-        {iss.claim && <span className="text-amber-300">claimed</span>}
+        {iss.claim && (
+          <span
+            className="text-amber-300"
+            title={`Locked by ${iss.claim} — the conductor holds the claim until the run finishes.`}
+          >
+            claimed by {iss.claim}
+          </span>
+        )}
+        {iss.updated_at && (
+          <span className="text-fg-subtle" title={iss.updated_at}>
+            · updated {boardRelTime(iss.updated_at)}
+          </span>
+        )}
       </div>
       {running && (
         <div className="mt-1 flex items-center justify-between gap-2 rounded bg-green-500/10 px-1.5 py-1 text-[10px] text-green-300">
@@ -942,6 +1093,71 @@ function IssueCard({
       )}
     </div>
   );
+}
+
+// labelPalette derives a stable pastel background + foreground colour
+// from a label name. Two cards with the label "urgent" always render
+// the same colour, but "infra" and "urgent" land on visibly distinct
+// palettes. Hashing avoids the need for a label-colour schema in the
+// backend — operators get colour scanning today without configuration.
+// A small alias table covers common semantic labels with sensible
+// presets (red for "urgent" / "bug", green for "ready", etc.).
+function labelPalette(label: string): { backgroundColor: string; color: string } {
+  const aliases: Record<string, { backgroundColor: string; color: string }> = {
+    urgent: { backgroundColor: "rgba(239,68,68,0.18)", color: "#fecaca" },
+    blocker: { backgroundColor: "rgba(239,68,68,0.18)", color: "#fecaca" },
+    bug: { backgroundColor: "rgba(244,63,94,0.18)", color: "#fecdd3" },
+    infra: { backgroundColor: "rgba(59,130,246,0.18)", color: "#bfdbfe" },
+    docs: { backgroundColor: "rgba(168,85,247,0.18)", color: "#e9d5ff" },
+    feature: { backgroundColor: "rgba(16,185,129,0.18)", color: "#bbf7d0" },
+    ready: { backgroundColor: "rgba(16,185,129,0.18)", color: "#bbf7d0" },
+  };
+  const hit = aliases[label.toLowerCase()];
+  if (hit) return hit;
+  // Stable 32-bit FNV-1a hash → hue. Fixed S/L keeps the palette readable
+  // against both light and dark surfaces.
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < label.length; i++) {
+    h ^= label.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  const hue = h % 360;
+  return {
+    backgroundColor: `hsl(${hue}, 60%, 28%)`,
+    color: `hsl(${hue}, 80%, 88%)`,
+  };
+}
+
+// pickPinnedFields returns up to two scalar field entries from a card's
+// `fields` map so the card body can surface high-signal data (enum
+// statuses, customer IDs) inline without expanding the modal. Skips
+// fields whose value is too long for a card row — those belong in the
+// hover preview / modal view.
+function pickPinnedFields(fields: Record<string, unknown>): Array<[string, unknown]> {
+  const picked: Array<[string, unknown]> = [];
+  for (const [k, v] of Object.entries(fields)) {
+    if (picked.length >= 2) break;
+    if (v === null || v === undefined) continue;
+    if (typeof v === "object") continue;
+    const str = String(v);
+    if (str.length === 0 || str.length > 32) continue;
+    picked.push([k, v]);
+  }
+  return picked;
+}
+
+// boardRelTime formats an ISO timestamp as "12s ago", "4m ago", etc.
+// Sized for the card footer so longer-form times (hours, days) collapse
+// to "1h", "2d" without trailing "ago" to save horizontal space.
+function boardRelTime(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  const delta = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (delta < 5) return "just now";
+  if (delta < 60) return `${delta}s ago`;
+  if (delta < 3600) return `${Math.round(delta / 60)}m ago`;
+  if (delta < 86400) return `${Math.round(delta / 3600)}h`;
+  return `${Math.round(delta / 86400)}d`;
 }
 
 function shortID(id: string) {

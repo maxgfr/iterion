@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { Pencil1Icon } from "@radix-ui/react-icons";
 
 import type { RunHeader as RunHeaderType } from "@/api/runs";
-import { cancelRun } from "@/api/runs";
+import { cancelRun, getRun, loadEvents } from "@/api/runs";
 import { Button, CopyButton, IconButton, StatusBadge } from "@/components/ui";
 import AppHeader from "@/components/shared/AppHeader";
 import WSStatusDot from "@/components/shared/WSStatusDot";
@@ -59,6 +59,35 @@ export default function RunHeader({ run, active, wsState }: Props) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Export the run as a single JSON document bundling the snapshot
+  // (run header + executions) and the full events stream. Useful for
+  // sharing reproductions, attaching to bug reports, or post-hoc
+  // analysis in notebooks. We assemble client-side to avoid a new
+  // backend endpoint and to inherit the existing /events pagination.
+  const onExport = async () => {
+    try {
+      const [snap, events] = await Promise.all([getRun(run.id), loadEvents(run.id)]);
+      const payload = JSON.stringify(
+        { snapshot: snap, events, exported_at: new Date().toISOString() },
+        null,
+        2,
+      );
+      const blob = new Blob([payload], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `run-${run.id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      // Defer revocation so Safari has a chance to start the download
+      // (it lazily resolves the blob URL).
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      setError((e as Error).message);
     }
   };
 
@@ -122,6 +151,14 @@ export default function RunHeader({ run, active, wsState }: Props) {
             copiedLabel="link copied"
             variant="share"
           />
+          <button
+            type="button"
+            onClick={() => void onExport()}
+            className="text-[10px] text-fg-subtle hover:text-fg-default px-1.5 py-0.5 rounded border border-border-default hover:bg-surface-2"
+            title="Download a JSON archive containing the run snapshot + every event"
+          >
+            Export
+          </button>
           <WSStatusDot state={wsState} />
           {/*
             Only render the Cancel button when the run is actually
