@@ -1,4 +1,5 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { Spinner } from "./Spinner";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 export type ButtonSize = "sm" | "md";
@@ -52,14 +53,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       className={`${base} ${variantClass[variant]} ${sizeClass[size]} ${className}`.trim()}
       {...rest}
     >
-      {loading ? (
-        <span
-          className="inline-block h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent animate-spin"
-          aria-hidden
-        />
-      ) : (
-        leadingIcon
-      )}
+      {loading ? <Spinner size="sm" /> : leadingIcon}
       {children}
       {!loading && trailingIcon}
     </button>

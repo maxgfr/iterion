@@ -6,6 +6,7 @@ import { useBackendDetectStore } from "@/store/backendDetect";
 import { createEmptyDocument } from "@/lib/defaults";
 import * as api from "@/api/client";
 import ConfirmDialog from "../shared/ConfirmDialog";
+import { useConfirm } from "@/hooks/useConfirm";
 import ShortcutsHelp from "../shared/ShortcutsHelp";
 import FilePicker from "../FilePicker/FilePicker";
 import {
@@ -80,19 +81,30 @@ export default function Toolbar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [confirmRemoveWorkflow, setConfirmRemoveWorkflow] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
-  const handleNew = useCallback(() => {
-    if (isDirty() && !window.confirm("You have unsaved changes. Discard them?")) return;
+  const confirmDiscard = useCallback(async () => {
+    if (!isDirty()) return true;
+    return confirm({
+      title: "Discard unsaved changes?",
+      message: "You have unsaved changes that will be lost.",
+      confirmLabel: "Discard",
+      confirmVariant: "danger",
+    });
+  }, [isDirty, confirm]);
+
+  const handleNew = useCallback(async () => {
+    if (!(await confirmDiscard())) return;
     setDocument(createEmptyDocument());
     setDiagnostics([], []);
     setCurrentFilePath(null);
     setCurrentSource(null);
     markSaved();
-  }, [setDocument, setDiagnostics, setCurrentFilePath, setCurrentSource, markSaved, isDirty]);
+  }, [setDocument, setDiagnostics, setCurrentFilePath, setCurrentSource, markSaved, confirmDiscard]);
 
   const handlePickFile = useCallback(
     async (kind: "file" | "example", path: string) => {
-      if (isDirty() && !window.confirm("You have unsaved changes. Discard them?")) return;
+      if (!(await confirmDiscard())) return;
       setLoading(true);
       try {
         if (kind === "file") {
@@ -140,14 +152,14 @@ export default function Toolbar() {
         setLoading(false);
       }
     },
-    [setDocument, setDiagnostics, setCurrentFilePath, markSaved, isDirty, pushRecent, removeRecent, addToast],
+    [setDocument, setDiagnostics, setCurrentFilePath, markSaved, confirmDiscard, pushRecent, removeRecent, addToast],
   );
 
   const handleImport = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      if (isDirty() && !window.confirm("You have unsaved changes. Discard them?")) {
+      if (!(await confirmDiscard())) {
         e.target.value = "";
         return;
       }
@@ -164,7 +176,7 @@ export default function Toolbar() {
       }
       e.target.value = "";
     },
-    [setDocument, setDiagnostics, setCurrentFilePath, setCurrentSource, isDirty],
+    [setDocument, setDiagnostics, setCurrentFilePath, setCurrentSource, confirmDiscard],
   );
 
   const handleValidate = useCallback(async () => {
@@ -603,6 +615,7 @@ export default function Toolbar() {
       </Dialog>
 
       <ShortcutsHelp open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+      {confirmDialog}
     </div>
   );
 }

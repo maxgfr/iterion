@@ -105,7 +105,7 @@ export default function BackendStatusPill() {
       <div className="mt-3 flex items-center justify-between gap-2 text-[10px]">
         <button
           type="button"
-          className="inline-flex items-center gap-1 text-fg-subtle hover:text-fg-default disabled:opacity-50"
+          className="inline-flex items-center gap-1 text-fg-subtle hover:text-fg-default disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-fg-subtle"
           onClick={() => void refresh(true)}
           disabled={loading}
         >

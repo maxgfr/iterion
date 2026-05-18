@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { Badge, Button, Input } from "@/components/ui";
+import { Badge, Button, EmptyState, Input } from "@/components/ui";
 
 import { desktop, type SecretStatus } from "@/lib/desktopBridge";
 
@@ -24,7 +24,13 @@ export default function ApiKeysEditor() {
     refresh();
   }, [refresh]);
 
-  if (!statuses) return <p className="text-fg-subtle">Loading…</p>;
+  if (!statuses) {
+    return error ? (
+      <EmptyState message={<span className="text-danger">{error}</span>} />
+    ) : (
+      <EmptyState message="Loading…" />
+    );
+  }
 
   const handleSave = async (key: string) => {
     setError(null);

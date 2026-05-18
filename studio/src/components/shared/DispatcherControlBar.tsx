@@ -65,7 +65,7 @@ export default function DispatcherControlBar({ onOpenSettings, pollIntervalMs = 
       <div className="ml-auto flex items-center gap-2">
         {(state === "idle" || state === "error") && (
           <button
-            className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50"
+            className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
             disabled={busy || !hasConfig}
             title={hasConfig ? "Start the dispatcher" : "Save a config in Settings first"}
             onClick={() => void guard(dispatcher.start)}
@@ -76,14 +76,14 @@ export default function DispatcherControlBar({ onOpenSettings, pollIntervalMs = 
         {state === "running" && (
           <>
             <button
-              className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50"
+              className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               disabled={busy}
               onClick={() => void guard(dispatcher.pause)}
             >
               ⏸ Pause
             </button>
             <button
-              className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50"
+              className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               disabled={busy}
               onClick={() => void guard(dispatcher.stop)}
             >
@@ -94,14 +94,14 @@ export default function DispatcherControlBar({ onOpenSettings, pollIntervalMs = 
         {state === "paused" && (
           <>
             <button
-              className="rounded bg-accent px-2 py-1 text-on-accent hover:opacity-90 disabled:opacity-50"
+              className="rounded bg-accent px-2 py-1 text-fg-onAccent hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={busy}
               onClick={() => void guard(dispatcher.resume)}
             >
               ▶ Resume
             </button>
             <button
-              className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50"
+              className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               disabled={busy}
               onClick={() => void guard(dispatcher.stop)}
             >

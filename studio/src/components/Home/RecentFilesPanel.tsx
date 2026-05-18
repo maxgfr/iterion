@@ -12,8 +12,10 @@ import * as api from "@/api/client";
 import { useDocumentStore } from "@/store/document";
 import { useRecentsStore } from "@/store/recents";
 import { useUIStore } from "@/store/ui";
+import { useConfirm } from "@/hooks/useConfirm";
 import { createEmptyDocument } from "@/lib/defaults";
 import { basename } from "@/lib/format";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 // Examples are static for the lifetime of the server process, so cache
 // the first successful response and reuse it on every subsequent mount.
@@ -52,6 +54,7 @@ export default function RecentFilesPanel() {
   const [examples, setExamples] = useState<string[]>([]);
   const [examplesOpen, setExamplesOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   useEffect(() => {
     let cancelled = false;
@@ -73,13 +76,18 @@ export default function RecentFilesPanel() {
     if (recents.length === 0 && examples.length > 0) setExamplesOpen(true);
   }, [recents.length, examples.length]);
 
-  const confirmDiscard = useCallback(() => {
+  const confirmDiscard = useCallback(async () => {
     if (!isDirty()) return true;
-    return window.confirm("You have unsaved changes. Discard them?");
-  }, [isDirty]);
+    return confirm({
+      title: "Discard unsaved changes?",
+      message: "You have unsaved changes that will be lost.",
+      confirmLabel: "Discard",
+      confirmVariant: "danger",
+    });
+  }, [isDirty, confirm]);
 
-  const handleNewBlank = useCallback(() => {
-    if (!confirmDiscard()) return;
+  const handleNewBlank = useCallback(async () => {
+    if (!(await confirmDiscard())) return;
     setDocument(createEmptyDocument());
     setDiagnostics([], []);
     setCurrentFilePath(null);
@@ -98,7 +106,7 @@ export default function RecentFilesPanel() {
 
   const handleOpenRecent = useCallback(
     async (path: string) => {
-      if (!confirmDiscard()) return;
+      if (!(await confirmDiscard())) return;
       setBusy(true);
       try {
         const result = await api.openFile(path);
@@ -138,7 +146,7 @@ export default function RecentFilesPanel() {
 
   const handleOpenExample = useCallback(
     async (name: string) => {
-      if (!confirmDiscard()) return;
+      if (!(await confirmDiscard())) return;
       setBusy(true);
       try {
         const result = await api.loadExample(name);
@@ -223,8 +231,14 @@ export default function RecentFilesPanel() {
             </span>
             {recents.length > 0 && (
               <button
-                onClick={() => {
-                  if (window.confirm("Clear all recent files?")) clearRecents();
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: "Clear recent files?",
+                    message: "All entries in the Recent list will be removed. Your files on disk are not affected.",
+                    confirmLabel: "Clear",
+                    confirmVariant: "danger",
+                  });
+                  if (ok) clearRecents();
                 }}
                 className="text-[10px] text-fg-subtle hover:text-fg-default"
               >
@@ -233,11 +247,14 @@ export default function RecentFilesPanel() {
             )}
           </div>
           {recents.length === 0 ? (
-            <div className="mt-2 px-2 py-3 text-xs text-fg-subtle">
-              {examples.length > 0
-                ? "No recent files yet — start from an example above or create a new workflow."
-                : "No recent files yet — create a new workflow."}
-            </div>
+            <EmptyState
+              className="mt-2 py-3"
+              message={
+                examples.length > 0
+                  ? "No recent files yet — start from an example above or create a new workflow."
+                  : "No recent files yet — create a new workflow."
+              }
+            />
           ) : (
             <ul className="mt-1 space-y-0.5">
               {recents.map((path) => (
@@ -275,6 +292,7 @@ export default function RecentFilesPanel() {
           )}
         </div>
       </div>
+      {confirmDialog}
     </section>
   );
 }

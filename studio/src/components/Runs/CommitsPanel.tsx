@@ -4,6 +4,7 @@ import { Pencil1Icon, ReloadIcon, ResetIcon } from "@radix-ui/react-icons";
 
 import {
   Button,
+  EmptyState,
   IconButton,
   Select,
   Textarea,
@@ -412,14 +413,6 @@ function SquashMessageEditor({
           )}
         </pre>
       )}
-    </div>
-  );
-}
-
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div className="flex h-full items-center justify-center px-3 py-8 text-center text-xs text-fg-subtle">
-      {message}
     </div>
   );
 }
