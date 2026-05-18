@@ -4,7 +4,7 @@ import { ExternalLinkIcon } from "@radix-ui/react-icons";
 
 import AppHeader from "@/components/shared/AppHeader";
 import {
-  DEFAULT_PILOTE_BOT_ID,
+  DEFAULT_WHATS_NEXT_BOT_ID,
   getFirstClassBot,
 } from "@/lib/whats-next/firstClassBots";
 import { useWhatsNextSession } from "@/lib/whats-next/useWhatsNextSession";
@@ -20,9 +20,9 @@ import SessionLauncher from "./SessionLauncher";
 // submitted via the hook's submitHumanAnswer.
 
 export default function WhatsNextView() {
-  const bot = getFirstClassBot(DEFAULT_PILOTE_BOT_ID);
+  const bot = getFirstClassBot(DEFAULT_WHATS_NEXT_BOT_ID);
   // Hooks must be called unconditionally — pass a dummy bot if the
-  // lookup miss happens (in practice it can't since DEFAULT_PILOTE_BOT_ID
+  // lookup miss happens (in practice it can't since DEFAULT_WHATS_NEXT_BOT_ID
   // is a const key, but the early-return branch needs valid hook order).
   const session = useWhatsNextSession(
     bot ?? {

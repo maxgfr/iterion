@@ -1,7 +1,7 @@
 import { Link } from "wouter";
 import { RocketIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 
-import { getFirstClassBot, DEFAULT_PILOTE_BOT_ID } from "@/lib/whats-next/firstClassBots";
+import { getFirstClassBot, DEFAULT_WHATS_NEXT_BOT_ID } from "@/lib/whats-next/firstClassBots";
 
 // WhatsNextCard sits at the top of the Home view as a full-width hero
 // pointing operators at the first-class whats-next experience. It's
@@ -9,7 +9,7 @@ import { getFirstClassBot, DEFAULT_PILOTE_BOT_ID } from "@/lib/whats-next/firstC
 // vars form — just step into the conversation.
 
 export default function WhatsNextCard() {
-  const bot = getFirstClassBot(DEFAULT_PILOTE_BOT_ID);
+  const bot = getFirstClassBot(DEFAULT_WHATS_NEXT_BOT_ID);
   if (!bot) return null;
 
   return (
@@ -23,7 +23,7 @@ export default function WhatsNextCard() {
         </div>
         <div className="flex-1 min-w-0">
           <h2 className="text-base font-semibold text-fg-default">
-            WhatsNext — {bot.label}
+            {bot.label}
           </h2>
           <p className="mt-1 text-[13px] text-fg-muted line-clamp-2">
             {bot.description}
