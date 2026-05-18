@@ -123,6 +123,9 @@ func Unparse(f *ast.File) string {
 		if a.Compaction != nil {
 			writeCompaction(&b, a.Compaction, "  ", false)
 		}
+		if a.Memory != nil {
+			writeMemory(&b, a.Memory, "  ", false)
+		}
 		writeSandboxBlock(&b, a.Sandbox, "  ")
 	}
 
@@ -138,6 +141,9 @@ func Unparse(f *ast.File) string {
 			j.Interaction, j.InteractionPrompt, j.InteractionModel, j.Await)
 		if j.Compaction != nil {
 			writeCompaction(&b, j.Compaction, "  ", false)
+		}
+		if j.Memory != nil {
+			writeMemory(&b, j.Memory, "  ", false)
 		}
 		writeSandboxBlock(&b, j.Sandbox, "  ")
 	}
@@ -717,6 +723,35 @@ func writeCompaction(b *strings.Builder, compaction *ast.CompactionBlock, indent
 	}
 	if compaction.PreserveRecent != nil {
 		fmt.Fprintf(b, "%s  preserve_recent: %d\n", indent, *compaction.PreserveRecent)
+	}
+}
+
+func writeMemory(b *strings.Builder, m *ast.MemoryBlock, indent string, leadingBlank bool) {
+	if leadingBlank {
+		b.WriteByte('\n')
+	}
+	fmt.Fprintf(b, "%smemory:\n", indent)
+	if m.Enabled != nil {
+		fmt.Fprintf(b, "%s  enabled: %t\n", indent, *m.Enabled)
+	}
+	if m.Scope != nil {
+		fmt.Fprintf(b, "%s  scope: %q\n", indent, *m.Scope)
+	}
+	if len(m.Autoload) > 0 {
+		quoted := make([]string, len(m.Autoload))
+		for i, s := range m.Autoload {
+			quoted[i] = fmt.Sprintf("%q", s)
+		}
+		fmt.Fprintf(b, "%s  autoload: [%s]\n", indent, strings.Join(quoted, ", "))
+	}
+	if m.Read != nil {
+		fmt.Fprintf(b, "%s  read: %t\n", indent, *m.Read)
+	}
+	if m.Write != nil {
+		fmt.Fprintf(b, "%s  write: %t\n", indent, *m.Write)
+	}
+	if m.PreCompactInject != nil {
+		fmt.Fprintf(b, "%s  pre_compact_inject: %t\n", indent, *m.PreCompactInject)
 	}
 }
 

@@ -282,6 +282,19 @@ prompt propose_system:
   - You do NOT create issues yourself. The `emit_action` node
     materialises issues after the operator approves the roadmap.
 
+  Workspace memory:
+  You have memory_read, memory_write, memory_list tools scoped to
+  this bot's memory tree (under
+  ~/.iterion/projects/<encoded-workspace>/memory/whats-next/,
+  outside the repo). Iterion auto-generates an index of every file
+  in the scope (with title + tags from frontmatter) at the top of
+  your system prompt — you do NOT maintain an INDEX.md by hand.
+  CONTEXT_BRIEF.md is autoloaded in full when present. Use
+  memory_write (with frontmatter title/tags) to add files; use
+  memory_list + memory_read to drill into the ones the index
+  surfaces. Full operating guidance in
+  .claude/skills/session-continuity.md.
+
 prompt propose_user:
   Before producing the roadmap, read these skills (mirrored to
   the workspace at run time):
@@ -289,6 +302,7 @@ prompt propose_user:
       read_file {{input.workspace_dir}}/.claude/skills/roadmap-synthesis.md
       read_file {{input.workspace_dir}}/.claude/skills/iterion-bot-catalog.md
       read_file {{input.workspace_dir}}/.claude/skills/priority-elicitation.md
+      read_file {{input.workspace_dir}}/.claude/skills/session-continuity.md
 
   - roadmap-synthesis tells you exactly what schema to emit and
     how to weigh the trade-offs.
@@ -360,6 +374,17 @@ prompt revise_system:
   - If the feedback is ambiguous, pick the most charitable reading
     and explain your interpretation in rationale.
 
+  Workspace memory:
+  You inherit the prior session AND share the workspace memory
+  tree with propose_roadmap (scope "whats-next"). The auto-index
+  + CONTEXT_BRIEF.md are already in your system prompt. Use
+  memory_write to update CONTEXT_BRIEF.md after every revision so
+  the next iteration (and the next compaction round) sees the
+  latest decision set. Use memory_list + memory_read to surface
+  richer files the index references (tag with frontmatter when
+  adding new ones). Format and cadence in
+  skills/session-continuity.md.
+
 prompt revise_user:
   Before producing the revised roadmap, re-read the parsing /
   synthesis skills (you may have lost them across sessions):
@@ -367,6 +392,12 @@ prompt revise_user:
       read_file {{input.workspace_dir}}/.claude/skills/roadmap-synthesis.md
       read_file {{input.workspace_dir}}/.claude/skills/priority-elicitation.md
       read_file {{input.workspace_dir}}/.claude/skills/iterion-bot-catalog.md
+      read_file {{input.workspace_dir}}/.claude/skills/session-continuity.md
+
+  The workspace memory auto-index (and CONTEXT_BRIEF.md when
+  present) is already in your system prompt — no need to re-fetch.
+  Use memory_list / memory_read to drill into files the index
+  surfaces.
 
   Pay particular attention to the "Revision discipline" section
   of roadmap-synthesis.
@@ -565,6 +596,15 @@ agent propose_roadmap:
   tools: [read_file, glob, grep, bash]
   tool_max_steps: 25
   readonly: true
+  ## Workspace memory: index-first autoload + re-inject before compaction.
+  ## See skills/session-continuity.md.
+  memory:
+    enabled: true
+    scope: "whats-next"
+    autoload: ["CONTEXT_BRIEF.md"]
+    read: true
+    write: true
+    pre_compact_inject: true
 
 ## carry_roadmap captures "the roadmap currently being reviewed"
 ## so the post-review branches don't have to disambiguate
@@ -604,6 +644,14 @@ agent revise_roadmap:
   tools: [read_file, glob, grep, bash]
   tool_max_steps: 25
   readonly: true
+  ## Shares the propose_roadmap memory scope (same workspace tree).
+  memory:
+    enabled: true
+    scope: "whats-next"
+    autoload: ["CONTEXT_BRIEF.md"]
+    read: true
+    write: true
+    pre_compact_inject: true
 
 agent emit_action:
   ## claude_code is REQUIRED here: this is the node that benefits

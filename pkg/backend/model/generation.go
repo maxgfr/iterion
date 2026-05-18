@@ -685,6 +685,17 @@ func GenerateTextDirect(ctx context.Context, client api.APIClient, opts Generati
 		// small-context model crashes with context_length_exceeded
 		// once history exceeds the budget.
 		if compacted, info, ok := maybeCompact(messages, opts.Model, opts.CompactThresholdRatio, opts.CompactPreserveRecent); ok {
+			// Compaction is about to fire: give OnBeforeCompact a chance
+			// to inject content (e.g. a session-memory user turn) so the
+			// summary preserves it. The injected slice feeds the
+			// summariser only; the live history keeps the originals.
+			if opts.OnBeforeCompact != nil {
+				if modified := opts.OnBeforeCompact(messages); modified != nil {
+					if reCompacted, reInfo, reOk := maybeCompact(modified, opts.Model, opts.CompactThresholdRatio, opts.CompactPreserveRecent); reOk {
+						compacted, info = reCompacted, reInfo
+					}
+				}
+			}
 			messages = compacted
 			if opts.OnCompact != nil {
 				opts.OnCompact(info)

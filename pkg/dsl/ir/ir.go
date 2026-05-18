@@ -149,6 +149,7 @@ type AgentNode struct {
 	ToolMaxSteps     int      // max tool-use iterations (0 = not set)
 	AwaitMode        AwaitMode
 	Compaction       *Compaction  // per-node compaction overrides (nil = inherit workflow)
+	Memory           *Memory      // per-node workspace memory opt-in (nil = disabled)
 	Sandbox          *SandboxSpec // node-level sandbox override (nil = inherit workflow)
 }
 
@@ -171,6 +172,7 @@ type JudgeNode struct {
 	ToolMaxSteps     int
 	AwaitMode        AwaitMode
 	Compaction       *Compaction  // per-node compaction overrides (nil = inherit workflow)
+	Memory           *Memory      // per-node workspace memory opt-in (nil = disabled)
 	Sandbox          *SandboxSpec // node-level sandbox override (nil = inherit workflow)
 }
 
@@ -833,4 +835,23 @@ type Budget struct {
 type Compaction struct {
 	Threshold      float64 // 0 = inherit (env / 0.85 default)
 	PreserveRecent int     // 0 = inherit (default 4)
+}
+
+// Memory opts a node into the iterion workspace memory tree at
+// ~/.iterion/projects/<encoded-workdir>/memory/<Scope>/. The scope
+// is a feature-bound subfolder (e.g. "session-continuity",
+// "whats-next"). Autoload lists glob patterns relative to the
+// scope whose content is mirrored into the system prompt at node
+// start; default is the scope's INDEX.md only (keeps the LLM
+// index-first, pulling richer files via memory_read on demand).
+//
+// PreCompactInject re-injects the autoload set before claw's
+// heuristic compaction so its content survives summarisation.
+type Memory struct {
+	Enabled          bool
+	Scope            string
+	Autoload         []string
+	Read             bool
+	Write            bool
+	PreCompactInject bool
 }

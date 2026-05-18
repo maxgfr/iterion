@@ -348,6 +348,12 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 		}
 	}
 
+	if m := task.Memory; m != nil {
+		if err := installWorkspaceMemory(&opts, task.WorkDir, m); err != nil {
+			return delegate.Result{}, fmt.Errorf("claw backend: memory: %w", err)
+		}
+	}
+
 	// Dispatch to the appropriate generation strategy.
 	hasSchema := task.OutputSchema != nil
 	if hasSchema && !task.HasTools {

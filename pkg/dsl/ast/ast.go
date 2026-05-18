@@ -259,6 +259,7 @@ type AgentDecl struct {
 	InteractionModel  string           // model for llm/llm_or_human modes (fallback to Model)
 	Await             AwaitMode        // convergence strategy (none/wait_all/best_effort)
 	Compaction        *CompactionBlock // per-node compaction overrides (nil = inherit workflow)
+	Memory            *MemoryBlock     // per-node workspace memory opt-in (nil = disabled)
 	Sandbox           *SandboxBlock    // node-level sandbox override; nil inherits from workflow (see pkg/sandbox)
 	Span              Span
 }
@@ -294,6 +295,7 @@ type JudgeDecl struct {
 	InteractionModel  string           // model for llm/llm_or_human modes (fallback to Model)
 	Await             AwaitMode        // convergence strategy (none/wait_all/best_effort)
 	Compaction        *CompactionBlock // per-node compaction overrides (nil = inherit workflow)
+	Memory            *MemoryBlock     // per-node workspace memory opt-in (nil = disabled)
 	Sandbox           *SandboxBlock    // node-level sandbox override; nil inherits from workflow (see pkg/sandbox)
 	Span              Span
 }
@@ -475,6 +477,21 @@ type CompactionBlock struct {
 	Threshold      *float64 // ratio of model context window (0 < t <= 1); nil = inherit
 	PreserveRecent *int     // recent messages kept verbatim (>= 1); nil = inherit
 	Span           Span
+}
+
+// MemoryBlock is the AST shape of an agent/judge `memory:`
+// sub-block: workspace-scoped, opt-in iterion memory that lives
+// under ~/.iterion/projects/<encoded-workdir>/memory/<scope>/...
+// Pointers preserve "field-omitted" vs "explicit zero" so the IR
+// compiler can apply defaults consistently.
+type MemoryBlock struct {
+	Enabled          *bool
+	Scope            *string
+	Autoload         []string
+	Read             *bool
+	Write            *bool
+	PreCompactInject *bool
+	Span             Span
 }
 
 // SandboxBlock is the AST representation of a `sandbox:` block. Two

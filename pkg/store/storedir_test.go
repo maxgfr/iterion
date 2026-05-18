@@ -56,7 +56,7 @@ func TestResolveStoreDir_DefaultsToGlobalProjectStore(t *testing.T) {
 	got := ResolveStoreDir(root, "")
 
 	abs, _ := filepath.Abs(root)
-	want := filepath.Join(iterionHome, "projects", encodeWorkDirKey(abs))
+	want := filepath.Join(iterionHome, "projects", EncodeWorkDirKey(abs))
 	if got != want {
 		t.Fatalf("expected global per-project slot %q, got %q", want, got)
 	}
@@ -83,7 +83,7 @@ func TestResolveStoreDir_DoesNotInheritParent(t *testing.T) {
 	got := ResolveStoreDir(deep, "")
 
 	absDeep, _ := filepath.Abs(deep)
-	want := filepath.Join(iterionHome, "projects", encodeWorkDirKey(absDeep))
+	want := filepath.Join(iterionHome, "projects", EncodeWorkDirKey(absDeep))
 	if got != want {
 		t.Fatalf("must not inherit parent .iterion: expected %q got %q (would have leaked to %q)", want, got, stray)
 	}
@@ -101,7 +101,7 @@ func TestResolveStoreDir_IgnoresFileNamedDotIterion(t *testing.T) {
 	got := ResolveStoreDir(root, "")
 
 	abs, _ := filepath.Abs(root)
-	want := filepath.Join(iterionHome, "projects", encodeWorkDirKey(abs))
+	want := filepath.Join(iterionHome, "projects", EncodeWorkDirKey(abs))
 	if got != want {
 		t.Fatalf("file (not dir) named .iterion must be skipped — expected global %q got %q", want, got)
 	}
@@ -143,8 +143,8 @@ func TestEncodeWorkDirKey(t *testing.T) {
 		`C:\foo\bar`: "-C--foo-bar",
 	}
 	for in, want := range cases {
-		if got := encodeWorkDirKey(in); got != want {
-			t.Errorf("encodeWorkDirKey(%q) = %q, want %q", in, got, want)
+		if got := EncodeWorkDirKey(in); got != want {
+			t.Errorf("EncodeWorkDirKey(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -163,7 +163,7 @@ func TestEncodeWorkDirKey_DistinctPathsDistinctKeys(t *testing.T) {
 	}
 	seen := map[string]string{}
 	for _, p := range paths {
-		k := encodeWorkDirKey(p)
+		k := EncodeWorkDirKey(p)
 		if other, ok := seen[k]; ok {
 			t.Errorf("collision: %q and %q both encode to %q", other, p, k)
 		}

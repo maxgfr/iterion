@@ -1028,6 +1028,9 @@ func (p *parser) parseAgentProp(ad *ast.AgentDecl, propTok Token) {
 	case TokenCompaction:
 		p.backup()
 		ad.Compaction = p.parseCompactionBlock()
+	case TokenMemory:
+		p.backup()
+		ad.Memory = p.parseMemoryBlock()
 	case TokenSandbox:
 		p.backup()
 		ad.Sandbox = p.parseSandboxBlock()
@@ -1144,6 +1147,9 @@ func (p *parser) parseJudgeProp(jd *ast.JudgeDecl, propTok Token) {
 	case TokenCompaction:
 		p.backup()
 		jd.Compaction = p.parseCompactionBlock()
+	case TokenMemory:
+		p.backup()
+		jd.Memory = p.parseMemoryBlock()
 	case TokenSandbox:
 		p.backup()
 		jd.Sandbox = p.parseSandboxBlock()
@@ -1724,6 +1730,32 @@ func (p *parser) parseCompactionBlock() *ast.CompactionBlock {
 	return cb
 }
 
+// parseMemoryBlock parses a `memory:` sub-block on an agent or
+// judge node. All fields are optional; IR compile applies defaults.
+func (p *parser) parseMemoryBlock() *ast.MemoryBlock {
+	start := p.next() // consume "memory"
+	p.expect(TokenColon)
+	p.skipNewlines()
+	if _, ok := p.expect(TokenIndent); !ok {
+		return nil
+	}
+
+	mb := &ast.MemoryBlock{Span: ast.Span{Start: p.pos(start)}}
+
+	for {
+		p.skipNewlines()
+		t := p.peek()
+		if t.Type == TokenDedent || t.Type == TokenEOF {
+			if t.Type == TokenDedent {
+				p.next()
+			}
+			break
+		}
+		p.parseMemoryProp(mb, t)
+	}
+	return mb
+}
+
 // parseSandboxBlock handles both forms of the `sandbox:` declaration:
 //
 //	sandbox: ident                  # short form (none / auto / inline)
@@ -2035,6 +2067,43 @@ func (p *parser) parseCompactionProp(cb *ast.CompactionBlock, propTok Token) {
 		cb.PreserveRecent = &v
 	default:
 		p.addError(DiagUnknownProperty, propTok, "unknown compaction property '"+propTok.Value+"'")
+		p.skipToNewline()
+	}
+	p.skipNewlines()
+}
+
+func (p *parser) parseMemoryProp(mb *ast.MemoryBlock, propTok Token) {
+	p.next()
+	switch propTok.Type {
+	case TokenEnabled:
+		p.expect(TokenColon)
+		if v := p.parseBool(); v != nil {
+			mb.Enabled = v
+		}
+	case TokenScope:
+		p.expect(TokenColon)
+		v := p.expectString()
+		mb.Scope = &v
+	case TokenAutoload:
+		p.expect(TokenColon)
+		mb.Autoload = p.parseStringList()
+	case TokenRead:
+		p.expect(TokenColon)
+		if v := p.parseBool(); v != nil {
+			mb.Read = v
+		}
+	case TokenWrite:
+		p.expect(TokenColon)
+		if v := p.parseBool(); v != nil {
+			mb.Write = v
+		}
+	case TokenPreCompactInject:
+		p.expect(TokenColon)
+		if v := p.parseBool(); v != nil {
+			mb.PreCompactInject = v
+		}
+	default:
+		p.addError(DiagUnknownProperty, propTok, "unknown memory property '"+propTok.Value+"'")
 		p.skipToNewline()
 	}
 	p.skipNewlines()
@@ -2450,6 +2519,7 @@ func isKeywordToken(tt TokenType) bool {
 		TokenMaxParallelBranches, TokenMaxDuration, TokenMaxCostUSD,
 		TokenMaxTokens, TokenMaxIterations,
 		TokenCompaction, TokenThreshold, TokenPreserveRecent,
+		TokenMemory, TokenEnabled, TokenScope, TokenAutoload, TokenRead, TokenWrite, TokenPreCompactInject,
 		TokenWorktree,
 		TokenSandbox,
 		TokenAttachments, TokenTypeFile, TokenTypeImage,

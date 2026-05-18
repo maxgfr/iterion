@@ -721,6 +721,7 @@ func (c *compiler) compileAgents() {
 			ToolMaxSteps: a.ToolMaxSteps,
 			AwaitMode:    a.Await,
 			Compaction:   compileCompaction(a.Compaction),
+			Memory:       compileMemory(a.Memory),
 			Sandbox:      c.compileSandboxBlock(a.Sandbox, "agent", a.Name),
 		}
 	}
@@ -784,6 +785,7 @@ func (c *compiler) compileJudges() {
 			ToolMaxSteps: j.ToolMaxSteps,
 			AwaitMode:    j.Await,
 			Compaction:   compileCompaction(j.Compaction),
+			Memory:       compileMemory(j.Memory),
 			Sandbox:      c.compileSandboxBlock(j.Sandbox, "judge", j.Name),
 		}
 	}
@@ -1356,6 +1358,40 @@ func compileCompaction(b *ast.CompactionBlock) *Compaction {
 	}
 	if out.Threshold == 0 && out.PreserveRecent == 0 {
 		return nil
+	}
+	return out
+}
+
+// compileMemory converts an AST MemoryBlock to its IR form. Returns
+// nil when disabled (canonical "off" marker). Defaults:
+// read=true, write=true, pre_compact_inject=false, autoload=nil
+// (pkg/memory.Autoload falls back to INDEX.md).
+func compileMemory(b *ast.MemoryBlock) *Memory {
+	if b == nil {
+		return nil
+	}
+	enabled := false
+	if b.Enabled != nil {
+		enabled = *b.Enabled
+	}
+	if !enabled {
+		return nil
+	}
+	out := &Memory{Enabled: true, Read: true, Write: true}
+	if b.Scope != nil {
+		out.Scope = *b.Scope
+	}
+	if len(b.Autoload) > 0 {
+		out.Autoload = append([]string(nil), b.Autoload...)
+	}
+	if b.Read != nil {
+		out.Read = *b.Read
+	}
+	if b.Write != nil {
+		out.Write = *b.Write
+	}
+	if b.PreCompactInject != nil {
+		out.PreCompactInject = *b.PreCompactInject
 	}
 	return out
 }

@@ -133,6 +133,14 @@ const (
 	TokenCompaction
 	TokenThreshold
 	TokenPreserveRecent
+	// Memory block + properties (workspace memory, opt-in)
+	TokenMemory
+	TokenEnabled
+	TokenScope
+	TokenAutoload
+	TokenRead
+	TokenWrite
+	TokenPreCompactInject
 	// Worktree
 	TokenWorktree
 	// Sandbox (Phase 0: simple "sandbox: ident" form for none|auto)
@@ -253,11 +261,18 @@ var tokenNames = map[TokenType]string{
 	TokenMaxTokens:           "max_tokens",
 	TokenMaxIterations:       "max_iterations",
 
-	TokenCompaction:     "compaction",
-	TokenThreshold:      "threshold",
-	TokenPreserveRecent: "preserve_recent",
-	TokenWorktree:       "worktree",
-	TokenSandbox:        "sandbox",
+	TokenCompaction:       "compaction",
+	TokenThreshold:        "threshold",
+	TokenPreserveRecent:   "preserve_recent",
+	TokenMemory:           "memory",
+	TokenEnabled:          "enabled",
+	TokenScope:            "scope",
+	TokenAutoload:         "autoload",
+	TokenRead:             "read",
+	TokenWrite:            "write",
+	TokenPreCompactInject: "pre_compact_inject",
+	TokenWorktree:         "worktree",
+	TokenSandbox:          "sandbox",
 
 	TokenDone: "done",
 	TokenFail: "fail",
@@ -358,6 +373,13 @@ var keywords = map[string]TokenType{
 	"compaction":            TokenCompaction,
 	"threshold":             TokenThreshold,
 	"preserve_recent":       TokenPreserveRecent,
+	"memory":                TokenMemory,
+	"enabled":               TokenEnabled,
+	"scope":                 TokenScope,
+	"autoload":              TokenAutoload,
+	"read":                  TokenRead,
+	"write":                 TokenWrite,
+	"pre_compact_inject":    TokenPreCompactInject,
 	"worktree":              TokenWorktree,
 	"sandbox":               TokenSandbox,
 	"done":                  TokenDone,
