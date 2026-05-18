@@ -13,6 +13,7 @@ import { useDocumentStore } from "@/store/document";
 import { useRecentsStore } from "@/store/recents";
 import { useUIStore } from "@/store/ui";
 import { useConfirm } from "@/hooks/useConfirm";
+import { DISCARD_CHANGES_PROMPT } from "@/lib/copy";
 import { createEmptyDocument } from "@/lib/defaults";
 import { basename } from "@/lib/format";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -78,12 +79,7 @@ export default function RecentFilesPanel() {
 
   const confirmDiscard = useCallback(async () => {
     if (!isDirty()) return true;
-    return confirm({
-      title: "Discard unsaved changes?",
-      message: "You have unsaved changes that will be lost.",
-      confirmLabel: "Discard",
-      confirmVariant: "danger",
-    });
+    return confirm(DISCARD_CHANGES_PROMPT);
   }, [isDirty, confirm]);
 
   const handleNewBlank = useCallback(async () => {

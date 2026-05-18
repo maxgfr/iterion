@@ -19,6 +19,7 @@ import { useAutoValidation } from "@/hooks/useAutoValidation";
 import { useAutoOpenDiagnosticsOnError } from "@/hooks/useAutoOpenDiagnosticsOnError";
 import { useFileWatcher } from "@/hooks/useFileWatcher";
 import { useConfirm } from "@/hooks/useConfirm";
+import { DISCARD_CHANGES_PROMPT } from "@/lib/copy";
 import * as api from "@/api/client";
 
 export default function EditorView() {
@@ -76,12 +77,7 @@ export default function EditorView() {
 
     const proceedOpen = async () => {
       if (docStore.isDirty()) {
-        const ok = await confirm({
-          title: "Discard unsaved changes?",
-          message: "You have unsaved changes that will be lost.",
-          confirmLabel: "Discard",
-          confirmVariant: "danger",
-        });
+        const ok = await confirm(DISCARD_CHANGES_PROMPT);
         if (!ok) return;
       }
       try {
