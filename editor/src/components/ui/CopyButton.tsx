@@ -1,0 +1,139 @@
+import { useEffect, useRef, useState, type ReactNode } from "react";
+
+export interface CopyButtonProps {
+  value: string;
+  label?: string;
+  copiedLabel?: string;
+  // Visual variant. "text" is the lightweight inline pill used in
+  // headers/summaries; "icon" renders a small icon-only button; "share"
+  // renders a share-arrow glyph (semantically a copy of a URL).
+  variant?: "text" | "icon" | "share";
+  className?: string;
+  // Optional callback after a successful copy (for analytics / chained UX).
+  onCopied?: () => void;
+}
+
+// CopyButton centralises clipboard interactions in the SPA. Use it instead of
+// reimplementing setState+timeout+navigator.clipboard pairs inline — every
+// panel that displays copyable content (prompts, responses, artifacts, tool
+// payloads, errors, run IDs, share links) should reach for this component so
+// the "copy / copied" affordance is consistent.
+//
+// Errors from the Clipboard API are swallowed: the surface stays inert when
+// clipboard access is denied (insecure context, permissions). Callers who need
+// a fallback can pass `onCopied` and observe the state externally.
+export function CopyButton({
+  value,
+  label = "copy",
+  copiedLabel = "copied",
+  variant = "text",
+  className,
+  onCopied,
+}: CopyButtonProps): ReactNode {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (timerRef.current != null) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handleClick: React.MouseEventHandler<HTMLButtonElement> = async (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      onCopied?.();
+      if (timerRef.current != null) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        setCopied(false);
+      }, 1200);
+    } catch {
+      // clipboard unavailable (insecure context, denied permission)
+    }
+  };
+
+  const baseClass =
+    variant === "icon" || variant === "share"
+      ? "inline-flex items-center justify-center h-5 w-5 rounded text-fg-subtle hover:text-fg-default hover:bg-surface-2 transition-colors"
+      : "text-[10px] text-fg-subtle hover:text-fg-default px-1";
+
+  let inner: ReactNode;
+  if (variant === "icon") {
+    inner = copied ? <CheckGlyph /> : <ClipboardGlyph />;
+  } else if (variant === "share") {
+    inner = copied ? <CheckGlyph /> : <ShareGlyph />;
+  } else {
+    inner = copied ? copiedLabel : label;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      title={copied ? copiedLabel : label}
+      aria-label={copied ? copiedLabel : label}
+      className={[baseClass, className ?? ""].join(" ")}
+    >
+      {inner}
+    </button>
+  );
+}
+
+function ClipboardGlyph() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="4.5" y="2.5" width="7" height="2" rx="0.6" />
+      <path d="M5.5 4.5h5a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" />
+    </svg>
+  );
+}
+
+function CheckGlyph() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3.5 8.5l3 3 6-6" />
+    </svg>
+  );
+}
+
+function ShareGlyph() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M10 6V3l4 4-4 4V8H6.5a3 3 0 0 0-3 3v1" />
+      <path d="M2.5 6.5V13a1 1 0 0 0 1 1H11" />
+    </svg>
+  );
+}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation } from "wouter";
 
 import PageShell from "@/components/shared/PageShell";
 import ConductorControlBar from "@/components/shared/ConductorControlBar";
@@ -14,14 +15,20 @@ import {
   type ManagerStatus,
 } from "@/api/conductor";
 import SettingsDrawer from "./SettingsDrawer";
+import TrackerErrorBanner from "@/components/shared/TrackerErrorBanner";
 
 export default function ConductorView() {
+  const [, setLocation] = useLocation();
   const [snap, setSnap] = useState<ConductorSnapshot | null>(null);
   const [status, setStatus] = useState<ManagerStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const openRun = useCallback(
+    (runID: string) => setLocation(`/runs/${encodeURIComponent(runID)}`),
+    [setLocation],
+  );
 
   const reload = useCallback(async () => {
     setError(null);
@@ -204,10 +211,28 @@ export default function ConductorView() {
         </div>
       )}
 
+      {snap.last_tracker_error && (
+        <TrackerErrorBanner
+          tracker={snap.tracker}
+          message={snap.last_tracker_error}
+        />
+      )}
+
       <main className="flex-1 overflow-auto p-4 space-y-4 max-w-4xl">
         <SummaryCard snap={snap} />
-        <RunningTable rows={running} onCancel={doCancel} />
-        <RetriesTable rows={retries} />
+        <RunningTable
+          rows={running}
+          stallTimeoutS={snap.stall_timeout_seconds}
+          onCancel={doCancel}
+          onOpenRun={openRun}
+        />
+        <RetriesTable
+          rows={retries}
+          onFocusIssue={(id) =>
+            setLocation(`/board?focus=${encodeURIComponent(id)}`)
+          }
+          onRefreshNow={() => void doRefresh()}
+        />
       </main>
     </PageShell>
   );
@@ -237,12 +262,47 @@ function SummaryCard({ snap }: { snap: ConductorSnapshot }) {
   );
 }
 
+// stallStyle inspects how long a running entry has been silent relative
+// to the conductor's stallTimeout and returns a (className, hint) pair
+// for the row. The thresholds match what the operator can act on:
+//   ≥ 50% of the budget elapsed → amber  ("slow — keep an eye")
+//   ≥ 100% of the budget        → red    ("about to be cancelled")
+// Below 50%: no decoration, the row reads as normal.
+function stallStyle(
+  lastEventAt: string,
+  stallTimeoutS: number,
+): { rowClass: string; hint: string | null } {
+  if (!stallTimeoutS || stallTimeoutS <= 0) {
+    return { rowClass: "", hint: null };
+  }
+  const last = Date.parse(lastEventAt);
+  if (!Number.isFinite(last)) return { rowClass: "", hint: null };
+  const elapsedS = (Date.now() - last) / 1000;
+  if (elapsedS >= stallTimeoutS) {
+    return {
+      rowClass: "bg-red-500/10",
+      hint: `Silent for ${Math.round(elapsedS)}s ≥ stall timeout (${Math.round(stallTimeoutS)}s) — will be cancelled on the next reconciliation tick.`,
+    };
+  }
+  if (elapsedS >= stallTimeoutS / 2) {
+    return {
+      rowClass: "bg-amber-500/10",
+      hint: `Silent for ${Math.round(elapsedS)}s — half the stall budget (${Math.round(stallTimeoutS)}s) consumed.`,
+    };
+  }
+  return { rowClass: "", hint: null };
+}
+
 function RunningTable({
   rows,
+  stallTimeoutS,
   onCancel,
+  onOpenRun,
 }: {
   rows: ConductorSnapshot["running"];
+  stallTimeoutS: number;
   onCancel: (id: string) => void;
+  onOpenRun: (runID: string) => void;
 }) {
   return (
     <section className="rounded border border-border-default bg-surface-1">
@@ -264,15 +324,33 @@ function RunningTable({
             </tr>
           </thead>
           <tbody>
-            {rows!.map((r) => (
-              <tr key={r.issue_id} className="border-b border-border-default/60">
+            {rows!.map((r) => {
+              const stall = stallStyle(r.last_event_at, stallTimeoutS);
+              return (
+              <tr
+                key={r.issue_id}
+                className={`border-b border-border-default/60 ${stall.rowClass}`}
+                title={stall.hint ?? undefined}
+              >
                 <td className="py-1.5 px-3 font-mono">{r.identifier}</td>
-                <td className="py-1.5 px-3 font-mono truncate max-w-[14rem]">{r.run_id}</td>
+                <td className="py-1.5 px-3 font-mono truncate max-w-[14rem]">
+                  <button
+                    type="button"
+                    onClick={() => onOpenRun(r.run_id)}
+                    className="text-info hover:underline"
+                    title={`Open run ${r.run_id}`}
+                  >
+                    {r.run_id}
+                  </button>
+                </td>
                 <td className="py-1.5 px-3">{r.workflow_state}</td>
                 <td className="py-1.5 px-3 text-fg-muted">{relTime(r.started_at)}</td>
                 <td className="py-1.5 px-3 text-fg-muted">
                   {r.last_event_name ? r.last_event_name + " · " : ""}
                   {relTime(r.last_event_at)}
+                  {stall.hint && (
+                    <span className="ml-1 text-amber-300/90">⏱</span>
+                  )}
                 </td>
                 <td className="py-1.5 px-3 text-right">
                   <button
@@ -283,7 +361,8 @@ function RunningTable({
                   </button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -291,11 +370,66 @@ function RunningTable({
   );
 }
 
-function RetriesTable({ rows }: { rows: ConductorSnapshot["retries"] }) {
+// useTick re-renders the caller at intervalMs while `active`. Used by
+// RetriesTable to keep countdowns smooth without a full conductor poll
+// each second — the retry table only needs to recompute due_at minus
+// now() on its own clock.
+function useTick(intervalMs: number, active: boolean): number {
+  const [tick, setTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setTick(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs, active]);
+  return tick;
+}
+
+// formatRetryDue returns a short human label for "in 12s" / "due now"
+// derived purely from due_at + now. Lives next to RetriesTable so the
+// formatting stays scoped to the retry context (the rest of the page
+// uses relTime).
+function formatRetryDue(dueIso: string, nowMs: number): string {
+  if (!dueIso) return "";
+  const due = Date.parse(dueIso);
+  if (!Number.isFinite(due)) return "";
+  const deltaS = Math.round((due - nowMs) / 1000);
+  if (deltaS <= 0) return "due";
+  if (deltaS < 60) return `in ${deltaS}s`;
+  if (deltaS < 3600) return `in ${Math.round(deltaS / 60)}m`;
+  return `in ${Math.round(deltaS / 3600)}h`;
+}
+
+function RetriesTable({
+  rows,
+  onFocusIssue,
+  onRefreshNow,
+}: {
+  rows: ConductorSnapshot["retries"];
+  onFocusIssue: (issueID: string) => void;
+  onRefreshNow: () => void;
+}) {
+  // Tick every 1s when at least one retry is due in under 5 minutes so
+  // the countdown is responsive without burning CPU on long-deferred
+  // queues.
+  const needsTick = (rows ?? []).some((r) => {
+    const due = Date.parse(r.due_at);
+    return Number.isFinite(due) && due - Date.now() < 5 * 60_000;
+  });
+  const now = useTick(1000, needsTick);
   return (
     <section className="rounded border border-border-default bg-surface-1">
-      <header className="px-4 py-2 border-b border-border-default text-sm font-semibold">
-        Retry queue ({rows?.length ?? 0})
+      <header className="px-4 py-2 border-b border-border-default text-sm font-semibold flex items-center justify-between gap-2">
+        <span>Retry queue ({rows?.length ?? 0})</span>
+        {rows && rows.length > 0 && (
+          <button
+            type="button"
+            onClick={onRefreshNow}
+            className="text-[11px] px-2 py-0.5 rounded border border-border-default hover:bg-surface-2 text-fg-muted hover:text-fg-default"
+            title="Trigger an immediate tracker poll; due retries will fire on the next tick."
+          >
+            Poll now
+          </button>
+        )}
       </header>
       {!rows || rows.length === 0 ? (
         <div className="p-4 text-xs text-fg-muted">No retries pending.</div>
@@ -310,16 +444,31 @@ function RetriesTable({ rows }: { rows: ConductorSnapshot["retries"] }) {
             </tr>
           </thead>
           <tbody>
-            {rows!.map((r) => (
-              <tr key={r.issue_id} className="border-b border-border-default/60">
+            {rows!.map((r) => {
+              const dueLabel = formatRetryDue(r.due_at, now);
+              const isDue = dueLabel === "due";
+              return (
+              <tr
+                key={r.issue_id}
+                className={`border-b border-border-default/60 hover:bg-surface-2/40 cursor-pointer ${
+                  isDue ? "bg-amber-500/5" : ""
+                }`}
+                onClick={() => onFocusIssue(r.issue_id)}
+                title="Open this issue on the board"
+              >
                 <td className="py-1.5 px-3 font-mono">{r.identifier || r.issue_id}</td>
                 <td className="py-1.5 px-3">{r.attempt}</td>
-                <td className="py-1.5 px-3 text-fg-muted">{r.due_at && relTime(r.due_at)}</td>
+                <td className="py-1.5 px-3">
+                  <span className={isDue ? "text-amber-300" : "text-fg-muted"}>
+                    {dueLabel || relTime(r.due_at)}
+                  </span>
+                </td>
                 <td className="py-1.5 px-3 text-red-300/80 truncate max-w-[24rem]">
                   {r.error}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       )}
