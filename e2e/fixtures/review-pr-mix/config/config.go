@@ -8,10 +8,10 @@ import (
 
 // Config is the runtime knobs the server reads at startup.
 type Config struct {
-	Workers      int
-	QueueSize    int
-	SecretToken  string
-	StorageRoot  string
+	Workers     int
+	QueueSize   int
+	SecretToken string
+	StorageRoot string
 }
 
 // Load reads env vars and returns a populated Config. Missing values
