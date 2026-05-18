@@ -50,6 +50,7 @@ Walk top-to-bottom; first match wins.
 | "focus on axis X" (security / observability / perf …) across the codebase | `whole_improve_loop` (with `--var improvement_prompt=…`) |
 | "review this branch", "review the PR", "fix the diff against main" | `branch_improve_loop` |
 | "upgrade dependencies", "patch CVEs", "bump versions" | `secured-renovacy` |
+| "audit the docs", "find code↔doc drift", "doc/code alignment", "fix outdated README/CLAUDE.md" | `doc-align` |
 | architectural choice, hiring, prioritisation meeting, alignment | `""` |
 | operator is vague or it's cross-cutting | `""` |
 | long-term theme (a quarter+ horizon) | usually `""` |
@@ -130,6 +131,32 @@ Example `args` payload for a roadmap_item:
 - **Use when**: dependency risk is the priority; CVE alerts;
   stale lockfiles.
 
+### `doc-align`
+
+- **Path**: `examples/doc-align/main.bot` (or packed
+  `examples/doc-align.botz`).
+- **Vars**: none required. Optional: `doc_globs` (default
+  `README.md,docs/**/*.md,CLAUDE.md`), `go_comment_globs`
+  (default empty — opt in to comment audits),
+  `code_scope_globs`, `coverage_target_pct` (default `80`),
+  `diff_since` (hint only — recently-changed code files to
+  prioritise), `bundle_self_path` (auto-exclude when the bot
+  is auditing its own source tree).
+- **Pipeline**: deterministic `scan_docs` enumerates the doc
+  footprint once → alternating Claude/GPT review/fix on docs
+  only (fixer is forbidden to touch code logic — `.md` files
+  + Go comments only) → `prepare_commit` + `commit_changes`.
+  A mechanical coverage gate (`cumulative_audited_docs /
+  doc_count ≥ coverage_target_pct`) is baked into
+  `streak_check` to prevent early "approved" on partial
+  audits.
+- **Budget**: 1 branch, 2h, $60 (typical).
+- **Use when**: README / CLAUDE.md / `docs/**/*.md` / bundled
+  skills are stale vs the code; before a release when the
+  docs must reflect what shipped; whenever `repo-survey`
+  flags drift between what the code does and what the docs
+  claim.
+
 ## Issue-creation mapping (consumed by `emit_action`)
 
 Each `roadmap_item` → one `iterion issue create` invocation:
@@ -156,11 +183,11 @@ dispatched bot.
 Before creating each issue:
 
 1. If `assignee != ""`, look it up in the table above. If it's
-   not one of the four known bots (`vibe_feature_dev`,
+   not one of the five known bots (`vibe_feature_dev`,
    `whole_improve_loop`, `branch_improve_loop`,
-   `secured-renovacy`), AND it doesn't correspond to a `.bot`
-   file the explorer surfaced — strip to `""` and add label
-   `needs-manual-triage`. NEVER invent.
+   `secured-renovacy`, `doc-align`), AND it doesn't correspond
+   to a `.bot` file the explorer surfaced — strip to `""` and
+   add label `needs-manual-triage`. NEVER invent.
 2. Empty assignee is FINE. The issue lands without an assignee
    and the operator triages.
 
