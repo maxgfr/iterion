@@ -12,7 +12,7 @@ import { ChevronRightIcon } from "@radix-ui/react-icons";
 import type { ArtifactSummary, ExecutionState, RunEvent } from "@/api/runs";
 import { fetchToolBlob, listArtifacts } from "@/api/runs";
 import { formatBytes } from "@/lib/format";
-import { IconButton, Input, StatusBadge, Tabs } from "@/components/ui";
+import { CopyButton, IconButton, Input, StatusBadge, Tabs } from "@/components/ui";
 import { stepIteration } from "@/lib/eventIter";
 import { formatContextUsage, formatDurationBetween, formatMs } from "@/lib/format";
 import { readNodeOutputMeta } from "@/lib/delegateMeta";
@@ -462,27 +462,6 @@ function DetailHeader({
     return { costUsd, tokens, model, contextWindow, contextUsed };
   }, [events]);
   const contextUsage = formatContextUsage(contextUsed, contextWindow);
-  const [copied, setCopied] = useState(false);
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current != null) clearTimeout(copyTimerRef.current);
-    };
-  }, []);
-  const onCopyError = async () => {
-    if (!exec.error) return;
-    try {
-      await navigator.clipboard.writeText(exec.error);
-      setCopied(true);
-      if (copyTimerRef.current != null) clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = setTimeout(() => {
-        copyTimerRef.current = null;
-        setCopied(false);
-      }, 1200);
-    } catch {
-      // ignore — clipboard may be unavailable
-    }
-  };
 
   return (
     <div className="px-4 pt-3 pb-3 pr-10 border-b border-border-default">
@@ -564,13 +543,7 @@ function DetailHeader({
         <div className="mt-2 px-2 py-1.5 rounded bg-danger-soft text-danger-fg">
           <div className="flex items-center justify-between gap-2 mb-0.5">
             <span className="font-medium">Error</span>
-            <button
-              type="button"
-              onClick={() => void onCopyError()}
-              className="text-[10px] text-danger-fg/80 hover:text-danger-fg underline"
-            >
-              {copied ? "copied" : "copy"}
-            </button>
+            <CopyButton value={exec.error} />
           </div>
           <div className="font-mono text-[11px] whitespace-pre-wrap break-words">
             {exec.error}
@@ -1193,8 +1166,14 @@ function ToolCallCard({ call, runId }: { call: ToolCall; runId: string }) {
         <TodoChecklist todos={summary.todos} />
       )}
       {call.errorMsg && (
-        <div className="text-[10px] font-mono text-danger-fg whitespace-pre-wrap break-words mb-1">
-          {call.errorMsg}
+        <div className="mb-1 rounded bg-danger-soft/40 px-1.5 py-1">
+          <div className="flex items-center justify-between gap-2 mb-0.5">
+            <span className="text-[10px] font-medium text-danger-fg">tool error</span>
+            <CopyButton value={call.errorMsg} />
+          </div>
+          <div className="text-[10px] font-mono text-danger-fg whitespace-pre-wrap break-words">
+            {call.errorMsg}
+          </div>
         </div>
       )}
       {call.input && (
@@ -1217,13 +1196,18 @@ function ToolCallCard({ call, runId }: { call: ToolCall; runId: string }) {
           totalSize={call.outputSize}
         />
       )}
-      <button
-        type="button"
-        onClick={() => setShowRaw((v) => !v)}
-        className="text-[10px] text-fg-subtle hover:text-fg-default"
-      >
-        {showRaw ? "hide raw" : "show raw"}
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setShowRaw((v) => !v)}
+          className="text-[10px] text-fg-subtle hover:text-fg-default"
+        >
+          {showRaw ? "hide raw" : "show raw"}
+        </button>
+        {showRaw && call.rawData && (
+          <CopyButton value={JSON.stringify(call.rawData, null, 2)} />
+        )}
+      </div>
       {showRaw && call.rawData && (
         <pre className="mt-1 text-[10px] font-mono whitespace-pre-wrap break-all bg-surface-1 rounded p-1.5 text-fg-subtle">
           {JSON.stringify(call.rawData, null, 2)}
@@ -1402,39 +1386,6 @@ function useExecutionEvents(events: RunEvent[], exec: ExecutionState | null) {
     }
     return out;
   }, [events, exec]);
-}
-
-function CopyButton({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    return () => {
-      if (timerRef.current != null) clearTimeout(timerRef.current);
-    };
-  }, []);
-  return (
-    <button
-      type="button"
-      onClick={async (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        try {
-          await navigator.clipboard.writeText(value);
-          setCopied(true);
-          if (timerRef.current != null) clearTimeout(timerRef.current);
-          timerRef.current = setTimeout(() => {
-            timerRef.current = null;
-            setCopied(false);
-          }, 1200);
-        } catch {
-          // ignore
-        }
-      }}
-      className="text-[9px] text-fg-subtle hover:text-fg-default px-1"
-    >
-      {copied ? "copied" : "copy"}
-    </button>
-  );
 }
 
 function safeJSON(v: unknown): string {

@@ -787,6 +787,7 @@ export default function RunView() {
                           onSelectNodeIteration={handleEventSelect}
                           onClearSelection={handleClearSelection}
                           onCollapse={toggleEventlogCollapsed}
+                          runId={runId}
                         />
                       ) : bottomTab === "logs" ? (
                         <RunLogPanel

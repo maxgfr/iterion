@@ -21,6 +21,7 @@ import {
 } from "@/api/native";
 import IssueModal from "./IssueModal";
 import SettingsDrawer from "@/views/Conductor/SettingsDrawer";
+import { useBoardKeyboard } from "@/hooks/useBoardKeyboard";
 
 export default function BoardView() {
   const [board, setBoard] = useState<NativeBoard | null>(null);
@@ -32,6 +33,8 @@ export default function BoardView() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [runningByIssue, setRunningByIssue] = useState<Map<string, RunningView>>(new Map());
   const [retryingByIssue, setRetryingByIssue] = useState<Map<string, RetryView>>(new Map());
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // Poll the conductor snapshot every 2s so each card can show a
   // running/retrying badge + cancel button. We ignore failures: when
@@ -194,6 +197,7 @@ export default function BoardView() {
       try {
         await deleteIssue(id);
         setEditing(null);
+        setSelectedId((cur) => (cur === id ? null : cur));
         await refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -201,6 +205,22 @@ export default function BoardView() {
     },
     [refresh],
   );
+
+  useBoardKeyboard({
+    board,
+    byState,
+    selectedId,
+    modalOpen: creating || editing !== null || helpOpen || settingsOpen,
+    onSelect: setSelectedId,
+    onCreate: () => setCreating(true),
+    onEdit: (id) => {
+      const iss = issues.find((i) => i.id === id);
+      if (iss) setEditing(iss);
+    },
+    onDelete: (id) => void onDelete(id),
+    onTransition: (id, toState) => void onDrop(id, toState),
+    onShowHelp: () => setHelpOpen((v) => !v),
+  });
 
   if (loading) {
     return (
@@ -257,10 +277,13 @@ export default function BoardView() {
               display={s.display ?? s.name}
               terminal={!!s.terminal}
               eligible={!!s.eligible}
+              color={s.color ?? defaultStateColor(s.name, !!s.eligible, !!s.terminal)}
               issues={byState.get(s.name) ?? []}
+              selectedId={selectedId}
               runningByIssue={runningByIssue}
               retryingByIssue={retryingByIssue}
               onDrop={onDrop}
+              onSelectCard={setSelectedId}
               onClickCard={(iss) => setEditing(iss)}
               onCancelRun={onCancelRun}
             />
@@ -271,10 +294,13 @@ export default function BoardView() {
               display="Unmapped"
               terminal={false}
               eligible={false}
+              color="#64748b"
               issues={byState.get("__unmapped__") ?? []}
+              selectedId={selectedId}
               runningByIssue={runningByIssue}
               retryingByIssue={retryingByIssue}
               onDrop={onDrop}
+              onSelectCard={setSelectedId}
               onClickCard={(iss) => setEditing(iss)}
               onCancelRun={onCancelRun}
             />
@@ -299,7 +325,64 @@ export default function BoardView() {
           onDelete={() => void onDelete(editing.id)}
         />
       )}
+      {helpOpen && <BoardKeyboardHelp onClose={() => setHelpOpen(false)} />}
     </PageShell>
+  );
+}
+
+function BoardKeyboardHelp({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" || e.key === "?") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center"
+      onClick={onClose}
+    >
+      <div
+        className="bg-surface-1 border border-border-default rounded shadow-lg p-5 max-w-sm text-sm"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="font-semibold text-fg-default mb-3">
+          Keyboard shortcuts
+        </div>
+        <ul className="space-y-1.5 text-fg-default">
+          <ShortcutRow keys="c / n" desc="New issue" />
+          <ShortcutRow keys="↑ ↓" desc="Navigate cards in column" />
+          <ShortcutRow keys="← →" desc="Move card to previous/next column" />
+          <ShortcutRow keys="Enter / e" desc="Open selected issue" />
+          <ShortcutRow keys="Del / Bksp" desc="Delete selected issue" />
+          <ShortcutRow keys="Esc" desc="Clear selection or close" />
+          <ShortcutRow keys="?" desc="Toggle this help" />
+        </ul>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-4 text-xs text-fg-subtle hover:text-fg-default"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ShortcutRow({ keys, desc }: { keys: string; desc: string }) {
+  return (
+    <li className="flex items-center justify-between gap-4">
+      <kbd className="font-mono text-xs px-1.5 py-0.5 rounded bg-surface-2 border border-border-default">
+        {keys}
+      </kbd>
+      <span className="text-fg-muted text-xs">{desc}</span>
+    </li>
   );
 }
 
@@ -307,15 +390,49 @@ export default function BoardView() {
 // Column + Card
 // ---------------------------------------------------------------------------
 
+// defaultStateColor maps the conventional native-tracker state names
+// (backlog/ready/in_progress/review/done/blocked) to a sensible palette
+// so columns are scannable out of the box. Custom states fall back to a
+// semantic colour from the eligible/terminal flags; truly unknown states
+// get a neutral slate. Custom boards can always override per-state via
+// the `color:` field — this helper only fires when `State.Color` is
+// empty.
+function defaultStateColor(name: string, eligible: boolean, terminal: boolean): string {
+  switch (name) {
+    case "backlog":
+      return "#64748b"; // slate-500
+    case "ready":
+      return "#22c55e"; // green-500
+    case "in_progress":
+      return "#3b82f6"; // blue-500
+    case "review":
+      return "#a855f7"; // purple-500
+    case "done":
+      return "#94a3b8"; // slate-400 (terminal success)
+    case "blocked":
+      return "#ef4444"; // red-500
+    default:
+      if (terminal) return "#94a3b8";
+      if (eligible) return "#22c55e";
+      return "#64748b";
+  }
+}
+
 interface ColumnProps {
   name: string;
   display: string;
   terminal: boolean;
   eligible: boolean;
+  // Hex or CSS color string used to tint the column header strip and the
+  // count chip. Always provided by the parent — either from State.Color
+  // (board config) or from `defaultStateColor()` (semantic fallback).
+  color: string;
   issues: NativeIssue[];
+  selectedId: string | null;
   runningByIssue: Map<string, RunningView>;
   retryingByIssue: Map<string, RetryView>;
   onDrop: (issueID: string, toState: string) => void;
+  onSelectCard: (id: string | null) => void;
   onClickCard: (iss: NativeIssue) => void;
   onCancelRun: (issueID: string) => void;
 }
@@ -325,10 +442,13 @@ function Column({
   display,
   terminal,
   eligible,
+  color,
   issues,
+  selectedId,
   runningByIssue,
   retryingByIssue,
   onDrop,
+  onSelectCard,
   onClickCard,
   onCancelRun,
 }: ColumnProps) {
@@ -338,6 +458,7 @@ function Column({
       className={`w-72 shrink-0 rounded border ${
         dragOver ? "border-accent/60 bg-accent-soft/30" : "border-border-default bg-surface-1"
       } flex flex-col`}
+      style={{ borderTopColor: color, borderTopWidth: 3 }}
       onDragOver={(e) => {
         e.preventDefault();
         setDragOver(true);
@@ -351,7 +472,16 @@ function Column({
       }}
     >
       <div className="px-3 py-2 border-b border-border-default flex items-center justify-between text-xs">
-        <span className="font-semibold uppercase tracking-wide text-fg-default">{display}</span>
+        <span className="flex items-center gap-2 min-w-0">
+          <span
+            className="inline-block h-2 w-2 rounded-full shrink-0"
+            style={{ backgroundColor: color }}
+            aria-hidden="true"
+          />
+          <span className="font-semibold uppercase tracking-wide text-fg-default truncate">
+            {display}
+          </span>
+        </span>
         <span className="text-fg-muted">
           {issues.length}
           {eligible && <span className="ml-1 text-emerald-400">●</span>}
@@ -363,8 +493,10 @@ function Column({
           <IssueCard
             key={iss.id}
             iss={iss}
+            selected={iss.id === selectedId}
             running={runningByIssue.get(iss.id)}
             retrying={retryingByIssue.get(iss.id)}
+            onSelect={() => onSelectCard(iss.id)}
             onClick={() => onClickCard(iss)}
             onCancelRun={() => onCancelRun(iss.id)}
           />
@@ -379,13 +511,23 @@ function Column({
 
 interface IssueCardProps {
   iss: NativeIssue;
+  selected: boolean;
   running?: RunningView;
   retrying?: RetryView;
+  onSelect: () => void;
   onClick: () => void;
   onCancelRun: () => void;
 }
 
-function IssueCard({ iss, running, retrying, onClick, onCancelRun }: IssueCardProps) {
+function IssueCard({
+  iss,
+  selected,
+  running,
+  retrying,
+  onSelect,
+  onClick,
+  onCancelRun,
+}: IssueCardProps) {
   return (
     <div
       role="button"
@@ -393,9 +535,25 @@ function IssueCard({ iss, running, retrying, onClick, onCancelRun }: IssueCardPr
       onDragStart={(e) => {
         e.dataTransfer.setData("text/plain", iss.id);
         e.dataTransfer.effectAllowed = "move";
+        onSelect();
       }}
-      onClick={onClick}
-      className="bg-surface-0 border border-border-default rounded p-2 text-sm cursor-grab hover:border-accent/40 active:cursor-grabbing"
+      onClick={(e) => {
+        // Single click selects (so keyboard nav has an anchor); a second
+        // click on the already-selected card opens the modal — mirroring
+        // file-manager double-click idioms but with a much shorter delay.
+        if (selected) {
+          onClick();
+        } else {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      onDoubleClick={onClick}
+      className={`bg-surface-0 border rounded p-2 text-sm cursor-grab active:cursor-grabbing ${
+        selected
+          ? "border-accent ring-1 ring-accent/40"
+          : "border-border-default hover:border-accent/40"
+      }`}
     >
       <div className="flex items-start gap-2">
         <span className="text-fg-default flex-1">{iss.title}</span>

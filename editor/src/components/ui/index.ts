@@ -45,3 +45,6 @@ export { EffortBar, isEffortLevel } from "./EffortBar";
 export type { EffortLevel } from "./EffortBar";
 
 export { Skeleton } from "./Skeleton";
+
+export { CopyButton } from "./CopyButton";
+export type { CopyButtonProps } from "./CopyButton";
