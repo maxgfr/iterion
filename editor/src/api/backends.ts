@@ -33,11 +33,14 @@ export interface BackendDetectReport {
 }
 
 export async function fetchBackendDetect(
-  signal?: AbortSignal,
+  opts: { signal?: AbortSignal; force?: boolean } = {},
 ): Promise<BackendDetectReport> {
-  const res = await fetch(`${BASE_URL}/backends/detect`, {
+  const url = opts.force
+    ? `${BASE_URL}/backends/detect?force=1`
+    : `${BASE_URL}/backends/detect`;
+  const res = await fetch(url, {
     credentials: "include",
-    signal,
+    signal: opts.signal,
   });
   if (!res.ok) {
     throw new Error(`backends/detect: HTTP ${res.status}`);

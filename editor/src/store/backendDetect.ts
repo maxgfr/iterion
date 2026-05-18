@@ -6,17 +6,22 @@ interface BackendDetectState {
   report: BackendDetectReport | null;
   loading: boolean;
   error: string | null;
-  refresh: () => Promise<void>;
+  // refresh re-probes the host for credentials. `force: true` invalidates
+  // the server-side 30s cache so the result reflects the host state right
+  // now (used after the user signs into Codex CLI, exports an env var,
+  // etc.). The initial mount call passes force: false so we benefit from
+  // the cache on page navigation.
+  refresh: (force?: boolean) => Promise<void>;
 }
 
 export const useBackendDetectStore = create<BackendDetectState>((set) => ({
   report: null,
   loading: false,
   error: null,
-  refresh: async () => {
+  refresh: async (force = false) => {
     set({ loading: true, error: null });
     try {
-      const report = await fetchBackendDetect();
+      const report = await fetchBackendDetect({ force });
       set({ report, loading: false });
     } catch (e) {
       set({

@@ -1,7 +1,12 @@
+import { RefreshCw } from "lucide-react";
+
 import { useBackendDetectStore } from "@/store/backendDetect";
 import { BackendBadge } from "@/components/icons/BackendBadge";
 import { Popover } from "@/components/ui/Popover";
 import type { BackendStatus } from "@/api/backends";
+
+const DOCS_BACKENDS_URL =
+  "https://github.com/SocialGouv/iterion/blob/main/docs/backends.md";
 
 export default function BackendStatusPill() {
   const report = useBackendDetectStore((s) => s.report);
@@ -40,33 +45,50 @@ export default function BackendStatusPill() {
     .join("\n");
   const tooltip = `Preference: ${report.preference_order.join(" → ")}\n${summary}`;
 
+  const onRefresh = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    void refresh(true);
+  };
+
   return (
     <Popover
       side="bottom"
       align="start"
       contentClassName="min-w-[280px] p-3 text-xs"
       trigger={
-        <button
-          type="button"
-          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${
-            hasAny
-              ? "border-success/40 text-success bg-success/5"
-              : "border-error/50 text-error bg-error/5"
-          }`}
-          title={tooltip}
-        >
-          <span
-            aria-hidden
-            className={`inline-block w-1.5 h-1.5 rounded-full ${
-              hasAny ? "bg-success" : "bg-error"
+        <span className="inline-flex items-center gap-0.5">
+          <button
+            type="button"
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${
+              hasAny
+                ? "border-success/40 text-success bg-success/5"
+                : "border-error/50 text-error bg-error/5"
             }`}
-          />
-          {hasAny ? (
-            <BackendBadge backend="" resolved={resolved} size={9} showLabel />
-          ) : (
-            <span>no creds</span>
-          )}
-        </button>
+            title={tooltip}
+          >
+            <span
+              aria-hidden
+              className={`inline-block w-1.5 h-1.5 rounded-full ${
+                hasAny ? "bg-success" : "bg-error"
+              }`}
+            />
+            {hasAny ? (
+              <BackendBadge backend="" resolved={resolved} size={9} showLabel />
+            ) : (
+              <span>no creds</span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            className="inline-flex items-center justify-center w-5 h-5 rounded text-fg-subtle hover:text-fg-default hover:bg-bg-subtle disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Re-probe LLM credentials"
+            aria-label="Refresh credential detection"
+          >
+            <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
+          </button>
+        </span>
       }
     >
       <div className="font-semibold mb-1">LLM credentials</div>
@@ -86,17 +108,24 @@ export default function BackendStatusPill() {
           <BackendRow key={b.name} status={b} />
         ))}
       </ul>
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-3 flex items-center justify-between gap-2 text-[10px]">
         <button
           type="button"
-          className="text-[10px] underline text-fg-subtle hover:text-fg-default"
-          onClick={() => void refresh()}
+          className="inline-flex items-center gap-1 text-fg-subtle hover:text-fg-default disabled:opacity-50"
+          onClick={() => void refresh(true)}
+          disabled={loading}
         >
+          <RefreshCw size={10} className={loading ? "animate-spin" : ""} />
           Refresh
         </button>
-        <span className="text-[10px] text-fg-subtle">
-          See <code>docs/backends.md</code>
-        </span>
+        <a
+          href={DOCS_BACKENDS_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-fg-subtle hover:text-fg-default hover:underline"
+        >
+          Backends reference ↗
+        </a>
       </div>
     </Popover>
   );
