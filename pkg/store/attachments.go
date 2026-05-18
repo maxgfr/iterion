@@ -150,6 +150,15 @@ func (s *FilesystemRunStore) OpenAttachment(ctx context.Context, runID, name str
 	if err != nil {
 		return nil, AttachmentRecord{}, err
 	}
+	// Re-sanitise rec.OriginalFilename even though WriteAttachment
+	// canonicalises it via filepath.Base: meta.json is on the same
+	// filesystem as the caller, so an attacker who can write the
+	// sidecar could otherwise plant `../../etc/passwd` and read
+	// arbitrary host files through the open endpoint. Defence-in-depth
+	// is cheap here.
+	if err := sanitizePathComponent("attachment filename", rec.OriginalFilename); err != nil {
+		return nil, rec, err
+	}
 	dir := s.attachmentDir(runID, name)
 	f, err := os.Open(filepath.Join(dir, rec.OriginalFilename))
 	if err != nil {
