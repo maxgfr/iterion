@@ -1,6 +1,6 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "Iterion",
+  "name": "Iterion Studio",
   "outputfilename": "iterion-desktop",
   "frontend:install": "true",
   "frontend:build": "true",
@@ -10,7 +10,7 @@
   "version": "2",
   "info": {
     "companyName": "Iterion",
-    "productName": "Iterion",
+    "productName": "Iterion Studio",
     "productVersion": "0.0.0",
     "copyright": "Copyright © 2026",
     "comments": "Workflow orchestration engine"
