@@ -189,7 +189,11 @@ jobs:
             zip)
               # macOS: ditto preserves xattrs/symlinks inside .app
               cd build/bin
-              ditto -c -k --keepParent Iterion.app "../../${ARTIFACT_NAME}.zip"
+              # Wails names the .app from wails.json's productName; the
+              # rebrand to "Iterion Studio" changed the bundle name so
+              # we glob for *.app instead of hard-coding it.
+              APP_BUNDLE=$(ls -d *.app | head -1)
+              ditto -c -k --keepParent "${APP_BUNDLE}" "../../${ARTIFACT_NAME}.zip"
               cd ../..
               ;;
             nsis-portable)
