@@ -18,6 +18,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
 	"github.com/SocialGouv/iterion/pkg/sandbox"
 	"github.com/SocialGouv/iterion/pkg/secrets"
+	"github.com/SocialGouv/iterion/pkg/store"
 )
 
 // ClawBackend implements delegate.Backend by calling GenerateTextDirect and
@@ -28,6 +29,104 @@ type ClawBackend struct {
 	hooks          EventHooks
 	retry          RetryPolicy
 	lifecycleHooks *hooks.Runner
+	// inbox, when non-nil, plumbs the run's user-message inbox into
+	// the generation loop: operator-typed chat messages are appended
+	// to the conversation between tool iterations. See [WithInbox].
+	inbox InboxBinder
+}
+
+// InboxBinder builds per-run inbox callbacks (drain + consume). The
+// runtime supplies an implementation backed by the run store +
+// event broker; tests can plug in a stub. Returning nil disables
+// the inbox plumbing for that specific run.
+type InboxBinder interface {
+	Bind(ctx context.Context, runID string) (drain func(context.Context) []string, consume func(context.Context))
+}
+
+// WithInbox wires an InboxBinder into the backend so the generation
+// engine drains the operator chatbox between tool iterations.
+func WithInbox(b InboxBinder) ClawBackendOption {
+	return func(c *ClawBackend) { c.inbox = b }
+}
+
+// StoreInboxBinder is a concrete InboxBinder backed by a
+// store.RunStore. It marks drained messages as delivered, the
+// previous round's delivered messages as consumed, and emits
+// user_message_{delivered,consumed} events through the publish
+// callback so WS subscribers update in lockstep.
+type StoreInboxBinder struct {
+	Store store.RunStore
+	// Publish is called once per state transition with the
+	// fully-stamped event. Local mode passes EventBroker.Publish;
+	// cloud mode passes a no-op (change-stream surfaces the
+	// transition).
+	Publish func(store.Event)
+}
+
+// Bind returns drain + consume closures scoped to runID. The
+// closures share a small slice of "delivered this iteration" IDs so
+// the next consume call can transition them to consumed without an
+// extra round trip to the store.
+func (b *StoreInboxBinder) Bind(ctx context.Context, runID string) (drain func(context.Context) []string, consume func(context.Context)) {
+	if b == nil || b.Store == nil || runID == "" {
+		return nil, nil
+	}
+	var lastDelivered []string
+	drain = func(ctx context.Context) []string {
+		msgs, err := b.Store.LoadPendingQueuedMessages(ctx, runID)
+		if err != nil || len(msgs) == 0 {
+			return nil
+		}
+		texts := make([]string, 0, len(msgs))
+		ids := make([]string, 0, len(msgs))
+		for _, m := range msgs {
+			if err := b.Store.UpdateQueuedMessageStatus(ctx, runID, m.ID, store.QueuedMessageStatusDelivered, store.QueuedMessageStatusQueued); err != nil {
+				continue
+			}
+			texts = append(texts, m.Text)
+			ids = append(ids, m.ID)
+			now := time.Now().UTC()
+			b.publishEvent(ctx, runID, store.EventUserMessageDelivered, m.ID, m.Text, store.QueuedMessageStatusDelivered, &now, nil, nil)
+		}
+		lastDelivered = ids
+		return texts
+	}
+	consume = func(ctx context.Context) {
+		if len(lastDelivered) == 0 {
+			return
+		}
+		now := time.Now().UTC()
+		for _, id := range lastDelivered {
+			if err := b.Store.UpdateQueuedMessageStatus(ctx, runID, id, store.QueuedMessageStatusConsumed); err != nil {
+				continue
+			}
+			b.publishEvent(ctx, runID, store.EventUserMessageConsumed, id, "", store.QueuedMessageStatusConsumed, nil, &now, nil)
+		}
+		lastDelivered = nil
+	}
+	return drain, consume
+}
+
+func (b *StoreInboxBinder) publishEvent(ctx context.Context, runID string, typ store.EventType, msgID, text string, status store.QueuedMessageStatus, deliveredAt, consumedAt, cancelledAt *time.Time) {
+	evt := store.Event{
+		Type:  typ,
+		RunID: runID,
+		Data: map[string]interface{}{
+			"id":           msgID,
+			"text":         text,
+			"status":       string(status),
+			"delivered_at": deliveredAt,
+			"consumed_at":  consumedAt,
+			"cancelled_at": cancelledAt,
+		},
+	}
+	persisted, err := b.Store.AppendEvent(ctx, runID, evt)
+	if err != nil {
+		return
+	}
+	if b.Publish != nil && persisted != nil {
+		b.Publish(*persisted)
+	}
 }
 
 // ClawBackendOption configures a ClawBackend at construction time.
@@ -232,6 +331,17 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 	// In-process lifecycle hooks (audit, safety, compaction
 	// observability). Nil-safe at call sites in generation.go.
 	opts.Hooks = b.lifecycleHooks
+
+	// Wire the operator-chatbox inbox if the runtime configured one.
+	// Resolves the per-run drainer + consumer lazily so a backend
+	// shared across runs picks up the right closures each call.
+	if b.inbox != nil {
+		if runID := RunIDFromContext(ctx); runID != "" {
+			drain, consume := b.inbox.Bind(ctx, runID)
+			opts.InboxDrainer = drain
+			opts.InboxConsume = consume
+		}
+	}
 
 	// Dispatch to the appropriate generation strategy.
 	hasSchema := task.OutputSchema != nil
