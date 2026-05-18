@@ -1,6 +1,7 @@
 package expr
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -265,6 +266,40 @@ func TestExpr_ParseErrors(t *testing.T) {
 		if err == nil {
 			t.Errorf("expected Parse(%q) to fail, got nil", src)
 		}
+	}
+}
+
+// TestExpr_DepthLimit guards against unbounded recursion in the
+// expression parser. Deeply-nested parens, unary `!`, and unary `-`
+// must all return an error rather than blowing the goroutine stack.
+// Relevant under multitenant cloud where .iter content may be
+// supplied by an untrusted tenant.
+func TestExpr_DepthLimit(t *testing.T) {
+	const n = 10_000
+	cases := map[string]string{
+		"parens": strings.Repeat("(", n) + "1" + strings.Repeat(")", n),
+		"not":    strings.Repeat("not ", n) + "true",
+		"neg":    strings.Repeat("-", n) + "1",
+	}
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := Parse(src)
+			if err == nil {
+				t.Fatalf("expected Parse to reject deeply nested input, got nil")
+			}
+			if !strings.Contains(err.Error(), "depth") {
+				t.Fatalf("expected depth error, got: %v", err)
+			}
+		})
+	}
+
+	// Sanity: depths well under the cap parse fine, including back-to-back
+	// shallow expressions (the counter must reset between Parse() calls).
+	if _, err := Parse("(((1 + 2)))"); err != nil {
+		t.Fatalf("shallow parens should parse: %v", err)
+	}
+	if _, err := Parse("not not true"); err != nil {
+		t.Fatalf("shallow not-chain should parse: %v", err)
 	}
 }
 

@@ -438,9 +438,29 @@ func (*funcCallNode) exprNode() {}
 // ---------------------------------------------------------------------------
 
 type parser struct {
-	lex *lexer
-	cur token
-	err error
+	lex   *lexer
+	cur   token
+	err   error
+	depth int
+}
+
+// maxExprDepth caps recursive descent depth so a pathologically nested
+// expression (e.g. `(((...)))` from an untrusted .iter under multitenant
+// cloud) can't blow the goroutine stack. Generous enough that any
+// hand-written expression fits, tight enough that malicious input is
+// rejected before it can exhaust the stack.
+const maxExprDepth = 256
+
+func (p *parser) enter() error {
+	p.depth++
+	if p.depth > maxExprDepth {
+		return fmt.Errorf("expr: maximum expression depth exceeded (%d levels)", maxExprDepth)
+	}
+	return nil
+}
+
+func (p *parser) leave() {
+	p.depth--
 }
 
 func (p *parser) advance() {
@@ -456,6 +476,10 @@ func (p *parser) advance() {
 }
 
 func (p *parser) parseExpr() (node, error) {
+	if err := p.enter(); err != nil {
+		return nil, err
+	}
+	defer p.leave()
 	return p.parseOr()
 }
 
@@ -493,6 +517,10 @@ func (p *parser) parseAnd() (node, error) {
 
 func (p *parser) parseNot() (node, error) {
 	if p.cur.kind == tokNot || p.cur.kind == tokKwNot {
+		if err := p.enter(); err != nil {
+			return nil, err
+		}
+		defer p.leave()
 		p.advance()
 		child, err := p.parseNot()
 		if err != nil {
@@ -557,6 +585,10 @@ func (p *parser) parseMul() (node, error) {
 
 func (p *parser) parseUnary() (node, error) {
 	if p.cur.kind == tokMinus {
+		if err := p.enter(); err != nil {
+			return nil, err
+		}
+		defer p.leave()
 		p.advance()
 		child, err := p.parseUnary()
 		if err != nil {
