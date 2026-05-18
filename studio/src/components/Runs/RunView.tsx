@@ -17,7 +17,12 @@ import { useRunWebSocket } from "@/hooks/useRunWebSocket";
 import { useLayoutPersistence } from "@/hooks/useLayoutPersistence";
 import { useRunToasts } from "@/hooks/useRunToasts";
 import { useRunKeyboard } from "@/hooks/useRunKeyboard";
-import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
+import {
+  readBooleanFlag,
+  readEnumFlag,
+  writeBooleanFlag,
+  writeStringFlag,
+} from "@/lib/localStorageFlag";
 import AppHeader from "@/components/shared/AppHeader";
 
 import { buildExecutionsAt } from "@/lib/snapshotReducer";
@@ -48,6 +53,9 @@ type RuntimeLLMOverride = DelegateOutputMeta;
 
 const DETAIL_COLLAPSED_KEY = "run-console-v1.detail-collapsed";
 const EVENTLOG_COLLAPSED_KEY = "run-console-v1.eventlog-collapsed";
+const BOTTOM_TAB_KEY = "run-console-v1.bottom-tab";
+const BOTTOM_TABS = ["events", "logs", "report", "browser", "artifacts"] as const;
+type BottomTab = (typeof BOTTOM_TABS)[number];
 const BROWSER_DOCK_KEY = "run-console-v1.browser-dock";
 
 function readBrowserDock(): BrowserDock {
@@ -197,20 +205,25 @@ export default function RunView() {
   const [eventlogCollapsed, setEventlogCollapsed] = useState<boolean>(() =>
     readBooleanFlag(EVENTLOG_COLLAPSED_KEY),
   );
-  const [bottomTab, setBottomTab] = useState<
-    "events" | "logs" | "report" | "browser" | "artifacts"
-  >("logs");
+  const [bottomTab, setBottomTab] = useState<BottomTab>(() =>
+    readEnumFlag(BOTTOM_TAB_KEY, BOTTOM_TABS, "logs"),
+  );
   // Tracks whether the user has manually changed the bottom tab during
   // this run view, so we don't yank the tab back to "browser" on every
   // new preview_url event after they explicitly picked another panel.
-  const [bottomTabPinned, setBottomTabPinned] = useState<boolean>(false);
-  const handleSetBottomTab = useCallback(
-    (tab: "events" | "logs" | "report" | "browser" | "artifacts") => {
-      setBottomTab(tab);
-      setBottomTabPinned(true);
-    },
-    [],
-  );
+  // A persisted tab counts as "pinned" — the user chose it last time.
+  const [bottomTabPinned, setBottomTabPinned] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(BOTTOM_TAB_KEY) !== null;
+    } catch {
+      return false;
+    }
+  });
+  const handleSetBottomTab = useCallback((tab: BottomTab) => {
+    setBottomTab(tab);
+    setBottomTabPinned(true);
+    writeStringFlag(BOTTOM_TAB_KEY, tab);
+  }, []);
   const toggleDetailCollapsed = useCallback(() => {
     setDetailCollapsed((prev) => {
       const next = !prev;
@@ -760,11 +773,7 @@ export default function RunView() {
                   <div className="h-full border-t border-border-default min-h-0 overflow-hidden animate-fade-in-opacity flex flex-col bg-surface-1">
                     <Tabs
                       value={bottomTab}
-                      onValueChange={(v) =>
-                        handleSetBottomTab(
-                          v as "events" | "logs" | "report" | "browser" | "artifacts",
-                        )
-                      }
+                      onValueChange={(v) => handleSetBottomTab(v as BottomTab)}
                       items={[
                         { value: "events", label: "Events" },
                         { value: "logs", label: "Logs" },
