@@ -159,4 +159,4 @@ export function getFirstClassBot(id: string): FirstClassBot | null {
   return FIRST_CLASS_BOTS[id] ?? null;
 }
 
-export const DEFAULT_PILOTE_BOT_ID = "whats-next";
+export const DEFAULT_WHATS_NEXT_BOT_ID = "whats-next";
