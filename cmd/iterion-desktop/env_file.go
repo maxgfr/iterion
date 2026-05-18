@@ -54,19 +54,91 @@ func loadIterionEnvFile() {
 	}
 }
 
-// ReloadIterionEnvFile is called by the refresh hook in the server: it
-// unsets every key that a previous applyDotenvFile call set (so a key
-// commented out / deleted in ~/.iterion/env actually disappears) and
-// then re-applies the file. Shell-passed env vars are untouched.
+// ReloadIterionEnvFile is the refresh hook. Treats the dotenv file as
+// the source of truth at refresh time: every key that appears in the
+// file (active `KEY=value` OR commented `# KEY=...`) is unset, then
+// the file is re-applied. This matters when the launching shell
+// pre-loaded the same .env (e.g. direnv following an `~/.iterion/env`
+// symlink into the project root) — in that case applyDotenvFile saw
+// the key already in env at boot, "shell wins" skipped it, and the
+// tracked-keys list alone wouldn't be enough to clear it.
+//
+// Keys not present in the file at all (e.g. a pure shell-passed
+// override like `OPENAI_API_KEY=sk-... iterion-desktop`) are not
+// touched — those remain owned by the shell.
 func ReloadIterionEnvFile() {
+	fileKeys := scanDotenvKeys()
 	dotenvMu.Lock()
 	previous := dotenvAppliedKeys
 	dotenvAppliedKeys = nil
 	dotenvMu.Unlock()
-	for _, key := range previous {
+	for _, key := range dedupeKeys(previous, fileKeys) {
 		_ = os.Unsetenv(key)
 	}
 	loadIterionEnvFile()
+}
+
+// scanDotenvKeys returns the set of keys mentioned in the first
+// existing candidate env file — both active and commented-out lines.
+// Used by ReloadIterionEnvFile to know which keys the file "claims"
+// even when a previous applyDotenvFile call skipped them.
+func scanDotenvKeys() []string {
+	for _, path := range candidateEnvFiles() {
+		if path == "" {
+			continue
+		}
+		if keys, ok := readDotenvKeys(path); ok {
+			return keys
+		}
+	}
+	return nil
+}
+
+func readDotenvKeys(path string) ([]string, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	var out []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		// Allow commented forms: "# KEY=...", "#KEY=...", "## KEY=...".
+		// Strip leading #'s then re-trim.
+		for strings.HasPrefix(line, "#") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
+		}
+		if line == "" {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		eq := strings.IndexByte(line, '=')
+		if eq <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:eq])
+		if key == "" {
+			continue
+		}
+		out = append(out, key)
+	}
+	return out, true
+}
+
+func dedupeKeys(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, src := range [][]string{a, b} {
+		for _, k := range src {
+			if _, ok := seen[k]; ok {
+				continue
+			}
+			seen[k] = struct{}{}
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 func candidateEnvFiles() []string {
