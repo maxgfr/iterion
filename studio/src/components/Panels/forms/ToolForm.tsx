@@ -4,6 +4,7 @@ import { useSchemaPromptCreators } from "@/hooks/useSchemaPromptCreators";
 import type { ToolNodeDecl, AwaitMode } from "@/api/types";
 import { getAllNodeNames } from "@/lib/defaults";
 import { AWAIT_HELP, AWAIT_OPTIONS } from "@/lib/dslOptions";
+import { NODE_COLORS, softColor } from "@/lib/constants";
 import { TextField, CommittedTextField, SelectField, SelectFieldWithCreate } from "./FormField";
 
 interface Props {
@@ -23,10 +24,10 @@ export default function ToolForm({ decl }: Props) {
     <div className="space-y-1">
       <div
         className="flex items-center gap-2 px-2 py-1.5 rounded mb-2 -mx-1"
-        style={{ backgroundColor: "#8B691422", borderLeft: "3px solid #8B6914" }}
+        style={{ backgroundColor: softColor(NODE_COLORS.tool), borderLeft: `3px solid ${NODE_COLORS.tool}` }}
       >
         <span className="text-base">{"\u{1F527}"}</span>
-        <span className="text-xs font-bold uppercase tracking-wide" style={{ color: "#8B6914" }}>Tool</span>
+        <span className="text-xs font-bold uppercase tracking-wide" style={{ color: NODE_COLORS.tool }}>Tool</span>
       </div>
       <CommittedTextField
         label="Name"

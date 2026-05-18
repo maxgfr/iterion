@@ -4,12 +4,12 @@ import { NODE_ICONS, NODE_COLORS } from "@/lib/constants";
 import { LAYER_COLORS, LAYER_ICONS } from "@/lib/constants";
 
 function getCategoryColor(category: LibraryCategory): string {
-  if (category === "pattern") return "#A855F7";
+  if (category === "pattern") return "var(--color-library-pattern)";
   if (category in NODE_COLORS) return NODE_COLORS[category as keyof typeof NODE_COLORS];
   if (category === "schema") return LAYER_COLORS.schemas;
   if (category === "prompt") return LAYER_COLORS.prompts;
   if (category === "var") return LAYER_COLORS.vars;
-  return "#888";
+  return "var(--color-fg-subtle)";
 }
 
 function getCategoryIcon(category: LibraryCategory): string {

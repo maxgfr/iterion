@@ -50,7 +50,10 @@
   --color-info-soft: rgba(8, 145, 178, 0.18);
   --color-info-fg: #a5f3fc;
 
-  /* Node kind palette (kept in sync with lib/constants.ts NODE_COLORS).
+  /* Node kind palette — the single source of truth for canvas node
+   * colors. lib/constants.ts re-exposes these as `var(--color-node-*)`
+   * strings, so the values here drive everything: canvas borders,
+   * inspector form headers, library cards, xyflow markers.
    * Aligned on Tailwind-500 family. Red (#ef4444) is reserved for
    * fail + diagnostic-error styling. */
   --color-node-agent: #3b82f6;   /* blue-500 */
@@ -63,6 +66,23 @@
   --color-node-done: #22c55e;    /* green-500 */
   --color-node-fail: #ef4444;    /* red-500 */
   --color-node-start: #10b981;   /* emerald-500 */
+  --color-node-group: #6366f1;   /* indigo-500 — group/parent container */
+
+  /* Selection — used by canvas + edge + sub-node highlighting */
+  --color-selected: #60a5fa;     /* blue-400 */
+
+  /* Layer / attachment kind palette (schemas/prompts/vars) — used by
+   * the canvas layer overlay, the layer-pane chrome, library cards. */
+  --color-layer-schemas: #a78bfa; /* violet-400 */
+  --color-layer-prompts: #2dd4bf; /* teal-400 */
+  --color-layer-vars: #fbbf24;    /* amber-400 */
+
+  /* Sub-node tool token (other sub-kinds reuse layer + selected). */
+  --color-sub-tool: #34d399;      /* emerald-400 */
+
+  /* Library category — "pattern" (compound graph snippet) is the only
+   * category without a node-kind equivalent. */
+  --color-library-pattern: #a855f7; /* purple-500 */
 
   /* Radii */
   --radius-sm: 4px;

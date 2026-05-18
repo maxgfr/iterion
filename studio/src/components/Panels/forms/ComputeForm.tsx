@@ -4,6 +4,7 @@ import { useSchemaPromptCreators } from "@/hooks/useSchemaPromptCreators";
 import type { ComputeDecl, AwaitMode, ComputeExpr } from "@/api/types";
 import { getAllNodeNames } from "@/lib/defaults";
 import { AWAIT_OPTIONS } from "@/lib/dslOptions";
+import { softColor } from "@/lib/constants";
 
 import {
   CommittedTextField,
@@ -16,7 +17,7 @@ interface Props {
   decl: ComputeDecl;
 }
 
-const HEADER_COLOR = "#0EA5E9";
+const HEADER_COLOR = "var(--color-node-compute)";
 
 /** Form for compute nodes — deterministic expression evaluator (no LLM,
  *  no shell). Each entry maps a key in the output schema to a raw
@@ -47,7 +48,7 @@ export default function ComputeForm({ decl }: Props) {
     <div className="space-y-1">
       <div
         className="flex items-center gap-2 px-2 py-1.5 rounded mb-2 -mx-1"
-        style={{ backgroundColor: HEADER_COLOR + "22", borderLeft: `3px solid ${HEADER_COLOR}` }}
+        style={{ backgroundColor: softColor(HEADER_COLOR), borderLeft: `3px solid ${HEADER_COLOR}` }}
       >
         <span className="text-base">{"\u{03A3}"}</span>
         <span

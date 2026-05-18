@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { Node } from "@xyflow/react";
 import { useSelectionStore } from "@/store/selection";
+import { SELECTED_BORDER, softColor } from "@/lib/constants";
 
 interface CanvasSearchResult {
   searchOpen: boolean;
@@ -87,7 +88,7 @@ export function useCanvasSearch(layoutNodes: Node[]): CanvasSearchResult {
             style: {
               ...n.style,
               opacity: 1,
-              boxShadow: "0 0 0 2px #60A5FA, 0 0 12px rgba(96, 165, 250, 0.4)",
+              boxShadow: `0 0 0 2px ${SELECTED_BORDER}, 0 0 12px ${softColor(SELECTED_BORDER, 40)}`,
               borderRadius: "8px",
             },
           };
