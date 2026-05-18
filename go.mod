@@ -85,7 +85,6 @@ require (
 	go.opentelemetry.io/otel/sdk/log v0.19.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.43.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
-	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
@@ -106,11 +105,11 @@ require (
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/sys v0.43.0
 )
 
 require (
-	github.com/SocialGouv/claw-code-go v0.1.1-0.20260517174118-81d56c1f4ff4
+	github.com/SocialGouv/claw-code-go v0.1.1-0.20260517183627-e1a6fe0c6d12
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.16
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.15
@@ -133,4 +132,5 @@ require (
 	go.opentelemetry.io/otel/trace v1.43.0
 	go.yaml.in/yaml/v2 v2.4.4
 	golang.org/x/crypto v0.50.0
+	golang.org/x/net v0.53.0
 )
