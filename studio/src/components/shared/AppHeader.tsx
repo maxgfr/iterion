@@ -32,10 +32,10 @@ export default function AppHeader({
       >
         Skip to main content
       </a>
-      <header className="shrink-0 h-12 flex items-center gap-3 px-4 text-sm bg-surface-1 border-b border-border-default">
+      <header className="shrink-0 h-12 flex items-center gap-2 sm:gap-3 px-3 sm:px-4 text-sm bg-surface-1 border-b border-border-default overflow-hidden">
         <Link
           href="/"
-          className="font-bold tracking-wide text-sm hover:text-accent transition-colors"
+          className="font-bold tracking-wide text-sm hover:text-accent transition-colors shrink-0"
           title="Iterion home"
         >
           ITERION
@@ -43,7 +43,7 @@ export default function AppHeader({
         <NavLinks active={active} />
         <ProjectLabel />
         {children}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-1.5 sm:gap-2 shrink-0">
           {rightActions}
           {showBackendPill && <BackendStatusPill />}
           <ThemeToggle />
