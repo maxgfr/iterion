@@ -142,7 +142,7 @@ export default function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeT
 
   return (
     <div
-      className={`relative rounded-xl border-2 px-4 py-2 min-w-[140px] text-center shadow-lg ${isTerminal || isStart ? "opacity-80" : ""}`}
+      className={`relative rounded-xl border-2 px-4 py-2 min-w-[140px] text-center shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-shadow ${isTerminal || isStart ? "opacity-80" : ""}`}
       style={{
         borderColor,
         background: softColor(color, 10),

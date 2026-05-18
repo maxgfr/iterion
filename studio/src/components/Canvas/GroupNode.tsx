@@ -25,7 +25,7 @@ export default function GroupNode({ id, data, selected }: NodeProps) {
     // Collapsed view: compact summary node
     return (
       <div
-        className="rounded-lg border-2 px-4 py-3 min-w-[160px] text-center shadow-lg cursor-pointer"
+        className="rounded-lg border-2 px-4 py-3 min-w-[160px] text-center shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-shadow cursor-pointer"
         style={{
           borderColor: selected ? SELECTED_BORDER : themeColor,
           background: `${themeColor}22`,
