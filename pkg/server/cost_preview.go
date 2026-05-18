@@ -9,34 +9,27 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dsl/parser"
 )
 
-// previewCostRequest is the studio Launch-form payload for the inline
-// cost-estimate chip. The handler parses the .iter source (preferring
-// the inline body when supplied — same precedence as POST /api/runs),
-// walks the IR for agent/judge nodes, and estimates a USD range using
-// effort tiers + the backend/cost pricing table.
 type previewCostRequest struct {
 	FilePath string `json:"file_path,omitempty"`
 	Source   string `json:"source,omitempty"`
 }
 
-// previewCostNode is the per-node breakdown displayed under the chip
-// tooltip. CostMin == 0 with CostMax == 0 signals "no pricing data" so
-// the studio can render "—" instead of "$0".
+// CostMin == 0 with CostMax == 0 signals "no pricing data" so the
+// studio can render "—" instead of "$0".
 type previewCostNode struct {
 	NodeID     string  `json:"node_id"`
-	Kind       string  `json:"kind"`             // "agent" | "judge"
-	Model      string  `json:"model,omitempty"`  // resolved model identifier
-	Effort     string  `json:"effort,omitempty"` // "low"|"medium"|"high"|"max"
-	TokensIn   int     `json:"tokens_in"`        // estimated input
-	TokensOut  int     `json:"tokens_out"`       // estimated output
+	Kind       string  `json:"kind"`
+	Model      string  `json:"model,omitempty"`
+	Effort     string  `json:"effort,omitempty"`
+	TokensIn   int     `json:"tokens_in"`
+	TokensOut  int     `json:"tokens_out"`
 	CostMinUSD float64 `json:"cost_min_usd"`
 	CostMaxUSD float64 `json:"cost_max_usd"`
 }
 
-// previewCostResponse is the JSON shape returned by POST /api/runs/preview-cost.
-// Min/max bracket reflects best-case (no retries, no loops) and a 2x
-// pessimistic fan-out factor. All cost numbers are best-effort hints —
-// see pkg/backend/cost for the pricing table caveats.
+// Min/max bracket: min = best-case (no retries, no loops); max = 2x
+// pessimistic fan-out factor. All cost numbers are best-effort hints
+// — see pkg/backend/cost for the pricing-table caveats.
 type previewCostResponse struct {
 	TokensMin  int               `json:"tokens_min"`
 	TokensMax  int               `json:"tokens_max"`
@@ -46,10 +39,9 @@ type previewCostResponse struct {
 	Notes      []string          `json:"notes,omitempty"`
 }
 
-// effortTokens maps a reasoning_effort tier to an indicative token
-// envelope (input, output). Numbers are intentionally generous — the
-// goal is to flag $5 workflows before launch, not to predict to the
-// cent. Refresh when provider pricing or claw effort defaults shift.
+// Token envelopes are intentionally generous — the goal is to flag
+// $5 workflows before launch, not to predict to the cent. Refresh
+// when provider pricing or claw effort defaults shift.
 var effortTokens = map[string]struct{ in, out int }{
 	"low":    {3_000, 1_500},
 	"medium": {12_000, 4_000},
@@ -58,9 +50,8 @@ var effortTokens = map[string]struct{ in, out int }{
 	"max":    {80_000, 16_000},
 }
 
-// defaultEffortTokens is used when a node has no declared effort and
-// the IR resolver did not substitute one. Mid-tier on purpose: a fresh
-// .iter with no annotations should map to a "medium" estimate.
+// A fresh .iter with no effort annotation should map to the mid-tier
+// estimate, not the cheapest one.
 var defaultEffortTokens = effortTokens["medium"]
 
 func estimateNodeTokens(model, effort string, maxTokensHint int) (in, out int) {
@@ -69,8 +60,7 @@ func estimateNodeTokens(model, effort string, maxTokensHint int) (in, out int) {
 		tier = defaultEffortTokens
 	}
 	in = tier.in
-	// MaxTokens caps the output budget; honour it if smaller than the
-	// effort-tier default. Treat 0 (backend default) as "no cap".
+	// maxTokensHint == 0 means "backend default" (no cap), not zero.
 	if maxTokensHint > 0 && maxTokensHint < tier.out {
 		out = maxTokensHint
 	} else {
@@ -87,8 +77,7 @@ func (s *Server) handlePreviewCost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Source > file_path, mirroring the launch endpoint. Without either
-	// we can't estimate, so 400 with a clear hint.
+	// Inline source wins over file_path — matches POST /api/runs precedence.
 	src := req.Source
 	parserPath := req.FilePath
 	if src == "" && req.FilePath != "" {
@@ -115,10 +104,8 @@ func (s *Server) handlePreviewCost(w http.ResponseWriter, r *http.Request) {
 
 	pr := parser.Parse(parserPath, src)
 	if pr.File == nil {
-		// The chip should never block the form: when the workflow is
-		// unparseable we return an empty estimate and let the studio
-		// silently hide the chip. The Launch button will fail validation
-		// later via the existing /api/validate path.
+		// Never 5xx on bad input — the chip silently hides and /api/validate
+		// remains the authoritative blocker for the Launch button.
 		writeJSON(w, previewCostResponse{Notes: []string{"workflow_unparseable"}})
 		return
 	}

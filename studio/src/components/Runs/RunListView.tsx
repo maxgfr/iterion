@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 
 import { RocketIcon } from "@radix-ui/react-icons";
@@ -31,6 +31,10 @@ export default function RunListView() {
   const [, setLocation] = useLocation();
   const [status, setStatus] = useState<RunStatus | "">("");
   const { runs, counts, loading, error } = useRuns({ status });
+  const openRun = useCallback(
+    (id: string) => setLocation(`/runs/${encodeURIComponent(id)}`),
+    [setLocation],
+  );
 
   // Force a re-render once per second while at least one run is
   // still in-flight (no finished_at), so the duration column ticks
@@ -132,16 +136,14 @@ export default function RunListView() {
               </thead>
               <tbody>
                 {runs.map((r) => (
-                  <RunRow key={r.id} run={r} onOpen={() => setLocation(`/runs/${encodeURIComponent(r.id)}`)} />
+                  <RunRow key={r.id} run={r} onOpen={openRun} />
                 ))}
               </tbody>
             </table>
-            {/* Mobile (< sm): vertical card list. Same data, no
-                horizontal scroll; tap-area meets WCAG 2.5.5 (44px). */}
             <ul className="sm:hidden divide-y divide-border-default">
               {runs.map((r) => (
                 <li key={r.id}>
-                  <RunCard run={r} onOpen={() => setLocation(`/runs/${encodeURIComponent(r.id)}`)} />
+                  <RunCard run={r} onOpen={openRun} />
                 </li>
               ))}
             </ul>
@@ -152,13 +154,19 @@ export default function RunListView() {
   );
 }
 
-// Table row used at >= sm. Extracted so the mobile card and the table
-// share a single source of truth for the displayed fields.
-function RunRow({ run, onOpen }: { run: RunSummary; onOpen: () => void }) {
+// Memoised so the parent's per-row callback (now stable via useCallback)
+// doesn't force every row to re-render when one run mutates.
+const RunRow = memo(function RunRow({
+  run,
+  onOpen,
+}: {
+  run: RunSummary;
+  onOpen: (id: string) => void;
+}) {
   return (
     <tr
       className="border-b border-border-default hover:bg-surface-2 cursor-pointer"
-      onClick={onOpen}
+      onClick={() => onOpen(run.id)}
     >
       <td className="px-4 py-2">
         <div className="font-medium">{run.name || run.workflow_name}</div>
@@ -192,16 +200,19 @@ function RunRow({ run, onOpen }: { run: RunSummary; onOpen: () => void }) {
       </td>
     </tr>
   );
-}
+});
 
-// Stacked card variant for < sm. Status + workflow on top line; metadata
-// in a compact second row; run id wraps as a third tiny line so phone
-// users can copy/share without horizontal scroll.
-function RunCard({ run, onOpen }: { run: RunSummary; onOpen: () => void }) {
+const RunCard = memo(function RunCard({
+  run,
+  onOpen,
+}: {
+  run: RunSummary;
+  onOpen: (id: string) => void;
+}) {
   return (
     <button
       type="button"
-      onClick={onOpen}
+      onClick={() => onOpen(run.id)}
       className="w-full text-left px-4 py-3 flex flex-col gap-1 min-h-[44px] hover:bg-surface-2 active:bg-surface-3"
     >
       <div className="flex items-center gap-2 min-w-0">
@@ -225,7 +236,7 @@ function RunCard({ run, onOpen }: { run: RunSummary; onOpen: () => void }) {
       </div>
     </button>
   );
-}
+});
 
 function formatDuration(startISO: string, endISO?: string): string {
   const start = Date.parse(startISO);
