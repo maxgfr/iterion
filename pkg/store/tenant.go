@@ -13,6 +13,14 @@ type tenantCtxKey struct{}
 // surfaces can attribute work without consulting an audit log.
 type ownerCtxKey struct{}
 
+// withoutTenantFilterKey lets cluster-level admin paths (migration
+// tools, queue dispatcher bootstrap, runview's reconcileOrphans,
+// conformance tests) opt back into a tenant-less query. The mongo
+// store treats a missing tenant as fail-closed (panic) unless this
+// flag is set — every business-logic call site already runs under a
+// tenant-stamped ctx, so a missing tenant_id is normally a bug.
+type withoutTenantFilterKey struct{}
+
 // WithTenant returns a child context carrying the given tenant_id.
 // An empty tenantID returns parent unchanged — the caller is then
 // responsible for ensuring the request is permitted to bypass tenant
@@ -64,4 +72,21 @@ func OwnerFromContext(ctx context.Context) (string, bool) {
 		return "", false
 	}
 	return v, true
+}
+
+// WithoutTenantFilter marks ctx as exempt from the mongo store's
+// tenant-scoped query guard. Use sparingly — every callsite is a
+// potential tenant-isolation hole. Audit by grepping for callers.
+func WithoutTenantFilter(parent context.Context) context.Context {
+	return context.WithValue(parent, withoutTenantFilterKey{}, true)
+}
+
+// IsWithoutTenantFilter reports whether the ctx was tagged by
+// WithoutTenantFilter. Read by mongo's withTenantFilter guard.
+func IsWithoutTenantFilter(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(withoutTenantFilterKey{}).(bool)
+	return v
 }
