@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { LiveDot } from "@/components/ui/LiveDot";
 import type { GlobalActiveRun, RunSummary } from "@/api/runs";
 import { formatRelative } from "@/lib/format";
 import {
@@ -64,7 +65,7 @@ export default function RunsPanel({ runs, loading, error }: Props) {
           Runs
           {totalActive > 0 && (
             <span className="ml-2 inline-flex items-center gap-1 normal-case tracking-normal text-info-fg">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-info animate-pulse" />
+              <LiveDot tone="info" size="sm" />
               {totalActive} active
             </span>
           )}
@@ -92,10 +93,7 @@ export default function RunsPanel({ runs, loading, error }: Props) {
                   onClick={() => goToRun(r.id)}
                   className="w-full px-4 py-2.5 flex items-center gap-3 text-left bg-info-soft/30 hover:bg-info-soft/50 border-l-2 border-info"
                 >
-                  <span
-                    className="inline-block w-2 h-2 rounded-full bg-info animate-pulse shrink-0"
-                    aria-hidden="true"
-                  />
+                  <LiveDot tone="info" size="md" className="shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-semibold truncate">
                       {r.name || r.workflow_name}
@@ -220,10 +218,7 @@ function GlobalRunRow({ run }: { run: GlobalActiveRun }) {
   // daemon wouter link.
   const inner = (
     <>
-      <span
-        className="inline-block w-2 h-2 rounded-full bg-info animate-pulse shrink-0"
-        aria-hidden="true"
-      />
+      <LiveDot tone="info" size="md" className="shrink-0" />
       <div className="min-w-0 flex-1">
         <div className="text-xs font-semibold truncate">
           {run.name || run.workflow_name}

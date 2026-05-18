@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { useRunMetrics } from "@/hooks/useRunMetrics";
+import { LiveDot } from "@/components/ui/LiveDot";
 import { formatCost, formatMs, formatTokens } from "@/lib/format";
 
 interface Props {
@@ -130,12 +131,7 @@ function Metric({
       <span className="text-fg-subtle">{label}</span>
       <span className={`font-mono font-semibold ${valueColor}`}>
         {value}
-        {live && (
-          <span
-            className="inline-block ml-1 w-1 h-1 rounded-full bg-info animate-pulse align-middle"
-            aria-hidden
-          />
-        )}
+        {live && <LiveDot tone="info" size="xs" className="ml-1 align-middle" />}
       </span>
     </span>
   );

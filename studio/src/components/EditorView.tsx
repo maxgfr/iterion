@@ -194,7 +194,9 @@ export default function EditorView() {
           </div>
         )}
       <div
-        className="flex-1 min-h-0 grid transition-[grid-template-columns] duration-200"
+        id="main-content"
+        tabIndex={-1}
+        className="flex-1 min-h-0 grid transition-[grid-template-columns] duration-200 outline-none"
         style={
           expanded
             ? { gridTemplateColumns: "1fr", gridTemplateRows: "1fr" }

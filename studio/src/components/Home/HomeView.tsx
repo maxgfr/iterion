@@ -11,7 +11,7 @@ export default function HomeView() {
     <div className="h-full flex flex-col overflow-hidden bg-surface-0 text-fg-default">
       <AppHeader active="home" />
 
-      <main className="flex-1 overflow-auto p-4 sm:p-6">
+      <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto p-4 sm:p-6 outline-none">
         <div className="max-w-6xl mx-auto space-y-4">
           {/* WhatsNextCard is the curated entry point — full-width above
               the grid so it reads as "start here" rather than as one

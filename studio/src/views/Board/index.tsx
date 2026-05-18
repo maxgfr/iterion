@@ -473,11 +473,11 @@ export default function BoardView() {
       />
 
       {issues.length === 0 ? (
-        <main className="flex-1 overflow-auto p-3">
+        <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto p-3 outline-none">
           <EmptyBoard kind="no-issues" onCreate={() => setCreating(true)} />
         </main>
       ) : (
-      <main className="flex-1 overflow-auto p-3">
+      <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto p-3 outline-none">
         <div className="flex gap-3 min-w-fit">
           {board.states.map((s) => (
             <Column
@@ -505,7 +505,7 @@ export default function BoardView() {
               display="Unmapped"
               terminal={false}
               eligible={false}
-              color="#64748b"
+              color="var(--color-board-backlog)"
               issues={byState.get("__unmapped__") ?? []}
               selectedId={selectedId}
               runningByIssue={runningByIssue}
@@ -814,21 +814,21 @@ function ShortcutRow({ keys, desc }: { keys: string; desc: string }) {
 function defaultStateColor(name: string, eligible: boolean, terminal: boolean): string {
   switch (name) {
     case "backlog":
-      return "#64748b"; // slate-500
+      return "var(--color-board-backlog)";
     case "ready":
-      return "#22c55e"; // green-500
+      return "var(--color-board-ready)";
     case "in_progress":
-      return "#3b82f6"; // blue-500
+      return "var(--color-board-in-progress)";
     case "review":
-      return "#a855f7"; // purple-500
+      return "var(--color-board-review)";
     case "done":
-      return "#94a3b8"; // slate-400 (terminal success)
+      return "var(--color-board-done)";
     case "blocked":
-      return "#ef4444"; // red-500
+      return "var(--color-board-blocked)";
     default:
-      if (terminal) return "#94a3b8";
-      if (eligible) return "#22c55e";
-      return "#64748b";
+      if (terminal) return "var(--color-board-done)";
+      if (eligible) return "var(--color-board-ready)";
+      return "var(--color-board-backlog)";
   }
 }
 

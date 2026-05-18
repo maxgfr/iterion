@@ -102,6 +102,25 @@ For "shimmer while data loads" rather than a centered message, use [`ui/Skeleton
 
 Note: the existing pattern of rotating an icon (e.g. `<ReloadIcon className="animate-spin" />`) is a **different design choice** and intentionally kept where it shows that a specific operation (reload, refresh) is in flight. Don't blanket-replace those with `Spinner` — the icon carries semantics.
 
+### LiveDot
+
+[`ui/LiveDot.tsx`](../src/components/ui/LiveDot.tsx) — small coloured pulsing dot for "something is live / in flight":
+
+```tsx
+<LiveDot tone="info" size="sm" />     // workflow running
+<LiveDot tone="success" size="sm" />  // data flowing / connected
+<LiveDot tone="warning" pulse />      // reconnecting
+<LiveDot tone="danger" pulse={false}/>// disconnected (steady)
+```
+
+Tones disambiguate the meaning so the same shape can express different states without inventing new visuals. `pulse={false}` for steady terminal states (WSStatusDot uses this for "connected" and "disconnected" — only intermediate states pulse).
+
+**Don't use for**:
+- Generic loading shimmer (use `Skeleton`).
+- Urgent attention badges (apply `animate-pulse` directly on the badge — `DiagnosticBadge` is the reference).
+- The AI "thinking" glyph in `ThinkingFooter` (intentional bespoke).
+- Row-level pulse on in-flight events (`NodeDetailPanel` applies `animate-pulse` to the entire event row — a different design choice).
+
 ### Toasts
 
 `useUIStore.addToast(message, level)` with four levels: `info`, `warning`, `error`, `success`. Optional `{ persistent: true }`. Use for **transient asynchronous feedback** (save complete, reload failed, etc.). Don't swallow API errors — toast them.
@@ -198,16 +217,16 @@ What's already wired:
 - `ConfirmDialog` traps focus and exits on Escape.
 - `useConfirm` returns a Promise so call-sites stay synchronous-shaped.
 - `Skeleton` renders `aria-hidden` so screen readers skip the shimmer.
+- `LiveDot` accepts an optional `label` for screen reader announcement.
+- `IconButton` mandates a `label` prop and applies it as `aria-label`.
 - Toast component is announced via the toast bus.
 - FormField inputs wire `aria-describedby` to their help icon and error message via the `FieldRow` wrapper. Set the `error` prop to render `<p role="alert">` and add `aria-invalid` on the input.
+- **Skip-link** from `AppHeader` (`<a href="#main-content">`) becomes visible on keyboard focus and jumps to the main work surface. Implemented on Home, Editor, RunList, RunView, Board, Dispatcher — pages without an `id="main-content"` anchor degrade gracefully.
 
 Open items (need human / axe-core verification):
-- Light mode contrast on status badges (severity tokens currently desaturated for light — sample with WCAG checker).
-- Canvas node text contrast on `softColor(color, 10)` backgrounds, both themes.
-- Skip-link from the page chrome to the main work surface (editor canvas, run view, etc.). Not yet present.
-- Full keyboard reachability of the canvas — recent commits added aux + sub-node keyboard nav, but cycling between root nodes via `Tab` alone is not yet exhaustive.
-
-Run an axe-core sweep (e.g. `axe-core` browser extension) on `/`, `/editor`, `/runs/:id`, `/board`, `/dispatcher`, `/settings` to surface anything missed.
+- WCAG AA contrast sweep with axe-core on `/`, `/editor`, `/runs/:id`, `/board`, `/dispatcher`, `/settings` — especially the light-mode canvas variants on `softColor(color, 10)` backgrounds.
+- `role="button"` divs in `LogLinesView`, `Canvas/DetailSubNode`, `Canvas/AuxiliaryNode`, `Canvas/SubNodePalette`, `Board/index.tsx` — verify each has a keyboard handler (Enter/Space) and an `aria-label`. The canvas variants got keyboard nav in commit `81e6195d` but the rest is unaudited.
+- Full keyboard reachability of the canvas — cycling between root nodes via `Tab` alone.
 
 ## Don'ts
 

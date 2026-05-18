@@ -84,6 +84,26 @@
    * category without a node-kind equivalent. */
   --color-library-pattern: #a855f7; /* purple-500 */
 
+  /* Iteration palette — cycled in RunView's IRNode pip strip so the
+   * eye tracks "which loop iteration?" independently of status. Six
+   * distinct hues, intentionally not aligned to severity. */
+  --color-iteration-0: #06b6d4; /* cyan-500 */
+  --color-iteration-1: #a855f7; /* purple-500 */
+  --color-iteration-2: #f59e0b; /* amber-500 */
+  --color-iteration-3: #14b8a6; /* teal-500 */
+  --color-iteration-4: #ec4899; /* pink-500 */
+  --color-iteration-5: #84cc16; /* lime-500 */
+
+  /* Native-tracker board state palette. Used by the kanban column
+   * header strip + count chips. Custom boards still override per-state
+   * via `State.Color`; these are the semantic fallbacks. */
+  --color-board-backlog: #64748b;     /* slate-500 */
+  --color-board-ready: #22c55e;       /* green-500 */
+  --color-board-in-progress: #3b82f6; /* blue-500 */
+  --color-board-review: #a855f7;      /* purple-500 */
+  --color-board-done: #94a3b8;        /* slate-400 */
+  --color-board-blocked: #ef4444;     /* red-500 */
+
   /* Radii */
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -180,6 +200,20 @@
   --color-layer-vars: #b45309;     /* amber-700 */
   --color-sub-tool: #15803d;       /* green-700 */
   --color-library-pattern: #7e22ce; /* purple-700 */
+  /* Iteration palette in light mode: Tailwind-700 family for contrast. */
+  --color-iteration-0: #0e7490; /* cyan-700 */
+  --color-iteration-1: #7e22ce; /* purple-700 */
+  --color-iteration-2: #b45309; /* amber-700 */
+  --color-iteration-3: #0f766e; /* teal-700 */
+  --color-iteration-4: #be185d; /* pink-700 */
+  --color-iteration-5: #4d7c0f; /* lime-700 */
+  /* Board state palette in light mode. */
+  --color-board-backlog: #475569;     /* slate-600 */
+  --color-board-ready: #15803d;       /* green-700 */
+  --color-board-in-progress: #1d4ed8; /* blue-700 */
+  --color-board-review: #7e22ce;      /* purple-700 */
+  --color-board-done: #64748b;        /* slate-500 */
+  --color-board-blocked: #b91c1c;     /* red-700 */
   color-scheme: light;
 }
 

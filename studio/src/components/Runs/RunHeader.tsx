@@ -4,7 +4,7 @@ import { Pencil1Icon } from "@radix-ui/react-icons";
 
 import type { RunHeader as RunHeaderType } from "@/api/runs";
 import { cancelRun, getRun, loadEvents } from "@/api/runs";
-import { Button, CopyButton, IconButton, StatusBadge } from "@/components/ui";
+import { Button, CopyButton, IconButton, LiveDot, StatusBadge } from "@/components/ui";
 import AppHeader from "@/components/shared/AppHeader";
 import WSStatusDot from "@/components/shared/WSStatusDot";
 
@@ -124,9 +124,10 @@ export default function RunHeader({ run, active, wsState }: Props) {
         )}
         <StatusBadge status={run.status} />
         {active && (
-          <span
-            className="inline-block w-1.5 h-1.5 rounded-full bg-info animate-pulse"
-            title="Run is active in this server process"
+          <LiveDot
+            tone="info"
+            size="sm"
+            label="Run is active in this server process"
           />
         )}
         {error && (

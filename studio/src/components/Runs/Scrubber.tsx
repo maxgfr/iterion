@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { RunEvent } from "@/api/runs";
+import { LiveDot } from "@/components/ui/LiveDot";
 import { timelineMarks } from "@/lib/snapshotReducer";
 
 interface Props {
@@ -163,7 +164,7 @@ export default function Scrubber({
       )}
       {isLive && (
         <span className="text-[10px] text-success-fg flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+          <LiveDot tone="success" size="sm" />
           live
         </span>
       )}
