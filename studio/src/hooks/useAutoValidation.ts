@@ -21,8 +21,17 @@ export function useAutoValidation() {
         if (!controller.signal.aborted) {
           setDiagnostics(result.diagnostics, result.warnings, result.issues);
         }
-      } catch {
-        // silently ignore validation errors during auto-validation
+      } catch (err) {
+        // AbortError is expected when a newer keystroke supersedes
+        // this request; everything else (network failure, 5xx, parse
+        // error) means stale diagnostics are now misleading users.
+        // Surface it to the console so devs notice but keep the UI
+        // quiet — a toast on every transient hiccup during typing
+        // would be worse than no signal at all.
+        if (controller.signal.aborted) return;
+        const name = (err as { name?: string } | null)?.name;
+        if (name === "AbortError") return;
+        console.warn("[useAutoValidation] validate failed:", err);
       }
     }, 1500);
     return () => clearTimeout(timerRef.current);
