@@ -462,6 +462,27 @@ function DetailHeader({
     return { costUsd, tokens, model, contextWindow, contextUsed };
   }, [events]);
   const contextUsage = formatContextUsage(contextUsed, contextWindow);
+  // showAbsoluteTimes flips the duration cell to wall-clock anchors
+  // ("started 14:32:08 · finished 14:32:12") which is what users need
+  // when correlating run events with external logs (CI runs, dashboards,
+  // etc.). Persisted to localStorage so the preference survives reloads.
+  const [showAbsoluteTimes, setShowAbsoluteTimes] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem("run-console.absolute-times") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "run-console.absolute-times",
+        showAbsoluteTimes ? "1" : "0",
+      );
+    } catch {
+      // localStorage unavailable — preference resets per session
+    }
+  }, [showAbsoluteTimes]);
 
   return (
     <div className="px-4 pt-3 pb-3 pr-10 border-b border-border-default">
@@ -498,7 +519,24 @@ function DetailHeader({
                 return idx >= 0 ? idx + 1 : 1;
               })()}
             </span>
-            {duration && <span>duration: {duration}</span>}
+            {duration && (
+              <button
+                type="button"
+                onClick={() => setShowAbsoluteTimes((v) => !v)}
+                className="hover:text-fg-default text-left"
+                title={
+                  showAbsoluteTimes
+                    ? "Click for relative duration"
+                    : "Click for absolute wall-clock anchors"
+                }
+              >
+                {showAbsoluteTimes && exec.started_at
+                  ? `${formatWallClock(exec.started_at)} → ${
+                      exec.finished_at ? formatWallClock(exec.finished_at) : "…"
+                    }`
+                  : `duration: ${duration}`}
+              </button>
+            )}
             {tokens > 0 && <span>tokens: {tokens.toLocaleString()}</span>}
             {costUsd > 0 && (
               <span title={`$${costUsd.toFixed(6)}`}>
@@ -1386,6 +1424,20 @@ function useExecutionEvents(events: RunEvent[], exec: ExecutionState | null) {
     }
     return out;
   }, [events, exec]);
+}
+
+// formatWallClock renders an ISO timestamp as HH:MM:SS in the user's
+// locale so the duration cell can flip to absolute wall-clock anchors
+// (R16). Falls back to the raw input when parsing fails — better to
+// show something than silently lose the timestamp.
+function formatWallClock(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 function safeJSON(v: unknown): string {

@@ -203,6 +203,26 @@ select:focus:not(:focus-visible) {
   display: none;
 }
 
+/* pulse-flash: a transient highlight pulled in by RunCanvasIR when the
+ * user jumps to a node (event-log click, g+f, etc.). The double box-
+ * shadow imitates a quick "ping" without altering layout, then fades to
+ * nothing as the class is removed ~600ms later by the component. */
+@keyframes pulse-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--accent-rgb, 96 165 250) / 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(var(--accent-rgb, 96 165 250) / 0.25);
+  }
+  100% {
+    box-shadow: 0 0 0 16px rgba(var(--accent-rgb, 96 165 250) / 0);
+  }
+}
+
+.pulse-flash {
+  animation: pulse-flash 0.6s ease-out;
+}
+
 /* Form control utility shared by SettingsDrawer + future forms. */
 .input {
   display: block;

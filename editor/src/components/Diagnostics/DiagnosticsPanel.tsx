@@ -14,11 +14,28 @@ export default function DiagnosticsPanel() {
   const toggleDiagnosticsPanel = useUIStore((s) => s.toggleDiagnosticsPanel);
   const grouped = useGroupedDiagnostics();
   const [showAttributed, setShowAttributed] = useState(false);
+  const [search, setSearch] = useState("");
+  const [showErrorsOnly, setShowErrorsOnly] = useState(false);
+
+  // Apply the search query + errors-only filter to every diagnostic
+  // before we slice into globals / attributed. Keeps the two lists in
+  // sync — a search like "C034" hides global *and* attributed
+  // diagnostics that don't match.
+  const visible = grouped.all.filter((d) => {
+    if (showErrorsOnly && d.severity !== "error") return false;
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    const hay = `${d.code ?? ""}\t${d.message}\t${d.nodeId ?? ""}\t${d.edgeId ?? ""}`.toLowerCase();
+    return hay.includes(q);
+  });
+  const visibleGlobal = visible.filter((d) => !(d.nodeId || d.edgeId));
+  const visibleAttributed = visible.filter((d) => d.nodeId || d.edgeId);
 
   const errorCount = grouped.all.filter((d) => d.severity === "error").length;
   const warningCount = grouped.all.length - errorCount;
   const hasIssues = grouped.all.length > 0;
-  const attributedCount = grouped.all.length - grouped.global.length;
+  const filterActive = search.trim() !== "" || showErrorsOnly;
+  const attributedCount = visibleAttributed.length;
 
   const handleClick = (d: AttributedDiagnostic) => {
     if (!document) return;
@@ -55,8 +72,48 @@ export default function DiagnosticsPanel() {
         </button>
       </div>
 
+      {hasIssues && (
+        <div className="flex items-center gap-2 mb-2">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search code or message…"
+            className="flex-1 px-1.5 py-0.5 rounded border border-border-default bg-surface-0 text-[11px]"
+          />
+          <button
+            type="button"
+            onClick={() => setShowErrorsOnly((v) => !v)}
+            className={`text-[10px] px-1.5 py-0.5 rounded border ${
+              showErrorsOnly
+                ? "bg-danger-soft border-danger text-danger-fg"
+                : "border-border-default text-fg-subtle hover:text-fg-default"
+            }`}
+            title="Show only error-severity diagnostics"
+          >
+            errors only
+          </button>
+          {filterActive && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setShowErrorsOnly(false);
+              }}
+              className="text-[10px] text-fg-subtle hover:text-fg-default underline"
+            >
+              reset
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Globals (unattributed) — always shown */}
-      <DiagnosticList items={grouped.global} onClick={handleClick} />
+      <DiagnosticList items={visibleGlobal} onClick={handleClick} />
+
+      {filterActive && visible.length === 0 && (
+        <div className="text-fg-subtle text-[11px] py-2">No diagnostics match.</div>
+      )}
 
       {/* Disclosure for attributed diagnostics */}
       {attributedCount > 0 && (
@@ -71,7 +128,7 @@ export default function DiagnosticsPanel() {
           {showAttributed && (
             <div className="mt-1">
               <DiagnosticList
-                items={grouped.all.filter((d) => d.nodeId || d.edgeId)}
+                items={visibleAttributed}
                 onClick={handleClick}
                 showAttribution
               />

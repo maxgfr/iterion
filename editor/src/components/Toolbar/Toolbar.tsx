@@ -658,9 +658,23 @@ function FileStatusBadge({
   // Render nothing when the editor has no document at all — the toolbar
   // is in its empty state and the right-side group is just navigation.
   if (!hasDocument) return null;
-  const basename = currentFilePath
-    ? currentFilePath.split("/").pop() || currentFilePath
-    : "Untitled";
+  // Split the path into parent + basename so the breadcrumb can show
+  // "examples/bots › vibe_feature_dev.bot" with the parent slightly
+  // muted. Parents longer than ~20 chars are truncated from the LEFT
+  // so the trailing directory (most informative) stays visible.
+  let parent = "";
+  let basename = "Untitled";
+  if (currentFilePath) {
+    const idx = currentFilePath.lastIndexOf("/");
+    if (idx >= 0) {
+      parent = currentFilePath.slice(0, idx);
+      basename = currentFilePath.slice(idx + 1) || currentFilePath;
+    } else {
+      basename = currentFilePath;
+    }
+  }
+  const displayParent =
+    parent.length > 24 ? "…" + parent.slice(parent.length - 22) : parent;
   const subtitle = !currentFilePath
     ? "Unsaved"
     : isDirty
@@ -668,7 +682,7 @@ function FileStatusBadge({
     : null;
   return (
     <div
-      className="flex items-center gap-1.5 max-w-[280px] border border-border-default rounded px-2 py-0.5 bg-surface-1"
+      className="flex items-center gap-1.5 max-w-[360px] border border-border-default rounded px-2 py-0.5 bg-surface-1"
       title={currentFilePath ?? "Untitled — save the workflow to give it a path"}
     >
       {isDirty && (
@@ -676,6 +690,16 @@ function FileStatusBadge({
           aria-hidden
           className="inline-block w-1.5 h-1.5 rounded-full bg-warning shrink-0"
         />
+      )}
+      {displayParent && (
+        <span className="truncate text-[10px] text-fg-subtle font-mono shrink min-w-0">
+          {displayParent}
+        </span>
+      )}
+      {displayParent && (
+        <span aria-hidden className="text-fg-subtle text-[10px] shrink-0">
+          ›
+        </span>
       )}
       <span className="truncate text-xs text-fg-default font-medium">
         {basename}

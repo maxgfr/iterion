@@ -6,6 +6,25 @@ import { makeEdgeId, isAuxiliaryNodeId } from "@/lib/documentToGraph";
 import { useEscapeStack } from "@/hooks/useEscapeStack";
 import type { LayerKind } from "@/lib/constants";
 
+// Centralised handler for the "successfully duplicated / pasted a node"
+// flow: select it, schedule a fit-view animation, toast the user. The
+// canvas's pendingFitNodeId effect drives the visual landing, which
+// resolves the "where did my clone go?" friction without forcing the
+// document store to track positions itself.
+function announceNewNode(
+  newName: string,
+  kind: "duplicated" | "pasted",
+  deps: {
+    setSelectedNode: (id: string | null) => void;
+    setPendingFitNodeId: (id: string | null) => void;
+    addToast: (msg: string, tone: "info" | "success") => void;
+  },
+) {
+  deps.setSelectedNode(newName);
+  deps.setPendingFitNodeId(newName);
+  deps.addToast(`${kind === "duplicated" ? "Duplicated" : "Pasted"} as ${newName}`, "success");
+}
+
 function isEditableNode(id: string): boolean {
   return id !== "__start__" && id !== "done" && id !== "fail" && !isAuxiliaryNodeId(id);
 }
@@ -39,6 +58,7 @@ export function useCanvasKeyboard(deps: CanvasKeyboardDeps): (e: KeyboardEvent) 
   const toggleExpanded = useUIStore((s) => s.toggleExpanded);
   const toggleLayer = useUIStore((s) => s.toggleLayer);
   const setCanvasTool = useUIStore((s) => s.setCanvasTool);
+  const setPendingFitNodeId = useUIStore((s) => s.setPendingFitNodeId);
   const dismissEscape = useEscapeStack();
 
   const { search, quickAddMenu, setQuickAddMenu, setContextMenu } = deps;
@@ -71,15 +91,57 @@ export function useCanvasKeyboard(deps: CanvasKeyboardDeps): (e: KeyboardEvent) 
         return;
       }
 
-      // Undo/Redo
+      // Undo/Redo. We sample canUndo/canRedo before firing so the toast
+      // reflects what actually happened: silently dropping the
+      // shortcut when there's nothing to undo would surprise a user
+      // hammering Ctrl+Z to back out of a copy/paste.
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey && !isInput) {
         e.preventDefault();
-        undo();
+        if (useDocumentStore.getState().canUndo()) {
+          undo();
+          addToast("Undid last change", "info");
+        } else {
+          addToast("Nothing to undo", "info");
+        }
         return;
       }
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey)) && !isInput) {
         e.preventDefault();
-        redo();
+        if (useDocumentStore.getState().canRedo()) {
+          redo();
+          addToast("Redid last change", "info");
+        } else {
+          addToast("Nothing to redo", "info");
+        }
+        return;
+      }
+
+      // Select-all on the canvas. xyflow tracks multi-selection
+      // natively (selected: true on each node) and updates it via
+      // onNodesChange — flipping every editable node to selected:true
+      // is the cleanest way to engage that machinery without
+      // duplicating selection bookkeeping in our own store. Excludes
+      // __start__ / done / fail / auxiliary nodes since they're not
+      // user-editable anyway.
+      if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A") && !isInput) {
+        e.preventDefault();
+        const allEditable = (document?.agents ?? [])
+          .map((a) => a.name)
+          .concat((document?.judges ?? []).map((j) => j.name))
+          .concat((document?.routers ?? []).map((r) => r.name))
+          .concat((document?.humans ?? []).map((h) => h.name))
+          .concat((document?.tools ?? []).map((t) => t.name))
+          .concat((document?.computes ?? []).map((c) => c.name));
+        if (allEditable.length === 0) return;
+        // Push a custom event the Canvas listens to. We don't have a
+        // direct handle to xyflow from here; the Canvas's
+        // useCanvasLayout setNodes wired through xyflow Reactflow
+        // instance is the right authority — see Canvas.tsx
+        // "selectAllEditable" listener.
+        window.dispatchEvent(
+          new CustomEvent("iterion:select-all-editable", { detail: allEditable }),
+        );
+        addToast(`Selected ${allEditable.length} node${allEditable.length === 1 ? "" : "s"}`, "info");
         return;
       }
 
@@ -95,8 +157,11 @@ export function useCanvasKeyboard(deps: CanvasKeyboardDeps): (e: KeyboardEvent) 
         if (copiedNodeId) {
           const newName = duplicateNode(copiedNodeId);
           if (newName) {
-            setSelectedNode(newName);
-            addToast(`Pasted as ${newName}`, "success");
+            announceNewNode(newName, "pasted", {
+              setSelectedNode,
+              setPendingFitNodeId,
+              addToast,
+            });
           }
         }
         return;
@@ -106,8 +171,11 @@ export function useCanvasKeyboard(deps: CanvasKeyboardDeps): (e: KeyboardEvent) 
         if (selectedNodeId && isEditableNode(selectedNodeId)) {
           const newName = duplicateNode(selectedNodeId);
           if (newName) {
-            setSelectedNode(newName);
-            addToast(`Duplicated as ${newName}`, "success");
+            announceNewNode(newName, "duplicated", {
+              setSelectedNode,
+              setPendingFitNodeId,
+              addToast,
+            });
           }
         }
         return;
