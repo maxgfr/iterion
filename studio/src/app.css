@@ -50,6 +50,14 @@
   --color-info-soft: rgba(8, 145, 178, 0.18);
   --color-info-fg: #a5f3fc;
 
+  /* "Live" — dedicated secondary accent for "currently in flight".
+   * Same hue family as info (cyan) but a step brighter so a running
+   * dot reads as more active than an informational badge. See
+   * docs/visual-identity.md § Secondary accent for the rationale. */
+  --color-live: #22d3ee;            /* cyan-400 */
+  --color-live-soft: rgba(34, 211, 238, 0.18);
+  --color-live-fg: #cffafe;
+
   /* Node kind palette — the single source of truth for canvas node
    * colors. lib/constants.ts re-exposes these as `var(--color-node-*)`
    * strings, so the values here drive everything: canvas borders,
@@ -181,6 +189,9 @@
   --color-info: #0891b2;
   --color-info-soft: rgba(8, 145, 178, 0.18);
   --color-info-fg: #a5f3fc;
+  --color-live: #22d3ee;
+  --color-live-soft: rgba(34, 211, 238, 0.18);
+  --color-live-fg: #cffafe;
   color-scheme: dark;
 }
 
@@ -213,6 +224,9 @@
   --color-info: #0e7490;
   --color-info-soft: rgba(14, 116, 144, 0.10);
   --color-info-fg: #164e63;
+  --color-live: #0891b2;
+  --color-live-soft: rgba(8, 145, 178, 0.12);
+  --color-live-fg: #155e75;
   /* Canvas tokens in light mode use the Tailwind-700 family for
    * contrast against the lighter surface. Node bgs are rendered via
    * softColor(color, 10) — a 10% mix of the token + transparent —
