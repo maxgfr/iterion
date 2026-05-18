@@ -9,6 +9,7 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import { IterionStoreParseError } from "./errors.js";
 import {
   artifactDir,
   interactionPath,
@@ -17,6 +18,15 @@ import {
   runJsonPath,
 } from "./paths.js";
 import type { Artifact, Interaction, Run } from "./types.js";
+
+function isFileNotFound(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: string }).code === "ENOENT"
+  );
+}
 
 /** Read `<store>/runs/<runId>/run.json`. */
 export async function loadRun(
@@ -55,8 +65,13 @@ export async function loadArtifact(
       if (typeof idx === "number") {
         v = idx;
       }
-    } catch {
-      // run.json absent or unreadable → fall through to directory scan.
+    } catch (err) {
+      // A missing run.json is expected for some flows (e.g. external SDK
+      // consumers reading mid-run); fall through to a directory scan. But a
+      // *parse* error means the file is there and corrupt — surface it so the
+      // caller does not silently mask a broken store.
+      if (err instanceof IterionStoreParseError) throw err;
+      if (!isFileNotFound(err)) throw err;
     }
   }
   if (v === undefined) {

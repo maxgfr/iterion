@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  IterionStoreParseError,
   listRuns,
   loadArtifact,
   loadInteraction,
@@ -117,6 +118,20 @@ describe("store helpers", () => {
 
   it("listRuns returns the directory entries", async () => {
     expect(await listRuns({ storeDir: store.storeDir })).toEqual(["run_1"]);
+  });
+
+  it("loadRun surfaces a structured error when run.json is corrupt", async () => {
+    await store.writeFile("run_1", "run.json", "{not json");
+    await expect(loadRun("run_1", { storeDir: store.storeDir })).rejects.toBeInstanceOf(
+      IterionStoreParseError,
+    );
+  });
+
+  it("loadArtifact propagates a corrupt run.json instead of falling back silently", async () => {
+    await store.writeFile("run_1", "run.json", "{not json");
+    await expect(
+      loadArtifact("run_1", "analyze", undefined, { storeDir: store.storeDir }),
+    ).rejects.toBeInstanceOf(IterionStoreParseError);
   });
 
   it("listRuns returns [] when the store has no runs", async () => {

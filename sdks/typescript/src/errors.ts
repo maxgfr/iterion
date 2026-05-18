@@ -72,6 +72,24 @@ export class IterionRuntimeError extends IterionError {
 }
 
 /**
+ * Raised when a store file is present but its contents cannot be parsed as
+ * JSON. Distinguishes "corrupt file" from "missing file" (ENOENT, propagated
+ * untouched) so callers can decide whether to retry, escalate, or surface the
+ * path to the user.
+ */
+export class IterionStoreParseError extends IterionError {
+  constructor(
+    public readonly path: string,
+    public readonly cause: unknown,
+  ) {
+    super(
+      `failed to parse JSON at ${path}: ${(cause as Error)?.message ?? String(cause)}`,
+    );
+    this.name = "IterionStoreParseError";
+  }
+}
+
+/**
  * Raised by `IterionClient.run` / `resume` only when the caller opts in
  * via `{ throwOn: [...] }`. Not raised by default — the standard contract
  * is to return the result so the consumer can branch on `status`.

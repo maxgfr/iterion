@@ -39,6 +39,7 @@ export {
   IterionInvocationError,
   IterionRunPausedSignal,
   IterionRuntimeError,
+  IterionStoreParseError,
   parseRuntimeError,
 } from "./errors.js";
 
