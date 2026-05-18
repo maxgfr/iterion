@@ -1,3 +1,4 @@
+import * as RD from "@radix-ui/react-dialog";
 import { useEffect, useState } from "react";
 
 import * as conductor from "@/api/conductor";
@@ -37,8 +38,6 @@ export default function SettingsDrawer({ open, onClose, onSaved }: Props) {
     };
   }, [open]);
 
-  if (!open) return null;
-
   const onSave = async () => {
     if (!cfg) return;
     setSaving(true);
@@ -55,38 +54,43 @@ export default function SettingsDrawer({ open, onClose, onSaved }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex">
-      <div className="flex-1 bg-black/40" onClick={onClose} aria-hidden />
-      <aside className="flex h-full w-full max-w-3xl flex-col bg-surface-0 text-fg-default shadow-2xl">
-        <header className="flex items-center gap-3 border-b border-border-default bg-surface-1 px-4 py-2.5">
-          <h2 className="text-sm font-semibold">Conductor settings</h2>
-          {loading && <span className="text-xs text-fg-muted">loading…</span>}
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              className="rounded border border-border-default px-2 py-1 text-xs hover:bg-surface-2"
-              onClick={onClose}
-            >
-              Cancel
-            </button>
-            <button
-              className="rounded bg-accent px-2 py-1 text-xs text-on-accent hover:opacity-90 disabled:opacity-50"
-              disabled={!cfg || saving}
-              onClick={() => void onSave()}
-            >
-              {saving ? "Saving…" : "Save"}
-            </button>
+    <RD.Root open={open} onOpenChange={(o) => !o && onClose()}>
+      <RD.Portal>
+        <RD.Overlay className="fixed inset-0 z-40 bg-black/40 animate-fade-in" />
+        <RD.Content
+          aria-describedby={undefined}
+          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-3xl flex-col bg-surface-0 text-fg-default shadow-2xl"
+        >
+          <header className="flex items-center gap-3 border-b border-border-default bg-surface-1 px-4 py-2.5">
+            <RD.Title className="text-sm font-semibold">Conductor settings</RD.Title>
+            {loading && <span className="text-xs text-fg-muted">loading…</span>}
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                className="rounded border border-border-default px-2 py-1 text-xs hover:bg-surface-2"
+                onClick={onClose}
+              >
+                Cancel
+              </button>
+              <button
+                className="rounded bg-accent px-2 py-1 text-xs text-on-accent hover:opacity-90 disabled:opacity-50"
+                disabled={!cfg || saving}
+                onClick={() => void onSave()}
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </header>
+
+          {error && (
+            <div className="border-b border-red-500/40 bg-red-500/10 px-4 py-2 text-xs text-red-200">{error}</div>
+          )}
+
+          <div className="flex-1 overflow-auto p-4 text-sm">
+            {cfg && <Form cfg={cfg} setCfg={setCfg} />}
           </div>
-        </header>
-
-        {error && (
-          <div className="border-b border-red-500/40 bg-red-500/10 px-4 py-2 text-xs text-red-200">{error}</div>
-        )}
-
-        <div className="flex-1 overflow-auto p-4 text-sm">
-          {cfg && <Form cfg={cfg} setCfg={setCfg} />}
-        </div>
-      </aside>
-    </div>
+        </RD.Content>
+      </RD.Portal>
+    </RD.Root>
   );
 }
 
