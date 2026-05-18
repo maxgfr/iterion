@@ -24,6 +24,16 @@ import (
 // (t.TempDir, drop database, etc.) is the factory's job.
 type Factory func(t *testing.T) store.RunStore
 
+// testCtx returns a context carrying a synthetic tenant + owner. The
+// mongo backend's fail-closed withTenantFilter guard panics on
+// tenant-scoped queries that arrive without a tenant in ctx;
+// conformance tests speak the normal calling convention (auth
+// middleware stamps a tenant) so they exercise the same code path as
+// production. Filesystem backend ignores the values.
+func testCtx() context.Context {
+	return store.WithIdentity(context.Background(), "_test", "_test")
+}
+
 // Opts let backends declare what behaviour the harness should expect
 // when it differs from the filesystem default.
 type Opts struct {
@@ -61,7 +71,7 @@ func RunWithOpts(t *testing.T, factory Factory, opts Opts) {
 func testCreateLoad(t *testing.T, s store.RunStore, opts Opts) {
 	t.Helper()
 	in := map[string]interface{}{"foo": "bar"}
-	r, err := s.CreateRun(context.Background(), "run_1", "demo", in)
+	r, err := s.CreateRun(testCtx(), "run_1", "demo", in)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -71,7 +81,7 @@ func testCreateLoad(t *testing.T, s store.RunStore, opts Opts) {
 	if r.Status != opts.InitialStatus {
 		t.Errorf("Status: got %q want %q", r.Status, opts.InitialStatus)
 	}
-	r2, err := s.LoadRun(context.Background(), "run_1")
+	r2, err := s.LoadRun(testCtx(), "run_1")
 	if err != nil {
 		t.Fatalf("LoadRun: %v", err)
 	}
@@ -85,13 +95,13 @@ func testCreateLoad(t *testing.T, s store.RunStore, opts Opts) {
 
 func testStatusTransitions(t *testing.T, s store.RunStore) {
 	t.Helper()
-	if _, err := s.CreateRun(context.Background(), "run_2", "demo", nil); err != nil {
+	if _, err := s.CreateRun(testCtx(), "run_2", "demo", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpdateRunStatus(context.Background(), "run_2", store.RunStatusFinished, ""); err != nil {
+	if err := s.UpdateRunStatus(testCtx(), "run_2", store.RunStatusFinished, ""); err != nil {
 		t.Fatal(err)
 	}
-	r, _ := s.LoadRun(context.Background(), "run_2")
+	r, _ := s.LoadRun(testCtx(), "run_2")
 	if r.Status != store.RunStatusFinished {
 		t.Errorf("Status: got %q", r.Status)
 	}
@@ -102,14 +112,14 @@ func testStatusTransitions(t *testing.T, s store.RunStore) {
 
 func testEventSeqMonotone(t *testing.T, s store.RunStore) {
 	t.Helper()
-	if _, err := s.CreateRun(context.Background(), "run_3", "demo", nil); err != nil {
+	if _, err := s.CreateRun(testCtx(), "run_3", "demo", nil); err != nil {
 		t.Fatal(err)
 	}
 	const N = 50
 	var prev int64 = -1
 	for i := 0; i < N; i++ {
 		ev := store.Event{Type: store.EventNodeStarted, Timestamp: time.Now().UTC()}
-		written, err := s.AppendEvent(context.Background(), "run_3", ev)
+		written, err := s.AppendEvent(testCtx(), "run_3", ev)
 		if err != nil {
 			t.Fatalf("AppendEvent #%d: %v", i, err)
 		}
@@ -118,7 +128,7 @@ func testEventSeqMonotone(t *testing.T, s store.RunStore) {
 		}
 		prev = written.Seq
 	}
-	all, err := s.LoadEvents(context.Background(), "run_3")
+	all, err := s.LoadEvents(testCtx(), "run_3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +139,7 @@ func testEventSeqMonotone(t *testing.T, s store.RunStore) {
 
 func testEventSeqConcurrent(t *testing.T, s store.RunStore) {
 	t.Helper()
-	if _, err := s.CreateRun(context.Background(), "run_4", "demo", nil); err != nil {
+	if _, err := s.CreateRun(testCtx(), "run_4", "demo", nil); err != nil {
 		t.Fatal(err)
 	}
 	const goroutines = 8
@@ -141,7 +151,7 @@ func testEventSeqConcurrent(t *testing.T, s store.RunStore) {
 			defer wg.Done()
 			for i := 0; i < perG; i++ {
 				ev := store.Event{Type: store.EventNodeStarted, Timestamp: time.Now().UTC()}
-				if _, err := s.AppendEvent(context.Background(), "run_4", ev); err != nil {
+				if _, err := s.AppendEvent(testCtx(), "run_4", ev); err != nil {
 					t.Errorf("AppendEvent: %v", err)
 					return
 				}
@@ -149,7 +159,7 @@ func testEventSeqConcurrent(t *testing.T, s store.RunStore) {
 		}()
 	}
 	wg.Wait()
-	all, err := s.LoadEvents(context.Background(), "run_4")
+	all, err := s.LoadEvents(testCtx(), "run_4")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,11 +180,11 @@ func testEventSeqConcurrent(t *testing.T, s store.RunStore) {
 
 func testArtifactVersions(t *testing.T, s store.RunStore) {
 	t.Helper()
-	if _, err := s.CreateRun(context.Background(), "run_5", "demo", nil); err != nil {
+	if _, err := s.CreateRun(testCtx(), "run_5", "demo", nil); err != nil {
 		t.Fatal(err)
 	}
 	for v := 1; v <= 3; v++ {
-		if err := s.WriteArtifact(context.Background(), &store.Artifact{
+		if err := s.WriteArtifact(testCtx(), &store.Artifact{
 			RunID:     "run_5",
 			NodeID:    "node_a",
 			Version:   v,
@@ -184,7 +194,7 @@ func testArtifactVersions(t *testing.T, s store.RunStore) {
 			t.Fatalf("WriteArtifact v=%d: %v", v, err)
 		}
 	}
-	versions, err := s.ListArtifactVersions(context.Background(), "run_5", "node_a")
+	versions, err := s.ListArtifactVersions(testCtx(), "run_5", "node_a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +206,7 @@ func testArtifactVersions(t *testing.T, s store.RunStore) {
 			t.Errorf("Version[%d]: got %d want %d", i, vinfo.Version, i+1)
 		}
 	}
-	latest, err := s.LoadLatestArtifact(context.Background(), "run_5", "node_a")
+	latest, err := s.LoadLatestArtifact(testCtx(), "run_5", "node_a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,17 +217,17 @@ func testArtifactVersions(t *testing.T, s store.RunStore) {
 
 func testLockExclusive(t *testing.T, s store.RunStore) {
 	t.Helper()
-	if _, err := s.CreateRun(context.Background(), "run_6", "demo", nil); err != nil {
+	if _, err := s.CreateRun(testCtx(), "run_6", "demo", nil); err != nil {
 		t.Fatal(err)
 	}
-	first, err := s.LockRun(context.Background(), "run_6")
+	first, err := s.LockRun(testCtx(), "run_6")
 	if err != nil {
 		t.Fatalf("first LockRun: %v", err)
 	}
 	if err := first.Unlock(); err != nil {
 		t.Errorf("Unlock: %v", err)
 	}
-	second, err := s.LockRun(context.Background(), "run_6")
+	second, err := s.LockRun(testCtx(), "run_6")
 	if err != nil {
 		t.Fatalf("relock after unlock: %v", err)
 	}
@@ -236,7 +246,7 @@ func testCapabilitiesReported(t *testing.T, s store.RunStore) {
 
 func testUserMessagesInbox(t *testing.T, s store.RunStore) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := testCtx()
 	if _, err := s.CreateRun(ctx, "run_um", "demo", nil); err != nil {
 		t.Fatal(err)
 	}
