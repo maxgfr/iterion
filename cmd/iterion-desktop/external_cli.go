@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/SocialGouv/iterion/pkg/backend/detect"
 )
 
 // CLIStatus is the wire-format reported to the frontend for each external
@@ -41,7 +44,24 @@ type looker interface {
 
 type realLooker struct{}
 
-func (realLooker) LookPath(name string) (string, error) { return exec.LookPath(name) }
+// LookPath probes PATH first; on miss it falls back to a list of
+// well-known install locations (Homebrew on Linux/macOS, Volta,
+// ~/.local/bin, /usr/local/bin). The fallback is the same list used
+// by pkg/backend/detect — keeps onboarding/Welcome and the toolbar
+// pill consistent for users whose GUI launcher didn't source
+// ~/.bashrc / `brew shellenv`.
+func (realLooker) LookPath(name string) (string, error) {
+	if path, err := exec.LookPath(name); err == nil {
+		return path, nil
+	}
+	for _, candidate := range detect.CommonBinaryCandidates(name) {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+			return candidate, nil
+		}
+	}
+	// Re-run LookPath so the caller gets the canonical exec.ErrNotFound.
+	return exec.LookPath(name)
+}
 func (realLooker) Run(ctx context.Context, name string, args ...string) (string, error) {
 	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	return string(out), err

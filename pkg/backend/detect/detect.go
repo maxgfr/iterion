@@ -59,8 +59,8 @@ type BackendStatus struct {
 
 // ProviderStatus describes a claw-driven provider.
 type ProviderStatus struct {
-	Name           string `json:"name"`
-	Available      bool   `json:"available"`
+	Name      string `json:"name"`
+	Available bool   `json:"available"`
 	// Source is the credential that will actually be used at runtime.
 	// For providers with a single auth path, this is "ENV_VAR_NAME". For
 	// providers that admit multiple paths (e.g. OpenAI: API key + ChatGPT
@@ -381,7 +381,7 @@ var findCodexBinary = func() (string, bool) {
 	if path, err := exec.LookPath("codex"); err == nil {
 		return path, true
 	}
-	for _, p := range commonBinaryCandidates("codex") {
+	for _, p := range CommonBinaryCandidates("codex") {
 		if isExecutable(p) {
 			return p, true
 		}
@@ -389,12 +389,17 @@ var findCodexBinary = func() (string, bool) {
 	return "", false
 }
 
-// commonBinaryCandidates returns an OS-aware list of well-known install
+// CommonBinaryCandidates returns an OS-aware list of well-known install
 // locations for a CLI tool, in roughly-preferred order. Used as a
 // fallback when exec.LookPath fails (typically because the process was
 // launched from a context that didn't load the user's interactive
 // shell rc — Homebrew on Linux, devbox/nix wrappers, GUI launchers).
-func commonBinaryCandidates(name string) []string {
+//
+// Exported so iterion-desktop's CLI probe (cmd/iterion-desktop/external_cli.go)
+// can apply the same fallback list when its own LookPath misses a tool
+// installed under Homebrew on a host where the GUI launcher didn't load
+// `brew shellenv` into PATH.
+func CommonBinaryCandidates(name string) []string {
 	var out []string
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		out = append(out,
