@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/SocialGouv/iterion/pkg/internal/shellquote"
 )
 
 // validateEnvVar mirrors the discipline applied on the docker driver
@@ -87,12 +89,12 @@ func appendEnvPrefix(args []string, env map[string]string) []string {
 func buildShellChdirExec(dir string, argv []string, env map[string]string) string {
 	var b strings.Builder
 	b.WriteString("cd ")
-	b.WriteString(shellSingleQuote(dir))
+	b.WriteString(shellquote.Quote(dir))
 	b.WriteString(" && exec ")
 	if len(env) > 0 {
 		b.WriteString("env ")
 		for _, k := range sortedKeys(env) {
-			b.WriteString(shellSingleQuote(k + "=" + env[k]))
+			b.WriteString(shellquote.Quote(k + "=" + env[k]))
 			b.WriteByte(' ')
 		}
 	}
@@ -100,21 +102,9 @@ func buildShellChdirExec(dir string, argv []string, env map[string]string) strin
 		if i > 0 {
 			b.WriteByte(' ')
 		}
-		b.WriteString(shellSingleQuote(a))
+		b.WriteString(shellquote.Quote(a))
 	}
 	return b.String()
-}
-
-// shellSingleQuote wraps s in single quotes and escapes any
-// embedded single quotes via the canonical '\” sequence.
-func shellSingleQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	if !strings.ContainsAny(s, " \t\n'\"\\$`*?(){}[]<>|&;") {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // sortedKeys returns keys of m in ascending order — used for stable

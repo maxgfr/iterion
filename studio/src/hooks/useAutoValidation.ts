@@ -28,9 +28,7 @@ export function useAutoValidation() {
         // Surface it to the console so devs notice but keep the UI
         // quiet — a toast on every transient hiccup during typing
         // would be worse than no signal at all.
-        if (controller.signal.aborted) return;
-        const name = (err as { name?: string } | null)?.name;
-        if (name === "AbortError") return;
+        if (err instanceof Error && err.name === "AbortError") return;
         console.warn("[useAutoValidation] validate failed:", err);
       }
     }, 1500);

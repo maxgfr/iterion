@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SocialGouv/iterion/pkg/internal/shellquote"
 	"github.com/SocialGouv/iterion/pkg/sandbox"
 )
 
@@ -346,7 +347,7 @@ func TestParseUserSpec(t *testing.T) {
 	}
 }
 
-func TestShellSingleQuote(t *testing.T) {
+func TestShellQuote(t *testing.T) {
 	cases := map[string]string{
 		"":            "''",
 		"hello":       "hello", // no special chars → no quoting
@@ -356,8 +357,8 @@ func TestShellSingleQuote(t *testing.T) {
 		"/workspace":  "/workspace", // no special chars
 	}
 	for in, want := range cases {
-		if got := shellSingleQuote(in); got != want {
-			t.Errorf("shellSingleQuote(%q) = %q, want %q", in, got, want)
+		if got := shellquote.Quote(in); got != want {
+			t.Errorf("shellquote.Quote(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
