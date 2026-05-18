@@ -91,7 +91,7 @@ Fix:
 
 ### Editor frontend connects but no events stream in
 
-**Probable cause**: the WebSocket endpoint cannot reach `MongoSource` (when in cloud mode with NATS-driven runs), OR the JWT used by the editor lacks the right tenant scope, OR a proxy strips WS upgrade headers.
+**Probable cause**: the WebSocket endpoint cannot reach `MongoSource` (when in cloud mode with NATS-driven runs), OR the JWT used by the studio lacks the right tenant scope, OR a proxy strips WS upgrade headers.
 
 Diagnose:
 1. Browser devtools → Network → filter on `Upgrade: websocket`. Does the handshake return 101?
@@ -100,7 +100,7 @@ Diagnose:
 
 Fix:
 - 101 handshake fails behind a proxy: configure the Ingress to pass WebSocket Upgrade. Example for nginx ingress: `nginx.ingress.kubernetes.io/proxy-set-header: "Upgrade $http_upgrade"`.
-- Events exist but the stream is empty: the editor is filtering by tenant mismatch. Re-login to refresh the JWT.
+- Events exist but the stream is empty: the studio is filtering by tenant mismatch. Re-login to refresh the JWT.
 - MongoSource unwired: confirm `ITERION_MODE=cloud` is set on the server. Without it, `runview.service` defaults to `FilesystemSource` which won't see Mongo events.
 
 ### Runs fail with `budget_exceeded` immediately

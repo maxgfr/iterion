@@ -238,7 +238,7 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 	}
 
 	// Inherit the publisher's trace so OTel spans created by the
-	// engine appear under the originating editor span (plan §F T-41).
+	// engine appear under the originating studio span (plan §F T-41).
 	traced := delivery.PropagateTraceTo(parent)
 	// Stamp tenant + owner from the message into ctx so every
 	// downstream Mongo write picks them up and every Mongo read
@@ -474,7 +474,7 @@ func (r *Runner) heartbeat(ctx context.Context, runCancel context.CancelFunc, lo
 func (r *Runner) executeRun(ctx context.Context, msg *queue.RunMessage) error {
 	// Honour the publisher's per-run wall-clock budget. Without this,
 	// queue.RunMessage.TimeoutSec — wired from `iterion run --timeout`
-	// and the editor Launch modal — has no effect in cloud mode: the
+	// and the studio Launch modal — has no effect in cloud mode: the
 	// runner ignores the field and the engine inherits an undeadlined
 	// ctx. The DSL budget (max_duration) is still enforced inside the
 	// engine; this guard catches the operator-level deadline.
@@ -647,7 +647,7 @@ func loadWorkflow(msg *queue.RunMessage) (*ir.Workflow, error) {
 }
 
 // buildExecutor reuses runview.BuildExecutor so the runner shares
-// exactly the same backend / tool / MCP wiring as the editor server
+// exactly the same backend / tool / MCP wiring as the studio server
 // and the CLI run path. Vars from the message are forwarded so
 // {{vars.X}} expansion works without re-resolving from disk.
 func (r *Runner) buildExecutor(ctx context.Context, msg *queue.RunMessage, wf *ir.Workflow) (runtime.NodeExecutor, error) {

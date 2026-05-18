@@ -45,7 +45,7 @@ func (c *runConn) handleSubscribeLogs(env runWSEnvelope) {
 		// Terminated run — no live buffer. Replay the persisted log
 		// file via the same wsTypeLogChunk envelope so the client
 		// renders it identically to a live tail. Without this, the
-		// editor's RunLogPanel showed "No log captured" on opening
+		// studio's RunLogPanel showed "No log captured" on opening
 		// any failed/finished run after-the-fact, even when run.log
 		// existed on disk. Skip silently if the file is missing
 		// (e.g. very early failure before any log was written) — the
@@ -74,7 +74,7 @@ func (c *runConn) streamLogs(buf *runview.RunLogBuffer, fromOffset int64) {
 	startOffset, snapshot, _ := buf.Snapshot(fromOffset)
 
 	// The ring is a 1 MiB tail (pkg/runview.runLogRingCap). On long
-	// runs the early bytes are evicted; reopening the editor after a
+	// runs the early bytes are evicted; reopening the studio after a
 	// disconnect resubscribes from offset 0 and would otherwise miss
 	// everything before the ring's lower bound — the per-node Logs
 	// tab then shows "No log lines tagged with this node yet" for

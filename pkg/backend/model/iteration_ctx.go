@@ -8,7 +8,7 @@ type iterationCtxKey struct{}
 // iteration counter for the node about to execute. The runtime calls
 // this immediately before Executor.Execute so backends can tag their
 // log output as [NodeID#iter/...] for per-(node, iteration) filtering
-// in the editor.
+// in the studio.
 func WithLoopIteration(ctx context.Context, iter int) context.Context {
 	return context.WithValue(ctx, iterationCtxKey{}, iter)
 }

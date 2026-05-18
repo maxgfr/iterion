@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Build editor frontend
+      - name: Build studio frontend
         working-directory: editor
         run: |
           corepack enable
@@ -182,7 +182,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Build editor frontend
+      - name: Build studio frontend
         working-directory: editor
         run: |
           corepack enable

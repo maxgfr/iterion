@@ -27,7 +27,7 @@ type ResumeOptions struct {
 	Force       bool              // allow resume despite workflow hash change
 	Executor    runtime.NodeExecutor
 	// Background marks this invocation as a managed-runner subprocess
-	// spawned by the editor server. The CLI writes a .pid file so the
+	// spawned by the studio server. The CLI writes a .pid file so the
 	// server can detect liveness across its own restart.
 	Background bool
 }
@@ -61,7 +61,7 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 	}
 	storeDir := store.ResolveStoreDir(storeAnchor, opts.StoreDir)
 
-	// Tee logger output to <storeDir>/runs/<runID>/run.log so the editor's
+	// Tee logger output to <storeDir>/runs/<runID>/run.log so the studio's
 	// Logs panel sees output for resumed runs (same rationale + pattern as
 	// pkg/cli/run.go::RunRun). Resume re-uses the same file via O_APPEND
 	// so the original run.log + resume sessions stack into one timeline,
@@ -223,7 +223,7 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 	}
 	defer lock.Unlock()
 
-	// Managed-runner mode: the editor server writes the .pid file on
+	// Managed-runner mode: the studio server writes the .pid file on
 	// our behalf at spawn time, so we only need to remove it on exit.
 	if opts.Background {
 		defer func() {

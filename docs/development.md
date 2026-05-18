@@ -26,8 +26,8 @@ task test:live      # Live e2e tests (requires API keys)
 task test:race      # Tests with race detector
 task lint           # go fmt + go vet
 task check          # lint + test
-task editor:dev     # Start editor in dev mode (HMR)
-task editor:build   # Build editor frontend
+task studio:dev     # Start studio in dev mode (HMR)
+task studio:build   # Build studio frontend
 ```
 
 Or directly with Go:
@@ -64,7 +64,7 @@ iterion/
 │   ├── runtime/         # Workflow execution engine (scheduling, budget, recovery, worktree finalization)
 │   ├── sandbox/         # Per-run container isolation (Docker/Podman/Kubernetes drivers + CONNECT proxy)
 │   ├── store/           # File-backed persistence (runs, events, artifacts) + Mongo/S3 in cloud mode
-│   ├── server/          # HTTP server: editor SPA + run console + cloud REST/WS API
+│   ├── server/          # HTTP server: studio + run console + cloud REST/WS API
 │   ├── runner/          # Cloud-mode runner pod consumer loop (NATS JetStream → execution)
 │   ├── queue/           # NATS JetStream message contract & dispatch schema
 │   ├── cloud/           # Cloud-mode helpers (Prometheus metrics registry, …)
@@ -75,7 +75,7 @@ iterion/
 │   ├── benchmark/       # Metrics collection and reporting
 │   ├── log/             # Leveled logger
 │   └── internal/        # Internal utilities (e.g. appinfo)
-├── editor/              # Web UI (React/Vite/TypeScript + XYFlow)
+├── studio/              # Web UI (React/Vite/TypeScript + XYFlow)
 ├── examples/            # Reference .iter workflows + companion docs
 ├── sdks/typescript/     # @iterion/sdk — typed CLI wrapper for Node/Deno/Bun
 ├── e2e/                 # End-to-end test suite (stub + live)

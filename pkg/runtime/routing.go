@@ -65,7 +65,7 @@ func (e *Engine) execRoundRobin(ctx context.Context, rs *runState, routerNodeID 
 		return "", err
 	}
 
-	// Emit edge_selected so external observers (editor edge-highlight,
+	// Emit edge_selected so external observers (studio edge-highlight,
 	// `iterion inspect --events`) can reconstruct the path taken. The
 	// condition + LLM router paths already emit this; the round-robin
 	// branch had been the only mode skipping it.

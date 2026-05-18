@@ -17,7 +17,7 @@ If you have **at least one** of:
 - `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT`
 - AWS credentials (Bedrock) or `GOOGLE_CLOUD_PROJECT` (Vertex)
 
-… then opening the editor, hitting **New**, and clicking **Run**
+… then opening the studio, hitting **New**, and clicking **Run**
 will work without any further configuration. The agent in the
 default template has empty `backend:` and `model:` — both are
 filled in at run time from what's available.
@@ -34,7 +34,7 @@ a backend in this order (first non-empty wins):
    credentials are detected on the host
 5. `claw` — last-resort fallback
 
-The empty-template path lands on step 4. The pill in the editor
+The empty-template path lands on step 4. The pill in the studio
 toolbar surfaces what the auto-resolver picked (and turns red when
 no credential is available).
 
@@ -161,7 +161,7 @@ export ITERION_OPENAI_USE_OAUTH=0
 # unintended backend.
 ```
 
-The editor status pill renders both detected sources, with the
+The studio status pill renders both detected sources, with the
 inactive one struck-through and labelled `(overridden by …)`.
 
 **Model-version gating.** OpenAI's backend gates model access on the
@@ -188,7 +188,7 @@ pragmatic — if OpenAI changes the terms or tightens enforcement, set
 
 ## Editor UX
 
-The editor calls `GET /api/backends/detect` at mount time. The
+The studio calls `GET /api/backends/detect` at mount time. The
 **status pill** in the top-left of the toolbar shows:
 
 - 🟢 **Green** + auto-resolved backend name when at least one

@@ -95,7 +95,7 @@ type Task struct {
 	// execution. Aligned with the loop_iteration field exposed in
 	// events / ExecutionState. Zero for nodes outside any loop.
 	// Backends use it to tag log lines as [NodeID#iter/...] so the
-	// editor can filter run.log per (node, iteration).
+	// studio can filter run.log per (node, iteration).
 	Iteration int
 
 	// SystemPrompt is the fully resolved system prompt text.
@@ -123,7 +123,7 @@ type Task struct {
 	// no capabilities granted.
 	Capabilities []string
 
-	// StoreDir is the absolute path to the conductor store root used by
+	// StoreDir is the absolute path to the dispatcher store root used by
 	// capability-gated tools (currently: board operations). Backends pass
 	// this to the __mcp-board subcommand via ITERION_STORE_DIR. Empty
 	// means "fall back to the cwd default"; backends should set this
@@ -262,7 +262,7 @@ type Task struct {
 	// engine without returning. Currently used by the claude_code
 	// delegate to emit `tool_started` and `tool_called` events as the
 	// stream parser observes ToolUseBlock / ToolResultBlock content
-	// blocks — the editor's Logs panel uses these to switch its footer
+	// blocks — the studio's Logs panel uses these to switch its footer
 	// between the LLM "thinking" loader and an in-flight tool spinner.
 	// All callbacks are optional.
 	Hooks TaskHooks
@@ -282,7 +282,7 @@ type TaskHooks struct {
 	// input carries the raw JSON arguments the LLM produced for the
 	// tool. The engine uses it to log the tool target (URL, file path,
 	// query…) and to persist a structured payload on the tool_started
-	// event for select tools (TodoWrite, WebFetch, …) so the editor's
+	// event for select tools (TodoWrite, WebFetch, …) so the studio's
 	// per-node Tools tab can render rich cards. May be nil for backends
 	// that cannot surface the input (legacy path).
 	OnToolStarted func(toolName string, toolUseID string, input json.RawMessage)
@@ -293,7 +293,7 @@ type TaskHooks struct {
 	// output carries the tool's result content as a string (flattened
 	// from ToolResultBlock.Content, which the SDK exposes as `any` —
 	// either a bare string or a slice of nested content blocks). The
-	// engine persists it on the tool_called event so the editor's
+	// engine persists it on the tool_called event so the studio's
 	// per-node Tools tab can render in+out side-by-side the way Claude
 	// Code does. May be empty for backends that cannot surface a result.
 	OnToolCalled func(toolName string, toolUseID string, isError bool, output string)

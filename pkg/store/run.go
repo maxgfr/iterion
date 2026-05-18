@@ -56,7 +56,7 @@ type Run struct {
 	WorkflowHash string `json:"workflow_hash,omitempty" bson:"workflow_hash,omitempty"` // SHA-256 of the .iter source at run start
 	FilePath     string `json:"file_path,omitempty" bson:"file_path,omitempty"`         // absolute .iter source path captured at launch (resume without re-supplying file)
 	// Preset is the in-source preset name selected at launch via
-	// `--preset <name>` (or the editor Launch modal). Persisted so
+	// `--preset <name>` (or the studio Launch modal). Persisted so
 	// `iterion resume` re-applies the same parameter set without the
 	// caller having to re-supply it. Empty when no preset was selected
 	// or the workflow declares none.
@@ -82,7 +82,7 @@ type Run struct {
 	ArtifactIndex map[string]int         `json:"artifact_index,omitempty" bson:"artifact_index,omitempty"` // node_id → latest version written
 	// WorkDir is the absolute filesystem path the run executes in
 	// (the per-run git worktree when Worktree is true, otherwise the
-	// engine's resolved cwd at start). Persisted so editor surfaces
+	// engine's resolved cwd at start). Persisted so studio surfaces
 	// (e.g. modified-files panel) can locate the run's working tree
 	// without re-deriving it from the runtime.
 	WorkDir string `json:"work_dir,omitempty" bson:"work_dir,omitempty"`
@@ -90,7 +90,7 @@ type Run struct {
 	// false when WorkDir is the inherited cwd.
 	Worktree bool `json:"worktree,omitempty" bson:"worktree,omitempty"`
 	// RepoRoot is the absolute path of the main git repository the
-	// worktree was forked from. Used by the editor's modified-files
+	// worktree was forked from. Used by the studio's modified-files
 	// panel after the worktree directory is gc'd to compute the diff
 	// against FinalCommit (the persistent branch lives in this repo's
 	// shared .git). Empty for non-worktree runs.

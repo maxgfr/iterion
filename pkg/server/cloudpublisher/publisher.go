@@ -290,7 +290,7 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 		OwnerID:        ownerID,
 	}
 	if _, err := p.nats.PublishRun(ctx, msg); err != nil {
-		// Best-effort: roll the run doc back to failed so the editor
+		// Best-effort: roll the run doc back to failed so the studio
 		// surfaces the queue failure rather than a stuck "queued"
 		// row that never moves.
 		_ = p.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, fmt.Sprintf("queue publish: %v", err))
@@ -304,7 +304,7 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 	//    and created_at <= ours.
 	pos, err := p.queuePosition(ctx, runID)
 	if err != nil {
-		// Non-fatal: the editor falls back to "Waiting on the queue"
+		// Non-fatal: the studio falls back to "Waiting on the queue"
 		// generic copy when queue_position is zero.
 		p.logger.Warn("cloudpublisher: queue position lookup: %v", err)
 	}
@@ -368,7 +368,7 @@ func (p *Publisher) CancelRun(ctx context.Context, runID string) error {
 // the answers in.
 //
 // On publish failure the run is reverted to failed_resumable so the
-// editor surfaces an actionable error instead of leaving a "queued"
+// studio surfaces an actionable error instead of leaving a "queued"
 // row that no runner will ever pick up. Mirrors the rollback pattern
 // in SubmitLaunch.
 func (p *Publisher) SubmitResume(ctx context.Context, spec runview.ResumeSpec, wf *ir.Workflow, hash string) error {
@@ -385,7 +385,7 @@ func (p *Publisher) SubmitResume(ctx context.Context, spec runview.ResumeSpec, w
 	}
 	priorStatus := prior.Status
 	// Flip status to queued so the runner doesn't short-circuit on the
-	// cooperative-cancel check + so the editor's QueueDepthBar reflects
+	// cooperative-cancel check + so the studio's QueueDepthBar reflects
 	// the in-flight resume.
 	if err := p.store.UpdateRunStatus(ctx, spec.RunID, store.RunStatusQueued, ""); err != nil {
 		return fmt.Errorf("cloudpublisher: requeue %s: %w", spec.RunID, err)
@@ -442,7 +442,7 @@ func (p *Publisher) SubmitResume(ctx context.Context, spec runview.ResumeSpec, w
 
 // queuePosition counts the runs with status=queued and created_at
 // less than or equal to ours. The result is 1-based, matching the
-// "1st in queue" copy the editor renders.
+// "1st in queue" copy the studio renders.
 func (p *Publisher) queuePosition(ctx context.Context, runID string) (int, error) {
 	var doc struct {
 		CreatedAt time.Time `bson:"created_at"`
@@ -462,7 +462,7 @@ func (p *Publisher) queuePosition(ctx context.Context, runID string) (int, error
 
 // marshalIRFromSpec returns the AST.File bytes for the workflow.
 // Resolution order: inline `source` (preferred in cloud mode where
-// the editor SPA uploads source verbatim and the server pod has no
+// the studio SPA uploads source verbatim and the server pod has no
 // shared filesystem) → `path` on local disk (fallback for tests and
 // migration tooling). The runner re-parses + re-compiles, so the
 // wire payload is the AST File, not the compiled IR.

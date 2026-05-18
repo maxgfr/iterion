@@ -90,7 +90,7 @@ For every platform row, walk every scenario column. Mark `✓` (pass), `✗` (fa
 - [ ] Start a long-running cloud-mode run.
 - [ ] Drop network for 30s (turn off WiFi / use a network namespace / unplug Ethernet).
 - [ ] Reconnect → app reconnects to the WebSocket; the event stream catches up.
-- [ ] No duplicate events post-reconnect (the editor's event de-dup by seq holds).
+- [ ] No duplicate events post-reconnect (the studio's event de-dup by seq holds).
 
 ### 10. Distribution-specific
 

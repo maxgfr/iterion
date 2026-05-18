@@ -8,7 +8,7 @@ import (
 )
 
 // setProcessGroup is a no-op on Windows. The runtime currently targets
-// Linux/macOS for the long-running editor/run path; if Windows desktop ever
+// Linux/macOS for the long-running studio + run path; if Windows desktop ever
 // needs robust subtree termination this should switch to
 // CREATE_NEW_PROCESS_GROUP and route TerminateJobObject through a Job Object.
 func setProcessGroup(_ *exec.Cmd) {}

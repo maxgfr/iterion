@@ -66,7 +66,7 @@ func runHeadless() {
 	errCh := make(chan error, 1)
 	go func() {
 		printer := cli.NewPrinter(cli.OutputJSON)
-		opts := cli.EditorOptions{
+		opts := cli.StudioOptions{
 			Port:      -1,
 			Bind:      "127.0.0.1",
 			Dir:       projectDir,
@@ -84,7 +84,7 @@ func runHeadless() {
 			// mirroring server_host.go for the GUI-embedded server.
 			OnForceRefresh: ReloadIterionEnvFile,
 		}
-		if err := cli.RunEditor(rootCtx, opts, printer); err != nil {
+		if err := cli.RunStudio(rootCtx, opts, printer); err != nil {
 			select {
 			case errCh <- err:
 			default:

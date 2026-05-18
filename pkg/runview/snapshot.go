@@ -73,13 +73,13 @@ type RunHeader struct {
 	Checkpoint   *store.Checkpoint      `json:"checkpoint,omitempty"`
 	// WorkDir is the absolute filesystem path the run executed in
 	// (per-run worktree when Worktree is true, otherwise inherited cwd).
-	// Empty for runs created before this field was persisted; the editor
+	// Empty for runs created before this field was persisted; the studio
 	// hides the modified-files panel in that case.
 	WorkDir string `json:"work_dir,omitempty"`
 	// Worktree is true when WorkDir was created by `worktree: auto`.
 	Worktree bool `json:"worktree,omitempty"`
 	// Worktree finalization summary (only populated for `worktree:
-	// auto` runs that reached a clean exit). The editor uses these to
+	// auto` runs that reached a clean exit). The studio uses these to
 	// surface the persistent branch and FF status in the run header.
 	FinalCommit   string              `json:"final_commit,omitempty"`
 	FinalBranch   string              `json:"final_branch,omitempty"`
@@ -103,7 +103,7 @@ type RunHeader struct {
 	// QueuePosition is the 1-based position of a queued cloud run on
 	// the NATS queue. Populated only while Status == "queued"; absent
 	// otherwise. Computed server-side (Mongo aggregation in T-17/T-31).
-	// The editor's QueuedBanner uses it to render the "3rd in queue"
+	// The studio's QueuedBanner uses it to render the "3rd in queue"
 	// copy. See cloud-ready plan §F (T-03, T-15, T-31).
 	QueuePosition int `json:"queue_position,omitempty"`
 }
@@ -315,7 +315,7 @@ func (b *SnapshotBuilder) handleNodeStarted(evt *store.Event, branch string) {
 	// then locked on the first attempt's terminal status). The path
 	// gives every (loop counters tuple) a strictly unique identity.
 	// LoopIteration on the exec stays as the scalar iter for the
-	// editor's pip strips + per-iteration filtering.
+	// studio's pip strips + per-iteration filtering.
 	id := makeExecutionIDFromEvent(branch, evt.NodeID, iter, evt.Data)
 	ts := evt.Timestamp
 	existing := b.execs[id]
@@ -339,7 +339,7 @@ func (b *SnapshotBuilder) handleNodeStarted(evt *store.Event, branch string) {
 	// successive runs): preserve original started_at / first_seq / kind
 	// so the timeline still anchors on the first attempt.
 	//
-	// Monotonic guard (mirror of editor T2.4 9bcccff): a duplicate
+	// Monotonic guard (mirror of studio T2.4 9bcccff): a duplicate
 	// node_started must NOT downgrade an already-terminal execution
 	// back to running. paused_waiting_human is monotonic too — only an
 	// explicit run_resumed transitions it back to running, via

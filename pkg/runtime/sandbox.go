@@ -91,7 +91,7 @@ type SandboxParams struct {
 	// tool scripts via the ITERION_ARTIFACT_FILES_DIR env var. Tools
 	// (write_audit_md, emit_sbom, …) write report/SBOM/manifest files
 	// here; iterion lists + serves them via /api/runs/<id>/artifact-
-	// files endpoints + the editor's Artifacts panel — without polluting
+	// files endpoints + the studio's Artifacts panel — without polluting
 	// the bench repo's worktree with `docs/renovacy/` commits. Empty
 	// disables the mount (cloud mode: cross-machine bind isn't
 	// supportable; needs an S3-backed scratch area instead).

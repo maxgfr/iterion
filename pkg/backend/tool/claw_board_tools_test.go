@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SocialGouv/iterion/pkg/conductor/native"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
 )
 
 func TestRegisterClawBoardTools_FiltersByCaps(t *testing.T) {

@@ -1,7 +1,7 @@
 # Building the Iterion Desktop app
 
 Iterion ships an optional desktop wrapper built with [Wails v2](https://wails.io/).
-The desktop binary embeds the editor SPA and the Iterion HTTP server inside a
+The desktop binary embeds the studio SPA and the Iterion HTTP server inside a
 native window via WebKit (Linux/macOS) or WebView2 (Windows).
 
 This document captures the build pipeline for **all four supported platforms**
@@ -19,7 +19,7 @@ sources alone.
   serves SPA/static paths from the GUI binary's embedded
   `pkg/server.StaticFS` and reverse-proxies only `/api/*` HTTP requests to
   the selected loopback `pkg/server` (the default per-project headless
-  daemon, or the in-process fallback). The editor SPA is embedded via
+  daemon, or the in-process fallback). The studio is embedded via
   `//go:embed all:static` — never copied into the Wails frontend dir.
 - Build tasks: [Taskfile.yml § Desktop](../Taskfile.yml). One target per
   GOOS/GOARCH plus `desktop:package:linux:<arch>` for AppImage.
@@ -34,11 +34,11 @@ always correct.
 
 We pass two Wails flags that aren't part of the default scaffold:
 
-- `-skipbindings`: the editor consumes bindings via the `window.go.main.App.*`
+- `-skipbindings`: the studio consumes bindings via the `window.go.main.App.*`
   globals injected by the Wails runtime, not via the static JS shims Wails
   generates. Skipping bindings generation removes a redundant codegen step.
 - `-s` (`--skip-frontend`): there is no frontend to build under
-  `cmd/iterion-desktop/`. The SPA is built by `task editor:build` and
+  `cmd/iterion-desktop/`. The SPA is built by `task studio:build` and
   embedded into `pkg/server/static`. The handler in
   [asset_proxy.go](../cmd/iterion-desktop/asset_proxy.go) serves the index
   and static chunks directly from that GUI embed, while `/api/*` is the only
@@ -92,7 +92,7 @@ headers. The Wails CLI is installed on demand into `$GOPATH/bin`.
 # 1. Install Wails CLI (one-off, per dev environment)
 devbox run -- task desktop:install-tools
 
-# 2. Build editor SPA + desktop binary
+# 2. Build studio + desktop binary
 export PATH="$(go env GOPATH)/bin:$HOME/.local/bin:$PATH"
 devbox run -- task desktop:build:linux:amd64
 # → build/bin/iterion-desktop-linux-amd64  (~46 MB)
@@ -168,7 +168,7 @@ bundle. Before producing release artefacts, wipe it and rebuild:
 
 ```bash
 rm -rf pkg/server/static
-devbox run -- task editor:build
+devbox run -- task studio:build
 ```
 
 DO NOT distribute a fast-built `.deb`. The CI release path remains the source
@@ -195,7 +195,7 @@ generally don't work. Each target must be built on a matching host:
 3. **Linux only**: `apt-get install` of the headers + AppImage tooling listed
    above; `linuxdeploy` and `linuxdeploy-plugin-gtk` fetched from
    github.com/linuxdeploy.
-4. `task editor:build` (single source of truth — same task as local dev).
+4. `task studio:build` (single source of truth — same task as local dev).
 5. `task desktop:build:<os>:<arch>` per matrix entry.
 6. Per-package step (zip / nsis-portable / appimage).
 7. `readelf` smoke-check on the AppImage to confirm the runtime header arch.

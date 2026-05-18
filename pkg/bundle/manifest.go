@@ -26,7 +26,7 @@ type Manifest struct {
 	Version string `yaml:"version"`
 
 	// Description is a one-line summary surfaced by `iterion inspect`
-	// and the editor's bundle picker.
+	// and the studio's bundle picker.
 	Description string `yaml:"description"`
 
 	// Author is a free-form attribution string.

@@ -322,7 +322,7 @@ type jsonToolNodeDecl struct {
 }
 
 // jsonSandboxBlock is the JSON form of an ast.SandboxBlock. The
-// editor consumes this shape.
+// studio consumes this shape.
 type jsonSandboxBlock struct {
 	Mode            string                   `json:"mode,omitempty"`
 	Image           string                   `json:"image,omitempty"`

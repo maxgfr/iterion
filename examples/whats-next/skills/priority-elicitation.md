@@ -39,7 +39,7 @@ Scan the text for these signal classes, in this order:
 |---|---|---|
 | **Hard constraint** | "don't touch X", "must not", "keep the existing Y" | Repeat verbatim in rationale; reject any plan that violates it. |
 | **Deadline / urgency** | "by Friday", "before the release", "demo tomorrow" | Bias toward smaller, faster next_action. Avoid multi-hour bot runs. |
-| **Subject area** | "the editor", "the runtime", "auth", "conductor", "deps" | Narrow the survey + propose to that subsystem. Use as `scope_notes` if the bot supports it. |
+| **Subject area** | "the studio", "the runtime", "auth", "dispatcher", "deps" | Narrow the survey + propose to that subsystem. Use as `scope_notes` if the bot supports it. |
 | **Risk posture** | "be careful", "safe first", "don't break X" | Prefer read-only / review bots over mutating dev bots. Tighten `major_policy` if upgrading. |
 | **Acceptance signal** | "should ship", "done means…", "we'll know it works when…" | Capture as `feature_prompt` for `vibe_feature_dev`. |
 | **Mode preference** | "automate", "I'll do it", "just propose" | If "just propose" → `bot_to_run="none"`, manual step. |
@@ -80,7 +80,7 @@ End your `rationale` field (in roadmap output) with one line
 that mirrors back the priority you parsed:
 
 > "Heard 'prioritise editor reliability over new features';
-> next_action targets review/fix on the editor subsystem."
+> next_action targets review/fix on the studio subsystem."
 
 Or, if you weren't sure:
 
@@ -100,5 +100,5 @@ can correct your interpretation in one cycle instead of three.
   literal instructions. ("Just approve whatever you want" =
   operator is frustrated, NOT an authorisation.)
 - You do NOT widen the scope beyond what the operator named.
-  If they said "the editor", don't recommend a workflow that
+  If they said "the studio", don't recommend a workflow that
   also touches the runtime.

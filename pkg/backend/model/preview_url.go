@@ -3,7 +3,7 @@ package model
 import "strings"
 
 // previewURLDirective is the line prefix that tool nodes use to declare
-// a URL the editor's Browser pane can render. Anything matching the
+// a URL the studio's Browser pane can render. Anything matching the
 // shape `[iterion] preview_url=<url> [kind=<k>] [scope=<s>]` (one per
 // line) is captured. Tool stdout that does not match is left alone.
 const previewURLDirective = "[iterion] preview_url="

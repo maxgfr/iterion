@@ -11,7 +11,7 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# --- Server (HTTP API + editor SPA) ---------------------------------
+# --- Server (HTTP API + studio) ---------------------------------
 server:
   replicas: 1
   # Cloud-mode HTTP entry point — `iterion server` (T-30). Reads

@@ -12,7 +12,7 @@ import (
 const StoreDirName = ".iterion"
 
 // ResolveStoreDir picks the run-store directory shared by the CLI and
-// the editor.
+// the studio.
 //
 // Resolution order:
 //  1. Explicit override (--store-dir, cfg.StoreDir) wins.

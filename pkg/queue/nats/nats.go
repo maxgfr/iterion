@@ -197,7 +197,7 @@ func (c *Conn) EnsureSchema(ctx context.Context) error {
 // PublishRun submits a RunMessage onto the iterion.queue.runs subject.
 // The Nats-Msg-Id header is set to RunID so that re-publishes within
 // the dedup window are silently absorbed by JetStream — that is what
-// makes the editor-side launch handler safely retryable.
+// makes the studio-side launch handler safely retryable.
 func (c *Conn) PublishRun(ctx context.Context, msg *queue.RunMessage) (*jetstream.PubAck, error) {
 	if err := msg.Validate(); err != nil {
 		return nil, fmt.Errorf("queue/nats: invalid RunMessage: %w", err)
@@ -241,9 +241,9 @@ func (c *Conn) PublishRun(ctx context.Context, msg *queue.RunMessage) (*jetstrea
 
 	// Per-publish timeout: the NATS client is configured with
 	// MaxReconnects(-1) so a downed broker leaves PublishMsg blocked
-	// indefinitely waiting for ack — that froze editor handlers
+	// indefinitely waiting for ack — that froze studio handlers
 	// (Launch run) under broker outage. 5s is long enough for normal
-	// hiccups and short enough that the editor surfaces "queue down"
+	// hiccups and short enough that the studio surfaces "queue down"
 	// to the user instead of hanging.
 	pubCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

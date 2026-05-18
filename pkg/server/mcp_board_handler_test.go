@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SocialGouv/iterion/pkg/conductor/native"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
 )
 
 func newMCPBoardTestServer(t *testing.T) (*httptest.Server, *BoardMCPTokenRegistry, *native.Store) {

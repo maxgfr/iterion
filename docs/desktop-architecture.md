@@ -19,7 +19,7 @@ Iterion.app  /  iterion-desktop.exe  /  Iterion.AppImage
    │     │                     pkg/server.StaticFS
    │     └─ /api/*             reverse-proxy → selected loopback server
    ├─ Selected loopback server (default: per-project headless daemon;
-   │  fallback/opt-out: in-process ServerHost via cli.RunEditor)
+   │  fallback/opt-out: in-process ServerHost via cli.RunStudio)
    │     ├─ /api/*            REST   (proxied via AssetServer)
    │     └─ /api/ws/runs/*    WebSocket runs   (DIRECT — Wails AssetServer
    │                                             returns 501 on WS upgrade)
@@ -48,7 +48,7 @@ origin gets no runtime, so `window.go.main.App.*` is `undefined`,
 into "browser mode". (See [ADR-002](adr/002-desktop-assetserver-proxy.md)
 for the full investigation that surfaced this in iteration 10.)
 
-The current design solves this by hosting the editor SPA via the Wails
+The current design solves this by hosting the studio SPA via the Wails
 AssetServer's `Handler` (`cmd/iterion-desktop/asset_proxy.go`), so the
 WebView's main origin stays on the AssetServer URL for the lifetime of
 the app. The handler serves every non-`/api` SPA/static request from the
@@ -69,10 +69,10 @@ stays on the AssetServer origin while being proxied to `/api/*`. We keep
 a real loopback server (rather than running everything inside the
 AssetServer) because:
 
-- `pkg/server` stays 1:1 between CLI (`iterion editor`) and desktop;
+- `pkg/server` stays 1:1 between CLI (`iterion studio`) and desktop;
 - WebSockets keep working without any AssetServer shim;
 - the selected server binds to loopback only and runs through the same
-  local-editor `DisableAuth=true` path as `iterion editor`, while Origin
+  local-editor `DisableAuth=true` path as `iterion studio`, while Origin
   checks still protect browser-initiated writes and WS upgrades.
 
 ### Local desktop auth model
@@ -88,11 +88,11 @@ continue.
 The in-process `ServerHost` path in `cmd/iterion-desktop/server_host.go`
 is now an escape hatch: set `ITERION_DESKTOP_ATTACH_DAEMON=0` (also
 `false`, `no`, or `off`) to opt out, or rely on it as the fallback when
-daemon attach/spawn fails. That path starts `cli.RunEditor` on
+daemon attach/spawn fails. That path starts `cli.RunStudio` on
 `127.0.0.1` with `Port=-1` and `NoBrowser=true`.
 
 Both the default headless daemon and the in-process fallback use
-`cli.RunEditor`, which constructs `pkg/server.Config` with
+`cli.RunStudio`, which constructs `pkg/server.Config` with
 `DisableAuth=true`. Local desktop mode therefore does not mint a
 per-launch session token and does not install cookie/query-token
 middleware. The AssetServer handler proxies only `/api/*` HTTP requests to
@@ -141,7 +141,7 @@ flips the right CGO/cross flags).
 | `cmd/iterion-desktop/menu.go` | Native menus |
 | `cmd/iterion-desktop/window_state.go` | Persisted geometry |
 | `cmd/iterion-desktop/single_instance.go` + `_unix.go` + `_windows.go` | Single-instance + IPC |
-| `cmd/iterion-desktop/server_host.go` | In-process `cli.RunEditor` fallback when daemon attach is disabled or fails |
+| `cmd/iterion-desktop/server_host.go` | In-process `cli.RunStudio` fallback when daemon attach is disabled or fails |
 | `cmd/iterion-desktop/config.go` | User config (no build tag — testable) |
 | `cmd/iterion-desktop/keychain.go` | go-keyring wrapper |
 | `cmd/iterion-desktop/external_cli.go` | claude/codex/git detection |
@@ -149,15 +149,15 @@ flips the right CGO/cross flags).
 | `cmd/iterion-desktop/path_fix_other.go` | No-op on non-darwin |
 | `cmd/iterion-desktop/updater*.go` | Ed25519-signed auto-update |
 | `cmd/iterion-desktop/asset_proxy.go` | Wails AssetServer handler: GUI-embedded SPA/static plus `/api/*` reverse-proxy to the selected loopback server (see ADR-002) |
-| `editor/src/lib/desktopBridge.ts` | Typed `window.go.main.App.*` wrappers |
-| `editor/src/hooks/useDesktop.ts` | React hook for desktop state |
-| `editor/src/views/Welcome/` | First-run wizard |
-| `editor/src/views/Settings/` | API keys / projects / updates / about |
-| `editor/src/views/ProjectSwitcher/` | Cmd+P modal |
+| `studio/src/lib/desktopBridge.ts` | Typed `window.go.main.App.*` wrappers |
+| `studio/src/hooks/useDesktop.ts` | React hook for desktop state |
+| `studio/src/views/Welcome/` | First-run wizard |
+| `studio/src/views/Settings/` | API keys / projects / updates / about |
+| `studio/src/views/ProjectSwitcher/` | Cmd+P modal |
 
 ## Backwards compatibility
 
-The `iterion` CLI is unchanged. `iterion editor` still listens on 4891
+The `iterion` CLI is unchanged. `iterion studio` still listens on 4891
 with the same local `DisableAuth=true` behaviour — the CLI flag flows are untouched. Two binaries
 ship from the same module: `iterion` (Cobra CLI) and `iterion-desktop`
 (Wails app). Both share `pkg/cli`, `pkg/server`, the SPA, and the run

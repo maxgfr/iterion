@@ -53,7 +53,7 @@ type Config struct {
 // master key, bootstrap admin, signup policy, and configured OIDC
 // providers (Google, GitHub, generic).
 //
-// Required in cloud mode; ignored in local mode (the editor process
+// Required in cloud mode; ignored in local mode (the studio process
 // is implicitly trusted to its TTY user).
 type AuthConfig struct {
 	// JWTSecret is a base64-encoded HS256 signing key (>=32 bytes).

@@ -219,7 +219,7 @@ func TestNewFromRecipeNameMismatch(t *testing.T) {
 }
 
 // TestResolveVarsExpandsProjectDirInOverrides locks in the fix for a
-// regression where the editor's LaunchView pre-fills the form with the
+// regression where the studio's LaunchView pre-fills the form with the
 // literal default `${PROJECT_DIR}`, the user submits unchanged, and the
 // override reaches tool nodes verbatim — breaking commands like
 // `git -C '${PROJECT_DIR}' add ...` because the literal path doesn't
@@ -249,7 +249,7 @@ func TestResolveVarsExpandsProjectDirInOverrides(t *testing.T) {
 		t.Errorf("default expansion: got %q, want %q", got["workspace_dir"], "/tmp/run-xyz")
 	}
 
-	// Override path: the editor re-sends the literal default. The same
+	// Override path: the studio re-sends the literal default. The same
 	// expansion must apply, otherwise tool nodes see `${PROJECT_DIR}`
 	// verbatim and shell-out fails.
 	got2 := eng.resolveVars(map[string]interface{}{"workspace_dir": "${PROJECT_DIR}"})

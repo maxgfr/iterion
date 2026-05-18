@@ -704,7 +704,7 @@ func GenerateTextDirect(ctx context.Context, client api.APIClient, opts Generati
 
 		// Drain operator-queued chatbox messages AFTER compaction so
 		// they always land in the preserved-recent window. Consume
-		// runs first so the editor inbox transitions delivered →
+		// runs first so the studio inbox transitions delivered →
 		// consumed in lockstep with the next request.
 		if opts.Inbox != nil {
 			opts.Inbox.Consume(ctx)

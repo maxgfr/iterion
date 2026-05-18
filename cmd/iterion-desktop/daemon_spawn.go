@@ -20,7 +20,7 @@ import (
 // Logs go to ~/.iterion/daemons/<key>.log so the operator can
 // post-mortem a crashed daemon without scraping syslog.
 //
-// Timeout is generous (20s) because cli.RunEditor's startup includes
+// Timeout is generous (20s) because cli.RunStudio's startup includes
 // store migrations and file-watcher setup that can take a few seconds
 // on cold caches. We poll the discovery file every 200ms so the GUI
 // doesn't block on the spawn longer than necessary.

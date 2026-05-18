@@ -48,7 +48,7 @@ iterion run workflow.iter [flags]
 | `--merge-into <target>` | For `worktree: auto` runs — `current` (default), `none` (skip merge, branch only), or a branch name |
 | `--branch-name <name>` | For `worktree: auto` runs — override the storage branch name (default `iterion/run/<friendly-name>`) |
 | `--merge-strategy <mode>` | For `worktree: auto` runs — `squash` (default, collapses run commits into one) or `merge` (fast-forward, preserves history) |
-| `--auto-merge` | For `worktree: auto` runs — apply `--merge-strategy` at run end (default `true` on the CLI; the editor sets `false` and defers the merge to a UI action) |
+| `--auto-merge` | For `worktree: auto` runs — apply `--merge-strategy` at run end (default `true` on the CLI; the studio sets `false` and defers the merge to a UI action) |
 
 ## `iterion inspect`
 
@@ -132,45 +132,45 @@ The report includes:
 - **Artifacts table** — all published artifacts with versions
 - **Timeline** — chronological reconstruction of every node execution, edge selection, verdict, branch lifecycle, and budget warning
 
-## `iterion editor`
+## `iterion studio`
 
 Launch the visual workflow editor:
 
 ```bash
-iterion editor                     # Default port 4891
-iterion editor --port 8080         # Custom port
-iterion editor --dir ./workflows   # Custom directory
-iterion editor --bind 0.0.0.0      # Expose on the LAN
-iterion editor --no-browser        # Don't auto-open browser
+iterion studio                     # Default port 4891
+iterion studio --port 8080         # Custom port
+iterion studio --dir ./workflows   # Custom directory
+iterion studio --bind 0.0.0.0      # Expose on the LAN
+iterion studio --no-browser        # Don't auto-open browser
 ```
 
 Networking flags:
 
 | Flag | Description |
 |---|---|
-| `--bind <addr>` | Bind address for the editor HTTP listener. Defaults to `127.0.0.1` (loopback only). Use `0.0.0.0` or an interface IP only when you intentionally want LAN exposure; the editor exposes unauthenticated file read/write endpoints, so do not bind it to untrusted networks. |
+| `--bind <addr>` | Bind address for the studio HTTP listener. Defaults to `127.0.0.1` (loopback only). Use `0.0.0.0` or an interface IP only when you intentionally want LAN exposure; the studio exposes unauthenticated file read/write endpoints, so do not bind it to untrusted networks. |
 
 See [visual-editor.md](visual-editor.md) for features.
 
-## `iterion conduct`
+## `iterion dispatch`
 
-Run the conductor daemon: poll a tracker, dispatch eligible issues to a workflow, and expose the optional REST/WebSocket surface (see [conductor.md](conductor.md)):
+Run the dispatcher daemon: poll a tracker, dispatch eligible issues to a workflow, and expose the optional REST/WebSocket surface (see [dispatcher.md](dispatcher.md)):
 
 ```bash
-iterion conduct iterion.conductor.yaml
-iterion conduct iterion.conductor.yaml --port 4892
-iterion conduct iterion.conductor.yaml --no-server
+iterion dispatch iterion.dispatcher.yaml
+iterion dispatch iterion.dispatcher.yaml --port 4892
+iterion dispatch iterion.dispatcher.yaml --no-server
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--store-dir <dir>` | Override the iterion store directory |
-| `--port <port>` | HTTP port for the conductor REST/WS surface (overrides `server.port` in config) |
+| `--port <port>` | HTTP port for the dispatcher REST/WS surface (overrides `server.port` in config) |
 | `--no-server` | Run headless — disable the HTTP surface even if `server.port` is set |
 
 ## `iterion issue`
 
-Manage the native kanban tracker used by the conductor (see [native-tracker.md](native-tracker.md)):
+Manage the native kanban tracker used by the dispatcher (see [native-tracker.md](native-tracker.md)):
 
 ```bash
 iterion issue create --title "Fix auth" --label backend --priority 10
@@ -229,7 +229,7 @@ iterion sandbox doctor   # Report the active driver (Docker/Podman), image cache
 
 ## `iterion server`
 
-Start the long-running HTTP server (editor SPA + run console + cloud API). Used both for the local web editor and for cloud mode deployments — install via [`oci://ghcr.io/socialgouv/charts/iterion`](https://github.com/SocialGouv/iterion/pkgs/container/charts%2Fiterion) (chart sources in [`charts/iterion/`](../charts/iterion/)).
+Start the long-running HTTP server (studio + run console + cloud API). Used both for the local web editor and for cloud mode deployments — install via [`oci://ghcr.io/socialgouv/charts/iterion`](https://github.com/SocialGouv/iterion/pkgs/container/charts%2Fiterion) (chart sources in [`charts/iterion/`](../charts/iterion/)).
 
 ```bash
 iterion server --port 4891 --bind 0.0.0.0

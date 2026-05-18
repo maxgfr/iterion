@@ -1,4 +1,4 @@
-// Package projects manages the editor's per-user project registry.
+// Package projects manages the studio's per-user project registry.
 //
 // On disk at <UserConfigDir>/Iterion/config.json — shared with the
 // desktop (Wails) app's own config (cmd/iterion-desktop/config.go).
@@ -88,7 +88,7 @@ func Path() (string, error) {
 
 // Load reads the registry. Missing file → fresh Config; corrupt JSON →
 // returns the error so the caller can decide whether to overwrite
-// (callers typically log + start fresh to avoid wedging the editor).
+// (callers typically log + start fresh to avoid wedging the studio).
 func Load() (*Config, error) {
 	path, err := Path()
 	if err != nil {

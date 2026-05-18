@@ -2,8 +2,8 @@
 
 Iterion ships with a first-class issue tracker — no Linear, no GitHub
 account required. It is the default backing store for
-[`iterion conduct`](conductor.md), but is fully usable on its own
-through the `iterion issue` CLI or the editor's Board view.
+[`iterion dispatch`](dispatcher.md), but is fully usable on its own
+through the `iterion issue` CLI or the studio's Board view.
 
 The native tracker is a deliberate design choice: iterion's autonomous
 loop should not require the operator to lock themselves into a
@@ -13,7 +13,7 @@ optional plug-ins, not the source of truth.
 ## Storage layout
 
 ```
-<store-dir>/conductor/
+<store-dir>/dispatcher/
   board.json                  # column + custom-field schema
   issues/<encoded-id>.json    # one file per issue
   events.jsonl                # append-only audit log (monotonic Seq)
@@ -51,8 +51,8 @@ fields the operator can attach to issues. Defaults:
 
 | Property            | Meaning                                                            |
 |---------------------|--------------------------------------------------------------------|
-| `eligible: true`    | Conductor will dispatch issues sitting in this state.              |
-| `terminal: true`    | Conductor treats this state as a stop signal; blocker dependencies | 
+| `eligible: true`    | Dispatcher will dispatch issues sitting in this state.              |
+| `terminal: true`    | Dispatcher treats this state as a stop signal; blocker dependencies | 
 |                     | resolve.                                                           |
 
 A state can be both `eligible` and `terminal` — for example a
@@ -85,12 +85,12 @@ issue write — unknown fields and bad types are rejected.
 | `enum`    | string ∈ `enum_values`                            |
 
 Field values are rendered into workflow inputs via
-`{{issue.fields.<name>}}` in the conductor's `dispatch.vars` block.
+`{{issue.fields.<name>}}` in the dispatcher's `dispatch.vars` block.
 
 ## CLI — `iterion issue`
 
-The full CLI works against `<store-dir>/conductor/` directly; it does
-**not** need the conductor daemon to be running.
+The full CLI works against `<store-dir>/dispatcher/` directly; it does
+**not** need the dispatcher daemon to be running.
 
 ```
 iterion issue create   --title T [--body B] [--state S] [--label L]+
@@ -128,9 +128,9 @@ iterion issue list --state ready --json | jq '.[].id'
 
 ## REST surface
 
-When iterion runs an HTTP server (`iterion editor` or `iterion
-conduct`'s embedded HTTP), the native tracker is exposed under
-`/api/v1/native/`. Auth follows the surrounding server: the editor's
+When iterion runs an HTTP server (`iterion studio` or `iterion
+dispatch`'s embedded HTTP), the native tracker is exposed under
+`/api/v1/native/`. Auth follows the surrounding server: the studio's
 local mode is unauthenticated; cloud mode gates the routes through the
 same JWT middleware as `/api/runs/*`.
 
@@ -147,16 +147,16 @@ same JWT middleware as `/api/runs/*`.
 
 `{id}` accepts the same prefix resolution as the CLI.
 
-The SPA's Board view (`/board` in the editor) consumes exactly these
+The SPA's Board view (`/board` in the studio) consumes exactly these
 endpoints — it's a thin React shell on top of the REST surface.
 
-## Use cases beyond the conductor
+## Use cases beyond the dispatcher
 
-Even without `iterion conduct` running, the native tracker is useful
+Even without `iterion dispatch` running, the native tracker is useful
 as a local kanban for:
 
 - **Pre-flight backlog grooming.** Curate issues before flipping the
-  switch on the conductor.
+  switch on the dispatcher.
 - **Per-project task lists.** The store lives under the same
   `<store-dir>` as your runs, so issues travel with the project.
 - **Lightweight personal queue.** Replace a sticky-note `TODO.md`
@@ -168,9 +168,9 @@ as a local kanban for:
 The Go package is exported:
 
 ```go
-import "github.com/SocialGouv/iterion/pkg/conductor/native"
+import "github.com/SocialGouv/iterion/pkg/dispatcher/native"
 
-s, err := native.NewStore(storeDir + "/conductor")
+s, err := native.NewStore(storeDir + "/dispatcher")
 if err != nil { return err }
 
 iss, err := s.Create(native.Issue{Title: "do a thing", State: "ready"})
@@ -180,7 +180,7 @@ err = s.Claim(iss.ID, "worker-1")
 err = s.Release(iss.ID, "worker-1")
 ```
 
-To plug it into the conductor's `Tracker` interface:
+To plug it into the dispatcher's `Tracker` interface:
 
 ```go
 adapter := native.NewAdapter(s) // satisfies tracker.Tracker
@@ -191,7 +191,7 @@ adapter := native.NewAdapter(s) // satisfies tracker.Tracker
 - **No comments.** Events.jsonl is the audit trail; user-facing
   comments are a v2 ergonomic.
 - **No bi-directional sync with GitHub / Forgejo.** A single
-  conductor instance picks one tracker. Mirroring is on the v2
+  dispatcher instance picks one tracker. Mirroring is on the v2
   roadmap.
 - **No persistent retry queue.** Restart loses in-flight backoff
   timers; the next tick re-discovers candidates via the tracker.

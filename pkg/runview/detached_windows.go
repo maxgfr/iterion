@@ -4,7 +4,7 @@ package runview
 
 import "syscall"
 
-// newDetachedSysProcAttr is the Windows fallback. The editor's detached
+// newDetachedSysProcAttr is the Windows fallback. The studio's detached
 // runner mode is not validated on Windows; release.yml still cross-
 // compiles a windows/{amd64,arm64} binary, so these helpers exist to
 // keep the package building. A future Windows port should swap them

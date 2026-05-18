@@ -419,7 +419,7 @@ func (s *FilesystemRunStore) UpdateRunStatus(ctx context.Context, id string, sta
 		r.FinishedAt = &t
 	case RunStatusRunning, RunStatusPausedWaitingHuman:
 		// Resume paths (failed_resumable/cancelled → running) must clear
-		// FinishedAt — otherwise the editor's duration ticker uses the
+		// FinishedAt — otherwise the studio's duration ticker uses the
 		// stale terminal timestamp and freezes mid-run.
 		r.FinishedAt = nil
 	}
@@ -588,7 +588,7 @@ func (s *FilesystemRunStore) AppendEvent(_ context.Context, runID string, evt Ev
 	evt.Seq = s.seq[runID]
 
 	// Stamp the current log-buffer byte position when the runview
-	// Service has wired a callback; lets the editor's time-travel
+	// Service has wired a callback; lets the studio's time-travel
 	// scrubber slice "log up to event seq N" without parsing log
 	// line timestamps. Only overwrites when the caller didn't set
 	// LogOffset explicitly (Mongo-mode replays / synthetic test
@@ -1022,7 +1022,7 @@ func (s *FilesystemRunStore) ListInteractions(_ context.Context, runID string) (
 }
 
 // ---------------------------------------------------------------------------
-// Run files (tool-produced artifact files surfaced via the editor)
+// Run files (tool-produced artifact files surfaced via the studio)
 // ---------------------------------------------------------------------------
 
 // runFilesDir returns the per-run scratch directory where tool-produced

@@ -12,7 +12,7 @@ import (
 
 // startLogSource spawns a goroutine that tails the run's run.log file
 // and pushes any appended bytes into the run's RunLogBuffer (which
-// the editor server registered via prepareRunLogNoFile in detached
+// the studio server registered via prepareRunLogNoFile in detached
 // mode). The buffer fans out to live WS subscribers.
 //
 // Mirrors startEventSource but operates on opaque byte streams rather

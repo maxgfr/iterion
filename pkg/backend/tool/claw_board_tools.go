@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/SocialGouv/iterion/pkg/conductor/native"
-	"github.com/SocialGouv/iterion/pkg/conductor/native/boardops"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native/boardops"
 )
 
 // BoardConfig configures in-process board access for the claw backend. It
-// is intentionally tiny: the store handle is shared with the conductor (so
+// is intentionally tiny: the store handle is shared with the dispatcher (so
 // changes are visible immediately) and the cap list is whatever the node
 // was granted. Pass nil store to disable board tool registration.
 type BoardConfig struct {
@@ -24,7 +24,7 @@ type BoardConfig struct {
 // workflow swapping backends doesn't need to rename tool references in
 // prompts.
 //
-// Each operation goes through pkg/conductor/native/boardops so the
+// Each operation goes through pkg/dispatcher/native/boardops so the
 // validation and event-emission semantics match the stdio + HTTP
 // transports byte-for-byte.
 //

@@ -42,7 +42,7 @@ func parseFileMode(raw string) fileMode {
 }
 
 // runFilesResponse is the wire shape of GET /api/runs/{id}/files. The
-// `available` flag is the editor's gate for showing the modified-files
+// `available` flag is the studio's gate for showing the modified-files
 // panel: a falsy value paired with a `reason` lets the UI render a
 // neutral empty state ("Not a git repository", "No working directory")
 // rather than treating absence as an error.
@@ -87,7 +87,7 @@ type runFilesResponse struct {
 //
 // The endpoint never 5xx's on the expected "no panel" outcomes (missing
 // WorkDir, non-git directory, no finalization metadata) — it returns 200
-// with `available: false` so the editor can branch in the UI without
+// with `available: false` so the studio can branch in the UI without
 // parsing error envelopes.
 func (s *Server) handleListRunFiles(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -152,7 +152,7 @@ func (s *Server) handleListRunFiles(w http.ResponseWriter, r *http.Request) {
 		}
 		// Falls through to the historical-diff path on ErrNotGitRepo. A
 		// directory that exists but is not a git repository is the same
-		// failure mode as a removed worktree from the editor's POV.
+		// failure mode as a removed worktree from the studio's POV.
 	}
 
 	// Past this point the worktree is gone (or never was a git repo).
@@ -300,7 +300,7 @@ func (s *Server) historicalFiles(run *store.Run) ([]gitlib.FileStatus, bool) {
 //     engine — used as-is.
 //  2. **Mid-vintage**: Run.FinalCommit + FinalBranch are present but RepoRoot
 //     and BaseCommit predate the field. We try to walk up from Run.WorkDir
-//     to a `.git` ancestor, then fall back to the editor's CWD; for the
+//     to a `.git` ancestor, then fall back to the studio's CWD; for the
 //     baseline we use `git merge-base FinalCommit HEAD` as a plausible
 //     replacement.
 //  3. **Legacy**: Run.FinalCommit is also missing — historical diff is not
@@ -328,7 +328,7 @@ func (s *Server) historicalRefs(run *store.Run) (base, final, repo string, ok bo
 		repo = gitlib.FindRepoRoot(run.WorkDir)
 	}
 	if repo == "" {
-		// Last resort: the editor's own CWD. Reasonable when the editor was
+		// Last resort: the studio's own CWD. Reasonable when the studio was
 		// launched from inside the same repo that hosts the run's persistent
 		// branch — the common single-machine case.
 		repo = gitlib.FindRepoRoot(s.cfg.WorkDir)

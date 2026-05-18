@@ -75,7 +75,7 @@ type wsSubscribeRequest struct {
 	// events in the catch-up phase between snapshot and live tail.
 	// Default (false) means "lazy": the client gets the snapshot and
 	// the live tail, but no historical replay — saving the cost of
-	// streaming thousands of events the editor doesn't need to render
+	// streaming thousands of events the studio doesn't need to render
 	// the canvas or status pill. Consumers that DO need history
 	// (EventLog tab, Scrubber) fetch it via GET /api/runs/{id}/events
 	// when they mount. Set explicitly to true on WS reconnect after a
@@ -667,7 +667,7 @@ func (c *runConn) checkCrossStoreTerminal(eventsPath string, offset *int64, last
 // replay window exceeds the cap we MUST paginate — otherwise the
 // tail of the events stream silently disappears, including any
 // terminal run_failed/run_finished events, which leaves the
-// editor's status pill stuck on whatever pre-terminal status the
+// studio's status pill stuck on whatever pre-terminal status the
 // last replayed event implied.
 func (c *runConn) streamEventsLocal(fromSeq, snapshotSeq int64) {
 	if snapshotSeq != runview.NoEventsSeq && (fromSeq > 0 || snapshotSeq > 0) {
@@ -677,7 +677,7 @@ func (c *runConn) streamEventsLocal(fromSeq, snapshotSeq int64) {
 			// LoadEventsCtx returns both partial events AND
 			// ErrEventsCorrupted when a run's events.jsonl is too
 			// damaged to trust. Surface that to the client as an
-			// error envelope BEFORE breaking so the editor can
+			// error envelope BEFORE breaking so the studio can
 			// raise a banner instead of silently rendering a
 			// truncated history as if it were complete.
 			if errors.Is(err, store.ErrEventsCorrupted) {
@@ -806,7 +806,7 @@ func (c *runConn) handleCancel(env runWSEnvelope) {
 		// Match the HTTP handler's behaviour: when no goroutine owns
 		// the run, the operator likely wants to abandon a paused or
 		// failed_resumable run. CancelInactive flips status to
-		// cancelled + runs RecoverFinalize so the editor's merge UI
+		// cancelled + runs RecoverFinalize so the studio's merge UI
 		// surfaces whatever commits the run produced. Already-terminal
 		// statuses are a silent no-op.
 		if _, ciErr := c.server.runs.CancelInactiveCtx(c.authCtx(), c.runID); ciErr != nil && c.server.logger != nil {

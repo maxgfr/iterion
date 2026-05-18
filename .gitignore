@@ -31,8 +31,8 @@ node_modules
 .pnpm-store
 .falcon/
 .env
-editor/dist/
-editor/node_modules/
+studio/dist/
+studio/node_modules/
 # This is a pnpm workspace (see pnpm-workspace.yaml). Lockfiles from
 # other package managers bypass pnpm-lock.yaml and produce silently
 # divergent dependency trees — never commit them.
@@ -99,3 +99,4 @@ charts/iterion/Chart.lock
 # layout: source at examples/X/ + archive at examples/X.botz). Anchor
 # at the repo root so any *.botz at any depth is excluded.
 *.botz
+.plans/

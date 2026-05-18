@@ -88,7 +88,7 @@ func TestReconcileOrphans(t *testing.T) {
 // "cancel" of a paused_waiting_human or failed_resumable run that's
 // NOT held by an active goroutine flips the persisted status to
 // cancelled. The runtime can then RecoverFinalize on that status so
-// the editor's merge UI exposes the partial commits.
+// the studio's merge UI exposes the partial commits.
 func TestCancelInactive_FlipsResumableStatuses(t *testing.T) {
 	for _, fromStatus := range []store.RunStatus{
 		store.RunStatusPausedWaitingHuman,

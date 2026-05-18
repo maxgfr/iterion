@@ -226,7 +226,7 @@ func summarizeTodosOneLine(v any) string {
 // pending, star for in_progress ("the checkbox is filled with a star
 // as the active marker"), checked box for completed. The terminal
 // rendering uses single-glyph markers so column alignment is preserved
-// across rows; the editor's TodoChecklist React component overlays the
+// across rows; the studio's TodoChecklist React component overlays the
 // star inside the ☐ for the equivalent visual.
 //
 //	☐ Set up project structure

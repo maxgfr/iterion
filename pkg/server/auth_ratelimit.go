@@ -42,7 +42,7 @@ func peekJSONField(r *http.Request, field string) string {
 // register, refresh) and additionally by email for login (defence
 // against distributed brute-force against one account).
 //
-// In-process by design: the local-mode editor doesn't have Redis,
+// In-process by design: the local-mode studio doesn't have Redis,
 // the cloud-mode runner pods stay cheap and the LRU cap bounds
 // memory under any abuse pattern. (F-C1)
 type authRateLimiter struct {

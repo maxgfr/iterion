@@ -59,7 +59,7 @@ exercises this path end-to-end on a kind cluster.
 ```
 
 - **server** publishes RunMessages onto JetStream and serves the
-  editor SPA + run console (REST + WebSocket).
+  studio + run console (REST + WebSocket).
 - **runner** pulls RunMessages, claims a NATS-KV lease, executes the
   workflow, and writes events + artifacts to Mongo + S3.
 

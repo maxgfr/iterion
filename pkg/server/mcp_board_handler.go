@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/SocialGouv/iterion/pkg/conductor/native"
-	"github.com/SocialGouv/iterion/pkg/conductor/native/boardops"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native/boardops"
 )
 
 // boardMCPDefaultTTL caps how long a board MCP run token stays alive

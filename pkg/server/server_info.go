@@ -10,19 +10,19 @@ import (
 // serverInfoResponse describes the running server to the SPA. Used by
 // the Launch modal to render appropriate upload limits before any
 // upload is attempted, and by the AuthProvider to decide whether to
-// gate the editor on a sign-in flow.
+// gate the studio on a sign-in flow.
 type serverInfoResponse struct {
 	Mode    string `json:"mode"`
 	Version string `json:"version"`
 	Commit  string `json:"commit,omitempty"`
 	// AuthRequired is false in local / desktop mode (single-user TTY,
 	// no JWT) and true in cloud mode (multitenant). The SPA short-
-	// circuits its bootstrap when false and renders the editor as a
+	// circuits its bootstrap when false and renders the studio as a
 	// synthetic super-admin so the existing local UX is preserved.
 	AuthRequired bool              `json:"auth_required"`
 	Limits       serverLimitsBlock `json:"limits"`
 	// WorkDir is the absolute working directory the server was launched
-	// with (`iterion editor --dir`). Empty in cloud mode where there is
+	// with (`iterion studio --dir`). Empty in cloud mode where there is
 	// no per-server folder concept.
 	WorkDir string `json:"work_dir,omitempty"`
 	// ProjectName is a human-friendly label derived from WorkDir
@@ -41,9 +41,9 @@ type serverInfoResponse struct {
 	// NativeTrackerEnabled is true when the server has the native
 	// kanban store wired. The SPA conditionally exposes the Board view.
 	NativeTrackerEnabled bool `json:"native_tracker_enabled"`
-	// ConductorEnabled is true when a Conductor instance is running on
-	// the server. The SPA conditionally exposes the Conductor view.
-	ConductorEnabled bool `json:"conductor_enabled"`
+	// DispatcherEnabled is true when a Dispatcher instance is running on
+	// the server. The SPA conditionally exposes the Dispatcher view.
+	DispatcherEnabled bool `json:"dispatcher_enabled"`
 }
 
 type serverLimitsBlock struct {
@@ -78,7 +78,7 @@ func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		NativeTrackerEnabled: s.cfg.NativeTrackerStore != nil,
-		ConductorEnabled:     s.cfg.Conductor != nil,
+		DispatcherEnabled:    s.cfg.Dispatcher != nil,
 	}
 	if mode == "local" {
 		resp.WorkDir = s.cfg.WorkDir

@@ -16,7 +16,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
 )
 
-// browserCDPReadDeadline is the per-frame read budget on the editor →
+// browserCDPReadDeadline is the per-frame read budget on the studio →
 // CDP direction. Editor inputs (mouse/keyboard) are tiny and bursty;
 // a generous 60s window keeps a quiet idle pane from being torn down.
 const browserCDPReadDeadline = 60 * time.Second
@@ -27,20 +27,20 @@ const browserCDPReadDeadline = 60 * time.Second
 // receiver is paused, so this cannot be too long.
 const browserCDPWriteDeadline = 5 * time.Second
 
-// browserCDPMaxFrame caps the inbound size from the editor — input
+// browserCDPMaxFrame caps the inbound size from the studio — input
 // events should never exceed a few hundred bytes, so 64 KiB is more
 // than generous and protects against accidental flooding.
 const browserCDPMaxFrame = 64 * 1024
 
 // handleBrowserCDP serves GET /api/runs/{id}/browser/cdp?session=<id>.
-// It bridges the editor's WebSocket to the in-process Chromium CDP
+// It bridges the studio's WebSocket to the in-process Chromium CDP
 // pipe registered in the BrowserRegistry. CDP frames are JSON-RPC
 // strings, but the proxy is a dumb binary pump — we never parse the
 // payload, so a future wire-format upgrade upstream is invisible
 // here.
 //
 // Auth: same Origin allowlist as the run console WS. Future PRs will
-// add a per-run capability token so the editor can dial without
+// add a per-run capability token so the studio can dial without
 // the SPA's full session.
 //
 // Cloud / desktop / web parity: this code path is identical across
@@ -97,7 +97,7 @@ func (s *Server) handleBrowserCDP(w http.ResponseWriter, r *http.Request) {
 		once.Do(func() { close(stop) })
 	}
 
-	// CDP → editor: re-frame the null-terminated pipe stream into
+	// CDP → studio: re-frame the null-terminated pipe stream into
 	// one WS BinaryMessage per CDP message. The pipe contract from
 	// `--remote-debugging-pipe` is: one JSON-RPC object followed by
 	// a single `\0` byte, both directions.
@@ -179,7 +179,7 @@ func (s *Server) handleBrowserCDP(w http.ResponseWriter, r *http.Request) {
 
 // handleBrowserAttach spawns a host Chromium via HostChromiumRunner
 // and registers it as a BrowserSession on the given run, then emits
-// the corresponding EventBrowserSessionStarted so the editor's
+// the corresponding EventBrowserSessionStarted so the studio's
 // reducer flips the Browser pane to live mode. Useful for testing
 // the live pipeline end-to-end without wiring Playwright MCP
 // detection at the manager level (a separate, larger workstream).
@@ -240,7 +240,7 @@ func (s *Server) handleBrowserAttach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The editor's BrowserPane handles state-update locally on the
+	// The studio's BrowserPane handles state-update locally on the
 	// 200 response (sets liveSession in the zustand store). We
 	// intentionally do NOT persist a `browser_session_started`
 	// event here: this debug-attach is a developer tool, not part

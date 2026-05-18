@@ -14,9 +14,9 @@ import (
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
-// envDetached opts the editor server into spawning each run as a
+// envDetached opts the studio server into spawning each run as a
 // detached `iterion run --background` subprocess instead of running
-// the engine in-process. Surviving the editor's own restarts (e.g.
+// the engine in-process. Surviving the studio's own restarts (e.g.
 // watchexec rebuilds during dev) is the entire goal; the flag exists
 // so the path can soak behind an operator-controlled toggle before
 // becoming the default.
@@ -46,7 +46,7 @@ const (
 // runnerBinary returns the absolute path to the iterion executable
 // the server should spawn. We prefer os.Executable() (the running
 // server's own binary) so a single iterion build is used end-to-end —
-// any divergence between the editor and the runner would be a
+// any divergence between the studio and the runner would be a
 // debugging nightmare. Falls back to PATH lookup when os.Executable
 // is unavailable (rare).
 func runnerBinary() (string, error) {
@@ -110,7 +110,7 @@ func buildRunnerCmd(ctx context.Context, bin string, spec detachedSpec) (*exec.C
 	cmd := exec.CommandContext(ctx, bin, args...)
 	// The runner's stdout/stderr go to /dev/null in production —
 	// observability is via events.jsonl + run.log, not the runner's
-	// stdio. Silencing them prevents the editor server's terminal from
+	// stdio. Silencing them prevents the studio server's terminal from
 	// being flooded by every spawned runner's logs.
 	cmd.Stdout = nil
 	cmd.Stderr = nil
@@ -204,7 +204,7 @@ func (s *Service) spawnDetached(parent context.Context, spec detachedSpec) (*Lau
 // runner subprocess. It validates the .iter file (so an obviously bad
 // workflow is rejected at the API boundary instead of silently
 // failing inside the spawned process), starts the runner, and wires
-// up the file-based event + log tailers so the editor's WS
+// up the file-based event + log tailers so the studio's WS
 // subscribers see the runner's output.
 func (s *Service) launchDetached(parent context.Context, runID string, spec LaunchSpec) (*LaunchResult, error) {
 	// Up-front compile so a malformed .iter doesn't get past the API
@@ -214,7 +214,7 @@ func (s *Service) launchDetached(parent context.Context, runID string, spec Laun
 	// the common case of a typo-laden workflow without forcing them to
 	// poll events.jsonl for a compile failure.
 	//
-	// Honour spec.Source when supplied: the editor SPA bundles the
+	// Honour spec.Source when supplied: the studio SPA bundles the
 	// in-memory buffer alongside file_path for imports / freshly-saved
 	// recipes. The server materialises it to a real file before this
 	// point (see server.resolveWorkflowPath), so the spawned subprocess
@@ -296,7 +296,7 @@ var errProcessNotFound = errors.New("runview: detached: process not found")
 // pidAlive returns nil if the given PID is currently alive, or
 // errProcessNotFound if the process no longer exists. Other errors
 // (EPERM, etc.) are returned as-is so the reconciler can decide what
-// to do — under typical operation the editor server has permission to
+// to do — under typical operation the studio server has permission to
 // signal its own children, but in unusual setups (rootless containers
 // reparenting to PID 1) a "permission denied" answer effectively means
 // "another process owns this; treat as alive".

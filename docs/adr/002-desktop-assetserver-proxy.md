@@ -1,22 +1,22 @@
-# ADR-002: Desktop editor SPA hosted via Wails AssetServer handler
+# ADR-002: Desktop studio hosted via Wails AssetServer handler
 
 - **Status**: Accepted
 - **Date**: 2026-05-05
 - **Authors**: feature-dev
-- **Scope**: `cmd/iterion-desktop/`, `pkg/server/`, `editor/`
+- **Scope**: `cmd/iterion-desktop/`, `pkg/server/`, `studio/`
 
 ## Context
 
 The desktop binary (`iterion-desktop`) is a thin native shell around the
-existing CLI editor server (`pkg/server`). Its value proposition lives in
+existing CLI studio server (`pkg/server`). Its value proposition lives in
 the **Wails IPC bindings** (`window.go.main.App.*`): project switcher,
-secrets/keychain, CLI detection, auto-update — none of which the editor
+secrets/keychain, CLI detection, auto-update — none of which the studio
 SPA can do on its own.
 
 The original design (Phase 1 of the desktop plan) loaded a tiny embedded
 "bootstrap stub" in the Wails AssetServer, called `GetServerURL` /
 `GetSessionToken` on `window.go.main.App`, and **navigated the WebView**
-to the embedded loopback HTTP server so the editor SPA loaded from the
+to the embedded loopback HTTP server so the studio SPA loaded from the
 server directly.
 
 That design has a fatal architectural flaw discovered in iteration 10 of
@@ -42,7 +42,7 @@ the desktop feature review:
    discarded, every `desktop.*` call rejected with "Not available in
    browser mode".
 
-Tests missed this because `editor/src/__tests__/desktopBridge.test.ts`
+Tests missed this because `studio/src/__tests__/desktopBridge.test.ts`
 stubs `window.go` directly, and `bindings_project_test.go` uses a fake
 `recordingServer` plus a stubbed `windowReloader`. Neither exercises the
 real cross-origin runtime injection that Wails actually performs at
@@ -50,7 +50,7 @@ runtime.
 
 ## Decision
 
-The Wails AssetServer hosts the editor SPA through a custom
+The Wails AssetServer hosts the studio SPA through a custom
 `http.Handler` (`cmd/iterion-desktop/asset_proxy.go`). The WebView's main
 origin stays on the AssetServer URL (`wails://wails/` on Mac/Linux,
 `http://wails.localhost/` on Windows) for the lifetime of the app, and:
@@ -60,7 +60,7 @@ origin stays on the AssetServer URL (`wails://wails/` on Mac/Linux,
   the GUI binary's own `pkg/server.StaticFS` embed. Wails detects the
   handler's `text/html` response on `GET /` and injects
   `/wails/runtime.js` + `/wails/ipc.js`, which is what makes
-  `window.go.main.App.*` reachable to the editor SPA — the exact gap that
+  `window.go.main.App.*` reachable to the studio SPA — the exact gap that
   was the production blocker.
 - Only `/api/*` HTTP traffic is forwarded to the selected loopback server
   through `httputil.ReverseProxy`. The proxy's `Rewrite` calls `SetURL`,
@@ -74,12 +74,12 @@ origin stays on the AssetServer URL (`wails://wails/` on Mac/Linux,
   `/api/*` proxy plus direct WS URLs at that daemon. The in-process
   `cmd/iterion-desktop/server_host.go` path is the opt-out/fallback used
   when `ITERION_DESKTOP_ATTACH_DAEMON=0` (also `false`, `no`, or `off`) is
-  set or daemon attach/spawn fails; that fallback starts `cli.RunEditor`
+  set or daemon attach/spawn fails; that fallback starts `cli.RunStudio`
   with `Port=-1`, `Bind="127.0.0.1"`, and `NoBrowser=true`.
 - Both the default headless daemon and the in-process fallback use
-  `cli.RunEditor`, which builds `pkg/server.Config` with
+  `cli.RunStudio`, which builds `pkg/server.Config` with
   `DisableAuth=true`, the same local-editor trust model used by
-  `iterion editor`; there is no desktop-specific `SessionToken` field in
+  `iterion studio`; there is no desktop-specific `SessionToken` field in
   `pkg/server.Config`.
 - `GetSessionToken` remains a Wails binding because the SPA's desktop WS
   helper calls it together with `GetServerURL`. In current local desktop
@@ -87,10 +87,10 @@ origin stays on the AssetServer URL (`wails://wails/` on Mac/Linux,
   the value is empty.
 - WebSocket upgrades (`/api/ws`, `/api/ws/runs/*`) **cannot** flow through
   the proxy: Wails' AssetServer rejects WS upgrades with `501` by design
-  (`vendor/.../assetserver.go:110-114`). The editor SPA dials WS endpoints
+  (`vendor/.../assetserver.go:110-114`). The studio dials WS endpoints
   directly at `ws://127.0.0.1:<port>/api/ws...` using the absolute URL
   resolved through `getDesktopWsBase()` in
-  `editor/src/lib/desktopBridge.ts`. In local desktop mode those dials have
+  `studio/src/lib/desktopBridge.ts`. In local desktop mode those dials have
   no token query parameter; if a future hosted-auth desktop flow supplies a
   real token, the auth implementation that consumes it should document that
   conditional behaviour.
@@ -106,7 +106,7 @@ proxy approach.
 Embed `runtime_prod_desktop.js` and `ipc.js` from `vendor/.../runtime/`
 into the desktop binary, serve them at `/wails/runtime.js` +
 `/wails/ipc.js` from `pkg/server`, and add `<script>` tags to
-`editor/index.html`.
+`studio/index.html`.
 
 **Rejected**: the runtime needs the `window.wailsbindings` JSON to
 populate `window.go.<package>.<class>.<method>`. That JSON is generated by
@@ -131,7 +131,7 @@ the proxy approach lets v1 keep the existing binding surface intact.
 ### 3. Allow-list the localhost origin via `BindingsAllowedOrigins`, keep
    the redirect
 
-Set `BindingsAllowedOrigins: "http://127.0.0.1:*"` and have the editor's
+Set `BindingsAllowedOrigins: "http://127.0.0.1:*"` and have the studio's
 `index.html` fetch + execute `/wails/runtime.js` + `/wails/ipc.js`
 cross-origin from the AssetServer.
 
@@ -146,14 +146,14 @@ wouldn't include that prefix, so `window.go` would still be empty.
 
 ### Positive
 
-- `window.go.main.App.*` is reachable on the editor SPA in desktop mode.
+- `window.go.main.App.*` is reachable on the studio SPA in desktop mode.
   Welcome, Settings, ProjectSwitcher, MissingCLIBanner, and the
   native-menu event subscriptions all work as designed.
 - The HTTP proxy is deliberately small: it only forwards `/api/*` to the
   current loopback server, forces the target Host, and rewrites Origin to
   match the loopback target. It does not own authentication state.
-- `iterion editor`, the default desktop headless daemon, and the
-  in-process fallback use the same `cli.RunEditor` / `DisableAuth=true`
+- `iterion studio`, the default desktop headless daemon, and the
+  in-process fallback use the same `cli.RunStudio` / `DisableAuth=true`
   local trust model; desktop only changes how the SPA is hosted and how WS
   URLs are resolved.
 - The reviewer's blocker is resolved without restructuring the binding
@@ -186,5 +186,5 @@ wouldn't include that prefix, so `window.go` would still be empty.
   handler's GUI-embedded SPA/static path, `/api/*` proxy, default daemon
   mode, and WS carve-out.
 - `docs/desktop-qa.md` first checkbox now exercises the actual production
-  path (bindings reachable on editor SPA), so a regression of the original
+  path (bindings reachable on studio), so a regression of the original
   blocker would surface immediately on the next QA pass.

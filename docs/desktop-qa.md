@@ -26,7 +26,7 @@ Walk this list before tagging a release.
 - [ ] Cmd+P opens the switcher, fuzzy match works on name and path.
 - [ ] Switching projects reloads the SPA on the right working directory.
 - [ ] **Post-onboarding sanity:** complete the Welcome flow on a clean
-      config, then on the editor home page verify that
+      config, then on the studio home page verify that
         * the file list at the left actually populates (no spinner stuck +
           no `ERR_CONNECTION_REFUSED`),
         * a workflow can be opened and the Run console connects its

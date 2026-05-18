@@ -71,7 +71,7 @@ Prompt-orchestration leaves you with transcripts. Searchable, but not structured
 
 ### 8. Long-running dispatch (tracker → run)
 
-`iterion conduct config.yaml` is a daemon that polls an issue tracker (native kanban, GitHub Issues, Forgejo) and dispatches one workflow run per eligible issue, with retry, stall detection, per-state concurrency, and lifecycle hooks. See [conductor.md](conductor.md).
+`iterion dispatch config.yaml` is a daemon that polls an issue tracker (native kanban, GitHub Issues, Forgejo) and dispatches one workflow run per eligible issue, with retry, stall detection, per-state concurrency, and lifecycle hooks. See [dispatcher.md](dispatcher.md).
 
 Approximating this from a prompt requires a cron, a state machine, and a place to remember which issues are in flight. At that point you've reimplemented part of Iterion in shell.
 
@@ -110,4 +110,4 @@ In practice most non-trivial Iterion workflows look exactly like this: a small g
 - [why-iterion.md](why-iterion.md) — origin story and the asymptote thesis that motivates the engine
 - [workflow_authoring_pitfalls.md](workflow_authoring_pitfalls.md) — Goodhart's law in workflow design, façade patterns, prompt + judge anti-patterns
 - [architecture.md](architecture.md) — compiler pipeline and runtime engine
-- [resume.md](resume.md), [conductor.md](conductor.md), [sandbox.md](sandbox.md) — the three operational guarantees most operators reach for first
+- [resume.md](resume.md), [dispatcher.md](dispatcher.md), [sandbox.md](sandbox.md) — the three operational guarantees most operators reach for first

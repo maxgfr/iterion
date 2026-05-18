@@ -145,7 +145,7 @@ func AsPIDStore(s RunStore) PIDStore {
 // can host arbitrary tool-produced files alongside a run. Tools running
 // inside the sandbox write into a per-run scratch directory bind-mounted
 // from the host (see ITERION_ARTIFACT_FILES_DIR in the runtime sandbox
-// wiring); iterion surfaces the contents via the editor's Artifacts
+// wiring); iterion surfaces the contents via the studio's Artifacts
 // panel + the /api/runs/<id>/artifact-files endpoints.
 //
 // FilesystemRunStore implements it because it owns a real on-disk
@@ -197,10 +197,10 @@ func AsRunFilesStore(s RunStore) RunFilesStore {
 
 // ToolBlobStore is an optional interface implemented by stores that
 // host per-tool-call I/O blobs (the bytes the LLM sent to and received
-// from a tool). Used by the editor's per-node Tools tab to render full
+// from a tool). Used by the studio's per-node Tools tab to render full
 // command outputs / large inputs without materialising them in
 // events.jsonl. Events carry a small inline preview plus a `ref` that
-// names the (run_id, tool_use_id, kind) tuple; the editor fetches the
+// names the (run_id, tool_use_id, kind) tuple; the studio fetches the
 // rest from the server's paginated endpoint on demand.
 //
 // Filesystem stores satisfy it (`<root>/runs/<id>/tools/<toolUseID>/{input,output}`).

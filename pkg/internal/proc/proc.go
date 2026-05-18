@@ -3,7 +3,7 @@
 //
 // Today the only export is [DetachProcessGroup], which lifts a child
 // process out of its parent's process group so a SIGTERM delivered
-// to the parent (typical when `watchexec -r` rebuilds the editor or
+// to the parent (typical when `watchexec -r` rebuilds the studio or
 // the runner's PGID is signalled by k8s on rolling update) does not
 // propagate and kill an in-flight git/docker/kubectl call mid-write.
 //

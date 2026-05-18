@@ -3,7 +3,7 @@
 //
 // Today only the type definitions live here — the NATS publisher /
 // consumer impl lands in plan §F T-25 (`pkg/queue/nats/`). Keeping
-// the schema package separate is deliberate so editor backend tests
+// the schema package separate is deliberate so studio backend tests
 // can import the types without pulling in the NATS client.
 //
 // See cloud-ready plan §C.2 for the wire format and §J for the
@@ -94,7 +94,7 @@ type ResumeSpec struct {
 	Force   bool                   `json:"force"`
 }
 
-// TraceContext propagates the originating editor span across NATS so
+// TraceContext propagates the originating studio span across NATS so
 // runner-side spans inherit the parent. Encoded redundantly in the
 // `traceparent` NATS header for fast extraction without decoding the
 // body.

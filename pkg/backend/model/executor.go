@@ -332,7 +332,7 @@ type ClawExecutor struct {
 	defaultBackend  string // workflow-level default backend (empty = use "claw")
 	wfCompaction    *ir.Compaction
 	wfCapabilities  []string // workflow-level default host capabilities (nil = none)
-	storeDir        string   // conductor store root (empty = backend default)
+	storeDir        string   // dispatcher store root (empty = backend default)
 	lifecycleHooks  *hooks.Runner
 
 	// sandbox is the live [sandbox.Run] for the current iterion run,
@@ -415,7 +415,7 @@ func WithDefaultBackend(name string) ClawExecutorOption {
 	return func(e *ClawExecutor) { e.defaultBackend = name }
 }
 
-// WithStoreDir sets the conductor store root forwarded to capability-gated
+// WithStoreDir sets the dispatcher store root forwarded to capability-gated
 // backend tools (currently the board MCP server). Backends translate this to
 // the ITERION_STORE_DIR env var on spawned MCP children.
 func WithStoreDir(dir string) ClawExecutorOption {
@@ -625,7 +625,7 @@ func (e *ClawExecutor) delegateHooksFor(nodeID string) delegate.TaskHooks {
 	return h
 }
 
-// Step 4 is what makes the editor's empty default template "just work" when
+// Step 4 is what makes the studio's empty default template "just work" when
 // the user has any credential configured.
 func (e *ClawExecutor) resolveBackendName(node ir.Node) string {
 	var backend string

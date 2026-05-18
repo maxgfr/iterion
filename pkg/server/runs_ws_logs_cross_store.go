@@ -25,7 +25,7 @@ const crossStoreLogChunkBudget = 64 * 1024
 //
 // The cross-store path does not honour handleUnsubscribeLogs
 // mid-connection — there is no in-process subscription handle to
-// cancel, only the file tail goroutine. The editor never sends
+// cancel, only the file tail goroutine. The studio never sends
 // unsubscribe_logs while a view is mounted, so this asymmetry is
 // acceptable.
 func (c *runConn) streamLogsCrossStore(fromOffset int64) {
@@ -38,7 +38,7 @@ func (c *runConn) streamLogsCrossStore(fromOffset int64) {
 	// Live tests using runtime.New(...) directly never create run.log
 	// (only `iterion run` CLI and runview.Service.prepareRunLog tee
 	// to disk). Without this short-circuit the tail loop polls a
-	// non-existent file forever and the editor's log pane is stuck on
+	// non-existent file forever and the studio's log pane is stuck on
 	// "Waiting for log output…". Producers that DO write run.log
 	// always create it before the first event, so a missing file at
 	// subscription time means it'll never exist for this run — emit

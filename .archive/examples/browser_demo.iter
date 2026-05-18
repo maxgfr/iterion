@@ -13,7 +13,7 @@
 ##
 ## Run:
 ##   devbox run -- ./iterion run examples/browser_demo.iter --merge-into none
-##   devbox run -- ./iterion editor --port 8080
+##   devbox run -- ./iterion studio --port 8080
 ##   # open http://127.0.0.1:8080 → "Browser" tab auto-reveals
 ##   # PR 1+2 visible without intervention
 ##   # PR 4   click "attach live" once live_browse is active

@@ -1,4 +1,4 @@
-// Package git is a minimal wrapper around the `git` CLI for the editor's
+// Package git is a minimal wrapper around the `git` CLI for the studio's
 // modified-files panel. It exposes Status (porcelain → typed entries),
 // Diff (HEAD ↔ working-tree contents for one path), and a path validator.
 //
@@ -20,17 +20,17 @@ import (
 // ErrNotGitRepo is returned by Status/Diff when the target directory is
 // not inside a git working tree (no .git, or `git` reports "not a git
 // repository"). Callers in the HTTP layer translate it to a 200 with
-// `available: false, reason: "not_git_repo"` so the editor can render a
+// `available: false, reason: "not_git_repo"` so the studio can render a
 // neutral empty-state instead of a red error.
 var ErrNotGitRepo = errors.New("git: not a git repository")
 
 // FileStatus is a single entry in the porcelain output, distilled to one
 // effective change per path. The on-disk reality (worktree) wins over the
-// index when both columns disagree — the editor cares about "what would I
+// index when both columns disagree — the studio cares about "what would I
 // see if I opened the file right now" more than the staging state.
 //
 // Added/Deleted carry the line counts from `git diff --numstat`, merged
-// in by Status/StatusBetween so the editor can render Git-Graph-style
+// in by Status/StatusBetween so the studio can render Git-Graph-style
 // "+N | -N" badges without a second round trip. Binary files set
 // Binary=true and Added=Deleted=-1 (sentinel) so the UI shows
 // "(binary)" instead of misleading zeros. Both numeric fields are
@@ -49,7 +49,7 @@ type FileStatus struct {
 // DiffEditor. Both fields are nil (omitted in JSON) when the file does
 // not exist on that side: `Before == nil` for untracked/added files,
 // `After == nil` for deleted files. Binary files set Binary = true and
-// leave Before/After nil — the editor swaps in a "binary file not shown"
+// leave Before/After nil — the studio swaps in a "binary file not shown"
 // message instead of feeding non-text into Monaco.
 // Status is intentionally absent: the caller already has it from the
 // prior /files listing and feeds it back as UI metadata. Recomputing it

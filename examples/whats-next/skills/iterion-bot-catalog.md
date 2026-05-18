@@ -1,6 +1,6 @@
 ---
 name: iterion-bot-catalog
-description: Catalog of iterion example bots — pick a bot name for each roadmap_item.assignee. The conductor will (eventually) route by assignee.
+description: Catalog of iterion example bots — pick a bot name for each roadmap_item.assignee. The dispatcher will (eventually) route by assignee.
 ---
 
 # Iterion Bot Catalog — for whats-next.bot's `propose_roadmap`, `revise_roadmap`, and `emit_action`
@@ -24,14 +24,14 @@ all issues will be `needs-manual-triage`.
 
 whats-next.bot no longer shells out `iterion run <bot>`. Instead
 every roadmap item becomes a kanban issue on the native board at
-`<workspace>/.iterion/conductor/`, and a **conductor** dispatches
-them. The conductor is wired via `iterion conduct <config.yaml>`.
+`<workspace>/.iterion/dispatcher/`, and a **dispatcher** dispatches
+them. The dispatcher is wired via `iterion dispatch <config.yaml>`.
 
-**Important feature gap (today)**: the conductor dispatches a
+**Important feature gap (today)**: the dispatcher dispatches a
 SINGLE workflow for all eligible issues — it does NOT yet route
 by `issue.assignee`. Until that ships, the operator has two
 choices:
-1. Run multiple conductors, one per assignee, each filtering by
+1. Run multiple dispatchers, one per assignee, each filtering by
    state or label.
 2. Wait for the routing feature (which whats-next may have
    proposed as its `next_action` on this run).
@@ -84,7 +84,7 @@ Example `args` payload for a roadmap_item:
   `vibe_review_alternating`).
 - **Vars**: `workspace_dir` (default), `scope_notes: string=""`
   — free-text steering ("focus on auth and persistence",
-  "ignore the editor"); `improvement_prompt: string=""` —
+  "ignore the studio"); `improvement_prompt: string=""` —
   optional axis override. Empty (default) uses the full
   production-ready grid; non-empty REPLACES the grid as the
   reviewer/fixer focus (e.g. `"Focus exclusively on
@@ -174,7 +174,7 @@ horizon=long_term    → --labels horizon:long-term,source:whats-next
 
 `bot_args` is a comma-joined flat string list. For
 `args={"feature_prompt":"Add CSV export"}`, the field value is
-`--var,feature_prompt=Add CSV export`. The eventual conductor
+`--var,feature_prompt=Add CSV export`. The eventual dispatcher
 router will split on `,` and emit `--var` flags to the
 dispatched bot.
 

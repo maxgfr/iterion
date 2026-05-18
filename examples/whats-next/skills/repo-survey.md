@@ -90,7 +90,7 @@ git -C "$WORKSPACE" log -n 20 --oneline
 
 For each commit, emit `{hash, line, theme}`. Themes are
 free-text but stick to a small vocabulary you reuse across
-commits (e.g. "editor", "conductor", "dsl", "test", "docs",
+commits (e.g. "editor", "dispatcher", "dsl", "test", "docs",
 "runtime", "sandbox"). The propose phase will use `theme`
 frequencies to spot what's hot.
 
@@ -112,7 +112,7 @@ These are the things YOU want the operator to clarify before
 `propose_roadmap` runs. The downstream `ask_priorities` human
 node will surface them. Examples of good open_questions:
 
-- "Recent commits are heavy on conductor work — is that still
+- "Recent commits are heavy on dispatcher work — is that still
   the priority, or has it shipped?"
 - "I see both editor TODO markers and runtime TODOs — which area
   is more painful right now?"

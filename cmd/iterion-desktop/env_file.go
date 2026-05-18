@@ -25,7 +25,7 @@ var (
 )
 
 // loadIterionEnvFile sources ~/.iterion/env (or ~/.iterion/.env as a
-// fallback) into the current process's env BEFORE the editor server
+// fallback) into the current process's env BEFORE the studio server
 // starts. Operators stash provider credentials there (OPENAI_API_KEY,
 // AZURE_OPENAI_API_KEY, etc.) so iterion-desktop launched from a
 // .desktop file (no shell to source ~/.bashrc) still has the keys

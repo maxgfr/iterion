@@ -10,7 +10,7 @@ import (
 )
 
 // StatusBetween lists files that differ between two commits inside repoRoot,
-// returning entries shaped like the porcelain Status() output so the editor
+// returning entries shaped like the porcelain Status() output so the studio
 // can render them through the same FilesPanel code path.
 //
 // Used by the modified-files panel after a worktree-using run has finalized
@@ -102,7 +102,7 @@ func DiffBetween(repoRoot, baseRef, finalRef, relPath string) (DiffPayload, erro
 // entry (regular .git directory or a worktree's gitfile pointer), returning
 // "" when no parent in the chain qualifies.
 //
-// Used by the editor server to recover a run's main repo root when the run
+// Used by the studio server to recover a run's main repo root when the run
 // record predates the persisted RepoRoot field — we walk up from the run's
 // work_dir (`<repo>/.iterion/worktrees/<id>`) past `.iterion` to the repo
 // itself. Falls back gracefully on legacy or migrated runs whose work_dir
@@ -172,7 +172,7 @@ func CommitParent(repo, sha string) (string, error) {
 }
 
 // ShowCommit returns the files touched by a single commit, shaped like the
-// porcelain Status() output so the editor can render them through the same
+// porcelain Status() output so the studio can render them through the same
 // FilesPanel code path. Equivalent to "what does `git show <sha>` change".
 //
 // For root commits (no parent), every file appears as Added against the
@@ -197,7 +197,7 @@ func ShowCommit(repo, sha string) ([]FileStatus, error) {
 // by commit sha in repo. Parent is resolved via CommitParent; root commits
 // produce Before=nil (the file didn't exist before the run began).
 //
-// Mirrors DiffBetween's binary/missing-side semantics so the editor can
+// Mirrors DiffBetween's binary/missing-side semantics so the studio can
 // feed the payload straight into Monaco.
 func DiffOfCommit(repo, sha, relPath string) (DiffPayload, error) {
 	if !isGitDir(repo) {

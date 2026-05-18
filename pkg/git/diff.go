@@ -15,7 +15,7 @@ import (
 //   - After  == nil: deleted from the worktree
 //
 // When the content is binary (NUL byte present in either side), Before
-// and After are both nil and Binary is true so the editor can surface a
+// and After are both nil and Binary is true so the studio can surface a
 // "binary file not shown" placeholder instead of feeding raw bytes into
 // a text editor.
 //
@@ -61,7 +61,7 @@ func Diff(dir, relPath string) (DiffPayload, error) {
 
 	// Binary detection: a NUL byte in either side is the conventional
 	// signal git itself uses (see diff.c:buffer_is_binary). We keep the
-	// payload metadata but blank the contents so the editor doesn't try
+	// payload metadata but blank the contents so the studio doesn't try
 	// to render bytes that aren't valid UTF-8.
 	if (payload.Before != nil && bytes.IndexByte([]byte(*payload.Before), 0) >= 0) ||
 		(payload.After != nil && bytes.IndexByte([]byte(*payload.After), 0) >= 0) {
