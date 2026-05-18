@@ -45,14 +45,14 @@ func TestStoreInboxBinder_DrainAndConsume(t *testing.T) {
 			published = append(published, e)
 		},
 	}
-	drain, consume := binder.Bind(ctx, runID)
-	if drain == nil || consume == nil {
-		t.Fatal("Bind returned nil functions for a configured binder")
+	hook := binder.Bind(ctx, runID)
+	if hook == nil {
+		t.Fatal("Bind returned nil hook for a configured binder")
 	}
 
 	// 1) First drain returns both messages in FIFO order and marks
 	//    them delivered in-store.
-	got := drain(ctx)
+	got := hook.Drain(ctx)
 	if len(got) != 2 || got[0] != "ping" || got[1] != "context" {
 		t.Fatalf("drain returned %v, want [ping, context]", got)
 	}
@@ -69,7 +69,7 @@ func TestStoreInboxBinder_DrainAndConsume(t *testing.T) {
 
 	// 2) A second drain immediately after returns nothing — delivered
 	//    messages are not redelivered.
-	if got := drain(ctx); len(got) != 0 {
+	if got := hook.Drain(ctx); len(got) != 0 {
 		t.Fatalf("second drain returned %v, want empty", got)
 	}
 
@@ -77,7 +77,7 @@ func TestStoreInboxBinder_DrainAndConsume(t *testing.T) {
 	//    consumed and emits the matching events. Reset published so
 	//    we only count the new transitions.
 	published = nil
-	consume(ctx)
+	hook.Consume(ctx)
 	if got := countEvents(published, store.EventUserMessageConsumed); got != 2 {
 		t.Fatalf("consumed events = %d, want 2", got)
 	}
@@ -93,7 +93,7 @@ func TestStoreInboxBinder_DrainAndConsume(t *testing.T) {
 
 	// 4) A consume with no fresh delivery is a no-op (idempotent).
 	published = nil
-	consume(ctx)
+	hook.Consume(ctx)
 	if len(published) != 0 {
 		t.Fatalf("idempotent consume published %d events, want 0", len(published))
 	}
@@ -106,8 +106,7 @@ func TestStoreInboxBinder_NilSafety(t *testing.T) {
 	t.Helper()
 	t.Run("nil receiver", func(t *testing.T) {
 		var b *StoreInboxBinder
-		d, c := b.Bind(context.Background(), "run_x")
-		if d != nil || c != nil {
+		if b.Bind(context.Background(), "run_x") != nil {
 			t.Fatal("nil receiver should disable inbox")
 		}
 	})
@@ -118,8 +117,7 @@ func TestStoreInboxBinder_NilSafety(t *testing.T) {
 			t.Fatalf("store.New: %v", err)
 		}
 		b := &StoreInboxBinder{Store: s}
-		d, c := b.Bind(context.Background(), "")
-		if d != nil || c != nil {
+		if b.Bind(context.Background(), "") != nil {
 			t.Fatal("empty run ID should disable inbox")
 		}
 	})

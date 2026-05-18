@@ -224,30 +224,65 @@ export function WizardForm({
               Skip
             </Button>
           )}
-          {isLast ? (
-            hideSubmit ? null : (
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={!canSubmitAll || busy}
-                onClick={submit}
-              >
-                {busy ? "…" : submitLabel}
-              </Button>
-            )
-          ) : (
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={!stepValid || busy}
-              onClick={onNext}
-            >
-              Next →
-            </Button>
-          )}
+          {renderForwardButton({
+            isLast,
+            hideSubmit,
+            busy,
+            canSubmitAll,
+            stepValid,
+            submitLabel,
+            onSubmit: submit,
+            onNext,
+          })}
         </div>
       </div>
     </div>
+  );
+}
+
+interface ForwardButtonProps {
+  isLast: boolean;
+  hideSubmit: boolean;
+  busy: boolean;
+  canSubmitAll: boolean;
+  stepValid: boolean;
+  submitLabel: string;
+  onSubmit: () => void;
+  onNext: () => void;
+}
+
+function renderForwardButton({
+  isLast,
+  hideSubmit,
+  busy,
+  canSubmitAll,
+  stepValid,
+  submitLabel,
+  onSubmit,
+  onNext,
+}: ForwardButtonProps) {
+  if (isLast && hideSubmit) return null;
+  if (isLast) {
+    return (
+      <Button
+        variant="primary"
+        size="sm"
+        disabled={!canSubmitAll || busy}
+        onClick={onSubmit}
+      >
+        {busy ? "…" : submitLabel}
+      </Button>
+    );
+  }
+  return (
+    <Button
+      variant="primary"
+      size="sm"
+      disabled={!stepValid || busy}
+      onClick={onNext}
+    >
+      Next →
+    </Button>
   );
 }
 

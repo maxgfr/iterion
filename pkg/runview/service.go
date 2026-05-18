@@ -1131,8 +1131,6 @@ func (s *Service) QueueMessage(ctx context.Context, runID, text string) (*store.
 	if text == "" {
 		return nil, errors.New("runview: message text is required")
 	}
-	// Refuse queueing against terminal runs — the chatbox UI gates on
-	// status too, but a stale tab could POST after the run finished.
 	r, err := s.store.LoadRun(ctx, runID)
 	if err != nil {
 		return nil, fmt.Errorf("load run: %w", err)
@@ -1143,27 +1141,17 @@ func (s *Service) QueueMessage(ctx context.Context, runID, text string) (*store.
 	}
 	msg := store.QueuedUserMessage{
 		ID:       newQueuedMessageID(),
-		RunID:    runID,
 		Text:     text,
-		QueuedAt: time.Now().UTC(),
 		TenantID: r.TenantID,
 	}
 	if err := s.store.AppendQueuedMessage(ctx, runID, msg); err != nil {
 		return nil, fmt.Errorf("append queued message: %w", err)
 	}
-	// Reload the message to capture whatever the store stamped on
-	// (tenant, status="queued"), then fan out via the event broker.
-	stored := msg
-	stored.Status = store.QueuedMessageStatusQueued
-	if err := s.emitInboxEvent(ctx, runID, store.EventUserMessageQueued, &stored); err != nil {
-		// Log but don't fail the queue — the persisted row already
-		// represents the operator's intent; missing the fan-out only
-		// delays UI badge updates until the next snapshot/poll.
-		if s.logger != nil {
-			s.logger.Warn("runview: emit user_message_queued for %s/%s: %v", runID, msg.ID, err)
-		}
+	if err := store.NormalizeQueuedForAppend(&msg, runID); err != nil {
+		return nil, err
 	}
-	return &stored, nil
+	store.PublishInboxEvent(ctx, s.store, s.brokerPublish(), store.EventUserMessageQueued, runID, msg)
+	return &msg, nil
 }
 
 // CancelQueuedMessage marks a queued (not-yet-delivered) message as
@@ -1177,16 +1165,9 @@ func (s *Service) CancelQueuedMessage(ctx context.Context, runID, msgID string) 
 	if err := s.store.UpdateQueuedMessageStatus(ctx, runID, msgID, store.QueuedMessageStatusCancelled, store.QueuedMessageStatusQueued); err != nil {
 		return err
 	}
-	// Reload so the fanned-out event carries the timestamps.
-	msgs, err := s.store.ListQueuedMessages(ctx, runID)
-	if err == nil {
-		for i := range msgs {
-			if msgs[i].ID == msgID {
-				_ = s.emitInboxEvent(ctx, runID, store.EventUserMessageCancelled, &msgs[i])
-				break
-			}
-		}
-	}
+	msg := store.QueuedUserMessage{ID: msgID}
+	store.StampQueuedTransition(&msg, store.QueuedMessageStatusCancelled, time.Now().UTC())
+	store.PublishInboxEvent(ctx, s.store, s.brokerPublish(), store.EventUserMessageCancelled, runID, msg)
 	return nil
 }
 
@@ -1200,30 +1181,13 @@ func (s *Service) ListQueuedMessages(ctx context.Context, runID string) ([]store
 	return s.store.ListQueuedMessages(ctx, runID)
 }
 
-// emitInboxEvent persists an inbox event and fans it out to live WS
-// subscribers via the broker.
-func (s *Service) emitInboxEvent(ctx context.Context, runID string, typ store.EventType, msg *store.QueuedUserMessage) error {
-	evt := store.Event{
-		Type:  typ,
-		RunID: runID,
-		Data: map[string]interface{}{
-			"id":           msg.ID,
-			"text":         msg.Text,
-			"status":       string(msg.Status),
-			"queued_at":    msg.QueuedAt,
-			"delivered_at": msg.DeliveredAt,
-			"consumed_at":  msg.ConsumedAt,
-			"cancelled_at": msg.CancelledAt,
-		},
+// brokerPublish returns broker.Publish as a free function, or nil
+// when no broker is wired. Shape matches store.PublishInboxEvent.
+func (s *Service) brokerPublish() func(store.Event) {
+	if s.broker == nil {
+		return nil
 	}
-	persisted, err := s.store.AppendEvent(ctx, runID, evt)
-	if err != nil {
-		return err
-	}
-	if s.broker != nil && persisted != nil {
-		s.broker.Publish(*persisted)
-	}
-	return nil
+	return s.broker.Publish
 }
 
 // newQueuedMessageID returns a short opaque ID for inbox messages.

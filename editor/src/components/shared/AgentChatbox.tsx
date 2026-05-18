@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { TrashIcon } from "@radix-ui/react-icons";
 
-import { Button, IconButton, Textarea } from "@/components/ui";
+import { Badge, Button, IconButton, Textarea } from "@/components/ui";
+import type { BadgeVariant } from "@/components/ui";
 import {
   cancelQueuedMessage,
   listQueuedMessages,
@@ -177,36 +178,30 @@ export default function AgentChatbox({
   );
 }
 
+const statusVariant: Record<QueuedUserMessage["status"], BadgeVariant> = {
+  queued: "warning",
+  delivered: "accent",
+  consumed: "success",
+  cancelled: "neutral",
+};
+
 function StatusBadge({ status }: { status: QueuedUserMessage["status"] }) {
-  const styles: Record<QueuedUserMessage["status"], string> = {
-    queued: "bg-warning-soft text-warning-fg",
-    delivered: "bg-accent-soft text-accent-fg",
-    consumed: "bg-success-soft text-success-fg",
-    cancelled: "bg-surface-2 text-fg-subtle line-through",
-  };
-  return (
-    <span
-      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${styles[status]}`}
-    >
-      {status}
-    </span>
-  );
+  return <Badge variant={statusVariant[status]}>{status}</Badge>;
 }
 
 // filterVisible hides messages the operator no longer needs to see:
-//   - cancelled and consumed messages are folded behind "show all"
-//   - queued / delivered messages always render
-//   - the most recent maxVisible are shown
+// cancelled and consumed messages are folded behind "show all";
+// queued / delivered are always rendered. Returns the most recent
+// maxVisible entries in the active set when collapsed, or the full
+// list when expanded.
 function filterVisible(
   all: QueuedUserMessage[],
   showAll: boolean,
   maxVisible: number,
 ): QueuedUserMessage[] {
+  if (showAll) return all;
   const live = all.filter(
     (m) => m.status === "queued" || m.status === "delivered",
   );
-  if (showAll) {
-    return all.slice(-maxVisible);
-  }
   return live.slice(-maxVisible);
 }

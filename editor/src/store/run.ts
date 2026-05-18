@@ -497,15 +497,16 @@ export const useRunStore = create<RunStoreState>((set) => ({
 
   setQueuedMessages: (messages) =>
     set((state) => {
-      // Merge REST-hydrated messages with whatever has already flowed
-      // through the event stream: a message present in BOTH wins on
-      // status with whichever timestamp is most recent. This keeps
-      // a slow REST round-trip from regressing live deliveries.
+      if (sameQueuedMessages(state.queuedMessages, messages)) {
+        return state;
+      }
+      // REST hydration races with WS events. Existing live records
+      // (already partly through the lifecycle) win on status fields
+      // so a slow round-trip can't regress an in-flight delivery.
       if (state.queuedMessages.length === 0) {
         return { queuedMessages: messages };
       }
-      const liveById = new Map<string, QueuedUserMessage>();
-      for (const m of state.queuedMessages) liveById.set(m.id, m);
+      const liveById = new Map(state.queuedMessages.map((m) => [m.id, m]));
       const merged: QueuedUserMessage[] = [];
       const seen = new Set<string>();
       for (const incoming of messages) {
@@ -668,6 +669,25 @@ function eventTypeToStatus(t: string): QueuedMessageStatus {
 
 function stringOrNull(v: unknown): string | null {
   return typeof v === "string" ? v : null;
+}
+
+// sameQueuedMessages compares two inbox lists by (id, status, text).
+// Used by setQueuedMessages to skip allocating a new slice when REST
+// hydration produces the same view as what's already in the store —
+// avoids re-rendering every chatbox subscriber on a no-op refresh.
+function sameQueuedMessages(
+  a: QueuedUserMessage[],
+  b: QueuedUserMessage[],
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (x.id !== y.id || x.status !== y.status || x.text !== y.text) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // mergeQueuedMessage folds an incoming record into an existing one,

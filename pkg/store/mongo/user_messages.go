@@ -31,20 +31,9 @@ type userMessageDoc struct {
 // emits a companion event to events.jsonl so observers can replay
 // transitions.
 func (s *Store) AppendQueuedMessage(ctx context.Context, runID string, msg store.QueuedUserMessage) error {
-	if msg.ID == "" {
-		return fmt.Errorf("store/mongo: queued message ID required")
+	if err := store.NormalizeQueuedForAppend(&msg, runID); err != nil {
+		return fmt.Errorf("store/mongo: %w", err)
 	}
-	if msg.Text == "" {
-		return fmt.Errorf("store/mongo: queued message text required")
-	}
-	msg.RunID = runID
-	msg.Status = store.QueuedMessageStatusQueued
-	if msg.QueuedAt.IsZero() {
-		msg.QueuedAt = time.Now().UTC()
-	}
-	msg.DeliveredAt = nil
-	msg.ConsumedAt = nil
-	msg.CancelledAt = nil
 	stampTenantOnQueuedMessage(ctx, &msg)
 	doc := userMessageDoc{
 		ID:                userMessageID{RunID: runID, MessageID: msg.ID},
