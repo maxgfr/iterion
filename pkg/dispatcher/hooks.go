@@ -80,6 +80,12 @@ func (h *Hook) Run(ctx context.Context, logger *iterlog.Logger, name, workspace 
 	}
 
 	cmd := exec.CommandContext(cctx, "sh", "-lc", command)
+	// Bound the orphan-pipe wait when context cancellation kills `sh`
+	// but a grandchild (e.g. `sleep` invoked inside the script) keeps
+	// the inherited stdout/stderr fds open. Without WaitDelay, cmd.Run
+	// blocks until the grandchild exits naturally, defeating the
+	// timeout. 2s is well below any sane TimeoutMS user setting.
+	cmd.WaitDelay = 2 * time.Second
 	cmd.Dir = workspace
 	// Inherit the host environment so hooks can find `git`, `gh`, …
 	// on $PATH. The dispatcher-supplied env (ITERION_*) is appended so
