@@ -13,9 +13,9 @@ package shellquote
 import "strings"
 
 // Quote returns s safe to drop into a /bin/sh command line. Empty
-// strings become `''`; strings of safe chars are returned bare;
+// strings become `”`; strings of safe chars are returned bare;
 // everything else is wrapped in single quotes with embedded single
-// quotes escaped via the canonical `'\''` sequence.
+// quotes escaped via the canonical `'\”` sequence.
 func Quote(s string) string {
 	if s == "" {
 		return "''"
