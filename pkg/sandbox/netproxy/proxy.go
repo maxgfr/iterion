@@ -281,8 +281,13 @@ func (p *Proxy) notifyBlocked(host string) {
 // CONNECT request line.
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	host := r.Host
-	if !strings.Contains(host, ":") {
-		host += ":443"
+	// SplitHostPort distinguishes a host that already carries a port
+	// (`example.com:443`, `[::1]:8080`) from a bare host that needs one
+	// appended. A naive `strings.Contains(":")` check would treat a
+	// bracketed-but-portless IPv6 literal (`[::1]`) as "already has a
+	// port" and pass it through unmodified, causing the dial to fail.
+	if _, _, err := net.SplitHostPort(host); err != nil {
+		host = net.JoinHostPort(host, "443")
 	}
 	upstream, err := p.dial(r.Context(), "tcp", host)
 	if err != nil {
