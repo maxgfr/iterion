@@ -24,7 +24,7 @@
 # The package installs:
 #   /usr/bin/iterion-desktop  — the GUI
 #   /usr/bin/iterion          — the CLI (run, validate, diagram, …)
-# both pinned to the same source revision so editor and CLI cannot
+# both pinned to the same source revision so studio and CLI cannot
 # drift between releases.
 
 set -euo pipefail
@@ -124,10 +124,10 @@ Maintainer: SocialGouv <opensource@social.gouv.fr>
 Homepage: https://github.com/SocialGouv/iterion
 Installed-Size: ${installed_size}
 Description: Iterion Desktop — workflow orchestration for AI agents
- Native desktop wrapper around the iterion editor and runtime,
+ Native desktop wrapper around the iterion studio and runtime,
  plus the iterion CLI (run, validate, diagram, inspect, resume,
  report, …). Both binaries are built from the same source revision
- so the editor and the CLI cannot drift between releases.
+ so the studio and the CLI cannot drift between releases.
  Runs against the system WebKitGTK 4.1 stack (smaller than the
  AppImage variant).
 EOF

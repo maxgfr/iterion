@@ -21,7 +21,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/usr/local/go/bin:/root/go/bin:/usr/local/bin:/usr/bin:/bin
 
 # System deps: build toolchain + WebKit/GTK headers + AppImage tooling
-# prerequisites + Node 22 (matches our Taskfile editor build).
+# prerequisites + Node 22 (matches our Taskfile studio build).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl wget xz-utils file xxd git \
         build-essential pkg-config \
@@ -57,7 +57,7 @@ RUN curl -fsSL -o /usr/local/bin/linuxdeploy \
  && chmod +x /usr/local/bin/linuxdeploy /usr/local/bin/linuxdeploy-plugin-gtk /usr/local/bin/appimagetool
 
 # Corepack ships with Node 22 — turn it on once at image build time so
-# pnpm dispatches to the version pinned in editor/package.json.
+# pnpm dispatches to the version pinned in studio/package.json.
 RUN corepack enable
 
 WORKDIR /workspace

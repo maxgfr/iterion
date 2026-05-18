@@ -98,7 +98,7 @@ func main() {
 	// the local server's http://127.0.0.1:<port>/api/ws[/runs/...], using
 	// ?t=<sessionToken> for cross-origin authentication.
 	err := wails.Run(&options.App{
-		Title:     "Iterion",
+		Title:     "Iterion Studio",
 		Width:     1400,
 		Height:    900,
 		MinWidth:  800,
