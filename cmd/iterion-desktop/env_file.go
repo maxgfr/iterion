@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,10 +73,15 @@ func ReloadIterionEnvFile() {
 	previous := dotenvAppliedKeys
 	dotenvAppliedKeys = nil
 	dotenvMu.Unlock()
-	for _, key := range dedupeKeys(previous, fileKeys) {
+	toUnset := dedupeKeys(previous, fileKeys)
+	for _, key := range toUnset {
 		_ = os.Unsetenv(key)
 	}
 	loadIterionEnvFile()
+	// One-shot visibility so the user can confirm in the iterion-desktop
+	// log whether the refresh hook actually fired and what it touched.
+	log.Printf("dotenv-reload: candidates=%v unset=%v applied=%v",
+		candidateEnvFiles(), toUnset, dotenvAppliedKeys)
 }
 
 // scanDotenvKeys returns the set of keys mentioned in the first
