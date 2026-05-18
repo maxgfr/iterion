@@ -345,11 +345,14 @@ func (s *Service) reconcileSandboxContainers() {
 	if err != nil {
 		return
 	}
-	reaped, err := dockersandbox.ReapOrphanContainers(context.Background(), rt, func(runID string) bool {
+	// Boot-time admin scan: peek at runs across tenants to decide
+	// whether their docker leftovers should be reaped.
+	ctx := store.WithoutTenantFilter(context.Background())
+	reaped, err := dockersandbox.ReapOrphanContainers(ctx, rt, func(runID string) bool {
 		if runID == "" {
 			return true
 		}
-		r, loadErr := s.store.LoadRun(context.Background(), runID)
+		r, loadErr := s.store.LoadRun(ctx, runID)
 		if loadErr != nil {
 			return true
 		}
@@ -385,13 +388,18 @@ func (s *Service) reconcileSandboxContainers() {
 // untouched, so a second iterion instance running in the same store
 // dir cannot clobber the first instance's in-flight work.
 func (s *Service) reconcileOrphans() {
-	ids, err := s.store.ListRuns(context.Background())
+	// Boot-time admin scan: no JWT, no tenant on the request. Tag the
+	// ctx so the mongo store's tenant guard allows the cross-tenant
+	// ListRuns / LoadRun / UpdateRunStatus calls that follow. The
+	// filesystem store ignores the flag (no tenant scoping there).
+	ctx := store.WithoutTenantFilter(context.Background())
+	ids, err := s.store.ListRuns(ctx)
 	if err != nil {
 		s.logger.Warn("runview: reconcile: list runs: %v", err)
 		return
 	}
 	for _, id := range ids {
-		r, err := s.store.LoadRun(context.Background(), id)
+		r, err := s.store.LoadRun(ctx, id)
 		if err != nil {
 			continue
 		}
@@ -402,7 +410,7 @@ func (s *Service) reconcileOrphans() {
 		// for every run scanned. Without this, a SIGTERM landing during
 		// the ~50ms window between status=finished and SaveRun(final_*)
 		// leaves the run forever stuck with no merge UI affordance.
-		if recErr := runtime.RecoverFinalize(context.Background(), s.store, r, s.logger); recErr != nil {
+		if recErr := runtime.RecoverFinalize(ctx, s.store, r, s.logger); recErr != nil {
 			s.logger.Warn("runview: recover finalize %s: %v", id, recErr)
 		}
 		if r.Status != store.RunStatusRunning {
@@ -417,14 +425,14 @@ func (s *Service) reconcileOrphans() {
 		}
 		// Try to grab the lock; non-blocking semantics mean we
 		// either own it instantly (orphan) or fail fast (live).
-		lock, err := s.store.LockRun(context.Background(), id)
+		lock, err := s.store.LockRun(ctx, id)
 		if err != nil {
 			continue
 		}
 		// Re-load under the lock — another process could have
 		// just released between ListRuns and LockRun and updated
 		// the status to a terminal state.
-		r2, err := s.store.LoadRun(context.Background(), id)
+		r2, err := s.store.LoadRun(ctx, id)
 		if err != nil || r2.Status != store.RunStatusRunning {
 			_ = lock.Unlock()
 			continue
@@ -433,7 +441,7 @@ func (s *Service) reconcileOrphans() {
 		if r2.Checkpoint != nil {
 			newStatus = store.RunStatusFailedResumable
 		}
-		if err := s.store.UpdateRunStatus(context.Background(), id, newStatus, "process orphaned: server restart found run in 'running' state"); err != nil {
+		if err := s.store.UpdateRunStatus(ctx, id, newStatus, "process orphaned: server restart found run in 'running' state"); err != nil {
 			s.logger.Warn("runview: reconcile %s: %v", id, err)
 		} else {
 			s.logger.Info("runview: reconciled orphan run %s → %s", id, newStatus)
