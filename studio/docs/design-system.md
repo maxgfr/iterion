@@ -106,6 +106,33 @@ Note: the existing pattern of rotating an icon (e.g. `<ReloadIcon className="ani
 
 `useUIStore.addToast(message, level)` with four levels: `info`, `warning`, `error`, `success`. Optional `{ persistent: true }`. Use for **transient asynchronous feedback** (save complete, reload failed, etc.). Don't swallow API errors — toast them.
 
+### Fetching data
+
+For **simple** resource hooks (single shot, optional refresh, no polling) use [`useFetchResource`](../src/hooks/useFetchResource.ts):
+
+```tsx
+const { data, loading, error, refresh } = useFetchResource(
+  () => api.listMyThings(),
+  [],  // cache key — bump when inputs change (e.g. [runId])
+);
+
+if (loading) return <Skeleton className="h-6" />;
+if (error) return <EmptyState message={<span className="text-danger">{error}</span>} />;
+if (!data || data.length === 0) return <EmptyState message="No things yet" />;
+return <List items={data} />;
+```
+
+It handles latest-wins race guards, a stable `refresh()` callback, and the `{ data, loading, error }` shape that `EmptyState` / `Skeleton` consume directly.
+
+**Don't reach for this hook when** the resource needs polling, event-triggered refetches, fingerprint deduplication across consumers, or a module-level shared cache. Those concerns are intentionally kept in their dedicated hooks:
+
+- [`useRuns`](../src/hooks/useRuns.ts) — adaptive 3s/8s polling + visibility-aware backoff + fingerprint dedup.
+- [`useRunFiles`](../src/hooks/useRunFiles.ts) — event-triggered refetch debounced over a 300ms window.
+- [`useEffortCapabilities`](../src/hooks/useEffortCapabilities.ts) — module-level cache + in-flight promise dedup (capabilities never change during a session).
+- [`useRunWebSocket`](../src/hooks/useRunWebSocket.ts) — WebSocket with reconnect.
+
+When a new fetch site doesn't match any of those patterns, reach for `useFetchResource`. When the boilerplate doesn't fit, write a dedicated hook and document why — like the four above.
+
 ### Tabs, Inputs, Selects, Badges
 
 See [`ui/index.ts`](../src/components/ui/index.ts) for the full export list. All wired with proper tokens, focus rings, and disabled states.

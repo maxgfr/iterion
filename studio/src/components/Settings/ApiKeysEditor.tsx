@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Badge, Button, EmptyState, Input } from "@/components/ui";
+import { useFetchResource } from "@/hooks/useFetchResource";
 
 import { desktop, type SecretStatus } from "@/lib/desktopBridge";
 
@@ -8,32 +9,27 @@ import { desktop, type SecretStatus } from "@/lib/desktopBridge";
 // shadowed-by-env status, plus an input for entering or replacing the
 // value. Used by both Settings → API keys and the Welcome wizard.
 export default function ApiKeysEditor() {
-  const [statuses, setStatuses] = useState<SecretStatus[] | null>(null);
+  const {
+    data: statuses,
+    error: fetchError,
+    refresh,
+  } = useFetchResource<SecretStatus[]>(
+    () => desktop.getSecretStatuses(),
+    [],
+  );
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      setStatuses(await desktop.getSecretStatuses());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
   if (!statuses) {
-    return error ? (
-      <EmptyState message={<span className="text-danger">{error}</span>} />
+    return fetchError ? (
+      <EmptyState message={<span className="text-danger">{fetchError}</span>} />
     ) : (
       <EmptyState message="Loading…" />
     );
   }
 
   const handleSave = async (key: string) => {
-    setError(null);
+    setMutationError(null);
     const v = drafts[key];
     if (!v) return;
     try {
@@ -41,19 +37,21 @@ export default function ApiKeysEditor() {
       setDrafts((d) => ({ ...d, [key]: "" }));
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setMutationError(err instanceof Error ? err.message : String(err));
     }
   };
 
   const handleDelete = async (key: string) => {
-    setError(null);
+    setMutationError(null);
     try {
       await desktop.deleteSecret(key);
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setMutationError(err instanceof Error ? err.message : String(err));
     }
   };
+
+  const error = mutationError ?? fetchError;
 
   return (
     <div className="flex flex-col gap-2">
