@@ -25,15 +25,25 @@ export default function AuxiliaryNode({ data, selected }: NodeProps) {
   const icon = LAYER_ICONS[layerKind];
   const setEditingItem = useUIStore((s) => s.setEditingItem);
 
+  const openEditor = () => setEditingItem({ kind: LAYER_TO_ITEM_KIND[layerKind], name: label });
   return (
     <div
-      className="rounded-full border px-3 py-1.5 min-w-[100px] text-center shadow-md cursor-pointer"
+      role="button"
+      tabIndex={0}
+      aria-label={`Edit ${label}`}
+      className="rounded-full border px-3 py-1.5 min-w-[100px] text-center shadow-md cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent"
       style={{
         borderColor: selected ? SELECTED_BORDER : color,
         background: `${color}22`,
         boxShadow: selected ? SELECTED_GLOW : undefined,
       }}
-      onClick={() => setEditingItem({ kind: LAYER_TO_ITEM_KIND[layerKind], name: label })}
+      onClick={openEditor}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openEditor();
+        }
+      }}
       title="Click to edit"
     >
       {SIDES.map(s => (
