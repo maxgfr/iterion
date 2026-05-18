@@ -264,9 +264,15 @@ function withStoreParam(qs: URLSearchParams): URLSearchParams {
   return qs;
 }
 
-export async function getRun(runId: string): Promise<RunSnapshot> {
+export async function getRun(
+  runId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<RunSnapshot> {
   const qs = withStoreParam(new URLSearchParams()).toString();
-  return request(`/runs/${encodeURIComponent(runId)}${qs ? `?${qs}` : ""}`);
+  return request(
+    `/runs/${encodeURIComponent(runId)}${qs ? `?${qs}` : ""}`,
+    { signal: opts?.signal },
+  );
 }
 
 export async function loadEvents(

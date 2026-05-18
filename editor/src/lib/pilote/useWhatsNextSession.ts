@@ -100,9 +100,10 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
     attachAttemptedRef.current = true;
     const remembered = recallSessionRunId(bot.id, projectId);
     if (!remembered) return;
+    const controller = new AbortController();
     let cancelled = false;
     setStatus("launching");
-    getRun(remembered)
+    getRun(remembered, { signal: controller.signal })
       .then(async (snap) => {
         if (cancelled) return;
         if (!LIVE_STATUSES.has(snap.run.status)) {
@@ -121,6 +122,10 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
         // this only when the user opens the Events tab; for Pilote the
         // transcript IS the rendering, so we always need the full log.
         // Best-effort: failures fall through to the live-tail-only path.
+        // No abort signal threaded here: the store coalesces concurrent
+        // callers and applies its own staleness guard post-await, so
+        // letting the fetch finish on remount is harmless (and a fresh
+        // mount would have to re-do the work anyway).
         try {
           await useRunStore
             .getState()
@@ -130,15 +135,22 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
         }
         setRunId(remembered);
       })
-      .catch(() => {
+      .catch((err) => {
+        // Aborts on unmount are expected — don't treat them as
+        // "run no longer exists" or the next mount's auto-attach
+        // would forget a perfectly valid run id.
+        if (controller.signal.aborted || (err as Error)?.name === "AbortError") {
+          return;
+        }
+        if (cancelled) return;
         // Run no longer exists (rotated, store wiped). Drop the
         // memory so we don't keep retrying.
-        if (cancelled) return;
         forgetSessionRunId(bot.id, projectId);
         setStatus("idle");
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [bot.id, projectId]);
 
@@ -238,6 +250,21 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
   // up. We keep both the id and the node_id (used by resumeRun) in a
   // ref so the submit callback stays stable.
   const pendingRef = useRef<{ messageId: string; nodeId: string } | null>(null);
+
+  // Belt-and-braces snapshot refresh scheduled by submitHumanAnswer.
+  // Held in a ref so we can cancel a pending timer when the hook
+  // unmounts or when a new submit supersedes the previous one — without
+  // this, a fast Pilote-to-Pilote navigation would let an old timer
+  // apply a stale snapshot to a different bot's session.
+  const refreshTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current !== null) {
+        window.clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+    };
+  }, []);
   useEffect(() => {
     if (!pendingHuman?.node_id) {
       pendingRef.current = null;
@@ -320,11 +347,25 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
         requestWsReconnect();
         // Belt-and-braces: refresh the snapshot ~600ms later so a
         // short-lived run that finishes before the WS redial still
-        // surfaces a final state.
-        window.setTimeout(() => {
-          getRun(runId)
+        // surfaces a final state. We capture the target runId so a
+        // late-firing timer can't apply a snapshot for a stale session
+        // (e.g. after Pilote-to-Pilote navigation within 600ms), and
+        // we cancel any previous pending timer so only the most recent
+        // submit's refresh wins.
+        if (refreshTimerRef.current !== null) {
+          window.clearTimeout(refreshTimerRef.current);
+        }
+        const targetRunId = runId;
+        refreshTimerRef.current = window.setTimeout(() => {
+          refreshTimerRef.current = null;
+          if (useRunStore.getState().runId !== targetRunId) return;
+          getRun(targetRunId)
             .then(applySnapshot)
-            .catch(() => {});
+            .catch((e) => {
+              // The WS will recover the state, but surface the failure
+              // in devtools so silent 401/5xx don't go unnoticed.
+              console.warn("pilote snapshot refresh failed", e);
+            });
         }, 600);
         setStatus("active");
       } catch (e) {
