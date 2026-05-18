@@ -25,6 +25,12 @@ func (s *Server) handleBackendsDetect(w http.ResponseWriter, r *http.Request) {
 		s.detector = detect.NewCachedDetector(backendDetectTTL)
 	})
 	if r.URL.Query().Get("force") == "1" {
+		// Refresh hook fires BEFORE invalidation so the next Detect()
+		// picks up any env vars the hook just (un)set. Desktop registers
+		// a hook that re-sources ~/.iterion/env.
+		if s.OnForceRefresh != nil {
+			s.OnForceRefresh()
+		}
 		s.detector.Invalidate()
 	}
 	writeJSON(w, s.detector.Get(r.Context()))

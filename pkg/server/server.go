@@ -270,6 +270,12 @@ type Server struct {
 	// /api/backends/detect. Lazily constructed on first request.
 	detector     *detect.CachedDetector
 	detectorOnce sync.Once
+	// OnForceRefresh runs (if non-nil) before the cache is invalidated on
+	// a `?force=1` call. The iterion-desktop binary registers a hook here
+	// that re-sources ~/.iterion/env so commenting out a key in that file
+	// and clicking Refresh actually clears the value — without it the
+	// dotenv-applied keys would stick for the life of the process.
+	OnForceRefresh func()
 
 	// listener is captured at ListenAndServe time so callers (notably the
 	// desktop host, which passes Port=0 for an OS-assigned port) can read

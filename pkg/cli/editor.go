@@ -52,6 +52,12 @@ type EditorOptions struct {
 	MaxTotalUploadSize int64
 	MaxUploadsPerRun   int
 	AllowUploadMime    []string
+
+	// OnForceRefresh, when non-nil, is forwarded to the server and fires
+	// before /api/backends/detect?force=1 invalidates its cache. The
+	// desktop host uses this to re-source ~/.iterion/env so dotenv
+	// edits (including key deletions) are picked up without a restart.
+	OnForceRefresh func()
 }
 
 // RunEditor starts the editor HTTP server.
@@ -137,6 +143,7 @@ func RunEditor(ctx context.Context, opts EditorOptions, p *Printer) error {
 	}
 
 	srv := server.New(cfg, logger)
+	srv.OnForceRefresh = opts.OnForceRefresh
 
 	// Open browser in background — only meaningful when port is fixed
 	// upfront. For Port=0 (random) callers should use OnReady.
