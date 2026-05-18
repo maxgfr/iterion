@@ -35,12 +35,21 @@ type ClawBackend struct {
 	inbox InboxBinder
 }
 
-// InboxBinder builds per-run inbox callbacks (drain + consume). The
-// runtime supplies an implementation backed by the run store +
-// event broker; tests can plug in a stub. Returning nil disables
-// the inbox plumbing for that specific run.
+// InboxHook is invoked by the generation tool-loop between
+// iterations: Consume marks the previous round's delivered messages
+// as consumed, Drain returns any new operator-typed texts to inject
+// before the next LLM call. Both run cooperatively at safe
+// boundaries — never mid-stream.
+type InboxHook interface {
+	Consume(ctx context.Context)
+	Drain(ctx context.Context) []string
+}
+
+// InboxBinder constructs a per-run InboxHook. The runtime supplies a
+// store-backed implementation; tests can plug in a stub. Returning
+// nil disables the inbox plumbing for that specific run.
 type InboxBinder interface {
-	Bind(ctx context.Context, runID string) (drain func(context.Context) []string, consume func(context.Context))
+	Bind(ctx context.Context, runID string) InboxHook
 }
 
 // WithInbox wires an InboxBinder into the backend so the generation
@@ -49,84 +58,82 @@ func WithInbox(b InboxBinder) ClawBackendOption {
 	return func(c *ClawBackend) { c.inbox = b }
 }
 
-// StoreInboxBinder is a concrete InboxBinder backed by a
-// store.RunStore. It marks drained messages as delivered, the
-// previous round's delivered messages as consumed, and emits
-// user_message_{delivered,consumed} events through the publish
-// callback so WS subscribers update in lockstep.
+// StoreInboxBinder is the production InboxBinder, backed by a
+// store.RunStore + an event-broker publish callback. The hooks it
+// returns reuse the shared store.DrainPending / store.MarkConsumed
+// helpers so the runtime's pauseAtHuman drainer and the agent-loop
+// drainer emit identical event payloads.
 type StoreInboxBinder struct {
 	Store store.RunStore
-	// Publish is called once per state transition with the
-	// fully-stamped event. Local mode passes EventBroker.Publish;
-	// cloud mode passes a no-op (change-stream surfaces the
-	// transition).
+	// Publish receives each user_message_* event after store-side
+	// persistence. Local mode passes EventBroker.Publish; cloud mode
+	// passes nil (the Mongo change-stream surfaces transitions).
 	Publish func(store.Event)
 }
 
-// Bind returns drain + consume closures scoped to runID. The
-// closures share a small slice of "delivered this iteration" IDs so
-// the next consume call can transition them to consumed without an
-// extra round trip to the store.
-func (b *StoreInboxBinder) Bind(ctx context.Context, runID string) (drain func(context.Context) []string, consume func(context.Context)) {
+// Bind returns the hook scoped to runID, or nil when the binder is
+// not configured for this run.
+func (b *StoreInboxBinder) Bind(ctx context.Context, runID string) InboxHook {
 	if b == nil || b.Store == nil || runID == "" {
-		return nil, nil
+		return nil
 	}
-	var lastDelivered []string
-	drain = func(ctx context.Context) []string {
-		msgs, err := b.Store.LoadPendingQueuedMessages(ctx, runID)
-		if err != nil || len(msgs) == 0 {
-			return nil
-		}
-		texts := make([]string, 0, len(msgs))
-		ids := make([]string, 0, len(msgs))
-		for _, m := range msgs {
-			if err := b.Store.UpdateQueuedMessageStatus(ctx, runID, m.ID, store.QueuedMessageStatusDelivered, store.QueuedMessageStatusQueued); err != nil {
-				continue
-			}
-			texts = append(texts, m.Text)
-			ids = append(ids, m.ID)
-			now := time.Now().UTC()
-			b.publishEvent(ctx, runID, store.EventUserMessageDelivered, m.ID, m.Text, store.QueuedMessageStatusDelivered, &now, nil, nil)
-		}
-		lastDelivered = ids
-		return texts
+	return &storeInboxHook{
+		store:     b.Store,
+		publish:   b.Publish,
+		runID:     runID,
+		versioner: asInboxVersioner(b.Store),
 	}
-	consume = func(ctx context.Context) {
-		if len(lastDelivered) == 0 {
-			return
-		}
-		now := time.Now().UTC()
-		for _, id := range lastDelivered {
-			if err := b.Store.UpdateQueuedMessageStatus(ctx, runID, id, store.QueuedMessageStatusConsumed); err != nil {
-				continue
-			}
-			b.publishEvent(ctx, runID, store.EventUserMessageConsumed, id, "", store.QueuedMessageStatusConsumed, nil, &now, nil)
-		}
-		lastDelivered = nil
-	}
-	return drain, consume
 }
 
-func (b *StoreInboxBinder) publishEvent(ctx context.Context, runID string, typ store.EventType, msgID, text string, status store.QueuedMessageStatus, deliveredAt, consumedAt, cancelledAt *time.Time) {
-	evt := store.Event{
-		Type:  typ,
-		RunID: runID,
-		Data: map[string]interface{}{
-			"id":           msgID,
-			"text":         text,
-			"status":       string(status),
-			"delivered_at": deliveredAt,
-			"consumed_at":  consumedAt,
-			"cancelled_at": cancelledAt,
-		},
+// asInboxVersioner type-asserts the store onto the optional
+// QueuedInboxVersioner interface so callers can fast-skip a load
+// when the doorbell counter is unchanged. Returns nil when the
+// backend can't supply a counter (forces every Drain to reload).
+func asInboxVersioner(s store.RunStore) store.QueuedInboxVersioner {
+	v, _ := s.(store.QueuedInboxVersioner)
+	return v
+}
+
+// storeInboxHook is one bound-to-a-run InboxHook. The struct is the
+// stable home for the cross-iteration state (last delivered IDs +
+// last observed inbox version) so the closures stay garbage-free.
+type storeInboxHook struct {
+	store         store.RunStore
+	publish       func(store.Event)
+	runID         string
+	versioner     store.QueuedInboxVersioner
+	lastDelivered []string
+	lastVersion   uint64
+	versionSeen   bool
+}
+
+// Drain transitions queued→delivered and returns texts in FIFO order.
+// When the underlying store implements QueuedInboxVersioner the hook
+// fast-skips loading the JSONL when the counter is unchanged — the
+// common case for a busy tool loop on a run with no queued messages.
+func (h *storeInboxHook) Drain(ctx context.Context) []string {
+	if h.versioner != nil {
+		v := h.versioner.QueuedInboxVersion(h.runID)
+		if h.versionSeen && v == h.lastVersion {
+			return nil
+		}
+		h.lastVersion = v
+		h.versionSeen = true
 	}
-	persisted, err := b.Store.AppendEvent(ctx, runID, evt)
-	if err != nil {
+	texts, ids, _ := store.DrainPending(ctx, h.store, h.publish, h.runID)
+	if len(ids) > 0 {
+		h.lastDelivered = ids
+	}
+	return texts
+}
+
+// Consume marks the previously-drained messages as consumed.
+func (h *storeInboxHook) Consume(ctx context.Context) {
+	if len(h.lastDelivered) == 0 {
 		return
 	}
-	if b.Publish != nil && persisted != nil {
-		b.Publish(*persisted)
-	}
+	store.MarkConsumed(ctx, h.store, h.publish, h.runID, h.lastDelivered)
+	h.lastDelivered = nil
 }
 
 // ClawBackendOption configures a ClawBackend at construction time.
@@ -333,13 +340,11 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 	opts.Hooks = b.lifecycleHooks
 
 	// Wire the operator-chatbox inbox if the runtime configured one.
-	// Resolves the per-run drainer + consumer lazily so a backend
-	// shared across runs picks up the right closures each call.
+	// Resolved per-call so a backend shared across runs picks up the
+	// right hook for each run.
 	if b.inbox != nil {
 		if runID := RunIDFromContext(ctx); runID != "" {
-			drain, consume := b.inbox.Bind(ctx, runID)
-			opts.InboxDrainer = drain
-			opts.InboxConsume = consume
+			opts.Inbox = b.inbox.Bind(ctx, runID)
 		}
 	}
 

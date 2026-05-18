@@ -66,14 +66,9 @@ func (s *FilesystemRunStore) userMessagesPath(runID string) (string, error) {
 // AppendQueuedMessage adds a new queued message in "queued" status.
 // The ID, RunID, Text, and QueuedAt fields must be set by the caller.
 // Status is forced to "queued"; all transition timestamps are nil.
-// Concurrent appends are protected by a per-run flock via LockRun for
-// cross-process safety.
 func (s *FilesystemRunStore) AppendQueuedMessage(ctx context.Context, runID string, msg QueuedUserMessage) error {
-	if msg.ID == "" {
-		return fmt.Errorf("store: queued message ID required")
-	}
-	if msg.Text == "" {
-		return fmt.Errorf("store: queued message text required")
+	if err := NormalizeQueuedForAppend(&msg, runID); err != nil {
+		return err
 	}
 	path, err := s.userMessagesPath(runID)
 	if err != nil {
@@ -82,15 +77,13 @@ func (s *FilesystemRunStore) AppendQueuedMessage(ctx context.Context, runID stri
 	if err := os.MkdirAll(filepath.Dir(path), dirPerm); err != nil {
 		return fmt.Errorf("store: mkdir user_messages: %w", err)
 	}
-	msg.RunID = runID
-	msg.Status = QueuedMessageStatusQueued
-	if msg.QueuedAt.IsZero() {
-		msg.QueuedAt = time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := appendJSONL(path, msg); err != nil {
+		return err
 	}
-	msg.DeliveredAt = nil
-	msg.ConsumedAt = nil
-	msg.CancelledAt = nil
-	return appendJSONL(path, msg)
+	s.bumpInboxVersion(runID)
+	return nil
 }
 
 // UpdateQueuedMessageStatus transitions the latest record for msgID
@@ -107,6 +100,8 @@ func (s *FilesystemRunStore) UpdateQueuedMessageStatus(ctx context.Context, runI
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	latest, err := loadLatestQueuedMessages(path)
 	if err != nil {
 		return err
@@ -115,29 +110,27 @@ func (s *FilesystemRunStore) UpdateQueuedMessageStatus(ctx context.Context, runI
 	if !ok {
 		return ErrQueuedMessageNotFound
 	}
-	if len(expectedFrom) > 0 {
-		match := false
-		for _, want := range expectedFrom {
-			if cur.Status == want {
-				match = true
-				break
-			}
-		}
-		if !match {
-			return fmt.Errorf("%w: status=%s", ErrQueuedMessageStatusConflict, cur.Status)
+	if !statusMatches(cur.Status, expectedFrom) {
+		return fmt.Errorf("%w: status=%s", ErrQueuedMessageStatusConflict, cur.Status)
+	}
+	StampQueuedTransition(&cur, status, time.Now().UTC())
+	if err := appendJSONL(path, cur); err != nil {
+		return err
+	}
+	s.bumpInboxVersion(runID)
+	return nil
+}
+
+func statusMatches(cur QueuedMessageStatus, expectedFrom []QueuedMessageStatus) bool {
+	if len(expectedFrom) == 0 {
+		return true
+	}
+	for _, want := range expectedFrom {
+		if cur == want {
+			return true
 		}
 	}
-	now := time.Now().UTC()
-	cur.Status = status
-	switch status {
-	case QueuedMessageStatusDelivered:
-		cur.DeliveredAt = &now
-	case QueuedMessageStatusConsumed:
-		cur.ConsumedAt = &now
-	case QueuedMessageStatusCancelled:
-		cur.CancelledAt = &now
-	}
-	return appendJSONL(path, cur)
+	return false
 }
 
 // LoadPendingQueuedMessages returns the messages whose current status
@@ -204,7 +197,156 @@ func appendJSONL(path string, v interface{}) error {
 	if _, err := f.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("store: write user_message: %w", err)
 	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("store: fsync user_messages: %w", err)
+	}
 	return nil
+}
+
+// NormalizeQueuedForAppend mutates msg into the canonical shape for
+// AppendQueuedMessage. Validates the required fields, stamps RunID +
+// Status=queued, fills QueuedAt when zero, and clears all transition
+// timestamps. Shared between FilesystemRunStore and the Mongo store
+// so the two paths agree on what "a freshly-queued row" looks like.
+func NormalizeQueuedForAppend(msg *QueuedUserMessage, runID string) error {
+	if msg.ID == "" {
+		return fmt.Errorf("store: queued message ID required")
+	}
+	if msg.Text == "" {
+		return fmt.Errorf("store: queued message text required")
+	}
+	msg.RunID = runID
+	msg.Status = QueuedMessageStatusQueued
+	if msg.QueuedAt.IsZero() {
+		msg.QueuedAt = time.Now().UTC()
+	}
+	msg.DeliveredAt = nil
+	msg.ConsumedAt = nil
+	msg.CancelledAt = nil
+	return nil
+}
+
+// StampQueuedTransition flips msg.Status and the matching transition
+// timestamp. Shared by both stores so the timestamp/field mapping
+// stays in lockstep with the status enum.
+func StampQueuedTransition(msg *QueuedUserMessage, status QueuedMessageStatus, now time.Time) {
+	msg.Status = status
+	switch status {
+	case QueuedMessageStatusDelivered:
+		msg.DeliveredAt = &now
+	case QueuedMessageStatusConsumed:
+		msg.ConsumedAt = &now
+	case QueuedMessageStatusCancelled:
+		msg.CancelledAt = &now
+	}
+}
+
+// QueuedInboxVersioner is implemented by stores that can report a
+// monotonically-increasing "something has changed" counter for the
+// run's user-message inbox. Hot-path consumers (the agent loop's
+// inbox drainer) read the version once per iteration and only re-
+// load when it advanced — turning the 50-iteration tool-loop on a
+// quiet run from 50 full-file scans into 50 cheap atomic reads.
+//
+// Stores that don't implement it force a load every iteration, which
+// is correct but slower. Cloud (Mongo) stores rely on change-streams
+// for liveness and need not implement this.
+type QueuedInboxVersioner interface {
+	QueuedInboxVersion(runID string) uint64
+}
+
+// InboxEventFor builds the canonical store.Event payload for one
+// inbox status transition. Used by all three event-emission sites
+// (the agent-loop drainer, the runtime pauseAtHuman drainer, the
+// runview Service API handlers) so the wire shape stays in lockstep.
+func InboxEventFor(typ EventType, runID string, msg QueuedUserMessage) Event {
+	return Event{
+		Type:  typ,
+		RunID: runID,
+		Data: map[string]interface{}{
+			"id":           msg.ID,
+			"text":         msg.Text,
+			"status":       string(msg.Status),
+			"queued_at":    msg.QueuedAt,
+			"delivered_at": msg.DeliveredAt,
+			"consumed_at":  msg.ConsumedAt,
+			"cancelled_at": msg.CancelledAt,
+		},
+	}
+}
+
+// PublishInboxEvent appends an inbox status-change event to the run
+// log and fans it out to any live subscriber via publish (the
+// broker.Publish callback in local mode, nil in cloud mode where
+// the change stream surfaces transitions).
+func PublishInboxEvent(ctx context.Context, s RunStore, publish func(Event), typ EventType, runID string, msg QueuedUserMessage) {
+	evt := InboxEventFor(typ, runID, msg)
+	persisted, err := s.AppendEvent(ctx, runID, evt)
+	if err != nil || persisted == nil {
+		return
+	}
+	if publish != nil {
+		publish(*persisted)
+	}
+}
+
+// DrainPending moves every "queued" row in runID's inbox to
+// "delivered", appending a transition row per message and emitting
+// one user_message_delivered event per transition through publish.
+// Returns the texts and IDs in FIFO order so a caller can both
+// surface them to the LLM (texts) and later mark them consumed (ids).
+// Errors loading the inbox are reported; per-message transition
+// errors are skipped silently — a concurrent cancellation winning
+// the race is acceptable, the row simply won't be delivered.
+func DrainPending(ctx context.Context, s RunStore, publish func(Event), runID string) (texts []string, ids []string, err error) {
+	msgs, err := s.LoadPendingQueuedMessages(ctx, runID)
+	if err != nil || len(msgs) == 0 {
+		return nil, nil, err
+	}
+	texts = make([]string, 0, len(msgs))
+	ids = make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		if err := s.UpdateQueuedMessageStatus(ctx, runID, m.ID, QueuedMessageStatusDelivered, QueuedMessageStatusQueued); err != nil {
+			continue
+		}
+		StampQueuedTransition(&m, QueuedMessageStatusDelivered, time.Now().UTC())
+		texts = append(texts, m.Text)
+		ids = append(ids, m.ID)
+		PublishInboxEvent(ctx, s, publish, EventUserMessageDelivered, runID, m)
+	}
+	return texts, ids, nil
+}
+
+// MarkConsumed transitions every id in ids from "delivered" to
+// "consumed" and emits a user_message_consumed event per transition.
+// Errors are skipped silently; nothing actionable a caller could do
+// with a partial failure.
+func MarkConsumed(ctx context.Context, s RunStore, publish func(Event), runID string, ids []string) {
+	now := time.Now().UTC()
+	for _, id := range ids {
+		if err := s.UpdateQueuedMessageStatus(ctx, runID, id, QueuedMessageStatusConsumed); err != nil {
+			continue
+		}
+		msg := QueuedUserMessage{ID: id}
+		StampQueuedTransition(&msg, QueuedMessageStatusConsumed, now)
+		PublishInboxEvent(ctx, s, publish, EventUserMessageConsumed, runID, msg)
+	}
+}
+
+// QueuedInboxVersion returns the run's inbox revision counter. The
+// counter advances whenever a queued-message row is appended (the
+// caller serialises writes under s.mu, so the increment is safe).
+// Returning 0 for an unseen run is correct: any future write will
+// increment past 0.
+func (s *FilesystemRunStore) QueuedInboxVersion(runID string) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.inboxVersion[runID]
+}
+
+// bumpInboxVersion is called by the write paths while holding s.mu.
+func (s *FilesystemRunStore) bumpInboxVersion(runID string) {
+	s.inboxVersion[runID]++
 }
 
 // loadLatestQueuedMessages folds the JSONL log into a "latest status

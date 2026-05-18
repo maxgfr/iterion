@@ -820,30 +820,13 @@ type pauseInfo struct {
 
 // drainOperatorMessagesForPause empties the run's operator-queued
 // chat-message inbox at pause time and returns the texts in FIFO
-// order. Each drained message transitions queued → delivered in the
-// store and emits a user_message_delivered event so WS subscribers
-// (the editor chatbox) update their badge. Used by the claude_code /
-// codex pause path — those backends can't accept mid-session stdin,
-// so the operator's intent rides on the resume system prompt.
+// order. Used by the claude_code / codex pause path — those backends
+// can't accept mid-session stdin, so the operator's intent rides on
+// the resume system prompt. Each transition emits a
+// user_message_delivered event through the engine's event observer
+// so WS subscribers (the editor chatbox) update their badge.
 func (e *Engine) drainOperatorMessagesForPause(ctx context.Context, runID string) []string {
-	msgs, err := e.store.LoadPendingQueuedMessages(ctx, runID)
-	if err != nil || len(msgs) == 0 {
-		return nil
-	}
-	texts := make([]string, 0, len(msgs))
-	for _, m := range msgs {
-		if err := e.store.UpdateQueuedMessageStatus(ctx, runID, m.ID, store.QueuedMessageStatusDelivered, store.QueuedMessageStatusQueued); err != nil {
-			continue
-		}
-		texts = append(texts, m.Text)
-		now := time.Now().UTC()
-		_ = e.emit(ctx, runID, store.EventUserMessageDelivered, "", map[string]interface{}{
-			"id":           m.ID,
-			"text":         m.Text,
-			"status":       string(store.QueuedMessageStatusDelivered),
-			"delivered_at": now,
-		})
-	}
+	texts, _, _ := store.DrainPending(ctx, e.store, e.onEvent, runID)
 	return texts
 }
 

@@ -102,25 +102,13 @@ type GenerationOptions struct {
 	// fires once when the generation loop exits (success or failure).
 	Hooks *hooks.Runner
 
-	// InboxDrainer, when non-nil, is called once per tool-loop
-	// iteration AFTER the tool results have been appended to the
-	// conversation. It returns the texts of any operator-queued
-	// messages to inject as a synthetic user turn before the next
-	// LLM call. The drainer is responsible for marking those
-	// messages as "delivered" in its source-of-truth (the run
-	// store's user_messages inbox) so they are not redelivered on
-	// the next iteration. Nil disables the inbox plumbing entirely.
-	//
-	// Delivery is cooperative: it happens between agent loop
-	// iterations, never mid-stream. This mirrors Claude Code CLI's
-	// "queued message" semantics.
-	InboxDrainer func(ctx context.Context) []string
-
-	// InboxConsume is called once per tool-loop iteration to mark
-	// previously-delivered messages as "consumed" — the LLM has now
-	// seen them in its conversation history. Distinct from
-	// InboxDrainer so the editor inbox can distinguish "delivered"
-	// (will be seen on the next LLM turn) from "consumed" (already
-	// folded into the conversation). Nil is a no-op.
-	InboxConsume func(ctx context.Context)
+	// Inbox, when non-nil, plumbs the run's operator-message inbox
+	// into the tool loop. After each tool-results turn the engine
+	// calls Inbox.Consume (transitioning the previous round's
+	// delivered messages to "consumed") and then Inbox.Drain
+	// (returning new operator texts to append as a synthetic user
+	// turn). Delivery is cooperative — between iterations, never
+	// mid-stream — mirroring Claude Code CLI's queued-message
+	// semantics. Nil disables the inbox plumbing.
+	Inbox InboxHook
 }

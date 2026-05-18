@@ -1,14 +1,8 @@
 // Operator chat-message inbox REST client. Mirrors the
 // POST/DELETE/GET surface registered in pkg/server/runs.go.
 
-import { apiRequest } from "@/api/client";
+import { request } from "@/api/client";
 import type { QueuedUserMessage } from "@/store/run";
-
-const BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-
-function request<T>(path: string, init?: RequestInit): Promise<T> {
-  return apiRequest<T>(`${BASE_URL}${path}`, init);
-}
 
 export async function listQueuedMessages(
   runId: string,

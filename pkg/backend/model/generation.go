@@ -691,18 +691,13 @@ func GenerateTextDirect(ctx context.Context, client api.APIClient, opts Generati
 			}
 		}
 
-		// Drain operator-queued messages (chatbox inbox) AFTER
-		// compaction so they always land at the very end of the
-		// conversation, in the preserved-recent window. Delivery is
-		// cooperative: the agent sees them at the next LLM turn, never
-		// mid-stream. Empty drains are a no-op. The previous round's
-		// consume hook fires first so the editor inbox transitions
-		// delivered→consumed in lockstep with the next request.
-		if opts.InboxConsume != nil {
-			opts.InboxConsume(ctx)
-		}
-		if opts.InboxDrainer != nil {
-			if drained := opts.InboxDrainer(ctx); len(drained) > 0 {
+		// Drain operator-queued chatbox messages AFTER compaction so
+		// they always land in the preserved-recent window. Consume
+		// runs first so the editor inbox transitions delivered →
+		// consumed in lockstep with the next request.
+		if opts.Inbox != nil {
+			opts.Inbox.Consume(ctx)
+			if drained := opts.Inbox.Drain(ctx); len(drained) > 0 {
 				messages = append(messages, buildOperatorMessage(drained))
 			}
 		}
