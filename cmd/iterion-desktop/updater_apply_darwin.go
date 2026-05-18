@@ -12,9 +12,10 @@ import (
 	"strings"
 )
 
-// applyArtifact extracts the .zip (which contains Iterion.app/) into a sibling
-// directory of the running .app and atomically swaps. Failure leaves the
-// running .app intact — we never destructively unzip on top of it.
+// applyArtifact extracts the .zip (which contains the .app bundle) into
+// a sibling directory of the running .app and atomically swaps. Failure
+// leaves the running .app intact — we never destructively unzip on top
+// of it.
 func applyArtifact(body []byte, _ *Release) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -28,7 +29,7 @@ func applyArtifact(body []byte, _ *Release) error {
 		return errors.New("updater: cannot locate enclosing .app bundle")
 	}
 	parent := filepath.Dir(appDir)
-	stage := filepath.Join(parent, "Iterion.app.update")
+	stage := filepath.Join(parent, filepath.Base(appDir)+".update")
 	_ = os.RemoveAll(stage)
 	if err := unzipBytes(body, stage); err != nil {
 		return err
