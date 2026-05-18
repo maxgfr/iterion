@@ -120,9 +120,17 @@ func (r *Registry) registerDefaults() {
 			Model:   modelID,
 			BaseURL: os.Getenv("OPENAI_BASE_URL"),
 		}
-		// Auto-detect ChatGPT-forfait OAuth via Codex CLI's auth.json.
-		// Opt-out: ITERION_OPENAI_USE_OAUTH=0 forces the legacy
-		// OPENAI_API_KEY path even when a chatgpt auth.json is present.
+		// Resolution: an explicit OPENAI_API_KEY wins by default — it's
+		// the standard surface for both CI and BYOK setups, and treating
+		// a user-set env var as deliberate avoids silently spending
+		// someone else's ChatGPT subscription. ChatGPT-forfait OAuth
+		// (sourced from Codex CLI's auth.json) is used when:
+		//   - OPENAI_API_KEY is unset, OR
+		//   - ITERION_OPENAI_USE_OAUTH=1 forces the forfait path even
+		//     when a key is present.
+		// ITERION_OPENAI_USE_OAUTH=0 disables OAuth entirely.
+		// An explicit OPENAI_BASE_URL also disables OAuth so we never
+		// masquerade Codex headers to a third-party endpoint.
 		//
 		// Known limitations (track separately, not blocking v1):
 		//   - Stale token: the resolved client is cached for the life of
@@ -134,7 +142,11 @@ func (r *Registry) registerDefaults() {
 		//     OAuth state in secrets.CredentialsFromContext. Cloud
 		//     deployments must use the API-key BYOK path until the
 		//     factory learns to consume creds.OAuthDir("codex").
-		shouldTryOAuth := os.Getenv("ITERION_OPENAI_USE_OAUTH") != "0" && cfg.BaseURL == ""
+		apiKey := os.Getenv("OPENAI_API_KEY")
+		oauthPref := os.Getenv("ITERION_OPENAI_USE_OAUTH")
+		oauthDisabled := oauthPref == "0" || cfg.BaseURL != ""
+		oauthForced := oauthPref == "1"
+		shouldTryOAuth := !oauthDisabled && (apiKey == "" || oauthForced)
 		if shouldTryOAuth {
 			if view, err := secrets.LoadCodexCredentialsFromDisk(); err == nil && view.IsChatGPTMode() {
 				cfg.OAuthToken = view.Tokens.AccessToken
@@ -143,7 +155,7 @@ func (r *Registry) registerDefaults() {
 				return p.NewClient(cfg)
 			}
 		}
-		cfg.APIKey = os.Getenv("OPENAI_API_KEY")
+		cfg.APIKey = apiKey
 		return p.NewClient(cfg)
 	}
 	r.providersWithKey["openai"] = func(modelID, apiKey string) (api.APIClient, error) {
