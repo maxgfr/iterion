@@ -107,7 +107,7 @@ auto-resolution. `OPENAI_API_KEY` alone routes to `claw`.
 | Provider | Detection |
 |---|---|
 | `anthropic` | `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` |
-| `openai` | `OPENAI_API_KEY` |
+| `openai` | `OPENAI_API_KEY`, **or** Codex CLI signed in via "Sign in with ChatGPT" (see `OpenAI via ChatGPT forfait` below) |
 | `foundry` (Azure) | `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` |
 | `bedrock` | `AWS_REGION` or `AWS_DEFAULT_REGION` (full chain handled by AWS SDK) |
 | `vertex` | `GOOGLE_CLOUD_PROJECT` |
@@ -116,6 +116,62 @@ When `model:` on the agent is also empty, the runtime substitutes a
 sensible default for the first available provider — currently
 `anthropic/claude-sonnet-4-6` for Anthropic and
 `openai/gpt-5.4-mini` for OpenAI.
+
+### OpenAI via ChatGPT forfait (Codex CLI OAuth)
+
+When Codex CLI is signed in via *Sign in with ChatGPT* (rather than the
+default API-key mode), iterion's `claw` provider can reuse that OAuth
+token to drive OpenAI calls through the ChatGPT-Codex backend
+(`chatgpt.com/backend-api/codex/responses`) — billed against the user's
+ChatGPT Plus / Pro / Team subscription instead of the metered
+api.openai.com endpoint.
+
+**Setup:**
+
+```bash
+# 1. Install or update Codex CLI (>= 0.130.0 for gpt-5.5 access).
+# 2. Sign in via ChatGPT (NOT API-key):
+codex logout                     # if previously logged in via API key
+codex login                      # follow prompts → "Sign in with ChatGPT"
+# 3. Verify auth.json carries chatgpt mode:
+jq '.auth_mode' ~/.codex/auth.json   # → "chatgpt"
+```
+
+Iterion auto-detects this on the next `iterion run`. The status pill
+shows the OpenAI provider as available even without `OPENAI_API_KEY`
+set.
+
+**Opt-out:**
+
+```bash
+# Force the API-key path even with a chatgpt auth.json on disk:
+export ITERION_OPENAI_USE_OAUTH=0
+# Or: setting OPENAI_BASE_URL (for OpenRouter/Ollama/vLLM) automatically
+# falls back to the API-key path so masquerading headers don't reach an
+# unintended backend.
+```
+
+**Model-version gating.** OpenAI's backend gates model access on the
+HTTP `version:` header iterion sends with each call. By default iterion
+derives this from `codex --version`; override with
+`ITERION_CODEX_VERSION=X.Y.Z` if you need to claim a different version
+without reinstalling the binary. Concretely: `gpt-5.5` requires
+codex-cli >= 0.130; `gpt-5.4` works on older versions.
+
+**Refresh.** iterion does **not** implement OAuth refresh — it reads
+whatever `access_token` is currently on disk. Codex CLI maintains the
+file as a side effect of normal use; if your token expires mid-run,
+just `codex --version` (or any other Codex command) to trigger a
+refresh, then re-run iterion.
+
+**ToS posture.** Unlike Anthropic Pro/Max (whose Consumer Terms scope
+the subscription to *Claude Code only* — see the warning under
+[z.ai integration](#using-a-non-anthropic-provider-via-the-anthropic-wire-format-zai--glm)),
+ChatGPT subscriptions don't carve out Codex CLI as the only legitimate
+surface. Reproducing Codex CLI's OAuth flow from a third-party tool is
+gray-area but has no explicit prohibition today. We treat this as
+pragmatic — if OpenAI changes the terms or tightens enforcement, set
+`ITERION_OPENAI_USE_OAUTH=0` and fall back to `OPENAI_API_KEY`.
 
 ## Editor UX
 
