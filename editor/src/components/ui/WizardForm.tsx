@@ -14,11 +14,23 @@ export type WizardMode = "auto" | "wizard" | "flat";
 export interface WizardFormProps {
   spec: FormSpec;
   onSubmit: (answers: FormAnswer) => void;
+  // Optional change callback. Fires every time the user edits any
+  // question's answer (debounced by React's state batching). Lets a
+  // parent observe the in-progress draft without waiting for the
+  // atomic submit — used by RunView's Approve/Reject quick-actions
+  // to ride along whatever side-field comments the operator has
+  // typed so far.
+  onAnswerChange?: (answers: FormAnswer) => void;
   busy?: boolean;
   // - "auto" (default): 1Q inline, 2+Q multi-step wizard.
   // - "wizard": always multi-step, even for 1Q.
   // - "flat": legacy single-page rendering (used for compatibility).
   mode?: WizardMode;
+  // When true, no Submit / Send button is rendered: the wizard is
+  // navigation-only and an external control drives the final submit
+  // (e.g. RunView's Approve / Reject buttons reading from
+  // onAnswerChange).
+  hideSubmit?: boolean;
 }
 
 // WizardForm renders a FormSpec. With multiple questions and the
@@ -28,8 +40,10 @@ export interface WizardFormProps {
 export function WizardForm({
   spec,
   onSubmit,
+  onAnswerChange,
   busy = false,
   mode = "auto",
+  hideSubmit = false,
 }: WizardFormProps) {
   const initial = useMemo(() => initialAnswers(spec), [spec]);
   const [answers, setAnswers] = useState<FormAnswer>(initial);
@@ -49,9 +63,16 @@ export function WizardForm({
   const single = total === 1;
   const submitLabel = spec.submitLabel ?? "Send";
 
-  const setOne = useCallback((id: string, value: string | string[]) => {
-    setAnswers((prev) => ({ ...prev, [id]: value }));
-  }, []);
+  const setOne = useCallback(
+    (id: string, value: string | string[]) => {
+      setAnswers((prev) => {
+        const next = { ...prev, [id]: value };
+        if (onAnswerChange) onAnswerChange(next);
+        return next;
+      });
+    },
+    [onAnswerChange],
+  );
 
   const submit = () => {
     if (busy || !isFormValid(spec, answers)) return;
@@ -69,6 +90,7 @@ export function WizardForm({
         busy={busy}
         single={single}
         submitLabel={submitLabel}
+        hideSubmit={hideSubmit}
       />
     );
   }
@@ -203,14 +225,16 @@ export function WizardForm({
             </Button>
           )}
           {isLast ? (
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={!canSubmitAll || busy}
-              onClick={submit}
-            >
-              {busy ? "…" : submitLabel}
-            </Button>
+            hideSubmit ? null : (
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={!canSubmitAll || busy}
+                onClick={submit}
+              >
+                {busy ? "…" : submitLabel}
+              </Button>
+            )
           ) : (
             <Button
               variant="primary"
@@ -237,6 +261,7 @@ interface FlatFormProps {
   busy: boolean;
   single: boolean;
   submitLabel: string;
+  hideSubmit: boolean;
 }
 
 function FlatForm({
@@ -247,6 +272,7 @@ function FlatForm({
   busy,
   single,
   submitLabel,
+  hideSubmit,
 }: FlatFormProps) {
   const valid = isFormValid(spec, answers);
   return (
@@ -288,16 +314,18 @@ function FlatForm({
         ))}
       </div>
 
-      <div className={single ? "self-end" : "flex justify-end pt-1"}>
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={!valid || busy}
-          onClick={onSubmit}
-        >
-          {busy ? "…" : submitLabel}
-        </Button>
-      </div>
+      {!hideSubmit && (
+        <div className={single ? "self-end" : "flex justify-end pt-1"}>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!valid || busy}
+            onClick={onSubmit}
+          >
+            {busy ? "…" : submitLabel}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
