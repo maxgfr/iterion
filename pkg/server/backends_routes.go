@@ -28,10 +28,12 @@ func (s *Server) handleBackendsDetect(w http.ResponseWriter, r *http.Request) {
 		// Refresh hook fires BEFORE invalidation so the next Detect()
 		// picks up any env vars the hook just (un)set. Desktop registers
 		// a hook that re-sources ~/.iterion/env.
-		if s.OnForceRefresh != nil {
+		hadHook := s.OnForceRefresh != nil
+		if hadHook {
 			s.OnForceRefresh()
 		}
 		s.detector.Invalidate()
+		s.logger.Info("backends/detect: force-refresh requested (hook fired: %v)", hadHook)
 	}
 	writeJSON(w, s.detector.Get(r.Context()))
 }
