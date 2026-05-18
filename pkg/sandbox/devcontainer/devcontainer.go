@@ -121,14 +121,49 @@ func (c Command) Empty() bool {
 	return c.Shell == "" && len(c.Argv) == 0
 }
 
-// AsShell returns the command as a shell-snippet string. Argv form is
-// joined with spaces — callers that need precise quoting should pass
-// the Argv form through their own quoting routine.
+// AsShell returns the command as a shell-snippet string. The Argv form
+// is POSIX-quoted so tokens containing spaces, quotes, or shell
+// metacharacters survive a subsequent `sh -c` execution as discrete
+// arguments. Naïve `strings.Join(argv, " ")` would expand `$HOME`,
+// split on whitespace, and silently break any argv with spaces.
 func (c Command) AsShell() string {
 	if c.Shell != "" {
 		return c.Shell
 	}
-	return strings.Join(c.Argv, " ")
+	parts := make([]string, len(c.Argv))
+	for i, a := range c.Argv {
+		parts[i] = posixShellQuote(a)
+	}
+	return strings.Join(parts, " ")
+}
+
+// posixShellQuote returns s safe to drop into a /bin/sh command line.
+// Empty strings become `”`; strings of safe chars are returned bare;
+// everything else is wrapped in single quotes (with inner single
+// quotes escaped via the standard `'\”` dance).
+func posixShellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if isShellSafe(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+func isShellSafe(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z',
+			c >= 'A' && c <= 'Z',
+			c >= '0' && c <= '9':
+		case c == '_' || c == '-' || c == '.' || c == '/' || c == ':' || c == '@' || c == ',' || c == '+' || c == '=':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // ReadFromRepo locates and parses a devcontainer.json in the canonical

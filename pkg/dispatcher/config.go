@@ -198,7 +198,10 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
-	if c.Polling.IntervalMS == 0 {
+	if c.Polling.IntervalMS <= 0 {
+		// Treat 0 and negative the same — both would later trip
+		// ticker.Reset's "non-positive interval" panic. Hot-reload
+		// callers depend on this floor.
 		c.Polling.IntervalMS = DefaultPollingInterval
 	}
 	if c.Agent.MaxConcurrent == 0 {

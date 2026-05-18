@@ -203,12 +203,17 @@ func (c *Dispatcher) Snapshot() Snapshot {
 	case <-c.stop:
 		return Snapshot{}
 	}
+	// NewTimer + Stop so an early return via reply/stop doesn't leak a
+	// timer goroutine waiting out the full 5s — under shutdown bursts
+	// that leaked tens of timers per second.
+	t := time.NewTimer(5 * time.Second)
+	defer t.Stop()
 	select {
 	case s := <-reply:
 		return s
 	case <-c.stop:
 		return Snapshot{}
-	case <-time.After(5 * time.Second):
+	case <-t.C:
 		return Snapshot{}
 	}
 }

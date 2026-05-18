@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -231,8 +232,22 @@ func (c *sdkClient) buildTransport() (mcp.Transport, error) {
 			cmd.Dir = c.cfg.WorkDir
 		}
 		if len(c.cfg.Env) > 0 {
-			cmd.Env = os.Environ()
+			// Merge user env on top of the inherited environ so a
+			// user-supplied override (e.g. PATH, PYTHONPATH) wins
+			// instead of being a duplicate appended after the parent's
+			// value — execve doesn't dedup and Go's docs leave dup
+			// resolution implementation-defined.
+			merged := make(map[string]string, len(os.Environ())+len(c.cfg.Env))
+			for _, kv := range os.Environ() {
+				if i := strings.IndexByte(kv, '='); i > 0 {
+					merged[kv[:i]] = kv[i+1:]
+				}
+			}
 			for k, v := range c.cfg.Env {
+				merged[k] = v
+			}
+			cmd.Env = make([]string, 0, len(merged))
+			for k, v := range merged {
 				cmd.Env = append(cmd.Env, k+"="+v)
 			}
 		}
