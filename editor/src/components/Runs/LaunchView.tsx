@@ -76,6 +76,46 @@ function isSandboxActive(doc: IterDocument | null): boolean {
   return m === "auto" || m === "inline";
 }
 
+/** sandboxModeLabel returns "auto" / "inline" / "none" / "" — the empty
+ *  string when no block is declared. Used by the SandboxBadge so the
+ *  badge label tracks the IR's view of the workflow without re-parsing. */
+function sandboxModeLabel(doc: IterDocument | null): string {
+  const sb = doc?.workflows?.[0]?.sandbox;
+  if (!sb) return "";
+  return (sb.mode ?? "").toLowerCase();
+}
+
+// SandboxBadge surfaces the workflow's sandbox isolation level next to
+// the Launch button so the operator never confirms a host-execution run
+// by accident. Three states match pkg/dsl/ir/sandbox.go SandboxSpec:
+//   auto / inline → green "sandboxed" pill
+//   none          → red "host execution" pill
+//   (no block)    → red "no sandbox" pill, same risk as `none`
+// The badge title carries the long-form description so the chip itself
+// stays compact in the Launch row.
+function SandboxBadge({ mode }: { mode: string }) {
+  const active = mode === "auto" || mode === "inline";
+  const label = active
+    ? `Sandbox: ${mode} ✓`
+    : mode === "none"
+    ? "Sandbox: none ⚠"
+    : "No sandbox ⚠";
+  const cls = active
+    ? "bg-success-soft text-success-fg border-success/40"
+    : "bg-danger-soft text-danger-fg border-danger/40";
+  const title = active
+    ? "Workflow declares a sandbox block — tools run inside the container."
+    : "Workflow has no active sandbox — tools run directly on the host. Add `sandbox: auto` for isolation.";
+  return (
+    <span
+      className={`inline-flex items-center text-[10px] px-1.5 py-0.5 rounded border ${cls}`}
+      title={title}
+    >
+      {label}
+    </span>
+  );
+}
+
 export default function LaunchView() {
   const [, setLocation] = useLocation();
   const search = useSearch();
@@ -557,7 +597,7 @@ export default function LaunchView() {
               )}
             </div>
 
-            <div className="mt-6 flex items-center gap-2">
+            <div className="mt-6 flex items-center gap-2 flex-wrap">
               <Button
                 variant="primary"
                 onClick={onSubmit}
@@ -566,6 +606,7 @@ export default function LaunchView() {
               >
                 {submitting ? "Launching…" : "Launch"}
               </Button>
+              <SandboxBadge mode={sandboxModeLabel(doc)} />
               <span className="text-[10px] text-fg-subtle">
                 Run ID is generated automatically.
               </span>

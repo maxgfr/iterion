@@ -23,6 +23,47 @@ interface Props {
   // in the toolbar when an execution is selected).
   onClearSelection?: () => void;
   onCollapse?: () => void;
+  // When provided, the search query and type filter chips are persisted
+  // to localStorage under a per-run key so coming back to the same run
+  // restores the previous filter state.
+  runId?: string | null;
+}
+
+// Per-run filter persistence: `run-console.event-filters.v1.<runId>`.
+// Schema is intentionally minimal so older entries can stay readable
+// when fields grow; missing keys fall back to defaults.
+interface PersistedFilters {
+  search?: string;
+  types?: string[];
+}
+
+function filterStorageKey(runId: string): string {
+  return `run-console.event-filters.v1.${runId}`;
+}
+
+function loadPersistedFilters(runId: string): PersistedFilters | null {
+  try {
+    const raw = window.localStorage.getItem(filterStorageKey(runId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedFilters;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePersistedFilters(runId: string, value: PersistedFilters) {
+  try {
+    // Treat all-default as "delete entry" to keep storage clean. The
+    // common case (no filter applied) writes nothing.
+    if ((!value.search || value.search === "") && (!value.types || value.types.length === 0)) {
+      window.localStorage.removeItem(filterStorageKey(runId));
+      return;
+    }
+    window.localStorage.setItem(filterStorageKey(runId), JSON.stringify(value));
+  } catch {
+    // quota / privacy mode → silently degrade to non-persistent
+  }
 }
 
 // Slack the bottom-detection threshold so dynamic-height row reflows
@@ -77,9 +118,34 @@ export default function EventLog({
   onSelectNodeIteration,
   onClearSelection,
   onCollapse,
+  runId,
 }: Props) {
-  const [search, setSearch] = useState("");
-  const [activeTypes, setActiveTypes] = useState<Set<string>>(() => new Set());
+  // Lazy initial value: read localStorage once on mount so the chips
+  // and search box render with the persisted state from the get-go.
+  const initialPersisted = useMemo<PersistedFilters | null>(
+    () => (runId ? loadPersistedFilters(runId) : null),
+    // The runId is treated as stable for this component's lifetime
+    // (RunView remounts EventLog when navigating between runs), so this
+    // memo intentionally runs once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const [search, setSearch] = useState(initialPersisted?.search ?? "");
+  const [activeTypes, setActiveTypes] = useState<Set<string>>(
+    () => new Set(initialPersisted?.types ?? []),
+  );
+
+  // Persist on every change. We avoid debouncing the search input
+  // because the writes are small and infrequent compared to typing
+  // bursts in other inputs, and an immediate write means a hard reload
+  // never loses keystrokes.
+  useEffect(() => {
+    if (!runId) return;
+    savePersistedFilters(runId, {
+      search: search || undefined,
+      types: activeTypes.size > 0 ? Array.from(activeTypes) : undefined,
+    });
+  }, [runId, search, activeTypes]);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   // Tracks whether virtuoso is currently scrolling. atBottomStateChange
   // also fires on data/filter changes; we only treat "left the bottom"
