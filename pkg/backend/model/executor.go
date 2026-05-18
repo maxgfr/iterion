@@ -773,7 +773,13 @@ type backendFields struct {
 	capabilities     []string
 }
 
-func extractBackendFields(node ir.Node) backendFields {
+// extractBackendFields normalises the LLM-relevant fields shared by
+// AgentNode and JudgeNode into a single struct. Returns an error for
+// any other node type so a future ir/ addition can't crash the binary
+// in production — the engine's executeNode dispatch already filters
+// to these two cases, but defensive typing here keeps that contract
+// localised.
+func extractBackendFields(node ir.Node) (backendFields, error) {
 	switch n := node.(type) {
 	case *ir.AgentNode:
 		return backendFields{
@@ -788,7 +794,7 @@ func extractBackendFields(node ir.Node) backendFields {
 			compaction:       n.Compaction,
 			memory:           n.Memory,
 			capabilities:     n.Capabilities,
-		}
+		}, nil
 	case *ir.JudgeNode:
 		return backendFields{
 			id: n.ID, model: n.Model, backend: n.Backend, provider: n.Provider,
@@ -802,9 +808,9 @@ func extractBackendFields(node ir.Node) backendFields {
 			compaction:       n.Compaction,
 			memory:           n.Memory,
 			capabilities:     n.Capabilities,
-		}
+		}, nil
 	default:
-		panic(fmt.Sprintf("model: extractBackendFields called with unsupported node type %T", node))
+		return backendFields{}, fmt.Errorf("model: extractBackendFields called with unsupported node type %T", node)
 	}
 }
 
@@ -848,7 +854,10 @@ func stampDelegateOutputMeta(output map[string]interface{}, result delegate.Resu
 // executeBackend is the unified execution path for agent and judge nodes.
 // It resolves the backend, builds a Task, and dispatches to the backend.
 func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input map[string]interface{}) (map[string]interface{}, error) {
-	f := extractBackendFields(node)
+	f, err := extractBackendFields(node)
+	if err != nil {
+		return nil, err
+	}
 	backendName := e.resolveBackendName(node)
 
 	if e.backendRegistry == nil {
