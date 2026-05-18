@@ -13,10 +13,16 @@ export interface BackendStatus {
 }
 
 export interface ProviderStatus {
-  name: "anthropic" | "openai" | "foundry" | "bedrock" | "vertex";
+  name: "anthropic" | "openai" | "foundry" | "bedrock" | "vertex" | "zai";
   available: boolean;
   source: string;
   suggested_model?: string;
+  // OverriddenSources lists detected credentials that exist on the host
+  // but won't be used because `source` takes precedence. Each label
+  // includes a trailing "(overridden by …)" annotation that the UI
+  // detects to render the entry struck-through. Only OpenAI currently
+  // populates this (API key vs ChatGPT-OAuth) but the shape is generic.
+  overridden_sources?: string[] | null;
 }
 
 export interface BackendDetectReport {

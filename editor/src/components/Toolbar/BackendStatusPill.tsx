@@ -118,8 +118,16 @@ function BackendRow({ status }: { status: BackendStatus }) {
           )}
         </div>
         {(status.sources?.length ?? 0) > 0 && (
-          <div className="text-fg-subtle text-[10px] truncate">
-            {status.sources!.join(", ")}
+          <div className="text-fg-subtle text-[10px]">
+            {status.sources!.map((src, i) => {
+              const overridden = src.includes("(overridden by ");
+              return (
+                <span key={i} className={overridden ? "line-through opacity-60" : ""}>
+                  {i > 0 && <span className="opacity-50">, </span>}
+                  <span title={overridden ? src : undefined}>{src}</span>
+                </span>
+              );
+            })}
           </div>
         )}
         {!status.available && (status.hints?.length ?? 0) > 0 && (

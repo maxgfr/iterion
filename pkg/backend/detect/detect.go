@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/SocialGouv/iterion/pkg/secrets"
 )
 
 // Backend names. Values must stay in sync with the delegate.Backend*
@@ -59,8 +61,18 @@ type BackendStatus struct {
 type ProviderStatus struct {
 	Name           string `json:"name"`
 	Available      bool   `json:"available"`
+	// Source is the credential that will actually be used at runtime.
+	// For providers with a single auth path, this is "ENV_VAR_NAME". For
+	// providers that admit multiple paths (e.g. OpenAI: API key + ChatGPT
+	// OAuth), it is the winner; the others are surfaced via
+	// OverriddenSources so the UI can render them struck-through.
 	Source         string `json:"source"`
 	SuggestedModel string `json:"suggested_model,omitempty"`
+	// OverriddenSources lists detected credentials for this provider
+	// that are present but will NOT be used because Source takes
+	// precedence. Each entry is a free-form human-readable label
+	// (e.g. "OPENAI_API_KEY (overridden by ChatGPT-OAuth)").
+	OverriddenSources []string `json:"overridden_sources,omitempty"`
 }
 
 // DefaultPreferenceOrder is the compiled-in fallback order.
@@ -162,6 +174,10 @@ func detectClaw(prov []ProviderStatus) BackendStatus {
 	for _, p := range prov {
 		if p.Available {
 			sources = append(sources, p.Source)
+			// Surface overridden sources too so the UI can render them
+			// struck-through (entries containing "(overridden by " are
+			// the convention).
+			sources = append(sources, p.OverriddenSources...)
 		}
 	}
 	if len(sources) > 0 {
@@ -211,12 +227,7 @@ func detectProviders() []ProviderStatus {
 			Source:         envSource("ZAI_API_KEY", "ANTHROPIC_BASE_URL"),
 			SuggestedModel: "anthropic/glm-4.6",
 		},
-		{
-			Name:           "openai",
-			Available:      os.Getenv("OPENAI_API_KEY") != "",
-			Source:         envSource("OPENAI_API_KEY"),
-			SuggestedModel: "openai/gpt-5.4-mini",
-		},
+		detectOpenAIProvider(),
 		{
 			Name:           "foundry",
 			Available:      os.Getenv("AZURE_OPENAI_API_KEY") != "" && os.Getenv("AZURE_OPENAI_ENDPOINT") != "",
@@ -237,6 +248,64 @@ func detectProviders() []ProviderStatus {
 		},
 	}
 	return out
+}
+
+// detectOpenAIProvider reports the OpenAI provider availability across both
+// auth paths: `OPENAI_API_KEY` (metered API), and ChatGPT-forfait OAuth
+// sourced from Codex CLI's auth.json. When both are present, the active
+// path mirrors registry.go's resolution: OAuth wins unless
+// ITERION_OPENAI_USE_OAUTH=0 or OPENAI_BASE_URL is set (which forces the
+// API-key path so OpenRouter/Ollama/vLLM aren't masqueraded).
+//
+// The non-active source is surfaced via OverriddenSources so the editor
+// can render it struck-through with a "overridden by ..." annotation.
+func detectOpenAIProvider() ProviderStatus {
+	const (
+		labelAPIKey = "OPENAI_API_KEY"
+		labelOAuth  = "ChatGPT-OAuth (~/.codex/auth.json)"
+	)
+	hasAPIKey := os.Getenv("OPENAI_API_KEY") != ""
+
+	hasOAuth := false
+	if view, err := secrets.LoadCodexCredentialsFromDisk(); err == nil && view.IsChatGPTMode() {
+		hasOAuth = true
+	}
+
+	st := ProviderStatus{
+		Name:           "openai",
+		SuggestedModel: "openai/gpt-5.4-mini",
+	}
+	if !hasAPIKey && !hasOAuth {
+		return st
+	}
+	st.Available = true
+
+	// Same precedence as pkg/backend/model/registry.go's openai factory.
+	oauthOptedOut := os.Getenv("ITERION_OPENAI_USE_OAUTH") == "0" ||
+		os.Getenv("OPENAI_BASE_URL") != ""
+	oauthWins := hasOAuth && !oauthOptedOut
+
+	switch {
+	case oauthWins:
+		st.Source = labelOAuth
+		if hasAPIKey {
+			st.OverriddenSources = []string{
+				labelAPIKey + " (overridden by ChatGPT-OAuth)",
+			}
+		}
+	default: // API-key path
+		st.Source = labelAPIKey
+		if hasOAuth {
+			reason := "ITERION_OPENAI_USE_OAUTH=0"
+			if os.Getenv("OPENAI_BASE_URL") != "" {
+				reason = "OPENAI_BASE_URL"
+			}
+			st.OverriddenSources = []string{
+				labelOAuth + " (overridden by " + reason + ")",
+			}
+		}
+	}
+	return st
 }
 
 func envSource(names ...string) string {
