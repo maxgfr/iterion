@@ -78,6 +78,11 @@ func runHeadless() {
 				default:
 				}
 			},
+			// Daemon is the actual HTTP server the GUI proxies all
+			// /api/* calls to, so the credentials Refresh button hits
+			// this process — wire ReloadIterionEnvFile here too,
+			// mirroring server_host.go for the GUI-embedded server.
+			OnForceRefresh: ReloadIterionEnvFile,
 		}
 		if err := cli.RunEditor(rootCtx, opts, printer); err != nil {
 			select {
