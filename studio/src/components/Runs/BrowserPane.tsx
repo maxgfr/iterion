@@ -71,25 +71,37 @@ export default function BrowserPane({
   // as user typing would clobber the keystroke (prev === new is true
   // even though the user actually changed prev mid-render).
   const lastStoreUrlRef = useRef<string | undefined>(browser.currentUrl);
+  // Cancel in-flight attach + skip stale setState on unmount.
+  const attachAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    return () => {
+      attachAbortRef.current?.abort();
+    };
+  }, []);
 
   const handleAttach = useCallback(async () => {
+    attachAbortRef.current?.abort();
+    const controller = new AbortController();
+    attachAbortRef.current = controller;
     setAttachBusy(true);
     setAttachError(null);
     try {
       const res = await fetch(
         `/api/runs/${encodeURIComponent(runId)}/browser/attach`,
-        { method: "POST", credentials: "include" },
+        { method: "POST", credentials: "include", signal: controller.signal },
       );
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`HTTP ${res.status}: ${text}`);
       }
       const body = (await res.json()) as { session_id: string };
+      if (controller.signal.aborted) return;
       setLiveSession({ sessionId: body.session_id, startedAt: new Date().toISOString() });
     } catch (err) {
+      if (controller.signal.aborted) return;
       setAttachError(err instanceof Error ? err.message : String(err));
     } finally {
-      setAttachBusy(false);
+      if (!controller.signal.aborted) setAttachBusy(false);
     }
   }, [runId, setLiveSession]);
 
