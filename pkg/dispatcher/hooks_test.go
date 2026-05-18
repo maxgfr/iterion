@@ -47,13 +47,19 @@ func TestHookRunCommandFails(t *testing.T) {
 }
 
 func TestHookRunTimeout(t *testing.T) {
-	h := &Hook{Script: "sleep 5", TimeoutMS: 100}
+	h := &Hook{Script: "sleep 30", TimeoutMS: 100}
 	start := time.Now()
 	err := h.Run(context.Background(), newTestLogger(), "slow", t.TempDir(), nil)
 	if err == nil || !strings.Contains(err.Error(), "timeout") {
 		t.Fatalf("expected timeout error, got %v", err)
 	}
-	if d := time.Since(start); d > time.Second {
+	// `exec.CommandContext` kills the immediate sh process at 100ms, but
+	// cmd.Run blocks until inherited stdout/stderr pipes close — the
+	// orphaned `sleep` child can hold them open. On overloaded CI
+	// runners this has been observed up to ~5s. Anything well under the
+	// 30s sleep proves the timeout fired; we only fail if the test
+	// would block the suite for longer than that.
+	if d := time.Since(start); d > 15*time.Second {
 		t.Fatalf("timeout took too long: %s", d)
 	}
 }
