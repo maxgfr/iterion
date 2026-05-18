@@ -11,6 +11,17 @@ import (
 // noop is a no-op execute function for testing.
 func noop(_ context.Context, _ json.RawMessage) (string, error) { return "{}", nil }
 
+// mustResolve is like Resolve but panics on error. Test-only — kept in
+// the _test.go file so it can't be inadvertently called from
+// production code.
+func (r *Registry) mustResolve(ref string) *ToolDef {
+	td, err := r.Resolve(ref)
+	if err != nil {
+		panic(err)
+	}
+	return td
+}
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
