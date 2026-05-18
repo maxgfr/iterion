@@ -1,3 +1,5 @@
+import { LiveDot, type LiveDotTone } from "@/components/ui/LiveDot";
+
 interface Props {
   // Mirrors useRunStore.wsState — "open" | "connecting" | "reconnecting" |
   // "closed" plus any future values; rendered as a coloured dot with a
@@ -6,7 +8,7 @@ interface Props {
 }
 
 interface Style {
-  color: string;
+  tone: LiveDotTone;
   label: string;
   pulse: boolean;
 }
@@ -14,31 +16,27 @@ interface Style {
 function styleFor(state: string): Style {
   switch (state) {
     case "open":
-      return { color: "bg-success", label: "Connected", pulse: false };
+      return { tone: "success", label: "Connected", pulse: false };
     case "connecting":
-      return { color: "bg-info", label: "Connecting…", pulse: true };
+      return { tone: "info", label: "Connecting…", pulse: true };
     case "reconnecting":
-      return { color: "bg-warning", label: "Reconnecting…", pulse: true };
+      return { tone: "warning", label: "Reconnecting…", pulse: true };
     case "closed":
-      return { color: "bg-danger", label: "Disconnected", pulse: false };
+      return { tone: "danger", label: "Disconnected", pulse: false };
     default:
-      return { color: "bg-surface-3", label: state || "Unknown", pulse: false };
+      return { tone: "neutral", label: state || "Unknown", pulse: false };
   }
 }
 
 export default function WSStatusDot({ state }: Props) {
-  const { color, label, pulse } = styleFor(state);
+  const { tone, label, pulse } = styleFor(state);
   return (
     <span
       className="inline-flex items-center"
       title={`WebSocket: ${label}`}
       aria-label={`WebSocket: ${label}`}
     >
-      <span
-        className={`inline-block w-2 h-2 rounded-full ${color} ${
-          pulse ? "animate-pulse" : ""
-        }`}
-      />
+      <LiveDot tone={tone} size="md" pulse={pulse} />
     </span>
   );
 }

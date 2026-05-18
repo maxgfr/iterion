@@ -21,14 +21,15 @@ const INLINE_PIPS_MAX = 6;
 // Palette cycled through iteration indices so a loop body that fired
 // 5 times shows pip 0 cyan, pip 1 violet, pip 2 amber, etc. Independent
 // of status colors — the eye can track "which iteration?" separately
-// from "did it succeed?".
+// from "did it succeed?". Backed by `--color-iteration-*` tokens for
+// theme-awareness; values resolve at paint time.
 export const ITERATION_PALETTE = [
-  "#06B6D4", // cyan
-  "#A855F7", // purple
-  "#F59E0B", // amber
-  "#14B8A6", // teal
-  "#EC4899", // pink
-  "#84CC16", // lime
+  "var(--color-iteration-0)",
+  "var(--color-iteration-1)",
+  "var(--color-iteration-2)",
+  "var(--color-iteration-3)",
+  "var(--color-iteration-4)",
+  "var(--color-iteration-5)",
 ];
 
 export function iterationColor(index: number): string {

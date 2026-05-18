@@ -218,7 +218,7 @@ export default function DispatcherView() {
         />
       )}
 
-      <main className="flex-1 overflow-auto p-4 space-y-4 max-w-4xl">
+      <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto p-4 space-y-4 max-w-4xl outline-none">
         <SummaryCard snap={snap} />
         <RunningTable
           rows={running}

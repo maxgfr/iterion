@@ -12,7 +12,7 @@ import { ChevronRightIcon } from "@radix-ui/react-icons";
 import type { ArtifactSummary, ExecutionState, RunEvent } from "@/api/runs";
 import { fetchToolBlob, listArtifacts } from "@/api/runs";
 import { formatBytes } from "@/lib/format";
-import { CopyButton, IconButton, Input, StatusBadge, Tabs } from "@/components/ui";
+import { CopyButton, IconButton, Input, LiveDot, StatusBadge, Tabs } from "@/components/ui";
 import { stepIteration } from "@/lib/eventIter";
 import { formatContextUsage, formatDurationBetween, formatMs } from "@/lib/format";
 import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
@@ -99,11 +99,7 @@ function FollowLivePill({
           : "Pinned. Click to follow the running node."
       }
     >
-      <span
-        className={`inline-block w-1.5 h-1.5 rounded-full ${
-          followLive ? "bg-success animate-pulse" : "bg-fg-subtle"
-        }`}
-      />
+      <LiveDot tone={followLive ? "success" : "neutral"} size="sm" pulse={followLive} />
       live
     </button>
   );

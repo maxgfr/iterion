@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { LiveDot } from "@/components/ui/LiveDot";
 import { type RunStatus } from "@/api/runs";
 import { formatRelative } from "@/lib/format";
 import AppHeader from "@/components/shared/AppHeader";
@@ -84,7 +85,7 @@ export default function RunListView() {
         })}
       </div>
 
-      <div className="flex-1 overflow-auto">
+      <div id="main-content" tabIndex={-1} className="flex-1 overflow-auto outline-none">
         {loading && runs.length === 0 ? (
           <EmptyState message="Loading…" />
         ) : error ? (
@@ -126,9 +127,11 @@ export default function RunListView() {
                       {labelForStatus(r.status)}
                     </Badge>
                     {r.active && (
-                      <span
-                        className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-info animate-pulse"
-                        title="Active in this process"
+                      <LiveDot
+                        tone="info"
+                        size="sm"
+                        className="ml-1.5"
+                        label="Active in this process"
                       />
                     )}
                   </td>

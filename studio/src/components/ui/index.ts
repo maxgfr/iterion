@@ -52,5 +52,8 @@ export type { EmptyStateProps } from "./EmptyState";
 export { Spinner } from "./Spinner";
 export type { SpinnerProps, SpinnerSize } from "./Spinner";
 
+export { LiveDot } from "./LiveDot";
+export type { LiveDotProps, LiveDotTone, LiveDotSize } from "./LiveDot";
+
 export { CopyButton } from "./CopyButton";
 export type { CopyButtonProps } from "./CopyButton";

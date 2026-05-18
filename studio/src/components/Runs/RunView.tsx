@@ -646,7 +646,7 @@ export default function RunView() {
             />
           </>
         )}
-      <div className="flex-1 min-h-0 flex">
+      <div id="main-content" tabIndex={-1} className="flex-1 min-h-0 flex outline-none">
         <LeftPanel
           runId={runId}
           run={snapshot.run}
