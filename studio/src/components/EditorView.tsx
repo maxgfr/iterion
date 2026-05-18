@@ -18,6 +18,7 @@ import { useSelectionStore } from "@/store/selection";
 import { useAutoValidation } from "@/hooks/useAutoValidation";
 import { useAutoOpenDiagnosticsOnError } from "@/hooks/useAutoOpenDiagnosticsOnError";
 import { useFileWatcher } from "@/hooks/useFileWatcher";
+import { useConfirm } from "@/hooks/useConfirm";
 import * as api from "@/api/client";
 
 export default function EditorView() {
@@ -47,6 +48,8 @@ export default function EditorView() {
   useAutoOpenDiagnosticsOnError();
   useFileWatcher();
 
+  const { confirm, dialog: confirmDialog } = useConfirm();
+
   // Honor deep links from the run console: /?file=<workspace-relative>&node=<ir_node_id>&from=<runId>.
   // Mounted once, runs whenever the search string changes — the early
   // return avoids re-loading the same file on unrelated navigation.
@@ -71,32 +74,40 @@ export default function EditorView() {
       setPendingFitNodeId(node);
     };
 
-    if (file && !alreadyOpen) {
-      if (docStore.isDirty() && !window.confirm("You have unsaved changes. Discard them?")) {
-        return;
-      }
-      api
-        .openFile(file)
-        .then((result) => {
-          const ds = useDocumentStore.getState();
-          ds.setDocument(result.document);
-          ds.setCurrentFilePath(result.path);
-          ds.setCurrentSource(result.source);
-          ds.markSaved();
-          // Selection waits a tick so the new document's nodes have
-          // been registered with React Flow before we attempt to
-          // center on one of them.
-          setTimeout(applyNodeFocus, 0);
-        })
-        .catch((err) => {
-          addToast(`Open from run failed: ${(err as Error).message}`, "error");
+    const proceedOpen = async () => {
+      if (docStore.isDirty()) {
+        const ok = await confirm({
+          title: "Discard unsaved changes?",
+          message: "You have unsaved changes that will be lost.",
+          confirmLabel: "Discard",
+          confirmVariant: "danger",
         });
+        if (!ok) return;
+      }
+      try {
+        const result = await api.openFile(file!);
+        const ds = useDocumentStore.getState();
+        ds.setDocument(result.document);
+        ds.setCurrentFilePath(result.path);
+        ds.setCurrentSource(result.source);
+        ds.markSaved();
+        // Selection waits a tick so the new document's nodes have
+        // been registered with React Flow before we attempt to
+        // center on one of them.
+        setTimeout(applyNodeFocus, 0);
+      } catch (err) {
+        addToast(`Open from run failed: ${(err as Error).message}`, "error");
+      }
+    };
+
+    if (file && !alreadyOpen) {
+      void proceedOpen();
     } else {
       applyNodeFocus();
     }
 
     if (from) setBannerRunId(from);
-  }, [search, addToast, setPendingFitNodeId, setSelectedNode]);
+  }, [search, addToast, setPendingFitNodeId, setSelectedNode, confirm]);
 
   const dismissBanner = () => {
     setBannerRunId(null);
@@ -270,6 +281,7 @@ export default function EditorView() {
           </div>
         )}
       </div>
+      {confirmDialog}
       </div>
     </ReactFlowProvider>
   );

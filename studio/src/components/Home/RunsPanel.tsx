@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useLocation } from "wouter";
 
 import { Badge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/EmptyState";
 import type { GlobalActiveRun, RunSummary } from "@/api/runs";
 import { formatRelative } from "@/lib/format";
 import {
@@ -78,13 +79,11 @@ export default function RunsPanel({ runs, loading, error }: Props) {
 
       <div className="flex-1 overflow-auto">
         {loading && runs.length === 0 ? (
-          <div className="p-4 text-xs text-fg-subtle">Loading…</div>
+          <EmptyState message="Loading…" className="py-6" />
         ) : error ? (
-          <div className="p-4 text-xs text-danger">{error}</div>
+          <EmptyState message={<span className="text-danger">{error}</span>} className="py-6" />
         ) : !hasAnything ? (
-          <div className="p-4 text-xs text-fg-subtle">
-            No runs yet — launch one from the studio.
-          </div>
+          <EmptyState message="No runs yet — launch one from the studio." className="py-6" />
         ) : (
           <ul className="divide-y divide-border-default">
             {active.map((r) => (

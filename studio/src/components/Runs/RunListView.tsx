@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 
 import { Badge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { type RunStatus } from "@/api/runs";
 import { formatRelative } from "@/lib/format";
 import AppHeader from "@/components/shared/AppHeader";
@@ -85,13 +86,11 @@ export default function RunListView() {
 
       <div className="flex-1 overflow-auto">
         {loading && runs.length === 0 ? (
-          <div className="p-6 text-xs text-fg-subtle">Loading…</div>
+          <EmptyState message="Loading…" />
         ) : error ? (
-          <div className="p-6 text-xs text-danger">{error}</div>
+          <EmptyState message={<span className="text-danger">{error}</span>} />
         ) : runs.length === 0 ? (
-          <div className="p-6 text-xs text-fg-subtle">
-            No runs yet. Launch one from the studio.
-          </div>
+          <EmptyState message="No runs yet. Launch one from the studio." />
         ) : (
           <table className="w-full text-xs">
             <thead className="text-fg-subtle">

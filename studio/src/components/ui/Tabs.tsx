@@ -46,8 +46,8 @@ export function Tabs({
             disabled={item.disabled}
             className={
               variant === "underline"
-                ? "relative px-3 py-2 text-xs font-medium text-fg-subtle hover:text-fg-default data-[state=active]:text-fg-default data-[state=active]:after:content-[''] data-[state=active]:after:absolute data-[state=active]:after:left-2 data-[state=active]:after:right-2 data-[state=active]:after:bottom-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-accent disabled:opacity-40"
-                : "rounded-md px-2.5 py-1 text-xs font-medium text-fg-muted hover:bg-surface-2 hover:text-fg-default data-[state=active]:bg-surface-2 data-[state=active]:text-fg-default disabled:opacity-40"
+                ? "relative px-3 py-2 text-xs font-medium text-fg-subtle hover:text-fg-default data-[state=active]:text-fg-default data-[state=active]:after:content-[''] data-[state=active]:after:absolute data-[state=active]:after:left-2 data-[state=active]:after:right-2 data-[state=active]:after:bottom-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-accent disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-fg-subtle"
+                : "rounded-md px-2.5 py-1 text-xs font-medium text-fg-muted hover:bg-surface-2 hover:text-fg-default data-[state=active]:bg-surface-2 data-[state=active]:text-fg-default disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-fg-muted"
             }
           >
             <span className="inline-flex items-center gap-1.5">
