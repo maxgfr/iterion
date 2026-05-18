@@ -14,11 +14,14 @@ import (
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
-// appendEventMaxRetries caps the seq-collision retry loop. Three is
-// generous: the engine is single-writer per run so a real collision
-// only happens during a server-runner handoff. Anything beyond three
-// is more likely a misconfiguration than transient contention.
-const appendEventMaxRetries = 3
+// appendEventMaxRetries caps the seq-collision retry loop. Ten is
+// generous: in production the engine is single-writer per run so a
+// real collision only happens during a server-runner handoff. The
+// generous budget exists for the storetest concurrency harness (8
+// goroutines × 25 events) which deliberately drives the allocSeq
+// path hard; flaking under that load would mask real regressions
+// in the seq monotonicity contract.
+const appendEventMaxRetries = 10
 
 // appendEventBackoffBase is the base delay before retrying after a
 // duplicate-key error. The actual delay grows linearly with the attempt
