@@ -37,6 +37,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/SocialGouv/iterion/pkg/internal/shellquote"
 )
 
 // File is the parsed shape of a devcontainer.json. Field names mirror
@@ -132,38 +134,9 @@ func (c Command) AsShell() string {
 	}
 	parts := make([]string, len(c.Argv))
 	for i, a := range c.Argv {
-		parts[i] = posixShellQuote(a)
+		parts[i] = shellquote.Quote(a)
 	}
 	return strings.Join(parts, " ")
-}
-
-// posixShellQuote returns s safe to drop into a /bin/sh command line.
-// Empty strings become `”`; strings of safe chars are returned bare;
-// everything else is wrapped in single quotes (with inner single
-// quotes escaped via the standard `'\”` dance).
-func posixShellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	if isShellSafe(s) {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-func isShellSafe(s string) bool {
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c >= 'a' && c <= 'z',
-			c >= 'A' && c <= 'Z',
-			c >= '0' && c <= '9':
-		case c == '_' || c == '-' || c == '.' || c == '/' || c == ':' || c == '@' || c == ',' || c == '+' || c == '=':
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 // ReadFromRepo locates and parses a devcontainer.json in the canonical

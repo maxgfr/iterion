@@ -237,8 +237,9 @@ func (c *sdkClient) buildTransport() (mcp.Transport, error) {
 			// instead of being a duplicate appended after the parent's
 			// value — execve doesn't dedup and Go's docs leave dup
 			// resolution implementation-defined.
-			merged := make(map[string]string, len(os.Environ())+len(c.cfg.Env))
-			for _, kv := range os.Environ() {
+			environ := os.Environ()
+			merged := make(map[string]string, len(environ)+len(c.cfg.Env))
+			for _, kv := range environ {
 				if i := strings.IndexByte(kv, '='); i > 0 {
 					merged[kv[:i]] = kv[i+1:]
 				}
