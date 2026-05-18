@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/SocialGouv/claw-code-go/pkg/api"
@@ -689,6 +690,22 @@ func GenerateTextDirect(ctx context.Context, client api.APIClient, opts Generati
 				opts.OnCompact(info)
 			}
 		}
+
+		// Drain operator-queued messages (chatbox inbox) AFTER
+		// compaction so they always land at the very end of the
+		// conversation, in the preserved-recent window. Delivery is
+		// cooperative: the agent sees them at the next LLM turn, never
+		// mid-stream. Empty drains are a no-op. The previous round's
+		// consume hook fires first so the editor inbox transitions
+		// delivered→consumed in lockstep with the next request.
+		if opts.InboxConsume != nil {
+			opts.InboxConsume(ctx)
+		}
+		if opts.InboxDrainer != nil {
+			if drained := opts.InboxDrainer(ctx); len(drained) > 0 {
+				messages = append(messages, buildOperatorMessage(drained))
+			}
+		}
 	}
 
 	return &TextResult{
@@ -699,6 +716,29 @@ func GenerateTextDirect(ctx context.Context, client api.APIClient, opts Generati
 		FinishReason: lastFinish,
 		Messages:     messages,
 	}, nil
+}
+
+// buildOperatorMessage wraps any operator-queued chat messages into a
+// single synthetic user turn the LLM observes between tool iterations.
+// The "[OPERATOR MESSAGE]" prefix is conventional rather than
+// load-bearing: the agent can see them, react if relevant, or
+// continue its plan otherwise.
+func buildOperatorMessage(texts []string) api.Message {
+	var sb strings.Builder
+	sb.WriteString("[OPERATOR MESSAGE]\n")
+	for i, t := range texts {
+		if i > 0 {
+			sb.WriteString("\n---\n")
+		}
+		sb.WriteString(t)
+	}
+	return api.Message{
+		Role: "user",
+		Content: []api.ContentBlock{{
+			Type: "text",
+			Text: sb.String(),
+		}},
+	}
 }
 
 // assistantToolUseMessage builds the assistant turn that contains text (if any)

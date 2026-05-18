@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	gitlib "github.com/SocialGouv/iterion/pkg/git"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
@@ -533,6 +534,21 @@ func watchDetachedExit(s *Service, runID string, pid int, done chan struct{}) {
 // Broker exposes the event broker for transports that need to
 // subscribe directly (the WS handler).
 func (s *Service) Broker() *EventBroker { return s.broker }
+
+// inboxBinder returns the runtime's operator-chatbox plumbing
+// scoped to this service's store + broker. Built once per Build-
+// Executor call so the binder closures see a consistent store
+// handle even when a service is hot-swapped (project switch).
+func (s *Service) inboxBinder() model.InboxBinder {
+	if s == nil || s.store == nil {
+		return nil
+	}
+	binder := &model.StoreInboxBinder{Store: s.store}
+	if s.broker != nil {
+		binder.Publish = s.broker.Publish
+	}
+	return binder
+}
 
 // StoreDir returns the on-disk store directory. Exposed so HTTP
 // handlers can fall back to persisted run.log when the in-memory
@@ -1495,6 +1511,7 @@ func (s *Service) Launch(parent context.Context, spec LaunchSpec) (*LaunchResult
 		RunID:    runID,
 		Logger:   runLogger,
 		StoreDir: s.storeDir,
+		Inbox:    s.inboxBinder(),
 	})
 	if err != nil {
 		s.dropRunLog(runID)
@@ -1613,6 +1630,7 @@ func (s *Service) Resume(parent context.Context, spec ResumeSpec) (*LaunchResult
 		RunID:    spec.RunID,
 		Logger:   runLogger,
 		StoreDir: s.storeDir,
+		Inbox:    s.inboxBinder(),
 	})
 	if err != nil {
 		s.dropRunLog(spec.RunID)
