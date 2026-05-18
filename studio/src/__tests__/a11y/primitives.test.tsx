@@ -112,7 +112,8 @@ describe("a11y / primitives", () => {
   it("LiveDot — every tone", async () => {
     const root = mount(
       <div>
-        <LiveDot tone="info" label="Run active" />
+        <LiveDot tone="info" label="Informational" />
+        <LiveDot tone="live" label="Run active" />
         <LiveDot tone="success" label="Connected" />
         <LiveDot tone="warning" label="Reconnecting" />
         <LiveDot tone="danger" pulse={false} label="Disconnected" />

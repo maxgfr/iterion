@@ -130,7 +130,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
         <StatusBadge status={run.status} />
         {active && (
           <LiveDot
-            tone="info"
+            tone="live"
             size="sm"
             label="Run is active in this server process"
           />

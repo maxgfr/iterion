@@ -1,4 +1,4 @@
-export type LiveDotTone = "info" | "success" | "warning" | "danger" | "neutral";
+export type LiveDotTone = "info" | "live" | "success" | "warning" | "danger" | "neutral";
 export type LiveDotSize = "xs" | "sm" | "md";
 
 export interface LiveDotProps {
@@ -17,6 +17,10 @@ export interface LiveDotProps {
 
 const toneClass: Record<LiveDotTone, string> = {
   info: "bg-info",
+  // "live" is the dedicated secondary accent for "currently running"
+  // — distinct from info (informational/neutral). See
+  // docs/visual-identity.md § Secondary accent.
+  live: "bg-live",
   success: "bg-success",
   warning: "bg-warning",
   danger: "bg-danger",

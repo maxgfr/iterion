@@ -176,7 +176,7 @@ function RunRow({ run, onOpen }: { run: RunSummary; onOpen: () => void }) {
         </Badge>
         {run.active && (
           <LiveDot
-            tone="info"
+            tone="live"
             size="sm"
             className="ml-1.5"
             label="Active in this process"
@@ -209,7 +209,7 @@ function RunCard({ run, onOpen }: { run: RunSummary; onOpen: () => void }) {
           {labelForStatus(run.status)}
         </Badge>
         {run.active && (
-          <LiveDot tone="info" size="sm" label="Active in this process" />
+          <LiveDot tone="live" size="sm" label="Active in this process" />
         )}
         <span className="font-medium truncate">
           {run.name || run.workflow_name}
