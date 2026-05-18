@@ -141,15 +141,28 @@ Iterion auto-detects this on the next `iterion run`. The status pill
 shows the OpenAI provider as available even without `OPENAI_API_KEY`
 set.
 
-**Opt-out:**
+**Precedence:**
+
+`OPENAI_API_KEY` wins when both are present. The reasoning: an explicit
+env var was a deliberate user action — typically a project-scoped BYOK
+key, a CI secret, or a shared workspace credential — and silently
+spending someone else's ChatGPT subscription would be a surprising
+default. ChatGPT-OAuth activates when `OPENAI_API_KEY` is unset.
 
 ```bash
-# Force the API-key path even with a chatgpt auth.json on disk:
+# Force OAuth even with OPENAI_API_KEY set:
+export ITERION_OPENAI_USE_OAUTH=1
+
+# Force API-key only (refuse to use OAuth even if no key is set):
 export ITERION_OPENAI_USE_OAUTH=0
-# Or: setting OPENAI_BASE_URL (for OpenRouter/Ollama/vLLM) automatically
-# falls back to the API-key path so masquerading headers don't reach an
+
+# Setting OPENAI_BASE_URL (for OpenRouter/Ollama/vLLM) automatically
+# disables OAuth so masquerading codex_cli_rs headers don't reach an
 # unintended backend.
 ```
+
+The editor status pill renders both detected sources, with the
+inactive one struck-through and labelled `(overridden by …)`.
 
 **Model-version gating.** OpenAI's backend gates model access on the
 HTTP `version:` header iterion sends with each call. By default iterion

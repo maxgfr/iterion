@@ -252,10 +252,11 @@ func detectProviders() []ProviderStatus {
 
 // detectOpenAIProvider reports the OpenAI provider availability across both
 // auth paths: `OPENAI_API_KEY` (metered API), and ChatGPT-forfait OAuth
-// sourced from Codex CLI's auth.json. When both are present, the active
-// path mirrors registry.go's resolution: OAuth wins unless
-// ITERION_OPENAI_USE_OAUTH=0 or OPENAI_BASE_URL is set (which forces the
-// API-key path so OpenRouter/Ollama/vLLM aren't masqueraded).
+// sourced from Codex CLI's auth.json. The active path mirrors registry.go:
+// OPENAI_API_KEY wins by default; ChatGPT-OAuth is used only when no API
+// key is set, or when ITERION_OPENAI_USE_OAUTH=1 forces it. OAuth is
+// disabled entirely when ITERION_OPENAI_USE_OAUTH=0 or OPENAI_BASE_URL is
+// set (we never masquerade codex_cli_rs headers to a third-party endpoint).
 //
 // The non-active source is surfaced via OverriddenSources so the editor
 // can render it struck-through with a "overridden by ..." annotation.
@@ -281,23 +282,35 @@ func detectOpenAIProvider() ProviderStatus {
 	st.Available = true
 
 	// Same precedence as pkg/backend/model/registry.go's openai factory.
-	oauthOptedOut := os.Getenv("ITERION_OPENAI_USE_OAUTH") == "0" ||
-		os.Getenv("OPENAI_BASE_URL") != ""
-	oauthWins := hasOAuth && !oauthOptedOut
+	oauthPref := os.Getenv("ITERION_OPENAI_USE_OAUTH")
+	oauthDisabled := oauthPref == "0" || os.Getenv("OPENAI_BASE_URL") != ""
+	oauthForced := oauthPref == "1"
+	oauthWins := hasOAuth && !oauthDisabled && (!hasAPIKey || oauthForced)
 
 	switch {
 	case oauthWins:
 		st.Source = labelOAuth
 		if hasAPIKey {
+			reason := "ITERION_OPENAI_USE_OAUTH=1"
+			if !oauthForced {
+				// Shouldn't be reachable given oauthWins requires
+				// !hasAPIKey || oauthForced, but spell it out
+				// defensively so the override label stays accurate
+				// if the predicate is ever refactored.
+				reason = "ChatGPT-OAuth"
+			}
 			st.OverriddenSources = []string{
-				labelAPIKey + " (overridden by ChatGPT-OAuth)",
+				labelAPIKey + " (overridden by " + reason + ")",
 			}
 		}
-	default: // API-key path
+	default: // API-key path wins
 		st.Source = labelAPIKey
 		if hasOAuth {
-			reason := "ITERION_OPENAI_USE_OAUTH=0"
-			if os.Getenv("OPENAI_BASE_URL") != "" {
+			reason := "OPENAI_API_KEY"
+			switch {
+			case oauthPref == "0":
+				reason = "ITERION_OPENAI_USE_OAUTH=0"
+			case os.Getenv("OPENAI_BASE_URL") != "":
 				reason = "OPENAI_BASE_URL"
 			}
 			st.OverriddenSources = []string{
@@ -358,25 +371,47 @@ var findClaudeBinary = func() (string, bool) {
 // findCodexBinary duplicates codex-agent-sdk-go/internal/cli/discovery.go;
 // the upstream helper is unexported and the search list is small.
 // Declared as a var so tests can stub host probing.
+//
+// PATH lookup is tried first, then a set of well-known install locations
+// that the process PATH might miss (e.g. iterion launched from a desktop
+// launcher that doesn't source ~/.bashrc — Homebrew on Linux installs to
+// /home/linuxbrew/.linuxbrew/bin which only login shells pick up via
+// brew shellenv).
 var findCodexBinary = func() (string, bool) {
 	if path, err := exec.LookPath("codex"); err == nil {
 		return path, true
 	}
-	home, _ := os.UserHomeDir()
-	candidates := []string{}
-	if home != "" {
-		candidates = append(candidates,
-			filepath.Join(home, ".volta", "bin", "codex"),
-			filepath.Join(home, ".local", "bin", "codex"),
-		)
-	}
-	candidates = append(candidates, "/usr/local/bin/codex", "/usr/bin/codex")
-	for _, p := range candidates {
+	for _, p := range commonBinaryCandidates("codex") {
 		if isExecutable(p) {
 			return p, true
 		}
 	}
 	return "", false
+}
+
+// commonBinaryCandidates returns an OS-aware list of well-known install
+// locations for a CLI tool, in roughly-preferred order. Used as a
+// fallback when exec.LookPath fails (typically because the process was
+// launched from a context that didn't load the user's interactive
+// shell rc — Homebrew on Linux, devbox/nix wrappers, GUI launchers).
+func commonBinaryCandidates(name string) []string {
+	var out []string
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		out = append(out,
+			filepath.Join(home, ".volta", "bin", name),
+			filepath.Join(home, ".local", "bin", name),
+			filepath.Join(home, ".linuxbrew", "bin", name),
+		)
+	}
+	out = append(out,
+		"/usr/local/bin/"+name,
+		"/usr/bin/"+name,
+		// Homebrew on Linux (multi-user shared install)
+		"/home/linuxbrew/.linuxbrew/bin/"+name,
+		// Homebrew on macOS Apple Silicon
+		"/opt/homebrew/bin/"+name,
+	)
+	return out
 }
 
 func fileExists(path string) bool {
