@@ -265,9 +265,21 @@ Before adding a new primitive, ask:
 2. **Is this a one-off vs reusable?** A one-off form layout is fine inline; a pattern repeated 3+ times deserves a primitive.
 3. **Where does this fit in the tokens?** If you can't name the design tokens you'd use, the design isn't finished yet — pause and define them.
 
+## Responsive scope
+
+The studio is **desktop-first**. The Editor (xyflow canvas with drag-drop, multi-select, library palette) and RunView (resizable panels, scrubber, dock) are not designed for touch and remain effectively desktop-only.
+
+What does work on narrow viewports (tested ≥ 360 px wide):
+- AppHeader collapses gracefully — NavLinks become icon-only below `sm` (640 px), `ProjectLabel` caps at 140 px, the user-team chip drops the email line. Brand + right-actions stay shrink-0.
+- HomeView grid switches from 2-col to 1-col below `md` (768 px).
+- RunListView table scrolls horizontally inside its container.
+- Board kanban already scrolls horizontally by design.
+- Skip-link is keyboard-only — no mobile impact.
+
+The pragmatic mental model: read-only flows (Home, RunList, Board, Dispatcher, Settings) are reachable on a phone for monitoring a run in flight; authoring flows (Editor, Launch form) expect a real desktop. When a feature crosses that line, hide it on `< sm` with a clear notice rather than reflowing it badly.
+
 ## Open items
 
-- **Status pulse semantics** — `animate-pulse` is currently used for 5 different meanings (WS live, run running, diagnostic urgent, node running, info). Worth a separate audit to assign clear visual vocabulary.
-- **WCAG AA contrast audit on every theme** — light mode overrides shipped, but no automated pass yet. Run axe-core (browser extension) on `/`, `/editor`, `/runs/:id`, `/board`, `/dispatcher`, `/settings`.
-- **Skip-link** for keyboard users from the page header to the main work surface.
-- **Mobile / responsive** — explicitly out of scope until a use-case demands it.
+- **Pulse semantics** — `animate-pulse` is used for several meanings beyond the `LiveDot` dot pattern (Skeleton shimmer, DiagnosticBadge urgency, ThinkingFooter glyph, NodeDetailPanel row in-flight). Documented in `LiveDot.tsx` but consider a follow-up audit if more callers appear.
+- **WCAG AA contrast audit on every theme** — the axe-core unit suite covers primitives; light-mode canvas variants on `softColor(color, 10)` backgrounds still need a manual browser sweep.
+- **Touch / mobile authoring** — explicitly out of scope until a use-case demands it.

@@ -17,10 +17,12 @@ export default function UserTeamChip() {
     <div className="relative inline-flex">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="bg-surface-1/95 border border-border-subtle rounded px-3 py-1 text-xs flex items-center gap-2 shadow"
+        className="bg-surface-1/95 border border-border-subtle rounded px-3 py-1 text-xs flex items-center gap-2 shadow max-w-[160px] sm:max-w-none"
+        title={`${activeTeam?.team_name ?? "No team"} · ${user?.email ?? ""}`}
       >
-        <span className="font-medium">{activeTeam?.team_name ?? "No team"}</span>
-        <span className="text-fg-muted">{user?.email}</span>
+        <span className="font-medium truncate">{activeTeam?.team_name ?? "No team"}</span>
+        {/* Hide email on narrow viewports — team name is enough chrome. */}
+        <span className="hidden sm:inline text-fg-muted truncate">{user?.email}</span>
         <span>▾</span>
       </button>
       {open && (

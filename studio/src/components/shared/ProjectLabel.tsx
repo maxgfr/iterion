@@ -20,7 +20,7 @@ export default function ProjectLabel() {
 
   const base =
     "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium text-xs" +
-    " border border-accent/40 bg-accent-soft text-accent leading-none max-w-[220px]";
+    " border border-accent/40 bg-accent-soft text-accent leading-none max-w-[140px] sm:max-w-[220px]";
   const interactive = clickable
     ? " hover:border-accent hover:bg-accent/20 cursor-pointer transition-colors"
     : " cursor-default";

@@ -61,9 +61,15 @@ export default function NavLinks({ active }: Props) {
                 : "border-transparent text-fg-muted hover:bg-surface-2 hover:text-fg-default"
             }`}
             aria-current={isActive ? "page" : undefined}
+            title={label}
+            aria-label={label}
           >
             <Icon className="w-3.5 h-3.5" />
-            <span>{label}</span>
+            {/* Hide the label text on narrow viewports so the header
+             * stays within ~360px without wrapping. The link title +
+             * aria-label still announce the destination to screen
+             * readers and tooltip on hover. */}
+            <span className="hidden sm:inline">{label}</span>
           </Link>
         );
       })}
