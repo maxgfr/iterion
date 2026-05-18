@@ -1,6 +1,6 @@
 import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath } from "@xyflow/react";
 import type { EdgeProps } from "@xyflow/react";
-import { SELECTED_BORDER } from "@/lib/constants";
+import { SELECTED_BORDER, softColor } from "@/lib/constants";
 import { useGroupedDiagnostics } from "@/hooks/useGroupedDiagnostics";
 import { useSelectionStore } from "@/store/selection";
 import DiagnosticBadge from "@/components/Diagnostics/DiagnosticBadge";
@@ -24,7 +24,11 @@ export default function ConditionalEdge(props: EdgeProps) {
     offset: hasLoop ? 40 : 20,
   });
 
-  const strokeColor = selected ? SELECTED_BORDER : hasLoop ? "#F59E0B" : "#888";
+  const strokeColor = selected
+    ? SELECTED_BORDER
+    : hasLoop
+      ? "var(--color-warning)"
+      : "var(--color-fg-subtle)";
   const strokeDasharray = hasLoop ? "8 4" : undefined;
   const strokeWidth = selected ? 3 : hasLoop ? 2.5 : 1;
 
@@ -37,7 +41,9 @@ export default function ConditionalEdge(props: EdgeProps) {
           stroke: strokeColor,
           strokeDasharray,
           strokeWidth,
-          filter: selected ? "drop-shadow(0 0 4px rgba(96, 165, 250, 0.6))" : undefined,
+          filter: selected
+            ? `drop-shadow(0 0 4px ${softColor(SELECTED_BORDER, 60)})`
+            : undefined,
           animation: hasLoop ? "dash-flow 1s linear infinite" : undefined,
         }}
       />
@@ -47,9 +53,15 @@ export default function ConditionalEdge(props: EdgeProps) {
             className="absolute text-xs px-1.5 py-0.5 rounded border pointer-events-all whitespace-nowrap"
             style={{
               transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-              backgroundColor: hasLoop ? "#78350F" : "#1F2937",
-              color: hasLoop ? "#FCD34D" : "#FDE68A",
-              borderColor: hasLoop ? "#92400E" : "#4B5563",
+              backgroundColor: hasLoop
+                ? "var(--color-warning-soft)"
+                : "var(--color-surface-1)",
+              color: hasLoop
+                ? "var(--color-warning-fg)"
+                : "var(--color-fg-default)",
+              borderColor: hasLoop
+                ? "var(--color-warning)"
+                : "var(--color-border-strong)",
             }}
           >
             {label}

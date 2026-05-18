@@ -129,7 +129,12 @@ export function documentToGraph(doc: IterDocument, activeWorkflowName?: string):
         target: edge.to,
         type: "conditionalEdge",
         label: label || undefined,
-        markerEnd: { type: MarkerType.ArrowClosed, color: isLoop ? "#F59E0B" : "#888", width: 16, height: 16 },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: isLoop ? "var(--color-warning)" : "var(--color-fg-subtle)",
+          width: 16,
+          height: 16,
+        },
         data: { when: edge.when, loop: edge.loop, with: edge.with, edgeIndex: i, workflowName: wf.name },
       });
     }
@@ -142,14 +147,19 @@ export function documentToGraph(doc: IterDocument, activeWorkflowName?: string):
       source: "__start__",
       target: entryNode,
       type: "default",
-      markerEnd: { type: MarkerType.ArrowClosed, color: "#888", width: 16, height: 16 },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: "var(--color-fg-subtle)",
+        width: 16,
+        height: 16,
+      },
     });
   }
 
   return { nodes, edges };
 }
 
-const GROUP_COLOR = "#6366F1";
+const GROUP_COLOR = "var(--color-node-group)";
 
 /** Apply group annotations to a graph: create group container nodes and handle collapsed groups.
  *  - Expanded groups: group node added, children get parentId (for ELK compound layout)

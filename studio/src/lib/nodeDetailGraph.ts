@@ -77,7 +77,7 @@ export function generateNodeDetailGraph(
   const { kind, decl } = found;
 
   // 1. Central node — the node itself as a workflowNode
-  const color = NODE_COLORS[kind] ?? "#6B7280";
+  const color = NODE_COLORS[kind] ?? "var(--color-fg-subtle)";
   nodes.push({
     id: DETAIL_PREFIX_CENTRAL,
     type: "workflowNode",

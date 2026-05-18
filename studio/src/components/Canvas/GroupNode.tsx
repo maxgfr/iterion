@@ -12,7 +12,7 @@ export interface GroupNodeData extends Record<string, unknown> {
   color: string;
 }
 
-const GROUP_COLOR = "#6366F1"; // indigo
+const GROUP_COLOR = "var(--color-node-group)";
 
 export default function GroupNode({ id, data, selected }: NodeProps) {
   const { groupName, nodeCount, childKinds, color } = data as unknown as GroupNodeData;

@@ -11,7 +11,7 @@ import DiagnosticBadge from "@/components/Diagnostics/DiagnosticBadge";
 import { EffortBar, isEffortLevel } from "@/components/ui/EffortBar";
 import { effortBackendKey, useEffortCapabilities } from "@/hooks/useEffortCapabilities";
 import { useResolvedEffort } from "@/hooks/useResolvedEffort";
-import { SELECTED_BORDER, SELECTED_GLOW } from "@/lib/constants";
+import { SELECTED_BORDER, SELECTED_GLOW, softColor } from "@/lib/constants";
 import { NodeIcon } from "@/components/icons/NodeIcon";
 import { SIDES, POS_MAP } from "./handlePositions";
 
@@ -126,20 +126,18 @@ export default function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeT
   const borderColor = selected
     ? SELECTED_BORDER
     : hasError
-      ? "#EF4444"
-      : hasWarning
-        ? "#F59E0B"
-        : isEntry
-          ? "#F59E0B"
-          : color;
+      ? "var(--color-danger)"
+      : hasWarning || isEntry
+        ? "var(--color-warning)"
+        : color;
   const glow = selected
     ? SELECTED_GLOW
     : hasError
-      ? "0 0 10px #EF444455"
+      ? `0 0 10px ${softColor("var(--color-danger)", 33)}`
       : hasWarning
-        ? "0 0 8px #F59E0B44"
+        ? `0 0 8px ${softColor("var(--color-warning)", 27)}`
         : isEntry
-          ? "0 0 8px #F59E0B55"
+          ? `0 0 8px ${softColor("var(--color-warning)", 33)}`
           : undefined;
 
   return (
@@ -147,7 +145,7 @@ export default function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeT
       className={`relative rounded-xl border-2 px-4 py-2 min-w-[140px] text-center shadow-lg ${isTerminal || isStart ? "opacity-80" : ""}`}
       style={{
         borderColor,
-        background: `${color}1A`,
+        background: softColor(color, 10),
         boxShadow: glow,
       }}
     >

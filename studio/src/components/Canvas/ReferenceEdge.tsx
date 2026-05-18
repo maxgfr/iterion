@@ -8,7 +8,7 @@ export default function ReferenceEdge(props: EdgeProps) {
 
   const edgeData = data as Record<string, unknown> | undefined;
   const layerKind = edgeData?.layerKind as LayerKind | undefined;
-  const color = (edgeData?.color as string) ?? (layerKind ? LAYER_COLORS[layerKind] : "#666");
+  const color = (edgeData?.color as string) ?? (layerKind ? LAYER_COLORS[layerKind] : "var(--color-fg-subtle)");
 
   const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX,

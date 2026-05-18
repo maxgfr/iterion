@@ -18,6 +18,7 @@ import {
   SESSION_HELP,
   SESSION_OPTIONS,
 } from "@/lib/dslOptions";
+import { NODE_COLORS, softColor } from "@/lib/constants";
 import { TextField, CommittedTextField, NumberField, CheckboxField, SelectField, SelectFieldWithCreate, TagListField, PromptPickerField } from "./FormField";
 import { ProviderIcon, ProviderLabel } from "@/components/icons/ProviderIcon";
 import { detectProvider } from "@/components/icons/providerDetect";
@@ -104,7 +105,7 @@ export default function AgentForm({ decl, kind }: Props) {
     return `${REASONING_EFFORT_HELP} Levels available for ${decl.model}: ${(effortCaps.supported ?? []).join(", ")}.`;
   }, [effortLoading, effortCaps, effortNotSupported, decl.model, envSubstEffort]);
 
-  const headerColor = kind === "agent" ? "#4A90D9" : "#7B68EE";
+  const headerColor = NODE_COLORS[kind];
   const headerIcon = kind === "agent" ? "\u{1F916}" : "\u{2696}\u{FE0F}";
   const headerLabel = kind === "agent" ? "Agent" : "Judge";
 
@@ -112,7 +113,7 @@ export default function AgentForm({ decl, kind }: Props) {
     <div className="space-y-1">
       <div
         className="flex items-center gap-2 px-2 py-1.5 rounded mb-2 -mx-1"
-        style={{ backgroundColor: headerColor + "22", borderLeft: `3px solid ${headerColor}` }}
+        style={{ backgroundColor: softColor(headerColor), borderLeft: `3px solid ${headerColor}` }}
       >
         <span className="text-base">{headerIcon}</span>
         <span className="text-xs font-bold uppercase tracking-wide" style={{ color: headerColor }}>{headerLabel}</span>

@@ -466,7 +466,7 @@ export default function Canvas() {
           pannable
           nodeColor={(node) => {
             const kind = (node.data as { kind?: string })?.kind as NodeKind | undefined;
-            return kind ? (NODE_COLORS[kind] ?? "#6B7280") : "#6B7280";
+            return kind ? (NODE_COLORS[kind] ?? "var(--color-fg-subtle)") : "var(--color-fg-subtle)";
           }}
         />
       </ReactFlow>

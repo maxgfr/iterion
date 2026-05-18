@@ -370,7 +370,7 @@ export default function RunCanvasIR({
         animated: isLoop,
         label,
         labelStyle: { fontSize: 10 },
-        labelBgStyle: { fill: "var(--surface-0, #fff)", opacity: 0.9 },
+        labelBgStyle: { fill: "var(--color-surface-0)", opacity: 0.9 },
         labelBgPadding: [4, 2],
         style:
           isLoop
