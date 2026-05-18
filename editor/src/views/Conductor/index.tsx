@@ -6,15 +6,18 @@ import { Button } from "@/components/ui/Button";
 import {
   cancelIssue,
   getState,
+  getStatus,
   openWS,
   refresh as refreshTick,
   reload as reloadConfig,
   type ConductorSnapshot,
+  type ManagerStatus,
 } from "@/api/conductor";
 import SettingsDrawer from "./SettingsDrawer";
 
 export default function ConductorView() {
   const [snap, setSnap] = useState<ConductorSnapshot | null>(null);
+  const [status, setStatus] = useState<ManagerStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -98,6 +101,26 @@ export default function ConductorView() {
     };
   }, [reload]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const s = await getStatus();
+        if (!cancelled) setStatus(s);
+      } catch {
+        if (!cancelled) setStatus(null);
+      }
+    };
+    void tick();
+    const t = window.setInterval(() => void tick(), 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, []);
+
+  const canOperate = status?.state === "running" || status?.state === "paused";
+
   const doRefresh = useCallback(async () => {
     try {
       await refreshTick();
@@ -147,10 +170,22 @@ export default function ConductorView() {
       active="conductor"
       rightActions={
         <>
-          <Button variant="secondary" size="sm" onClick={() => void doRefresh()}>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!canOperate}
+            title={canOperate ? undefined : "Start the conductor first"}
+            onClick={() => void doRefresh()}
+          >
             Force tick
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => void doReload()}>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!canOperate}
+            title={canOperate ? undefined : "Start the conductor first"}
+            onClick={() => void doReload()}
+          >
             Reload config
           </Button>
         </>
