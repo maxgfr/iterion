@@ -47,6 +47,14 @@ type Store struct {
 	// hitting the filesystem, so a board with hundreds of issues
 	// doesn't pay N file reads per query.
 	index map[string]*Issue
+
+	// pendingEvents buffers events whose appendEventLocked call
+	// returned an error (transient fsync failure, NFS hiccup). Every
+	// subsequent successful event flush drains the buffer first so a
+	// downstream tailer eventually sees every state transition. State
+	// recovery via populateIndex doesn't depend on events.jsonl, so
+	// holding the buffer in memory is safe across the failure window.
+	pendingEvents []Event
 }
 
 // NewStore opens (or initializes) the native tracker at root. If
@@ -627,7 +635,9 @@ func (s *Store) issuePath(id string) string {
 	return filepath.Join(s.root, issuesDir, encodeID(id)+".json")
 }
 
-func (s *Store) appendEventLocked(evt Event) error {
+// writeEventLineLocked formats an event and appends a single line to
+// events.jsonl with fsync. Increments s.seq on success.
+func (s *Store) writeEventLineLocked(evt Event) error {
 	evt.Seq = s.seq
 	if evt.Timestamp.IsZero() {
 		evt.Timestamp = time.Now().UTC()
@@ -653,16 +663,43 @@ func (s *Store) appendEventLocked(evt Event) error {
 	return nil
 }
 
+// appendEventLocked drains any previously-buffered events whose append
+// failed before writing the new one. A transient fsync hiccup that
+// previously left a gap in events.jsonl now self-heals on the next
+// successful operation — external tailers see every transition in
+// the correct seq order, just delayed.
+func (s *Store) appendEventLocked(evt Event) error {
+	if len(s.pendingEvents) > 0 {
+		drained := s.pendingEvents
+		s.pendingEvents = nil
+		for i, p := range drained {
+			if err := s.writeEventLineLocked(p); err != nil {
+				// Still flaky — re-buffer the failed entry, every
+				// entry after it, and the new one. The caller can
+				// retry; state on disk is consistent because the
+				// issue file was already updated by the mutator.
+				s.pendingEvents = append(s.pendingEvents, drained[i:]...)
+				s.pendingEvents = append(s.pendingEvents, evt)
+				return err
+			}
+		}
+	}
+	if err := s.writeEventLineLocked(evt); err != nil {
+		s.pendingEvents = append(s.pendingEvents, evt)
+		return err
+	}
+	return nil
+}
+
 // emitPostCommitEvent appends an event after a successful issue write.
 // The issue file is the authoritative source for state recovery
 // (populateIndex reads them at startup, not events.jsonl), so an event
-// write failure here doesn't corrupt state — but it does leave a
-// silent gap in the event stream. Surface that loudly on stderr so an
-// operator notices, and return the error so HTTP handlers can include
-// it in their reply. State is still consistent on disk.
+// write failure here doesn't corrupt state. The buffered-replay path
+// in appendEventLocked ensures external tailers still see every
+// transition once the filesystem cooperates again.
 func (s *Store) emitPostCommitEvent(evt Event) error {
 	if err := s.appendEventLocked(evt); err != nil {
-		fmt.Fprintf(os.Stderr, "native store: WARN event log diverged from state (issue persisted, event missing): %v\n", err)
+		fmt.Fprintf(os.Stderr, "native store: WARN event log fsync failed; buffered for replay on next operation: %v\n", err)
 		return err
 	}
 	return nil

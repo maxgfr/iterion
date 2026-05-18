@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -528,21 +529,66 @@ func (b *ClaudeCodeBackend) formatOutput(ctx context.Context, task Task, session
 		opts = append(opts, claudesdk.WithCLIPath(b.Command))
 	}
 
-	// When sandboxed, route the CLI subprocess through the sandbox driver so
-	// it resumes the session inside the container (where the session file
-	// lives) rather than spawning a host claude that can't see it. Without
-	// this, Pass 2 always returned empty output on sandboxed runs because the
-	// host CLI emitted "No conversation found".
+	// Capture every spawned subprocess so promptWithTimeout can SIGKILL
+	// them if the SDK's read loop gets stuck and ctx cancellation alone
+	// fails to wake it. The CommandBuilder we install wraps either the
+	// sandbox-routing path or the default exec.CommandContext path; both
+	// arms collect the returned cmd into killables.
+	var killMu sync.Mutex
+	var killables []*exec.Cmd
+	captureCmd := func(cmd *exec.Cmd) {
+		if cmd == nil {
+			return
+		}
+		killMu.Lock()
+		killables = append(killables, cmd)
+		killMu.Unlock()
+	}
+	killAll := func() {
+		killMu.Lock()
+		defer killMu.Unlock()
+		for _, cmd := range killables {
+			if cmd == nil || cmd.Process == nil {
+				continue
+			}
+			_ = cmd.Process.Kill()
+		}
+	}
+
 	if task.Sandbox != nil {
+		// When sandboxed, route the CLI subprocess through the sandbox driver so
+		// it resumes the session inside the container (where the session file
+		// lives) rather than spawning a host claude that can't see it.
 		run := task.Sandbox
 		opts = append(opts, claudesdk.WithCommandBuilder(func(ctx context.Context, path string, args []string, cwd string, env map[string]string, openStdin bool) *exec.Cmd {
 			preview := append([]string{path}, args...)
 			b.Logger.Info("claude-code [fmt]: exec %v (cwd=%s, env_keys=%d, stdin=%v)", preview, cwd, len(env), openStdin)
-			return run.Command(ctx, append([]string{path}, args...), sandbox.ExecOpts{
+			cmd := run.Command(ctx, append([]string{path}, args...), sandbox.ExecOpts{
 				WorkDir:       cwd,
 				Env:           env,
 				KeepStdinOpen: openStdin,
 			})
+			captureCmd(cmd)
+			return cmd
+		}))
+	} else {
+		// Host-side fallback: the SDK normally constructs its own
+		// exec.CommandContext, so we install a builder solely to capture
+		// the cmd reference. exec.CommandContext kills the subprocess
+		// when ctx fires; the explicit Kill() in killAll is the
+		// belt-and-braces hedge for the case where ctx propagation is
+		// what's stuck.
+		opts = append(opts, claudesdk.WithCommandBuilder(func(ctx context.Context, path string, args []string, cwd string, env map[string]string, openStdin bool) *exec.Cmd {
+			cmd := exec.CommandContext(ctx, path, args...)
+			cmd.Dir = cwd
+			if len(env) > 0 {
+				cmd.Env = make([]string, 0, len(env))
+				for k, v := range env {
+					cmd.Env = append(cmd.Env, k+"="+v)
+				}
+			}
+			captureCmd(cmd)
+			return cmd
 		}))
 	}
 
@@ -557,15 +603,20 @@ func (b *ClaudeCodeBackend) formatOutput(ctx context.Context, task Task, session
 
 	prompt := "Format your complete findings as JSON matching the required output schema."
 
-	return promptWithTimeout(fmtCtx, prompt, opts...)
+	return promptWithTimeout(fmtCtx, prompt, killAll, opts...)
 }
 
-// promptWithTimeout wraps claudesdk.Prompt in a goroutine with context-aware
-// cancellation. The Claude Agent SDK's Prompt() function may not check
-// ctx.Done() in its internal ReadLine() loop on every read, so this wrapper
-// ensures the call returns promptly when the context is cancelled. Used only
-// by formatOutput (no hooks needed); the main Execute path uses Session.
-func promptWithTimeout(ctx context.Context, prompt string, opts ...claudesdk.Option) (*claudesdk.ResultMessage, error) {
+// promptWithTimeout wraps claudesdk.Prompt in a goroutine with
+// context-aware cancellation AND a hard subprocess kill on ctx cancel.
+//
+// The Claude Agent SDK's Prompt() function does not always check
+// ctx.Done() in its internal ReadLine() loop — a stuck stream that
+// stops emitting bytes will block the goroutine indefinitely, leaking
+// the subprocess and pinning the host slot. The killCmd callback,
+// when non-nil, is invoked on ctx cancellation to SIGKILL whatever
+// subprocesses the SDK spawned via the caller's CommandBuilder. See
+// formatOutput for an example of how to wire the cmd capture.
+func promptWithTimeout(ctx context.Context, prompt string, killCmd func(), opts ...claudesdk.Option) (*claudesdk.ResultMessage, error) {
 	type result struct {
 		rm  *claudesdk.ResultMessage
 		err error
@@ -580,6 +631,12 @@ func promptWithTimeout(ctx context.Context, prompt string, opts ...claudesdk.Opt
 	case res := <-ch:
 		return res.rm, res.err
 	case <-ctx.Done():
+		if killCmd != nil {
+			killCmd()
+		}
+		// Drain in the background so the Prompt goroutine doesn't
+		// leak — Prompt() will return now that the subprocess is dead.
+		go func() { <-ch }()
 		return nil, fmt.Errorf("claude prompt cancelled: %w", ctx.Err())
 	}
 }

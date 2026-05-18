@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -32,17 +33,49 @@ type AccessClaims struct {
 	jwt.RegisteredClaims
 }
 
-// JWTSigner mints and verifies access JWTs.
+// JWTKey is a single HS256 signing key, identified by a stable kid so
+// tokens minted under it can be verified after the active key has
+// rotated. kid is stamped into the JWT header at sign time and looked
+// up out of the header at verify time.
+type JWTKey struct {
+	ID     string
+	Secret []byte
+}
+
+// JWTDenylist is the abstraction the signer uses to look up revoked
+// JTIs. Implementations are expected to be backed by storage with a
+// TTL index at the JWT's exp so the list doesn't grow unbounded.
+// Verify checks IsDenied for every successful parse — an empty
+// implementation (no revocations) is provided as NopDenylist.
+type JWTDenylist interface {
+	IsDenied(jti string) bool
+}
+
+// NopDenylist accepts every JTI. The signer falls back to it when no
+// explicit denylist is supplied so test setups don't need to wire
+// storage.
+type NopDenylist struct{}
+
+func (NopDenylist) IsDenied(string) bool { return false }
+
+// JWTSigner mints and verifies access JWTs across multiple signing
+// keys. The active key (keys[activeKID]) is used for IssueAccess;
+// Verify accepts a token signed by any key in the map, dispatching by
+// the `kid` header. A token that arrives without a kid header is
+// assumed to come from the active key — that lets the first rollout
+// land without breaking already-issued tokens.
 type JWTSigner struct {
-	secret    []byte
+	keys      map[string]JWTKey
+	activeKID string
 	accessTTL time.Duration
+	denylist  JWTDenylist
 	now       func() time.Time // injected for tests
 }
 
-// NewJWTSigner constructs a signer from a base64-encoded HS256
-// secret (>=32 bytes after decoding). The same string is used for
-// signing and verifying; rotation strategy (TODO) will introduce a
-// kid-keyed map.
+// NewJWTSigner constructs a signer from a single key (the simple
+// single-secret case). Equivalent to NewJWTSignerMulti with one entry
+// in the map and the same kid marked active. Kept for callers that
+// don't need rotation; new deployments should prefer NewJWTSignerMulti.
 func NewJWTSigner(b64 string, accessTTL time.Duration) (*JWTSigner, error) {
 	key, err := decodeBase64Lenient(b64)
 	if err != nil {
@@ -54,12 +87,70 @@ func NewJWTSigner(b64 string, accessTTL time.Duration) (*JWTSigner, error) {
 	if accessTTL <= 0 {
 		accessTTL = 15 * time.Minute
 	}
-	return &JWTSigner{secret: key, accessTTL: accessTTL, now: time.Now}, nil
+	return &JWTSigner{
+		keys:      map[string]JWTKey{"k0": {ID: "k0", Secret: key}},
+		activeKID: "k0",
+		accessTTL: accessTTL,
+		denylist:  NopDenylist{},
+		now:       time.Now,
+	}, nil
+}
+
+// NewJWTSignerMulti constructs a signer that signs new tokens with
+// keys[activeKID] and verifies tokens against any key in keys. The
+// caller supplies kids; recommended scheme is monotonically increasing
+// "k0", "k1", "k2" so the active key is obvious in metrics and logs.
+// During a rollover, retire a key by removing it from the map after
+// one AccessTTL has elapsed past the last token it signed.
+func NewJWTSignerMulti(keys []JWTKey, activeKID string, accessTTL time.Duration, denylist JWTDenylist) (*JWTSigner, error) {
+	if len(keys) == 0 {
+		return nil, errors.New("auth: at least one JWT key required")
+	}
+	m := make(map[string]JWTKey, len(keys))
+	for _, k := range keys {
+		if k.ID == "" {
+			return nil, errors.New("auth: JWT key requires a non-empty ID")
+		}
+		if len(k.Secret) < 32 {
+			return nil, fmt.Errorf("auth: JWT key %q too short (%d bytes, need >=32)", k.ID, len(k.Secret))
+		}
+		if _, dup := m[k.ID]; dup {
+			return nil, fmt.Errorf("auth: duplicate JWT key id %q", k.ID)
+		}
+		m[k.ID] = k
+	}
+	if activeKID == "" {
+		// Default to the lexicographically-largest kid — operationally
+		// the convention is monotonically increasing names ("k0" → "k1").
+		ids := make([]string, 0, len(m))
+		for id := range m {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		activeKID = ids[len(ids)-1]
+	}
+	if _, ok := m[activeKID]; !ok {
+		return nil, fmt.Errorf("auth: active JWT kid %q not in key set", activeKID)
+	}
+	if accessTTL <= 0 {
+		accessTTL = 15 * time.Minute
+	}
+	if denylist == nil {
+		denylist = NopDenylist{}
+	}
+	return &JWTSigner{
+		keys:      m,
+		activeKID: activeKID,
+		accessTTL: accessTTL,
+		denylist:  denylist,
+		now:       time.Now,
+	}, nil
 }
 
 // IssueAccess produces a freshly-signed access token for the given
 // principal. The JTI is a UUIDv4 captured back into the returned
-// Identity for audit purposes.
+// Identity for audit purposes; the kid header is the signer's active
+// key id so Verify can dispatch correctly after rotation.
 func (s *JWTSigner) IssueAccess(id Identity) (token string, exp time.Time, err error) {
 	now := s.now().UTC()
 	exp = now.Add(s.accessTTL)
@@ -80,7 +171,8 @@ func (s *JWTSigner) IssueAccess(id Identity) (token string, exp time.Time, err e
 		},
 	}
 	t := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := t.SignedString(s.secret)
+	t.Header["kid"] = s.activeKID
+	signed, err := t.SignedString(s.keys[s.activeKID].Secret)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("auth: sign jwt: %w", err)
 	}
@@ -95,7 +187,18 @@ func (s *JWTSigner) Verify(raw string) (Identity, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
-		return s.secret, nil
+		// Look the key up by kid. Absent header → fall back to the
+		// active key so tokens that predate the rotation work-around
+		// keep verifying until they expire.
+		kid, _ := t.Header["kid"].(string)
+		if kid == "" {
+			kid = s.activeKID
+		}
+		key, ok := s.keys[kid]
+		if !ok {
+			return nil, fmt.Errorf("unknown kid %q", kid)
+		}
+		return key.Secret, nil
 	},
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
 		jwt.WithIssuer(jwtIssuer),
@@ -123,6 +226,9 @@ func (s *JWTSigner) Verify(raw string) (Identity, error) {
 	if !ok {
 		return Identity{}, ErrTokenInvalid
 	}
+	if c.ID != "" && s.denylist.IsDenied(c.ID) {
+		return Identity{}, ErrTokenRevoked
+	}
 	return Identity{
 		UserID:       c.Subject,
 		Email:        c.Email,
@@ -137,6 +243,11 @@ func (s *JWTSigner) Verify(raw string) (Identity, error) {
 // max-age in lock-step with the access expiry.
 func (s *JWTSigner) AccessTTL() time.Duration { return s.accessTTL }
 
+// ActiveKID surfaces the active signing key id so operators can verify
+// (via /authz/diagnostics, for example) which key the server is
+// currently minting tokens with.
+func (s *JWTSigner) ActiveKID() string { return s.activeKID }
+
 // decodeBase64Lenient mirrors secrets.decodeBase64Lenient — a copy
 // to avoid an inter-package dep on an internal helper.
 func decodeBase64Lenient(b64 string) ([]byte, error) {
@@ -147,4 +258,5 @@ func decodeBase64Lenient(b64 string) ([]byte, error) {
 var (
 	ErrTokenExpired = errors.New("auth: token expired")
 	ErrTokenInvalid = errors.New("auth: token invalid")
+	ErrTokenRevoked = errors.New("auth: token revoked")
 )
