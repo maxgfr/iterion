@@ -414,7 +414,7 @@ Two `when` forms:
 ## Shared Enumerations
 
 ```ebnf
-session_mode           = "fresh" | "inherit" | "fork" | "artifacts_only" ;
+session_mode           = "fresh" | "inherit" | "inherit_if_available" | "fork" | "artifacts_only" ;
 await_mode             = "wait_all" | "best_effort" ;
 interaction_mode       = "none" | "human" | "llm" | "llm_or_human" ;
 reasoning_effort_value = "low" | "medium" | "high" | "xhigh" | "max" ;
@@ -462,6 +462,6 @@ DEDENT       = (* decrease in indentation level *) ;
 
 ## Reserved Keywords
 
-`vars`, `presets`, `attachments`, `prompt`, `schema`, `agent`, `judge`, `router`, `human`, `tool`, `compute`, `workflow`, `entry`, `mcp`, `mcp_server`, `budget`, `compaction`, `worktree`, `model`, `backend`, `default_backend`, `input`, `output`, `publish`, `system`, `user`, `session`, `tools`, `tool_policy`, `capabilities`, `tool_max_steps`, `reasoning_effort`, `readonly`, `interaction`, `interaction_prompt`, `interaction_model`, `await`, `mode`, `instructions`, `min_answers`, `command`, `script`, `language`, `expr`, `multi`, `transport`, `args`, `url`, `auth`, `type`, `auth_url`, `token_url`, `revoke_url`, `client_id`, `scopes`, `autoload_project`, `inherit`, `servers`, `disable`, `threshold`, `preserve_recent`, `sandbox`, `when`, `not`, `as`, `with`, `enum`, `fresh`, `fork`, `artifacts_only`, `fan_out_all`, `condition`, `round_robin`, `llm`, `wait_all`, `best_effort`, `none`, `human`, `llm_or_human`, `auto`, `done`, `fail`, `true`, `false`, `string`, `bool`, `int`, `float`, `json`, `string[]`, `file`, `image`, `max_parallel_branches`, `max_duration`, `max_cost_usd`, `max_tokens`, `max_iterations`, `low`, `medium`, `high`, `xhigh`, `max`, `stdio`, `http`, `sse`, `oauth2`.
+`vars`, `presets`, `attachments`, `prompt`, `schema`, `agent`, `judge`, `router`, `human`, `tool`, `compute`, `workflow`, `entry`, `mcp`, `mcp_server`, `budget`, `compaction`, `worktree`, `model`, `backend`, `default_backend`, `input`, `output`, `publish`, `system`, `user`, `session`, `tools`, `tool_policy`, `capabilities`, `tool_max_steps`, `reasoning_effort`, `readonly`, `interaction`, `interaction_prompt`, `interaction_model`, `await`, `mode`, `instructions`, `min_answers`, `command`, `script`, `language`, `expr`, `multi`, `transport`, `args`, `url`, `auth`, `type`, `auth_url`, `token_url`, `revoke_url`, `client_id`, `scopes`, `autoload_project`, `inherit`, `inherit_if_available`, `servers`, `disable`, `threshold`, `preserve_recent`, `sandbox`, `when`, `not`, `as`, `with`, `enum`, `fresh`, `fork`, `artifacts_only`, `fan_out_all`, `condition`, `round_robin`, `llm`, `wait_all`, `best_effort`, `none`, `human`, `llm_or_human`, `auto`, `done`, `fail`, `true`, `false`, `string`, `bool`, `int`, `float`, `json`, `string[]`, `file`, `image`, `max_parallel_branches`, `max_duration`, `max_cost_usd`, `max_tokens`, `max_iterations`, `low`, `medium`, `high`, `xhigh`, `max`, `stdio`, `http`, `sse`, `oauth2`.
 
 The `delegate` keyword from earlier drafts has been removed — use `backend:` everywhere it was used (delegation backends are selected by name: `claw`, `claude_code`, `codex`).

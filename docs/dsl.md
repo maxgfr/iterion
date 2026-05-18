@@ -80,7 +80,7 @@ agent reviewer:
 | `input` / `output` | Schema references for structured I/O |
 | `publish` | Persist output as a named artifact |
 | `system` / `user` | Prompt references |
-| `session` | Context mode: `fresh` (default), `inherit`, `fork`, or `artifacts_only` |
+| `session` | Context mode: `fresh` (default), `inherit`, `inherit_if_available`, `fork`, or `artifacts_only`. `inherit_if_available` (v0.6.0+) inherits the parent session when `_session_id` resolves on the input and falls back to `fresh` otherwise — useful inside loops where the first iteration has no parent. |
 | `tools` | List of allowed tool names |
 | `tool_max_steps` | Max tool-use iterations (0 = unlimited) |
 | `reasoning_effort` | Extended thinking: `low`, `medium`, `high`, `xhigh`, `max` |
