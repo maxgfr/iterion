@@ -734,7 +734,7 @@ type Preset struct {
 // Attachment is a resolved attachment declaration. The bytes themselves
 // are persisted by the run store; this struct only carries the schema
 // (name, type, validation hints) consumed by the parser, runtime and
-// editor frontend.
+// studio frontend.
 type Attachment struct {
 	Name        string
 	Type        AttachmentType

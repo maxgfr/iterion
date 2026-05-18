@@ -1,4 +1,4 @@
-// Package server provides an HTTP API for the iterion editor.
+// Package server provides an HTTP API for the iterion studio.
 // It wraps the parser, compiler, and unparser to provide endpoints
 // for parsing .iter files, validating workflows, and generating .iter text.
 package server
@@ -26,8 +26,8 @@ import (
 	"github.com/SocialGouv/iterion/pkg/backend/detect"
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
 	"github.com/SocialGouv/iterion/pkg/cloud/metrics"
-	"github.com/SocialGouv/iterion/pkg/conductor"
-	"github.com/SocialGouv/iterion/pkg/conductor/native"
+	"github.com/SocialGouv/iterion/pkg/dispatcher"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
 	"github.com/SocialGouv/iterion/pkg/dsl/ast"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	"github.com/SocialGouv/iterion/pkg/dsl/parser"
@@ -39,7 +39,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
-// StaticFS embeds the built editor SPA so any importer (the server
+// StaticFS embeds the built studio so any importer (the server
 // itself, and the desktop GUI's asset proxy) can serve it. Exported
 // because cmd/iterion-desktop relies on it to ship the SPA inside the
 // GUI binary — that way UI updates don't require a daemon restart.
@@ -60,14 +60,14 @@ type Config struct {
 	// shared project registry (~/.config/Iterion/config.json's
 	// recent_projects). Tests set this to true so the user's real
 	// recents list isn't polluted with /tmp paths from every
-	// `newTestServer(t)`. Production (desktop launcher + CLI editor
+	// `newTestServer(t)`. Production (desktop launcher + CLI studio
 	// mode) leaves it false so the launched WorkDir surfaces in the
 	// switcher.
 	SkipProjectRegistration bool
 
 	// AuthService is the multitenant authentication service. When
 	// non-nil, every /api/* request is gated by authMiddleware. CLI
-	// local mode leaves this nil and DisableAuth=true so the editor
+	// local mode leaves this nil and DisableAuth=true so the studio
 	// process trusts its TTY user (legacy behaviour).
 	AuthService *auth.Service
 
@@ -186,7 +186,7 @@ type Config struct {
 	Metrics *metrics.Registry
 
 	// BrowserRegistry tracks active Chromium CDP sessions for the
-	// editor's Browser pane (PR 3 of the browser-simulation feature).
+	// studio's Browser pane (PR 3 of the browser-simulation feature).
 	// When non-nil, the server registers GET
 	// /api/runs/{id}/browser/cdp and proxies CDP frames to the
 	// matching session. Local + cloud builds wire an in-memory
@@ -194,19 +194,19 @@ type Config struct {
 	// mock to validate the WS proxy independently of Chromium.
 	BrowserRegistry mcp.BrowserRegistry
 
-	// NativeTrackerStore, when non-nil, exposes the conductor's native
+	// NativeTrackerStore, when non-nil, exposes the dispatcher's native
 	// kanban tracker under /api/v1/native/* (issues CRUD + board) so
-	// the editor SPA can render the Board view.
+	// the studio SPA can render the Board view.
 	NativeTrackerStore *native.Store
 
-	// Conductor, when non-nil, exposes the long-running dispatcher
-	// lifecycle + operational endpoints under /api/v1/conductor/*.
+	// Dispatcher, when non-nil, exposes the long-running dispatcher
+	// lifecycle + operational endpoints under /api/v1/dispatcher/*.
 	// The Manager owns the full surface (config GET/PUT, start/stop/
-	// pause/resume, state, refresh, issue cancel, WS) so the editor
-	// SPA can configure and pilot the conductor without a separate
-	// `iterion conduct` process. When nil the SPA hides the
-	// Conductor + Board controls beyond plain CRUD.
-	Conductor *conductor.Manager
+	// pause/resume, state, refresh, issue cancel, WS) so the studio
+	// SPA can configure and pilot the dispatcher without a separate
+	// `iterion dispatch` process. When nil the SPA hides the
+	// Dispatcher + Board controls beyond plain CRUD.
+	Dispatcher *dispatcher.Manager
 
 	// MaxUploadSize bounds the bytes the upload endpoint will accept
 	// per attachment. Zero is replaced with a mode-specific default
@@ -233,7 +233,7 @@ type Config struct {
 // supplied context's deadline.
 type ReadinessCheck func(ctx context.Context) error
 
-// Server is the editor HTTP server.
+// Server is the studio HTTP server.
 type Server struct {
 	// stateMu guards the hot-swappable fields used by ProjectSwitcher
 	// (cfg.WorkDir, cfg.StoreDir, runs, watcher). Acquired write-side
@@ -309,17 +309,17 @@ func (s *Server) BoardMCPTokens() *BoardMCPTokenRegistry {
 	return s.boardMCPTokens
 }
 
-// New creates a new editor server.
+// New creates a new studio server.
 //
 // Port semantics: cfg.Port == 0 means "let the OS pick a free port"
 // (the desktop host depends on this). If you want the legacy default of
-// 4891, set it explicitly — pkg/cli.RunEditor does so when the caller
+// 4891, set it explicitly — pkg/cli.RunStudio does so when the caller
 // passes Port=0. Tests that construct Config{} directly previously got
 // 4891 by default; they now get a random port, which is what we want
 // to avoid cross-test bind conflicts.
 func New(cfg Config, logger *iterlog.Logger) *Server {
 	// Default to loopback. The previous behaviour was to leave Addr as ":<port>"
-	// which binds 0.0.0.0 — exposing the editor (which has unauthenticated
+	// which binds 0.0.0.0 — exposing the studio (which has unauthenticated
 	// /api/files/save and /api/files/open endpoints) to anyone on the LAN.
 	// The startup log used to print "http://localhost:<port>" regardless,
 	// which actively misled operators about the bind surface. Operators who
@@ -359,7 +359,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 	}
 	s.hub = NewHub(logger)
 	go s.hub.Run()
-	// File watcher is only meaningful in local mode where the editor
+	// File watcher is only meaningful in local mode where the studio
 	// SPA is editing files on disk that the server should hot-reload.
 	// In cloud mode the server pod has no local source tree (workflows
 	// arrive inline on the wire) and starting the watcher there would
@@ -375,7 +375,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 	}
 	// Wire the run console service. A failure here is non-fatal: we log a
 	// warning and leave s.runs == nil, which disables /api/runs but keeps
-	// the editor usable. The guard preserves the prior behaviour of
+	// the studio usable. The guard preserves the prior behaviour of
 	// disabling runs entirely when neither StoreDir nor WorkDir are set
 	// (e.g. tests that build a Config{} directly).
 	var storeDir string
@@ -491,7 +491,7 @@ func (s *Server) ListenAndServe() error {
 		}()
 	}
 	// Truthful URL in the log: if the operator chose a non-loopback bind we
-	// print the actual address so they know the editor is exposed beyond the
+	// print the actual address so they know the studio is exposed beyond the
 	// local machine. Previously we always printed http://localhost:<port>
 	// regardless of the bind interface.
 	displayHost := s.cfg.Bind
@@ -621,7 +621,7 @@ func (s *Server) routes() {
 		s.registerOAuthForfaitRoutes()
 	}
 
-	// Conductor + native tracker — both optional. Each handler is
+	// Dispatcher + native tracker — both optional. Each handler is
 	// registered through requireAuth so a server bound to a non-loopback
 	// address (devcontainer / LAN / SSH tunnel) can't have its kanban
 	// or dispatcher state mutated by an unauthenticated peer. The
@@ -635,8 +635,8 @@ func (s *Server) routes() {
 		// run-start), so it intentionally bypasses requireAuth.
 		RegisterBoardMCPRoutes(s.mux, "/api/v1/mcp/board", s.cfg.NativeTrackerStore, s.boardMCPTokens)
 	}
-	if s.cfg.Conductor != nil {
-		s.cfg.Conductor.RegisterRoutesWithMiddleware(s.mux, "/api/v1/conductor", s.requireAuth)
+	if s.cfg.Dispatcher != nil {
+		s.cfg.Dispatcher.RegisterRoutesWithMiddleware(s.mux, "/api/v1/dispatcher", s.requireAuth)
 	}
 
 	// Serve static frontend files with SPA fallback so client-side routes
@@ -661,7 +661,7 @@ type parseResponse struct {
 }
 
 // DiagnosticDTO is the wire-safe shape of an ir.Diagnostic. It carries the
-// structured fields (code, severity, attribution, hint) so the editor can
+// structured fields (code, severity, attribution, hint) so the studio can
 // render inline badges without resorting to string-matching the message.
 type DiagnosticDTO struct {
 	Code     string `json:"code,omitempty"`
@@ -745,7 +745,7 @@ func (s *Server) handleParse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pr := parser.Parse("editor.iter", req.Source)
+	pr := parser.Parse("studio.iter", req.Source)
 
 	var diags []string
 	for _, d := range pr.Diagnostics {
@@ -829,7 +829,7 @@ func (s *Server) handleListExamples(w http.ResponseWriter, _ *http.Request) {
 	//   2. The recipes embedded in the binary (examples/embed.go), so a
 	//      fresh project that doesn't ship its own examples still gets
 	//      the canonical built-ins (vibe_*, ci_fix_until_green,
-	//      secured-renovacy, …) in the editor's example picker.
+	//      secured-renovacy, …) in the studio's example picker.
 	// On-disk wins on name collision: a project that overrides an
 	// embedded recipe by placing one with the same basename in its
 	// examples/ dir gets to override what the SPA loads.
@@ -959,7 +959,7 @@ func readJSON(r *http.Request, v interface{}) error {
 }
 
 // IsAllowedOrigin reports whether the given Origin header value matches the
-// loopback set the editor server accepts. It is exposed as a method so test
+// loopback set the studio server accepts. It is exposed as a method so test
 // code (and a future config flag) can extend the allowlist without rewriting
 // every handler. Empty Origin (same-origin request, curl, etc.) is allowed
 // because the browser CORS layer is not involved in that case.
@@ -981,12 +981,12 @@ func (s *Server) allowedOrigins() []string {
 		fmt.Sprintf("http://127.0.0.1:%d", s.cfg.Port),
 		fmt.Sprintf("http://[::1]:%d", s.cfg.Port),
 	}
-	// Desktop mode: the editor SPA is hosted on the Wails AssetServer
+	// Desktop mode: the studio SPA is hosted on the Wails AssetServer
 	// (wails:// on Mac/Linux, http://wails.localhost on Windows) so that
 	// `window.go.main.App.*` bindings + `/wails/runtime.js` injection are
 	// available. HTTP API calls reach the local server via Wails' reverse
 	// proxy (which rewrites Origin to the loopback target), but the
-	// editor's WebSocket clients dial the local server DIRECTLY (Wails'
+	// studio's WebSocket clients dial the local server DIRECTLY (Wails'
 	// AssetServer returns 501 on WS upgrade). The dialer therefore arrives
 	// with the SPA's true origin in the upgrade handshake; without these
 	// entries the upgrader's CheckOrigin would reject every cross-origin
@@ -1044,7 +1044,7 @@ func (s *Server) httpErrorFor(w http.ResponseWriter, r *http.Request, code int, 
 // requireSafeOrigin gates state-changing endpoints. Any request whose Origin
 // header is set and not in the allowlist is rejected with 403 BEFORE the
 // handler runs — preventing a malicious page in another tab from POSTing
-// into the local editor's filesystem-write endpoints. Same-origin and
+// into the local studio's filesystem-write endpoints. Same-origin and
 // non-browser callers (no Origin header) pass through.
 func (s *Server) requireSafeOrigin(w http.ResponseWriter, r *http.Request) bool {
 	origin := r.Header.Get("Origin")
@@ -1057,7 +1057,7 @@ func (s *Server) requireSafeOrigin(w http.ResponseWriter, r *http.Request) bool 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusForbidden)
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"error": "cross-origin request rejected: editor only accepts loopback origins",
+		"error": "cross-origin request rejected: studio only accepts loopback origins",
 	})
 	return false
 }
@@ -1229,7 +1229,7 @@ func (s *Server) handleOpenFile(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Embedded-recipe fallback: the example picker sets
 		// currentFilePath to "examples/<name>" after loading an
-		// embedded recipe (see editor Toolbar handlePickFile). When
+		// embedded recipe (see studio Toolbar handlePickFile). When
 		// the project has no on-disk examples/ dir, every later flow
 		// that re-reads via /files/open (LaunchView's pre-launch
 		// document fetch, the file watcher, hot-reload) would 404

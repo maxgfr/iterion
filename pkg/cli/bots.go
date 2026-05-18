@@ -320,7 +320,7 @@ func renderBotsSkill(w io.Writer, entries []BotEntry) error {
 	fmt.Fprintln(w, "---")
 	fmt.Fprintln(w, "name: iterion-bot-catalog")
 	fmt.Fprintln(w, "description: |")
-	fmt.Fprintln(w, "  Canonical list of bots available to dispatch via the iterion conductor.")
+	fmt.Fprintln(w, "  Canonical list of bots available to dispatch via the iterion dispatcher.")
 	fmt.Fprintln(w, "  Use this when deciding which bot to assign an issue to. Each entry lists")
 	fmt.Fprintln(w, "  the triggers it expects, the capabilities it consumes, and a one-line")
 	fmt.Fprintln(w, "  description so the matcher can pick by intent.")

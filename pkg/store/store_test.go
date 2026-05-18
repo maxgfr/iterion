@@ -108,7 +108,7 @@ func TestUpdateRunStatusFailed(t *testing.T) {
 }
 
 // Resume from failed_resumable / cancelled must clear FinishedAt.
-// Otherwise the editor keys the duration ticker on a stale terminal
+// Otherwise the studio keys the duration ticker on a stale terminal
 // timestamp and the elapsed-time display freezes mid-run.
 func TestUpdateRunStatusClearsFinishedAtOnResume(t *testing.T) {
 	cases := []struct {

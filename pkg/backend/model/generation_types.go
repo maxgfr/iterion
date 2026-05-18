@@ -100,7 +100,7 @@ type ToolCallInfo struct {
 	// Output is the string the tool returned to the LLM. Populated only on
 	// the post-execution OnToolCall path; empty on OnToolStarted. The
 	// hooks layer persists it (truncated) on the tool_called event so the
-	// editor's per-node Tools tab can render the in/out pair the way
+	// studio's per-node Tools tab can render the in/out pair the way
 	// Claude Code does.
 	Output string
 

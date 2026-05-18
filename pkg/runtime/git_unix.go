@@ -8,7 +8,7 @@ import (
 )
 
 // detachGitProcessGroup puts a `git` child in its own process group via
-// Setpgid. A SIGTERM delivered to the editor's PGID — for example by
+// Setpgid. A SIGTERM delivered to the studio's PGID — for example by
 // `watchexec -r` rebuilding the dev-mode backend mid-merge — therefore
 // does NOT reach the in-flight `git commit` and abort it with
 // "signal: terminated".

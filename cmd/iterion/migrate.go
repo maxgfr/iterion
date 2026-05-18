@@ -289,7 +289,7 @@ func mustListInteractions(ctx context.Context, src store.RunStore, runID string,
 //  1. Mongo without a replica set — the migration writes succeed, but
 //     the cloud server's change-stream subscription (downstream
 //     consumer of these events) silently fails. Operators don't notice
-//     until the editor's run console stays empty.
+//     until the studio's run console stays empty.
 //
 //  2. S3 bucket without write permission — every artifact PUT fails;
 //     the migration runs to completion reporting "0 artifacts written"

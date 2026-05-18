@@ -183,7 +183,7 @@ func TestRunsWS_ReplayPaginatesPastMaxEventsPerPage(t *testing.T) {
 	// Seed MaxEventsPerPage+50 events so a single LoadEvents page can't
 	// cover the whole replay window. The pre-pagination implementation
 	// silently dropped the tail past the cap, including any terminal
-	// run_failed/run_finished — leaving the editor's pill stuck on
+	// run_failed/run_finished — leaving the studio's pill stuck on
 	// whatever pre-terminal status the last replayed event implied.
 	n := runview.MaxEventsPerPage + 50
 	for i := 0; i < n; i++ {

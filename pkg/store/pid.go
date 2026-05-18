@@ -11,7 +11,7 @@ import (
 
 // pidFileName lives under <store>/runs/<runID>/.pid. It records the
 // PID of the iterion-run subprocess managing this run on behalf of an
-// editor server. Presence of the file marks the run as "managed by a
+// studio server. Presence of the file marks the run as "managed by a
 // detached runner"; absence means in-process or already-cleaned-up.
 const pidFileName = ".pid"
 

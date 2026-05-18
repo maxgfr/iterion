@@ -1,7 +1,7 @@
 package main
 
 // Event names emitted via wruntime.EventsEmit and consumed by the SPA.
-// Keep in lockstep with editor/src/lib/desktopEvents.ts.
+// Keep in lockstep with studio/src/lib/desktopEvents.ts.
 const (
 	eventProjectSwitched = "project:switched"
 	// eventProjectsChanged fires whenever the persisted project list

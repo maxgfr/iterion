@@ -87,7 +87,7 @@ func CompileBundleWorkflow(path string, b *bundle.Bundle) (*ir.Workflow, string,
 }
 
 // CompileWorkflowFromSource is the cloud-mode entry point: the .iter
-// content is supplied verbatim (uploaded by the editor SPA). Path is
+// content is supplied verbatim (uploaded by the studio SPA). Path is
 // retained as a logical label for diagnostics + MCP relative-path
 // resolution; when empty, MCP resolution falls back to the current
 // working directory.

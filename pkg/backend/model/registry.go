@@ -134,10 +134,10 @@ func (r *Registry) registerDefaults() {
 		//
 		// Known limitations (track separately, not blocking v1):
 		//   - Stale token: the resolved client is cached for the life of
-		//     the process; long-running daemons (editor, conductor)
+		//     the process; long-running daemons (studio, dispatcher)
 		//     keep using the access_token captured at first resolve.
 		//     Codex CLI rotates tokens ~hourly; restart the daemon to
-		//     refresh, or set a tight max_duration on conductor jobs.
+		//     refresh, or set a tight max_duration on dispatcher jobs.
 		//   - Cloud mode: bypasses runner-materialised per-tenant
 		//     OAuth state in secrets.CredentialsFromContext. Cloud
 		//     deployments must use the API-key BYOK path until the

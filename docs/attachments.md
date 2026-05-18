@@ -97,13 +97,13 @@ Unreferenced uploads are reaped after one hour (`uploadStagingTTL`).
 ### Limits
 
 The upload handler enforces four limits. In local editor mode,
-`iterion editor` exposes flags for these settings; the cloud
+`iterion studio` exposes flags for these settings; the cloud
 `iterion server` command currently exposes only its server flags
 (port/bind/dir/store-dir/config), so upload limits there use the
 server configuration defaults unless an embedder wires explicit
 `server.Config` values.
 
-| `iterion editor` flag       | Default (web/cloud) | Default (desktop) |
+| `iterion studio` flag       | Default (web/cloud) | Default (desktop) |
 | --------------------------- | -------------------- | ----------------- |
 | `--max-upload-size`         | 50 MB                | 1 GB              |
 | `--max-total-upload-size`   | 5 × max-upload-size  | 5 × max-upload-size |
@@ -148,7 +148,7 @@ saw — there is no special-case retry path.
 - Cloud: a SigV4-signed S3 GET URL valid for the same TTL.
 
 The bytes endpoint also accepts safe-Origin browser callers (no
-signature) so the editor SPA can read attachments without minting a
+signature) so the studio SPA can read attachments without minting a
 URL first.
 
 ## Runtime semantics

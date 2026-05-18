@@ -69,7 +69,7 @@ func (s *Server) CurrentProjectID() string {
 }
 
 // projectResponse is the wire shape returned to the SPA. Mirrors
-// editor/src/api/projects.ts.
+// studio/src/api/projects.ts.
 type projectResponse struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`

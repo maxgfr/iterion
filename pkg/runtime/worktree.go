@@ -33,7 +33,7 @@ import (
 // silently localized into the user's locale (fr_FR, etc).
 //
 // Children are detached into their own process group (Unix) so a
-// SIGTERM delivered to the editor's PGID — typical when `watchexec -r`
+// SIGTERM delivered to the studio's PGID — typical when `watchexec -r`
 // rebuilds the dev-mode backend during an in-flight squash merge —
 // doesn't propagate and kill `git commit` mid-write with the
 // "signal: terminated" failure mode observed in run_1778021294883.
@@ -159,7 +159,7 @@ type finalizeOptions struct {
 }
 
 // finalizeResult captures what the post-run promotion actually did so
-// the engine can persist it to run.json and the editor can surface it.
+// the engine can persist it to run.json and the studio can surface it.
 type finalizeResult struct {
 	// FinalCommit is the SHA the worktree's HEAD pointed to at end of
 	// run. Empty when the run produced no commits (HEAD unchanged).
@@ -434,7 +434,7 @@ func trySquashMerge(repoRoot, target, branchToMerge, originalBranch, message str
 		return "", fmt.Errorf("git merge --squash failed: %v\noutput: %s", err, string(out))
 	}
 
-	// Step 2: commit the squashed index. --no-edit prevents the editor
+	// Step 2: commit the squashed index. --no-edit prevents the studio
 	// from being invoked when MERGE_MSG was populated by --squash; -m
 	// supplies our aggregated message regardless. `-m` consumes the
 	// very next argv element as the value, so a leading "-" in the
@@ -693,7 +693,7 @@ func branchOrDetached(branch string) string {
 // is killed between "Run finished" being written and finalizeWorktree
 // completing — observed on 2026-05-14 when a dpkg post-install trigger
 // SIGTERM'd the daemon ~50ms after run_1778749561103 hit `done`, leaving
-// the worktree with 11 commits but the editor showing "no commits to
+// the worktree with 11 commits but the studio showing "no commits to
 // merge" because run.json had no final_branch.
 //
 // The recovery is idempotent: it bails immediately if the run already

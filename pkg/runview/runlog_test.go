@@ -219,7 +219,7 @@ func TestRunLogBuffer_SeedsFromExistingFile(t *testing.T) {
 	// daemon-resume / restart-on-active-run case) used to start the
 	// ring's logical stream at offset 0 even though the file already
 	// had pre-restart history. Snapshot(from=0) returned offset=0
-	// → the editor's /log gap-fill helper (handleGetRunLog) and the
+	// → the studio's /log gap-fill helper (handleGetRunLog) and the
 	// WS subscribe_logs replayer both saw offset == from and did
 	// nothing — the per-node Logs tab went empty for any node that
 	// ran before the restart.

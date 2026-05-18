@@ -21,7 +21,7 @@ type NumStat struct {
 }
 
 // untrackedReadCap bounds CountUntrackedLines to avoid stalling the
-// editor on a multi-GB log file accidentally left in the worktree.
+// studio on a multi-GB log file accidentally left in the worktree.
 // Anything larger is reported as binary so the UI displays "(binary)".
 const untrackedReadCap = 5 << 20 // 5 MiB
 

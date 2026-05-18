@@ -13,18 +13,18 @@ import (
 )
 
 // previewProxyMaxBytes caps how much upstream body the proxy will
-// stream to the editor before EOF. 32 MB covers any reasonable
+// stream to the studio before EOF. 32 MB covers any reasonable
 // preview page (HTML + inline assets) while bounding the worst case
 // when an operator points the proxy at a large download URL.
 const previewProxyMaxBytes = 32 << 20
 
 // handlePreviewProxy serves GET /api/runs/{id}/preview?target=<url>.
-// It is the back-channel that lets the editor's Browser pane embed
+// It is the back-channel that lets the studio's Browser pane embed
 // a URL whose origin would otherwise reject framing via
 // X-Frame-Options or Content-Security-Policy: frame-ancestors. The
 // proxy fetches the target server-side, strips frame-blocking response
 // headers, and returns the body sandboxed via a strict CSP so the
-// proxied page cannot navigate the editor SPA top-level.
+// proxied page cannot navigate the studio SPA top-level.
 //
 // Cloud mode applies SSRF-grade input validation:
 //   - target must be http(s)
@@ -68,7 +68,7 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Confirm the run exists — keeps this endpoint scoped, and avoids
-	// turning the editor into an open relay even for clients on a
+	// turning the studio into an open relay even for clients on a
 	// loopback origin.
 	if s.runs == nil {
 		s.httpErrorFor(w, r, http.StatusNotFound, "run console disabled")
@@ -83,11 +83,11 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 	//  - cloud mode (always strict)
 	//  - local mode bound to a non-loopback address (multi-user dev
 	//    box, devcontainer-shared host, LAN exposure): also strict.
-	//    A logged-in user who can reach the editor on 0.0.0.0 should
+	//    A logged-in user who can reach the studio on 0.0.0.0 should
 	//    not be able to gateway requests to the host's loopback /
 	//    private network through us. (F-S4)
 	//  - local mode bound to 127.0.0.1 / ::1 / localhost: permissive
-	//    so the editor can embed the user's own dev servers.
+	//    so the studio can embed the user's own dev servers.
 	cloudMode := s.cfg.Mode == "cloud"
 	strict := cloudMode || !isLoopbackBind(s.cfg.Bind)
 
@@ -127,7 +127,7 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		// We don't auto-follow redirects: each hop must be re-validated.
-		// The editor receives the 3xx and decides whether to chase it
+		// The studio receives the 3xx and decides whether to chase it
 		// (typically it won't — iframes follow on their own when the
 		// proxy round-trips).
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -142,7 +142,7 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Pass through a minimal set of headers. Cookies are intentionally
-	// dropped — the editor SPA's cookie space must not leak to the
+	// dropped — the studio SPA's cookie space must not leak to the
 	// proxied origin, and vice versa.
 	if accept := r.Header.Get("Accept"); accept != "" {
 		upstreamReq.Header.Set("Accept", accept)
@@ -184,7 +184,7 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 // safe to dial. When strict, every resolved IP must be a public
 // unicast address: any private/link-local/loopback/multicast/cloud-
 // metadata hit causes a refusal. When non-strict, the first resolved
-// address is returned regardless — the editor is loopback-bound and
+// address is returned regardless — the studio is loopback-bound and
 // the user is supposed to be able to embed dev servers.
 //
 // strict is set when (a) the server runs in cloud mode, or (b) the

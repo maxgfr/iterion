@@ -101,11 +101,11 @@ Same engine, seven delivery modes — pick the one that fits your workflow:
 | Mode | Best for | Install | Docs |
 |---|---|---|---|
 | 🖥️ **CLI** | Scripted runs, CI/CD pipelines | `curl -fsSL https://socialgouv.github.io/iterion/install.sh \| sh` | [install.md](docs/install.md) |
-| 🌐 **Web editor** | Visual workflow design (browser-based) | Bundled with the CLI: `iterion editor` | [visual-editor.md](docs/visual-editor.md) |
+| 🌐 **Studio (web app)** | Visual workflow design (browser-based) | Bundled with the CLI: `iterion studio` | [visual-editor.md](docs/visual-editor.md) |
 | 🪟 **Desktop app** | Native window, multi-project, OS keychain, auto-update | Download `iterion-desktop` from [Releases](https://github.com/SocialGouv/iterion/releases/latest) | [desktop.md](docs/desktop.md) |
 | 🐳 **Docker** | Zero-install runs, reproducible CI | `docker run --rm ghcr.io/socialgouv/iterion:latest` | [install.md#docker](docs/install.md#docker) |
 | ☁️ **Cloud / server** | Multi-tenant deployment, shared run store, REST/WS API | `helm install iterion oci://ghcr.io/socialgouv/charts/iterion` | [cloud.md](docs/cloud.md) |
-| 🎼 **Conductor** | Autonomous loop — poll a tracker, dispatch a workflow per issue | Bundled: `iterion conduct iterion.conductor.yaml` | [conductor.md](docs/conductor.md) |
+| 🎼 **Dispatcher** | Autonomous loop — poll a tracker, dispatch a workflow per issue | Bundled: `iterion dispatch iterion.dispatcher.yaml` | [dispatcher.md](docs/dispatcher.md) |
 | 📦 **TypeScript SDK** | Programmatic invocation from Node/Deno/Bun | `npm install @iterion/sdk` | [sdks/typescript/](sdks/typescript/) |
 
 All seven invoke the same Go core. The DSL, runtime, persistence and observability are identical — they only differ in how you reach them.
@@ -149,7 +149,7 @@ All run data (events, artifacts, interactions) is stored in `.iterion/runs/`.
 
 ## 🤖 `.iter` vs `.bot`
 
-Iterion accepts two interchangeable file extensions: **`.iter`** for raw or experimental DSL (didactic examples, coverage tests, single-purpose scripts) and **`.bot`** for productized, operational bots (with human gates, mitigation steps, reports, and a documented runbook). The parser, compiler, runtime, and editor treat them identically — the distinction is narrative only. `iterion init` produces a `.bot` file by default; the `examples/` directory ships both, with `.bot` reserved for examples meant to be run unmodified against real systems.
+Iterion accepts two interchangeable file extensions: **`.iter`** for raw or experimental DSL (didactic examples, coverage tests, single-purpose scripts) and **`.bot`** for productized, operational bots (with human gates, mitigation steps, reports, and a documented runbook). The parser, compiler, runtime, and studio treat them identically — the distinction is narrative only. `iterion init` produces a `.bot` file by default; the `examples/` directory ships both, with `.bot` reserved for examples meant to be run unmodified against real systems.
 
 Bots can also be shipped as **`.botz`** — a tar.gz packaging the workflow with adjacent resources (Claude Code skills, reusable prompts, default attachments, manifest). Scaffold with `iterion bundle init`, build with `iterion bundle pack`, run with `iterion run my.botz`. See [docs/bundles.md](docs/bundles.md).
 
@@ -200,7 +200,7 @@ The full documentation lives under [`docs/`](docs/) — start with the [document
 
 **Get going**
 - [docs/install.md](docs/install.md) — every install method (CLI, desktop, Docker, Helm, SDK)
-- [docs/visual-editor.md](docs/visual-editor.md) — browser-based workflow editor
+- [docs/visual-editor.md](docs/visual-editor.md) — studio (browser-based workflow editor)
 - [docs/desktop.md](docs/desktop.md) — native desktop app
 - [docs/examples.md](docs/examples.md) — workflows of increasing complexity (starter → advanced)
 - [docs/skill.md](docs/skill.md) — install Iterion as an AI agent skill (Claude Code, Cursor, Copilot…)

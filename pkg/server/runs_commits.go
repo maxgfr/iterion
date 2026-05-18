@@ -12,7 +12,7 @@ import (
 
 // runCommitsResponse is the wire shape of GET /api/runs/{id}/commits.
 // `available` mirrors the runFilesResponse contract: a falsy value paired
-// with `reason` lets the editor render an empty-state without parsing
+// with `reason` lets the studio render an empty-state without parsing
 // error envelopes (e.g. legacy runs without BaseCommit, or worktree dirs
 // torn down before the commits could be promoted).
 //
@@ -109,7 +109,7 @@ func (s *Server) handleListRunCommits(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// reasonForCommits chooses the empty-state reason for the editor when the
+// reasonForCommits chooses the empty-state reason for the studio when the
 // commits list cannot be produced. Mirrors the runFilesResponse reasons
 // so the same i18n labels can be reused.
 func reasonForCommits(run *store.Run) string {
@@ -123,7 +123,7 @@ func reasonForCommits(run *store.Run) string {
 }
 
 // runCommitDetailResponse is the wire shape of GET /api/runs/{id}/commits/{sha}.
-// Fields shadow the per-commit row (so the editor can re-render the header
+// Fields shadow the per-commit row (so the studio can re-render the header
 // off this payload without holding the listing in memory) and add the file
 // list that the commit introduced.
 type runCommitDetailResponse struct {
@@ -153,7 +153,7 @@ var shaPattern = regexp.MustCompile(`^[0-9a-fA-F]{7,64}$`)
 //     surface for arbitrary refs.
 //  2. The SHA must resolve to a commit in the run's range
 //     (BaseCommit..HEAD live, BaseCommit..FinalCommit finalized). This
-//     prevents the editor from exposing pre-run history or sibling
+//     prevents the studio from exposing pre-run history or sibling
 //     branches by guessing SHAs.
 func (s *Server) handleGetRunCommit(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -204,7 +204,7 @@ func (s *Server) handleGetRunCommit(w http.ResponseWriter, r *http.Request) {
 
 // handleGetRunCommitFileDiff returns the diff for one file as introduced by
 // the commit. Validates the SHA against the run's range identically to the
-// detail handler so the editor cannot leak content outside the run.
+// detail handler so the studio cannot leak content outside the run.
 func (s *Server) handleGetRunCommitFileDiff(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	rawSHA := r.PathValue("sha")

@@ -11,7 +11,7 @@ import (
 )
 
 // WireWorkflow is the JSON projection of an IR workflow used by the
-// editor's "IR overlay" view. Heavier fields (schemas, prompts, vars,
+// studio's "IR overlay" view. Heavier fields (schemas, prompts, vars,
 // MCP config, full expression ASTs) are intentionally omitted — the
 // overlay only needs the topology so it can layer execution counts.
 type WireWorkflow struct {

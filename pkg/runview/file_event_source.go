@@ -17,7 +17,7 @@ import (
 // startEventSource spawns a goroutine that tails the run's
 // events.jsonl using fsnotify and republishes each appended line via
 // the service's EventBroker, so WS subscribers connected to the
-// editor server receive events emitted by a detached runner
+// studio server receive events emitted by a detached runner
 // subprocess (or by a runner that's outliving the server it was
 // started by).
 //

@@ -280,7 +280,7 @@ func (s *Server) promoteStaged(ctx context.Context, runID string, mapping map[st
 // HMAC signature is required when the request comes from outside a
 // safe Origin (i.e. presigned-URL access from a non-CORS-allowed
 // caller); browser-origin requests skip the HMAC check via the same
-// allowlist that gates the rest of the editor API.
+// allowlist that gates the rest of the studio API.
 func (s *Server) handleServeAttachment(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	name := r.PathValue("name")
@@ -295,7 +295,7 @@ func (s *Server) handleServeAttachment(w http.ResponseWriter, r *http.Request) {
 
 	// Either the request comes from a safe Origin (browser SPA) OR it
 	// presents a valid HMAC signature minted by PresignAttachment.
-	// Verifying both preserves the editor's UX (no signature in
+	// Verifying both preserves the studio's UX (no signature in
 	// dev-tools URLs) while still allowing presigned URLs to work
 	// from any user agent.
 	exp := r.URL.Query().Get("exp")

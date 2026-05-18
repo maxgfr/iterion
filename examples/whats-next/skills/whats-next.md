@@ -67,13 +67,13 @@ verbatim. Bound the loop (≤10 iterations) so you don't spiral.
 ### 5. Action — materialise as kanban issues, then hand off
 
 On approval, every `roadmap_item` becomes one issue on the iterion
-native kanban board at `<workspace>/.iterion/conductor/`. The bot does
-NOT shell out `iterion run …` itself; the **conductor** is the
+native kanban board at `<workspace>/.iterion/dispatcher/`. The bot does
+NOT shell out `iterion run …` itself; the **dispatcher** is the
 dispatcher.
 
 1. For each item: `iterion issue create --title … --body …
    --assignee <bot_name> --labels horizon:<level>,source:whats-next
-   --field bot_args=<flat string list>`. The conductor will pick it up
+   --field bot_args=<flat string list>`. The dispatcher will pick it up
    once iterion learns to route by `issue.assignee` — see the "Iterion
    feature gap" note below.
 2. Record an audit markdown at
@@ -86,10 +86,10 @@ dispatcher.
 
 ### Iterion feature gap (today)
 
-The conductor (`iterion conduct <config.yaml>`) dispatches a single
+The dispatcher (`iterion dispatch <config.yaml>`) dispatches a single
 workflow for all eligible issues. It does NOT yet route by
 `issue.assignee`. Until that ships, the operator either runs multiple
-conductors (one per assignee, filtering by state) or waits for the
+dispatchers (one per assignee, filtering by state) or waits for the
 routing feature. whats-next records the assignee on every issue
 regardless so the future mechanism has the data it needs — and may
 propose "ship the assignee-routing feature" as the very `next_action`
@@ -109,7 +109,7 @@ on a whats-next run against the iterion source repo.
    touches state (it creates kanban issues), and only after the
    `human_review` approval gate.
 6. **Issues, not invocations.** The bot creates issues; it does not
-   run other bots directly. The conductor dispatches. Don't try to
+   run other bots directly. The dispatcher dispatches. Don't try to
    shortcut by shelling out.
 
 ## Anti-patterns — refuse to fall into these
@@ -124,7 +124,7 @@ on a whats-next run against the iterion source repo.
   rationale (1–2 lines).
 - **Shelling out instead of creating issues.** The bot used to
   invoke `iterion run …` directly; that's no longer the contract.
-  Create issues; let the conductor dispatch.
+  Create issues; let the dispatcher dispatch.
 - **Skipping exploration on "small" requests.** Even a one-line ask
   deserves a 5-minute survey. Cheap recon prevents expensive mistakes.
 

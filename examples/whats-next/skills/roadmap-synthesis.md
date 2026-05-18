@@ -59,7 +59,7 @@ need…"). Use the explorer's facts.
 ## 2. `long_term` — 2-4 items, strategic horizon
 
 Each item:
-- `title` — one short noun-phrase, e.g. "Stabilise conductor
+- `title` — one short noun-phrase, e.g. "Stabilise dispatcher
   pipeline before adding capability".
 - `body` — markdown explaining the theme. Cite specific files,
   ADRs, or commit themes from the survey.
@@ -83,7 +83,7 @@ Each item:
 
 ## 4. `next_action` — exactly ONE item, executable now
 
-This is THE issue the conductor will dispatch first.
+This is THE issue the dispatcher will dispatch first.
 
 - `title` — imperative, scoped, completable.
 - `body` — full acceptance criteria. Include any pointer the

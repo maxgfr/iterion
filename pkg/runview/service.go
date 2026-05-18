@@ -33,7 +33,7 @@ type LaunchSpec struct {
 	FilePath string // absolute .iter path; sandbox check is the caller's job
 	// Source carries the .iter source verbatim. Used by cloud-mode
 	// callers when the server pod has no local copy of the workflow
-	// (the editor SPA uploads the source inline). When non-empty it
+	// (the studio SPA uploads the source inline). When non-empty it
 	// takes precedence over FilePath for parsing; FilePath is still
 	// retained for display and for the runner to recompile against
 	// the same logical workflow.
@@ -129,7 +129,7 @@ type ListFilter struct {
 	Since    time.Time       // UpdatedAt >= Since
 	Limit    int             // 0 = no limit
 	// Node filters runs to those whose persisted events include at
-	// least one node_started for this IR node ID. Used by the editor
+	// least one node_started for this IR node ID. Used by the studio
 	// to surface "this node was touched by N runs" without scanning
 	// every run on the client. Scanning happens at request time —
 	// fine for hundreds of runs; wire an inverted index later if the
@@ -146,7 +146,7 @@ type ArtifactSummary struct {
 }
 
 // Service is the canonical façade over runtime + store + broker +
-// manager. The HTTP server, the editor, and (optionally) the CLI all
+// manager. The HTTP server, the studio, and (optionally) the CLI all
 // route through here — keeping a single source of truth for run
 // lifecycle, validation, and event fan-out.
 // WithWorkDir sets the working directory the engine should use for
@@ -317,7 +317,7 @@ func NewService(storeDir string, opts ...ServiceOption) (*Service, error) {
 	// Wire log-position stamping when the store is a local
 	// FilesystemRunStore. The closure reads the current byte total
 	// from the per-run RunLogBuffer (created lazily by
-	// prepareRunLog); a missing entry returns 0, which the editor
+	// prepareRunLog); a missing entry returns 0, which the studio
 	// interprets as "no offset info — show live tail". Cloud
 	// (Mongo) stores skip this wiring — they have no on-host log
 	// buffer to attach.
@@ -370,7 +370,7 @@ func (s *Service) reconcileSandboxContainers() {
 
 // reconcileOrphans flips runs whose status is "running" but whose
 // owning process is gone (lock released by the OS) to a terminal
-// status. Without this, every server restart leaves the editor's
+// status. Without this, every server restart leaves the studio's
 // run list polluted with stale "running" rows from CLI invocations
 // that exited (cleanly or otherwise) without persisting a final
 // status — flock(2) is auto-released on crash, but the engine's
@@ -463,7 +463,7 @@ func (s *Service) tryReattachByPID(runID string) bool {
 	return false
 }
 
-// reattachDetached re-establishes the editor server's view of a
+// reattachDetached re-establishes the studio server's view of a
 // detached runner that survived a previous server lifetime. It
 // installs an in-memory log buffer (so WS subscribers can stream
 // live), starts the file-based event + log tailers, and registers a
@@ -768,7 +768,7 @@ func (s *Service) markRemainingInterrupted(handles []HandleSnapshot) {
 // to failed_resumable with reason "server drained". Errors are logged
 // at warn level — drain must not abort over a single run's bookkeeping.
 func (s *Service) markInterrupted(runID string) {
-	const reason = "server drained: editor process shutting down"
+	const reason = "server drained: studio process shutting down"
 	if _, err := s.store.AppendEvent(context.Background(), runID, store.Event{
 		Type:  store.EventRunInterrupted,
 		RunID: runID,
@@ -1060,7 +1060,7 @@ func (s *Service) OpenArtifactFileCtx(ctx context.Context, runID, relPath string
 //
 // Returns a clear "unavailable" error when the store doesn't satisfy
 // ToolBlobStore (cloud mode today — the hooks layer falls back to
-// inline-only persistence in that case, so the editor doesn't issue
+// inline-only persistence in that case, so the studio doesn't issue
 // the fetch).
 func (s *Service) ReadToolBlob(runID, toolUseID, kind string, offset, limit int64) ([]byte, int64, bool, error) {
 	return s.ReadToolBlobCtx(context.Background(), runID, toolUseID, kind, offset, limit)
@@ -1106,7 +1106,7 @@ func (s *Service) Cancel(runID string) error {
 // terminal (no-op). Cross-process cancel of a held run is still not
 // supported — this only handles the case where no goroutine owns it.
 //
-// After flipping, RecoverFinalize fires so the editor's merge UI can act
+// After flipping, RecoverFinalize fires so the studio's merge UI can act
 // on whatever commits the run produced before it stalled (counterpart to
 // the post-cancel finalize in spawnRun).
 func (s *Service) CancelInactive(runID string) (bool, error) {
@@ -1172,7 +1172,7 @@ func (s *Service) CancelQueuedMessage(ctx context.Context, runID, msgID string) 
 }
 
 // ListQueuedMessages returns every message recorded for the run in
-// FIFO order, regardless of current status. Used by the editor for
+// FIFO order, regardless of current status. Used by the studio for
 // initial hydration alongside the run snapshot.
 func (s *Service) ListQueuedMessages(ctx context.Context, runID string) ([]store.QueuedUserMessage, error) {
 	if runID == "" {
@@ -1316,7 +1316,7 @@ func (s *Service) PerformMergeCtx(ctx context.Context, runID string, req MergeRe
 		Message:       message,
 	}, s.logger)
 	if mergeErr != nil {
-		// Persist the failure so the editor can show "Retry merge".
+		// Persist the failure so the studio can show "Retry merge".
 		r.MergeStatus = store.MergeStatusFailed
 		if saveErr := s.store.SaveRun(ctx, r); saveErr != nil && s.logger != nil {
 			s.logger.Warn("runview: persist merge failure for %s: %v", runID, saveErr)
@@ -1605,7 +1605,7 @@ func (s *Service) Resume(parent context.Context, spec ResumeSpec) (*LaunchResult
 	}
 
 	// Preserve an existing name; back-fill one for legacy runs that
-	// predate the friendly-name field so the editor never falls back
+	// predate the friendly-name field so the studio never falls back
 	// to workflow_name after a resume.
 	runName := r.Name
 	if runName == "" {
@@ -1694,7 +1694,7 @@ func (s *Service) reconcileRun(runID string) (*store.Run, bool, error) {
 	} else {
 		// No checkpoint means the run died before any node finished —
 		// resume from entry is now possible thanks to the engine-side
-		// permissive-restart path. Flag as resumable too so the editor
+		// permissive-restart path. Flag as resumable too so the studio
 		// can offer the resume button.
 		newStatus = store.RunStatusFailedResumable
 	}
@@ -1779,7 +1779,7 @@ func (s *Service) spawnRun(
 		// On cancel, the engine flipped run.Status to cancelled but didn't
 		// run finalizeWorktree (that's the success path only). If the run
 		// produced commits, RecoverFinalize promotes the worktree HEAD to
-		// a storage branch so the editor's "Squash and merge" button can
+		// a storage branch so the studio's "Squash and merge" button can
 		// act on it without waiting for a daemon restart. Idempotent +
 		// scoped to worktree runs with no FinalBranch yet, so it's safe to
 		// call unconditionally.
@@ -1811,7 +1811,7 @@ type finalizationOpts struct {
 // workflow hash, file path, run name, and worktree-finalization
 // targets. The logger is always per-run (built by prepareRunLog) so
 // every iterion log line is captured into the run's log buffer for
-// streaming to the editor.
+// streaming to the studio.
 func (s *Service) engineOptions(runLogger *iterlog.Logger, hash, filePath, runName string, fin finalizationOpts) []runtime.EngineOption {
 	if runLogger == nil {
 		runLogger = s.logger

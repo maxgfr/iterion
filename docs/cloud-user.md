@@ -31,11 +31,11 @@ Runs, API keys, OAuth blobs, audit entries are partitioned by team:
 team A simply cannot see team B's data, even if you're an admin in
 both.
 
-The chip in the top-right of the editor surfaces the active team;
+The chip in the top-right of the studio surfaces the active team;
 clicking it lets you:
 
 - Switch teams. The server re-bakes a fresh access JWT bound to the
-  new `tenant_id`. All editor surfaces (run list, files panel,
+  new `tenant_id`. All studio surfaces (run list, files panel,
   settings) follow.
 - Open the team admin page (`/teams/<id>`) where you can:
   - invite teammates with a role (viewer / member / admin / owner)

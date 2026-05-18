@@ -330,9 +330,9 @@ func TestFinalizeWorktree_DetachedAtStart(t *testing.T) {
 }
 
 // TestFinalizeWorktree_DeferredMerge_AutoMergeOff — when autoMerge is
-// false (the editor's default), finalize creates the storage branch
+// false (the studio's default), finalize creates the storage branch
 // but stops short of touching the user's main branch. The result
-// reports MergeStatus=pending so the editor can offer a UI action.
+// reports MergeStatus=pending so the studio can offer a UI action.
 func TestFinalizeWorktree_DeferredMerge_AutoMergeOff(t *testing.T) {
 	repo, originalTip := initBareishRepo(t)
 	wt := filepath.Join(t.TempDir(), "wt")

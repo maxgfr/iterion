@@ -697,7 +697,7 @@ type sessionMeta struct {
 
 // applyClaudeCodeSessionMeta merges the streamed session metadata and
 // the final ResultMessage's per-model usage into Result so the runtime
-// can stamp them on the node's output for the editor's run view. The
+// can stamp them on the node's output for the studio's run view. The
 // effective model comes from system/init; the context window + output
 // cap come from result.ModelUsage[effective]. When the effective model
 // is unknown but ModelUsage has exactly one entry, we use that — some
@@ -1065,7 +1065,7 @@ func logAssistantContent(logger *iterlog.Logger, nodeID string, iteration int, b
 			}
 		case *claudesdk.TextBlock:
 			if bl.Text != "" {
-				// LogBlock so the assistant text folds in the editor's
+				// LogBlock so the assistant text folds in the studio's
 				// run log; full content, no truncation (the SPA log
 				// view handles wrap + per-block expand/collapse).
 				logger.LogBlock(iterlog.LevelInfo, "ℹ️ ",

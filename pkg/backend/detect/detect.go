@@ -1,5 +1,5 @@
 // Package detect probes the host environment for available LLM credentials
-// and CLI binaries, producing a Report consumed by the editor (UI hints)
+// and CLI binaries, producing a Report consumed by the studio (UI hints)
 // and the runtime resolver (auto backend selection).
 package detect
 
@@ -33,7 +33,7 @@ const (
 )
 
 // Report is the snapshot returned by Detect. The shape is mirrored in
-// editor/src/api/backends.ts.
+// studio/src/api/backends.ts.
 type Report struct {
 	// PreferenceOrder is the effective order used when resolving "auto".
 	// Default ["claude_code", "claw"]; codex is intentionally absent so it
@@ -258,7 +258,7 @@ func detectProviders() []ProviderStatus {
 // disabled entirely when ITERION_OPENAI_USE_OAUTH=0 or OPENAI_BASE_URL is
 // set (we never masquerade codex_cli_rs headers to a third-party endpoint).
 //
-// The non-active source is surfaced via OverriddenSources so the editor
+// The non-active source is surfaced via OverriddenSources so the studio
 // can render it struck-through with a "overridden by ..." annotation.
 func detectOpenAIProvider() ProviderStatus {
 	const (

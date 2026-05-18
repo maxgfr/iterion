@@ -200,7 +200,7 @@ func ApplyCodexRefresh(payload []byte, r RefreshResult) ([]byte, error) {
 
 // refreshRetrySchedule defines the per-attempt backoff for OAuth
 // refresh on transient failures. Three attempts total (0/200ms/600ms);
-// total wall-clock ceiling is ~800ms so the editor stays responsive
+// total wall-clock ceiling is ~800ms so the studio stays responsive
 // when the IdP is briefly flaky. Only 5xx and connection-level errors
 // retry — 4xx responses (invalid_grant, unauthorized_client, …) are
 // terminal and propagated immediately.

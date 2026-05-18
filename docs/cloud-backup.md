@@ -203,7 +203,7 @@ that has never been restored is unverified.
   in your post-restore checklist.
 - **Editor session cookies**: stateless JWTs; users re-login after
   restore. No persistence to back up.
-- **Conductor in-flight retry windows**: same as JetStream — restore
+- **Dispatcher in-flight retry windows**: same as JetStream — restore
   re-creates the tracker view; in-flight retries restart from the
   tracker's source of truth (GitHub Issues, Forgejo, native kanban).
 

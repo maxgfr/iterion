@@ -12,7 +12,7 @@ When the run console UI was added (Phase 1 = `pkg/runview` backend +
 REST endpoints; Phase 2 = WebSocket transport + frontend `RunView`), a
 design choice surfaced:
 
-> Should the live execution view be **integrated into the editor**
+> Should the live execution view be **integrated into the studio**
 > (one canvas, one page, with a `mode: edit | observe` toggle), or
 > should it live as a **separate route/page** with its own canvas,
 > store, and transport layer?
@@ -23,7 +23,7 @@ simplification — would be a step backwards.
 
 ### Status quo at the time of decision
 
-- The editor canvas is **read-write**: nodes are draggable, edges can be
+- The studio canvas is **read-write**: nodes are draggable, edges can be
   created/deleted, declarations are mutable through the inspector,
   undo/redo is wired through `useDocumentStore`.
 - The run view requirements are fundamentally different: a
@@ -41,13 +41,13 @@ simplification — would be a step backwards.
 
 The run console is implemented as **a separate page** in the same SPA:
 
-- **Routing** (wouter, in [editor/src/App.tsx](../../editor/src/App.tsx)):
+- **Routing** (wouter, in [studio/src/App.tsx](../../studio/src/App.tsx)):
   - `/` → `EditorView` (author mode)
   - `/runs/new?file=<path>` → `LaunchView` (launch form)
   - `/runs/:id` → `RunView` (observer mode)
   - `/runs` → `RunListView` (history)
 
-- **Stores** (Zustand, in [editor/src/store/](../../editor/src/store/)):
+- **Stores** (Zustand, in [studio/src/store/](../../studio/src/store/)):
   - `useDocumentStore` — AST, IR, dirty flag, undo/redo (editor only)
   - `useRunStore` — events, snapshots, execution state, WS connection
     (run view only)
@@ -63,10 +63,10 @@ The run console is implemented as **a separate page** in the same SPA:
 
 - **Canvas**:
   - Editor uses an editable `Canvas`
-    ([editor/src/components/Canvas/Canvas.tsx](../../editor/src/components/Canvas/Canvas.tsx))
+    ([studio/src/components/Canvas/Canvas.tsx](../../studio/src/components/Canvas/Canvas.tsx))
     with full ReactFlow interactivity.
   - RunView uses `RunCanvasIR`
-    ([editor/src/components/Runs/RunCanvasIR.tsx](../../editor/src/components/Runs/RunCanvasIR.tsx)),
+    ([studio/src/components/Runs/RunCanvasIR.tsx](../../studio/src/components/Runs/RunCanvasIR.tsx)),
     a distinct read-only component that
     paints execution state (running, succeeded, failed, paused) onto
     the IR graph and supports time-travel scrubbing — but no mutations.
@@ -101,7 +101,7 @@ a run.
 
 ### 2. Side-by-side split-pane (editor left, run right, simultaneous)
 
-The editor and the run console rendered in two panes of the same page,
+The studio and the run console rendered in two panes of the same page,
 both alive at once.
 
 **Rejected because**:
@@ -116,9 +116,9 @@ both alive at once.
   views** (a parent layout that mounts both routes) without breaking
   the isolation guarantees.
 
-### 3. Modal/drawer overlay over the editor
+### 3. Modal/drawer overlay over the studio
 
-Open the run view as a slide-over panel above the editor.
+Open the run view as a slide-over panel above the studio.
 
 **Rejected because**:
 - A run can last minutes to hours. A modal is the wrong primitive for
@@ -165,18 +165,18 @@ branch on mode. Two canvases keep each interaction model crisp.
 
 ### 5. Deep-links preserve flow
 
-Navigation friction is minimal because the editor and the run view
+Navigation friction is minimal because the studio and the run view
 exchange contextual deep-links:
 - Editor → RunView: "Launch" → `/runs/new?file=…`
 - RunView → Editor: "Open in editor" → `/?file=…&node=…&from={runId}`
-- The `?from={runId}` query param triggers a banner in the editor
+- The `?from={runId}` query param triggers a banner in the studio
   ("Coming from run X — see in console") so the user keeps thread.
 
 ### 6. Independent scaling
 
 `RunView` ships dedicated optimizations — virtualized event log, ring
 buffer for logs, throttled WebSocket batching — without bloating the
-editor bundle or complicating its render path. The editor remains lean
+editor bundle or complicating its render path. The studio remains lean
 and focused.
 
 ## Arguments against
@@ -212,7 +212,7 @@ shared atoms (buttons, icons) are factored where appropriate.
 
 ## Consequences
 
-- The editor evolves freely (new node types, new inspector panels,
+- The studio evolves freely (new node types, new inspector panels,
   validation rule changes) without considering run-view invariants.
 - The run view evolves freely (new event types, new metrics panels,
   protocol changes) without considering authoring invariants.
@@ -225,11 +225,11 @@ shared atoms (buttons, icons) are factored where appropriate.
 
 ## References
 
-- Routing: [editor/src/App.tsx](../../editor/src/App.tsx)
-- Editor view: [editor/src/components/EditorView.tsx](../../editor/src/components/EditorView.tsx)
-- Run view: [editor/src/components/Runs/RunView.tsx](../../editor/src/components/Runs/RunView.tsx)
-- Launch view: [editor/src/components/Runs/LaunchView.tsx](../../editor/src/components/Runs/LaunchView.tsx)
-- Run list: [editor/src/components/Runs/RunListView.tsx](../../editor/src/components/Runs/RunListView.tsx)
-- Stores: [editor/src/store/document.ts](../../editor/src/store/document.ts), [editor/src/store/run.ts](../../editor/src/store/run.ts), [editor/src/store/ui.ts](../../editor/src/store/ui.ts)
+- Routing: [studio/src/App.tsx](../../studio/src/App.tsx)
+- Editor view: [studio/src/components/EditorView.tsx](../../studio/src/components/EditorView.tsx)
+- Run view: [studio/src/components/Runs/RunView.tsx](../../studio/src/components/Runs/RunView.tsx)
+- Launch view: [studio/src/components/Runs/LaunchView.tsx](../../studio/src/components/Runs/LaunchView.tsx)
+- Run list: [studio/src/components/Runs/RunListView.tsx](../../studio/src/components/Runs/RunListView.tsx)
+- Stores: [studio/src/store/document.ts](../../studio/src/store/document.ts), [studio/src/store/run.ts](../../studio/src/store/run.ts), [studio/src/store/ui.ts](../../studio/src/store/ui.ts)
 - Backend snapshots & WS: [pkg/runview/](../../pkg/runview/)
 - HTTP routes: [pkg/server/](../../pkg/server/)

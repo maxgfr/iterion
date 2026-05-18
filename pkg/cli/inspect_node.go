@@ -15,7 +15,7 @@ import (
 
 // nodeReport is the structured payload returned by `iterion inspect
 // --node` / `--exec`. The shape is intentionally aligned with the
-// editor's NodeDetailPanel so the same vocabulary
+// studio's NodeDetailPanel so the same vocabulary
 // (trace / tools / artifacts / interactions / events / log) is shared
 // across surfaces. Optional sections use omitempty so the JSON output
 // stays tight when the caller asked for one bucket.
@@ -172,7 +172,7 @@ func runInspectNode(s store.RunStore, storeDir string, opts InspectOptions, p *P
 //  2. Otherwise filter by Node + optional Branch.
 //  3. If Iteration was set, pick that exact iteration.
 //  4. Otherwise: single match wins; same-branch matches collapse to
-//     latest (mirrors editor's auto-follow); cross-branch matches
+//     latest (mirrors studio's auto-follow); cross-branch matches
 //     error with candidate exec IDs.
 func resolveExecution(snap *runview.RunSnapshot, opts InspectOptions) (*runview.ExecutionState, error) {
 	if opts.ExecutionID != "" {
@@ -385,7 +385,7 @@ func loadExecEvents(s store.RunStore, runID string, exec *runview.ExecutionState
 // llm_prompt → llm_request → llm_step_finished events accumulating
 // one llmStep per turn. lastModel survives across steps so a model-
 // only llm_request between turns still attributes the model to the
-// next turn (matches the editor reducer).
+// next turn (matches the studio reducer).
 func buildLLMTrace(events []*store.Event) []llmStep {
 	steps := make([]llmStep, 0, 4)
 	var current *llmStep

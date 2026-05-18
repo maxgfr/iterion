@@ -44,7 +44,7 @@ const (
 	EventRunFinished          EventType = "run_finished"
 	EventRunFailed            EventType = "run_failed"
 	EventRunCancelled         EventType = "run_cancelled"
-	// EventRunInterrupted is emitted when the editor server drains in-flight
+	// EventRunInterrupted is emitted when the studio server drains in-flight
 	// runs during shutdown (SIGTERM, watchexec rebuild, etc). The companion
 	// run.json status flips to failed_resumable so the next boot can offer
 	// one-click resume — distinct from EventRunCancelled (user-initiated).
@@ -109,7 +109,7 @@ const (
 	//     stderr (the "ERROR: failed to solve" footer)
 	EventSandboxBuildFailed EventType = "sandbox_build_failed"
 	// EventPreviewURLAvailable signals that the run has a URL worth
-	// rendering in the editor's Browser pane (dev server, deploy preview,
+	// rendering in the studio's Browser pane (dev server, deploy preview,
 	// HTML artifact). Emitted by the runtime when a tool node prints
 	// the convention line `[iterion] preview_url=<url>` on stdout, or
 	// directly by the runtime/sandbox when it knows about a forwarded
@@ -128,7 +128,7 @@ const (
 	// in PR 3, on every Playwright `browser_*` action. The bytes
 	// themselves are persisted as a regular attachment (PNG/JPEG via
 	// store.WriteAttachment); this event carries only the pointer plus
-	// the URL the screenshot is *of* so the editor's scrubber can
+	// the URL the screenshot is *of* so the studio's scrubber can
 	// pick the right artefact for a given seq. Data:
 	//   - attachment_name: store.AttachmentRecord.Name
 	//   - url: optional, the URL the screenshot represents
@@ -138,14 +138,14 @@ const (
 	EventBrowserScreenshot EventType = "browser_screenshot"
 	// EventBrowserSessionStarted fires when the runtime attaches a
 	// Chromium instance to a node and registers it in the
-	// BrowserRegistry. The editor uses this signal to flip the
+	// BrowserRegistry. The studio uses this signal to flip the
 	// Browser pane to live mode and dial the CDP WS proxy. Data:
 	//   - session_id: BrowserSession.SessionID, also the WS query arg
 	//   - node_id: which node the session is bound to
 	EventBrowserSessionStarted EventType = "browser_session_started"
 	// EventBrowserSessionEnded fires when Detach is called — either
 	// because the node finished, the run was cancelled, or the
-	// runtime tore the registry down on Manager.Close. The editor
+	// runtime tore the registry down on Manager.Close. The studio
 	// closes the CDP WS and falls back to viewer mode. Data:
 	//   - session_id: matches the prior _started event
 	EventBrowserSessionEnded EventType = "browser_session_ended"

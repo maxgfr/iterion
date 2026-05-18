@@ -34,7 +34,7 @@ func (s *Server) handleGetRunLog(w http.ResponseWriter, r *http.Request) {
 		// If the ring has evicted bytes older than `from`, fill the
 		// missing prefix [from, offset) from the persisted run.log
 		// (authoritative; the ring is just a 1 MiB live tail). Without
-		// this, the editor's "copy log" / "download log" buttons on a
+		// this, the studio's "copy log" / "download log" buttons on a
 		// long-running active run miss everything before the ring's
 		// lower bound — same root cause as the WS subscribe path.
 		var prefix []byte

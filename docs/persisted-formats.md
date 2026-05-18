@@ -21,11 +21,11 @@ These formats are considered **stable for V1** — tooling may rely on them.
 
 ### .pid (detached-runner mode)
 
-When `ITERION_RUNS_DETACHED=1` is set in the editor server's
+When `ITERION_RUNS_DETACHED=1` is set in the studio server's
 environment, runs launched by the server are spawned as detached
 `iterion run --background` subprocesses instead of in-process
 goroutines. The runner subprocess writes its PID to `.pid` and
-removes the file on exit; the editor server reads `.pid` to
+removes the file on exit; the studio server reads `.pid` to
 re-attach to the runner across its own restarts (e.g. after a
 `watchexec` rebuild during development).
 

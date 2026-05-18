@@ -8,7 +8,7 @@ import (
 )
 
 // backendDetectTTL is how long the detect Report stays cached. Detection
-// is cheap (env reads + filesystem stats) but the editor calls
+// is cheap (env reads + filesystem stats) but the studio calls
 // /api/backends/detect on every mount and could re-poll on focus, so we
 // don't want to re-stat on every keystroke either.
 const backendDetectTTL = 30 * time.Second
@@ -18,7 +18,7 @@ const backendDetectTTL = 30 * time.Second
 // names (e.g. "ANTHROPIC_API_KEY") — never the credential values.
 //
 // `?force=1` invalidates the server-side cache before responding so the
-// editor's refresh button can re-probe immediately after the user
+// studio's refresh button can re-probe immediately after the user
 // changes env / signs in elsewhere.
 func (s *Server) handleBackendsDetect(w http.ResponseWriter, r *http.Request) {
 	s.detectorOnce.Do(func() {

@@ -65,9 +65,9 @@ func (s Severity) String() string {
 // Diagnostic represents a compilation error or warning.
 //
 // NodeID and EdgeID are best-effort attribution fields used by tooling (the
-// editor renders them as inline badges). They may be empty when the diagnostic
+// studio renders them as inline badges). They may be empty when the diagnostic
 // is global (e.g. "no workflow"). EdgeID follows the canonical "<from>-><to>"
-// format the editor uses; when multiple edges share endpoints the first
+// format the studio uses; when multiple edges share endpoints the first
 // matching one wins.
 //
 // Hint is a one-line, user-facing fix suggestion when one is known. The
@@ -175,7 +175,7 @@ func (c *compiler) warnfAt(code DiagCode, nodeID, edgeID string, format string, 
 	})
 }
 
-// edgeID builds the canonical "<from>-><to>" identifier the editor uses so
+// edgeID builds the canonical "<from>-><to>" identifier the studio uses so
 // inline diagnostic badges can match attributed diagnostics to the right edge.
 func edgeID(from, to string) string {
 	return from + "->" + to

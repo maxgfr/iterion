@@ -99,7 +99,7 @@ func codexCapabilities(ctx context.Context, model string) (effortCapabilitiesRes
 	}
 
 	// Model not in the live list — return fallback rather than empty so
-	// the editor still shows something sensible.
+	// the studio still shows something sensible.
 	return effortCapabilitiesResponse{
 		Supported: codexEffortFallback,
 		Source:    "codex-fallback",
@@ -107,7 +107,7 @@ func codexCapabilities(ctx context.Context, model string) (effortCapabilitiesRes
 }
 
 // resolveEffortResponse is the JSON shape returned by
-// GET /api/resolve-effort. Lets the editor canvas display the
+// GET /api/resolve-effort. Lets the studio canvas display the
 // resolved value (e.g., "max") for env-substituted literals like
 // "${VIBE_EFFORT:-max}" without exposing process env over HTTP.
 type resolveEffortResponse struct {
@@ -124,7 +124,7 @@ type resolveEffortResponse struct {
 //
 // with the env-resolved effort level for the supplied literal. The
 // canonical use case is "${VAR:-default}" / "${VAR}" forms in
-// reasoning_effort fields — the editor canvas reads these from the
+// reasoning_effort fields — the studio canvas reads these from the
 // AST and asks the server to expand them so the rendered bar matches
 // the runtime behaviour.
 func (s *Server) handleResolveEffort(w http.ResponseWriter, r *http.Request) {

@@ -54,7 +54,7 @@ type LLMToolCallInfo struct {
 	ToolName  string
 	InputSize int
 	// ToolUseID correlates this completion event with the matching
-	// tool_started event. The editor merges the two by this id so the
+	// tool_started event. The studio merges the two by this id so the
 	// post-execution event (duration + error) lines up with the
 	// pre-execution event (structured input payload for whitelisted
 	// tools). Empty when the path can't provide one — the merge then
@@ -62,7 +62,7 @@ type LLMToolCallInfo struct {
 	// tool_called event alone carries.
 	ToolUseID string
 	// Output is the string the tool returned to the LLM. The hooks layer
-	// truncates and persists it on the tool_called event so the editor's
+	// truncates and persists it on the tool_called event so the studio's
 	// per-node Tools tab can render in+out the way Claude Code does.
 	// Empty when the backend can't surface a result (e.g. tool blocked
 	// pre-execution by a lifecycle hook, unknown tool dispatch).
@@ -73,7 +73,7 @@ type LLMToolCallInfo struct {
 
 // LLMToolStartedInfo describes a tool call about to execute, passed to the
 // OnToolStarted hook. Emitted immediately before the tool runs so observers
-// can render an in-flight indicator (e.g. the editor's "Running <tool>"
+// can render an in-flight indicator (e.g. the studio's "Running <tool>"
 // footer) while waiting for completion.
 type LLMToolStartedInfo struct {
 	ToolName  string
@@ -85,7 +85,7 @@ type LLMToolStartedInfo struct {
 	ToolUseID string
 	// Input is the raw JSON arguments the LLM produced for this call.
 	// May be empty when the backend cannot surface it. The hooks layer
-	// persists it (truncated) on the tool_started event so the editor's
+	// persists it (truncated) on the tool_started event so the studio's
 	// per-node Tools tab can render parameters (command, file_path,
 	// todos, …) for every tool — symmetric with the post-execution
 	// `output` field on LLMToolCallInfo.

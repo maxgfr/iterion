@@ -37,8 +37,8 @@ npx -y @playwright/mcp@latest --help
 #    first navigate call hangs for ~60-120s while it downloads.
 npx playwright install chromium
 
-# 3. Confirm the editor dev server starts (sanity-check pnpm + corepack).
-devbox run -- task editor:dev   # Ctrl+C once you see "Local: http://..."
+# 3. Confirm the studio dev server starts (sanity-check pnpm + corepack).
+devbox run -- task studio:dev   # Ctrl+C once you see "Local: http://..."
 ```
 
 Per-run: ensure port `5173` is free. The workflow's `playwright_run`
@@ -69,7 +69,7 @@ your main checkout onto it. The run produces an
 A typical successful run looks like this on the events log:
 
 1. `run_started`
-2. `node_started: plan` — Claude Code reads `editor/src/`, emits
+2. `node_started: plan` — Claude Code reads `studio/src/`, emits
    `plan_output` with `files_to_modify` listed
 3. `node_started: act` — same Claude Code session, now with edit tools.
    Edits the listed files, runs `tsc --noEmit` until green

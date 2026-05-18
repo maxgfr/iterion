@@ -11,7 +11,7 @@ import (
 // during run execution. Sessions are per-(run, node, tool-call-id)
 // scoped: when a Playwright MCP tool first issues a `browser_*` call
 // from inside the runtime, the manager spawns Chromium and registers
-// the resulting session here so the editor's WS proxy can dial in.
+// the resulting session here so the studio's WS proxy can dial in.
 //
 // CDPConn is an io.ReadWriteCloser carrying CDP wire frames. The
 // production transport is a long-lived
@@ -24,7 +24,7 @@ type BrowserSession struct {
 	RunID     string
 	NodeID    string
 	// CDPConn carries CDP JSON-RPC frames bidirectionally. The
-	// runtime owns it; the editor's WS proxy calls Acquire/Release
+	// runtime owns it; the studio's WS proxy calls Acquire/Release
 	// rather than holding a raw reference, so the registry can
 	// enforce single-consumer semantics if a future iterion
 	// transport demands it.
@@ -37,13 +37,13 @@ type BrowserSession struct {
 //   - Attach(): runtime calls when Playwright MCP spawns Chromium for
 //     the first `browser_*` tool call of a node. Returns a session
 //     with CDPConn already plumbed.
-//   - Get(): editor WS proxy looks up by sessionID.
-//   - List(): editor's "which sessions are active" UI poll.
+//   - Get(): studio WS proxy looks up by sessionID.
+//   - List(): studio's "which sessions are active" UI poll.
 //   - Detach(): runtime calls on tool-loop tear-down or run
 //     finalisation; closes CDPConn.
 //
 // The default implementation is in-memory and process-local; cloud
-// deployments where the editor and runtime live in different pods
+// deployments where the studio and runtime live in different pods
 // would front this with a Mongo-backed registry keyed by
 // tenant + run + node.
 type BrowserRegistry interface {
@@ -160,7 +160,7 @@ type ChromiumRunner interface {
 
 // ErrChromiumNotImplemented is returned by the stub runner. Wired
 // when no real runner is configured so the WS proxy surfaces a
-// clean 503 to the editor instead of crashing.
+// clean 503 to the studio instead of crashing.
 var ErrChromiumNotImplemented = errors.New("browser: chromium runner not yet implemented")
 
 // stubChromiumRunner returns ErrChromiumNotImplemented unconditionally.

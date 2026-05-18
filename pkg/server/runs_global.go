@@ -153,7 +153,7 @@ type runJSONShape struct {
 	UpdatedAt    time.Time       `json:"updated_at"`
 }
 
-// isActiveStatus mirrors the editor's runStatusMeta.isActiveStatus —
+// isActiveStatus mirrors the studio's runStatusMeta.isActiveStatus —
 // kept in sync intentionally so client and server agree on what
 // counts as "show this in the active-runs widget". Update both when
 // adding a status.

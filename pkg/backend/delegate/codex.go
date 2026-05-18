@@ -402,7 +402,7 @@ func (b *CodexBackend) logAssistantActivity(nodeID string, iteration int, msg *c
 			}
 		case *codexsdk.TextBlock:
 			if blk.Text != "" {
-				// LogBlock so the assistant text folds in the editor's
+				// LogBlock so the assistant text folds in the studio's
 				// run log; full content, no truncation.
 				b.Logger.LogBlock(iterlog.LevelInfo, "ℹ️ ",
 					fmt.Sprintf("[%s#%d/codex] 💬", nodeID, iteration),

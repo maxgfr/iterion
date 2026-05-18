@@ -2,7 +2,7 @@
 // extensions iterion recognises as workflow source files. Both `.iter`
 // and `.bot` are accepted everywhere a workflow file is loaded: the
 // CLI, the HTTP server, the file watcher, the embedded examples, and
-// the editor. The two extensions are semantically identical at the
+// the studio. The two extensions are semantically identical at the
 // parser, IR, and runtime levels — the distinction is narrative, not
 // technical. See the README section "`.iter` vs `.bot`" for guidance.
 package workflowfile

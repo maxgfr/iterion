@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/SocialGouv/iterion/pkg/conductor/native"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
@@ -18,7 +18,7 @@ type IssueCommonOptions struct {
 	StoreDir string
 }
 
-// openNativeStore resolves <store-dir>/conductor and opens the native
+// openNativeStore resolves <store-dir>/dispatcher and opens the native
 // store there. The directory and board.json are created on first call.
 func openNativeStore(opts IssueCommonOptions) (*native.Store, string, error) {
 	cwd, err := os.Getwd()
@@ -26,7 +26,7 @@ func openNativeStore(opts IssueCommonOptions) (*native.Store, string, error) {
 		return nil, "", err
 	}
 	storeDir := store.ResolveStoreDir(cwd, opts.StoreDir)
-	root := filepath.Join(storeDir, "conductor")
+	root := filepath.Join(storeDir, "dispatcher")
 	s, err := native.NewStore(root)
 	if err != nil {
 		return nil, "", err

@@ -13,7 +13,7 @@ import (
 // pipe transport opens FDs 3 (Chromium reads) and 4 (Chromium writes)
 // in the child process; we provide them via cmd.ExtraFiles and wrap
 // the parent ends as an io.ReadWriteCloser the registry hands to
-// the editor's WS proxy.
+// the studio's WS proxy.
 //
 // Pipe framing: Chromium emits one CDP JSON-RPC message per write,
 // followed by a single null byte (`\0`). The WS proxy is responsible
@@ -36,7 +36,7 @@ type HostChromiumRunner struct {
 	BinaryPath string
 	// ExtraArgs is appended to the default headless + pipe flags.
 	// Operators can use it to bump --remote-allow-origins or pin a
-	// user-data-dir; the defaults stay safe for the editor pane.
+	// user-data-dir; the defaults stay safe for the studio pane.
 	ExtraArgs []string
 }
 

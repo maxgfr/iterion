@@ -3,7 +3,7 @@ package ir
 import (
 	"regexp"
 
-	"github.com/SocialGouv/iterion/pkg/conductor/native/boardops"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native/boardops"
 )
 
 // Capability diagnostics.

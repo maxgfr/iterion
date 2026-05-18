@@ -51,7 +51,7 @@ wkhtmltoimage, headless chromium, anything that produces a PNG/JPEG):
 
 The runtime reads the file from the host filesystem and persists it as
 a regular run attachment (the same machinery as user uploads). The
-editor surfaces every captured frame in **time-travel mode**: when the
+studio surfaces every captured frame in **time-travel mode**: when the
 scrubber is parked at seq *N*, the pane shows the most-recent frame
 with seq ≤ *N* — useful for retroactively inspecting what the workflow
 saw at any point in the run.
@@ -61,8 +61,8 @@ saw at any point in the run.
 Two paths today:
 
 1. **Manual debug attach** (local editor mode only, no Playwright
-   required) — click **attach live** in the Browser tab. The editor POSTs
-   to `/api/runs/:id/browser/attach`, the local editor server spawns
+   required) — click **attach live** in the Browser tab. The studio POSTs
+   to `/api/runs/:id/browser/attach`, the local studio server spawns
    Chromium on the host via `--remote-debugging-pipe`, registers a
    session in its in-memory `BrowserRegistry`, and the pane connects via
    the CDP WS proxy. Useful for testing the live UI on a fresh run. The
@@ -74,7 +74,7 @@ Two paths today:
    sandbox image that ships Chromium (`iterion-sandbox-browser`), the
    runtime will spawn Chromium before the agent starts and inject
    `--cdp-endpoint` into the MCP server args so it shares the same
-   browser. The editor's Browser pane flips to live mode automatically.
+   browser. The studio's Browser pane flips to live mode automatically.
 
 The C060 IR diagnostic enforces the sandbox/image pairing at compile
 time when a sandbox is active — workflows that opt into a sandbox + a
@@ -95,7 +95,7 @@ editor  <─── ws://…/api/runs/{id}/browser/cdp?session=… ───>  it
 Framing rule: **one WebSocket BinaryMessage = one CDP JSON-RPC
 message**. The server re-frames Chromium's null-terminated pipe stream
 into discrete WS frames in both directions. The frontend client
-(`editor/src/lib/cdpClient.ts`) speaks plain JSON-RPC; it doesn't see
+(`studio/src/lib/cdpClient.ts`) speaks plain JSON-RPC; it doesn't see
 the pipe framing.
 
 ### Disabling the pane
@@ -103,7 +103,7 @@ the pipe framing.
 The whole feature is gated by a single CLI flag:
 
 ```sh
-iterion editor --no-browser-pane
+iterion studio --no-browser-pane
 ```
 
 The flag disables every code path: the iframe proxy, the WS endpoint,

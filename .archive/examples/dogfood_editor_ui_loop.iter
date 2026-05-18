@@ -9,8 +9,8 @@
 ##
 ## Pipeline:
 ##   1. plan          — Claude Code, opus 4.7. session=fresh, read-only.
-##                      Reads editor/src/, identifies React components,
-##                      API client (editor/src/api/), backend endpoint
+##                      Reads studio/src/, identifies React components,
+##                      API client (studio/src/api/), backend endpoint
 ##                      hooks. Produces a structured plan.
 ##   2. act           — Claude Code, opus 4.7. session=inherit.
 ##                      Implements the plan. NEVER touches pkg/ or cmd/
@@ -166,20 +166,20 @@ prompt plan_system:
      (Read, Glob, Grep, and bash limited to readonly commands such
      as ls, cat, head, git status, git log).
   2. Identify the React components, the API client (under
-     editor/src/api/), and the backend endpoint(s) the feature
+     studio/src/api/), and the backend endpoint(s) the feature
      requires. If the feature needs a new HTTP route, name the
      pkg/server/ file that handles it — but DO NOT plan to write
      it unless the user prompt explicitly calls for backend work.
   3. Produce a structured plan. `files_to_modify` MUST list paths
      relative to {{vars.workspace_dir}} (e.g.
-     "editor/src/components/Runs/RunHeader.tsx"). The judge will
+     "studio/src/components/Runs/RunHeader.tsx"). The judge will
      enforce the diff against this list — keep it accurate.
 
   The next node inherits this Claude Code session and will
   implement the plan you produce here.
 
 prompt plan_user:
-  Feature to implement on the iterion editor:
+  Feature to implement on the iterion studio:
   {{vars.feature_prompt}}
 
   Workspace: {{vars.workspace_dir}}

@@ -50,7 +50,7 @@ type RunOptions struct {
 	NoInteractive bool                 // disable interactive TTY prompting on human pause
 	Executor      runtime.NodeExecutor // pluggable executor (nil = stub)
 	// Background marks this invocation as a managed-runner subprocess
-	// spawned by the editor server. The CLI writes a .pid file so the
+	// spawned by the studio server. The CLI writes a .pid file so the
 	// server can detect liveness across its own restart, and forces
 	// NoInteractive (no TTY in the spawned process).
 	Background bool
@@ -162,10 +162,10 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 	storeDir := store.ResolveStoreDir(filepath.Dir(iterFile), opts.StoreDir)
 
 	// Tee the logger output into <storeDir>/runs/<runID>/run.log so the
-	// editor's Logs tab and the per-run log buffer (used by the WS
+	// studio's Logs tab and the per-run log buffer (used by the WS
 	// subscription that drives RunLogPanel) see the same content as the
 	// CLI's stderr. Without this, CLI-launched runs show "No log
-	// captured." in the editor — the daemon-launched path tees via
+	// captured." in the studio — the daemon-launched path tees via
 	// runview.Service.prepareRunLog, but a direct `iterion run`
 	// invocation bypasses runview entirely. Errors are warned-and-
 	// continue: a CLI run with no writable store dir still works (logs
@@ -282,7 +282,7 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 	}
 	defer lock.Unlock()
 
-	// Managed-runner mode: the editor server writes the .pid file on
+	// Managed-runner mode: the studio server writes the .pid file on
 	// our behalf at spawn time, so we only need to remove it on exit.
 	// The server's reconciler then flips this run to a terminal status
 	// without waiting for the next reconcile sweep.

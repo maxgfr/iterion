@@ -25,7 +25,7 @@
 ## Run instructions (post-PR 4):
 ##   devbox run -- ./iterion run examples/playwright_demo.iter \
 ##     --merge-into none
-##   devbox run -- ./iterion editor --port 8080
+##   devbox run -- ./iterion studio --port 8080
 ##   # Open the run, watch the Browser tab show example.com.
 
 mcp_server playwright:

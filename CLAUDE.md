@@ -37,7 +37,7 @@ which on Linux Mint/Ubuntu hosts is **dash**, but inside devbox is
 expansion, no `[[ ]]`, no `<<<`). See
 [docs/workflow_authoring_pitfalls.md](docs/workflow_authoring_pitfalls.md#shell-portability-for-tool-nodes).
 
-**pnpm via corepack:** the `editor/` workspace is locked to a specific
+**pnpm via corepack:** the `studio/` workspace is locked to a specific
 pnpm version through `package.json`'s `packageManager` field. The
 Taskfile invokes pnpm as `corepack pnpm …` so the version is
 auto-dispatched without polluting the host install. Corepack ships
@@ -79,7 +79,7 @@ The Go code follows the standard `cmd/` + `pkg/` layout. Three top-level Go dire
 - `pkg/` — All library code, grouped by role (see breakdown below)
 - `e2e/` — End-to-end test suite (kept at root by Go convention)
 
-Other top-level directories: `editor/` (React/Vite frontend), `examples/` (.iter workflows), `docs/` (incl. `docs/grammar/` EBNF and `docs/references/` patterns/diagnostics), `scripts/`, `vendor/`.
+Other top-level directories: `studio/` (React/Vite frontend), `examples/` (.iter workflows), `docs/` (incl. `docs/grammar/` EBNF and `docs/references/` patterns/diagnostics), `scripts/`, `vendor/`.
 
 ### `pkg/` breakdown
 
@@ -99,27 +99,27 @@ Other top-level directories: `editor/` (React/Vite frontend), `examples/` (.iter
   - `recipe/` — Recipe handling for tool adapters and execution policies
   - `cost/` — Cost estimation and budgeting
   - `llmtypes/` — LLM SDK abstraction (`LLMTool`, `FatalToolError`, `ModelCapabilities`)
-  - `detect/` — Backend credential auto-detection (OAuth, API keys, AWS/GCP) consumed by `model/executor.go`'s resolver and the editor toolbar BackendStatusPill
+  - `detect/` — Backend credential auto-detection (OAuth, API keys, AWS/GCP) consumed by `model/executor.go`'s resolver and the studio toolbar BackendStatusPill
   - `tooldisplay/` — Human-readable rendering of tool calls for the run console / report
 - `pkg/runtime/` — Workflow execution engine (branch scheduling, events, budget, recovery dispatch)
 - `pkg/store/` — Run persistence (JSON-based, versioned artifacts, events.jsonl)
-- `pkg/server/` — HTTP server for editor backend (embedded static UI)
-- `pkg/conductor/` — Long-running dispatcher: native kanban store, polling actor, tracker adapters (native, github, forgejo)
+- `pkg/server/` — HTTP server for studio backend (embedded static UI)
+- `pkg/dispatcher/` — Long-running dispatcher: native kanban store, polling actor, tracker adapters (native, github, forgejo)
   - `tracker/` — `Tracker` interface + normalized `Issue` type + GitHub/Forgejo adapters
   - `native/` — Filesystem-backed kanban (board.json, issues/, events.jsonl) + REST + adapter
   - `native/boardops/` — capability-gated board operations shared by the `__mcp-board` stdio server, the `/api/v1/mcp/board` HTTP handler, and the claw in-process tools (`mcp.iterion_board.*`)
-- `pkg/cli/` — CLI command implementations (init, validate, run, inspect, resume, diagram, editor, report, conduct, issue, bench, bots, bundle, sandbox, version)
+- `pkg/cli/` — CLI command implementations (init, validate, run, inspect, resume, diagram, studio, report, dispatch, issue, bench, bots, bundle, sandbox, version)
 - `pkg/benchmark/` — Metrics collection and reporting
 - `pkg/log/` — Leveled logger (error, warn, info, debug, trace) — public so e2e tests can construct it
 - `pkg/auth/` — Operator authentication primitives (SSO, session cookies) for cloud-mode endpoints
 - `pkg/bundle/` — `.botz` bundle loader (workflow + skills + recipes packaged together)
 - `pkg/cloud/` — Cloud-mode runtime wiring (queue dispatch, runner orchestration, multitenancy)
-- `pkg/config/` — Config-file loader (`iterion conduct` YAML + cloud config)
+- `pkg/config/` — Config-file loader (`iterion dispatch` YAML + cloud config)
 - `pkg/git/` — Git helpers (worktree create/finalize, branch detection, fast-forward checks)
-- `pkg/identity/` — Operator identity types shared between auth, cloud and conductor
+- `pkg/identity/` — Operator identity types shared between auth, cloud and dispatcher
 - `pkg/queue/` — NATS-backed work queue used by cloud-mode dispatcher → runner pods
 - `pkg/runner/` — Cloud runner pod logic: claim a queued run, execute, report status back
-- `pkg/runview/` — Read-only run console API (REST + WS) consumed by the editor SPA
+- `pkg/runview/` — Read-only run console API (REST + WS) consumed by the studio SPA
 - `pkg/sandbox/` — Sandbox engine: Docker/Kubernetes drivers, devcontainer parsing, CONNECT proxy
 - `pkg/secrets/` — Secret resolution (env / file / KMS) shared across backends and sandbox
 - `pkg/internal/` — Internal utilities (not importable outside `pkg/`)
@@ -184,7 +184,7 @@ Three backends are wired:
 - `claude_code` — recommended for nodes that need real tool/shell access (implementers, fixers).
 - `codex` — **supported but discouraged**. The IR compiler emits `C030` for any node using it. Reasons: codex SDK cannot configure its tool set (`AllowedTools`/`CanUseTool` don't gate the built-in shell), it tends to fill its own context window, and its iterion integration is less ergonomic. Live tests (`task test:live`) still exercise codex for compatibility coverage; new workflows should not adopt it.
 
-**Auto-detection.** When neither the node (`backend:`) nor the workflow (`default_backend:`) names a backend, and `ITERION_DEFAULT_BACKEND` is unset, the resolver in [pkg/backend/model/executor.go:resolveBackendName](pkg/backend/model/executor.go) probes the host for credentials (Claude Code OAuth, ANTHROPIC_API_KEY, OPENAI_API_KEY, AWS, GCP) and picks the first match in `ITERION_BACKEND_PREFERENCE` (default `claude_code,claw` — codex is intentionally excluded). When `model:` is also empty and the resolved backend is `claw`, the runtime substitutes a sensible model spec for the first available provider. The editor surfaces the live detection via the toolbar BackendStatusPill and disables Run when no credential is found. See [docs/backends.md](docs/backends.md).
+**Auto-detection.** When neither the node (`backend:`) nor the workflow (`default_backend:`) names a backend, and `ITERION_DEFAULT_BACKEND` is unset, the resolver in [pkg/backend/model/executor.go:resolveBackendName](pkg/backend/model/executor.go) probes the host for credentials (Claude Code OAuth, ANTHROPIC_API_KEY, OPENAI_API_KEY, AWS, GCP) and picks the first match in `ITERION_BACKEND_PREFERENCE` (default `claude_code,claw` — codex is intentionally excluded). When `model:` is also empty and the resolved backend is `claw`, the runtime substitutes a sensible model spec for the first available provider. The studio surfaces the live detection via the toolbar BackendStatusPill and disables Run when no credential is found. See [docs/backends.md](docs/backends.md).
 
 **OpenAI ChatGPT-forfait via claw.** When Codex CLI is signed in via "Sign in with ChatGPT" (`auth_mode: "chatgpt"` in `~/.codex/auth.json`), `claw` can reuse that OAuth token + account_id to drive OpenAI calls through `chatgpt.com/backend-api/codex` — billing against the user's ChatGPT Plus/Pro subscription instead of metered API calls. Precedence: `OPENAI_API_KEY` wins when both are present (explicit env var = deliberate); ChatGPT-OAuth activates when no API key is set, or when `ITERION_OPENAI_USE_OAUTH=1` forces it. `ITERION_OPENAI_USE_OAUTH=0` or any `OPENAI_BASE_URL` disables OAuth. The `version:` header (which OpenAI uses to gate model availability — e.g. gpt-5.5 requires codex-cli ≥ 0.130) is sourced from `ITERION_CODEX_VERSION` or `codex --version`. See the "OpenAI via ChatGPT forfait" section in [docs/backends.md](docs/backends.md). The Anthropic-forfait equivalent is **not** supported (Consumer Terms scope it to Claude Code only).
 
@@ -268,10 +268,10 @@ worktree at `<store-dir>/worktrees/<run-id>` and runs all nodes inside it
 4. Removes the worktree directory.
 
 The result is persisted on `run.json` as `final_commit`, `final_branch`,
-`merged_into` and surfaced in the editor RunHeader so the user always
+`merged_into` and surfaced in the studio RunHeader so the user always
 knows where the run's commits landed.
 
-Override flags (CLI + editor Launch modal + HTTP API):
+Override flags (CLI + studio Launch modal + HTTP API):
 - `--merge-into <target>` — `current` (default), `none` (skip FF, branch
   only), or a branch name (must match currently-checked-out)
 - `--branch-name <name>` — override the storage branch (default
@@ -281,32 +281,32 @@ On error, the worktree is preserved at `<store-dir>/worktrees/<run-id>`
 for inspection and finalization is skipped — the operator decides what
 to do with any partial commits.
 
-### Conductor layer (`iterion conduct`)
+### Dispatcher layer (`iterion dispatch`)
 
 Iterion ships a long-running dispatcher on top of the runtime engine:
-`iterion conduct <config.yaml>` polls an issue tracker (native kanban,
+`iterion dispatch <config.yaml>` polls an issue tracker (native kanban,
 GitHub Issues, or Forgejo/Gitea) and dispatches a workflow run per
 eligible issue, with retry, stall detection, per-state concurrency,
 and lifecycle hooks (`after_create`, `before_run`, `after_run`,
 `before_remove`).
 
-The conductor uses an **actor pattern** — a single goroutine owns all
+The dispatcher uses an **actor pattern** — a single goroutine owns all
 mutable state; outside callers send typed commands on a channel. The
-architecture is fully documented in [docs/conductor.md](docs/conductor.md);
+architecture is fully documented in [docs/dispatcher.md](docs/dispatcher.md);
 the native tracker (the default, locally-owned kanban) is documented
 in [docs/native-tracker.md](docs/native-tracker.md).
 
-Key files: [pkg/conductor/conductor.go](pkg/conductor/conductor.go) (actor +
-public API), [pkg/conductor/loop.go](pkg/conductor/loop.go) (polling + dispatch),
-[pkg/conductor/tracker/tracker.go](pkg/conductor/tracker/tracker.go) (the
-`Tracker` interface), [pkg/conductor/native/store.go](pkg/conductor/native/store.go)
-(the JSON kanban store), [pkg/cli/conduct.go](pkg/cli/conduct.go) (daemon
+Key files: [pkg/dispatcher/dispatcher.go](pkg/dispatcher/dispatcher.go) (actor +
+public API), [pkg/dispatcher/loop.go](pkg/dispatcher/loop.go) (polling + dispatch),
+[pkg/dispatcher/tracker/tracker.go](pkg/dispatcher/tracker/tracker.go) (the
+`Tracker` interface), [pkg/dispatcher/native/store.go](pkg/dispatcher/native/store.go)
+(the JSON kanban store), [pkg/cli/dispatch.go](pkg/cli/dispatch.go) (daemon
 wiring including the embedded SPA).
 
-The editor's SPA exposes two new routes when the corresponding server
+The studio's SPA exposes two new routes when the corresponding server
 flags are set: `/board` (kanban CRUD with drag-and-drop, gated on
-`server_info.native_tracker_enabled`) and `/conductor` (live dashboard
-with running + retry tables, gated on `server_info.conductor_enabled`).
+`server_info.native_tracker_enabled`) and `/dispatcher` (live dashboard
+with running + retry tables, gated on `server_info.dispatcher_enabled`).
 
 ### Bot board access (capabilities)
 
@@ -325,7 +325,7 @@ opens the matching tools transparently based on the backend:
   `mcp.iterion_board.*` via `pkg/backend/tool/claw_board_tools.go`.
 
 All three paths route through the same
-[pkg/conductor/native/boardops](pkg/conductor/native/boardops/ops.go)
+[pkg/dispatcher/native/boardops](pkg/dispatcher/native/boardops/ops.go)
 package, so validation and event semantics are identical. Capability
 diagnostics are `C080` (unknown cap, warning) and `C081` (malformed,
 error). The bot catalog used by `whats-next` is regenerated via
@@ -415,15 +415,15 @@ iterion run <file.iter> [flags]         # Execute workflow (--var, --recipe, --t
 iterion inspect [--run-id] [--events]   # View run state and events
 iterion resume --run-id --file [--answers-file] [--force]  # Resume paused/failed/cancelled run
 iterion diagram <file.iter> [--view]    # Generate Mermaid diagram (compact|detailed|full)
-iterion editor [--port] [--dir]         # Launch visual workflow editor
+iterion studio [--port] [--dir]         # Launch visual workflow editor
 iterion report --run-id <id> [--store-dir] [--output]  # Generate chronological run report
-iterion conduct <config.yaml> [--port]  # Long-running dispatcher (tracker → workflow per issue)
+iterion dispatch <config.yaml> [--port]  # Long-running dispatcher (tracker → workflow per issue)
 iterion issue create|list|show|move|update|close|board  # Native kanban tracker
 iterion bench asymptote [flags]         # Asymptote benchmark (see docs/asymptote-bench.md)
 iterion bundle init|pack                # Scaffold or pack a .botz bundle (see docs/bundles.md)
 iterion sandbox doctor                  # Diagnose host sandbox prerequisites (see docs/sandbox.md)
 iterion migrate to-cloud [flags]        # Migrate a local store into a cloud (Mongo + S3) backend
-iterion server [--port] [--store-dir]   # HTTP server (run console + editor SPA), without the editor launcher
+iterion server [--port] [--store-dir]   # HTTP server (run console + studio), without the studio launcher
 iterion version                         # Print version
 
 # Operational runner and hidden subprocess entry points:

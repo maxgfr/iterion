@@ -101,7 +101,7 @@ func TestSnapshotReducer_LoopIterations(t *testing.T) {
 }
 
 func TestSnapshotReducer_MonotonicGuardAgainstDuplicateNodeStarted(t *testing.T) {
-	// Mirror of editor T2.4 (9bcccff). The runtime can re-emit
+	// Mirror of studio T2.4 (9bcccff). The runtime can re-emit
 	// node_started for the same (branch, node, iteration) when the
 	// node is not on a loop edge directly and currentLoopIteration
 	// returns the same value for successive runs (observed live as

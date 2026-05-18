@@ -31,10 +31,10 @@ import (
 const tracerName = "github.com/SocialGouv/iterion/pkg/server"
 
 // registerRunRoutes wires the /api/runs surface onto the server's
-// mux. Called from routes() after the editor endpoints so the run
+// mux. Called from routes() after the studio endpoints so the run
 // console is opt-in: a server constructed without a store dir
 // (s.runs == nil) silently skips registration and behaves exactly
-// like the editor-only build.
+// like the studio-only build.
 func (s *Server) registerRunRoutes() {
 	if s.runs == nil {
 		return
@@ -76,7 +76,7 @@ func (s *Server) registerRunRoutes() {
 type launchRunRequest struct {
 	FilePath string `json:"file_path"`
 	// Source is the .iter contents uploaded inline. In cloud mode the
-	// editor SPA sends this so the server pod doesn't need a shared
+	// studio sends this so the server pod doesn't need a shared
 	// filesystem; FilePath is then advisory (used for display + as the
 	// AST parserPath). When both are set, Source wins.
 	Source string            `json:"source,omitempty"`
@@ -115,7 +115,7 @@ type launchRunResponse struct {
 type resumeRunRequest struct {
 	FilePath string `json:"file_path,omitempty"` // optional; falls back to run.FilePath
 	// Source carries the .iter contents inline. Used in cloud mode
-	// when the resumer (editor SPA) wants to push a possibly-modified
+	// when the resumer (studio) wants to push a possibly-modified
 	// workflow without depending on the server pod's filesystem.
 	Source  string                 `json:"source,omitempty"`
 	Answers map[string]interface{} `json:"answers,omitempty"`
@@ -188,7 +188,7 @@ func (s *Server) handleLaunchRun(w http.ResponseWriter, r *http.Request) {
 	}
 	// Cloud mode rejects bare FilePath because the server pod has no
 	// shared filesystem with the operator. Inline Source is the only
-	// path that works cloud-side; document it explicitly so the editor
+	// path that works cloud-side; document it explicitly so the studio
 	// SPA / CLI / curl users see an actionable 400 instead of a
 	// silent file-not-found further down the publish chain.
 	if s.cfg.Mode == "cloud" && req.Source == "" {
@@ -386,7 +386,7 @@ func (s *Server) handleGetRunWorkflow(w http.ResponseWriter, r *http.Request) {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "%v", err)
 		return
 	} else if xs != nil {
-		// Cross-store: re-use the IR-→-wire projection so the editor
+		// Cross-store: re-use the IR-→-wire projection so the studio
 		// receives the same shape it expects from the same-store path.
 		// One-shot — no cache (the daemon serves cross-store reads
 		// rarely; cache-hit ratio wouldn't justify the lock).
@@ -455,7 +455,7 @@ func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 
 // handleGetToolBlob streams a slice of a per-tool-call I/O sidecar
 // blob (written by the hooks layer when an input/output exceeded the
-// inline threshold). Used by the editor's Tools tab to lazy-fetch
+// inline threshold). Used by the studio's Tools tab to lazy-fetch
 // large bodies on demand: events carry only a 4 KB preview + a ref,
 // the rest is served paginated from here.
 //
@@ -529,7 +529,7 @@ func (s *Server) handleGetToolBlob(w http.ResponseWriter, r *http.Request) {
 // (run reports, SBOMs, …) dropped under runs/<id>/artifact_files by
 // in-sandbox tools. Returns an empty array (not 404) when the run
 // produced no files — distinguishes "valid run, nothing to download"
-// from "no such run", which the editor's Artifacts panel renders as
+// from "no such run", which the studio's Artifacts panel renders as
 // an empty state.
 func (s *Server) handleListArtifactFiles(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -573,7 +573,7 @@ func (s *Server) handleGetArtifactFile(w http.ResponseWriter, r *http.Request) {
 	}
 	// Disposition: `inline` by default lets browsers preview .md /
 	// .json / images directly; `?download=1` switches to `attachment`
-	// for the editor's Download button (the HTML5 `download` attribute
+	// for the studio's Download button (the HTML5 `download` attribute
 	// alone is unreliable across embedded WebViews + same-origin
 	// previewable types). Filename hint is the basename of the path.
 	disposition := "inline"
@@ -645,7 +645,7 @@ func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 		//   - paused_waiting_human / failed_resumable: the operator
 		//     wants to abandon the partial work. Flip the persisted
 		//     status to cancelled, emit run_cancelled, and finalize the
-		//     worktree so the editor's merge UI can act on whatever
+		//     worktree so the studio's merge UI can act on whatever
 		//     commits the run produced before it stalled.
 		if errors.Is(err, runview.ErrRunNotActive) {
 			r2, loadErr := s.runs.LoadRunCtx(r.Context(), id)
@@ -838,9 +838,9 @@ func (s *Server) handleResumeRun(w http.ResponseWriter, r *http.Request) {
 // Resolution rules:
 //   - cloud mode + source set: return filePath as a logical label;
 //     the publisher carries Source inline to the runner pod.
-//   - local mode + source set: the SPA bundles the editor buffer
+//   - local mode + source set: the SPA bundles the studio buffer
 //     alongside file_path (e.g. for imported / freshly-saved
-//     recipes — see editor/src/components/Toolbar/Toolbar.tsx).
+//     recipes — see studio/src/components/Toolbar/Toolbar.tsx).
 //     The downstream subprocess (`iterion run <path>`) reads from
 //     disk, so a relative basename relative to the desktop
 //     process cwd would ENOENT. We materialise Source into a
@@ -912,14 +912,14 @@ func (s *Server) resolveCachedInlineSource(filePath string) (string, bool) {
 // path. The cache lives at <storeDir>/inline-sources/<sha12>-<basename>:
 //   - the file persists for the lifetime of the run store (resume,
 //     inspect, report all keep working without needing the original
-//     buffer to still be open in the editor);
+//     buffer to still be open in the studio);
 //   - identical source content reuses the same cache file (idempotent);
 //   - different content for the same basename does NOT overwrite —
 //     each run's persisted FilePath uniquely identifies the bytes it
 //     was launched with, so resume always replays the original source
 //     even when a newer launch of the same recipe touched the cache.
 //
-// When filePath is empty (an editor-only buffer that was never saved on
+// When filePath is empty (an studio-only buffer that was never saved on
 // disk), we synthesise a basename of "inline.iter" so the cache layout
 // stays predictable.
 //

@@ -31,8 +31,8 @@ type AppInfo struct {
 }
 
 // GetServerURL returns the absolute http://127.0.0.1:<port>/ address the
-// embedded editor server is bound to, or "" if the server failed to start.
-// The editor SPA uses this binding for absolute URLs that cannot be
+// embedded studio server is bound to, or "" if the server failed to start.
+// The studio uses this binding for absolute URLs that cannot be
 // proxied through Wails' AssetServer — most notably WebSocket dialer URLs
 // for /api/ws and /api/ws/runs/* (Wails AssetServer rejects WS upgrades
 // with 501). HTTP API calls flow through the AssetServer reverse-proxy
@@ -324,7 +324,7 @@ func (a *App) addProject(abs string) (*Project, error) {
 }
 
 // addAndSwitchProject registers the given directory as a project and switches
-// the embedded editor server to it before returning. Keeping the
+// the embedded studio server to it before returning. Keeping the
 // config/current project and backend workdir in lockstep is required for both
 // first-run onboarding and the normal project switcher; otherwise the SPA can
 // show the new currentProject while /api/* still writes to the previous
@@ -345,7 +345,7 @@ func (a *App) addAndSwitchProject(dir string) (*Project, error) {
 }
 
 // AddProject registers the given directory as a project, switches the backend
-// to it, and emits project:switched so the already-mounted editor SPA reloads
+// to it, and emits project:switched so the already-mounted studio reloads
 // onto the new project's server state. Use AddProjectSilently during first-run
 // onboarding, where the Welcome flow must continue through API keys / CLI
 // checks before the final deliberate reload.
@@ -360,7 +360,7 @@ func (a *App) AddProject(dir string) (*Project, error) {
 }
 
 // AddProjectSilently registers the given directory as the current project,
-// persisting it without restarting the embedded editor server. Scoped to
+// persisting it without restarting the embedded studio server. Scoped to
 // first-run onboarding: the Welcome flow needs to keep its React state
 // (current step, picked dir, configured API keys) until FirstRunDone is
 // persisted at the end of the wizard. A WindowReloadApp triggered mid-flow
@@ -395,7 +395,7 @@ func validateProjectDir(dir string) (string, error) {
 
 // RemoveProject drops the project from recents. Filesystem unaffected.
 //
-// If the removed project was the current one, the editor server must
+// If the removed project was the current one, the studio server must
 // be restarted to point at the new CurrentProjectID (the MRU head, as
 // chosen by config.RemoveProject). Without this restart the WebView's
 // serverURL keeps pointing at the now-orphan daemon of the deleted
@@ -428,7 +428,7 @@ func (a *App) RemoveProject(id string) error {
 	// deleted project in their lists until the next manual refresh.
 	wruntime.EventsEmit(a.ctx, eventProjectsChanged)
 
-	// Restart the editor server only when the delete actually changed
+	// Restart the studio server only when the delete actually changed
 	// the current project (i.e. operator deleted the one they were
 	// looking at). Deleting any other project leaves the GUI's
 	// serverURL untouched and is a pure config write.
@@ -484,7 +484,7 @@ func (a *App) stopDaemonForRemovedProject(projectDir string) {
 	_ = os.Remove(target)
 }
 
-// SwitchProject restarts the editor server pointing at the given project.
+// SwitchProject restarts the studio server pointing at the given project.
 // The frontend reloads the window via the "project:switched" event.
 func (a *App) SwitchProject(id string) error {
 	a.mu.Lock()
@@ -655,7 +655,7 @@ func (a *App) IsFirstRunPending() bool {
 }
 
 // MarkFirstRunDone flips the FirstRunDone flag, persists config, and (if a
-// project is now selected) restarts the embedded editor server pointing at
+// project is now selected) restarts the embedded studio server pointing at
 // it before issuing the single re-bootstrap of the SPA. AddProjectSilently
 // intentionally skipped this restart so the Welcome wizard could keep its
 // React state through API-keys / CLI-check steps; this is the unique point

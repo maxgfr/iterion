@@ -1,6 +1,6 @@
 # Production Readiness Scorecard
 
-**Scope:** workflow engine + editor + cloud + desktop + conductor +
+**Scope:** workflow engine + editor + cloud + desktop + dispatcher +
 sandbox surface.
 
 **Effective:** end of Sprint-8 (2026-05-17).
@@ -31,7 +31,7 @@ Legend: ✅ Ready · ⚠️ Watch · ❌ Block · — not applicable
 | Queue / NATS       | ✅    | ✅†   | ⚠️     | ✅       | ✅      | ✅   | ✅      | ✅      |
 | Server (HTTP+WS)   | ✅    | ✅    | ⚠️ 22% | ✅       | ✅      | ✅   | ✅      | ✅      |
 | Auth + Identity    | ✅    | ✅    | ✅     | ✅       | ✅      | ✅   | ✅      | ✅      |
-| Conductor          | ✅    | ✅    | ✅     | ✅       | ✅      | ✅   | ✅      | ✅      |
+| Dispatcher          | ✅    | ✅    | ✅     | ✅       | ✅      | ✅   | ✅      | ✅      |
 | Sandbox            | ✅    | ✅    | ✅     | ✅       | ✅      | ✅   | ✅      | ✅      |
 | Cloud (metrics/OTel)| ✅   | ✅    | ✅ 85%+ | ✅       | ✅      | ✅   | ✅      | ✅      |
 | Runner             | ✅    | ⚠️*   | ⚠️ 18% | ✅       | ✅      | ✅   | ✅      | ⚠️     |

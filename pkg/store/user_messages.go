@@ -160,7 +160,7 @@ func (s *FilesystemRunStore) LoadPendingQueuedMessages(ctx context.Context, runI
 
 // ListQueuedMessages returns every message recorded for the run, in
 // FIFO order by QueuedAt, with their CURRENT (latest) status. Used
-// by the editor for initial inbox hydration alongside the snapshot.
+// by the studio for initial inbox hydration alongside the snapshot.
 func (s *FilesystemRunStore) ListQueuedMessages(ctx context.Context, runID string) ([]QueuedUserMessage, error) {
 	path, err := s.userMessagesPath(runID)
 	if err != nil {

@@ -14,7 +14,7 @@ import (
 // user's desktop reports `prefer-dark`, so WebKitGTK 2.40+ exposes
 // `prefers-color-scheme: dark` to the WebView. Without this hook, GTK
 // defaults to a light variant regardless of the system preference and the
-// SPA's matchMedia listener (editor/src/store/theme.ts) sees light mode
+// SPA's matchMedia listener (studio/src/store/theme.ts) sees light mode
 // even on a dark Cinnamon/GNOME session. We respect any explicit
 // GTK_THEME the user already set in their shell — the override always
 // wins.

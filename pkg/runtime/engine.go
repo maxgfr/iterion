@@ -232,7 +232,7 @@ func WithMergeStrategy(strategy string) EngineOption {
 // WithAutoMerge controls whether the engine applies the merge strategy
 // synchronously at the end of the run (true) or stops after creating
 // the storage branch (false, default), leaving merge_status="pending"
-// so the editor can offer a deferred GitHub-style merge action.
+// so the studio can offer a deferred GitHub-style merge action.
 func WithAutoMerge(auto bool) EngineOption {
 	return func(e *Engine) { e.autoMerge = auto }
 }
@@ -478,7 +478,7 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 		worktreeActive = true
 	}
 
-	// Persist the resolved working directory so editor surfaces (modified-
+	// Persist the resolved working directory so studio surfaces (modified-
 	// files panel) can locate it without re-deriving it. Done after worktree
 	// setup so e.workDir reflects the per-run worktree path when applicable.
 	// For worktree-active runs we also stash the baseline (RepoRoot +
@@ -1390,7 +1390,7 @@ func (e *Engine) resolveVars(inputs map[string]interface{}) map[string]interface
 	// expandFn lets var values reference ${PROJECT_DIR} (resolved to the
 	// engine's workDir, possibly a worktree path) and any other env var.
 	// Applied to both string defaults AND string user-provided overrides:
-	// the editor's LaunchView pre-fills its form with the literal default
+	// the studio's LaunchView pre-fills its form with the literal default
 	// (e.g. "${PROJECT_DIR}") so an unmodified submit re-sends it as an
 	// override, which would otherwise reach tool nodes verbatim and break
 	// `git -C '${PROJECT_DIR}'`. Expanding overrides in the same pass

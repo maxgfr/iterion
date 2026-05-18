@@ -2,13 +2,13 @@
 
 # Cloud Mode
 
-A long-running server deployment that targets multi-tenant teams. Same Go core as the CLI, but exposes the editor + run engine through HTTP/WS to a shared instance, persists runs to a Mongo + S3-compatible blob store, and dispatches jobs to a runner pool via NATS JetStream.
+A long-running server deployment that targets multi-tenant teams. Same Go core as the CLI, but exposes the studio + run engine through HTTP/WS to a shared instance, persists runs to a Mongo + S3-compatible blob store, and dispatches jobs to a runner pool via NATS JetStream.
 
 ## Architecture at a glance
 
 | Component | Implementation | Role |
 |---|---|---|
-| **Server** | `iterion server` (`pkg/server/`) | HTTP/WS API + embedded editor SPA + dispatch of runs to the queue |
+| **Server** | `iterion server` (`pkg/server/`) | HTTP/WS API + embedded studio + dispatch of runs to the queue |
 | **Runner pod** | `iterion runner` (`pkg/runner/`) | Consumes the NATS queue, executes workflows, can launch a per-run sandbox pod via Kubernetes |
 | **Queue** | NATS JetStream (`pkg/queue/`) | At-least-once delivery, distributed lease coordination |
 | **Run store** | MongoDB + S3-compatible blob (`pkg/store/`) | Replaces the local `.iterion/` filesystem store |

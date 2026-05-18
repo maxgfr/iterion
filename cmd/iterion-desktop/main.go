@@ -41,7 +41,7 @@ func main() {
 	// scratch and picks up our _NET_WM_ICON.
 	setPrgname("iterion")
 
-	// Source ~/.iterion/env (or $ITERION_ENV_FILE) BEFORE the editor
+	// Source ~/.iterion/env (or $ITERION_ENV_FILE) BEFORE the studio
 	// server starts so provider credentials a launching shell didn't
 	// export are still available to the runtime — notably so
 	// ClawBackend.executeViaSandboxRunner can forward OPENAI_API_KEY
@@ -94,7 +94,7 @@ func main() {
 	// (it is unused at runtime).
 	//
 	// WebSocket carve-out: AssetServer rejects WS upgrades with 501 (it is
-	// HTTP-only by design). The editor SPA dials WS endpoints directly at
+	// HTTP-only by design). The studio dials WS endpoints directly at
 	// the local server's http://127.0.0.1:<port>/api/ws[/runs/...], using
 	// ?t=<sessionToken> for cross-origin authentication.
 	err := wails.Run(&options.App{
@@ -107,7 +107,7 @@ func main() {
 			Assets:  nil,
 			Handler: newAssetProxyHandler(app),
 		},
-		// Wails defaults bindings to the startURL origin only. The editor
+		// Wails defaults bindings to the startURL origin only. The studio
 		// SPA loads on that startURL via the proxy, so the default is
 		// sufficient. We list the loopback origins explicitly so the
 		// allowlist is reviewable in one place; in practice no SPA code

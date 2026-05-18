@@ -11,7 +11,7 @@ import (
 
 // TestRunStatus_QueuedString validates the new lifecycle state added for
 // cloud-mode submission. A typo or accidental rename here breaks the
-// editor + the server's queue-position handler at once.
+// studio + the server's queue-position handler at once.
 func TestRunStatus_QueuedString(t *testing.T) {
 	if string(store.RunStatusQueued) != "queued" {
 		t.Errorf("RunStatusQueued = %q want %q", store.RunStatusQueued, "queued")

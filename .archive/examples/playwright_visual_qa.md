@@ -29,7 +29,7 @@ through `devbox run --` so Node 22 is in scope:
 
 ```bash
 set -a; source .env; set +a
-devbox run -- ./iterion editor --port 8080
+devbox run -- ./iterion studio --port 8080
 ```
 
 Without `devbox run --`, a minimal launcher PATH (e.g. running
@@ -51,7 +51,7 @@ set -a; source .env; set +a   # exports OPENAI_API_KEY
   --var objective='Verify the homepage loads, the docs link in the navbar opens the docs, and the search box is reachable from the homepage'
 ```
 
-Or via the editor's Launch modal: open
+Or via the studio's Launch modal: open
 `examples/playwright_visual_qa.iter`, fill `target_url` + `objective`,
 click Launch. The run pauses on `human_signoff` for your final
 verdict; the run console's bottom drawer renders the verdict + the
@@ -120,7 +120,7 @@ plan.
 ## When something doesn't work
 
 - `claw backend: model: invalid spec ""` → check that
-  `OPENAI_API_KEY` is exported in the shell where the editor /
+  `OPENAI_API_KEY` is exported in the shell where the studio /
   CLI was started, and that the model literal in the `.iter` is a
   valid `provider/model-id`.
 - The browse node hangs without taking any screenshot → check

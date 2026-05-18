@@ -442,7 +442,7 @@ func TestMaterializeInlineSource_NoOverwriteAcrossContent(t *testing.T) {
 	}
 }
 
-// TestArtifactFile_DispositionToggle pins the contract that the editor's
+// TestArtifactFile_DispositionToggle pins the contract that the studio's
 // Artifacts panel relies on: the route serves files inline by default
 // (so previewable types render in the browser) and switches to
 // `attachment` when `?download=1` is set (so the Download button

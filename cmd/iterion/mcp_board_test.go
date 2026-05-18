@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SocialGouv/iterion/pkg/conductor/native"
-	"github.com/SocialGouv/iterion/pkg/conductor/native/boardops"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native/boardops"
 )
 
 // drive feeds a list of JSON-RPC requests to runMCPBoardServer and returns

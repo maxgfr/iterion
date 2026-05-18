@@ -140,7 +140,7 @@ func TestRunFiles_HappyPath(t *testing.T) {
 }
 
 func TestRunFiles_HappyPath_LiveTrue(t *testing.T) {
-	// Live worktree path must mark the response Live=true so the editor
+	// Live worktree path must mark the response Live=true so the studio
 	// labels the panel "Working tree (worktree)" rather than
 	// "Committed in this run".
 	srv, hs := newTestServer(t)
@@ -167,10 +167,10 @@ func TestRunFiles_Historical_RepoRootStaleFallsBackToCWD(t *testing.T) {
 	// rsync, repo move…), historicalRefs used to short-circuit on the stale
 	// absolute path and never try the cfg.WorkDir fallback. Result: the
 	// finalized-run files panel returned `available=false reason=not_git_repo`
-	// even though the storage branch was reachable from the editor's CWD.
+	// even though the storage branch was reachable from the studio's CWD.
 	srv, hs := newTestServer(t)
 
-	// Initialise a real repo at the editor's WorkDir (cfg.WorkDir) and put
+	// Initialise a real repo at the studio's WorkDir (cfg.WorkDir) and put
 	// one commit there — the historical-files endpoint will diff against it.
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")

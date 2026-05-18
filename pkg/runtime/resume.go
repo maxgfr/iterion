@@ -400,7 +400,7 @@ func (e *Engine) resumeFromFailure(ctx context.Context, r *store.Run) error {
 	}
 	// When cp is nil, rs keeps the empty maps from newRunState — same
 	// state shape as a fresh launch, only the run_id is preserved so
-	// the editor's snapshot continuity stays intact.
+	// the studio's snapshot continuity stays intact.
 
 	e.pushExecutorVars(rs.vars)
 
@@ -824,7 +824,7 @@ type pauseInfo struct {
 // can't accept mid-session stdin, so the operator's intent rides on
 // the resume system prompt. Each transition emits a
 // user_message_delivered event through the engine's event observer
-// so WS subscribers (the editor chatbox) update their badge.
+// so WS subscribers (the studio chatbox) update their badge.
 func (e *Engine) drainOperatorMessagesForPause(ctx context.Context, runID string) []string {
 	texts, _, _ := store.DrainPending(ctx, e.store, e.onEvent, runID)
 	return texts
@@ -908,7 +908,7 @@ func (e *Engine) currentLoopIteration(nodeID string, loopCounters map[string]int
 	// loop L iff it's reachable from L's entry within L.Body. The snapshot
 	// reducer also consumes `iteration_path` (see currentLoopIterationPath
 	// below) to disambiguate executions of the same node across nested
-	// loops; this scalar `iteration` is retained for the editor's pip strip
+	// loops; this scalar `iteration` is retained for the studio's pip strip
 	// + the legacy reducer fallback.
 	for loopName, loop := range e.workflow.Loops {
 		if loop == nil {
@@ -941,7 +941,7 @@ func (e *Engine) currentLoopIteration(nodeID string, loopCounters map[string]int
 
 // currentLoopIterationPath returns a stable string encoding of the
 // counters of EVERY loop currently containing nodeID. The snapshot
-// reducers (backend + editor) use it to build a unique exec_id when a
+// reducers (backend + studio) use it to build a unique exec_id when a
 // node sits in nested loops — observed live: validate_upgrade lives in
 // fix_loop ⊂ package_loop ⊂ family_loop, and the single-int iteration
 // scheme collapsed pkg N's attempt 0 and pkg N+1's attempt 0 onto the

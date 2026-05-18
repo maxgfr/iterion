@@ -32,13 +32,13 @@ import (
 )
 
 // `iterion server` is the cloud-mode HTTP server entry point. In
-// local mode it delegates to cli.RunEditor (same handler tree as
-// `iterion editor`). In cloud mode it builds a Mongo+S3 store + a
+// local mode it delegates to cli.RunStudio (same handler tree as
+// `iterion studio`). In cloud mode it builds a Mongo+S3 store + a
 // NATS-backed LaunchPublisher and feeds them into pkg/server.Server
 // so handleLaunchRun publishes to the queue instead of spawning the
 // runtime in-process.
 //
-// Differences from `iterion editor` regardless of mode:
+// Differences from `iterion studio` regardless of mode:
 //   - default --bind is 0.0.0.0 (cloud pods need LAN exposure);
 //   - --no-browser is forced on (no display in a container).
 //
@@ -54,18 +54,18 @@ var serverOpts struct {
 
 var serverCmd = &cobra.Command{
 	Use:   "server",
-	Short: "Start the iterion HTTP server (editor SPA + run console + cloud API)",
+	Short: "Start the iterion HTTP server (studio + run console + cloud API)",
 	Long: `iterion server is the cloud-deployment HTTP entry point. It serves the
-editor SPA, the run console (REST + WebSocket), and the launch /
+studio, the run console (REST + WebSocket), and the launch /
 resume / cancel API on a single port. Health endpoints (/healthz,
 /readyz) live alongside the API.
 
 Mode is chosen by ITERION_MODE:
-  - local (default): in-process engine; same as 'iterion editor'.
+  - local (default): in-process engine; same as 'iterion studio'.
   - cloud: persists to Mongo+S3, publishes runs onto NATS for the
     runner pool to consume.
 
-For local dev, prefer 'iterion editor' which keeps the loopback bind
+For local dev, prefer 'iterion studio' which keeps the loopback bind
 default and opens the browser.`,
 	Args: cobra.NoArgs,
 	RunE: runServer,
@@ -90,10 +90,10 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("server: load config: %w", err)
 	}
 
-	// Local mode: keep the existing editor handlers; only difference
-	// from `iterion editor` is the cloud-friendly --bind default.
+	// Local mode: keep the existing studio handlers; only difference
+	// from `iterion studio` is the cloud-friendly --bind default.
 	if cfg.Mode == iterconfig.ModeLocal {
-		return cli.RunEditor(cmd.Context(), cli.EditorOptions{
+		return cli.RunStudio(cmd.Context(), cli.StudioOptions{
 			Port:      serverOpts.port,
 			Bind:      serverOpts.bind,
 			Dir:       serverOpts.dir,
@@ -103,7 +103,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Cloud mode: build Mongo+S3 store + NATS publisher + server
-	// directly. We bypass cli.RunEditor because it auto-discovers a
+	// directly. We bypass cli.RunStudio because it auto-discovers a
 	// filesystem store, which doesn't make sense when persistence
 	// lives in Mongo.
 	logger := iterlog.NewWithFormat(parseLevel(cfg.Log.Level), cmd.ErrOrStderr(), parseLogFormat(cfg.Log.Format))

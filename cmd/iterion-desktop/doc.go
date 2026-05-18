@@ -1,7 +1,7 @@
 // Package main is the Iterion Desktop binary.
 //
-// The desktop binary wraps pkg/server (the editor HTTP server) and pkg/cli
-// (RunEditor) inside a Wails v2 native window. It adds:
+// The desktop binary wraps pkg/server (the studio HTTP server) and pkg/cli
+// (RunStudio) inside a Wails v2 native window. It adds:
 //
 //   - Multi-project switching (pkg config under ~/.config/Iterion/)
 //   - OS keychain integration (Mac Keychain, Win Cred Mgr, libsecret) for

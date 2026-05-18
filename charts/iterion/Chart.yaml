@@ -2,7 +2,7 @@ apiVersion: v2
 name: iterion
 description: |
   Iterion workflow orchestration engine — Kubernetes deployment.
-  Server (HTTP API + editor SPA) plus an optional runner pool that
+  Server (HTTP API + studio) plus an optional runner pool that
   pulls work from NATS JetStream and persists state to MongoDB + S3.
 type: application
 # Chart `version` and `appVersion` are both kept in sync with package.json

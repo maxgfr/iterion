@@ -12,9 +12,9 @@ var issueCmd = &cobra.Command{
 	Short: "Manage native kanban issues",
 	Long: `Manage iterion's built-in kanban tracker.
 
-Issues live under <store-dir>/conductor/. They are independent of any
+Issues live under <store-dir>/dispatcher/. They are independent of any
 remote tracker (GitHub, Forgejo, …) and can be dispatched by
-` + "`iterion conduct`" + ` via the native tracker adapter.
+` + "`iterion dispatch`" + ` via the native tracker adapter.
 
 Subcommands:
   create   Create a new issue

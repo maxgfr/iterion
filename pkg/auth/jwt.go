@@ -17,7 +17,7 @@ import (
 // client can reject tokens that didn't come from this server.
 const jwtIssuer = "iterion"
 
-// jwtAudience scopes tokens to the editor SPA + API. We don't issue
+// jwtAudience scopes tokens to the studio SPA + API. We don't issue
 // audience-specific tokens today (the same JWT works for both), but
 // pinning the value lets us split later without breaking existing
 // clients on day-one.

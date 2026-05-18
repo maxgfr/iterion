@@ -32,7 +32,7 @@ func (s *FilesystemRunStore) LockRun(_ context.Context, runID string) (RunLock, 
 // AcquireFileLock returns an exclusive lock pinned to a specific file
 // path. It is the directory-agnostic surface of the same flock /
 // PID-lock primitive that backs LockRun, exposed so consumers outside
-// pkg/store (typically the conductor's process-level lock on the
+// pkg/store (typically the dispatcher's process-level lock on the
 // workspace root) can reuse the implementation instead of reinventing
 // it cross-platform.
 //

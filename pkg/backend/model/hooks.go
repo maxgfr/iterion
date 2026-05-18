@@ -21,9 +21,9 @@ const maxFieldSize = 1 << 20 // 1 MB
 // toolInlineThreshold is the byte size up to which tool inputs/outputs
 // are stored inline in the event payload. Above this, the full content
 // lands in a sidecar blob (runs/<id>/tools/<tool_use_id>/{input,output}),
-// and the event carries a 4 KB head preview + a `ref` so the editor can
+// and the event carries a 4 KB head preview + a `ref` so the studio can
 // fetch the rest paginated on demand. Keeping the threshold equal to the
-// preview size means small calls are zero-fetch (the editor sees the
+// preview size means small calls are zero-fetch (the studio sees the
 // full content inline) while large outputs (Bash on big files, LLM-
 // authored Write/Edit) don't bloat events.jsonl or flood the WS stream.
 const toolInlineThreshold = 4096 // 4 KB
@@ -64,7 +64,7 @@ type ToolBlobWriter interface {
 //     deterministic from run_id + tool_use_id + kind).
 //
 // When blobSink is nil or toolUseID is empty (legacy paths, cloud
-// stores), falls back to capped inline persistence so the editor still
+// stores), falls back to capped inline persistence so the studio still
 // shows *something*.
 func persistToolPayload(ctx context.Context, blobSink ToolBlobWriter, runID, toolUseID, key string, content []byte, data map[string]interface{}) {
 	if len(content) == 0 {
@@ -120,8 +120,8 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			})
 
 			// Use LogBlock so the prompt body folds under the header
-			// in the editor's run log. Pass the full text — truncating
-			// at the source loses signal (the editor already provides
+			// in the studio's run log. Pass the full text — truncating
+			// at the source loses signal (the studio already provides
 			// a Wrap toggle + per-block expand/collapse).
 			if userMessage != "" {
 				logger.LogBlock(iterlog.LevelInfo, "💬",
@@ -230,7 +230,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			})
 
 			if step.Text != "" {
-				// Full response, no preview cap — the editor folds the
+				// Full response, no preview cap — the studio folds the
 				// body under the header so length doesn't crowd the log.
 				logger.LogBlock(iterlog.LevelInfo, "💬",
 					fmt.Sprintf("LLM response [%s] step %d:", nodeID, step.Number),
@@ -300,7 +300,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			// Persist the raw JSON input. Small inputs land inline
 			// (`data.input`); large inputs go to a sidecar blob so the
 			// event stream stays bounded, with the event carrying a
-			// 4 KB preview + a ref the editor uses to fetch the rest
+			// 4 KB preview + a ref the studio uses to fetch the rest
 			// paginated.
 			persistToolPayload(ctx, toolBlobSink, runID, info.ToolUseID, "input", info.Input, data)
 			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
@@ -325,7 +325,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			if info.ToolUseID != "" {
 				data["tool_use_id"] = info.ToolUseID
 			}
-			// Persist the tool's result so the editor's per-node Tools
+			// Persist the tool's result so the studio's per-node Tools
 			// tab renders in+out side-by-side (matching Claude Code's
 			// inline display). Small outputs inline; large outputs go
 			// to a sidecar blob with a 4 KB preview + ref, fetched
@@ -516,7 +516,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 // filesystem (the path was emitted by a tool node via the
 // `[iterion] preview_screenshot=<path>` directive) and persists it as
 // a run attachment, then emits an `EventBrowserScreenshot` so the
-// editor's Browser pane can fetch it through the existing
+// studio's Browser pane can fetch it through the existing
 // `/api/runs/:id/attachments/:name` route. Failures are logged but
 // non-fatal — a missing or unreadable file should never abort a tool
 // node, since the directive is a best-effort hint.

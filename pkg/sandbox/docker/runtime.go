@@ -56,7 +56,7 @@ func Detect() (Runtime, error) {
 // stderr substrings ("No such image", "container not found") are
 // stable across user locales.
 //
-// Detached process group on Unix so a SIGTERM to the iterion editor
+// Detached process group on Unix so a SIGTERM to the iterion studio
 // PGID (e.g. watchexec rebuild) doesn't propagate and kill the
 // container management commands mid-flight.
 func runtimeCmd(rt Runtime, args ...string) *exec.Cmd {

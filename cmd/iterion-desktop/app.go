@@ -119,7 +119,7 @@ func (a *App) onStartup(ctx context.Context) {
 	if !a.usingDaemon {
 		// No daemon (opted out, or attach/spawn failed) — bring up the
 		// embedded server for the current project (or no project on
-		// first run — the editor SPA's useDesktop hook routes to /welcome
+		// first run — the studio SPA's useDesktop hook routes to /welcome
 		// based on IsFirstRunPending).
 		a.server = NewServerHost()
 		if err := a.startServerForCurrentProject(ctx); err != nil {
@@ -260,10 +260,10 @@ func (a *App) onShutdown(_ context.Context) {
 	}
 }
 
-// currentProjectServerDirs returns the editor working directory/store pair
+// currentProjectServerDirs returns the studio working directory/store pair
 // for the project currently selected in config. On first-run / empty config
 // it uses a small, sandboxed directory under the user config dir so the
-// editor server can start (the SPA's onboarding flow then prompts for a
+// studio server can start (the SPA's onboarding flow then prompts for a
 // real project). Falling back to $HOME makes the recursive file watcher
 // crawl the entire home tree, exhausting inotify limits and stalling the
 // SPA's initial bootstrap behind permission-denied warnings.
@@ -278,7 +278,7 @@ func (a *App) currentProjectServerDirsLocked() (dir, storeDir string) {
 	return dir, storeDir
 }
 
-// defaultFallbackProjectDir returns the directory the editor server points
+// defaultFallbackProjectDir returns the directory the studio server points
 // to when no project is selected. We anchor it inside the user config dir
 // (e.g. ~/.config/Iterion on Linux) so it's small, writable, and never
 // leaks the user's home tree to the file watcher.
@@ -314,7 +314,7 @@ func (a *App) startServerForCurrentProject(ctx context.Context) error {
 	return nil
 }
 
-// restartServerForCurrentProject stops any running editor server and starts
+// restartServerForCurrentProject stops any running studio server and starts
 // a new one pointed at the current config project. The HTTP server binds a
 // fresh random ephemeral port on every Start (Port=-1), so any in-memory
 // SPA state (open WebSockets, react-query caches, file watchers) refers to

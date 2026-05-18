@@ -3,7 +3,7 @@ name: iterion-board
 description: |
   How to write to the iterion native kanban board from inside a `.bot`
   workflow. Covers the seven capability-gated MCP tools, the kanban
-  state machine, the "move to eligible → conductor dispatch" pattern,
+  state machine, the "move to eligible → dispatcher dispatch" pattern,
   and common error cases. Load this skill whenever a node has any
   `board.*` capability granted in the DSL.
 ---
@@ -97,8 +97,8 @@ The default board ships these states:
 | Name | Terminal | Eligible | Notes |
 |---|---|---|---|
 | `backlog` | no | no | Initial state — drafts not yet ready. |
-| `ready` | no | **yes** | The conductor polls this and dispatches. |
-| `in_progress` | no | yes | Conductor flips an issue here on claim. |
+| `ready` | no | **yes** | The dispatcher polls this and dispatches. |
+| `in_progress` | no | yes | Dispatcher flips an issue here on claim. |
 | `review` | no | no | Bot done, waiting on human review. |
 | `done` | **yes** | no | Successful terminal state. |
 | `blocked` | **yes** | no | Failure terminal state. |
@@ -107,18 +107,18 @@ A workflow can customise the board (different names/colors) via
 `iterion issue board init`; the labels above are conventions, not
 DSL-enforced names.
 
-## The "move to eligible → conductor dispatch" pattern
+## The "move to eligible → dispatcher dispatch" pattern
 
-Whenever you create an issue you want the conductor to pick up
+Whenever you create an issue you want the dispatcher to pick up
 immediately, set `state: "ready"` in the create_issue call (or call
-`transition_issue` right after). The conductor's polling loop walks
+`transition_issue` right after). The dispatcher's polling loop walks
 the board and dispatches issues whose state has `eligible: true`. If
 you leave the issue in `backlog`, it stays as a draft until a human
 or another bot moves it forward.
 
 ```
 create_issue(..., state="ready") ──┐
-                                    ├─→ conductor poll → dispatch to bot
+                                    ├─→ dispatcher poll → dispatch to bot
 transition_issue(id, "ready")    ──┘
 ```
 
@@ -151,9 +151,9 @@ After your workflow run finishes, you can inspect the resulting
 board from a shell:
 
 ```bash
-iterion issue list --store-dir <workspace>/.iterion/conductor
-iterion issue board show --store-dir <workspace>/.iterion/conductor
+iterion issue list --store-dir <workspace>/.iterion/dispatcher
+iterion issue board show --store-dir <workspace>/.iterion/dispatcher
 ```
 
-Or via the editor at `/board` if `iterion editor` is running on the
+Or via the studio at `/board` if `iterion studio` is running on the
 same workspace.

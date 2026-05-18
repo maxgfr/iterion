@@ -16,7 +16,7 @@
 ## checked-out branch is never touched.
 ##
 ##   devbox run -- ./iterion run examples/diff_showcase.iter --merge-into none
-##   devbox run -- ./iterion editor --port 8080
+##   devbox run -- ./iterion studio --port 8080
 ##
 ## What you should see in FilesPanel after the run finishes:
 ##   - README.md                  (M — modified, multi-line append)

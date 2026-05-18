@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 
 	"github.com/SocialGouv/iterion/pkg/cli"
-	"github.com/SocialGouv/iterion/pkg/conductor/native"
-	"github.com/SocialGouv/iterion/pkg/conductor/native/boardops"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native/boardops"
 	"github.com/spf13/cobra"
 )
 
@@ -21,8 +21,8 @@ import (
 // running workflow.
 //
 // Configuration via environment:
-//   - ITERION_STORE_DIR : path to the conductor store root. If unset, falls
-//     back to ./.iterion/conductor relative to the current working directory.
+//   - ITERION_STORE_DIR : path to the dispatcher store root. If unset, falls
+//     back to ./.iterion/dispatcher relative to the current working directory.
 //   - ITERION_BOARD_CAPS: comma-separated list of granted capabilities.
 //     Empty/unset = no tools exposed (tools/list returns []).
 var mcpBoardCmd = &cobra.Command{
@@ -44,7 +44,7 @@ func init() {
 	rootCmd.AddCommand(mcpBoardCmd)
 }
 
-// openBoardStoreFromEnv resolves the conductor store root and opens it.
+// openBoardStoreFromEnv resolves the dispatcher store root and opens it.
 // native.NewStore owns directory creation (it MkdirAlls root + issues/
 // itself), so a standalone `iterion run` hitting a fresh workspace
 // gets a board lazily without any prior `iterion issue board init`.
@@ -55,7 +55,7 @@ func openBoardStoreFromEnv() (*native.Store, error) {
 		if err != nil {
 			return nil, fmt.Errorf("resolve cwd: %w", err)
 		}
-		root = filepath.Join(cwd, ".iterion", "conductor")
+		root = filepath.Join(cwd, ".iterion", "dispatcher")
 	}
 	return native.NewStore(root)
 }

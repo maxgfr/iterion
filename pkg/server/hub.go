@@ -43,11 +43,11 @@ type wsClient struct {
 	send chan []byte
 }
 
-// upgrader for the editor file-event WebSocket. CheckOrigin enforces a
+// upgrader for the studio file-event WebSocket. CheckOrigin enforces a
 // loopback origin allowlist injected by the Hub at construction time:
 // without this, any browser tab could open ws://localhost:<port>/api/ws and
 // observe every file change in WorkDir. The previous "return true" was
-// justified as 'acceptable for a local-only editor server' but the threat
+// justified as 'acceptable for a local-only studio server' but the threat
 // here is browser-side / drive-by, which a local-only bind does not stop.
 //
 // Empty-Origin policy: browsers always set Origin on cross-origin WS

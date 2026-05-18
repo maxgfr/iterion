@@ -18,7 +18,7 @@ type mergeRunRequest struct {
 }
 
 // mergeRunResponse echoes the persisted state after a successful merge,
-// so the editor can update its local snapshot without an extra GET.
+// so the studio can update its local snapshot without an extra GET.
 type mergeRunResponse struct {
 	RunID         string              `json:"run_id"`
 	MergedCommit  string              `json:"merged_commit"`
@@ -58,7 +58,7 @@ func (s *Server) handleMergeRun(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		// The service's error messages are descriptive enough to surface
-		// directly; the editor renders them as a toast. 409 conveys
+		// directly; the studio renders them as a toast. 409 conveys
 		// "preconditions not met / guard rejected" — the storage branch
 		// still exists, so the failure is recoverable.
 		s.httpErrorFor(w, r, http.StatusConflict, "merge: %v", err)

@@ -12,25 +12,25 @@ Orchestrator bot. Given a repository, it:
 4. Loops on your free-text feedback until you mark the proposal
    `approved`. The revise step runs on `claw + openai/gpt-5.5`.
 5. **Materialises the approved roadmap as issues on the iterion native
-   kanban board** (`<workspace>/.iterion/conductor/`) via `iterion
-   issue create`. The conductor takes over from there — auto-pilot.
+   kanban board** (`<workspace>/.iterion/dispatcher/`) via `iterion
+   issue create`. The dispatcher takes over from there — auto-pilot.
 
-The bot does NOT shell out `iterion run …`. The conductor dispatches.
+The bot does NOT shell out `iterion run …`. The dispatcher dispatches.
 
 ## Iterion feature gap (current limitation)
 
-`iterion conduct` today binds **one workflow per conductor instance**
+`iterion dispatch` today binds **one workflow per dispatcher instance**
 — it does not yet route dispatch by `issue.assignee`. whats-next still
 records the assignee on every issue (e.g. `assignee=vibe_feature_dev`)
 so the data is there for the future routing feature. Until that ships,
 the operator either:
 
-- Runs multiple conductors (one per assignee, filtering by state /
+- Runs multiple dispatchers (one per assignee, filtering by state /
   label), or
 - Waits for the assignee-routing feature.
 
 If you run whats-next.bot on the iterion source repo, it may well
-propose **"ship the conductor assignee-routing feature"** as its
+propose **"ship the dispatcher assignee-routing feature"** as its
 `next_action` — self-bootstrapping the autopilot.
 
 ## Why a mixed backend (claw + claude_code)?
@@ -68,7 +68,7 @@ for the generator (the seed for a future `generate-skills.bot`).
   iterion CLI auto-loads `.env` from `$CWD` upwards.
 - `ANTHROPIC_API_KEY` or the Claude Code CLI for the final
   `emit_action` node.
-- A writable `.iterion/conductor/` under `workspace_dir` (the native
+- A writable `.iterion/dispatcher/` under `workspace_dir` (the native
   kanban store auto-initialises on first `iterion issue create`).
 
 ## Run
@@ -87,7 +87,7 @@ You can override `workspace_dir` and pass optional `scope_notes`:
 ```bash
 devbox run -- iterion run examples/whats-next/main.bot \
   --var workspace_dir=/path/to/my-repo \
-  --var scope_notes="focus on the conductor layer, ignore the editor"
+  --var scope_notes="focus on the dispatcher layer, ignore the studio"
 ```
 
 After the run completes, inspect what landed:
@@ -106,7 +106,7 @@ devbox run -- iterion issue board       # opens the local board UI
 
 ## Outputs
 
-- N kanban issues at `<workspace>/.iterion/conductor/issues/`, each
+- N kanban issues at `<workspace>/.iterion/dispatcher/issues/`, each
   with `--assignee <bot_name>` (or unassigned + `needs-manual-triage`
   label).
 - `<workspace>/.iterion/plans/whats-next-<timestamp>.md` — audit

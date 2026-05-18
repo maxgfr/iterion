@@ -17,7 +17,7 @@ tasks:
 
   build:
     desc: Build the iterion binary
-    deps: [editor:build]
+    deps: [studio:build]
     env:
       CGO_ENABLED: "0"
     cmds:
@@ -173,8 +173,8 @@ tasks:
     cmds:
       - go test -v -count=1 -run TestBundle_SecuredRenovacy_RepackMatchesShippedBotz -timeout 30s ./e2e/...
 
-  dogfood:editor:
-    desc: 'Run the editor UI feedback loop on a feature prompt (requires CLAUDE_CODE_USE_BEDROCK or claude-code login + npx playwright install chromium). Pass the prompt via FEATURE_PROMPT env var.'
+  dogfood:studio:
+    desc: 'Run the studio UI feedback loop on a feature prompt (requires CLAUDE_CODE_USE_BEDROCK or claude-code login + npx playwright install chromium). Pass the prompt via FEATURE_PROMPT env var.'
     deps: [build]
     cmds:
       - test -n "$FEATURE_PROMPT" || (echo 'set FEATURE_PROMPT=...' >&2 && exit 1)
@@ -202,7 +202,7 @@ tasks:
 
   install:
     desc: Build and install iterion to $GOPATH/bin
-    deps: [editor:build]
+    deps: [studio:build]
     env:
       CGO_ENABLED: "0"
     cmds:
@@ -231,9 +231,9 @@ tasks:
       - task: lint
       - task: test
 
-  editor:build:
-    desc: Build the editor frontend
-    dir: editor
+  studio:build:
+    desc: Build the studio frontend
+    dir: studio
     method: checksum
     env:
       CI: "true"
@@ -261,26 +261,26 @@ tasks:
       - ../pkg/server/static/index.html
       - ../pkg/server/static/assets/**
 
-  editor:dev:
+  studio:dev:
     desc: Start editor in dev mode (Vite HMR + Go backend with auto-restart)
-    deps: [editor:dev:backend, editor:dev:frontend]
+    deps: [studio:dev:backend, studio:dev:frontend]
 
-  editor:dev:backend:
-    desc: Run Go editor backend with auto-restart on changes
+  studio:dev:backend:
+    desc: Run Go studio backend with auto-restart on changes
     cmds:
       - watchexec -r -e go -w cmd -w pkg -w vendor -- go run {{.CMD}} editor --no-browser --port 4891
     interactive: true
 
-  editor:dev:frontend:
-    desc: Run Vite dev server for editor frontend
-    dir: editor
+  studio:dev:frontend:
+    desc: Run Vite dev server for studio frontend
+    dir: studio
     cmds:
       - corepack pnpm install --prefer-offline 2>/dev/null; corepack pnpm exec vite --port 5173 --open
     interactive: true
 
-  editor:
-    desc: Build and run the editor (production mode)
-    deps: [build, editor:build]
+  studio:
+    desc: Build and run the studio (production mode)
+    deps: [build, studio:build]
     cmds:
       - ./{{.BINARY}} editor {{.CLI_ARGS}}
 
@@ -319,7 +319,7 @@ tasks:
       - task: sdk:ts:test
 
   # ── Desktop (Wails v2) ────────────────────────────────────────────────
-  # The desktop binary wraps the editor server in a native window.
+  # The desktop binary wraps the studio server in a native window.
   # Wails CLI is required for `desktop:dev` and `desktop:build`. Install
   # it once with `task desktop:install-tools`. The Go code lives under
   # cmd/iterion-desktop/ and is gated by `//go:build desktop` so the
@@ -348,7 +348,7 @@ tasks:
 
   desktop:dev:
     desc: Run Iterion Desktop in dev mode (Wails)
-    deps: [editor:build]
+    deps: [studio:build]
     dir: cmd/iterion-desktop
     cmds:
       - |
@@ -366,28 +366,28 @@ tasks:
 
   desktop:build:
     desc: Build Iterion Desktop for the current platform (unsigned)
-    deps: [editor:build]
+    deps: [studio:build]
     dir: cmd/iterion-desktop
     cmds:
       - wails build -tags desktop,webkit2_41 -clean -trimpath -skipbindings -s -ldflags "{{.LDFLAGS}}"
 
   desktop:build:darwin:arm64:
     desc: Build Iterion Desktop for macOS arm64 (must run on macOS)
-    deps: [editor:build]
+    deps: [studio:build]
     dir: cmd/iterion-desktop
     cmds:
       - wails build -tags desktop -platform darwin/arm64 -clean -trimpath -skipbindings -s -ldflags "{{.LDFLAGS}}" -o iterion-desktop-darwin-arm64
 
   desktop:build:darwin:amd64:
     desc: Build Iterion Desktop for macOS amd64 (must run on macOS)
-    deps: [editor:build]
+    deps: [studio:build]
     dir: cmd/iterion-desktop
     cmds:
       - wails build -tags desktop -platform darwin/amd64 -clean -trimpath -skipbindings -s -ldflags "{{.LDFLAGS}}" -o iterion-desktop-darwin-amd64
 
   desktop:build:darwin:universal:
     desc: Build Iterion Desktop for macOS (universal binary, runs on Intel + Apple Silicon)
-    deps: [editor:build]
+    deps: [studio:build]
     dir: cmd/iterion-desktop
     cmds:
       # `-platform darwin/universal` makes Wails build both arch slices
@@ -398,21 +398,21 @@ tasks:
 
   desktop:build:windows:amd64:
     desc: Build Iterion Desktop for Windows amd64 (must run on Windows)
-    deps: [editor:build]
+    deps: [studio:build]
     dir: cmd/iterion-desktop
     cmds:
       - wails build -tags desktop -platform windows/amd64 -clean -trimpath -skipbindings -s -ldflags "{{.LDFLAGS}}" -nsis -o iterion-desktop-windows-amd64.exe
 
   desktop:build:windows:arm64:
     desc: Build Iterion Desktop for Windows arm64 (must run on Windows)
-    deps: [editor:build]
+    deps: [studio:build]
     dir: cmd/iterion-desktop
     cmds:
       - wails build -tags desktop -platform windows/arm64 -clean -trimpath -skipbindings -s -ldflags "{{.LDFLAGS}}" -nsis -o iterion-desktop-windows-arm64.exe
 
   desktop:build:linux:amd64:
     desc: Build Iterion Desktop for Linux amd64 (production with DevTools enabled)
-    deps: [editor:build]
+    deps: [studio:build]
     dir: cmd/iterion-desktop
     cmds:
       - |
@@ -436,7 +436,7 @@ tasks:
 
   desktop:build:linux:arm64:
     desc: Build Iterion Desktop for Linux arm64 (production with DevTools enabled)
-    deps: [editor:build]
+    deps: [studio:build]
     dir: cmd/iterion-desktop
     cmds:
       - |
@@ -476,7 +476,7 @@ tasks:
     # downstream `desktop:package:linux:*:deb` to fail with a
     # "iterion-linux-amd64 not found" before the dep had a chance to
     # rebuild it. A 10-second always-rebuild is the cheap fix.
-    deps: [editor:build]
+    deps: [studio:build]
     env:
       CGO_ENABLED: "0"
       GOOS: linux
@@ -486,7 +486,7 @@ tasks:
 
   cli:build:linux:arm64:
     desc: Build the iterion CLI for Linux arm64 (output build/bin/iterion-linux-arm64)
-    deps: [editor:build]
+    deps: [studio:build]
     env:
       CGO_ENABLED: "0"
       GOOS: linux
@@ -500,7 +500,7 @@ tasks:
     # longer passes -clean (see desktop:build:linux:amd64). cli:build and
     # desktop:build write distinct filenames into build/bin/ and the
     # AppImage / deb scripts manage their own staging dirs, so there is
-    # no contention. editor:build is shared between both prerequisites
+    # no contention. studio:build is shared between both prerequisites
     # and Task dedupes it, so it runs once.
     deps: [desktop:package:linux:amd64, cli:build:linux:amd64]
     cmds:
@@ -527,15 +527,15 @@ tasks:
   # is stamped <semver>+fast.<commit> so it cannot be confused with a
   # prod artifact via `dpkg -l`. See docs/desktop-build.md.
 
-  editor:build:fast:
-    desc: Build editor frontend WITHOUT minification — local dev only, do NOT ship
-    dir: editor
+  studio:build:fast:
+    desc: Build studio frontend WITHOUT minification — local dev only, do NOT ship
+    dir: studio
     # `desktop:package:linux:amd64:deb:fast` deps on both
     # `desktop:build:linux:amd64:fast` and `cli:build:linux:amd64:fast`,
-    # and both list `editor:build:fast` in their own `deps:`. Task v3
+    # and both list `studio:build:fast` in their own `deps:`. Task v3
     # parallelises sibling deps by default, and the default `run:` mode
     # treats each invocation as independent — so without `run: once`
-    # editor:build:fast fires TWICE in parallel and the two
+    # studio:build:fast fires TWICE in parallel and the two
     # `cp -R dist/. ../pkg/server/static` calls race on the same path,
     # producing `cp: cannot create regular file …: File exists` from
     # whichever cp lost. `run: once` collapses the two invocations into
@@ -546,7 +546,7 @@ tasks:
       CI: "true"
     cmds:
       - corepack pnpm install --prefer-offline
-      # Direct vite call (matches prod editor:build, which also bypasses
+      # Direct vite call (matches prod studio:build, which also bypasses
       # `pnpm run build` and so already skips tsc -b). --minify false
       # saves ~30-50s on cold builds; sourcemaps stay on (set in vite
       # config) for debuggability.
@@ -555,12 +555,12 @@ tasks:
       - mkdir -p ../pkg/server/static
       - cp -R dist/. ../pkg/server/static
     # No method: checksum — Vite's incremental cache makes warm rebuild
-    # ~3-5s, and avoiding shared-output collisions with prod editor:build
+    # ~3-5s, and avoiding shared-output collisions with prod studio:build
     # (same pkg/server/static dir) is worth more than 5s.
 
   desktop:build:linux:amd64:fast:
     desc: Build Iterion Desktop for Linux amd64 with the unminified SPA (local dev variant)
-    deps: [editor:build:fast]
+    deps: [studio:build:fast]
     dir: cmd/iterion-desktop
     cmds:
       - |
@@ -573,12 +573,12 @@ tasks:
 
   cli:build:linux:amd64:fast:
     desc: Build the iterion CLI for Linux amd64 with the unminified SPA embedded (local dev variant)
-    # Mirrors cli:build:linux:amd64 but deps on editor:build:fast so the
-    # whole :fast subgraph hits editor:build:fast exactly once. Without
-    # this, Task would invoke both editor:build and editor:build:fast
+    # Mirrors cli:build:linux:amd64 but deps on studio:build:fast so the
+    # whole :fast subgraph hits studio:build:fast exactly once. Without
+    # this, Task would invoke both studio:build and studio:build:fast
     # (different task names = no dedup) and they would race on
     # pkg/server/static/.
-    deps: [editor:build:fast]
+    deps: [studio:build:fast]
     env:
       CGO_ENABLED: "0"
       GOOS: linux
