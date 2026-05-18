@@ -49,6 +49,8 @@ export { Skeleton } from "./Skeleton";
 export { EmptyState } from "./EmptyState";
 export type { EmptyStateProps } from "./EmptyState";
 
+export { DesktopOnlyNotice } from "./DesktopOnlyNotice";
+
 export { Spinner } from "./Spinner";
 export type { SpinnerProps, SpinnerSize } from "./Spinner";
 

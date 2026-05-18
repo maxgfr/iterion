@@ -15,6 +15,7 @@ import type {
 import { CheckCircledIcon, ExclamationTriangleIcon } from "@radix-ui/react-icons";
 
 import { Button } from "@/components/ui/Button";
+import { DesktopOnlyNotice } from "@/components/ui/DesktopOnlyNotice";
 import { Select } from "@/components/ui/Select";
 import AppHeader from "@/components/shared/AppHeader";
 import ConfirmDialog from "@/components/shared/ConfirmDialog";
@@ -400,6 +401,11 @@ export default function LaunchView() {
       </AppHeader>
 
       <div className="flex-1 overflow-auto px-4 py-4 max-w-3xl">
+        <DesktopOnlyNotice
+          feature="the Launch form"
+          hint="Variable inputs, attachment uploads, and worktree-finalization toggles are designed for desktop interaction. View runs on phones; launch from desktop."
+          lsKey="iterion.launch.mobile-optin"
+        >
         {error && (
           <div className="mb-3 px-3 py-2 rounded bg-danger-soft text-danger-fg text-xs">{error}</div>
         )}
@@ -681,6 +687,7 @@ export default function LaunchView() {
             </div>
           </>
         )}
+        </DesktopOnlyNotice>
       </div>
 
       <ConfirmDialog

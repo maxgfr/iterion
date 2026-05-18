@@ -97,7 +97,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
   return (
     <>
       <AppHeader active="runs" />
-      <div className="shrink-0 border-b border-border-default px-4 py-2 flex items-center gap-3 text-sm">
+      <div className="shrink-0 border-b border-border-default px-3 sm:px-4 py-2 flex items-center gap-2 sm:gap-3 text-sm flex-wrap">
         <div className="flex flex-col leading-tight min-w-0 max-w-md">
           <Tooltip content={run.name || run.workflow_name}>
             <div className="font-medium truncate" tabIndex={0}>
@@ -138,9 +138,9 @@ export default function RunHeader({ run, active, wsState }: Props) {
         {error && (
           <span className="text-[10px] text-danger truncate max-w-xs">{error}</span>
         )}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
           <span
-            className="text-[10px] text-fg-subtle font-mono"
+            className="hidden sm:inline text-[10px] text-fg-subtle font-mono"
             title="Run ID"
           >
             {run.id}
