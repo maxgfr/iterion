@@ -4,7 +4,7 @@ import { useLocation } from "wouter";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { LiveDot } from "@/components/ui/LiveDot";
-import { type RunStatus } from "@/api/runs";
+import type { RunStatus, RunSummary } from "@/api/runs";
 import { formatRelative } from "@/lib/format";
 import AppHeader from "@/components/shared/AppHeader";
 import { useRuns } from "@/hooks/useRuns";
@@ -93,64 +93,112 @@ export default function RunListView() {
         ) : runs.length === 0 ? (
           <EmptyState message="No runs yet. Launch one from the studio." />
         ) : (
-          <table className="w-full text-xs">
-            <thead className="text-fg-subtle">
-              <tr className="border-b border-border-default">
-                <th className="text-left px-4 py-2 font-medium">Workflow</th>
-                <th className="text-left px-4 py-2 font-medium">Status</th>
-                <th className="text-left px-4 py-2 font-medium">Started</th>
-                <th className="text-left px-4 py-2 font-medium">Duration</th>
-                <th className="text-left px-4 py-2 font-medium">Run ID</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-b border-border-default hover:bg-surface-2 cursor-pointer"
-                  onClick={() => setLocation(`/runs/${encodeURIComponent(r.id)}`)}
-                >
-                  <td className="px-4 py-2">
-                    <div className="font-medium">
-                      {r.name || r.workflow_name}
-                    </div>
-                    {(r.name || r.file_path) && (
-                      <div className="text-fg-subtle text-[10px] truncate max-w-md">
-                        {[r.name && r.workflow_name, r.file_path]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-2">
-                    <Badge variant={STATUS_VARIANT[r.status]}>
-                      {labelForStatus(r.status)}
-                    </Badge>
-                    {r.active && (
-                      <LiveDot
-                        tone="info"
-                        size="sm"
-                        className="ml-1.5"
-                        label="Active in this process"
-                      />
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-fg-muted">
-                    {formatRelative(r.created_at)}
-                  </td>
-                  <td className="px-4 py-2 text-fg-muted">
-                    {formatDuration(r.created_at, r.finished_at)}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-[10px] text-fg-subtle">
-                    {r.id}
-                  </td>
+          <>
+            {/* Desktop / tablet: standard 5-column table. */}
+            <table className="w-full text-xs hidden sm:table">
+              <thead className="text-fg-subtle">
+                <tr className="border-b border-border-default">
+                  <th className="text-left px-4 py-2 font-medium">Workflow</th>
+                  <th className="text-left px-4 py-2 font-medium">Status</th>
+                  <th className="text-left px-4 py-2 font-medium">Started</th>
+                  <th className="text-left px-4 py-2 font-medium">Duration</th>
+                  <th className="text-left px-4 py-2 font-medium">Run ID</th>
                 </tr>
+              </thead>
+              <tbody>
+                {runs.map((r) => (
+                  <RunRow key={r.id} run={r} onOpen={() => setLocation(`/runs/${encodeURIComponent(r.id)}`)} />
+                ))}
+              </tbody>
+            </table>
+            {/* Mobile (< sm): vertical card list. Same data, no
+                horizontal scroll; tap-area meets WCAG 2.5.5 (44px). */}
+            <ul className="sm:hidden divide-y divide-border-default">
+              {runs.map((r) => (
+                <li key={r.id}>
+                  <RunCard run={r} onOpen={() => setLocation(`/runs/${encodeURIComponent(r.id)}`)} />
+                </li>
               ))}
-            </tbody>
-          </table>
+            </ul>
+          </>
         )}
       </div>
     </div>
+  );
+}
+
+// Table row used at >= sm. Extracted so the mobile card and the table
+// share a single source of truth for the displayed fields.
+function RunRow({ run, onOpen }: { run: RunSummary; onOpen: () => void }) {
+  return (
+    <tr
+      className="border-b border-border-default hover:bg-surface-2 cursor-pointer"
+      onClick={onOpen}
+    >
+      <td className="px-4 py-2">
+        <div className="font-medium">{run.name || run.workflow_name}</div>
+        {(run.name || run.file_path) && (
+          <div className="text-fg-subtle text-[10px] truncate max-w-md">
+            {[run.name && run.workflow_name, run.file_path]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
+        )}
+      </td>
+      <td className="px-4 py-2">
+        <Badge variant={STATUS_VARIANT[run.status]}>
+          {labelForStatus(run.status)}
+        </Badge>
+        {run.active && (
+          <LiveDot
+            tone="info"
+            size="sm"
+            className="ml-1.5"
+            label="Active in this process"
+          />
+        )}
+      </td>
+      <td className="px-4 py-2 text-fg-muted">{formatRelative(run.created_at)}</td>
+      <td className="px-4 py-2 text-fg-muted">
+        {formatDuration(run.created_at, run.finished_at)}
+      </td>
+      <td className="px-4 py-2 font-mono text-[10px] text-fg-subtle">
+        {run.id}
+      </td>
+    </tr>
+  );
+}
+
+// Stacked card variant for < sm. Status + workflow on top line; metadata
+// in a compact second row; run id wraps as a third tiny line so phone
+// users can copy/share without horizontal scroll.
+function RunCard({ run, onOpen }: { run: RunSummary; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="w-full text-left px-4 py-3 flex flex-col gap-1 min-h-[44px] hover:bg-surface-2 active:bg-surface-3"
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        <Badge variant={STATUS_VARIANT[run.status]}>
+          {labelForStatus(run.status)}
+        </Badge>
+        {run.active && (
+          <LiveDot tone="info" size="sm" label="Active in this process" />
+        )}
+        <span className="font-medium truncate">
+          {run.name || run.workflow_name}
+        </span>
+      </div>
+      <div className="text-[11px] text-fg-muted flex flex-wrap gap-x-2">
+        <span>{formatRelative(run.created_at)}</span>
+        <span>·</span>
+        <span>{formatDuration(run.created_at, run.finished_at)}</span>
+      </div>
+      <div className="text-[10px] text-fg-subtle font-mono truncate">
+        {run.id}
+      </div>
+    </button>
   );
 }
 

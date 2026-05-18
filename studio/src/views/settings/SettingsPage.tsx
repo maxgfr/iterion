@@ -16,8 +16,8 @@ export default function SettingsPage() {
         <span className="text-sm font-semibold">Settings</span>
       </AppHeader>
 
-      <div className="max-w-5xl mx-auto p-6 grid grid-cols-[200px,1fr] gap-6">
-        <nav className="space-y-1">
+      <div className="max-w-5xl mx-auto p-3 sm:p-6 grid grid-cols-1 sm:grid-cols-[200px,1fr] gap-4 sm:gap-6">
+        <nav className="flex sm:block sm:space-y-1 gap-1 flex-wrap">
           {(
             [
               { id: "api-keys", label: "API keys (BYOK)" },
@@ -28,7 +28,7 @@ export default function SettingsPage() {
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`w-full text-left px-3 py-2 rounded text-sm ${
+              className={`sm:w-full text-left px-3 py-2 rounded text-sm min-h-[44px] sm:min-h-0 ${
                 tab === t.id ? "bg-surface-2" : "hover:bg-surface-1"
               }`}
             >

@@ -7,6 +7,7 @@ import axe from "axe-core";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { DesktopOnlyNotice } from "@/components/ui/DesktopOnlyNotice";
 import { Spinner } from "@/components/ui/Spinner";
 import { LiveDot } from "@/components/ui/LiveDot";
 import { Badge } from "@/components/ui/Badge";
@@ -17,6 +18,25 @@ import { Skeleton } from "@/components/ui/Skeleton";
 // regressions on the building blocks — full-page audits stay manual
 // (axe browser extension) because the canvas + WebSocket flows are
 // out of jsdom's reach.
+
+// jsdom does not implement window.matchMedia. Components that read
+// the viewport size (DesktopOnlyNotice) need a stub so they don't
+// crash during mount. A real browser viewport sweep happens manually.
+if (typeof window !== "undefined" && !window.matchMedia) {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+}
 
 async function expectNoViolations(container: HTMLElement, label: string) {
   const results = await axe.run(container, {
@@ -143,6 +163,21 @@ describe("a11y / primitives", () => {
       </main>,
     );
     await expectNoViolations(root, "WS banner");
+  });
+
+  it("DesktopOnlyNotice — desktop branch + narrow notice", async () => {
+    // jsdom reports a desktop viewport by default, so the children
+    // branch is what the smoke test exercises here. The narrow branch
+    // is shape-tested via the manual mobile sweep called out in
+    // design-system.md § Responsive scope.
+    const root = mount(
+      <main>
+        <DesktopOnlyNotice feature="the editor">
+          <div>desktop UI</div>
+        </DesktopOnlyNotice>
+      </main>,
+    );
+    await expectNoViolations(root, "DesktopOnlyNotice");
   });
 
   it("Toast region — status + alert roles per level", async () => {

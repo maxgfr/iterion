@@ -279,6 +279,19 @@ What does work on narrow viewports (tested ≥ 360 px wide):
 
 The pragmatic mental model: read-only flows (Home, RunList, Board, Dispatcher, Settings) are reachable on a phone for monitoring a run in flight; authoring flows (Editor, Launch form) expect a real desktop. When a feature crosses that line, hide it on `< sm` with a clear notice rather than reflowing it badly.
 
+Use [`ui/DesktopOnlyNotice`](../src/components/ui/DesktopOnlyNotice.tsx) as the gate:
+
+```tsx
+<DesktopOnlyNotice
+  feature="the workflow editor"
+  lsKey="iterion.editor.mobile-optin"
+>
+  {/* desktop UI */}
+</DesktopOnlyNotice>
+```
+
+It renders the children at `sm` and above, otherwise a centered notice with a "Continue anyway" button (persisted in localStorage via `lsKey`). Currently mounted on `LaunchView` and `EditorView`. Read-only views (RunList card mode, Settings two-up→stack) reflow inline — they do not use this primitive.
+
 ## Open items
 
 - **Pulse semantics** — `animate-pulse` is used for several meanings beyond the `LiveDot` dot pattern (Skeleton shimmer, DiagnosticBadge urgency, ThinkingFooter glyph, NodeDetailPanel row in-flight). Documented in `LiveDot.tsx` but consider a follow-up audit if more callers appear.

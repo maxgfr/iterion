@@ -11,7 +11,7 @@ import LibraryPanel from "@/components/Library/LibraryPanel";
 import SubNodePalette from "@/components/Canvas/SubNodePalette";
 import SourceView from "@/components/SourceView/SourceView";
 import AppHeader from "@/components/shared/AppHeader";
-import { IconButton } from "@/components/ui";
+import { DesktopOnlyNotice, IconButton } from "@/components/ui";
 import { useUIStore } from "@/store/ui";
 import { useDocumentStore } from "@/store/document";
 import { useSelectionStore } from "@/store/selection";
@@ -193,6 +193,7 @@ export default function EditorView() {
             </button>
           </div>
         )}
+      <DesktopOnlyNotice feature="the workflow editor" lsKey="iterion.editor.mobile-optin">
       <div
         id="main-content"
         tabIndex={-1}
@@ -279,6 +280,7 @@ export default function EditorView() {
           </div>
         )}
       </div>
+      </DesktopOnlyNotice>
       {confirmDialog}
       </div>
     </ReactFlowProvider>
