@@ -615,22 +615,22 @@ func (s *Server) routes() {
 		s.registerOAuthForfaitRoutes()
 	}
 
-	// Conductor + native tracker — both optional, both safe to
-	// register on the editor's mux. The native tracker exposes the
-	// kanban store CRUD that the SPA's Board view consumes; the
-	// conductor exposes the dispatcher's live state for the
-	// Conductor view. SPA hides views whose corresponding endpoint
-	// returns 404.
+	// Conductor + native tracker — both optional. Each handler is
+	// registered through requireAuth so a server bound to a non-loopback
+	// address (devcontainer / LAN / SSH tunnel) can't have its kanban
+	// or dispatcher state mutated by an unauthenticated peer. The
+	// RegisterRoutesWithMiddleware variants preserve method-specific
+	// patterns so they don't conflict with the server's OPTIONS /api/
+	// catch-all.
 	if s.cfg.NativeTrackerStore != nil {
-		s.cfg.NativeTrackerStore.RegisterRoutes(s.mux, "/api/v1/native")
-		// Board MCP over HTTP for sandbox-running bots. The runtime
-		// registers per-run tokens via Server.BoardMCPTokens(); bots
-		// in containers reach this endpoint via the host loopback
-		// proxy.
+		s.cfg.NativeTrackerStore.RegisterRoutesWithMiddleware(s.mux, "/api/v1/native", s.requireAuth)
+		// The Board MCP HTTP endpoint authenticates via its own
+		// per-run X-Iterion-Run token (issued by the runtime at
+		// run-start), so it intentionally bypasses requireAuth.
 		RegisterBoardMCPRoutes(s.mux, "/api/v1/mcp/board", s.cfg.NativeTrackerStore, s.boardMCPTokens)
 	}
 	if s.cfg.Conductor != nil {
-		s.cfg.Conductor.RegisterRoutes(s.mux, "/api/v1/conductor")
+		s.cfg.Conductor.RegisterRoutesWithMiddleware(s.mux, "/api/v1/conductor", s.requireAuth)
 	}
 
 	// Serve static frontend files with SPA fallback so client-side routes

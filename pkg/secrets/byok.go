@@ -15,7 +15,31 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/SocialGouv/iterion/pkg/internal/mongoutil"
+	"github.com/SocialGouv/iterion/pkg/store"
 )
+
+// withApiKeyTenantFilter augments a Mongo filter with a tenant_id
+// clause derived from the request context. Returns an error when ctx
+// carries no tenant so callers can't accidentally bypass isolation.
+// The matching error sentinel below maps to 401 in HTTP handlers.
+func withApiKeyTenantFilter(ctx context.Context, base bson.M) (bson.M, error) {
+	tenantID, ok := store.TenantFromContext(ctx)
+	if !ok || tenantID == "" {
+		return nil, ErrApiKeyTenantMissing
+	}
+	out := make(bson.M, len(base)+1)
+	for k, v := range base {
+		out[k] = v
+	}
+	out["tenant_id"] = tenantID
+	return out, nil
+}
+
+// ErrApiKeyTenantMissing is returned when an ApiKeyStore call lacks
+// the tenant_id needed to scope its query. Callers must propagate it
+// up — falling back to an unscoped query would expose every tenant's
+// keys.
+var ErrApiKeyTenantMissing = errors.New("secrets: ApiKey store called without tenant context")
 
 // Provider enumerates the supported LLM credential providers. The
 // string values are stable wire identifiers; do not rename without a
@@ -70,6 +94,7 @@ func (p Provider) Valid() bool {
 // flagged is_default. Resolution prefers it over non-default keys.
 type ApiKey struct {
 	ID           string     `bson:"_id" json:"id"`
+	TenantID     string     `bson:"tenant_id" json:"tenant_id"`
 	ScopeTeamID  string     `bson:"scope_team" json:"scope_team_id"`
 	ScopeUserID  string     `bson:"scope_user,omitempty" json:"scope_user_id,omitempty"`
 	Provider     Provider   `bson:"provider" json:"provider"`
@@ -395,16 +420,27 @@ func (s *MongoApiKeyStore) EnsureSchema(ctx context.Context) error {
 }
 
 func (s *MongoApiKeyStore) Create(ctx context.Context, k ApiKey) error {
-	_, err := s.coll.InsertOne(ctx, k)
-	if err != nil {
+	tenantID, ok := store.TenantFromContext(ctx)
+	if !ok || tenantID == "" {
+		return ErrApiKeyTenantMissing
+	}
+	// Stamp tenant_id from ctx so the caller can't smuggle a different
+	// tenant onto a writeable row. The struct field is the source of
+	// truth on the wire; we overwrite it here unconditionally.
+	k.TenantID = tenantID
+	if _, err := s.coll.InsertOne(ctx, k); err != nil {
 		return fmt.Errorf("secrets: insert api key: %w", err)
 	}
 	return nil
 }
 
 func (s *MongoApiKeyStore) Get(ctx context.Context, id string) (ApiKey, error) {
+	filter, err := withApiKeyTenantFilter(ctx, bson.M{"_id": id})
+	if err != nil {
+		return ApiKey{}, err
+	}
 	var k ApiKey
-	err := s.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&k)
+	err = s.coll.FindOne(ctx, filter).Decode(&k)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return ApiKey{}, ErrApiKeyNotFound
 	}
@@ -415,7 +451,14 @@ func (s *MongoApiKeyStore) Get(ctx context.Context, id string) (ApiKey, error) {
 }
 
 func (s *MongoApiKeyStore) Update(ctx context.Context, k ApiKey) error {
-	res, err := s.coll.ReplaceOne(ctx, bson.M{"_id": k.ID}, k)
+	tenantID, ok := store.TenantFromContext(ctx)
+	if !ok || tenantID == "" {
+		return ErrApiKeyTenantMissing
+	}
+	// Match by both _id AND tenant_id so a tenant can never overwrite
+	// another tenant's row by guessing an id.
+	k.TenantID = tenantID
+	res, err := s.coll.ReplaceOne(ctx, bson.M{"_id": k.ID, "tenant_id": tenantID}, k)
 	if err != nil {
 		return fmt.Errorf("secrets: update api key: %w", err)
 	}
@@ -426,7 +469,11 @@ func (s *MongoApiKeyStore) Update(ctx context.Context, k ApiKey) error {
 }
 
 func (s *MongoApiKeyStore) Delete(ctx context.Context, id string) error {
-	res, err := s.coll.DeleteOne(ctx, bson.M{"_id": id})
+	filter, err := withApiKeyTenantFilter(ctx, bson.M{"_id": id})
+	if err != nil {
+		return err
+	}
+	res, err := s.coll.DeleteOne(ctx, filter)
 	if err != nil {
 		return fmt.Errorf("secrets: delete api key: %w", err)
 	}
@@ -437,13 +484,16 @@ func (s *MongoApiKeyStore) Delete(ctx context.Context, id string) error {
 }
 
 func (s *MongoApiKeyStore) ListByTeam(ctx context.Context, teamID, userID string) ([]ApiKey, error) {
-	filter := bson.M{
+	filter, err := withApiKeyTenantFilter(ctx, bson.M{
 		"scope_team": teamID,
 		"$or": []bson.M{
 			{"scope_user": bson.M{"$exists": false}},
 			{"scope_user": ""},
 			{"scope_user": userID},
 		},
+	})
+	if err != nil {
+		return nil, err
 	}
 	cur, err := s.coll.Find(ctx, filter, options.Find().SetSort(bson.M{"created_at": 1}))
 	if err != nil {
@@ -458,7 +508,11 @@ func (s *MongoApiKeyStore) ListByTeam(ctx context.Context, teamID, userID string
 }
 
 func (s *MongoApiKeyStore) ListByUser(ctx context.Context, teamID, userID string) ([]ApiKey, error) {
-	cur, err := s.coll.Find(ctx, bson.M{"scope_team": teamID, "scope_user": userID}, options.Find().SetSort(bson.M{"created_at": 1}))
+	filter, err := withApiKeyTenantFilter(ctx, bson.M{"scope_team": teamID, "scope_user": userID})
+	if err != nil {
+		return nil, err
+	}
+	cur, err := s.coll.Find(ctx, filter, options.Find().SetSort(bson.M{"created_at": 1}))
 	if err != nil {
 		return nil, fmt.Errorf("secrets: list user api keys: %w", err)
 	}
@@ -471,18 +525,24 @@ func (s *MongoApiKeyStore) ListByUser(ctx context.Context, teamID, userID string
 }
 
 func (s *MongoApiKeyStore) MarkUsed(ctx context.Context, id string, at time.Time) error {
-	_, err := s.coll.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"last_used_at": at}})
+	filter, err := withApiKeyTenantFilter(ctx, bson.M{"_id": id})
 	if err != nil {
+		return err
+	}
+	if _, err := s.coll.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"last_used_at": at}}); err != nil {
 		return fmt.Errorf("secrets: mark used: %w", err)
 	}
 	return nil
 }
 
 func (s *MongoApiKeyStore) ClearDefault(ctx context.Context, teamID, userID string, provider Provider, exceptID string) error {
-	filter := bson.M{
+	filter, err := withApiKeyTenantFilter(ctx, bson.M{
 		"scope_team": teamID,
 		"provider":   provider,
 		"is_default": true,
+	})
+	if err != nil {
+		return err
 	}
 	if userID == "" {
 		// Team-wide rows are persisted with scope_user omitted (the
@@ -500,8 +560,7 @@ func (s *MongoApiKeyStore) ClearDefault(ctx context.Context, teamID, userID stri
 	if exceptID != "" {
 		filter["_id"] = bson.M{"$ne": exceptID}
 	}
-	_, err := s.coll.UpdateMany(ctx, filter, bson.M{"$set": bson.M{"is_default": false}})
-	if err != nil {
+	if _, err := s.coll.UpdateMany(ctx, filter, bson.M{"$set": bson.M{"is_default": false}}); err != nil {
 		return fmt.Errorf("secrets: clear default: %w", err)
 	}
 	return nil

@@ -391,21 +391,32 @@ func errString(err error) string {
 // (state/refresh/issues/.../cancel/ws) which delegate to the active
 // Conductor when one is running.
 func (m *Manager) RegisterRoutes(mux *http.ServeMux, prefix string) {
-	p := strings.TrimSuffix(prefix, "/")
-	mux.HandleFunc("GET "+p+"/status", m.handleStatus)
-	mux.HandleFunc("GET "+p+"/config", m.handleGetConfig)
-	mux.HandleFunc("PUT "+p+"/config", m.handlePutConfig)
-	mux.HandleFunc("POST "+p+"/start", m.handleStart)
-	mux.HandleFunc("POST "+p+"/stop", m.handleStop)
-	mux.HandleFunc("POST "+p+"/pause", m.handlePause)
-	mux.HandleFunc("POST "+p+"/resume", m.handleResume)
+	m.RegisterRoutesWithMiddleware(mux, prefix, nil)
+}
 
-	mux.HandleFunc("GET "+p+"/state", m.handleSnapshot)
-	mux.HandleFunc("POST "+p+"/refresh", m.handleRefresh)
-	mux.HandleFunc("POST "+p+"/reload", m.handleReload)
-	mux.HandleFunc("GET "+p+"/issues/{id}", m.handleIssueDetail)
-	mux.HandleFunc("POST "+p+"/issues/{id}/cancel", m.handleIssueCancel)
-	mux.HandleFunc("GET "+p+"/ws", m.handleWS)
+// RegisterRoutesWithMiddleware mounts the routes through a caller-
+// supplied wrapper (typically the editor server's requireAuth) so
+// every operator endpoint is gated when the server binds non-loopback.
+// nil falls back to the identity wrap (same as RegisterRoutes).
+func (m *Manager) RegisterRoutesWithMiddleware(mux *http.ServeMux, prefix string, wrap func(http.Handler) http.Handler) {
+	p := strings.TrimSuffix(prefix, "/")
+	if wrap == nil {
+		wrap = func(h http.Handler) http.Handler { return h }
+	}
+	mux.Handle("GET "+p+"/status", wrap(http.HandlerFunc(m.handleStatus)))
+	mux.Handle("GET "+p+"/config", wrap(http.HandlerFunc(m.handleGetConfig)))
+	mux.Handle("PUT "+p+"/config", wrap(http.HandlerFunc(m.handlePutConfig)))
+	mux.Handle("POST "+p+"/start", wrap(http.HandlerFunc(m.handleStart)))
+	mux.Handle("POST "+p+"/stop", wrap(http.HandlerFunc(m.handleStop)))
+	mux.Handle("POST "+p+"/pause", wrap(http.HandlerFunc(m.handlePause)))
+	mux.Handle("POST "+p+"/resume", wrap(http.HandlerFunc(m.handleResume)))
+
+	mux.Handle("GET "+p+"/state", wrap(http.HandlerFunc(m.handleSnapshot)))
+	mux.Handle("POST "+p+"/refresh", wrap(http.HandlerFunc(m.handleRefresh)))
+	mux.Handle("POST "+p+"/reload", wrap(http.HandlerFunc(m.handleReload)))
+	mux.Handle("GET "+p+"/issues/{id}", wrap(http.HandlerFunc(m.handleIssueDetail)))
+	mux.Handle("POST "+p+"/issues/{id}/cancel", wrap(http.HandlerFunc(m.handleIssueCancel)))
+	mux.Handle("GET "+p+"/ws", wrap(http.HandlerFunc(m.handleWS)))
 }
 
 func (m *Manager) handleStatus(w http.ResponseWriter, _ *http.Request) {

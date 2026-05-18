@@ -41,13 +41,23 @@ func (c *Conductor) Routes() http.Handler {
 // Method-specific patterns are used so registration coexists with
 // other method+path routes (e.g. the editor server's CORS preflight).
 func (c *Conductor) RegisterRoutes(mux *http.ServeMux, prefix string) {
+	c.RegisterRoutesWithMiddleware(mux, prefix, nil)
+}
+
+// RegisterRoutesWithMiddleware mounts the routes through a caller-
+// supplied wrapper (typically the editor server's requireAuth). See
+// native.Store.RegisterRoutesWithMiddleware for the rationale.
+func (c *Conductor) RegisterRoutesWithMiddleware(mux *http.ServeMux, prefix string, wrap func(http.Handler) http.Handler) {
 	p := strings.TrimSuffix(prefix, "/")
-	mux.HandleFunc("GET "+p+"/state", c.handleState)
-	mux.HandleFunc("POST "+p+"/refresh", c.handleRefresh)
-	mux.HandleFunc("POST "+p+"/reload", c.handleReload)
-	mux.HandleFunc("GET "+p+"/issues/{id}", c.handleIssueDetail)
-	mux.HandleFunc("POST "+p+"/issues/{id}/cancel", c.handleIssueCancel)
-	mux.HandleFunc("GET "+p+"/ws", c.handleWS)
+	if wrap == nil {
+		wrap = func(h http.Handler) http.Handler { return h }
+	}
+	mux.Handle("GET "+p+"/state", wrap(http.HandlerFunc(c.handleState)))
+	mux.Handle("POST "+p+"/refresh", wrap(http.HandlerFunc(c.handleRefresh)))
+	mux.Handle("POST "+p+"/reload", wrap(http.HandlerFunc(c.handleReload)))
+	mux.Handle("GET "+p+"/issues/{id}", wrap(http.HandlerFunc(c.handleIssueDetail)))
+	mux.Handle("POST "+p+"/issues/{id}/cancel", wrap(http.HandlerFunc(c.handleIssueCancel)))
+	mux.Handle("GET "+p+"/ws", wrap(http.HandlerFunc(c.handleWS)))
 }
 
 func (c *Conductor) handleState(w http.ResponseWriter, _ *http.Request) {

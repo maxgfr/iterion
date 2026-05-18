@@ -16,15 +16,28 @@ import (
 // doesn't flag ambiguities against other catch-all method routes
 // (e.g. the server's `OPTIONS /api/` CORS preflight).
 func (s *Store) RegisterRoutes(mux *http.ServeMux, prefix string) {
+	s.RegisterRoutesWithMiddleware(mux, prefix, nil)
+}
+
+// RegisterRoutesWithMiddleware mounts the routes through a caller-
+// supplied wrapper (typically the editor server's requireAuth). nil
+// wraps each handler in the identity — same behaviour as RegisterRoutes.
+// Used so the editor server can gate every native-tracker call behind
+// JWT auth without introducing a single bare-path catch-all that
+// would conflict with the server's existing method-specific patterns.
+func (s *Store) RegisterRoutesWithMiddleware(mux *http.ServeMux, prefix string, wrap func(http.Handler) http.Handler) {
 	p := strings.TrimSuffix(prefix, "/")
-	mux.HandleFunc("GET "+p+"/issues", s.handleListIssues)
-	mux.HandleFunc("POST "+p+"/issues", s.handleCreateIssue)
-	mux.HandleFunc("GET "+p+"/issues/{id}", s.handleGetIssue)
-	mux.HandleFunc("PATCH "+p+"/issues/{id}", s.handlePatchIssue)
-	mux.HandleFunc("DELETE "+p+"/issues/{id}", s.handleDeleteIssue)
-	mux.HandleFunc("POST "+p+"/issues/{id}/transition", s.handleTransitionIssue)
-	mux.HandleFunc("GET "+p+"/board", s.handleGetBoard)
-	mux.HandleFunc("PUT "+p+"/board", s.handlePutBoard)
+	if wrap == nil {
+		wrap = func(h http.Handler) http.Handler { return h }
+	}
+	mux.Handle("GET "+p+"/issues", wrap(http.HandlerFunc(s.handleListIssues)))
+	mux.Handle("POST "+p+"/issues", wrap(http.HandlerFunc(s.handleCreateIssue)))
+	mux.Handle("GET "+p+"/issues/{id}", wrap(http.HandlerFunc(s.handleGetIssue)))
+	mux.Handle("PATCH "+p+"/issues/{id}", wrap(http.HandlerFunc(s.handlePatchIssue)))
+	mux.Handle("DELETE "+p+"/issues/{id}", wrap(http.HandlerFunc(s.handleDeleteIssue)))
+	mux.Handle("POST "+p+"/issues/{id}/transition", wrap(http.HandlerFunc(s.handleTransitionIssue)))
+	mux.Handle("GET "+p+"/board", wrap(http.HandlerFunc(s.handleGetBoard)))
+	mux.Handle("PUT "+p+"/board", wrap(http.HandlerFunc(s.handlePutBoard)))
 }
 
 // ---------------------------------------------------------------------------

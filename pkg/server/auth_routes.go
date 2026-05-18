@@ -293,7 +293,8 @@ func mapAuthErrorStatus(err error) int {
 		errors.Is(err, auth.ErrSessionRevoked),
 		errors.Is(err, auth.ErrSessionExpired),
 		errors.Is(err, auth.ErrTokenExpired),
-		errors.Is(err, auth.ErrTokenInvalid):
+		errors.Is(err, auth.ErrTokenInvalid),
+		errors.Is(err, auth.ErrTokenRevoked):
 		return http.StatusUnauthorized
 	case errors.Is(err, auth.ErrSignupClosed),
 		errors.Is(err, auth.ErrInvitationMismatch),
