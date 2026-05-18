@@ -7,6 +7,20 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+)
+
+// dotenvAppliedKeys tracks which keys were set into the process env by a
+// previous applyDotenvFile call. Used by reloadIterionEnvFile so that
+// commenting out a key in ~/.iterion/env and clicking Refresh actually
+// clears the value (default os.Setenv-then-skip-if-present semantics
+// would otherwise pin the original value for the life of the process).
+//
+// Keys passed in by the launching shell are NOT tracked here, so they
+// survive a reload — shell wins remains the precedence rule.
+var (
+	dotenvMu          sync.Mutex
+	dotenvAppliedKeys []string
 )
 
 // loadIterionEnvFile sources ~/.iterion/env (or ~/.iterion/.env as a
@@ -38,6 +52,21 @@ func loadIterionEnvFile() {
 			return
 		}
 	}
+}
+
+// ReloadIterionEnvFile is called by the refresh hook in the server: it
+// unsets every key that a previous applyDotenvFile call set (so a key
+// commented out / deleted in ~/.iterion/env actually disappears) and
+// then re-applies the file. Shell-passed env vars are untouched.
+func ReloadIterionEnvFile() {
+	dotenvMu.Lock()
+	previous := dotenvAppliedKeys
+	dotenvAppliedKeys = nil
+	dotenvMu.Unlock()
+	for _, key := range previous {
+		_ = os.Unsetenv(key)
+	}
+	loadIterionEnvFile()
 }
 
 func candidateEnvFiles() []string {
@@ -99,7 +128,12 @@ func applyDotenvFile(path string) bool {
 		if _, present := os.LookupEnv(key); present {
 			continue
 		}
-		_ = os.Setenv(key, val)
+		if err := os.Setenv(key, val); err != nil {
+			continue
+		}
+		dotenvMu.Lock()
+		dotenvAppliedKeys = append(dotenvAppliedKeys, key)
+		dotenvMu.Unlock()
 	}
 	return true
 }

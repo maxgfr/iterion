@@ -64,6 +64,7 @@ func (h *ServerHost) Start(parent context.Context, dir, storeDir string) (string
 				default:
 				}
 			},
+			OnForceRefresh: ReloadIterionEnvFile,
 		}
 		if err := cli.RunEditor(ctx, opts, printer); err != nil {
 			select {
