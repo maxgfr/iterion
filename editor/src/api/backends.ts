@@ -35,12 +35,18 @@ export interface BackendDetectReport {
 export async function fetchBackendDetect(
   opts: { signal?: AbortSignal; force?: boolean } = {},
 ): Promise<BackendDetectReport> {
+  // Cache-bust both the server-side TTL cache (?force=1) and any browser
+  // / webview HTTP cache (cache: "no-store" + Cache-Control header). The
+  // Wails webview is particularly aggressive about caching identical
+  // GETs unless we explicitly disable it.
   const url = opts.force
     ? `${BASE_URL}/backends/detect?force=1`
     : `${BASE_URL}/backends/detect`;
   const res = await fetch(url, {
     credentials: "include",
     signal: opts.signal,
+    cache: opts.force ? "no-store" : "default",
+    headers: opts.force ? { "Cache-Control": "no-cache" } : undefined,
   });
   if (!res.ok) {
     throw new Error(`backends/detect: HTTP ${res.status}`);
