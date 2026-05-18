@@ -42,8 +42,12 @@ export default function BoardView() {
   const [trackerError, setTrackerError] = useState<{ tracker: string; message: string } | null>(
     null,
   );
+  const [conductorPaused, setConductorPaused] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [labelFilter, setLabelFilter] = useState<Set<string>>(() => new Set());
+  const [assigneeFilter, setAssigneeFilter] = useState("");
 
   // Poll the conductor snapshot every 2s so each card can show a
   // running/retrying badge + cancel button. We ignore failures: when
@@ -75,6 +79,7 @@ export default function BoardView() {
             ? { tracker: snap.tracker, message: snap.last_tracker_error }
             : null,
         );
+        setConductorPaused(!!snap.paused);
       } catch {
         // swallow: conductor may be unreachable / not wired
       } finally {
@@ -128,15 +133,58 @@ export default function BoardView() {
     setLocation("/board", { replace: true });
   }, [focusFromUrl, issues, setLocation]);
 
-  // Group issues by state for column rendering. Issues whose state
-  // does not appear on the board land in an "unmapped" bucket so they
-  // are not silently lost when the operator renames a state.
+  // Distinct values exposed in the filter dropdowns. Derived from the
+  // current issues list so the dropdowns track what the user actually
+  // sees — including labels created on the fly by bots.
+  const { allLabels, allAssignees } = useMemo(() => {
+    const labels = new Set<string>();
+    const assignees = new Set<string>();
+    for (const iss of issues) {
+      for (const l of iss.labels ?? []) labels.add(l);
+      if (iss.assignee) assignees.add(iss.assignee);
+    }
+    return {
+      allLabels: Array.from(labels).sort(),
+      allAssignees: Array.from(assignees).sort(),
+    };
+  }, [issues]);
+
+  // filteredIssues applies the search query + active label/assignee
+  // filters to the raw issues list. Keep filtering client-side: the
+  // backend's listIssues filter would force a full network round-trip
+  // on every keystroke, which makes the search feel laggy on
+  // multi-hundred-issue boards. Title/body substring is case-insensitive.
+  const filteredIssues = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const labels = labelFilter;
+    const assignee = assigneeFilter.trim();
+    if (!q && labels.size === 0 && !assignee) return issues;
+    return issues.filter((iss) => {
+      if (q) {
+        const hay =
+          (iss.title ?? "") + "\t" + (iss.body ?? "") + "\t" + iss.id;
+        if (!hay.toLowerCase().includes(q)) return false;
+      }
+      if (labels.size > 0) {
+        const have = new Set(iss.labels ?? []);
+        for (const l of labels) {
+          if (!have.has(l)) return false;
+        }
+      }
+      if (assignee && iss.assignee !== assignee) return false;
+      return true;
+    });
+  }, [issues, searchQuery, labelFilter, assigneeFilter]);
+
+  // Group filtered issues by state for column rendering. Issues whose
+  // state does not appear on the board land in an "unmapped" bucket so
+  // they are not silently lost when the operator renames a state.
   const byState = useMemo(() => {
     const m = new Map<string, NativeIssue[]>();
     if (!board) return m;
     for (const s of board.states) m.set(s.name, []);
     m.set("__unmapped__", []);
-    for (const iss of issues) {
+    for (const iss of filteredIssues) {
       const bucket = m.has(iss.state) ? iss.state : "__unmapped__";
       m.get(bucket)!.push(iss);
     }
@@ -144,7 +192,7 @@ export default function BoardView() {
       list.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
     }
     return m;
-  }, [board, issues]);
+  }, [board, filteredIssues]);
 
   const onDrop = useCallback(
     async (issueID: string, toState: string) => {
@@ -260,10 +308,7 @@ export default function BoardView() {
   if (!board) {
     return (
       <PageShell active="board">
-        <div className="p-8 text-fg-muted">
-          Native tracker not available.{" "}
-          <code className="text-xs">iterion editor --dir &lt;project&gt;</code> creates one on first launch.
-        </div>
+        <EmptyBoard kind="missing" />
       </PageShell>
     );
   }
@@ -302,7 +347,46 @@ export default function BoardView() {
           <span className="text-amber-200/60 shrink-0">({trackerError.tracker})</span>
         </div>
       )}
+      {conductorPaused && (
+        <div className="bg-yellow-500/10 border-b border-yellow-500/40 px-4 py-2 text-xs text-yellow-200 flex items-center gap-2">
+          <span className="font-medium">Conductor paused</span>
+          <span className="text-yellow-200/80">
+            New issues won't be dispatched until you resume from the toolbar
+            above. In-flight runs continue unaffected.
+          </span>
+        </div>
+      )}
 
+      <BoardFilters
+        searchQuery={searchQuery}
+        labelFilter={labelFilter}
+        assigneeFilter={assigneeFilter}
+        allLabels={allLabels}
+        allAssignees={allAssignees}
+        total={issues.length}
+        filtered={filteredIssues.length}
+        onSearchChange={setSearchQuery}
+        onLabelToggle={(l) =>
+          setLabelFilter((prev) => {
+            const next = new Set(prev);
+            if (next.has(l)) next.delete(l);
+            else next.add(l);
+            return next;
+          })
+        }
+        onAssigneeChange={setAssigneeFilter}
+        onReset={() => {
+          setSearchQuery("");
+          setLabelFilter(new Set());
+          setAssigneeFilter("");
+        }}
+      />
+
+      {issues.length === 0 ? (
+        <main className="flex-1 overflow-auto p-3">
+          <EmptyBoard kind="no-issues" onCreate={() => setCreating(true)} />
+        </main>
+      ) : (
       <main className="flex-1 overflow-auto p-3">
         <div className="flex gap-3 min-w-fit">
           {board.states.map((s) => (
@@ -322,6 +406,7 @@ export default function BoardView() {
               onClickCard={(iss) => setEditing(iss)}
               onCancelRun={onCancelRun}
               onOpenRun={(runId) => setLocation(`/runs/${encodeURIComponent(runId)}`)}
+              dimmed={conductorPaused}
             />
           ))}
           {(byState.get("__unmapped__")?.length ?? 0) > 0 && (
@@ -340,10 +425,12 @@ export default function BoardView() {
               onClickCard={(iss) => setEditing(iss)}
               onCancelRun={onCancelRun}
               onOpenRun={(runId) => setLocation(`/runs/${encodeURIComponent(runId)}`)}
+              dimmed={conductorPaused}
             />
           )}
         </div>
       </main>
+      )}
 
       {creating && (
         <IssueModal
@@ -364,6 +451,181 @@ export default function BoardView() {
       )}
       {helpOpen && <BoardKeyboardHelp onClose={() => setHelpOpen(false)} />}
     </PageShell>
+  );
+}
+
+// EmptyBoard renders the two empty-state guides:
+//   missing   — no native tracker has been initialised on disk yet
+//   no-issues — board exists, no issues yet (most common at first
+//               launch). Surfaces a "Create your first issue" CTA + a
+//               short orientation hint pointing at the conductor.
+function EmptyBoard({
+  kind,
+  onCreate,
+}: {
+  kind: "missing" | "no-issues";
+  onCreate?: () => void;
+}) {
+  if (kind === "missing") {
+    return (
+      <div className="p-8 max-w-lg mx-auto text-fg-default space-y-4">
+        <div className="text-lg font-semibold">Native tracker not initialised</div>
+        <p className="text-sm text-fg-muted">
+          The board view persists issues under the project's{" "}
+          <code className="text-xs bg-surface-2 px-1 rounded">.iterion/conductor/native/</code>{" "}
+          directory. iterion creates one automatically on first launch.
+        </p>
+        <div className="text-sm">
+          <p className="mb-1 text-fg-default">Start it from the workspace:</p>
+          <pre className="bg-surface-2 rounded p-2 text-xs font-mono overflow-x-auto">
+            iterion editor --dir &lt;your-project&gt;
+          </pre>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="p-8 max-w-xl mx-auto text-fg-default space-y-5">
+      <div className="text-lg font-semibold">Your kanban is empty</div>
+      <p className="text-sm text-fg-muted">
+        Issues live as JSON under{" "}
+        <code className="text-xs bg-surface-2 px-1 rounded">
+          .iterion/conductor/native/issues/
+        </code>
+        . Each card represents a unit of work the conductor can pick up and dispatch
+        to a workflow.
+      </p>
+      <div className="grid gap-3 text-sm">
+        <div className="rounded border border-border-default p-3 bg-surface-1">
+          <div className="font-medium text-fg-default mb-1">1. Create an issue</div>
+          <p className="text-fg-muted">
+            Click below, or press{" "}
+            <kbd className="font-mono text-xs px-1 rounded bg-surface-2 border border-border-default">
+              c
+            </kbd>{" "}
+            anywhere on this page. Issues land in the first <em>eligible</em>{" "}
+            column (green dot in the header) so a running conductor can pick them
+            up immediately.
+          </p>
+        </div>
+        <div className="rounded border border-border-default p-3 bg-surface-1">
+          <div className="font-medium text-fg-default mb-1">
+            2. Wire a conductor (optional)
+          </div>
+          <p className="text-fg-muted">
+            Without a conductor, the board is just a task list. Configure one at{" "}
+            <code className="text-xs bg-surface-2 px-1 rounded">/conductor</code>{" "}
+            to have iterion auto-dispatch a workflow per eligible card.
+          </p>
+        </div>
+        <div className="rounded border border-border-default p-3 bg-surface-1">
+          <div className="font-medium text-fg-default mb-1">3. Keyboard shortcuts</div>
+          <p className="text-fg-muted">
+            Press{" "}
+            <kbd className="font-mono text-xs px-1 rounded bg-surface-2 border border-border-default">
+              ?
+            </kbd>{" "}
+            anywhere to see the full list — c (new), arrow keys (navigate / move
+            between columns), Enter (open), Del (delete).
+          </p>
+        </div>
+      </div>
+      {onCreate && (
+        <div>
+          <Button variant="primary" onClick={onCreate}>
+            + Create your first issue
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BoardFilters({
+  searchQuery,
+  labelFilter,
+  assigneeFilter,
+  allLabels,
+  allAssignees,
+  total,
+  filtered,
+  onSearchChange,
+  onLabelToggle,
+  onAssigneeChange,
+  onReset,
+}: {
+  searchQuery: string;
+  labelFilter: Set<string>;
+  assigneeFilter: string;
+  allLabels: string[];
+  allAssignees: string[];
+  total: number;
+  filtered: number;
+  onSearchChange: (v: string) => void;
+  onLabelToggle: (l: string) => void;
+  onAssigneeChange: (v: string) => void;
+  onReset: () => void;
+}) {
+  const filtersActive =
+    searchQuery.trim() !== "" || labelFilter.size > 0 || assigneeFilter !== "";
+  return (
+    <div className="px-3 py-2 border-b border-border-default bg-surface-1 flex flex-wrap items-center gap-2 text-xs">
+      <input
+        type="search"
+        value={searchQuery}
+        onChange={(e) => onSearchChange(e.target.value)}
+        placeholder="Search title / body / id…"
+        className="px-2 py-1 rounded border border-border-default bg-surface-0 text-fg-default text-xs min-w-[200px] flex-shrink-0"
+      />
+      {allAssignees.length > 0 && (
+        <select
+          value={assigneeFilter}
+          onChange={(e) => onAssigneeChange(e.target.value)}
+          className="px-2 py-1 rounded border border-border-default bg-surface-0 text-fg-default text-xs"
+        >
+          <option value="">All assignees</option>
+          {allAssignees.map((a) => (
+            <option key={a} value={a}>
+              @{a}
+            </option>
+          ))}
+        </select>
+      )}
+      {allLabels.length > 0 && (
+        <div className="flex flex-wrap gap-1 items-center">
+          <span className="text-fg-muted">labels:</span>
+          {allLabels.map((l) => {
+            const active = labelFilter.has(l);
+            return (
+              <button
+                key={l}
+                type="button"
+                onClick={() => onLabelToggle(l)}
+                className={`px-1.5 py-0.5 rounded border text-[10px] ${
+                  active
+                    ? "bg-accent text-fg-onAccent border-accent"
+                    : "bg-surface-0 text-fg-muted border-border-default hover:text-fg-default"
+                }`}
+              >
+                {l}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <span className="ml-auto text-fg-muted">
+        {filtersActive ? `${filtered} / ${total}` : `${total} issue${total === 1 ? "" : "s"}`}
+      </span>
+      {filtersActive && (
+        <button
+          type="button"
+          onClick={onReset}
+          className="text-fg-subtle hover:text-fg-default underline text-[10px]"
+        >
+          reset
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -473,6 +735,11 @@ interface ColumnProps {
   onClickCard: (iss: NativeIssue) => void;
   onCancelRun: (issueID: string) => void;
   onOpenRun: (runId: string) => void;
+  // dimmed: tells the column to render at reduced opacity. Used when the
+  // conductor is paused so eligible columns visually fade — the cards
+  // are still draggable, but the user gets a clear "nothing will pick
+  // these up" signal.
+  dimmed?: boolean;
 }
 
 function Column({
@@ -490,13 +757,18 @@ function Column({
   onClickCard,
   onCancelRun,
   onOpenRun,
+  dimmed,
 }: ColumnProps) {
   const [dragOver, setDragOver] = useState(false);
+  // Dim only the eligible columns when the conductor is paused — the
+  // terminal / backlog columns aren't being actively dispatched even
+  // when the conductor runs, so muting them carries no extra signal.
+  const fadeForPause = dimmed && eligible;
   return (
     <div
       className={`w-72 shrink-0 rounded border ${
         dragOver ? "border-accent/60 bg-accent-soft/30" : "border-border-default bg-surface-1"
-      } flex flex-col`}
+      } flex flex-col ${fadeForPause ? "opacity-60" : ""}`}
       style={{ borderTopColor: color, borderTopWidth: 3 }}
       onDragOver={(e) => {
         e.preventDefault();

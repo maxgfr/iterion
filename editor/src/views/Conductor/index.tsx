@@ -190,6 +190,7 @@ export default function ConductorView() {
           onFocusIssue={(id) =>
             setLocation(`/board?focus=${encodeURIComponent(id)}`)
           }
+          onRefreshNow={() => void doRefresh()}
         />
       </main>
     </PageShell>
@@ -373,17 +374,66 @@ function RunningTable({
   );
 }
 
+// useTick re-renders the caller at intervalMs while `active`. Used by
+// RetriesTable to keep countdowns smooth without a full conductor poll
+// each second — the retry table only needs to recompute due_at minus
+// now() on its own clock.
+function useTick(intervalMs: number, active: boolean): number {
+  const [tick, setTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setTick(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs, active]);
+  return tick;
+}
+
+// formatRetryDue returns a short human label for "in 12s" / "due now"
+// derived purely from due_at + now. Lives next to RetriesTable so the
+// formatting stays scoped to the retry context (the rest of the page
+// uses relTime).
+function formatRetryDue(dueIso: string, nowMs: number): string {
+  if (!dueIso) return "";
+  const due = Date.parse(dueIso);
+  if (!Number.isFinite(due)) return "";
+  const deltaS = Math.round((due - nowMs) / 1000);
+  if (deltaS <= 0) return "due";
+  if (deltaS < 60) return `in ${deltaS}s`;
+  if (deltaS < 3600) return `in ${Math.round(deltaS / 60)}m`;
+  return `in ${Math.round(deltaS / 3600)}h`;
+}
+
 function RetriesTable({
   rows,
   onFocusIssue,
+  onRefreshNow,
 }: {
   rows: ConductorSnapshot["retries"];
   onFocusIssue: (issueID: string) => void;
+  onRefreshNow: () => void;
 }) {
+  // Tick every 1s when at least one retry is due in under 5 minutes so
+  // the countdown is responsive without burning CPU on long-deferred
+  // queues.
+  const needsTick = (rows ?? []).some((r) => {
+    const due = Date.parse(r.due_at);
+    return Number.isFinite(due) && due - Date.now() < 5 * 60_000;
+  });
+  const now = useTick(1000, needsTick);
   return (
     <section className="rounded border border-border-default bg-surface-1">
-      <header className="px-4 py-2 border-b border-border-default text-sm font-semibold">
-        Retry queue ({rows?.length ?? 0})
+      <header className="px-4 py-2 border-b border-border-default text-sm font-semibold flex items-center justify-between gap-2">
+        <span>Retry queue ({rows?.length ?? 0})</span>
+        {rows && rows.length > 0 && (
+          <button
+            type="button"
+            onClick={onRefreshNow}
+            className="text-[11px] px-2 py-0.5 rounded border border-border-default hover:bg-surface-2 text-fg-muted hover:text-fg-default"
+            title="Trigger an immediate tracker poll; due retries will fire on the next tick."
+          >
+            Poll now
+          </button>
+        )}
       </header>
       {!rows || rows.length === 0 ? (
         <div className="p-4 text-xs text-fg-muted">No retries pending.</div>
@@ -398,21 +448,31 @@ function RetriesTable({
             </tr>
           </thead>
           <tbody>
-            {rows!.map((r) => (
+            {rows!.map((r) => {
+              const dueLabel = formatRetryDue(r.due_at, now);
+              const isDue = dueLabel === "due";
+              return (
               <tr
                 key={r.issue_id}
-                className="border-b border-border-default/60 hover:bg-surface-2/40 cursor-pointer"
+                className={`border-b border-border-default/60 hover:bg-surface-2/40 cursor-pointer ${
+                  isDue ? "bg-amber-500/5" : ""
+                }`}
                 onClick={() => onFocusIssue(r.issue_id)}
                 title="Open this issue on the board"
               >
                 <td className="py-1.5 px-3 font-mono">{r.identifier || r.issue_id}</td>
                 <td className="py-1.5 px-3">{r.attempt}</td>
-                <td className="py-1.5 px-3 text-fg-muted">{r.due_at && relTime(r.due_at)}</td>
+                <td className="py-1.5 px-3">
+                  <span className={isDue ? "text-amber-300" : "text-fg-muted"}>
+                    {dueLabel || relTime(r.due_at)}
+                  </span>
+                </td>
                 <td className="py-1.5 px-3 text-red-300/80 truncate max-w-[24rem]">
                   {r.error}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       )}
