@@ -54,6 +54,21 @@ type RunMessage struct {
 	// OwnerID is the user_id of the principal who initiated the run.
 	// Used for audit logging; runners do NOT gate execution on it.
 	OwnerID string `json:"owner_id,omitempty"`
+	// ParentRunID is set on child runs spawned by a parent workflow
+	// (e.g. by `iterion __scan-shards`). Empty for root runs. When
+	// non-empty, the runner copies it into the persisted Run document
+	// so the studio and inspect surfaces can render the parent/child
+	// tree. See docs/security-bots-distributed.md.
+	ParentRunID string `json:"parent_run_id,omitempty"`
+	// ShardIndex is the 0-based index of this run within the parent's
+	// shard set. Only meaningful when ParentRunID is set.
+	ShardIndex int `json:"shard_index,omitempty"`
+	// ShardCount is the total number of shards the parent split its
+	// work into. Only meaningful when ParentRunID is set.
+	ShardCount int `json:"shard_count,omitempty"`
+	// ShardLabel is an optional human-friendly tag for the shard
+	// (e.g. "files 100-119" or "ecosystem:npm"). Display-only.
+	ShardLabel string `json:"shard_label,omitempty"`
 }
 
 // IRBackend is the storage backend an IRRef points at.
