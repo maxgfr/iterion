@@ -2,7 +2,8 @@ package kubernetes
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/SocialGouv/iterion/pkg/internal/shellquote"
@@ -63,7 +64,7 @@ func appendEnvPrefix(args []string, env map[string]string) []string {
 	if len(env) == 0 {
 		return args
 	}
-	keys := sortedKeys(env)
+	keys := slices.Sorted(maps.Keys(env))
 	args = append(args, "env")
 	for _, k := range keys {
 		// Defense-in-depth: validateEnvVar rejects newlines and NULs
@@ -95,7 +96,7 @@ func buildShellChdirExec(dir string, argv []string, env map[string]string) strin
 	b.WriteString(" && exec ")
 	if len(env) > 0 {
 		b.WriteString("env ")
-		for _, k := range sortedKeys(env) {
+		for _, k := range slices.Sorted(maps.Keys(env)) {
 			b.WriteString(shellquote.Quote(k + "=" + env[k]))
 			b.WriteByte(' ')
 		}
@@ -107,15 +108,4 @@ func buildShellChdirExec(dir string, argv []string, env map[string]string) strin
 		b.WriteString(shellquote.Quote(a))
 	}
 	return b.String()
-}
-
-// sortedKeys returns keys of m in ascending order — used for stable
-// argv ordering in `kubectl describe` output across runs.
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }

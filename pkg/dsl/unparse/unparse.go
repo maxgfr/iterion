@@ -3,6 +3,8 @@ package unparse
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -623,7 +625,7 @@ func writeSandboxBlock(b *strings.Builder, sb *ast.SandboxBlock, indent string) 
 	}
 	if len(sb.Env) > 0 {
 		fmt.Fprintf(b, "%senv:\n", inner)
-		for _, k := range sortedKeys(sb.Env) {
+		for _, k := range slices.Sorted(maps.Keys(sb.Env)) {
 			fmt.Fprintf(b, "%s  %s: %q\n", inner, k, sb.Env[k])
 		}
 	}
@@ -675,7 +677,7 @@ func writeSandboxBuildBlock(b *strings.Builder, bb *ast.SandboxBuildBlock, inden
 	}
 	if len(bb.Args) > 0 {
 		fmt.Fprintf(b, "%sargs:\n", inner)
-		for _, k := range sortedKeys(bb.Args) {
+		for _, k := range slices.Sorted(maps.Keys(bb.Args)) {
 			fmt.Fprintf(b, "%s  %s: %q\n", inner, k, bb.Args[k])
 		}
 	}
@@ -703,17 +705,6 @@ func writeSandboxNetworkBlock(b *strings.Builder, n *ast.SandboxNetworkBlock, in
 		}
 		b.WriteString("]\n")
 	}
-}
-
-// sortedKeys returns the keys of m in ascending order — used for
-// deterministic unparse output.
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func writeCompaction(b *strings.Builder, compaction *ast.CompactionBlock, indent string, leadingBlank bool) {
