@@ -546,6 +546,12 @@ export interface CreateRunRequest {
   // endpoint. The server promotes each upload into the run-scoped
   // store before the engine starts.
   attachments?: Record<string, string>;
+  // Backend, when set, overrides the workflow's `default_backend:`
+  // for this run only. Node-level explicit `backend:` still wins.
+  // Empty preserves the resolver chain (workflow default → env →
+  // auto-detect). Useful for A/B-testing the same workflow against
+  // different backends without editing the .iter source.
+  backend?: string;
 }
 
 export interface CreateRunResponse {

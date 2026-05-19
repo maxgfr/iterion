@@ -20,6 +20,7 @@ import { Select } from "@/components/ui/Select";
 import AppHeader from "@/components/shared/AppHeader";
 import ConfirmDialog from "@/components/shared/ConfirmDialog";
 import { useDocumentStore } from "@/store/document";
+import { useBackendDetectStore } from "@/store/backendDetect";
 
 import AttachmentFieldInput, {
   type AttachmentValue,
@@ -144,6 +145,37 @@ function SandboxBadge({ mode }: { mode: string }) {
   );
 }
 
+// WorktreeTargetSummary renders the one-line "Commits → branch · FF→ target"
+// summary above the worktree finalization fields, so the operator sees
+// where their commits will land without parsing four input fields.
+function WorktreeTargetSummary({
+  branchName,
+  mergeInto,
+}: {
+  branchName: string;
+  mergeInto: string;
+}) {
+  const branch = branchName || "iterion/run/<auto>";
+  const skipMerge = mergeInto === "none";
+  const target =
+    mergeInto && mergeInto !== "current" ? mergeInto : "current branch";
+  return (
+    <div className="text-[11px] text-fg-muted bg-surface-2 border border-border-default rounded px-2 py-1.5">
+      <span className="text-fg-subtle">Commits → </span>
+      <code className="font-mono text-fg-default">{branch}</code>
+      <span className="text-fg-subtle"> · </span>
+      {skipMerge ? (
+        <span className="text-fg-default">no FF (branch only)</span>
+      ) : (
+        <>
+          <span className="text-fg-subtle">FF→ </span>
+          <code className="font-mono text-fg-default">{target}</code>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function LaunchView() {
   const [, setLocation] = useLocation();
   const search = useSearch();
@@ -183,6 +215,12 @@ export default function LaunchView() {
   // controls without having to click — they're meaningful options,
   // not "advanced" in the obscure sense.
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // Backend override for this run. "" = let the resolver pick (the
+  // current behaviour, which also surfaces in BackendStatusPill).
+  // Sending an explicit name overrides the workflow's `default_backend:`
+  // but node-level explicit `backend:` still wins.
+  const [backendOverride, setBackendOverride] = useState<string>("");
+  const backendReport = useBackendDetectStore((s) => s.report);
 
   useEffect(() => {
     let cancelled = false;
@@ -347,6 +385,7 @@ export default function LaunchView() {
         auto_merge: autoMerge,
         attachments:
           Object.keys(attachmentsPayload).length > 0 ? attachmentsPayload : undefined,
+        backend: backendOverride || undefined,
       });
       setLocation(`/runs/${encodeURIComponent(res.run_id)}`);
     } catch (e) {
@@ -556,6 +595,44 @@ export default function LaunchView() {
               </form>
             )}
             <div className="mt-6 border-t border-border-default pt-4">
+              <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
+                <div>
+                  <div className="text-xs font-medium font-mono">backend</div>
+                  <div className="text-[10px] text-fg-subtle">override for this run</div>
+                </div>
+                <div>
+                  <Select
+                    value={backendOverride}
+                    onChange={(e) => setBackendOverride(e.currentTarget.value)}
+                  >
+                    <option value="">
+                      auto{backendReport?.resolved_default
+                        ? ` — currently ${backendReport.resolved_default}`
+                        : ""}
+                    </option>
+                    {(backendReport?.backends ?? []).map((b) => (
+                      <option
+                        key={b.name}
+                        value={b.name}
+                        disabled={!b.available}
+                      >
+                        {b.name}
+                        {b.available
+                          ? b.auth !== "none"
+                            ? ` (${b.auth})`
+                            : ""
+                          : " — no credential"}
+                      </option>
+                    ))}
+                  </Select>
+                  <div className="mt-1 text-[10px] text-fg-subtle">
+                    Replaces the workflow's <code>default_backend:</code>.
+                    Node-level explicit <code>backend:</code> still wins.
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="mt-6 border-t border-border-default pt-4">
               <button
                 type="button"
                 className="text-xs text-fg-muted hover:text-fg-default flex items-center gap-1"
@@ -571,6 +648,12 @@ export default function LaunchView() {
               </button>
               {showAdvanced && (
                 <div className="mt-3 space-y-3 pl-4 border-l border-border-default">
+                  {worktreeOn && (
+                    <WorktreeTargetSummary
+                      branchName={branchName}
+                      mergeInto={mergeInto}
+                    />
+                  )}
                   <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
                     <label htmlFor="launch-merge-into" className="pt-1">
                       <div className="text-xs font-medium font-mono">merge_into</div>

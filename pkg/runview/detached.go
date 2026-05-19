@@ -224,6 +224,15 @@ func (s *Service) launchDetached(parent context.Context, runID string, spec Laun
 		return nil, err
 	}
 
+	// LaunchSpec.Backend is honored only by the in-process spawnRun
+	// path today. The detached runner is a separate process invoked
+	// via `iterion run` which has no `--backend` flag yet. Surface
+	// this gap as a warning so the operator knows the override was
+	// dropped, rather than silently running with the workflow default.
+	if spec.Backend != "" {
+		s.logger.Warn("runview: backend override %q ignored in detached mode (ITERION_RUNS_DETACHED=1); set ITERION_DEFAULT_BACKEND or workflow `default_backend:` instead", spec.Backend)
+	}
+
 	// Set up the per-run log buffer so live WS subscribers can pick up
 	// the file-based tailer's output. In detached mode we explicitly
 	// skip the file-tee path: the runner subprocess owns run.log on
