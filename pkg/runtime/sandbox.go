@@ -10,16 +10,17 @@
 // The lifecycle is opt-in: workflows without a sandbox: declaration
 // (and CLI invocations without --sandbox) skip every step here and
 // the engine behaves exactly as before.
+//
+// Helpers split across sibling files:
+//   - sandbox_mounts.go: bind-mount + host-state wiring
+//   - sandbox_lifecycle.go: driver selection, build, start helpers
 package runtime
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +29,6 @@ import (
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/sandbox"
 	"github.com/SocialGouv/iterion/pkg/sandbox/devcontainer"
-	"github.com/SocialGouv/iterion/pkg/sandbox/docker"
 	"github.com/SocialGouv/iterion/pkg/sandbox/netproxy"
 	"github.com/SocialGouv/iterion/pkg/sandbox/registry"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -139,10 +139,6 @@ type SandboxParams struct {
 // function emits a `sandbox_skipped` event and returns a noop Run so
 // callers can keep using the same code paths without nil-checking.
 func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbox, error) {
-	wf := p.Workflow
-	runID := p.RunID
-	friendlyName := p.FriendlyName
-	workspacePath := p.WorkspacePath
 	logger := p.Logger
 	// Wrap the raw emitter so every callsite that discards the error
 	// (sandbox lifecycle and build events are not load-bearing for
@@ -154,11 +150,11 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	emitEvent := func(ev store.EventType, payload map[string]interface{}) error {
 		err := rawEmit(ev, payload)
 		if err != nil && logger != nil {
-			logger.Warn("runtime: emit %s event for run %s: %v", ev, runID, err)
+			logger.Warn("runtime: emit %s event for run %s: %v", ev, p.RunID, err)
 		}
 		return err
 	}
-	spec, source, err := resolveSandboxSpec(wf, p.RepoRoot, p.CLIOverride, p.GlobalDefault, resolveDefaultSandboxImage(p.DefaultImage))
+	spec, source, err := resolveSandboxSpec(p.Workflow, p.RepoRoot, p.CLIOverride, p.GlobalDefault, resolveDefaultSandboxImage(p.DefaultImage))
 	if err != nil {
 		return nil, err
 	}
@@ -167,321 +163,57 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 		return nil, nil
 	}
 
-	// Inject the attachments bind-mount BEFORE the driver prepares
-	// resources. Read-only so an agent inside the sandbox can never
-	// corrupt the run store. Skipped when the host dir does not
-	// exist yet (no attachments declared); non-ENOENT errors (typically
-	// EACCES on a locked-down directory) are surfaced at warn so the
-	// resulting `{{attachments.X}}` template miss has a paper trail.
-	if p.AttachmentsHostDir != "" {
-		_, statErr := os.Stat(p.AttachmentsHostDir)
-		switch {
-		case statErr == nil:
-			containerPath := p.AttachmentsContainerPath
-			if containerPath == "" {
-				containerPath = "/run/iterion/attachments"
-			}
-			spec.Mounts = append(spec.Mounts,
-				fmt.Sprintf("source=%s,target=%s,type=bind,readonly", p.AttachmentsHostDir, containerPath),
-			)
-		case errors.Is(statErr, fs.ErrNotExist):
-			// no attachments declared yet — silent skip
-		default:
-			if logger != nil {
-				logger.Warn("runtime: sandbox attachments host dir %s: %v — skipping mount", p.AttachmentsHostDir, statErr)
-			}
+	// Configure all mounts BEFORE the driver prepares resources. Each
+	// helper is a silent no-op when its host source is missing, so
+	// callers don't have to guard.
+	addOptionalBindMount(spec, p.AttachmentsHostDir, p.AttachmentsContainerPath, "/run/iterion/attachments", "attachments", true, logger)
+	if runFilesContainerPath := addOptionalBindMount(spec, p.RunFilesHostDir, p.RunFilesContainerPath, "/iterion/artifact-files", "run-files", false, logger); runFilesContainerPath != "" {
+		// Tool scripts find the path via $ITERION_ARTIFACT_FILES_DIR
+		// so recipe authors don't have to hard-code container paths.
+		if spec.Env == nil {
+			spec.Env = map[string]string{}
 		}
+		spec.Env["ITERION_ARTIFACT_FILES_DIR"] = runFilesContainerPath
 	}
-
-	// Inject the run-files bind-mount (READ-WRITE) so in-sandbox tools
-	// can drop arbitrary report/SBOM files there for iterion to surface
-	// via the Artifacts UI. Same skip-on-missing-host-dir behaviour as
-	// attachments. Mounted via a single bind entry; tool scripts find
-	// the path via $ITERION_ARTIFACT_FILES_DIR (set on the spec env
-	// below so it lands on every `docker exec` and the recipe author
-	// doesn't have to remember the container path string).
-	if p.RunFilesHostDir != "" {
-		_, statErr := os.Stat(p.RunFilesHostDir)
-		switch {
-		case statErr == nil:
-			containerPath := p.RunFilesContainerPath
-			if containerPath == "" {
-				containerPath = "/iterion/artifact-files"
-			}
-			spec.Mounts = append(spec.Mounts,
-				fmt.Sprintf("source=%s,target=%s,type=bind", p.RunFilesHostDir, containerPath),
-			)
-			if spec.Env == nil {
-				spec.Env = map[string]string{}
-			}
-			spec.Env["ITERION_ARTIFACT_FILES_DIR"] = containerPath
-		case errors.Is(statErr, fs.ErrNotExist):
-			// no run-files dir provisioned — silent skip
-		default:
-			if logger != nil {
-				logger.Warn("runtime: sandbox run-files host dir %s: %v — skipping mount", p.RunFilesHostDir, statErr)
-			}
-		}
-	}
-
-	// Bundle mount: read-only bind of the resolved bundle directory
-	// so the in-container view of skills/ and prompts/ matches the
-	// host. Independent of workspace bind-mount because the cache
-	// slot lives under the user cache dir, not the workspace.
-	if p.BundleHostDir != "" {
-		_, statErr := os.Stat(p.BundleHostDir)
-		switch {
-		case statErr == nil:
-			containerPath := p.BundleContainerPath
-			if containerPath == "" {
-				containerPath = "/run/iterion/bundle"
-			}
-			spec.Mounts = append(spec.Mounts,
-				fmt.Sprintf("source=%s,target=%s,type=bind,readonly", p.BundleHostDir, containerPath),
-			)
-		case errors.Is(statErr, fs.ErrNotExist):
-			// bundle resources not materialised yet — silent skip
-		default:
-			if logger != nil {
-				logger.Warn("runtime: sandbox bundle host dir %s: %v — skipping mount", p.BundleHostDir, statErr)
-			}
-		}
-	}
-
-	// Host-state auto-mount of ~/.iterion + ~/.claude at the same
-	// absolute path host=container. The path-parity is load-bearing:
-	// Claude Code's per-project key is derived from cwd, so without
-	// it sandboxed and host invocations see different session
-	// histories. See docs/sandbox.md "Host state mounts" for the
-	// full rationale, opt-out, and security caveats.
-	var wfHostState string
-	if wf != nil && wf.Sandbox != nil {
-		wfHostState = wf.Sandbox.HostState
-	}
-	resolvedHostState, hsSource := pickHostState(wfHostState, p.HostStateOverride, p.HostStateDefault)
-	spec.HostState = sandbox.HostState(resolvedHostState)
-	if spec.HostState.Active() {
-		absWorkspace, absErr := filepath.Abs(workspacePath)
-		if absErr != nil {
-			absWorkspace = workspacePath
-		}
-		// Workspace at host's absolute path keeps cwd-derived state
-		// (Claude Code project key, ${PROJECT_DIR}, absolute-path tool
-		// args) resolvable identically in/out container. Preserve any
-		// explicit DSL workspace_folder override.
-		if spec.WorkspaceFolder == "" {
-			spec.WorkspaceFolder = absWorkspace
-		}
-
-		homeDir := resolveHostHomeDir()
-		iterionHomeDir := store.GlobalIterionDataDir()
-		var claudeDir string
-		if homeDir != "" {
-			claudeDir = filepath.Join(homeDir, ".claude")
-		}
-
-		mounts := collectHostStateMounts(absWorkspace, iterionHomeDir, claudeDir)
-		mountPairs := make([]string, 0, len(mounts))
-		for _, m := range mounts {
-			entry := fmt.Sprintf("source=%s,target=%s,type=bind", m.HostPath, m.ContainerPath)
-			if m.ReadOnly {
-				entry += ",readonly"
-			}
-			spec.Mounts = append(spec.Mounts, entry)
-			mountPairs = append(mountPairs, m.HostPath+":"+m.ContainerPath)
-		}
-
-		// Force HOME inside the container to the host home path so
-		// processes that resolve `~` (Claude Code, git, anything that
-		// reads $HOME) land in the mounted tree rather than a stock
-		// image's /root or empty $HOME. Only set when we actually
-		// resolved the host home and the spec hasn't already pinned an
-		// override.
-		if homeDir != "" {
-			if spec.Env == nil {
-				spec.Env = map[string]string{}
-			}
-			if _, alreadySet := spec.Env["HOME"]; !alreadySet {
-				spec.Env["HOME"] = homeDir
-			}
-		}
-
-		// UID remap policy: on Linux hosts, when the spec doesn't pin
-		// a user, run the container as the host UID:GID so writes back
-		// to the mounted ~/.iterion + ~/.claude trees stay owned by
-		// the host user (not root). macOS / Windows Docker Desktop do
-		// userns-remap implicitly, so we leave User empty there.
-		// Host UID 0 (CI runners) is a no-op — same UID either way.
-		if goruntime.GOOS == "linux" {
-			hostUID := os.Getuid()
-			hostGID := os.Getgid()
-			if spec.User == "" && hostUID != 0 {
-				spec.User = strconv.Itoa(hostUID) + ":" + strconv.Itoa(hostGID)
-				_ = emitEvent(store.EventSandboxUserRemap, map[string]interface{}{
-					"uid":    hostUID,
-					"gid":    hostGID,
-					"reason": "host_state=auto: align container UID with host so writes to ~/.iterion + ~/.claude remain host-owned",
-				})
-			} else if spec.User != "" && hostUID != 0 {
-				if specUID, ok := parseUserUID(spec.User); ok && specUID != hostUID {
-					_ = emitEvent(store.EventSandboxUIDMismatchWarning, map[string]interface{}{
-						"spec_user": spec.User,
-						"host_uid":  hostUID,
-					})
-					if logger != nil {
-						logger.Warn("runtime: sandbox host_state active but container user %q (UID %d) != host UID %d — writes to ~/.iterion + ~/.claude will be owned by UID %d and may be unreadable to subsequent host invocations",
-							spec.User, specUID, hostUID, specUID)
-					}
-				} else if !ok && logger != nil {
-					// Non-numeric user (e.g. "node") — we can't verify UID
-					// alignment without inspecting the image. Surface so
-					// the operator at least knows host_state can corrupt
-					// home-dir permissions if the image's user doesn't
-					// resolve to the host UID at runtime.
-					logger.Warn("runtime: sandbox host_state active but container user %q has no parseable UID — cannot verify host UID alignment; ~/.iterion + ~/.claude writes may end up with unexpected ownership",
-						spec.User)
-				}
-			}
-		}
-
-		_ = emitEvent(store.EventSandboxHostStateMounted, map[string]interface{}{
-			"enabled":          true,
-			"source":           hsSource,
-			"workspace_folder": spec.WorkspaceFolder,
-			"mounts":           mountPairs,
-		})
-	} else {
-		_ = emitEvent(store.EventSandboxHostStateMounted, map[string]interface{}{
-			"enabled": false,
-			"source":  hsSource,
-		})
-	}
-
-	// When the workflow uses claw nodes, route them through the
-	// iterion-claw-runner sub-process inside the sandbox. The runner
-	// is the same iterion binary, invoked via `iterion __claw-runner`
-	// from the container — so the binary must be reachable on the
-	// container PATH. Production sandbox images bake iterion in, but
-	// local-host iteration with the slim image needs a bind-mount of
-	// the host binary at /usr/local/bin/iterion. Skip silently when no
-	// host binary can be located (the existing
-	// "exec: iterion: executable file not found" error from the runner
-	// invocation will then surface the gap clearly).
-	if wf != nil && containsClawNode(wf) {
-		if hostBin := locateHostIterionBinary(); hostBin != "" {
-			spec.Mounts = append(spec.Mounts,
-				fmt.Sprintf("source=%s,target=/usr/local/bin/iterion,type=bind,readonly", hostBin),
-			)
-		}
-	}
-
-	// When a worktree is active AND the host repo's .git lives outside
-	// the bind-mounted workspace (the common case: worktrees are stored
-	// under the iterion data dir, not inside the source repo), bind-
-	// mount the parent .git into the container at the SAME host path so
-	// the worktree's `.git` pointer file (containing
-	// `gitdir: <repoRoot>/.git/worktrees/<runID>`) resolves. Without
-	// this, every git command run by tool nodes inside the sandbox
-	// (capture_start_sha, discover_outdated, commit_changes, etc.)
-	// fails with "fatal: not a git repository: <repoRoot>/.git/...":
-	// the git pointer is absolute and references a path the container
-	// can't see.
-	//
-	// Read-only by default — agents that need to write commits use
-	// `git -C /workspace` which writes through the worktree-side
-	// machinery (the worktree's gitdir under .git/worktrees/<id> needs
-	// rw access, and that's part of the parent .git tree we mount). So
-	// we mount rw here; if a recipe wants stricter isolation it can
-	// override the mount via `sandbox: { mounts: [...] }`.
-	if p.RepoRoot != "" && p.RepoRoot != workspacePath {
-		gitDir := filepath.Join(p.RepoRoot, ".git")
-		if info, statErr := os.Stat(gitDir); statErr == nil && info.IsDir() {
-			spec.Mounts = append(spec.Mounts,
-				fmt.Sprintf("source=%s,target=%s,type=bind", gitDir, gitDir),
-			)
-		}
-	}
+	addOptionalBindMount(spec, p.BundleHostDir, p.BundleContainerPath, "/run/iterion/bundle", "bundle", true, logger)
+	applyHostStateMounts(spec, p.Workflow, p, emitEvent, logger)
+	addClawBinaryMount(spec, p.Workflow)
+	addWorktreeGitMount(spec, p.RepoRoot, p.WorkspacePath)
 
 	// Phase 4 V1: claw nodes are forwarded to the iterion-claw-runner
-	// sub-process inside the container so their tool calls (Bash,
-	// file edits) execute inside the sandbox. The hard error from
-	// earlier phases is replaced by an event so operators can see
-	// when the sandboxed claw path is in use, and can opt out by
-	// setting backend on the affected nodes.
-	if wf != nil && containsClawNode(wf) {
+	// sub-process inside the container so their tool calls (Bash, file
+	// edits) execute inside the sandbox. Surface the routing decision
+	// so operators can audit it and opt out by setting `backend:` on
+	// the affected nodes.
+	if p.Workflow != nil && containsClawNode(p.Workflow) {
 		_ = emitEvent(store.EventSandboxClawRoutedViaRunner, map[string]interface{}{
 			"reason":         "claw nodes will run via iterion-claw-runner inside the container",
 			"limitations_v1": "no MCP servers, no mid-tool-loop ask_user — see docs/sandbox.md",
 		})
 	}
 
-	factory := sandbox.NewFactory(sandbox.FactoryOptions{
-		AvailableDrivers: defaultDriverRegistry(),
-	})
-	// DriverForSpec hard-errors when an active mode (auto/inline) would
-	// silently fall through to noop. We want operators to know that the
-	// host is missing a container runtime rather than continue running
-	// unsandboxed under the impression that the workflow's `sandbox:`
-	// directive took effect.
-	driver, err := factory.DriverForSpec(spec)
+	driver, err := selectSandboxDriver(spec, logger)
 	if err != nil {
-		return nil, fmt.Errorf("runtime: sandbox: select driver: %w", err)
-	}
-
-	// Wire the engine's logger into the driver so messages from the
-	// docker run, postCreate execution, and container start surface in
-	// the run.log alongside the rest of the run. The factory hands back
-	// a sandbox.Driver whose default logger discards output (see
-	// docker.New); without this swap, useful diagnostics like
-	// "running postCreateCommand" or "container started" disappear,
-	// and silent-failure modes (postCreate skipped because spec was
-	// empty, image pull stalled, etc.) become impossible to debug
-	// from logs alone.
-	if logger != nil {
-		if dd, ok := driver.(*docker.Driver); ok {
-			driver = dd.WithLogger(logger)
-		}
+		return nil, err
 	}
 
 	if driver.Name() == "noop" {
-		// We only reach this branch when the operator explicitly opted
-		// into noop (PreferredDriver="noop") for an active spec —
-		// DriverForSpec hard-errors otherwise. Emit the skip event so
-		// it still surfaces in events.jsonl and reports.
-		_ = emitEvent(store.EventSandboxSkipped, map[string]interface{}{
-			"driver": "noop",
-			"mode":   string(spec.Mode),
-			"source": source,
-			"reason": "operator opted into the noop driver; the run is NOT actually sandboxed",
-		})
-		prepared, err := driver.Prepare(ctx, *spec)
-		if err != nil {
-			return nil, fmt.Errorf("runtime: sandbox: noop prepare: %w", err)
-		}
-		run, err := driver.Start(ctx, prepared, sandbox.RunInfo{
-			RunID:         runID,
-			FriendlyName:  friendlyName,
-			WorkspacePath: workspacePath,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("runtime: sandbox: noop start: %w", err)
-		}
-		return &activeSandbox{run: run, workspaceFolder: spec.WorkspaceFolder}, nil
+		return startNoopSandbox(ctx, driver, spec, source, p.RunID, p.FriendlyName, p.WorkspacePath, emitEvent)
 	}
 
 	// Optionally start the network proxy. When the workflow has no
 	// explicit network policy, default to the iterion-default
 	// allowlist preset so users get sensible defaults out of the box —
 	// this is the security-first posture the design plan §5 calls for.
-	proxy, proxyEndpoint, err := startNetworkProxy(spec, driver, runID, emitEvent, logger)
+	proxy, proxyEndpoint, err := startNetworkProxy(spec, driver, p.RunID, emitEvent, logger)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: sandbox: network proxy: %w", err)
 	}
 
 	info := sandbox.RunInfo{
-		RunID:         runID,
-		FriendlyName:  friendlyName,
-		WorkspacePath: workspacePath,
+		RunID:         p.RunID,
+		FriendlyName:  p.FriendlyName,
+		WorkspacePath: p.WorkspacePath,
 		ProxyEndpoint: proxyEndpoint,
 	}
 
@@ -493,42 +225,12 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 		return nil, fmt.Errorf("runtime: sandbox: prepare: %w", err)
 	}
 
-	// V2-6: when the spec asks for a Dockerfile build and the driver
-	// implements the optional [sandbox.Builder] interface, materialize
-	// the image now (between Prepare and Start) and substitute the
-	// freshly-built ref into the prepared spec. Drivers that don't
-	// implement Builder must reject Spec.Build in their Prepare so the
-	// engine surfaces a clear error rather than silently ignoring.
-	if spec.Build != nil {
-		if b, ok := driver.(sandbox.Builder); ok {
-			buildStart := time.Now()
-			_ = emitEvent(store.EventSandboxBuildStarted, map[string]interface{}{
-				"driver":     driver.Name(),
-				"dockerfile": spec.Build.Dockerfile,
-				"context":    spec.Build.Context,
-			})
-			built, buildErr := b.Build(ctx, prepared, info)
-			if buildErr != nil {
-				_ = emitEvent(store.EventSandboxBuildFailed, map[string]interface{}{
-					"driver": driver.Name(),
-					"error":  buildErr.Error(),
-				})
-				if proxy != nil {
-					_ = proxy.Shutdown(ctx)
-				}
-				return nil, fmt.Errorf("runtime: sandbox: build: %w", buildErr)
-			}
-			prepared = built
-			builtImage := ""
-			if sp, ok := prepared.(interface{ Spec() sandbox.Spec }); ok {
-				builtImage = sp.Spec().Image
-			}
-			_ = emitEvent(store.EventSandboxBuildFinished, map[string]interface{}{
-				"driver":      driver.Name(),
-				"target":      builtImage,
-				"duration_ms": time.Since(buildStart).Milliseconds(),
-			})
+	prepared, err = buildSandboxImageIfRequested(ctx, driver, prepared, spec, info, emitEvent)
+	if err != nil {
+		if proxy != nil {
+			_ = proxy.Shutdown(ctx)
 		}
+		return nil, err
 	}
 
 	run, err := driver.Start(ctx, prepared, info)
@@ -538,26 +240,7 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 		}
 		return nil, fmt.Errorf("runtime: sandbox: start: %w", err)
 	}
-	// Diagnostic event so operators can tell from events.jsonl which
-	// spec actually backed the sandbox. Without this we only see
-	// "sandbox active (driver=docker)" in the log, which doesn't
-	// reveal whether `auto` resolved to the project's devcontainer or
-	// to the slim fallback (the silent-fallback bug that ate the
-	// modjo postCreate).
-	resolvedImage := ""
-	if sp, ok := prepared.(interface{ Spec() sandbox.Spec }); ok {
-		resolvedImage = sp.Spec().Image
-	}
-	if resolvedImage == "" {
-		resolvedImage = spec.Image
-	}
-	_ = emitEvent(store.EventSandboxStarted, map[string]interface{}{
-		"driver":          driver.Name(),
-		"mode":            string(spec.Mode),
-		"source":          source,
-		"image":           resolvedImage,
-		"has_post_create": spec.PostCreate != "",
-	})
+	emitSandboxStarted(prepared, spec, driver.Name(), source, emitEvent)
 	return &activeSandbox{run: run, proxy: proxy, workspaceFolder: spec.WorkspaceFolder}, nil
 }
 
