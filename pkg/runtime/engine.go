@@ -447,6 +447,88 @@ func (e *Engine) newRunState(runID string, inputs map[string]interface{}) *runSt
 // back to CreateRun. Any other status (running, finished, …) is a
 // programming error — refuse to clobber state.
 func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interface{}) (err error) {
+	run, err := e.runResolveDoc(ctx, runID, inputs)
+	if err != nil {
+		return err
+	}
+
+	run, err = e.runPromoteAttachments(ctx, runID, run)
+	if err != nil {
+		return err
+	}
+
+	// Default workDir to process cwd if not set explicitly.
+	if e.workDir == "" {
+		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+			e.workDir = cwd
+		}
+	}
+
+	// Worktree setup stays inline: the finalizeOnExit defer must
+	// capture the named return `err`, and the defer installation
+	// is the meaningful side effect — extracting it would require
+	// returning a deferred-callable that the caller invokes, which
+	// is less clear than keeping the block here.
+	var worktreeCleanup func()
+	var wtCtx worktreeContext
+	worktreeActive := false
+	if e.workflow.Worktree == "auto" {
+		wtc, cleanup, wtErr := setupWorktree(e.store.Root(), runID, e.workDir, e.logger)
+		if wtErr != nil {
+			e.markFailedBestEffort(ctx, runID, "worktree setup", wtErr)
+			return fmt.Errorf("runtime: worktree setup: %w", wtErr)
+		}
+		e.workDir = wtc.wtPath
+		worktreeCleanup = cleanup
+		wtCtx = wtc
+		worktreeActive = true
+		// Cover every exit path from this point on. Without this defer,
+		// failures in subsequent setup would return without finalize and
+		// leak the worktree dir + orphan any commits the partial run
+		// produced. finalizeOnExit short-circuits on error (preserves
+		// worktree for inspection, skips FF) so a single defer covers
+		// both happy and error paths uniformly.
+		defer func() {
+			e.finalizeOnExit(ctx, runID, &wtCtx, worktreeCleanup, err)
+		}()
+	}
+
+	if err := e.runPersistWorkspace(ctx, runID, run, worktreeActive, wtCtx); err != nil {
+		return err
+	}
+
+	// Sandbox lifecycle: when the workflow opts in, start a long-lived
+	// container that hosts every delegate invocation for this run.
+	repoRoot := wtCtx.repoRoot
+	if repoRoot == "" {
+		repoRoot = engineRepoRoot(e.workDir)
+	}
+	sandboxCleanup, sbErr := e.startSandbox(ctx, runID, repoRoot)
+	if sbErr != nil {
+		e.markFailedBestEffort(ctx, runID, "sandbox start", sbErr)
+		return fmt.Errorf("runtime: sandbox: %w", sbErr)
+	}
+	defer sandboxCleanup()
+
+	if err := e.emit(ctx, runID, store.EventRunStarted, "", nil); err != nil {
+		e.markFailedBestEffort(ctx, runID, "emit run_started", err)
+		return fmt.Errorf("runtime: emit run_started: %w", err)
+	}
+
+	rs := e.runInitState(ctx, runID, inputs)
+
+	loopErr := e.execLoop(ctx, rs, e.workflow.Entry)
+	e.evictRunSessions(runID, loopErr)
+
+	return loopErr
+}
+
+// runResolveDoc loads-or-creates the run doc, transitioning a queued
+// row to running for cloud-pickup or rejecting an already-terminal
+// run, then stamps any engine-level metadata (workflow hash, file
+// path, run name, merge strategy, auto-merge, preset, bundle hash)
+// onto the persisted record.
+func (e *Engine) runResolveDoc(ctx context.Context, runID string, inputs map[string]interface{}) (*store.Run, error) {
 	var run *store.Run
 	if existing, loadErr := e.store.LoadRun(ctx, runID); loadErr == nil {
 		// Pickup path: the doc already exists.
@@ -462,13 +544,13 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 		switch existing.Status {
 		case store.RunStatusQueued:
 			if err := e.store.UpdateRunStatus(ctx, runID, store.RunStatusRunning, ""); err != nil {
-				return fmt.Errorf("runtime: pickup transition: %w", err)
+				return nil, fmt.Errorf("runtime: pickup transition: %w", err)
 			}
 			existing.Status = store.RunStatusRunning
 		case store.RunStatusRunning:
 			// Already running — assume legitimate claim.
 		default:
-			return fmt.Errorf("runtime: run %s already in status %s, refusing to restart", runID, existing.Status)
+			return nil, fmt.Errorf("runtime: run %s already in status %s, refusing to restart", runID, existing.Status)
 		}
 		if len(inputs) > 0 {
 			existing.Inputs = inputs
@@ -479,11 +561,11 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 		// (InsertOne) so a parallel pickup would lose this race —
 		// acceptable: the only callers here are the CLI and tests, both
 		// single-writer.
-		var err error
-		run, err = e.store.CreateRun(ctx, runID, e.workflow.Name, inputs)
+		created, err := e.store.CreateRun(ctx, runID, e.workflow.Name, inputs)
 		if err != nil {
-			return fmt.Errorf("runtime: create run: %w", err)
+			return nil, fmt.Errorf("runtime: create run: %w", err)
 		}
+		run = created
 	}
 	if e.workflowHash != "" || e.filePath != "" || e.runName != "" || e.mergeStrategy != "" || e.autoMerge || e.preset != "" || e.bundle != nil {
 		if e.workflowHash != "" {
@@ -507,72 +589,39 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 			run.BundlePath = e.bundle.SourcePath
 		}
 		if err := e.store.SaveRun(ctx, run); err != nil {
-			return fmt.Errorf("runtime: save run metadata: %w", err)
+			return nil, fmt.Errorf("runtime: save run metadata: %w", err)
 		}
 	}
+	return run, nil
+}
 
-	// Bundle attachment defaults land first so any runtime upload
-	// processed by attachmentPromote below overwrites them.
+// runPromoteAttachments materialises bundle attachment defaults, then
+// runs the optional attachmentPromote callback, then reloads the run
+// so the caller's next SaveRun does not clobber Run.Attachments (the
+// promote writes directly to the store; the in-memory copy is now
+// stale). On error, marks the run failed best-effort before returning.
+func (e *Engine) runPromoteAttachments(ctx context.Context, runID string, run *store.Run) (*store.Run, error) {
 	if err := promoteBundleAttachmentDefaults(ctx, e.store, runID, e.workflow, e.bundle, e.logger); err != nil {
 		e.markFailedBestEffort(ctx, runID, "bundle attachment defaults", err)
-		return fmt.Errorf("runtime: bundle attachment defaults: %w", err)
+		return nil, fmt.Errorf("runtime: bundle attachment defaults: %w", err)
 	}
-
-	// Reload `run` after the promote callback so the next SaveRun
-	// below doesn't clobber Run.Attachments (the promote writes
-	// directly to the store; our local `run` is now stale).
 	if e.attachmentPromote != nil {
 		if err := e.attachmentPromote(ctx, runID); err != nil {
 			e.markFailedBestEffort(ctx, runID, "attachment promote", err)
-			return fmt.Errorf("runtime: promote attachments: %w", err)
+			return nil, fmt.Errorf("runtime: promote attachments: %w", err)
 		}
 	}
 	if reloaded, err := e.store.LoadRun(ctx, runID); err == nil {
-		run = reloaded
+		return reloaded, nil
 	}
+	return run, nil
+}
 
-	// Default workDir to process cwd if not set explicitly.
-	if e.workDir == "" {
-		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
-			e.workDir = cwd
-		}
-	}
-
-	// Worktree setup: when the workflow opts in with `worktree: auto`,
-	// create a fresh git worktree for this run so all node executions
-	// happen in an isolated checkout. The user's main working tree
-	// (with WIP, build artefacts, etc.) is invisible by construction.
-	var worktreeCleanup func()
-	var wtCtx worktreeContext
-	worktreeActive := false
-	if e.workflow.Worktree == "auto" {
-		wtc, cleanup, wtErr := setupWorktree(e.store.Root(), runID, e.workDir, e.logger)
-		if wtErr != nil {
-			e.markFailedBestEffort(ctx, runID, "worktree setup", wtErr)
-			return fmt.Errorf("runtime: worktree setup: %w", wtErr)
-		}
-		e.workDir = wtc.wtPath
-		worktreeCleanup = cleanup
-		wtCtx = wtc
-		worktreeActive = true
-		// Cover every exit path from this point on. Without this defer,
-		// failures in mirrorBundleSkills / startSandbox / emit /
-		// SaveRun(workDir) would return without finalize and leak the
-		// worktree dir + orphan any commits the partial run produced.
-		// finalizeOnExit short-circuits on error (preserves worktree for
-		// inspection, skips FF) so a single defer covers both happy and
-		// error paths uniformly.
-		defer func() {
-			e.finalizeOnExit(ctx, runID, &wtCtx, worktreeCleanup, err)
-		}()
-	}
-
-	// Persist the resolved working directory so studio surfaces (modified-
-	// files panel) can locate it without re-deriving it. Done after worktree
-	// setup so e.workDir reflects the per-run worktree path when applicable.
-	// For worktree-active runs we also stash the baseline (RepoRoot +
-	// BaseCommit) so the modified-files panel can render a historical diff
-	// against FinalCommit after the worktree directory has been torn down.
+// runPersistWorkspace persists the resolved workDir + worktree baseline
+// onto the run record, pushes workDir into the executor (when the
+// concrete executor implements SetWorkDir), and mirrors any bundle
+// skills into the workspace's .claude/skills/ directory.
+func (e *Engine) runPersistWorkspace(ctx context.Context, runID string, run *store.Run, worktreeActive bool, wtCtx worktreeContext) error {
 	if e.workDir != "" {
 		run.WorkDir = e.workDir
 		run.Worktree = e.workflow.Worktree == "auto"
@@ -585,7 +634,6 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 			return fmt.Errorf("runtime: save work dir: %w", err)
 		}
 	}
-
 	// Push workDir into the executor so backend subprocesses (claude_code,
 	// codex) and tool nodes see it. Type-assert because NodeExecutor is a
 	// minimal interface; only ClawExecutor implements SetWorkDir.
@@ -593,7 +641,6 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 	if s, ok := e.executor.(workDirSetter); ok {
 		s.SetWorkDir(e.workDir)
 	}
-
 	// Bundle skill mirroring: when a .botz backs this run, copy the
 	// bundle's skills/ entries into <workDir>/.claude/skills/ so both
 	// claude_code's native skill lookup and the claw `skill` tool
@@ -603,53 +650,27 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 		e.markFailedBestEffort(ctx, runID, "bundle skills", err)
 		return fmt.Errorf("runtime: bundle skills: %w", err)
 	}
+	return nil
+}
 
-	// Sandbox lifecycle: when the workflow opts in, start a long-lived
-	// container that hosts every delegate invocation for this run.
-	// startSandbox handles the workflow/global/CLI resolution, executor
-	// wiring, and containerWorkspace stash so resumes can share the
-	// exact same path.
-	repoRoot := wtCtx.repoRoot
-	if repoRoot == "" {
-		repoRoot = engineRepoRoot(e.workDir)
-	}
-	sandboxCleanup, sbErr := e.startSandbox(ctx, runID, repoRoot)
-	if sbErr != nil {
-		e.markFailedBestEffort(ctx, runID, "sandbox start", sbErr)
-		return fmt.Errorf("runtime: sandbox: %w", sbErr)
-	}
-	defer sandboxCleanup()
-
-	// Emit run_started.
-	if err := e.emit(ctx, runID, store.EventRunStarted, "", nil); err != nil {
-		e.markFailedBestEffort(ctx, runID, "emit run_started", err)
-		return fmt.Errorf("runtime: emit run_started: %w", err)
-	}
-
+// runInitState constructs the per-run runState, resolves vars,
+// loads attachments, caches the worktree flag (so per-node snapshot
+// decisions don't re-read run.json N times), and pushes the resolved
+// vars back into the executor — PROJECT_DIR-aware expansion may have
+// changed values from what the caller originally seeded.
+func (e *Engine) runInitState(ctx context.Context, runID string, inputs map[string]interface{}) *runState {
 	rs := e.newRunState(runID, inputs)
 	rs.ctx = ctx
 	rs.vars = e.resolveVars(inputs)
 	rs.attachments = e.loadAttachmentInfos(ctx, runID)
-	// Cache the worktree flag once so per-node snapshot decisions
-	// don't re-read run.json N times.
 	if r, err := e.store.LoadRun(ctx, runID); err == nil && r != nil {
 		rs.isWorktree = r.Worktree
 	}
-
-	// Refresh executor vars: PROJECT_DIR-aware expansion may have changed
-	// values from what the CLI/server originally seeded.
 	type varsSetter interface{ SetVars(map[string]interface{}) }
 	if sv, ok := e.executor.(varsSetter); ok {
 		sv.SetVars(rs.vars)
 	}
-
-	loopErr := e.execLoop(ctx, rs, e.workflow.Entry)
-	e.evictRunSessions(runID, loopErr)
-
-	// Worktree finalization runs via the defer installed right after
-	// setupWorktree above — covers both this happy-path return and any
-	// setup-phase early returns.
-	return loopErr
+	return rs
 }
 
 // finalizeOnExit applies the worktree-finalization step at the end of a
@@ -782,270 +803,298 @@ func (e *Engine) execLoop(ctx context.Context, rs *runState, startNodeID string)
 				fmt.Sprintf("node %q not found", currentNodeID))
 		}
 
-		// --- Terminal nodes ---
-		switch node.(type) {
-		case *ir.DoneNode:
-			if err := e.emitTerminalNodeEvents(rs, currentNodeID); err != nil {
+		handled, terminate, next, err := e.execLoopDispatchSpecial(ctx, rs, currentNodeID, node)
+		if handled {
+			if terminate {
 				return err
 			}
-			// Best-effort status flip — the run logically succeeded the
-			// moment we reached DoneNode, so a transient store-side
-			// failure on the final status write must not flip a
-			// successful run to "failed" (which would also skip
-			// worktree finalize and orphan any commits the run
-			// produced). Log and continue; run_finished still fires
-			// below so observers see the terminal event.
-			if err := e.store.UpdateRunStatus(rs.ctx, rs.runID, store.RunStatusFinished, ""); err != nil && e.logger != nil {
-				e.logger.Warn("runtime: failed to persist run %s as finished: %v (run reached DoneNode — treating as success)", rs.runID, err)
-			}
-			return e.emit(rs.ctx, rs.runID, store.EventRunFinished, "", nil)
-		case *ir.FailNode:
-			if err := e.emitTerminalNodeEvents(rs, currentNodeID); err != nil {
-				return err
-			}
-			return e.failRun(rs.ctx, rs.runID, currentNodeID, "workflow reached fail node")
-		default:
-			// non-terminal — continue below
-		}
-
-		// --- Human node ---
-		if hn, ok := node.(*ir.HumanNode); ok {
-			switch hn.Interaction {
-			case ir.InteractionLLM:
-				// Intentional fall-through: LLM interaction human nodes are
-				// executed via the standard node path below (emit started →
-				// budget check → executor.Execute → store output → emit
-				// finished → select edge). The executor dispatches to
-				// executeHumanLLM which handles model resolution and schema.
-			case ir.InteractionLLMOrHuman:
-				paused, err := e.execAutoOrPauseHuman(ctx, rs, currentNodeID, node)
-				if err != nil {
-					return err
-				}
-				if paused {
-					return ErrRunPaused
-				}
-				// LLM decided no human needed — continue to edge selection.
-				nextNodeID, err := e.selectEdgeRS(rs, currentNodeID, rs.outputs[currentNodeID])
-				if err != nil {
-					return e.failRunErrWithCheckpoint(rs, currentNodeID, err)
-				}
-				currentNodeID = nextNodeID
-				continue
-			default:
-				// InteractionHuman (default) and InteractionNone both pause.
-				return e.pauseAtHuman(rs, currentNodeID, node)
-			}
-		}
-
-		// --- Router nodes ---
-		if rn, ok := node.(*ir.RouterNode); ok {
-			switch rn.RouterMode {
-			case ir.RouterFanOutAll:
-				nextNodeID, err := e.execFanOut(ctx, rs, currentNodeID)
-				if err != nil {
-					return e.failRunErrWithCheckpoint(rs, currentNodeID, err)
-				}
-				currentNodeID = nextNodeID
-				continue
-			case ir.RouterRoundRobin:
-				nextNodeID, err := e.execRoundRobin(ctx, rs, currentNodeID)
-				if err != nil {
-					return e.failRunErrWithCheckpoint(rs, currentNodeID, err)
-				}
-				currentNodeID = nextNodeID
-				continue
-			case ir.RouterLLM:
-				nextNodeID, err := e.execLLMRouter(ctx, rs, currentNodeID)
-				if err != nil {
-					return e.failRunErrWithCheckpoint(rs, currentNodeID, err)
-				}
-				currentNodeID = nextNodeID
-				continue
-			}
-			// RouterCondition falls through to normal execution path.
-		}
-
-		// --- Compute nodes execute deterministically inside the engine ---
-		// (no LLM, no shell-out). Keep this path before emitting node_started
-		// so it shares the same envelope as other nodes.
-		if cn, ok := node.(*ir.ComputeNode); ok {
-			nextNodeID, err := e.execCompute(rs, currentNodeID, cn)
-			if err != nil {
-				return e.failRunErrWithCheckpoint(rs, currentNodeID, err)
-			}
-			currentNodeID = nextNodeID
+			currentNodeID = next
 			continue
 		}
 
-		// --- Emit node_started ---
-		// Compute the loop iteration once so the event payload and the
-		// executor's Task.Iteration agree. The frontend uses
-		// data.iteration as the source of truth for the pip-strip UI,
-		// but the reducer keys exec_id on data.iteration_path because a
-		// single int collapses nested-loop executions onto the same id
-		// (observed live: solo body nodes were stuck on the family_loop
-		// counter so every package's validate_upgrade collided on
-		// iter=5 → canvas showed nothing as running across 5+ pkgs).
-		iter := e.currentLoopIteration(currentNodeID, rs.loopCounters)
-		iterPath := e.currentLoopIterationPath(currentNodeID, rs.loopCounters)
-		payload := map[string]interface{}{
-			"kind":      node.NodeKind().String(),
-			"iteration": iter,
-		}
-		if iterPath != "" {
-			payload["iteration_path"] = iterPath
-		}
-		if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, currentNodeID, payload); err != nil {
-			return err
-		}
-
-		// --- Check budget before execution ---
-		if err := e.checkBudgetBeforeExec(rs, currentNodeID); err != nil {
-			return err
-		}
-
-		// --- Build node input from edge mappings ---
-		nodeInput := e.buildNodeInputRS(currentNodeID, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
-
-		// Fork rehydration: when resumeFromFailure pinned a backend
-		// conversation / session id at currentNodeID, inject the
-		// matching keys into the input map for THIS first execution
-		// only. Cleared after injection so a loop iteration of the
-		// same node doesn't keep replaying the parent's conversation.
-		// session_id flows via the same key SessionInherit nodes
-		// consume, so an inherit-mode forked node picks it up
-		// transparently. independent-mode nodes ignore the key.
-		if rs.resumeBackend.nodeID == currentNodeID {
-			if len(rs.resumeBackend.conversation) > 0 {
-				nodeInput[delegate.ResumeConversationKey] = rs.resumeBackend.conversation
-			}
-			if rs.resumeBackend.sessionID != "" {
-				nodeInput[delegate.SessionIDKey] = rs.resumeBackend.sessionID
-			}
-			rs.resumeBackend = resumeBackendState{}
-		}
-
-		// --- Execute node ---
-		// Thread the run ID into ctx so the executor can locate
-		// per-node session state (used by Compactor implementations
-		// to find the right messages list to compact + retry).
-		execCtx := model.WithRunID(ctx, rs.runID)
-		// Attach a template-data snapshot so the executor can resolve
-		// `outputs.*`, `loop.*`, `artifacts.*`, and `run.*` refs in
-		// prompt bodies. These namespaces complement the `input.*`
-		// fields populated by edge `with`-mappings and the workflow-
-		// level `vars.*`.
-		execCtx = model.WithTemplateData(execCtx, e.buildTemplateData(rs))
-		// Per-node span: inherits the runner-side or server-side root
-		// span via ctx (W3C trace propagated through NATS in cloud
-		// mode). Attributes mirror the node_started event payload so
-		// trace + event log stay aligned.
-		spanCtx, span := otel.Tracer(tracerName).Start(execCtx, "iterion.node.execute",
-			trace.WithAttributes(
-				attribute.String("iterion.run_id", rs.runID),
-				attribute.String("iterion.node_id", currentNodeID),
-				attribute.String("iterion.node_kind", node.NodeKind().String()),
-			),
-		)
-		spanCtx = model.WithLoopIteration(spanCtx, iter)
-		output, err := e.executor.Execute(spanCtx, node, nodeInput)
+		output, retry, err := e.execLoopRunNode(ctx, rs, currentNodeID, node)
 		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-		}
-		span.End()
-		if err != nil {
-			// Check if the delegate needs user interaction.
-			var needsInput *model.ErrNeedsInteraction
-			if errors.As(err, &needsInput) {
-				return e.handleNeedsInteraction(ctx, rs, currentNodeID, node, needsInput, 0)
-			}
-			// Recovery dispatch (when wired via WithRecoveryDispatch):
-			// classify the error, look up a recipe, and either retry,
-			// pause, or fail terminally. Without a dispatcher, every
-			// failure produces failed_resumable as before. The
-			// run-ID-enriched ctx is passed so Compact() can locate
-			// the per-node session.
-			retry, recoveryErr := e.handleNodeFailure(execCtx, rs, currentNodeID, err)
-			if recoveryErr != nil {
-				return recoveryErr
-			}
-			if retry {
-				continue
-			}
-			return e.failRunWithCheckpoint(rs, currentNodeID, fmt.Sprintf("node %q execution failed: %v", currentNodeID, err))
-		}
-
-		// Reset per-node retry counters on success so a future failure
-		// starts fresh.
-		delete(rs.nodeAttempts, currentNodeID)
-
-		// Store output.
-		rs.outputs[currentNodeID] = output
-
-		// Validate output against declared schema (optional).
-		if err := e.validateNodeOutput(currentNodeID, node, output); err != nil {
-			return e.failRunErrWithCheckpoint(rs, currentNodeID, err)
-		}
-
-		// Record budget usage and check limits.
-		if err := e.recordAndCheckBudget(rs, currentNodeID, output); err != nil {
 			return err
 		}
-
-		// Persist artifact if node has publish.
-		if pub := nodePublish(node); pub != "" {
-			version := rs.artifactVersions[currentNodeID]
-			artifact := &store.Artifact{
-				RunID:   rs.runID,
-				NodeID:  currentNodeID,
-				Version: version,
-				Data:    output,
-			}
-			if err := e.store.WriteArtifact(ctx, artifact); err != nil {
-				return fmt.Errorf("runtime: write artifact: %w", err)
-			}
-			rs.artifactVersions[currentNodeID] = version + 1
-			rs.artifacts[pub] = output
-
-			if err := e.emit(rs.ctx, rs.runID, store.EventArtifactWritten, currentNodeID, map[string]interface{}{
-				"publish": pub,
-				"version": version,
-			}); err != nil {
-				return fmt.Errorf("runtime: artifact written but event emission failed (state inconsistency): %w", err)
-			}
+		if retry {
+			continue
 		}
 
-		// --- Emit node_finished with usage data ---
-		nodeFinishedData := buildNodeFinishedData(sanitizeOutputForEvent(node, output))
-		if err := e.emit(rs.ctx, rs.runID, store.EventNodeFinished, currentNodeID, nodeFinishedData); err != nil {
+		nextNodeID, err := e.execLoopAfterExec(ctx, rs, currentNodeID, node, output)
+		if err != nil {
 			return err
 		}
-		if e.onNodeFinished != nil {
-			e.onNodeFinished(currentNodeID, output)
-		}
-
-		// Best-effort checkpoint for resume-from-failed.
-		if err := e.store.SaveCheckpoint(rs.ctx, rs.runID, buildCheckpoint(rs, currentNodeID)); err != nil {
-			e.logger.Error("failed to save checkpoint after node %q: %v", currentNodeID, err)
-		}
-
-		// Phase 2: snapshot the worktree at this node boundary so the
-		// Fork API's rewind_code=true mode has an anchor to git reset
-		// back to. Best-effort — a failure logs at warn and continues
-		// (the rest of the run is unaffected, the only loss is the
-		// fork-rewind capability for THIS node).
-		e.snapshotAtNodeBoundary(rs, currentNodeID)
-
-		// --- Select outgoing edge ---
-		nextNodeID, err := e.selectEdgeRS(rs, currentNodeID, output)
-		if err != nil {
-			return e.failRunErrWithCheckpoint(rs, currentNodeID, err)
-		}
-
 		currentNodeID = nextNodeID
 	}
+}
+
+// execLoopDispatchSpecial handles terminal (Done/Fail), Human, Router,
+// and Compute nodes that don't follow the standard
+// emit-started → executor.Execute → emit-finished pipeline.
+//
+// Return tuple (handled, terminate, next, err):
+//   - handled=false: caller falls through to standard execution
+//     (LLM-mode human, RouterCondition, or genuinely non-special node).
+//   - handled=true && terminate=true: caller returns `err` from execLoop
+//     (terminal Done/Fail, pause, or fatal dispatch error).
+//   - handled=true && terminate=false: caller continues the loop with
+//     currentNodeID = `next` (router/compute advance, LLM-or-Human
+//     auto-answered then advanced).
+func (e *Engine) execLoopDispatchSpecial(ctx context.Context, rs *runState, currentNodeID string, node ir.Node) (handled, terminate bool, next string, err error) {
+	switch n := node.(type) {
+	case *ir.DoneNode:
+		if emErr := e.emitTerminalNodeEvents(rs, currentNodeID); emErr != nil {
+			return true, true, "", emErr
+		}
+		// Best-effort status flip — the run logically succeeded the
+		// moment we reached DoneNode, so a transient store-side
+		// failure on the final status write must not flip a
+		// successful run to "failed" (which would also skip
+		// worktree finalize and orphan any commits the run
+		// produced). Log and continue; run_finished still fires
+		// below so observers see the terminal event.
+		if usErr := e.store.UpdateRunStatus(rs.ctx, rs.runID, store.RunStatusFinished, ""); usErr != nil && e.logger != nil {
+			e.logger.Warn("runtime: failed to persist run %s as finished: %v (run reached DoneNode — treating as success)", rs.runID, usErr)
+		}
+		return true, true, "", e.emit(rs.ctx, rs.runID, store.EventRunFinished, "", nil)
+
+	case *ir.FailNode:
+		if emErr := e.emitTerminalNodeEvents(rs, currentNodeID); emErr != nil {
+			return true, true, "", emErr
+		}
+		return true, true, "", e.failRun(rs.ctx, rs.runID, currentNodeID, "workflow reached fail node")
+
+	case *ir.HumanNode:
+		switch n.Interaction {
+		case ir.InteractionLLM:
+			// LLM interaction human nodes execute via the standard
+			// pipeline below (executeHumanLLM handles model + schema).
+			return false, false, "", nil
+		case ir.InteractionLLMOrHuman:
+			paused, autoErr := e.execAutoOrPauseHuman(ctx, rs, currentNodeID, node)
+			if autoErr != nil {
+				return true, true, "", autoErr
+			}
+			if paused {
+				return true, true, "", ErrRunPaused
+			}
+			// LLM decided no human needed — continue to edge selection.
+			nextNodeID, edgeErr := e.selectEdgeRS(rs, currentNodeID, rs.outputs[currentNodeID])
+			if edgeErr != nil {
+				return true, true, "", e.failRunErrWithCheckpoint(rs, currentNodeID, edgeErr)
+			}
+			return true, false, nextNodeID, nil
+		default:
+			// InteractionHuman (default) and InteractionNone both pause.
+			return true, true, "", e.pauseAtHuman(rs, currentNodeID, node)
+		}
+
+	case *ir.RouterNode:
+		switch n.RouterMode {
+		case ir.RouterFanOutAll:
+			nextNodeID, fErr := e.execFanOut(ctx, rs, currentNodeID)
+			if fErr != nil {
+				return true, true, "", e.failRunErrWithCheckpoint(rs, currentNodeID, fErr)
+			}
+			return true, false, nextNodeID, nil
+		case ir.RouterRoundRobin:
+			nextNodeID, rrErr := e.execRoundRobin(ctx, rs, currentNodeID)
+			if rrErr != nil {
+				return true, true, "", e.failRunErrWithCheckpoint(rs, currentNodeID, rrErr)
+			}
+			return true, false, nextNodeID, nil
+		case ir.RouterLLM:
+			nextNodeID, lErr := e.execLLMRouter(ctx, rs, currentNodeID)
+			if lErr != nil {
+				return true, true, "", e.failRunErrWithCheckpoint(rs, currentNodeID, lErr)
+			}
+			return true, false, nextNodeID, nil
+		}
+		// RouterCondition falls through to standard execution.
+		return false, false, "", nil
+
+	case *ir.ComputeNode:
+		nextNodeID, cErr := e.execCompute(rs, currentNodeID, n)
+		if cErr != nil {
+			return true, true, "", e.failRunErrWithCheckpoint(rs, currentNodeID, cErr)
+		}
+		return true, false, nextNodeID, nil
+	}
+
+	return false, false, "", nil
+}
+
+// execLoopRunNode runs the standard non-special node pipeline: emit
+// node_started, check budget, build node input (with fork-rehydration
+// when applicable), invoke executor.Execute under a per-node span, and
+// route any error through ErrNeedsInteraction / handleNodeFailure. On
+// retry=true the caller `continue`s the loop without advancing; on
+// retry=false + err==nil the output is returned for downstream
+// persistence in execLoopAfterExec.
+func (e *Engine) execLoopRunNode(ctx context.Context, rs *runState, currentNodeID string, node ir.Node) (map[string]interface{}, bool, error) {
+	// Compute the loop iteration once so the event payload and the
+	// executor's Task.Iteration agree. The frontend uses
+	// data.iteration as the source of truth for the pip-strip UI,
+	// but the reducer keys exec_id on data.iteration_path because a
+	// single int collapses nested-loop executions onto the same id
+	// (observed live: solo body nodes were stuck on the family_loop
+	// counter so every package's validate_upgrade collided on
+	// iter=5 → canvas showed nothing as running across 5+ pkgs).
+	iter := e.currentLoopIteration(currentNodeID, rs.loopCounters)
+	iterPath := e.currentLoopIterationPath(currentNodeID, rs.loopCounters)
+	payload := map[string]interface{}{
+		"kind":      node.NodeKind().String(),
+		"iteration": iter,
+	}
+	if iterPath != "" {
+		payload["iteration_path"] = iterPath
+	}
+	if err := e.emit(rs.ctx, rs.runID, store.EventNodeStarted, currentNodeID, payload); err != nil {
+		return nil, false, err
+	}
+
+	if err := e.checkBudgetBeforeExec(rs, currentNodeID); err != nil {
+		return nil, false, err
+	}
+
+	nodeInput := e.buildNodeInputRS(currentNodeID, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
+
+	// Fork rehydration: when resumeFromFailure pinned a backend
+	// conversation / session id at currentNodeID, inject the matching
+	// keys into the input map for THIS first execution only. Cleared
+	// after injection so a loop iteration of the same node doesn't keep
+	// replaying the parent's conversation. session_id flows via the
+	// same key SessionInherit nodes consume, so an inherit-mode forked
+	// node picks it up transparently; independent-mode nodes ignore.
+	if rs.resumeBackend.nodeID == currentNodeID {
+		if len(rs.resumeBackend.conversation) > 0 {
+			nodeInput[delegate.ResumeConversationKey] = rs.resumeBackend.conversation
+		}
+		if rs.resumeBackend.sessionID != "" {
+			nodeInput[delegate.SessionIDKey] = rs.resumeBackend.sessionID
+		}
+		rs.resumeBackend = resumeBackendState{}
+	}
+
+	// Thread the run ID into ctx so the executor can locate per-node
+	// session state (used by Compactor implementations to find the
+	// right messages list to compact + retry). Also attach a
+	// template-data snapshot so the executor can resolve `outputs.*`,
+	// `loop.*`, `artifacts.*`, and `run.*` refs in prompt bodies.
+	execCtx := model.WithRunID(ctx, rs.runID)
+	execCtx = model.WithTemplateData(execCtx, e.buildTemplateData(rs))
+	// Per-node span: inherits the runner-side or server-side root
+	// span via ctx (W3C trace propagated through NATS in cloud mode).
+	spanCtx, span := otel.Tracer(tracerName).Start(execCtx, "iterion.node.execute",
+		trace.WithAttributes(
+			attribute.String("iterion.run_id", rs.runID),
+			attribute.String("iterion.node_id", currentNodeID),
+			attribute.String("iterion.node_kind", node.NodeKind().String()),
+		),
+	)
+	spanCtx = model.WithLoopIteration(spanCtx, iter)
+	output, execErr := e.executor.Execute(spanCtx, node, nodeInput)
+	if execErr != nil {
+		span.RecordError(execErr)
+		span.SetStatus(codes.Error, execErr.Error())
+	}
+	span.End()
+	if execErr != nil {
+		// Check if the delegate needs user interaction.
+		var needsInput *model.ErrNeedsInteraction
+		if errors.As(execErr, &needsInput) {
+			return nil, false, e.handleNeedsInteraction(ctx, rs, currentNodeID, node, needsInput, 0)
+		}
+		// Recovery dispatch (when wired via WithRecoveryDispatch):
+		// classify the error, look up a recipe, and either retry,
+		// pause, or fail terminally. Without a dispatcher, every
+		// failure produces failed_resumable as before. The run-ID-
+		// enriched ctx is passed so Compact() can locate the per-
+		// node session.
+		retry, recoveryErr := e.handleNodeFailure(execCtx, rs, currentNodeID, execErr)
+		if recoveryErr != nil {
+			return nil, false, recoveryErr
+		}
+		if retry {
+			return nil, true, nil
+		}
+		return nil, false, e.failRunWithCheckpoint(rs, currentNodeID, fmt.Sprintf("node %q execution failed: %v", currentNodeID, execErr))
+	}
+
+	// Reset per-node retry counters on success so a future failure
+	// starts fresh.
+	delete(rs.nodeAttempts, currentNodeID)
+	return output, false, nil
+}
+
+// execLoopAfterExec runs the post-execution pipeline for a node:
+// stores output in runState, validates against the declared schema,
+// records budget usage, persists any `publish:` artifact, emits
+// node_finished + onNodeFinished hook, saves a checkpoint (best-
+// effort), snapshots the worktree at the node boundary, and selects
+// the outgoing edge. Returns the next node ID.
+func (e *Engine) execLoopAfterExec(ctx context.Context, rs *runState, currentNodeID string, node ir.Node, output map[string]interface{}) (string, error) {
+	rs.outputs[currentNodeID] = output
+
+	// Validate output against declared schema (optional).
+	if err := e.validateNodeOutput(currentNodeID, node, output); err != nil {
+		return "", e.failRunErrWithCheckpoint(rs, currentNodeID, err)
+	}
+
+	// Record budget usage and check limits.
+	if err := e.recordAndCheckBudget(rs, currentNodeID, output); err != nil {
+		return "", err
+	}
+
+	// Persist artifact if node has publish.
+	if pub := nodePublish(node); pub != "" {
+		version := rs.artifactVersions[currentNodeID]
+		artifact := &store.Artifact{
+			RunID:   rs.runID,
+			NodeID:  currentNodeID,
+			Version: version,
+			Data:    output,
+		}
+		if err := e.store.WriteArtifact(ctx, artifact); err != nil {
+			return "", fmt.Errorf("runtime: write artifact: %w", err)
+		}
+		rs.artifactVersions[currentNodeID] = version + 1
+		rs.artifacts[pub] = output
+
+		if err := e.emit(rs.ctx, rs.runID, store.EventArtifactWritten, currentNodeID, map[string]interface{}{
+			"publish": pub,
+			"version": version,
+		}); err != nil {
+			return "", fmt.Errorf("runtime: artifact written but event emission failed (state inconsistency): %w", err)
+		}
+	}
+
+	// Emit node_finished with usage data.
+	nodeFinishedData := buildNodeFinishedData(sanitizeOutputForEvent(node, output))
+	if err := e.emit(rs.ctx, rs.runID, store.EventNodeFinished, currentNodeID, nodeFinishedData); err != nil {
+		return "", err
+	}
+	if e.onNodeFinished != nil {
+		e.onNodeFinished(currentNodeID, output)
+	}
+
+	// Best-effort checkpoint for resume-from-failed.
+	if err := e.store.SaveCheckpoint(rs.ctx, rs.runID, buildCheckpoint(rs, currentNodeID)); err != nil {
+		e.logger.Error("failed to save checkpoint after node %q: %v", currentNodeID, err)
+	}
+
+	// Phase 2: snapshot the worktree at this node boundary so the
+	// Fork API's rewind_code=true mode has an anchor to git reset
+	// back to. Best-effort — a failure logs at warn and continues
+	// (the rest of the run is unaffected, the only loss is the
+	// fork-rewind capability for THIS node).
+	e.snapshotAtNodeBoundary(rs, currentNodeID)
+
+	nextNodeID, err := e.selectEdgeRS(rs, currentNodeID, output)
+	if err != nil {
+		return "", e.failRunErrWithCheckpoint(rs, currentNodeID, err)
+	}
+	return nextNodeID, nil
 }
 
 // snapshotAtNodeBoundary records a per-node git snapshot when the run
