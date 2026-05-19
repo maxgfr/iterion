@@ -141,8 +141,21 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	runID := p.RunID
 	friendlyName := p.FriendlyName
 	workspacePath := p.WorkspacePath
-	emitEvent := p.EmitEvent
 	logger := p.Logger
+	// Wrap the raw emitter so every callsite that discards the error
+	// (sandbox lifecycle and build events are not load-bearing for
+	// engine correctness) still surfaces store-side failures at warn
+	// level — otherwise a degraded store silently drops
+	// sandbox_build_failed / sandbox_started and the operator has no
+	// signal that the run is unobservable.
+	rawEmit := p.EmitEvent
+	emitEvent := func(ev store.EventType, payload map[string]interface{}) error {
+		err := rawEmit(ev, payload)
+		if err != nil && logger != nil {
+			logger.Warn("runtime: emit %s event for run %s: %v", ev, runID, err)
+		}
+		return err
+	}
 	spec, source, err := resolveSandboxSpec(wf, p.RepoRoot, p.CLIOverride, p.GlobalDefault, resolveDefaultSandboxImage(p.DefaultImage))
 	if err != nil {
 		return nil, err
