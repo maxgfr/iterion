@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -27,16 +29,6 @@ import (
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
-
-// sortedKeys returns the keys of a map sorted alphabetically.
-func sortedKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
 
 // RunOptions holds the configuration for the run command.
 type RunOptions struct {
@@ -615,7 +607,7 @@ func printPausedQuestions(p *Printer, result map[string]interface{}) {
 	if !ok || len(q) == 0 {
 		return
 	}
-	keys := sortedKeys(q)
+	keys := slices.Sorted(maps.Keys(q))
 	p.Line("  Questions:")
 	for _, k := range keys {
 		p.Line("    %s: %v", k, q[k])
