@@ -82,14 +82,17 @@ export default function RunsTabsView() {
         icon={() => <PlayIcon className="w-3.5 h-3.5 shrink-0" />}
       />
       <div className="flex-1 min-h-0 relative">
-        <div
-          className={`absolute inset-0 ${pinnedActive ? "block" : "hidden"}`}
-          aria-hidden={pinnedActive ? undefined : true}
-        >
-          <Suspense fallback={<MainSpinner />}>
-            <RunListView />
-          </Suspense>
-        </div>
+        {/* RunListView owns its own URL-sync effect that always
+            normalises to /runs?…filters; mounting it while a run
+            tab is active would force a redirect back to the list.
+            Mount only when the pinned "All runs" lead is active. */}
+        {pinnedActive && (
+          <div className="absolute inset-0">
+            <Suspense fallback={<MainSpinner />}>
+              <RunListView />
+            </Suspense>
+          </div>
+        )}
         {tabs.filter((t) => t.hydrated).map((tab) => {
           const runId = tab.params.runId;
           if (!runId) return null;
