@@ -254,7 +254,7 @@ func defaultCacheRoot() (string, error) {
 // the cache has been GC'd between runs.
 func writeLock(dir, fullHash, source string) error {
 	body := fmt.Sprintf("hash: %s\nsource: %s\n", fullHash, source)
-	return os.WriteFile(filepath.Join(dir, "bundle.lock"), []byte(body), 0o644)
+	return os.WriteFile(filepath.Join(dir, "bundle.lock"), []byte(body), 0o600)
 }
 
 func touch(path string) error {
