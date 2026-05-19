@@ -729,14 +729,14 @@ func ParseExecutionID(id string) (branch, nodeID string, iteration int, err erro
 
 func headerFromRun(r *store.Run) RunHeader {
 	h := RunHeader{
-		ID:            r.ID,
-		Name:          r.Name,
-		WorkflowName:  r.WorkflowName,
-		WorkflowHash:  r.WorkflowHash,
-		FilePath:      r.FilePath,
-		Status:        r.Status,
-		Inputs:        r.Inputs,
-		CreatedAt:     r.CreatedAt,
+		ID:               r.ID,
+		Name:             r.Name,
+		WorkflowName:     r.WorkflowName,
+		WorkflowHash:     r.WorkflowHash,
+		FilePath:         r.FilePath,
+		Status:           r.Status,
+		Inputs:           r.Inputs,
+		CreatedAt:        r.CreatedAt,
 		UpdatedAt:        r.UpdatedAt,
 		FinishedAt:       r.FinishedAt,
 		Error:            r.Error,

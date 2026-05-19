@@ -109,7 +109,7 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 
 	if opts.BranchName != "" {
 		if err := git.ValidateBranchName(opts.BranchName); err != nil {
-			return fmt.Errorf("--branch-name: %w", err)
+			return UserInputError(fmt.Errorf("--branch-name: %w", err))
 		}
 	}
 
