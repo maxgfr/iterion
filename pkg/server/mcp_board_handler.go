@@ -158,6 +158,7 @@ func (h *boardMCPHandler) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req mcpReq
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB cap on JSON-RPC payloads
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(&req); err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, mcpResp{
