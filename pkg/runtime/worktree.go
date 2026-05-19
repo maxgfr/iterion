@@ -167,6 +167,11 @@ type finalizeResult struct {
 	// FinalBranch is the persistent branch created on FinalCommit.
 	// Empty when no commits were produced (no branch needed).
 	FinalBranch string
+	// FinalBranchError is set when FinalCommit was produced but no
+	// persistent branch could be created on it. The studio renders
+	// this so the operator can recover the commits manually before
+	// reflog GC.
+	FinalBranchError string
 	// MergedInto is the branch the engine merged into. Empty when the
 	// merge was skipped (autoMerge=false), opted out, or failed.
 	MergedInto string
@@ -225,6 +230,7 @@ func finalizeWorktree(wc worktreeContext, opts finalizeOptions, logger *iterlog.
 		if logger != nil {
 			logger.Warn("runtime: finalize: refusing to create branch %q: %v — recover with: git branch <name> %s", branchName, err, finalSHA)
 		}
+		res.FinalBranchError = fmt.Sprintf("invalid branch name %q: %v (recover with: git branch <name> %s)", branchName, err, finalSHA)
 		return res
 	}
 
@@ -240,6 +246,7 @@ func finalizeWorktree(wc worktreeContext, opts finalizeOptions, logger *iterlog.
 			logger.Warn("runtime: finalize: could not create branch for %s — recover with: git branch <name> %s",
 				shortSHA(finalSHA), finalSHA)
 		}
+		res.FinalBranchError = fmt.Sprintf("git branch failed for %q (and suffixed variants) — recover with: git branch <name> %s", branchName, finalSHA)
 		return res
 	}
 	res.FinalBranch = finalName

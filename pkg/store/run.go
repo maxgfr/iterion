@@ -134,6 +134,12 @@ type Run struct {
 	// via launch params). Acts as a GC guard so the commits remain
 	// reachable after the worktree directory is removed.
 	FinalBranch string `json:"final_branch,omitempty" bson:"final_branch,omitempty"`
+	// FinalBranchError is non-empty when FinalCommit is set but
+	// finalizeWorktree could not create a persistent branch on it —
+	// the commits exist (reachable via reflog) but the GC guard is
+	// missing. The studio surfaces this so the operator can run
+	// `git branch <name> <FinalCommit>` before the reflog expires.
+	FinalBranchError string `json:"final_branch_error,omitempty" bson:"final_branch_error,omitempty"`
 	// MergedInto is the branch the engine fast-forwarded to FinalCommit
 	// after the run, or empty when the FF was skipped (dirty main,
 	// non-FF, branch divergence, opt-out, or detached HEAD at start).

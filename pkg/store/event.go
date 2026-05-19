@@ -197,6 +197,19 @@ const (
 	// queued (not-yet-delivered) message via DELETE /api/runs/{id}/
 	// queue-message/{msgId}.
 	EventUserMessageCancelled EventType = "user_message_cancelled"
+	// EventWorktreeBranchFailed fires when finalizeWorktree could not
+	// create the persistent storage branch for a worktree:auto run's
+	// commits (validation of a malformed default name, repeated
+	// "already exists" on the fallback variants, or git itself
+	// erroring). The commits remain reachable via reflog for the
+	// repository's default GC window. Data:
+	//   - sha: final commit SHA (use `git branch <name> <sha>` to recover)
+	//   - reason: short string identifying the failure mode
+	//     ("invalid_name", "git_branch_failed")
+	//   - branch: attempted branch name (the requested one or the
+	//     `iterion/run/<friendly>` default — empty when the attempted
+	//     name itself was the rejected input)
+	EventWorktreeBranchFailed EventType = "worktree_branch_failed"
 )
 
 // Event is a single timestamped fact persisted in events.jsonl.

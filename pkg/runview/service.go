@@ -125,13 +125,14 @@ type RunSummary struct {
 	// Worktree finalization summary (only populated for `worktree:
 	// auto` runs that reached a clean exit). See store.Run for the
 	// full semantics.
-	FinalCommit   string              `json:"final_commit,omitempty"`
-	FinalBranch   string              `json:"final_branch,omitempty"`
-	MergedInto    string              `json:"merged_into,omitempty"`
-	MergedCommit  string              `json:"merged_commit,omitempty"`
-	MergeStrategy store.MergeStrategy `json:"merge_strategy,omitempty"`
-	MergeStatus   store.MergeStatus   `json:"merge_status,omitempty"`
-	AutoMerge     bool                `json:"auto_merge,omitempty"`
+	FinalCommit      string              `json:"final_commit,omitempty"`
+	FinalBranch      string              `json:"final_branch,omitempty"`
+	FinalBranchError string              `json:"final_branch_error,omitempty"`
+	MergedInto       string              `json:"merged_into,omitempty"`
+	MergedCommit     string              `json:"merged_commit,omitempty"`
+	MergeStrategy    store.MergeStrategy `json:"merge_strategy,omitempty"`
+	MergeStatus      store.MergeStatus   `json:"merge_status,omitempty"`
+	AutoMerge        bool                `json:"auto_merge,omitempty"`
 	// QueuePosition is set only for cloud-mode runs whose Status is
 	// "queued"; nil otherwise. 1 means "next to be picked up". Computed
 	// by the server (Mongo aggregation), not persisted on the run doc.
@@ -903,14 +904,15 @@ func (s *Service) ListCtx(ctx context.Context, f ListFilter) ([]RunSummary, erro
 			UpdatedAt:     r.UpdatedAt,
 			FinishedAt:    r.FinishedAt,
 			Error:         r.Error,
-			Active:        s.manager.Active(r.ID),
-			FinalCommit:   r.FinalCommit,
-			FinalBranch:   r.FinalBranch,
-			MergedInto:    r.MergedInto,
-			MergedCommit:  r.MergedCommit,
-			MergeStrategy: r.MergeStrategy,
-			MergeStatus:   r.MergeStatus,
-			AutoMerge:     r.AutoMerge,
+			Active:           s.manager.Active(r.ID),
+			FinalCommit:      r.FinalCommit,
+			FinalBranch:      r.FinalBranch,
+			FinalBranchError: r.FinalBranchError,
+			MergedInto:       r.MergedInto,
+			MergedCommit:     r.MergedCommit,
+			MergeStrategy:    r.MergeStrategy,
+			MergeStatus:      r.MergeStatus,
+			AutoMerge:        r.AutoMerge,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

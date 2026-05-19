@@ -620,10 +620,11 @@ func (e *Engine) finalizeOnExit(ctx context.Context, runID string, wtCtx *worktr
 		mergeStrategy: e.mergeStrategy,
 		autoMerge:     e.autoMerge,
 	}, e.logger)
-	if finRes.FinalCommit != "" || finRes.FinalBranch != "" || finRes.MergedInto != "" || finRes.MergeStatus != "" {
+	if finRes.FinalCommit != "" || finRes.FinalBranch != "" || finRes.MergedInto != "" || finRes.MergeStatus != "" || finRes.FinalBranchError != "" {
 		if r2, err := e.store.LoadRun(ctx, runID); err == nil {
 			r2.FinalCommit = finRes.FinalCommit
 			r2.FinalBranch = finRes.FinalBranch
+			r2.FinalBranchError = finRes.FinalBranchError
 			r2.MergedInto = finRes.MergedInto
 			r2.MergeStatus = store.MergeStatus(finRes.MergeStatus)
 			r2.MergedCommit = finRes.MergedCommit
@@ -634,6 +635,14 @@ func (e *Engine) finalizeOnExit(ctx context.Context, runID string, wtCtx *worktr
 			if saveErr := e.store.SaveRun(ctx, r2); saveErr != nil && e.logger != nil {
 				e.logger.Warn("runtime: persist finalization metadata: %v", saveErr)
 			}
+		}
+	}
+	if finRes.FinalBranchError != "" {
+		if err := e.emit(ctx, runID, store.EventWorktreeBranchFailed, "", map[string]interface{}{
+			"sha":    finRes.FinalCommit,
+			"reason": finRes.FinalBranchError,
+		}); err != nil && e.logger != nil {
+			e.logger.Warn("runtime: emit worktree_branch_failed event for %s: %v", runID, err)
 		}
 	}
 	if cleanup != nil {
