@@ -124,11 +124,17 @@ func TestAwaitTerminal_PollsUntilTerminal(t *testing.T) {
 		{Plan: shardPlan{Index: 1, RunID: "shard-bbbb00000000bbbb"}},
 	}
 
+	// Capture the parent ctx into a separate var before the deadline
+	// reassign below — the goroutine closes over `bgCtx` instead of `ctx`
+	// so the closure's read never races against the `ctx, cancel := ...`
+	// write on the main goroutine. (Pre-existing race detected by
+	// `task test:race`.)
+	bgCtx := ctx
 	go func() {
 		time.Sleep(30 * time.Millisecond)
-		_ = rs.UpdateRunStatus(ctx, "shard-aaaa00000000aaaa", store.RunStatusFinished, "")
+		_ = rs.UpdateRunStatus(bgCtx, "shard-aaaa00000000aaaa", store.RunStatusFinished, "")
 		time.Sleep(30 * time.Millisecond)
-		_ = rs.UpdateRunStatus(ctx, "shard-bbbb00000000bbbb", store.RunStatusFailed, "boom")
+		_ = rs.UpdateRunStatus(bgCtx, "shard-bbbb00000000bbbb", store.RunStatusFailed, "boom")
 	}()
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
