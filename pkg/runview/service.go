@@ -824,6 +824,25 @@ func (s *Service) LoadRunCtx(ctx context.Context, runID string) (*store.Run, err
 	return s.store.LoadRun(ctx, runID)
 }
 
+// RenameRunCtx replaces a run's friendly Name. The run id stays
+// stable; only the human-readable label changes. The store is the
+// source of truth — clients keep their per-runId state and the next
+// snapshot push surfaces the new name.
+func (s *Service) RenameRunCtx(ctx context.Context, runID, name string) (*store.Run, error) {
+	r, err := s.store.LoadRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if r.Name == name {
+		return r, nil
+	}
+	r.Name = name
+	if err := s.store.SaveRun(ctx, r); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
 // List returns every run in the store filtered by f. The result is
 // sorted by CreatedAt descending (newest first); Limit truncates after
 // sort.

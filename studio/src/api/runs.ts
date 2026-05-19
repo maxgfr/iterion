@@ -625,6 +625,20 @@ export async function resumeRun(
   });
 }
 
+// renameRun updates a run's friendly Name without touching its id —
+// callers keep their per-runId stores, tabs, deep links etc. The
+// server is the source of truth; refetch the snapshot (or rely on the
+// next event-stream push) to surface the change.
+export async function renameRun(
+  runId: string,
+  name: string,
+): Promise<{ run_id: string; name: string }> {
+  return request(`/runs/${encodeURIComponent(runId)}/rename`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Modified-files panel — git status + diff for the run's working dir.
 // ---------------------------------------------------------------------------
