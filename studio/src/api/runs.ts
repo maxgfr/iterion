@@ -61,6 +61,11 @@ export interface RunSummary {
   // runs that never reached a clean exit.
   final_commit?: string;
   final_branch?: string;
+  // Populated when the worktree produced commits but the persistent
+  // storage branch could not be created (malformed default name, git
+  // failure). The commits are reachable only via reflog until the
+  // operator runs `git branch <name> <final_commit>` manually.
+  final_branch_error?: string;
   merged_into?: string;
   merged_commit?: string;
   merge_strategy?: MergeStrategy;
@@ -119,6 +124,11 @@ export interface RunHeader {
   // runs that never reached a clean exit.
   final_commit?: string;
   final_branch?: string;
+  // Populated when the worktree produced commits but the persistent
+  // storage branch could not be created (malformed default name, git
+  // failure). The commits are reachable only via reflog until the
+  // operator runs `git branch <name> <final_commit>` manually.
+  final_branch_error?: string;
   merged_into?: string;
   merged_commit?: string;
   merge_strategy?: MergeStrategy;

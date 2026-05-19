@@ -99,6 +99,14 @@ export default function InfoPanel({ run }: InfoPanelProps) {
               <Mono copyable>{run.final_branch}</Mono>
             </Row>
           )}
+          {run.final_branch_error && (
+            <Row label="Storage branch">
+              <span className="text-danger-fg" title={run.final_branch_error}>
+                creation failed — recover with{" "}
+                <Mono>{`git branch <name> ${run.final_commit?.slice(0, 7) ?? ""}`}</Mono>
+              </span>
+            </Row>
+          )}
         </Section>
 
         {run.worktree && (
