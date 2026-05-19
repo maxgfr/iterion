@@ -119,9 +119,9 @@ func TestGenerateRunName_Golden(t *testing.T) {
 		seed string
 		want string
 	}{
-		{"", "obsidian-ripple-meteorfern-1c14"},
-		{"hello", "retro-tick-photonpetal-a30e"},
-		{"examples/x.iter:1", "meteor-blink-fiberglyph-03cc"},
+		{"", "obsidian-ripple-manigancier-1c14"},
+		{"hello", "retro-schmarble-riotchord-a30e"},
+		{"examples/x.iter:1", "meteor-vroom-mijotefox-03cc"},
 	}
 	for _, c := range cases {
 		got := GenerateRunName(c.seed)

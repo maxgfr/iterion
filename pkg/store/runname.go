@@ -8,54 +8,63 @@ import (
 	"github.com/google/uuid"
 )
 
-// runNamePool1 is the atmospheric-qualifier slot: synth-tech adjectives
-// and noun-prefixes ("neon", "prism", "fractal", …) that set the mood.
-// Order is part of the contract: changing it would invalidate the
-// seed → name mapping for all subsequent runs derived from this list.
+// runNamePool1 is the atmospheric-qualifier slot: synth-tech, rock-grit
+// and a sprinkle of mischief ("neon", "thunder", "savage", "feral",
+// "sassy", "wonky", "zesty", …) that set the mood. Order is part of
+// the contract: changing it would invalidate the seed → name mapping
+// for all subsequent runs derived from this list.
 var runNamePool1 = []string{
-	"neon", "prism", "chrome", "plasma", "quantum", "void", "fractal", "photon", "lumen", "hex",
+	"neon", "prism", "chrome", "plasma", "quantum", "void", "fractal", "photon", "thunder", "hex",
 	"pixel", "glitch", "vapor", "crystal", "neural", "sonic", "electric", "kinetic", "magnetic", "atomic",
-	"cosmic", "lunar", "solar", "astral", "stellar", "orbital", "radiant", "luminous", "cryo", "pyro",
-	"holo", "vector", "scalar", "binary", "ionic", "helix", "vortex", "beam", "flare", "halo",
-	"glow", "shimmer", "mirage", "spectral", "ethereal", "phantom", "ghost", "opal", "obsidian", "onyx",
+	"cosmic", "lunar", "solar", "astral", "stellar", "orbital", "radiant", "savage", "cryo", "pyro",
+	"holo", "vector", "sassy", "wonky", "zesty", "helix", "vortex", "beam", "flare", "halo",
+	"blaze", "shimmer", "mirage", "renegade", "feral", "phantom", "ghost", "opal", "obsidian", "onyx",
 	"quartz", "ember", "ash", "dusk", "dawn", "twilight", "midnight", "aurora", "eclipse", "comet",
-	"meteor", "nova", "polar", "arctic", "boreal", "synth", "retro", "modal", "fiber", "optic",
-	"laser", "sonar", "radar", "gleam", "refractive", "nebular", "magneto", "plasmic", "hypno", "gamma",
+	"meteor", "nova", "polar", "arctic", "boreal", "synth", "retro", "riot", "fuzz", "blistered",
+	"laser", "sonar", "radar", "wrecked", "scorching", "smoldering", "magneto", "blastoff", "molten", "gamma",
 }
 
-// runNamePool2 is the motion-or-state slot: short verb-nouns ("drift",
-// "pulse", "ripple", …) that give the name kinetic energy. Order is
-// part of the contract (see runNamePool1).
+// runNamePool2 is the motion-or-state slot: stage-rock action ("shred",
+// "thrash", "mosh", "riff", "howl", "growl", "yeet", "bonk", "boop", …)
+// blended with iterion's franglais verb roots taken from the studio
+// ThinkingFooter ("bidouille", "magouille", "schmilblick", "ratiocine",
+// "cocorico", "mijote", "demerdouille", "tambouille", "manigance",
+// "cogitruffe", …). Order is part of the contract (see runNamePool1).
 var runNamePool2 = []string{
 	"drift", "pulse", "ripple", "bloom", "surge", "echo", "wave", "shard", "haze", "flux",
-	"zephyr", "glide", "flow", "dash", "sweep", "swirl", "twist", "spin", "whirl", "dance",
-	"dive", "plunge", "soar", "climb", "leap", "bound", "rush", "race", "sprint", "hop",
-	"bounce", "blink", "wink", "flash", "dart", "ray", "trace", "track", "trail", "chase",
-	"hunt", "seek", "fetch", "catch", "clasp", "swipe", "sway", "lull", "hush", "breath",
-	"sigh", "hum", "chime", "ring", "peal", "clang", "ping", "tap", "tick", "whir",
-	"buzz", "hiss", "sizzle", "spark", "glimmer", "twinkle", "sparkle", "glitter", "shine", "glare",
-	"blaze", "burst", "fade", "flick", "gust", "draft", "eddy", "plume", "billow", "churn",
+	"smash", "slam", "shred", "crash", "thrash", "wail", "howl", "snarl", "roar", "growl",
+	"blast", "kick", "riff", "strum", "yeet", "bonk", "boop", "thump", "mosh", "grind",
+	"stomp", "vroom", "sparkle", "sizzle", "churn", "bidouille", "magouille", "gribouille", "trifouille", "patouille",
+	"fignole", "bricole", "embrouille", "triture", "rafistole", "tambouille", "bouillonne", "mouline", "ronronne", "manigance",
+	"chuchote", "vasouille", "baguette", "saucisson", "cocorico", "zinzin", "cogitruffe", "ratiocine", "schmarble", "itere",
+	"mijote", "pinaille", "tortille", "ricochet", "voila", "schmilblick", "demerdouille", "chamboule", "fricote", "gambergue",
+	"bafouille", "tergiverse", "gambade", "virevolte", "gigote", "bidouillonne", "eparpille", "ronchonne", "gargouille", "tripote",
 }
 
 // runNamePool3 is the coined-noun slot: portmanteaus and invented
-// compound words ("foxhowl", "lumicore", "starforge", …) that give
-// each name a distinctive tail. Order is part of the contract (see
-// runNamePool1).
+// compounds blending synth-cosmos with garage-rock iconography
+// ("ampthunder", "riotchord", "overdrive", "feedbackwail",
+// "voltageclash", "neondemon", "stellarcrash", …) and iterion's
+// signature franglais nouns ("ratiocinator", "mouliningette",
+// "baguettomancer", "schmilblickerie", "voilassembler",
+// "cogitruffaire", "saucissonator", "cocoricoder", …) that give
+// each name a distinctive tail. Order is part of the contract
+// (see runNamePool1).
 var runNamePool3 = []string{
-	"foxhowl", "mothbeam", "owlspark", "hexglade", "pyrebloom", "lumicore", "starforge", "cryomantle", "novachime", "auroraflux",
-	"voiddriver", "glitchfox", "pixelpurr", "neondrift", "prismfox", "chromewhisper", "photonpetal", "lasercrick", "sonarglow", "beamspire",
-	"mosslight", "ferncloak", "dawnglyph", "duskvane", "twilightfox", "midnightfern", "glimmerleaf", "shimmerstone", "mirageknot", "ghostpetal",
-	"phantomwick", "spectrelune", "etherspark", "vaporlark", "plasmasong", "quantumcurl", "fractalfin", "vectorvane", "scalarsprout", "helixbloom",
-	"vortexlark", "orbitcrest", "novacrest", "cometwhisk", "meteorfern", "polarpetal", "arcticquill", "borealhum", "synthsigh", "retrosparkle",
-	"cyberbloom", "optigleam", "modulink", "fiberglyph", "opalrune", "onyxwhisper", "jadehum", "quartzhowl", "emberknot", "ashglyph",
-	"crystalbloom", "pyrelark", "cryolark", "holowhisk", "neonmoth", "prismink", "beamwick", "halospire", "voidwhisk", "nebulink",
-	"lunaspire", "solarsigh", "stellarhum", "astralcrick", "kineticglide", "magnetoglyph", "ionicpetal", "atomicfern", "ravenrune", "sirenchime",
+	"foxhowl", "mothbeam", "owlspark", "hexglade", "pyrebloom", "lumicore", "starforge", "voiddriver", "glitchfox", "pixelriot",
+	"neondrift", "prismfox", "chromethrash", "sonarsnoot", "beamspire", "ampthunder", "riotchord", "twilightfox", "feedbackwail", "overdrive",
+	"distortpedal", "riotpyre", "voltageclash", "retrosparkle", "neondemon", "jadeshred", "quartzhowl", "solarslam", "stellarcrash", "magnetoglyph",
+	"bidouillefox", "magouilloid", "gribouillor", "schmilblicker", "mouliningette", "ratiocinator", "ponderificator", "reflectomancer", "schemarbler", "iterifier",
+	"baguettomancer", "saucissonator", "cocoricoder", "zinzinator", "manigancier", "demerdouilleur", "cogitruffaire", "ratiocinette", "mouliningor", "bidouillonator",
+	"chamboulifier", "schmilblickerie", "voilassembler", "mijotefox", "trifouilloid", "patouilleur", "bricolatron", "embrouillateur", "triturateur", "rafistolier",
+	"tambouillier", "bouillonneur", "moulineur", "ronronneur", "manigancere", "baguettifier", "saucissonet", "cocoricomatic", "zinzinifier", "patapouflin",
+	"cogitruffex", "ratiocinaire", "ponderifaire", "recursifaire", "conjecturifier", "branchifier", "judgifier", "diagrammifier", "fricoteur", "gambergueur",
 }
 
 // GenerateRunName derives a stable, human-friendly run label from an
 // opaque seed. Same seed → same name. The output is kebab-case ASCII,
 // path- and URL-safe: <atmos>-<motion>-<coined>-<4hex>, e.g.
-// "neon-glitch-foxhowl-a3f2".
+// "thunder-bidouille-ratiocinator-a3f2".
 //
 // Three distinct word slots (atmospheric qualifier, motion/state,
 // coined portmanteau) make parallel runs visually unmistakable, and
