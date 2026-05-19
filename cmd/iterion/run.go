@@ -23,6 +23,7 @@ var runOpts struct {
 	autoMerge           bool
 	sandbox             string
 	sandboxDefaultImage string
+	sandboxHostState    string
 }
 
 var runCmd = &cobra.Command{
@@ -46,6 +47,7 @@ var runCmd = &cobra.Command{
 			AutoMerge:           runOpts.autoMerge,
 			Sandbox:             runOpts.sandbox,
 			SandboxDefaultImage: runOpts.sandboxDefaultImage,
+			SandboxHostState:    runOpts.sandboxHostState,
 		}
 		if len(runOpts.varFlags) > 0 {
 			vars, err := cli.ParseVarFlags(runOpts.varFlags)
@@ -76,5 +78,6 @@ func init() {
 	f.BoolVar(&runOpts.autoMerge, "auto-merge", true, "For worktree:auto runs, apply --merge-strategy at the end of the run (CLI default true preserves prior behaviour; the studio sets false by default to defer the merge to a UI action)")
 	f.StringVar(&runOpts.sandbox, "sandbox", "", "Run-level sandbox override: \"none\" (force off), \"auto\" (read .devcontainer/devcontainer.json). Empty inherits ITERION_SANDBOX_DEFAULT then the workflow's own sandbox: block. See pkg/sandbox.")
 	f.StringVar(&runOpts.sandboxDefaultImage, "sandbox-default-image", "", "Image ref used by sandbox: auto when no .devcontainer/devcontainer.json is found (env: ITERION_SANDBOX_DEFAULT_IMAGE; built-in: ghcr.io/socialgouv/iterion-sandbox-slim:<iterion-version>)")
+	f.StringVar(&runOpts.sandboxHostState, "sandbox-host-state", "", "Bind host ~/.iterion and ~/.claude into the sandbox so persistent memory survives across runs: \"auto\" (default) | \"none\". Empty inherits ITERION_SANDBOX_HOST_STATE then the built-in default \"auto\". Use \"none\" on multi-tenant/cloud runners to avoid leaking host OAuth credentials. See docs/sandbox.md.")
 	rootCmd.AddCommand(runCmd)
 }

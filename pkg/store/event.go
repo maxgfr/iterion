@@ -82,6 +82,32 @@ const (
 	//   - reason: short summary
 	//   - limitations_v1: known V1 caveats
 	EventSandboxClawRoutedViaRunner EventType = "sandbox_claw_routed_via_runner"
+	// EventSandboxHostStateMounted fires when the runtime auto-binds
+	// the host's persistent state directories (`~/.iterion` run store
+	// and `~/.claude` Claude Code OAuth/sessions) into the sandbox.
+	// Lets operators audit what slipped into the container and spot
+	// "host_state was on when I expected off" misconfigurations. Data:
+	//   - enabled: whether the auto-mount ran (false = host_state=none)
+	//   - source: precedence label (CLI > workflow > env > default)
+	//   - mounts: []string of "host_path:container_path" pairs (only
+	//     paths actually mounted are listed; skipped ones are absent)
+	EventSandboxHostStateMounted EventType = "sandbox_host_state_mounted"
+	// EventSandboxUserRemap fires when the docker driver injects
+	// `--user $(id -u):$(id -g)` because host_state=auto requires
+	// host-UID-owned writes into the mounted ~/.iterion / ~/.claude
+	// trees. Data:
+	//   - uid: host UID
+	//   - gid: host GID
+	//   - reason: why the remap was applied
+	EventSandboxUserRemap EventType = "sandbox_user_remap"
+	// EventSandboxUIDMismatchWarning fires when host_state=auto is
+	// active but the spec already pins a User that differs from the
+	// host UID — likely a devcontainer.json's remoteUser. We respect
+	// the explicit User but warn so operators see why host_state
+	// writes may end up root-owned. Data:
+	//   - spec_user: the value of Spec.User
+	//   - host_uid: host UID (only emitted on Linux hosts)
+	EventSandboxUIDMismatchWarning EventType = "sandbox_uid_mismatch_warning"
 	// EventNetworkBlocked fires every time the iterion CONNECT proxy
 	// rejects a request. Data:
 	//   - host: blocked hostname

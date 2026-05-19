@@ -615,6 +615,9 @@ func writeSandboxBlock(b *strings.Builder, sb *ast.SandboxBlock, indent string) 
 	if sb.WorkspaceFolder != "" {
 		fmt.Fprintf(b, "%sworkspace_folder: %q\n", inner, sb.WorkspaceFolder)
 	}
+	if sb.HostState != "" {
+		fmt.Fprintf(b, "%shost_state: %s\n", inner, sb.HostState)
+	}
 	if sb.PostCreate != "" {
 		fmt.Fprintf(b, "%spost_create: %q\n", inner, sb.PostCreate)
 	}

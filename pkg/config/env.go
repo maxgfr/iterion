@@ -116,6 +116,9 @@ func loadEnv(cfg *Config) error {
 	if v, ok := lookup("ITERION_SANDBOX_DEFAULT"); ok {
 		cfg.Sandbox.Default = strings.ToLower(v)
 	}
+	if v, ok := lookup("ITERION_SANDBOX_HOST_STATE"); ok {
+		cfg.Sandbox.HostState = strings.ToLower(v)
+	}
 
 	if v, ok := lookup("ITERION_JWT_SECRET"); ok {
 		cfg.Auth.JWTSecret = v

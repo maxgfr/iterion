@@ -62,30 +62,32 @@ type NodeExecutor interface {
 // Engine executes workflows. It supports sequential execution and
 // parallel fan-out via bounded branch scheduling.
 type Engine struct {
-	workflow            *ir.Workflow
-	store               store.RunStore
-	executor            NodeExecutor
-	logger              *iterlog.Logger
-	onNodeFinished      func(nodeID string, output map[string]interface{})
-	onEvent             func(evt store.Event) // optional observer fired after every successful append
-	recoveryDispatch    RecoveryDispatch      // optional; consulted on node execution failure
-	workflowHash        string                // SHA-256 of the .iter source, set via WithWorkflowHash
-	filePath            string                // absolute .iter source path, set via WithFilePath
-	preset              string                // in-source preset name selected at launch, set via WithPreset
-	runName             string                // deterministic human-friendly run label, set via WithRunName
-	mergeInto           string                // worktree finalization: FF target ("" = current branch, "none" = skip, or branch name); set via WithMergeInto
-	branchName          string                // worktree finalization: storage branch override ("" = iterion/run/<runName>); set via WithBranchName
-	mergeStrategy       string                // worktree finalization: "squash" (default) or "merge" (FF); set via WithMergeStrategy
-	autoMerge           bool                  // worktree finalization: when true, apply mergeStrategy at end of run; otherwise leave merge_status=pending for UI; set via WithAutoMerge
-	validateOutputs     bool                  // when true, validate node outputs against declared schemas
-	forceResume         bool                  // when true, skip workflow hash check on resume
-	workDir             string                // working directory for subprocesses + PROJECT_DIR expansion; defaults to os.Getwd() at Run() time
-	containerWorkspace  string                // when sandbox is active, the in-container path the host workDir is bind-mounted to (e.g. "/workspace"); used to remap ${PROJECT_DIR} so prompts and tool nodes see paths the in-container processes can actually open
-	sandboxOverride     string                // CLI/Launch-level sandbox mode override; "" means "no override" (workflow + global default win); set via WithSandboxOverride
-	sandboxDefault      string                // global ITERION_SANDBOX_DEFAULT value snapshot; set via WithSandboxDefault
-	sandboxDefaultImage string                // image ref used as fallback when sandbox: auto and no .devcontainer/devcontainer.json is found; "" lets the runtime pick the built-in pinned to the iterion version; set via WithSandboxDefaultImage
-	attachmentPromote   AttachmentPromoteFunc // optional: invoked after CreateRun to materialise attachments
-	bundle              *bundle.Bundle        // optional: bundle backing this run; nil for plain .iter/.bot runs
+	workflow                 *ir.Workflow
+	store                    store.RunStore
+	executor                 NodeExecutor
+	logger                   *iterlog.Logger
+	onNodeFinished           func(nodeID string, output map[string]interface{})
+	onEvent                  func(evt store.Event) // optional observer fired after every successful append
+	recoveryDispatch         RecoveryDispatch      // optional; consulted on node execution failure
+	workflowHash             string                // SHA-256 of the .iter source, set via WithWorkflowHash
+	filePath                 string                // absolute .iter source path, set via WithFilePath
+	preset                   string                // in-source preset name selected at launch, set via WithPreset
+	runName                  string                // deterministic human-friendly run label, set via WithRunName
+	mergeInto                string                // worktree finalization: FF target ("" = current branch, "none" = skip, or branch name); set via WithMergeInto
+	branchName               string                // worktree finalization: storage branch override ("" = iterion/run/<runName>); set via WithBranchName
+	mergeStrategy            string                // worktree finalization: "squash" (default) or "merge" (FF); set via WithMergeStrategy
+	autoMerge                bool                  // worktree finalization: when true, apply mergeStrategy at end of run; otherwise leave merge_status=pending for UI; set via WithAutoMerge
+	validateOutputs          bool                  // when true, validate node outputs against declared schemas
+	forceResume              bool                  // when true, skip workflow hash check on resume
+	workDir                  string                // working directory for subprocesses + PROJECT_DIR expansion; defaults to os.Getwd() at Run() time
+	containerWorkspace       string                // when sandbox is active, the in-container path the host workDir is bind-mounted to (e.g. "/workspace"); used to remap ${PROJECT_DIR} so prompts and tool nodes see paths the in-container processes can actually open
+	sandboxOverride          string                // CLI/Launch-level sandbox mode override; "" means "no override" (workflow + global default win); set via WithSandboxOverride
+	sandboxDefault           string                // global ITERION_SANDBOX_DEFAULT value snapshot; set via WithSandboxDefault
+	sandboxDefaultImage      string                // image ref used as fallback when sandbox: auto and no .devcontainer/devcontainer.json is found; "" lets the runtime pick the built-in pinned to the iterion version; set via WithSandboxDefaultImage
+	sandboxHostStateOverride string                // CLI/Launch-level override for sandbox.host_state ("auto"|"none"|""); set via WithSandboxHostStateOverride
+	sandboxHostStateDefault  string                // global ITERION_SANDBOX_HOST_STATE snapshot; set via WithSandboxHostStateDefault
+	attachmentPromote        AttachmentPromoteFunc // optional: invoked after CreateRun to materialise attachments
+	bundle                   *bundle.Bundle        // optional: bundle backing this run; nil for plain .iter/.bot runs
 }
 
 // AttachmentPromoteFunc is invoked once at the start of a run, right
@@ -124,6 +126,20 @@ func WithSandboxDefault(mode string) EngineOption {
 // (`ghcr.io/socialgouv/iterion-sandbox-slim:<iterion-version>`).
 func WithSandboxDefaultImage(ref string) EngineOption {
 	return func(e *Engine) { e.sandboxDefaultImage = ref }
+}
+
+// WithSandboxHostStateOverride sets the CLI / Launch-modal level
+// override for sandbox.host_state. Highest precedence. Value is one
+// of "", "auto", or "none". An empty string means "no override".
+func WithSandboxHostStateOverride(mode string) EngineOption {
+	return func(e *Engine) { e.sandboxHostStateOverride = mode }
+}
+
+// WithSandboxHostStateDefault sets the global default for
+// sandbox.host_state (the snapshot of ITERION_SANDBOX_HOST_STATE).
+// Lowest precedence — workflow and CLI override it.
+func WithSandboxHostStateDefault(mode string) EngineOption {
+	return func(e *Engine) { e.sandboxHostStateDefault = mode }
 }
 
 // WithAttachmentPromote registers a callback invoked right after

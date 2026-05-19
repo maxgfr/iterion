@@ -517,6 +517,7 @@ type SandboxBlock struct {
 	Build           *SandboxBuildBlock   // when Mode=inline (V2-6, mutually exclusive with Image)
 	User            string               // remoteUser
 	WorkspaceFolder string               // absolute path inside the container
+	HostState       string               // "auto" | "none" | "" — bind host ~/.iterion + ~/.claude into the sandbox
 	PostCreate      string               // shell snippet
 	Env             map[string]string    // containerEnv
 	Mounts          []string             // devcontainer mount syntax

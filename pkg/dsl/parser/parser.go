@@ -1837,6 +1837,8 @@ func (p *parser) parseSandboxProp(sb *ast.SandboxBlock, propTok Token) {
 		sb.User = p.expectString()
 	case "workspace_folder":
 		sb.WorkspaceFolder = p.expectString()
+	case "host_state":
+		sb.HostState = p.expectIdent()
 	case "post_create":
 		sb.PostCreate = p.expectString()
 	case "env":

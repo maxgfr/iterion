@@ -227,11 +227,21 @@ func (c *compiler) compileSandboxBlock(blk *ast.SandboxBlock, scope, name string
 		return nil
 	}
 
+	switch blk.HostState {
+	case "", "auto", "none":
+	default:
+		c.errorfAt(DiagInvalidSandboxMode, name, "",
+			"%s %q has invalid sandbox.host_state %q (want \"\", \"auto\", or \"none\")",
+			scope, name, blk.HostState)
+		return nil
+	}
+
 	spec := &SandboxSpec{
 		Mode:            blk.Mode,
 		Image:           blk.Image,
 		User:            blk.User,
 		WorkspaceFolder: blk.WorkspaceFolder,
+		HostState:       blk.HostState,
 		PostCreate:      blk.PostCreate,
 	}
 	if len(blk.Env) > 0 {

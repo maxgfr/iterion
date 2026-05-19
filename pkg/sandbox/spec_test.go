@@ -55,6 +55,10 @@ func TestSpecValidate(t *testing.T) {
 		{"invalid-inherit", &Spec{Mode: ModeAuto, Network: &Network{Inherit: InheritMode("foo")}}, true},
 		{"relative-workspace", &Spec{Mode: ModeAuto, WorkspaceFolder: "workspace"}, true},
 		{"absolute-workspace", &Spec{Mode: ModeAuto, WorkspaceFolder: "/workspace"}, false},
+		{"host_state-empty", &Spec{Mode: ModeAuto, HostState: HostStateUnset}, false},
+		{"host_state-auto", &Spec{Mode: ModeAuto, HostState: HostStateAuto}, false},
+		{"host_state-none", &Spec{Mode: ModeAuto, HostState: HostStateNone}, false},
+		{"host_state-invalid", &Spec{Mode: ModeAuto, HostState: HostState("yes please")}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

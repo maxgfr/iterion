@@ -329,6 +329,7 @@ type jsonSandboxBlock struct {
 	Build           *jsonSandboxBuildBlock   `json:"build,omitempty"`
 	User            string                   `json:"user,omitempty"`
 	WorkspaceFolder string                   `json:"workspace_folder,omitempty"`
+	HostState       string                   `json:"host_state,omitempty"`
 	PostCreate      string                   `json:"post_create,omitempty"`
 	Env             map[string]string        `json:"env,omitempty"`
 	Mounts          []string                 `json:"mounts,omitempty"`
@@ -360,6 +361,7 @@ func sandboxBlockToJSON(s *SandboxBlock) *jsonSandboxBlock {
 		Build:           sandboxBuildBlockToJSON(s.Build),
 		User:            s.User,
 		WorkspaceFolder: s.WorkspaceFolder,
+		HostState:       s.HostState,
 		PostCreate:      s.PostCreate,
 		Env:             s.Env,
 		Mounts:          s.Mounts,
@@ -400,6 +402,7 @@ func sandboxBlockFromJSON(j *jsonSandboxBlock) *SandboxBlock {
 		Build:           sandboxBuildBlockFromJSON(j.Build),
 		User:            j.User,
 		WorkspaceFolder: j.WorkspaceFolder,
+		HostState:       j.HostState,
 		PostCreate:      j.PostCreate,
 		Env:             j.Env,
 		Mounts:          j.Mounts,

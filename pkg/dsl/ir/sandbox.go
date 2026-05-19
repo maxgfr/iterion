@@ -45,6 +45,13 @@ type SandboxSpec struct {
 	// (default `/workspace`). Phase 1.
 	WorkspaceFolder string
 
+	// HostState controls auto-binding of the host's `~/.iterion`
+	// (run store) and `~/.claude` (Claude Code OAuth + sessions)
+	// into the sandbox so persistent memory survives across runs.
+	// "" (default → "auto") | "auto" | "none". See pkg/runtime/sandbox.go
+	// for the injection logic.
+	HostState string
+
 	// Network controls egress filtering. Phase 3.
 	Network *SandboxNetwork
 }

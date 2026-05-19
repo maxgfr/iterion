@@ -87,8 +87,49 @@ type Spec struct {
 	// Phase 1.
 	WorkspaceFolder string
 
+	// HostState selects whether the host's `~/.iterion` (run store)
+	// and `~/.claude` (Claude Code OAuth + per-project sessions) are
+	// auto-mounted into the sandbox so persistent memory survives
+	// across runs. "" defaults to HostStateAuto when the sandbox is
+	// active; HostStateNone disables the auto-mount entirely.
+	HostState HostState
+
 	// Network, when non-nil, controls egress filtering. Phase 3.
 	Network *Network
+}
+
+// HostState selects how the host's persistent state directories
+// (`~/.iterion`, `~/.claude`) are exposed to the sandbox.
+type HostState string
+
+const (
+	// HostStateUnset defers to the runtime default (currently auto when
+	// the sandbox is active).
+	HostStateUnset HostState = ""
+	// HostStateAuto bind-mounts the host's `~/.iterion` and `~/.claude`
+	// directories at the same absolute path inside the container, and
+	// (on Linux, when the spec does not pin a User) maps the container
+	// process to the host UID/GID so writes back to those mounts stay
+	// owned by the host user.
+	HostStateAuto HostState = "auto"
+	// HostStateNone disables the auto-mount and UID remap entirely.
+	HostStateNone HostState = "none"
+)
+
+// IsValid reports whether h is one of the legal host-state values.
+func (h HostState) IsValid() bool {
+	switch h {
+	case HostStateUnset, HostStateAuto, HostStateNone:
+		return true
+	}
+	return false
+}
+
+// Active reports whether the host-state auto-mount should fire.
+// Treats the unset value as "auto" so callers can resolve precedence
+// elsewhere (CLI > workflow > env > default) and then trust the spec.
+func (h HostState) Active() bool {
+	return h == HostStateAuto || h == HostStateUnset
 }
 
 // Build describes a Dockerfile-based image build (Phase 2).
@@ -198,6 +239,9 @@ func (s *Spec) Validate() error {
 	}
 	if s.WorkspaceFolder != "" && !strings.HasPrefix(s.WorkspaceFolder, "/") {
 		return fmt.Errorf("sandbox.workspaceFolder %q must be absolute", s.WorkspaceFolder)
+	}
+	if !s.HostState.IsValid() {
+		return fmt.Errorf("sandbox: invalid host_state %q (want \"\", auto, or none)", s.HostState)
 	}
 	return nil
 }
