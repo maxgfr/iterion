@@ -36,10 +36,15 @@ export default function AppHeader({
       <header className="shrink-0 h-12 flex items-center gap-2 sm:gap-3 px-3 sm:px-4 text-sm bg-surface-1 border-b border-border-default overflow-hidden">
         <Link
           href="/"
-          className="font-bold tracking-wide text-sm hover:text-accent transition-colors shrink-0"
+          className="flex items-center hover:opacity-80 transition-opacity shrink-0"
           title="Iterion home"
+          aria-label="Iterion home"
         >
-          ITERION
+          <img
+            src="/favicon-96x96.png"
+            alt="Iterion"
+            className="h-7 w-7"
+          />
         </Link>
         <NavLinks active={active} />
         <ProjectLabel />
