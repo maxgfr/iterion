@@ -77,6 +77,16 @@ type LaunchSpec struct {
 	// (ITERION_RUNS_DETACHED=1) does not yet honor this field; the
 	// service layer logs a warning and ignores it there.
 	Backend string
+	// ParentRunID, ShardIndex, ShardCount, ShardLabel are set when a
+	// parent run dispatches this as a shard child (see Cap. 3 in
+	// docs/security-bots-distributed.md). The cloudpublisher copies
+	// them onto the persisted Run document AND onto the published
+	// RunMessage so the runner pod that picks up the work knows it's
+	// part of a sharded set.
+	ParentRunID string
+	ShardIndex  int
+	ShardCount  int
+	ShardLabel  string
 }
 
 // ResumeSpec describes a resume request.
