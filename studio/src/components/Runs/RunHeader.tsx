@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { ClockIcon, FileTextIcon, OpenInNewWindowIcon } from "@radix-ui/react-icons";
+import { ClockIcon, FileTextIcon, OpenInNewWindowIcon, Pencil1Icon } from "@radix-ui/react-icons";
 
 import type { RunHeader as RunHeaderType } from "@/api/runs";
-import { cancelRun, getRun, loadEvents } from "@/api/runs";
+import { cancelRun, getRun, loadEvents, renameRun } from "@/api/runs";
 import { Button, CopyButton, LiveDot, StatusBadge, Tooltip } from "@/components/ui";
 import WSStatusDot from "@/components/shared/WSStatusDot";
 import { formatRelative } from "@/lib/format";
@@ -19,9 +19,11 @@ interface Props {
 
 export default function RunHeader({ run, active, wsState }: Props) {
   const requestWsReconnect = useRunStore((s) => s.requestWsReconnect);
+  const applySnapshot = useRunStore((s) => s.applySnapshot);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resumeOpen, setResumeOpen] = useState(false);
+  const [editingName, setEditingName] = useState(false);
   const [, setLocation] = useLocation();
 
   // canCancel covers every state where a cancel actually does something
@@ -100,16 +102,47 @@ export default function RunHeader({ run, active, wsState }: Props) {
   const finishedRel = run.finished_at ? formatRelative(run.finished_at) : null;
   const fileBase = run.file_path ? basename(run.file_path) : null;
 
+  const onRename = async (next: string) => {
+    const trimmed = next.trim();
+    if (!trimmed || trimmed === friendlyName) {
+      setEditingName(false);
+      return;
+    }
+    try {
+      await renameRun(run.id, trimmed);
+      // Refresh the snapshot so the rest of the UI (run header,
+      // tab label sync, run list) sees the new name immediately —
+      // the WS stream doesn't replay snapshot pushes after a metadata
+      // change, so a manual refresh is the most reliable path.
+      const snap = await getRun(run.id);
+      applySnapshot(snap);
+    } catch (e) {
+      setError(`Rename failed: ${(e as Error).message}`);
+    } finally {
+      setEditingName(false);
+    }
+  };
+
   return (
     <>
       <div className="shrink-0 border-b border-border-default px-3 sm:px-4 py-2 flex flex-col gap-1.5 text-sm">
         {/* Row 1: friendly name + status + actions */}
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-          <Tooltip content={friendlyName}>
-            <div className="font-medium truncate max-w-md" tabIndex={0}>
-              {friendlyName}
-            </div>
-          </Tooltip>
+          {editingName ? (
+            <RunNameEditor initial={friendlyName} onSubmit={onRename} onCancel={() => setEditingName(false)} />
+          ) : (
+            <Tooltip content="Double-click to rename">
+              <button
+                type="button"
+                onDoubleClick={() => setEditingName(true)}
+                className="inline-flex items-center gap-1 font-medium truncate max-w-md text-left hover:text-fg-default group focus:outline-none"
+                title={friendlyName}
+              >
+                <span className="truncate">{friendlyName}</span>
+                <Pencil1Icon className="w-3 h-3 text-fg-subtle opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+              </button>
+            </Tooltip>
+          )}
           <StatusBadge status={run.status} />
           {active && (
             <LiveDot
@@ -229,6 +262,50 @@ export default function RunHeader({ run, active, wsState }: Props) {
 function basename(path: string): string {
   const parts = path.split(/[\\/]/);
   return parts[parts.length - 1] || path;
+}
+
+// RunNameEditor is the inline edit affordance for the run name. Mounted
+// only while editing; auto-focuses and selects on mount. Enter commits,
+// Escape (or blur) cancels. The id stays stable — the rename only
+// updates the human-readable label.
+function RunNameEditor({
+  initial,
+  onSubmit,
+  onCancel,
+}: {
+  initial: string;
+  onSubmit: (next: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const ref = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, []);
+  return (
+    <input
+      ref={ref}
+      type="text"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          onSubmit(value);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
+      onBlur={() => onSubmit(value)}
+      className="font-medium text-sm bg-surface-2 border border-accent/60 rounded px-1.5 py-0.5 min-w-[16rem] max-w-md focus:outline-none focus:border-accent"
+      maxLength={200}
+      aria-label="Rename run"
+    />
+  );
 }
 
 // compactDir shortens a long absolute path for the run header: the
