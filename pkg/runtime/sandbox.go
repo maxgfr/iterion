@@ -14,7 +14,9 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -168,9 +170,13 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	// Inject the attachments bind-mount BEFORE the driver prepares
 	// resources. Read-only so an agent inside the sandbox can never
 	// corrupt the run store. Skipped when the host dir does not
-	// exist yet (no attachments declared).
+	// exist yet (no attachments declared); non-ENOENT errors (typically
+	// EACCES on a locked-down directory) are surfaced at warn so the
+	// resulting `{{attachments.X}}` template miss has a paper trail.
 	if p.AttachmentsHostDir != "" {
-		if _, statErr := os.Stat(p.AttachmentsHostDir); statErr == nil {
+		_, statErr := os.Stat(p.AttachmentsHostDir)
+		switch {
+		case statErr == nil:
 			containerPath := p.AttachmentsContainerPath
 			if containerPath == "" {
 				containerPath = "/run/iterion/attachments"
@@ -178,6 +184,12 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 			spec.Mounts = append(spec.Mounts,
 				fmt.Sprintf("source=%s,target=%s,type=bind,readonly", p.AttachmentsHostDir, containerPath),
 			)
+		case errors.Is(statErr, fs.ErrNotExist):
+			// no attachments declared yet — silent skip
+		default:
+			if logger != nil {
+				logger.Warn("runtime: sandbox attachments host dir %s: %v — skipping mount", p.AttachmentsHostDir, statErr)
+			}
 		}
 	}
 
@@ -189,7 +201,9 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	// below so it lands on every `docker exec` and the recipe author
 	// doesn't have to remember the container path string).
 	if p.RunFilesHostDir != "" {
-		if _, statErr := os.Stat(p.RunFilesHostDir); statErr == nil {
+		_, statErr := os.Stat(p.RunFilesHostDir)
+		switch {
+		case statErr == nil:
 			containerPath := p.RunFilesContainerPath
 			if containerPath == "" {
 				containerPath = "/iterion/artifact-files"
@@ -201,6 +215,12 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 				spec.Env = map[string]string{}
 			}
 			spec.Env["ITERION_ARTIFACT_FILES_DIR"] = containerPath
+		case errors.Is(statErr, fs.ErrNotExist):
+			// no run-files dir provisioned — silent skip
+		default:
+			if logger != nil {
+				logger.Warn("runtime: sandbox run-files host dir %s: %v — skipping mount", p.RunFilesHostDir, statErr)
+			}
 		}
 	}
 
@@ -209,7 +229,9 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	// host. Independent of workspace bind-mount because the cache
 	// slot lives under the user cache dir, not the workspace.
 	if p.BundleHostDir != "" {
-		if _, statErr := os.Stat(p.BundleHostDir); statErr == nil {
+		_, statErr := os.Stat(p.BundleHostDir)
+		switch {
+		case statErr == nil:
 			containerPath := p.BundleContainerPath
 			if containerPath == "" {
 				containerPath = "/run/iterion/bundle"
@@ -217,6 +239,12 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 			spec.Mounts = append(spec.Mounts,
 				fmt.Sprintf("source=%s,target=%s,type=bind,readonly", p.BundleHostDir, containerPath),
 			)
+		case errors.Is(statErr, fs.ErrNotExist):
+			// bundle resources not materialised yet — silent skip
+		default:
+			if logger != nil {
+				logger.Warn("runtime: sandbox bundle host dir %s: %v — skipping mount", p.BundleHostDir, statErr)
+			}
 		}
 	}
 
