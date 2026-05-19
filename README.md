@@ -4,9 +4,9 @@
 
 # Iterion
 
-**Declarative workflow orchestration for AI agents.**
+**Bots, as code.** *Declarative workflow orchestration for AI agents.*
 
-Define complex, multi-agent LLM workflows as readable `.iter` / `.bot` files — chain agents, judges, routers, human gates, parallel branches, bounded loops, and budget caps into a single, auditable execution graph.
+Define your bots as readable `.bot` files — chain agents, judges, routers, human gates, parallel branches, bounded loops, and budget caps into a single, auditable execution graph.
 
 > ⚠️ **This project is highly experimental.** APIs, DSL syntax, and storage formats may change without notice. Use at your own risk in production environments. Feedback and contributions are welcome!
 
