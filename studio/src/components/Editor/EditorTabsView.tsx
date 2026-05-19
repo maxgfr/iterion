@@ -5,11 +5,11 @@ import { useShallow } from "zustand/react/shallow";
 
 import EditorTabHost from "@/components/shared/EditorTabHost";
 import InnerTabBar from "@/components/shared/InnerTabBar";
+import RecentFilesPanel from "@/components/Home/RecentFilesPanel";
 import {
   selectEditorTabs,
   useTabsStore,
 } from "@/store/tabs";
-import { useUIStore } from "@/store/ui";
 
 // EditorTabsView is the /editor route. It hosts an inner tab strip
 // listing every open editor tab (one per .iter file) and renders all
@@ -32,7 +32,6 @@ export default function EditorTabsView() {
   // "Maximum update depth exceeded" via the getSnapshot caching rule).
   const tabs = useTabsStore(useShallow(selectEditorTabs));
   const activeTabId = useTabsStore((s) => s.activeEditorTabId);
-  const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
 
   const fileParam = useMemo(() => {
     const sp = new URLSearchParams(search);
@@ -40,21 +39,13 @@ export default function EditorTabsView() {
   }, [search]);
 
   // URL → tab: when `?file=X` is present, ensure the matching editor
-  // tab exists and is active. When the route is `/editor` with no
-  // file param and no editor tabs are open yet, auto-create a blank
-  // "untitled" tab so the user lands on an empty canvas instead of
-  // an empty state. Both branches are idempotent — openTab focuses
-  // any existing tab with the same params.
+  // tab exists and is active. Idempotent on repeat because openTab
+  // focuses an existing tab with the same params. When the URL is
+  // bare `/editor` and no tabs exist, the empty-state view (below)
+  // takes over and presents the picker instead of an empty editor.
   useEffect(() => {
-    const store = useTabsStore.getState();
-    if (fileParam) {
-      store.openTab("editor", { file: fileParam });
-      return;
-    }
-    const hasAny = store.tabs.some((t) => t.kind === "editor");
-    if (!hasAny) {
-      store.openTab("editor", {}, "untitled.bot");
-    }
+    if (!fileParam) return;
+    useTabsStore.getState().openTab("editor", { file: fileParam });
   }, [fileParam]);
 
   // Tab → URL: synchronous on user action. Click → activate + push URL.
@@ -102,30 +93,21 @@ export default function EditorTabsView() {
           onNewTab={handleNewTab}
           newTabLabel="New editor tab"
           icon={() => <Pencil2Icon className="w-3.5 h-3.5 shrink-0" />}
-          emptyState={
-            <span>
-              No editor tabs open — pick a workflow from{" "}
-              <button
-                type="button"
-                className="underline hover:text-fg-default"
-                onClick={() => setCommandPaletteOpen(true)}
-              >
-                the command palette
-              </button>{" "}
-              or{" "}
-              <button
-                type="button"
-                className="underline hover:text-fg-default"
-                onClick={() => setLocation("/")}
-              >
-                Home
-              </button>
-              .
-            </span>
-          }
         />
-        <div className="flex-1 grid place-items-center text-fg-muted text-sm">
-          Open a .iter file to start editing.
+        <div className="flex-1 overflow-auto">
+          <div className="max-w-md mx-auto py-10 px-4 space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold text-fg-default">
+                Start editing a workflow
+              </h2>
+              <p className="text-xs text-fg-muted mt-1">
+                Pick an existing file, fork an example, or open a fresh
+                blank canvas. Each one opens in its own editor tab so
+                you can work on several in parallel.
+              </p>
+            </div>
+            <RecentFilesPanel variant="plain" />
+          </div>
         </div>
       </div>
     );
@@ -138,8 +120,8 @@ export default function EditorTabsView() {
         activeTabId={activeTabId}
         onSelect={handleSelect}
         onClose={handleClose}
-        onNewTab={() => setCommandPaletteOpen(true)}
-        newTabLabel="Open a workflow"
+        onNewTab={handleNewTab}
+        newTabLabel="New editor tab"
         icon={() => <Pencil2Icon className="w-3.5 h-3.5 shrink-0" />}
       />
       <div className="flex-1 min-h-0 relative">

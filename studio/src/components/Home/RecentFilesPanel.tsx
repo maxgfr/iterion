@@ -9,12 +9,11 @@ import {
 } from "@radix-ui/react-icons";
 
 import * as api from "@/api/client";
-import { useDocumentStore } from "@/store/document";
+import { getOrCreateDocumentStore } from "@/store/document";
 import { useRecentsStore } from "@/store/recents";
+import { useTabsStore } from "@/store/tabs";
 import { useUIStore } from "@/store/ui";
 import { useConfirm } from "@/hooks/useConfirm";
-import { DISCARD_CHANGES_PROMPT } from "@/lib/copy";
-import { createEmptyDocument } from "@/lib/defaults";
 import { basename } from "@/lib/format";
 import { EmptyState } from "@/components/ui/EmptyState";
 
@@ -38,14 +37,22 @@ function loadExamples(): Promise<string[]> {
   return examplesPromise;
 }
 
-export default function RecentFilesPanel() {
+type Variant = "card" | "plain";
+
+interface Props {
+  // "card" (default): bordered section with header, used on Home.
+  // "plain": no chrome, used as the EditorTabsView empty state where
+  // the host already provides a centered container.
+  variant?: Variant;
+}
+
+// RecentFilesPanel (a.k.a. workflow picker) shows the three ways to
+// start an editor tab: a fresh blank workflow, one of the bundled
+// examples, or one of the user's recent files. Every entry point
+// opens (or focuses) an editor tab via the tabs store — never the
+// singleton document store — so multi-file editing stays consistent.
+export default function RecentFilesPanel({ variant = "card" }: Props) {
   const [, setLocation] = useLocation();
-  const setDocument = useDocumentStore((s) => s.setDocument);
-  const setDiagnostics = useDocumentStore((s) => s.setDiagnostics);
-  const setCurrentFilePath = useDocumentStore((s) => s.setCurrentFilePath);
-  const setCurrentSource = useDocumentStore((s) => s.setCurrentSource);
-  const markSaved = useDocumentStore((s) => s.markSaved);
-  const isDirty = useDocumentStore((s) => s.isDirty);
   const recents = useRecentsStore((s) => s.recents);
   const pushRecent = useRecentsStore((s) => s.pushRecent);
   const removeRecent = useRecentsStore((s) => s.removeRecent);
@@ -59,8 +66,6 @@ export default function RecentFilesPanel() {
 
   useEffect(() => {
     let cancelled = false;
-    // Errors are swallowed: examples are a nice-to-have, hiding the
-    // subsection is preferable to a toast on every landing.
     loadExamples()
       .then((list) => {
         if (!cancelled) setExamples(list);
@@ -71,86 +76,46 @@ export default function RecentFilesPanel() {
     };
   }, []);
 
-  // Expand examples by default when the user has no recents — gives
-  // first-time users an obvious starting point.
   useEffect(() => {
     if (recents.length === 0 && examples.length > 0) setExamplesOpen(true);
   }, [recents.length, examples.length]);
 
-  const confirmDiscard = useCallback(async () => {
-    if (!isDirty()) return true;
-    return confirm(DISCARD_CHANGES_PROMPT);
-  }, [isDirty, confirm]);
-
-  const handleNewBlank = useCallback(async () => {
-    if (!(await confirmDiscard())) return;
-    setDocument(createEmptyDocument());
-    setDiagnostics([], []);
-    setCurrentFilePath(null);
-    setCurrentSource(null);
-    markSaved();
+  const handleNewBlank = useCallback(() => {
+    useTabsStore.getState().newEditorTab();
     setLocation("/editor");
-  }, [
-    confirmDiscard,
-    setDocument,
-    setDiagnostics,
-    setCurrentFilePath,
-    setCurrentSource,
-    markSaved,
-    setLocation,
-  ]);
+  }, [setLocation]);
 
   const handleOpenRecent = useCallback(
-    async (path: string) => {
-      if (!(await confirmDiscard())) return;
-      setBusy(true);
-      try {
-        const result = await api.openFile(path);
-        setDocument(result.document);
-        setDiagnostics(result.diagnostics);
-        setCurrentFilePath(result.path);
-        setCurrentSource(result.source);
-        pushRecent(result.path);
-        markSaved();
-        setLocation("/editor");
-      } catch (err) {
-        const message = (err as Error).message ?? "";
-        const isMissing = /file not found|no such file|404/i.test(message);
-        if (isMissing) {
-          removeRecent(path);
-          addToast(`Removed missing file from recents: ${path}`, "warning");
-        } else {
-          addToast("Open failed", "error");
-        }
-      } finally {
-        setBusy(false);
-      }
+    (path: string) => {
+      // Opening a recent file routes through openTab — EditorTabHost
+      // will fetch the document via api.openFile on mount and bind it
+      // to the per-tab store. Re-clicking the same path focuses the
+      // existing tab instead of reloading.
+      useTabsStore.getState().openTab("editor", { file: path });
+      pushRecent(path);
+      setLocation(`/editor?file=${encodeURIComponent(path)}`);
     },
-    [
-      confirmDiscard,
-      setDocument,
-      setDiagnostics,
-      setCurrentFilePath,
-      setCurrentSource,
-      pushRecent,
-      removeRecent,
-      markSaved,
-      addToast,
-      setLocation,
-    ],
+    [pushRecent, setLocation],
   );
 
   const handleOpenExample = useCallback(
     async (name: string) => {
-      if (!(await confirmDiscard())) return;
       setBusy(true);
       try {
+        // Examples live behind a dedicated endpoint and aren't files
+        // the user can save back to. Load the content first, spawn a
+        // fresh untitled tab via newEditorTab, then push the loaded
+        // document into the tab's store directly. The tab stays
+        // "dirty/unsaved" so the user knows they need to Save As.
         const result = await api.loadExample(name);
-        setDocument(result.document);
-        setDiagnostics(result.diagnostics);
-        setCurrentFilePath(`examples/${name}`);
-        setCurrentSource(null);
-        markSaved();
+        const tabId = useTabsStore.getState().newEditorTab(name);
+        const docStore = getOrCreateDocumentStore(tabId);
+        const s = docStore.getState();
+        s.setDocument(result.document);
+        s.setDiagnostics(result.diagnostics);
+        s.setCurrentSource(result.source);
+        // No setCurrentFilePath — the example isn't on disk under
+        // this name in the user's workspace.
         setLocation("/editor");
       } catch {
         addToast("Failed to open example", "error");
@@ -158,17 +123,125 @@ export default function RecentFilesPanel() {
         setBusy(false);
       }
     },
-    [
-      confirmDiscard,
-      setDocument,
-      setDiagnostics,
-      setCurrentFilePath,
-      setCurrentSource,
-      markSaved,
-      addToast,
-      setLocation,
-    ],
+    [addToast, setLocation],
   );
+
+  const body = (
+    <div className={variant === "card" ? "p-3 space-y-3" : "space-y-3"}>
+      <button
+        onClick={handleNewBlank}
+        disabled={busy}
+        className="w-full flex items-center gap-2 px-3 py-2 rounded-md bg-accent-soft hover:bg-accent/20 border border-accent/40 text-sm disabled:opacity-50"
+      >
+        <FilePlusIcon className="w-4 h-4" />
+        <span className="font-medium">New blank workflow</span>
+      </button>
+
+      {examples.length > 0 && (
+        <div>
+          <button
+            onClick={() => setExamplesOpen((v) => !v)}
+            className="w-full flex items-center gap-1 text-xs font-medium text-fg-muted hover:text-fg-default px-1"
+          >
+            {examplesOpen ? (
+              <ChevronDownIcon className="w-3 h-3" />
+            ) : (
+              <ChevronRightIcon className="w-3 h-3" />
+            )}
+            <span>Examples ({examples.length})</span>
+          </button>
+          {examplesOpen && (
+            <ul className="mt-1 space-y-0.5">
+              {examples.map((name) => (
+                <li key={name}>
+                  <button
+                    onClick={() => handleOpenExample(name)}
+                    disabled={busy}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-surface-2 text-left text-xs disabled:opacity-50"
+                  >
+                    <FileIcon className="w-3.5 h-3.5 text-fg-subtle shrink-0" />
+                    <span className="truncate">{name}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      <div>
+        <div className="flex items-center justify-between px-1">
+          <span className="text-xs font-medium text-fg-muted">
+            Recent ({recents.length})
+          </span>
+          {recents.length > 0 && (
+            <button
+              onClick={async () => {
+                const ok = await confirm({
+                  title: "Clear recent files?",
+                  message:
+                    "All entries in the Recent list will be removed. Your files on disk are not affected.",
+                  confirmLabel: "Clear",
+                  confirmVariant: "danger",
+                });
+                if (ok) clearRecents();
+              }}
+              className="text-[10px] text-fg-subtle hover:text-fg-default"
+            >
+              Clear all
+            </button>
+          )}
+        </div>
+        {recents.length === 0 ? (
+          <EmptyState
+            className="mt-2 py-3"
+            message={
+              examples.length > 0
+                ? "No recent files yet — start from an example above or create a new workflow."
+                : "No recent files yet — create a new workflow."
+            }
+          />
+        ) : (
+          <ul className="mt-1 space-y-0.5">
+            {recents.map((path) => (
+              <li key={path} className="group flex items-center gap-1">
+                <button
+                  onClick={() => handleOpenRecent(path)}
+                  disabled={busy}
+                  className="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded hover:bg-surface-2 text-left text-xs disabled:opacity-50"
+                  title={path}
+                >
+                  <FileIcon className="w-3.5 h-3.5 text-fg-subtle shrink-0" />
+                  <span className="font-medium truncate">
+                    {basename(path)}
+                  </span>
+                  {basename(path) !== path && (
+                    <span className="text-fg-subtle text-[10px] truncate">
+                      {path}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeRecent(path);
+                  }}
+                  className="p-1 text-fg-subtle hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Remove from recents"
+                  aria-label={`Remove ${path} from recents`}
+                >
+                  <TrashIcon className="w-3.5 h-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {confirmDialog}
+    </div>
+  );
+
+  if (variant === "plain") return body;
 
   return (
     <section className="flex flex-col bg-surface-1 border border-border-default rounded-lg overflow-hidden">
@@ -177,118 +250,7 @@ export default function RecentFilesPanel() {
           Workflows
         </h2>
       </header>
-
-      <div className="p-3 space-y-3">
-        <button
-          onClick={handleNewBlank}
-          disabled={busy}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-md bg-accent-soft hover:bg-accent/20 border border-accent/40 text-sm disabled:opacity-50"
-        >
-          <FilePlusIcon className="w-4 h-4" />
-          <span className="font-medium">New blank workflow</span>
-        </button>
-
-        {examples.length > 0 && (
-          <div>
-            <button
-              onClick={() => setExamplesOpen((v) => !v)}
-              className="w-full flex items-center gap-1 text-xs font-medium text-fg-muted hover:text-fg-default px-1"
-            >
-              {examplesOpen ? (
-                <ChevronDownIcon className="w-3 h-3" />
-              ) : (
-                <ChevronRightIcon className="w-3 h-3" />
-              )}
-              <span>Examples ({examples.length})</span>
-            </button>
-            {examplesOpen && (
-              <ul className="mt-1 space-y-0.5">
-                {examples.map((name) => (
-                  <li key={name}>
-                    <button
-                      onClick={() => handleOpenExample(name)}
-                      disabled={busy}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-surface-2 text-left text-xs disabled:opacity-50"
-                    >
-                      <FileIcon className="w-3.5 h-3.5 text-fg-subtle shrink-0" />
-                      <span className="truncate">{name}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-
-        <div>
-          <div className="flex items-center justify-between px-1">
-            <span className="text-xs font-medium text-fg-muted">
-              Recent ({recents.length})
-            </span>
-            {recents.length > 0 && (
-              <button
-                onClick={async () => {
-                  const ok = await confirm({
-                    title: "Clear recent files?",
-                    message: "All entries in the Recent list will be removed. Your files on disk are not affected.",
-                    confirmLabel: "Clear",
-                    confirmVariant: "danger",
-                  });
-                  if (ok) clearRecents();
-                }}
-                className="text-[10px] text-fg-subtle hover:text-fg-default"
-              >
-                Clear all
-              </button>
-            )}
-          </div>
-          {recents.length === 0 ? (
-            <EmptyState
-              className="mt-2 py-3"
-              message={
-                examples.length > 0
-                  ? "No recent files yet — start from an example above or create a new workflow."
-                  : "No recent files yet — create a new workflow."
-              }
-            />
-          ) : (
-            <ul className="mt-1 space-y-0.5">
-              {recents.map((path) => (
-                <li key={path} className="group flex items-center gap-1">
-                  <button
-                    onClick={() => handleOpenRecent(path)}
-                    disabled={busy}
-                    className="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded hover:bg-surface-2 text-left text-xs disabled:opacity-50"
-                    title={path}
-                  >
-                    <FileIcon className="w-3.5 h-3.5 text-fg-subtle shrink-0" />
-                    <span className="font-medium truncate">
-                      {basename(path)}
-                    </span>
-                    {basename(path) !== path && (
-                      <span className="text-fg-subtle text-[10px] truncate">
-                        {path}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeRecent(path);
-                    }}
-                    className="p-1 text-fg-subtle hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Remove from recents"
-                    aria-label={`Remove ${path} from recents`}
-                  >
-                    <TrashIcon className="w-3.5 h-3.5" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-      {confirmDialog}
+      {body}
     </section>
   );
 }

@@ -92,10 +92,16 @@ function basename(path: string): string {
 // label so opening a file (deep link, RecentFiles click, Save As)
 // retitles the tab. Hosted under DocumentStoreProvider so the selector
 // hits the per-tab store, not the module default.
+//
+// Only acts when `currentFilePath` is non-null. Resetting the label to
+// "untitled.bot" whenever path is null would race the openFile
+// resolution on every new tab open and clobber labels set by the
+// caller (e.g. an example name passed to newEditorTab).
 function TabLabelSync({ tabId }: { tabId: string }) {
   const path = useDocumentStore((s) => s.currentFilePath);
   useEffect(() => {
-    const next = path ? basename(path) : "untitled.bot";
+    if (!path) return;
+    const next = basename(path);
     const tabs = useTabsStore.getState().tabs;
     const current = tabs.find((t) => t.id === tabId);
     if (!current || current.label === next) return;
