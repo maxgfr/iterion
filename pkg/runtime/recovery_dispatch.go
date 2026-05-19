@@ -49,7 +49,10 @@ func (e *Engine) handleNodeFailure(ctx context.Context, rs *runState, nodeID str
 		emitData["error"] = execErr.Error()
 	}
 	if err := e.emit(rs.ctx, rs.runID, store.EventNodeRecovery, nodeID, emitData); err != nil {
-		e.logger.Warn("recovery: failed to emit recovery event: %v", err)
+		// Best-effort — recovery proceeds even when the event store is
+		// down; include code + action so the gap is debuggable.
+		e.logger.Warn("recovery: failed to emit recovery event for node %q (code=%s action=%v attempt=%d): %v",
+			nodeID, code, action.Kind, bucket[code], err)
 	}
 
 	if action.Kind == RecoveryCompactAndRetry {

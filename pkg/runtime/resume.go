@@ -156,10 +156,16 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 			return fmt.Errorf("runtime: write human artifact: %w", err)
 		}
 		artifactVersions[humanNodeID] = version + 1
-		_ = e.emit(ctx, runID, store.EventArtifactWritten, humanNodeID, map[string]interface{}{
+		// The artifact itself is durably written; the event is
+		// observational. Best-effort emit — log the failure so the
+		// observability gap is visible rather than swallowing it
+		// entirely on the resume path.
+		if err := e.emit(ctx, runID, store.EventArtifactWritten, humanNodeID, map[string]interface{}{
 			"publish": pub,
 			"version": version,
-		})
+		}); err != nil && e.logger != nil {
+			e.logger.Warn("runtime: resume: failed to emit artifact_written for human node %q version %d: %v", humanNodeID, version, err)
+		}
 	}
 
 	// Mark human node as finished.
@@ -224,7 +230,14 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 		// follow-up /resume can complete once docker is unblocked.
 		stubCp := &store.Checkpoint{NodeID: humanNodeID}
 		if err := e.store.FailRunResumable(ctx, runID, stubCp, sbErr.Error()); err != nil {
-			_ = e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, sbErr.Error())
+			// FailRunResumable failed too — fall back to a hard
+			// "failed" status flip so the run doesn't appear stuck.
+			// If even that fails, log loudly: the store is in a bad
+			// state and silently dropping the second failure would
+			// leave the run in `running` forever.
+			if uerr := e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, sbErr.Error()); uerr != nil && e.logger != nil {
+				e.logger.Warn("runtime: resume: failed both FailRunResumable (%v) and UpdateRunStatus (%v) for run %s after sandbox error: %v", err, uerr, runID, sbErr)
+			}
 		}
 		return fmt.Errorf("runtime: sandbox: %w", sbErr)
 	}
