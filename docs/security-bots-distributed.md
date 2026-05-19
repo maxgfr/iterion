@@ -2,10 +2,11 @@
 
 # Distributed security scans — design (Cap. 3)
 
-> **Status: V1 foundations shipped (local-mode primitive + runtime
-> fields + tests). Bundle integration + cloud-mode path pending.**
-> See "Status & shipped pieces" at the bottom. Targeted for parity
-> with deepsec's `pnpm deepsec sandbox process --sandboxes N
+> **Status: deepsec parity SHIPPED.** Local-mode primitive +
+> runtime fields + bundle integration + cloud-mode (HTTP POST to
+> the server's launch endpoint) all wired. See "Status & shipped
+> pieces" at the bottom for the exhaustive list. Parity target:
+> deepsec's `pnpm deepsec sandbox process --sandboxes N
 > --concurrency M`.
 
 ## Motivation
@@ -260,22 +261,34 @@ aggregated JSON envelope on stdout. Unit tests
 disjoint-parent isolation, remainder shard, id format, empty
 input.
 
-⏳ Step 4 — Bundle integration: requires the scanner tool nodes
-in `sec-audit-source/main.bot` to accept a `--var file_filter`
-(comma-separated paths) so a child run scans only its slice. The
-scanners (`semgrep`, `gosec`, `bandit`, `gitleaks`, `trivy`)
-each support `--include` / explicit file args, so the change is
-in the command templates rather than the runtime. **Pending.**
+✅ Step 4 — Bundle integration: `examples/sec-audit-source/main.bot`
+now has `--var shard_size` (default 0 = no fan-out), `--var
+shard_concurrency` (default 4), `--var file_filter` (CSV of
+paths). Two new tool nodes:
+- `plan_shards`: walks the workspace (same exclusions as the
+  scanners) and writes the file list to
+  `.iterion/security/scan/shard-files.json` when `shard_size > 0`.
+- `dispatch_shards`: invokes `iterion __scan-shards`, captures
+  the JSON envelope to `.iterion/security/scan/shards.json`, and
+  returns a structured summary. Children re-run the same workflow
+  with `shard_size=0` so they fall through to the single-process
+  pipeline on their assigned `file_filter` slice.
+The `triage` prompt + schema accept `file_filter` and DROP every
+candidate whose `file` is not in the list before downstream.
 
-⏳ Step 5 — Cloud-mode publishing: swap the local
-`exec.CommandContext` in `dispatchLocal` for a NATS JetStream
-publish via `pkg/server/cloudpublisher`. The parent run id +
-shard fields go into the published `RunMessage`; the existing
-runner pool drains the queue with `MaxAckPending=1`. No new
-NATS topic, no event-driven aggregation — the parent polls the
-store. **Pending.**
+✅ Step 5 — Cloud-mode publishing: `iterion __scan-shards
+--mode=cloud` (or auto when `ITERION_SERVER_URL` is set) POSTs to
+the server's `/api/v1/runs/launch` endpoint per shard, passing
+`parent_run_id`, `shard_index`, `shard_count`, `shard_label`. The
+server (cloudpublisher) persists those on the queued Run AND on
+the published RunMessage. The existing runner pool drains the
+queue; the parent (the `__scan-shards` invocation) polls the
+shared store for each child's terminal status. No new NATS topic
+or event-driven aggregation — polling matches the local path.
 
 ⏳ Step 6 — Studio parent/child tree view. **Deferred to V2.**
+The persisted fields are in place; the SPA still renders shards
+as plain peer runs until a future iteration groups them.
 
 ## How to use the primitive today (manual integration)
 

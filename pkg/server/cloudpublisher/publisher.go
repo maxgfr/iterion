@@ -255,6 +255,14 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 		QueuedAt:      &now,
 		TenantID:      tenantID,
 		OwnerID:       ownerID,
+		// Cap. 3 sharding fields — propagate to the persisted Run so
+		// studio surfaces can render the parent/child relationship,
+		// and onto the published RunMessage below so the runner pod
+		// that claims this work knows its place in the shard set.
+		ParentRunID: spec.ParentRunID,
+		ShardIndex:  spec.ShardIndex,
+		ShardCount:  spec.ShardCount,
+		ShardLabel:  spec.ShardLabel,
 	}
 	if err := p.store.SaveRun(ctx, r); err != nil {
 		return 0, fmt.Errorf("cloudpublisher: save run: %w", err)
@@ -288,6 +296,14 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 		PublishedAtRFC: time.Now().UTC().Format(time.RFC3339Nano),
 		TenantID:       tenantID,
 		OwnerID:        ownerID,
+		// Cap. 3 sharding: when this run is a child shard, the runner
+		// pod that picks it up sees its place in the set so the studio
+		// can group siblings and so a future event-based aggregator
+		// can correlate completions.
+		ParentRunID: spec.ParentRunID,
+		ShardIndex:  spec.ShardIndex,
+		ShardCount:  spec.ShardCount,
+		ShardLabel:  spec.ShardLabel,
 	}
 	if _, err := p.nats.PublishRun(ctx, msg); err != nil {
 		// Best-effort: roll the run doc back to failed so the studio

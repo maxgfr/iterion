@@ -13,16 +13,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -135,9 +138,6 @@ func runScanShards(ctx context.Context, out io.Writer) error {
 	plans := planShards(files, scanShardsOpts.shardSize, scanShardsOpts.parentRunID)
 
 	mode := resolveMode(scanShardsOpts.mode)
-	if mode == "cloud" {
-		return fmt.Errorf("__scan-shards: --mode=cloud is not implemented yet; use --mode=local or --mode=auto (which falls back to local without a NATS URL)")
-	}
 
 	baseVars, err := parseBaseVars(scanShardsOpts.baseVarsJSON)
 	if err != nil {
@@ -149,7 +149,12 @@ func runScanShards(ctx context.Context, out io.Writer) error {
 	defer cancel()
 
 	start := time.Now()
-	results := dispatchLocal(ctx, plans, baseVars)
+	var results []shardResult
+	if mode == "cloud" {
+		results = dispatchCloud(ctx, plans, baseVars)
+	} else {
+		results = dispatchLocal(ctx, plans, baseVars)
+	}
 
 	// Re-attach a tail poll to capture terminal statuses from the store.
 	rs, openErr := store.New(scanShardsOpts.storeDir)
@@ -182,7 +187,7 @@ func runScanShards(ctx context.Context, out io.Writer) error {
 	rep := scanShardsReport{
 		ParentRunID:  scanShardsOpts.parentRunID,
 		Workflow:     scanShardsOpts.workflow,
-		Mode:         "local",
+		Mode:         mode,
 		ShardCount:   len(plans),
 		ShardSize:    scanShardsOpts.shardSize,
 		FilesTotal:   len(files),
@@ -357,4 +362,108 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "...(truncated)"
+}
+
+// dispatchCloud submits each shard as a queued run via the iterion
+// server's HTTP launch endpoint (POST /api/v1/runs/launch). The
+// server persists the run as `queued`, publishes a RunMessage with
+// parent/shard fields populated, and a runner pool drains the queue.
+// The parent polls the shared store for each child's terminal
+// status — exactly like the local path; only the data plane differs.
+//
+// Required env:
+//   - ITERION_SERVER_URL : base URL of the iterion server (e.g.
+//     https://iterion.example.com)
+//
+// Optional env:
+//   - ITERION_SERVER_TOKEN : Bearer auth, when the server gates the
+//     launch endpoint behind SSO
+func dispatchCloud(ctx context.Context, plans []shardPlan, baseVars map[string]string) []shardResult {
+	results := make([]shardResult, len(plans))
+	for i, p := range plans {
+		results[i] = shardResult{Plan: p}
+	}
+
+	serverURL := strings.TrimRight(os.Getenv("ITERION_SERVER_URL"), "/")
+	if serverURL == "" {
+		for i := range results {
+			results[i].Error = "ITERION_SERVER_URL not set; cloud mode requires the server endpoint"
+		}
+		return results
+	}
+	token := os.Getenv("ITERION_SERVER_TOKEN")
+
+	// Load the workflow source so the server doesn't need a shared
+	// filesystem (cloud-mode endpoint requires inline `source` when
+	// the server is the cloud daemon, per pkg/server/runs.go:200).
+	src, srcErr := os.ReadFile(scanShardsOpts.workflow)
+	if srcErr != nil {
+		for i := range results {
+			results[i].Error = fmt.Sprintf("read workflow source: %v", srcErr)
+		}
+		return results
+	}
+
+	sem := make(chan struct{}, scanShardsOpts.maxConcurrency)
+	var wg sync.WaitGroup
+
+	for i := range plans {
+		i := i
+		p := plans[i]
+
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			shardJSON, _ := json.Marshal(p.Files)
+			vars := map[string]string{
+				scanShardsOpts.shardVarName: string(shardJSON),
+				"parent_run_id":             scanShardsOpts.parentRunID,
+				"shard_index":               fmt.Sprintf("%d", p.Index),
+			}
+			for k, v := range baseVars {
+				vars[k] = v
+			}
+
+			body := map[string]interface{}{
+				"file_path":     scanShardsOpts.workflow,
+				"source":        string(src),
+				"run_id":        p.RunID,
+				"vars":          vars,
+				"parent_run_id": scanShardsOpts.parentRunID,
+				"shard_index":   p.Index,
+				"shard_count":   len(plans),
+				"shard_label":   p.Label,
+			}
+			raw, _ := json.Marshal(body)
+
+			started := time.Now()
+			results[i].Started = &started
+
+			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, serverURL+"/api/v1/runs/launch", bytes.NewReader(raw))
+			req.Header.Set("Content-Type", "application/json")
+			if token != "" {
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			finished := time.Now()
+			results[i].Finished = &finished
+			if err != nil {
+				results[i].Error = fmt.Sprintf("POST /runs/launch: %v", err)
+				return
+			}
+			defer resp.Body.Close()
+			respBody, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode >= 300 {
+				results[i].Error = fmt.Sprintf("server returned %d: %s", resp.StatusCode, truncate(string(respBody), 512))
+				return
+			}
+			// Server accepted (202). The child's terminal status will
+			// surface in the post-dispatch poll loop in runScanShards.
+		}()
+	}
+	wg.Wait()
+	return results
 }

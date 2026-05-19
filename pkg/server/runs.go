@@ -112,6 +112,17 @@ type launchRunRequest struct {
 	// still win. Honored in the in-process spawnRun path; detached mode
 	// (ITERION_RUNS_DETACHED=1) logs a warning and ignores it.
 	Backend string `json:"backend,omitempty"`
+	// Cap. 3 sharding fields. When ParentRunID is non-empty, this
+	// launch is a shard child of an existing parent run; the server
+	// propagates the fields to the persisted Run document and (in
+	// cloud mode) to the published RunMessage so runner pods and the
+	// studio can render parent/child relationships. The hidden CLI
+	// command `iterion __scan-shards --mode=cloud` POSTs runs with
+	// these set; the API is also reachable by other callers.
+	ParentRunID string `json:"parent_run_id,omitempty"`
+	ShardIndex  int    `json:"shard_index,omitempty"`
+	ShardCount  int    `json:"shard_count,omitempty"`
+	ShardLabel  string `json:"shard_label,omitempty"`
 }
 
 type launchRunResponse struct {
@@ -244,6 +255,10 @@ func (s *Server) handleLaunchRun(w http.ResponseWriter, r *http.Request) {
 		AutoMerge:         req.AutoMerge,
 		AttachmentPromote: promote,
 		Backend:           req.Backend,
+		ParentRunID:       req.ParentRunID,
+		ShardIndex:        req.ShardIndex,
+		ShardCount:        req.ShardCount,
+		ShardLabel:        req.ShardLabel,
 	})
 	if err != nil {
 		if errors.Is(err, runtime.ErrServerDraining) {
