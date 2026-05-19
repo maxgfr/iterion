@@ -207,23 +207,12 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 		}
 	}
 
-	// Host-state auto-mount: bind `~/.iterion` (run store) and
-	// `~/.claude` (Claude Code OAuth + sessions) into the container
-	// at the same absolute path as on the host so persistent memory
-	// survives across runs. Mounting at the same absolute path also
-	// keeps Claude Code's per-project key
-	// (~/.claude/projects/<EncodeWorkDirKey(cwd)>) identical inside
-	// and outside the sandbox, which is the only clean way to share
-	// session history between sandboxed and host invocations — the
-	// `CLAUDE_PROJECT_DIR` env var Claude Code exports for hooks is
-	// not read on the way in.
-	//
-	// Precedence: CLI > workflow > env > default "auto". Set
-	// `sandbox.host_state: none` (or `--sandbox-host-state=none`, or
-	// `ITERION_SANDBOX_HOST_STATE=none`) for multi-tenant / cloud
-	// runners that must not leak host OAuth credentials into the
-	// container. The kubernetes driver hard-errors on host_state=auto
-	// (no host filesystem to bind) — see DriverForSpec.
+	// Host-state auto-mount of ~/.iterion + ~/.claude at the same
+	// absolute path host=container. The path-parity is load-bearing:
+	// Claude Code's per-project key is derived from cwd, so without
+	// it sandboxed and host invocations see different session
+	// histories. See docs/sandbox.md "Host state mounts" for the
+	// full rationale, opt-out, and security caveats.
 	var wfHostState string
 	if wf != nil && wf.Sandbox != nil {
 		wfHostState = wf.Sandbox.HostState
@@ -235,11 +224,10 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 		if absErr != nil {
 			absWorkspace = workspacePath
 		}
-		// Match host workspace path inside the container so absolute-
-		// path-derived state (Claude Code project key, prompts that
-		// reference $PROJECT_DIR, tool nodes invoking absolute paths)
-		// resolves identically on both sides. The DSL can still pin a
-		// specific WorkspaceFolder; we only override the empty default.
+		// Workspace at host's absolute path keeps cwd-derived state
+		// (Claude Code project key, ${PROJECT_DIR}, absolute-path tool
+		// args) resolvable identically in/out container. Preserve any
+		// explicit DSL workspace_folder override.
 		if spec.WorkspaceFolder == "" {
 			spec.WorkspaceFolder = absWorkspace
 		}
@@ -294,7 +282,7 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 					"reason": "host_state=auto: align container UID with host so writes to ~/.iterion + ~/.claude remain host-owned",
 				})
 			} else if spec.User != "" && hostUID != 0 {
-				if specUID, ok := parseLeadingUID(spec.User); ok && specUID != hostUID {
+				if specUID, ok := parseUserUID(spec.User); ok && specUID != hostUID {
 					_ = emitEvent(store.EventSandboxUIDMismatchWarning, map[string]interface{}{
 						"spec_user": spec.User,
 						"host_uid":  hostUID,
@@ -802,46 +790,31 @@ func collectHostStateMounts(workspacePath, iterionHomeDir, claudeDir string) []h
 }
 
 // pathContains reports whether parent is an ancestor of (or equal to)
-// child. Both are normalised to clean absolute paths first; on a
-// resolution error we conservatively return false so the caller falls
-// through to the safe "mount it anyway" path.
+// child. Both inputs MUST already be absolute clean paths; the helper
+// exists to encode the "skip overlap" rule, not to normalise — callers
+// pre-normalise via filepath.Abs once and pass results in.
 func pathContains(parent, child string) bool {
 	if parent == "" || child == "" {
 		return false
 	}
-	pa, err := filepath.Abs(parent)
-	if err != nil {
-		return false
-	}
-	ca, err := filepath.Abs(child)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(pa, ca)
+	rel, err := filepath.Rel(parent, child)
 	if err != nil {
 		return false
 	}
 	return rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
 }
 
-// parseLeadingUID extracts the numeric UID prefix from a devcontainer-
-// style remoteUser string ("1000", "1000:1000", "node"). Returns
-// (0, false) when the string doesn't start with digits — in that case
-// the caller can't compare against the host UID without resolving
-// usernames inside the image, and we skip the warning rather than
-// surface a noisy false positive.
-func parseLeadingUID(user string) (int, bool) {
+// parseUserUID parses the UID prefix of a devcontainer-style remoteUser
+// ("1000" or "1000:gid"). Returns (0, false) when the prefix isn't
+// fully numeric (a username like "node") — callers can't compare a
+// non-numeric user against the host UID without inspecting the image's
+// /etc/passwd, so we skip the warning rather than emit a false positive.
+func parseUserUID(user string) (int, bool) {
 	if user == "" {
 		return 0, false
 	}
-	end := 0
-	for end < len(user) && user[end] >= '0' && user[end] <= '9' {
-		end++
-	}
-	if end == 0 {
-		return 0, false
-	}
-	n, err := strconv.Atoi(user[:end])
+	head := strings.SplitN(user, ":", 2)[0]
+	n, err := strconv.Atoi(head)
 	if err != nil {
 		return 0, false
 	}
