@@ -143,6 +143,16 @@ export function useTabLocationSync(): void {
   // otherwise see "new" location and re-call openTab. Comparing against
   // this ref short-circuits that.
   const lastPushedUrl = useRef<string | null>(null);
+  // Track the activeTabId that was current on the previous effect run.
+  // We only push tab→URL when activeTabId *actually changed* between
+  // runs — not on initial mount (URL is then the authoritative source,
+  // see onRehydrateStorage in tabs.ts which always restores activeTabId
+  // to Home) and not on external URL navigation (the URL→tab effect
+  // catches up by openTab/setActive). Without this guard, mount-time
+  // disagreement between rehydrated activeTabId and deep-link URL
+  // triggers an effect-on-effect ping-pong that React aborts with
+  // "Maximum update depth exceeded".
+  const prevActiveTabId = useRef<string | null | undefined>(undefined);
 
   // tab → URL. Depend on activeTabId (a stable string) rather than
   // the derived `activeTab` object — unrelated mutations to the tabs
@@ -150,6 +160,10 @@ export function useTabLocationSync(): void {
   // identity and re-fire the effect needlessly. The body still reads
   // the resolved activeTab to build the URL.
   useEffect(() => {
+    const isFirstRun = prevActiveTabId.current === undefined;
+    const activeChanged = !isFirstRun && prevActiveTabId.current !== activeTabId;
+    prevActiveTabId.current = activeTabId;
+    if (!activeChanged) return;
     if (!activeTab) return;
     const target = urlForTab(activeTab);
     if (target === location) return;
