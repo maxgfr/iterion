@@ -12,11 +12,13 @@ import { ChevronRightIcon } from "@radix-ui/react-icons";
 import type { ArtifactSummary, ExecutionState, RunEvent } from "@/api/runs";
 import { fetchToolBlob, listArtifacts } from "@/api/runs";
 import { formatBytes } from "@/lib/format";
-import { CopyButton, IconButton, Input, LiveDot, StatusBadge, Tabs } from "@/components/ui";
+import { CopyButton, IconButton, Input, LiveDot, Popover, StatusBadge, Tabs } from "@/components/ui";
 import { stepIteration } from "@/lib/eventIter";
 import { formatContextUsage, formatDurationBetween, formatMs } from "@/lib/format";
 import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
 import { readNodeOutputMeta } from "@/lib/delegateMeta";
+import { NodeIcon } from "@/components/icons/NodeIcon";
+import type { NodeKind } from "@/api/types";
 
 import ArtifactDiff from "./ArtifactDiff";
 import { iterationColor } from "./IRNode";
@@ -405,6 +407,83 @@ export default function NodeDetailPanel({
 // Header
 // ---------------------------------------------------------------------------
 
+// IterationCrumb renders the "iter: N" position in the breadcrumb
+// row. When the node has only one execution it stays a static label;
+// for multi-iteration nodes it becomes a button that opens a popover
+// listing every attempt with status + duration so the user can jump
+// between iterations without leaving the right pane.
+function IterationCrumb({
+  exec,
+  executions,
+  selectedIteration,
+  onSelect,
+}: {
+  exec: ExecutionState;
+  executions: ExecutionState[];
+  selectedIteration: number;
+  onSelect: (iter: number) => void;
+}): ReactNode {
+  const idx = executions.findIndex((e) => e.execution_id === exec.execution_id);
+  const position = idx >= 0 ? idx + 1 : 1;
+  const total = executions.length;
+  if (total <= 1) {
+    return <span>iter: {position}</span>;
+  }
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+      side="bottom"
+      align="start"
+      contentClassName="min-w-[220px] p-1.5 text-[11px]"
+      trigger={
+        <button
+          type="button"
+          className="hover:text-fg-default underline-offset-2 hover:underline"
+          title="Jump to a different iteration"
+        >
+          iter: {position}/{total}
+        </button>
+      }
+    >
+      <ul className="space-y-0.5">
+        {executions.map((e, i) => {
+          const active = i === selectedIteration;
+          const duration = formatDurationBetween(e.started_at, e.finished_at);
+          return (
+            <li key={e.execution_id}>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelect(i);
+                  setOpen(false);
+                }}
+                className={`w-full text-left px-2 py-1 rounded flex items-center gap-2 ${
+                  active
+                    ? "bg-accent-soft text-fg-default"
+                    : "hover:bg-surface-2 text-fg-muted"
+                }`}
+              >
+                <span className="font-mono w-6 shrink-0">#{i + 1}</span>
+                <StatusBadge status={e.status} />
+                {duration && (
+                  <span className="text-fg-subtle ml-auto">{duration}</span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </Popover>
+  );
+}
+
+function NodeKindIcon({ kind }: { kind?: string }): ReactNode {
+  if (!kind) return null;
+  return <NodeIcon kind={kind as NodeKind} size={14} />;
+}
+
 function DetailHeader({
   runId,
   filePath,
@@ -475,6 +554,7 @@ function DetailHeader({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <StatusBadge status={exec.status} />
+            <NodeKindIcon kind={exec.kind} />
             <h2 className="text-sm font-semibold truncate" title={exec.ir_node_id}>
               {exec.ir_node_id}
             </h2>
@@ -488,22 +568,12 @@ function DetailHeader({
           <div className="text-fg-subtle text-[10px] flex flex-wrap gap-x-3 gap-y-0.5">
             {exec.kind && <span>kind: {exec.kind}</span>}
             <span>branch: {exec.branch_id}</span>
-            <span>
-              iter:{" "}
-              {(() => {
-                // Display 1-based position in the start-ordered
-                // executions array. Scalar `loop_iteration` is no
-                // longer unique post-Option-3 (the runtime's
-                // currentLoopIteration returns max() across containing
-                // loops so an outer-loop counter can dominate every
-                // attempt of an inner loop), so it cannot be shown
-                // raw here.
-                const idx = executions.findIndex(
-                  (e) => e.execution_id === exec.execution_id,
-                );
-                return idx >= 0 ? idx + 1 : 1;
-              })()}
-            </span>
+            <IterationCrumb
+              exec={exec}
+              executions={executions}
+              selectedIteration={selectedIteration}
+              onSelect={(iter) => onSelectIteration(exec.ir_node_id, iter)}
+            />
             {duration && (
               <button
                 type="button"
