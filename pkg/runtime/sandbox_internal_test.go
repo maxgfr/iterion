@@ -240,7 +240,7 @@ func TestPathContains(t *testing.T) {
 	}
 }
 
-func TestParseLeadingUID(t *testing.T) {
+func TestParseUserUID(t *testing.T) {
 	cases := []struct {
 		input  string
 		want   int
@@ -252,10 +252,11 @@ func TestParseLeadingUID(t *testing.T) {
 		{"1000:1000", 1000, true},
 		{"500:600", 500, true},
 		{"abc:1000", 0, false},
+		{"1000abc", 0, false}, // strict-numeric: no trailing junk
 	}
 	for _, c := range cases {
 		t.Run(c.input, func(t *testing.T) {
-			got, ok := parseLeadingUID(c.input)
+			got, ok := parseUserUID(c.input)
 			if ok != c.wantOK {
 				t.Errorf("ok = %v, want %v", ok, c.wantOK)
 			}
