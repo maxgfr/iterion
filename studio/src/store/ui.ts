@@ -76,6 +76,11 @@ interface UIState {
     arrange: (() => void) | null;
     fitView: (() => void) | null;
   };
+  // Cmd+K palette. Owned by the UI store so AppHeader's chip and the
+  // window-level keydown listener share a single source of truth.
+  commandPaletteOpen: boolean;
+  setCommandPaletteOpen: (open: boolean) => void;
+  toggleCommandPalette: () => void;
   setActiveTab: (tab: SidebarTab) => void;
   toggleSourceView: () => void;
   toggleDiagnosticsPanel: () => void;
@@ -133,6 +138,9 @@ export const useUIStore = create<UIState>((set) => ({
   filesChangedAt: 0,
   pendingFitNodeId: null,
   canvasActions: { arrange: null, fitView: null },
+  commandPaletteOpen: false,
+  setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
+  toggleCommandPalette: () => set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
   setActiveTab: (activeTab) => set({ activeTab }),
   toggleSourceView: () => set((s) => ({ sourceViewOpen: !s.sourceViewOpen })),
   toggleDiagnosticsPanel: () => set((s) => ({ diagnosticsPanelOpen: !s.diagnosticsPanelOpen })),

@@ -1,0 +1,113 @@
+import { useEffect, useMemo } from "react";
+import { useLocation } from "wouter";
+
+import CommandPalette, {
+  type CommandAction,
+} from "@/components/shared/CommandPalette";
+import { useRuns } from "@/hooks/useRuns";
+import { useRecentsStore } from "@/store/recents";
+import { useServerInfoStore } from "@/store/serverInfo";
+import { useThemeStore } from "@/store/theme";
+import { useUIStore } from "@/store/ui";
+
+// GlobalCommandPalette is the route-agnostic Cmd+K palette. It mounts
+// in App and surfaces navigation, recent runs, recent files, and the
+// theme toggle. The editor route owns its own Canvas-scoped palette
+// (Canvas.tsx) because those actions depend on canvas-local handlers
+// (undo/redo wired to React Flow, fitView, layer toggles, …); App
+// suppresses its own listener while the editor is mounted to avoid
+// double-firing on Cmd+K.
+export default function GlobalCommandPalette() {
+  const [location, setLocation] = useLocation();
+  const open = useUIStore((s) => s.commandPaletteOpen);
+  const setOpen = useUIStore((s) => s.setCommandPaletteOpen);
+  const recents = useRecentsStore((s) => s.recents);
+  const { runs } = useRuns({ limit: 5, enabled: open });
+  const serverInfo = useServerInfoStore((s) => s.info);
+  const cycleTheme = useThemeStore((s) => s.cycleMode);
+
+  // The Canvas Cmd+K listener handles the editor route. Everywhere
+  // else, App intercepts Cmd+K and opens this palette.
+  const inEditor = location === "/editor";
+
+  useEffect(() => {
+    if (inEditor) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setOpen(!useUIStore.getState().commandPaletteOpen);
+        const target = e.target as HTMLElement | null;
+        if (target && typeof target.blur === "function") target.blur();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [inEditor, setOpen]);
+
+  const actions: CommandAction[] = useMemo(
+    () => [
+      {
+        id: "nav.home",
+        group: "Navigate",
+        title: "Home",
+        keywords: ["start", "projects"],
+        run: () => setLocation("/"),
+      },
+      {
+        id: "nav.editor",
+        group: "Navigate",
+        title: "Editor",
+        keywords: ["canvas", "design", "edit"],
+        run: () => setLocation("/editor"),
+      },
+      {
+        id: "nav.runs",
+        group: "Navigate",
+        title: "Runs",
+        keywords: ["history", "list", "console"],
+        run: () => setLocation("/runs"),
+      },
+      {
+        id: "nav.board",
+        group: "Navigate",
+        title: "Board",
+        keywords: ["kanban", "issues"],
+        disabled: !serverInfo?.native_tracker_enabled,
+        run: () => setLocation("/board"),
+      },
+      {
+        id: "nav.dispatcher",
+        group: "Navigate",
+        title: "Dispatcher",
+        keywords: ["retries", "queue"],
+        disabled: !serverInfo?.dispatcher_enabled,
+        run: () => setLocation("/dispatcher"),
+      },
+      {
+        id: "theme.cycle",
+        group: "View",
+        title: "Cycle theme (system / light / dark)",
+        keywords: ["dark", "light", "appearance"],
+        run: cycleTheme,
+      },
+      ...runs.slice(0, 5).map<CommandAction>((r) => ({
+        id: `runs.recent.${r.id}`,
+        group: "Recent runs",
+        title: r.name || r.workflow_name,
+        keywords: [r.id, r.workflow_name, r.file_path ?? ""],
+        run: () => setLocation(`/runs/${encodeURIComponent(r.id)}`),
+      })),
+      ...recents.slice(0, 5).map<CommandAction>((path) => ({
+        id: `files.recent.${path}`,
+        group: "Recent files",
+        title: path,
+        run: () => setLocation(`/runs/new?file=${encodeURIComponent(path)}`),
+      })),
+    ],
+    [runs, recents, serverInfo, setLocation, cycleTheme],
+  );
+
+  return (
+    <CommandPalette open={open} actions={actions} onClose={() => setOpen(false)} />
+  );
+}

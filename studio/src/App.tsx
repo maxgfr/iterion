@@ -20,6 +20,7 @@ const SettingsPage = lazy(() => import("@/views/settings/SettingsPage"));
 const TeamPage = lazy(() => import("@/views/teams/TeamPage"));
 
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
+import GlobalCommandPalette from "@/components/shared/GlobalCommandPalette";
 import ToastContainer from "@/components/shared/Toast";
 import MissingCLIBanner from "@/components/MissingCLIBanner";
 import Login from "@/views/Login";
@@ -202,6 +203,7 @@ function AuthedApp() {
         </Switch>
       </Suspense>
       <ToastContainer />
+      <GlobalCommandPalette />
       {/* Settings + ProjectSwitcher are also lazy and need their own
           Suspense boundary because they unmount/remount on open/close. */}
       <Suspense fallback={null}>
