@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { Pencil1Icon } from "@radix-ui/react-icons";
+import { ClockIcon, FileTextIcon, OpenInNewWindowIcon } from "@radix-ui/react-icons";
 
 import type { RunHeader as RunHeaderType } from "@/api/runs";
 import { cancelRun, getRun, loadEvents } from "@/api/runs";
-import { Button, CopyButton, IconButton, LiveDot, StatusBadge, Tooltip } from "@/components/ui";
+import { Button, CopyButton, LiveDot, StatusBadge, Tooltip } from "@/components/ui";
 import WSStatusDot from "@/components/shared/WSStatusDot";
+import { formatRelative } from "@/lib/format";
 import { useRunStore, type WsState } from "@/store/run";
 
 import ResumeDialog from "./ResumeDialog";
@@ -94,106 +95,120 @@ export default function RunHeader({ run, active, wsState }: Props) {
 
   const showFinalization = Boolean(run.final_commit);
 
+  const friendlyName = run.name || run.workflow_name;
+  const startedRel = formatRelative(run.created_at);
+  const finishedRel = run.finished_at ? formatRelative(run.finished_at) : null;
+  const fileBase = run.file_path ? basename(run.file_path) : null;
+
   return (
     <>
-      <div className="shrink-0 border-b border-border-default px-3 sm:px-4 py-2 flex items-center gap-2 sm:gap-3 text-sm flex-wrap">
-        <div className="flex flex-col leading-tight min-w-0 max-w-md">
-          <Tooltip content={run.name || run.workflow_name}>
-            <div className="font-medium truncate" tabIndex={0}>
-              {run.name || run.workflow_name}
+      <div className="shrink-0 border-b border-border-default px-3 sm:px-4 py-2 flex flex-col gap-1.5 text-sm">
+        {/* Row 1: friendly name + status + actions */}
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          <Tooltip content={friendlyName}>
+            <div className="font-medium truncate max-w-md" tabIndex={0}>
+              {friendlyName}
             </div>
           </Tooltip>
-          {run.name && (
-            <Tooltip content={run.workflow_name}>
-              <div className="text-[10px] text-fg-subtle truncate" tabIndex={0}>
-                {run.workflow_name}
-              </div>
+          <StatusBadge status={run.status} />
+          {active && (
+            <LiveDot
+              tone="live"
+              size="sm"
+              label="Run is active in this server process"
+            />
+          )}
+          {error && (
+            <span className="text-[10px] text-danger truncate max-w-xs">{error}</span>
+          )}
+          <div className="ml-auto flex items-center gap-2 flex-wrap">
+            <CopyButton
+              value={run.id}
+              label="copy run id"
+              copiedLabel="run id copied"
+              variant="icon"
+            />
+            <CopyButton
+              value={typeof window === "undefined" ? "" : window.location.href}
+              label="copy share link"
+              copiedLabel="link copied"
+              variant="share"
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void onExport()}
+              title="Download a JSON archive containing the run snapshot + every event"
+            >
+              Export
+            </Button>
+            <WSStatusDot state={wsState} />
+            {canCancel && (
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => void onCancel()}
+                disabled={busy}
+                title="Cancel this run"
+              >
+                Cancel
+              </Button>
+            )}
+            {canResume && (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => setResumeOpen(true)}
+                disabled={busy}
+                title="Resume this run from its last checkpoint"
+              >
+                Resume…
+              </Button>
+            )}
+          </div>
+        </div>
+        {/* Row 2: bot · folder · when. Each cell is muted + small so
+            it stays readable but doesn't compete with the run name. */}
+        <div className="flex items-center gap-3 text-[11px] text-fg-subtle flex-wrap">
+          {fileBase && (
+            <Tooltip content={run.file_path!}>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 hover:text-fg-default focus:outline-none"
+                onClick={() =>
+                  setLocation(
+                    `/editor?file=${encodeURIComponent(run.file_path!)}&from=${encodeURIComponent(run.id)}`,
+                  )
+                }
+                title={`Open ${run.file_path} in the editor`}
+              >
+                <FileTextIcon className="w-3 h-3" />
+                <span className="font-mono truncate max-w-[20rem]">{fileBase}</span>
+                <OpenInNewWindowIcon className="w-2.5 h-2.5 opacity-70" />
+              </button>
             </Tooltip>
           )}
-        </div>
-        {run.file_path && (
-          <IconButton
-            label="Open workflow in editor"
-            tooltip={`Open ${run.file_path} in the studio`}
-            size="sm"
-            variant="ghost"
-            onClick={() =>
-              setLocation(
-                `/editor?file=${encodeURIComponent(run.file_path!)}&from=${encodeURIComponent(run.id)}`,
-              )
-            }
-          >
-            <Pencil1Icon />
-          </IconButton>
-        )}
-        <StatusBadge status={run.status} />
-        {active && (
-          <LiveDot
-            tone="live"
-            size="sm"
-            label="Run is active in this server process"
-          />
-        )}
-        {error && (
-          <span className="text-[10px] text-danger truncate max-w-xs">{error}</span>
-        )}
-        <div className="ml-auto flex items-center gap-2 flex-wrap">
+          {run.work_dir && (
+            <Tooltip content={run.work_dir}>
+              <span className="inline-flex items-center gap-1 font-mono truncate max-w-[20rem]">
+                <FolderGlyph />
+                <span className="truncate">{compactDir(run.work_dir)}</span>
+              </span>
+            </Tooltip>
+          )}
+          <Tooltip content={new Date(run.created_at).toLocaleString()}>
+            <span className="inline-flex items-center gap-1">
+              <ClockIcon className="w-3 h-3" />
+              <span>started {startedRel}</span>
+              {finishedRel && <span>· finished {finishedRel}</span>}
+            </span>
+          </Tooltip>
           <span
-            className="hidden sm:inline text-[10px] text-fg-subtle font-mono"
+            className="ml-auto text-[10px] font-mono opacity-70"
             title="Run ID"
           >
             {run.id}
           </span>
-          <CopyButton
-            value={run.id}
-            label="copy run id"
-            copiedLabel="run id copied"
-            variant="icon"
-          />
-          <CopyButton
-            value={typeof window === "undefined" ? "" : window.location.href}
-            label="copy share link"
-            copiedLabel="link copied"
-            variant="share"
-          />
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void onExport()}
-            title="Download a JSON archive containing the run snapshot + every event"
-          >
-            Export
-          </Button>
-          <WSStatusDot state={wsState} />
-          {/*
-            Only render the Cancel button when the run is actually
-            cancellable. A disabled button on a terminal/untracked run
-            is visual noise — the StatusBadge already says "finished"
-            / "failed" / "cancelled" so the user knows there's nothing
-            to act on. Hiding it cleans up the header.
-          */}
-          {canCancel && (
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => void onCancel()}
-              disabled={busy}
-              title="Cancel this run"
-            >
-              Cancel
-            </Button>
-          )}
-          {canResume && (
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => setResumeOpen(true)}
-              disabled={busy}
-              title="Resume this run from its last checkpoint"
-            >
-              Resume…
-            </Button>
-          )}
         </div>
       </div>
       <WSDisconnectBanner state={wsState} onReconnect={requestWsReconnect} />
@@ -208,6 +223,39 @@ export default function RunHeader({ run, active, wsState }: Props) {
         />
       )}
     </>
+  );
+}
+
+function basename(path: string): string {
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
+
+// compactDir shortens a long absolute path for the run header: the
+// last two segments are usually informative enough, and the tooltip
+// shows the full string for verification.
+function compactDir(dir: string): string {
+  const parts = dir.split(/[\\/]/).filter(Boolean);
+  if (parts.length <= 2) return dir;
+  return `…/${parts.slice(-2).join("/")}`;
+}
+
+function FolderGlyph() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 15 15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <path d="M1.5 4.5h4l1 1h7v6.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-7.5z" />
+    </svg>
   );
 }
 
