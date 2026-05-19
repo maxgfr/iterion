@@ -1,8 +1,9 @@
 import { ListBulletIcon, PlayIcon } from "@radix-ui/react-icons";
-import { useCallback, useEffect } from "react";
+import { Suspense, lazy, useCallback, useEffect } from "react";
 import { useLocation, useParams } from "wouter";
 import { useShallow } from "zustand/react/shallow";
 
+import MainSpinner from "@/components/shared/MainSpinner";
 import RunTabHost from "@/components/shared/RunTabHost";
 import InnerTabBar from "@/components/shared/InnerTabBar";
 import {
@@ -10,18 +11,30 @@ import {
   useTabsStore,
 } from "@/store/tabs";
 
-// RunsTabsView is the /runs/:id route. Same architecture as
-// EditorTabsView: URL → tab on deep-link (effect), tab → URL on user
-// click (callback). See the comment there for the no-bidirectional-
-// effect rationale.
+const RunListView = lazy(() => import("@/components/Runs/RunListView"));
+
+// RunsTabsView is mounted on BOTH `/runs` (list mode) and `/runs/:id`
+// (single-run mode). The pinned "All runs" tab in the inner strip is
+// the list view; clicking it navigates to `/runs` while keeping every
+// open run tab visible in the strip — switching back to a run is one
+// click. Each open run tab keeps its per-runId store + WS mounted in
+// parallel (display:none for the inactive ones) so events accumulate
+// in the background.
+//
+// URL → tab on deep-link via effect; tab → URL on user click in the
+// callbacks (see EditorTabsView for the no-bidirectional-effect rule).
 export default function RunsTabsView() {
   const params = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
   // See EditorTabsView for the rationale on useShallow.
   const tabs = useTabsStore(useShallow(selectRunTabs));
   const activeTabId = useTabsStore((s) => s.activeRunTabId);
+  // pinnedActive is true when the user is on /runs (list view) rather
+  // than a specific run; the pinned "All runs" tab highlights and the
+  // RunListView fills the content area.
+  const pinnedActive = !params.id;
 
-  // URL → tab.
+  // URL → tab: only when we have a specific runId in the URL.
   useEffect(() => {
     if (!params.id) return;
     useTabsStore.getState().openTab("run", { runId: params.id });
@@ -55,58 +68,37 @@ export default function RunsTabsView() {
     icon: <ListBulletIcon className="w-3.5 h-3.5 shrink-0" />,
     label: "All runs",
     onClick: () => setLocation("/runs"),
+    active: pinnedActive,
   };
-
-  if (tabs.length === 0) {
-    return (
-      <div className="h-full flex flex-col">
-        <InnerTabBar
-          tabs={[]}
-          activeTabId={null}
-          onSelect={() => {}}
-          onClose={() => {}}
-          pinnedLead={pinnedRunsList}
-          icon={() => <PlayIcon className="w-3.5 h-3.5 shrink-0" />}
-          emptyState={
-            <span>
-              No run open — pick one from{" "}
-              <button
-                type="button"
-                className="underline hover:text-fg-default"
-                onClick={() => setLocation("/runs")}
-              >
-                the runs list
-              </button>
-              .
-            </span>
-          }
-        />
-        <div className="flex-1 grid place-items-center text-fg-muted text-sm">
-          Open a run to view its progress.
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="h-full flex flex-col">
       <InnerTabBar
         tabs={tabs}
-        activeTabId={activeTabId}
+        activeTabId={pinnedActive ? null : activeTabId}
         onSelect={handleSelect}
         onClose={handleClose}
         pinnedLead={pinnedRunsList}
         icon={() => <PlayIcon className="w-3.5 h-3.5 shrink-0" />}
       />
       <div className="flex-1 min-h-0 relative">
+        <div
+          className={`absolute inset-0 ${pinnedActive ? "block" : "hidden"}`}
+          aria-hidden={pinnedActive ? undefined : true}
+        >
+          <Suspense fallback={<MainSpinner />}>
+            <RunListView />
+          </Suspense>
+        </div>
         {tabs.filter((t) => t.hydrated).map((tab) => {
           const runId = tab.params.runId;
           if (!runId) return null;
+          const visible = !pinnedActive && tab.id === activeTabId;
           return (
             <div
               key={tab.id}
-              className={`absolute inset-0 ${tab.id === activeTabId ? "block" : "hidden"}`}
-              aria-hidden={tab.id === activeTabId ? undefined : true}
+              className={`absolute inset-0 ${visible ? "block" : "hidden"}`}
+              aria-hidden={visible ? undefined : true}
             >
               <RunTabHost runId={runId} tabId={tab.id} />
             </div>
