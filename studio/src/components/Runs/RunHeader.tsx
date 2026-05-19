@@ -5,7 +5,6 @@ import { Pencil1Icon } from "@radix-ui/react-icons";
 import type { RunHeader as RunHeaderType } from "@/api/runs";
 import { cancelRun, getRun, loadEvents } from "@/api/runs";
 import { Button, CopyButton, IconButton, LiveDot, StatusBadge, Tooltip } from "@/components/ui";
-import AppHeader from "@/components/shared/AppHeader";
 import WSStatusDot from "@/components/shared/WSStatusDot";
 import { useRunStore, type WsState } from "@/store/run";
 
@@ -97,7 +96,6 @@ export default function RunHeader({ run, active, wsState }: Props) {
 
   return (
     <>
-      <AppHeader active="runs" />
       <div className="shrink-0 border-b border-border-default px-3 sm:px-4 py-2 flex items-center gap-2 sm:gap-3 text-sm flex-wrap">
         <div className="flex flex-col leading-tight min-w-0 max-w-md">
           <Tooltip content={run.name || run.workflow_name}>

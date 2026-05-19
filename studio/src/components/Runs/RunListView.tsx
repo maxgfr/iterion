@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/Input";
 import { LiveDot } from "@/components/ui/LiveDot";
 import type { RunStatus, RunSummary } from "@/api/runs";
 import { formatRelative } from "@/lib/format";
-import AppHeader from "@/components/shared/AppHeader";
+import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useRuns } from "@/hooks/useRuns";
 import { STATUS_VARIANT, labelForStatus } from "./runStatusMeta";
@@ -110,19 +110,21 @@ export default function RunListView() {
     setSince("all");
   }, []);
 
+  useHeaderSlot({
+    left: (
+      <span className="text-xs font-medium text-fg-default">Runs</span>
+    ),
+    right: (
+      <span className="text-xs text-fg-subtle">
+        {filtersActive
+          ? `${filteredRuns.length} of ${runs.length}`
+          : `${runs.length} total`}
+      </span>
+    ),
+  });
+
   return (
     <div className="h-full flex flex-col overflow-hidden bg-surface-1 text-fg-default">
-      <AppHeader
-        active="runs"
-        rightActions={
-          <span className="text-xs text-fg-subtle">
-            {filtersActive
-              ? `${filteredRuns.length} of ${runs.length}`
-              : `${runs.length} total`}
-          </span>
-        }
-      />
-
       <QueueDepthBar counts={counts} />
 
       <div className="px-4 py-2 flex flex-col gap-2 border-b border-border-default">
@@ -178,7 +180,7 @@ export default function RunListView() {
         </div>
       </div>
 
-      <div id="main-content" tabIndex={-1} className="flex-1 overflow-auto outline-none">
+      <div className="flex-1 overflow-auto">
         {loading && runs.length === 0 ? (
           <EmptyState message="Loading…" />
         ) : error ? (

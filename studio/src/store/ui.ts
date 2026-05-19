@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { create } from "zustand";
 import type { LayerKind } from "@/lib/constants";
 import { TOAST_DURATION_DEFAULT_MS } from "@/lib/constants";
@@ -29,6 +30,7 @@ const INSPECTOR_WIDTH_DEFAULT = 360;
 const INSPECTOR_WIDTH_MIN = 280;
 const INSPECTOR_WIDTH_MAX = 600;
 const INSPECTOR_COLLAPSED_KEY = "iterion.inspectorCollapsed";
+const SIDEBAR_COLLAPSED_KEY = "iterion.sidebarCollapsed";
 
 function readInspectorWidth(): number {
   if (typeof window === "undefined") return INSPECTOR_WIDTH_DEFAULT;
@@ -81,6 +83,16 @@ interface UIState {
   commandPaletteOpen: boolean;
   setCommandPaletteOpen: (open: boolean) => void;
   toggleCommandPalette: () => void;
+  // App shell — collapsible left sidebar.
+  sidebarCollapsed: boolean;
+  toggleSidebarCollapsed: () => void;
+  // Contextual header slots: each route can inject `left` (breadcrumbs,
+  // page title, RunHeader) and/or `right` (action buttons). The
+  // ContextualHeaderBar reads these and renders itself only when at
+  // least one slot is non-null. Pages set/clear via useHeaderSlot().
+  headerLeft: ReactNode | null;
+  headerRight: ReactNode | null;
+  setHeaderSlots: (slots: { left: ReactNode | null; right: ReactNode | null }) => void;
   setActiveTab: (tab: SidebarTab) => void;
   toggleSourceView: () => void;
   toggleDiagnosticsPanel: () => void;
@@ -141,6 +153,18 @@ export const useUIStore = create<UIState>((set) => ({
   commandPaletteOpen: false,
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
   toggleCommandPalette: () => set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
+  sidebarCollapsed: readBooleanFlag(SIDEBAR_COLLAPSED_KEY),
+  toggleSidebarCollapsed: () => set((s) => {
+    const next = !s.sidebarCollapsed;
+    writeBooleanFlag(SIDEBAR_COLLAPSED_KEY, next);
+    return { sidebarCollapsed: next };
+  }),
+  headerLeft: null,
+  headerRight: null,
+  setHeaderSlots: ({ left, right }) => set((s) => {
+    if (s.headerLeft === left && s.headerRight === right) return s;
+    return { headerLeft: left, headerRight: right };
+  }),
   setActiveTab: (activeTab) => set({ activeTab }),
   toggleSourceView: () => set((s) => ({ sourceViewOpen: !s.sourceViewOpen })),
   toggleDiagnosticsPanel: () => set((s) => ({ diagnosticsPanelOpen: !s.diagnosticsPanelOpen })),

@@ -23,7 +23,6 @@ import {
   writeBooleanFlag,
   writeStringFlag,
 } from "@/lib/localStorageFlag";
-import AppHeader from "@/components/shared/AppHeader";
 
 import { buildExecutionsAt } from "@/lib/snapshotReducer";
 
@@ -648,7 +647,7 @@ export default function RunView() {
 
   return (
     <ReactFlowProvider>
-      <div className="h-screen w-screen overflow-hidden flex flex-col bg-surface-0 text-fg-default">
+      <div className="h-full w-full overflow-hidden flex flex-col">
         <RunHeader run={snapshot.run} active={active} wsState={wsState} />
         {isQueued ? (
           <QueuedBanner run={snapshot.run} />
@@ -666,7 +665,7 @@ export default function RunView() {
             />
           </>
         )}
-      <div id="main-content" tabIndex={-1} className="flex-1 min-h-0 flex outline-none">
+      <div className="flex-1 min-h-0 flex">
         <LeftPanel
           runId={runId}
           run={snapshot.run}
@@ -917,8 +916,7 @@ function RunViewLoadError({
   const [, setLocation] = useLocation();
   const isNotFound = status === 404;
   return (
-    <div className="h-screen w-screen flex flex-col items-center justify-center bg-surface-0 gap-4 p-8">
-      <AppHeader active="runs" />
+    <div className="h-full w-full flex flex-col items-center justify-center gap-4 p-8">
       <div className="max-w-md text-center space-y-3 mt-4">
         <h2 className="text-base font-semibold text-fg-default">
           {isNotFound ? "Run not found" : "Run failed to load"}

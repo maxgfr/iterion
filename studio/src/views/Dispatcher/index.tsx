@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 
-import PageShell from "@/components/shared/PageShell";
+import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
 import DispatcherControlBar from "@/components/shared/DispatcherControlBar";
 import { Button } from "@/components/ui/Button";
 import {
@@ -151,21 +151,41 @@ export default function DispatcherView() {
     }
   }, []);
 
+  useHeaderSlot({
+    left: <span className="text-xs font-medium text-fg-default">Dispatcher</span>,
+    right: (
+      <>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!canOperate}
+          title={canOperate ? undefined : "Start the dispatcher first"}
+          onClick={() => void doRefresh()}
+        >
+          Force tick
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!canOperate}
+          title={canOperate ? undefined : "Start the dispatcher first"}
+          onClick={() => void doReload()}
+        >
+          Reload config
+        </Button>
+      </>
+    ),
+  });
+
   if (loading) {
-    return (
-      <PageShell active="dispatcher">
-        <div className="p-8 text-fg-muted">Loading dispatcher state…</div>
-      </PageShell>
-    );
+    return <div className="p-8 text-fg-muted">Loading dispatcher state…</div>;
   }
   if (!snap) {
     return (
-      <PageShell active="dispatcher">
-        <div className="p-8 text-fg-muted">
-          Dispatcher not available.{" "}
-          <code className="text-xs">iterion dispatch &lt;config.yaml&gt;</code> exposes this view.
-        </div>
-      </PageShell>
+      <div className="p-8 text-fg-muted">
+        Dispatcher not available.{" "}
+        <code className="text-xs">iterion dispatch &lt;config.yaml&gt;</code> exposes this view.
+      </div>
     );
   }
 
@@ -173,31 +193,7 @@ export default function DispatcherView() {
   const retries = snap.retries ?? [];
 
   return (
-    <PageShell
-      active="dispatcher"
-      rightActions={
-        <>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={!canOperate}
-            title={canOperate ? undefined : "Start the dispatcher first"}
-            onClick={() => void doRefresh()}
-          >
-            Force tick
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={!canOperate}
-            title={canOperate ? undefined : "Start the dispatcher first"}
-            onClick={() => void doReload()}
-          >
-            Reload config
-          </Button>
-        </>
-      }
-    >
+    <div className="h-full flex flex-col overflow-hidden">
       <DispatcherControlBar onOpenSettings={() => setSettingsOpen(true)} />
       <SettingsDrawer
         open={settingsOpen}
@@ -218,7 +214,7 @@ export default function DispatcherView() {
         />
       )}
 
-      <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto p-4 space-y-4 max-w-4xl outline-none">
+      <div className="flex-1 overflow-auto p-4 space-y-4 max-w-4xl">
         <SummaryCard snap={snap} />
         <RunningTable
           rows={running}
@@ -233,8 +229,8 @@ export default function DispatcherView() {
           }
           onRefreshNow={() => void doRefresh()}
         />
-      </main>
-    </PageShell>
+      </div>
+    </div>
   );
 }
 

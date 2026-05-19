@@ -10,7 +10,6 @@ import DiagnosticsPanel from "@/components/Diagnostics/DiagnosticsPanel";
 import LibraryPanel from "@/components/Library/LibraryPanel";
 import SubNodePalette from "@/components/Canvas/SubNodePalette";
 import SourceView from "@/components/SourceView/SourceView";
-import AppHeader from "@/components/shared/AppHeader";
 import { DesktopOnlyNotice, IconButton } from "@/components/ui";
 import { useUIStore } from "@/store/ui";
 import { useDocumentStore } from "@/store/document";
@@ -163,8 +162,7 @@ export default function EditorView() {
 
   return (
     <ReactFlowProvider>
-      <div className="h-screen w-screen overflow-hidden flex flex-col bg-surface-0 text-fg-default">
-        {!expanded && <AppHeader active="editor" />}
+      <div className="h-full w-full overflow-hidden flex flex-col">
         {bannerRunId && (
           <div className="flex items-center gap-2 px-3 py-1.5 text-xs bg-accent-soft text-accent-fg border-b border-border-default">
             <span aria-hidden>↗</span>
@@ -195,8 +193,6 @@ export default function EditorView() {
         )}
       <DesktopOnlyNotice feature="the workflow editor" lsKey="iterion.editor.mobile-optin">
       <div
-        id="main-content"
-        tabIndex={-1}
         className="flex-1 min-h-0 grid transition-[grid-template-columns] duration-200 outline-none"
         style={
           expanded

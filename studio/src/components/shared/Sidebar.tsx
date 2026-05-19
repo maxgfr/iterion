@@ -1,0 +1,117 @@
+import { Link } from "wouter";
+import {
+  DoubleArrowLeftIcon,
+  DoubleArrowRightIcon,
+} from "@radix-ui/react-icons";
+
+import NavLinks from "./NavLinks";
+import SidebarContext from "./SidebarContext";
+import BackendStatusPill from "@/components/Toolbar/BackendStatusPill";
+import ThemeToggle from "@/components/ui/ThemeToggle";
+import UserTeamChip from "./UserTeamChip";
+import { useUIStore } from "@/store/ui";
+
+const SIDEBAR_W_EXPANDED = "w-[220px]";
+const SIDEBAR_W_COLLAPSED = "w-[56px]";
+
+// Sidebar is the persistent vertical chrome on the left of the studio.
+// It hosts the iterion logo, the project + ⌘K context block, primary
+// nav, and the footer with backend status / theme / user team chip.
+//
+// Collapse state is persisted in localStorage via the UI store. When
+// collapsed (56px) every row degrades to an icon-only square button
+// with native tooltips that preserve the labels.
+export default function Sidebar() {
+  const collapsed = useUIStore((s) => s.sidebarCollapsed);
+  const toggle = useUIStore((s) => s.toggleSidebarCollapsed);
+
+  return (
+    <aside
+      className={`shrink-0 ${collapsed ? SIDEBAR_W_COLLAPSED : SIDEBAR_W_EXPANDED} h-full bg-surface-1 border-r border-border-default flex flex-col transition-[width] duration-150 ease-out overflow-hidden`}
+      aria-label="Primary"
+    >
+      {/* Logo (top). The collapse-toggle lives inline next to it when
+          expanded, and at the bottom of the sidebar when collapsed —
+          stacking a chevron directly under the logo in icon-only mode
+          made the two squares read as a single "logo + extension" unit.
+          See ToggleButton below the footer. */}
+      <div
+        className={`shrink-0 h-12 flex items-center ${collapsed ? "justify-center px-1.5" : "gap-2 px-3"} border-b border-border-default`}
+      >
+        <Link
+          href="/"
+          className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+          title="Iterion home"
+          aria-label="Iterion home"
+        >
+          <img
+            src="/favicon-96x96.png"
+            alt="Iterion"
+            className="h-7 w-7 dark:invert shrink-0"
+          />
+          {!collapsed && (
+            <span className="text-sm font-semibold tracking-tight text-fg-default">
+              Iterion
+            </span>
+          )}
+        </Link>
+        {!collapsed && (
+          <button
+            type="button"
+            onClick={toggle}
+            className="ml-auto inline-flex items-center justify-center h-6 w-6 rounded text-fg-subtle hover:text-fg-default hover:bg-surface-2 transition-colors"
+            title="Collapse sidebar"
+            aria-label="Collapse sidebar"
+            aria-expanded={true}
+          >
+            <DoubleArrowLeftIcon className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      {/* Context block: project + search/command palette */}
+      <div className={`shrink-0 ${collapsed ? "px-1.5 py-2" : "px-2 py-2"}`}>
+        <SidebarContext collapsed={collapsed} />
+      </div>
+
+      {/* Primary nav */}
+      <div className={`flex-1 min-h-0 overflow-y-auto ${collapsed ? "px-1.5" : "px-2"}`}>
+        <NavLinks collapsed={collapsed} />
+      </div>
+
+      {/* Footer: backend status, theme, user team */}
+      <div
+        className={`shrink-0 border-t border-border-default ${collapsed ? "px-1.5 py-2 flex flex-col items-center gap-1.5" : "px-2 py-2 flex flex-col gap-1.5"}`}
+      >
+        <div className={collapsed ? "flex justify-center" : ""}>
+          <BackendStatusPill variant={collapsed ? "icon" : "row"} />
+        </div>
+        <div className={collapsed ? "flex justify-center" : "flex items-center justify-between gap-2"}>
+          <ThemeToggle />
+          {!collapsed && <UserTeamChip />}
+        </div>
+        {collapsed && (
+          <div className="flex justify-center">
+            <UserTeamChip />
+          </div>
+        )}
+      </div>
+
+      {/* Collapse toggle when collapsed — positioned at the very bottom
+          so it doesn't compete visually with the logo (the chevron
+          square was reading as a second logo when stacked under it). */}
+      {collapsed && (
+        <button
+          type="button"
+          onClick={toggle}
+          className="shrink-0 border-t border-border-default h-7 w-full flex items-center justify-center text-fg-subtle hover:text-fg-default hover:bg-surface-2 transition-colors"
+          title="Expand sidebar"
+          aria-label="Expand sidebar"
+          aria-expanded={false}
+        >
+          <DoubleArrowRightIcon className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </aside>
+  );
+}

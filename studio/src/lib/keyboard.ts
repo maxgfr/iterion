@@ -9,3 +9,13 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   if (target.isContentEditable) return true;
   return false;
 }
+
+// isMacOS returns true when the UA suggests a Mac. Used to pick the
+// glyph for keyboard-shortcut hints (⌘ vs Ctrl). Safe in SSR — falls
+// back to false when navigator is unavailable.
+export function isMacOS(): boolean {
+  return (
+    typeof navigator !== "undefined" &&
+    navigator.userAgent.toLowerCase().includes("mac")
+  );
+}

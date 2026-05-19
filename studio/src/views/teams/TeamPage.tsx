@@ -12,7 +12,7 @@ import {
   updateMemberRole,
 } from "@/api/byok";
 import ApiKeysPanel from "@/views/settings/ApiKeys";
-import AppHeader from "@/components/shared/AppHeader";
+import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
 
 const ROLES = ["viewer", "member", "admin", "owner"] as const;
 
@@ -25,35 +25,33 @@ export default function TeamPage() {
   const team = useMemo(() => teams.find((t) => t.team_id === teamID), [teams, teamID]);
   const [tab, setTab] = useState<Tab>("members");
 
-  if (!team) {
-    return (
-      <div className="min-h-screen bg-surface-0 text-fg-default">
-        <AppHeader showBackendPill={false}>
-          <span className="text-sm font-semibold">Team not found</span>
-        </AppHeader>
-        <div className="p-6">
-          <p className="text-sm text-fg-muted">You are not a member of this team.</p>
-        </div>
-      </div>
-    );
-  }
   const canManage =
     activeRole === "admin" || activeRole === "owner" || (user?.is_super_admin ?? false);
 
-  return (
-    <div className="min-h-screen bg-surface-0 text-fg-default">
-      <AppHeader
-        showBackendPill={false}
-        rightActions={
-          <span className="text-xs text-fg-muted">Your role: {activeRole ?? "—"}</span>
-        }
-      >
-        <span className="text-sm font-semibold">
-          {team.team_name}
-          <span className="ml-2 text-xs text-fg-muted font-normal">/{team.team_slug}</span>
-        </span>
-      </AppHeader>
+  useHeaderSlot({
+    left: team ? (
+      <span className="text-sm font-semibold">
+        {team.team_name}
+        <span className="ml-2 text-xs text-fg-muted font-normal">/{team.team_slug}</span>
+      </span>
+    ) : (
+      <span className="text-sm font-semibold">Team not found</span>
+    ),
+    right: team ? (
+      <span className="text-xs text-fg-muted">Your role: {activeRole ?? "—"}</span>
+    ) : null,
+  });
 
+  if (!team) {
+    return (
+      <div className="p-6">
+        <p className="text-sm text-fg-muted">You are not a member of this team.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full overflow-auto">
       <div className="max-w-5xl mx-auto p-3 sm:p-6 grid grid-cols-1 sm:grid-cols-[200px,1fr] gap-4 sm:gap-6">
         <nav className="flex sm:block sm:space-y-1 gap-1 flex-wrap">
           {(
