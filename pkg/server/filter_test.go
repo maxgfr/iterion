@@ -14,8 +14,8 @@ func TestIsSkippedDir(t *testing.T) {
 		{".idea", true},
 		{".devcontainer", true},
 		{"dist", false},
-		{".", true},   // technically starts with "."
-		{"..", true},  // same
+		{".", true},  // technically starts with "."
+		{"..", true}, // same
 		{"a.b", false},
 	}
 	for _, c := range cases {

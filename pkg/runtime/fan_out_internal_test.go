@@ -162,11 +162,11 @@ func TestFindConvergencePoint_NoConvergenceReturnsEmpty(t *testing.T) {
 	wf := &ir.Workflow{
 		Name: "t",
 		Nodes: map[string]ir.Node{
-			"router":  &ir.RouterNode{BaseNode: ir.BaseNode{ID: "router"}, RouterMode: ir.RouterFanOutAll},
-			"a":       &ir.AgentNode{BaseNode: ir.BaseNode{ID: "a"}},
-			"b":       &ir.AgentNode{BaseNode: ir.BaseNode{ID: "b"}},
-			"done_a":  &ir.DoneNode{BaseNode: ir.BaseNode{ID: "done_a"}},
-			"done_b":  &ir.DoneNode{BaseNode: ir.BaseNode{ID: "done_b"}},
+			"router": &ir.RouterNode{BaseNode: ir.BaseNode{ID: "router"}, RouterMode: ir.RouterFanOutAll},
+			"a":      &ir.AgentNode{BaseNode: ir.BaseNode{ID: "a"}},
+			"b":      &ir.AgentNode{BaseNode: ir.BaseNode{ID: "b"}},
+			"done_a": &ir.DoneNode{BaseNode: ir.BaseNode{ID: "done_a"}},
+			"done_b": &ir.DoneNode{BaseNode: ir.BaseNode{ID: "done_b"}},
 		},
 		Edges: []*ir.Edge{
 			{From: "router", To: "a"},
