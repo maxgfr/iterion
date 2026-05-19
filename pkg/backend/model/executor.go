@@ -138,141 +138,63 @@ type EventHooks struct {
 	OnNodeFinished func(nodeID string, output map[string]interface{})
 }
 
+// chainCb2 composes two 2-argument callbacks: if either is nil, returns
+// the non-nil one; otherwise returns a wrapper that calls a then b.
+func chainCb2[A, B any](a, b func(A, B)) func(A, B) {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	}
+	return func(x A, y B) { a(x, y); b(x, y) }
+}
+
+// chainCb3 is the 3-argument variant of chainCb2 (used by OnLLMPrompt).
+func chainCb3[A, B, C any](a, b func(A, B, C)) func(A, B, C) {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	}
+	return func(x A, y B, z C) { a(x, y, z); b(x, y, z) }
+}
+
+// chainCb6 is the 6-argument variant (used by OnToolNodeResult).
+func chainCb6[A, B, C, D, E, F any](a, b func(A, B, C, D, E, F)) func(A, B, C, D, E, F) {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	}
+	return func(p1 A, p2 B, p3 C, p4 D, p5 E, p6 F) {
+		a(p1, p2, p3, p4, p5, p6)
+		b(p1, p2, p3, p4, p5, p6)
+	}
+}
+
 // ChainHooks composes two EventHooks so callbacks registered on either
 // side run in order (a then b) for every event. Either side may leave
 // any callback nil; the result keeps the non-nil one without an extra
 // closure.
 func ChainHooks(a, b EventHooks) EventHooks {
 	return EventHooks{
-		OnLLMRequest: func() func(string, LLMRequestInfo) {
-			if a.OnLLMRequest == nil {
-				return b.OnLLMRequest
-			}
-			if b.OnLLMRequest == nil {
-				return a.OnLLMRequest
-			}
-			return func(n string, i LLMRequestInfo) { a.OnLLMRequest(n, i); b.OnLLMRequest(n, i) }
-		}(),
-		OnLLMPrompt: func() func(string, string, string) {
-			if a.OnLLMPrompt == nil {
-				return b.OnLLMPrompt
-			}
-			if b.OnLLMPrompt == nil {
-				return a.OnLLMPrompt
-			}
-			return func(n, s, u string) { a.OnLLMPrompt(n, s, u); b.OnLLMPrompt(n, s, u) }
-		}(),
-		OnLLMResponse: func() func(string, LLMResponseInfo) {
-			if a.OnLLMResponse == nil {
-				return b.OnLLMResponse
-			}
-			if b.OnLLMResponse == nil {
-				return a.OnLLMResponse
-			}
-			return func(n string, i LLMResponseInfo) { a.OnLLMResponse(n, i); b.OnLLMResponse(n, i) }
-		}(),
-		OnLLMRetry: func() func(string, RetryInfo) {
-			if a.OnLLMRetry == nil {
-				return b.OnLLMRetry
-			}
-			if b.OnLLMRetry == nil {
-				return a.OnLLMRetry
-			}
-			return func(n string, i RetryInfo) { a.OnLLMRetry(n, i); b.OnLLMRetry(n, i) }
-		}(),
-		OnLLMStepFinish: func() func(string, LLMStepInfo) {
-			if a.OnLLMStepFinish == nil {
-				return b.OnLLMStepFinish
-			}
-			if b.OnLLMStepFinish == nil {
-				return a.OnLLMStepFinish
-			}
-			return func(n string, s LLMStepInfo) { a.OnLLMStepFinish(n, s); b.OnLLMStepFinish(n, s) }
-		}(),
-		OnLLMCompacted: func() func(string, LLMCompactInfo) {
-			if a.OnLLMCompacted == nil {
-				return b.OnLLMCompacted
-			}
-			if b.OnLLMCompacted == nil {
-				return a.OnLLMCompacted
-			}
-			return func(n string, i LLMCompactInfo) { a.OnLLMCompacted(n, i); b.OnLLMCompacted(n, i) }
-		}(),
-		OnToolStarted: func() func(string, LLMToolStartedInfo) {
-			if a.OnToolStarted == nil {
-				return b.OnToolStarted
-			}
-			if b.OnToolStarted == nil {
-				return a.OnToolStarted
-			}
-			return func(n string, i LLMToolStartedInfo) { a.OnToolStarted(n, i); b.OnToolStarted(n, i) }
-		}(),
-		OnToolCall: func() func(string, LLMToolCallInfo) {
-			if a.OnToolCall == nil {
-				return b.OnToolCall
-			}
-			if b.OnToolCall == nil {
-				return a.OnToolCall
-			}
-			return func(n string, i LLMToolCallInfo) { a.OnToolCall(n, i); b.OnToolCall(n, i) }
-		}(),
-		OnToolNodeResult: func() func(string, string, []byte, string, time.Duration, error) {
-			if a.OnToolNodeResult == nil {
-				return b.OnToolNodeResult
-			}
-			if b.OnToolNodeResult == nil {
-				return a.OnToolNodeResult
-			}
-			return func(n, t string, in []byte, out string, e time.Duration, err error) {
-				a.OnToolNodeResult(n, t, in, out, e, err)
-				b.OnToolNodeResult(n, t, in, out, e, err)
-			}
-		}(),
-		OnDelegateStarted: func() func(string, string) {
-			if a.OnDelegateStarted == nil {
-				return b.OnDelegateStarted
-			}
-			if b.OnDelegateStarted == nil {
-				return a.OnDelegateStarted
-			}
-			return func(n, bn string) { a.OnDelegateStarted(n, bn); b.OnDelegateStarted(n, bn) }
-		}(),
-		OnDelegateFinished: func() func(string, DelegateInfo) {
-			if a.OnDelegateFinished == nil {
-				return b.OnDelegateFinished
-			}
-			if b.OnDelegateFinished == nil {
-				return a.OnDelegateFinished
-			}
-			return func(n string, i DelegateInfo) { a.OnDelegateFinished(n, i); b.OnDelegateFinished(n, i) }
-		}(),
-		OnDelegateError: func() func(string, DelegateInfo) {
-			if a.OnDelegateError == nil {
-				return b.OnDelegateError
-			}
-			if b.OnDelegateError == nil {
-				return a.OnDelegateError
-			}
-			return func(n string, i DelegateInfo) { a.OnDelegateError(n, i); b.OnDelegateError(n, i) }
-		}(),
-		OnDelegateRetry: func() func(string, DelegateInfo) {
-			if a.OnDelegateRetry == nil {
-				return b.OnDelegateRetry
-			}
-			if b.OnDelegateRetry == nil {
-				return a.OnDelegateRetry
-			}
-			return func(n string, i DelegateInfo) { a.OnDelegateRetry(n, i); b.OnDelegateRetry(n, i) }
-		}(),
-		OnNodeFinished: func() func(string, map[string]interface{}) {
-			if a.OnNodeFinished == nil {
-				return b.OnNodeFinished
-			}
-			if b.OnNodeFinished == nil {
-				return a.OnNodeFinished
-			}
-			return func(n string, o map[string]interface{}) { a.OnNodeFinished(n, o); b.OnNodeFinished(n, o) }
-		}(),
+		OnLLMRequest:       chainCb2(a.OnLLMRequest, b.OnLLMRequest),
+		OnLLMPrompt:        chainCb3(a.OnLLMPrompt, b.OnLLMPrompt),
+		OnLLMResponse:      chainCb2(a.OnLLMResponse, b.OnLLMResponse),
+		OnLLMRetry:         chainCb2(a.OnLLMRetry, b.OnLLMRetry),
+		OnLLMStepFinish:    chainCb2(a.OnLLMStepFinish, b.OnLLMStepFinish),
+		OnLLMCompacted:     chainCb2(a.OnLLMCompacted, b.OnLLMCompacted),
+		OnToolStarted:      chainCb2(a.OnToolStarted, b.OnToolStarted),
+		OnToolCall:         chainCb2(a.OnToolCall, b.OnToolCall),
+		OnToolNodeResult:   chainCb6(a.OnToolNodeResult, b.OnToolNodeResult),
+		OnDelegateStarted:  chainCb2(a.OnDelegateStarted, b.OnDelegateStarted),
+		OnDelegateFinished: chainCb2(a.OnDelegateFinished, b.OnDelegateFinished),
+		OnDelegateError:    chainCb2(a.OnDelegateError, b.OnDelegateError),
+		OnDelegateRetry:    chainCb2(a.OnDelegateRetry, b.OnDelegateRetry),
+		OnNodeFinished:     chainCb2(a.OnNodeFinished, b.OnNodeFinished),
 	}
 }
 
