@@ -253,7 +253,31 @@ func spawnProcess(ctx context.Context, cliPath string, args []string, opts spawn
 		}
 	}
 
-	var stdin io.WriteCloser
+	// Pipes are file descriptors in the parent process; if a later step
+	// (a subsequent pipe, or cmd.Start) fails, the descriptors already
+	// opened would leak until GC. Track them and close on any early
+	// return; on a successful Start cmd.Wait will own the cleanup.
+	var (
+		stdin   io.WriteCloser
+		stdout  io.ReadCloser
+		stderr  io.ReadCloser
+		started bool
+	)
+	defer func() {
+		if started {
+			return
+		}
+		if stdin != nil {
+			_ = stdin.Close()
+		}
+		if stdout != nil {
+			_ = stdout.Close()
+		}
+		if stderr != nil {
+			_ = stderr.Close()
+		}
+	}()
+
 	if opts.OpenStdin {
 		var err error
 		stdin, err = cmd.StdinPipe()
@@ -262,12 +286,13 @@ func spawnProcess(ctx context.Context, cliPath string, args []string, opts spawn
 		}
 	}
 
-	stdout, err := cmd.StdoutPipe()
+	var err error
+	stdout, err = cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("claude: stdout pipe: %w", err)
 	}
 
-	stderr, err := cmd.StderrPipe()
+	stderr, err = cmd.StderrPipe()
 	if err != nil {
 		return nil, fmt.Errorf("claude: stderr pipe: %w", err)
 	}
@@ -281,6 +306,7 @@ func spawnProcess(ctx context.Context, cliPath string, args []string, opts spawn
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("claude: start: %w", err)
 	}
+	started = true
 
 	scanner := bufio.NewScanner(stdout)
 	// 10 MB buffer for large NDJSON lines.

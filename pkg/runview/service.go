@@ -1478,6 +1478,11 @@ func (s *Service) Launch(parent context.Context, spec LaunchSpec) (*LaunchResult
 	if spec.FilePath == "" && spec.Source == "" {
 		return nil, errors.New("runview: file_path or source is required")
 	}
+	if spec.BranchName != "" {
+		if err := gitlib.ValidateBranchName(spec.BranchName); err != nil {
+			return nil, fmt.Errorf("branch_name: %w", err)
+		}
+	}
 	runID := spec.RunID
 	if runID == "" {
 		runID = store.GenerateRunID()

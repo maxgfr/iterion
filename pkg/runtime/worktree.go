@@ -216,6 +216,17 @@ func finalizeWorktree(wc worktreeContext, opts finalizeOptions, logger *iterlog.
 		}
 		branchName = "iterion/run/" + label
 	}
+	// Defense-in-depth: user-supplied branchName is already rejected at
+	// Launch / CLI entry, but a malformed default (e.g. runID containing
+	// unexpected chars in a future refactor) would otherwise reach `git
+	// branch` as a positional that could be parsed as a flag. Validate
+	// here too and skip branch creation rather than risk an injection.
+	if err := gitlib.ValidateBranchName(branchName); err != nil {
+		if logger != nil {
+			logger.Warn("runtime: finalize: refusing to create branch %q: %v — recover with: git branch <name> %s", branchName, err, finalSHA)
+		}
+		return res
+	}
 
 	// 4. Create the storage branch. If the name already exists, fall
 	// back to a suffixed variant so we never overwrite a user-managed
@@ -335,7 +346,10 @@ func createBranchSafely(repoRoot, name, sha string, logger *iterlog.Logger) (boo
 		candidates = append(candidates, fmt.Sprintf("%s-%d", name, i))
 	}
 	for _, candidate := range candidates {
-		out, err := gitCmd("-C", repoRoot, "branch", candidate, sha).CombinedOutput()
+		// `--` separates options from positional arguments so a
+		// candidate that begins with `-` (or any future ValidateBranchName
+		// regression) can never be parsed as a flag by git.
+		out, err := gitCmd("-C", repoRoot, "branch", "--", candidate, sha).CombinedOutput()
 		if err == nil {
 			return true, candidate
 		}
