@@ -7,7 +7,6 @@ import AppShell from "@/components/shared/AppShell";
 // initial download covers only the shell + AuthGate. The eager imports
 // below are the always-needed shell pieces (Login lives off the auth
 // gate; everything else is conditional on a route match).
-const EditorView = lazy(() => import("@/components/EditorView"));
 const HomeView = lazy(() => import("@/components/Home/HomeView"));
 const WhatsNextView = lazy(() => import("@/components/WhatsNext/WhatsNextView"));
 const LaunchView = lazy(() => import("@/components/Runs/LaunchView"));
@@ -202,7 +201,11 @@ function AuthedApp() {
               </ErrorBoundary>
             </Route>
           )}
-          <Route path="/editor" component={EditorView} />
+          {/* /editor is rendered by TabRouter via EditorTabHost so
+              each tab has its own document + selection store. The
+              route is preserved (without a component) for URL sync
+              and sidebar nav highlight. */}
+          <Route path="/editor">{null}</Route>
           <Route path="/whats-next">
             <ErrorBoundary area="What's Next view">
               <WhatsNextView />

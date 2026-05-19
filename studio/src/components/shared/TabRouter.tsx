@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 
 import RunTabHost from "./RunTabHost";
+import EditorTabHost from "./EditorTabHost";
 import { useTabsStore } from "@/store/tabs";
 
 // TabRouter renders one tab subtree at a time for non-run kinds, and
@@ -19,10 +20,19 @@ import { useTabsStore } from "@/store/tabs";
 export default function TabRouter({ fallback }: { fallback: ReactNode }) {
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
-  const runTabs = tabs.filter(
-    (t) => t.kind === "run" && t.hydrated && t.params.runId,
+  const activeKind = tabs.find((t) => t.id === activeTabId)?.kind;
+  // Memoise the filtered lists by tabs identity so unrelated tab
+  // store updates (e.g. label rename) don't force a re-render of
+  // every hosted subtree — only structural changes do.
+  const runTabs = useMemo(
+    () => tabs.filter((t) => t.kind === "run" && t.hydrated && t.params.runId),
+    [tabs],
   );
-  const activeIsRun = tabs.find((t) => t.id === activeTabId)?.kind === "run";
+  const editorTabs = useMemo(
+    () => tabs.filter((t) => t.kind === "editor" && t.hydrated),
+    [tabs],
+  );
+  const fallbackHidden = activeKind === "run" || activeKind === "editor";
 
   return (
     <>
@@ -38,10 +48,24 @@ export default function TabRouter({ fallback }: { fallback: ReactNode }) {
           <RunTabHost runId={tab.params.runId!} />
         </div>
       ))}
-      {/* Non-run tabs: defer to the wouter-managed fallback (Switch).
-          We hide the fallback when a run tab is active so the live
-          run view is the only thing visible. */}
-      <div className={`h-full w-full ${activeIsRun ? "hidden" : "block"}`}>
+      {/* Editor tabs: every hydrated one stays mounted with its own
+          document + selection store. Hidden tabs preserve dirty state,
+          undo history, and canvas scroll so switching feels instant. */}
+      {editorTabs.map((tab) => (
+        <div
+          key={tab.id}
+          className={`h-full w-full ${tab.id === activeTabId ? "block" : "hidden"}`}
+          aria-hidden={tab.id === activeTabId ? undefined : true}
+        >
+          <EditorTabHost tabId={tab.id} file={tab.params.file} />
+        </div>
+      ))}
+      {/* Non-tab-hosted kinds (Home, Runs list, Board, Dispatcher,
+          Settings, Team, LaunchView on /runs/new): served by the
+          wouter <Switch> fallback. Hidden whenever a hosted tab kind
+          (run or editor) is active so the per-tab view is the only
+          thing visible. */}
+      <div className={`h-full w-full ${fallbackHidden ? "hidden" : "block"}`}>
         {fallback}
       </div>
     </>
