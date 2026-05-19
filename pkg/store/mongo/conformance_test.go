@@ -81,12 +81,19 @@ func newInMemoryBlob() *inMemoryBlob {
 }
 
 func (b *inMemoryBlob) PutArtifact(_ context.Context, runID, nodeID string, version int, body []byte) error {
-	b.data[blob.ArtifactKey(runID, nodeID, version)] = append([]byte{}, body...)
+	key, err := blob.ArtifactKey(runID, nodeID, version)
+	if err != nil {
+		return err
+	}
+	b.data[key] = append([]byte{}, body...)
 	return nil
 }
 
 func (b *inMemoryBlob) GetArtifact(_ context.Context, runID, nodeID string, version int) ([]byte, error) {
-	key := blob.ArtifactKey(runID, nodeID, version)
+	key, err := blob.ArtifactKey(runID, nodeID, version)
+	if err != nil {
+		return nil, err
+	}
 	body, ok := b.data[key]
 	if !ok {
 		return nil, blob.ErrArtifactNotFound
@@ -143,12 +150,19 @@ func (b *inMemoryBlob) Ping(_ context.Context) error { return nil }
 func (b *inMemoryBlob) Close() error { return nil }
 
 func (b *inMemoryBlob) PutAttachment(_ context.Context, runID, name, filename, contentType string, body []byte) error {
-	b.data[blob.AttachmentKey(runID, name, filename)] = append([]byte{}, body...)
+	key, err := blob.AttachmentKey(runID, name, filename)
+	if err != nil {
+		return err
+	}
+	b.data[key] = append([]byte{}, body...)
 	return nil
 }
 
 func (b *inMemoryBlob) GetAttachment(_ context.Context, runID, name, filename string) (io.ReadCloser, blob.AttachmentMeta, error) {
-	key := blob.AttachmentKey(runID, name, filename)
+	key, err := blob.AttachmentKey(runID, name, filename)
+	if err != nil {
+		return nil, blob.AttachmentMeta{}, err
+	}
 	body, ok := b.data[key]
 	if !ok {
 		return nil, blob.AttachmentMeta{}, blob.ErrArtifactNotFound
@@ -158,16 +172,27 @@ func (b *inMemoryBlob) GetAttachment(_ context.Context, runID, name, filename st
 }
 
 func (b *inMemoryBlob) PresignAttachment(_ context.Context, runID, name, filename string, _ time.Duration) (string, error) {
-	return "memory://" + blob.AttachmentKey(runID, name, filename), nil
+	key, err := blob.AttachmentKey(runID, name, filename)
+	if err != nil {
+		return "", err
+	}
+	return "memory://" + key, nil
 }
 
 func (b *inMemoryBlob) DeleteAttachment(_ context.Context, runID, name, filename string) error {
-	delete(b.data, blob.AttachmentKey(runID, name, filename))
+	key, err := blob.AttachmentKey(runID, name, filename)
+	if err != nil {
+		return err
+	}
+	delete(b.data, key)
 	return nil
 }
 
 func (b *inMemoryBlob) DeleteRunAttachments(_ context.Context, runID string) error {
-	prefix := blob.AttachmentRunPrefix(runID)
+	prefix, err := blob.AttachmentRunPrefix(runID)
+	if err != nil {
+		return err
+	}
 	for k := range b.data {
 		if len(k) > len(prefix) && k[:len(prefix)] == prefix {
 			delete(b.data, k)
