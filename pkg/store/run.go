@@ -51,7 +51,16 @@ type Run struct {
 	// canonical identifier remains ID. Empty for runs persisted
 	// before this field existed; surfaces should fall back to
 	// WorkflowName in that case.
-	Name         string `json:"name,omitempty" bson:"name,omitempty"`
+	Name string `json:"name,omitempty" bson:"name,omitempty"`
+	// ParentRunID, ShardIndex, ShardCount, ShardLabel are set on child
+	// runs spawned by a parent workflow via `iterion __scan-shards`
+	// (see docs/security-bots-distributed.md). Empty / zero for root
+	// runs. The studio surfaces parent/child relationships via these
+	// fields; aggregation is by polling children's terminal status.
+	ParentRunID  string `json:"parent_run_id,omitempty" bson:"parent_run_id,omitempty"`
+	ShardIndex   int    `json:"shard_index,omitempty" bson:"shard_index,omitempty"`
+	ShardCount   int    `json:"shard_count,omitempty" bson:"shard_count,omitempty"`
+	ShardLabel   string `json:"shard_label,omitempty" bson:"shard_label,omitempty"`
 	WorkflowName string `json:"workflow_name" bson:"workflow_name"`
 	WorkflowHash string `json:"workflow_hash,omitempty" bson:"workflow_hash,omitempty"` // SHA-256 of the .iter source at run start
 	FilePath     string `json:"file_path,omitempty" bson:"file_path,omitempty"`         // absolute .iter source path captured at launch (resume without re-supplying file)
