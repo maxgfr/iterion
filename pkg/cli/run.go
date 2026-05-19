@@ -20,6 +20,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/benchmark"
 	"github.com/SocialGouv/iterion/pkg/bundle"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
+	"github.com/SocialGouv/iterion/pkg/git"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/runtime"
 	"github.com/SocialGouv/iterion/pkg/runtime/recovery"
@@ -104,6 +105,12 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 		// Managed-runner mode: no TTY available in the spawned
 		// subprocess, and prompts would deadlock.
 		opts.NoInteractive = true
+	}
+
+	if opts.BranchName != "" {
+		if err := git.ValidateBranchName(opts.BranchName); err != nil {
+			return fmt.Errorf("--branch-name: %w", err)
+		}
 	}
 
 	// Resolve run ID.
