@@ -1588,7 +1588,6 @@ func (p *parser) parseMemoryBlock() *ast.MemoryBlock {
 	return mb
 }
 
-// parseSandboxBlock handles both forms of the `sandbox:` declaration:
 func (p *parser) parseCompactionProp(cb *ast.CompactionBlock, propTok Token) {
 	p.next()
 	switch propTok.Type {
