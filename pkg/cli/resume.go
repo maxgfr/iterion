@@ -2,18 +2,13 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/SocialGouv/iterion/pkg/bundle"
-	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/runtime"
-	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
@@ -42,7 +37,6 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 		return fmt.Errorf("--run-id is required")
 	}
 
-	// Resolve log level early so the logger is available for store creation.
 	level, err := iterlog.ResolveLevel(opts.LogLevel, "ITERION_LOG_LEVEL")
 	if err != nil {
 		return err
@@ -54,27 +48,19 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 	// ancestor contains a .iterion.
 	storeAnchor := filepath.Dir(iterFile)
 	if iterFile == "" {
-		cwd, cwdErr := os.Getwd()
-		if cwdErr == nil {
+		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
 			storeAnchor = cwd
 		}
 	}
 	storeDir := store.ResolveStoreDir(storeAnchor, opts.StoreDir)
 
-	// Tee logger output to <storeDir>/runs/<runID>/run.log so the studio's
-	// Logs panel sees output for resumed runs (same rationale + pattern as
-	// pkg/cli/run.go::RunRun). Resume re-uses the same file via O_APPEND
-	// so the original run.log + resume sessions stack into one timeline,
-	// matching what the daemon-launched path produces via runview's
-	// prepareRunLog. Errors are warned-and-continue.
-	runDir := filepath.Join(storeDir, "runs", opts.RunID)
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
-		logger.Warn("cli: mkdir run dir for log tee: %v", err)
-	} else if logFile, openErr := os.OpenFile(filepath.Join(runDir, "run.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); openErr != nil {
-		logger.Warn("cli: open run.log for tee: %v", openErr)
-	} else {
-		defer logFile.Close()
-		logger = iterlog.New(level, io.MultiWriter(os.Stderr, logFile))
+	// Tee log output to run.log so the studio's Logs panel sees
+	// output for resumed runs. Resume re-uses the same file via
+	// O_APPEND so the original run.log + resume sessions stack into
+	// one timeline, matching what the daemon-launched path produces.
+	logger, logCloser := teeRunLog(logger, level, filepath.Join(storeDir, "runs", opts.RunID))
+	if logCloser != nil {
+		defer logCloser.Close()
 	}
 
 	s, err := store.New(storeDir, store.WithLogger(logger))
@@ -82,7 +68,6 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 		return fmt.Errorf("cannot open store: %w", err)
 	}
 
-	// Load run to validate state.
 	r, err := s.LoadRun(context.Background(), opts.RunID)
 	if err != nil {
 		return fmt.Errorf("cannot load run: %w", err)
@@ -108,101 +93,24 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 		return fmt.Errorf("run %q cannot be resumed (status: %s)", opts.RunID, r.Status)
 	}
 
-	// Build answers (required for paused runs, ignored for failed-resumable).
-	answers := make(map[string]interface{})
-
-	if opts.AnswersFile != "" {
-		fileAnswers, err := ParseAnswersFile(opts.AnswersFile)
-		if err != nil {
-			return err
-		}
-		for k, v := range fileAnswers {
-			answers[k] = v
-		}
+	answers, err := buildResumeAnswers(opts, resumingFromFailure)
+	if err != nil {
+		return err
 	}
 
-	for k, v := range opts.Answers {
-		answers[k] = v
+	wf, wfHash, iterFile, bundleHandle, bundleCleanup, err := resumeOpenWorkflow(r, iterFile)
+	if err != nil {
+		return err
 	}
-
-	if !resumingFromFailure && len(answers) == 0 {
-		return fmt.Errorf("no answers provided; use --answers-file or --answer key=value")
-	}
-
-	// Compile workflow and compute hash for change detection.
-	// When the run was launched from a `.botz` bundle, re-open the
-	// archive (cache hit on the same hash, or re-extract from the
-	// original path on cache miss) so bundle prompts/skills/attachments
-	// are wired back into the resumed engine.
-	var bundleHandle *bundle.Bundle
-	bundleCleanup := func() error { return nil }
 	defer func() {
 		if cerr := bundleCleanup(); cerr != nil {
 			logger.Warn("bundle cleanup: %v", cerr)
 		}
 	}()
-	var wf *ir.Workflow
-	var wfHash string
-	if r != nil && r.BundlePath != "" {
-		kind, detectErr := bundle.Detect(r.BundlePath)
-		if detectErr != nil {
-			return fmt.Errorf("resume: re-detect bundle: %w", detectErr)
-		}
-		switch kind {
-		case bundle.KindBundle:
-			opened, c, openErr := bundle.Open(r.BundlePath, "")
-			if openErr != nil {
-				return fmt.Errorf("resume: re-open bundle %s: %w (original archive may have moved — re-supply with --file)", r.BundlePath, openErr)
-			}
-			bundleCleanup = c
-			bundleHandle = opened
-		case bundle.KindBundleDir:
-			opened, openErr := bundle.OpenDir(r.BundlePath)
-			if openErr != nil {
-				return fmt.Errorf("resume: re-open bundle dir %s: %w", r.BundlePath, openErr)
-			}
-			bundleHandle = opened
-		}
-		if bundleHandle != nil {
-			iterFile = bundleHandle.IterPath
-			wf, wfHash, err = runview.CompileBundleWorkflow(bundleHandle.IterPath, bundleHandle)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	if wf == nil {
-		wf, wfHash, err = runview.CompileWorkflowWithHash(iterFile)
-		if err != nil {
-			return err
-		}
-	}
 
-	executor := opts.Executor
-	if executor == nil {
-		exec, execErr := runview.BuildExecutor(runview.ExecutorSpec{
-			Workflow: wf,
-			Vars:     nil,
-			Store:    s,
-			RunID:    opts.RunID,
-			Logger:   logger,
-			StoreDir: storeDir,
-		})
-		if execErr != nil {
-			return execErr
-		}
-		// Re-seed the executor's `vars` from the run's stored inputs so
-		// prompt templates can resolve `{{vars.X}}` after resume.
-		// Without this, the executor's vars map is nil and references
-		// render as the literal `{{vars.X}}` string, silently breaking
-		// any prompt that points at a workspace_dir/scope_notes/etc.
-		// (RunStarted persisted the same map under run.Inputs; the
-		// engine reloads them into rs.vars from the checkpoint, but
-		// the executor has its own copy used for prompt rendering.)
-		if r != nil && len(r.Inputs) > 0 {
-			exec.SetVars(r.Inputs)
-		}
-		executor = exec
+	executor, err := buildResumeExecutor(opts, wf, s, storeDir, logger, r)
+	if err != nil {
+		return err
 	}
 
 	eng := runtime.New(wf, s, executor,
@@ -233,7 +141,8 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 		}()
 	}
 
-	// Re-check run status under the lock to prevent TOCTOU race.
+	// Re-check run status under the lock to prevent a TOCTOU race
+	// against a concurrent process that flipped the run to terminal.
 	r, err = s.LoadRun(context.Background(), opts.RunID)
 	if err != nil {
 		return fmt.Errorf("cannot reload run: %w", err)
@@ -262,54 +171,10 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 	}
 
 	err = eng.Resume(ctx, opts.RunID, answers)
-
-	result := map[string]interface{}{
+	return reportResumeOutcome(p, s, opts.RunID, err, map[string]interface{}{
 		"run_id":   opts.RunID,
 		"workflow": wf.Name,
-	}
-
-	if err != nil {
-		if errors.Is(err, runtime.ErrRunPaused) {
-			result["status"] = "paused_waiting_human"
-			enrichPausedResult(s, opts.RunID, result)
-
-			if p.Format == OutputJSON {
-				p.JSON(result)
-			} else {
-				p.Line("  Status: PAUSED (waiting for human input again)")
-				printPausedQuestions(p, result)
-			}
-			return nil
-		}
-		if errors.Is(err, runtime.ErrRunCancelled) {
-			result["status"] = "cancelled"
-			if p.Format == OutputJSON {
-				p.JSON(result)
-			} else {
-				p.Line("  Status: CANCELLED")
-				p.Line("  Detail: %s", err.Error())
-			}
-			return err
-		}
-		result["status"] = "failed"
-		result["error"] = err.Error()
-		if p.Format == OutputJSON {
-			p.JSON(result)
-		} else {
-			p.Line("  Status: FAILED")
-			p.Line("  Error:  %s", err.Error())
-			p.Line("  Hint:   use 'iterion inspect --run-id %s --events' for details", opts.RunID)
-		}
-		return err
-	}
-
-	result["status"] = "finished"
-	if p.Format == OutputJSON {
-		p.JSON(result)
-	} else {
-		p.Line("  Status: FINISHED")
-	}
-	return nil
+	})
 }
 
 // ParseAnswerFlags parses a slice of "key=value" strings into a map.
