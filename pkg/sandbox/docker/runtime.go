@@ -18,8 +18,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/SocialGouv/iterion/pkg/internal/proc"
 )
@@ -91,18 +93,52 @@ func imageExists(ctx context.Context, rt Runtime, ref string) bool {
 	return cmd.Run() == nil
 }
 
+// defaultPullTimeout caps `<runtime> pull` so a stalled registry or
+// blocked DNS in the sandbox network can't pend the run indefinitely.
+// 10 min is enough for cold pulls of large CUDA / language-runtime
+// images on slow links; operators can raise it via
+// ITERION_SANDBOX_PULL_TIMEOUT (Go duration syntax, e.g. "20m").
+const defaultPullTimeout = 10 * time.Minute
+
+// pullTimeout reads ITERION_SANDBOX_PULL_TIMEOUT and falls back to the
+// default when the env var is unset, empty, unparseable, or non-positive.
+func pullTimeout() time.Duration {
+	v := strings.TrimSpace(os.Getenv("ITERION_SANDBOX_PULL_TIMEOUT"))
+	if v == "" {
+		return defaultPullTimeout
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return defaultPullTimeout
+	}
+	return d
+}
+
 // pullImage runs `<runtime> pull <ref>` and surfaces the runtime's
-// error output verbatim on failure. Long-running but ctx-aware so a
-// run cancellation during initial setup terminates the pull.
+// error output verbatim on failure. Bounded by pullTimeout (or the
+// caller's ctx, whichever fires first) so a hung registry doesn't
+// strand the run; a deadline overshoot is reported as a distinct
+// "timeout" so the operator can lengthen ITERION_SANDBOX_PULL_TIMEOUT
+// without chasing a generic exec failure.
 func pullImage(ctx context.Context, rt Runtime, ref string) error {
+	timeout := pullTimeout()
+	pullCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	var stderr bytes.Buffer
-	cmd := runtimeCmdContext(ctx, rt, "pull", ref)
+	cmd := runtimeCmdContext(pullCtx, rt, "pull", ref)
 	cmd.Stderr = &stderr
 	cmd.Stdout = &stderr // Docker writes pull progress to stdout; capture both.
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker: pull %s: %w\noutput:\n%s", ref, err, stderr.String())
+	err := cmd.Run()
+	if err == nil {
+		return nil
 	}
-	return nil
+	// pullCtx.Err() is the authoritative source for "we tripped the
+	// deadline" — cmd.Run() may surface "signal: killed" depending on
+	// runtime, so derive the error category from the ctx instead.
+	if pullCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+		return fmt.Errorf("docker: pull %s: timed out after %s (set ITERION_SANDBOX_PULL_TIMEOUT to extend)\noutput:\n%s", ref, timeout, stderr.String())
+	}
+	return fmt.Errorf("docker: pull %s: %w\noutput:\n%s", ref, err, stderr.String())
 }
 
 // runtimeVersion returns the runtime's reported version string for
