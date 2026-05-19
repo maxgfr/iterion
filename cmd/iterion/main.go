@@ -4,6 +4,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -52,6 +53,11 @@ func main() {
 			newPrinter().JSON(map[string]string{"error": err.Error()})
 		} else {
 			cli.PrintError(os.Stderr, err)
+		}
+		// Exit 2 for user-input errors (bad flag, missing file, …) so
+		// shell scripts can branch on the distinction; 1 otherwise.
+		if errors.Is(err, cli.ErrUserInput) {
+			os.Exit(2)
 		}
 		os.Exit(1)
 	}

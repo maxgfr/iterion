@@ -111,7 +111,7 @@ func New(opts Options) (*Dispatcher, error) {
 		publisher:  opts.SnapshotPublisher,
 		stop:       make(chan struct{}),
 		done:       make(chan struct{}),
-		ws:         newWsBridge(),
+		ws:         newWsBridge(opts.Logger),
 	}
 	c.cfg.Store(opts.Config)
 	return c, nil

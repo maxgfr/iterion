@@ -3,12 +3,15 @@ package dispatcher
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	iterlog "github.com/SocialGouv/iterion/pkg/log"
 )
 
 const (
@@ -144,12 +147,19 @@ type wsBridge struct {
 
 	stopOnce sync.Once
 	stop     chan struct{}
+	// logger is used for panic recovery in the per-client writer/reader
+	// goroutines; non-nil so callers can rely on it without a nil guard.
+	logger *iterlog.Logger
 }
 
-func newWsBridge() *wsBridge {
+func newWsBridge(logger *iterlog.Logger) *wsBridge {
+	if logger == nil {
+		logger = iterlog.New(iterlog.LevelInfo, io.Discard)
+	}
 	return &wsBridge{
 		clients: map[*wsClientConn]struct{}{},
 		stop:    make(chan struct{}),
+		logger:  logger,
 	}
 }
 
@@ -222,6 +232,14 @@ func (b *wsBridge) broadcast(s Snapshot) {
 // writer drains the send channel and emits a periodic ping so the
 // TCP layer notices a dead peer instead of silently leaking.
 func (c *wsClientConn) writer(b *wsBridge) {
+	defer func() {
+		if r := recover(); r != nil {
+			// A panic in the writer would otherwise propagate up and
+			// crash the dispatcher process; the connection is going
+			// away anyway, so log and let the deferred drop close it.
+			b.logger.Error("dispatcher: ws writer panic: %v", r)
+		}
+	}()
 	ticker := time.NewTicker(wsPingPeriod)
 	defer func() {
 		ticker.Stop()
@@ -254,6 +272,11 @@ func (c *wsClientConn) writer(b *wsBridge) {
 // read that fails (close, pong timeout, frame too large) drops the
 // connection.
 func (c *wsClientConn) reader(b *wsBridge) {
+	defer func() {
+		if r := recover(); r != nil {
+			b.logger.Error("dispatcher: ws reader panic: %v", r)
+		}
+	}()
 	defer b.drop(c)
 	c.conn.SetReadLimit(wsReadLimit)
 	_ = c.conn.SetReadDeadline(time.Now().Add(wsPongWait))
