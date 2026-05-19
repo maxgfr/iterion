@@ -21,6 +21,10 @@ export function computePollingInterval(
 export interface UseRunsOptions {
   status?: RunStatus | "";
   limit?: number;
+  // When false, the hook skips fetching and returns the empty result.
+  // Used by surfaces that only need the runs list while a UI is open
+  // (e.g. the global command palette) to avoid background polling.
+  enabled?: boolean;
 }
 
 export interface UseRunsResult {
@@ -36,10 +40,11 @@ export interface UseRunsResult {
 // is hidden) and de-dupes consumers that mount the same key, so the
 // previous fingerprint + visibilitychange machinery falls away.
 export function useRuns(opts: UseRunsOptions = {}): UseRunsResult {
-  const { status = "", limit } = opts;
+  const { status = "", limit, enabled = true } = opts;
   const query = useQuery<RunSummary[]>({
     queryKey: ["runs", status, limit],
     queryFn: () => listRuns({ status: status || undefined, limit }),
+    enabled,
     refetchInterval: (q) => {
       const data = q.state.data;
       if (!data) return POLL_INTERVAL_FAST_MS;

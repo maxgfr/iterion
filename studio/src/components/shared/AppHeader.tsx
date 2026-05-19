@@ -6,6 +6,7 @@ import ProjectLabel from "./ProjectLabel";
 import UserTeamChip from "./UserTeamChip";
 import BackendStatusPill from "@/components/Toolbar/BackendStatusPill";
 import ThemeToggle from "@/components/ui/ThemeToggle";
+import { useUIStore } from "@/store/ui";
 
 interface AppHeaderProps {
   active?: Section;
@@ -42,6 +43,7 @@ export default function AppHeader({
         </Link>
         <NavLinks active={active} />
         <ProjectLabel />
+        <CommandPaletteHint />
         {children}
         <div className="ml-auto flex items-center gap-1.5 sm:gap-2 shrink-0">
           {rightActions}
@@ -51,5 +53,28 @@ export default function AppHeader({
         </div>
       </header>
     </>
+  );
+}
+
+// CommandPaletteHint renders a small "⌘K" chip next to the project
+// label so the global Cmd+K palette is discoverable. Click toggles
+// the palette via the UI store; the actual shortcut is handled by
+// GlobalCommandPalette. Hidden on narrow viewports to keep the
+// header from wrapping.
+function CommandPaletteHint() {
+  const toggle = useUIStore((s) => s.toggleCommandPalette);
+  const isMac =
+    typeof navigator !== "undefined" &&
+    navigator.userAgent.toLowerCase().includes("mac");
+  const label = isMac ? "⌘K" : "Ctrl+K";
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded border border-border-default bg-surface-2 text-fg-subtle hover:text-fg-default hover:border-border-strong"
+      title="Open command palette"
+    >
+      <kbd className="font-mono">{label}</kbd>
+    </button>
   );
 }
