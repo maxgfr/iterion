@@ -33,10 +33,9 @@ export function registerIterCompletionProvider(monaco: Monaco) {
       // each tab has its own document store. Resolve via the tabs
       // store + registry on every invocation so multi-tab editing
       // never feeds suggestions from a stale singleton.
-      const { tabs, activeTabId } = useTabsStore.getState();
-      const active = tabs.find((t) => t.id === activeTabId);
-      if (active?.kind !== "editor") return { suggestions: [] };
-      const doc = getOrCreateDocumentStore(active.id).getState().document;
+      const { activeEditorTabId } = useTabsStore.getState();
+      if (!activeEditorTabId) return { suggestions: [] };
+      const doc = getOrCreateDocumentStore(activeEditorTabId).getState().document;
       const activeWorkflowName = useUIStore.getState().activeWorkflowName ?? undefined;
       if (!doc) return { suggestions: [] };
 

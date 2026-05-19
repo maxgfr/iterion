@@ -4,10 +4,6 @@ import type { ReactNode } from "react";
 import Sidebar from "./Sidebar";
 import ContextualHeaderBar from "./ContextualHeaderBar";
 import MainSpinner from "./MainSpinner";
-import TabBar from "./TabBar";
-import TabRouter from "./TabRouter";
-import { useTabLocationSync } from "@/hooks/useTabLocationSync";
-import { useTabHotkeys } from "@/hooks/useTabHotkeys";
 import { useUIStore } from "@/store/ui";
 
 interface AppShellProps {
@@ -15,10 +11,11 @@ interface AppShellProps {
 }
 
 // AppShell is the persistent layout root for all authenticated routes.
-// Sidebar, TabBar, and ContextualHeaderBar stay mounted across navigation;
-// only <main> swaps its lazy-loaded route content. Phase 1 keeps the
-// wouter <Switch> (passed in via children) as the actual renderer; the
-// TabBar is a state/UI skin synced bidirectionally with the URL.
+// Sidebar + ContextualHeaderBar stay mounted across navigation; only
+// <main> swaps its lazy-loaded route content. Routing is driven by
+// the wouter <Switch> passed in as children — sections like /editor
+// and /runs/:id host their own inner tab strips for multi-file /
+// multi-run parallelism (see EditorTabsView / RunsTabsView).
 //
 // Focus mode: when useUIStore.expanded is true (editor canvas-only
 // mode), the chrome is dropped entirely — including the "Skip to
@@ -26,18 +23,10 @@ interface AppShellProps {
 export default function AppShell({ children }: AppShellProps) {
   const expanded = useUIStore((s) => s.expanded);
 
-  // Hooks must run unconditionally; both sync hooks no-op when their
-  // dependencies haven't moved, so they're cheap to call on every
-  // render — including focus mode.
-  useTabLocationSync();
-  useTabHotkeys();
-
-  const fallback = <Suspense fallback={<MainSpinner />}>{children}</Suspense>;
-
   if (expanded) {
     return (
       <div className="h-screen w-screen bg-surface-0 text-fg-default">
-        <TabRouter fallback={fallback} />
+        <Suspense fallback={<MainSpinner />}>{children}</Suspense>
       </div>
     );
   }
@@ -52,10 +41,9 @@ export default function AppShell({ children }: AppShellProps) {
       </a>
       <Sidebar />
       <div className="flex-1 min-w-0 flex flex-col">
-        <TabBar />
         <ContextualHeaderBar />
         <main id="main-content" className="flex-1 min-h-0 overflow-hidden">
-          <TabRouter fallback={fallback} />
+          <Suspense fallback={<MainSpinner />}>{children}</Suspense>
         </main>
       </div>
     </div>

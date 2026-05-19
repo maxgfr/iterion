@@ -9,8 +9,10 @@ import AppShell from "@/components/shared/AppShell";
 // gate; everything else is conditional on a route match).
 const HomeView = lazy(() => import("@/components/Home/HomeView"));
 const WhatsNextView = lazy(() => import("@/components/WhatsNext/WhatsNextView"));
+const EditorTabsView = lazy(() => import("@/components/Editor/EditorTabsView"));
 const LaunchView = lazy(() => import("@/components/Runs/LaunchView"));
 const RunListView = lazy(() => import("@/components/Runs/RunListView"));
+const RunsTabsView = lazy(() => import("@/components/Runs/RunsTabsView"));
 const BoardView = lazy(() => import("@/views/Board"));
 const DispatcherView = lazy(() => import("@/views/Dispatcher"));
 const Welcome = lazy(() => import("@/views/Welcome"));
@@ -35,15 +37,14 @@ import { getOrCreateDocumentStore } from "@/store/document";
 import { useTabsStore } from "@/store/tabs";
 import { useServerInfoStore } from "@/store/serverInfo";
 
-// activeEditorDocStore looks up the document store for the active
-// editor tab via the tabs+document registries. Returns null when the
-// active tab isn't an editor (Home, Runs, etc.) so menu shortcuts
-// silently no-op rather than mutating a stale global default.
+// activeEditorDocStore looks up the document store for the editor
+// tab currently shown in /editor. Returns null when no editor tab is
+// open so menu undo/redo shortcuts silently no-op rather than
+// mutating a stale global default.
 function activeEditorDocStore() {
-  const { tabs, activeTabId } = useTabsStore.getState();
-  const active = tabs.find((t) => t.id === activeTabId);
-  if (active?.kind !== "editor") return null;
-  return getOrCreateDocumentStore(active.id);
+  const { activeEditorTabId } = useTabsStore.getState();
+  if (!activeEditorTabId) return null;
+  return getOrCreateDocumentStore(activeEditorTabId);
 }
 
 export default function App() {
@@ -174,12 +175,11 @@ function AuthedApp() {
               <LaunchView />
             </ErrorBoundary>
           </Route>
-          {/* /runs/:id is rendered by TabRouter via RunTabHost so the
-              run can live in a tab with its own per-runId store + WS.
-              We leave the route present so wouter still resolves it
-              for deriveSection (sidebar nav highlight) but it renders
-              nothing — the visible UI comes from TabRouter. */}
-          <Route path="/runs/:id">{null}</Route>
+          <Route path="/runs/:id">
+            <ErrorBoundary area="Run view">
+              <RunsTabsView />
+            </ErrorBoundary>
+          </Route>
           <Route path="/runs">
             <ErrorBoundary area="Runs list">
               <RunListView />
@@ -201,11 +201,11 @@ function AuthedApp() {
               </ErrorBoundary>
             </Route>
           )}
-          {/* /editor is rendered by TabRouter via EditorTabHost so
-              each tab has its own document + selection store. The
-              route is preserved (without a component) for URL sync
-              and sidebar nav highlight. */}
-          <Route path="/editor">{null}</Route>
+          <Route path="/editor">
+            <ErrorBoundary area="Editor view">
+              <EditorTabsView />
+            </ErrorBoundary>
+          </Route>
           <Route path="/whats-next">
             <ErrorBoundary area="What's Next view">
               <WhatsNextView />
