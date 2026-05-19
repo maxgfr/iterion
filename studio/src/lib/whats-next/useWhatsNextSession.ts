@@ -20,7 +20,7 @@ import {
 import { useRunWebSocket } from "@/hooks/useRunWebSocket";
 import type { FirstClassBot } from "@/lib/whats-next/firstClassBots";
 import type { WhatsNextMessage } from "@/lib/whats-next/messages";
-import { useRunStore } from "@/store/run";
+import { runStore, useRunStore } from "@/store/run";
 import { useServerInfoStore } from "@/store/serverInfo";
 
 import {
@@ -111,12 +111,12 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
           setStatus("idle");
           return;
         }
-        useRunStore.getState().reset();
-        useRunStore.getState().applySnapshot(snap);
+        runStore.getState().reset();
+        runStore.getState().applySnapshot(snap);
         // setRunId on the store FIRST so loadEventHistoryIfMissing's
         // post-await guard (`state.runId !== runId` → return) passes.
         // Without this the fetched events would be silently dropped.
-        useRunStore.getState().setRunId(remembered);
+        runStore.getState().setRunId(remembered);
         // Pull the persisted event history so the transcript reflects
         // everything that happened before this mount. RunView lazy-loads
         // this only when the user opens the Events tab; for WhatsNext the
@@ -127,7 +127,7 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
         // letting the fetch finish on remount is harmless (and a fresh
         // mount would have to re-do the work anyway).
         try {
-          await useRunStore
+          await runStore
             .getState()
             .loadEventHistoryIfMissing(remembered);
         } catch {
@@ -301,7 +301,7 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
         // Pin the store's runId early so loadEventHistoryIfMissing's
         // `state.runId !== runId` guard doesn't drop the fetched batch
         // after its await — same trick the auto-attach branch uses.
-        useRunStore.getState().setRunId(res.run_id);
+        runStore.getState().setRunId(res.run_id);
         setRunId(res.run_id);
         // Seed the store with the freshly-created run's snapshot AND
         // any events the runtime persisted between createRun and now.
@@ -358,7 +358,7 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
         const targetRunId = runId;
         refreshTimerRef.current = window.setTimeout(() => {
           refreshTimerRef.current = null;
-          if (useRunStore.getState().runId !== targetRunId) return;
+          if (runStore.getState().runId !== targetRunId) return;
           getRun(targetRunId)
             .then(applySnapshot)
             .catch((e) => {

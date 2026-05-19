@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 
 import { fileWatcher } from "@/api/ws";
 import { refreshServerProjects } from "@/hooks/useProjects";
-import { useRunStore } from "@/store/run";
+import { resetAllRunStores } from "@/store/run";
 import { useServerInfoStore } from "@/store/serverInfo";
 import { useUIStore } from "@/store/ui";
 
@@ -30,7 +30,7 @@ export function useProjectSwitchListener(): void {
     fileWatcher.connect();
     const off = fileWatcher.subscribe((event) => {
       if (event.type !== "project_switched") return;
-      useRunStore.getState().reset();
+      resetAllRunStores();
       void useServerInfoStore.getState().refresh();
       refreshServerProjects();
       setLocation("/");
