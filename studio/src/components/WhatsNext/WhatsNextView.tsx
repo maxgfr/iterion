@@ -2,7 +2,6 @@ import { useCallback } from "react";
 import { Link } from "wouter";
 import { ExternalLinkIcon } from "@radix-ui/react-icons";
 
-import AppHeader from "@/components/shared/AppHeader";
 import {
   DEFAULT_WHATS_NEXT_BOT_ID,
   getFirstClassBot,
@@ -76,11 +75,8 @@ export default function WhatsNextView() {
 
   if (!bot) {
     return (
-      <div className="h-full flex flex-col bg-surface-0">
-        <AppHeader active="whatsNext" />
-        <main className="flex-1 grid place-items-center text-fg-muted">
-          No first-class bot registered.
-        </main>
+      <div className="h-full grid place-items-center text-fg-muted">
+        No first-class bot registered.
       </div>
     );
   }
@@ -88,10 +84,7 @@ export default function WhatsNextView() {
   const inSession = session.status !== "idle";
 
   return (
-    <div className="h-full flex flex-col bg-surface-0 text-fg-default overflow-hidden">
-      <AppHeader active="whatsNext" />
-
-      <main className="flex-1 flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden">
         {!inSession ? (
           <SessionLauncher
             bot={bot}
@@ -132,7 +125,6 @@ export default function WhatsNextView() {
               )}
           </div>
         )}
-      </main>
     </div>
   );
 }

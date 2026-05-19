@@ -17,7 +17,7 @@ import { CheckCircledIcon, ExclamationTriangleIcon } from "@radix-ui/react-icons
 import { Button } from "@/components/ui/Button";
 import { DesktopOnlyNotice } from "@/components/ui/DesktopOnlyNotice";
 import { Select } from "@/components/ui/Select";
-import AppHeader from "@/components/shared/AppHeader";
+import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
 import ConfirmDialog from "@/components/shared/ConfirmDialog";
 import { useDocumentStore } from "@/store/document";
 import { useBackendDetectStore } from "@/store/backendDetect";
@@ -419,26 +419,28 @@ export default function LaunchView() {
     if (worktreeOn) setShowAdvanced(true);
   }, [worktreeOn]);
 
-  return (
-    <div className="h-full flex flex-col bg-surface-1 text-fg-default">
-      <AppHeader
-        active="runs"
-        rightActions={
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setLocation("/editor")}
-          >
-            Cancel
-          </Button>
-        }
-      >
+  useHeaderSlot({
+    left: (
+      <>
         <span className="text-xs font-semibold text-fg-muted">Launch run</span>
         <span className="text-xs text-fg-subtle font-mono truncate max-w-md" title={filePath}>
           {filePath}
         </span>
-      </AppHeader>
+      </>
+    ),
+    right: (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setLocation("/editor")}
+      >
+        Cancel
+      </Button>
+    ),
+  });
 
+  return (
+    <div className="h-full flex flex-col bg-surface-1 text-fg-default">
       <div className="flex-1 overflow-auto px-4 py-4 max-w-3xl">
         <DesktopOnlyNotice
           feature="the Launch form"

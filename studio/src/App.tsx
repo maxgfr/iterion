@@ -1,6 +1,8 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 import { Route, Switch } from "wouter";
 
+import AppShell from "@/components/shared/AppShell";
+
 // Routes are React.lazy'd so each view ships its own chunk and the
 // initial download covers only the shell + AuthGate. The eager imports
 // below are the always-needed shell pieces (Login lives off the auth
@@ -151,13 +153,7 @@ function AuthedApp() {
   return (
     <>
       {isDesktop && <MissingCLIBanner />}
-      <Suspense
-        fallback={
-          <div className="h-screen flex items-center justify-center bg-surface-0 text-fg-muted">
-            Loading view…
-          </div>
-        }
-      >
+      <AppShell>
         <Switch>
           <Route path="/runs/new">
             <ErrorBoundary area="Launch view">
@@ -201,7 +197,7 @@ function AuthedApp() {
           <Route path="/" component={HomeView} />
           <Route component={HomeView} />
         </Switch>
-      </Suspense>
+      </AppShell>
       <ToastContainer />
       <GlobalCommandPalette />
       {/* Settings + ProjectSwitcher are also lazy and need their own

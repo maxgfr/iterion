@@ -2,7 +2,7 @@ import { useState } from "react";
 import ApiKeysPanel from "./ApiKeys";
 import OAuthConnections from "./OAuthConnections";
 import { useAuth } from "@/auth/AuthContext";
-import AppHeader from "@/components/shared/AppHeader";
+import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
 
 type Tab = "api-keys" | "oauth" | "profile";
 
@@ -10,12 +10,12 @@ export default function SettingsPage() {
   const { user } = useAuth();
   const [tab, setTab] = useState<Tab>("api-keys");
 
-  return (
-    <div className="min-h-screen bg-surface-0 text-fg-default">
-      <AppHeader showBackendPill={false}>
-        <span className="text-sm font-semibold">Settings</span>
-      </AppHeader>
+  useHeaderSlot({
+    left: <span className="text-sm font-semibold">Settings</span>,
+  });
 
+  return (
+    <div className="h-full overflow-auto">
       <div className="max-w-5xl mx-auto p-3 sm:p-6 grid grid-cols-1 sm:grid-cols-[200px,1fr] gap-4 sm:gap-6">
         <nav className="flex sm:block sm:space-y-1 gap-1 flex-wrap">
           {(
@@ -37,7 +37,7 @@ export default function SettingsPage() {
           ))}
         </nav>
 
-        <main className="bg-surface-0">
+        <div className="bg-surface-0">
           {tab === "api-keys" && <ApiKeysPanel />}
           {tab === "oauth" && <OAuthConnections />}
           {tab === "profile" && (
@@ -51,7 +51,7 @@ export default function SettingsPage() {
               )}
             </div>
           )}
-        </main>
+        </div>
       </div>
     </div>
   );

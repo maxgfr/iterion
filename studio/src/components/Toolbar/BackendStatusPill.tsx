@@ -6,6 +6,27 @@ import { Popover } from "@/components/ui/Popover";
 import type { BackendStatus } from "@/api/backends";
 import { desktop, isDesktop } from "@/lib/desktopBridge";
 
+export type BackendStatusPillVariant = "pill" | "row" | "icon";
+
+interface Props {
+  /** Layout variant:
+   *  - "pill" (default): rounded chip with dot + backend label, suited to the
+   *    horizontal header / contextual bar.
+   *  - "row": full-width sidebar row with dot + backend label + refresh hint.
+   *  - "icon": single dot-only square for the collapsed sidebar; tooltip
+   *    surfaces the resolved backend so the operator still sees it.
+   */
+  variant?: BackendStatusPillVariant;
+}
+
+// Container classes per variant — hoisted to module scope so they're
+// not reallocated on every render.
+const VARIANT_BASE: Record<BackendStatusPillVariant, string> = {
+  icon: "inline-flex items-center justify-center h-7 w-7 rounded border",
+  row: "flex w-full items-center gap-2 px-2 py-1 text-xs rounded border",
+  pill: "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border",
+};
+
 const DOCS_BACKENDS_URL =
   "https://github.com/SocialGouv/iterion/blob/main/docs/backends.md";
 
@@ -19,15 +40,20 @@ function openDocs(e: React.MouseEvent<HTMLAnchorElement>) {
   }
 }
 
-export default function BackendStatusPill() {
+export default function BackendStatusPill({ variant = "pill" }: Props = {}) {
   const report = useBackendDetectStore((s) => s.report);
   const loading = useBackendDetectStore((s) => s.loading);
   const error = useBackendDetectStore((s) => s.error);
   const refresh = useBackendDetectStore((s) => s.refresh);
 
+  const variantBase = VARIANT_BASE[variant];
+
   if (loading && !report) {
     return (
-      <span className="text-[10px] text-fg-subtle px-2 py-1" title="Detecting LLM backends...">
+      <span
+        className={`${variantBase} text-fg-subtle border-border-default`}
+        title="Detecting LLM backends..."
+      >
         …
       </span>
     );
@@ -37,11 +63,11 @@ export default function BackendStatusPill() {
     return (
       <button
         type="button"
-        className="text-[10px] text-error px-2 py-1"
+        className={`${variantBase} text-error border-error/50 bg-error/5`}
         title={`Backend detect failed: ${error}`}
         onClick={() => void refresh()}
       >
-        ⚠ creds
+        ⚠{variant !== "icon" && " creds"}
       </button>
     );
   }
@@ -54,30 +80,43 @@ export default function BackendStatusPill() {
   const summary = report.backends
     .map((b) => `${b.available ? "✓" : "·"} ${b.name}${b.auth !== "none" ? ` (${b.auth})` : ""}`)
     .join("\n");
-  const tooltip = `Preference: ${report.preference_order.join(" → ")}\n${summary}`;
+  const tooltip = hasAny
+    ? `LLM credentials\nResolved: ${resolved}\n\nPreference: ${report.preference_order.join(" → ")}\n${summary}`
+    : `No LLM credentials detected\n\nPreference: ${report.preference_order.join(" → ")}\n${summary}`;
+
+  const dotCls = hasAny ? "bg-success" : "bg-error";
+  const borderCls = hasAny
+    ? "border-success/40 text-fg-default bg-success/5"
+    : "border-error/50 text-fg-default bg-error/5";
 
   return (
     <Popover
-      side="bottom"
+      side={variant === "icon" ? "right" : "bottom"}
       align="start"
       contentClassName="min-w-[280px] p-3 text-xs"
       trigger={
         <button
           type="button"
-          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${
-            hasAny
-              ? "border-success/40 text-success bg-success/5"
-              : "border-error/50 text-error bg-error/5"
-          }`}
+          className={`${variantBase} ${borderCls} hover:bg-surface-3`}
           title={tooltip}
+          aria-label={hasAny ? `LLM credentials: ${resolved}` : "No LLM credentials"}
         >
           <span
             aria-hidden
-            className={`inline-block w-1.5 h-1.5 rounded-full ${
-              hasAny ? "bg-success" : "bg-error"
-            }`}
+            className={`inline-block rounded-full ${dotCls} ${variant === "icon" ? "w-2 h-2" : "w-1.5 h-1.5"}`}
           />
-          {hasAny ? (
+          {variant === "icon" ? null : variant === "row" ? (
+            <>
+              {hasAny ? (
+                <BackendBadge backend="" resolved={resolved} size={11} showLabel />
+              ) : (
+                <span className="text-error">no credentials</span>
+              )}
+              <ReloadIcon
+                className={`w-3 h-3 ml-auto text-fg-subtle ${loading ? "animate-spin" : ""}`}
+              />
+            </>
+          ) : hasAny ? (
             <BackendBadge backend="" resolved={resolved} size={9} showLabel />
           ) : (
             <span>no creds</span>

@@ -3,7 +3,7 @@ import { useLocation, useSearch } from "wouter";
 
 import { formatRelative } from "@/lib/format";
 
-import PageShell from "@/components/shared/PageShell";
+import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
 import DispatcherControlBar from "@/components/shared/DispatcherControlBar";
 import { Button } from "@/components/ui/Button";
 import {
@@ -388,37 +388,30 @@ export default function BoardView() {
     onShowHelp: () => setHelpOpen((v) => !v),
   });
 
+  useHeaderSlot({
+    left: <span className="text-xs font-medium text-fg-default">Board</span>,
+    right: board ? (
+      <>
+        <LastSyncBadge lastSyncAt={lastSyncAt} />
+        <Button variant="secondary" size="sm" onClick={() => void refresh()}>
+          Refresh
+        </Button>
+        <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+          + New issue
+        </Button>
+      </>
+    ) : null,
+  });
+
   if (loading) {
-    return (
-      <PageShell active="board">
-        <div className="p-8 text-fg-muted">Loading kanban…</div>
-      </PageShell>
-    );
+    return <div className="p-8 text-fg-muted">Loading kanban…</div>;
   }
   if (!board) {
-    return (
-      <PageShell active="board">
-        <EmptyBoard kind="missing" />
-      </PageShell>
-    );
+    return <EmptyBoard kind="missing" />;
   }
 
   return (
-    <PageShell
-      active="board"
-      rightActions={
-        <>
-          <LastSyncBadge lastSyncAt={lastSyncAt} />
-          <Button variant="secondary" size="sm" onClick={() => void refresh()}>
-            Refresh
-          </Button>
-          <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-            + New issue
-          </Button>
-        </>
-      }
-    >
-
+    <div className="h-full flex flex-col overflow-hidden">
       <DispatcherControlBar onOpenSettings={() => setSettingsOpen(true)} />
       <SettingsDrawer
         open={settingsOpen}
@@ -473,11 +466,11 @@ export default function BoardView() {
       />
 
       {issues.length === 0 ? (
-        <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto p-3 outline-none">
+        <div className="flex-1 overflow-auto p-3">
           <EmptyBoard kind="no-issues" onCreate={() => setCreating(true)} />
-        </main>
+        </div>
       ) : (
-      <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto p-3 outline-none">
+      <div className="flex-1 overflow-auto p-3">
         <div className="flex gap-3 min-w-fit">
           {board.states.map((s) => (
             <Column
@@ -519,7 +512,7 @@ export default function BoardView() {
             />
           )}
         </div>
-      </main>
+      </div>
       )}
 
       {creating && (
@@ -540,7 +533,7 @@ export default function BoardView() {
         />
       )}
       {helpOpen && <BoardKeyboardHelp onClose={() => setHelpOpen(false)} />}
-    </PageShell>
+    </div>
   );
 }
 
