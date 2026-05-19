@@ -397,7 +397,7 @@ func (e *Engine) newRunState(runID string, inputs map[string]interface{}) *runSt
 // LoadRun + transition is attempted first; if no doc exists we fall
 // back to CreateRun. Any other status (running, finished, …) is a
 // programming error — refuse to clobber state.
-func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interface{}) error {
+func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interface{}) (err error) {
 	var run *store.Run
 	if existing, loadErr := e.store.LoadRun(ctx, runID); loadErr == nil {
 		// Pickup path: the doc already exists.
@@ -506,6 +506,16 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 		worktreeCleanup = cleanup
 		wtCtx = wtc
 		worktreeActive = true
+		// Cover every exit path from this point on. Without this defer,
+		// failures in mirrorBundleSkills / startSandbox / emit /
+		// SaveRun(workDir) would return without finalize and leak the
+		// worktree dir + orphan any commits the partial run produced.
+		// finalizeOnExit short-circuits on error (preserves worktree for
+		// inspection, skips FF) so a single defer covers both happy and
+		// error paths uniformly.
+		defer func() {
+			e.finalizeOnExit(ctx, runID, &wtCtx, worktreeCleanup, err)
+		}()
 	}
 
 	// Persist the resolved working directory so studio surfaces (modified-
@@ -522,6 +532,7 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 			run.BaseCommit = wtCtx.originalTip
 		}
 		if err := e.store.SaveRun(ctx, run); err != nil {
+			e.markFailedBestEffort(ctx, runID, "save work dir", err)
 			return fmt.Errorf("runtime: save work dir: %w", err)
 		}
 	}
@@ -562,7 +573,8 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 
 	// Emit run_started.
 	if err := e.emit(ctx, runID, store.EventRunStarted, "", nil); err != nil {
-		return err
+		e.markFailedBestEffort(ctx, runID, "emit run_started", err)
+		return fmt.Errorf("runtime: emit run_started: %w", err)
 	}
 
 	rs := e.newRunState(runID, inputs)
@@ -580,14 +592,9 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 	loopErr := e.execLoop(ctx, rs, e.workflow.Entry)
 	e.evictRunSessions(runID, loopErr)
 
-	// Worktree retention: on clean exit, promote any commits the run
-	// produced onto a persistent branch (and best-effort FF the user's
-	// branch), then remove the worktree dir. On error, preserve the
-	// worktree so the operator can inspect what was produced.
-	if worktreeActive {
-		e.finalizeOnExit(ctx, runID, &wtCtx, worktreeCleanup, loopErr)
-	}
-
+	// Worktree finalization runs via the defer installed right after
+	// setupWorktree above — covers both this happy-path return and any
+	// setup-phase early returns.
 	return loopErr
 }
 
