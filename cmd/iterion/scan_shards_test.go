@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/SocialGouv/iterion/pkg/store"
 )
 
 // TestPlanShards_DeterministicIDs exercises planShards' contract:
@@ -93,5 +97,100 @@ func TestPlanShards_EmptyInput(t *testing.T) {
 	}
 	if got := planShards([]string{}, 10, "p"); len(got) != 0 {
 		t.Errorf("expected 0 shards for empty slice, got %d", len(got))
+	}
+}
+
+// awaitTerminal MUST poll until every result reaches a terminal
+// status — the original "one-shot LoadRun" shape silently marked
+// cloud-mode shards as failed because they were still queued when the
+// poll fired. The test below seeds two runs at non-terminal statuses,
+// then concurrently transitions them to finished/failed to confirm
+// the poll loop converges only when the store reflects it.
+func TestAwaitTerminal_PollsUntilTerminal(t *testing.T) {
+	rs, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := rs.CreateRun(ctx, "shard-aaaa00000000aaaa", "wf", nil); err != nil {
+		t.Fatalf("CreateRun a: %v", err)
+	}
+	if _, err := rs.CreateRun(ctx, "shard-bbbb00000000bbbb", "wf", nil); err != nil {
+		t.Fatalf("CreateRun b: %v", err)
+	}
+
+	results := []shardResult{
+		{Plan: shardPlan{Index: 0, RunID: "shard-aaaa00000000aaaa"}},
+		{Plan: shardPlan{Index: 1, RunID: "shard-bbbb00000000bbbb"}},
+	}
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		_ = rs.UpdateRunStatus(ctx, "shard-aaaa00000000aaaa", store.RunStatusFinished, "")
+		time.Sleep(30 * time.Millisecond)
+		_ = rs.UpdateRunStatus(ctx, "shard-bbbb00000000bbbb", store.RunStatusFailed, "boom")
+	}()
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	awaitTerminal(ctx, rs, results, 10*time.Millisecond)
+
+	if results[0].Status != store.RunStatusFinished {
+		t.Errorf("shard 0 status = %q, want finished", results[0].Status)
+	}
+	if results[1].Status != store.RunStatusFailed {
+		t.Errorf("shard 1 status = %q, want failed", results[1].Status)
+	}
+	if results[1].Error != "boom" {
+		t.Errorf("shard 1 error = %q, want %q", results[1].Error, "boom")
+	}
+}
+
+// When the context cancels before all runs terminate, awaitTerminal
+// must annotate the still-pending shards with a timeout error rather
+// than block forever or return a partial silent state.
+func TestAwaitTerminal_ContextCancelMarksPending(t *testing.T) {
+	rs, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	if _, err := rs.CreateRun(context.Background(), "shard-deadbeefdeadbeef", "wf", nil); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	results := []shardResult{{Plan: shardPlan{Index: 0, RunID: "shard-deadbeefdeadbeef"}}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	awaitTerminal(ctx, rs, results, 10*time.Millisecond)
+
+	if !strings.Contains(results[0].Error, "timed out") {
+		t.Errorf("expected timeout error, got %q", results[0].Error)
+	}
+}
+
+// A LoadRun miss (run document not yet visible — cloud publisher lag
+// is the realistic case) must keep the shard in the polling set
+// rather than mark it permanently missing.
+func TestAwaitTerminal_LoadRunMissTransient(t *testing.T) {
+	rs, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	results := []shardResult{{Plan: shardPlan{Index: 0, RunID: "shard-nonexistent00"}}}
+
+	go func() {
+		time.Sleep(40 * time.Millisecond)
+		_, _ = rs.CreateRun(context.Background(), "shard-nonexistent00", "wf", nil)
+		time.Sleep(10 * time.Millisecond)
+		_ = rs.UpdateRunStatus(context.Background(), "shard-nonexistent00", store.RunStatusFinished, "")
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	awaitTerminal(ctx, rs, results, 10*time.Millisecond)
+
+	if results[0].Status != store.RunStatusFinished {
+		t.Errorf("status = %q, want finished (transient miss should not be permanent)", results[0].Status)
 	}
 }

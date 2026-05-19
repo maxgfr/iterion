@@ -26,6 +26,21 @@ const (
 	RunStatusQueued RunStatus = "queued"
 )
 
+// IsTerminal returns true when the run has reached a state it cannot
+// leave without operator action. Polling consumers (cloud-mode shard
+// dispatchers, the studio's run list, etc.) stop refreshing once
+// IsTerminal is true. `failed_resumable` is terminal in this sense
+// even though the run can be resumed — the resume produces a new
+// observable status transition.
+func (s RunStatus) IsTerminal() bool {
+	switch s {
+	case RunStatusFinished, RunStatusFailed, RunStatusFailedResumable, RunStatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Run — top-level run metadata persisted in run.json
 // ---------------------------------------------------------------------------

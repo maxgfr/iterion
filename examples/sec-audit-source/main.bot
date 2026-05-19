@@ -66,6 +66,11 @@ vars:
   ## LLM workload to their assigned slice. Tools (scanners) ignore
   ## it; triage applies it post-scanner.
   file_filter:         string = ""
+  ## Path to THIS workflow file; children re-invoke it with
+  ## shard_size=0 + file_filter set. Defaults to the bundle's
+  ## conventional location; override when the bundle is installed
+  ## elsewhere (e.g. --var workflow_path=/opt/bots/sec-audit-source/main.bot).
+  workflow_path:       string = "${PROJECT_DIR}/examples/sec-audit-source/main.bot"
 
 ## ─── Schemas ──────────────────────────────────────────────────────
 
@@ -123,6 +128,7 @@ schema shard_dispatch_input:
   records_dir:         string
   matchers_dir:        string
   files_path:          string
+  workflow_path:       string
 
 schema shard_dispatch_output:
   shards_planned:    int
@@ -575,17 +581,21 @@ print(json.dumps({
 ## the audit trail; the tool returns a structured summary so the
 ## parent's exit code reflects shard failures.
 tool dispatch_shards:
-  command: `mkdir -p {{input.scan_dir}} && WS={{input.workspace_dir}} SHARD_SIZE={{input.shard_size}} CONCURRENCY={{input.shard_concurrency}} SEVTHR={{input.severity_threshold}} FPP={{input.fp_path}} REC={{input.records_dir}} MAT={{input.matchers_dir}} FILES={{input.files_path}} ENV_PATH={{input.scan_dir}}/shards.json python3 -c "
-import os, sys, json, time, subprocess, shutil
+  command: `mkdir -p {{input.scan_dir}} && WS={{input.workspace_dir}} SHARD_SIZE={{input.shard_size}} CONCURRENCY={{input.shard_concurrency}} SEVTHR={{input.severity_threshold}} FPP={{input.fp_path}} REC={{input.records_dir}} MAT={{input.matchers_dir}} FILES={{input.files_path}} WORKFLOW={{input.workflow_path}} ENV_PATH={{input.scan_dir}}/shards.json python3 -c "
+import os, json, time, subprocess, shutil
 ws = os.environ['WS']
 shard_size = int(os.environ['SHARD_SIZE'])
 concurrency = int(os.environ['CONCURRENCY'])
 files_path = os.environ['FILES']
+workflow = os.environ['WORKFLOW']
 
 # Locate the iterion binary: prefer the one on PATH; fall back to the
 # repo-local build that ships with bundled runs.
 iterion = shutil.which('iterion') or os.path.join(ws, 'iterion')
 
+# Child runs re-enter this same workflow with shard_size=0, so they
+# fall through to the single-process pipeline on their assigned slice
+# (file_filter, set by __scan-shards via --shard-var).
 base_vars = {
     'workspace_dir':      ws,
     'shard_size':         '0',
@@ -593,24 +603,17 @@ base_vars = {
     'fp_path':            os.environ.get('FPP', ''),
     'records_dir':        os.environ.get('REC', ''),
     'matchers_dir':       os.environ.get('MAT', ''),
+    'workflow_path':      workflow,
 }
 
-# Use the same workflow that's running now. The child sees shard_size=0
-# (via base_vars override) so it falls through to the single-process
-# pipeline on its assigned slice (file_filter).
 cmd = [iterion, '__scan-shards',
-       '--workflow', sys.argv[0] if False else os.environ.get('ITERION_WORKFLOW_PATH', ''),
+       '--workflow', workflow,
        '--store-dir', os.path.expanduser('~/.iterion'),
        '--shard-size', str(shard_size),
        '--max-concurrency', str(concurrency),
        '--shard-var', 'file_filter',
        '--base-vars-json', json.dumps(base_vars),
        '--files-json', files_path]
-# When ITERION_WORKFLOW_PATH isn't set by the harness (single-process
-# runs typically don't have it), fall back to assuming the bundle is
-# at examples/sec-audit-source/main.bot relative to workspace_dir.
-if not cmd[cmd.index('--workflow') + 1]:
-    cmd[cmd.index('--workflow') + 1] = os.path.join(ws, 'examples/sec-audit-source/main.bot')
 
 start = time.time()
 proc = subprocess.run(cmd, capture_output=True, timeout=7200)
@@ -1001,7 +1004,8 @@ workflow sec_audit_source:
     fp_path:            "{{vars.fp_path}}",
     records_dir:        "{{vars.records_dir}}",
     matchers_dir:       "{{vars.matchers_dir}}",
-    files_path:         "{{outputs.plan_shards.files_path}}"
+    files_path:         "{{outputs.plan_shards.files_path}}",
+    workflow_path:      "{{vars.workflow_path}}"
   }
 
   dispatch_shards -> done

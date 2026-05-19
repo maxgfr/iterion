@@ -33,6 +33,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Dispatch modes for __scan-shards. The local mode runs children as
+// subprocesses + polls the shared store; the cloud mode POSTs to the
+// iterion server's launch endpoint and lets the runner pool execute
+// the children. "auto" picks cloud when ITERION_SERVER_URL is set,
+// else local.
+const (
+	modeAuto  = "auto"
+	modeLocal = "local"
+	modeCloud = "cloud"
+)
+
+// statusMissing is reported when the shared store has no record of a
+// dispatched child run by the time the poll loop fires. Not a real
+// RunStatus — purely an out-of-band signal in the report JSON.
+const statusMissing store.RunStatus = "missing"
+
 var scanShardsOpts struct {
 	parentRunID    string
 	workflow       string
@@ -122,21 +138,17 @@ func runScanShards(ctx context.Context, out io.Writer) error {
 		return fmt.Errorf("__scan-shards: read files-json: %w", err)
 	}
 	if len(files) == 0 {
-		// Trivial case: no files → no shards. Emit an empty report and succeed.
 		_ = json.NewEncoder(out).Encode(scanShardsReport{
 			ParentRunID: scanShardsOpts.parentRunID,
 			Workflow:    scanShardsOpts.workflow,
-			Mode:        "local",
-			ShardCount:  0,
+			Mode:        modeLocal,
 			ShardSize:   scanShardsOpts.shardSize,
-			FilesTotal:  0,
 			Shards:      []shardResult{},
 		})
 		return nil
 	}
 
 	plans := planShards(files, scanShardsOpts.shardSize, scanShardsOpts.parentRunID)
-
 	mode := resolveMode(scanShardsOpts.mode)
 
 	baseVars, err := parseBaseVars(scanShardsOpts.baseVarsJSON)
@@ -144,45 +156,24 @@ func runScanShards(ctx context.Context, out io.Writer) error {
 		return fmt.Errorf("__scan-shards: parse --base-vars-json: %w", err)
 	}
 
-	deadline := time.Now().Add(scanShardsOpts.timeout)
-	ctx, cancel := context.WithDeadline(ctx, deadline)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(scanShardsOpts.timeout))
 	defer cancel()
 
-	start := time.Now()
-	var results []shardResult
-	if mode == "cloud" {
-		results = dispatchCloud(ctx, plans, baseVars)
-	} else {
-		results = dispatchLocal(ctx, plans, baseVars)
-	}
-
-	// Re-attach a tail poll to capture terminal statuses from the store.
 	rs, openErr := store.New(scanShardsOpts.storeDir)
 	if openErr != nil {
 		return fmt.Errorf("__scan-shards: open store: %w", openErr)
 	}
-	for i := range results {
-		runID := results[i].Plan.RunID
-		r, loadErr := rs.LoadRun(ctx, runID)
-		if loadErr != nil {
-			// Subprocess emitted no run document (unlikely once dispatchLocal returns) — record as error.
-			results[i].Error = fmt.Sprintf("load run after dispatch: %v", loadErr)
-			results[i].Status = store.RunStatus("missing")
-			continue
-		}
-		results[i].Status = r.Status
-		if r.FinishedAt != nil {
-			ft := *r.FinishedAt
-			results[i].Finished = &ft
-		}
-		if r.CreatedAt != (time.Time{}) {
-			ct := r.CreatedAt
-			results[i].Started = &ct
-		}
-		if r.Error != "" && results[i].Error == "" {
-			results[i].Error = r.Error
-		}
+
+	start := time.Now()
+	var results []shardResult
+	switch mode {
+	case modeCloud:
+		results = dispatchCloud(ctx, plans, baseVars)
+	default:
+		results = dispatchLocal(ctx, plans, baseVars)
 	}
+
+	awaitTerminal(ctx, rs, results, scanShardsOpts.pollInterval)
 
 	rep := scanShardsReport{
 		ParentRunID:  scanShardsOpts.parentRunID,
@@ -194,9 +185,6 @@ func runScanShards(ctx context.Context, out io.Writer) error {
 		Shards:       results,
 		DurationSecs: time.Since(start).Seconds(),
 	}
-	// Surface any non-terminal-finished statuses as errors so the bundle
-	// caller can decide what to do (tool node exit code stays 0; the JSON
-	// is the structured signal).
 	for _, s := range rep.Shards {
 		if s.Status != store.RunStatusFinished {
 			rep.Errors = append(rep.Errors, fmt.Sprintf("shard %d (%s) status=%s err=%s", s.Plan.Index, s.Plan.RunID, s.Status, s.Error))
@@ -207,16 +195,71 @@ func runScanShards(ctx context.Context, out io.Writer) error {
 
 func resolveMode(requested string) string {
 	switch requested {
-	case "cloud":
-		return "cloud"
-	case "local":
-		return "local"
+	case modeCloud, modeLocal:
+		return requested
 	default:
-		// auto: cloud iff ITERION_QUEUE_NATS_URL is set; else local.
-		if os.Getenv("ITERION_QUEUE_NATS_URL") != "" {
-			return "cloud"
+		if os.Getenv("ITERION_QUEUE_NATS_URL") != "" || os.Getenv("ITERION_SERVER_URL") != "" {
+			return modeCloud
 		}
-		return "local"
+		return modeLocal
+	}
+}
+
+// awaitTerminal polls the shared run store until every result reaches
+// a terminal status or the context expires. Local-mode children are
+// already terminal when dispatchLocal returns (cmd.Output blocks), so
+// the loop converges on the first tick. Cloud-mode children are still
+// queued/running at this point; the loop is the only thing that turns
+// "POSTed" into "really done" in the report.
+func awaitTerminal(ctx context.Context, rs store.RunStore, results []shardResult, interval time.Duration) {
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	pending := make(map[int]struct{}, len(results))
+	for i := range results {
+		pending[i] = struct{}{}
+	}
+	for len(pending) > 0 {
+		for i := range pending {
+			r, loadErr := rs.LoadRun(ctx, results[i].Plan.RunID)
+			if loadErr != nil {
+				// Run document hasn't appeared yet (cloud-mode publisher
+				// may lag behind the HTTP response by a few ms). Keep
+				// polling; on context expiry the outer select bails.
+				continue
+			}
+			if results[i].Started == nil {
+				ct := r.CreatedAt
+				results[i].Started = &ct
+			}
+			results[i].Status = r.Status
+			if r.Error != "" && results[i].Error == "" {
+				results[i].Error = r.Error
+			}
+			if r.Status.IsTerminal() {
+				if r.FinishedAt != nil {
+					ft := *r.FinishedAt
+					results[i].Finished = &ft
+				}
+				delete(pending, i)
+			}
+		}
+		if len(pending) == 0 {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			for i := range pending {
+				if results[i].Status == "" {
+					results[i].Status = statusMissing
+				}
+				if results[i].Error == "" {
+					results[i].Error = fmt.Sprintf("timed out waiting for shard %s: %v", results[i].Plan.RunID, ctx.Err())
+				}
+			}
+			return
+		case <-time.After(interval):
+		}
 	}
 }
 
@@ -287,70 +330,30 @@ func planShards(files []string, shardSize int, parentRunID string) []shardPlan {
 	return plans
 }
 
-// dispatchLocal spawns child `iterion run` subprocesses bounded by
-// scanShardsOpts.maxConcurrency. Returns one shardResult per plan in
-// the same order as the input slice. Subprocess failures are recorded
-// in the result, not bubbled up — the caller decides what to do based
-// on the JSON envelope's `errors[]`.
-func dispatchLocal(ctx context.Context, plans []shardPlan, baseVars map[string]string) []shardResult {
+// dispatchShards drives the concurrency-bounded fan-out shared by
+// both local and cloud modes. Each plan is dispatched via `do` under
+// a semaphore sized by --max-concurrency; results are pre-populated
+// and `do` mutates them in place. The result slice is in the same
+// order as `plans`.
+func dispatchShards(plans []shardPlan, do func(p shardPlan, r *shardResult)) []shardResult {
 	results := make([]shardResult, len(plans))
 	for i, p := range plans {
 		results[i] = shardResult{Plan: p}
 	}
-
 	sem := make(chan struct{}, scanShardsOpts.maxConcurrency)
 	var wg sync.WaitGroup
-
-	exePath, err := os.Executable()
-	if err != nil {
-		// Fall back to argv[0] if the kernel-provided path is unavailable.
-		exePath = os.Args[0]
-	}
-	exePath, _ = filepath.Abs(exePath)
-
 	for i := range plans {
 		i := i
-		p := plans[i]
-
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-
-			shardJSON, _ := json.Marshal(p.Files)
-			args := []string{
-				"run", scanShardsOpts.workflow,
-				"--run-id", p.RunID,
-				"--store-dir", scanShardsOpts.storeDir,
-				"--no-interactive",
-				"--var", fmt.Sprintf("%s=%s", scanShardsOpts.shardVarName, string(shardJSON)),
-				"--var", fmt.Sprintf("parent_run_id=%s", scanShardsOpts.parentRunID),
-				"--var", fmt.Sprintf("shard_index=%d", p.Index),
-			}
-			for k, v := range baseVars {
-				args = append(args, "--var", k+"="+v)
-			}
-
 			started := time.Now()
 			results[i].Started = &started
-
-			cmd := exec.CommandContext(ctx, exePath, args...)
-			cmd.Env = append(os.Environ(),
-				"ITERION_PARENT_RUN_ID="+scanShardsOpts.parentRunID,
-				fmt.Sprintf("ITERION_SHARD_INDEX=%d", p.Index),
-				fmt.Sprintf("ITERION_SHARD_COUNT=%d", len(plans)),
-			)
-			// Stream subprocess stderr to the parent's stderr; capture
-			// stdout because we don't want it polluting our own JSON
-			// envelope.
-			cmd.Stderr = os.Stderr
-			out, err := cmd.Output()
+			do(plans[i], &results[i])
 			finished := time.Now()
 			results[i].Finished = &finished
-			if err != nil {
-				results[i].Error = fmt.Sprintf("%v: %s", err, truncate(string(out), 512))
-			}
 		}()
 	}
 	wg.Wait()
@@ -364,106 +367,107 @@ func truncate(s string, max int) string {
 	return s[:max] + "...(truncated)"
 }
 
-// dispatchCloud submits each shard as a queued run via the iterion
-// server's HTTP launch endpoint (POST /api/v1/runs/launch). The
-// server persists the run as `queued`, publishes a RunMessage with
-// parent/shard fields populated, and a runner pool drains the queue.
-// The parent polls the shared store for each child's terminal
-// status — exactly like the local path; only the data plane differs.
+// dispatchLocal spawns child `iterion run` subprocesses sharing the
+// parent's --store-dir. cmd.Output blocks per shard, so children are
+// guaranteed terminal when this returns — the downstream awaitTerminal
+// poll converges on the first tick.
+func dispatchLocal(ctx context.Context, plans []shardPlan, baseVars map[string]string) []shardResult {
+	exePath, err := os.Executable()
+	if err != nil {
+		exePath = os.Args[0]
+	}
+	exePath, _ = filepath.Abs(exePath)
+
+	return dispatchShards(plans, func(p shardPlan, r *shardResult) {
+		shardJSON, _ := json.Marshal(p.Files)
+		args := []string{
+			"run", scanShardsOpts.workflow,
+			"--run-id", p.RunID,
+			"--store-dir", scanShardsOpts.storeDir,
+			"--no-interactive",
+			"--var", scanShardsOpts.shardVarName + "=" + string(shardJSON),
+			"--var", "parent_run_id=" + scanShardsOpts.parentRunID,
+			"--var", fmt.Sprintf("shard_index=%d", p.Index),
+		}
+		for k, v := range baseVars {
+			args = append(args, "--var", k+"="+v)
+		}
+		cmd := exec.CommandContext(ctx, exePath, args...)
+		cmd.Env = append(os.Environ(),
+			"ITERION_PARENT_RUN_ID="+scanShardsOpts.parentRunID,
+			fmt.Sprintf("ITERION_SHARD_INDEX=%d", p.Index),
+			fmt.Sprintf("ITERION_SHARD_COUNT=%d", len(plans)),
+		)
+		cmd.Stderr = os.Stderr
+		out, runErr := cmd.Output()
+		if runErr != nil {
+			r.Error = fmt.Sprintf("%v: %s", runErr, truncate(string(out), 512))
+		}
+	})
+}
+
+// dispatchCloud POSTs each shard to the iterion server's launch
+// endpoint and returns once the server has accepted the request — the
+// child runs continue executing inside the runner pool. The terminal
+// status is collected by awaitTerminal polling the shared store.
 //
 // Required env:
-//   - ITERION_SERVER_URL : base URL of the iterion server (e.g.
-//     https://iterion.example.com)
+//   - ITERION_SERVER_URL : base URL of the iterion server
 //
 // Optional env:
-//   - ITERION_SERVER_TOKEN : Bearer auth, when the server gates the
-//     launch endpoint behind SSO
+//   - ITERION_SERVER_TOKEN : Bearer token, when the server gates
+//     the launch endpoint behind SSO
 func dispatchCloud(ctx context.Context, plans []shardPlan, baseVars map[string]string) []shardResult {
-	results := make([]shardResult, len(plans))
-	for i, p := range plans {
-		results[i] = shardResult{Plan: p}
-	}
-
 	serverURL := strings.TrimRight(os.Getenv("ITERION_SERVER_URL"), "/")
 	if serverURL == "" {
-		for i := range results {
-			results[i].Error = "ITERION_SERVER_URL not set; cloud mode requires the server endpoint"
-		}
-		return results
+		// Fail every shard with the same message so the report makes the misconfiguration obvious.
+		return dispatchShards(plans, func(_ shardPlan, r *shardResult) {
+			r.Error = "ITERION_SERVER_URL not set; cloud mode requires the server endpoint"
+		})
 	}
 	token := os.Getenv("ITERION_SERVER_TOKEN")
 
-	// Load the workflow source so the server doesn't need a shared
-	// filesystem (cloud-mode endpoint requires inline `source` when
-	// the server is the cloud daemon, per pkg/server/runs.go:200).
 	src, srcErr := os.ReadFile(scanShardsOpts.workflow)
 	if srcErr != nil {
-		for i := range results {
-			results[i].Error = fmt.Sprintf("read workflow source: %v", srcErr)
+		return dispatchShards(plans, func(_ shardPlan, r *shardResult) {
+			r.Error = fmt.Sprintf("read workflow source: %v", srcErr)
+		})
+	}
+
+	return dispatchShards(plans, func(p shardPlan, r *shardResult) {
+		shardJSON, _ := json.Marshal(p.Files)
+		vars := map[string]string{
+			scanShardsOpts.shardVarName: string(shardJSON),
+			"parent_run_id":             scanShardsOpts.parentRunID,
+			"shard_index":               fmt.Sprintf("%d", p.Index),
 		}
-		return results
-	}
-
-	sem := make(chan struct{}, scanShardsOpts.maxConcurrency)
-	var wg sync.WaitGroup
-
-	for i := range plans {
-		i := i
-		p := plans[i]
-
-		wg.Add(1)
-		sem <- struct{}{}
-		go func() {
-			defer wg.Done()
-			defer func() { <-sem }()
-
-			shardJSON, _ := json.Marshal(p.Files)
-			vars := map[string]string{
-				scanShardsOpts.shardVarName: string(shardJSON),
-				"parent_run_id":             scanShardsOpts.parentRunID,
-				"shard_index":               fmt.Sprintf("%d", p.Index),
-			}
-			for k, v := range baseVars {
-				vars[k] = v
-			}
-
-			body := map[string]interface{}{
-				"file_path":     scanShardsOpts.workflow,
-				"source":        string(src),
-				"run_id":        p.RunID,
-				"vars":          vars,
-				"parent_run_id": scanShardsOpts.parentRunID,
-				"shard_index":   p.Index,
-				"shard_count":   len(plans),
-				"shard_label":   p.Label,
-			}
-			raw, _ := json.Marshal(body)
-
-			started := time.Now()
-			results[i].Started = &started
-
-			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, serverURL+"/api/v1/runs/launch", bytes.NewReader(raw))
-			req.Header.Set("Content-Type", "application/json")
-			if token != "" {
-				req.Header.Set("Authorization", "Bearer "+token)
-			}
-			resp, err := http.DefaultClient.Do(req)
-			finished := time.Now()
-			results[i].Finished = &finished
-			if err != nil {
-				results[i].Error = fmt.Sprintf("POST /runs/launch: %v", err)
-				return
-			}
-			defer resp.Body.Close()
-			respBody, _ := io.ReadAll(resp.Body)
-			if resp.StatusCode >= 300 {
-				results[i].Error = fmt.Sprintf("server returned %d: %s", resp.StatusCode, truncate(string(respBody), 512))
-				return
-			}
-			// Server accepted (202). The child's terminal status will
-			// surface in the post-dispatch poll loop in runScanShards.
-		}()
-	}
-	wg.Wait()
-	return results
+		for k, v := range baseVars {
+			vars[k] = v
+		}
+		body, _ := json.Marshal(map[string]interface{}{
+			"file_path":     scanShardsOpts.workflow,
+			"source":        string(src),
+			"run_id":        p.RunID,
+			"vars":          vars,
+			"parent_run_id": scanShardsOpts.parentRunID,
+			"shard_index":   p.Index,
+			"shard_count":   len(plans),
+			"shard_label":   p.Label,
+		})
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, serverURL+"/api/v1/runs/launch", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			r.Error = fmt.Sprintf("POST /runs/launch: %v", err)
+			return
+		}
+		defer resp.Body.Close()
+		respBody, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode >= 300 {
+			r.Error = fmt.Sprintf("server returned %d: %s", resp.StatusCode, truncate(string(respBody), 512))
+		}
+	})
 }
