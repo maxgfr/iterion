@@ -290,6 +290,23 @@ func restoreNodeAttempts(src map[string]map[string]int) map[string]map[ErrorCode
 	return out
 }
 
+// emitRunFailedAndReturn emits a run_failed event with the resumable
+// flag set (best-effort: a store-side failure is logged at warn, not
+// returned, since the run-failure path itself is already best-effort)
+// and returns the matching RuntimeError. Shared by every checkpoint-
+// aware failure path so the "what does a resumable failure look like"
+// decision lives in one place.
+func (e *Engine) emitRunFailedAndReturn(ctx context.Context, runID, nodeID, reason string, code ErrorCode) error {
+	if err := e.emit(ctx, runID, store.EventRunFailed, nodeID, map[string]interface{}{
+		"error":     reason,
+		"code":      string(code),
+		"resumable": true,
+	}); err != nil {
+		e.logger.Warn("failed to emit run_failed event: %v", err)
+	}
+	return &RuntimeError{Code: code, Message: reason, NodeID: nodeID}
+}
+
 // failRunWithCheckpoint marks a run as failed_resumable with a checkpoint,
 // enabling resume from the last completed node. Falls back to a regular
 // (non-resumable) failure if the checkpoint write fails.
@@ -299,18 +316,7 @@ func (e *Engine) failRunWithCheckpoint(rs *runState, nodeID, reason string) erro
 		e.logger.Error("failed to persist resumable failure: %v", storeErr)
 		return e.failRun(rs.ctx, rs.runID, nodeID, reason)
 	}
-	if err := e.emit(rs.ctx, rs.runID, store.EventRunFailed, nodeID, map[string]interface{}{
-		"error":     reason,
-		"code":      string(ErrCodeExecutionFailed),
-		"resumable": true,
-	}); err != nil {
-		e.logger.Warn("failed to emit run_failed event: %v", err)
-	}
-	return &RuntimeError{
-		Code:    ErrCodeExecutionFailed,
-		Message: reason,
-		NodeID:  nodeID,
-	}
+	return e.emitRunFailedAndReturn(rs.ctx, rs.runID, nodeID, reason, ErrCodeExecutionFailed)
 }
 
 // failRunErrWithCheckpoint is the checkpoint-aware variant of failRunErr.
@@ -322,6 +328,9 @@ func (e *Engine) failRunErrWithCheckpoint(rs *runState, nodeID string, origErr e
 			e.logger.Error("failed to persist resumable failure: %v", storeErr)
 			return e.failRunErr(rs.ctx, rs.runID, nodeID, origErr)
 		}
+		// Preserve the original *RuntimeError identity so callers can
+		// errors.As back to the same value; the helper would otherwise
+		// allocate a fresh one.
 		if err := e.emit(rs.ctx, rs.runID, store.EventRunFailed, nodeID, map[string]interface{}{
 			"error":     rtErr.Message,
 			"code":      string(rtErr.Code),
@@ -375,18 +384,7 @@ func (e *Engine) handleContextDoneWithCheckpoint(rs *runState, nodeID string, ct
 		e.logger.Error("failed to persist resumable failure: %v", storeErr)
 		return e.failRun(storeCtx, rs.runID, nodeID, reason)
 	}
-	if err := e.emit(storeCtx, rs.runID, store.EventRunFailed, nodeID, map[string]interface{}{
-		"error":     reason,
-		"code":      string(ErrCodeExecutionFailed),
-		"resumable": true,
-	}); err != nil {
-		e.logger.Warn("failed to emit run_failed event: %v", err)
-	}
-	return &RuntimeError{
-		Code:    ErrCodeExecutionFailed,
-		Message: reason,
-		NodeID:  nodeID,
-	}
+	return e.emitRunFailedAndReturn(storeCtx, rs.runID, nodeID, reason, ErrCodeExecutionFailed)
 }
 
 // wrapContextErr wraps a context error for branch-level reporting.
