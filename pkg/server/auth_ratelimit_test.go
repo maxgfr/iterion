@@ -147,7 +147,7 @@ func TestRetrySeconds_RoundsUpToOneOrMore(t *testing.T) {
 		d    time.Duration
 		want string
 	}{
-		{0, "1"},                  // floor at 1 second
+		{0, "1"},                      // floor at 1 second
 		{time.Millisecond * 100, "1"}, // sub-second → 1
 		{time.Second * 5, "5"},
 		{time.Second*42 + time.Millisecond*500, "42"}, // floor

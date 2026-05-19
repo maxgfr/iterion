@@ -25,19 +25,19 @@ func TestLooksLikeShellCommand(t *testing.T) {
 	}{
 		{"bash", false},
 		{"read_file", false},
-		{"echo hello", true},           // space
-		{"a|b", true},                  // pipe
-		{"a&b", true},                  // background/and
-		{"a;b", true},                  // semicolon
-		{"a>b", true},                  // redirect
-		{"a<b", true},                  // redirect
-		{"a$VAR", true},                // env-var
-		{"`date`", true},               // backtick
-		{"(echo)", true},               // subshell
-		{"echo {}", true},              // brace
-		{`echo "x"`, true},             // dquote
-		{"echo 'x'", true},             // squote
-		{"/usr/bin/echo", true},        // slash
+		{"echo hello", true},            // space
+		{"a|b", true},                   // pipe
+		{"a&b", true},                   // background/and
+		{"a;b", true},                   // semicolon
+		{"a>b", true},                   // redirect
+		{"a<b", true},                   // redirect
+		{"a$VAR", true},                 // env-var
+		{"`date`", true},                // backtick
+		{"(echo)", true},                // subshell
+		{"echo {}", true},               // brace
+		{`echo "x"`, true},              // dquote
+		{"echo 'x'", true},              // squote
+		{"/usr/bin/echo", true},         // slash
 		{"complex_tool_name123", false}, // bare identifier, no shell chars
 	}
 	for _, c := range cases {
@@ -261,11 +261,11 @@ func TestLooksLikeEnvRef(t *testing.T) {
 		{"_FOO123", true},
 		{"FOO:-default", true},
 		{"FOO:-anything goes here", true},
-		{"foo.bar", false},          // dot disqualifies
-		{"foo bar", false},          // space disqualifies
-		{"123FOO", false},           // leading digit
-		{"foo(", false},             // paren
-		{"foo[0]", false},           // bracket
+		{"foo.bar", false}, // dot disqualifies
+		{"foo bar", false}, // space disqualifies
+		{"123FOO", false},  // leading digit
+		{"foo(", false},    // paren
+		{"foo[0]", false},  // bracket
 	}
 	for _, c := range cases {
 		t.Run(c.body, func(t *testing.T) {
