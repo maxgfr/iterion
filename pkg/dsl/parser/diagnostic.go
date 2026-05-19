@@ -17,6 +17,7 @@ const (
 	DiagReservedName    DiagCode = "E011" // use of reserved name (done/fail) as declaration
 	DiagUnknownProperty DiagCode = "E012" // unknown property in a node block
 	DiagMissingProperty DiagCode = "E013" // required property missing
+	DiagDuplicateBlock  DiagCode = "E014" // duplicate top-level block (vars/presets/attachments)
 
 	// Value errors
 	DiagInvalidValue DiagCode = "E020" // invalid value (e.g. bad session mode)

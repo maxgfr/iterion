@@ -893,6 +893,40 @@ func TestDiagUnexpectedTopLevel(t *testing.T) {
 	}
 }
 
+func TestDiagDuplicateBlock(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "vars",
+			src: `vars:
+  a: string = "first"
+
+vars:
+  b: string = "second"
+`,
+		},
+		{
+			name: "attachments",
+			src: `attachments:
+  logo: image
+
+attachments:
+  spec: file
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := parser.Parse("test.iter", tc.src)
+			if !hasDiagCode(res, parser.DiagDuplicateBlock) {
+				t.Fatalf("expected DiagDuplicateBlock for duplicate %s, got diags=%v", tc.name, res.Diagnostics)
+			}
+		})
+	}
+}
+
 func TestMultipleDeclarations(t *testing.T) {
 	src := `schema a:
   x: string
