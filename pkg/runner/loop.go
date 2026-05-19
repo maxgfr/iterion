@@ -43,6 +43,19 @@ import (
 
 const tracerName = "github.com/SocialGouv/iterion/pkg/runner"
 
+// logDeliveryErr surfaces failures from delivery state transitions
+// (Ack / Nak / Term) that the caller can't propagate. A missed Term
+// leaves a malformed or forged message looping in the queue; a missed
+// Nak leaves a transient failure stuck until ack-wait; a missed Ack
+// can cause a successful run to redeliver. Without surfacing these,
+// the operator has no breadcrumb to chase.
+func logDeliveryErr(logger *iterlog.Logger, op, runID string, err error) {
+	if err == nil {
+		return
+	}
+	logger.Warn("runner: %s for %s: %v", op, runID, err)
+}
+
 // Config is the runner bootstrap.
 type Config struct {
 	NATS              *natsq.Conn
@@ -192,7 +205,7 @@ func (r *Runner) Shutdown(ctx context.Context) error {
 	// handleContextDoneWithCheckpoint (preserving the checkpoint),
 	// and extend the ack window while we wait for it to finish.
 	cur.cancelFn()
-	_ = cur.delivery.InProgress()
+	logDeliveryErr(r.cfg.Logger, "in-progress-shutdown", cur.runID, cur.delivery.InProgress())
 	select {
 	case <-cur.done:
 		// processOne already Ack'd (paused/cancelled checkpoint) or
@@ -201,7 +214,7 @@ func (r *Runner) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		// Grace period expired before the engine finished checkpointing.
 		// Best-effort Nak so JetStream redelivers to a sibling pod.
-		_ = cur.delivery.Nak()
+		logDeliveryErr(r.cfg.Logger, "nak-shutdown-grace", cur.runID, cur.delivery.Nak())
 		r.cfg.Logger.Warn("runner: shutdown grace expired for run %s — naking for redelivery", cur.runID)
 	}
 	return nil
@@ -215,7 +228,13 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 	msg, err := delivery.Decode()
 	if err != nil {
 		r.cfg.Logger.Error("runner: decode delivery: %v", err)
-		_ = delivery.Term() // unrecoverable — bad payload
+		if termErr := delivery.Term(); termErr != nil {
+			// A failed Term leaves the malformed message in the queue
+			// where it will be redelivered and fail decode again on
+			// every runner — surface it so the operator can purge
+			// rather than chase a silent loop.
+			r.cfg.Logger.Warn("runner: term after decode failure: %v", termErr)
+		}
 		return
 	}
 
@@ -308,7 +327,9 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 	if preErr != nil && (errors.Is(preErr, context.DeadlineExceeded) || errors.Is(preErr, context.Canceled)) {
 		logger.Warn("runner: pre-lock LoadRun %s transient: %v — naking", msg.RunID, preErr)
 		finalStatus = "store_load_transient"
-		_ = delivery.Nak()
+		if nakErr := delivery.Nak(); nakErr != nil {
+			logger.Warn("runner: nak for %s after store-load transient: %v", msg.RunID, nakErr)
+		}
 		return
 	}
 	// A message whose run document we can't load is unsafe to execute:
@@ -320,13 +341,15 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 	if preErr != nil || preRun == nil {
 		logger.Error("runner: run %s not found in store (err=%v) — terming", msg.RunID, preErr)
 		finalStatus = "store_load_failed"
-		_ = delivery.Term()
+		if termErr := delivery.Term(); termErr != nil {
+			logger.Warn("runner: term for %s after store-load failure: %v", msg.RunID, termErr)
+		}
 		return
 	}
 	if preRun.Status == store.RunStatusCancelled {
 		logger.Info("runner: run %s already cancelled — skipping", msg.RunID)
 		finalStatus = "cancelled"
-		_ = delivery.Ack()
+		logDeliveryErr(logger, "ack-already-cancelled", msg.RunID, delivery.Ack())
 		return
 	}
 	// Verify the message's tenant matches the persisted document.
@@ -341,7 +364,13 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 	if preRun.TenantID != msg.TenantID {
 		logger.Error("runner: tenant mismatch for run %s (msg=%q stored=%q) — terming", msg.RunID, msg.TenantID, preRun.TenantID)
 		finalStatus = "tenant_mismatch"
-		_ = delivery.Term()
+		if termErr := delivery.Term(); termErr != nil {
+			// HIGH-impact: a failed Term on a tenant-mismatched
+			// message means a forged / replayed delivery stays in the
+			// queue and JetStream will redeliver it, looping forever.
+			// Surface loudly so the operator can purge the stream.
+			logger.Error("runner: term for %s after tenant mismatch FAILED (%v) — message will redeliver; purge the JetStream subject manually", msg.RunID, termErr)
+		}
 		return
 	}
 
@@ -352,11 +381,11 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 		if errors.Is(err, natsq.ErrLockHeld) {
 			logger.Warn("runner: lock held for %s — naking for sibling", msg.RunID)
 			finalStatus = "lock_held"
-			_ = delivery.Nak()
+			logDeliveryErr(logger, "nak-lock-held", msg.RunID, delivery.Nak())
 			return
 		}
 		logger.Error("runner: lock %s: %v", msg.RunID, err)
-		_ = delivery.Nak()
+		logDeliveryErr(logger, "nak-lock-error", msg.RunID, delivery.Nak())
 		return
 	}
 	defer func() {
@@ -400,7 +429,7 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 		if errors.Is(err, runtime.ErrRunPaused) {
 			logger.Info("runner: run %s checkpointed (%v)", msg.RunID, err)
 			finalStatus = "paused"
-			_ = delivery.Ack()
+			logDeliveryErr(logger, "ack-paused", msg.RunID, delivery.Ack())
 			return
 		}
 		if errors.Is(err, runtime.ErrRunCancelled) {
@@ -411,23 +440,23 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 			if hbFailed.Load() {
 				logger.Warn("runner: run %s heartbeat lost — naking for sibling redelivery", msg.RunID)
 				finalStatus = "lock_held"
-				_ = delivery.Nak()
+				logDeliveryErr(logger, "nak-heartbeat-lost", msg.RunID, delivery.Nak())
 				return
 			}
 			logger.Info("runner: run %s checkpointed (%v)", msg.RunID, err)
 			finalStatus = "cancelled"
-			_ = delivery.Ack()
+			logDeliveryErr(logger, "ack-cancelled", msg.RunID, delivery.Ack())
 			return
 		}
 		// Other errors → nak so JetStream redelivers up to MaxDeliver.
 		logger.Error("runner: run %s execution failed: %v", msg.RunID, err)
-		_ = delivery.Nak()
+		logDeliveryErr(logger, "nak-exec-failed", msg.RunID, delivery.Nak())
 		return
 	}
 
 	logger.Info("runner: run %s completed", msg.RunID)
 	finalStatus = "finished"
-	_ = delivery.Ack()
+	logDeliveryErr(logger, "ack-finished", msg.RunID, delivery.Ack())
 }
 
 // heartbeat refreshes the NATS KV lease so a long-running run keeps
@@ -570,7 +599,12 @@ func (r *Runner) injectCredentials(ctx context.Context, msg *queue.RunMessage) (
 	cleanup := func() {
 		ctxDel, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = r.cfg.RunSecrets.Delete(ctxDel, msg.SecretsRef)
+		// A failed Delete here leaks the sealed bundle in run_secrets
+		// (it'll expire on the store's TTL, but the operator should know
+		// the cleanup path failed in case of repeated occurrences).
+		if delErr := r.cfg.RunSecrets.Delete(ctxDel, msg.SecretsRef); delErr != nil {
+			r.cfg.Logger.Warn("runner: run_secrets delete for %s (ref=%s): %v", msg.RunID, msg.SecretsRef, delErr)
+		}
 		for k := range bundle.APIKeys {
 			bundle.APIKeys[k] = ""
 		}

@@ -347,6 +347,20 @@ type runState struct {
 	attachments map[string]model.AttachmentInfo
 }
 
+// markFailedBestEffort transitions the run to status=failed with a
+// formatted message describing the origin error. Used on pre-execLoop
+// setup failures where the engine is about to return the same error to
+// the caller — a store-side failure of the status flip itself can't be
+// propagated, so it's logged at warn level instead of being silently
+// dropped (without this, an op error during startup leaves the run
+// stuck in `running` in the UI).
+func (e *Engine) markFailedBestEffort(ctx context.Context, runID, phase string, cause error) {
+	msg := fmt.Sprintf("%s: %v", phase, cause)
+	if err := e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, msg); err != nil && e.logger != nil {
+		e.logger.Warn("runtime: failed to record run %s as failed during %s: %v (original cause: %v)", runID, phase, err, cause)
+	}
+}
+
 // newRunState builds a runState with all maps allocated. Resume paths
 // then overwrite specific fields (outputs, loop counters, vars, etc.)
 // from the persisted checkpoint.
@@ -451,7 +465,7 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 	// Bundle attachment defaults land first so any runtime upload
 	// processed by attachmentPromote below overwrites them.
 	if err := promoteBundleAttachmentDefaults(ctx, e.store, runID, e.workflow, e.bundle, e.logger); err != nil {
-		_ = e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, fmt.Sprintf("bundle attachment defaults: %v", err))
+		e.markFailedBestEffort(ctx, runID, "bundle attachment defaults", err)
 		return fmt.Errorf("runtime: bundle attachment defaults: %w", err)
 	}
 
@@ -460,7 +474,7 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 	// directly to the store; our local `run` is now stale).
 	if e.attachmentPromote != nil {
 		if err := e.attachmentPromote(ctx, runID); err != nil {
-			_ = e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, fmt.Sprintf("attachment promote: %v", err))
+			e.markFailedBestEffort(ctx, runID, "attachment promote", err)
 			return fmt.Errorf("runtime: promote attachments: %w", err)
 		}
 	}
@@ -485,7 +499,7 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 	if e.workflow.Worktree == "auto" {
 		wtc, cleanup, wtErr := setupWorktree(e.store.Root(), runID, e.workDir, e.logger)
 		if wtErr != nil {
-			_ = e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, wtErr.Error())
+			e.markFailedBestEffort(ctx, runID, "worktree setup", wtErr)
 			return fmt.Errorf("runtime: worktree setup: %w", wtErr)
 		}
 		e.workDir = wtc.wtPath
@@ -526,7 +540,7 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 	// discover them transparently. Workspace files always win on
 	// collision (see runtime/bundle.go for the rule).
 	if err := mirrorBundleSkills(e.workDir, e.bundle, e.logger); err != nil {
-		_ = e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, err.Error())
+		e.markFailedBestEffort(ctx, runID, "bundle skills", err)
 		return fmt.Errorf("runtime: bundle skills: %w", err)
 	}
 
@@ -541,7 +555,7 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 	}
 	sandboxCleanup, sbErr := e.startSandbox(ctx, runID, repoRoot)
 	if sbErr != nil {
-		_ = e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, sbErr.Error())
+		e.markFailedBestEffort(ctx, runID, "sandbox start", sbErr)
 		return fmt.Errorf("runtime: sandbox: %w", sbErr)
 	}
 	defer sandboxCleanup()
