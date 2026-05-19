@@ -8,48 +8,67 @@ import (
 	"github.com/google/uuid"
 )
 
-// runNameAdjectives is the curated, sober adjective pool used to derive
-// human-friendly run names. Order is part of the contract: changing it
-// would invalidate the seed → name mapping for all existing runs whose
-// names were derived from this list.
-var runNameAdjectives = []string{
-	"calm", "clear", "cool", "crisp", "deep", "dim", "distant", "dry", "dusky", "early",
-	"even", "faint", "far", "fine", "fleet", "frank", "high", "keen", "late", "lean",
-	"level", "lithe", "lone", "low", "lucid", "mild", "mute", "near", "neat", "pale",
-	"plain", "prime", "quiet", "raw", "sharp", "slow", "soft", "sober", "spare", "stark",
-	"steady", "still", "swift", "tacit", "terse", "vast", "vivid", "warm", "wide", "wild",
-	"white", "ashen", "amber", "smooth", "rough", "brisk", "blunt", "bright", "bold", "brave",
-	"gentle", "agile", "grave", "hardy", "idle", "lush", "mellow", "modest", "noble", "patient",
-	"quick", "ready", "rich", "royal", "sleek", "stout", "sturdy", "suave", "stoic", "trim",
+// runNamePool1 is the atmospheric-qualifier slot: synth-tech adjectives
+// and noun-prefixes ("neon", "prism", "fractal", …) that set the mood.
+// Order is part of the contract: changing it would invalidate the
+// seed → name mapping for all subsequent runs derived from this list.
+var runNamePool1 = []string{
+	"neon", "prism", "chrome", "plasma", "quantum", "void", "fractal", "photon", "lumen", "hex",
+	"pixel", "glitch", "vapor", "crystal", "neural", "sonic", "electric", "kinetic", "magnetic", "atomic",
+	"cosmic", "lunar", "solar", "astral", "stellar", "orbital", "radiant", "luminous", "cryo", "pyro",
+	"holo", "vector", "scalar", "binary", "ionic", "helix", "vortex", "beam", "flare", "halo",
+	"glow", "shimmer", "mirage", "spectral", "ethereal", "phantom", "ghost", "opal", "obsidian", "onyx",
+	"quartz", "ember", "ash", "dusk", "dawn", "twilight", "midnight", "aurora", "eclipse", "comet",
+	"meteor", "nova", "polar", "arctic", "boreal", "synth", "retro", "modal", "fiber", "optic",
+	"laser", "sonar", "radar", "gleam", "refractive", "nebular", "magneto", "plasmic", "hypno", "gamma",
 }
 
-// runNameNouns is the curated noun pool — trees, stones, water, terrain,
-// cosmos, fauna — selected for sobriety and tech-friendly readability.
-// Order is part of the contract (see runNameAdjectives).
-var runNameNouns = []string{
-	"cedar", "oak", "elm", "pine", "birch", "ash", "willow", "beech", "juniper", "larch",
-	"maple", "alder", "poplar", "quartz", "slate", "basalt", "agate", "onyx", "jade", "flint",
-	"opal", "marble", "granite", "mica", "chert", "coral", "pearl", "copper", "iron", "tin",
-	"bronze", "steel", "glass", "salt", "river", "brook", "fjord", "delta", "tide", "basin",
-	"isle", "creek", "harbor", "marsh", "pond", "reef", "gulf", "bay", "cove", "ridge",
-	"vale", "mesa", "glade", "meadow", "dune", "hill", "peak", "hollow", "orion", "lyra",
-	"vega", "atlas", "nova", "polaris", "sirius", "comet", "prism", "ember", "pyre", "arc",
-	"helix", "vertex", "pivot", "hawk", "heron", "falcon", "lynx", "otter", "raven", "anchor",
+// runNamePool2 is the motion-or-state slot: short verb-nouns ("drift",
+// "pulse", "ripple", …) that give the name kinetic energy. Order is
+// part of the contract (see runNamePool1).
+var runNamePool2 = []string{
+	"drift", "pulse", "ripple", "bloom", "surge", "echo", "wave", "shard", "haze", "flux",
+	"zephyr", "glide", "flow", "dash", "sweep", "swirl", "twist", "spin", "whirl", "dance",
+	"dive", "plunge", "soar", "climb", "leap", "bound", "rush", "race", "sprint", "hop",
+	"bounce", "blink", "wink", "flash", "dart", "ray", "trace", "track", "trail", "chase",
+	"hunt", "seek", "fetch", "catch", "clasp", "swipe", "sway", "lull", "hush", "breath",
+	"sigh", "hum", "chime", "ring", "peal", "clang", "ping", "tap", "tick", "whir",
+	"buzz", "hiss", "sizzle", "spark", "glimmer", "twinkle", "sparkle", "glitter", "shine", "glare",
+	"blaze", "burst", "fade", "flick", "gust", "draft", "eddy", "plume", "billow", "churn",
+}
+
+// runNamePool3 is the coined-noun slot: portmanteaus and invented
+// compound words ("foxhowl", "lumicore", "starforge", …) that give
+// each name a distinctive tail. Order is part of the contract (see
+// runNamePool1).
+var runNamePool3 = []string{
+	"foxhowl", "mothbeam", "owlspark", "hexglade", "pyrebloom", "lumicore", "starforge", "cryomantle", "novachime", "auroraflux",
+	"voiddriver", "glitchfox", "pixelpurr", "neondrift", "prismfox", "chromewhisper", "photonpetal", "lasercrick", "sonarglow", "beamspire",
+	"mosslight", "ferncloak", "dawnglyph", "duskvane", "twilightfox", "midnightfern", "glimmerleaf", "shimmerstone", "mirageknot", "ghostpetal",
+	"phantomwick", "spectrelune", "etherspark", "vaporlark", "plasmasong", "quantumcurl", "fractalfin", "vectorvane", "scalarsprout", "helixbloom",
+	"vortexlark", "orbitcrest", "novacrest", "cometwhisk", "meteorfern", "polarpetal", "arcticquill", "borealhum", "synthsigh", "retrosparkle",
+	"cyberbloom", "optigleam", "modulink", "fiberglyph", "opalrune", "onyxwhisper", "jadehum", "quartzhowl", "emberknot", "ashglyph",
+	"crystalbloom", "pyrelark", "cryolark", "holowhisk", "neonmoth", "prismink", "beamwick", "halospire", "voidwhisk", "nebulink",
+	"lunaspire", "solarsigh", "stellarhum", "astralcrick", "kineticglide", "magnetoglyph", "ionicpetal", "atomicfern", "ravenrune", "sirenchime",
 }
 
 // GenerateRunName derives a stable, human-friendly run label from an
 // opaque seed. Same seed → same name. The output is kebab-case ASCII,
-// path- and URL-safe: <adjective>-<noun>-<4hex>, e.g. "swift-cedar-a3f2".
+// path- and URL-safe: <atmos>-<motion>-<coined>-<4hex>, e.g.
+// "neon-glitch-foxhowl-a3f2".
 //
-// The 4-char hex suffix (16 bits) lifts the namespace from ~6.4k
-// adj-noun pairs to ~419M combinations, keeping pairwise collision
-// risk negligible at any realistic run count.
+// Three distinct word slots (atmospheric qualifier, motion/state,
+// coined portmanteau) make parallel runs visually unmistakable, and
+// the 4-char hex suffix (16 bits) keeps the combined namespace at
+// 80×80×80×65 536 ≈ 34 billion — well beyond any realistic collision
+// horizon.
 func GenerateRunName(seed string) string {
 	h := sha256.Sum256([]byte(seed))
-	adj := runNameAdjectives[binary.BigEndian.Uint16(h[0:2])%uint16(len(runNameAdjectives))]
-	noun := runNameNouns[binary.BigEndian.Uint16(h[2:4])%uint16(len(runNameNouns))]
-	suffix := hex.EncodeToString(h[4:6])
-	return adj + "-" + noun + "-" + suffix
+	w1 := runNamePool1[binary.BigEndian.Uint16(h[0:2])%uint16(len(runNamePool1))]
+	w2 := runNamePool2[binary.BigEndian.Uint16(h[2:4])%uint16(len(runNamePool2))]
+	w3 := runNamePool3[binary.BigEndian.Uint16(h[4:6])%uint16(len(runNamePool3))]
+	suffix := hex.EncodeToString(h[6:8])
+	return w1 + "-" + w2 + "-" + w3 + "-" + suffix
 }
 
 // GenerateRunID returns a new UUIDv7 run identifier. Lexicographic

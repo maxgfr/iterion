@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-var runNameFormat = regexp.MustCompile(`^[a-z]+-[a-z]+-[0-9a-f]{4}$`)
+var runNameFormat = regexp.MustCompile(`^[a-z]+-[a-z]+-[a-z]+-[0-9a-f]{4}$`)
 
 // uuidV7Format matches the canonical hyphenated form of UUIDv7. The
 // third group must start with `7` (version) and the fourth must start
@@ -63,8 +63,9 @@ func TestRunNameLists_NoDuplicates(t *testing.T) {
 		name  string
 		items []string
 	}{
-		{"adjectives", runNameAdjectives},
-		{"nouns", runNameNouns},
+		{"pool1", runNamePool1},
+		{"pool2", runNamePool2},
+		{"pool3", runNamePool3},
 	} {
 		seen := make(map[string]int, len(list.items))
 		for i, w := range list.items {
@@ -77,17 +78,20 @@ func TestRunNameLists_NoDuplicates(t *testing.T) {
 }
 
 func TestRunNameLists_Sized(t *testing.T) {
-	if len(runNameAdjectives) == 0 {
-		t.Fatal("runNameAdjectives must not be empty")
-	}
-	if len(runNameNouns) == 0 {
-		t.Fatal("runNameNouns must not be empty")
-	}
-	if len(runNameAdjectives) > 65535 {
-		t.Errorf("adjectives must fit a uint16 mod (got %d)", len(runNameAdjectives))
-	}
-	if len(runNameNouns) > 65535 {
-		t.Errorf("nouns must fit a uint16 mod (got %d)", len(runNameNouns))
+	for _, list := range []struct {
+		name  string
+		items []string
+	}{
+		{"pool1", runNamePool1},
+		{"pool2", runNamePool2},
+		{"pool3", runNamePool3},
+	} {
+		if len(list.items) == 0 {
+			t.Fatalf("%s must not be empty", list.name)
+		}
+		if len(list.items) > 65535 {
+			t.Errorf("%s must fit a uint16 mod (got %d)", list.name, len(list.items))
+		}
 	}
 }
 
@@ -115,9 +119,9 @@ func TestGenerateRunName_Golden(t *testing.T) {
 		seed string
 		want string
 	}{
-		{"", "wide-elm-98fc"},
-		{"hello", "mellow-orion-5fb0"},
-		{"examples/x.iter:1", "gentle-steel-6ed5"},
+		{"", "obsidian-ripple-meteorfern-1c14"},
+		{"hello", "retro-tick-photonpetal-a30e"},
+		{"examples/x.iter:1", "meteor-blink-fiberglyph-03cc"},
 	}
 	for _, c := range cases {
 		got := GenerateRunName(c.seed)

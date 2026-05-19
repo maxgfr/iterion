@@ -133,7 +133,7 @@ func setupWorktree(storeRoot, runID, repoHint string, logger *iterlog.Logger) (w
 // finalizeOptions controls the post-run worktree promotion. All fields
 // are optional; sensible defaults apply when empty.
 type finalizeOptions struct {
-	// runName is the deterministic friendly label (e.g. "swift-cedar-a3f2")
+	// runName is the deterministic friendly label (e.g. "neon-glitch-foxhowl-a3f2")
 	// used when branchName is empty. Falls back to runID if also empty.
 	runName string
 	runID   string
@@ -504,7 +504,7 @@ func BuildSquashMessageFromCommits(repoRoot, head, runName string, commits []git
 }
 
 // RunDisplayName returns the human-friendly label for a run: its
-// deterministic friendly name when set (e.g. "swift-cedar-a3f2"),
+// deterministic friendly name when set (e.g. "neon-glitch-foxhowl-a3f2"),
 // else the workflow name. Callers that build squash titles or
 // log lines share this fallback chain.
 func RunDisplayName(run *store.Run) string {
