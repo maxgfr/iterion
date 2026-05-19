@@ -11,7 +11,6 @@ const HomeView = lazy(() => import("@/components/Home/HomeView"));
 const WhatsNextView = lazy(() => import("@/components/WhatsNext/WhatsNextView"));
 const EditorTabsView = lazy(() => import("@/components/Editor/EditorTabsView"));
 const LaunchView = lazy(() => import("@/components/Runs/LaunchView"));
-const RunListView = lazy(() => import("@/components/Runs/RunListView"));
 const RunsTabsView = lazy(() => import("@/components/Runs/RunsTabsView"));
 const BoardView = lazy(() => import("@/views/Board"));
 const DispatcherView = lazy(() => import("@/views/Dispatcher"));
@@ -182,7 +181,7 @@ function AuthedApp() {
           </Route>
           <Route path="/runs">
             <ErrorBoundary area="Runs list">
-              <RunListView />
+              <RunsTabsView />
             </ErrorBoundary>
           </Route>
           <Route path="/account" component={SettingsPage} />
