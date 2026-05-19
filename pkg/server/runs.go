@@ -106,6 +106,11 @@ type launchRunRequest struct {
 	// each upload from the staging area into the run-scoped store
 	// before kicking off execution.
 	Attachments map[string]string `json:"attachments,omitempty"`
+	// Backend, when non-empty, overrides the workflow's `default_backend:`
+	// for this run only. Node-level explicit `backend:` declarations
+	// still win. Honored in the in-process spawnRun path; detached mode
+	// (ITERION_RUNS_DETACHED=1) logs a warning and ignores it.
+	Backend string `json:"backend,omitempty"`
 }
 
 type launchRunResponse struct {
@@ -237,6 +242,7 @@ func (s *Server) handleLaunchRun(w http.ResponseWriter, r *http.Request) {
 		MergeStrategy:     store.MergeStrategy(req.MergeStrategy),
 		AutoMerge:         req.AutoMerge,
 		AttachmentPromote: promote,
+		Backend:           req.Backend,
 	})
 	if err != nil {
 		if errors.Is(err, runtime.ErrServerDraining) {

@@ -70,6 +70,13 @@ type LaunchSpec struct {
 	// (typically by promoting uploads from a staging area). Errors
 	// abort the launch.
 	AttachmentPromote runtime.AttachmentPromoteFunc
+	// Backend, when non-empty, overrides the workflow's `default_backend:`
+	// for this run. Node-level explicit `backend:` declarations still
+	// win — this is a soft default override, not a hard force. Empty
+	// preserves the resolver chain. NOTE: the detached runner path
+	// (ITERION_RUNS_DETACHED=1) does not yet honor this field; the
+	// service layer logs a warning and ignores it there.
+	Backend string
 }
 
 // ResumeSpec describes a resume request.
@@ -1491,6 +1498,7 @@ func (s *Service) Launch(parent context.Context, spec LaunchSpec) (*LaunchResult
 		Logger:   runLogger,
 		StoreDir: s.storeDir,
 		Inbox:    s.inboxBinder(),
+		Backend:  spec.Backend,
 	})
 	if err != nil {
 		s.dropRunLog(runID)

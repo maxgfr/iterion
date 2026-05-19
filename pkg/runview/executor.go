@@ -46,6 +46,12 @@ type ExecutorSpec struct {
 	// agent-loop iterations. Nil disables the inbox (CLI mode +
 	// runs that opted out).
 	Inbox model.InboxBinder
+	// Backend, when non-empty, takes precedence over the workflow's
+	// `default_backend:` for this run only. Node-level explicit
+	// `backend:` still wins (it's the most specific level in the
+	// resolution chain). Used by the studio launch UI to A/B a
+	// workflow against different backends without editing the .iter.
+	Backend string
 }
 
 // BuildExecutor wires up the default ClawExecutor: registry, default
@@ -121,6 +127,9 @@ func BuildExecutor(spec ExecutorSpec) (*model.ClawExecutor, error) {
 		model.WithLogger(spec.Logger),
 		model.WithLifecycleHooks(lifecycle),
 		model.WithStoreDir(dispatcherStoreDir),
+	}
+	if spec.Backend != "" {
+		opts = append(opts, model.WithDefaultBackend(spec.Backend))
 	}
 
 	checker := buildToolChecker(spec.Workflow)
