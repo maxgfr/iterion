@@ -154,19 +154,31 @@ func (p *parser) parseFile() *ast.File {
 		case TokenVars:
 			vb := p.parseVarsBlock()
 			if vb != nil {
-				f.Vars = vb
+				if f.Vars != nil {
+					p.addError(DiagDuplicateBlock, t, "duplicate 'vars:' block — keeping first declaration")
+				} else {
+					f.Vars = vb
+				}
 			}
 
 		case TokenPresets:
 			pb := p.parsePresetsBlock()
 			if pb != nil {
-				f.Presets = pb
+				if f.Presets != nil {
+					p.addError(DiagDuplicateBlock, t, "duplicate 'presets:' block — keeping first declaration")
+				} else {
+					f.Presets = pb
+				}
 			}
 
 		case TokenAttachments:
 			ab := p.parseAttachmentsBlock()
 			if ab != nil {
-				f.Attachments = ab
+				if f.Attachments != nil {
+					p.addError(DiagDuplicateBlock, t, "duplicate 'attachments:' block — keeping first declaration")
+				} else {
+					f.Attachments = ab
+				}
 			}
 
 		case TokenMCPServer:
