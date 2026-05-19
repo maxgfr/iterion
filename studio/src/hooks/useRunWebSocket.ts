@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { isSafeStoreParam, type RunEvent, type RunSnapshot } from "@/api/runs";
 import { buildWsUrl } from "@/lib/wsUrl";
-import { useRunStore } from "@/store/run";
+import { useRunStore, useRunStoreInstance } from "@/store/run";
 
 interface WsEnvelope {
   type: string;
@@ -84,6 +84,14 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
   // way the resumed run reaches this client is a fresh subscribe.
   const reconnectToken = useRunStore((s) => s.wsReconnectToken);
 
+  // Capture the active RunStore instance (the per-run store provided
+  // by RunTabHost, or the module default when no Provider is mounted).
+  // We freeze it into a ref so reconnects fire against the same store
+  // even if the surrounding Context changes mid-flight.
+  const store = useRunStoreInstance();
+  const runStoreRef = useRef(store);
+  runStoreRef.current = store;
+
   // Track the runId the previous effect run was bound to. The effect
   // re-runs on either runId or reconnectToken change; we use this ref
   // to distinguish them. On a runId switch the consumer panels for
@@ -106,12 +114,13 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
     }
     prevRunIdRef.current = runId;
 
-    const setWsState = useRunStore.getState().setWsState;
-    const applySnapshot = useRunStore.getState().applySnapshot;
-    const applyEventsBatch = useRunStore.getState().applyEventsBatch;
-    const applyLogChunk = useRunStore.getState().applyLogChunk;
-    const markLogTerminated = useRunStore.getState().markLogTerminated;
-    const setLogSubscribed = useRunStore.getState().setLogSubscribed;
+    const store = runStoreRef.current;
+    const setWsState = store.getState().setWsState;
+    const applySnapshot = store.getState().applySnapshot;
+    const applyEventsBatch = store.getState().applyEventsBatch;
+    const applyLogChunk = store.getState().applyLogChunk;
+    const markLogTerminated = store.getState().markLogTerminated;
+    const setLogSubscribed = store.getState().setLogSubscribed;
 
     // Coalesce events that arrive in the same microtask before pushing
     // them to the store. Replay (from_seq=0) on a long run can dump
@@ -171,7 +180,7 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
         // then live tail — and let loadEventHistoryIfMissing pull
         // the historical events via HTTP if and when something needs
         // them. Eliminates the 30s replay-stall on first open.
-        const events = useRunStore.getState().events;
+        const events = runStoreRef.current.getState().events;
         const fromSeq =
           events.length > 0 ? events[events.length - 1]!.seq + 1 : 0;
         ws.send(
@@ -189,7 +198,7 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
         // last known position so the backend snapshot fills any gap
         // that landed during the outage.
         if (logsRequestedRef.current) {
-          const log = useRunStore.getState().log;
+          const log = runStoreRef.current.getState().log;
           const fromOffset = log.start + log.text.length;
           ws.send(
             JSON.stringify({
@@ -329,7 +338,7 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
       // RunLogPanel + NodeDetailPanel Logs consumers were still
       // mounted, then the new ws.onopen saw logsRequestedRef=false
       // and never re-subscribed.
-      useRunStore.getState().setWsState("closed");
+      runStoreRef.current.getState().setWsState("closed");
     };
   }, [runId, reconnectToken]);
 
@@ -350,7 +359,7 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
         typeof fromOffset === "number"
           ? fromOffset
           : (() => {
-              const log = useRunStore.getState().log;
+              const log = runStoreRef.current.getState().log;
               return log.start + log.text.length;
             })();
       ws.send(
@@ -359,7 +368,7 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
           payload: offset > 0 ? { from_offset: offset } : undefined,
         } satisfies WsEnvelope),
       );
-      useRunStore.getState().setLogSubscribed(true);
+      runStoreRef.current.getState().setLogSubscribed(true);
     },
     unsubscribeLogs: () => {
       if (logSubscriberCountRef.current === 0) return;
@@ -372,7 +381,7 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
           JSON.stringify({ type: "unsubscribe_logs" } satisfies WsEnvelope),
         );
       }
-      useRunStore.getState().setLogSubscribed(false);
+      runStoreRef.current.getState().setLogSubscribed(false);
     },
   };
 }

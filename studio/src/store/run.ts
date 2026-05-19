@@ -1,4 +1,5 @@
-import { create } from "zustand";
+import { createContext, useContext, type ReactNode, createElement } from "react";
+import { create, useStore } from "zustand";
 
 import {
   loadEvents,
@@ -309,33 +310,47 @@ const initialLogState: RunLogState = {
   terminated: false,
 };
 
-const initialState = {
-  runId: null,
-  snapshot: null,
-  events: [] as RunEvent[],
-  // historyFetchedForRun marks which run's persisted event log has
-  // already been hydrated via the REST /events endpoint. The WS no
-  // longer auto-replays history (lazy mode), so the store tracks
-  // whether it owes a hydration. Reset on reset() so a new run
-  // navigation re-fetches.
-  historyFetchedForRun: null as string | null,
-  executionsById: new Map<string, ExecutionState>(),
-  lastExecIDByNode: new Map<string, string>(),
-  inFlightToolsByExec: new Map<string, InFlightTool[]>(),
-  latestTodosByExec: new Map<string, TodoListSnapshot>(),
-  pendingHumanInput: null as PendingHumanInput | null,
-  queuedMessages: [] as QueuedUserMessage[],
-  wsState: "idle" as WsState,
-  followTail: true,
-  log: initialLogState,
-  browser: initialBrowserState,
-  wsReconnectToken: 0,
-};
+// freshInitial returns a value-only snapshot of the initial reducer
+// state. Called per store instance so each parallel run tab gets its
+// own Maps / arrays (previous module-level `initialState` shared the
+// same Map identities across stores, which broke once we introduced
+// multiple stores).
+function freshInitial() {
+  return {
+    runId: null as string | null,
+    snapshot: null as RunSnapshot | null,
+    events: [] as RunEvent[],
+    // historyFetchedForRun marks which run's persisted event log has
+    // already been hydrated via the REST /events endpoint. The WS no
+    // longer auto-replays history (lazy mode), so the store tracks
+    // whether it owes a hydration. Reset on reset() so a new run
+    // navigation re-fetches.
+    historyFetchedForRun: null as string | null,
+    executionsById: new Map<string, ExecutionState>(),
+    lastExecIDByNode: new Map<string, string>(),
+    inFlightToolsByExec: new Map<string, InFlightTool[]>(),
+    latestTodosByExec: new Map<string, TodoListSnapshot>(),
+    pendingHumanInput: null as PendingHumanInput | null,
+    queuedMessages: [] as QueuedUserMessage[],
+    wsState: "idle" as WsState,
+    followTail: true,
+    log: initialLogState,
+    browser: initialBrowserState,
+    wsReconnectToken: 0,
+  };
+}
 
-export const useRunStore = create<RunStoreState>((set) => ({
-  ...initialState,
+// createRunStore builds a fresh Zustand store with the reducer logic
+// previously hosted on the module-level singleton. Each parallel run
+// tab owns its own store instance; closing the tab disposes the store
+// (see registry below). The legacy `useRunStore` is reconstructed by
+// binding a default store + a Context-aware hook so existing call
+// sites keep working unchanged.
+export function createRunStore() {
+  return create<RunStoreState>((set, get) => ({
+    ...freshInitial(),
 
-  setRunId: (id) => set({ runId: id }),
+    setRunId: (id) => set({ runId: id }),
   setWsState: (state) => set({ wsState: state }),
   setFollowTail: (follow) => set({ followTail: follow }),
   requestWsReconnect: () =>
@@ -434,13 +449,13 @@ export const useRunStore = create<RunStoreState>((set) => ({
   },
 
   loadEventHistoryIfMissing: async (runId) => {
-    const state = useRunStore.getState();
+    const state = get();
     if (state.historyFetchedForRun === runId) return;
     if (state.runId !== null && state.runId !== runId) return;
     // Coalesce concurrent callers (EventLog + Scrubber mounting in the
     // same render pass, or several mounts before `set()` lands) on a
     // single fetch. The optimistic marker below also helps, but there
-    // is a micro-race between the getState() check above and the set()
+    // is a micro-race between the get() check above and the set()
     // call — multiple callers can pass both before either has stored
     // the marker, leading to duplicate `/events` GETs.
     const inflight = inflightHistoryFetches.get(runId);
@@ -452,10 +467,10 @@ export const useRunStore = create<RunStoreState>((set) => ({
     const fetchPromise = (async () => {
       try {
         const fetched = await loadEvents(runId);
-        if (useRunStore.getState().runId !== runId) return;
-        useRunStore.getState().applyEventsBatch(fetched);
+        if (get().runId !== runId) return;
+        get().applyEventsBatch(fetched);
       } catch (err) {
-        if (useRunStore.getState().historyFetchedForRun === runId) {
+        if (get().historyFetchedForRun === runId) {
           set({ historyFetchedForRun: null });
         }
         throw err;
@@ -592,14 +607,90 @@ export const useRunStore = create<RunStoreState>((set) => ({
 
   reset: () =>
     set({
-      ...initialState,
-      executionsById: new Map(),
-      lastExecIDByNode: new Map(),
-      inFlightToolsByExec: new Map(),
-      latestTodosByExec: new Map(),
-      log: initialLogState,
+      ...freshInitial(),
     }),
-}));
+  }));
+}
+
+export type RunStore = ReturnType<typeof createRunStore>;
+
+// Default store used by call sites that don't have a RunStoreProvider
+// in their React tree (App-level hooks, the WhatsNext session, etc.).
+// Per-run tab stores are created via the registry (see getOrCreateRunStore)
+// and mounted via RunStoreProvider; their hooks override this default.
+const defaultRunStore = createRunStore();
+
+const RunStoreContext = createContext<RunStore | null>(null);
+
+interface RunStoreProviderProps {
+  store: RunStore;
+  children: ReactNode;
+}
+
+export function RunStoreProvider({ store, children }: RunStoreProviderProps) {
+  return createElement(RunStoreContext.Provider, { value: store }, children);
+}
+
+// useRunStoreInstance returns the active RunStore (falling back to the
+// module default when no Provider is mounted). Use sparingly — most
+// React-side consumers should reach for useRunStore(selector) which
+// memoises subscriptions automatically.
+export function useRunStoreInstance(): RunStore {
+  return useContext(RunStoreContext) ?? defaultRunStore;
+}
+
+// useRunStore preserves the (s) => x selector API from the singleton era
+// so components don't need to be rewritten. Inside a RunStoreProvider it
+// reads from that provider's store; outside, it falls back to the
+// module-level default store — equivalent to the old singleton behavior.
+export function useRunStore<T>(selector: (state: RunStoreState) => T): T {
+  return useStore(useRunStoreInstance(), selector);
+}
+
+// Imperative façade for non-React callers (e.g. effects that need to
+// poke the store without subscribing). Pre-tab callers used
+// `useRunStore.getState()` — that pattern is preserved via this helper
+// wrapping the default store.
+export const runStore = {
+  getState: () => defaultRunStore.getState(),
+  setState: defaultRunStore.setState,
+  subscribe: defaultRunStore.subscribe,
+};
+
+// Registry of stores keyed by runId. Populated lazily by
+// getOrCreateRunStore as run tabs hydrate; cleared by disposeRunStore
+// when a run tab closes. BackgroundRunSubscribers and RunTabHost are
+// the primary consumers (Phase 2b wiring); App-level fallbacks still
+// hit the module default above.
+const REGISTRY = new Map<string, RunStore>();
+
+export function getOrCreateRunStore(runId: string): RunStore {
+  let store = REGISTRY.get(runId);
+  if (!store) {
+    store = createRunStore();
+    store.getState().setRunId(runId);
+    REGISTRY.set(runId, store);
+  }
+  return store;
+}
+
+export function disposeRunStore(runId: string): void {
+  REGISTRY.delete(runId);
+}
+
+export function getRegisteredRunIds(): string[] {
+  return Array.from(REGISTRY.keys());
+}
+
+// resetAllRunStores wipes every run store the studio is tracking. Used
+// by project-switch listeners (the new project's runs are in a
+// different store dir, so previous data is meaningless).
+export function resetAllRunStores(): void {
+  defaultRunStore.getState().reset();
+  for (const store of REGISTRY.values()) {
+    store.getState().reset();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Selectors
