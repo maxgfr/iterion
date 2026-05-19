@@ -190,3 +190,133 @@ func TestResolveDefaultSandboxImage(t *testing.T) {
 		}
 	})
 }
+
+func TestPickHostState(t *testing.T) {
+	cases := []struct {
+		name       string
+		wf         string
+		cli        string
+		global     string
+		wantMode   string
+		wantSource string
+	}{
+		{"cli wins over everything", "auto", "none", "auto", "none", "cli flag --sandbox-host-state"},
+		{"workflow wins over env", "none", "", "auto", "none", "workflow sandbox.host_state"},
+		{"env when nothing else", "", "", "none", "none", "ITERION_SANDBOX_HOST_STATE"},
+		{"default is auto", "", "", "", "auto", "default"},
+		{"cli auto over default", "", "auto", "", "auto", "cli flag --sandbox-host-state"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gotMode, gotSource := pickHostState(c.wf, c.cli, c.global)
+			if gotMode != c.wantMode {
+				t.Errorf("mode = %q, want %q", gotMode, c.wantMode)
+			}
+			if !strings.HasPrefix(gotSource, c.wantSource) {
+				t.Errorf("source = %q, want prefix %q", gotSource, c.wantSource)
+			}
+		})
+	}
+}
+
+func TestPathContains(t *testing.T) {
+	tmp := t.TempDir()
+	parent := tmp
+	child := filepath.Join(tmp, "nested", "child")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if !pathContains(parent, child) {
+		t.Errorf("expected parent %q to contain child %q", parent, child)
+	}
+	if !pathContains(parent, parent) {
+		t.Errorf("expected pathContains(x, x) to be true")
+	}
+	if pathContains(child, parent) {
+		t.Errorf("expected child %q to NOT contain parent %q", child, parent)
+	}
+	if pathContains("", parent) || pathContains(parent, "") {
+		t.Errorf("empty-string operands must return false")
+	}
+}
+
+func TestParseLeadingUID(t *testing.T) {
+	cases := []struct {
+		input  string
+		want   int
+		wantOK bool
+	}{
+		{"", 0, false},
+		{"node", 0, false},
+		{"1000", 1000, true},
+		{"1000:1000", 1000, true},
+		{"500:600", 500, true},
+		{"abc:1000", 0, false},
+	}
+	for _, c := range cases {
+		t.Run(c.input, func(t *testing.T) {
+			got, ok := parseLeadingUID(c.input)
+			if ok != c.wantOK {
+				t.Errorf("ok = %v, want %v", ok, c.wantOK)
+			}
+			if ok && got != c.want {
+				t.Errorf("uid = %d, want %d", got, c.want)
+			}
+		})
+	}
+}
+
+func TestCollectHostStateMounts(t *testing.T) {
+	tmp := t.TempDir()
+	iterionHome := filepath.Join(tmp, "iter-home")
+	claudeDir := filepath.Join(tmp, "claude-home")
+	workspace := filepath.Join(tmp, "workspace")
+	for _, d := range []string{iterionHome, claudeDir, workspace} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+
+	t.Run("both present, disjoint workspace -> both mounted", func(t *testing.T) {
+		mounts := collectHostStateMounts(workspace, iterionHome, claudeDir)
+		if len(mounts) != 2 {
+			t.Fatalf("got %d mounts, want 2", len(mounts))
+		}
+		for _, m := range mounts {
+			if m.HostPath != m.ContainerPath {
+				t.Errorf("HostPath %q != ContainerPath %q (must mount at same absolute path)", m.HostPath, m.ContainerPath)
+			}
+		}
+	})
+
+	t.Run("missing host dir skipped silently", func(t *testing.T) {
+		missing := filepath.Join(tmp, "does-not-exist")
+		mounts := collectHostStateMounts(workspace, missing, claudeDir)
+		if len(mounts) != 1 {
+			t.Errorf("got %d mounts, want 1 (only claude)", len(mounts))
+		}
+	})
+
+	t.Run("workspace contains iterion home -> skipped", func(t *testing.T) {
+		// project-local .iterion case: store lives inside workspace
+		nested := filepath.Join(workspace, ".iterion")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatalf("mkdir nested: %v", err)
+		}
+		mounts := collectHostStateMounts(workspace, nested, claudeDir)
+		// Only claude should be mounted; nested is shadowed by workspace.
+		if len(mounts) != 1 {
+			t.Fatalf("got %d mounts, want 1", len(mounts))
+		}
+		if mounts[0].HostPath != claudeDir {
+			t.Errorf("expected claudeDir, got %q", mounts[0].HostPath)
+		}
+	})
+
+	t.Run("empty paths short-circuit", func(t *testing.T) {
+		mounts := collectHostStateMounts(workspace, "", "")
+		if len(mounts) != 0 {
+			t.Errorf("got %d mounts, want 0", len(mounts))
+		}
+	})
+}

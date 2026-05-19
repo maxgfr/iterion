@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -76,8 +78,16 @@ type SandboxParams struct {
 	CLIOverride   string // "" means no override
 	GlobalDefault string // "" means no global default
 	DefaultImage  string // "" lets the runtime pick the built-in default
-	EmitEvent     func(store.EventType, map[string]interface{}) error
-	Logger        *iterlog.Logger
+
+	// HostStateOverride / HostStateDefault carry the precedence inputs
+	// for the host_state mount (auto-bind of ~/.iterion + ~/.claude).
+	// Empty values defer to the next layer in the chain. The chain is
+	// CLI > workflow > env > default("auto"). See pickHostState.
+	HostStateOverride string
+	HostStateDefault  string
+
+	EmitEvent func(store.EventType, map[string]interface{}) error
+	Logger    *iterlog.Logger
 	// AttachmentsHostDir, when non-empty, is bind-mounted read-only
 	// into the container at AttachmentsContainerPath so {{attachments.X}}
 	// path references resolve inside the sandbox. Empty disables the
@@ -195,6 +205,115 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 				fmt.Sprintf("source=%s,target=%s,type=bind,readonly", p.BundleHostDir, containerPath),
 			)
 		}
+	}
+
+	// Host-state auto-mount: bind `~/.iterion` (run store) and
+	// `~/.claude` (Claude Code OAuth + sessions) into the container
+	// at the same absolute path as on the host so persistent memory
+	// survives across runs. Mounting at the same absolute path also
+	// keeps Claude Code's per-project key
+	// (~/.claude/projects/<EncodeWorkDirKey(cwd)>) identical inside
+	// and outside the sandbox, which is the only clean way to share
+	// session history between sandboxed and host invocations — the
+	// `CLAUDE_PROJECT_DIR` env var Claude Code exports for hooks is
+	// not read on the way in.
+	//
+	// Precedence: CLI > workflow > env > default "auto". Set
+	// `sandbox.host_state: none` (or `--sandbox-host-state=none`, or
+	// `ITERION_SANDBOX_HOST_STATE=none`) for multi-tenant / cloud
+	// runners that must not leak host OAuth credentials into the
+	// container. The kubernetes driver hard-errors on host_state=auto
+	// (no host filesystem to bind) — see DriverForSpec.
+	var wfHostState string
+	if wf != nil && wf.Sandbox != nil {
+		wfHostState = wf.Sandbox.HostState
+	}
+	resolvedHostState, hsSource := pickHostState(wfHostState, p.HostStateOverride, p.HostStateDefault)
+	spec.HostState = sandbox.HostState(resolvedHostState)
+	if spec.HostState.Active() {
+		absWorkspace, absErr := filepath.Abs(workspacePath)
+		if absErr != nil {
+			absWorkspace = workspacePath
+		}
+		// Match host workspace path inside the container so absolute-
+		// path-derived state (Claude Code project key, prompts that
+		// reference $PROJECT_DIR, tool nodes invoking absolute paths)
+		// resolves identically on both sides. The DSL can still pin a
+		// specific WorkspaceFolder; we only override the empty default.
+		if spec.WorkspaceFolder == "" {
+			spec.WorkspaceFolder = absWorkspace
+		}
+
+		homeDir := resolveHostHomeDir()
+		iterionHomeDir := store.GlobalIterionDataDir()
+		var claudeDir string
+		if homeDir != "" {
+			claudeDir = filepath.Join(homeDir, ".claude")
+		}
+
+		mounts := collectHostStateMounts(absWorkspace, iterionHomeDir, claudeDir)
+		mountPairs := make([]string, 0, len(mounts))
+		for _, m := range mounts {
+			entry := fmt.Sprintf("source=%s,target=%s,type=bind", m.HostPath, m.ContainerPath)
+			if m.ReadOnly {
+				entry += ",readonly"
+			}
+			spec.Mounts = append(spec.Mounts, entry)
+			mountPairs = append(mountPairs, m.HostPath+":"+m.ContainerPath)
+		}
+
+		// Force HOME inside the container to the host home path so
+		// processes that resolve `~` (Claude Code, git, anything that
+		// reads $HOME) land in the mounted tree rather than a stock
+		// image's /root or empty $HOME. Only set when we actually
+		// resolved the host home and the spec hasn't already pinned an
+		// override.
+		if homeDir != "" {
+			if spec.Env == nil {
+				spec.Env = map[string]string{}
+			}
+			if _, alreadySet := spec.Env["HOME"]; !alreadySet {
+				spec.Env["HOME"] = homeDir
+			}
+		}
+
+		// UID remap policy: on Linux hosts, when the spec doesn't pin
+		// a user, run the container as the host UID:GID so writes back
+		// to the mounted ~/.iterion + ~/.claude trees stay owned by
+		// the host user (not root). macOS / Windows Docker Desktop do
+		// userns-remap implicitly, so we leave User empty there.
+		// Host UID 0 (CI runners) is a no-op — same UID either way.
+		if goruntime.GOOS == "linux" {
+			hostUID := os.Getuid()
+			hostGID := os.Getgid()
+			if spec.User == "" && hostUID != 0 {
+				spec.User = strconv.Itoa(hostUID) + ":" + strconv.Itoa(hostGID)
+				_ = emitEvent(store.EventSandboxUserRemap, map[string]interface{}{
+					"uid":    hostUID,
+					"gid":    hostGID,
+					"reason": "host_state=auto: align container UID with host so writes to ~/.iterion + ~/.claude remain host-owned",
+				})
+			} else if spec.User != "" && hostUID != 0 {
+				if specUID, ok := parseLeadingUID(spec.User); ok && specUID != hostUID {
+					_ = emitEvent(store.EventSandboxUIDMismatchWarning, map[string]interface{}{
+						"spec_user": spec.User,
+						"host_uid":  hostUID,
+					})
+				}
+			}
+		}
+
+		_ = emitEvent(store.EventSandboxHostStateMounted, map[string]interface{}{
+			"enabled":          true,
+			"source":           hsSource,
+			"workspace_folder": spec.WorkspaceFolder,
+			"mounts":           mountPairs,
+		})
+	} else {
+		_ = emitEvent(store.EventSandboxHostStateMounted, map[string]interface{}{
+			"enabled": false,
+			"source":  hsSource,
+		})
 	}
 
 	// When the workflow uses claw nodes, route them through the
@@ -616,6 +735,135 @@ func pickMode(wf *ir.Workflow, cli, global string) (string, string) {
 	return "", "default (no sandbox)"
 }
 
+// pickHostState resolves the precedence chain for the `host_state`
+// knob. Same ordering as pickMode but with the built-in default of
+// "auto" when nothing further down the chain has spoken — making
+// "persistent memory in the sandbox" the out-of-the-box behaviour.
+// Returns the resolved value and a human-readable source label used
+// in the sandbox_host_state_mounted event.
+func pickHostState(wfHostState, cli, global string) (string, string) {
+	if cli != "" {
+		return cli, "cli flag --sandbox-host-state"
+	}
+	if wfHostState != "" {
+		return wfHostState, "workflow sandbox.host_state"
+	}
+	if global != "" {
+		return global, "ITERION_SANDBOX_HOST_STATE"
+	}
+	return string(sandbox.HostStateAuto), "default"
+}
+
+// hostStateMount describes a single auto-bind from the host into the
+// sandbox at the same absolute path. Returned by collectHostStateMounts
+// so the caller can decide read/write mode and emit a single event
+// listing everything that landed.
+type hostStateMount struct {
+	HostPath      string
+	ContainerPath string // intentionally identical to HostPath for path-key parity
+	ReadOnly      bool
+}
+
+// collectHostStateMounts returns the auto-bind set for host_state=auto
+// given the resolved workspace path. Honors overlap: when the workspace
+// already contains a candidate (e.g. project-local <repo>/.iterion is
+// nested inside the workspace bind-mount), the candidate is skipped to
+// avoid two competing binds. Missing host dirs are skipped silently —
+// the user hasn't used iterion or Claude Code on this host yet, so
+// there's nothing persistent to preserve.
+//
+// iterionHomeDir is the resolved root of the iterion data dir
+// (`$ITERION_HOME` or `~/.iterion`). claudeDir is `<userHome>/.claude`.
+// Both may be empty when the host cannot resolve the home directory
+// (CI without HOME); the caller treats that as "skip silently".
+func collectHostStateMounts(workspacePath, iterionHomeDir, claudeDir string) []hostStateMount {
+	out := make([]hostStateMount, 0, 2)
+	for _, candidate := range []string{iterionHomeDir, claudeDir} {
+		if candidate == "" {
+			continue
+		}
+		info, err := os.Stat(candidate)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		if pathContains(workspacePath, candidate) || pathContains(candidate, workspacePath) {
+			// Workspace bind-mount already covers (or is covered by)
+			// this path — adding another bind would either shadow the
+			// workspace or be shadowed itself. Skip to keep the mount
+			// graph unambiguous.
+			continue
+		}
+		out = append(out, hostStateMount{
+			HostPath:      candidate,
+			ContainerPath: candidate,
+		})
+	}
+	return out
+}
+
+// pathContains reports whether parent is an ancestor of (or equal to)
+// child. Both are normalised to clean absolute paths first; on a
+// resolution error we conservatively return false so the caller falls
+// through to the safe "mount it anyway" path.
+func pathContains(parent, child string) bool {
+	if parent == "" || child == "" {
+		return false
+	}
+	pa, err := filepath.Abs(parent)
+	if err != nil {
+		return false
+	}
+	ca, err := filepath.Abs(child)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(pa, ca)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
+}
+
+// parseLeadingUID extracts the numeric UID prefix from a devcontainer-
+// style remoteUser string ("1000", "1000:1000", "node"). Returns
+// (0, false) when the string doesn't start with digits — in that case
+// the caller can't compare against the host UID without resolving
+// usernames inside the image, and we skip the warning rather than
+// surface a noisy false positive.
+func parseLeadingUID(user string) (int, bool) {
+	if user == "" {
+		return 0, false
+	}
+	end := 0
+	for end < len(user) && user[end] >= '0' && user[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(user[:end])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// resolveHostHomeDir returns the host user's home directory, normalised
+// to an absolute path. Empty string when the host has no usable HOME
+// (CI containers without HOME, distroless, etc.) — callers treat that
+// as "host_state cannot fire, skip silently".
+func resolveHostHomeDir() string {
+	h, err := os.UserHomeDir()
+	if err != nil || h == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(h)
+	if err != nil {
+		return h
+	}
+	return abs
+}
+
 // fromIRSpec converts the IR-level SandboxSpec to the runtime-level
 // sandbox.Spec used by drivers. Phase 1 mirrors only the fields the
 // IR carries today; later phases extend both shapes in lockstep.
@@ -628,6 +876,7 @@ func fromIRSpec(s *ir.SandboxSpec) sandbox.Spec {
 		User:            s.User,
 		PostCreate:      s.PostCreate,
 		WorkspaceFolder: s.WorkspaceFolder,
+		HostState:       sandbox.HostState(s.HostState),
 	}
 	if s.Build != nil {
 		out.Build = &sandbox.Build{
@@ -858,6 +1107,8 @@ func (e *Engine) startSandbox(ctx context.Context, runID string, repoRoot string
 		CLIOverride:              e.sandboxOverride,
 		GlobalDefault:            e.sandboxDefault,
 		DefaultImage:             e.sandboxDefaultImage,
+		HostStateOverride:        e.sandboxHostStateOverride,
+		HostStateDefault:         e.sandboxHostStateDefault,
 		EmitEvent:                emitForSandbox,
 		Logger:                   e.logger,
 		AttachmentsHostDir:       attachHost,

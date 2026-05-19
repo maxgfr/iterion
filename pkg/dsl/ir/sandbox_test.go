@@ -130,6 +130,7 @@ workflow refactor:
     image: "alpine:3"
     user: "node"
     workspace_folder: "/workspace"
+    host_state: none
     post_create: "npm install"
     env:
       KEY1: "v1"
@@ -158,6 +159,9 @@ workflow refactor:
 	}
 	if sb.WorkspaceFolder != "/workspace" {
 		t.Errorf("WorkspaceFolder = %q", sb.WorkspaceFolder)
+	}
+	if sb.HostState != "none" {
+		t.Errorf("HostState = %q, want none", sb.HostState)
 	}
 	if sb.PostCreate != "npm install" {
 		t.Errorf("PostCreate = %q", sb.PostCreate)

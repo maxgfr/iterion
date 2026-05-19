@@ -54,9 +54,65 @@ treating the container as a long-lived "ssh-like" target.
 ### Workspace bind-mount
 
 The host worktree (when `worktree: auto`) or repo (when `worktree: none`)
-is bind-mounted RW at `/workspace` inside the container. This is the
-container's working directory by default. Override via
-`workspaceFolder` in `.devcontainer/devcontainer.json`.
+is bind-mounted RW into the container. The default mount target depends
+on `host_state` (see below):
+
+- `host_state: auto` (the default) — mounted at the **same absolute
+  path as on the host**. This keeps absolute-path-derived state
+  identical inside and outside the container (Claude Code project
+  keys, prompts that reference `${PROJECT_DIR}`, tool nodes that pass
+  absolute paths around).
+- `host_state: none` or workflow that pins `workspace_folder` —
+  mounted at the configured target (default `/workspace`).
+
+Override via `workspaceFolder` in `.devcontainer/devcontainer.json`
+or `workspace_folder:` in the inline `sandbox:` block.
+
+### Host state mounts (`~/.iterion`, `~/.claude`)
+
+When `host_state: auto` (the default), iterion also bind-mounts:
+
+| Host path                | Container path           | Purpose |
+|--------------------------|--------------------------|---------|
+| `~/.iterion/` (or `$ITERION_HOME`) | same absolute path | Run store: events, artifacts, recoveries, the `runs/<id>/` tree. The in-container `iterion __claw-runner` writes here and host iterion reads it after the run. |
+| `~/.claude/`             | same absolute path      | Claude Code OAuth credentials, per-project `projects/<key>/` chat history, user-level `CLAUDE.md`. Keeps memory persistent across runs. |
+
+Both are RW. The container's `HOME` env var is set to the host home so
+processes that resolve `~` land in the mounted tree (no EACCES against
+a stock image's `/root`).
+
+**UID remapping (Linux only):** when `host_state: auto` is active and
+the spec doesn't pin a `User`, the docker driver runs the container as
+`$(id -u):$(id -g)` so files written into the mounted trees stay owned
+by the host user. Emitted as `sandbox_user_remap` in `events.jsonl`.
+macOS / Windows Docker Desktop handle this implicitly via userns-remap
+and need no intervention. Host UID 0 (CI runners) is a no-op.
+
+If the spec pins a `User` that mismatches the host UID (a
+devcontainer with `remoteUser: node` on a host UID ≠ 1000, for
+example), iterion respects the spec and emits a
+`sandbox_uid_mismatch_warning` so the operator knows why writes back
+to the mounted trees may end up owned by an unexpected UID.
+
+**Overlap handling:** when the workspace bind-mount already contains
+one of the candidate paths (typically a project-local `<repo>/.iterion/`
+opt-in store), the redundant host_state mount is skipped — Docker's
+bind semantics would have the more-specific entry win anyway, but the
+explicit skip keeps `docker inspect` readable.
+
+**Opt-out and security.** Set `host_state: none` in the workflow,
+pass `--sandbox-host-state=none`, or export
+`ITERION_SANDBOX_HOST_STATE=none` to disable. This is the recommended
+posture for **multi-tenant cloud runners and shared CI**: the RW mount
+exposes `~/.claude/.credentials.json` (OAuth) to every exec in the
+container, which is fine on a single-user dev box but a leak vector
+on shared infrastructure. The `kubernetes` driver hard-errors on
+`host_state: auto` for the same reason: cloud pods have no host
+filesystem to bind and the design refuses to fake it.
+
+Audit trail: the `sandbox_host_state_mounted` event in `events.jsonl`
+lists the resolved source (CLI / workflow / env / default), the
+container workspace path, and every mount that landed.
 
 ### Network policy
 
@@ -133,6 +189,8 @@ workflow x:
     #     VERSION: "1.2.3"
     user: "1000:1000"
     workspace_folder: "/workspace"
+    host_state: auto         # auto | none. Default: auto. Set "none"
+                             # on multi-tenant / shared runners.
     post_create: "npm ci"
     env:
       NODE_ENV: "test"
@@ -183,6 +241,8 @@ iterion run foo.iter                   # use workflow + global default
 iterion run foo.iter \
     --sandbox-default-image ghcr.io/socialgouv/iterion-sandbox-full:edge
                                        # override the auto-mode fallback image
+iterion run foo.iter --sandbox-host-state=none
+                                       # disable ~/.iterion + ~/.claude auto-mount
 iterion sandbox doctor                 # report driver + capabilities
 ```
 
@@ -194,6 +254,10 @@ iterion sandbox doctor                 # report driver + capabilities
   when no `.devcontainer/devcontainer.json` is found. Falls back to
   `ghcr.io/socialgouv/iterion-sandbox-slim:<iterion-version>` when
   unset. Overridden per-run by `--sandbox-default-image`.
+- `ITERION_SANDBOX_HOST_STATE` — global default for the
+  `~/.iterion` + `~/.claude` auto-mount (`""`, `auto`, or `none`).
+  Defaults to `auto`. Set to `none` on multi-tenant / cloud runners
+  to avoid leaking host OAuth credentials.
 
 ### Precedence (highest → lowest)
 
@@ -202,6 +266,10 @@ iterion sandbox doctor                 # report driver + capabilities
 3. Workflow-level `sandbox:` declaration (DSL)
 4. `ITERION_SANDBOX_DEFAULT` env var
 5. Implicit `none` (no sandbox)
+
+The same chain applies to `host_state` via `--sandbox-host-state`,
+`sandbox.host_state:` in the workflow block, and
+`ITERION_SANDBOX_HOST_STATE`. The built-in default is `auto`.
 
 ## Default image
 

@@ -83,6 +83,12 @@ type RunOptions struct {
 	// Empty inherits ITERION_SANDBOX_DEFAULT_IMAGE then the built-in
 	// default (`ghcr.io/socialgouv/iterion-sandbox-slim:<iterion-version>`).
 	SandboxDefaultImage string
+	// SandboxHostState controls whether the host's `~/.iterion` (run
+	// store) and `~/.claude` (Claude Code OAuth + sessions) are
+	// auto-mounted into the sandbox so persistent memory survives
+	// across runs. Values: "", "auto", "none". Empty inherits
+	// ITERION_SANDBOX_HOST_STATE then the built-in default "auto".
+	SandboxHostState string
 }
 
 // RunRun executes a workflow or recipe and reports the outcome.
@@ -221,6 +227,7 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 	}
 
 	sandboxDefault := strings.ToLower(os.Getenv("ITERION_SANDBOX_DEFAULT"))
+	sandboxHostStateDefault := strings.ToLower(os.Getenv("ITERION_SANDBOX_HOST_STATE"))
 
 	eng := runtime.New(wf, s, executor,
 		append(engineOpts,
@@ -234,6 +241,8 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 			runtime.WithSandboxOverride(opts.Sandbox),
 			runtime.WithSandboxDefault(sandboxDefault),
 			runtime.WithSandboxDefaultImage(opts.SandboxDefaultImage),
+			runtime.WithSandboxHostStateOverride(opts.SandboxHostState),
+			runtime.WithSandboxHostStateDefault(sandboxHostStateDefault),
 			runtime.WithBundle(bundleHandle),
 			runtime.WithPreset(opts.Preset),
 		)...,

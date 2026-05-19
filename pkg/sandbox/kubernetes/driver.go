@@ -147,6 +147,9 @@ func (d *Driver) Prepare(_ context.Context, spec sandbox.Spec) (sandbox.Prepared
 	if spec.Image == "" {
 		return nil, fmt.Errorf("kubernetes: sandbox.image is required; declare an image: field or use mode=auto with a .devcontainer/devcontainer.json")
 	}
+	if spec.HostState == sandbox.HostStateAuto {
+		return nil, fmt.Errorf("kubernetes: sandbox.host_state=auto is not supported on the kubernetes driver (no host filesystem to bind); set host_state: none on the workflow, pass --sandbox-host-state=none, or set ITERION_SANDBOX_HOST_STATE=none for cloud runs")
+	}
 	// V2-7: sandbox.mounts entries are validated lazily — translateMounts
 	// at manifest-render time produces a clear error pointing at the
 	// offending entry. Keep the surface here minimal so authors see the

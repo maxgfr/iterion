@@ -154,6 +154,14 @@ type SandboxConfig struct {
 	// accepts these three; "inline" requires a block body which the
 	// CLI cannot express.
 	Default string `yaml:"default"`
+
+	// HostState selects whether the host's `~/.iterion` (run store)
+	// and `~/.claude` (Claude Code OAuth + sessions) are
+	// auto-mounted into the sandbox. "" (default → "auto") | "auto" |
+	// "none". The "none" value is the recommended posture for
+	// cloud / multi-tenant deploys (it avoids leaking host OAuth
+	// into shared runners).
+	HostState string `yaml:"host_state"`
 }
 
 // NATSConfig holds the NATS JetStream connection + stream/bucket names.
@@ -391,6 +399,12 @@ func (c *Config) Validate() error {
 	case "", "none", "auto":
 	default:
 		return fmt.Errorf("ITERION_SANDBOX_DEFAULT %q invalid (want \"\", \"none\", or \"auto\")", c.Sandbox.Default)
+	}
+
+	switch c.Sandbox.HostState {
+	case "", "auto", "none":
+	default:
+		return fmt.Errorf("ITERION_SANDBOX_HOST_STATE %q invalid (want \"\", \"auto\", or \"none\")", c.Sandbox.HostState)
 	}
 
 	return nil
