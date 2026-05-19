@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
 import { disposeRunStore } from "@/store/run";
+import { disposeDocumentStore } from "@/store/document";
+import { disposeSelectionStore } from "@/store/selection";
 
 export type TabKind =
   | "home"
@@ -147,10 +149,11 @@ export const useTabsStore = create<TabsState>()(
           if (idx === -1) return s;
           const closed = s.tabs[idx];
           const tabs = s.tabs.filter((t) => t.id !== id);
-          // Dispose the per-runId Zustand store + WS connection now
-          // that no tab references this run. Done inside the set()
-          // callback so we hold the same authoritative tabs list when
-          // checking for other tabs that might still reference it.
+          // Dispose the per-tab Zustand stores so the WS connection
+          // (runs) / document + selection state (editors) are
+          // reclaimed. Run stores are keyed by runId — only dispose
+          // when no other tab still references it. Editor stores are
+          // keyed by tabId so they're always tab-unique.
           if (closed?.kind === "run" && closed.params.runId) {
             const stillReferenced = tabs.some(
               (t) => t.kind === "run" && t.params.runId === closed.params.runId,
@@ -158,6 +161,9 @@ export const useTabsStore = create<TabsState>()(
             if (!stillReferenced) {
               disposeRunStore(closed.params.runId);
             }
+          } else if (closed?.kind === "editor") {
+            disposeDocumentStore(closed.id);
+            disposeSelectionStore(closed.id);
           }
           let activeTabId = s.activeTabId;
           if (activeTabId === id) {
