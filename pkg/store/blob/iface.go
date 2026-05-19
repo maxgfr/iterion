@@ -109,7 +109,11 @@ type Config struct {
 // a single helper here keeps the layout decision in one place — any
 // future change (e.g. sharding by run prefix for high cardinality
 // stores) only mutates this function. See plan §D.6.
-func ArtifactKey(runID, nodeID string, version int) string {
+//
+// Returns an error when runID or nodeID fails the standard path
+// component sanitisation (separators, traversal, control chars), or
+// when version is negative.
+func ArtifactKey(runID, nodeID string, version int) (string, error) {
 	return artifactKey(runID, nodeID, version)
 }
 
@@ -118,13 +122,18 @@ func ArtifactKey(runID, nodeID string, version int) string {
 // used by the filesystem backend (relative to the store root) so
 // migration tooling can copy bytes between backends without
 // rewriting paths.
-func AttachmentKey(runID, name, filename string) string {
+//
+// Returns an error when any of the three components fail
+// sanitisation.
+func AttachmentKey(runID, name, filename string) (string, error) {
 	return attachmentKey(runID, name, filename)
 }
 
 // AttachmentRunPrefix is the S3 key prefix that contains every
 // attachment for a run. Used by DeleteRunAttachments and
 // retention sweepers.
-func AttachmentRunPrefix(runID string) string {
+//
+// Returns an error when runID fails sanitisation.
+func AttachmentRunPrefix(runID string) (string, error) {
 	return attachmentRunPrefix(runID)
 }

@@ -56,7 +56,11 @@ func (s *Store) WriteAttachment(ctx context.Context, runID string, rec store.Att
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = time.Now().UTC()
 	}
-	rec.StorageRef = blob.AttachmentKey(runID, rec.Name, rec.OriginalFilename)
+	ref, err := blob.AttachmentKey(runID, rec.Name, rec.OriginalFilename)
+	if err != nil {
+		return fmt.Errorf("store/mongo: attachment key: %w", err)
+	}
+	rec.StorageRef = ref
 
 	if err := s.blob.PutAttachment(ctx, runID, rec.Name, rec.OriginalFilename, rec.MIME, buf); err != nil {
 		return fmt.Errorf("store/mongo: blob put attachment: %w", err)

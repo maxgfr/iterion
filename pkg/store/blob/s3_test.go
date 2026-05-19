@@ -36,13 +36,16 @@ func TestErrArtifactNotFoundIsExported(t *testing.T) {
 }
 
 // ArtifactKey is the public re-export of the canonical layout. The
-// behaviour is owned by key.go (panics on bad inputs) but we lock the
-// happy-path format here so a future refactor can't silently change
-// it without breaking the migration tool.
+// behaviour is owned by key.go (returns an error on bad inputs) but
+// we lock the happy-path format here so a future refactor can't
+// silently change it without breaking the migration tool.
 func TestArtifactKeyHappyPath(t *testing.T) {
 	t.Parallel()
 
-	got := ArtifactKey("run-001", "agent_a", 3)
+	got, err := ArtifactKey("run-001", "agent_a", 3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	want := "artifacts/run-001/agent_a/3.json"
 	if got != want {
 		t.Fatalf("ArtifactKey: got %q want %q", got, want)

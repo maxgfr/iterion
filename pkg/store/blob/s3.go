@@ -114,8 +114,11 @@ func (c *S3Client) Close() error {
 // upload is idempotent — re-PUTting the same (run, node, version)
 // overwrites with byte-identical content per ArtifactKey contract.
 func (c *S3Client) PutArtifact(ctx context.Context, runID, nodeID string, version int, body []byte) error {
-	key := artifactKey(runID, nodeID, version)
-	_, err := c.client.PutObject(ctx, &s3.PutObjectInput{
+	key, err := artifactKey(runID, nodeID, version)
+	if err != nil {
+		return err
+	}
+	_, err = c.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(c.bucket),
 		Key:         aws.String(key),
 		Body:        bytes.NewReader(body),
@@ -131,7 +134,10 @@ func (c *S3Client) PutArtifact(ctx context.Context, runID, nodeID string, versio
 // ErrArtifactNotFound when the key is absent so callers can branch
 // without parsing AWS error codes themselves.
 func (c *S3Client) GetArtifact(ctx context.Context, runID, nodeID string, version int) ([]byte, error) {
-	key := artifactKey(runID, nodeID, version)
+	key, err := artifactKey(runID, nodeID, version)
+	if err != nil {
+		return nil, err
+	}
 	out, err := c.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(key),
@@ -300,11 +306,14 @@ func isS3NotFound(err error) bool {
 // PutAttachment uploads attachment bytes under the canonical key.
 // Idempotent: re-PUTting the same key replaces the bytes.
 func (c *S3Client) PutAttachment(ctx context.Context, runID, name, filename, contentType string, body []byte) error {
-	key := attachmentKey(runID, name, filename)
+	key, err := attachmentKey(runID, name, filename)
+	if err != nil {
+		return err
+	}
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	_, err := c.client.PutObject(ctx, &s3.PutObjectInput{
+	_, err = c.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(c.bucket),
 		Key:         aws.String(key),
 		Body:        bytes.NewReader(body),
@@ -318,7 +327,10 @@ func (c *S3Client) PutAttachment(ctx context.Context, runID, name, filename, con
 
 // GetAttachment streams the attachment bytes back. Callers must Close.
 func (c *S3Client) GetAttachment(ctx context.Context, runID, name, filename string) (io.ReadCloser, AttachmentMeta, error) {
-	key := attachmentKey(runID, name, filename)
+	key, err := attachmentKey(runID, name, filename)
+	if err != nil {
+		return nil, AttachmentMeta{}, err
+	}
 	out, err := c.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(key),
@@ -348,7 +360,10 @@ func (c *S3Client) PresignAttachment(ctx context.Context, runID, name, filename 
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
-	key := attachmentKey(runID, name, filename)
+	key, err := attachmentKey(runID, name, filename)
+	if err != nil {
+		return "", err
+	}
 	presigner := s3.NewPresignClient(c.client)
 	req, err := presigner.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
@@ -364,7 +379,10 @@ func (c *S3Client) PresignAttachment(ctx context.Context, runID, name, filename 
 // missing key returns nil so callers performing rollback don't error
 // on a write that never reached S3.
 func (c *S3Client) DeleteAttachment(ctx context.Context, runID, name, filename string) error {
-	key := attachmentKey(runID, name, filename)
+	key, err := attachmentKey(runID, name, filename)
+	if err != nil {
+		return err
+	}
 	if _, err := c.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(key),
@@ -377,7 +395,10 @@ func (c *S3Client) DeleteAttachment(ctx context.Context, runID, name, filename s
 // DeleteRunAttachments sweeps every blob under attachments/<runID>/.
 // Mirrors DeleteRun's batched, best-effort semantics.
 func (c *S3Client) DeleteRunAttachments(ctx context.Context, runID string) error {
-	prefix := attachmentRunPrefix(runID)
+	prefix, err := attachmentRunPrefix(runID)
+	if err != nil {
+		return err
+	}
 
 	var collected []error
 	pager := s3.NewListObjectsV2Paginator(c.client, &s3.ListObjectsV2Input{
