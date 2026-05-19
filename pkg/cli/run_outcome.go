@@ -57,7 +57,7 @@ func runInteractiveResumeLoop(
 // will resume out-of-band — while cancelled and failed runs surface
 // the underlying error.
 //
-// opts.File is the user-facing path used to populate the JSON "file"
+// userFile is the user-facing path used to populate the JSON "file"
 // field when present (paused result only); pass "" to omit it.
 func reportRunOutcome(
 	p *Printer,
@@ -66,16 +66,6 @@ func reportRunOutcome(
 	err error,
 	runResult map[string]interface{},
 ) error {
-	if err == nil {
-		runResult["status"] = "finished"
-		if p.Format == OutputJSON {
-			p.JSON(runResult)
-		} else {
-			p.Line("  Status: FINISHED")
-		}
-		return nil
-	}
-
 	if errors.Is(err, runtime.ErrRunPaused) {
 		runResult["status"] = "paused_waiting_human"
 		if userFile != "" {
@@ -91,22 +81,68 @@ func reportRunOutcome(
 		}
 		return nil
 	}
+	return reportNonPausedOutcome(p, runID, err, runResult)
+}
 
-	if errors.Is(err, runtime.ErrRunCancelled) {
-		runResult["status"] = "cancelled"
+// reportResumeOutcome is the equivalent of [reportRunOutcome] for the
+// `iterion resume` path: the paused branch reports a slightly
+// different status string and skips the resume-hint line (the user
+// just ran resume — printing the same command back is noise).
+// Cancelled / failed / finished branches are identical and shared
+// via [reportNonPausedOutcome].
+func reportResumeOutcome(
+	p *Printer,
+	s store.RunStore,
+	runID string,
+	err error,
+	result map[string]interface{},
+) error {
+	if errors.Is(err, runtime.ErrRunPaused) {
+		result["status"] = "paused_waiting_human"
+		enrichPausedResult(s, runID, result)
 		if p.Format == OutputJSON {
-			p.JSON(runResult)
+			p.JSON(result)
+		} else {
+			p.Line("  Status: PAUSED (waiting for human input again)")
+			printPausedQuestions(p, result)
+		}
+		return nil
+	}
+	return reportNonPausedOutcome(p, runID, err, result)
+}
+
+// reportNonPausedOutcome handles the cancelled / failed / finished
+// branches shared by run + resume. Pause is caller-specific (different
+// status text + resume hint) and is handled outside this helper.
+func reportNonPausedOutcome(
+	p *Printer,
+	runID string,
+	err error,
+	result map[string]interface{},
+) error {
+	if err == nil {
+		result["status"] = "finished"
+		if p.Format == OutputJSON {
+			p.JSON(result)
+		} else {
+			p.Line("  Status: FINISHED")
+		}
+		return nil
+	}
+	if errors.Is(err, runtime.ErrRunCancelled) {
+		result["status"] = "cancelled"
+		if p.Format == OutputJSON {
+			p.JSON(result)
 		} else {
 			p.Line("  Status: CANCELLED")
 			p.Line("  Detail: %s", err.Error())
 		}
 		return err
 	}
-
-	runResult["status"] = "failed"
-	runResult["error"] = err.Error()
+	result["status"] = "failed"
+	result["error"] = err.Error()
 	if p.Format == OutputJSON {
-		p.JSON(runResult)
+		p.JSON(result)
 	} else {
 		p.Line("  Status: FAILED")
 		p.Line("  Error:  %s", err.Error())
