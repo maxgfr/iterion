@@ -3,23 +3,17 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"maps"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/SocialGouv/claw-code-go/pkg/apikit/telemetry/otlpgrpc"
-
+	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/backend/recipe"
-	"github.com/SocialGouv/iterion/pkg/benchmark"
 	"github.com/SocialGouv/iterion/pkg/bundle"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	"github.com/SocialGouv/iterion/pkg/git"
@@ -86,8 +80,6 @@ type RunOptions struct {
 
 // RunRun executes a workflow or recipe and reports the outcome.
 func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
-	// Resolve log level early so the logger is available for store creation
-	// and downstream subsystems.
 	level, err := iterlog.ResolveLevel(opts.LogLevel, "ITERION_LOG_LEVEL")
 	if err != nil {
 		return err
@@ -105,49 +97,30 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 		}
 	}
 
-	// Resolve run ID.
 	runID := opts.RunID
 	if runID == "" {
-		var err error
-		runID, err = store.GenerateRunID()
-		if err != nil {
-			return fmt.Errorf("mint run id: %w", err)
+		var idErr error
+		runID, idErr = store.GenerateRunID()
+		if idErr != nil {
+			return fmt.Errorf("mint run id: %w", idErr)
 		}
 	}
 
-	// Optional Prometheus exporter (env-controlled, see docs/observability/).
-	exporter, metricsServer, metricsErr := startPrometheusFromEnv(runID, logger)
-	if metricsErr != nil {
-		return metricsErr
+	telemetry, err := startRunTelemetry(runID, logger)
+	if err != nil {
+		return err
 	}
-	if metricsServer != nil {
-		defer func() {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			_ = metricsServer.Shutdown(shutdownCtx)
-		}()
-	}
-	// Optional OTLP/gRPC exporter (env-controlled, see docs/observability/).
-	otlpExporter, otlpErr := startOTLPGRPCFromEnv(runID, logger)
-	if otlpErr != nil {
-		return otlpErr
-	}
-	if otlpExporter != nil {
-		defer func() {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = otlpExporter.Stop(shutdownCtx)
-		}()
-	}
+	defer telemetry.shutdown()
+
 	engineOpts := []runtime.EngineOption{
 		runtime.WithLogger(logger),
 		runtime.WithRecoveryDispatch(recovery.Dispatch(recovery.DefaultRecipes())),
 	}
-	if exporter != nil {
-		engineOpts = append(engineOpts, runtime.WithEventObserver(exporter.EventObserver()))
+	if telemetry.prometheus != nil {
+		engineOpts = append(engineOpts, runtime.WithEventObserver(telemetry.prometheus.EventObserver()))
 	}
-	if otlpExporter != nil {
-		engineOpts = append(engineOpts, runtime.WithEventObserver(otlpExporter.EventObserver()))
+	if telemetry.otlp != nil {
+		engineOpts = append(engineOpts, runtime.WithEventObserver(telemetry.otlp.EventObserver()))
 	}
 
 	// Resolve the workflow source: either via recipe (which may
@@ -167,30 +140,14 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 	}()
 
 	runName := store.GenerateRunName(iterFile + ":" + runID)
-
 	storeDir := store.ResolveStoreDir(filepath.Dir(iterFile), opts.StoreDir)
 
-	// Tee the logger output into <storeDir>/runs/<runID>/run.log so the
-	// studio's Logs tab and the per-run log buffer (used by the WS
-	// subscription that drives RunLogPanel) see the same content as the
-	// CLI's stderr. Without this, CLI-launched runs show "No log
-	// captured." in the studio — the daemon-launched path tees via
-	// runview.Service.prepareRunLog, but a direct `iterion run`
-	// invocation bypasses runview entirely. Errors are warned-and-
-	// continue: a CLI run with no writable store dir still works (logs
-	// go to stderr only) instead of failing the boot over a feature
-	// the operator may not be using right now.
-	runDir := filepath.Join(storeDir, "runs", runID)
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
-		logger.Warn("cli: mkdir run dir for log tee: %v", err)
-	} else if logFile, openErr := os.OpenFile(filepath.Join(runDir, "run.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); openErr != nil {
-		logger.Warn("cli: open run.log for tee: %v", openErr)
-	} else {
-		defer logFile.Close()
-		logger = iterlog.New(level, io.MultiWriter(os.Stderr, logFile))
-		// Re-emit the engineOpts entries that captured the stderr-only
-		// logger so the engine sees the tee'd one. WithLogger overwrites
-		// e.logger on each call, so appending is sufficient.
+	logger, logCloser := teeRunLog(logger, level, filepath.Join(storeDir, "runs", runID))
+	if logCloser != nil {
+		defer logCloser.Close()
+		// Re-emit the engineOpts entry so the engine sees the tee'd
+		// logger; WithLogger overwrites on each call, so appending is
+		// sufficient.
 		engineOpts = append(engineOpts, runtime.WithLogger(logger))
 	}
 
@@ -199,24 +156,9 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 		return fmt.Errorf("cannot create store: %w", err)
 	}
 
-	executor := opts.Executor
-	if executor == nil {
-		execSpec := runview.ExecutorSpec{
-			Workflow: wf,
-			Vars:     opts.Vars,
-			Store:    s,
-			RunID:    runID,
-			Logger:   logger,
-			StoreDir: storeDir,
-		}
-		if exporter != nil {
-			execSpec.ExtraHooks = append(execSpec.ExtraHooks, exporter.EventHooks())
-		}
-		exec, execErr := runview.BuildExecutor(execSpec)
-		if execErr != nil {
-			return execErr
-		}
-		executor = exec
+	executor, err := buildRunExecutor(opts, wf, s, runID, storeDir, logger, telemetry.prometheus)
+	if err != nil {
+		return err
 	}
 	if c, ok := executor.(io.Closer); ok {
 		defer func() {
@@ -229,65 +171,22 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 		return err
 	}
 
-	sandboxDefault := strings.ToLower(os.Getenv("ITERION_SANDBOX_DEFAULT"))
-	sandboxHostStateDefault := strings.ToLower(os.Getenv("ITERION_SANDBOX_HOST_STATE"))
+	eng := buildEngine(wf, s, executor, opts, wfHash, iterFile, runName, bundleHandle, engineOpts)
 
-	eng := runtime.New(wf, s, executor,
-		append(engineOpts,
-			runtime.WithWorkflowHash(wfHash),
-			runtime.WithFilePath(iterFile),
-			runtime.WithRunName(runName),
-			runtime.WithMergeInto(opts.MergeInto),
-			runtime.WithBranchName(opts.BranchName),
-			runtime.WithMergeStrategy(opts.MergeStrategy),
-			runtime.WithAutoMerge(opts.AutoMerge),
-			runtime.WithSandboxOverride(opts.Sandbox),
-			runtime.WithSandboxDefault(sandboxDefault),
-			runtime.WithSandboxDefaultImage(opts.SandboxDefaultImage),
-			runtime.WithSandboxHostStateOverride(opts.SandboxHostState),
-			runtime.WithSandboxHostStateDefault(sandboxHostStateDefault),
-			runtime.WithBundle(bundleHandle),
-			runtime.WithPreset(opts.Preset),
-		)...,
-	)
-
-	// Build run inputs. Precedence (lowest → highest):
-	//   1. vars: defaults (applied by the engine when a key is unset here)
-	//   2. --preset <name>: in-source named preset values
-	//   3. --var key=value: CLI overrides
-	// Recipe presets are applied earlier in resolveWorkflow.
-	inputs := make(map[string]interface{})
-	if opts.Preset != "" {
-		preset, ok := wf.Presets[opts.Preset]
-		if !ok {
-			available := make([]string, 0, len(wf.Presets))
-			for name := range wf.Presets {
-				available = append(available, name)
-			}
-			sort.Strings(available)
-			if len(available) == 0 {
-				return fmt.Errorf("--preset %q: workflow has no presets declared", opts.Preset)
-			}
-			return fmt.Errorf("--preset %q: unknown preset (available: %s)", opts.Preset, strings.Join(available, ", "))
-		}
-		for k, v := range preset.Values {
-			inputs[k] = v
-		}
-	}
-	for k, v := range opts.Vars {
-		inputs[k] = v
+	inputs, err := buildRunInputs(wf, opts.Preset, opts.Vars)
+	if err != nil {
+		return err
 	}
 
-	// Apply timeout to context if specified.
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
 	}
 
-	// Acquire exclusive run lock to prevent concurrent processes.
-	// Use the SIGINT-aware ctx so a contended lock can still be
-	// interrupted by Ctrl-C rather than blocking forever.
+	// Acquire exclusive run lock. Use the SIGINT-aware ctx so a
+	// contended lock can still be interrupted by Ctrl-C rather than
+	// blocking forever.
 	lock, err := s.LockRun(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("cannot acquire run lock: %w", err)
@@ -306,7 +205,6 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 		}()
 	}
 
-	// Execute.
 	if p.Format == OutputHuman {
 		p.Header("Run: " + workflowName)
 		p.KV("Run name", runName)
@@ -320,92 +218,103 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 	}
 
 	err = eng.Run(ctx, runID, inputs)
+	err = runInteractiveResumeLoop(ctx, eng, s, runID, opts.NoInteractive, err)
 
-	// Interactive TTY loop: when paused at a human node and stdin is a terminal,
-	// prompt the user for answers and resume in the same process.
-	for errors.Is(err, runtime.ErrRunPaused) && !opts.NoInteractive && IsTTY() {
-		// Each error path replaces err so the outer reporting reflects
-		// the actual failure rather than the stale ErrRunPaused: a load
-		// or prompt error here was previously swallowed by `break`,
-		// leaving the user with a paused_waiting_human status that hid
-		// the real issue (corrupt checkpoint, missing interaction file,
-		// stdin closed mid-prompt, etc.).
-		r, loadErr := s.LoadRun(context.Background(), runID)
-		if loadErr != nil {
-			err = fmt.Errorf("interactive resume: load run: %w", loadErr)
-			break
-		}
-		if r.Checkpoint == nil {
-			err = fmt.Errorf("interactive resume: run %q has no checkpoint", runID)
-			break
-		}
-		interaction, loadErr := s.LoadInteraction(context.Background(), runID, r.Checkpoint.InteractionID)
-		if loadErr != nil {
-			err = fmt.Errorf("interactive resume: load interaction: %w", loadErr)
-			break
-		}
-
-		answers, promptErr := PromptHumanAnswers(interaction)
-		if promptErr != nil {
-			err = fmt.Errorf("interactive resume: prompt answers: %w", promptErr)
-			break
-		}
-		err = eng.Resume(ctx, runID, answers)
-	}
-
-	// Build result.
 	runResult := map[string]interface{}{
 		"run_id":   runID,
 		"workflow": workflowName,
 		"store":    storeDir,
 	}
+	return reportRunOutcome(p, s, runID, storeDir, opts.File, err, runResult)
+}
 
+// teeRunLog opens <runDir>/run.log and returns a new logger whose
+// output is multiplexed to both stderr and the file. On error the
+// original logger and a nil closer are returned so callers can keep
+// running — a CLI run with no writable store dir still works (logs go
+// to stderr only). The returned closer is nil when no tee was set up.
+func teeRunLog(logger *iterlog.Logger, level iterlog.Level, runDir string) (*iterlog.Logger, io.Closer) {
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		logger.Warn("cli: mkdir run dir for log tee: %v", err)
+		return logger, nil
+	}
+	logFile, err := os.OpenFile(filepath.Join(runDir, "run.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		if errors.Is(err, runtime.ErrRunPaused) {
-			runResult["status"] = "paused_waiting_human"
-			if opts.File != "" {
-				runResult["file"] = opts.File
-			}
-			enrichPausedResult(s, runID, runResult)
-
-			if p.Format == OutputJSON {
-				p.JSON(runResult)
-			} else {
-				p.Line("  Status: PAUSED (waiting for human input)")
-				printPausedQuestions(p, runResult)
-				p.Line("  Resume: iterion resume --run-id %s --store-dir %s --answers-file <file>", runID, storeDir)
-			}
-			return nil
-		}
-		if errors.Is(err, runtime.ErrRunCancelled) {
-			runResult["status"] = "cancelled"
-			if p.Format == OutputJSON {
-				p.JSON(runResult)
-			} else {
-				p.Line("  Status: CANCELLED")
-				p.Line("  Detail: %s", err.Error())
-			}
-			return err
-		}
-		runResult["status"] = "failed"
-		runResult["error"] = err.Error()
-		if p.Format == OutputJSON {
-			p.JSON(runResult)
-		} else {
-			p.Line("  Status: FAILED")
-			p.Line("  Error:  %s", err.Error())
-			p.Line("  Hint:   use 'iterion inspect --run-id %s --events' for details", runID)
-		}
-		return err
+		logger.Warn("cli: open run.log for tee: %v", err)
+		return logger, nil
 	}
+	return iterlog.New(level, io.MultiWriter(os.Stderr, logFile)), logFile
+}
 
-	runResult["status"] = "finished"
-	if p.Format == OutputJSON {
-		p.JSON(runResult)
-	} else {
-		p.Line("  Status: FINISHED")
+// buildRunExecutor constructs the default ClawExecutor for the run
+// unless opts.Executor already supplies one (test path). Prometheus
+// hooks are wired in when the exporter started so the executor emits
+// the same per-turn metrics as the engine.
+func buildRunExecutor(
+	opts RunOptions,
+	wf *ir.Workflow,
+	s store.RunStore,
+	runID, storeDir string,
+	logger *iterlog.Logger,
+	exporter exporterEventHooks,
+) (runtime.NodeExecutor, error) {
+	if opts.Executor != nil {
+		return opts.Executor, nil
 	}
-	return nil
+	execSpec := runview.ExecutorSpec{
+		Workflow: wf,
+		Vars:     opts.Vars,
+		Store:    s,
+		RunID:    runID,
+		Logger:   logger,
+		StoreDir: storeDir,
+	}
+	if exporter != nil {
+		execSpec.ExtraHooks = append(execSpec.ExtraHooks, exporter.EventHooks())
+	}
+	return runview.BuildExecutor(execSpec)
+}
+
+// exporterEventHooks is the narrow subset of the Prometheus exporter
+// surface buildRunExecutor depends on; using an interface lets the
+// helper accept (*benchmark.PrometheusExporter)(nil) without importing
+// the benchmark package here (it already lives in run_telemetry.go).
+type exporterEventHooks interface {
+	EventHooks() model.EventHooks
+}
+
+// buildEngine wires the per-run engine options that flow from the CLI
+// flags + env. Kept out of RunRun so the orchestrator focuses on
+// lifecycle rather than the option-slice plumbing.
+func buildEngine(
+	wf *ir.Workflow,
+	s store.RunStore,
+	executor runtime.NodeExecutor,
+	opts RunOptions,
+	wfHash, iterFile, runName string,
+	bundleHandle *bundle.Bundle,
+	base []runtime.EngineOption,
+) *runtime.Engine {
+	sandboxDefault := strings.ToLower(os.Getenv("ITERION_SANDBOX_DEFAULT"))
+	sandboxHostStateDefault := strings.ToLower(os.Getenv("ITERION_SANDBOX_HOST_STATE"))
+	return runtime.New(wf, s, executor,
+		append(base,
+			runtime.WithWorkflowHash(wfHash),
+			runtime.WithFilePath(iterFile),
+			runtime.WithRunName(runName),
+			runtime.WithMergeInto(opts.MergeInto),
+			runtime.WithBranchName(opts.BranchName),
+			runtime.WithMergeStrategy(opts.MergeStrategy),
+			runtime.WithAutoMerge(opts.AutoMerge),
+			runtime.WithSandboxOverride(opts.Sandbox),
+			runtime.WithSandboxDefault(sandboxDefault),
+			runtime.WithSandboxDefaultImage(opts.SandboxDefaultImage),
+			runtime.WithSandboxHostStateOverride(opts.SandboxHostState),
+			runtime.WithSandboxHostStateDefault(sandboxHostStateDefault),
+			runtime.WithBundle(bundleHandle),
+			runtime.WithPreset(opts.Preset),
+		)...,
+	)
 }
 
 // resolveWorkflow loads the workflow either via a recipe, a `.botz`
@@ -490,104 +399,6 @@ func resolveWorkflow(opts RunOptions) (wf *ir.Workflow, hash, filePath, displayN
 		return nil, "", "", "", nil, cleanup, compileErr
 	}
 	return raw, h, resolved, raw.Name, nil, cleanup, nil
-}
-
-// startPrometheusFromEnv builds a PrometheusExporter and serves /metrics
-// on the address from the ITERION_PROMETHEUS_ADDR env var (e.g. ":9464").
-// Returns (nil, nil, nil) when the env var is empty.
-//
-// The HTTP server runs in a goroutine; the caller should Shutdown it on
-// exit. By default ListenAndServe failures (port in use, permission) are
-// logged at error level and the exporter is returned anyway so the rest
-// of the run can proceed (fail-soft).
-//
-// When ITERION_PROMETHEUS_REQUIRED is truthy, the address is bound
-// synchronously upfront so a startup failure (port in use, missing
-// permission, malformed addr) is surfaced as an error instead of being
-// hidden in the background goroutine.
-func startPrometheusFromEnv(runID string, logger *iterlog.Logger) (*benchmark.PrometheusExporter, *http.Server, error) {
-	addr := strings.TrimSpace(os.Getenv("ITERION_PROMETHEUS_ADDR"))
-	if addr == "" {
-		return nil, nil, nil
-	}
-	required := isTruthyEnv("ITERION_PROMETHEUS_REQUIRED")
-	exporter := benchmark.NewPrometheusExporter(runID, nil)
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", exporter.Handler())
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
-	if required {
-		ln, err := net.Listen("tcp", addr)
-		if err != nil {
-			return nil, nil, fmt.Errorf("prometheus: bind %s (ITERION_PROMETHEUS_REQUIRED=1): %w", addr, err)
-		}
-		go func() {
-			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.Error("prometheus: serve %s: %v", addr, err)
-			}
-		}()
-	} else {
-		go func() {
-			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.Error("prometheus: serve %s: %v", addr, err)
-			}
-		}()
-	}
-	logger.Info("prometheus: serving /metrics on %s (run_id=%s)", addr, runID)
-	return exporter, srv, nil
-}
-
-// startOTLPGRPCFromEnv builds an OTLP/gRPC exporter from environment
-// configuration and registers it as a secondary observer on the run's
-// event bus. Returns (nil, nil) when no endpoint is configured.
-//
-// Recognised env vars (claw-code-go upstream):
-//
-//	CLAWD_OTLP_GRPC_ENDPOINT   host:port or URL (required to enable)
-//	CLAWD_OTLP_GRPC_INSECURE   "1" / "true" disables TLS
-//	CLAWD_OTLP_GRPC_HEADERS    comma-separated key=value pairs
-//	CLAWD_SERVICE_NAME         service.name resource attr
-//	CLAWD_SERVICE_VERSION      service.version resource attr
-//
-// ITERION_OTLP_GRPC_ENDPOINT is honored as an iterion-prefixed alias for
-// the endpoint so operators can keep CLAWD_* reserved for claw-internal
-// traffic if their deployment runs both side-by-side.
-func startOTLPGRPCFromEnv(runID string, logger *iterlog.Logger) (*benchmark.OTLPGRPCExporter, error) {
-	if alias := strings.TrimSpace(os.Getenv("ITERION_OTLP_GRPC_ENDPOINT")); alias != "" {
-		if os.Getenv(otlpgrpc.EnvEndpoint) == "" {
-			_ = os.Setenv(otlpgrpc.EnvEndpoint, alias)
-		}
-	}
-
-	cfg, err := otlpgrpc.FromEnv()
-	if err != nil {
-		if errors.Is(err, otlpgrpc.ErrEndpointMissing) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("otlp/grpc: %w", err)
-	}
-	if strings.TrimSpace(cfg.ServiceName) == "" {
-		cfg.ServiceName = "iterion"
-	}
-	exp, err := benchmark.NewOTLPGRPCExporter(runID, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("otlp/grpc: %w", err)
-	}
-	logger.Info("otlp/grpc: exporting to %s (run_id=%s, service=%s)", cfg.Endpoint, runID, cfg.ServiceName)
-	return exp, nil
-}
-
-// isTruthyEnv returns true for the conventional "yes" values: 1, true, yes, on.
-func isTruthyEnv(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
 }
 
 // enrichPausedResult loads checkpoint and interaction details from the store
