@@ -35,7 +35,7 @@ export const useBackendDetectStore = create<BackendDetectState>((set) => ({
 // initializeBackendDetect kicks off the first probe. Called once from App
 // at mount time. We deliberately do NOT poll on focus — the server caches
 // 30s and the user rarely changes credentials mid-session. They get a
-// manual refresh by clicking the BackendStatusPill.
+// manual refresh from Settings → Backends.
 export function initializeBackendDetect() {
   void useBackendDetectStore.getState().refresh();
 }

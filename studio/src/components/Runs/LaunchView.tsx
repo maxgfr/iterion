@@ -216,7 +216,7 @@ export default function LaunchView() {
   // not "advanced" in the obscure sense.
   const [showAdvanced, setShowAdvanced] = useState(false);
   // Backend override for this run. "" = let the resolver pick (the
-  // current behaviour, which also surfaces in BackendStatusPill).
+  // current behaviour, mirrored in Settings → Backends).
   // Sending an explicit name overrides the workflow's `default_backend:`
   // but node-level explicit `backend:` still wins.
   const [backendOverride, setBackendOverride] = useState<string>("");

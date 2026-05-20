@@ -1,25 +1,54 @@
 import { Dialog, Tabs } from "@/components/ui";
 
+import AppearanceTab from "./AppearanceTab";
+import BackendsTab from "./BackendsTab";
 import ApiKeysTab from "./ApiKeysTab";
 import ProjectsTab from "./ProjectsTab";
 import UpdatesTab from "./UpdatesTab";
 import AboutTab from "./AboutTab";
+import StorageTab from "./StorageTab";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   tab: string;
   onTabChange: (tab: string) => void;
+  /** When true, surface tabs that depend on the desktop bridge
+   *  (api keys via OS keychain, projects, updates, native About). The
+   *  Appearance, Backends, Storage tabs work everywhere. */
+  desktopFeatures: boolean;
 }
 
-const tabItems = [
-  { value: "api-keys", label: "API keys" },
-  { value: "projects", label: "Projects" },
-  { value: "updates", label: "Updates" },
-  { value: "about", label: "About" },
-];
-
-export default function Settings({ open, onClose, tab, onTabChange }: Props) {
+export default function Settings({
+  open,
+  onClose,
+  tab,
+  onTabChange,
+  desktopFeatures,
+}: Props) {
+  const tabItems = [
+    { value: "appearance", label: "Appearance" },
+    { value: "backends", label: "Backends" },
+    ...(desktopFeatures ? [{ value: "api-keys", label: "API keys" }] : []),
+    ...(desktopFeatures ? [{ value: "projects", label: "Projects" }] : []),
+    { value: "storage", label: "Storage" },
+    ...(desktopFeatures ? [{ value: "updates", label: "Updates" }] : []),
+    { value: "about", label: desktopFeatures ? "About" : "About" },
+  ];
+  const panels: Record<string, React.ReactNode> = {
+    appearance: <AppearanceTab />,
+    backends: <BackendsTab />,
+    storage: <StorageTab />,
+    about: <AboutTab desktopFeatures={desktopFeatures} />,
+  };
+  if (desktopFeatures) {
+    panels["api-keys"] = <ApiKeysTab />;
+    panels.projects = <ProjectsTab />;
+    panels.updates = <UpdatesTab />;
+  }
+  // Guard against stale tab state pointing at a desktop-only tab when
+  // the dialog is opened in web mode.
+  const safeTab = panels[tab] ? tab : "appearance";
   return (
     <Dialog
       open={open}
@@ -28,15 +57,10 @@ export default function Settings({ open, onClose, tab, onTabChange }: Props) {
       widthClass="max-w-3xl"
     >
       <Tabs
-        value={tab}
+        value={safeTab}
         onValueChange={onTabChange}
         items={tabItems}
-        panels={{
-          "api-keys": <ApiKeysTab />,
-          projects: <ProjectsTab />,
-          updates: <UpdatesTab />,
-          about: <AboutTab />,
-        }}
+        panels={panels}
         className="min-h-[420px]"
       />
     </Dialog>

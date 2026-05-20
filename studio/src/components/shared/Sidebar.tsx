@@ -2,14 +2,17 @@ import { Link } from "wouter";
 import {
   DoubleArrowLeftIcon,
   DoubleArrowRightIcon,
+  GearIcon,
 } from "@radix-ui/react-icons";
 
 import NavLinks from "./NavLinks";
 import SidebarContext from "./SidebarContext";
-import BackendStatusPill from "@/components/Toolbar/BackendStatusPill";
-import ThemeToggle from "@/components/ui/ThemeToggle";
 import UserTeamChip from "./UserTeamChip";
 import { useUIStore } from "@/store/ui";
+
+function openSettings() {
+  window.dispatchEvent(new CustomEvent("iterion:open-settings"));
+}
 
 const SIDEBAR_W_EXPANDED = "w-[220px]";
 const SIDEBAR_W_COLLAPSED = "w-[56px]";
@@ -79,22 +82,37 @@ export default function Sidebar() {
         <NavLinks collapsed={collapsed} />
       </div>
 
-      {/* Footer: backend status, theme, user team */}
+      {/* Footer: single Settings entry + user/team chip. Backend
+          credentials and theme moved into the Settings dialog so the
+          two sit together in a coherent panel instead of competing as
+          mismatched chrome at the bottom of the sidebar. */}
       <div
         className={`shrink-0 border-t border-border-default ${collapsed ? "px-1.5 py-2 flex flex-col items-center gap-1.5" : "px-2 py-2 flex flex-col gap-1.5"}`}
       >
-        <div className={collapsed ? "flex justify-center" : ""}>
-          <BackendStatusPill variant={collapsed ? "icon" : "row"} />
-        </div>
-        <div className={collapsed ? "flex justify-center" : "flex items-center justify-between gap-2"}>
-          <ThemeToggle />
-          {!collapsed && <UserTeamChip />}
-        </div>
-        {collapsed && (
-          <div className="flex justify-center">
-            <UserTeamChip />
-          </div>
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={openSettings}
+            className="inline-flex items-center justify-center h-7 w-7 rounded text-fg-subtle hover:text-fg-default hover:bg-surface-2 transition-colors"
+            title="Settings"
+            aria-label="Open settings"
+          >
+            <GearIcon className="w-4 h-4" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={openSettings}
+            className="flex w-full items-center gap-2 px-2 py-1 text-xs rounded text-fg-default hover:bg-surface-2 transition-colors"
+            aria-label="Open settings"
+          >
+            <GearIcon className="w-4 h-4 shrink-0" />
+            <span>Settings</span>
+          </button>
         )}
+        <div className={collapsed ? "flex justify-center" : ""}>
+          <UserTeamChip />
+        </div>
       </div>
 
       {/* Collapse toggle when collapsed — positioned at the very bottom

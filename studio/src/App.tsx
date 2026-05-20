@@ -124,11 +124,22 @@ function AuthedApp() {
     // (clicking the project chip in the toolbar / run header).
     const onOpenSwitcher = () => setSwitcherOpen(true);
     window.addEventListener("iterion:open-project-switcher", onOpenSwitcher);
+    // Sidebar Settings button (and any other SPA caller) dispatches this
+    // to surface the dialog. The optional `tab` detail lets callers
+    // land on a specific section (Appearance, Backends, …).
+    const onOpenSettings = (e: Event) => {
+      const detail = (e as CustomEvent<{ tab?: string }>).detail;
+      if (detail?.tab) setSettingsTab(detail.tab);
+      else setSettingsTab(isDesktop ? "api-keys" : "appearance");
+      setSettingsOpen(true);
+    };
+    window.addEventListener("iterion:open-settings", onOpenSettings as EventListener);
     return () => {
       offs.forEach((off) => off());
       window.removeEventListener("iterion:open-project-switcher", onOpenSwitcher);
+      window.removeEventListener("iterion:open-settings", onOpenSettings as EventListener);
     };
-  }, [pickAndAddProject]);
+  }, [pickAndAddProject, isDesktop]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -219,14 +230,13 @@ function AuthedApp() {
       {/* Settings + ProjectSwitcher are also lazy and need their own
           Suspense boundary because they unmount/remount on open/close. */}
       <Suspense fallback={null}>
-        {isDesktop && (
-          <Settings
-            open={settingsOpen}
-            onClose={() => setSettingsOpen(false)}
-            tab={settingsTab}
-            onTabChange={setSettingsTab}
-          />
-        )}
+        <Settings
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          tab={settingsTab}
+          onTabChange={setSettingsTab}
+          desktopFeatures={isDesktop}
+        />
         {/* ProjectSwitcher renders in both desktop and local-server modes.
             Cloud mode (no work_dir) renders nothing useful; we still mount
             it so the Ctrl+P shortcut and ProjectLabel chip have somewhere
