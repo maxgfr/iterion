@@ -1,47 +1,67 @@
 import { useEffect, useState } from "react";
 
 import { desktop, type AppInfo } from "@/lib/desktopBridge";
+import { useServerInfoStore } from "@/store/serverInfo";
 
-export default function AboutTab() {
+interface Props {
+  desktopFeatures: boolean;
+}
+
+export default function AboutTab({ desktopFeatures }: Props) {
   const [info, setInfo] = useState<AppInfo | null>(null);
+  const serverInfo = useServerInfoStore((s) => s.info);
 
   useEffect(() => {
+    if (!desktopFeatures) return;
     desktop.getAppInfo().then(setInfo).catch(() => setInfo(null));
-  }, []);
+  }, [desktopFeatures]);
 
-  if (!info) return <p className="text-fg-subtle p-4">Loading…</p>;
+  if (desktopFeatures && !info) return <p className="text-fg-subtle p-4">Loading…</p>;
+
   return (
     <div className="flex flex-col gap-3 p-4 text-sm">
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
         <dt className="text-fg-subtle">Version</dt>
-        <dd>{info.version}</dd>
+        <dd>{info?.version ?? serverInfo?.version ?? "—"}</dd>
         <dt className="text-fg-subtle">Commit</dt>
-        <dd>{info.commit || "—"}</dd>
-        <dt className="text-fg-subtle">Platform</dt>
-        <dd>
-          {info.os}/{info.arch}
-        </dd>
-        <dt className="text-fg-subtle">License</dt>
-        <dd>{info.license}</dd>
+        <dd>{info?.commit || serverInfo?.commit || "—"}</dd>
+        {info && (
+          <>
+            <dt className="text-fg-subtle">Platform</dt>
+            <dd>
+              {info.os}/{info.arch}
+            </dd>
+            <dt className="text-fg-subtle">License</dt>
+            <dd>{info.license}</dd>
+          </>
+        )}
+        {!info && serverInfo && (
+          <>
+            <dt className="text-fg-subtle">Mode</dt>
+            <dd>{serverInfo.mode}</dd>
+          </>
+        )}
       </dl>
-      <ul className="flex flex-col gap-1 text-xs">
-        {(
-          [
-            ["GitHub", info.homepage],
-            ["Documentation", info.documentation],
-            ["Report an issue", info.issue_tracker],
-          ] as const
-        ).map(([label, url]) => (
-          <li key={label}>
-            <button
-              className="text-accent underline"
-              onClick={() => desktop.openExternal(url)}
-            >
-              {label}
-            </button>
-          </li>
-        ))}
-      </ul>
+      {info && (
+        <ul className="flex flex-col gap-1 text-xs">
+          {(
+            [
+              ["GitHub", info.homepage],
+              ["Documentation", info.documentation],
+              ["Report an issue", info.issue_tracker],
+            ] as const
+          ).map(([label, url]) => (
+            <li key={label}>
+              <button
+                className="text-accent underline"
+                onClick={() => desktop.openExternal(url)}
+              >
+                {label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
