@@ -46,7 +46,6 @@ export default function BoardView() {
     null,
   );
   const [dispatcherPaused, setDispatcherPaused] = useState(false);
-  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
   // History of recent column transitions, so Ctrl+Z reverts the last
   // one. Bounded at 10 entries — the board's drag-undo intent is the
   // immediate "oops, wrong column", not full session replay.
@@ -98,7 +97,6 @@ export default function BoardView() {
           return { tracker: snap.tracker, message };
         });
         setDispatcherPaused(!!snap.paused);
-        setLastSyncAt(Date.now());
       } catch {
         // swallow: dispatcher may be unreachable / not wired
       } finally {
@@ -392,7 +390,6 @@ export default function BoardView() {
     left: <span className="text-xs font-medium text-fg-default">Board</span>,
     right: board ? (
       <>
-        <LastSyncBadge lastSyncAt={lastSyncAt} />
         <Button variant="secondary" size="sm" onClick={() => void refresh()}>
           Refresh
         </Button>
@@ -465,11 +462,9 @@ export default function BoardView() {
         }}
       />
 
-      {issues.length === 0 ? (
-        <div className="flex-1 overflow-auto p-3">
-          <EmptyBoard kind="no-issues" onCreate={() => setCreating(true)} />
-        </div>
-      ) : (
+      {issues.length === 0 && (
+        <EmptyBoardBanner onCreate={() => setCreating(true)} />
+      )}
       <div className="flex-1 overflow-auto p-3">
         <div className="flex gap-3 min-w-fit">
           {board.states.map((s) => (
@@ -513,7 +508,6 @@ export default function BoardView() {
           )}
         </div>
       </div>
-      )}
 
       {creating && (
         <IssueModal
@@ -537,43 +531,10 @@ export default function BoardView() {
   );
 }
 
-// LastSyncBadge reads the most-recent dispatcher-snapshot timestamp the
-// poller stored and renders a transient pill in the toolbar so the
-// user knows whether the running/retrying badges are fresh. Ticks
-// every second on its own so it stays accurate between the 2-second
-// poll intervals. Falls back to "—" while the first request hasn't
-// landed yet. Hidden when polling fails for >30s.
-function LastSyncBadge({ lastSyncAt }: { lastSyncAt: number | null }) {
-  const [, force] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => force((v) => v + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
-  if (!lastSyncAt) return null;
-  const seconds = Math.max(0, Math.floor((Date.now() - lastSyncAt) / 1000));
-  if (seconds > 30) return null;
-  return (
-    <span
-      className="text-[10px] text-fg-subtle px-1 self-center"
-      title="Time since the dispatcher snapshot was last fetched. Updates every 2s."
-    >
-      synced {seconds}s ago
-    </span>
-  );
-}
-
-// EmptyBoard renders the two empty-state guides:
-//   missing   — no native tracker has been initialised on disk yet
-//   no-issues — board exists, no issues yet (most common at first
-//               launch). Surfaces a "Create your first issue" CTA + a
-//               short orientation hint pointing at the dispatcher.
-function EmptyBoard({
-  kind,
-  onCreate,
-}: {
-  kind: "missing" | "no-issues";
-  onCreate?: () => void;
-}) {
+// EmptyBoard renders the "tracker not initialised on disk yet" guide.
+// The "board exists but has no issues" case is handled inline above the
+// columns by EmptyBoardBanner so the column headers stay visible.
+function EmptyBoard({ kind }: { kind: "missing" }) {
   if (kind === "missing") {
     return (
       <div className="p-8 max-w-lg mx-auto text-fg-default space-y-4">
@@ -592,59 +553,57 @@ function EmptyBoard({
       </div>
     );
   }
+  return null;
+}
+
+const EMPTY_BANNER_DISMISSED_KEY = "iterion.board.empty-banner-dismissed";
+
+// EmptyBoardBanner renders a compact, dismissable onboarding strip
+// above the column grid when the board has zero issues. Dismissal
+// persists across reloads via localStorage so the chrome only nags on
+// first encounter; the columns themselves stay visible regardless.
+function EmptyBoardBanner({ onCreate }: { onCreate: () => void }) {
+  const [dismissed, setDismissed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(EMPTY_BANNER_DISMISSED_KEY) === "1";
+  });
+  if (dismissed) return null;
+  const dismiss = () => {
+    setDismissed(true);
+    try {
+      window.localStorage.setItem(EMPTY_BANNER_DISMISSED_KEY, "1");
+    } catch {
+      // localStorage may be unavailable (private mode, quota); the
+      // in-memory state still hides the banner for this session.
+    }
+  };
   return (
-    <div className="p-8 max-w-xl mx-auto text-fg-default space-y-5">
-      <div className="text-lg font-semibold">Your kanban is empty</div>
-      <p className="text-sm text-fg-muted">
-        Issues live as JSON under{" "}
-        <code className="text-xs bg-surface-2 px-1 rounded">
-          .iterion/dispatcher/native/issues/
-        </code>
-        . Each card represents a unit of work the dispatcher can pick up and dispatch
-        to a workflow.
-      </p>
-      <div className="grid gap-3 text-sm">
-        <div className="rounded border border-border-default p-3 bg-surface-1">
-          <div className="font-medium text-fg-default mb-1">1. Create an issue</div>
-          <p className="text-fg-muted">
-            Click below, or press{" "}
-            <kbd className="font-mono text-xs px-1 rounded bg-surface-2 border border-border-default">
-              c
-            </kbd>{" "}
-            anywhere on this page. Issues land in the first <em>eligible</em>{" "}
-            column (green dot in the header) so a running dispatcher can pick them
-            up immediately.
-          </p>
-        </div>
-        <div className="rounded border border-border-default p-3 bg-surface-1">
-          <div className="font-medium text-fg-default mb-1">
-            2. Wire a dispatcher (optional)
-          </div>
-          <p className="text-fg-muted">
-            Without a dispatcher, the board is just a task list. Configure one at{" "}
-            <code className="text-xs bg-surface-2 px-1 rounded">/dispatcher</code>{" "}
-            to have iterion auto-dispatch a workflow per eligible card.
-          </p>
-        </div>
-        <div className="rounded border border-border-default p-3 bg-surface-1">
-          <div className="font-medium text-fg-default mb-1">3. Keyboard shortcuts</div>
-          <p className="text-fg-muted">
-            Press{" "}
-            <kbd className="font-mono text-xs px-1 rounded bg-surface-2 border border-border-default">
-              ?
-            </kbd>{" "}
-            anywhere to see the full list — c (new), arrow keys (navigate / move
-            between columns), Enter (open), Del (delete).
-          </p>
+    <div className="shrink-0 mx-3 mt-3 rounded border border-border-default bg-surface-1 p-3 text-sm text-fg-default flex items-start gap-3">
+      <div className="flex-1 min-w-0">
+        <div className="font-medium mb-0.5">Your kanban is empty</div>
+        <div className="text-fg-muted text-xs leading-relaxed">
+          Create your first issue (or press{" "}
+          <kbd className="font-mono px-1 rounded bg-surface-2 border border-border-default">c</kbd>
+          ) · Issues land in the first <em>eligible</em> column (green dot) ·
+          Wire a dispatcher at{" "}
+          <code className="text-xs bg-surface-2 px-1 rounded">/dispatcher</code>{" "}
+          to auto-run workflows · Press{" "}
+          <kbd className="font-mono px-1 rounded bg-surface-2 border border-border-default">?</kbd>{" "}
+          for shortcuts
         </div>
       </div>
-      {onCreate && (
-        <div>
-          <Button variant="primary" onClick={onCreate}>
-            + Create your first issue
-          </Button>
-        </div>
-      )}
+      <Button variant="primary" size="sm" onClick={onCreate}>
+        + Create issue
+      </Button>
+      <button
+        type="button"
+        onClick={dismiss}
+        className="text-fg-subtle hover:text-fg-default transition-colors leading-none text-lg px-1"
+        title="Dismiss"
+        aria-label="Dismiss onboarding banner"
+      >
+        ×
+      </button>
     </div>
   );
 }
