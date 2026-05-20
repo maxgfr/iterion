@@ -3,8 +3,8 @@ import { useLocation } from "wouter";
 
 import { useProjectInfo } from "@/hooks/useProjectInfo";
 import { desktop, isDesktop } from "@/lib/desktopBridge";
-import { useDocumentStore } from "@/store/document";
 import { useRunStore } from "@/store/run";
+import { useTabsStore } from "@/store/tabs";
 
 const APP = "iterion studio";
 
@@ -25,8 +25,16 @@ function basename(path: string): string {
 export function useDocumentTitle() {
   const [location] = useLocation();
   const { name: projectName } = useProjectInfo();
-  const currentFilePath = useDocumentStore((s) => s.currentFilePath);
   const runHeader = useRunStore((s) => s.snapshot?.run);
+  // Editor title is keyed off the active editor tab — not the default
+  // document store, which can carry a stale currentFilePath from a
+  // prior edit session and would falsely advertise "untitled.bot" when
+  // the user just navigated to /editor with no tabs open.
+  const activeEditorTabId = useTabsStore((s) => s.activeEditorTabId);
+  const activeEditorTabFile = useTabsStore((s) => {
+    const tab = s.tabs.find((t) => t.id === s.activeEditorTabId);
+    return tab?.params.file ?? null;
+  });
 
   useEffect(() => {
     let context = "";
@@ -43,9 +51,15 @@ export function useDocumentTitle() {
     } else if (location.startsWith("/teams/")) {
       context = "Team";
     } else if (location === "/editor") {
-      // Editor route: show the open file name, or "untitled.bot" only
-      // when a fresh document is being authored.
-      context = currentFilePath ? basename(currentFilePath) : "untitled.bot";
+      if (!activeEditorTabId) {
+        // No tab open → the picker is showing, not a document.
+        context = "Editor";
+      } else if (activeEditorTabFile) {
+        context = basename(activeEditorTabFile);
+      } else {
+        // Active tab with no file param → genuine fresh document.
+        context = "untitled.bot";
+      }
     } else {
       // Home and any unmatched route: no per-page context, just the
       // project name (or bare app name when no project is resolved).
@@ -74,5 +88,5 @@ export function useDocumentTitle() {
         /* binding may not be ready yet — re-runs on next deps change */
       });
     }
-  }, [location, projectName, currentFilePath, runHeader]);
+  }, [location, projectName, activeEditorTabId, activeEditorTabFile, runHeader]);
 }
