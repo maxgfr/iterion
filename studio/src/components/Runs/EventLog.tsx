@@ -131,13 +131,13 @@ export default function EventLog({
   onCollapse,
   runId,
 }: Props) {
-  // Lazy initial value: read localStorage once on mount so the chips
-  // and search box render with the persisted state from the get-go.
+  // Lazy initial value: read localStorage once for first paint so the
+  // chips and search box render with the persisted state from the
+  // get-go. The effect below reloads when a parent reuses this
+  // component for a different run.
   const initialPersisted = useMemo<PersistedFilters | null>(
     () => (runId ? loadPersistedFilters(runId) : null),
-    // The runId is treated as stable for this component's lifetime
-    // (RunView remounts EventLog when navigating between runs), so this
-    // memo intentionally runs once.
+    // Initial paint only; runId changes are handled by the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
