@@ -374,21 +374,6 @@ prompt review_user_claude:
 
   Current iteration: {{loop.review_loop.iteration}}/{{loop.review_loop.max}}
 
-  ## Diff manifest (deterministic — anchor your review on this,
-  ## then spot-check with read_file/grep on specific paths)
-
-  Files changed:       {{input.diff_files_changed}}
-  Insertions:          {{input.diff_insertions}}
-  Deletions:           {{input.diff_deletions}}
-  Paths:               {{input.diff_files}}
-
-  Diff (may be truncated — the manifest tool caps the body so the
-  reviewer prompt stays inside the model's context window; spot-check
-  large hunks via read_file/grep against the paths above):
-  ```
-  {{input.diff_summary}}
-  ```
-
   Previous reviewer's verdict (other family, iteration
   immediately before — empty on first iteration):
   {{loop.review_loop.previous_output}}
@@ -429,27 +414,26 @@ prompt review_user_gpt:
 
   Current iteration: {{loop.review_loop.iteration}}/{{loop.review_loop.max}}
 
-  ## Diff manifest (deterministic — your PRIMARY anchor;
-  ## spot-check via read_file/grep on specific paths)
-
-  Files changed:       {{input.diff_files_changed}}
-  Insertions:          {{input.diff_insertions}}
-  Deletions:           {{input.diff_deletions}}
-  Paths:               {{input.diff_files}}
-
-  Diff body (truncated by the build_diff_manifest tool to keep this
-  prompt under the ChatGPT-forfait context cap — DO NOT re-grep the
-  full diff yourself, spot-check specific paths instead):
-  ```
-  {{input.diff_summary}}
-  ```
-
-  TOOL BUDGET (tight — was 30, now 12): the manifest above is your
-  primary context. Use read_file / grep / bash only to verify
-  specific claims, NOT to re-enumerate the diff. Going over budget
-  blows the ChatGPT-forfait context window; tool-loop accumulation
-  is exactly how this run died on the 2026-05-26 dogfood before the
-  manifest pattern landed.
+  ## TOOL BUDGET — READ FIRST (tight — only 12 tool calls total)
+  ## This budget exists because the 2026-05-26 dogfood died at
+  ## reviewer_gpt with context_length_exceeded after 5-10 grep
+  ## calls — tool-loop accumulation blows the ChatGPT-forfait
+  ## context window.
+  ##
+  ## Anchor protocol — do EXACTLY this at iteration start, then
+  ## commit to a verdict:
+  ##   1. `bash: git -C {{vars.workspace_dir}} diff HEAD^...HEAD --shortstat`
+  ##      (1 call → total lines changed)
+  ##   2. `bash: git -C {{vars.workspace_dir}} diff HEAD^...HEAD --name-only`
+  ##      (1 call → file list)
+  ##   3. Pick 2-3 files of interest from step 2. `read_file` each
+  ##      ONCE (3 calls max).
+  ##   4. Optional: one targeted `grep` per concern raised, max 2-3.
+  ##   5. Emit verdict.
+  ##
+  ## TOTAL: ~8 tool calls, well under the 12 cap. Going over the
+  ## cap → run dies → operator has to babysit. DO NOT re-enumerate
+  ## the diff with multiple grep calls — trust step 1+2.
 
   Previous reviewer's verdict (other family, iteration
   immediately before — empty on first iteration):
@@ -576,31 +560,6 @@ schema review_input:
   ## reviewer reads it to prefer uncovered surfaces — see
   ## review_system rule 4. Empty on the first iteration.
   previous_scanned_areas: string[]
-  ## v0.2: diff manifest fields — computed deterministically by
-  ## the build_diff_manifest tool node so the reviewer has an
-  ## anchored "what changed" summary instead of paying for the
-  ## enumeration via its own tool calls. Without this the
-  ## reviewer_gpt (running on the ChatGPT-forfait gpt-5.5 cap)
-  ## reliably hit context_length_exceeded after 5-10 grep/read
-  ## turns (2026-05-26 issue #5 dogfood). Mirrors doc-align's
-  ## build_manifest pattern (commit 7e4251f0).
-  diff_files_changed: int
-  diff_insertions: int
-  diff_deletions: int
-  diff_files: string[]
-  diff_summary: string
-
-## diff_manifest_output is what the build_diff_manifest tool
-## emits. Bounded by construction: files[] is short (~10s of
-## entries even on big features), and diff_summary truncates
-## the long-tail body so the reviewer's working context stays
-## under the ChatGPT-forfait cap.
-schema diff_manifest_output:
-  files_changed: int
-  insertions: int
-  deletions: int
-  files: string[]
-  diff_summary: string
 
 schema verdict_output:
   approved: bool
@@ -744,68 +703,6 @@ tool commit_changes:
   output: commit_result
 
 ## ─── Nodes : Review / Fix Loop ──────────────────────────────────
-
-## build_diff_manifest pre-computes the "what changed" surface for
-## the reviewers so they don't have to enumerate it via tool calls —
-## tool-loop accumulation was the 2026-05-26 issue #5 dogfood's
-## crash mode (reviewer_gpt on the ChatGPT-forfait gpt-5.5 cap hit
-## context_length_exceeded after 5-10 grep/read turns). Mirrors
-## doc-align's build_manifest pattern (commit 7e4251f0).
-##
-## Output is bounded by construction: files[] is short (10s of
-## entries on a typical feature), diff_summary truncates the body
-## to ~16K chars (≈4K tokens — fits comfortably inside any modern
-## reviewer's prompt budget). The reviewer then trusts the manifest
-## as anchor + spot-checks specific files with read_file/grep
-## rather than re-discovering the diff from scratch.
-##
-## Base: HEAD^ (the parent commit of the act stage). When the bot's
-## act-phase did multiple commits we'd want to look across all of
-## them, but the typical feature_dev flow lands a single commit and
-## HEAD^ aligns with `simplify`'s tree before act-driven edits.
-tool build_diff_manifest:
-  command: `python3 -c "
-import json, subprocess
-def git(args):
-    try:
-        return subprocess.check_output(['git'] + args, cwd='{{vars.workspace_dir}}', stderr=subprocess.DEVNULL).decode('utf-8', errors='replace')
-    except subprocess.CalledProcessError:
-        return ''
-# Walk back to the first commit that exists; HEAD^ is the usual
-# anchor but a worktree freshly cloned at a single commit has no
-# parent — fall back to the empty tree hash in that case so the
-# diff just shows everything as new.
-base = git(['rev-parse', '--verify', 'HEAD^']).strip()
-if not base:
-    base = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'  # git empty tree
-files_blob = git(['diff', base + '...HEAD', '--name-only']).strip()
-files = [f for f in files_blob.splitlines() if f.strip()]
-stat = git(['diff', base + '...HEAD', '--shortstat']).strip()
-# Parse 'N files changed, X insertions(+), Y deletions(-)'
-import re
-def num(label):
-    m = re.search(r'(\\d+) ' + label, stat)
-    return int(m.group(1)) if m else 0
-files_changed = num('files? changed')
-insertions = num('insertions?')
-deletions = num('deletions?')
-diff_body = git(['diff', base + '...HEAD'])
-# Truncate to keep reviewer prompts under the forfait cap. 16K
-# chars ≈ 4K tokens — enough to see hunk context for ~5-10 files
-# without blowing the budget. Reviewer spot-checks with read_file
-# when it needs to see more.
-TRUNC = 16000
-if len(diff_body) > TRUNC:
-    diff_body = diff_body[:TRUNC] + '\\n\\n[...TRUNCATED for prompt budget — use read_file / grep on specific paths in files[] to see more...]'
-print(json.dumps({
-    'files_changed': files_changed,
-    'insertions': insertions,
-    'deletions': deletions,
-    'files': files,
-    'diff_summary': diff_body,
-}))
-"`
-  output: diff_manifest_output
 
 router alt:
   mode: round_robin
@@ -1007,8 +904,7 @@ workflow feature_dev:
   ## Hand off to the alternating review/fix loop. Reviewers run
   ## with `session: fresh` (re-scan the workspace independently)
   ## so they aren't biased by the dev session's reasoning chain.
-  simplify -> build_diff_manifest
-  build_diff_manifest -> alt
+  simplify -> alt
 
   ## ═══ Phase 2 : Alternating Review / Fix Loop ══════════════════
   ## Verbatim from whole_improve_loop/main.bot (entry was alt).
@@ -1024,22 +920,12 @@ workflow feature_dev:
   alt -> reviewer_claude with {
     prior_pushback: "{{outputs.fix_gpt.pushback}}",
     prior_pushback_justification: "{{outputs.fix_gpt.pushback_justification}}",
-    previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}",
-    diff_files_changed: "{{outputs.build_diff_manifest.files_changed}}",
-    diff_insertions: "{{outputs.build_diff_manifest.insertions}}",
-    diff_deletions: "{{outputs.build_diff_manifest.deletions}}",
-    diff_files: "{{outputs.build_diff_manifest.files}}",
-    diff_summary: "{{outputs.build_diff_manifest.diff_summary}}"
+    previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}"
   }
   alt -> reviewer_gpt with {
     prior_pushback: "{{outputs.fix_claude.pushback}}",
     prior_pushback_justification: "{{outputs.fix_claude.pushback_justification}}",
-    previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}",
-    diff_files_changed: "{{outputs.build_diff_manifest.files_changed}}",
-    diff_insertions: "{{outputs.build_diff_manifest.insertions}}",
-    diff_deletions: "{{outputs.build_diff_manifest.deletions}}",
-    diff_files: "{{outputs.build_diff_manifest.files}}",
-    diff_summary: "{{outputs.build_diff_manifest.diff_summary}}"
+    previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}"
   }
 
   ## Both reviewers feed into streak_check. The loop is attached
