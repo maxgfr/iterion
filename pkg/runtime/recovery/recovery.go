@@ -13,7 +13,6 @@ package recovery
 import (
 	"context"
 	"errors"
-	"math"
 	"math/rand/v2"
 	"strings"
 	"time"
@@ -73,17 +72,25 @@ func RateLimitRecipe(maxRetries int) Recipe {
 	if maxRetries <= 0 {
 		maxRetries = DefaultMaxRetries
 	}
+	const baseDelay = 4 * time.Second
+	const maxDelay = 32 * time.Second
 	return RecipeFunc(func(_ context.Context, err *runtime.RuntimeError, attempts int) Action {
+		if attempts < 0 {
+			attempts = 0
+		}
 		if attempts >= maxRetries {
 			return Action{
 				Kind:   ActionPauseForHuman,
 				Reason: "rate limit retries exhausted; operator should wait for quota reset or rotate credentials",
 			}
 		}
-		// Exponential backoff: 4s, 8s, 16s, 32s capped, with ±25% jitter.
-		base := time.Duration(math.Pow(2, float64(attempts+2))) * time.Second
-		if base > 32*time.Second {
-			base = 32 * time.Second
+		// Exponential backoff: 4s, 8s, 16s, 32s capped, with
+		// jitter in the upper half of the current window. Cap before
+		// shifting so huge caller-provided retry budgets cannot overflow
+		// time.Duration before the max-delay clamp runs.
+		base := maxDelay
+		if attempts < 3 {
+			base = baseDelay * (1 << uint(attempts))
 		}
 		jitter := time.Duration(rand.Int64N(int64(base / 2)))
 		return Action{

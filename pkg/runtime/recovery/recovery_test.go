@@ -30,6 +30,17 @@ func TestRateLimitRecipe_RetriesThenPauses(t *testing.T) {
 	}
 }
 
+func TestRateLimitRecipe_BackoffCapsBeforeOverflow(t *testing.T) {
+	r := RateLimitRecipe(1000)
+	act := r.Apply(context.Background(), &runtime.RuntimeError{Code: runtime.ErrCodeRateLimited}, 100)
+	if act.Kind != ActionRetrySameNode {
+		t.Fatalf("expected RetrySameNode, got %v", act.Kind)
+	}
+	if act.Delay < 16*time.Second || act.Delay > 32*time.Second {
+		t.Fatalf("expected capped jitter delay in [16s, 32s], got %v", act.Delay)
+	}
+}
+
 func TestContextLengthRecipe_CompactThenFail(t *testing.T) {
 	r := ContextLengthRecipe()
 	for i := 0; i < 2; i++ {

@@ -45,11 +45,22 @@ function loadPersistedFilters(runId: string): PersistedFilters | null {
   try {
     const raw = window.localStorage.getItem(filterStorageKey(runId));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedFilters;
-    return parsed && typeof parsed === "object" ? parsed : null;
+    return normalizePersistedFilters(JSON.parse(raw));
   } catch {
     return null;
   }
+}
+
+function normalizePersistedFilters(value: unknown): PersistedFilters | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const out: PersistedFilters = {};
+  if (typeof record.search === "string") out.search = record.search;
+  if (Array.isArray(record.types)) {
+    const types = record.types.filter((v): v is string => typeof v === "string");
+    if (types.length > 0) out.types = types;
+  }
+  return out;
 }
 
 function savePersistedFilters(runId: string, value: PersistedFilters) {
@@ -134,6 +145,22 @@ export default function EventLog({
   const [activeTypes, setActiveTypes] = useState<Set<string>>(
     () => new Set(initialPersisted?.types ?? []),
   );
+  const [filtersRunId, setFiltersRunId] = useState<string | null>(
+    () => runId ?? null,
+  );
+
+  useEffect(() => {
+    if (!runId) {
+      setSearch("");
+      setActiveTypes(new Set());
+      setFiltersRunId(null);
+      return;
+    }
+    const next = loadPersistedFilters(runId);
+    setSearch(next?.search ?? "");
+    setActiveTypes(new Set(next?.types ?? []));
+    setFiltersRunId(runId);
+  }, [runId]);
 
   // Persist on every change. We avoid debouncing the search input
   // because the writes are small and infrequent compared to typing
@@ -141,11 +168,12 @@ export default function EventLog({
   // never loses keystrokes.
   useEffect(() => {
     if (!runId) return;
+    if (filtersRunId !== runId) return;
     savePersistedFilters(runId, {
       search: search || undefined,
       types: activeTypes.size > 0 ? Array.from(activeTypes) : undefined,
     });
-  }, [runId, search, activeTypes]);
+  }, [runId, filtersRunId, search, activeTypes]);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   // Tracks whether virtuoso is currently scrolling. atBottomStateChange
   // also fires on data/filter changes; we only treat "left the bottom"
