@@ -106,7 +106,13 @@ type Run struct {
 	// so dispatcher-spawned bot runs are visually grouped. Empty for
 	// plain .iter/.bot runs and for bundles whose manifest had no name;
 	// consumers fall back to basename(BundlePath) stripped of `.botz`.
-	BundleName    string                 `json:"bundle_name,omitempty" bson:"bundle_name,omitempty"`
+	BundleName string `json:"bundle_name,omitempty" bson:"bundle_name,omitempty"`
+	// BundleDisplayName is the bundle's friendly persona name (e.g.
+	// "Nexie"), captured from manifest.yaml's `display_name` at launch.
+	// Empty when the bundle's manifest doesn't declare one. The studio
+	// adds a ✨ icon next to the BotChip when this is set, so a run
+	// belonging to a named persona reads at a glance.
+	BundleDisplayName string                 `json:"bundle_display_name,omitempty" bson:"bundle_display_name,omitempty"`
 	Status        RunStatus              `json:"status" bson:"status"`
 	Inputs        map[string]interface{} `json:"inputs,omitempty" bson:"inputs,omitempty"`
 	CreatedAt     time.Time              `json:"created_at" bson:"created_at"`

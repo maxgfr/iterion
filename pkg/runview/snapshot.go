@@ -70,6 +70,11 @@ type RunHeader struct {
 	// internal workflow name was customised. Empty for plain .iter
 	// runs.
 	BundleName string `json:"bundle_name,omitempty"`
+	// BundleDisplayName mirrors the manifest's `display_name` (e.g.
+	// "Nexie"). When set, the studio RunHeader leads the bot chip
+	// with this persona name + a ✨ icon so dispatcher-spawned runs
+	// belonging to a named bot read at a glance.
+	BundleDisplayName string `json:"bundle_display_name,omitempty"`
 	Status       store.RunStatus        `json:"status"`
 	Inputs       map[string]interface{} `json:"inputs,omitempty"`
 	CreatedAt    time.Time              `json:"created_at"`
@@ -742,10 +747,11 @@ func headerFromRun(r *store.Run) RunHeader {
 	h := RunHeader{
 		ID:               r.ID,
 		Name:             r.Name,
-		WorkflowName:     r.WorkflowName,
-		WorkflowHash:     r.WorkflowHash,
-		FilePath:         r.FilePath,
-		BundleName:       r.BundleName,
+		WorkflowName:      r.WorkflowName,
+		WorkflowHash:      r.WorkflowHash,
+		FilePath:          r.FilePath,
+		BundleName:        r.BundleName,
+		BundleDisplayName: r.BundleDisplayName,
 		Status:           r.Status,
 		Inputs:           r.Inputs,
 		CreatedAt:        r.CreatedAt,

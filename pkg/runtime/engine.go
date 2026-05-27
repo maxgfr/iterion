@@ -606,6 +606,7 @@ func (e *Engine) runResolveDoc(ctx context.Context, runID string, inputs map[str
 			run.BundlePath = e.bundle.SourcePath
 			if e.bundle.Manifest != nil {
 				run.BundleName = e.bundle.Manifest.Name
+				run.BundleDisplayName = e.bundle.Manifest.DisplayName
 			}
 		}
 		if e.source != nil {

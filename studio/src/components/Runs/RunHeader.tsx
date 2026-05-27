@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { ClockIcon, FileTextIcon, OpenInNewWindowIcon, Pencil1Icon } from "@radix-ui/react-icons";
+import { ClockIcon, FileTextIcon, MagicWandIcon, OpenInNewWindowIcon, Pencil1Icon } from "@radix-ui/react-icons";
 
 import type { RunHeader as RunHeaderType } from "@/api/runs";
 import { cancelRun, getRun, loadEvents, pauseRun, renameRun } from "@/api/runs";
@@ -540,13 +540,19 @@ function BotChip({
   // ships `workflow doc_align:`). Render it as a secondary chip in
   // that case; suppress when redundant.
   const bundleName = run.bundle_name?.trim() ?? "";
+  const personaName = run.bundle_display_name?.trim() ?? "";
   const normalisedWorkflow = workflowName.replace(/[-_]/g, "");
   const normalisedBundle = bundleName.replace(/[-_]/g, "");
   const showBundleAside =
     bundleName.length > 0 &&
     normalisedBundle.toLowerCase() !== normalisedWorkflow.toLowerCase();
-  const primary = workflowName || bundleName || fileBase || "(unnamed)";
-  const tooltip = run.file_path ?? primary;
+  const techPrimary = workflowName || bundleName || fileBase || "(unnamed)";
+  // When the manifest declares a persona (display_name), it becomes
+  // the lead chip — that's the "Nexie" / "Billy" the operator thinks
+  // in. The technical workflow_name moves to a muted aside so it
+  // stays one click away. Without a persona, the technical name is
+  // the lead and the chip falls back to the prior layout.
+  const tooltip = run.file_path ?? techPrimary;
   return (
     <Tooltip content={tooltip}>
       <button
@@ -560,14 +566,34 @@ function BotChip({
             : "Workflow source path not recorded for this run"
         }
       >
-        <FileTextIcon className="w-3 h-3 shrink-0" />
-        <span className="font-mono truncate max-w-[18rem] text-fg-default">
-          {primary}
-        </span>
-        {showBundleAside && (
-          <span className="font-mono truncate max-w-[12rem] text-fg-subtle">
-            · {bundleName}
-          </span>
+        {personaName ? (
+          <MagicWandIcon
+            className="w-3 h-3 shrink-0 text-accent"
+            aria-label="persona bot"
+          />
+        ) : (
+          <FileTextIcon className="w-3 h-3 shrink-0" />
+        )}
+        {personaName ? (
+          <>
+            <span className="truncate max-w-[12rem] font-medium text-fg-default">
+              {personaName}
+            </span>
+            <span className="font-mono truncate max-w-[14rem] text-fg-subtle">
+              · {techPrimary}
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="font-mono truncate max-w-[18rem] text-fg-default">
+              {techPrimary}
+            </span>
+            {showBundleAside && (
+              <span className="font-mono truncate max-w-[12rem] text-fg-subtle">
+                · {bundleName}
+              </span>
+            )}
+          </>
         )}
         {run.file_path && (
           <OpenInNewWindowIcon className="w-2.5 h-2.5 opacity-70 shrink-0" />

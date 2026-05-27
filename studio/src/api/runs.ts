@@ -129,6 +129,10 @@ export interface RunHeader {
   // "feature-dev"). May differ from workflow_name when the bundle
   // ships a customised manifest. Empty for plain .iter / .bot runs.
   bundle_name?: string;
+  // Bundle's manifest.yaml `display_name` field — the persona an
+  // operator actually uses in conversation (e.g. "Nexie"). When
+  // set, the studio adds a ✨ icon next to the bot chip.
+  bundle_display_name?: string;
   status: RunStatus;
   inputs?: Record<string, unknown>;
   created_at: string;

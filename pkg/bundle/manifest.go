@@ -17,9 +17,20 @@ const CurrentManifestSchema = 1
 // omitted (treated as "explicit v1"). Future minor extensions add to
 // Compat without changing SchemaVersion.
 type Manifest struct {
-	// Name is a human-readable bundle name (falls back to the file
-	// stem when empty). Distinct from the workflow's own name.
+	// Name is the bundle's technical id (falls back to the file stem
+	// when empty). Distinct from the workflow's own name. Surfaced in
+	// the studio's bundle picker, `iterion bots list`, and on the run
+	// header next to the workflow name.
 	Name string `yaml:"name"`
+
+	// DisplayName is the bundle's friendly persona — the name an
+	// operator actually uses in conversation (e.g. "Nexie" for the
+	// whats-next bot, "Billy" for some future feature_dev variant).
+	// Optional and free-form. When set, the studio's RunHeader gilds
+	// the bot chip with a ✨ icon so dispatcher-spawned runs are
+	// instantly recognisable by persona, not just by technical name.
+	// Empty falls back to the Name + WorkflowName pair as before.
+	DisplayName string `yaml:"display_name,omitempty"`
 
 	// Version is a free-form bundle version string (semver or any
 	// other scheme — the engine does not parse it).

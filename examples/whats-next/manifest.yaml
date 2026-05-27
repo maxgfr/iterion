@@ -1,4 +1,5 @@
 name: whats-next
+display_name: Nexie
 version: 0.1.0
 description: |
   Orchestrator bot. Surveys the target repo agentically (claw +
