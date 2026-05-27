@@ -70,7 +70,7 @@ export default function RunMetrics({ active, onJumpToFailed, bare = false }: Pro
           stalled {staleSeconds}s
         </span>
       )}
-      {m.llmStepCount > 0 && (
+      {m.costUsd > 0 && (
         <Metric
           label="cost"
           value={formatCost(m.costUsd)}
@@ -100,11 +100,22 @@ export default function RunMetrics({ active, onJumpToFailed, bare = false }: Pro
           budget {m.budgetWarning.dimension} {Math.round(m.budgetWarning.ratio * 100)}%
         </span>
       )}
-      {(m.inputTokens > 0 || m.outputTokens > 0) && (
+      {m.totalTokens > 0 && (
         <Metric
           label="tokens"
-          value={`${formatTokens(m.inputTokens)} / ${formatTokens(m.outputTokens)}`}
-          tooltip={`input ${m.inputTokens.toLocaleString()} · output ${m.outputTokens.toLocaleString()}`}
+          // claude_code reports an aggregate without an in/out split;
+          // claw fills both. Show the split when we have it, fall back
+          // to the total otherwise.
+          value={
+            m.inputTokens > 0 || m.outputTokens > 0
+              ? `${formatTokens(m.inputTokens)} / ${formatTokens(m.outputTokens)}`
+              : formatTokens(m.totalTokens)
+          }
+          tooltip={
+            m.inputTokens > 0 || m.outputTokens > 0
+              ? `input ${m.inputTokens.toLocaleString()} · output ${m.outputTokens.toLocaleString()} · total ${m.totalTokens.toLocaleString()}`
+              : `${m.totalTokens.toLocaleString()} tokens (aggregate; backend did not split input/output)`
+          }
         />
       )}
       {m.llmStepCount > 0 && (

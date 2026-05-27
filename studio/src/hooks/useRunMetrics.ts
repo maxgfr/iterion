@@ -8,6 +8,12 @@ import { useRunStore } from "@/store/run";
 // inputs actually changes. Duration ticks live separately.
 export interface EventDrivenMetrics {
   costUsd: number;
+  // Best-effort token total. claude_code reports only an aggregate
+  // (via delegate_finished.data.tokens + node_finished.data.output._tokens),
+  // claw reports per-step input/output via llm_step_finished. The
+  // total is the sum of whatever each backend supplied; the chip
+  // also shows the in/out split when both fields are non-zero.
+  totalTokens: number;
   inputTokens: number;
   outputTokens: number;
   // Total LLM step events seen (proxy for "LLM rounds").
@@ -56,6 +62,7 @@ export function useEventDrivenMetrics(): EventDrivenMetrics {
   return useMemo<EventDrivenMetrics>(() => {
     const m: EventDrivenMetrics = {
       costUsd: 0,
+      totalTokens: 0,
       inputTokens: 0,
       outputTokens: 0,
       llmStepCount: 0,
@@ -78,18 +85,39 @@ export function useEventDrivenMetrics(): EventDrivenMetrics {
       }
       if (e.type === "llm_step_finished" && e.data) {
         m.llmStepCount += 1;
+        // Per-step input/output split is unique to claw — kept for the
+        // detailed chip tooltip. The TOTAL counter comes from
+        // node_finished._tokens below to avoid double-counting on claw
+        // (which emits both per-step and per-node totals).
         const inT = e.data["input_tokens"];
         if (typeof inT === "number") m.inputTokens += inT;
         const outT = e.data["output_tokens"];
         if (typeof outT === "number") m.outputTokens += outT;
       }
-      // Cost is annotated per-node by the backend (cost.Annotate writes
-      // _cost_usd onto the node output, which the runtime mirrors into
-      // node_finished.data). LLMStepInfo carries no cost, so summing
-      // cost from llm_step_finished would always yield $0.
+      // Cost + tokens are annotated per-node by the backend
+      // (cost.Annotate writes _cost_usd / _tokens onto the node
+      // output, which the runtime mirrors into node_finished.data.output).
+      // claude_code is the dominant case today: it reports a single
+      // aggregate token total per node, no in/out split, so the chip
+      // falls back to total when both per-direction values are zero.
+      // We also tolerate the legacy flat layout (data._cost_usd) so
+      // older runs without the nested output field still report.
       if (e.type === "node_finished" && e.data) {
-        const c = e.data["_cost_usd"];
-        if (typeof c === "number") m.costUsd += c;
+        const output = e.data["output"] as Record<string, unknown> | undefined;
+        const flatCost = e.data["_cost_usd"];
+        if (typeof flatCost === "number") {
+          m.costUsd += flatCost;
+        } else if (typeof output?.["_cost_usd"] === "number") {
+          m.costUsd += output["_cost_usd"] as number;
+        }
+        // Aggregate token total. claude_code reports a single number
+        // (no in/out split); claw could fold its in/out tally into
+        // _tokens too. We don't double-count llm_step_finished here:
+        // the per-step + per-node paths surface different backends so
+        // exactly one will be populated for any given step.
+        if (typeof output?.["_tokens"] === "number") {
+          m.totalTokens += output["_tokens"] as number;
+        }
       }
       if (e.type === "budget_warning" && e.data) {
         const dim = pickString(e.data, "dimension");

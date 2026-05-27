@@ -261,24 +261,11 @@ export default function RunHeader({ run, active, wsState }: Props) {
         {/* Row 2: bot · folder · when. Each cell is muted + small so
             it stays readable but doesn't compete with the run name. */}
         <div className="flex items-center gap-3 text-[11px] text-fg-subtle flex-wrap">
-          {fileBase && (
-            <Tooltip content={run.file_path!}>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 hover:text-fg-default focus:outline-none"
-                onClick={() =>
-                  setLocation(
-                    `/editor?file=${encodeURIComponent(run.file_path!)}&from=${encodeURIComponent(run.id)}`,
-                  )
-                }
-                title={`Open ${run.file_path} in the editor`}
-              >
-                <FileTextIcon className="w-3 h-3" />
-                <span className="font-mono truncate max-w-[20rem]">{fileBase}</span>
-                <OpenInNewWindowIcon className="w-2.5 h-2.5 opacity-70" />
-              </button>
-            </Tooltip>
-          )}
+          <BotChip run={run} fileBase={fileBase} onOpenFile={(p) =>
+            setLocation(
+              `/editor?file=${encodeURIComponent(p)}&from=${encodeURIComponent(run.id)}`,
+            )
+          } />
           {run.work_dir && (
             <Tooltip content={run.work_dir}>
               <span className="inline-flex items-center gap-1 font-mono truncate max-w-[20rem]">
@@ -529,6 +516,67 @@ function FinalizationRow({ run }: { run: RunHeaderType }) {
   );
 }
 
+// BotChip renders the "what bot ran this?" cell in Row 2 of the run
+// header. The previous chip showed only the file basename ("main.bot"),
+// which was ambiguous: every iterion bot's entrypoint is called
+// main.bot. We now lead with the workflow's declared name (the
+// `workflow <name>:` token in the DSL — e.g. "feature_dev") and add
+// the bundle's manifest name when it exists and differs, so the
+// operator can tell a feature_dev run from a doc-align run at a
+// glance. The basename + file path stay reachable via tooltip + the
+// click-to-open-in-editor affordance.
+function BotChip({
+  run,
+  fileBase,
+  onOpenFile,
+}: {
+  run: RunHeaderType;
+  fileBase: string | null;
+  onOpenFile: (path: string) => void;
+}) {
+  const workflowName = run.workflow_name || "";
+  // Bundle name diverges from workflow_name only when the .botz
+  // manifest's `name:` field was customised (e.g. bundle "doc-align"
+  // ships `workflow doc_align:`). Render it as a secondary chip in
+  // that case; suppress when redundant.
+  const bundleName = run.bundle_name?.trim() ?? "";
+  const normalisedWorkflow = workflowName.replace(/[-_]/g, "");
+  const normalisedBundle = bundleName.replace(/[-_]/g, "");
+  const showBundleAside =
+    bundleName.length > 0 &&
+    normalisedBundle.toLowerCase() !== normalisedWorkflow.toLowerCase();
+  const primary = workflowName || bundleName || fileBase || "(unnamed)";
+  const tooltip = run.file_path ?? primary;
+  return (
+    <Tooltip content={tooltip}>
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 hover:text-fg-default focus:outline-none min-w-0"
+        onClick={() => run.file_path && onOpenFile(run.file_path)}
+        disabled={!run.file_path}
+        title={
+          run.file_path
+            ? `Open ${run.file_path} in the editor`
+            : "Workflow source path not recorded for this run"
+        }
+      >
+        <FileTextIcon className="w-3 h-3 shrink-0" />
+        <span className="font-mono truncate max-w-[18rem] text-fg-default">
+          {primary}
+        </span>
+        {showBundleAside && (
+          <span className="font-mono truncate max-w-[12rem] text-fg-subtle">
+            · {bundleName}
+          </span>
+        )}
+        {run.file_path && (
+          <OpenInNewWindowIcon className="w-2.5 h-2.5 opacity-70 shrink-0" />
+        )}
+      </button>
+    </Tooltip>
+  );
+}
+
 // SourceTicketRow surfaces the originating kanban issue when the run
 // was dispatched by the native dispatcher. Clicking opens /board with
 // the issue focused so the operator can jump back to the ticket that
@@ -541,23 +589,50 @@ function SourceTicketRow({
 }) {
   const [, setLocation] = useLocation();
   const issueID = source.issue_id!;
-  const identifier = source.issue_identifier || issueID;
-  const title = source.issue_title || "(untitled)";
+  // Title-led display. The "[#N]" prefix is a project convention
+  // baked into emit_action's titles, so it's already visible without
+  // us echoing the internal identifier (which on the native tracker
+  // is an ugly "native:<short-uuid>" chip). The full identifier
+  // survives in the tooltip + the navigation URL for operators who
+  // need it.
+  const title = (source.issue_title || "(untitled)").trim();
+  const shortHandle = parseTicketHandle(title, source.issue_identifier);
   const focusIssue = () =>
     setLocation(`/board?focus=${encodeURIComponent(issueID)}`);
   return (
     <div className="shrink-0 px-4 py-1.5 bg-info-soft/40 border-b border-info/30 flex items-center gap-2 text-[11px]">
-      <span className="text-fg-muted">From ticket</span>
+      <span className="text-fg-muted shrink-0">From ticket</span>
       <button
         onClick={focusIssue}
-        className="font-mono text-fg-default hover:text-info underline-offset-2 hover:underline"
-        title={`Open issue ${identifier} on the board`}
+        className="inline-flex items-center gap-2 text-fg-default hover:text-info underline-offset-2 hover:underline truncate min-w-0"
+        title={`Open issue ${source.issue_identifier || issueID} on the board`}
       >
-        #{identifier}
+        {shortHandle && (
+          <span className="font-mono shrink-0 text-fg-muted">{shortHandle}</span>
+        )}
+        <span className="truncate text-fg-default">{title}</span>
       </button>
-      <span className="text-fg-default truncate max-w-[40rem]">{title}</span>
     </div>
   );
+}
+
+// parseTicketHandle returns the human-friendly handle the operator
+// recognises: when emit_action prefixed the title with "[#N]" we lift
+// that out as a separate mono chip; otherwise we render nothing and
+// the navigation tooltip carries the long identifier. We intentionally
+// don't synthesise a chip from the tracker's "native:<uuid-prefix>"
+// identifier — that bare UUID is more noise than signal next to the
+// title.
+function parseTicketHandle(
+  title: string,
+  fallbackIdentifier: string | null | undefined,
+): string | null {
+  const match = title.match(/^\[(#[^\]]+)\]/);
+  if (match) return match[1] ?? null;
+  if (fallbackIdentifier && !fallbackIdentifier.includes(":")) {
+    return `#${fallbackIdentifier}`;
+  }
+  return null;
 }
 
 // ForkedFromRow surfaces the parent-run breadcrumb on a forked run.

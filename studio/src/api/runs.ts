@@ -125,6 +125,10 @@ export interface RunHeader {
   workflow_name: string;
   workflow_hash?: string;
   file_path?: string;
+  // Bundle's manifest.yaml `name` field captured at launch (e.g.
+  // "feature-dev"). May differ from workflow_name when the bundle
+  // ships a customised manifest. Empty for plain .iter / .bot runs.
+  bundle_name?: string;
   status: RunStatus;
   inputs?: Record<string, unknown>;
   created_at: string;

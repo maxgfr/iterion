@@ -64,6 +64,12 @@ type RunHeader struct {
 	WorkflowName string                 `json:"workflow_name"`
 	WorkflowHash string                 `json:"workflow_hash,omitempty"`
 	FilePath     string                 `json:"file_path,omitempty"`
+	// BundleName mirrors the .botz manifest's `name` field captured
+	// at launch (e.g. "feature-dev"). The studio RunHeader pairs it
+	// with WorkflowName so the operator can distinguish bundles whose
+	// internal workflow name was customised. Empty for plain .iter
+	// runs.
+	BundleName string `json:"bundle_name,omitempty"`
 	Status       store.RunStatus        `json:"status"`
 	Inputs       map[string]interface{} `json:"inputs,omitempty"`
 	CreatedAt    time.Time              `json:"created_at"`
@@ -739,6 +745,7 @@ func headerFromRun(r *store.Run) RunHeader {
 		WorkflowName:     r.WorkflowName,
 		WorkflowHash:     r.WorkflowHash,
 		FilePath:         r.FilePath,
+		BundleName:       r.BundleName,
 		Status:           r.Status,
 		Inputs:           r.Inputs,
 		CreatedAt:        r.CreatedAt,
