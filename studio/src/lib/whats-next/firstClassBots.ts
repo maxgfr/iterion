@@ -138,6 +138,16 @@ function formatPickedIssues(
 // back to the truncated-id rendering. Defensive against unknown
 // shapes: a missing field / wrong type silently skips that entry
 // rather than throwing.
+//
+// Critical: humanAnswerExtractor runs DURING the fold, before the
+// whats-next resolver's postProcess lifts ExtensionMessage entries
+// into their typed shapes (RoadmapCardMessage, IssuesSummaryMessage,
+// DispatchCandidatesMessage). So the upstream array at this point
+// carries `kind: "extension"` with the original tag, not the typed
+// `kind` the rendered transcript shows. We match on the extension
+// tag here AND on the post-processed kind so the formatter works
+// whether it's called during the initial fold or against a fully
+// post-processed message stream (defensive for future callers).
 function collectTitleMap(
   upstream: ReadonlyArray<unknown> | undefined,
   cardKind: "issues-summary" | "dispatch-candidates",
@@ -147,15 +157,30 @@ function collectTitleMap(
   // Walk back-to-front: the latest matching card wins on ID
   // collisions (e.g. two emit_action passes in the same session).
   for (let i = upstream.length - 1; i >= 0; i--) {
-    const m = upstream[i] as { kind?: string } | null;
+    const m = upstream[i] as
+      | { kind?: string; tag?: string; payload?: unknown }
+      | { kind?: string; createdIssues?: unknown; candidates?: unknown }
+      | null;
     if (!m || typeof m !== "object") continue;
-    if (m.kind !== cardKind) continue;
-    const list =
-      cardKind === "issues-summary"
-        ? (m as { createdIssues?: Array<{ id?: unknown; title?: unknown }> })
-            .createdIssues
-        : (m as { candidates?: Array<{ id?: unknown; title?: unknown }> })
-            .candidates;
+    const obj = m as Record<string, unknown>;
+    let list: unknown = undefined;
+    if (obj.kind === cardKind) {
+      // Post-processed typed card.
+      list =
+        cardKind === "issues-summary" ? obj.createdIssues : obj.candidates;
+    } else if (obj.kind === "extension" && obj.tag === cardKind) {
+      // In-flight ExtensionMessage — its payload mirrors the typed
+      // shape because the whats-next resolver builds it that way.
+      const payload = obj.payload as Record<string, unknown> | undefined;
+      if (payload) {
+        list =
+          cardKind === "issues-summary"
+            ? payload.createdIssues
+            : payload.candidates;
+      }
+    } else {
+      continue;
+    }
     if (!Array.isArray(list)) continue;
     for (const row of list) {
       if (!row || typeof row !== "object") continue;
