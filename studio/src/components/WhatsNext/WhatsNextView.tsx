@@ -23,6 +23,7 @@ import ChatTranscript from "./ChatTranscript";
 import HumanChatTurn from "./HumanChatTurn";
 import PreFlightPanel from "./PreFlightPanel";
 import SessionLauncher from "./SessionLauncher";
+import WatchPanel from "./WatchPanel";
 
 // WhatsNextView is the /whats-next route. It owns one whats-next session at a
 // time via the useWhatsNextSession hook: the launcher creates the run,
@@ -163,6 +164,7 @@ export default function WhatsNextView() {
         ) : (
           <div className="flex-1 flex flex-col max-w-3xl w-full mx-auto overflow-hidden">
             <SessionHeader bot={bot} session={session} />
+            <WatchPanel runId={session.runId} />
             {session.messages.length === 0 ? (
               <div className="flex-1 overflow-y-auto">
                 <PreFlightPanel
