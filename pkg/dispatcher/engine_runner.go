@@ -11,6 +11,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/runtime"
+	"github.com/SocialGouv/iterion/pkg/runtime/recovery"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
@@ -178,6 +179,16 @@ func (r *EngineRunner) Dispatch(ctx context.Context, spec DispatchSpec) error {
 		runtime.WithWorkflowHash(r.workflowHash),
 		runtime.WithFilePath(r.workflowPath),
 		runtime.WithRunName(store.GenerateRunName(r.workflowPath + ":" + spec.RunID)),
+		// Without this, every transient hiccup (http2 timeout against
+		// the ChatGPT-codex endpoint, an LLM rate-limit 429, a DNS
+		// flutter, …) fails the run terminally at the first attempt —
+		// the runview/studio launch path wires the same dispatcher and
+		// gets 6 exponential-backoff retries on network transients,
+		// but dispatcher-spawned bot runs had no recovery policy at
+		// all. Today's dogfood caught it: Nexie's explore retried
+		// gracefully through two http2 timeouts, then feature_dev's
+		// reviewer_gpt hit the same error and died on the first try.
+		runtime.WithRecoveryDispatch(recovery.Dispatch(recovery.DefaultRecipes())),
 	}
 	// Stamp the issue back-reference so the studio's RunHeader can
 	// link to the originating kanban ticket. Only set when the
