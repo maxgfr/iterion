@@ -42,6 +42,12 @@
 vars:
   workspace_dir: string = "${PROJECT_DIR}"
   scope_notes:   string = ""
+  ## Launcher fast-path: when set to "dispatch_only", the workflow
+  ## entry skips explore + ask_priorities + propose_roadmap and goes
+  ## straight to load_dispatch_candidates + the checkbox picker.
+  ## Useful when the operator just wants to promote a known
+  ## backlog item without a fresh survey/proposal cycle.
+  mode: string = ""
 
 ## ─── Schemas ──────────────────────────────────────────────────────
 
@@ -218,6 +224,17 @@ schema continue_derived:
   needs_dispatch_choice:  bool
   action:                 string
   detail:                 string
+
+## Placeholder for the workflow-entry compute that reads vars.mode.
+## iterion's compute nodes always have an `input:` schema; the entry
+## doesn't have any upstream node so this single-field placeholder is
+## passed in as an empty map. The compute itself ignores `input` and
+## reads `vars.mode` via expr.
+schema entry_check_input:
+  unused: string
+
+schema entry_derived:
+  is_dispatch_only: bool
 
 ## load_dispatch_candidates surfaces the current board state for the
 ## "dispatch_more without detail" detour. The agent reads the native
@@ -1267,6 +1284,16 @@ compute derive_continue:
     action:                "input.action"
     detail:                "input.detail"
 
+## Workflow entry router-compute. Reads vars.mode and projects
+## is_dispatch_only so the workflow's first edges can branch between
+## the regular survey loop and the "skip everything, just promote a
+## board item" fast path.
+compute classify_entry:
+  input: entry_check_input
+  output: entry_derived
+  expr:
+    is_dispatch_only: "vars.mode == 'dispatch_only'"
+
 ## Surfaces the current board so the operator can pick what to
 ## dispatch when they answered "dispatch_more" without specifying
 ## which item. claw + board.read is the cheap-and-deterministic
@@ -1310,7 +1337,7 @@ agent triage_board:
 ## ─── Workflow ─────────────────────────────────────────────────────
 
 workflow whats_next:
-  entry: explore
+  entry: classify_entry
 
   budget:
     max_parallel_branches: 1
@@ -1323,6 +1350,15 @@ workflow whats_next:
     ## Bumped from 30 to 80 to accommodate the triage_loop(20) plus
     ## the existing approval_loop(10) plus the linear pre-loop nodes.
     max_iterations: 80
+
+  ## Entry routing: vars.mode=="dispatch_only" sends the operator
+  ## straight to the board-picker without a fresh survey. Default
+  ## path falls through to the regular explore → propose → emit_action
+  ## loop.
+  classify_entry -> load_dispatch_candidates when is_dispatch_only with {
+    workspace_dir: "{{vars.workspace_dir}}"
+  }
+  classify_entry -> explore
 
   explore -> ask_priorities with {
     exploration_summary: "{{outputs.explore.summary}}",

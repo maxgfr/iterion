@@ -82,6 +82,12 @@ export interface FirstClassBot {
   // Node id whose first pending human-question receives the launcher
   // form's answer. Required when launcherForm is set.
   launcherFormTarget?: string;
+  // When true, SessionLauncher renders a secondary "Dispatch existing
+  // board items" button that launches with vars.mode="dispatch_only".
+  // The bot's workflow is responsible for branching on that var (e.g.
+  // a classify_entry compute that routes to load_dispatch_candidates
+  // when set). Bots without this routing should leave it false.
+  supportsDispatchOnly?: boolean;
   nodeMap: Readonly<Record<string, WhatsNextNodeMapEntry>>;
 }
 
@@ -140,6 +146,7 @@ export const FIRST_CLASS_BOTS: Readonly<Record<string, FirstClassBot>> = {
     launcherVars: [],
     launcherForm: askPrioritiesForm,
     launcherFormTarget: "ask_priorities",
+    supportsDispatchOnly: true,
     nodeMap: {
       explore: {
         kind: "banner",

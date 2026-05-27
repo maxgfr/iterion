@@ -60,6 +60,17 @@ export default function SessionLauncher({
     if (!onLaunch || busy || !varsReady) return;
     onLaunch({ vars, formAnswer });
   };
+  // Fast-path launch: skip the priorities form + the explore/propose
+  // survey loop, route the workflow straight to the board-picker via
+  // vars.mode. The bot's classify_entry compute reads vars.mode and
+  // routes to load_dispatch_candidates. Empty formAnswer so the
+  // ask_priorities auto-submit effect is a no-op (that human node
+  // isn't reached on the fast path).
+  const launchDispatchOnly = () => {
+    if (!onLaunch || busy || !varsReady) return;
+    onLaunch({ vars: { ...vars, mode: "dispatch_only" }, formAnswer: undefined });
+  };
+  const supportsFastDispatch = Boolean(bot.supportsDispatchOnly);
 
   return (
     <div className="max-w-2xl mx-auto py-8 px-4">
@@ -117,6 +128,23 @@ export default function SessionLauncher({
               onClick={() => launch()}
             >
               {busy ? "Starting…" : "Start"}
+            </Button>
+          </div>
+        )}
+
+        {supportsFastDispatch && (
+          <div className="pt-3 border-t border-border-subtle space-y-1">
+            <p className="text-[11px] text-fg-subtle">
+              Skip the survey — pick directly from the current board:
+            </p>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy || !varsReady}
+              onClick={launchDispatchOnly}
+              title="Skip explore + propose_roadmap. Goes straight to a checkbox of current backlog + ready items."
+            >
+              {busy ? "Starting…" : "Dispatch existing board items"}
             </Button>
           </div>
         )}
