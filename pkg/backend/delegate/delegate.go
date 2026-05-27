@@ -287,6 +287,12 @@ type Task struct {
 	// facade), "openai" (force OpenAI-direct, skip OPENAI_BASE_URL
 	// overrides). Empty string means "auto" — current
 	// environment-driven precedence.
+	//
+	// This carries a SINGLE hint per Execute call. When the DSL declares
+	// an ordered fallback chain (`provider: "anthropic,zai,openai"`), the
+	// executor (dispatchWithProviderFallback) re-issues the task with the
+	// next hint here after a hard failure beyond the retry budget — the
+	// backend itself stays chain-unaware.
 	ProviderHint string
 
 	// Hooks lets the backend surface mid-execution events back to the

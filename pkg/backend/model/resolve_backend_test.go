@@ -209,3 +209,57 @@ func TestResolveProvider_EmptyWhenUnset(t *testing.T) {
 		t.Fatalf("got %q, want '' for unset Provider", got)
 	}
 }
+
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestResolveProviderChain(t *testing.T) {
+	resetEnvForResolve(t)
+	e := newExecutorForResolveTest("")
+
+	cases := []struct {
+		name     string
+		provider string
+		setEnv   map[string]string
+		want     []string
+	}{
+		{"unset", "", nil, []string{""}},
+		{"single", "anthropic", nil, []string{"anthropic"}},
+		{"auto normalises to blank", "auto", nil, []string{""}},
+		{"chain", "anthropic,zai,openai", nil, []string{"anthropic", "zai", "openai"}},
+		{"chain with whitespace", "anthropic, zai , openai", nil, []string{"anthropic", "zai", "openai"}},
+		{"trailing comma dropped", "anthropic,", nil, []string{"anthropic"}},
+		{"leading comma dropped", ",anthropic", nil, []string{"anthropic"}},
+		{"consecutive duplicates collapsed", "zai,zai,anthropic", nil, []string{"zai", "anthropic"}},
+		{"explicit auto kept as chain element", "auto,anthropic", nil, []string{"", "anthropic"}},
+		// Env expansion runs on the whole field BEFORE splitting, so an
+		// env default may itself carry the rest of the chain.
+		{"rescue head expands then chains", "${RESCUE_PROVIDER:-zai},anthropic", nil, []string{"zai", "anthropic"}},
+		{"rescue head overridden", "${RESCUE_PROVIDER:-zai},anthropic", map[string]string{"RESCUE_PROVIDER": "openai"}, []string{"openai", "anthropic"}},
+		{"env supplies whole chain", "${PROVIDERS:-anthropic,zai}", nil, []string{"anthropic", "zai"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for k, v := range tc.setEnv {
+				t.Setenv(k, v)
+			}
+			got := e.resolveProviderChain(nodeWithBackendProvider("claude_code", tc.provider))
+			if !equalStringSlice(got, tc.want) {
+				t.Fatalf("resolveProviderChain(%q) = %v, want %v", tc.provider, got, tc.want)
+			}
+			// resolveProvider must equal the head of the chain (back-compat).
+			if head := e.resolveProvider(nodeWithBackendProvider("claude_code", tc.provider)); head != tc.want[0] {
+				t.Errorf("resolveProvider(%q) = %q, want head %q", tc.provider, head, tc.want[0])
+			}
+		})
+	}
+}

@@ -66,6 +66,8 @@ func TestDiagnosticCodes_Unique(t *testing.T) {
 		"DiagUnknownCapability":         DiagUnknownCapability,
 		"DiagMalformedCapability":       DiagMalformedCapability,
 		"DiagBoardCapInSandbox":         DiagBoardCapInSandbox,
+		"DiagUnknownProvider":           DiagUnknownProvider,
+		"DiagProviderChainIgnored":      DiagProviderChainIgnored,
 	}
 	seen := make(map[DiagCode]string, len(all))
 	for name, code := range all {

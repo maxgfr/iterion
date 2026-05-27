@@ -102,6 +102,13 @@ Backend rules:
 - `claude_code` only for nodes that need the native Skill tool
   or Claude Code-specific MCP servers.
 - `claw` and `claude_code` BOTH use snake_case tool names.
+- `provider:` routes credentials per node. It accepts a single
+  hint (`anthropic`/`zai`/`openai`/`auto`) OR an ordered fallback
+  chain (`provider: "zai,anthropic"`): on a hard failure beyond
+  retries the runtime falls through to the next provider
+  transparently (generalises `RESCUE_PROVIDER`). Honoured by
+  `claude_code` (same-API family); `claw`/`codex` use only the
+  first hint (compiler warns C088). Single values are unchanged.
 
 Session-mode notes:
 - `fresh` (default) — new context every call.

@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -157,6 +158,117 @@ func (e *ClawExecutor) retryDelegateLoop(ctx context.Context, nodeID string, bac
 		}
 
 		result, err = fn()
+	}
+	return result, err
+}
+
+// ---------------------------------------------------------------------------
+// Provider fallback chain.
+//
+// Generalises the single-node RESCUE_PROVIDER escape hatch into a
+// declarative, ordered chain (DSL `provider: "anthropic,zai,openai"`).
+// The chain wraps retryDelegateLoop: each provider gets the full retry
+// budget; only a hard failure *beyond* that budget falls through to the
+// next provider. See docs/adr for the credential-hint-vs-cross-model
+// scope decision.
+// ---------------------------------------------------------------------------
+
+// providerLabel renders a provider hint for logs, mapping the empty
+// "auto" hint to a readable token.
+func providerLabel(p string) string {
+	if p == "" {
+		return "auto"
+	}
+	return p
+}
+
+// providerFallbackEligible reports whether a backend actually consumes
+// the per-node provider hint, and therefore whether walking a
+// multi-element provider chain is meaningful. Only claude_code honours
+// ProviderHint today (anthropic ↔ z.ai ↔ Anthropic-compatible facades);
+// claw derives its provider from the model-spec prefix and codex ignores
+// the hint entirely, so for those a multi-provider chain would re-run an
+// identical call and waste a second retry budget. Compile-time C088
+// warns the author; here we collapse the chain to its head so the run
+// never pays for a no-op fall-through.
+//
+// Centralised + named so wiring a future hint-honouring backend (e.g.
+// teaching claw to switch provider+model per element) is a one-line
+// change.
+func providerFallbackEligible(backendName string) bool {
+	return backendName == delegate.BackendClaudeCode
+}
+
+// dispatchWithProviderFallback runs backend.Execute across the node's
+// provider chain, transparently falling through to the next provider on
+// a hard failure beyond the retry budget. It mutates task.ProviderHint
+// per attempt and returns the first success, or the last error once the
+// chain is exhausted.
+//
+// "Hard failure" is any non-nil error returned by retryDelegateLoop —
+// a non-retryable error, or a retryable one that exhausted the budget.
+// Context cancellation / deadline is NOT a provider failure: it aborts
+// the chain immediately so a cancelled run doesn't thrash through every
+// provider. Each fall-through emits exactly one log note and one
+// OnProviderFallback hook, so the operator sees a route change, not a
+// failure.
+func (e *ClawExecutor) dispatchWithProviderFallback(
+	ctx context.Context,
+	nodeID, backendName string,
+	chain []string,
+	backend delegate.Backend,
+	task *delegate.Task,
+) (delegate.Result, error) {
+	if len(chain) == 0 {
+		chain = []string{""}
+	}
+	// Backends that ignore the provider hint gain nothing from walking
+	// the chain — collapse to the preferred provider to avoid a wasted
+	// second retry budget on an identical call.
+	if len(chain) > 1 && !providerFallbackEligible(backendName) {
+		chain = chain[:1]
+	}
+
+	var (
+		result delegate.Result
+		err    error
+	)
+	for i, provider := range chain {
+		task.ProviderHint = provider
+		result, err = e.retryDelegateLoop(ctx, nodeID, backendName, func() (delegate.Result, error) {
+			return backend.Execute(ctx, *task)
+		})
+		if err == nil {
+			return result, nil
+		}
+		// A cancelled / timed-out context is terminal for the whole
+		// node, not a provider-specific failure: don't fall through.
+		if ctx.Err() != nil {
+			return result, err
+		}
+		if i < len(chain)-1 {
+			next := chain[i+1]
+			if e.logger != nil {
+				e.logger.Warn("[%s#%d/%s] provider %q failed beyond retry budget; falling through to %q: %v",
+					nodeID, LoopIterationFromContext(ctx), backendName,
+					providerLabel(provider), providerLabel(next), err)
+			}
+			if e.hooks.OnProviderFallback != nil {
+				e.hooks.OnProviderFallback(nodeID, ProviderFallbackInfo{
+					BackendName: backendName,
+					From:        provider,
+					To:          next,
+					Attempts:    e.retry.maxAttempts(),
+					Err:         err,
+				})
+			}
+		}
+	}
+	// Whole chain exhausted. Annotate with the chain when it had real
+	// alternatives so the surfaced error explains the multi-provider
+	// attempt; a single-element chain keeps the bare backend error.
+	if len(chain) > 1 {
+		return result, fmt.Errorf("all providers in chain %v failed; last error: %w", chain, err)
 	}
 	return result, err
 }

@@ -106,6 +106,16 @@ type DelegateInfo struct {
 	Delay              time.Duration // backoff delay (for OnDelegateRetry)
 }
 
+// ProviderFallbackInfo describes a single fall-through within a node's
+// provider fallback chain, passed to the OnProviderFallback hook.
+type ProviderFallbackInfo struct {
+	BackendName string // backend that ran the chain (e.g. "claude_code")
+	From        string // provider hint that just failed ("" = auto)
+	To          string // provider hint about to be tried next
+	Attempts    int    // retry attempts spent on the failed provider
+	Err         error  // the hard failure that triggered the fall-through
+}
+
 // ---------------------------------------------------------------------------
 // Event hooks
 // ---------------------------------------------------------------------------
@@ -138,6 +148,13 @@ type EventHooks struct {
 	OnDelegateFinished func(nodeID string, info DelegateInfo)
 	OnDelegateError    func(nodeID string, info DelegateInfo)
 	OnDelegateRetry    func(nodeID string, info DelegateInfo)
+	// OnProviderFallback fires once each time a node's provider
+	// fallback chain falls through from a failed provider to the next
+	// one (see the DSL `provider: "a,b,c"` chain). It is purely
+	// observational — the run continues transparently against the next
+	// provider — and lets the studio / Prometheus exporter surface that
+	// a credential route was exhausted without the run itself failing.
+	OnProviderFallback func(nodeID string, info ProviderFallbackInfo)
 
 	// OnNodeFinished fires after a node's executor returns successfully.
 	// The output map carries iterion's conventional usage keys (`_tokens`,
@@ -204,6 +221,7 @@ func ChainHooks(a, b EventHooks) EventHooks {
 		OnDelegateFinished: chainCb2(a.OnDelegateFinished, b.OnDelegateFinished),
 		OnDelegateError:    chainCb2(a.OnDelegateError, b.OnDelegateError),
 		OnDelegateRetry:    chainCb2(a.OnDelegateRetry, b.OnDelegateRetry),
+		OnProviderFallback: chainCb2(a.OnProviderFallback, b.OnProviderFallback),
 		OnNodeFinished:     chainCb2(a.OnNodeFinished, b.OnNodeFinished),
 	}
 }
@@ -706,41 +724,70 @@ func (e *ClawExecutor) resolveBackendName(node ir.Node) string {
 	return delegate.BackendClaw
 }
 
-// resolveProvider returns the per-node credential-routing hint, or ""
-// to defer to the global precedence (process env + sandboxed
-// credentials). Supports the same ${VAR}/${VAR:-default} env-var
-// expansion as resolveBackendName so a single recipe can flip a node
-// between providers without an edit:
+// resolveProvider returns the first (preferred) credential-routing hint
+// for a node, or "" to defer to the global precedence. It is the
+// single-value façade over resolveProviderChain, kept for the call
+// sites and tests that only need the head of the chain.
 //
-//	judge reviewer_claude:
-//	  backend: claude_code
-//	  provider: "${RESCUE_PROVIDER:-zai}"    # set RESCUE_PROVIDER=anthropic
-//	                                          # in ~/.iterion/env to escalate
-//
-// Known values (matched by anthropicCredOptsForCLI / the claw registry):
+// Known hint values (matched by anthropicCredEnvForCLI / the claw registry):
 //   - "anthropic" — force ANTHROPIC_API_KEY / CLAUDE_CONFIG_DIR, skip z.ai
-//     even when ZAI_API_KEY is set on the process. Useful when a node
-//     needs Anthropic's larger context window.
+//     even when ZAI_API_KEY is set on the process.
 //   - "zai" — force z.ai routing (ANTHROPIC_BASE_URL=z.ai facade +
 //     ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY).
-//   - "openai" — for claw/OpenAI-compat: force OPENAI_API_KEY direct
-//     (skip OPENAI_BASE_URL-overridden routes).
+//   - "openai" — for claw/OpenAI-compat: force OPENAI_API_KEY direct.
 //   - "auto" / "" — current process-env-driven precedence.
 func (e *ClawExecutor) resolveProvider(node ir.Node) string {
-	var provider string
+	return e.resolveProviderChain(node)[0]
+}
+
+// resolveProviderChain resolves the per-node `provider:` field into an
+// ordered fallback chain of credential-routing hints. A single value
+// (the historical form, incl. `${RESCUE_PROVIDER:-zai}`) yields a
+// one-element chain, so existing workflows behave exactly as before.
+//
+// A comma-separated value (`provider: "anthropic,zai,openai"`) yields
+// the ordered list: the executor tries each provider in turn, falling
+// through to the next on a hard failure beyond the retry budget (see
+// dispatchWithProviderFallback). This generalises the single-node
+// RESCUE_PROVIDER escape hatch into a declarative chain.
+//
+// Env expansion runs on the whole field FIRST, then the result is split
+// on commas — so an env var may supply the entire chain
+// (`${PROVIDERS:-anthropic,zai}`) and a `:-default` may itself contain a
+// comma. Tokens are trimmed; an explicit "auto" normalises to "" (defer
+// to process-env precedence) but is kept as a chain element; genuinely
+// empty tokens (stray/trailing commas) are dropped; consecutive
+// duplicates are collapsed. The chain is never empty: an unset/blank
+// field yields [""], i.e. a single auto attempt.
+func (e *ClawExecutor) resolveProviderChain(node ir.Node) []string {
+	var raw string
 	switch n := node.(type) {
 	case *ir.AgentNode:
-		provider = n.Provider
+		raw = n.Provider
 	case *ir.JudgeNode:
-		provider = n.Provider
+		raw = n.Provider
 	case *ir.RouterNode:
-		provider = n.Provider
+		raw = n.Provider
 	}
-	provider = ir.ExpandEnvWithDefault(provider)
-	if provider == "auto" {
-		return ""
+	expanded := ir.ExpandEnvWithDefault(raw)
+	chain := make([]string, 0, 4)
+	for _, part := range strings.Split(expanded, ",") {
+		p := strings.TrimSpace(part)
+		if p == "" {
+			continue // stray, leading or trailing comma
+		}
+		if p == "auto" {
+			p = "" // explicit auto → process-env precedence
+		}
+		if len(chain) > 0 && chain[len(chain)-1] == p {
+			continue // collapse consecutive duplicates
+		}
+		chain = append(chain, p)
 	}
-	return provider
+	if len(chain) == 0 {
+		return []string{""}
+	}
+	return chain
 }
 
 // detectorResolve picks the first available backend in
@@ -996,9 +1043,10 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		CompactThresholdRatio: compactRatio,
 		CompactPreserveRecent: compactPreserve,
 		Sandbox:               e.sandbox,
-		ProviderHint:          e.resolveProvider(node),
-		Hooks:                 e.delegateHooksFor(f.id, backendName),
-		InboxDrain:            e.bindInboxDrain(ctx),
+		// ProviderHint is set per-attempt by dispatchWithProviderFallback
+		// as it walks the node's provider chain.
+		Hooks:      e.delegateHooksFor(f.id, backendName),
+		InboxDrain: e.bindInboxDrain(ctx),
 	}
 	if m := f.memory; m != nil && m.Enabled {
 		task.Memory = &delegate.MemorySpec{
@@ -1117,9 +1165,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 			f.id, 0, task.Model, toolSuffix)
 	}
 
-	result, err := e.retryDelegateLoop(ctx, f.id, backendName, func() (delegate.Result, error) {
-		return backend.Execute(ctx, task)
-	})
+	result, err := e.dispatchWithProviderFallback(ctx, f.id, backendName, e.resolveProviderChain(node), backend, &task)
 	if err != nil {
 		if e.hooks.OnDelegateError != nil {
 			bn := result.BackendName
@@ -1642,8 +1688,9 @@ func (e *ClawExecutor) executeLLMRouterUnified(ctx context.Context, node *ir.Rou
 		WorkDir:         e.workDir,
 		ReasoningEffort: resolveReasoningEffort(node.ReasoningEffort, input),
 		Sandbox:         e.sandbox,
-		ProviderHint:    e.resolveProvider(node),
-		InboxDrain:      e.bindInboxDrain(ctx),
+		// ProviderHint is set per-attempt by dispatchWithProviderFallback
+		// as it walks the node's provider chain.
+		InboxDrain: e.bindInboxDrain(ctx),
 	}
 
 	// Emit backend started event.
@@ -1651,9 +1698,7 @@ func (e *ClawExecutor) executeLLMRouterUnified(ctx context.Context, node *ir.Rou
 		e.hooks.OnDelegateStarted(node.ID, backendName)
 	}
 
-	result, err := e.retryDelegateLoop(ctx, node.ID, backendName, func() (delegate.Result, error) {
-		return backend.Execute(ctx, task)
-	})
+	result, err := e.dispatchWithProviderFallback(ctx, node.ID, backendName, e.resolveProviderChain(node), backend, &task)
 	if err != nil {
 		if e.hooks.OnDelegateError != nil {
 			bn := result.BackendName

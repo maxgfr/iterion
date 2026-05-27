@@ -397,3 +397,51 @@ Before creating each issue:
 - You do NOT recommend an `assignee` whose `.bot` file the
   explorer did not surface.
 - You do NOT recommend more than one `next_action`.
+
+## Backend selection
+
+When authoring a `.bot` (e.g. via `feature_dev`), each agent/judge
+node picks where its LLM call runs:
+
+- `backend: "claude_code"` — the official Claude Code CLI. Use for
+  nodes that need real tool/shell access (implementers, fixers) or
+  the native Skill tool / Claude Code MCP servers.
+- `backend: "claw"` — in-process, multi-provider. Use for read-only
+  nodes (judges, reviewers, planners) and for any non-Anthropic model
+  (`openai/*` models MUST use `backend: "claw"`).
+- Omit `backend:` to let the runtime auto-detect from host credentials
+  (see [docs/backends.md](../../../docs/backends.md)).
+
+### Per-node `provider:` and the fallback chain
+
+`provider:` is a credential-routing hint, resolved per node after
+`${VAR}` expansion. A **single value** routes one credential lane; a
+**comma-separated, ordered chain** declares fallbacks that the runtime
+walks transparently when a provider fails *beyond its retry budget*:
+
+```yaml
+agent reviewer:
+  backend: "claude_code"
+  provider: "zai,anthropic"        # try z.ai; on hard failure, fall through to Anthropic
+  model: "claude-opus-4-7"
+```
+
+- Known hints: `anthropic`, `zai`, `openai`, `auto` (≡ default
+  precedence). Unknown tokens are warned at compile time (**C087**)
+  and ignored at run time.
+- On a hard provider failure beyond retries, the executor re-issues the
+  same call against the next hint and logs **one** fall-through note —
+  the operator sees a route change, not a failure. The run only fails
+  if every provider in the chain is exhausted.
+- This **generalises `RESCUE_PROVIDER`**: `provider: "${RESCUE_PROVIDER:-zai},anthropic"`
+  starts on z.ai (or whatever `RESCUE_PROVIDER` overrides to) and falls
+  back to Anthropic automatically — no env flip + manual resume needed.
+- The chain is honoured by **`claude_code`** today (same-API family:
+  `anthropic`↔`zai`↔Anthropic-compatible facades, identical model id).
+  `claw` derives its provider from the `model:` prefix and `codex`
+  ignores the hint, so a multi-element chain on those backends is a
+  no-op — the runtime uses only the first provider and the compiler
+  warns (**C088**). For cross-provider failover on `claw`, vary the
+  `model:` instead.
+- Single-value `provider:` (and unset) behaves exactly as before —
+  the chain form is purely additive.

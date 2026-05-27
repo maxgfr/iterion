@@ -70,6 +70,77 @@ export ITERION_BACKEND_PREFERENCE='codex'
 Backends omitted from the list are never auto-selected, even if
 their credentials exist.
 
+## Per-node provider routing & fallback chain (`provider:`)
+
+The `backend:` field chooses *which* execution stack runs a node; the
+optional `provider:` field is a finer **credential-routing hint** within
+that stack. It is resolved per node after `${VAR}` / `${VAR:-default}`
+expansion.
+
+Known hints:
+
+| Hint | Effect |
+|---|---|
+| `anthropic` | Force Anthropic-direct (`ANTHROPIC_API_KEY` / Claude Code OAuth); skip z.ai even when `ZAI_API_KEY` is set. |
+| `zai` | Force the z.ai Anthropic-compatible facade (`ANTHROPIC_BASE_URL`=z.ai + `ANTHROPIC_AUTH_TOKEN`=`$ZAI_API_KEY`). |
+| `openai` | Force OpenAI-direct (`OPENAI_API_KEY`), skipping `OPENAI_BASE_URL` overrides. |
+| `auto` / *(unset)* | Default process-env precedence. |
+
+### Fallback chain
+
+`provider:` accepts a single value **or** an ordered, comma-separated
+chain. The chain is the declarative generalisation of the
+`RESCUE_PROVIDER` escape hatch:
+
+```yaml
+agent reviewer:
+  backend: "claude_code"
+  provider: "${RESCUE_PROVIDER:-zai},anthropic"   # z.ai first, Anthropic on hard failure
+  model: "claude-opus-4-7"
+```
+
+Semantics:
+
+- Each provider gets the node's **full retry budget** (transient errors
+  are retried in place — see `RetryPolicy`).
+- Only a **hard failure beyond the retry budget** — a non-retryable
+  error, or a retryable one whose retries are exhausted — falls through
+  to the *next* provider. The executor re-issues the same call with the
+  next hint and emits **one** log note (and an `OnProviderFallback`
+  observability event), so the operator sees a route change, not a
+  failure.
+- The node only fails if **every** provider in the chain is exhausted;
+  the surfaced error names the chain that was attempted.
+- A cancelled / timed-out run aborts the chain immediately rather than
+  thrashing through every provider.
+- Env expansion runs on the whole field **first**, then the result is
+  split on commas — so an env var can supply the entire chain
+  (`${PROVIDERS:-anthropic,zai}`) and a `:-default` may itself contain a
+  comma.
+
+### Which backends honour the chain
+
+Only **`claude_code`** consumes the provider hint today, and it routes
+within the **Anthropic-compatible family** (`anthropic` ↔ `zai` ↔ other
+facades) — i.e. the same model id served by a different credential lane.
+This is the validated path and the original `RESCUE_PROVIDER` use case.
+
+`claw` derives its provider from the `model:` prefix
+(`openai/…`, `anthropic/…`), and `codex` ignores the hint entirely. On
+those backends a multi-element chain is a **no-op**: the runtime uses
+only the first provider, and the compiler emits a **C088** warning. For
+cross-provider failover under `claw` (e.g. Anthropic → OpenAI), vary the
+`model:` per node instead — a credential hint alone cannot switch the
+model that the API expects.
+
+Unknown hint tokens (typos) are flagged at compile time with **C087**
+(a warning) and ignored at run time (the node falls back to default
+credential precedence). Fields containing a `${VAR}` env ref are left
+for run-time resolution and not statically validated.
+
+Single-value `provider:` (and unset) behaviour is unchanged — the chain
+form is purely additive and fully back-compatible.
+
 ## Per-backend detection rules
 
 A backend reports `Available: true` only when **both** a binary/runtime
