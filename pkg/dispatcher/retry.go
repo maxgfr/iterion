@@ -3,10 +3,34 @@ package dispatcher
 import (
 	"context"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/store"
 )
+
+// sandboxBackoffSchedule overrides the default exponential backoff
+// when the failure is a sandbox-setup error (devcontainer postCreate
+// killed, docker daemon refused, image pull failed). These don't
+// recover within milliseconds — the host is the bottleneck. Pause
+// longer between attempts so the operator's docker daemon and OS
+// have room to breathe, and so a runaway OOM cycle doesn't pin the
+// dispatcher in a "spawn-die-spawn-die" loop that exhausts further
+// resources.
+var sandboxBackoffSchedule = []time.Duration{
+	60 * time.Second,
+	180 * time.Second,
+	300 * time.Second,
+}
+
+// sandboxParkDelay is the delay queued AFTER the schedule is
+// exhausted. We don't strictly stop retrying (the operator may fix
+// the host without touching the dispatcher), but we wait long enough
+// that the model spend / docker churn settles to zero. A retry entry
+// with a 1h DueAt is also visible on the studio's dispatcher view so
+// the operator can manually clear it after fixing the underlying
+// issue.
+const sandboxParkDelay = 1 * time.Hour
 
 // scheduleRetry queues a retry for the given issue, using exponential
 // backoff capped by cfg.MaxRetryBackoff. Must be called from the actor.
@@ -31,6 +55,13 @@ func (c *Dispatcher) scheduleRetry(issueID string, prev *runningEntry, runErr er
 	}
 	attempt := prevAttempt + 1
 	delay := computeBackoff(attempt, cfg.MaxRetryBackoff())
+	sandboxFail := isSandboxSetupError(runErr)
+	parked := false
+	if sandboxFail {
+		var sbParked bool
+		delay, sbParked = sandboxBackoff(attempt)
+		parked = sbParked
+	}
 	due := time.Now().Add(delay)
 
 	timer := time.AfterFunc(delay, func() {
@@ -52,7 +83,14 @@ func (c *Dispatcher) scheduleRetry(issueID string, prev *runningEntry, runErr er
 		Timer:      timer,
 		PrevRunID:  c.resumableRunID(prev.RunID),
 	}
-	c.logger.Info("dispatcher: %s retry queued (attempt=%d, in=%s, resume=%s)", prev.Identifier, attempt, delay, prev.RunID)
+	switch {
+	case parked:
+		c.logger.Warn("dispatcher: %s parked after %d sandbox-setup failures — next retry in %s. Investigate host (docker daemon, OOM, disk) before then or clear the retry from the studio.", prev.Identifier, attempt-1, delay)
+	case sandboxFail:
+		c.logger.Warn("dispatcher: %s sandbox setup failed (attempt=%d/%d) — backing off %s before retry", prev.Identifier, attempt, len(sandboxBackoffSchedule), delay)
+	default:
+		c.logger.Info("dispatcher: %s retry queued (attempt=%d, in=%s, resume=%s)", prev.Identifier, attempt, delay, prev.RunID)
+	}
 }
 
 // resumableRunID returns the runID iff the corresponding run record
@@ -82,6 +120,59 @@ func (c *Dispatcher) resumableRunID(runID string) string {
 		return runID
 	}
 	return ""
+}
+
+// isSandboxSetupError reports whether the run failed before the
+// runtime engine got to execute any node — devcontainer postCreate
+// exited non-zero, docker daemon refused, image pull timed out. These
+// are NOT transients the per-node recovery dispatch can mask; they
+// fail deterministically until the host is fixed. The dispatcher
+// applies sandboxBackoffSchedule instead of the default exponential
+// so consecutive failures don't pile docker churn on a stressed host.
+//
+// Match strings are intentionally broad and lowercase — claw's claude
+// CLI, claude_code, the runtime's sandbox driver, and a few buildkit
+// edge cases all wrap their errors with slightly different prefixes,
+// and matching too tightly here means a stress-induced postCreate
+// failure slips into the default 10s exponential and re-spawns the
+// container before the host has recovered.
+func isSandboxSetupError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "sandbox start:") {
+		return true
+	}
+	if strings.Contains(msg, "postcreate") {
+		return true
+	}
+	if strings.Contains(msg, "post_create") {
+		return true
+	}
+	if strings.Contains(msg, "docker: postcreate") {
+		return true
+	}
+	if strings.Contains(msg, "image pull") {
+		return true
+	}
+	if strings.Contains(msg, "container start") {
+		return true
+	}
+	return false
+}
+
+// sandboxBackoff returns the delay for the given retry attempt under
+// the sandbox-setup-error schedule + a parked flag once the schedule
+// is exhausted. attempt is 1-indexed (first retry = attempt 1).
+func sandboxBackoff(attempt int) (delay time.Duration, parked bool) {
+	if attempt < 1 {
+		return time.Second, false
+	}
+	if attempt <= len(sandboxBackoffSchedule) {
+		return sandboxBackoffSchedule[attempt-1], false
+	}
+	return sandboxParkDelay, true
 }
 
 // computeBackoff returns min(10s * 2^(attempt-1), cap), with attempt=0
