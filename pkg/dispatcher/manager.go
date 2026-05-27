@@ -420,6 +420,40 @@ func (m *Manager) CancelRun(runID string) bool {
 	return cur.CancelByRunID(runID)
 }
 
+// TransitionMergedIssue moves the issue identified by issueID to the
+// state configured under Agent.MergedState. Best-effort:
+//   - returns nil silently when the dispatcher is idle, the config
+//     leaves MergedState empty, or the value is "none". The merge
+//     handler treats these as "feature opt-out", not failure.
+//   - returns a wrapped error for tracker-level failures so the
+//     caller can log them; the merge itself remains successful
+//     regardless.
+//
+// Used by the server's merge handler to drive the GitHub-style
+// "close issue on PR merge" UX for native and remote trackers.
+func (m *Manager) TransitionMergedIssue(ctx context.Context, issueID string) error {
+	if issueID == "" {
+		return nil
+	}
+	cur := m.Current()
+	if cur == nil {
+		return nil
+	}
+	cfg := cur.cfg.Load()
+	if cfg == nil {
+		return nil
+	}
+	target := cfg.Agent.MergedState
+	if target == "" || target == "none" {
+		return nil
+	}
+	if err := cur.tracker.UpdateState(ctx, issueID, target); err != nil {
+		return fmt.Errorf("transition merged issue %s → %s: %w", issueID, target, err)
+	}
+	cur.logger.Info("dispatcher: merged-issue transition %s → %s", issueID, target)
+	return nil
+}
+
 func (m *Manager) setError(err error) {
 	m.mu.Lock()
 	m.state = ManagerStateError

@@ -210,7 +210,11 @@ export default function WhatsNextView() {
               session.runId &&
               session.runStatus !== "finished" &&
               session.runStatus !== "failed" && (
-                <AgentChatbox runId={session.runId} />
+                // embedded={true}: queued messages are folded into the
+                // transcript above (as user-message cards), so the
+                // chatbox suppresses its own duplicate list. Only the
+                // composer + skill picker remain.
+                <AgentChatbox runId={session.runId} embedded />
               )
             )}
           </div>

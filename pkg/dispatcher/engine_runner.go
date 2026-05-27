@@ -178,6 +178,20 @@ func (r *EngineRunner) Dispatch(ctx context.Context, spec DispatchSpec) error {
 		runtime.WithWorkflowHash(r.workflowHash),
 		runtime.WithFilePath(r.workflowPath),
 		runtime.WithRunName(store.GenerateRunName(r.workflowPath + ":" + spec.RunID)),
+	}
+	// Stamp the issue back-reference so the studio's RunHeader can
+	// link to the originating kanban ticket. Only set when the
+	// dispatcher actually populated the spec — direct CLI / studio
+	// launches leave these empty and the Source field stays nil.
+	if spec.Issue != nil && spec.Issue.ID != "" {
+		opts = append(opts, runtime.WithSource(&store.RunSource{
+			Kind:            store.RunSourceKindDispatcher,
+			IssueID:         spec.Issue.ID,
+			IssueIdentifier: spec.Issue.Identifier,
+			IssueTitle:      spec.Issue.Title,
+		}))
+	}
+	opts = append(opts,
 		// Per-issue workspace becomes the runtime workDir so ${PROJECT_DIR}
 		// in bot var defaults expands to the dispatcher's isolated
 		// worktree path, not the daemon's cwd (= host repo). Without
@@ -192,7 +206,7 @@ func (r *EngineRunner) Dispatch(ctx context.Context, spec DispatchSpec) error {
 				spec.OnEvent(string(evt.Type))
 			}
 		}),
-	}
+	)
 	if r.bundle != nil {
 		opts = append(opts, runtime.WithBundle(r.bundle))
 	}

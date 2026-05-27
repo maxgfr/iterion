@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/SocialGouv/iterion/pkg/runview"
@@ -64,6 +65,7 @@ func (s *Server) handleMergeRun(w http.ResponseWriter, r *http.Request) {
 		s.httpErrorFor(w, r, http.StatusConflict, "merge: %v", err)
 		return
 	}
+	s.maybeTransitionMergedIssue(r.Context(), id, res.SourceIssueID)
 	s.writeJSONFor(w, r, mergeRunResponse{
 		RunID:         id,
 		MergedCommit:  res.MergedCommit,
@@ -71,6 +73,29 @@ func (s *Server) handleMergeRun(w http.ResponseWriter, r *http.Request) {
 		MergeStrategy: res.MergeStrategy,
 		MergeStatus:   res.MergeStatus,
 	})
+}
+
+// maybeTransitionMergedIssue fires the dispatcher's MergedState
+// transition for a run's source issue when the merge succeeds. Silent
+// no-op when:
+//   - no Dispatcher is wired (CLI/cloud variants without an actor),
+//   - issueID is empty (run wasn't dispatcher-spawned),
+//   - or the dispatcher's MergedState config is empty / "none".
+//
+// The caller supplies issueID from MergeResponse.SourceIssueID so this
+// path never hits the store — the merge handler already loaded and
+// persisted the run.
+//
+// Tracker errors are logged but never propagated — the merge response
+// stays clean, and the operator can move the issue manually if the
+// auto-transition didn't land.
+func (s *Server) maybeTransitionMergedIssue(ctx context.Context, runID, issueID string) {
+	if s.cfg.Dispatcher == nil || issueID == "" {
+		return
+	}
+	if err := s.cfg.Dispatcher.TransitionMergedIssue(ctx, issueID); err != nil {
+		s.logger.Warn("server: post-merge issue transition (run=%s, issue=%s): %v", runID, issueID, err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +235,7 @@ func (s *Server) handleFinalizeMergeConflict(w http.ResponseWriter, r *http.Requ
 		s.httpErrorFor(w, r, http.StatusConflict, "finalize: %v", err)
 		return
 	}
+	s.maybeTransitionMergedIssue(r.Context(), id, res.SourceIssueID)
 	s.writeJSONFor(w, r, mergeRunResponse{
 		RunID:         id,
 		MergedCommit:  res.MergedCommit,

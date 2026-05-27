@@ -247,6 +247,11 @@ type MergeResponse struct {
 	MergedInto    string              `json:"merged_into"`
 	MergeStrategy store.MergeStrategy `json:"merge_strategy"`
 	MergeStatus   store.MergeStatus   `json:"merge_status"`
+	// SourceIssueID is set when the run was dispatcher-spawned (i.e.
+	// Run.Source is non-nil). The HTTP handler reads it to fire the
+	// post-merge auto-transition without a second LoadRun round-trip.
+	// Internal-only — omitted from the JSON wire.
+	SourceIssueID string `json:"-"`
 }
 
 // PerformMerge runs the deferred merge for runID. Preconditions:
@@ -344,7 +349,18 @@ func (s *Service) PerformMergeCtx(ctx context.Context, runID string, req MergeRe
 		MergedInto:    r.MergedInto,
 		MergeStrategy: r.MergeStrategy,
 		MergeStatus:   r.MergeStatus,
+		SourceIssueID: sourceIssueID(r),
 	}, nil
+}
+
+// sourceIssueID returns r.Source.IssueID without the nil-pointer dance
+// every caller would otherwise have to write. Empty for non-dispatcher
+// runs.
+func sourceIssueID(r *store.Run) string {
+	if r == nil || r.Source == nil {
+		return ""
+	}
+	return r.Source.IssueID
 }
 
 // resolveMergeTargetForPersistence resolves the merge target into a
@@ -506,6 +522,7 @@ func (s *Service) FinalizeMergeAfterConflict(ctx context.Context, runID, message
 		MergedInto:    r.MergedInto,
 		MergeStrategy: r.MergeStrategy,
 		MergeStatus:   r.MergeStatus,
+		SourceIssueID: sourceIssueID(r),
 	}, nil
 }
 

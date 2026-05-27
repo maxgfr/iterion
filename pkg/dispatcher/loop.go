@@ -447,8 +447,13 @@ func (c *Dispatcher) buildSpec(cfg *Config, iss tracker.Issue, runID, wsPath str
 		WorkspacePath: wsPath,
 		StoreDir:      c.storeDir,
 		Vars:          vars,
-		Attachments:   attachments,
-		Assignee:      iss.Assignee,
+		Issue: &IssueRef{
+			ID:         iss.ID,
+			Identifier: iss.Identifier,
+			Title:      iss.Title,
+		},
+		Attachments: attachments,
+		Assignee:    iss.Assignee,
 		OnEvent: func(name string) {
 			// Synchronous, lock-free heartbeat: read by reconcileStalled
 			// without needing the actor to drain c.cmds first. This is

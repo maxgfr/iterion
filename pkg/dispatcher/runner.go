@@ -31,12 +31,29 @@ type DispatchSpec struct {
 	// A RoutingRunner inspects this to pick a per-assignee workflow.
 	Assignee string
 
+	// Issue is the back-reference to the kanban issue that triggered
+	// this dispatch. nil for direct CLI / studio launches; non-nil
+	// when buildSpec was driven by the dispatcher actor. The
+	// EngineRunner stamps these onto the run record's Source field
+	// so the studio's RunHeader can link back to the ticket.
+	Issue *IssueRef
+
 	// OnEvent is invoked for every observation point of the run
 	// (event_appended, node_started, …). The dispatcher uses it to
 	// update its last-event watermark for stall detection. Runners
 	// MUST be safe for concurrent invocation; OnEvent runs in the
 	// engine goroutine.
 	OnEvent func(eventName string)
+}
+
+// IssueRef captures the minimum back-reference the engine needs to
+// stamp Source on the run record. Mirrors store.RunSource without
+// importing it into the runner contract (the dispatcher package
+// translates).
+type IssueRef struct {
+	ID         string
+	Identifier string
+	Title      string
 }
 
 // Runner abstracts the engine that turns a DispatchSpec into a running

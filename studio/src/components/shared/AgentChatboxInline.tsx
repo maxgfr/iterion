@@ -23,6 +23,12 @@ interface Props {
   // When true, the textarea grows up to ~10 rows; when false, capped
   // at 4 rows for use in tight containers (FloatingChatPanel).
   compact?: boolean;
+  // When the parent transcript renders queued messages inline (the
+  // user-message card variant the runChat fold emits), pass `embedded`
+  // so this chatbox hides its own duplicate queue list. The composer
+  // and skill picker stay visible — only the list of past+pending
+  // queued messages below the textarea disappears.
+  embedded?: boolean;
 }
 
 // Renders the composer without outer chrome — the parent container
@@ -33,11 +39,17 @@ export default function AgentChatboxInline({
   disabled = false,
   maxVisible = 5,
   compact = false,
+  embedded = false,
 }: Props) {
   const messages = useRunStore((s) => s.queuedMessages);
   const setQueuedMessages = useRunStore((s) => s.setQueuedMessages);
   const chatEnterSubmits = useUIStore((s) => s.chatEnterSubmits);
-  const [draft, setDraft] = useState("");
+  // Draft lives in the run store so the WhatsNextView swap between
+  // AgentChatbox and the HumanChatTurn footer (which unmounts this
+  // component when the bot raises a question) doesn't discard the
+  // operator's in-flight text.
+  const draft = useRunStore((s) => s.chatDraft);
+  const setDraft = useRunStore((s) => s.setChatDraft);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -261,7 +273,7 @@ export default function AgentChatboxInline({
         </p>
       )}
 
-      {visible.length > 0 && (
+      {!embedded && visible.length > 0 && (
         <ul className="space-y-1">
           {visible.map((m) => (
             <li
@@ -291,7 +303,7 @@ export default function AgentChatboxInline({
         </ul>
       )}
 
-      {hiddenCount > 0 && (
+      {!embedded && hiddenCount > 0 && (
         <button
           type="button"
           className="text-[10px] text-fg-subtle hover:text-fg-default"

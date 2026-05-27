@@ -146,6 +146,20 @@ type AgentConfig struct {
 	// disable; on an unknown state the dispatcher logs a warning and
 	// leaves the issue in RunningState (back to pre-fix behaviour).
 	CompletedState string `yaml:"completed_state,omitempty" json:"completed_state,omitempty"`
+
+	// MergedState is the kanban state the dispatcher moves an issue
+	// into when the operator squash/merges the run's commits via the
+	// studio (POST /api/runs/{id}/merge). The transition fires only
+	// when the run has a Source.IssueID (= dispatcher-spawned) and
+	// the merge succeeds. Analog of GitHub's "close issue on PR merge"
+	// — review queues can flow review → done without the operator
+	// touching the kanban after every merge click.
+	//
+	// Empty disables the auto-transition (the issue stays in
+	// CompletedState — typically "review" — until manually moved).
+	// "none" is treated the same as empty. An unknown state name logs
+	// a warning and is a no-op.
+	MergedState string `yaml:"merged_state,omitempty" json:"merged_state,omitempty"`
 }
 
 // WorkspaceConfig controls where per-issue workspaces live.

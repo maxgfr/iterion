@@ -107,6 +107,11 @@ type RunHeader struct {
 	// The studio's QueuedBanner uses it to render the "3rd in queue"
 	// copy. See cloud-ready plan §F (T-03, T-15, T-31).
 	QueuePosition int `json:"queue_position,omitempty"`
+	// Source records who originated the run (dispatcher → issue back-
+	// reference today; CLI / studio launches leave it nil). The studio
+	// RunHeader reads it to render a link back to the kanban ticket
+	// that triggered the dispatch.
+	Source *store.RunSource `json:"source,omitempty"`
 }
 
 // RunSnapshot is the structured view returned by GET /api/runs/{id} and
@@ -751,6 +756,7 @@ func headerFromRun(r *store.Run) RunHeader {
 		MergeStrategy:    r.MergeStrategy,
 		MergeStatus:      r.MergeStatus,
 		AutoMerge:        r.AutoMerge,
+		Source:           r.Source,
 	}
 	// Bootstrap fallback: when the run is already running but the WS
 	// catch-up hasn't yet seen the run_started event, anchor on

@@ -115,9 +115,36 @@ export interface ExtensionMessage {
   payload: unknown;
 }
 
+// Lifecycle of an operator-queued chat message. Stays in lockstep with
+// `pkg/store/user_messages.go:QueuedMessageStatus`:
+//   queued    → sitting in the inbox, not yet seen by the LLM
+//   delivered → injected into the agent's conversation; the next LLM
+//               turn will read it (but hasn't been processed yet)
+//   consumed  → the LLM has finished a turn that included it
+//   cancelled → operator (or runtime) dropped it before delivery
+export type UserMessageStatus =
+  | "queued"
+  | "delivered"
+  | "consumed"
+  | "cancelled";
+
+// UserMessage is one operator-queued chat message rendered inline in
+// the transcript. Position in the message list is anchored to the
+// originating `user_message_queued` event's sequence number, so the
+// card stays in chronological order alongside the bot's turns.
+// Subsequent `user_message_delivered` / `_consumed` / `_cancelled`
+// events flip `status` in place without changing the card's position.
+export interface UserMessage {
+  kind: "user-message";
+  id: string; // matches QueuedUserMessage.id
+  text: string;
+  status: UserMessageStatus;
+}
+
 export type RunChatMessage =
   | BannerMessage
   | HumanQuestionMessage
   | NodeOutputMessage
   | SessionClosedMessage
-  | ExtensionMessage;
+  | ExtensionMessage
+  | UserMessage;

@@ -269,6 +269,43 @@ type Run struct {
 	ForkedFrom string      `json:"forked_from,omitempty" bson:"forked_from,omitempty"`
 	ForkAnchor *ForkAnchor `json:"fork_anchor,omitempty" bson:"fork_anchor,omitempty"`
 	SourceHash string      `json:"source_hash,omitempty" bson:"source_hash,omitempty"`
+
+	// Source records the originating action that produced this run —
+	// today, only "dispatcher" runs carry an Issue back-reference, but
+	// the shape leaves room for CLI / studio / cloud-API variants
+	// without another schema bump. The studio's RunHeader reads
+	// IssueID / IssueIdentifier / IssueTitle to render a "from ticket
+	// #X" link back to the kanban; resume re-stamps the same Source
+	// so the linkage survives.
+	Source *RunSource `json:"source,omitempty" bson:"source,omitempty"`
+}
+
+// Recognised values for RunSource.Kind. The field stays a free-form
+// string so the schema is forward-compatible with future producers
+// (cloud-API, scheduled runs, fork variants); these consts cover the
+// known set today.
+const (
+	RunSourceKindDispatcher = "dispatcher"
+)
+
+// RunSource captures who originated this run. Populated by the
+// dispatcher when an issue is claimed; empty for CLI / studio /
+// fork-spawned runs.
+type RunSource struct {
+	// Kind is the producer of this run (see RunSourceKind* consts).
+	Kind string `json:"kind,omitempty" bson:"kind,omitempty"`
+	// IssueID is the tracker-specific opaque id (e.g.
+	// "native:55283bbc-…" or "github:repo#123") of the issue that
+	// triggered the dispatch.
+	IssueID string `json:"issue_id,omitempty" bson:"issue_id,omitempty"`
+	// IssueIdentifier is the short, human-facing identifier the
+	// tracker exposes (e.g. "55283bbc" or "123") — used in URLs and
+	// in the studio's chip label.
+	IssueIdentifier string `json:"issue_identifier,omitempty" bson:"issue_identifier,omitempty"`
+	// IssueTitle is the issue's title at dispatch time. Snapshot —
+	// not re-fetched on resume, so a later title edit doesn't
+	// rewrite the historical run record.
+	IssueTitle string `json:"issue_title,omitempty" bson:"issue_title,omitempty"`
 }
 
 // ForkAnchor identifies where a forked run resumes inside the parent's

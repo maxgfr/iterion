@@ -157,6 +157,83 @@ function MessageRow({
       return <SessionClosedRow message={message} />;
     case "plan-handed-off":
       return <PlanHandedOffRow message={message} />;
+    case "user-message":
+      return <UserMessageRow message={message} />;
+  }
+}
+
+// UserMessageRow renders an operator-queued chat message inline in
+// the transcript, anchored to the chronological position of the
+// originating `user_message_queued` event. The status pill makes the
+// lifecycle explicit — operators saw "delivered" and assumed the bot
+// had acted on the request, when in fact it only meant "now in the
+// agent's conversation context". The new labels distinguish "in
+// agent's context" from "agent read it" so the contract is clear.
+function UserMessageRow({
+  message,
+}: {
+  message: Extract<WhatsNextMessage, { kind: "user-message" }>;
+}) {
+  const { label, tone, hint } = userStatusMeta(message.status);
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[85%] rounded-lg border border-info/30 bg-info-soft/50 px-3 py-2">
+        <div className="text-[12px] whitespace-pre-wrap break-words text-fg-default">
+          {message.text}
+        </div>
+        <div className="mt-1 flex items-center justify-end gap-1.5">
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${tone}`}
+            title={hint}
+          >
+            {label}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function userStatusMeta(
+  status: Extract<WhatsNextMessage, { kind: "user-message" }>["status"],
+): { label: string; tone: string; hint: string } {
+  switch (status) {
+    case "queued":
+      return {
+        label: "Queued",
+        tone: "bg-warning-soft text-warning-fg",
+        hint: "Waiting for the agent's next turn. The agent has not seen it yet.",
+      };
+    case "delivered":
+      return {
+        label: "In agent's context",
+        tone: "bg-info-soft text-info-fg",
+        hint: "Injected into the agent's conversation. The next LLM turn will read it — but the agent has not processed it yet.",
+      };
+    case "consumed":
+      return {
+        label: "Read by agent",
+        tone: "bg-success-soft text-success-fg",
+        hint: "The agent finished a turn that included this message. Note: this does not mean the agent acted on it — only that it had the chance to.",
+      };
+    case "cancelled":
+      return {
+        label: "Cancelled",
+        tone: "bg-surface-2 text-fg-muted",
+        hint: "Removed before delivery.",
+      };
+    default: {
+      // Compile-time exhaustiveness: any new UserMessageStatus added
+      // upstream surfaces here as a type error. The runtime fallback
+      // keeps the row renderable instead of crashing on a missing
+      // mapping.
+      const _exhaustive: never = status;
+      return {
+        label: String(_exhaustive),
+        tone: "bg-surface-2 text-fg-muted",
+        hint: "",
+      };
+    }
   }
 }
 

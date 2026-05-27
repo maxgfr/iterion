@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Pencil1Icon, ReloadIcon, ResetIcon } from "@radix-ui/react-icons";
 
@@ -195,6 +195,30 @@ function MergeFooter({
   const [editingMessage, setEditingMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Optimistic merge result captured from the mergeRun response. The
+  // parent's refreshSnapshot is async (network round-trip + store
+  // update), so without this the panel briefly snaps back to the
+  // pristine merge form between submit and snapshot apply — operators
+  // mistake that gap for "click did nothing" and double-click, hitting
+  // the now-merged backend with a stale request that surfaces as a
+  // confusing error. We render the merged view immediately on response;
+  // the snapshot still flows through in the background as source of
+  // truth and matches what we showed.
+  const [optimisticMerged, setOptimisticMerged] = useState<{
+    merged_commit: string;
+    merged_into: string;
+    merge_strategy: MergeStrategy;
+  } | null>(null);
+  // Clear the optimistic flip once the snapshot catches up: from that
+  // point `merged` itself drives the merged view. Without this guard
+  // a later state change (e.g. the operator re-running this view
+  // against a different run that happens to be unmerged) would still
+  // see our stale optimistic snapshot.
+  useEffect(() => {
+    if (merged && optimisticMerged !== null) {
+      setOptimisticMerged(null);
+    }
+  }, [merged, optimisticMerged]);
 
   // Conflict in progress → hand off to the dedicated resolver. The
   // resolver owns its own footer chrome (Resolve / Abort / Finalize
@@ -209,17 +233,19 @@ function MergeFooter({
     );
   }
 
-  // Already merged → show the merged badge regardless of how we got
-  // here (deferred UI action OR auto-merge at end of run).
-  if (merged) {
-    const shortMerged = (run.merged_commit ?? "").slice(0, 7);
+  // Already merged (either from a fresh snapshot or from the local
+  // optimistic flip below) → show the merged badge.
+  if (merged || optimisticMerged) {
+    const shortMerged = (
+      optimisticMerged?.merged_commit ?? run.merged_commit ?? ""
+    ).slice(0, 7);
+    const mergedInto = optimisticMerged?.merged_into ?? run.merged_into;
+    const mergedStrategy = optimisticMerged?.merge_strategy ?? run.merge_strategy;
     return (
       <div className="shrink-0 border-t border-border-default px-3 py-2 bg-success-soft text-success-fg text-[11px]">
         <div className="font-medium">
-          {run.merge_strategy === "squash"
-            ? "Squashed and merged"
-            : "Merged"}{" "}
-          into {run.merged_into}
+          {mergedStrategy === "squash" ? "Squashed and merged" : "Merged"}{" "}
+          into {mergedInto}
         </div>
         {shortMerged && (
           <div className="font-mono text-[10px] mt-0.5">{shortMerged}</div>
@@ -296,6 +322,16 @@ function MergeFooter({
         commit_message: override,
       });
       if (res.merge_status === "merged") {
+        // Flip locally before the snapshot round-trip so the operator
+        // sees the merged badge the moment the API returns. Without
+        // this, a fast successful merge looked indistinguishable from
+        // a no-op — operators double-clicked, and the second request
+        // hit a now-merged backend that returned a confusing error.
+        setOptimisticMerged({
+          merged_commit: res.merged_commit,
+          merged_into: res.merged_into,
+          merge_strategy: res.merge_strategy,
+        });
         onMergeComplete?.();
       }
     } catch (e) {
@@ -348,7 +384,8 @@ function MergeFooter({
         variant="primary"
         size="sm"
         onClick={() => void onSubmit()}
-        disabled={submitting || (editingMessage !== null && editingMessage.trim() === "")}
+        loading={submitting}
+        disabled={editingMessage !== null && editingMessage.trim() === ""}
         className="w-full"
       >
         {submitting ? "Merging…" : buttonLabel}

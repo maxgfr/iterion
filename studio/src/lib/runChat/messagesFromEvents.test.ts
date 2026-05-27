@@ -305,4 +305,88 @@ describe("runChat messagesFromEvents", () => {
       expect(ext.payload).toEqual({ kind: "ok" });
     }
   });
+
+  // user_message_* events fold into UserMessage cards that sit inline
+  // in the transcript, status flipping in place as the lifecycle
+  // advances. These tests pin the contract that drives the WhatsNext
+  // chat thread (no more separate "queued list under the composer").
+  it("pushes a queued user-message card on user_message_queued", () => {
+    nextSeq = 1;
+    const out = messagesFromEvents({
+      resolver: irKindResolver(fixtureWorkflow),
+      events: [
+        evt("user_message_queued", {
+          data: { id: "m1", text: "create a ticket" },
+        }),
+      ],
+      snapshot: null,
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      kind: "user-message",
+      id: "m1",
+      text: "create a ticket",
+      status: "queued",
+    });
+  });
+
+  it("flips status in place across delivered → consumed", () => {
+    nextSeq = 1;
+    const out = messagesFromEvents({
+      resolver: irKindResolver(fixtureWorkflow),
+      events: [
+        evt("user_message_queued", { data: { id: "m1", text: "do X" } }),
+        evt("user_message_delivered", { data: { id: "m1" } }),
+        evt("node_started", { node_id: "explorer" }),
+        evt("user_message_consumed", { data: { id: "m1" } }),
+      ],
+      snapshot: null,
+    });
+    // The user-message card anchors at its queued position (before the
+    // banner). Its status reflects the latest lifecycle event for m1.
+    const userMsg = out.find((m) => m.kind === "user-message");
+    expect(userMsg).toMatchObject({ kind: "user-message", id: "m1", status: "consumed" });
+    // Banner came AFTER the user message — order preserved.
+    const userIdx = out.findIndex((m) => m.kind === "user-message");
+    const bannerIdx = out.findIndex((m) => m.kind === "banner");
+    expect(bannerIdx).toBeGreaterThan(userIdx);
+  });
+
+  it("synthesises a user-message card when a delivered event arrives without a queued precursor", () => {
+    // WS reconnect / history truncation can drop the queued event; the
+    // fold must still surface the message so the operator sees it
+    // (status = delivered, not queued).
+    nextSeq = 1;
+    const out = messagesFromEvents({
+      resolver: irKindResolver(fixtureWorkflow),
+      events: [
+        evt("user_message_delivered", {
+          data: { id: "m_orphan", text: "late delivery" },
+        }),
+      ],
+      snapshot: null,
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      kind: "user-message",
+      id: "m_orphan",
+      text: "late delivery",
+      status: "delivered",
+    });
+  });
+
+  it("dedupes duplicate user_message_queued events", () => {
+    // Replay (e.g. snapshot then live stream catching up) must not push
+    // a second card for the same id.
+    nextSeq = 1;
+    const out = messagesFromEvents({
+      resolver: irKindResolver(fixtureWorkflow),
+      events: [
+        evt("user_message_queued", { data: { id: "m1", text: "first" } }),
+        evt("user_message_queued", { data: { id: "m1", text: "first" } }),
+      ],
+      snapshot: null,
+    });
+    expect(out.filter((m) => m.kind === "user-message")).toHaveLength(1);
+  });
 });

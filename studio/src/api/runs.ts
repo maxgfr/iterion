@@ -176,6 +176,17 @@ export interface RunHeader {
   // Different from workflow_hash (the child's own) when the .iter has
   // been edited between parent run and fork.
   source_hash?: string;
+  // source describes the originating action that produced this run.
+  // Today only dispatcher runs populate it, carrying the back-reference
+  // to the kanban issue so the RunHeader can link back to /board.
+  source?: RunSource;
+}
+
+export interface RunSource {
+  kind?: string;
+  issue_id?: string;
+  issue_identifier?: string;
+  issue_title?: string;
 }
 
 // Mirror of runview.RunSnapshot.

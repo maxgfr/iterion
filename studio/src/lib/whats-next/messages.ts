@@ -23,6 +23,8 @@ export type {
   HumanQuestionMessage,
   QuickActionKind,
   SessionClosedMessage,
+  UserMessage,
+  UserMessageStatus,
 } from "@/lib/runChat/types";
 
 export interface RoadmapItem {
@@ -105,6 +107,7 @@ import type {
   BannerMessage as _BannerMessage,
   HumanQuestionMessage as _HumanQuestionMessage,
   SessionClosedMessage as _SessionClosedMessage,
+  UserMessage as _UserMessage,
 } from "@/lib/runChat/types";
 
 export type WhatsNextMessage =
@@ -114,7 +117,8 @@ export type WhatsNextMessage =
   | IssuesSummaryMessage
   | SurveyCardMessage
   | _SessionClosedMessage
-  | PlanHandedOffMessage;
+  | PlanHandedOffMessage
+  | _UserMessage;
 
 // Helper for components: extract a roadmap doc from a raw node output
 // object. Returns null if the shape doesn't match. Used by the

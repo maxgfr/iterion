@@ -253,6 +253,11 @@ interface RunStoreState {
   // the REST GET /api/runs/{id}/queue-messages endpoint and live-
   // updated through the user_message_* event family.
   queuedMessages: QueuedUserMessage[];
+  // Composer draft for the AgentChatbox. Lifted out of component-local
+  // state so the WhatsNextView swap between AgentChatbox and the
+  // HumanChatTurn footer (when the bot asks a question mid-typing)
+  // doesn't unmount the textarea and discard the operator's text.
+  chatDraft: string;
   wsState: WsState;
   followTail: boolean;
   log: RunLogState;
@@ -299,6 +304,8 @@ interface RunStoreState {
   // events that arrived in the meantime so live status overrides a
   // stale REST snapshot.
   setQueuedMessages: (messages: QueuedUserMessage[]) => void;
+
+  setChatDraft: (draft: string) => void;
 
   setLogSubscribed: (subscribed: boolean) => void;
   applyLogChunk: (chunk: { offset: number; text: string; total?: number }) => void;
@@ -349,6 +356,7 @@ function freshInitial() {
     latestTodosByExec: new Map<string, TodoListSnapshot>(),
     pendingHumanInput: null as PendingHumanInput | null,
     queuedMessages: [] as QueuedUserMessage[],
+    chatDraft: "",
     wsState: "idle" as WsState,
     followTail: true,
     log: initialLogState,
@@ -556,6 +564,9 @@ export function createRunStore() {
       merged.sort((a, b) => a.queued_at.localeCompare(b.queued_at));
       return { queuedMessages: merged };
     }),
+
+  setChatDraft: (draft) =>
+    set((state) => (state.chatDraft === draft ? state : { chatDraft: draft })),
 
   setManualPreviewUrl: (url) =>
     set((s) => ({

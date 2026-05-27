@@ -305,6 +305,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
       <WSDisconnectBanner state={wsState} onReconnect={requestWsReconnect} />
       {showFinalization && <FinalizationRow run={run} />}
       {run.forked_from && <ForkedFromRow run={run} />}
+      {run.source?.issue_id && <SourceTicketRow source={run.source} />}
       <ErrorHintRow run={run} onResume={() => setResumeOpen(true)} />
 
       {canResume && (
@@ -524,6 +525,37 @@ function FinalizationRow({ run }: { run: RunHeaderType }) {
         mergedShort={mergedShort}
         branch={branch}
       />
+    </div>
+  );
+}
+
+// SourceTicketRow surfaces the originating kanban issue when the run
+// was dispatched by the native dispatcher. Clicking opens /board with
+// the issue focused so the operator can jump back to the ticket that
+// triggered this run — answering "what does this run belong to?"
+// without grepping the dispatcher logs.
+function SourceTicketRow({
+  source,
+}: {
+  source: NonNullable<RunHeaderType["source"]>;
+}) {
+  const [, setLocation] = useLocation();
+  const issueID = source.issue_id!;
+  const identifier = source.issue_identifier || issueID;
+  const title = source.issue_title || "(untitled)";
+  const focusIssue = () =>
+    setLocation(`/board?focus=${encodeURIComponent(issueID)}`);
+  return (
+    <div className="shrink-0 px-4 py-1.5 bg-info-soft/40 border-b border-info/30 flex items-center gap-2 text-[11px]">
+      <span className="text-fg-muted">From ticket</span>
+      <button
+        onClick={focusIssue}
+        className="font-mono text-fg-default hover:text-info underline-offset-2 hover:underline"
+        title={`Open issue ${identifier} on the board`}
+      >
+        #{identifier}
+      </button>
+      <span className="text-fg-default truncate max-w-[40rem]">{title}</span>
     </div>
   );
 }

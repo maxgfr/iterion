@@ -34,6 +34,8 @@ import type {
   HumanQuestionMessage,
   NodeOutputMessage,
   RunChatMessage,
+  UserMessage,
+  UserMessageStatus,
 } from "./types";
 
 interface MapInputs {
@@ -139,6 +141,25 @@ function iterationOf(evt: RunEvent): number {
   return typeof raw === "number" ? raw : 0;
 }
 
+// userMessageStatusForEvent maps the runtime's `user_message_*` event
+// type to the corresponding UserMessage card status. Keeping the
+// mapping in one place ensures the in-place update path and the
+// out-of-order synthesis path can't drift. Only the three terminal
+// event types are valid; the runtime emits `user_message_queued`
+// through a separate code path.
+function userMessageStatusForEvent(type: string): UserMessageStatus {
+  switch (type) {
+    case "user_message_delivered":
+      return "delivered";
+    case "user_message_consumed":
+      return "consumed";
+    case "user_message_cancelled":
+      return "cancelled";
+    default:
+      return "cancelled";
+  }
+}
+
 function bannerId(nodeId: string, iter: number) {
   return `${nodeId}:${iter}`;
 }
@@ -166,6 +187,11 @@ export interface FolderState {
   // UI shows the answered first iteration without the form.
   nodeIteration: Map<string, number>;
   latestPendingHumanKey: string | null;
+  // Index of the UserMessage card for each queued-message id, so the
+  // later `user_message_delivered` / `_consumed` / `_cancelled` events
+  // can flip the existing card's status in place without re-ordering
+  // the transcript or duplicating the entry.
+  userMessageIdx: Map<string, number>;
 }
 
 export function newFolderState(): FolderState {
@@ -176,6 +202,7 @@ export function newFolderState(): FolderState {
     activeBannerByNode: new Map(),
     nodeIteration: new Map(),
     latestPendingHumanKey: null,
+    userMessageIdx: new Map(),
   };
 }
 
@@ -597,6 +624,54 @@ function processEvent(
         out.pop();
       }
       break;
+
+    case "user_message_queued": {
+      const data = (evt.data ?? {}) as Record<string, unknown>;
+      const id = typeof data.id === "string" ? data.id : "";
+      const text = typeof data.text === "string" ? data.text : "";
+      if (id === "") break;
+      if (state.userMessageIdx.has(id)) break; // dedupe on replay
+      const idx = out.length;
+      out.push({
+        kind: "user-message",
+        id,
+        text,
+        status: "queued",
+      } satisfies UserMessage);
+      state.userMessageIdx.set(id, idx);
+      break;
+    }
+
+    case "user_message_delivered":
+    case "user_message_consumed":
+    case "user_message_cancelled": {
+      const data = (evt.data ?? {}) as Record<string, unknown>;
+      const id = typeof data.id === "string" ? data.id : "";
+      if (id === "") break;
+      const status = userMessageStatusForEvent(evt.type);
+      const idx = state.userMessageIdx.get(id);
+      if (idx === undefined) {
+        // Out-of-order delivery — the queued event was missed (e.g. ws
+        // reconnect dropped it). Push the card now at the current
+        // status so the operator still sees the message in the
+        // transcript.
+        const text = typeof data.text === "string" ? data.text : "";
+        if (text === "") break; // can't synthesise a placeholder
+        const newIdx = out.length;
+        out.push({
+          kind: "user-message",
+          id,
+          text,
+          status,
+        } satisfies UserMessage);
+        state.userMessageIdx.set(id, newIdx);
+        break;
+      }
+      const existing = out[idx];
+      if (!existing || existing.kind !== "user-message") break;
+      out[idx] = { ...existing, status };
+      break;
+    }
 
     default:
       break;

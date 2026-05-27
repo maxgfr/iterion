@@ -82,6 +82,7 @@ type Engine struct {
 	filePath                 string                // absolute .iter source path, set via WithFilePath
 	preset                   string                // in-source preset name selected at launch, set via WithPreset
 	runName                  string                // deterministic human-friendly run label, set via WithRunName
+	source                   *store.RunSource      // originating action metadata (dispatcher → issue ref), set via WithSource
 	mergeInto                string                // worktree finalization: FF target ("" = current branch, "none" = skip, or branch name); set via WithMergeInto
 	branchName               string                // worktree finalization: storage branch override ("" = iterion/run/<runName>); set via WithBranchName
 	mergeStrategy            string                // worktree finalization: "squash" (default) or "merge" (FF); set via WithMergeStrategy
@@ -215,6 +216,14 @@ func WithRunName(name string) EngineOption {
 // selected.
 func WithPreset(name string) EngineOption {
 	return func(e *Engine) { e.preset = name }
+}
+
+// WithSource records the originating action that produced this run.
+// The dispatcher passes a non-nil *store.RunSource carrying the
+// issue back-reference so the studio's RunHeader can link back to
+// the kanban. nil for CLI / studio / fork-spawned runs.
+func WithSource(src *store.RunSource) EngineOption {
+	return func(e *Engine) { e.source = src }
 }
 
 // WithMergeInto controls the worktree-finalization fast-forward target
@@ -575,7 +584,7 @@ func (e *Engine) runResolveDoc(ctx context.Context, runID string, inputs map[str
 		}
 		run = created
 	}
-	if e.workflowHash != "" || e.filePath != "" || e.runName != "" || e.mergeStrategy != "" || e.autoMerge || e.preset != "" || e.bundle != nil {
+	if e.workflowHash != "" || e.filePath != "" || e.runName != "" || e.mergeStrategy != "" || e.autoMerge || e.preset != "" || e.bundle != nil || e.source != nil {
 		if e.workflowHash != "" {
 			run.WorkflowHash = e.workflowHash
 		}
@@ -598,6 +607,12 @@ func (e *Engine) runResolveDoc(ctx context.Context, runID string, inputs map[str
 			if e.bundle.Manifest != nil {
 				run.BundleName = e.bundle.Manifest.Name
 			}
+		}
+		if e.source != nil {
+			// Copy so the engine's option pointer can't later be mutated
+			// through the run record.
+			src := *e.source
+			run.Source = &src
 		}
 		if err := e.store.SaveRun(ctx, run); err != nil {
 			return nil, fmt.Errorf("runtime: save run metadata: %w", err)
