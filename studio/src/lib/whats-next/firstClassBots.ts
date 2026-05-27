@@ -9,6 +9,7 @@
 // WhatsNext chat. The keys must match the `.bot` source — a rename there
 // without updating the map silently drops the node from the chat.
 
+import { shortIssueId } from "./issueId";
 import type { FormSpec } from "./questionForm";
 
 export type WhatsNextNodeKind =
@@ -127,7 +128,7 @@ function formatPickedIssues(
   }
   // Partial / no match: surface what we can. Truncated IDs are
   // strictly more informative than the full opaque UUID.
-  const truncated = ids.map((v) => v.replace(/^native:/, "").slice(0, 8));
+  const truncated = ids.map(shortIssueId);
   if (ids.length === 1) return truncated[0] ?? "";
   return `${ids.length} items: ${truncated.join(", ")}`;
 }

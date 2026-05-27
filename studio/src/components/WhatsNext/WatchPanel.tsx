@@ -1,22 +1,9 @@
-// WatchPanel surfaces the dispatcher-bound issues the operator picked
-// from this whats-next session. Each row shows the live board state
-// of the issue plus a console-link to its most recent dispatcher run,
-// so the operator can tell what landed / is running / finished
-// without flipping to /board.
-//
-// MVP2: when the poller catches a state transition (in_progress →
-// review → done, …) we buffer it in the hook. The panel surfaces an
-// updates badge + a "Tell Nexie" button that forwards a collapsed
-// summary into the run inbox via queueMessage — so the operator
-// stays in control of what crosses into Nexie's next turn.
-//
-// MVP3 will move the registry into the runtime; the WatchPanel's
-// rendering contract stays stable across that revision.
-
 import { useState } from "react";
 import { Link } from "wouter";
 
 import { queueMessage } from "@/api/queueMessages";
+import { stateChipStyle } from "@/lib/board/stateTheme";
+import { shortIssueId } from "@/lib/whats-next/issueId";
 import {
   formatUpdatesAsChatMessage,
   useWatchList,
@@ -39,13 +26,10 @@ export default function WatchPanel({ runId }: WatchPanelProps) {
     if (!runId || pendingUpdates.length === 0) return;
     setForwardError(null);
     setForwarding(true);
-    const text = formatUpdatesAsChatMessage(pendingUpdates);
     try {
-      await queueMessage(runId, text);
+      await queueMessage(runId, formatUpdatesAsChatMessage(pendingUpdates));
       acknowledgeUpdates();
     } catch (e) {
-      // Keep the buffer so the operator can retry; surface the error
-      // muted so it doesn't dominate the panel.
       setForwardError((e as Error).message ?? String(e));
     } finally {
       setForwarding(false);
@@ -79,19 +63,13 @@ export default function WatchPanel({ runId }: WatchPanelProps) {
               {forwarding ? "Forwarding…" : "Tell Nexie"}
             </button>
           )}
-          <Link
-            href="/board"
-            className="text-[10px] text-accent hover:underline"
-          >
+          <Link href="/board" className="text-[10px] text-accent hover:underline">
             board ↗
           </Link>
         </div>
       </div>
       {forwardError && (
-        <div
-          className="mb-1 text-[10px] text-red-300"
-          title={forwardError}
-        >
+        <div className="mb-1 text-[10px] text-red-300" title={forwardError}>
           Forward failed: {truncate(forwardError, 80)}
         </div>
       )}
@@ -106,21 +84,23 @@ export default function WatchPanel({ runId }: WatchPanelProps) {
 
 function WatchRow({ entry }: { entry: WatchEntry }) {
   const { issue, issueId, lastFetchError } = entry;
-  const title = issue?.title ?? truncateId(issueId);
+  const title = issue?.title ?? shortIssueId(issueId);
   const state = issue?.state ?? "…";
   const lastRunId = issue?.last_run_id ?? null;
 
   return (
     <li className="flex items-center gap-2 text-[12px] text-fg-default">
-      <StateChip state={state} />
+      <span
+        className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide"
+        style={stateChipStyle(state)}
+      >
+        {state}
+      </span>
       <span className="flex-1 min-w-0 truncate" title={title}>
         {title}
       </span>
       {lastFetchError && (
-        <span
-          className="text-[10px] text-fg-subtle"
-          title={lastFetchError}
-        >
+        <span className="text-[10px] text-fg-subtle" title={lastFetchError}>
           (stale)
         </span>
       )}
@@ -135,46 +115,6 @@ function WatchRow({ entry }: { entry: WatchEntry }) {
       )}
     </li>
   );
-}
-
-// StateChip color-encodes the native board state into a compact badge.
-// The palette mirrors the board view's column header tones so an
-// operator who's been staring at /board recognises the state at a
-// glance. Unknown states get a neutral chip rather than a missing one
-// — the chip is the alignment anchor for the row.
-function StateChip({ state }: { state: string }) {
-  const cls = chipClasses(state);
-  return (
-    <span
-      className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide ${cls}`}
-    >
-      {state}
-    </span>
-  );
-}
-
-function chipClasses(state: string): string {
-  switch (state) {
-    case "backlog":
-      return "bg-surface-2 text-fg-muted";
-    case "ready":
-      return "bg-accent-soft text-accent";
-    case "in_progress":
-      return "bg-amber-500/15 text-amber-300";
-    case "review":
-      return "bg-violet-500/15 text-violet-300";
-    case "done":
-      return "bg-emerald-500/15 text-emerald-300";
-    case "failed":
-    case "cancelled":
-      return "bg-red-500/15 text-red-300";
-    default:
-      return "bg-surface-2 text-fg-subtle";
-  }
-}
-
-function truncateId(id: string): string {
-  return id.replace(/^native:/, "").slice(0, 8);
 }
 
 function truncate(s: string, n: number): string {

@@ -1,4 +1,5 @@
 import type { WireSchemaField } from "@/api/runs";
+import { shortIssueId } from "@/lib/whats-next/issueId";
 import type {
   FormAnswer,
   FormQuestion,
@@ -249,10 +250,7 @@ function toOption(it: Record<string, unknown>): QuestionOption {
   if (typeof it.horizon === "string" && it.horizon.length > 0) {
     meta.push(it.horizon);
   }
-  const shortId =
-    typeof it.id === "string"
-      ? (it.id as string).replace(/^native:/, "").slice(0, 8)
-      : "";
+  const shortId = typeof it.id === "string" ? shortIssueId(it.id) : "";
   let label = titleSrc || value;
   if (shortId) label += ` · ${shortId}`;
   return {
