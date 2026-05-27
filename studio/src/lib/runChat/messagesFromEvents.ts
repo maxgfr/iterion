@@ -452,9 +452,36 @@ function processEvent(
       out[idx] = {
         ...banner,
         progress: {
+          ...prev,
           toolCount: prev.toolCount + 1,
           latestTool: toolName ?? prev.latestTool,
           latestToolHint: pickToolHint(data, toolName) ?? prev.latestToolHint,
+        },
+      };
+      break;
+    }
+
+    case "node_recovery": {
+      // Engine retried after a transient delegate failure (LLM rate
+      // limit, http2 reset, codex endpoint hiccup). Surface the count
+      // + a head-of-error summary on the active banner so an operator
+      // staring at a "still running" card can tell the difference
+      // between "agent is thinking hard" and "agent is stuck in a
+      // retry loop hitting a flaky backend".
+      const nodeId = evt.node_id;
+      if (!nodeId) break;
+      const idx = activeBannerByNode.get(nodeId);
+      if (idx === undefined) break;
+      const banner = out[idx] as BannerMessage;
+      const data = evt.data ?? {};
+      const errText = typeof data.error === "string" ? data.error : "";
+      const prev = banner.progress ?? { toolCount: 0 };
+      out[idx] = {
+        ...banner,
+        progress: {
+          ...prev,
+          retryCount: (prev.retryCount ?? 0) + 1,
+          latestRetryError: errText ? truncateHint(errText) : prev.latestRetryError,
         },
       };
       break;

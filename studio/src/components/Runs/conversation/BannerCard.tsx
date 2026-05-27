@@ -40,22 +40,36 @@ export function BannerProgressLine({
 }: {
   progress: NonNullable<BannerMessage["progress"]>;
 }) {
-  if (progress.toolCount === 0) return null;
-  const noun = progress.toolCount === 1 ? "tool call" : "tool calls";
+  const retryCount = progress.retryCount ?? 0;
+  if (progress.toolCount === 0 && retryCount === 0) return null;
+  const toolNoun = progress.toolCount === 1 ? "tool call" : "tool calls";
+  const retryNoun = retryCount === 1 ? "retry" : "retries";
   return (
     <p className="mt-1 text-[11px] text-fg-muted truncate">
-      <span className="font-mono">{progress.toolCount}</span> {noun}
-      {progress.latestTool && (
+      {progress.toolCount > 0 && (
         <>
-          {" "}· latest:{" "}
-          <code className="text-[11px] font-mono text-fg-default">
-            {progress.latestTool}
-          </code>
-          {progress.latestToolHint &&
-            progress.latestToolHint !== progress.latestTool && (
-              <span className="text-fg-subtle"> — {progress.latestToolHint}</span>
-            )}
+          <span className="font-mono">{progress.toolCount}</span> {toolNoun}
+          {progress.latestTool && (
+            <>
+              {" "}· latest:{" "}
+              <code className="text-[11px] font-mono text-fg-default">
+                {progress.latestTool}
+              </code>
+              {progress.latestToolHint &&
+                progress.latestToolHint !== progress.latestTool && (
+                  <span className="text-fg-subtle"> — {progress.latestToolHint}</span>
+                )}
+            </>
+          )}
         </>
+      )}
+      {retryCount > 0 && (
+        <span className="ml-2 inline-flex items-center gap-1 text-warning-fg">
+          ↻ <span className="font-mono">{retryCount}</span> {retryNoun}
+          {progress.latestRetryError && (
+            <span className="text-fg-subtle"> — {progress.latestRetryError}</span>
+          )}
+        </span>
       )}
     </p>
   );

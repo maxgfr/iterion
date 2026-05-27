@@ -30,6 +30,16 @@ export interface BannerProgress {
   // first argument-ish field, when present. Surfaces "read_file: README.md"
   // rather than just "read_file".
   latestToolHint?: string;
+  // Number of `node_recovery` events seen on this node's active iter
+  // — i.e. transient delegate failures the engine recovered from
+  // (LLM rate limit, http2 endpoint hiccup, …). The card surfaces
+  // this as "↻ N retries" so the operator knows a "still running"
+  // banner that's actually stuck in retry loops doesn't look frozen.
+  retryCount?: number;
+  // Short, human-readable summary of the latest delegate_error /
+  // node_recovery error. Truncated to the head so a stack-trace
+  // dump from claw doesn't blow up the chip width.
+  latestRetryError?: string;
 }
 
 export interface BannerMessage {
