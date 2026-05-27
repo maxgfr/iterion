@@ -159,7 +159,34 @@ function MessageRow({
       return <PlanHandedOffRow message={message} />;
     case "user-message":
       return <UserMessageRow message={message} />;
+    case "dispatch-candidates":
+      return <DispatchCandidatesRow message={message} />;
   }
+}
+
+// DispatchCandidatesRow is the tiny banner that surfaces the
+// load_dispatch_candidates output ("N candidates ready to pick"). The
+// real UX lives on the next human turn (ask_which_to_dispatch_more)
+// where the candidates list becomes a checkbox column — this row just
+// gives the operator a chronological hint that the agent ran.
+function DispatchCandidatesRow({
+  message,
+}: {
+  message: Extract<WhatsNextMessage, { kind: "dispatch-candidates" }>;
+}) {
+  const count = message.candidates.length;
+  const label =
+    count === 0
+      ? "No dispatchable items on the board"
+      : `${count} candidate${count === 1 ? "" : "s"} ready to pick`;
+  return (
+    <div className="rounded border border-info/30 bg-info-soft/30 px-3 py-2 text-[11px] text-fg-default">
+      <div className="font-medium">{label}</div>
+      {message.summary && (
+        <div className="mt-0.5 text-fg-muted">{message.summary}</div>
+      )}
+    </div>
+  );
 }
 
 // UserMessageRow renders an operator-queued chat message inline in

@@ -9,6 +9,7 @@ import {
 import { useWhatsNextSession } from "@/lib/whats-next/useWhatsNextSession";
 import type { FormAnswer, FormSpec } from "@/lib/whats-next/questionForm";
 import type {
+  DispatchCandidatesMessage,
   IssuesSummaryMessage,
   RoadmapDoc,
   WhatsNextMessage,
@@ -282,6 +283,46 @@ function resolveDynamicForm(
     };
   }
 
+  if (message.nodeId === "ask_which_to_dispatch_more") {
+    const candidates = findLatestDispatchCandidates(upstream);
+    if (!candidates || candidates.candidates.length === 0) return staticForm;
+    return {
+      mode: "flat",
+      questions: [
+        {
+          id: "selected_issue_ids",
+          kind: "checkbox",
+          label: "Items to push to ready",
+          description:
+            "Tick what should move into ready next. Items already in ready are shown so you can re-confirm them if the dispatcher hasn't claimed them yet.",
+          options: candidates.candidates.map((c) => ({
+            value: c.id,
+            label: c.title,
+            description: [c.state, c.assignee || c.bot]
+              .filter(Boolean)
+              .join(" · "),
+          })),
+          // Pre-tick nothing — unlike ask_which_to_process where the
+          // operator just emitted these items and wants them all,
+          // here we're showing the whole eligible board and a
+          // default-all selection would silently dispatch the long
+          // tail. Make the operator pick.
+          defaultValues: [],
+        },
+        {
+          id: "note",
+          kind: "free_text",
+          label: "Note (optional)",
+          description: "Optional — context for downstream nodes.",
+          placeholder: "e.g. 'only the feature_dev items'",
+          rows: 2,
+          required: false,
+        },
+      ],
+      submitLabel: "Dispatch selected",
+    };
+  }
+
   if (message.nodeId === "human_review") {
     const roadmap = findLatestRoadmap(upstream);
     if (!roadmap) return staticForm;
@@ -360,6 +401,16 @@ function findLatestIssuesSummary(
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m && m.kind === "issues-summary") return m;
+  }
+  return null;
+}
+
+function findLatestDispatchCandidates(
+  messages: WhatsNextMessage[],
+): DispatchCandidatesMessage | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m && m.kind === "dispatch-candidates") return m;
   }
   return null;
 }

@@ -72,6 +72,26 @@ export interface IssuesSummaryMessage {
   summary: string;
 }
 
+// One row from the load_dispatch_candidates agent's output. Mirrors
+// the schema's `candidates[]` shape; the studio's
+// resolveDynamicForm consumes it to populate the ask_which_to_dispatch_more
+// checkbox column.
+export interface DispatchCandidate {
+  id: string;
+  title: string;
+  assignee?: string;
+  state?: string;
+  bot?: string;
+}
+
+export interface DispatchCandidatesMessage {
+  kind: "dispatch-candidates";
+  id: string;
+  nodeId: string;
+  candidates: DispatchCandidate[];
+  summary: string;
+}
+
 // SurveyCardMessage carries the structured output of an agent that
 // surveyed the workspace (whats-next's `explore` node today).
 export interface SurveyCardMessage {
@@ -118,6 +138,7 @@ export type WhatsNextMessage =
   | SurveyCardMessage
   | _SessionClosedMessage
   | PlanHandedOffMessage
+  | DispatchCandidatesMessage
   | _UserMessage;
 
 // Helper for components: extract a roadmap doc from a raw node output
@@ -176,6 +197,35 @@ export function asSurveyOutput(value: unknown): {
     toplevelDirs: v.toplevel_dirs,
     recentCommits: v.recent_commits,
   };
+}
+
+// asDispatchCandidates lifts a load_dispatch_candidates node output
+// into the typed shape resolveDynamicForm wants. Returns null when
+// the shape doesn't match — the upstream prompt is loose enough
+// that an empty board still produces a valid (zero-length) payload.
+export function asDispatchCandidates(value: unknown): {
+  candidates: DispatchCandidate[];
+  summary: string;
+} | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  const rawCandidates = Array.isArray(v.candidates) ? v.candidates : null;
+  if (!rawCandidates) return null;
+  const candidates: DispatchCandidate[] = rawCandidates
+    .filter(
+      (x): x is Record<string, unknown> =>
+        !!x && typeof x === "object" && typeof (x as Record<string, unknown>).id === "string",
+    )
+    .map((x) => {
+      const id = x.id as string;
+      const title = typeof x.title === "string" ? x.title : id;
+      const assignee = typeof x.assignee === "string" ? x.assignee : undefined;
+      const state = typeof x.state === "string" ? x.state : undefined;
+      const bot = typeof x.bot === "string" ? x.bot : undefined;
+      return { id, title, assignee, state, bot };
+    });
+  const summary = typeof v.summary === "string" ? v.summary : "";
+  return { candidates, summary };
 }
 
 export function asEmitOutput(value: unknown): {

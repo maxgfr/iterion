@@ -30,9 +30,11 @@ import type {
 
 import type { FirstClassBot } from "./firstClassBots";
 import {
+  asDispatchCandidates,
   asEmitOutput,
   asRoadmapDoc,
   asSurveyOutput,
+  type DispatchCandidatesMessage,
   type IssuesSummaryMessage,
   type PlanHandedOffMessage,
   type RoadmapCardMessage,
@@ -141,6 +143,14 @@ function makeResolver(bot: FirstClassBot): NodeKindResolver {
           if (!survey) return null;
           return { tag: "survey", payload: { nodeId, ...survey } };
         }
+        case "dispatchCandidates": {
+          const dc = asDispatchCandidates(eventOutput);
+          if (!dc) return null;
+          return {
+            tag: "dispatch-candidates",
+            payload: { nodeId, ...dc },
+          };
+        }
         case "issuesSummary": {
           const emit = asEmitOutput(eventOutput);
           if (!emit) return null;
@@ -222,6 +232,19 @@ function makeResolver(bot: FirstClassBot): NodeKindResolver {
               planPath: p.planPath,
               summary: p.summary,
             } satisfies IssuesSummaryMessage as unknown as RunChatMessage);
+            break;
+          }
+          case "dispatch-candidates": {
+            const p = ext.payload as {
+              nodeId: string;
+            } & NonNullable<ReturnType<typeof asDispatchCandidates>>;
+            out.push({
+              kind: "dispatch-candidates",
+              id: ext.id,
+              nodeId: p.nodeId,
+              candidates: p.candidates,
+              summary: p.summary,
+            } satisfies DispatchCandidatesMessage as unknown as RunChatMessage);
             break;
           }
           case "plan-handed-off": {

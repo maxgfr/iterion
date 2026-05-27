@@ -24,7 +24,7 @@ export interface WhatsNextNodeMapEntry {
   label?: string;
   // For agent nodes whose output should be promoted to a typed card
   // after the banner closes. Each kind has its own renderer.
-  followCardKind?: "roadmap" | "issuesSummary" | "survey";
+  followCardKind?: "roadmap" | "issuesSummary" | "survey" | "dispatchCandidates";
   // For "banner" entries: pluck this field from the node output as the
   // collapsed summary text. Optional — if absent, the banner closes
   // without a summary line.
@@ -244,6 +244,66 @@ export const FIRST_CLASS_BOTS: Readonly<Record<string, FirstClassBot>> = {
         kind: "banner",
         label: "Moving issues to ready",
         summaryField: "summary",
+      },
+      // load_dispatch_candidates is the read-only board peek that
+      // feeds ask_which_to_dispatch_more's checkbox list. It only
+      // fires when the operator answered dispatch_more without
+      // naming an item; otherwise it stays silent. We tag the
+      // follow-card so the upstream candidates array lands in the
+      // transcript as a typed message; resolveDynamicForm reads it
+      // to build the checkbox column on the next human turn.
+      load_dispatch_candidates: {
+        kind: "banner",
+        label: "Loading dispatchable items",
+        summaryField: "summary",
+        followCardKind: "dispatchCandidates",
+      },
+      // Mirror of ask_which_to_process: same checkbox UX, but the
+      // candidates list comes from the load_dispatch_candidates
+      // agent (current board state) instead of the freshly-created
+      // emit_action issues. The dynamic form is built by
+      // WhatsNextView.resolveDynamicForm at render time.
+      ask_which_to_dispatch_more: {
+        kind: "human",
+        prompt:
+          "Pick which board items to push to ready now — the dispatcher will pick them up.",
+        textField: "selected_issue_ids",
+        formatAnswer: (answers) => {
+          const raw = answers["selected_issue_ids"];
+          if (Array.isArray(raw)) {
+            const ids = raw
+              .filter((v): v is string => typeof v === "string")
+              .map((v) => v.replace(/^native:/, "").slice(0, 12));
+            if (ids.length === 0) return "";
+            if (ids.length === 1) return ids[0] ?? "";
+            return `${ids.length} issues: ${ids.join(", ")}`;
+          }
+          return typeof raw === "string" ? raw : "";
+        },
+        form: {
+          questions: [
+            {
+              id: "selected_issue_ids",
+              kind: "free_text",
+              label: "Issue IDs to dispatch (fallback)",
+              description:
+                'Normally rendered as a checkbox list of current backlog + ready items — this free-text shows only when the upstream load_dispatch_candidates message is missing.',
+              placeholder: '["abc12345","def67890"]',
+              rows: 3,
+              required: false,
+            },
+            {
+              id: "note",
+              kind: "free_text",
+              label: "Note (optional)",
+              description: "Optional — context to help downstream nodes.",
+              placeholder: "e.g. 'only the feature_dev items'",
+              rows: 2,
+              required: false,
+            },
+          ],
+          submitLabel: "Dispatch",
+        },
       },
       // Two-field form rendered flat (both questions on one page):
       // pick an action AND describe what you want, submit once.
