@@ -101,7 +101,7 @@ function makeResolver(bot: FirstClassBot): NodeKindResolver {
         actions: entry.actions,
       };
     },
-    humanAnswerExtractor(nodeId, answers) {
+    humanAnswerExtractor(nodeId, answers, upstream) {
       const entry = bot.nodeMap[nodeId];
       if (!entry || entry.kind !== "human") return undefined;
       const textKey = entry.textField;
@@ -112,10 +112,12 @@ function makeResolver(bot: FirstClassBot): NodeKindResolver {
       // turn as "(empty reply)" — e.g. an operator who picked
       // dispatch_more without typing a filter still sees
       // "dispatch_more" on their answered turn instead of an
-      // erasure.
+      // erasure. The optional `upstream` array is forwarded so
+      // formatters can resolve opaque IDs back to titles via
+      // upstream cards (e.g. DispatchCandidatesMessage).
       let text = "";
       if (entry.formatAnswer && answers) {
-        text = entry.formatAnswer(answers).trim();
+        text = entry.formatAnswer(answers, upstream).trim();
       }
       if (!text) {
         text =

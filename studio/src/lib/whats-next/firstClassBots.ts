@@ -58,7 +58,15 @@ export interface WhatsNextNodeMapEntry {
   // and a turn with action="dispatch_more" + detail="" renders as
   // "(empty reply)" — visually erasing the operator's choice. Return
   // an empty string to fall back to the textField/generic path.
-  formatAnswer?: (answers: Record<string, unknown>) => string;
+  //
+  // The optional `upstream` array carries the chat messages preceding
+  // this turn. Use it to resolve checkbox-ID answers back to titles
+  // — the ask_which_to_dispatch_more formatter joins selected IDs to
+  // human-readable issue titles via the upstream DispatchCandidatesMessage.
+  formatAnswer?: (
+    answers: Record<string, unknown>,
+    upstream?: ReadonlyArray<unknown>,
+  ) => string;
 }
 
 export interface FirstClassBot {
@@ -89,6 +97,77 @@ export interface FirstClassBot {
   // when set). Bots without this routing should leave it false.
   supportsDispatchOnly?: boolean;
   nodeMap: Readonly<Record<string, WhatsNextNodeMapEntry>>;
+}
+
+// formatPickedIssues resolves a checkbox answer (selected_issue_ids
+// as a JSON array of opaque board IDs) back into the human-readable
+// titles the operator just ticked. Looks at the most recent upstream
+// card of the given kind ("issues-summary" for emit_action's freshly-
+// created issues, "dispatch-candidates" for the board-snapshot picker)
+// and joins the matched titles. Falls back to a count + truncated-id
+// digest when the card or titles are missing — never returns the bare
+// "native:<uuid>" form that's unreadable in the chat strip.
+function formatPickedIssues(
+  answers: Record<string, unknown>,
+  upstream: ReadonlyArray<unknown> | undefined,
+  cardKind: "issues-summary" | "dispatch-candidates",
+): string {
+  const raw = answers["selected_issue_ids"];
+  if (typeof raw === "string") return raw; // legacy CLI free-text path
+  if (!Array.isArray(raw) || raw.length === 0) return "";
+  const ids = raw.filter((v): v is string => typeof v === "string");
+  const titleById = collectTitleMap(upstream, cardKind);
+  const titles = ids
+    .map((id) => titleById.get(id))
+    .filter((t): t is string => typeof t === "string" && t.length > 0);
+  if (titles.length === ids.length && ids.length > 0) {
+    if (ids.length === 1) return titles[0] ?? "";
+    if (ids.length <= 3) return titles.join(", ");
+    return `${ids.length} items: ${titles.slice(0, 2).join(", ")}, …`;
+  }
+  // Partial / no match: surface what we can. Truncated IDs are
+  // strictly more informative than the full opaque UUID.
+  const truncated = ids.map((v) => v.replace(/^native:/, "").slice(0, 8));
+  if (ids.length === 1) return truncated[0] ?? "";
+  return `${ids.length} items: ${truncated.join(", ")}`;
+}
+
+// collectTitleMap scans the upstream chat messages for the most
+// recent card of the given kind and lifts {id → title} pairs from
+// it. Returns an empty map when none exists — the caller then falls
+// back to the truncated-id rendering. Defensive against unknown
+// shapes: a missing field / wrong type silently skips that entry
+// rather than throwing.
+function collectTitleMap(
+  upstream: ReadonlyArray<unknown> | undefined,
+  cardKind: "issues-summary" | "dispatch-candidates",
+): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!upstream || upstream.length === 0) return out;
+  // Walk back-to-front: the latest matching card wins on ID
+  // collisions (e.g. two emit_action passes in the same session).
+  for (let i = upstream.length - 1; i >= 0; i--) {
+    const m = upstream[i] as { kind?: string } | null;
+    if (!m || typeof m !== "object") continue;
+    if (m.kind !== cardKind) continue;
+    const list =
+      cardKind === "issues-summary"
+        ? (m as { createdIssues?: Array<{ id?: unknown; title?: unknown }> })
+            .createdIssues
+        : (m as { candidates?: Array<{ id?: unknown; title?: unknown }> })
+            .candidates;
+    if (!Array.isArray(list)) continue;
+    for (const row of list) {
+      if (!row || typeof row !== "object") continue;
+      const id = (row as Record<string, unknown>).id;
+      const title = (row as Record<string, unknown>).title;
+      if (typeof id === "string" && typeof title === "string") {
+        out.set(id, title);
+      }
+    }
+    return out;
+  }
+  return out;
 }
 
 // askPrioritiesForm is the priorities radio + free-text question.
@@ -206,21 +285,12 @@ export const FIRST_CLASS_BOTS: Readonly<Record<string, FirstClassBot>> = {
         // JSON array, not a string — without this formatter the
         // generic textField extractor (which only honors strings)
         // falls back to "(empty reply)" even when the operator
-        // ticked one or more boxes. We render the IDs as a comma-
-        // joined list; "all" / explicit string answers from the
-        // fallback free-text path pass through unchanged.
-        formatAnswer: (answers) => {
-          const raw = answers["selected_issue_ids"];
-          if (Array.isArray(raw)) {
-            const ids = raw
-              .filter((v): v is string => typeof v === "string")
-              .map((v) => v.replace(/^native:/, "").slice(0, 12));
-            if (ids.length === 0) return "";
-            if (ids.length === 1) return ids[0] ?? "";
-            return `${ids.length} issues: ${ids.join(", ")}`;
-          }
-          return typeof raw === "string" ? raw : "";
-        },
+        // ticked one or more boxes. We resolve the IDs back to
+        // human-readable titles via the upstream IssuesSummaryMessage
+        // so the AnsweredTurn reads "Add whats-next board-dispatch
+        // smoke loop" instead of "native:e2b975b9".
+        formatAnswer: (answers, upstream) =>
+          formatPickedIssues(answers, upstream, "issues-summary"),
         form: {
           questions: [
             {
@@ -275,18 +345,8 @@ export const FIRST_CLASS_BOTS: Readonly<Record<string, FirstClassBot>> = {
         prompt:
           "Pick which board items to push to ready now — the dispatcher will pick them up.",
         textField: "selected_issue_ids",
-        formatAnswer: (answers) => {
-          const raw = answers["selected_issue_ids"];
-          if (Array.isArray(raw)) {
-            const ids = raw
-              .filter((v): v is string => typeof v === "string")
-              .map((v) => v.replace(/^native:/, "").slice(0, 12));
-            if (ids.length === 0) return "";
-            if (ids.length === 1) return ids[0] ?? "";
-            return `${ids.length} issues: ${ids.join(", ")}`;
-          }
-          return typeof raw === "string" ? raw : "";
-        },
+        formatAnswer: (answers, upstream) =>
+          formatPickedIssues(answers, upstream, "dispatch-candidates"),
         form: {
           questions: [
             {

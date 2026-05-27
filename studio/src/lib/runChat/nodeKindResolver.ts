@@ -60,9 +60,16 @@ export interface NodeKindResolver {
   // declares which field holds the user-visible text). The IR
   // resolver omits this → folder picks the longest string value
   // and any bool named "approved".
+  //
+  // The optional `upstream` array carries the already-folded chat
+  // messages preceding this human turn. Bot-specific formatters use
+  // it to resolve checkbox-ID answers back into the human-readable
+  // labels the operator just picked (e.g. issue titles) — without it
+  // the AnsweredTurn renders bare opaque IDs like "native:8a8e4399".
   humanAnswerExtractor?(
     nodeId: string,
     answers: Record<string, unknown> | null,
+    upstream?: ReadonlyArray<RunChatMessage>,
   ): { text: string; approved?: boolean } | undefined;
   // Optional: extension card emitted after a banner closes. Returns
   // null when no extension applies; the folder skips the push.

@@ -566,7 +566,7 @@ function processEvent(
       // no string lands.
       let text = "";
       let approved: boolean | undefined;
-      const overridden = resolver.humanAnswerExtractor?.(nodeId, answers);
+      const overridden = resolver.humanAnswerExtractor?.(nodeId, answers, out);
       if (overridden) {
         text = overridden.text;
         approved = overridden.approved;
