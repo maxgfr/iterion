@@ -939,6 +939,36 @@ export async function mergeRun(
   });
 }
 
+export interface CommitAndFinalizeRequest {
+  commit_message: string;
+}
+
+export interface CommitAndFinalizeResponse {
+  run_id: string;
+  final_commit: string;
+  final_branch: string;
+  merge_status: MergeStatus;
+  merged_into?: string;
+  merged_commit?: string;
+  merge_strategy?: MergeStrategy;
+}
+
+// commitAndFinalizeRun stages and commits a run's uncommitted workdir
+// changes with the operator-supplied message, then promotes the new
+// HEAD onto a persistent branch (FinalCommit + FinalBranch land on
+// the run record). Used when a bot finishes a work session without
+// committing — the operator salvages the diff from the run page
+// instead of having to commit by hand in the workspace.
+export async function commitAndFinalizeRun(
+  runId: string,
+  req: CommitAndFinalizeRequest,
+): Promise<CommitAndFinalizeResponse> {
+  return request(`/runs/${encodeURIComponent(runId)}/commit-and-finalize`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Merge conflict resolution
 // ---------------------------------------------------------------------------

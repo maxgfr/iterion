@@ -353,6 +353,63 @@ func (s *Service) PerformMergeCtx(ctx context.Context, runID string, req MergeRe
 	}, nil
 }
 
+// CommitAndFinalizeResponse echoes the persisted state after a
+// successful commit-and-finalize, so the studio can update its
+// snapshot and pivot to the standard /merge UX without an extra GET.
+type CommitAndFinalizeResponse struct {
+	RunID         string              `json:"run_id"`
+	FinalCommit   string              `json:"final_commit"`
+	FinalBranch   string              `json:"final_branch"`
+	MergeStatus   store.MergeStatus   `json:"merge_status"`
+	MergedInto    string              `json:"merged_into,omitempty"`
+	MergedCommit  string              `json:"merged_commit,omitempty"`
+	MergeStrategy store.MergeStrategy `json:"merge_strategy,omitempty"`
+}
+
+// CommitAndFinalizeCtx commits a run's uncommitted workdir changes
+// with the operator-supplied message, then promotes the new HEAD
+// onto a persistent branch via the standard finalize path. The
+// resulting state is identical to a clean bot-side commit + run
+// completion, so the existing /merge endpoint takes over from there.
+//
+// Preconditions:
+//   - run must be a worktree run (worktree=true on run.json).
+//   - run.FinalBranch must be empty (already-finalized runs go
+//     through /merge directly).
+//   - workdir must be dirty (no-op rejected; the operator should
+//     use /merge if the run finalized cleanly).
+//
+// Errors propagate as-is — handlers translate them to 409 for the
+// expected guard-rejection cases.
+func (s *Service) CommitAndFinalizeCtx(ctx context.Context, runID, message string) (*CommitAndFinalizeResponse, error) {
+	if runID == "" {
+		return nil, errors.New("runview: run_id is required")
+	}
+	r, err := s.store.LoadRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if err := runtime.CommitUncommittedAndFinalize(ctx, s.store, r, message, s.logger); err != nil {
+		return nil, err
+	}
+	// Re-read so we return the just-persisted state (RecoverFinalize
+	// writes via SaveRun under its own context; we want the canonical
+	// post-write snapshot to send back).
+	r, err = s.store.LoadRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	return &CommitAndFinalizeResponse{
+		RunID:         r.ID,
+		FinalCommit:   r.FinalCommit,
+		FinalBranch:   r.FinalBranch,
+		MergeStatus:   r.MergeStatus,
+		MergedInto:    r.MergedInto,
+		MergedCommit:  r.MergedCommit,
+		MergeStrategy: r.MergeStrategy,
+	}, nil
+}
+
 // sourceIssueID returns r.Source.IssueID without the nil-pointer dance
 // every caller would otherwise have to write. Empty for non-dispatcher
 // runs.

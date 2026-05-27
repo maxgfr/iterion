@@ -75,6 +75,46 @@ func (s *Server) handleMergeRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// commitAndFinalizeRequest is the body of POST
+// /api/runs/{id}/commit-and-finalize. Mirrors mergeRunRequest's
+// shape — the operator supplies the commit message; everything
+// else is derived from the run record.
+type commitAndFinalizeRequest struct {
+	CommitMessage string `json:"commit_message"`
+}
+
+// handleCommitAndFinalize stages and commits a run's uncommitted
+// workdir changes, then promotes the new HEAD onto a persistent
+// branch via the standard finalize path. After it returns the
+// existing /merge endpoint takes over — the response shape carries
+// enough state for the studio to pivot to its merge UX without an
+// extra GET. Preconditions surface as 409 (the workdir is preserved
+// in every failure mode so retries are safe).
+func (s *Server) handleCommitAndFinalize(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSafeOrigin(w, r) {
+		return
+	}
+	if s.rejectCrossStoreWrite(w, r) {
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "missing run id")
+		return
+	}
+	var req commitAndFinalizeRequest
+	if err := readJSON(r, &req); err != nil {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "invalid request: %v", err)
+		return
+	}
+	res, err := s.runs.CommitAndFinalizeCtx(r.Context(), id, req.CommitMessage)
+	if err != nil {
+		s.httpErrorFor(w, r, http.StatusConflict, "commit-and-finalize: %v", err)
+		return
+	}
+	s.writeJSONFor(w, r, res)
+}
+
 // maybeTransitionMergedIssue fires the dispatcher's MergedState
 // transition for a run's source issue when the merge succeeds. Silent
 // no-op when:

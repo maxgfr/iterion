@@ -70,6 +70,7 @@ func (s *Server) registerRunRoutes() {
 	s.mux.HandleFunc("DELETE /api/runs/{id}/queue-message/{msgID}", s.handleCancelQueuedMessage)
 	s.mux.HandleFunc("POST /api/runs/{id}/resume", s.handleResumeRun)
 	s.mux.HandleFunc("POST /api/runs/{id}/merge", s.handleMergeRun)
+	s.mux.HandleFunc("POST /api/runs/{id}/commit-and-finalize", s.handleCommitAndFinalize)
 	s.mux.HandleFunc("GET /api/runs/{id}/merge/conflicts", s.handleGetMergeConflicts)
 	s.mux.HandleFunc("POST /api/runs/{id}/merge/conflicts/resolve", s.handleResolveMergeConflict)
 	s.mux.HandleFunc("POST /api/runs/{id}/merge/conflicts/resolve-with-agent", s.handleResolveConflictWithAgent)

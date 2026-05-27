@@ -12,6 +12,7 @@ import {
 } from "@/components/ui";
 import { useRunCommits } from "@/hooks/useRunCommits";
 import {
+  commitAndFinalizeRun,
   mergeRun,
   type MergeStrategy,
   type RunCommit,
@@ -298,9 +299,11 @@ function MergeFooter({
       );
     }
     return (
-      <NoticeFooter tone="muted">
-        Run produced no commits — nothing to merge.
-      </NoticeFooter>
+      <CommitAndFinalizeFooter
+        runId={runId}
+        run={run}
+        onMergeComplete={onMergeComplete}
+      />
     );
   }
 
@@ -465,6 +468,84 @@ function SquashMessageEditor({
           )}
         </pre>
       )}
+    </div>
+  );
+}
+
+// CommitAndFinalizeFooter rescues a terminal-but-uncommitted worktree
+// run: stages every change in the workdir, commits with an operator-
+// supplied message, and promotes the new HEAD onto a persistent
+// branch. After it succeeds the snapshot refresh swings the panel
+// over to the standard MergeFooter (FinalCommit + FinalBranch are
+// now set). Used when a bot finishes a work session without
+// committing — common with whole_improve_loop variants that don't
+// include a prepare_commit / commit_changes step.
+function CommitAndFinalizeFooter({
+  runId,
+  run,
+  onMergeComplete,
+}: {
+  runId: string;
+  run: RunHeader;
+  onMergeComplete?: () => void;
+}) {
+  const defaultMessage = `Bot work session — ${run.name || run.workflow_name}`;
+  const [message, setMessage] = useState<string>(defaultMessage);
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const onSubmit = async () => {
+    setSubmitting(true);
+    setErr(null);
+    try {
+      await commitAndFinalizeRun(runId, { commit_message: message.trim() });
+      onMergeComplete?.();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="shrink-0 border-t border-border-default px-3 py-2 space-y-2 bg-surface-1 max-h-[60%] overflow-y-auto">
+      <div className="text-[10px] text-fg-subtle uppercase tracking-wide">
+        Uncommitted work in worktree
+      </div>
+      <p className="text-[11px] text-fg-muted">
+        Run finished without committing. Stage everything with
+        {" "}<code className="text-fg-default">git add -A</code> and commit so
+        you can squash + merge below. New files not covered by
+        {" "}<code className="text-fg-default">.gitignore</code> will be
+        included — adjust beforehand if you want to exclude something.
+      </p>
+      <div className="space-y-1">
+        <span className="text-[10px] text-fg-subtle uppercase tracking-wide">
+          Commit message
+        </span>
+        <Textarea
+          rows={3}
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          disabled={submitting}
+          className="text-[11px] font-mono"
+        />
+      </div>
+      {err && (
+        <div className="text-[10px] text-danger-fg bg-danger-soft px-2 py-1 rounded">
+          {err}
+        </div>
+      )}
+      <Button
+        variant="primary"
+        size="sm"
+        onClick={() => void onSubmit()}
+        loading={submitting}
+        disabled={message.trim() === ""}
+        className="w-full"
+      >
+        {submitting ? "Committing…" : "Commit and finalize"}
+      </Button>
     </div>
   );
 }
