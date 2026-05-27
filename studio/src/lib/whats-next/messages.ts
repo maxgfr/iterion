@@ -92,6 +92,24 @@ export interface DispatchCandidatesMessage {
   summary: string;
 }
 
+// TriageSummaryMessage carries the structured output of a triage_board
+// turn. The board_summary banner text already conveys "what happened"
+// to the operator; the structured payload is what powers the
+// "dispatch what I just created" shortcut on the next ask_continue
+// (resolveDynamicForm reads created_issue_ids to decide whether to
+// surface the radio option, and the formatAnswer / contextual prompt
+// resolve the IDs back to titles via the issue cache that lives in
+// the WatchPanel poll loop).
+export interface TriageSummaryMessage {
+  kind: "triage-summary";
+  id: string;
+  nodeId: string;
+  boardSummary: string;
+  dispatchedIds: string[];
+  createdIssueIds: string[];
+  needsFollowup: boolean;
+}
+
 // SurveyCardMessage carries the structured output of an agent that
 // surveyed the workspace (whats-next's `explore` node today).
 export interface SurveyCardMessage {
@@ -139,6 +157,7 @@ export type WhatsNextMessage =
   | _SessionClosedMessage
   | PlanHandedOffMessage
   | DispatchCandidatesMessage
+  | TriageSummaryMessage
   | _UserMessage;
 
 // Helper for components: extract a roadmap doc from a raw node output
@@ -196,6 +215,33 @@ export function asSurveyOutput(value: unknown): {
     observations,
     toplevelDirs: v.toplevel_dirs,
     recentCommits: v.recent_commits,
+  };
+}
+
+export function asTriageSummary(value: unknown): {
+  boardSummary: string;
+  dispatchedIds: string[];
+  createdIssueIds: string[];
+  needsFollowup: boolean;
+} | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  const boardSummary = typeof v.board_summary === "string" ? v.board_summary : "";
+  const dispatched = Array.isArray(v.dispatched_ids)
+    ? (v.dispatched_ids.filter((x): x is string => typeof x === "string") as string[])
+    : [];
+  const created = Array.isArray(v.created_issue_ids)
+    ? (v.created_issue_ids.filter((x): x is string => typeof x === "string") as string[])
+    : [];
+  const needsFollowup = typeof v.needs_followup === "boolean" ? v.needs_followup : false;
+  if (boardSummary === "" && dispatched.length === 0 && created.length === 0) {
+    return null;
+  }
+  return {
+    boardSummary,
+    dispatchedIds: dispatched,
+    createdIssueIds: created,
+    needsFollowup,
   };
 }
 

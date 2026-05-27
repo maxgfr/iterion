@@ -34,11 +34,13 @@ import {
   asEmitOutput,
   asRoadmapDoc,
   asSurveyOutput,
+  asTriageSummary,
   type DispatchCandidatesMessage,
   type IssuesSummaryMessage,
   type PlanHandedOffMessage,
   type RoadmapCardMessage,
   type SurveyCardMessage,
+  type TriageSummaryMessage,
   type WhatsNextMessage,
 } from "./messages";
 
@@ -153,6 +155,14 @@ function makeResolver(bot: FirstClassBot): NodeKindResolver {
             payload: { nodeId, ...dc },
           };
         }
+        case "triageSummary": {
+          const ts = asTriageSummary(eventOutput);
+          if (!ts) return null;
+          return {
+            tag: "triage-summary",
+            payload: { nodeId, ...ts },
+          };
+        }
         case "issuesSummary": {
           const emit = asEmitOutput(eventOutput);
           if (!emit) return null;
@@ -247,6 +257,21 @@ function makeResolver(bot: FirstClassBot): NodeKindResolver {
               candidates: p.candidates,
               summary: p.summary,
             } satisfies DispatchCandidatesMessage as unknown as RunChatMessage);
+            break;
+          }
+          case "triage-summary": {
+            const p = ext.payload as {
+              nodeId: string;
+            } & NonNullable<ReturnType<typeof asTriageSummary>>;
+            out.push({
+              kind: "triage-summary",
+              id: ext.id,
+              nodeId: p.nodeId,
+              boardSummary: p.boardSummary,
+              dispatchedIds: p.dispatchedIds,
+              createdIssueIds: p.createdIssueIds,
+              needsFollowup: p.needsFollowup,
+            } satisfies TriageSummaryMessage as unknown as RunChatMessage);
             break;
           }
           case "plan-handed-off": {

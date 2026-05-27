@@ -19,13 +19,120 @@ export type WhatsNextNodeKind =
   | "issues-summary"
   | "roadmap";
 
+// Walk upstream chat messages back-to-front for the most recent
+// triage-summary card and return its createdIssueIds. Handles both
+// the in-flight ExtensionMessage shape (kind="extension", tag) and
+// the post-processed typed shape (kind="triage-summary") — the
+// formatter runs during fold, before postProcess promotes the
+// extension to the typed kind, so both windows must match.
+export function recentCreatedIssueIds(
+  upstream?: ReadonlyArray<unknown>,
+): string[] {
+  if (!upstream || upstream.length === 0) return [];
+  for (let i = upstream.length - 1; i >= 0; i--) {
+    const m = upstream[i] as
+      | { kind?: string; tag?: string; payload?: unknown; createdIssueIds?: unknown }
+      | null;
+    if (!m || typeof m !== "object") continue;
+    const obj = m as Record<string, unknown>;
+    if (obj.kind === "triage-summary") {
+      const ids = obj.createdIssueIds;
+      return Array.isArray(ids)
+        ? ids.filter((x): x is string => typeof x === "string")
+        : [];
+    }
+    if (obj.kind === "extension" && obj.tag === "triage-summary") {
+      const p = obj.payload as { createdIssueIds?: unknown } | undefined;
+      const ids = p?.createdIssueIds;
+      return Array.isArray(ids)
+        ? ids.filter((x): x is string => typeof x === "string")
+        : [];
+    }
+  }
+  return [];
+}
+
+// recentBoardSummary returns the most recent triage_board's
+// board_summary text — used by the WhatsNextView contextual prompt
+// to remind the operator what just happened above the next form.
+export function recentBoardSummary(
+  upstream?: ReadonlyArray<unknown>,
+): string {
+  if (!upstream || upstream.length === 0) return "";
+  for (let i = upstream.length - 1; i >= 0; i--) {
+    const m = upstream[i] as
+      | { kind?: string; tag?: string; payload?: unknown; boardSummary?: unknown }
+      | null;
+    if (!m || typeof m !== "object") continue;
+    const obj = m as Record<string, unknown>;
+    if (obj.kind === "triage-summary" && typeof obj.boardSummary === "string") {
+      return obj.boardSummary;
+    }
+    if (obj.kind === "extension" && obj.tag === "triage-summary") {
+      const p = obj.payload as { boardSummary?: unknown } | undefined;
+      if (p && typeof p.boardSummary === "string") return p.boardSummary;
+    }
+  }
+  return "";
+}
+
+// titleForIssueId walks upstream for any card carrying issue cards
+// (issues-summary's createdIssues, dispatch-candidates's candidates)
+// and returns the matching title. Returns null when nothing matches.
+// Used by the dispatch_just_created formatter so the answered turn
+// reads "Dispatch: <title>" rather than the opaque id.
+export function titleForIssueId(
+  upstream: ReadonlyArray<unknown> | undefined,
+  issueId: string,
+): string | null {
+  if (!upstream || upstream.length === 0) return null;
+  for (let i = upstream.length - 1; i >= 0; i--) {
+    const m = upstream[i] as Record<string, unknown> | null;
+    if (!m || typeof m !== "object") continue;
+    const candidates = liftIssueRows(m);
+    for (const row of candidates) {
+      if (row.id === issueId) return row.title;
+    }
+  }
+  return null;
+}
+
+function liftIssueRows(
+  m: Record<string, unknown>,
+): Array<{ id: string; title: string }> {
+  let list: unknown = undefined;
+  if (m.kind === "issues-summary") list = m.createdIssues;
+  else if (m.kind === "dispatch-candidates") list = m.candidates;
+  else if (m.kind === "extension") {
+    const tag = m.tag;
+    const p = m.payload as Record<string, unknown> | undefined;
+    if (tag === "issues-summary") list = p?.createdIssues;
+    else if (tag === "dispatch-candidates") list = p?.candidates;
+  }
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter(
+      (r): r is Record<string, unknown> =>
+        !!r &&
+        typeof r === "object" &&
+        typeof (r as Record<string, unknown>).id === "string" &&
+        typeof (r as Record<string, unknown>).title === "string",
+    )
+    .map((r) => ({ id: r.id as string, title: r.title as string }));
+}
+
 export interface WhatsNextNodeMapEntry {
   kind: WhatsNextNodeKind;
   // Label shown in the progress banner ("Surveying repository…").
   label?: string;
   // For agent nodes whose output should be promoted to a typed card
   // after the banner closes. Each kind has its own renderer.
-  followCardKind?: "roadmap" | "issuesSummary" | "survey" | "dispatchCandidates";
+  followCardKind?:
+    | "roadmap"
+    | "issuesSummary"
+    | "survey"
+    | "dispatchCandidates"
+    | "triageSummary";
   // For "banner" entries: pluck this field from the node output as the
   // collapsed summary text. Optional — if absent, the banner closes
   // without a summary line.
@@ -412,12 +519,22 @@ export const FIRST_CLASS_BOTS: Readonly<Record<string, FirstClassBot>> = {
         // the operator picks dispatch_more / done without typing,
         // visually erasing the choice. Action is the primary signal;
         // detail is appended after an em-dash when present.
-        formatAnswer: (answers) => {
+        formatAnswer: (answers, upstream) => {
           const actionRaw = answers["action"];
           const detailRaw = answers["detail"];
           const action = typeof actionRaw === "string" ? actionRaw.trim() : "";
           const detail = typeof detailRaw === "string" ? detailRaw.trim() : "";
-          if (!action) return detail; // ""=empty handled by caller
+          if (action === "dispatch_just_created") {
+            const ids = recentCreatedIssueIds(upstream);
+            const titles = ids
+              .map((id) => titleForIssueId(upstream, id))
+              .filter((t): t is string => typeof t === "string" && t.length > 0);
+            if (titles.length === 0) return "Dispatch what I just created";
+            if (titles.length === 1) return `Dispatch: ${titles[0]}`;
+            if (titles.length <= 3) return `Dispatch: ${titles.join(", ")}`;
+            return `Dispatch ${titles.length} just-created tickets`;
+          }
+          if (!action) return detail;
           return detail ? `${action} — ${detail}` : action;
         },
         form: {
@@ -474,6 +591,11 @@ export const FIRST_CLASS_BOTS: Readonly<Record<string, FirstClassBot>> = {
         kind: "banner",
         label: "Updating the board",
         summaryField: "board_summary",
+        // followCardKind: push a typed triage-summary card alongside
+        // the banner so downstream human turns can read
+        // created_issue_ids structurally — powers the
+        // "Dispatch what I just created" radio option on ask_continue.
+        followCardKind: "triageSummary",
       },
     },
   },

@@ -193,8 +193,9 @@ schema assign_output:
 ## derived by the derive_continue compute node from action; the form
 ## the operator sees stays simple (radio + free_text).
 schema continue_input:
-  dispatched_ids: json
-  board_summary:  string
+  dispatched_ids:     json
+  board_summary:      string
+  created_issue_ids:  json
 
 ## ask_continue collects the operator's pick + a free-form detail
 ## ("which ticket", "what criteria") all in one flat form. The
@@ -220,10 +221,11 @@ schema continue_output:
 ## need an explicit `should_triage` boolean: the runtime evaluates
 ## conditional edges first and falls back to the default last.
 schema continue_derived:
-  is_done:                bool
-  needs_dispatch_choice:  bool
-  action:                 string
-  detail:                 string
+  is_done:                      bool
+  needs_dispatch_choice:        bool
+  needs_dispatch_just_created:  bool
+  action:                       string
+  detail:                       string
 
 ## Placeholder for the workflow-entry compute that reads vars.mode.
 ## iterion's compute nodes always have an `input:` schema; the entry
@@ -266,9 +268,15 @@ schema triage_input:
   workspace_dir: string
 
 schema triage_output:
-  board_summary: string
-  dispatched_ids: json
-  needs_followup: bool
+  board_summary:     string
+  dispatched_ids:    json
+  ## IDs of issues this turn just CREATED (action=add_ticket).
+  ## Empty for non-creating actions. Feeds the ask_continue
+  ## "Dispatch what I just created" shortcut so the operator can
+  ## one-click promote freshly-added tickets without re-picking
+  ## from the whole board.
+  created_issue_ids: json
+  needs_followup:    bool
 
 ## ─── Prompts ──────────────────────────────────────────────────────
 
@@ -1090,6 +1098,10 @@ prompt triage_board_system:
     changed (or what's available, on the empty-detail branch).
   - `dispatched_ids`: array of issue IDs you transitioned
     (empty array if you didn't transition anything).
+  - `created_issue_ids`: array of issue IDs you just CREATED
+    this turn (action=add_ticket). Empty array for every
+    other action. The studio uses this to offer the operator
+    a one-click "dispatch what I just created" shortcut.
   - `needs_followup`: true when you're waiting for the
     operator to clarify (typically empty-detail dispatch_more
     or an unmatched detail); false when you executed cleanly.
@@ -1279,10 +1291,11 @@ compute derive_continue:
   input: continue_output
   output: continue_derived
   expr:
-    is_done:               "input.action == 'done'"
-    needs_dispatch_choice: "input.action == 'dispatch_more' && length(input.detail) == 0"
-    action:                "input.action"
-    detail:                "input.detail"
+    is_done:                      "input.action == 'done'"
+    needs_dispatch_choice:        "input.action == 'dispatch_more' && length(input.detail) == 0"
+    needs_dispatch_just_created:  "input.action == 'dispatch_just_created'"
+    action:                       "input.action"
+    detail:                       "input.detail"
 
 ## Workflow entry router-compute. Reads vars.mode and projects
 ## is_dispatch_only so the workflow's first edges can branch between
@@ -1455,6 +1468,20 @@ workflow whats_next:
   ## Exit when the operator picked "I'm done".
   derive_continue -> done when is_done
 
+  ## "dispatch_just_created" → re-enter triage_board in dispatch_more
+  ## mode with the previous turn's created_issue_ids serialized as
+  ## detail. The triage_board prompt already accepts an ID list in
+  ## detail (it documents "explicit IDs (comma-separated)" and the
+  ## existing ask_which_to_dispatch_more path passes a JSON array
+  ## through the same channel — both shapes parse). Outputs.triage_board
+  ## refers to the LAST completed instance, which is the add_ticket
+  ## turn whose created_issue_ids the operator wants to promote.
+  derive_continue -> triage_board when needs_dispatch_just_created with {
+    action:        "dispatch_more",
+    detail:        "{{outputs.triage_board.created_issue_ids}}",
+    workspace_dir: "{{vars.workspace_dir}}"
+  } as triage_loop(20)
+
   ## "dispatch_more" without a hint → detour through the board-load
   ## + checkbox-picker pair so the operator sees what's actually
   ## eligible instead of triage_board picking on their behalf. The
@@ -1493,6 +1520,7 @@ workflow whats_next:
   } as triage_loop(20)
 
   triage_board -> ask_continue with {
-    dispatched_ids: "{{outputs.triage_board.dispatched_ids}}",
-    board_summary:  "{{outputs.triage_board.board_summary}}"
+    dispatched_ids:    "{{outputs.triage_board.dispatched_ids}}",
+    board_summary:     "{{outputs.triage_board.board_summary}}",
+    created_issue_ids: "{{outputs.triage_board.created_issue_ids}}"
   }

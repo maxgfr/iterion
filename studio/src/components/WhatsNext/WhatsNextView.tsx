@@ -5,6 +5,9 @@ import { ExternalLinkIcon } from "@radix-ui/react-icons";
 import {
   DEFAULT_WHATS_NEXT_BOT_ID,
   getFirstClassBot,
+  recentBoardSummary,
+  recentCreatedIssueIds,
+  titleForIssueId,
 } from "@/lib/whats-next/firstClassBots";
 import { useWhatsNextSession } from "@/lib/whats-next/useWhatsNextSession";
 import type { FormAnswer, FormSpec } from "@/lib/whats-next/questionForm";
@@ -206,6 +209,10 @@ export default function WhatsNextView() {
                 message={pendingHumanQuestion}
                 form={pendingForm}
                 busy={session.busyMessageId === pendingHumanQuestion.id}
+                contextPrefix={contextPrefixFor(
+                  pendingHumanQuestion,
+                  session.messages,
+                )}
                 onSubmit={(outcome) =>
                   onHumanSubmit(pendingHumanQuestion.id, outcome)
                 }
@@ -325,6 +332,49 @@ function resolveDynamicForm(
     };
   }
 
+  if (message.nodeId === "ask_continue") {
+    const created = recentCreatedIssueIds(upstream);
+    const titles: string[] = created
+      .map((id: string) => titleForIssueId(upstream, id))
+      .filter((t): t is string => typeof t === "string" && t.length > 0);
+    if (created.length === 0) return staticForm;
+
+    const actionQ = (staticForm?.questions ?? [])[0];
+    const detailQ = (staticForm?.questions ?? [])[1];
+    if (!actionQ || actionQ.kind !== "radio") return staticForm;
+
+    const shortcutLabel =
+      titles.length === 0
+        ? `Dispatch what I just created (${created.length})`
+        : titles.length === 1
+          ? `Dispatch ${titles[0]}`
+          : titles.length <= 3
+            ? `Dispatch: ${titles.join(", ")}`
+            : `Dispatch the ${titles.length} I just created`;
+
+    return {
+      ...staticForm,
+      mode: "flat",
+      questions: [
+        {
+          ...actionQ,
+          options: [
+            {
+              value: "dispatch_just_created",
+              label: shortcutLabel,
+              description:
+                "Push the ticket(s) you added in the previous turn from backlog to ready. The dispatcher picks them up immediately.",
+            },
+            ...actionQ.options,
+          ],
+          defaultValue: "dispatch_just_created",
+        },
+        ...(detailQ ? [detailQ] : []),
+      ],
+      submitLabel: staticForm?.submitLabel,
+    } as FormSpec;
+  }
+
   if (message.nodeId === "human_review") {
     const roadmap = findLatestRoadmap(upstream);
     if (!roadmap) return staticForm;
@@ -417,6 +467,22 @@ function findLatestDispatchCandidates(
   return null;
 }
 
+// contextPrefixFor returns a one-line "what just happened" hint to
+// render above the pending form, so the operator doesn't have to
+// scroll up to remember the previous action's outcome. Today only
+// ask_continue uses it (after a triage_board turn); other human
+// nodes fall through to the empty string and the footer renders
+// without a prefix.
+function contextPrefixFor(
+  message: Extract<WhatsNextMessage, { kind: "human-question" }>,
+  messages: WhatsNextMessage[],
+): string {
+  if (message.nodeId !== "ask_continue") return "";
+  const pendingIdx = messages.findIndex((m) => m.id === message.id);
+  const upstream = pendingIdx < 0 ? messages : messages.slice(0, pendingIdx);
+  return recentBoardSummary(upstream);
+}
+
 // PendingTurnFooter wraps HumanChatTurn in a Claude-Code-style fixed
 // footer: top border, slightly stronger surface, comfortable padding.
 // The wrapped HumanChatTurn keeps all its existing rendering (form /
@@ -425,11 +491,13 @@ function PendingTurnFooter({
   message,
   form,
   busy,
+  contextPrefix,
   onSubmit,
 }: {
   message: Parameters<typeof HumanChatTurn>[0]["message"];
   form: Parameters<typeof HumanChatTurn>[0]["form"];
   busy: boolean;
+  contextPrefix?: string;
   onSubmit: Parameters<typeof HumanChatTurn>[0]["onSubmit"];
 }) {
   return (
@@ -439,6 +507,11 @@ function PendingTurnFooter({
       aria-live="polite"
     >
       <div className="mx-auto max-w-3xl px-4 py-3">
+        {contextPrefix && contextPrefix.length > 0 && (
+          <div className="mb-2 text-[11px] text-fg-muted italic">
+            {contextPrefix}
+          </div>
+        )}
         <HumanChatTurn
           message={message}
           form={form}
