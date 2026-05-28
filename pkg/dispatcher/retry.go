@@ -74,6 +74,22 @@ func (c *Dispatcher) scheduleRetry(issueID string, prev *runningEntry, runErr er
 	if runErr != nil {
 		errStr = runErr.Error()
 	}
+	prevRunID := c.resumableRunID(prev.RunID)
+	// The prior run may be resumable by status (failed_resumable /
+	// cancelled / paused_operator), but if resume already FAILED because
+	// the bot's workflow source changed since that run started, resuming
+	// again is futile — the runtime rejects it identically every attempt
+	// ("workflow source has changed ... re-run from scratch or use
+	// --force", pkg/runtime/resume.go). Drop the resume pointer so the
+	// next attempt mints a fresh runID instead of looping on the same
+	// doomed resume. Bot edits are routine in a dev/dogfood loop, so this
+	// otherwise strands every issue whose last run is failed_resumable.
+	if isResumeSourceChanged(runErr) {
+		if prevRunID != "" {
+			c.logger.Info("dispatcher: %s prior run %s not resumable (bot source changed) — retrying from scratch", prev.Identifier, prevRunID)
+		}
+		prevRunID = ""
+	}
 	c.state.retries[issueID] = &retryEntry{
 		IssueID:    issueID,
 		Identifier: prev.Identifier,
@@ -81,7 +97,7 @@ func (c *Dispatcher) scheduleRetry(issueID string, prev *runningEntry, runErr er
 		DueAt:      due,
 		LastError:  errStr,
 		Timer:      timer,
-		PrevRunID:  c.resumableRunID(prev.RunID),
+		PrevRunID:  prevRunID,
 	}
 	switch {
 	case parked:
@@ -91,6 +107,18 @@ func (c *Dispatcher) scheduleRetry(issueID string, prev *runningEntry, runErr er
 	default:
 		c.logger.Info("dispatcher: %s retry queued (attempt=%d, in=%s, resume=%s)", prev.Identifier, attempt, delay, prev.RunID)
 	}
+}
+
+// isResumeSourceChanged reports whether runErr is the runtime's refusal
+// to resume because the bot's workflow source changed since the prior
+// run started (pkg/runtime/resume.go: "workflow source has changed ...
+// re-run from scratch or use --force"). Such a run cannot be resumed as-
+// is; the dispatcher must retry FRESH rather than reschedule the same
+// doomed resume. Matches the message substring because the error is a
+// plain fmt.Errorf, not a typed code, and survives the in-process
+// boundary as text.
+func isResumeSourceChanged(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "workflow source has changed")
 }
 
 // resumableRunID returns the runID iff the corresponding run record
