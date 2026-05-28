@@ -469,7 +469,7 @@ func (e *Engine) execBranch(ctx context.Context, rs *runState, branchID string, 
 			result.eventErrors++
 		}
 		if e.onNodeFinished != nil {
-			e.onNodeFinished(currentNodeID, output)
+			e.onNodeFinished(runID, currentNodeID, output)
 		}
 
 		// Select next edge (branch-local, no loop counters needed in branches).

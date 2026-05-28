@@ -47,6 +47,14 @@ type RunStore interface {
 	SaveRun(ctx context.Context, r *Run) error
 	ListRuns(ctx context.Context) ([]string, error)
 
+	// Watch subscriptions (MVP3b) — the set of native-kanban issue IDs
+	// this run is subscribed to. Concurrency-safe read-modify-write of
+	// Run.WatchedIssueIDs (parallel branches' onNodeFinished hooks and
+	// the watch API endpoints can mutate concurrently). Both return the
+	// resulting deduped set.
+	AddWatchedIssues(ctx context.Context, runID string, issueIDs []string) ([]string, error)
+	RemoveWatchedIssues(ctx context.Context, runID string, issueIDs []string) ([]string, error)
+
 	// Status & checkpoint
 	UpdateRunStatus(ctx context.Context, id string, status RunStatus, runErr string) error
 	// UpdateRunStatusIf is a compare-and-set on the status field: the

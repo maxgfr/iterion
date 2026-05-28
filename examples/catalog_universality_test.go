@@ -25,7 +25,7 @@ import (
 
 // varDefaultRe matches a typed var default with a string literal:
 //
-//	  doc_globs: string = "README.md,docs/**/*.md"
+//	doc_globs: string = "README.md,docs/**/*.md"
 //
 // Capture group 1 is the var name, group 2 the default value.
 var varDefaultRe = regexp.MustCompile(
@@ -37,12 +37,12 @@ var varDefaultRe = regexp.MustCompile(
 // run against someone else's repo (the glob matches nothing, or the
 // path scatters `.iterion/` into their working tree).
 var violationPatterns = []string{
-	"cmd/iterion",     // iterion's CLI package layout
-	"pkg/dsl",         // iterion's DSL internals
-	"pkg/**",          // iterion's Go pkg layout
-	"cmd/**",          // iterion's Go cmd layout
+	"cmd/iterion",       // iterion's CLI package layout
+	"pkg/dsl",           // iterion's DSL internals
+	"pkg/**",            // iterion's Go pkg layout
+	"cmd/**",            // iterion's Go cmd layout
 	"examples/*/skills", // iterion's bundle-doc layout
-	".iterion/",       // writing iterion's store dir into the target repo
+	".iterion/",         // writing iterion's store dir into the target repo
 }
 
 // allowlist records (bot dir, var name, pattern) triples that are

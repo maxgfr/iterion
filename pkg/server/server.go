@@ -258,7 +258,8 @@ type Server struct {
 	server           *http.Server
 	hub              *Hub
 	watcher          *Watcher
-	runs             *runview.Service // run console service; nil disables /api/runs endpoints
+	runs             *runview.Service  // run console service; nil disables /api/runs endpoints
+	watchCoord       *watchCoordinator // MVP3b issue-state fan-out; nil when no native tracker or events tail unavailable
 
 	authSvc      *auth.Service
 	authLimiter  *authRateLimiter
@@ -479,6 +480,12 @@ func (s *Server) ListenAndServe() error {
 	if s.runs != nil {
 		go s.runStagedUploadReaper()
 	}
+	// MVP3b: fan native-board issue-state transitions out to runs that
+	// subscribed (Run.WatchedIssueIDs). No-op when no native tracker is
+	// wired or the events tail can't start.
+	if s.runs != nil && s.cfg.NativeTrackerStore != nil {
+		s.watchCoord = startWatchCoordinator(s.runs, s.cfg.NativeTrackerStore, s.logger)
+	}
 	// Sweep abandoned OIDC PendingAuth entries — a user who clicks
 	// "Sign in with Google" then closes the tab never returns to
 	// trigger the lazy eviction inside Take, so without this the
@@ -537,6 +544,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		// runtime.json. Stop persists `desired=stopped` — that's
 		// operator-driven only.
 		s.cfg.Dispatcher.Shutdown()
+	}
+	if s.watchCoord != nil {
+		s.watchCoord.Close()
 	}
 	if s.watcher != nil {
 		s.watcher.Stop()

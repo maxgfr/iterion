@@ -60,10 +60,10 @@ type RunHeader struct {
 	ID string `json:"id"`
 	// Name is the deterministic, human-friendly label for the run.
 	// Empty for legacy runs persisted before this field existed.
-	Name         string                 `json:"name,omitempty"`
-	WorkflowName string                 `json:"workflow_name"`
-	WorkflowHash string                 `json:"workflow_hash,omitempty"`
-	FilePath     string                 `json:"file_path,omitempty"`
+	Name         string `json:"name,omitempty"`
+	WorkflowName string `json:"workflow_name"`
+	WorkflowHash string `json:"workflow_hash,omitempty"`
+	FilePath     string `json:"file_path,omitempty"`
 	// BundleName mirrors the .botz manifest's `name` field captured
 	// at launch (e.g. "feature-dev"). The studio RunHeader pairs it
 	// with WorkflowName so the operator can distinguish bundles whose
@@ -74,14 +74,14 @@ type RunHeader struct {
 	// "Nexie"). When set, the studio RunHeader leads the bot chip
 	// with this persona name + a ✨ icon so dispatcher-spawned runs
 	// belonging to a named bot read at a glance.
-	BundleDisplayName string `json:"bundle_display_name,omitempty"`
-	Status       store.RunStatus        `json:"status"`
-	Inputs       map[string]interface{} `json:"inputs,omitempty"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
-	FinishedAt   *time.Time             `json:"finished_at,omitempty"`
-	Error        string                 `json:"error,omitempty"`
-	Checkpoint   *store.Checkpoint      `json:"checkpoint,omitempty"`
+	BundleDisplayName string                 `json:"bundle_display_name,omitempty"`
+	Status            store.RunStatus        `json:"status"`
+	Inputs            map[string]interface{} `json:"inputs,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
+	UpdatedAt         time.Time              `json:"updated_at"`
+	FinishedAt        *time.Time             `json:"finished_at,omitempty"`
+	Error             string                 `json:"error,omitempty"`
+	Checkpoint        *store.Checkpoint      `json:"checkpoint,omitempty"`
 	// WorkDir is the absolute filesystem path the run executed in
 	// (per-run worktree when Worktree is true, otherwise inherited cwd).
 	// Empty for runs created before this field was persisted; the studio
@@ -123,6 +123,11 @@ type RunHeader struct {
 	// RunHeader reads it to render a link back to the kanban ticket
 	// that triggered the dispatch.
 	Source *store.RunSource `json:"source,omitempty"`
+	// WatchedIssueIDs is the server-authoritative set of native-kanban
+	// issue IDs this run subscribed to (MVP3b). The studio's whats-next
+	// WatchPanel reads it as the primary watch-list source, falling back
+	// to its event-derived list for legacy runs that predate the field.
+	WatchedIssueIDs []string `json:"watched_issue_ids,omitempty"`
 }
 
 // RunSnapshot is the structured view returned by GET /api/runs/{id} and
@@ -745,31 +750,32 @@ func ParseExecutionID(id string) (branch, nodeID string, iteration int, err erro
 
 func headerFromRun(r *store.Run) RunHeader {
 	h := RunHeader{
-		ID:               r.ID,
-		Name:             r.Name,
+		ID:                r.ID,
+		Name:              r.Name,
 		WorkflowName:      r.WorkflowName,
 		WorkflowHash:      r.WorkflowHash,
 		FilePath:          r.FilePath,
 		BundleName:        r.BundleName,
 		BundleDisplayName: r.BundleDisplayName,
-		Status:           r.Status,
-		Inputs:           r.Inputs,
-		CreatedAt:        r.CreatedAt,
-		UpdatedAt:        r.UpdatedAt,
-		FinishedAt:       r.FinishedAt,
-		Error:            r.Error,
-		Checkpoint:       r.Checkpoint,
-		WorkDir:          r.WorkDir,
-		Worktree:         r.Worktree,
-		FinalCommit:      r.FinalCommit,
-		FinalBranch:      r.FinalBranch,
-		FinalBranchError: r.FinalBranchError,
-		MergedInto:       r.MergedInto,
-		MergedCommit:     r.MergedCommit,
-		MergeStrategy:    r.MergeStrategy,
-		MergeStatus:      r.MergeStatus,
-		AutoMerge:        r.AutoMerge,
-		Source:           r.Source,
+		Status:            r.Status,
+		Inputs:            r.Inputs,
+		CreatedAt:         r.CreatedAt,
+		UpdatedAt:         r.UpdatedAt,
+		FinishedAt:        r.FinishedAt,
+		Error:             r.Error,
+		Checkpoint:        r.Checkpoint,
+		WorkDir:           r.WorkDir,
+		Worktree:          r.Worktree,
+		FinalCommit:       r.FinalCommit,
+		FinalBranch:       r.FinalBranch,
+		FinalBranchError:  r.FinalBranchError,
+		MergedInto:        r.MergedInto,
+		MergedCommit:      r.MergedCommit,
+		MergeStrategy:     r.MergeStrategy,
+		MergeStatus:       r.MergeStatus,
+		AutoMerge:         r.AutoMerge,
+		Source:            r.Source,
+		WatchedIssueIDs:   r.WatchedIssueIDs,
 	}
 	// Bootstrap fallback: when the run is already running but the WS
 	// catch-up hasn't yet seen the run_started event, anchor on

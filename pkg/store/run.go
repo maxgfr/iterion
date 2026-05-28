@@ -113,14 +113,14 @@ type Run struct {
 	// adds a ✨ icon next to the BotChip when this is set, so a run
 	// belonging to a named persona reads at a glance.
 	BundleDisplayName string                 `json:"bundle_display_name,omitempty" bson:"bundle_display_name,omitempty"`
-	Status        RunStatus              `json:"status" bson:"status"`
-	Inputs        map[string]interface{} `json:"inputs,omitempty" bson:"inputs,omitempty"`
-	CreatedAt     time.Time              `json:"created_at" bson:"created_at"`
-	UpdatedAt     time.Time              `json:"updated_at" bson:"updated_at"`
-	FinishedAt    *time.Time             `json:"finished_at,omitempty" bson:"finished_at,omitempty"`
-	Error         string                 `json:"error,omitempty" bson:"error,omitempty"`
-	Checkpoint    *Checkpoint            `json:"checkpoint,omitempty" bson:"checkpoint,omitempty"`
-	ArtifactIndex map[string]int         `json:"artifact_index,omitempty" bson:"artifact_index,omitempty"` // node_id → latest version written
+	Status            RunStatus              `json:"status" bson:"status"`
+	Inputs            map[string]interface{} `json:"inputs,omitempty" bson:"inputs,omitempty"`
+	CreatedAt         time.Time              `json:"created_at" bson:"created_at"`
+	UpdatedAt         time.Time              `json:"updated_at" bson:"updated_at"`
+	FinishedAt        *time.Time             `json:"finished_at,omitempty" bson:"finished_at,omitempty"`
+	Error             string                 `json:"error,omitempty" bson:"error,omitempty"`
+	Checkpoint        *Checkpoint            `json:"checkpoint,omitempty" bson:"checkpoint,omitempty"`
+	ArtifactIndex     map[string]int         `json:"artifact_index,omitempty" bson:"artifact_index,omitempty"` // node_id → latest version written
 	// WorkDir is the absolute filesystem path the run executes in
 	// (the per-run git worktree when Worktree is true, otherwise the
 	// engine's resolved cwd at start). Persisted so studio surfaces
@@ -284,6 +284,66 @@ type Run struct {
 	// #X" link back to the kanban; resume re-stamps the same Source
 	// so the linkage survives.
 	Source *RunSource `json:"source,omitempty" bson:"source,omitempty"`
+
+	// WatchedIssueIDs is the set of native-kanban issue IDs this run has
+	// subscribed to (MVP3b). When a watched issue changes board state,
+	// the server-side watch coordinator enqueues a user-message onto the
+	// run so the bot sees the transition between turns. Populated by the
+	// engine's onNodeFinished hook from a dispatch node's `dispatched_ids`
+	// output, and by the explicit POST/DELETE /api/runs/{id}/watch
+	// endpoints. Empty for runs that never dispatched / subscribed.
+	WatchedIssueIDs []string `json:"watched_issue_ids,omitempty" bson:"watched_issue_ids,omitempty"`
+}
+
+// dedupeNonEmpty returns ids with empty strings and duplicates removed,
+// first-seen order preserved. Returns nil when the result is empty so
+// the WatchedIssueIDs field stays omitted from the persisted record.
+func dedupeNonEmpty(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// mergeWatchedIssues returns the deduped union of existing and add,
+// insertion order preserved (existing entries lead).
+func mergeWatchedIssues(existing, add []string) []string {
+	return dedupeNonEmpty(append(append(make([]string, 0, len(existing)+len(add)), existing...), add...))
+}
+
+// removeWatchedIssues returns existing with every entry in drop removed.
+// Returns nil when the result is empty so the field stays omitted.
+func removeWatchedIssues(existing, drop []string) []string {
+	if len(existing) == 0 {
+		return nil
+	}
+	dropSet := make(map[string]struct{}, len(drop))
+	for _, id := range drop {
+		dropSet[id] = struct{}{}
+	}
+	out := make([]string, 0, len(existing))
+	for _, id := range existing {
+		if _, ok := dropSet[id]; ok {
+			continue
+		}
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // Recognised values for RunSource.Kind. The field stays a free-form

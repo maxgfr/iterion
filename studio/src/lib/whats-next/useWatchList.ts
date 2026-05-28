@@ -34,6 +34,33 @@ export interface UseWatchListResult {
   acknowledgeUpdates: () => void;
 }
 
+// deriveWatchedIds is the MVP3b watch-list source of truth. It unions
+// the server-authoritative list (Run.WatchedIssueIDs, mirrored into
+// RunHeader — durable across reloads, captures every dispatch path)
+// with the event-derived list (live during the session, before the next
+// snapshot refresh surfaces a fresh stamp). Server entries lead so
+// ordering is stable across reloads; legacy runs persisted before the
+// field existed fall back to the event list alone (serverWatched
+// undefined). The union dedups while preserving first-seen order.
+export function deriveWatchedIds(
+  serverWatched: ReadonlyArray<string> | undefined,
+  events: ReadonlyArray<RunEvent>,
+): string[] {
+  return dedupeNonEmpty([...(serverWatched ?? []), ...extractDispatchedIds(events)]);
+}
+
+function dedupeNonEmpty(ids: ReadonlyArray<string>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of ids) {
+    if (typeof id !== "string" || id.length === 0) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
 function extractDispatchedIds(events: ReadonlyArray<RunEvent>): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -55,6 +82,12 @@ function extractDispatchedIds(events: ReadonlyArray<RunEvent>): string[] {
 
 export function useWatchList(runId: string | null): UseWatchListResult {
   const events = useRunStore((s) => s.events);
+  // MVP3b: the server-authoritative watch list (Run.WatchedIssueIDs,
+  // mirrored into RunHeader). Captures every dispatch path — operator
+  // checkbox, LLM dispatch_more, the explicit /watch API — and survives
+  // reloads without localStorage. Absent (undefined) for legacy runs
+  // persisted before the field existed.
+  const serverWatched = useRunStore((s) => s.snapshot?.run?.watched_issue_ids);
 
   // Stabilize watchedIds reference: a new events array reference on
   // each event push otherwise cascades into a new watchedIds array →
@@ -62,14 +95,14 @@ export function useWatchList(runId: string | null): UseWatchListResult {
   // set is unchanged.
   const watchedIdsRef = useRef<string[]>([]);
   const watchedIds = useMemo(() => {
-    const next = extractDispatchedIds(events);
+    const next = deriveWatchedIds(serverWatched, events);
     const prev = watchedIdsRef.current;
     if (prev.length === next.length && prev.every((v, i) => v === next[i])) {
       return prev;
     }
     watchedIdsRef.current = next;
     return next;
-  }, [events]);
+  }, [events, serverWatched]);
 
   const [byId, setById] = useState<Record<string, WatchEntry>>({});
   const [pendingUpdates, setPendingUpdates] = useState<WatchUpdate[]>(() =>

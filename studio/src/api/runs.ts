@@ -188,6 +188,11 @@ export interface RunHeader {
   // Today only dispatcher runs populate it, carrying the back-reference
   // to the kanban issue so the RunHeader can link back to /board.
   source?: RunSource;
+  // watched_issue_ids is the server-authoritative set of native-kanban
+  // issue IDs this run subscribed to (MVP3b). The whats-next WatchPanel
+  // reads it as the primary watch-list source; absent for legacy runs
+  // that predate the field (the UI then falls back to event derivation).
+  watched_issue_ids?: string[];
 }
 
 export interface RunSource {
@@ -675,6 +680,31 @@ export async function pauseRun(
   runId: string,
 ): Promise<{ run_id: string; status: string }> {
   return request(`/runs/${encodeURIComponent(runId)}/pause`, { method: "POST" });
+}
+
+// addWatch subscribes a run to a native-kanban issue (MVP3b) so the
+// server-side watch coordinator forwards that issue's future board
+// transitions to the run as queued messages. Returns the run's full
+// subscription set after the mutation.
+export async function addWatch(
+  runId: string,
+  issueId: string,
+): Promise<{ run_id: string; watched_issue_ids: string[] }> {
+  return request(
+    `/runs/${encodeURIComponent(runId)}/watch/${encodeURIComponent(issueId)}`,
+    { method: "POST" },
+  );
+}
+
+// removeWatch unsubscribes a run from a native-kanban issue.
+export async function removeWatch(
+  runId: string,
+  issueId: string,
+): Promise<{ run_id: string; watched_issue_ids: string[] }> {
+  return request(
+    `/runs/${encodeURIComponent(runId)}/watch/${encodeURIComponent(issueId)}`,
+    { method: "DELETE" },
+  );
 }
 
 // ForkAnchor identifies where a forked run resumes inside the parent's

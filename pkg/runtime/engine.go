@@ -75,7 +75,7 @@ type Engine struct {
 	store                    store.RunStore
 	executor                 NodeExecutor
 	logger                   *iterlog.Logger
-	onNodeFinished           func(nodeID string, output map[string]interface{})
+	onNodeFinished           func(runID, nodeID string, output map[string]interface{})
 	onEvent                  func(evt store.Event) // optional observer fired after every successful append
 	recoveryDispatch         RecoveryDispatch      // optional; consulted on node execution failure
 	workflowHash             string                // SHA-256 of the .iter source, set via WithWorkflowHash
@@ -164,8 +164,13 @@ func WithAttachmentPromote(fn AttachmentPromoteFunc) EngineOption {
 }
 
 // WithOnNodeFinished registers a callback invoked after each node finishes
-// with the node's ID and output. The callback must be safe for concurrent use.
-func WithOnNodeFinished(fn func(nodeID string, output map[string]interface{})) EngineOption {
+// with the run ID, the node's ID, and the raw (unsanitized) output map.
+// The callback must be safe for concurrent use (parallel branches finish
+// concurrently). The runID lets a single registered callback serve every
+// run the engine drives, so convention-specific logic (e.g. stamping
+// Run.WatchedIssueIDs from a dispatch node's `dispatched_ids` output)
+// can live in the wiring layer instead of the generic engine.
+func WithOnNodeFinished(fn func(runID, nodeID string, output map[string]interface{})) EngineOption {
 	return func(e *Engine) { e.onNodeFinished = fn }
 }
 
@@ -1126,7 +1131,7 @@ func (e *Engine) execLoopAfterExec(ctx context.Context, rs *runState, currentNod
 		return "", err
 	}
 	if e.onNodeFinished != nil {
-		e.onNodeFinished(currentNodeID, output)
+		e.onNodeFinished(rs.runID, currentNodeID, output)
 	}
 
 	// Best-effort checkpoint for resume-from-failed.
@@ -1213,7 +1218,7 @@ func (e *Engine) execCompute(rs *runState, nodeID string, cn *ir.ComputeNode) (s
 		return "", err
 	}
 	if e.onNodeFinished != nil {
-		e.onNodeFinished(nodeID, output)
+		e.onNodeFinished(rs.runID, nodeID, output)
 	}
 
 	if err := e.store.SaveCheckpoint(rs.ctx, rs.runID, buildCheckpoint(rs, nodeID)); err != nil {

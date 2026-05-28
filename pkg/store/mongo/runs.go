@@ -76,6 +76,75 @@ func (s *Store) SaveRun(ctx context.Context, r *store.Run) error {
 	return nil
 }
 
+// AddWatchedIssues merges issueIDs into the run's watched_issue_ids set
+// ($addToSet is atomic and dedups) and returns the resulting set.
+func (s *Store) AddWatchedIssues(ctx context.Context, runID string, issueIDs []string) ([]string, error) {
+	clean := make([]string, 0, len(issueIDs))
+	for _, id := range issueIDs {
+		if id != "" {
+			clean = append(clean, id)
+		}
+	}
+	if len(clean) == 0 {
+		return s.watchedIssues(ctx, runID)
+	}
+	update := bson.M{
+		"$addToSet": bson.M{"watched_issue_ids": bson.M{"$each": clean}},
+		"$set":      bson.M{"updated_at": time.Now().UTC()},
+		"$inc":      bson.M{"version": 1},
+	}
+	return s.updateWatched(ctx, runID, update)
+}
+
+// RemoveWatchedIssues drops issueIDs from the run's watched_issue_ids
+// set ($pull) and returns the resulting set.
+func (s *Store) RemoveWatchedIssues(ctx context.Context, runID string, issueIDs []string) ([]string, error) {
+	if len(issueIDs) == 0 {
+		return s.watchedIssues(ctx, runID)
+	}
+	update := bson.M{
+		"$pull": bson.M{"watched_issue_ids": bson.M{"$in": issueIDs}},
+		"$set":  bson.M{"updated_at": time.Now().UTC()},
+		"$inc":  bson.M{"version": 1},
+	}
+	return s.updateWatched(ctx, runID, update)
+}
+
+func (s *Store) updateWatched(ctx context.Context, runID string, update bson.M) ([]string, error) {
+	var doc struct {
+		Watched []string `bson:"watched_issue_ids"`
+	}
+	opts := options.FindOneAndUpdate().
+		SetReturnDocument(options.After).
+		SetProjection(bson.M{"watched_issue_ids": 1})
+	err := s.runs.FindOneAndUpdate(ctx, withTenantFilter(ctx, bson.M{"_id": runID}), update, opts).Decode(&doc)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("store/mongo: run %s not found", runID)
+		}
+		return nil, fmt.Errorf("store/mongo: update watched issues %s: %w", runID, err)
+	}
+	return doc.Watched, nil
+}
+
+func (s *Store) watchedIssues(ctx context.Context, runID string) ([]string, error) {
+	var doc struct {
+		Watched []string `bson:"watched_issue_ids"`
+	}
+	err := s.runs.FindOne(
+		ctx,
+		withTenantFilter(ctx, bson.M{"_id": runID}),
+		options.FindOne().SetProjection(bson.M{"watched_issue_ids": 1}),
+	).Decode(&doc)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("store/mongo: run %s not found", runID)
+		}
+		return nil, fmt.Errorf("store/mongo: load watched issues %s: %w", runID, err)
+	}
+	return doc.Watched, nil
+}
+
 // ListRuns returns every run id sorted by created_at ascending. The
 // caller filters in higher layers (runview.Service.List). Tenant
 // scope is enforced when ctx carries a tenant_id.

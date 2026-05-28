@@ -1,6 +1,55 @@
 import { describe, expect, it } from "vitest";
 
-import { formatUpdatesAsChatMessage, type WatchUpdate } from "./useWatchList";
+import type { RunEvent } from "@/api/runs";
+import {
+  deriveWatchedIds,
+  formatUpdatesAsChatMessage,
+  type WatchUpdate,
+} from "./useWatchList";
+
+function dispatchEvent(ids: string[], seq = 1): RunEvent {
+  return {
+    seq,
+    timestamp: "2026-05-28T10:00:00Z",
+    type: "human_answers_recorded",
+    run_id: "run-1",
+    node_id: "ask_which_to_process",
+    data: { answers: { selected_issue_ids: ids } },
+  };
+}
+
+describe("deriveWatchedIds", () => {
+  it("falls back to event-derived ids for legacy runs (server undefined)", () => {
+    expect(deriveWatchedIds(undefined, [dispatchEvent(["native:a", "native:b"])])).toEqual([
+      "native:a",
+      "native:b",
+    ]);
+  });
+
+  it("uses the server list as the primary, reload-durable source", () => {
+    expect(deriveWatchedIds(["native:x", "native:y"], [])).toEqual([
+      "native:x",
+      "native:y",
+    ]);
+  });
+
+  it("unions server + event ids, server first, deduped", () => {
+    const got = deriveWatchedIds(
+      ["native:x", "native:a"],
+      [dispatchEvent(["native:a", "native:b"])],
+    );
+    expect(got).toEqual(["native:x", "native:a", "native:b"]);
+  });
+
+  it("drops empty/whitespace ids", () => {
+    expect(deriveWatchedIds(["native:x", ""], [])).toEqual(["native:x"]);
+  });
+
+  it("returns empty when neither source has ids", () => {
+    expect(deriveWatchedIds(undefined, [])).toEqual([]);
+    expect(deriveWatchedIds([], [])).toEqual([]);
+  });
+});
 
 describe("formatUpdatesAsChatMessage", () => {
   it("returns empty for no updates", () => {

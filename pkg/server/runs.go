@@ -68,6 +68,8 @@ func (s *Server) registerRunRoutes() {
 	s.mux.HandleFunc("GET /api/runs/{id}/queue-messages", s.handleListQueuedMessages)
 	s.mux.HandleFunc("POST /api/runs/{id}/queue-message", s.handleQueueMessage)
 	s.mux.HandleFunc("DELETE /api/runs/{id}/queue-message/{msgID}", s.handleCancelQueuedMessage)
+	s.mux.HandleFunc("POST /api/runs/{id}/watch/{issueID}", s.handleAddWatch)
+	s.mux.HandleFunc("DELETE /api/runs/{id}/watch/{issueID}", s.handleRemoveWatch)
 	s.mux.HandleFunc("POST /api/runs/{id}/resume", s.handleResumeRun)
 	s.mux.HandleFunc("POST /api/runs/{id}/merge", s.handleMergeRun)
 	s.mux.HandleFunc("POST /api/runs/{id}/commit-and-finalize", s.handleCommitAndFinalize)
@@ -711,6 +713,59 @@ func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusAccepted)
 	s.writeJSONFor(w, r, cancelRunResponse{RunID: id, Status: "cancelling"})
+}
+
+// watchResponse is the body of the watch endpoints — the run's full
+// subscription set after the mutation, so the studio can replace its
+// local view without re-fetching the snapshot.
+type watchResponse struct {
+	RunID           string   `json:"run_id"`
+	WatchedIssueIDs []string `json:"watched_issue_ids"`
+}
+
+// handleAddWatch subscribes a run to a native-kanban issue (MVP3b) so
+// the watch coordinator forwards that issue's future board transitions
+// to the run as queued messages.
+func (s *Server) handleAddWatch(w http.ResponseWriter, r *http.Request) {
+	s.mutateWatch(w, r, true)
+}
+
+// handleRemoveWatch unsubscribes a run from a native-kanban issue.
+func (s *Server) handleRemoveWatch(w http.ResponseWriter, r *http.Request) {
+	s.mutateWatch(w, r, false)
+}
+
+func (s *Server) mutateWatch(w http.ResponseWriter, r *http.Request, add bool) {
+	if !s.requireSafeOrigin(w, r) {
+		return
+	}
+	if s.rejectCrossStoreWrite(w, r) {
+		return
+	}
+	id := r.PathValue("id")
+	issueID := r.PathValue("issueID")
+	if id == "" || issueID == "" {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "missing run id or issue id")
+		return
+	}
+	rs := s.runs.RunStore()
+	var (
+		watched []string
+		err     error
+	)
+	if add {
+		watched, err = rs.AddWatchedIssues(r.Context(), id, []string{issueID})
+	} else {
+		watched, err = rs.RemoveWatchedIssues(r.Context(), id, []string{issueID})
+	}
+	if err != nil {
+		s.httpErrorFor(w, r, http.StatusInternalServerError, "watch: %v", err)
+		return
+	}
+	if watched == nil {
+		watched = []string{}
+	}
+	s.writeJSONFor(w, r, watchResponse{RunID: id, WatchedIssueIDs: watched})
 }
 
 // pauseRunResponse is the body of POST /api/runs/{id}/pause. Mirrors

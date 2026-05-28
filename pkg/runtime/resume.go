@@ -596,7 +596,7 @@ func (e *Engine) execAutoOrPauseHuman(ctx context.Context, rs *runState, nodeID 
 		return false, err
 	}
 	if e.onNodeFinished != nil {
-		e.onNodeFinished(nodeID, output)
+		e.onNodeFinished(rs.runID, nodeID, output)
 	}
 
 	return false, nil
@@ -813,7 +813,7 @@ func (e *Engine) reInvokeBackend(ctx context.Context, rs *runState, nodeID strin
 		return err
 	}
 	if e.onNodeFinished != nil {
-		e.onNodeFinished(nodeID, output)
+		e.onNodeFinished(rs.runID, nodeID, output)
 	}
 
 	// Checkpoint.

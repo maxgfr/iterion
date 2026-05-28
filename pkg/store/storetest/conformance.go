@@ -66,6 +66,81 @@ func RunWithOpts(t *testing.T, factory Factory, opts Opts) {
 	t.Run("LockExclusivity", func(t *testing.T) { testLockExclusive(t, factory(t)) })
 	t.Run("CapabilitiesReported", func(t *testing.T) { testCapabilitiesReported(t, factory(t)) })
 	t.Run("UserMessagesInbox", func(t *testing.T) { testUserMessagesInbox(t, factory(t)) })
+	t.Run("WatchedIssues", func(t *testing.T) { testWatchedIssues(t, factory(t)) })
+}
+
+func testWatchedIssues(t *testing.T, s store.RunStore) {
+	t.Helper()
+	ctx := testCtx()
+	if _, err := s.CreateRun(ctx, "run_watch", "demo", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add merges + dedups, preserving insertion order.
+	got, err := s.AddWatchedIssues(ctx, "run_watch", []string{"a", "b", "a", ""})
+	if err != nil {
+		t.Fatalf("AddWatchedIssues: %v", err)
+	}
+	if !sameSet(got, []string{"a", "b"}) {
+		t.Errorf("after add: got %v want [a b]", got)
+	}
+
+	// A second add only appends the new entry.
+	got, err = s.AddWatchedIssues(ctx, "run_watch", []string{"b", "c"})
+	if err != nil {
+		t.Fatalf("AddWatchedIssues #2: %v", err)
+	}
+	if !sameSet(got, []string{"a", "b", "c"}) {
+		t.Errorf("after add #2: got %v want [a b c]", got)
+	}
+
+	// Persisted on the run record.
+	r, err := s.LoadRun(ctx, "run_watch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameSet(r.WatchedIssueIDs, []string{"a", "b", "c"}) {
+		t.Errorf("LoadRun watched: got %v want [a b c]", r.WatchedIssueIDs)
+	}
+
+	// Remove drops the named entries.
+	got, err = s.RemoveWatchedIssues(ctx, "run_watch", []string{"b", "missing"})
+	if err != nil {
+		t.Fatalf("RemoveWatchedIssues: %v", err)
+	}
+	if !sameSet(got, []string{"a", "c"}) {
+		t.Errorf("after remove: got %v want [a c]", got)
+	}
+
+	// Removing the rest leaves an empty set.
+	got, err = s.RemoveWatchedIssues(ctx, "run_watch", []string{"a", "c"})
+	if err != nil {
+		t.Fatalf("RemoveWatchedIssues #2: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("after remove all: got %v want empty", got)
+	}
+}
+
+// sameSet reports whether got and want contain the same elements,
+// order-insensitive (Mongo's $addToSet does not guarantee ordering).
+func sameSet(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	seen := make(map[string]int, len(got))
+	for _, g := range got {
+		seen[g]++
+	}
+	for _, w := range want {
+		seen[w]--
+	}
+	for _, v := range seen {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func testCreateLoad(t *testing.T, s store.RunStore, opts Opts) {

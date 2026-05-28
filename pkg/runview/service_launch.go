@@ -414,6 +414,7 @@ func (s *Service) engineOptions(runLogger *iterlog.Logger, hash, filePath, runNa
 		runtime.WithLogger(runLogger),
 		runtime.WithRecoveryDispatch(s.recoveryDispatch),
 		runtime.WithEventObserver(s.broker.Publish),
+		runtime.WithOnNodeFinished(s.stampWatchedFromOutput),
 	}
 	if s.workDir != "" {
 		opts = append(opts, runtime.WithWorkDir(s.workDir))
@@ -453,6 +454,56 @@ func (s *Service) engineOptions(runLogger *iterlog.Logger, hash, filePath, runNa
 		opts = append(opts, runtime.WithAutoMerge(true))
 	}
 	return opts
+}
+
+// stampWatchedFromOutput subscribes a run to the kanban issues it just
+// dispatched. Wired as the engine's onNodeFinished hook: when a node's
+// output carries `dispatched_ids` (the assign_to_bots / triage_board
+// convention — IDs transitioned to `ready`), those issues are merged
+// into Run.WatchedIssueIDs so the server-side watch coordinator fans
+// future board transitions back to this run. The convention lives here,
+// not in the generic engine, so the runtime stays decoupled from a
+// bot-specific schema field.
+func (s *Service) stampWatchedFromOutput(runID, _ string, output map[string]interface{}) {
+	if output == nil {
+		return
+	}
+	ids := extractStringIDs(output["dispatched_ids"])
+	if len(ids) == 0 {
+		return
+	}
+	if _, err := s.store.AddWatchedIssues(context.Background(), runID, ids); err != nil {
+		s.logger.Warn("runview: stamp watched issues on run %s: %v", runID, err)
+	}
+}
+
+// extractStringIDs coerces a node-output value into a slice of non-empty
+// string IDs. Tolerates the JSON shapes a `json`-typed schema field
+// decodes into: []interface{} of strings, []string, or a single string.
+func extractStringIDs(v interface{}) []string {
+	switch t := v.(type) {
+	case []string:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			if e != "" {
+				out = append(out, e)
+			}
+		}
+		return out
+	case []interface{}:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			if str, ok := e.(string); ok && str != "" {
+				out = append(out, str)
+			}
+		}
+		return out
+	case string:
+		if t != "" {
+			return []string{t}
+		}
+	}
+	return nil
 }
 
 // logRunOutcome emits a single line at the end of a run goroutine so

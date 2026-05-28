@@ -3,6 +3,7 @@ import { Link } from "wouter";
 
 import { queueMessage } from "@/api/queueMessages";
 import { transitionIssue } from "@/api/native";
+import { addWatch } from "@/api/runs";
 import { stateChipStyle } from "@/lib/board/stateTheme";
 import { shortIssueId } from "@/lib/whats-next/issueId";
 import {
@@ -76,14 +77,14 @@ export default function WatchPanel({ runId }: WatchPanelProps) {
       )}
       <ul className="flex flex-col gap-1">
         {entries.map((entry) => (
-          <WatchRow key={entry.issueId} entry={entry} />
+          <WatchRow key={entry.issueId} entry={entry} runId={runId} />
         ))}
       </ul>
     </div>
   );
 }
 
-function WatchRow({ entry }: { entry: WatchEntry }) {
+function WatchRow({ entry, runId }: { entry: WatchEntry; runId: string | null }) {
   const { issue, issueId, lastFetchError } = entry;
   const title = issue?.title ?? shortIssueId(issueId);
   // Optimistic local override: once the operator clicks Dispatch we
@@ -107,6 +108,13 @@ function WatchRow({ entry }: { entry: WatchEntry }) {
     try {
       await transitionIssue(issueId, "ready");
       setOptimisticReady(true);
+      // Persist the subscription server-side (best-effort) so the watch
+      // coordinator fans the dispatched bot's *future* transitions back
+      // to this run, and so the watch survives a reload. Fired after the
+      // backlog → ready transition so the operator's own dispatch move
+      // doesn't self-notify. Failure is non-fatal: the event-derived
+      // watch still works for the live session.
+      if (runId) void addWatch(runId, issueId).catch(() => {});
     } catch (e) {
       setDispatchError((e as Error).message ?? String(e));
     } finally {

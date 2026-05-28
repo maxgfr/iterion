@@ -525,6 +525,37 @@ func (s *FilesystemRunStore) FailRunResumable(ctx context.Context, id string, cp
 	return s.writeRun(r)
 }
 
+// AddWatchedIssues merges issueIDs into the run's WatchedIssueIDs set
+// (dedup, insertion order preserved) and returns the resulting set.
+func (s *FilesystemRunStore) AddWatchedIssues(_ context.Context, runID string, issueIDs []string) ([]string, error) {
+	return s.mutateWatched(runID, func(cur []string) []string { return mergeWatchedIssues(cur, issueIDs) })
+}
+
+// RemoveWatchedIssues drops issueIDs from the run's WatchedIssueIDs set
+// and returns the resulting set.
+func (s *FilesystemRunStore) RemoveWatchedIssues(_ context.Context, runID string, issueIDs []string) ([]string, error) {
+	return s.mutateWatched(runID, func(cur []string) []string { return removeWatchedIssues(cur, issueIDs) })
+}
+
+// mutateWatched applies apply to the run's WatchedIssueIDs under mu —
+// parallel branches' onNodeFinished hooks and the watch API can call
+// this concurrently.
+func (s *FilesystemRunStore) mutateWatched(runID string, apply func([]string) []string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	r, err := s.loadRunRaw(runID)
+	if err != nil {
+		return nil, err
+	}
+	r.WatchedIssueIDs = apply(r.WatchedIssueIDs)
+	r.UpdatedAt = time.Now().UTC()
+	if err := s.writeRun(r); err != nil {
+		return nil, err
+	}
+	return r.WatchedIssueIDs, nil
+}
+
 // ListRuns returns the IDs of all persisted runs.
 func (s *FilesystemRunStore) ListRuns(_ context.Context) ([]string, error) {
 	runsDir := filepath.Join(s.root, "runs")
