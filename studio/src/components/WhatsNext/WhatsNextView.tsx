@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { ExternalLinkIcon } from "@radix-ui/react-icons";
 
@@ -21,7 +21,13 @@ import type {
 import { cancelRun } from "@/api/runs";
 import AgentChatbox from "@/components/shared/AgentChatbox";
 import { Button } from "@/components/ui/Button";
+import { Select, Textarea } from "@/components/ui";
 import { labelForStatus } from "@/components/Runs/runStatusMeta";
+import {
+  classifyContinueIntent,
+  type ContinueAction,
+} from "@/lib/whats-next/classifyContinueIntent";
+import { useUIStore } from "@/store/ui";
 import ChatTranscript from "./ChatTranscript";
 import HumanChatTurn from "./HumanChatTurn";
 import PreFlightPanel from "./PreFlightPanel";
@@ -35,6 +41,7 @@ import WatchPanel from "./WatchPanel";
 
 export default function WhatsNextView() {
   const bot = getFirstClassBot(DEFAULT_WHATS_NEXT_BOT_ID);
+  const quickMode = useUIStore((s) => s.whatsNextQuickMode);
   // Hooks must be called unconditionally — pass a dummy bot if the
   // lookup miss happens (in practice it can't since DEFAULT_WHATS_NEXT_BOT_ID
   // is a const key, but the early-return branch needs valid hook order).
@@ -203,6 +210,19 @@ export default function WhatsNextView() {
                 runStatus={session.runStatus}
                 busy={session.status === "submitting"}
                 onResume={() => void session.resume()}
+              />
+            ) : pendingHumanQuestion &&
+              quickMode &&
+              pendingHumanQuestion.nodeId === "ask_continue" ? (
+              <QuickModeFooter
+                busy={session.busyMessageId === pendingHumanQuestion.id}
+                contextPrefix={contextPrefixFor(
+                  pendingHumanQuestion,
+                  session.messages,
+                )}
+                onSubmit={(answers) =>
+                  void session.submitHumanAnswer(pendingHumanQuestion.id, answers)
+                }
               />
             ) : pendingHumanQuestion ? (
               <PendingTurnFooter
@@ -587,6 +607,150 @@ function PendingTurnFooter({
   );
 }
 
+// QuickModeFooter is the ask_continue footer when WhatsNext Quick
+// mode is on: a single free-text box replaces the action radio +
+// detail form. The typed line is classified into {action, detail} by
+// a local heuristic, and a dry-run banner shows the guess (with an
+// action override + editable detail) so the operator confirms before
+// anything runs. Low-confidence guesses surface the rationale by
+// default. This keeps the operator in the loop while collapsing the
+// two-field form to one line for power users.
+const QUICK_ACTION_LABELS: Record<ContinueAction, string> = {
+  add_ticket: "Add a ticket",
+  modify_ticket: "Modify a ticket",
+  dispatch_more: "Dispatch more",
+  done: "End the session",
+};
+
+function QuickModeFooter({
+  busy,
+  contextPrefix,
+  onSubmit,
+}: {
+  busy: boolean;
+  contextPrefix?: string;
+  onSubmit: (answers: Record<string, unknown>) => void;
+}) {
+  const setQuickMode = useUIStore((s) => s.setWhatsNextQuickMode);
+  const chatEnterSubmits = useUIStore((s) => s.chatEnterSubmits);
+  const [raw, setRaw] = useState("");
+  // null = follow the classifier; non-null = operator override.
+  const [actionOverride, setActionOverride] = useState<ContinueAction | null>(
+    null,
+  );
+  const [detailOverride, setDetailOverride] = useState<string | null>(null);
+
+  const classified = useMemo(() => classifyContinueIntent(raw), [raw]);
+  const action = actionOverride ?? classified.action;
+  const detail = detailOverride ?? classified.detail;
+  const ready = raw.trim() !== "";
+  const lowConfidence = classified.confidence < 0.5;
+
+  const submit = () => {
+    if (!ready || busy) return;
+    // ask_continue's schema is {action, detail}; the bot's
+    // derive_continue keys on action verbatim. "done" needs no detail.
+    onSubmit({ action, detail: action === "done" ? "" : detail });
+  };
+
+  return (
+    <div
+      className="border-t border-border-default bg-surface-1"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="mx-auto max-w-3xl px-4 py-3 space-y-2">
+        {contextPrefix && contextPrefix.length > 0 && (
+          <div className="text-[11px] text-fg-muted italic">{contextPrefix}</div>
+        )}
+        <Textarea
+          rows={2}
+          value={raw}
+          placeholder="What's next? e.g. “dispatch the feature_dev tickets”, “add a ticket for the flaky sandbox boot”, “done”."
+          onChange={(e) => {
+            setRaw(e.target.value);
+            // Re-follow the classifier whenever the text changes; the
+            // operator's prior overrides applied to stale text.
+            setActionOverride(null);
+            setDetailOverride(null);
+          }}
+          onKeyDown={(e) => {
+            const submitChord = chatEnterSubmits
+              ? e.key === "Enter" && !e.shiftKey
+              : e.key === "Enter" && (e.metaKey || e.ctrlKey);
+            if (submitChord) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+        />
+        {ready && (
+          <div
+            className={`rounded border px-2 py-1.5 space-y-1.5 ${
+              lowConfidence
+                ? "border-warning/40 bg-warning-soft"
+                : "border-border-default bg-surface-0"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-fg-subtle uppercase tracking-wide shrink-0">
+                I'll
+              </span>
+              <Select
+                value={action}
+                onChange={(e) =>
+                  setActionOverride(e.target.value as ContinueAction)
+                }
+                className="text-[11px] py-0.5"
+              >
+                {(Object.keys(QUICK_ACTION_LABELS) as ContinueAction[]).map(
+                  (a) => (
+                    <option key={a} value={a}>
+                      {QUICK_ACTION_LABELS[a]}
+                    </option>
+                  ),
+                )}
+              </Select>
+            </div>
+            {action !== "done" && (
+              <input
+                type="text"
+                value={detail}
+                onChange={(e) => setDetailOverride(e.target.value)}
+                placeholder="detail (optional)"
+                className="w-full rounded border border-border-default bg-surface-1 px-2 py-1 text-[11px] text-fg-default"
+              />
+            )}
+            {lowConfidence && (
+              <div className="text-[10px] text-warning-fg">
+                {classified.rationale} — check the action before confirming.
+              </div>
+            )}
+          </div>
+        )}
+        <div className="flex items-center gap-3">
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!ready || busy}
+            onClick={submit}
+          >
+            {busy ? "…" : "Confirm"}
+          </Button>
+          <button
+            type="button"
+            onClick={() => setQuickMode(false)}
+            className="text-[11px] text-fg-subtle hover:text-fg-default cursor-pointer"
+            title="Switch back to the structured action + detail form."
+          >
+            Use form instead
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ResumeFooter is the bottom-of-chat call-to-action when the run is
 // in failed_resumable or cancelled state. Replaces the AgentChatbox
 // (which is hidden for terminal runs) so the operator's next action
@@ -680,6 +844,7 @@ function SessionHeader({
         )}
       </h2>
       <div className="flex items-baseline gap-3">
+        <QuickModeToggle />
         {session.runId && (
           <Link
             href={`/runs/${encodeURIComponent(session.runId)}`}
@@ -709,6 +874,27 @@ function SessionHeader({
         )}
       </div>
     </div>
+  );
+}
+
+// QuickModeToggle is the SessionHeader control that flips the
+// ask_continue footer between the structured action+detail form and
+// the free-text Quick mode. Persisted via the ui store so the
+// operator's preference survives reloads + sessions.
+function QuickModeToggle() {
+  const quickMode = useUIStore((s) => s.whatsNextQuickMode);
+  const setQuickMode = useUIStore((s) => s.setWhatsNextQuickMode);
+  return (
+    <button
+      type="button"
+      onClick={() => setQuickMode(!quickMode)}
+      className={`text-[11px] hover:underline cursor-pointer ${
+        quickMode ? "text-accent" : "text-fg-subtle"
+      }`}
+      title="Quick mode: type a free-text instruction on the ask_continue turn instead of picking from the form. A dry-run banner lets you confirm the interpreted action."
+    >
+      {quickMode ? "⚡ Quick mode" : "Quick mode"}
+    </button>
   );
 }
 
