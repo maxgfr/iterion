@@ -2079,10 +2079,20 @@ workflow doc_align:
     max_review_chunk_docs: "{{vars.max_review_chunk_docs}}"
   }
 
-  ## Loop-exhaustion fallthroughs (update_audit_cache has its
-  ## unconditional `→ done` declared in the main commit path).
-  reviewer_claude -> done
-  reviewer_gpt    -> done
-  fix_claude      -> done
-  fix_gpt         -> done
+  ## Loop-exhaustion fallthroughs: the bounded review_loop /
+  ## recovery_loop was used up WITHOUT streak_check ever firing `stop`
+  ## — i.e. no convergence and no commit. Route to `fail`, NOT `done`,
+  ## so the run reports `failed` instead of a silent empty success.
+  ## Otherwise the dispatcher's completed_state marks the ticket
+  ## `review` as if doc work landed, and a coverage-gate deadlock
+  ## (reviewers approve while coverage < target, so the fixer never
+  ## fires to raise it) is indistinguishable from a clean convergence.
+  ## The legitimate success path is streak_check → prepare_commit →
+  ## commit_changes → mark_issue_for_review → update_audit_cache → done
+  ## (declared above); `fail` is non-resumable so the dispatcher won't
+  ## re-dispatch a deterministic non-convergence in a loop.
+  reviewer_claude -> fail
+  reviewer_gpt    -> fail
+  fix_claude      -> fail
+  fix_gpt         -> fail
   streak_check    -> alt
