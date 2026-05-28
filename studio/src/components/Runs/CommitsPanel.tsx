@@ -489,8 +489,9 @@ function CommitAndFinalizeFooter({
   run: RunHeader;
   onMergeComplete?: () => void;
 }) {
-  const defaultMessage = `Bot work session — ${run.name || run.workflow_name}`;
-  const [message, setMessage] = useState<string>(defaultMessage);
+  const [message, setMessage] = useState<string>(() =>
+    defaultConventionalMessage(run),
+  );
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -501,7 +502,17 @@ function CommitAndFinalizeFooter({
       await commitAndFinalizeRun(runId, { commit_message: message.trim() });
       onMergeComplete?.();
     } catch (e) {
-      setErr((e as Error).message);
+      const msg = (e as Error).message;
+      // Idempotence guard: the run was finalized out-of-band (a prior
+      // commit-and-finalize, or RecoverFinalize on daemon restart) since
+      // this panel's snapshot was taken. The work is already on a branch
+      // — refresh so the panel swaps to the standard merge footer instead
+      // of stranding the operator on a stale "commit" form.
+      if (/already finalized/i.test(msg)) {
+        onMergeComplete?.();
+        return;
+      }
+      setErr(msg);
     } finally {
       setSubmitting(false);
     }
@@ -548,6 +559,38 @@ function CommitAndFinalizeFooter({
       </Button>
     </div>
   );
+}
+
+// defaultConventionalMessage seeds the commit-and-finalize textarea
+// with a Conventional-Commits-shaped default. The subject comes from
+// the run's source issue title (dispatcher runs) or its friendly
+// name, stripped of any "[#N]" issue-number prefix. The type is
+// guessed from keywords in the subject; the operator edits it before
+// committing. Already-conventional subjects pass through untouched.
+export function defaultConventionalMessage(run: RunHeader): string {
+  const raw =
+    run.source?.issue_title?.trim() ||
+    run.name ||
+    run.workflow_name ||
+    "bot work session";
+  const subject = raw.replace(/^\[#\d+\]\s*/, "").trim();
+  // Already conventional (type: … or type(scope)!: …) → keep verbatim.
+  if (/^[a-z]+(\([^)]+\))?!?:\s/.test(subject)) return subject;
+  return `${guessConventionalType(subject)}: ${subject}`;
+}
+
+function guessConventionalType(subject: string): string {
+  const s = subject.toLowerCase();
+  // Order matters: a "doc-align bug fix" should read as fix, not docs.
+  if (/\b(bug|fix|broken|crash|regression|race|leak|hang)\b/.test(s)) return "fix";
+  if (/\b(feat|feature|add|implement|introduce|support|enable)\b/.test(s))
+    return "feat";
+  if (/\b(refactor|clean|cleanup|simplify|rework|restructure|dedupe)\b/.test(s))
+    return "refactor";
+  if (/\b(perf|performance|optimi|speed[ -]?up|latency)\b/.test(s)) return "perf";
+  if (/\b(test|tests|coverage|spec|e2e)\b/.test(s)) return "test";
+  if (/\b(doc|docs|documentation|readme|comment)\b/.test(s)) return "docs";
+  return "chore";
 }
 
 // NoticeFooter renders the same border + padding shell as the merge
