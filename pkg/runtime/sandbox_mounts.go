@@ -71,11 +71,7 @@ func applyHostStateMounts(
 	emitEvent func(store.EventType, map[string]interface{}) error,
 	logger *iterlog.Logger,
 ) {
-	var wfHostState string
-	if wf != nil && wf.Sandbox != nil {
-		wfHostState = wf.Sandbox.HostState
-	}
-	resolvedHostState, hsSource := pickHostState(wfHostState, p.HostStateOverride, p.HostStateDefault)
+	resolvedHostState, hsSource := pickHostState(workflowHostState(wf), p.HostStateOverride, p.HostStateDefault)
 	spec.HostState = sandbox.HostState(resolvedHostState)
 	if !spec.HostState.Active() {
 		_ = emitEvent(store.EventSandboxHostStateMounted, map[string]interface{}{

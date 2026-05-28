@@ -420,6 +420,59 @@ across the channel.
 `iterion sandbox doctor` reports which driver is selected on the
 current host and what capabilities it advertises.
 
+### Strict pre-flight (`--strict`)
+
+`iterion sandbox doctor --strict [workflow.iter]` resolves the **exact
+sandbox spec a run would use** — host detection + the workflow's
+`sandbox:` block (when a file is given) + the same
+`--sandbox` / `--sandbox-default-image` / `--sandbox-host-state` flags
+`iterion run` accepts — and validates every config combination *before*
+a run starts. It exits non-zero on any failure, and each failure carries
+an actionable remediation hint. Misconfigs that previously surfaced ~30s
+into a run with a cryptic Docker/K8s error are caught in ~1s.
+
+```bash
+iterion sandbox doctor --strict                          # host-level checks only
+iterion sandbox doctor --strict workflow.iter            # validate the workflow's sandbox: block
+iterion sandbox doctor --strict workflow.iter --target cloud   # validate cloud (k8s) compat from a laptop
+iterion sandbox doctor --strict --json workflow.iter     # machine-readable report
+```
+
+Checks (each `pass` / `warn` / `fail`):
+
+| Check | What it verifies | Failure means |
+| ----- | ---------------- | ------------- |
+| **driver available** | a real driver (not `noop`) is selectable for the active spec | install Docker/Podman, or `--sandbox-driver=noop` to bypass |
+| **spec valid** | `Spec.Validate` (image XOR build, inline needs image, absolute `workspace_folder`, valid network mode/inherit, valid `host_state`) | fix the `sandbox:` block |
+| **docker daemon** | the daemon answers `version --format {{.Server.Version}}` | start Docker Desktop / `systemctl start docker` |
+| **spec safety** | no `source=` bind of `docker.sock`, `/proc`, `/sys`, or host credentials; no flag injection on image/user/workdir; no env-var name/value injection | remove/fix the offending bind, arg, or env var |
+| **image resolvable** | the image tag resolves in its registry via `docker manifest inspect` — **no pull**; a locally-cached image short-circuits to pass | `fail` = tag not found; `warn` = registry auth/network (can't verify offline) |
+| **k8s spec compatible** | the cloud (kubernetes) constraints: no `build:`, image required, numeric `user`, and the **`host_state`-vs-k8s mutual exclusion** (`host_state: auto` is rejected — pods have no host filesystem) | pin `image`, set `host_state: none`, set a numeric `user` |
+| **k8s context** | a context is selected and the API server is reachable (in-cluster: service-account + `cluster-info`; off-cluster: `kubectl config current-context` + `cluster-info`) | `fail` in-cluster; `warn` off-cluster (this host is not a runner) |
+| **network allowlist syntax** | `network.preset` resolves and every `network.rules` entry compiles (wildcards lead a label, CIDRs parse, one wildcard segment per rule) | fix the offending rule/preset |
+| **driver capabilities** | the selected driver supports the requested features (build, mounts, remote user, postCreate) | choose a driver that supports them, or drop the feature |
+
+The `--target` flag selects the battery: `auto` (default — follow the
+selected driver), `cloud` (force the kubernetes / host-independent
+battery so a cloud workflow can be validated from a laptop), or `local`
+(force docker).
+
+**Exit codes:** a failed check exits **1** (host/spec misconfigured); a
+bad file or flag exits **2** (usage error). Warnings never change the
+exit code. `ITERION_SANDBOX_DOCTOR_TIMEOUT` (Go duration, default `5s`)
+caps each shell-out probe so a hung daemon/registry surfaces fast.
+
+### Pre-flight hook in `iterion run` (opt-in)
+
+Set `ITERION_SANDBOX_PREFLIGHT=1` to make `iterion run` run the same
+strict battery against the resolved spec *before* booting the engine.
+Failures abort the run early (exit 2) with the remediation logged;
+warnings are logged but do not abort. It is **off by default** — the
+battery shells out to the Docker daemon and an image registry, so the
+latency is only paid when the operator opts in (e.g. in CI, or the first
+run of a long session). The dispatcher equivalent (one check per daemon
+session) is a planned follow-up.
+
 ## Cloud (`ITERION_MODE=cloud`)
 
 When iterion runs in-cluster (`iterion server` + `iterion runner`

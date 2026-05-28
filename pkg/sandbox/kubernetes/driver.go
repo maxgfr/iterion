@@ -138,27 +138,15 @@ func (d *Driver) Capabilities() sandbox.Capabilities {
 // `sandbox.image:` — build via CI, pin by digest, point iterion at
 // the result. See docs/sandbox.md.
 func (d *Driver) Prepare(_ context.Context, spec sandbox.Spec) (sandbox.PreparedSpec, error) {
-	if err := spec.Validate(); err != nil {
+	// Spec validity + the cloud-driver hard constraints (no build, image
+	// required, host_state!=auto, numeric user) live in ValidateSpec so
+	// `iterion sandbox doctor --strict` can run the identical battery
+	// without an in-cluster kubectl. V2-7: sandbox.mounts entries are
+	// validated lazily — translateMounts at manifest-render time produces
+	// a clear error pointing at the offending entry, so authors see the
+	// offending mount string verbatim rather than a generic rejection here.
+	if err := ValidateSpec(spec); err != nil {
 		return nil, err
-	}
-	if spec.Build != nil {
-		return nil, fmt.Errorf("kubernetes: sandbox.build is local-only; cloud workflows must reference a pre-built image via sandbox.image (build via CI and pin by digest)")
-	}
-	if spec.Image == "" {
-		return nil, fmt.Errorf("kubernetes: sandbox.image is required; declare an image: field or use mode=auto with a .devcontainer/devcontainer.json")
-	}
-	if spec.HostState == sandbox.HostStateAuto {
-		return nil, fmt.Errorf("kubernetes: sandbox.host_state=auto is not supported on the kubernetes driver (no host filesystem to bind); set host_state: none on the workflow, pass --sandbox-host-state=none, or set ITERION_SANDBOX_HOST_STATE=none for cloud runs")
-	}
-	// V2-7: sandbox.mounts entries are validated lazily — translateMounts
-	// at manifest-render time produces a clear error pointing at the
-	// offending entry. Keep the surface here minimal so authors see the
-	// offending mount string verbatim in the diagnostic.
-	if spec.User == "" {
-		return nil, fmt.Errorf("kubernetes: sandbox.user is required (form: \"uid\" or \"uid:gid\", numeric); the driver enforces runAsNonRoot=true and most base images (alpine, debian) default to root, so kubelet will refuse the container with a cryptic error if no non-zero user is specified")
-	}
-	if _, _, ok := parseUserSpec(spec.User); !ok {
-		return nil, fmt.Errorf("kubernetes: sandbox.user %q must be numeric (form: \"uid\" or \"uid:gid\"); image USER is not introspected", spec.User)
 	}
 	workspace := spec.WorkspaceFolder
 	if workspace == "" {

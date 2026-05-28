@@ -226,6 +226,29 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 		p.Blank()
 	}
 
+	// Opt-in sandbox pre-flight (ITERION_SANDBOX_PREFLIGHT): validate the
+	// effective sandbox spec before booting the engine so a misconfig
+	// (bad image, daemon down, host_state-vs-k8s, malformed allowlist)
+	// surfaces in ~1s with a remediation hint instead of 30s into the run.
+	if sandboxPreflightEnabled() {
+		pfOpts := SandboxDoctorOptions{
+			File:                opts.File,
+			Sandbox:             opts.Sandbox,
+			SandboxDefaultImage: opts.SandboxDefaultImage,
+			SandboxHostState:    opts.SandboxHostState,
+			Target:              "auto",
+		}
+		if pfErr := PreflightSandbox(ctx, wf, pfOpts, func(status CheckStatus, c SandboxCheck) {
+			if status == CheckFail {
+				logger.Error("sandbox preflight [%s]: %s (hint: %s)", c.Name, c.Detail, c.Remediation)
+			} else {
+				logger.Warn("sandbox preflight [%s]: %s", c.Name, c.Detail)
+			}
+		}); pfErr != nil {
+			return pfErr
+		}
+	}
+
 	err = eng.Run(ctx, runID, inputs)
 	err = runInteractiveResumeLoop(ctx, eng, s, runID, opts.NoInteractive, err)
 

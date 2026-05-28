@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime"
@@ -10,8 +11,42 @@ import (
 	"github.com/SocialGouv/iterion/pkg/sandbox/registry"
 )
 
-// RunSandboxDoctor prints diagnostics about the sandbox subsystem.
-// It is the implementation of `iterion sandbox doctor`.
+// SandboxDoctorOptions tunes `iterion sandbox doctor`. The zero value
+// reproduces the historical host-only report.
+type SandboxDoctorOptions struct {
+	// Strict turns on the pre-run validation battery (driver liveness,
+	// image resolvability, k8s compatibility, network syntax, …) and
+	// makes the command exit non-zero on any failure.
+	Strict bool
+	// File is an optional workflow (.iter/.bot/.botz/dir) whose sandbox:
+	// block is resolved and validated. Empty runs host-level checks only.
+	File string
+	// Sandbox / SandboxDefaultImage / SandboxHostState mirror the
+	// `iterion run` flags so the doctor validates the EXACT spec a run
+	// with the same flags would use.
+	Sandbox             string
+	SandboxDefaultImage string
+	SandboxHostState    string
+	// Target selects the check battery: "auto" (follow the selected
+	// driver, default), "cloud" (force the kubernetes/host-independent
+	// battery — validate a cloud workflow from a laptop), or "local"
+	// (force docker).
+	Target string
+}
+
+// RunSandboxDoctor implements `iterion sandbox doctor`. Without
+// [SandboxDoctorOptions.Strict] it prints the host-only report
+// (unchanged from prior releases). With Strict it resolves the effective
+// sandbox spec and runs the full pre-flight battery, returning a non-nil
+// error (non-zero exit) when any check fails.
+func RunSandboxDoctor(ctx context.Context, p *Printer, opts SandboxDoctorOptions) error {
+	if opts.Strict {
+		return runSandboxDoctorStrict(ctx, p, opts)
+	}
+	return runSandboxDoctorBasic(p)
+}
+
+// runSandboxDoctorBasic prints diagnostics about the sandbox subsystem.
 //
 // The output covers:
 //
@@ -27,7 +62,7 @@ import (
 // Output is human-readable by default; pass --json on the parent
 // command to switch to JSON. Phase 0 prints stable string keys; Phase
 // 1+ may extend the JSON shape — keys present today will not change.
-func RunSandboxDoctor(p *Printer) error {
+func runSandboxDoctorBasic(p *Printer) error {
 	factory := sandbox.NewFactory(sandbox.FactoryOptions{
 		AvailableDrivers: defaultDriverRegistry(),
 	})

@@ -1,0 +1,189 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/SocialGouv/iterion/pkg/sandbox"
+)
+
+func TestResolveDoctorTarget(t *testing.T) {
+	cases := []struct {
+		optTarget, driver, want string
+	}{
+		{"cloud", "docker", "kubernetes"},
+		{"k8s", "noop", "kubernetes"},
+		{"local", "kubernetes", "docker"},
+		{"auto", "docker", "docker"},
+		{"", "podman", "docker"},
+		{"", "kubernetes", "kubernetes"},
+		{"", "noop", ""},
+		{"", "<none>", ""},
+	}
+	for _, tc := range cases {
+		if got := resolveDoctorTarget(tc.optTarget, tc.driver); got != tc.want {
+			t.Errorf("resolveDoctorTarget(%q, %q) = %q, want %q", tc.optTarget, tc.driver, got, tc.want)
+		}
+	}
+}
+
+func TestRunNetworkStrictChecks(t *testing.T) {
+	t.Run("good preset + rules", func(t *testing.T) {
+		r := &SandboxStrictReport{}
+		runNetworkStrictChecks(r, &sandbox.Spec{Network: &sandbox.Network{
+			Mode:   sandbox.NetworkModeAllowlist,
+			Preset: "iterion-default",
+			Rules:  []string{"**.example.com", "!evil.example.com"},
+		}})
+		if r.Failed() {
+			t.Fatalf("expected no failures, got %+v", r.Checks)
+		}
+	})
+
+	t.Run("unknown preset", func(t *testing.T) {
+		r := &SandboxStrictReport{}
+		runNetworkStrictChecks(r, &sandbox.Spec{Network: &sandbox.Network{
+			Mode:   sandbox.NetworkModeAllowlist,
+			Preset: "nope-not-a-preset",
+		}})
+		if !r.Failed() {
+			t.Fatal("expected a failure for unknown preset")
+		}
+		if !hasFailNamed(r, "network preset") {
+			t.Errorf("expected a failing 'network preset' check, got %+v", r.Checks)
+		}
+	})
+
+	t.Run("bad rule syntax", func(t *testing.T) {
+		r := &SandboxStrictReport{}
+		runNetworkStrictChecks(r, &sandbox.Spec{Network: &sandbox.Network{
+			Mode:  sandbox.NetworkModeAllowlist,
+			Rules: []string{"a*b.com"}, // embedded wildcard — rejected by compileRule
+		}})
+		if !hasFailNamed(r, "network allowlist syntax") {
+			t.Errorf("expected a failing 'network allowlist syntax' check, got %+v", r.Checks)
+		}
+	})
+}
+
+// fakeDriver is a minimal sandbox.Driver with controllable capabilities
+// for the capability-mismatch check.
+type fakeDriver struct {
+	name string
+	caps sandbox.Capabilities
+}
+
+func (f fakeDriver) Name() string                       { return f.name }
+func (f fakeDriver) Capabilities() sandbox.Capabilities { return f.caps }
+func (f fakeDriver) Prepare(context.Context, sandbox.Spec) (sandbox.PreparedSpec, error) {
+	return nil, nil
+}
+func (f fakeDriver) Start(context.Context, sandbox.PreparedSpec, sandbox.RunInfo) (sandbox.Run, error) {
+	return nil, nil
+}
+
+func TestRunCapabilityStrictChecks(t *testing.T) {
+	noCaps := fakeDriver{name: "fake", caps: sandbox.Capabilities{}}
+
+	t.Run("build unsupported", func(t *testing.T) {
+		r := &SandboxStrictReport{}
+		runCapabilityStrictChecks(r, &sandbox.Spec{Build: &sandbox.Build{Dockerfile: "Dockerfile"}}, noCaps)
+		if !hasFailNamed(r, "driver capabilities") {
+			t.Errorf("expected capability failure, got %+v", r.Checks)
+		}
+	})
+
+	t.Run("all supported", func(t *testing.T) {
+		allCaps := fakeDriver{name: "fake", caps: sandbox.Capabilities{
+			SupportsBuild: true, SupportsMounts: true, SupportsRemoteUser: true, SupportsPostCreate: true,
+		}}
+		r := &SandboxStrictReport{}
+		runCapabilityStrictChecks(r, &sandbox.Spec{
+			Build: &sandbox.Build{Dockerfile: "Dockerfile"}, User: "1000", PostCreate: "x", Mounts: []string{"m"},
+		}, allCaps)
+		if r.Failed() {
+			t.Errorf("expected no capability failure with full caps, got %+v", r.Checks)
+		}
+	})
+}
+
+func TestReportFailedAndRenderExit(t *testing.T) {
+	r := &SandboxStrictReport{Mode: "auto", Host: "local"}
+	r.add("ok", CheckPass, "", "")
+	r.add("warn", CheckWarn, "advisory", "do x")
+	if r.Failed() {
+		t.Fatal("warn-only report must not be Failed()")
+	}
+
+	// renderStrict returns nil when no fail.
+	p := &Printer{W: &bytes.Buffer{}, Format: OutputHuman}
+	if err := renderStrict(p, r); err != nil {
+		t.Errorf("renderStrict on warn-only report = %v, want nil", err)
+	}
+
+	r.add("boom", CheckFail, "broken", "fix it")
+	if !r.Failed() {
+		t.Fatal("report with a fail must be Failed()")
+	}
+	var buf bytes.Buffer
+	p = &Printer{W: &buf, Format: OutputHuman}
+	if err := renderStrict(p, r); !errors.Is(err, errStrictSandboxChecks) {
+		t.Errorf("renderStrict on failing report = %v, want errStrictSandboxChecks", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "[FAIL] boom") || !strings.Contains(out, "hint: fix it") {
+		t.Errorf("rendered output missing fail line / hint:\n%s", out)
+	}
+}
+
+func TestRunSandboxDoctorStrictNoSandbox(t *testing.T) {
+	// No workflow file + Sandbox="none" → spec resolves inactive → warn,
+	// nil error, no driver selection or shelling out.
+	var buf bytes.Buffer
+	p := &Printer{W: &buf, Format: OutputHuman}
+	err := RunSandboxDoctor(context.Background(), p, SandboxDoctorOptions{Strict: true, Sandbox: "none"})
+	if err != nil {
+		t.Fatalf("strict doctor with sandbox=none = %v, want nil", err)
+	}
+	if !strings.Contains(buf.String(), "sandbox configured") {
+		t.Errorf("expected 'sandbox configured' warn, got:\n%s", buf.String())
+	}
+}
+
+func TestRunSandboxDoctorStrictResolutionFailure(t *testing.T) {
+	// An invalid mode override fails spec resolution → fail check → exit
+	// error. Deterministic (no driver/daemon contact).
+	var buf bytes.Buffer
+	p := &Printer{W: &buf, Format: OutputJSON}
+	err := RunSandboxDoctor(context.Background(), p, SandboxDoctorOptions{Strict: true, Sandbox: "bogus-mode"})
+	if !errors.Is(err, errStrictSandboxChecks) {
+		t.Fatalf("strict doctor with bogus mode = %v, want errStrictSandboxChecks", err)
+	}
+	if !strings.Contains(buf.String(), "spec resolution") {
+		t.Errorf("expected a 'spec resolution' fail in JSON, got:\n%s", buf.String())
+	}
+}
+
+func TestBasicDoctorUnchanged(t *testing.T) {
+	// Non-strict path still works and never errors.
+	var buf bytes.Buffer
+	p := &Printer{W: &buf, Format: OutputHuman}
+	if err := RunSandboxDoctor(context.Background(), p, SandboxDoctorOptions{}); err != nil {
+		t.Fatalf("basic doctor = %v, want nil", err)
+	}
+	if !strings.Contains(buf.String(), "doctor report") {
+		t.Errorf("basic doctor output changed unexpectedly:\n%s", buf.String())
+	}
+}
+
+func hasFailNamed(r *SandboxStrictReport, name string) bool {
+	for _, c := range r.Checks {
+		if c.Name == name && c.Status == CheckFail {
+			return true
+		}
+	}
+	return false
+}

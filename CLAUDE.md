@@ -503,7 +503,7 @@ iterion issue create|list|show|move|update|close|board  # Native kanban tracker
 iterion bots list [--paths <dir>] [--format json|markdown|skill]  # Discover .bot/.botz bundles (used by whats-next + dispatcher zero-config)
 iterion bench asymptote [flags]         # Asymptote benchmark (see docs/asymptote-bench.md)
 iterion bundle init|pack                # Scaffold or pack a .botz bundle (see docs/bundles.md)
-iterion sandbox doctor                  # Diagnose host sandbox prerequisites (see docs/sandbox.md)
+iterion sandbox doctor [file] [--strict] [--target auto|cloud|local]  # Diagnose host sandbox prerequisites; --strict validates a run's full config pre-flight (see docs/sandbox.md)
 iterion migrate to-cloud [flags]        # Migrate a local store into a cloud (Mongo + S3) backend
 iterion server [--port] [--store-dir]   # HTTP server (run console + studio), without the studio launcher
 iterion version                         # Print version

@@ -13,7 +13,7 @@ import (
 
 // Complementary coverage for sandbox.go pure helpers not already
 // exercised by sandbox_internal_test.go. Focus: containsClawNode,
-// backendIsClaw, cloneStringMap, fromIRSpec, resolveNetworkPolicy,
+// backendIsClaw, cloneStringMap, fromIRSpec, ResolveNetworkPolicy,
 // engineRepoRoot. End-to-end startSandbox / shutdown remain
 // integration-only because they require docker/k8s.
 
@@ -198,7 +198,7 @@ func TestFromIRSpec_NilSubBlocks(t *testing.T) {
 }
 
 func TestResolveNetworkPolicy_NilSpecYieldsOpen(t *testing.T) {
-	mode, rules := resolveNetworkPolicy(nil)
+	mode, rules := ResolveNetworkPolicy(nil)
 	if mode != netproxy.ModeOpen {
 		t.Errorf("mode = %q, want open (default since 2026-05-22)", mode)
 	}
@@ -218,7 +218,7 @@ func TestResolveNetworkPolicy_ExplicitDenylist(t *testing.T) {
 			Rules: []string{"*.evil.site"},
 		},
 	}
-	mode, rules := resolveNetworkPolicy(spec)
+	mode, rules := ResolveNetworkPolicy(spec)
 	if mode != netproxy.ModeDenylist {
 		t.Errorf("mode = %q, want denylist", mode)
 	}
@@ -240,7 +240,7 @@ func TestResolveNetworkPolicy_OpenMode(t *testing.T) {
 	spec := &sandbox.Spec{
 		Network: &sandbox.Network{Mode: sandbox.NetworkModeOpen},
 	}
-	mode, _ := resolveNetworkPolicy(spec)
+	mode, _ := ResolveNetworkPolicy(spec)
 	if mode != netproxy.ModeOpen {
 		t.Errorf("mode = %q, want open", mode)
 	}
@@ -256,7 +256,7 @@ func TestResolveNetworkPolicy_CustomPresetReplacesDefault(t *testing.T) {
 			Rules:  []string{"only-this.example.com"},
 		},
 	}
-	mode, rules := resolveNetworkPolicy(spec)
+	mode, rules := ResolveNetworkPolicy(spec)
 	if mode != netproxy.ModeAllowlist {
 		t.Errorf("mode = %q, want allowlist", mode)
 	}

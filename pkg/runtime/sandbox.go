@@ -275,7 +275,7 @@ func startNetworkProxy(
 	emitEvent func(store.EventType, map[string]interface{}) error,
 	logger *iterlog.Logger,
 ) (*netproxy.Proxy, string, error) {
-	mode, rules := resolveNetworkPolicy(spec)
+	mode, rules := ResolveNetworkPolicy(spec)
 	if mode == netproxy.ModeOpen {
 		return nil, "", nil
 	}
@@ -335,7 +335,7 @@ func proxyAddressesForDriver(d sandbox.Driver) (bind, advertise string, err erro
 	return "127.0.0.1:0", "host.docker.internal", nil
 }
 
-// resolveNetworkPolicy derives the (mode, rules) pair to compile from
+// ResolveNetworkPolicy derives the (mode, rules) pair to compile from
 // the spec. Precedence:
 //
 //  1. spec.Network.Mode (when explicit) wins.
@@ -358,7 +358,7 @@ func proxyAddressesForDriver(d sandbox.Driver) (bind, advertise string, err erro
 // starting point for the allowlist mode — but is no longer applied
 // implicitly. ModeAllowlist with an empty rule list is unchanged: it
 // blocks everything, surfacing as `network_blocked` events.
-func resolveNetworkPolicy(spec *sandbox.Spec) (netproxy.Mode, []string) {
+func ResolveNetworkPolicy(spec *sandbox.Spec) (netproxy.Mode, []string) {
 	mode := netproxy.ModeOpen
 	preset := ""
 	var extra []string
@@ -457,6 +457,43 @@ func resolveSandboxSpec(
 	return nil, source, fmt.Errorf("runtime: sandbox: unknown mode %q", mode)
 }
 
+// ResolveSandboxSpecForDoctor produces the effective sandbox spec a run
+// WOULD use, for `iterion sandbox doctor --strict` (and the opt-in
+// pre-flight hook), WITHOUT starting anything. It applies the same
+// precedence chains the engine uses at run start:
+//
+//   - mode + image/build/mounts/env/network via [resolveSandboxSpec]
+//     (CLI > workflow > global default; mode=auto reads
+//     .devcontainer/devcontainer.json or falls back to the default
+//     image);
+//   - host_state via [pickHostState] (CLI > workflow > env > "auto"),
+//     baked into spec.HostState so the doctor's k8s mutual-exclusion
+//     check sees the value the engine would.
+//
+// Unlike [resolveAndStartSandbox], it performs NO filesystem mounts, NO
+// image pull, and NO os.Stat of host-state dirs — it is a pure dry-run
+// resolution. Returns (nil, source, nil) when no active sandbox is
+// requested (mode none / inherit), so callers can report "no sandbox
+// configured" rather than guess.
+//
+// defaultImageFlag mirrors the --sandbox-default-image flag; the env var
+// and built-in fallback are applied by [resolveDefaultSandboxImage].
+func ResolveSandboxSpecForDoctor(
+	wf *ir.Workflow,
+	repoRoot, cliOverride, globalDefault, defaultImageFlag, hostStateOverride, hostStateDefault string,
+) (*sandbox.Spec, string, error) {
+	spec, source, err := resolveSandboxSpec(wf, repoRoot, cliOverride, globalDefault, resolveDefaultSandboxImage(defaultImageFlag))
+	if err != nil {
+		return nil, source, err
+	}
+	if spec == nil || !spec.Mode.IsActive() {
+		return spec, source, nil
+	}
+	resolvedHostState, _ := pickHostState(workflowHostState(wf), hostStateOverride, hostStateDefault)
+	spec.HostState = sandbox.HostState(resolvedHostState)
+	return spec, source, nil
+}
+
 // pickMode walks the precedence chain and returns the first
 // non-empty mode along with a human-readable source label.
 //
@@ -485,6 +522,18 @@ func pickMode(wf *ir.Workflow, cli, global string) (string, string) {
 		return global, "ITERION_SANDBOX_DEFAULT"
 	}
 	return "", "default (no sandbox)"
+}
+
+// workflowHostState returns the workflow-scope host_state declaration
+// (wf.Sandbox.HostState), or "" when the workflow declares none. Shared
+// by applyHostStateMounts (engine) and ResolveSandboxSpecForDoctor
+// (doctor / pre-flight) so both feed pickHostState the identical
+// workflow input and can never disagree on the resolved host_state.
+func workflowHostState(wf *ir.Workflow) string {
+	if wf != nil && wf.Sandbox != nil {
+		return wf.Sandbox.HostState
+	}
+	return ""
 }
 
 // pickHostState resolves the precedence chain for the `host_state`
