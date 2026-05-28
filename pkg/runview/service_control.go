@@ -399,6 +399,20 @@ func (s *Service) CommitAndFinalizeCtx(ctx context.Context, runID, message strin
 	if err != nil {
 		return nil, err
 	}
+	// RecoverFinalize promotes the worktree HEAD with mergeInto:"none",
+	// which lands MergeStatus="skipped". For a commit-and-finalize the
+	// operator's intent is explicitly "I want to merge this" — but the
+	// studio reads finished+skipped as "operator opted out of the merge
+	// at launch" and renders a dead-end notice with no merge button.
+	// Flip skipped → pending here so the standard squash/merge footer
+	// surfaces. (Only when not already merged — defensive against an
+	// auto-FF path having landed it.)
+	if r.MergeStatus == store.MergeStatusSkipped && r.MergedInto == "" {
+		r.MergeStatus = store.MergeStatusPending
+		if err := s.store.SaveRun(ctx, r); err != nil {
+			return nil, fmt.Errorf("runview: persist pending merge status: %w", err)
+		}
+	}
 	return &CommitAndFinalizeResponse{
 		RunID:         r.ID,
 		FinalCommit:   r.FinalCommit,
