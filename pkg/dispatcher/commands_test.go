@@ -228,6 +228,79 @@ type errPermanentFailure struct{}
 
 func (errPermanentFailure) Error() string { return "permanent failure" }
 
+// TestDispatch_StampsLastRunAtStart asserts the studio "run ↗" link is
+// live for the whole run: the dispatcher must stamp last_run when it
+// dispatches, not only when the run finishes. A blocking runner keeps
+// the run in flight so the only SetLastRun observed is the dispatch-time
+// one (the finish-time stamp can't have fired yet).
+func TestDispatch_StampsLastRunAtStart(t *testing.T) {
+	ft := newLastRunTracker()
+	ft.add(tracker.Issue{
+		ID: "fake:dispatch-stamp", Identifier: "fake#dispatch-stamp",
+		Title: "go", WorkflowState: "ready",
+	})
+
+	started := make(chan struct{}, 1)
+	runner := &StubRunner{Handler: func(ctx context.Context, _ DispatchSpec) error {
+		started <- struct{}{}
+		<-ctx.Done() // keep the run "in flight" until the test cancels
+		return ctx.Err()
+	}}
+
+	dir := t.TempDir()
+	cfg := &Config{
+		Name:      "test",
+		Workflow:  t.TempDir() + "/fake.iter",
+		Tracker:   TrackerConfig{Kind: "fake"},
+		Polling:   PollingConfig{IntervalMS: 30},
+		Agent:     AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000, RunningState: "in_progress"},
+		Workspace: WorkspaceConfig{Root: filepath.Join(dir, "ws")},
+		Stall:     StallConfig{TimeoutMS: 0},
+	}
+	cfg.applyDefaults()
+	ws, err := NewWorkspaces(filepath.Join(dir, "ws"))
+	if err != nil {
+		t.Fatalf("NewWorkspaces: %v", err)
+	}
+	c, err := New(Options{
+		Config:     cfg,
+		Tracker:    ft,
+		Runner:     runner,
+		Workspaces: ws,
+		Logger:     iterlog.New(iterlog.LevelError, &bytes.Buffer{}),
+		HostMarker: "test",
+		StoreDir:   filepath.Join(dir, "store"),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.Start(ctx)
+	defer c.Stop()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatch never started")
+	}
+
+	// The run is now blocked in the handler — finishRun cannot have run,
+	// so any SetLastRun call must be the dispatch-time stamp.
+	calls := ft.lastRunCalls()
+	if len(calls) == 0 {
+		t.Fatal("expected last_run stamped at dispatch, got none")
+	}
+	got := calls[0]
+	if got.id != "fake:dispatch-stamp" {
+		t.Fatalf("stamped issue = %q, want fake:dispatch-stamp", got.id)
+	}
+	if got.runID == "" {
+		t.Fatalf("dispatch-time stamp must carry a runID, got empty")
+	}
+}
+
 // TestFinishRun_WarnsOnZeroCommit asserts the honesty guard: a clean
 // finish whose run produced no commit is logged at WARN (not the
 // silent INFO "finished cleanly") so an empty run doesn't masquerade

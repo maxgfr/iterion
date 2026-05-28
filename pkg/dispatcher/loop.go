@@ -355,6 +355,14 @@ func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 	c.state.running[iss.ID] = entry
 	c.state.slotsByState[iss.WorkflowState]++
 
+	// Stamp last_run at dispatch (not just at finish) so the studio's
+	// IssueModal / WatchPanel "run ↗" link is live for the whole run
+	// instead of pointing at the previous run until this one completes.
+	// run.json doesn't exist yet, so stampLastRun falls back to the
+	// workspace path; the finish-time stamp later upgrades it to the
+	// resolved worktree path.
+	c.stampLastRun(iss.ID, entry)
+
 	spec := c.buildSpec(cfg, iss, runID, wsPath, attempt, entry)
 	spec.ResumeFromRunID = resumeFromRunID
 
