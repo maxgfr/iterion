@@ -54,11 +54,12 @@ func TestManager_TransitionMergedIssue_EmptyIssue(t *testing.T) {
 	}
 }
 
-func TestManager_TransitionMergedIssue_EmptyAndNoneAreNoOp(t *testing.T) {
-	// Two distinct ways an operator says "don't auto-transition":
-	// MergedState left empty (default) OR set to the explicit "none"
-	// sentinel. Both must short-circuit before the tracker is touched.
-	for _, mergedState := range []string{"", "none"} {
+func TestManager_TransitionMergedIssue_NoneIsNoOp(t *testing.T) {
+	// "none" is the explicit opt-out: the operator wants merged issues to
+	// stay put. (Empty no longer belongs here — it now defaults to "done"
+	// via DefaultMergedState; that firing path is covered by
+	// TestManager_TransitionMergedIssue_HappyPath.)
+	for _, mergedState := range []string{"none"} {
 		t.Run("merged_state="+mergedState, func(t *testing.T) {
 			t.Setenv("ITERION_DISPATCHER_AUTOSTART", "0")
 			dir := seedManagerFixtureWithMergedState(t, mergedState)

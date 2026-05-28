@@ -155,10 +155,10 @@ type AgentConfig struct {
 	// — review queues can flow review → done without the operator
 	// touching the kanban after every merge click.
 	//
-	// Empty disables the auto-transition (the issue stays in
-	// CompletedState — typically "review" — until manually moved).
-	// "none" is treated the same as empty. An unknown state name logs
-	// a warning and is a no-op.
+	// Empty in YAML → defaults to "done" (see DefaultMergedState) so a
+	// merged run closes its ticket automatically. "none" is the explicit
+	// opt-out (issue stays in CompletedState — typically "review" — until
+	// manually moved). An unknown state name logs a warning and is a no-op.
 	MergedState string `yaml:"merged_state,omitempty" json:"merged_state,omitempty"`
 }
 
@@ -229,6 +229,16 @@ const (
 	// unrecognised target is treated as "leave the issue alone" so
 	// operators with custom boards aren't forced to opt out explicitly.
 	DefaultCompletedState = "review"
+
+	// DefaultMergedState is the kanban state a dispatcher-spawned issue
+	// moves to when its run is merged from the studio (review → merged →
+	// done is the canonical lifecycle). Without a default, merged issues
+	// would sit in CompletedState ("review") forever, forcing the
+	// operator to close each one by hand. "done" is assumed to exist as a
+	// terminal column; UpdateState failures are logged + non-fatal, so
+	// boards without it degrade gracefully. Opt out with
+	// `merged_state: none`.
+	DefaultMergedState = "done"
 )
 
 // Load reads and parses a dispatcher config from path. Relative paths
@@ -292,6 +302,15 @@ func (c *Config) applyDefaults() {
 		c.Agent.CompletedState = DefaultCompletedState
 	} else if c.Agent.CompletedState == "none" {
 		c.Agent.CompletedState = ""
+	}
+	// MergedState mirrors the same convention: empty → default ("done")
+	// so a studio-merged dispatcher run auto-closes its ticket; "none"
+	// is the explicit opt-out for operators who want to close merged
+	// issues by hand.
+	if c.Agent.MergedState == "" {
+		c.Agent.MergedState = DefaultMergedState
+	} else if c.Agent.MergedState == "none" {
+		c.Agent.MergedState = ""
 	}
 	if c.Stall.TimeoutMS == 0 {
 		c.Stall.TimeoutMS = DefaultStallTimeoutMS

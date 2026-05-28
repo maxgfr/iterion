@@ -74,6 +74,30 @@ tracker:
 	if cfg.Stall.TimeoutMS != DefaultStallTimeoutMS {
 		t.Fatalf("default stall: %d", cfg.Stall.TimeoutMS)
 	}
+	if cfg.Agent.CompletedState != DefaultCompletedState {
+		t.Fatalf("default completed_state: %q, want %q", cfg.Agent.CompletedState, DefaultCompletedState)
+	}
+	// A studio-merged dispatcher run must auto-close its ticket by
+	// default — without this, merged issues pile up in "review" forever.
+	if cfg.Agent.MergedState != DefaultMergedState {
+		t.Fatalf("default merged_state: %q, want %q", cfg.Agent.MergedState, DefaultMergedState)
+	}
+}
+
+func TestConfigMergedStateNoneOptOut(t *testing.T) {
+	p := writeConfig(t, `workflow: {{WORKFLOW}}
+tracker:
+  kind: native
+agent:
+  merged_state: none
+`)
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Agent.MergedState != "" {
+		t.Fatalf("merged_state: none should disable (empty), got %q", cfg.Agent.MergedState)
+	}
 }
 
 func TestConfigMissingWorkflow(t *testing.T) {
