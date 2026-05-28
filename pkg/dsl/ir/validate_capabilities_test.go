@@ -42,6 +42,40 @@ workflow w:
 	}
 }
 
+func TestCapabilities_WatchKnownAccepted(t *testing.T) {
+	src := `
+schema s:
+  ok: bool
+
+prompt sys:
+  hi.
+
+prompt usr:
+  go.
+
+agent po:
+  model: "m"
+  input: s
+  output: s
+  system: sys
+  user: usr
+  capabilities: [watch.subscribe, watch.unsubscribe]
+
+workflow w:
+  entry: po
+  po -> done
+`
+	r := compileFile(t, src)
+	for _, d := range r.Diagnostics {
+		if d.Severity == SeverityError {
+			t.Fatalf("unexpected error: %s", d.Error())
+		}
+		if d.Code == DiagUnknownCapability {
+			t.Fatalf("watch.* should be a known capability, got: %s", d.Error())
+		}
+	}
+}
+
 func TestCapabilities_UnknownEmitsWarning(t *testing.T) {
 	src := `
 schema s:

@@ -356,6 +356,16 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 		}
 	}
 
+	// Watch capabilities (watch.subscribe / watch.unsubscribe) are wired for
+	// the claw backend only so far — the claude_code stdio (__mcp-watch) and
+	// sandbox HTTP transports are not built yet (board's own rollout was
+	// stdio-then-HTTP across phases; watch is at the claw-only phase). Warn
+	// so the gap is visible instead of the bot calling a tool that isn't
+	// there mid-loop.
+	if HasWatchCapability(task.Capabilities) {
+		b.Logger.Warn("[%s#%d/claude-code] watch.* capabilities are not yet supported on the claude_code backend (claw only); ignoring for this node", task.NodeID, task.Iteration)
+	}
+
 	// Operator-chatbox mid-session inbox delivery (parity with the claw
 	// backend's per-iteration drain). PostToolUse fires after every tool
 	// call; Stop fires when the LLM tries to end the turn. Both consult

@@ -13,6 +13,17 @@ const (
 	DiagBoardCapInSandbox   DiagCode = "C082" // board.* capability requested while sandboxed (HTTP transport needed)
 )
 
+// Watch capability names. A node with watch.subscribe / watch.unsubscribe can
+// opt its run into the runtime watch fan-out (MVP3b): once subscribed to a
+// native-board issue, the run receives a queued message whenever that issue
+// changes state. This is the source of truth for the strings; the claw tool
+// registrar (pkg/backend/tool/claw_watch_tools.go) mirrors them. Currently
+// wired for the claw backend only — see RegisterClawWatchTools.
+const (
+	CapWatchSubscribe   = "watch.subscribe"
+	CapWatchUnsubscribe = "watch.unsubscribe"
+)
+
 // KnownCapabilities is the set of capabilities the iterion runtime understands
 // at compile time. The validator emits a C080 warning for any cap declared on
 // an agent or judge that is not in this set — but does not reject it, so
@@ -27,6 +38,8 @@ var KnownCapabilities = map[string]bool{
 	boardops.CapBoardAssign: true,
 	boardops.CapBoardLabel:  true,
 	boardops.CapBoardClose:  true,
+	CapWatchSubscribe:       true,
+	CapWatchUnsubscribe:     true,
 }
 
 // capShapeRe enforces the lowercase `domain` or `domain.action` shape.

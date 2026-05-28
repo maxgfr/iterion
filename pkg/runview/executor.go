@@ -210,6 +210,27 @@ func BuildExecutor(spec ExecutorSpec) (*model.ClawExecutor, error) {
 		}
 	}
 
+	// Register the native-board WATCH tools so claw nodes that declare
+	// watch.subscribe / watch.unsubscribe can opt their run into the
+	// runtime watch fan-out (MVP3b). All known watch caps are registered;
+	// per-node access is gated downstream by checkNodeToolAccess via the
+	// node's `capabilities:` list, mirroring the board tools. The claw
+	// executor is per-run, so spec.RunID binds every subscription to the
+	// correct run. spec.Store is the RunStore (it carries the
+	// AddWatchedIssues/RemoveWatchedIssues mutators); the type-assertion
+	// degrades to a no-op for stores that don't implement watch (e.g. a
+	// bare event emitter).
+	if ws, ok := spec.Store.(tool.WatchStore); ok {
+		watchCfg := &tool.WatchConfig{
+			Store:        ws,
+			RunID:        spec.RunID,
+			Capabilities: []string{ir.CapWatchSubscribe, ir.CapWatchUnsubscribe},
+		}
+		if err := tool.RegisterClawWatchTools(toolReg, watchCfg); err != nil {
+			spec.Logger.Warn("runview: RegisterClawWatchTools: %v", err)
+		}
+	}
+
 	executor := model.NewClawExecutor(reg, spec.Workflow, opts...)
 
 	if len(spec.Vars) > 0 {
