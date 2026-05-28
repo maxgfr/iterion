@@ -11,12 +11,16 @@
 .iterion-*/
 
 # Sandbox runtime scratch — the container redirects HOME / XDG_CACHE_HOME
-# into the bind-mounted worktree (devbox writes its version cache there,
-# etc). These are per-run caches, never source. Without ignoring them
-# they leak into commit-and-finalize's `git add -A` and land in the
-# run's storage branch.
-.tmp-home/
-.tmp-xdg-cache/
+# and the Go toolchain caches (GOPATH / GOCACHE) into the bind-mounted
+# worktree (devbox writes its version cache there, `go test`/`go build`
+# populate the module + build caches, etc). These are per-run caches,
+# never source. Without ignoring them they (a) leak into
+# commit-and-finalize's `git add -A` and land in the run's storage
+# branch, and (b) explode the studio run-view diff: `git status -uall`
+# expands an un-ignored .tmp-gocache into 20k+ entries and the file/diff
+# panel renders them all, freezing the UI. The `.tmp-*/` glob catches
+# any future per-run scratch dir of this family.
+.tmp-*/
 
 # Playwright MCP scratch (console logs + page snapshots written under
 # cwd by the @playwright/mcp server; per-run, not committed). Also
