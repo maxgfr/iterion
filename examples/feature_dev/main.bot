@@ -1032,16 +1032,23 @@ workflow feature_dev:
 
   ## Loop exhaustion fallbacks: when a bounded loop hits its limit
   ## the loop-bearing edges above are skipped and execution falls
-  ## through to these unconditional terminal edges.
-  reviewer_claude -> done
-  reviewer_gpt    -> done
-  fix_claude      -> done
-  fix_gpt         -> done
-  ## streak_check's catch-all routes back to `alt` (not `done`) so
+  ## through to these terminal edges. Route to `fail`, NOT `done`:
+  ## exhausting the review/recovery loop WITHOUT streak_check ever
+  ## firing `stop` means no convergence and no commit — reporting
+  ## `finished` there is a silent empty success, and the dispatcher
+  ## would mark the ticket done/review as if work landed. `fail` is
+  ## non-resumable so a deterministic non-convergence isn't
+  ## re-dispatched in a loop. Legit success is
+  ## streak_check (stop) → prepare_commit → commit_changes → done.
+  reviewer_claude -> fail
+  reviewer_gpt    -> fail
+  fix_claude      -> fail
+  fix_gpt         -> fail
+  ## streak_check's catch-all routes back to `alt` (not a terminal) so
   ## an unmatched conditional state (e.g. a hallucinated family that
   ## escapes the enum, or any future expression edge case) keeps
   ## the loop cycling rather than silently terminating. The bounded
   ## review_loop counter on the reviewer→streak_check edges still
   ## guarantees the workflow eventually exits — exhaustion routes
-  ## via the reviewer→done fallthrough above.
+  ## via the reviewer→fail fallthrough above.
   streak_check    -> alt
