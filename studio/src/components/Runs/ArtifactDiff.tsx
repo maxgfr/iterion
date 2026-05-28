@@ -59,6 +59,129 @@ function diffLines(a: string[], b: string[]): LineChange[] {
   return out.reverse();
 }
 
+/** Coerce a verdict field that may be a string[] or a single string
+ *  into a clean list, dropping blank entries. */
+function asStringList(v: unknown): string[] {
+  if (Array.isArray(v))
+    return v.map((x) => String(x)).filter((s) => s.trim() !== "");
+  if (typeof v === "string" && v.trim() !== "") return [v];
+  return [];
+}
+
+function firstString(d: Record<string, unknown>, keys: string[]): string {
+  for (const k of keys) {
+    if (typeof d[k] === "string" && (d[k] as string).trim() !== "")
+      return (d[k] as string).trim();
+  }
+  return "";
+}
+
+/** A reviewer/judge artifact is verdict-shaped when it carries any of the
+ *  recognised decision fields. Anything else falls through to the raw JSON
+ *  view unchanged. */
+function isVerdictShaped(data: unknown): data is Record<string, unknown> {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  const d = data as Record<string, unknown>;
+  return [
+    "approved",
+    "blockers",
+    "fix_plan",
+    "verdict",
+    "rationale",
+    "confidence",
+    "passed",
+    "decision",
+  ].some((k) => k in d);
+}
+
+/** VerdictCard renders the human-relevant parts of a reviewer/judge
+ *  verdict — the approval state, the blockers (why it refused), and the
+ *  fix plan — so an operator doesn't have to read raw JSON to learn what
+ *  the agents replied. Raw JSON still renders below for full detail. */
+function VerdictCard({ data }: { data: Record<string, unknown> }) {
+  const blockers = asStringList(data.blockers);
+  const fixPlan = firstString(data, ["fix_plan"]);
+  const rationale = firstString(data, [
+    "rationale",
+    "summary",
+    "reason",
+    "notes",
+  ]);
+  const confidence = firstString(data, ["confidence"]);
+  const family = firstString(data, ["family"]);
+
+  let approved: boolean | null = null;
+  for (const k of ["approved", "passed", "pass"]) {
+    if (typeof data[k] === "boolean") {
+      approved = data[k] as boolean;
+      break;
+    }
+  }
+  if (approved === null) {
+    const verdictStr = firstString(data, [
+      "verdict",
+      "decision",
+      "status",
+    ]).toLowerCase();
+    if (/approv|pass|accept|lgtm/.test(verdictStr)) approved = true;
+    else if (/reject|block|fail|den|chang/.test(verdictStr)) approved = false;
+  }
+  if (approved === null && blockers.length > 0) approved = false;
+
+  return (
+    <div className="mb-3 rounded border border-border-default bg-surface-1 p-2 space-y-2 text-micro">
+      <div className="flex items-center gap-2 flex-wrap">
+        {approved === true && (
+          <span className="rounded px-1.5 py-0.5 bg-success-soft text-success-fg font-medium">
+            ✓ approved
+          </span>
+        )}
+        {approved === false && (
+          <span className="rounded px-1.5 py-0.5 bg-danger-soft text-danger-fg font-medium">
+            ✗ changes requested
+          </span>
+        )}
+        {confidence && (
+          <span className="rounded px-1.5 py-0.5 bg-surface-2 text-fg-muted">
+            confidence: {confidence}
+          </span>
+        )}
+        {family && (
+          <span className="rounded px-1.5 py-0.5 bg-surface-2 text-fg-muted">
+            family: {family}
+          </span>
+        )}
+      </div>
+      {rationale && (
+        <div>
+          <div className="text-fg-muted mb-0.5">rationale</div>
+          <p className="whitespace-pre-wrap text-fg-default">{rationale}</p>
+        </div>
+      )}
+      {blockers.length > 0 && (
+        <div>
+          <div className="text-danger-fg mb-0.5">
+            blockers ({blockers.length})
+          </div>
+          <ul className="list-disc pl-4 space-y-0.5 text-fg-default">
+            {blockers.map((b, i) => (
+              <li key={i} className="whitespace-pre-wrap">
+                {b}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {fixPlan && (
+        <div>
+          <div className="text-fg-muted mb-0.5">fix plan</div>
+          <p className="whitespace-pre-wrap text-fg-default">{fixPlan}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ArtifactDiff({ runId, nodeId, versions }: Props) {
   // Sort once: highest first so the default selection is "previous vs
   // latest" — the most useful diff for loop iterations or retries.
@@ -117,6 +240,9 @@ export default function ArtifactDiff({ runId, nodeId, versions }: Props) {
 
   return (
     <>
+      {toBody && isVerdictShaped(toBody.data) && (
+        <VerdictCard data={toBody.data as Record<string, unknown>} />
+      )}
       <div className="flex items-center gap-2 mb-2 text-[10px]">
         <label>
           from{" "}
