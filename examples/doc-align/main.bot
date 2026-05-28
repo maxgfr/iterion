@@ -1029,6 +1029,10 @@ schema build_manifest_output:
   verified_anchors: int
   drifted_anchors: int
   unverifiable_anchors: int
+  ## checkable_anchors = verified + drifted (excludes unverifiable).
+  ## coverage_pct = verified / checkable, so anchors whose scanner was
+  ## skipped/unscoped don't drag the gate below reach.
+  checkable_anchors: int
   coverage_pct: int
   ## drift_candidates is the reviewer's working set. Each entry
   ## carries the doc::anchor pair plus pre-fetched evidence so the
@@ -1414,7 +1418,16 @@ for a in anchors:
             a['evidence'] = 'file not found on disk'
             drifted.append(a)
     elif k == 'cli_command':
-        if v in cli_commands:
+        ## When scan_code_surface was skipped/unscoped, cli_commands is
+        ## empty -- we never scanned the CLI surface, so we cannot call a
+        ## doc's iterion-subcommand reference drifted-from-code. Treat as
+        ## unverifiable (excluded from the coverage denominator) rather
+        ## than emitting a false drift for every existing command.
+        if not cli_commands:
+            a['status'] = 'unverifiable'
+            a['evidence'] = 'cli surface not scanned (scan skipped / code_scope_globs unscoped) — cannot adjudicate'
+            unverifiable.append(a)
+        elif v in cli_commands:
             a['status'] = 'verified'
             a['evidence'] = 'present in scan_code_surface.cli_commands'
             verified.append(a)
@@ -1423,7 +1436,11 @@ for a in anchors:
             a['evidence'] = 'not in scan_code_surface.cli_commands'
             drifted.append(a)
     elif k == 'cli_flag':
-        if v in cli_flags:
+        if not cli_flags:
+            a['status'] = 'unverifiable'
+            a['evidence'] = 'cli surface not scanned (scan skipped / code_scope_globs unscoped) — cannot adjudicate'
+            unverifiable.append(a)
+        elif v in cli_flags:
             a['status'] = 'verified'
             a['evidence'] = 'present in scan_code_surface.cli_flags'
             verified.append(a)
@@ -1432,7 +1449,11 @@ for a in anchors:
             a['evidence'] = 'not in scan_code_surface.cli_flags'
             drifted.append(a)
     elif k == 'diagnostic':
-        if v in diag_codes:
+        if not diag_codes:
+            a['status'] = 'unverifiable'
+            a['evidence'] = 'diagnostic surface not scanned (diagnostic_surface_globs unset) — cannot adjudicate'
+            unverifiable.append(a)
+        elif v in diag_codes:
             a['status'] = 'verified'
             a['evidence'] = 'present in scan_code_surface.diagnostic_codes'
             verified.append(a)
@@ -1465,7 +1486,12 @@ priority = {
     ('drifted', 'symbol_ref'): 3,
     ('unverifiable', 'symbol_ref'): 4,
 }
-candidates = drifted + unverifiable
+## Surface drifted anchors plus unverifiable *symbol_ref*s (genuinely
+## borderline — a reviewer may resolve them by reading code). Do NOT
+## surface scanner-skipped cli/flag/diagnostic unverifiables: we know
+## we never scanned that surface, so there is nothing for a reviewer to
+## adjudicate — they would only be noise that tempts a false blocker.
+candidates = drifted + [a for a in unverifiable if a['kind'] == 'symbol_ref']
 candidates.sort(key=lambda a: (priority.get((a['status'], a['kind']), 9), a['doc'], a['line']))
 
 ## v0.16.0: doc-count chunking. After the severity sort, walk the
@@ -1499,7 +1525,18 @@ total_anchors = len(anchors)
 verified_anchors = len(verified)
 drifted_anchors = len(drifted)
 unverifiable_anchors = len(unverifiable)
-coverage_pct = (verified_anchors * 100 // total_anchors) if total_anchors > 0 else 0
+## Coverage is verified / (verified + drifted) — the fraction of
+## MECHANICALLY-CHECKABLE anchors that verify. Unverifiable anchors
+## (symbol-heuristic misses, and cli/flag/diagnostic anchors whose
+## scanner was skipped/unscoped) are EXCLUDED from the denominator:
+## counting them in the denominator dragged coverage below the gate
+## every checkable claim was correct — e.g. 190 unverifiable / 907
+## anchors capped achievable coverage at 79% < the 80% target, a
+## permanent non-convergence deadlock. When nothing is checkable,
+## coverage is vacuously complete (100) so the gate can still fire on
+## reviewer approval instead of looping to exhaustion.
+checkable_anchors = verified_anchors + drifted_anchors
+coverage_pct = (verified_anchors * 100 // checkable_anchors) if checkable_anchors > 0 else 100
 
 per_doc_list = sorted(
     [{'doc': d, 'total': c['total'], 'verified': c['verified']} for d, c in per_doc_counts.items()],
@@ -1512,6 +1549,7 @@ print(json.dumps({
     'verified_anchors': verified_anchors,
     'drifted_anchors': drifted_anchors,
     'unverifiable_anchors': unverifiable_anchors,
+    'checkable_anchors': checkable_anchors,
     'coverage_pct': coverage_pct,
     'drift_candidates': candidates,
     'per_doc_anchor_counts': per_doc_list,
