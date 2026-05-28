@@ -84,6 +84,9 @@ agent w:
   interaction_prompt: ask_msg   # used when interaction is llm or llm_or_human
   interaction_model: "openai/gpt-5.5"
   capabilities: [board.read, board.create, board.move]   # opens MCP-gated tools
+  # watch.subscribe / watch.unsubscribe (claw backend): mcp.iterion_watch.*
+  # — subscribe a run to a board issue; the runtime queues a message to the
+  #   run whenever that issue changes state (track dispatched tickets)
   await: wait_all               # only when the node has multiple incoming edges
   compaction:                   # model-aware compaction (per-node override)
     threshold: 0.9              # fraction of context window
