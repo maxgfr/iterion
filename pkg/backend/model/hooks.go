@@ -193,8 +193,8 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			if info.ReasoningEffort != "" {
 				reasoningInfo = fmt.Sprintf(", reasoning=%s", info.ReasoningEffort)
 			}
-			logger.Logf(iterlog.LevelInfo, "🤖", "LLM call [%s]: %s (%d msgs%s%s)",
-				nodeID, info.Model, info.MessageCount, toolInfo, reasoningInfo)
+			logger.Logf(iterlog.LevelInfo, "🤖", "[%s#%d/claw] LLM call: %s (%d msgs%s%s)",
+				nodeID, info.Iteration, info.Model, info.MessageCount, toolInfo, reasoningInfo)
 		},
 
 		// OnLLMResponse is intentionally nil: response data surfaces through
@@ -268,8 +268,10 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			if step.Text != "" {
 				// Full response, no preview cap — the studio folds the
 				// body under the header so length doesn't crowd the log.
+				// The [node#iter/claw] tag must lead the header so the
+				// per-node Logs tab's prefix filter associates the line.
 				logger.LogBlock(iterlog.LevelInfo, "💬",
-					fmt.Sprintf("LLM response [%s] step %d:", nodeID, step.Number),
+					fmt.Sprintf("[%s#%d/claw] response step %d:", nodeID, step.Iteration, step.Number),
 					step.Text)
 			}
 			// Per-tool log line for the claw (in-process) path. The
@@ -282,29 +284,29 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				for _, tc := range step.ToolCalls {
 					detail := tooldisplay.HeaderDetail(tc.Name, tc.Input, tooldisplay.SnakeCaseKeys)
 					if detail != "" {
-						logger.Logf(iterlog.LevelInfo, "🔧", "Tool call [%s]: %s %s", nodeID, tc.Name, detail)
+						logger.Logf(iterlog.LevelInfo, "🔧", "[%s#%d/claw] %s %s", nodeID, step.Iteration, tc.Name, detail)
 					} else {
-						logger.Logf(iterlog.LevelInfo, "🔧", "Tool call [%s]: %s", nodeID, tc.Name)
+						logger.Logf(iterlog.LevelInfo, "🔧", "[%s#%d/claw] %s", nodeID, step.Iteration, tc.Name)
 					}
 					if body := tooldisplay.BlockBody(tc.Name, tc.Input); body != "" {
 						logger.LogBlock(iterlog.LevelInfo, "🔧",
-							fmt.Sprintf("Tool input [%s/%s]:", nodeID, tc.Name),
+							fmt.Sprintf("[%s#%d/claw] tool input %s:", nodeID, step.Iteration, tc.Name),
 							body)
 					}
 					if logger.IsEnabled(iterlog.LevelDebug) {
 						logger.LogBlock(iterlog.LevelDebug, "🔧",
-							fmt.Sprintf("raw input [%s/%s]:", nodeID, tc.Name),
+							fmt.Sprintf("[%s#%d/claw] raw input %s:", nodeID, step.Iteration, tc.Name),
 							string(tc.Input))
 					}
 				}
 			}
 			if step.CacheReadTokens > 0 || step.CacheWriteTokens > 0 {
-				logger.Logf(iterlog.LevelInfo, "📊", "Step %d [%s]: %d in / %d out tokens (cache: %d read, %d write)",
-					step.Number, nodeID, step.InputTokens, step.OutputTokens,
+				logger.Logf(iterlog.LevelInfo, "📊", "[%s#%d/claw] step %d: %d in / %d out tokens (cache: %d read, %d write)",
+					nodeID, step.Iteration, step.Number, step.InputTokens, step.OutputTokens,
 					step.CacheReadTokens, step.CacheWriteTokens)
 			} else {
-				logger.Logf(iterlog.LevelInfo, "📊", "Step %d [%s]: %d in / %d out tokens",
-					step.Number, nodeID, step.InputTokens, step.OutputTokens)
+				logger.Logf(iterlog.LevelInfo, "📊", "[%s#%d/claw] step %d: %d in / %d out tokens",
+					nodeID, step.Iteration, step.Number, step.InputTokens, step.OutputTokens)
 			}
 		},
 
@@ -315,7 +317,12 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				// for those runs (the rest of the LLM loop is unaffected).
 				return
 			}
-			iter := LoopIterationFromContext(ctx)
+			// info.Iteration is threaded through applyHooks /
+			// delegateHooksFor from the live per-execution context. The
+			// hook closure's captured ctx is the engine-level one (always
+			// iter 0), so reading it here stamped every TurnCheckpoint with
+			// LoopIter=0 and broke per-iteration fork anchoring.
+			iter := info.Iteration
 			toolCalls := make([]store.TurnToolCall, len(info.ToolCalls))
 			for i, tc := range info.ToolCalls {
 				toolCalls[i] = store.TurnToolCall{
@@ -371,8 +378,8 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				Data:   data,
 			})
 
-			logger.Logf(iterlog.LevelInfo, "📦", "Compacted [%s]: %d → %d msgs (%d removed)",
-				nodeID, info.BeforeMessages, info.AfterMessages, info.RemovedMessageCount)
+			logger.Logf(iterlog.LevelInfo, "📦", "[%s#%d/claw] compacted: %d → %d msgs (%d removed)",
+				nodeID, info.Iteration, info.BeforeMessages, info.AfterMessages, info.RemovedMessageCount)
 		},
 
 		OnToolStarted: func(nodeID string, info LLMToolStartedInfo) {

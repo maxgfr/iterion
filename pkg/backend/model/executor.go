@@ -621,18 +621,14 @@ func clawToolHint(input json.RawMessage) string {
 // to e.logger so per-tool-call activity surfaces in run.log (F-NEW-13).
 // claude_code + codex emit their own `[%s#%d/<backend>]` lines from
 // the subprocess stderr capture path, so we don't double-log them here.
-func (e *ClawExecutor) delegateHooksFor(nodeID string, backendName string) delegate.TaskHooks {
+func (e *ClawExecutor) delegateHooksFor(nodeID string, backendName string, iteration int) delegate.TaskHooks {
 	var h delegate.TaskHooks
 	logForClaw := backendName == delegate.BackendClaw && e.logger != nil
 	if e.hooks.OnToolStarted != nil || logForClaw {
 		fn := e.hooks.OnToolStarted
 		h.OnToolStarted = func(toolName string, toolUseID string, input json.RawMessage) {
 			if logForClaw {
-				// LoopIterationFromContext needs a context. The delegate
-				// callback signature doesn't carry one; use 0 — the iter
-				// only differs across loop bodies, which claw's text-tool
-				// hooks fire from the same goroutine as the dispatch.
-				e.logger.Info("[%s#%d/claw] 🔧 %s %s", nodeID, 0, toolName, clawToolHint(input))
+				e.logger.Info("[%s#%d/claw] 🔧 %s %s", nodeID, iteration, toolName, clawToolHint(input))
 			}
 			if fn != nil {
 				fn(nodeID, LLMToolStartedInfo{
@@ -652,7 +648,7 @@ func (e *ClawExecutor) delegateHooksFor(nodeID string, backendName string) deleg
 				if isError {
 					marker = "✗"
 				}
-				e.logger.Info("[%s#%d/claw] %s %s (%d bytes)", nodeID, 0, marker, toolName, len(output))
+				e.logger.Info("[%s#%d/claw] %s %s (%d bytes)", nodeID, iteration, marker, toolName, len(output))
 			}
 			if fn != nil {
 				info := LLMToolCallInfo{
@@ -690,6 +686,7 @@ func (e *ClawExecutor) delegateHooksFor(nodeID string, backendName string) deleg
 				OutputTokens: info.OutputTokens,
 				SessionID:    info.SessionID,
 				Backend:      delegate.BackendClaudeCode,
+				Iteration:    iteration,
 			})
 		}
 	}
@@ -1045,7 +1042,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		Sandbox:               e.sandbox,
 		// ProviderHint is set per-attempt by dispatchWithProviderFallback
 		// as it walks the node's provider chain.
-		Hooks:      e.delegateHooksFor(f.id, backendName),
+		Hooks:      e.delegateHooksFor(f.id, backendName, LoopIterationFromContext(ctx)),
 		InboxDrain: e.bindInboxDrain(ctx),
 	}
 	if m := f.memory; m != nil && m.Enabled {
@@ -1356,7 +1353,7 @@ func (e *ClawExecutor) executeHumanLLM(ctx context.Context, node *ir.HumanNode, 
 	}
 
 	// Observability hooks.
-	applyHooks(node.ID, e.hooks, &genOpts)
+	applyHooks(node.ID, LoopIterationFromContext(ctx), e.hooks, &genOpts)
 
 	// Determine the schema to use. A non-nil override takes precedence
 	// over the registered-schemas lookup; this is how the interaction

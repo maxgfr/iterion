@@ -78,7 +78,7 @@ func NewSubagentRunner(
 			MaxSteps: 10,
 			Hooks:    lifecycle,
 		}
-		applyHooks("subagent:"+spec.AgentID, eventHooks, &opts)
+		applyHooks("subagent:"+spec.AgentID, LoopIterationFromContext(ctx), eventHooks, &opts)
 
 		result, err := GenerateTextDirect(ctx, client, opts)
 		if err != nil {

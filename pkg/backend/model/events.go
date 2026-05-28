@@ -18,6 +18,12 @@ type LLMRequestInfo struct {
 	ToolCount       int
 	ReasoningEffort string
 	Timestamp       time.Time
+	// Iteration is the 0-based loop iteration the node is executing in,
+	// threaded through by applyHooks. Drives the [node#iter/claw] console
+	// tag so the studio's per-(node,iteration) Logs tab can associate the
+	// line; without it every claw line stuck at #0 (the hook closures
+	// captured a base context, not the live per-iteration one).
+	Iteration int
 }
 
 // LLMResponseInfo describes an LLM response, passed to the OnLLMResponse hook.
@@ -43,6 +49,8 @@ type LLMStepInfo struct {
 	OutputTokens     int
 	CacheReadTokens  int
 	CacheWriteTokens int
+	// Iteration is the 0-based loop iteration (see LLMRequestInfo.Iteration).
+	Iteration int
 }
 
 // ToolCallEntry describes a single tool call within a step.
@@ -103,6 +111,8 @@ type LLMCompactInfo struct {
 	BeforeMessages      int
 	AfterMessages       int
 	RemovedMessageCount int
+	// Iteration is the 0-based loop iteration (see LLMRequestInfo.Iteration).
+	Iteration int
 }
 
 // LLMTurnCaptureInfo describes one captured tool-loop turn, passed to
@@ -123,6 +133,10 @@ type LLMTurnCaptureInfo struct {
 	OutputTokens     int
 	CacheReadTokens  int
 	CacheWriteTokens int
+	// Iteration is the 0-based loop iteration (see LLMRequestInfo.Iteration).
+	// Threaded so TurnCheckpoint.LoopIter is correct — it previously came
+	// from a stale captured context and was always 0.
+	Iteration int
 	// Backend names the executor that produced this turn ("claw" or
 	// "claude_code"). Used by the store-backed hook to set the
 	// matching TurnCheckpoint.Backend field. Empty defaults to "claw"
@@ -268,11 +282,13 @@ func toLLMTurnCaptureInfo(info TurnCaptureInfo) LLMTurnCaptureInfo {
 // generation engine's types (RequestInfo, ResponseInfo, StepResult, ToolCallInfo)
 // to the iterion event types (LLMRequestInfo, etc.) and dispatch to the
 // EventHooks callbacks. Only non-nil hooks are wired.
-func applyHooks(nodeID string, h EventHooks, opts *GenerationOptions) {
+func applyHooks(nodeID string, iteration int, h EventHooks, opts *GenerationOptions) {
 	if h.OnLLMRequest != nil {
 		fn := h.OnLLMRequest
 		opts.OnRequest = func(info RequestInfo) {
-			fn(nodeID, toLLMRequestInfo(info))
+			li := toLLMRequestInfo(info)
+			li.Iteration = iteration
+			fn(nodeID, li)
 		}
 	}
 	if h.OnLLMResponse != nil {
@@ -284,13 +300,17 @@ func applyHooks(nodeID string, h EventHooks, opts *GenerationOptions) {
 	if h.OnLLMStepFinish != nil {
 		fn := h.OnLLMStepFinish
 		opts.OnStepFinish = func(step StepResult) {
-			fn(nodeID, toLLMStepInfo(step))
+			li := toLLMStepInfo(step)
+			li.Iteration = iteration
+			fn(nodeID, li)
 		}
 	}
 	if h.OnLLMTurnCapture != nil {
 		fn := h.OnLLMTurnCapture
 		opts.OnTurnCapture = func(info TurnCaptureInfo) {
-			fn(nodeID, toLLMTurnCaptureInfo(info))
+			li := toLLMTurnCaptureInfo(info)
+			li.Iteration = iteration
+			fn(nodeID, li)
 		}
 	}
 	if h.OnToolStarted != nil {
@@ -308,7 +328,9 @@ func applyHooks(nodeID string, h EventHooks, opts *GenerationOptions) {
 	if h.OnLLMCompacted != nil {
 		fn := h.OnLLMCompacted
 		opts.OnCompact = func(info CompactInfo) {
-			fn(nodeID, toLLMCompactInfo(info))
+			li := toLLMCompactInfo(info)
+			li.Iteration = iteration
+			fn(nodeID, li)
 		}
 	}
 }

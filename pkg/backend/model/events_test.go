@@ -55,3 +55,43 @@ func TestToLLMResponseInfo_PropagatesCacheTokens(t *testing.T) {
 		t.Errorf("CacheWriteTokens = %d, want 120", info.CacheWriteTokens)
 	}
 }
+
+// applyHooks must stamp the live loop iteration onto every bridged info
+// struct. Before this, the EventHooks log closures read iteration from a
+// context captured once at engine.Run, so every claw line was tagged #0
+// and the studio's per-(node,iteration) Logs filter never matched them.
+func TestApplyHooks_StampsIteration(t *testing.T) {
+	const wantIter = 3
+	var (
+		gotReq     int
+		gotStep    int
+		gotTurn    int
+		gotCompact int
+	)
+	h := EventHooks{
+		OnLLMRequest:     func(_ string, i LLMRequestInfo) { gotReq = i.Iteration },
+		OnLLMStepFinish:  func(_ string, i LLMStepInfo) { gotStep = i.Iteration },
+		OnLLMTurnCapture: func(_ string, i LLMTurnCaptureInfo) { gotTurn = i.Iteration },
+		OnLLMCompacted:   func(_ string, i LLMCompactInfo) { gotCompact = i.Iteration },
+	}
+	var opts GenerationOptions
+	applyHooks("node1", wantIter, h, &opts)
+
+	opts.OnRequest(RequestInfo{})
+	opts.OnStepFinish(StepResult{})
+	opts.OnTurnCapture(TurnCaptureInfo{})
+	opts.OnCompact(CompactInfo{})
+
+	if gotReq != wantIter {
+		t.Errorf("OnLLMRequest iteration = %d, want %d", gotReq, wantIter)
+	}
+	if gotStep != wantIter {
+		t.Errorf("OnLLMStepFinish iteration = %d, want %d", gotStep, wantIter)
+	}
+	if gotTurn != wantIter {
+		t.Errorf("OnLLMTurnCapture iteration = %d, want %d", gotTurn, wantIter)
+	}
+	if gotCompact != wantIter {
+		t.Errorf("OnLLMCompacted iteration = %d, want %d", gotCompact, wantIter)
+	}
+}

@@ -333,7 +333,7 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 	}
 
 	// Observability hooks.
-	applyHooks(task.NodeID, b.hooks, &opts)
+	applyHooks(task.NodeID, task.Iteration, b.hooks, &opts)
 
 	// In-process lifecycle hooks (audit, safety, compaction
 	// observability). Nil-safe at call sites in generation.go.
