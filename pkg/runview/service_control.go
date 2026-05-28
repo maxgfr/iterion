@@ -364,6 +364,12 @@ type CommitAndFinalizeResponse struct {
 	MergedInto    string              `json:"merged_into,omitempty"`
 	MergedCommit  string              `json:"merged_commit,omitempty"`
 	MergeStrategy store.MergeStrategy `json:"merge_strategy,omitempty"`
+	// SourceIssueID is set when the run was dispatcher-spawned. The HTTP
+	// handler reads it to fire the merged-issue auto-transition when an
+	// auto-FF landed the merge inside finalize (MergeStatus="merged"),
+	// without a second LoadRun round-trip. Internal-only — omitted from
+	// the JSON wire.
+	SourceIssueID string `json:"-"`
 }
 
 // CommitAndFinalizeCtx commits a run's uncommitted workdir changes
@@ -421,6 +427,7 @@ func (s *Service) CommitAndFinalizeCtx(ctx context.Context, runID, message strin
 		MergedInto:    r.MergedInto,
 		MergedCommit:  r.MergedCommit,
 		MergeStrategy: r.MergeStrategy,
+		SourceIssueID: sourceIssueID(r),
 	}, nil
 }
 

@@ -17,19 +17,67 @@ import (
 // configured rely on the silent no-op — without this guard, every
 // studio-driven merge would 4xx-noise the logs.
 
-func TestManager_TransitionMergedIssue_NoDispatcher(t *testing.T) {
+func TestManager_TransitionMergedIssue_IdleFallsBackToNativeStore(t *testing.T) {
+	// Regression: a studio-driven merge that lands while the polling
+	// actor is down (e.g. a watchexec rebuild window) must still close
+	// the ticket. The actor pointer is nil, so the transition falls
+	// back to the native store directly. Before this fix the call
+	// silently no-op'd and the ticket was stranded in review.
 	dir := newTestStoreDir(t)
+	ns := newTestNativeStore(t, dir)
+	iss, err := ns.Create(native.Issue{Title: "demo", State: native.StateReview})
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
 	m, err := NewManager(ManagerOptions{
 		StoreDir:    dir,
-		NativeStore: newTestNativeStore(t, dir),
+		NativeStore: ns,
 		Logger:      newTestLogger(),
 	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	// Manager is idle (no Start). Cur is nil — the call must no-op silently.
-	if err := m.TransitionMergedIssue(context.Background(), "native:abc"); err != nil {
-		t.Errorf("idle manager: TransitionMergedIssue err = %v, want nil", err)
+	// No Start → cur is nil. No persisted config → DefaultMergedState.
+	if err := m.TransitionMergedIssue(context.Background(), iss.ID); err != nil {
+		t.Fatalf("idle fallback: TransitionMergedIssue err = %v", err)
+	}
+	got, err := ns.Get(iss.ID)
+	if err != nil {
+		t.Fatalf("reload issue: %v", err)
+	}
+	if got.State != native.StateDone {
+		t.Errorf("idle fallback: state = %q, want %q", got.State, native.StateDone)
+	}
+}
+
+func TestManager_TransitionMergedIssue_IdleHonorsNoneOptOut(t *testing.T) {
+	// When the operator disabled the transition (merged_state: none →
+	// normalized to ""), the idle fallback must NOT resurrect it by
+	// defaulting back to "done".
+	dir := seedManagerFixtureWithMergedState(t, "none")
+	ns := newTestNativeStore(t, dir)
+	iss, err := ns.Create(native.Issue{Title: "demo", State: native.StateReview})
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	m, err := NewManager(ManagerOptions{
+		StoreDir:    dir,
+		NativeStore: ns,
+		Logger:      newTestLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	// Idle (no Start); persisted config opted out.
+	if err := m.TransitionMergedIssue(context.Background(), iss.ID); err != nil {
+		t.Fatalf("idle opt-out: TransitionMergedIssue err = %v", err)
+	}
+	got, err := ns.Get(iss.ID)
+	if err != nil {
+		t.Fatalf("reload issue: %v", err)
+	}
+	if got.State != native.StateReview {
+		t.Errorf("idle opt-out: state = %q, want unchanged %q", got.State, native.StateReview)
 	}
 }
 

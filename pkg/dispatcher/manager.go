@@ -435,23 +435,52 @@ func (m *Manager) TransitionMergedIssue(ctx context.Context, issueID string) err
 	if issueID == "" {
 		return nil
 	}
-	cur := m.Current()
-	if cur == nil {
+	target, tr := m.mergedTransition()
+	if tr == nil || target == "" || target == "none" {
 		return nil
 	}
-	cfg := cur.cfg.Load()
-	if cfg == nil {
-		return nil
-	}
-	target := cfg.Agent.MergedState
-	if target == "" || target == "none" {
-		return nil
-	}
-	if err := cur.tracker.UpdateState(ctx, issueID, target); err != nil {
+	if err := tr.UpdateState(ctx, issueID, target); err != nil {
 		return fmt.Errorf("transition merged issue %s → %s: %w", issueID, target, err)
 	}
-	cur.logger.Info("dispatcher: merged-issue transition %s → %s", issueID, target)
+	m.logger.Info("dispatcher: merged-issue transition %s → %s", issueID, target)
 	return nil
+}
+
+// mergedTransition resolves the merged-state target and the tracker to
+// apply it with, working whether or not the polling actor is live.
+//
+// When the actor is running its tracker is authoritative (handles
+// native + external trackers). When idle — e.g. a watchexec restart
+// hasn't re-spawned the actor yet, or the operator paused/stopped
+// dispatching — we fall back to the native store directly: the board
+// is a filesystem store that's always writable, so a studio-driven
+// merge must still close the ticket regardless of the actor's
+// lifecycle. Without this fallback the review→done transition was
+// silently dropped whenever the merge click landed in an actor-down
+// window.
+func (m *Manager) mergedTransition() (string, tracker.Tracker) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cur != nil {
+		cfg := m.cur.cfg.Load()
+		if cfg == nil {
+			return "", nil
+		}
+		return cfg.Agent.MergedState, m.cur.tracker
+	}
+	if m.nativeStore == nil {
+		return "", nil
+	}
+	// m.cfg was normalized by loadConfigJSON's applyDefaults: unset →
+	// "done", "none" → "" (opt-out). Honor it verbatim — re-defaulting
+	// "" back to "done" here would resurrect a transition the operator
+	// deliberately disabled. Only when no config was ever persisted do
+	// we fall back to the package default.
+	target := DefaultMergedState
+	if m.cfg != nil {
+		target = m.cfg.Agent.MergedState
+	}
+	return target, native.NewAdapter(m.nativeStore)
 }
 
 func (m *Manager) setError(err error) {

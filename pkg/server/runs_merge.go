@@ -112,6 +112,14 @@ func (s *Server) handleCommitAndFinalize(w http.ResponseWriter, r *http.Request)
 		s.httpErrorFor(w, r, http.StatusConflict, "commit-and-finalize: %v", err)
 		return
 	}
+	// When finalize auto-FF'd the commit straight onto the target branch
+	// (MergeStatus="merged"), there's no follow-up /merge click — so this
+	// is the only place that can close the source issue. The common path
+	// (status flips to "pending") leaves the issue alone; /merge handles
+	// it after the operator confirms.
+	if res.MergeStatus == store.MergeStatusMerged {
+		s.maybeTransitionMergedIssue(r.Context(), id, res.SourceIssueID)
+	}
 	s.writeJSONFor(w, r, res)
 }
 
