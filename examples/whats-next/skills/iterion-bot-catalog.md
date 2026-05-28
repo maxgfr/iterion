@@ -328,17 +328,18 @@ issue. The data model on the wire is:
 | `title`              | `title`              | `--title`        |
 | `body`               | `body`               | `--body`         |
 | `assignee`           | `assignee`           | `--assignee`     |
-| _(bot name, e.g. `feature_dev`)_ | `bot` (string)       | _no CLI flag — REST only_ |
-| `args` (object)      | `bot_args` (`map[string]string`) | _no CLI flag — REST only_ |
+| _(bot name, e.g. `feature_dev`)_ | `bot` (string)       | `--bot` (on `create`) |
+| `args` (object)      | `bot_args` (`map[string]string`) | `--bot-arg key=value` (on `create`) |
 
 `bot` and `bot_args` are dedicated typed fields on
 [`native.Issue`](../../../pkg/dispatcher/native/issue.go) (JSON
 keys `bot`, `bot_args`); they are NOT stored under the freeform
-`Fields` map. The `iterion issue create/update` CLI does not yet
-expose `--bot` / `--bot-arg` flags — until they ship, set those
-fields through the REST API (POST/PATCH `/api/v1/native/issues`
-with `{ "bot": "...", "bot_args": { ... } }`) or via direct
-`store.Create/Update` calls. `bot_args` is usable today: the
+`Fields` map. Set them via `iterion issue create --bot <name>
+--bot-arg key=value` (repeatable; values are kept verbatim, so
+comma-containing glob lists survive intact), the REST API (POST/PATCH
+`/api/v1/native/issues` with `{ "bot": "...", "bot_args": { ... } }`),
+or direct `store.Create/Update` calls. (`iterion issue update` does
+not yet expose the flags — use REST PATCH for edits.) `bot_args` is usable today: the
 dispatcher merges it on top of the rendered `dispatch.vars`
 key-by-key, with `bot_args` winning on shared keys (see
 [pkg/dispatcher/loop.go](../../../pkg/dispatcher/loop.go) `buildSpec`,

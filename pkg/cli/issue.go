@@ -44,7 +44,9 @@ type IssueCreateOptions struct {
 	Priority int
 	Assignee string
 	Blockers []string
-	Fields   []string // key=value pairs
+	Fields   []string // custom-field key=value pairs (Issue.Fields)
+	Bot      string   // typed workflow override consumed by the dispatcher
+	BotArgs  []string // typed dispatcher var overrides as key=value (Issue.BotArgs)
 }
 
 // RunIssueCreate creates a new issue in the native tracker.
@@ -60,6 +62,10 @@ func RunIssueCreate(p *Printer, opts IssueCreateOptions) error {
 	if err != nil {
 		return err
 	}
+	botArgs, err := parseBotArgs(opts.BotArgs)
+	if err != nil {
+		return err
+	}
 	iss := native.Issue{
 		Title:    opts.Title,
 		Body:     opts.Body,
@@ -69,6 +75,8 @@ func RunIssueCreate(p *Printer, opts IssueCreateOptions) error {
 		Assignee: opts.Assignee,
 		Blockers: opts.Blockers,
 		Fields:   fields,
+		Bot:      opts.Bot,
+		BotArgs:  botArgs,
 	}
 	got, err := s.Create(iss)
 	if err != nil {
@@ -409,6 +417,29 @@ func parseFieldPairs(pairs []string) (map[string]any, error) {
 		k := strings.TrimSpace(p[:eq])
 		v := strings.TrimSpace(p[eq+1:])
 		out[k] = inferTyped(v)
+	}
+	return out, nil
+}
+
+// parseBotArgs parses repeatable --bot-arg key=value flags into the
+// typed BotArgs map the dispatcher merges over rendered config vars
+// (pkg/dispatcher/loop.go). Unlike parseFieldPairs (custom fields,
+// map[string]any with type inference), dispatcher vars are always
+// strings — matching the studio Launch form wire format — so values
+// are kept verbatim (no inferTyped, no comma-splitting: glob lists like
+// doc_globs=README.md,docs/**/*.md must survive intact, which is why
+// the flag is registered as StringArray, not StringSlice).
+func parseBotArgs(pairs []string) (map[string]string, error) {
+	if len(pairs) == 0 {
+		return nil, nil
+	}
+	out := map[string]string{}
+	for _, p := range pairs {
+		eq := strings.IndexByte(p, '=')
+		if eq <= 0 {
+			return nil, fmt.Errorf("--bot-arg expects key=value, got %q", p)
+		}
+		out[strings.TrimSpace(p[:eq])] = strings.TrimSpace(p[eq+1:])
 	}
 	return out, nil
 }

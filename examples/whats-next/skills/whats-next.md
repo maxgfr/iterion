@@ -98,15 +98,18 @@ through the stock runner built at startup:
 
 Native issues also have typed `bot` and `bot_args` fields.
 `bot_args` (a typed `map[string]string`) merges over rendered config
-vars key-by-key and must be set via REST/direct store APIs if it
-should affect dispatch. `bot` is persisted/resolved for custom
-runners/future routing, but the stock `EngineRunner` does not use it
-to switch workflows. whats-next records the assignee on every issue
-so an operator can drive routing through `assignee_workflows:`
-without touching the REST API. See
+vars key-by-key and must be set as TYPED args to affect dispatch — a
+custom *field* literally named `bot_args` is unrelated and ignored by
+the dispatcher. `bot` is persisted/resolved for custom runners/future
+routing, but the stock `EngineRunner` does not use it to switch
+workflows. whats-next records the assignee on every issue so an
+operator can drive routing through `assignee_workflows:`. Set typed
+args via the native REST API, direct store APIs, or the CLI:
+`iterion issue create --bot <name> --bot-arg key=value` (repeatable;
+values are kept verbatim, so comma-containing glob lists like
+`--bot-arg 'doc_globs=README.md,docs/**/*.md'` survive intact). See
 [`iterion-bot-catalog`](iterion-bot-catalog.md#issue-creation-mapping-consumed-by-emit_action)
-for the exact wire shape and the open CLI gap (no
-`--bot`/`--bot-arg` on `iterion issue create`).
+for the exact wire shape.
 
 ## Operating principles
 
