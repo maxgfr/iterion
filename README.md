@@ -4,9 +4,12 @@
 
 # Iterion
 
+**From dev to imperator — command a legion of bots at the next level.**
+*Veni, vidi, merged.*
+
 **Bots, as code.** *Declarative workflow orchestration for AI agents.*
 
-Define your bots as readable `.bot` files — chain agents, judges, routers, human gates, parallel branches, bounded loops, and budget caps into a single, auditable execution graph.
+Stop coding like a mortal. Define your bots as readable `.bot` files — chain agents, judges, routers, human gates, parallel branches, bounded loops, and budget caps into a single, auditable execution graph, then command from the next level.
 
 > ⚠️ **This project is highly experimental.** APIs, DSL syntax, and storage formats may change without notice. Use at your own risk in production environments. Feedback and contributions are welcome!
 
