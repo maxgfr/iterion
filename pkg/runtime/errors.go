@@ -37,6 +37,15 @@ const (
 	// network-failure phrase (FailedToOpenSocket, "Unable to connect to
 	// API", "no such host", "connection refused", "i/o timeout", etc.).
 	ErrCodeNetworkTransient ErrorCode = "NETWORK_TRANSIENT"
+	// ErrCodeAuthFailed: the upstream model provider rejected the
+	// request for credential reasons (HTTP 401/403, "authentication
+	// token is expired", "invalid api key", …). NOT transient — retrying
+	// the same call can never succeed until a human re-authenticates
+	// (e.g. `codex login` for the ChatGPT-forfait OAuth token, or
+	// rotating an API key). The recovery dispatcher pauses for human
+	// instead of burning the retry budget; the run is resumable once the
+	// credential is refreshed.
+	ErrCodeAuthFailed ErrorCode = "AUTH_FAILED"
 )
 
 // RuntimeError is a structured error carrying a machine-readable code,

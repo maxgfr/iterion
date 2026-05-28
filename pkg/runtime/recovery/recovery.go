@@ -131,6 +131,23 @@ func BudgetRecipe() Recipe {
 	})
 }
 
+// AuthFailedRecipe: the model provider rejected our credentials
+// (expired/invalid token, HTTP 401/403). Retrying the same call can
+// never succeed — only a human re-authenticating can fix it. Pause for
+// human (like BudgetRecipe) rather than burning the retry budget on
+// guaranteed failures; the run is resumable once the credential is
+// refreshed. This also keeps a dispatcher from re-dispatching the run
+// in a tight loop (every cycle would re-spend sandbox + partial-run
+// cost only to hit the same 401).
+func AuthFailedRecipe() Recipe {
+	return RecipeFunc(func(_ context.Context, _ *runtime.RuntimeError, _ int) Action {
+		return Action{
+			Kind:   ActionPauseForHuman,
+			Reason: "model provider rejected credentials (expired/invalid token) — re-authenticate (e.g. 'codex login' for the ChatGPT-forfait token, or rotate the API key), then resume",
+		}
+	})
+}
+
 // TransientToolRecipe: retry with linear backoff up to maxRetries
 // (model gets the error in its next turn), then fail terminal.
 func TransientToolRecipe(maxRetries int) Recipe {
@@ -261,6 +278,7 @@ func DefaultRecipes() map[runtime.ErrorCode]Recipe {
 		runtime.ErrCodeToolFailedPermanent:   PermanentToolRecipe(),
 		runtime.ErrCodeExecutionFailed:       ExecutionFailedRecipe(1),
 		runtime.ErrCodeNetworkTransient:      NetworkTransientRecipe(6),
+		runtime.ErrCodeAuthFailed:            AuthFailedRecipe(),
 	}
 }
 
@@ -343,6 +361,12 @@ func Classify(err error) runtime.ErrorCode {
 		if apiErr.StatusCode == 408 || (apiErr.StatusCode >= 500 && apiErr.StatusCode <= 599) {
 			return runtime.ErrCodeNetworkTransient
 		}
+		// 401/403: credential rejected (expired/invalid token, missing
+		// scope). Non-transient — pause for human re-auth rather than
+		// retrying. See AuthFailedRecipe.
+		if apiErr.StatusCode == 401 || apiErr.StatusCode == 403 {
+			return runtime.ErrCodeAuthFailed
+		}
 		return runtime.ErrCodeExecutionFailed
 	}
 	// String-pattern fallback for unstructured errors that bubble up
@@ -359,12 +383,39 @@ func Classify(err error) runtime.ErrorCode {
 	// recovery dispatcher applies the longer exponential backoff
 	// instead of the catch-all 1-shot retry.
 	msg := strings.ToLower(err.Error())
+	// Credential rejections often arrive as plain strings: the claw
+	// runner is an out-of-process subprocess whose typed *api.APIError is
+	// flattened to text by the time it bubbles up through the backend
+	// wrappers (e.g. "claw backend: ... openai: API error 401: Provided
+	// authentication token is expired. Please try signing in again").
+	// Match those before the network needles so they pause-for-reauth
+	// instead of falling to the 1-shot ExecutionFailed retry.
+	for _, needle := range authFailedNeedles {
+		if strings.Contains(msg, needle) {
+			return runtime.ErrCodeAuthFailed
+		}
+	}
 	for _, needle := range networkTransientNeedles {
 		if strings.Contains(msg, needle) {
 			return runtime.ErrCodeNetworkTransient
 		}
 	}
 	return runtime.ErrCodeExecutionFailed
+}
+
+// authFailedNeedles enumerates lowercase substrings that indicate the
+// model provider rejected our credentials (not a transient fault). ALL
+// entries MUST be lowercase — Classify lowercases the err string first.
+var authFailedNeedles = []string{
+	"authentication token is expired", // OpenAI/ChatGPT-forfait expired OAuth access token
+	"please try signing in",           // OpenAI/codex re-auth prompt
+	"error 401",                       // "API error 401:" verbatim from claw/openai
+	"error 403",                       // forbidden (missing scope / disabled key)
+	"invalid api key",                 // OpenAI/Anthropic bad key
+	"incorrect api key",               // OpenAI verbatim
+	"invalid_api_key",                 // OpenAI error code field
+	"authentication_error",            // Anthropic error type field
+	"oauth token has expired",         // Anthropic OAuth (claude_code) expiry
 }
 
 // networkTransientNeedles enumerates the lowercase substrings that

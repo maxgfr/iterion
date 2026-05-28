@@ -130,6 +130,44 @@ func TestClassify_RateLimit429(t *testing.T) {
 	}
 }
 
+func TestClassify_AuthFailed_APIError(t *testing.T) {
+	for _, code := range []int{401, 403} {
+		apiErr := &api.APIError{StatusCode: code, Message: "unauthorized"}
+		if got := Classify(apiErr); got != runtime.ErrCodeAuthFailed {
+			t.Errorf("status %d: expected AUTH_FAILED, got %v", code, got)
+		}
+	}
+}
+
+func TestClassify_AuthFailed_StringPatterns(t *testing.T) {
+	// The claw runner flattens its *api.APIError to a string by the time
+	// it reaches Classify, so the expired-token 401 must be caught by the
+	// authFailedNeedles fallback, not the 1-shot ExecutionFailed retry.
+	cases := []string{
+		"claw backend: runner: claw backend: text+tools generation: openai: API error 401: Provided authentication token is expired. Please try signing in again.",
+		"openai: incorrect API key provided",
+		"anthropic: authentication_error: invalid x-api-key",
+	}
+	for _, msg := range cases {
+		if got := Classify(errors.New(msg)); got != runtime.ErrCodeAuthFailed {
+			t.Errorf("expected AUTH_FAILED for %q, got %v", msg, got)
+		}
+	}
+}
+
+func TestAuthFailedRecipe_PausesForHuman(t *testing.T) {
+	r := AuthFailedRecipe()
+	for _, attempts := range []int{0, 1, 5} {
+		act := r.Apply(context.Background(), &runtime.RuntimeError{Code: runtime.ErrCodeAuthFailed}, attempts)
+		if act.Kind != ActionPauseForHuman {
+			t.Fatalf("attempts=%d: expected pause-for-human (never retry an expired credential), got %v", attempts, act.Kind)
+		}
+	}
+	if _, ok := DefaultRecipes()[runtime.ErrCodeAuthFailed]; !ok {
+		t.Fatal("DefaultRecipes must register a recipe for ErrCodeAuthFailed")
+	}
+}
+
 func TestClassify_DelegateRateLimited(t *testing.T) {
 	// Regression: CLI-backend rate-limit signal arrives as the typed
 	// delegate.ErrRateLimited (raised by isRateLimitMessage). Before
