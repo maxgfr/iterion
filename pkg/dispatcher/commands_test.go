@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -227,6 +228,67 @@ func TestFinishRun_StampsOnFailureToo(t *testing.T) {
 type errPermanentFailure struct{}
 
 func (errPermanentFailure) Error() string { return "permanent failure" }
+
+// TestDispatch_SkipsUnresolvableExplicitBot asserts the honest-fail
+// guard: a ticket naming a bot the registry can't resolve must NOT be
+// dispatched against the default workflow (which would run an unrelated
+// no-op and report a misleading success). The dispatch is skipped — no
+// running entry, no runner call — so the issue stays eligible for retry.
+func TestDispatch_SkipsUnresolvableExplicitBot(t *testing.T) {
+	ft := newFakeTracker()
+	ft.add(tracker.Issue{
+		ID: "fake:ghost", Identifier: "fake#ghost",
+		Title: "go", WorkflowState: "ready", Bot: "no-such-bot-xyz",
+	})
+
+	var dispatched atomic.Int64
+	runner := &StubRunner{Handler: func(context.Context, DispatchSpec) error {
+		dispatched.Add(1)
+		return nil
+	}}
+
+	dir := t.TempDir()
+	cfg := &Config{
+		Name:      "test",
+		Workflow:  t.TempDir() + "/fake.iter",
+		Tracker:   TrackerConfig{Kind: "fake"},
+		Polling:   PollingConfig{IntervalMS: 50},
+		Agent:     AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000, RunningState: "in_progress"},
+		Workspace: WorkspaceConfig{Root: filepath.Join(dir, "ws")},
+		Stall:     StallConfig{TimeoutMS: 0},
+	}
+	cfg.applyDefaults()
+	// Bots.Paths points at an empty dir → "no-such-bot-xyz" is unresolvable.
+	cfg.Bots.Paths = []string{filepath.Join(dir, "empty-bots")}
+	ws, err := NewWorkspaces(filepath.Join(dir, "ws"))
+	if err != nil {
+		t.Fatalf("NewWorkspaces: %v", err)
+	}
+	c, err := New(Options{
+		Config:     cfg,
+		Tracker:    ft,
+		Runner:     runner,
+		Workspaces: ws,
+		Logger:     iterlog.New(iterlog.LevelError, &bytes.Buffer{}),
+		HostMarker: "test",
+		StoreDir:   filepath.Join(dir, "store"),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	c.dispatch(context.Background(), tracker.Issue{
+		ID: "fake:ghost", Identifier: "fake#ghost",
+		Title: "go", WorkflowState: "ready", Bot: "no-such-bot-xyz",
+	})
+
+	if n := len(c.state.running); n != 0 {
+		t.Fatalf("running entries = %d, want 0 (dispatch must be skipped)", n)
+	}
+	if dispatched.Load() != 0 {
+		t.Fatalf("runner.Dispatch called %d times, want 0", dispatched.Load())
+	}
+}
 
 // TestDispatch_StampsLastRunAtStart asserts the studio "run ↗" link is
 // live for the whole run: the dispatcher must stamp last_run when it

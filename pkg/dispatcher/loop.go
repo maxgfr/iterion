@@ -252,6 +252,25 @@ func (c *Dispatcher) hasSlot(state string, cfg *Config) bool {
 // worker goroutine. Runs on the actor goroutine — must be fast.
 func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 	cfg := c.cfg.Load()
+
+	// Honest-fail on explicit-bot resolution failure. When the issue
+	// names a specific bot (iss.Bot != "") that the registry can't
+	// resolve, do NOT claim + silently fall back to the default workflow:
+	// that runs an unrelated no-op (dispatcher_default's triage→done) and
+	// reports a misleading "success", leaving the ticket in review/done
+	// with nothing relevant done. Skip the dispatch instead — the issue
+	// stays eligible in its source state, so a transient scan failure
+	// (e.g. mid dev-server rebuild) recovers on the next tick, and a
+	// persistent one (typo'd / missing bot) stays visible via this warn
+	// rather than burning a default run every poll. buildSpec re-resolves
+	// for the happy path; this guard only gates the explicit-bot case.
+	if iss.Bot != "" {
+		if _, err := botregistry.ResolveBotPath(iss.Bot, cfg.Bots.Paths); err != nil {
+			c.logger.Warn("dispatcher: %s names bot %q which can't be resolved: %v — skipping (refusing to silently run the default workflow); will retry next tick", iss.Identifier, iss.Bot, err)
+			return
+		}
+	}
+
 	if err := c.tracker.Claim(ctx, iss.ID, c.hostMarker); err != nil {
 		if errors.Is(err, tracker.ErrClaimConflict) {
 			c.logger.Info("dispatcher: %s already claimed elsewhere, skipping", iss.Identifier)
