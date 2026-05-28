@@ -468,6 +468,17 @@ func (c *Dispatcher) buildSpec(cfg *Config, iss tracker.Issue, runID, wsPath str
 	for k, v := range iss.BotArgs {
 		vars[k] = v
 	}
+	// Routing key for the runner. The RoutingRunner selects a per-assignee
+	// pre-compiled workflow by spec.Assignee (AssigneeWorkflows is keyed by
+	// bot name), so a ticket that names a Bot but has no Assignee would
+	// otherwise fall through to the default workflow (dispatcher_default)
+	// and never run its bot. Bot is the explicit dispatch directive — it
+	// wins over Assignee when set. (The honest-fail guard at the top of
+	// dispatch() already rejected an unresolvable Bot before we get here.)
+	routeAssignee := iss.Assignee
+	if iss.Bot != "" {
+		routeAssignee = iss.Bot
+	}
 	return DispatchSpec{
 		WorkflowPath:  workflowPath,
 		RunID:         runID,
@@ -480,7 +491,7 @@ func (c *Dispatcher) buildSpec(cfg *Config, iss tracker.Issue, runID, wsPath str
 			Title:      iss.Title,
 		},
 		Attachments: attachments,
-		Assignee:    iss.Assignee,
+		Assignee:    routeAssignee,
 		OnEvent: func(name string) {
 			// Synchronous, lock-free heartbeat: read by reconcileStalled
 			// without needing the actor to drain c.cmds first. This is

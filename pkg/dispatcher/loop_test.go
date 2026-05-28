@@ -64,6 +64,30 @@ func TestBuildSpec_AssigneeDispatchOverridesGlobalVars(t *testing.T) {
 	}
 }
 
+func TestBuildSpec_RoutesByBotWhenSet(t *testing.T) {
+	d := newMinimalDispatcher(t)
+	cfg := &Config{Workflow: "/tmp/default.bot"}
+
+	// Bot set, no assignee → route by bot (so the RoutingRunner reaches
+	// the bot's per-assignee workflow instead of the default).
+	spec := d.buildSpec(cfg, tracker.Issue{ID: "i-b", Title: "x", Bot: "whole_improve_loop"}, "r", "/tmp/ws", 0, nil)
+	if spec.Assignee != "whole_improve_loop" {
+		t.Fatalf("bot-only: route key = %q, want whole_improve_loop", spec.Assignee)
+	}
+
+	// Bot wins over assignee when both are present.
+	spec = d.buildSpec(cfg, tracker.Issue{ID: "i-ba", Title: "x", Bot: "feature_dev", Assignee: "someone"}, "r", "/tmp/ws", 0, nil)
+	if spec.Assignee != "feature_dev" {
+		t.Fatalf("bot+assignee: route key = %q, want feature_dev (bot wins)", spec.Assignee)
+	}
+
+	// No bot → fall back to assignee (unchanged behaviour).
+	spec = d.buildSpec(cfg, tracker.Issue{ID: "i-a", Title: "x", Assignee: "doc-align"}, "r", "/tmp/ws", 0, nil)
+	if spec.Assignee != "doc-align" {
+		t.Fatalf("assignee-only: route key = %q, want doc-align", spec.Assignee)
+	}
+}
+
 func TestBuildSpec_FallsBackToGlobalDispatchWhenNoOverride(t *testing.T) {
 	d := newMinimalDispatcher(t)
 	cfg := &Config{
