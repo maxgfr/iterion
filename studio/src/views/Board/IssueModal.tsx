@@ -3,6 +3,7 @@ import { Link } from "wouter";
 
 import { listBots, type BotEntryWithSchema } from "@/api/bots";
 import type { NativeBoard, NativeIssue } from "@/api/native";
+import BranchDiffModal from "@/components/Runs/BranchDiffModal";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { Dialog } from "@/components/ui/Dialog";
 import { Input } from "@/components/ui/Input";
@@ -503,6 +504,7 @@ function LastRunSection({
   runID?: string;
   workdir?: string;
 }) {
+  const [diffOpen, setDiffOpen] = useState(false);
   if (!runID && !workdir) return null;
   const runLabel = runID ? runID.slice(0, 12) : "";
   return (
@@ -521,7 +523,22 @@ function LastRunSection({
             {runLabel}
           </Link>
           <CopyButton value={runID} variant="icon" label="Copy run id" />
+          <button
+            type="button"
+            onClick={() => setDiffOpen(true)}
+            className="ml-auto text-[11px] px-1.5 py-0.5 rounded border border-border-default hover:bg-surface-2 text-fg-default"
+            title="View this run's full branch diff without leaving the board"
+          >
+            View diff
+          </button>
         </div>
+      )}
+      {runID && (
+        <BranchDiffModal
+          runId={runID}
+          open={diffOpen}
+          onClose={() => setDiffOpen(false)}
+        />
       )}
       {workdir && (
         <div className="flex items-center gap-1.5 text-xs">
