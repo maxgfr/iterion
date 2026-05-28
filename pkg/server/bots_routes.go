@@ -21,11 +21,7 @@ func (s *Server) effectivePaths() []string {
 	if s.cfg.WorkDir == "" {
 		return nil
 	}
-	return []string{
-		s.cfg.WorkDir + "/bots",
-		s.cfg.WorkDir + "/examples",
-		s.cfg.WorkDir + "/.botz",
-	}
+	return botregistry.DefaultPaths(s.cfg.WorkDir)
 }
 
 // handleBotsList returns the discovered bots' metadata + vars schema.

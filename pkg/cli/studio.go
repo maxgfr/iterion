@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
+	"github.com/SocialGouv/iterion/pkg/botregistry"
 	"github.com/SocialGouv/iterion/pkg/dispatcher"
 	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
@@ -96,6 +97,18 @@ func RunStudio(ctx context.Context, opts StudioOptions, p *Printer) error {
 		examplesDir = ""
 	}
 
+	// Resolve the bot-discovery roots ONCE so the HTTP /api/v1/bots
+	// endpoint and the embedded dispatcher agree on the catalog. When the
+	// operator didn't pass --bots-path, fall back to the conventional
+	// <dir>/{bots,examples,.botz} default — the same set the server's
+	// effectivePaths() uses. Without this, DefaultBotsPaths received raw
+	// nil and the dispatcher could resolve no catalog bot, silently
+	// running the default workflow for every explicit-bot ticket.
+	botsPaths := opts.BotsPaths
+	if len(botsPaths) == 0 {
+		botsPaths = botregistry.DefaultPaths(dir)
+	}
+
 	cfg := server.Config{
 		Port:               opts.Port,
 		Bind:               opts.Bind,
@@ -113,7 +126,7 @@ func RunStudio(ctx context.Context, opts StudioOptions, p *Printer) error {
 		// via Origin allowlisting; cross-tenant isolation does not
 		// apply because there is exactly one local user.
 		DisableAuth: true,
-		Bots:        server.BotsConfig{Paths: opts.BotsPaths},
+		Bots:        server.BotsConfig{Paths: botsPaths},
 	}
 	// Wire the in-memory BrowserRegistry unless the operator
 	// explicitly disabled the pane. The registry is process-local;
@@ -140,7 +153,7 @@ func RunStudio(ctx context.Context, opts StudioOptions, p *Printer) error {
 			StoreDir:         resolvedStoreDir,
 			NativeStore:      ns,
 			Logger:           logger,
-			DefaultBotsPaths: opts.BotsPaths,
+			DefaultBotsPaths: botsPaths,
 			DefaultsFn: func() (*dispatcher.Config, error) {
 				// Pass the studio's working directory as the
 				// project seed. The auto-config installs an

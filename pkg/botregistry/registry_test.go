@@ -100,6 +100,23 @@ func TestResolveBotPath_NotFound(t *testing.T) {
 	}
 }
 
+func TestDefaultPaths(t *testing.T) {
+	got := DefaultPaths("/work")
+	want := []string{
+		filepath.Join("/work", "bots"),
+		filepath.Join("/work", "examples"),
+		filepath.Join("/work", ".botz"),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("DefaultPaths len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("DefaultPaths[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestEntry_MainFile(t *testing.T) {
 	dir := t.TempDir()
 	bundleDir := filepath.Join(dir, "b")

@@ -99,6 +99,23 @@ func ResolveBotPath(name string, paths []string) (string, error) {
 	return "", fmt.Errorf("bot %q not found in %v: %w", name, paths, os.ErrNotExist)
 }
 
+// DefaultPaths returns the conventional bot-discovery roots relative to a
+// working directory: <dir>/bots, <dir>/examples, <dir>/.botz. Missing
+// roots are skipped silently by discovery, so returning all three is
+// safe. Shared by the studio HTTP server (GET /api/v1/bots) and the
+// studio-embedded dispatcher so both resolve the same catalog when the
+// operator didn't pass an explicit --bots-path. (Before this was shared,
+// the dispatcher got raw-nil paths and could resolve no catalog bot,
+// silently falling back to the default workflow on every explicit-bot
+// ticket.)
+func DefaultPaths(workDir string) []string {
+	return []string{
+		filepath.Join(workDir, "bots"),
+		filepath.Join(workDir, "examples"),
+		filepath.Join(workDir, ".botz"),
+	}
+}
+
 // discoverBots walks each root and produces one Entry per discovered
 // bot. Bundles (directories with manifest.yaml + main.bot) collapse
 // into one entry; individual .bot/.iter files become one entry each.
