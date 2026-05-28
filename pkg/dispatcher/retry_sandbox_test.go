@@ -42,6 +42,11 @@ func TestIsSandboxSetupError(t *testing.T) {
 			true,
 		},
 		{
+			"broken claude binary (EFORMAT on first node — native:c6d93a2a)",
+			errors.New(`node "reviewer_claude" execution failed: backend "claude_code" failed: delegate: claude-code failed: exec /usr/bin/claude: exec format error`),
+			true,
+		},
+		{
 			"http2 transient (handled by recovery dispatch, not sandbox path)",
 			errors.New(`model: node "reviewer_gpt": http2: timeout awaiting response headers`),
 			false,

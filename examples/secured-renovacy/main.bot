@@ -4326,7 +4326,7 @@ workflow secured_renovacy:
     ##     the project's `packageManager` field without each
     ##     downstream agent re-discovering the right invocation.
     ##     Corepack ships with Node 22 (no extra install).
-    post_create: "set -e; command -v claude >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest; sudo corepack enable 2>/dev/null || true; corepack prepare --activate 2>/dev/null || true"
+    post_create: "set -e; claude --version >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest; claude --version >/dev/null 2>&1 || { echo 'claude install verification failed' >&2; exit 1; }; sudo corepack enable 2>/dev/null || true; corepack prepare --activate 2>/dev/null || true"
 
   budget:
     max_parallel_branches: 4

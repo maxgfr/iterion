@@ -877,7 +877,18 @@ workflow feature_dev:
     ## package.json, etc.) belongs in the agent's `act` step where
     ## it's observable + has the run's budget rather than dying
     ## silently here on a post_create timeout.
-    post_create: "set -e; command -v claude >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest"
+    ##
+    ## Gate on `claude --version` (runs the binary), NOT `command -v
+    ## claude` (mere existence): `npm install -g` occasionally exits 0
+    ## leaving a broken/partial binary (observed: a `claude.exe`
+    ## symlink whose target wasn't fully written → `exec format
+    ## error` mid-run). `command -v` would see that broken claude and
+    ## skip the reinstall forever. We also VERIFY after install and
+    ## exit 1 on failure so a still-broken claude fails post_create
+    ## (a clean sandbox-setup error the dispatcher retries with a
+    ## fresh container) instead of failing cryptically on the first
+    ## claude_code node. See native:c6d93a2a.
+    post_create: "set -e; claude --version >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest; claude --version >/dev/null 2>&1 || { echo 'claude install verification failed' >&2; exit 1; }"
 
   budget:
     max_parallel_branches: 1

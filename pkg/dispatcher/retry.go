@@ -159,6 +159,18 @@ func isSandboxSetupError(err error) bool {
 	if strings.Contains(msg, "container start") {
 		return true
 	}
+	// A broken/partial CLI install inside the sandbox surfaces as an
+	// "exec format error" when the runtime first invokes it (observed:
+	// npm install -g claude-code exits 0 leaving a claude.exe symlink
+	// whose target wasn't fully written → EFORMAT on the first
+	// claude_code node — native:c6d93a2a). The hardened post_create now
+	// fails the boot cleanly, but if a broken binary still slips through
+	// to node execution, treat it as a sandbox-setup error so the retry
+	// uses the backoff + a fresh container (where the reinstall takes)
+	// rather than the default exponential against the same broken image.
+	if strings.Contains(msg, "exec format error") {
+		return true
+	}
 	return false
 }
 
