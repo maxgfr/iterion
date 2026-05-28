@@ -10,6 +10,14 @@
 .iterion/
 .iterion-*/
 
+# Sandbox runtime scratch — the container redirects HOME / XDG_CACHE_HOME
+# into the bind-mounted worktree (devbox writes its version cache there,
+# etc). These are per-run caches, never source. Without ignoring them
+# they leak into commit-and-finalize's `git add -A` and land in the
+# run's storage branch.
+.tmp-home/
+.tmp-xdg-cache/
+
 # Playwright MCP scratch (console logs + page snapshots written under
 # cwd by the @playwright/mcp server; per-run, not committed). Also
 # catches stray screenshots Playwright drops at the repo root when an
