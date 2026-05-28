@@ -221,6 +221,14 @@ type Service struct {
 	// streams from change streams instead of relying on the local
 	// broker (which only sees this process's writes). Plan §F (T-21).
 	eventSource EventStreamSource
+
+	// fileSrcs tracks on-demand events.jsonl tailers started by
+	// EnsureEventSource for runs not produced in this process (e.g.
+	// dispatcher-spawned in-process runs, whose runtime observer feeds
+	// the dispatcher heartbeat — not this broker). Refcounted across WS
+	// subscribers; the tailer stops when the last subscriber releases.
+	fileSrcMu sync.Mutex
+	fileSrcs  map[string]*fileSrcHandle
 }
 
 // EventStreamSource is the small subset of pkg/runview/eventstream.Source

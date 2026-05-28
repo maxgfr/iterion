@@ -225,6 +225,12 @@ type runConn struct {
 	logSub        *runview.RunLogSubscription
 	closeOnce     sync.Once
 	closed        chan struct{}
+
+	// fileSrcRelease, when non-nil, releases the refcounted file event
+	// source started on subscribe for a run not produced in this
+	// process (e.g. a dispatcher-spawned run). Called on unsubscribe
+	// and on connection close. Guarded by mu alongside sub.
+	fileSrcRelease func()
 }
 
 // authCtx returns a fresh background ctx with the tenant/user
@@ -265,6 +271,10 @@ func (c *runConn) close() {
 		if c.logSub != nil {
 			c.logSub.Cancel()
 			c.logSub = nil
+		}
+		if c.fileSrcRelease != nil {
+			c.fileSrcRelease()
+			c.fileSrcRelease = nil
 		}
 		c.mu.Unlock()
 		_ = c.conn.Close()
@@ -357,6 +367,15 @@ func (c *runConn) handleSubscribe(env runWSEnvelope) {
 	// on the same process share the same fan-out cursor.
 	if c.xStore == nil && !c.server.runs.HasEventSource() {
 		c.sub = c.server.runs.Broker().Subscribe(c.runID)
+		// Dispatcher-spawned (and any other not-in-process) runs write
+		// events to disk but never publish to this broker, so live WS
+		// delivery would stall after the connect-time replay until the
+		// client refreshes. Bridge events.jsonl -> broker for them. In-
+		// process Launch runs already feed the broker via the runtime
+		// observer, so skip those to avoid double-publishing.
+		if !c.server.runs.Active(c.runID) {
+			c.fileSrcRelease = c.server.runs.EnsureEventSource(c.runID)
+		}
 	}
 	c.subscribed = true
 	c.mu.Unlock()
@@ -787,6 +806,10 @@ func (c *runConn) handleUnsubscribe(env runWSEnvelope) {
 	if c.sub != nil {
 		c.sub.Cancel()
 		c.sub = nil
+	}
+	if c.fileSrcRelease != nil {
+		c.fileSrcRelease()
+		c.fileSrcRelease = nil
 	}
 	c.subscribed = false
 	c.mu.Unlock()
