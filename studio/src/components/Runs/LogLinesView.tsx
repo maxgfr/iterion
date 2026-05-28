@@ -680,6 +680,20 @@ const LogBlockRow = memo(function LogBlockRow({
   const bodyWidthCls = wrap
     ? "whitespace-pre-wrap break-all"
     : "whitespace-pre min-w-max";
+  // Collapsed preview: the first non-empty body line, stripped of the
+  // block-indent gutter ("         │ "). Shown inline after the header so
+  // the operator reads the gist (e.g. a 💬 message or tool input) without
+  // having to expand every block. CSS-truncated to one line with an
+  // ellipsis; the full body still appears on click.
+  const preview = useMemo(() => {
+    for (const l of body) {
+      const s = (
+        l.text.startsWith(BLOCK_INDENT) ? l.text.slice(BLOCK_INDENT.length) : l.text
+      ).trim();
+      if (s) return s;
+    }
+    return "";
+  }, [body]);
   const toggle = () => setOpen((v) => !v);
   return (
     <div className={`font-mono text-[10px] py-0.5 ${cls}`}>
@@ -697,9 +711,19 @@ const LogBlockRow = memo(function LogBlockRow({
         title={open ? "Collapse body" : "Expand body"}
         className="flex items-baseline gap-2 pr-3 rounded cursor-pointer hover:bg-surface-2"
       >
-        <div className={`flex-1 min-w-0 ${bodyWidthCls}`}>
-          {header.text || " "}
-        </div>
+        {open ? (
+          <div className={`flex-1 min-w-0 ${bodyWidthCls}`}>
+            {header.text || " "}
+          </div>
+        ) : (
+          // Collapsed: header + dimmed inline preview on a single
+          // truncated line. `truncate` needs the flex child to stay
+          // shrinkable, hence min-w-0 + no min-w-max here.
+          <div className="flex-1 min-w-0 truncate">
+            <span>{header.text || " "}</span>
+            {preview && <span className="text-fg-subtle"> {preview}</span>}
+          </div>
+        )}
         <span className="shrink-0 text-fg-subtle">
           {open ? "▾" : `▸ +${body.length}`}
         </span>
