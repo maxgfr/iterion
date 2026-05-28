@@ -56,7 +56,7 @@ func TestAggregateRunStatsBucketsCostByEventDay(t *testing.T) {
 		CreatedAt:    run.CreatedAt,
 		UpdatedAt:    run.UpdatedAt,
 		FinishedAt:   run.FinishedAt,
-	}}, 30)
+	}}, 30, nil)
 
 	if len(out.CostByDay) != 2 {
 		t.Fatalf("want 2 cost buckets, got %+v", out.CostByDay)

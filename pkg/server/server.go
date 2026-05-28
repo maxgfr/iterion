@@ -260,6 +260,10 @@ type Server struct {
 	watcher          *Watcher
 	runs             *runview.Service  // run console service; nil disables /api/runs endpoints
 	watchCoord       *watchCoordinator // MVP3b issue-state fan-out; nil when no native tracker or events tail unavailable
+	// statsCache memoizes the per-run events.jsonl cost scan behind
+	// /api/v1/runs/stats (terminal runs only — see runs_stats_cache.go).
+	// Cleared on project switch. Non-nil after New.
+	statsCache *runStatsCache
 
 	authSvc      *auth.Service
 	authLimiter  *authRateLimiter
@@ -359,6 +363,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		oauthStore:      cfg.OAuthForfait,
 		httpClient:      &http.Client{Timeout: 15 * time.Second},
 		browserSessions: cfg.BrowserRegistry,
+		statsCache:      newRunStatsCache(),
 	}
 	if cfg.NativeTrackerStore != nil {
 		s.boardMCPTokens = NewBoardMCPTokenRegistry()

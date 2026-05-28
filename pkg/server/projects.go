@@ -321,6 +321,10 @@ func (s *Server) swapWorkDir(_ context.Context, newDir string) error {
 	s.cfg.StoreDir = storeDir
 	s.runs = newRuns
 	s.watcher = newWatcher
+	// The run set changes wholesale on a project switch — drop the
+	// runs-stats memo so per-run cost from the previous project can't
+	// linger (and the cache can't grow unbounded across switches).
+	s.statsCache.clear()
 	s.stateMu.Unlock()
 
 	if oldWatcher != nil {

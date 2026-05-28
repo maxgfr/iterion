@@ -80,7 +80,17 @@ func (s *Server) registerRunsStatsRoutes() {
 }
 
 func (s *Server) handleRunsStats(w http.ResponseWriter, r *http.Request) {
-	if s.runs == nil {
+	// Snapshot the hot-swappable run service + stats cache together so a
+	// concurrent project switch can't pair this request's run summaries
+	// with the other project's store (which would scan non-existent files
+	// and silently report zero cost). Pointers only — the I/O below runs
+	// unlocked so a dashboard load never blocks a swap.
+	s.stateMu.RLock()
+	runsSvc := s.runs
+	statsCache := s.statsCache
+	s.stateMu.RUnlock()
+
+	if runsSvc == nil {
 		httpError(w, http.StatusServiceUnavailable, "no run store configured on this server")
 		return
 	}
@@ -92,13 +102,13 @@ func (s *Server) handleRunsStats(w http.ResponseWriter, r *http.Request) {
 	}
 	since := time.Now().UTC().AddDate(0, 0, -sinceDays)
 
-	runs, err := s.runs.ListCtx(r.Context(), runview.ListFilter{Since: since})
+	runs, err := runsSvc.ListCtx(r.Context(), runview.ListFilter{Since: since})
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "%v", err)
 		return
 	}
 
-	out := aggregateRunStats(r.Context(), s.runs, runs, sinceDays)
+	out := aggregateRunStats(r.Context(), runsSvc, runs, sinceDays, statsCache)
 	writeJSON(w, out)
 }
 
@@ -110,6 +120,7 @@ func aggregateRunStats(
 	svc *runview.Service,
 	runs []runview.RunSummary,
 	sinceDays int,
+	cache *runStatsCache,
 ) StatsResponse {
 	// Pass 1: accumulate workflow counts/durations and bucket cost by
 	// each node_finished event's day (one ScanEvents call per run).
@@ -145,7 +156,7 @@ func aggregateRunStats(
 			acc.durations = append(acc.durations, dur)
 		}
 
-		for day, cost := range sumRunCostByDay(ctx, svc, r.ID, r.CreatedAt) {
+		for day, cost := range cachedRunCostByDay(ctx, svc, cache, r) {
 			acc.totalCostUSD += cost
 			totalCost += cost
 			if _, ok := days[day]; !ok {
@@ -220,35 +231,65 @@ func isFailStatus(s store.RunStatus) bool {
 // for runs that reached a terminal state; 0 for still-running /
 // paused / queued.
 func finishedDuration(r *runview.RunSummary) float64 {
-	switch r.Status {
-	case store.RunStatusFinished,
-		store.RunStatusFailed,
-		store.RunStatusFailedResumable,
-		store.RunStatusCancelled:
-		end := r.UpdatedAt
-		if r.FinishedAt != nil && !r.FinishedAt.IsZero() {
-			end = *r.FinishedAt
-		}
-		if r.CreatedAt.IsZero() || end.Before(r.CreatedAt) {
-			return 0
-		}
-		return end.Sub(r.CreatedAt).Seconds()
+	if !r.Status.IsTerminal() {
+		return 0
 	}
-	return 0
+	end := r.UpdatedAt
+	if r.FinishedAt != nil && !r.FinishedAt.IsZero() {
+		end = *r.FinishedAt
+	}
+	if r.CreatedAt.IsZero() || end.Before(r.CreatedAt) {
+		return 0
+	}
+	return end.Sub(r.CreatedAt).Seconds()
+}
+
+// cachedRunCostByDay returns the run's cost-by-day map, served from the
+// runStatsCache when possible. Terminal runs (which append no further
+// events) are memoized keyed by their version; non-terminal runs are
+// always re-scanned so live cost stays honest. The expensive ScanEvents
+// walk runs OUTSIDE the cache lock — get/put bracket it but never wrap
+// it — so concurrent dashboard loads never serialise on the file read.
+//
+// Only a clean scan is memoized: a transient open/scan error on a
+// terminal run would otherwise pin a partial/empty cost for the rest of
+// that run's lifetime (its version never changes again), stripping the
+// self-healing the uncached path had. The map handed back is read-only
+// by contract, so sharing the same reference with the cache is safe.
+func cachedRunCostByDay(
+	ctx context.Context,
+	svc *runview.Service,
+	cache *runStatsCache,
+	r *runview.RunSummary,
+) map[string]float64 {
+	if cache == nil || !r.Status.IsTerminal() {
+		byDay, _ := sumRunCostByDay(ctx, svc, r.ID, r.CreatedAt)
+		return byDay
+	}
+	version := runVersion(r)
+	if byDay, ok := cache.get(r.ID, version); ok {
+		return byDay
+	}
+	byDay, err := sumRunCostByDay(ctx, svc, r.ID, r.CreatedAt)
+	if err == nil {
+		cache.put(r.ID, version, byDay)
+	}
+	return byDay
 }
 
 // sumRunCostByDay walks the run's events.jsonl via ScanEvents and buckets
 // every node_finished event's `_cost_usd` payload field by the event's UTC
-// day. Returns an empty map when the file is missing or the events stream
-// errors — the dashboard treats missing-cost as "free", which is the truthful
-// reading (no LLM calls = no cost).
-func sumRunCostByDay(ctx context.Context, svc *runview.Service, runID string, fallback time.Time) map[string]float64 {
+// day. A missing events file is not an error — the dashboard treats
+// missing-cost as "free" (no LLM calls = no cost). The returned error
+// reflects a genuine open/scan/corruption failure so callers can decline
+// to memoize a partial read.
+func sumRunCostByDay(ctx context.Context, svc *runview.Service, runID string, fallback time.Time) (map[string]float64, error) {
 	byDay := map[string]float64{}
 	rs := svc.RunStore()
 	if rs == nil {
-		return byDay
+		return byDay, nil
 	}
-	_ = rs.ScanEvents(ctx, runID, func(e *store.Event) bool {
+	err := rs.ScanEvents(ctx, runID, func(e *store.Event) bool {
 		if e.Type != store.EventNodeFinished {
 			return true
 		}
@@ -267,7 +308,7 @@ func sumRunCostByDay(ctx context.Context, svc *runview.Service, runID string, fa
 		}
 		return true
 	})
-	return byDay
+	return byDay, err
 }
 
 // percentiles returns the P50 and P95 of the given sample (in seconds
