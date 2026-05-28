@@ -1294,7 +1294,12 @@ except ValueError:
 ## Regexes targeting markdown-typical patterns.
 ## file_ref: paths like pkg/foo/bar.go, docs/dsl.md, with optional :NN line.
 ## We restrict to known code/doc roots to avoid false hits on prose.
-FILE_RE = re.compile(r'\b((?:pkg|cmd|internal|examples|docs|scripts|studio|.github|sdks)/[A-Za-z0-9_./-]+\.(?:go|md|ts|tsx|py|sh|yaml|yml|json|bot|iter))(?::([0-9]+(?:-[0-9]+)?))?')
+## (?<![./\w-]) instead of \b: \b matched the /→letter boundary INSIDE a
+## longer path (e.g. '.archive/examples/foo.iter' captured 'examples/foo.iter',
+## silently dropping the '.archive/' prefix → phantom file-not-found drift).
+## The lookbehind refuses to start a match mid-path, so a known-root token is
+## only captured when it's the true start of the reference.
+FILE_RE = re.compile(r'(?<![./\w-])((?:pkg|cmd|internal|examples|docs|scripts|studio|.github|sdks)/[A-Za-z0-9_./-]+\.(?:go|md|ts|tsx|py|sh|yaml|yml|json|bot|iter))(?::([0-9]+(?:-[0-9]+)?))?')
 ## chr(96) = backtick. The iterion DSL uses backticks as the raw-string
 ## delimiter for tool commands, so any literal backtick inside the
 ## command body (e.g. an inline-code regex) terminates the string and
