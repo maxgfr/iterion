@@ -380,6 +380,8 @@ function initialAnswers(spec: FormSpec): FormAnswer {
   for (const q of spec.questions) {
     if (q.kind === "checkbox") {
       out[q.id] = q.defaultValues ? [...q.defaultValues] : [];
+    } else if (q.kind === "radio" && q.defaultValue) {
+      out[q.id] = q.defaultValue;
     } else {
       out[q.id] = "";
     }

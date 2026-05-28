@@ -333,42 +333,60 @@ function resolveDynamicForm(
   }
 
   if (message.nodeId === "ask_continue") {
-    const created = recentCreatedIssueIds(upstream);
-    const titles: string[] = created
-      .map((id: string) => titleForIssueId(upstream, id))
-      .filter((t): t is string => typeof t === "string" && t.length > 0);
-    if (created.length === 0) return staticForm;
-
     const actionQ = (staticForm?.questions ?? [])[0];
     const detailQ = (staticForm?.questions ?? [])[1];
     if (!actionQ || actionQ.kind !== "radio") return staticForm;
 
-    const shortcutLabel =
-      titles.length === 0
-        ? `Dispatch what I just created (${created.length})`
-        : titles.length === 1
-          ? `Dispatch ${titles[0]}`
-          : titles.length <= 3
-            ? `Dispatch: ${titles.join(", ")}`
-            : `Dispatch the ${titles.length} I just created`;
+    const created = recentCreatedIssueIds(upstream);
+    const titles: string[] = created
+      .map((id: string) => titleForIssueId(upstream, id))
+      .filter((t): t is string => typeof t === "string" && t.length > 0);
 
+    // UX#1: when the previous turn created tickets, prepend the
+    // "dispatch what I just created" shortcut and default to it.
+    if (created.length > 0) {
+      const shortcutLabel =
+        titles.length === 0
+          ? `Dispatch what I just created (${created.length})`
+          : titles.length === 1
+            ? `Dispatch ${titles[0]}`
+            : titles.length <= 3
+              ? `Dispatch: ${titles.join(", ")}`
+              : `Dispatch the ${titles.length} I just created`;
+      return {
+        ...staticForm,
+        mode: "flat",
+        questions: [
+          {
+            ...actionQ,
+            options: [
+              {
+                value: "dispatch_just_created",
+                label: shortcutLabel,
+                description:
+                  "Push the ticket(s) you added in the previous turn from backlog to ready. The dispatcher picks them up immediately.",
+              },
+              ...actionQ.options,
+            ],
+            defaultValue: "dispatch_just_created",
+          },
+          ...(detailQ ? [detailQ] : []),
+        ],
+        submitLabel: staticForm?.submitLabel,
+      } as FormSpec;
+    }
+
+    // UX#2: no fresh tickets this turn — smart-default the radio to
+    // the next-likely action based on what the operator did last
+    // loop. Saves a click on the common chains. `done` is never
+    // auto-selected: ending the session must be an explicit pick.
+    const smartDefault = smartContinueDefault(previousContinueAction(upstream));
+    if (!smartDefault) return staticForm;
     return {
       ...staticForm,
       mode: "flat",
       questions: [
-        {
-          ...actionQ,
-          options: [
-            {
-              value: "dispatch_just_created",
-              label: shortcutLabel,
-              description:
-                "Push the ticket(s) you added in the previous turn from backlog to ready. The dispatcher picks them up immediately.",
-            },
-            ...actionQ.options,
-          ],
-          defaultValue: "dispatch_just_created",
-        },
+        { ...actionQ, defaultValue: smartDefault },
         ...(detailQ ? [detailQ] : []),
       ],
       submitLabel: staticForm?.submitLabel,
@@ -465,6 +483,52 @@ function findLatestDispatchCandidates(
     if (m && m.kind === "dispatch-candidates") return m;
   }
   return null;
+}
+
+// previousContinueAction returns the `action` the operator picked on
+// the most recent ANSWERED ask_continue turn, or "" when none exists
+// yet (first loop iteration). Reads the structured answers persisted
+// on the turn's outcome (runChat stores the full answers map there).
+export function previousContinueAction(
+  upstream: ReadonlyArray<WhatsNextMessage>,
+): string {
+  for (let i = upstream.length - 1; i >= 0; i--) {
+    const m = upstream[i];
+    if (
+      m &&
+      m.kind === "human-question" &&
+      m.nodeId === "ask_continue" &&
+      m.status === "answered"
+    ) {
+      const action = m.outcome?.action;
+      return typeof action === "string" ? action : "";
+    }
+  }
+  return "";
+}
+
+// smartContinueDefault maps the previous loop's action to the
+// next-likely action to pre-select. Returns undefined when there's
+// no useful (or safe) default — the caller leaves the radio
+// unselected so the operator picks deliberately.
+//   add_ticket    → add another (operators batch ticket creation)
+//   modify_ticket → add a ticket (typical triage rhythm)
+//   dispatch_*    → undefined (no default)
+// `done` is never produced as a default: ending the session must be
+// an explicit pick, never a one-Enter accident. After a dispatch the
+// operator's next move is genuinely ambiguous (end / dispatch more /
+// add follow-up), so we don't guess — pre-selecting `done` there
+// would risk an accidental session-end.
+export function smartContinueDefault(
+  previousAction: string,
+): string | undefined {
+  switch (previousAction) {
+    case "add_ticket":
+    case "modify_ticket":
+      return "add_ticket";
+    default:
+      return undefined;
+  }
 }
 
 // contextPrefixFor returns a one-line "what just happened" hint to

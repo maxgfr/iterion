@@ -38,6 +38,12 @@ export type FormQuestion = {
       // a free-text input. Mirrors Claude Code's AskUserQuestion
       // affordance.
       allow_other?: boolean;
+      // Pre-selects this option value when the form first mounts.
+      // Must match one of `options[].value`. Used by whats-next's
+      // smart-default radio (next-likely action from the previous
+      // loop) and the dispatch-just-created shortcut. Unset → the
+      // form opens with no option selected (operator must pick).
+      defaultValue?: string;
     }
   | {
       kind: "checkbox";

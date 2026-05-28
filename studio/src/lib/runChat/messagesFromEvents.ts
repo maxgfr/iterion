@@ -565,25 +565,28 @@ function processEvent(
       // best-effort — answered turns survive with `userReply: ""` if
       // no string lands.
       let text = "";
-      let approved: boolean | undefined;
       const overridden = resolver.humanAnswerExtractor?.(nodeId, answers, out);
       if (overridden) {
         text = overridden.text;
-        approved = overridden.approved;
       } else if (answers) {
-        for (const [k, v] of Object.entries(answers)) {
+        for (const v of Object.values(answers)) {
           if (typeof v === "string" && v.length > text.length) {
             text = v;
-          } else if (typeof v === "boolean" && k === "approved") {
-            approved = v;
           }
         }
       }
+      // Persist the full structured answers map as the outcome (not
+      // just {approved}). Downstream UIs that need to reason about a
+      // past turn's structured choice — e.g. whats-next's
+      // smart-default radio reading the previous ask_continue.action —
+      // read it from here. Existing readers only probe `outcome.approved`
+      // defensively (`"approved" in outcome`), so the wider shape is
+      // backward-compatible.
       out[idx] = {
         ...current,
         status: "answered",
         userReply: text || current.userReply,
-        outcome: approved !== undefined ? { approved } : current.outcome,
+        outcome: answers ?? current.outcome,
       };
       if (latestPendingHumanKey === key) latestPendingHumanKey = null;
       break;
