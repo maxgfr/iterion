@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ChevronDownIcon,
@@ -20,6 +20,15 @@ import type { RunFile, RunFileStatus, RunFilesMode } from "@/api/runs";
 type ViewMode = "uncommitted" | "branch";
 
 const MODE_STORAGE_KEY = "run-console-v1.files-mode";
+
+// Above this many changed files we DEFAULT-COLLAPSE every folder on first
+// load so the initial paint is a handful of folder rows rather than
+// thousands of (tooltip-wrapped) file rows — which is what freezes the
+// browser (a 20k+ un-gitignored cache crashed the UI; a committed Go
+// vendor/ is legitimately thousands too). We never hide the files — they
+// stay one expand away — and a non-blocking banner points at .gitignore
+// when the count looks like a stray build/cache dir.
+const LARGE_CHANGESET = 2000;
 
 // readPersistedMode pulls the user's last segmented-control selection
 // from localStorage. Scoped globally (not per-runId) because the
@@ -81,6 +90,7 @@ export default function FilesPanel({ runId, onSelectFile }: FilesPanelProps) {
 
   const tree = useMemo(() => buildFileTree(data?.files ?? []), [data?.files]);
   const fileCount = data?.files.length ?? 0;
+  const largeChangeset = fileCount > LARGE_CHANGESET;
   // Disable the uncommitted segment when no worktree exists — the
   // backend can't compute it. Same condition the auto-fallback above
   // keys off, surfaced visually so the user understands the constraint.
@@ -91,6 +101,21 @@ export default function FilesPanel({ runId, onSelectFile }: FilesPanelProps) {
   // panel auto-refreshes on node_finished events) appear under
   // already-expanded ancestors instead of being hidden.
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+
+  // On a LARGE changeset, auto-collapse every folder once per (run, mode)
+  // so the first paint is bounded (top-level folders only) instead of
+  // mounting thousands of rows. A signature ref makes this fire once and
+  // never fight the user's subsequent expand/collapse.
+  const autoCollapsedSig = useRef<string | null>(null);
+  useEffect(() => {
+    const sig = `${runId}:${mode}`;
+    if (largeChangeset && tree.length > 0 && autoCollapsedSig.current !== sig) {
+      autoCollapsedSig.current = sig;
+      setCollapsed(collectFolderKeys(tree));
+    } else if (!largeChangeset) {
+      autoCollapsedSig.current = null;
+    }
+  }, [largeChangeset, tree, runId, mode]);
   const toggle = useCallback((pathKey: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -173,6 +198,9 @@ export default function FilesPanel({ runId, onSelectFile }: FilesPanelProps) {
           )
         ) : (
           <div className="py-1 text-xs">
+            {largeChangeset && (
+              <LargeChangesetHint count={fileCount} workDir={data.work_dir} />
+            )}
             {tree.map((node) => (
               <TreeRow
                 key={node.pathKey}
@@ -191,6 +219,57 @@ export default function FilesPanel({ runId, onSelectFile }: FilesPanelProps) {
             <span className="truncate block">{footerLabel(data, mode)}</span>
           </Tooltip>
         </footer>
+      )}
+    </div>
+  );
+}
+
+// collectFolderKeys returns every folder pathKey in the tree — used to
+// auto-collapse a large changeset down to its top-level folders so the
+// initial render stays bounded.
+function collectFolderKeys(nodes: TreeNode[]): Set<string> {
+  const keys = new Set<string>();
+  const walk = (ns: TreeNode[]) => {
+    for (const n of ns) {
+      if (n.kind === "folder") {
+        keys.add(n.pathKey);
+        walk(n.children);
+      }
+    }
+  };
+  walk(nodes);
+  return keys;
+}
+
+// LargeChangesetHint is a NON-blocking banner shown above the (default-
+// collapsed) tree when the changeset is large. It doesn't hide anything —
+// the tree renders below — it just explains the collapse and nudges the
+// operator to gitignore a stray build/cache dir, pointing at the worktree
+// so they can go fix it (or open it in an editor once that lands).
+function LargeChangesetHint({
+  count,
+  workDir,
+}: {
+  count: number;
+  workDir?: string;
+}) {
+  return (
+    <div className="mb-1 flex flex-col gap-1 border-b border-border-default bg-surface-1 px-2 py-1.5 text-micro">
+      <div className="text-fg-muted">
+        <span className="font-medium text-amber-500">
+          {count.toLocaleString()} changes
+        </span>{" "}
+        — folders collapsed to keep the view responsive; expand to drill in.
+      </div>
+      <div className="leading-relaxed text-fg-subtle">
+        If this includes a build/cache dir (a Go module/build cache,{" "}
+        <code>node_modules</code>, …) add it to <code>.gitignore</code> so
+        it stops flooding the diff{workDir ? "." : "."}
+      </div>
+      {workDir && (
+        <div className="break-all text-fg-subtle">
+          Worktree: <code className="text-fg-muted">{workDir}</code>
+        </div>
       )}
     </div>
   );
