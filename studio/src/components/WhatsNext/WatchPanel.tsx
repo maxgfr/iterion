@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "wouter";
 
 import { queueMessage } from "@/api/queueMessages";
+import { transitionIssue } from "@/api/native";
 import { stateChipStyle } from "@/lib/board/stateTheme";
 import { shortIssueId } from "@/lib/whats-next/issueId";
 import {
@@ -85,8 +86,33 @@ export default function WatchPanel({ runId }: WatchPanelProps) {
 function WatchRow({ entry }: { entry: WatchEntry }) {
   const { issue, issueId, lastFetchError } = entry;
   const title = issue?.title ?? shortIssueId(issueId);
-  const state = issue?.state ?? "…";
+  // Optimistic local override: once the operator clicks Dispatch we
+  // flip the chip to "ready" immediately rather than wait for the
+  // (up to 15s) poll. The poll's real state takes over on its next
+  // tick; this only bridges the gap so the click feels instant.
+  const [optimisticReady, setOptimisticReady] = useState(false);
+  const [dispatching, setDispatching] = useState(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+
+  const state = optimisticReady ? "ready" : issue?.state ?? "…";
   const lastRunId = issue?.last_run_id ?? null;
+  // Dispatchable = currently in backlog. Promoting backlog → ready is
+  // what the dispatcher's polling actor waits for; from any other
+  // state the button is meaningless (already moving / done).
+  const canDispatch = issue?.state === "backlog" && !optimisticReady;
+
+  const onDispatch = async () => {
+    setDispatching(true);
+    setDispatchError(null);
+    try {
+      await transitionIssue(issueId, "ready");
+      setOptimisticReady(true);
+    } catch (e) {
+      setDispatchError((e as Error).message ?? String(e));
+    } finally {
+      setDispatching(false);
+    }
+  };
 
   return (
     <li className="flex items-center gap-2 text-[12px] text-fg-default">
@@ -99,10 +125,26 @@ function WatchRow({ entry }: { entry: WatchEntry }) {
       <span className="flex-1 min-w-0 truncate" title={title}>
         {title}
       </span>
-      {lastFetchError && (
+      {dispatchError && (
+        <span className="text-[10px] text-red-300" title={dispatchError}>
+          (failed)
+        </span>
+      )}
+      {lastFetchError && !dispatchError && (
         <span className="text-[10px] text-fg-subtle" title={lastFetchError}>
           (stale)
         </span>
+      )}
+      {canDispatch && (
+        <button
+          type="button"
+          onClick={() => void onDispatch()}
+          disabled={dispatching}
+          className="text-[11px] text-accent hover:underline shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+          title="Push this ticket from backlog to ready — the dispatcher picks it up."
+        >
+          {dispatching ? "…" : "▶ dispatch"}
+        </button>
       )}
       {lastRunId && (
         <Link
