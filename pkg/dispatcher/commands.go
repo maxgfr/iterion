@@ -204,7 +204,21 @@ func (c *Dispatcher) finishRun(ctx context.Context, issueID string, err error) {
 
 	switch {
 	case err == nil:
-		c.logger.Info("dispatcher: %s finished cleanly (run=%s)", r.Identifier, r.RunID)
+		// Honesty guard: a "clean" finish with no commit produced nothing
+		// directly mergeable, yet the transition below still moves the
+		// issue to CompletedState (default "review") — where an operator
+		// reasonably expects a diff to review. Surface the gap loudly
+		// instead of letting an empty run masquerade as completed work.
+		// Common causes: the wrong bot for the task (a feature ticket sent
+		// to an improve-loop, which approves the unchanged code and exits
+		// via its legit streak→done edge), or a run that left changes
+		// uncommitted (needs commit-and-finalize). Non-fatal: we still
+		// transition (reverting would loop the dispatcher), just visibly.
+		if c.runFinalCommit(r.RunID) == "" {
+			c.logger.Warn("dispatcher: %s finished cleanly but produced NO commit (run=%s) — nothing directly mergeable. Moving to %q anyway; inspect before merging (wrong bot for the task, or work left uncommitted → commit-and-finalize).", r.Identifier, r.RunID, c.cfg.Load().Agent.CompletedState)
+		} else {
+			c.logger.Info("dispatcher: %s finished cleanly (run=%s)", r.Identifier, r.RunID)
+		}
 		// Successful dispatches clear any prior retry bookkeeping and
 		// honor the workspace-persist policy. We don't revert the
 		// in-progress transition — the workflow may have moved the
@@ -348,6 +362,29 @@ func (c *Dispatcher) resolveRunWorkdir(runID string) string {
 		return ""
 	}
 	return probe.WorkDir
+}
+
+// runFinalCommit reads the run's persisted FinalCommit from
+// <storeDir>/runs/<runID>/run.json. Returns "" when storeDir is unset,
+// the file is missing, the JSON can't be decoded, or the run produced
+// no commit (worktree HEAD unchanged, or work left uncommitted). Callers
+// treat "" as "this run produced nothing directly mergeable".
+func (c *Dispatcher) runFinalCommit(runID string) string {
+	if c.storeDir == "" || runID == "" {
+		return ""
+	}
+	path := filepath.Join(c.storeDir, "runs", runID, "run.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var probe struct {
+		FinalCommit string `json:"final_commit"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return ""
+	}
+	return probe.FinalCommit
 }
 
 // cleanupWorkspace removes the per-issue workspace directory when the

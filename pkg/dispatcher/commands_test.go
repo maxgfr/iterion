@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -226,3 +227,102 @@ func TestFinishRun_StampsOnFailureToo(t *testing.T) {
 type errPermanentFailure struct{}
 
 func (errPermanentFailure) Error() string { return "permanent failure" }
+
+// TestFinishRun_WarnsOnZeroCommit asserts the honesty guard: a clean
+// finish whose run produced no commit is logged at WARN (not the
+// silent INFO "finished cleanly") so an empty run doesn't masquerade
+// as completed work — while still transitioning the issue to
+// CompletedState (reverting would loop the dispatcher). A run that
+// produced a commit keeps the quiet INFO path.
+func TestFinishRun_WarnsOnZeroCommit(t *testing.T) {
+	run := func(t *testing.T, finalCommit string) (logs string, finalState string) {
+		ft := newFakeTracker()
+		dir := t.TempDir()
+		wsDir := filepath.Join(dir, "ws")
+		storeDir := filepath.Join(dir, "store")
+		cfg := &Config{
+			Name:      "test",
+			Workflow:  t.TempDir() + "/fake.iter",
+			Tracker:   TrackerConfig{Kind: "fake"},
+			Polling:   PollingConfig{IntervalMS: 50},
+			Agent:     AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000, RunningState: "in_progress"},
+			Workspace: WorkspaceConfig{Root: wsDir},
+			Stall:     StallConfig{TimeoutMS: 0},
+		}
+		cfg.applyDefaults() // CompletedState defaults to "review"
+		ws, err := NewWorkspaces(wsDir)
+		if err != nil {
+			t.Fatalf("NewWorkspaces: %v", err)
+		}
+		var buf bytes.Buffer
+		c, err := New(Options{
+			Config:     cfg,
+			Tracker:    ft,
+			Runner:     &StubRunner{},
+			Workspaces: ws,
+			Logger:     iterlog.New(iterlog.LevelInfo, &buf),
+			HostMarker: "test",
+			StoreDir:   storeDir,
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+
+		runID := "run-empty-check"
+		runDir := filepath.Join(storeDir, "runs", runID)
+		if err := os.MkdirAll(runDir, 0o755); err != nil {
+			t.Fatalf("mkdir run dir: %v", err)
+		}
+		payload := map[string]any{"id": runID, "work_dir": filepath.Join(storeDir, "worktrees", runID)}
+		if finalCommit != "" {
+			payload["final_commit"] = finalCommit
+		}
+		runJSON, _ := json.Marshal(payload)
+		if err := os.WriteFile(filepath.Join(runDir, "run.json"), runJSON, 0o644); err != nil {
+			t.Fatalf("write run.json: %v", err)
+		}
+
+		issueID := "fake:empty-1"
+		ft.add(tracker.Issue{
+			ID: issueID, Identifier: "fake#empty-1",
+			Title: "go", WorkflowState: "in_progress",
+		})
+		c.state.running[issueID] = &runningEntry{
+			IssueID:       issueID,
+			Identifier:    "fake#empty-1",
+			RunID:         runID,
+			WorkflowState: "in_progress",
+			WorkspacePath: filepath.Join(wsDir, "fake_empty-1"),
+			StartedAt:     time.Now(),
+		}
+
+		c.finishRun(context.Background(), issueID, nil)
+
+		states, _ := ft.RefreshStates(context.Background(), []string{issueID})
+		return buf.String(), states[issueID]
+	}
+
+	t.Run("zero commit warns", func(t *testing.T) {
+		logs, state := run(t, "")
+		if !strings.Contains(logs, "produced NO commit") {
+			t.Fatalf("expected zero-commit WARN, got logs:\n%s", logs)
+		}
+		// Non-breaking: the issue still advances to CompletedState.
+		if state != "review" {
+			t.Fatalf("issue state = %q, want %q (transition must still happen)", state, "review")
+		}
+	})
+
+	t.Run("with commit stays quiet", func(t *testing.T) {
+		logs, state := run(t, "deadbeefcafe")
+		if strings.Contains(logs, "produced NO commit") {
+			t.Fatalf("did not expect zero-commit WARN for a committed run, got logs:\n%s", logs)
+		}
+		if !strings.Contains(logs, "finished cleanly") {
+			t.Fatalf("expected quiet INFO 'finished cleanly', got logs:\n%s", logs)
+		}
+		if state != "review" {
+			t.Fatalf("issue state = %q, want %q", state, "review")
+		}
+	})
+}
