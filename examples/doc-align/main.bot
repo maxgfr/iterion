@@ -69,7 +69,13 @@ vars:
   ## .claude, vendor, node_modules, .git, dist, build, out) are
   ## excluded unconditionally inside the scanner; the bot's own
   ## bundle is excluded when `bundle_self_path` is set.
-  doc_globs: string = "README.md,CLAUDE.md,docs/**/*.md,**/CLAUDE.md,examples/*/skills/*.md"
+  ## UNIVERSAL DEFAULT: doc-align documents ANY repo, so the default
+  ## footprint is the conventions common to most projects (root +
+  ## nested READMEs, a docs/ tree, CLAUDE.md). Repo-specific doc
+  ## locations (e.g. iterion's `examples/*/skills/*.md` bundle docs)
+  ## are added per-repo via --var, never baked into the catalog
+  ## default. See "Catalog bots are repo-agnostic" in CLAUDE.md.
+  doc_globs: string = "README.md,docs/**/*.md,**/README.md,CLAUDE.md,**/CLAUDE.md"
 
   ## Go code comment scope (comma-separated globs). Empty (default)
   ## means: do NOT audit Go function/package comments — speeds up
@@ -77,7 +83,12 @@ vars:
   go_comment_globs: string = ""
 
   ## Code scope reviewers may grep / read to verify doc claims.
-  code_scope_globs: string = "pkg/**/*.go,cmd/**/*.go,internal/**/*.go"
+  ## UNIVERSAL DEFAULT: empty = reviewers may grep the whole
+  ## workspace (minus `excluded_dirs`). A language/layout-specific
+  ## scope (e.g. iterion's `pkg/**/*.go,cmd/**/*.go`) is a per-repo
+  ## --var override, never the catalog default — doc-align must run
+  ## on Python / Rust / TS / Go repos identically out of the box.
+  code_scope_globs: string = ""
 
   ## Optional free-text notes pinning the reviewers' attention.
   scope_notes: string = ""
@@ -119,16 +130,25 @@ vars:
   excluded_dirs: string = ".iterion,.works,.claude,vendor,node_modules,.git,dist,build,out"
 
   ## Code-surface scan scope (v0.6.0). Globs for the
-  ## `scan_code_surface` tool which greps cmd/iterion/*.go and
-  ## pkg/dsl/ir/*.go (and similar locations) for "publicly-exposed
-  ## identifiers" the docs ought to mention: CLI commands, CLI
-  ## flags, diagnostic codes. Reviewers receive the surface as a
-  ## counter-omission audit list — for each identifier in the
-  ## surface, they verify it appears in at least one doc in scope.
-  ## Empty string disables the surface scan (legacy doc→code-only
-  ## audit).
-  cli_surface_globs: string = "cmd/iterion/*.go,cmd/iterion/*/*.go"
-  diagnostic_surface_globs: string = "pkg/dsl/ir/*.go,pkg/dsl/parser/*.go"
+  ## `scan_code_surface` tool — a counter-omission audit that greps
+  ## the code for "publicly-exposed identifiers" docs ought to
+  ## mention (CLI commands, flags, diagnostic codes) and checks each
+  ## appears in at least one doc.
+  ##
+  ## OPT-IN / NON-UNIVERSAL: the scanner's extraction patterns are
+  ## currently specialised for a Cobra-CLI + custom-diagnostic-code
+  ## repo (it greps cobra `Use:` literals and `Cxxx`-style codes —
+  ## see scan_code_surface below). That heuristic only produces
+  ## meaningful output on repos shaped like that (e.g. iterion). So
+  ## the catalog DEFAULT is empty = surface scan DISABLED, and
+  ## doc-align does a universal doc↔code drift audit. A CLI/DSL repo
+  ## opts in per-run, e.g.
+  ##   --var cli_surface_globs="cmd/myapp/*.go" \
+  ##   --var diagnostic_surface_globs="internal/diag/*.go"
+  ## Generalising the scanner's patterns to other stacks is tracked
+  ## as a follow-up; until then, leave empty for non-Cobra repos.
+  cli_surface_globs: string = ""
+  diagnostic_surface_globs: string = ""
 
   ## v0.15.0: cap on the reviewer's per-iteration working set —
   ## build_manifest sorts candidates by severity (drifted CLI
@@ -189,7 +209,12 @@ vars:
   ## Empty string disables both reads and writes — useful for
   ## the first run on a workspace or when you want a guaranteed
   ## fresh audit.
-  audit_cache_path: string = ".iterion/doc-align/audit-cache.json"
+  ##
+  ## UNIVERSAL DEFAULT: a repo-root dotfile, NOT iterion's `.iterion/`
+  ## store dir — doc-align running on someone else's repo must not
+  ## scatter `.iterion/` paths into their tree. Add the cache file to
+  ## the target repo's .gitignore (or leave empty to disable).
+  audit_cache_path: string = ".doc-align-cache.json"
 
 
 ## ─── Prompts ────────────────────────────────────────────────────

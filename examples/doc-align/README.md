@@ -280,15 +280,27 @@ feedback on repeated over-reach):
 
 ## What it audits
 
-By default the doc footprint covers:
+doc-align is **repo-agnostic** — it aligns the docs of *any* code
+repository (Go, Python, Rust, TS, …) with that repo's code. Nothing
+about iterion's own layout is baked into the catalog defaults; see
+"Catalog bots are repo-agnostic" in the project CLAUDE.md.
 
-- `README.md` at repo root
+By default the doc footprint covers conventions common to most
+projects:
+
+- `README.md` at repo root and any nested `README.md`
 - `docs/**/*.md`
 - `CLAUDE.md` (any level)
-- `examples/*/skills/*.md`
-- Go function- and package-level docstrings (when
-  `--var go_comment_globs="..."` is set; empty by default for
-  faster first runs)
+- Source-comment docstrings (when `--var go_comment_globs="..."` /
+  the language-appropriate glob is set; empty by default for faster
+  first runs)
+
+Repo-specific doc locations are added per-run via `--var doc_globs`
+(e.g. iterion self-hosts with `examples/*/skills/*.md` appended for
+its bundle docs). The optional code-surface counter-omission scan
+(CLI commands / diagnostic codes) is **off by default** and only
+meaningful on Cobra-CLI-shaped repos — opt in with
+`--var cli_surface_globs=… --var diagnostic_surface_globs=…`.
 
 ## Inviolable rules
 

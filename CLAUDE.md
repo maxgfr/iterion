@@ -438,6 +438,54 @@ that resist metric-gaming. Skipping it has a real cost — the
 goai → claw-code-go migration ran for 3 hours and produced a
 96%-parity-reported façade because these lessons weren't yet codified.
 
+## Catalog bots are repo-agnostic
+
+Every bot shipped in `examples/` (the catalog `iterion bots list`
+discovers — doc-align, feature_dev, whole_improve_loop,
+branch_improve_loop, secured-renovacy, whats-next, sec-audit-*, …) is
+a **general-purpose tool that must run on ANY target repository**, in
+any language, with no knowledge of iterion's own layout baked in.
+doc-align aligns *a* repo's docs with *its* code; feature_dev ships
+*a* feature in *whatever* repo it's pointed at. iterion is just one
+possible target, never the assumed one.
+
+**The rule:** a catalog bot's `vars:` defaults, prompts, and scanners
+must not hardcode iterion-specific *target-repo* facts. Concretely,
+the following are violations when they appear as **defaults**:
+
+- Code/doc globs pinned to iterion's tree — `cmd/iterion/*.go`,
+  `pkg/dsl/ir/*.go`, `pkg/**/*.go`, `examples/*/skills/*.md`. Default
+  to language/layout-agnostic globs (or empty = "scan the workspace");
+  a specific layout is a per-run `--var` override.
+- Output/cache paths under iterion's store — `.iterion/...`,
+  `~/.iterion/...` written **into the target repo**. Use a neutral
+  repo-root dotfile (e.g. `.doc-align-cache.json`) the operator can
+  gitignore; never scatter `.iterion/` into someone else's tree.
+- Scanners that only produce meaningful output on iterion's shape
+  (e.g. gre`p`ing for cobra `Use:` literals, `Cxxx` diagnostic codes,
+  or the literal `iterion <subcmd>`). Gate these **off by default**
+  (empty scope glob) and document them as an opt-in specialization;
+  generalising their patterns to other stacks is the bar for making
+  them a default.
+- Prose framing the bot AS an iterion tool ("doc-align's primary
+  target is iterion's own documentation"). The bot's target is
+  whatever repo it's run against; iterion is at most the *reference
+  self-host case*.
+
+**Not violations** (these are the *runtime*, not the target repo):
+references to iterion the engine running the bot — `mcp__iterion_board__*`
+capability tools, "iterion's expr / template substitution", `iterion
+report` for surfacing output, `.iter`/`.bot` DSL syntax. The bot is
+*written for* iterion; it must not be *scoped to* iterion.
+
+**Enforcement:** `examples/catalog_universality_test.go` greps every
+catalog bot's var-default block for the violation patterns above and
+fails CI on a regression. When a default legitimately needs an
+iterion path (rare), add it to the test's allowlist with a comment
+explaining why it's universal-safe. When you touch a catalog bot,
+re-read this section — the iterion repo is the easiest target to
+accidentally overfit to, because it's the one you're staring at.
+
 ## CLI Commands
 
 ```
