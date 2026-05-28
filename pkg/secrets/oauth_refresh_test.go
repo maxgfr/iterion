@@ -326,6 +326,23 @@ func TestApplyAnthropicRefresh_RejectsMalformed(t *testing.T) {
 	}
 }
 
+// TestApplyRefresh_NullPayloadDoesNotPanic pins the hardening for a
+// `null` (or empty) credentials blob: json.Unmarshal leaves the target
+// map nil without an error, so the subsequent map writes would panic
+// ("assignment to entry in nil map"). Both Apply* funcs must instead
+// surface a graceful error.
+func TestApplyRefresh_NullPayloadDoesNotPanic(t *testing.T) {
+	res := RefreshResult{AccessToken: "sk-ant-validacctok1234567890abc"}
+	for _, payload := range [][]byte{[]byte("null"), {}, []byte("  null  ")} {
+		if _, err := ApplyAnthropicRefresh(payload, res); err == nil {
+			t.Errorf("ApplyAnthropicRefresh(%q): expected error, got nil", payload)
+		}
+		if _, err := ApplyCodexRefresh(payload, res); err == nil {
+			t.Errorf("ApplyCodexRefresh(%q): expected error, got nil", payload)
+		}
+	}
+}
+
 func TestApplyCodexRefresh_PreservesOuterAndStampsTime(t *testing.T) {
 	original := []byte(`{"meta":"keep","tokens":{"access_token":"old","other":"untouched"}}`)
 	res := RefreshResult{
@@ -378,5 +395,69 @@ func TestValidateAccessToken(t *testing.T) {
 				t.Errorf("got err=%v, wantErr=%v", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// -----------------------------------------------------------------
+// doWithRetry resource handling
+// -----------------------------------------------------------------
+
+// trackingBody records whether Close was called so tests can assert
+// doWithRetry releases the body of every response it abandons.
+type trackingBody struct {
+	*strings.Reader
+	closed *int32
+}
+
+func (b trackingBody) Close() error {
+	atomic.StoreInt32(b.closed, 1)
+	return nil
+}
+
+func cannedResp(status int, body string, closedFlag *int32) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Body:       trackingBody{Reader: strings.NewReader(body), closed: closedFlag},
+		Header:     make(http.Header),
+	}
+}
+
+// sequencedTransport hands back queued responses in order, one per
+// RoundTrip. doWithRetry calls hc.Do sequentially, so no locking needed.
+type sequencedTransport struct {
+	responses []*http.Response
+	idx       int
+}
+
+func (t *sequencedTransport) RoundTrip(_ *http.Request) (*http.Response, error) {
+	if t.idx >= len(t.responses) {
+		return nil, fmt.Errorf("sequencedTransport: unexpected call %d", t.idx)
+	}
+	resp := t.responses[t.idx]
+	t.idx++
+	return resp, nil
+}
+
+// TestDoWithRetry_ClosesAbandoned5xxBodyOnRetrySuccess pins the fix for
+// the connection/fd leak where a 5xx attempt's response body was never
+// closed once a subsequent retry succeeded. Without the fix the first
+// (502) body stays open, pinning its TCP connection until GC.
+func TestDoWithRetry_ClosesAbandoned5xxBodyOnRetrySuccess(t *testing.T) {
+	freshRetrySchedule(t)
+	var firstClosed, secondClosed int32
+	okBody := `{"access_token":"sk-ant-validacctok1234567890abc","expires_in":3600}`
+	hc := &http.Client{Transport: &sequencedTransport{responses: []*http.Response{
+		cannedResp(http.StatusBadGateway, `{"error":"upstream"}`, &firstClosed),
+		cannedResp(http.StatusOK, okBody, &secondClosed),
+	}}}
+
+	if _, err := RefreshAnthropic(context.Background(), hc, "cid", "rf"); err != nil {
+		t.Fatalf("RefreshAnthropic: %v", err)
+	}
+	if atomic.LoadInt32(&firstClosed) != 1 {
+		t.Error("abandoned 5xx response body was not closed (connection/fd leak)")
+	}
+	if atomic.LoadInt32(&secondClosed) != 1 {
+		t.Error("successful response body was not closed")
 	}
 }

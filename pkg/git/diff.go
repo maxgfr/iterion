@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"os"
-	"path/filepath"
 )
 
 // Diff returns the HEAD content (Before) and current working-tree content
@@ -47,8 +46,7 @@ func Diff(dir, relPath string) (DiffPayload, error) {
 	// Worktree-side content via direct file read. We don't pipe through
 	// git here because `git show :path` would mirror the index, not the
 	// dirty working copy that the user actually sees on disk.
-	abs := filepath.Join(dir, filepath.FromSlash(relPath))
-	wtOut, wtErr := os.ReadFile(abs)
+	wtOut, wtErr := readWorktreeFile(dir, relPath)
 	switch {
 	case wtErr == nil:
 		s := string(wtOut)

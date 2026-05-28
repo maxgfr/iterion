@@ -249,3 +249,36 @@ func TestCountUntrackedLines_BinaryNUL(t *testing.T) {
 		t.Errorf("binary file should report -1, got %d", added)
 	}
 }
+
+func TestCountUntrackedLines_DoesNotFollowSymlink(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "link.txt")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	added, binary := CountUntrackedLines(dir, "link.txt")
+	if binary {
+		t.Fatalf("symlink target text should not be binary")
+	}
+	if added != 0 {
+		t.Fatalf("symlink line count should use link text, not target contents: got %d", added)
+	}
+}
+
+func TestCountUntrackedLines_SkipsSymlinkedParent(t *testing.T) {
+	dir := t.TempDir()
+	outsideDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outsideDir, "outside.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideDir, filepath.Join(dir, "linked-dir")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	added, binary := CountUntrackedLines(dir, "linked-dir/outside.txt")
+	if binary || added != 0 {
+		t.Fatalf("symlinked parent should degrade as missing, got added=%d binary=%v", added, binary)
+	}
+}

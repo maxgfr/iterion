@@ -34,11 +34,16 @@ func Log(repo, base, head string) ([]CommitInfo, error) {
 	if base != "" {
 		rangeArg = base + ".." + head
 	}
-	// TABs separate fields (none of which can contain TAB); --pretty
-	// emits one record per line with a trailing NUL so we can split
-	// reliably on \n without the subject swallowing newlines.
-	format := "%H%x09%h%x09%s%x09%an%x09%ae%x09%aI"
-	out, err := run(repo, "log", "--reverse", "--pretty=format:"+format, rangeArg)
+	// Use NUL separators between both fields and records. Commit subjects,
+	// author names, and emails are user-controlled and may contain tabs; a
+	// field delimiter that can also appear in the data makes one malformed
+	// commit break the entire Commits tab. Git commit messages cannot contain
+	// NUL, so this gives parseLog an unambiguous six-field record shape.
+	// `-z` suppresses git log's default newline between records and replaces
+	// it with NUL; because %aI is the last field, that record separator is
+	// also the sixth field separator for the next record.
+	format := "%H%x00%h%x00%s%x00%an%x00%ae%x00%aI"
+	out, err := run(repo, "log", "-z", "--reverse", "--pretty=format:"+format, rangeArg)
 	if err != nil {
 		return nil, err
 	}
@@ -63,33 +68,25 @@ func parseLog(raw []byte) ([]CommitInfo, error) {
 	if len(raw) == 0 {
 		return []CommitInfo{}, nil
 	}
-	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
-	out := make([]CommitInfo, 0, len(lines))
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		// SplitN with N=6 lets a TAB inside the subject (real commits
-		// occasionally carry one: copy-pasted patches, generated msgs)
-		// stay attached to the subject field instead of corrupting the
-		// next column and failing the whole repo's Commits tab. The
-		// format string emits exactly five TABs, so 6 parts is the
-		// canonical shape and a tabbed subject is the only producer of
-		// >6 fields in real-world output.
-		parts := strings.SplitN(line, "\t", 6)
-		if len(parts) != 6 {
-			return nil, fmt.Errorf("git log: malformed entry %q", line)
-		}
-		ts, tErr := time.Parse(time.RFC3339, parts[5])
+	parts := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
+	if len(parts) == 1 && parts[0] == "" {
+		return []CommitInfo{}, nil
+	}
+	if len(parts)%6 != 0 {
+		return nil, fmt.Errorf("git log: malformed NUL-delimited output (%d fields)", len(parts))
+	}
+	out := make([]CommitInfo, 0, len(parts)/6)
+	for i := 0; i < len(parts); i += 6 {
+		ts, tErr := time.Parse(time.RFC3339, parts[i+5])
 		if tErr != nil {
-			return nil, fmt.Errorf("git log: parse date %q: %w", parts[5], tErr)
+			return nil, fmt.Errorf("git log: parse date %q: %w", parts[i+5], tErr)
 		}
 		out = append(out, CommitInfo{
-			SHA:     parts[0],
-			Short:   parts[1],
-			Subject: parts[2],
-			Author:  parts[3],
-			Email:   parts[4],
+			SHA:     parts[i],
+			Short:   parts[i+1],
+			Subject: parts[i+2],
+			Author:  parts[i+3],
+			Email:   parts[i+4],
 			Date:    ts,
 		})
 	}

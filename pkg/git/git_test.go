@@ -211,3 +211,24 @@ func TestValidateRelPath(t *testing.T) {
 		}
 	}
 }
+
+func TestDiffWorktreeSymlinkReadsLinkTextNotTarget(t *testing.T) {
+	dir := gitRepo(t)
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "link.txt")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	p, err := Diff(dir, "link.txt")
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if p.After == nil {
+		t.Fatal("After is nil")
+	}
+	if *p.After != outside {
+		t.Fatalf("Diff followed symlink target: got %q want link text %q", *p.After, outside)
+	}
+}

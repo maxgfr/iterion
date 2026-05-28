@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 )
 
@@ -149,9 +148,21 @@ func parseNumStatCount(addedField, deletedField []byte, ns *NumStat) bool {
 // the panel keeps working with a zero count rather than 5xx-ing on a
 // transiently-locked or vanished file.
 func CountUntrackedLines(dir, relPath string) (added int, binary bool) {
-	abs := filepath.Join(dir, filepath.FromSlash(relPath))
-	info, err := os.Stat(abs)
+	abs, info, err := lstatWorktreePath(dir, relPath)
 	if err != nil {
+		return 0, false
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(abs)
+		if err != nil {
+			return 0, false
+		}
+		if int64(len(target)) > untrackedReadCap {
+			return -1, true
+		}
+		return bytes.Count([]byte(target), []byte{byte('\n')}), false
+	}
+	if !info.Mode().IsRegular() {
 		return 0, false
 	}
 	if info.Size() > untrackedReadCap {
@@ -162,6 +173,13 @@ func CountUntrackedLines(dir, relPath string) (added int, binary bool) {
 		return 0, false
 	}
 	defer f.Close()
+	openedInfo, err := f.Stat()
+	if err != nil || !openedInfo.Mode().IsRegular() {
+		return 0, false
+	}
+	if openedInfo.Size() > untrackedReadCap {
+		return -1, true
+	}
 
 	const sniff = 8 * 1024
 	buf := make([]byte, sniff)

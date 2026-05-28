@@ -100,6 +100,13 @@ func ApplyAnthropicRefresh(payload []byte, r RefreshResult) ([]byte, error) {
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return nil, fmt.Errorf("secrets: parse credentials.json: %w", err)
 	}
+	if raw == nil {
+		// A literal JSON `null` (or an empty payload) unmarshals into a nil
+		// map *without* an error; the `raw[...] = ...` writes below would
+		// then panic with "assignment to entry in nil map". Treat it as
+		// corrupt input and fail gracefully instead of crashing the caller.
+		return nil, fmt.Errorf("secrets: parse credentials.json: empty or null payload")
+	}
 	inner, ok := raw["claudeAiOauth"].(map[string]any)
 	if !ok {
 		inner = map[string]any{}
@@ -182,6 +189,13 @@ func ApplyCodexRefresh(payload []byte, r RefreshResult) ([]byte, error) {
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return nil, fmt.Errorf("secrets: parse auth.json: %w", err)
 	}
+	if raw == nil {
+		// A literal JSON `null` (or an empty payload) unmarshals into a nil
+		// map *without* an error; the `raw[...] = ...` writes below would
+		// then panic with "assignment to entry in nil map". Treat it as
+		// corrupt input and fail gracefully instead of crashing the caller.
+		return nil, fmt.Errorf("secrets: parse auth.json: empty or null payload")
+	}
 	tokens, ok := raw["tokens"].(map[string]any)
 	if !ok {
 		tokens = map[string]any{}
@@ -211,14 +225,25 @@ func doWithRetry(hc *http.Client, req *http.Request, opName string) (*http.Respo
 		lastResp *http.Response
 		lastErr  error
 	)
+	// closeLast drains the response we're abandoning before moving on.
+	// A 5xx attempt yields a non-nil *http.Response whose Body must be
+	// closed or its TCP connection is pinned until GC — leaking a
+	// connection/fd on every retry-after-5xx. We must close it on EVERY
+	// path that abandons it: the next retry, the early success return,
+	// the body-clone-error return, the cancellation return, and the
+	// final error return.
+	closeLast := func() {
+		if lastResp != nil {
+			lastResp.Body.Close()
+			lastResp = nil
+		}
+	}
 	for i, delay := range refreshRetrySchedule {
 		if delay > 0 {
 			select {
 			case <-time.After(delay):
 			case <-req.Context().Done():
-				if lastResp != nil {
-					lastResp.Body.Close()
-				}
+				closeLast()
 				return nil, fmt.Errorf("secrets: %s cancelled: %w", opName, req.Context().Err())
 			}
 		}
@@ -229,22 +254,32 @@ func doWithRetry(hc *http.Client, req *http.Request, opName string) (*http.Respo
 		if i > 0 && req.GetBody != nil {
 			b, err := req.GetBody()
 			if err != nil {
+				closeLast()
 				return nil, fmt.Errorf("secrets: %s body clone: %w", opName, err)
 			}
 			req.Body = b
 		}
 		resp, err := hc.Do(req)
 		if err == nil && resp.StatusCode < 500 {
+			// Success (2xx/3xx/4xx). Hand resp to the caller, but first
+			// release any earlier 5xx attempt's body.
+			closeLast()
 			return resp, nil
 		}
-		if lastResp != nil {
-			lastResp.Body.Close()
-		}
+		// This attempt failed (5xx or transport error). Drop the prior
+		// failed response, then remember this one for the next loop / the
+		// final return.
+		closeLast()
 		lastResp, lastErr = resp, err
 	}
 	if lastErr != nil {
+		// A transport error never yields a usable response (and the
+		// redirect-failure edge case, where it can, must not leak it).
+		closeLast()
 		return nil, fmt.Errorf("secrets: %s after %d attempts: %w", opName, len(refreshRetrySchedule), lastErr)
 	}
+	// Retries exhausted on persistent 5xx: hand the last response to the
+	// caller, which inspects StatusCode and closes the body via defer.
 	return lastResp, nil
 }
 

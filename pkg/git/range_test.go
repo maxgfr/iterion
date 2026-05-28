@@ -214,3 +214,34 @@ func TestFindMainRepoRoot_LinkedWorktree(t *testing.T) {
 		t.Fatalf("FindMainRepoRoot on worktree subdir: got %q, want %q", got, main)
 	}
 }
+
+func TestLogAllowsTabsInUserControlledFields(t *testing.T) {
+	dir := gitRepo(t)
+	mustRun(t, dir, "config", "user.name", "Tab	Author")
+	mustRun(t, dir, "config", "user.email", "tab	email@example.com")
+	sha := commit(t, dir, "tabbed.txt", "tabbed\n", "subject	with	tabs")
+
+	entries, err := Log(dir, "", sha)
+	if err != nil {
+		t.Fatalf("Log with tabs: %v", err)
+	}
+	var got *CommitInfo
+	for i := range entries {
+		if entries[i].SHA == sha {
+			got = &entries[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("commit %s not found in %+v", sha, entries)
+	}
+	if got.Subject != "subject	with	tabs" {
+		t.Fatalf("subject: got %q", got.Subject)
+	}
+	if got.Author != "Tab	Author" {
+		t.Fatalf("author: got %q", got.Author)
+	}
+	if got.Email != "tab	email@example.com" {
+		t.Fatalf("email: got %q", got.Email)
+	}
+}
