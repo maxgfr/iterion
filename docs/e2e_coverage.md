@@ -22,27 +22,21 @@ events.
 | `TestLive_Lite_ClawMCP` | MCP stdio server discovery + tool calls | claw |
 | `TestLive_Lite_ClawLongContext` | 68k-token prompt, no truncation, marker echo | claw + anthropic |
 
-## Claw-code-go integration tests (`go test`, no build tag)
+## Current checked-in adapter/integration tests (`go test`, no build tag)
 
-Each new feature ships with a unit/integration test in
-`/workspaces/iterion/.works/claw-code-go/internal/<pkg>/*_test.go` that
-uses `httptest` for any external service interaction.
+This matrix lists test paths that exist in this workspace. Some claw-code-go
+features are covered through iterion adapter tests around the vendored API;
+features whose old claw-only tests are not present here are listed as
+historical gaps below instead of pointing at non-existent files.
 
 | Feature | Test location | What it asserts |
 |---|---|---|
-| Computer use (`read_image`) | `internal/tools/computer_use_test.go` | base64-from-file, file size cap, https-only URL, **HTTPS→HTTP redirect rejected**, mutual exclusion |
-| Computer use (`screenshot` stub) | same | returns `*api.APIError{StatusCode:501}` |
-| Session timeline | `internal/commands/session_timeline_test.go` | chronological order, message truncation, lineage tree, no-fork single node |
-| OTLP exporter | `internal/apikit/telemetry/otlp/exporter_test.go` | size flush, interval flush, 5xx retry, 4xx drop, Stop drains |
-| OAuth broker (PKCE) | `internal/mcp/oauth/pkce_test.go` | RFC 7636 verifier/challenge, S256 method, state uniqueness |
-| OAuth broker (auth code) | `internal/mcp/oauth/broker_test.go` | happy path, state mismatch CSRF defense, refresh on expiry, revoke clears local on remote 4xx |
-| Plugin marketplace | `internal/plugins/marketplace_test.go` | catalog fetch, sorted output, case-insensitive search, get-by-name, HTTP error propagation |
-| Plugin installer | `internal/plugins/installer_test.go` | download + checksum + extract, **cumulative size cap**, path traversal rejected, idempotent uninstall |
-| Plugin manager | `internal/plugins/manager_test.go` | install records state, idempotent install, uninstall drops state, search delegates, **concurrent install serializes** |
-| `/store` slash command | `internal/commands/plugin_marketplace_test.go` | install/uninstall/search/list dispatch, no-provider graceful path |
-| CLAUDE.md auto-load | `internal/commands/claudemd_loader_test.go` | ancestor walk, slash-block parsing, leaf-wins on conflict, dynamic registration |
-| ctx propagation | `internal/runtime/conversation_lifecycle_test.go::TestExecuteTool_PropagatesCtxCancellation` | hook handler observes `context.Canceled` from upstream |
-| SSE dynamic auth | `internal/mcp/sse_test.go` | static header, dynamic authFunc takes priority, authFunc error aborts request |
+| Computer use (`read_image`) | `pkg/backend/tool/claw_builtins_test.go` (`TestRegisterClawComputerUse_ReadImageRoundTrip`, `TestRegisterClawComputerUse_ReadImagePropagatesError`, `TestRegisterClawComputerUse_ReadImageRejectsHTTPRedirect`) plus `e2e/live_test.go` (`TestLive_Lite_ClawReadImage`) | base64-from-file, missing-input error propagation, **HTTPS→HTTP redirect rejected**, live workflow tool use |
+| Computer use (`screenshot` / `computer_use`) | `pkg/backend/tool/claw_builtins_test.go` (`TestRegisterClawComputerUse_ScreenshotPropagatesUnavailable`, `TestRegisterClawComputerUse_ComputerUsePropagatesUnavailable`) | headless unavailable errors propagate for screenshot and action dispatch |
+| Session timeline / run inspection | `pkg/cli/cli_test.go` (`TestInspect_WithEvents`, `TestInspect_RunningNodeSectionsIncludeLiveEvents`, node-section inspect tests) | stored events are listed, per-node traces/tools/events preserve recent live events and node metadata |
+| OTLP exporter | `pkg/benchmark/otlp_test.go`; `pkg/cloud/tracing/tracing_test.go` | missing endpoint handling, non-blocking event observer, nil Stop, OTLP env endpoint setup and shutdown |
+| OAuth broker / PKCE wiring | `pkg/backend/mcp/oauth_test.go`; `pkg/auth/oidc/connector.go` (`GenerateStateAndPKCE`) | broker construction/storage paths, auth closure validation, endpoint security, PKCE state/verifier/challenge generation used by OIDC flows |
+| MCP SSE transport/auth wiring | `pkg/dsl/parser/parser_mcp_test.go` (`TestMCPServer_SSETransport`), `pkg/dsl/ir/compile_test.go` (`TestValidateMCPAuth_Unsupported`), `pkg/backend/mcp/oauth_test.go` | SSE transport parses, oauth2 auth blocks validate, auth functions are attached for MCP clients |
 
 ## Coverage gaps (deliberate)
 
@@ -52,23 +46,21 @@ coverage beyond what's already in place.
 
 | Feature | Why no iterion live test |
 |---|---|
-| OAuth broker | Requires a real OAuth provider; httptest in claw covers the protocol. iterion doesn't currently consume the broker (no MCP servers with OAuth in fixtures). |
-| Plugin marketplace | Requires a real catalog/tarball server; httptest covers it. iterion doesn't ship a marketplace integration. |
-| OTLP exporter | Requires a real collector for an end-to-end live test. iterion server/runner wire OTLP/HTTP through `pkg/cloud/tracing` when `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set; `pkg/cloud/tracing` tests cover exporter setup, and claw-code-go httptest coverage exercises its exporter behavior. |
-| CLAUDE.md auto-load | Runs at the claw TUI boot, not in a workflow context. iterion uses its own command registry. |
+| OAuth broker | Requires a real OAuth provider; iterion covers broker construction, auth-function validation, and MCP auth wiring, but does not run a live third-party OAuth flow in e2e fixtures. |
+| Plugin marketplace / installer / manager and `/store` command | Historical claw-code-go coverage is not present in this workspace, and iterion does not ship a marketplace integration or plugin installer surface to exercise in live workflows. |
+| OTLP exporter | Requires a real collector for an end-to-end live test. iterion server/runner wire OTLP/HTTP through `pkg/cloud/tracing` when `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set; checked-in tests cover exporter setup and the benchmark OTLP observer path. |
+| CLAUDE.md auto-load | Historical claw TUI command-loader coverage is not present in this workspace. The behavior runs at claw TUI boot, not in an iterion workflow context; iterion uses its own command registry. |
 | Bedrock / Vertex / Foundry providers | Requires real cloud creds (AWS/GCP/Azure). Code paths are unit-tested with mocked SDK clients. |
-| Lifecycle hooks (PreToolUse/Post/Stop) | iterion doesn't currently install a `lifehooks.Runner` on its claw client. Adding one is a separate feature. |
+| Lifecycle hooks / ctx propagation into claw hook handlers | Historical claw runtime lifecycle coverage is not present in this workspace. iterion does not currently install a `lifehooks.Runner` on its claw client; adding one is a separate feature. |
 | Permission modes `auto` / `dontAsk` | iterion runs in workflow mode (no interactive prompts). Modes are unit-tested at the claw level. |
 
 ## How to run
 
 ```bash
-# All claw unit + integration tests (fast):
-cd /workspaces/iterion/.works/claw-code-go
-devbox run --config=/workspaces/iterion -- go -C $(pwd) test -race -short ./...
+# Checked-in iterion unit + integration tests (fast):
+devbox run -- go test -race -short ./...
 
 # All iterion live workflow tests (slow, costs API quota):
-cd /workspaces/iterion
 devbox run -- task test:live
 
 # A single live target:
