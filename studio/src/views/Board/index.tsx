@@ -51,6 +51,14 @@ export default function BoardView() {
   // one. Bounded at 10 entries — the board's drag-undo intent is the
   // immediate "oops, wrong column", not full session replay.
   const transitionHistoryRef = useRef<Array<{ id: string; from: string }>>([]);
+  // Signature of the last-seen active (running + retrying) issue set.
+  // The 2s dispatcher poll only refreshes the running/retry overlay; an
+  // issue's column is driven by its `state`, which the dispatcher
+  // mutates server-side on dispatch (ready→in_progress) and completion
+  // (→review/done). When this signature changes we re-fetch issues so a
+  // dispatched card actually moves columns instead of stranding in
+  // `ready` with a running badge until a manual refresh.
+  const prevActiveSigRef = useRef<string>("");
   // Multi-selection state. `selectedIds` is the full set; `anchorId`
   // is the pivot for shift-range extension and the focal point for
   // keyboard navigation. A plain click collapses both to {id}; ctrl/
@@ -109,6 +117,26 @@ export default function BoardView() {
         for (const r of snap.retries ?? []) xmap.set(r.issue_id, r);
         setRunningByIssue(rmap);
         setRetryingByIssue(xmap);
+        // When the active (running + retrying) set changes — a dispatch
+        // started or a run finished — the affected issue's server-side
+        // `state` has moved (ready→in_progress, →review/done), but the
+        // poll above only refreshed the overlay. Re-fetch issues so the
+        // card actually changes columns. Gated on a set *change* so we
+        // don't re-fetch every 2s or fight an in-flight optimistic drag;
+        // prevActiveSigRef advances only after a successful fetch so a
+        // transient failure retries on the next tick.
+        const activeSig = [...rmap.keys(), ...xmap.keys()].sort().join(",");
+        if (activeSig !== prevActiveSigRef.current) {
+          void listIssues()
+            .then((fresh) => {
+              if (!alive) return;
+              setIssues(fresh ?? []);
+              prevActiveSigRef.current = activeSig;
+            })
+            .catch(() => {
+              /* leave prevActiveSigRef stale → retry next tick */
+            });
+        }
         // Guard the tracker error update on value equality so a stable
         // poll doesn't churn an identical object reference each tick
         // and re-render the whole board.
