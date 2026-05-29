@@ -897,16 +897,6 @@ export function mergeActionReady(
   return terminal && Boolean(run.final_branch);
 }
 
-// smartDefaultFilesMode is the FilesPanel's scope default for a given
-// lifecycle phase: the committed branch diff once the merge action is
-// ready, the combined (committed + uncommitted) view while work is still
-// in flight. Callers OR this with an explicit user selection.
-export function smartDefaultFilesMode(
-  mergeReady: boolean,
-): "branch" | "combined" {
-  return mergeReady ? "branch" : "combined";
-}
-
 // ---------------------------------------------------------------------------
 // Commits panel — git log between BaseCommit and FinalCommit/HEAD.
 // ---------------------------------------------------------------------------

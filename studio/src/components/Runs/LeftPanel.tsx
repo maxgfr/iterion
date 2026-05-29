@@ -13,7 +13,6 @@ import {
   writeBooleanFlag,
   writeStringFlag,
 } from "@/lib/localStorageFlag";
-import { mergeActionReady } from "@/api/runs";
 import type { RunFile, RunFilesMode, RunHeader } from "@/api/runs";
 
 import FilesPanel from "./FilesPanel";
@@ -179,7 +178,6 @@ export default function LeftPanel({
         <FilesPanel
           runId={runId}
           onSelectFile={onSelectFile}
-          mergeReady={mergeActionReady(run)}
         />
       </div>
       <div

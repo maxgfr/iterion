@@ -15,13 +15,13 @@ import {
   type TreeNode,
 } from "@/lib/fileTree";
 import { basename } from "@/lib/format";
-import { smartDefaultFilesMode } from "@/api/runs";
 import type { RunFile, RunFileStatus, RunFilesMode } from "@/api/runs";
 
 // View scope for the files tree. "combined" is the union of branch +
-// uncommitted (each file tagged with a lifecycle); it's the default while
-// the run is in progress. Once the merge action is available the default
-// flips to "branch" (the committed diff that would actually merge).
+// uncommitted (each file tagged with a lifecycle), surfaced to the operator
+// as "All changes"; it is the default for every run. (When the worktree has
+// been cleaned up it can't be computed, so the panel falls back to "branch"
+// — see the worktree_gone effect below.)
 type ViewMode = "uncommitted" | "branch" | "combined";
 
 // Above this many changed files we DEFAULT-COLLAPSE every folder on first
@@ -33,8 +33,9 @@ type ViewMode = "uncommitted" | "branch" | "combined";
 // when the count looks like a stray build/cache dir.
 const LARGE_CHANGESET = 2000;
 
-// Shown on the Combined + Uncommitted pills once the worktree is gone: both
-// need a worktree to read pending changes, so only Branch stays reachable.
+// Shown on the All changes + Uncommitted pills once the worktree is gone:
+// both need a worktree to read pending changes, so only Branch stays
+// reachable.
 const WORKTREE_GONE_TIP =
   "Worktree no longer available — only the branch view is reachable.";
 
@@ -44,11 +45,6 @@ interface FilesPanelProps {
   // the right range from the backend (uncommitted vs branch). In combined
   // mode the row forwards the per-file scope derived from its lifecycle.
   onSelectFile: (file: RunFile, mode: RunFilesMode) => void;
-  // mergeReady drives the smart default: false (run in progress) → combined,
-  // true (terminal + has storage branch, i.e. the Squash & merge button is
-  // shown) → branch. Reactive: a transition flips the default automatically
-  // unless the operator has made an explicit selection.
-  mergeReady: boolean;
 }
 
 // FilesPanel renders the modified-files tree — wrapped by LeftPanel
@@ -61,20 +57,19 @@ interface FilesPanelProps {
 export default function FilesPanel({
   runId,
   onSelectFile,
-  mergeReady,
 }: FilesPanelProps) {
   // userMode is the operator's explicit segmented-control selection; null
-  // means "follow the lifecycle smart default". Keeping the override here
-  // (rather than persisting it globally to localStorage as we used to) is
-  // what lets the default track the run's phase: a finishing run flips
-  // combined → branch on its own, while a manual pick stays put.
+  // means "follow the default" — which is always "combined" (All changes),
+  // the superset view. Keeping the override here (rather than persisting it
+  // globally to localStorage as we used to) lets each run open on All changes
+  // while a manual pick stays put for the rest of the session.
   const [userMode, setUserMode] = useState<ViewMode | null>(null);
   // Reset the override when the run changes so each run opens at its own
   // phase-appropriate default rather than inheriting the previous run's pick.
   useEffect(() => {
     setUserMode(null);
   }, [runId]);
-  const mode: ViewMode = userMode ?? smartDefaultFilesMode(mergeReady);
+  const mode: ViewMode = userMode ?? "combined";
 
   const { data, loading, error, refresh } = useRunFiles(runId, mode);
 
@@ -300,10 +295,10 @@ interface ModeSegmentedProps {
 }
 
 // ModeSegmented is the three-pill segmented control above the tree.
-// "Combined" is the union (committed + uncommitted) and the default while a
-// run is in progress; "Uncommitted" maps to git status; "Branch" to
-// BaseCommit..HEAD. The count badge tracks the currently-visible mode so the
-// active pill stays consistent with the tree below.
+// "All changes" is the union (committed + uncommitted) and the default for
+// every run; "Uncommitted" maps to git status; "Branch" to BaseCommit..HEAD.
+// The count badge tracks the currently-visible mode so the active pill stays
+// consistent with the tree below.
 function ModeSegmented({
   mode,
   onChange,
@@ -316,7 +311,7 @@ function ModeSegmented({
         active={mode === "combined"}
         disabled={worktreeGone}
         onClick={() => onChange("combined")}
-        label="Combined"
+        label="All changes"
         tooltip={
           worktreeGone
             ? WORKTREE_GONE_TIP
@@ -362,20 +357,30 @@ function SegmentButton({
   tooltip: string;
   count?: number;
 }) {
+  // Active gets a solid accent fill (the app's primary affordance, as on
+  // Button/IconButton) so the selected segment is unmistakable; inactive
+  // hover is only a subtle surface tint. These must stay visually distinct
+  // — an earlier version used bg-surface-2 for BOTH active and inactive
+  // hover, which made the selected tab indistinguishable on hover.
   const cls = active
-    ? "bg-surface-2 text-fg-default"
-    : "bg-transparent text-fg-muted hover:bg-surface-2";
+    ? "bg-accent text-fg-onAccent font-medium"
+    : "bg-transparent text-fg-muted hover:bg-surface-2 hover:text-fg-default";
   return (
     <Tooltip content={tooltip}>
       <button
         type="button"
         onClick={onClick}
         disabled={disabled}
+        aria-pressed={active}
         className={`px-2 py-0.5 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none ${cls}`}
       >
         <span>{label}</span>
         {typeof count === "number" && (
-          <span className="ml-1 inline-flex items-center justify-center rounded-md bg-surface-3 px-1 text-[9px] font-medium text-fg-muted">
+          <span
+            className={`ml-1 inline-flex items-center justify-center rounded-md px-1 text-[9px] font-medium ${
+              active ? "bg-black/20 text-fg-onAccent" : "bg-surface-3 text-fg-muted"
+            }`}
+          >
             {count}
           </span>
         )}

@@ -1,16 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  mergeActionReady,
-  smartDefaultFilesMode,
-  type RunStatus,
-} from "./runs";
+import { mergeActionReady, type RunStatus } from "./runs";
 
-// These two pure helpers encode the FilesPanel's reactive scope default:
-// "combined" while a run is in flight, flipping to "branch" exactly when the
-// Squash & merge action becomes available (terminal state + storage branch).
-// Locking them here keeps the lifecycle contract honest without mounting the
-// panel (which needs a query client + Monaco).
+// mergeActionReady gates the "Squash & merge" action (terminal state +
+// storage branch). The FilesPanel always defaults to the "combined" (All
+// changes) view, so there is no longer a lifecycle-reactive scope default to
+// lock down here. Locking this helper keeps the merge-gate contract honest
+// without mounting the panel (which needs a query client + Monaco).
 
 describe("mergeActionReady", () => {
   it("is false while the run is still in progress or non-mergeable", () => {
@@ -50,12 +46,5 @@ describe("mergeActionReady", () => {
   it("is false for a missing run", () => {
     expect(mergeActionReady(null)).toBe(false);
     expect(mergeActionReady(undefined)).toBe(false);
-  });
-});
-
-describe("smartDefaultFilesMode", () => {
-  it("defaults to combined in flight, branch once merge-ready", () => {
-    expect(smartDefaultFilesMode(false)).toBe("combined");
-    expect(smartDefaultFilesMode(true)).toBe("branch");
   });
 });
