@@ -70,7 +70,9 @@ workflow my_workflow:
 agent w:
   backend: "claw"               # or "claude_code"; avoid "codex" (C030)
   model:   "openai/gpt-5.5"     # claw with openai/* prefix
-  reasoning_effort: high        # low | medium | high | xhigh | max
+  reasoning_effort: high        # low | medium | high | xhigh | max | ultracode
+                                # ultracode = xhigh + multi-agent orchestration prerogative;
+                                # reliable only on claude-opus-4-8 (else warns C089, runs as xhigh)
   input:   request_schema
   output:  result_schema
   system:  w_system

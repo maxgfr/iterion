@@ -47,6 +47,7 @@ var modelPriceTable = map[string]modelPricing{
 	// Anthropic — opus / sonnet / haiku families share rates within a
 	// family, so newer point releases inherit the same numbers until
 	// Anthropic publishes a new price.
+	"claude-opus-4-8":           {15.00, 75.00},
 	"claude-opus-4-7":           {15.00, 75.00},
 	"claude-opus-4-6":           {15.00, 75.00},
 	"claude-opus-4-5":           {15.00, 75.00},

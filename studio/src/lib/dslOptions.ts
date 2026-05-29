@@ -68,10 +68,12 @@ export const REASONING_EFFORT_OPTIONS: SelectOption[] = [
   { value: "high", label: "high" },
   { value: "xhigh", label: "xhigh" },
   { value: "max", label: "max" },
+  { value: "ultracode", label: "ultracode (xhigh + orchestration)" },
 ];
 
 export const REASONING_EFFORT_HELP =
-  "For reasoning-capable models (e.g. o-series, claude-extended-thinking).";
+  "For reasoning-capable models (e.g. o-series, claude-extended-thinking). " +
+  "ultracode = xhigh + standing consent to orchestrate multi-agent workflows; reliable only on claude-opus-4-8.";
 
 export const WORKTREE_OPTIONS: SelectOption[] = [
   { value: "auto", label: "auto (per-run worktree)" },

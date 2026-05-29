@@ -1008,6 +1008,10 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 	}
 
 	effort := resolveReasoningEffort(f.reasoningEffort, input)
+	// "ultracode" is a mode (xhigh + workflow-orchestration prerogative),
+	// not a wire effort value. Remap to xhigh for the provider and carry the
+	// mode separately so the task can enable the orchestration prompt + tool.
+	ultracode := effort == "ultracode"
 	compactRatio, compactPreserve := resolveCompaction(f.compaction, e.wfCompaction)
 
 	resolvedModel := ir.ExpandEnvWithDefault(f.model)
@@ -1035,7 +1039,8 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		ToolMaxSteps:          f.toolMaxSteps,
 		MaxTokens:             f.maxTokens,
 		WorkDir:               e.workDir,
-		ReasoningEffort:       effort,
+		ReasoningEffort:       wireEffort(effort),
+		Ultracode:             ultracode,
 		InteractionEnabled:    f.interaction != ir.InteractionNone,
 		CompactThresholdRatio: compactRatio,
 		CompactPreserveRecent: compactPreserve,
@@ -1072,6 +1077,15 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 	// restriction" — the MCP server is still registered and discoverable.
 	if delegate.HasBoardCapability(effectiveCaps) && len(effectiveTools) > 0 {
 		effectiveTools = append(effectiveTools, delegate.BoardToolsFor(effectiveCaps)...)
+	}
+	// Ultracode grants standing consent to orchestrate subagents. On claw,
+	// the orchestration capability is the `agent` subagent tool; ensure it is
+	// in the allowlist when the node restricts its tool set (mirrors the
+	// board-tools append above). An unrestricted tool set already exposes the
+	// claw builtins, and the claude_code backend orchestrates via its native
+	// subagent mechanism, so neither needs the explicit append.
+	if ultracode && backendName == delegate.BackendClaw && len(effectiveTools) > 0 {
+		effectiveTools = ensureAgentTool(effectiveTools)
 	}
 	// CLI-based backends can't accept inline images on stdin: forward
 	// the image path via {{attachments.X}} text interpolation and
@@ -1676,14 +1690,17 @@ func (e *ClawExecutor) executeLLMRouterUnified(ctx context.Context, node *ir.Rou
 	}
 
 	task := delegate.Task{
-		NodeID:          node.ID,
-		Iteration:       LoopIterationFromContext(ctx),
-		SystemPrompt:    systemText,
-		UserPrompt:      userText,
-		OutputSchema:    jsonSchema,
-		Model:           expanded,
-		WorkDir:         e.workDir,
-		ReasoningEffort: resolveReasoningEffort(node.ReasoningEffort, input),
+		NodeID:       node.ID,
+		Iteration:    LoopIterationFromContext(ctx),
+		SystemPrompt: systemText,
+		UserPrompt:   userText,
+		OutputSchema: jsonSchema,
+		Model:        expanded,
+		WorkDir:      e.workDir,
+		// wireEffort collapses the "ultracode" mode to xhigh so the raw token
+		// never reaches the provider; identity for every other level. Routers
+		// don't get the orchestration prerogative (they route, not orchestrate).
+		ReasoningEffort: wireEffort(resolveReasoningEffort(node.ReasoningEffort, input)),
 		Sandbox:         e.sandbox,
 		// ProviderHint is set per-attempt by dispatchWithProviderFallback
 		// as it walks the node's provider chain.
@@ -2469,6 +2486,19 @@ func ensureAskUser(tools []string) []string {
 		}
 	}
 	return append(append([]string(nil), tools...), askUserToolName)
+}
+
+// ensureAgentTool returns tools with the claw `agent` subagent tool
+// appended if not already present. Used for ultracode nodes so the
+// standing-consent orchestration prompt has a tool to act on even when the
+// node restricts its tool set. Idempotent.
+func ensureAgentTool(tools []string) []string {
+	for _, t := range tools {
+		if t == "agent" {
+			return tools
+		}
+	}
+	return append(append([]string(nil), tools...), "agent")
 }
 
 // ensureReadImage augments a tool list with "read_image" so CLI-based

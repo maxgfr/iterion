@@ -7,7 +7,7 @@ description: |
   fixes the DOCS (never the code) and auto-commits on convergence.
 
   Workflow shape mirrors branch_improve_loop: alternating
-  claude_code (opus-4-7) and claw (openai/gpt-5.5) reviewers,
+  claude_code (opus-4-8) and claw (openai/gpt-5.5) reviewers,
   deterministic streak_check requiring two cross-family approvals,
   prepare_commit + commit_changes phase.
 

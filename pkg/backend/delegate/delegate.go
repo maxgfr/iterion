@@ -33,6 +33,24 @@ const interactionSystemInstruction = "\n\n[INTERACTION PROTOCOL]\n" +
 	"Include as many question keys as needed. If you do NOT need human input, " +
 	"do not include these fields and complete your task normally."
 
+// ultracodeOrchestrationInstruction is the standing-consent prompt appended
+// when Task.Ultracode is set. It mirrors Anthropic's documented
+// orchestration-mode recipe (xhigh effort + standing permission to launch
+// multi-agent workflows): the model is told it may decompose substantial work
+// across parallel subagents and lean toward adversarial verification, without
+// asking first. The orchestration capability is the `agent` subagent tool,
+// which the runtime makes available on the node when ultracode is active.
+// See platform.claude.com/docs/en/build-with-claude/mid-conversation-effort-example.
+const ultracodeOrchestrationInstruction = "\n\n## Workflow Orchestration\n\n" +
+	"Ultracode mode is on: optimize for the most exhaustive, correct result, " +
+	"not the fastest or cheapest. You have standing consent to orchestrate " +
+	"multi-agent workflows — when a task has independent sub-parts, decompose " +
+	"it and dispatch parallel subagents via the `agent` tool rather than doing " +
+	"everything in one thread, and lean toward verifying findings adversarially " +
+	"before acting on them. Work solo only on trivial or inherently sequential " +
+	"steps. This consent stands for the whole task; you need not ask before " +
+	"spawning a subagent."
+
 // Backend is the interface for delegation execution. Each backend wraps
 // a CLI agent (e.g. claude, codex) and handles prompt delivery, tool
 // forwarding, and output collection.
@@ -195,9 +213,21 @@ type Task struct {
 	// worktree they execute in.
 	RepoRoot string
 
-	// ReasoningEffort is the reasoning effort level.
-	// Valid values: "low", "medium", "high", "xhigh", "max".
+	// ReasoningEffort is the reasoning effort level sent on the wire.
+	// Valid values: "low", "medium", "high", "xhigh", "max". The DSL also
+	// accepts "ultracode", but the runtime remaps that to "xhigh" before
+	// populating this field (see model.wireEffort) and sets Ultracode below.
 	ReasoningEffort string
+
+	// Ultracode enables the "Ultracode" mode: xhigh reasoning paired with a
+	// standing-consent prerogative to orchestrate multi-agent workflows.
+	// When set, BuildSystemPrompt appends a "## Workflow Orchestration"
+	// section granting that consent (mirrors Anthropic's documented
+	// orchestration-mode recipe), and the runtime makes the subagent tool
+	// available. Reliable only on Opus 4.8 (mid-conversation system messages
+	// are 4.8-only); on other models it degrades to plain xhigh.
+	// See platform.claude.com/docs/en/build-with-claude/mid-conversation-effort-example.
+	Ultracode bool
 
 	// CursorFragments are resolved prompt-engineering cursor fragments
 	// to append to the system prompt under a "## Calibration" section.
@@ -402,6 +432,9 @@ func (t Task) BuildSystemPrompt() string {
 	b.WriteString(t.SystemPrompt)
 	if t.InteractionEnabled {
 		b.WriteString(interactionSystemInstruction)
+	}
+	if t.Ultracode {
+		b.WriteString(ultracodeOrchestrationInstruction)
 	}
 	if len(t.CursorFragments) > 0 {
 		b.WriteString("\n\n## Calibration\n\n")

@@ -61,7 +61,7 @@ export const iterTokensProvider: languages.IMonarchLanguage = {
     // pause_until_answers / auto_answer / auto_or_pause)
     "human", "llm", "llm_or_human",
     // Reasoning effort
-    "low", "medium", "high", "xhigh", "max",
+    "low", "medium", "high", "xhigh", "max", "ultracode",
     // MCP transport
     "stdio", "http", "sse",
     // OAuth

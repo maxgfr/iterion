@@ -208,7 +208,10 @@ export type AwaitMode = "none" | "wait_all" | "best_effort";
 // the old editor-only `HumanMode` and adds llm/llm_or_human surfaces.
 export type InteractionMode = "none" | "human" | "llm" | "llm_or_human";
 
-export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
+// "ultracode" is a mode, not a wire effort: xhigh + a standing prerogative to
+// orchestrate multi-agent workflows (reliable only on claude-opus-4-8). The
+// runtime remaps it to xhigh before the provider. See docs/ultracode.md.
+export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultracode";
 
 export interface AgentDecl {
   name: string;

@@ -1,8 +1,10 @@
 // Visual indicator for the LLM reasoning_effort field. Renders the level
 // name plus a 5-cell intensity bar tinted by severity, so users can scan
-// the canvas and tell low/medium/high/xhigh/max apart without reading.
+// the canvas and tell low/medium/high/xhigh/max/ultracode apart without reading.
+// "ultracode" is a mode (xhigh + workflow orchestration), shown full-bar in a
+// distinct accent tone so it reads as "beyond max".
 
-export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max" | "ultracode";
 
 export function isEffortLevel(s: string | undefined): s is EffortLevel {
   return (
@@ -10,7 +12,8 @@ export function isEffortLevel(s: string | undefined): s is EffortLevel {
     s === "medium" ||
     s === "high" ||
     s === "xhigh" ||
-    s === "max"
+    s === "max" ||
+    s === "ultracode"
   );
 }
 
@@ -41,6 +44,7 @@ const FILLED: Record<EffortLevel, number> = {
   high: 3,
   xhigh: 4,
   max: 5,
+  ultracode: 5,
 };
 
 const TONE: Record<EffortLevel, { text: string; bar: string; cell: string }> = {
@@ -68,6 +72,11 @@ const TONE: Record<EffortLevel, { text: string; bar: string; cell: string }> = {
     text: "text-danger-fg",
     bar: "bg-danger/20",
     cell: "bg-danger",
+  },
+  ultracode: {
+    text: "text-accent",
+    bar: "bg-accent/20",
+    cell: "bg-accent",
   },
 };
 

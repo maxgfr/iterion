@@ -354,6 +354,23 @@ coverage gates. Reference catalogue:
 [examples/cursors/cursors.iter](examples/cursors/cursors.iter)
 ships `ambition` / `depth` / `rigor` / `autonomy`.
 
+### Ultracode (`reasoning_effort: ultracode`)
+
+`ultracode` is the top of the `reasoning_effort` dial
+(`low|medium|high|xhigh|max|ultracode`) but is a **mode, not a wire
+value**: Anthropic's API only accepts up to `xhigh`/`max`. It means
+**xhigh + a standing prerogative to orchestrate multi-agent
+workflows**, delivered via a `## Workflow Orchestration` system-prompt
+section, and is **reliable only on `claude-opus-4-8`** (the
+orchestration half rides Anthropic mid-conversation system messages,
+4.8-only). The runtime remaps `ultracode` to `xhigh` on the wire
+([model.wireEffort](pkg/backend/model/effort.go)), makes the `agent`
+subagent tool available, and emits diagnostic **C089** (warning) when
+the node's model isn't 4.8 — degrading to plain `xhigh`. Adaptive
+thinking is auto-enabled for 4.8 by the claw backend. The studio
+effort picker only offers `ultracode` on 4.8. Full contract:
+[docs/ultracode.md](docs/ultracode.md).
+
 ## Building the desktop app
 
 The Wails desktop wrapper (`cmd/iterion-desktop/`) has its own pipeline

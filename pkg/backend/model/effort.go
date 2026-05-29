@@ -22,9 +22,24 @@ func effortRank(e string) int {
 		return 5
 	case "max":
 		return 6
+	case "ultracode":
+		// Not a wire value — a mode that maps to xhigh (see wireEffort).
+		// Ranked above max so any ordering comparison treats it as the top.
+		return 7
 	default:
 		return 0
 	}
+}
+
+// wireEffort maps an effort level to the value sent on the provider wire.
+// "ultracode" is Claude Code's mode (xhigh + workflow-orchestration
+// prerogative), not an API effort value — Anthropic only accepts up to
+// xhigh/max — so it collapses to "xhigh". Every other level passes through.
+func wireEffort(effort string) string {
+	if effort == "ultracode" {
+		return "xhigh"
+	}
+	return effort
 }
 
 // coerceEffort returns effort unchanged when it appears in supported.
@@ -78,6 +93,10 @@ func coerceEffortForModel(effort, modelID string) string {
 	if effort == "" {
 		return ""
 	}
+	// Collapse the "ultracode" mode to its wire effort (xhigh) before
+	// coercing — otherwise the unknown token would rank below every
+	// supported level and wrongly drop to the model's lowest effort.
+	effort = wireEffort(effort)
 	supported, def := apikit.EffortCapabilities(modelID)
 	return coerceEffort(effort, supported, def)
 }

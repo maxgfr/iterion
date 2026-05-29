@@ -424,7 +424,7 @@ walks transparently when a provider fails *beyond its retry budget*:
 agent reviewer:
   backend: "claude_code"
   provider: "zai,anthropic"        # try z.ai; on hard failure, fall through to Anthropic
-  model: "claude-opus-4-7"
+  model: "claude-opus-4-8"
 ```
 
 - Known hints: `anthropic`, `zai`, `openai`, `auto` (≡ default

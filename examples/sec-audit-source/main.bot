@@ -909,7 +909,7 @@ agent report_card:
   ## skills/ mirrored to .claude/skills/ and the board MCP server
   ## registered with capability-gated tools.
   backend: "claude_code"
-  model: "${ITERION_SEC_AUDIT_MODEL_CLAUDE:-claude-opus-4-7}"
+  model: "${ITERION_SEC_AUDIT_MODEL_CLAUDE:-claude-opus-4-8}"
   reasoning_effort: "${ITERION_SEC_AUDIT_EFFORT_REPORT:-medium}"
   input: report_input
   output: report_output

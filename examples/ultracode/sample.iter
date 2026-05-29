@@ -1,0 +1,31 @@
+## Minimal workflow demonstrating the `ultracode` mode.
+## Run with: iterion run examples/ultracode/sample.iter
+##
+## reasoning_effort: ultracode = xhigh reasoning + a standing prerogative to
+## orchestrate multi-agent workflows (the `agent` subagent tool). It is a mode,
+## not a wire value — the runtime sends `xhigh` to the provider and appends a
+## "## Workflow Orchestration" system-prompt section. Reliable only on
+## claude-opus-4-8 (else compiles with a C089 warning and runs as plain xhigh).
+## Restricting tools below shows the runtime auto-adding the `agent` subagent
+## tool so the orchestration prerogative has something to act on.
+## See docs/ultracode.md.
+
+prompt build_system:
+  You are a senior engineer. Implement the requested change end to end. When the
+  task has independent sub-parts, dispatch parallel subagents to handle them
+  rather than doing everything in one thread.
+
+prompt build_user:
+  Add a CHANGELOG entry for the most recent change in this repository.
+
+agent implementer:
+  backend: "claude_code"
+  model: "anthropic/claude-opus-4-8"
+  reasoning_effort: ultracode
+  system: build_system
+  user: build_user
+  tools: [bash, read_file, glob, grep, write_file, file_edit]
+
+workflow main:
+  entry: implementer
+  implementer -> done

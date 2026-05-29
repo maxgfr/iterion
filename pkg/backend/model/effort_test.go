@@ -141,3 +141,31 @@ func TestCoerceEffortForModel(t *testing.T) {
 		})
 	}
 }
+
+func TestWireEffortUltracode(t *testing.T) {
+	if got := wireEffort("ultracode"); got != "xhigh" {
+		t.Errorf("wireEffort(ultracode) = %q, want xhigh", got)
+	}
+	if got := wireEffort("max"); got != "max" {
+		t.Errorf("wireEffort(max) = %q, want max (passthrough)", got)
+	}
+	if got := wireEffort(""); got != "" {
+		t.Errorf("wireEffort(empty) = %q, want empty", got)
+	}
+	// ultracode must rank above max so ordering never demotes it.
+	if effortRank("ultracode") <= effortRank("max") {
+		t.Errorf("effortRank(ultracode)=%d must exceed effortRank(max)=%d", effortRank("ultracode"), effortRank("max"))
+	}
+}
+
+func TestCoerceEffortForModelUltracode(t *testing.T) {
+	// ultracode must collapse to the model's xhigh, never drop to the lowest
+	// supported level (the unknown-token-rank-0 trap).
+	if got := coerceEffortForModel("ultracode", "claude-opus-4-8"); got != "xhigh" {
+		t.Errorf("coerceEffortForModel(ultracode, opus-4-8) = %q, want xhigh", got)
+	}
+	// On OpenAI (no xhigh), xhigh collapses to high — so should ultracode.
+	if got := coerceEffortForModel("ultracode", "gpt-5.5"); got != "high" {
+		t.Errorf("coerceEffortForModel(ultracode, gpt-5.5) = %q, want high", got)
+	}
+}

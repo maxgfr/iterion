@@ -37,21 +37,22 @@ const askUserMCPSubcommand = "__mcp-ask-user"
 
 // defaultClaudeCodeModel is the model iterion forces on the claude_code
 // backend when the workflow doesn't specify one. Mirrors the official
-// Claude Code CLI default — Opus 4.7 (1M context window). Workflows can
+// Claude Code CLI default — Opus 4.8 (1M context window). Workflows can
 // always override via the node's `model:` field — including the
-// env-driven form `model: "${ITERION_CLAUDE_CODE_MODEL:-claude-opus-4-7}"`
+// env-driven form `model: "${ITERION_CLAUDE_CODE_MODEL:-claude-opus-4-8}"`
 // which the IR expander in pkg/backend/model/executor.go resolves
 // before this backend ever sees the task. Operators who want to pin
 // every claude_code node to a single gateway-side alias (e.g. GLM 5.1
 // on z.ai) should put the env var in their .env and use the DSL form
 // above in the bots that opt in.
-const defaultClaudeCodeModel = "claude-opus-4-7"
+const defaultClaudeCodeModel = "claude-opus-4-8"
 
 // defaultClaudeCodeEffort is the reasoning effort iterion forces on the
-// claude_code backend when the workflow doesn't specify one. Mirrors the
-// official Claude Code CLI default ("xhigh" thinking budget for Opus 4.7,
-// per code.claude.com/docs/en/model-config). Workflows can always override
-// via `reasoning_effort:`.
+// claude_code backend when the workflow doesn't specify one. The bare API
+// default on Opus 4.8 is "high", but the claude_code backend runs
+// implementers/fixers — coding and agentic work — for which Anthropic
+// recommends starting at "xhigh" (platform.claude.com/docs/en/build-with-claude/effort).
+// Workflows can always override via `reasoning_effort:`.
 const defaultClaudeCodeEffort = "xhigh"
 
 // ClaudeCodeBackend delegates work to the `claude` CLI (claude-code)

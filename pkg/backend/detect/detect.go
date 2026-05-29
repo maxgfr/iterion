@@ -218,7 +218,7 @@ func detectProviders() []ProviderStatus {
 			Name:           "anthropic",
 			Available:      anthropicAvailable,
 			Source:         envSource("ANTHROPIC_API_KEY"),
-			SuggestedModel: "anthropic/claude-sonnet-4-6",
+			SuggestedModel: "anthropic/claude-opus-4-8",
 		},
 		{
 			Name:           "zai",

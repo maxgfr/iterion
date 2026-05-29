@@ -575,7 +575,7 @@ router alt:
 
 judge reviewer_claude:
   backend: "claude_code"
-  model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-7}"
+  model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-8}"
   reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-max}"
   input: review_input
   output: verdict_output
@@ -650,7 +650,7 @@ compute streak_check:
 ## without inheritance every fixer would re-scan the workspace.
 agent fix_claude:
   backend: "claude_code"
-  model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-7}"
+  model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-8}"
   reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-max}"
   input: fix_input
   output: fix_output
@@ -689,7 +689,7 @@ agent fix_gpt:
 ## mutations during the commit-planning phase.
 agent prepare_commit:
   backend: "claude_code"
-  model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-7}"
+  model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-8}"
   reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-max}"
   output: commit_output
   system: prepare_commit_system

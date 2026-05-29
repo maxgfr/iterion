@@ -96,7 +96,7 @@ chain. The chain is the declarative generalisation of the
 agent reviewer:
   backend: "claude_code"
   provider: "${RESCUE_PROVIDER:-zai},anthropic"   # z.ai first, Anthropic on hard failure
-  model: "claude-opus-4-7"
+  model: "claude-opus-4-8"
 ```
 
 Semantics:
@@ -185,7 +185,7 @@ auto-resolution. `OPENAI_API_KEY` alone routes to `claw`.
 
 When `model:` on the agent is also empty, the runtime substitutes a
 sensible default for the first available provider — currently
-`anthropic/claude-sonnet-4-6` for Anthropic and
+`anthropic/claude-opus-4-8` for Anthropic and
 `openai/gpt-5.4-mini` for OpenAI.
 
 ### OpenAI via ChatGPT forfait (Codex CLI OAuth)

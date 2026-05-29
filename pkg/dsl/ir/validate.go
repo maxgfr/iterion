@@ -29,6 +29,7 @@ const (
 	DiagLLMRouterConditionEdge  DiagCode = "C022" // llm router edge has a 'when' condition
 	DiagRouterLLMOnlyProperty   DiagCode = "C023" // LLM-only property on non-llm router
 	DiagInvalidReasoningEffort  DiagCode = "C027" // invalid reasoning_effort value (was C024, clashed with DiagDuplicateMCPServer)
+	DiagUltracodeModelGate      DiagCode = "C089" // reasoning_effort: ultracode on a model that isn't claude-opus-4-8 (warning)
 	DiagInvalidLoopIterations   DiagCode = "C026" // loop max_iterations must be >= 1
 	DiagDuplicateWithKey        DiagCode = "C028" // duplicate with-mapping key across edges to same target
 	DiagUnknownRefNode          DiagCode = "C029" // outputs ref to non-existent node (was C030, clashed with DiagCodexDiscouraged)
@@ -925,6 +926,14 @@ var ValidReasoningEfforts = map[string]bool{
 	"high":   true,
 	"xhigh":  true,
 	"max":    true,
+	// "ultracode" is not an API effort value — Anthropic only accepts up to
+	// xhigh/max on the wire. It is a *mode* (Claude Code's "Ultracode"):
+	// xhigh reasoning + standing consent to orchestrate multi-agent
+	// workflows, prompt-engineered and reliable only on Opus 4.8. The
+	// runtime remaps it to "xhigh" before the wire (see model.wireEffort)
+	// and injects the orchestration prerogative. Authoring it in the
+	// reasoning_effort field mirrors how Claude Code surfaces it.
+	"ultracode": true,
 }
 
 // IsEnvSubstitutedEffort reports whether an effort literal is an
@@ -1037,14 +1046,14 @@ func expandEnvWithDefault(s string) string { return ExpandEnvWithDefault(s) }
 
 func (c *compiler) validateReasoningEffort(w *Workflow) {
 	for _, node := range w.Nodes {
-		var effort string
+		var effort, model string
 		switch n := node.(type) {
 		case *AgentNode:
-			effort = n.ReasoningEffort
+			effort, model = n.ReasoningEffort, n.Model
 		case *JudgeNode:
-			effort = n.ReasoningEffort
+			effort, model = n.ReasoningEffort, n.Model
 		case *RouterNode:
-			effort = n.ReasoningEffort
+			effort, model = n.ReasoningEffort, n.Model
 		default:
 			continue
 		}
@@ -1060,10 +1069,40 @@ func (c *compiler) validateReasoningEffort(w *Workflow) {
 		}
 		if !ValidReasoningEfforts[effort] {
 			c.errorf(DiagInvalidReasoningEffort,
-				"node %q has invalid reasoning_effort %q; valid values are low, medium, high, xhigh, max",
+				"node %q has invalid reasoning_effort %q; valid values are low, medium, high, xhigh, max, ultracode",
 				node.NodeID(), effort)
+			continue
+		}
+		// ultracode (xhigh + workflow-orchestration prerogative) relies on
+		// mid-conversation system messages, which Anthropic ships on Opus 4.8
+		// only. On any other model it degrades to plain xhigh — warn so the
+		// author knows the orchestration half won't be reliable.
+		if effort == "ultracode" && !modelIsOpus48(model) {
+			shown := model
+			if shown == "" {
+				shown = "(default)"
+			}
+			c.warnf(DiagUltracodeModelGate,
+				"node %q uses reasoning_effort: ultracode but model %q is not claude-opus-4-8; ultracode's workflow-orchestration prerogative is reliable only on Opus 4.8 and will degrade to plain xhigh elsewhere",
+				node.NodeID(), shown)
 		}
 	}
+}
+
+// modelIsOpus48 reports whether a model spec resolves to claude-opus-4-8.
+// An empty spec is treated as the default (Opus 4.8 when Anthropic is the
+// resolved backend) and env-substituted forms are deferred to runtime — both
+// suppress the ultracode gate warning. The bare "opus" alias resolves to the
+// newest Opus (4.8) in claw's registry.
+func modelIsOpus48(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if m == "" || IsEnvSubstitutedEffort(m) {
+		return true
+	}
+	if i := strings.LastIndex(m, "/"); i >= 0 {
+		m = m[i+1:]
+	}
+	return m == "opus" || strings.Contains(m, "opus-4-8")
 }
 
 // ---------------------------------------------------------------------------

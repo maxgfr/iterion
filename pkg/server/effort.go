@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,6 +154,15 @@ func (s *Server) handleEffortCapabilities(w http.ResponseWriter, r *http.Request
 	switch backend {
 	case "claude_code", "claw":
 		supported, def := apikit.EffortCapabilities(model)
+		// Surface the "ultracode" mode (xhigh + workflow-orchestration
+		// prerogative) only on claude-opus-4-8: its orchestration half is
+		// backed by mid-conversation system messages, which Anthropic ships
+		// on Opus 4.8 only. ResolveModelAlias maps the "opus" alias to the
+		// canonical id and returns any literal unchanged, so it covers both
+		// the alias and the bare/prefixed forms. See docs/ultracode.md.
+		if strings.Contains(apikit.ResolveModelAlias(model), "claude-opus-4-8") {
+			supported = append(append([]string(nil), supported...), "ultracode")
+		}
 		writeJSON(w, effortCapabilitiesResponse{
 			Supported: supported,
 			Default:   def,

@@ -1230,7 +1230,7 @@ agent emit_action:
   ## from the bundled skills/ being mirrored into .claude/skills/.
   ## Models on the claw backend do not see those skills natively.
   backend: "claude_code"
-  model: "${ITERION_WHATS_NEXT_MODEL_CLAUDE:-claude-opus-4-7}"
+  model: "${ITERION_WHATS_NEXT_MODEL_CLAUDE:-claude-opus-4-8}"
   reasoning_effort: "${ITERION_WHATS_NEXT_EFFORT_CLAUDE:-high}"
   input: emit_input
   output: emit_output
