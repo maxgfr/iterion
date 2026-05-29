@@ -805,14 +805,22 @@ export interface RunFile {
   added: number;
   deleted: number;
   binary?: boolean;
+  // Populated ONLY in the "combined" view (server merges committed +
+  // uncommitted): "committed" = the change landed on the run's branch,
+  // "uncommitted" = still pending in the working tree. Absent in every
+  // other mode. Drives the FilesPanel's subtle per-file tint and the
+  // per-row diff mode (committed → branch range, uncommitted → worktree).
+  lifecycle?: "committed" | "uncommitted";
 }
 
 // File listing source-of-truth selector. Mirrors the server's fileMode:
 //   - "uncommitted": worktree `git status` (changes pending commit).
 //   - "branch": BaseCommit..HEAD range (commits introduced by the run).
+//   - "combined": union of branch + uncommitted, each file tagged with a
+//     `lifecycle`. The studio's default while a run is in progress.
 // Empty string means "let the backend pick the default" (the live
 // uncommitted view when a worktree exists, branch otherwise).
-export type RunFilesMode = "uncommitted" | "branch" | "";
+export type RunFilesMode = "uncommitted" | "branch" | "combined" | "";
 
 // Mirror of server.runFilesResponse. `available` is the gate: when
 // false, `reason` is one of "no_workdir" | "not_git_repo" |
@@ -872,6 +880,31 @@ export async function getRunFileDiff(
   return request(
     `/runs/${encodeURIComponent(runId)}/files/diff?${qs.toString()}`,
   );
+}
+
+// mergeActionReady reports whether the run has reached the phase where the
+// "Squash & merge" action is shown in the Commits panel: a terminal state
+// (finished or cancelled — RecoverFinalize populates final_branch for both)
+// with a persistent storage branch to merge. It is the single signal that
+// flips the FilesPanel's smart default from "combined" (in-flight) to
+// "branch" (the committed diff that would actually merge). Mirrors
+// CommitsPanel's `mergeable && hasBranch` gate so the two stay in lock-step.
+export function mergeActionReady(
+  run: Pick<RunHeader, "status" | "final_branch"> | null | undefined,
+): boolean {
+  if (!run) return false;
+  const terminal = run.status === "finished" || run.status === "cancelled";
+  return terminal && Boolean(run.final_branch);
+}
+
+// smartDefaultFilesMode is the FilesPanel's scope default for a given
+// lifecycle phase: the committed branch diff once the merge action is
+// ready, the combined (committed + uncommitted) view while work is still
+// in flight. Callers OR this with an explicit user selection.
+export function smartDefaultFilesMode(
+  mergeReady: boolean,
+): "branch" | "combined" {
+  return mergeReady ? "branch" : "combined";
 }
 
 // ---------------------------------------------------------------------------

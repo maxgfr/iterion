@@ -43,6 +43,13 @@ type FileStatus struct {
 	Added   int    `json:"added"`              // -1 when Binary
 	Deleted int    `json:"deleted"`            // -1 when Binary
 	Binary  bool   `json:"binary,omitempty"`
+	// Lifecycle is a server-side annotation for the studio's "combined"
+	// files view: "committed" (the change landed on the run's branch,
+	// BaseCommit..HEAD) or "uncommitted" (still pending in the working
+	// tree). It is populated ONLY by the server's combined-mode merge
+	// (pkg/server/runs_files.go); the git primitives here never set it,
+	// and `omitempty` keeps every other mode's wire shape unchanged.
+	Lifecycle string `json:"lifecycle,omitempty"`
 }
 
 // DiffPayload carries the two sides of a file diff for the Monaco

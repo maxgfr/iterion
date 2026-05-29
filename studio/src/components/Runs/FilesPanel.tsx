@@ -15,11 +15,14 @@ import {
   type TreeNode,
 } from "@/lib/fileTree";
 import { basename } from "@/lib/format";
+import { smartDefaultFilesMode } from "@/api/runs";
 import type { RunFile, RunFileStatus, RunFilesMode } from "@/api/runs";
 
-type ViewMode = "uncommitted" | "branch";
-
-const MODE_STORAGE_KEY = "run-console-v1.files-mode";
+// View scope for the files tree. "combined" is the union of branch +
+// uncommitted (each file tagged with a lifecycle); it's the default while
+// the run is in progress. Once the merge action is available the default
+// flips to "branch" (the committed diff that would actually merge).
+type ViewMode = "uncommitted" | "branch" | "combined";
 
 // Above this many changed files we DEFAULT-COLLAPSE every folder on first
 // load so the initial paint is a handful of folder rows rather than
@@ -30,35 +33,22 @@ const MODE_STORAGE_KEY = "run-console-v1.files-mode";
 // when the count looks like a stray build/cache dir.
 const LARGE_CHANGESET = 2000;
 
-// readPersistedMode pulls the user's last segmented-control selection
-// from localStorage. Scoped globally (not per-runId) because the
-// preference is about *how* the user reads diffs, not *which* run —
-// across runs we want the same view.
-function readPersistedMode(): ViewMode {
-  if (typeof window === "undefined") return "uncommitted";
-  try {
-    const raw = window.localStorage.getItem(MODE_STORAGE_KEY);
-    if (raw === "branch") return "branch";
-  } catch {
-    // Storage may be unavailable; fall through to the default mode.
-  }
-  return "uncommitted";
-}
-
-function writePersistedMode(mode: ViewMode) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(MODE_STORAGE_KEY, mode);
-  } catch {
-    // Storage may be unavailable; keep the in-memory mode.
-  }
-}
+// Shown on the Combined + Uncommitted pills once the worktree is gone: both
+// need a worktree to read pending changes, so only Branch stays reachable.
+const WORKTREE_GONE_TIP =
+  "Worktree no longer available — only the branch view is reachable.";
 
 interface FilesPanelProps {
   runId: string;
   // onSelectFile carries the current mode so FileDiffDialog can request
-  // the right range from the backend (uncommitted vs branch).
+  // the right range from the backend (uncommitted vs branch). In combined
+  // mode the row forwards the per-file scope derived from its lifecycle.
   onSelectFile: (file: RunFile, mode: RunFilesMode) => void;
+  // mergeReady drives the smart default: false (run in progress) → combined,
+  // true (terminal + has storage branch, i.e. the Squash & merge button is
+  // shown) → branch. Reactive: a transition flips the default automatically
+  // unless the operator has made an explicit selection.
+  mergeReady: boolean;
 }
 
 // FilesPanel renders the modified-files tree — wrapped by LeftPanel
@@ -68,33 +58,46 @@ interface FilesPanelProps {
 // each file shows "+N | -N" line counts in green/red, and folders show
 // the same aggregate when they are collapsed (so a folded directory
 // still tells you how much churn lives below).
-export default function FilesPanel({ runId, onSelectFile }: FilesPanelProps) {
-  const [mode, setMode] = useState<ViewMode>(() => readPersistedMode());
-  // Persist mode changes (writePersistedMode is a no-op on SSR; the
-  // initializer above handles the cold-load case).
+export default function FilesPanel({
+  runId,
+  onSelectFile,
+  mergeReady,
+}: FilesPanelProps) {
+  // userMode is the operator's explicit segmented-control selection; null
+  // means "follow the lifecycle smart default". Keeping the override here
+  // (rather than persisting it globally to localStorage as we used to) is
+  // what lets the default track the run's phase: a finishing run flips
+  // combined → branch on its own, while a manual pick stays put.
+  const [userMode, setUserMode] = useState<ViewMode | null>(null);
+  // Reset the override when the run changes so each run opens at its own
+  // phase-appropriate default rather than inheriting the previous run's pick.
   useEffect(() => {
-    writePersistedMode(mode);
-  }, [mode]);
+    setUserMode(null);
+  }, [runId]);
+  const mode: ViewMode = userMode ?? smartDefaultFilesMode(mergeReady);
 
   const { data, loading, error, refresh } = useRunFiles(runId, mode);
 
-  // When the backend signals worktree_gone (uncommitted requested but
-  // worktree was torn down), fall back to branch view automatically so
-  // the user sees something rather than an empty placeholder. Only
-  // applies on data refresh, so manual toggles still work in any state.
+  // When the backend signals worktree_gone (uncommitted/combined requested
+  // but the worktree was torn down), fall back to branch view automatically
+  // so the user sees something rather than an empty placeholder. Pins the
+  // override to branch; manual toggles still work in any state.
   useEffect(() => {
-    if (data?.reason === "worktree_gone" && mode === "uncommitted") {
-      setMode("branch");
+    if (
+      data?.reason === "worktree_gone" &&
+      (mode === "uncommitted" || mode === "combined")
+    ) {
+      setUserMode("branch");
     }
   }, [data?.reason, mode]);
 
   const tree = useMemo(() => buildFileTree(data?.files ?? []), [data?.files]);
   const fileCount = data?.files.length ?? 0;
   const largeChangeset = fileCount > LARGE_CHANGESET;
-  // Disable the uncommitted segment when no worktree exists — the
-  // backend can't compute it. Same condition the auto-fallback above
-  // keys off, surfaced visually so the user understands the constraint.
-  const uncommittedDisabled = data?.reason === "worktree_gone";
+  // Disable the uncommitted + combined segments when no worktree exists —
+  // the backend can't read pending changes. Same condition the auto-fallback
+  // above keys off, surfaced visually so the user understands the constraint.
+  const worktreeGone = data?.reason === "worktree_gone";
 
   // Default state: every folder expanded. Set tracks pathKeys the user
   // has *explicitly* collapsed — this way new files arriving live (the
@@ -130,7 +133,18 @@ export default function FilesPanel({ runId, onSelectFile }: FilesPanelProps) {
 
   const handleSelectFile = useCallback(
     (file: RunFile) => {
-      onSelectFile(file, mode);
+      // In combined mode each row forwards the scope matching its lifecycle
+      // so the diff dialog reuses the existing two backend ranges: a
+      // committed file diffs the branch range (base..HEAD), an uncommitted
+      // file diffs the working tree (HEAD..worktree). Other modes pass
+      // through unchanged.
+      const fileMode: RunFilesMode =
+        mode === "combined"
+          ? file.lifecycle === "committed"
+            ? "branch"
+            : "uncommitted"
+          : mode;
+      onSelectFile(file, fileMode);
     },
     [onSelectFile, mode],
   );
@@ -141,8 +155,8 @@ export default function FilesPanel({ runId, onSelectFile }: FilesPanelProps) {
         <div className="flex items-center gap-1">
           <ModeSegmented
             mode={mode}
-            onChange={setMode}
-            uncommittedDisabled={uncommittedDisabled}
+            onChange={setUserMode}
+            worktreeGone={worktreeGone}
             count={fileCount}
           />
           <div className="ml-auto">
@@ -185,7 +199,7 @@ export default function FilesPanel({ runId, onSelectFile }: FilesPanelProps) {
                   <button
                     type="button"
                     className="underline text-info-fg hover:text-info-hover"
-                    onClick={() => setMode("uncommitted")}
+                    onClick={() => setUserMode("uncommitted")}
                   >
                     Uncommitted
                   </button>{" "}
@@ -208,6 +222,7 @@ export default function FilesPanel({ runId, onSelectFile }: FilesPanelProps) {
                 collapsed={collapsed}
                 onToggle={toggle}
                 onSelectFile={handleSelectFile}
+                showLifecycle={mode === "combined"}
               />
             ))}
           </div>
@@ -278,30 +293,45 @@ function LargeChangesetHint({
 interface ModeSegmentedProps {
   mode: ViewMode;
   onChange: (mode: ViewMode) => void;
-  uncommittedDisabled: boolean;
+  // True when the worktree was torn down: the uncommitted + combined views
+  // can't be computed, so their segments are disabled.
+  worktreeGone: boolean;
   count: number;
 }
 
-// ModeSegmented is the two-pill segmented control above the tree.
-// "Uncommitted" maps to git status, "Branch" to BaseCommit..HEAD.
-// The count badge tracks the currently-visible mode so the active pill
-// stays consistent with the tree below.
+// ModeSegmented is the three-pill segmented control above the tree.
+// "Combined" is the union (committed + uncommitted) and the default while a
+// run is in progress; "Uncommitted" maps to git status; "Branch" to
+// BaseCommit..HEAD. The count badge tracks the currently-visible mode so the
+// active pill stays consistent with the tree below.
 function ModeSegmented({
   mode,
   onChange,
-  uncommittedDisabled,
+  worktreeGone,
   count,
 }: ModeSegmentedProps) {
   return (
     <div className="inline-flex overflow-hidden rounded-md border border-border-default text-[10px]">
       <SegmentButton
+        active={mode === "combined"}
+        disabled={worktreeGone}
+        onClick={() => onChange("combined")}
+        label="Combined"
+        tooltip={
+          worktreeGone
+            ? WORKTREE_GONE_TIP
+            : "All changes this run made — committed commits plus uncommitted working-tree edits, vs. the source branch. Tinted by status."
+        }
+        count={mode === "combined" ? count : undefined}
+      />
+      <SegmentButton
         active={mode === "uncommitted"}
-        disabled={uncommittedDisabled}
+        disabled={worktreeGone}
         onClick={() => onChange("uncommitted")}
         label="Uncommitted"
         tooltip={
-          uncommittedDisabled
-            ? "Worktree no longer available — only the branch view is reachable."
+          worktreeGone
+            ? WORKTREE_GONE_TIP
             : "Files modified but not yet committed (git status)."
         }
         count={mode === "uncommitted" ? count : undefined}
@@ -359,9 +389,18 @@ interface TreeRowProps {
   collapsed: Set<string>;
   onToggle: (pathKey: string) => void;
   onSelectFile: (file: RunFile) => void;
+  // When true (combined mode), file rows paint a subtle committed-vs-
+  // uncommitted tint keyed by file.lifecycle.
+  showLifecycle: boolean;
 }
 
-function TreeRow({ node, collapsed, onToggle, onSelectFile }: TreeRowProps) {
+function TreeRow({
+  node,
+  collapsed,
+  onToggle,
+  onSelectFile,
+  showLifecycle,
+}: TreeRowProps) {
   if (node.kind === "folder") {
     const isCollapsed = collapsed.has(node.pathKey);
     return (
@@ -379,12 +418,19 @@ function TreeRow({ node, collapsed, onToggle, onSelectFile }: TreeRowProps) {
               collapsed={collapsed}
               onToggle={onToggle}
               onSelectFile={onSelectFile}
+              showLifecycle={showLifecycle}
             />
           ))}
       </>
     );
   }
-  return <FileRow node={node} onSelectFile={onSelectFile} />;
+  return (
+    <FileRow
+      node={node}
+      onSelectFile={onSelectFile}
+      showLifecycle={showLifecycle}
+    />
+  );
 }
 
 // Pixel offsets for indentation. We use inline styles instead of
@@ -439,25 +485,45 @@ function FolderRow({
   );
 }
 
+// LIFECYCLE_META drives the subtle per-file committed-vs-uncommitted
+// distinction in combined mode: a faint row tint (warm for in-flight
+// uncommitted work, cool for landed commits) plus a tooltip/aria suffix.
+// Kept low-alpha so it reads as a hint, not a highlight, and so the
+// hover:bg-surface-2 still wins on hover.
+const LIFECYCLE_META: Record<
+  "committed" | "uncommitted",
+  { row: string; label: string }
+> = {
+  uncommitted: { row: "bg-amber-500/10", label: "uncommitted · pending" },
+  committed: { row: "bg-sky-500/[0.07]", label: "committed · on branch" },
+};
+
 function FileRow({
   node,
   onSelectFile,
+  showLifecycle,
 }: {
   node: TreeFile;
   onSelectFile: (file: RunFile) => void;
+  showLifecycle: boolean;
 }) {
   const f = node.file;
-  const tooltip = f.old_path ? `${f.old_path} → ${f.path}` : f.path;
+  const meta = showLifecycle && f.lifecycle ? LIFECYCLE_META[f.lifecycle] : null;
+  const base = f.old_path ? `${f.old_path} → ${f.path}` : f.path;
+  const tooltip = meta ? `${base} · ${meta.label}` : base;
   return (
     <Tooltip content={tooltip}>
       <button
         type="button"
         onClick={() => onSelectFile(f)}
+        aria-label={meta ? `${node.label} — ${meta.label}` : undefined}
         style={{
           paddingLeft:
             INDENT_BASE + node.depth * INDENT_PER_LEVEL + CHEVRON_SLOT,
         }}
-        className="flex w-full items-center gap-2 py-0.5 pr-2 text-left hover:bg-surface-2 focus:bg-surface-2 focus:outline-none"
+        className={`flex w-full items-center gap-2 py-0.5 pr-2 text-left hover:bg-surface-2 focus:bg-surface-2 focus:outline-none ${
+          meta ? meta.row : ""
+        }`}
       >
         <StatusDot status={f.status} />
         <span className="truncate min-w-0 text-fg-default">{node.label}</span>
@@ -519,9 +585,14 @@ function reasonLabel(reason: string | undefined): string {
 }
 
 function emptyMessage(mode: ViewMode): string {
-  return mode === "branch"
-    ? "No committed changes yet"
-    : "No uncommitted changes — the agent hasn't touched any tracked file yet.";
+  switch (mode) {
+    case "branch":
+      return "No committed changes yet";
+    case "combined":
+      return "No changes yet — nothing committed or pending.";
+    default:
+      return "No uncommitted changes — the agent hasn't touched any tracked file yet.";
+  }
 }
 
 // isLive defaults to true when the field is absent so pre-feature
@@ -532,6 +603,7 @@ function isLive(data: { live?: boolean }): boolean {
 }
 
 // footerLabel disambiguates the visible mode + lifecycle:
+// - combined on a live worktree → "All run changes · worktree: name"
 // - uncommitted on a live worktree → "Working tree (worktree): name"
 // - branch on a live worktree → "Branch vs. source: BaseCommit..HEAD"
 // - branch on a finalized run → "Committed in this run"
@@ -543,14 +615,16 @@ function footerLabel(
   },
   mode: ViewMode,
 ): string {
+  const where = data.worktree ? "worktree" : "cwd";
+  if (mode === "combined") {
+    return `All run changes · ${where}: ${basename(data.work_dir ?? "")}`;
+  }
   if (mode === "branch") {
     if (isLive(data)) {
-      const where = data.worktree ? "worktree" : "cwd";
       return `Branch vs. source · ${where}: ${basename(data.work_dir ?? "")}`;
     }
     return "Committed in this run";
   }
-  const where = data.worktree ? "worktree" : "cwd";
   return `Working tree (${where}): ${basename(data.work_dir ?? "")}`;
 }
 
@@ -562,6 +636,11 @@ function footerTooltip(
   },
   mode: ViewMode,
 ): string {
+  if (mode === "combined") {
+    return `Every file this run has touched — committed commits (BaseCommit..HEAD) plus uncommitted working-tree edits, tinted by status. Worktree: ${
+      data.work_dir ?? "<unknown>"
+    }`;
+  }
   if (mode === "branch") {
     if (isLive(data)) {
       return `All changes this run has committed so far, vs. the source branch (BaseCommit..HEAD). Worktree: ${

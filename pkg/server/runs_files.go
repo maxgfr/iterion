@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 
 	gitlib "github.com/SocialGouv/iterion/pkg/git"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -12,20 +13,34 @@ import (
 
 // fileMode selects the source-of-truth for /api/runs/{id}/files:
 //
-//   - modeUncommitted (default, live worktree only): `git status` against
-//     the worktree — captures changes that have not been committed yet.
+//   - modeUncommitted (live worktree only): `git status` against the
+//     worktree — captures changes that have not been committed yet.
 //   - modeBranch: range diff between Run.BaseCommit and the current tip
 //     (HEAD when the worktree is live, FinalCommit when finalized).
 //     Equivalent to "branch vs. source branch" — every entry is a change
 //     introduced by a commit during the run.
+//   - modeCombined (live worktree only): the union of modeBranch and
+//     modeUncommitted — every file the run has touched, committed or not,
+//     each tagged with a `lifecycle` ("committed" | "uncommitted") so the
+//     studio can render a subtle committed-vs-in-flight distinction. This
+//     is the studio's default while a run is in progress.
 //
 // Once the worktree is gc'd, only modeBranch is meaningful: the
-// uncommitted view returns available=false with reason="worktree_gone".
+// uncommitted and combined views return available=false with
+// reason="worktree_gone".
 type fileMode string
 
 const (
 	modeUncommitted fileMode = "uncommitted"
 	modeBranch      fileMode = "branch"
+	modeCombined    fileMode = "combined"
+)
+
+// Lifecycle tags annotate combined-mode entries (see combinedFiles). They
+// surface on gitlib.FileStatus.Lifecycle for the studio's per-file tint.
+const (
+	lifecycleCommitted   = "committed"
+	lifecycleUncommitted = "uncommitted"
 )
 
 // parseFileMode reads the ?mode= query param. Unknown values fall back
@@ -36,6 +51,8 @@ func parseFileMode(raw string) fileMode {
 		return modeUncommitted
 	case modeBranch:
 		return modeBranch
+	case modeCombined:
+		return modeCombined
 	default:
 		return ""
 	}
@@ -79,11 +96,14 @@ type runFilesResponse struct {
 //   - `branch`: `git diff BaseCommit..HEAD` — commits the run has
 //     produced so far (excludes uncommitted state).
 //
+//   - `combined`: the union of the two above, each file tagged with a
+//     lifecycle (see combinedFiles). The studio's default while in flight.
+//
 //   - **Finalized run** (worktree gc'd by the engine cleanup): only
 //     `mode=branch` is meaningful; we synthesize the file list from
 //     `git diff BaseCommit..FinalCommit` against repoRoot. A request
-//     with `mode=uncommitted` returns available=false with
-//     reason="worktree_gone" so the UI can disable that segment.
+//     with `mode=uncommitted` or `mode=combined` returns available=false
+//     with reason="worktree_gone" so the UI can disable that segment.
 //
 // The endpoint never 5xx's on the expected "no panel" outcomes (missing
 // WorkDir, non-git directory, no finalization metadata) — it returns 200
@@ -156,14 +176,15 @@ func (s *Server) handleListRunFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Past this point the worktree is gone (or never was a git repo).
-	// Uncommitted view is meaningless without a worktree: signal that
-	// to the UI so it can disable the segment instead of showing an
-	// empty list.
-	if requested == modeUncommitted {
+	// The uncommitted and combined views both need a worktree to read
+	// pending changes: signal that to the UI so it can disable the
+	// segment (and auto-fall-back to branch) instead of showing an empty
+	// list.
+	if requested == modeUncommitted || requested == modeCombined {
 		s.writeJSONFor(w, r, runFilesResponse{
 			WorkDir:   run.WorkDir,
 			Worktree:  run.Worktree,
-			Mode:      modeUncommitted,
+			Mode:      requested,
 			Files:     []gitlib.FileStatus{},
 			Available: false,
 			Reason:    "worktree_gone",
@@ -196,12 +217,85 @@ func (s *Server) handleListRunFiles(w http.ResponseWriter, r *http.Request) {
 
 // liveFiles returns the live-worktree file list for the requested mode.
 // modeUncommitted reads `git status`; modeBranch ranges BaseCommit..HEAD
-// inside the worktree (commits not yet finalized).
+// inside the worktree (commits not yet finalized); modeCombined merges
+// the two via combinedFiles.
 func liveFiles(run *store.Run, mode fileMode) ([]gitlib.FileStatus, error) {
-	if mode == modeBranch {
+	switch mode {
+	case modeBranch:
 		return gitlib.StatusBetween(run.WorkDir, run.BaseCommit, "HEAD")
+	case modeCombined:
+		return combinedFiles(run)
+	default:
+		return gitlib.Status(run.WorkDir)
 	}
-	return gitlib.Status(run.WorkDir)
+}
+
+// combinedFiles produces the union of the uncommitted working-tree changes
+// (`git status`) and the committed range (BaseCommit..HEAD) for a live
+// worktree, tagging each entry with a lifecycle so the studio can paint a
+// subtle committed-vs-in-flight distinction.
+//
+// On a path collision — a file committed during the run AND then re-edited
+// (or committed but with further staged/unstaged delta) — the uncommitted
+// entry wins: the file is the operator's in-flight concern, and its
+// +N|-N reflects the still-pending delta (HEAD..worktree) rather than the
+// committed delta. This is a deliberate 2-state simplification matching the
+// "committed vs uncommitted" framing; we don't synthesize a third "mixed"
+// state or a base..worktree line-count (which would need an extra diff).
+//
+// When the run has no BaseCommit (e.g. a non-worktree run, or a worktree
+// run whose baseline wasn't recorded) the committed range is unknowable, so
+// the result degrades gracefully to the uncommitted set alone.
+func combinedFiles(run *store.Run) ([]gitlib.FileStatus, error) {
+	// The committed range and the uncommitted status are independent git
+	// scans, so run the range concurrently with the status read (each
+	// already parallelizes its own name-status + numstat internally). Mirrors
+	// the goroutine+channel idiom in pkg/git/status.go so combined — the
+	// in-flight default — pays max(scan) latency, not the sum.
+	type rangeResult struct {
+		files []gitlib.FileStatus
+		err   error
+	}
+	var rangeCh chan rangeResult
+	if run.BaseCommit != "" {
+		rangeCh = make(chan rangeResult, 1)
+		go func() {
+			files, err := gitlib.StatusBetween(run.WorkDir, run.BaseCommit, "HEAD")
+			rangeCh <- rangeResult{files, err}
+		}()
+	}
+
+	uncommitted, err := gitlib.Status(run.WorkDir)
+	if err != nil {
+		if rangeCh != nil {
+			<-rangeCh
+		}
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(uncommitted))
+	out := make([]gitlib.FileStatus, 0, len(uncommitted))
+	for _, f := range uncommitted {
+		f.Lifecycle = lifecycleUncommitted
+		out = append(out, f)
+		seen[f.Path] = struct{}{}
+	}
+	if rangeCh != nil {
+		res := <-rangeCh
+		if res.err != nil {
+			return nil, res.err
+		}
+		for _, f := range res.files {
+			if _, dup := seen[f.Path]; dup {
+				continue
+			}
+			f.Lifecycle = lifecycleCommitted
+			out = append(out, f)
+		}
+	}
+	// Deterministic order for test stability; the studio re-sorts into a
+	// tree (buildFileTree) so display order is unaffected either way.
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out, nil
 }
 
 // handleGetRunFileDiff returns the Before/After contents of one path inside

@@ -420,3 +420,164 @@ func TestRunFileDiff_HappyPath(t *testing.T) {
 		t.Errorf("after: %v", out.After)
 	}
 }
+
+// TestRunFiles_ModeCombined verifies the combined view returns the union of
+// committed (BaseCommit..HEAD) and uncommitted (`git status`) changes, each
+// tagged with the right lifecycle. Fixture: b.txt committed inside the run,
+// a.txt modified-but-uncommitted, c.txt untracked.
+func TestRunFiles_ModeCombined(t *testing.T) {
+	srv, hs := newTestServer(t)
+	dir := initRepo(t)
+	baseSHA := revParse(t, dir, "HEAD")
+
+	commitInRunWorktree(t, dir, "b.txt", "new\n", "add b")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "c.txt"), []byte("scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	seedRunWithBaseline(t, srv, "combined", dir, baseSHA)
+
+	resp, err := http.Get(hs.URL + "/api/runs/combined/files?mode=combined")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out runFilesResponse
+	decodeJSON(t, resp, &out)
+	if !out.Available || !out.Live {
+		t.Fatalf("Available=%v Live=%v reason=%q", out.Available, out.Live, out.Reason)
+	}
+	if out.Mode != modeCombined {
+		t.Errorf("Mode: want combined, got %q", out.Mode)
+	}
+	got := map[string]gitlib.FileStatus{}
+	for _, f := range out.Files {
+		got[f.Path] = f
+	}
+	if len(out.Files) != 3 {
+		t.Errorf("want 3 files (a,b,c), got %d: %+v", len(out.Files), out.Files)
+	}
+	if got["b.txt"].Lifecycle != lifecycleCommitted {
+		t.Errorf("b.txt lifecycle: want %q, got %q", lifecycleCommitted, got["b.txt"].Lifecycle)
+	}
+	if got["a.txt"].Lifecycle != lifecycleUncommitted {
+		t.Errorf("a.txt lifecycle: want %q, got %q", lifecycleUncommitted, got["a.txt"].Lifecycle)
+	}
+	if got["c.txt"].Lifecycle != lifecycleUncommitted {
+		t.Errorf("c.txt lifecycle: want %q, got %q", lifecycleUncommitted, got["c.txt"].Lifecycle)
+	}
+}
+
+// TestRunFiles_ModeCombined_MixedDedup verifies that a file both committed
+// during the run AND re-edited without committing appears exactly once,
+// tagged uncommitted (the in-flight state wins on collision).
+func TestRunFiles_ModeCombined_MixedDedup(t *testing.T) {
+	srv, hs := newTestServer(t)
+	dir := initRepo(t)
+	baseSHA := revParse(t, dir, "HEAD")
+
+	commitInRunWorktree(t, dir, "b.txt", "v1\n", "add b")
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("v2 pending\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	seedRunWithBaseline(t, srv, "mixed", dir, baseSHA)
+
+	resp, err := http.Get(hs.URL + "/api/runs/mixed/files?mode=combined")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out runFilesResponse
+	decodeJSON(t, resp, &out)
+	if !out.Available {
+		t.Fatalf("Available=false reason=%q", out.Reason)
+	}
+	n := 0
+	var entry gitlib.FileStatus
+	for _, f := range out.Files {
+		if f.Path == "b.txt" {
+			n++
+			entry = f
+		}
+	}
+	if n != 1 {
+		t.Fatalf("b.txt should appear exactly once, got %d: %+v", n, out.Files)
+	}
+	if entry.Lifecycle != lifecycleUncommitted {
+		t.Errorf("mixed b.txt lifecycle: want %q, got %q", lifecycleUncommitted, entry.Lifecycle)
+	}
+}
+
+// TestRunFiles_ModeCombined_NoBaseline verifies that combined degrades to the
+// uncommitted set alone when the run has no BaseCommit (the committed range is
+// unknowable) instead of erroring.
+func TestRunFiles_ModeCombined_NoBaseline(t *testing.T) {
+	srv, hs := newTestServer(t)
+	dir := initRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "c.txt"), []byte("scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seedRunWithWorkDir(t, srv, "combined-nobase", dir, true)
+
+	resp, err := http.Get(hs.URL + "/api/runs/combined-nobase/files?mode=combined")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out runFilesResponse
+	decodeJSON(t, resp, &out)
+	if !out.Available {
+		t.Fatalf("Available=false reason=%q — combined should degrade to uncommitted-only without a baseline", out.Reason)
+	}
+	if out.Mode != modeCombined {
+		t.Errorf("Mode: want combined, got %q", out.Mode)
+	}
+	if len(out.Files) == 0 {
+		t.Fatalf("expected uncommitted files, got none")
+	}
+	for _, f := range out.Files {
+		if f.Lifecycle != lifecycleUncommitted {
+			t.Errorf("%s lifecycle: want %q (no baseline → no committed portion), got %q", f.Path, lifecycleUncommitted, f.Lifecycle)
+		}
+	}
+}
+
+// TestRunFiles_ModeCombined_WorktreeGone verifies the combined view reports
+// worktree_gone (like uncommitted) once the worktree is torn down, so the UI
+// disables the segment and auto-falls-back to branch.
+func TestRunFiles_ModeCombined_WorktreeGone(t *testing.T) {
+	srv, hs := newTestServer(t)
+	st, err := store.New(srv.cfg.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := st.CreateRun(context.Background(), "combined-gone", "wf", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.WorkDir = "/nonexistent/host/worktree"
+	r.RepoRoot = "/nonexistent/host"
+	r.Worktree = true
+	r.BaseCommit = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	r.FinalCommit = "feedfacefeedfacefeedfacefeedfacefeedface"
+	if err := st.SaveRun(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.Get(hs.URL + "/api/runs/combined-gone/files?mode=combined")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out runFilesResponse
+	decodeJSON(t, resp, &out)
+	if out.Available {
+		t.Errorf("Available should be false")
+	}
+	if out.Reason != "worktree_gone" {
+		t.Errorf("Reason: want worktree_gone, got %q", out.Reason)
+	}
+}
