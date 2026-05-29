@@ -458,6 +458,12 @@ judge reviewer_claude:
   reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-max}"
   input: review_input
   output: verdict_output
+  ## Persist the verdict as a versioned artifact so each iteration's
+  ## approval / blockers / fix_plan is inspectable in the studio's
+  ## Artifact tab (the VerdictCard renders it) and diffable across the
+  ## review loop. Without publish:, the verdict lives only in
+  ## events.jsonl / run.log and never reaches the Artifact tab.
+  publish: verdict_claude
   system: review_system
   user: review_user_claude
   session: fresh
@@ -482,6 +488,8 @@ judge reviewer_gpt:
   reasoning_effort: "${ITERION_VIBE_EFFORT_GPT:-high}"
   input: review_input
   output: verdict_output
+  ## Persist the verdict (see reviewer_claude's publish: note).
+  publish: verdict_gpt
   system: review_system
   user: review_user_gpt
   session: fresh
