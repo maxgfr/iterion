@@ -350,3 +350,42 @@ func TestLoad_EmptyEnvIgnored(t *testing.T) {
 		t.Errorf("NATS.Stream: got %q want default", cfg.NATS.Stream)
 	}
 }
+
+func TestLoad_SandboxHostStateYAML(t *testing.T) {
+	clearITERION(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sandbox-host-state.yaml")
+	body := `
+sandbox:
+  host_state: none
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(LoadOptions{YAMLPath: path})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Sandbox.HostState != "none" {
+		t.Errorf("Sandbox.HostState = %q, want none", cfg.Sandbox.HostState)
+	}
+}
+
+func TestLoad_InvalidRunnerDurations(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+	}{
+		{"heartbeat-zero", "ITERION_HEARTBEAT_INTERVAL"},
+		{"lock-ttl-zero", "ITERION_LOCK_TTL"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clearITERION(t)
+			t.Setenv(tc.env, "0s")
+			if _, err := Load(LoadOptions{}); err == nil {
+				t.Fatalf("expected error for %s=0s", tc.env)
+			}
+		})
+	}
+}

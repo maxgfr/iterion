@@ -394,6 +394,12 @@ func (c *Config) Validate() error {
 	if c.Runner.Concurrency < 1 {
 		return fmt.Errorf("ITERION_RUNNER_CONCURRENCY %d invalid (want >= 1)", c.Runner.Concurrency)
 	}
+	if c.Runner.Heartbeat <= 0 {
+		return fmt.Errorf("ITERION_HEARTBEAT_INTERVAL %s invalid (want > 0)", c.Runner.Heartbeat)
+	}
+	if c.Runner.LockTTL <= 0 {
+		return fmt.Errorf("ITERION_LOCK_TTL %s invalid (want > 0)", c.Runner.LockTTL)
+	}
 
 	switch c.Sandbox.Default {
 	case "", "none", "auto":

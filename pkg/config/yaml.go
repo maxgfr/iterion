@@ -44,7 +44,8 @@ type yamlConfig struct {
 }
 
 type yamlSandboxConfig struct {
-	Default *string `yaml:"default"`
+	Default   *string `yaml:"default"`
+	HostState *string `yaml:"host_state"`
 }
 
 type yamlAuthConfig struct {
@@ -214,6 +215,7 @@ func (y *yamlConfig) applyTo(cfg *Config) error {
 	}
 	if y.Sandbox != nil {
 		applyString(y.Sandbox.Default, &cfg.Sandbox.Default)
+		applyString(y.Sandbox.HostState, &cfg.Sandbox.HostState)
 	}
 	return nil
 }
