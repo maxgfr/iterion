@@ -21,6 +21,12 @@
 # panel renders them all, freezing the UI. The `.tmp-*/` glob catches
 # any future per-run scratch dir of this family.
 .tmp-*/
+# Same family, different name: a sandboxed `go` invocation with a
+# workspace-relative GOMODCACHE drops a `.gomodcache/` (module + Go
+# toolchain auto-download cache) into the worktree. It slipped past
+# `.tmp-*/` once and rode commit-and-finalize's `git add -A` onto a
+# storage branch — ignore it explicitly.
+.gomodcache/
 
 # Playwright MCP scratch (console logs + page snapshots written under
 # cwd by the @playwright/mcp server; per-run, not committed). Also
