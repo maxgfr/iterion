@@ -35,41 +35,37 @@ agent a:
   model: "test"
 `
 
-// TestBuildSpec_PerTicketBotResolvesWorkflowPath confirms a ticket
-// with iss.Bot set picks up the resolved bot's main file instead of
-// cfg.Workflow.
-func TestBuildSpec_PerTicketBotResolvesWorkflowPath(t *testing.T) {
-	botregistry.ClearSchemaCache()
+// TestBuildSpec_PerTicketBotSetsRouteKey confirms a ticket with iss.Bot
+// set drives the routing key (spec.Assignee) — the RoutingRunner selects
+// the pre-compiled workflow by that key. buildSpec no longer resolves a
+// workflow file (the engine runs its pre-compiled IR; the bot FILE is
+// resolved + route-checked by the dispatch() guard).
+func TestBuildSpec_PerTicketBotSetsRouteKey(t *testing.T) {
 	d := newMinimalDispatcher(t)
-	dir := t.TempDir()
-	botPath := filepath.Join(dir, "feature_dev.bot")
-	writeBotFile(t, botPath, botSrcWithVars)
-
-	cfg := &Config{
-		Workflow: "/tmp/default.bot",
-		Bots:     botregistry.Config{Paths: []string{dir}},
-	}
+	cfg := &Config{Workflow: "/tmp/default.bot"}
 	iss := tracker.Issue{ID: "i-1", Title: "x", Bot: "feature_dev"}
 	spec := d.buildSpec(cfg, iss, "run-1", "/tmp/ws", 0, nil)
-	if spec.WorkflowPath != botPath {
-		t.Fatalf("WorkflowPath = %q, want %q", spec.WorkflowPath, botPath)
+	if spec.Assignee != "feature_dev" {
+		t.Fatalf("route key (spec.Assignee) = %q, want %q", spec.Assignee, "feature_dev")
 	}
 }
 
-// TestBuildSpec_UnknownBotFallsBackToConfigWorkflow — a stale name on
-// a ticket should not silently halt dispatch; we fall back to the
-// config workflow and log a warning.
-func TestBuildSpec_UnknownBotFallsBackToConfigWorkflow(t *testing.T) {
-	botregistry.ClearSchemaCache()
+// TestBuildSpec_BotWinsOverAssignee pins the routing-key precedence:
+// Bot wins when both are set; otherwise Assignee is the key. Resolution
+// / route-checking of an unknown bot is the dispatch() guard's job, not
+// buildSpec's — buildSpec sets the key unconditionally.
+func TestBuildSpec_BotWinsOverAssignee(t *testing.T) {
 	d := newMinimalDispatcher(t)
-	cfg := &Config{
-		Workflow: "/tmp/default.bot",
-		Bots:     botregistry.Config{Paths: []string{t.TempDir()}},
+	cfg := &Config{Workflow: "/tmp/default.bot"}
+
+	both := tracker.Issue{ID: "i-2", Title: "x", Bot: "feature_dev", Assignee: "alice"}
+	if got := d.buildSpec(cfg, both, "run-2a", "/tmp/ws", 0, nil).Assignee; got != "feature_dev" {
+		t.Fatalf("bot+assignee: route key = %q, want bot %q", got, "feature_dev")
 	}
-	iss := tracker.Issue{ID: "i-2", Title: "x", Bot: "ghost"}
-	spec := d.buildSpec(cfg, iss, "run-2", "/tmp/ws", 0, nil)
-	if spec.WorkflowPath != "/tmp/default.bot" {
-		t.Fatalf("expected fallback to default, got %q", spec.WorkflowPath)
+
+	assigneeOnly := tracker.Issue{ID: "i-2b", Title: "x", Assignee: "whole_improve_loop"}
+	if got := d.buildSpec(cfg, assigneeOnly, "run-2b", "/tmp/ws", 0, nil).Assignee; got != "whole_improve_loop" {
+		t.Fatalf("assignee-only: route key = %q, want %q", got, "whole_improve_loop")
 	}
 }
 
@@ -111,16 +107,16 @@ func TestBuildSpec_BotArgsMergeOverConfigVars(t *testing.T) {
 	}
 }
 
-// TestBuildSpec_EmptyBotKeepsConfigWorkflow — the legacy code path
-// where neither Assignee nor Bot points anywhere still produces the
-// default cfg.Workflow.
-func TestBuildSpec_EmptyBotKeepsConfigWorkflow(t *testing.T) {
+// TestBuildSpec_EmptyBotEmptyRouteKey — neither Assignee nor Bot set
+// yields an empty routing key, so the RoutingRunner falls through to the
+// default workflow.
+func TestBuildSpec_EmptyBotEmptyRouteKey(t *testing.T) {
 	d := newMinimalDispatcher(t)
 	cfg := &Config{Workflow: "/tmp/default.bot"}
 	iss := tracker.Issue{ID: "i-4", Title: "x"}
 	spec := d.buildSpec(cfg, iss, "run-4", "/tmp/ws", 0, nil)
-	if spec.WorkflowPath != "/tmp/default.bot" {
-		t.Fatalf("WorkflowPath = %q", spec.WorkflowPath)
+	if spec.Assignee != "" {
+		t.Fatalf("route key (spec.Assignee) = %q, want empty", spec.Assignee)
 	}
 	if len(spec.Vars) != 0 {
 		t.Fatalf("Vars should be empty: %v", spec.Vars)

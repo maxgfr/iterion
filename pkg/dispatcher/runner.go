@@ -9,7 +9,6 @@ import (
 // execute on behalf of an issue. Runner.Dispatch is expected to block
 // until the run reaches a terminal status or ctx is cancelled.
 type DispatchSpec struct {
-	WorkflowPath  string
 	RunID         string
 	WorkspacePath string
 	StoreDir      string

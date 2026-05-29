@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/SocialGouv/iterion/pkg/botregistry"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 )
 
@@ -40,12 +41,43 @@ func (r *RoutingRunner) Dispatch(ctx context.Context, spec DispatchSpec) error {
 	if r == nil || r.Default == nil {
 		return errors.New("routing runner: default runner is nil")
 	}
-	if r.ByAssignee != nil && spec.Assignee != "" {
-		if rn, ok := r.ByAssignee[spec.Assignee]; ok && rn != nil {
-			return rn.Dispatch(ctx, spec)
-		}
+	if rn, ok := r.routeFor(spec.Assignee); ok {
+		return rn.Dispatch(ctx, spec)
 	}
 	return r.Default.Dispatch(ctx, spec)
+}
+
+// routeFor resolves the per-assignee Runner for a routing key (the
+// issue's bot, else its assignee). Exact match wins; otherwise a
+// normalized comparison tolerates kebab/snake/case differences between
+// the ticket and the configured key (so bot:"feature_dev" matches an
+// assignee_workflows entry "feature-dev" without a dual alias). Returns
+// (nil,false) when no per-assignee route exists — the caller falls back
+// to Default.
+func (r *RoutingRunner) routeFor(key string) (Runner, bool) {
+	if r == nil || r.ByAssignee == nil || key == "" {
+		return nil, false
+	}
+	if rn, ok := r.ByAssignee[key]; ok && rn != nil {
+		return rn, true
+	}
+	nk := botregistry.NormalizeName(key)
+	for k, rn := range r.ByAssignee {
+		if rn != nil && botregistry.NormalizeName(k) == nk {
+			return rn, true
+		}
+	}
+	return nil, false
+}
+
+// HasRoute reports whether key resolves to a dedicated per-assignee
+// Runner (vs. falling through to Default). The dispatcher's honest-fail
+// guard uses it so an explicit `bot` that resolves to a file but has no
+// route is skipped+warned, instead of silently running the default
+// workflow with the wrong structured-output schemas.
+func (r *RoutingRunner) HasRoute(key string) bool {
+	_, ok := r.routeFor(key)
+	return ok
 }
 
 // Close releases all per-assignee runners (and the default), in any

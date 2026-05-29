@@ -45,8 +45,9 @@ func TestRoutingRunnerPicksByAssignee(t *testing.T) {
 		{"feature_dev", vfd},
 		{"whole_improve_loop", rev},
 		{"", def},            // empty → default
-		{"unknown-bot", def}, // miss → default
-		{"FEATURE_DEV", def}, // case-sensitive miss → default
+		{"unknown-bot", def}, // genuine miss → default
+		{"FEATURE_DEV", vfd}, // case-insensitive → feature_dev (NormalizeName)
+		{"feature-dev", vfd}, // kebab tolerated against snake key → feature_dev
 	}
 	for _, tc := range cases {
 		t.Run(tc.assignee, func(t *testing.T) {
@@ -67,9 +68,35 @@ func TestRoutingRunnerPicksByAssignee(t *testing.T) {
 		})
 	}
 
-	// default got the three fallback cases (empty + unknown + case mismatch).
-	if got := len(def.seen); got != 3 {
-		t.Errorf("default runner saw %d dispatches, want 3", got)
+	// default got only the genuine fallbacks (empty + unknown-bot); the
+	// case/kebab variants now resolve to feature_dev via NormalizeName.
+	if got := len(def.seen); got != 2 {
+		t.Errorf("default runner saw %d dispatches, want 2", got)
+	}
+}
+
+// TestRoutingRunnerHasRoute pins the route-existence check the
+// dispatch() guard uses to refuse an explicit bot that would otherwise
+// silently fall through to the default workflow.
+func TestRoutingRunnerHasRoute(t *testing.T) {
+	rr := &RoutingRunner{
+		Default:    &recordingRunner{name: "default"},
+		ByAssignee: map[string]Runner{"feature_dev": &recordingRunner{name: "feature_dev"}},
+	}
+	cases := []struct {
+		key  string
+		want bool
+	}{
+		{"feature_dev", true}, // exact
+		{"feature-dev", true}, // kebab → snake key
+		{"FEATURE_DEV", true}, // case-insensitive
+		{"ghost", false},      // no route
+		{"", false},           // empty
+	}
+	for _, tc := range cases {
+		if got := rr.HasRoute(tc.key); got != tc.want {
+			t.Errorf("HasRoute(%q) = %v, want %v", tc.key, got, tc.want)
+		}
 	}
 }
 

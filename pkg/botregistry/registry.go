@@ -91,12 +91,35 @@ func ResolveBotPath(name string, paths []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Exact match first (fast, unambiguous).
 	for _, e := range entries {
 		if e.Name == name {
 			return e.MainFile(), nil
 		}
 	}
+	// Normalized fallback: tolerate kebab/snake/case differences between
+	// the requested name and the discovered bot (e.g. a ticket's
+	// bot:"feature_dev" against a catalogue dir "feature-dev"). Without
+	// this, every bot needed a dual kebab+snake alias registered.
+	nn := NormalizeName(name)
+	for _, e := range entries {
+		if NormalizeName(e.Name) == nn {
+			return e.MainFile(), nil
+		}
+	}
 	return "", fmt.Errorf("bot %q not found in %v: %w", name, paths, os.ErrNotExist)
+}
+
+// NormalizeName canonicalises a bot/assignee name for tolerant matching:
+// lowercased, with '_' and spaces folded to '-'. So "feature_dev",
+// "Feature Dev", and "feature-dev" all compare equal. Used by
+// ResolveBotPath and the dispatcher's RoutingRunner so a ticket's
+// bot/assignee need not match the catalogue's exact spelling.
+func NormalizeName(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.ReplaceAll(s, "_", "-")
+	s = strings.ReplaceAll(s, " ", "-")
+	return s
 }
 
 // DefaultPaths returns the conventional bot-discovery roots relative to a

@@ -269,6 +269,18 @@ func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 			c.logger.Warn("dispatcher: %s names bot %q which can't be resolved: %v — skipping (refusing to silently run the default workflow); will retry next tick", iss.Identifier, iss.Bot, err)
 			return
 		}
+		// The bot FILE resolves — but does it have an actual dispatch
+		// route? A bot absent from assignee_workflows would fall through
+		// to the default workflow, running an unrelated bot with the
+		// wrong structured-output schemas and reporting a misleading
+		// success. Refuse, same as the unresolvable case. (RoutingRunner
+		// implements HasRoute; a plain single-workflow runner doesn't —
+		// there an explicit bot has no routing concept, so we don't gate
+		// it and preserve the legacy single-workflow behaviour.)
+		if rc, ok := c.runner.(interface{ HasRoute(string) bool }); ok && !rc.HasRoute(iss.Bot) {
+			c.logger.Warn("dispatcher: %s names bot %q which resolves to a file but has no dispatch route (not in assignee_workflows) — skipping (refusing to silently run the default workflow); add it to assignee_workflows to enable it", iss.Identifier, iss.Bot)
+			return
+		}
 	}
 
 	if err := c.tracker.Claim(ctx, iss.ID, c.hostMarker); err != nil {
@@ -446,41 +458,27 @@ func (c *Dispatcher) buildSpec(cfg *Config, iss tracker.Issue, runID, wsPath str
 		}
 		attachments[k] = v
 	}
-	// Per-ticket bot + BotArgs overrides — set on the issue itself,
-	// resolved against cfg.Bots.Paths. Order:
-	//   1. Per-ticket Bot replaces the config workflow path entirely.
-	//      If we can't resolve, fall back to cfg.Workflow + log loudly:
-	//      a stale name on a ticket should not silently halt dispatch
-	//      (operators may have renamed/moved a bot mid-flight).
-	//   2. Per-ticket BotArgs merge over the rendered vars key-by-key,
-	//      with iss.BotArgs winning for declared keys. Keys not in the
-	//      workflow's vars schema get a warn log but are still passed
-	//      through (the engine will surface its own diagnostic).
-	workflowPath := cfg.Workflow
-	if iss.Bot != "" {
-		resolved, err := botregistry.ResolveBotPath(iss.Bot, cfg.Bots.Paths)
-		if err != nil {
-			c.logger.Warn("dispatcher: resolve bot %q for issue %s: %v — falling back to config.workflow", iss.Bot, iss.ID, err)
-		} else {
-			workflowPath = resolved
-		}
-	}
+	// Per-ticket BotArgs merge over the rendered vars key-by-key, with
+	// iss.BotArgs winning for declared keys. Keys not in the workflow's
+	// vars schema get a warn log but are still passed through (the engine
+	// surfaces its own diagnostic).
 	for k, v := range iss.BotArgs {
 		vars[k] = v
 	}
 	// Routing key for the runner. The RoutingRunner selects a per-assignee
-	// pre-compiled workflow by spec.Assignee (AssigneeWorkflows is keyed by
-	// bot name), so a ticket that names a Bot but has no Assignee would
-	// otherwise fall through to the default workflow (dispatcher_default)
-	// and never run its bot. Bot is the explicit dispatch directive — it
-	// wins over Assignee when set. (The honest-fail guard at the top of
-	// dispatch() already rejected an unresolvable Bot before we get here.)
+	// pre-compiled workflow by spec.Assignee (ByAssignee is keyed by bot /
+	// assignee name), so a ticket that names a Bot but has no Assignee would
+	// otherwise fall through to the default workflow and never run its bot.
+	// Bot is the explicit dispatch directive — it wins over Assignee when
+	// set. The compiled workflow is selected ENTIRELY by this key; the bot
+	// FILE is resolved (and route-checked) by the guard at the top of
+	// dispatch(). buildSpec no longer carries a workflow path — the engine
+	// runs its pre-compiled IR, never a per-dispatch path.
 	routeAssignee := iss.Assignee
 	if iss.Bot != "" {
 		routeAssignee = iss.Bot
 	}
 	return DispatchSpec{
-		WorkflowPath:  workflowPath,
 		RunID:         runID,
 		WorkspacePath: wsPath,
 		StoreDir:      c.storeDir,
