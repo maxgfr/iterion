@@ -91,6 +91,16 @@ tasks:
     cmds:
       - go test -v -timeout 120s ./e2e/...
 
+  test:goldens:
+    desc: Run bot golden replay tests (schema + invariant checks on recorded LLM fixtures; no API keys)
+    cmds:
+      - go test -count=1 -run 'TestGoldens' ./pkg/botreplay/...
+
+  test:goldens:record:
+    desc: Re-record bot golden fixtures against the real LLM (requires credentials; writes testdata/bot-goldens/). Run from the repo root.
+    cmds:
+      - go test -tags goldens_record -count=1 -run 'TestRecordGoldens' -timeout 30m ./pkg/botreplay/...
+
   test:live:
     desc: Run all live e2e tests (requires claude CLI + ANTHROPIC_API_KEY + OPENAI_API_KEY)
     cmds:
@@ -261,10 +271,11 @@ tasks:
       - ./{{.BINARY}} diagram {{.CLI_ARGS}}
 
   check:
-    desc: Run all checks (lint + test)
+    desc: Run all checks (lint + test + golden replay)
     cmds:
       - task: lint
       - task: test
+      - task: test:goldens
 
   studio:build:
     desc: Build the studio frontend
