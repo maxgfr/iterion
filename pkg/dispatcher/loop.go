@@ -322,7 +322,16 @@ func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 
 	attempt := 0
 	resumeFromRunID := ""
+	// hadRetryEntry records whether this dispatch is servicing a
+	// scheduled retry (an in-memory retryEntry existed). It gates the
+	// cross-restart fallback below: a retry entry carries a DELIBERATE
+	// resume-vs-fresh decision, and an empty PrevRunID on it means "run
+	// fresh" — e.g. scheduleRetry dropped a doomed resume because the bot
+	// source changed. The persisted last_run pointer must not override
+	// that decision.
+	hadRetryEntry := false
 	if cur, ok := c.state.retries[iss.ID]; ok {
+		hadRetryEntry = true
 		attempt = cur.Attempt
 		// PrevRunID is set on the retry entry iff the prior run's
 		// status was resumable (failed_resumable / cancelled /
@@ -344,7 +353,17 @@ func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 	// orphaned ticket), consult the tracker's persisted "last run"
 	// pointer. Only the native tracker exposes this lookup today;
 	// other adapters silently fall through to a fresh runID.
-	if resumeFromRunID == "" {
+	//
+	// Gated on !hadRetryEntry: when a retry entry WAS present its
+	// PrevRunID is authoritative — including an empty value meaning
+	// "scheduleRetry deliberately dropped a doomed resume (bot source
+	// changed since the prior run) — run fresh". Without this guard the
+	// fallback re-reads the persisted last_run_id (still failed_resumable
+	// on disk) and re-resumes the same source-changed run on the very
+	// next poll, an infinite resume→fail→revert loop that strands the
+	// ticket. scheduleRetry's in-memory drop alone can't survive this
+	// re-resolution. See pkg/dispatcher/retry.go isResumeSourceChanged.
+	if resumeFromRunID == "" && !hadRetryEntry {
 		type lastRunLookup interface {
 			LastRunForIssue(id string) (string, error)
 		}
