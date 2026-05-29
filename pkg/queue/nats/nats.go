@@ -129,14 +129,30 @@ func (c *Conn) Ping(ctx context.Context) error {
 	if c == nil || c.nc == nil {
 		return fmt.Errorf("queue/nats: connection not initialised")
 	}
+	if ctx == nil {
+		return fmt.Errorf("queue/nats: ping: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if !c.nc.IsConnected() {
 		return fmt.Errorf("queue/nats: not connected (status=%s)", c.nc.Status())
 	}
-	// nats.go has no native Ping that takes a context; RTT measures the
-	// round-trip latency to the connected server using a Flush + ping
-	// frame and respects the connection's reconnect state.
-	if _, err := c.nc.RTT(); err != nil {
-		return fmt.Errorf("queue/nats: rtt: %w", err)
+	// FlushWithContext is the context-aware form of a NATS ping/flush
+	// round-trip. Preserve the previous RTT() upper bound (10s) when the
+	// caller supplies an undeadlined context, but honour shorter caller
+	// deadlines/cancellation instead of always blocking for the library
+	// default.
+	flushCtx := ctx
+	var cancel context.CancelFunc
+	if _, ok := flushCtx.Deadline(); !ok {
+		flushCtx, cancel = context.WithTimeout(ctx, 10*time.Second)
+	} else {
+		cancel = func() {}
+	}
+	defer cancel()
+	if err := c.nc.FlushWithContext(flushCtx); err != nil {
+		return fmt.Errorf("queue/nats: ping: %w", err)
 	}
 	return nil
 }
@@ -263,7 +279,19 @@ func (c *Conn) CancelRun(runID string) error {
 	if runID == "" {
 		return fmt.Errorf("queue/nats: cancel requires runID")
 	}
-	return c.nc.Publish(fmt.Sprintf(SubjectCancelFmt, runID), nil)
+	if c == nil || c.nc == nil {
+		return fmt.Errorf("queue/nats: connection not initialised")
+	}
+	if err := c.nc.Publish(fmt.Sprintf(SubjectCancelFmt, runID), nil); err != nil {
+		return fmt.Errorf("queue/nats: publish cancel %s: %w", runID, err)
+	}
+	// Core NATS Publish only queues to the client's flusher; force a
+	// bounded round-trip so API callers learn when a reconnect/partition
+	// prevented the transient cancel signal from reaching the broker.
+	if err := c.nc.FlushTimeout(5 * time.Second); err != nil {
+		return fmt.Errorf("queue/nats: flush cancel %s: %w", runID, err)
+	}
+	return nil
 }
 
 // SubscribeCancel installs a one-shot Core NATS subscriber on
@@ -271,15 +299,45 @@ func (c *Conn) CancelRun(runID string) error {
 // arrives. The runner uses this for the duration of a single run;
 // the returned subscription is valid until ctx is cancelled.
 func (c *Conn) SubscribeCancel(ctx context.Context, runID string, onCancel func()) (*nats.Subscription, error) {
+	if c == nil || c.nc == nil {
+		return nil, fmt.Errorf("queue/nats: connection not initialised")
+	}
+	if ctx == nil {
+		return nil, fmt.Errorf("queue/nats: subscribe cancel %s: nil context", runID)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	sub, err := c.nc.Subscribe(fmt.Sprintf(SubjectCancelFmt, runID), func(_ *nats.Msg) {
 		onCancel()
 	})
 	if err != nil {
 		return nil, fmt.Errorf("queue/nats: subscribe cancel %s: %w", runID, err)
 	}
+	// Subscribe is asynchronous: without a flush, a cancel published just
+	// after SubscribeCancel returns can race ahead of the SUB protocol and
+	// be lost. Bound the round-trip with the caller's context (or 5s when
+	// it has no deadline) and tear the subscription back down on failure.
+	flushCtx := ctx
+	var cancel context.CancelFunc
+	if _, ok := flushCtx.Deadline(); !ok {
+		flushCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
+	} else {
+		cancel = func() {}
+	}
+	flushErr := c.nc.FlushWithContext(flushCtx)
+	cancel()
+	if flushErr != nil {
+		if unsubErr := sub.Unsubscribe(); unsubErr != nil {
+			return nil, fmt.Errorf("queue/nats: subscribe cancel %s flush: %w (unsubscribe: %v)", runID, flushErr, unsubErr)
+		}
+		return nil, fmt.Errorf("queue/nats: subscribe cancel %s flush: %w", runID, flushErr)
+	}
 	go func() {
 		<-ctx.Done()
-		_ = sub.Unsubscribe()
+		if err := sub.Unsubscribe(); err != nil && c.logger != nil {
+			c.logger.Warn("queue/nats: unsubscribe cancel %s: %v", runID, err)
+		}
 	}()
 	return sub, nil
 }
@@ -343,8 +401,11 @@ func (cons *Consumer) Fetch(ctx context.Context, wait time.Duration) (*Delivery,
 	}
 	timeoutCtx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
-	batch2, err := cons.cons.Fetch(1, jetstream.FetchMaxWait(wait))
+	batch2, err := cons.cons.Fetch(1, jetstream.FetchContext(timeoutCtx))
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) {
 			return nil, ErrNoMessage
 		}
@@ -352,6 +413,19 @@ func (cons *Consumer) Fetch(ctx context.Context, wait time.Duration) (*Delivery,
 	}
 	for msg := range batch2.Messages() {
 		return wrap(msg), nil
+	}
+	// A transport error during the blocking fetch must not masquerade as
+	// "no message ready": that would skip the runner loop's back-off and
+	// spin tightly against a partitioned broker. A bare wait timeout is
+	// the expected empty-poll case and stays ErrNoMessage.
+	if err := batch2.Error(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, ErrNoMessage
+		}
+		return nil, fmt.Errorf("queue/nats: fetch wait error: %w", err)
 	}
 	return nil, ErrNoMessage
 }

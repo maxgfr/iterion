@@ -84,10 +84,10 @@ type Config struct {
 type Runner struct {
 	cfg      Config
 	consumer *natsq.Consumer
-	cancel   context.CancelFunc
 
 	mu      sync.Mutex
-	current *inFlight // non-nil while a run is being processed
+	current *inFlight          // non-nil while a run is being processed; guarded by mu
+	cancel  context.CancelFunc // loop-context canceller installed by Run; guarded by mu
 }
 
 type inFlight struct {
@@ -144,7 +144,13 @@ func New(ctx context.Context, cfg Config) (*Runner, error) {
 // on failure). Returns ctx.Err() when shut down cleanly.
 func (r *Runner) Run(ctx context.Context) error {
 	loopCtx, cancel := context.WithCancel(ctx)
+	// Publish the loop canceller under mu: Shutdown reads it from another
+	// goroutine, so an unsynchronised write here is a data race (and the
+	// Go memory model permits Shutdown to observe a stale nil and silently
+	// skip cancelling the loop, defeating the graceful drain).
+	r.mu.Lock()
 	r.cancel = cancel
+	r.mu.Unlock()
 	defer cancel()
 
 	r.cfg.Logger.Info("runner: started, runnerID=%s workdir=%s", r.cfg.RunnerID, r.cfg.WorkDir)
@@ -193,10 +199,11 @@ func (r *Runner) Run(ctx context.Context) error {
 func (r *Runner) Shutdown(ctx context.Context) error {
 	r.mu.Lock()
 	cur := r.current
+	cancel := r.cancel
 	r.mu.Unlock()
 
-	if r.cancel != nil {
-		r.cancel()
+	if cancel != nil {
+		cancel()
 	}
 	if cur == nil {
 		return nil
@@ -346,10 +353,35 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 		}
 		return
 	}
-	if preRun.Status == store.RunStatusCancelled {
-		logger.Info("runner: run %s already cancelled — skipping", msg.RunID)
-		finalStatus = "cancelled"
-		logDeliveryErr(logger, "ack-already-cancelled", msg.RunID, delivery.Ack())
+	// Redelivered launch messages can arrive after the first attempt
+	// already persisted resumable state (failed_resumable,
+	// paused_operator, or cancellation-with-checkpoint during shutdown).
+	// Re-running them through Engine.Run would be a poison loop because
+	// runResolveDoc refuses to restart non-queued statuses; convert the
+	// in-memory dispatch to Resume so JetStream redelivery actually uses
+	// the checkpoint it exists to protect. A pre-pickup user-cancelled run
+	// has no checkpoint and remains a stale delivery to ack/drop.
+	switch preRun.Status {
+	case store.RunStatusCancelled:
+		if preRun.Checkpoint == nil {
+			logger.Info("runner: run %s already cancelled — skipping", msg.RunID)
+			finalStatus = "cancelled"
+			logDeliveryErr(logger, "ack-already-cancelled", msg.RunID, delivery.Ack())
+			return
+		}
+		if msg.Resume == nil {
+			logger.Info("runner: run %s redelivered after cancellation checkpoint — resuming", msg.RunID)
+			msg.Resume = &queue.ResumeSpec{}
+		}
+	case store.RunStatusFailedResumable, store.RunStatusPausedOperator:
+		if msg.Resume == nil {
+			logger.Info("runner: run %s redelivered in status %s — resuming", msg.RunID, preRun.Status)
+			msg.Resume = &queue.ResumeSpec{}
+		}
+	case store.RunStatusFinished, store.RunStatusFailed, store.RunStatusPausedWaitingHuman:
+		logger.Info("runner: run %s already in status %s — dropping stale delivery", msg.RunID, preRun.Status)
+		finalStatus = string(preRun.Status)
+		logDeliveryErr(logger, "ack-stale-status", msg.RunID, delivery.Ack())
 		return
 	}
 	// Verify the message's tenant matches the persisted document.
@@ -411,17 +443,28 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 	// up automatically.
 	var hbFailed atomic.Bool
 	hbDone := make(chan struct{})
-	go r.heartbeat(runCtx, runCancel, lock, hbDone, &hbFailed)
+	go r.heartbeat(runCtx, runCancel, lock, delivery, hbDone, &hbFailed)
 	// Cancel runCtx *before* waiting on hbDone, otherwise we deadlock:
 	// heartbeat only exits on ctx.Done(), and the outer `defer
 	// runCancel()` at function entry is LIFO-last so it would run
-	// after this defer. Calling runCancel() here is idempotent.
+	// after this defer. Calling runCancel() here is idempotent. Kept as
+	// a panic-safety net even though the happy path drains the heartbeat
+	// explicitly below.
 	defer func() {
 		runCancel()
 		<-hbDone
 	}()
 
-	if err := r.executeRun(runCtx, msg); err != nil {
+	err = r.executeRun(runCtx, msg)
+	// Stop the heartbeat before finalizing (Ack/Nak) the delivery. The
+	// heartbeat issues periodic InProgress() on this same delivery to
+	// hold the JetStream ack deadline open; draining it here guarantees
+	// no InProgress() lands after the terminal Ack/Nak below (which would
+	// otherwise log a spurious already-acked error). A second drain in
+	// the defer above is a no-op on the closed channel.
+	runCancel()
+	<-hbDone
+	if err != nil {
 		// Distinguish transient (resumable) vs terminal failures.
 		// runtime.ErrRunPaused / ErrRunCancelled are not "the
 		// delivery failed" — they're successful checkpoint writes
@@ -430,6 +473,12 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 			logger.Info("runner: run %s checkpointed (%v)", msg.RunID, err)
 			finalStatus = "paused"
 			logDeliveryErr(logger, "ack-paused", msg.RunID, delivery.Ack())
+			return
+		}
+		if errors.Is(err, runtime.ErrRunPausedOperator) {
+			logger.Info("runner: run %s operator-paused (%v)", msg.RunID, err)
+			finalStatus = "paused_operator"
+			logDeliveryErr(logger, "ack-paused-operator", msg.RunID, delivery.Ack())
 			return
 		}
 		if errors.Is(err, runtime.ErrRunCancelled) {
@@ -441,6 +490,12 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 				logger.Warn("runner: run %s heartbeat lost — naking for sibling redelivery", msg.RunID)
 				finalStatus = "lock_held"
 				logDeliveryErr(logger, "nak-heartbeat-lost", msg.RunID, delivery.Nak())
+				return
+			}
+			if parent.Err() != nil {
+				logger.Warn("runner: run %s interrupted by runner shutdown — naking for checkpoint resume", msg.RunID)
+				finalStatus = "shutdown"
+				logDeliveryErr(logger, "nak-shutdown-cancelled", msg.RunID, delivery.Nak())
 				return
 			}
 			logger.Info("runner: run %s checkpointed (%v)", msg.RunID, err)
@@ -468,7 +523,7 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 // writers ending up on the same run state. processOne reads hbFailed
 // to Nak (not Ack) the delivery so the message stays queued for sibling
 // redelivery instead of requiring manual user resume.
-func (r *Runner) heartbeat(ctx context.Context, runCancel context.CancelFunc, lock store.RunLock, done chan<- struct{}, hbFailed *atomic.Bool) {
+func (r *Runner) heartbeat(ctx context.Context, runCancel context.CancelFunc, lock store.RunLock, delivery *natsq.Delivery, done chan<- struct{}, hbFailed *atomic.Bool) {
 	defer close(done)
 	natsLock, ok := lock.(*natsq.Lock)
 	if !ok {
@@ -481,6 +536,17 @@ func (r *Runner) heartbeat(ctx context.Context, runCancel context.CancelFunc, lo
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			// Hold the JetStream ack deadline open. AckWait (5m default)
+			// is far shorter than many real runs; without a periodic
+			// InProgress() the broker redelivers the message to a sibling
+			// and, after MaxDeliver attempts, drops it from the queue —
+			// destroying the crash-recovery safety net while the run is
+			// still healthy and head-of-line-blocking the consumer
+			// (MaxAckPending=1). Best-effort: a transient miss is retried
+			// on the next tick, well inside AckWait.
+			if err := delivery.InProgress(); err != nil {
+				r.cfg.Logger.Warn("runner: heartbeat InProgress failed: %v", err)
+			}
 			if err := natsLock.Refresh(ctx); err != nil {
 				if errors.Is(err, context.Canceled) {
 					return // run already exiting
@@ -547,17 +613,44 @@ func (r *Runner) executeRun(ctx context.Context, msg *queue.RunMessage) error {
 		defer cleanup()
 	}
 
+	var runErr error
 	if msg.Resume != nil {
-		return engine.Resume(ctx, msg.RunID, msg.Resume.Answers)
+		runErr = engine.Resume(ctx, msg.RunID, msg.Resume.Answers)
+	} else {
+		runErr = engine.Run(ctx, msg.RunID, msg.Vars)
 	}
-	return engine.Run(ctx, msg.RunID, msg.Vars)
+
+	// Delete the sealed credentials bundle only on a terminal-clean
+	// outcome (success, or paused-for-resume). On every Nak-for-
+	// redelivery path — a transient/generic engine error, or a
+	// heartbeat-loss ErrRunCancelled — JetStream redelivers the SAME
+	// message with the SAME SecretsRef, so the bundle MUST survive for
+	// the retry. Deleting it here was the bug: the redelivered attempt
+	// hit ErrRunSecretsNotFound, logged "continuing without", ran
+	// credential-less and failed again, turning one transient blip into
+	// a guaranteed MaxDeliver drop for every BYOK/OAuth run. Paused runs
+	// Ack and resume via a FRESH SecretsRef (cloudpublisher.SubmitResume
+	// re-seals — run_secrets.go documents "the runner deletes the record
+	// on success"), so the old bundle is safe to drop. The store's 24h
+	// TTL is the backstop for the user-cancel / terminal-fail paths we
+	// intentionally skip here.
+	if cleanup != nil && (runErr == nil || errors.Is(runErr, runtime.ErrRunPaused)) {
+		r.deleteRunSecrets(msg)
+	}
+	return runErr
 }
 
 // injectCredentials resolves the run's sealed bundle, decrypts it,
 // stamps the plaintext into ctx via secrets.WithCredentials, and
-// returns a cleanup func that wipes the bundle at the call site.
-// When no bundle is attached or the runner has no Sealer wired,
+// returns a cleanup func that performs LOCAL hygiene (wipes the
+// in-memory plaintext keys + removes the OAuth temp dirs) at the call
+// site. When no bundle is attached or the runner has no Sealer wired,
 // returns the original ctx unchanged.
+//
+// The cleanup func runs on every executeRun return. Removal of the
+// *persistent* sealed bundle from the store is intentionally NOT part
+// of cleanup — see deleteRunSecrets, which executeRun invokes only on a
+// terminal-clean outcome so a redelivered run can re-fetch its secrets.
 //
 // OAuth-forfait blobs are materialised in fresh temp directories
 // (CLAUDE_CONFIG_DIR / CODEX_HOME-shaped) and wired through
@@ -596,15 +689,15 @@ func (r *Runner) injectCredentials(ctx context.Context, msg *queue.RunMessage) (
 		OAuthCredentialFiles: map[string]string{},
 	}
 	tmpDirs := make([]string, 0, len(bundle.OAuthCredentials))
+	// cleanup performs LOCAL process hygiene only — wiping the decrypted
+	// API keys from memory and removing the materialised OAuth temp dirs.
+	// It runs on EVERY executeRun return (including Nak-for-redelivery
+	// paths) so plaintext never outlives the attempt. Deleting the
+	// *persistent* sealed bundle is deliberately NOT done here: it must
+	// happen only on a terminal-clean outcome (executeRun calls
+	// deleteRunSecrets) so a redelivered run can re-fetch the same
+	// SecretsRef instead of silently running credential-less.
 	cleanup := func() {
-		ctxDel, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		// A failed Delete here leaks the sealed bundle in run_secrets
-		// (it'll expire on the store's TTL, but the operator should know
-		// the cleanup path failed in case of repeated occurrences).
-		if delErr := r.cfg.RunSecrets.Delete(ctxDel, msg.SecretsRef); delErr != nil {
-			r.cfg.Logger.Warn("runner: run_secrets delete for %s (ref=%s): %v", msg.RunID, msg.SecretsRef, delErr)
-		}
 		for k := range bundle.APIKeys {
 			bundle.APIKeys[k] = ""
 		}
@@ -623,6 +716,25 @@ func (r *Runner) injectCredentials(ctx context.Context, msg *queue.RunMessage) (
 		r.cfg.Logger.Info("runner: oauth-forfait active run=%s tenant=%s kind=%s file=%s/%s", msg.RunID, msg.TenantID, kind, dir, fname)
 	}
 	return secrets.WithCredentials(ctx, creds), cleanup, nil
+}
+
+// deleteRunSecrets best-effort removes the persistent sealed bundle for
+// this run from the RunSecrets store. executeRun calls it ONLY on a
+// terminal-clean outcome (success or paused-for-resume) — never on a
+// Nak-for-redelivery path, where the SAME SecretsRef must survive so the
+// redelivered attempt can re-fetch its credentials. Detached from the
+// (possibly already-cancelled) run context with its own short timeout. A
+// failed delete is logged but non-fatal: the store's 24h TTL reaps the
+// bundle regardless.
+func (r *Runner) deleteRunSecrets(msg *queue.RunMessage) {
+	if msg.SecretsRef == "" || r.cfg.RunSecrets == nil {
+		return
+	}
+	ctxDel, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if delErr := r.cfg.RunSecrets.Delete(ctxDel, msg.SecretsRef); delErr != nil {
+		r.cfg.Logger.Warn("runner: run_secrets delete for %s (ref=%s): %v", msg.RunID, msg.SecretsRef, delErr)
+	}
 }
 
 // materializeOAuthCredentials writes the sealed payload to a fresh

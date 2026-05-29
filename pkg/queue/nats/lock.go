@@ -96,7 +96,16 @@ func (l *Lock) Refresh(ctx context.Context) error {
 // run_id immediately. Non-fatal if the lease has already expired —
 // the next Acquire will succeed regardless.
 func (l *Lock) Release(ctx context.Context) error {
-	if err := l.conn.kv.Delete(ctx, l.runID); err != nil &&
+	// Revision-guarded delete: only remove the lease if its latest
+	// revision still matches the one we last wrote (at Acquire or the
+	// most recent Refresh). If our lease expired (TTL) and a sibling
+	// re-acquired it after a network partition or a long GC pause, the
+	// key now carries the sibling's revision — an unconditional Delete
+	// would silently evict *their* lock and let a third runner claim the
+	// same run, i.e. split-brain. LastRevision turns that case into a
+	// surfaced error instead of a stolen lock; a clean release (we still
+	// own the revision) still succeeds.
+	if err := l.conn.kv.Delete(ctx, l.runID, jetstream.LastRevision(l.rev)); err != nil &&
 		!errors.Is(err, jetstream.ErrKeyNotFound) {
 		return fmt.Errorf("queue/nats: release %s: %w", l.runID, err)
 	}
