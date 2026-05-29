@@ -146,6 +146,38 @@ func TestRoundTrip_CreateTransitionGetList(t *testing.T) {
 	}
 }
 
+func TestSetBot_SetsBotFieldNotAssignee(t *testing.T) {
+	s := newStore(t)
+	caps := NewCapabilities("board.create,board.assign")
+	res, err := Call(s, caps, "create_issue", json.RawMessage(`{"title":"x","assignee":"alice"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var iss native.Issue
+	_ = json.Unmarshal(res, &iss)
+
+	args, _ := json.Marshal(map[string]string{"id": iss.ID, "bot": "feature_dev"})
+	if _, err := Call(s, caps, "set_bot", args); err != nil {
+		t.Fatalf("set_bot: %v", err)
+	}
+	got, _ := s.Get(iss.ID)
+	if got.Bot != "feature_dev" {
+		t.Errorf("Bot = %q, want feature_dev", got.Bot)
+	}
+	if got.Assignee != "alice" {
+		t.Errorf("Assignee = %q, want unchanged 'alice' — set_bot must not touch the owner", got.Assignee)
+	}
+}
+
+func TestSetBot_RequiresAssignCapability(t *testing.T) {
+	s := newStore(t)
+	// Only board.read granted → set_bot (needs board.assign) must be denied.
+	_, err := Call(s, NewCapabilities("board.read"), "set_bot", json.RawMessage(`{"id":"x","bot":"feature_dev"}`))
+	if err == nil || !errors.Is(err, ErrCapabilityDenied) {
+		t.Fatalf("expected ErrCapabilityDenied, got %v", err)
+	}
+}
+
 func TestClose_RejectsNonTerminalTarget(t *testing.T) {
 	s := newStore(t)
 	caps := NewCapabilities("board.create,board.close")

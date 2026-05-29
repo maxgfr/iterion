@@ -678,7 +678,11 @@ prompt emit_action_system:
     item.body     → create_issue.body (multi-line markdown
                     capturing rationale + acceptance criteria —
                     this is what the assigned bot will read)
-    item.assignee → assign_issue (called separately after create)
+    item.assignee → set_bot (the chosen bot; called separately after
+                    create). item.assignee names which BOT runs the
+                    issue, so it maps to the issue's `bot` field via
+                    set_bot — the canonical dispatcher selector — NOT
+                    to assign_issue (which sets a human/team owner).
     item.args     → store in create_issue.fields.bot_args (a
                     comma-separated string, see step 5 below)
 
@@ -739,9 +743,11 @@ prompt emit_action_system:
           labels (see § Label assembly below), state `backlog`,
           and `fields.bot_args` set to the encoded args string
           from step 5.
-       b. If `item.assignee` validated in step 1, call
-          `mcp__iterion_board__assign_issue` with the new issue's
-          ID and the assignee.
+       b. If `item.assignee` validated in step 1 (it names a catalog
+          bot), call `mcp__iterion_board__set_bot` with the new issue's
+          ID and that bot. set_bot is the canonical dispatcher selector
+          — the dispatcher routes by `bot` first. Use assign_issue only
+          to record a human/team owner, never to choose the bot.
        c. On per-item failure, add to `failed_issues` with the
           error message and continue — do NOT abort the run.
 
@@ -927,11 +933,12 @@ prompt assign_to_bots_system:
      unknown tokens silently — include them in the summary.
   2. For each matched id:
      a. `mcp__iterion_board__transition_issue` with id + to="ready".
-     b. If the issue already has an assignee, leave it. If empty
-        and the issue title/body strongly suggests a specific bot
-        from the catalog, set it via
-        `mcp__iterion_board__assign_issue`. When uncertain, skip —
-        the operator can re-assign later from the triage loop.
+     b. If the issue already names a bot, leave it. If it has none
+        and the title/body strongly suggests a specific catalog bot,
+        set it via `mcp__iterion_board__set_bot` — the canonical
+        dispatcher selector (routes by `bot`; assign_issue records only
+        the human/team owner). When uncertain, skip — the operator can
+        set it later from the triage loop.
   3. Return the structured assign_output:
        - dispatched_ids: the ids actually moved to `ready`.
        - summary: one sentence: "Dispatched N of M selected
@@ -1045,7 +1052,11 @@ prompt triage_board_system:
     - mcp__iterion_board__transition_issue   (state changes,
                                               including
                                               backlog → ready)
-    - mcp__iterion_board__assign_issue
+    - mcp__iterion_board__set_bot            (choose which bot runs
+                                              the issue — canonical
+                                              dispatcher selector)
+    - mcp__iterion_board__assign_issue       (human/team owner only,
+                                              NOT bot selection)
     - mcp__iterion_board__set_labels
     - mcp__iterion_board__close_issue
     - mcp__iterion_board__list_issues / get_issue (read)

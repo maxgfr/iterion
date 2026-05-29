@@ -71,12 +71,12 @@ var allTools = []Tool{
 	{
 		Name:        "assign_issue",
 		Capability:  CapBoardAssign,
-		Description: "Set the assignee on an issue.",
+		Description: "Set the human/ownership assignee on an issue. To choose which BOT processes an issue, use set_bot instead — the dispatcher routes by bot first, and an assignee is only used as a bot selector when no bot is set (the path external trackers like GitHub/Forgejo rely on).",
 		InputSchema: json.RawMessage(`{
           "type":"object",
           "properties":{
             "id":{"type":"string"},
-            "assignee":{"type":"string","description":"Bot or user handle. Empty string clears the assignee."}
+            "assignee":{"type":"string","description":"Owner handle (person or team). Empty clears it. To pick the dispatching bot, prefer set_bot."}
           },
           "required":["id","assignee"]
         }`),
@@ -157,6 +157,19 @@ var allTools = []Tool{
         }`),
 	},
 	{
+		Name:        "set_bot",
+		Capability:  CapBoardAssign,
+		Description: "Set the explicit bot (dispatcher workflow) for an issue. This is the CANONICAL way to choose which bot runs an issue — prefer it over assign_issue, which sets the human/ownership assignee. The dispatcher routes by bot first, else assignee. Empty string clears it (falls back to assignee-based routing).",
+		InputSchema: json.RawMessage(`{
+          "type":"object",
+          "properties":{
+            "id":{"type":"string"},
+            "bot":{"type":"string","description":"Bot name, e.g. feature_dev or whole_improve_loop. Empty string clears it."}
+          },
+          "required":["id","bot"]
+        }`),
+	},
+	{
 		Name:        "set_labels",
 		Capability:  CapBoardLabel,
 		Description: "Replace the label list on an issue.",
@@ -199,6 +212,7 @@ var dispatchByName = map[string]func(*native.Store, json.RawMessage) (json.RawMe
 	"create_issue":     doCreate,
 	"transition_issue": doTransition,
 	"assign_issue":     doAssign,
+	"set_bot":          doSetBot,
 	"set_labels":       doSetLabels,
 	"close_issue":      doClose,
 	"list_issues":      doList,
@@ -206,7 +220,7 @@ var dispatchByName = map[string]func(*native.Store, json.RawMessage) (json.RawMe
 	"get_issue":        doGet,
 }
 
-// Tools returns the seven board tools, sorted by name. The slice is a
+// Tools returns the board tools, sorted by name. The slice is a
 // defensive copy so callers can sort/filter without mutating package state.
 func Tools() []Tool {
 	out := make([]Tool, len(allTools))
@@ -315,6 +329,32 @@ func doAssign(store *native.Store, raw json.RawMessage) (json.RawMessage, error)
 		return nil, err
 	}
 	iss, err := store.Update(resolved, native.Patch{Assignee: &args.Assignee})
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(iss)
+}
+
+// doSetBot sets the issue's explicit bot — the canonical dispatcher
+// workflow selector. Mirrors doAssign but targets the Bot field so a
+// triage agent can express "run bot X" without conflating it with the
+// human/ownership assignee.
+func doSetBot(store *native.Store, raw json.RawMessage) (json.RawMessage, error) {
+	var args struct {
+		ID  string `json:"id"`
+		Bot string `json:"bot"`
+	}
+	if err := unmarshalArgs(raw, &args); err != nil {
+		return nil, err
+	}
+	if args.ID == "" {
+		return nil, errors.New("id is required")
+	}
+	resolved, err := store.Resolve(args.ID)
+	if err != nil {
+		return nil, err
+	}
+	iss, err := store.Update(resolved, native.Patch{Bot: &args.Bot})
 	if err != nil {
 		return nil, err
 	}
