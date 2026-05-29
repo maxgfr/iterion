@@ -105,14 +105,18 @@ func (m *MemoryStore) ListUsers(_ context.Context, page Page) ([]User, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	if page.Offset >= len(users) {
+	offset := page.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(users) {
 		return nil, nil
 	}
-	end := page.Offset + limit
-	if end > len(users) {
+	end := offset + limit
+	if end < offset || end > len(users) {
 		end = len(users)
 	}
-	return users[page.Offset:end], nil
+	return users[offset:end], nil
 }
 
 func (m *MemoryStore) UserCount(_ context.Context) (int64, error) {
@@ -226,6 +230,9 @@ func (m *MemoryStore) ListMembershipsByTeam(_ context.Context, teamID string) ([
 func (m *MemoryStore) CreateInvitation(_ context.Context, inv Invitation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if cur, ok := m.invitations[inv.ID]; ok && cur.TokenHash != "" && cur.TokenHash != inv.TokenHash {
+		delete(m.invHash, cur.TokenHash)
+	}
 	m.invitations[inv.ID] = inv
 	if inv.TokenHash != "" {
 		m.invHash[inv.TokenHash] = inv.ID
@@ -256,8 +263,17 @@ func (m *MemoryStore) GetInvitationByTokenHash(_ context.Context, tokenHash stri
 func (m *MemoryStore) UpdateInvitation(_ context.Context, inv Invitation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.invitations[inv.ID]; !ok {
+	cur, ok := m.invitations[inv.ID]
+	if !ok {
 		return ErrNotFound
+	}
+	if cur.TokenHash != inv.TokenHash {
+		if cur.TokenHash != "" {
+			delete(m.invHash, cur.TokenHash)
+		}
+		if inv.TokenHash != "" {
+			m.invHash[inv.TokenHash] = inv.ID
+		}
 	}
 	m.invitations[inv.ID] = inv
 	return nil
@@ -294,6 +310,14 @@ func (m *MemoryStore) UpsertOIDCLink(_ context.Context, link OIDCLink) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	k := oidcKey(link.Provider, link.ProviderUserID)
+	if cur, ok := m.oidc[k]; ok && cur.UserID != link.UserID {
+		if set := m.oidcByUser[cur.UserID]; set != nil {
+			delete(set, k)
+			if len(set) == 0 {
+				delete(m.oidcByUser, cur.UserID)
+			}
+		}
+	}
 	m.oidc[k] = link
 	if m.oidcByUser[link.UserID] == nil {
 		m.oidcByUser[link.UserID] = make(map[string]bool)

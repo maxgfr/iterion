@@ -215,6 +215,46 @@ func TestLoadManifest_RejectsUnknownSchemaVersion(t *testing.T) {
 	errContains(t, err, "schema_version 99 not supported")
 }
 
+func TestLoadManifest_RejectsAttachmentTraversal(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	body := "name: evil\nschema_version: 1\nattachments:\n  secret: ../../../../etc/passwd\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadManifest(path)
+	errContains(t, err, "escapes the bundle")
+}
+
+func TestLoadManifest_RejectsAbsoluteAttachment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	body := "name: evil\nschema_version: 1\nattachments:\n  secret: /etc/passwd\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadManifest(path)
+	errContains(t, err, "absolute")
+}
+
+func TestLoadManifest_AllowsRelativeAttachment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	// A nested path with an internal ".." that cancels out must still be
+	// accepted — it does not escape the bundle.
+	body := "name: ok\nschema_version: 1\nattachments:\n  logo: images/logo.png\n  doc: a/../b/readme.md\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := LoadManifest(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m == nil || m.Attachments["logo"] != "images/logo.png" {
+		t.Fatalf("manifest not loaded correctly: %+v", m)
+	}
+}
+
 func TestLoadManifest_MissingFileIsNotError(t *testing.T) {
 	dir := t.TempDir()
 	m, err := LoadManifest(filepath.Join(dir, "absent.yaml"))

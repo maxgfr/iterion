@@ -3,6 +3,8 @@ package bundle
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"go.yaml.in/yaml/v2"
 )
@@ -92,5 +94,44 @@ func LoadManifest(path string) (*Manifest, error) {
 			m.SchemaVersion, CurrentManifestSchema,
 		)
 	}
+	// Every attachment value is later joined to the bundle's attachments/
+	// directory and opened as a file by the runtime. Reject absolute or
+	// "../"-escaping values at parse time so a hostile bundle can't turn
+	// that join into an arbitrary host-file read. This mirrors the tar
+	// extractor's guardEntry — both untrusted path sources in a .botz are
+	// validated identically.
+	for name, rel := range m.Attachments {
+		if err := validateAttachmentRelPath(name, rel); err != nil {
+			return nil, fmt.Errorf("bundle: manifest %s: %w", path, err)
+		}
+	}
 	return &m, nil
+}
+
+// validateAttachmentRelPath rejects a manifest `attachments:` value that
+// is absolute or escapes the bundle root via "..". The downstream
+// consumer builds the on-disk path with a bare
+// filepath.Join(AttachmentsDir, value) followed by os.Open, so an
+// unvalidated value such as "../../../../etc/passwd" would read an
+// arbitrary host file. Keep this in lock-step with tar.go's guardEntry.
+func validateAttachmentRelPath(name, rel string) error {
+	if strings.TrimSpace(rel) == "" {
+		return fmt.Errorf("attachment %q has an empty path", name)
+	}
+	if filepath.IsAbs(rel) {
+		return fmt.Errorf("attachment %q path must be relative, got absolute %q", name, rel)
+	}
+	clean := filepath.ToSlash(filepath.Clean(rel))
+	if clean == "." {
+		return fmt.Errorf("attachment %q has an empty path", name)
+	}
+	if strings.HasPrefix(clean, "/") {
+		return fmt.Errorf("attachment %q path must be relative, got absolute %q", name, rel)
+	}
+	for _, part := range strings.Split(clean, "/") {
+		if part == ".." {
+			return fmt.Errorf("attachment %q path escapes the bundle (%q)", name, rel)
+		}
+	}
+	return nil
 }

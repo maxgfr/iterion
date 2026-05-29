@@ -50,10 +50,12 @@ func (r Role) rank() int {
 
 // AtLeast reports whether r confers all permissions of want.
 func (r Role) AtLeast(want Role) bool {
-	if r.rank() == 0 {
+	haveRank := r.rank()
+	wantRank := want.rank()
+	if haveRank == 0 || wantRank == 0 {
 		return false
 	}
-	return r.rank() >= want.rank()
+	return haveRank >= wantRank
 }
 
 // Valid reports whether r is one of the four known roles.

@@ -151,9 +151,13 @@ func (s *MongoStore) ListUsers(ctx context.Context, page Page) ([]User, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	offset := int64(page.Offset)
+	if offset < 0 {
+		offset = 0
+	}
 	cur, err := s.users.Find(ctx, bson.M{}, options.Find().
 		SetSort(bson.M{"created_at": 1}).
-		SetSkip(int64(page.Offset)).
+		SetSkip(offset).
 		SetLimit(limit))
 	if err != nil {
 		return nil, fmt.Errorf("identity: list users: %w", err)
