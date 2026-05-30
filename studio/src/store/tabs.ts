@@ -26,6 +26,14 @@ export interface Tab {
   kind: TabKind;
   params: Record<string, string>;
   label: string;
+  // projectKey scopes a tab to one project (the project's dir, from
+  // useProjectInfo). Tabs only show when their projectKey matches the
+  // active project (selectRunTabs / selectEditorTabs), so switching
+  // projects hides the others — preserved for switch-back — and you never
+  // see another project's run/editor tab. undefined = legacy (dropped on
+  // rehydrate); scoping is off when currentProjectKey is null (cloud mode,
+  // no folder).
+  projectKey?: string;
   // hydrated stays false on cold start for tabs restored from localStorage
   // and flips true on first activation. Lets the editor/run tab views
   // skip mounting (and thus skip api.openFile + WS) for tabs the user
@@ -40,6 +48,11 @@ interface TabsState {
   // independently of run-tab activity, so we track them separately.
   activeEditorTabId: string | null;
   activeRunTabId: string | null;
+  // currentProjectKey is the active project's dir (synced from
+  // useProjectInfo via useProjectScopeSync). Tabs are filtered to it so
+  // each project shows only its own. null in cloud mode (no folder) =
+  // scoping off. NOT persisted — re-synced from the server on load.
+  currentProjectKey: string | null;
   // Per-runId counter bumped each time a run is OPENED via navigation
   // (board, runs list, deep-link) — NOT on a plain tab-strip click. The
   // run log view watches it to re-enforce "follow tail" on (re)open,
@@ -58,6 +71,9 @@ interface TabsState {
   // Bump runOpenNonce[runId] — called by navigation-driven opens to
   // signal the log view to re-enforce follow-tail.
   bumpRunOpen: (runId: string) => void;
+  // setCurrentProjectKey updates the active project scope and repoints the
+  // active run/editor tab to one visible in the new project.
+  setCurrentProjectKey: (key: string | null) => void;
   reorder: (kind: TabKind, from: number, to: number) => void;
   rename: (id: string, label: string) => void;
 }
@@ -110,6 +126,7 @@ export const useTabsStore = create<TabsState>()(
       tabs: [],
       activeEditorTabId: null,
       activeRunTabId: null,
+      currentProjectKey: null,
       runOpenNonce: {},
       openTab: (kind, params, label) => {
         const existing = findExistingTab(get().tabs, kind, params);
@@ -133,6 +150,7 @@ export const useTabsStore = create<TabsState>()(
           kind,
           params,
           label: label ?? defaultLabelFor(kind, params),
+          projectKey: get().currentProjectKey ?? undefined,
           hydrated: true,
         };
         set((s) => ({
@@ -148,6 +166,7 @@ export const useTabsStore = create<TabsState>()(
           kind: "editor",
           params: {},
           label: label ?? "untitled.bot",
+          projectKey: get().currentProjectKey ?? undefined,
           hydrated: true,
         };
         set((s) => ({ tabs: [...s.tabs, tab], activeEditorTabId: id }));
@@ -208,6 +227,30 @@ export const useTabsStore = create<TabsState>()(
           },
         }));
       },
+      setCurrentProjectKey: (key) => {
+        set((s) => {
+          if (s.currentProjectKey === key) return s;
+          // The previously-active tab may belong to a now-hidden project;
+          // repoint each kind's active id to its first visible tab (or
+          // null) so the views never render a hidden tab.
+          const visible = (t: Tab) => key == null || t.projectKey === key;
+          const stillVisible = (id: string | null) => {
+            const t = s.tabs.find((x) => x.id === id);
+            return !!t && visible(t);
+          };
+          const firstVisible = (kind: TabKind) =>
+            s.tabs.find((t) => t.kind === kind && visible(t))?.id ?? null;
+          return {
+            currentProjectKey: key,
+            activeEditorTabId: stillVisible(s.activeEditorTabId)
+              ? s.activeEditorTabId
+              : firstVisible("editor"),
+            activeRunTabId: stillVisible(s.activeRunTabId)
+              ? s.activeRunTabId
+              : firstVisible("run"),
+          };
+        });
+      },
       reorder: (kind, from, to) => {
         set((s) => {
           if (from === to) return s;
@@ -243,6 +286,7 @@ export const useTabsStore = create<TabsState>()(
           kind: t.kind,
           params: t.params,
           label: t.label,
+          projectKey: t.projectKey,
           // Persist as dormant so cold start doesn't fetch every
           // editor file / open every run WS on page reload — see
           // onRehydrateStorage.
@@ -258,6 +302,11 @@ export const useTabsStore = create<TabsState>()(
         // before those moved to sidebar-only navigation.
         state.tabs = state.tabs
           .filter((t) => t.kind === "editor" || t.kind === "run")
+          // Drop legacy tabs persisted before project scoping (no
+          // projectKey) — a one-time reset so they can't leak across
+          // projects. New tabs are always tagged with the active project
+          // on open.
+          .filter((t) => t.projectKey != null)
           .map((t) => ({ ...t, hydrated: false }));
         if (!state.tabs.some((t) => t.id === state.activeEditorTabId)) {
           state.activeEditorTabId = null;
@@ -270,10 +319,21 @@ export const useTabsStore = create<TabsState>()(
   ),
 );
 
+// tabInScope is true when the tab belongs to the active project (or
+// scoping is off — cloud mode, no folder). Drives the project-scoped tab
+// strips so switching projects never surfaces another project's tab.
+function tabInScope(t: Tab, key: string | null): boolean {
+  return key == null || t.projectKey === key;
+}
+
 export function selectEditorTabs(state: TabsState): Tab[] {
-  return state.tabs.filter((t) => t.kind === "editor");
+  return state.tabs.filter(
+    (t) => t.kind === "editor" && tabInScope(t, state.currentProjectKey),
+  );
 }
 
 export function selectRunTabs(state: TabsState): Tab[] {
-  return state.tabs.filter((t) => t.kind === "run");
+  return state.tabs.filter(
+    (t) => t.kind === "run" && tabInScope(t, state.currentProjectKey),
+  );
 }

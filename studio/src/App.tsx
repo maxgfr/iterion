@@ -30,6 +30,7 @@ import Login from "@/views/Login";
 import { useDesktop } from "@/hooks/useDesktop";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useProjectSwitchListener } from "@/hooks/useProjectSwitchListener";
+import { useProjectScopeSync } from "@/hooks/useProjectScopeSync";
 import { onDesktopEvent } from "@/lib/desktopBridge";
 import { DesktopEvent } from "@/lib/desktopEvents";
 import { AuthProvider, useAuth } from "@/auth/AuthContext";
@@ -96,6 +97,9 @@ function AuthedApp() {
   // project's empty home view replaces whatever the user was looking
   // at. No-op in desktop (server-mode WS) and cloud modes.
   useProjectSwitchListener();
+  // Scope run/editor tabs to the active project (hide other projects'
+  // tabs instead of leaking them across a switch).
+  useProjectScopeSync();
 
   useEffect(() => {
     const offs = [
