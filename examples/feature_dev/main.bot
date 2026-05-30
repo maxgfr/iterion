@@ -644,7 +644,10 @@ schema commit_result:
 agent plan:
   backend: "claude_code"
   model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-8}"
-  reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-max}"
+  reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-high}"
+  ## Bounded session — see act's tool_max_steps note. Plan is read-only
+  ## exploration, so a tighter cap is fine.
+  tool_max_steps: 60
   system: plan_system
   user: plan_user
   session: fresh
@@ -652,7 +655,15 @@ agent plan:
 agent act:
   backend: "claude_code"
   model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-8}"
-  reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-max}"
+  reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-high}"
+  ## Bound the agentic session (maps to claude --max-turns). Unbounded, a
+  ## high/max-effort implementer accretes tool-result context until the CLI
+  ## dies ("session ended without result message" — observed ~553 tool
+  ## calls, then a doomed resume that wedged in a tool-error loop).
+  ## error_max_turns is now a graceful partial stop (see
+  ## pkg/backend/delegate/claude_code.go), so the alternating review/fix
+  ## loop completes anything this cap truncates instead of crashing.
+  tool_max_steps: 120
   system: act_system
   user: act_user
   session: inherit
@@ -660,7 +671,9 @@ agent act:
 agent simplify:
   backend: "claude_code"
   model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-8}"
-  reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-max}"
+  reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-high}"
+  ## Bounded session — see act's tool_max_steps note.
+  tool_max_steps: 50
   user: simplify_user
   session: inherit
 
@@ -681,7 +694,7 @@ agent simplify:
 agent prepare_commit:
   backend: "claude_code"
   model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-8}"
-  reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-max}"
+  reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-high}"
   output: commit_output
   system: prepare_commit_system
   user: prepare_commit_user
@@ -813,7 +826,9 @@ compute streak_check:
 agent fix_claude:
   backend: "claude_code"
   model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-8}"
-  reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-max}"
+  reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-high}"
+  ## Bounded session — see act's tool_max_steps note.
+  tool_max_steps: 80
   input: fix_input
   output: fix_output
   system: fix_system

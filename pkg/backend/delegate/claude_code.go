@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -46,6 +47,25 @@ const askUserMCPSubcommand = "__mcp-ask-user"
 // on z.ai) should put the env var in their .env and use the DSL form
 // above in the bots that opt in.
 const defaultClaudeCodeModel = "claude-opus-4-8"
+
+// defaultMaxConsecutiveToolErrors aborts a claude_code session once this
+// many tool results error in a row (any success resets the count). It
+// guards against degenerate tool-error loops — a resumed/confused agent
+// spinning out tool calls that all fail (e.g. a parallel batch cancelled
+// by one bad relative-path call), which otherwise burns tokens until the
+// run hits its cost/duration budget (observed: ~50 errors / 3 successes
+// with zero progress). Override via ITERION_CLAUDE_CODE_MAX_TOOL_ERRORS
+// (0 disables the guard).
+const defaultMaxConsecutiveToolErrors = 25
+
+func resolveMaxConsecutiveToolErrors() int {
+	if v := os.Getenv("ITERION_CLAUDE_CODE_MAX_TOOL_ERRORS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return defaultMaxConsecutiveToolErrors
+}
 
 // defaultClaudeCodeEffort is the reasoning effort iterion forces on the
 // claude_code backend when the workflow doesn't specify one. The bare API
@@ -475,7 +495,20 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 	result.Tokens = totalIn + totalOut
 
 	if rm.IsError && rm.Subtype != claudesdk.ResultSuccess {
-		return result, fmt.Errorf("delegate: claude-code error: subtype=%s", rm.Subtype)
+		// error_max_turns is a SOFT stop, not a failure: the agent hit its
+		// tool_max_steps cap (claude --max-turns). For an implementer
+		// (act/fix, no output schema) the work it did is already in the
+		// worktree, so return the partial result and let the workflow
+		// continue — the review/fix loop completes any gaps. For a node
+		// with structured output (a judge), the partial result lacks the
+		// required fields and upstream schema validation fails it, which is
+		// the correct outcome. Other error subtypes (error_during_execution,
+		// error_max_budget_usd) remain hard failures.
+		if rm.Subtype == claudesdk.ResultErrorMaxTurns {
+			b.Logger.Warn("[%s#%d/claude-code] hit max turns (tool_max_steps) — returning partial result; downstream review/fix completes any gaps", task.NodeID, task.Iteration)
+		} else {
+			return result, fmt.Errorf("delegate: claude-code error: subtype=%s", rm.Subtype)
+		}
 	}
 
 	// Two-pass execution: when tools + schema are both present, Pass 1 output
@@ -910,6 +943,11 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 	// the name on the completion hook (ToolResultBlock only carries the
 	// correlation ID).
 	inFlightTools := make(map[string]string)
+	// Circuit-breaker for degenerate tool-error loops (see
+	// resolveMaxConsecutiveToolErrors): count CONSECUTIVE tool-result
+	// errors, reset on any success, abort when the streak crosses the cap.
+	maxToolErrors := resolveMaxConsecutiveToolErrors()
+	consecutiveToolErrors := 0
 	currentTimeout := coldTimeout
 	idle := time.NewTimer(currentTimeout)
 	defer idle.Stop()
@@ -1031,6 +1069,23 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 				b.Logger.Debug("[%s#%d/claude-code] 👤 user message echoed back", task.NodeID, task.Iteration)
 				if m.Message != nil {
 					emitToolHooks(task.Hooks, m.Message.Content, inFlightTools)
+					// Tool results echo back here as ToolResultBlocks. Track
+					// consecutive errors and abort a wedged tool-error loop
+					// before it burns the whole budget (see maxToolErrors).
+					for _, block := range m.Message.Content {
+						if tr, ok := block.(*claudesdk.ToolResultBlock); ok {
+							if tr.IsError {
+								consecutiveToolErrors++
+							} else {
+								consecutiveToolErrors = 0
+							}
+						}
+					}
+					if maxToolErrors > 0 && consecutiveToolErrors >= maxToolErrors {
+						cancelStream()
+						b.Logger.Warn("[%s#%d/claude-code] %d consecutive tool errors — aborting degenerate tool-error loop", task.NodeID, task.Iteration, consecutiveToolErrors)
+						return result, meta, fmt.Errorf("claude session aborted after %d consecutive tool errors — likely a degenerate tool-error loop (set ITERION_CLAUDE_CODE_MAX_TOOL_ERRORS to tune, 0 to disable)", consecutiveToolErrors)
+					}
 				}
 			case *claudesdk.ResultMessage:
 				result = m
