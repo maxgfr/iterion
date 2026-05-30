@@ -213,13 +213,10 @@ func collectBlocks(blocks map[int]*blockState) (string, []toolUseBlock, string, 
 			toolUses = append(toolUses, bs.toolUse)
 		case "thinking":
 			thinkingText += bs.text
-			// Prefer the duration finalized on content_block_stop; fall back
-			// to elapsed-since-start if the stream closed mid-block.
-			if bs.thinkingMs > 0 {
-				thinkingMs += bs.thinkingMs
-			} else if !bs.thinkingStart.IsZero() {
-				thinkingMs += int(time.Since(bs.thinkingStart) / time.Millisecond)
-			}
+			// Duration is finalized on content_block_stop (persisted via the
+			// *blockState pointer). A block that never stopped reports 0 — we
+			// don't attribute stream-close latency to thinking.
+			thinkingMs += bs.thinkingMs
 		}
 	}
 	return text, toolUses, thinkingText, thinkingMs

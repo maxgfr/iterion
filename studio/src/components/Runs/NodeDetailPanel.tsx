@@ -617,8 +617,7 @@ function DetailHeader({
               <span
                 title="Extended thinking. Token count is an approximation (the provider bills thinking inside output tokens; the text is re-encoded). Time is measured (exact for claw, best-effort for claude_code)."
               >
-                🧠 ~{thinkingTokens.toLocaleString()} tok ·{" "}
-                {(thinkingMs / 1000).toFixed(1)}s
+                🧠 ~{thinkingTokens.toLocaleString()} tok · {formatMs(thinkingMs)}
               </span>
             )}
             {costUsd > 0 && (

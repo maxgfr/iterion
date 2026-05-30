@@ -204,8 +204,6 @@ func buildReport(r *store.Run, events []*store.Event, s store.RunStore) *report 
 			rpt.Metrics.TotalInputTokens += extractInt(evt.Data, "input_tokens")
 			rpt.Metrics.CacheReadTokens += extractInt(evt.Data, "cache_read_tokens")
 			rpt.Metrics.CacheWriteTokens += extractInt(evt.Data, "cache_write_tokens")
-			rpt.Metrics.ThinkingTokens += extractInt(evt.Data, "thinking_tokens")
-			rpt.Metrics.ThinkingMs += extractInt(evt.Data, "thinking_ms")
 
 		case store.EventNodeFinished:
 			if evt.Data == nil {
@@ -220,6 +218,12 @@ func buildReport(r *store.Run, events []*store.Event, s store.RunStore) *report 
 			summary := ""
 			if output, ok := evt.Data["output"]; ok {
 				if outMap, ok := output.(map[string]interface{}); ok {
+					// Thinking metrics are stamped onto the node output by
+					// stampDelegateOutputMeta for both backends (claude_code
+					// never emits llm_step_finished), so node_finished is the
+					// single canonical source — same as _tokens/_cost_usd.
+					rpt.Metrics.ThinkingTokens += extractInt(outMap, "_thinking_tokens")
+					rpt.Metrics.ThinkingMs += extractInt(outMap, "_thinking_ms")
 					if s, ok := outMap["summary"].(string); ok {
 						summary = truncate(s, 200)
 					}
@@ -368,7 +372,7 @@ func renderMarkdown(rpt *report) string {
 		// Thinking tokens are an approximation (the provider bills thinking
 		// inside output tokens with no breakdown — re-encoded here).
 		sb.WriteString(fmt.Sprintf("| Thinking Tokens | ~%d |\n", rpt.Metrics.ThinkingTokens))
-		sb.WriteString(fmt.Sprintf("| Thinking Time | %.1fs |\n", float64(rpt.Metrics.ThinkingMs)/1000))
+		sb.WriteString(fmt.Sprintf("| Thinking Time | %s |\n", FormatDuration(time.Duration(rpt.Metrics.ThinkingMs)*time.Millisecond)))
 	}
 	if rpt.Metrics.CacheReadTokens > 0 || rpt.Metrics.CacheWriteTokens > 0 {
 		sb.WriteString(fmt.Sprintf("| Cache Read Tokens | %d |\n", rpt.Metrics.CacheReadTokens))
