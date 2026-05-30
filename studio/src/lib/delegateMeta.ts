@@ -11,6 +11,12 @@ export interface DelegateOutputMeta {
   reasoning_effort?: string;
   contextWindow?: number;
   contextUsed?: number;
+  // Extended-thinking metrics. thinkingTokens is an approximation (the
+  // provider bills thinking inside output tokens with no breakdown — the
+  // backend re-encodes the thinking text); thinkingMs is wall-clock spent
+  // thinking (exact for claw, best-effort for claude_code).
+  thinkingTokens?: number;
+  thinkingMs?: number;
 }
 
 export function readNodeOutputMeta(
@@ -24,5 +30,9 @@ export function readNodeOutputMeta(
   if (typeof cw === "number" && cw > 0) out.contextWindow = cw;
   const cu = output["_context_used"];
   if (typeof cu === "number" && cu > 0) out.contextUsed = cu;
+  const tt = output["_thinking_tokens"];
+  if (typeof tt === "number" && tt > 0) out.thinkingTokens = tt;
+  const tm = output["_thinking_ms"];
+  if (typeof tm === "number" && tm > 0) out.thinkingMs = tm;
   return out;
 }

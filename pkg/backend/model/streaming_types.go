@@ -24,9 +24,10 @@ type Usage struct {
 	InputTokens      int
 	OutputTokens     int
 	TotalTokens      int
-	ReasoningTokens  int
+	ReasoningTokens  int // approximate count of extended-thinking tokens (re-encoded text)
 	CacheReadTokens  int
 	CacheWriteTokens int
+	ThinkingMs       int // wall-clock spent in thinking blocks, milliseconds
 }
 
 // ToolCall represents the model's request to invoke a tool.

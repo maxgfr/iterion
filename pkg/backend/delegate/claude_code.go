@@ -15,6 +15,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/backend/cost"
 	"github.com/SocialGouv/iterion/pkg/backend/delegate/claudesdk"
+	"github.com/SocialGouv/iterion/pkg/backend/thinktokens"
 	"github.com/SocialGouv/iterion/pkg/backend/tooldisplay"
 	"github.com/SocialGouv/iterion/pkg/internal/proc"
 	"github.com/SocialGouv/iterion/pkg/sandbox"
@@ -822,6 +823,8 @@ func resolveStreamHotTimeout() time.Duration {
 type sessionMeta struct {
 	effectiveModel  string
 	peakContextLoad int
+	thinkingTokens  int // approximate extended-thinking tokens (re-encoded text)
+	thinkingMs      int // best-effort wall-clock spent thinking, milliseconds
 }
 
 // applyClaudeCodeSessionMeta merges the streamed session metadata and
@@ -837,6 +840,8 @@ func applyClaudeCodeSessionMeta(out *Result, rm *claudesdk.ResultMessage, sm ses
 	}
 	out.EffectiveModel = sm.effectiveModel
 	out.PeakInputTokens = sm.peakContextLoad
+	out.ThinkingTokens = sm.thinkingTokens
+	out.ThinkingMs = sm.thinkingMs
 	if rm == nil {
 		return
 	}
@@ -939,6 +944,12 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 	// claude that runs the formatting prompt).
 	var lastAssistantText string
 	var meta sessionMeta
+	// lastItemTime anchors the best-effort thinking-time proxy: when an
+	// assistant message leads with thinking, the gap since the previous
+	// stream item is the wall-clock the model spent reasoning before
+	// emitting. The SDK delivers assembled thinking blocks (not deltas), so
+	// this inter-message gap is the closest signal available.
+	lastItemTime := time.Now()
 	// Per-session map correlating tool_use_id → tool name so we can echo
 	// the name on the completion hook (ToolResultBlock only carries the
 	// correlation ID).
@@ -1037,6 +1048,24 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 					if load > meta.peakContextLoad {
 						meta.peakContextLoad = load
 					}
+					// Extended-thinking metrics. The provider bills thinking
+					// inside output_tokens with no breakdown, so we re-encode
+					// the thinking text for an approximate count. Time is the
+					// best-effort gap since the previous stream item (see
+					// lastItemTime), attributed once per thinking-bearing turn.
+					var turnThinking string
+					for _, block := range m.Message.Content {
+						if tk, ok := block.(*claudesdk.ThinkingBlock); ok && tk.Thinking != "" {
+							turnThinking += tk.Thinking
+						}
+					}
+					if turnThinking != "" {
+						tokens := thinktokens.Count(turnThinking)
+						ms := int(time.Since(lastItemTime) / time.Millisecond)
+						meta.thinkingTokens += tokens
+						meta.thinkingMs += ms
+						b.Logger.Info("[%s#%d/claude-code] 🧠 thinking: ~%d tok, %dms", task.NodeID, task.Iteration, tokens, ms)
+					}
 					// Capture the latest non-empty text block — the
 					// final assistant message is what the LLM intended
 					// as its "answer" and is where it puts the JSON
@@ -1098,6 +1127,9 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 					b.Logger.Debug("[%s#%d/claude-code] 📨 %T message", task.NodeID, task.Iteration, it.msg)
 				}
 			}
+			// Advance the thinking-time anchor to this item's arrival so the
+			// next thinking-bearing turn measures only its own reasoning gap.
+			lastItemTime = time.Now()
 		case <-idle.C:
 			if currentTimeout <= 0 {
 				continue

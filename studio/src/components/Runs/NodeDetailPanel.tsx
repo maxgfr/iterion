@@ -514,12 +514,22 @@ function DetailHeader({
   // matching events is just to defensively merge if the engine ever
   // emits multiple (e.g. on retry within a node) — the common case is
   // exactly one row.
-  const { costUsd, tokens, model, contextWindow, contextUsed } = useMemo(() => {
+  const {
+    costUsd,
+    tokens,
+    model,
+    contextWindow,
+    contextUsed,
+    thinkingTokens,
+    thinkingMs,
+  } = useMemo(() => {
     let costUsd = 0;
     let tokens = 0;
     let model = "";
     let contextWindow = 0;
     let contextUsed = 0;
+    let thinkingTokens = 0;
+    let thinkingMs = 0;
     for (const e of events) {
       if (e.type !== "node_finished" || !e.data) continue;
       const c = e.data["_cost_usd"];
@@ -534,8 +544,18 @@ function DetailHeader({
         contextWindow = meta.contextWindow;
       if (meta.contextUsed && meta.contextUsed > contextUsed)
         contextUsed = meta.contextUsed;
+      if (meta.thinkingTokens) thinkingTokens += meta.thinkingTokens;
+      if (meta.thinkingMs) thinkingMs += meta.thinkingMs;
     }
-    return { costUsd, tokens, model, contextWindow, contextUsed };
+    return {
+      costUsd,
+      tokens,
+      model,
+      contextWindow,
+      contextUsed,
+      thinkingTokens,
+      thinkingMs,
+    };
   }, [events]);
   const contextUsage = formatContextUsage(contextUsed, contextWindow);
   // Wall-clock vs relative durations. Persisted so the preference
@@ -593,6 +613,14 @@ function DetailHeader({
               </button>
             )}
             {tokens > 0 && <span>tokens: {tokens.toLocaleString()}</span>}
+            {(thinkingTokens > 0 || thinkingMs > 0) && (
+              <span
+                title="Extended thinking. Token count is an approximation (the provider bills thinking inside output tokens; the text is re-encoded). Time is measured (exact for claw, best-effort for claude_code)."
+              >
+                🧠 ~{thinkingTokens.toLocaleString()} tok ·{" "}
+                {(thinkingMs / 1000).toFixed(1)}s
+              </span>
+            )}
             {costUsd > 0 && (
               <span title={`$${costUsd.toFixed(6)}`}>
                 cost: ${costUsd.toFixed(4)}

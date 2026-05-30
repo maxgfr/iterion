@@ -628,4 +628,17 @@ type Result struct {
 	// ContextWindow it yields the peak usage ratio displayed on the
 	// run-view node. Zero when unknown.
 	PeakInputTokens int
+
+	// ThinkingTokens is an approximate count of extended-thinking
+	// (reasoning) tokens, re-encoded from the thinking content the backend
+	// surfaced (the provider does not report thinking tokens separately).
+	// Zero when the run produced no thinking. Always an approximation.
+	ThinkingTokens int
+
+	// ThinkingMs is the wall-clock spent in thinking, in milliseconds. For
+	// claude_code this is a best-effort proxy (the SDK delivers assembled
+	// thinking blocks, not deltas, so it is measured as the time elapsed
+	// before a thinking-bearing assistant message arrived). Zero when no
+	// thinking was produced.
+	ThinkingMs int
 }

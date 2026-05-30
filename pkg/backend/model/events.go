@@ -49,6 +49,11 @@ type LLMStepInfo struct {
 	OutputTokens     int
 	CacheReadTokens  int
 	CacheWriteTokens int
+	// ReasoningTokens is an approximate count of extended-thinking tokens
+	// (re-encoded from the thinking text); ThinkingMs is the wall-clock spent
+	// in thinking blocks. Both are 0 when the step produced no thinking.
+	ReasoningTokens int
+	ThinkingMs      int
 	// Iteration is the 0-based loop iteration (see LLMRequestInfo.Iteration).
 	Iteration int
 }
@@ -218,6 +223,8 @@ func toLLMStepInfo(step StepResult) LLMStepInfo {
 		OutputTokens:     step.Usage.OutputTokens,
 		CacheReadTokens:  step.Usage.CacheReadTokens,
 		CacheWriteTokens: step.Usage.CacheWriteTokens,
+		ReasoningTokens:  step.Usage.ReasoningTokens,
+		ThinkingMs:       step.Usage.ThinkingMs,
 	}
 }
 

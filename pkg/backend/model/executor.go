@@ -949,6 +949,12 @@ func stampDelegateOutputMeta(output map[string]interface{}, result delegate.Resu
 	if result.MaxOutputTokens > 0 {
 		output["_max_output_tokens"] = result.MaxOutputTokens
 	}
+	if result.ThinkingTokens > 0 {
+		output["_thinking_tokens"] = result.ThinkingTokens
+	}
+	if result.ThinkingMs > 0 {
+		output["_thinking_ms"] = result.ThinkingMs
+	}
 }
 
 // executeBackend is the unified execution path for agent and judge nodes.

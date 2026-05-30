@@ -35,6 +35,7 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
+	github.com/dlclark/regexp2/v2 v2.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ethpandaops/agent-sdk-observability v0.0.1 // indirect
 	github.com/glebarez/go-sqlite v1.22.0 // indirect
@@ -109,7 +110,7 @@ require (
 )
 
 require (
-	github.com/SocialGouv/claw-code-go v0.1.1-0.20260529130740-64bcb787bdb9
+	github.com/SocialGouv/claw-code-go v0.1.1-0.20260530092037-868917aa5284
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.16
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.15
@@ -122,6 +123,7 @@ require (
 	github.com/nats-io/nats.go v1.51.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
+	github.com/tiktoken-go/tokenizer v0.8.0
 	github.com/wailsapp/wails/v2 v2.12.0
 	github.com/zalando/go-keyring v0.2.8
 	go.mongodb.org/mongo-driver/v2 v2.6.0

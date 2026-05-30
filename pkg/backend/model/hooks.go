@@ -240,6 +240,12 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			if step.CacheWriteTokens > 0 {
 				data["cache_write_tokens"] = step.CacheWriteTokens
 			}
+			if step.ReasoningTokens > 0 {
+				data["thinking_tokens"] = step.ReasoningTokens
+			}
+			if step.ThinkingMs > 0 {
+				data["thinking_ms"] = step.ThinkingMs
+			}
 
 			// Always include response text in persisted events.
 			if step.Text != "" {
@@ -307,6 +313,10 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			} else {
 				logger.Logf(iterlog.LevelInfo, "📊", "[%s#%d/claw] step %d: %d in / %d out tokens",
 					nodeID, step.Iteration, step.Number, step.InputTokens, step.OutputTokens)
+			}
+			if step.ReasoningTokens > 0 || step.ThinkingMs > 0 {
+				logger.Logf(iterlog.LevelInfo, "🧠", "[%s#%d/claw] step %d thinking: ~%d tok, %dms",
+					nodeID, step.Iteration, step.Number, step.ReasoningTokens, step.ThinkingMs)
 			}
 		},
 

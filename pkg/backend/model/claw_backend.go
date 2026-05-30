@@ -461,9 +461,11 @@ func (b *ClawBackend) generateStructured(ctx context.Context, client api.APIClie
 	tokens := cost.Annotate(output, task.Model, result.TotalUsage.InputTokens, result.TotalUsage.OutputTokens)
 
 	return delegate.Result{
-		Output:      output,
-		Tokens:      tokens,
-		BackendName: delegate.BackendClaw,
+		Output:         output,
+		Tokens:         tokens,
+		BackendName:    delegate.BackendClaw,
+		ThinkingTokens: result.TotalUsage.ReasoningTokens,
+		ThinkingMs:     result.TotalUsage.ThinkingMs,
 	}, nil
 }
 
@@ -488,9 +490,11 @@ func (b *ClawBackend) generateText(ctx context.Context, client api.APIClient, ta
 	tokens := cost.Annotate(output, task.Model, result.TotalUsage.InputTokens, result.TotalUsage.OutputTokens)
 
 	return delegate.Result{
-		Output:      output,
-		Tokens:      tokens,
-		BackendName: delegate.BackendClaw,
+		Output:         output,
+		Tokens:         tokens,
+		BackendName:    delegate.BackendClaw,
+		ThinkingTokens: result.TotalUsage.ReasoningTokens,
+		ThinkingMs:     result.TotalUsage.ThinkingMs,
 	}, nil
 }
 
@@ -521,9 +525,11 @@ func (b *ClawBackend) generateTextWithToolsAndSchema(ctx context.Context, client
 		if err := json.Unmarshal([]byte(text), &output); err == nil {
 			tokens := cost.Annotate(output, task.Model, result.TotalUsage.InputTokens, result.TotalUsage.OutputTokens)
 			return delegate.Result{
-				Output:      output,
-				Tokens:      tokens,
-				BackendName: delegate.BackendClaw,
+				Output:         output,
+				Tokens:         tokens,
+				BackendName:    delegate.BackendClaw,
+				ThinkingTokens: result.TotalUsage.ReasoningTokens,
+				ThinkingMs:     result.TotalUsage.ThinkingMs,
 			}, nil
 		}
 	}
@@ -563,6 +569,8 @@ func (b *ClawBackend) generateTextWithToolsAndSchema(ctx context.Context, client
 			Tokens:             tokens,
 			BackendName:        delegate.BackendClaw,
 			FormattingPassUsed: true,
+			ThinkingTokens:     result.TotalUsage.ReasoningTokens + obj.TotalUsage.ReasoningTokens,
+			ThinkingMs:         result.TotalUsage.ThinkingMs + obj.TotalUsage.ThinkingMs,
 		}, nil
 	}
 
@@ -576,10 +584,12 @@ func (b *ClawBackend) generateTextWithToolsAndSchema(ctx context.Context, client
 	output := map[string]interface{}{"text": text}
 	tokens := cost.Annotate(output, task.Model, result.TotalUsage.InputTokens, result.TotalUsage.OutputTokens)
 	return delegate.Result{
-		Output:        output,
-		Tokens:        tokens,
-		BackendName:   delegate.BackendClaw,
-		ParseFallback: true,
+		Output:         output,
+		Tokens:         tokens,
+		BackendName:    delegate.BackendClaw,
+		ParseFallback:  true,
+		ThinkingTokens: result.TotalUsage.ReasoningTokens,
+		ThinkingMs:     result.TotalUsage.ThinkingMs,
 	}, nil
 }
 

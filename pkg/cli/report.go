@@ -95,6 +95,8 @@ type reportMetrics struct {
 	TotalInputTokens int     `json:"total_input_tokens"`
 	CacheReadTokens  int     `json:"cache_read_tokens"`
 	CacheWriteTokens int     `json:"cache_write_tokens"`
+	ThinkingTokens   int     `json:"thinking_tokens"`
+	ThinkingMs       int     `json:"thinking_ms"`
 	TotalCostUSD     float64 `json:"total_cost_usd"`
 	ModelCalls       int     `json:"model_calls"`
 	NodeCount        int     `json:"node_count"`
@@ -202,6 +204,8 @@ func buildReport(r *store.Run, events []*store.Event, s store.RunStore) *report 
 			rpt.Metrics.TotalInputTokens += extractInt(evt.Data, "input_tokens")
 			rpt.Metrics.CacheReadTokens += extractInt(evt.Data, "cache_read_tokens")
 			rpt.Metrics.CacheWriteTokens += extractInt(evt.Data, "cache_write_tokens")
+			rpt.Metrics.ThinkingTokens += extractInt(evt.Data, "thinking_tokens")
+			rpt.Metrics.ThinkingMs += extractInt(evt.Data, "thinking_ms")
 
 		case store.EventNodeFinished:
 			if evt.Data == nil {
@@ -360,6 +364,12 @@ func renderMarkdown(rpt *report) string {
 	sb.WriteString(fmt.Sprintf("| Model Calls | %d |\n", rpt.Metrics.ModelCalls))
 	sb.WriteString(fmt.Sprintf("| Node Executions | %d |\n", rpt.Metrics.NodeCount))
 	sb.WriteString(fmt.Sprintf("| Loop Edges | %d |\n", rpt.Metrics.LoopEdges))
+	if rpt.Metrics.ThinkingTokens > 0 || rpt.Metrics.ThinkingMs > 0 {
+		// Thinking tokens are an approximation (the provider bills thinking
+		// inside output tokens with no breakdown — re-encoded here).
+		sb.WriteString(fmt.Sprintf("| Thinking Tokens | ~%d |\n", rpt.Metrics.ThinkingTokens))
+		sb.WriteString(fmt.Sprintf("| Thinking Time | %.1fs |\n", float64(rpt.Metrics.ThinkingMs)/1000))
+	}
 	if rpt.Metrics.CacheReadTokens > 0 || rpt.Metrics.CacheWriteTokens > 0 {
 		sb.WriteString(fmt.Sprintf("| Cache Read Tokens | %d |\n", rpt.Metrics.CacheReadTokens))
 		sb.WriteString(fmt.Sprintf("| Cache Write Tokens | %d |\n", rpt.Metrics.CacheWriteTokens))

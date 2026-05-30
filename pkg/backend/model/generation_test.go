@@ -115,6 +115,47 @@ func TestAggregateStream(t *testing.T) {
 	}
 }
 
+func TestAggregateStream_Thinking(t *testing.T) {
+	ch := make(chan api.StreamEvent, 16)
+	events := []api.StreamEvent{
+		{Type: api.EventMessageStart, InputTokens: 50},
+		// A thinking block: start, two thinking deltas, a signature, stop.
+		{Type: api.EventContentBlockStart, ContentBlock: api.ContentBlockInfo{Type: "thinking", Index: 0}},
+		{Type: api.EventContentBlockDelta, Index: 0, Delta: api.Delta{Type: "thinking_delta", Thinking: "Let me reason "}},
+		{Type: api.EventContentBlockDelta, Index: 0, Delta: api.Delta{Type: "thinking_delta", Thinking: "about this carefully."}},
+		{Type: api.EventContentBlockDelta, Index: 0, Delta: api.Delta{Type: "signature_delta", Signature: "sig-abc"}},
+		{Type: api.EventContentBlockStop, Index: 0},
+		// Then the visible answer.
+		{Type: api.EventContentBlockStart, ContentBlock: api.ContentBlockInfo{Type: "text", Index: 1}},
+		{Type: api.EventContentBlockDelta, Index: 1, Delta: api.Delta{Type: "text_delta", Text: "The answer is 42."}},
+		{Type: api.EventContentBlockStop, Index: 1},
+		{Type: api.EventMessageDelta, StopReason: "end_turn", Usage: api.UsageDelta{OutputTokens: 30}},
+		{Type: api.EventMessageStop},
+	}
+	for _, ev := range events {
+		ch <- ev
+	}
+	close(ch)
+
+	agg := aggregateStream(context.Background(), ch)
+	if agg.err != nil {
+		t.Fatalf("unexpected error: %v", agg.err)
+	}
+	// Visible text excludes thinking content.
+	if agg.text != "The answer is 42." {
+		t.Errorf("text = %q, want %q", agg.text, "The answer is 42.")
+	}
+	// Thinking content is captured (signature is dropped).
+	if agg.thinkingText != "Let me reason about this carefully." {
+		t.Errorf("thinkingText = %q", agg.thinkingText)
+	}
+	// Timing is captured (start→stop measured); allow zero on a very fast
+	// machine but the field must be wired (non-negative).
+	if agg.thinkingMs < 0 {
+		t.Errorf("thinkingMs = %d, want >= 0", agg.thinkingMs)
+	}
+}
+
 func TestAggregateStream_ToolUse(t *testing.T) {
 	ch := make(chan api.StreamEvent, 10)
 	events := []api.StreamEvent{

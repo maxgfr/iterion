@@ -13,6 +13,7 @@ import (
 	clawrt "github.com/SocialGouv/claw-code-go/pkg/runtime"
 
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
+	"github.com/SocialGouv/iterion/pkg/backend/thinktokens"
 )
 
 const (
@@ -48,19 +49,23 @@ type toolUseBlock struct {
 
 // aggregatedResponse is the result of consuming a StreamEvent channel.
 type aggregatedResponse struct {
-	text       string
-	toolUses   []toolUseBlock
-	usage      Usage
-	stopReason string
-	err        error
+	text         string
+	toolUses     []toolUseBlock
+	usage        Usage
+	stopReason   string
+	thinkingText string // concatenated extended-thinking content (all thinking blocks)
+	thinkingMs   int    // wall-clock spent inside thinking blocks (start→stop)
+	err          error
 }
 
 // blockState tracks a single content block during stream aggregation.
 type blockState struct {
-	blockType string // "text" or "tool_use"
-	text      string
-	toolUse   toolUseBlock
-	stopped   bool
+	blockType     string // "text", "tool_use", or "thinking"
+	text          string // text content, or thinking content for thinking blocks
+	toolUse       toolUseBlock
+	stopped       bool
+	thinkingStart time.Time // when a thinking block opened (zero for non-thinking)
+	thinkingMs    int       // finalized thinking duration (set on content_block_stop)
 }
 
 // aggregateStream reads all events from ch and builds an aggregatedResponse.
@@ -96,7 +101,7 @@ func aggregateStream(ctx context.Context, ch <-chan api.StreamEvent) aggregatedR
 		case event, ok := <-ch:
 			if !ok {
 				drained = true
-				res.text, res.toolUses = collectBlocks(blocks)
+				res.text, res.toolUses, res.thinkingText, res.thinkingMs = collectBlocks(blocks)
 				for _, bs := range blocks {
 					if bs.blockType == "tool_use" && !bs.stopped {
 						res.err = fmt.Errorf("incomplete tool_use block: %s (content_block_stop not received)", bs.toolUse.Name)
@@ -120,6 +125,9 @@ func aggregateStream(ctx context.Context, ch <-chan api.StreamEvent) aggregatedR
 						Name: event.ContentBlock.Name,
 					}
 				}
+				if event.ContentBlock.Type == "thinking" {
+					bs.thinkingStart = time.Now()
+				}
 				blocks[event.ContentBlock.Index] = bs
 
 			case api.EventContentBlockDelta:
@@ -131,10 +139,15 @@ func aggregateStream(ctx context.Context, ch <-chan api.StreamEvent) aggregatedR
 				switch event.Delta.Type {
 				case "text_delta":
 					bs.text += event.Delta.Text
+				case "thinking_delta":
+					bs.text += event.Delta.Thinking
+				case "signature_delta":
+					// Signature signs the thinking block for cross-turn replay;
+					// it carries no token/timing signal, so we ignore it here.
 				case "input_json_delta":
 					if len(bs.toolUse.PartialJSON)+len(event.Delta.PartialJSON) > maxToolInputJSONSize {
 						res.err = fmt.Errorf("%w: tool %q exceeded %d bytes", ErrToolInputTooLarge, bs.toolUse.Name, maxToolInputJSONSize)
-						res.text, res.toolUses = collectBlocks(blocks)
+						res.text, res.toolUses, res.thinkingText, res.thinkingMs = collectBlocks(blocks)
 						return res
 					}
 					bs.toolUse.PartialJSON += event.Delta.PartialJSON
@@ -143,6 +156,9 @@ func aggregateStream(ctx context.Context, ch <-chan api.StreamEvent) aggregatedR
 			case api.EventContentBlockStop:
 				if bs, ok := blocks[event.Index]; ok {
 					bs.stopped = true
+					if bs.blockType == "thinking" && !bs.thinkingStart.IsZero() {
+						bs.thinkingMs = int(time.Since(bs.thinkingStart) / time.Millisecond)
+					}
 				}
 
 			case api.EventMessageDelta:
@@ -155,7 +171,7 @@ func aggregateStream(ctx context.Context, ch <-chan api.StreamEvent) aggregatedR
 				} else {
 					res.err = fmt.Errorf("stream error: %s", event.ErrorMessage)
 				}
-				res.text, res.toolUses = collectBlocks(blocks)
+				res.text, res.toolUses, res.thinkingText, res.thinkingMs = collectBlocks(blocks)
 				return res
 
 			case api.EventMessageStop, api.EventPing:
@@ -165,11 +181,13 @@ func aggregateStream(ctx context.Context, ch <-chan api.StreamEvent) aggregatedR
 	}
 }
 
-// collectBlocks extracts text and tool_use blocks from the block state map,
-// ordered by block index.
-func collectBlocks(blocks map[int]*blockState) (string, []toolUseBlock) {
+// collectBlocks extracts text, tool_use, and thinking blocks from the block
+// state map, ordered by block index. It returns the concatenated visible text,
+// the tool_use blocks, the concatenated thinking content, and the total
+// wall-clock spent inside thinking blocks (milliseconds).
+func collectBlocks(blocks map[int]*blockState) (string, []toolUseBlock, string, int) {
 	if len(blocks) == 0 {
-		return "", nil
+		return "", nil, "", 0
 	}
 
 	maxIdx := 0
@@ -181,6 +199,8 @@ func collectBlocks(blocks map[int]*blockState) (string, []toolUseBlock) {
 
 	var text string
 	var toolUses []toolUseBlock
+	var thinkingText string
+	var thinkingMs int
 	for i := 0; i <= maxIdx; i++ {
 		bs, ok := blocks[i]
 		if !ok {
@@ -191,9 +211,18 @@ func collectBlocks(blocks map[int]*blockState) (string, []toolUseBlock) {
 			text += bs.text
 		case "tool_use":
 			toolUses = append(toolUses, bs.toolUse)
+		case "thinking":
+			thinkingText += bs.text
+			// Prefer the duration finalized on content_block_stop; fall back
+			// to elapsed-since-start if the stream closed mid-block.
+			if bs.thinkingMs > 0 {
+				thinkingMs += bs.thinkingMs
+			} else if !bs.thinkingStart.IsZero() {
+				thinkingMs += int(time.Since(bs.thinkingStart) / time.Millisecond)
+			}
 		}
 	}
-	return text, toolUses
+	return text, toolUses, thinkingText, thinkingMs
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +302,8 @@ func accumulateUsage(total *Usage, step Usage) {
 	total.TotalTokens = total.InputTokens + total.OutputTokens
 	total.CacheReadTokens += step.CacheReadTokens
 	total.CacheWriteTokens += step.CacheWriteTokens
+	total.ReasoningTokens += step.ReasoningTokens
+	total.ThinkingMs += step.ThinkingMs
 }
 
 // toolCallsFromBlocks converts aggregated tool_use blocks to ToolCall values.
@@ -333,6 +364,12 @@ func callAndAggregate(
 
 	agg := aggregateStream(ctx, ch)
 	latency := time.Since(start)
+
+	// Thinking metrics: the API does not report thinking tokens separately, so
+	// re-encode the accumulated thinking text. Timing is measured from the
+	// stream (start→stop of each thinking block).
+	agg.usage.ReasoningTokens = thinktokens.Count(agg.thinkingText)
+	agg.usage.ThinkingMs = agg.thinkingMs
 
 	finishReason := mapStopReason(agg.stopReason)
 	if opts.OnResponse != nil {
