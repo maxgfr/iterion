@@ -1,5 +1,5 @@
 import { ListBulletIcon, PlayIcon } from "@radix-ui/react-icons";
-import { Suspense, lazy, useCallback, useEffect } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef } from "react";
 import { useLocation, useParams } from "wouter";
 import { useShallow } from "zustand/react/shallow";
 
@@ -34,18 +34,40 @@ export default function RunsTabsView() {
   // RunListView fills the content area.
   const pinnedActive = !params.id;
 
+  // skipReenforceRef carries one bit from handleSelect (a tab-strip
+  // click) into the URL→tab effect below. A plain tab click navigates
+  // the URL too, so without this the effect couldn't tell a click apart
+  // from a board / runs-list open and would wrongly re-enforce
+  // follow-tail. We stash the runId the click navigates to; the effect
+  // consumes it and skips the re-enforce for exactly that transition.
+  const skipReenforceRef = useRef<string | null>(null);
+
   // URL → tab: only when we have a specific runId in the URL.
   useEffect(() => {
     if (!params.id) return;
     useTabsStore.getState().openTab("run", { runId: params.id });
+    // Re-enforce follow-tail on a navigation-driven open (board, runs
+    // list, deep-link) but NOT on a tab-strip click (which set the ref).
+    if (skipReenforceRef.current === params.id) {
+      skipReenforceRef.current = null;
+    } else {
+      useTabsStore.getState().bumpRunOpen(params.id);
+    }
   }, [params.id]);
 
   const handleSelect = useCallback(
     (id: string) => {
+      // Capture before setActive: if this tab is already active the URL
+      // won't change, so the URL→tab effect won't fire — we must NOT
+      // leave a stale skip flag that would suppress a later real open.
+      const wasActive = useTabsStore.getState().activeRunTabId === id;
       useTabsStore.getState().setActive(id);
       const tab = useTabsStore.getState().tabs.find((t) => t.id === id);
       const runId = tab?.params.runId;
       if (!runId) return;
+      // Mark this URL change as a tab-click so the effect preserves the
+      // user's current follow-tail state instead of re-enforcing it.
+      if (!wasActive) skipReenforceRef.current = runId;
       setLocation(`/runs/${encodeURIComponent(runId)}`, { replace: true });
     },
     [setLocation],

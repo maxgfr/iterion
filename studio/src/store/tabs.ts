@@ -40,6 +40,13 @@ interface TabsState {
   // independently of run-tab activity, so we track them separately.
   activeEditorTabId: string | null;
   activeRunTabId: string | null;
+  // Per-runId counter bumped each time a run is OPENED via navigation
+  // (board, runs list, deep-link) — NOT on a plain tab-strip click. The
+  // run log view watches it to re-enforce "follow tail" on (re)open,
+  // while a tab-click preserves the user's current follow state. See
+  // RunsTabsView (skipReenforceRef) + LogLinesView. Ephemeral: not
+  // persisted (a reload re-mounts the log view, which defaults to follow).
+  runOpenNonce: Record<string, number>;
   openTab: (kind: TabKind, params: Record<string, string>, label?: string) => string;
   // newEditorTab always creates a fresh untitled tab — used by the "+"
   // button. openTab("editor", {}) by contrast focuses an existing
@@ -48,6 +55,9 @@ interface TabsState {
   newEditorTab: (label?: string) => string;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
+  // Bump runOpenNonce[runId] — called by navigation-driven opens to
+  // signal the log view to re-enforce follow-tail.
+  bumpRunOpen: (runId: string) => void;
   reorder: (kind: TabKind, from: number, to: number) => void;
   rename: (id: string, label: string) => void;
 }
@@ -100,6 +110,7 @@ export const useTabsStore = create<TabsState>()(
       tabs: [],
       activeEditorTabId: null,
       activeRunTabId: null,
+      runOpenNonce: {},
       openTab: (kind, params, label) => {
         const existing = findExistingTab(get().tabs, kind, params);
         if (existing) {
@@ -187,6 +198,15 @@ export const useTabsStore = create<TabsState>()(
             : s.tabs.map((t) => (t.id === id ? { ...t, hydrated: true } : t));
           return { tabs, [field]: id } as Partial<TabsState>;
         });
+      },
+      bumpRunOpen: (runId) => {
+        if (!runId) return;
+        set((s) => ({
+          runOpenNonce: {
+            ...s.runOpenNonce,
+            [runId]: (s.runOpenNonce[runId] ?? 0) + 1,
+          },
+        }));
       },
       reorder: (kind, from, to) => {
         set((s) => {

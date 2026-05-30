@@ -11,6 +11,7 @@ import { desktop, isDesktop } from "@/lib/desktopBridge";
 import { formatBytes } from "@/lib/format";
 import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
 import { selectInFlightTools, useRunStore } from "@/store/run";
+import { useTabsStore } from "@/store/tabs";
 import { useUIStore } from "@/store/ui";
 
 import { ActiveFooter } from "./ActiveFooter";
@@ -164,6 +165,11 @@ export default function LogLinesView({
   const [search, setSearch] = useState("");
   const [activeLevels, setActiveLevels] = useState<Set<string>>(() => new Set());
   const [followTail, setFollowTail] = useState(true);
+  // Re-enforce follow-tail when this run is (re)opened via navigation
+  // (board / runs list / deep-link). RunsTabsView bumps this nonce on
+  // open but NOT on a plain tab-strip click — so returning to a tab you
+  // had scrolled up in keeps your position. See store/tabs runOpenNonce.
+  const runOpenNonce = useTabsStore((s) => s.runOpenNonce[runId] ?? 0);
   // Word wrap toggle: when off (default), long lines extend horizontally
   // and the Virtuoso scroller carries a single horizontal scrollbar at
   // the bottom — replaces the per-row scrollbars the original code
@@ -182,6 +188,15 @@ export default function LogLinesView({
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isScrollingRef = useRef<boolean>(false);
   const disabledByScrollRef = useRef<boolean>(false);
+
+  // On a navigation-driven (re)open of this run (RunsTabsView bumps
+  // runOpenNonce — board / runs list / deep-link, NOT a plain tab-strip
+  // click), snap back to following the tail. Also runs on mount, where
+  // followTail already starts true so it's a no-op.
+  useEffect(() => {
+    disabledByScrollRef.current = false;
+    setFollowTail(true);
+  }, [runOpenNonce]);
 
   // Subscribe on mount and unsubscribe on unmount. The hook
   // ref-counts these so multiple mounted views share one WS
