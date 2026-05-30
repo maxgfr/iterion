@@ -710,7 +710,18 @@ router alt:
 judge reviewer_claude:
   backend: "claude_code"
   model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-8}"
-  reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-max}"
+  ## Reviewer effort is DECOUPLED from the implementer's effort
+  ## (ITERION_VIBE_EFFORT_CLAUDE drives plan/act/fix) and defaults to
+  ## MEDIUM. A max-effort reviewer is pathologically thorough — it always
+  ## finds or re-raises *some* blocker, so the "two consecutive
+  ## cross-family approvals" gate never closes and the loop oscillates to
+  ## the review_loop bound (observed: a spend-cap run ground ~5h / ~$47 /
+  ## 9+ rounds at max without converging, even flagging a non-compiling
+  ## test a fixer had just added). Medium keeps the reviewer honest about
+  ## REAL production issues without the false-positive churn. This is the
+  ## reliable convergence dial — tune reviewer strictness here, keep the
+  ## implementer at high/max separately.
+  reasoning_effort: "${ITERION_VIBE_EFFORT_REVIEW:-medium}"
   input: review_input
   output: verdict_output
   system: review_system
@@ -734,13 +745,14 @@ judge reviewer_gpt:
   ## of the structured verdict and the schema validator fails the run.
   backend: "claw"
   model: "${ITERION_VIBE_MODEL_GPT:-openai/gpt-5.5}"
-  ## Reasoning effort: medium (was high). Mirrors doc-align's
-  ## reviewer_gpt change in commit 822ec4ac: on the ChatGPT-forfait
-  ## gpt-5.5 endpoint, "high" reserves enough reasoning tokens to
-  ## blow the per-call cap when combined with non-trivial tool
-  ## output. Medium keeps verdict quality while leaving headroom.
-  ## Override with the env var when the diff is small.
-  reasoning_effort: "${ITERION_VIBE_EFFORT_GPT:-medium}"
+  ## Reviewer effort knob, shared with reviewer_claude via
+  ## ITERION_VIBE_EFFORT_REVIEW (default MEDIUM) — see reviewer_claude for
+  ## the convergence rationale. Medium is also the safe ceiling on the
+  ## ChatGPT-forfait gpt-5.5 endpoint: "high" reserves enough reasoning
+  ## tokens to blow the per-call cap when combined with non-trivial tool
+  ## output (mirrors doc-align's 822ec4ac). If you raise
+  ## ITERION_VIBE_EFFORT_REVIEW above medium, watch the gpt-5.5 cap.
+  reasoning_effort: "${ITERION_VIBE_EFFORT_REVIEW:-medium}"
   input: review_input
   output: verdict_output
   system: review_system
@@ -762,26 +774,30 @@ judge reviewer_gpt:
 
 ## Deterministic streak detector.
 ##
-## stop=true iff (current AND previous reviewer both ACTUALLY
-## approved) AND families differ. The success criterion is two
-## consecutive POSITIVE verdicts from opposite families — both
-## AIs must let the code pass on successive iterations. A
-## low-confidence rejection does NOT count as approval for the
-## stop signal: the code only ships when it convinces both
-## reviewers.
+## stop=true iff the current AND previous reviewers (opposite
+## families) both APPROVED, where "approved" is HIGH-CONFIDENCE-
+## GATED: a rejection still counts as approval unless it carries a
+## `confidence: high` blocker. Rationale — in an autonomous loop
+## only high-confidence, production-breaking blockers should hold
+## up the ship: medium/low concerns are recorded in scanned_areas
+## but don't gate, because (a) the operator reviews the final diff
+## and (b) two independent reviewers almost always surface SOME
+## medium nit each round, so gating on medium makes "two
+## consecutive cross-family approvals" statistically unreachable
+## (the oscillation that ground a spend-cap run ~5h/$47 without
+## converging). High-confidence blockers still reset the streak
+## and route to the same-family fixer.
 ##
-## The `approved` passthrough field stays soft — it includes
-## low-confidence rejections — so the downstream
-## `when approved` edge keeps alternating without invoking the
-## fixer when a reviewer is merely uncertain. This separation
-## means the workflow keeps cycling without forced fix attempts
-## on flaky-low-confidence rejections, but requires real
-## approvals to terminate.
+## The `approved` passthrough field is the same high-confidence-
+## gated value, so the downstream `when approved` edge keeps
+## alternating WITHOUT invoking the fixer on medium/low concerns;
+## only a `confidence: high` blocker flips approved=false and
+## triggers a fix. That is what keeps the loop converging.
 compute streak_check:
   output: streak_state
   expr:
-    stop: "input.approved && loop.review_loop.previous_output.approved && input.family != loop.review_loop.previous_output.family"
-    approved: "input.approved || input.confidence == 'low'"
+    stop: "(input.approved || input.confidence != 'high') && loop.review_loop.previous_output.approved && input.family != loop.review_loop.previous_output.family"
+    approved: "input.approved || input.confidence != 'high'"
     family: "input.family"
     blockers: "input.blockers"
     fix_plan: "input.fix_plan"
@@ -976,9 +992,9 @@ workflow feature_dev:
 
   commit_changes -> done
 
-  ## Otherwise approved (no streak yet, OR low-confidence rejection
-  ## treated as soft-approved, OR rejection without concrete blockers
-  ## — see below): keep alternating without fixing.
+  ## Otherwise approved (no streak yet, OR a non-high-confidence
+  ## rejection treated as soft-approved, OR rejection without concrete
+  ## blockers — see below): keep alternating without fixing.
   ## Expression form is shown here both to demonstrate the new
   ## syntax and so future authors can extend the predicate (e.g.
   ## tighten the soft-approval condition) by enriching the
@@ -990,7 +1006,7 @@ workflow feature_dev:
   ## cycle is still bounded because that edge IS loop-bearing.
   streak_check -> alt when "approved"
 
-  ## Medium/high-confidence rejection WITH concrete blockers: route
+  ## High-confidence rejection WITH concrete blockers: route
   ## to the SAME-family fixer so it can inherit the reviewer's
   ## session (one session per iteration per family — see
   ## fix_claude / fix_gpt comments). `_session_id` reads directly
