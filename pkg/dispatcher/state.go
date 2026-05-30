@@ -32,6 +32,11 @@ type state struct {
 	// writer so no mutex is needed.
 	lastTrackerErr   string
 	lastTrackerErrAt time.Time
+	// costCap is the latest daily spend-cap status, recomputed each tick
+	// when a cap is configured (nil when disabled). Surfaced in the
+	// Snapshot so the studio dispatcher view can render the cap banner.
+	// Actor-goroutine-owned; no mutex needed.
+	costCap *CostCapView
 }
 
 func newState() *state {
@@ -181,6 +186,19 @@ type Snapshot struct {
 	// stall the dispatcher.
 	LastTrackerError   string    `json:"last_tracker_error,omitempty"`
 	LastTrackerErrorAt time.Time `json:"last_tracker_error_at,omitempty"`
+	// CostCap reports the per-(store, UTC-day) spend-cap status when a
+	// cap is configured; nil when disabled. The dashboard renders a
+	// banner + spend/limit when Exceeded.
+	CostCap *CostCapView `json:"cost_cap,omitempty"`
+}
+
+// CostCapView is the dashboard projection of the daily spend cap.
+type CostCapView struct {
+	Date           string  `json:"date"`
+	SpentUSD       float64 `json:"spent_usd"`
+	LimitUSD       float64 `json:"limit_usd"`
+	Exceeded       bool    `json:"exceeded"`
+	OverrideActive bool    `json:"override_active"`
 }
 
 // RunningView is one row of the dashboard's "running" table.

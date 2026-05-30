@@ -684,6 +684,10 @@ func (s *Server) routes() {
 	// server runs without a run-store handle (cloud control plane).
 	s.registerRunsStatsRoutes()
 
+	// Daily spend-cap status + one-click override. No-op without a run
+	// store. Gated by the global /api/* auth middleware.
+	s.registerLimitsRoutes()
+
 	// Serve static frontend files with SPA fallback so client-side routes
 	// (e.g. /runs/abc) render index.html instead of 404.
 	staticSub, err := fs.Sub(StaticFS, "static")

@@ -395,31 +395,62 @@ func (e *Engine) wrapContextErr(ctxErr error) error {
 	return ctxErr
 }
 
-// handleOperatorPauseWithCheckpoint is the sibling of
-// handleContextDoneWithCheckpoint, called from execLoop when the
-// engine's WithPauseSignal channel fires. It saves a checkpoint
-// anchored at nodeID (the node about to execute), flips the run
-// status to paused_operator (distinct from paused_waiting_human so
-// the studio can render a banner and the resume dispatch routes
-// through the cancellation-style restore path, not the human-answers
-// path), and emits a run_paused event with reason="operator".
-func (e *Engine) handleOperatorPauseWithCheckpoint(rs *runState, nodeID string) error {
+// pauseOperatorWithCheckpoint is the shared soft-pause path: it saves a
+// checkpoint anchored at nodeID (the node about to execute), flips the
+// run status to paused_operator (distinct from paused_waiting_human so
+// the studio can render a banner and resume routes through the
+// cancellation-style restore path, not the human-answers path), and
+// emits a run_paused event whose "reason" + extra fields the caller
+// supplies via data. Returns ErrRunPausedOperator wrapped with detail —
+// reusing that sentinel means every resumable-pause handler (runner,
+// resume dispatch, dispatcher retry) treats both operator and cost-cap
+// pauses correctly with no extra wiring.
+func (e *Engine) pauseOperatorWithCheckpoint(rs *runState, nodeID, reason, detail string, data map[string]interface{}) error {
 	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(rs.ctx), 5*time.Second)
 	defer cancel()
 
 	cp := buildCheckpoint(rs, nodeID)
 	if err := e.store.SaveCheckpoint(storeCtx, rs.runID, cp); err != nil {
-		e.logger.Error("failed to save checkpoint on operator pause: %v", err)
+		e.logger.Error("failed to save checkpoint on %s pause: %v", reason, err)
 	}
 	if err := e.store.UpdateRunStatus(storeCtx, rs.runID, store.RunStatusPausedOperator, ""); err != nil {
-		e.logger.Error("failed to persist operator pause status: %v", err)
+		e.logger.Error("failed to persist %s pause status: %v", reason, err)
 	}
-	if err := e.emit(storeCtx, rs.runID, store.EventRunPaused, nodeID, map[string]interface{}{
-		"reason": "operator",
-	}); err != nil {
+	if data == nil {
+		data = make(map[string]interface{}, 1)
+	}
+	data["reason"] = reason
+	if err := e.emit(storeCtx, rs.runID, store.EventRunPaused, nodeID, data); err != nil {
 		e.logger.Warn("failed to emit run_paused event: %v", err)
 	}
+	if detail != "" {
+		return fmt.Errorf("%w: paused at node %s (%s)", ErrRunPausedOperator, nodeID, detail)
+	}
 	return fmt.Errorf("%w: paused at node %s", ErrRunPausedOperator, nodeID)
+}
+
+// handleOperatorPauseWithCheckpoint is called from execLoop when the
+// engine's WithPauseSignal channel fires (the studio "Pause now" button
+// / POST /api/runs/{id}/pause).
+func (e *Engine) handleOperatorPauseWithCheckpoint(rs *runState, nodeID string) error {
+	return e.pauseOperatorWithCheckpoint(rs, nodeID, "operator", "", nil)
+}
+
+// handleCostCapPause pauses a run because the shared per-day spend cap is
+// over the limit. It tags the run_paused event with reason=cost_cap_daily
+// and the spend numbers so the studio can render the cost-cap banner. The
+// run auto-resumes once the operator overrides for the day or the UTC day
+// rolls over and the ledger resets.
+func (e *Engine) handleCostCapPause(rs *runState, nodeID string, st CapStatus) error {
+	e.logger.Warn("run %s paused: daily spend cap reached ($%.2f >= $%.2f for %s)",
+		rs.runID, st.SpentUSD, st.LimitUSD, st.Date)
+	return e.pauseOperatorWithCheckpoint(rs, nodeID, CapReasonDaily,
+		fmt.Sprintf("daily spend cap $%.2f >= $%.2f", st.SpentUSD, st.LimitUSD),
+		map[string]interface{}{
+			"spent_usd": st.SpentUSD,
+			"limit_usd": st.LimitUSD,
+			"date":      st.Date,
+		})
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +460,18 @@ func (e *Engine) handleOperatorPauseWithCheckpoint(rs *runState, nodeID string) 
 // checkBudgetBeforeExec checks budget limits before a node runs.
 // It enforces both hard exceeded (100%) and hard limited (90%) thresholds.
 func (e *Engine) checkBudgetBeforeExec(rs *runState, nodeID string) error {
+	// Daily spend cap: pause (resumable) before executing the next node
+	// when the shared per-day ledger is over the cap. Checked before the
+	// per-run budget — and independently of whether a per-run budget is
+	// declared — so a cap trip pauses (resumable) rather than fails.
+	if e.dailyCap != nil {
+		if st, err := e.dailyCap.Status(rs.ctx); err != nil {
+			e.logger.Warn("daily spend cap: status check failed: %v", err)
+		} else if st.Exceeded {
+			return e.handleCostCapPause(rs, nodeID, st)
+		}
+	}
+
 	if rs.budget == nil {
 		return nil
 	}
@@ -471,11 +514,23 @@ func (e *Engine) checkBudgetBeforeExec(rs *runState, nodeID string) error {
 // recordAndCheckBudget records usage from a node execution and emits
 // budget_warning / budget_exceeded events as needed.
 func (e *Engine) recordAndCheckBudget(rs *runState, nodeID string, output map[string]interface{}) error {
+	tokens, costUSD := extractUsage(output)
+
+	// Daily spend cap accounting (independent of the per-run budget so it
+	// works for workflows with no budget: block). We only record — the
+	// pause decision happens on the pre-exec path so we anchor the
+	// checkpoint at a not-yet-executed node.
+	if e.dailyCap != nil && costUSD > 0 {
+		rs.costUSDTotal += costUSD
+		if _, err := e.dailyCap.Record(rs.ctx, rs.runID, rs.costUSDTotal); err != nil {
+			e.logger.Warn("daily spend cap: record failed: %v", err)
+		}
+	}
+
 	if rs.budget == nil {
 		return nil
 	}
 
-	tokens, costUSD := extractUsage(output)
 	checks := rs.budget.RecordUsage(tokens, costUSD)
 
 	// Emit warnings.

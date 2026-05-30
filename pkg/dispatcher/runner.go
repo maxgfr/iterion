@@ -3,6 +3,8 @@ package dispatcher
 import (
 	"context"
 	"errors"
+
+	"github.com/SocialGouv/iterion/pkg/runtime"
 )
 
 // DispatchSpec describes a single workflow run the dispatcher wants to
@@ -43,6 +45,16 @@ type DispatchSpec struct {
 	// MUST be safe for concurrent invocation; OnEvent runs in the
 	// engine goroutine.
 	OnEvent func(eventName string)
+
+	// DailyCap, when non-nil, enforces the per-(store, UTC-day) LLM
+	// spend cap on this run: the engine records the run's cumulative
+	// cost into the shared ledger after each node and pauses (resumable)
+	// at the next node boundary once the day is over cap. The dispatcher
+	// builds it from its SINGLETON SpendStore (see Dispatcher.newDailyCapGuard)
+	// so every concurrent dispatched run writes the one ledger, serialising
+	// on a single mutex — no lost-update race from per-run store instances.
+	// nil disables the cap for this run (limit unset, or no ledger store).
+	DailyCap *runtime.DailyCapGuard
 }
 
 // IssueRef captures the minimum back-reference the engine needs to

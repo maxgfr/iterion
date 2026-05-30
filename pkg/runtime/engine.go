@@ -100,6 +100,7 @@ type Engine struct {
 	attachmentPromote        AttachmentPromoteFunc // optional: invoked after CreateRun to materialise attachments
 	bundle                   *bundle.Bundle        // optional: bundle backing this run; nil for plain .iter/.bot runs
 	pauseSignal              <-chan struct{}       // optional: closed by Service.Pause to request a soft pause at the next safe boundary; nil disables operator pause
+	dailyCap                 *DailyCapGuard        // optional: per-(store, UTC-day) spend cap; nil disables it. Set via WithDailyCap
 }
 
 // AttachmentPromoteFunc is invoked once at the start of a run, right
@@ -327,6 +328,22 @@ func WithPauseSignal(ch <-chan struct{}) EngineOption {
 	return func(e *Engine) { e.pauseSignal = ch }
 }
 
+// WithDailyCap wires a per-(store, UTC-day) LLM spend cap into the
+// engine. Before each node executes, the engine checks the shared daily
+// ledger; if the cap is over (and not overridden for the day) it pauses
+// the run (resumable, status paused_operator) with a run_paused event
+// tagged reason=cost_cap_daily. After each node it records the run's
+// cumulative cost back into the ledger. Because the ledger is shared
+// across all runs in a store, one run tripping the cap causes every
+// other running run to pause at its next node boundary, and the
+// dispatcher to stop launching new work.
+//
+// Pass nil (the default, or a disabled guard from NewDailyCapGuard) to
+// opt out — the cap is then inert.
+func WithDailyCap(g *DailyCapGuard) EngineOption {
+	return func(e *Engine) { e.dailyCap = g }
+}
+
 // New creates a new Engine for a raw workflow.
 func New(wf *ir.Workflow, s store.RunStore, exec NodeExecutor, opts ...EngineOption) *Engine {
 	e := &Engine{workflow: wf, store: s, executor: exec}
@@ -377,6 +394,13 @@ type runState struct {
 	roundRobinCounters map[string]int
 	artifactVersions   map[string]int
 	budget             *SharedBudget // shared across branches, nil if no budget
+
+	// costUSDTotal is the run's cumulative LLM spend (sum of per-node
+	// _cost_usd), tracked independently of `budget` so the daily spend
+	// cap works even when the workflow declares no per-run budget. Read
+	// and incremented on the post-exec path (recordAndCheckBudget);
+	// recorded into the shared daily ledger via Engine.dailyCap.
+	costUSDTotal float64
 
 	// nodeAttempts counts prior failed attempts per (nodeID, ErrorCode)
 	// so the recovery dispatcher can apply per-class retry budgets and

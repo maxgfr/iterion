@@ -419,6 +419,9 @@ func (s *Service) engineOptions(runLogger *iterlog.Logger, hash, filePath, runNa
 	if s.workDir != "" {
 		opts = append(opts, runtime.WithWorkDir(s.workDir))
 	}
+	if s.dailyCap != nil {
+		opts = append(opts, runtime.WithDailyCap(s.dailyCap))
+	}
 	for _, obs := range s.extraObservers {
 		opts = append(opts, runtime.WithEventObserver(obs))
 	}

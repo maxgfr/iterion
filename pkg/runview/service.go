@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/backend/model"
+	"github.com/SocialGouv/iterion/pkg/clock"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/runtime"
 	"github.com/SocialGouv/iterion/pkg/runtime/recovery"
@@ -229,6 +231,16 @@ type Service struct {
 	// subscribers; the tailer stops when the last subscriber releases.
 	fileSrcMu sync.Mutex
 	fileSrcs  map[string]*fileSrcHandle
+
+	// maxCostPerDayUSD configures the per-(store, UTC-day) LLM spend cap
+	// enforced across every run this service launches. 0 disables it.
+	// Set via WithDailyCostCap or the ITERION_MAX_COST_PER_DAY_USD env
+	// default (the latter only when no explicit option is passed).
+	maxCostPerDayUSD float64
+	// dailyCap is the shared spend-cap guard built from maxCostPerDayUSD
+	// + the wired SpendStore. nil when the cap is disabled (no limit, or
+	// a store that can't persist a ledger — e.g. cloud Mongo).
+	dailyCap *runtime.DailyCapGuard
 }
 
 // EventStreamSource is the small subset of pkg/runview/eventstream.Source
@@ -259,6 +271,16 @@ func WithWorkDir(dir string) ServiceOption {
 	return func(s *Service) {
 		s.workDir = dir
 	}
+}
+
+// WithDailyCostCap sets the per-(store, UTC-day) LLM spend ceiling in
+// USD enforced across all runs this service launches. Zero (the default)
+// disables the cap; the ITERION_MAX_COST_PER_DAY_USD env var supplies a
+// fallback when this option is omitted. The cap is overridable per day
+// via the /api/v1/limits/cost/override endpoint and auto-resets at the
+// next UTC day.
+func WithDailyCostCap(limitUSD float64) ServiceOption {
+	return func(s *Service) { s.maxCostPerDayUSD = limitUSD }
 }
 
 // WithLogger sets the logger used for service-level diagnostics.
@@ -370,6 +392,19 @@ func NewService(storeDir string, opts ...ServiceOption) (*Service, error) {
 		fs.SetLogPositionFn(s.logPositionForRun)
 	}
 
+	// Build the daily spend-cap guard. The env default only applies when
+	// no explicit WithDailyCostCap was passed. NewDailyCapGuard returns
+	// nil (cap disabled) when the limit is non-positive or the store
+	// can't persist a ledger (cloud Mongo stores).
+	if s.maxCostPerDayUSD <= 0 {
+		s.maxCostPerDayUSD = envDailyCostCap()
+	}
+	s.dailyCap = runtime.NewDailyCapGuard(
+		store.AsSpendStore(s.store),
+		clock.Default,
+		runtime.DailyCapConfig{MaxCostPerDayUSD: s.maxCostPerDayUSD},
+	)
+
 	s.reconcileOrphans()
 	s.reconcileSandboxContainers()
 	return s, nil
@@ -378,6 +413,25 @@ func NewService(storeDir string, opts ...ServiceOption) (*Service, error) {
 // Broker exposes the event broker for transports that need to
 // subscribe directly (the WS handler).
 func (s *Service) Broker() *EventBroker { return s.broker }
+
+// DailyCap returns the service's shared spend-cap guard, or nil when the
+// daily cap is disabled. The HTTP layer uses it to read status and apply
+// per-day overrides.
+func (s *Service) DailyCap() *runtime.DailyCapGuard { return s.dailyCap }
+
+// envDailyCostCap parses ITERION_MAX_COST_PER_DAY_USD as a float dollar
+// amount, returning 0 (disabled) when unset or unparseable.
+func envDailyCostCap() float64 {
+	v := os.Getenv("ITERION_MAX_COST_PER_DAY_USD")
+	if v == "" {
+		return 0
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f < 0 {
+		return 0
+	}
+	return f
+}
 
 // inboxBinder returns the runtime's operator-chatbox plumbing
 // scoped to this service's store + broker. Built once per Build-

@@ -186,6 +186,17 @@ export interface DispatcherSnapshot {
   // Empty / absent once the next poll succeeds.
   last_tracker_error?: string;
   last_tracker_error_at?: string;
+  // Per-(store, UTC-day) spend-cap status when a cap is configured;
+  // absent when disabled. The dashboard renders the CostCapBanner off
+  // the live /api/v1/limits/cost endpoint; this mirrors the gate state
+  // the dispatcher acted on.
+  cost_cap?: {
+    date: string;
+    spent_usd: number;
+    limit_usd: number;
+    exceeded: boolean;
+    override_active: boolean;
+  };
 }
 
 export interface RunningView {

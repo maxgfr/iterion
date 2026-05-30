@@ -1313,13 +1313,17 @@ function reduceEvents(
         break;
       }
       case "run_paused": {
-        // The engine emits the same event type for both pause flavours.
-        // Operator pause (POST /api/runs/:id/pause) tags reason=operator;
-        // human-input pause leaves reason empty (or "human"). Branch on
-        // the reason so the status badge maps to the right colour without
-        // a second event round-trip.
+        // The engine emits the same event type for every pause flavour.
+        // Operator pause (POST /api/runs/:id/pause) tags reason=operator
+        // and the daily spend cap tags reason=cost_cap_daily — both
+        // persist as paused_operator on the backend. Human-input pause
+        // leaves reason empty (or "human"). Branch so the live status
+        // matches the persisted status without a second event round-trip.
         const reason = (evt.data?.reason as string) ?? "";
-        runStatusOverride = reason === "operator" ? "paused_operator" : "paused_waiting_human";
+        runStatusOverride =
+          reason === "operator" || reason === "cost_cap_daily"
+            ? "paused_operator"
+            : "paused_waiting_human";
         break;
       }
       case "browser_session_started": {

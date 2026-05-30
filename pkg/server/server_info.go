@@ -44,6 +44,10 @@ type serverInfoResponse struct {
 	// DispatcherEnabled is true when a Dispatcher instance is running on
 	// the server. The SPA conditionally exposes the Dispatcher view.
 	DispatcherEnabled bool `json:"dispatcher_enabled"`
+	// CostCapEnabled is true when a per-(store, UTC-day) LLM spend cap is
+	// configured. The SPA polls GET /api/v1/limits/cost for live status
+	// and renders the cost-cap banner only when this is true.
+	CostCapEnabled bool `json:"cost_cap_enabled"`
 }
 
 type serverLimitsBlock struct {
@@ -79,6 +83,14 @@ func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
 		},
 		NativeTrackerEnabled: s.cfg.NativeTrackerStore != nil,
 		DispatcherEnabled:    s.cfg.Dispatcher != nil,
+	}
+	// Surface whether the daily spend cap is active so the SPA knows to
+	// poll for live status. DailyCap() is nil when disabled.
+	s.stateMu.RLock()
+	runsSvc := s.runs
+	s.stateMu.RUnlock()
+	if runsSvc != nil && runsSvc.DailyCap() != nil {
+		resp.CostCapEnabled = true
 	}
 	if mode == "local" {
 		resp.WorkDir = s.cfg.WorkDir

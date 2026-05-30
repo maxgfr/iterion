@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/botregistry"
+	"github.com/SocialGouv/iterion/pkg/clock"
 	"github.com/SocialGouv/iterion/pkg/dispatcher/tracker"
+	"github.com/SocialGouv/iterion/pkg/runtime"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
@@ -27,6 +29,18 @@ func (c *Dispatcher) tick(ctx context.Context) {
 	c.refreshRunningStates(ctx)
 
 	if c.paused.Load() {
+		c.fireSnapshot()
+		return
+	}
+
+	// Daily spend cap: recompute the day's spend status and, when the cap
+	// is reached (and not overridden for the day), stop launching new
+	// work. Runs already in flight pause themselves at their next node
+	// boundary via the shared <store>/spend/ ledger; the gate here only
+	// suppresses new dispatches. The cap limit is read fresh from the
+	// hot-reloadable config so a reload takes effect on the next tick.
+	c.refreshCostCap(ctx, cfg)
+	if cc := c.state.costCap; cc != nil && cc.Exceeded {
 		c.fireSnapshot()
 		return
 	}
@@ -74,6 +88,47 @@ func (c *Dispatcher) tick(ctx context.Context) {
 		c.dispatch(ctx, iss)
 	}
 	c.fireSnapshot()
+}
+
+// refreshCostCap recomputes the daily spend-cap status into state.costCap
+// (nil when the cap is disabled or no ledger store is wired). Runs on the
+// actor goroutine. Errors are logged and leave the prior status in place
+// so a transient ledger read failure doesn't flip the gate open/closed.
+func (c *Dispatcher) refreshCostCap(ctx context.Context, cfg *Config) {
+	g := c.newDailyCapGuard(cfg)
+	if g == nil {
+		c.state.costCap = nil
+		return
+	}
+	st, err := g.Status(ctx)
+	if err != nil {
+		c.logger.Warn("dispatcher: daily spend cap status: %v", err)
+		return
+	}
+	c.state.costCap = &CostCapView{
+		Date:           st.Date,
+		SpentUSD:       st.SpentUSD,
+		LimitUSD:       st.LimitUSD,
+		Exceeded:       st.Exceeded,
+		OverrideActive: st.OverrideActive,
+	}
+}
+
+// newDailyCapGuard builds a spend-cap guard from the dispatcher's
+// SINGLETON SpendStore and the hot-reloadable limit, or nil when the cap
+// is disabled (limit <= 0 or no ledger store). Reusing the single shared
+// c.spendStore across every dispatched run is load-bearing: all ledger
+// read-modify-writes then serialise on one store mutex, so concurrent
+// runs can't clobber each other's runs_contributed entry — unlike a
+// per-run store.New() (the engine opens one for run.json/events) which
+// would race on <store>/spend/<day>.json. NewDailyCapGuard already
+// returns nil for a nil store or non-positive limit.
+func (c *Dispatcher) newDailyCapGuard(cfg *Config) *runtime.DailyCapGuard {
+	return runtime.NewDailyCapGuard(
+		c.spendStore,
+		clock.Default,
+		runtime.DailyCapConfig{MaxCostPerDayUSD: cfg.Limits.MaxCostPerDayUSD},
+	)
 }
 
 func sortCandidates(in []tracker.Issue) {
@@ -502,6 +557,10 @@ func (c *Dispatcher) buildSpec(cfg *Config, iss tracker.Issue, runID, wsPath str
 		WorkspacePath: wsPath,
 		StoreDir:      c.storeDir,
 		Vars:          vars,
+		// Built from the singleton SpendStore so this run records into —
+		// and self-pauses against — the same ledger the refreshCostCap
+		// gate reads. nil when the cap is disabled.
+		DailyCap: c.newDailyCapGuard(cfg),
 		Issue: &IssueRef{
 			ID:         iss.ID,
 			Identifier: iss.Identifier,

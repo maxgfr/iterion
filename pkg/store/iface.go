@@ -285,3 +285,32 @@ func AsTurnStore(s RunStore) TurnStore {
 	t, _ := s.(TurnStore)
 	return t
 }
+
+// SpendStore is an optional interface implemented by stores that can
+// persist a per-(store, UTC-day) LLM spend ledger backing the daily
+// spend cap. FilesystemRunStore satisfies it (<root>/spend/<date>.json).
+// Cloud (Mongo) stores currently do NOT — the daily cap is a local-mode
+// feature for now; the spend-cap guard treats a nil SpendStore as
+// "cap disabled". Callers MUST nil-check via AsSpendStore.
+type SpendStore interface {
+	// LoadDailySpend returns the ledger for a UTC day (YYYY-MM-DD),
+	// or a zero-valued ledger (no error) when the day is absent.
+	LoadDailySpend(ctx context.Context, date string) (*DailySpend, error)
+	// AddSpend records a run's latest cumulative cost into the day's
+	// ledger (idempotent) and returns the updated ledger.
+	AddSpend(ctx context.Context, date, runID string, cumulativeRunCostUSD float64) (*DailySpend, error)
+	// SetSpendOverride sets/clears the day's override flag and returns
+	// the updated ledger.
+	SetSpendOverride(ctx context.Context, date string, ov *SpendOverride) (*DailySpend, error)
+}
+
+// AsSpendStore returns s as SpendStore when the backend persists a daily
+// spend ledger, or nil otherwise. Filesystem stores satisfy it; cloud
+// (Mongo) stores currently do not.
+func AsSpendStore(s RunStore) SpendStore {
+	if s == nil {
+		return nil
+	}
+	sp, _ := s.(SpendStore)
+	return sp
+}

@@ -24,6 +24,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/dispatcher/tracker"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/store"
 )
 
 // Options is the construction-time wiring for a Dispatcher.
@@ -78,6 +79,13 @@ type Dispatcher struct {
 	// Pause/Resume public API or the corresponding REST endpoints.
 	paused atomic.Bool
 
+	// spendStore backs the daily spend-cap gate. Built once from
+	// StoreDir; nil when the store dir is unset or can't host a ledger.
+	// The cap limit itself is read fresh from the hot-reloadable config
+	// each tick, so changing limits.max_cost_per_day_usd via reload takes
+	// effect without a restart.
+	spendStore store.SpendStore
+
 	ws *wsBridge
 }
 
@@ -117,6 +125,19 @@ func New(opts Options) (*Dispatcher, error) {
 		ws:         newWsBridge(opts.Logger),
 	}
 	c.cfg.Store(opts.Config)
+	// Wire the daily spend-cap ledger when a store dir is available. The
+	// FilesystemRunStore implements store.SpendStore; the runtime runs
+	// launched by this dispatcher write into the same <store>/spend/
+	// ledger, so the gate sees their cumulative spend. AsSpendStore
+	// returns nil for stores that can't host a ledger (cloud Mongo),
+	// which disables the gate cleanly.
+	if opts.StoreDir != "" {
+		if st, err := store.New(opts.StoreDir); err == nil {
+			c.spendStore = store.AsSpendStore(st)
+		} else {
+			opts.Logger.Warn("dispatcher: daily spend cap disabled — open store: %v", err)
+		}
+	}
 	return c, nil
 }
 
@@ -442,6 +463,7 @@ func (c *Dispatcher) buildSnapshot() Snapshot {
 		Paused:             c.paused.Load(),
 		LastTrackerError:   c.state.lastTrackerErr,
 		LastTrackerErrorAt: c.state.lastTrackerErrAt,
+		CostCap:            c.state.costCap,
 		Slots: SlotsView{
 			GlobalMax:    cfg.Agent.MaxConcurrent,
 			GlobalUsed:   len(c.state.running),

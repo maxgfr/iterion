@@ -1,4 +1,5 @@
 import { useRuns } from "@/hooks/useRuns";
+import CostCapBanner from "@/components/shared/CostCapBanner";
 import WhatsNextCard from "./WhatsNextCard";
 import RecentFilesPanel from "./RecentFilesPanel";
 import RunsPanel from "./RunsPanel";
@@ -8,6 +9,9 @@ export default function HomeView() {
 
   return (
     <div className="h-full overflow-auto p-4 sm:p-6">
+      {/* Daily spend-cap banner sits above the page content so it's the
+          first thing the operator sees when runs are paused on budget. */}
+      <CostCapBanner />
       <div className="max-w-6xl mx-auto space-y-4">
         {/* WhatsNextCard is the curated entry point — full-width above
             the grid so it reads as "start here" rather than as one

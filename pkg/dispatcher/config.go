@@ -37,6 +37,7 @@ type Config struct {
 	Workspace         WorkspaceConfig           `yaml:"workspace,omitempty" json:"workspace,omitempty"`
 	Hooks             Hooks                     `yaml:"hooks,omitempty" json:"hooks,omitempty"`
 	Stall             StallConfig               `yaml:"stall,omitempty" json:"stall,omitempty"`
+	Limits            LimitsConfig              `yaml:"limits,omitempty" json:"limits,omitempty"`
 	Server            ServerConfig              `yaml:"server,omitempty" json:"server,omitempty"`
 	// Bots configures the registry the dispatcher consults when a
 	// ticket carries a per-ticket Bot override. Paths are walked
@@ -160,6 +161,20 @@ type AgentConfig struct {
 	// opt-out (issue stays in CompletedState — typically "review" — until
 	// manually moved). An unknown state name logs a warning and is a no-op.
 	MergedState string `yaml:"merged_state,omitempty" json:"merged_state,omitempty"`
+}
+
+// LimitsConfig holds operator-facing spend guardrails. Currently just
+// the per-(store, UTC-day) LLM spend cap; structured as a block so
+// future limits (per-issue cost, monthly cap) slot in without a config
+// migration.
+type LimitsConfig struct {
+	// MaxCostPerDayUSD caps cumulative LLM spend across all dispatcher
+	// runs for a UTC calendar day. When the day's spend reaches the cap,
+	// the dispatcher stops launching new work and every running run
+	// pauses (resumable) at its next node boundary. 0 (the default)
+	// disables the cap. Overridable for the current day from the studio;
+	// auto-resets at the next UTC day.
+	MaxCostPerDayUSD float64 `yaml:"max_cost_per_day_usd,omitempty" json:"max_cost_per_day_usd,omitempty"`
 }
 
 // WorkspaceConfig controls where per-issue workspaces live.

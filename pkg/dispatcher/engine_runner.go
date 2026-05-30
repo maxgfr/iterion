@@ -221,6 +221,15 @@ func (r *EngineRunner) Dispatch(ctx context.Context, spec DispatchSpec) error {
 	if r.bundle != nil {
 		opts = append(opts, runtime.WithBundle(r.bundle))
 	}
+	// Enforce the per-(store, UTC-day) spend cap when the dispatcher wired
+	// one onto the spec. Without this, dispatcher-launched runs neither
+	// record spend into the shared ledger nor self-pause, so the
+	// dispatcher's refreshCostCap gate would read a ledger nobody writes
+	// to and the cap would never fire — the primary surface for
+	// limits.max_cost_per_day_usd. WithDailyCap(nil) is inert.
+	if spec.DailyCap != nil {
+		opts = append(opts, runtime.WithDailyCap(spec.DailyCap))
+	}
 	eng := runtime.New(r.workflow, s, exec, opts...)
 
 	// Resume the prior run iff the dispatcher's scheduleRetry tagged

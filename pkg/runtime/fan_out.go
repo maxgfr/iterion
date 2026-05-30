@@ -278,6 +278,18 @@ func (e *Engine) execBranch(ctx context.Context, rs *runState, branchID string, 
 	vars := rs.vars
 	runInputs := rs.runInputs
 
+	// branchCostUSD is this branch's cumulative LLM spend. It is recorded
+	// into the shared daily-cap ledger under a per-branch key
+	// ("<runID>#<branchID>") rather than the bare runID: branches run
+	// concurrently, and the ledger's AddSpend keys by a single ID with
+	// monotonic-max, so two branches recording under the same runID would
+	// clobber each other (only the largest single-branch cumulative would
+	// survive). Distinct keys are summed into the day total, so parallel
+	// branch spend aggregates correctly and stays idempotent on resume
+	// (re-running a branch overwrites its own key monotonically). Without
+	// this, all fan-out spend escapes the per-day cap entirely.
+	var branchCostUSD float64
+
 	// Emit branch_started (best-effort — branch can proceed without the event).
 	if err := e.emitBranch(ctx, runID, branchID, store.EventBranchStarted, startEdge.To, nil); err != nil {
 		e.logger.Warn("branch %s: failed to emit branch_started: %v", branchID, err)
@@ -408,8 +420,23 @@ func (e *Engine) execBranch(ctx context.Context, rs *runState, branchID string, 
 		}
 
 		// Record budget usage and check limits.
+		tokens, costUSD := extractUsage(output)
+
+		// Daily spend-cap accounting for this branch. Independent of the
+		// per-run budget so it works for workflows with no `budget:` block.
+		// The pause decision still happens on the trunk's pre-exec path
+		// (checkBudgetBeforeExec) so the checkpoint anchors at a not-yet-
+		// executed node; branches only contribute spend. The per-branch
+		// ledger key keeps concurrent branches from clobbering each other
+		// (see branchCostUSD above).
+		if e.dailyCap != nil && costUSD > 0 {
+			branchCostUSD += costUSD
+			if _, err := e.dailyCap.Record(ctx, runID+"#"+branchID, branchCostUSD); err != nil {
+				e.logger.Warn("branch %s: daily spend cap record failed: %v", branchID, err)
+			}
+		}
+
 		if rs.budget != nil {
-			tokens, costUSD := extractUsage(output)
 			checks := rs.budget.RecordUsage(tokens, costUSD)
 
 			// Emit warnings.

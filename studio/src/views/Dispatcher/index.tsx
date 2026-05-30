@@ -16,6 +16,7 @@ import {
 } from "@/api/dispatcher";
 import SettingsDrawer from "@/components/Dispatcher/SettingsDrawer";
 import TrackerErrorBanner from "@/components/shared/TrackerErrorBanner";
+import CostCapBanner from "@/components/shared/CostCapBanner";
 import { dispatcherActionState } from "./dispatcherActionState";
 import { dispatcherPillMeta } from "@/components/shared/dispatcherPillMeta";
 
@@ -220,6 +221,12 @@ export default function DispatcherView() {
           message={snap.last_tracker_error}
         />
       )}
+
+      {/* Daily spend-cap banner — self-polls /api/v1/limits/cost and
+          renders only when the cap is reached. The dispatcher gate has
+          already stopped new dispatches; this surfaces it + the
+          override action. */}
+      <CostCapBanner />
 
       {snap.paused && (
         <div className="bg-yellow-500/10 border-b border-yellow-500/40 px-4 py-2 text-xs text-yellow-200 flex items-center gap-2">

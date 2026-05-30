@@ -121,6 +121,20 @@ export interface ServerInfo {
   // dispatcher_enabled is true when a long-running dispatcher is
   // attached. The SPA exposes the Dispatcher dashboard conditionally.
   dispatcher_enabled?: boolean;
+  // cost_cap_enabled is true when a per-(store, UTC-day) LLM spend cap
+  // is configured. The SPA polls GET /api/v1/limits/cost for live status
+  // and renders the cost-cap banner only when this is true.
+  cost_cap_enabled?: boolean;
+}
+
+// CostCapStatus mirrors runtime.CapStatus (GET /api/v1/limits/cost).
+export interface CostCapStatus {
+  enabled: boolean;
+  date: string;
+  spent_usd: number;
+  limit_usd: number;
+  exceeded: boolean;
+  override_active: boolean;
 }
 
 // Response shape of POST /api/runs/uploads.
