@@ -55,5 +55,8 @@ RUN npm install -g @playwright/mcp@latest
 # user's home so each run gets a fresh, isolated cache.
 ENV CHROMIUM_FLAGS="--headless --no-sandbox --disable-dev-shm-usage --remote-debugging-pipe"
 
-USER devbox
+# Numeric UID (not the `devbox` name) so the image runs under platforms
+# that forbid non-numeric / root-capable users (OpenShift `restricted`
+# SCC, k8s `runAsNonRoot`). uid 1000 == devbox.
+USER 1000
 WORKDIR /workspace

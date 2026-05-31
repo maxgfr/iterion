@@ -40,7 +40,10 @@ RUN apt-get update \
 # docker driver (see pkg/sandbox/docker/driver.go DefaultWorkspace).
 RUN mkdir -p /workspace && chown -R devbox:devbox /workspace
 
-USER devbox
+# Numeric UID (not the `devbox` name) so the image runs under platforms
+# that forbid non-numeric / root-capable users (OpenShift `restricted`
+# SCC, k8s `runAsNonRoot`). uid 1000 == devbox.
+USER 1000
 WORKDIR /workspace
 
 ENTRYPOINT ["/usr/bin/tini", "--"]

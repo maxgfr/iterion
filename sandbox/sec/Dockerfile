@@ -69,7 +69,10 @@ RUN case "$(uname -m)" in \
         | tar -xz -C /usr/local/bin gitleaks \
  && chmod +x /usr/local/bin/gitleaks
 
-USER devbox
+# Numeric UID (not the `devbox` name) on the final stage so the image
+# runs under platforms that forbid non-numeric / root-capable users
+# (OpenShift `restricted` SCC, k8s `runAsNonRoot`). uid 1000 == devbox.
+USER 1000
 WORKDIR /workspace
 
 # Build-time sanity check — fail the build rather than ship an image

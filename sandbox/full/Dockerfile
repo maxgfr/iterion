@@ -129,7 +129,10 @@ RUN curl -fsSL https://raw.githubusercontent.com/stefanmaric/g/master/bin/g \
  && chmod +x /usr/local/bin/g \
  && install -d -o devbox -g devbox /home/devbox/.g /home/devbox/go
 
-USER devbox
+# Numeric UID (not the `devbox` name) so the image runs under platforms
+# that forbid non-numeric / root-capable users (OpenShift `restricted`
+# SCC, k8s `runAsNonRoot`). uid 1000 == devbox.
+USER 1000
 WORKDIR /workspace
 
 # Sanity check at build time — fail fast if any tool is missing/broken
