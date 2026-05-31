@@ -25,9 +25,13 @@ interface Props {
   onSubmit: (input: Partial<NativeIssue>) => Promise<void> | void;
   onClose: () => void;
   onDelete?: () => void;
+  // When set, the issue is in a pre-dispatch lane (inbox/backlog) and a
+  // "Let's go" button is shown that transitions it into the dispatch
+  // lane so the running dispatcher picks it up. Omitted otherwise.
+  onDispatch?: () => void;
 }
 
-export default function IssueModal({ board, initial, onSubmit, onClose, onDelete }: Props) {
+export default function IssueModal({ board, initial, onSubmit, onClose, onDelete, onDispatch }: Props) {
   const [tab, setTab] = useState<"ticket" | "bot">("ticket");
   const [title, setTitle] = useState(initial?.title ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
@@ -212,7 +216,17 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
           </div>
         )}
         <footer className="px-4 py-2.5 border-t border-border-default flex items-center justify-between bg-surface-0">
-          <div>
+          <div className="flex items-center gap-3">
+            {onDispatch && (
+              <button
+                type="button"
+                onClick={onDispatch}
+                disabled={submitting}
+                className="text-xs px-2.5 py-1 rounded bg-emerald-600/90 text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ▶ Let's go
+              </button>
+            )}
             {onDelete && (
               <button
                 type="button"

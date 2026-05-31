@@ -9,6 +9,8 @@ interface Args {
   selectedId: string | null;
   modalOpen: boolean;
   onSelect: (id: string | null) => void;
+  onToggleSelect: (id: string) => void;
+  onSelectAllVisible: () => void;
   onCreate: () => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
@@ -20,6 +22,8 @@ interface Args {
 //   c / n        : open the New Issue modal
 //   ? or shift+/ : toggle the keyboard-help overlay
 //   Esc          : clear selection
+//   Cmd/Ctrl+A   : select every visible (filtered) card
+//   x            : toggle the anchor card in/out of the selection
 //   ↑ / ↓        : navigate within the current column
 //   ← / →        : move the selected card to the previous/next column
 //   Enter / e    : open the selected card
@@ -34,6 +38,8 @@ export function useBoardKeyboard({
   selectedId,
   modalOpen,
   onSelect,
+  onToggleSelect,
+  onSelectAllVisible,
   onCreate,
   onEdit,
   onDelete,
@@ -44,6 +50,14 @@ export function useBoardKeyboard({
     const handler = (e: KeyboardEvent) => {
       if (modalOpen) return;
       if (isTypingTarget(e.target)) return;
+
+      // Cmd/Ctrl+A selects every visible card. Handled before the
+      // modifier bail below so the combo isn't swallowed.
+      if ((e.metaKey || e.ctrlKey) && (e.key === "a" || e.key === "A")) {
+        e.preventDefault();
+        onSelectAllVisible();
+        return;
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       // "?" is shift+/ on most layouts. Accept both the produced glyph
@@ -77,6 +91,12 @@ export function useBoardKeyboard({
       if (e.key === "e" || e.key === "Enter") {
         e.preventDefault();
         onEdit(selectedId);
+        return;
+      }
+
+      if (e.key === "x" || e.key === "X") {
+        e.preventDefault();
+        onToggleSelect(selectedId);
         return;
       }
 

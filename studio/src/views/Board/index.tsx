@@ -22,11 +22,59 @@ import {
   transitionIssue,
   type NativeBoard,
   type NativeIssue,
+  type NativeIssuePatch,
 } from "@/api/native";
 import IssueModal from "./IssueModal";
 import SettingsDrawer from "@/components/Dispatcher/SettingsDrawer";
 import TrackerErrorBanner from "@/components/shared/TrackerErrorBanner";
 import { useBoardKeyboard } from "@/hooks/useBoardKeyboard";
+import { useConfirm } from "@/hooks/useConfirm";
+import { useUIStore } from "@/store/ui";
+
+// Pre-dispatch lanes: an issue here has not yet entered the dispatcher's
+// eligible queue, so it can be "dispatched" (transitioned into the
+// dispatch lane). review/done/blocked are downstream and not dispatchable.
+function isDispatchable(state: string): boolean {
+  return state === "inbox" || state === "backlog";
+}
+
+// Above this many at once, bulk dispatch asks for confirmation — each
+// dispatch starts a paid run.
+const BULK_DISPATCH_CONFIRM_THRESHOLD = 3;
+
+// Priority presets offered by the bulk "Priority" picker (the magnitudes
+// the roadmap uses). Columns sort by priority descending by default.
+const PRIORITY_PRESETS = [0, 1, 2, 3, 5, 10, 20, 30];
+
+// Max label chips shown on a card before collapsing the rest into "+N".
+const MAX_CARD_LABELS = 3;
+
+// Intra-column ordering modes offered by the board's Sort selector.
+type SortMode = "priority" | "updated" | "created" | "title";
+
+const SORT_OPTIONS: { value: SortMode; label: string }[] = [
+  { value: "priority", label: "Priority" },
+  { value: "updated", label: "Recently updated" },
+  { value: "created", label: "Recently created" },
+  { value: "title", label: "Title (A–Z)" },
+];
+
+// sortComparator returns the per-column ordering for a sort mode. Priority
+// is descending (higher number first, the board's long-standing default);
+// date modes are newest-first; title is alphabetical.
+function sortComparator(mode: SortMode): (a: NativeIssue, b: NativeIssue) => number {
+  switch (mode) {
+    case "updated":
+      return (a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "");
+    case "created":
+      return (a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? "");
+    case "title":
+      return (a, b) => (a.title ?? "").localeCompare(b.title ?? "");
+    case "priority":
+    default:
+      return (a, b) => (b.priority ?? 0) - (a.priority ?? 0);
+  }
+}
 
 export default function BoardView() {
   const [, setLocation] = useLocation();
@@ -76,9 +124,12 @@ export default function BoardView() {
     }
   }, []);
   const [helpOpen, setHelpOpen] = useState(false);
+  const addToast = useUIStore((s) => s.addToast);
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [searchQuery, setSearchQuery] = useState("");
   const [labelFilter, setLabelFilter] = useState<Set<string>>(() => new Set());
   const [assigneeFilter, setAssigneeFilter] = useState("");
+  const [sortMode, setSortMode] = useState<SortMode>("priority");
   // Single source of truth for label filter toggling — used both by
   // the top filter strip and by clicking a chip on any card. Lifted
   // here so card-level chips toggle the same Set the filter strip
@@ -261,11 +312,12 @@ export default function BoardView() {
       const bucket = m.has(iss.state) ? iss.state : "__unmapped__";
       m.get(bucket)!.push(iss);
     }
+    const cmp = sortComparator(sortMode);
     for (const list of m.values()) {
-      list.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+      list.sort(cmp);
     }
     return m;
-  }, [board, filteredIssues]);
+  }, [board, filteredIssues, sortMode]);
 
   // Flat issue-id sequence in column-then-row order. Used as the
   // 1-D coordinate space for shift-click range extension across
@@ -420,10 +472,11 @@ export default function BoardView() {
         return;
       }
 
-      // Selection is updated so the keyboard hook has an anchor
-      // when the modal closes.
+      // Plain click selects only (GitHub-style) — opening the modal is
+      // a deliberate gesture (double-click the card or click the title).
+      // Selection still updates so the keyboard hook has an anchor and
+      // the single-card action bar appears.
       setSingleSelection(iss.id);
-      setEditing(iss);
     },
     [anchorId, flatIssueIds, selectedIds, setSingleSelection],
   );
@@ -508,9 +561,12 @@ export default function BoardView() {
   const onDelete = useCallback(
     async (id: string) => {
       if (
-        !confirm(
-          "Delete this issue? This removes it from the board and cannot be undone.",
-        )
+        !(await confirm({
+          title: "Delete this issue?",
+          message: "This removes it from the board and cannot be undone.",
+          confirmLabel: "Delete",
+          confirmVariant: "danger",
+        }))
       )
         return;
       try {
@@ -528,7 +584,175 @@ export default function BoardView() {
         setError(e instanceof Error ? e.message : String(e));
       }
     },
-    [refresh],
+    [confirm, refresh],
+  );
+
+  // The dispatch lane: the first eligible, non-terminal state (the
+  // "Let's go"/ready column the dispatcher claims from). Falls back to
+  // "ready" for boards that haven't flagged eligibility.
+  const dispatchState = useMemo(
+    () => board?.states.find((s) => s.eligible && !s.terminal)?.name ?? "ready",
+    [board],
+  );
+  const selectedIssues = useMemo(
+    () => issues.filter((i) => selectedIds.has(i.id)),
+    [issues, selectedIds],
+  );
+  const allSelectedDispatchable =
+    selectedIssues.length > 0 && selectedIssues.every((i) => isDispatchable(i.state));
+
+  const onBulkDispatch = useCallback(async () => {
+    const ids = selectedIssues.filter((i) => isDispatchable(i.state)).map((i) => i.id);
+    if (ids.length === 0) return;
+    // Each dispatch starts a run (cost). Confirm above a small threshold
+    // so a fat-fingered select-all + dispatch doesn't fan out a dozen
+    // paid runs — pairs with the per-day spend cap.
+    if (ids.length > BULK_DISPATCH_CONFIRM_THRESHOLD) {
+      if (
+        !(await confirm({
+          title: `Dispatch ${ids.length} issues?`,
+          message: `This starts ${ids.length} runs at once, each consuming budget against the daily spend cap.`,
+          confirmLabel: `Dispatch ${ids.length}`,
+        }))
+      )
+        return;
+    }
+    for (const id of ids) await onDrop(id, dispatchState);
+    setSingleSelection(null);
+    addToast(`Dispatched ${ids.length} issue${ids.length > 1 ? "s" : ""}`, "success", {
+      action: { label: "View runs", onClick: () => setLocation("/runs") },
+    });
+  }, [selectedIssues, dispatchState, onDrop, setSingleSelection, addToast, confirm, setLocation]);
+
+  // runBulkPatch applies a per-issue PATCH across the selection, then
+  // refreshes. The patch fn returns null to skip an issue (e.g. a label
+  // it already has). Shared by the bulk label / priority / assignee ops.
+  const runBulkPatch = useCallback(
+    async (build: (iss: NativeIssue) => NativeIssuePatch | null, toastMsg: string) => {
+      const targets = selectedIssues;
+      if (targets.length === 0) return;
+      try {
+        let n = 0;
+        for (const iss of targets) {
+          const patch = build(iss);
+          if (patch) {
+            await patchIssue(iss.id, patch);
+            n++;
+          }
+        }
+        await refresh();
+        if (n > 0) addToast(toastMsg, "success");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [selectedIssues, refresh, addToast],
+  );
+
+  const onBulkMove = useCallback(
+    async (toState: string) => {
+      const ids = selectedIssues.map((i) => i.id);
+      if (ids.length === 0) return;
+      for (const id of ids) await onDrop(id, toState);
+      const display = board?.states.find((s) => s.name === toState)?.display ?? toState;
+      addToast(`Moved ${ids.length} to ${display}`, "success");
+    },
+    [selectedIssues, onDrop, board, addToast],
+  );
+
+  const onBulkPriority = useCallback(
+    (priority: number) =>
+      void runBulkPatch(
+        () => ({ priority }),
+        `Set priority P${priority} on ${selectedIssues.length} issue${selectedIssues.length > 1 ? "s" : ""}`,
+      ),
+    [runBulkPatch, selectedIssues],
+  );
+
+  const onBulkAssignee = useCallback(
+    (assignee: string) =>
+      void runBulkPatch(
+        () => ({ assignee }),
+        assignee
+          ? `Assigned ${selectedIssues.length} to @${assignee}`
+          : `Cleared assignee on ${selectedIssues.length} issue${selectedIssues.length > 1 ? "s" : ""}`,
+      ),
+    [runBulkPatch, selectedIssues],
+  );
+
+  // Toggle a label across the selection: if every selected issue already
+  // has it, remove it from all; otherwise add it to those missing it.
+  const onBulkToggleLabel = useCallback(
+    (label: string) => {
+      const allHave = selectedIssues.length > 0 && selectedIssues.every((i) => (i.labels ?? []).includes(label));
+      void runBulkPatch((iss) => {
+        const cur = iss.labels ?? [];
+        const has = cur.includes(label);
+        if (allHave) return has ? { labels: cur.filter((l) => l !== label) } : null;
+        return has ? null : { labels: [...cur, label] };
+      }, `${allHave ? "Removed" : "Added"} label "${label}" ${allHave ? "from" : "on"} ${selectedIssues.length} issue${selectedIssues.length > 1 ? "s" : ""}`);
+    },
+    [selectedIssues, runBulkPatch],
+  );
+
+  const onBulkDelete = useCallback(async () => {
+    const ids = selectedIssues.map((i) => i.id);
+    if (ids.length === 0) return;
+    if (
+      !(await confirm({
+        title: `Delete ${ids.length} issue${ids.length > 1 ? "s" : ""}?`,
+        message: "This removes them from the board and cannot be undone.",
+        confirmLabel: "Delete",
+        confirmVariant: "danger",
+      }))
+    )
+      return;
+    try {
+      for (const id of ids) await deleteIssue(id);
+      setSingleSelection(null);
+      addToast(`Deleted ${ids.length} issue${ids.length > 1 ? "s" : ""}`, "success");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [selectedIssues, confirm, setSingleSelection, addToast, refresh]);
+
+  // Toggle one card in/out of the multi-selection (keyboard `x` and the
+  // per-column select-all share this). The anchor follows the acted-on
+  // card so further arrow-key navigation continues from here.
+  const toggleSelection = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    setAnchorId(id);
+  }, []);
+  const selectAllVisible = useCallback(() => {
+    const ids = filteredIssues.map((i) => i.id);
+    setSelectedIds(new Set(ids));
+    setAnchorId(ids[0] ?? null);
+  }, [filteredIssues]);
+  // Select every card in one state column (per-column select-all box).
+  const selectColumn = useCallback(
+    (stateName: string) => {
+      const ids = (byState.get(stateName) ?? []).map((i) => i.id);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        const allIn = ids.length > 0 && ids.every((id) => next.has(id));
+        // Toggle: if the whole column is already selected, clear it;
+        // otherwise add the column to the selection.
+        for (const id of ids) {
+          if (allIn) next.delete(id);
+          else next.add(id);
+        }
+        return next;
+      });
+      const first = ids[0];
+      if (first) setAnchorId(first);
+    },
+    [byState],
   );
 
   useBoardKeyboard({
@@ -537,6 +761,8 @@ export default function BoardView() {
     selectedId: anchorId,
     modalOpen: creating || editing !== null || helpOpen || settingsOpen,
     onSelect: setSingleSelection,
+    onToggleSelect: toggleSelection,
+    onSelectAllVisible: selectAllVisible,
     onCreate: () => setCreating(true),
     onEdit: (id) => {
       const iss = issues.find((i) => i.id === id);
@@ -616,7 +842,10 @@ export default function BoardView() {
         filtered={filteredIssues.length}
         onSearchChange={setSearchQuery}
         onLabelToggle={onLabelToggle}
+        onClearLabels={() => setLabelFilter(new Set())}
         onAssigneeChange={setAssigneeFilter}
+        sortMode={sortMode}
+        onSortChange={setSortMode}
         onReset={() => {
           setSearchQuery("");
           setLabelFilter(new Set());
@@ -627,21 +856,34 @@ export default function BoardView() {
       {issues.length === 0 && (
         <EmptyBoardBanner onCreate={() => setCreating(true)} />
       )}
-      {selectedIds.size > 1 && (
-        <div className="shrink-0 px-3 py-1.5 border-b border-border-default bg-accent-soft/20 flex items-center gap-3 text-xs text-fg-default">
-          <span>
-            <strong>{selectedIds.size}</strong> cards selected — drag any one to move them all
-          </span>
-          <button
-            type="button"
-            onClick={() => setSingleSelection(null)}
-            className="ml-auto text-fg-subtle hover:text-fg-default underline"
-          >
-            clear
-          </button>
-        </div>
+      {selectedIds.size > 0 && (
+        <SelectionToolbar
+          count={selectedIds.size}
+          board={board}
+          allLabels={allLabels}
+          allAssignees={allAssignees}
+          selectedIssues={selectedIssues}
+          allSelectedDispatchable={allSelectedDispatchable}
+          onDispatch={() => void onBulkDispatch()}
+          onMove={(s) => void onBulkMove(s)}
+          onPriority={onBulkPriority}
+          onAssignee={onBulkAssignee}
+          onToggleLabel={onBulkToggleLabel}
+          onDelete={() => void onBulkDelete()}
+          onClear={() => setSingleSelection(null)}
+        />
       )}
-      <div className="flex-1 overflow-auto p-3">
+      <div
+        className="flex-1 overflow-auto p-3"
+        // Click in the empty board area (column gaps, "drop here" space,
+        // padding) clears the selection. Clicks landing on a card are
+        // ignored here — the card carries data-issue-card and runs its
+        // own selection handler.
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest("[data-issue-card]")) return;
+          if (selectedIds.size > 0) setSingleSelection(null);
+        }}
+      >
         <div className="flex gap-3 min-w-fit">
           {board.states.map((s) => (
             <Column
@@ -659,6 +901,7 @@ export default function BoardView() {
               onClickCard={onCardClick}
               onDragStartCard={onCardDragStart}
               onOpenCard={(iss) => setEditing(iss)}
+              onSelectColumn={selectColumn}
               onLabelClick={onLabelToggle}
               activeLabels={labelFilter}
               onCancelRun={onCancelRun}
@@ -681,6 +924,7 @@ export default function BoardView() {
               onClickCard={onCardClick}
               onDragStartCard={onCardDragStart}
               onOpenCard={(iss) => setEditing(iss)}
+              onSelectColumn={selectColumn}
               onLabelClick={onLabelToggle}
               activeLabels={labelFilter}
               onCancelRun={onCancelRun}
@@ -706,8 +950,19 @@ export default function BoardView() {
           onSubmit={onSave}
           onClose={() => setEditing(null)}
           onDelete={() => void onDelete(editing.id)}
+          onDispatch={
+            isDispatchable(editing.state)
+              ? () => {
+                  const id = editing.id;
+                  setEditing(null);
+                  void onDrop(id, dispatchState);
+                  addToast("Dispatched 1 issue", "success");
+                }
+              : undefined
+          }
         />
       )}
+      {confirmDialog}
       {helpOpen && <BoardKeyboardHelp onClose={() => setHelpOpen(false)} />}
     </div>
   );
@@ -794,7 +1049,10 @@ function BoardFilters({
   filtered,
   onSearchChange,
   onLabelToggle,
+  onClearLabels,
   onAssigneeChange,
+  sortMode,
+  onSortChange,
   onReset,
 }: {
   searchQuery: string;
@@ -806,7 +1064,10 @@ function BoardFilters({
   filtered: number;
   onSearchChange: (v: string) => void;
   onLabelToggle: (l: string) => void;
+  onClearLabels: () => void;
   onAssigneeChange: (v: string) => void;
+  sortMode: SortMode;
+  onSortChange: (m: SortMode) => void;
   onReset: () => void;
 }) {
   const filtersActive =
@@ -835,27 +1096,28 @@ function BoardFilters({
         </select>
       )}
       {allLabels.length > 0 && (
-        <div className="flex flex-wrap gap-1 items-center">
-          <span className="text-fg-muted">labels:</span>
-          {allLabels.map((l) => {
-            const active = labelFilter.has(l);
-            return (
-              <button
-                key={l}
-                type="button"
-                onClick={() => onLabelToggle(l)}
-                className={`px-1.5 py-0.5 rounded border text-[10px] ${
-                  active
-                    ? "bg-accent text-fg-onAccent border-accent"
-                    : "bg-surface-0 text-fg-muted border-border-default hover:text-fg-default"
-                }`}
-              >
-                {l}
-              </button>
-            );
-          })}
-        </div>
+        <LabelFilter
+          allLabels={allLabels}
+          selected={labelFilter}
+          onToggle={onLabelToggle}
+          onClear={onClearLabels}
+        />
       )}
+      <label className="flex items-center gap-1 text-fg-muted">
+        Sort
+        <select
+          value={sortMode}
+          onChange={(e) => onSortChange(e.target.value as SortMode)}
+          className="px-2 py-1 rounded border border-border-default bg-surface-0 text-fg-default text-xs"
+          title="Order cards within each column"
+        >
+          {SORT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
       <span className="ml-auto text-fg-muted">
         {filtersActive ? `${filtered} / ${total}` : `${total} issue${total === 1 ? "" : "s"}`}
       </span>
@@ -867,6 +1129,357 @@ function BoardFilters({
         >
           reset
         </button>
+      )}
+    </div>
+  );
+}
+
+// LabelFilter is a searchable multi-select popover for the board's label
+// vocabulary. It replaces the flat chip strip, which grew unwieldy once
+// boards accumulate dozens of labels. Selection is the same `labelFilter`
+// Set the card chips toggle, so the two stay in sync.
+function LabelFilter({
+  allLabels,
+  selected,
+  onToggle,
+  onClear,
+}: {
+  allLabels: string[];
+  selected: Set<string>;
+  onToggle: (l: string) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? allLabels.filter((l) => l.toLowerCase().includes(q)) : allLabels;
+  }, [allLabels, query]);
+
+  const count = selected.size;
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          setTimeout(() => inputRef.current?.focus(), 0);
+        }}
+        className={`px-2 py-1 rounded border flex items-center gap-1 ${
+          count > 0
+            ? "border-accent text-fg-default bg-accent-soft/30"
+            : "border-border-default text-fg-muted hover:text-fg-default bg-surface-0"
+        }`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span>Labels</span>
+        {count > 0 && (
+          <span className="px-1 rounded bg-accent text-fg-onAccent text-[10px]">{count}</span>
+        )}
+        <span className="text-fg-subtle text-[10px]">▾</span>
+      </button>
+
+      {open && (
+        <div className="absolute z-30 mt-1 w-64 max-h-80 overflow-hidden rounded-md border border-border-strong bg-surface-0 shadow-lg flex flex-col">
+          <div className="p-1 border-b border-border-default shrink-0">
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search labels…"
+              className="w-full bg-surface-1 text-fg-default rounded border border-border-default px-2 py-1 text-xs outline-none focus:border-accent"
+            />
+          </div>
+          <ul className="py-1 overflow-auto">
+            {filtered.length === 0 && (
+              <li className="px-2 py-2 text-xs text-fg-subtle italic">No matches</li>
+            )}
+            {filtered.map((l) => {
+              const active = selected.has(l);
+              return (
+                <li key={l}>
+                  <button
+                    type="button"
+                    onClick={() => onToggle(l)}
+                    className={`w-full text-left px-2 py-1.5 text-xs flex items-center gap-2 hover:bg-surface-1 ${
+                      active ? "text-fg-default" : "text-fg-muted"
+                    }`}
+                  >
+                    <span
+                      className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border text-[9px] ${
+                        active
+                          ? "bg-accent border-accent text-fg-onAccent"
+                          : "border-border-strong"
+                      }`}
+                    >
+                      {active ? "✓" : ""}
+                    </span>
+                    <span className="truncate">{l}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {count > 0 && (
+            <div className="p-1 border-t border-border-default shrink-0">
+              <button
+                type="button"
+                onClick={onClear}
+                className="w-full text-center text-[11px] text-fg-subtle hover:text-fg-default py-1"
+              >
+                Clear {count} label{count > 1 ? "s" : ""}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// SelectionToolbar is the action bar shown whenever ≥1 card is selected.
+// It hosts the bulk operations (dispatch, move, priority, assignee,
+// label, delete) so triage is possible without opening each card.
+function SelectionToolbar({
+  count,
+  board,
+  allLabels,
+  allAssignees,
+  selectedIssues,
+  allSelectedDispatchable,
+  onDispatch,
+  onMove,
+  onPriority,
+  onAssignee,
+  onToggleLabel,
+  onDelete,
+  onClear,
+}: {
+  count: number;
+  board: NativeBoard;
+  allLabels: string[];
+  allAssignees: string[];
+  selectedIssues: NativeIssue[];
+  allSelectedDispatchable: boolean;
+  onDispatch: () => void;
+  onMove: (state: string) => void;
+  onPriority: (p: number) => void;
+  onAssignee: (a: string) => void;
+  onToggleLabel: (label: string) => void;
+  onDelete: () => void;
+  onClear: () => void;
+}) {
+  const selectClass =
+    "px-2 py-0.5 rounded border border-border-default bg-surface-0 text-fg-muted hover:text-fg-default";
+  return (
+    <div className="shrink-0 px-3 py-1.5 border-b border-border-default bg-accent-soft/20 flex flex-wrap items-center gap-2 text-xs text-fg-default">
+      <span>
+        <strong>{count}</strong> selected
+      </span>
+      <button
+        type="button"
+        onClick={onDispatch}
+        disabled={!allSelectedDispatchable}
+        title={
+          allSelectedDispatchable
+            ? "Move all selected into the dispatch lane"
+            : "All selected cards must be in Inbox or Backlog"
+        }
+        className="px-2 py-0.5 rounded bg-emerald-600/90 text-white hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        ▶ Let's go
+      </button>
+
+      <select
+        value=""
+        onChange={(e) => {
+          if (e.target.value) onMove(e.target.value);
+        }}
+        className={selectClass}
+        title="Move all selected to a column"
+      >
+        <option value="">Move to…</option>
+        {board.states.map((s) => (
+          <option key={s.name} value={s.name}>
+            {s.display ?? s.name}
+          </option>
+        ))}
+      </select>
+
+      <select
+        value=""
+        onChange={(e) => {
+          if (e.target.value !== "") onPriority(Number(e.target.value));
+        }}
+        className={selectClass}
+        title="Set priority on all selected"
+      >
+        <option value="">Priority…</option>
+        {PRIORITY_PRESETS.map((p) => (
+          <option key={p} value={p}>
+            P{p}
+          </option>
+        ))}
+      </select>
+
+      <select
+        value=""
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === "") return;
+          onAssignee(v === "__clear__" ? "" : v);
+        }}
+        className={selectClass}
+        title="Assign all selected"
+      >
+        <option value="">Assignee…</option>
+        <option value="__clear__">(clear)</option>
+        {allAssignees.map((a) => (
+          <option key={a} value={a}>
+            @{a}
+          </option>
+        ))}
+      </select>
+
+      <BulkLabelPopover
+        allLabels={allLabels}
+        selectedIssues={selectedIssues}
+        onToggle={onToggleLabel}
+      />
+
+      <div className="ml-auto flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onDelete}
+          className="px-2 py-0.5 rounded border border-red-500/50 text-red-300 hover:bg-red-500/10"
+        >
+          Delete
+        </button>
+        <button
+          type="button"
+          onClick={onClear}
+          className="text-fg-subtle hover:text-fg-default underline"
+        >
+          clear
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// BulkLabelPopover toggles a label across the whole selection. Each row
+// is tri-state: ✓ when every selected issue has the label, – when some
+// do, empty when none. Clicking adds it to all (or removes from all when
+// every selected issue already has it). Stays open for rapid tagging.
+function BulkLabelPopover({
+  allLabels,
+  selectedIssues,
+  onToggle,
+}: {
+  allLabels: string[];
+  selectedIssues: NativeIssue[];
+  onToggle: (label: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? allLabels.filter((l) => l.toLowerCase().includes(q)) : allLabels;
+  }, [allLabels, query]);
+  const total = selectedIssues.length;
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          setTimeout(() => inputRef.current?.focus(), 0);
+        }}
+        className="px-2 py-0.5 rounded border border-border-default bg-surface-0 text-fg-muted hover:text-fg-default flex items-center gap-1"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        Label <span className="text-fg-subtle text-[10px]">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 w-64 max-h-80 overflow-hidden rounded-md border border-border-strong bg-surface-0 shadow-lg flex flex-col">
+          <div className="p-1 border-b border-border-default shrink-0">
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search labels…"
+              className="w-full bg-surface-1 text-fg-default rounded border border-border-default px-2 py-1 text-xs outline-none focus:border-accent"
+            />
+          </div>
+          <ul className="py-1 overflow-auto">
+            {filtered.length === 0 && (
+              <li className="px-2 py-2 text-xs text-fg-subtle italic">No matches</li>
+            )}
+            {filtered.map((l) => {
+              const c = selectedIssues.reduce(
+                (n, i) => n + ((i.labels ?? []).includes(l) ? 1 : 0),
+                0,
+              );
+              const mark = c === 0 ? "" : c === total ? "✓" : "–";
+              const active = c > 0;
+              return (
+                <li key={l}>
+                  <button
+                    type="button"
+                    onClick={() => onToggle(l)}
+                    className={`w-full text-left px-2 py-1.5 text-xs flex items-center gap-2 hover:bg-surface-1 ${
+                      active ? "text-fg-default" : "text-fg-muted"
+                    }`}
+                  >
+                    <span
+                      className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border text-[9px] ${
+                        active
+                          ? "bg-accent border-accent text-fg-onAccent"
+                          : "border-border-strong"
+                      }`}
+                    >
+                      {mark}
+                    </span>
+                    <span className="truncate">{l}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
     </div>
   );
@@ -898,16 +1511,18 @@ function BoardKeyboardHelp({ onClose }: { onClose: () => void }) {
         </div>
         <ul className="space-y-1.5 text-fg-default">
           <ShortcutRow keys="c / n" desc="New issue" />
-          <ShortcutRow keys="click" desc="Open issue (and select it)" />
+          <ShortcutRow keys="click" desc="Select issue" />
+          <ShortcutRow keys="title / double-click" desc="Open issue" />
           <ShortcutRow keys="Ctrl/⌘+click" desc="Toggle card in selection" />
           <ShortcutRow keys="Shift+click" desc="Extend selection range" />
+          <ShortcutRow keys="Ctrl/⌘+A" desc="Select all visible cards" />
+          <ShortcutRow keys="x" desc="Toggle selected card" />
           <ShortcutRow keys="drag selection" desc="Move all selected cards" />
           <ShortcutRow keys="↑ ↓" desc="Navigate cards in column" />
           <ShortcutRow keys="← →" desc="Move card to previous/next column" />
           <ShortcutRow keys="Enter / e" desc="Open selected issue" />
           <ShortcutRow keys="Del / Bksp" desc="Delete selected issue" />
           <ShortcutRow keys="Esc" desc="Clear selection or close" />
-          <ShortcutRow keys="?" desc="Toggle this help" />
         </ul>
         <button
           type="button"
@@ -1005,6 +1620,9 @@ interface ColumnProps {
   // like "retry details" that should always open regardless of any
   // active selection modifier).
   onOpenCard: (iss: NativeIssue) => void;
+  // onSelectColumn toggles the whole column in/out of the selection
+  // (the header select-all checkbox).
+  onSelectColumn: (stateName: string) => void;
   onLabelClick: (label: string) => void;
   activeLabels: Set<string>;
   onCancelRun: (issueID: string) => void;
@@ -1030,6 +1648,7 @@ function Column({
   onClickCard,
   onDragStartCard,
   onOpenCard,
+  onSelectColumn,
   onLabelClick,
   activeLabels,
   onCancelRun,
@@ -1037,6 +1656,8 @@ function Column({
   dimmed,
 }: ColumnProps) {
   const [dragOver, setDragOver] = useState(false);
+  const selCount = issues.reduce((n, i) => n + (selectedIds.has(i.id) ? 1 : 0), 0);
+  const allSelected = issues.length > 0 && selCount === issues.length;
   // Dim only the eligible columns when the dispatcher is paused — the
   // terminal / backlog columns aren't being actively dispatched even
   // when the dispatcher runs, so muting them carries no extra signal.
@@ -1076,6 +1697,18 @@ function Column({
     >
       <div className="px-3 py-2 border-b border-border-default flex items-center justify-between text-xs">
         <span className="flex items-center gap-2 min-w-0">
+          {name !== "__unmapped__" && issues.length > 0 && (
+            <input
+              type="checkbox"
+              checked={allSelected}
+              ref={(el) => {
+                if (el) el.indeterminate = selCount > 0 && !allSelected;
+              }}
+              onChange={() => onSelectColumn(name)}
+              title={allSelected ? "Deselect all in column" : "Select all in column"}
+              className="shrink-0 accent-accent cursor-pointer"
+            />
+          )}
           <span
             className="inline-block h-2 w-2 rounded-full shrink-0"
             style={{ backgroundColor: color }}
@@ -1085,7 +1718,10 @@ function Column({
             {display}
           </span>
         </span>
-        <span className="text-fg-muted">
+        <span className="text-fg-muted flex items-center gap-1">
+          {selCount > 0 && (
+            <span className="text-accent font-medium">{selCount} sel ·</span>
+          )}
           {issues.length}
           {eligible && <span className="ml-1 text-emerald-400">●</span>}
           {terminal && <span className="ml-1 text-fg-muted">✓</span>}
@@ -1101,6 +1737,7 @@ function Column({
             retrying={retryingByIssue.get(iss.id)}
             activeLabels={activeLabels}
             onClick={(e) => onClickCard(iss, e)}
+            onOpen={() => onOpenCard(iss)}
             onDragStart={(e) => onDragStartCard(iss, e)}
             onLabelClick={onLabelClick}
             onCancelRun={() => onCancelRun(iss.id)}
@@ -1125,10 +1762,12 @@ interface IssueCardProps {
   // filter, so each card's label chip can show its active state and
   // operators can see which chips already filter the view.
   activeLabels: Set<string>;
-  // onClick receives the mouse event so the parent can decide
-  // whether to open the modal (plain click) or update multi-select
-  // (Shift / Ctrl / Meta).
+  // onClick receives the mouse event so the parent can update the
+  // selection (plain click = select; Shift / Ctrl / Meta = multi-select).
   onClick: (e: React.MouseEvent) => void;
+  // onOpen opens the issue modal — triggered by a double-click on the
+  // card or a plain click on the title text (GitHub-style).
+  onOpen: () => void;
   // onDragStart receives the drag event so the parent can decide
   // whether to drag this card alone or the whole multi-selection
   // and write the right payload into dataTransfer.
@@ -1146,6 +1785,7 @@ function IssueCard({
   retrying,
   activeLabels,
   onClick,
+  onOpen,
   onDragStart,
   onLabelClick,
   onCancelRun,
@@ -1178,6 +1818,7 @@ function IssueCard({
     <div
       role="button"
       draggable
+      data-issue-card
       title={hoverTitle}
       onDragStart={(e) => {
         onDragStart(e);
@@ -1185,6 +1826,7 @@ function IssueCard({
       }}
       onDragEnd={() => setDragging(false)}
       onClick={onClick}
+      onDoubleClick={onOpen}
       className={`bg-surface-0 border rounded p-2 text-sm cursor-grab active:cursor-grabbing transition-transform ${
         dragging ? "scale-[1.02] shadow-lg" : ""
       } ${
@@ -1194,7 +1836,19 @@ function IssueCard({
       }`}
     >
       <div className="flex items-start gap-2">
-        <span className="text-fg-default flex-1">{iss.title}</span>
+        <span
+          // GitHub-style: the title text is the affordance that opens
+          // the modal. A plain click here opens; a modified click falls
+          // through to the card's selection handler for multi-select.
+          className="text-fg-default flex-1 cursor-pointer hover:underline"
+          onClick={(e) => {
+            if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+            e.stopPropagation();
+            onOpen();
+          }}
+        >
+          {iss.title}
+        </span>
         {iss.priority && iss.priority > 0 ? (
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">
             P{iss.priority}
@@ -1213,7 +1867,7 @@ function IssueCard({
       )}
       {(iss.labels?.length ?? 0) > 0 && (
         <div className="mt-1 flex flex-wrap gap-1">
-          {iss.labels!.map((l) => {
+          {iss.labels!.slice(0, MAX_CARD_LABELS).map((l) => {
             const palette = labelPalette(l);
             const active = activeLabels.has(l);
             return (
@@ -1242,6 +1896,14 @@ function IssueCard({
               </button>
             );
           })}
+          {iss.labels!.length > MAX_CARD_LABELS && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-fg-subtle"
+              title={iss.labels!.slice(MAX_CARD_LABELS).join(", ")}
+            >
+              +{iss.labels!.length - MAX_CARD_LABELS}
+            </span>
+          )}
         </div>
       )}
       <div className="mt-1 flex items-center gap-2 text-[10px] text-fg-muted flex-wrap">
