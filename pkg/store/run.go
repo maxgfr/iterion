@@ -293,6 +293,28 @@ type Run struct {
 	// output, and by the explicit POST/DELETE /api/runs/{id}/watch
 	// endpoints. Empty for runs that never dispatched / subscribed.
 	WatchedIssueIDs []string `json:"watched_issue_ids,omitempty" bson:"watched_issue_ids,omitempty"`
+
+	// CallbackURL, when set, is an http/https endpoint the engine POSTs
+	// a run-completion webhook to when the run reaches a terminal state
+	// (see pkg/notify). Supplied at launch by a programmatic caller — a
+	// chat adapter, a CI bridge — that wants to be told when the run
+	// finished without polling. Empty for the common case (CLI / studio
+	// launches). The delivery passes an SSRF guard; the URL may embed a
+	// caller correlation secret in its query string, so it is never
+	// logged.
+	CallbackURL string `json:"callback_url,omitempty" bson:"callback_url,omitempty"`
+	// CallbackToken is an opaque value echoed back verbatim in the
+	// completion payload's callback_token field. Lets the receiver
+	// correlate the callback to the originating request (e.g. a chat
+	// thread id) without keeping server-side state. Empty when no
+	// callback was requested.
+	CallbackToken string `json:"callback_token,omitempty" bson:"callback_token,omitempty"`
+	// CallbackAnswerNode optionally names the node whose latest artifact
+	// holds the run's user-facing answer (read from the "final_answer"
+	// field). When empty, the notifier scans every artifact-producing
+	// node for a "final_answer" field. Set by callers that know their
+	// bot's terminal node id, to disambiguate.
+	CallbackAnswerNode string `json:"callback_answer_node,omitempty" bson:"callback_answer_node,omitempty"`
 }
 
 // dedupeNonEmpty returns ids with empty strings and duplicates removed,

@@ -156,8 +156,13 @@ func (s *Service) Launch(parent context.Context, spec LaunchSpec) (*LaunchResult
 		mergeStrategy: spec.MergeStrategy,
 		autoMerge:     spec.AutoMerge,
 	}
+	cb := callbackOpts{
+		url:        spec.CallbackURL,
+		token:      spec.CallbackToken,
+		answerNode: spec.CallbackAnswerNode,
+	}
 
-	return s.spawnRun(parent, runID, wf, hash, spec.FilePath, runName, fin, executor, runLogger, spec.Timeout, false,
+	return s.spawnRun(parent, runID, wf, hash, spec.FilePath, runName, fin, cb, executor, runLogger, spec.Timeout, false,
 		spec.AttachmentPromote, spec.Preset,
 		func(ctx context.Context, eng *runtime.Engine) error {
 			return eng.Run(ctx, runID, inputs)
@@ -264,7 +269,7 @@ func (s *Service) Resume(parent context.Context, spec ResumeSpec) (*LaunchResult
 	// MergeInto/BranchName decisions on the run), so resume uses
 	// engine defaults. If we ever surface "edit finalization on
 	// resume" we'd plumb a ResumeSpec field here.
-	return s.spawnRun(parent, spec.RunID, wf, hash, spec.FilePath, runName, finalizationOpts{}, executor, runLogger, spec.Timeout, spec.Force,
+	return s.spawnRun(parent, spec.RunID, wf, hash, spec.FilePath, runName, finalizationOpts{}, callbackOpts{}, executor, runLogger, spec.Timeout, spec.Force,
 		nil, r.Preset,
 		func(ctx context.Context, eng *runtime.Engine) error {
 			// Re-validate under the lock acquired by spawnRun (TOCTOU
@@ -307,6 +312,7 @@ func (s *Service) spawnRun(
 	wf *ir.Workflow,
 	hash, filePath, runName string,
 	fin finalizationOpts,
+	cb callbackOpts,
 	executor runtime.NodeExecutor,
 	runLogger *iterlog.Logger,
 	timeout time.Duration,
@@ -343,6 +349,9 @@ func (s *Service) spawnRun(
 	if preset != "" {
 		opts = append(opts, runtime.WithPreset(preset))
 	}
+	if cb.url != "" {
+		opts = append(opts, runtime.WithCallback(cb.url, cb.token, cb.answerNode))
+	}
 	// Wire the operator-pause channel so POST /api/runs/{id}/pause
 	// can interrupt this run at the next safe boundary. The Manager
 	// owns the channel (created in Register above); we hand a
@@ -365,6 +374,15 @@ func (s *Service) spawnRun(
 
 		bodyErr := body(ctx, eng)
 		s.logRunOutcome(runID, bodyErr)
+		// Fire the run-completion webhook (no-op unless the run carries a
+		// callback URL). Uses a fresh, tenant-unfiltered ctx: the run ctx
+		// may be cancelled at this point, and the runID is already known.
+		// FireForRun re-reads the persisted run, so it sees the terminal
+		// status the engine just wrote regardless of bodyErr's shape.
+		if s.completionNotifier != nil {
+			nctx := store.WithoutTenantFilter(context.Background())
+			s.completionNotifier.FireForRun(nctx, s.store, runID)
+		}
 		// On cancel, the engine flipped run.Status to cancelled but didn't
 		// run finalizeWorktree (that's the success path only). If the run
 		// produced commits, RecoverFinalize promotes the worktree HEAD to
@@ -393,6 +411,12 @@ func (s *Service) spawnRun(
 // Resume, in case the user wants to revisit the choice mid-run) wants
 // to thread through to the engine without inflating engineOptions's
 // signature for every callsite.
+type callbackOpts struct {
+	url        string
+	token      string
+	answerNode string
+}
+
 type finalizationOpts struct {
 	mergeInto     string
 	branchName    string

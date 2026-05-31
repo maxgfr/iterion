@@ -259,10 +259,13 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 		// studio surfaces can render the parent/child relationship,
 		// and onto the published RunMessage below so the runner pod
 		// that claims this work knows its place in the shard set.
-		ParentRunID: spec.ParentRunID,
-		ShardIndex:  spec.ShardIndex,
-		ShardCount:  spec.ShardCount,
-		ShardLabel:  spec.ShardLabel,
+		ParentRunID:        spec.ParentRunID,
+		ShardIndex:         spec.ShardIndex,
+		ShardCount:         spec.ShardCount,
+		ShardLabel:         spec.ShardLabel,
+		CallbackURL:        spec.CallbackURL,
+		CallbackToken:      spec.CallbackToken,
+		CallbackAnswerNode: spec.CallbackAnswerNode,
 	}
 	if err := p.store.SaveRun(ctx, r); err != nil {
 		return 0, fmt.Errorf("cloudpublisher: save run: %w", err)
@@ -300,10 +303,13 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 		// pod that picks it up sees its place in the set so the studio
 		// can group siblings and so a future event-based aggregator
 		// can correlate completions.
-		ParentRunID: spec.ParentRunID,
-		ShardIndex:  spec.ShardIndex,
-		ShardCount:  spec.ShardCount,
-		ShardLabel:  spec.ShardLabel,
+		ParentRunID:        spec.ParentRunID,
+		ShardIndex:         spec.ShardIndex,
+		ShardCount:         spec.ShardCount,
+		ShardLabel:         spec.ShardLabel,
+		CallbackURL:        spec.CallbackURL,
+		CallbackToken:      spec.CallbackToken,
+		CallbackAnswerNode: spec.CallbackAnswerNode,
 	}
 	if _, err := p.nats.PublishRun(ctx, msg); err != nil {
 		// Best-effort: roll the run doc back to failed so the studio

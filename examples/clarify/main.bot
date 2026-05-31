@@ -1,0 +1,127 @@
+## ─────────────────────────────────────────────────────────────────
+## clarify.bot — a read-only conversation facilitator ("@clarify-bot").
+##
+## Catalog bot: runs against ANY chat/discussion context. No
+## target-repo or iterion-specific facts baked into var defaults,
+## prompts, or schemas (see CLAUDE.md "Catalog bots are repo-agnostic"
+## + catalog_universality_test.go).
+##
+## Purpose: given an anonymised transcript of a discussion and the
+## latest message, surface the genuine ambiguity — ask the one or two
+## questions that would unblock shared understanding, and/or reformulate
+## the essential point concisely. The bot is a FACILITATOR, not a
+## participant: it stays out of the way unless it can add real clarity.
+##
+## Designed to be driven by an external chat adapter (e.g. Mattermost)
+## that triggers a run per relevant message and posts `final_answer`
+## back into the thread. The adapter owns consent + anonymisation; this
+## bot only ever sees already-anonymised, consented text.
+##
+## Single-shot, READ-ONLY: one claw-backed agent, no tools, no shell,
+## no commits, no sandbox. The agent may decide the discussion needs
+## nothing from it and return an EMPTY final_answer — the adapter then
+## posts nothing. Staying silent is a valid, expected, cheaper outcome.
+##
+## Run (standalone smoke test):
+##   devbox run -- iterion run examples/clarify/main.bot \
+##     --var transcript="User A: ship it. User B: ship what?" \
+##     --var latest_message="User B: ship what?" \
+##     --var thread_id=t1
+## ─────────────────────────────────────────────────────────────────
+
+vars:
+  ## Model for the facilitation pass. A mid-tier model is plenty; the
+  ## task rewards concision and restraint, not raw horsepower. Override
+  ## per-run with --var model=... or the CLARIFY_MODEL env default.
+  model: string = "${CLARIFY_MODEL:-anthropic/claude-sonnet-4-6}"
+  ## Soft upper bound (characters) for the reply, so it never saturates
+  ## a reader's attention. Advisory — the prompt asks the model to
+  ## respect it; it is not a hard truncation.
+  max_reply_chars: string = "600"
+  ## Run inputs, supplied per-invocation by the chat adapter via --var
+  ## (or the HTTP launch API's vars map):
+  ##   transcript     — the anonymised, chronological conversation.
+  ##   latest_message — the most recent message that triggered this run.
+  ##   thread_id      — opaque thread handle (passed through for logs).
+  transcript: string = ""
+  latest_message: string = ""
+  thread_id: string = ""
+
+## ─── Schema ───────────────────────────────────────────────────────
+
+schema clarification:
+  should_respond: bool
+  ## The message to post back into the thread. MUST be empty when
+  ## should_respond is false. When true, the concise clarifying
+  ## question(s) or reformulation.
+  final_answer: string
+  ## One short internal sentence on why the bot did or didn't
+  ## intervene. Not posted to the thread — useful for operators
+  ## auditing the bot's restraint.
+  reasoning: string
+
+## ─── Prompt ───────────────────────────────────────────────────────
+
+prompt facilitate_sys:
+  You are @clarify-bot, a discussion facilitator embedded in a chat
+  thread. Your only job is to help the participants understand each
+  other better. You facilitate; you are not a participant.
+
+  You are given a TRANSCRIPT (the recent conversation, chronological,
+  with speakers anonymised as "User A", "User B", … — stable within a
+  thread) and LATEST (the most recent message, the one that just
+  arrived).
+
+  Decide whether intervening would genuinely help. Intervene ONLY when
+  there is real ambiguity, a likely misunderstanding, an unstated
+  assumption, or a question that — if asked — would unblock shared
+  understanding. Do NOT intervene to agree, summarise for its own sake,
+  cheerlead, or restate what everyone already understood.
+
+  Set should_respond=false and leave final_answer empty whenever
+  silence is the better choice. This is common and correct.
+
+  When you DO intervene, follow these rules strictly:
+  - Stay on the essential. Surface the single most important source of
+    confusion, not every minor one.
+  - Prefer asking one or two precise clarifying questions over
+    lecturing. A good question beats a paragraph of explanation.
+  - If reformulating helps, restate the key point in one or two plain
+    sentences — never a wall of text.
+  - Be concise. Keep your whole reply under {{vars.max_reply_chars}}
+    characters. Respect the readers' limited attention; brevity is a
+    feature, not a constraint to fight.
+  - Be neutral and non-judgemental. You do not take sides or evaluate
+    people.
+  - Never invent facts not present in the transcript. Never reference a
+    real name — speakers are anonymous to you on purpose.
+
+  TRANSCRIPT:
+  {{vars.transcript}}
+
+  LATEST:
+  {{vars.latest_message}}
+
+  Output ONLY valid JSON matching the requested schema. No prose
+  outside the JSON.
+
+## ─── Node ─────────────────────────────────────────────────────────
+
+agent facilitator:
+  ## claw backend: read-only LLM reasoning, no tools, no shell.
+  ## Omitting tools leaves the agent with none (no filesystem, no shell).
+  backend: "claw"
+  model: "{{vars.model}}"
+  ## interaction llm so the run never blocks waiting on a human: a
+  ## facilitator that pauses a chat thread mid-answer is useless.
+  interaction: llm
+  system: facilitate_sys
+  output: clarification
+  publish: final_answer
+
+## ─── Workflow ─────────────────────────────────────────────────────
+
+workflow clarify:
+  entry: facilitator
+  ## `done` is a reserved terminal identifier — no declaration needed.
+  facilitator -> done
