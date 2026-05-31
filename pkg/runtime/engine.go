@@ -101,6 +101,9 @@ type Engine struct {
 	bundle                   *bundle.Bundle        // optional: bundle backing this run; nil for plain .iter/.bot runs
 	pauseSignal              <-chan struct{}       // optional: closed by Service.Pause to request a soft pause at the next safe boundary; nil disables operator pause
 	dailyCap                 *DailyCapGuard        // optional: per-(store, UTC-day) spend cap; nil disables it. Set via WithDailyCap
+	callbackURL              string                // optional: run-completion webhook target persisted on the run; set via WithCallback
+	callbackToken            string                // optional: opaque correlation token echoed in the completion payload; set via WithCallback
+	callbackAnswerNode       string                // optional: node whose latest artifact holds the run's final answer; set via WithCallback
 }
 
 // AttachmentPromoteFunc is invoked once at the start of a run, right
@@ -230,6 +233,21 @@ func WithPreset(name string) EngineOption {
 // the kanban. nil for CLI / studio / fork-spawned runs.
 func WithSource(src *store.RunSource) EngineOption {
 	return func(e *Engine) { e.source = src }
+}
+
+// WithCallback records the run-completion webhook parameters on the run
+// metadata at creation. url is the http/https endpoint the completion
+// notifier POSTs to when the run reaches a terminal state; token is an
+// opaque value echoed back to the receiver for correlation; answerNode
+// optionally names the node whose latest artifact holds the run's
+// user-facing answer (read from the "final_answer" field). All optional
+// — an empty url leaves the run without a callback (the common case).
+func WithCallback(url, token, answerNode string) EngineOption {
+	return func(e *Engine) {
+		e.callbackURL = url
+		e.callbackToken = token
+		e.callbackAnswerNode = answerNode
+	}
 }
 
 // WithMergeInto controls the worktree-finalization fast-forward target
@@ -613,7 +631,7 @@ func (e *Engine) runResolveDoc(ctx context.Context, runID string, inputs map[str
 		}
 		run = created
 	}
-	if e.workflowHash != "" || e.filePath != "" || e.runName != "" || e.mergeStrategy != "" || e.autoMerge || e.preset != "" || e.bundle != nil || e.source != nil {
+	if e.workflowHash != "" || e.filePath != "" || e.runName != "" || e.mergeStrategy != "" || e.autoMerge || e.preset != "" || e.bundle != nil || e.source != nil || e.callbackURL != "" {
 		if e.workflowHash != "" {
 			run.WorkflowHash = e.workflowHash
 		}
@@ -643,6 +661,11 @@ func (e *Engine) runResolveDoc(ctx context.Context, runID string, inputs map[str
 			// through the run record.
 			src := *e.source
 			run.Source = &src
+		}
+		if e.callbackURL != "" {
+			run.CallbackURL = e.callbackURL
+			run.CallbackToken = e.callbackToken
+			run.CallbackAnswerNode = e.callbackAnswerNode
 		}
 		if err := e.store.SaveRun(ctx, run); err != nil {
 			return nil, fmt.Errorf("runtime: save run metadata: %w", err)

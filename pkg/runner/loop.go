@@ -33,6 +33,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dsl/ast"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/notify"
 	"github.com/SocialGouv/iterion/pkg/queue"
 	natsq "github.com/SocialGouv/iterion/pkg/queue/nats"
 	"github.com/SocialGouv/iterion/pkg/runtime"
@@ -85,6 +86,11 @@ type Runner struct {
 	cfg      Config
 	consumer *natsq.Consumer
 
+	// completionNotifier POSTs a run-completion webhook when a run
+	// carrying a callback URL reaches a terminal state. Built in New;
+	// no-op unless the run requested a callback.
+	completionNotifier *notify.Notifier
+
 	mu      sync.Mutex
 	current *inFlight          // non-nil while a run is being processed; guarded by mu
 	cancel  context.CancelFunc // loop-context canceller installed by Run; guarded by mu
@@ -136,7 +142,13 @@ func New(ctx context.Context, cfg Config) (*Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Runner{cfg: cfg, consumer: cons}, nil
+	// Run-completion webhook notifier. ITERION_COMPLETION_WEBHOOK_ALLOW_PRIVATE=1
+	// relaxes the SSRF guard for self-hosted deployments whose callback
+	// receiver lives on a private network alongside the runner; off by
+	// default (cloud runners must not gateway into a private network).
+	allowPrivate := os.Getenv("ITERION_COMPLETION_WEBHOOK_ALLOW_PRIVATE") == "1"
+	notifier := notify.New(cfg.Logger, 0, notify.WithAllowPrivate(allowPrivate))
+	return &Runner{cfg: cfg, consumer: cons, completionNotifier: notifier}, nil
 }
 
 // Run drains the queue until ctx is cancelled. Each iteration fetches
@@ -464,6 +476,19 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 	// the defer above is a no-op on the closed channel.
 	runCancel()
 	<-hbDone
+
+	// Fire the run-completion webhook (no-op unless the run carries a
+	// callback URL). FireForRun re-reads the persisted run and gates on
+	// the terminal status via shouldNotify — paused runs (the run is not
+	// done, just waiting) are filtered there, so no error-type guard is
+	// needed here. The resume that actually terminates fires it then.
+	// Mirrors runview.spawnRun's in-process fire (same shouldNotify
+	// authority) so cloud and local behave identically.
+	if r.completionNotifier != nil {
+		nctx := store.WithIdentity(context.Background(), msg.TenantID, msg.OwnerID)
+		r.completionNotifier.FireForRun(nctx, r.cfg.Store, msg.RunID)
+	}
+
 	if err != nil {
 		// Distinguish transient (resumable) vs terminal failures.
 		// runtime.ErrRunPaused / ErrRunCancelled are not "the

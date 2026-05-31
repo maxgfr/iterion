@@ -69,6 +69,14 @@ type RunMessage struct {
 	// ShardLabel is an optional human-friendly tag for the shard
 	// (e.g. "files 100-119" or "ecosystem:npm"). Display-only.
 	ShardLabel string `json:"shard_label,omitempty"`
+	// CallbackURL, CallbackToken, CallbackAnswerNode carry the
+	// run-completion webhook parameters (see pkg/notify) across the
+	// queue so the runner pod that executes the run knows where to POST
+	// the terminal-state callback and what correlation token to echo.
+	// Empty for runs launched without a callback (the common case).
+	CallbackURL        string `json:"callback_url,omitempty"`
+	CallbackToken      string `json:"callback_token,omitempty"`
+	CallbackAnswerNode string `json:"callback_answer_node,omitempty"`
 }
 
 // IRBackend is the storage backend an IRRef points at.

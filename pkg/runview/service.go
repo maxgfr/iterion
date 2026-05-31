@@ -14,6 +14,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/clock"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/notify"
 	"github.com/SocialGouv/iterion/pkg/runtime"
 	"github.com/SocialGouv/iterion/pkg/runtime/recovery"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -80,6 +81,19 @@ type LaunchSpec struct {
 	ShardIndex  int
 	ShardCount  int
 	ShardLabel  string
+	// CallbackURL, when set, is an http/https endpoint the engine POSTs
+	// a run-completion webhook to when the run terminates (see
+	// pkg/notify). Lets a programmatic caller (chat adapter, CI bridge)
+	// be told the run finished without polling. Empty for CLI / studio.
+	CallbackURL string
+	// CallbackToken is an opaque value echoed back verbatim in the
+	// completion payload so the receiver can correlate the callback to
+	// the originating request (e.g. a chat thread id) without state.
+	CallbackToken string
+	// CallbackAnswerNode optionally names the node whose latest artifact
+	// holds the run's user-facing answer (the "final_answer" field).
+	// Empty → the notifier scans all artifact nodes for "final_answer".
+	CallbackAnswerNode string
 }
 
 // ResumeSpec describes a resume request.
@@ -220,6 +234,11 @@ type Service struct {
 	// the engine in-process (local mode). See LaunchPublisher and
 	// WithLaunchPublisher.
 	publisher LaunchPublisher
+
+	// completionNotifier POSTs a run-completion webhook when an
+	// in-process run carrying a callback URL reaches a terminal state.
+	// Default-constructed in NewService; never nil for in-process runs.
+	completionNotifier *notify.Notifier
 
 	// injectedStore captures the WithStore option so NewService can
 	// honour a caller-supplied store. nil → fall back to the
@@ -451,6 +470,17 @@ func NewService(storeDir string, opts ...ServiceOption) (*Service, error) {
 	if s.alertSettings != nil {
 		s.alertManager = s.buildAlertManager(*s.alertSettings)
 		s.alertManager.Start(context.Background())
+	}
+
+	if s.completionNotifier == nil {
+		// Run-completion webhooks are off-by-default in behaviour (no-op
+		// unless a launched run carries a callback URL) but the notifier
+		// itself is always present so spawnRun can fire unconditionally.
+		// ITERION_COMPLETION_WEBHOOK_ALLOW_PRIVATE=1 relaxes the SSRF
+		// guard for self-hosted deployments whose callback receiver lives
+		// on a private network alongside iterion.
+		allowPrivate := os.Getenv("ITERION_COMPLETION_WEBHOOK_ALLOW_PRIVATE") == "1"
+		s.completionNotifier = notify.New(s.logger, 0, notify.WithAllowPrivate(allowPrivate))
 	}
 
 	s.reconcileOrphans()
