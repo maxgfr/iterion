@@ -11,6 +11,11 @@ interface Props {
   // duplicates. RunView's FloatingChatPanel leaves this false because
   // the popup is the only surface showing the queue there.
   embedded?: boolean;
+  // Forwarded to AgentChatboxInline: placeholder override and an
+  // onSend that routes submits through the parent's own continuation
+  // logic instead of the built-in queueMessage (see WhatsNextView).
+  placeholder?: string;
+  onSend?: (text: string, opts: { skills: string[] }) => Promise<void> | void;
 }
 
 // AgentChatbox is the legacy banner-style chatbox: a full-width strip
@@ -24,6 +29,8 @@ export default function AgentChatbox({
   disabled = false,
   maxVisible = 5,
   embedded = false,
+  placeholder,
+  onSend,
 }: Props) {
   return (
     <div className="border-t border-border-subtle bg-surface-1">
@@ -33,6 +40,8 @@ export default function AgentChatbox({
           disabled={disabled}
           maxVisible={maxVisible}
           embedded={embedded}
+          placeholder={placeholder}
+          onSend={onSend}
         />
       </div>
     </div>

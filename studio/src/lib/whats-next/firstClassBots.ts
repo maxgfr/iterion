@@ -562,9 +562,16 @@ export const FIRST_CLASS_BOTS: Readonly<Record<string, FirstClassBot>> = {
                     'Push more backlog tickets to ready. Detail = "all", a list of IDs, or a filter like "feature_dev" / "short-term". Leave empty to first see what\'s dispatchable.',
                 },
                 {
-                  value: "done",
-                  label: "I'm done",
-                  description: "End this session. Detail can stay empty.",
+                  value: "standby",
+                  label: "I'm done for now",
+                  description:
+                    "Put Nexie on standby. The session stays open and reachable — message anytime to pick back up. Nothing is closed.",
+                },
+                {
+                  value: "close",
+                  label: "Close the session",
+                  description:
+                    "Explicitly archive this session. Standby is almost always what you want instead.",
                 },
               ],
               required: true,

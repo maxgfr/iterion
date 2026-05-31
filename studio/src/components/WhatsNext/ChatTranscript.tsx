@@ -271,13 +271,14 @@ function SessionClosedRow({
 }) {
   // "finished" no longer means "plan handed off" — that's now the
   // dedicated PlanHandedOffRow milestone fired when emit_action lands.
-  // A "finished" run reaches Done because the operator picked
-  // action=done in the triage loop (or a bot with no triage loop
-  // reached its terminal node). Either way: this is the actual
-  // end-of-session marker.
+  // A "finished" run reaches Done because the operator EXPLICITLY
+  // closed the session (action=close); "standby" / "I'm done for now"
+  // keeps the run paused and reachable, so it never lands here. The
+  // composer below stays live (it re-seeds a fresh session), so frame
+  // this as a soft close, not a dead end.
   const label =
     message.reason === "finished"
-      ? "Session ended."
+      ? "Session closed — send a message to start a fresh one."
       : message.reason === "failed"
         ? "Session failed."
         : "Session cancelled.";

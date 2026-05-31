@@ -29,6 +29,15 @@ interface Props {
   // and skill picker stay visible — only the list of past+pending
   // queued messages below the textarea disappears.
   embedded?: boolean;
+  // Placeholder override for the composer textarea. Defaults to the
+  // "Queue a message to the running agent…" copy.
+  placeholder?: string;
+  // When provided, the composer calls this instead of the built-in
+  // queueMessage on submit. Used by WhatsNextView to route a typed
+  // message through its own continuation logic (queue into a live
+  // run, or re-seed a fresh run when the previous one closed). The
+  // draft + attached skills are cleared on a resolved send.
+  onSend?: (text: string, opts: { skills: string[] }) => Promise<void> | void;
 }
 
 // Renders the composer without outer chrome — the parent container
@@ -40,6 +49,8 @@ export default function AgentChatboxInline({
   maxVisible = 5,
   compact = false,
   embedded = false,
+  placeholder,
+  onSend,
 }: Props) {
   const messages = useRunStore((s) => s.queuedMessages);
   const setQueuedMessages = useRunStore((s) => s.setQueuedMessages);
@@ -100,7 +111,11 @@ export default function AgentChatboxInline({
     setBusy(true);
     setError(null);
     try {
-      await queueMessage(runId, text, { skills: attachedSkills });
+      if (onSend) {
+        await onSend(text, { skills: attachedSkills });
+      } else {
+        await queueMessage(runId, text, { skills: attachedSkills });
+      }
       setDraft("");
       setAttachedSkills([]);
       setPickerOpen(false);
@@ -109,7 +124,7 @@ export default function AgentChatboxInline({
     } finally {
       setBusy(false);
     }
-  }, [draft, runId, busy, attachedSkills]);
+  }, [draft, runId, busy, attachedSkills, onSend, setDraft]);
 
   const toggleSkill = useCallback((name: string) => {
     setAttachedSkills((prev) =>
@@ -185,7 +200,7 @@ export default function AgentChatboxInline({
           placeholder={
             disabled
               ? "Run is not active"
-              : "Queue a message to the running agent…"
+              : (placeholder ?? "Queue a message to the running agent…")
           }
           rows={Math.max(2, Math.min(maxRows, Math.ceil(draft.length / 60) + 1))}
           disabled={disabled || busy}

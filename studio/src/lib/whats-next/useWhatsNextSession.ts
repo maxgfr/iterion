@@ -57,6 +57,12 @@ export interface UseWhatsNextSession {
   runStatus: RunStatus | null;
   // Last error from launch/submit, if any.
   errorMessage: string | null;
+  // The vars used to launch (or that would launch) the current
+  // session. Exposed so the view can re-seed a fresh run with the
+  // same scope after the previous one closed. Null before any launch
+  // in this mount (e.g. after auto-attach), in which case the bot's
+  // var defaults apply.
+  lastVars: Record<string, string> | null;
   // Imperative actions.
   launch: (vars: Record<string, string>) => Promise<void>;
   submitHumanAnswer: (
@@ -81,6 +87,9 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
   const [status, setStatus] = useState<WhatsNextStatus>("idle");
   const [busyMessageId, setBusyMessageId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Remembers the vars of the most recent launch so a re-seed (typing
+  // into the composer after the run closed) reuses the same scope.
+  const lastVarsRef = useRef<Record<string, string> | null>(null);
 
   // Subscribe to the WS for the active run. The hook is a no-op when
   // runId is null. The store is shared with the rest of the SPA — a
@@ -288,17 +297,19 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
     if (!runId) return;
     if (!runStatus) return;
     if (status === "submitting") return;
+    // Keep the runId in localStorage in every terminal state so the
+    // next visit re-hydrates the transcript — continuity is the
+    // central whats-next promise (full exchange visible across app
+    // restarts). A finished run (the operator hit `close`) still keeps
+    // a live composer via the view's always-on footer, which re-seeds
+    // a fresh session on the next message — so "ended" is no longer a
+    // dead end. The user can also start over via newSession().
     if (
       runStatus === "finished" ||
       runStatus === "failed" ||
       runStatus === "cancelled" ||
       runStatus === "failed_resumable"
     ) {
-      // Keep the runId in localStorage so the next visit re-hydrates
-      // the transcript — continuity is the central whats-next promise
-      // (full exchange visible across app restarts). The user starts
-      // a fresh session via the explicit "New session" button exposed
-      // through newSession() (which clears localStorage + state).
       setStatus("ended");
     } else {
       setStatus("active");
@@ -371,6 +382,9 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
     async (vars: Record<string, string>) => {
       setErrorMessage(null);
       setStatus("launching");
+      // Remember the scope so a later re-seed (composer send after the
+      // run closed) reuses it.
+      lastVarsRef.current = vars;
       // Make sure we start from a clean store: the studio session may
       // have a previous run loaded.
       reset();
@@ -554,6 +568,7 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
     busyMessageId,
     runStatus,
     errorMessage,
+    lastVars: lastVarsRef.current,
     launch,
     submitHumanAnswer,
     newSession,

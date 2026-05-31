@@ -193,11 +193,14 @@ schema assign_output:
   dispatched_ids: json
   summary:        string
 
-## ask_continue is the loop pivot. The operator picks one of four
-## actions; "done" exits the loop, the others route to triage_board.
-## The boolean the workflow's `when` clauses key on (is_done) is
-## derived by the derive_continue compute node from action; the form
-## the operator sees stays simple (radio + free_text).
+## ask_continue is the loop pivot — and the permanent home base for
+## Nexie-the-co-CTO. The operator either drives the board in natural
+## language (routed to triage_board), puts Nexie on "standby" (the
+## session stays open at this human pause, free of budget, reachable
+## with the next message), or explicitly "close"s the session. The
+## booleans the workflow's `when` clauses key on (is_standby / is_close)
+## are derived by the derive_continue compute node from action; the
+## form the operator sees stays simple (radio + free_text).
 schema continue_input:
   dispatched_ids:     json
   board_summary:      string
@@ -211,9 +214,17 @@ schema continue_output:
   action: string
   detail: string
 
-## Computed projection of continue_output: is_done = action == "done".
-## Kept separate so the human-facing form doesn't carry a derivable
-## boolean (which would be a footgun if the operator forgot to tick).
+## Computed projection of continue_output. Two terminal-ish booleans:
+##   is_standby = action == "standby" — re-pause at ask_continue
+##     without doing any work. The session stays alive at the human
+##     gate (which costs nothing — the runtime suspends the budget on
+##     human pauses), so Nexie remains reachable indefinitely. This is
+##     the DEFAULT "I'm done for now" pick; it never ends the run.
+##   is_close   = action == "close" (or legacy "done") — the rare,
+##     explicit "archive this session" pick. The ONLY path to the
+##     terminal Done node.
+## Kept separate from the form so the human-facing radio doesn't carry
+## a derivable boolean (a footgun if the operator forgot to tick).
 ##
 ## needs_dispatch_choice is true only when the operator picked
 ## "dispatch_more" without typing anything into detail. In that case
@@ -223,11 +234,12 @@ schema continue_output:
 ## from an empty hint.
 ##
 ## The triage_board edge below is the unconditional fallback — fires
-## when neither is_done nor needs_dispatch_choice match. We don't
-## need an explicit `should_triage` boolean: the runtime evaluates
-## conditional edges first and falls back to the default last.
+## when none of is_close / is_standby / needs_dispatch_* match. We
+## don't need an explicit `should_triage` boolean: the runtime
+## evaluates conditional edges first and falls back to the default last.
 schema continue_derived:
-  is_done:                      bool
+  is_standby:                   bool
+  is_close:                     bool
   needs_dispatch_choice:        bool
   needs_dispatch_just_created:  bool
   action:                       string
@@ -1153,26 +1165,43 @@ prompt ask_continue_instructions:
   Board status:
   {{input.board_summary}}
 
-  What's next? Pick an action and (when relevant) describe what
-  you want — the form takes both at once:
+  I'm Nexie, your co-CTO. This is home base — tell me in plain
+  language what you want done on the board, the issues, or the
+  dispatch queue and I'll act on it. You're never forced to pick a
+  preset action: type freely in `detail` and I'll interpret it.
+
+  The presets are just shortcuts:
 
   - add_ticket      — create a new ticket on the board.
                       detail = short description.
   - modify_ticket   — re-assign, re-label, move, or close existing
-                      tickets. detail = which ticket(s) + what
-                      change. (Note: the board has no body-edit
-                      tool — for body changes, close + recreate.)
+                      tickets — or any free-text board instruction.
+                      detail = which ticket(s) + what change. (Note:
+                      the board has no body-edit tool — for body
+                      changes, close + recreate.)
   - dispatch_more   — pick more tickets from backlog (or any state)
                       and push them to `ready`. detail = "all",
                       a list of IDs, or a filter
                       ("all feature_dev", "short-term only").
-  - done            — end this session. detail can stay empty.
+  - standby         — I'm done for now. The session stays open and
+                      I stay reachable — just send another message
+                      whenever you want to pick back up. Nothing is
+                      closed or lost. detail can stay empty.
+  - close           — explicitly archive this session. Use this only
+                      when you truly want to end; standby is almost
+                      always what you want instead. detail can stay
+                      empty.
 
-  Submit once; the triage agent uses your action + detail to act.
+  Submit once; I use your action + detail to act.
 
 prompt triage_board_system:
-  You act on the operator's chosen action + detail to modify the
-  kanban board. Both arrive together as structured input.
+  You are Nexie acting as the operator's co-CTO on the kanban board.
+  You receive a structured action + detail. `detail` is frequently
+  free natural language ("close the flaky-sandbox ticket and open a
+  follow-up for the proxy timeout", "what's on the board right now?",
+  "move everything feature_dev to ready") — interpret the operator's
+  INTENT, don't just pattern-match the preset `action`. The action is
+  a hint; the detail is the instruction.
 
   Available board operations:
 
@@ -1231,6 +1260,21 @@ prompt triage_board_system:
       branch that executed transitions. If a non-empty detail
       couldn't be matched to any ticket, set
       `needs_followup: true` and explain in board_summary.
+  - any other action (including a free-text intent the classifier
+      mapped to modify_ticket, or an unrecognised value):
+      Treat `detail` as a direct co-CTO instruction and do the most
+      reasonable thing with the board tools:
+        - Read-only asks ("what's on the board?", "what's in
+          review?", "status of the feature_dev tickets") → call
+          list_issues / get_issue and answer in `board_summary`.
+          Don't mutate. dispatched_ids: [], needs_followup: false.
+        - Action asks → carry them out with create / transition /
+          set_bot / assign / set_labels / close, one issue at a
+          time, logging each in board_summary.
+        - If the intent is genuinely ambiguous, do NOT guess
+          destructively: describe in board_summary what you think
+          they meant and what you'd do, set needs_followup: true,
+          and let them confirm next turn.
 
   Always return:
   - `board_summary`: one short paragraph describing what
@@ -1380,8 +1424,10 @@ agent emit_action:
 ## emit_action creates issues in `backlog`. The triage loop lets the
 ## operator (1) pick which to push to `ready` for the dispatcher,
 ## (2) iteratively refine the board (add / move / assign / close)
-## while still in the same chat session. The loop terminates when
-## the operator picks action=done (is_done=true) on ask_continue.
+## while still in the same chat session. The loop never self-
+## terminates: ask_continue is Nexie's permanent home base. It exits
+## ONLY when the operator explicitly closes (action=close → is_close →
+## Done); "standby" re-pauses here, keeping the session reachable.
 
 human ask_which_to_process:
   input: select_input
@@ -1414,11 +1460,15 @@ human ask_continue:
   instructions: ask_continue_instructions
   interaction: human
 
-## Deterministic projection: the `when is_done` workflow edge needs a
-## boolean field, but we don't want to surface that boolean in the
-## form (the operator would have to remember to tick a checkbox in
-## sync with picking "done" on the radio). Compute derives it from
+## Deterministic projection: the `when is_standby` / `when is_close`
+## workflow edges need boolean fields, but we don't want to surface
+## those booleans in the form (the operator would have to remember to
+## tick a checkbox in sync with the radio). Compute derives them from
 ## action verbatim, so the form stays minimal.
+##
+## is_close also accepts the legacy "done" value so any caller (CLI
+## --answer, older studio builds) that still sends action="done" lands
+## on the explicit-close path rather than a NO_OUTGOING_EDGE error.
 ##
 ## needs_dispatch_choice is the "dispatch_more without a hint"
 ## detection — true only when the operator picked dispatch_more and
@@ -1430,7 +1480,8 @@ compute derive_continue:
   input: continue_output
   output: continue_derived
   expr:
-    is_done:                      "input.action == 'done'"
+    is_standby:                   "input.action == 'standby'"
+    is_close:                     "input.action == 'close' || input.action == 'done'"
     needs_dispatch_choice:        "input.action == 'dispatch_more' && length(input.detail) == 0"
     needs_dispatch_just_created:  "input.action == 'dispatch_just_created'"
     action:                       "input.action"
@@ -1493,14 +1544,20 @@ workflow whats_next:
 
   budget:
     max_parallel_branches: 1
-    ## 4h: the triage loop is interactive — the operator may step
-    ## away for minutes between turns. The runtime pauses budget
-    ## consumption while waiting on a human node, so this cap only
-    ## bounds active work, not wall-clock chat time.
+    ## These caps bound a single BURST of active work between two human
+    ## pauses, NOT the whole session: the runtime rebuilds the budget on
+    ## every resume (pkg/runtime/engine.go newRunState), and it suspends
+    ## consumption entirely while paused at a human node. A Nexie session
+    ## that lives for days in standby — repeatedly pausing at
+    ## ask_continue — never accumulates against any of these. They only
+    ## guard a runaway autonomous burst (e.g. a mass re-dispatch).
     max_duration: "4h"
     max_cost_usd: 10
-    ## Bumped from 30 to 80 to accommodate the triage_loop(20) plus
-    ## the existing approval_loop(10) plus the linear pre-loop nodes.
+    ## 80 comfortably covers a burst = the linear pre-loop nodes +
+    ## approval_loop(10) + a handful of triage turns. triage_loop is
+    ## bounded at 200 (lifetime, persisted across resumes) so a chatty
+    ## session can run ~200 board mutations before a re-seed; standby
+    ## turns are free (untagged edge, no counter).
     max_iterations: 80
 
   ## Entry routing: vars.mode=="dispatch_only" sends the operator
@@ -1597,15 +1654,27 @@ workflow whats_next:
   }
 
   ## The triage loop pivot. ask_continue collects the operator's
-  ## action + detail; derive_continue projects action == "done"
-  ## into the is_done boolean the when clauses below read.
+  ## action + detail; derive_continue projects them into the
+  ## is_standby / is_close booleans the when clauses below read.
   ask_continue -> derive_continue with {
     action: "{{outputs.ask_continue.action}}",
     detail: "{{outputs.ask_continue.detail}}"
   }
 
-  ## Exit when the operator picked "I'm done".
-  derive_continue -> done when is_done
+  ## Explicit close — the ONLY path to the terminal Done node. Fires
+  ## only when the operator deliberately archives the session
+  ## (action="close", or a legacy "done").
+  derive_continue -> done when is_close
+
+  ## Standby — "I'm done for now". Re-pause at ask_continue without
+  ## doing any work, keeping the session alive and reachable. This
+  ## edge is intentionally NOT loop-tagged: it carries no `as ...(N)`
+  ## bound, so it never increments a loop counter and never exhausts.
+  ## It's safe from runaway because ask_continue is a human node that
+  ## pauses every cycle (the loop is gated by operator input, not by
+  ## the budget), and C019 treats the cycle as bounded because
+  ## derive_continue already participates in triage_loop.
+  derive_continue -> ask_continue when is_standby
 
   ## "dispatch_just_created" → re-enter triage_board in dispatch_more
   ## mode with the previous turn's created_issue_ids serialized as
@@ -1619,7 +1688,7 @@ workflow whats_next:
     action:        "dispatch_more",
     detail:        "{{outputs.triage_board.created_issue_ids}}",
     workspace_dir: "{{vars.workspace_dir}}"
-  } as triage_loop(20)
+  } as triage_loop(200)
 
   ## "dispatch_more" without a hint → detour through the board-load
   ## + checkbox-picker pair so the operator sees what's actually
@@ -1628,7 +1697,7 @@ workflow whats_next:
   ## triage_board path stays for every other action.
   derive_continue -> load_dispatch_candidates when needs_dispatch_choice with {
     workspace_dir: "{{vars.workspace_dir}}"
-  } as triage_loop(20)
+  } as triage_loop(200)
 
   load_dispatch_candidates -> ask_which_to_dispatch_more with {
     candidates: "{{outputs.load_dispatch_candidates.candidates}}",
@@ -1646,17 +1715,17 @@ workflow whats_next:
     workspace_dir: "{{vars.workspace_dir}}"
   }
 
-  ## Default fallback edge: when neither is_done nor
-  ## needs_dispatch_choice fires (other actions OR dispatch_more
-  ## with an explicit detail string), loop through triage_board →
-  ## ask_continue. Bounded at 20 iterations — chatty operators
-  ## can hit this, but the budget watchdog will surface the right
-  ## error.
+  ## Default fallback edge: when none of is_close / is_standby /
+  ## needs_dispatch_* fire (add_ticket, modify_ticket, free natural-
+  ## language intent, OR dispatch_more with an explicit detail string),
+  ## loop through triage_board → ask_continue. Bounded at 200 lifetime
+  ## iterations — a power session can run ~200 board mutations before a
+  ## re-seed; standby turns don't count against this.
   derive_continue -> triage_board with {
     action:        "{{outputs.derive_continue.action}}",
     detail:        "{{outputs.derive_continue.detail}}",
     workspace_dir: "{{vars.workspace_dir}}"
-  } as triage_loop(20)
+  } as triage_loop(200)
 
   triage_board -> ask_continue with {
     dispatched_ids:    "{{outputs.triage_board.dispatched_ids}}",

@@ -3,10 +3,18 @@ import { describe, expect, it } from "vitest";
 import { classifyContinueIntent } from "./classifyContinueIntent";
 
 describe("classifyContinueIntent", () => {
-  it("detects done from closing phrases", () => {
+  it("detects standby from 'done for now' phrases", () => {
     for (const t of ["done", "I'm done", "that's all", "c'est fini", "stop"]) {
       const r = classifyContinueIntent(t);
-      expect(r.action).toBe("done");
+      expect(r.action).toBe("standby");
+      expect(r.detail).toBe("");
+    }
+  });
+
+  it("detects close from explicit archive phrases", () => {
+    for (const t of ["close the session", "shut down", "ferme la session"]) {
+      const r = classifyContinueIntent(t);
+      expect(r.action).toBe("close");
       expect(r.detail).toBe("");
     }
   });
@@ -43,8 +51,8 @@ describe("classifyContinueIntent", () => {
     expect(r.confidence).toBe(0);
   });
 
-  it("prioritises done over other verbs when the line opens with it", () => {
+  it("prioritises standby over other verbs when the line opens with it", () => {
     const r = classifyContinueIntent("done, nothing else to add");
-    expect(r.action).toBe("done");
+    expect(r.action).toBe("standby");
   });
 });
