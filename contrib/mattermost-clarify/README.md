@@ -81,6 +81,28 @@ the privacy-safe default.
 | `MM_WS_URL` | Mattermost WS, e.g. `wss://mm.example.com/api/v4/websocket` |
 | `MM_BOT_TOKEN` | bot account access token |
 | `MM_BOT_USER_ID` | bot's user id (used to detect mentions + ignore self) |
+| `CLARIFY_WEBHOOK_SECRET` | shared HMAC secret authenticating the completion callback; **must equal `ITERION_COMPLETION_WEBHOOK_SECRET` on the iterion server**. Empty = callbacks unauthenticated (private-network-only) |
+| `CLARIFY_MM_ACTION_TOKEN` | shared secret embedded in consent buttons and checked on `/mm/actions`; rejects forged consent clicks. Empty = unauthenticated |
+
+## Endpoint authentication
+
+The adapter exposes two inbound endpoints; both are authenticated when
+their secret is configured (and log a startup warning when not):
+
+- **`POST /callback`** (iterion → adapter). iterion signs each payload
+  with `ITERION_COMPLETION_WEBHOOK_SECRET`; the adapter verifies the
+  `X-Iterion-Signature` HMAC against `CLARIFY_WEBHOOK_SECRET` over the
+  raw body and returns `401` on mismatch. Set the **same** value on both
+  sides. See [docs/completion-webhooks.md](../../docs/completion-webhooks.md#authenticating-the-payload-hmac-signature).
+- **`POST /mm/actions`** (Mattermost → adapter). The adapter embeds
+  `CLARIFY_MM_ACTION_TOKEN` in each consent button's context; Mattermost
+  echoes it back, and the adapter constant-time-compares it on receipt,
+  returning `401` on mismatch. This stops a forged POST from flipping a
+  user's consent.
+
+Note the `callback_token` (which encodes `{channel, thread}`) is **not**
+an auth mechanism — it is only for routing the reply to the right thread.
+Authentication is the HMAC signature above.
 
 Because the adapter and iterion typically run on the same private
 network, set `ITERION_COMPLETION_WEBHOOK_ALLOW_PRIVATE=1` **on the

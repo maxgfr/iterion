@@ -147,7 +147,13 @@ func New(ctx context.Context, cfg Config) (*Runner, error) {
 	// receiver lives on a private network alongside the runner; off by
 	// default (cloud runners must not gateway into a private network).
 	allowPrivate := os.Getenv("ITERION_COMPLETION_WEBHOOK_ALLOW_PRIVATE") == "1"
-	notifier := notify.New(cfg.Logger, 0, notify.WithAllowPrivate(allowPrivate))
+	// ITERION_COMPLETION_WEBHOOK_SECRET, when set, HMAC-signs every
+	// outbound payload (X-Iterion-Signature) so receivers can
+	// authenticate the delivery. Empty = unsigned.
+	secret := os.Getenv("ITERION_COMPLETION_WEBHOOK_SECRET")
+	notifier := notify.New(cfg.Logger, 0,
+		notify.WithAllowPrivate(allowPrivate),
+		notify.WithSigningSecret(secret))
 	return &Runner{cfg: cfg, consumer: cons, completionNotifier: notifier}, nil
 }
 

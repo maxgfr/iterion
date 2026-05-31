@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -27,6 +29,17 @@ type config struct {
 	mmWSURL     string
 	mmToken     string
 	mmBotUserID string
+
+	// webhookSecret authenticates the completion callback. It MUST match
+	// ITERION_COMPLETION_WEBHOOK_SECRET on the iterion server: iterion
+	// HMAC-signs each payload, this adapter verifies the signature.
+	// Empty = no verification (only safe on a trusted private network).
+	webhookSecret string
+	// mmActionToken authenticates Mattermost consent button clicks. The
+	// adapter embeds it in each button's context and checks it on
+	// receipt, so a forged POST to /mm/actions is rejected. Empty = no
+	// verification.
+	mmActionToken string
 }
 
 func loadConfig() (config, error) {
@@ -42,6 +55,9 @@ func loadConfig() (config, error) {
 		mmWSURL:      os.Getenv("MM_WS_URL"),
 		mmToken:      os.Getenv("MM_BOT_TOKEN"),
 		mmBotUserID:  os.Getenv("MM_BOT_USER_ID"),
+
+		webhookSecret: os.Getenv("CLARIFY_WEBHOOK_SECRET"),
+		mmActionToken: os.Getenv("CLARIFY_MM_ACTION_TOKEN"),
 	}
 	return c, nil
 }
@@ -71,12 +87,19 @@ func main() {
 		Model:       cfg.model,
 	})
 	driver := NewMattermostDriver(MattermostConfig{
-		HTTPBase:  cfg.mmHTTPBase,
-		WSURL:     cfg.mmWSURL,
-		Token:     cfg.mmToken,
-		BotUserID: cfg.mmBotUserID,
-		ActionURL: cfg.actionURL,
+		HTTPBase:    cfg.mmHTTPBase,
+		WSURL:       cfg.mmWSURL,
+		Token:       cfg.mmToken,
+		BotUserID:   cfg.mmBotUserID,
+		ActionURL:   cfg.actionURL,
+		ActionToken: cfg.mmActionToken,
 	})
+	if cfg.webhookSecret == "" {
+		log.Println("WARNING: CLARIFY_WEBHOOK_SECRET unset — completion callbacks are NOT authenticated (only safe on a trusted private network)")
+	}
+	if cfg.mmActionToken == "" {
+		log.Println("WARNING: CLARIFY_MM_ACTION_TOKEN unset — consent button clicks are NOT authenticated")
+	}
 	coord := NewCoordinator(driver, newHeuristicFilter(), launchClient)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -84,8 +107,8 @@ func main() {
 
 	// HTTP server: completion callback + Mattermost action endpoint.
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /callback", completionHandler(ctx, coord))
-	mux.HandleFunc("POST /mm/actions", actionHandler(coord))
+	mux.HandleFunc("POST /callback", completionHandler(ctx, coord, cfg.webhookSecret))
+	mux.HandleFunc("POST /mm/actions", actionHandler(coord, cfg.mmActionToken))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 
 	srv := &http.Server{Addr: cfg.listenAddr, Handler: mux}
@@ -109,11 +132,26 @@ func main() {
 }
 
 // completionHandler receives iterion's run-completion webhook and posts
-// the final answer back into the originating thread.
-func completionHandler(ctx context.Context, coord *Coordinator) http.HandlerFunc {
+// the final answer back into the originating thread. When secret is set,
+// the request's X-Iterion-Signature is verified against the raw body
+// (HMAC-SHA256) before the payload is trusted — a forged POST to the
+// callback URL is rejected with 401. When secret is empty, verification
+// is skipped (documented as private-network-only).
+func completionHandler(ctx context.Context, coord *Coordinator, secret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Read the raw body once: the signature is computed over these
+		// exact bytes, and the payload is decoded from the same buffer.
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			http.Error(w, "read error", http.StatusBadRequest)
+			return
+		}
+		if secret != "" && !notify.Verify(secret, body, r.Header.Get(notify.SignatureHeader)) {
+			http.Error(w, "invalid signature", http.StatusUnauthorized)
+			return
+		}
 		var payload notify.CompletionPayload
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		if err := json.Unmarshal(body, &payload); err != nil {
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
 		}
@@ -133,16 +171,28 @@ type mmAction struct {
 		UserID    string `json:"user_id"`
 		ChannelID string `json:"channel_id"`
 		RootID    string `json:"root_id"`
+		// Token is the shared secret the adapter embedded in the button
+		// when it posted the consent prompt. Mattermost echoes the
+		// context back verbatim, so checking it here authenticates that
+		// the click came from a button THIS adapter issued.
+		Token string `json:"token"`
 	} `json:"context"`
 }
 
 // actionHandler translates a Mattermost consent button click into a
-// ConsentAction and acknowledges it.
-func actionHandler(coord *Coordinator) http.HandlerFunc {
+// ConsentAction and acknowledges it. When token is set, the click's
+// embedded context token must match (constant-time) or the request is
+// rejected — this stops a forged POST to /mm/actions from flipping a
+// user's consent.
+func actionHandler(coord *Coordinator, token string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var a mmAction
 		if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
 			http.Error(w, "bad action", http.StatusBadRequest)
+			return
+		}
+		if token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(a.Context.Token)) != 1 {
+			http.Error(w, "invalid action token", http.StatusUnauthorized)
 			return
 		}
 		if a.Context.Action == "consent" {
