@@ -455,6 +455,40 @@ that resist metric-gaming. Skipping it has a real cost — the
 goai → claw-code-go migration ran for 3 hours and produced a
 96%-parity-reported façade because these lessons weren't yet codified.
 
+### Review loops must converge to an asymptote
+
+Every review/judge loop (feature_dev, branch_improve_loop,
+whole_improve_loop, doc-align, secured-renovacy) must **converge to an
+asymptote** — settle into a stable approved state and stop — not
+oscillate. A slight, very occasional oscillation is acceptable; it must
+be the rare exception. **The rule is the asymptote.** (`iterion bench
+asymptote` measures exactly this — see [docs/asymptote-bench.md](docs/asymptote-bench.md).)
+
+The mechanisms that produce convergence, all already wired into the
+loop bots — preserve them when authoring/editing:
+- **`streak_check`** gates exit on **N consecutive cross-family
+  approvals** (claude + gpt both approve), not a single pass — and
+  treats a low-confidence rejection as non-blocking so noise doesn't
+  reset the streak.
+- **`prior_pushback` / `previous_scanned_areas`** are fed back to
+  reviewers with "do NOT re-raise without new evidence" — re-litigating
+  resolved items is the classic oscillation driver.
+- **`loop.<name>.previous_output`** shows each reviewer the prior
+  verdict so verdicts trend monotonically, not randomly.
+- **Bounded `max_iterations`** is the backstop, not the design goal.
+
+The fastest way to **break** convergence is to make a reviewer judge
+the **wrong artifact**. The implementer's work lives in the
+**uncommitted working tree** — the commit step runs only *after* review
+passes. So reviewers MUST diff `git diff HEAD` (working tree vs HEAD),
+**never `git diff HEAD^...HEAD`** (the last *commit*, i.e. the base):
+the latter makes a reviewer conclude "the feature isn't implemented" and
+loop forever. This exact bug lived in feature_dev's reviewer_gpt anchor
+protocol (fixed: it now uses `git diff HEAD`, matching review_system,
+reviewer_claude, and every other loop bot). When a review loop
+oscillates, first verify **both** reviewers are diffing the same,
+correct (uncommitted) artifact.
+
 ## Catalog bots are repo-agnostic
 
 Every bot shipped in `examples/` (the catalog `iterion bots list`

@@ -251,6 +251,40 @@ the metrics. The goal stayed unmet.
 
 ---
 
+## Review loops must converge to an asymptote
+
+A review/judge loop (feature_dev, branch_improve_loop,
+whole_improve_loop, doc-align, secured-renovacy) must **converge to an
+asymptote** — settle into a stable approved state and stop. A slight,
+very occasional oscillation is acceptable; it must be the rare
+exception. **The rule is the asymptote**, never sustained oscillation.
+`iterion bench asymptote` (docs/asymptote-bench.md) measures it.
+
+What produces convergence — preserve these:
+- **`streak_check`**: exit on N *consecutive cross-family* approvals,
+  not one pass; a low-confidence rejection is non-blocking so noise
+  doesn't reset the streak.
+- **`prior_pushback` + `previous_scanned_areas`** fed back with "do NOT
+  re-raise without new evidence" — re-litigating resolved items is the
+  #1 oscillation driver.
+- **`loop.<name>.previous_output`** shows each reviewer the prior verdict
+  so verdicts trend monotonically.
+- Bounded `max_iterations` is the backstop, not the design.
+
+The fastest way to **break** convergence: make a reviewer judge the
+**wrong artifact**. The implementer's work is in the **uncommitted
+working tree** (commit runs only after review passes). Reviewers MUST
+diff `git diff HEAD` — **never `git diff HEAD^...HEAD`** (the last
+*commit* = the base). The latter makes a reviewer report "feature not
+implemented" against work that is plainly present, splitting the verdict
+(the other reviewer, diffing correctly, approves) so the streak never
+arms → infinite oscillation. This exact bug lived in feature_dev's
+reviewer_gpt anchor protocol; every other loop bot diffs the working
+tree. **When a loop oscillates, first confirm every reviewer diffs the
+same, correct (uncommitted) artifact — `git diff HEAD`.**
+
+---
+
 ## What worked in the end (run-005, 2026-04-28)
 
 After four failed attempts (run-001 façade, run-002 auth, run-003
