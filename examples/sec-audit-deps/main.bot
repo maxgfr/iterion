@@ -430,6 +430,18 @@ print(json.dumps({'appended_count': count, 'summary': 'Appended %d verdicts to %
 workflow sec_audit_deps:
   entry: enumerate_deps
 
+  ## Dependency scanners (npm audit, pip-audit, govulncheck, …) need a
+  ## host that ships those binaries — slim/full sandbox images and a
+  ## bare host do NOT, so without a scanner image every scan silently
+  ## `|| true`-falls through and the audit reports zero findings (a
+  ## façade). iterion-sandbox-sec layers the toolchain onto the full
+  ## image; build it from sandbox/sec/Dockerfile. Network defaults to
+  ## `open`, so the SCA DBs are reachable. (Until CI publishes the ref
+  ## to ghcr, build locally and `docker tag` it to the ref below so the
+  ## docker driver's image-inspect fast path resolves it without a pull.)
+  sandbox:
+    image: "ghcr.io/socialgouv/iterion-sandbox-sec:edge"
+
   budget:
     max_parallel_branches: 4
     max_duration: "2h"
