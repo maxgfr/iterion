@@ -33,6 +33,7 @@ import { useProjectSwitchListener } from "@/hooks/useProjectSwitchListener";
 import { useProjectScopeSync } from "@/hooks/useProjectScopeSync";
 import { onDesktopEvent } from "@/lib/desktopBridge";
 import { DesktopEvent } from "@/lib/desktopEvents";
+import { showRunAlertNotification, type RunAlertPayload } from "@/lib/desktopNotify";
 import { AuthProvider, useAuth } from "@/auth/AuthContext";
 import { setUnauthorizedHandler } from "@/api/client";
 import { getOrCreateDocumentStore } from "@/store/document";
@@ -125,6 +126,11 @@ function AuthedApp() {
       // the action scoped to whatever the user is looking at.
       onDesktopEvent(DesktopEvent.MenuUndo, () => activeEditorDocStore()?.getState().undo()),
       onDesktopEvent(DesktopEvent.MenuRedo, () => activeEditorDocStore()?.getState().redo()),
+      // Native OS notification for run-health alerts. No-op in browser
+      // mode (onDesktopEvent returns a noop unsubscribe there).
+      onDesktopEvent<RunAlertPayload>(DesktopEvent.RunAlert, (payload) =>
+        showRunAlertNotification(payload),
+      ),
     ];
     // Listen for the SPA-emitted open-switcher event from ProjectLabel
     // (clicking the project chip in the toolbar / run header).

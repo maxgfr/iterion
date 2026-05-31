@@ -57,6 +57,11 @@ interface UIState {
   activeLayers: Set<LayerKind>;
   editingItem: EditingItem | null;
   toasts: Toast[];
+  // Run-health alert notification dot. Bumped each time a stall /
+  // budget / failure alert event arrives over the run WS while the
+  // operator isn't looking at the run; cleared when they acknowledge
+  // (open the run / click the bell). Drives the dot in AppShell.
+  alertUnseen: number;
   // Sub-node detail view (double-click navigation)
   subNodeViewStack: string[];
   // Library panel
@@ -112,6 +117,9 @@ interface UIState {
   setEditingItem: (item: EditingItem | null) => void;
   addToast: (message: string, type: Toast["type"], opts?: { action?: ToastAction; persistent?: boolean }) => void;
   removeToast: (id: number) => void;
+  // Run-health alert dot
+  bumpAlertUnseen: () => void;
+  clearAlertUnseen: () => void;
   // Sub-node view navigation
   pushSubNodeView: (nodeId: string) => void;
   popSubNodeView: () => void;
@@ -157,6 +165,7 @@ export const useUIStore = create<UIState>((set) => ({
   activeLayers: new Set<LayerKind>(),
   editingItem: null,
   toasts: [],
+  alertUnseen: 0,
   subNodeViewStack: [],
   libraryExpanded: false,
   macroView: false,
@@ -215,6 +224,8 @@ export const useUIStore = create<UIState>((set) => ({
     }
   },
   removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+  bumpAlertUnseen: () => set((s) => ({ alertUnseen: s.alertUnseen + 1 })),
+  clearAlertUnseen: () => set((s) => (s.alertUnseen === 0 ? s : { alertUnseen: 0 })),
   // Sub-node view navigation
   pushSubNodeView: (nodeId) => set((s) => {
     // Prevent duplicate: ignore if already at top of stack

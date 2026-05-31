@@ -171,6 +171,9 @@ func drainNewEvents(s *Service, runID, path string, offset int64) int64 {
 				continue
 			}
 			s.broker.Publish(evt)
+			if s.alertManager != nil {
+				s.alertManager.Observe(evt)
+			}
 		}
 		if err != nil {
 			if !errors.Is(err, io.EOF) {

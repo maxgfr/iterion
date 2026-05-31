@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/SocialGouv/iterion/pkg/alert"
 	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/clock"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
@@ -177,6 +178,14 @@ type Service struct {
 	broker  *EventBroker
 	manager *Manager
 
+	// alertSettings, when non-nil, requests construction of an alert
+	// Manager that observes the run event stream (via the file-event
+	// tail) and fans stall / budget / failure alerts out to a webhook,
+	// the studio browser (broker → WS toast), and optionally a desktop
+	// Wails sink. Set via WithAlerts.
+	alertSettings *AlertSettings
+	alertManager  *alert.Manager
+
 	// recoveryDispatch is built once on construction so each Launch /
 	// Resume reuses the same dispatcher rather than allocating a new
 	// recipes map + closure on the per-run hot path.
@@ -292,6 +301,40 @@ func WithLogger(l *iterlog.Logger) ServiceOption {
 	}
 }
 
+// AlertSettings configures the run-health alert Manager the service
+// builds when WithAlerts is supplied. The webhook + desktop sinks are
+// optional; browser delivery (broker → WS toast) is always wired so
+// studio sessions get alerts regardless of these fields.
+type AlertSettings struct {
+	// WebhookURL targets a generic incoming webhook (Slack/Discord
+	// shape). Empty disables webhook delivery. Treated as a secret.
+	WebhookURL string
+	// StallTimeout is the no-activity window for stall alerts. Zero or
+	// negative disables stall detection; the caller resolves the default.
+	StallTimeout time.Duration
+	// BaseURL is the origin used to build /runs/<id> deep links.
+	BaseURL string
+	// DesktopSink, when non-nil, is added as an extra sink — the desktop
+	// app injects a Wails EventsEmit sink here for in-window
+	// notifications. Nil in headless server / browser-only mode.
+	DesktopSink alert.Sink
+}
+
+// WithAlerts enables run-health alerting. The service constructs an
+// alert.Manager, attaches a browser-delivery sink (publishing an
+// in-process `alert` event to the broker), optional webhook + desktop
+// sinks, wires it into the file-event tail, and starts its poll loop.
+func WithAlerts(set AlertSettings) ServiceOption {
+	return func(s *Service) {
+		cp := set
+		s.alertSettings = &cp
+	}
+}
+
+// AlertManager returns the service's alert Manager, or nil when alerts
+// are disabled. Exposed for tests + shutdown.
+func (s *Service) AlertManager() *alert.Manager { return s.alertManager }
+
 // WithBroker injects an existing event broker. When omitted, the
 // service creates its own.
 func WithBroker(b *EventBroker) ServiceOption {
@@ -405,9 +448,65 @@ func NewService(storeDir string, opts ...ServiceOption) (*Service, error) {
 		runtime.DailyCapConfig{MaxCostPerDayUSD: s.maxCostPerDayUSD},
 	)
 
+	if s.alertSettings != nil {
+		s.alertManager = s.buildAlertManager(*s.alertSettings)
+		s.alertManager.Start(context.Background())
+	}
+
 	s.reconcileOrphans()
 	s.reconcileSandboxContainers()
 	return s, nil
+}
+
+// buildAlertManager wires the alert Manager's sinks (webhook, optional
+// desktop, and the always-on browser-broker sink), the run-name lookup,
+// and the deep-link base URL. The manager itself is fed events by the
+// file-event tail (see drainNewEvents).
+func (s *Service) buildAlertManager(set AlertSettings) *alert.Manager {
+	var sinks []alert.Sink
+	if wh := alert.NewWebhookSink(set.WebhookURL, s.logger); wh != nil {
+		sinks = append(sinks, wh)
+	}
+	if set.DesktopSink != nil {
+		sinks = append(sinks, set.DesktopSink)
+	}
+	// Browser delivery: publish an in-process `alert` event to the
+	// broker. It is NOT persisted to events.jsonl, so the file tail
+	// never re-feeds it into Observe (no detection feedback loop).
+	sinks = append(sinks, alert.FuncSink(func(_ context.Context, a alert.Alert) {
+		if s.broker == nil {
+			return
+		}
+		s.broker.Publish(store.Event{
+			Type:      store.EventAlert,
+			RunID:     a.RunID,
+			NodeID:    a.NodeID,
+			Timestamp: a.Timestamp,
+			Data:      a.AsEventData(),
+		})
+	}))
+
+	runLookup := func(id string) (string, bool) {
+		if s.store == nil {
+			return "", false
+		}
+		r, err := s.store.LoadRun(context.Background(), id)
+		if err != nil || r == nil {
+			return "", false
+		}
+		if r.Name != "" {
+			return r.Name, true
+		}
+		return r.WorkflowName, true
+	}
+
+	return alert.NewManager(
+		alert.WithSinks(sinks...),
+		alert.WithRunLookup(runLookup),
+		alert.WithBaseURL(set.BaseURL),
+		alert.WithStallTimeout(set.StallTimeout),
+		alert.WithLogger(s.logger),
+	)
 }
 
 // Broker exposes the event broker for transports that need to

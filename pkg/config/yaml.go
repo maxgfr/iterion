@@ -41,6 +41,21 @@ type yamlConfig struct {
 	Metrics *yamlMetricsConfig `yaml:"metrics"`
 	Log     *yamlLogConfig     `yaml:"log"`
 	Auth    *yamlAuthConfig    `yaml:"auth"`
+	Alerts  *yamlAlertsConfig  `yaml:"alerts"`
+}
+
+type yamlAlertsConfig struct {
+	Webhook      *yamlWebhookAlertConfig `yaml:"webhook"`
+	Desktop      *yamlDesktopAlertConfig `yaml:"desktop"`
+	StallTimeout *string                 `yaml:"stall_timeout"`
+}
+
+type yamlWebhookAlertConfig struct {
+	URL *string `yaml:"url"`
+}
+
+type yamlDesktopAlertConfig struct {
+	Enabled *bool `yaml:"enabled"`
 }
 
 type yamlSandboxConfig struct {
@@ -216,6 +231,21 @@ func (y *yamlConfig) applyTo(cfg *Config) error {
 	if y.Sandbox != nil {
 		applyString(y.Sandbox.Default, &cfg.Sandbox.Default)
 		applyString(y.Sandbox.HostState, &cfg.Sandbox.HostState)
+	}
+	if y.Alerts != nil {
+		if y.Alerts.Webhook != nil {
+			applyString(y.Alerts.Webhook.URL, &cfg.Alerts.Webhook.URL)
+		}
+		if y.Alerts.Desktop != nil && y.Alerts.Desktop.Enabled != nil {
+			cfg.Alerts.Desktop.Enabled = *y.Alerts.Desktop.Enabled
+		}
+		if y.Alerts.StallTimeout != nil {
+			d, err := time.ParseDuration(*y.Alerts.StallTimeout)
+			if err != nil {
+				return fmt.Errorf("alerts.stall_timeout: %w", err)
+			}
+			cfg.Alerts.StallTimeout = d
+		}
 	}
 	return nil
 }

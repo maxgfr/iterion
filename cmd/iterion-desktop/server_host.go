@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SocialGouv/iterion/pkg/alert"
 	"github.com/SocialGouv/iterion/pkg/cli"
 )
 
@@ -23,11 +24,19 @@ type ServerHost struct {
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	done   chan struct{} // closed when the underlying RunStudio goroutine returns
+
+	// alertSink is forwarded into every studio server this host starts as
+	// the desktop run-health notification sink. nil disables native
+	// desktop notifications (RunStudio still wires the browser toast + dot
+	// and the optional webhook). Set once at construction.
+	alertSink alert.Sink
 }
 
-// NewServerHost returns an unstarted host.
-func NewServerHost() *ServerHost {
-	return &ServerHost{}
+// NewServerHost returns an unstarted host. alertSink, when non-nil, is
+// wired as the desktop alert delivery sink for every embedded studio
+// server (gated server-side on ITERION_ALERTS_DESKTOP_ENABLED).
+func NewServerHost(alertSink alert.Sink) *ServerHost {
+	return &ServerHost{alertSink: alertSink}
 }
 
 // Start brings up the studio server on a random port for the given
@@ -64,7 +73,8 @@ func (h *ServerHost) Start(parent context.Context, dir, storeDir string) (string
 				default:
 				}
 			},
-			OnForceRefresh: ReloadIterionEnvFile,
+			OnForceRefresh:   ReloadIterionEnvFile,
+			DesktopAlertSink: h.alertSink,
 		}
 		if err := cli.RunStudio(ctx, opts, printer); err != nil {
 			select {

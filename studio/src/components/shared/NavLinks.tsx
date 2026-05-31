@@ -21,6 +21,7 @@ import {
   useTabsStore,
   type Tab,
 } from "@/store/tabs";
+import { useUIStore } from "@/store/ui";
 import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
 
 export type Section =
@@ -80,6 +81,8 @@ export default function NavLinks({ collapsed }: Props) {
   const info = useServerInfoStore((s) => s.info);
   const [location] = useLocation();
   const active = deriveSection(location);
+  const alertUnseen = useUIStore((s) => s.alertUnseen);
+  const clearAlertUnseen = useUIStore((s) => s.clearAlertUnseen);
 
   const links: LinkDef[] = [...BASE_LINKS];
   if (info?.native_tracker_enabled) {
@@ -95,6 +98,10 @@ export default function NavLinks({ collapsed }: Props) {
         const isActive = active === section;
         const withSublist =
           !collapsed && (section === "editor" || section === "runs");
+        // Run-health alert dot rides the Runs entry: an operator who
+        // looked away sees a run needs attention. Acknowledged (cleared)
+        // when they click into the Runs section.
+        const showAlertDot = section === "runs" && alertUnseen > 0;
         return (
           <div key={section} className="flex flex-col gap-0.5">
             <NavRow
@@ -104,6 +111,8 @@ export default function NavLinks({ collapsed }: Props) {
               isActive={isActive}
               collapsed={collapsed}
               sublistKind={withSublist ? section : null}
+              showAlertDot={showAlertDot}
+              onNavClick={section === "runs" ? clearAlertUnseen : undefined}
             />
           </div>
         );
@@ -119,9 +128,11 @@ interface NavRowProps {
   isActive: boolean;
   collapsed: boolean;
   sublistKind: "editor" | "runs" | null;
+  showAlertDot?: boolean;
+  onNavClick?: () => void;
 }
 
-function NavRow({ href, label, icon: Icon, isActive, collapsed, sublistKind }: NavRowProps) {
+function NavRow({ href, label, icon: Icon, isActive, collapsed, sublistKind, showAlertDot, onNavClick }: NavRowProps) {
   const editorTabs = useTabsStore(useShallow(selectEditorTabs));
   const runTabs = useTabsStore(useShallow(selectRunTabs));
   const tabs =
@@ -157,10 +168,19 @@ function NavRow({ href, label, icon: Icon, isActive, collapsed, sublistKind }: N
           href={href}
           className="inline-flex items-center gap-2 min-w-0 flex-1 focus:outline-none"
           aria-current={isActive ? "page" : undefined}
-          title={label}
-          aria-label={label}
+          title={showAlertDot ? `${label} — run needs attention` : label}
+          aria-label={showAlertDot ? `${label}, run needs attention` : label}
+          onClick={onNavClick}
         >
-          <Icon className="w-3.5 h-3.5 shrink-0" />
+          <span className="relative inline-flex shrink-0">
+            <Icon className="w-3.5 h-3.5 shrink-0" />
+            {showAlertDot && (
+              <span
+                className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-danger ring-2 ring-surface-1"
+                aria-hidden="true"
+              />
+            )}
+          </span>
           {!collapsed && <span className="truncate">{label}</span>}
         </Link>
         {sublistKind && tabs.length > 0 && (

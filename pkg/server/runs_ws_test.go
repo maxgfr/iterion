@@ -115,6 +115,74 @@ func TestRunsWS_LiveEventReachesSubscriber(t *testing.T) {
 	}
 }
 
+// TestRunsWS_AlertEventBypassesSnapshotDedup is the regression guard for
+// the run-health alert delivery path. Alert events (store.EventAlert) are
+// published straight to the broker with Seq=0 and are never persisted, so
+// the live-tail snapshot dedup guard (ev.Seq <= snapshotSeq) would drop
+// them once the run has emitted any real event (snapshotSeq past 0) —
+// silently breaking the browser toast + notification dot. The server must
+// special-case EventAlert and forward it regardless of seq.
+func TestRunsWS_AlertEventBypassesSnapshotDedup(t *testing.T) {
+	srv, hs := newTestServer(t)
+	// A running run with several persisted events so the subscribe-time
+	// snapshot's LastSeq is well past 0 (the realistic case: an alert
+	// only fires minutes into a run that has emitted many events).
+	st, err := store.New(srv.cfg.StoreDir)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	const runID = "run-alert"
+	if _, err := st.CreateRun(context.Background(), runID, "wf", nil); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	for _, evt := range []store.Event{
+		{Type: store.EventRunStarted, RunID: runID},
+		{Type: store.EventNodeStarted, RunID: runID, NodeID: "analyze"},
+		{Type: store.EventNodeFinished, RunID: runID, NodeID: "analyze"},
+	} {
+		if _, err := st.AppendEvent(context.Background(), runID, evt); err != nil {
+			t.Fatalf("seed event: %v", err)
+		}
+	}
+
+	c := dialRunWS(t, hs, runID)
+	writeJSONMessage(t, c, runWSEnvelope{Type: wsTypeSubscribe})
+	snapEnv := readEnvelope(t, c, wsTypeSnapshot)
+	var snap runview.RunSnapshot
+	if err := json.Unmarshal(snapEnv.Payload, &snap); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if snap.LastSeq <= 0 {
+		t.Fatalf("snapshot LastSeq = %d, want > 0 (test needs snapshotSeq past 0 to exercise the guard)", snap.LastSeq)
+	}
+
+	// Publish an in-process alert event the way pkg/alert's browser sink
+	// does: straight to the broker, unpersisted, with Seq=0.
+	srv.runs.Broker().Publish(store.Event{
+		Seq:    0,
+		Type:   store.EventAlert,
+		RunID:  runID,
+		NodeID: "analyze",
+		Data: map[string]interface{}{
+			"kind":   "budget_warning",
+			"title":  "Budget warning: wf",
+			"reason": "tokens budget at 82%",
+		},
+	})
+
+	env := readEnvelope(t, c, wsTypeEvent)
+	var ev store.Event
+	if err := json.Unmarshal(env.Payload, &ev); err != nil {
+		t.Fatalf("decode event: %v", err)
+	}
+	if ev.Type != store.EventAlert {
+		t.Fatalf("event Type = %q, want %q (alert must bypass the snapshot dedup guard)", ev.Type, store.EventAlert)
+	}
+	if ev.NodeID != "analyze" {
+		t.Errorf("NodeID = %q, want analyze", ev.NodeID)
+	}
+}
+
 func TestRunsWS_FromSeqReplaysHistorical(t *testing.T) {
 	srv, hs := newTestServer(t)
 	seedRun(t, srv, "run-replay", "wf", store.RunStatusFinished)

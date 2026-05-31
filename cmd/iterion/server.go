@@ -272,11 +272,22 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		logger.Warn("server: ITERION_DISABLE_AUTH set — /api/* endpoints are unauthenticated; do not expose the server publicly")
 	}
 
+	// Run-health alerting: webhook (Slack/Discord) + always-on browser
+	// toast sink. Deep links use the externally-reachable PublicURL so
+	// webhook recipients get a clickable /runs/<id> link. The desktop
+	// sink is nil here (cloud pods have no Wails runtime).
+	alertSettings := &runview.AlertSettings{
+		WebhookURL:   cfg.Alerts.Webhook.URL,
+		StallTimeout: cfg.Alerts.StallTimeout,
+		BaseURL:      cfg.Auth.PublicURL,
+	}
+
 	srv := server.New(server.Config{
 		Port:                   serverOpts.port,
 		Bind:                   serverOpts.bind,
 		WorkDir:                serverOpts.dir,
 		Store:                  st,
+		Alerts:                 alertSettings,
 		LaunchPublisher:        pub,
 		EventSource:            eventSrc,
 		Mode:                   string(iterconfig.ModeCloud),

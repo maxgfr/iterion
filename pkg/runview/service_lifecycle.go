@@ -254,6 +254,14 @@ func (s *Service) Stop(ctx context.Context) {
 func (s *Service) Drain(ctx context.Context) {
 	s.draining.Store(true)
 
+	// Stop the alert manager's stall-poll goroutine. It was started with
+	// context.Background() (so it outlives per-run contexts), so Drain is
+	// the only place that reaps it — without this it leaks across project
+	// hot-swaps that construct a fresh Service.
+	if s.alertManager != nil {
+		s.alertManager.Stop()
+	}
+
 	handles := s.manager.Snapshot()
 
 	for _, h := range handles {

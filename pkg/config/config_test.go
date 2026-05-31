@@ -51,6 +51,65 @@ func TestLoad_DefaultsApplied(t *testing.T) {
 	}
 }
 
+func TestLoad_AlertsDefaults(t *testing.T) {
+	clearITERION(t)
+	cfg, err := Load(LoadOptions{})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Alerts.StallTimeout != 5*time.Minute {
+		t.Errorf("Alerts.StallTimeout: got %s want 5m", cfg.Alerts.StallTimeout)
+	}
+	if cfg.Alerts.Webhook.URL != "" {
+		t.Errorf("Alerts.Webhook.URL: got %q want empty", cfg.Alerts.Webhook.URL)
+	}
+	if cfg.Alerts.Desktop.Enabled {
+		t.Errorf("Alerts.Desktop.Enabled: got true want false")
+	}
+}
+
+func TestLoad_AlertsEnvOverride(t *testing.T) {
+	clearITERION(t)
+	t.Setenv("ITERION_ALERTS_WEBHOOK_URL", "https://hooks.example/abc")
+	t.Setenv("ITERION_ALERTS_DESKTOP_ENABLED", "true")
+	t.Setenv("ITERION_ALERTS_STALL_TIMEOUT", "90s")
+	cfg, err := Load(LoadOptions{})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Alerts.Webhook.URL != "https://hooks.example/abc" {
+		t.Errorf("Webhook.URL = %q", cfg.Alerts.Webhook.URL)
+	}
+	if !cfg.Alerts.Desktop.Enabled {
+		t.Errorf("Desktop.Enabled = false, want true")
+	}
+	if cfg.Alerts.StallTimeout != 90*time.Second {
+		t.Errorf("StallTimeout = %s, want 90s", cfg.Alerts.StallTimeout)
+	}
+}
+
+func TestLoad_AlertsYAML(t *testing.T) {
+	clearITERION(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	if err := os.WriteFile(path, []byte("alerts:\n  webhook:\n    url: https://hooks.example/yaml\n  desktop:\n    enabled: true\n  stall_timeout: 2m\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(LoadOptions{YAMLPath: path})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Alerts.Webhook.URL != "https://hooks.example/yaml" {
+		t.Errorf("Webhook.URL = %q", cfg.Alerts.Webhook.URL)
+	}
+	if !cfg.Alerts.Desktop.Enabled {
+		t.Errorf("Desktop.Enabled = false, want true")
+	}
+	if cfg.Alerts.StallTimeout != 2*time.Minute {
+		t.Errorf("StallTimeout = %s, want 2m", cfg.Alerts.StallTimeout)
+	}
+}
+
 func TestLoad_SandboxDefaultEnv(t *testing.T) {
 	cases := []struct {
 		env     string

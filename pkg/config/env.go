@@ -218,6 +218,24 @@ func loadEnv(cfg *Config) error {
 		cfg.Auth.OAuthForfait.CodexClientID = v
 	}
 
+	if v, ok := lookup("ITERION_ALERTS_WEBHOOK_URL"); ok {
+		cfg.Alerts.Webhook.URL = v
+	}
+	if v, ok := lookup("ITERION_ALERTS_DESKTOP_ENABLED"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("ITERION_ALERTS_DESKTOP_ENABLED: %w", err)
+		}
+		cfg.Alerts.Desktop.Enabled = b
+	}
+	if v, ok := lookup("ITERION_ALERTS_STALL_TIMEOUT"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("ITERION_ALERTS_STALL_TIMEOUT: %w", err)
+		}
+		cfg.Alerts.StallTimeout = d
+	}
+
 	return nil
 }
 

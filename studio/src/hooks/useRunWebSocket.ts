@@ -1,8 +1,10 @@
 import { useEffect, useRef } from "react";
 
 import { isSafeStoreParam, type RunEvent, type RunSnapshot } from "@/api/runs";
+import { toastForEvent } from "@/hooks/useRunToasts";
 import { buildWsUrl } from "@/lib/wsUrl";
 import { useRunStore, useRunStoreInstance } from "@/store/run";
+import { useUIStore } from "@/store/ui";
 
 interface WsEnvelope {
   type: string;
@@ -144,6 +146,23 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
       }
     };
 
+    // Run-health alert events (pkg/store.EventAlert) are in-process-only:
+    // they are NEVER persisted to events.jsonl and the broker fans them
+    // out WITHOUT a seq (Seq=0). Feeding them through the seq-ordered
+    // event store would (a) get them dropped by reduceEvents' `seq <=
+    // lastSeq` guard once any real event has advanced the high-water
+    // mark, and (b) corrupt the WS reconnect `from_seq` computation
+    // (events[last].seq + 1). So we handle them out-of-band here: render
+    // the toast + light the notification dot directly, and keep them out
+    // of the events array entirely. Because they are never persisted,
+    // they only ever arrive once on the live tail — no replay/dedup risk.
+    const handleAlertEvent = (evt: RunEvent) => {
+      const ui = useUIStore.getState();
+      const toast = toastForEvent(evt);
+      if (toast) ui.addToast(toast.message, toast.type);
+      ui.bumpAlertUnseen();
+    };
+
     const connect = async () => {
       if (!aliveRef.current) return;
       setWsState("connecting");
@@ -220,18 +239,34 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
               flushEvents();
               applySnapshot(env.payload as RunSnapshot);
               break;
-            case "event":
-              queueEvent(env.payload as RunEvent);
+            case "event": {
+              const evt = env.payload as RunEvent;
+              if (evt.type === "alert") {
+                handleAlertEvent(evt);
+                break;
+              }
+              queueEvent(evt);
               break;
-            case "event_batch":
+            }
+            case "event_batch": {
               // Server-side bulk envelope (replay path): payload is
               // already an array. Drain the live-event microtask
               // buffer first so seq order is preserved across
               // batches, then push the whole array in one shot —
-              // bypasses the per-event microtask round-trip.
+              // bypasses the per-event microtask round-trip. Alert
+              // events are never persisted so they don't appear in a
+              // replay batch, but partition defensively in case a sink
+              // ever multiplexes one in.
               flushEvents();
-              applyEventsBatch(env.payload as RunEvent[]);
+              const batch = env.payload as RunEvent[];
+              const persisted: RunEvent[] = [];
+              for (const e of batch) {
+                if (e.type === "alert") handleAlertEvent(e);
+                else persisted.push(e);
+              }
+              if (persisted.length > 0) applyEventsBatch(persisted);
               break;
+            }
             case "log_chunk":
               applyLogChunk(env.payload as LogChunkPayload);
               break;

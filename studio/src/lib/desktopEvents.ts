@@ -21,6 +21,11 @@ export const DesktopEvent = {
   UpdateProgress: "update:progress",
   UpdateNone: "update:none",
   UpdateError: "update:error",
+
+  // Run-health alert (stall / budget / failure) forwarded from the
+  // embedded server's alert Manager. The SPA surfaces it as a native OS
+  // notification; the in-page toast + dot ride the run WS separately.
+  RunAlert: "run:alert",
 } as const;
 
 export type DesktopEventName = (typeof DesktopEvent)[keyof typeof DesktopEvent];

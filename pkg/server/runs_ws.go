@@ -749,7 +749,16 @@ func (c *runConn) streamEventsLocal(fromSeq, snapshotSeq int64) {
 				c.sendEnvelope(wsTypeTerminated, map[string]string{"run_id": c.runID}, "")
 				return
 			}
-			if snapshotSeq != runview.NoEventsSeq && ev.Seq <= snapshotSeq {
+			// Run-health alert events (store.EventAlert) are in-process
+			// only: the alert Manager publishes them straight to the
+			// broker WITHOUT a seq (Seq=0) and they are never persisted
+			// to events.jsonl. They must bypass the snapshot dedup guard
+			// below — once the run has emitted any real event,
+			// snapshotSeq is past 0, so the guard would otherwise drop
+			// every alert (Seq=0 <= snapshotSeq), silently breaking the
+			// browser toast + notification-dot delivery path. They arrive
+			// once on the live tail only, so there is no replay/dedup risk.
+			if ev.Type != store.EventAlert && snapshotSeq != runview.NoEventsSeq && ev.Seq <= snapshotSeq {
 				continue
 			}
 			if !c.sendEnvelope(wsTypeEvent, ev, "") {

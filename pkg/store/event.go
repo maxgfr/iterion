@@ -44,6 +44,12 @@ const (
 	EventRunFinished          EventType = "run_finished"
 	EventRunFailed            EventType = "run_failed"
 	EventRunCancelled         EventType = "run_cancelled"
+	// EventAlert is an in-process-only run-health alert (stall, budget,
+	// failure) fanned out to studio browser sessions via the event
+	// broker. It is NEVER persisted to events.jsonl — the alert Manager
+	// publishes it straight to the broker to avoid a detection feedback
+	// loop — so it carries no seq and is observational only.
+	EventAlert EventType = "alert"
 	// EventRunInterrupted is emitted when the studio server drains in-flight
 	// runs during shutdown (SIGTERM, watchexec rebuild, etc). The companion
 	// run.json status flips to failed_resumable so the next boot can offer

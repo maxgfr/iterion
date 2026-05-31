@@ -7,13 +7,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"time"
 
+	"github.com/SocialGouv/iterion/pkg/alert"
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
 	"github.com/SocialGouv/iterion/pkg/botregistry"
 	"github.com/SocialGouv/iterion/pkg/dispatcher"
 	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/server"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
@@ -64,6 +67,59 @@ type StudioOptions struct {
 	// discover bots for the Board ticket form's bot picker. Empty
 	// falls back to <Dir>/bots, <Dir>/examples, <Dir>/.botz.
 	BotsPaths []string
+
+	// DesktopAlertSink, when non-nil, is wired as the run-health alert
+	// desktop delivery sink (the desktop app injects a Wails
+	// EventsEmit-backed sink for native OS notifications). It is honoured
+	// only when desktop alerts are enabled (ITERION_ALERTS_DESKTOP_ENABLED
+	// / alerts.desktop.enabled). The headless CLI and the --server-only
+	// daemon leave it nil — they have no Wails runtime to emit through.
+	DesktopAlertSink alert.Sink
+}
+
+// alertSettingsFromEnv builds the run-health alert settings for local
+// studio mode from the ITERION_ALERTS_* environment (the same vars the
+// cloud config overlay reads). It always returns a non-nil settings so
+// the always-on browser-toast sink + stall detection are default-on;
+// the webhook sink activates only when ITERION_ALERTS_WEBHOOK_URL is
+// set. The desktop sink stays nil here — Wails delivery is wired by the
+// desktop host, not the headless CLI.
+//
+// BaseURL (used to build clickable /runs/<id> deep links in webhook
+// payloads) prefers an explicit ITERION_ALERTS_BASE_URL, else is
+// derived from the bind address + port. When the port is OS-assigned
+// (0 / random) the absolute base is left empty: the in-app toast does
+// not need it, and a wrong absolute link is worse than none.
+func alertSettingsFromEnv(bind string, port int) *runview.AlertSettings {
+	set := &runview.AlertSettings{
+		WebhookURL:   os.Getenv("ITERION_ALERTS_WEBHOOK_URL"),
+		StallTimeout: alert.DefaultStallTimeout,
+	}
+	if v := os.Getenv("ITERION_ALERTS_STALL_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			set.StallTimeout = d
+		}
+	}
+	if base := os.Getenv("ITERION_ALERTS_BASE_URL"); base != "" {
+		set.BaseURL = base
+	} else if port > 0 {
+		host := bind
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			host = "localhost"
+		}
+		set.BaseURL = fmt.Sprintf("http://%s:%d", host, port)
+	}
+	return set
+}
+
+// desktopAlertsEnabled reports whether native desktop notifications are
+// turned on via ITERION_ALERTS_DESKTOP_ENABLED (the env mirror of the
+// alerts.desktop.enabled config). Default false: the desktop sink is
+// opt-in so headless / browser-only sessions never pay for a Wails emit
+// that has no consumer.
+func desktopAlertsEnabled() bool {
+	b, err := strconv.ParseBool(os.Getenv("ITERION_ALERTS_DESKTOP_ENABLED"))
+	return err == nil && b
 }
 
 // RunStudio starts the studio HTTP server.
@@ -127,6 +183,13 @@ func RunStudio(ctx context.Context, opts StudioOptions, p *Printer) error {
 		// apply because there is exactly one local user.
 		DisableAuth: true,
 		Bots:        server.BotsConfig{Paths: botsPaths},
+		Alerts:      alertSettingsFromEnv(opts.Bind, opts.Port),
+	}
+	// Native desktop notifications: wire the Wails-backed sink the desktop
+	// host supplied, but only when the operator opted in. Browser/headless
+	// sessions still get the always-on browser toast + dot regardless.
+	if opts.DesktopAlertSink != nil && desktopAlertsEnabled() && cfg.Alerts != nil {
+		cfg.Alerts.DesktopSink = opts.DesktopAlertSink
 	}
 	// Wire the in-memory BrowserRegistry unless the operator
 	// explicitly disabled the pane. The registry is process-local;

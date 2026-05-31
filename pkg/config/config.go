@@ -47,6 +47,32 @@ type Config struct {
 	Log     LogConfig     `yaml:"log"`
 	Sandbox SandboxConfig `yaml:"sandbox"`
 	Auth    AuthConfig    `yaml:"auth"`
+	Alerts  AlertsConfig  `yaml:"alerts"`
+}
+
+// AlertsConfig configures run-health alerting (stall, budget, failure).
+// Delivery is fan-out: a generic incoming webhook (Slack/Discord-shaped)
+// plus, in the desktop app, an in-window Wails notification. Browser
+// studio sessions always receive alerts as toasts + a notification dot
+// regardless of these settings.
+type AlertsConfig struct {
+	Webhook WebhookAlertConfig `yaml:"webhook"`
+	Desktop DesktopAlertConfig `yaml:"desktop"`
+	// StallTimeout is the no-activity window after which a running run
+	// is flagged as stalled. Default 5m; "0" disables stall alerts.
+	StallTimeout time.Duration `yaml:"stall_timeout"`
+}
+
+// WebhookAlertConfig points at a generic incoming webhook. Empty URL
+// disables webhook delivery. The URL is a secret and is never logged.
+type WebhookAlertConfig struct {
+	URL string `yaml:"url"`
+}
+
+// DesktopAlertConfig toggles in-window desktop notifications (desktop
+// app only; no effect on the headless server).
+type DesktopAlertConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // AuthConfig groups multitenant auth settings: JWT signing, secrets
@@ -251,6 +277,9 @@ func Defaults() Config {
 			Format: LogFormatHuman,
 			Level:  "info",
 		},
+		Alerts: AlertsConfig{
+			StallTimeout: 5 * time.Minute,
+		},
 		Auth: AuthConfig{
 			AccessTTL:    15 * time.Minute,
 			RefreshTTL:   30 * 24 * time.Hour,
@@ -332,6 +361,10 @@ func (c *Config) Validate() error {
 	}
 	if c.Metrics.Port < 1 || c.Metrics.Port > 65535 {
 		return fmt.Errorf("ITERION_METRICS_PORT %d invalid (want 1-65535)", c.Metrics.Port)
+	}
+
+	if c.Alerts.StallTimeout < 0 {
+		return fmt.Errorf("ITERION_ALERTS_STALL_TIMEOUT %s invalid (want >= 0)", c.Alerts.StallTimeout)
 	}
 
 	if c.Mode == ModeCloud {

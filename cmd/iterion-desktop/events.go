@@ -23,4 +23,12 @@ const (
 	eventUpdateProgress  = "update:progress"
 	eventUpdateNone      = "update:none"
 	eventUpdateError     = "update:error"
+
+	// eventRunAlert carries a run-health alert (stall / budget / failure)
+	// from the embedded studio server's alert Manager to the SPA, which
+	// surfaces it as a native OS notification. The payload is the flat map
+	// produced by alert.Alert.AsEventData(). The in-page toast + dot are
+	// driven separately off the run WS `alert` event; this channel adds
+	// the out-of-window native notification desktop sessions expect.
+	eventRunAlert = "run:alert"
 )

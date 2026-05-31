@@ -31,6 +31,11 @@ export function useRunToasts(
       if (toast) addToast(toast.message, toast.type);
       anchorRef.current = e.seq;
     }
+    // NOTE: run-health `alert` events are NOT handled here. They are
+    // unpersisted, seq-less (Seq=0) broker events that never enter the
+    // seq-ordered event store (they'd be dropped by reduceEvents and
+    // corrupt the WS from_seq math). useRunWebSocket intercepts them at
+    // ingestion and drives the toast + notification dot out-of-band.
   }, [events, snapshotLastSeq, addToast]);
 }
 
@@ -59,9 +64,32 @@ export function toastForEvent(
       return { message: "Run resumed", type: "info" };
     case "run_cancelled":
       return { message: "Run cancelled", type: "info" };
+    case "budget_warning": {
+      const dim = (e.data?.["dimension"] as string | undefined) ?? "budget";
+      const used = e.data?.["used"] as number | undefined;
+      const limit = e.data?.["limit"] as number | undefined;
+      const pct =
+        typeof used === "number" && typeof limit === "number" && limit > 0
+          ? Math.round((used / limit) * 100)
+          : null;
+      const suffix = pct !== null ? ` at ${pct}%` : "";
+      return { message: `Budget warning: ${dim}${suffix}.`, type: "warning" };
+    }
     case "budget_exceeded": {
       const dim = (e.data?.["dimension"] as string | undefined) ?? "budget";
       return { message: `Budget exhausted: ${dim} hit hard cap.`, type: "error" };
+    }
+    case "alert": {
+      // In-process run-health alert (stall / budget / failure) fanned
+      // out by pkg/alert's browser sink. The payload carries a
+      // pre-rendered title + reason; pick the toast tone from kind.
+      const kind = e.data?.["kind"] as string | undefined;
+      const title = (e.data?.["title"] as string | undefined) ?? "Run alert";
+      const reason = e.data?.["reason"] as string | undefined;
+      const message = reason ? `${title}: ${reason}` : title;
+      const type: "error" | "warning" =
+        kind === "budget_exceeded" || kind === "run_failed" ? "error" : "warning";
+      return { message, type };
     }
     default:
       return null;

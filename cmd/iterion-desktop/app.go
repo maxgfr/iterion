@@ -14,6 +14,8 @@ import (
 	"time"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"github.com/SocialGouv/iterion/pkg/alert"
 )
 
 // App is the Wails-bound struct exposed to the frontend. Every public method
@@ -121,7 +123,7 @@ func (a *App) onStartup(ctx context.Context) {
 		// embedded server for the current project (or no project on
 		// first run — the studio SPA's useDesktop hook routes to /welcome
 		// based on IsFirstRunPending).
-		a.server = NewServerHost()
+		a.server = NewServerHost(a.desktopAlertSink())
 		if err := a.startServerForCurrentProject(ctx); err != nil {
 			log.Printf("desktop: server failed to start: %v", err)
 			// Surface the error: GetServerURL stays "" and the AssetServer
@@ -297,6 +299,23 @@ func defaultFallbackProjectDir() string {
 
 // startServerForCurrentProject brings up the HTTP server for the project
 // currently selected in config.
+// desktopAlertSink returns the run-health alert sink the embedded studio
+// server delivers native desktop notifications through. It emits the
+// flat alert payload over the existing Wails event channel (run:alert);
+// the SPA listener turns it into an OS notification. The server only
+// activates this sink when ITERION_ALERTS_DESKTOP_ENABLED is set, so the
+// emit is a no-op unless the operator opted in. Reading a.ctx at emit
+// time is safe: it is set in onStartup before the server starts, and
+// alerts only fire well into a run's lifetime.
+func (a *App) desktopAlertSink() alert.Sink {
+	return alert.FuncSink(func(_ context.Context, al alert.Alert) {
+		if a.ctx == nil {
+			return
+		}
+		wruntime.EventsEmit(a.ctx, eventRunAlert, al.AsEventData())
+	})
+}
+
 func (a *App) startServerForCurrentProject(ctx context.Context) error {
 	a.mu.Lock()
 	dir, storeDir := a.currentProjectServerDirsLocked()

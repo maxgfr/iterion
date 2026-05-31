@@ -231,6 +231,13 @@ type Config struct {
 	// text/plain, text/markdown, text/csv, application/yaml,
 	// application/zip, application/gzip, application/x-tar).
 	AllowedUploadMIMEs []string
+
+	// Alerts, when non-nil, enables run-health alerting (stall / budget /
+	// failure) on the run console service. The settings carry the webhook
+	// URL, stall window, deep-link base URL and an optional desktop sink;
+	// the always-on browser sink publishes EventAlert to each run's broker
+	// so the SPA can toast. nil disables alerting entirely.
+	Alerts *runview.AlertSettings
 }
 
 // ReadinessCheck is the contract /readyz invokes on each external
@@ -408,6 +415,9 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		if cfg.EventSource != nil {
 			opts = append(opts, runview.WithEventSource(cfg.EventSource))
 		}
+		if cfg.Alerts != nil {
+			opts = append(opts, runview.WithAlerts(*cfg.Alerts))
+		}
 		svc, svcErr := runview.NewService("", opts...)
 		if svcErr != nil {
 			logger.Warn("run console disabled: %v", svcErr)
@@ -418,6 +428,9 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		svcOpts := []runview.ServiceOption{runview.WithLogger(logger)}
 		if cfg.WorkDir != "" {
 			svcOpts = append(svcOpts, runview.WithWorkDir(cfg.WorkDir))
+		}
+		if cfg.Alerts != nil {
+			svcOpts = append(svcOpts, runview.WithAlerts(*cfg.Alerts))
 		}
 		svc, svcErr := runview.NewService(storeDir, svcOpts...)
 		if svcErr != nil {
