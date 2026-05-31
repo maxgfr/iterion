@@ -173,11 +173,19 @@ func matchesFilter(r *store.Run, f ListFilter) bool {
 // SnapshotCtx from cloud HTTP/WS handlers so the mongo tenant filter
 // applies.
 func (s *Service) Snapshot(runID string) (*RunSnapshot, error) {
-	return BuildSnapshot(context.Background(), s.store, runID)
+	return s.SnapshotCtx(context.Background(), runID)
 }
 
 // SnapshotCtx is the tenant-aware variant of Snapshot.
 func (s *Service) SnapshotCtx(ctx context.Context, runID string) (*RunSnapshot, error) {
+	// Reconcile a still-"pending" run that was merged out-of-band (git CLI
+	// / CI) so the run-view stops offering "Squash and merge" for a branch
+	// already on the target. Best-effort, and only for "pending": "skipped"
+	// is a deliberate branch-only outcome, and failed/conflicted have their
+	// own UX.
+	if r, err := s.store.LoadRun(ctx, runID); err == nil && r.MergeStatus == store.MergeStatusPending {
+		_, _ = s.reconcileOutOfBandMerge(ctx, r, "")
+	}
 	return BuildSnapshot(ctx, s.store, runID)
 }
 
