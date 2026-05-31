@@ -19,7 +19,8 @@ import type {
 } from "@/lib/whats-next/messages";
 
 import { cancelRun } from "@/api/runs";
-import AgentChatbox from "@/components/shared/AgentChatbox";
+import { queueMessage } from "@/api/queueMessages";
+import AgentChatboxInline from "@/components/shared/AgentChatboxInline";
 import { Button } from "@/components/ui/Button";
 import { Select, Textarea } from "@/components/ui";
 import { labelForStatus } from "@/components/Runs/runStatusMeta";
@@ -120,6 +121,39 @@ export default function WhatsNextView() {
       void session.submitHumanAnswer(messageId, answers);
     },
     [bot, session],
+  );
+
+  // onComposerSend backs the always-on composer (the footer's last
+  // branch). It renders only when there's no pending human turn, so
+  // the run is either still working or already closed:
+  //   - closed (no run / finished / failed / cancelled) → re-seed a
+  //     fresh session, delivering this message as the ask_priorities
+  //     answer (auto-submitted by the launcher-stash effect below).
+  //     Nexie's workspace memory reloads on the new run, so it picks
+  //     up where the closed session left off — continuity without a
+  //     resumable engine (a finished run can't be resumed).
+  //   - working (running/queued) → inject the message into the live
+  //     agent loop's inbox via queueMessage.
+  const onComposerSend = useCallback(
+    async (text: string, opts: { skills: string[] }) => {
+      const trimmed = text.trim();
+      if (trimmed === "") return;
+      const status = session.runStatus;
+      const closed =
+        !session.runId ||
+        status === "finished" ||
+        status === "failed" ||
+        status === "cancelled";
+      if (closed) {
+        pendingLauncherAnswer.current = { context: trimmed };
+        await session.launch(session.lastVars ?? {});
+        return;
+      }
+      if (session.runId) {
+        await queueMessage(session.runId, trimmed, { skills: opts.skills });
+      }
+    },
+    [session],
   );
 
   if (!bot) {
@@ -238,14 +272,17 @@ export default function WhatsNextView() {
                 }
               />
             ) : (
-              session.runId &&
-              session.runStatus !== "finished" &&
-              session.runStatus !== "failed" && (
-                // embedded={true}: queued messages are folded into the
-                // transcript above (as user-message cards), so the
-                // chatbox suppresses its own duplicate list. Only the
-                // composer + skill picker remain.
-                <AgentChatbox runId={session.runId} embedded />
+              // Always-on composer. Renders for live work (queues into
+              // the running loop) AND for a closed session (re-seeds a
+              // fresh run) so Nexie is never a dead end — replaces the
+              // old "hide the box on terminal runs" behaviour that
+              // stranded the operator on "Session ended."
+              session.runId && (
+                <ComposerFooter
+                  runId={session.runId}
+                  placeholder={composerPlaceholder(session.runStatus)}
+                  onSend={onComposerSend}
+                />
               )
             )}
           </div>
@@ -617,9 +654,10 @@ function PendingTurnFooter({
 // two-field form to one line for power users.
 const QUICK_ACTION_LABELS: Record<ContinueAction, string> = {
   add_ticket: "Add a ticket",
-  modify_ticket: "Modify a ticket",
+  modify_ticket: "Modify / free instruction",
   dispatch_more: "Dispatch more",
-  done: "End the session",
+  standby: "Standby (stay reachable)",
+  close: "Close the session",
 };
 
 function QuickModeFooter({
@@ -646,11 +684,13 @@ function QuickModeFooter({
   const ready = raw.trim() !== "";
   const lowConfidence = classified.confidence < 0.5;
 
+  const noDetail = action === "standby" || action === "close";
   const submit = () => {
     if (!ready || busy) return;
     // ask_continue's schema is {action, detail}; the bot's
-    // derive_continue keys on action verbatim. "done" needs no detail.
-    onSubmit({ action, detail: action === "done" ? "" : detail });
+    // derive_continue keys on action verbatim. Session-control intents
+    // (standby/close) need no detail.
+    onSubmit({ action, detail: noDetail ? "" : detail });
   };
 
   return (
@@ -666,7 +706,7 @@ function QuickModeFooter({
         <Textarea
           rows={2}
           value={raw}
-          placeholder="What's next? e.g. “dispatch the feature_dev tickets”, “add a ticket for the flaky sandbox boot”, “done”."
+          placeholder="What's next? e.g. “dispatch the feature_dev tickets”, “add a ticket for the flaky sandbox boot”, “standby”."
           onChange={(e) => {
             setRaw(e.target.value);
             // Re-follow the classifier whenever the text changes; the
@@ -712,7 +752,7 @@ function QuickModeFooter({
                 )}
               </Select>
             </div>
-            {action !== "done" && (
+            {!noDetail && (
               <input
                 type="text"
                 value={detail}
@@ -785,6 +825,46 @@ function ResumeFooter({
   );
 }
 
+// composerPlaceholder picks the prompt copy for the always-on
+// composer based on the run state it's rendered over.
+function composerPlaceholder(runStatus: string | null): string {
+  if (runStatus === "finished") {
+    return "Nexie is on standby — send a message to pick back up where you left off…";
+  }
+  if (runStatus === "failed" || runStatus === "cancelled") {
+    return "Send a message to start a fresh Nexie session…";
+  }
+  return "Message Nexie — it'll fold this into the step it's running…";
+}
+
+// ComposerFooter is the always-on free-text composer at the bottom of
+// the chat. It wraps AgentChatboxInline in the same fixed-footer
+// chrome as the other footers and routes submits through onSend
+// (queue-into-live-run or re-seed). embedded: queued messages are
+// folded into the transcript above, so suppress the duplicate list.
+function ComposerFooter({
+  runId,
+  placeholder,
+  onSend,
+}: {
+  runId: string;
+  placeholder: string;
+  onSend: (text: string, opts: { skills: string[] }) => Promise<void> | void;
+}) {
+  return (
+    <div className="border-t border-border-default bg-surface-1">
+      <div className="mx-auto max-w-3xl px-4 py-3">
+        <AgentChatboxInline
+          runId={runId}
+          embedded
+          onSend={onSend}
+          placeholder={placeholder}
+        />
+      </div>
+    </div>
+  );
+}
+
 function SessionHeader({
   bot,
   session,
@@ -801,6 +881,7 @@ function SessionHeader({
   const isLive =
     session.runId !== null &&
     session.status !== "ended" &&
+    session.status !== "standby" &&
     session.status !== "idle";
 
   const onNewSession = useCallback(async () => {
@@ -904,6 +985,7 @@ export function humanStatus(
 ): string {
   if (hi === "launching") return "Launching…";
   if (hi === "submitting") return "Submitting…";
+  if (hi === "standby") return "On standby";
   if (hi === "ended") {
     const label = raw ? labelForStatus(raw) : "unknown";
     return `Ended · ${label}`;

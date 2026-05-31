@@ -16,7 +16,8 @@ export type ContinueAction =
   | "add_ticket"
   | "modify_ticket"
   | "dispatch_more"
-  | "done";
+  | "standby"
+  | "close";
 
 export interface ClassifiedIntent {
   action: ContinueAction;
@@ -39,17 +40,26 @@ interface Rule {
   rationale: string;
 }
 
-// Ordered by specificity — the first matching rule wins. "done" is
-// checked first (shortest, most unambiguous), then the verbs that
-// imply a board mutation, then dispatch.
+// Ordered by specificity — the first matching rule wins. The two
+// session-control intents are checked first: "close" (explicit
+// archive — most specific) then "standby" ("I'm done for now", keeps
+// the session reachable). Then the board-mutation verbs, then dispatch.
 const RULES: Rule[] = [
   {
-    action: "done",
+    action: "close",
     patterns: [
-      /^\s*(done|stop|finish|finished|that'?s all|c'?est (tout|bon|fini)|fini|termin[ée]|exit|quit|end)\b/i,
-      /\b(i'?m done|nothing else|rien d'?autre)\b/i,
+      /\b(close|end|archive)\s+(the\s+|this\s+)?(session|chat|conversation|nexie)\b/i,
+      /\b(shut\s?down|terminate|kill\s+nexie|arr[êe]te\s+nexie|ferme\s+(la\s+)?session)\b/i,
     ],
-    rationale: "phrasing signals ending the session",
+    rationale: "phrasing signals explicitly closing/archiving the session",
+  },
+  {
+    action: "standby",
+    patterns: [
+      /^\s*(done|stop|finish|finished|that'?s all|c'?est (tout|bon|fini)|fini|termin[ée]|exit|quit|end|later|pause|standby|brb)\b/i,
+      /\b(i'?m done|done for now|nothing else|rien d'?autre|plus tard)\b/i,
+    ],
+    rationale: "phrasing signals pausing for now — the session stays open",
   },
   {
     action: "dispatch_more",
@@ -97,8 +107,8 @@ export function classifyContinueIntent(text: string): ClassifiedIntent {
         detail = m[1].trim();
       }
     }
-    // "done" carries no meaningful detail.
-    if (rule.action === "done") detail = "";
+    // Session-control intents carry no meaningful detail.
+    if (rule.action === "standby" || rule.action === "close") detail = "";
     return {
       action: rule.action,
       detail,
