@@ -503,6 +503,39 @@ explaining why it's universal-safe. When you touch a catalog bot,
 re-read this section — the iterion repo is the easiest target to
 accidentally overfit to, because it's the one you're staring at.
 
+## Security
+
+Iterion self-audits with its own catalog bots, `sec-audit-source`
+(SAST) and `sec-audit-deps` (SCA), pointed at this repo. Findings land
+on the native board with the label **`source:sec-audit-self`**;
+critical/high are triaged into roadmap items, medium/low stay in the
+inbox.
+
+**Scanner toolchain.** The scanner binaries (semgrep, gosec,
+govulncheck, bandit, pip-audit, trivy, gitleaks) ship in the
+**`iterion-sandbox-sec`** image (`sandbox/sec/Dockerfile`, layered on
+`-full`), which both bots pin via `sandbox.image`. A bare host and the
+slim/full images have none of these tools, so running the bots without
+the sec image silently produces a zero-finding façade. Until CI
+publishes the image, build it locally and `docker tag` it to
+`ghcr.io/socialgouv/iterion-sandbox-sec:edge`.
+
+**Recurring audit — pending.** The intended weekly schedule
+(sec-audit-source Mon 02:00 UTC, sec-audit-deps 03:00 UTC) is **not yet
+wired**: it needs (1) an `iterion schedule` mechanism, (2) the sec image
+published in CI, and (3) a fix for `sec-audit-source`'s `detect_tech`
+node, which overflows the model context on a repo this size. All three
+are tracked on the board. Until then, run a one-time audit by hand: a
+direct scanner pass in the sec image is reliable —
+`docker run --rm -v "$PWD":/src:ro -w /src
+ghcr.io/socialgouv/iterion-sandbox-sec:edge gosec -severity=high
+-confidence=high -exclude-dir=vendor -exclude-dir=.iterion ./...`.
+
+The last self-audit (2026-05-31) surfaced 6 high-severity gosec taint
+findings (SSRF in `pkg/server/runs_preview.go`, path-traversal in
+`pkg/server/runs_files.go` + a few internal paths); triage lives on the
+board under `source:sec-audit-self`.
+
 ## CLI Commands
 
 ```
