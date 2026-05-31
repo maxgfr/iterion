@@ -550,8 +550,11 @@ govulncheck, bandit, pip-audit, trivy, gitleaks) ship in the
 **`iterion-sandbox-sec`** image (`sandbox/sec/Dockerfile`, layered on
 `-full`), which both bots pin via `sandbox.image`. A bare host and the
 slim/full images have none of these tools, so running the bots without
-the sec image silently produces a zero-finding façade. Until CI
-publishes the image, build it locally and `docker tag` it to
+the sec image silently produces a zero-finding façade. CI publishes it
+via [.github/workflows/image.yml](.github/workflows/image.yml) (the
+`build-sandbox-sec` job, chained on `-full`) on every push to `main`
+(tag `:edge`) and on release tags. Until that first CI run lands — or for
+a local-only loop — build it yourself and `docker tag` it to
 `ghcr.io/socialgouv/iterion-sandbox-sec:edge`.
 
 **Recurring audit — pending.** The intended weekly schedule
