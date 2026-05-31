@@ -667,10 +667,12 @@ const LogLineRow = memo(function LogLineRow({
     : "text-fg-default";
   // No-wrap mode: keep `whitespace-pre` + `min-w-max` so the row
   // contributes to the Scroller's horizontal extent (single global
-  // scrollbar). Wrap mode: pre-wrap with word-break so long tokens
-  // (paths, tool inputs) don't bust the viewport.
+  // scrollbar). Wrap mode: pre-wrap with `break-words` (overflow-wrap)
+  // so lines wrap at word boundaries and only genuinely unbreakable
+  // long tokens (paths) split — `break-all` was breaking mid-token and
+  // dangling tiny fragments ("…main.bot" → "n.bot") on the next row.
   const widthCls = wrap
-    ? "whitespace-pre-wrap break-all"
+    ? "whitespace-pre-wrap break-words"
     : "whitespace-pre min-w-max";
   return (
     <div className={`font-mono text-[10px] py-0.5 ${widthCls} ${cls}`}>
@@ -693,7 +695,7 @@ const LogBlockRow = memo(function LogBlockRow({
     ? LEVEL_GLYPHS.find((g) => g.key === header.level)?.cls ?? "text-fg-default"
     : "text-fg-default";
   const bodyWidthCls = wrap
-    ? "whitespace-pre-wrap break-all"
+    ? "whitespace-pre-wrap break-words"
     : "whitespace-pre min-w-max";
   // Collapsed preview: the first non-empty body line, stripped of the
   // block-indent gutter ("         │ "). Shown inline after the header so
