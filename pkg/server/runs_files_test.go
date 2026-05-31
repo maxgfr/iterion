@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,6 +63,37 @@ func initRepo(t *testing.T) string {
 		}
 	}
 	return dir
+}
+
+// TestRunFileDiff_RejectsTraversal confirms the path-traversal guard on the
+// file-diff surface: the request-borne ?path= is validated by
+// gitlib.ValidateRelPath before any git/FS access, so escape attempts are
+// refused with 400 (this is the real external surface behind the
+// runs_files.go:dirExists #nosec justification).
+func TestRunFileDiff_RejectsTraversal(t *testing.T) {
+	srv, hs := newTestServer(t)
+	dir := initRepo(t)
+	seedRunWithWorkDir(t, srv, "trav", dir, true)
+
+	for _, bad := range []string{
+		"../../etc/passwd",
+		"/etc/passwd",
+		"..",
+		"-rf",
+		"", // empty path
+	} {
+		t.Run(bad, func(t *testing.T) {
+			u := hs.URL + "/api/runs/trav/files/diff?path=" + url.QueryEscape(bad)
+			resp, err := http.Get(u)
+			if err != nil {
+				t.Fatalf("GET %s: %v", u, err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("path %q: status = %d, want 400", bad, resp.StatusCode)
+			}
+		})
+	}
 }
 
 func TestRunFiles_NoWorkDir(t *testing.T) {

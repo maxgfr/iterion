@@ -136,6 +136,11 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 		Transport: transport,
 	}
 
+	// #nosec G107 G704 — SSRF-safe: host was validated by resolvePreviewHost and the
+	// transport below dials only the pinned resolved IP (DNS-rebinding-proof),
+	// redirects are not auto-followed, and strict public-unicast validation is
+	// enforced in cloud / non-loopback-bind modes. parsed.String() is reused
+	// solely to preserve the original Host header / SNI for virtual hosts.
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, parsed.String(), nil)
 	if err != nil {
 		s.httpErrorFor(w, r, http.StatusInternalServerError, "build upstream request: %v", err)
@@ -152,6 +157,9 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	upstreamReq.Header.Set("User-Agent", "iterion-preview-proxy/1")
 
+	// #nosec G107 G704 — SSRF-safe: see the resolvePreviewHost guard above. The
+	// client's transport is pinned to the validated IP and CheckRedirect
+	// refuses to auto-follow, so no hop can re-target a private address.
 	resp, err := client.Do(upstreamReq)
 	if err != nil {
 		s.httpErrorFor(w, r, http.StatusBadGateway, "upstream fetch failed: %v", err)

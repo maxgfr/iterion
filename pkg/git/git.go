@@ -103,6 +103,8 @@ func run(dir string, args ...string) ([]byte, error) {
 // is a directory) and linked worktrees (.git is a file pointing to the
 // real gitdir under the parent repo's worktrees/).
 func isGitDir(dir string) bool {
+	// #nosec G304 G703 — dir is an internally-derived working/repo root (run-state,
+	// resolved checkout paths), never raw external request input.
 	info, err := os.Stat(filepath.Join(dir, ".git"))
 	return err == nil && (info.IsDir() || info.Mode().IsRegular())
 }

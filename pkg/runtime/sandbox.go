@@ -816,6 +816,8 @@ func locateHostIterionBinary() string {
 		}
 	}
 	if env := strings.TrimSpace(os.Getenv("ITERION_BIN")); env != "" {
+		// #nosec G304 G703 — env is the operator-set ITERION_BIN override, host
+		// configuration not external request input.
 		if info, statErr := os.Stat(env); statErr == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0 {
 			return env
 		}

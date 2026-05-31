@@ -70,6 +70,9 @@ func isVolatileBuildPath(p string) bool {
 }
 
 func isExecutableFile(p string) bool {
+	// #nosec G304 G703 — p originates from os.Executable(), the operator-set
+	// ITERION_BIN override, or fixed install-path constants (see
+	// LocateIterionBinary), never raw external request input.
 	info, err := os.Stat(p)
 	if err != nil || info.IsDir() {
 		return false

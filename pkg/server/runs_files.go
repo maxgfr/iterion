@@ -441,6 +441,9 @@ func (s *Server) historicalRefs(run *store.Run) (base, final, repo string, ok bo
 }
 
 func dirExists(p string) bool {
+	// #nosec G304 G703 — p is run.WorkDir read from persisted run-state, never raw
+	// request input. The only request-borne path on this surface (?path=) is
+	// validated by gitlib.ValidateRelPath before any git/FS access.
 	info, err := os.Stat(p)
 	return err == nil && info.IsDir()
 }
