@@ -421,10 +421,14 @@ prompt review_user_gpt:
   ## context window.
   ##
   ## Anchor protocol — do EXACTLY this at iteration start, then
-  ## commit to a verdict:
-  ##   1. `bash: git -C {{vars.workspace_dir}} diff HEAD^...HEAD --shortstat`
+  ## commit to a verdict. The feature is in the WORKING TREE,
+  ## UNCOMMITTED (the commit step runs only AFTER review passes), so
+  ## diff against HEAD — NOT `HEAD^...HEAD` (that shows the last commit,
+  ## i.e. the base, and makes you wrongly conclude "the feature isn't
+  ## implemented", which loops the review forever instead of converging):
+  ##   1. `bash: git -C {{vars.workspace_dir}} diff HEAD --shortstat`
   ##      (1 call → total lines changed)
-  ##   2. `bash: git -C {{vars.workspace_dir}} diff HEAD^...HEAD --name-only`
+  ##   2. `bash: git -C {{vars.workspace_dir}} diff HEAD --name-only`
   ##      (1 call → file list)
   ##   3. Pick 2-3 files of interest from step 2. `read_file` each
   ##      ONCE (3 calls max).
