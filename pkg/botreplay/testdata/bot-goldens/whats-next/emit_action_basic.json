@@ -29,6 +29,7 @@
       }
     ],
     "failed_issues": [],
+    "archived_findings": [],
     "summary": "Created 2 backlog issues from the approved roadmap; 1 assigned to feature_dev, 1 left for triage."
   }
 }

@@ -84,6 +84,64 @@ Beyond CONTEXT_BRIEF.md, create dated/topic-tagged files when:
 The auto-index will surface all of these on the next iteration —
 no manual bookkeeping needed.
 
+## The findings/ scope (cross-bot inbox)
+
+`findings/` is a **distinct memory scope** — a sibling of this
+bot's own scope under `…/memory/`, not a subfolder of it. It is a
+shared inbox where dispatcher-spawned bots drop one Markdown file
+per observation they want a later session (or the operator) to act
+on. Filenames are date-prefixed, `YYYY-MM-DD-<slug>.md`, and the
+frontmatter writers use is:
+
+```
+---
+title: "<one-line summary>"
+description: "<one sentence>"
+id: "<optional stable finding ID>"
+kind: "bug" | "drift" | "idea" | …
+source_bot: "<the bot that filed it>"
+strong_keywords: ["<optional distinctive token/error-code/function>"]
+tags: ["area:<x>", "severity:<low|med|high>"]
+---
+```
+
+Lifecycle of a finding:
+
+- **open** — the file exists; a future session should triage it.
+- **ingested** — a whats-next roadmap item materialised it as a
+  board issue (the file itself may still linger).
+- **archived-by-bot** — *terminal; set by whats-next's `emit_action`
+  auto-hygiene pass.* After emitting the roadmap, that node scans
+  `findings/` and, for each file, greps **read-only** `git log`
+  since the finding's date. On a **confident** match — a commit
+  naming the finding's filename/slug, an exact stable finding `id`
+  (or alias such as `finding_id`, `issue_id`, `key`, `uid`), an
+  explicit distinctive `strong_keyword`, or a resolution verb plus
+  the finding's exact title/phrase — it writes a one-line entry to
+  the run's plan markdown and only then deletes the file:
+  `- archived-by-bot: <filename> — <sha> "<subject>"`.
+  The audit section `## Findings archived (auto-hygiene)` is created
+  on the first archived (or dry-run) match and omitted when there are
+  no matches. Because the file is removed, `archived-by-bot` lives in
+  that audit log (and `emit_output.archived_findings`), NOT in any
+  surviving frontmatter. Matching is deliberately conservative:
+  ambiguous or keyword-only matches are LEFT IN PLACE —
+  under-archiving is the safe failure mode, and git history is the
+  recovery net. Operators can disable or dry-run the pass via
+  `ITERION_WHATS_NEXT_FINDINGS_HYGIENE=off|dry`; dry-run uses the
+  same audit heading with `(dry)` bullets but does not delete files or
+  populate `archived_findings`. If the audit line cannot be written
+  and verified first, the finding is left in place.
+
+If you only ever **write** findings from another bot, the required
+contract stays small: keep using `title`, `description`, `kind`,
+`source_bot`, and `tags`. Add `id` when you have a stable finding ID,
+and add `strong_keywords` only for distinctive tokens a future commit
+is likely to mention exactly (bug IDs, namespaced error codes, unique
+API/function names). You do **not** need a `status:` field — the
+hygiene pass infers resolution from git, and an unresolved finding
+simply survives to the next session.
+
 ## Path discipline
 
 - Paths are scope-relative. Never absolute, never `../...`.
