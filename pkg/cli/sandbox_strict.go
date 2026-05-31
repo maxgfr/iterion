@@ -131,8 +131,21 @@ func buildStrictReport(ctx context.Context, wf *ir.Workflow, opts SandboxDoctorO
 	}
 	report.Driver = driverName
 	if driverErr != nil {
-		report.add("driver available", CheckFail, driverErr.Error(),
-			"install Docker or Podman, or pass --sandbox-driver=noop to bypass (the run will NOT be isolated)")
+		// A runtime-less host (or one whose selected driver cannot serve
+		// the forced target battery) fails driver selection. When the
+		// operator explicitly asked to validate a spec for a different
+		// host class via --target (e.g. `--target cloud` from a laptop),
+		// local driver availability is not the thing being validated —
+		// downgrade to a warning so a valid cross-host spec still exits 0.
+		// See docs/adr/006-sandbox-strict-doctor.md.
+		if crossHostDoctorValidation(opts.Target, driverName) {
+			report.add("driver available", CheckWarn, driverErr.Error(),
+				"no local container runtime; --target "+strings.ToLower(strings.TrimSpace(opts.Target))+
+					" validates the spec for another host, so a local driver is not required here")
+		} else {
+			report.add("driver available", CheckFail, driverErr.Error(),
+				"install Docker or Podman, or pass --sandbox-driver=noop to bypass (the run will NOT be isolated)")
+		}
 	} else {
 		report.add("driver available", CheckPass, "selected driver: "+driverName, "")
 	}
@@ -214,6 +227,33 @@ func resolveDoctorTarget(optTarget, driverName string) string {
 		return "kubernetes"
 	}
 	return ""
+}
+
+// isExplicitDoctorTarget reports whether --target names a concrete host
+// class rather than "" / "auto" — i.e. the operator is deliberately
+// validating a spec for a possibly-different host than this one. An
+// explicit target is exactly one that resolveDoctorTarget maps to a
+// concrete battery regardless of the selected driver, so we defer to it
+// rather than re-listing the target name set.
+func isExplicitDoctorTarget(optTarget string) bool {
+	return resolveDoctorTarget(optTarget, "") != ""
+}
+
+// crossHostDoctorValidation reports whether the strict "driver available"
+// failure should be downgraded to a warning: an explicit --target points
+// at a host class this host's selected driver does not naturally serve
+// (or this host has no driver at all), so local runtime availability is
+// not what is being validated. Without an explicit --target, a
+// runtime-less host is a genuine local misconfiguration and still fails.
+func crossHostDoctorValidation(optTarget, driverName string) bool {
+	if !isExplicitDoctorTarget(optTarget) {
+		return false
+	}
+	if driverName == "" || driverName == "<none>" {
+		// Runtime-less host: any explicit target is cross-host by definition.
+		return true
+	}
+	return resolveDoctorTarget(optTarget, driverName) != resolveDoctorTarget("", driverName)
 }
 
 func runDockerStrictChecks(ctx context.Context, report *SandboxStrictReport, spec *sandbox.Spec) {

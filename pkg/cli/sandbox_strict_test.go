@@ -30,6 +30,61 @@ func TestResolveDoctorTarget(t *testing.T) {
 	}
 }
 
+func TestCrossHostDoctorValidation(t *testing.T) {
+	t.Run("isExplicitDoctorTarget", func(t *testing.T) {
+		cases := []struct {
+			target string
+			want   bool
+		}{
+			{"cloud", true},
+			{"kubernetes", true},
+			{"k8s", true},
+			{"local", true},
+			{"docker", true},
+			{"podman", true},
+			{" Cloud ", true}, // case + whitespace insensitive
+			{"", false},
+			{"auto", false},
+			{"bogus", false},
+		}
+		for _, tc := range cases {
+			if got := isExplicitDoctorTarget(tc.target); got != tc.want {
+				t.Errorf("isExplicitDoctorTarget(%q) = %v, want %v", tc.target, got, tc.want)
+			}
+		}
+	})
+
+	t.Run("crossHostDoctorValidation", func(t *testing.T) {
+		cases := []struct {
+			target, driver string
+			want           bool
+		}{
+			// Runtime-less host + explicit target → cross-host (downgrade).
+			{"cloud", "<none>", true},
+			{"local", "<none>", true},
+			{"cloud", "", true},
+			// Runtime-less host, no/auto target → genuine local failure.
+			{"", "<none>", false},
+			{"auto", "<none>", false},
+			// Driver selected, forced battery differs from natural one.
+			{"cloud", "docker", true},     // kubernetes != docker
+			{"local", "kubernetes", true}, // docker != kubernetes
+			// Driver selected, forced battery matches natural one.
+			{"cloud", "kubernetes", false}, // kubernetes == kubernetes
+			{"local", "docker", false},     // docker == docker
+			{"docker", "podman", false},    // both → docker battery
+			// No explicit target never downgrades.
+			{"", "docker", false},
+			{"auto", "kubernetes", false},
+		}
+		for _, tc := range cases {
+			if got := crossHostDoctorValidation(tc.target, tc.driver); got != tc.want {
+				t.Errorf("crossHostDoctorValidation(%q, %q) = %v, want %v", tc.target, tc.driver, got, tc.want)
+			}
+		}
+	})
+}
+
 func TestRunNetworkStrictChecks(t *testing.T) {
 	t.Run("good preset + rules", func(t *testing.T) {
 		r := &SandboxStrictReport{}

@@ -442,7 +442,7 @@ Checks (each `pass` / `warn` / `fail`):
 
 | Check | What it verifies | Failure means |
 | ----- | ---------------- | ------------- |
-| **driver available** | a real driver (not `noop`) is selectable for the active spec | install Docker/Podman, or `--sandbox-driver=noop` to bypass |
+| **driver available** | a real driver (not `noop`) is selectable for the active spec | install Docker/Podman, or `--sandbox-driver=noop` to bypass — **downgraded to `warn`** under an explicit cross-host `--target` (see below), so a valid cloud/local spec validates from a foreign host |
 | **spec valid** | `Spec.Validate` (image XOR build, inline needs image, absolute `workspace_folder`, valid network mode/inherit, valid `host_state`) | fix the `sandbox:` block |
 | **docker daemon** | the daemon answers `version --format {{.Server.Version}}` | start Docker Desktop / `systemctl start docker` |
 | **spec safety** | no `source=` bind of `docker.sock`, `/proc`, `/sys`, or host credentials; no flag injection on image/user/workdir; no env-var name/value injection | remove/fix the offending bind, arg, or env var |
@@ -455,7 +455,13 @@ Checks (each `pass` / `warn` / `fail`):
 The `--target` flag selects the battery: `auto` (default — follow the
 selected driver), `cloud` (force the kubernetes / host-independent
 battery so a cloud workflow can be validated from a laptop), or `local`
-(force docker).
+(force docker). When an explicit `--target` names a host class this host
+cannot serve (e.g. `--target cloud` on a Docker-only laptop, or any
+target on a host with no container runtime), the **driver available**
+check is reported as `warn` instead of `fail` — local runtime
+availability is irrelevant to a cross-host spec check, so a valid spec
+still exits 0. A plain `--strict` with no/`auto` target on a
+runtime-less host still fails (a genuine local misconfiguration).
 
 **Exit codes:** a failed check exits **1** (host/spec misconfigured); a
 bad file or flag exits **2** (usage error). Warnings never change the

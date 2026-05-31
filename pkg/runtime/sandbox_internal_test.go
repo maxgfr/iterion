@@ -163,6 +163,75 @@ func TestResolveSandboxSpecAutoFallbackToDefaultImage(t *testing.T) {
 	})
 }
 
+func TestResolveSandboxSpecForDoctorHostStateBaking(t *testing.T) {
+	// Inline mode with an explicit image resolves without a devcontainer,
+	// so the spec is active and host_state baking applies. repoRoot is
+	// irrelevant for inline specs (no devcontainer lookup).
+	repoRoot := t.TempDir()
+	inline := func(hostState string) *ir.Workflow {
+		return &ir.Workflow{Sandbox: &ir.SandboxSpec{
+			Mode:      string(sandbox.ModeInline),
+			Image:     "alpine:3.20",
+			HostState: hostState,
+		}}
+	}
+
+	cases := []struct {
+		name             string
+		wf               *ir.Workflow
+		hostStateCLI     string
+		hostStateDefault string
+		want             sandbox.HostState
+	}{
+		{"default is auto when nothing set", inline(""), "", "", sandbox.HostStateAuto},
+		{"workflow host_state wins", inline("none"), "", "", sandbox.HostStateNone},
+		{"cli override beats workflow", inline("auto"), "none", "", sandbox.HostStateNone},
+		{"env default applied when wf+cli empty", inline(""), "", "none", sandbox.HostStateNone},
+		{"cli beats env default", inline(""), "auto", "none", sandbox.HostStateAuto},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			spec, source, err := ResolveSandboxSpecForDoctor(
+				c.wf, repoRoot, "", "", "", c.hostStateCLI, c.hostStateDefault,
+			)
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+			if spec == nil {
+				t.Fatal("expected an active spec, got nil")
+			}
+			if spec.Mode != sandbox.ModeInline {
+				t.Errorf("Mode = %q, want inline", spec.Mode)
+			}
+			if spec.HostState != c.want {
+				t.Errorf("HostState = %q, want %q", spec.HostState, c.want)
+			}
+			if source == "" {
+				t.Error("expected a non-empty source label for an active spec")
+			}
+		})
+	}
+
+	t.Run("inactive spec is returned without host_state baking", func(t *testing.T) {
+		// Mode none → inactive → early return before host_state resolution.
+		noneWf := &ir.Workflow{Sandbox: &ir.SandboxSpec{Mode: string(sandbox.ModeNone)}}
+		spec, _, err := ResolveSandboxSpecForDoctor(noneWf, repoRoot, "", "", "", "auto", "")
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		// An inactive spec must not have had the default-auto host_state
+		// baked onto it (the doctor reports mode=none and validates nothing).
+		if spec != nil {
+			if spec.Mode.IsActive() {
+				t.Fatalf("expected inactive spec, got active mode %q", spec.Mode)
+			}
+			if spec.HostState == sandbox.HostStateAuto {
+				t.Errorf("inactive spec must not have host_state baked to auto, got %q", spec.HostState)
+			}
+		}
+	})
+}
+
 func TestResolveDefaultSandboxImage(t *testing.T) {
 	t.Setenv(EnvSandboxDefaultImage, "")
 

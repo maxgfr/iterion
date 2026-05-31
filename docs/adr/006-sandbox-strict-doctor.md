@@ -101,7 +101,9 @@ will succeed — registry credentials applied daemon-side at pull time are
 invisible to a `manifest inspect`, hence the transient-warn bucket; and
 (b) the off-cluster k8s context probe is advisory, so a laptop run of
 `--target cloud` validates *spec* compatibility but not *cluster*
-reachability (which only the in-cluster runner can verify).
+reachability (which only the in-cluster runner can verify); and (c) the
+"driver available" check is likewise advisory (warn, not fail) under an
+explicit cross-host `--target` — see the 2026-05-31 update below.
 
 ## Alternatives considered
 
@@ -156,3 +158,37 @@ its latency (CI, first run of a dispatcher session).
   before engine boot; `ITERION_SANDBOX_DOCTOR_TIMEOUT` caps each probe
   (default 5s). The dispatcher pre-flight (one `sync.Once` per daemon
   session) is a noted follow-up reusing `PreflightSandbox`.
+
+## Update — 2026-05-31: cross-host `--target` no longer fails on local driver availability
+
+A review follow-up found that `iterion sandbox doctor --strict --target
+cloud` (and `--target local`) hard-failed the **"driver available"**
+check — exit 1 — on a host whose local runtime cannot serve the forced
+battery (most acutely a *runtime-less* host: no Docker/Podman, where
+`Factory.DriverForSpec` refuses to degrade to noop on an active spec).
+That conflated *local runtime availability* with *cross-host spec
+validation* and defeated this ADR's headline use case ("validate a cloud
+spec from a laptop"): the report content was correct, yet the exit code
+was 1 for a perfectly valid spec.
+
+**Decision.** When an explicit `--target` selects a host class the
+locally-selected driver does not naturally serve — or this host has no
+driver at all — the "driver available" check is downgraded from `fail`
+to `warn` (`crossHostDoctorValidation` in
+[pkg/cli/sandbox_strict.go](../../pkg/cli/sandbox_strict.go)). A valid
+cross-host spec now exits 0; the warning still records that the spec is
+not runnable *here*.
+
+**Trade-off.** The alternative — keep the hard fail — preserves a single
+crisp signal ("this host cannot run the sandbox") but makes the
+documented off-cluster validation path unusable, since exit 1 is
+indistinguishable (to a script) from a genuinely broken spec. We
+deliberately gate the downgrade on an **explicit** `--target`: a plain
+`--strict` (no target / `auto`) on a runtime-less host still fails, so
+the "I meant to run this locally and can't" signal is retained. The
+residual concession: the symmetric live-probe checks for the *forced*
+battery (`docker daemon` under `--target local`, `k8s context` under
+`--target cloud`) can still surface as fail/warn for a foreign host —
+`k8s context` already self-downgrades when the selected driver is not
+kubernetes; a `docker daemon` equivalent under cross-host `--target
+local` is a noted follow-up, out of scope for this change.
