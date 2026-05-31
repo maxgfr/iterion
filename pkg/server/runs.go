@@ -135,6 +135,20 @@ type launchRunRequest struct {
 	ShardIndex  int    `json:"shard_index,omitempty"`
 	ShardCount  int    `json:"shard_count,omitempty"`
 	ShardLabel  string `json:"shard_label,omitempty"`
+	// CallbackURL, when set, is an http/https endpoint iterion POSTs a
+	// run-completion webhook to when the run terminates (see pkg/notify
+	// + docs/completion-webhooks.md). Lets a programmatic caller (chat
+	// adapter, CI bridge) be told the run finished without polling. The
+	// delivery passes an SSRF guard.
+	CallbackURL string `json:"callback_url,omitempty"`
+	// CallbackToken is echoed back verbatim in the completion payload so
+	// the receiver can correlate the callback to its originating request
+	// (e.g. a chat thread id) without server-side state.
+	CallbackToken string `json:"callback_token,omitempty"`
+	// CallbackAnswerNode optionally names the node whose latest artifact
+	// holds the run's user-facing answer (the "final_answer" field).
+	// Empty → the notifier scans all artifact nodes for "final_answer".
+	CallbackAnswerNode string `json:"callback_answer_node,omitempty"`
 }
 
 type launchRunResponse struct {
@@ -255,22 +269,25 @@ func (s *Server) handleLaunchRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := s.runs.Launch(ctx, runview.LaunchSpec{
-		FilePath:          absPath,
-		Source:            req.Source,
-		RunID:             req.RunID,
-		Vars:              req.Vars,
-		Preset:            req.Preset,
-		Timeout:           timeout,
-		MergeInto:         req.MergeInto,
-		BranchName:        req.BranchName,
-		MergeStrategy:     store.MergeStrategy(req.MergeStrategy),
-		AutoMerge:         req.AutoMerge,
-		AttachmentPromote: promote,
-		Backend:           req.Backend,
-		ParentRunID:       req.ParentRunID,
-		ShardIndex:        req.ShardIndex,
-		ShardCount:        req.ShardCount,
-		ShardLabel:        req.ShardLabel,
+		FilePath:           absPath,
+		Source:             req.Source,
+		RunID:              req.RunID,
+		Vars:               req.Vars,
+		Preset:             req.Preset,
+		Timeout:            timeout,
+		MergeInto:          req.MergeInto,
+		BranchName:         req.BranchName,
+		MergeStrategy:      store.MergeStrategy(req.MergeStrategy),
+		AutoMerge:          req.AutoMerge,
+		AttachmentPromote:  promote,
+		Backend:            req.Backend,
+		ParentRunID:        req.ParentRunID,
+		ShardIndex:         req.ShardIndex,
+		ShardCount:         req.ShardCount,
+		ShardLabel:         req.ShardLabel,
+		CallbackURL:        req.CallbackURL,
+		CallbackToken:      req.CallbackToken,
+		CallbackAnswerNode: req.CallbackAnswerNode,
 	})
 	if err != nil {
 		if errors.Is(err, runtime.ErrServerDraining) {
