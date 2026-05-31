@@ -480,7 +480,14 @@ func NewService(storeDir string, opts ...ServiceOption) (*Service, error) {
 		// guard for self-hosted deployments whose callback receiver lives
 		// on a private network alongside iterion.
 		allowPrivate := os.Getenv("ITERION_COMPLETION_WEBHOOK_ALLOW_PRIVATE") == "1"
-		s.completionNotifier = notify.New(s.logger, 0, notify.WithAllowPrivate(allowPrivate))
+		// ITERION_COMPLETION_WEBHOOK_SECRET, when set, HMAC-signs every
+		// outbound payload (X-Iterion-Signature) so receivers can
+		// authenticate the delivery. Empty = unsigned (receiver must not
+		// require a signature).
+		secret := os.Getenv("ITERION_COMPLETION_WEBHOOK_SECRET")
+		s.completionNotifier = notify.New(s.logger, 0,
+			notify.WithAllowPrivate(allowPrivate),
+			notify.WithSigningSecret(secret))
 	}
 
 	s.reconcileOrphans()

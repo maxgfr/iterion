@@ -57,9 +57,10 @@ type CompletionPayload struct {
 // safe for concurrent use. A nil *Notifier is a valid no-op so callers
 // can hold one unconditionally.
 type Notifier struct {
-	client       *http.Client
-	logger       *iterlog.Logger
-	allowPrivate bool
+	client        *http.Client
+	logger        *iterlog.Logger
+	allowPrivate  bool
+	signingSecret string
 }
 
 // Option configures a Notifier.
@@ -72,6 +73,16 @@ type Option func(*Notifier)
 // iterion.
 func WithAllowPrivate(allow bool) Option {
 	return func(n *Notifier) { n.allowPrivate = allow }
+}
+
+// WithSigningSecret sets the shared secret used to HMAC-sign every
+// outbound completion payload (see Sign). When set, each delivery
+// carries an X-Iterion-Signature header the receiver verifies to
+// authenticate that iterion — not a forger who learned the callback
+// URL — sent it. Empty (the default) disables signing: no header is
+// added, and a receiver expecting one should reject the request.
+func WithSigningSecret(secret string) Option {
+	return func(n *Notifier) { n.signingSecret = secret }
 }
 
 // New builds a Notifier. timeout bounds each delivery attempt; zero
@@ -220,6 +231,13 @@ func (n *Notifier) deliver(ctx context.Context, rawURL string, payload Completio
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "iterion-completion-webhook/1")
+	// Authenticate the payload so the receiver can distinguish a genuine
+	// iterion delivery from a forged POST to a known callback URL. The
+	// MAC is computed over the exact bytes sent. No-op when no signing
+	// secret is configured.
+	if sig := Sign(n.signingSecret, body); sig != "" {
+		req.Header.Set(SignatureHeader, sig)
+	}
 
 	resp, err := n.client.Do(req)
 	if err != nil {

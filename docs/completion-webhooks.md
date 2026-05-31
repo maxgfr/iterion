@@ -72,6 +72,38 @@ Delivery is **best-effort**: a webhook failure is logged and never
 affects the run outcome. The `callback_url` is never logged (it may embed
 a secret in its query string).
 
+## Authenticating the payload (HMAC signature)
+
+The `callback_token` is for **correlation, not authentication** — iterion
+echoes it back but never verifies it, so on its own it does not stop a
+forged POST to a known callback URL. To let the receiver prove a delivery
+genuinely came from iterion, set a shared secret on the iterion server:
+
+```bash
+ITERION_COMPLETION_WEBHOOK_SECRET=<random-secret>
+```
+
+When set, iterion HMAC-SHA256-signs **the exact response body** and sends
+the result in a header:
+
+```
+X-Iterion-Signature: sha256=<hex>
+```
+
+The receiver recomputes `HMAC_SHA256(secret, raw_body)` over the bytes it
+received (before JSON parsing) and compares — constant-time — against the
+header. A mismatch means a forged or tampered request; reject it. The
+helper that produces and checks this is
+[`notify.Sign` / `notify.Verify`](../pkg/notify/sign.go) (the same
+primitive a future native inbound webhook would use to authenticate
+trigger requests).
+
+When the secret is empty (default) iterion sends **no** signature header.
+A receiver should then either run only on a trusted private network or
+refuse to start — `notify.Verify` returns false for every input when its
+secret is empty, so "no secret configured" fails closed rather than
+silently accepting everything.
+
 ## Security: SSRF guard
 
 `callback_url` arrives over the launch API, so it is treated as

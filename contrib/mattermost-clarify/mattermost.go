@@ -22,32 +22,35 @@ import (
 // validated against a live Mattermost instance (see README) — it is the
 // one part of the adapter that cannot be unit-tested without a server.
 type MattermostDriver struct {
-	httpBase   string // e.g. https://mm.example.com
-	wsURL      string // e.g. wss://mm.example.com/api/v4/websocket
-	token      string // bot access token
-	botUserID  string // bot's user id (to flag FromBot)
-	actionURL  string // adapter's /mm/actions endpoint (consent button target)
-	httpClient *http.Client
+	httpBase    string // e.g. https://mm.example.com
+	wsURL       string // e.g. wss://mm.example.com/api/v4/websocket
+	token       string // bot access token
+	botUserID   string // bot's user id (to flag FromBot)
+	actionURL   string // adapter's /mm/actions endpoint (consent button target)
+	actionToken string // shared secret embedded in button contexts (auth)
+	httpClient  *http.Client
 }
 
 // MattermostConfig configures a MattermostDriver.
 type MattermostConfig struct {
-	HTTPBase  string
-	WSURL     string
-	Token     string
-	BotUserID string
-	ActionURL string
+	HTTPBase    string
+	WSURL       string
+	Token       string
+	BotUserID   string
+	ActionURL   string
+	ActionToken string
 }
 
 // NewMattermostDriver builds a driver.
 func NewMattermostDriver(cfg MattermostConfig) *MattermostDriver {
 	return &MattermostDriver{
-		httpBase:   strings.TrimRight(cfg.HTTPBase, "/"),
-		wsURL:      cfg.WSURL,
-		token:      cfg.Token,
-		botUserID:  cfg.BotUserID,
-		actionURL:  cfg.ActionURL,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		httpBase:    strings.TrimRight(cfg.HTTPBase, "/"),
+		wsURL:       cfg.WSURL,
+		token:       cfg.Token,
+		botUserID:   cfg.BotUserID,
+		actionURL:   cfg.ActionURL,
+		actionToken: cfg.ActionToken,
+		httpClient:  &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
