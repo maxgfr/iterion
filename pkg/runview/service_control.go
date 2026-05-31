@@ -287,6 +287,23 @@ func (s *Service) PerformMergeCtx(ctx context.Context, runID string, req MergeRe
 		return nil, fmt.Errorf("run %q has no resolvable repo root", runID)
 	}
 
+	// Out-of-band merge: if the run's HEAD is already an ancestor of the
+	// resolved target (someone merged the storage branch via git CLI / CI
+	// outside the studio), there's nothing to squash — a redundant squash
+	// would just build a confusing empty commit. Reconcile to "merged" and
+	// return a no-op success instead.
+	if ok, rcErr := s.reconcileOutOfBandMerge(ctx, r, resolveMergeTargetForPersistence(req.MergeInto, repoRoot)); rcErr != nil {
+		return nil, rcErr
+	} else if ok {
+		return &MergeResponse{
+			MergedCommit:  r.MergedCommit,
+			MergedInto:    r.MergedInto,
+			MergeStrategy: r.MergeStrategy,
+			MergeStatus:   r.MergeStatus,
+			SourceIssueID: sourceIssueID(r),
+		}, nil
+	}
+
 	strategy := req.Strategy
 	if strategy == "" {
 		strategy = store.MergeStrategySquash
@@ -351,6 +368,43 @@ func (s *Service) PerformMergeCtx(ctx context.Context, runID string, req MergeRe
 		MergeStatus:   r.MergeStatus,
 		SourceIssueID: sourceIssueID(r),
 	}, nil
+}
+
+// reconcileOutOfBandMerge marks r as merged when its FinalCommit is
+// already an ancestor of `target` — i.e. the run's storage branch was
+// merged into the target outside the studio (git CLI, CI, cherry-pick).
+// It mutates r in place and persists the corrected record so the
+// run-view stops offering a redundant "Squash and merge". A "" target
+// resolves against the repo's current branch. Returns (true, nil) when
+// it reconciled, (false, nil) when there's nothing to do, and
+// (false, err) when the persist failed — the caller decides whether
+// that is fatal (PerformMerge) or best-effort (snapshot read).
+func (s *Service) reconcileOutOfBandMerge(ctx context.Context, r *store.Run, target string) (bool, error) {
+	if r == nil || r.FinalCommit == "" {
+		return false, nil
+	}
+	repoRoot := mergeRepoRoot(r)
+	if repoRoot == "" {
+		return false, nil
+	}
+	if target == "" {
+		target = resolveMergeTargetForPersistence("", repoRoot)
+	}
+	if target == "" || !gitlib.IsAncestor(repoRoot, r.FinalCommit, target) {
+		return false, nil
+	}
+	r.MergedCommit = r.FinalCommit
+	r.MergedInto = target
+	r.MergeStatus = store.MergeStatusMerged
+	r.PendingMergeMessage = ""
+	r.PendingMergeInto = ""
+	if err := s.store.SaveRun(ctx, r); err != nil {
+		return false, fmt.Errorf("runview: persist out-of-band merge reconcile for %s: %w", r.ID, err)
+	}
+	if s.logger != nil {
+		s.logger.Info("runview: run %s already merged out-of-band into %s (FinalCommit %s is an ancestor) — reconciled merge_status=merged", r.ID, target, r.FinalCommit)
+	}
+	return true, nil
 }
 
 // CommitAndFinalizeResponse echoes the persisted state after a

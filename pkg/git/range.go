@@ -237,6 +237,34 @@ func MergeBase(repoRoot, refA, refB string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// IsAncestor reports whether `ancestor` is an ancestor of (or identical
+// to) `descendant` in repoRoot — i.e. descendant's history already
+// contains ancestor. Used to detect an out-of-band merge (a run's
+// FinalCommit already on the target branch) so the studio doesn't offer
+// a redundant squash.
+//
+// Implemented via merge-base rather than `git merge-base --is-ancestor`,
+// because the latter signals "no" with exit code 1, which run() cannot
+// distinguish from a real error. ancestor is contained iff the merge
+// base of (ancestor, descendant) resolves to ancestor itself. Returns
+// false on any git error or when the refs share no common history.
+func IsAncestor(repoRoot, ancestor, descendant string) bool {
+	if repoRoot == "" || ancestor == "" || descendant == "" {
+		return false
+	}
+	base := MergeBase(repoRoot, ancestor, descendant)
+	if base == "" {
+		return false
+	}
+	// Normalise `ancestor` to a full commit SHA so the comparison holds
+	// for branch names and short SHAs, not just full ones.
+	ancSHA := ancestor
+	if out, err := run(repoRoot, "rev-parse", "--verify", "--quiet", ancestor+"^{commit}"); err == nil {
+		ancSHA = strings.TrimSpace(string(out))
+	}
+	return base == ancSHA
+}
+
 // emptyTreeSHA is the well-known SHA-1 of an empty tree object. Used as
 // a synthetic "before" ref when diffing a root commit (no parent): every
 // file in the commit appears as Added against this baseline.
