@@ -218,7 +218,11 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
         // that landed during the outage.
         if (logsRequestedRef.current) {
           const log = runStoreRef.current.getState().log;
-          const fromOffset = log.start + log.text.length;
+          // Byte-accurate resume cursor — NOT start + text.length (UTF-16
+          // code units), which drifts below the true byte offset on the
+          // run console's multi-byte glyphs and made the backend resend
+          // overlapping tails that the client re-appended as duplicates.
+          const fromOffset = log.nextByte;
           ws.send(
             JSON.stringify({
               type: "subscribe_logs",
@@ -408,7 +412,8 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
           ? fromOffset
           : (() => {
               const log = runStoreRef.current.getState().log;
-              return log.start + log.text.length;
+              // Byte-accurate cursor (see the onopen reconnect path).
+              return log.nextByte;
             })();
       ws.send(
         JSON.stringify({

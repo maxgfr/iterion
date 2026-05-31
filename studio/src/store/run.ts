@@ -207,6 +207,16 @@ export interface RunLogState {
   // start is the byte offset in the run's logical log stream where
   // text begins. start > 0 means the older bytes were evicted.
   start: number;
+  // nextByte is the byte offset just PAST the last byte currently in
+  // `text` — i.e. the exact `from_offset` to resume from. It is tracked
+  // separately from `start + text.length` because `text.length` counts
+  // UTF-16 code units, NOT bytes, while the backend keys every log
+  // offset in bytes. The run console is dense with multi-byte glyphs
+  // (ℹ️ = 6 bytes / 2 units, 🔧 = 4 / 2, ▸ = 3 / 1), so a code-unit
+  // cursor drifts below the true byte position; feeding it back as
+  // from_offset made the server resend — and the client re-append —
+  // overlapping tails (the "nt -T /hom…" / doubled-line corruption).
+  nextByte: number;
   // total is the running write counter the backend reports — total
   // bytes ever written for this run, even those that have rolled out
   // of the in-memory tail. Used by the UI to detect drops.
@@ -328,11 +338,33 @@ interface RunStoreState {
 
 const initialLogState: RunLogState = {
   start: 0,
+  nextByte: 0,
   total: 0,
   text: "",
   subscribed: false,
   terminated: false,
 };
+
+// utf8Len returns the number of UTF-8 *bytes* a string encodes to, NOT
+// its UTF-16 code-unit length (`String.prototype.length`). Used to keep
+// the log byte cursor (RunLogState.nextByte) aligned with the backend,
+// which tracks every log offset in bytes. Allocation-free so the
+// one-shot ~1 MiB snapshot on tab open doesn't churn a Uint8Array.
+function utf8Len(s: string): number {
+  let bytes = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) bytes += 1;
+    else if (c < 0x800) bytes += 2;
+    else if (c >= 0xd800 && c <= 0xdbff) {
+      // High surrogate → a code point ≥ U+10000 (4 bytes); consume the
+      // paired low surrogate so it isn't counted again.
+      bytes += 4;
+      i++;
+    } else bytes += 3;
+  }
+  return bytes;
+}
 
 // freshInitial returns a value-only snapshot of the initial reducer
 // state. Called per store instance so each parallel run tab gets its
@@ -589,6 +621,10 @@ export function createRunStore() {
     set((s) => {
       if (!chunk.text) return s;
       const { log } = s;
+      // The end byte of this chunk in the backend's byte-keyed stream.
+      // utf8Len (NOT text.length) so the cursor stays byte-accurate —
+      // see RunLogState.nextByte.
+      const incomingEndByte = chunk.offset + utf8Len(chunk.text);
       const incomingEnd = chunk.offset + chunk.text.length;
       if (incomingEnd <= log.start) return s;
 
@@ -624,6 +660,7 @@ export function createRunStore() {
         log: {
           ...log,
           start: nextStart,
+          nextByte: Math.max(log.nextByte, incomingEndByte),
           text: nextText,
           total: nextTotal,
           terminated: false,
