@@ -1,5 +1,9 @@
 # Build output
 /iterion
+# contrib helper binaries (built with `go build -o <name> ./contrib/<name>`).
+# Source lives under contrib/<name>/; the compiled binary is a build
+# artefact, not source — anchored at repo root so it can't shadow the dir.
+/mattermost-clarify
 *.exe
 # Vendored Wails ships the WebView2 bootstrapper as a real .exe under
 # vendor/. The global *.exe ignore otherwise hides it from `git add`,

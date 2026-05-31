@@ -157,8 +157,15 @@ func applyHostStateMounts(
 		// matches the effective container user.
 		if goruntime.GOOS == "linux" {
 			if uid := os.Getuid(); uid != 0 {
+				// `exec` is REQUIRED. docker mounts --tmpfs noexec by
+				// default, which blocks anything executable that lands in
+				// $HOME — most importantly go's auto-downloaded toolchain
+				// ($HOME/go/pkg/mod/golang.org/toolchain@.../bin/go), but
+				// also nix/npm/pip binaries cached under HOME. Without it a
+				// sandboxed `go build` dies with "cannot execute" and the
+				// agent is forced to hand-relocate GOPATH/GOCACHE to /tmp.
 				spec.Tmpfs = append(spec.Tmpfs,
-					fmt.Sprintf("%s:uid=%d,gid=%d,mode=0755", homeDir, uid, os.Getgid()))
+					fmt.Sprintf("%s:uid=%d,gid=%d,mode=0755,exec", homeDir, uid, os.Getgid()))
 			}
 		}
 	}
