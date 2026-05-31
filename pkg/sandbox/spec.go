@@ -71,6 +71,13 @@ type Spec struct {
 	// (`source=...,target=...,type=bind`). Phase 2.
 	Mounts []string
 
+	// Tmpfs lists `docker run --tmpfs` entries (e.g.
+	// "/home/jo:uid=1000,gid=1000,mode=0755"). host_state lays a
+	// uid-owned writable tmpfs at the forced HOME path so $HOME itself
+	// (go/devbox/npm caches) is writable; the persistent state binds nest
+	// on top. Docker driver only — host_state is rejected on k8s.
+	Tmpfs []string
+
 	// Env is the containerEnv map injected into the sandbox. Phase 1.
 	Env map[string]string
 

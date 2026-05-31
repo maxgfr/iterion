@@ -216,6 +216,15 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 		}
 		args = append(args, "--mount", m)
 	}
+	// Tmpfs entries (host_state's writable HOME). docker treats the value
+	// after --tmpfs as a single arg ("/path:opts"), so the same
+	// shell-injection guard as --mount/--user applies.
+	for _, t := range p.spec.Tmpfs {
+		if err := validatePlainArg("docker --tmpfs", t); err != nil {
+			return nil, fmt.Errorf("docker driver: %w", err)
+		}
+		args = append(args, "--tmpfs", t)
+	}
 	// Iterate Env in sorted key order so validation errors and the
 	// resulting `docker run` argv are deterministic — Go's map
 	// iteration randomises order, which produced flaky tests when two

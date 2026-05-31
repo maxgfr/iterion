@@ -145,6 +145,22 @@ func applyHostStateMounts(
 		if _, alreadySet := spec.Env["HOME"]; !alreadySet {
 			spec.Env["HOME"] = homeDir
 		}
+		// Docker creates the forced-HOME path as a root-owned mount parent
+		// (only the nested .iterion/.claude/.codex binds under it are
+		// writable). Anything that writes elsewhere in $HOME — go's
+		// $HOME/.cache + $HOME/go, devbox/npm state — then hits
+		// "permission denied" on a root-owned $HOME, so devbox isn't
+		// first-class in the sandbox. Lay a uid-owned writable tmpfs at
+		// the home path; the state binds nest on top and still persist to
+		// the host. host_state is Linux + docker only (k8s rejects it),
+		// and host-UID alignment is the host's own UID, so the tmpfs uid
+		// matches the effective container user.
+		if goruntime.GOOS == "linux" {
+			if uid := os.Getuid(); uid != 0 {
+				spec.Tmpfs = append(spec.Tmpfs,
+					fmt.Sprintf("%s:uid=%d,gid=%d,mode=0755", homeDir, uid, os.Getgid()))
+			}
+		}
 	}
 
 	// Disable git commit signing inside the container. The mounted
