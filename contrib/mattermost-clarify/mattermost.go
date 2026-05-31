@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -143,7 +144,7 @@ func (m *MattermostDriver) createPost(ctx context.Context, payload map[string]an
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.httpBase+"/api/v4/posts", strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.httpBase+"/api/v4/posts", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
