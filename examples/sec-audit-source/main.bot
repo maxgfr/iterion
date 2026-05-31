@@ -809,12 +809,13 @@ tool run_python_scanners:
   command: `mkdir -p {{vars.scan_dir}} && semgrep --config=p/python --config=p/django --config=p/flask --config=p/owasp-top-ten --json --output={{vars.scan_dir}}/py-semgrep.json --metrics=off --quiet --exclude='**/migrations/**' --exclude='**/__pycache__' --exclude='**/venv' --exclude='**/.venv' --exclude='**/test_*.py' --exclude='**/*_test.py' {{vars.workspace_dir}} || true; bandit --recursive --format=json --output={{vars.scan_dir}}/bandit.json --severity-level=low --confidence-level=low --skip B101 --exclude='*/test_*.py,*/tests/*,*/.venv/*,*/venv/*,*/migrations/*' --quiet {{vars.workspace_dir}} || true; printf '{"scanner":"python","subscanners":["semgrep","bandit"],"json_paths":{"semgrep":"%s/py-semgrep.json","bandit":"%s/bandit.json"},"finding_count":0,"errors":[]}\n' {{vars.scan_dir}} {{vars.scan_dir}}`
   output: scanner_output
 
-## scan_join converges the (up to 4) scanner branches into one
-## downstream node. await: best_effort tolerates a scanner failing
-## without halting the workflow; a skipped or failed branch shows
-## up as empty in its slot and the triage prompt handles that.
+## scan_join collects the five scanner outputs into one record for
+## triage. The scanners run as a single sequential branch (generic →
+## … → custom → scan_join), so this is a plain collector, not a
+## convergence point — each output is carried forward along the chain.
+## A scanner that no-ops or fails (each command ends in `|| true`)
+## shows up empty in its slot and the triage prompt handles that.
 compute scan_join:
-  await: best_effort
   output: scan_join_output
   expr:
     generic_scan: "outputs.run_generic_scanners"
