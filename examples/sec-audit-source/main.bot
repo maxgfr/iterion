@@ -3,14 +3,15 @@
 ##
 ## Universal source-code security auditor. Pipeline:
 ##
-##   1. detect_tech       — claw + openai/gpt-5.5, readonly, agentic
-##                          survey of langs / frameworks / managers.
-##   2. scan_fanout       — fan_out_all router → parallel scanners.
-##   3. run_*_scanners    — deterministic tool nodes:
-##                            run_generic_scanners (always)
-##                            run_js_scanners      (when has_js)
-##                            run_go_scanners      (when has_go)
-##                            run_python_scanners  (when has_python)
+##   0. inventory         — deterministic bounded file/manifest list
+##                          (prevents detect_tech context overflow).
+##   1. detect_tech       — claw + openai/gpt-5.5, readonly; classifies
+##                          langs / frameworks / managers from inventory.
+##   2-3. run_*_scanners  — deterministic tool nodes run as ONE
+##                          sequential branch (generic → js → go →
+##                          python → custom), not a parallel fan-out, to
+##                          stay within the runtime's 1-mutating-branch
+##                          rule. Each lang scanner no-ops on absent langs.
 ##   4. triage            — claw + openai/gpt-5.5, readonly,
 ##                          await: best_effort. Reads scanner JSONs
 ##                          + fp-known.yaml → emits candidates[].
@@ -597,7 +598,8 @@ agent detect_tech:
 ## every source file the scanners would touch and emits a plan.
 ## When shard_size == 0 (default), it emits enabled=false and the
 ## conditional edge below routes the workflow to the single-process
-## path (scan_fanout). See docs/security-bots-distributed.md.
+## path (the sequential run_*_scanners chain). See
+## docs/security-bots-distributed.md.
 ##
 ## File enumeration excludes the same paths the scanners do
 ## (node_modules, vendor, .git, .iterion, build artefacts, …) so
@@ -699,10 +701,15 @@ print(json.dumps({
   input: shard_dispatch_input
   output: shard_dispatch_output
 
-## scan_fanout dispatches all scanner branches in parallel.
-router scan_fanout:
-  mode: fan_out_all
-
+## Scanners run as ONE sequential branch (generic → js → go → python →
+## custom → scan_join), NOT a parallel fan-out. The runtime classifies
+## every tool node as mutating and allows at most one mutating branch
+## per fan-out (pkg/runtime/fan_out.go), so 5 parallel scanner branches
+## tripped a workspace-safety violation on any multi-language repo.
+## Sequencing keeps the whole scan in a single branch. Each language
+## scanner is unconditional but no-ops cheaply when its language is
+## absent (semgrep matches no files; gosec/bandit find nothing) — the
+## tech flags still gate rule relevance downstream in triage.
 tool run_generic_scanners:
   ## Always-on layer: gitleaks (secrets) + trivy fs (config + vuln
   ## DB) + semgrep --config=auto (broad-spectrum SAST). sh -c is
@@ -1081,22 +1088,16 @@ workflow sec_audit_source:
 
   dispatch_shards -> done
 
-  plan_shards -> scan_fanout when not enabled
+  ## Single sequential scanner branch (see the run_generic_scanners
+  ## comment): generic → js → go → python → custom → scan_join. Avoids
+  ## the >1-mutating-branch workspace-safety violation that a parallel
+  ## fan-out hits. scan_join still reads all five scanner outputs.
+  plan_shards -> run_generic_scanners when not enabled
 
-  scan_fanout -> run_generic_scanners
-
-  scan_fanout -> run_js_scanners when has_js
-
-  scan_fanout -> run_go_scanners when has_go
-
-  scan_fanout -> run_python_scanners when has_python
-
-  scan_fanout -> run_custom_matchers
-
-  run_generic_scanners -> scan_join
-  run_js_scanners      -> scan_join
-  run_go_scanners      -> scan_join
-  run_python_scanners  -> scan_join
+  run_generic_scanners -> run_js_scanners
+  run_js_scanners      -> run_go_scanners
+  run_go_scanners      -> run_python_scanners
+  run_python_scanners  -> run_custom_matchers
   run_custom_matchers  -> scan_join
 
   scan_join -> triage with {
