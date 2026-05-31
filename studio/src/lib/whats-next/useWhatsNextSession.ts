@@ -40,10 +40,6 @@ export type WhatsNextStatus =
   | "launching"
   | "active"
   | "submitting"
-  // The run reached its terminal Done node (the operator explicitly
-  // closed). Unlike "ended", Nexie stays reachable: the view keeps a
-  // composer that re-seeds a fresh session on the next message.
-  | "standby"
   | "ended";
 
 export interface UseWhatsNextSession {
@@ -304,15 +300,12 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
     // Keep the runId in localStorage in every terminal state so the
     // next visit re-hydrates the transcript — continuity is the
     // central whats-next promise (full exchange visible across app
-    // restarts). The user starts a fresh session via newSession()
-    // (which clears localStorage + state) or by typing into the
-    // composer (which re-seeds — see the view's onComposerSend).
-    if (runStatus === "finished") {
-      // The operator explicitly closed (the only path to Done now).
-      // Standby keeps the composer alive so the next message re-seeds
-      // a fresh session instead of trapping them on "Session ended."
-      setStatus("standby");
-    } else if (
+    // restarts). A finished run (the operator hit `close`) still keeps
+    // a live composer via the view's always-on footer, which re-seeds
+    // a fresh session on the next message — so "ended" is no longer a
+    // dead end. The user can also start over via newSession().
+    if (
+      runStatus === "finished" ||
       runStatus === "failed" ||
       runStatus === "cancelled" ||
       runStatus === "failed_resumable"

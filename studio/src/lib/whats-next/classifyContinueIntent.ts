@@ -19,6 +19,13 @@ export type ContinueAction =
   | "standby"
   | "close";
 
+// Session-control actions carry no `detail` — they pause/close the
+// session rather than mutating the board. Shared by the classifier
+// and the Quick-mode footer so the "no detail" rule stays in one place.
+export function isSessionControlAction(action: ContinueAction): boolean {
+  return action === "standby" || action === "close";
+}
+
 export interface ClassifiedIntent {
   action: ContinueAction;
   detail: string;
@@ -108,7 +115,7 @@ export function classifyContinueIntent(text: string): ClassifiedIntent {
       }
     }
     // Session-control intents carry no meaningful detail.
-    if (rule.action === "standby" || rule.action === "close") detail = "";
+    if (isSessionControlAction(rule.action)) detail = "";
     return {
       action: rule.action,
       detail,
