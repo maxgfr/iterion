@@ -236,7 +236,7 @@ type is already an extensible enum.
 |---|---|
 | `grammar/iterion_v1.ebnf` | Add `round_robin` to the `router_mode` rule |
 | `grammar/V1_SCOPE.md` | Document the new mode |
-| `pkg/dsl/ast/ast.go` | Add `RouterModeRoundRobin` to the `RouterMode` enum |
+| `pkg/dsl/ast/ast.go` | Add `RouterRoundRobin` to the `RouterMode` enum |
 | `pkg/dsl/parser/` | Parse `round_robin` as a value of `mode:` |
 | `pkg/dsl/ir/ir.go` | Add `RouterRoundRobin` to the IR `RouterMode` type |
 | `pkg/dsl/ir/compile.go` | Compile the AST mode into IR |

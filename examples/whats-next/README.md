@@ -77,9 +77,8 @@ for the generator (the seed for a future `generate-skills.bot`).
 # From the source directory
 devbox run -- iterion run examples/whats-next/main.bot
 
-# Or from the packed bundle
-devbox run -- iterion bundle pack examples/whats-next/
-devbox run -- iterion run examples/whats-next.botz
+# Or by passing the bot directory (iterion resolves main.bot)
+devbox run -- iterion run examples/whats-next/
 ```
 
 You can override `workspace_dir` and pass optional `scope_notes`:

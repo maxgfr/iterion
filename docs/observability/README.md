@@ -39,7 +39,7 @@ endpoint enabled. Prometheus is preconfigured to scrape
 `configs/prometheus.yaml`).
 
 ```bash
-ITERION_PROMETHEUS_ADDR=:9464 iterion run examples/your_workflow.iter
+ITERION_PROMETHEUS_ADDR=:9464 iterion run examples/whats-next/main.bot
 # In another shell, sanity-check the metrics:
 curl -s localhost:9464/metrics | grep iterion_
 ```
