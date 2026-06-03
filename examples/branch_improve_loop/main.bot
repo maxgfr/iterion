@@ -48,18 +48,58 @@
 ##   3. `loop.<name>.previous_output` namespace eliminating manual
 ##      `previous_verdict` relay through every loop-bearing edge
 ##   4. Boolean expressions in `when` clauses (quoted form)
+##
+## Large-PR handling (chunked review + streaming fix):
+##   On big branches the reviewer used to ingest the entire branch
+##   diff in one LLM context, overflow the
+##   window, lose early hunks to compaction, and never converge.
+##   A deterministic `plan_chunks` tool now measures the diff — the
+##   merge-base-vs-WORKING-TREE diff, so a prior iteration's
+##   uncommitted fixes are visible (commit-only `base_ref...HEAD`
+##   would hide them and the loop could never converge) — and,
+##   above `chunk_threshold_loc` (default 300 LoC), splits it into
+##   ≤ `chunk_max_loc` (default 200) LoC unified-diff files under the
+##   gitignorable scratch dir `chunk_dir`. The reviewer reads those
+##   chunks one at a time, emits a per-chunk note (`chunk_notes`),
+##   then MERGES them into ONE whole-diff verdict — so cross-family
+##   approval (streak_check) still happens on the WHOLE diff, never
+##   chunk-by-chunk. The fixer streams the per-chunk notes + chunk
+##   diff files incrementally, never reloading the full diff. Below
+##   the threshold the bot behaves exactly as before. Trade-off and
+##   the rejected per-chunk-fan-out alternative are recorded in
+##   docs/adr/011-branch-improve-diff-chunking.md.
 ## ─────────────────────────────────────────────────────────────────
 
 vars:
   workspace_dir: string = "${PROJECT_DIR}"
   scope_notes: string = ""
   ## Branch comparison base. The reviewers and fixers operate on the
-  ## diff `git diff {{vars.base_ref}}...HEAD` — meaning the changes
-  ## introduced by the current branch on top of `base_ref`. Default
-  ## "main" covers the GitHub/GitLab/Forgejo conventions; pass
-  ## `--var base_ref=develop` (or any local ref) when reviewing
-  ## against a different integration branch.
+  ## diff `git diff $(git merge-base {{vars.base_ref}} HEAD)` — the
+  ## changes introduced by the current branch on top of `base_ref`,
+  ## measured against the WORKING TREE so a prior iteration's
+  ## uncommitted fixes are included (the commit-only `...HEAD` form
+  ## would hide them and break convergence). Default "main" covers the
+  ## GitHub/GitLab/Forgejo conventions; pass `--var base_ref=develop`
+  ## (or any local ref) when reviewing against a different integration
+  ## branch.
   base_ref: string = "main"
+
+  ## Large-PR chunking dials. When the branch diff
+  ## (merge-base vs working tree — see base_ref) exceeds
+  ## chunk_threshold_loc CHANGED lines, the `plan_chunks` tool splits
+  ## it into ≤ chunk_max_loc LoC diff files so each reviewer bounds
+  ## its context per chunk instead of ingesting the whole diff at
+  ## once. At or below the threshold the bot keeps its original
+  ## single-pass whole-diff behaviour. Both are plain --var overrides;
+  ## defaults are layout-agnostic so the bot stays repo-portable
+  ## (catalog-universality).
+  chunk_threshold_loc: int = 300
+  chunk_max_loc: int = 200
+  ## Scratch dir (repo-root-relative, gitignorable) where plan_chunks
+  ## writes per-chunk diff files + manifest.json. Deliberately NOT
+  ## under .iterion/ — keep the target repo's tree clean; the
+  ## prepare_commit step excludes it from the commit.
+  chunk_dir: string = ".branch-improve-chunks"
 
 prompt review_system:
   You are an EXTREMELY demanding, methodical code reviewer in
@@ -70,18 +110,24 @@ prompt review_system:
 
   REVIEW SCOPE (CRUCIAL):
   1. Enumerate the branch footprint via
-     `git diff {{vars.base_ref}}...HEAD --name-only`
-     (note the triple-dot `...`: this gives the diff "all
-     that changed on the branch since the base", NOT the
-     symmetric diff). That is your scope.
+     `git diff $(git merge-base {{vars.base_ref}} HEAD) --name-only`.
+     This diffs the merge-base of the branch and the base
+     against the WORKING TREE, so it captures the changes
+     the branch introduced on top of the base AND any
+     uncommitted fixes a prior iteration of this loop already
+     applied (fixes are committed only AFTER the loop
+     converges). Reviewing the commit-only
+     `{{vars.base_ref}}...HEAD` would hide every prior fix and
+     the loop could never converge. That working-tree diff is
+     your scope.
   2. You MAY read the surrounding code (host package,
      callers, conventions) ONLY to judge how the branch
      changes integrate. You MUST NOT flag blockers on
      pre-existing code the branch does not touch, even if
      you see issues there: those observations go into
      `scanned_areas` as informational notes, NOT into
-     `blockers`. The source of truth for scope is the diff
-     `base_ref...HEAD`.
+     `blockers`. The source of truth for scope is that
+     working-tree diff against the merge-base.
   3. You MAY consult `git log {{vars.base_ref}}..HEAD` to
      understand the branch's intent, but that is not a
      scope constraint — the diff is.
@@ -129,6 +175,36 @@ prompt review_system:
      found nothing. `approved=true` requires the
      CUMULATIVE axis coverage across iterations to be
      sufficient relative to the branch scope.
+
+  LARGE-DIFF CHUNKED REVIEW (context discipline):
+  Your input carries a `large` flag and chunk metadata from the
+  deterministic `plan_chunks` step that runs before you.
+  - When `large` is FALSE: review the whole branch diff exactly as
+    described above, in a single pass. Leave `chunk_notes` empty.
+  - When `large` is TRUE: the diff was too big for one context and
+    was split into `chunk_count` unified-diff files of
+    ≤ `chunk_max_loc` LoC each, listed in `manifest_path` (JSON:
+    `chunks[].diff_path / files / loc`) under `chunk_dir`. You MUST:
+      1. Read `manifest_path` to get the chunk list.
+      2. Review the chunks ONE AT A TIME — read a SINGLE
+         chunk-NNN.diff, judge it, append a concise finding for that
+         chunk to `chunk_notes` (one array entry per chunk, prefixed
+         with its index + files), THEN move to the next chunk. Do
+         NOT cat the whole diff or all chunk files into one read —
+         that re-creates the very context blow-up this split exists
+         to avoid. You MAY read surrounding source for the chunk you
+         are judging.
+      3. MERGE: after all chunks, synthesise your per-chunk findings
+         into ONE coherent WHOLE-DIFF verdict. `approved`,
+         `blockers`, `fix_plan`, `confidence` and `scanned_areas`
+         describe the ENTIRE branch, not a single chunk — a blocker
+         in any chunk fails the whole verdict, and you must weigh
+         cross-chunk interactions. This merge is the single review
+         summary the loop converges on.
+  CRUCIAL: cross-family approval is computed downstream (streak_check)
+  on this MERGED whole-diff verdict, NEVER chunk-by-chunk. Do not
+  approve merely because each chunk looked locally fine; judge the
+  branch as a whole.
 
   ADR TRACEABILITY (apply to decisions made by the fixer
   across recent iterations of this run):
@@ -199,7 +275,10 @@ prompt review_user_claude:
   Review the changes of the current branch in
   {{vars.workspace_dir}}, relative to the base
   `{{vars.base_ref}}`. Enumerate the footprint via
-  `git diff {{vars.base_ref}}...HEAD --name-only`.
+  `git diff $(git merge-base {{vars.base_ref}} HEAD) --name-only`
+  (merge-base vs WORKING TREE, so a prior iteration's
+  uncommitted fixes are in scope; commit-only `...HEAD`
+  would hide them).
 
   Scope notes:
   {{vars.scope_notes}}
@@ -222,6 +301,17 @@ prompt review_user_claude:
 
   Justification for the prior pushback:
   {{input.prior_pushback_justification}}
+
+  Diff size mode (from plan_chunks):
+    large: {{input.large}}
+    chunk_count: {{input.chunk_count}}
+    chunk_dir: {{input.chunk_dir}}
+    manifest_path: {{input.manifest_path}}
+    chunk_max_loc: {{input.chunk_max_loc}}
+  If large is true, follow "LARGE-DIFF CHUNKED REVIEW": review each
+  chunk listed in manifest_path one at a time, fill chunk_notes (one
+  entry per chunk), then MERGE into a single whole-diff verdict. If
+  false, review the whole diff and leave chunk_notes empty.
 
   Produce a structured verdict:
     - approved: true ONLY if the cumulative axis coverage
@@ -239,12 +329,18 @@ prompt review_user_claude:
       ".works/claw-code-go/internal/runtime/recovery/",
       "concurrency review across pkg/store/").
       Will be relayed to the next reviewer.
+    - chunk_notes: in large-diff mode, ONE concise finding per
+      reviewed chunk (prefix each with its index + files); empty
+      when large is false. The same-family fixer streams these.
 
 prompt review_user_gpt:
   Review the changes of the current branch in
   {{vars.workspace_dir}}, relative to the base
   `{{vars.base_ref}}`. Enumerate the footprint via
-  `git diff {{vars.base_ref}}...HEAD --name-only`.
+  `git diff $(git merge-base {{vars.base_ref}} HEAD) --name-only`
+  (merge-base vs WORKING TREE, so a prior iteration's
+  uncommitted fixes are in scope; commit-only `...HEAD`
+  would hide them).
 
   Scope notes:
   {{vars.scope_notes}}
@@ -268,6 +364,17 @@ prompt review_user_gpt:
   Justification for the prior pushback:
   {{input.prior_pushback_justification}}
 
+  Diff size mode (from plan_chunks):
+    large: {{input.large}}
+    chunk_count: {{input.chunk_count}}
+    chunk_dir: {{input.chunk_dir}}
+    manifest_path: {{input.manifest_path}}
+    chunk_max_loc: {{input.chunk_max_loc}}
+  If large is true, follow "LARGE-DIFF CHUNKED REVIEW": review each
+  chunk listed in manifest_path one at a time, fill chunk_notes (one
+  entry per chunk), then MERGE into a single whole-diff verdict. If
+  false, review the whole diff and leave chunk_notes empty.
+
   Produce a structured verdict:
     - approved: true ONLY if the cumulative axis coverage
       across the branch footprint is sufficient AND no
@@ -281,6 +388,9 @@ prompt review_user_gpt:
     - scanned_areas: packages / files / surfaces you
       actually audited THIS iteration (concise text).
       Will be relayed to the next reviewer.
+    - chunk_notes: in large-diff mode, ONE concise finding per
+      reviewed chunk (prefix each with its index + files); empty
+      when large is false. The same-family fixer streams these.
 
 prompt fix_system:
   You are an expert developer. You fix the blocking issues
@@ -288,10 +398,11 @@ prompt fix_system:
   BRANCH code.
 
   SCOPE:
-  1. Apply your fixes to files in the diff
-     `git diff {{vars.base_ref}}...HEAD --name-only`
-     (branch footprint). You MAY modify those files
-     freely.
+  1. Apply your fixes to files in the branch footprint
+     (`git diff $(git merge-base {{vars.base_ref}} HEAD) --name-only`
+     — merge-base vs working tree, which already includes
+     any fixes from earlier iterations). You MAY modify
+     those files freely.
   2. If a fix requires touching a file OUTSIDE the branch
      footprint (because the bug overflows), you MAY do
      so — but document it clearly in your `summary` so
@@ -300,6 +411,18 @@ prompt fix_system:
   3. You MUST NOT refactor pre-existing code just because
      you notice issues there: stay within the scope of
      the reported blockers.
+
+  CHUNKED / STREAMING FIX (large diffs):
+  When `large` is true, the blockers were produced by a chunk-by-
+  chunk review. `chunk_notes` holds one finding per chunk and
+  `manifest_path` (under `chunk_dir`) maps each chunk index to its
+  files and its chunk-NNN.diff. Work the blockers by STREAMING the
+  chunks: read ONE chunk note, open ONLY its specific chunk-NNN.diff
+  (or the few files it names), apply the fix, then move to the next
+  note. Do NOT reload the entire branch diff into context — that is
+  exactly the blow-up the chunking avoids, and it is unnecessary
+  because the chunk notes already localise every blocker. When
+  `large` is false, fix normally against the whole diff.
 
   You MAY REFUSE an item from the blockers list if you
   judge it is not genuinely blocking for production (style
@@ -354,13 +477,21 @@ prompt fix_user:
   For the code in {{vars.workspace_dir}}, examine this
   list of blockers and apply concrete fixes. Stay
   primarily within the branch footprint
-  (`git diff {{vars.base_ref}}...HEAD --name-only`).
+  (`git diff $(git merge-base {{vars.base_ref}} HEAD) --name-only`).
 
   Reported blockers:
   {{input.blockers}}
 
   Proposed fix plan:
   {{input.fix_plan}}
+
+  Diff size mode (from plan_chunks):
+    large: {{input.large}}
+    chunk_dir: {{input.chunk_dir}}
+    manifest_path: {{input.manifest_path}}
+  Per-chunk review notes (large-diff mode only — stream them one at a
+  time with the matching chunk-NNN.diff; do NOT reload the whole diff):
+  {{input.chunk_notes}}
 
   For EACH blocker:
     - If it is a real production-blocking issue: read the
@@ -410,6 +541,8 @@ prompt prepare_commit_system:
            improvement)
          - editor / IDE scratch files
          - LLM scratch files (`notes.md`, `plan.txt`, etc.)
+         - the chunked-review scratch dir ({{vars.chunk_dir}},
+           default `.branch-improve-chunks/`) written by plan_chunks
        When in doubt, EXCLUDE. Under-staging is recoverable
        (operator commits the missing file in a follow-up);
        over-staging pollutes the commit and is much harder
@@ -477,6 +610,22 @@ prompt prepare_commit_user:
 
 ## ─── Schemas ────────────────────────────────────────────────────
 
+## plan_chunks output — the deterministic diff-size gate + splitter.
+## large=true means total_loc > chunk_threshold_loc and the diff was
+## split into chunk_count unified-diff files of ≤ chunk_max_loc LoC
+## each under chunk_dir (manifest.json maps index→files→diff_path).
+## large=false means the branch is small enough for the original
+## single-pass whole-diff review; the chunk_count / manifest_path
+## fields are then unused.
+schema chunk_plan_output:
+  large: bool
+  total_loc: int
+  chunk_count: int
+  chunk_dir: string
+  manifest_path: string
+  chunk_max_loc: int
+  chunk_threshold_loc: int
+
 schema review_input:
   prior_pushback: string[]
   prior_pushback_justification: string
@@ -485,6 +634,17 @@ schema review_input:
   ## reviewer reads it to prefer uncovered surfaces — see
   ## review_system rule 4. Empty on the first iteration.
   previous_scanned_areas: string[]
+  ## Chunking handoff from plan_chunks (same values each carry on the
+  ## alt→reviewer edge). When large is true the reviewer MUST review
+  ## the diff chunk-by-chunk from chunk_dir / manifest_path (see
+  ## review_system "LARGE-DIFF CHUNKED REVIEW"); when false it reviews
+  ## the whole diff as before. chunk_count / chunk_max_loc describe
+  ## the split.
+  large: bool
+  chunk_count: int
+  chunk_dir: string
+  manifest_path: string
+  chunk_max_loc: int
 
 schema verdict_output:
   approved: bool
@@ -506,6 +666,15 @@ schema verdict_output:
   ## subsequent iterations explore uncovered ground rather than
   ## re-walking the same files.
   scanned_areas: string[]
+  ## chunk_notes holds ONE entry per reviewed chunk (large-diff mode)
+  ## — the per-chunk findings the reviewer produced before merging
+  ## them into the whole-diff verdict above. Empty in whole-diff mode.
+  ## The same-family fixer streams these incrementally (with the
+  ## matching chunk diff file) so it never reloads the full diff.
+  ## NOTE: approved/blockers/fix_plan stay WHOLE-diff verdicts —
+  ## chunk_notes is fixer context, NOT a per-chunk approval signal,
+  ## so cross-family convergence is unaffected.
+  chunk_notes: string[]
 
 ## streak_check relays approved/blockers/fix_plan/family from its
 ## input (the current reviewer's verdict) and computes a
@@ -540,6 +709,15 @@ schema streak_state:
 schema fix_input:
   blockers: string[]
   fix_plan: string
+  ## Chunked-fix streaming handoff (empty / false in whole-diff mode).
+  ## chunk_notes = the same-family reviewer's per-chunk findings; the
+  ## fixer walks them one at a time, opening the matching
+  ## chunk_dir/chunk-NNN.diff (mapped by manifest_path) for detail,
+  ## and NEVER reloads the entire diff.
+  chunk_notes: string[]
+  large: bool
+  chunk_dir: string
+  manifest_path: string
 
 schema fix_output:
   applied: bool
@@ -569,6 +747,176 @@ schema commit_result:
   output: string
 
 ## ─── Nodes ──────────────────────────────────────────────────────
+
+## plan_chunks — deterministic diff-size gate + LoC chunker (no LLM).
+## Runs once at the head of EVERY review cycle (it is the workflow
+## entry and every loop-back routes through it) so the chunk files
+## always reflect the CURRENT working tree, including the latest
+## fixer edits. It measures the branch diff — the merge-base-vs-
+## working-tree diff (`git diff $(git merge-base base HEAD)`), so the
+## latest UNCOMMITTED fixer edits ARE included; a commit-only
+## base...HEAD would not see them, would regenerate identical chunks
+## every cycle, and would prevent convergence — and, only when it
+## exceeds chunk_threshold_loc, splits it into ≤ chunk_max_loc LoC unified-
+## diff files under chunk_dir (a single file bigger than the cap is
+## hunk-split). Pure git + python3 — the bot pins
+## iterion-sandbox-full, which ships python3 (same dependency as
+## sec-audit-source's plan_shards). CWD is the worktree, so git and
+## the relative chunk_dir resolve there. Stdout is a JSON object
+## matching chunk_plan_output. Rationale + rejected alternatives:
+## docs/adr/011-branch-improve-diff-chunking.md.
+tool plan_chunks:
+  language: python
+  script: `
+import json, os, subprocess, sys
+
+BASE = {{vars.base_ref}}
+THRESHOLD = int({{vars.chunk_threshold_loc}})
+MAX_LOC = int({{vars.chunk_max_loc}})
+CHUNK_DIR = {{vars.chunk_dir}}
+
+def git(args, check=False):
+    # core.quotePath=false: emit non-ASCII paths VERBATIM (UTF-8), not
+    # C-quoted like "caf\303\251.txt". Without it the quoted token is parsed
+    # as the path AND reused below as a pathspec that matches no real file,
+    # so the file's hunks silently vanish from every chunk — a changed file
+    # would escape review while still being counted in total_loc.
+    p = subprocess.run(["git", "-c", "core.quotePath=false"] + args, capture_output=True)
+    if check and p.returncode != 0:
+        # Fail loud. A silent git failure here yields an empty diff ->
+        # large=false -> chunking silently disabled (fail-open), re-opening
+        # the very context blow-up this tool exists to prevent.
+        sys.stderr.write("plan_chunks: git %s failed (exit %d): %s\n" % (
+            " ".join(args), p.returncode, p.stderr.decode("utf-8", "replace").strip()))
+        sys.exit(1)
+    return p.stdout.decode("utf-8", "replace")
+
+# Diff the WORKING TREE against the merge-base of BASE and HEAD, NOT the
+# commit-only BASE...HEAD. The fixers in this loop edit the working tree
+# WITHOUT committing (the only commit is the terminal commit_changes after
+# convergence), so a commit-only range would regenerate byte-identical
+# chunk files every cycle, hide every prior fix from the next reviewer,
+# and the loop could never converge. "git diff <merge_base>" (single
+# endpoint) diffs that commit against the working tree, capturing the
+# branch's committed changes AND the fixer's uncommitted edits, mirroring
+# feature_dev's "git diff HEAD" convention. When the working tree is clean
+# this equals BASE...HEAD. Untracked scratch (chunk_dir, the temp script)
+# is never shown by "git diff <commit>", so it cannot pollute the measure.
+# Fall back to BASE if merge-base fails (e.g. unrelated histories).
+MERGE_BASE = git(["merge-base", BASE, "HEAD"]).strip()
+DIFF_BASE = MERGE_BASE if MERGE_BASE else BASE
+
+# --numstat -z: NUL-terminated records "added<TAB>deleted<TAB>path"
+# (binary files: "-<TAB>-"). The -z form emits the path VERBATIM — git
+# never C-quotes it — so non-ASCII / space / quote / backslash filenames
+# survive intact. (Plain newline numstat quotes unusual paths even with
+# core.quotePath=false, and the quoted token then fails to match as a
+# pathspec below, silently dropping that file from its chunk.) --no-renames
+# keeps paths single (no "old => new"); a rename counts as delete+add, fine
+# for sizing. check=True: a git failure aborts loudly rather than silently
+# measuring an empty diff.
+numstat = git(["diff", "--numstat", "--no-renames", "-z", DIFF_BASE], check=True)
+files = []
+total = 0
+# Records are NUL-separated; split each on TAB with maxsplit=2 so a path
+# containing literal tabs still lands whole in parts[2].
+for rec in numstat.split("\0"):
+    if not rec:
+        continue
+    parts = rec.split("\t", 2)
+    if len(parts) < 3:
+        continue
+    added, deleted, path = parts[0], parts[1], parts[2]
+    loc = 0 if (added == "-" or deleted == "-") else int(added) + int(deleted)
+    files.append({"path": path, "loc": loc})
+    total += loc
+
+result = {
+    "large": total > THRESHOLD,
+    "total_loc": total,
+    "chunk_count": 0,
+    "chunk_dir": CHUNK_DIR,
+    "manifest_path": "",
+    "chunk_max_loc": MAX_LOC,
+    "chunk_threshold_loc": THRESHOLD,
+}
+
+def split_hunks(text):
+    # (header, [hunk_text, ...]) — header is the file preamble before @@.
+    header, hunks, cur = [], [], None
+    for ln in text.splitlines(keepends=True):
+        if ln.startswith("@@"):
+            if cur is not None:
+                hunks.append(cur)
+            cur = [ln]
+        elif cur is None:
+            header.append(ln)
+        else:
+            cur.append(ln)
+    if cur is not None:
+        hunks.append(cur)
+    return "".join(header), ["".join(h) for h in hunks]
+
+def hunk_loc(h):
+    n = 0
+    for ln in h.splitlines():
+        if ln[:1] in ("+", "-") and not ln.startswith("+++") and not ln.startswith("---"):
+            n += 1
+    return n
+
+if not result["large"]:
+    print(json.dumps(result))
+else:
+    os.makedirs(CHUNK_DIR, exist_ok=True)
+    files.sort(key=lambda f: f["path"])
+    # Greedy bin-pack whole files into chunks of <= MAX_LOC. A single
+    # file bigger than MAX_LOC is hunk-split so no chunk exceeds the
+    # cap (unless one indivisible hunk is itself larger than the cap).
+    chunks = []
+    cur_files, cur_diff, cur_loc = [], [], 0
+    for f in files:
+        fdiff = git(["diff", "--no-renames", DIFF_BASE, "--", f["path"]], check=True)
+        if f["loc"] > MAX_LOC:
+            if cur_diff:
+                chunks.append({"diff": "".join(cur_diff), "files": cur_files, "loc": cur_loc})
+                cur_files, cur_diff, cur_loc = [], [], 0
+            header, hunks = split_hunks(fdiff)
+            sub, sub_loc = [], 0
+            for h in hunks:
+                hl = hunk_loc(h)
+                if sub and sub_loc + hl > MAX_LOC:
+                    chunks.append({"diff": header + "".join(sub), "files": [f["path"]], "loc": sub_loc})
+                    sub, sub_loc = [], 0
+                sub.append(h)
+                sub_loc += hl
+            if sub:
+                chunks.append({"diff": header + "".join(sub), "files": [f["path"]], "loc": sub_loc})
+            continue
+        if cur_diff and cur_loc + f["loc"] > MAX_LOC:
+            chunks.append({"diff": "".join(cur_diff), "files": cur_files, "loc": cur_loc})
+            cur_files, cur_diff, cur_loc = [], [], 0
+        cur_files.append(f["path"])
+        cur_diff.append(fdiff)
+        cur_loc += f["loc"]
+    if cur_diff:
+        chunks.append({"diff": "".join(cur_diff), "files": cur_files, "loc": cur_loc})
+
+    manifest = []
+    for i, ch in enumerate(chunks):
+        diff_path = os.path.join(CHUNK_DIR, "chunk-%03d.diff" % i)
+        with open(diff_path, "w", encoding="utf-8") as fh:
+            fh.write(ch["diff"])
+        manifest.append({"index": i, "files": ch["files"], "loc": ch["loc"], "diff_path": diff_path})
+
+    manifest_path = os.path.join(CHUNK_DIR, "manifest.json")
+    with open(manifest_path, "w", encoding="utf-8") as fh:
+        json.dump({"base_ref": BASE, "total_loc": total, "chunk_max_loc": MAX_LOC, "chunks": manifest}, fh, indent=2)
+
+    result["chunk_count"] = len(chunks)
+    result["manifest_path"] = manifest_path
+    print(json.dumps(result))
+`
+  output: chunk_plan_output
 
 router alt:
   mode: round_robin
@@ -711,7 +1059,7 @@ tool commit_changes:
 ## ─── Workflow ───────────────────────────────────────────────────
 
 workflow branch_improve_loop:
-  entry: alt
+  entry: plan_chunks
 
   ## Run in an isolated git worktree at .iterion/worktrees/<run-id>/.
   ## The bot mutates code AND commits; the worktree + finalize FF
@@ -745,6 +1093,12 @@ workflow branch_improve_loop:
     threshold: 0.9
     preserve_recent: 8
 
+  ## plan_chunks is the entry AND the loop-back hub: re-running it
+  ## at the head of every cycle re-measures the working tree so the
+  ## chunk files always reflect the latest fixer edits. It is purely
+  ## deterministic, then hands off to the round-robin selector.
+  plan_chunks -> alt
+
   ## Round-robin alternates: 1st pass → claude, 2nd → gpt, repeat.
   ## Each reviewer receives the OTHER family's most recent fixer
   ## pushback so it knows which items to skip — the alternation
@@ -752,16 +1106,27 @@ workflow branch_improve_loop:
   ## iteration's fixer of the opposing family. On the first
   ## iteration both `outputs.fix_*` are empty → fields render as
   ## empty strings and the prompt's "ne re-flague pas ces items"
-  ## section is harmless.
+  ## section is harmless. The chunk_* fields relay plan_chunks's
+  ## size verdict so the reviewer picks whole-diff vs chunked mode.
   alt -> reviewer_claude with {
     prior_pushback: "{{outputs.fix_gpt.pushback}}",
     prior_pushback_justification: "{{outputs.fix_gpt.pushback_justification}}",
-    previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}"
+    previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}",
+    large: "{{outputs.plan_chunks.large}}",
+    chunk_count: "{{outputs.plan_chunks.chunk_count}}",
+    chunk_dir: "{{outputs.plan_chunks.chunk_dir}}",
+    manifest_path: "{{outputs.plan_chunks.manifest_path}}",
+    chunk_max_loc: "{{outputs.plan_chunks.chunk_max_loc}}"
   }
   alt -> reviewer_gpt with {
     prior_pushback: "{{outputs.fix_claude.pushback}}",
     prior_pushback_justification: "{{outputs.fix_claude.pushback_justification}}",
-    previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}"
+    previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}",
+    large: "{{outputs.plan_chunks.large}}",
+    chunk_count: "{{outputs.plan_chunks.chunk_count}}",
+    chunk_dir: "{{outputs.plan_chunks.chunk_dir}}",
+    manifest_path: "{{outputs.plan_chunks.manifest_path}}",
+    chunk_max_loc: "{{outputs.plan_chunks.chunk_max_loc}}"
   }
 
   ## Both reviewers feed into streak_check. The loop is attached
@@ -810,7 +1175,7 @@ workflow branch_improve_loop:
   ## counter (and the previous_output snapshot) is incremented
   ## ONCE per cycle on the reviewer→streak_check edge above. The
   ## cycle is still bounded because that edge IS loop-bearing.
-  streak_check -> alt when "approved"
+  streak_check -> plan_chunks when "approved"
 
   ## Medium/high-confidence rejection WITH concrete blockers: route
   ## to the SAME-family fixer so it can inherit the reviewer's
@@ -833,14 +1198,27 @@ workflow branch_improve_loop:
   ## down, first match wins. We list both family-specific fixers
   ## before the unconditional `done` fallthrough so loop-exhaustion
   ## still terminates cleanly.
+  ## chunk_notes comes from the SAME-family reviewer's output (the
+  ## one that just ran this cycle), not through streak_check — the
+  ## family guard guarantees the right reviewer. large/chunk_dir/
+  ## manifest_path come from plan_chunks so the fixer streams per
+  ## chunk instead of reloading the whole diff.
   streak_check -> fix_claude when "!approved && family == 'claude' && length(blockers) > 0" with {
     blockers: "{{outputs.streak_check.blockers}}",
     fix_plan: "{{outputs.streak_check.fix_plan}}",
+    chunk_notes: "{{outputs.reviewer_claude.chunk_notes}}",
+    large: "{{outputs.plan_chunks.large}}",
+    chunk_dir: "{{outputs.plan_chunks.chunk_dir}}",
+    manifest_path: "{{outputs.plan_chunks.manifest_path}}",
     _session_id: "{{outputs.reviewer_claude._session_id}}"
   }
   streak_check -> fix_gpt when "!approved && family == 'gpt' && length(blockers) > 0" with {
     blockers: "{{outputs.streak_check.blockers}}",
     fix_plan: "{{outputs.streak_check.fix_plan}}",
+    chunk_notes: "{{outputs.reviewer_gpt.chunk_notes}}",
+    large: "{{outputs.plan_chunks.large}}",
+    chunk_dir: "{{outputs.plan_chunks.chunk_dir}}",
+    manifest_path: "{{outputs.plan_chunks.manifest_path}}",
     _session_id: "{{outputs.reviewer_gpt._session_id}}"
   }
 
@@ -849,8 +1227,8 @@ workflow branch_improve_loop:
   ## enough to allow review_loop to be the binding constraint. Both
   ## fixers share the loop counter — total fix attempts across both
   ## families are capped at 20.
-  fix_claude -> alt as recovery_loop(20)
-  fix_gpt    -> alt as recovery_loop(20)
+  fix_claude -> plan_chunks as recovery_loop(20)
+  fix_gpt    -> plan_chunks as recovery_loop(20)
 
   ## Loop exhaustion fallbacks: when a bounded loop hits its limit
   ## the loop-bearing edges above are skipped and execution falls
@@ -873,4 +1251,4 @@ workflow branch_improve_loop:
   ## review_loop counter on the reviewer→streak_check edges still
   ## guarantees the workflow eventually exits — exhaustion routes
   ## via the reviewer→fail fallthrough above.
-  streak_check    -> alt
+  streak_check    -> plan_chunks
