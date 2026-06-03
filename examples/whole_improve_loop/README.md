@@ -14,8 +14,103 @@ production-ready state, with:
 - A fixer per family that inherits the corresponding reviewer's session
   (cache savings + context continuity)
 - A deterministic stop condition: two consecutive positive verdicts from
-  opposite families (cross-family double approval)
-- A loop budget (`review_loop(15)` today, tunable to project complexity)
+  opposite families (cross-family double approval), generalised to a
+  full clean sweep across chunks on large workspaces (see below)
+- A per-run pass budget (`max_review_passes`, default 15, tunable per
+  project complexity / budget), plus a cross-run persisted `clean_streak`
+  so convergence accumulates across re-dispatches on large repos
+- **Context-budget chunking** so the loop survives ~150k+ LoC workspaces
+  without exhausting the reviewer's context window (issue #12, below)
+
+## Context-budget chunking (issue #12)
+
+Pointed at a large workspace (iterion itself is ~195k LoC of Go; the
+chunker measures ~2.2M estimated tokens of source across ~1,200 files),
+a reviewer told to "review ALL the code" simply reads files until it
+hits `context_length_exceeded` — on the **first** iteration. To stay
+usable at that scale the loop no longer hands the reviewer the whole
+tree. Instead:
+
+- A deterministic `snapshot_chunk` **tool** node (Python, no LLM) is the
+  workflow entry and runs once per pass. It groups source files by
+  **package/folder boundary first**, then bin-packs them into chunks of
+  at most **`max_review_chunk_tokens` (default 30000)** estimated tokens
+  (~4 bytes/token). A package larger than the budget is split by file
+  size. It emits **one chunk** per pass with its source inline.
+- The reviewer audits **that one chunk** (the source is in its prompt;
+  read tools are for narrow cross-references only, never bulk reads), so
+  a single review can never exceed the chunk budget.
+- The selected chunk **rotates** via a persisted cursor, and the
+  cross-run `clean_streak` is persisted alongside it, in a single JSON
+  state file (`.whole_improve_loop.state` at the workspace root — **add
+  it to your `.gitignore`**; delete it to restart coverage AND the streak
+  from 0), so a re-dispatched run advances through the repo AND keeps
+  accumulating toward convergence instead of re-scanning the first chunks
+  and resetting the streak.
+- `streak_check` is **coverage-aware**: it stops only after a full clean
+  sweep of every chunk — `clean_streak >= num_chunks + 1` consecutive
+  blocker-free passes — with the reviewing **family alternating** across
+  chunks (round-robin). So every chunk is reviewed clean by **at least
+  one** family and **both families participate in the terminating
+  sweep**, but — because the cursor advances one chunk and the family
+  flips one step per pass — within a *single* sweep each chunk is seen by
+  exactly one family; dual-family coverage of any *individual* chunk
+  accrues across *successive* sweeps, not within one. This collapses to
+  the original "two consecutive cross-family approvals" when the whole
+  repo fits in one chunk (`num_chunks <= 1`), where the two alternating
+  passes both review that single chunk. A single clean chunk therefore
+  cannot end the loop. (See ADR-011 → Corrections for why per-chunk
+  dual-family review is *not* gated on — it is cost-infeasible at
+  iterion scale.)
+
+Tune with `--var max_review_chunk_tokens=N`: raise it to review more per
+pass (fewer chunks, faster convergence, larger prompt); lower it for a
+smaller-context model.
+
+The reviewer + fixer **share** this snapshot: the fixer inherits the
+same-family reviewer's session, which already holds the chunk it must
+fix. Design rationale and the rejected alternatives (per-pass fan-out +
+merge; `__scan-shards` child runs; loop-counter rotation) are in
+[ADR-011](../../docs/adr/011-whole-improve-loop-context-chunking.md).
+
+### Large workspaces: convergence spans passes (and sometimes runs)
+
+Reviewing ~2.2M tokens of source with premium models needs ~`num_chunks`
+(≈100 on iterion) reviews for **one** full sweep — more than the
+`max_review_passes` per-run bound (default 15) and a meaningful fraction
+of the `max_cost_usd: 60` / `max_duration: 2h` budget. So on an
+iterion-sized repo a single run makes **bounded, context-safe progress**
+(it will not crash on context) and exits via `fail` ("not converged
+yet") rather than reaching full cross-family convergence in one shot.
+
+This is genuinely multi-run, and it actually converges: BOTH the
+rotation cursor AND the `clean_streak` are persisted in
+`.whole_improve_loop.state`, so each re-dispatch (or manual re-run of the
+acceptance command) resumes mid-sweep and **accumulates** toward the
+`num_chunks + 1` clean-sweep threshold — it does not reset to zero every
+run. A run that completes the sweep exits via `stop -> done`. (Before the
+2026-06-02b fix the streak was run-local and capped at the per-run pass
+bound, so `stop` was unreachable on a repo this size and every run
+failed — see ADR-011 → Corrections.)
+
+This multi-run accumulation is **crash-safe**. The rotation cursor and the
+`clean_streak` are persisted together and both advance only once a verdict
+exists, so the on-disk state is always consistent: `cursor` points at the
+chunk currently under review, and `clean_streak` covers the chunks before
+it. If a run dies on a non-clean pass before the fixer finishes (a `fix_*`
+failure routes to `fail` + re-dispatch — the normal large-repo path), the
+re-dispatch resumes **on** that chunk and re-reviews it rather than
+skipping past it. So a blocker can never be "credited" by a crash and the
+loop cannot falsely converge while an un-fixed blocker remains. (Before the
+2026-06-02c fix the cursor advanced eagerly while the streak lagged, which
+could strand the cursor past a blocker chunk and converge without
+re-reviewing it — see ADR-011 → Corrections.)
+
+To converge a **mid-size** repo in a single run, raise `max_review_passes`
+(and the budget) until one run can complete `num_chunks + 1` clean
+passes, and/or raise `max_review_chunk_tokens` (fewer, larger chunks).
+On a repo as large as iterion the multi-run path is the intended one —
+an inherent cost ceiling, not a chunking defect. See ADR-011.
 
 ## Convergence pattern observed in practice
 
@@ -58,7 +153,8 @@ No single prompt resolves the trade-off. Current levers:
 | Strict `stop` (two cross-family `approved=true`) | Prevents a low/low chain from terminating the run |
 | Fixer `pushback` + `prior_pushback` to the next reviewer | Stops a persistent false positive from blocking convergence |
 | `previous_scanned_areas` | Encourages broadening coverage iter after iter, instead of revisiting the same files |
-| `review_loop(N)` | Upper bound that guarantees termination |
+| `max_review_passes` (issue #12) | Per-run pass bound that guarantees termination (wires `review_loop`). Raise it (with budget) to converge a mid-size repo in one run; on iterion-scale repos the persisted `clean_streak` carries convergence across re-dispatches regardless |
+| `max_review_chunk_tokens` (issue #12) | Per-pass context budget. Smaller → more chunks, safer context, more passes to converge; larger → fewer chunks, faster convergence, bigger per-pass prompt |
 
 ## Open prompt-engineering directions
 

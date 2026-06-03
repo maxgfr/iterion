@@ -58,6 +58,30 @@ vars:
   ## observability: structured logs, traces, metrics, lost error
   ## signals."
   improvement_prompt: string = ""
+  ## Context-budget chunking (issue #12). The reviewer never sees the
+  ## whole workspace at once: the deterministic `snapshot_chunk` tool
+  ## groups source files by package/folder into chunks of at most this
+  ## many estimated tokens (~4 bytes/token), and each review pass audits
+  ## ONE chunk. This keeps a ~150k+ LoC workspace from exhausting the
+  ## reviewer's context window on the first iteration. 30000 leaves
+  ## ample head-room under a 200k context for the chunk content + the
+  ## system/user prompt + the model's reasoning. Lower it on a smaller
+  ## context model; raise it to review more per pass (fewer chunks,
+  ## faster convergence) at the cost of a larger per-pass prompt.
+  ## See docs/adr/011-whole-improve-loop-context-chunking.md.
+  max_review_chunk_tokens: int = 30000
+  ## Per-run review-pass budget (issue #12). Each pass reviews ONE chunk,
+  ## so this bounds passes per single run. Convergence needs num_chunks+1
+  ## consecutive clean passes; when num_chunks exceeds this bound a single
+  ## run cannot converge alone, but the persisted clean_streak
+  ## (.whole_improve_loop.state) lets successive re-dispatches accumulate
+  ## toward it. Raise it (with the budget) to converge a mid-size repo in
+  ## ONE run — e.g. a 25-chunk repo converges in one run at 30. The
+  ## default 15 keeps a single run well inside max_cost_usd / max_duration
+  ## with the premium default models. Wired as the review_loop cap via the
+  ## runtime's templated-loop-bound support (resolves to an int; an int
+  ## var default always coerces, so the bound never degrades to 0).
+  max_review_passes: int = 15
 
 prompt review_system:
   You are an EXTREMELY demanding, methodical code reviewer in
@@ -66,13 +90,31 @@ prompt review_system:
   complete review of the code as it runs in production.
 
   REVIEW SCOPE (CRUCIAL):
-  1. You MUST review ALL the code in the workspace, like an
-     SRE taking over the service. The git HEAD hash has NO
-     privilege — a bug introduced six months ago counts as
-     much as a bug in the latest commit.
-  2. You MUST NOT limit yourself to recent commits, to the
-     diff, or to files you touched in prior iterations.
-     `git log` MAY serve as orientation but NEVER as scope.
+  1. The workspace is reviewed like an SRE taking over the
+     service: the git HEAD hash has NO privilege — a bug
+     introduced six months ago counts as much as one in the
+     latest commit. You MUST NOT limit yourself to recent
+     commits or the diff; `git log` MAY orient you but NEVER
+     scopes you.
+  2. CONTEXT-BUDGET CHUNKING (issue #12): a workspace this
+     size does NOT fit in one context window, so the
+     deterministic `snapshot_chunk` tool has already split it
+     by package/folder into bounded chunks and handed you
+     EXACTLY ONE chunk for THIS pass (see "THIS PASS'S CHUNK"
+     in the user message). Review that chunk thoroughly.
+     - The chunk's full source is provided INLINE in the user
+       message (`chunk_content`). That inline content is your
+       primary artifact — you do NOT need to read it from disk.
+     - You MAY use your read tools to follow a SPECIFIC
+       cross-reference into another file, but you MUST NEVER
+       bulk-read, `glob **/*`, `find` without a tight path, or
+       enumerate the tree: that is exactly what exhausts the
+       context window and is the bug this design fixes.
+     - Coverage of the WHOLE workspace is cumulative across
+       passes: the chunk rotates every pass and the streak
+       gate (see below) refuses to terminate until every chunk
+       has been reviewed clean. So judge ONLY the chunk in
+       front of you; do not speculate about unseen chunks.
 
   IMPROVEMENT AXIS (optional override):
   The operator can pass a targeted improvement axis in the
@@ -107,28 +149,36 @@ prompt review_system:
        - Boundaries: recovery after crash/panic,
          resilience to corrupted input, behaviour under
          saturation.
-  4. ITERATIONS — concrete use of history:
-     - On the first iteration, pick 3-5 surfaces and
-       investigate them thoroughly.
-     - On subsequent iterations, pick surfaces NOT YET
-       COVERED by prior iterations (use
-       `previous_scanned_areas` from input). Already
-       examined surfaces are, by default, considered
-       vetted.
-     - You MAY re-examine an already-covered surface
-       ONLY if you have a new concrete hypothesis to
-       test (specific evidence of a bug that may have
-       been missed).
-     - Fill `scanned_areas` with the packages, files, or
-       domains you actually audited this iteration. Be
-       precise and concise.
-  5. The BROADENING PRINCIPLE applies: if you found no
-     blocker after exhausting the obvious surfaces, BROADEN
-     — move to subtle surfaces (concurrency, recovery,
-     observability, corrupted input, edge cases). Do NOT
-     return `approved=true` simply because the zone you
-     looked at is clean. `approved=true` requires the
-     CUMULATIVE COVERAGE across iterations to be sufficient.
+  4. WITHIN THIS CHUNK — be exhaustive:
+     - Apply every relevant axis above to the files in the
+       chunk. The chunk is small enough that you can and
+       must read it in full — no spot-checking.
+     - `previous_scanned_areas` (from input) lists surfaces
+       already audited in prior passes; use it to avoid
+       re-litigating settled findings, NOT to skip the
+       current chunk.
+     - Fill `scanned_areas` with the packages/files you
+       actually audited THIS pass (e.g. the chunk label and
+       the specific files). Be precise and concise.
+  5. APPROVAL SEMANTICS UNDER CHUNKING (read carefully):
+     - Set `approved=true` when THIS chunk has no
+       production-blocking issue, even though you have only
+       seen one slice of the workspace. Withholding approval
+       of a clean chunk on the grounds that "I haven't seen
+       the rest of the repo" is WRONG and would stall the
+       loop forever — full-workspace coverage is guaranteed
+       NOT by you, but by the deterministic streak gate,
+       which refuses to terminate until EVERY chunk has been
+       reviewed clean across a full sweep, with the reviewing
+       family alternating across chunks (both families take
+       part in the sweep).
+     - Set `approved=false` only when THIS chunk contains a
+       genuine production blocker (per the anti-false-positive
+       rules below). Apply the BROADENING PRINCIPLE inside the
+       chunk: if the obvious surfaces are clean, probe the
+       subtle ones (concurrency, recovery, corrupted input)
+       before approving — but probe within the chunk, do not
+       fan out across the repo.
 
   ADR TRACEABILITY (apply to decisions made by the fixer
   across recent iterations of this run):
@@ -196,7 +246,7 @@ prompt review_system:
   you're not sure.
 
 prompt review_user_claude:
-  Review the code in {{vars.workspace_dir}}.
+  Review ONE chunk of the workspace at {{vars.workspace_dir}}.
 
   Targeted improvement axis (empty = full production-ready
   grid by default):
@@ -207,14 +257,28 @@ prompt review_user_claude:
 
   Current iteration: {{loop.review_loop.iteration}}/{{loop.review_loop.max}}
 
+  ## THIS PASS'S CHUNK (issue #12 context-budget chunking)
+  Chunk {{input.chunk_index}} of {{input.num_chunks}}  ·  label: {{input.chunk_label}}
+  Chunked this run: {{input.chunked}}  ·  files in chunk: shown below
+  The full source of this chunk is provided inline below. Review
+  it in full. Use read tools ONLY to follow a specific
+  cross-reference — NEVER to bulk-read or enumerate the tree.
+
+  Files in this chunk:
+  {{input.chunk_files}}
+
+  ----- BEGIN CHUNK SOURCE -----
+  {{input.chunk_content}}
+  ----- END CHUNK SOURCE -----
+
   Previous reviewer's verdict (the OTHER family,
   immediately prior iteration — empty on the first
   iteration):
   {{loop.review_loop.previous_output}}
 
-  Surfaces already audited in prior iterations (all
-  families combined — use this to steer your coverage
-  toward NEW ground, NOT to relax your rigor):
+  Surfaces already audited in prior passes (all families
+  combined — use this to avoid re-litigating settled
+  findings, NOT to skip the current chunk):
   {{input.previous_scanned_areas}}
 
   Items already pushed back by the fixer (you MUST NOT
@@ -224,25 +288,24 @@ prompt review_user_claude:
   Justification for the prior pushback:
   {{input.prior_pushback_justification}}
 
-  Produce a structured verdict:
-    - approved: true ONLY if the cumulative coverage
-      across iterations is sufficient AND no blocker
-      was found — NOT if you only looked at part of
-      the code.
+  Produce a structured verdict for THIS CHUNK:
+    - approved: true when THIS chunk has no production
+      blocker. Do NOT withhold approval merely because you
+      only saw one chunk — the streak gate guarantees full
+      coverage before the loop stops (see system prompt rule
+      5). false only when this chunk has a real blocker.
     - family: "claude" for this reviewer
-    - blockers: list of genuinely blocking issues
+    - blockers: genuinely blocking issues IN THIS CHUNK
       (after self-critique — exclude preferences)
     - fix_plan: concrete action plan to fix the blockers
     - confidence: "low" / "medium" / "high"
-    - scanned_areas: packages / files / surfaces you
-      actually audited THIS iteration (concise text,
-      e.g. "pkg/runtime/engine.go (recovery dispatch)",
-      ".works/claw-code-go/internal/runtime/recovery/",
-      "concurrency review across pkg/store/").
-      Will be relayed to the next reviewer.
+    - scanned_areas: packages / files you actually audited
+      THIS pass (concise — e.g. the chunk label plus the
+      specific files, "pkg/runtime/engine.go (recovery
+      dispatch)"). Relayed to the next reviewer.
 
 prompt review_user_gpt:
-  Review the code in {{vars.workspace_dir}}.
+  Review ONE chunk of the workspace at {{vars.workspace_dir}}.
 
   Targeted improvement axis (empty = full production-ready
   grid by default):
@@ -253,14 +316,28 @@ prompt review_user_gpt:
 
   Current iteration: {{loop.review_loop.iteration}}/{{loop.review_loop.max}}
 
+  ## THIS PASS'S CHUNK (issue #12 context-budget chunking)
+  Chunk {{input.chunk_index}} of {{input.num_chunks}}  ·  label: {{input.chunk_label}}
+  Chunked this run: {{input.chunked}}  ·  files in chunk: shown below
+  The full source of this chunk is provided inline below. Review
+  it in full. Use read tools ONLY to follow a specific
+  cross-reference — NEVER to bulk-read or enumerate the tree.
+
+  Files in this chunk:
+  {{input.chunk_files}}
+
+  ----- BEGIN CHUNK SOURCE -----
+  {{input.chunk_content}}
+  ----- END CHUNK SOURCE -----
+
   Previous reviewer's verdict (the OTHER family,
   immediately prior iteration — empty on the first
   iteration):
   {{loop.review_loop.previous_output}}
 
-  Surfaces already audited in prior iterations (all
-  families combined — use this to steer your coverage
-  toward NEW ground, NOT to relax your rigor):
+  Surfaces already audited in prior passes (all families
+  combined — use this to avoid re-litigating settled
+  findings, NOT to skip the current chunk):
   {{input.previous_scanned_areas}}
 
   Items already pushed back by the fixer (you MUST NOT
@@ -270,19 +347,19 @@ prompt review_user_gpt:
   Justification for the prior pushback:
   {{input.prior_pushback_justification}}
 
-  Produce a structured verdict:
-    - approved: true ONLY if the cumulative coverage
-      across iterations is sufficient AND no blocker
-      was found — NOT if you only looked at part of
-      the code.
+  Produce a structured verdict for THIS CHUNK:
+    - approved: true when THIS chunk has no production
+      blocker. Do NOT withhold approval merely because you
+      only saw one chunk — the streak gate guarantees full
+      coverage before the loop stops (see system prompt rule
+      5). false only when this chunk has a real blocker.
     - family: "gpt" for this reviewer
-    - blockers: list of genuinely blocking issues
+    - blockers: genuinely blocking issues IN THIS CHUNK
       (after self-critique — exclude preferences)
     - fix_plan: concrete action plan to fix the blockers
     - confidence: "low" / "medium" / "high"
-    - scanned_areas: packages / files / surfaces you
-      actually audited THIS iteration (concise text).
-      Will be relayed to the next reviewer.
+    - scanned_areas: packages / files you actually audited
+      THIS pass (concise text). Relayed to the next reviewer.
 
 prompt fix_system:
   You are an expert developer. You fix the blocking issues
@@ -354,6 +431,14 @@ prompt fix_user:
   grid by default, fix everything that is blocking):
   {{vars.improvement_prompt}}
 
+  CHUNK SCOPE (issue #12): these blockers were raised against
+  ONE chunk of the workspace, which you (the same-family
+  reviewer) just inspected in this very session — its source
+  is already in your context. Apply fixes to the files the
+  blockers name (a bounded set within that chunk). Do NOT
+  bulk-read or sweep the rest of the repo: other chunks are
+  reviewed and fixed on their own passes.
+
   Reported blockers:
   {{input.blockers}}
 
@@ -385,6 +470,55 @@ schema review_input:
   ## reviewer reads it to prefer uncovered surfaces — see
   ## review_system rule 4. Empty on the first iteration.
   previous_scanned_areas: string[]
+  ## Chunk fields (issue #12) — populated by the snapshot_chunk tool
+  ## and carried on the alt -> reviewer edge. chunk_content is the
+  ## bounded, pre-fetched source of THIS pass's chunk (≤
+  ## max_review_chunk_tokens); chunk_files is the newline-separated
+  ## path list; chunk_index/num_chunks/chunked describe where this
+  ## chunk sits in the rotation so the reviewer knows it is seeing a
+  ## slice, not the whole repo.
+  chunk_content: string
+  chunk_files: string
+  chunk_label: string
+  chunk_index: int
+  num_chunks: int
+  chunked: bool
+
+## snapshot_output is the deterministic workspace-snapshot tool's
+## contract. It is the shared chunking surface for the reviewer (reads
+## chunk_content) and, transitively, the fixer (inherits the reviewer's
+## session, which already holds the chunk). chunk_index AND the
+## cross-run clean_streak both rotate/accumulate via a persisted JSON
+## state file (.whole_improve_loop.state at the workspace root) so
+## re-dispatched runs advance through the repo AND keep building toward
+## the convergence threshold instead of re-scanning the first chunks and
+## resetting the streak. num_chunks drives the streak gate's coverage
+## requirement; persisted_clean_streak is the on-disk streak BASE the
+## gate increments this pass; total_* are telemetry surfaced in the
+## reviewer prompt.
+schema snapshot_output:
+  chunk_content: string
+  files: string
+  chunk_label: string
+  chunk_index: int
+  num_chunks: int
+  chunked: bool
+  file_count: int
+  chunk_tokens: int
+  total_files: int
+  total_tokens: int
+  skipped_oversize: int
+  ## Cross-run convergence base (issue #12): the clean_streak value the
+  ## snapshot read from .whole_improve_loop.state (seeded from the prior
+  ## pass's verdict via the loop-return edge, or from disk on the first
+  ## pass of a re-dispatched run). streak_check increments it this pass.
+  persisted_clean_streak: int
+  ## Raw monotonic rotation cursor this pass USED (chunk_index ==
+  ## cursor % num_chunks). Carried to streak_check, which echoes it back
+  ## as next_cursor = cursor + 1 so the rotation advance is COUPLED to the
+  ## verdict and persisted atomically with clean_streak — the crash-safety
+  ## fix for issue #12 (ADR-011 -> Corrections 2026-06-02c).
+  cursor: int
 
 schema verdict_output:
   approved: bool
@@ -436,6 +570,29 @@ schema streak_state:
   blockers: string[]
   fix_plan: string
   cumulative_scanned_areas: string[]
+  ## clean_streak counts CONSECUTIVE fully-clean passes (approved AND
+  ## zero blockers). It resets to 0 on any non-clean pass. With one
+  ## chunk reviewed per pass and the family alternating every pass, a
+  ## streak of num_chunks+1 means the entire workspace was reviewed
+  ## clean end-to-end with both families contributing — the chunked
+  ## analogue of the original "two consecutive cross-family approvals".
+  ## (Both-families-contributing is AGGREGATE over the sweep, not
+  ## per-chunk: within one sweep each chunk is seen by exactly one
+  ## family. See ADR-011 -> Corrections.)
+  ## This is what makes a single clean chunk UNABLE to terminate the
+  ## loop (the premature-exit failure mode chunking must avoid).
+  clean_streak: int
+  ## num_chunks is echoed from the snapshot so the stop expression can
+  ## scale the required streak length to the workspace size.
+  num_chunks: int
+  ## next_cursor = input.cursor + 1 — the rotation cursor for the NEXT
+  ## pass, advanced exactly once per pass (verdict-independent: a blocker
+  ## resets clean_streak but still advances coverage). It is handed back
+  ## to snapshot_chunk on EVERY loop-return edge so the cursor advance and
+  ## the clean_streak update land in the SAME on-disk write, keeping the
+  ## persisted {cursor, clean_streak} pair consistent and crash-safe
+  ## (issue #12, ADR-011 -> Corrections 2026-06-02c).
+  next_cursor: int
 
 schema fix_input:
   blockers: string[]
@@ -448,6 +605,293 @@ schema fix_output:
   pushback_justification: string
 
 ## ─── Nodes ──────────────────────────────────────────────────────
+
+## snapshot_chunk (issue #12) — the deterministic workspace-snapshot /
+## chunking node, shared by the reviewer (which reads the emitted
+## chunk_content) and, via session inheritance, the fixer. It groups
+## source files by package/folder (Go-package boundary == directory)
+## into chunks of at most {{vars.max_review_chunk_tokens}} estimated
+## tokens, then emits EXACTLY ONE chunk for this pass. A package larger
+## than the budget is split by file-size budget (the "package boundary
+## first, then file-size" heuristic). The selected chunk rotates via a
+## persisted JSON state file (.whole_improve_loop.state at the workspace
+## root, add it to .gitignore) which ALSO carries the cross-run
+## clean_streak, so a re-dispatched run advances through the repo AND
+## keeps accumulating toward convergence rather than re-scanning the
+## first chunks and resetting the streak; deleting that file restarts
+## coverage and the streak from 0. No LLM — pure enumeration, so the
+## reviewer never burns context discovering files (the doc-align
+## deterministic-prepass lesson, applied to source instead of docs).
+## sh -c is dash on some hosts / bash in devbox — the body is plain
+## POSIX + python3 (the same toolchain sec-audit-source's tool nodes
+## rely on); keep it double-quote-free so `python3 -c "..."` stays intact.
+tool snapshot_chunk:
+  command: `WS={{vars.workspace_dir}} BUDGET={{vars.max_review_chunk_tokens}} STATE_IN={{input.incoming_clean_streak}} STATE_CURSOR={{input.incoming_cursor}} python3 -c "
+import os, sys, json
+
+ws = os.environ.get('WS', '.')
+budget = int(os.environ.get('BUDGET', '30000') or '30000')
+if budget <= 0:
+    budget = 30000
+
+# Persistent state (issue #12): ONE json dotfile at the workspace root
+# holds BOTH the package-chunk rotation cursor AND the cross-run
+# clean_streak. Why both, why persisted: the review_loop counter and
+# streak_check's output are run-local and reset on every (re-)dispatch,
+# so without an on-disk streak a workspace whose num_chunks exceeds the
+# per-run review_loop bound could NEVER reach the convergence threshold
+# (num_chunks+1 consecutive clean passes) across ANY number of runs —
+# the cursor advancing coverage was necessary but not sufficient. The
+# streak now accumulates across runs here, which is what actually makes
+# 'cross-family approval terminates the loop' reachable on an iterion-
+# sized repo. Neutral, gitignore-able. Best-effort: a read-only FS
+# degrades to chunk 0 / streak 0 (still bounded, just non-advancing).
+# See docs/adr/011-whole-improve-loop-context-chunking.md -> Corrections.
+state_path = os.path.join(ws, '.whole_improve_loop.state')
+cursor = 0
+disk_streak = 0
+try:
+    with open(state_path, 'r', encoding='utf-8') as sf:
+        st = json.load(sf)
+    # Valid JSON that is not an object (a bare list/scalar/null, e.g. a
+    # hand-edit or a foreign writer of this gitignore-able dotfile) has no
+    # .get and would raise AttributeError -- which the except tuple below
+    # does NOT catch, crashing snapshot_chunk (the workflow entry + every
+    # loop-return target) and bricking the whole loop. Coerce to {} so the
+    # cursor/streak fall through to their 0 defaults: the same best-effort
+    # degrade this block already gives a missing/garbage/non-int state file.
+    if not isinstance(st, dict):
+        st = {}
+    cursor = int(st.get('cursor', 0) or 0)
+    disk_streak = int(st.get('clean_streak', 0) or 0)
+except (OSError, IOError, ValueError, TypeError):
+    cursor = 0
+    disk_streak = 0
+if cursor < 0:
+    cursor = 0
+if disk_streak < 0:
+    disk_streak = 0
+
+# State threading for THIS pass (issue #12, crash-safe). snapshot_chunk
+# is the ONLY filesystem writer in the loop and it runs BEFORE the
+# reviewer, so it can only ever persist verdicts up to the PREVIOUS pass.
+# The cursor AND the clean_streak are therefore both fed back from
+# streak_check on the loop-return edge (STATE_CURSOR / STATE_IN) and
+# persisted together (see the persist below), so the on-disk pair
+# {cursor, clean_streak} is always self-consistent: clean_streak counts
+# the consecutive clean passes for the chunks STRICTLY BEFORE cursor, and
+# 'cursor' names the chunk this pass is about to (re-)review.
+#
+# Crash-safety (the bug this replaces): the cursor is NOT advanced
+# eagerly here. It advances only via streak_check's next_cursor, AFTER a
+# verdict exists. So if the run dies on a non-clean pass before the next
+# snapshot persists streak_check's reset (the common case: the fix_* node
+# failing on budget/rate-limit/cancel, which routes to 'fail' + a
+# re-dispatch), disk still points cursor AT the un-verdicted chunk, and
+# the re-dispatch RE-REVIEWS it instead of skipping past it. The previous
+# design advanced cursor+1 eagerly while the streak lagged one pass, so a
+# crash could leave cursor PAST a blocker chunk with a stale-high streak,
+# and the shortened terminating window converged ('stop' -> done) without
+# the blocker chunk ever being re-reviewed -- a silent false convergence.
+# See docs/adr/011-whole-improve-loop-context-chunking.md -> Corrections
+# (2026-06-02c).
+#
+# On the FIRST pass of a (re-)dispatched run there is no inbound edge:
+# STATE_IN / STATE_CURSOR render as an empty/literal placeholder, the
+# float() parse fails, and we seed BOTH from disk instead. float() (not
+# int()) tolerates a value the expr engine stringifies as e.g. '6' or
+# '6.0'.
+clean_streak = disk_streak
+try:
+    incoming = int(float((os.environ.get('STATE_IN', '') or '').strip()))
+    if incoming >= 0:
+        clean_streak = incoming
+except (ValueError, TypeError):
+    pass
+# Cursor base for THIS pass: the edge-fed next_cursor (authoritative,
+# verdict-coupled) when present, else the disk cursor on a fresh dispatch.
+try:
+    incoming_cursor = int(float((os.environ.get('STATE_CURSOR', '') or '').strip()))
+    if incoming_cursor >= 0:
+        cursor = incoming_cursor
+except (ValueError, TypeError):
+    pass
+
+EXCLUDED_DIRS = {
+    'vendor', 'node_modules', 'env', 'dist', 'build', 'out', 'target',
+    '__pycache__', 'testdata', 'coverage',
+}
+SOURCE_EXTS = {
+    '.go', '.py', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.java',
+    '.rb', '.rs', '.c', '.h', '.cc', '.cpp', '.hpp', '.cxx', '.hxx',
+    '.cs', '.php', '.swift', '.kt', '.kts', '.scala', '.sh', '.bash',
+    '.zsh', '.sql', '.proto', '.tf', '.gradle', '.groovy', '.lua', '.ex',
+    '.exs', '.erl', '.clj', '.dart', '.vue', '.svelte', '.ml', '.mli',
+    '.hs', '.jl', '.r', '.pl', '.pm',
+}
+SKIP_SUFFIXES = ('.min.js', '.min.css', '.pb.go', '_pb2.py', '.gen.go',
+                 '.generated.go', '.g.dart')
+MAX_FILES = 20000
+MAX_FILE_TOKENS = budget
+
+
+def est_tokens(nbytes):
+    return (nbytes + 3) // 4
+
+
+pkgs = {}
+total_files = 0
+total_tokens = 0
+truncated_scan = False
+for root, dirs, names in os.walk(ws):
+    # Prune dependency/build dirs AND every hidden dir (.git, .devbox,
+    # .iterion, .works, .github, .archive, .claude, .venv, ...).
+    dirs[:] = sorted(d for d in dirs if d not in EXCLUDED_DIRS and not d.startswith('.'))
+    for n in sorted(names):
+        ext = os.path.splitext(n)[1].lower()
+        if ext not in SOURCE_EXTS:
+            continue
+        if any(n.endswith(s) for s in SKIP_SUFFIXES):
+            continue
+        full = os.path.join(root, n)
+        try:
+            if os.path.islink(full):
+                continue
+            sz = os.path.getsize(full)
+        except OSError:
+            continue
+        rel = os.path.relpath(full, ws)
+        tok = est_tokens(sz)
+        pkgs.setdefault(os.path.dirname(rel) or '.', []).append((rel, tok))
+        total_files += 1
+        total_tokens += tok
+        if total_files >= MAX_FILES:
+            truncated_scan = True
+            break
+    if truncated_scan:
+        break
+
+
+def pack(pkgs, budget):
+    chunks = []
+    cur = {'files': [], 'tokens': 0, 'dirs': []}
+
+    def flush():
+        nonlocal cur
+        if cur['files']:
+            chunks.append(cur)
+            cur = {'files': [], 'tokens': 0, 'dirs': []}
+
+    for d in sorted(pkgs.keys()):
+        files = pkgs[d]
+        pkg_tokens = sum(t for _, t in files)
+        if pkg_tokens <= budget:
+            if cur['tokens'] + pkg_tokens > budget and cur['files']:
+                flush()
+            cur['files'].extend(files)
+            cur['tokens'] += pkg_tokens
+            cur['dirs'].append(d)
+        else:
+            flush()
+            sub = {'files': [], 'tokens': 0, 'dirs': [d]}
+            for rel, tok in files:
+                if sub['tokens'] + tok > budget and sub['files']:
+                    chunks.append(sub)
+                    sub = {'files': [], 'tokens': 0, 'dirs': [d]}
+                sub['files'].append((rel, tok))
+                sub['tokens'] += tok
+            if sub['files']:
+                chunks.append(sub)
+    flush()
+    return chunks
+
+
+chunks = pack(pkgs, budget)
+num_chunks = len(chunks)
+
+if num_chunks == 0:
+    try:
+        with open(state_path, 'w', encoding='utf-8') as sf:
+            json.dump({'cursor': 0, 'clean_streak': int(clean_streak),
+                       'num_chunks': 1}, sf)
+    except (OSError, IOError):
+        pass
+    print(json.dumps({
+        'chunk_content': '(no source files found in workspace)',
+        'files': '', 'chunk_label': 'empty', 'chunk_index': 0,
+        'num_chunks': 1, 'chunked': False, 'file_count': 0,
+        'chunk_tokens': 0, 'total_files': 0, 'total_tokens': 0,
+        'skipped_oversize': 0, 'persisted_clean_streak': int(clean_streak),
+        'cursor': int(cursor),
+    }))
+    sys.exit(0)
+
+idx = cursor % num_chunks
+chunk = chunks[idx]
+# Persist the (cursor, clean_streak) pair this pass is USING -- NOT an
+# eager cursor+1. The advance to the next chunk rides streak_check's
+# next_cursor on the loop-return edge, so the cursor only moves once a
+# verdict has been folded in. This keeps disk crash-safe: a run that dies
+# mid-pass leaves cursor pointing at the chunk under review, so a
+# re-dispatch re-reviews it rather than skipping past it (issue #12,
+# ADR-011 -> Corrections 2026-06-02c).
+try:
+    with open(state_path, 'w', encoding='utf-8') as sf:
+        json.dump({'cursor': cursor, 'clean_streak': int(clean_streak),
+                   'num_chunks': num_chunks}, sf)
+except (OSError, IOError):
+    pass
+
+hard_cap = budget * 4 + 4096
+parts = []
+used = 0
+skipped_oversize = 0
+for rel, tok in chunk['files']:
+    abs_path = os.path.join(ws, rel)
+    try:
+        with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
+            body = f.read()
+    except (OSError, IOError):
+        continue
+    if est_tokens(len(body)) > MAX_FILE_TOKENS:
+        body = body[:MAX_FILE_TOKENS * 4] + '\n... [truncated: file exceeds one chunk budget] ...\n'
+        skipped_oversize += 1
+    header = '===== FILE: %s (~%d tokens) =====\n' % (rel, tok)
+    block = header + body + '\n'
+    if used + len(block) > hard_cap:
+        parts.append('... [chunk content truncated at the char cap] ...\n')
+        break
+    parts.append(block)
+    used += len(block)
+
+content = ''.join(parts)
+file_list = '\n'.join(rel for rel, _ in chunk['files'])
+dirs = chunk['dirs']
+if len(dirs) == 1:
+    label = dirs[0]
+else:
+    label = '%s (+%d more dirs)' % (dirs[0], len(dirs) - 1)
+
+print(json.dumps({
+    'chunk_content': content,
+    'files': file_list,
+    'chunk_label': label,
+    'chunk_index': idx,
+    'num_chunks': num_chunks,
+    'chunked': num_chunks > 1,
+    'file_count': len(chunk['files']),
+    'chunk_tokens': chunk['tokens'],
+    'total_files': total_files,
+    'total_tokens': total_tokens,
+    'skipped_oversize': skipped_oversize,
+    'persisted_clean_streak': int(clean_streak),
+    # Raw monotonic rotation cursor this pass USED (idx == cursor %
+    # num_chunks). streak_check echoes it back as next_cursor = cursor + 1
+    # on the loop-return edge so the advance is coupled to the verdict.
+    'cursor': int(cursor),
+}))
+"`
+  output: snapshot_output
 
 router alt:
   mode: round_robin
@@ -501,31 +945,91 @@ judge reviewer_gpt:
   tool_max_steps: 30
   interaction: human
 
-## Deterministic streak detector.
+## Deterministic streak detector (coverage-aware under chunking,
+## issue #12).
 ##
-## stop=true iff (current AND previous reviewer both ACTUALLY
-## approved) AND families differ. The success criterion is two
-## consecutive POSITIVE verdicts from opposite families — both
-## AIs must let the code pass on successive iterations. A
-## low-confidence rejection does NOT count as approval for the
-## stop signal: the code only ships when it convinces both
-## reviewers.
+## clean_streak counts CONSECUTIVE fully-clean passes (approved AND
+## zero blockers), resetting to 0 on any non-clean pass. Because each
+## pass reviews exactly ONE chunk and the family alternates every pass
+## (round_robin), a clean_streak of `num_chunks + 1` means the entire
+## workspace was just reviewed clean end-to-end with both families
+## contributing — the chunked analogue of the original "two
+## consecutive cross-family approvals".
+## NB (precise guarantee): the cursor advances one chunk and the family
+## flips one step per pass, so within a SINGLE terminating sweep each
+## chunk is seen by exactly ONE family (only the wrap chunk repeats).
+## "Both families contributing" is therefore an AGGREGATE property of
+## the sweep, NOT a per-chunk one; per-chunk dual-family coverage
+## accrues across SUCCESSIVE sweeps. Gating on per-chunk cross-family
+## would need ~2*num_chunks clean passes — infeasible at iterion scale
+## under review_loop/$budget. See ADR-011 → Corrections (2026-06-02).
+## stop fires only when THIS pass
+## is clean AND that running streak reaches the threshold:
+##   threshold = num_chunks + 1   (chunked: a full sweep + 1)
+##             = 2                 (num_chunks <= 1: original semantics)
+## Crucially this makes a single clean chunk UNABLE to terminate the
+## loop — the premature-exit failure mode chunking must avoid.
+##
+## CROSS-RUN PERSISTENCE (issue #12 fix). The streak BASE is NOT read
+## from `outputs.streak_check` (run-local, reset every dispatch) but
+## from `input.persisted_clean_streak` — the value snapshot_chunk read
+## from `.whole_improve_loop.state` this pass. snapshot_chunk re-persists
+## the post-review streak each pass (fed back on the loop-return edge),
+## so a streak that needs `num_chunks + 1` clean passes can now ACCUMULATE
+## across re-dispatches instead of capping at the per-run review_loop
+## bound. This is what makes `stop` reachable on a workspace whose
+## num_chunks exceeds the per-run pass budget (e.g. iterion ≈ 101 chunks);
+## previously clean_streak could never exceed review_loop(15) < 102, so
+## the loop could never converge on its own named target. Using the
+## snapshot-supplied base (not a self-reference) also sidesteps the
+## nil-vs-0 ambiguity of `if(prev, prev+1, …)`: a mid-run reset (streak
+## 0) and a first pass (no prior output) are both handled by snapshot_chunk
+## deterministically. See ADR-011 → Corrections (2026-06-02b).
+##
+## CRASH-SAFE ROTATION (issue #12 fix, 2026-06-02c). The rotation cursor
+## and the clean_streak are now persisted TOGETHER, both verdict-coupled.
+## streak_check emits `next_cursor = input.cursor + 1` and EVERY
+## loop-return edge hands BOTH `incoming_clean_streak` AND `incoming_cursor`
+## back to snapshot_chunk, which persists the pair it is USING (no eager
+## cursor+1). The on-disk {cursor, clean_streak} is therefore always
+## consistent — clean_streak counts the clean passes for chunks strictly
+## BEFORE cursor. So if a run dies on a non-clean pass before the reset is
+## persisted (the common case: a fix_* failure → `fail` → re-dispatch),
+## disk still points cursor AT the un-verdicted chunk and the re-dispatch
+## RE-REVIEWS it. The earlier design advanced cursor eagerly while the
+## streak lagged, which could strand the cursor PAST a blocker chunk with a
+## stale-high streak and let the shortened window converge without ever
+## re-reviewing the blocker — a silent false convergence. See ADR-011 →
+## Corrections (2026-06-02c).
+##
+## A single run still makes only bounded progress when num_chunks exceeds
+## the per-run pass budget (max_review_passes), but the persisted streak
+## means successive re-dispatches CONVERGE rather than merely re-cover.
+## Raise `max_review_passes` (and the budget) to converge a mid-size repo
+## in one run. See the README "Large workspaces" note and ADR-011.
 ##
 ## The `approved` passthrough field stays soft — it includes
-## low-confidence rejections — so the downstream
-## `when approved` edge keeps alternating without invoking the
-## fixer when a reviewer is merely uncertain. This separation
-## means the workflow keeps cycling without forced fix attempts
-## on flaky-low-confidence rejections, but requires real
-## approvals to terminate.
+## low-confidence rejections — so the downstream `when approved` edge
+## keeps alternating without invoking the fixer when a reviewer is
+## merely uncertain. This separation means the workflow keeps cycling
+## without forced fix attempts on flaky-low-confidence rejections, but
+## requires real, blocker-free approvals to build the clean streak.
 compute streak_check:
   output: streak_state
   expr:
-    stop: "input.approved && loop.review_loop.previous_output.approved && input.family != loop.review_loop.previous_output.family"
+    clean_streak: "if(input.approved && length(input.blockers) == 0, input.persisted_clean_streak + 1, 0)"
+    stop: "(input.approved && length(input.blockers) == 0) && (input.persisted_clean_streak + 1 >= if(input.num_chunks > 1, input.num_chunks + 1, 2))"
     approved: "input.approved || input.confidence == 'low'"
     family: "input.family"
     blockers: "input.blockers"
     fix_plan: "input.fix_plan"
+    num_chunks: "input.num_chunks"
+    ## Advance the rotation cursor exactly once per pass, regardless of the
+    ## verdict (a blocker resets clean_streak above but coverage still
+    ## moves on). Handed back to snapshot_chunk on every loop-return edge
+    ## so the advance is persisted ATOMICALLY with clean_streak — the
+    ## crash-safety fix for issue #12 (see schema next_cursor / ADR-011).
+    next_cursor: "input.cursor + 1"
     cumulative_scanned_areas: "unique(concat(outputs.streak_check.cumulative_scanned_areas, input.scanned_areas))"
 
 ## Per-family fixers. Each one inherits the SAME-family reviewer's
@@ -585,7 +1089,10 @@ tool commit_changes:
 ## ─── Workflow ───────────────────────────────────────────────────
 
 workflow whole_improve_loop:
-  entry: alt
+  ## Entry is the deterministic chunker, not the round-robin router:
+  ## every pass re-snapshots the workspace (picking up the fixer's
+  ## edits) and selects this pass's chunk BEFORE the reviewer runs.
+  entry: snapshot_chunk
 
   ## Container isolation. Reviewers run `git diff`, `go test`,
   ## linters, smoke-runs, etc. — all of which we'd rather not expose
@@ -610,44 +1117,67 @@ workflow whole_improve_loop:
     threshold: 0.9
     preserve_recent: 8
 
+  ## snapshot_chunk (the chunker) runs first each pass, then hands off
+  ## to the round-robin router. Its output (this pass's chunk) is read
+  ## by both reviewer edges below.
+  snapshot_chunk -> alt
+
   ## Round-robin alternates: 1st pass → claude, 2nd → gpt, repeat.
-  ## Each reviewer receives the OTHER family's most recent fixer
-  ## pushback so it knows which items to skip — the alternation
-  ## guarantees the cross-family pushback comes from the previous
-  ## iteration's fixer of the opposing family. On the first
-  ## iteration both `outputs.fix_*` are empty → fields render as
-  ## empty strings and the prompt's "ne re-flague pas ces items"
-  ## section is harmless.
+  ## Each reviewer receives THIS pass's chunk (from snapshot_chunk) plus
+  ## the OTHER family's most recent fixer pushback so it knows which
+  ## items to skip — the alternation guarantees the cross-family
+  ## pushback comes from the previous iteration's fixer of the opposing
+  ## family. On the first iteration both `outputs.fix_*` are empty →
+  ## fields render as empty strings and the prompt's "do not re-flag
+  ## these items" section is harmless.
   alt -> reviewer_claude with {
     prior_pushback: "{{outputs.fix_gpt.pushback}}",
     prior_pushback_justification: "{{outputs.fix_gpt.pushback_justification}}",
-    previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}"
+    previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}",
+    chunk_content: "{{outputs.snapshot_chunk.chunk_content}}",
+    chunk_files: "{{outputs.snapshot_chunk.files}}",
+    chunk_label: "{{outputs.snapshot_chunk.chunk_label}}",
+    chunk_index: "{{outputs.snapshot_chunk.chunk_index}}",
+    num_chunks: "{{outputs.snapshot_chunk.num_chunks}}",
+    chunked: "{{outputs.snapshot_chunk.chunked}}"
   }
   alt -> reviewer_gpt with {
     prior_pushback: "{{outputs.fix_claude.pushback}}",
     prior_pushback_justification: "{{outputs.fix_claude.pushback_justification}}",
-    previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}"
+    previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}",
+    chunk_content: "{{outputs.snapshot_chunk.chunk_content}}",
+    chunk_files: "{{outputs.snapshot_chunk.files}}",
+    chunk_label: "{{outputs.snapshot_chunk.chunk_label}}",
+    chunk_index: "{{outputs.snapshot_chunk.chunk_index}}",
+    num_chunks: "{{outputs.snapshot_chunk.num_chunks}}",
+    chunked: "{{outputs.snapshot_chunk.chunked}}"
   }
 
   ## Both reviewers feed into streak_check. The loop is attached
   ## here so the runtime snapshots the reviewer's verdict as
   ## `loop.review_loop.previous_output` for the NEXT iteration to
   ## inspect — eliminating the manual `previous_verdict` relay.
-  reviewer_claude -> streak_check as review_loop(15) with {
+  reviewer_claude -> streak_check as review_loop("{{vars.max_review_passes}}") with {
     approved: "{{outputs.reviewer_claude.approved}}",
     family: "{{outputs.reviewer_claude.family}}",
     blockers: "{{outputs.reviewer_claude.blockers}}",
     fix_plan: "{{outputs.reviewer_claude.fix_plan}}",
     confidence: "{{outputs.reviewer_claude.confidence}}",
-    scanned_areas: "{{outputs.reviewer_claude.scanned_areas}}"
+    scanned_areas: "{{outputs.reviewer_claude.scanned_areas}}",
+    num_chunks: "{{outputs.snapshot_chunk.num_chunks}}",
+    persisted_clean_streak: "{{outputs.snapshot_chunk.persisted_clean_streak}}",
+    cursor: "{{outputs.snapshot_chunk.cursor}}"
   }
-  reviewer_gpt -> streak_check as review_loop(15) with {
+  reviewer_gpt -> streak_check as review_loop("{{vars.max_review_passes}}") with {
     approved: "{{outputs.reviewer_gpt.approved}}",
     family: "{{outputs.reviewer_gpt.family}}",
     blockers: "{{outputs.reviewer_gpt.blockers}}",
     fix_plan: "{{outputs.reviewer_gpt.fix_plan}}",
     confidence: "{{outputs.reviewer_gpt.confidence}}",
-    scanned_areas: "{{outputs.reviewer_gpt.scanned_areas}}"
+    scanned_areas: "{{outputs.reviewer_gpt.scanned_areas}}",
+    num_chunks: "{{outputs.snapshot_chunk.num_chunks}}",
+    persisted_clean_streak: "{{outputs.snapshot_chunk.persisted_clean_streak}}",
+    cursor: "{{outputs.snapshot_chunk.cursor}}"
   }
 
   ## Stop when streak detected (cross-family double approval) → commit
@@ -658,17 +1188,23 @@ workflow whole_improve_loop:
 
   ## Otherwise approved (no streak yet, OR low-confidence rejection
   ## treated as soft-approved, OR rejection without concrete blockers
-  ## — see below): keep alternating without fixing.
-  ## Expression form is shown here both to demonstrate the new
-  ## syntax and so future authors can extend the predicate (e.g.
-  ## tighten the soft-approval condition) by enriching the
-  ## quoted expression.
+  ## — see below): keep alternating without fixing. Routes back to
+  ## snapshot_chunk (not alt) so the cursor advances and the NEXT pass
+  ## reviews the NEXT chunk; snapshot_chunk -> alt then alternates the
+  ## family. Expression form is kept so future authors can tighten the
+  ## soft-approval predicate.
   ##
   ## NOTE: this edge does NOT carry `review_loop` so the loop
   ## counter (and the previous_output snapshot) is incremented
   ## ONCE per cycle on the reviewer→streak_check edge above. The
   ## cycle is still bounded because that edge IS loop-bearing.
-  streak_check -> alt when "approved"
+  ## It DOES hand this pass's clean_streak back to snapshot_chunk so the
+  ## next snapshot re-persists it to .whole_improve_loop.state (cross-run
+  ## convergence — issue #12).
+  streak_check -> snapshot_chunk when "approved" with {
+    incoming_clean_streak: "{{outputs.streak_check.clean_streak}}",
+    incoming_cursor: "{{outputs.streak_check.next_cursor}}"
+  }
 
   ## Medium/high-confidence rejection WITH concrete blockers: route
   ## to the SAME-family fixer so it can inherit the reviewer's
@@ -706,28 +1242,54 @@ workflow whole_improve_loop:
   ## interfere with the review_loop snapshot semantics. Sized large
   ## enough to allow review_loop to be the binding constraint. Both
   ## fixers share the loop counter — total fix attempts across both
-  ## families are capped at 20.
-  fix_claude -> alt as recovery_loop(20)
-  fix_gpt    -> alt as recovery_loop(20)
+  ## families are capped at 20. Routes back to snapshot_chunk so the
+  ## cursor advances after a fix and the next pass reviews the next
+  ## chunk (the fixed chunk is re-reviewed when the rotation wraps).
+  ## Hands the (now-reset, since this pass had blockers) clean_streak
+  ## back so snapshot_chunk persists the reset to disk — a fix must NOT
+  ## leave a stale non-zero streak on disk (issue #12).
+  fix_claude -> snapshot_chunk as recovery_loop(20) with {
+    incoming_clean_streak: "{{outputs.streak_check.clean_streak}}",
+    incoming_cursor: "{{outputs.streak_check.next_cursor}}"
+  }
+  fix_gpt -> snapshot_chunk as recovery_loop(20) with {
+    incoming_clean_streak: "{{outputs.streak_check.clean_streak}}",
+    incoming_cursor: "{{outputs.streak_check.next_cursor}}"
+  }
 
   ## Loop exhaustion fallbacks: when a bounded loop hits its limit
   ## the loop-bearing edges above are skipped and execution falls
   ## through to these terminal edges. Route to `fail`, NOT `done`:
   ## exhausting the review/recovery loop WITHOUT streak_check ever
-  ## firing `stop` means no convergence — reporting `finished` there
-  ## is a silent empty success, and the dispatcher would mark the
-  ## ticket done/review as if work landed. `fail` is non-resumable so
-  ## a deterministic non-convergence isn't re-dispatched in a loop.
+  ## firing `stop` means this run did not reach convergence — reporting
+  ## `finished` there is a silent empty success, and the dispatcher would
+  ## mark the ticket done/review as if the whole workspace were clean.
   ## Legit success runs through streak_check's `stop` edge → done.
+  ##
+  ## ON LARGE REPOS THIS IS EXPECTED, NOT A DEAD END (issue #12): when
+  ## num_chunks exceeds max_review_passes a single run cannot complete a
+  ## full clean sweep, so it exhausts review_loop and lands here — but the
+  ## clean_streak and rotation cursor are PERSISTED to
+  ## .whole_improve_loop.state, so a re-dispatch (or a manual re-run of
+  ## the acceptance command) resumes mid-sweep and accumulates toward the
+  ## num_chunks+1 threshold. `fail` is the per-run signal "not converged
+  ## yet"; the operator/dispatcher re-runs until a run exits via `stop`.
+  ## Tune max_review_passes up (with the budget) to converge in fewer
+  ## runs. See README "Large workspaces" and ADR-011 → Corrections.
   reviewer_claude -> fail
   reviewer_gpt    -> fail
   fix_claude      -> fail
   fix_gpt         -> fail
-  ## streak_check's catch-all routes back to `alt` (not a terminal) so
-  ## an unmatched conditional state (e.g. a hallucinated family that
-  ## escapes the enum, or any future expression edge case) keeps
-  ## the loop cycling rather than silently terminating. The bounded
-  ## review_loop counter on the reviewer→streak_check edges still
-  ## guarantees the workflow eventually exits — exhaustion routes
-  ## via the reviewer→fail fallthrough above.
-  streak_check    -> alt
+  ## streak_check's catch-all routes back to snapshot_chunk (not a
+  ## terminal) so an unmatched conditional state (e.g. a hallucinated
+  ## family that escapes the enum, or any future expression edge case)
+  ## keeps the loop cycling rather than silently terminating. The
+  ## bounded review_loop counter on the reviewer→streak_check edges
+  ## still guarantees the workflow eventually exits — exhaustion routes
+  ## via the reviewer→fail fallthrough above. Carries the streak back
+  ## like the other loop-return edges so the persisted state stays
+  ## coherent even on this rare path (issue #12).
+  streak_check    -> snapshot_chunk with {
+    incoming_clean_streak: "{{outputs.streak_check.clean_streak}}",
+    incoming_cursor: "{{outputs.streak_check.next_cursor}}"
+  }

@@ -14,6 +14,12 @@
 .iterion/
 .iterion-*/
 
+# whole_improve_loop (issue #12) persists its package-chunk rotation
+# cursor AND its cross-run clean_streak here when dogfooded on this repo.
+# It's coverage+convergence state, not source — regenerable (delete to
+# restart coverage and the streak from 0).
+.whole_improve_loop.state
+
 # Sandbox runtime scratch — the container redirects HOME / XDG_CACHE_HOME
 # and the Go toolchain caches (GOPATH / GOCACHE) into the bind-mounted
 # worktree (devbox writes its version cache there, `go test`/`go build`
