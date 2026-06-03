@@ -166,9 +166,18 @@ func (c *Dispatcher) sweepStaleLocalClaims() {
 		SweepStaleClaims(func(marker string) bool) ([]string, error)
 	})
 	if !ok {
-		// External adapters (github/forgejo) carry claims as labels;
-		// they handle stale claims with their own GC. The interface
-		// type-assert keeps the dispatcher loosely coupled.
+		// External adapters (github/forgejo) carry the claim as a single
+		// markerless label (ClaimedLabel) — no host/PID is encoded, so a
+		// sweep has nothing to key on, and these adapters ship no GC of
+		// their own. Consequence: a claim left behind by a crashed or
+		// SIGKILL'd dispatcher (OOM, watchexec rebuild, pod eviction, a
+		// run that never reached finishRun's Release) keeps the issue
+		// filtered out of ListCandidates indefinitely — it is only
+		// reclaimed by removing the label on the tracker by hand. Surface
+		// that once at startup so the stranding isn't silent. A proper
+		// fix (marker-bearing claim labels + an external sweep) is left
+		// as a precise finding.
+		c.logger.Info("dispatcher: %s tracker has no stale-claim sweep — an issue claimed by a dispatcher that crashes before releasing stays out of dispatch until its claim label is removed by hand", c.tracker.Name())
 		return
 	}
 	host, _ := osHostname()
@@ -504,6 +513,14 @@ func (c *Dispatcher) buildSnapshot() Snapshot {
 			DueAt:      e.DueAt,
 			Error:      e.LastError,
 		})
+	}
+	skids := make([]string, 0, len(c.state.dispatchSkips))
+	for id := range c.state.dispatchSkips {
+		skids = append(skids, id)
+	}
+	sort.Strings(skids)
+	for _, id := range skids {
+		snap.DispatchSkips = append(snap.DispatchSkips, c.state.dispatchSkips[id])
 	}
 	return snap
 }

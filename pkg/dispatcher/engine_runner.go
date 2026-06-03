@@ -95,6 +95,28 @@ func NewEngineRunner(workflowPath string, logger *iterlog.Logger) (*EngineRunner
 // startup.
 func (r *EngineRunner) Workflow() *ir.Workflow { return r.workflow }
 
+// DeclaredVars returns the set of var names the compiled workflow
+// declares. The routeKey argument is ignored — a single-workflow runner
+// has no routing — but kept so EngineRunner and RoutingRunner share the
+// `DeclaredVars(string) map[string]struct{}` shape the dispatcher type-
+// asserts in buildSpec. Returns nil when the workflow is unset.
+//
+// The dispatcher uses this to warn at dispatch time when a per-ticket
+// bot_arg names a var the routed workflow does not declare: resolveVars
+// (pkg/runtime/engine.go) silently drops undeclared input keys, so an
+// unvalidated bot_arg would otherwise reach the bot as if unset with no
+// signal anywhere.
+func (r *EngineRunner) DeclaredVars(string) map[string]struct{} {
+	if r.workflow == nil {
+		return nil
+	}
+	out := make(map[string]struct{}, len(r.workflow.Vars))
+	for name := range r.workflow.Vars {
+		out[name] = struct{}{}
+	}
+	return out
+}
+
 // Close releases any resources tied to the workflow source — in
 // particular, removes the extraction directory of a `.botz` archive.
 // Safe to call multiple times.

@@ -288,6 +288,84 @@ func TestDispatch_SkipsUnresolvableExplicitBot(t *testing.T) {
 	if dispatched.Load() != 0 {
 		t.Fatalf("runner.Dispatch called %d times, want 0", dispatched.Load())
 	}
+
+	// The skip must be reconcilable from the UI, not just a log line:
+	// dispatch() records it in state and buildSnapshot surfaces it so the
+	// board / dispatcher dashboard can show WHY the ticket sits idle.
+	skip, ok := c.state.dispatchSkips["fake:ghost"]
+	if !ok {
+		t.Fatalf("dispatch-skip not recorded for the unresolvable bot")
+	}
+	if skip.Bot != "no-such-bot-xyz" || skip.Reason == "" {
+		t.Errorf("skip entry incomplete: %+v", skip)
+	}
+	if snap := c.buildSnapshot(); len(snap.DispatchSkips) != 1 || snap.DispatchSkips[0].IssueID != "fake:ghost" {
+		t.Fatalf("snapshot DispatchSkips = %+v, want one fake:ghost entry", c.buildSnapshot().DispatchSkips)
+	}
+}
+
+// TestDispatchSkip_SurfacedThenPruned drives the actor's tick directly:
+// an eligible ticket naming an unrouteable bot must surface a
+// dispatch-skip entry (so the operator can reconcile the silent stall),
+// and that entry must be pruned once the ticket leaves the eligible lane
+// so the UI doesn't carry a stale "won't dispatch" badge forever.
+func TestDispatchSkip_SurfacedThenPruned(t *testing.T) {
+	ft := newFakeTracker()
+	ft.add(tracker.Issue{
+		ID: "fake:ghost", Identifier: "fake#ghost",
+		Title: "go", WorkflowState: "ready", Bot: "no-such-bot-xyz",
+	})
+
+	dir := t.TempDir()
+	cfg := &Config{
+		Name:      "test",
+		Workflow:  t.TempDir() + "/fake.iter",
+		Tracker:   TrackerConfig{Kind: "fake"},
+		Polling:   PollingConfig{IntervalMS: 50},
+		Agent:     AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000, RunningState: "in_progress"},
+		Workspace: WorkspaceConfig{Root: filepath.Join(dir, "ws")},
+		Stall:     StallConfig{TimeoutMS: 0},
+	}
+	cfg.applyDefaults()
+	cfg.Bots.Paths = []string{filepath.Join(dir, "empty-bots")} // unresolvable
+	ws, err := NewWorkspaces(filepath.Join(dir, "ws"))
+	if err != nil {
+		t.Fatalf("NewWorkspaces: %v", err)
+	}
+	c, err := New(Options{
+		Config:     cfg,
+		Tracker:    ft,
+		Runner:     &StubRunner{},
+		Workspaces: ws,
+		Logger:     iterlog.New(iterlog.LevelError, &bytes.Buffer{}),
+		HostMarker: "test",
+		StoreDir:   filepath.Join(dir, "store"),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Tick 1: the unrouteable ticket is an eligible candidate → skip recorded.
+	c.tick(ctx)
+	snap := c.buildSnapshot()
+	if len(snap.DispatchSkips) != 1 || snap.DispatchSkips[0].IssueID != "fake:ghost" {
+		t.Fatalf("after tick 1: DispatchSkips = %+v, want one fake:ghost entry", snap.DispatchSkips)
+	}
+	if snap.DispatchSkips[0].Bot != "no-such-bot-xyz" || snap.DispatchSkips[0].Reason == "" {
+		t.Errorf("skip entry lacks bot/reason: %+v", snap.DispatchSkips[0])
+	}
+
+	// Operator moves the ticket out of the eligible lane (or fixes it):
+	// it's no longer a candidate, so the stale skip must be pruned.
+	if err := ft.UpdateState(ctx, "fake:ghost", "blocked"); err != nil {
+		t.Fatalf("UpdateState: %v", err)
+	}
+	c.tick(ctx)
+	if snap := c.buildSnapshot(); len(snap.DispatchSkips) != 0 {
+		t.Fatalf("after tick 2: DispatchSkips = %+v, want pruned (empty)", snap.DispatchSkips)
+	}
 }
 
 // TestDispatch_StampsLastRunAtStart asserts the studio "run ↗" link is

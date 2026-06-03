@@ -73,6 +73,23 @@ func (c *Dispatcher) tick(ctx context.Context) {
 	c.state.lastTrackerErrAt = time.Time{}
 	sortCandidates(candidates)
 
+	// Prune dispatch-skip entries whose issue is no longer an eligible,
+	// unclaimed candidate — it was claimed, closed, or dragged out of the
+	// ready lane, so the stale "won't dispatch" reason should disappear
+	// from the UI. Issues that re-skip below re-populate the map; ones
+	// that became dispatchable are cleared by dispatch() when they claim.
+	if len(c.state.dispatchSkips) > 0 {
+		live := make(map[string]struct{}, len(candidates))
+		for _, iss := range candidates {
+			live[iss.ID] = struct{}{}
+		}
+		for id := range c.state.dispatchSkips {
+			if _, ok := live[id]; !ok {
+				delete(c.state.dispatchSkips, id)
+			}
+		}
+	}
+
 	for _, iss := range candidates {
 		// Global cap full → no further candidate can run; stop scanning.
 		if len(c.state.running) >= cfg.Agent.MaxConcurrent {
@@ -201,15 +218,6 @@ func (c *Dispatcher) reconcileStalled(ctx context.Context, cfg *Config) {
 			atomicLag := now.Sub(r.lastEventTime())
 			actorLag := now.Sub(r.LastEventAt)
 			c.logger.Warn("dispatcher: %s stalled (atomic_lag=%s actor_lag=%s timeout=%s) — cancelling", r.Identifier, atomicLag, actorLag, timeout)
-			// Diagnostic: append to /tmp so 2026-05-21 hangs can be
-			// post-mortem'd from outside the studio tty. Remove once
-			// the heartbeat fix is confirmed working.
-			if f, ferr := os.OpenFile("/tmp/iterion-stall-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); ferr == nil {
-				fmt.Fprintf(f, "%s identifier=%s atomic_lag=%s actor_lag=%s timeout=%s last_event_atomic_nano=%d last_event_at=%s now=%s\n",
-					now.Format(time.RFC3339Nano), r.Identifier, atomicLag, actorLag, timeout,
-					r.lastEventAtomicNano.Load(), r.LastEventAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
-				_ = f.Close()
-			}
 			if r.Cancel != nil {
 				r.Cancel()
 			}
@@ -323,6 +331,7 @@ func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 	if iss.Bot != "" {
 		if _, err := botregistry.ResolveBotPath(iss.Bot, cfg.Bots.Paths); err != nil {
 			c.logger.Warn("dispatcher: %s names bot %q which can't be resolved: %v — skipping (refusing to silently run the default workflow); will retry next tick", iss.Identifier, iss.Bot, err)
+			c.recordDispatchSkip(iss, fmt.Sprintf("bot %q can't be resolved (%v)", iss.Bot, err))
 			return
 		}
 		// The bot FILE resolves — but does it have an actual dispatch
@@ -335,9 +344,15 @@ func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 		// it and preserve the legacy single-workflow behaviour.)
 		if rc, ok := c.runner.(interface{ HasRoute(string) bool }); ok && !rc.HasRoute(iss.Bot) {
 			c.logger.Warn("dispatcher: %s names bot %q which resolves to a file but has no dispatch route (not in assignee_workflows) — skipping (refusing to silently run the default workflow); add it to assignee_workflows to enable it", iss.Identifier, iss.Bot)
+			c.recordDispatchSkip(iss, fmt.Sprintf("bot %q has no dispatch route (not in assignee_workflows)", iss.Bot))
 			return
 		}
 	}
+	// Past the bot guards: this issue is dispatchable, so drop any skip
+	// entry a prior tick recorded (the operator fixed the bot name or
+	// added the route). Cleared here rather than on claim so a downstream
+	// claim/workspace failure still reflects "no longer a routing skip".
+	delete(c.state.dispatchSkips, iss.ID)
 
 	if err := c.tracker.Claim(ctx, iss.ID, c.hostMarker); err != nil {
 		if errors.Is(err, tracker.ErrClaimConflict) {
@@ -495,13 +510,27 @@ func (c *Dispatcher) buildSpec(cfg *Config, iss tracker.Issue, runID, wsPath str
 			Attempt:       attempt,
 		},
 	}
+	// The routing key selects BOTH the workflow and the per-assignee
+	// dispatch overrides, so the two can't diverge. RoutingRunner picks the
+	// pre-compiled workflow by spec.Assignee (ByAssignee is keyed by bot /
+	// assignee name); Bot is the explicit dispatch directive and wins over
+	// Assignee when set. A ticket that names a Bot but no Assignee would
+	// otherwise fall through to the default workflow and never run its bot.
+	// The bot FILE is resolved (and route-checked) by the guard at the top
+	// of dispatch(); buildSpec carries no workflow path — the engine runs
+	// its pre-compiled IR.
+	routeAssignee := iss.Assignee
+	if iss.Bot != "" {
+		routeAssignee = iss.Bot
+	}
 	// Per-assignee overrides win wholesale: when a bot has its own
 	// AssigneeDispatch entry, its var/attachment map replaces the global
-	// one rather than merging. This keeps each bot's input contract
-	// explicit — operators see exactly what they bind.
+	// one rather than merging. Keyed by routeAssignee (not raw iss.Assignee)
+	// so a per-ticket Bot override binds THAT bot's inputs — otherwise an
+	// issue with Assignee=X + Bot=Y ran Y's workflow with X's var bindings.
 	dc := cfg.Dispatch
-	if iss.Assignee != "" {
-		if ov, ok := cfg.AssigneeDispatch[iss.Assignee]; ok {
+	if routeAssignee != "" {
+		if ov, ok := cfg.AssigneeDispatch[routeAssignee]; ok {
 			dc = ov
 		}
 	}
@@ -519,39 +548,30 @@ func (c *Dispatcher) buildSpec(cfg *Config, iss tracker.Issue, runID, wsPath str
 		}
 		vars[k] = v
 	}
-	attachments := map[string]any{}
-	for k, src := range dc.Attachments {
-		tpl, err := ParseTemplate(src)
-		if err != nil {
-			c.logger.Warn("dispatcher: dispatch.attachments[%s]: %v", k, err)
-			continue
-		}
-		v, err := tpl.Render(tplCtx)
-		if err != nil {
-			c.logger.Warn("dispatcher: render dispatch.attachments[%s]: %v", k, err)
-			continue
-		}
-		attachments[k] = v
-	}
+	// NOTE: dispatch.attachments / assignee_dispatch[].attachments are
+	// rejected at Config.Validate (see unsupportedAttachmentsErr), so dc
+	// never carries any here — the dispatcher has no path to inject
+	// per-issue attachments into a run. There is therefore deliberately
+	// no attachments render block: a config that reached this point has
+	// none. See docs/adr/013-dispatcher-attachments-unsupported.md.
+	//
 	// Per-ticket BotArgs merge over the rendered vars key-by-key, with
-	// iss.BotArgs winning for declared keys. Keys not in the workflow's
-	// vars schema get a warn log but are still passed through (the engine
-	// surfaces its own diagnostic).
+	// iss.BotArgs winning. A BotArgs key the routed workflow does not
+	// declare as a var is silently dropped downstream — resolveVars
+	// (pkg/runtime/engine.go) skips undeclared input keys with `continue`
+	// and no log — so a typo'd / unknown bot_arg would otherwise reach the
+	// bot as if unset, with no signal at all. Validate each key against the
+	// routed workflow's declared vars (when the runner can report them) and
+	// warn on a miss so the operator can reconcile why their override had no
+	// effect. The studio's BotArgsForm flags the same keys at input time.
+	declared := c.declaredVarsFor(routeAssignee)
 	for k, v := range iss.BotArgs {
 		vars[k] = v
-	}
-	// Routing key for the runner. The RoutingRunner selects a per-assignee
-	// pre-compiled workflow by spec.Assignee (ByAssignee is keyed by bot /
-	// assignee name), so a ticket that names a Bot but has no Assignee would
-	// otherwise fall through to the default workflow and never run its bot.
-	// Bot is the explicit dispatch directive — it wins over Assignee when
-	// set. The compiled workflow is selected ENTIRELY by this key; the bot
-	// FILE is resolved (and route-checked) by the guard at the top of
-	// dispatch(). buildSpec no longer carries a workflow path — the engine
-	// runs its pre-compiled IR, never a per-dispatch path.
-	routeAssignee := iss.Assignee
-	if iss.Bot != "" {
-		routeAssignee = iss.Bot
+		if declared != nil {
+			if _, ok := declared[k]; !ok {
+				c.logger.Warn("dispatcher: %s bot_arg %q is not a declared var of the routed workflow — it will be IGNORED at runtime (undeclared input vars are dropped). Fix the key to match the bot's vars schema or remove it.", iss.Identifier, k)
+			}
+		}
 	}
 	// feature_dev declares a required `feature_prompt` (no default) and reads
 	// it in every prompt. A board ticket dispatched without
@@ -578,8 +598,7 @@ func (c *Dispatcher) buildSpec(cfg *Config, iss tracker.Issue, runID, wsPath str
 			Identifier: iss.Identifier,
 			Title:      iss.Title,
 		},
-		Attachments: attachments,
-		Assignee:    routeAssignee,
+		Assignee: routeAssignee,
 		OnEvent: func(name string) {
 			// Synchronous, lock-free heartbeat: read by reconcileStalled
 			// without needing the actor to drain c.cmds first. This is
@@ -603,6 +622,38 @@ func (c *Dispatcher) buildSpec(cfg *Config, iss tracker.Issue, runID, wsPath str
 	}
 }
 
+// declaredVarsFor returns the set of var names declared by the workflow
+// that routeKey will run, or nil when the runner can't report them (a
+// test StubRunner, or a runner type that predates the DeclaredVars
+// shape). A nil result makes buildSpec skip bot_arg validation rather
+// than warn on everything — fail-open, since the validation is advisory.
+func (c *Dispatcher) declaredVarsFor(routeKey string) map[string]struct{} {
+	vd, ok := c.runner.(interface {
+		DeclaredVars(string) map[string]struct{}
+	})
+	if !ok {
+		return nil
+	}
+	return vd.DeclaredVars(routeKey)
+}
+
+// recordDispatchSkip notes that the actor refused to dispatch iss this
+// scan because its explicit bot is unresolvable / unrouteable. Surfaced
+// in the Snapshot so the board + dashboard can show WHY an eligible
+// ticket is idle. Runs on the actor goroutine; pruned in tick() once the
+// issue stops being a candidate and cleared in dispatch() once it claims.
+func (c *Dispatcher) recordDispatchSkip(iss tracker.Issue, reason string) {
+	if c.state.dispatchSkips == nil {
+		c.state.dispatchSkips = map[string]DispatchSkipView{}
+	}
+	c.state.dispatchSkips[iss.ID] = DispatchSkipView{
+		IssueID:    iss.ID,
+		Identifier: iss.Identifier,
+		Bot:        iss.Bot,
+		Reason:     reason,
+	}
+}
+
 // runWorker is the dispatch goroutine. Runs all hooks and the workflow,
 // then posts cmdRunFinished. Hook failures fail the run.
 //
@@ -615,7 +666,8 @@ func (c *Dispatcher) runWorker(ctx context.Context, entry *runningEntry, created
 	// Snapshot the hooks struct from the atomic config pointer once,
 	// at the start of the worker. A mid-flight reload doesn't suddenly
 	// swap callback bodies, and the read is guaranteed consistent
-	// across the three Run invocations below (F-CD-10).
+	// across the four Run invocations below — after_create, before_run,
+	// after_run, and the before_remove run inside cleanupWorkspace (F-CD-10).
 	hooks := c.cfg.Load().Hooks
 
 	if created && hooks.AfterCreate != nil {
@@ -635,6 +687,21 @@ func (c *Dispatcher) runWorker(ctx context.Context, entry *runningEntry, created
 	// dispatch result.
 	if err := hooks.AfterRun.Run(ctx, c.logger, "after_run", entry.WorkspacePath, env); err != nil {
 		c.logger.Warn("dispatcher: after_run hook for %s: %v", entry.Identifier, err)
+	}
+
+	// On a clean finish, tear down the workspace per the persist policy —
+	// running before_remove first so an operator-configured hook (the
+	// default `git worktree remove`, see BuildDefaultConfig) can
+	// deregister the workspace from the host repo BEFORE the directory is
+	// deleted. Done here on the worker goroutine (never the actor, where a
+	// shell hook would freeze polling/dispatch/snapshots) and BEFORE
+	// postFinished, so teardown completes before the actor releases the
+	// claim and the issue becomes re-dispatchable — no Create/Remove race
+	// on the shared per-issue workspace path. Failed/cancelled dispatches
+	// keep the workspace (retry resumes from it / the operator inspects
+	// it), matching finishRun's cancel + default branches.
+	if dispatchErr == nil {
+		c.cleanupWorkspace(entry, hooks.BeforeRemove, env)
 	}
 
 	c.postFinished(entry.IssueID, dispatchErr)

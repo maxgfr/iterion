@@ -46,9 +46,19 @@ const sandboxParkDelay = 1 * time.Hour
 // artifact).
 func (c *Dispatcher) scheduleRetry(issueID string, prev *runningEntry, runErr error) {
 	cfg := c.cfg.Load()
-	prevAttempt := 0
+	// prevAttempt is the attempt index of the run that just failed. It
+	// lives on the runningEntry — dispatch() carries it forward from the
+	// consumed retry entry — so reading it here is what makes the counter
+	// ACCUMULATE across retries. Reading c.state.retries[issueID] alone (the
+	// prior behaviour) always missed: dispatch() deletes that entry when it
+	// picks the run up, so prevAttempt reset to 0 every cycle and the
+	// attempt count was frozen at 1 — the dashboard never advanced past
+	// "attempt 1" and any attempt ceiling would never trigger.
+	prevAttempt := prev.Attempt
 	if cur, ok := c.state.retries[issueID]; ok {
-		prevAttempt = cur.Attempt
+		if cur.Attempt > prevAttempt {
+			prevAttempt = cur.Attempt
+		}
 		if cur.Timer != nil {
 			cur.Timer.Stop()
 		}

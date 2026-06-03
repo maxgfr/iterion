@@ -216,6 +216,62 @@ func TestDispatcherRetriesOnFailure(t *testing.T) {
 	t.Fatalf("expected at least 2 dispatch attempts, saw %d", calls.Load())
 }
 
+// TestDispatcherGivesUpAfterMaxAttempts is the regression guard for the
+// silent-infinite-retry blocker: a deterministically-failing issue must
+// stop retrying after MaxAttempts and land in a terminal FailedState
+// (here "blocked") instead of rescheduling forever and burning spend.
+func TestDispatcherGivesUpAfterMaxAttempts(t *testing.T) {
+	ft := newFakeTracker()
+	ft.add(tracker.Issue{ID: "fake:ga", Identifier: "fake#ga", Title: "doomed", WorkflowState: "ready"})
+
+	var calls atomic.Int32
+	runner := &StubRunner{Handler: func(_ context.Context, _ DispatchSpec) error {
+		calls.Add(1)
+		return errors.New("deterministic failure")
+	}}
+
+	c := newTestDispatcher(t, runner, ft, 50*time.Millisecond)
+	cfg := c.cfg.Load()
+	cfg.Agent.MaxRetryBackoffMS = 50 // keep retries fast
+	cfg.Agent.MaxAttempts = 2        // initial + 1 retry, then give up
+	cfg.Agent.FailedState = "blocked"
+	c.cfg.Store(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.Start(ctx)
+	defer c.Stop()
+
+	// Wait for the give-up to land the issue in the terminal failed state.
+	deadline := time.Now().Add(3 * time.Second)
+	state := func() string {
+		ft.mu.Lock()
+		defer ft.mu.Unlock()
+		if iss, ok := ft.issues["fake:ga"]; ok {
+			return iss.WorkflowState
+		}
+		return ""
+	}
+	for time.Now().Before(deadline) {
+		if state() == "blocked" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := state(); got != "blocked" {
+		t.Fatalf("issue state = %q, want blocked after give-up", got)
+	}
+	// Exactly MaxAttempts dispatches — the give-up moved the issue out of
+	// the eligible "ready" set so no further dispatch can pick it up.
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("dispatch calls = %d, want 2 (initial + 1 retry, then give up)", got)
+	}
+	// No lingering bookkeeping: the retry entry was dropped on give-up.
+	snap := c.Snapshot()
+	if len(snap.Running) != 0 || len(snap.Retries) != 0 {
+		t.Fatalf("after give-up: running=%d retries=%d, want 0/0", len(snap.Running), len(snap.Retries))
+	}
+}
+
 func TestDispatcherRespectsClaimConflict(t *testing.T) {
 	ft := newFakeTracker()
 	ft.add(tracker.Issue{ID: "fake:3", Identifier: "fake#3", WorkflowState: "ready"})

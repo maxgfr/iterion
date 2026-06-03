@@ -295,3 +295,48 @@ assignee_dispatch:
 		t.Fatalf("expected template field error, got %v", err)
 	}
 }
+
+// TestConfigDispatchAttachmentsRejected pins that dispatch.attachments is
+// a load-time error, not a silent no-op. The dispatcher renders no
+// attachments and the engine has no path to inject per-issue attachments
+// (they are binary files, not template-rendered strings); the prior
+// behaviour parsed + validated the block then dropped it on the floor,
+// losing context with zero signal. See ADR-013.
+func TestConfigDispatchAttachmentsRejected(t *testing.T) {
+	p := writeConfig(t, `workflow: {{WORKFLOW}}
+tracker:
+  kind: native
+dispatch:
+  attachments:
+    context_doc: "{{ issue.body }}"
+`)
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("expected dispatch.attachments to be rejected, got nil")
+	}
+	if !strings.Contains(err.Error(), "dispatch.attachments") || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("expected an explicit 'dispatch.attachments ... not supported' error, got %v", err)
+	}
+}
+
+// TestConfigAssigneeDispatchAttachmentsRejected pins the same rejection on
+// the per-assignee override path (assignee_dispatch[].attachments).
+func TestConfigAssigneeDispatchAttachmentsRejected(t *testing.T) {
+	p := writeConfigWithAssigneeWorkflow(t, `workflow: {{WORKFLOW}}
+tracker:
+  kind: native
+assignee_workflows:
+  feature-bot: ./bot.iter
+assignee_dispatch:
+  feature-bot:
+    attachments:
+      spec: "{{ issue.body }}"
+`)
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("expected assignee_dispatch[].attachments to be rejected, got nil")
+	}
+	if !strings.Contains(err.Error(), "feature-bot") || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("expected an explicit per-assignee attachments rejection, got %v", err)
+	}
+}

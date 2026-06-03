@@ -15,7 +15,6 @@ type DispatchSpec struct {
 	WorkspacePath string
 	StoreDir      string
 	Vars          map[string]any
-	Attachments   map[string]any
 
 	// ResumeFromRunID, when non-empty, signals the runner to resume
 	// the named prior run (via runtime.Engine.Resume) instead of

@@ -124,6 +124,14 @@ func RunDispatch(p *Printer, opts DispatchOptions) error {
 
 	port := pickPort(cfg, opts)
 	var httpSrv *http.Server
+	// Buffered so the HTTP goroutine's error send never blocks even when
+	// the daemon is torn down by a signal before we read it. Checked after
+	// shutdown so a bind failure (port already in use, permission denied)
+	// propagates a non-zero exit instead of a misleading exit 0 — without
+	// it, a supervisor (systemd/k8s) keyed on exit code treats a daemon
+	// whose operator-facing API never came up as a clean stop and won't
+	// restart it, leaving the dispatcher silently unreachable.
+	httpErrCh := make(chan error, 1)
 	if port > 0 {
 		mux := http.NewServeMux()
 		mgr.RegisterRoutes(mux, "/api/v1/dispatcher")
@@ -153,6 +161,7 @@ func RunDispatch(p *Printer, opts DispatchOptions) error {
 		go func() {
 			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Error("dispatcher http server: %v", err)
+				httpErrCh <- err
 				cancel()
 			}
 		}()
@@ -180,6 +189,15 @@ func RunDispatch(p *Printer, opts DispatchOptions) error {
 		shutdownCtx, sc := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = httpSrv.Shutdown(shutdownCtx)
 		sc()
+	}
+	// Distinguish a signal-driven stop (clean, exit 0) from a teardown the
+	// HTTP server forced via cancel() (bind failure → non-zero exit). A
+	// graceful Shutdown returns http.ErrServerClosed, which the goroutine
+	// filters out, so the channel only ever holds a genuine serve error.
+	select {
+	case err := <-httpErrCh:
+		return fmt.Errorf("dispatcher: http server failed: %w", err)
+	default:
 	}
 	return nil
 }

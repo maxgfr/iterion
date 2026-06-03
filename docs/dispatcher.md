@@ -272,9 +272,18 @@ WARN.
 
 ## Dispatch templates
 
-The `dispatch.vars` and `dispatch.attachments` blocks map workflow
-inputs to per-issue values using the same `{{namespace.path}}` syntax
-the `.iter` DSL exposes — but with a narrower set of namespaces.
+The `dispatch.vars` block maps workflow input **vars** to per-issue
+values using the same `{{namespace.path}}` syntax the `.iter` DSL
+exposes — but with a narrower set of namespaces.
+
+> **Attachments are not dispatchable.** There is no `dispatch.attachments`
+> support: workflow attachments are binary files (referenced as
+> `{{attachments.<name>.path}}`), and the dispatcher has no way to turn a
+> per-issue template string into an attachment's bytes. Declaring
+> `dispatch.attachments` (or `assignee_dispatch[].attachments`) is a
+> **load-time error**, not a silent no-op — pass per-issue context through
+> `dispatch.vars` or a ticket's `bot_args` instead. See
+> [ADR-013](adr/013-dispatcher-attachments-unsupported.md).
 
 | Reference                       | Resolves to                                |
 |---------------------------------|--------------------------------------------|
@@ -395,8 +404,8 @@ binds a single template for *every* assignee, which doesn't fit a
 heterogeneous bot catalogue.
 
 `assignee_dispatch:` solves that — when an issue's assignee has an
-entry here, its `vars:` (and `attachments:`) **replace** the global
-`dispatch.vars` wholesale for that dispatch:
+entry here, its `vars:` **replace** the global `dispatch.vars`
+wholesale for that dispatch:
 
 ```yaml
 workflow: workflows/triage.bot
@@ -449,7 +458,7 @@ The dispatcher watches `iterion.dispatcher.yaml` via fsnotify with a
 | `agent.running_state`                          | applied next dispatch + revert       |
 | `agent.max_retry_backoff_ms`                   | applied next retry calc              |
 | `hooks.*`                                      | applied next dispatch                |
-| `dispatch.vars`, `dispatch.attachments`        | applied next dispatch                |
+| `dispatch.vars`                                | applied next dispatch                |
 | `stall.timeout_ms`                             | applied next tick                    |
 | `workflow:`, `tracker.kind:`, `workspace.root` | warn-only; require restart           |
 | `tracker.*` credentials                        | warn-only; require restart           |

@@ -235,6 +235,16 @@ func RunStudio(ctx context.Context, opts StudioOptions, p *Printer) error {
 		} else {
 			logger.Warn("studio: dispatcher manager init: %v", mgrErr)
 		}
+	} else {
+		// Without the native store, cfg.NativeTrackerStore AND cfg.Dispatcher
+		// both stay nil, so the server silently mounts neither the /board nor
+		// the /dispatcher surface (server_info reports them disabled). Left
+		// unlogged this looks like "the Board tab is just empty/broken" with
+		// no cause — the operator's whole loop starts at the board. Surface
+		// the reason (typically a corrupt or unwritable
+		// <store>/dispatcher/board.json) so it's actionable. Non-fatal: the
+		// studio still serves the editor / run console for everything else.
+		logger.Warn("studio: native tracker store init failed: %v — Board and Dispatcher views are disabled this session (check permissions / integrity of %s/board.json)", nsErr, filepath.Join(resolvedStoreDir, "dispatcher"))
 	}
 
 	srv := server.New(cfg, logger)

@@ -152,3 +152,30 @@ func TestBuildSpec_FeatureDevPromptFallback(t *testing.T) {
 		t.Fatalf("feature_prompt must not be set for non-feature_dev bots")
 	}
 }
+
+// TestBuildSpec_AssigneeDispatchFollowsRouteKey pins that the per-assignee
+// dispatch override (vars/attachments) is keyed by the SAME routing key
+// that selects the workflow — so a per-ticket Bot override binds that bot's
+// inputs. Previously the override was keyed by iss.Assignee while the
+// workflow was keyed by Bot, so an issue with Assignee=X + Bot=Y ran Y's
+// workflow with X's var bindings.
+func TestBuildSpec_AssigneeDispatchFollowsRouteKey(t *testing.T) {
+	d := newMinimalDispatcher(t)
+	cfg := &Config{
+		Workflow: "/tmp/default.bot",
+		AssigneeDispatch: map[string]DispatchConfig{
+			"whole_improve_loop": {Vars: map[string]string{"which": "improve"}},
+			"feature_dev":        {Vars: map[string]string{"which": "feature"}},
+		},
+	}
+	// Bot (feature_dev) overrides Assignee (whole_improve_loop): both the
+	// route key and the var bindings must follow the bot.
+	iss := tracker.Issue{ID: "i-route", Title: "x", Assignee: "whole_improve_loop", Bot: "feature_dev"}
+	spec := d.buildSpec(cfg, iss, "run-route", "/tmp/ws", 0, nil)
+	if spec.Assignee != "feature_dev" {
+		t.Fatalf("route key = %q, want feature_dev", spec.Assignee)
+	}
+	if spec.Vars["which"] != "feature" {
+		t.Fatalf("vars followed Assignee, not the Bot route: which=%v, want feature", spec.Vars["which"])
+	}
+}

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/Button";
 import {
   cancelIssue,
   getState,
+  type DispatchSkipView,
   type RetryView,
   type RunningView,
 } from "@/api/dispatcher";
@@ -91,6 +92,7 @@ export default function BoardView() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [runningByIssue, setRunningByIssue] = useState<Map<string, RunningView>>(new Map());
   const [retryingByIssue, setRetryingByIssue] = useState<Map<string, RetryView>>(new Map());
+  const [skipByIssue, setSkipByIssue] = useState<Map<string, DispatchSkipView>>(new Map());
   const [trackerError, setTrackerError] = useState<{ tracker: string; message: string } | null>(
     null,
   );
@@ -166,8 +168,11 @@ export default function BoardView() {
         for (const r of snap.running ?? []) rmap.set(r.issue_id, r);
         const xmap = new Map<string, RetryView>();
         for (const r of snap.retries ?? []) xmap.set(r.issue_id, r);
+        const skmap = new Map<string, DispatchSkipView>();
+        for (const s of snap.dispatch_skips ?? []) skmap.set(s.issue_id, s);
         setRunningByIssue(rmap);
         setRetryingByIssue(xmap);
+        setSkipByIssue(skmap);
         // When the active (running + retrying) set changes — a dispatch
         // started or a run finished — the affected issue's server-side
         // `state` has moved (ready→in_progress, →review/done), but the
@@ -176,7 +181,19 @@ export default function BoardView() {
         // don't re-fetch every 2s or fight an in-flight optimistic drag;
         // prevActiveSigRef advances only after a successful fetch so a
         // transient failure retries on the next tick.
-        const activeSig = [...rmap.keys(), ...xmap.keys()].sort().join(",");
+        // Tag each id with its map. A running→retry move keeps the same
+        // issue id but the dispatcher reverts its server-side state
+        // (in_progress→ready); an untagged union still contains that id, so
+        // the signature wouldn't change and the card would linger in the
+        // in_progress column while the server has it back in ready. Tagging
+        // makes "r:id"→"x:id" a signature change, forcing the re-fetch that
+        // snaps the card to its real column.
+        const activeSig = [
+          ...[...rmap.keys()].map((id) => "r:" + id),
+          ...[...xmap.keys()].map((id) => "x:" + id),
+        ]
+          .sort()
+          .join(",");
         if (activeSig !== prevActiveSigRef.current) {
           void listIssues()
             .then((fresh) => {
@@ -391,6 +408,7 @@ export default function BoardView() {
         if (recordHistory && draft.prevState && draft.prevState !== toState) {
           recordTransition(issueID, draft.prevState);
         }
+        return true;
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         // Only revert this issue's row to its pre-drop state — leave
@@ -402,6 +420,12 @@ export default function BoardView() {
           if (!prev) return previous;
           return cur.map((i) => (i.id === issueID ? prev : i));
         });
+        // Report failure so batch callers (onBulkDispatch) can
+        // distinguish a queued issue from one that never moved — a
+        // swallowed transition error here previously let a bulk
+        // "Dispatched N" success toast fire even when some issues
+        // never reached the dispatch lane.
+        return false;
       }
     },
     [recordTransition],
@@ -541,11 +565,17 @@ export default function BoardView() {
           body: input.body,
           labels: input.labels,
           priority: input.priority,
-          assignee: input.assignee,
+          // assignee/bot/bot_args all default to a cleared value ("" / "" /
+          // {}) when the operator empties the field, so the corresponding
+          // Patch pointer is SET and the server actually clears a
+          // previously-stored value. The modal emits `undefined` for an
+          // empty field; without the `?? ""` the key is JSON-dropped, the
+          // server reads a nil pointer as "unchanged", and the stale value
+          // silently persists. For `assignee` that also kept routing the
+          // issue to the wrong per-assignee workflow (assignee selects the
+          // bot), so clearing it has to reach the store.
+          assignee: input.assignee ?? "",
           fields: input.fields,
-          // bot defaults to "" when cleared — send the empty string so
-          // the Patch.Bot pointer is set, allowing the server to clear
-          // a previously-set bot. Same for bot_args (empty map clears).
           bot: input.bot ?? "",
           bot_args: input.bot_args ?? {},
         });
@@ -617,11 +647,29 @@ export default function BoardView() {
       )
         return;
     }
-    for (const id of ids) await onDrop(id, dispatchState);
+    let queued = 0;
+    for (const id of ids) {
+      if (await onDrop(id, dispatchState)) queued += 1;
+    }
     setSingleSelection(null);
-    addToast(`Dispatched ${ids.length} issue${ids.length > 1 ? "s" : ""}`, "success", {
-      action: { label: "View runs", onClick: () => setLocation("/runs") },
-    });
+    const plural = (n: number) => (n > 1 ? "s" : "");
+    if (queued === ids.length) {
+      addToast(`Dispatched ${queued} issue${plural(queued)}`, "success", {
+        action: { label: "View runs", onClick: () => setLocation("/runs") },
+      });
+    } else if (queued > 0) {
+      // Partial: some transitions failed (claim conflict, rejected move,
+      // tracker error). Surface the gap instead of a misleading all-success
+      // toast — the unqueued issues never reached the dispatch lane and the
+      // dispatcher will not pick them up.
+      addToast(
+        `Dispatched ${queued}/${ids.length} issues — ${ids.length - queued} could not be queued`,
+        "warning",
+        { action: { label: "View runs", onClick: () => setLocation("/runs") } },
+      );
+    } else {
+      addToast(`Could not dispatch ${ids.length} issue${plural(ids.length)}`, "error");
+    }
   }, [selectedIssues, dispatchState, onDrop, setSingleSelection, addToast, confirm, setLocation]);
 
   // runBulkPatch applies a per-issue PATCH across the selection, then
@@ -897,6 +945,7 @@ export default function BoardView() {
               selectedIds={selectedIds}
               runningByIssue={runningByIssue}
               retryingByIssue={retryingByIssue}
+              skipByIssue={skipByIssue}
               onDrop={onColumnDrop}
               onClickCard={onCardClick}
               onDragStartCard={onCardDragStart}
@@ -920,6 +969,7 @@ export default function BoardView() {
               selectedIds={selectedIds}
               runningByIssue={runningByIssue}
               retryingByIssue={retryingByIssue}
+              skipByIssue={skipByIssue}
               onDrop={onColumnDrop}
               onClickCard={onCardClick}
               onDragStartCard={onCardDragStart}
@@ -1606,6 +1656,7 @@ interface ColumnProps {
   selectedIds: Set<string>;
   runningByIssue: Map<string, RunningView>;
   retryingByIssue: Map<string, RetryView>;
+  skipByIssue: Map<string, DispatchSkipView>;
   // onDrop receives the dropped issue ids (one or more, parsed
   // from the dataTransfer payload) and the destination state name.
   onDrop: (ids: string[], toState: string) => void;
@@ -1644,6 +1695,7 @@ function Column({
   selectedIds,
   runningByIssue,
   retryingByIssue,
+  skipByIssue,
   onDrop,
   onClickCard,
   onDragStartCard,
@@ -1735,6 +1787,7 @@ function Column({
             selected={selectedIds.has(iss.id)}
             running={runningByIssue.get(iss.id)}
             retrying={retryingByIssue.get(iss.id)}
+            skip={skipByIssue.get(iss.id)}
             activeLabels={activeLabels}
             onClick={(e) => onClickCard(iss, e)}
             onOpen={() => onOpenCard(iss)}
@@ -1758,6 +1811,10 @@ interface IssueCardProps {
   selected: boolean;
   running?: RunningView;
   retrying?: RetryView;
+  // skip: present when the dispatcher refused to claim this eligible
+  // issue because its explicit `bot` is unresolvable / unrouteable.
+  // Rendered as a warning badge so the stall is visible + actionable.
+  skip?: DispatchSkipView;
   // activeLabels: the set of labels currently in the board-level
   // filter, so each card's label chip can show its active state and
   // operators can see which chips already filter the view.
@@ -1783,6 +1840,7 @@ function IssueCard({
   selected,
   running,
   retrying,
+  skip,
   activeLabels,
   onClick,
   onOpen,
@@ -2000,6 +2058,19 @@ function IssueCard({
           title={`The dispatcher still has a retry entry for this issue, but it's in a terminal state (${iss.state}) — the retry will be skipped on the next tick.`}
         >
           stale retry queued — will be skipped (issue in {iss.state})
+        </div>
+      )}
+      {!running && skip && (
+        <div
+          className="mt-1 rounded bg-red-500/10 px-1.5 py-1 text-[10px] text-red-300 cursor-pointer hover:bg-red-500/20"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
+          }}
+          title={`The dispatcher refuses to run this issue: ${skip.reason}. Fix the bot in the issue editor or add it to assignee_workflows.`}
+        >
+          ⚠ won&apos;t dispatch
+          <span className="ml-1 text-red-200/80 truncate">— {skip.reason}</span>
         </div>
       )}
     </div>

@@ -107,7 +107,15 @@ type ForgejoTrackerConfig struct {
 // Vars maps workflow `vars:` names to template strings using
 // {{issue.x}} / {{dispatcher.y}} references.
 type DispatchConfig struct {
-	Vars        map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
+	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
+	// Attachments is retained ONLY so Config.Validate can detect it and
+	// fail fast with a clear message — the dispatcher has no path to
+	// inject per-issue attachments (see unsupportedAttachmentsErr and
+	// docs/adr/013-dispatcher-attachments-unsupported.md). The YAML
+	// decoder is non-strict (Load uses yaml.Unmarshal, not strict
+	// decoding), so the field MUST exist to be detectable: removing it
+	// would make a stray `attachments:` key parse-and-vanish silently,
+	// reintroducing the very context-loss bug this guards against.
 	Attachments map[string]string `yaml:"attachments,omitempty" json:"attachments,omitempty"`
 }
 
@@ -122,6 +130,18 @@ type AgentConfig struct {
 	MaxConcurrentByState map[string]int `yaml:"max_concurrent_by_state,omitempty" json:"max_concurrent_by_state,omitempty"`
 	MaxTurns             int            `yaml:"max_turns,omitempty" json:"max_turns,omitempty"`
 	MaxRetryBackoffMS    int            `yaml:"max_retry_backoff_ms,omitempty" json:"max_retry_backoff_ms,omitempty"`
+
+	// MaxAttempts caps the TOTAL number of dispatch attempts (the initial
+	// run plus retries) for one issue. When a run fails and this many
+	// attempts have been made, the dispatcher stops retrying and moves the
+	// issue to FailedState instead of rescheduling forever. The previous
+	// behaviour retried indefinitely (bounded only by the optional daily
+	// spend cap — disabled by default), silently bouncing a doomed ticket
+	// between its source and running states and burning model spend, with
+	// the failure visible only in the dispatcher dashboard. Default
+	// DefaultMaxAttempts; set a negative value to retry forever (the legacy
+	// unbounded behaviour).
+	MaxAttempts int `yaml:"max_attempts,omitempty" json:"max_attempts,omitempty"`
 
 	// RunningState, when non-empty, is the kanban state the dispatcher
 	// transitions a claimed issue to after a successful Claim. Empty
@@ -161,6 +181,15 @@ type AgentConfig struct {
 	// opt-out (issue stays in CompletedState — typically "review" — until
 	// manually moved). An unknown state name logs a warning and is a no-op.
 	MergedState string `yaml:"merged_state,omitempty" json:"merged_state,omitempty"`
+
+	// FailedState is the kanban state an issue moves to when its retries
+	// are exhausted (see MaxAttempts). Default "blocked" (a terminal column
+	// on the default board) so a give-up is visible on the board and the
+	// issue stops being eligible for re-dispatch. "none" disables the move;
+	// when the move is unavailable (board lacks the state, tracker rejects
+	// it) the dispatcher logs and falls back to the legacy retry behaviour
+	// rather than stranding the issue, so the cap never silently drops work.
+	FailedState string `yaml:"failed_state,omitempty" json:"failed_state,omitempty"`
 }
 
 // LimitsConfig holds operator-facing spend guardrails. Currently just
@@ -254,6 +283,20 @@ const (
 	// boards without it degrade gracefully. Opt out with
 	// `merged_state: none`.
 	DefaultMergedState = "done"
+
+	// DefaultMaxAttempts bounds retries so a deterministically-failing
+	// issue (bad/missing bot, schema mismatch, missing dependency) can't
+	// retry forever. With the default 5-minute backoff cap this is on the
+	// order of tens of minutes of retries before giving up — enough to ride
+	// out a transient provider outage, bounded enough to stop burning spend
+	// on a doomed ticket.
+	DefaultMaxAttempts = 10
+
+	// DefaultFailedState is the terminal column a give-up moves an issue
+	// into. "blocked" exists on the default board (native.StateBlocked,
+	// duplicated as a literal to keep this file free of the native import —
+	// same convention as DefaultRunningState).
+	DefaultFailedState = "blocked"
 )
 
 // Load reads and parses a dispatcher config from path. Relative paths
@@ -326,6 +369,21 @@ func (c *Config) applyDefaults() {
 		c.Agent.MergedState = DefaultMergedState
 	} else if c.Agent.MergedState == "none" {
 		c.Agent.MergedState = ""
+	}
+	// MaxAttempts: 0 (unset) → finite default so retries can't run forever;
+	// a negative value is the explicit "retry indefinitely" escape hatch,
+	// mapped to 0 which giveUpIfExhausted reads as "no cap".
+	if c.Agent.MaxAttempts == 0 {
+		c.Agent.MaxAttempts = DefaultMaxAttempts
+	} else if c.Agent.MaxAttempts < 0 {
+		c.Agent.MaxAttempts = 0
+	}
+	// FailedState mirrors the RunningState/CompletedState convention:
+	// empty → default ("blocked"); "none" is the explicit opt-out.
+	if c.Agent.FailedState == "" {
+		c.Agent.FailedState = DefaultFailedState
+	} else if c.Agent.FailedState == "none" {
+		c.Agent.FailedState = ""
 	}
 	if c.Stall.TimeoutMS == 0 {
 		c.Stall.TimeoutMS = DefaultStallTimeoutMS
@@ -432,10 +490,8 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("config: dispatch.vars[%s]: %w", k, err)
 		}
 	}
-	for k, v := range c.Dispatch.Attachments {
-		if _, err := ParseTemplate(v); err != nil {
-			return fmt.Errorf("config: dispatch.attachments[%s]: %w", k, err)
-		}
+	if len(c.Dispatch.Attachments) > 0 {
+		return errors.New(unsupportedAttachmentsErr("dispatch.attachments"))
 	}
 	for assignee, dc := range c.AssigneeDispatch {
 		if assignee == "" {
@@ -449,13 +505,30 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("config: assignee_dispatch[%q].vars[%s]: %w", assignee, k, err)
 			}
 		}
-		for k, v := range dc.Attachments {
-			if _, err := ParseTemplate(v); err != nil {
-				return fmt.Errorf("config: assignee_dispatch[%q].attachments[%s]: %w", assignee, k, err)
-			}
+		if len(dc.Attachments) > 0 {
+			return errors.New(unsupportedAttachmentsErr(fmt.Sprintf("assignee_dispatch[%q].attachments", assignee)))
 		}
 	}
 	return nil
+}
+
+// unsupportedAttachmentsErr builds the fail-fast message used when a
+// dispatcher config declares attachments. The dispatcher runner has no
+// path to inject per-issue attachments: attachments are binary files
+// referenced as {{attachments.<name>.path}} (see pkg/dsl/ir.Attachment —
+// kinds are file/image, never a template-rendered string), and there is
+// no defined mapping from a rendered string to an attachment's bytes
+// (content? a path to open? an upload id?). Rather than silently drop the
+// block (the prior behaviour — rendered then never wired into the engine)
+// or guess a semantic and risk feeding the bot the wrong bytes, we refuse
+// the config outright so the operator gets an honest signal at load time.
+// See docs/adr/013-dispatcher-attachments-unsupported.md.
+func unsupportedAttachmentsErr(field string) string {
+	return "config: " + field + " is not supported — the dispatcher cannot inject " +
+		"per-issue attachments (attachments are binary files referenced as " +
+		"{{attachments.<name>.path}}, not template-rendered strings). Remove the " +
+		"block and pass per-issue context through vars / a ticket's bot_args " +
+		"instead. See docs/adr/013-dispatcher-attachments-unsupported.md."
 }
 
 // ApplyDefaults exposes the package-private default application so

@@ -98,8 +98,9 @@ export function BotArgsForm({ bot, values, onChange }: Props) {
       {bot?.schema_error && (
         <div className="text-[11px] text-warning-fg space-y-1">
           <div>
-            Schema unavailable for this bot — the workflow file failed to parse.
-            Custom args below still flow to the dispatcher.
+            Schema unavailable for this bot — the workflow file failed to parse,
+            so keys can&apos;t be validated here. Custom args below are still
+            forwarded, but only keys the workflow declares as vars take effect.
           </div>
           <code className="block bg-surface-1 rounded px-1.5 py-1 break-all">
             {bot.schema_error}
@@ -146,9 +147,9 @@ export function BotArgsForm({ bot, values, onChange }: Props) {
 
       {bot && !bot.schema_error && fields.length === 0 && (
         <p className="text-[11px] text-fg-subtle italic">
-          This bot declares no input vars. Use the custom args section
-          below to set overrides; they flow to the dispatcher&apos;s vars
-          templates at launch.
+          This bot declares no input vars, so custom args you add below are
+          dropped at runtime unless the bot&apos;s workflow declares a var
+          with a matching key — the bot never receives unknown keys.
         </p>
       )}
 
@@ -157,16 +158,20 @@ export function BotArgsForm({ bot, values, onChange }: Props) {
         <div className="text-[10px] uppercase tracking-wide text-fg-subtle">
           Custom args
           {customEntries.length > 0 && bot && !bot.schema_error && fields.length > 0 && (
-            <span className="ml-1 normal-case text-warning-fg">
-              ({customEntries.length} override{customEntries.length === 1 ? "" : "s"}{" "}
-              not declared by this bot)
+            <span
+              className="ml-1 normal-case text-warning-fg"
+              title="Keys not in the bot's vars schema are dropped at runtime — the bot never receives them. Rename to a declared var or remove."
+            >
+              ({customEntries.length} key{customEntries.length === 1 ? "" : "s"}{" "}
+              not declared by this bot — ignored at runtime)
             </span>
           )}
         </div>
         {customEntries.length === 0 && (
           <p className="text-[11px] text-fg-subtle italic">
-            No custom args yet. The row below adds a key/value override that
-            the dispatcher passes to the bot&apos;s vars.
+            No custom args yet. A custom arg only reaches the bot if its key
+            matches a declared var; keys the bot doesn&apos;t declare are
+            dropped at runtime.
           </p>
         )}
         {customEntries.map(([k, v]) => (

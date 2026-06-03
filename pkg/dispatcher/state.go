@@ -37,14 +37,24 @@ type state struct {
 	// Snapshot so the studio dispatcher view can render the cap banner.
 	// Actor-goroutine-owned; no mutex needed.
 	costCap *CostCapView
+	// dispatchSkips records eligible issues the actor refused to claim
+	// because their explicit `bot` couldn't be resolved or has no
+	// dispatch route. Keyed by issueID. Without this, an honest-fail
+	// skip lived only in a dispatcher log line the studio operator never
+	// sees, so a misconfigured ticket sat idle in the eligible lane with
+	// no UI signal. Rebuilt each candidate scan (pruned to live
+	// candidates in tick); an entry is cleared the moment its issue
+	// successfully claims. Actor-goroutine-owned; no mutex needed.
+	dispatchSkips map[string]DispatchSkipView
 }
 
 func newState() *state {
 	return &state{
-		running:      map[string]*runningEntry{},
-		retries:      map[string]*retryEntry{},
-		slotsByState: map[string]int{},
-		tombstones:   map[string]struct{}{},
+		running:       map[string]*runningEntry{},
+		retries:       map[string]*retryEntry{},
+		slotsByState:  map[string]int{},
+		tombstones:    map[string]struct{}{},
+		dispatchSkips: map[string]DispatchSkipView{},
 	}
 }
 
@@ -190,6 +200,25 @@ type Snapshot struct {
 	// cap is configured; nil when disabled. The dashboard renders a
 	// banner + spend/limit when Exceeded.
 	CostCap *CostCapView `json:"cost_cap,omitempty"`
+	// DispatchSkips lists eligible issues the dispatcher refused to claim
+	// this scan because their explicit `bot` is unresolvable or has no
+	// dispatch route. Empty in the common case. The board + dispatcher
+	// dashboard surface these so a misconfigured `bot:` is visible and
+	// actionable instead of silently never running.
+	DispatchSkips []DispatchSkipView `json:"dispatch_skips,omitempty"`
+}
+
+// DispatchSkipView is one entry of the "won't dispatch" surface: an
+// eligible issue the dispatcher refused to claim because its explicit
+// bot can't be resolved to a workflow file, or resolves but has no
+// dispatch route (not in assignee_workflows). The remedy is operator-
+// side — fix the `bot:` value or add it to assignee_workflows — so
+// surfacing the reason turns a silent stall into an actionable signal.
+type DispatchSkipView struct {
+	IssueID    string `json:"issue_id"`
+	Identifier string `json:"identifier"`
+	Bot        string `json:"bot,omitempty"`
+	Reason     string `json:"reason"`
 }
 
 // CostCapView is the dashboard projection of the daily spend cap.

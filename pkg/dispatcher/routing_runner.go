@@ -80,6 +80,25 @@ func (r *RoutingRunner) HasRoute(key string) bool {
 	return ok
 }
 
+// DeclaredVars returns the declared var-name set of the workflow that
+// `key` routes to (the per-assignee runner, else Default). Returns nil
+// when the resolved runner can't report its vars (e.g. a test stub).
+// Mirrors EngineRunner.DeclaredVars so the dispatcher can validate a
+// ticket's bot_args against whichever workflow will actually run it.
+func (r *RoutingRunner) DeclaredVars(key string) map[string]struct{} {
+	runner := r.Default
+	if rn, ok := r.routeFor(key); ok {
+		runner = rn
+	}
+	vd, ok := runner.(interface {
+		DeclaredVars(string) map[string]struct{}
+	})
+	if !ok {
+		return nil
+	}
+	return vd.DeclaredVars(key)
+}
+
 // Close releases all per-assignee runners (and the default), in any
 // order. A runner that does not implement `Close() error` is skipped
 // silently. The first error encountered is returned but cleanup

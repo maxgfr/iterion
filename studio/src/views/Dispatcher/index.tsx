@@ -11,6 +11,7 @@ import {
   openWS,
   refresh as refreshTick,
   reload as reloadConfig,
+  type DispatchSkipView,
   type DispatcherSnapshot,
   type ManagerStatus,
 } from "@/api/dispatcher";
@@ -199,6 +200,13 @@ export default function DispatcherView() {
 
   const running = snap.running ?? [];
   const retries = snap.retries ?? [];
+  // Eligible issues the dispatcher refused to claim this scan because
+  // their explicit `bot` is unresolvable / unrouteable. Surfaced here so
+  // a misconfigured `bot:` is visible on the dashboard too (the board
+  // already badges the affected cards) — otherwise an operator watching
+  // this view sees an eligible issue that simply never runs, with no
+  // reason given.
+  const skips = snap.dispatch_skips ?? [];
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -240,6 +248,12 @@ export default function DispatcherView() {
 
       <div className="flex-1 overflow-auto p-4 space-y-4 max-w-4xl">
         <SummaryCard snap={snap} status={status} />
+        <DispatchSkipsTable
+          rows={skips}
+          onFocusIssue={(id) =>
+            setLocation(`/board?focus=${encodeURIComponent(id)}`)
+          }
+        />
         <RunningTable
           rows={running}
           stallTimeoutS={snap.stall_timeout_seconds}
@@ -542,6 +556,70 @@ function RetriesTable({
         </table>
         </div>
       )}
+    </section>
+  );
+}
+
+// DispatchSkipsTable surfaces eligible issues the dispatcher refused to
+// claim because their explicit `bot` can't be resolved to a workflow file
+// or has no dispatch route (not in assignee_workflows). Mirrors the board's
+// per-card "won't dispatch" badge so the failure is visible on the
+// dashboard too — without it, the dispatch_skips snapshot field (already
+// wired through state.go + the WS payload) reached only the board, and an
+// operator watching this view saw an eligible issue silently never run.
+//
+// Renders nothing when there are no skips (the common case) — this is an
+// exceptional misconfiguration surface, not a steady-state queue like
+// running/retries, so it stays out of the way until it has something to
+// say. Rows are click-to-focus the offending issue on the board, where the
+// editor lets the operator fix the bot.
+function DispatchSkipsTable({
+  rows,
+  onFocusIssue,
+}: {
+  rows: DispatchSkipView[];
+  onFocusIssue: (issueID: string) => void;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <section className="rounded border border-red-500/40 bg-red-500/5">
+      <header className="px-4 py-2 border-b border-red-500/30 text-sm font-semibold text-red-200 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span>⚠ Won&apos;t dispatch ({rows.length})</span>
+        <span className="text-[11px] font-normal text-red-200/70">
+          eligible issues the dispatcher refuses to claim — fix the{" "}
+          <code>bot</code> in the issue editor or add it to{" "}
+          <code>assignee_workflows</code>
+        </span>
+      </header>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-xs">
+          <thead className="text-fg-muted border-b border-border-default">
+            <tr>
+              <th className="text-left py-1.5 px-3 font-normal whitespace-nowrap">Issue</th>
+              <th className="text-left py-1.5 px-3 font-normal">Bot</th>
+              <th className="text-left py-1.5 px-3 font-normal">Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((s) => (
+              <tr
+                key={s.issue_id}
+                className="border-b border-border-default/60 hover:bg-surface-2/40 cursor-pointer"
+                onClick={() => onFocusIssue(s.issue_id)}
+                title="Open this issue on the board to fix its bot"
+              >
+                <td className="py-1.5 px-3 font-mono whitespace-nowrap">
+                  {s.identifier || s.issue_id}
+                </td>
+                <td className="py-1.5 px-3 font-mono">
+                  {s.bot ? s.bot : <span className="text-fg-subtle">—</span>}
+                </td>
+                <td className="py-1.5 px-3 text-red-300/80">{s.reason}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

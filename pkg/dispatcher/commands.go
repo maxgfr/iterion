@@ -13,6 +13,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/dispatcher/tracker"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/runtime"
 )
 
 // cancelGracePeriod is how long we wait after firing the engine-level
@@ -176,6 +177,36 @@ func (c *Dispatcher) finishRun(ctx context.Context, issueID string, err error) {
 			delete(c.state.slotsByState, r.WorkflowState)
 		}
 	}
+
+	// A run that suspended for input is NOT a failure. ErrRunPaused is a
+	// human node awaiting an answer (status paused_waiting_human);
+	// ErrRunPausedOperator is a soft pause the operator requested from the
+	// run console (status paused_operator). Both leave a valid checkpoint
+	// plus a pending interaction. The old code let these fall through to the
+	// `default:` arm, which scheduled a retry that re-ran FRESH — paused
+	// runs are not in resumableRunID's set — re-hit the same pause, and
+	// eventually exhausted attempts into FailedState ("blocked"), bouncing
+	// the ticket between states and burying the bot's escalation question.
+	//
+	// Instead, PARK it: keep the tracker claim (ListCandidates only returns
+	// UNCLAIMED issues, so the retained claim is what stops the next tick
+	// re-dispatching it — RunningState is itself an eligible candidate
+	// state), free the concurrency slot (done above), and leave the issue in
+	// place. The operator answers + resumes from the run console; the issue's
+	// last_run pointer (stamped here) links straight to the paused run and
+	// its pending interaction. This mirrors the cloud runner, which acks
+	// ErrRunPaused / ErrRunPausedOperator instead of naking for retry
+	// (pkg/runner/loop.go). The retained claim is reclaimed only by the
+	// stale-claim sweep once THIS daemon's pid dies (isStaleLocalMarker), so
+	// a live dispatcher never re-dispatches a parked issue; after a restart
+	// it degrades to a single fresh re-run that re-parks at the same point.
+	if errors.Is(err, runtime.ErrRunPaused) || errors.Is(err, runtime.ErrRunPausedOperator) {
+		c.stampLastRun(issueID, r)
+		c.logger.Info("dispatcher: %s paused awaiting input (run=%s): %v — left claimed and in-progress, NOT retried. Resume it from the run console; the issue keeps a live link via last_run.", r.Identifier, r.RunID, err)
+		c.fireSnapshot()
+		return
+	}
+
 	// Always release the tracker claim — if the issue is still active
 	// on the tracker side, the next tick will re-pick it (unless we
 	// schedule a retry below).
@@ -241,7 +272,11 @@ func (c *Dispatcher) finishRun(ctx context.Context, issueID string, err error) {
 			delete(c.state.retries, issueID)
 		}
 		c.maybeTransitionToCompleted(relCtx, issueID, r.Identifier, currentTarget)
-		c.cleanupWorkspace(r)
+		// NOTE: workspace teardown (incl. the before_remove hook) is NOT
+		// done here. It runs on the dispatch worker goroutine in runWorker,
+		// before postFinished — so a shell hook can't block the actor and
+		// the directory is gone before the claim is released. See
+		// cleanupWorkspace + runWorker.
 	case errors.Is(err, context.Canceled):
 		// Cancellation is a soft stop. Keep the workspace and any
 		// pending retry entry so the next tick can re-pick the issue.
@@ -252,17 +287,65 @@ func (c *Dispatcher) finishRun(ctx context.Context, issueID string, err error) {
 		c.logger.Info("dispatcher: %s cancelled (run=%s)", r.Identifier, r.RunID)
 		c.revertTransition(relCtx, issueID, r.Identifier, r.TransitionedFromState, currentTarget)
 	default:
-		// Non-cancellation failure → schedule a retry. Revert the
-		// in-progress transition so the next retry tick sees the issue
-		// eligible again from its source state. Without the revert,
-		// the issue would sit in `in_progress` (no longer in the
-		// eligible "ready" set) until the operator dragged it back.
+		// Non-cancellation failure → retry, unless the attempt ceiling is
+		// reached. On exhaustion, give up: move the issue to a terminal
+		// FailedState (default "blocked") so the failure is visible on the
+		// board and the issue stops being eligible — instead of rescheduling
+		// forever and silently bouncing a doomed ticket between its source
+		// and running states (burning model spend with no board signal).
 		c.logger.Warn("dispatcher: %s failed (run=%s): %v", r.Identifier, r.RunID, err)
+		if c.giveUpIfExhausted(relCtx, issueID, r, err) {
+			break
+		}
+		// Revert the in-progress transition so the next retry tick sees the
+		// issue eligible again from its source state. Without the revert,
+		// the issue would sit in `in_progress` (no longer in the eligible
+		// "ready" set) until the operator dragged it back.
 		c.revertTransition(relCtx, issueID, r.Identifier, r.TransitionedFromState, currentTarget)
 		c.scheduleRetry(issueID, r, err)
 	}
 	relCancel()
 	c.fireSnapshot()
+}
+
+// giveUpIfExhausted ends the retry loop once an issue has reached the
+// configured attempt ceiling (cfg.Agent.MaxAttempts; 0/negative = no cap).
+// On give-up it moves the issue to a terminal FailedState (default
+// "blocked") so the failure is visible on the board and the issue stops
+// being eligible for re-dispatch, then drops any pending retry bookkeeping.
+//
+// Returns true when it took ownership of the terminal outcome. It returns
+// FALSE — deferring to the normal revert+retry path — when the cap is
+// disabled, attempts remain, FailedState is unset, or the terminal move is
+// unavailable (board doesn't define the state, tracker rejects / doesn't
+// support it, or a transient tracker error). That fallback is deliberate:
+// the cap must never strand an issue in a non-terminal-but-eligible state,
+// so on a board that can't represent "failed" we preserve the legacy
+// unbounded retry rather than freeze the ticket. Runs on the actor goroutine.
+func (c *Dispatcher) giveUpIfExhausted(ctx context.Context, issueID string, r *runningEntry, runErr error) bool {
+	cfg := c.cfg.Load()
+	max := cfg.Agent.MaxAttempts
+	// r.Attempt is 0-indexed (0 = initial run), so r.Attempt+1 is the
+	// number of attempts made so far. Give up once that reaches the cap.
+	if max <= 0 || r.Attempt+1 < max {
+		return false
+	}
+	failed := cfg.Agent.FailedState
+	if failed == "" {
+		return false
+	}
+	if err := c.tracker.UpdateState(ctx, issueID, failed); err != nil {
+		c.logger.Warn("dispatcher: %s exhausted %d attempts but the move to failed state %q failed (%v) — keeping retry behaviour", r.Identifier, r.Attempt+1, failed, err)
+		return false
+	}
+	if cur, ok := c.state.retries[issueID]; ok {
+		if cur.Timer != nil {
+			cur.Timer.Stop()
+		}
+		delete(c.state.retries, issueID)
+	}
+	c.logger.Warn("dispatcher: %s gave up after %d attempts (run=%s): %v — moved to %q; clear the blocker or re-open the issue to retry", r.Identifier, r.Attempt+1, r.RunID, runErr, failed)
+	return true
 }
 
 // stampLastRun records the (run_id, workdir) pair on the tracker
@@ -387,14 +470,30 @@ func (c *Dispatcher) runFinalCommit(runID string) string {
 	return probe.FinalCommit
 }
 
-// cleanupWorkspace removes the per-issue workspace directory when the
-// active persist policy calls for it. Best-effort — failures are logged.
-func (c *Dispatcher) cleanupWorkspace(r *runningEntry) {
+// cleanupWorkspace tears down the per-issue workspace after a clean
+// dispatch when the active persist policy calls for it. The optional
+// before_remove hook runs first so an operator-configured teardown — the
+// default `git worktree remove` wired by BuildDefaultConfig — can
+// deregister the workspace from the host repo BEFORE the directory is
+// deleted. Without it `git worktree list` accumulates stale entries and a
+// later re-dispatch of the same issue fails its `git worktree add`.
+//
+// MUST be called from the dispatch worker goroutine (runWorker), never the
+// actor: the hook is a shell command bounded only by its own timeout
+// (default 60s) and would otherwise stall polling/dispatch/snapshots.
+// beforeRemove is the hook snapshotted by the caller (nil = no-op; Hook.Run
+// tolerates a nil receiver); env is the same ITERION_* set the other hooks
+// receive. Best-effort throughout: a failing hook is logged but the
+// directory is still removed, so a bad hook never strands the workspace.
+func (c *Dispatcher) cleanupWorkspace(entry *runningEntry, beforeRemove *Hook, env []string) {
 	if !c.cfg.Load().Workspace.Persist.shouldCleanupOnSuccess() {
 		return
 	}
-	if err := c.workspaces.Remove(r.IssueID); err != nil {
-		c.logger.Warn("dispatcher: cleanup workspace %s: %v", r.Identifier, err)
+	if err := beforeRemove.Run(context.Background(), c.logger, "before_remove", entry.WorkspacePath, env); err != nil {
+		c.logger.Warn("dispatcher: before_remove hook for %s: %v", entry.Identifier, err)
+	}
+	if err := c.workspaces.Remove(entry.IssueID); err != nil {
+		c.logger.Warn("dispatcher: cleanup workspace %s: %v", entry.Identifier, err)
 	}
 }
 

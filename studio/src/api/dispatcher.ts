@@ -197,6 +197,18 @@ export interface DispatcherSnapshot {
     exceeded: boolean;
     override_active: boolean;
   };
+  // Eligible issues the dispatcher refused to claim this scan because
+  // their explicit `bot` is unresolvable / unrouteable. Absent when
+  // none. Surfaced so a misconfigured `bot:` is visible on the board +
+  // dashboard instead of silently never running.
+  dispatch_skips?: DispatchSkipView[];
+}
+
+export interface DispatchSkipView {
+  issue_id: string;
+  identifier: string;
+  bot?: string;
+  reason: string;
 }
 
 export interface RunningView {

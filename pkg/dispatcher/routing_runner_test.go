@@ -130,6 +130,50 @@ func TestRoutingRunnerDispatchPropagatesRunnerError(t *testing.T) {
 	}
 }
 
+// varReportingRunner is a recordingRunner that also reports a fixed
+// declared-var set, so RoutingRunner.DeclaredVars routing can be tested
+// without compiling a real workflow.
+type varReportingRunner struct {
+	recordingRunner
+	vars map[string]struct{}
+}
+
+func (r *varReportingRunner) DeclaredVars(string) map[string]struct{} { return r.vars }
+
+// TestRoutingRunnerDeclaredVars pins that DeclaredVars resolves the same
+// route as Dispatch and forwards the routed runner's declared vars — the
+// dispatcher uses it to warn when a per-ticket bot_arg names a var the
+// routed workflow doesn't declare (such args are silently dropped at
+// runtime). A route whose runner can't report vars yields nil so buildSpec
+// fails open (skips validation) rather than warning on everything.
+func TestRoutingRunnerDeclaredVars(t *testing.T) {
+	fd := &varReportingRunner{
+		recordingRunner: recordingRunner{name: "feature_dev"},
+		vars:            map[string]struct{}{"loop_cap": {}, "workspace_dir": {}},
+	}
+	def := &recordingRunner{name: "default"} // no DeclaredVars method
+	rr := &RoutingRunner{
+		Default:    def,
+		ByAssignee: map[string]Runner{"feature_dev": fd},
+	}
+
+	v := rr.DeclaredVars("feature_dev")
+	if _, ok := v["loop_cap"]; !ok {
+		t.Fatalf("DeclaredVars(feature_dev) = %v, want loop_cap present", v)
+	}
+	if _, ok := v["not_declared"]; ok {
+		t.Errorf("DeclaredVars must not invent undeclared keys: %v", v)
+	}
+	// kebab/case normalisation routes the same as Dispatch/HasRoute.
+	if v := rr.DeclaredVars("feature-dev"); v == nil {
+		t.Errorf("DeclaredVars(feature-dev) should route to feature_dev via NormalizeName")
+	}
+	// Unknown route → falls back to Default, which can't report vars → nil.
+	if v := rr.DeclaredVars("ghost"); v != nil {
+		t.Fatalf("DeclaredVars(ghost) = %v, want nil (default runner reports nothing)", v)
+	}
+}
+
 func TestRoutingRunnerCloseClosesAllChildren(t *testing.T) {
 	def := &recordingRunner{name: "default"}
 	a := &recordingRunner{name: "a"}
