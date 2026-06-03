@@ -176,9 +176,15 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 		return err
 	}
 
-	// Update status to running and emit run_resumed.
-	if err := e.store.UpdateRunStatus(ctx, runID, store.RunStatusRunning, ""); err != nil {
-		return fmt.Errorf("runtime: update status running: %w", err)
+	// Atomically claim the run (compare-and-set) so a second concurrent
+	// resume can't spawn a duplicate execution racing on run.json.
+	claimed, claimErr := e.store.UpdateRunStatusIf(ctx, runID, store.RunStatusRunning, "",
+		[]store.RunStatus{store.RunStatusPausedWaitingHuman})
+	if claimErr != nil {
+		return fmt.Errorf("runtime: claim run for resume: %w", claimErr)
+	}
+	if !claimed {
+		return fmt.Errorf("runtime: run %q is already being executed (status no longer paused); refusing duplicate resume", runID)
 	}
 	if err := e.emit(ctx, runID, store.EventRunResumed, "", nil); err != nil {
 		return err
@@ -333,9 +339,19 @@ func (e *Engine) resumeFromFailure(ctx context.Context, r *store.Run) error {
 		restartNodeID = cp.NodeID
 	}
 
-	// Update status to running and emit run_resumed.
-	if err := e.store.UpdateRunStatus(ctx, runID, store.RunStatusRunning, ""); err != nil {
-		return fmt.Errorf("runtime: update status running: %w", err)
+	// Atomically claim the run for this execution. A compare-and-set on
+	// the status (vs an unconditional write) rejects a second concurrent
+	// resume — e.g. an operator /resume racing a studio-restart reconcile
+	// — so two engines never execute the same run and race on run.json.
+	// That race is what left a live run mislabeled `failed_resumable`
+	// (the failing execution's write clobbered the running one's).
+	claimed, claimErr := e.store.UpdateRunStatusIf(ctx, runID, store.RunStatusRunning, "",
+		[]store.RunStatus{store.RunStatusFailedResumable, store.RunStatusCancelled, store.RunStatusPausedOperator})
+	if claimErr != nil {
+		return fmt.Errorf("runtime: claim run for resume: %w", claimErr)
+	}
+	if !claimed {
+		return fmt.Errorf("runtime: run %q is already being executed (status no longer resumable); refusing duplicate resume", runID)
 	}
 	resumeData := map[string]interface{}{
 		"resumed_from": "failed",

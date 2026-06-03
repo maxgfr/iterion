@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -56,6 +57,44 @@ func TestCheckWorkflowHash_ForceAllowsMismatch(t *testing.T) {
 	r := &store.Run{ID: "r1", WorkflowHash: "deadbeefcafe"}
 	if err := e.checkWorkflowHash(r); err != nil {
 		t.Fatalf("expected --force to bypass hash check, got %v", err)
+	}
+}
+
+// ---- resumeFromFailure: duplicate-resume guard ----
+
+// TestResumeFromFailure_RejectsAlreadyClaimedRun pins the compare-and-set
+// claim: when a run has already been claimed by another execution (status
+// is running on disk), a second concurrent resume — which loaded the stale
+// failed_resumable view — must be rejected, not spawn a duplicate engine
+// that races on run.json. Regression guard for the dogfood incident where
+// a studio-restart reconcile + an operator /resume both executed dep-debt
+// and the failing one's write mislabeled the live run failed_resumable.
+func TestResumeFromFailure_RejectsAlreadyClaimedRun(t *testing.T) {
+	s := tmpStore(t)
+	ctx := context.Background()
+	// CreateRun persists with status=running — stands in for a sibling
+	// execution that already claimed this run.
+	if _, err := s.CreateRun(ctx, "run-dup", "wf", nil); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	e := &Engine{store: s, workflow: &ir.Workflow{Entry: "n1"}}
+	// r is the stale snapshot the losing resume loaded before the race.
+	r := &store.Run{ID: "run-dup", Status: store.RunStatusFailedResumable, Checkpoint: &store.Checkpoint{NodeID: "n1"}}
+
+	err := e.resumeFromFailure(ctx, r)
+	if err == nil {
+		t.Fatal("expected resumeFromFailure to reject a run already claimed (status=running)")
+	}
+	if !strings.Contains(err.Error(), "already being executed") {
+		t.Errorf("expected duplicate-resume rejection, got: %v", err)
+	}
+	// The winner's status must survive — the loser must not have clobbered it.
+	got, loadErr := s.LoadRun(ctx, "run-dup")
+	if loadErr != nil {
+		t.Fatalf("LoadRun: %v", loadErr)
+	}
+	if got.Status != store.RunStatusRunning {
+		t.Errorf("status should stay running after rejected duplicate, got %q", got.Status)
 	}
 }
 
