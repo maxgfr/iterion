@@ -38,6 +38,9 @@ interface LeftPanelProps {
   runId: string;
   run: RunHeader | null;
   onSelectFile: (file: RunFile, mode: RunFilesMode) => void;
+  // Opens the worktree file at `path` in an editable Monaco tab. Used by the
+  // large-changeset banner's "Edit .gitignore" shortcut.
+  onEditFile?: (path: string) => void;
   onMergeComplete?: () => void;
 }
 
@@ -50,6 +53,7 @@ export default function LeftPanel({
   runId,
   run,
   onSelectFile,
+  onEditFile,
   onMergeComplete,
 }: LeftPanelProps) {
   const [collapsed, setCollapsed] = useState<boolean>(() =>
@@ -178,6 +182,7 @@ export default function LeftPanel({
         <FilesPanel
           runId={runId}
           onSelectFile={onSelectFile}
+          onEditFile={onEditFile}
         />
       </div>
       <div

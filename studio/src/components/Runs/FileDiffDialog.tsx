@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { DiffEditor } from "@monaco-editor/react";
 
-import { Dialog } from "@/components/ui";
+import { Button, Dialog } from "@/components/ui";
 import {
   getRunFileDiff,
   type RunFile,
@@ -18,6 +18,10 @@ interface FileDiffDialogProps {
   // by the listing (uncommitted vs branch). Omitted → backend default.
   mode?: RunFilesMode;
   onClose: () => void;
+  // When provided, renders an "Edit" affordance that switches from this
+  // read-only diff to the editable FileEditDialog for the same path. The
+  // diff stays read-only; editing is always a deliberate switch.
+  onEdit?: (path: string) => void;
 }
 
 // FileDiffDialog opens Monaco's DiffEditor on the run's working
@@ -28,6 +32,7 @@ export default function FileDiffDialog({
   file,
   mode,
   onClose,
+  onEdit,
 }: FileDiffDialogProps) {
   const [diff, setDiff] = useState<RunFileDiff | null>(null);
   const [loading, setLoading] = useState(false);
@@ -66,6 +71,10 @@ export default function FileDiffDialog({
   const open = file !== null;
   const language = path ? inferMonacoLanguage(path) : "plaintext";
   const monacoTheme = resolvedTheme === "dark" ? "vs-dark" : "vs";
+  // Offer "Edit" only for a real, non-binary path. A deleted file (status D)
+  // has no working-tree content to edit, so it's excluded.
+  const canEdit =
+    Boolean(onEdit) && path !== null && !diff?.binary && file?.status !== "D";
 
   return (
     <Dialog
@@ -76,6 +85,19 @@ export default function FileDiffDialog({
       title={path ?? "Diff"}
       description={file ? statusLabel(file.status) : undefined}
       widthClass="max-w-[90vw] w-[90vw]"
+      footer={
+        canEdit ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              if (path && onEdit) onEdit(path);
+            }}
+          >
+            Edit file
+          </Button>
+        ) : undefined
+      }
     >
       <div className="h-[75vh] -mx-4 -my-3 flex flex-col">
         {error ? (

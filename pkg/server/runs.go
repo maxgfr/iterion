@@ -58,6 +58,8 @@ func (s *Server) registerRunRoutes() {
 	s.mux.HandleFunc("GET /api/runs/{id}/artifact-files/{path...}", s.handleGetArtifactFile)
 	s.mux.HandleFunc("GET /api/runs/{id}/files", s.handleListRunFiles)
 	s.mux.HandleFunc("GET /api/runs/{id}/files/diff", s.handleGetRunFileDiff)
+	s.mux.HandleFunc("GET /api/runs/{id}/files/content", s.handleGetRunFileContent)
+	s.mux.HandleFunc("PUT /api/runs/{id}/files/content", s.handleSaveRunFileContent)
 	s.mux.HandleFunc("GET /api/runs/{id}/commits", s.handleListRunCommits)
 	s.mux.HandleFunc("GET /api/runs/{id}/commits/{sha}", s.handleGetRunCommit)
 	s.mux.HandleFunc("GET /api/runs/{id}/commits/{sha}/diff", s.handleGetRunCommitFileDiff)

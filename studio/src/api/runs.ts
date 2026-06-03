@@ -882,6 +882,46 @@ export async function getRunFileDiff(
   );
 }
 
+// Mirror of server.runFileContentResponse. Raw file contents from the run's
+// LIVE worktree, ready to seed an editable Monaco buffer.
+//   - `exists` false → the path is not on disk yet; the editor opens a fresh
+//     empty buffer (e.g. creating a `.gitignore` that doesn't exist).
+//   - `binary` true → `content` is empty and the editor refuses to edit.
+export interface RunFileContent {
+  path: string;
+  content: string;
+  binary: boolean;
+  exists: boolean;
+}
+
+// getRunFileContent reads one worktree file for in-run editing. Unlike
+// getRunFileDiff (changed files only), this reaches any path under the
+// worktree — including an unchanged/untracked `.gitignore`. 409 when the
+// run has no live worktree (finalized/gc'd); the caller should only offer
+// editing while the worktree exists.
+export async function getRunFileContent(
+  runId: string,
+  path: string,
+): Promise<RunFileContent> {
+  const qs = new URLSearchParams({ path });
+  return request(
+    `/runs/${encodeURIComponent(runId)}/files/content?${qs.toString()}`,
+  );
+}
+
+// saveRunFileContent writes operator-edited content back into the run's live
+// worktree. Path-traversal is enforced server-side (never escapes work_dir).
+export async function saveRunFileContent(
+  runId: string,
+  path: string,
+  content: string,
+): Promise<RunFileContent> {
+  return request(`/runs/${encodeURIComponent(runId)}/files/content`, {
+    method: "PUT",
+    body: JSON.stringify({ path, content }),
+  });
+}
+
 // mergeActionReady reports whether the run has reached the phase where the
 // "Squash & merge" action is shown in the Commits panel: a terminal state
 // (finished or cancelled — RecoverFinalize populates final_branch for both)

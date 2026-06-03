@@ -1153,10 +1153,21 @@ func (s *Server) safePath(relPath string) (string, error) {
 	s.stateMu.RLock()
 	workDir := s.cfg.WorkDir
 	s.stateMu.RUnlock()
-	if workDir == "" {
+	return safePathWithin(workDir, relPath)
+}
+
+// safePathWithin resolves relPath against base with the same strict,
+// symlink-aware containment used by Save: the returned absolute path is
+// guaranteed to live inside base after resolving symlinks on the longest
+// existing prefix. It is the single audited path-traversal boundary shared
+// by the studio-workdir Save (safePath) and the run-worktree file editor
+// (handleGetRunFileContent / handleSaveRunFileContent), so a fix here covers
+// both surfaces.
+func safePathWithin(base, relPath string) (string, error) {
+	if base == "" {
 		return "", fmt.Errorf("no working directory configured")
 	}
-	baseAbs, err := filepath.Abs(workDir)
+	baseAbs, err := filepath.Abs(base)
 	if err != nil {
 		return "", fmt.Errorf("workdir abs: %w", err)
 	}

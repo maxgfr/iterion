@@ -45,6 +45,11 @@ interface FilesPanelProps {
   // the right range from the backend (uncommitted vs branch). In combined
   // mode the row forwards the per-file scope derived from its lifecycle.
   onSelectFile: (file: RunFile, mode: RunFilesMode) => void;
+  // onEditFile opens a worktree file in an editable Monaco tab. Wired to the
+  // large-changeset banner's "Edit .gitignore" shortcut so the operator can
+  // gitignore a stray build/cache dir inline. Optional: the panel degrades
+  // to the informational-only banner when absent.
+  onEditFile?: (path: string) => void;
 }
 
 // FilesPanel renders the modified-files tree — wrapped by LeftPanel
@@ -57,6 +62,7 @@ interface FilesPanelProps {
 export default function FilesPanel({
   runId,
   onSelectFile,
+  onEditFile,
 }: FilesPanelProps) {
   // userMode is the operator's explicit segmented-control selection; null
   // means "follow the default" — which is always "combined" (All changes),
@@ -208,7 +214,17 @@ export default function FilesPanel({
         ) : (
           <div className="py-1 text-xs">
             {largeChangeset && (
-              <LargeChangesetHint count={fileCount} workDir={data.work_dir} />
+              <LargeChangesetHint
+                count={fileCount}
+                workDir={data.work_dir}
+                // Only offer inline editing while the worktree is live —
+                // a finalized/gc'd run has no on-disk .gitignore to write.
+                onEditGitignore={
+                  onEditFile && !worktreeGone
+                    ? () => onEditFile(".gitignore")
+                    : undefined
+                }
+              />
             )}
             {tree.map((node) => (
               <TreeRow
@@ -259,9 +275,14 @@ function collectFolderKeys(nodes: TreeNode[]): Set<string> {
 function LargeChangesetHint({
   count,
   workDir,
+  onEditGitignore,
 }: {
   count: number;
   workDir?: string;
+  // When provided, renders a one-click "Edit .gitignore" button that opens
+  // the run worktree's .gitignore in an editable Monaco tab. Absent when the
+  // worktree is gone (nothing on disk to edit).
+  onEditGitignore?: () => void;
 }) {
   return (
     <div className="mb-1 flex flex-col gap-1 border-b border-border-default bg-surface-1 px-2 py-1.5 text-micro">
@@ -279,6 +300,17 @@ function LargeChangesetHint({
       {workDir && (
         <div className="break-all text-fg-subtle">
           Worktree: <code className="text-fg-muted">{workDir}</code>
+        </div>
+      )}
+      {onEditGitignore && (
+        <div>
+          <button
+            type="button"
+            onClick={onEditGitignore}
+            className="mt-0.5 inline-flex items-center rounded-md border border-border-default bg-surface-2 px-2 py-0.5 text-[10px] font-medium text-fg-default hover:bg-surface-3 focus:outline-none"
+          >
+            Edit .gitignore
+          </button>
         </div>
       )}
     </div>

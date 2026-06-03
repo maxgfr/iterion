@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"errors"
 	"net/http"
 	"os"
@@ -10,6 +11,13 @@ import (
 	gitlib "github.com/SocialGouv/iterion/pkg/git"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
+
+// maxRunFileEditBytes caps both the read and write side of the in-run file
+// editor. The motivating bug was a 22k-file un-gitignored build cache
+// flooding the diff; the editor must never try to stream a multi-megabyte
+// blob into Monaco (it would freeze the browser) nor accept an unbounded
+// write body. 4 MiB comfortably covers any hand-edited source/.gitignore.
+const maxRunFileEditBytes = 4 << 20
 
 // fileMode selects the source-of-truth for /api/runs/{id}/files:
 //
@@ -438,6 +446,166 @@ func (s *Server) historicalRefs(run *store.Run) (base, final, repo string, ok bo
 		return "", "", "", false
 	}
 	return base, final, repo, true
+}
+
+// runFileContentResponse is the wire shape of
+// GET /api/runs/{id}/files/content and the success body of the PUT. Content
+// is empty for binary files (Binary=true) and for a not-yet-existing path
+// (Exists=false); the studio uses Exists to seed a fresh editor buffer
+// (e.g. creating a `.gitignore` that doesn't exist yet) rather than erroring.
+type runFileContentResponse struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	Binary  bool   `json:"binary"`
+	Exists  bool   `json:"exists"`
+}
+
+// saveRunFileRequest is the body of PUT /api/runs/{id}/files/content.
+type saveRunFileRequest struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+// handleGetRunFileContent returns the raw UTF-8 contents of one path inside a
+// run's live worktree, ready to seed an editable Monaco buffer. Unlike
+// /files/diff (which returns before/after for changed files only), this reads
+// any path under the worktree — including an unchanged or not-yet-created
+// `.gitignore` — so the operator can fix a stray build/cache dir inline.
+//
+// Editing is scoped to LIVE worktrees: a finalized/gc'd run has no on-disk
+// worktree, so we 409 rather than guessing at the persistent branch. The
+// ?path= input is validated by gitlib.ValidateRelPath AND re-resolved through
+// safePathWithin (symlink-aware containment) before any FS access — the path
+// can never escape run.WorkDir.
+func (s *Server) handleGetRunFileContent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "missing run id")
+		return
+	}
+	path := r.URL.Query().Get("path")
+	if err := gitlib.ValidateRelPath(path); err != nil {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "invalid path: %v", err)
+		return
+	}
+	run, err := s.runs.LoadRunCtx(r.Context(), id)
+	if err != nil {
+		s.httpErrorFor(w, r, http.StatusNotFound, "run not found: %v", err)
+		return
+	}
+	abs, ok := s.resolveRunWorktreePath(w, r, run, path)
+	if !ok {
+		return
+	}
+	// #nosec G304 — abs is the output of safePathWithin (symlink-aware
+	// containment against run.WorkDir); request input cannot escape the
+	// worktree. Mirrors the dirExists nosec rationale on this surface.
+	info, statErr := os.Stat(abs)
+	if errors.Is(statErr, os.ErrNotExist) {
+		s.writeJSONFor(w, r, runFileContentResponse{Path: path, Exists: false})
+		return
+	}
+	if statErr != nil {
+		s.httpErrorFor(w, r, http.StatusInternalServerError, "stat: %v", statErr)
+		return
+	}
+	if info.IsDir() {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "path is a directory")
+		return
+	}
+	if info.Size() > maxRunFileEditBytes {
+		s.httpErrorFor(w, r, http.StatusRequestEntityTooLarge,
+			"file too large to edit (%d bytes; limit %d)", info.Size(), maxRunFileEditBytes)
+		return
+	}
+	// #nosec G304 — see stat rationale above; abs is containment-checked.
+	data, readErr := os.ReadFile(abs)
+	if readErr != nil {
+		s.httpErrorFor(w, r, http.StatusInternalServerError, "read: %v", readErr)
+		return
+	}
+	resp := runFileContentResponse{Path: path, Exists: true}
+	if bytes.IndexByte(data, 0) >= 0 {
+		resp.Binary = true // leave Content empty; the editor refuses binary
+	} else {
+		resp.Content = string(data)
+	}
+	s.writeJSONFor(w, r, resp)
+}
+
+// handleSaveRunFileContent writes operator-edited content back into a run's
+// live worktree. Same path-traversal boundary as the GET; additionally
+// gated by requireSafeOrigin + rejectCrossStoreWrite (the mutation guards
+// every write endpoint on this server carries).
+func (s *Server) handleSaveRunFileContent(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSafeOrigin(w, r) {
+		return
+	}
+	if s.rejectCrossStoreWrite(w, r) {
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "missing run id")
+		return
+	}
+	var req saveRunFileRequest
+	if err := readJSON(r, &req); err != nil {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "invalid request: %v", err)
+		return
+	}
+	if err := gitlib.ValidateRelPath(req.Path); err != nil {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "invalid path: %v", err)
+		return
+	}
+	if len(req.Content) > maxRunFileEditBytes {
+		s.httpErrorFor(w, r, http.StatusRequestEntityTooLarge,
+			"content too large (%d bytes; limit %d)", len(req.Content), maxRunFileEditBytes)
+		return
+	}
+	run, err := s.runs.LoadRunCtx(r.Context(), id)
+	if err != nil {
+		s.httpErrorFor(w, r, http.StatusNotFound, "run not found: %v", err)
+		return
+	}
+	abs, ok := s.resolveRunWorktreePath(w, r, run, req.Path)
+	if !ok {
+		return
+	}
+	// #nosec G304 — abs is the output of safePathWithin (symlink-aware
+	// containment against run.WorkDir); request input cannot escape the
+	// worktree.
+	if info, statErr := os.Stat(abs); statErr == nil && info.IsDir() {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "path is a directory")
+		return
+	}
+	// #nosec G304 — see rationale above; abs is containment-checked.
+	if err := os.WriteFile(abs, []byte(req.Content), 0o644); err != nil {
+		s.httpErrorFor(w, r, http.StatusInternalServerError, "write: %v", err)
+		return
+	}
+	s.writeJSONFor(w, r, runFileContentResponse{Path: req.Path, Content: req.Content, Exists: true})
+}
+
+// resolveRunWorktreePath validates that the run has a live on-disk worktree
+// and returns the containment-checked absolute path for relPath. It writes
+// the appropriate HTTP error and returns ok=false on any failure, so callers
+// can early-return. relPath MUST already have passed gitlib.ValidateRelPath.
+func (s *Server) resolveRunWorktreePath(w http.ResponseWriter, r *http.Request, run *store.Run, relPath string) (string, bool) {
+	if run.WorkDir == "" {
+		s.httpErrorFor(w, r, http.StatusConflict, "run has no working directory recorded")
+		return "", false
+	}
+	if !dirExists(run.WorkDir) {
+		s.httpErrorFor(w, r, http.StatusConflict, "run worktree is no longer available; files can only be edited while the worktree exists")
+		return "", false
+	}
+	abs, err := safePathWithin(run.WorkDir, relPath)
+	if err != nil {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "invalid path: %v", err)
+		return "", false
+	}
+	return abs, true
 }
 
 func dirExists(p string) bool {

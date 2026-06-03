@@ -29,6 +29,7 @@ import { buildExecutionsAt } from "@/lib/snapshotReducer";
 import BrowserPane, { type BrowserDock } from "./BrowserPane";
 import EventLog from "./EventLog";
 import FileDiffDialog from "./FileDiffDialog";
+import FileEditDialog from "./FileEditDialog";
 import FloatingChatPanel, {
   ChatPanelContent,
   type ChatDock,
@@ -200,6 +201,15 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
     },
     [],
   );
+
+  // Worktree path open in the editable Monaco tab (FileEditDialog), or null.
+  // Driven by the FilesPanel "Edit .gitignore" shortcut and the diff
+  // dialog's "Edit" affordance (which closes the read-only diff first).
+  const [editFile, setEditFile] = useState<string | null>(null);
+  const handleEditFile = useCallback((path: string) => {
+    setDiffFile(null);
+    setEditFile(path);
+  }, []);
 
   const verticalLayout = useLayoutPersistence("run-console-v2.vertical", {
     top: 70,
@@ -785,6 +795,7 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
           runId={runId}
           run={snapshot.run}
           onSelectFile={handleSelectFile}
+          onEditFile={handleEditFile}
           onMergeComplete={refreshSnapshot}
         />
         <div className="flex-1 min-h-0 flex flex-col">
@@ -971,6 +982,12 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
           file={diffFile}
           mode={diffMode}
           onClose={() => setDiffFile(null)}
+          onEdit={handleEditFile}
+        />
+        <FileEditDialog
+          runId={runId}
+          path={editFile}
+          onClose={() => setEditFile(null)}
         />
         <FloatingChatPanel
           runId={runId}
