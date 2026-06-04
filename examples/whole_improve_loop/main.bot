@@ -70,17 +70,20 @@ vars:
   ## faster convergence) at the cost of a larger per-pass prompt.
   ## See docs/adr/011-whole-improve-loop-context-chunking.md.
   max_review_chunk_tokens: int = 30000
-  ## Per-run review-pass budget (issue #12). Each pass reviews ONE chunk,
-  ## so this bounds passes per single run. Convergence needs num_chunks+1
-  ## consecutive clean passes; when num_chunks exceeds this bound a single
-  ## run cannot converge alone, but the persisted clean_streak
-  ## (.whole_improve_loop.state) lets successive re-dispatches accumulate
-  ## toward it. Raise it (with the budget) to converge a mid-size repo in
-  ## ONE run — e.g. a 25-chunk repo converges in one run at 30. The
-  ## default 15 keeps a single run well inside max_cost_usd / max_duration
-  ## with the premium default models. Wired as the review_loop cap via the
-  ## runtime's templated-loop-bound support (resolves to an int; an int
-  ## var default always coerces, so the bound never degrades to 0).
+  ## Per-run FIX HEADROOM beyond one full clean sweep (issue #12). The
+  ## review_loop cap is NOT this value directly — snapshot_chunk emits a
+  ## dynamic loop_max = num_chunks + max_review_passes: num_chunks passes
+  ## for ONE full clean sweep (reaching the num_chunks+1 convergence
+  ## threshold) PLUS this many extra passes to find+fix blockers and
+  ## re-sweep. So a single run ALWAYS gets at least one full sweep — the
+  ## old fixed-15 bound could not even sweep a >14-chunk repo once, which
+  ## is exactly why #12 never converged — and converges in one run for any
+  ## repo needing ≤ max_review_passes fix passes. Pathological repos still
+  ## amortize across re-dispatches via the persisted clean_streak
+  ## (.whole_improve_loop.state). The default 15 keeps a single run well
+  ## inside max_cost_usd / max_duration with the premium default models;
+  ## raise it for more in-run fix headroom. Wired as the review_loop cap
+  ## via the runtime's templated-loop-bound support (resolves to an int).
   max_review_passes: int = 15
 
 prompt review_system:
@@ -508,6 +511,7 @@ schema snapshot_output:
   total_files: int
   total_tokens: int
   skipped_oversize: int
+  loop_max: int
   ## Cross-run convergence base (issue #12): the clean_streak value the
   ## snapshot read from .whole_improve_loop.state (seeded from the prior
   ## pass's verdict via the loop-return edge, or from disk on the first
@@ -626,13 +630,26 @@ schema fix_output:
 ## POSIX + python3 (the same toolchain sec-audit-source's tool nodes
 ## rely on); keep it double-quote-free so `python3 -c "..."` stays intact.
 tool snapshot_chunk:
-  command: `WS={{vars.workspace_dir}} BUDGET={{vars.max_review_chunk_tokens}} STATE_IN={{input.incoming_clean_streak}} STATE_CURSOR={{input.incoming_cursor}} python3 -c "
+  command: `WS={{vars.workspace_dir}} BUDGET={{vars.max_review_chunk_tokens}} MAXPASSES={{vars.max_review_passes}} STATE_IN={{input.incoming_clean_streak}} STATE_CURSOR={{input.incoming_cursor}} python3 -c "
 import os, sys, json
 
 ws = os.environ.get('WS', '.')
 budget = int(os.environ.get('BUDGET', '30000') or '30000')
 if budget <= 0:
     budget = 30000
+
+# Per-run FIX HEADROOM beyond one full clean sweep (issue #12). The
+# review_loop bound is emitted below as loop_max = num_chunks + max_passes:
+# num_chunks passes for ONE full clean sweep (reaching the num_chunks+1
+# convergence threshold) PLUS max_passes extra passes to find+fix blockers
+# and re-sweep. A bare num_chunks+2 band would give a single fix no room --
+# one blocker resets clean_streak and the sweep cannot restart in-bound --
+# so max_passes is what makes single-run convergence reachable for a repo
+# needing up to that many fix passes; the persisted clean_streak still
+# amortizes pathological repos across re-dispatches.
+max_passes = int(os.environ.get('MAXPASSES', '15') or '15')
+if max_passes < 2:
+    max_passes = 2
 
 # Persistent state (issue #12): ONE json dotfile at the workspace root
 # holds BOTH the package-chunk rotation cursor AND the cross-run
@@ -809,6 +826,18 @@ def pack(pkgs, budget):
 chunks = pack(pkgs, budget)
 num_chunks = len(chunks)
 
+# Issue #12 convergence fix: convergence needs num_chunks+1 clean passes,
+# and the loop bound is now derived from num_chunks (loop_max = num_chunks +
+# max_passes, emitted below) so a single run converges within one full sweep
+# plus max_passes fix passes. Cap the chunk COUNT on huge repos by re-packing
+# with a larger budget, so that bound stays within a sane pass count instead
+# of 100+ passes / fragile multi-run amortization.
+MAX_CHUNKS = 24
+if num_chunks > MAX_CHUNKS and total_tokens > 0:
+    budget = (total_tokens // MAX_CHUNKS) + 1
+    chunks = pack(pkgs, budget)
+    num_chunks = len(chunks)
+
 if num_chunks == 0:
     try:
         with open(state_path, 'w', encoding='utf-8') as sf:
@@ -819,7 +848,7 @@ if num_chunks == 0:
     print(json.dumps({
         'chunk_content': '(no source files found in workspace)',
         'files': '', 'chunk_label': 'empty', 'chunk_index': 0,
-        'num_chunks': 1, 'chunked': False, 'file_count': 0,
+        'num_chunks': 1, 'loop_max': 1 + max_passes, 'chunked': False, 'file_count': 0,
         'chunk_tokens': 0, 'total_files': 0, 'total_tokens': 0,
         'skipped_oversize': 0, 'persisted_clean_streak': int(clean_streak),
         'cursor': int(cursor),
@@ -889,6 +918,7 @@ print(json.dumps({
     # num_chunks). streak_check echoes it back as next_cursor = cursor + 1
     # on the loop-return edge so the advance is coupled to the verdict.
     'cursor': int(cursor),
+    'loop_max': num_chunks + max_passes,
 }))
 "`
   output: snapshot_output
@@ -1157,7 +1187,7 @@ workflow whole_improve_loop:
   ## here so the runtime snapshots the reviewer's verdict as
   ## `loop.review_loop.previous_output` for the NEXT iteration to
   ## inspect — eliminating the manual `previous_verdict` relay.
-  reviewer_claude -> streak_check as review_loop("{{vars.max_review_passes}}") with {
+  reviewer_claude -> streak_check as review_loop("{{outputs.snapshot_chunk.loop_max}}") with {
     approved: "{{outputs.reviewer_claude.approved}}",
     family: "{{outputs.reviewer_claude.family}}",
     blockers: "{{outputs.reviewer_claude.blockers}}",
@@ -1168,7 +1198,7 @@ workflow whole_improve_loop:
     persisted_clean_streak: "{{outputs.snapshot_chunk.persisted_clean_streak}}",
     cursor: "{{outputs.snapshot_chunk.cursor}}"
   }
-  reviewer_gpt -> streak_check as review_loop("{{vars.max_review_passes}}") with {
+  reviewer_gpt -> streak_check as review_loop("{{outputs.snapshot_chunk.loop_max}}") with {
     approved: "{{outputs.reviewer_gpt.approved}}",
     family: "{{outputs.reviewer_gpt.family}}",
     blockers: "{{outputs.reviewer_gpt.blockers}}",

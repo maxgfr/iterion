@@ -51,6 +51,7 @@ func stubSnapshotChunk(exec *scenarioExecutor) {
 			"chunk_label":            "stub",
 			"chunk_index":            0,
 			"num_chunks":             1,
+			"loop_max":               3, // small fixed bound for the test; real node emits num_chunks+max_passes
 			"chunked":                false,
 			"file_count":             1,
 			"chunk_tokens":           10,
@@ -354,11 +355,12 @@ func TestWholeImproveLoop_RecoveryLoopExhausted(t *testing.T) {
 	// Bounded by review_loop(15) on the reviewer→streak_check edge —
 	// the review cap kicks in before recovery_loop(20) does, since
 	// review_loop is what's incremented every cycle. The exact cap
-	// depends on round-robin starting family; assert "many fixes ran"
-	// rather than a specific number.
+	// depends on round-robin starting family; assert "fixes ran each pass"
+	// rather than a specific number. With num_chunks=1 the dynamic bound is
+	// loop_max=3, so ~3 fix cycles run before review_loop exhausts.
 	totalFixes := exec.callCount("fix_claude") + exec.callCount("fix_gpt")
-	if totalFixes < 5 {
-		t.Errorf("expected significant fixer activity (≥5), got %d (claude=%d, gpt=%d)",
+	if totalFixes < 2 {
+		t.Errorf("expected fixer activity across the bounded loop (≥2), got %d (claude=%d, gpt=%d)",
 			totalFixes, exec.callCount("fix_claude"), exec.callCount("fix_gpt"))
 	}
 }
@@ -417,7 +419,7 @@ func TestWholeImproveLoop_CursorThreadsAndStreakAccumulates(t *testing.T) {
 		gotStreaks = append(gotStreaks, streak)
 		return map[string]interface{}{
 			"chunk_content": "// stub", "files": "stub.go", "chunk_label": "stub",
-			"chunk_index": cur % 3, "num_chunks": 3, "chunked": true,
+			"chunk_index": cur % 3, "num_chunks": 3, "loop_max": 5, "chunked": true,
 			"file_count": 1, "chunk_tokens": 10, "total_files": 3, "total_tokens": 30,
 			"skipped_oversize": 0, "persisted_clean_streak": streak, "cursor": cur, "_tokens": 1,
 		}, nil
