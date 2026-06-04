@@ -77,6 +77,7 @@ const editMissHintAfter = 2
 //     the tally,
 //   - any other Edit/MultiEdit result (success, or a different error)
 //     resets it to 0.
+//
 // Extracted from the PostToolUse hook so the wedge-detection is unit-
 // testable without driving a live claude session.
 func editMissCount(toolName, response string, prev int) int {

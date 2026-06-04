@@ -64,7 +64,7 @@ func TestBudgetWarningFiresOncePerAxis(t *testing.T) {
 		}
 	}
 	m.Observe(warn("tokens", 80, 100))
-	m.Observe(warn("tokens", 85, 100)) // same axis — must not re-fire
+	m.Observe(warn("tokens", 85, 100))  // same axis — must not re-fire
 	m.Observe(warn("cost_usd", 0.9, 1)) // different axis — fires
 
 	waitFor(t, func() bool { return len(sink.snapshot()) == 2 })

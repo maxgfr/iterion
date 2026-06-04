@@ -6,9 +6,9 @@ import "testing"
 // to avoid offering a redundant "Squash and merge" for a branch already
 // landed on the target (ticket: stale merge button after a git-CLI merge).
 func TestIsAncestor(t *testing.T) {
-	dir := gitRepo(t)                          // root commit on main
-	a := resolveSHA(t, dir, "HEAD")            // root
-	b := commit(t, dir, "b.txt", "b\n", "b")   // main: a -> b
+	dir := gitRepo(t)                        // root commit on main
+	a := resolveSHA(t, dir, "HEAD")          // root
+	b := commit(t, dir, "b.txt", "b\n", "b") // main: a -> b
 
 	mustRun(t, dir, "checkout", "-q", "-b", "feat")
 	c := commit(t, dir, "c.txt", "c\n", "c") // feat: b -> c
