@@ -550,7 +550,11 @@ govulncheck, bandit, pip-audit, trivy, gitleaks) ship in the
 **`iterion-sandbox-sec`** image (`sandbox/sec/Dockerfile`, layered on
 `-full`), which both bots pin via `sandbox.image`. A bare host and the
 slim/full images have none of these tools, so running the bots without
-the sec image silently produces a zero-finding façade. CI publishes it
+the sec image produces a zero-finding façade — now caught, not silent:
+`sec-audit-source`'s deterministic `scan_health` gate hard-fails the run
+when the always-on generic scanners (gitleaks/trivy/semgrep-auto)
+produced no output, and banners partial coverage gaps in the report (see
+[sec_audit_scan_health_test.go](e2e/sec_audit_scan_health_test.go)). CI publishes it
 via [.github/workflows/image.yml](.github/workflows/image.yml) (the
 `build-sandbox-sec` job, chained on `-full`) on every push to `main`
 (tag `:edge`) and on release tags. Until that first CI run lands — or for

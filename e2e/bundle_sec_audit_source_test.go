@@ -23,6 +23,9 @@ var expectedSecAuditSourceNodes = []string{
 	// Cap2 programmatic matchers: see skills/programmatic-matchers.md
 	"run_custom_matchers",
 	"scan_join",
+	// scan_health: deterministic anti-façade smoke gate — hard-fails when
+	// the generic scanners produced no output. See sec_audit_scan_health_test.go.
+	"scan_health",
 	// cap_findings: deterministic overflow guard — bounds scanner JSON
 	// before triage. See sec_audit_cap_findings_test.go.
 	"cap_findings",

@@ -47,6 +47,15 @@ vars:
   ## the truncation explicitly. Raise it for exhaustive small-repo runs;
   ## lower it on a tighter-context model.
   findings_cap_per_file: int    = 50
+  ## Anti-façade smoke gate. The always-on generic scanners (gitleaks,
+  ## trivy, semgrep --config=auto) MUST each write a JSON file on any repo
+  ## when they actually run — a missing file means the tool crashed or was
+  ## absent (e.g. scanners not installed in the sandbox), not that the repo
+  ## is clean. scan_health hard-fails the run when fewer than this many of
+  ## the 3 generic scanners produced output, so a broken toolchain can no
+  ## longer masquerade as a zero-finding clean bill of health. Set to 0 to
+  ## disable the gate (not recommended).
+  min_generic_scanners: int    = 2
   fp_path:             string = "${PROJECT_DIR}/.iterion/security/fp-known.yaml"
   ## Per-file append-only analysis cache; see skills/file-records.md.
   ## The bot writes one JSON per scanned file to skip the (expensive)
@@ -119,6 +128,21 @@ schema findings_budget_output:
   truncated:     bool
   per_file_cap:  int
   per_scanner:   json
+
+## scan_health emits the scanner-coverage signal so a broken toolchain
+## (scanners that crashed / are absent in the sandbox and produced no
+## output file) is never mistaken for a clean repo. missing[] is a list
+## of {file, status, group}; healthy is true only when the generic layer
+## ran and nothing is missing.
+schema scanner_health_output:
+  generic_expected:      int
+  generic_present:       int
+  min_generic:           int
+  present:               json
+  missing:               json
+  total_findings_seen:   int
+  healthy:               bool
+  degraded:              bool
 
 schema triage_input:
   workspace_dir:  string
@@ -226,6 +250,7 @@ schema report_input:
   suppressed:          json
   stats:               json
   findings_budget:     json
+  scanner_health:      json
 
 schema report_output:
   created_issues:  json
@@ -611,6 +636,18 @@ prompt report_card_user:
   capped run is never mistaken for a clean bill of health. When
   `truncated` is false, coverage was complete; no banner needed.
 
+  Scanner health (deterministic scan_health smoke gate):
+  {{input.scanner_health}}
+  If `missing` is non-empty, one or more scanners produced NO output file
+  — they crashed or are absent in the sandbox, so their share of the repo
+  was NOT scanned. You MUST state this prominently near the TOP of the
+  markdown — e.g. a "⚠ Scanner coverage: N scanners produced no output
+  (<files>); results are NOT a complete clean bill of health — verify the
+  scanner toolchain (iterion-sandbox-sec) and re-run" banner. (A run where
+  the generic layer wholly failed never reaches this node — scan_health
+  hard-fails it first.) When `missing` is empty, coverage was full; no
+  banner needed.
+
   Create one kanban issue per confirmed and uncertain finding
   per the system-prompt template, then write the markdown
   summary. Return report_output.
@@ -890,6 +927,95 @@ compute scan_join:
     go_scan:      "outputs.run_go_scanners"
     python_scan:  "outputs.run_python_scanners"
     custom_scan:  "outputs.run_custom_matchers"
+
+## scan_health (anti-façade smoke gate). Each scanner command ends in
+## `|| true`, so a scanner that crashes or is absent (e.g. the sandbox
+## lacks gosec/semgrep/trivy) fails silently and leaves no output file —
+## triage then sees zero findings and the audit reports a clean bill of
+## health that is actually a broken toolchain. This deterministic node
+## inspects scan_dir for each expected scanner output file and HARD-FAILS
+## the run when fewer than `min_generic_scanners` of the always-on generic
+## trio (gitleaks/trivy/semgrep-auto) produced a parseable file. A clean
+## repo still writes valid (empty) files, so this distinguishes
+## "nothing found" from "nothing ran". Partial gaps (some language
+## scanners missing) pass but are surfaced to report_card as a coverage
+## banner. Runs BEFORE cap_findings, which truncates the files in place.
+tool scan_health:
+  command: `SCAN_DIR={{vars.scan_dir}} MIN_GENERIC={{vars.min_generic_scanners}} python3 -c "
+import os, sys, json
+
+scan_dir = os.environ.get('SCAN_DIR', '.')
+try:
+    min_generic = int(os.environ.get('MIN_GENERIC', '2') or '2')
+except ValueError:
+    min_generic = 2
+
+# The always-on generic layer is language-agnostic: each of these MUST
+# write a JSON file on any repo when the tool actually runs. Missing or
+# unparseable => the scanner crashed / is absent, not a clean repo. The
+# language + custom files may legitimately be empty (no matching sources).
+GENERIC = ['gitleaks.json', 'trivy.json', 'semgrep-auto.json']
+LANG    = ['js.json', 'go-semgrep.json', 'gosec.json', 'py-semgrep.json', 'bandit.json']
+CUSTOM  = ['custom.json']
+FINDING_KEYS = ['results', 'Issues', 'findings', 'matches', 'vulnerabilities', 'Vulns', 'alerts']
+
+def classify(fname):
+    p = os.path.join(scan_dir, fname)
+    if not os.path.exists(p):
+        return 'missing', 0
+    try:
+        with open(p, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (ValueError, OSError):
+        return 'invalid', 0
+    n = 0
+    if isinstance(data, dict):
+        for k in FINDING_KEYS:
+            v = data.get(k)
+            if isinstance(v, list):
+                n += len(v)
+    elif isinstance(data, list):
+        n = len(data)
+    return 'present', n
+
+present, missing, findings, generic_present = [], [], 0, 0
+for group, files in (('generic', GENERIC), ('lang', LANG), ('custom', CUSTOM)):
+    for fn in files:
+        status, n = classify(fn)
+        findings += n
+        if status == 'present':
+            present.append(fn)
+            if group == 'generic':
+                generic_present += 1
+        else:
+            missing.append({'file': fn, 'status': status, 'group': group})
+
+health = {
+    'generic_expected':    len(GENERIC),
+    'generic_present':     generic_present,
+    'min_generic':         min_generic,
+    'present':             present,
+    'missing':             missing,
+    'total_findings_seen': findings,
+    'healthy':             generic_present >= min_generic and not missing,
+    'degraded':            bool(missing),
+}
+print(json.dumps(health))
+
+if generic_present < min_generic:
+    sys.stderr.write(
+        'scan_health: only %d of %d always-on generic scanners produced output '
+        '(need >= %d). The scanner toolchain failed to run, so this audit cannot '
+        'be trusted as a clean bill of health. Missing: %s. Check that the sandbox '
+        'image ships the scanners (iterion-sandbox-sec) and that egress for '
+        'semgrep/trivy rule + DB fetches is permitted.\n' % (
+            generic_present, len(GENERIC), min_generic,
+            ', '.join(m['file'] for m in missing) or '(none recorded)',
+        )
+    )
+    sys.exit(1)
+"`
+  output: scanner_health_output
 
 ## cap_findings (overflow guard, Cap. 1-class). gosec/semgrep can emit
 ## thousands of findings on a large repo; triage reads the scanner JSON
@@ -1276,7 +1402,8 @@ workflow sec_audit_source:
   run_python_scanners  -> run_custom_matchers
   run_custom_matchers  -> scan_join
 
-  scan_join -> cap_findings
+  scan_join -> scan_health
+  scan_health -> cap_findings
 
   cap_findings -> triage with {
     workspace_dir:   "{{vars.workspace_dir}}",
@@ -1314,7 +1441,8 @@ workflow sec_audit_source:
     uncertain:          "{{outputs.merge_verdicts.uncertain}}",
     suppressed:         "{{outputs.triage.suppressed}}",
     stats:              "{{outputs.merge_verdicts.stats}}",
-    findings_budget:    "{{outputs.cap_findings}}"
+    findings_budget:    "{{outputs.cap_findings}}",
+    scanner_health:     "{{outputs.scan_health}}"
   }
 
   report_card -> update_file_records with {
