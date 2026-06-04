@@ -213,6 +213,30 @@ iterion dispatch iterion.dispatcher.yaml --no-server
 | `--port <port>` | HTTP port for the dispatcher REST/WS surface (overrides `server.port` in config) |
 | `--no-server` | Run headless — disable the HTTP surface even if `server.port` is set |
 
+## `iterion schedule`
+
+Schedule recurring bot runs via the host crontab — no resident daemon (see [scheduling.md](scheduling.md)). A declarative manifest (`~/.iterion/schedules.yaml`) is the source of truth; `install` splices a managed block into the crontab and each cron line calls `schedule run <name>`:
+
+```bash
+iterion schedule add sec-audit-source-weekly --cron "0 2 * * 1" \
+  --bot examples/sec-audit-source/main.bot --workdir "$PWD"
+iterion schedule list
+iterion schedule run sec-audit-source-weekly --dry-run   # preview the resolved `iterion run`
+iterion schedule install                                  # write the crontab block (CRON_TZ=UTC)
+iterion schedule uninstall                                # remove the managed block
+```
+
+All subcommands accept `--manifest <path>` (default `$ITERION_SCHEDULES_FILE` or `~/.iterion/schedules.yaml`).
+
+| Command | Flags |
+|---------|-------|
+| `schedule add <name>` | `--cron <expr>` (required, 5-field), `--bot <path>` (required), `--workdir <dir>`, `--store-dir <dir>`, `--sandbox <none\|auto>`, `--timeout <dur>`, `--var key=value` (repeatable), `--description <text>`, `--disabled` |
+| `schedule list` | `--json` |
+| `schedule remove <name>` | — |
+| `schedule run <name>` | `--dry-run` |
+| `schedule install` | `--print` (render block to stdout, don't touch crontab), `--tz <zone>` (default `UTC`) |
+| `schedule uninstall` | — |
+
 ## `iterion issue`
 
 Manage the native kanban tracker used by the dispatcher (see [native-tracker.md](native-tracker.md)):

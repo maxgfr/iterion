@@ -557,13 +557,33 @@ via [.github/workflows/image.yml](.github/workflows/image.yml) (the
 a local-only loop — build it yourself and `docker tag` it to
 `ghcr.io/socialgouv/iterion-sandbox-sec:edge`.
 
-**Recurring audit — pending.** The intended weekly schedule
-(sec-audit-source Mon 02:00 UTC, sec-audit-deps 03:00 UTC) is **not yet
-wired**: it needs (1) an `iterion schedule` mechanism, (2) the sec image
-published in CI, and (3) a fix for `sec-audit-source`'s `detect_tech`
-node, which overflows the model context on a repo this size. All three
-are tracked on the board. Until then, run a one-time audit by hand: a
-direct scanner pass in the sec image is reliable —
+**Recurring audit.** The weekly schedule (sec-audit-source Mon 02:00
+UTC, sec-audit-deps Mon 03:00 UTC) is wired through
+[`iterion schedule`](docs/scheduling.md) — a host-crontab integration
+that needs **no resident daemon** (the host's own cron is the trigger).
+Register and install it with:
+
+```sh
+iterion schedule add sec-audit-source-weekly \
+  --cron "0 2 * * 1" --bot examples/sec-audit-source/main.bot --workdir "$PWD"
+iterion schedule add sec-audit-deps-weekly \
+  --cron "0 3 * * 1" --bot examples/sec-audit-deps/main.bot --workdir "$PWD"
+iterion schedule install            # splices a managed block into `crontab`, CRON_TZ=UTC
+```
+
+Each cron line routes through `iterion schedule run <name>`, which
+re-reads `~/.iterion/schedules.yaml` so the manifest stays authoritative;
+logs land in `~/.iterion/logs/schedule-<name>.log`. Of the three original
+blockers, the context-overflow ones are fixed —
+`sec-audit-source`'s `detect_tech`/`triage` overflow is bounded by the
+deterministic `cap_findings` node (see
+[sec_audit_cap_findings_test.go](e2e/sec_audit_cap_findings_test.go)).
+The remaining gate before flipping the schedule on for real is **(2) the
+sec image published in CI** (the `build-sandbox-sec` job above); until
+that first push lands, install the schedule but `docker tag` the locally
+built `iterion-sandbox-sec:edge` so the scanned runs find their tools.
+For a one-time audit by hand, a direct scanner pass in the sec image is
+reliable —
 `docker run --rm -v "$PWD":/src:ro -w /src
 ghcr.io/socialgouv/iterion-sandbox-sec:edge gosec -severity=high
 -confidence=high -exclude-dir=vendor -exclude-dir=.iterion ./...`.
@@ -586,6 +606,7 @@ iterion diagram <file.iter> [--view]    # Generate Mermaid diagram (compact|deta
 iterion studio [--port] [--dir] [--bind] [--bots-path] [--no-browser-pane]  # Launch visual workflow editor (+ kanban /board, /dispatcher dashboard, Browser pane, Launch modal)
 iterion report --run-id <id> [--store-dir] [--output]  # Generate chronological run report
 iterion dispatch <config.yaml> [--port]  # Long-running dispatcher (tracker → workflow per issue)
+iterion schedule add|list|remove|run|install|uninstall  # Cron recurring bots via the host crontab — no daemon (see docs/scheduling.md)
 iterion issue create|list|show|move|update|close|board  # Native kanban tracker
 iterion bots list [--paths <dir>] [--format json|markdown|skill]  # Discover .bot/.botz bundles (used by whats-next + dispatcher zero-config)
 iterion bench asymptote [flags]         # Asymptote benchmark (see docs/asymptote-bench.md)
