@@ -3781,15 +3781,22 @@ if [ -z "$SPECS" ]; then
   exit 0
 fi
 case "$PKG_MGR" in
-  yarn|yarn3|yarn4) CMD="yarn up $SPECS" ;;
-  npm)              CMD="npm install $SPECS" ;;
-  pnpm)             CMD="pnpm update $SPECS" ;;
-  bun)              CMD="bun update $SPECS" ;;
-  *)                printf '{"success":false,"output":"family_upgrade: unsupported pkg_manager %s","upgraded_specs":[]}\n' "$PKG_MGR"; exit 1 ;;
+  yarn|yarn3|yarn4)    CMD="yarn up $SPECS" ;;
+  npm)                 CMD="npm install $SPECS" ;;
+  pnpm)                CMD="pnpm update $SPECS" ;;
+  bun)                 CMD="bun update $SPECS" ;;
+  go|go-modules|gomod) CMD="go get $SPECS && go mod tidy" ;;
+  # Unsupported manager: emit success=false and exit 0 so the bot takes
+  # its designed not-success edge to family_revert (the per-package solo
+  # loop re-attempts members individually) instead of erroring the node
+  # and killing the whole run.
+  *)                   printf '{"success":false,"output":"family_upgrade: unsupported pkg_manager %s — skipping this family","upgraded_specs":[]}\n' "$PKG_MGR"; exit 0 ;;
 esac
 if ! eval "$CMD" >&2; then
+  # Genuine upgrade failure: same graceful contract — success=false,
+  # exit 0 -> family_revert, not a hard run failure.
   printf '{"success":false,"output":"family upgrade failed: %s","upgraded_specs":[]}\n' "$CMD"
-  exit 1
+  exit 0
 fi
 UPGRADED_JSON=$(printf '%s' "$SPECS" | jq -R 'split(" ") | map(select(length > 0))' 2>/dev/null || echo '[]')
 printf '{"success":true,"output":"family upgrade succeeded","upgraded_specs":%s}\n' "$UPGRADED_JSON"
@@ -3811,11 +3818,12 @@ cd {{input.workspace_dir}} >&2
 PKG_MGR={{input.pkg_manager}}
 FAMILY={{input.family_name}}
 case "$PKG_MGR" in
-  yarn|yarn3|yarn4) INSTALL_CMD="yarn install" ;;
-  npm)              INSTALL_CMD="npm install" ;;
-  pnpm)             INSTALL_CMD="pnpm install" ;;
-  bun)              INSTALL_CMD="bun install" ;;
-  *)                INSTALL_CMD="" ;;
+  yarn|yarn3|yarn4)    INSTALL_CMD="yarn install" ;;
+  npm)                 INSTALL_CMD="npm install" ;;
+  pnpm)                INSTALL_CMD="pnpm install" ;;
+  bun)                 INSTALL_CMD="bun install" ;;
+  go|go-modules|gomod) INSTALL_CMD="go mod download" ;;
+  *)                   INSTALL_CMD="" ;;
 esac
 if [ -n "$INSTALL_CMD" ]; then
   if ! eval "$INSTALL_CMD" >&2; then
@@ -3823,6 +3831,16 @@ if [ -n "$INSTALL_CMD" ]; then
     exit 0
   fi
 fi
+# Go has no package.json scripts — smoke directly with build + vet.
+case "$PKG_MGR" in
+  go|go-modules|gomod)
+    if go build ./... >&2 && go vet ./... >&2; then
+      printf '{"stable":true,"output":"family %s go build+vet passed"}\n' "$FAMILY"
+    else
+      printf '{"stable":false,"output":"family %s go build/vet failed"}\n' "$FAMILY"
+    fi
+    exit 0 ;;
+esac
 # Pick the fastest available smoke from common script names. Order:
 # typecheck/tsc → build → test. Skip lint deliberately: it's far too
 # noisy on most repos (warnings-as-errors, formatting drift, stylistic
