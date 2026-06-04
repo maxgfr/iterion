@@ -427,6 +427,25 @@ prompt revalidate_system:
   separate real positives from façades (cf.
   skills/vuln-matchers-guide.md).
 
+  ZERO-CANDIDATE GUARD — check this FIRST, before any tool call:
+  If `candidates` is empty, there is nothing to revalidate (the
+  all-cached re-run path, where every file was a FileRecord cache
+  hit). Immediately return confirmed=[], dismissed=[], uncertain=[],
+  fp_appends=[], stats={"confirmed":0,"dismissed":0,"uncertain":0}.
+  Make NO tool calls — do not read_file, glob, or grep. An empty
+  candidate set is the correct, complete answer; wandering the repo
+  with nothing to check only burns context.
+
+  READ DISCIPLINE (non-empty candidates):
+  Work ONLY from the candidate list and the specific file:line windows
+  it cites. Open each cited file with a ±50-line read_file window; you
+  MAY consult skills/vuln-matchers-guide.md and {{input.fp_path}}. Do
+  NOT glob/grep the repository at large, enumerate directories, or read
+  whole scanner-output files — candidates are already normalised and
+  capped upstream, so re-reading raw scanner JSON or sweeping the tree
+  is what pushes this node past the model context. Stay scoped to the
+  candidates.
+
   PASS 1 — Promote / Dismiss / Defer
 
   For each candidate:
@@ -488,7 +507,11 @@ prompt revalidate_user:
 
   Workspace: {{input.workspace_dir}}
 
-  Do pass 1, then pass 2. Return the structured revalidate_output.
+  If the candidate list above is empty, return the empty revalidate_output
+  shape immediately with NO tool calls (all-cached re-run — nothing to
+  revalidate). Otherwise do pass 1, then pass 2, staying scoped to the
+  candidates' cited file:line windows. Return the structured
+  revalidate_output.
 
 prompt report_card_system:
   You write security findings to the iterion native kanban board
