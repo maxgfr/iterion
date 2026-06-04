@@ -3766,35 +3766,71 @@ tool select_family:
   output: select_family_output
 
 ## family_upgrade bumps every member of the selected family in one
-## `yarn up name@target …` invocation. Identical mechanics to
-## batch_upgrade_patches; the family-specific commit subject comes
-## later in family_commit.
+## ecosystem-native invocation — a deterministic FAST-PATH covering the
+## managers with a clean one-shot version-pinning CLI: JS (yarn/npm/pnpm/
+## bun), Go, Rust (cargo add), Python (pip/uv/poetry), PHP (composer),
+## .NET (dotnet add package). Each ecosystem's spec form differs (name@v,
+## name==v, name:v, or per-package --version) — see the case below.
+## Manifest-surgery managers (bundler/maven/gradle/mix/…) and unknown
+## managers gracefully DEFER the family to the per-package agentic solo
+## loop (success=false → family_revert), which CAN edit their manifests —
+## so coverage is universal, the fast-path is just the optimisation.
+## Identical mechanics to batch_upgrade_patches; the family-specific commit
+## subject comes later in family_commit.
 tool family_upgrade:
   command: `set -euo pipefail
 cd {{input.workspace_dir}} >&2
 PKG_MGR={{input.pkg_manager}}
+PKG_MGR=$(printf '%s' "$PKG_MGR" | tr 'A-Z' 'a-z')
 MEMBERS={{input.members}}
-NOTES={{input.notes}}
+# Most managers take name@target (npm/yarn/pnpm/bun/go/cargo/poetry); the
+# pip/uv families want PEP 508 name==target, composer wants name:target, and
+# dotnet/nuget take one --version per package (built in its branch). Targets
+# are concrete versions from the pipeline, so no range metacharacters reach
+# the shell. SPECS (the @ form) is the canonical record for upgraded_specs.
 SPECS=$(printf '%s' "$MEMBERS" | jq -r '.[] | select(.name and .target) | "\(.name)@\(.target)"' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
 if [ -z "$SPECS" ]; then
   printf '{"success":true,"output":"no specs to upgrade","upgraded_specs":[]}\n'
   exit 0
 fi
 case "$PKG_MGR" in
-  yarn|yarn3|yarn4)    CMD="yarn up $SPECS" ;;
+  yarn|yarn-berry|yarn3|yarn4) CMD="yarn up $SPECS" ;;
   npm)                 CMD="npm install $SPECS" ;;
   pnpm)                CMD="pnpm update $SPECS" ;;
   bun)                 CMD="bun update $SPECS" ;;
   go|go-modules|gomod) CMD="go get $SPECS && go mod tidy" ;;
-  # Unsupported manager: emit success=false and exit 0 so the bot takes
-  # its designed not-success edge to family_revert (the per-package solo
-  # loop re-attempts members individually) instead of erroring the node
-  # and killing the whole run.
-  *)                   printf '{"success":false,"output":"family_upgrade: unsupported pkg_manager %s — skipping this family","upgraded_specs":[]}\n' "$PKG_MGR"; exit 0 ;;
+  cargo)               CMD="cargo add $SPECS" ;;
+  poetry)              CMD="poetry add $SPECS" ;;
+  pip|pip-poetry)
+    EQ=$(printf '%s' "$MEMBERS" | jq -r '.[] | select(.name and .target) | "\(.name)==\(.target)"' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
+    CMD="python3 -m pip install --upgrade $EQ" ;;
+  uv)
+    EQ=$(printf '%s' "$MEMBERS" | jq -r '.[] | select(.name and .target) | "\(.name)==\(.target)"' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
+    CMD="uv add $EQ" ;;
+  composer)
+    COL=$(printf '%s' "$MEMBERS" | jq -r '.[] | select(.name and .target) | "\(.name):\(.target)"' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
+    CMD="composer require --no-interaction --no-scripts $COL" ;;
+  nuget|dotnet)
+    CMD=""
+    for spec in $SPECS; do
+      n=${spec%@*}; v=${spec##*@}
+      c="dotnet add package $n --version $v"
+      if [ -z "$CMD" ]; then CMD="$c"; else CMD="$CMD && $c"; fi
+    done ;;
+  # Manifest-surgery managers have no clean one-shot version-pinning CLI;
+  # the honest move is to defer the whole family to the per-package agentic
+  # solo loop, which CAN edit Gemfile/pom.xml/build.gradle/mix.exs with full
+  # intel + validation. success=false + exit 0 takes the not-success edge to
+  # family_revert, which feeds that loop — graceful coverage, not a skip.
+  bundler|maven|gradle|mix|swift|nimble|pub|conan|hex)
+    printf '{"success":false,"output":"family_upgrade: %s needs manifest edits — deferring family to the per-package agentic loop","upgraded_specs":[]}\n' "$PKG_MGR"; exit 0 ;;
+  *)
+    printf '{"success":false,"output":"family_upgrade: unrecognised pkg_manager %s — deferring family to the per-package agentic loop","upgraded_specs":[]}\n' "$PKG_MGR"; exit 0 ;;
 esac
 if ! eval "$CMD" >&2; then
-  # Genuine upgrade failure: same graceful contract — success=false,
-  # exit 0 -> family_revert, not a hard run failure.
+  # Genuine upgrade failure (or the manager CLI is absent in this sandbox):
+  # same graceful contract — success=false, exit 0 -> family_revert, not a
+  # hard run failure. The per-package agentic loop re-attempts each member.
   printf '{"success":false,"output":"family upgrade failed: %s","upgraded_specs":[]}\n' "$CMD"
   exit 0
 fi
@@ -3805,33 +3841,47 @@ printf '{"success":true,"output":"family upgrade succeeded","upgraded_specs":%s}
   output: family_upgrade_result
 
 ## family_validate is a SHELL-only smoke gate. We deliberately skip
-## the agentic validate_upgrade for families to keep the cost low:
-## yarn install resolves transitives, then we try `yarn build` /
-## `yarn typecheck` / `yarn lint` in order of speed, taking the first
-## available script. A failure flips stable=false and routes to
-## family_revert; the per-package solo loop downstream then re-attempts
-## each member individually with full agentic intel + validate, so we
-## still get safety for genuinely tricky family bumps.
+## the agentic validate_upgrade for families to keep the cost low. It
+## first re-resolves the dependency graph with the ecosystem's install
+## (yarn/npm/pnpm/bun install, go mod download, cargo fetch, pip check,
+## uv sync, poetry/composer install, dotnet restore) — a conflict fails
+## here. Then it smokes: compiled langs build/typecheck directly (go
+## build+vet, cargo check, dotnet build); interpreted langs (pip/uv/
+## poetry/composer) treat the clean resolve as the smoke; node picks the
+## fastest of typecheck/tsc/build/test. A failure flips stable=false and
+## routes to family_revert; the per-package solo loop downstream then
+## re-attempts each member individually with full agentic intel +
+## validate, so we still get safety for genuinely tricky family bumps.
 tool family_validate:
   command: `set -euo pipefail
 cd {{input.workspace_dir}} >&2
 PKG_MGR={{input.pkg_manager}}
+PKG_MGR=$(printf '%s' "$PKG_MGR" | tr 'A-Z' 'a-z')
 FAMILY={{input.family_name}}
 case "$PKG_MGR" in
-  yarn|yarn3|yarn4)    INSTALL_CMD="yarn install" ;;
+  yarn|yarn-berry|yarn3|yarn4) INSTALL_CMD="yarn install" ;;
   npm)                 INSTALL_CMD="npm install" ;;
   pnpm)                INSTALL_CMD="pnpm install" ;;
   bun)                 INSTALL_CMD="bun install" ;;
   go|go-modules|gomod) INSTALL_CMD="go mod download" ;;
+  cargo)               INSTALL_CMD="cargo fetch" ;;
+  pip|pip-poetry)      INSTALL_CMD="python3 -m pip check" ;;
+  uv)                  INSTALL_CMD="uv sync" ;;
+  poetry)              INSTALL_CMD="poetry install --no-interaction" ;;
+  composer)            INSTALL_CMD="composer install --no-interaction --no-scripts" ;;
+  nuget|dotnet)        INSTALL_CMD="dotnet restore" ;;
   *)                   INSTALL_CMD="" ;;
 esac
 if [ -n "$INSTALL_CMD" ]; then
   if ! eval "$INSTALL_CMD" >&2; then
-    printf '{"stable":false,"output":"%s install failed for family %s"}\n' "$PKG_MGR" "$FAMILY"
+    printf '{"stable":false,"output":"%s install/resolve failed for family %s"}\n' "$PKG_MGR" "$FAMILY"
     exit 0
   fi
 fi
-# Go has no package.json scripts — smoke directly with build + vet.
+# Compiled-language smoke: these ecosystems have no package.json scripts, so
+# compile/typecheck directly — the strongest fast signal that a family bump
+# didn't break the API surface. cargo check / go build are compile-checks
+# (no final artifact); dotnet has no cheap check, so build.
 case "$PKG_MGR" in
   go|go-modules|gomod)
     if go build ./... >&2 && go vet ./... >&2; then
@@ -3840,20 +3890,41 @@ case "$PKG_MGR" in
       printf '{"stable":false,"output":"family %s go build/vet failed"}\n' "$FAMILY"
     fi
     exit 0 ;;
+  cargo)
+    if cargo check >&2; then
+      printf '{"stable":true,"output":"family %s cargo check passed"}\n' "$FAMILY"
+    else
+      printf '{"stable":false,"output":"family %s cargo check failed"}\n' "$FAMILY"
+    fi
+    exit 0 ;;
+  nuget|dotnet)
+    if dotnet build --nologo >&2; then
+      printf '{"stable":true,"output":"family %s dotnet build passed"}\n' "$FAMILY"
+    else
+      printf '{"stable":false,"output":"family %s dotnet build failed"}\n' "$FAMILY"
+    fi
+    exit 0 ;;
 esac
-# Pick the fastest available smoke from common script names. Order:
-# typecheck/tsc → build → test. Skip lint deliberately: it's far too
-# noisy on most repos (warnings-as-errors, formatting drift, stylistic
-# preferences) and produces false-negative reverts even when the
+# Interpreted ecosystems (pip/poetry/uv/composer): nothing to compile — the
+# install/check above IS the smoke (it re-resolves the graph and fails on a
+# conflict). Stable if we got here.
+case "$PKG_MGR" in
+  pip|pip-poetry|uv|poetry|composer)
+    printf '{"stable":true,"output":"family %s %s resolve/check passed"}\n' "$FAMILY" "$PKG_MGR"
+    exit 0 ;;
+esac
+# Node ecosystems: pick the fastest available smoke from common script
+# names. Order: typecheck/tsc → build → test. Skip lint deliberately: it's
+# far too noisy on most repos (warnings-as-errors, formatting drift,
+# stylistic preferences) and produces false-negative reverts even when the
 # upgrade itself is clean. The per-package solo loop's agentic
-# validate_upgrade is the right place to weigh lint signal vs.
-# pre-existing noise on a per-package basis.
+# validate_upgrade is the right place to weigh lint signal vs. pre-existing
+# noise on a per-package basis.
 SCRIPTS=$(jq -r '.scripts // {} | keys[]' package.json 2>/dev/null || true)
-RAN=""
 for cand in typecheck tsc build test; do
   if printf '%s\n' "$SCRIPTS" | grep -qx "$cand"; then
     case "$PKG_MGR" in
-      yarn|yarn3|yarn4) SCRIPT_CMD="yarn $cand" ;;
+      yarn|yarn-berry|yarn3|yarn4) SCRIPT_CMD="yarn $cand" ;;
       npm)              SCRIPT_CMD="npm run $cand" ;;
       pnpm)             SCRIPT_CMD="pnpm $cand" ;;
       bun)              SCRIPT_CMD="bun run $cand" ;;
