@@ -476,6 +476,16 @@ prompt propose_system:
                  as a string[] at issue-creation time.
 
   Constraints:
+  - CONTEXT DISCIPLINE (prevents context-window overflow): you
+    already have a complete exploration_summary — treat it as your
+    PRIMARY source and synthesise the roadmap from it. Use tools only
+    to confirm specifics. NEVER enumerate the whole tree (`glob **/*`
+    or `**`, `find .`, `ls -R`, `grep -r` from the root): on a large
+    repo that pulls in the vendored / build / worktree trees and blows
+    the model's context window. Scope every glob/find/grep to a
+    specific source dir and EXCLUDE heavy dirs — vendor, node_modules,
+    .git, .works, .archive, dist, build, out, target. Keep tool calls
+    few and targeted; the summary, not re-exploration, is your basis.
   - Every `assignee` you set MUST be the display name of a real
     `.bot` / `.iter` file the explorer surfaced. Verify with a
     quick `bash ls -la <workspace>/<bot_path>` if uncertain.
