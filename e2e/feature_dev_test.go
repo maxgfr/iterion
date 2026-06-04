@@ -212,10 +212,13 @@ func TestVibeFeatureDev_FixThenCommit(t *testing.T) {
 
 // TestVibeFeatureDev_LoopExhausted forces the review loop to never
 // converge: claude always approves, gpt always rejects with blockers.
-// The bounded `review_loop(15)` should kick in and the run falls
-// through to the unconditional `reviewer_X -> done` fallthrough.
+// The bounded `review_loop(15)` exhausts without a cross-family streak,
+// and the bot FAILS HONESTLY (routes to the fail node) rather than
+// silently committing unreviewed work — see "fail honestly on loop
+// exhaustion" (13dbfb53).
 //
-// Asserts: commit_changes was NEVER called, run still finished gracefully.
+// Asserts: the run fails (reaches the fail node) and commit_changes was
+// NEVER called (no false commit on exhaustion).
 func TestVibeFeatureDev_LoopExhausted(t *testing.T) {
 	wf := compileFixtureStubSafe(t, "feature_dev/main.bot")
 	exec := newScenarioExecutor()
@@ -242,17 +245,19 @@ func TestVibeFeatureDev_LoopExhausted(t *testing.T) {
 
 	s := tmpStore(t)
 	eng := runtime.New(wf, s, exec)
-	if err := eng.Run(context.Background(), "run-vfd-exhausted", featureDevStubInputs); err != nil {
-		t.Fatalf("Run: %v", err)
+	// Loop exhaustion must surface as an error (the bot routes to the
+	// fail node), not a silent success that commits unreviewed work.
+	if err := eng.Run(context.Background(), "run-vfd-exhausted", featureDevStubInputs); err == nil {
+		t.Fatal("Run: expected loop exhaustion to fail honestly (reach fail node), got nil error")
 	}
 
 	run, err := s.LoadRun(context.Background(), "run-vfd-exhausted")
 	if err != nil {
 		t.Fatalf("LoadRun: %v", err)
 	}
-	if run.Status != store.RunStatusFinished {
-		t.Fatalf("status = %s, want %s (loop should exhaust then fall through to done)",
-			run.Status, store.RunStatusFinished)
+	if run.Status != store.RunStatusFailed {
+		t.Fatalf("status = %s, want %s (loop exhaustion fails honestly)",
+			run.Status, store.RunStatusFailed)
 	}
 	if exec.callCount("commit_changes") != 0 {
 		t.Errorf("commit_changes should NOT run when reviewers never streak (got %d)",

@@ -16,7 +16,6 @@ import (
 //	  → revalidate → report_card → done
 var expectedSecAuditSourceNodes = []string{
 	"detect_tech",
-	"scan_fanout",
 	"run_generic_scanners",
 	"run_js_scanners",
 	"run_go_scanners",
