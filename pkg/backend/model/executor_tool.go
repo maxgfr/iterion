@@ -44,23 +44,8 @@ func (e *ClawExecutor) executeToolNode(ctx context.Context, node *ir.ToolNode, i
 	toolName := node.Command
 
 	// Policy check before resolution — fail fast on denied tools.
-	if e.toolPolicy != nil {
-		pctx := tool.PolicyContext{
-			Ctx:      ctx,
-			NodeID:   node.ID,
-			NodeKind: ir.NodeTool.String(),
-			ToolName: toolName,
-			Vars:     e.vars,
-		}
-		if err := e.toolPolicy.CheckContext(pctx); err != nil {
-			if e.hooks.OnToolCall != nil {
-				e.hooks.OnToolCall(node.ID, LLMToolCallInfo{
-					ToolName: toolName,
-					Error:    err,
-				})
-			}
-			return nil, fmt.Errorf("model: tool node %q: %w", node.ID, err)
-		}
+	if err := e.checkToolNodePolicy(ctx, node, toolName); err != nil {
+		return nil, err
 	}
 
 	resolved, ok, err := e.resolveSingleToolForNode(ctx, node, toolName)
@@ -130,6 +115,11 @@ func (e *ClawExecutor) executeToolNode(ctx context.Context, node *ir.ToolNode, i
 // template references. Templates are resolved from the node's input map,
 // and the resulting string is executed as a shell command via sh -c.
 func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNode, input map[string]interface{}) (map[string]interface{}, error) {
+	toolName := shellToolNodeToolName(node)
+	if err := e.checkToolNodePolicy(ctx, node, toolName); err != nil {
+		return nil, err
+	}
+
 	// Expand environment variables FIRST, on the author-controlled command
 	// template only. Doing this AFTER resolveCommandTemplate would re-introduce
 	// shell metacharacters into substituted values that shellEscape thought
@@ -152,8 +142,6 @@ func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNo
 
 	// Resolve template references in the (env-expanded) command.
 	resolved := resolveCommandTemplate(expandedCommand, node.CommandRefs, input, e.vars)
-
-	toolName := "shell:" + node.ID
 
 	if e.hooks.OnToolStarted != nil {
 		e.hooks.OnToolStarted(node.ID, LLMToolStartedInfo{
@@ -202,6 +190,54 @@ func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNo
 	return output, nil
 }
 
+// shellToolNodeToolName returns the canonical virtual tool name used for
+// policy checks and hooks for direct shell-command tool nodes. Operators can
+// allow a specific shell node with "shell:<nodeID>" or all shell nodes with
+// "shell:*".
+func shellToolNodeToolName(node *ir.ToolNode) string {
+	return "shell:" + node.ID
+}
+
+// scriptToolNodeToolName returns the canonical virtual tool name used for
+// policy checks and hooks for direct script tool nodes. Empty language
+// defaults to "sh", matching scriptInterpreter. Operators can allow a
+// specific script node with "script:<language>:<nodeID>" or scripts in a
+// language with "script:<language>:*".
+func scriptToolNodeToolName(node *ir.ToolNode) string {
+	language := node.Language
+	if language == "" {
+		language = "sh"
+	}
+	return "script:" + language + ":" + node.ID
+}
+
+// checkToolNodePolicy applies the executor tool policy to all tool-node
+// execution modes: registry tools and direct virtual shell/script tools. On
+// denial it emits OnToolCall with the policy error, matching failed executed
+// tool calls, and returns an error wrapped with node and tool context.
+func (e *ClawExecutor) checkToolNodePolicy(ctx context.Context, node *ir.ToolNode, toolName string) error {
+	if e.toolPolicy == nil {
+		return nil
+	}
+	pctx := tool.PolicyContext{
+		Ctx:      ctx,
+		NodeID:   node.ID,
+		NodeKind: ir.NodeTool.String(),
+		ToolName: toolName,
+		Vars:     e.vars,
+	}
+	if err := e.toolPolicy.CheckContext(pctx); err != nil {
+		if e.hooks.OnToolCall != nil {
+			e.hooks.OnToolCall(node.ID, LLMToolCallInfo{
+				ToolName: toolName,
+				Error:    err,
+			})
+		}
+		return fmt.Errorf("model: tool node %q: tool %q denied: %w", node.ID, toolName, err)
+	}
+	return nil
+}
+
 // runWithSeparateStreams runs cmd with stdout and stderr captured into
 // distinct buffers. Returns (stdout bytes, run error, stderr string).
 // Use this for tool nodes where downstream needs to parse stdout as a
@@ -241,6 +277,11 @@ func combineStreamsForLog(stdout, stderr string) string {
 // from inside the sandbox bind-mount, and is removed on success or
 // failure.
 func (e *ClawExecutor) executeToolNodeScript(ctx context.Context, node *ir.ToolNode, input map[string]interface{}) (map[string]interface{}, error) {
+	toolName := scriptToolNodeToolName(node)
+	if err := e.checkToolNodePolicy(ctx, node, toolName); err != nil {
+		return nil, err
+	}
+
 	// Same env-then-substitution ordering as executeToolNodeShell: only
 	// the author-controlled `${NAME}` braces are env-expanded so injected
 	// values from inputs/vars stay inert. But where the shell path uses
@@ -283,8 +324,6 @@ func (e *ClawExecutor) executeToolNodeScript(ctx context.Context, node *ir.ToolN
 	// mount uses the same path; passing just the basename keeps it
 	// portable whether we run via sandbox or host).
 	scriptBasename := filepath.Base(tmpPath)
-
-	toolName := "script:" + node.Language + ":" + node.ID
 
 	if e.hooks.OnToolStarted != nil {
 		e.hooks.OnToolStarted(node.ID, LLMToolStartedInfo{

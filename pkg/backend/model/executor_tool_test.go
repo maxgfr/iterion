@@ -1,11 +1,109 @@
 package model
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/SocialGouv/iterion/pkg/backend/tool"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 )
+
+func TestExecutorToolNodeShellDenyAllPolicyRejects(t *testing.T) {
+	exec := newTestClawExecutor(NewRegistry(), &ir.Workflow{},
+		WithToolPolicy(tool.DenyAllPolicy()),
+		WithEventHooks(EventHooks{
+			OnToolCall: func(nodeID string, info LLMToolCallInfo) {
+				if nodeID != "shell_denied" {
+					t.Errorf("nodeID = %q, want shell_denied", nodeID)
+				}
+				if info.ToolName != "shell:shell_denied" {
+					t.Errorf("toolName = %q, want shell:shell_denied", info.ToolName)
+				}
+				if !errors.Is(info.Error, tool.ErrToolDenied) {
+					t.Errorf("hook error = %v, want ErrToolDenied", info.Error)
+				}
+			},
+		}),
+	)
+
+	node := &ir.ToolNode{
+		BaseNode: ir.BaseNode{ID: "shell_denied"},
+		Command:  "echo should-not-run",
+	}
+	_, err := exec.Execute(context.Background(), node, map[string]interface{}{})
+	if !errors.Is(err, tool.ErrToolDenied) {
+		t.Fatalf("err = %v, want ErrToolDenied", err)
+	}
+	if !strings.Contains(err.Error(), `tool "shell:shell_denied" denied`) {
+		t.Fatalf("error lacks shell tool context: %v", err)
+	}
+}
+
+func TestExecutorToolNodeScriptDenyAllPolicyRejects(t *testing.T) {
+	exec := newTestClawExecutor(NewRegistry(), &ir.Workflow{},
+		WithToolPolicy(tool.DenyAllPolicy()),
+		WithEventHooks(EventHooks{
+			OnToolCall: func(nodeID string, info LLMToolCallInfo) {
+				if nodeID != "script_denied" {
+					t.Errorf("nodeID = %q, want script_denied", nodeID)
+				}
+				if info.ToolName != "script:sh:script_denied" {
+					t.Errorf("toolName = %q, want script:sh:script_denied", info.ToolName)
+				}
+				if !errors.Is(info.Error, tool.ErrToolDenied) {
+					t.Errorf("hook error = %v, want ErrToolDenied", info.Error)
+				}
+			},
+		}),
+	)
+
+	node := &ir.ToolNode{
+		BaseNode: ir.BaseNode{ID: "script_denied"},
+		Script:   "echo should-not-run",
+	}
+	_, err := exec.Execute(context.Background(), node, map[string]interface{}{})
+	if !errors.Is(err, tool.ErrToolDenied) {
+		t.Fatalf("err = %v, want ErrToolDenied", err)
+	}
+	if !strings.Contains(err.Error(), `tool "script:sh:script_denied" denied`) {
+		t.Fatalf("error lacks script tool context: %v", err)
+	}
+}
+
+func TestExecutorToolNodeDirectPolicyAllows(t *testing.T) {
+	t.Run("nil policy allows shell", func(t *testing.T) {
+		exec := newTestClawExecutor(NewRegistry(), &ir.Workflow{})
+		node := &ir.ToolNode{
+			BaseNode: ir.BaseNode{ID: "shell_allowed"},
+			Command:  "echo ok",
+		}
+		out, err := exec.Execute(context.Background(), node, map[string]interface{}{})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if out["result"] != "ok" {
+			t.Fatalf("result = %v, want ok", out["result"])
+		}
+	})
+
+	t.Run("open policy allows script", func(t *testing.T) {
+		exec := newTestClawExecutor(NewRegistry(), &ir.Workflow{}, WithToolPolicy(tool.OpenPolicy()))
+		node := &ir.ToolNode{
+			BaseNode: ir.BaseNode{ID: "script_allowed"},
+			Language: "sh",
+			Script:   "echo ok",
+		}
+		out, err := exec.Execute(context.Background(), node, map[string]interface{}{})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if out["result"] != "ok" {
+			t.Fatalf("result = %v, want ok", out["result"])
+		}
+	})
+}
 
 // executor_tool.go (carved out of executor.go in commit ab2fa26a) holds
 // the tool-node helpers. End-to-end paths (executeToolNodeShell /
