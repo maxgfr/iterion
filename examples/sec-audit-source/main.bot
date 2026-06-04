@@ -40,6 +40,13 @@ vars:
   scope_notes:         string = ""
   severity_threshold:  string = "low"
   scan_dir:            string = "${PROJECT_DIR}/.iterion/security/scan"
+  ## Overflow guard. gosec/semgrep can emit thousands of findings on a
+  ## large repo; triage reads the scanner JSON and overflows the model
+  ## context. cap_findings keeps at most this many findings per scanner
+  ## file (severity-sorted, bulky per-finding fields trimmed) and surfaces
+  ## the truncation explicitly. Raise it for exhaustive small-repo runs;
+  ## lower it on a tighter-context model.
+  findings_cap_per_file: int    = 50
   fp_path:             string = "${PROJECT_DIR}/.iterion/security/fp-known.yaml"
   ## Per-file append-only analysis cache; see skills/file-records.md.
   ## The bot writes one JSON per scanned file to skip the (expensive)
@@ -102,9 +109,21 @@ schema scan_join_output:
   python_scan:   json
   custom_scan:   json
 
+## cap_findings emits the truncation budget so triage can surface it in
+## the report (explicit, never-silent signal loss). per_scanner is a list
+## of {file, array, raw, kept, capped}.
+schema findings_budget_output:
+  total_raw:     int
+  total_kept:    int
+  total_capped:  int
+  truncated:     bool
+  per_file_cap:  int
+  per_scanner:   json
+
 schema triage_input:
   workspace_dir:  string
   tech:           json
+  findings_budget: json
   generic_scan:   json
   js_scan:        json
   go_scan:        json
@@ -206,6 +225,7 @@ schema report_input:
   uncertain:           json
   suppressed:          json
   stats:               json
+  findings_budget:     json
 
 schema report_output:
   created_issues:  json
@@ -289,7 +309,13 @@ prompt detect_tech_user:
 
   Use read_file/grep ONLY on the SPECIFIC manifest paths listed above
   (e.g. read go.mod for module deps, package.json for "dependencies")
-  to pin frameworks + package managers. If the bundle's skills are
+  to pin frameworks + package managers. NEVER read the CONTENTS of
+  lock/checksum files (go.sum, package-lock.json, pnpm-lock.yaml,
+  yarn.lock, poetry.lock, Cargo.lock, composer.lock, Gemfile.lock):
+  their PRESENCE in the inventory already signals the package manager,
+  and their contents routinely run to tens of thousands of lines and
+  overflow your context. Read only the small source manifests. If the
+  bundle's skills are
   mirrored at {{vars.workspace_dir}}/.claude/skills/, the canonical
   playbook is `sec-audit-source.md`.
 
@@ -373,6 +399,13 @@ prompt triage_system:
 prompt triage_user:
   Tech detected:
   {{input.tech}}
+
+  Scanner findings budget (deterministic cap_findings step):
+  {{input.findings_budget}}
+  If `truncated` is true, the raw scanner JSON was capped to the top
+  `per_file_cap` findings per file (severity-sorted, bulky fields trimmed)
+  so it fits the context window. Triage what is present; coverage for this
+  run is bounded to the kept set — report_card will surface the cap.
 
   Generic scan: {{input.generic_scan}}
   JS scan:      {{input.js_scan}}
@@ -543,6 +576,17 @@ prompt report_card_user:
 
   Stats (informational):
   {{input.stats}}
+
+  Scanner coverage budget (deterministic cap_findings step):
+  {{input.findings_budget}}
+  If `truncated` is true, the scanners emitted more findings than fit the
+  model context, so this run only triaged `total_kept` of `total_raw`
+  (the top `per_file_cap` per scanner file, severity-sorted). You MUST
+  state this prominently near the TOP of the markdown — e.g. a
+  "⚠ Coverage: triaged N of M scanner findings; M−N capped this run —
+  narrow scope or raise findings_cap_per_file and re-run" banner — so a
+  capped run is never mistaken for a clean bill of health. When
+  `truncated` is false, coverage was complete; no banner needed.
 
   Create one kanban issue per confirmed and uncertain finding
   per the system-prompt template, then write the markdown
@@ -824,6 +868,114 @@ compute scan_join:
     python_scan:  "outputs.run_python_scanners"
     custom_scan:  "outputs.run_custom_matchers"
 
+## cap_findings (overflow guard, Cap. 1-class). gosec/semgrep can emit
+## thousands of findings on a large repo; triage reads the scanner JSON
+## via its tools and overflows the model context (the historical
+## detect_tech/triage failure on iterion-sized trees). This deterministic
+## step rewrites every scanner JSON in {{vars.scan_dir}} in place:
+## severity-sorts each findings array, keeps the top findings_cap_per_file,
+## drops bulky per-finding fields (matched code, dataflow traces, metadata)
+## and truncates long strings — preserving the scanner's NATIVE shape so
+## triage parses it unchanged. Each capped file is stamped
+## `_iterion_truncated`; the aggregate budget (raw vs kept vs capped) is
+## emitted so triage surfaces the truncation in the report. Security signal
+## is bounded, never silently dropped.
+tool cap_findings:
+  command: `SCAN_DIR={{vars.scan_dir}} CAP={{vars.findings_cap_per_file}} python3 -c "
+import os, json, glob
+
+scan_dir = os.environ.get('SCAN_DIR', '.')
+try:
+    cap = int(os.environ.get('CAP', '50') or '50')
+except ValueError:
+    cap = 50
+if cap < 1:
+    cap = 50
+
+FINDING_KEYS = ['results', 'Issues', 'findings', 'matches', 'vulnerabilities', 'Vulns', 'alerts']
+SEV = {'critical': 5, 'blocker': 5, 'high': 4, 'error': 4, 'major': 4, 'medium': 3, 'warning': 3, 'moderate': 3, 'minor': 2, 'low': 2, 'info': 1, 'note': 1, 'unknown': 0}
+BULKY = {'lines', 'dataflow_trace', 'dataflowTrace', 'metadata', 'code', 'snippet', 'fix', 'fix_regex', 'fingerprint', 'context', 'sca_info', 'rendered_fix', 'raw_json'}
+MAXSTR = 300
+
+def sev_rank(item):
+    if not isinstance(item, dict):
+        return 0
+    for path in (('severity',), ('Severity',), ('extra', 'severity'), ('level',), ('extra', 'metadata', 'severity')):
+        v = item
+        ok = True
+        for k in path:
+            if isinstance(v, dict) and k in v:
+                v = v[k]
+            else:
+                ok = False
+                break
+        if ok and isinstance(v, str):
+            return SEV.get(v.strip().lower(), 0)
+    return 0
+
+def trim(item):
+    if isinstance(item, dict):
+        out = {}
+        for k, v in item.items():
+            if k in BULKY:
+                continue
+            if isinstance(v, str):
+                out[k] = v if len(v) <= MAXSTR else v[:MAXSTR] + '...[trunc]'
+            elif isinstance(v, dict):
+                out[k] = trim(v)
+            elif isinstance(v, list):
+                out[k] = [trim(x) for x in v[:5]]
+            else:
+                out[k] = v
+        return out
+    if isinstance(item, str) and len(item) > MAXSTR:
+        return item[:MAXSTR] + '...[trunc]'
+    return item
+
+per_scanner = []
+total_raw = total_kept = total_capped = 0
+for jf in sorted(glob.glob(os.path.join(scan_dir, '*.json'))):
+    try:
+        with open(jf, 'r', encoding='utf-8') as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        continue
+    if not isinstance(data, dict):
+        continue
+    key = next((k for k in FINDING_KEYS if isinstance(data.get(k), list)), None)
+    if key is None:
+        continue
+    arr = data[key]
+    raw = len(arr)
+    if raw == 0:
+        continue
+    total_raw += raw
+    arr = sorted(arr, key=sev_rank, reverse=True)
+    kept = arr[:cap]
+    capped = raw - len(kept)
+    data[key] = [trim(x) for x in kept]
+    if capped > 0:
+        data['_iterion_truncated'] = {'raw': raw, 'kept': len(kept), 'capped': capped, 'cap': cap, 'order': 'severity-desc'}
+    try:
+        with open(jf, 'w', encoding='utf-8') as fh:
+            json.dump(data, fh)
+    except OSError:
+        pass
+    total_kept += len(kept)
+    total_capped += capped
+    per_scanner.append({'file': os.path.basename(jf), 'array': key, 'raw': raw, 'kept': len(kept), 'capped': capped})
+
+print(json.dumps({
+    'total_raw': total_raw,
+    'total_kept': total_kept,
+    'total_capped': total_capped,
+    'truncated': total_capped > 0,
+    'per_file_cap': cap,
+    'per_scanner': per_scanner,
+}))
+"`
+  output: findings_budget_output
+
 agent triage:
   backend: "claw"
   model: "${ITERION_SEC_AUDIT_MODEL:-openai/gpt-5.5}"
@@ -1101,16 +1253,19 @@ workflow sec_audit_source:
   run_python_scanners  -> run_custom_matchers
   run_custom_matchers  -> scan_join
 
-  scan_join -> triage with {
-    workspace_dir: "{{vars.workspace_dir}}",
-    tech:          "{{outputs.detect_tech}}",
-    generic_scan:  "{{outputs.scan_join.generic_scan}}",
-    js_scan:       "{{outputs.scan_join.js_scan}}",
-    go_scan:       "{{outputs.scan_join.go_scan}}",
-    python_scan:   "{{outputs.scan_join.python_scan}}",
-    custom_scan:   "{{outputs.scan_join.custom_scan}}",
-    fp_path:       "{{vars.fp_path}}",
-    file_filter:   "{{vars.file_filter}}"
+  scan_join -> cap_findings
+
+  cap_findings -> triage with {
+    workspace_dir:   "{{vars.workspace_dir}}",
+    tech:            "{{outputs.detect_tech}}",
+    findings_budget: "{{outputs.cap_findings}}",
+    generic_scan:    "{{outputs.scan_join.generic_scan}}",
+    js_scan:         "{{outputs.scan_join.js_scan}}",
+    go_scan:         "{{outputs.scan_join.go_scan}}",
+    python_scan:     "{{outputs.scan_join.python_scan}}",
+    custom_scan:     "{{outputs.scan_join.custom_scan}}",
+    fp_path:         "{{vars.fp_path}}",
+    file_filter:     "{{vars.file_filter}}"
   }
 
   triage -> filter_cached_files with {
@@ -1135,7 +1290,8 @@ workflow sec_audit_source:
     confirmed:          "{{outputs.merge_verdicts.confirmed}}",
     uncertain:          "{{outputs.merge_verdicts.uncertain}}",
     suppressed:         "{{outputs.triage.suppressed}}",
-    stats:              "{{outputs.merge_verdicts.stats}}"
+    stats:              "{{outputs.merge_verdicts.stats}}",
+    findings_budget:    "{{outputs.cap_findings}}"
   }
 
   report_card -> update_file_records with {

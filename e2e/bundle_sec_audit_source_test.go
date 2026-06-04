@@ -23,6 +23,9 @@ var expectedSecAuditSourceNodes = []string{
 	// Cap2 programmatic matchers: see skills/programmatic-matchers.md
 	"run_custom_matchers",
 	"scan_join",
+	// cap_findings: deterministic overflow guard — bounds scanner JSON
+	// before triage. See sec_audit_cap_findings_test.go.
+	"cap_findings",
 	"triage",
 	// Cap1 FileRecords: see skills/file-records.md
 	"filter_cached_files",
