@@ -20,6 +20,7 @@ import (
 
 	clawtools "github.com/SocialGouv/claw-code-go/pkg/api/tools"
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
+	"github.com/SocialGouv/iterion/pkg/backend/detect"
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
 	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/backend/tool"
@@ -340,7 +341,7 @@ func TestLive_Lite_DualModel_PlanImplementReview(t *testing.T) {
 		t.Fatalf("Failed to create snapshots dir: %v", err)
 	}
 
-	onFinished := func(nodeID string, output map[string]interface{}) {
+	onFinished := func(_ string, nodeID string, output map[string]interface{}) {
 		if nodeID != "claude_implement" && nodeID != "gpt_implement" {
 			return
 		}
@@ -685,7 +686,7 @@ func TestLive_Lite_SessionContinuity_ReviewFix(t *testing.T) {
 		t.Fatalf("Failed to create snapshots dir: %v", err)
 	}
 
-	onFinished := func(nodeID string, output map[string]interface{}) {
+	onFinished := func(_ string, nodeID string, output map[string]interface{}) {
 		if nodeID != "implement" && nodeID != "claude_fix" && nodeID != "gpt_fix" {
 			return
 		}
@@ -1398,7 +1399,7 @@ func TestLive_Lite_ClawComprehensive(t *testing.T) {
 		t.Skip("skipping live test in short mode")
 	}
 	loadDotEnv(t)
-	requireEnv(t, "OPENAI_API_KEY")
+	requireOpenAI(t)
 	requireEnv(t, "ANTHROPIC_API_KEY")
 
 	wf := compileFixture(t, "claw_comprehensive_coverage.iter")
@@ -2048,7 +2049,7 @@ func TestLive_Lite_ClawReasoningEffort(t *testing.T) {
 		t.Skip("skipping live test in short mode")
 	}
 	loadDotEnv(t)
-	requireEnv(t, "OPENAI_API_KEY")
+	requireOpenAI(t)
 
 	wf := compileFixture(t, "claw_reasoning_effort.iter")
 
@@ -2610,6 +2611,25 @@ func requireEnv(t *testing.T, name string) {
 	}
 }
 
+// requireOpenAI skips the test unless an OpenAI credential is available
+// through EITHER path the runtime accepts: OPENAI_API_KEY (metered) or
+// ChatGPT-forfait OAuth (~/.codex/auth.json). It reuses pkg/backend/detect
+// — the same probe the runtime resolver and studio use — so OAuth-forfait
+// setups (the project's documented default credential mode) can run the
+// live bot suite instead of silently skipping every test on a missing
+// OPENAI_API_KEY. Use this for tests whose OpenAI work goes through claw
+// (gpt-* models); keep requireEnv("ANTHROPIC_API_KEY") for tests that
+// exercise claw's anthropic provider, which has no OAuth-forfait path.
+func requireOpenAI(t *testing.T) {
+	t.Helper()
+	for _, p := range detect.Detect(context.Background()).Providers {
+		if p.Name == "openai" && p.Available {
+			return
+		}
+	}
+	t.Skip("no OpenAI credential (OPENAI_API_KEY or ChatGPT-OAuth) — skipping live test")
+}
+
 // ---------------------------------------------------------------------------
 // Run recapitulation helper
 // ---------------------------------------------------------------------------
@@ -3110,7 +3130,7 @@ func TestLive_FeatureDev(t *testing.T) {
 	loadDotEnv(t)
 	requireCLI(t, "claude")
 	requireBinaryInPath(t, "docker")
-	requireEnv(t, "OPENAI_API_KEY")
+	requireOpenAI(t)
 
 	wf := compileFixture(t, "feature_dev/main.bot")
 
@@ -3223,7 +3243,7 @@ func TestLive_VibeReviewAlternating(t *testing.T) {
 	loadDotEnv(t)
 	requireCLI(t, "claude")
 	requireBinaryInPath(t, "docker")
-	requireEnv(t, "OPENAI_API_KEY")
+	requireOpenAI(t)
 
 	wf := compileFixture(t, "whole_improve_loop/main.bot")
 
@@ -3357,7 +3377,7 @@ func TestLive_SecuredRenovacy(t *testing.T) {
 	loadDotEnv(t)
 	requireCLI(t, "claude")
 	requireBinaryInPath(t, "docker")
-	requireEnv(t, "OPENAI_API_KEY")
+	requireOpenAI(t)
 
 	// Compile via bundle.OpenDir so manifest + prompts + skills are
 	// wired into the workflow exactly as `iterion run secured-renovacy/`
@@ -3544,7 +3564,7 @@ func TestLive_FeatureDev_Real(t *testing.T) {
 	loadDotEnv(t)
 	requireCLI(t, "claude")
 	requireBinaryInPath(t, "docker")
-	requireEnv(t, "OPENAI_API_KEY")
+	requireOpenAI(t)
 
 	wf := compileFixture(t, "feature_dev/main.bot")
 	workspaceDir := seedFromFixture(t, "feature-dev-go-service")
@@ -3628,7 +3648,7 @@ func TestLive_VibeReviewAlternating_Real(t *testing.T) {
 	loadDotEnv(t)
 	requireCLI(t, "claude")
 	requireBinaryInPath(t, "docker")
-	requireEnv(t, "OPENAI_API_KEY")
+	requireOpenAI(t)
 
 	wf := compileFixture(t, "whole_improve_loop/main.bot")
 	workspaceDir := seedFromFixture(t, "review-pr-mix")
@@ -3701,7 +3721,7 @@ func TestLive_SecuredRenovacy_Real(t *testing.T) {
 	loadDotEnv(t)
 	requireCLI(t, "claude")
 	requireBinaryInPath(t, "docker")
-	requireEnv(t, "OPENAI_API_KEY")
+	requireOpenAI(t)
 
 	bDir, err := filepath.Abs("../examples/secured-renovacy")
 	if err != nil {
@@ -3820,7 +3840,7 @@ func TestLive_SecuredRenovacy_Protestware(t *testing.T) {
 	loadDotEnv(t)
 	requireCLI(t, "claude")
 	requireBinaryInPath(t, "docker")
-	requireEnv(t, "OPENAI_API_KEY")
+	requireOpenAI(t)
 
 	bDir, err := filepath.Abs("../examples/secured-renovacy")
 	if err != nil {
