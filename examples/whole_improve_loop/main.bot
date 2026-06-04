@@ -1112,8 +1112,16 @@ schema commit_result:
   success: bool
   output: string
 
+## commit_changes lands the production-readiness fixes on convergence.
+## The `:!.whole_improve_loop.state` pathspec EXCLUDES the bot's own
+## rotation/streak scratch file from the commit — committing it would
+## pollute the target repo's history with bot state (it stays untracked
+## in the working tree for cross-run persistence, gitignore-able by the
+## operator). Bonus: when the reviewers converge with no code fixes, the
+## state file is the only working-tree change, so nothing stages and the
+## `diff --cached --quiet` guard makes NO empty commit.
 tool commit_changes:
-  command: `git -C {{vars.workspace_dir}} add -A && (git -C {{vars.workspace_dir}} diff --cached --quiet || git -C {{vars.workspace_dir}} commit -m "chore(improve): production-readiness pass (whole_improve_loop)")`
+  command: `git -C {{vars.workspace_dir}} add -A -- . ':!.whole_improve_loop.state' && (git -C {{vars.workspace_dir}} diff --cached --quiet || git -C {{vars.workspace_dir}} commit -m "chore(improve): production-readiness pass (whole_improve_loop)")`
   output: commit_result
 
 ## ─── Workflow ───────────────────────────────────────────────────
