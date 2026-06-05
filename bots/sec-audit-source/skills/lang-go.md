@@ -128,3 +128,17 @@ Don't flag:
 
 - `[[lang-generic]]` — always-on layer.
 - `[[finding-taxonomy]]` — required mapping.
+
+## Scanners (machine-readable — consumed by run_lang_scanners + scan_health)
+
+Deterministic scanner specs for this language. `run_lang_scanners` (a tool
+node, no LLM) runs each `cmd` with `$SCAN_DIR` and `$WORKSPACE_DIR` in the
+environment and cwd = workspace; `scan_health` reads `output` to verify
+coverage. To add/adjust Go scanning, edit this block — no DSL change.
+
+<!-- iterion:scanners
+[
+  {"id":"semgrep-go","output":"go-semgrep.json","cmd":"semgrep --config=p/golang --config=p/owasp-top-ten --json --output=$SCAN_DIR/go-semgrep.json --metrics=off --quiet --exclude=vendor --exclude='**/*_test.go' --exclude='**/testdata' $WORKSPACE_DIR || true"},
+  {"id":"gosec","output":"gosec.json","cmd":"gosec -fmt=json -out=$SCAN_DIR/gosec.json -exclude-dir=vendor -exclude-dir=testdata -exclude-generated -severity=low -confidence=low -quiet ./... || true"}
+]
+-->

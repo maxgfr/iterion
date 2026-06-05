@@ -109,3 +109,16 @@ Don't flag:
 
 - `[[lang-generic]]` — always-on layer that complements this skill.
 - `[[finding-taxonomy]]` — required mapping for normalised output.
+
+## Scanners (machine-readable — consumed by run_lang_scanners + scan_health)
+
+Deterministic scanner specs for this language. `run_lang_scanners` (a tool
+node, no LLM) runs each `cmd` with `$SCAN_DIR` and `$WORKSPACE_DIR` in the
+environment and cwd = workspace; `scan_health` reads `output` to verify
+coverage. To add/adjust JS/TS scanning, edit this block — no DSL change.
+
+<!-- iterion:scanners
+[
+  {"id":"semgrep-js","output":"js.json","cmd":"semgrep --config=p/javascript --config=p/typescript --config=p/nodejsscan --config=p/owasp-top-ten --json --output=$SCAN_DIR/js.json --metrics=off --quiet --exclude=node_modules --exclude=dist --exclude=build --exclude=.next --exclude='*.min.js' $WORKSPACE_DIR || true"}
+]
+-->

@@ -152,11 +152,15 @@ type stackPattern struct {
 
 var stackPatterns = []stackPattern{
 	{regexp.MustCompile(`case\s+"?\$\{?(PKG_MGR|pkg_manager)\}?"?\s+in`), "per-ecosystem shell case dispatch"},
-	{regexp.MustCompile(`\bgosec\b`), "hardcoded Go SAST scanner"},
-	{regexp.MustCompile(`\bbandit\b`), "hardcoded Python SAST scanner"},
-	{regexp.MustCompile(`\bgovulncheck\b`), "hardcoded Go SCA scanner"},
-	{regexp.MustCompile(`\bpip-audit\b`), "hardcoded Python SCA scanner"},
-	{regexp.MustCompile(`\bnpm audit\b`), "hardcoded npm SCA scanner"},
+	// Invocation-form (binary + a flag/path arg), so a prose comment that
+	// merely NAMES a scanner ("gosec/semgrep can emit thousands…") is not a
+	// violation — only an actual command is. The real invocations belong in
+	// the bot's skills (which this test does not scan), not in the DSL.
+	{regexp.MustCompile(`\bgosec\s+-`), "hardcoded Go SAST scanner invocation"},
+	{regexp.MustCompile(`\bbandit\s+(-|--recursive)`), "hardcoded Python SAST scanner invocation"},
+	{regexp.MustCompile(`\bgovulncheck\s+(-|\./)`), "hardcoded Go SCA scanner invocation"},
+	{regexp.MustCompile(`\bpip-audit\s+-`), "hardcoded Python SCA scanner invocation"},
+	{regexp.MustCompile(`\bnpm\s+audit\b`), "hardcoded npm SCA scanner invocation"},
 	{regexp.MustCompile(`semgrep\s+--config=p/`), "hardcoded per-language semgrep ruleset"},
 	{regexp.MustCompile(`^\s*has_(js|go|python|npm|pypi|gomod|rust|ruby|php|java)\s*:\s*bool`), "closed-enum tech boolean in schema (emit an open langs/ecosystems list)"},
 	{regexp.MustCompile(`^(agent|tool|judge)\s+run_(js|go|py|python)_(scanners|heuristics)\s*:`), "per-language scanner/heuristic node (use one adaptive agent step)"},
@@ -170,7 +174,6 @@ var stackPatterns = []stackPattern{
 // the entry to be removed.
 var stackAgnosticExemptions = map[string]string{
 	"secured-renovacy": "per-PKG_MGR case branches + smoke scanners (W2.2 migration pending)",
-	"sec-audit-source": "run_<lang>_scanners nodes + has_X bools (W2.3 migration pending)",
 	"sec-audit-deps":   "run_<eco>_heuristics nodes + has_X bools (W2.4 migration pending)",
 }
 

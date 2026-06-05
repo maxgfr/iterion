@@ -96,9 +96,6 @@ schema tech_output:
   frameworks:       json
   package_managers: json
   build_systems:    json
-  has_js:           bool
-  has_go:           bool
-  has_python:       bool
   summary:          string
 
 schema inventory_output:
@@ -113,9 +110,7 @@ schema scanner_output:
 
 schema scan_join_output:
   generic_scan:  json
-  js_scan:       json
-  go_scan:       json
-  python_scan:   json
+  lang_scan:     json
   custom_scan:   json
 
 ## cap_findings emits the truncation budget so triage can surface it in
@@ -149,9 +144,7 @@ schema triage_input:
   tech:           json
   findings_budget: json
   generic_scan:   json
-  js_scan:        json
-  go_scan:        json
-  python_scan:    json
+  lang_scan:      json
   custom_scan:    json
   fp_path:        string
   ## Comma-separated list of relative paths the triage MUST restrict
@@ -311,9 +304,8 @@ prompt detect_tech_system:
 
   When done, return a structured `tech_output` with:
   - langs: lowercased identifiers (e.g. ["js","ts","go","python"]).
-    Set has_js / has_go / has_python derived booleans
-    accordingly. has_js MUST also be true when typescript is the
-    only flavour found.
+    This OPEN list drives which lang-<id>.md scanners run — there are
+    no per-language booleans. Use "js" for both JavaScript and TypeScript.
   - frameworks: identifiers (e.g. ["nextjs","django","gin"]).
   - package_managers: identifiers (e.g. ["pnpm","poetry"]).
   - build_systems: identifiers (e.g. ["taskfile","docker"]).
@@ -349,11 +341,11 @@ prompt triage_system:
   list for a downstream judge. Inputs:
   - tech: detected languages + frameworks (gates which rule sets
     are relevant).
-  - generic_scan / js_scan / go_scan / python_scan / custom_scan:
+  - generic_scan / lang_scan / custom_scan:
     scanner metadata, each carrying `json_paths` with absolute
     paths to raw JSONs you MUST read via read_file. A scan field
     may be empty / null when its branch was skipped (e.g.
-    python_scan is empty on a pure-Go repo) — handle gracefully.
+    a lang_scan slot is empty when no language scanners ran) — handle gracefully.
     custom_scan is always present but may have `subscanners: []`
     when no programmatic matchers are dropped at
     `.iterion/security/matchers/`.
@@ -433,9 +425,7 @@ prompt triage_user:
   run is bounded to the kept set — report_card will surface the cap.
 
   Generic scan: {{input.generic_scan}}
-  JS scan:      {{input.js_scan}}
-  Go scan:      {{input.go_scan}}
-  Python scan:  {{input.python_scan}}
+  Language scans: {{input.lang_scan}}
   Custom scan:  {{input.custom_scan}}
 
   File filter (empty = no filter): {{input.file_filter}}
@@ -821,14 +811,53 @@ tool run_generic_scanners:
   command: `mkdir -p {{vars.scan_dir}} && cd {{vars.workspace_dir}} && ERRS="" && gitleaks detect --source={{vars.workspace_dir}} --report-format=json --report-path={{vars.scan_dir}}/gitleaks.json --redact --exit-code=0 || ERRS="$ERRS gitleaks"; trivy fs --format=json --output={{vars.scan_dir}}/trivy.json --security-checks=vuln,config,secret --severity=LOW,MEDIUM,HIGH,CRITICAL --quiet {{vars.workspace_dir}} || ERRS="$ERRS trivy"; semgrep --config=auto --json --output={{vars.scan_dir}}/semgrep-auto.json --metrics=off --quiet {{vars.workspace_dir}} || ERRS="$ERRS semgrep-auto"; printf '{"scanner":"generic","subscanners":["gitleaks","trivy","semgrep-auto"],"json_paths":{"gitleaks":"%s/gitleaks.json","trivy":"%s/trivy.json","semgrep":"%s/semgrep-auto.json"},"finding_count":0,"errors":["%s"]}\n' {{vars.scan_dir}} {{vars.scan_dir}} {{vars.scan_dir}} "$ERRS"`
   output: scanner_output
 
-tool run_js_scanners:
-  command: `mkdir -p {{vars.scan_dir}} && semgrep --config=p/javascript --config=p/typescript --config=p/nodejsscan --config=p/owasp-top-ten --json --output={{vars.scan_dir}}/js.json --metrics=off --quiet --exclude=node_modules --exclude=dist --exclude=build --exclude=.next --exclude='*.min.js' {{vars.workspace_dir}} || true; printf '{"scanner":"js","subscanners":["semgrep"],"json_paths":{"semgrep":"%s/js.json"},"finding_count":0,"errors":[]}\n' {{vars.scan_dir}}`
+## run_lang_scanners — skill-driven, DETERMINISTIC (no LLM in the path).
+## Reads the `iterion:scanners` data block from .claude/skills/lang-<lang>.md
+## for each detected language (outputs.detect_tech.langs) and runs the listed
+## scanners into scan_dir. Adding a language = drop a lang-<id>.md skill with a
+## scanners block — no DSL or schema edit. scan_health reads the SAME blocks to
+## verify per-language coverage. Replaces the old per-language run_js/go/python
+## scanner nodes + the closed has_js/has_go/has_python enum.
+tool run_lang_scanners:
+  command: `mkdir -p {{vars.scan_dir}} && LANGS='{{outputs.detect_tech.langs}}' SCAN_DIR={{vars.scan_dir}} WORKSPACE_DIR={{vars.workspace_dir}} SKILLS_DIR={{vars.workspace_dir}}/.claude/skills python3 -c "
+import os, sys, json, re, subprocess
+raw = os.environ.get('LANGS', '[]') or '[]'
+try:
+    langs = json.loads(raw)
+except Exception:
+    langs = re.findall(r'[A-Za-z0-9_+.-]+', raw)
+if not isinstance(langs, list):
+    langs = []
+skills = os.environ.get('SKILLS_DIR', ''); scan_dir = os.environ['SCAN_DIR']; ws = os.environ['WORKSPACE_DIR']
+env = dict(os.environ); env['SCAN_DIR'] = scan_dir; env['WORKSPACE_DIR'] = ws
+sub = []; paths = {}; errs = []
+for lang in langs:
+    sp = os.path.join(skills, 'lang-%s.md' % lang)
+    if not os.path.isfile(sp):
+        continue
+    m = re.search(r'<!--\s*iterion:scanners(.*?)-->', open(sp, encoding='utf-8').read(), re.S)
+    if not m:
+        continue
+    try:
+        specs = json.loads(m.group(1))
+    except Exception as e:
+        errs.append('lang %s: bad scanners block: %s' % (lang, e)); continue
+    for s in specs:
+        sid = s.get('id', lang); cmd = s.get('cmd', ''); out = s.get('output', '')
+        if out:
+            paths[sid] = '%s/%s' % (scan_dir, out)
+        if not cmd:
+            continue
+        sub.append(sid)
+        try:
+            p = subprocess.run(cmd, shell=True, cwd=ws, env=env, capture_output=True, timeout=900)
+            if p.returncode != 0:
+                errs.append('%s exited %d' % (sid, p.returncode))
+        except Exception as e:
+            errs.append('%s: %s' % (sid, e))
+print(json.dumps({'scanner': 'lang', 'subscanners': sub, 'json_paths': paths, 'finding_count': 0, 'errors': errs}))
+"`
   output: scanner_output
-
-tool run_go_scanners:
-  command: `mkdir -p {{vars.scan_dir}} && cd {{vars.workspace_dir}} && semgrep --config=p/golang --config=p/owasp-top-ten --json --output={{vars.scan_dir}}/go-semgrep.json --metrics=off --quiet --exclude=vendor --exclude='**/*_test.go' --exclude='**/testdata' {{vars.workspace_dir}} || true; gosec -fmt=json -out={{vars.scan_dir}}/gosec.json -exclude-dir=vendor -exclude-dir=testdata -exclude-generated -severity=low -confidence=low -quiet ./... || true; printf '{"scanner":"go","subscanners":["semgrep","gosec"],"json_paths":{"semgrep":"%s/go-semgrep.json","gosec":"%s/gosec.json"},"finding_count":0,"errors":[]}\n' {{vars.scan_dir}} {{vars.scan_dir}}`
-  output: scanner_output
-
 ## run_custom_matchers — programmatic matchers (Cap. 2). Enumerates
 ## executables under attachments/matchers/, invokes each with the
 ## standardised stdin JSON contract, aggregates findings. See
@@ -909,10 +938,6 @@ print(json.dumps({
 "`
   output: scanner_output
 
-tool run_python_scanners:
-  command: `mkdir -p {{vars.scan_dir}} && semgrep --config=p/python --config=p/django --config=p/flask --config=p/owasp-top-ten --json --output={{vars.scan_dir}}/py-semgrep.json --metrics=off --quiet --exclude='**/migrations/**' --exclude='**/__pycache__' --exclude='**/venv' --exclude='**/.venv' --exclude='**/test_*.py' --exclude='**/*_test.py' {{vars.workspace_dir}} || true; bandit --recursive --format=json --output={{vars.scan_dir}}/bandit.json --severity-level=low --confidence-level=low --skip B101 --exclude='*/test_*.py,*/tests/*,*/.venv/*,*/venv/*,*/migrations/*' --quiet {{vars.workspace_dir}} || true; printf '{"scanner":"python","subscanners":["semgrep","bandit"],"json_paths":{"semgrep":"%s/py-semgrep.json","bandit":"%s/bandit.json"},"finding_count":0,"errors":[]}\n' {{vars.scan_dir}} {{vars.scan_dir}}`
-  output: scanner_output
-
 ## scan_join collects the five scanner outputs into one record for
 ## triage. The scanners run as a single sequential branch (generic →
 ## … → custom → scan_join), so this is a plain collector, not a
@@ -923,9 +948,7 @@ compute scan_join:
   output: scan_join_output
   expr:
     generic_scan: "outputs.run_generic_scanners"
-    js_scan:      "outputs.run_js_scanners"
-    go_scan:      "outputs.run_go_scanners"
-    python_scan:  "outputs.run_python_scanners"
+    lang_scan:    "outputs.run_lang_scanners"
     custom_scan:  "outputs.run_custom_matchers"
 
 ## scan_health (anti-façade smoke gate). Each scanner command ends in
@@ -941,8 +964,8 @@ compute scan_join:
 ## scanners missing) pass but are surfaced to report_card as a coverage
 ## banner. Runs BEFORE cap_findings, which truncates the files in place.
 tool scan_health:
-  command: `SCAN_DIR={{vars.scan_dir}} MIN_GENERIC={{vars.min_generic_scanners}} python3 -c "
-import os, sys, json
+  command: `SCAN_DIR={{vars.scan_dir}} MIN_GENERIC={{vars.min_generic_scanners}} LANGS='{{outputs.detect_tech.langs}}' SKILLS_DIR={{vars.workspace_dir}}/.claude/skills python3 -c "
+import os, sys, json, re
 
 scan_dir = os.environ.get('SCAN_DIR', '.')
 try:
@@ -955,7 +978,33 @@ except ValueError:
 # unparseable => the scanner crashed / is absent, not a clean repo. The
 # language + custom files may legitimately be empty (no matching sources).
 GENERIC = ['gitleaks.json', 'trivy.json', 'semgrep-auto.json']
-LANG    = ['js.json', 'go-semgrep.json', 'gosec.json', 'py-semgrep.json', 'bandit.json']
+# LANG outputs are derived from the same iterion:scanners skill blocks that
+# run_lang_scanners executes, filtered to the detected languages — so the
+# per-language coverage check stays in lockstep with what actually ran, with
+# no hardcoded language list (add a lang = drop a lang-<id>.md skill).
+_raw_langs = os.environ.get('LANGS', '[]') or '[]'
+try:
+    _langs = json.loads(_raw_langs)
+except Exception:
+    _langs = re.findall(r'[A-Za-z0-9_+.-]+', _raw_langs)
+if not isinstance(_langs, list):
+    _langs = []
+_skills_dir = os.environ.get('SKILLS_DIR', '')
+LANG = []
+for _lang in _langs:
+    _sp = os.path.join(_skills_dir, 'lang-%s.md' % _lang)
+    if not os.path.isfile(_sp):
+        continue
+    _m = re.search(r'<!--\s*iterion:scanners(.*?)-->', open(_sp, encoding='utf-8').read(), re.S)
+    if not _m:
+        continue
+    try:
+        for _s in json.loads(_m.group(1)):
+            _o = _s.get('output')
+            if _o:
+                LANG.append(_o)
+    except Exception:
+        pass
 CUSTOM  = ['custom.json']
 FINDING_KEYS = ['results', 'Issues', 'findings', 'matches', 'vulnerabilities', 'Vulns', 'alerts']
 
@@ -1396,10 +1445,8 @@ workflow sec_audit_source:
   ## fan-out hits. scan_join still reads all five scanner outputs.
   plan_shards -> run_generic_scanners when not enabled
 
-  run_generic_scanners -> run_js_scanners
-  run_js_scanners      -> run_go_scanners
-  run_go_scanners      -> run_python_scanners
-  run_python_scanners  -> run_custom_matchers
+  run_generic_scanners -> run_lang_scanners
+  run_lang_scanners    -> run_custom_matchers
   run_custom_matchers  -> scan_join
 
   scan_join -> scan_health
@@ -1410,9 +1457,7 @@ workflow sec_audit_source:
     tech:            "{{outputs.detect_tech}}",
     findings_budget: "{{outputs.cap_findings}}",
     generic_scan:    "{{outputs.scan_join.generic_scan}}",
-    js_scan:         "{{outputs.scan_join.js_scan}}",
-    go_scan:         "{{outputs.scan_join.go_scan}}",
-    python_scan:     "{{outputs.scan_join.python_scan}}",
+    lang_scan:       "{{outputs.scan_join.lang_scan}}",
     custom_scan:     "{{outputs.scan_join.custom_scan}}",
     fp_path:         "{{vars.fp_path}}",
     file_filter:     "{{vars.file_filter}}"
