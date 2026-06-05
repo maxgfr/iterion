@@ -607,8 +607,10 @@ for line in raw.splitlines():
 
 pending = []
 already = []
-now = datetime.datetime.utcnow()
+now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 for d in deps:
+    if not isinstance(d, dict):
+        pending.append(d); continue
     key = '%s:%s:%s:%s' % (d.get('ecosystem',''), d.get('name',''), d.get('version',''), d.get('checksum',''))
     e = index.get(key)
     if not e:
@@ -656,7 +658,7 @@ verdicts_raw = os.environ.get('VERDICTS','')
 verdicts = json.loads(verdicts_raw) if verdicts_raw else []
 path     = os.environ['CACHE_PATH']
 sver     = os.environ.get('SVER','')
-now      = datetime.datetime.utcnow().isoformat() + 'Z'
+now      = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat() + 'Z'
 count = 0
 os.makedirs(os.path.dirname(path), exist_ok=True)
 with open(path, 'a', encoding='utf-8') as f:
@@ -698,6 +700,15 @@ workflow sec_audit_deps:
   ## docker driver's image-inspect fast path resolves it without a pull.)
   sandbox:
     image: "ghcr.io/socialgouv/iterion-sandbox-sec:edge"
+    user: "devbox"
+    mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=/home/devbox/.claude,consistency=cached"]
+    env:
+      CLAUDE_CONFIG_DIR: "/home/devbox/.claude"
+    ## llm_review is a claude_code node, but the sec image ships node+npm
+    ## WITHOUT the claude CLI — install it once per container (same gate as
+    ## feature_dev / sec-audit-source: run the binary, verify, fail
+    ## post_create cleanly so the dispatcher retries with a fresh container).
+    post_create: "set -e; claude --version >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest; claude --version >/dev/null 2>&1 || { echo 'claude install verification failed' >&2; exit 1; }"
 
   budget:
     max_parallel_branches: 4
