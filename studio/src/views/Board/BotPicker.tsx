@@ -2,6 +2,7 @@ import { useMemo } from "react";
 
 import type { BotEntry } from "@/api/bots";
 import { Combobox, type ComboboxOption } from "@/components/ui/Combobox";
+import { botIdentity } from "@/lib/personas";
 
 interface Props {
   value: string;
@@ -34,13 +35,24 @@ export function BotPicker({
 }: Props) {
   const options = useMemo<ComboboxOption<string>[]>(
     () =>
-      bots.map((b) => ({
-        value: b.name,
-        label: b.name,
-        description: b.description,
-        meta: metaFor(b) || undefined,
-        searchHaystack: `${b.name} ${b.description ?? ""} ${(b.triggers ?? []).join(" ")} ${(b.capabilities ?? []).join(" ")}`,
-      })),
+      bots.map((b) => {
+        // The manifest persona (display_name) leads, with the emoji
+        // avatar; the technical name moves into the description and stays
+        // in the search haystack so operators can still type "feature_dev".
+        const persona = b.display_name?.trim();
+        const { emoji } = botIdentity(b.name);
+        const label = persona ? `${emoji} ${persona}` : b.name;
+        const description = persona
+          ? `${b.name}${b.description ? ` — ${b.description}` : ""}`
+          : b.description;
+        return {
+          value: b.name,
+          label,
+          description,
+          meta: metaFor(b) || undefined,
+          searchHaystack: `${persona ?? ""} ${b.name} ${b.description ?? ""} ${(b.triggers ?? []).join(" ")} ${(b.capabilities ?? []).join(" ")}`,
+        };
+      }),
     [bots, metaFor],
   );
 

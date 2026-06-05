@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { ClockIcon, FileTextIcon, MagicWandIcon, OpenInNewWindowIcon, Pencil1Icon } from "@radix-ui/react-icons";
+import { ClockIcon, FileTextIcon, OpenInNewWindowIcon, Pencil1Icon } from "@radix-ui/react-icons";
 
 import type { RunHeader as RunHeaderType } from "@/api/runs";
 import { cancelRun, getRun, loadEvents, pauseRun, renameRun } from "@/api/runs";
 import { Button, CopyButton, LiveDot, StatusBadge, Tooltip } from "@/components/ui";
 import WSStatusDot from "@/components/shared/WSStatusDot";
 import { formatRelative } from "@/lib/format";
+import { botIdentity } from "@/lib/personas";
 import { useRunStore, type WsState } from "@/store/run";
 
 import ForkDialog from "./ForkDialog";
@@ -541,6 +542,9 @@ function BotChip({
   // that case; suppress when redundant.
   const bundleName = run.bundle_name?.trim() ?? "";
   const personaName = run.bundle_display_name?.trim() ?? "";
+  // Per-bot emoji + accent colour (presentation), keyed by the bot's
+  // technical id; deterministic fallback for unknown bots.
+  const identity = botIdentity(bundleName || workflowName);
   const normalisedWorkflow = workflowName.replace(/[-_]/g, "");
   const normalisedBundle = bundleName.replace(/[-_]/g, "");
   const showBundleAside =
@@ -567,16 +571,18 @@ function BotChip({
         }
       >
         {personaName ? (
-          <MagicWandIcon
-            className="w-3 h-3 shrink-0 text-accent"
+          <span
+            className="shrink-0 text-[0.95em] leading-none"
             aria-label="persona bot"
-          />
+          >
+            {identity.emoji}
+          </span>
         ) : (
           <FileTextIcon className="w-3 h-3 shrink-0" />
         )}
         {personaName ? (
           <>
-            <span className="truncate max-w-[12rem] font-medium text-fg-default">
+            <span className={`truncate max-w-[12rem] font-medium ${identity.color}`}>
               {personaName}
             </span>
             <span className="font-mono truncate max-w-[14rem] text-fg-subtle">
