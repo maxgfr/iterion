@@ -1,6 +1,6 @@
 ---
 name: iterion-bot-catalog
-description: Catalog of iterion example bots — pick a bot name for each roadmap_item.assignee. The stock dispatcher routes by assignee through assignee_workflows.
+description: Catalog of iterion bots — pick a bot name for each roadmap_item.assignee. The stock dispatcher routes by assignee through assignee_workflows.
 ---
 
 # Iterion Bot Catalog — for whats-next.bot's `propose_roadmap`, `revise_roadmap`, and `emit_action`
@@ -19,6 +19,25 @@ Consumed by three phases:
 in the iterion source tree. If the workspace is NOT iterion,
 none of these will resolve — all assignees should be `""` and
 all issues will be `needs-manual-triage`.
+
+## The team — persona ↔ assignee
+
+These bots have operator-facing **personas** (the names a human uses
+in conversation). When you emit an `assignee`, always use the
+**technical name** below (the dispatcher routes on it), never the
+persona.
+
+| Persona | `assignee` (technical name) |
+|---|---|
+| Nexie | `whats-next` (this bot) |
+| Featurly | `feature_dev` |
+| Billy | `branch_improve_loop` |
+| Willy | `whole_improve_loop` |
+| Doki | `doc-align` |
+| Revi | `code_review` |
+| Seki | `sec-audit-source` |
+| Depsy | `sec-audit-deps` |
+| Renovacy | `secured-renovacy` |
 
 ## The pivot: kanban-driven, not shell-driven
 
@@ -64,7 +83,8 @@ Walk top-to-bottom; first match wins.
 | "build a new bot for Y" / "create a workflow that does Y" — the catalogue lacks a fit and we need to author one | `feature_dev` (with `feature_prompt` pointing at the new `.bot` file to create) |
 | "review the whole codebase", "audit production-readiness", "find bugs anywhere" | `whole_improve_loop` |
 | "focus on axis X" (observability / perf / DX / refactoring) ACROSS the codebase — improvement loop, not detection | `whole_improve_loop` (with `--var improvement_prompt=…`) |
-| "review this branch", "review the PR", "fix the diff against main" | `branch_improve_loop` |
+| "review this branch", "review the PR", "fix the diff against main" — review AND fix AND commit | `branch_improve_loop` |
+| "review this PR / branch and just REPORT the issues" — read-only review, posts findings to the board, does NOT fix or commit | `code_review` |
 | "upgrade dependencies", "patch CVEs", "bump versions", "renovate" — MUTATING (writes package.json / go.mod / lockfiles) | `secured-renovacy` |
 | "audit the docs", "find code↔doc drift", "doc/code alignment", "fix outdated README/CLAUDE.md" | `doc-align` |
 | "audit the source for vulns", "find injection / SSRF / IDOR / secrets", "OWASP source scan" — DETECTION (writes findings, not fixes) | `sec-audit-source` |
@@ -317,6 +337,25 @@ Example `args` payload for a roadmap_item:
   docs must reflect what shipped; whenever `repo-survey`
   flags drift between what the code does and what the docs
   claim.
+
+### `code_review`
+
+- **Path**: `bots/code_review/main.bot`.
+- **Vars**: none required. Optional: `base_ref` (default `main`;
+  pass `HEAD` to review only the uncommitted working tree),
+  `scope_notes`, `severity_threshold` (default `low`),
+  `max_findings` (default `40`), `post_to_board` (default `true`),
+  `report_path` (default `.code-review/findings.md`).
+- **Pipeline**: fan-out to two read-only reviewers (claude_code +
+  claw/openai) over the branch diff, then a single `emit` step
+  merges + de-duplicates their findings (cross-family agreement
+  raises confidence) and writes one board issue per finding (label
+  `source:revi`) plus a markdown report. No fix, no commit, no loop.
+- **Budget**: 2 branches, 45m, $20 (typical).
+- **Use when**: you want a PR / branch REVIEWED and its issues
+  surfaced for triage, but NOT auto-fixed. Distinct from
+  `branch_improve_loop` (Billy), which reviews AND fixes AND commits
+  — `code_review` (Revi) only reports.
 
 ## Issue-creation mapping (consumed by `emit_action`)
 
