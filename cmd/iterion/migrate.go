@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
 	"go.mongodb.org/mongo-driver/v2/bson"
 
+	"github.com/SocialGouv/iterion/pkg/cli"
 	iterconfig "github.com/SocialGouv/iterion/pkg/config"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -52,6 +55,31 @@ or modifies the source store.`,
 	RunE: runMigrateToCloud,
 }
 
+var migrateRunPathsOpts struct {
+	storeDir string
+	dryRun   bool
+}
+
+// `iterion migrate run-paths` rewrites the recorded source paths of runs
+// created before the examples/ -> bots/ relocation so their "open source"
+// link + `iterion resume` keep working. One-shot, idempotent, hidden.
+var migrateRunPathsCmd = &cobra.Command{
+	Use:   "run-paths",
+	Short: "Rewrite recorded bot source paths after the examples/ -> bots/ relocation",
+	Long: `Rewrite file_path + bundle_path in every <store-dir>/runs/*/run.json that
+still points at a productised bot's old examples/<bot> source, remapping
+it to bots/<bot> so the studio "open source" link and 'iterion resume'
+find the relocated files.
+
+Idempotent and field-scoped: the rest of each run.json is preserved
+byte-for-byte, paths already under bots/ are left untouched, and only the
+9 relocated bots are remapped (demos that stayed under examples/ —
+cursors, ultracode, clarify — are not). Defaults to the ~/.iterion home
+store; pass --store-dir for a project-local store.`,
+	Args: cobra.NoArgs,
+	RunE: runMigrateRunPaths,
+}
+
 func init() {
 	migrateToCloudCmd.Flags().StringVar(&migrateOpts.storeDir, "store-dir", ".iterion", "Filesystem store to migrate from")
 	migrateToCloudCmd.Flags().StringVar(&migrateOpts.configPath, "config", "", "Path to YAML config (env vars take precedence)")
@@ -60,7 +88,39 @@ func init() {
 	migrateToCloudCmd.Flags().StringVar(&migrateOpts.tenantID, "tenant", "", "Tenant ID to assign to migrated runs (required for multitenant cloud)")
 	migrateToCloudCmd.Flags().StringVar(&migrateOpts.ownerID, "owner", "", "Owner user ID to attribute migrated runs to (optional)")
 	migrateCmd.AddCommand(migrateToCloudCmd)
+
+	migrateRunPathsCmd.Flags().StringVar(&migrateRunPathsOpts.storeDir, "store-dir", "", "Run store root to migrate (default: ~/.iterion)")
+	migrateRunPathsCmd.Flags().BoolVar(&migrateRunPathsOpts.dryRun, "dry-run", false, "Print the rewrites without modifying any run.json")
+	migrateCmd.AddCommand(migrateRunPathsCmd)
+
 	rootCmd.AddCommand(migrateCmd)
+}
+
+func runMigrateRunPaths(_ *cobra.Command, _ []string) error {
+	storeDir := migrateRunPathsOpts.storeDir
+	if storeDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("migrate run-paths: resolve home dir (pass --store-dir): %w", err)
+		}
+		storeDir = filepath.Join(home, ".iterion")
+	}
+	res, err := cli.MigrateRunPaths(cli.MigrateRunPathsOptions{
+		StoreDir: storeDir,
+		DryRun:   migrateRunPathsOpts.dryRun,
+	})
+	if err != nil {
+		return err
+	}
+	for _, c := range res.Changes {
+		fmt.Printf("  %s  %s: %s -> %s\n", c.RunID, c.Field, c.From, c.To)
+	}
+	verb := "updated"
+	if migrateRunPathsOpts.dryRun {
+		verb = "would update"
+	}
+	fmt.Printf("migrate run-paths: store %s — scanned %d runs, %s %d\n", storeDir, res.Scanned, verb, res.Updated)
+	return nil
 }
 
 func runMigrateToCloud(cmd *cobra.Command, _ []string) error {
