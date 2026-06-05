@@ -61,7 +61,11 @@ func renderBotsMarkdown(w io.Writer, entries []BotEntry) error {
 	fmt.Fprintln(w, "# Bots")
 	fmt.Fprintln(w)
 	for _, e := range entries {
-		fmt.Fprintf(w, "## %s\n\n", e.Name)
+		if e.DisplayName != "" {
+			fmt.Fprintf(w, "## %s · `%s`\n\n", e.DisplayName, e.Name)
+		} else {
+			fmt.Fprintf(w, "## %s\n\n", e.Name)
+		}
 		if e.Description != "" {
 			fmt.Fprintf(w, "%s\n\n", e.Description)
 		}
@@ -94,14 +98,15 @@ func renderBotsSkill(w io.Writer, entries []BotEntry) error {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Regenerate with `iterion bots list --format=skill --paths examples/`.")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Bot | Description | Triggers | Capabilities |")
-	fmt.Fprintln(w, "|---|---|---|---|")
+	fmt.Fprintln(w, "| Persona | Bot | Description | Triggers | Capabilities |")
+	fmt.Fprintln(w, "|---|---|---|---|---|")
 	for _, e := range entries {
 		desc := strings.ReplaceAll(strings.TrimSpace(e.Description), "\n", " ")
 		if len(desc) > 200 {
 			desc = desc[:197] + "..."
 		}
-		fmt.Fprintf(w, "| `%s` | %s | %s | %s |\n",
+		fmt.Fprintf(w, "| %s | `%s` | %s | %s | %s |\n",
+			personaOrDash(e.DisplayName),
 			e.Name,
 			desc,
 			joinOrDash(e.Triggers),
@@ -123,4 +128,14 @@ func joinOrDash(xs []string) string {
 		return "—"
 	}
 	return strings.Join(xs, ", ")
+}
+
+// personaOrDash renders a bundle's friendly persona (display_name) for a
+// catalog table cell, falling back to an em dash when the bot declares no
+// persona (loose .bot files, un-personified bundles).
+func personaOrDash(displayName string) string {
+	if strings.TrimSpace(displayName) == "" {
+		return "—"
+	}
+	return "**" + displayName + "**"
 }

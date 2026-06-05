@@ -1,4 +1,5 @@
 name: doc-align
+display_name: Doki
 version: 0.13.1
 description: |
   Documentation alignment bot. Detects mismatches between project

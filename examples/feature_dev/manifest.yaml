@@ -1,4 +1,5 @@
 name: feature_dev
+display_name: Featurly
 version: 0.1.0
 description: |
   Autonomous end-to-end feature development. Takes a `feature_prompt`

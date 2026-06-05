@@ -1,4 +1,5 @@
 name: branch_improve_loop
+display_name: Billy
 version: 0.1.0
 description: |
   Branch-scoped variant of whole_improve_loop. Runs review-fix iterations

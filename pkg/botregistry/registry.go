@@ -27,7 +27,13 @@ import (
 // or directory (bundle) that produced the entry — operators can grep
 // back to it.
 type Entry struct {
-	Name         string   `json:"name" yaml:"name"`
+	Name string `json:"name" yaml:"name"`
+	// DisplayName is the bundle's friendly persona (manifest.yaml
+	// display_name) — e.g. "Nexie" for whats-next, "Featurly" for
+	// feature_dev. Empty for loose .bot files and bundles that declare
+	// no persona. Surfaced by `iterion bots list` and the studio bot
+	// picker so operators recognise the team by name, not just by id.
+	DisplayName  string   `json:"display_name,omitempty" yaml:"display_name,omitempty"`
 	Description  string   `json:"description" yaml:"description,omitempty"`
 	Path         string   `json:"path" yaml:"path"`
 	Triggers     []string `json:"triggers,omitempty" yaml:"triggers,omitempty"`
@@ -229,6 +235,7 @@ func parseBundle(dir string) (*Entry, error) {
 	}
 	return &Entry{
 		Name:         m.Name,
+		DisplayName:  m.DisplayName,
 		Description:  strings.TrimSpace(m.Description),
 		Path:         dir,
 		Triggers:     m.Triggers,

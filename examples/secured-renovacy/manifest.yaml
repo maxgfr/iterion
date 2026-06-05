@@ -1,4 +1,5 @@
 name: secured-renovacy
+display_name: Renovacy
 version: 0.1.0
 description: |
   Multi-stack agentic dependency upgrade pipeline. Updates every kind of

@@ -1,4 +1,5 @@
 name: whole_improve_loop
+display_name: Willy
 version: 0.3.0
 description: |
   Whole-repository alternating Claude/GPT review-fix loop. Iterates
