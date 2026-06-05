@@ -917,6 +917,11 @@ else:
     print(json.dumps(result))
 `
   output: chunk_plan_output
+  ## Publish the chunk manifest as a versioned artifact so the diff-split
+  ## plan is inspectable in the studio Artifact tab and `iterion report`.
+  ## Zero LLM cost: a tool node only runs python; publish persists its
+  ## already-emitted structured output.
+  publish: chunk_plan_artifact
 
 router alt:
   mode: round_robin

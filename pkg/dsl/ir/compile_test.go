@@ -1713,3 +1713,73 @@ workflow w:
 		t.Errorf("expected DiagNodeMaxTokensVsBudget warning, diagnostics: %v", r.Diagnostics)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// publish: on tool and compute nodes
+// ---------------------------------------------------------------------------
+
+// TestPublishOnToolAndComputeNodes verifies `publish:` parses and compiles
+// onto tool and compute nodes, that NodePublish recognises them, and that
+// they register as artifact producers — the downstream {{artifacts.X}} refs
+// compile clean (mustCompile fails on any error diagnostic, incl. C035).
+func TestPublishOnToolAndComputeNodes(t *testing.T) {
+	src := `
+schema note_out:
+  msg: string
+
+schema plan_out:
+  plan: string
+
+prompt sys:
+  System.
+
+prompt consume:
+  Plan {{artifacts.plan_artifact}} and note {{artifacts.note_artifact}}.
+
+tool make_note:
+  command: "printf hi"
+  output: note_out
+  publish: note_artifact
+
+compute make_plan:
+  output: plan_out
+  publish: plan_artifact
+  expr:
+    plan: "outputs.make_note.msg"
+
+agent consumer:
+  model: "m"
+  output: plan_out
+  system: sys
+  user: consume
+
+workflow w:
+  entry: make_note
+  make_note -> make_plan
+  make_plan -> consumer
+  consumer -> done
+`
+	w := mustCompile(t, src)
+
+	tool, ok := w.Nodes["make_note"].(*ToolNode)
+	if !ok {
+		t.Fatalf("make_note is %T, want *ToolNode", w.Nodes["make_note"])
+	}
+	if tool.Publish != "note_artifact" {
+		t.Errorf("ToolNode.Publish = %q, want note_artifact", tool.Publish)
+	}
+	if got := NodePublish(tool); got != "note_artifact" {
+		t.Errorf("NodePublish(tool) = %q, want note_artifact", got)
+	}
+
+	comp, ok := w.Nodes["make_plan"].(*ComputeNode)
+	if !ok {
+		t.Fatalf("make_plan is %T, want *ComputeNode", w.Nodes["make_plan"])
+	}
+	if comp.Publish != "plan_artifact" {
+		t.Errorf("ComputeNode.Publish = %q, want plan_artifact", comp.Publish)
+	}
+	if got := NodePublish(comp); got != "plan_artifact" {
+		t.Errorf("NodePublish(compute) = %q, want plan_artifact", got)
+	}
+}

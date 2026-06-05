@@ -209,6 +209,7 @@ tool_node_decl = "tool" IDENT ":" NEWLINE INDENT { tool_node_prop } DEDENT ;
 tool_node_prop = "command" ":" STRING_LIT NEWLINE
                | "input"   ":" IDENT     NEWLINE
                | "output"  ":" IDENT     NEWLINE
+               | "publish" ":" IDENT     NEWLINE
                | "await"   ":" await_mode NEWLINE ;
 
 (* ---- Nœuds : compute (déterministe, sans LLM ni shell) ---- *)
@@ -219,9 +220,10 @@ tool_node_prop = "command" ":" STRING_LIT NEWLINE
 
 compute_decl = "compute" IDENT ":" NEWLINE INDENT { compute_prop } DEDENT ;
 
-compute_prop = "input"  ":" IDENT       NEWLINE
-             | "output" ":" IDENT       NEWLINE
-             | "await"  ":" await_mode   NEWLINE
+compute_prop = "input"   ":" IDENT       NEWLINE
+             | "output"  ":" IDENT       NEWLINE
+             | "publish" ":" IDENT       NEWLINE
+             | "await"   ":" await_mode   NEWLINE
              | compute_expr_block ;
 
 compute_expr_block = "expr" ":" NEWLINE INDENT { compute_expr_entry } DEDENT ;

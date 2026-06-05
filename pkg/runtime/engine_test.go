@@ -11,6 +11,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
 	"github.com/SocialGouv/iterion/pkg/backend/model"
+	"github.com/SocialGouv/iterion/pkg/dsl/expr"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
@@ -148,6 +149,84 @@ func TestLinearPath(t *testing.T) {
 	}
 	if art.Data["summary"] != "all good" {
 		t.Errorf("artifact data mismatch: %v", art.Data)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: tool and compute nodes persist artifacts when they declare publish
+// (tool via the generic path, compute via its bespoke execCompute path).
+// ---------------------------------------------------------------------------
+
+func TestToolAndComputePublishArtifact(t *testing.T) {
+	planExpr, err := expr.Parse("outputs.make_note.msg")
+	if err != nil {
+		t.Fatalf("parse compute expr: %v", err)
+	}
+
+	wf := &ir.Workflow{
+		Name:  "publish_test",
+		Entry: "make_note",
+		Nodes: map[string]ir.Node{
+			"make_note": &ir.ToolNode{BaseNode: ir.BaseNode{ID: "make_note"}, Command: "noop", Publish: "note_artifact"},
+			"make_plan": &ir.ComputeNode{
+				BaseNode: ir.BaseNode{ID: "make_plan"},
+				Exprs:    []*ir.ComputeExpr{{Key: "plan", AST: planExpr, Raw: "outputs.make_note.msg"}},
+				Publish:  "plan_artifact",
+			},
+			"done": &ir.DoneNode{BaseNode: ir.BaseNode{ID: "done"}},
+		},
+		Edges: []*ir.Edge{
+			{From: "make_note", To: "make_plan"},
+			{From: "make_plan", To: "done"},
+		},
+		Schemas: map[string]*ir.Schema{},
+		Prompts: map[string]*ir.Prompt{},
+		Vars:    map[string]*ir.Var{},
+		Loops:   map[string]*ir.Loop{},
+	}
+
+	exec := newStubExecutor()
+	exec.on("make_note", func(_ map[string]interface{}) (map[string]interface{}, error) {
+		return map[string]interface{}{"msg": "hi from tool"}, nil
+	})
+
+	s := tmpStore(t)
+	eng := New(wf, s, exec)
+	if err := eng.Run(context.Background(), "run-pub", nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	// Tool node artifact (generic publish path).
+	toolArt, err := s.LoadArtifact(context.Background(), "run-pub", "make_note", 0)
+	if err != nil {
+		t.Fatalf("load tool artifact: %v", err)
+	}
+	if toolArt.Data["msg"] != "hi from tool" {
+		t.Errorf("tool artifact = %v, want msg=\"hi from tool\"", toolArt.Data)
+	}
+
+	// Compute node artifact (execCompute publish path — the fix under test).
+	compArt, err := s.LoadArtifact(context.Background(), "run-pub", "make_plan", 0)
+	if err != nil {
+		t.Fatalf("load compute artifact: %v", err)
+	}
+	if compArt.Data["plan"] != "hi from tool" {
+		t.Errorf("compute artifact = %v, want plan=\"hi from tool\"", compArt.Data)
+	}
+
+	// Both publishes emit an artifact_written event.
+	events, err := s.LoadEvents(context.Background(), "run-pub")
+	if err != nil {
+		t.Fatalf("load events: %v", err)
+	}
+	written := 0
+	for _, e := range events {
+		if e.Type == store.EventArtifactWritten {
+			written++
+		}
+	}
+	if written != 2 {
+		t.Errorf("artifact_written events = %d, want 2 (tool + compute)", written)
 	}
 }
 

@@ -731,6 +731,11 @@ print(json.dumps({
 }))
 "`
   output: shard_plan_output
+  ## Publish the shard manifest as a versioned artifact for the audit
+  ## trail — visible in the studio Artifact tab and `iterion report`.
+  ## Zero LLM cost: a tool node only runs `sh`/python; publish persists
+  ## its already-emitted structured output.
+  publish: shard_plan_artifact
 
 ## dispatch_shards (Cap. 3) calls the hidden `iterion __scan-shards`
 ## subcommand, which spawns N child `iterion run` invocations

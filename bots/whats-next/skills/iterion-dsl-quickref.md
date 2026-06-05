@@ -180,6 +180,12 @@ auto-escape strings, but `string[]` substitutions split into
 multiple argv tokens — use positional argv + `--` sentinels
 when passing multi-element arrays.
 
+Add `publish: <name>` to a `tool` (or `compute`, or agent/judge/human)
+node to persist its output as a versioned artifact — surfaced in the
+studio Artifact tab and `iterion report`, referenceable downstream as
+`{{artifacts.<name>}}`. Deterministic, no LLM cost: `publish:` only
+redirects the already-computed output into the store.
+
 ## Template references
 
 | Form | Meaning |

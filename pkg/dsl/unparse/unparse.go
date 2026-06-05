@@ -256,6 +256,9 @@ func Unparse(f *ast.File) string {
 		if t.Output != "" {
 			writeProp(&b, "output", t.Output)
 		}
+		if t.Publish != "" {
+			writeProp(&b, "publish", t.Publish)
+		}
 		if t.Await != ast.AwaitNone {
 			writeProp(&b, "await", t.Await.String())
 		}
@@ -271,6 +274,9 @@ func Unparse(f *ast.File) string {
 		}
 		if c.Output != "" {
 			writeProp(&b, "output", c.Output)
+		}
+		if c.Publish != "" {
+			writeProp(&b, "publish", c.Publish)
 		}
 		if c.Await != ast.AwaitNone {
 			writeProp(&b, "await", c.Await.String())

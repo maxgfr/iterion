@@ -1003,6 +1003,7 @@ func (c *compiler) compileTools() {
 			Script:      t.Script,
 			ScriptRefs:  scriptRefs,
 			Language:    t.Language,
+			Publish:     t.Publish,
 			AwaitMode:   t.Await,
 			Sandbox:     c.compileSandboxBlock(t.Sandbox, "tool", t.Name),
 		}
@@ -1050,6 +1051,7 @@ func (c *compiler) compileComputes() {
 				OutputSchema: cd.Output,
 			},
 			Exprs:     exprs,
+			Publish:   cd.Publish,
 			AwaitMode: cd.Await,
 		}
 	}

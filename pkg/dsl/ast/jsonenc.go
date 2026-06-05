@@ -348,6 +348,7 @@ type jsonToolNodeDecl struct {
 	Language string            `json:"language,omitempty"`
 	Input    string            `json:"input,omitempty"`
 	Output   string            `json:"output,omitempty"`
+	Publish  string            `json:"publish,omitempty"`
 	Await    string            `json:"await,omitempty"`
 	Sandbox  *jsonSandboxBlock `json:"sandbox,omitempty"`
 }
@@ -465,11 +466,12 @@ func sandboxNetworkBlockFromJSON(j *jsonSandboxNetworkBlock) *SandboxNetworkBloc
 }
 
 type jsonComputeDecl struct {
-	Name   string             `json:"name,omitempty"`
-	Input  string             `json:"input,omitempty"`
-	Output string             `json:"output,omitempty"`
-	Expr   []*jsonComputeExpr `json:"expr,omitempty"`
-	Await  string             `json:"await,omitempty"`
+	Name    string             `json:"name,omitempty"`
+	Input   string             `json:"input,omitempty"`
+	Output  string             `json:"output,omitempty"`
+	Publish string             `json:"publish,omitempty"`
+	Expr    []*jsonComputeExpr `json:"expr,omitempty"`
+	Await   string             `json:"await,omitempty"`
 }
 
 type jsonComputeExpr struct {
@@ -596,16 +598,18 @@ func toJSON(f *File) *jsonFile {
 			Language: t.Language,
 			Input:    t.Input,
 			Output:   t.Output,
+			Publish:  t.Publish,
 			Await:    awaitModeToStr[t.Await],
 			Sandbox:  sandboxBlockToJSON(t.Sandbox),
 		})
 	}
 	for _, c := range f.Computes {
 		jc := &jsonComputeDecl{
-			Name:   c.Name,
-			Input:  c.Input,
-			Output: c.Output,
-			Await:  awaitModeToStr[c.Await],
+			Name:    c.Name,
+			Input:   c.Input,
+			Output:  c.Output,
+			Publish: c.Publish,
+			Await:   awaitModeToStr[c.Await],
 		}
 		for _, e := range c.Expr {
 			jc.Expr = append(jc.Expr, &jsonComputeExpr{Key: e.Key, Expr: e.Expr})
@@ -1109,6 +1113,7 @@ func fromJSON(jf *jsonFile) (*File, error) {
 			Language: jt.Language,
 			Input:    jt.Input,
 			Output:   jt.Output,
+			Publish:  jt.Publish,
 			Await:    aw,
 			Sandbox:  sandboxBlockFromJSON(jt.Sandbox),
 		})
@@ -1120,10 +1125,11 @@ func fromJSON(jf *jsonFile) (*File, error) {
 			return nil, fmt.Errorf("astjson: unknown await mode %q", jc.Await)
 		}
 		cd := &ComputeDecl{
-			Name:   jc.Name,
-			Input:  jc.Input,
-			Output: jc.Output,
-			Await:  aw,
+			Name:    jc.Name,
+			Input:   jc.Input,
+			Output:  jc.Output,
+			Publish: jc.Publish,
+			Await:   aw,
 		}
 		for _, je := range jc.Expr {
 			cd.Expr = append(cd.Expr, &ComputeExpr{Key: je.Key, Expr: je.Expr})

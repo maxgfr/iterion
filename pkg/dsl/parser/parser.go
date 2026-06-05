@@ -1480,6 +1480,9 @@ func (p *parser) parseToolNodeProp(td *ast.ToolNodeDecl, propTok Token) {
 	case TokenOutput:
 		p.expect(TokenColon)
 		td.Output = p.expectIdent()
+	case TokenPublish:
+		p.expect(TokenColon)
+		td.Publish = p.expectIdent()
 	case TokenAwait:
 		p.expect(TokenColon)
 		td.Await = p.parseAwaitMode()
@@ -1541,6 +1544,9 @@ func (p *parser) parseComputeProp(cd *ast.ComputeDecl, propTok Token) {
 	case TokenOutput:
 		p.expect(TokenColon)
 		cd.Output = p.expectIdent()
+	case TokenPublish:
+		p.expect(TokenColon)
+		cd.Publish = p.expectIdent()
 	case TokenAwait:
 		p.expect(TokenColon)
 		cd.Await = p.parseAwaitMode()

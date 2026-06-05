@@ -182,6 +182,30 @@ function VerdictCard({ data }: { data: Record<string, unknown> }) {
   );
 }
 
+/** A plan artifact is "plan-shaped" when it carries a `plan` or `text`
+ *  string field — e.g. feature_dev's published plan, `{text: "## …", …}`.
+ *  Verdict-shaped data goes to VerdictCard; structured data (tool
+ *  manifests) has neither field and falls through to the raw JSON view. */
+function isPlanShaped(data: unknown): data is Record<string, unknown> {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  if (isVerdictShaped(data)) return false;
+  return firstString(data as Record<string, unknown>, ["plan", "text"]) !== "";
+}
+
+/** PlanCard renders the prose body (`plan` or `text`) with newlines
+ *  preserved, so a published plan reads like a plan, not escaped JSON.
+ *  Metadata keys are omitted; the full record is in the raw JSON below. */
+function PlanCard({ data }: { data: Record<string, unknown> }) {
+  const body = firstString(data, ["plan", "text"]);
+  if (!body) return null;
+  return (
+    <div className="mb-3 rounded border border-border-default bg-surface-1 p-2 text-micro">
+      <div className="text-fg-muted mb-1">plan</div>
+      <p className="whitespace-pre-wrap text-fg-default">{body}</p>
+    </div>
+  );
+}
+
 export default function ArtifactDiff({ runId, nodeId, versions }: Props) {
   // Sort once: highest first so the default selection is "previous vs
   // latest" — the most useful diff for loop iterations or retries.
@@ -242,6 +266,9 @@ export default function ArtifactDiff({ runId, nodeId, versions }: Props) {
     <>
       {toBody && isVerdictShaped(toBody.data) && (
         <VerdictCard data={toBody.data as Record<string, unknown>} />
+      )}
+      {toBody && isPlanShaped(toBody.data) && (
+        <PlanCard data={toBody.data as Record<string, unknown>} />
       )}
       <div className="flex items-center gap-2 mb-2 text-[10px]">
         <label>

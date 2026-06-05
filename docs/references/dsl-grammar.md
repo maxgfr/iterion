@@ -220,6 +220,7 @@ tool_node_prop = "command"  ":" STRING_LIT  NEWLINE
                | "language" ":" IDENT       NEWLINE
                | "input"    ":" IDENT       NEWLINE
                | "output"   ":" IDENT       NEWLINE
+               | "publish"  ":" IDENT       NEWLINE
                | "await"    ":" await_mode  NEWLINE
                | sandbox_decl ;
 ```
@@ -235,6 +236,13 @@ workflow sandbox configuration.
 data via `{{input.field}}` template substitution. String-array fields
 (`string[]`) expand into the command line as space-joined items.
 
+`publish:` (optional) persists the node's output as a named, versioned
+artifact — surfaced in the studio Artifact tab and `iterion report`, and
+referenceable downstream as `{{artifacts.<name>}}`. It works identically on
+`tool` and `compute` nodes as it does on agent/judge/human, and is
+deterministic with **no LLM cost** (it only redirects the already-computed
+output into the store).
+
 ## Compute
 
 Deterministic node — evaluates a list of expressions over the
@@ -245,9 +253,10 @@ detection, boolean combinations, counters, simple aggregations.
 ```ebnf
 compute_decl = "compute" IDENT ":" NEWLINE INDENT { compute_prop } DEDENT ;
 
-compute_prop = "input"  ":" IDENT       NEWLINE
-             | "output" ":" IDENT       NEWLINE
-             | "await"  ":" await_mode   NEWLINE
+compute_prop = "input"   ":" IDENT       NEWLINE
+             | "output"  ":" IDENT       NEWLINE
+             | "publish" ":" IDENT       NEWLINE
+             | "await"   ":" await_mode   NEWLINE
              | compute_expr_block ;
 
 compute_expr_block  = "expr" ":" NEWLINE INDENT { compute_expr_entry } DEDENT ;

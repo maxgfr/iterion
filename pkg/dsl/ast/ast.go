@@ -457,6 +457,7 @@ type ToolNodeDecl struct {
 	Language string        // interpreter selector for Script: js | py | sh | bash. Defaults to sh when empty.
 	Input    string        // optional input schema reference name
 	Output   string        // schema reference name
+	Publish  string        // persistent artifact name (empty if not set)
 	Await    AwaitMode     // convergence strategy (none/wait_all/best_effort)
 	Sandbox  *SandboxBlock // node-level sandbox override; nil inherits from workflow
 	Span     Span
@@ -471,12 +472,13 @@ type ToolNodeDecl struct {
 // produce a structured output. Used for streak detection, boolean ANDs,
 // counters, etc., without invoking an LLM or shelling out.
 type ComputeDecl struct {
-	Name   string
-	Input  string         // optional input schema reference name
-	Output string         // schema reference name (defines the output fields)
-	Expr   []*ComputeExpr // ordered list of field-name → expression-source pairs
-	Await  AwaitMode      // convergence strategy (none/wait_all/best_effort)
-	Span   Span
+	Name    string
+	Input   string         // optional input schema reference name
+	Output  string         // schema reference name (defines the output fields)
+	Publish string         // persistent artifact name (empty if not set)
+	Expr    []*ComputeExpr // ordered list of field-name → expression-source pairs
+	Await   AwaitMode      // convergence strategy (none/wait_all/best_effort)
+	Span    Span
 }
 
 // ComputeExpr is one entry inside a `compute` node's `expr:` block:

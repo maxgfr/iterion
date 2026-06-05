@@ -227,6 +227,7 @@ type ToolNode struct {
 	Script      string // script body (interpreter snippet); mutually exclusive with Command
 	ScriptRefs  []*Ref // parsed template references in Script
 	Language    string // interpreter for Script: "js"|"py"|"sh"|"bash" (empty defaults to "sh")
+	Publish     string // persistent artifact name (empty = not published)
 	Session     SessionMode
 	AwaitMode   AwaitMode
 	Sandbox     *SandboxSpec // node-level sandbox override (nil = inherit workflow)
@@ -244,6 +245,7 @@ type ComputeNode struct {
 	BaseNode
 	SchemaFields
 	Exprs     []*ComputeExpr // ordered field-name → parsed AST pairs
+	Publish   string         // persistent artifact name (empty = not published)
 	AwaitMode AwaitMode
 }
 
@@ -344,6 +346,10 @@ func NodePublish(n Node) string {
 	case *JudgeNode:
 		return n.Publish
 	case *HumanNode:
+		return n.Publish
+	case *ToolNode:
+		return n.Publish
+	case *ComputeNode:
 		return n.Publish
 	}
 	return ""

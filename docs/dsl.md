@@ -185,9 +185,15 @@ Direct shell command execution — no LLM involved:
 tool run_tests:
   command: "make test"
   output: test_result
+  publish: test_result_artifact   # optional — see below
 ```
 
-Supports `${ENV_VAR}` in the command string.
+Supports `${ENV_VAR}` in the command string. Like agent/judge/human nodes,
+a `tool` — or a `compute` — node may add `publish: <name>` to persist its
+output as a versioned artifact (surfaced in the studio Artifact tab and
+`iterion report`, and referenceable downstream as `{{artifacts.<name>}}`).
+This is deterministic and adds **no LLM cost** — `publish:` only redirects
+the node's already-computed output into the store.
 
 ### Terminal Nodes
 

@@ -1130,6 +1130,38 @@ func (e *Engine) execLoopRunNode(ctx context.Context, rs *runState, currentNodeI
 	return output, false, nil
 }
 
+// persistArtifactIfPublished writes the node's `publish:` artifact when it
+// declares one: it versions the artifact, exposes the output under
+// rs.artifacts[name] for downstream {{artifacts.name}} refs, and emits
+// EventArtifactWritten. No-op for nodes without publish. Shared by every
+// node-completion path so the behaviour stays identical — including
+// compute, whose bespoke execCompute path calls this directly.
+func (e *Engine) persistArtifactIfPublished(ctx context.Context, rs *runState, nodeID string, node ir.Node, output map[string]interface{}) error {
+	pub := nodePublish(node)
+	if pub == "" {
+		return nil
+	}
+	version := rs.artifactVersions[nodeID]
+	if err := e.store.WriteArtifact(ctx, &store.Artifact{
+		RunID:   rs.runID,
+		NodeID:  nodeID,
+		Version: version,
+		Data:    output,
+	}); err != nil {
+		return fmt.Errorf("runtime: write artifact: %w", err)
+	}
+	rs.artifactVersions[nodeID] = version + 1
+	rs.artifacts[pub] = output
+
+	if err := e.emit(rs.ctx, rs.runID, store.EventArtifactWritten, nodeID, map[string]interface{}{
+		"publish": pub,
+		"version": version,
+	}); err != nil {
+		return fmt.Errorf("runtime: artifact written but event emission failed (state inconsistency): %w", err)
+	}
+	return nil
+}
+
 // execLoopAfterExec runs the post-execution pipeline for a node:
 // stores output in runState, validates against the declared schema,
 // records budget usage, persists any `publish:` artifact, emits
@@ -1150,26 +1182,8 @@ func (e *Engine) execLoopAfterExec(ctx context.Context, rs *runState, currentNod
 	}
 
 	// Persist artifact if node has publish.
-	if pub := nodePublish(node); pub != "" {
-		version := rs.artifactVersions[currentNodeID]
-		artifact := &store.Artifact{
-			RunID:   rs.runID,
-			NodeID:  currentNodeID,
-			Version: version,
-			Data:    output,
-		}
-		if err := e.store.WriteArtifact(ctx, artifact); err != nil {
-			return "", fmt.Errorf("runtime: write artifact: %w", err)
-		}
-		rs.artifactVersions[currentNodeID] = version + 1
-		rs.artifacts[pub] = output
-
-		if err := e.emit(rs.ctx, rs.runID, store.EventArtifactWritten, currentNodeID, map[string]interface{}{
-			"publish": pub,
-			"version": version,
-		}); err != nil {
-			return "", fmt.Errorf("runtime: artifact written but event emission failed (state inconsistency): %w", err)
-		}
+	if err := e.persistArtifactIfPublished(ctx, rs, currentNodeID, node, output); err != nil {
+		return "", err
 	}
 
 	// Emit node_finished with usage data.
@@ -1258,6 +1272,13 @@ func (e *Engine) execCompute(rs *runState, nodeID string, cn *ir.ComputeNode) (s
 	delete(rs.nodeAttempts, nodeID)
 
 	if err := e.validateNodeOutput(nodeID, cn, output); err != nil {
+		return "", err
+	}
+
+	// Persist artifact if the compute node has publish. Compute has a
+	// bespoke exec path, so it calls the shared writer explicitly. Zero
+	// extra cost: `output` is already computed deterministically above.
+	if err := e.persistArtifactIfPublished(rs.ctx, rs, nodeID, cn, output); err != nil {
 		return "", err
 	}
 

@@ -655,6 +655,10 @@ agent plan:
   system: plan_system
   user: plan_user
   session: fresh
+  ## Persist the plan as a versioned artifact (studio Artifact tab +
+  ## `iterion report`) — no extra LLM call; publish only redirects the
+  ## already-computed output. `act` still inherits the plan via the session.
+  publish: plan_artifact
 
 agent act:
   backend: "claude_code"
