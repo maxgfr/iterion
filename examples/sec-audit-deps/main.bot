@@ -185,13 +185,14 @@ prompt review_system:
      `false_positive` (heuristic mis-fired — common cause: test
      fixtures, dev-only paths, false entropy on legitimate
      compressed data).
-     For a `known-vuln` signal (type == "known-vuln") the evidence is a
-     PUBLISHED advisory (id + aliases) emitted by govulncheck / pip-audit
-     / npm audit — treat it as HIGH-confidence: mark `valid` unless the
-     package is dev/test-only, the installed version is genuinely outside
-     the advisory's affected range, or a listed `fixed_version` is
-     already in use. For Go, `called: true` means the vulnerable symbol
-     is actually reachable (more urgent than imported-only).
+     For a `vuln-db-known` signal (type == "vuln-db-known") the evidence
+     is a PUBLISHED advisory (the signal's `advisory` id + `aliases`)
+     emitted by govulncheck / pip-audit / npm audit — treat it as
+     HIGH-confidence: mark `valid` unless the package is dev/test-only,
+     the installed version is genuinely outside the advisory's affected
+     range, or a listed `fixed_version` is already in use. For Go,
+     `called: true` means the vulnerable symbol is actually reachable
+     (more urgent than imported-only).
   3. Compute risk_score:
      - Start from the heuristic_score in the input.
      - Subtract the weight of each false_positive signal.
@@ -322,7 +323,7 @@ import os, json
 scan_dir = os.environ.get('SCAN_DIR', '.')
 path = os.path.join(scan_dir, 'npm-audit.json')
 packages, errors = [], []
-SEV = {'critical': 90, 'high': 75, 'moderate': 50, 'low': 25, 'info': 10}
+SEV = {'critical': 35, 'high': 25, 'moderate': 15, 'low': 8, 'info': 3}
 try:
     with open(path, 'r', encoding='utf-8') as f:
         data = json.load(f)
@@ -343,13 +344,16 @@ if isinstance(data, dict) and isinstance(data.get('vulnerabilities'), dict):
                 if via.get('source') is not None:
                     ids.append('npm-advisory-%s' % via['source'])
         desc = '; '.join(titles[:3]) or ('vulnerable dependency %s' % name)
+        weight = SEV.get(sev, 12)
+        advisory = ids[0] if ids else ('npm:%s' % name)
         packages.append({
             'ecosystem': 'npm', 'name': info.get('name', name), 'version': '',
+            'heuristic_score': weight,
             'signals': [{
-                'type': 'known-vuln', 'id': ids[0] if ids else ('npm:%s' % name),
-                'aliases': urls[:3], 'severity': sev, 'range': info.get('range', ''),
-                'fixed_version': '', 'description': desc[:300],
-                'evidence_file': path, 'heuristic_score': SEV.get(sev, 40),
+                'type': 'vuln-db-known', 'weight': weight,
+                'evidence': '%s (%s): %s [%s]' % (advisory, sev, desc[:180], path),
+                'advisory': advisory, 'aliases': urls[:3], 'severity': sev,
+                'range': info.get('range', ''), 'fixed_version': '',
             }],
         })
 elif isinstance(data, dict) and isinstance(data.get('advisories'), dict):
@@ -357,14 +361,16 @@ elif isinstance(data, dict) and isinstance(data.get('advisories'), dict):
         if not isinstance(adv, dict):
             continue
         sev = adv.get('severity', 'unknown')
+        weight = SEV.get(sev, 12)
         packages.append({
             'ecosystem': 'npm', 'name': adv.get('module_name', ''), 'version': '',
+            'heuristic_score': weight,
             'signals': [{
-                'type': 'known-vuln', 'id': 'npm-advisory-%s' % aid,
+                'type': 'vuln-db-known', 'weight': weight,
+                'evidence': '%s (%s): %s [%s]' % ('npm-advisory-%s' % aid, sev, (adv.get('title') or adv.get('overview') or '')[:180], path),
+                'advisory': 'npm-advisory-%s' % aid,
                 'aliases': [adv['url']] if adv.get('url') else [], 'severity': sev,
                 'fixed_version': adv.get('patched_versions', ''),
-                'description': (adv.get('title') or adv.get('overview') or '')[:300],
-                'evidence_file': path, 'heuristic_score': SEV.get(sev, 40),
             }],
         })
 print(json.dumps({'packages': packages, 'errors': errors}))
@@ -402,13 +408,14 @@ for d in deps:
             continue
         fixes = v.get('fix_versions') or []
         signals.append({
-            'type': 'known-vuln', 'id': v.get('id', ''), 'aliases': v.get('aliases', []),
+            'type': 'vuln-db-known', 'weight': 15,
+            'evidence': '%s: %s [%s]' % (v.get('id', ''), (v.get('description') or '')[:180], path),
+            'advisory': v.get('id', ''), 'aliases': v.get('aliases', []),
             'severity': 'unknown', 'fixed_version': fixes[0] if fixes else '',
-            'description': (v.get('description') or '')[:300],
-            'evidence_file': path, 'heuristic_score': 50,
         })
     if signals:
-        packages.append({'ecosystem': 'pypi', 'name': d.get('name', ''), 'version': d.get('version', ''), 'signals': signals})
+        score = min(100, sum(s['weight'] for s in signals))
+        packages.append({'ecosystem': 'pypi', 'name': d.get('name', ''), 'version': d.get('version', ''), 'heuristic_score': score, 'signals': signals})
 print(json.dumps({'packages': packages, 'errors': errors}))
 " > {{vars.scan_dir}}/py.json; cat {{vars.scan_dir}}/py.json`
   output: heuristic_output
@@ -427,7 +434,6 @@ import os, json
 scan_dir = os.environ.get('SCAN_DIR', '.')
 path = os.path.join(scan_dir, 'govulncheck.json')
 packages, errors = [], []
-SEV_BASE = {'high': 75, 'medium': 50}
 def iter_objs(text):
     dec = json.JSONDecoder()
     i, n = 0, len(text)
@@ -490,14 +496,16 @@ if text.strip():
                 ver = fr.get('version', '')
                 break
         sev = 'high' if f['called'] else 'medium'
-        score = SEV_BASE[sev] + (10 if f['called'] else 0)
+        weight = 25 if f['called'] else 15
+        summary = (e.get('summary') or e.get('details') or '')[:200]
         packages.append({
             'ecosystem': 'gomod', 'name': mod or 'unknown', 'version': ver,
+            'heuristic_score': weight,
             'signals': [{
-                'type': 'known-vuln', 'id': oid, 'aliases': e.get('aliases', []),
+                'type': 'vuln-db-known', 'weight': weight,
+                'evidence': '%s%s: %s [%s]' % (oid, ' (called)' if f['called'] else ' (imported)', summary, path),
+                'advisory': oid, 'aliases': e.get('aliases', []),
                 'severity': sev, 'called': f['called'], 'fixed_version': f.get('fixed', ''),
-                'description': (e.get('summary') or e.get('details') or '')[:300],
-                'evidence_file': path, 'heuristic_score': min(score, 100),
             }],
         })
 print(json.dumps({'packages': packages, 'errors': errors}))

@@ -18,22 +18,24 @@ type depHeuristicOut struct {
 }
 
 type depPackage struct {
-	Ecosystem string      `json:"ecosystem"`
-	Name      string      `json:"name"`
-	Version   string      `json:"version"`
-	Signals   []depSignal `json:"signals"`
+	Ecosystem      string      `json:"ecosystem"`
+	Name           string      `json:"name"`
+	Version        string      `json:"version"`
+	HeuristicScore int         `json:"heuristic_score"`
+	Signals        []depSignal `json:"signals"`
 }
 
+// depSignal mirrors the malware-signals.md catalogue shape: {type, evidence,
+// weight} with vuln-db-known carrying advisory metadata.
 type depSignal struct {
-	Type           string   `json:"type"`
-	ID             string   `json:"id"`
-	Aliases        []string `json:"aliases"`
-	Severity       string   `json:"severity"`
-	Called         bool     `json:"called"`
-	FixedVersion   string   `json:"fixed_version"`
-	Description    string   `json:"description"`
-	EvidenceFile   string   `json:"evidence_file"`
-	HeuristicScore int      `json:"heuristic_score"`
+	Type         string   `json:"type"`
+	Evidence     string   `json:"evidence"`
+	Weight       int      `json:"weight"`
+	Advisory     string   `json:"advisory"`
+	Aliases      []string `json:"aliases"`
+	Severity     string   `json:"severity"`
+	Called       bool     `json:"called"`
+	FixedVersion string   `json:"fixed_version"`
 }
 
 // runDepHeuristic runs the ACTUAL heuristic node command from sec-audit-deps
@@ -115,8 +117,8 @@ func TestSecAuditDeps_GoHeuristic_ParsesGovulncheck(t *testing.T) {
 		t.Fatalf("foo signals = %d, want 1", len(foo.Signals))
 	}
 	s := foo.Signals[0]
-	if s.Type != "known-vuln" || s.ID != "GO-2024-1111" || !s.Called || s.Severity != "high" {
-		t.Errorf("foo signal = %+v, want known-vuln GO-2024-1111 called=true severity=high", s)
+	if s.Type != "vuln-db-known" || s.Advisory != "GO-2024-1111" || !s.Called || s.Severity != "high" {
+		t.Errorf("foo signal = %+v, want vuln-db-known GO-2024-1111 called=true severity=high", s)
 	}
 	if s.FixedVersion != "1.2.3" {
 		t.Errorf("foo fixed_version = %q, want 1.2.3", s.FixedVersion)
@@ -124,8 +126,11 @@ func TestSecAuditDeps_GoHeuristic_ParsesGovulncheck(t *testing.T) {
 	if len(s.Aliases) == 0 || s.Aliases[0] != "CVE-2024-1111" {
 		t.Errorf("foo aliases = %v, want [CVE-2024-1111]", s.Aliases)
 	}
-	if s.HeuristicScore < 75 {
-		t.Errorf("foo (called/high) heuristic_score = %d, want >= 75", s.HeuristicScore)
+	if foo.HeuristicScore < 20 || s.Weight < 20 {
+		t.Errorf("foo (called) heuristic_score=%d weight=%d, want >= 20", foo.HeuristicScore, s.Weight)
+	}
+	if !strings.Contains(s.Evidence, "GO-2024-1111") {
+		t.Errorf("foo evidence should cite the advisory: %q", s.Evidence)
 	}
 
 	bar := findPkg(res.Packages, "github.com/example/bar")
@@ -136,8 +141,8 @@ func TestSecAuditDeps_GoHeuristic_ParsesGovulncheck(t *testing.T) {
 	if bs.Called || bs.Severity != "medium" {
 		t.Errorf("bar signal = %+v, want called=false severity=medium (import-only)", bs)
 	}
-	if bs.HeuristicScore >= foo.Signals[0].HeuristicScore {
-		t.Errorf("import-only bar score (%d) should be below called foo score (%d)", bs.HeuristicScore, foo.Signals[0].HeuristicScore)
+	if bar.HeuristicScore >= foo.HeuristicScore {
+		t.Errorf("import-only bar score (%d) should be below called foo score (%d)", bar.HeuristicScore, foo.HeuristicScore)
 	}
 }
 
@@ -162,8 +167,8 @@ func TestSecAuditDeps_PyHeuristic_ParsesPipAudit(t *testing.T) {
 		t.Errorf("pkg = %+v, want flask@0.5 pypi", flask)
 	}
 	s := flask.Signals[0]
-	if s.Type != "known-vuln" || s.ID != "PYSEC-2019-179" || s.FixedVersion != "1.0" {
-		t.Errorf("signal = %+v, want known-vuln PYSEC-2019-179 fixed 1.0", s)
+	if s.Type != "vuln-db-known" || s.Advisory != "PYSEC-2019-179" || s.FixedVersion != "1.0" {
+		t.Errorf("signal = %+v, want vuln-db-known PYSEC-2019-179 fixed 1.0", s)
 	}
 	if len(s.Aliases) == 0 || s.Aliases[0] != "CVE-2019-1010083" {
 		t.Errorf("aliases = %v, want [CVE-2019-1010083]", s.Aliases)
@@ -185,11 +190,11 @@ func TestSecAuditDeps_JsHeuristic_ParsesNpmAudit(t *testing.T) {
 			t.Fatalf("expected 1 vulnerable package, got %d: %+v", len(res.Packages), res.Packages)
 		}
 		s := res.Packages[0].Signals[0]
-		if res.Packages[0].Name != "lodash" || s.Severity != "high" || s.HeuristicScore != 75 {
-			t.Errorf("pkg/signal = %+v / %+v, want lodash severity high score 75", res.Packages[0], s)
+		if res.Packages[0].Name != "lodash" || s.Severity != "high" || res.Packages[0].HeuristicScore != 25 {
+			t.Errorf("pkg/signal = %+v / %+v, want lodash severity high heuristic_score 25", res.Packages[0], s)
 		}
-		if s.ID != "npm-advisory-1065" || !strings.Contains(s.Description, "Prototype Pollution") {
-			t.Errorf("signal id/desc = %q / %q, want npm-advisory-1065 + title", s.ID, s.Description)
+		if s.Type != "vuln-db-known" || s.Advisory != "npm-advisory-1065" || !strings.Contains(s.Evidence, "Prototype Pollution") {
+			t.Errorf("signal = %+v, want vuln-db-known npm-advisory-1065 + title in evidence", s)
 		}
 	})
 
