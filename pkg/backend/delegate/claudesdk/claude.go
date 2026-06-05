@@ -167,6 +167,7 @@ func configToProcess(cfg *config) processConfig {
 		NoSessionPersistence:   cfg.noSessionPersistence,
 		OutputFormat:           cfg.outputFormat,
 		AddDirs:                cfg.addDirs,
+		SettingSources:         cfg.settingSources,
 	}
 
 	if len(cfg.agents) > 0 {

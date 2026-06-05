@@ -51,6 +51,82 @@ const ultracodeOrchestrationInstruction = "\n\n## Workflow Orchestration\n\n" +
 	"steps. This consent stands for the whole task; you need not ask before " +
 	"spawning a subagent."
 
+// agenticOperatingPosture is the iterion-authored base prompt prepended to
+// the recipe author's system prompt when SystemPromptMode is
+// SystemPromptAuthoredBase (the claw backend default). It is the parity
+// substrate that lets claw behave as adaptively as the claude_code backend:
+// the claude CLI ships these instincts inside its own native system prompt
+// (which iterion now appends to, see SystemPromptAppendToNative), whereas
+// claw-code-go is a bare API client with no system prompt of its own — so
+// whatever iterion supplies is the whole prompt. Without this base, claw
+// agents receive only the recipe's task text and none of the operating
+// posture (read-before-edit, plan-then-act, evidence-over-guess,
+// converge-and-stop) that makes an agent adaptive. Kept short and provider-
+// neutral (claw drives anthropic and openai models). The converge-and-stop
+// section reinforces, never undermines, the loop bots' asymptote machinery.
+const agenticOperatingPosture = "You are an autonomous software engineering agent. " +
+	"Work the way a careful senior engineer does: understand before you act, " +
+	"verify before you claim, and stop when the job is done.\n\n" +
+	"Tool use:\n" +
+	"- Gather context first. Read the relevant files and run read-only checks " +
+	"before proposing or making changes; never edit a file you have not just read.\n" +
+	"- Issue independent read-only tool calls together rather than one at a time; " +
+	"serialize only when a later call genuinely depends on an earlier result.\n" +
+	"- Prefer precise, surgical edits over broad rewrites. Cite concrete evidence " +
+	"as `path:line` so your reasoning can be checked.\n\n" +
+	"Plan then act:\n" +
+	"- For work spanning several steps or files, lay out a short plan, then carry " +
+	"it out in order, adjusting only when the evidence contradicts it. For a " +
+	"trivial single step, just do it — do not pad with ceremony.\n\n" +
+	"Evidence over guessing:\n" +
+	"- If you are unsure, find out: read the source or run a check. Do not invent " +
+	"file paths, symbols, APIs, or results. When you verify something, actually " +
+	"run the verification and report what happened — including failures, plainly.\n\n" +
+	"Converge and stop:\n" +
+	"- Drive the task to a stable, finished state, then stop. When you are given " +
+	"prior context — earlier outputs, a previous reviewer's verdict, points already " +
+	"pushed back — treat it as authoritative and do not re-litigate settled matters " +
+	"without new evidence. Repeating resolved points prevents convergence."
+
+// SystemPromptMode selects how BuildSystemPrompt composes the final system
+// prompt for a Task, so the same prompt-assembly code serves backends with
+// very different baselines.
+type SystemPromptMode int
+
+const (
+	// SystemPromptStandalone treats the recipe author's SystemPrompt as the
+	// entire prompt (plus the interaction/ultracode/calibration suffixes).
+	// This is the zero value and the legacy behaviour — used by codex and any
+	// caller that does not set the mode.
+	SystemPromptStandalone SystemPromptMode = iota
+
+	// SystemPromptAppendToNative emits only the author text + suffixes; the
+	// caller (the claude_code backend) routes the result to the CLI's
+	// --append-system-prompt so Claude Code's native agentic system prompt
+	// remains the base. The agentic posture is provided natively, not by us.
+	SystemPromptAppendToNative
+
+	// SystemPromptAuthoredBase prepends agenticOperatingPosture before the
+	// author text. Used by the claw backend, which has no native system
+	// prompt — iterion must supply the operating posture for parity.
+	SystemPromptAuthoredBase
+)
+
+// SystemPromptModeForBackend maps a backend name to its system-prompt
+// composition mode. Centralised here so the executor and any other Task
+// constructor stay consistent.
+func SystemPromptModeForBackend(backend string) SystemPromptMode {
+	switch backend {
+	case BackendClaudeCode:
+		return SystemPromptAppendToNative
+	case BackendClaw:
+		return SystemPromptAuthoredBase
+	default:
+		// codex and any future/legacy backend: author text is the whole prompt.
+		return SystemPromptStandalone
+	}
+}
+
 // Backend is the interface for delegation execution. Each backend wraps
 // a CLI agent (e.g. claude, codex) and handles prompt delivery, tool
 // forwarding, and output collection.
@@ -127,6 +203,13 @@ type Task struct {
 
 	// SystemPrompt is the fully resolved system prompt text.
 	SystemPrompt string
+
+	// SystemPromptMode selects how BuildSystemPrompt composes the final
+	// prompt from SystemPrompt (see SystemPromptMode constants). The zero
+	// value (SystemPromptStandalone) preserves legacy behaviour, so any
+	// Task that does not set it is unaffected. The executor sets it from
+	// the resolved backend via SystemPromptModeForBackend.
+	SystemPromptMode SystemPromptMode
 
 	// UserPrompt is the fully resolved user message text.
 	UserPrompt string
@@ -425,11 +508,20 @@ type TurnFinishedInfo struct {
 // stability).
 func (t Task) BuildSystemPrompt() string {
 	var b strings.Builder
+	// The base is the recipe author's prompt, optionally fronted by the
+	// iterion-authored agentic posture when the backend has no native one
+	// (claw). claude_code (SystemPromptAppendToNative) and codex/legacy
+	// (SystemPromptStandalone) both emit author-only here; claude_code then
+	// routes this to --append-system-prompt so the native prompt stays the base.
+	base := t.SystemPrompt
+	if t.SystemPromptMode == SystemPromptAuthoredBase {
+		base = agenticOperatingPosture + "\n\n" + t.SystemPrompt
+	}
 	// Pre-grow to dodge 2-3 reallocations in the common path: base
 	// prompt (~500B) + optional interaction instruction (~300B) +
 	// calibration section (~80B per fragment).
-	b.Grow(len(t.SystemPrompt) + 512)
-	b.WriteString(t.SystemPrompt)
+	b.Grow(len(base) + 512)
+	b.WriteString(base)
 	if t.InteractionEnabled {
 		b.WriteString(interactionSystemInstruction)
 	}

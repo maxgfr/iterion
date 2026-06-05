@@ -47,6 +47,12 @@ type processConfig struct {
 	OutputFormat map[string]any
 	AddDirs      []string
 
+	// SettingSources controls which settings the CLI loads (user / project /
+	// local). Empty means the flag is not emitted and the CLI uses its own
+	// default. iterion sets this so the operator's CLAUDE.md + settings.json
+	// are in effect — part of matching native Claude Code behaviour.
+	SettingSources []SettingSource
+
 	// MCPConfigJSON is the JSON-encoded MCP server config (written to a temp file).
 	MCPConfigJSON []byte
 
@@ -130,6 +136,14 @@ func buildArgs(cfg processConfig, streaming bool) []string {
 
 	for _, dir := range cfg.AddDirs {
 		args = append(args, "--add-dir", dir)
+	}
+
+	if len(cfg.SettingSources) > 0 {
+		srcs := make([]string, len(cfg.SettingSources))
+		for i, s := range cfg.SettingSources {
+			srcs[i] = string(s)
+		}
+		args = append(args, "--setting-sources", strings.Join(srcs, ","))
 	}
 
 	if len(cfg.AgentsJSON) > 0 {

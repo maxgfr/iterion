@@ -1,0 +1,64 @@
+package claudesdk
+
+import (
+	"strings"
+	"testing"
+)
+
+// flagValue returns the argument following the first occurrence of flag in
+// args, or "" if the flag is absent or has no value after it.
+func flagValue(args []string, flag string) string {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+func hasFlag(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBuildArgs_AppendSystemPromptNotReplace(t *testing.T) {
+	// The claude_code backend routes the assembled prompt to
+	// --append-system-prompt so Claude Code's native system prompt is kept.
+	args := buildArgs(processConfig{AppendSystemPrompt: "extra instructions"}, true)
+	if got := flagValue(args, "--append-system-prompt"); got != "extra instructions" {
+		t.Errorf("--append-system-prompt = %q, want %q", got, "extra instructions")
+	}
+	if hasFlag(args, "--system-prompt") {
+		t.Error("--system-prompt must not be emitted when only AppendSystemPrompt is set (would replace the native prompt)")
+	}
+}
+
+func TestBuildArgs_SettingSources(t *testing.T) {
+	args := buildArgs(processConfig{
+		SettingSources: []SettingSource{SettingSourceUser, SettingSourceProject},
+	}, true)
+	if got := flagValue(args, "--setting-sources"); got != "user,project" {
+		t.Errorf("--setting-sources = %q, want %q", got, "user,project")
+	}
+
+	// No sources → flag omitted (CLI falls back to its own default).
+	if hasFlag(buildArgs(processConfig{}, true), "--setting-sources") {
+		t.Error("--setting-sources must be omitted when no sources are configured")
+	}
+}
+
+func TestBuildArgs_SettingSourcesAllThree(t *testing.T) {
+	args := buildArgs(processConfig{
+		SettingSources: []SettingSource{SettingSourceUser, SettingSourceProject, SettingSourceLocal},
+	}, true)
+	got := flagValue(args, "--setting-sources")
+	for _, want := range []string{"user", "project", "local"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("--setting-sources %q missing %q", got, want)
+		}
+	}
+}

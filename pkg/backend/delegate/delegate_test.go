@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	codexsdk "github.com/ethpandaops/codex-agent-sdk-go"
@@ -304,4 +305,75 @@ type mockBackend struct {
 
 func (m *mockBackend) Execute(_ context.Context, _ Task) (Result, error) {
 	return m.response, m.err
+}
+
+func TestSystemPromptModeForBackend(t *testing.T) {
+	cases := map[string]SystemPromptMode{
+		BackendClaudeCode: SystemPromptAppendToNative,
+		BackendClaw:       SystemPromptAuthoredBase,
+		BackendCodex:      SystemPromptStandalone,
+		"unknown":         SystemPromptStandalone,
+	}
+	for backend, want := range cases {
+		if got := SystemPromptModeForBackend(backend); got != want {
+			t.Errorf("SystemPromptModeForBackend(%q) = %d, want %d", backend, got, want)
+		}
+	}
+	// The zero value must be Standalone so a Task that never sets the mode
+	// keeps legacy behaviour.
+	if SystemPromptStandalone != 0 {
+		t.Errorf("SystemPromptStandalone must be the zero value, got %d", SystemPromptStandalone)
+	}
+}
+
+func TestBuildSystemPrompt_Modes(t *testing.T) {
+	const author = "You are a code reviewer. Emit a JSON verdict."
+
+	// Standalone (codex/legacy) and AppendToNative (claude_code) both emit the
+	// author text verbatim — for claude_code the native prompt is the base and
+	// iterion routes this to --append-system-prompt, so it must NOT carry the
+	// iterion-authored agentic base.
+	for _, mode := range []SystemPromptMode{SystemPromptStandalone, SystemPromptAppendToNative} {
+		got := Task{SystemPrompt: author, SystemPromptMode: mode}.BuildSystemPrompt()
+		if got != author {
+			t.Errorf("mode %d: got %q, want author verbatim %q", mode, got, author)
+		}
+		if strings.Contains(got, agenticOperatingPosture) {
+			t.Errorf("mode %d: must NOT contain the iterion agentic base", mode)
+		}
+	}
+
+	// AuthoredBase (claw) prepends the agentic posture before the author text,
+	// because claw has no native system prompt of its own.
+	got := Task{SystemPrompt: author, SystemPromptMode: SystemPromptAuthoredBase}.BuildSystemPrompt()
+	if !strings.HasPrefix(got, agenticOperatingPosture) {
+		t.Errorf("AuthoredBase: must start with the agentic base, got %q", got[:min(80, len(got))])
+	}
+	if !strings.Contains(got, author) {
+		t.Error("AuthoredBase: must still contain the author text")
+	}
+	if strings.Index(got, agenticOperatingPosture) >= strings.Index(got, author) {
+		t.Error("AuthoredBase: agentic base must come before the author text")
+	}
+
+	// Suffixes (interaction, ultracode, calibration) are appended after the
+	// base in every mode — verify on AuthoredBase that they trail the author.
+	full := Task{
+		SystemPrompt:       author,
+		SystemPromptMode:   SystemPromptAuthoredBase,
+		InteractionEnabled: true,
+		Ultracode:          true,
+		CursorFragments:    []string{"rigor: be exacting"},
+	}.BuildSystemPrompt()
+	authorAt := strings.Index(full, author)
+	for _, suffix := range []string{interactionSystemInstruction, ultracodeOrchestrationInstruction, "## Calibration", "rigor: be exacting"} {
+		at := strings.Index(full, suffix)
+		if at < 0 {
+			t.Errorf("AuthoredBase+suffixes: missing %q", suffix)
+			continue
+		}
+		if at < authorAt {
+			t.Errorf("AuthoredBase+suffixes: %q must come after the author text", suffix)
+		}
+	}
 }

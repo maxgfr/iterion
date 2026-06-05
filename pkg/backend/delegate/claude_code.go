@@ -99,6 +99,38 @@ func resolveMaxConsecutiveToolErrors() int {
 	return defaultMaxConsecutiveToolErrors
 }
 
+// settingSourcesFromEnv returns the CLI --setting-sources for claude_code
+// nodes. Default "user,project": load the operator's user-level CLAUDE.md /
+// settings.json and the target repo's project CLAUDE.md / .claude/settings.json
+// so the agent honours the same conventions native Claude Code would — a core
+// part of closing the adaptivity gap. Override via
+// ITERION_CLAUDE_CODE_SETTING_SOURCES (comma-separated user/project/local);
+// "" or "none" disables it, restoring the CLI's headless no-settings default.
+// "local" is omitted from the default: .claude/settings.local.json is
+// machine-specific and may carry absolute paths that don't resolve in a sandbox.
+func settingSourcesFromEnv() []claudesdk.SettingSource {
+	raw, ok := os.LookupEnv("ITERION_CLAUDE_CODE_SETTING_SOURCES")
+	if !ok {
+		raw = "user,project"
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.EqualFold(raw, "none") {
+		return nil
+	}
+	var out []claudesdk.SettingSource
+	for _, part := range strings.Split(raw, ",") {
+		switch strings.ToLower(strings.TrimSpace(part)) {
+		case "user":
+			out = append(out, claudesdk.SettingSourceUser)
+		case "project":
+			out = append(out, claudesdk.SettingSourceProject)
+		case "local":
+			out = append(out, claudesdk.SettingSourceLocal)
+		}
+	}
+	return out
+}
+
 // defaultClaudeCodeEffort is the reasoning effort iterion forces on the
 // claude_code backend when the workflow doesn't specify one. The bare API
 // default on Opus 4.8 is "high", but the claude_code backend runs
@@ -156,9 +188,28 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 
 	var opts []claudesdk.Option
 
+	// APPEND, do not REPLACE. --system-prompt would discard Claude Code's
+	// native agentic system prompt (tool-use discipline, plan-before-act,
+	// read-before-edit, parallel-tool reflex, file:line conventions, refusal
+	// posture) and leave the model with only the recipe's task text — the root
+	// cause of iterion-via-Claude-Code being less adaptive than native Claude
+	// Code. --append-system-prompt keeps the native prompt as the base and adds
+	// the workflow's instructions on top. Task.SystemPromptMode is
+	// SystemPromptAppendToNative for this backend, so BuildSystemPrompt emits
+	// author + suffixes only (no iterion-authored base — the native prompt is it).
 	systemPrompt := task.BuildSystemPrompt()
 	if systemPrompt != "" {
-		opts = append(opts, claudesdk.WithSystemPrompt(systemPrompt))
+		opts = append(opts, claudesdk.WithAppendSystemPrompt(systemPrompt))
+	}
+	// Load the operator's settings sources so the agent behaves like native
+	// Claude Code in the target repo: user-level (~/.claude/CLAUDE.md +
+	// settings.json) and project-level (the repo's CLAUDE.md + .claude/
+	// settings.json). --append-system-prompt alone does not re-enable settings
+	// discovery in --print mode; --setting-sources does. Honours the same paths
+	// in a sandbox (the workspace and ~/.claude are bind-mounted at their host
+	// absolute paths). Tunable/disable-able via ITERION_CLAUDE_CODE_SETTING_SOURCES.
+	if srcs := settingSourcesFromEnv(); len(srcs) > 0 {
+		opts = append(opts, claudesdk.WithSettingSources(srcs...))
 	}
 	// Cwd handling differs by sandbox state. On the host (no sandbox)
 	// we pass the workdir straight through to claudesdk → cmd.Dir.

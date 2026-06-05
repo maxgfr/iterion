@@ -1034,6 +1034,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		NodeID:                f.id,
 		Iteration:             LoopIterationFromContext(ctx),
 		SystemPrompt:          systemText,
+		SystemPromptMode:      delegate.SystemPromptModeForBackend(backendName),
 		UserPrompt:            userText,
 		UserContent:           userContent,
 		AllowedTools:          f.tools,
@@ -1696,13 +1697,14 @@ func (e *ClawExecutor) executeLLMRouterUnified(ctx context.Context, node *ir.Rou
 	}
 
 	task := delegate.Task{
-		NodeID:       node.ID,
-		Iteration:    LoopIterationFromContext(ctx),
-		SystemPrompt: systemText,
-		UserPrompt:   userText,
-		OutputSchema: jsonSchema,
-		Model:        expanded,
-		WorkDir:      e.workDir,
+		NodeID:           node.ID,
+		Iteration:        LoopIterationFromContext(ctx),
+		SystemPrompt:     systemText,
+		SystemPromptMode: delegate.SystemPromptModeForBackend(backendName),
+		UserPrompt:       userText,
+		OutputSchema:     jsonSchema,
+		Model:            expanded,
+		WorkDir:          e.workDir,
 		// wireEffort collapses the "ultracode" mode to xhigh so the raw token
 		// never reaches the provider; identity for every other level. Routers
 		// don't get the orchestration prerogative (they route, not orchestrate).
