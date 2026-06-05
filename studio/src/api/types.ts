@@ -352,6 +352,9 @@ export interface ToolNodeDecl {
   // data rendered into the command via `{{input.field}}` templates.
   input?: string;
   output: string;
+  // Optional. Publishes the node's output as a persistent artifact,
+  // referenceable downstream via `{{artifacts.name}}`.
+  publish?: string;
   await?: AwaitMode;
 }
 
@@ -365,6 +368,9 @@ export interface ComputeDecl {
   input?: string;
   output: string;
   expr: ComputeExpr[];
+  // Optional. Publishes the node's output as a persistent artifact,
+  // referenceable downstream via `{{artifacts.name}}`.
+  publish?: string;
   await?: AwaitMode;
 }
 

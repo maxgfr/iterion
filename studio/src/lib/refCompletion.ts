@@ -188,6 +188,8 @@ export function computeRefs(
   for (const a of doc.agents) pushArtifact(a.publish);
   for (const j of doc.judges) pushArtifact(j.publish);
   for (const h of doc.humans) pushArtifact(h.publish);
+  for (const t of doc.tools) pushArtifact(t.publish);
+  for (const c of doc.computes ?? []) pushArtifact(c.publish);
 
   return refs;
 }

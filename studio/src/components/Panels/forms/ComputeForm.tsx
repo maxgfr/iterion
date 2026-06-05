@@ -92,6 +92,13 @@ export default function ComputeForm({ decl }: Props) {
         onCreate={createSchema}
         help="Defines the keys produced by the expressions below."
       />
+      <TextField
+        label="Publish"
+        value={decl.publish ?? ""}
+        onChange={(v) => updateCompute(decl.name, { publish: v || undefined })}
+        placeholder="Artifact name"
+        help="Optional. Publish this node's output as a persistent artifact, accessible downstream via {{artifacts.name}}."
+      />
       <SelectField
         label="Await"
         value={decl.await ?? "none"}
