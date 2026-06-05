@@ -235,6 +235,19 @@ prompt review_system:
   <one paragraph — pin a safe version, downgrade, audit fork, …>
   ```
 
+  Coverage banner (anti-façade — check BEFORE writing the report):
+  - Inspect `heuristics`. If every ecosystem entry has an empty
+    `packages[]` AND its `errors[]` mention "stub" / "implementation
+    pending", the deterministic heuristic layer (typosquat / entropy /
+    install-hook / known-CVE parsing) has NOT run — this pass is
+    enumerate + LLM-review only, NOT a complete supply-chain scan. You
+    MUST headline both the `summary` field and the TOP of the markdown
+    report with: "⚠ Coverage: heuristic scanner layer pending — this is
+    an LLM-review-only pass, NOT a complete dependency/supply-chain
+    audit. See the sec-audit-deps implementation ticket." Never present
+    such a run as a clean or complete audit. When the heuristics carry
+    real signals, no banner is needed.
+
   Markdown report:
   - After all board calls, write
     {{input.workspace_dir}}/.iterion/security/deps-findings.md

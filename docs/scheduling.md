@@ -116,6 +116,12 @@ pin the `iterion-sandbox-sec` image via `sandbox.image`, so the host
 needs that image present (CI publishes it; for a local loop, `docker
 tag` your build to `ghcr.io/socialgouv/iterion-sandbox-sec:edge`).
 
+> Note: `sec-audit-source` (SAST) is production-ready. `sec-audit-deps`
+> (SCA) is currently an enumerate + LLM-review pass — its heuristic
+> scanner layer is still a scaffold and a run self-labels with a
+> "⚠ Coverage" banner. Schedule it for the LLM-review pass, but treat it
+> as incomplete until the implementation ticket lands.
+
 ## Notes & limits
 
 - **Cron expressions are passed through verbatim.** `iterion` only

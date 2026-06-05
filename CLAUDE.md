@@ -575,6 +575,14 @@ iterion schedule add sec-audit-deps-weekly \
 iterion schedule install            # splices a managed block into `crontab`, CRON_TZ=UTC
 ```
 
+Note: `sec-audit-source` (SAST) is production-ready (cap_findings +
+scan_health hardened). `sec-audit-deps` (SCA) is currently
+**enumerate + LLM-review only** — its heuristic scanner layer is still a
+scaffold that runs the real CVE scanners but discards their output
+(tracked: native:3a81df64); a run self-labels with a "⚠ Coverage"
+banner. Schedule it if you want the LLM-review pass, but don't read it as
+a complete dependency audit until that ticket lands.
+
 Each cron line routes through `iterion schedule run <name>`, which
 re-reads `~/.iterion/schedules.yaml` so the manifest stays authoritative;
 logs land in `~/.iterion/logs/schedule-<name>.log`. Of the three original
