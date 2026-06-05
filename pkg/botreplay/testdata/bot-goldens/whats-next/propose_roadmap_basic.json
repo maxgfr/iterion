@@ -1,5 +1,5 @@
 {
-  "_note": "Hand-authored seed fixture (no live LLM was available at creation). Regenerate with `task test:goldens:record`. Shape derived from examples/whats-next/main.bot schemas roadmap + roadmap_item. Assignees must resolve to a real catalog bot or be empty.",
+  "_note": "Hand-authored seed fixture (no live LLM was available at creation). Regenerate with `task test:goldens:record`. Shape derived from bots/whats-next/main.bot schemas roadmap + roadmap_item. Assignees must resolve to a real catalog bot or be empty.",
   "bot": "whats-next",
   "scenario": "propose_roadmap_basic",
   "node": "propose_roadmap",

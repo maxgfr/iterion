@@ -5,7 +5,6 @@ import type {
   QuickActionKind,
 } from "@/lib/whats-next/messages";
 import type { FormAnswer, FormSpec } from "@/lib/whats-next/questionForm";
-import { BOT_PERSONAS } from "@/lib/personas";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
 import { WizardForm } from "@/components/ui/WizardForm";
@@ -318,7 +317,9 @@ function AssistantBubble({ text }: { text: string }) {
         className="mt-1 px-2 py-0.5 rounded-full bg-accent-soft text-accent-fg text-[10px] font-bold flex items-center justify-center shrink-0"
         aria-hidden="true"
       >
-        {BOT_PERSONAS["whats-next"]}
+        {/* whats-next's persona (manifest display_name); this bubble is
+            whats-next-specific so the name is fixed here. */}
+        Nexie
       </span>
       <div className="flex-1 rounded-lg bg-surface-2 border border-border-subtle px-3 py-2 text-[13px] text-fg-default">
         {text}

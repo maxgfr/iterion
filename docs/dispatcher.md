@@ -33,17 +33,18 @@ as assignees. Out of the box you can:
 
 Built-in assignees ([source bots](../examples/)):
 
-| Assignee | Backing bot | What it does |
-|---|---|---|
-| `feature-dev` | `examples/feature_dev/` | Autonomous feature dev: plan → act → simplify → alternating Claude/GPT review loop |
-| `whole-improve-loop` | `examples/whole_improve_loop/` | Whole-codebase improvement loop with alternating cross-family verdicts |
-| `branch-improve-loop` | `examples/branch_improve_loop/` | Branch-scoped improvement + auto-commit on convergence |
-| `whats-next` | `examples/whats-next/` | Repo survey → roadmap synthesis → kanban materialisation |
-| `doc-align` | `examples/doc-align/` | Detect & fix doc/code mismatches |
-| `sec-audit-source` | `examples/sec-audit-source/` | Source-code security audit (gitleaks/trivy/semgrep/gosec) |
-| `sec-audit-deps` | `examples/sec-audit-deps/` | Supply-chain dep audit + LLM review |
-| `secured-renovacy` | `examples/secured-renovacy/` | Security-aware dependency upgrades with cumulative review |
-| _(unassigned)_ | `default/` (embedded) | Generic triage agent: classifies the issue and recommends a next step |
+| Persona | Assignee | Backing bot | What it does |
+|---|---|---|---|
+| 🛠️ Featurly | `feature-dev` | `bots/feature_dev/` | Autonomous feature dev: plan → act → simplify → alternating Claude/GPT review loop |
+| 🌍 Willy | `whole-improve-loop` | `bots/whole_improve_loop/` | Whole-codebase improvement loop with alternating cross-family verdicts |
+| 🌿 Billy | `branch-improve-loop` | `bots/branch_improve_loop/` | Branch-scoped improvement + auto-commit on convergence |
+| 🧭 Nexie | `whats-next` | `bots/whats-next/` | Repo survey → roadmap synthesis → kanban materialisation |
+| 📚 Doki | `doc-align` | `bots/doc-align/` | Detect & fix doc/code mismatches |
+| 🔎 Revi | `code-review` | `bots/code_review/` | Read-only cross-family code review; publishes findings to the board |
+| 🛡️ Seki | `sec-audit-source` | `bots/sec-audit-source/` | Source-code security audit (gitleaks/trivy/semgrep/gosec) |
+| 📦 Depsy | `sec-audit-deps` | `bots/sec-audit-deps/` | Supply-chain dep audit + LLM review |
+| ⬆️ Renovacy | `secured-renovacy` | `bots/secured-renovacy/` | Security-aware dependency upgrades with cumulative review |
+| — | _(unassigned)_ | `default/` (embedded) | Generic triage agent: classifies the issue and recommends a next step |
 
 Each assignee's input contract (`{{issue.title}} + {{issue.body}}` →
 the bot's main prompt var) is wired in
@@ -324,9 +325,9 @@ tracker:
 workflow: workflows/triage.bot                  # default fallback
 
 assignee_workflows:
-  feature_dev:        examples/feature_dev/main.bot
-  whole_improve_loop: examples/whole_improve_loop/main.bot
-  secured-renovacy:   examples/secured-renovacy/main.bot
+  feature_dev:        bots/feature_dev/main.bot
+  whole_improve_loop: bots/whole_improve_loop/main.bot
+  secured-renovacy:   bots/secured-renovacy/main.bot
 ```
 
 Resolution rules at dispatch time:
@@ -410,9 +411,9 @@ wholesale for that dispatch:
 ```yaml
 workflow: workflows/triage.bot
 assignee_workflows:
-  feature-dev:        examples/feature_dev/main.bot
-  whole-improve-loop: examples/whole_improve_loop/main.bot
-  secured-renovacy:   examples/secured-renovacy/main.bot
+  feature-dev:        bots/feature_dev/main.bot
+  whole-improve-loop: bots/whole_improve_loop/main.bot
+  secured-renovacy:   bots/secured-renovacy/main.bot
 
 assignee_dispatch:
   feature-dev:

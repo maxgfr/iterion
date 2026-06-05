@@ -8,8 +8,8 @@ discipline, but address different layers of the application.
 
 | Bundle | Layer audited | Inspired by |
 |---|---|---|
-| [`sec-audit-source`](../examples/sec-audit-source/) | Source code in the repo | [vercel-labs/deepsec](https://github.com/vercel-labs/deepsec) |
-| [`sec-audit-deps`](../examples/sec-audit-deps/) | Installed third-party dependencies | [SocialGouv/no-package-malware](https://github.com/SocialGouv/no-package-malware) |
+| [`sec-audit-source`](../bots/sec-audit-source/) | Source code in the repo | [vercel-labs/deepsec](https://github.com/vercel-labs/deepsec) |
+| [`sec-audit-deps`](../bots/sec-audit-deps/) | Installed third-party dependencies | [SocialGouv/no-package-malware](https://github.com/SocialGouv/no-package-malware) |
 
 ## When to run which
 
@@ -167,8 +167,8 @@ ever landing on disk; the audit-bundle catches what slipped through
 
 ## See also
 
-- [`examples/sec-audit-source/README.md`](../examples/sec-audit-source/README.md)
-- [`examples/sec-audit-deps/README.md`](../examples/sec-audit-deps/README.md)
+- [`bots/sec-audit-source/README.md`](../bots/sec-audit-source/README.md)
+- [`bots/sec-audit-deps/README.md`](../bots/sec-audit-deps/README.md)
 - [`docs/bundles.md`](bundles.md) — bundle layout + runtime resolution
 - [`docs/native-tracker.md`](native-tracker.md) — the kanban board
   where findings land

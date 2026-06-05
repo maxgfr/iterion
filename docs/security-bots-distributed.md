@@ -243,7 +243,7 @@ Total estimate: 3-5 days for steps 2-5 (step 6 deferred).
 ## Status & shipped pieces (as of V1.1)
 
 ✅ Step 1 — Cap. 1 FileRecords (V1.1, see this bundle's
-[skills/file-records.md](../examples/sec-audit-source/skills/file-records.md)).
+[skills/file-records.md](../bots/sec-audit-source/skills/file-records.md)).
 
 ✅ Step 2 — Runtime field additions:
 - `pkg/queue/types.go` — `RunMessage.ParentRunID`, `ShardIndex`,
@@ -261,7 +261,7 @@ aggregated JSON envelope on stdout. Unit tests
 disjoint-parent isolation, remainder shard, id format, empty
 input.
 
-✅ Step 4 — Bundle integration: `examples/sec-audit-source/main.bot`
+✅ Step 4 — Bundle integration: `bots/sec-audit-source/main.bot`
 now has `--var shard_size` (default 0 = no fan-out), `--var
 shard_concurrency` (default 4), `--var file_filter` (CSV of
 paths). Two new tool nodes:
@@ -302,7 +302,7 @@ find . -type f -name '*.go' | jq -R . | jq -s . > /tmp/files.json
 # Fan out across 4 child runs, 50 files per shard:
 iterion __scan-shards \
   --parent-run-id="$(uuidgen)" \
-  --workflow=examples/sec-audit-source/main.bot \
+  --workflow=bots/sec-audit-source/main.bot \
   --files-json=/tmp/files.json \
   --shard-size=50 \
   --max-concurrency=4 \

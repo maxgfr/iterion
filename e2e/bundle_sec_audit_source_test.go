@@ -10,7 +10,7 @@ import (
 
 // expectedSecAuditSourceNodes lists the node IDs the sec-audit-source
 // bundle must expose. Drift on a node *name* surfaces here. See
-// examples/sec-audit-source/main.bot and its README for the pipeline:
+// bots/sec-audit-source/main.bot and its README for the pipeline:
 //
 //	detect_tech → scan_fanout → run_*_scanners → scan_join → triage
 //	  → revalidate → report_card → done
@@ -41,7 +41,7 @@ var expectedSecAuditSourceNodes = []string{
 // TestBundle_SecAuditSource_PackOpenCompile exercises the full bundle
 // pipeline: PackDir → Detect → Open → CompileBundleWorkflow.
 func TestBundle_SecAuditSource_PackOpenCompile(t *testing.T) {
-	srcDir, err := filepath.Abs("../examples/sec-audit-source")
+	srcDir, err := filepath.Abs("../bots/sec-audit-source")
 	if err != nil {
 		t.Fatalf("resolve src: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestBundle_SecAuditSource_PackOpenCompile(t *testing.T) {
 // (OpenDir on the source directory) yields a structurally identical
 // workflow to the packed archive.
 func TestBundle_SecAuditSource_OpenDirMatchesPack(t *testing.T) {
-	srcDir, err := filepath.Abs("../examples/sec-audit-source")
+	srcDir, err := filepath.Abs("../bots/sec-audit-source")
 	if err != nil {
 		t.Fatalf("resolve src: %v", err)
 	}

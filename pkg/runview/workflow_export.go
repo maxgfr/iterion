@@ -145,7 +145,7 @@ func BuildWireWorkflowFromStore(ctx context.Context, s store.RunStore, runID str
 //   - r.FilePath set: a launched-from-`.iter` run. CompileWorkflowWithHash
 //     reads the file directly.
 //   - r.BundlePath set (FilePath empty): a launched-from-`.botz` run
-//     (e.g. `iterion run examples/secured-renovacy/` or any live test
+//     (e.g. `iterion run bots/secured-renovacy/` or any live test
 //     using bundle.OpenDir + runview.CompileBundleWorkflow). Open the
 //     bundle directory, compile via CompileBundleWorkflow so node-level
 //     prompt references resolve against the bundle's prompts/ resources.

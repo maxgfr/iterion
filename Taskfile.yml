@@ -39,31 +39,33 @@ tasks:
       - "{{.BINARY}}"
 
   templates:dispatch-bots:
-    desc: "Sync the embedded dispatcher bot catalogue (pkg/cli/templates/dispatch_bots/) from examples/ + the default fallback template. The output is gitignored: re-run after editing any bot in examples/ or pkg/cli/templates/dispatch_bots_default.bot. Required before `task build` / `task test` (declared as a dep)."
+    desc: "Sync the embedded dispatcher bot catalogue (pkg/cli/templates/dispatch_bots/) from bots/ + the default fallback template. The output is gitignored: re-run after editing any bot in bots/ or pkg/cli/templates/dispatch_bots_default.bot. Required before `task build` / `task test` (declared as a dep)."
     cmds:
       # Wipe-and-resync — but preserve .gitkeep so the directory keeps
       # tracking even when no bot has been copied yet.
       - find pkg/cli/templates/dispatch_bots -mindepth 1 ! -name .gitkeep -exec rm -rf {} +
       - mkdir -p pkg/cli/templates/dispatch_bots/default
       - cp pkg/cli/templates/dispatch_bots_default.bot pkg/cli/templates/dispatch_bots/default/main.bot
-      - cp -R examples/feature_dev pkg/cli/templates/dispatch_bots/feature-dev
-      - cp -R examples/whole_improve_loop pkg/cli/templates/dispatch_bots/whole-improve-loop
-      - cp -R examples/branch_improve_loop pkg/cli/templates/dispatch_bots/branch-improve-loop
-      - cp -R examples/whats-next pkg/cli/templates/dispatch_bots/whats-next
-      - cp -R examples/doc-align pkg/cli/templates/dispatch_bots/doc-align
-      - cp -R examples/sec-audit-source pkg/cli/templates/dispatch_bots/sec-audit-source
-      - cp -R examples/sec-audit-deps pkg/cli/templates/dispatch_bots/sec-audit-deps
-      - cp -R examples/secured-renovacy pkg/cli/templates/dispatch_bots/secured-renovacy
+      - cp -R bots/feature_dev pkg/cli/templates/dispatch_bots/feature-dev
+      - cp -R bots/whole_improve_loop pkg/cli/templates/dispatch_bots/whole-improve-loop
+      - cp -R bots/branch_improve_loop pkg/cli/templates/dispatch_bots/branch-improve-loop
+      - cp -R bots/whats-next pkg/cli/templates/dispatch_bots/whats-next
+      - cp -R bots/doc-align pkg/cli/templates/dispatch_bots/doc-align
+      - cp -R bots/sec-audit-source pkg/cli/templates/dispatch_bots/sec-audit-source
+      - cp -R bots/sec-audit-deps pkg/cli/templates/dispatch_bots/sec-audit-deps
+      - cp -R bots/secured-renovacy pkg/cli/templates/dispatch_bots/secured-renovacy
+      - cp -R bots/code_review pkg/cli/templates/dispatch_bots/code-review
     sources:
       - pkg/cli/templates/dispatch_bots_default.bot
-      - examples/feature_dev/**
-      - examples/whole_improve_loop/**
-      - examples/branch_improve_loop/**
-      - examples/whats-next/**
-      - examples/doc-align/**
-      - examples/sec-audit-source/**
-      - examples/sec-audit-deps/**
-      - examples/secured-renovacy/**
+      - bots/feature_dev/**
+      - bots/whole_improve_loop/**
+      - bots/branch_improve_loop/**
+      - bots/whats-next/**
+      - bots/doc-align/**
+      - bots/sec-audit-source/**
+      - bots/sec-audit-deps/**
+      - bots/secured-renovacy/**
+      - bots/code_review/**
     generates:
       - pkg/cli/templates/dispatch_bots/**
 
@@ -221,7 +223,7 @@ tasks:
       - go test -v -count=1 -run TestBundle_ -timeout 60s ./e2e/...
 
   test:repack-examples:
-    desc: Verify examples/*.botz match their source dirs (drift detector)
+    desc: Verify shipped .botz bundles match their source dirs (drift detector)
     cmds:
       - go test -v -count=1 -run TestBundle_SecuredRenovacy_RepackMatchesShippedBotz -timeout 30s ./e2e/...
 

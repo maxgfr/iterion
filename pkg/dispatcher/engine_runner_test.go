@@ -13,7 +13,7 @@ import (
 // directory (manifest.yaml + main.bot alongside) is a valid workflow
 // source — the dispatcher can run it just like a plain `.iter`.
 func TestEngineRunnerAcceptsBundleDir(t *testing.T) {
-	// examples/secured-renovacy/ has the canonical bundle shape:
+	// bots/secured-renovacy/ has the canonical bundle shape:
 	// manifest.yaml + main.bot + prompts/. Walk up from the test
 	// binary's working dir (pkg/dispatcher) to the repo root.
 	repoRoot, err := filepath.Abs("../..")

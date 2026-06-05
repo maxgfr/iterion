@@ -14,6 +14,10 @@ const BASE = "/api/v1/bots";
  *  endpoint and embedded inside BotEntryWithSchema. */
 export interface BotEntry {
   name: string;
+  /** Bundle persona from manifest.yaml `display_name` (e.g. "Nexie",
+   *  "Revi"). Empty for loose .bot files / un-personified bundles. The
+   *  studio shows it as the lead label with `name` as a muted aside. */
+  display_name?: string;
   description?: string;
   path: string;
   triggers?: string[];

@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/SocialGouv/iterion/examples"
+	"github.com/SocialGouv/iterion/bots"
 )
 
 // ResolveRecipePath returns a real on-disk path for `path`, transparently
@@ -38,7 +38,7 @@ func ResolveRecipePath(path string) string {
 	if _, err := os.Stat(path); err == nil {
 		return path
 	}
-	data, ok := examples.Get(path)
+	data, ok := bots.Get(path)
 	if !ok {
 		return path
 	}

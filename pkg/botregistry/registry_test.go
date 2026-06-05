@@ -57,6 +57,28 @@ func TestList_MissingPathIsSkipped(t *testing.T) {
 	}
 }
 
+func TestList_BundleCarriesDisplayName(t *testing.T) {
+	dir := t.TempDir()
+	bundleDir := filepath.Join(dir, "whats-next")
+	writeFile(t, filepath.Join(bundleDir, "manifest.yaml"), `name: whats-next
+display_name: Nexie
+description: Orchestrator bot.
+`)
+	writeFile(t, filepath.Join(bundleDir, "main.bot"), `agent x:
+  model: "test"
+`)
+	entries, err := List(ListOptions{Paths: []string{dir}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries", len(entries))
+	}
+	if entries[0].DisplayName != "Nexie" {
+		t.Errorf("DisplayName = %q, want Nexie (manifest display_name must survive discovery)", entries[0].DisplayName)
+	}
+}
+
 func TestResolveBotPath_LooseFile(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "feature_dev.bot")

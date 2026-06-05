@@ -90,6 +90,7 @@ func TestBotsList_Bundle(t *testing.T) {
 	dir := t.TempDir()
 	bundle := filepath.Join(dir, "my-bundle")
 	writeFile(t, filepath.Join(bundle, "manifest.yaml"), `name: my-bundle
+display_name: Bundly
 description: |
   A great bot bundle.
 triggers: [pipe]
@@ -108,6 +109,9 @@ triggers: [pipe]
 	}
 	if entries[0].Name != "my-bundle" {
 		t.Fatalf("Name = %q", entries[0].Name)
+	}
+	if entries[0].DisplayName != "Bundly" {
+		t.Fatalf("DisplayName = %q (manifest display_name dropped before reaching Entry)", entries[0].DisplayName)
 	}
 	if !strings.Contains(entries[0].Description, "A great bot bundle") {
 		t.Fatalf("Description = %q", entries[0].Description)
@@ -147,7 +151,8 @@ func TestBotsList_FormatSkill(t *testing.T) {
 	}
 	for _, want := range []string{
 		"name: iterion-bot-catalog",
-		"| `x` | X | foo |",
+		"| Persona | Bot | Description | Triggers | Capabilities |",
+		"| — | `x` | X | foo |",
 		"Assignment heuristics",
 	} {
 		if !strings.Contains(buf.String(), want) {

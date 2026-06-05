@@ -1,0 +1,13 @@
+name: secured-renovacy
+display_name: Renovacy
+version: 0.1.0
+description: |
+  Multi-stack agentic dependency upgrade pipeline. Updates every kind of
+  dependency (libs, languages, frameworks, devops, ci_cd) across every
+  recognised package ecosystem, aligns consuming code on breaking
+  changes, cross-references CVE feeds, and runs heuristic malware
+  detection on the new versions + transitively-introduced libs. Phase 2
+  closes with an alternating Claude/GPT review/fix loop until cross-
+  family approval.
+author: SocialGouv (devthejo) — secured-renovacy/main.bot
+schema_version: 1

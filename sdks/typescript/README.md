@@ -26,7 +26,7 @@ import { IterionClient, IterionRuntimeError } from "@iterion/sdk";
 const iterion = new IterionClient({ storeDir: ".iterion" });
 
 try {
-  const result = await iterion.run("examples/whats-next/main.bot", {
+  const result = await iterion.run("bots/whats-next/main.bot", {
     vars: { repo: "my-repo" },
     logLevel: "info",
   });
@@ -71,7 +71,7 @@ for await (const evt of iterion.events(result.run_id, { follow: true, signal: ac
 ```ts
 const resumed = await iterion.resume({
   runId: result.run_id,
-  file: "examples/whats-next/main.bot",
+  file: "bots/whats-next/main.bot",
   answers: { approve: true, notes: "looks good" },
 });
 ```

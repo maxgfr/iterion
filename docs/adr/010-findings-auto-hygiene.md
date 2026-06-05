@@ -3,9 +3,9 @@
 - **Status**: Accepted
 - **Date**: 2026-05-31
 - **Authors**: devthejo
-- **Code context**: [`examples/whats-next/main.bot`](../../examples/whats-next/main.bot)
+- **Code context**: [`bots/whats-next/main.bot`](../../bots/whats-next/main.bot)
   (`emit_action` node, `emit_action_system` steps 10–13, `emit_output`
-  schema), [`examples/whats-next/skills/session-continuity.md`](../../examples/whats-next/skills/session-continuity.md)
+  schema), [`bots/whats-next/skills/session-continuity.md`](../../bots/whats-next/skills/session-continuity.md)
   (findings/ scope lifecycle), [`pkg/store/storedir.go`](../../pkg/store/storedir.go)
   (`EncodeWorkDirKey`, replicated in bash), [`pkg/memory/memory.go`](../../pkg/memory/memory.go)
   (the `findings` scope path), [`pkg/botreplay/testdata/bot-goldens/whats-next/emit_action_basic.json`](../../pkg/botreplay/testdata/bot-goldens/whats-next/emit_action_basic.json)

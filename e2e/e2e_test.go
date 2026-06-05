@@ -30,8 +30,8 @@ import (
 // ---------------------------------------------------------------------------
 
 // compileFixture parses and compiles a workflow file (.iter / .bot)
-// from either examples/ (active) or .archive/examples/ (historical
-// fixtures used only by the test suite).
+// from bots/ (the productised team), examples/ (demos), or
+// .archive/examples/ (historical fixtures used only by the test suite).
 func compileFixture(t *testing.T, name string) *ir.Workflow {
 	t.Helper()
 	path := resolveFixturePath(t, name)
@@ -61,18 +61,19 @@ func compileFixture(t *testing.T, name string) *ir.Workflow {
 	return cr.Workflow
 }
 
-// resolveFixturePath looks up a fixture in examples/ first, then falls
-// back to .archive/examples/ (where historical fixtures used only by
-// the test suite live).
+// resolveFixturePath looks up a fixture under the productised team root
+// bots/ first, then examples/ (demos), then falls back to
+// .archive/examples/ (where historical fixtures used only by the test
+// suite live).
 func resolveFixturePath(t *testing.T, name string) string {
 	t.Helper()
-	for _, base := range []string{"../examples", "../.archive/examples"} {
+	for _, base := range []string{"../bots", "../examples", "../.archive/examples"} {
 		path := filepath.Join(base, name)
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
 	}
-	t.Fatalf("fixture not found in examples/ or .archive/examples/: %s", name)
+	t.Fatalf("fixture not found in bots/, examples/ or .archive/examples/: %s", name)
 	return ""
 }
 

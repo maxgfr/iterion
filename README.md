@@ -22,6 +22,7 @@ Stop coding like a mortal. Define your bots as readable `.bot` files — chain a
 - [Why Iterion?](docs/why-iterion.md) — origin + recipe + asymptote + lab
 - [What is Iterion?](#what-is-iterion)
 - [Features](#features)
+- [Meet the legion](#meet-the-legion)
 - [Quick Start](#quick-start)
 - [`.iter` vs `.bot`](#iter-vs-bot)
 - [A Taste of the DSL](#a-taste-of-the-dsl)
@@ -92,6 +93,26 @@ Think of it as a DAG runner purpose-built for LLM workflows — with first-class
 - ☁️ **Cloud mode** — Multi-tenant Helm deployment with MongoDB + S3-compatible blob store + NATS JetStream queue; KEDA-scaled runner pool; per-run Kubernetes sandbox pods
 - 🧰 **TypeScript SDK** — [`@iterion/sdk`](sdks/typescript/) wraps the CLI with typed `run` / `resume` / `events` streaming for Node, Deno, and Bun apps
 - 🧠 **AI agent skill** — Install as a skill in Claude Code, Codex, Cursor, Windsurf, GitHub Copilot, Cline, Aider, and other AI coding agents
+
+---
+
+## ⚔️ Meet the legion
+
+Iterion ships a team of named, first-class bots — your legion. Each is a general-purpose `.bot` you point at *any* repo: run it directly (`iterion run bots/<name>/main.bot`), dispatch it per issue, or schedule it.
+
+| Bot | Role | Bundle |
+|---|---|---|
+| 🧭 **Nexie** | Co-CTO orchestrator — surveys the repo, elicits priorities, proposes a roadmap, and emits kanban issues | [`whats-next`](bots/whats-next/) |
+| 🛠️ **Featurly** | Ships a feature end-to-end — plan → implement → simplify → review-fix loop | [`feature_dev`](bots/feature_dev/) |
+| 🌿 **Billy** | Branch reviewer-fixer — alternating Claude/GPT review-fix on the branch diff, auto-commits on convergence | [`branch_improve_loop`](bots/branch_improve_loop/) |
+| 🌍 **Willy** | Whole-repo reviewer-fixer — the same loop across the entire codebase | [`whole_improve_loop`](bots/whole_improve_loop/) |
+| 📚 **Doki** | Doc aligner — detects & fixes doc/code drift (the docs, never the code) | [`doc-align`](bots/doc-align/) |
+| 🔎 **Revi** | Code reviewer — read-only cross-family review, publishes findings to the board | [`code_review`](bots/code_review/) |
+| 🛡️ **Seki** | Source security auditor — SAST + secret scan + LLM triage | [`sec-audit-source`](bots/sec-audit-source/) |
+| 📦 **Depsy** | Supply-chain auditor — dependency malware / CVE scan | [`sec-audit-deps`](bots/sec-audit-deps/) |
+| ⬆️ **Renovacy** | Security-aware dependency upgrader | [`secured-renovacy`](bots/secured-renovacy/) |
+
+List them anytime with `iterion bots list`; see [docs/examples.md](docs/examples.md) for the full catalog (including the DSL demos under `examples/`).
 
 ---
 

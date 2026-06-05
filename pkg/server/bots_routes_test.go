@@ -76,6 +76,40 @@ func TestBotsListRoute(t *testing.T) {
 	}
 }
 
+func TestBotsListRoute_DisplayName(t *testing.T) {
+	botregistry.ClearSchemaCache()
+	dir := t.TempDir()
+	bundleDir := filepath.Join(dir, "whats-next")
+	writeBotFile(t, filepath.Join(bundleDir, "manifest.yaml"), "name: whats-next\ndisplay_name: Nexie\ndescription: Orchestrator bot.\n")
+	writeBotFile(t, filepath.Join(bundleDir, "main.bot"), testBotSrc)
+
+	srv := New(Config{
+		DisableAuth: true,
+		Bots:        BotsConfig{Paths: []string{dir}},
+	}, iterlog.New(iterlog.LevelError, nil))
+	srv.handler = srv.mux
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/bots", nil)
+	rec := httptest.NewRecorder()
+	srv.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Bots []botregistry.EntryWithSchema `json:"bots"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
+	}
+	if len(resp.Bots) != 1 {
+		t.Fatalf("got %d bots; body=%s", len(resp.Bots), rec.Body.String())
+	}
+	if resp.Bots[0].DisplayName != "Nexie" {
+		t.Errorf("DisplayName = %q, want Nexie (the /bots payload must expose the manifest persona)", resp.Bots[0].DisplayName)
+	}
+}
+
 func TestBotsGetRoute(t *testing.T) {
 	botregistry.ClearSchemaCache()
 	dir := t.TempDir()

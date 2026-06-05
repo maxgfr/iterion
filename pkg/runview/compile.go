@@ -115,7 +115,7 @@ func compileForLaunch(path, source string) (*ir.Workflow, string, error) {
 // the parent has no bundle markers, or OpenDir fails (best-effort).
 //
 // Mirrors the auto-promotion the CLI does in pkg/cli/run.go (F-NEW-4).
-// Without this, studio launches of `iterion run examples/whats-next/main.bot`
+// Without this, studio launches of `iterion run bots/whats-next/main.bot`
 // silently produce empty `.claude/skills/` and prompts that reference
 // `repo-survey.md` fail with `no such file or directory`.
 func ResolveBundleFromFilePath(filePath string) *bundle.Bundle {

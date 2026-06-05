@@ -1,0 +1,30 @@
+name: sec-audit-deps
+display_name: Depsy
+version: 0.1.0
+description: |
+  Universal supply-chain malware auditor. Enumerates installed
+  dependencies per ecosystem (npm/yarn/pnpm, pip/poetry/uv,
+  go.mod/vendor, …), looks each `(ecosystem, name, version,
+  checksum)` triple up against a host-wide cache at
+  `~/.iterion/security-cache/packages.jsonl` to skip packages that
+  were already analysed at an acceptable scanner version, runs
+  language-specific static heuristics on the rest (install-time
+  hooks, eval, obfuscation, fetch+exec, base64 blobs, init()
+  side-effects), passes the structured signals to an LLM reviewer
+  with strict JSON output schema (no-package-malware style),
+  combines heuristic + LLM scores by `max()`, buckets into
+  LOW/MEDIUM/HIGH, emits findings to the iterion kanban board and
+  appends a fresh line to the package cache.
+
+  Cross-run memory: cache is host-wide and shared across repos
+  because a published package version is universal. The
+  `scanner_version` field lets the bot opportunistically rescan
+  packages analysed by older versions.
+
+  Per-language extensibility: ships JS/TS (npm), Python (pip/poetry)
+  and Go (modules + vendor/), plus a language-agnostic pass on
+  embedded binaries and locale anomalies. Add a language by dropping
+  a `skills/lang-<id>.md` and an entry in the `heuristic_scan`
+  router.
+author: SocialGouv (devthejo) — bots/sec-audit-deps/main.bot
+schema_version: 1
