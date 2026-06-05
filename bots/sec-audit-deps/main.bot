@@ -656,11 +656,15 @@ tool update_cache:
 import os, sys, json, datetime
 verdicts_raw = os.environ.get('VERDICTS','')
 verdicts = json.loads(verdicts_raw) if verdicts_raw else []
-path     = os.environ['CACHE_PATH']
+path     = os.environ['CACHE_PATH'].strip()
 sver     = os.environ.get('SVER','')
 now      = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat() + 'Z'
 count = 0
-os.makedirs(os.path.dirname(path), exist_ok=True)
+if not path:
+    print(json.dumps({'appended_count': 0, 'summary': 'cache_path empty; skipped cache update'})); sys.exit(0)
+_d = os.path.dirname(path)
+if _d:
+    os.makedirs(_d, exist_ok=True)
 with open(path, 'a', encoding='utf-8') as f:
     for v in verdicts:
         line = {
@@ -737,8 +741,15 @@ workflow sec_audit_deps:
     heuristics:          "{{outputs.heuristic_join}}"
   }
 
+  ## cache_path comes straight from vars (the single source of truth that
+  ## load_cache itself echoes) — NOT from {{outputs.load_cache.cache_path}}.
+  ## The cross-node ref to a non-adjacent node failed to resolve on resume
+  ## (the edge only rebinds the edge-source's outputs), so update_cache wrote
+  ## the verdicts to a file literally named "{{input.cache_path}}" instead of
+  ## the real cache — a silent dead-cache façade. {{vars.cache_path}} resolves
+  ## identically on the normal and resume paths.
   llm_review -> update_cache with {
-    cache_path:       "{{outputs.load_cache.cache_path}}",
+    cache_path:       "{{vars.cache_path}}",
     verdicts:         "{{outputs.llm_review.verdicts}}",
     scanner_version:  "{{vars.scanner_version}}"
   }
