@@ -47,8 +47,9 @@ func remapBotPath(p string) (string, bool) {
 
 // runPathFieldRe matches the JSON file_path / bundle_path string values in
 // a run.json so the rewrite is scoped to exactly those two fields and the
-// rest of the document is preserved byte-for-byte.
-var runPathFieldRe = regexp.MustCompile(`("(?:file_path|bundle_path)"\s*:\s*")([^"]*)(")`)
+// rest of the document is preserved byte-for-byte. Groups: 1=prefix up to
+// the opening quote, 2=field name, 3=path value, 4=closing quote.
+var runPathFieldRe = regexp.MustCompile(`("(file_path|bundle_path)"\s*:\s*")([^"]*)(")`)
 
 // MigrateRunPathsOptions configures MigrateRunPaths.
 type MigrateRunPathsOptions struct {
@@ -107,14 +108,14 @@ func MigrateRunPaths(opts MigrateRunPathsOptions) (MigrateRunPathsResult, error)
 		var pending []RunPathChange
 		out := runPathFieldRe.ReplaceAllStringFunc(string(data), func(match string) string {
 			m := runPathFieldRe.FindStringSubmatch(match)
-			np, ok := remapBotPath(m[2])
+			np, ok := remapBotPath(m[3])
 			if !ok {
 				return match
 			}
 			pending = append(pending, RunPathChange{
-				RunID: runID, Field: fieldName(m[1]), From: m[2], To: np,
+				RunID: runID, Field: m[2], From: m[3], To: np,
 			})
-			return m[1] + np + m[3]
+			return m[1] + np + m[4]
 		})
 		if len(pending) == 0 {
 			continue
@@ -129,13 +130,4 @@ func MigrateRunPaths(opts MigrateRunPathsOptions) (MigrateRunPathsResult, error)
 		}
 	}
 	return res, nil
-}
-
-// fieldName extracts file_path / bundle_path from the regex's first
-// capture group (e.g. `"file_path": "`), for the change log.
-func fieldName(prefix string) string {
-	if strings.Contains(prefix, "file_path") {
-		return "file_path"
-	}
-	return "bundle_path"
 }
