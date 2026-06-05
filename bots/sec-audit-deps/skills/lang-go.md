@@ -138,3 +138,13 @@ scope (those are sec-audit-source territory).
 - `[[malware-signals]]`
 - `[[package-cache]]`
 - `[[sec-audit-deps]]`
+
+## Heuristic SCA scanner (machine-readable — consumed by run_eco_heuristics)
+
+Deterministic. `run_eco_heuristics` (a tool node, no LLM) runs `cmd` with
+`$SCAN_DIR` in the env and cwd = workspace, then parses `output`. To adjust
+Go SCA, edit this block — no DSL change.
+
+<!-- iterion:heuristics
+[ {"id":"govulncheck","output":"govulncheck.json","cmd":"[ -f go.mod ] && command -v govulncheck >/dev/null 2>&1 && govulncheck -json ./... > $SCAN_DIR/govulncheck.json.tmp 2>/dev/null && mv $SCAN_DIR/govulncheck.json.tmp $SCAN_DIR/govulncheck.json || true"} ]
+-->

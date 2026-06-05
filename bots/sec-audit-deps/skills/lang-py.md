@@ -153,3 +153,13 @@ and grep the rest.
 - `[[malware-signals]]`
 - `[[package-cache]]`
 - `[[sec-audit-deps]]`
+
+## Heuristic SCA scanner (machine-readable — consumed by run_eco_heuristics)
+
+Deterministic. `run_eco_heuristics` (a tool node, no LLM) runs `cmd` with
+`$SCAN_DIR` in the env and cwd = workspace, then parses `output`. To adjust
+Python SCA, edit this block — no DSL change.
+
+<!-- iterion:heuristics
+[ {"id":"pip-audit","output":"pip-audit.json","cmd":"{ [ -f pyproject.toml ] || [ -f requirements.txt ] || [ -f setup.py ]; } && command -v pip-audit >/dev/null 2>&1 && pip-audit --format=json --output=$SCAN_DIR/pip-audit.json.tmp 2>/dev/null && mv $SCAN_DIR/pip-audit.json.tmp $SCAN_DIR/pip-audit.json || true"} ]
+-->

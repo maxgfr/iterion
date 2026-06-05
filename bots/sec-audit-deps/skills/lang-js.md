@@ -129,3 +129,13 @@ for the current package.
 - `[[malware-signals]]` — canonical signal catalogue.
 - `[[package-cache]]` — how the verdict is persisted.
 - `[[sec-audit-deps]]` — the orchestrating playbook.
+
+## Heuristic SCA scanner (machine-readable — consumed by run_eco_heuristics)
+
+Deterministic. `run_eco_heuristics` (a tool node, no LLM) runs `cmd` with
+`$SCAN_DIR` in the env and cwd = workspace, then parses `output`. To adjust
+JS/npm SCA, edit this block — no DSL change.
+
+<!-- iterion:heuristics
+[ {"id":"npm-audit","output":"npm-audit.json","cmd":"[ -f package.json ] && command -v npm >/dev/null 2>&1 && npm audit --json > $SCAN_DIR/npm-audit.json.tmp 2>/dev/null; [ -s $SCAN_DIR/npm-audit.json.tmp ] && mv $SCAN_DIR/npm-audit.json.tmp $SCAN_DIR/npm-audit.json; true"} ]
+-->

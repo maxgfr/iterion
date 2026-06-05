@@ -6,16 +6,17 @@
 ##   1. enumerate_deps      — claw + openai/gpt-5.5, readonly,
 ##                            walks node_modules / .venv / vendor and
 ##                            lockfiles to produce the flat dep list
-##                            plus ecosystem booleans.
-##   2. heuristic_fanout    — fan_out_all router → ecosystem-specific
-##                            + generic heuristic tools.
-##   3. run_*_heuristics    — tool nodes per ecosystem:
-##                              run_js_heuristics      (when has_npm)
-##                              run_py_heuristics      (when has_pypi)
-##                              run_go_heuristics      (when has_gomod)
-##                              run_generic_heuristics (always)
-##   4. heuristic_join      — compute, await: best_effort. Surfaces a
-##                            flat per-ecosystem signals object.
+##                            plus an open `ecosystems` list.
+##   2. run_eco_heuristics  — ONE deterministic tool (no LLM). For each
+##                            detected ecosystem it reads the
+##                            iterion:heuristics data block from
+##                            skills/lang-<id>.md and runs the listed SCA
+##                            scanner, then parses its output into signals.
+##                            Add an ecosystem = drop a skill, no DSL edit.
+##   3. run_generic_heuristics — tool, always-on supply-chain MALWARE scan
+##                            (node_modules install-hooks / locale anomaly).
+##   4. heuristic_join      — compute. Merges {eco, generic} into one
+##                            signals object for the reviewer.
 ##   5. load_cache          — tool, reads
 ##                            ~/.iterion/security-cache/packages.jsonl
 ##                            and emits the in-memory index.
@@ -54,9 +55,6 @@ vars:
 
 schema enumerate_output:
   deps:           json
-  has_npm:        bool
-  has_pypi:       bool
-  has_gomod:      bool
   ecosystems:     json
   summary:        string
 
@@ -64,10 +62,11 @@ schema heuristic_output:
   packages:    json
   errors:      json
 
+schema eco_input:
+  ecosystems:  json
+
 schema heuristic_join_output:
-  js:        json
-  py:        json
-  go:        json
+  eco:       json
   generic:   json
 
 schema cache_load_output:
@@ -136,8 +135,9 @@ prompt enumerate_system:
         go.sum h1: hash).
      c. Emit one entry per (ecosystem, name, version, checksum)
         with the manifest_path it came from.
-  3. Set has_npm / has_pypi / has_gomod booleans accordingly.
-  4. Populate ecosystems: ["npm","pypi","gomod"] (subset present).
+  3. Populate ecosystems with the lowercase ids present (a subset of
+     ["npm","pypi","gomod"]). This OPEN list drives which lang-<id>.md
+     heuristic scanners run downstream — there are no per-ecosystem booleans.
 
   Constraints:
   - Read-only. Allowed bash: ls, find, file, head, tail, wc, cat,
@@ -312,98 +312,99 @@ agent enumerate_deps:
   tool_max_steps: 25
   readonly: true
 
-router heuristic_fanout:
-  mode: fan_out_all
-
-## run_js_heuristics runs npm audit (JS SCA) and parses its JSON into
-## known-vuln signals. npm audit exits NON-ZERO when it finds vulnerabilities,
-## so the output is captured to .tmp and mv'd into place on a non-empty file
-## (NOT gated on npm's exit code), guarding both an absent npm and a seeded
-## fixture. Handles the v7+ report (vulnerabilities{} map) and the legacy v6
-## report (advisories{} map). (Typosquat / entropy malware heuristics remain
-## pending — see native:3a81df64.)
-tool run_js_heuristics:
-  command: `mkdir -p {{vars.scan_dir}} && cd {{vars.workspace_dir}} && ([ -f package.json ] && command -v npm >/dev/null 2>&1 && npm audit --json > {{vars.scan_dir}}/npm-audit.json.tmp 2>/dev/null; [ -s {{vars.scan_dir}}/npm-audit.json.tmp ] && mv {{vars.scan_dir}}/npm-audit.json.tmp {{vars.scan_dir}}/npm-audit.json; true); SCAN_DIR={{vars.scan_dir}} python3 -c "
-import os, json
-scan_dir = os.environ.get('SCAN_DIR', '.')
-path = os.path.join(scan_dir, 'npm-audit.json')
-packages, errors = [], []
-SEV = {'critical': 35, 'high': 25, 'moderate': 15, 'low': 8, 'info': 3}
+## run_eco_heuristics — skill-driven, DETERMINISTIC (no LLM in the path).
+## Replaces the per-ecosystem run_js/py/go_heuristics nodes + the
+## heuristic_fanout router + the closed has_npm/has_pypi/has_gomod enum.
+## For each detected ecosystem (enumerate_deps.ecosystems, open list) it
+## reads the `iterion:heuristics` data block from .claude/skills/lang-<id>.md,
+## runs the listed SCA scanner, then parses its output into known-vuln
+## signals. Adding an ecosystem = drop a lang-<id>.md skill with a
+## heuristics block (+ a parser here only if its output format is new).
+tool run_eco_heuristics:
+  command: `mkdir -p {{vars.scan_dir}} && ECOS='{{input.ecosystems}}' SCAN_DIR={{vars.scan_dir}} WORKSPACE_DIR={{vars.workspace_dir}} SKILLS_DIR={{vars.workspace_dir}}/.claude/skills python3 -c "
+import os, sys, json, re, subprocess
+raw = os.environ.get('ECOS', '[]') or '[]'
 try:
-    with open(path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    parsed = json.loads(raw)
+except Exception:
+    parsed = raw
+items = []
+if isinstance(parsed, dict):
+    items = list(parsed.keys())
+elif isinstance(parsed, list):
+    for x in parsed:
+        if isinstance(x, str):
+            items.append(x)
+        elif isinstance(x, dict):
+            for k in ('id', 'eco', 'ecosystem', 'name'):
+                if isinstance(x.get(k), str):
+                    items.append(x[k]); break
+elif isinstance(parsed, str):
+    items = re.findall(r'[A-Za-z0-9_+.-]+', parsed)
+alias = {'npm': 'js', 'javascript': 'js', 'typescript': 'js', 'node': 'js', 'nodejs': 'js', 'yarn': 'js', 'pnpm': 'js', 'bun': 'js', 'pypi': 'py', 'python': 'py', 'pip': 'py', 'poetry': 'py', 'gomod': 'go', 'golang': 'go', 'go-modules': 'go'}
+ecos = []
+for it in items:
+    if not isinstance(it, str):
+        continue
+    e = alias.get(it.strip().lower(), it.strip().lower())
+    if e and e not in ecos:
+        ecos.append(e)
+scan_dir = os.environ['SCAN_DIR']; ws = os.environ['WORKSPACE_DIR']; skills = os.environ.get('SKILLS_DIR', '')
+env = dict(os.environ); env['SCAN_DIR'] = scan_dir; env['WORKSPACE_DIR'] = ws
+errors = []
+for e in ecos:
+    sp = os.path.join(skills, 'lang-%s.md' % e)
+    if not os.path.isfile(sp):
+        continue
+    m = re.search(r'<!--\s*iterion:heuristics(.*?)-->', open(sp, encoding='utf-8').read(), re.S)
+    if not m:
+        continue
+    try:
+        specs = json.loads(m.group(1))
+    except Exception as ex:
+        errors.append('eco %s: bad heuristics block: %s' % (e, ex)); continue
+    for s in specs:
+        cmd = s.get('cmd', '')
+        if not cmd:
+            continue
+        try:
+            subprocess.run(cmd, shell=True, cwd=ws, env=env, capture_output=True, timeout=900)
+        except Exception as ex:
+            errors.append('%s: %s' % (s.get('id', e), ex))
+packages = []
+SEV = {'critical': 35, 'high': 25, 'moderate': 15, 'low': 8, 'info': 3}
+# --- npm-audit.json (npm v7 vulnerabilities{} / v6 advisories{}) ---
+p = os.path.join(scan_dir, 'npm-audit.json')
+try:
+    data = json.load(open(p, encoding='utf-8'))
 except (OSError, ValueError):
     data = None
 if isinstance(data, dict) and isinstance(data.get('vulnerabilities'), dict):
     for name, info in data['vulnerabilities'].items():
         if not isinstance(info, dict):
             continue
-        sev = info.get('severity', 'unknown')
-        titles, urls, ids = [], [], []
+        sev = info.get('severity', 'unknown'); titles, urls, ids = [], [], []
         for via in (info.get('via') or []):
             if isinstance(via, dict):
-                if via.get('title'):
-                    titles.append(via['title'])
-                if via.get('url'):
-                    urls.append(via['url'])
-                if via.get('source') is not None:
-                    ids.append('npm-advisory-%s' % via['source'])
+                if via.get('title'): titles.append(via['title'])
+                if via.get('url'): urls.append(via['url'])
+                if via.get('source') is not None: ids.append('npm-advisory-%s' % via['source'])
         desc = '; '.join(titles[:3]) or ('vulnerable dependency %s' % name)
-        weight = SEV.get(sev, 12)
-        advisory = ids[0] if ids else ('npm:%s' % name)
-        packages.append({
-            'ecosystem': 'npm', 'name': info.get('name', name), 'version': '',
-            'heuristic_score': weight,
-            'signals': [{
-                'type': 'vuln-db-known', 'weight': weight,
-                'evidence': '%s (%s): %s [%s]' % (advisory, sev, desc[:180], path),
-                'advisory': advisory, 'aliases': urls[:3], 'severity': sev,
-                'range': info.get('range', ''), 'fixed_version': '',
-            }],
-        })
+        weight = SEV.get(sev, 12); advisory = ids[0] if ids else ('npm:%s' % name)
+        packages.append({'ecosystem': 'npm', 'name': info.get('name', name), 'version': '', 'heuristic_score': weight, 'signals': [{'type': 'vuln-db-known', 'weight': weight, 'evidence': '%s (%s): %s [%s]' % (advisory, sev, desc[:180], p), 'advisory': advisory, 'aliases': urls[:3], 'severity': sev, 'range': info.get('range', ''), 'fixed_version': ''}]})
 elif isinstance(data, dict) and isinstance(data.get('advisories'), dict):
     for aid, adv in data['advisories'].items():
         if not isinstance(adv, dict):
             continue
-        sev = adv.get('severity', 'unknown')
-        weight = SEV.get(sev, 12)
-        packages.append({
-            'ecosystem': 'npm', 'name': adv.get('module_name', ''), 'version': '',
-            'heuristic_score': weight,
-            'signals': [{
-                'type': 'vuln-db-known', 'weight': weight,
-                'evidence': '%s (%s): %s [%s]' % ('npm-advisory-%s' % aid, sev, (adv.get('title') or adv.get('overview') or '')[:180], path),
-                'advisory': 'npm-advisory-%s' % aid,
-                'aliases': [adv['url']] if adv.get('url') else [], 'severity': sev,
-                'fixed_version': adv.get('patched_versions', ''),
-            }],
-        })
-print(json.dumps({'packages': packages, 'errors': errors}))
-" > {{vars.scan_dir}}/js.json; cat {{vars.scan_dir}}/js.json`
-  output: heuristic_output
-
-## run_py_heuristics runs pip-audit (Python SCA) and parses its JSON into
-## known-vuln signals. pip-audit JSON is either a top-level list or
-## {dependencies:[{name,version,vulns:[{id,fix_versions,aliases,description}]}]};
-## it carries no severity, so signals default to severity "unknown" for the
-## reviewer to assess. .tmp+mv keeps an absent/failing pip-audit from
-## clobbering prior output (and a seeded fixture from being lost in tests).
-tool run_py_heuristics:
-  command: `mkdir -p {{vars.scan_dir}} && cd {{vars.workspace_dir}} && ({ [ -f pyproject.toml ] || [ -f requirements.txt ] || [ -f setup.py ] ; } && command -v pip-audit >/dev/null 2>&1 && pip-audit --format=json --output={{vars.scan_dir}}/pip-audit.json.tmp 2>/dev/null && mv {{vars.scan_dir}}/pip-audit.json.tmp {{vars.scan_dir}}/pip-audit.json || true); SCAN_DIR={{vars.scan_dir}} python3 -c "
-import os, json
-scan_dir = os.environ.get('SCAN_DIR', '.')
-path = os.path.join(scan_dir, 'pip-audit.json')
-packages, errors = [], []
+        sev = adv.get('severity', 'unknown'); weight = SEV.get(sev, 12)
+        packages.append({'ecosystem': 'npm', 'name': adv.get('module_name', ''), 'version': '', 'heuristic_score': weight, 'signals': [{'type': 'vuln-db-known', 'weight': weight, 'evidence': '%s (%s): %s [%s]' % ('npm-advisory-%s' % aid, sev, (adv.get('title') or adv.get('overview') or '')[:180], p), 'advisory': 'npm-advisory-%s' % aid, 'aliases': [adv['url']] if adv.get('url') else [], 'severity': sev, 'fixed_version': adv.get('patched_versions', '')}]})
+# --- pip-audit.json (list | {dependencies:[{name,version,vulns:[]}]}) ---
+p = os.path.join(scan_dir, 'pip-audit.json')
 try:
-    with open(path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    data = json.load(open(p, encoding='utf-8'))
 except (OSError, ValueError):
     data = None
-deps = []
-if isinstance(data, list):
-    deps = data
-elif isinstance(data, dict):
-    deps = data.get('dependencies') or []
+deps = data if isinstance(data, list) else (data.get('dependencies') or [] if isinstance(data, dict) else [])
 for d in deps:
     if not isinstance(d, dict):
         continue
@@ -412,36 +413,14 @@ for d in deps:
         if not isinstance(v, dict):
             continue
         fixes = v.get('fix_versions') or []
-        signals.append({
-            'type': 'vuln-db-known', 'weight': 15,
-            'evidence': '%s: %s [%s]' % (v.get('id', ''), (v.get('description') or '')[:180], path),
-            'advisory': v.get('id', ''), 'aliases': v.get('aliases', []),
-            'severity': 'unknown', 'fixed_version': fixes[0] if fixes else '',
-        })
+        signals.append({'type': 'vuln-db-known', 'weight': 15, 'evidence': '%s: %s [%s]' % (v.get('id', ''), (v.get('description') or '')[:180], p), 'advisory': v.get('id', ''), 'aliases': v.get('aliases', []), 'severity': 'unknown', 'fixed_version': fixes[0] if fixes else ''})
     if signals:
         score = min(100, sum(s['weight'] for s in signals))
         packages.append({'ecosystem': 'pypi', 'name': d.get('name', ''), 'version': d.get('version', ''), 'heuristic_score': score, 'signals': signals})
-print(json.dumps({'packages': packages, 'errors': errors}))
-" > {{vars.scan_dir}}/py.json; cat {{vars.scan_dir}}/py.json`
-  output: heuristic_output
-
-## run_go_heuristics runs govulncheck (Go's authoritative SCA) and parses
-## its -json STREAM into known-vuln signals. govulncheck emits a series of
-## {config|progress|osv|finding} message objects: `osv` carries the vuln
-## entry (id/summary/aliases/affected), `finding` carries {osv, fixed_version,
-## trace[]} — a finding whose trace has a `function` frame means the vuln is
-## actually CALLED (higher severity) vs imported-only. The scanner writes to
-## a .tmp then mv's into place so an absent/failing govulncheck never clobbers
-## prior output (and a pre-seeded fixture survives in tests).
-tool run_go_heuristics:
-  command: `mkdir -p {{vars.scan_dir}} && cd {{vars.workspace_dir}} && ([ -f go.mod ] && command -v govulncheck >/dev/null 2>&1 && govulncheck -json ./... > {{vars.scan_dir}}/govulncheck.json.tmp 2>/dev/null && mv {{vars.scan_dir}}/govulncheck.json.tmp {{vars.scan_dir}}/govulncheck.json || true); SCAN_DIR={{vars.scan_dir}} python3 -c "
-import os, json
-scan_dir = os.environ.get('SCAN_DIR', '.')
-path = os.path.join(scan_dir, 'govulncheck.json')
-packages, errors = [], []
-def iter_objs(text):
-    dec = json.JSONDecoder()
-    i, n = 0, len(text)
+# --- govulncheck.json (NDJSON stream of {osv|finding}) ---
+p = os.path.join(scan_dir, 'govulncheck.json')
+def _iter_objs(text):
+    dec = json.JSONDecoder(); i, n = 0, len(text)
     while i < n:
         while i < n and text[i] in ' \t\r\n':
             i += 1
@@ -451,26 +430,22 @@ def iter_objs(text):
             obj, end = dec.raw_decode(text, i)
         except ValueError:
             break
-        yield obj
-        i = end
+        yield obj; i = end
 try:
-    with open(path, 'r', encoding='utf-8') as f:
-        text = f.read()
+    text = open(p, encoding='utf-8').read()
 except OSError:
     text = ''
 if text.strip():
     osvs, findings = {}, {}
     try:
-        for msg in iter_objs(text):
+        for msg in _iter_objs(text):
             if not isinstance(msg, dict):
                 continue
             if isinstance(msg.get('osv'), dict):
-                e = msg['osv']
-                if e.get('id'):
-                    osvs[e['id']] = e
+                ent = msg['osv']
+                if ent.get('id'): osvs[ent['id']] = ent
             elif isinstance(msg.get('finding'), dict):
-                fnd = msg['finding']
-                oid = fnd.get('osv', '')
+                fnd = msg['finding']; oid = fnd.get('osv', '')
                 if not oid:
                     continue
                 trace = fnd.get('trace') or []
@@ -478,43 +453,26 @@ if text.strip():
                 cur = findings.get(oid) or {'called': False, 'frames': [], 'fixed': ''}
                 cur['called'] = cur['called'] or called
                 for fr in trace:
-                    if isinstance(fr, dict) and fr.get('module'):
-                        cur['frames'].append(fr)
-                if fnd.get('fixed_version'):
-                    cur['fixed'] = fnd['fixed_version']
+                    if isinstance(fr, dict) and fr.get('module'): cur['frames'].append(fr)
+                if fnd.get('fixed_version'): cur['fixed'] = fnd['fixed_version']
                 findings[oid] = cur
     except Exception as ex:
         errors.append('govulncheck parse error: %s' % ex)
     for oid, f in findings.items():
-        e = osvs.get(oid, {})
-        mod = ''
-        for a in (e.get('affected') or []):
+        ent = osvs.get(oid, {}); mod = ''
+        for a in (ent.get('affected') or []):
             pkg = a.get('package') or {}
-            if pkg.get('name'):
-                mod = pkg['name']
-                break
-        if not mod and f['frames']:
-            mod = f['frames'][0].get('module', '')
+            if pkg.get('name'): mod = pkg['name']; break
+        if not mod and f['frames']: mod = f['frames'][0].get('module', '')
         ver = ''
         for fr in f['frames']:
-            if fr.get('module') == mod:
-                ver = fr.get('version', '')
-                break
-        sev = 'high' if f['called'] else 'medium'
-        weight = 25 if f['called'] else 15
-        summary = (e.get('summary') or e.get('details') or '')[:200]
-        packages.append({
-            'ecosystem': 'gomod', 'name': mod or 'unknown', 'version': ver,
-            'heuristic_score': weight,
-            'signals': [{
-                'type': 'vuln-db-known', 'weight': weight,
-                'evidence': '%s%s: %s [%s]' % (oid, ' (called)' if f['called'] else ' (imported)', summary, path),
-                'advisory': oid, 'aliases': e.get('aliases', []),
-                'severity': sev, 'called': f['called'], 'fixed_version': f.get('fixed', ''),
-            }],
-        })
+            if fr.get('module') == mod: ver = fr.get('version', ''); break
+        sev = 'high' if f['called'] else 'medium'; weight = 25 if f['called'] else 15
+        summary = (ent.get('summary') or ent.get('details') or '')[:200]
+        packages.append({'ecosystem': 'gomod', 'name': mod or 'unknown', 'version': ver, 'heuristic_score': weight, 'signals': [{'type': 'vuln-db-known', 'weight': weight, 'evidence': '%s%s: %s [%s]' % (oid, ' (called)' if f['called'] else ' (imported)', summary, p), 'advisory': oid, 'aliases': ent.get('aliases', []), 'severity': sev, 'called': f['called'], 'fixed_version': f.get('fixed', '')}]})
 print(json.dumps({'packages': packages, 'errors': errors}))
-" > {{vars.scan_dir}}/go.json; cat {{vars.scan_dir}}/go.json`
+"`
+  input: eco_input
   output: heuristic_output
 
 ## run_generic_heuristics is the deterministic supply-chain MALWARE scanner
@@ -608,9 +566,7 @@ compute heuristic_join:
   await: best_effort
   output: heuristic_join_output
   expr:
-    js:       "outputs.run_js_heuristics"
-    py:       "outputs.run_py_heuristics"
-    go:       "outputs.run_go_heuristics"
+    eco:      "outputs.run_eco_heuristics"
     generic:  "outputs.run_generic_heuristics"
 
 ## load_cache reads the host-wide JSONL cache. We pass the raw text
@@ -749,16 +705,9 @@ workflow sec_audit_deps:
     max_cost_usd: 25
     max_iterations: 200
 
-  enumerate_deps -> heuristic_fanout
+  enumerate_deps -> run_eco_heuristics with {ecosystems: "{{outputs.enumerate_deps.ecosystems}}"}
 
-  heuristic_fanout -> run_js_heuristics      when has_npm
-  heuristic_fanout -> run_py_heuristics      when has_pypi
-  heuristic_fanout -> run_go_heuristics      when has_gomod
-  heuristic_fanout -> run_generic_heuristics
-
-  run_js_heuristics       -> heuristic_join
-  run_py_heuristics       -> heuristic_join
-  run_go_heuristics       -> heuristic_join
+  run_eco_heuristics      -> run_generic_heuristics
   run_generic_heuristics  -> heuristic_join
 
   heuristic_join -> load_cache
