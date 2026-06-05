@@ -108,6 +108,9 @@ schema scanner_output:
   finding_count:  int
   errors:         json
 
+schema lang_input:
+  langs:  json
+
 schema scan_join_output:
   generic_scan:  json
   lang_scan:     json
@@ -304,8 +307,11 @@ prompt detect_tech_system:
 
   When done, return a structured `tech_output` with:
   - langs: lowercased identifiers (e.g. ["js","ts","go","python"]).
-    This OPEN list drives which lang-<id>.md scanners run — there are
-    no per-language booleans. Use "js" for both JavaScript and TypeScript.
+    MUST be a flat JSON array of lowercase identifier strings, e.g.
+    ["go","js","python"] — NOT an object/map, NOT capitalized, NO version
+    detail. These ids select skills/lang-<id>.md and drive which scanners
+    run (there are no per-language booleans). Use "js" for both JavaScript
+    and TypeScript, "go" for Go, "python" for Python.
   - frameworks: identifiers (e.g. ["nextjs","django","gin"]).
   - package_managers: identifiers (e.g. ["pnpm","poetry"]).
   - build_systems: identifiers (e.g. ["taskfile","docker"]).
@@ -819,15 +825,37 @@ tool run_generic_scanners:
 ## verify per-language coverage. Replaces the old per-language run_js/go/python
 ## scanner nodes + the closed has_js/has_go/has_python enum.
 tool run_lang_scanners:
-  command: `mkdir -p {{vars.scan_dir}} && LANGS='{{outputs.detect_tech.langs}}' SCAN_DIR={{vars.scan_dir}} WORKSPACE_DIR={{vars.workspace_dir}} SKILLS_DIR={{vars.workspace_dir}}/.claude/skills python3 -c "
+  command: `mkdir -p {{vars.scan_dir}} && LANGS='{{input.langs}}' SCAN_DIR={{vars.scan_dir}} WORKSPACE_DIR={{vars.workspace_dir}} SKILLS_DIR={{vars.workspace_dir}}/.claude/skills python3 -c "
 import os, sys, json, re, subprocess
-raw = os.environ.get('LANGS', '[]') or '[]'
-try:
-    langs = json.loads(raw)
-except Exception:
-    langs = re.findall(r'[A-Za-z0-9_+.-]+', raw)
-if not isinstance(langs, list):
-    langs = []
+_alias = {'javascript': 'js', 'typescript': 'js', 'ts': 'js', 'node': 'js', 'nodejs': 'js', 'golang': 'go', 'py': 'python', 'py3': 'python', 'python3': 'python'}
+def _norm_langs(_raw):
+    try:
+        _p = json.loads(_raw)
+    except Exception:
+        _p = _raw
+    _items = []
+    if isinstance(_p, dict):
+        _items = list(_p.keys())
+    elif isinstance(_p, list):
+        for _x in _p:
+            if isinstance(_x, str):
+                _items.append(_x)
+            elif isinstance(_x, dict):
+                for _k in ('id', 'lang', 'name', 'language'):
+                    if isinstance(_x.get(_k), str):
+                        _items.append(_x[_k]); break
+    elif isinstance(_p, str):
+        _items = re.findall(r'[A-Za-z0-9_+.-]+', _p)
+    _out = []
+    for _l in _items:
+        if not isinstance(_l, str):
+            continue
+        _l = _l.strip().lower()
+        _l = _alias.get(_l, _l)
+        if _l and _l not in _out:
+            _out.append(_l)
+    return _out
+langs = _norm_langs(os.environ.get('LANGS', '[]') or '[]')
 skills = os.environ.get('SKILLS_DIR', ''); scan_dir = os.environ['SCAN_DIR']; ws = os.environ['WORKSPACE_DIR']
 env = dict(os.environ); env['SCAN_DIR'] = scan_dir; env['WORKSPACE_DIR'] = ws
 sub = []; paths = {}; errs = []
@@ -857,6 +885,7 @@ for lang in langs:
             errs.append('%s: %s' % (sid, e))
 print(json.dumps({'scanner': 'lang', 'subscanners': sub, 'json_paths': paths, 'finding_count': 0, 'errors': errs}))
 "`
+  input: lang_input
   output: scanner_output
 ## run_custom_matchers — programmatic matchers (Cap. 2). Enumerates
 ## executables under attachments/matchers/, invokes each with the
@@ -964,7 +993,7 @@ compute scan_join:
 ## scanners missing) pass but are surfaced to report_card as a coverage
 ## banner. Runs BEFORE cap_findings, which truncates the files in place.
 tool scan_health:
-  command: `SCAN_DIR={{vars.scan_dir}} MIN_GENERIC={{vars.min_generic_scanners}} LANGS='{{outputs.detect_tech.langs}}' SKILLS_DIR={{vars.workspace_dir}}/.claude/skills python3 -c "
+  command: `SCAN_DIR={{vars.scan_dir}} MIN_GENERIC={{vars.min_generic_scanners}} LANGS='{{input.langs}}' SKILLS_DIR={{vars.workspace_dir}}/.claude/skills python3 -c "
 import os, sys, json, re
 
 scan_dir = os.environ.get('SCAN_DIR', '.')
@@ -982,13 +1011,35 @@ GENERIC = ['gitleaks.json', 'trivy.json', 'semgrep-auto.json']
 # run_lang_scanners executes, filtered to the detected languages — so the
 # per-language coverage check stays in lockstep with what actually ran, with
 # no hardcoded language list (add a lang = drop a lang-<id>.md skill).
-_raw_langs = os.environ.get('LANGS', '[]') or '[]'
-try:
-    _langs = json.loads(_raw_langs)
-except Exception:
-    _langs = re.findall(r'[A-Za-z0-9_+.-]+', _raw_langs)
-if not isinstance(_langs, list):
-    _langs = []
+_alias = {'javascript': 'js', 'typescript': 'js', 'ts': 'js', 'node': 'js', 'nodejs': 'js', 'golang': 'go', 'py': 'python', 'py3': 'python', 'python3': 'python'}
+def _norm_langs(_raw):
+    try:
+        _p = json.loads(_raw)
+    except Exception:
+        _p = _raw
+    _items = []
+    if isinstance(_p, dict):
+        _items = list(_p.keys())
+    elif isinstance(_p, list):
+        for _x in _p:
+            if isinstance(_x, str):
+                _items.append(_x)
+            elif isinstance(_x, dict):
+                for _k in ('id', 'lang', 'name', 'language'):
+                    if isinstance(_x.get(_k), str):
+                        _items.append(_x[_k]); break
+    elif isinstance(_p, str):
+        _items = re.findall(r'[A-Za-z0-9_+.-]+', _p)
+    _out = []
+    for _l in _items:
+        if not isinstance(_l, str):
+            continue
+        _l = _l.strip().lower()
+        _l = _alias.get(_l, _l)
+        if _l and _l not in _out:
+            _out.append(_l)
+    return _out
+_langs = _norm_langs(os.environ.get('LANGS', '[]') or '[]')
 _skills_dir = os.environ.get('SKILLS_DIR', '')
 LANG = []
 for _lang in _langs:
@@ -1064,6 +1115,7 @@ if generic_present < min_generic:
     )
     sys.exit(1)
 "`
+  input: lang_input
   output: scanner_health_output
 
 ## cap_findings (overflow guard, Cap. 1-class). gosec/semgrep can emit
@@ -1413,6 +1465,18 @@ workflow sec_audit_source:
   ## image-inspect fast path resolves it without a pull.)
   sandbox:
     image: "ghcr.io/socialgouv/iterion-sandbox-sec:edge"
+    user: "devbox"
+    mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=/home/devbox/.claude,consistency=cached"]
+    env:
+      CLAUDE_CONFIG_DIR: "/home/devbox/.claude"
+    ## report_card is a claude_code node, but the sec image (layered on
+    ## -full) ships node+npm WITHOUT the claude CLI — install it once per
+    ## container. Same gate as feature_dev: run the binary (not `command -v`,
+    ## which a partial install fools), verify, and fail post_create cleanly
+    ## so the dispatcher retries with a fresh container rather than dying
+    ## cryptically on the first claude_code node. (Discovered via live
+    ## dogfood: report_card failed with cli_exit_code=127 = claude not found.)
+    post_create: "set -e; claude --version >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest; claude --version >/dev/null 2>&1 || { echo 'claude install verification failed' >&2; exit 1; }"
 
   budget:
     max_parallel_branches: 4
@@ -1445,11 +1509,11 @@ workflow sec_audit_source:
   ## fan-out hits. scan_join still reads all five scanner outputs.
   plan_shards -> run_generic_scanners when not enabled
 
-  run_generic_scanners -> run_lang_scanners
+  run_generic_scanners -> run_lang_scanners with {langs: "{{outputs.detect_tech.langs}}"}
   run_lang_scanners    -> run_custom_matchers
   run_custom_matchers  -> scan_join
 
-  scan_join -> scan_health
+  scan_join -> scan_health with {langs: "{{outputs.detect_tech.langs}}"}
   scan_health -> cap_findings
 
   cap_findings -> triage with {
