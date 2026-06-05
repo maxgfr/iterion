@@ -1178,6 +1178,15 @@ print(json.dumps({'doc_files': files, 'doc_count': len(files), 'footprint_hash':
 ## with scan_skipped set to a reason string. Useful for runs
 ## targeting docs that have no CLI / diagnostic surface (e.g.
 ## a library-only repo).
+##
+## OPT-IN, iterion-shaped SPECIALIZATION — not a universal default.
+## The `cobra Use:` / `--flag` / `Cxxx` patterns below only yield
+## meaningful output on a repo with iterion's own code shape, so this
+## scanner ships OFF (both surface globs empty by default). A run
+## against any other repo either leaves it skipped or points the globs
+## at that repo's own surface patterns via --var. Generalising these
+## regexes to another stack is the bar for making it a default. See
+## CLAUDE.md "Catalog bots are repo-agnostic".
 tool scan_code_surface:
   command: `WS={{vars.workspace_dir}} CLI_GLOBS={{vars.cli_surface_globs}} DIAG_GLOBS={{vars.diagnostic_surface_globs}} python3 -c "
 import os, json, glob, re

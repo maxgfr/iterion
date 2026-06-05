@@ -54,7 +54,8 @@ prompt plan_system:
   Instead, you should:
   1. Explore {{vars.workspace_dir}} with read-only tools (Read,
      Glob, Grep, and bash limited to readonly commands such as
-     ls, cat, git status, git log, go doc).
+     ls, cat, git status, git log, and language-appropriate
+     doc/inspection commands).
   2. Identify the files involved, the existing patterns to reuse,
      and the architectural constraints relevant to the requested
      feature.
@@ -88,7 +89,8 @@ prompt act_system:
   1. Apply each change from the plan using Write, Edit, and
      bash. Mutating tools are now allowed.
   2. Run the relevant tests after each meaningful change
-     (devbox run -- task test or the targeted package tests).
+     (the project's own test command — infer it from the
+     workspace; use whatever test runner the repo already uses).
   3. Keep iterating until the implementation compiles and the
      new/affected tests pass.
   4. If part of the plan turns out to be unrealistic at

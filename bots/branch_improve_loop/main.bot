@@ -1075,8 +1075,8 @@ workflow branch_improve_loop:
   ## (best-effort, skipped with a warning on conflict).
   worktree: auto
 
-  ## Container isolation. Reviewers run `git diff`, `go test`,
-  ## linters, smoke-runs, etc. — all of which we'd rather not expose
+  ## Container isolation. Reviewers run `git diff`, the project's
+  ## tests, linters, smoke-runs, etc. — all of which we'd rather not expose
   ## to the host. Inline mode (vs `mode: auto`) chosen so the
   ## post_create script that installs claude inside the container is
   ## honoured — see feature_dev/main.bot for the full rationale.
