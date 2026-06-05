@@ -17,9 +17,11 @@ import (
 var expectedSecAuditSourceNodes = []string{
 	"detect_tech",
 	"run_generic_scanners",
-	"run_js_scanners",
-	"run_go_scanners",
-	"run_python_scanners",
+	// run_lang_scanners: single skill-guided adaptive scanner step (replaced
+	// the old per-language run_{js,go,python}_scanners after the
+	// universal-code-bots refactor — stack knowledge now lives in
+	// skills/lang-*.md, not in the workflow graph).
+	"run_lang_scanners",
 	// Cap2 programmatic matchers: see skills/programmatic-matchers.md
 	"run_custom_matchers",
 	"scan_join",

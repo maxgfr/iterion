@@ -31,7 +31,7 @@ type scanHealthResult struct {
 // runScanHealth executes the ACTUAL scan_health command from the bot against
 // scanDir, returning the parsed health envelope, whether it exited non-zero
 // (the hard-fail smoke assertion), and stderr.
-func runScanHealth(t *testing.T, scanDir, minGeneric string) (scanHealthResult, bool, string) {
+func runScanHealth(t *testing.T, scanDir, minGeneric, langs, workspaceDir string) (scanHealthResult, bool, string) {
 	t.Helper()
 	wf := compileFixture(t, "sec-audit-source/main.bot")
 	node, ok := wf.Nodes["scan_health"]
@@ -45,6 +45,13 @@ func runScanHealth(t *testing.T, scanDir, minGeneric string) (scanHealthResult, 
 	cmd := tool.Command
 	cmd = strings.ReplaceAll(cmd, "{{vars.scan_dir}}", scanDir)
 	cmd = strings.ReplaceAll(cmd, "{{vars.min_generic_scanners}}", minGeneric)
+	// Per-language expected outputs are no longer hardcoded: scan_health
+	// derives them from the detected langs ({{input.langs}}) crossed with the
+	// `iterion:scanners` blocks in {{vars.workspace_dir}}/.claude/skills/lang-*.md.
+	// Substitute both so the gate resolves the same LANG file set it would at
+	// runtime.
+	cmd = strings.ReplaceAll(cmd, "{{input.langs}}", langs)
+	cmd = strings.ReplaceAll(cmd, "{{vars.workspace_dir}}", workspaceDir)
 
 	c := exec.Command("sh", "-c", cmd)
 	var stdout, stderr bytes.Buffer
@@ -58,6 +65,36 @@ func runScanHealth(t *testing.T, scanDir, minGeneric string) (scanHealthResult, 
 	}
 	return res, runErr != nil, stderr.String()
 }
+
+// setupScanHealthWorkspace builds a workspace whose .claude/skills/ holds the
+// real bundle lang-{go,js,python}.md skills, so scan_health derives the same
+// per-language expected outputs (gosec.json, go-semgrep.json, js.json,
+// py-semgrep.json, bandit.json) it would at runtime — no hardcoded file list
+// duplicated in the test. Returns the workspace dir to pass as workspaceDir.
+func setupScanHealthWorkspace(t *testing.T) string {
+	t.Helper()
+	ws := t.TempDir()
+	skillsDir := filepath.Join(ws, ".claude", "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatalf("mkdir skills: %v", err)
+	}
+	for _, lang := range []string{"go", "js", "python"} {
+		name := "lang-" + lang + ".md"
+		body, err := os.ReadFile(filepath.Join("..", "bots", "sec-audit-source", "skills", name))
+		if err != nil {
+			t.Fatalf("read bundle skill %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(skillsDir, name), body, 0o644); err != nil {
+			t.Fatalf("write skill %s: %v", name, err)
+		}
+	}
+	return ws
+}
+
+// langsGoJsPython is the detected-language list the two coverage subtests
+// feed scan_health; crossed with the lang skills it yields the five expected
+// per-language scanner outputs.
+const langsGoJsPython = `["go","js","python"]`
 
 // TestSecAuditSource_ScanHealth_GuardsAgainstFacade is the regression test for
 // the dispatcher-sandbox "scanners emit no output" façade (native:f3a888dc):
@@ -90,7 +127,8 @@ func TestSecAuditSource_ScanHealth_GuardsAgainstFacade(t *testing.T) {
 		// custom
 		capWriteJSON(t, filepath.Join(dir, "custom.json"), map[string]any{"matchers": map[string]any{}})
 
-		res, failed, _ := runScanHealth(t, dir, "2")
+		ws := setupScanHealthWorkspace(t)
+		res, failed, _ := runScanHealth(t, dir, "2", langsGoJsPython, ws)
 		if failed {
 			t.Errorf("healthy run hard-failed; scan_health must pass when the generic layer ran")
 		}
@@ -119,7 +157,8 @@ func TestSecAuditSource_ScanHealth_GuardsAgainstFacade(t *testing.T) {
 		// gosec + go-semgrep MISSING (the exact tools that silently failed in f3a888dc)
 		capWriteJSON(t, filepath.Join(dir, "custom.json"), map[string]any{"matchers": map[string]any{}})
 
-		res, failed, _ := runScanHealth(t, dir, "2")
+		ws := setupScanHealthWorkspace(t)
+		res, failed, _ := runScanHealth(t, dir, "2", langsGoJsPython, ws)
 		if failed {
 			t.Errorf("degraded run hard-failed; partial language gaps must not fail the run")
 		}
@@ -146,7 +185,7 @@ func TestSecAuditSource_ScanHealth_GuardsAgainstFacade(t *testing.T) {
 		capWriteJSON(t, filepath.Join(dir, "bandit.json"), map[string]any{"results": []any{}})
 		// trivy.json + semgrep-auto.json absent → generic_present = 1
 
-		res, failed, stderr := runScanHealth(t, dir, "2")
+		res, failed, stderr := runScanHealth(t, dir, "2", "[]", t.TempDir())
 		if !failed {
 			t.Errorf("generic-layer failure must hard-fail (exit non-zero) — this IS the façade gate")
 		}
@@ -173,7 +212,7 @@ func TestSecAuditSource_ScanHealth_GuardsAgainstFacade(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		res, failed, _ := runScanHealth(t, dir, "2")
+		res, failed, _ := runScanHealth(t, dir, "2", "[]", t.TempDir())
 		if failed {
 			t.Errorf("two valid generic scanners (>= min) must not hard-fail")
 		}
