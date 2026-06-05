@@ -139,3 +139,79 @@ func TestCatalogBotsAreRepoAgnostic(t *testing.T) {
 		}
 	}
 }
+
+// stackPattern is a high-signal indicator that a catalog bot hardcodes
+// language/ecosystem logic in its DSL instead of delegating it to skills.
+// These strings essentially never appear in prompt prose, so a whole-file
+// line scan is reliable without block-aware parsing. See CLAUDE.md
+// "Universal code bots — stack knowledge lives in skills".
+type stackPattern struct {
+	re   *regexp.Regexp
+	what string
+}
+
+var stackPatterns = []stackPattern{
+	{regexp.MustCompile(`case\s+"?\$\{?(PKG_MGR|pkg_manager)\}?"?\s+in`), "per-ecosystem shell case dispatch"},
+	{regexp.MustCompile(`\bgosec\b`), "hardcoded Go SAST scanner"},
+	{regexp.MustCompile(`\bbandit\b`), "hardcoded Python SAST scanner"},
+	{regexp.MustCompile(`\bgovulncheck\b`), "hardcoded Go SCA scanner"},
+	{regexp.MustCompile(`\bpip-audit\b`), "hardcoded Python SCA scanner"},
+	{regexp.MustCompile(`\bnpm audit\b`), "hardcoded npm SCA scanner"},
+	{regexp.MustCompile(`semgrep\s+--config=p/`), "hardcoded per-language semgrep ruleset"},
+	{regexp.MustCompile(`^\s*has_(js|go|python|npm|pypi|gomod|rust|ruby|php|java)\s*:\s*bool`), "closed-enum tech boolean in schema (emit an open langs/ecosystems list)"},
+	{regexp.MustCompile(`^(agent|tool|judge)\s+run_(js|go|py|python)_(scanners|heuristics)\s*:`), "per-language scanner/heuristic node (use one adaptive agent step)"},
+}
+
+// stackAgnosticExemptions lists catalog bots whose stack-specific DSL is known
+// debt, pending migration to the skill-guided pattern. SHRINK this: every
+// entry is a bot that still hardcodes a language/ecosystem. When a bot is
+// migrated, remove it here — the test then guards it against regression. A bot
+// left in the list that no longer matches any pattern fails the test, forcing
+// the entry to be removed.
+var stackAgnosticExemptions = map[string]string{
+	"secured-renovacy": "per-PKG_MGR case branches + smoke scanners (W2.2 migration pending)",
+	"sec-audit-source": "run_<lang>_scanners nodes + has_X bools (W2.3 migration pending)",
+	"sec-audit-deps":   "run_<eco>_heuristics nodes + has_X bools (W2.4 migration pending)",
+}
+
+func TestCatalogBotsAreStackAgnostic(t *testing.T) {
+	teamBots, _ := filepath.Glob("*/main.bot")
+	demoBots, _ := filepath.Glob("../examples/*/main.bot")
+	botPaths := append(teamBots, demoBots...)
+	if len(botPaths) == 0 {
+		t.Fatal("no catalog bots found under bots/*/main.bot or examples/*/main.bot")
+	}
+
+	matched := map[string]bool{} // bot -> had >=1 stack pattern
+
+	for _, botPath := range botPaths {
+		bot := filepath.Base(filepath.Dir(botPath))
+		data, err := os.ReadFile(botPath)
+		if err != nil {
+			t.Errorf("%s: read: %v", botPath, err)
+			continue
+		}
+		_, exempt := stackAgnosticExemptions[bot]
+		for i, line := range strings.Split(string(data), "\n") {
+			for _, p := range stackPatterns {
+				if !p.re.MatchString(line) {
+					continue
+				}
+				matched[bot] = true
+				if exempt {
+					continue
+				}
+				t.Errorf(
+					"%s:%d hardcodes stack-specific logic: %s\n    %s\n  Move it into the bot's skills and dispatch via an adaptive agent + deterministic gate (see CLAUDE.md \"Universal code bots\").",
+					botPath, i+1, p.what, strings.TrimSpace(line),
+				)
+			}
+		}
+	}
+
+	for bot, reason := range stackAgnosticExemptions {
+		if !matched[bot] {
+			t.Errorf("bot %q is exempt (%q) but no longer hardcodes any stack pattern — remove it from stackAgnosticExemptions so the test guards it against regression.", bot, reason)
+		}
+	}
+}

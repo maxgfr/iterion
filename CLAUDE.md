@@ -186,6 +186,35 @@ Three backends are wired:
 
 **Auto-detection.** When neither the node (`backend:`) nor the workflow (`default_backend:`) names a backend, and `ITERION_DEFAULT_BACKEND` is unset, the resolver in [pkg/backend/model/executor.go:resolveBackendName](pkg/backend/model/executor.go) probes the host for credentials (Claude Code OAuth, ANTHROPIC_API_KEY, OPENAI_API_KEY, AWS, GCP) and picks the first match in `ITERION_BACKEND_PREFERENCE` (default `claude_code,claw` — codex is intentionally excluded). When `model:` is also empty and the resolved backend is `claw`, the runtime substitutes a sensible model spec for the first available provider. The studio surfaces the live detection via the toolbar BackendStatusPill and disables Run when no credential is found. See [docs/backends.md](docs/backends.md).
 
+**System-prompt composition (adaptivity parity).** A node's `system:`
+prompt is the *task*, never the whole operating posture. How it composes
+with the agentic baseline differs by backend, and getting this wrong is
+exactly what made iterion-via-Claude-Code feel dumber than native Claude
+Code:
+- **claude_code** — iterion passes the assembled prompt via
+  `--append-system-prompt`, **never** `--system-prompt`. Replacing would
+  strip Claude Code's native system prompt (TodoWrite/plan-before-act/
+  read-before-edit/parallel-tool/`file:line`/refusal posture); appending
+  keeps it as the base. iterion also emits `--setting-sources user,project`
+  so the target repo's `CLAUDE.md`/settings are honoured (tunable via
+  `ITERION_CLAUDE_CODE_SETTING_SOURCES`). Tool restriction: under the
+  always-on `--permission-mode bypassPermissions`, `--allowedTools` does
+  **not** gate the toolset — claude_code nodes always have the full native
+  toolset (a node's lowercase `tools:` list is a no-op here; the real
+  hard-restrict flag is `--tools`, deliberately unused to preserve
+  adaptivity).
+- **claw** — claw-code-go is a bare API client with **no** native system
+  prompt, so iterion prepends an authored `agenticOperatingPosture` base
+  (the parity substrate) before the node's `system:` text. A node's
+  `tools:` list **does** restrict claw (lowercase names are claw-native).
+
+The mechanism is `delegate.SystemPromptMode` (Standalone | AppendToNative
+| AuthoredBase), set per-backend by `SystemPromptModeForBackend`
+([pkg/backend/delegate/delegate.go](pkg/backend/delegate/delegate.go)).
+This restores adaptivity **without** touching the convergence machinery —
+the `agenticOperatingPosture` "converge and stop / don't re-litigate"
+clause reinforces the asymptote, it does not gate it.
+
 **OpenAI ChatGPT-forfait via claw.** When Codex CLI is signed in via "Sign in with ChatGPT" (`auth_mode: "chatgpt"` in `~/.codex/auth.json`), `claw` can reuse that OAuth token + account_id to drive OpenAI calls through `chatgpt.com/backend-api/codex` — billing against the user's ChatGPT Plus/Pro subscription instead of metered API calls. Precedence: `OPENAI_API_KEY` wins when both are present (explicit env var = deliberate); ChatGPT-OAuth activates when no API key is set, or when `ITERION_OPENAI_USE_OAUTH=1` forces it. `ITERION_OPENAI_USE_OAUTH=0` or any `OPENAI_BASE_URL` disables OAuth. The `version:` header (which OpenAI uses to gate model availability — e.g. gpt-5.5 requires codex-cli ≥ 0.130) is sourced from `ITERION_CODEX_VERSION` or `codex --version`. See the "OpenAI via ChatGPT forfait" section in [docs/backends.md](docs/backends.md). The Anthropic-forfait equivalent is **not** supported (Consumer Terms scope it to Claude Code only).
 
 ### Sandbox
@@ -491,7 +520,7 @@ correct (uncommitted) artifact.
 
 ## Catalog bots are repo-agnostic
 
-Every bot shipped in `examples/` (the catalog `iterion bots list`
+Every bot shipped in `bots/` (the catalog `iterion bots list`
 discovers — doc-align, feature_dev, whole_improve_loop,
 branch_improve_loop, secured-renovacy, whats-next, sec-audit-*, …) is
 a **general-purpose tool that must run on ANY target repository**, in
@@ -529,13 +558,73 @@ capability tools, "iterion's expr / template substitution", `iterion
 report` for surfacing output, `.iter`/`.bot` DSL syntax. The bot is
 *written for* iterion; it must not be *scoped to* iterion.
 
-**Enforcement:** `examples/catalog_universality_test.go` greps every
+**Enforcement:** `bots/catalog_universality_test.go` greps every
 catalog bot's var-default block for the violation patterns above and
 fails CI on a regression. When a default legitimately needs an
 iterion path (rare), add it to the test's allowlist with a comment
 explaining why it's universal-safe. When you touch a catalog bot,
 re-read this section — the iterion repo is the easiest target to
 accidentally overfit to, because it's the one you're staring at.
+
+## Universal code bots — stack knowledge lives in skills
+
+Catalog bots are not only repo-agnostic (layout) — they are
+**stack-agnostic** (language/ecosystem). A bot is universal when adding
+a new language or package manager requires **zero DSL edits**: the
+stack-specific knowledge lives in the bot's **skills**, the (now
+adaptive) agent reads the relevant skill and adapts to whatever repo it
+is pointed at — exactly how native Claude Code works — and
+**deterministic gates verify the right work happened**. This is the
+companion dimension to "Catalog bots are repo-agnostic" above; a catalog
+bot must clear both bars.
+
+**The rule:** a catalog bot's DSL (`vars:`, `prompt:`, `schema:`,
+`tool ... command:`) must not enumerate languages or package managers.
+Violations:
+- Per-ecosystem shell branches in a tool node — `case "$PKG_MGR" in
+  yarn) …; npm) …; go) …`. The skill is the catalogue; the agent
+  dispatches.
+- Per-language tool nodes wired in fixed position — `tool
+  run_go_scanners:` / `run_js_heuristics:` plus a closed router fan-out.
+  One adaptive agent step, guided by the skills, replaces them.
+- Closed enum booleans in a schema — `has_js: bool`, `has_go: bool`,
+  `has_npm: bool`. Emit an open `langs: []` / `ecosystems: []` list.
+- Hardcoded language extension globs (`*.go`, `*.py`, `*.rs`) in `vars:`
+  defaults or `command:` bodies.
+
+**The canonical pattern (skill-guided + deterministic gate):**
+1. A `skills/<topic>.md` (or `skills/lang-<id>.md`) holds the
+   stack-specific knowledge — how to detect the stack, which
+   scanners/commands to run, how to read the results.
+2. An adaptive agent node (claude_code or claw, agentic base restored —
+   see "System-prompt composition" above) reads the matching skill and
+   runs the right commands for the repo in front of it.
+3. A **deterministic gate** (a `tool`/`compute` node, no LLM) verifies
+   coverage: the always-on floor must have produced output, and every
+   detected stack must have produced its expected artifact, else the run
+   degrades/fails with a visible banner. The gate is the determinism —
+   not an LLM judgment, and not a closed DSL enum. (sec-audit-source's
+   `scan_health` is the reference: hard-fail when the generic floor is
+   missing, banner partial per-language coverage.)
+
+This keeps the asymptote/quality guarantees intact while removing every
+language/ecosystem assumption from the workflow graph. Adding Rust to a
+security bot = drop `skills/lang-rust.md`; no `main.bot` or schema edit.
+
+**Not violations** (universal infrastructure, not stack-specific tooling):
+- The always-on generic floor — `gitleaks` / `trivy` / `semgrep
+  --config=auto` in sec-audit-source's `run_generic_scanners`.
+- `npm install -g @anthropic-ai/claude-code` in a sandbox `post_create`
+  (bootstrapping the runtime, not the target's stack).
+- Prose in a `prompt:` block that *mentions* `go test` / `npm install` as
+  an illustrative example — the agent picks its commands from the repo +
+  skill; the example is just guidance.
+
+**Enforcement:** `bots/catalog_universality_test.go` greps every catalog
+bot's `command:` bodies and `schema:` blocks (not only `vars:` defaults)
+for the stack-specific patterns above. When you touch a catalog bot,
+re-read this section and "Catalog bots are repo-agnostic" — iterion (Go)
+is the easiest stack to overfit to, because it's the one you're staring at.
 
 ## Security
 
