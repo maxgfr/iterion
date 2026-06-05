@@ -1,0 +1,380 @@
+## ─────────────────────────────────────────────────────────────────
+## code_review — "Revi", a read-only cross-family code reviewer.
+##
+## Revi reviews the changes on the current branch and PUBLISHES the
+## findings — it never edits, fixes, or commits code. That mutation
+## job belongs to the improve-loops (Billy = branch_improve_loop,
+## Willy = whole_improve_loop). Revi is the PR reviewer: it reads the
+## diff, reasons about it with two independent reviewers from
+## different model families (Claude + GPT), then a single emit step
+## merges + de-duplicates their findings and writes them to the
+## iterion native kanban board (one issue per finding) plus a markdown
+## report.
+##
+## Shape (single pass — no loop, no convergence, nothing to converge
+## ON since Revi changes nothing between iterations):
+##
+##   fan (fan_out_all)
+##     ├─ reviewer_claude  (claude_code, read-only)
+##     └─ reviewer_gpt     (claw + openai/gpt-5.5, read-only tools)
+##   reviewer_* -> emit    (await: wait_all)
+##   emit -> done
+##
+## Cross-family value: an issue flagged by BOTH families is far more
+## likely real than one flagged by a single reviewer. emit raises the
+## confidence of cross-confirmed findings and labels them so the
+## operator can triage agreement first.
+##
+## Scope discipline (matches the loop bots): reviewers diff the
+## WORKING TREE against the merge-base of `base_ref` and HEAD —
+## `git diff $(git merge-base base_ref HEAD)` — so both committed and
+## uncommitted branch changes are reviewed. To review ONLY the
+## uncommitted working tree, run with `--var base_ref=HEAD` (then the
+## merge-base is HEAD and the diff is HEAD-vs-working-tree).
+##
+## Read-only safety: no node mutates source. reviewer_claude is
+## `readonly: true`; reviewer_gpt is given only read tools (bash,
+## read_file, glob, grep — no write_file/file_edit). The single
+## downstream `emit` step writes exactly one file (the report) and
+## creates board issues over MCP; it runs after the parallel reviewers
+## converge, so the one-mutating-branch workspace rule holds.
+##
+## v2 opportunity: very large diffs can overflow a reviewer's context.
+## The loop bots solve this with a deterministic `plan_chunks` shard
+## step; Revi v1 instructs reviewers to triage `git diff --stat` first
+## and prioritise the highest-impact hunks. Port plan_chunks here when
+## reviewing 1k+ LoC PRs becomes common.
+## ─────────────────────────────────────────────────────────────────
+
+vars:
+  workspace_dir: string = "${PROJECT_DIR}"
+
+  ## Branch comparison base. Reviewers audit
+  ## `git diff $(git merge-base base_ref HEAD)` (working tree vs the
+  ## merge-base), so committed + uncommitted branch changes are both in
+  ## scope. Default "main" covers the common GitHub/GitLab/Forgejo
+  ## integration-branch name; pass `--var base_ref=develop` for another
+  ## base, or `--var base_ref=HEAD` to review only uncommitted changes.
+  base_ref: string = "main"
+
+  ## Free-text steering for the reviewers (e.g. "focus on the new auth
+  ## middleware" or "this is a hotfix, prioritise correctness"). Empty
+  ## = review the whole diff against the full production-ready grid.
+  scope_notes: string = ""
+
+  ## Drop findings below this severity (order: low < medium < high <
+  ## critical). Default "low" surfaces everything.
+  severity_threshold: string = "low"
+
+  ## Cap the number of board issues / report rows (highest severity
+  ## first). A capped run says so prominently in the report so it is
+  ## never mistaken for "only N issues exist".
+  max_findings: int = 40
+
+  ## When true, emit creates one native-board issue per kept finding
+  ## (label source:revi). When false, emit writes the markdown report
+  ## only — useful for a read-only PR comment workflow with no board.
+  post_to_board: bool = true
+
+  ## Markdown report destination, repo-root-relative. A neutral
+  ## dotfile the operator can gitignore — deliberately NOT under
+  ## .iterion/ so Revi never scatters engine state into the target
+  ## repo's tree.
+  report_path: string = ".code-review/findings.md"
+
+## ─── Prompts ────────────────────────────────────────────────────
+
+prompt review_system:
+  You are an EXTREMELY demanding, methodical code reviewer performing
+  a PRODUCTION-READY review of the changes on the current branch. You
+  are READ-ONLY: you NEVER edit, fix, format, or commit anything. Your
+  only output is a structured list of findings — fixing is another
+  bot's job.
+
+  REVIEW SCOPE (crucial):
+  1. Enumerate the changed files with
+     `git -C {{vars.workspace_dir}} diff --name-only $(git -C {{vars.workspace_dir}} merge-base {{vars.base_ref}} HEAD)`.
+     This is the working-tree diff against the merge-base of
+     `{{vars.base_ref}}` and HEAD — it captures the changes the branch
+     introduced (committed AND uncommitted). That diff is your scope.
+  2. Read the actual diff with
+     `git -C {{vars.workspace_dir}} diff $(git -C {{vars.workspace_dir}} merge-base {{vars.base_ref}} HEAD)`.
+     On a large diff, read `--stat` first and prioritise the
+     highest-impact hunks; never let context overflow silently.
+  3. You MAY read surrounding code (callers, conventions, the host
+     package) to judge how the change integrates, but you MUST only
+     report issues in the CHANGED lines/files. Pre-existing issues the
+     branch did not touch are out of scope — note them in `summary`
+     at most, never as findings.
+
+  AXES (cover what's relevant to the change):
+    - Correctness: logic bugs, off-by-one, wrong conditionals, missing
+      cases, broken invariants, incorrect API usage.
+    - Security: auth, input validation, secret leaks, injection
+      (shell/SQL/template), path traversal, unsafe deserialization,
+      SSRF.
+    - Concurrency: races, deadlocks, unbalanced locks, double-close,
+      unbounded goroutines/channels, missing timeouts.
+    - Error handling: swallowed errors, missing checks, panics on
+      untrusted input, partial-failure cleanup.
+    - Data: migrations, transactions, idempotence, ordering, data loss
+      on crash.
+    - Performance: O(n^2) on hot paths, N+1 queries, unbounded memory,
+      needless allocations on hot paths.
+    - Tests & maintainability: missing coverage for the new behaviour,
+      dead code, leaky abstractions that will cause bugs.
+
+  ANTI-FAÇADE DISCIPLINE:
+    - Report only REAL, concrete, actionable issues anchored to a
+      specific `file:line`. Every finding must name what breaks and
+      under what condition.
+    - NO stylistic nitpicks, NO "consider renaming", NO speculative
+      "this could maybe" unless it is a genuine latent bug. If you
+      would not block a PR on it, do not file it.
+    - Rate each finding's `confidence` honestly. A guess is `low`.
+    - Finding nothing is a valid, common outcome — return an empty
+      `findings` array and say so in `summary`. Do NOT invent issues
+      to look thorough.
+
+  OUTPUT — emit `review_output`:
+    - `family`: YOUR model family — "claude" or "gpt" (the user
+      message tells you which). Be exact: a wrong family breaks the
+      cross-family agreement signal downstream.
+    - `findings`: a JSON array. Each finding is an object:
+        {
+          "file": "relative/path.go",
+          "line": 142,
+          "severity": "critical" | "high" | "medium" | "low",
+          "category": "correctness" | "security" | "concurrency" |
+                      "error-handling" | "data" | "performance" |
+                      "tests" | "maintainability",
+          "title": "short noun phrase incl. the symptom",
+          "detail": "what breaks, under what condition, why it matters",
+          "suggestion": "one-line remediation sketch (no patch)",
+          "confidence": "low" | "medium" | "high"
+        }
+    - `scanned_areas`: the (axis, file) surfaces you actually audited.
+    - `summary`: one paragraph — overall risk read + anything notable
+      that did not rise to a finding.
+
+prompt review_user_claude:
+  You are the CLAUDE-family reviewer — set `family` to "claude" in your
+  output.
+
+  Workspace: {{vars.workspace_dir}}
+  Base ref:  {{vars.base_ref}}
+  Operator steering (may be empty): {{vars.scope_notes}}
+
+  Run the git scope commands above yourself, read the diff, and produce
+  your `review_output`.
+
+prompt review_user_gpt:
+  You are the GPT-family reviewer — set `family` to "gpt" in your
+  output.
+
+  Workspace: {{vars.workspace_dir}}
+  Base ref:  {{vars.base_ref}}
+  Operator steering (may be empty): {{vars.scope_notes}}
+
+  Use your `bash`, `read_file`, `glob` and `grep` tools to run the git
+  scope commands, read the diff and surrounding code, then produce your
+  `review_output`. You have NO write tools — you are read-only by
+  construction.
+
+prompt emit_system:
+  You merge two INDEPENDENT code reviews (one Claude-family, one
+  GPT-family) into a single de-duplicated finding set and PUBLISH it.
+  You are read-only on source code: you write exactly one report file
+  and (optionally) create kanban issues. You NEVER edit the code under
+  review.
+
+  STEP 1 — MERGE & DEDUPE:
+    - Union the two `findings` arrays.
+    - Two findings are the SAME issue when they share roughly the same
+      `file` and overlapping `line` and describe the same defect — even
+      if worded differently. Collapse them into one.
+    - A finding raised by BOTH families is "cross-confirmed": keep the
+      higher severity, set its confidence to "high", and remember to
+      label/flag it as agreed-by-both. Cross-confirmed findings are the
+      operator's highest-trust signal.
+    - Keep family-unique findings too (one reviewer often sees what the
+      other misses), at their own confidence.
+
+  STEP 2 — THRESHOLD & CAP:
+    - Drop findings whose severity is below `{{vars.severity_threshold}}`
+      (low < medium < high < critical).
+    - Sort by severity (critical first), then cross-confirmed first.
+    - Keep at most `{{vars.max_findings}}`. If you drop any to the cap,
+      state it PROMINENTLY at the top of the report (e.g. "⚠ Capped:
+      showing N of M findings — raise max_findings or narrow scope and
+      re-run") so a capped run is never read as a clean bill of health.
+
+  STEP 3 — BOARD (only when `{{vars.post_to_board}}` is true):
+    - Read `{{vars.workspace_dir}}/.claude/skills/iterion-board.md`
+      for the board MCP tools before your first call.
+    - For each KEPT finding, call `mcp__iterion_board__create_issue`
+      ONCE with:
+        title  — short noun phrase incl. the anchor, e.g.
+                 "SSRF in proxy handler at pkg/server/proxy.go:142"
+        body   — markdown, using the template below
+        state  — "ready"
+        labels — ["severity:<level>", "type:<category>",
+                  "source:revi"] plus "cross-confirmed" when both
+                  families flagged it. Severity/type labels lowercase.
+      One issue per finding. No batching. Capture each returned id;
+      collect any rejected create into `failed_issues` and CONTINUE —
+      never fail the run on a single rejected issue.
+    - When `{{vars.post_to_board}}` is false, skip all board calls and
+      leave `issues_created` empty.
+
+    Body template (markdown):
+    ```
+    ## Anchor
+    `<file>:<line>`
+
+    ## Severity / Type / Confidence
+    `<severity>` · `<category>` · `<confidence>`<cross-confirmed?>
+
+    ## What breaks
+    <detail — the defect and the condition that triggers it>
+
+    ## Fix sketch
+    <suggestion — one paragraph, no patch>
+
+    ## Reviewers
+    <claude | gpt | both>
+    ```
+
+  STEP 4 — REPORT:
+    Write a markdown summary to
+    `{{vars.workspace_dir}}/{{vars.report_path}}` (create parent dirs):
+      # Code review — Revi
+      ## Summary       (counts by severity; cross-confirmed count; cap
+                        banner if any)
+      ## Findings      (table: severity, category, file:line, title,
+                        reviewers, board issue id)
+      ## Agreement     (one line: N of M findings cross-confirmed)
+
+  RETURN `emit_output`:
+    - `report_path`: absolute path of the markdown file you wrote.
+    - `total_findings`: number of findings KEPT after threshold+cap.
+    - `issues_created`: the board issue ids you created (empty when
+      post_to_board is false).
+    - `failed_issues`: any board creates the runtime rejected.
+
+prompt emit_user:
+  Workspace:          {{vars.workspace_dir}}
+  Severity threshold: {{vars.severity_threshold}}
+  Max findings:       {{vars.max_findings}}
+  Post to board:      {{vars.post_to_board}}
+  Report path:        {{vars.report_path}}
+
+  ── Claude-family review ──
+  Summary: {{outputs.reviewer_claude.summary}}
+  Findings (JSON):
+  {{outputs.reviewer_claude.findings}}
+  Areas audited: {{outputs.reviewer_claude.scanned_areas}}
+
+  ── GPT-family review ──
+  Summary: {{outputs.reviewer_gpt.summary}}
+  Findings (JSON):
+  {{outputs.reviewer_gpt.findings}}
+  Areas audited: {{outputs.reviewer_gpt.scanned_areas}}
+
+  Merge, dedupe, threshold, cap, publish, and report per your
+  instructions.
+
+## ─── Schemas ────────────────────────────────────────────────────
+
+schema review_output:
+  ## family is enum-constrained so a hallucinated third value fails
+  ## structured-output validation (triggering the retry path) instead
+  ## of silently breaking the cross-family agreement signal.
+  family: string [enum: "claude", "gpt"]
+  ## findings is a free-form JSON array of finding objects (the schema
+  ## DSL has no object-array type); the per-object shape is specified
+  ## in review_system. emit reads it as JSON.
+  findings: json
+  scanned_areas: string[]
+  summary: string
+
+schema emit_output:
+  report_path: string
+  total_findings: int
+  issues_created: string[]
+  failed_issues: string[]
+
+## ─── Nodes ──────────────────────────────────────────────────────
+
+router fan:
+  mode: fan_out_all
+
+judge reviewer_claude:
+  backend: "claude_code"
+  model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-8}"
+  reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-high}"
+  output: review_output
+  system: review_system
+  user: review_user_claude
+  session: fresh
+  ## Hard read-only: claude_code keeps Read/Grep/Bash for running git +
+  ## reading code, but Write/Edit are removed so the reviewer cannot
+  ## mutate the code it is judging.
+  readonly: true
+
+judge reviewer_gpt:
+  ## Explicit backend pin: "openai/gpt-5.5" only resolves via claw.
+  ## Without it the auto-resolver routes through claude_code, which
+  ## doesn't recognise openai/* models and the schema validator fails.
+  backend: "claw"
+  model: "${ITERION_VIBE_MODEL_GPT:-openai/gpt-5.5}"
+  reasoning_effort: "${ITERION_VIBE_EFFORT_GPT:-high}"
+  output: review_output
+  system: review_system
+  user: review_user_gpt
+  session: fresh
+  ## Read-only toolset only (no write_file / file_edit): the claw
+  ## reviewer can run git + read the workspace but has no structured
+  ## path to edit it.
+  tools: [bash, read_file, glob, grep]
+  tool_max_steps: 30
+
+agent emit:
+  backend: "claude_code"
+  model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-8}"
+  reasoning_effort: "${ITERION_VIBE_EFFORT_EMIT:-medium}"
+  output: emit_output
+  system: emit_system
+  user: emit_user
+  session: fresh
+  ## Converge the two parallel reviewer branches: emit runs once, after
+  ## BOTH reviewers complete, and reads their outputs directly.
+  await: wait_all
+  ## board.read to load the iterion-board skill, board.create +
+  ## board.label to file findings. emit writes the report file via its
+  ## ordinary claude_code tools.
+  capabilities: [board.read, board.create, board.label]
+
+## ─── Workflow ───────────────────────────────────────────────────
+
+workflow code_review:
+  entry: fan
+
+  budget:
+    ## Two read-only reviewer branches run in parallel; emit runs alone
+    ## afterwards.
+    max_parallel_branches: 2
+    max_duration: "45m"
+    max_cost_usd: 20
+
+  ## Fan out to both family reviewers.
+  fan -> reviewer_claude
+  fan -> reviewer_gpt
+
+  ## Converge on emit (await: wait_all). emit reads
+  ## outputs.reviewer_claude / outputs.reviewer_gpt directly, so the
+  ## edges carry no data mapping.
+  reviewer_claude -> emit
+  reviewer_gpt -> emit
+
+  emit -> done

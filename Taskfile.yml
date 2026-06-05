@@ -54,6 +54,7 @@ tasks:
       - cp -R examples/sec-audit-source pkg/cli/templates/dispatch_bots/sec-audit-source
       - cp -R examples/sec-audit-deps pkg/cli/templates/dispatch_bots/sec-audit-deps
       - cp -R examples/secured-renovacy pkg/cli/templates/dispatch_bots/secured-renovacy
+      - cp -R examples/code_review pkg/cli/templates/dispatch_bots/code-review
     sources:
       - pkg/cli/templates/dispatch_bots_default.bot
       - examples/feature_dev/**
@@ -64,6 +65,7 @@ tasks:
       - examples/sec-audit-source/**
       - examples/sec-audit-deps/**
       - examples/secured-renovacy/**
+      - examples/code_review/**
     generates:
       - pkg/cli/templates/dispatch_bots/**
 

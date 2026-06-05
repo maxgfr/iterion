@@ -104,6 +104,11 @@ func defaultAssigneeDispatch() map[string]dispatcher.DispatchConfig {
 	securedRenovacy := dispatcher.DispatchConfig{Vars: map[string]string{
 		"user_prompt": defaultBotIssuePrompt,
 	}}
+	// Revi (code_review) is read-only: the issue body steers what the
+	// reviewers focus on (scope_notes), the diff itself is the input.
+	codeReview := dispatcher.DispatchConfig{Vars: map[string]string{
+		"scope_notes": defaultBotIssuePrompt,
+	}}
 	return map[string]dispatcher.DispatchConfig{
 		"feature-dev":         featureDev,
 		"feature_dev":         featureDev,
@@ -121,6 +126,8 @@ func defaultAssigneeDispatch() map[string]dispatcher.DispatchConfig {
 		"sec_audit_deps":      secAuditDeps,
 		"secured-renovacy":    securedRenovacy,
 		"secured_renovacy":    securedRenovacy,
+		"code-review":         codeReview,
+		"code_review":         codeReview,
 	}
 }
 
@@ -295,6 +302,7 @@ fi
 			"sec-audit-source":    filepath.Join(botsDir, "sec-audit-source"),
 			"sec-audit-deps":      filepath.Join(botsDir, "sec-audit-deps"),
 			"secured-renovacy":    filepath.Join(botsDir, "secured-renovacy"),
+			"code-review":         filepath.Join(botsDir, "code-review"),
 			// snake_case aliases — what whats-next' assign_to_bots
 			// emits (matching the Go pkg naming convention used in
 			// examples/feature_dev/, examples/whole_improve_loop/).
@@ -308,6 +316,7 @@ fi
 			"doc_align":           filepath.Join(botsDir, "doc-align"),
 			"sec_audit_source":    filepath.Join(botsDir, "sec-audit-source"),
 			"sec_audit_deps":      filepath.Join(botsDir, "sec-audit-deps"),
+			"code_review":         filepath.Join(botsDir, "code-review"),
 			"secured_renovacy":    filepath.Join(botsDir, "secured-renovacy"),
 		},
 		AssigneeDispatch: defaultAssigneeDispatch(),
