@@ -185,6 +185,13 @@ prompt review_system:
      `false_positive` (heuristic mis-fired — common cause: test
      fixtures, dev-only paths, false entropy on legitimate
      compressed data).
+     For a `known-vuln` signal (type == "known-vuln") the evidence is a
+     PUBLISHED advisory (id + aliases) emitted by govulncheck / pip-audit
+     / npm audit — treat it as HIGH-confidence: mark `valid` unless the
+     package is dev/test-only, the installed version is genuinely outside
+     the advisory's affected range, or a listed `fixed_version` is
+     already in use. For Go, `called: true` means the vulnerable symbol
+     is actually reachable (more urgent than imported-only).
   3. Compute risk_score:
      - Start from the heuristic_score in the input.
      - Subtract the weight of each false_positive signal.
@@ -236,17 +243,22 @@ prompt review_system:
   ```
 
   Coverage banner (anti-façade — check BEFORE writing the report):
-  - Inspect `heuristics`. If every ecosystem entry has an empty
-    `packages[]` AND its `errors[]` mention "stub" / "implementation
-    pending", the deterministic heuristic layer (typosquat / entropy /
-    install-hook / known-CVE parsing) has NOT run — this pass is
-    enumerate + LLM-review only, NOT a complete supply-chain scan. You
-    MUST headline both the `summary` field and the TOP of the markdown
-    report with: "⚠ Coverage: heuristic scanner layer pending — this is
-    an LLM-review-only pass, NOT a complete dependency/supply-chain
-    audit. See the sec-audit-deps implementation ticket." Never present
-    such a run as a clean or complete audit. When the heuristics carry
-    real signals, no banner is needed.
+  - The known-CVE scanners (govulncheck / pip-audit / npm audit) ARE
+    implemented and emit `known-vuln` signals. The supply-chain MALWARE
+    heuristics (typosquat distance, entry-point entropy, install-hook /
+    network-on-import / obfuscated-string) are NOT yet implemented. So
+    every run currently has partial coverage: you MUST add a one-line
+    "⚠ Coverage: known-CVE scanning active; supply-chain malware
+    heuristics pending (native:3a81df64)" note to the `summary` field and
+    the top of the markdown report. Never imply the malware dimension was
+    checked.
+  - Total-failure case: if EVERY ecosystem entry in `heuristics` has an
+    empty `packages[]` AND its `errors[]` mention "stub"/"pending" (the
+    CVE scanners themselves could not run — tools absent, or no
+    manifests), escalate the headline to: "⚠ Coverage: dependency
+    scanners did not run — this is an LLM-review-only pass, NOT a
+    dependency/supply-chain audit." Never present such a run as clean or
+    complete.
 
   Markdown report:
   - After all board calls, write
@@ -297,19 +309,199 @@ agent enumerate_deps:
 router heuristic_fanout:
   mode: fan_out_all
 
+## run_js_heuristics runs npm audit (JS SCA) and parses its JSON into
+## known-vuln signals. npm audit exits NON-ZERO when it finds vulnerabilities,
+## so the output is captured to .tmp and mv'd into place on a non-empty file
+## (NOT gated on npm's exit code), guarding both an absent npm and a seeded
+## fixture. Handles the v7+ report (vulnerabilities{} map) and the legacy v6
+## report (advisories{} map). (Typosquat / entropy malware heuristics remain
+## pending — see native:3a81df64.)
 tool run_js_heuristics:
-  ## Walks node_modules + lockfile, runs npm audit, computes entropy
-  ## on entry-point files, checks typosquat distance. POSIX shell;
-  ## the heavy lifting is in inline python3.
-  command: `mkdir -p {{vars.scan_dir}} && cd {{vars.workspace_dir}} && (npm audit --json > {{vars.scan_dir}}/npm-audit.json 2>/dev/null || true); python3 -c "import os,json,sys; print(json.dumps({'packages':[],'errors':['stub: run_js_heuristics implementation pending']}))" > {{vars.scan_dir}}/js.json; cat {{vars.scan_dir}}/js.json`
+  command: `mkdir -p {{vars.scan_dir}} && cd {{vars.workspace_dir}} && ([ -f package.json ] && command -v npm >/dev/null 2>&1 && npm audit --json > {{vars.scan_dir}}/npm-audit.json.tmp 2>/dev/null; [ -s {{vars.scan_dir}}/npm-audit.json.tmp ] && mv {{vars.scan_dir}}/npm-audit.json.tmp {{vars.scan_dir}}/npm-audit.json; true); SCAN_DIR={{vars.scan_dir}} python3 -c "
+import os, json
+scan_dir = os.environ.get('SCAN_DIR', '.')
+path = os.path.join(scan_dir, 'npm-audit.json')
+packages, errors = [], []
+SEV = {'critical': 90, 'high': 75, 'moderate': 50, 'low': 25, 'info': 10}
+try:
+    with open(path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+except (OSError, ValueError):
+    data = None
+if isinstance(data, dict) and isinstance(data.get('vulnerabilities'), dict):
+    for name, info in data['vulnerabilities'].items():
+        if not isinstance(info, dict):
+            continue
+        sev = info.get('severity', 'unknown')
+        titles, urls, ids = [], [], []
+        for via in (info.get('via') or []):
+            if isinstance(via, dict):
+                if via.get('title'):
+                    titles.append(via['title'])
+                if via.get('url'):
+                    urls.append(via['url'])
+                if via.get('source') is not None:
+                    ids.append('npm-advisory-%s' % via['source'])
+        desc = '; '.join(titles[:3]) or ('vulnerable dependency %s' % name)
+        packages.append({
+            'ecosystem': 'npm', 'name': info.get('name', name), 'version': '',
+            'signals': [{
+                'type': 'known-vuln', 'id': ids[0] if ids else ('npm:%s' % name),
+                'aliases': urls[:3], 'severity': sev, 'range': info.get('range', ''),
+                'fixed_version': '', 'description': desc[:300],
+                'evidence_file': path, 'heuristic_score': SEV.get(sev, 40),
+            }],
+        })
+elif isinstance(data, dict) and isinstance(data.get('advisories'), dict):
+    for aid, adv in data['advisories'].items():
+        if not isinstance(adv, dict):
+            continue
+        sev = adv.get('severity', 'unknown')
+        packages.append({
+            'ecosystem': 'npm', 'name': adv.get('module_name', ''), 'version': '',
+            'signals': [{
+                'type': 'known-vuln', 'id': 'npm-advisory-%s' % aid,
+                'aliases': [adv['url']] if adv.get('url') else [], 'severity': sev,
+                'fixed_version': adv.get('patched_versions', ''),
+                'description': (adv.get('title') or adv.get('overview') or '')[:300],
+                'evidence_file': path, 'heuristic_score': SEV.get(sev, 40),
+            }],
+        })
+print(json.dumps({'packages': packages, 'errors': errors}))
+" > {{vars.scan_dir}}/js.json; cat {{vars.scan_dir}}/js.json`
   output: heuristic_output
 
+## run_py_heuristics runs pip-audit (Python SCA) and parses its JSON into
+## known-vuln signals. pip-audit JSON is either a top-level list or
+## {dependencies:[{name,version,vulns:[{id,fix_versions,aliases,description}]}]};
+## it carries no severity, so signals default to severity "unknown" for the
+## reviewer to assess. .tmp+mv keeps an absent/failing pip-audit from
+## clobbering prior output (and a seeded fixture from being lost in tests).
 tool run_py_heuristics:
-  command: `mkdir -p {{vars.scan_dir}} && cd {{vars.workspace_dir}} && (pip-audit --format=json --output={{vars.scan_dir}}/pip-audit.json 2>/dev/null || true); python3 -c "import json; print(json.dumps({'packages':[],'errors':['stub: run_py_heuristics implementation pending']}))" > {{vars.scan_dir}}/py.json; cat {{vars.scan_dir}}/py.json`
+  command: `mkdir -p {{vars.scan_dir}} && cd {{vars.workspace_dir}} && ({ [ -f pyproject.toml ] || [ -f requirements.txt ] || [ -f setup.py ] ; } && command -v pip-audit >/dev/null 2>&1 && pip-audit --format=json --output={{vars.scan_dir}}/pip-audit.json.tmp 2>/dev/null && mv {{vars.scan_dir}}/pip-audit.json.tmp {{vars.scan_dir}}/pip-audit.json || true); SCAN_DIR={{vars.scan_dir}} python3 -c "
+import os, json
+scan_dir = os.environ.get('SCAN_DIR', '.')
+path = os.path.join(scan_dir, 'pip-audit.json')
+packages, errors = [], []
+try:
+    with open(path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+except (OSError, ValueError):
+    data = None
+deps = []
+if isinstance(data, list):
+    deps = data
+elif isinstance(data, dict):
+    deps = data.get('dependencies') or []
+for d in deps:
+    if not isinstance(d, dict):
+        continue
+    signals = []
+    for v in (d.get('vulns') or []):
+        if not isinstance(v, dict):
+            continue
+        fixes = v.get('fix_versions') or []
+        signals.append({
+            'type': 'known-vuln', 'id': v.get('id', ''), 'aliases': v.get('aliases', []),
+            'severity': 'unknown', 'fixed_version': fixes[0] if fixes else '',
+            'description': (v.get('description') or '')[:300],
+            'evidence_file': path, 'heuristic_score': 50,
+        })
+    if signals:
+        packages.append({'ecosystem': 'pypi', 'name': d.get('name', ''), 'version': d.get('version', ''), 'signals': signals})
+print(json.dumps({'packages': packages, 'errors': errors}))
+" > {{vars.scan_dir}}/py.json; cat {{vars.scan_dir}}/py.json`
   output: heuristic_output
 
+## run_go_heuristics runs govulncheck (Go's authoritative SCA) and parses
+## its -json STREAM into known-vuln signals. govulncheck emits a series of
+## {config|progress|osv|finding} message objects: `osv` carries the vuln
+## entry (id/summary/aliases/affected), `finding` carries {osv, fixed_version,
+## trace[]} — a finding whose trace has a `function` frame means the vuln is
+## actually CALLED (higher severity) vs imported-only. The scanner writes to
+## a .tmp then mv's into place so an absent/failing govulncheck never clobbers
+## prior output (and a pre-seeded fixture survives in tests).
 tool run_go_heuristics:
-  command: `mkdir -p {{vars.scan_dir}} && cd {{vars.workspace_dir}} && (govulncheck -json ./... > {{vars.scan_dir}}/govulncheck.json 2>/dev/null || true); python3 -c "import json; print(json.dumps({'packages':[],'errors':['stub: run_go_heuristics implementation pending']}))" > {{vars.scan_dir}}/go.json; cat {{vars.scan_dir}}/go.json`
+  command: `mkdir -p {{vars.scan_dir}} && cd {{vars.workspace_dir}} && ([ -f go.mod ] && command -v govulncheck >/dev/null 2>&1 && govulncheck -json ./... > {{vars.scan_dir}}/govulncheck.json.tmp 2>/dev/null && mv {{vars.scan_dir}}/govulncheck.json.tmp {{vars.scan_dir}}/govulncheck.json || true); SCAN_DIR={{vars.scan_dir}} python3 -c "
+import os, json
+scan_dir = os.environ.get('SCAN_DIR', '.')
+path = os.path.join(scan_dir, 'govulncheck.json')
+packages, errors = [], []
+SEV_BASE = {'high': 75, 'medium': 50}
+def iter_objs(text):
+    dec = json.JSONDecoder()
+    i, n = 0, len(text)
+    while i < n:
+        while i < n and text[i] in ' \t\r\n':
+            i += 1
+        if i >= n:
+            break
+        try:
+            obj, end = dec.raw_decode(text, i)
+        except ValueError:
+            break
+        yield obj
+        i = end
+try:
+    with open(path, 'r', encoding='utf-8') as f:
+        text = f.read()
+except OSError:
+    text = ''
+if text.strip():
+    osvs, findings = {}, {}
+    try:
+        for msg in iter_objs(text):
+            if not isinstance(msg, dict):
+                continue
+            if isinstance(msg.get('osv'), dict):
+                e = msg['osv']
+                if e.get('id'):
+                    osvs[e['id']] = e
+            elif isinstance(msg.get('finding'), dict):
+                fnd = msg['finding']
+                oid = fnd.get('osv', '')
+                if not oid:
+                    continue
+                trace = fnd.get('trace') or []
+                called = any(isinstance(fr, dict) and fr.get('function') for fr in trace)
+                cur = findings.get(oid) or {'called': False, 'frames': [], 'fixed': ''}
+                cur['called'] = cur['called'] or called
+                for fr in trace:
+                    if isinstance(fr, dict) and fr.get('module'):
+                        cur['frames'].append(fr)
+                if fnd.get('fixed_version'):
+                    cur['fixed'] = fnd['fixed_version']
+                findings[oid] = cur
+    except Exception as ex:
+        errors.append('govulncheck parse error: %s' % ex)
+    for oid, f in findings.items():
+        e = osvs.get(oid, {})
+        mod = ''
+        for a in (e.get('affected') or []):
+            pkg = a.get('package') or {}
+            if pkg.get('name'):
+                mod = pkg['name']
+                break
+        if not mod and f['frames']:
+            mod = f['frames'][0].get('module', '')
+        ver = ''
+        for fr in f['frames']:
+            if fr.get('module') == mod:
+                ver = fr.get('version', '')
+                break
+        sev = 'high' if f['called'] else 'medium'
+        score = SEV_BASE[sev] + (10 if f['called'] else 0)
+        packages.append({
+            'ecosystem': 'gomod', 'name': mod or 'unknown', 'version': ver,
+            'signals': [{
+                'type': 'known-vuln', 'id': oid, 'aliases': e.get('aliases', []),
+                'severity': sev, 'called': f['called'], 'fixed_version': f.get('fixed', ''),
+                'description': (e.get('summary') or e.get('details') or '')[:300],
+                'evidence_file': path, 'heuristic_score': min(score, 100),
+            }],
+        })
+print(json.dumps({'packages': packages, 'errors': errors}))
+" > {{vars.scan_dir}}/go.json; cat {{vars.scan_dir}}/go.json`
   output: heuristic_output
 
 tool run_generic_heuristics:
