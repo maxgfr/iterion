@@ -147,10 +147,16 @@ func RunStudio(ctx context.Context, opts StudioOptions, p *Printer) error {
 		dir, _ = os.Getwd()
 	}
 
-	// Look for examples directory.
-	examplesDir := filepath.Join(dir, "examples")
+	// On-disk source for the studio's quick-open "Bots" panel + the
+	// embedded-recipe load override. Prefer the productised bots/ dir
+	// (where the team now lives); fall back to the legacy examples/ dir
+	// for repos that still keep workflows there.
+	examplesDir := filepath.Join(dir, "bots")
 	if _, err := os.Stat(examplesDir); err != nil {
-		examplesDir = ""
+		examplesDir = filepath.Join(dir, "examples")
+		if _, err := os.Stat(examplesDir); err != nil {
+			examplesDir = ""
+		}
 	}
 
 	// Resolve the bot-discovery roots ONCE so the HTTP /api/v1/bots
@@ -260,7 +266,7 @@ func RunStudio(ctx context.Context, opts StudioOptions, p *Printer) error {
 		p.Header("Iterion Studio")
 		p.KV("URL", fmt.Sprintf("http://localhost:%d", opts.Port))
 		if examplesDir != "" {
-			p.KV("Examples", examplesDir)
+			p.KV("Bots", examplesDir)
 		}
 		p.Blank()
 		p.Line("  Press Ctrl+C to stop.")

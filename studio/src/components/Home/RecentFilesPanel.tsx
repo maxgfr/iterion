@@ -152,7 +152,7 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
             ) : (
               <ChevronRightIcon className="w-3 h-3" />
             )}
-            <span>Examples ({examples.length})</span>
+            <span>Bots ({examples.length})</span>
           </button>
           {examplesOpen && (
             <ul className="mt-1 space-y-0.5">

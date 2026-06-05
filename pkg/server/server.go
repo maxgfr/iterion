@@ -1300,17 +1300,21 @@ func (s *Server) handleOpenFile(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := os.ReadFile(absPath)
 	if err != nil {
-		// Embedded-recipe fallback: the example picker sets
-		// currentFilePath to "examples/<name>" after loading an
-		// embedded recipe (see studio Toolbar handlePickFile). When
-		// the project has no on-disk examples/ dir, every later flow
-		// that re-reads via /files/open (LaunchView's pre-launch
+		// Embedded-recipe fallback: the bot picker sets currentFilePath
+		// to "bots/<name>" (legacy "examples/<name>") after loading a
+		// binary-embedded recipe (see studio Toolbar handlePickFile).
+		// When the project has no matching on-disk file, every later
+		// flow that re-reads via /files/open (LaunchView's pre-launch
 		// document fetch, the file watcher, hot-reload) would 404
-		// without this fallback.
-		if filepath.Dir(req.Path) == "examples" {
-			if embedded, ok := bots.Get(filepath.Base(req.Path)); ok {
-				data = embedded
-				err = nil
+		// without this fallback. Strip the prefix and resolve the
+		// remainder (e.g. "feature_dev/main.bot") against the embed.
+		for _, prefix := range []string{"bots/", "examples/"} {
+			if rest := strings.TrimPrefix(req.Path, prefix); rest != req.Path {
+				if embedded, ok := bots.Get(rest); ok {
+					data = embedded
+					err = nil
+				}
+				break
 			}
 		}
 	}

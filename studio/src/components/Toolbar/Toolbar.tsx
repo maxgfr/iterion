@@ -115,13 +115,13 @@ export default function Toolbar() {
           const result = await api.loadExample(path);
           setDocument(result.document);
           setDiagnostics(result.diagnostics);
-          // Examples live at <WorkDir>/examples/<name>, so the same
-          // relative path is reachable via the file API. Setting it
-          // here lets the user Save edits back to the example file
-          // and — more importantly — enables the Launch run button,
-          // which would otherwise be disabled with "Save the workflow
-          // first" on every example.
-          setCurrentFilePath(`examples/${path}`);
+          // The productised bots live at <WorkDir>/bots/<name>, so the
+          // same relative path is reachable via the file API. Setting it
+          // here lets the user Save edits back to the bot file and —
+          // more importantly — enables the Launch run button, which
+          // would otherwise be disabled with "Save the workflow first"
+          // on every bot.
+          setCurrentFilePath(`bots/${path}`);
           // loadExample doesn't return raw .iter source (it returns the
           // parsed document only). Cloud-mode resume after launching
           // an example would need a re-open to populate currentSource.
