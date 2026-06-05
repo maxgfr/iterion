@@ -124,7 +124,7 @@ export default function IRNode({ data }: NodeProps<IRNodeType>) {
   return (
     <div
       className={`relative rounded-xl border px-3 py-2 shadow-sm w-[200px] text-xs transition-colors duration-300 ${c.bg} ${c.border} ${c.text} ${
-        selected ? "ring-2 ring-accent" : ""
+        selected ? "ir-node-selected" : ""
       }`}
       title={idleTitle}
       // Inner ring tinted by the selected iteration index so the user

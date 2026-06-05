@@ -294,6 +294,16 @@ select:focus:not(:focus-visible) {
   outline: none;
 }
 
+/* Run-canvas node selection. IRNode sets an inline `box-shadow` (the
+ * per-iteration tint) which overrides any Tailwind `ring-*` (same CSS
+ * property), so executed nodes showed no selection. `outline` is an
+ * independent property that coexists with it; `outline-offset` keeps it
+ * clear of the status border. Mirrors :focus-visible above. */
+.ir-node-selected {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 /* =============================================================================
  * Animations (existing, preserved)
  * ========================================================================== */
