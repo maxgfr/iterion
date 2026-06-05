@@ -109,11 +109,14 @@ export async function validate(
 }
 
 export interface ExampleEntry {
-  /** Relative load name, e.g. "whats-next/main.bot". */
+  /** Relative load name, e.g. "whats-next/main.bot". The technical bot
+   *  id is its first path segment ("whats-next"). */
   name: string;
   /** Bundle persona (manifest display_name), e.g. "Nexie". Empty for
    *  embedded recipes that ship no on-disk manifest. */
   display_name?: string;
+  /** One-line manifest description, condensed server-side. */
+  description?: string;
 }
 
 // The /examples endpoint returns the first-class bots as

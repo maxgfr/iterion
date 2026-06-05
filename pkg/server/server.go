@@ -16,6 +16,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -919,7 +920,7 @@ func (s *Server) handleListExamples(w http.ResponseWriter, _ *http.Request) {
 			// manifest.yaml declares a display_name persona. Drops loose
 			// .bot files (smoke tests) and un-personified bundles so the
 			// Home panel shows exactly the named team.
-			persona, ok := firstClassPersona(path)
+			persona, desc, ok := firstClassBot(path)
 			if !ok {
 				return nil
 			}
@@ -934,7 +935,7 @@ func (s *Server) handleListExamples(w http.ResponseWriter, _ *http.Request) {
 				return nil
 			}
 			seen[rel] = struct{}{}
-			entries = append(entries, exampleEntry{Name: rel, DisplayName: persona})
+			entries = append(entries, exampleEntry{Name: rel, DisplayName: persona, Description: desc})
 			return nil
 		})
 	}
@@ -950,6 +951,16 @@ func (s *Server) handleListExamples(w http.ResponseWriter, _ *http.Request) {
 		entries = append(entries, exampleEntry{Name: p})
 	}
 
+	// Present the bots in the curated team order (Nexie first), not the
+	// filesystem walk order.
+	sort.SliceStable(entries, func(i, j int) bool {
+		ri, rj := botRosterRank(entries[i].Name), botRosterRank(entries[j].Name)
+		if ri != rj {
+			return ri < rj
+		}
+		return entries[i].Name < entries[j].Name
+	})
+
 	if entries == nil {
 		entries = []exampleEntry{}
 	}
@@ -958,27 +969,81 @@ func (s *Server) handleListExamples(w http.ResponseWriter, _ *http.Request) {
 
 // exampleEntry is one bot surfaced by the studio Home "Bots" panel:
 // its relative load name (e.g. "whats-next/main.bot") plus the manifest
-// persona the SPA shows in place of the raw path.
+// persona + a one-line description the SPA shows in place of the raw
+// path. (The technical name is the first path segment, derived SPA-side.)
 type exampleEntry struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"display_name,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
-// firstClassPersona returns the display_name persona of the bot bundle
-// whose entry point is mainBotPath, and whether it is first-class — a
-// "main.bot" whose sibling manifest.yaml declares a non-empty
+// firstClassBot returns the persona + a one-line description of the bot
+// bundle whose entry point is mainBotPath, and whether it is first-class
+// — a "main.bot" whose sibling manifest.yaml declares a non-empty
 // display_name. The studio Home lists only first-class bots, so loose
 // .bot files (smoke tests) and un-personified bundles stay out.
-func firstClassPersona(mainBotPath string) (string, bool) {
+func firstClassBot(mainBotPath string) (persona, description string, ok bool) {
 	if filepath.Base(mainBotPath) != "main.bot" {
-		return "", false
+		return "", "", false
 	}
 	m, err := bundle.LoadManifest(filepath.Join(filepath.Dir(mainBotPath), "manifest.yaml"))
 	if err != nil || m == nil {
-		return "", false
+		return "", "", false
 	}
-	persona := strings.TrimSpace(m.DisplayName)
-	return persona, persona != ""
+	persona = strings.TrimSpace(m.DisplayName)
+	if persona == "" {
+		return "", "", false
+	}
+	return persona, shortDescription(m.Description), true
+}
+
+// shortDescription condenses a multi-line manifest description into a
+// single tidy line for the Home: whitespace collapsed, trimmed to the
+// first sentence (or ~140 chars) so the panel rows stay compact.
+func shortDescription(desc string) string {
+	d := strings.Join(strings.Fields(desc), " ")
+	if d == "" {
+		return ""
+	}
+	if i := strings.Index(d, ". "); i > 0 && i < 160 {
+		return d[:i+1]
+	}
+	const max = 140
+	if len(d) > max {
+		return strings.TrimSpace(d[:max-1]) + "…"
+	}
+	return d
+}
+
+// botRosterOrder is the curated team order the studio surfaces present
+// bots in — Nexie first, then the build / improve / doc / review /
+// security line (matches the README "Meet the legion" table). Bots
+// outside the roster sort after it, alphabetically.
+var botRosterOrder = []string{
+	"whats-next",          // Nexie
+	"feature_dev",         // Featurly
+	"branch_improve_loop", // Billy
+	"whole_improve_loop",  // Willy
+	"doc-align",           // Doki
+	"code_review",         // Revi
+	"sec-audit-source",    // Seki
+	"sec-audit-deps",      // Depsy
+	"secured-renovacy",    // Renovacy
+}
+
+// botRosterRank ranks an example name ("<bot-id>/main.bot") by its
+// position in botRosterOrder; unknown bots rank last.
+func botRosterRank(name string) int {
+	id := name
+	if i := strings.IndexByte(name, '/'); i >= 0 {
+		id = name[:i]
+	}
+	for idx, b := range botRosterOrder {
+		if b == id {
+			return idx
+		}
+	}
+	return len(botRosterOrder)
 }
 
 func (s *Server) handleLoadExample(w http.ResponseWriter, r *http.Request) {

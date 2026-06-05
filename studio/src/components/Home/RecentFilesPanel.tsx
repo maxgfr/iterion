@@ -158,26 +158,45 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
           {examplesOpen && (
             <ul className="mt-1 space-y-0.5">
               {examples.map((ex) => {
-                // Render the persona (manifest display_name) + the bot's
-                // emoji; the technical name behind it (e.g. "whats-next")
-                // drives the emoji/colour lookup. Falls back to the raw
-                // name for an embedded recipe with no on-disk persona.
-                const identity = botIdentity(ex.name.split("/")[0]);
+                // Persona (manifest display_name) + emoji on line 1, with
+                // the technical name (the first path segment, e.g.
+                // "whats-next") muted beside it and a one-line description
+                // below. The technical id also drives the emoji/colour
+                // lookup. Falls back to the raw name for an embedded
+                // recipe with no on-disk persona.
+                const techName = ex.name.split("/")[0];
+                const identity = botIdentity(techName);
                 return (
                   <li key={ex.name}>
                     <button
                       onClick={() => handleOpenExample(ex.name)}
                       disabled={busy}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-surface-2 text-left text-xs disabled:opacity-50"
+                      className="w-full flex items-start gap-2 px-2 py-1.5 rounded hover:bg-surface-2 text-left disabled:opacity-50"
                     >
                       <span
-                        className="text-sm leading-none shrink-0"
+                        className="text-sm leading-none shrink-0 mt-0.5"
                         aria-hidden="true"
                       >
                         {identity.emoji}
                       </span>
-                      <span className={`truncate font-medium ${identity.color}`}>
-                        {ex.display_name || ex.name}
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline gap-1.5">
+                          <span
+                            className={`truncate font-medium text-xs ${identity.color}`}
+                          >
+                            {ex.display_name || ex.name}
+                          </span>
+                          {ex.display_name && (
+                            <span className="font-mono text-fg-subtle text-[10px] truncate shrink-0">
+                              {techName}
+                            </span>
+                          )}
+                        </span>
+                        {ex.description && (
+                          <span className="block truncate text-fg-muted text-[11px] mt-0.5">
+                            {ex.description}
+                          </span>
+                        )}
                       </span>
                     </button>
                   </li>
