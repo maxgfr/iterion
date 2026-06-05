@@ -3981,7 +3981,10 @@ def lookup(name):
         if name in [a.lower() for a in e.get('aliases', [])]:
             return e
     return None
-subprocess.run(['sh', '-c', 'git reset --hard HEAD'], stdout=2, stderr=2)
+rc = subprocess.run(['sh', '-c', 'git reset --hard HEAD'], stdout=2, stderr=2).returncode
+if rc != 0:
+    print(json.dumps({'success': False, 'output': 'family ' + fam + ' revert FAILED: git reset --hard HEAD exited ' + str(rc) + ' - worktree may be dirty, operator must intervene'}))
+    sys.exit(1)
 prof = lookup(pm) or {}
 ri = prof.get('revert_install')
 if ri:
