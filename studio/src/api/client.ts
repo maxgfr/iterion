@@ -108,8 +108,24 @@ export async function validate(
   });
 }
 
-export async function listExamples(): Promise<string[]> {
+export interface ExampleEntry {
+  /** Relative load name, e.g. "whats-next/main.bot". */
+  name: string;
+  /** Bundle persona (manifest display_name), e.g. "Nexie". Empty for
+   *  embedded recipes that ship no on-disk manifest. */
+  display_name?: string;
+}
+
+// The /examples endpoint returns the first-class bots as
+// {name, display_name} objects (the Home shows the persona).
+export async function listExampleEntries(): Promise<ExampleEntry[]> {
   return request("/examples");
+}
+
+// listExamples keeps the legacy string[] shape (relative names) for the
+// FilePicker + CanvasEmpty surfaces that don't render the persona.
+export async function listExamples(): Promise<string[]> {
+  return (await listExampleEntries()).map((e) => e.name);
 }
 
 export async function loadExample(

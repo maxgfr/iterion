@@ -15,18 +15,19 @@ import { useTabsStore } from "@/store/tabs";
 import { useUIStore } from "@/store/ui";
 import { useConfirm } from "@/hooks/useConfirm";
 import { basename } from "@/lib/format";
+import { botIdentity } from "@/lib/personas";
 import { EmptyState } from "@/components/ui/EmptyState";
 
-// Examples are static for the lifetime of the server process, so cache
-// the first successful response and reuse it on every subsequent mount.
-// Avoids a network round-trip every time the user lands on /.
-let examplesCache: string[] | null = null;
-let examplesPromise: Promise<string[]> | null = null;
+// First-class bots are static for the lifetime of the server process, so
+// cache the first successful response and reuse it on every subsequent
+// mount. Avoids a network round-trip every time the user lands on /.
+let examplesCache: api.ExampleEntry[] | null = null;
+let examplesPromise: Promise<api.ExampleEntry[]> | null = null;
 
-function loadExamples(): Promise<string[]> {
+function loadExamples(): Promise<api.ExampleEntry[]> {
   if (examplesCache) return Promise.resolve(examplesCache);
   if (!examplesPromise) {
-    examplesPromise = api.listExamples().then((list) => {
+    examplesPromise = api.listExampleEntries().then((list) => {
       examplesCache = list;
       return list;
     }).catch((err) => {
@@ -59,7 +60,7 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
   const clearRecents = useRecentsStore((s) => s.clearRecents);
   const addToast = useUIStore((s) => s.addToast);
 
-  const [examples, setExamples] = useState<string[]>([]);
+  const [examples, setExamples] = useState<api.ExampleEntry[]>([]);
   const [examplesOpen, setExamplesOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -156,18 +157,32 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
           </button>
           {examplesOpen && (
             <ul className="mt-1 space-y-0.5">
-              {examples.map((name) => (
-                <li key={name}>
-                  <button
-                    onClick={() => handleOpenExample(name)}
-                    disabled={busy}
-                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-surface-2 text-left text-xs disabled:opacity-50"
-                  >
-                    <FileIcon className="w-3.5 h-3.5 text-fg-subtle shrink-0" />
-                    <span className="truncate">{name}</span>
-                  </button>
-                </li>
-              ))}
+              {examples.map((ex) => {
+                // Render the persona (manifest display_name) + the bot's
+                // emoji; the technical name behind it (e.g. "whats-next")
+                // drives the emoji/colour lookup. Falls back to the raw
+                // name for an embedded recipe with no on-disk persona.
+                const identity = botIdentity(ex.name.split("/")[0]);
+                return (
+                  <li key={ex.name}>
+                    <button
+                      onClick={() => handleOpenExample(ex.name)}
+                      disabled={busy}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-surface-2 text-left text-xs disabled:opacity-50"
+                    >
+                      <span
+                        className="text-sm leading-none shrink-0"
+                        aria-hidden="true"
+                      >
+                        {identity.emoji}
+                      </span>
+                      <span className={`truncate font-medium ${identity.color}`}>
+                        {ex.display_name || ex.name}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

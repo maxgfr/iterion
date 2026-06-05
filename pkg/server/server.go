@@ -25,6 +25,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/auth/oidc"
 	"github.com/SocialGouv/iterion/pkg/backend/detect"
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
+	"github.com/SocialGouv/iterion/pkg/bundle"
 	"github.com/SocialGouv/iterion/pkg/cloud/metrics"
 	"github.com/SocialGouv/iterion/pkg/dispatcher"
 	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
@@ -885,18 +886,20 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListExamples(w http.ResponseWriter, _ *http.Request) {
-	// Two sources, merged + de-duplicated:
-	//   1. <ExamplesDir>/*.iter — examples shipped alongside the workdir
-	//      (e.g. <repo>/examples/ when the user opens an iterion repo).
-	//   2. The recipes embedded in the binary (examples/embed.go), so a
-	//      fresh project that doesn't ship its own examples still gets
-	//      the canonical built-ins (vibe_*, ci_fix_until_green,
-	//      secured-renovacy, …) in the studio's example picker.
+	// Two sources, merged + de-duplicated, surfaced as the studio Home's
+	// "Bots" quick-open panel:
+	//   1. <ExamplesDir>/<bot>/main.bot — first-class bots shipped on
+	//      disk (e.g. <repo>/bots/ when the user opens an iterion repo),
+	//      filtered to bundles whose manifest declares a display_name
+	//      persona (see isFirstClassBot).
+	//   2. The bot recipes embedded in the binary (bots/embed.go), so a
+	//      fresh project that ships none of its own still gets the
+	//      canonical built-ins (feature_dev, whole/branch_improve_loop).
 	// On-disk wins on name collision: a project that overrides an
-	// embedded recipe by placing one with the same basename in its
-	// examples/ dir gets to override what the SPA loads.
+	// embedded recipe by placing one with the same relative name in its
+	// bots/ dir gets to override what the SPA loads.
 	seen := map[string]struct{}{}
-	var names []string
+	var entries []exampleEntry
 
 	if dir := s.cfg.ExamplesDir; dir != "" {
 		_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -912,6 +915,14 @@ func (s *Server) handleListExamples(w http.ResponseWriter, _ *http.Request) {
 			if !workflowfile.IsWorkflowFile(d.Name()) {
 				return nil
 			}
+			// Only surface first-class bots — a bundle's main.bot whose
+			// manifest.yaml declares a display_name persona. Drops loose
+			// .bot files (smoke tests) and un-personified bundles so the
+			// Home panel shows exactly the named team.
+			persona, ok := firstClassPersona(path)
+			if !ok {
+				return nil
+			}
 			rel, err := filepath.Rel(dir, path)
 			if err != nil {
 				return nil
@@ -923,7 +934,7 @@ func (s *Server) handleListExamples(w http.ResponseWriter, _ *http.Request) {
 				return nil
 			}
 			seen[rel] = struct{}{}
-			names = append(names, rel)
+			entries = append(entries, exampleEntry{Name: rel, DisplayName: persona})
 			return nil
 		})
 	}
@@ -933,13 +944,41 @@ func (s *Server) handleListExamples(w http.ResponseWriter, _ *http.Request) {
 			continue
 		}
 		seen[p] = struct{}{}
-		names = append(names, p)
+		// Embedded recipes carry no manifest in the binary, so no persona
+		// here; the on-disk walk above already surfaced (with its persona)
+		// any bundle the workspace actually ships.
+		entries = append(entries, exampleEntry{Name: p})
 	}
 
-	if names == nil {
-		names = []string{}
+	if entries == nil {
+		entries = []exampleEntry{}
 	}
-	writeJSON(w, names)
+	writeJSON(w, entries)
+}
+
+// exampleEntry is one bot surfaced by the studio Home "Bots" panel:
+// its relative load name (e.g. "whats-next/main.bot") plus the manifest
+// persona the SPA shows in place of the raw path.
+type exampleEntry struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name,omitempty"`
+}
+
+// firstClassPersona returns the display_name persona of the bot bundle
+// whose entry point is mainBotPath, and whether it is first-class — a
+// "main.bot" whose sibling manifest.yaml declares a non-empty
+// display_name. The studio Home lists only first-class bots, so loose
+// .bot files (smoke tests) and un-personified bundles stay out.
+func firstClassPersona(mainBotPath string) (string, bool) {
+	if filepath.Base(mainBotPath) != "main.bot" {
+		return "", false
+	}
+	m, err := bundle.LoadManifest(filepath.Join(filepath.Dir(mainBotPath), "manifest.yaml"))
+	if err != nil || m == nil {
+		return "", false
+	}
+	persona := strings.TrimSpace(m.DisplayName)
+	return persona, persona != ""
 }
 
 func (s *Server) handleLoadExample(w http.ResponseWriter, r *http.Request) {
