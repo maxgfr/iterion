@@ -162,6 +162,50 @@ resolve and the lockfile is rewritten.
 - **maven:** `mvn dependency:resolve` (refreshes the local cache)
 - **gradle:** `gradle dependencies --refresh-dependencies`
 
+## Family fast-path catalogue (machine-readable — consumed by family_upgrade / family_validate / family_revert)
+
+The deterministic Phase-2 "family" tools read the JSON block below to
+dispatch by package manager — there is NO per-manager `case` in the
+workflow DSL. Adding or amending a manager is a skill edit here; the
+`.bot` graph never changes. Each entry:
+
+- `aliases` — every `pkg_manager` id that maps to this entry (lower-cased
+  on lookup).
+- `spec_form` — how a `name`+`target` pair becomes one upgrade spec:
+  `@` → `name@target`, `==` → `name==target`, `:` → `name:target`,
+  `per-package` → one full `upgrade` invocation per package (joined `&&`),
+  filling `{name}` / `{version}`.
+- `upgrade` — bulk upgrade command; `{specs}` is the space-joined spec
+  list (or `{name}`/`{version}` for `per-package`).
+- `install` — resolve/refresh after the upgrade (the family_validate
+  install gate; a conflict here fails the family).
+- `smoke` — post-install smoke strategy: `compiled` runs `smoke_cmd`
+  (build/typecheck); `resolve` treats a clean install as the smoke
+  (interpreted langs); `node-script` runs the first of
+  typecheck/tsc/build/test present in package.json via `script_run`
+  (`{script}` placeholder).
+- `revert_install` — reinstall after `git reset --hard` on a failed
+  family (node managers only; others need no reinstall).
+- `kind: "manifest-surgery"` — no clean one-shot pin CLI; the family is
+  deferred to the per-package agentic loop (graceful, not skipped).
+
+<!-- iterion:pkgmgr
+[
+  {"aliases":["yarn","yarn-berry","yarn3","yarn4"],"spec_form":"@","upgrade":"yarn up {specs}","install":"yarn install","smoke":"node-script","script_run":"yarn {script}","revert_install":"yarn install"},
+  {"aliases":["npm"],"spec_form":"@","upgrade":"npm install {specs}","install":"npm install","smoke":"node-script","script_run":"npm run {script}","revert_install":"npm install"},
+  {"aliases":["pnpm"],"spec_form":"@","upgrade":"pnpm update {specs}","install":"pnpm install","smoke":"node-script","script_run":"pnpm {script}","revert_install":"pnpm install"},
+  {"aliases":["bun"],"spec_form":"@","upgrade":"bun update {specs}","install":"bun install","smoke":"node-script","script_run":"bun run {script}","revert_install":"bun install"},
+  {"aliases":["go","go-modules","gomod"],"spec_form":"@","upgrade":"go get {specs} && go mod tidy","install":"go mod download","smoke":"compiled","smoke_cmd":"go build ./... && go vet ./..."},
+  {"aliases":["cargo"],"spec_form":"@","upgrade":"cargo add {specs}","install":"cargo fetch","smoke":"compiled","smoke_cmd":"cargo check"},
+  {"aliases":["poetry"],"spec_form":"@","upgrade":"poetry add {specs}","install":"poetry install --no-interaction","smoke":"resolve"},
+  {"aliases":["pip","pip-poetry"],"spec_form":"==","upgrade":"python3 -m pip install --upgrade {specs}","install":"python3 -m pip check","smoke":"resolve"},
+  {"aliases":["uv"],"spec_form":"==","upgrade":"uv add {specs}","install":"uv sync","smoke":"resolve"},
+  {"aliases":["composer"],"spec_form":":","upgrade":"composer require --no-interaction --no-scripts {specs}","install":"composer install --no-interaction --no-scripts","smoke":"resolve"},
+  {"aliases":["nuget","dotnet"],"spec_form":"per-package","upgrade":"dotnet add package {name} --version {version}","install":"dotnet restore","smoke":"compiled","smoke_cmd":"dotnet build --nologo"},
+  {"aliases":["bundler","maven","gradle","mix","swift","nimble","pub","conan","hex"],"kind":"manifest-surgery"}
+]
+-->
+
 ## Vulnerability audit
 
 JSON-emitting auditors are preferred so the agent can parse findings

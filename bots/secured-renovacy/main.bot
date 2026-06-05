@@ -3778,65 +3778,51 @@ tool select_family:
 ## Identical mechanics to batch_upgrade_patches; the family-specific commit
 ## subject comes later in family_commit.
 tool family_upgrade:
-  command: `set -euo pipefail
-cd {{input.workspace_dir}} >&2
-PKG_MGR={{input.pkg_manager}}
-PKG_MGR=$(printf '%s' "$PKG_MGR" | tr 'A-Z' 'a-z')
-MEMBERS={{input.members}}
-# Most managers take name@target (npm/yarn/pnpm/bun/go/cargo/poetry); the
-# pip/uv families want PEP 508 name==target, composer wants name:target, and
-# dotnet/nuget take one --version per package (built in its branch). Targets
-# are concrete versions from the pipeline, so no range metacharacters reach
-# the shell. SPECS (the @ form) is the canonical record for upgraded_specs.
-SPECS=$(printf '%s' "$MEMBERS" | jq -r '.[] | select(.name and .target) | "\(.name)@\(.target)"' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
-if [ -z "$SPECS" ]; then
-  printf '{"success":true,"output":"no specs to upgrade","upgraded_specs":[]}\n'
-  exit 0
-fi
-case "$PKG_MGR" in
-  yarn|yarn-berry|yarn3|yarn4) CMD="yarn up $SPECS" ;;
-  npm)                 CMD="npm install $SPECS" ;;
-  pnpm)                CMD="pnpm update $SPECS" ;;
-  bun)                 CMD="bun update $SPECS" ;;
-  go|go-modules|gomod) CMD="go get $SPECS && go mod tidy" ;;
-  cargo)               CMD="cargo add $SPECS" ;;
-  poetry)              CMD="poetry add $SPECS" ;;
-  pip|pip-poetry)
-    EQ=$(printf '%s' "$MEMBERS" | jq -r '.[] | select(.name and .target) | "\(.name)==\(.target)"' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
-    CMD="python3 -m pip install --upgrade $EQ" ;;
-  uv)
-    EQ=$(printf '%s' "$MEMBERS" | jq -r '.[] | select(.name and .target) | "\(.name)==\(.target)"' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
-    CMD="uv add $EQ" ;;
-  composer)
-    COL=$(printf '%s' "$MEMBERS" | jq -r '.[] | select(.name and .target) | "\(.name):\(.target)"' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
-    CMD="composer require --no-interaction --no-scripts $COL" ;;
-  nuget|dotnet)
-    CMD=""
-    for spec in $SPECS; do
-      n=${spec%@*}; v=${spec##*@}
-      c="dotnet add package $n --version $v"
-      if [ -z "$CMD" ]; then CMD="$c"; else CMD="$CMD && $c"; fi
-    done ;;
-  # Manifest-surgery managers have no clean one-shot version-pinning CLI;
-  # the honest move is to defer the whole family to the per-package agentic
-  # solo loop, which CAN edit Gemfile/pom.xml/build.gradle/mix.exs with full
-  # intel + validation. success=false + exit 0 takes the not-success edge to
-  # family_revert, which feeds that loop — graceful coverage, not a skip.
-  bundler|maven|gradle|mix|swift|nimble|pub|conan|hex)
-    printf '{"success":false,"output":"family_upgrade: %s needs manifest edits — deferring family to the per-package agentic loop","upgraded_specs":[]}\n' "$PKG_MGR"; exit 0 ;;
-  *)
-    printf '{"success":false,"output":"family_upgrade: unrecognised pkg_manager %s — deferring family to the per-package agentic loop","upgraded_specs":[]}\n' "$PKG_MGR"; exit 0 ;;
-esac
-if ! eval "$CMD" >&2; then
-  # Genuine upgrade failure (or the manager CLI is absent in this sandbox):
-  # same graceful contract — success=false, exit 0 -> family_revert, not a
-  # hard run failure. The per-package agentic loop re-attempts each member.
-  printf '{"success":false,"output":"family upgrade failed: %s","upgraded_specs":[]}\n' "$CMD"
-  exit 0
-fi
-UPGRADED_JSON=$(printf '%s' "$SPECS" | jq -R 'split(" ") | map(select(length > 0))' 2>/dev/null || echo '[]')
-printf '{"success":true,"output":"family upgrade succeeded","upgraded_specs":%s}\n' "$UPGRADED_JSON"
-`
+  command: `WS={{input.workspace_dir}} PKG_MGR={{input.pkg_manager}} MEMBERS={{input.members}} python3 -c "
+import os, sys, json, re, subprocess
+ws = os.environ['WS']
+os.chdir(ws)
+pm = os.environ.get('PKG_MGR', '').strip().lower()
+try:
+    members = json.loads(os.environ.get('MEMBERS') or '[]')
+except Exception:
+    members = []
+def emit(d):
+    print(json.dumps(d)); sys.exit(0)
+def lookup(name):
+    p = os.path.join(ws, '.claude', 'skills', 'package-managers.md')
+    try:
+        t = open(p, encoding='utf-8').read()
+    except Exception:
+        return None
+    m = re.search(r'<!--\s*iterion:pkgmgr\s*(.*?)-->', t, re.S)
+    if not m:
+        return None
+    try:
+        cat = json.loads(m.group(1))
+    except Exception:
+        return None
+    for e in cat:
+        if name in [a.lower() for a in e.get('aliases', [])]:
+            return e
+    return None
+prof = lookup(pm)
+if prof is None or prof.get('kind') == 'manifest-surgery':
+    emit({'success': False, 'output': 'family_upgrade: ' + pm + ' needs manifest edits or is unrecognised - deferring family to the per-package agentic loop', 'upgraded_specs': []})
+pairs = [(m['name'], m['target']) for m in members if isinstance(m, dict) and m.get('name') and m.get('target')]
+if not pairs:
+    emit({'success': True, 'output': 'no specs to upgrade', 'upgraded_specs': []})
+form = prof.get('spec_form', '@')
+if form == 'per-package':
+    cmd = ' && '.join(prof['upgrade'].replace('{name}', n).replace('{version}', v) for n, v in pairs)
+else:
+    specs = ' '.join(n + form + v for n, v in pairs)
+    cmd = prof['upgrade'].replace('{specs}', specs)
+rc = subprocess.run(['sh', '-c', cmd], stdout=2, stderr=2).returncode
+if rc != 0:
+    emit({'success': False, 'output': 'family upgrade failed: ' + cmd, 'upgraded_specs': []})
+emit({'success': True, 'output': 'family upgrade succeeded', 'upgraded_specs': [n + '@' + v for n, v in pairs]})
+"`
   input: family_upgrade_input
   output: family_upgrade_result
 
@@ -3853,99 +3839,57 @@ printf '{"success":true,"output":"family upgrade succeeded","upgraded_specs":%s}
 ## re-attempts each member individually with full agentic intel +
 ## validate, so we still get safety for genuinely tricky family bumps.
 tool family_validate:
-  command: `set -euo pipefail
-cd {{input.workspace_dir}} >&2
-PKG_MGR={{input.pkg_manager}}
-PKG_MGR=$(printf '%s' "$PKG_MGR" | tr 'A-Z' 'a-z')
-FAMILY={{input.family_name}}
-case "$PKG_MGR" in
-  yarn|yarn-berry|yarn3|yarn4) INSTALL_CMD="yarn install" ;;
-  npm)                 INSTALL_CMD="npm install" ;;
-  pnpm)                INSTALL_CMD="pnpm install" ;;
-  bun)                 INSTALL_CMD="bun install" ;;
-  go|go-modules|gomod) INSTALL_CMD="go mod download" ;;
-  cargo)               INSTALL_CMD="cargo fetch" ;;
-  pip|pip-poetry)      INSTALL_CMD="python3 -m pip check" ;;
-  uv)                  INSTALL_CMD="uv sync" ;;
-  poetry)              INSTALL_CMD="poetry install --no-interaction" ;;
-  composer)            INSTALL_CMD="composer install --no-interaction --no-scripts" ;;
-  nuget|dotnet)        INSTALL_CMD="dotnet restore" ;;
-  *)                   INSTALL_CMD="" ;;
-esac
-if [ -n "$INSTALL_CMD" ]; then
-  if ! eval "$INSTALL_CMD" >&2; then
-    printf '{"stable":false,"output":"%s install/resolve failed for family %s"}\n' "$PKG_MGR" "$FAMILY"
-    exit 0
-  fi
-fi
-# Compiled-language smoke: these ecosystems have no package.json scripts, so
-# compile/typecheck directly — the strongest fast signal that a family bump
-# didn't break the API surface. cargo check / go build are compile-checks
-# (no final artifact); dotnet has no cheap check, so build.
-case "$PKG_MGR" in
-  go|go-modules|gomod)
-    if go build ./... >&2 && go vet ./... >&2; then
-      printf '{"stable":true,"output":"family %s go build+vet passed"}\n' "$FAMILY"
-    else
-      printf '{"stable":false,"output":"family %s go build/vet failed"}\n' "$FAMILY"
-    fi
-    exit 0 ;;
-  cargo)
-    if cargo check >&2; then
-      printf '{"stable":true,"output":"family %s cargo check passed"}\n' "$FAMILY"
-    else
-      printf '{"stable":false,"output":"family %s cargo check failed"}\n' "$FAMILY"
-    fi
-    exit 0 ;;
-  nuget|dotnet)
-    if dotnet build --nologo >&2; then
-      printf '{"stable":true,"output":"family %s dotnet build passed"}\n' "$FAMILY"
-    else
-      printf '{"stable":false,"output":"family %s dotnet build failed"}\n' "$FAMILY"
-    fi
-    exit 0 ;;
-esac
-# Interpreted ecosystems (pip/poetry/uv/composer): nothing to compile — the
-# install/check above IS the smoke (it re-resolves the graph and fails on a
-# conflict). Stable if we got here.
-case "$PKG_MGR" in
-  pip|pip-poetry|uv|poetry|composer)
-    printf '{"stable":true,"output":"family %s %s resolve/check passed"}\n' "$FAMILY" "$PKG_MGR"
-    exit 0 ;;
-esac
-# Node ecosystems: pick the fastest available smoke from common script
-# names. Order: typecheck/tsc → build → test. Skip lint deliberately: it's
-# far too noisy on most repos (warnings-as-errors, formatting drift,
-# stylistic preferences) and produces false-negative reverts even when the
-# upgrade itself is clean. The per-package solo loop's agentic
-# validate_upgrade is the right place to weigh lint signal vs. pre-existing
-# noise on a per-package basis.
-SCRIPTS=$(jq -r '.scripts // {} | keys[]' package.json 2>/dev/null || true)
-for cand in typecheck tsc build test; do
-  if printf '%s\n' "$SCRIPTS" | grep -qx "$cand"; then
-    case "$PKG_MGR" in
-      yarn|yarn-berry|yarn3|yarn4) SCRIPT_CMD="yarn $cand" ;;
-      npm)              SCRIPT_CMD="npm run $cand" ;;
-      pnpm)             SCRIPT_CMD="pnpm $cand" ;;
-      bun)              SCRIPT_CMD="bun run $cand" ;;
-      *)                SCRIPT_CMD="" ;;
-    esac
-    if [ -n "$SCRIPT_CMD" ]; then
-      if eval "$SCRIPT_CMD" >&2; then
-        printf '{"stable":true,"output":"family %s smoke %s passed"}\n' "$FAMILY" "$cand"
-        exit 0
-      else
-        printf '{"stable":false,"output":"family %s smoke %s failed"}\n' "$FAMILY" "$cand"
-        exit 0
-      fi
-    fi
-  fi
-done
-# No smoke script available → still stable (install worked). The
-# per-package solo loop will re-validate each member individually
-# anyway if anything's actually broken.
-printf '{"stable":true,"output":"family %s install ok, no smoke script available"}\n' "$FAMILY"
-`
+  command: `WS={{input.workspace_dir}} PKG_MGR={{input.pkg_manager}} FAMILY={{input.family_name}} python3 -c "
+import os, sys, json, re, subprocess
+ws = os.environ['WS']
+os.chdir(ws)
+pm = os.environ.get('PKG_MGR', '').strip().lower()
+fam = os.environ.get('FAMILY', '')
+def emit(d):
+    print(json.dumps(d)); sys.exit(0)
+def lookup(name):
+    p = os.path.join(ws, '.claude', 'skills', 'package-managers.md')
+    try:
+        t = open(p, encoding='utf-8').read()
+    except Exception:
+        return None
+    m = re.search(r'<!--\s*iterion:pkgmgr\s*(.*?)-->', t, re.S)
+    if not m:
+        return None
+    try:
+        cat = json.loads(m.group(1))
+    except Exception:
+        return None
+    for e in cat:
+        if name in [a.lower() for a in e.get('aliases', [])]:
+            return e
+    return None
+def run(cmd):
+    return subprocess.run(['sh', '-c', cmd], stdout=2, stderr=2).returncode == 0
+prof = lookup(pm) or {}
+install = prof.get('install')
+if install and not run(install):
+    emit({'stable': False, 'output': pm + ' install/resolve failed for family ' + fam})
+smoke = prof.get('smoke')
+if smoke == 'compiled':
+    cmd = prof.get('smoke_cmd', '')
+    ok = run(cmd) if cmd else True
+    emit({'stable': ok, 'output': 'family ' + fam + ' ' + cmd + (' passed' if ok else ' failed')})
+if smoke == 'resolve':
+    emit({'stable': True, 'output': 'family ' + fam + ' ' + pm + ' resolve/check passed'})
+if smoke == 'node-script':
+    try:
+        scripts = (json.load(open('package.json')).get('scripts') or {})
+    except Exception:
+        scripts = {}
+    tmpl = prof.get('script_run', '')
+    for cand in ('typecheck', 'tsc', 'build', 'test'):
+        if cand in scripts and tmpl:
+            ok = run(tmpl.replace('{script}', cand))
+            emit({'stable': ok, 'output': 'family ' + fam + ' smoke ' + cand + (' passed' if ok else ' failed')})
+    emit({'stable': True, 'output': 'family ' + fam + ' install ok, no smoke script available'})
+emit({'stable': True, 'output': 'family ' + fam + ' install ok (no smoke strategy for ' + pm + ')'})
+"`
   input: family_validate_input
   output: family_validate_result
 
@@ -4014,22 +3958,36 @@ agent family_align_code:
 ## it through the schema chain (yarn-up doesn't commit, so HEAD~0 is
 ## still the previous commit when family_validate flagged unstable).
 tool family_revert:
-  command: `set -euo pipefail
-cd {{input.workspace_dir}} >&2
-PKG_MGR={{input.pkg_manager}}
-FAMILY={{input.family_name}}
-# Hard-reset the worktree (working dir + index + lockfile) back to the
-# last commit. yarn-up didn't commit, so the previous commit is the
-# clean pre-family state.
-git reset --hard HEAD >&2
-case "$PKG_MGR" in
-  yarn|yarn3|yarn4) eval "yarn install" >&2 || true ;;
-  npm)              eval "npm install" >&2 || true ;;
-  pnpm)             eval "pnpm install" >&2 || true ;;
-  bun)              eval "bun install" >&2 || true ;;
-esac
-printf '{"success":true,"output":"family %s reverted"}\n' "$FAMILY"
-`
+  command: `WS={{input.workspace_dir}} PKG_MGR={{input.pkg_manager}} FAMILY={{input.family_name}} python3 -c "
+import os, sys, json, re, subprocess
+ws = os.environ['WS']
+os.chdir(ws)
+pm = os.environ.get('PKG_MGR', '').strip().lower()
+fam = os.environ.get('FAMILY', '')
+def lookup(name):
+    p = os.path.join(ws, '.claude', 'skills', 'package-managers.md')
+    try:
+        t = open(p, encoding='utf-8').read()
+    except Exception:
+        return None
+    m = re.search(r'<!--\s*iterion:pkgmgr\s*(.*?)-->', t, re.S)
+    if not m:
+        return None
+    try:
+        cat = json.loads(m.group(1))
+    except Exception:
+        return None
+    for e in cat:
+        if name in [a.lower() for a in e.get('aliases', [])]:
+            return e
+    return None
+subprocess.run(['sh', '-c', 'git reset --hard HEAD'], stdout=2, stderr=2)
+prof = lookup(pm) or {}
+ri = prof.get('revert_install')
+if ri:
+    subprocess.run(['sh', '-c', ri], stdout=2, stderr=2)
+print(json.dumps({'success': True, 'output': 'family ' + fam + ' reverted'}))
+"`
   input: family_revert_input
   output: family_revert_result
 

@@ -172,9 +172,12 @@ var stackPatterns = []stackPattern{
 // migrated, remove it here — the test then guards it against regression. A bot
 // left in the list that no longer matches any pattern fails the test, forcing
 // the entry to be removed.
-var stackAgnosticExemptions = map[string]string{
-	"secured-renovacy": "per-PKG_MGR case branches + smoke scanners (W2.2 migration pending)",
-}
+// Empty: every catalog bot now dispatches stack-specific work through skill
+// data + deterministic gates, with zero language/ecosystem enumeration in the
+// DSL. secured-renovacy was the last entry (its per-PKG_MGR `case` branches
+// moved into package-managers.md's `iterion:pkgmgr` block, W2.2). A new
+// violation on any bot now fails the test outright rather than being excused.
+var stackAgnosticExemptions = map[string]string{}
 
 func TestCatalogBotsAreStackAgnostic(t *testing.T) {
 	teamBots, _ := filepath.Glob("*/main.bot")
