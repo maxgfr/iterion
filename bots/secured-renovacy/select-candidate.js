@@ -1,6 +1,6 @@
 // secured-renovacy `select_candidate` — deterministic survivor pick.
 //
-// This script is what `examples/secured-renovacy.iter`'s
+// This script is what `bots/secured-renovacy/main.bot`'s
 // `select_candidate` tool runs inside the sandbox. The .iter embeds
 // it as a base64 string in the command body (recipe DSL doesn't
 // support multi-line strings or raw quotes, and escape-juggling

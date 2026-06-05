@@ -9,7 +9,7 @@ import (
 )
 
 // expectedSecAuditDepsNodes lists the node IDs the sec-audit-deps
-// bundle must expose. See examples/sec-audit-deps/main.bot and its
+// bundle must expose. See bots/sec-audit-deps/main.bot and its
 // README for the pipeline:
 //
 //	enumerate_deps → heuristic_fanout → run_*_heuristics → heuristic_join
@@ -29,7 +29,7 @@ var expectedSecAuditDepsNodes = []string{
 }
 
 func TestBundle_SecAuditDeps_PackOpenCompile(t *testing.T) {
-	srcDir, err := filepath.Abs("../examples/sec-audit-deps")
+	srcDir, err := filepath.Abs("../bots/sec-audit-deps")
 	if err != nil {
 		t.Fatalf("resolve src: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestBundle_SecAuditDeps_PackOpenCompile(t *testing.T) {
 }
 
 func TestBundle_SecAuditDeps_OpenDirMatchesPack(t *testing.T) {
-	srcDir, err := filepath.Abs("../examples/sec-audit-deps")
+	srcDir, err := filepath.Abs("../bots/sec-audit-deps")
 	if err != nil {
 		t.Fatalf("resolve src: %v", err)
 	}

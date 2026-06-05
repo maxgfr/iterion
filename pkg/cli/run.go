@@ -421,7 +421,7 @@ func resolveWorkflow(opts RunOptions) (wf *ir.Workflow, hash, filePath, displayN
 	// runtime mirrors the bundled skills/ into .claude/skills/ at run
 	// time. Without this promotion, prompts that read
 	// `.claude/skills/<name>.md` silently get nothing on bare-file
-	// launches — observed with examples/whats-next/main.bot where the
+	// launches — observed with bots/whats-next/main.bot where the
 	// explore prompt reads `.claude/skills/repo-survey.md`.
 	if parent := bundleParentOf(resolved); parent != "" {
 		opened, openErr := bundle.OpenDir(parent)

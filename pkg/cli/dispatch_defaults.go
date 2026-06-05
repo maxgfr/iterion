@@ -15,7 +15,7 @@ import (
 
 // defaultBotsFS is the embedded catalogue of bots exposed as assignees
 // by the zero-config `iterion dispatch` mode. The tree is regenerated
-// from examples/ via `task templates:dispatch-bots`. Each top-level
+// from bots/ via `task templates:dispatch-bots`. Each top-level
 // directory is one assignee — the directory name becomes the assignee
 // label (`feature-dev`, `whole-improve-loop`, …) and the contents
 // form a bundle (main.bot + optional skills/, prompts/, attachments/).
@@ -61,7 +61,7 @@ const defaultDispatchMaxConcurrent = 2
 // Both kebab-case (`feature-dev`) and snake_case (`feature_dev`)
 // assignee labels are mapped to the same workflow. The whats-next bot
 // emits snake_case (matching the Go package convention used inside the
-// examples/ tree); hand-written or git-versioned configs typically use
+// bots/ tree); hand-written or git-versioned configs typically use
 // kebab-case (matching the bot directory names). Supporting both makes
 // auto-config robust to either origin without forcing the operator or
 // the bot to pick one.
@@ -305,7 +305,7 @@ fi
 			"code-review":         filepath.Join(botsDir, "code-review"),
 			// snake_case aliases — what whats-next' assign_to_bots
 			// emits (matching the Go pkg naming convention used in
-			// examples/feature_dev/, examples/whole_improve_loop/).
+			// bots/feature_dev/, bots/whole_improve_loop/).
 			// Pre-aliased here so the dispatcher routes existing
 			// snake_case assignees without the operator needing to
 			// rename tickets or edit the config.

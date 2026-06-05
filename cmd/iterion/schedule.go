@@ -29,7 +29,7 @@ Subcommands:
 
 Example — weekly self-audit (UTC):
   iterion schedule add sec-audit-source-weekly \
-    --cron "0 2 * * 1" --bot examples/sec-audit-source/main.bot \
+    --cron "0 2 * * 1" --bot bots/sec-audit-source/main.bot \
     --workdir "$PWD"
   iterion schedule install        # writes the managed crontab block
 `,

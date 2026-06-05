@@ -29,10 +29,10 @@
 ##     is registered with capability-gated tools.
 ##
 ## Run:
-##   devbox run -- iterion run examples/sec-audit-source/main.bot \
+##   devbox run -- iterion run bots/sec-audit-source/main.bot \
 ##     --var workspace_dir=$(pwd)
 ##
-## See examples/sec-audit-source/README.md.
+## See bots/sec-audit-source/README.md.
 ## ─────────────────────────────────────────────────────────────────
 
 vars:
@@ -87,7 +87,7 @@ vars:
   ## shard_size=0 + file_filter set. Defaults to the bundle's
   ## conventional location; override when the bundle is installed
   ## elsewhere (e.g. --var workflow_path=/opt/bots/sec-audit-source/main.bot).
-  workflow_path:       string = "${PROJECT_DIR}/examples/sec-audit-source/main.bot"
+  workflow_path:       string = "${PROJECT_DIR}/bots/sec-audit-source/main.bot"
 
 ## ─── Schemas ──────────────────────────────────────────────────────
 

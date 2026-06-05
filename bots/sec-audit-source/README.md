@@ -36,7 +36,7 @@ language* section at the bottom of this README.
 #    `iterion sandbox doctor` flags missing tools.)
 
 # 1. Run on the current repo (claw + openai/gpt-5.5 by default).
-devbox run -- iterion run examples/sec-audit-source/main.bot \
+devbox run -- iterion run bots/sec-audit-source/main.bot \
   --var workspace_dir=$(pwd) \
   --var severity_threshold=medium
 

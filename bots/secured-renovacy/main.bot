@@ -1369,7 +1369,7 @@ prompt prepare_commit_system:
   ## a deterministic tool here (see the tool declaration further
   ## down), so this prompt never drives an LLM agent. If a future
   ## refactor re-wires it to one, copy the Findings-handoff block
-  ## from examples/feature_dev/main.bot.
+  ## from bots/feature_dev/main.bot.
 
 prompt prepare_commit_user:
   Workspace: {{vars.workspace_dir}}
@@ -2294,7 +2294,7 @@ agent discover_outdated:
 ## object/array literals — JSON is a strict subset of JS literal
 ## syntax, so the substituted text parses verbatim, no jq/shell
 ## escape juggling. The standalone source-of-truth lives at
-## `examples/secured-renovacy.select-candidate.js` for review.
+## `bots/secured-renovacy/select-candidate.js` for review.
 tool select_candidate:
   input: select_input
   output: candidate

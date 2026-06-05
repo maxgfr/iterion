@@ -154,7 +154,7 @@ iterion bots list --format skill > skills/iterion-bot-catalog.md
 | Flag | Description |
 |---|---|
 | `--paths <dir-or-file>` | Directories or `.bot` files to scan; repeatable (default: `examples`) |
-| `--format <json\|markdown\|skill>` | Output format. `skill` emits a SKILL.md ready to drop into a bundle's `skills/` directory — the canonical way to refresh `examples/whats-next/skills/iterion-bot-catalog.md` after adding or renaming a bot. |
+| `--format <json\|markdown\|skill>` | Output format. `skill` emits a SKILL.md ready to drop into a bundle's `skills/` directory — the canonical way to refresh `bots/whats-next/skills/iterion-bot-catalog.md` after adding or renaming a bot. |
 
 ## `iterion report`
 
@@ -219,7 +219,7 @@ Schedule recurring bot runs via the host crontab — no resident daemon (see [sc
 
 ```bash
 iterion schedule add sec-audit-source-weekly --cron "0 2 * * 1" \
-  --bot examples/sec-audit-source/main.bot --workdir "$PWD"
+  --bot bots/sec-audit-source/main.bot --workdir "$PWD"
 iterion schedule list
 iterion schedule run sec-audit-source-weekly --dry-run   # preview the resolved `iterion run`
 iterion schedule install                                  # write the crontab block (CRON_TZ=UTC)

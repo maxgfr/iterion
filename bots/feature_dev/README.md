@@ -24,7 +24,7 @@ consecutive cross-family approvals.
 ## Run
 
 ```bash
-iterion run examples/feature_dev/main.bot \
+iterion run bots/feature_dev/main.bot \
   --var feature_prompt='Add a /healthz endpoint that returns build info' \
   --var repo_path=/path/to/repo
 ```

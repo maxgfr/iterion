@@ -22,5 +22,5 @@ description: |
   Per-language extensibility: ships JS/TS, Go, Python and a
   language-agnostic baseline. Add a language by dropping a
   `skills/lang-<id>.md` and an entry in the `lang_scan` router.
-author: SocialGouv (devthejo) — examples/sec-audit-source/main.bot
+author: SocialGouv (devthejo) — bots/sec-audit-source/main.bot
 schema_version: 1

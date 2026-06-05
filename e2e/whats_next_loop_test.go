@@ -215,7 +215,7 @@ func titlesOf(issues []*native.Issue) []string {
 // the filtering is performed by the LLM per the prompt — so this helper
 // is the executable spec, exercised by TestWhatsNext_EmitAction_SelectedTitlesFilterMatrix.
 //
-// Contract (see examples/whats-next/main.bot, emit_action_system step 0):
+// Contract (see bots/whats-next/main.bot, emit_action_system step 0):
 //   - empty / nil / ["all"] (case-insensitive) → keep EVERY item
 //     (default approve-all behaviour).
 //   - otherwise → keep only items whose title exactly matches an entry in

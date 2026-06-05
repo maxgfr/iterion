@@ -20,13 +20,13 @@
 ##
 ## After a green run, commit the produced skills/*.md files. This
 ## .iter file stays in scripts/adhoc/ as the seed for a future
-## examples/whats-next/generate-skills.bot (formalised version, run
+## bots/whats-next/generate-skills.bot (formalised version, run
 ## any time we want to refresh / add a skill).
 ## ─────────────────────────────────────────────────────────────────
 
 vars:
   workspace_dir: string = "${PROJECT_DIR}"
-  skills_dir:    string = "examples/whats-next/skills"
+  skills_dir:    string = "bots/whats-next/skills"
 
 schema gen_output:
   summary:    string
@@ -68,9 +68,9 @@ prompt gen_skills_system:
 
   2. iterion-bot-catalog.md — an index of the iterion bots that
      ship in examples/. Inspect these three files in particular:
-       - examples/whole_improve_loop/main.bot
-       - examples/feature_dev/main.bot
-       - examples/secured-renovacy/main.bot
+       - bots/whole_improve_loop/main.bot
+       - bots/feature_dev/main.bot
+       - bots/secured-renovacy/main.bot
      For each: one-line purpose, key inputs from the workflow vars
      block, the shape of its iterion run invocation, and a "use
      this when …" recommendation rule. This skill is

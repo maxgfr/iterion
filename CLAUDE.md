@@ -407,7 +407,7 @@ refresh for upgrade cases) is documented in
 [docs/bundles.md](docs/bundles.md#resource-resolution-at-run-time).
 
 Current bundles and their skills:
-- [examples/whats-next/skills/](examples/whats-next/skills/) —
+- [bots/whats-next/skills/](bots/whats-next/skills/) —
   8 skills: `whats-next` (operating playbook), `iterion-bot-catalog`,
   `iterion-dsl-quickref`, `iterion-board` (board capabilities
   reference for the claude_code / claw `board.*` tools),
@@ -429,7 +429,7 @@ incomplete, or out of date, fix it in the same change — the cost
 of a small inline correction is much lower than the cost of an
 agent later following stale guidance. Concrete examples:
 - Renamed a bot or moved its file → update `iterion-bot-catalog`
-  in every bundle that ships it (currently only `examples/whats-next/`).
+  in every bundle that ships it (currently only `bots/whats-next/`).
 - Added a new DSL primitive or changed edge syntax → update
   `iterion-dsl-quickref`.
 - Discovered a better survey heuristic → fold it into `repo-survey`.
@@ -569,9 +569,9 @@ Register and install it with:
 
 ```sh
 iterion schedule add sec-audit-source-weekly \
-  --cron "0 2 * * 1" --bot examples/sec-audit-source/main.bot --workdir "$PWD"
+  --cron "0 2 * * 1" --bot bots/sec-audit-source/main.bot --workdir "$PWD"
 iterion schedule add sec-audit-deps-weekly \
-  --cron "0 3 * * 1" --bot examples/sec-audit-deps/main.bot --workdir "$PWD"
+  --cron "0 3 * * 1" --bot bots/sec-audit-deps/main.bot --workdir "$PWD"
 iterion schedule install            # splices a managed block into `crontab`, CRON_TZ=UTC
 ```
 

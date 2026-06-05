@@ -27,7 +27,7 @@ All inputs are workflow `vars` (override with `--var name=value`):
 ## Run
 
 ```bash
-iterion run examples/branch_improve_loop/main.bot \
+iterion run bots/branch_improve_loop/main.bot \
   --var workspace_dir=/path/to/repo \
   --var base_ref=main
 ```

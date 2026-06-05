@@ -1,4 +1,4 @@
-package examples
+package bots
 
 import (
 	"os"
@@ -8,7 +8,8 @@ import (
 	"testing"
 )
 
-// Catalog bots (the *.bot bundles `iterion bots list` discovers under
+// Catalog bots (the *.bot bundles `iterion bots list` discovers — the
+// productised team under bots/ plus the remaining single-file bots under
 // examples/) are general-purpose tools that must run on ANY target
 // repository, in any language, with no knowledge of iterion's own
 // layout baked in. See "Catalog bots are repo-agnostic" in CLAUDE.md.
@@ -41,7 +42,8 @@ var violationPatterns = []string{
 	"pkg/dsl",           // iterion's DSL internals
 	"pkg/**",            // iterion's Go pkg layout
 	"cmd/**",            // iterion's Go cmd layout
-	"examples/*/skills", // iterion's bundle-doc layout
+	"examples/*/skills", // iterion's (legacy) bundle-doc layout
+	"bots/*/skills",     // iterion's bundle-doc layout (post-relocation)
 	".iterion/",         // writing iterion's store dir into the target repo
 }
 
@@ -78,15 +80,23 @@ func isAllowed(bot, varName, pattern string) bool {
 }
 
 func TestCatalogBotsAreRepoAgnostic(t *testing.T) {
-	bots, err := filepath.Glob("*/main.bot")
+	// The productised team lives under bots/ (this package's dir); the
+	// remaining single-file catalog bots (e.g. clarify) stay under
+	// examples/. Cover both so neither set can regress.
+	teamBots, err := filepath.Glob("*/main.bot")
 	if err != nil {
-		t.Fatalf("glob catalog bots: %v", err)
+		t.Fatalf("glob team bots: %v", err)
 	}
-	if len(bots) == 0 {
-		t.Fatal("no catalog bots found under examples/*/main.bot")
+	demoBots, err := filepath.Glob("../examples/*/main.bot")
+	if err != nil {
+		t.Fatalf("glob demo catalog bots: %v", err)
+	}
+	botPaths := append(teamBots, demoBots...)
+	if len(botPaths) == 0 {
+		t.Fatal("no catalog bots found under bots/*/main.bot or examples/*/main.bot")
 	}
 
-	for _, botPath := range bots {
+	for _, botPath := range botPaths {
 		bot := filepath.Base(filepath.Dir(botPath))
 		data, err := os.ReadFile(botPath)
 		if err != nil {

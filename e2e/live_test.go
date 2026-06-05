@@ -3382,7 +3382,7 @@ func TestLive_SecuredRenovacy(t *testing.T) {
 	// Compile via bundle.OpenDir so manifest + prompts + skills are
 	// wired into the workflow exactly as `iterion run secured-renovacy/`
 	// would do.
-	bDir, err := filepath.Abs("../examples/secured-renovacy")
+	bDir, err := filepath.Abs("../bots/secured-renovacy")
 	if err != nil {
 		t.Fatalf("abs bundle dir: %v", err)
 	}
@@ -3723,7 +3723,7 @@ func TestLive_SecuredRenovacy_Real(t *testing.T) {
 	requireBinaryInPath(t, "docker")
 	requireOpenAI(t)
 
-	bDir, err := filepath.Abs("../examples/secured-renovacy")
+	bDir, err := filepath.Abs("../bots/secured-renovacy")
 	if err != nil {
 		t.Fatalf("abs bundle dir: %v", err)
 	}
@@ -3842,7 +3842,7 @@ func TestLive_SecuredRenovacy_Protestware(t *testing.T) {
 	requireBinaryInPath(t, "docker")
 	requireOpenAI(t)
 
-	bDir, err := filepath.Abs("../examples/secured-renovacy")
+	bDir, err := filepath.Abs("../bots/secured-renovacy")
 	if err != nil {
 		t.Fatalf("abs bundle dir: %v", err)
 	}

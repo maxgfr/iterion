@@ -28,7 +28,7 @@ ecosystem* at the bottom.
 ## Quick start
 
 ```bash
-devbox run -- iterion run examples/sec-audit-deps/main.bot \
+devbox run -- iterion run bots/sec-audit-deps/main.bot \
   --var workspace_dir=$(pwd) \
   --var severity_threshold=medium
 

@@ -98,7 +98,7 @@ feedback on repeated over-reach):
   output is the contract — out-of-declaration writes are
   reverted before the next reviewer sees them.
 - Catches the v0.10 dogfood gap: fix_gpt edited
-  `examples/doc-align/skills/doc-verification-checklist.md`
+  `bots/doc-align/skills/doc-verification-checklist.md`
   (the bot's own skill) despite `bundle_self_path` excluding
   it from `doc_files`. The fixer's tool access (write_file,
   file_edit) is filesystem-wide; previous releases relied on
@@ -155,7 +155,7 @@ feedback on repeated over-reach):
 - Drop `.works` from the list to audit sibling repos checked
   out under `.works/<name>/` in the same run:
   ```bash
-  iterion run examples/doc-align/ \
+  iterion run bots/doc-align/ \
     --var excluded_dirs=".iterion,.claude,vendor,node_modules,.git,dist,build,out" \
     --var doc_globs="README.md,CLAUDE.md,docs/**/*.md,.works/*/README.md,.works/*/docs/**/*.md"
   ```
@@ -269,7 +269,7 @@ feedback on repeated over-reach):
   `fix_gpt` so GPT reviews ride on the prompt cache — major
   cost reduction (v0.1.0 spent $7.49 on a single fresh GPT
   review of the workspace).
-- `--var bundle_self_path=examples/doc-align` excludes the bot's
+- `--var bundle_self_path=bots/doc-align` excludes the bot's
   own bundle from the audit footprint when running on its host
   repo.
 - `--var diff_since=<ref>` surfaces recently-changed code files
@@ -324,7 +324,7 @@ meaningful on Cobra-CLI-shaped repos — opt in with
 
 ```bash
 # From the workspace (worktree recommended for dogfooding).
-iterion run examples/doc-align/ \
+iterion run bots/doc-align/ \
   --var workspace_dir=$(pwd) \
   --var doc_globs="README.md,CLAUDE.md,docs/**/*.md" \
   --var go_comment_globs="" \
@@ -334,14 +334,14 @@ iterion run examples/doc-align/ \
 # Self-host: when running doc-align on the iterion repo itself,
 # exclude the bot's own bundle so it doesn't try to "align" its
 # own skills/main.bot.
-iterion run examples/doc-align/ \
+iterion run bots/doc-align/ \
   --var workspace_dir=$(pwd) \
-  --var bundle_self_path=examples/doc-align \
+  --var bundle_self_path=bots/doc-align \
   ...
 
 # Incremental (e.g. nightly): focus on docs that reference
 # code changed since a ref.
-iterion run examples/doc-align/ \
+iterion run bots/doc-align/ \
   --var workspace_dir=$(pwd) \
   --var diff_since=main~7 \
   ...

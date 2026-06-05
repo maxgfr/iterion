@@ -107,7 +107,7 @@ vars:
 
   ## Auto-exclusion (fix 4). When non-empty, scan_docs excludes
   ## any file whose path starts with this prefix from the doc
-  ## footprint. Set to `examples/doc-align` when running doc-align
+  ## footprint. Set to `bots/doc-align` when running doc-align
   ## on the iterion repo itself; otherwise leave empty.
   bundle_self_path: string = ""
 
@@ -1791,7 +1791,7 @@ tool mark_issue_for_review:
 ## edit outside the fixer's declared `modified_doc_files` set.
 ##
 ## Discovered during the v0.10 dogfood: fix_gpt edited
-## `examples/doc-align/skills/doc-verification-checklist.md` —
+## `bots/doc-align/skills/doc-verification-checklist.md` —
 ## doc-align's own skill — despite scan_docs excluding it via
 ## `bundle_self_path`. The fixer's tool access (write_file,
 ## file_edit) is filesystem-wide; the skill-level constraint

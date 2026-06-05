@@ -121,9 +121,9 @@ func sampleManifest() *ScheduleManifest {
 	return &ScheduleManifest{
 		Version: 1,
 		Schedules: []ScheduleEntry{
-			{Name: "sec-audit-source-weekly", Cron: "0 2 * * 1", Bot: "examples/sec-audit-source/main.bot",
+			{Name: "sec-audit-source-weekly", Cron: "0 2 * * 1", Bot: "bots/sec-audit-source/main.bot",
 				Workdir: "/home/jo/lab/ai/iterion", Description: "Weekly SAST self-audit"},
-			{Name: "sec-audit-deps-weekly", Cron: "0 3 * * 1", Bot: "examples/sec-audit-deps/main.bot",
+			{Name: "sec-audit-deps-weekly", Cron: "0 3 * * 1", Bot: "bots/sec-audit-deps/main.bot",
 				Workdir: "/home/jo/lab/ai/iterion"},
 			{Name: "paused-one", Cron: "0 4 * * 1", Bot: "x.bot", Workdir: "/tmp", Disabled: true},
 		},
@@ -226,7 +226,7 @@ func TestRunScheduleAddListRemove(t *testing.T) {
 		ScheduleCommonOptions: common,
 		Name:                  "sec-audit-source-weekly",
 		Cron:                  "0 2 * * 1",
-		Bot:                   "examples/sec-audit-source/main.bot",
+		Bot:                   "bots/sec-audit-source/main.bot",
 		Workdir:               "/repo",
 		VarFlags:              []string{"label_source=sec-audit-self"},
 	}); err != nil {
@@ -240,7 +240,7 @@ func TestRunScheduleAddListRemove(t *testing.T) {
 	p, buf = testPrinter()
 	if err := RunScheduleAdd(p, ScheduleAddOptions{
 		ScheduleCommonOptions: common, Name: "sec-audit-source-weekly",
-		Cron: "30 2 * * 1", Bot: "examples/sec-audit-source/main.bot", Workdir: "/repo",
+		Cron: "30 2 * * 1", Bot: "bots/sec-audit-source/main.bot", Workdir: "/repo",
 	}); err != nil {
 		t.Fatalf("re-add: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestRunScheduleInstall_EmptyManifestErrors(t *testing.T) {
 func TestRunScheduleRun_DryRun(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "schedules.yaml")
 	m := &ScheduleManifest{Version: 1, Schedules: []ScheduleEntry{{
-		Name: "weekly", Cron: "0 2 * * 1", Bot: "examples/sec-audit-source/main.bot",
+		Name: "weekly", Cron: "0 2 * * 1", Bot: "bots/sec-audit-source/main.bot",
 		Workdir: "/repo", StoreDir: ".iterion", Sandbox: "auto",
 		Vars: map[string]string{"label_source": "sec-audit-self"},
 	}}}
@@ -388,7 +388,7 @@ func TestRunScheduleRun_DryRun(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"cd /repo",
-		"iterion run examples/sec-audit-source/main.bot",
+		"iterion run bots/sec-audit-source/main.bot",
 		"--var label_source=sec-audit-self",
 		"--store-dir .iterion",
 		"--sandbox auto",

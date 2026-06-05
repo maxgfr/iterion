@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/SocialGouv/iterion/examples"
+	"github.com/SocialGouv/iterion/bots"
 	"github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/auth/oidc"
 	"github.com/SocialGouv/iterion/pkg/backend/detect"
@@ -928,7 +928,7 @@ func (s *Server) handleListExamples(w http.ResponseWriter, _ *http.Request) {
 		})
 	}
 
-	for _, p := range examples.List() {
+	for _, p := range bots.List() {
 		if _, dup := seen[p]; dup {
 			continue
 		}
@@ -972,7 +972,7 @@ func (s *Server) handleLoadExample(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if data == nil {
-		if d, ok := examples.Get(name); ok {
+		if d, ok := bots.Get(name); ok {
 			data = d
 		}
 	}
@@ -1308,7 +1308,7 @@ func (s *Server) handleOpenFile(w http.ResponseWriter, r *http.Request) {
 		// document fetch, the file watcher, hot-reload) would 404
 		// without this fallback.
 		if filepath.Dir(req.Path) == "examples" {
-			if embedded, ok := examples.Get(filepath.Base(req.Path)); ok {
+			if embedded, ok := bots.Get(filepath.Base(req.Path)); ok {
 				data = embedded
 				err = nil
 			}

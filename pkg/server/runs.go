@@ -20,7 +20,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/SocialGouv/iterion/examples"
+	"github.com/SocialGouv/iterion/bots"
 	"github.com/SocialGouv/iterion/pkg/runtime"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -1223,7 +1223,7 @@ func (s *Server) resolvedStoreDir() string {
 // Returns ok=false when the recipe is not in the embed FS, or when
 // the server has no writable store dir to cache it under.
 func (s *Server) materializeEmbeddedRecipe(filePath string) (string, bool) {
-	data, ok := examples.Get(filePath)
+	data, ok := bots.Get(filePath)
 	if !ok {
 		return "", false
 	}

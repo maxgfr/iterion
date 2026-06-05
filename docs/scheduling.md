@@ -33,7 +33,7 @@ version: 1
 schedules:
   - name: sec-audit-source-weekly      # unique; used in the crontab line + log filename
     cron: "0 2 * * 1"                   # standard 5-field expression, passed opaquely to host cron
-    bot: examples/sec-audit-source/main.bot
+    bot: bots/sec-audit-source/main.bot
     workdir: /home/jo/lab/ai/iterion    # cd here before running; bot path resolves against it
     store_dir: ""                        # optional --store-dir (default <workdir>/.iterion)
     sandbox: ""                          # optional --sandbox override (none|auto)
@@ -101,9 +101,9 @@ PATH=/usr/local/bin:/usr/bin:/bin:…
 
 ```sh
 iterion schedule add sec-audit-source-weekly \
-  --cron "0 2 * * 1" --bot examples/sec-audit-source/main.bot --workdir "$PWD"
+  --cron "0 2 * * 1" --bot bots/sec-audit-source/main.bot --workdir "$PWD"
 iterion schedule add sec-audit-deps-weekly \
-  --cron "0 3 * * 1" --bot examples/sec-audit-deps/main.bot --workdir "$PWD"
+  --cron "0 3 * * 1" --bot bots/sec-audit-deps/main.bot --workdir "$PWD"
 
 iterion schedule run sec-audit-source-weekly --dry-run   # sanity-check the resolved command
 iterion schedule install                                  # write the crontab block

@@ -33,10 +33,10 @@
 ##     to recommend and how to phrase the recorded plan.
 ##
 ## Run:
-##   devbox run -- iterion run examples/whats-next/main.bot \
+##   devbox run -- iterion run bots/whats-next/main.bot \
 ##     --var workspace_dir=/path/to/repo
 ##
-## See examples/whats-next/README.md for the dogfood rationale.
+## See bots/whats-next/README.md for the dogfood rationale.
 ## ─────────────────────────────────────────────────────────────────
 
 vars:
@@ -1419,7 +1419,7 @@ agent emit_action:
   system: emit_action_system
   user: emit_action_user
   ## claude_code also uses snake_case tool names (see
-  ## examples/feature_dev/main.bot:670).
+  ## bots/feature_dev/main.bot:670).
   tools: [bash, read_file, write_file, glob, grep]
   ## Board capabilities: the runtime registers an internal __mcp-board
   ## server that exposes capability-gated mcp__iterion_board__* tools

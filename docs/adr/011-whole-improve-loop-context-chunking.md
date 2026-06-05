@@ -3,9 +3,9 @@
 - **Status**: Accepted
 - **Date**: 2026-06-02
 - **Authors**: devthejo
-- **Code context**: [`examples/whole_improve_loop/main.bot`](../../examples/whole_improve_loop/main.bot)
+- **Code context**: [`bots/whole_improve_loop/main.bot`](../../bots/whole_improve_loop/main.bot)
   (`snapshot_chunk` tool, `streak_check` compute, `max_review_chunk_tokens` var),
-  [`examples/whole_improve_loop/README.md`](../../examples/whole_improve_loop/README.md)
+  [`bots/whole_improve_loop/README.md`](../../bots/whole_improve_loop/README.md)
 
 ## Context
 
@@ -124,7 +124,7 @@ and removes any dependency on loop-counter-vs-snapshot timing.
 
 - **No more `context_length_exceeded` on the first iteration.** Each
   review sees one bounded chunk; the acceptance command
-  (`iterion run examples/whole_improve_loop/main.bot --var workspace_dir=.`)
+  (`iterion run bots/whole_improve_loop/main.bot --var workspace_dir=.`)
   starts reviewing chunk 0 (~0.5–28k tokens) instead of inhaling the repo.
 - **Convergence is coverage-gated.** `stop` needs a full clean sweep of
   every chunk (`clean_streak >= num_chunks + 1` consecutive blocker-free

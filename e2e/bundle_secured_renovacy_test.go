@@ -51,7 +51,7 @@ var expectedSecuredRenovacyNodes = []string{
 // that a freshly-packed bundle round-trips through the runtime loader
 // and yields a compilable workflow with the expected node structure.
 func TestBundle_SecuredRenovacy_PackOpenCompile(t *testing.T) {
-	srcDir, err := filepath.Abs("../examples/secured-renovacy")
+	srcDir, err := filepath.Abs("../bots/secured-renovacy")
 	if err != nil {
 		t.Fatalf("resolve src: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestBundle_SecuredRenovacy_PackOpenCompile(t *testing.T) {
 // archive path. The hashes differ on purpose (OpenDir leaves Hash empty)
 // but the runtime contract is that either path yields the same graph.
 func TestBundle_SecuredRenovacy_OpenDirMatchesPack(t *testing.T) {
-	srcDir, err := filepath.Abs("../examples/secured-renovacy")
+	srcDir, err := filepath.Abs("../bots/secured-renovacy")
 	if err != nil {
 		t.Fatalf("resolve src: %v", err)
 	}
@@ -155,8 +155,8 @@ func TestBundle_SecuredRenovacy_OpenDirMatchesPack(t *testing.T) {
 
 // TestBundle_SecuredRenovacy_RepackMatchesShippedBotz is a drift
 // detector: pack the source directory and compare the resulting hash
-// against the committed `examples/secured-renovacy.botz`. If they
-// diverge, someone updated `examples/secured-renovacy/` without
+// against the committed `bots/secured-renovacy.botz`. If they
+// diverge, someone updated `bots/secured-renovacy/` without
 // repacking the archive — a silent regression for any user running the
 // bundle by its archive path.
 //
@@ -164,7 +164,7 @@ func TestBundle_SecuredRenovacy_OpenDirMatchesPack(t *testing.T) {
 // (see pkg/bundle/writer_test.go::TestPackDir_Deterministic), so hash
 // equality is the right invariant.
 func TestBundle_SecuredRenovacy_RepackMatchesShippedBotz(t *testing.T) {
-	shippedPath, err := filepath.Abs("../examples/secured-renovacy.botz")
+	shippedPath, err := filepath.Abs("../bots/secured-renovacy.botz")
 	if err != nil {
 		t.Fatalf("resolve shipped path: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestBundle_SecuredRenovacy_RepackMatchesShippedBotz(t *testing.T) {
 		// `.botz` archives are git-ignored build artefacts (see .gitignore
 		// comment block). A fresh clone won't have one — skip rather than
 		// fail so CI stays green without forcing every contributor to pack.
-		t.Skipf("shipped .botz absent at %s (run `./iterion bundle pack examples/secured-renovacy --force --output examples/secured-renovacy.botz`)", shippedPath)
+		t.Skipf("shipped .botz absent at %s (run `./iterion bundle pack bots/secured-renovacy --force --output bots/secured-renovacy.botz`)", shippedPath)
 	}
 
 	bShipped, cleanup, err := bundle.Open(shippedPath, t.TempDir())
@@ -181,7 +181,7 @@ func TestBundle_SecuredRenovacy_RepackMatchesShippedBotz(t *testing.T) {
 	}
 	defer cleanup()
 
-	srcDir, err := filepath.Abs("../examples/secured-renovacy")
+	srcDir, err := filepath.Abs("../bots/secured-renovacy")
 	if err != nil {
 		t.Fatalf("resolve src: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestBundle_SecuredRenovacy_RepackMatchesShippedBotz(t *testing.T) {
 
 	if packRes.Hash != bShipped.Hash {
 		t.Errorf("drift detected: shipped hash %s != repack hash %s\n"+
-			"  Run: ./iterion bundle pack examples/secured-renovacy --force --output examples/secured-renovacy.botz",
+			"  Run: ./iterion bundle pack bots/secured-renovacy --force --output bots/secured-renovacy.botz",
 			bShipped.Hash, packRes.Hash)
 	}
 }

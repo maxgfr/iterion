@@ -44,7 +44,7 @@ All inputs are workflow `vars` (override with `--var name=value`):
 ## Run
 
 ```bash
-iterion run examples/code_review/main.bot \
+iterion run bots/code_review/main.bot \
   --var workspace_dir=/path/to/repo \
   --var base_ref=main
 ```

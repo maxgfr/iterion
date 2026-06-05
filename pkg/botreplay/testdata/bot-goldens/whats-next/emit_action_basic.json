@@ -1,5 +1,5 @@
 {
-  "_note": "Hand-authored seed fixture (no live LLM was available at creation). Regenerate with `task test:goldens:record`. Shape derived from examples/whats-next/main.bot schema emit_output. created_issues must be non-empty; each assignee must resolve to a real catalog bot or be empty.",
+  "_note": "Hand-authored seed fixture (no live LLM was available at creation). Regenerate with `task test:goldens:record`. Shape derived from bots/whats-next/main.bot schema emit_output. created_issues must be non-empty; each assignee must resolve to a real catalog bot or be empty.",
   "bot": "whats-next",
   "scenario": "emit_action_basic",
   "node": "emit_action",

@@ -172,7 +172,7 @@ item that called for it.
 
 ### `feature_dev`
 
-- **Path**: `examples/feature_dev/main.bot`
+- **Path**: `bots/feature_dev/main.bot`
 - **Required var**: `feature_prompt` (one feature + acceptance
   criteria).
 - **Pipeline**: plan → act → simplify → alternating Claude/GPT
@@ -189,7 +189,7 @@ Example `args` payload for a roadmap_item:
 
 ### `whole_improve_loop`
 
-- **Path**: `examples/whole_improve_loop/main.bot` (formerly
+- **Path**: `bots/whole_improve_loop/main.bot` (formerly
   `vibe_review_alternating`).
 - **Vars**: `workspace_dir` (default), `scope_notes: string=""`
   — free-text steering ("focus on auth and persistence",
@@ -210,7 +210,7 @@ Example `args` payload for a roadmap_item:
 
 ### `branch_improve_loop`
 
-- **Path**: `examples/branch_improve_loop/main.bot`.
+- **Path**: `bots/branch_improve_loop/main.bot`.
 - **Vars**: `workspace_dir` (default), `scope_notes: string=""`,
   `base_ref: string="main"` — branch comparison base. The
   bot reviews the diff `git diff base_ref...HEAD` only.
@@ -230,8 +230,8 @@ Example `args` payload for a roadmap_item:
 
 ### `secured-renovacy`
 
-- **Path**: `examples/secured-renovacy/main.bot` (or packed
-  `examples/secured-renovacy.botz`).
+- **Path**: `bots/secured-renovacy/main.bot` (or packed
+  `bots/secured-renovacy.botz`).
 - **Vars**: `scope: "patch"|"minor"|"patch,minor,major"`,
   `max_packages_per_run`, `major_policy:
   "skip"|"gate"|"attempt"`, `update_scope`. **Ask before
@@ -242,8 +242,8 @@ Example `args` payload for a roadmap_item:
 
 ### `sec-audit-source`
 
-- **Path**: `examples/sec-audit-source/main.bot` (or packed
-  `examples/sec-audit-source.botz`).
+- **Path**: `bots/sec-audit-source/main.bot` (or packed
+  `bots/sec-audit-source.botz`).
 - **Vars**: `workspace_dir` (default `${PROJECT_DIR}`),
   `severity_threshold: "low"|"medium"|"high"|"critical"` (skip
   findings below this on the board), `scope_notes` (optional
@@ -267,8 +267,8 @@ Example `args` payload for a roadmap_item:
 
 ### `sec-audit-deps`
 
-- **Path**: `examples/sec-audit-deps/main.bot` (or packed
-  `examples/sec-audit-deps.botz`).
+- **Path**: `bots/sec-audit-deps/main.bot` (or packed
+  `bots/sec-audit-deps.botz`).
 - **Vars**: `workspace_dir`, `severity_threshold` (default
   `medium`), `cache_ttl_days` (default `30`).
 - **Pipeline**: `enumerate_deps` (claw, readonly) walks
@@ -294,8 +294,8 @@ Example `args` payload for a roadmap_item:
 
 ### `doc-align`
 
-- **Path**: `examples/doc-align/main.bot` (or packed
-  `examples/doc-align.botz`).
+- **Path**: `bots/doc-align/main.bot` (or packed
+  `bots/doc-align.botz`).
 - **Vars**: none required. Optional: `doc_globs` (default
   `README.md,docs/**/*.md,CLAUDE.md`), `go_comment_globs`
   (default empty — opt in to comment audits),

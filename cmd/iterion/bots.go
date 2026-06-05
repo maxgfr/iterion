@@ -15,7 +15,7 @@ catalog used by orchestrator bots (e.g. whats-next) to pick the right bot
 for an issue. Output formats: json (default), markdown, skill.
 
 The "skill" format emits a SKILL.md ready to drop into a bundle's skills/
-directory; that's the canonical way to refresh examples/whats-next/skills/
+directory; that's the canonical way to refresh bots/whats-next/skills/
 iterion-bot-catalog.md after adding or renaming a bot.`,
 }
 
@@ -27,14 +27,14 @@ var botsListCmd = &cobra.Command{
 		paths, _ := cmd.Flags().GetStringSlice("paths")
 		format, _ := cmd.Flags().GetString("format")
 		if len(paths) == 0 {
-			paths = []string{"examples"}
+			paths = []string{"bots", "examples"}
 		}
 		return cli.BotsList(cli.BotsListOptions{Paths: paths, Format: format}, os.Stdout)
 	},
 }
 
 func init() {
-	botsListCmd.Flags().StringSlice("paths", nil, "Directories or .bot files to scan (default: examples)")
+	botsListCmd.Flags().StringSlice("paths", nil, "Directories or .bot files to scan (default: bots, examples)")
 	botsListCmd.Flags().String("format", "json", "Output format: json|markdown|skill")
 	botsCmd.AddCommand(botsListCmd)
 	rootCmd.AddCommand(botsCmd)
