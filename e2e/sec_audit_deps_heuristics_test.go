@@ -86,6 +86,102 @@ func findPkg(pkgs []depPackage, name string) *depPackage {
 	return nil
 }
 
+func hasSignal(p *depPackage, sigType string) *depSignal {
+	if p == nil {
+		return nil
+	}
+	for i := range p.Signals {
+		if p.Signals[i].Type == sigType {
+			return &p.Signals[i]
+		}
+	}
+	return nil
+}
+
+// writeNpmPkg creates <nodeModules>/<dir>/package.json with the given body.
+func writeNpmPkg(t *testing.T, nodeModules, dir, body string) {
+	t.Helper()
+	d := filepath.Join(nodeModules, dir)
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", d, err)
+	}
+	if err := os.WriteFile(filepath.Join(d, "package.json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s/package.json: %v", d, err)
+	}
+}
+
+// runGenericHeuristic runs the ACTUAL run_generic_heuristics command against a
+// workspace whose node_modules has been pre-built by the caller.
+func runGenericHeuristic(t *testing.T, wsDir string) depHeuristicOut {
+	t.Helper()
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not in PATH")
+	}
+	wf := compileFixture(t, "sec-audit-deps/main.bot")
+	tool, ok := wf.Nodes["run_generic_heuristics"].(*ir.ToolNode)
+	if !ok {
+		t.Fatal("run_generic_heuristics missing or not a ToolNode")
+	}
+	cmd := tool.Command
+	cmd = strings.ReplaceAll(cmd, "{{vars.scan_dir}}", t.TempDir())
+	cmd = strings.ReplaceAll(cmd, "{{vars.workspace_dir}}", wsDir)
+	out, err := exec.Command("sh", "-c", cmd).Output()
+	if err != nil {
+		t.Fatalf("run_generic_heuristics failed: %v", err)
+	}
+	var res depHeuristicOut
+	if err := json.Unmarshal(out, &res); err != nil {
+		t.Fatalf("generic output not valid JSON: %v\nout: %s", err, out)
+	}
+	return res
+}
+
+// TestSecAuditDeps_GenericHeuristic_DetectsMalwareSignals covers the malware
+// scanner half of native:3a81df64: install-hook (npm lifecycle scripts) and
+// locale-anomaly (homoglyph package name), emitted in the catalogue shape.
+func TestSecAuditDeps_GenericHeuristic_DetectsMalwareSignals(t *testing.T) {
+	ws := t.TempDir()
+	nm := filepath.Join(ws, "node_modules")
+	writeNpmPkg(t, nm, "leftpad", `{"name":"leftpad","version":"1.0.0"}`)                                            // clean
+	writeNpmPkg(t, nm, "evil", `{"name":"evil","version":"2.0.0","scripts":{"postinstall":"node steal.js"}}`)        // 1 hook
+	writeNpmPkg(t, nm, "evil2", `{"name":"evil2","version":"1.0.0","scripts":{"preinstall":"a","postinstall":"b"}}`) // 2 hooks
+	writeNpmPkg(t, nm, "lodаsh", `{"name":"lodash","version":"4.0.0"}`)                                              // Cyrillic 'а' homoglyph dir
+	writeNpmPkg(t, filepath.Join(nm, "@acme"), "tool", `{"name":"@acme/tool","version":"1.0.0","scripts":{"install":"./x.sh"}}`)
+
+	res := runGenericHeuristic(t, ws)
+
+	if findPkg(res.Packages, "leftpad") != nil {
+		t.Error("clean package leftpad should emit no signals")
+	}
+
+	evil := findPkg(res.Packages, "evil")
+	if ih := hasSignal(evil, "install-hook"); ih == nil {
+		t.Errorf("evil should have an install-hook signal; got %+v", res.Packages)
+	} else if !strings.Contains(ih.Evidence, "postinstall") {
+		t.Errorf("install-hook evidence should cite postinstall: %q", ih.Evidence)
+	}
+
+	if evil2 := findPkg(res.Packages, "evil2"); evil2 == nil {
+		t.Error("evil2 (two hooks) missing")
+	} else if ih := hasSignal(evil2, "install-hook"); ih == nil || ih.Weight != 20 {
+		t.Errorf("evil2 install-hook weight = %v, want 20 (15 + 5 for second hook)", ih)
+	}
+
+	// homoglyph: emitted under the manifest name "lodash" (ASCII) but flagged
+	// because its install directory used a Cyrillic character.
+	if lod := findPkg(res.Packages, "lodash"); lod == nil {
+		t.Error("homoglyph package missing")
+	} else if la := hasSignal(lod, "locale-anomaly"); la == nil || la.Weight != 25 {
+		t.Errorf("homoglyph package should have a locale-anomaly signal weight 25; got %+v", lod)
+	}
+
+	if scoped := findPkg(res.Packages, "@acme/tool"); scoped == nil {
+		t.Error("scoped @acme/tool (install hook) missing — scope dirs not scanned")
+	} else if hasSignal(scoped, "install-hook") == nil {
+		t.Errorf("@acme/tool should have an install-hook signal; got %+v", scoped)
+	}
+}
+
 // TestSecAuditDeps_GoHeuristic_ParsesGovulncheck is the regression test for the
 // govulncheck-parsing half of native:3a81df64 — the node must turn the real
 // govulncheck -json stream into known-vuln signals (called=high, import-only=

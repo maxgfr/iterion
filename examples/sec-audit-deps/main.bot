@@ -180,7 +180,11 @@ prompt review_system:
   - package-cache.md       (the cache line schema you'll produce)
 
   For each pending package:
-  1. Read each signal's `evidence` file path with read_file.
+  1. Each signal's `evidence` is a string citing the file (and line, when
+     known) the detection came from — e.g. "left-pad/package.json
+     scripts.{postinstall}: …" or "GHSA-xxxx (high): … [scan/npm-audit.json]".
+     Read the cited file with read_file to confirm the pattern is real
+     (not a comment, a test fixture, or a dev-only path).
   2. Decide per signal: `valid` (heuristic was correct) or
      `false_positive` (heuristic mis-fired — common cause: test
      fixtures, dev-only paths, false entropy on legitimate
@@ -244,22 +248,23 @@ prompt review_system:
   ```
 
   Coverage banner (anti-façade — check BEFORE writing the report):
-  - The known-CVE scanners (govulncheck / pip-audit / npm audit) ARE
-    implemented and emit `known-vuln` signals. The supply-chain MALWARE
-    heuristics (typosquat distance, entry-point entropy, install-hook /
-    network-on-import / obfuscated-string) are NOT yet implemented. So
-    every run currently has partial coverage: you MUST add a one-line
-    "⚠ Coverage: known-CVE scanning active; supply-chain malware
-    heuristics pending (native:3a81df64)" note to the `summary` field and
-    the top of the markdown report. Never imply the malware dimension was
-    checked.
+  - Active detections: known-CVE scanning (`vuln-db-known` via govulncheck
+    / pip-audit / npm audit) and two malware heuristics — `install-hook`
+    (npm lifecycle scripts) and `locale-anomaly` (homoglyph npm names).
+    Still PENDING: the import-time code-pattern signals (`eval-on-startup`
+    / `base64-blob` / `network-on-import` / `child-process-on-import` …),
+    `typosquat-shape`, and py/go install-hooks (see
+    [[malware-signals]] status table). So you MUST add a one-line
+    "⚠ Coverage: CVE + install-hook/locale-anomaly active; deeper malware
+    heuristics (code-pattern, typosquat, py/go hooks) pending
+    (native:3a81df64)" note to the `summary` field and the top of the
+    markdown report. Never imply those pending dimensions were checked.
   - Total-failure case: if EVERY ecosystem entry in `heuristics` has an
     empty `packages[]` AND its `errors[]` mention "stub"/"pending" (the
-    CVE scanners themselves could not run — tools absent, or no
-    manifests), escalate the headline to: "⚠ Coverage: dependency
-    scanners did not run — this is an LLM-review-only pass, NOT a
-    dependency/supply-chain audit." Never present such a run as clean or
-    complete.
+    scanners themselves could not run — tools absent, or no manifests),
+    escalate the headline to: "⚠ Coverage: dependency scanners did not
+    run — this is an LLM-review-only pass, NOT a dependency/supply-chain
+    audit." Never present such a run as clean or complete.
 
   Markdown report:
   - After all board calls, write
@@ -512,8 +517,91 @@ print(json.dumps({'packages': packages, 'errors': errors}))
 " > {{vars.scan_dir}}/go.json; cat {{vars.scan_dir}}/go.json`
   output: heuristic_output
 
+## run_generic_heuristics is the deterministic supply-chain MALWARE scanner
+## (distinct from the per-ecosystem CVE scanners). It walks the installed
+## npm tree (node_modules — where real-world supply-chain malware ships) and
+## emits two high-signal, low-false-positive catalogue signals:
+##   - install-hook  : a package.json lifecycle script (preinstall/install/
+##                     postinstall/prepare) runs arbitrary code at install
+##                     time — the #1 npm malware vector.
+##   - locale-anomaly: a non-ASCII / homoglyph character in a package name.
+##                     npm names are ASCII-only by registry rule, so ANY
+##                     non-ASCII char is a typosquat/homoglyph attack.
+## Bounded (MAX_PKGS) so a huge node_modules can't blow the budget. The
+## code-pattern signals (eval-on-startup / base64-blob / network-on-import)
+## and py/go install-hook + typosquat-corpus remain pending — see
+## native:3a81df64. The reviewer validates each signal against the cited
+## evidence file.
 tool run_generic_heuristics:
-  command: `mkdir -p {{vars.scan_dir}} && python3 -c "import json; print(json.dumps({'packages':[],'errors':['stub: run_generic_heuristics implementation pending']}))" > {{vars.scan_dir}}/generic.json; cat {{vars.scan_dir}}/generic.json`
+  command: `mkdir -p {{vars.scan_dir}} && WS={{vars.workspace_dir}} python3 -c "
+import os, json
+ws = os.environ.get('WS', '.')
+packages, errors = [], []
+HOOK_KEYS = ('preinstall', 'install', 'postinstall', 'prepare')
+MAX_PKGS = 3000
+
+def anomalous(name):
+    return any(ord(ch) > 127 for ch in name)
+
+def scan_pkg(pkg_json_path, declared_name):
+    sigs, weight = [], 0
+    try:
+        with open(pkg_json_path, 'r', encoding='utf-8') as f:
+            pj = json.load(f)
+    except (OSError, ValueError):
+        pj = {}
+    name = (pj.get('name') or declared_name) if isinstance(pj, dict) else declared_name
+    ver = pj.get('version', '') if isinstance(pj, dict) else ''
+    scripts = pj.get('scripts') if isinstance(pj, dict) else None
+    hooks = [k for k in HOOK_KEYS if isinstance(scripts, dict) and scripts.get(k)]
+    if hooks:
+        w = 15 + 5 * (len(hooks) - 1)
+        weight += w
+        detail = '; '.join('%s=%s' % (k, str(scripts.get(k))[:80]) for k in hooks)
+        sigs.append({'type': 'install-hook', 'weight': w,
+                     'evidence': '%s/package.json scripts.{%s}: %s' % (declared_name, ','.join(hooks), detail)})
+    if anomalous(declared_name) or anomalous(name):
+        weight += 25
+        sigs.append({'type': 'locale-anomaly', 'weight': 25,
+                     'evidence': 'non-ASCII / homoglyph in npm package name (dir=%r, manifest=%r)' % (declared_name, name)})
+    if sigs:
+        return {'ecosystem': 'npm', 'name': name, 'version': ver,
+                'heuristic_score': min(100, weight), 'signals': sigs}
+    return None
+
+nm = os.path.join(ws, 'node_modules')
+count = 0
+if os.path.isdir(nm):
+    try:
+        entries = sorted(os.listdir(nm))
+    except OSError:
+        entries = []
+    for entry in entries:
+        if count >= MAX_PKGS:
+            errors.append('node_modules scan capped at %d packages' % MAX_PKGS)
+            break
+        if entry == '.bin' or entry.startswith('.'):
+            continue
+        p = os.path.join(nm, entry)
+        if entry.startswith('@'):
+            try:
+                subs = sorted(os.listdir(p))
+            except OSError:
+                subs = []
+            for sub in subs:
+                if count >= MAX_PKGS:
+                    break
+                count += 1
+                res = scan_pkg(os.path.join(p, sub, 'package.json'), '%s/%s' % (entry, sub))
+                if res:
+                    packages.append(res)
+        else:
+            count += 1
+            res = scan_pkg(os.path.join(p, 'package.json'), entry)
+            if res:
+                packages.append(res)
+print(json.dumps({'packages': packages, 'errors': errors}))
+" > {{vars.scan_dir}}/generic.json; cat {{vars.scan_dir}}/generic.json`
   output: heuristic_output
 
 compute heuristic_join:
