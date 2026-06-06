@@ -907,7 +907,7 @@ workflow feature_dev:
     ## switch to slim and add a `devbox install` step in post_create
     ## with the workspace's devbox.json.
     image: "ghcr.io/socialgouv/iterion-sandbox-full:edge"
-    user: "devbox"
+    user: "1000:1000"
     mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=/home/devbox/.claude,consistency=cached"]
     env:
       CLAUDE_CONFIG_DIR: "/home/devbox/.claude"
