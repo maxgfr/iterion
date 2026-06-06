@@ -1,18 +1,35 @@
 ---
 name: disprove-voting
 description: |
-  N-voter adversarial verification protocol used by `[[triage]]`'s
-  revalidate step. Each voter is an INDEPENDENT verifier prompted
-  to DISPROVE the candidate. Majority of dismiss → FP. Voters are
-  read-only and emit one verdict block per candidate. Majority is
-  computed deterministically downstream by `merge_verdicts`.
+  Fixed-pool 3-voter adversarial verification protocol used by Seki's
+  revalidate phase. Each voter is an INDEPENDENT verifier prompted
+  to DISPROVE every candidate. Majority of dismiss (≥2 of 3) → FP.
+  Voters are read-only and emit a `voter_output` with one verdict
+  per candidate. The majority is computed deterministically
+  downstream by the `majority_verdict` tool.
 ---
 
-# disprove-voting — the N-voter protocol
+# disprove-voting — the 3-voter protocol
 
-Replaces a single judge with N independent voters whose stance is
-**"the scanner is wrong; disprove this candidate."** Shared context
-propagates blind spots — independence is the entire point.
+Replaces a single judge with a fixed pool of 3 independent voters
+whose stance is **"the scanner is wrong; disprove this candidate."**
+Shared context propagates blind spots — independence is the entire
+point.
+
+The pool size is **structural** (3 distinct `judge` nodes:
+`voter_v1`, `voter_v2`, `voter_v3` — declared in
+`bots/sec-audit-source/main.bot`). Scaling means adding voter
+declarations, not flipping a var (the iterion DSL cannot cleanly
+gate fan-out edges by a numeric var). Default mix:
+
+- `voter_v1` — claw + `openai/gpt-5.5`
+- `voter_v2` — claude_code + `claude-opus-4-8` (cross-family signal)
+- `voter_v3` — claw + `openai/gpt-5.5`
+
+Each judge is `readonly: true` + `session: fresh` — no context bleed
+between voters, no workspace mutation. The ONLY mutator in this
+subgraph is the `fp_append` tool, downstream of the majority
+converge — preserves the one-mutating-branch-per-fan-out rule.
 
 ## Why disprove (not "verify")
 
@@ -26,18 +43,19 @@ A finding that survives N adversarial reads is high-signal.
 
 A voter:
 
-- Sees ONLY the voter prompt and the single candidate under review.
-  Never another voter's reasoning, never the threat model in full
-  (only the trust boundary line), never an aggregated verdict.
-- Has read-only access to `{{vars.workspace_dir}}` via Read, Glob,
-  Grep. NO execution, NO network, NO edits.
-- May use `git log` and `git blame` on workspace files for
-  `fixed_recently` / `introduced_recently` signal.
-- Emits ONE verdict block. The orchestrator never asks for
-  reasoning beyond the block — anything extra is noise.
+- Sees ONLY its voter prompt, the full list of fresh candidates
+  under review, and the project security context block. Never
+  another voter's reasoning, never an aggregated verdict.
+- Has read-only access to `{{vars.workspace_dir}}` via `read_file`,
+  `glob`, `grep`, and `bash` (the bash allowlist permits `git log`
+  and `git blame`). NO execution beyond that, NO network, NO edits.
+- Emits ONE `voter_output` structured object with `voter_id` set to
+  its slot (`v1`, `v2`, `v3`) and `verdicts[]` containing ONE
+  verdict per input candidate. The orchestrator never asks for
+  reasoning beyond that structure — anything extra is noise.
 
-The majority is computed **deterministically downstream** by
-Seki's `merge_verdicts` node, NOT by any voter. A voter who tries
+The majority is computed **deterministically downstream** by Seki's
+`majority_verdict` tool node, NOT by any voter. A voter who tries
 to coordinate is out of contract.
 
 ## Voter prompt
@@ -108,17 +126,24 @@ FALSE POSITIVE if matched):
  15 unguessable UUID/token flagged predictable
  16 theoretical-only race / TOCTOU
 
-OUTPUT — your response MUST end with EXACTLY this block:
+OUTPUT — return a structured `voter_output` whose `verdicts[]`
+contains ONE entry per input candidate, each shaped:
 
-  VOTE: confirm | dismiss | uncertain
-  CONFIDENCE: <0-10>
-  RATIONALE: <2-5 sentences citing file:line evidence for
-    reachability, protections found/absent, and why each held or
-    didn't>
-  GIT_SIGNAL: <fixed_recently | introduced_recently | neutral>
-  DISMISSED_BY_GUARD: <exclusion rule number 1-16, or none>
-  EXPLOIT_STEP_ANCHOR: <file:line of the FIRST step of the attack
-    chain, or "none found">
+  {
+    "candidate_id":        "C-xxx",
+    "vote":                "confirm" | "dismiss" | "uncertain",
+    "confidence":          "low" | "medium" | "high",
+    "rationale":           "2-5 sentences citing file:line of the
+                            upstream guard (dismiss) or the exploit
+                            step (confirm)",
+    "git_signal":          "fixed_recently" | "introduced_recently"
+                           | "stable" | "deleted" | "unknown",
+    "dismissed_by_guard":  "<file:line>" | null,
+    "exploit_step_anchor": "<file:line>" | null
+  }
+
+Top-level: voter_id (= "v1" | "v2" | "v3", from {{input.voter_id}})
++ verdicts (the list above).
 
 VOTE rules:
 - `confirm` requires ALL of: reachable from untrusted input per
@@ -171,13 +196,13 @@ Exclusion rules (cite rule number if FP):
 13 missing-hardening-only; 14 auto-escape XSS w/o escape hatch;
 15 unguessable token flagged predictable; 16 theoretical TOCTOU.
 
-End EXACTLY with:
-  VOTE: confirm | dismiss | uncertain
-  CONFIDENCE: 0-10
-  RATIONALE: 2-5 sentences, file:line cited
-  GIT_SIGNAL: fixed_recently | introduced_recently | neutral
-  DISMISSED_BY_GUARD: 1-16 or none
-  EXPLOIT_STEP_ANCHOR: file:line or "none found"
+Return a `voter_output` with `verdicts[]` of:
+  {candidate_id, vote (confirm|dismiss|uncertain),
+   confidence (low|medium|high),
+   rationale (2-5 sentences, file:line cited),
+   git_signal (fixed_recently|introduced_recently|stable|deleted|unknown),
+   dismissed_by_guard (file:line or null),
+   exploit_step_anchor (file:line or null)}
 
 FINDING: {id} {file}:{line} {finding_type} (claimed {severity})
 {title}
@@ -187,47 +212,50 @@ Vote {k}/{N}. Independent; do not seek other votes.
 
 ## Spawn shape
 
-In `[[triage]]`:
+The 3 voters are declared as distinct `judge` nodes in
+`bots/sec-audit-source/main.bot` and fan out via a
+`router fan_voters { mode: fan_out_all }`. Each voter receives the
+SAME `voter_input` payload via the `with { ... }` mapping on its
+edge from the router; only the `voter_id` field varies (`v1`, `v2`,
+`v3`). The three voter branches run in parallel and converge on
+`majority_verdict` (`await: best_effort`), which reads each voter's
+output via `{{outputs.voter_vN.verdicts}}`.
 
-```
-for candidate in surviving:
-    spawn N Task subagents
-        subagent_type: "general-purpose"
-        description: "vote {k}/{N} for {id}"
-        prompt: voter prompt with candidate substituted
-```
-
-ALL voters for a candidate go in a SINGLE assistant message so
-they execute concurrently. Never `run_in_background` — the
-orchestrator needs the final block to tally. If
-`len(candidates) * N > ~40`, shard into sequential batches of ~40;
-each batch is still a single message.
+Voters are NOT spawned per candidate — each voter receives the FULL
+candidate list and returns one verdict per candidate in its single
+`voter_output`. The orchestrator does not stream verdict blocks
+back; the structured-output schema is the entire contract.
 
 ## Tally — deterministic, downstream
 
-The voters do not tally. `merge_verdicts` reads the N blocks per
-candidate and computes:
+The voters do not tally. The `majority_verdict` tool reads the 3
+voter outputs via template interpolation in its command and
+computes per candidate:
 
-- `vote_breakdown`: `{confirm: x, dismiss: y, uncertain: z}`
-- `verdict`:
-  - majority `confirm` → `confirm`. Proceeds to severity re-rank.
-  - majority `dismiss` → `dismiss`. Skips re-rank.
-  - no majority (tie or majority `uncertain`):
-    - workflow var `noise_tolerance: precision` → `dismiss`,
-      append `"split vote, dropped under precision policy"` to
-      rationale.
-    - `noise_tolerance: recall` → `confirm` with
-      `verify_verdict: needs_manual_test`. Promoted with
-      `triage-uncertain` label per `[[finding-taxonomy]]`.
-- `confidence`: mean of CONFIDENCE across votes on the winning
-  side, rounded to one decimal.
-- `dismissed_by_guard`: modal exclusion rule among `dismiss`
-  votes; null otherwise.
-- `git_signal`: modal across all voters
-  (`fixed_recently | introduced_recently | neutral`).
-- `exploit_step_anchors`: unique set across confirming voters.
-- `rationale`: the RATIONALE from the highest-confidence vote on
-  the winning side, verbatim.
+- `votes` breakdown: counts of `{confirm, dismiss, uncertain}`
+  across the 3 voters (a voter that crashed contributes nothing —
+  `total` < 3 records the degradation; `await: best_effort`
+  guarantees we still tally on partial input).
+- Final verdict:
+  - `nC >= confirm_threshold && nC > nD` → `confirm`.
+    Inherits the candidate metadata (file, line_range, severity,
+    finding_type, matcher) and surfaces `exploit_step_anchors` =
+    unique set across confirming voters.
+  - `nD >= confirm_threshold && nD > nC` → `dismiss`. Surfaces
+    `dismissed_by_guards` = unique set across dismissing voters.
+  - Otherwise (no majority, or no votes from any voter) →
+    `uncertain` — surfaced to report_card with the
+    `triage-uncertain` label.
+- `confidence`: `high` only on unanimous (3/3) confirm with a full
+  voter pool, else `medium`.
+- `voter_agreement`: counts of `{unanimous_confirm,
+  unanimous_dismiss, unanimous_uncertain, split}`. Surfaced as a
+  single-line "Verifier agreement" banner in the markdown report.
+- `fp_appends[]`: built ONLY when ALL 3 voters dismiss AND at least
+  one cites a `dismissed_by_guard` file:line (per
+  `vars.fp_append_policy = "unanimous_dismiss"`). Set
+  `fp_append_policy = "never"` to disable fp-known.yaml appends
+  entirely.
 
 ## Failure modes the protocol guards against
 
@@ -242,16 +270,19 @@ candidate and computes:
 
 ## Constraints
 
-- Voters are read-only. No edits, no shell beyond `git log` /
-  `git blame`.
-- Voters MUST end with the verdict block; nothing parsed otherwise.
+- Voters are `readonly: true` + `session: fresh`. No edits, no
+  shell beyond the bash allowlist (which includes `git log` /
+  `git blame`).
+- Voters MUST return the structured `voter_output`; free text
+  outside the schema is dropped by structured-output validation.
 - Voters MUST NOT reach the network. No CVE-DB lookups.
-- One vote = one Task. Forks are banned (cf. `[[triage]]`).
+- Voters MUST NOT see each other's reasoning. The fan_voters
+  router and `session: fresh` guarantee independence at the
+  runtime level.
 
 ## See also
 
-- `[[triage]]` — phase 3 that calls this protocol.
 - `[[finding-taxonomy]]` — categories voters reference.
-- `[[fp-memory]]` — what happens to a strongly-rationalized
-  `dismiss` (appended to `fp-known.yaml`).
-- `[[sec-audit-source]]` — six-phase orchestration.
+- `[[fp-memory]]` — format of the entries `fp_append` writes to
+  `fp-known.yaml` on unanimous dismiss with a cited guard.
+- `[[sec-audit-source]]` — overall pipeline phases.
