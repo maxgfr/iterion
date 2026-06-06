@@ -12,14 +12,16 @@ import (
 // bundle must expose. See bots/sec-audit-deps/main.bot and its
 // README for the pipeline:
 //
-//	enumerate_deps → heuristic_fanout → run_*_heuristics → heuristic_join
-//	  → load_cache → filter_cached → llm_review → update_cache → done
+//	enumerate_deps → run_eco_heuristics + run_generic_heuristics →
+//	  heuristic_join → load_cache → filter_cached → llm_review →
+//	  update_cache → done
+//
+// W2.4 consolidated the per-ecosystem run_js/py/go_heuristics nodes and the
+// heuristic_fanout router into the single skill-data-driven run_eco_heuristics
+// (the catalogue of scanners now lives in skills/lang-*.md, not the DSL).
 var expectedSecAuditDepsNodes = []string{
 	"enumerate_deps",
-	"heuristic_fanout",
-	"run_js_heuristics",
-	"run_py_heuristics",
-	"run_go_heuristics",
+	"run_eco_heuristics",
 	"run_generic_heuristics",
 	"heuristic_join",
 	"load_cache",
