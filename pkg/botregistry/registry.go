@@ -287,13 +287,13 @@ func parseBundle(dir string) (*Entry, error) {
 		}
 	}
 	return &Entry{
-		Name:         m.Name,
-		DisplayName:  m.DisplayName,
-		Description:  strings.TrimSpace(m.Description),
-		Path:         dir,
-		Triggers:     m.Triggers,
-		Capabilities: m.Capabilities,
-		WhenToUse:    strings.TrimSpace(m.WhenToUse),
+		Name:            m.Name,
+		DisplayName:     m.DisplayName,
+		Description:     strings.TrimSpace(m.Description),
+		Path:            dir,
+		Triggers:        m.Triggers,
+		Capabilities:    m.Capabilities,
+		WhenToUse:       strings.TrimSpace(m.WhenToUse),
 		Author:          m.Author,
 		Version:         m.Version,
 		Enabled:         m.IsEnabled(), // manifest default; overlay composed in List

@@ -173,7 +173,7 @@ func botPutFixture(t *testing.T) string {
 	writeBotFile(t, filepath.Join(dir, "bots", "whats-next", "manifest.yaml"),
 		"name: whats-next\ndisplay_name: Nexie\ndescription: Orchestrator.\n")
 	writeBotFile(t, filepath.Join(dir, "bots", "whats-next", "main.bot"), botPutStub)
-	writeBotFile(t, filepath.Join(dir, "bots", "whats-next", "skills", "iterion-bot-catalog-static.md"),
+	writeBotFile(t, filepath.Join(dir, "bots", "whats-next", "iterion-bot-catalog-static.md"),
 		"---\nname: iterion-bot-catalog\n---\nPREAMBLE\n\n<!-- ITERION:CATALOG:GENERATED:BEGIN -->\n<!-- ITERION:CATALOG:GENERATED:END -->\n")
 	return dir
 }

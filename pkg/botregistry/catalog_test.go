@@ -61,7 +61,7 @@ func fixtureCatalogWorkspace(t *testing.T) string {
 	writeFile(t, filepath.Join(dir, "bots", "whats-next", "manifest.yaml"),
 		"name: whats-next\ndisplay_name: Nexie\ndescription: Orchestrator.\n")
 	writeFile(t, filepath.Join(dir, "bots", "whats-next", "main.bot"), stub)
-	writeFile(t, filepath.Join(dir, "bots", "whats-next", "skills", catalogStaticName),
+	writeFile(t, filepath.Join(dir, "bots", "whats-next", catalogStaticName),
 		"---\nname: iterion-bot-catalog\n---\nPREAMBLE-TOP\n\n"+
 			catalogGeneratedBegin+"\n"+catalogGeneratedEnd+"\n\nPREAMBLE-BOTTOM\n")
 

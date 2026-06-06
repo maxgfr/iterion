@@ -13,8 +13,9 @@ description: Catalog of iterion bots — pick a bot name for each roadmap_item.a
      edit the bots' manifest.yaml instead (display_name / description /
      when_to_use / triggers / enabled), or toggle a bot in the studio
      Catalog manager. Everything OUTSIDE the markers is editorial routing
-     reasoning you maintain by hand. The generated copy Nexie actually
-     reads is the sibling iterion-bot-catalog.md. -->
+     reasoning you maintain by hand. This template lives at the bundle
+     ROOT (not skills/) so it is never mirrored as a skill; the generated
+     copy Nexie actually reads is skills/iterion-bot-catalog.md. -->
 
 Consumed by three phases:
 

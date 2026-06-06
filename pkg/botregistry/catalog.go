@@ -167,7 +167,10 @@ func RegenerateWhatsNextCatalog(workdir string) (string, error) {
 		if !entries[i].IsBundleDir {
 			continue
 		}
-		candidate := filepath.Join(entries[i].Path, "skills", catalogStaticName)
+		// The template lives at the BUNDLE ROOT, not skills/, so it is
+		// never mirrored into <workspace>/.claude/skills/ as a (duplicate
+		// `name: iterion-bot-catalog`) skill — only the generated file is.
+		candidate := filepath.Join(entries[i].Path, catalogStaticName)
 		if _, statErr := os.Stat(candidate); statErr == nil {
 			owner = &entries[i]
 			staticPath = candidate
@@ -197,7 +200,11 @@ func RegenerateWhatsNextCatalog(workdir string) (string, error) {
 		return "", fmt.Errorf("botregistry: %s: %w", staticPath, err)
 	}
 
-	dest := filepath.Join(owner.Path, "skills", catalogGeneratedName)
+	skillsDir := filepath.Join(owner.Path, "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		return "", fmt.Errorf("botregistry: mkdir %s: %w", skillsDir, err)
+	}
+	dest := filepath.Join(skillsDir, catalogGeneratedName)
 	if err := atomicWriteFile(dest, []byte(out), 0o644); err != nil {
 		return "", err
 	}

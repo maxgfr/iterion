@@ -359,8 +359,22 @@ All three paths route through the same
 [pkg/dispatcher/native/boardops](pkg/dispatcher/native/boardops/ops.go)
 package, so validation and event semantics are identical. Capability
 diagnostics are `C080` (unknown cap, warning) and `C081` (malformed,
-error). The bot catalog used by `whats-next` is regenerated via
-`iterion bots list --format=skill --paths examples/`.
+error). The bot catalog Nexie reads
+([bots/whats-next/skills/iterion-bot-catalog.md](bots/whats-next/skills/iterion-bot-catalog.md))
+is **generated** from each bot's `manifest.yaml` (persona table +
+per-bot cards with description / triggers / vars / `when_to_use`,
+enabled bots only) spliced into a hand-authored
+`iterion-bot-catalog-static.md` preamble (the decision tree +
+distinguishers + rituals you maintain by hand). To change Nexie's
+routing, edit a bot's manifest (`display_name` / `description` /
+`when_to_use` / `triggers` / `enabled`) or toggle it in the studio
+Catalog manager — **don't hand-edit the generated region**. Regeneration
+runs automatically before Nexie's run (engine) and on every studio
+bot-metadata save (server); refresh the committed copy by hand with
+`iterion bots regen-catalog`. A workspace overlay
+(`.iterion/bot-overrides.yaml`, gitignored) can hide/show a bot
+per-workspace without editing its manifest. See
+[pkg/botregistry/catalog.go](pkg/botregistry/catalog.go).
 
 ### Cursors (prompt-engineering dials)
 
@@ -457,8 +471,13 @@ you touch a skill's subject area and notice the skill is wrong,
 incomplete, or out of date, fix it in the same change — the cost
 of a small inline correction is much lower than the cost of an
 agent later following stale guidance. Concrete examples:
-- Renamed a bot or moved its file → update `iterion-bot-catalog`
-  in every bundle that ships it (currently only `bots/whats-next/`).
+- Changed a bot's purpose/persona/triggers, or renamed/moved it →
+  edit that bot's `manifest.yaml` (`display_name` / `description` /
+  `when_to_use` / `triggers` / `enabled`), NOT the catalog skill: the
+  generated region of `iterion-bot-catalog.md` is rebuilt from
+  manifests. Only the hand-authored `iterion-bot-catalog-static.md`
+  preamble (decision tree / distinguishers) is edited by hand; run
+  `iterion bots regen-catalog` to refresh the committed generated file.
 - Added a new DSL primitive or changed edge syntax → update
   `iterion-dsl-quickref`.
 - Discovered a better survey heuristic → fold it into `repo-survey`.
