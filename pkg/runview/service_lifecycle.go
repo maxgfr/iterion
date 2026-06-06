@@ -30,25 +30,50 @@ func (s *Service) reconcileSandboxContainers() {
 	// whether their docker leftovers should be reaped.
 	ctx := store.WithoutTenantFilter(context.Background())
 	reaped, err := dockersandbox.ReapOrphanContainers(ctx, rt, func(runID string) bool {
-		if runID == "" {
-			return true
-		}
-		r, loadErr := s.store.LoadRun(ctx, runID)
-		if loadErr != nil {
-			return true
-		}
-		switch r.Status {
-		case store.RunStatusRunning, store.RunStatusPausedWaitingHuman:
-			return false
-		default:
-			return true
-		}
+		return s.sandboxContainerReapable(ctx, runID)
 	})
 	if err != nil {
 		s.logger.Warn("runview: reap orphan containers: %v", err)
 	}
 	if len(reaped) > 0 {
 		s.logger.Info("runview: reaped %d orphan sandbox container(s)", len(reaped))
+	}
+}
+
+// sandboxContainerReapable is the isTerminal predicate for
+// reconcileSandboxContainers — reports whether a managed sandbox
+// container's owning run is gone, so its container may be force-removed.
+// Extracted from the reaper closure for unit testing.
+//
+// Liveness FIRST: a non-blocking run lock that FAILS to acquire proves
+// the owning process is still alive, so we NEVER reap a live run's
+// container — its in-flight docker exec(s) (claude_code / claw delegate
+// calls) would otherwise die with a baffling "No such container" mid-run.
+// This guards every concurrent owner: a CLI `iterion run` sharing this
+// store dir holds the run lock for its whole execution
+// (pkg/cli/run.go: LockRun + defer Unlock), so a daemon restart's
+// boot-time reap (e.g. studio:dev bouncing under watchexec while a
+// dogfood run is live in the same store) cannot kill it. This is safer
+// than — and independent of — the status check, which can't see a status
+// that is mid-write or briefly unreadable.
+func (s *Service) sandboxContainerReapable(ctx context.Context, runID string) bool {
+	if runID == "" {
+		return true // managed container with no run owner → orphan
+	}
+	if lock, lockErr := s.store.LockRun(ctx, runID); lockErr != nil {
+		return false // lock held → process alive → keep the container
+	} else {
+		_ = lock.Unlock() // lock free → owner gone; fall through to status
+	}
+	r, loadErr := s.store.LoadRun(ctx, runID)
+	if loadErr != nil {
+		return true // owner gone + record unreadable → orphan
+	}
+	switch r.Status {
+	case store.RunStatusRunning, store.RunStatusPausedWaitingHuman:
+		return false
+	default:
+		return true
 	}
 }
 
