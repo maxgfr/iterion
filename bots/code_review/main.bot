@@ -44,6 +44,25 @@
 ## step; Revi v1 instructs reviewers to triage `git diff --stat` first
 ## and prioritise the highest-impact hunks. Port plan_chunks here when
 ## reviewing 1k+ LoC PRs becomes common.
+##
+## ROADMAP — forge PR review (primary intended use):
+## The end goal for Revi is to publish its review directly onto a PR on
+## GitHub / GitLab / Forgejo as a proper PR review — inline comments
+## anchored to file+line, including ```suggestion code-change blocks the
+## author can apply in one click — not only the native kanban board +
+## markdown report it writes today. Two pieces are still to build:
+##   1. A forge publish step (replacing/augmenting emit's board write):
+##      map each finding {file,line,suggestion} to the forge's PR
+##      review-comment API. Build on the existing github/forgejo tracker
+##      adapters in pkg/dispatcher/tracker/ (those cover issues today;
+##      PR review-comments are a new surface); GitLab is a new adapter.
+##      Emit the ```suggestion block when a finding carries a concrete
+##      replacement; fall back to a plain comment otherwise.
+##   2. A PR trigger: run on a PR event (dispatcher/webhook) OR a manual
+##      launch against a PR — e.g. `--var pr_url=<forge PR url>` resolves
+##      the base/head refs + the target for posting (today base_ref is a
+##      local git ref only). post_to_board stays as the fallback/local
+##      sink when no PR target is given.
 ## ─────────────────────────────────────────────────────────────────
 
 vars:

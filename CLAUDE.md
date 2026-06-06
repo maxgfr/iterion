@@ -733,6 +733,25 @@ Global flags: `--json` (machine output), `--help`
 - `task test:live` — runs E2E with real Claude/Codex CLIs (requires API keys)
 - **Bot golden replay** (`pkg/botreplay/`, `task test:goldens`, wired into `check`) — freezes a bot's LLM node output as a committed fixture under `pkg/botreplay/testdata/bot-goldens/<bot>/<scenario>.json` and re-validates it against the current schema + invariants (required-field presence, no hallucinated assignees) with no API calls. Record mode (`task test:goldens:record`, build tag `goldens_record`) hits the real LLM to (re)generate fixtures. Wired bots: feature_dev, whats-next, doc-align. See [docs/adr/008-bot-golden-replay-framework.md](docs/adr/008-bot-golden-replay-framework.md).
 
+### Live dogfood runs MUST be visible in the operator's studio
+
+When you test or dogfood a catalog bot with a real run, launch it into the
+store the operator's running `iterion studio` reads — the workspace default
+(`<workspace>/.iterion`, i.e. **omit `--store-dir`** or point it explicitly at
+that path) — **never** a throwaway `--store-dir /tmp/...` the operator cannot
+see. A run the operator can't watch in the UI does not count as validated.
+
+Contain side-effects with per-run **flags**, not by hiding the run in a
+separate store:
+- board writes → `--var post_to_board=false` (or the bot's equivalent),
+- worktree/branch changes → `--merge-into none` (commits land on a storage
+  branch only, never the operator's checked-out branch),
+- report/scratch output → a scratch `report_path` (e.g. under `/tmp`).
+
+The same applies to a dedicated server instance you spin up from a worktree to
+exercise modified engine code: bind it to the operator's store dir (or tell
+the operator the port) so the runs are observable.
+
 ## CI/CD
 
 - **tests.yml** — on push/PR: gofmt, go vet, unit tests, e2e tests
