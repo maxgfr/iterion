@@ -17,5 +17,5 @@ when_to_use: |
   production-readiness audit across the whole workspace, or to drive
   iterative improvement on a specific axis (pass improvement_prompt).
   No new capability — just better/cleaner code.
-author: SocialGouv (devthejo) — whole_improve_loop/main.bot
+author: SocialGouv (devthejo) — whole-improve-loop/main.bot
 schema_version: 1

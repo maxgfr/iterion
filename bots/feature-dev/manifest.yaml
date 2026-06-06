@@ -11,5 +11,5 @@ when_to_use: |
   externally-visible "done" state (new endpoint, UI affordance, CLI
   flag). Also the route for "build a new bot" work — point
   feature_prompt at the new .bot file to author.
-author: SocialGouv (devthejo) — feature_dev/main.bot
+author: SocialGouv (devthejo) — feature-dev/main.bot
 schema_version: 1

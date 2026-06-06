@@ -123,7 +123,7 @@ before you walk the table on a new roadmap item.
   bumping versions, NOT when they want code rewritten to be
   safer.
 - Tie-break ladder: "do they want a list?" → sec-audit-*. "do
-  they want code rewritten?" → whole_improve_loop. "do they want
+  they want code rewritten?" → whole-improve-loop. "do they want
   versions bumped?" → secured-renovacy.
 
 ### `whole-improve-loop` vs `branch-improve-loop`
@@ -204,7 +204,7 @@ dispatcher routes on it), never the persona.
 
 ### `branch-improve-loop` — Billy
 
-Branch-scoped variant of whole_improve_loop. Runs review-fix iterations
+Branch-scoped variant of whole-improve-loop. Runs review-fix iterations
 on the changes between a feature branch and its base, auto-commits each
 fix, and stops on cross-family double-approval.
 
@@ -213,7 +213,7 @@ fix, and stops on cross-family double-approval.
   commit before merge. Scopes to git diff base_ref...HEAD and commits
   a semantic message; pass base_ref for a non-main integration base.
 - **Vars**: `base_ref` (string), `chunk_dir` (string), `chunk_max_loc` (int), `chunk_threshold_loc` (int), `scope_notes` (string), `workspace_dir` (string)
-- **Path**: `bots/branch_improve_loop/main.bot`
+- **Path**: `bots/branch-improve-loop/main.bot`
 
 ### `code-review` — Revi
 
@@ -222,30 +222,38 @@ of the current branch against its base with two independent reviewers
 (Claude + GPT), merges and de-duplicates their findings (cross-family
 agreement raises confidence), then publishes one issue per finding to
 the iterion native kanban board (labelled severity + type +
-source:revi) and writes a markdown report. Never edits, fixes, or
-commits code — that is the improve-loops' job (Billy / Willy).
+source:revi) and writes a markdown report. Given a pull/merge-request
+URL (--var pr_url), it ALSO posts the findings onto that PR as a real
+forge review — inline comments anchored to file:line with one-click
+```suggestion blocks (GitHub / GitLab / Forgejo). Never edits, fixes,
+or commits code — that is the improve-loops' job (Billy / Willy).
 
 - **Use when**:
-  Use when you want a PR/branch REVIEWED and its issues surfaced to
-  the board for triage, but NOT auto-fixed. Read-only: Revi reports;
-  Billy (branch_improve_loop) reviews AND fixes AND commits.
+  Use when you want a PR/branch REVIEWED and its issues surfaced — to
+  the board for triage and/or posted directly onto the PR (pass
+  --var pr_url) as inline comments + ```suggestion fixes — but NOT
+  auto-fixed. Read-only: Revi reports; Billy (branch-improve-loop)
+  reviews AND fixes AND commits.
 - **Triggers**: code-review, review, pr-review
-- **Vars**: `base_ref` (string), `max_findings` (int), `post_to_board` (bool), `report_path` (string), `scope_notes` (string), `severity_threshold` (string), `workspace_dir` (string)
-- **Path**: `bots/code_review/main.bot`
+- **Vars**: `base_ref` (string), `max_findings` (int), `post_to_board` (bool), `pr_url` (string), `report_path` (string), `scope_notes` (string), `severity_threshold` (string), `workspace_dir` (string)
+- **Path**: `bots/code-review/main.bot`
 
 ### `docs-refresh` — Doki
 
-Documentation alignment bot. Detects mismatches between project
+Documentation refresh bot. Detects mismatches between project
 documentation (README, docs/*.md, CLAUDE.md, bundled skills,
 Go code comments) and the actual current state of the code, then
 fixes the DOCS (never the code) and auto-commits on convergence.
+When a repo has NO documentation yet, it bootstraps an initial
+doc set (configurable docs_dir, default "docs") authored from the
+code, then refreshes it through the same review loop.
 
-Workflow shape mirrors branch_improve_loop: alternating
+Workflow shape mirrors branch-improve-loop: alternating
 claude_code (opus-4-8) and claw (openai/gpt-5.5) reviewers,
 deterministic streak_check requiring two cross-family approvals,
 prepare_commit + commit_changes phase.
 
-Specificity vs branch_improve_loop: a deterministic upstream
+Specificity vs branch-improve-loop: a deterministic upstream
 scan_docs tool node enumerates the doc footprint once (find +
 sha1sum) so agents cannot truncate the audit set. Reviewers and
 fixers operate against this immutable footprint. The fixer is
@@ -262,8 +270,10 @@ STEP-0 preamble).
 - **Use when**:
   Use when README / CLAUDE.md / docs/**/*.md / bundled skills are
   stale versus the code, before a release, or whenever a survey flags
-  code↔doc drift. Fixes the DOCS only (never code logic) and commits.
-- **Vars**: `audit_cache_path` (string), `bundle_self_path` (string), `cli_surface_globs` (string), `code_scope_globs` (string), `coverage_target_pct` (int), `diagnostic_surface_globs` (string), `diff_since` (string), `doc_globs` (string), `excluded_dirs` (string), `go_comment_globs` (string), `issue_id` (string), `max_drift_candidates` (int), `max_recovery_iterations` (int), `max_review_chunk_docs` (int), `max_review_iterations` (int), `scope_notes` (string), `workspace_dir` (string)
+  code↔doc drift — or when a repo has NO docs yet and needs an initial
+  set authored from the code. Fixes the DOCS only (never code logic)
+  and commits.
+- **Vars**: `audit_cache_path` (string), `bundle_self_path` (string), `cli_surface_globs` (string), `code_scope_globs` (string), `coverage_target_pct` (int), `diagnostic_surface_globs` (string), `diff_since` (string), `doc_globs` (string), `docs_dir` (string), `excluded_dirs` (string), `go_comment_globs` (string), `issue_id` (string), `max_drift_candidates` (int), `max_recovery_iterations` (int), `max_review_chunk_docs` (int), `max_review_iterations` (int), `scope_notes` (string), `workspace_dir` (string)
 - **Path**: `bots/docs-refresh/main.bot`
 
 ### `feature-dev` — Featurly
@@ -279,7 +289,7 @@ loop until two consecutive cross-family approvals.
   flag). Also the route for "build a new bot" work — point
   feature_prompt at the new .bot file to author.
 - **Vars**: `feature_prompt` (string, required), `workspace_dir` (string)
-- **Path**: `bots/feature_dev/main.bot`
+- **Path**: `bots/feature-dev/main.bot`
 
 ### `sec-audit-deps` — Depsy
 
@@ -404,7 +414,7 @@ failing forever. See docs/adr/011-whole-improve-loop-context-chunking.md.
   iterative improvement on a specific axis (pass improvement_prompt).
   No new capability — just better/cleaner code.
 - **Vars**: `improvement_prompt` (string), `max_review_chunk_tokens` (int), `max_review_passes` (int), `scope_notes` (string), `workspace_dir` (string)
-- **Path**: `bots/whole_improve_loop/main.bot`
+- **Path**: `bots/whole-improve-loop/main.bot`
 
 <!-- ITERION:CATALOG:GENERATED:END -->
 
@@ -439,8 +449,8 @@ Concrete `bot_args` example — for an issue assigned to
 ```json
 {
   "title": "Add CSV export",
-  "assignee": "feature_dev",
-  "bot": "feature_dev",
+  "assignee": "feature-dev",
+  "bot": "feature-dev",
   "bot_args": { "feature_prompt": "Add CSV export" },
   "labels": ["horizon:next-action", "source:whats-next"]
 }

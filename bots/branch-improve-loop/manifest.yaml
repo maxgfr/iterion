@@ -2,12 +2,12 @@ name: branch-improve-loop
 display_name: Billy
 version: 0.1.0
 description: |
-  Branch-scoped variant of whole_improve_loop. Runs review-fix iterations
+  Branch-scoped variant of whole-improve-loop. Runs review-fix iterations
   on the changes between a feature branch and its base, auto-commits each
   fix, and stops on cross-family double-approval.
 when_to_use: |
   Use when an existing branch/PR needs a rigorous review + fix +
   commit before merge. Scopes to git diff base_ref...HEAD and commits
   a semantic message; pass base_ref for a non-main integration base.
-author: SocialGouv (devthejo) — branch_improve_loop/main.bot
+author: SocialGouv (devthejo) — branch-improve-loop/main.bot
 schema_version: 1

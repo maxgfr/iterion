@@ -16,7 +16,7 @@ when_to_use: |
   Use when you want a PR/branch REVIEWED and its issues surfaced — to
   the board for triage and/or posted directly onto the PR (pass
   --var pr_url) as inline comments + ```suggestion fixes — but NOT
-  auto-fixed. Read-only: Revi reports; Billy (branch_improve_loop)
+  auto-fixed. Read-only: Revi reports; Billy (branch-improve-loop)
   reviews AND fixes AND commits.
 author: SocialGouv (devthejo) — code-review/main.bot
 schema_version: 1
