@@ -380,6 +380,15 @@ schema voter_output:
   voter_id:  string
   verdicts:  json
 
+## majority_verdict input. The three voter verdicts + the fresh
+## candidates are mapped via the incoming edge's with{} (tool
+## command:` strings only interpolate input/vars, not outputs).
+schema majority_verdict_input:
+  v1:          json
+  v2:          json
+  v3:          json
+  candidates:  json
+
 ## majority_verdict (deterministic Python tool) output. Extends the
 ## merged_verdicts shape with vote-audit fields so report_card +
 ## downstream tooling can surface agreement. `has_fp_appends` is a
@@ -557,6 +566,16 @@ schema prepare_branch_output:
   stash_ref:        string
   note:             string
 
+## fix_summary input. The temp branch + original branch (from
+## prepare_branch) and the hard_stopped[] slice (from remediation_plan)
+## are mapped via the incoming edge's with{} so the tool command can
+## read them as {{input.*}} — tool command:` strings only interpolate
+## input/vars, not outputs.
+schema fix_summary_input:
+  branch:           string
+  original_branch:  string
+  hard_stopped:     json
+
 ## fix_summary output. Runs once after the per-finding loop drains
 ## (apply_gated only) to scan patch_dir for *-verified.diff /
 ## *-uncertain.diff / *-rejected.diff and aggregate the counts the
@@ -629,6 +648,12 @@ schema abandon_fixes_output:
   branch_kept:  string
   note:         string
 
+## remediation_plan input. confirmed[] is mapped via the incoming
+## edge's with{} so the tool command can read it as {{input.confirmed}}
+## (tool command:` strings only interpolate input/vars, not outputs).
+schema remediation_plan_input:
+  confirmed:  json
+
 ## remediation_plan output. Splits the confirmed[] stream into:
 ##   - to_fix:       findings whose finding_type is NOT in
 ##                   vars.hard_stop_categories (eligible for the loop).
@@ -649,9 +674,13 @@ schema remediation_plan_output:
 ## select_finding input. attempted is the ledger of finding ids the
 ## loop has already attempted (string list). The loop's with{} seeds
 ## it as "[]" on the first pass and grows it via
-## outputs.select_finding.attempted on each loop-back.
+## outputs.select_finding.attempted on each loop-back. to_fix is the
+## remediation plan queue mapped onto every incoming edge (tool
+## command:` strings only interpolate input/vars, not outputs — the
+## queue must come in via with{}).
 schema select_finding_input:
-  attempted: json
+  attempted:  json
+  to_fix:     json
 
 ## select_finding output. Pops the next finding off to_fix using a
 ## ledger of already-attempted candidate ids. has_more is the bool
@@ -769,11 +798,15 @@ schema patch_verdict_output:
 ## upstream remediation_mode_gate + prepare_branch via the loop's with{}.
 ## D5a-only fields (workspace_dir, patch_dir, vars) are still pulled
 ## from {{vars.*}} inline; this schema captures the per-run, per-loop
-## context the node needs to decide commit-vs-revert.
+## context the node needs to decide commit-vs-revert. verdict + author
+## are mapped on the incoming aggregate_verdict edge (tool command:`
+## strings only interpolate input/vars, not outputs).
 schema record_finding_input:
   is_apply:         bool
   branch:           string
   original_branch:  string
+  verdict:          json
+  author:           json
 
 ## record_finding output. ALWAYS writes the diff to
 ## ${PROJECT_DIR}/.iterion/security/patches/<finding_id>-<status>.diff
@@ -2933,7 +2966,7 @@ judge voter_v3:
 ## so report_card + update_file_records receive the same shape the
 ## old revalidate node emitted.
 tool majority_verdict:
-  command: `V1={{outputs.voter_v1.verdicts}} V2={{outputs.voter_v2.verdicts}} V3={{outputs.voter_v3.verdicts}} CANDIDATES={{outputs.filter_cached_files.fresh_candidates}} CONFIRM_THRESHOLD={{vars.confirm_threshold}} FP_APPEND_POLICY={{vars.fp_append_policy}} python3 -c "
+  command: `V1={{input.v1}} V2={{input.v2}} V3={{input.v3}} CANDIDATES={{input.candidates}} CONFIRM_THRESHOLD={{vars.confirm_threshold}} FP_APPEND_POLICY={{vars.fp_append_policy}} python3 -c "
 import os, sys, json
 def _load(name):
     raw = os.environ.get(name, '') or ''
@@ -3099,6 +3132,7 @@ print(json.dumps({
     'voter_agreement':     agreement,
 }))
 "`
+  input: majority_verdict_input
   output: majority_verdict_output
   await: best_effort
   publish: vote_audit_trail
@@ -3369,7 +3403,7 @@ compute apply_router:
 ## remediation_plan -> done shortcut for the zero-fixable-findings
 ## case.
 tool remediation_plan:
-  command: `CONFIRMED={{outputs.merge_with_cache.confirmed}} HARD_STOP={{vars.hard_stop_categories}} REMEDIATE={{vars.remediate}} python3 -c "
+  command: `CONFIRMED={{input.confirmed}} HARD_STOP={{vars.hard_stop_categories}} REMEDIATE={{vars.remediate}} python3 -c "
 import os, json
 try:
     confirmed = json.loads(os.environ.get('CONFIRMED','[]') or '[]')
@@ -3400,6 +3434,7 @@ print(json.dumps({
     'count':        len(to_fix),
 }))
 "`
+  input: remediation_plan_input
   output: remediation_plan_output
 
 ## prepare_branch (D5b). Runs ONCE before the per-finding loop in
@@ -3506,7 +3541,7 @@ print(json.dumps(result))
 ## `attempted` — a JSON array of strings; on first pass the loop
 ## seeds it as "[]".
 tool select_finding:
-  command: `TO_FIX={{outputs.remediation_plan.to_fix}} ATTEMPTED={{input.attempted}} python3 -c "
+  command: `TO_FIX={{input.to_fix}} ATTEMPTED={{input.attempted}} python3 -c "
 import os, json
 def fid(f):
     if not isinstance(f, dict):
@@ -3581,7 +3616,7 @@ agent patch_author:
 ## (vars.build_cmd_hint) overrides the auto-detected command — currently
 ## unused (no var declared) but harmless future-proofing.
 tool build_rung:
-  command: `WS={{vars.workspace_dir}} LANGS={{outputs.detect_tech.langs}} python3 -c "
+  command: `WS={{vars.workspace_dir}} LANGS={{input.langs}} python3 -c "
 import os, json, subprocess
 ws = os.environ['WS']
 try:
@@ -3618,6 +3653,7 @@ try:
 except Exception as e:
     print(json.dumps({'ok': False, 'exit_code': -1, 'output': 'build_rung exception: ' + str(e), 'command': cmd}))
 "`
+  input: lang_input
   output: build_output
 
 ## reproduce_rung — Tier 1. Re-runs the ORIGINAL scanner+matcher
@@ -3691,7 +3727,7 @@ print(json.dumps({
 ## go → go test ./...; js/ts → npm/pnpm test script else trivially
 ## pass. Always exits 0 (envelope carries passed=false on failure).
 tool regress_rung:
-  command: `WS={{vars.workspace_dir}} LANGS={{outputs.detect_tech.langs}} python3 -c "
+  command: `WS={{vars.workspace_dir}} LANGS={{input.langs}} python3 -c "
 import os, json, subprocess
 ws = os.environ['WS']
 try:
@@ -3726,6 +3762,7 @@ try:
 except Exception as e:
     print(json.dumps({'passed': False, 'test_command': cmd, 'exit_code': -1, 'output': 'regress_rung exception: ' + str(e)}))
 "`
+  input: lang_input
   output: regress_output
 
 ## reattack — Tier 3. THE DISTINCTIVE RUNG. Fresh adversarial judge
@@ -3835,7 +3872,7 @@ compute aggregate_verdict:
 ## back to the propose-mode revert path. We never commit when the
 ## branch context is missing.
 tool record_finding:
-  command: `mkdir -p {{vars.patch_dir}} && WS={{vars.workspace_dir}} PATCH_DIR={{vars.patch_dir}} VERDICT={{outputs.aggregate_verdict}} AUTHOR={{outputs.patch_author}} IS_APPLY={{input.is_apply}} BRANCH={{input.branch}} python3 -c "
+  command: `mkdir -p {{vars.patch_dir}} && WS={{vars.workspace_dir}} PATCH_DIR={{vars.patch_dir}} VERDICT={{input.verdict}} AUTHOR={{input.author}} IS_APPLY={{input.is_apply}} BRANCH={{input.branch}} python3 -c "
 import os, sys, json, subprocess, re
 ws = os.environ['WS']
 patch_dir = os.environ['PATCH_DIR']
@@ -3956,7 +3993,7 @@ print(json.dumps({'artifact_path': artifact_path, 'reverted': reverted, 'committ
 ## driven so a missing artifact (e.g. the loop budget was hit) shows
 ## as zero instead of a crash.
 tool fix_summary:
-  command: `WS={{vars.workspace_dir}} PATCH_DIR={{vars.patch_dir}} BRANCH={{outputs.prepare_branch.branch}} ORIGINAL={{outputs.prepare_branch.original_branch}} HARD_STOPPED={{outputs.remediation_plan.hard_stopped}} python3 -c "
+  command: `WS={{vars.workspace_dir}} PATCH_DIR={{vars.patch_dir}} BRANCH={{input.branch}} ORIGINAL={{input.original_branch}} HARD_STOPPED={{input.hard_stopped}} python3 -c "
 import os, sys, json, glob
 ws = os.environ['WS']
 patch_dir = os.environ['PATCH_DIR']
@@ -4017,6 +4054,7 @@ print(json.dumps({
     'summary_path':       summary_path,
 }))
 "`
+  input: fix_summary_input
   output: fix_summary_output
   publish: fix_summary_artifact
 
@@ -4330,10 +4368,17 @@ workflow sec_audit_source:
     project_context: "{{outputs.project_context_resolve.contents}}"
   }
 
-  ## Converge: majority_verdict reads outputs.voter_v1/v2/v3.verdicts
-  ## directly via template interpolation in its command (all three ran
-  ## upstream in the chain, so the keys resolve).
-  voter_v3 -> majority_verdict
+  ## Converge: majority_verdict needs the three voter verdicts + the
+  ## fresh candidates threaded via with{} because tool command:` strings
+  ## only interpolate {{input.*}} / {{vars.*}} — they do NOT resolve
+  ## {{outputs.NODE.field}} (edge with{} values DO, so the mappings
+  ## here cross the bridge).
+  voter_v3 -> majority_verdict with {
+    v1:         "{{outputs.voter_v1.verdicts}}",
+    v2:         "{{outputs.voter_v2.verdicts}}",
+    v3:         "{{outputs.voter_v3.verdicts}}",
+    candidates: "{{outputs.filter_cached_files.fresh_candidates}}"
+  }
 
   ## Conditional split on the bool field has_fp_appends (C012-exhaustive
   ## via the pair `when has_fp_appends` / `when not has_fp_appends`).
@@ -4409,7 +4454,9 @@ workflow sec_audit_source:
 
   update_file_records -> remediate_gate
 
-  remediate_gate -> remediation_plan when enabled
+  remediate_gate -> remediation_plan when enabled with {
+    confirmed: "{{outputs.merge_with_cache.confirmed}}"
+  }
   remediate_gate -> done when not enabled
 
   remediation_plan -> remediation_mode_gate when has_findings
@@ -4422,10 +4469,12 @@ workflow sec_audit_source:
   ## carries the mode + branch context onto the loop body via with{}.
   remediation_mode_gate -> prepare_branch when is_apply
   remediation_mode_gate -> select_finding when not is_apply with {
-    attempted: "[]"
+    attempted: "[]",
+    to_fix:    "{{outputs.remediation_plan.to_fix}}"
   }
   prepare_branch -> select_finding with {
-    attempted: "[]"
+    attempted: "[]",
+    to_fix:    "{{outputs.remediation_plan.to_fix}}"
   }
 
   ## Per-finding ladder. patch_author edits the workspace in place
@@ -4440,13 +4489,17 @@ workflow sec_audit_source:
   }
   select_finding -> exit_router when not has_more
 
-  patch_author -> build_rung
+  patch_author -> build_rung with {
+    langs: "{{outputs.detect_tech.langs}}"
+  }
   build_rung -> reproduce_rung with {
     workspace_dir: "{{vars.workspace_dir}}",
     finding:       "{{outputs.select_finding.finding}}",
     candidate:     "{{outputs.patch_author}}"
   }
-  reproduce_rung -> regress_rung
+  reproduce_rung -> regress_rung with {
+    langs: "{{outputs.detect_tech.langs}}"
+  }
   regress_rung -> reattack with {
     workspace_dir: "{{vars.workspace_dir}}",
     finding:       "{{outputs.select_finding.finding}}",
@@ -4459,7 +4512,9 @@ workflow sec_audit_source:
   aggregate_verdict -> record_finding with {
     is_apply:        "{{outputs.remediation_mode_gate.is_apply}}",
     branch:          "{{outputs.prepare_branch.branch}}",
-    original_branch: "{{outputs.prepare_branch.original_branch}}"
+    original_branch: "{{outputs.prepare_branch.original_branch}}",
+    verdict:         "{{outputs.aggregate_verdict}}",
+    author:          "{{outputs.patch_author}}"
   }
 
   ## Loop back to select_finding to process the next finding. The
@@ -4467,7 +4522,8 @@ workflow sec_audit_source:
   ## budget. attempted carries the ledger of already-attempted
   ## finding ids so select_finding's pop is monotonic.
   record_finding -> select_finding as fix_loop("{{vars.max_fix_per_run}}") with {
-    attempted: "{{outputs.select_finding.attempted}}"
+    attempted: "{{outputs.select_finding.attempted}}",
+    to_fix:    "{{outputs.remediation_plan.to_fix}}"
   }
 
   ## ── D5b exit fan ────────────────────────────────────────────────
@@ -4506,7 +4562,11 @@ workflow sec_audit_source:
     stashed:         "{{outputs.prepare_branch.stashed}}",
     stash_ref:       "{{outputs.prepare_branch.stash_ref}}"
   }
-  apply_router -> fix_summary when not is_apply_auto
+  apply_router -> fix_summary when not is_apply_auto with {
+    branch:          "{{outputs.prepare_branch.branch}}",
+    original_branch: "{{outputs.prepare_branch.original_branch}}",
+    hard_stopped:    "{{outputs.remediation_plan.hard_stopped}}"
+  }
 
   fix_summary -> approve_fixes with {
     verified_count:     "{{outputs.fix_summary.verified_count}}",
