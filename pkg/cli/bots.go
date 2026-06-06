@@ -34,23 +34,46 @@ func BotsList(opts BotsListOptions, w io.Writer) error {
 	if opts.Format == "" {
 		opts.Format = "json"
 	}
-	entries, err := botregistry.List(botregistry.ListOptions{Paths: opts.Paths})
-	if err != nil {
-		return err
-	}
 
 	switch opts.Format {
 	case "json":
+		entries, err := botregistry.List(botregistry.ListOptions{Paths: opts.Paths})
+		if err != nil {
+			return err
+		}
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		return enc.Encode(entries)
 	case "markdown":
+		entries, err := botregistry.List(botregistry.ListOptions{Paths: opts.Paths})
+		if err != nil {
+			return err
+		}
 		return renderBotsMarkdown(w, entries)
 	case "skill":
+		// The skill catalog wants the per-bot vars too, so use the
+		// schema-augmented list and the shared catalog renderer (the same
+		// one botregistry.RegenerateWhatsNextCatalog splices into Nexie's
+		// live catalog).
+		entries, err := botregistry.ListWithSchema(botregistry.ListOptions{Paths: opts.Paths})
+		if err != nil {
+			return err
+		}
 		return renderBotsSkill(w, entries)
 	default:
 		return fmt.Errorf("bots: unknown format %q (json|markdown|skill)", opts.Format)
 	}
+}
+
+// BotsRegenCatalog regenerates the orchestrator-facing bot catalog (the
+// generated region of the whats-next bundle's iterion-bot-catalog.md)
+// from the live manifests discovered under workdir, applying the
+// workspace overlay. Returns the written path, or "" when the workspace
+// ships no catalog template. The runtime regenerates this automatically
+// at whats-next start and the studio on every bot-metadata save; this is
+// the manual escape hatch (and the way to refresh the committed copy).
+func BotsRegenCatalog(workdir string) (string, error) {
+	return botregistry.RegenerateWhatsNextCatalog(workdir)
 }
 
 // ---------------------------------------------------------------------------
@@ -81,61 +104,34 @@ func renderBotsMarkdown(w io.Writer, entries []BotEntry) error {
 	return nil
 }
 
-// renderBotsSkill emits a SKILL.md ready to drop into a bundle's skills/
-// directory. The output is a decision-tree-style catalog the LLM can
-// consult to pick a bot for a given issue.
-func renderBotsSkill(w io.Writer, entries []BotEntry) error {
+// renderBotsSkill emits a self-contained SKILL.md catalog: the standard
+// front-matter, then the shared persona table + per-bot cards (the
+// generated region of the live whats-next catalog), then the assignment
+// heuristics. This is a standalone introspection view —
+// botregistry.RegenerateWhatsNextCatalog produces the richer file Nexie
+// actually reads by splicing the same block into a hand-authored
+// decision-tree preamble.
+func renderBotsSkill(w io.Writer, entries []botregistry.EntryWithSchema) error {
 	fmt.Fprintln(w, "---")
 	fmt.Fprintln(w, "name: iterion-bot-catalog")
 	fmt.Fprintln(w, "description: |")
 	fmt.Fprintln(w, "  Canonical list of bots available to dispatch via the iterion dispatcher.")
-	fmt.Fprintln(w, "  Use this when deciding which bot to assign an issue to. Each entry lists")
-	fmt.Fprintln(w, "  the triggers it expects, the capabilities it consumes, and a one-line")
-	fmt.Fprintln(w, "  description so the matcher can pick by intent.")
+	fmt.Fprintln(w, "  Use this when deciding which bot to assign an issue to. Each card lists")
+	fmt.Fprintln(w, "  the triggers, vars, and a when-to-use blurb so the matcher can pick by")
+	fmt.Fprintln(w, "  intent.")
 	fmt.Fprintln(w, "---")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "# iterion bot catalog")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Regenerate with `iterion bots list --format=skill --paths examples/`.")
+	fmt.Fprintln(w, "Regenerate with `iterion bots list --format=skill`.")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Persona | Bot | Description | Triggers | Capabilities |")
-	fmt.Fprintln(w, "|---|---|---|---|---|")
-	for _, e := range entries {
-		desc := strings.ReplaceAll(strings.TrimSpace(e.Description), "\n", " ")
-		if len(desc) > 200 {
-			desc = desc[:197] + "..."
-		}
-		fmt.Fprintf(w, "| %s | `%s` | %s | %s | %s |\n",
-			personaOrDash(e.DisplayName),
-			e.Name,
-			desc,
-			joinOrDash(e.Triggers),
-			joinOrDash(e.Capabilities),
-		)
-	}
+	fmt.Fprintln(w, botregistry.RenderCatalogBlock(entries, "", ""))
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "## Assignment heuristics")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "1. Read the issue's title and labels.")
-	fmt.Fprintln(w, "2. Match against the **Triggers** column above.")
-	fmt.Fprintln(w, "3. If multiple bots match, pick the one whose **Description** best fits the issue.")
+	fmt.Fprintln(w, "2. Match against each card's **Triggers** and **Use when**.")
+	fmt.Fprintln(w, "3. If multiple bots match, pick the one whose description best fits the issue.")
 	fmt.Fprintln(w, "4. If nothing matches cleanly, assign to a generalist (e.g. `feature_dev`) and add a `needs-triage` label.")
 	return nil
-}
-
-func joinOrDash(xs []string) string {
-	if len(xs) == 0 {
-		return "—"
-	}
-	return strings.Join(xs, ", ")
-}
-
-// personaOrDash renders a bundle's friendly persona (display_name) for a
-// catalog table cell, falling back to an em dash when the bot declares no
-// persona (loose .bot files, un-personified bundles).
-func personaOrDash(displayName string) string {
-	if strings.TrimSpace(displayName) == "" {
-		return "—"
-	}
-	return "**" + displayName + "**"
 }

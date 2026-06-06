@@ -24,6 +24,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
 	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/backend/recipe"
+	"github.com/SocialGouv/iterion/pkg/botregistry"
 	"github.com/SocialGouv/iterion/pkg/bundle"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	gitlib "github.com/SocialGouv/iterion/pkg/git"
@@ -742,6 +743,19 @@ func (e *Engine) runPersistWorkspace(ctx context.Context, runID string, run *sto
 	type repoRootSetter interface{ SetRepoRoot(string) }
 	if s, ok := e.executor.(repoRootSetter); ok {
 		s.SetRepoRoot(run.RepoRoot)
+	}
+	// Refresh the orchestrator-facing bot catalog from the live manifests
+	// (display_name / description / when_to_use / triggers / enabled +
+	// the workspace overlay) BEFORE mirroring, so an edited bot or a
+	// catalog toggle reaches Nexie on her next run. Writes into the
+	// whats-next bundle SOURCE skills dir; the mirror below then refreshes
+	// the workspace copy via its marker logic. Best-effort + no-op unless
+	// this workspace ships the catalog template — a failure must never
+	// abort the run (the mirror falls back to the on-disk catalog).
+	if _, err := botregistry.RegenerateWhatsNextCatalog(e.workDir); err != nil {
+		if e.logger != nil {
+			e.logger.Warn("bot catalog regen: %v", err)
+		}
 	}
 	// Bundle skill mirroring: when a .botz backs this run, copy the
 	// bundle's skills/ entries into <workDir>/.claude/skills/ so both

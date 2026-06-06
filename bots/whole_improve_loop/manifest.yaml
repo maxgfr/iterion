@@ -12,5 +12,10 @@ description: |
   (.whole_improve_loop.state), so repos whose chunk count exceeds one
   run's max_review_passes converge over successive runs instead of
   failing forever. See docs/adr/011-whole-improve-loop-context-chunking.md.
+when_to_use: |
+  Use on EXISTING code when the operator wants a rigorous
+  production-readiness audit across the whole workspace, or to drive
+  iterative improvement on a specific axis (pass improvement_prompt).
+  No new capability — just better/cleaner code.
 author: SocialGouv (devthejo) — whole_improve_loop/main.bot
 schema_version: 1

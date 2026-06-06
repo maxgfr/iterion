@@ -69,6 +69,39 @@ type Manifest struct {
 	// to be granted (e.g. "board.create"). Documentation-only — the
 	// runtime gates capabilities per node, not per bundle.
 	Capabilities []string `yaml:"capabilities,omitempty"`
+
+	// WhenToUse is the orchestrator-facing "use when" guidance for this
+	// bot — the same role as the "when to use it" block in a Claude Code
+	// skill. Free text, may be multi-line. Surfaced verbatim in the
+	// generated iterion-bot-catalog "Use when" card that Nexie reads to
+	// route a task to a bot. Optional; an empty value drops the card.
+	// Edited via the studio Bot-metadata panel.
+	WhenToUse string `yaml:"when_to_use,omitempty"`
+
+	// Enabled toggles whether this bot is advertised in the catalog
+	// exposed to orchestrator bots (Nexie). Tri-state on purpose:
+	//   nil   → key absent → treated as enabled, so manifests authored
+	//           before the toggle existed stay visible.
+	//   true  → explicitly enabled.
+	//   false → explicitly disabled: dropped from the generated catalog
+	//           and not auto-dispatched, but still surfaced by the studio
+	//           so an operator can flip it back on.
+	// A workspace overlay (.iterion/bot-overrides.yaml) may override this
+	// per-workspace without editing the manifest — see
+	// botregistry.ResolveEnabled.
+	Enabled *bool `yaml:"enabled,omitempty"`
+}
+
+// IsEnabled reports whether this bot should be advertised in the
+// orchestrator-facing catalog by default. A nil Enabled (key absent
+// from the manifest) is treated as enabled, so bots authored before the
+// toggle existed remain visible. A workspace overlay may still override
+// this — see botregistry.ResolveEnabled.
+func (m *Manifest) IsEnabled() bool {
+	if m == nil || m.Enabled == nil {
+		return true
+	}
+	return *m.Enabled
 }
 
 // LoadManifest reads and parses a manifest.yaml file. Missing file

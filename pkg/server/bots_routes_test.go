@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/SocialGouv/iterion/pkg/botregistry"
@@ -155,5 +156,162 @@ func TestBotsGetRoute_NotFound(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+const botPutStub = "agent a:\n  model: \"test\"\n"
+
+// botPutFixture builds a workspace with an editable feature_dev bundle
+// plus a whats-next bundle carrying the catalog template, so PUT can be
+// observed to both persist the manifest and regenerate the catalog.
+func botPutFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeBotFile(t, filepath.Join(dir, "bots", "feature_dev", "manifest.yaml"),
+		"name: feature_dev\ndisplay_name: Featurly\ndescription: Ships a feature.\n")
+	writeBotFile(t, filepath.Join(dir, "bots", "feature_dev", "main.bot"), botPutStub)
+	writeBotFile(t, filepath.Join(dir, "bots", "whats-next", "manifest.yaml"),
+		"name: whats-next\ndisplay_name: Nexie\ndescription: Orchestrator.\n")
+	writeBotFile(t, filepath.Join(dir, "bots", "whats-next", "main.bot"), botPutStub)
+	writeBotFile(t, filepath.Join(dir, "bots", "whats-next", "skills", "iterion-bot-catalog-static.md"),
+		"---\nname: iterion-bot-catalog\n---\nPREAMBLE\n\n<!-- ITERION:CATALOG:GENERATED:BEGIN -->\n<!-- ITERION:CATALOG:GENERATED:END -->\n")
+	return dir
+}
+
+func newBotServer(t *testing.T, workdir string) *Server {
+	t.Helper()
+	botregistry.ClearSchemaCache()
+	srv := New(Config{
+		DisableAuth: true,
+		WorkDir:     workdir,
+		Bots:        BotsConfig{Paths: botregistry.DefaultPaths(workdir)},
+	}, iterlog.New(iterlog.LevelError, nil))
+	srv.handler = srv.mux
+	return srv
+}
+
+func doPut(t *testing.T, srv *Server, path, body, origin string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	rec := httptest.NewRecorder()
+	srv.handler.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestBotsPutRoute_UpdatesManifestAndRegenerates(t *testing.T) {
+	dir := botPutFixture(t)
+	srv := newBotServer(t, dir)
+
+	rec := doPut(t, srv, "/api/v1/bots/feature_dev",
+		`{"display_name":"Featly","when_to_use":"use for features","enabled":false}`, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var b botregistry.EntryWithSchema
+	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
+	}
+	if b.DisplayName != "Featly" || b.WhenToUse != "use for features" || b.Enabled {
+		t.Errorf("response not updated: %+v", b)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "bots", "feature_dev", "manifest.yaml"))
+	if !strings.Contains(string(raw), "display_name: Featly") || !strings.Contains(string(raw), "enabled: false") {
+		t.Errorf("manifest not persisted:\n%s", raw)
+	}
+	cat, err := os.ReadFile(filepath.Join(dir, "bots", "whats-next", "skills", "iterion-bot-catalog.md"))
+	if err != nil {
+		t.Fatalf("catalog not regenerated: %v", err)
+	}
+	if !strings.Contains(string(cat), "## The team") {
+		t.Errorf("catalog missing generated block:\n%s", cat)
+	}
+	if strings.Contains(string(cat), "### `feature_dev`") {
+		t.Errorf("disabled bot should be excluded from the regenerated catalog:\n%s", cat)
+	}
+}
+
+func TestBotsPutRoute_PreservesUnsetFields(t *testing.T) {
+	dir := botPutFixture(t)
+	srv := newBotServer(t, dir)
+
+	rec := doPut(t, srv, "/api/v1/bots/feature_dev", `{"when_to_use":"X"}`, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var b botregistry.EntryWithSchema
+	json.Unmarshal(rec.Body.Bytes(), &b)
+	if b.DisplayName != "Featurly" {
+		t.Errorf("display_name must be preserved when omitted, got %q", b.DisplayName)
+	}
+	if b.WhenToUse != "X" {
+		t.Errorf("when_to_use = %q", b.WhenToUse)
+	}
+}
+
+func TestBotsPutRoute_RejectsLooseBot(t *testing.T) {
+	dir := t.TempDir()
+	writeBotFile(t, filepath.Join(dir, "bots", "loose.bot"), `## ---
+## name: loosey
+## ---
+`+botPutStub)
+	srv := newBotServer(t, dir)
+	rec := doPut(t, srv, "/api/v1/bots/loosey", `{"display_name":"x"}`, "")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestBotsPutRoute_NotFound(t *testing.T) {
+	dir := botPutFixture(t)
+	srv := newBotServer(t, dir)
+	rec := doPut(t, srv, "/api/v1/bots/ghost", `{"display_name":"x"}`, "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestBotsPutRoute_RejectsCrossOrigin(t *testing.T) {
+	dir := botPutFixture(t)
+	srv := newBotServer(t, dir)
+	rec := doPut(t, srv, "/api/v1/bots/feature_dev", `{"display_name":"x"}`, "http://evil.example")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestBotOverlayRoute_TogglesWithoutTouchingManifest(t *testing.T) {
+	dir := botPutFixture(t)
+	srv := newBotServer(t, dir)
+
+	// Disable via the overlay.
+	rec := doPut(t, srv, "/api/v1/bots/feature_dev/overlay", `{"enabled":false}`, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var b botregistry.EntryWithSchema
+	json.Unmarshal(rec.Body.Bytes(), &b)
+	if b.Enabled {
+		t.Error("overlay disable should resolve Enabled=false")
+	}
+	// The manifest stays pristine (no enabled key written).
+	raw, _ := os.ReadFile(filepath.Join(dir, "bots", "feature_dev", "manifest.yaml"))
+	if strings.Contains(string(raw), "enabled:") {
+		t.Errorf("overlay must not touch the manifest:\n%s", raw)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".iterion", "bot-overrides.yaml")); err != nil {
+		t.Errorf("overlay file not written: %v", err)
+	}
+
+	// Clearing the override restores the manifest default (enabled).
+	rec = doPut(t, srv, "/api/v1/bots/feature_dev/overlay", `{"enabled":null}`, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("clear status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	json.Unmarshal(rec.Body.Bytes(), &b)
+	if !b.Enabled {
+		t.Error("clearing the overlay should restore Enabled=true")
 	}
 }

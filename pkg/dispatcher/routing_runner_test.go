@@ -3,8 +3,21 @@ package dispatcher
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func writeDispatcherBot(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // recordingRunner records every spec it sees so tests can assert on
 // which Runner received which dispatch.
@@ -171,6 +184,78 @@ func TestRoutingRunnerDeclaredVars(t *testing.T) {
 	// Unknown route → falls back to Default, which can't report vars → nil.
 	if v := rr.DeclaredVars("ghost"); v != nil {
 		t.Fatalf("DeclaredVars(ghost) = %v, want nil (default runner reports nothing)", v)
+	}
+}
+
+// TestRoutingRunnerDynamicResolvesEnabledBot pins the registry-driven
+// fallback: an ENABLED bundle that has no assignee_workflows entry is
+// still routed (compiled lazily, cached); a disabled bundle is NOT
+// (falls through to default); compilation happens once.
+func TestRoutingRunnerDynamicResolvesEnabledBot(t *testing.T) {
+	dir := t.TempDir()
+	botsDir := filepath.Join(dir, "bots")
+	stub := "agent x:\n  model: \"test\"\n"
+	writeDispatcherBot(t, filepath.Join(botsDir, "customy", "manifest.yaml"), "name: customy\ndisplay_name: Custy\n")
+	writeDispatcherBot(t, filepath.Join(botsDir, "customy", "main.bot"), stub)
+	writeDispatcherBot(t, filepath.Join(botsDir, "offy", "manifest.yaml"), "name: offy\nenabled: false\n")
+	writeDispatcherBot(t, filepath.Join(botsDir, "offy", "main.bot"), stub)
+
+	def := &recordingRunner{name: "default"}
+	dyn := &recordingRunner{name: "dynamic"}
+	var compiled []string
+	rr := &RoutingRunner{
+		Default:   def,
+		BotsPaths: []string{botsDir},
+		compile: func(path string) (Runner, error) {
+			compiled = append(compiled, path)
+			return dyn, nil
+		},
+	}
+
+	if !rr.HasRoute("customy") {
+		t.Error("enabled custom bot should have a dynamic route")
+	}
+	if rr.HasRoute("offy") {
+		t.Error("disabled bot must NOT be routable (catalog toggle gates auto-dispatch)")
+	}
+	if rr.HasRoute("ghost") {
+		t.Error("unknown bot must not be routable")
+	}
+	// HasRoute must not compile (it runs on the actor's pre-claim path).
+	if len(compiled) != 0 {
+		t.Fatalf("HasRoute compiled %d workflows; it must stay compile-free", len(compiled))
+	}
+
+	// Two dispatches to the same dynamic bot → routed both times, compiled once.
+	for i := 0; i < 2; i++ {
+		if err := rr.Dispatch(context.Background(), DispatchSpec{Assignee: "customy"}); err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+	}
+	if len(dyn.seen) != 2 {
+		t.Errorf("dynamic runner saw %d dispatches, want 2", len(dyn.seen))
+	}
+	if len(compiled) != 1 {
+		t.Errorf("compiled %d times, want 1 (cached)", len(compiled))
+	}
+	if len(compiled) == 1 && !strings.HasSuffix(filepath.ToSlash(compiled[0]), "bots/customy/main.bot") {
+		t.Errorf("compiled wrong path: %s", compiled[0])
+	}
+
+	// Disabled bot has no route → falls through to default.
+	if err := rr.Dispatch(context.Background(), DispatchSpec{Assignee: "offy"}); err != nil {
+		t.Fatalf("dispatch offy: %v", err)
+	}
+	if len(def.seen) != 1 {
+		t.Errorf("disabled bot should fall through to default; default saw %d", len(def.seen))
+	}
+
+	// Close releases the dynamically-compiled runner too.
+	if err := rr.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if !dyn.close {
+		t.Error("dynamic runner not closed")
 	}
 }
 

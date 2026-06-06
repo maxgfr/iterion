@@ -1,0 +1,190 @@
+package bundle
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func ptr[T any](v T) *T { return &v }
+
+const manifestWithComments = `# Top-of-file note about this bot.
+name: testbot
+display_name: Testy
+# the catalogue blurb
+description: |
+  A test bot.
+  Second line.
+author: me <me@example.com>
+schema_version: 1
+triggers: [refactor, review]
+`
+
+func TestWriteManifest_PreservesCommentsAndBlockScalar(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	if err := os.WriteFile(path, []byte(manifestWithComments), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := WriteManifest(path, ManifestPatch{DisplayName: ptr("Renamed")})
+	if err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	if m.DisplayName != "Renamed" {
+		t.Errorf("DisplayName = %q, want Renamed", m.DisplayName)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	for _, want := range []string{
+		"# Top-of-file note about this bot.",
+		"# the catalogue blurb",
+		"description: |",
+		"Second line.",
+		"display_name: Renamed",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("rewritten manifest missing %q\n---\n%s", want, got)
+		}
+	}
+	// The edited value must be gone.
+	if strings.Contains(got, "Testy") {
+		t.Errorf("old display_name still present\n---\n%s", got)
+	}
+}
+
+func TestWriteManifest_AppendsNewKeysAfterDescription(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	if err := os.WriteFile(path, []byte(manifestWithComments), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := WriteManifest(path, ManifestPatch{
+		WhenToUse: ptr("Use when testing.\nSecond hint."),
+		Enabled:   ptr(false),
+	}); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	raw, _ := os.ReadFile(path)
+	got := string(raw)
+
+	if !strings.Contains(got, "when_to_use: |") {
+		t.Errorf("multi-line when_to_use should use block-literal style\n---\n%s", got)
+	}
+	if !strings.Contains(got, "enabled: false") {
+		t.Errorf("enabled should be an unquoted bool\n---\n%s", got)
+	}
+	// New keys land between description and author.
+	descAt := strings.Index(got, "description:")
+	whenAt := strings.Index(got, "when_to_use:")
+	authorAt := strings.Index(got, "author:")
+	if !(descAt < whenAt && whenAt < authorAt) {
+		t.Errorf("when_to_use not placed after description / before author (desc=%d when=%d author=%d)\n---\n%s",
+			descAt, whenAt, authorAt, got)
+	}
+
+	m, err := LoadManifest(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if m.WhenToUse == "" || m.IsEnabled() {
+		t.Errorf("reload: WhenToUse=%q IsEnabled=%v, want set + disabled", m.WhenToUse, m.IsEnabled())
+	}
+}
+
+func TestWriteManifest_NilPatchPreservesEverything(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	if err := os.WriteFile(path, []byte(manifestWithComments), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteManifest(path, ManifestPatch{}); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	m, err := LoadManifest(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if m.Name != "testbot" || m.DisplayName != "Testy" || m.Author != "me <me@example.com>" {
+		t.Errorf("nil patch altered values: %+v", m)
+	}
+	if len(m.Triggers) != 2 || m.Triggers[0] != "refactor" {
+		t.Errorf("nil patch altered triggers: %v", m.Triggers)
+	}
+}
+
+func TestWriteManifest_IsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	if err := os.WriteFile(path, []byte(manifestWithComments), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := ManifestPatch{WhenToUse: ptr("Use when X."), Enabled: ptr(true)}
+	if _, err := WriteManifest(path, patch); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := os.ReadFile(path)
+	if _, err := WriteManifest(path, patch); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := os.ReadFile(path)
+	if string(first) != string(second) {
+		t.Errorf("re-applying the same patch changed the file\n--- first ---\n%s\n--- second ---\n%s", first, second)
+	}
+}
+
+func TestWriteManifest_StringLooksLikeBoolStaysString(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	if err := os.WriteFile(path, []byte("name: b\nschema_version: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteManifest(path, ManifestPatch{DisplayName: ptr("true")}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := LoadManifest(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if m.DisplayName != "true" {
+		t.Errorf("DisplayName = %q, want the string \"true\"", m.DisplayName)
+	}
+}
+
+func TestWriteManifest_CreatesScaffoldWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	m, err := WriteManifest(path, ManifestPatch{Name: ptr("fresh"), DisplayName: ptr("Freshy")})
+	if err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	if m.Name != "fresh" || m.SchemaVersion != CurrentManifestSchema {
+		t.Errorf("scaffold manifest = %+v", m)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("manifest not created: %v", err)
+	}
+}
+
+func TestWriteManifest_LeavesNoTempOnSuccess(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	if err := os.WriteFile(path, []byte("name: b\nschema_version: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteManifest(path, ManifestPatch{Author: ptr("x")}); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Errorf("leftover temp file: %s", e.Name())
+		}
+	}
+}

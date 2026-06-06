@@ -38,6 +38,27 @@ type Entry struct {
 	Path         string   `json:"path" yaml:"path"`
 	Triggers     []string `json:"triggers,omitempty" yaml:"triggers,omitempty"`
 	Capabilities []string `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+
+	// WhenToUse is the orchestrator-facing "use when" guidance from the
+	// bundle manifest (manifest.yaml when_to_use). Empty for loose .bot
+	// files. Surfaced in the generated iterion-bot-catalog "Use when"
+	// card and editable via the studio Bot-metadata panel.
+	WhenToUse string `json:"when_to_use,omitempty" yaml:"when_to_use,omitempty"`
+
+	// Enabled is the RESOLVED catalog-visibility decision: the manifest
+	// `enabled` default composed with the workspace overlay
+	// (.iterion/bot-overrides.yaml), the overlay winning. Always
+	// serialised so the studio toggle has a deterministic initial state.
+	// List/ListWithSchema return disabled bots too (Enabled=false) so the
+	// studio can show them to flip back on; only catalog generation and
+	// auto-dispatch filter on it.
+	Enabled bool `json:"enabled" yaml:"enabled"`
+
+	// IsBundleDir reports whether this entry is a bundle directory
+	// (manifest.yaml + main.bot) rather than a loose .bot/.iter file.
+	// The studio uses it to gate manifest editing — only bundles have a
+	// manifest.yaml to write.
+	IsBundleDir bool `json:"is_bundle,omitempty" yaml:"is_bundle,omitempty"`
 }
 
 // IsBundle reports whether the entry came from a .botz bundle (Path
@@ -67,6 +88,13 @@ type ListOptions struct {
 	// skipped silently — the caller's defaults often include
 	// optimistic locations like "./examples" or "./bots".
 	Paths []string
+
+	// Workdir, when set, is the workspace root whose
+	// .iterion/bot-overrides.yaml overlay is composed over each bot's
+	// manifest `enabled` default to produce the resolved Entry.Enabled.
+	// Empty disables overlay resolution (entries keep the manifest
+	// default). Typically the same dir passed to DefaultPaths.
+	Workdir string
 }
 
 // Config carries the discovery roots for the bot registry. Lives here
@@ -84,6 +112,19 @@ func List(opts ListOptions) ([]Entry, error) {
 	entries, err := discoverBots(opts.Paths)
 	if err != nil {
 		return nil, err
+	}
+	// Compose the workspace overlay over each bot's manifest `enabled`
+	// default so Entry.Enabled is the resolved catalog-visibility
+	// decision. Disabled bots are still returned (the studio shows them
+	// to flip back on); only catalog generation + auto-dispatch filter.
+	if opts.Workdir != "" {
+		ov, err := LoadOverrides(opts.Workdir)
+		if err != nil {
+			return nil, err
+		}
+		for i := range entries {
+			entries[i].Enabled = ResolveEnabled(entries[i].Name, entries[i].Enabled, ov)
+		}
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 	return entries, nil
@@ -240,6 +281,9 @@ func parseBundle(dir string) (*Entry, error) {
 		Path:         dir,
 		Triggers:     m.Triggers,
 		Capabilities: m.Capabilities,
+		WhenToUse:    strings.TrimSpace(m.WhenToUse),
+		Enabled:      m.IsEnabled(), // manifest default; overlay composed in List
+		IsBundleDir:  true,
 	}, nil
 }
 
@@ -249,7 +293,10 @@ func parseBotFile(path string) (*Entry, error) {
 		return nil, fmt.Errorf("bots: read %s: %w", path, err)
 	}
 	fm := parseFrontmatterBody(raw)
-	e := &Entry{Path: path}
+	// Loose .bot/.iter files carry no manifest, so they default to
+	// enabled (overlay may still flip them in List) and are not
+	// manifest-editable.
+	e := &Entry{Path: path, Enabled: true}
 	if fm != nil {
 		e.Name = fm.Name
 		e.Description = fm.Description

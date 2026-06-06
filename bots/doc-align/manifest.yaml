@@ -25,5 +25,9 @@ description: |
   doc-scope-enumeration (scanner contract), anti-facade-fix-rules
   (substantive fix discipline), doc-verification-checklist (judge
   STEP-0 preamble).
+when_to_use: |
+  Use when README / CLAUDE.md / docs/**/*.md / bundled skills are
+  stale versus the code, before a release, or whenever a survey flags
+  code↔doc drift. Fixes the DOCS only (never code logic) and commits.
 author: SocialGouv (devthejo) — doc-align/main.bot
 schema_version: 1

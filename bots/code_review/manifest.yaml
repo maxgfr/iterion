@@ -9,6 +9,10 @@ description: |
   the iterion native kanban board (labelled severity + type +
   source:revi) and writes a markdown report. Never edits, fixes, or
   commits code — that is the improve-loops' job (Billy / Willy).
+when_to_use: |
+  Use when you want a PR/branch REVIEWED and its issues surfaced to
+  the board for triage, but NOT auto-fixed. Read-only: Revi reports;
+  Billy (branch_improve_loop) reviews AND fixes AND commits.
 author: SocialGouv (devthejo) — code_review/main.bot
 schema_version: 1
 triggers: [code-review, review, pr-review]

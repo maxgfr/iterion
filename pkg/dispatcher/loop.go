@@ -335,16 +335,20 @@ func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 			return
 		}
 		// The bot FILE resolves — but does it have an actual dispatch
-		// route? A bot absent from assignee_workflows would fall through
-		// to the default workflow, running an unrelated bot with the
-		// wrong structured-output schemas and reporting a misleading
-		// success. Refuse, same as the unresolvable case. (RoutingRunner
+		// route? Without one it would fall through to the default
+		// workflow, running an unrelated bot with the wrong
+		// structured-output schemas and reporting a misleading success.
+		// Refuse, same as the unresolvable case. With registry-driven
+		// routing, any ENABLED discovered bot has a route (no
+		// assignee_workflows entry needed); a bot lands here only when it
+		// is disabled in the catalog or — with no bots discovery
+		// configured — absent from assignee_workflows. (RoutingRunner
 		// implements HasRoute; a plain single-workflow runner doesn't —
 		// there an explicit bot has no routing concept, so we don't gate
 		// it and preserve the legacy single-workflow behaviour.)
 		if rc, ok := c.runner.(interface{ HasRoute(string) bool }); ok && !rc.HasRoute(iss.Bot) {
-			c.logger.Warn("dispatcher: %s names bot %q which resolves to a file but has no dispatch route (not in assignee_workflows) — skipping (refusing to silently run the default workflow); add it to assignee_workflows to enable it", iss.Identifier, iss.Bot)
-			c.recordDispatchSkip(iss, fmt.Sprintf("bot %q has no dispatch route (not in assignee_workflows)", iss.Bot))
+			c.logger.Warn("dispatcher: %s names bot %q which resolves to a file but has no active dispatch route — skipping (refusing to silently run the default workflow). Likely disabled in the catalog (enable it in the studio Catalog manager) or, with no bots discovery configured, missing from assignee_workflows.", iss.Identifier, iss.Bot)
+			c.recordDispatchSkip(iss, fmt.Sprintf("bot %q has no active dispatch route (disabled in catalog or unrouted)", iss.Bot))
 			return
 		}
 	}

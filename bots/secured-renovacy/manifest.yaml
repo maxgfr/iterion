@@ -9,5 +9,10 @@ description: |
   detection on the new versions + transitively-introduced libs. Phase 2
   closes with an alternating Claude/GPT review/fix loop until cross-
   family approval.
+when_to_use: |
+  Use when dependency risk is the priority: CVE alerts, stale
+  lockfiles, version bumps. MUTATES dependency manifests/lockfiles and
+  aligns consuming code on breaking changes. Ask before running with
+  major_policy: attempt.
 author: SocialGouv (devthejo) — secured-renovacy/main.bot
 schema_version: 1

@@ -13,5 +13,9 @@ description: |
 
   Ships claw + openai/gpt-5.5-generated skills as a dogfood test of
   claw-code-go's agentic loop against OpenAI.
+when_to_use: |
+  Use to decide what to work on next: survey the repo, draft or revise
+  a roadmap, and route each item to the right bot (or triage it on the
+  board). The orchestrator / entry point, not a worker bot.
 author: SocialGouv (devthejo) — whats-next/main.bot
 schema_version: 1

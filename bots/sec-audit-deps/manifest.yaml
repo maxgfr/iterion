@@ -26,5 +26,9 @@ description: |
   embedded binaries and locale anomalies. Add a language by dropping
   a `skills/lang-<id>.md` and an entry in the `heuristic_scan`
   router.
+when_to_use: |
+  Use for a READ-ONLY supply-chain audit of installed dependencies:
+  post-install triage, malware / typosquat / install-hook detection,
+  CVE baseline. Emits findings to the board; does not fix.
 author: SocialGouv (devthejo) — bots/sec-audit-deps/main.bot
 schema_version: 1

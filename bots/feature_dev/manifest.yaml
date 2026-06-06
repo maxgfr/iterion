@@ -6,5 +6,10 @@ description: |
   input, plans (Claude Code, read-only), implements (session-inherit),
   invokes /simplify, then runs the alternating Claude/GPT review-fix
   loop until two consecutive cross-family approvals.
+when_to_use: |
+  Use when an item can be phrased as one feature with a clear,
+  externally-visible "done" state (new endpoint, UI affordance, CLI
+  flag). Also the route for "build a new bot" work — point
+  feature_prompt at the new .bot file to author.
 author: SocialGouv (devthejo) — feature_dev/main.bot
 schema_version: 1

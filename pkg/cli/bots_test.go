@@ -151,8 +151,10 @@ func TestBotsList_FormatSkill(t *testing.T) {
 	}
 	for _, want := range []string{
 		"name: iterion-bot-catalog",
-		"| Persona | Bot | Description | Triggers | Capabilities |",
-		"| — | `x` | X | foo |",
+		"## The team — persona ↔ assignee",
+		"| — | `x` |",
+		"### `x`",
+		"**Triggers**: foo",
 		"Assignment heuristics",
 	} {
 		if !strings.Contains(buf.String(), want) {

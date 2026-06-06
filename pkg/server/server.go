@@ -602,7 +602,7 @@ func (s *Server) routes() {
 		}
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -623,6 +623,8 @@ func (s *Server) routes() {
 	// as the rest of /api/* (the wrapper at line ~427 wraps the mux).
 	s.mux.HandleFunc("GET /api/v1/bots", s.handleBotsList)
 	s.mux.HandleFunc("GET /api/v1/bots/{name}", s.handleBotsGet)
+	s.mux.HandleFunc("PUT /api/v1/bots/{name}", s.handleBotsPut)
+	s.mux.HandleFunc("PUT /api/v1/bots/{name}/overlay", s.handleBotOverlay)
 
 	// Health endpoints — liveness (always 200 if the mux is alive)
 	// and readiness (cloud-mode dependency pings come via T-26 when
