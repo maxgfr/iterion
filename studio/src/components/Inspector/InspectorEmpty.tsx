@@ -5,9 +5,11 @@ import VarsEditor from "@/components/Panels/VarsEditor";
 import WorkflowSettingsForm from "@/components/Panels/WorkflowSettingsForm";
 import CommentsEditor from "@/components/Panels/CommentsEditor";
 import MCPServersEditor from "@/components/Panels/MCPServersEditor";
+import BotMetadataForm from "@/components/Panels/BotMetadataForm";
+import { useBotForOpenFile } from "@/hooks/useBotForOpenFile";
 import { Tabs } from "@/components/ui";
 
-const TABS: { value: SidebarTab; label: string }[] = [
+const BASE_TABS: { value: SidebarTab; label: string }[] = [
   { value: "workflow", label: "Workflow" },
   { value: "vars", label: "Vars" },
   { value: "schemas", label: "Schemas" },
@@ -18,7 +20,10 @@ const TABS: { value: SidebarTab; label: string }[] = [
 
 /**
  * Rendered by the Inspector when nothing is selected — shows the document-level
- * editing surfaces (workflow settings, vars, schemas, prompts, comments).
+ * editing surfaces (workflow settings, vars, schemas, prompts, comments). When
+ * the open file is a bundle's main.bot, a "Bot" tab is appended for editing the
+ * bundle's manifest metadata (persona, description, when-to-use, triggers,
+ * catalog toggle).
  *
  * Note: the legacy "properties" tab is intentionally absent; selection-driven
  * editing is now handled by the Inspector itself.
@@ -26,16 +31,20 @@ const TABS: { value: SidebarTab; label: string }[] = [
 export default function InspectorEmpty() {
   const activeTab = useUIStore((s) => s.activeTab);
   const setActiveTab = useUIStore((s) => s.setActiveTab);
+  const bot = useBotForOpenFile();
 
-  // Coerce legacy "properties" persistence to a sensible default.
+  const tabs = bot ? [...BASE_TABS, { value: "bot" as SidebarTab, label: "Bot" }] : BASE_TABS;
+
+  // Coerce legacy "properties" persistence — and the "bot" tab when the
+  // open file isn't a bundle — to a sensible default.
   const tab: SidebarTab =
-    activeTab === "properties" ? "workflow" : activeTab;
+    activeTab === "properties" || (activeTab === "bot" && !bot) ? "workflow" : activeTab;
 
   return (
     <Tabs
       value={tab}
       onValueChange={(v) => setActiveTab(v as SidebarTab)}
-      items={TABS.map((t) => ({ value: t.value, label: t.label }))}
+      items={tabs.map((t) => ({ value: t.value, label: t.label }))}
       panels={{
         workflow: <WorkflowSettingsForm />,
         vars: <VarsEditor />,
@@ -43,6 +52,7 @@ export default function InspectorEmpty() {
         prompts: <PromptEditor />,
         mcp: <MCPServersEditor />,
         comments: <CommentsEditor />,
+        ...(bot ? { bot: <BotMetadataForm key={bot.name} bot={bot} /> } : {}),
       }}
       className="h-full"
       listClassName="shrink-0 px-2"

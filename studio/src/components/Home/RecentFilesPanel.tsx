@@ -17,6 +17,7 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { basename } from "@/lib/format";
 import { botIdentity } from "@/lib/personas";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { BotCatalogDialog } from "@/components/Catalog/BotCatalogDialog";
 
 // First-class bots are static for the lifetime of the server process, so
 // cache the first successful response and reuse it on every subsequent
@@ -63,6 +64,7 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
   const [examples, setExamples] = useState<api.ExampleEntry[]>([]);
   const [examplesOpen, setExamplesOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
   const { confirm, dialog: confirmDialog } = useConfirm();
 
   useEffect(() => {
@@ -144,17 +146,26 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
 
       {examples.length > 0 && (
         <div>
-          <button
-            onClick={() => setExamplesOpen((v) => !v)}
-            className="w-full flex items-center gap-1 text-xs font-medium text-fg-muted hover:text-fg-default px-1"
-          >
-            {examplesOpen ? (
-              <ChevronDownIcon className="w-3 h-3" />
-            ) : (
-              <ChevronRightIcon className="w-3 h-3" />
-            )}
-            <span>Bots ({examples.length})</span>
-          </button>
+          <div className="flex items-center justify-between px-1">
+            <button
+              onClick={() => setExamplesOpen((v) => !v)}
+              className="flex items-center gap-1 text-xs font-medium text-fg-muted hover:text-fg-default"
+            >
+              {examplesOpen ? (
+                <ChevronDownIcon className="w-3 h-3" />
+              ) : (
+                <ChevronRightIcon className="w-3 h-3" />
+              )}
+              <span>Bots ({examples.length})</span>
+            </button>
+            <button
+              onClick={() => setCatalogOpen(true)}
+              className="text-[10px] text-fg-subtle hover:text-fg-default"
+              title="Enable/disable bots and edit their metadata"
+            >
+              Manage
+            </button>
+          </div>
           {examplesOpen && (
             <ul className="mt-1 space-y-0.5">
               {examples.map((ex) => {
@@ -276,6 +287,7 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
         )}
       </div>
       {confirmDialog}
+      <BotCatalogDialog open={catalogOpen} onOpenChange={setCatalogOpen} />
     </div>
   );
 
@@ -287,6 +299,13 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
         <h2 className="text-xs font-semibold uppercase tracking-wider text-fg-muted">
           Workflows
         </h2>
+        <button
+          onClick={() => setCatalogOpen(true)}
+          className="text-[10px] text-fg-subtle hover:text-fg-default"
+          title="Enable/disable bots and edit their metadata"
+        >
+          Manage bots
+        </button>
       </header>
       {body}
     </section>

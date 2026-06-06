@@ -45,6 +45,11 @@ type Entry struct {
 	// card and editable via the studio Bot-metadata panel.
 	WhenToUse string `json:"when_to_use,omitempty" yaml:"when_to_use,omitempty"`
 
+	// Author and Version mirror the manifest fields so the studio Bot
+	// metadata panel can pre-fill + edit them. Empty for loose .bot files.
+	Author  string `json:"author,omitempty" yaml:"author,omitempty"`
+	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+
 	// Enabled is the RESOLVED catalog-visibility decision: the manifest
 	// `enabled` default composed with the workspace overlay
 	// (.iterion/bot-overrides.yaml), the overlay winning. Always
@@ -53,6 +58,13 @@ type Entry struct {
 	// studio can show them to flip back on; only catalog generation and
 	// auto-dispatch filter on it.
 	Enabled bool `json:"enabled" yaml:"enabled"`
+
+	// ManifestEnabled is the bot's `enabled` DEFAULT from its manifest,
+	// BEFORE the workspace overlay is applied. The studio Bot panel edits
+	// this (writes the manifest), while the Catalog manager toggles the
+	// overlay (Enabled). The panel compares the two to surface a "locally
+	// overridden" note. Not overwritten by List.
+	ManifestEnabled bool `json:"manifest_enabled" yaml:"manifest_enabled"`
 
 	// IsBundleDir reports whether this entry is a bundle directory
 	// (manifest.yaml + main.bot) rather than a loose .bot/.iter file.
@@ -282,8 +294,11 @@ func parseBundle(dir string) (*Entry, error) {
 		Triggers:     m.Triggers,
 		Capabilities: m.Capabilities,
 		WhenToUse:    strings.TrimSpace(m.WhenToUse),
-		Enabled:      m.IsEnabled(), // manifest default; overlay composed in List
-		IsBundleDir:  true,
+		Author:          m.Author,
+		Version:         m.Version,
+		Enabled:         m.IsEnabled(), // manifest default; overlay composed in List
+		ManifestEnabled: m.IsEnabled(), // preserved pre-overlay for the studio Bot panel
+		IsBundleDir:     true,
 	}, nil
 }
 
@@ -296,7 +311,7 @@ func parseBotFile(path string) (*Entry, error) {
 	// Loose .bot/.iter files carry no manifest, so they default to
 	// enabled (overlay may still flip them in List) and are not
 	// manifest-editable.
-	e := &Entry{Path: path, Enabled: true}
+	e := &Entry{Path: path, Enabled: true, ManifestEnabled: true}
 	if fm != nil {
 		e.Name = fm.Name
 		e.Description = fm.Description

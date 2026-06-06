@@ -77,12 +77,13 @@ func (s *Server) handleBotsGet(w http.ResponseWriter, r *http.Request) {
 // (rename cascades through the catalog, dispatcher routing, and ticket
 // history — out of scope).
 type botUpdateRequest struct {
-	DisplayName *string `json:"display_name,omitempty"`
-	Description *string `json:"description,omitempty"`
-	Author      *string `json:"author,omitempty"`
-	Version     *string `json:"version,omitempty"`
-	WhenToUse   *string `json:"when_to_use,omitempty"`
-	Enabled     *bool   `json:"enabled,omitempty"`
+	DisplayName *string   `json:"display_name,omitempty"`
+	Description *string   `json:"description,omitempty"`
+	Author      *string   `json:"author,omitempty"`
+	Version     *string   `json:"version,omitempty"`
+	WhenToUse   *string   `json:"when_to_use,omitempty"`
+	Enabled     *bool     `json:"enabled,omitempty"`
+	Triggers    *[]string `json:"triggers,omitempty"`
 }
 
 // handleBotsPut updates a bot's manifest.yaml in place (the studio Bot
@@ -126,6 +127,7 @@ func (s *Server) handleBotsPut(w http.ResponseWriter, r *http.Request) {
 		Version:     req.Version,
 		WhenToUse:   req.WhenToUse,
 		Enabled:     req.Enabled,
+		Triggers:    req.Triggers,
 	}
 	if _, err := bundle.WriteManifest(manifestPath, patch); err != nil {
 		s.httpErrorFor(w, r, http.StatusInternalServerError, "bots: write manifest: %v", err)

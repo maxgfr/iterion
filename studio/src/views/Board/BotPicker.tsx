@@ -35,7 +35,12 @@ export function BotPicker({
 }: Props) {
   const options = useMemo<ComboboxOption<string>[]>(
     () =>
-      bots.map((b) => {
+      // Disabled bots (catalog toggle off) aren't routable, so they don't
+      // belong in the ticket assignment picker. The current value is kept
+      // even if disabled (below) so an existing assignment still renders.
+      bots
+        .filter((b) => b.enabled !== false || b.name === value)
+        .map((b) => {
         // The manifest persona (display_name) leads, with the emoji
         // avatar; the technical name moves into the description and stays
         // in the search haystack so operators can still type "feature_dev".
@@ -53,7 +58,7 @@ export function BotPicker({
           searchHaystack: `${persona ?? ""} ${b.name} ${b.description ?? ""} ${(b.triggers ?? []).join(" ")} ${(b.capabilities ?? []).join(" ")}`,
         };
       }),
-    [bots, metaFor],
+    [bots, metaFor, value],
   );
 
   return (

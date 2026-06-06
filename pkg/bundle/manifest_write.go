@@ -32,6 +32,11 @@ type ManifestPatch struct {
 	Author      *string
 	WhenToUse   *string
 	Enabled     *bool
+	// Triggers is nil for "no change"; a non-nil slice (even empty) sets
+	// the manifest's triggers list. Note: when the bundle's main.bot
+	// declares its own `## triggers:` frontmatter, discovery overlays it
+	// over the manifest value (see botregistry.parseBundle).
+	Triggers *[]string
 }
 
 // WriteManifest applies patch to the manifest.yaml at path, preserving
@@ -105,6 +110,11 @@ func WriteManifest(path string, patch ManifestPatch) (*Manifest, error) {
 	}
 	if patch.Enabled != nil {
 		if err := setMapField(root, "enabled", *patch.Enabled, false, "description"); err != nil {
+			return nil, err
+		}
+	}
+	if patch.Triggers != nil {
+		if err := setMapField(root, "triggers", *patch.Triggers, false, ""); err != nil {
 			return nil, err
 		}
 	}

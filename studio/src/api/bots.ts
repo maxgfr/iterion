@@ -22,7 +22,38 @@ export interface BotEntry {
   path: string;
   triggers?: string[];
   capabilities?: string[];
+  /** Orchestrator-facing "use when" guidance (manifest when_to_use) that
+   *  Nexie reads to route a task. Editable in the Bot metadata panel. */
+  when_to_use?: string;
+  /** Resolved catalog visibility: manifest `enabled` default composed
+   *  with the workspace overlay. `false` = hidden from Nexie + the board
+   *  picker (but still listed in the Catalog manager to flip back on).
+   *  Absent is treated as enabled. */
+  enabled?: boolean;
+  /** True when this entry is a bundle (manifest.yaml + main.bot) and thus
+   *  has metadata that can be edited; loose .bot files are read-only. */
+  is_bundle?: boolean;
+  /** Manifest author/version, surfaced so the Bot metadata panel can
+   *  pre-fill + edit them. */
+  author?: string;
+  version?: string;
+  /** The manifest `enabled` DEFAULT (pre-overlay). The Bot panel edits
+   *  this; `enabled` is the resolved value the Catalog manager overlay
+   *  controls. They differ when a workspace overlay is active. */
+  manifest_enabled?: boolean;
 }
+
+/** BotPatch is the editable subset of a bot's manifest. Omitted fields
+ *  are left untouched server-side; an empty string clears a field. */
+export type BotPatch = Partial<{
+  display_name: string;
+  description: string;
+  author: string;
+  version: string;
+  when_to_use: string;
+  enabled: boolean;
+  triggers: string[];
+}>;
 
 /** BotEntryWithSchema augments BotEntry with the workflow's declared
  *  vars + presets — same JSON shape as the studio's existing
@@ -56,4 +87,25 @@ export async function listBots(): Promise<BotEntryWithSchema[]> {
  *  yet (cache miss / page reload while a modal is open). */
 export function getBot(name: string): Promise<BotEntryWithSchema> {
   return apiRequest<BotEntryWithSchema>(`${BASE}/${encodeURIComponent(name)}`);
+}
+
+/** updateBot writes a bot's manifest metadata (Bot metadata panel) and
+ *  returns the refreshed entry. Bundle-only — the server rejects loose
+ *  .bot files with 409. */
+export function updateBot(name: string, patch: BotPatch): Promise<BotEntryWithSchema> {
+  return apiRequest<BotEntryWithSchema>(`${BASE}/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    body: JSON.stringify(patch),
+  });
+}
+
+/** setBotOverlay pins a bot's catalog visibility in this workspace
+ *  without touching the (possibly git-tracked) manifest — the Catalog
+ *  manager quick-toggle. `null` clears the override (manifest default
+ *  stands again). Returns the refreshed entry. */
+export function setBotOverlay(name: string, enabled: boolean | null): Promise<BotEntryWithSchema> {
+  return apiRequest<BotEntryWithSchema>(`${BASE}/${encodeURIComponent(name)}/overlay`, {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
 }

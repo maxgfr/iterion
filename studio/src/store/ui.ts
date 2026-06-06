@@ -5,7 +5,7 @@ import { TOAST_DURATION_DEFAULT_MS } from "@/lib/constants";
 import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
 
 export type { LayerKind };
-export type SidebarTab = "properties" | "schemas" | "prompts" | "vars" | "workflow" | "comments" | "mcp";
+export type SidebarTab = "properties" | "schemas" | "prompts" | "vars" | "workflow" | "comments" | "mcp" | "bot";
 export type LayoutDirection = "DOWN" | "RIGHT";
 export type CanvasTool = "pan" | "select";
 export interface EditingItem { kind: "schema" | "prompt" | "var"; name: string }
