@@ -1521,6 +1521,18 @@ workflow sec_audit_source:
   scan_join -> scan_health with {langs: "{{outputs.detect_tech.langs}}"}
   scan_health -> cap_findings
 
+  ## ZERO-FINDINGS IS DELIBERATELY NOT SHORT-CIRCUITED. On a clean repo
+  ## cap_findings yields an empty set and triage runs one cheap LLM pass
+  ## on it — that redundant call is the intended cost. We do NOT branch
+  ## "cap_findings -> done when no findings": that path would run ONLY on
+  ## clean repos (rare — most audits find something), making it the
+  ## least-exercised, most bug-prone edge in the pipeline, and it would
+  ## need a converging node since report_card / update_file_records
+  ## reference outputs.triage / outputs.merge_verdicts by node id. A
+  ## uniform single path that is always exercised + always tested is far
+  ## more reliable than a marginal-savings branch that almost never runs.
+  ## Safety on zero/huge candidate sets is already handled deterministically
+  ## (cap_findings bounds triage's input; revalidate guards zero candidates).
   cap_findings -> triage with {
     workspace_dir:   "{{vars.workspace_dir}}",
     tech:            "{{outputs.detect_tech}}",
