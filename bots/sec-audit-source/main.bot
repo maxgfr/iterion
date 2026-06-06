@@ -2000,7 +2000,7 @@ compute project_context_resolve:
 ## via the `file_filter` mapping, which already handles a comma-separated
 ## list (existing Cap. 3 shard mechanism, see triage_system:404-409).
 tool diff_scope:
-  command: `WS={{vars.workspace_dir}} BASE='{{vars.diff_base}}' python3 -c "
+  command: `WS={{vars.workspace_dir}} BASE={{vars.diff_base}} python3 -c "
 import os, subprocess, json
 ws = os.environ['WS']
 base = (os.environ.get('BASE') or '').strip()
@@ -2190,7 +2190,7 @@ tool run_generic_scanners:
 ## verify per-language coverage. Replaces the old per-language run_js/go/python
 ## scanner nodes + the closed has_js/has_go/has_python enum.
 tool run_lang_scanners:
-  command: `mkdir -p {{vars.scan_dir}} && LANGS='{{input.langs}}' SCAN_DIR={{vars.scan_dir}} WORKSPACE_DIR={{vars.workspace_dir}} SKILLS_DIR={{vars.workspace_dir}}/.claude/skills python3 -c "
+  command: `mkdir -p {{vars.scan_dir}} && LANGS={{input.langs}} SCAN_DIR={{vars.scan_dir}} WORKSPACE_DIR={{vars.workspace_dir}} SKILLS_DIR={{vars.workspace_dir}}/.claude/skills python3 -c "
 import os, sys, json, re, subprocess
 _alias = {'javascript': 'js', 'typescript': 'js', 'ts': 'js', 'node': 'js', 'nodejs': 'js', 'golang': 'go', 'py': 'python', 'py3': 'python', 'python3': 'python'}
 def _norm_langs(_raw):
@@ -2481,7 +2481,7 @@ compute scan_join:
 ## scanners missing) pass but are surfaced to report_card as a coverage
 ## banner. Runs BEFORE cap_findings, which truncates the files in place.
 tool scan_health:
-  command: `SCAN_DIR={{vars.scan_dir}} MIN_GENERIC={{vars.min_generic_scanners}} LANGS='{{input.langs}}' SKILLS_DIR={{vars.workspace_dir}}/.claude/skills ENABLE_DEEPSEC={{vars.enable_deepsec}} DEEPSEC_OUT={{vars.deepsec_out}} python3 -c "
+  command: `SCAN_DIR={{vars.scan_dir}} MIN_GENERIC={{vars.min_generic_scanners}} LANGS={{input.langs}} SKILLS_DIR={{vars.workspace_dir}}/.claude/skills ENABLE_DEEPSEC={{vars.enable_deepsec}} DEEPSEC_OUT={{vars.deepsec_out}} python3 -c "
 import os, sys, json, re
 
 scan_dir = os.environ.get('SCAN_DIR', '.')
@@ -2931,7 +2931,7 @@ judge voter_v3:
 ## so report_card + update_file_records receive the same shape the
 ## old revalidate node emitted.
 tool majority_verdict:
-  command: `V1='{{outputs.voter_v1.verdicts}}' V2='{{outputs.voter_v2.verdicts}}' V3='{{outputs.voter_v3.verdicts}}' CANDIDATES='{{outputs.filter_cached_files.fresh_candidates}}' CONFIRM_THRESHOLD={{vars.confirm_threshold}} FP_APPEND_POLICY={{vars.fp_append_policy}} python3 -c "
+  command: `V1={{outputs.voter_v1.verdicts}} V2={{outputs.voter_v2.verdicts}} V3={{outputs.voter_v3.verdicts}} CANDIDATES={{outputs.filter_cached_files.fresh_candidates}} CONFIRM_THRESHOLD={{vars.confirm_threshold}} FP_APPEND_POLICY={{vars.fp_append_policy}} python3 -c "
 import os, sys, json
 def _load(name):
     raw = os.environ.get(name, '') or ''
@@ -3110,7 +3110,7 @@ print(json.dumps({
 ## known_false_positives: list when present; creates the file/section
 ## when absent. Idempotent on empty fp_appends[] (returns count=0).
 tool fp_append:
-  command: `FP_PATH='{{input.fp_path}}' FP_APPENDS='{{input.fp_appends}}' python3 -c "
+  command: `FP_PATH={{input.fp_path}} FP_APPENDS={{input.fp_appends}} python3 -c "
 import os, sys, json, datetime, re
 fp_path = os.environ.get('FP_PATH', '')
 try:
@@ -3367,7 +3367,7 @@ compute apply_router:
 ## remediation_plan -> done shortcut for the zero-fixable-findings
 ## case.
 tool remediation_plan:
-  command: `CONFIRMED='{{outputs.merge_with_cache.confirmed}}' HARD_STOP='{{vars.hard_stop_categories}}' REMEDIATE='{{vars.remediate}}' python3 -c "
+  command: `CONFIRMED={{outputs.merge_with_cache.confirmed}} HARD_STOP={{vars.hard_stop_categories}} REMEDIATE={{vars.remediate}} python3 -c "
 import os, json
 try:
     confirmed = json.loads(os.environ.get('CONFIRMED','[]') or '[]')
@@ -3421,7 +3421,7 @@ print(json.dumps({
 ## input.branch — empty branch means we degrade to propose-style revert
 ## even in apply mode (defence-in-depth — no committed state lost).
 tool prepare_branch:
-  command: `WS={{vars.workspace_dir}} RUN_ID='{{run.id}}' python3 -c "
+  command: `WS={{vars.workspace_dir}} RUN_ID={{run.id}} python3 -c "
 import os, sys, json, subprocess, re, time
 ws = os.environ.get('WS','')
 run_id = (os.environ.get('RUN_ID','') or '').strip()
@@ -3504,7 +3504,7 @@ print(json.dumps(result))
 ## `attempted` — a JSON array of strings; on first pass the loop
 ## seeds it as "[]".
 tool select_finding:
-  command: `TO_FIX='{{outputs.remediation_plan.to_fix}}' ATTEMPTED='{{input.attempted}}' python3 -c "
+  command: `TO_FIX={{outputs.remediation_plan.to_fix}} ATTEMPTED={{input.attempted}} python3 -c "
 import os, json
 def fid(f):
     if not isinstance(f, dict):
@@ -3579,7 +3579,7 @@ agent patch_author:
 ## (vars.build_cmd_hint) overrides the auto-detected command — currently
 ## unused (no var declared) but harmless future-proofing.
 tool build_rung:
-  command: `WS={{vars.workspace_dir}} LANGS='{{outputs.detect_tech.langs}}' python3 -c "
+  command: `WS={{vars.workspace_dir}} LANGS={{outputs.detect_tech.langs}} python3 -c "
 import os, json, subprocess
 ws = os.environ['WS']
 try:
@@ -3626,7 +3626,7 @@ except Exception as e:
 ## — treated as "no signal" → uncertain (NOT verified) downstream in
 ## aggregate_verdict.
 tool reproduce_rung:
-  command: `WS={{vars.workspace_dir}} FINDING='{{input.finding}}' SKILLS={{vars.workspace_dir}}/.claude/skills python3 -c "
+  command: `WS={{vars.workspace_dir}} FINDING={{input.finding}} SKILLS={{vars.workspace_dir}}/.claude/skills python3 -c "
 import os, sys, json, subprocess, re
 try:
     finding = json.loads(os.environ.get('FINDING','{}') or '{}')
@@ -3689,7 +3689,7 @@ print(json.dumps({
 ## go → go test ./...; js/ts → npm/pnpm test script else trivially
 ## pass. Always exits 0 (envelope carries passed=false on failure).
 tool regress_rung:
-  command: `WS={{vars.workspace_dir}} LANGS='{{outputs.detect_tech.langs}}' python3 -c "
+  command: `WS={{vars.workspace_dir}} LANGS={{outputs.detect_tech.langs}} python3 -c "
 import os, json, subprocess
 ws = os.environ['WS']
 try:
@@ -3833,7 +3833,7 @@ compute aggregate_verdict:
 ## back to the propose-mode revert path. We never commit when the
 ## branch context is missing.
 tool record_finding:
-  command: `mkdir -p {{vars.patch_dir}} && WS={{vars.workspace_dir}} PATCH_DIR={{vars.patch_dir}} VERDICT='{{outputs.aggregate_verdict}}' AUTHOR='{{outputs.patch_author}}' IS_APPLY='{{input.is_apply}}' BRANCH='{{input.branch}}' python3 -c "
+  command: `mkdir -p {{vars.patch_dir}} && WS={{vars.workspace_dir}} PATCH_DIR={{vars.patch_dir}} VERDICT={{outputs.aggregate_verdict}} AUTHOR={{outputs.patch_author}} IS_APPLY={{input.is_apply}} BRANCH={{input.branch}} python3 -c "
 import os, sys, json, subprocess, re
 ws = os.environ['WS']
 patch_dir = os.environ['PATCH_DIR']
@@ -3954,7 +3954,7 @@ print(json.dumps({'artifact_path': artifact_path, 'reverted': reverted, 'committ
 ## driven so a missing artifact (e.g. the loop budget was hit) shows
 ## as zero instead of a crash.
 tool fix_summary:
-  command: `WS={{vars.workspace_dir}} PATCH_DIR={{vars.patch_dir}} BRANCH='{{outputs.prepare_branch.branch}}' ORIGINAL='{{outputs.prepare_branch.original_branch}}' HARD_STOPPED='{{outputs.remediation_plan.hard_stopped}}' python3 -c "
+  command: `WS={{vars.workspace_dir}} PATCH_DIR={{vars.patch_dir}} BRANCH={{outputs.prepare_branch.branch}} ORIGINAL={{outputs.prepare_branch.original_branch}} HARD_STOPPED={{outputs.remediation_plan.hard_stopped}} python3 -c "
 import os, sys, json, glob
 ws = os.environ['WS']
 patch_dir = os.environ['PATCH_DIR']
@@ -4045,7 +4045,7 @@ human approve_fixes:
 ## Zero-verified-commits = clean no-op (just checkout the original).
 ## Any stash captured by prepare_branch is restored AFTER the merge.
 tool merge_fixes:
-  command: `WS={{input.workspace_dir}} BRANCH='{{input.branch}}' ORIGINAL='{{input.original_branch}}' STASHED='{{input.stashed}}' STASH_REF='{{input.stash_ref}}' python3 -c "
+  command: `WS={{input.workspace_dir}} BRANCH={{input.branch}} ORIGINAL={{input.original_branch}} STASHED={{input.stashed}} STASH_REF={{input.stash_ref}} python3 -c "
 import os, sys, json, subprocess
 ws = os.environ['WS']
 branch = (os.environ.get('BRANCH','') or '').strip()
@@ -4103,7 +4103,7 @@ out(result)
 ## a subset, inspect a specific commit, or re-run with apply_auto on
 ## CI later). Restore any stash captured by prepare_branch.
 tool abandon_fixes:
-  command: `WS={{input.workspace_dir}} BRANCH='{{input.branch}}' ORIGINAL='{{input.original_branch}}' STASHED='{{input.stashed}}' STASH_REF='{{input.stash_ref}}' python3 -c "
+  command: `WS={{input.workspace_dir}} BRANCH={{input.branch}} ORIGINAL={{input.original_branch}} STASHED={{input.stashed}} STASH_REF={{input.stash_ref}} python3 -c "
 import os, sys, json, subprocess
 ws = os.environ['WS']
 branch = (os.environ.get('BRANCH','') or '').strip()
