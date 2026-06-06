@@ -35,12 +35,12 @@ Built-in assignees ([source bots](../examples/)):
 
 | Persona | Assignee | Backing bot | What it does |
 |---|---|---|---|
-| 🛠️ Featurly | `feature-dev` | `bots/feature_dev/` | Autonomous feature dev: plan → act → simplify → alternating Claude/GPT review loop |
-| 🌍 Willy | `whole-improve-loop` | `bots/whole_improve_loop/` | Whole-codebase improvement loop with alternating cross-family verdicts |
-| 🌿 Billy | `branch-improve-loop` | `bots/branch_improve_loop/` | Branch-scoped improvement + auto-commit on convergence |
+| 🛠️ Featurly | `feature-dev` | `bots/feature-dev/` | Autonomous feature dev: plan → act → simplify → alternating Claude/GPT review loop |
+| 🌍 Willy | `whole-improve-loop` | `bots/whole-improve-loop/` | Whole-codebase improvement loop with alternating cross-family verdicts |
+| 🌿 Billy | `branch-improve-loop` | `bots/branch-improve-loop/` | Branch-scoped improvement + auto-commit on convergence |
 | 🧭 Nexie | `whats-next` | `bots/whats-next/` | Repo survey → roadmap synthesis → kanban materialisation |
 | 📚 Doki | `docs-refresh` | `bots/docs-refresh/` | Detect & fix doc/code mismatches |
-| 🔎 Revi | `code-review` | `bots/code_review/` | Read-only cross-family code review; publishes findings to the board |
+| 🔎 Revi | `code-review` | `bots/code-review/` | Read-only cross-family code review; publishes findings to the board |
 | 🛡️ Seki | `sec-audit-source` | `bots/sec-audit-source/` | Source-code security audit (gitleaks/trivy/semgrep/gosec) |
 | 📦 Depsy | `sec-audit-deps` | `bots/sec-audit-deps/` | Supply-chain dep audit + LLM review |
 | ⬆️ Renovacy | `secured-renovacy` | `bots/secured-renovacy/` | Security-aware dependency upgrades with cumulative review |
@@ -325,8 +325,8 @@ tracker:
 workflow: workflows/triage.bot                  # default fallback
 
 assignee_workflows:
-  feature_dev:        bots/feature_dev/main.bot
-  whole_improve_loop: bots/whole_improve_loop/main.bot
+  feature_dev:        bots/feature-dev/main.bot
+  whole_improve_loop: bots/whole-improve-loop/main.bot
   secured-renovacy:   bots/secured-renovacy/main.bot
 ```
 
@@ -411,8 +411,8 @@ wholesale for that dispatch:
 ```yaml
 workflow: workflows/triage.bot
 assignee_workflows:
-  feature-dev:        bots/feature_dev/main.bot
-  whole-improve-loop: bots/whole_improve_loop/main.bot
+  feature-dev:        bots/feature-dev/main.bot
+  whole-improve-loop: bots/whole-improve-loop/main.bot
   secured-renovacy:   bots/secured-renovacy/main.bot
 
 assignee_dispatch:

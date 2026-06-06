@@ -71,7 +71,7 @@ func stubSnapshotChunk(exec *scenarioExecutor) {
 //	iter1: claude approves   → streak_check.stop = false (no previous)
 //	iter2: gpt approves      → streak_check.stop = true  → done
 func TestWholeImproveLoop_HappyPath(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "whole_improve_loop/main.bot")
+	wf := compileFixtureStubSafe(t, "whole-improve-loop/main.bot")
 	exec := newScenarioExecutor()
 	stubSnapshotChunk(exec)
 
@@ -134,7 +134,7 @@ func TestWholeImproveLoop_HappyPath(t *testing.T) {
 // claude→streak_check sees previous=gpt's approval, current=claude's
 // approval, families differ → stop.
 func TestWholeImproveLoop_FixThenApprove(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "whole_improve_loop/main.bot")
+	wf := compileFixtureStubSafe(t, "whole-improve-loop/main.bot")
 	exec := newScenarioExecutor()
 	stubSnapshotChunk(exec)
 
@@ -201,7 +201,7 @@ func TestWholeImproveLoop_FixThenApprove(t *testing.T) {
 // `failed` (not a silent `finished`) so a dispatcher re-runs rather than
 // marking the ticket clean. See main.bot "Loop exhaustion fallbacks".
 func TestWholeImproveLoop_LoopExhausted(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "whole_improve_loop/main.bot")
+	wf := compileFixtureStubSafe(t, "whole-improve-loop/main.bot")
 	exec := newScenarioExecutor()
 	stubSnapshotChunk(exec)
 
@@ -247,7 +247,7 @@ func TestWholeImproveLoop_LoopExhausted(t *testing.T) {
 // This is the regression net for any future refactor of the engine's
 // event emission — a missing event type surfaces here first.
 func TestWholeImproveLoop_EventTrace(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "whole_improve_loop/main.bot")
+	wf := compileFixtureStubSafe(t, "whole-improve-loop/main.bot")
 	exec := newScenarioExecutor()
 	stubSnapshotChunk(exec)
 	exec.on("reviewer_claude", func(_ map[string]interface{}) (map[string]interface{}, error) {
@@ -307,7 +307,7 @@ func TestWholeImproveLoop_EventTrace(t *testing.T) {
 // and execution falls through to a `fail` terminal — a non-convergence,
 // reported as `failed`. Asserts the fixer ran many times before the cap.
 func TestWholeImproveLoop_RecoveryLoopExhausted(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "whole_improve_loop/main.bot")
+	wf := compileFixtureStubSafe(t, "whole-improve-loop/main.bot")
 	exec := newScenarioExecutor()
 	stubSnapshotChunk(exec)
 
@@ -373,7 +373,7 @@ func TestWholeImproveLoop_RecoveryLoopExhausted(t *testing.T) {
 // prompt-cache hits and reviewer-context continuity — the live runs
 // would still pass but cost more, so we pin it here.
 func TestWholeImproveLoop_SessionInheritStructural(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "whole_improve_loop/main.bot")
+	wf := compileFixtureStubSafe(t, "whole-improve-loop/main.bot")
 
 	for _, id := range []string{"fix_claude", "fix_gpt"} {
 		node, ok := wf.Nodes[id]
@@ -408,7 +408,7 @@ func TestWholeImproveLoop_SessionInheritStructural(t *testing.T) {
 //     pass-through), and convergence needs a FULL sweep + 1 (4 passes), so a
 //     single clean chunk cannot terminate the loop.
 func TestWholeImproveLoop_CursorThreadsAndStreakAccumulates(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "whole_improve_loop/main.bot")
+	wf := compileFixtureStubSafe(t, "whole-improve-loop/main.bot")
 	exec := newScenarioExecutor()
 
 	var gotCursors, gotStreaks []int

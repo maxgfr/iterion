@@ -23,21 +23,26 @@ import (
 // avoids a false hit on an unrelated dir like "/my-examples/feature_dev".
 // No name in the set is a prefix of another, so the remaps never overlap.
 var botRelocations = []struct{ from, to string }{
-	{"/examples/feature_dev", "/bots/feature_dev"},
-	{"/examples/whole_improve_loop", "/bots/whole_improve_loop"},
-	{"/examples/branch_improve_loop", "/bots/branch_improve_loop"},
+	{"/examples/feature_dev", "/bots/feature-dev"},
+	{"/examples/whole_improve_loop", "/bots/whole-improve-loop"},
+	{"/examples/branch_improve_loop", "/bots/branch-improve-loop"},
 	{"/examples/whats-next", "/bots/whats-next"},
 	{"/examples/doc-align", "/bots/docs-refresh"},
 	{"/examples/sec-audit-source", "/bots/sec-audit-source"},
 	{"/examples/sec-audit-deps", "/bots/sec-audit-deps"},
 	{"/examples/secured-renovacy", "/bots/secured-renovacy"},
-	{"/examples/code_review", "/bots/code_review"},
+	{"/examples/code_review", "/bots/code-review"},
 	// doc-align was renamed to docs-refresh (2026-06). Remap its
 	// pre-rename bots/ location too so runs created between the
 	// examples→bots move and the rename still resolve the bot. Safe vs
 	// the examples/doc-align rule above: "/bots/docs-refresh" does not
 	// contain "/bots/doc-align", so neither remap double-applies.
 	{"/bots/doc-align", "/bots/docs-refresh"},
+	// 4 bots renamed snake->kebab (2026-06): remap their pre-rename bots/ paths.
+	{"/bots/feature_dev", "/bots/feature-dev"},
+	{"/bots/whole_improve_loop", "/bots/whole-improve-loop"},
+	{"/bots/branch_improve_loop", "/bots/branch-improve-loop"},
+	{"/bots/code_review", "/bots/code-review"},
 }
 
 // remapBotPath applies the relocation to a single recorded path. Returns

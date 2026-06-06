@@ -72,12 +72,12 @@ Walk top-to-bottom; first match wins.
 
 | If the work sounds like… | → `assignee` |
 |---|---|
-| "implement feature X", "add capability", "build the thing" | `feature_dev` |
-| "build a new bot for Y" / "create a workflow that does Y" — the catalogue lacks a fit and we need to author one | `feature_dev` (with `feature_prompt` pointing at the new `.bot` file to create) |
-| "review the whole codebase", "audit production-readiness", "find bugs anywhere" | `whole_improve_loop` |
-| "focus on axis X" (observability / perf / DX / refactoring) ACROSS the codebase — improvement loop, not detection | `whole_improve_loop` (with `--var improvement_prompt=…`) |
-| "review this branch", "review the PR", "fix the diff against main" — review AND fix AND commit | `branch_improve_loop` |
-| "review this PR / branch and just REPORT the issues" — read-only review, posts findings to the board, does NOT fix or commit | `code_review` |
+| "implement feature X", "add capability", "build the thing" | `feature-dev` |
+| "build a new bot for Y" / "create a workflow that does Y" — the catalogue lacks a fit and we need to author one | `feature-dev` (with `feature_prompt` pointing at the new `.bot` file to create) |
+| "review the whole codebase", "audit production-readiness", "find bugs anywhere" | `whole-improve-loop` |
+| "focus on axis X" (observability / perf / DX / refactoring) ACROSS the codebase — improvement loop, not detection | `whole-improve-loop` (with `--var improvement_prompt=…`) |
+| "review this branch", "review the PR", "fix the diff against main" — review AND fix AND commit | `branch-improve-loop` |
+| "review this PR / branch and just REPORT the issues" — read-only review, posts findings to the board, does NOT fix or commit | `code-review` |
 | "upgrade dependencies", "patch CVEs", "bump versions", "renovate" — MUTATING (writes package.json / go.mod / lockfiles) | `secured-renovacy` |
 | "audit the docs", "find code↔doc drift", "doc/code alignment", "fix outdated README/CLAUDE.md" | `docs-refresh` |
 | "audit the source for vulns", "find injection / SSRF / IDOR / secrets", "OWASP source scan" — DETECTION (writes findings, not fixes) | `sec-audit-source` |
@@ -95,25 +95,25 @@ wastes a bot run.
 These overlaps come up often; commit each distinguisher to memory
 before you walk the table on a new roadmap item.
 
-### `feature_dev` vs `whole_improve_loop`
+### `feature-dev` vs `whole-improve-loop`
 
-- `feature_dev` ships a NEW capability. There is a "done" state
+- `feature-dev` ships a NEW capability. There is a "done" state
   visible from the outside (a new endpoint, a new UI affordance,
   a new CLI flag). Body reads as a feature spec.
-- `whole_improve_loop` improves EXISTING code along an axis
+- `whole-improve-loop` improves EXISTING code along an axis
   (reliability, perf, observability, DX). There is no new
   capability — just better/cleaner code. Body reads as a quality
   bar to reach.
 - Tie-break: "could a user notice the difference without reading
-  the diff?" Yes → `feature_dev`. No → `whole_improve_loop`.
+  the diff?" Yes → `feature-dev`. No → `whole-improve-loop`.
 
-### `sec-audit-*` (DETECTION) vs `whole_improve_loop` (FIX-loop on a security axis) vs `secured-renovacy` (MUTATION on deps)
+### `sec-audit-*` (DETECTION) vs `whole-improve-loop` (FIX-loop on a security axis) vs `secured-renovacy` (MUTATION on deps)
 
 - `sec-audit-source` / `sec-audit-deps` ARE READ-ONLY. They emit
   findings as kanban issues; they don't fix anything. Use when
   the operator wants a security baseline / list of issues / a
   triage pass — NOT when they want fixes applied.
-- `whole_improve_loop` with `improvement_prompt: "security focus"`
+- `whole-improve-loop` with `improvement_prompt: "security focus"`
   is FIX-mode: alternating review/fix loop until cross-family
   approval. Edits land in the working tree. Use when the operator
   wants security holes closed in place.
@@ -126,15 +126,15 @@ before you walk the table on a new roadmap item.
   they want code rewritten?" → whole_improve_loop. "do they want
   versions bumped?" → secured-renovacy.
 
-### `whole_improve_loop` vs `branch_improve_loop`
+### `whole-improve-loop` vs `branch-improve-loop`
 
-- `whole_improve_loop` scans the entire workspace.
-- `branch_improve_loop` scans `git diff base_ref...HEAD` only —
+- `whole-improve-loop` scans the entire workspace.
+- `branch-improve-loop` scans `git diff base_ref...HEAD` only —
   scoped to what the current PR/branch touched, then commits a
   semantic message covering its fixes.
 - Tie-break: "is there an open PR / unmerged branch they want
-  reviewed?" → `branch_improve_loop`. "is the work
-  workspace-wide / no specific branch?" → `whole_improve_loop`.
+  reviewed?" → `branch-improve-loop`. "is the work
+  workspace-wide / no specific branch?" → `whole-improve-loop`.
 
 ## When no row matches confidently — three escape hatches
 
@@ -145,40 +145,40 @@ before you walk the table on a new roadmap item.
    work; the operator decides at human_review.
 2. **Surface the ambiguity in `rationale`** as a question the
    operator can answer. Example: "Item #3 ('Refactor auth') sits
-   between `feature_dev` (new SAML provider as capability) and
-   `whole_improve_loop` (reliability/observability on existing
+   between `feature-dev` (new SAML provider as capability) and
+   `whole-improve-loop` (reliability/observability on existing
    auth). Pick by replying with the assignee you want, or accept
    the default `""`." The studio renders the rationale verbatim
    so the operator sees the question.
 3. **Propose creating a NEW bot** when the catalogue genuinely
    doesn't have a fit and the work will recur. Emit a
-   `feature_dev` item whose `feature_prompt` describes the bot
+   `feature-dev` item whose `feature_prompt` describes the bot
    you'd build (target `.bot` filename, expected vars, pipeline
    sketch). Example: "Build a new bot `flake-hunter` at
    `examples/flake-hunter/main.bot` that runs the test suite N
    times and groups failures by stack trace — needs `vars: {
    suite: string, repeats: int=20 }`."
 
-Bot creation always routes through `feature_dev`; there's no
+Bot creation always routes through `feature-dev`; there's no
 "bot_factory" assignee. The new bot ships in the same PR as the
 item that called for it.
 
 ## What ambiguity looks like in practice — examples
 
-- "Improve our auth reliability" → likely `whole_improve_loop`
+- "Improve our auth reliability" → likely `whole-improve-loop`
   with `improvement_prompt: "auth + session handling
   reliability"`, BUT if the operator's priorities mention
-  "add OAuth" the same item is `feature_dev`. Surface the
+  "add OAuth" the same item is `feature-dev`. Surface the
   question if both fits look plausible.
 - "Make the docs match the new dispatcher API" → `docs-refresh`
   (clear). No ambiguity.
-- "Fix the failing CI on the rust port" → `branch_improve_loop`
-  IF there's an open branch, `feature_dev` IF the CI fix is
+- "Fix the failing CI on the rust port" → `branch-improve-loop`
+  IF there's an open branch, `feature-dev` IF the CI fix is
   itself a new capability (e.g. a new test runner). Surface
   the question.
 - "Reduce vendor dependency footprint" → ambiguous.
-  `secured-renovacy` could prune by bumping; `whole_improve_loop`
-  could refactor to drop dependencies; `feature_dev` could build
+  `secured-renovacy` could prune by bumping; `whole-improve-loop`
+  could refactor to drop dependencies; `feature-dev` could build
   an in-house replacement. Surface as a three-way question.
 
 <!-- ITERION:CATALOG:GENERATED:BEGIN -->
@@ -190,19 +190,19 @@ dispatcher routes on it), never the persona.
 
 | Persona | `assignee` (technical name) |
 |---|---|
-| Billy | `branch_improve_loop` |
-| Revi | `code_review` |
+| Billy | `branch-improve-loop` |
+| Revi | `code-review` |
 | Doki | `docs-refresh` |
-| Featurly | `feature_dev` |
+| Featurly | `feature-dev` |
 | Depsy | `sec-audit-deps` |
 | Seki | `sec-audit-source` |
 | Renovacy | `secured-renovacy` |
 | Nexie | `whats-next` (this bot) |
-| Willy | `whole_improve_loop` |
+| Willy | `whole-improve-loop` |
 
 ## Bot reference
 
-### `branch_improve_loop` — Billy
+### `branch-improve-loop` — Billy
 
 Branch-scoped variant of whole_improve_loop. Runs review-fix iterations
 on the changes between a feature branch and its base, auto-commits each
@@ -215,7 +215,7 @@ fix, and stops on cross-family double-approval.
 - **Vars**: `base_ref` (string), `chunk_dir` (string), `chunk_max_loc` (int), `chunk_threshold_loc` (int), `scope_notes` (string), `workspace_dir` (string)
 - **Path**: `bots/branch_improve_loop/main.bot`
 
-### `code_review` — Revi
+### `code-review` — Revi
 
 Read-only cross-family code reviewer. Reviews the working-tree diff
 of the current branch against its base with two independent reviewers
@@ -266,7 +266,7 @@ STEP-0 preamble).
 - **Vars**: `audit_cache_path` (string), `bundle_self_path` (string), `cli_surface_globs` (string), `code_scope_globs` (string), `coverage_target_pct` (int), `diagnostic_surface_globs` (string), `diff_since` (string), `doc_globs` (string), `excluded_dirs` (string), `go_comment_globs` (string), `issue_id` (string), `max_drift_candidates` (int), `max_recovery_iterations` (int), `max_review_chunk_docs` (int), `max_review_iterations` (int), `scope_notes` (string), `workspace_dir` (string)
 - **Path**: `bots/docs-refresh/main.bot`
 
-### `feature_dev` — Featurly
+### `feature-dev` — Featurly
 
 Autonomous end-to-end feature development. Takes a `feature_prompt`
 input, plans (Claude Code, read-only), implements (session-inherit),
@@ -385,7 +385,7 @@ claw-code-go's agentic loop against OpenAI.
 - **Vars**: `mode` (string), `scope_notes` (string), `workspace_dir` (string)
 - **Path**: `bots/whats-next/main.bot`
 
-### `whole_improve_loop` — Willy
+### `whole-improve-loop` — Willy
 
 Whole-repository alternating Claude/GPT review-fix loop. Iterates
 until two consecutive cross-family approvals, with pushback
@@ -418,7 +418,7 @@ issue. The data model on the wire is:
 | `title`              | `title`              | `--title`        |
 | `body`               | `body`               | `--body`         |
 | `assignee`           | `assignee`           | `--assignee`     |
-| _(bot name, e.g. `feature_dev`)_ | `bot` (string)       | `--bot` (on `create`) |
+| _(bot name, e.g. `feature-dev`)_ | `bot` (string)       | `--bot` (on `create`) |
 | `args` (object)      | `bot_args` (`map[string]string`) | `--bot-arg key=value` (on `create`) |
 
 `bot` and `bot_args` are dedicated typed fields on
@@ -434,7 +434,7 @@ key-by-key, with `bot_args` winning on shared keys (see
 [pkg/dispatcher/loop.go](../../../pkg/dispatcher/loop.go) `buildSpec`).
 
 Concrete `bot_args` example — for an issue assigned to
-`feature_dev` with `args = {"feature_prompt": "Add CSV export"}`:
+`feature-dev` with `args = {"feature_prompt": "Add CSV export"}`:
 
 ```json
 {
@@ -484,7 +484,7 @@ Before creating each issue:
 
 ## Backend selection
 
-When authoring a `.bot` (e.g. via `feature_dev`), each agent/judge
+When authoring a `.bot` (e.g. via `feature-dev`), each agent/judge
 node picks where its LLM call runs:
 
 - `backend: "claude_code"` — the official Claude Code CLI. Use for

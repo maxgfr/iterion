@@ -34,11 +34,11 @@ import (
 // deliberately NOT embedded; they have to be loaded by explicit path
 // (`iterion run bots/<name>/` or against the packed `.botz`).
 //
-//go:embed feature_dev/main.bot whole_improve_loop/main.bot branch_improve_loop/main.bot
+//go:embed feature-dev/main.bot whole-improve-loop/main.bot branch-improve-loop/main.bot
 var Files embed.FS
 
 // Get returns the contents of the embedded example with the given
-// basename (e.g. "feature_dev/main.bot" or "skill/human_gate.bot").
+// basename (e.g. "feature-dev/main.bot" or "skill/human_gate.bot").
 // Returns ok=false if no such embedded recipe exists.
 func Get(name string) ([]byte, bool) {
 	data, err := Files.ReadFile(name)

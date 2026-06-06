@@ -40,7 +40,7 @@ func (s Scenario) FixturePath() string {
 func Scenarios() []Scenario {
 	return []Scenario{
 		{
-			Bot:            "feature_dev",
+			Bot:            "feature-dev",
 			Name:           "reviewer_gpt_approve",
 			Node:           "reviewer_gpt",
 			CheckAssignees: true, // verdict_output carries no assignees; scan must stay clean

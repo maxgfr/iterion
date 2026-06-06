@@ -142,7 +142,7 @@ function Form({ cfg, setCfg }: FormProps) {
             className="input"
             value={cfg.workflow}
             onChange={(e) => update("workflow", e.target.value)}
-            placeholder="./bots/feature_dev/main.bot"
+            placeholder="./bots/feature-dev/main.bot"
           />
         </Field>
       </Section>

@@ -46,26 +46,26 @@ tasks:
       - find pkg/cli/templates/dispatch_bots -mindepth 1 ! -name .gitkeep -exec rm -rf {} +
       - mkdir -p pkg/cli/templates/dispatch_bots/default
       - cp pkg/cli/templates/dispatch_bots_default.bot pkg/cli/templates/dispatch_bots/default/main.bot
-      - cp -R bots/feature_dev pkg/cli/templates/dispatch_bots/feature-dev
-      - cp -R bots/whole_improve_loop pkg/cli/templates/dispatch_bots/whole-improve-loop
-      - cp -R bots/branch_improve_loop pkg/cli/templates/dispatch_bots/branch-improve-loop
+      - cp -R bots/feature-dev pkg/cli/templates/dispatch_bots/feature-dev
+      - cp -R bots/whole-improve-loop pkg/cli/templates/dispatch_bots/whole-improve-loop
+      - cp -R bots/branch-improve-loop pkg/cli/templates/dispatch_bots/branch-improve-loop
       - cp -R bots/whats-next pkg/cli/templates/dispatch_bots/whats-next
       - cp -R bots/docs-refresh pkg/cli/templates/dispatch_bots/docs-refresh
       - cp -R bots/sec-audit-source pkg/cli/templates/dispatch_bots/sec-audit-source
       - cp -R bots/sec-audit-deps pkg/cli/templates/dispatch_bots/sec-audit-deps
       - cp -R bots/secured-renovacy pkg/cli/templates/dispatch_bots/secured-renovacy
-      - cp -R bots/code_review pkg/cli/templates/dispatch_bots/code-review
+      - cp -R bots/code-review pkg/cli/templates/dispatch_bots/code-review
     sources:
       - pkg/cli/templates/dispatch_bots_default.bot
-      - bots/feature_dev/**
-      - bots/whole_improve_loop/**
-      - bots/branch_improve_loop/**
+      - bots/feature-dev/**
+      - bots/whole-improve-loop/**
+      - bots/branch-improve-loop/**
       - bots/whats-next/**
       - bots/docs-refresh/**
       - bots/sec-audit-source/**
       - bots/sec-audit-deps/**
       - bots/secured-renovacy/**
-      - bots/code_review/**
+      - bots/code-review/**
     generates:
       - pkg/cli/templates/dispatch_bots/**
 

@@ -323,7 +323,7 @@ compilation.
 stays untouched; on a clean exit the worktree is removed automatically,
 on failure it is preserved so the operator can inspect. Omit the
 field (or set `none`) to run in place. See
-[bots/feature_dev/main.bot](../../bots/feature_dev/main.bot)
+[bots/feature-dev/main.bot](../../bots/feature-dev/main.bot)
 for a workflow that opts in.
 
 ```ebnf

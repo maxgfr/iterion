@@ -112,7 +112,7 @@ func rejectVerdict(family string) map[string]interface{} {
 // Asserts: a single commit was produced, no fixers were called, and
 // the run reached `finished`.
 func TestVibeFeatureDev_HappyPath(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "feature_dev/main.bot")
+	wf := compileFixtureStubSafe(t, "feature-dev/main.bot")
 	exec := newScenarioExecutor()
 
 	devPhaseStubs(exec)
@@ -161,7 +161,7 @@ func TestVibeFeatureDev_HappyPath(t *testing.T) {
 //
 // Asserts: fix_claude ran exactly once, commit_changes once, run finished.
 func TestVibeFeatureDev_FixThenCommit(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "feature_dev/main.bot")
+	wf := compileFixtureStubSafe(t, "feature-dev/main.bot")
 	exec := newScenarioExecutor()
 
 	devPhaseStubs(exec)
@@ -220,7 +220,7 @@ func TestVibeFeatureDev_FixThenCommit(t *testing.T) {
 // Asserts: the run fails (reaches the fail node) and commit_changes was
 // NEVER called (no false commit on exhaustion).
 func TestVibeFeatureDev_LoopExhausted(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "feature_dev/main.bot")
+	wf := compileFixtureStubSafe(t, "feature-dev/main.bot")
 	exec := newScenarioExecutor()
 
 	devPhaseStubs(exec)
@@ -271,7 +271,7 @@ func TestVibeFeatureDev_LoopExhausted(t *testing.T) {
 // commit_changes stub captures its input and the test inspects what
 // the runtime templated in from prepare_commit.outputs and vars.
 func TestVibeFeatureDev_CommitInputRelay(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "feature_dev/main.bot")
+	wf := compileFixtureStubSafe(t, "feature-dev/main.bot")
 	exec := newScenarioExecutor()
 
 	devPhaseStubs(exec)

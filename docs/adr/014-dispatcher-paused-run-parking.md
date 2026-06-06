@@ -47,7 +47,7 @@ consequences:
   dispatcher's next fresh retry for the same issue.
 
 This is reachable on the dispatcher's primary path: the catalog bots it
-routes to escalate to humans (`bots/feature_dev/main.bot` declares four
+routes to escalate to humans (`bots/feature-dev/main.bot` declares four
 `interaction: human` nodes; `whole_improve_loop`, `secured-renovacy`,
 `docs-refresh`, `branch_improve_loop` carry `human` / `llm_or_human` nodes). It
 is a genuine gap, not an intended-unsupported case: the cloud runner already

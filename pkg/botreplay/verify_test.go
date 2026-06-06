@@ -118,13 +118,13 @@ func TestVerifyRequiredNonEmpty(t *testing.T) {
 // so a schema change in the .bot file that breaks the golden contract is
 // caught here too — not just in TestGoldens.
 func TestVerifySchema_RealBot(t *testing.T) {
-	wf, err := CompileBot("feature_dev")
+	wf, err := CompileBot("feature-dev")
 	if err != nil {
 		t.Fatalf("CompileBot: %v", err)
 	}
 
 	good := &Fixture{
-		Bot:  "feature_dev",
+		Bot:  "feature-dev",
 		Node: "reviewer_gpt",
 		Output: map[string]interface{}{
 			"approved":      true,
@@ -141,7 +141,7 @@ func TestVerifySchema_RealBot(t *testing.T) {
 
 	// Missing the required `family` field.
 	bad := &Fixture{
-		Bot:  "feature_dev",
+		Bot:  "feature-dev",
 		Node: "reviewer_gpt",
 		Output: map[string]interface{}{
 			"approved":      true,
@@ -157,7 +157,7 @@ func TestVerifySchema_RealBot(t *testing.T) {
 
 	// Out-of-enum `family` value.
 	hallucinatedFamily := &Fixture{
-		Bot:  "feature_dev",
+		Bot:  "feature-dev",
 		Node: "reviewer_gpt",
 		Output: map[string]interface{}{
 			"approved":      true,

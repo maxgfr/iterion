@@ -3132,7 +3132,7 @@ func TestLive_FeatureDev(t *testing.T) {
 	requireBinaryInPath(t, "docker")
 	requireOpenAI(t)
 
-	wf := compileFixture(t, "feature_dev/main.bot")
+	wf := compileFixture(t, "feature-dev/main.bot")
 
 	workspaceDir, err := os.MkdirTemp("", "iterion-feature-dev-*")
 	if err != nil {
@@ -3245,7 +3245,7 @@ func TestLive_VibeReviewAlternating(t *testing.T) {
 	requireBinaryInPath(t, "docker")
 	requireOpenAI(t)
 
-	wf := compileFixture(t, "whole_improve_loop/main.bot")
+	wf := compileFixture(t, "whole-improve-loop/main.bot")
 
 	workspaceDir, err := os.MkdirTemp("", "iterion-whole-improve-loop-*")
 	if err != nil {
@@ -3566,7 +3566,7 @@ func TestLive_FeatureDev_Real(t *testing.T) {
 	requireBinaryInPath(t, "docker")
 	requireOpenAI(t)
 
-	wf := compileFixture(t, "feature_dev/main.bot")
+	wf := compileFixture(t, "feature-dev/main.bot")
 	workspaceDir := seedFromFixture(t, "feature-dev-go-service")
 
 	storeDir := resolveLiveStoreDir(t, workspaceDir)
@@ -3650,7 +3650,7 @@ func TestLive_VibeReviewAlternating_Real(t *testing.T) {
 	requireBinaryInPath(t, "docker")
 	requireOpenAI(t)
 
-	wf := compileFixture(t, "whole_improve_loop/main.bot")
+	wf := compileFixture(t, "whole-improve-loop/main.bot")
 	workspaceDir := seedFromFixture(t, "review-pr-mix")
 
 	storeDir := resolveLiveStoreDir(t, workspaceDir)
