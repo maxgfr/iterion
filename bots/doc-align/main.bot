@@ -6,6 +6,17 @@
 ## actual current state of the code, then fixes the DOCUMENTATION
 ## (never the code) and auto-commits on convergence.
 ##
+## ROADMAP (operator-directed):
+##  - RENAME doc-align → "docs-refresh" (it REFRESHES docs, not only
+##    aligns pre-existing ones; persona stays Doki). ~40-file rename — see
+##    the bot-validation-campaign notes for the care-points (migrate_run_
+##    paths back-compat rule, dispatch_defaults aliases, botreplay golden
+##    dir, embed.go, the doc_align internal workflow name, peer-bot refs).
+##  - DEFAULT-CREATE: when a repo has NO pre-existing documentation
+##    structure, create a docs/ directory and author the docs there
+##    (refresh from zero), not only edit existing files. The docs target
+##    dir must be a launch-configurable var, DEFAULT "docs".
+##
 ## v0.2.0 fixes 7 issues uncovered by the v0.1.0 dogfood run on
 ## this repo:
 ##  1. Template substitution bug: prior fix iteration's
@@ -960,6 +971,9 @@ schema update_audit_cache_output:
   entries_written: int
   skipped: string
 
+schema detect_changes_output:
+  has_changes: bool
+
 ## enforce_fix_scope I/O (v0.11.0). The fixer DECLARES the files
 ## it modified via `fix_output.modified_doc_files`; this tool
 ## walks `git diff --name-only` against that declaration and
@@ -1887,7 +1901,25 @@ print(json.dumps({
 ## runs that don't want to persist state.
 ##
 ## Runs after commit_changes so a failed commit doesn't poison
-## the cache with audit data that wasn't actually shipped.
+## the cache with audit data that wasn't actually shipped. The no-change
+## path reaches it directly via detect_doc_changes (skipping the commit).
+
+## EFFICIENCY guard (deterministic, no LLM). After the review streak
+## converges, only spend the LLM prepare_commit + commit_changes when the
+## fixers actually changed the working tree. A review-only convergence
+## (no drift / nothing to fix) skips straight to the audit-cache refresh +
+## done — so doc-align only pays the commit-prep turn when there is
+## something to commit. Both unstaged and staged diffs are checked.
+tool detect_doc_changes:
+  command: `WS={{vars.workspace_dir}} python3 -c "
+import os, subprocess, json
+os.chdir(os.environ['WS'])
+r1 = subprocess.run(['git', 'diff', '--quiet']).returncode
+r2 = subprocess.run(['git', 'diff', '--cached', '--quiet']).returncode
+print(json.dumps({'has_changes': (r1 != 0 or r2 != 0)}))
+"`
+  output: detect_changes_output
+
 tool update_audit_cache:
   command: `python3 -c "
 import os, json, hashlib, re, sys, pathlib
@@ -2056,7 +2088,18 @@ workflow doc_align:
   }
 
   ## Stop on (cross-family double approval) AND (coverage gate met).
-  streak_check -> prepare_commit when stop
+  ## EFFICIENCY: route the converged streak through a deterministic
+  ## has-changes guard — run the LLM prepare_commit only when the fixers
+  ## actually changed the tree; a review-only (no-fix) convergence skips to
+  ## the audit-cache refresh + done.
+  streak_check -> detect_doc_changes when stop
+
+  detect_doc_changes -> prepare_commit when has_changes
+  detect_doc_changes -> update_audit_cache when not has_changes with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    cache_path: "{{vars.audit_cache_path}}",
+    audited_pairs: "{{outputs.streak_check.cumulative_audited_pairs}}"
+  }
 
   prepare_commit -> commit_changes with {
     full_message: "{{outputs.prepare_commit.full_message}}",
