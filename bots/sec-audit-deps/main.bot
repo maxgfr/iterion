@@ -704,7 +704,7 @@ workflow sec_audit_deps:
   ## docker driver's image-inspect fast path resolves it without a pull.)
   sandbox:
     image: "ghcr.io/socialgouv/iterion-sandbox-sec:edge"
-    user: "devbox"
+    user: "1000:1000"
     mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=/home/devbox/.claude,consistency=cached"]
     env:
       CLAUDE_CONFIG_DIR: "/home/devbox/.claude"

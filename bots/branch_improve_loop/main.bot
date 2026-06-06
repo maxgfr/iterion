@@ -1083,7 +1083,7 @@ workflow branch_improve_loop:
   sandbox:
     ## See feature_dev/main.bot for the rationale on full vs slim.
     image: "ghcr.io/socialgouv/iterion-sandbox-full:edge"
-    user: "devbox"
+    user: "1000:1000"
     mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=/home/devbox/.claude,consistency=cached"]
     env:
       CLAUDE_CONFIG_DIR: "/home/devbox/.claude"
