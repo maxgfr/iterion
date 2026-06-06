@@ -114,9 +114,18 @@ func LoadManifest(path string) (*Manifest, error) {
 		}
 		return nil, fmt.Errorf("bundle: read manifest %s: %w", path, err)
 	}
+	return decodeManifest(body, path)
+}
+
+// decodeManifest parses + validates manifest bytes (strict unmarshal,
+// schema version, attachment-path safety). srcLabel names the source in
+// errors. Shared by LoadManifest and WriteManifest's pre-write
+// validation so a rewritten manifest is held to exactly the same bar as
+// a loaded one.
+func decodeManifest(body []byte, srcLabel string) (*Manifest, error) {
 	var m Manifest
 	if err := yaml.UnmarshalStrict(body, &m); err != nil {
-		return nil, fmt.Errorf("bundle: parse manifest %s: %w", path, err)
+		return nil, fmt.Errorf("bundle: parse manifest %s: %w", srcLabel, err)
 	}
 	if m.SchemaVersion == 0 {
 		m.SchemaVersion = CurrentManifestSchema
@@ -135,7 +144,7 @@ func LoadManifest(path string) (*Manifest, error) {
 	// validated identically.
 	for name, rel := range m.Attachments {
 		if err := validateAttachmentRelPath(name, rel); err != nil {
-			return nil, fmt.Errorf("bundle: manifest %s: %w", path, err)
+			return nil, fmt.Errorf("bundle: manifest %s: %w", srcLabel, err)
 		}
 	}
 	return &m, nil

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"go.yaml.in/yaml/v2"
+
+	"github.com/SocialGouv/iterion/pkg/store"
 )
 
 // overridesRelPath is the workspace-local file that overrides per-bot
@@ -87,8 +89,8 @@ func SetOverlayEnabled(workdir, name string, enabled *bool) error {
 	return writeOverrides(workdir, ov)
 }
 
-// writeOverrides marshals ov to <workdir>/.iterion/bot-overrides.yaml via
-// a sibling temp + rename.
+// writeOverrides marshals ov to <workdir>/.iterion/bot-overrides.yaml
+// durably (atomic temp + fsync + rename via the shared store writer).
 func writeOverrides(workdir string, ov *Overrides) error {
 	dir := filepath.Join(workdir, ".iterion")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -99,23 +101,8 @@ func writeOverrides(workdir string, ov *Overrides) error {
 		return fmt.Errorf("botregistry: marshal overrides: %w", err)
 	}
 	path := filepath.Join(workdir, overridesRelPath)
-	tmp, err := os.CreateTemp(dir, "bot-overrides.*.tmp")
-	if err != nil {
-		return fmt.Errorf("botregistry: tempfile: %w", err)
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(body); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("botregistry: write overrides: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("botregistry: close overrides: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("botregistry: rename overrides: %w", err)
+	if err := store.WriteFileAtomic(path, body, 0o644); err != nil {
+		return fmt.Errorf("botregistry: write overrides %s: %w", path, err)
 	}
 	return nil
 }

@@ -71,13 +71,9 @@ function mergeEntry(
   updated: BotEntryWithSchema,
 ): BotEntryWithSchema[] {
   if (!bots) return [updated];
-  let found = false;
-  const next = bots.map((b) => {
-    if (b.name === updated.name) {
-      found = true;
-      return updated;
-    }
-    return b;
-  });
-  return found ? next : [...next, updated];
+  const i = bots.findIndex((b) => b.name === updated.name);
+  if (i === -1) return [...bots, updated];
+  const next = bots.slice();
+  next[i] = updated;
+  return next;
 }

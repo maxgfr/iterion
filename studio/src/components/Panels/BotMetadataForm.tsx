@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { BotEntryWithSchema, BotPatch } from "@/api/bots";
 import { CheckboxField, TagListField, TextField } from "@/components/Panels/forms/FormField";
@@ -45,8 +45,11 @@ export default function BotMetadataForm({ bot }: { bot: BotEntryWithSchema }) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(bot));
   const [saving, setSaving] = useState(false);
 
-  const baseline = toDraft(bot);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(baseline);
+  const baseline = useMemo(() => toDraft(bot), [bot]);
+  const dirty = useMemo(
+    () => JSON.stringify(draft) !== JSON.stringify(baseline),
+    [draft, baseline],
+  );
   const overlayDiffers = bot.enabled !== bot.manifest_enabled;
 
   const update = <K extends keyof Draft>(k: K, v: Draft[K]) =>

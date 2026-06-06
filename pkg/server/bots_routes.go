@@ -161,16 +161,6 @@ func (s *Server) handleBotOverlay(w http.ResponseWriter, r *http.Request) {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "bots: no workspace configured for the catalog overlay")
 		return
 	}
-	entry, ok, err := s.findBot(name)
-	if err != nil {
-		s.httpErrorFor(w, r, http.StatusInternalServerError, "bots: %v", err)
-		return
-	}
-	if !ok {
-		s.httpErrorFor(w, r, http.StatusNotFound, "bots: %q not found", name)
-		return
-	}
-	_ = entry
 	var req botOverlayRequest
 	if err := readJSON(r, &req); err != nil {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "invalid request: %v", err)
@@ -181,6 +171,8 @@ func (s *Server) handleBotOverlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.regenCatalog(name, "overlay")
+	// respondBot re-resolves the entry; an unknown name 404s here (after a
+	// harmless no-op overlay write — ResolveEnabled ignores unknown names).
 	s.respondBot(w, r, name)
 }
 

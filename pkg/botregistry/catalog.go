@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/SocialGouv/iterion/pkg/store"
 )
 
 // Catalog markers delimit the machine-generated region inside the
@@ -205,8 +207,8 @@ func RegenerateWhatsNextCatalog(workdir string) (string, error) {
 		return "", fmt.Errorf("botregistry: mkdir %s: %w", skillsDir, err)
 	}
 	dest := filepath.Join(skillsDir, catalogGeneratedName)
-	if err := atomicWriteFile(dest, []byte(out), 0o644); err != nil {
-		return "", err
+	if err := store.WriteFileAtomic(dest, []byte(out), 0o644); err != nil {
+		return "", fmt.Errorf("botregistry: write catalog %s: %w", dest, err)
 	}
 	return dest, nil
 }
@@ -223,32 +225,4 @@ func spliceGeneratedBlock(static, block string) (string, error) {
 	head := static[:beginAt+len(catalogGeneratedBegin)]
 	tail := static[endAt:]
 	return head + "\n\n" + block + "\n\n" + tail, nil
-}
-
-// atomicWriteFile writes data to path via a sibling temp + rename.
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("botregistry: tempfile %s: %w", path, err)
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("botregistry: write %s: %w", tmpName, err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("botregistry: close %s: %w", tmpName, err)
-	}
-	if err := os.Chmod(tmpName, perm); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("botregistry: chmod %s: %w", tmpName, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("botregistry: rename %s → %s: %w", tmpName, path, err)
-	}
-	return nil
 }

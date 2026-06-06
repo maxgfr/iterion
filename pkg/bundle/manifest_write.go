@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
+
+	"github.com/SocialGouv/iterion/pkg/store"
 
 	// The loader (manifest.go) parses with go.yaml.in/yaml/v2, which
 	// cannot round-trip comments or preserve key order on marshal. The
@@ -13,7 +14,7 @@ import (
 	// touched keys in place, leaving every hand-authored comment and the
 	// original block/flow style of unrelated keys intact. The two
 	// libraries coexist in this package; the rewritten bytes are
-	// cross-validated through LoadManifest (v2 strict) before the file is
+	// cross-validated through decodeManifest (v2 strict) before the file is
 	// replaced, so a v3-emitted manifest can never land on disk in a form
 	// the loader would reject.
 	yamlv3 "gopkg.in/yaml.v3"
@@ -127,41 +128,18 @@ func WriteManifest(path string, patch ManifestPatch) (*Manifest, error) {
 	}
 	_ = enc.Close()
 
-	return commitManifestBytes(path, buf.Bytes())
-}
-
-// commitManifestBytes validates body through the strict v2 loader, then
-// atomically replaces path with it via a sibling temp + rename. The
-// cross-library validation is the safety net for the v3-writer /
-// v2-loader split.
-func commitManifestBytes(path string, body []byte) (*Manifest, error) {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	// Validate the rewritten bytes through the SAME decoder LoadManifest
+	// uses (strict v2 + schema + attachment safety) before committing, so a
+	// structurally-broken or schema-incompatible v3-emitted manifest can
+	// never land on disk. Then write durably via the shared atomic writer
+	// (temp + fsync + rename + dir fsync).
+	out := buf.Bytes()
+	m, err := decodeManifest(out, path)
 	if err != nil {
-		return nil, fmt.Errorf("bundle: tempfile %s: %w", path, err)
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(body); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return nil, fmt.Errorf("bundle: write %s: %w", tmpName, err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return nil, fmt.Errorf("bundle: close %s: %w", tmpName, err)
-	}
-	m, err := LoadManifest(tmpName)
-	if err != nil {
-		_ = os.Remove(tmpName)
 		return nil, fmt.Errorf("bundle: rewritten manifest invalid: %w", err)
 	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		_ = os.Remove(tmpName)
-		return nil, fmt.Errorf("bundle: chmod %s: %w", tmpName, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return nil, fmt.Errorf("bundle: rename %s → %s: %w", tmpName, path, err)
+	if err := store.WriteFileAtomic(path, out, 0o644); err != nil {
+		return nil, fmt.Errorf("bundle: write manifest %s: %w", path, err)
 	}
 	return m, nil
 }
