@@ -203,7 +203,7 @@ func init() {
 	issueCreateCmd.Flags().StringVar(&issueCreateOpts.Assignee, "assignee", "", "Assignee")
 	issueCreateCmd.Flags().StringSliceVar(&issueCreateOpts.Blockers, "blocker", nil, "Blocker issue ID (repeatable)")
 	issueCreateCmd.Flags().StringSliceVar(&issueCreateOpts.Fields, "field", nil, "Custom field as key=value (repeatable)")
-	issueCreateCmd.Flags().StringVar(&issueCreateOpts.Bot, "bot", "", "Typed workflow/bot override the dispatcher routes to (e.g. doc-align)")
+	issueCreateCmd.Flags().StringVar(&issueCreateOpts.Bot, "bot", "", "Typed workflow/bot override the dispatcher routes to (e.g. docs-refresh)")
 	issueCreateCmd.Flags().StringArrayVar(&issueCreateOpts.BotArgs, "bot-arg", nil, "Typed dispatcher var override as key=value, merged over config vars (repeatable; values kept verbatim incl. commas)")
 
 	// list

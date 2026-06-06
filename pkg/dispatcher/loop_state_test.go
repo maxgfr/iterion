@@ -438,7 +438,7 @@ func TestFinishRun_DoesNotRevertOnCleanFinish(t *testing.T) {
 
 	// The issue should remain in in_progress — clean finishes don't
 	// revert. The workflow itself would be expected to call
-	// UpdateState if it wanted to move on (e.g. doc-align → review).
+	// UpdateState if it wanted to move on (e.g. docs-refresh → review).
 	if got := ft.issueState("fake:t6"); got != "in_progress" {
 		t.Fatalf("issue state = %q after clean finish, want in_progress", got)
 	}
@@ -508,7 +508,7 @@ func TestFinishRun_AutoTransitionsToCompletedState(t *testing.T) {
 
 // TestFinishRun_SkipsAutoTransitionWhenWorkflowMovedState verifies
 // the safety check: a workflow that already moved the issue out of
-// RunningState (e.g. doc-align → "review", or a board-aware bot
+// RunningState (e.g. docs-refresh → "review", or a board-aware bot
 // picking "done") keeps its terminal state — we don't second-guess
 // it by re-applying the default CompletedState.
 func TestFinishRun_SkipsAutoTransitionWhenWorkflowMovedState(t *testing.T) {

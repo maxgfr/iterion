@@ -299,7 +299,7 @@ The whats-next pipeline almost never needs to author DSL. If
 
 1. Check that none of the five existing bots
    (`feature_dev`, `whole_improve_loop`,
-   `branch_improve_loop`, `secured-renovacy`, `doc-align`)
+   `branch_improve_loop`, `secured-renovacy`, `docs-refresh`)
    covers the use case. Usually one does.
 2. If a new bot really is needed, the `next_action` should be
    "manually author a new bot at `examples/<slug>/main.bot`"

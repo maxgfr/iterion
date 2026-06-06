@@ -114,7 +114,7 @@ func applyHostStateMounts(
 		// aliases, signing keys, etc.). Without this, in-container
 		// `git commit` fails with "Author identity unknown" — the
 		// classic blocker for any commit-producing bot
-		// (feature_dev's commit_changes tool, doc-align's
+		// (feature_dev's commit_changes tool, docs-refresh's
 		// post-fix commits, branch-improve-loop, …). Mount as a
 		// file (collectHostStateMounts treats both files and dirs
 		// the same; the bind is at the same host path so git

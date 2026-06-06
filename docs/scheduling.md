@@ -1,7 +1,7 @@
 # Scheduling recurring bot runs (`iterion schedule`)
 
 Some bots are meant to run on a clock, not on demand — a weekly
-security audit, a nightly doc-alignment pass, a periodic dependency
+security audit, a nightly docs-refreshment pass, a periodic dependency
 sweep. `iterion schedule` wires those into the **host's own cron** so
 they fire on time **without keeping an iterion process resident**. This
 is the complement to [`iterion dispatch`](dispatcher.md): the dispatcher

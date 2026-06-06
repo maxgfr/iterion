@@ -34,7 +34,7 @@ func (s Scenario) FixturePath() string {
 
 // Scenarios returns the wired golden scenarios for this iteration:
 // feature_dev, whats-next (the assignee-bearing bot, two scenarios), and
-// doc-align. The claw-backed reviewer/proposer nodes are the cheapest to
+// docs-refresh. The claw-backed reviewer/proposer nodes are the cheapest to
 // record live; emit_action (claude_code + board MCP + filesystem) is the
 // headline created_issues scenario and is the heaviest to re-record.
 func Scenarios() []Scenario {
@@ -81,10 +81,10 @@ func Scenarios() []Scenario {
 			},
 		},
 		{
-			Bot:            "doc-align",
+			Bot:            "docs-refresh",
 			Name:           "reviewer_gpt_approve",
 			Node:           "reviewer_gpt",
-			CheckAssignees: true, // doc-align routes no work to bots; scan must stay clean
+			CheckAssignees: true, // docs-refresh routes no work to bots; scan must stay clean
 			Input: map[string]interface{}{
 				"prior_pushback":               []interface{}{},
 				"prior_pushback_justification": "",

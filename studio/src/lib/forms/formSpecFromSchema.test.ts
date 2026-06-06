@@ -32,7 +32,7 @@ describe("formSpecFromSchema — JSON checkbox auto-detection", () => {
           {
             id: "native:def67890",
             title: "Second issue",
-            assignee: "doc-align",
+            assignee: "docs-refresh",
             horizon: "short_term",
           },
         ],
@@ -74,7 +74,7 @@ describe("formSpecFromSchema — JSON checkbox auto-detection", () => {
           ],
           short_term: [
             { title: "Tactical A", assignee: "feature_dev" },
-            { title: "Tactical B", assignee: "doc-align" },
+            { title: "Tactical B", assignee: "docs-refresh" },
           ],
           next_action: { title: "Do this first", assignee: "feature_dev" },
           rationale: "Because.",

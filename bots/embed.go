@@ -29,7 +29,7 @@ import (
 // branch_improve_loop) each ship as a single-file bundle: only
 // `<name>/main.bot` is embedded — their manifest.yaml + README.md
 // are stripped to keep the binary slim. Larger bundles
-// (whats-next, doc-align, sec-audit-*, secured-renovacy, code_review)
+// (whats-next, docs-refresh, sec-audit-*, secured-renovacy, code_review)
 // carry skills/prompts/attachments alongside main.bot and are
 // deliberately NOT embedded; they have to be loaded by explicit path
 // (`iterion run bots/<name>/` or against the packed `.botz`).

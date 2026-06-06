@@ -17,7 +17,7 @@ Use `namespace:value` (colon-prefixed). Single-word tags exist but are rare.
 
 | Namespace | Allowed values | Meaning |
 |---|---|---|
-| `source:` | bot name, import path, or `manual` | Where the issue came from. Prefer the bot identity (`source:whats-next`, `source:sec-audit-source`, `source:sec-audit-deps`, `source:doc-align`). For one-off operator imports, `source:manual` plus a date suffix only when chronology genuinely matters. |
+| `source:` | bot name, import path, or `manual` | Where the issue came from. Prefer the bot identity (`source:whats-next`, `source:sec-audit-source`, `source:sec-audit-deps`, `source:docs-refresh`). For one-off operator imports, `source:manual` plus a date suffix only when chronology genuinely matters. |
 | `horizon:` | `next-action`, `short-term`, `long-term`, `theme` | Time horizon. `theme` for strategic items the operator never expects to dispatch directly. |
 | `epic:` | short kebab-case name | Long-running effort grouping multiple issues. Example: `epic:battle-tested`, `epic:cloud-readiness`. ONE epic label per issue is enough — multi-epic items dilute the signal. |
 | `sprint:` | integer | Sprint window the issue is committed to. Example: `sprint:1`. Combine with `epic:` to scope. |
@@ -70,7 +70,7 @@ Avoid one-issue-only labels (`source:battle-tested-plan-2026-05-24` is the canon
 
 ## When you introduce a new label
 
-Only when no existing label fits AND the new value will recur. Document the new value in the run's audit markdown (whats-next's `docs/plans/whats-next-*.md`) so a future contributor reading the audit knows where the convention came from. If the value should become canonical, propose adding it to this skill via a `doc-align` follow-up item.
+Only when no existing label fits AND the new value will recur. Document the new value in the run's audit markdown (whats-next's `docs/plans/whats-next-*.md`) so a future contributor reading the audit knows where the convention came from. If the value should become canonical, propose adding it to this skill via a `docs-refresh` follow-up item.
 
 ## Cheat-sheet
 

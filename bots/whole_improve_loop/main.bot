@@ -624,7 +624,7 @@ schema fix_output:
 ## keeps accumulating toward convergence rather than re-scanning the
 ## first chunks and resetting the streak; deleting that file restarts
 ## coverage and the streak from 0. No LLM — pure enumeration, so the
-## reviewer never burns context discovering files (the doc-align
+## reviewer never burns context discovering files (the docs-refresh
 ## deterministic-prepass lesson, applied to source instead of docs).
 ## sh -c is dash on some hosts / bash in devbox — the body is plain
 ## POSIX + python3 (the same toolchain sec-audit-source's tool nodes
@@ -1105,7 +1105,7 @@ agent fix_gpt:
 ## the worktree — HEAD never advanced past base, finalizeWorktree recorded
 ## nothing (final_commit=None), and the diff was stranded. Commit ALL
 ## changes on convergence so the engine records a final_commit + GC-guard
-## branch like feature_dev / doc-align. `git add -A` because the loop
+## branch like feature_dev / docs-refresh. `git add -A` because the loop
 ## touches the whole workspace, not a known file list; no-op-safe — a clean
 ## tree skips the commit via `diff --cached --quiet`.
 schema commit_result:

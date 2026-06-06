@@ -723,7 +723,7 @@ func (c *Dispatcher) postFinished(issueID string, err error) {
 //   - The safety check (RefreshStates) compares the issue's current
 //     tracker state against currentTarget (cfg.Agent.RunningState at
 //     the time of dispatch). If the workflow has already moved the
-//     issue forward (e.g. doc-align → "review") or the operator has
+//     issue forward (e.g. docs-refresh → "review") or the operator has
 //     dragged it manually, we leave it alone — clobbering operator
 //     actions would surprise the human in the loop.
 //
@@ -740,7 +740,7 @@ func (c *Dispatcher) revertTransition(ctx context.Context, issueID, identifier, 
 	}
 	// Safety check: only revert if the issue is STILL in the target
 	// running state. If the workflow already moved it (typical clean
-	// finish path; the doc-align bot does this explicitly) or the
+	// finish path; the docs-refresh bot does this explicitly) or the
 	// operator dragged it on the kanban, leave the new state alone.
 	// RefreshStates is the cheapest read on the Tracker interface.
 	if currentTarget != "" {

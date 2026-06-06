@@ -1,11 +1,11 @@
 ---
-name: doc-align
-description: Operating playbook for the doc-align bot — what mismatches to look for, what the immutable rules are, and how to escalate.
+name: docs-refresh
+description: Operating playbook for the docs-refresh bot — what mismatches to look for, what the immutable rules are, and how to escalate.
 ---
 
-# doc-align — operating playbook
+# docs-refresh — operating playbook
 
-You are participating in the **doc-align** workflow. Its purpose is
+You are participating in the **docs-refresh** workflow. Its purpose is
 to detect places where the project's documentation has drifted from
 the actual code state, and to fix the documentation to match the
 code.

@@ -1,4 +1,4 @@
-name: doc-align
+name: docs-refresh
 display_name: Doki
 version: 0.13.1
 description: |
@@ -21,9 +21,9 @@ description: |
   on the next iteration.
 
   The bot ships 5 skills capturing the anti-Goodhart rules:
-  doc-align (playbook), doc-mismatch-taxonomy (10-value enum),
+  docs-refresh (playbook), doc-mismatch-taxonomy (10-value enum),
   doc-scope-enumeration (scanner contract), anti-facade-fix-rules
   (substantive fix discipline), doc-verification-checklist (judge
   STEP-0 preamble).
-author: SocialGouv (devthejo) — doc-align/main.bot
+author: SocialGouv (devthejo) — docs-refresh/main.bot
 schema_version: 1

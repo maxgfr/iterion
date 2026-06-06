@@ -254,7 +254,7 @@ the metrics. The goal stayed unmet.
 ## Review loops must converge to an asymptote
 
 A review/judge loop (feature_dev, branch_improve_loop,
-whole_improve_loop, doc-align, secured-renovacy) must **converge to an
+whole_improve_loop, docs-refresh, secured-renovacy) must **converge to an
 asymptote** — settle into a stable approved state and stop. A slight,
 very occasional oscillation is acceptable; it must be the rare
 exception. **The rule is the asymptote**, never sustained oscillation.

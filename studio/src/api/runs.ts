@@ -55,7 +55,7 @@ export interface RunSummary {
   // persisted before this field existed; UI falls back to workflow_name.
   name?: string;
   workflow_name: string;
-  // Bot/bundle label (e.g. "doc-align"). Sourced from the bundle's
+  // Bot/bundle label (e.g. "docs-refresh"). Sourced from the bundle's
   // manifest.yaml name; server falls back to basename(bundle_path) for
   // legacy runs. Empty for plain .iter/.bot runs with no bundle.
   bundle_name?: string;

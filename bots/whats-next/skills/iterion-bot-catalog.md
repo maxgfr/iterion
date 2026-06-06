@@ -33,7 +33,7 @@ persona.
 | Featurly | `feature_dev` |
 | Billy | `branch_improve_loop` |
 | Willy | `whole_improve_loop` |
-| Doki | `doc-align` |
+| Doki | `docs-refresh` |
 | Revi | `code_review` |
 | Seki | `sec-audit-source` |
 | Depsy | `sec-audit-deps` |
@@ -86,7 +86,7 @@ Walk top-to-bottom; first match wins.
 | "review this branch", "review the PR", "fix the diff against main" — review AND fix AND commit | `branch_improve_loop` |
 | "review this PR / branch and just REPORT the issues" — read-only review, posts findings to the board, does NOT fix or commit | `code_review` |
 | "upgrade dependencies", "patch CVEs", "bump versions", "renovate" — MUTATING (writes package.json / go.mod / lockfiles) | `secured-renovacy` |
-| "audit the docs", "find code↔doc drift", "doc/code alignment", "fix outdated README/CLAUDE.md" | `doc-align` |
+| "audit the docs", "find code↔doc drift", "doc/code alignment", "fix outdated README/CLAUDE.md" | `docs-refresh` |
 | "audit the source for vulns", "find injection / SSRF / IDOR / secrets", "OWASP source scan" — DETECTION (writes findings, not fixes) | `sec-audit-source` |
 | "audit dependencies for malware / typosquats / install hooks", "supply-chain check", "post-`npm install` triage" — DETECTION across installed deps | `sec-audit-deps` |
 | architectural choice, hiring, prioritisation meeting, alignment | `""` |
@@ -177,7 +177,7 @@ item that called for it.
   reliability"`, BUT if the operator's priorities mention
   "add OAuth" the same item is `feature_dev`. Surface the
   question if both fits look plausible.
-- "Make the docs match the new dispatcher API" → `doc-align`
+- "Make the docs match the new dispatcher API" → `docs-refresh`
   (clear). No ambiguity.
 - "Fix the failing CI on the rust port" → `branch_improve_loop`
   IF there's an open branch, `feature_dev` IF the CI fix is
@@ -312,10 +312,10 @@ Example `args` payload for a roadmap_item:
   install-time malware (preinstall hooks, eval on import,
   typosquats); periodic baseline scan of vendored deps.
 
-### `doc-align`
+### `docs-refresh`
 
-- **Path**: `bots/doc-align/main.bot` (or packed
-  `bots/doc-align.botz`).
+- **Path**: `bots/docs-refresh/main.bot` (or packed
+  `bots/docs-refresh.botz`).
 - **Vars**: none required. Optional: `doc_globs` (default
   `README.md,docs/**/*.md,CLAUDE.md`), `go_comment_globs`
   (default empty — opt in to comment audits),
@@ -422,7 +422,7 @@ Before creating each issue:
    not one of the seven known bots (`feature_dev`,
    `whole_improve_loop`, `branch_improve_loop`,
    `secured-renovacy`, `sec-audit-source`, `sec-audit-deps`,
-   `doc-align`), AND it doesn't correspond to a `.bot` file the
+   `docs-refresh`), AND it doesn't correspond to a `.bot` file the
    explorer surfaced — strip to `""` and add label
    `needs-manual-triage`. NEVER invent.
 2. Empty assignee is FINE. The issue lands without an assignee

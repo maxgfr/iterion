@@ -1,6 +1,6 @@
 {
-  "_note": "Hand-authored seed fixture (no live LLM was available at creation). Regenerate with `task test:goldens:record`. Shape derived from bots/doc-align/main.bot schema verdict_output.",
-  "bot": "doc-align",
+  "_note": "Hand-authored seed fixture (no live LLM was available at creation). Regenerate with `task test:goldens:record`. Shape derived from bots/docs-refresh/main.bot schema verdict_output.",
+  "bot": "docs-refresh",
   "scenario": "reviewer_gpt_approve",
   "node": "reviewer_gpt",
   "backend": "claw",

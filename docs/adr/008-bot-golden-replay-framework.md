@@ -9,7 +9,7 @@
 
 ## Context
 
-Iterion's flagship bots (`feature_dev`, `whats-next`, `doc-align`) emit
+Iterion's flagship bots (`feature_dev`, `whats-next`, `docs-refresh`) emit
 structured LLM output that downstream nodes and the dispatcher depend on:
 a reviewer's `verdict_output.family` routes the fix loop, `emit_action`'s
 `created_issues[].assignee` tells the dispatcher which bot to run, and a
@@ -100,7 +100,7 @@ Wrap the production executor, run the bot end-to-end live, and capture
 all nodes.
 
 **Rejected because**: `whats-next` cannot run unattended (its
-`human_review` / `ask_*` nodes pause), and `feature_dev` / `doc-align`
+`human_review` / `ask_*` nodes pause), and `feature_dev` / `docs-refresh`
 mutate real code and commit. Single-node record is the only path that
 works uniformly across the three and keeps a fixture tied to the one
 node whose contract we assert.

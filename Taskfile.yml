@@ -50,7 +50,7 @@ tasks:
       - cp -R bots/whole_improve_loop pkg/cli/templates/dispatch_bots/whole-improve-loop
       - cp -R bots/branch_improve_loop pkg/cli/templates/dispatch_bots/branch-improve-loop
       - cp -R bots/whats-next pkg/cli/templates/dispatch_bots/whats-next
-      - cp -R bots/doc-align pkg/cli/templates/dispatch_bots/doc-align
+      - cp -R bots/docs-refresh pkg/cli/templates/dispatch_bots/docs-refresh
       - cp -R bots/sec-audit-source pkg/cli/templates/dispatch_bots/sec-audit-source
       - cp -R bots/sec-audit-deps pkg/cli/templates/dispatch_bots/sec-audit-deps
       - cp -R bots/secured-renovacy pkg/cli/templates/dispatch_bots/secured-renovacy
@@ -61,7 +61,7 @@ tasks:
       - bots/whole_improve_loop/**
       - bots/branch_improve_loop/**
       - bots/whats-next/**
-      - bots/doc-align/**
+      - bots/docs-refresh/**
       - bots/sec-audit-source/**
       - bots/sec-audit-deps/**
       - bots/secured-renovacy/**
