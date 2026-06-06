@@ -17,8 +17,11 @@
 ##   fan (fan_out_all)
 ##     ├─ reviewer_claude  (claude_code, read-only)
 ##     └─ reviewer_gpt     (claw + openai/gpt-5.5, read-only tools)
-##   reviewer_* -> emit    (await: wait_all)
-##   emit -> done
+##   reviewer_* -> emit    (await: wait_all)   board + markdown report
+##   emit -> pr_gate       (deterministic: was a pr_url given?)
+##     ├─ no  -> done
+##     └─ yes -> publish_review  (skill-guided forge PR review) ->
+##               publish_health  (deterministic anti-façade gate) -> done
 ##
 ## Cross-family value: an issue flagged by BOTH families is far more
 ## likely real than one flagged by a single reviewer. emit raises the
@@ -45,24 +48,27 @@
 ## and prioritise the highest-impact hunks. Port plan_chunks here when
 ## reviewing 1k+ LoC PRs becomes common.
 ##
-## ROADMAP — forge PR review (primary intended use):
-## The end goal for Revi is to publish its review directly onto a PR on
-## GitHub / GitLab / Forgejo as a proper PR review — inline comments
-## anchored to file+line, including ```suggestion code-change blocks the
-## author can apply in one click — not only the native kanban board +
-## markdown report it writes today. Two pieces are still to build:
-##   1. A forge publish step (replacing/augmenting emit's board write):
-##      map each finding {file,line,suggestion} to the forge's PR
-##      review-comment API. Build on the existing github/forgejo tracker
-##      adapters in pkg/dispatcher/tracker/ (those cover issues today;
-##      PR review-comments are a new surface); GitLab is a new adapter.
-##      Emit the ```suggestion block when a finding carries a concrete
-##      replacement; fall back to a plain comment otherwise.
-##   2. A PR trigger: run on a PR event (dispatcher/webhook) OR a manual
-##      launch against a PR — e.g. `--var pr_url=<forge PR url>` resolves
-##      the base/head refs + the target for posting (today base_ref is a
-##      local git ref only). post_to_board stays as the fallback/local
-##      sink when no PR target is given.
+## FORGE PR REVIEW (v0.2.0 — implemented, the primary intended use):
+## When `--var pr_url=<PR/MR url>` is given, Revi ALSO publishes its
+## merged findings directly onto that PR as a proper forge review —
+## inline comments anchored to file:line, including ```suggestion
+## code-change blocks (when a finding carries a concrete `replacement`)
+## the author can apply in one click — on top of the native kanban
+## board + markdown report it always writes. Forge-agnostic: the
+## `publish_review` step reads the `forge-pr-review.md` skill and
+## dispatches by URL host (GitHub `gh`, GitLab `glab`, Forgejo/Gitea
+## API) — no forge names are baked into this DSL (universal-bots
+## doctrine). A deterministic `publish_health` gate flags a no-op /
+## failed publish (findings existed but 0 comments landed) so a façade
+## is never silent. `post_to_board` remains the local sink; both run.
+##
+## Remaining enhancement (not yet built): auto-resolve base/head from
+## the PR URL. Today review the LOCAL checkout (base_ref..HEAD) and
+## publish to pr_url — so check out the PR branch and pass its base as
+## base_ref. See the `pr_url` var doc below. Manual launch against a PR
+## (`--var pr_url=<url>`) works today; a PR-event trigger
+## (dispatcher/webhook auto-launch on PR open/update) is the other
+## remaining enhancement.
 ## ─────────────────────────────────────────────────────────────────
 
 vars:
@@ -100,6 +106,25 @@ vars:
   ## .iterion/ so Revi never scatters engine state into the target
   ## repo's tree.
   report_path: string = ".code-review/findings.md"
+
+  ## FORGE PR REVIEW (v0.2.0). When set to a pull/merge-request URL,
+  ## Revi ALSO publishes its merged findings onto that PR as a real
+  ## forge review: one inline comment per finding anchored to file:line,
+  ## emitting a one-click ```suggestion block when the finding carries a
+  ## concrete `replacement`, else a plain inline comment. Empty (default)
+  ## = today's board + markdown-report behaviour only.
+  ##
+  ## Forge-agnostic: the publish step reads the `forge-pr-review.md`
+  ## skill and dispatches by the URL host — GitHub (`gh`), GitLab
+  ## (`glab`), or Forgejo/Gitea (API). The relevant CLI must be
+  ## authenticated on the host (e.g. `gh auth login`).
+  ##
+  ## v1 diff model: review the LOCAL checkout (base_ref..HEAD, as
+  ## always) and publish to this PR. So check out the PR's branch
+  ## locally and pass its base as `base_ref` (e.g.
+  ## `--var base_ref=main --var pr_url=https://github.com/o/r/pull/42`).
+  ## Auto-resolving base/head from the PR URL is a future enhancement.
+  pr_url: string = ""
 
 ## ─── Prompts ────────────────────────────────────────────────────
 
@@ -163,6 +188,7 @@ prompt review_system:
         {
           "file": "relative/path.go",
           "line": 142,
+          "line_end": 142,
           "severity": "critical" | "high" | "medium" | "low",
           "category": "correctness" | "security" | "concurrency" |
                       "error-handling" | "data" | "performance" |
@@ -170,8 +196,21 @@ prompt review_system:
           "title": "short noun phrase incl. the symptom",
           "detail": "what breaks, under what condition, why it matters",
           "suggestion": "one-line remediation sketch (no patch)",
+          "replacement": "",
           "confidence": "low" | "medium" | "high"
         }
+      `line` / `line_end`: the anchor span IN THE CHANGED CODE (a single
+      line → set both equal). Anchor to lines the branch actually added
+      or modified — that is where a forge can attach an inline comment.
+      `replacement`: USUALLY EMPTY. Fill it ONLY when you have a
+      concrete, high-confidence, self-contained fix that EXACTLY
+      replaces lines [`line`..`line_end`] verbatim — the literal new
+      code, ready to apply in one click (a forge renders it as a
+      ```suggestion block). Leave it "" when the fix is not a clean
+      line-for-line swap (spans scattered edits, needs a new import,
+      is judgement-dependent); a plain comment with your `suggestion`
+      sketch is posted instead. Never put a diff, prose, or a partial
+      line in `replacement` — only the exact replacement text.
     - `scanned_areas`: the (axis, file) surfaces you actually audited.
     - `summary`: one paragraph — overall risk read + anything notable
       that did not rise to a finding.
@@ -280,6 +319,14 @@ prompt emit_system:
     - `issues_created`: the board issue ids you created (empty when
       post_to_board is false).
     - `failed_issues`: any board creates the runtime rejected.
+    - `findings`: the FINAL merged/threshold/capped finding set as a
+      JSON array, in the SAME per-object shape the reviewers emitted —
+      preserve `file`, `line`, `line_end`, `severity`, `category`,
+      `title`, `detail`, `suggestion`, `replacement`, `confidence`, and
+      add `"reviewers": "claude" | "gpt" | "both"`. A downstream step may
+      publish these onto a forge PR, so keep `line`/`line_end` and any
+      `replacement` exactly as given. This is the same set you reported —
+      do not re-summarise or drop fields.
 
 prompt emit_user:
   Workspace:          {{vars.workspace_dir}}
@@ -303,6 +350,74 @@ prompt emit_user:
   Merge, dedupe, threshold, cap, publish, and report per your
   instructions.
 
+prompt publish_review_system:
+  You publish a completed code review onto a pull / merge request as a
+  proper forge review: ONE review carrying an inline comment per
+  finding, anchored to the exact `file:line` in the PR's diff. You are
+  READ-ONLY on the source code — you post comments, you never edit,
+  fix, or commit anything in the workspace.
+
+  LOAD THE `forge-pr-review.md` SKILL FIRST. It is the catalogue: how
+  to detect the forge from the PR URL, the exact CLI / API call for
+  GitHub, GitLab and Forgejo/Gitea, how to anchor an inline comment to
+  a diff line, and the per-forge ```suggestion syntax. Follow it; do
+  not improvise an API you have not confirmed there.
+
+  PROCEDURE:
+   1. Detect the forge from the PR URL host and confirm the matching
+      CLI is authenticated (the skill says how). If the forge is
+      unrecognised or the CLI is not authenticated, publish NOTHING:
+      return published=false with a precise `skipped_reason`. Never
+      pretend to have posted.
+   2. For each finding, build an inline comment anchored to its
+      `file` + `line`..`line_end`:
+        - If `replacement` is non-empty, emit a ```suggestion block
+          (per the skill's syntax for this forge) so the author can
+          apply the fix in one click. Put the `title` + `detail`
+          above the block.
+        - Otherwise post a plain inline comment: `title`, then
+          `detail`, then the one-line `suggestion` sketch.
+        - Prefix each comment with the severity + category + whether it
+          was cross-confirmed (`reviewers == "both"`).
+      A finding whose line is NOT in the PR diff cannot take an inline
+      comment — collect those and include them in the review's summary
+      body instead (do not silently drop them).
+   3. Post them as a SINGLE review (event = comment, not approve /
+      request-changes — Revi advises, it does not gate the merge) with
+      a summary body: total findings, severity counts, cross-confirmed
+      count, and any findings that could not be anchored inline.
+   4. VERIFY: re-fetch the review you just created (the skill gives the
+      read call) and COUNT the inline comments the forge actually
+      stored. Report that re-fetched count as `comments_posted` — never
+      an optimistic self-estimate. Capture the review URL.
+
+  ANTI-FAÇADE: `comments_posted` and `review_url` must come from the
+  re-fetch in step 4, and your `summary` must cite the verification
+  call you ran. A claim of success with no re-fetch evidence is a
+  façade and will be flagged by the downstream health gate.
+
+  STACK / FORGE-AGNOSTIC: the repo and the forge may be anything. Read
+  the skill and adapt; never assume a particular forge or language.
+
+prompt publish_review_user:
+  Publish this review onto the pull/merge request.
+
+  PR URL:        {{input.pr_url}}
+  Workspace:     {{input.workspace_dir}}
+  Base ref:      {{input.base_ref}}
+  Findings kept: {{input.total_findings}}
+
+  Findings to publish (JSON array — file, line, line_end, severity,
+  category, title, detail, suggestion, replacement, confidence,
+  reviewers):
+  {{input.findings}}
+
+  Follow your system prompt and the `forge-pr-review.md` skill. Post one
+  review with inline comments (```suggestion blocks where `replacement`
+  is set), then re-fetch to verify and return `publish_output` with the
+  re-fetched `comments_posted`, `suggestions_posted`, `review_url`, and
+  a `summary` citing the verification call.
+
 ## ─── Schemas ────────────────────────────────────────────────────
 
 schema review_output:
@@ -322,10 +437,72 @@ schema emit_output:
   total_findings: int
   issues_created: string[]
   failed_issues: string[]
+  ## The final merged/capped finding set, carried forward so the forge
+  ## publish step can map each finding to an inline PR comment. Same
+  ## per-object shape the reviewers emit (file/line/line_end/severity/
+  ## category/title/detail/suggestion/replacement/confidence/reviewers).
+  findings: json
 
 schema diff_precheck_output:
   is_empty: bool
   changed_files: int
+
+## ─── Forge PR review (v0.2.0) schemas ───────────────────────────
+
+## pr_gate: deterministic branch on whether a PR target was given, so
+## the (LLM) publish step is reached ONLY when pr_url is non-empty.
+## Carries emit's findings + counts through to publish_review.
+schema pr_gate_input:
+  pr_url: string
+  findings: json
+  total_findings: int
+
+schema pr_gate_output:
+  has_pr: bool
+  pr_url: string
+  findings: json
+  total_findings: int
+
+schema publish_input:
+  pr_url: string
+  findings: json
+  total_findings: int
+  workspace_dir: string
+  base_ref: string
+
+schema publish_output:
+  ## published: a forge review was successfully created.
+  published: bool
+  ## forge: "github" | "gitlab" | "forgejo" | "unknown" (detected from
+  ## the pr_url host). Free-form string, not a closed DSL enum.
+  forge: string
+  ## review_url: link to the posted review/comment thread (evidence).
+  review_url: string
+  ## comments_posted: inline comments the forge ACCEPTED (re-fetched as
+  ## evidence, not self-reported optimistically).
+  comments_posted: int
+  ## suggestions_posted: of those, how many carried a ```suggestion block.
+  suggestions_posted: int
+  ## skipped_reason: non-empty when nothing was published (e.g. unknown
+  ## forge, CLI not authenticated, zero anchorable findings).
+  skipped_reason: string
+  ## summary: what was posted + the re-fetch evidence behind the counts.
+  summary: string
+
+schema publish_health_input:
+  published: bool
+  comments_posted: int
+  total_findings: int
+  skipped_reason: string
+  review_url: string
+
+## Deterministic anti-façade gate: when a publish was requested AND
+## there were findings, at least one inline comment must have landed.
+## degraded=true surfaces a loud banner (the board + report already
+## succeeded, so this informs rather than hard-fails the run).
+schema publish_health_output:
+  degraded: bool
+  banner: string
 
 ## ─── Nodes ──────────────────────────────────────────────────────
 
@@ -399,6 +576,60 @@ agent emit:
   ## ordinary claude_code tools.
   capabilities: [board.read, board.create, board.label]
 
+## ─── Forge PR review (v0.2.0) nodes ─────────────────────────────
+
+## Deterministic branch (no LLM): reach the forge publish step ONLY
+## when a pr_url was given. Passes emit's findings + counts through so
+## publish_review reads them as input.* (stable across the edge).
+compute pr_gate:
+  input: pr_gate_input
+  output: pr_gate_output
+  expr:
+    has_pr: "input.pr_url != ''"
+    pr_url: "input.pr_url"
+    findings: "input.findings"
+    total_findings: "input.total_findings"
+
+## Skill-guided, forge-agnostic publish. claude_code so it has Bash +
+## the host forge CLIs (gh / glab) and full read tools; it posts PR
+## comments via the CLI/API, never edits workspace source. The per-forge
+## knowledge lives in skills/forge-pr-review.md — no forge names in this
+## DSL. Self-verifies by re-fetching the posted review (anti-façade).
+agent publish_review:
+  backend: "claude_code"
+  model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-8}"
+  reasoning_effort: "${ITERION_VIBE_EFFORT_EMIT:-medium}"
+  input: publish_input
+  output: publish_output
+  system: publish_review_system
+  user: publish_review_user
+  session: fresh
+  ## The reviewer can ask the operator (e.g. ambiguous PR target) rather
+  ## than guess; same escalation contract as the reviewers.
+  interaction: human
+
+## Deterministic anti-façade gate (no LLM): when findings existed but
+## zero inline comments landed, emit a loud banner. The board + report
+## already succeeded upstream, so this informs (degraded=true) rather
+## than hard-failing the run. Forge-agnostic: a pure count assertion.
+tool publish_health:
+  command: `TOTAL={{input.total_findings}} POSTED={{input.comments_posted}} PUBLISHED={{input.published}} REVIEW_URL={{input.review_url}} SKIPPED={{input.skipped_reason}} python3 -c "
+import os, json, sys
+total = int(os.environ.get('TOTAL', '0') or '0')
+posted = int(os.environ.get('POSTED', '0') or '0')
+review_url = os.environ.get('REVIEW_URL', '')
+skipped = os.environ.get('SKIPPED', '')
+degraded = total > 0 and posted == 0
+if degraded:
+    banner = chr(9888) + ' FORGE PUBLISH FAILED: ' + str(total) + ' finding(s) to post but 0 inline comments landed on the PR (reason: ' + (skipped or 'none given') + '). The board + markdown report still succeeded; fix the forge CLI auth and re-run with the same pr_url to publish.'
+else:
+    banner = 'forge publish OK: ' + str(posted) + ' inline comment(s) posted; review: ' + (review_url or 'n/a')
+sys.stderr.write(banner + chr(10))
+print(json.dumps({'degraded': degraded, 'banner': banner}))
+"`
+  input: publish_health_input
+  output: publish_health_output
+
 ## ─── Workflow ───────────────────────────────────────────────────
 
 workflow code_review:
@@ -425,4 +656,30 @@ workflow code_review:
   reviewer_claude -> emit
   reviewer_gpt -> emit
 
-  emit -> done
+  ## emit always runs (board + markdown report). Then pr_gate decides
+  ## whether to ALSO publish to a forge PR — only when pr_url is set —
+  ## feeding emit's merged findings forward to the publish step.
+  emit -> pr_gate with {
+    pr_url: "{{vars.pr_url}}",
+    findings: "{{outputs.emit.findings}}",
+    total_findings: "{{outputs.emit.total_findings}}"
+  }
+  ## No PR target → finish after the board + report (the default,
+  ## zero extra LLM cost). PR target → skill-guided forge publish.
+  pr_gate -> done when not has_pr
+  pr_gate -> publish_review when has_pr with {
+    pr_url: "{{outputs.pr_gate.pr_url}}",
+    findings: "{{outputs.pr_gate.findings}}",
+    total_findings: "{{outputs.pr_gate.total_findings}}",
+    workspace_dir: "{{vars.workspace_dir}}",
+    base_ref: "{{vars.base_ref}}"
+  }
+  ## Deterministic anti-façade gate on the publish result, then done.
+  publish_review -> publish_health with {
+    published: "{{outputs.publish_review.published}}",
+    comments_posted: "{{outputs.publish_review.comments_posted}}",
+    total_findings: "{{outputs.pr_gate.total_findings}}",
+    skipped_reason: "{{outputs.publish_review.skipped_reason}}",
+    review_url: "{{outputs.publish_review.review_url}}"
+  }
+  publish_health -> done

@@ -1,18 +1,23 @@
 name: code-review
 display_name: Revi
-version: 0.1.0
+version: 0.2.0
 description: |
   Read-only cross-family code reviewer. Reviews the working-tree diff
   of the current branch against its base with two independent reviewers
   (Claude + GPT), merges and de-duplicates their findings (cross-family
   agreement raises confidence), then publishes one issue per finding to
   the iterion native kanban board (labelled severity + type +
-  source:revi) and writes a markdown report. Never edits, fixes, or
-  commits code — that is the improve-loops' job (Billy / Willy).
+  source:revi) and writes a markdown report. Given a pull/merge-request
+  URL (--var pr_url), it ALSO posts the findings onto that PR as a real
+  forge review — inline comments anchored to file:line with one-click
+  ```suggestion blocks (GitHub / GitLab / Forgejo). Never edits, fixes,
+  or commits code — that is the improve-loops' job (Billy / Willy).
 when_to_use: |
-  Use when you want a PR/branch REVIEWED and its issues surfaced to
-  the board for triage, but NOT auto-fixed. Read-only: Revi reports;
-  Billy (branch_improve_loop) reviews AND fixes AND commits.
-author: SocialGouv (devthejo) — code_review/main.bot
+  Use when you want a PR/branch REVIEWED and its issues surfaced — to
+  the board for triage and/or posted directly onto the PR (pass
+  --var pr_url) as inline comments + ```suggestion fixes — but NOT
+  auto-fixed. Read-only: Revi reports; Billy (branch_improve_loop)
+  reviews AND fixes AND commits.
+author: SocialGouv (devthejo) — code-review/main.bot
 schema_version: 1
 triggers: [code-review, review, pr-review]
