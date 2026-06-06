@@ -66,6 +66,11 @@ func runDepHeuristic(t *testing.T, nodeID, scannerFile, fixture string) depHeuri
 	cmd := tool.Command
 	cmd = strings.ReplaceAll(cmd, "{{vars.scan_dir}}", scanDir)
 	cmd = strings.ReplaceAll(cmd, "{{vars.workspace_dir}}", wsDir)
+	// run_eco_heuristics dispatches scanners on {{input.ecosystems}}, but its
+	// parser reads scan_dir/*.json unconditionally — an empty list no-ops the
+	// scanner-run loop so the parse path runs against exactly the seeded
+	// fixture (mirrors the old per-language nodes' command -v guard).
+	cmd = strings.ReplaceAll(cmd, "{{input.ecosystems}}", "[]")
 	out, err := exec.Command("sh", "-c", cmd).Output()
 	if err != nil {
 		t.Fatalf("%s command failed: %v", nodeID, err)
@@ -197,7 +202,7 @@ func TestSecAuditDeps_GoHeuristic_ParsesGovulncheck(t *testing.T) {
 {"osv": {"id": "GO-2024-2222", "summary": "Import-only flaw in example/bar", "aliases": ["CVE-2024-2222"], "affected": [{"package": {"name": "github.com/example/bar", "ecosystem": "Go"}}]}}
 {"finding": {"osv": "GO-2024-2222", "fixed_version": "2.0.0", "trace": [{"module": "github.com/example/bar", "version": "1.5.0", "package": "github.com/example/bar"}]}}`
 
-	res := runDepHeuristic(t, "run_go_heuristics", "govulncheck.json", fixture)
+	res := runDepHeuristic(t, "run_eco_heuristics", "govulncheck.json", fixture)
 	if len(res.Packages) != 2 {
 		t.Fatalf("expected 2 vulnerable packages, got %d: %+v", len(res.Packages), res.Packages)
 	}
@@ -254,7 +259,7 @@ func TestSecAuditDeps_PyHeuristic_ParsesPipAudit(t *testing.T) {
   {"name": "pip", "version": "21.3.1", "vulns": []}
 ], "fixes": []}`
 
-	res := runDepHeuristic(t, "run_py_heuristics", "pip-audit.json", fixture)
+	res := runDepHeuristic(t, "run_eco_heuristics", "pip-audit.json", fixture)
 	if len(res.Packages) != 1 {
 		t.Fatalf("expected 1 vulnerable package (flask; clean deps skipped), got %d: %+v", len(res.Packages), res.Packages)
 	}
@@ -281,7 +286,7 @@ func TestSecAuditDeps_JsHeuristic_ParsesNpmAudit(t *testing.T) {
     "via": [{"source": 1065, "name": "lodash", "title": "Prototype Pollution in lodash", "url": "https://github.com/advisories/GHSA-jf85", "severity": "high"}],
     "range": "<4.17.19", "fixAvailable": true}
 }, "metadata": {"vulnerabilities": {"total": 1}}}`
-		res := runDepHeuristic(t, "run_js_heuristics", "npm-audit.json", fixture)
+		res := runDepHeuristic(t, "run_eco_heuristics", "npm-audit.json", fixture)
 		if len(res.Packages) != 1 {
 			t.Fatalf("expected 1 vulnerable package, got %d: %+v", len(res.Packages), res.Packages)
 		}
@@ -296,7 +301,7 @@ func TestSecAuditDeps_JsHeuristic_ParsesNpmAudit(t *testing.T) {
 
 	t.Run("v6_advisories_fallback", func(t *testing.T) {
 		fixture := `{"advisories": {"1065": {"module_name": "lodash", "severity": "high", "title": "Prototype Pollution", "url": "https://npmjs.com/advisories/1065", "patched_versions": ">=4.17.19"}}}`
-		res := runDepHeuristic(t, "run_js_heuristics", "npm-audit.json", fixture)
+		res := runDepHeuristic(t, "run_eco_heuristics", "npm-audit.json", fixture)
 		if len(res.Packages) != 1 || res.Packages[0].Name != "lodash" {
 			t.Fatalf("v6 fallback: expected lodash, got %+v", res.Packages)
 		}

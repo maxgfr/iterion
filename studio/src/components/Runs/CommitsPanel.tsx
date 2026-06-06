@@ -580,7 +580,7 @@ export function defaultConventionalMessage(run: RunHeader): string {
 
 function guessConventionalType(subject: string): string {
   const s = subject.toLowerCase();
-  // Order matters: a "doc-align bug fix" should read as fix, not docs.
+  // Order matters: a "docs-refresh bug fix" should read as fix, not docs.
   if (/\b(bug|fix|broken|crash|regression|race|leak|hang)\b/.test(s)) return "fix";
   if (/\b(feat|feature|add|implement|introduce|support|enable)\b/.test(s))
     return "feat";

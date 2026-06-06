@@ -39,9 +39,9 @@ describe("classifyContinueIntent", () => {
   });
 
   it("falls back to modify_ticket with low confidence on ambiguous text", () => {
-    const r = classifyContinueIntent("the doc-align thing from earlier");
+    const r = classifyContinueIntent("the docs-refresh thing from earlier");
     expect(r.action).toBe("modify_ticket");
-    expect(r.detail).toBe("the doc-align thing from earlier");
+    expect(r.detail).toBe("the docs-refresh thing from earlier");
     expect(r.confidence).toBeLessThan(0.5);
   });
 

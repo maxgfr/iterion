@@ -1260,7 +1260,7 @@ prompt triage_board_system:
           Set `dispatched_ids: []` and `needs_followup: true`.
         - "all" (case-insensitive) → transition ALL backlog
           issues that already have an assignee.
-        - assignee name ("feature_dev", "doc-align") → only
+        - assignee name ("feature_dev", "docs-refresh") → only
           that assignee's tickets.
         - horizon label ("next-action", "short-term",
           "long-term") → filter by that horizon label.

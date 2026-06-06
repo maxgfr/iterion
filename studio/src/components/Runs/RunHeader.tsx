@@ -523,7 +523,7 @@ function FinalizationRow({ run }: { run: RunHeaderType }) {
 // main.bot. We now lead with the workflow's declared name (the
 // `workflow <name>:` token in the DSL — e.g. "feature_dev") and add
 // the bundle's manifest name when it exists and differs, so the
-// operator can tell a feature_dev run from a doc-align run at a
+// operator can tell a feature_dev run from a docs-refresh run at a
 // glance. The basename + file path stay reachable via tooltip + the
 // click-to-open-in-editor affordance.
 function BotChip({
@@ -537,8 +537,8 @@ function BotChip({
 }) {
   const workflowName = run.workflow_name || "";
   // Bundle name diverges from workflow_name only when the .botz
-  // manifest's `name:` field was customised (e.g. bundle "doc-align"
-  // ships `workflow doc_align:`). Render it as a secondary chip in
+  // manifest's `name:` field was customised (e.g. bundle "docs-refresh"
+  // ships `workflow docs_refresh:`). Render it as a secondary chip in
   // that case; suppress when redundant.
   const bundleName = run.bundle_name?.trim() ?? "";
   const personaName = run.bundle_display_name?.trim() ?? "";

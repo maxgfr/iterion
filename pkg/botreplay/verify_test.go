@@ -14,7 +14,7 @@ func TestCollectAssignees_NestedShapes(t *testing.T) {
 			map[string]interface{}{"id": "iss-2", "assignee": ""},
 		},
 		"next_action": []interface{}{
-			map[string]interface{}{"title": "x", "assignee": "doc-align"},
+			map[string]interface{}{"title": "x", "assignee": "docs-refresh"},
 		},
 		"nested": map[string]interface{}{
 			"deeper": map[string]interface{}{"bot": "whats-next"},
@@ -22,14 +22,14 @@ func TestCollectAssignees_NestedShapes(t *testing.T) {
 	}
 	got := collectAssignees(output)
 	sort.Strings(got)
-	want := []string{"", "doc-align", "feature_dev", "whats-next"}
+	want := []string{"", "docs-refresh", "feature_dev", "whats-next"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("collectAssignees = %v, want %v", got, want)
 	}
 }
 
 func TestVerifyNoHallucinatedAssignees(t *testing.T) {
-	valid := map[string]bool{"feature-dev": true, "doc-align": true}
+	valid := map[string]bool{"feature-dev": true, "docs-refresh": true}
 
 	cases := []struct {
 		name    string

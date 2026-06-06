@@ -596,7 +596,7 @@ func TestExpr_FuncCall_If(t *testing.T) {
 // TestExpr_If_ShortCircuits covers ticket a3a9757b: the un-taken
 // branch must not be evaluated, so an arithmetic trap (divide-by-zero,
 // out-of-range index) hidden inside it can't crash the compute node.
-// The 2026-05-20 doc-align dogfood hit this with
+// The 2026-05-20 docs-refresh dogfood hit this with
 // `if(doc_count > 0, total*100/doc_count, 0)` on an empty workspace.
 func TestExpr_If_ShortCircuits(t *testing.T) {
 	ctx := makeCtx(

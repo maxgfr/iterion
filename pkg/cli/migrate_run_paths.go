@@ -27,11 +27,17 @@ var botRelocations = []struct{ from, to string }{
 	{"/examples/whole_improve_loop", "/bots/whole_improve_loop"},
 	{"/examples/branch_improve_loop", "/bots/branch_improve_loop"},
 	{"/examples/whats-next", "/bots/whats-next"},
-	{"/examples/doc-align", "/bots/doc-align"},
+	{"/examples/doc-align", "/bots/docs-refresh"},
 	{"/examples/sec-audit-source", "/bots/sec-audit-source"},
 	{"/examples/sec-audit-deps", "/bots/sec-audit-deps"},
 	{"/examples/secured-renovacy", "/bots/secured-renovacy"},
 	{"/examples/code_review", "/bots/code_review"},
+	// doc-align was renamed to docs-refresh (2026-06). Remap its
+	// pre-rename bots/ location too so runs created between the
+	// examples→bots move and the rename still resolve the bot. Safe vs
+	// the examples/doc-align rule above: "/bots/docs-refresh" does not
+	// contain "/bots/doc-align", so neither remap double-applies.
+	{"/bots/doc-align", "/bots/docs-refresh"},
 }
 
 // remapBotPath applies the relocation to a single recorded path. Returns

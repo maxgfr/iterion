@@ -118,7 +118,7 @@ type RunSummary struct {
 	// Empty for legacy runs persisted before this field existed.
 	Name         string `json:"name,omitempty"`
 	WorkflowName string `json:"workflow_name"`
-	// BundleName is the bot/bundle label (e.g. "doc-align"). Sourced
+	// BundleName is the bot/bundle label (e.g. "docs-refresh"). Sourced
 	// from the persisted Run.BundleName; falls back server-side to
 	// basename(BundlePath) (stripped of `.botz`) for legacy runs.
 	// Empty for plain .iter/.bot runs with no bundle.

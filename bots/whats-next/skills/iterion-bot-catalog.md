@@ -13,8 +13,9 @@ description: Catalog of iterion bots — pick a bot name for each roadmap_item.a
      edit the bots' manifest.yaml instead (display_name / description /
      when_to_use / triggers / enabled), or toggle a bot in the studio
      Catalog manager. Everything OUTSIDE the markers is editorial routing
-     reasoning you maintain by hand. The generated copy Nexie actually
-     reads is the sibling iterion-bot-catalog.md. -->
+     reasoning you maintain by hand. This template lives at the bundle
+     ROOT (not skills/) so it is never mirrored as a skill; the generated
+     copy Nexie actually reads is skills/iterion-bot-catalog.md. -->
 
 Consumed by three phases:
 
@@ -78,7 +79,7 @@ Walk top-to-bottom; first match wins.
 | "review this branch", "review the PR", "fix the diff against main" — review AND fix AND commit | `branch_improve_loop` |
 | "review this PR / branch and just REPORT the issues" — read-only review, posts findings to the board, does NOT fix or commit | `code_review` |
 | "upgrade dependencies", "patch CVEs", "bump versions", "renovate" — MUTATING (writes package.json / go.mod / lockfiles) | `secured-renovacy` |
-| "audit the docs", "find code↔doc drift", "doc/code alignment", "fix outdated README/CLAUDE.md" | `doc-align` |
+| "audit the docs", "find code↔doc drift", "doc/code alignment", "fix outdated README/CLAUDE.md" | `docs-refresh` |
 | "audit the source for vulns", "find injection / SSRF / IDOR / secrets", "OWASP source scan" — DETECTION (writes findings, not fixes) | `sec-audit-source` |
 | "audit dependencies for malware / typosquats / install hooks", "supply-chain check", "post-`npm install` triage" — DETECTION across installed deps | `sec-audit-deps` |
 | architectural choice, hiring, prioritisation meeting, alignment | `""` |
@@ -169,7 +170,7 @@ item that called for it.
   reliability"`, BUT if the operator's priorities mention
   "add OAuth" the same item is `feature_dev`. Surface the
   question if both fits look plausible.
-- "Make the docs match the new dispatcher API" → `doc-align`
+- "Make the docs match the new dispatcher API" → `docs-refresh`
   (clear). No ambiguity.
 - "Fix the failing CI on the rust port" → `branch_improve_loop`
   IF there's an open branch, `feature_dev` IF the CI fix is
@@ -191,7 +192,7 @@ dispatcher routes on it), never the persona.
 |---|---|
 | Billy | `branch_improve_loop` |
 | Revi | `code_review` |
-| Doki | `doc-align` |
+| Doki | `docs-refresh` |
 | Featurly | `feature_dev` |
 | Depsy | `sec-audit-deps` |
 | Seki | `sec-audit-source` |
@@ -232,7 +233,7 @@ commits code — that is the improve-loops' job (Billy / Willy).
 - **Vars**: `base_ref` (string), `max_findings` (int), `post_to_board` (bool), `report_path` (string), `scope_notes` (string), `severity_threshold` (string), `workspace_dir` (string)
 - **Path**: `bots/code_review/main.bot`
 
-### `doc-align` — Doki
+### `docs-refresh` — Doki
 
 Documentation alignment bot. Detects mismatches between project
 documentation (README, docs/*.md, CLAUDE.md, bundled skills,
@@ -253,7 +254,7 @@ Go code comments — code logic edits are an automatic blocker
 on the next iteration.
 
 The bot ships 5 skills capturing the anti-Goodhart rules:
-doc-align (playbook), doc-mismatch-taxonomy (10-value enum),
+docs-refresh (playbook), doc-mismatch-taxonomy (10-value enum),
 doc-scope-enumeration (scanner contract), anti-facade-fix-rules
 (substantive fix discipline), doc-verification-checklist (judge
 STEP-0 preamble).
@@ -263,7 +264,7 @@ STEP-0 preamble).
   stale versus the code, before a release, or whenever a survey flags
   code↔doc drift. Fixes the DOCS only (never code logic) and commits.
 - **Vars**: `audit_cache_path` (string), `bundle_self_path` (string), `cli_surface_globs` (string), `code_scope_globs` (string), `coverage_target_pct` (int), `diagnostic_surface_globs` (string), `diff_since` (string), `doc_globs` (string), `excluded_dirs` (string), `go_comment_globs` (string), `issue_id` (string), `max_drift_candidates` (int), `max_recovery_iterations` (int), `max_review_chunk_docs` (int), `max_review_iterations` (int), `scope_notes` (string), `workspace_dir` (string)
-- **Path**: `bots/doc-align/main.bot`
+- **Path**: `bots/docs-refresh/main.bot`
 
 ### `feature_dev` — Featurly
 

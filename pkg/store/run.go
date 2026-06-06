@@ -102,7 +102,7 @@ type Run struct {
 	// runs. Empty for plain .iter/.bot runs.
 	BundlePath string `json:"bundle_path,omitempty" bson:"bundle_path,omitempty"`
 	// BundleName is the bundle's `manifest.yaml` `name` field captured at
-	// launch (e.g. "doc-align"). Display-only — surfaces it in run lists
+	// launch (e.g. "docs-refresh"). Display-only — surfaces it in run lists
 	// so dispatcher-spawned bot runs are visually grouped. Empty for
 	// plain .iter/.bot runs and for bundles whose manifest had no name;
 	// consumers fall back to basename(BundlePath) stripped of `.botz`.

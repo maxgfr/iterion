@@ -168,13 +168,19 @@ func TestDispatcherE2E_CancelInFlight(t *testing.T) {
 
 	select {
 	case <-started:
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("worker never started")
 	}
 
 	c.Cancel(iss.ID)
 
-	deadline := time.Now().Add(2 * time.Second)
+	// Generous deadline: the cancel→handler-return→cmdRunFinished→finishRun
+	// chain completes in ~50ms unloaded, but it crosses the actor's command
+	// channel and a dispatch-worker teardown, so under a loaded CI host (or a
+	// busy dev machine running the full suite + docker) scheduler jitter can
+	// push it past a tight 2s window — a flaky failure, not a real hang. 10s
+	// stays a hard ceiling that still catches a genuine cancel-flush hang.
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if len(c.Snapshot().Running) == 0 {
 			return

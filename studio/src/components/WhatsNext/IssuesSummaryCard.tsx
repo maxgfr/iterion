@@ -235,7 +235,7 @@ function DispatcherChip({
             disabled={status.busy}
             onClick={() => void status.autoConfigureAndStart()}
             className="rounded border border-accent/40 bg-accent-soft px-2 py-0.5 text-[11px] text-accent hover:bg-accent-soft/80 disabled:opacity-50"
-            title="Auto-configure with the embedded bot catalogue (feature_dev, doc-align, …) and start the dispatcher"
+            title="Auto-configure with the embedded bot catalogue (feature_dev, docs-refresh, …) and start the dispatcher"
           >
             {status.busy ? "…" : "⚡ Auto-configure & start"}
           </button>

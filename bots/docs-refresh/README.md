@@ -1,4 +1,4 @@
-# doc-align (v0.13.1)
+# docs-refresh (v0.13.1)
 
 A dogfood-friendly iterion bot that detects mismatches between
 project documentation and actual code state, then fixes the
@@ -98,7 +98,7 @@ feedback on repeated over-reach):
   output is the contract — out-of-declaration writes are
   reverted before the next reviewer sees them.
 - Catches the v0.10 dogfood gap: fix_gpt edited
-  `bots/doc-align/skills/doc-verification-checklist.md`
+  `bots/docs-refresh/skills/doc-verification-checklist.md`
   (the bot's own skill) despite `bundle_self_path` excluding
   it from `doc_files`. The fixer's tool access (write_file,
   file_edit) is filesystem-wide; previous releases relied on
@@ -112,21 +112,21 @@ feedback on repeated over-reach):
 
 **v0.10.0 changes** (telemetry trailer for post-run analysis):
 - `prepare_commit` now requires the commit message to end with a
-  `Bot: doc-align` trailer line. Auto-commits become findable
-  via `git log --grep "^Bot: doc-align"`. Combined with
+  `Bot: docs-refresh` trailer line. Auto-commits become findable
+  via `git log --grep "^Bot: docs-refresh"`. Combined with
   `iterion report --run-id <id>` for per-run cost data, this
   makes both cost telemetry and revert tracking trivial:
   ```bash
-  # All doc-align auto-commits across history
-  git log --grep "^Bot: doc-align" --oneline
+  # All docs-refresh auto-commits across history
+  git log --grep "^Bot: docs-refresh" --oneline
 
-  # Reverts of doc-align commits (false-positive signal)
-  git log --grep "^Revert" --grep "Bot: doc-align" --all-match --oneline
+  # Reverts of docs-refresh commits (false-positive signal)
+  git log --grep "^Revert" --grep "Bot: docs-refresh" --all-match --oneline
   ```
 - This closes the v0.3.0 telemetry gap noted in the
   "limitations" section: we couldn't tell which fixes survived
   vs got reverted. Now you can `git log --grep` to find every
-  doc-align run's commit, then check if any of them were
+  docs-refresh run's commit, then check if any of them were
   subsequently reverted.
 
 **v0.9.0 changes** (reviewer discipline tightening):
@@ -155,7 +155,7 @@ feedback on repeated over-reach):
 - Drop `.works` from the list to audit sibling repos checked
   out under `.works/<name>/` in the same run:
   ```bash
-  iterion run bots/doc-align/ \
+  iterion run bots/docs-refresh/ \
     --var excluded_dirs=".iterion,.claude,vendor,node_modules,.git,dist,build,out" \
     --var doc_globs="README.md,CLAUDE.md,docs/**/*.md,.works/*/README.md,.works/*/docs/**/*.md"
   ```
@@ -201,7 +201,7 @@ feedback on repeated over-reach):
   with no CLI or diagnostic surface to document.
 
 **v0.5.0 changes** (inter-run audit cache):
-- `scan_docs` now reads `.iterion/doc-align/audit-cache.json`
+- `scan_docs` now reads `.iterion/docs-refresh/audit-cache.json`
   (path configurable via `--var audit_cache_path`). For each
   doc whose content sha1 AND every previously-cited code-file
   sha1 are unchanged since the last successful run, the doc is
@@ -269,7 +269,7 @@ feedback on repeated over-reach):
   `fix_gpt` so GPT reviews ride on the prompt cache — major
   cost reduction (v0.1.0 spent $7.49 on a single fresh GPT
   review of the workspace).
-- `--var bundle_self_path=bots/doc-align` excludes the bot's
+- `--var bundle_self_path=bots/docs-refresh` excludes the bot's
   own bundle from the audit footprint when running on its host
   repo.
 - `--var diff_since=<ref>` surfaces recently-changed code files
@@ -280,7 +280,7 @@ feedback on repeated over-reach):
 
 ## What it audits
 
-doc-align is **repo-agnostic** — it aligns the docs of *any* code
+docs-refresh is **repo-agnostic** — it aligns the docs of *any* code
 repository (Go, Python, Rust, TS, …) with that repo's code. Nothing
 about iterion's own layout is baked into the catalog defaults; see
 "Catalog bots are repo-agnostic" in the project CLAUDE.md.
@@ -324,24 +324,24 @@ meaningful on Cobra-CLI-shaped repos — opt in with
 
 ```bash
 # From the workspace (worktree recommended for dogfooding).
-iterion run bots/doc-align/ \
+iterion run bots/docs-refresh/ \
   --var workspace_dir=$(pwd) \
   --var doc_globs="README.md,CLAUDE.md,docs/**/*.md" \
   --var go_comment_globs="" \
   --var max_review_iterations=10 \
   --var coverage_target_pct=80
 
-# Self-host: when running doc-align on the iterion repo itself,
+# Self-host: when running docs-refresh on the iterion repo itself,
 # exclude the bot's own bundle so it doesn't try to "align" its
 # own skills/main.bot.
-iterion run bots/doc-align/ \
+iterion run bots/docs-refresh/ \
   --var workspace_dir=$(pwd) \
-  --var bundle_self_path=bots/doc-align \
+  --var bundle_self_path=bots/docs-refresh \
   ...
 
 # Incremental (e.g. nightly): focus on docs that reference
 # code changed since a ref.
-iterion run bots/doc-align/ \
+iterion run bots/docs-refresh/ \
   --var workspace_dir=$(pwd) \
   --var diff_since=main~7 \
   ...

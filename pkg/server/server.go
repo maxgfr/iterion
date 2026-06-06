@@ -1026,7 +1026,7 @@ var botRosterOrder = []string{
 	"feature_dev",         // Featurly
 	"branch_improve_loop", // Billy
 	"whole_improve_loop",  // Willy
-	"doc-align",           // Doki
+	"docs-refresh",        // Doki
 	"code_review",         // Revi
 	"sec-audit-source",    // Seki
 	"sec-audit-deps",      // Depsy

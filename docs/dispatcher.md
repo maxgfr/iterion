@@ -39,7 +39,7 @@ Built-in assignees ([source bots](../examples/)):
 | 🌍 Willy | `whole-improve-loop` | `bots/whole_improve_loop/` | Whole-codebase improvement loop with alternating cross-family verdicts |
 | 🌿 Billy | `branch-improve-loop` | `bots/branch_improve_loop/` | Branch-scoped improvement + auto-commit on convergence |
 | 🧭 Nexie | `whats-next` | `bots/whats-next/` | Repo survey → roadmap synthesis → kanban materialisation |
-| 📚 Doki | `doc-align` | `bots/doc-align/` | Detect & fix doc/code mismatches |
+| 📚 Doki | `docs-refresh` | `bots/docs-refresh/` | Detect & fix doc/code mismatches |
 | 🔎 Revi | `code-review` | `bots/code_review/` | Read-only cross-family code review; publishes findings to the board |
 | 🛡️ Seki | `sec-audit-source` | `bots/sec-audit-source/` | Source-code security audit (gitleaks/trivy/semgrep/gosec) |
 | 📦 Depsy | `sec-audit-deps` | `bots/sec-audit-deps/` | Supply-chain dep audit + LLM review |
@@ -149,14 +149,14 @@ which tickets are being worked on right now. Behaviour:
 | Run cancelled (`context.Canceled`)     | Revert state, release claim, keep workspace         |
 | Run failed (non-cancel)                | Revert state, release claim, schedule retry         |
 | Run finished cleanly (`err == nil`)    | **No revert.** The workflow has either moved the   |
-|                                        | state itself (e.g. doc-align → `review`) or the     |
+|                                        | state itself (e.g. docs-refresh → `review`) or the     |
 |                                        | operator wants to inspect it in `running_state`.    |
 | Daemon shutdown (Ctrl+C, SIGTERM)      | Revert each in-flight ticket's transition           |
 
 Every revert is **best-effort** and protected by a `RefreshStates`
 safety check: the dispatcher only flips the state back when the issue
 is still in `running_state`. If the workflow already moved it forward
-(e.g. doc-align → `review`) or the operator dragged the card on the
+(e.g. docs-refresh → `review`) or the operator dragged the card on the
 kanban mid-run, the revert is skipped so the operator's action isn't
 clobbered.
 

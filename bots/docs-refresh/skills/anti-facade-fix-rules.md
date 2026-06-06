@@ -1,6 +1,6 @@
 ---
 name: anti-facade-fix-rules
-description: Discipline rules for doc-align fixers — verify code state, cite tool output, never rewrite code, escalate on ambiguity.
+description: Discipline rules for docs-refresh fixers — verify code state, cite tool output, never rewrite code, escalate on ambiguity.
 ---
 
 # Anti-façade fix rules

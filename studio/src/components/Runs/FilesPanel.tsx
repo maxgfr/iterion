@@ -190,7 +190,7 @@ export default function FilesPanel({
             // may still be editing without having committed yet. Prompt
             // the user toward the Uncommitted tab instead of leaving
             // them on a blank "No committed changes yet" message
-            // (2026-05-21 dogfood: doc-align fix_claude edits show up
+            // (2026-05-21 dogfood: docs-refresh fix_claude edits show up
             // here under Uncommitted long before commit_changes runs at
             // the end of the workflow).
             <EmptyState

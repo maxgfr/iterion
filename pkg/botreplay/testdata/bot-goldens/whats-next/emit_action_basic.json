@@ -17,7 +17,7 @@
     "created_issues": [
       {
         "id": "iss-001",
-        "title": "Wire feature_dev, whats-next, doc-align goldens",
+        "title": "Wire feature_dev, whats-next, docs-refresh goldens",
         "horizon": "next_action",
         "assignee": "feature_dev"
       },

@@ -1,11 +1,11 @@
 ---
 name: doc-mismatch-taxonomy
-description: The 10 enum-locked kinds of doc/code mismatch the doc-align bot recognises. Required tag on every blocker.
+description: The 10 enum-locked kinds of doc/code mismatch the docs-refresh bot recognises. Required tag on every blocker.
 ---
 
 # Doc mismatch taxonomy
 
-Every blocker raised by a doc-align reviewer MUST be tagged with one
+Every blocker raised by a docs-refresh reviewer MUST be tagged with one
 of these 10 `mismatch_kind` enum values. Hallucinating a new kind
 fails schema validation and triggers iterion's parse-fallback retry
 path — you will be re-invoked until you pick a valid kind.

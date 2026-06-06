@@ -1,5 +1,5 @@
 ## ─────────────────────────────────────────────────────────────────
-## doc-align v0.2.0
+## docs-refresh v0.2.0
 ##
 ## Detects mismatches between documentation (README, docs/*.md,
 ## CLAUDE.md, bundled skills, optionally Go code comments) and the
@@ -7,11 +7,11 @@
 ## (never the code) and auto-commits on convergence.
 ##
 ## ROADMAP (operator-directed):
-##  - RENAME doc-align → "docs-refresh" (it REFRESHES docs, not only
+##  - RENAME docs-refresh → "docs-refresh" (it REFRESHES docs, not only
 ##    aligns pre-existing ones; persona stays Doki). ~40-file rename — see
 ##    the bot-validation-campaign notes for the care-points (migrate_run_
 ##    paths back-compat rule, dispatch_defaults aliases, botreplay golden
-##    dir, embed.go, the doc_align internal workflow name, peer-bot refs).
+##    dir, embed.go, the docs_refresh internal workflow name, peer-bot refs).
 ##  - DEFAULT-CREATE: when a repo has NO pre-existing documentation
 ##    structure, create a docs/ directory and author the docs there
 ##    (refresh from zero), not only edit existing files. The docs target
@@ -37,7 +37,7 @@
 ##     session (large prompt-cache benefit). v0.1.0 burned $7.49
 ##     on a single fresh-session GPT review of the workspace.
 ##  4. scan_docs auto-excludes the bot's own bundle via
-##     `bundle_self_path` var — when doc-align is run on a repo
+##     `bundle_self_path` var — when docs-refresh is run on a repo
 ##     that contains its own source, the bot won't try to
 ##     "align" its own skills/main.bot to itself.
 ##  5. Incremental mode: when `diff_since` is set, scan_docs
@@ -80,7 +80,7 @@ vars:
   ## .claude, vendor, node_modules, .git, dist, build, out) are
   ## excluded unconditionally inside the scanner; the bot's own
   ## bundle is excluded when `bundle_self_path` is set.
-  ## UNIVERSAL DEFAULT: doc-align documents ANY repo, so the default
+  ## UNIVERSAL DEFAULT: docs-refresh documents ANY repo, so the default
   ## footprint is the conventions common to most projects (root +
   ## nested READMEs, a docs/ tree, CLAUDE.md). Repo-specific doc
   ## locations (e.g. iterion's `examples/*/skills/*.md` bundle docs)
@@ -97,7 +97,7 @@ vars:
   ## UNIVERSAL DEFAULT: empty = reviewers may grep the whole
   ## workspace (minus `excluded_dirs`). A language/layout-specific
   ## scope (e.g. iterion's `pkg/**/*.go,cmd/**/*.go`) is a per-repo
-  ## --var override, never the catalog default — doc-align must run
+  ## --var override, never the catalog default — docs-refresh must run
   ## on Python / Rust / TS / Go repos identically out of the box.
   code_scope_globs: string = ""
 
@@ -118,7 +118,7 @@ vars:
 
   ## Auto-exclusion (fix 4). When non-empty, scan_docs excludes
   ## any file whose path starts with this prefix from the doc
-  ## footprint. Set to `bots/doc-align` when running doc-align
+  ## footprint. Set to `bots/docs-refresh` when running docs-refresh
   ## on the iterion repo itself; otherwise leave empty.
   bundle_self_path: string = ""
 
@@ -152,7 +152,7 @@ vars:
   ## see scan_code_surface below). That heuristic only produces
   ## meaningful output on repos shaped like that (e.g. iterion). So
   ## the catalog DEFAULT is empty = surface scan DISABLED, and
-  ## doc-align does a universal doc↔code drift audit. A CLI/DSL repo
+  ## docs-refresh does a universal doc↔code drift audit. A CLI/DSL repo
   ## opts in per-run, e.g.
   ##   --var cli_surface_globs="cmd/myapp/*.go" \
   ##   --var diagnostic_surface_globs="internal/diag/*.go"
@@ -187,7 +187,7 @@ vars:
   ## tool calls accumulate in the conversation and blow the gpt-5.5
   ## ChatGPT-forfait context window after 4-5 turns
   ## (context_length_exceeded; finding
-  ## `2026-05-24-doc-align-reviewer-gpt-context-exhaustion.md`).
+  ## `2026-05-24-docs-refresh-reviewer-gpt-context-exhaustion.md`).
   ## Bounding the chunk by DOC count caps the file surface area the
   ## reviewer is tempted to spot-check, even when the candidate
   ## count is well under max_drift_candidates.
@@ -222,23 +222,23 @@ vars:
   ## fresh audit.
   ##
   ## UNIVERSAL DEFAULT: a repo-root dotfile, NOT iterion's `.iterion/`
-  ## store dir — doc-align running on someone else's repo must not
+  ## store dir — docs-refresh running on someone else's repo must not
   ## scatter `.iterion/` paths into their tree. Add the cache file to
   ## the target repo's .gitignore (or leave empty to disable).
-  audit_cache_path: string = ".doc-align-cache.json"
+  audit_cache_path: string = ".docs-refresh-cache.json"
 
 
 ## ─── Prompts ────────────────────────────────────────────────────
 
 prompt review_system:
-  You are a rigorous documentation reviewer for the `doc-align`
+  You are a rigorous documentation reviewer for the `docs-refresh`
   workflow. Your job is to detect mismatches between project
   documentation and the actual current state of the code, and to
   produce a structured verdict.
 
   LOAD YOUR SKILLS FIRST. The workflow ships five skills under
   `.claude/skills/` describing the discipline you MUST follow:
-    - `doc-align.md` — operating playbook, the why and the
+    - `docs-refresh.md` — operating playbook, the why and the
       inviolable rules
     - `doc-mismatch-taxonomy.md` — the 11 mismatch_kind enum
       values AND the `anchor_kind` enum you must use to tag
@@ -586,7 +586,7 @@ prompt review_user_gpt:
    - escalate_to_human: true if ANY blocker has is_code_bug=true
 
 prompt fix_system:
-  You are the fixer for the `doc-align` workflow. You apply
+  You are the fixer for the `docs-refresh` workflow. You apply
   corrections to DOCUMENTATION files based on blockers a reviewer
   has identified.
 
@@ -700,9 +700,9 @@ prompt prepare_commit_system:
          period (e.g. "align CLI examples with current flags")
        - full_message: type(scope): subject — plus an optional
          body summarising what was aligned. The body MUST end
-         with the trailer line `Bot: doc-align` on its own line
+         with the trailer line `Bot: docs-refresh` on its own line
          (after a blank line). This makes auto-commits
-         identifiable via `git log --grep "^Bot: doc-align"` for
+         identifiable via `git log --grep "^Bot: docs-refresh"` for
          post-run analysis (cost telemetry, revert tracking) —
          the v0.10 telemetry hook.
        - files: exact list of repo-relative paths to stage
@@ -742,7 +742,7 @@ prompt prepare_commit_system:
              "labels": [
                "findings",
                "kind:bug",            // or drift | improvement | question
-               "source:doc_align",
+               "source:docs_refresh",
                "area:<subsystem>",
                "severity:<low|medium|high>"
              ]
@@ -755,7 +755,7 @@ prompt prepare_commit_system:
 
 prompt prepare_commit_user:
   Pick the files and produce the semantic commit name for the
-  doc alignment fixes applied during this doc-align run.
+  doc alignment fixes applied during this docs-refresh run.
 
   Workspace: {{vars.workspace_dir}}
 
@@ -782,7 +782,7 @@ schema code_surface:
 ##
 ## v0.5.0 adds `pre_verified_docs`: docs whose content AND all
 ## referenced code-file SHAs match what was recorded in
-## `.iterion/doc-align/audit-cache.json` after the previous
+## `.iterion/docs-refresh/audit-cache.json` after the previous
 ## successful run. These docs are seeded into
 ## `cumulative_audited_docs` from iter 0, lifting the coverage
 ## gate immediately for unchanged regions. Reviewers focus on
@@ -1814,8 +1814,8 @@ tool mark_issue_for_review:
 ## edit outside the fixer's declared `modified_doc_files` set.
 ##
 ## Discovered during the v0.10 dogfood: fix_gpt edited
-## `bots/doc-align/skills/doc-verification-checklist.md` —
-## doc-align's own skill — despite scan_docs excluding it via
+## `bots/docs-refresh/skills/doc-verification-checklist.md` —
+## docs-refresh's own skill — despite scan_docs excluding it via
 ## `bundle_self_path`. The fixer's tool access (write_file,
 ## file_edit) is filesystem-wide; the skill-level constraint
 ## "you may not write outside doc_files" was unenforced.
@@ -1908,7 +1908,7 @@ print(json.dumps({
 ## converges, only spend the LLM prepare_commit + commit_changes when the
 ## fixers actually changed the working tree. A review-only convergence
 ## (no drift / nothing to fix) skips straight to the audit-cache refresh +
-## done — so doc-align only pays the commit-prep turn when there is
+## done — so docs-refresh only pays the commit-prep turn when there is
 ## something to commit. Both unstaged and staged diffs are checked.
 tool detect_doc_changes:
   command: `WS={{vars.workspace_dir}} python3 -c "
@@ -1969,7 +1969,7 @@ print(json.dumps({'cache_path': str(out_path), 'entries_written': len(doc_entrie
 
 ## ─── Workflow ───────────────────────────────────────────────────
 
-workflow doc_align:
+workflow docs_refresh:
   entry: scan_docs
 
   budget:

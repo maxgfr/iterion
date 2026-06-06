@@ -6,7 +6,7 @@ description: Contract for the scan_docs tool output — agents must treat doc_fi
 # Doc scope enumeration — the immutable footprint
 
 The `scan_docs` tool node runs ONCE at the very start of a
-`doc-align` run, before any reviewer or fixer. It executes a
+`docs-refresh` run, before any reviewer or fixer. It executes a
 deterministic shell pipeline (`find` over the configured globs +
 `sha1sum` for a footprint hash) and emits:
 

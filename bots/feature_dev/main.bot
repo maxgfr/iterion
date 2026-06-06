@@ -773,7 +773,7 @@ judge reviewer_gpt:
   ## the convergence rationale. Medium is also the safe ceiling on the
   ## ChatGPT-forfait gpt-5.5 endpoint: "high" reserves enough reasoning
   ## tokens to blow the per-call cap when combined with non-trivial tool
-  ## output (mirrors doc-align's 822ec4ac). If you raise
+  ## output (mirrors docs-refresh's 822ec4ac). If you raise
   ## ITERION_VIBE_EFFORT_REVIEW above medium, watch the gpt-5.5 cap.
   reasoning_effort: "${ITERION_VIBE_EFFORT_REVIEW:-medium}"
   input: review_input

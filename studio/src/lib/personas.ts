@@ -23,7 +23,8 @@ export const BOT_IDENTITY: Record<string, BotIdentity> = {
   "feature-dev": { emoji: "🛠️", color: "text-emerald-400" },
   "branch-improve-loop": { emoji: "🌿", color: "text-violet-400" },
   "whole-improve-loop": { emoji: "🌍", color: "text-teal-400" },
-  "doc-align": { emoji: "📚", color: "text-amber-400" },
+  "docs-refresh": { emoji: "📚", color: "text-amber-400" },
+  "doc-align": { emoji: "📚", color: "text-amber-400" }, // back-compat alias (renamed 2026-06); keeps Doki's identity on pre-rename runs
   "code-review": { emoji: "🔎", color: "text-cyan-400" },
   "sec-audit-source": { emoji: "🛡️", color: "text-rose-400" },
   "sec-audit-deps": { emoji: "📦", color: "text-orange-400" },

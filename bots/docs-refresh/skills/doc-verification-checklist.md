@@ -1,6 +1,6 @@
 ---
 name: doc-verification-checklist
-description: STEP-0 preamble for doc-align reviewers — how to triage the deterministic drift manifest before voting approved=true.
+description: STEP-0 preamble for docs-refresh reviewers — how to triage the deterministic drift manifest before voting approved=true.
 ---
 
 # Doc verification checklist — reviewers' STEP-0 preamble
@@ -125,7 +125,7 @@ If either is non-empty, raise an automatic blocker with:
 - `severity: high`
 - `confidence: high`
 - `suggested_fix`: "Workflow contract violation: fixer touched
-  <files>. Revert those files; doc-align must never modify code."
+  <files>. Revert those files; docs-refresh must never modify code."
 
 ## STEP 5 — Scope-honesty check (v0.13.0)
 

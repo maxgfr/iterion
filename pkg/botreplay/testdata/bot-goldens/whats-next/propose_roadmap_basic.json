@@ -29,13 +29,13 @@
       {
         "title": "Align docs with the new test:goldens task",
         "body": "Document the golden framework in the testing guide.\n\nAcceptance: docs reference task test:goldens.",
-        "assignee": "doc-align",
+        "assignee": "docs-refresh",
         "args": {}
       }
     ],
     "next_action": [
       {
-        "title": "Wire feature_dev, whats-next, doc-align goldens",
+        "title": "Wire feature_dev, whats-next, docs-refresh goldens",
         "body": "Land the first three golden scenarios and the replay gate.\n\nAcceptance: task test:goldens green in CI.",
         "assignee": "feature_dev",
         "args": {}

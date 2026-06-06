@@ -89,7 +89,7 @@ func defaultAssigneeDispatch() map[string]dispatcher.DispatchConfig {
 	whatsNext := dispatcher.DispatchConfig{Vars: map[string]string{
 		"scope_notes": defaultBotIssuePrompt,
 	}}
-	docAlign := dispatcher.DispatchConfig{Vars: map[string]string{
+	docsRefresh := dispatcher.DispatchConfig{Vars: map[string]string{
 		"scope_notes": defaultBotIssuePrompt,
 		// v0.15.4: the bot transitions the issue out of `ready` once
 		// the run reaches a clean terminal state, so the dispatcher
@@ -118,16 +118,19 @@ func defaultAssigneeDispatch() map[string]dispatcher.DispatchConfig {
 		"branch_improve_loop": branchImproveLoop,
 		"whats-next":          whatsNext,
 		"whats_next":          whatsNext,
-		"doc-align":           docAlign,
-		"doc_align":           docAlign,
-		"sec-audit-source":    secAuditSource,
-		"sec_audit_source":    secAuditSource,
-		"sec-audit-deps":      secAuditDeps,
-		"sec_audit_deps":      secAuditDeps,
-		"secured-renovacy":    securedRenovacy,
-		"secured_renovacy":    securedRenovacy,
-		"code-review":         codeReview,
-		"code_review":         codeReview,
+		"docs-refresh":        docsRefresh,
+		"docs_refresh":        docsRefresh,
+		// back-compat aliases for the pre-rename name (doc-align -> docs-refresh, 2026-06)
+		"doc-align":        docsRefresh,
+		"doc_align":        docsRefresh,
+		"sec-audit-source": secAuditSource,
+		"sec_audit_source": secAuditSource,
+		"sec-audit-deps":   secAuditDeps,
+		"sec_audit_deps":   secAuditDeps,
+		"secured-renovacy": securedRenovacy,
+		"secured_renovacy": securedRenovacy,
+		"code-review":      codeReview,
+		"code_review":      codeReview,
 	}
 }
 
@@ -298,7 +301,8 @@ fi
 			"whole-improve-loop":  filepath.Join(botsDir, "whole-improve-loop"),
 			"branch-improve-loop": filepath.Join(botsDir, "branch-improve-loop"),
 			"whats-next":          filepath.Join(botsDir, "whats-next"),
-			"doc-align":           filepath.Join(botsDir, "doc-align"),
+			"docs-refresh":        filepath.Join(botsDir, "docs-refresh"),
+			"doc-align":           filepath.Join(botsDir, "docs-refresh"), // back-compat alias (renamed 2026-06)
 			"sec-audit-source":    filepath.Join(botsDir, "sec-audit-source"),
 			"sec-audit-deps":      filepath.Join(botsDir, "sec-audit-deps"),
 			"secured-renovacy":    filepath.Join(botsDir, "secured-renovacy"),
@@ -313,7 +317,8 @@ fi
 			"whole_improve_loop":  filepath.Join(botsDir, "whole-improve-loop"),
 			"branch_improve_loop": filepath.Join(botsDir, "branch-improve-loop"),
 			"whats_next":          filepath.Join(botsDir, "whats-next"),
-			"doc_align":           filepath.Join(botsDir, "doc-align"),
+			"docs_refresh":        filepath.Join(botsDir, "docs-refresh"),
+			"doc_align":           filepath.Join(botsDir, "docs-refresh"), // back-compat alias (renamed 2026-06)
 			"sec_audit_source":    filepath.Join(botsDir, "sec-audit-source"),
 			"sec_audit_deps":      filepath.Join(botsDir, "sec-audit-deps"),
 			"code_review":         filepath.Join(botsDir, "code-review"),

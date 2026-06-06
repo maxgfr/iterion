@@ -79,7 +79,7 @@ fan-out-and-merge of all chunks.
 | Cost per *full sweep* | ~`num_chunks` reviews, **spread across passes/runs** under the $60/2h cap | ~`num_chunks` reviews **every pass** → ~100 premium calls/pass on iterion → blows $60/2h in one pass |
 | Convergence signal | `clean_streak >= num_chunks+1` (full alternating sweep; both families participate, per-chunk dual-family accrues across sweeps — see Corrections) | `approved = AND(all chunks)` per pass |
 | Cross-run progress | Persisted cursor advances coverage across re-dispatches | N/A (can't get through one pass) |
-| Reuses repo precedent | doc-align's deterministic-prepass + chunk-aware streak | none |
+| Reuses repo precedent | docs-refresh's deterministic-prepass + chunk-aware streak | none |
 
 The decisive factor is that the literal "review per-chunk then merge into
 one consolidated review **per pass**" interpretation is **cost-infeasible
@@ -88,7 +88,7 @@ on the very workspace the acceptance criteria name as the target**: at
 `max_cost_usd`/`max_duration` budget before a single pass finishes. The
 chosen design spends the same total review effort but amortises it across
 passes (and, for very large repos, across re-dispatched runs via the
-persisted cursor), which is exactly how doc-align (issue #2) already
+persisted cursor), which is exactly how docs-refresh (issue #2) already
 makes its parallel chunking story tractable.
 
 ## Alternatives considered
@@ -117,7 +117,7 @@ Use `loop.review_loop.iteration % num_chunks` to pick the chunk.
 Rejected: the loop counter **resets every run**, so a re-dispatched run
 would re-review chunks `0..review_loop` forever and never reach a large
 repo's tail. The persisted cursor (a neutral, gitignore-able dotfile,
-same convention as doc-align's cache) makes coverage advance across runs
+same convention as docs-refresh's cache) makes coverage advance across runs
 and removes any dependency on loop-counter-vs-snapshot timing.
 
 ## Consequences
@@ -150,7 +150,7 @@ and removes any dependency on loop-counter-vs-snapshot timing.
   different packages may not be visible within a single chunk; reviewers
   may follow a specific cross-reference with read tools, but the design
   trades some whole-program visibility for tractability — the same
-  trade-off doc-align accepts.
+  trade-off docs-refresh accepts.
 - **`max_review_chunk_tokens` is the dial.** Raise it to review more per
   pass (fewer chunks, faster convergence, larger prompt); lower it for a
   smaller-context model.
@@ -258,7 +258,7 @@ with a mid-run reset.)
 2. *Persist a per-chunk clean SET keyed by content hash, stop when the
    set covers every chunk (the reviewer's "more robust variant").* This
    converges faster — a late blocker invalidates only its own chunk, not
-   the whole consecutive streak — and mirrors doc-align's anchor cache
+   the whole consecutive streak — and mirrors docs-refresh's anchor cache
    more closely. Deferred, not adopted now: it is a larger change to the
    `snapshot_chunk` planner (per-file SHAs threaded as coverage) carrying
    more bug surface for a fix that needed to land minimally and be

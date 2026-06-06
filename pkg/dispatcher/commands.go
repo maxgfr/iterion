@@ -253,7 +253,7 @@ func (c *Dispatcher) finishRun(ctx context.Context, issueID string, err error) {
 		// Successful dispatches clear any prior retry bookkeeping and
 		// honor the workspace-persist policy. We don't revert the
 		// in-progress transition — the workflow may have moved the
-		// state itself (e.g. doc-align → "review"). When the workflow
+		// state itself (e.g. docs-refresh → "review"). When the workflow
 		// did NOT move the state (most often because it lacks
 		// board.move capability — dispatcher_default is the
 		// archetypal case), an explicit move to CompletedState here
@@ -383,7 +383,7 @@ func (c *Dispatcher) stampLastRun(issueID string, r *runningEntry) {
 //   - CompletedState equals RunningState (the transition would be
 //     a no-op anyway, and trackers may reject same-state moves).
 //   - The current tracker state differs from RunningState — that's
-//     the "workflow already moved it" case (doc-align → review,
+//     the "workflow already moved it" case (docs-refresh → review,
 //     a board-aware bot picking "done", etc.); leave it alone.
 //   - Tracker rejects the transition (state not defined on the
 //     board, blocking guard, etc.) — log + leave in RunningState.

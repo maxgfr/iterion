@@ -147,7 +147,7 @@ func TestBuildSpec_FeatureDevPromptFallback(t *testing.T) {
 	}
 
 	// non-feature_dev bot → no feature_prompt injected
-	iss3 := tracker.Issue{ID: "i-fp3", Title: "T", Body: "B", Bot: "doc-align"}
+	iss3 := tracker.Issue{ID: "i-fp3", Title: "T", Body: "B", Bot: "docs-refresh"}
 	if _, ok := d.buildSpec(cfg, iss3, "r-fp3", "/tmp/ws", 0, nil).Vars["feature_prompt"]; ok {
 		t.Fatalf("feature_prompt must not be set for non-feature_dev bots")
 	}

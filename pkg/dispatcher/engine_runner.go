@@ -228,7 +228,7 @@ func (r *EngineRunner) Dispatch(ctx context.Context, spec DispatchSpec) error {
 		// Per-issue workspace becomes the runtime workDir so ${PROJECT_DIR}
 		// in bot var defaults expands to the dispatcher's isolated
 		// worktree path, not the daemon's cwd (= host repo). Without
-		// this, doc-align's `workspace_dir: "${PROJECT_DIR}"` resolved
+		// this, docs-refresh's `workspace_dir: "${PROJECT_DIR}"` resolved
 		// to the host repo and fix_claude Edit calls landed directly
 		// on the operator's working tree (2026-05-21 dogfood). The
 		// after_create hook in dispatch_defaults.go seeds the path

@@ -506,7 +506,7 @@ goai → claw-code-go migration ran for 3 hours and produced a
 ### Review loops must converge to an asymptote
 
 Every review/judge loop (feature_dev, branch_improve_loop,
-whole_improve_loop, doc-align, secured-renovacy) must **converge to an
+whole_improve_loop, docs-refresh, secured-renovacy) must **converge to an
 asymptote** — settle into a stable approved state and stop — not
 oscillate. A slight, very occasional oscillation is acceptable; it must
 be the rare exception. **The rule is the asymptote.** (`iterion bench
@@ -540,11 +540,11 @@ correct (uncommitted) artifact.
 ## Catalog bots are repo-agnostic
 
 Every bot shipped in `bots/` (the catalog `iterion bots list`
-discovers — doc-align, feature_dev, whole_improve_loop,
+discovers — docs-refresh, feature_dev, whole_improve_loop,
 branch_improve_loop, secured-renovacy, whats-next, sec-audit-*, …) is
 a **general-purpose tool that must run on ANY target repository**, in
 any language, with no knowledge of iterion's own layout baked in.
-doc-align aligns *a* repo's docs with *its* code; feature_dev ships
+docs-refresh aligns *a* repo's docs with *its* code; feature_dev ships
 *a* feature in *whatever* repo it's pointed at. iterion is just one
 possible target, never the assumed one.
 
@@ -558,7 +558,7 @@ the following are violations when they appear as **defaults**:
   a specific layout is a per-run `--var` override.
 - Output/cache paths under iterion's store — `.iterion/...`,
   `~/.iterion/...` written **into the target repo**. Use a neutral
-  repo-root dotfile (e.g. `.doc-align-cache.json`) the operator can
+  repo-root dotfile (e.g. `.docs-refresh-cache.json`) the operator can
   gitignore; never scatter `.iterion/` into someone else's tree.
 - Scanners that only produce meaningful output on iterion's shape
   (e.g. gre`p`ing for cobra `Use:` literals, `Cxxx` diagnostic codes,
@@ -566,7 +566,7 @@ the following are violations when they appear as **defaults**:
   (empty scope glob) and document them as an opt-in specialization;
   generalising their patterns to other stacks is the bar for making
   them a default.
-- Prose framing the bot AS an iterion tool ("doc-align's primary
+- Prose framing the bot AS an iterion tool ("docs-refresh's primary
   target is iterion's own documentation"). The bot's target is
   whatever repo it's run against; iterion is at most the *reference
   self-host case*.
@@ -750,7 +750,7 @@ Global flags: `--json` (machine output), `--help`
 - **Scenario executor** (`e2e/e2e_test.go`) — configurable stub with `.on(nodeID, handler)` for per-node behavior
 - Table-driven subtests with standard `testing` package
 - `task test:live` — runs E2E with real Claude/Codex CLIs (requires API keys)
-- **Bot golden replay** (`pkg/botreplay/`, `task test:goldens`, wired into `check`) — freezes a bot's LLM node output as a committed fixture under `pkg/botreplay/testdata/bot-goldens/<bot>/<scenario>.json` and re-validates it against the current schema + invariants (required-field presence, no hallucinated assignees) with no API calls. Record mode (`task test:goldens:record`, build tag `goldens_record`) hits the real LLM to (re)generate fixtures. Wired bots: feature_dev, whats-next, doc-align. See [docs/adr/008-bot-golden-replay-framework.md](docs/adr/008-bot-golden-replay-framework.md).
+- **Bot golden replay** (`pkg/botreplay/`, `task test:goldens`, wired into `check`) — freezes a bot's LLM node output as a committed fixture under `pkg/botreplay/testdata/bot-goldens/<bot>/<scenario>.json` and re-validates it against the current schema + invariants (required-field presence, no hallucinated assignees) with no API calls. Record mode (`task test:goldens:record`, build tag `goldens_record`) hits the real LLM to (re)generate fixtures. Wired bots: feature_dev, whats-next, docs-refresh. See [docs/adr/008-bot-golden-replay-framework.md](docs/adr/008-bot-golden-replay-framework.md).
 
 ### Live dogfood runs MUST be visible in the operator's studio
 

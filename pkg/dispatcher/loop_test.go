@@ -82,9 +82,9 @@ func TestBuildSpec_RoutesByBotWhenSet(t *testing.T) {
 	}
 
 	// No bot → fall back to assignee (unchanged behaviour).
-	spec = d.buildSpec(cfg, tracker.Issue{ID: "i-a", Title: "x", Assignee: "doc-align"}, "r", "/tmp/ws", 0, nil)
-	if spec.Assignee != "doc-align" {
-		t.Fatalf("assignee-only: route key = %q, want doc-align", spec.Assignee)
+	spec = d.buildSpec(cfg, tracker.Issue{ID: "i-a", Title: "x", Assignee: "docs-refresh"}, "r", "/tmp/ws", 0, nil)
+	if spec.Assignee != "docs-refresh" {
+		t.Fatalf("assignee-only: route key = %q, want docs-refresh", spec.Assignee)
 	}
 }
 
