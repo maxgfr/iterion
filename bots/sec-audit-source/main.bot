@@ -681,6 +681,7 @@ schema remediation_plan_output:
 schema select_finding_input:
   attempted:  json
   to_fix:     json
+  max:        int
 
 ## select_finding output. Pops the next finding off to_fix using a
 ## ledger of already-attempted candidate ids. has_more is the bool
@@ -3541,7 +3542,7 @@ print(json.dumps(result))
 ## `attempted` — a JSON array of strings; on first pass the loop
 ## seeds it as "[]".
 tool select_finding:
-  command: `TO_FIX={{input.to_fix}} ATTEMPTED={{input.attempted}} python3 -c "
+  command: `TO_FIX={{input.to_fix}} ATTEMPTED={{input.attempted}} MAXFIX={{input.max}} python3 -c "
 import os, json
 def fid(f):
     if not isinstance(f, dict):
@@ -3566,14 +3567,19 @@ except Exception:
     attempted = []
 if not isinstance(attempted, list):
     attempted = []
+try:
+    maxfix = int(os.environ.get('MAXFIX','10') or '10')
+except ValueError:
+    maxfix = 10
 seen = set(str(a) for a in attempted)
 finding = {}
-for f in to_fix:
-    if fid(f) not in seen:
-        finding = f
-        break
+if len(seen) < maxfix:
+    for f in to_fix:
+        if fid(f) not in seen:
+            finding = f
+            break
 remaining = sum(1 for f in to_fix if fid(f) not in seen)
-has_more = remaining > 0 and bool(finding)
+has_more = bool(finding)
 if has_more:
     seen.add(fid(finding))
     remaining = max(remaining - 1, 0)
@@ -4470,11 +4476,13 @@ workflow sec_audit_source:
   remediation_mode_gate -> prepare_branch when is_apply
   remediation_mode_gate -> select_finding when not is_apply with {
     attempted: "[]",
-    to_fix:    "{{outputs.remediation_plan.to_fix}}"
+    to_fix:    "{{outputs.remediation_plan.to_fix}}",
+    max:       "{{vars.max_fix_per_run}}"
   }
   prepare_branch -> select_finding with {
     attempted: "[]",
-    to_fix:    "{{outputs.remediation_plan.to_fix}}"
+    to_fix:    "{{outputs.remediation_plan.to_fix}}",
+    max:       "{{vars.max_fix_per_run}}"
   }
 
   ## Per-finding ladder. patch_author edits the workspace in place
@@ -4521,9 +4529,10 @@ workflow sec_audit_source:
   ## fix_loop cap (vars.max_fix_per_run) bounds the per-run patch
   ## budget. attempted carries the ledger of already-attempted
   ## finding ids so select_finding's pop is monotonic.
-  record_finding -> select_finding as fix_loop("{{vars.max_fix_per_run}}") with {
+  record_finding -> select_finding as fix_loop(500) with {
     attempted: "{{outputs.select_finding.attempted}}",
-    to_fix:    "{{outputs.remediation_plan.to_fix}}"
+    to_fix:    "{{outputs.remediation_plan.to_fix}}",
+    max:       "{{vars.max_fix_per_run}}"
   }
 
   ## ── D5b exit fan ────────────────────────────────────────────────
