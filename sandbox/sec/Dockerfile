@@ -69,6 +69,30 @@ RUN case "$(uname -m)" in \
         | tar -xz -C /usr/local/bin gitleaks \
  && chmod +x /usr/local/bin/gitleaks
 
+# ---------------------------------------------------------------------
+# Layer 4 — OPTIONAL deepsec backend (Enhancement 4 in the sec-audit
+# uplift). https://github.com/vercel-labs/deepsec. Only exercised when
+# the sec-audit-source workflow is run with --var enable_deepsec=true;
+# the tool node degrades gracefully (envelope with errors[]) if any
+# of these binaries are missing, so this layer NEVER hard-fails the
+# build and a partial install only flips the degraded flag at runtime.
+#
+# Requires Node.js 22+ (deepsec hard-requirement). Debian's apt `nodejs`
+# trails behind, so install the NodeSource Node 22 LTS deb and pin
+# deepsec via build arg. npm install -g lands the `deepsec` binary on
+# /usr/local/bin which is already on PATH for uid 1000 (devbox).
+#
+# A failure here MUST NOT break the build for users who don't want
+# deepsec — wrap in `|| echo`. The Layer 4 sanity check below records
+# whether deepsec is actually callable.
+# ---------------------------------------------------------------------
+ARG DEEPSEC_VERSION=latest
+RUN { curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+        && apt-get install -y --no-install-recommends nodejs \
+        && rm -rf /var/lib/apt/lists/* \
+        && npm install -g "deepsec@${DEEPSEC_VERSION}" ; } \
+    || echo "deepsec Layer 4 setup did not complete — run_deepsec_scanner will degrade gracefully (enable_deepsec=true users should rebuild with a Node 22+ base or pre-install deepsec)."
+
 # Numeric UID (not the `devbox` name) on the final stage so the image
 # runs under platforms that forbid non-numeric / root-capable users
 # (OpenShift `restricted` SCC, k8s `runAsNonRoot`). uid 1000 == devbox.
@@ -77,10 +101,18 @@ WORKDIR /workspace
 
 # Build-time sanity check — fail the build rather than ship an image
 # that silently lacks a scanner (the exact façade this image prevents).
+# deepsec is intentionally NOT in the hard-fail list: it is the only
+# optional scanner and the run_deepsec_scanner tool degrades gracefully
+# when it is absent. A presence probe is logged for the image audit
+# trail without affecting the build exit code.
 RUN semgrep --version \
  && gosec --version \
  && govulncheck -version \
  && bandit --version \
  && pip-audit --version \
  && trivy --version \
- && gitleaks version
+ && gitleaks version \
+ && { command -v deepsec >/dev/null 2>&1 \
+        && deepsec --version \
+        && echo "deepsec: present (optional, only used when enable_deepsec=true)" \
+        || echo "deepsec: ABSENT — enable_deepsec=true runs will degrade with an unavailable-reason envelope"; }

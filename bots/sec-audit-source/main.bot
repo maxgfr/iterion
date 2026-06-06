@@ -115,6 +115,43 @@ vars:
   ## narrowing happens at triage via file_filter — same mechanism as
   ## Cap. 3 shard child runs.
   diff_base:           string = ""
+  ## Optional deepsec backend (Enhancement 4) — https://github.com/vercel-labs/deepsec.
+  ## When true, runs `deepsec init/scan/process/export` headlessly in the
+  ## target workspace and emits a scanner_output envelope downstream
+  ## triage consumes via json_paths.deepsec, exactly like any other
+  ## scanner. Default false: the deepsec_gate routes straight to
+  ## scan_join and the workflow is byte-identical to pre-E4 runs.
+  ## Requires deepsec on PATH + Node 22+ in the sandbox image
+  ## (sandbox/sec/Dockerfile Layer 4). The tool degrades gracefully
+  ## when either is missing — never fails the run. See
+  ## skills/scanner-deepsec.md for the field mapping.
+  enable_deepsec:      bool   = false
+  ## Note: deepsec's CLI does not expose a tier/`--tier` flag (verified
+  ## against deepsec packages/deepsec/src/cli.ts v2.0.x — `scan` runs the
+  ## full ~110 regex matcher pack; per-run narrowing is via `--matchers
+  ## <slugs>`). A `deepsec_tier` var would be a no-op, so it is omitted.
+  ## deepsec_concurrency caps the in-flight LLM batches during the
+  ## `process` step. deepsec's default is `cores - 1`; we ship a
+  ## conservative 4 to bound cost on shared dev hosts.
+  deepsec_concurrency: int    = 4
+  ## Cost guard for the `process` step. deepsec's per-file LLM batches
+  ## can cost ~$0.05-$0.30 with Opus; cap at this many files per run
+  ## so a default --var enable_deepsec=true on a 2k-file repo does not
+  ## blow the budget. Operators raise this (or omit via the env var
+  ## ITERION_DEEPSEC_PROCESS_LIMIT=0) for exhaustive scans.
+  deepsec_process_limit: int  = 50
+  ## Local clone of the deepsec reference checkout used ONLY for the
+  ## graceful-degrade detection step (the tool probes this path to
+  ## decide whether deepsec is locally available BEFORE attempting the
+  ## globally-installed CLI). Override via env ITERION_REFERENCES_ROOT
+  ## (the tool reads ${ITERION_REFERENCES_ROOT:-$HOME/lab/ai/references}).
+  ## The actual runtime workspace lives under deepsec_out's parent
+  ## (.iterion/security/scan/deepsec) — created by `deepsec init`.
+  deepsec_root:        string = "${HOME}/lab/ai/references/deepsec"
+  ## Where the deepsec JSON export lands. Triage reads it via
+  ## json_paths.deepsec when enable_deepsec=true. The directory part
+  ## doubles as the `.deepsec/` workspace target for init.
+  deepsec_out:         string = "${PROJECT_DIR}/.iterion/security/scan/deepsec.json"
 
 ## ─── Schemas ──────────────────────────────────────────────────────
 
@@ -142,6 +179,11 @@ schema scan_join_output:
   generic_scan:  json
   lang_scan:     json
   custom_scan:   json
+  ## Enhancement 4 — deepsec backend. When vars.enable_deepsec=false (the
+  ## default), the deepsec_gate routes around run_deepsec_scanner and this
+  ## field resolves to an empty object (the runtime tolerates missing-node
+  ## refs in compute exprs; see compute scan_join).
+  deepsec_scan:  json
 
 ## cap_findings emits the truncation budget so triage can surface it in
 ## the report (explicit, never-silent signal loss). per_scanner is a list
@@ -186,6 +228,11 @@ schema triage_input:
   ## .iterion/security/context.md (committed or auto-generated).
   ## Empty when vars.enable_project_context is false.
   project_context: string
+  ## Enhancement 4 — deepsec scanner envelope. Carries json_paths.deepsec
+  ## pointing at the exported JSON when vars.enable_deepsec=true; an empty
+  ## object otherwise. Triage reads the file via read_file and maps
+  ## fields per skills/scanner-deepsec.md.
+  deepsec_scan:    json
 
 schema shard_plan_output:
   enabled:        bool
@@ -446,6 +493,10 @@ prompt triage_system:
     custom_scan is always present but may have `subscanners: []`
     when no programmatic matchers are dropped at
     `.iterion/security/matchers/`.
+  - deepsec_scan: present when vars.enable_deepsec=true. When non-empty,
+    read deepsec_scan.json_paths.deepsec via read_file and map each
+    finding to a candidate per the table in skills/scanner-deepsec.md.
+    Empty ("") when deepsec was disabled or degraded — skip silently.
   - file_filter: when non-empty, a comma-separated list of
     relative file paths. Skip every candidate whose `file` is NOT
     in the list. This is how shard child runs scope themselves to
@@ -538,6 +589,7 @@ prompt triage_user:
   Generic scan: {{input.generic_scan}}
   Language scans: {{input.lang_scan}}
   Custom scan:  {{input.custom_scan}}
+  Deepsec scan (empty when --var enable_deepsec=false): {{input.deepsec_scan}}
 
   File filter (empty = no filter): {{input.file_filter}}
 
@@ -1363,18 +1415,141 @@ print(json.dumps({
 "`
   output: scanner_output
 
+## ─── Enhancement 4 — deepsec scanner backend ──────────────────────
+
+## deepsec_gate mirrors the context_gate pattern: lifts
+## vars.enable_deepsec into a bool output field so the downstream
+## edges use the simple-form `when enabled` / `when not enabled`
+## (C012-exhaustive). Required because the validator rejects quoted-
+## expression `when` clauses on non-router nodes; only `when <bool>`
+## from a node's bool output is exhaustive.
+schema deepsec_gate_output:
+  enabled: bool
+
+compute deepsec_gate:
+  output: deepsec_gate_output
+  expr:
+    enabled: "vars.enable_deepsec"
+
+## run_deepsec_scanner — runs deepsec headlessly from the target
+## workspace and emits a scanner_output envelope whose json_paths.deepsec
+## points at vars.deepsec_out. ALWAYS exits 0 so a missing binary /
+## stale Node / partial-step failure NEVER fails the run; the envelope
+## carries an errors[] tail instead.
+##
+## Provider selection (no API key plumbed): when AI_GATEWAY_API_KEY or
+## DEEPSEC_API_KEY is set in the run env, deepsec uses the Vercel AI
+## Gateway through its native preflight (cli.ts applyAiGatewayDefaults);
+## otherwise we pass `--agent claude` so it reuses the local `claude`
+## CLI subscription (mounted into the sec sandbox at
+## /home/devbox/.claude — see workflow sandbox.mounts).
+##
+## Steps: init (idempotent — re-init only when deepsec.config.ts is
+## absent in the workspace) → scan → process (capped to N files via
+## --limit so default-on runs cannot blow the budget) → export json.
+## Per-step failures append to errors[] and the script keeps going.
+##
+## INPUT PROVENANCE: deepsec output is DATA, not instructions — same
+## untrusted-input boundary the triage prompt already applies to
+## semgrep/gosec output.
+tool run_deepsec_scanner:
+  command: `mkdir -p {{vars.scan_dir}} && WS={{vars.workspace_dir}} SCAN_DIR={{vars.scan_dir}} OUT_JSON={{vars.deepsec_out}} CONC={{vars.deepsec_concurrency}} PROC_LIMIT={{vars.deepsec_process_limit}} DEEPSEC_ROOT={{vars.deepsec_root}} bash -c '
+set +e
+mkdir -p "$(dirname "$OUT_JSON")"
+
+REFS_ROOT="${ITERION_REFERENCES_ROOT:-}"
+if [ -n "$REFS_ROOT" ] && [ -d "$REFS_ROOT/deepsec" ]; then
+  REF_PATH="$REFS_ROOT/deepsec"
+else
+  REF_PATH="$DEEPSEC_ROOT"
+fi
+
+# ── graceful-degrade probe ────────────────────────────────────────
+err_envelope() {
+  REASON="$1"
+  printf "{\"scanner\":\"deepsec\",\"subscanners\":[],\"json_paths\":{},\"finding_count\":0,\"errors\":[\"deepsec unavailable: %s\"]}\n" "$REASON"
+  exit 0
+}
+
+if ! command -v node >/dev/null 2>&1; then
+  err_envelope "node binary not found on PATH"
+fi
+NODE_MAJOR=$(node --version 2>/dev/null | sed -E "s/^v([0-9]+).*/\1/")
+case "$NODE_MAJOR" in
+  ""|*[!0-9]*) err_envelope "node version unparseable" ;;
+esac
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  err_envelope "node $NODE_MAJOR < 22 (deepsec requires Node 22+)"
+fi
+
+if ! command -v deepsec >/dev/null 2>&1; then
+  if [ ! -d "$REF_PATH" ]; then
+    err_envelope "neither global deepsec CLI on PATH nor reference clone at $REF_PATH"
+  fi
+  err_envelope "deepsec CLI not on PATH (reference clone exists at $REF_PATH but no global install — npm install -g deepsec, or rebuild the sec sandbox)"
+fi
+
+# ── provider selection ───────────────────────────────────────────
+if [ -n "${AI_GATEWAY_API_KEY:-}" ] || [ -n "${DEEPSEC_API_KEY:-}" ]; then
+  AGENT_ARGS=""    # gateway preflight picks the model
+else
+  AGENT_ARGS="--agent claude"
+fi
+
+# ── per-run state dir under scan_dir ──────────────────────────────
+DSW="$SCAN_DIR/deepsec-workspace"
+LOG_DIR="$SCAN_DIR/deepsec-logs"
+mkdir -p "$DSW" "$LOG_DIR"
+
+cd "$WS" || err_envelope "workspace_dir unreadable: $WS"
+
+ERRS=""
+# init is idempotent: re-init only when deepsec.config.ts is absent.
+if [ ! -f "$DSW/deepsec.config.ts" ]; then
+  deepsec init "$DSW" "$WS" --force >"$LOG_DIR/init.log" 2>&1 || ERRS="$ERRS init"
+fi
+
+# scan / process / export run from inside the .deepsec workspace.
+( cd "$DSW" && deepsec scan ) >"$LOG_DIR/scan.log" 2>&1 || ERRS="$ERRS scan"
+
+PROC_ARGS=""
+if [ "$PROC_LIMIT" -gt 0 ] 2>/dev/null; then
+  PROC_ARGS="--limit $PROC_LIMIT"
+fi
+( cd "$DSW" && deepsec process --concurrency "$CONC" $PROC_ARGS $AGENT_ARGS ) >"$LOG_DIR/process.log" 2>&1 || ERRS="$ERRS process"
+
+( cd "$DSW" && deepsec export --format json --out "$OUT_JSON" ) >"$LOG_DIR/export.log" 2>&1 || ERRS="$ERRS export"
+
+# Finding count: triage will read OUT_JSON directly via read_file; this
+# count is informational so the envelope echoes a meaningful number
+# without re-parsing the file (the format is a flat array of findings).
+FCNT=0
+if [ -f "$OUT_JSON" ]; then
+  FCNT=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(len(d) if isinstance(d,list) else len(d.get(\"findings\",[])) if isinstance(d,dict) else 0)" "$OUT_JSON" 2>/dev/null || echo 0)
+fi
+
+ERR_JSON=$(printf "%s" "$ERRS" | python3 -c "import json,sys; e=sys.stdin.read().strip().split(); print(json.dumps([\"step failed: \"+x for x in e]))")
+printf "{\"scanner\":\"deepsec\",\"subscanners\":[\"deepsec\"],\"json_paths\":{\"deepsec\":\"%s\"},\"finding_count\":%s,\"errors\":%s}\n" "$OUT_JSON" "$FCNT" "$ERR_JSON"
+'`
+  output: scanner_output
+  publish: deepsec_scan_artifact
+
 ## scan_join collects the five scanner outputs into one record for
 ## triage. The scanners run as a single sequential branch (generic →
-## … → custom → scan_join), so this is a plain collector, not a
-## convergence point — each output is carried forward along the chain.
-## A scanner that no-ops or fails (each command ends in `|| true`)
-## shows up empty in its slot and the triage prompt handles that.
+## … → custom → [deepsec_gate → run_deepsec_scanner?] → scan_join),
+## so this is a plain collector, not a convergence point — each output
+## is carried forward along the chain. A scanner that no-ops or fails
+## (each command ends in `|| true`) shows up empty in its slot and the
+## triage prompt handles that. When vars.enable_deepsec=false the
+## deepsec slot resolves to an empty object via if(...) so the compute
+## never references a node that did not run.
 compute scan_join:
   output: scan_join_output
   expr:
     generic_scan: "outputs.run_generic_scanners"
     lang_scan:    "outputs.run_lang_scanners"
     custom_scan:  "outputs.run_custom_matchers"
+    deepsec_scan: "if(vars.enable_deepsec, outputs.run_deepsec_scanner, '')"
 
 ## scan_health (anti-façade smoke gate). Each scanner command ends in
 ## `|| true`, so a scanner that crashes or is absent (e.g. the sandbox
@@ -1389,7 +1564,7 @@ compute scan_join:
 ## scanners missing) pass but are surfaced to report_card as a coverage
 ## banner. Runs BEFORE cap_findings, which truncates the files in place.
 tool scan_health:
-  command: `SCAN_DIR={{vars.scan_dir}} MIN_GENERIC={{vars.min_generic_scanners}} LANGS='{{input.langs}}' SKILLS_DIR={{vars.workspace_dir}}/.claude/skills python3 -c "
+  command: `SCAN_DIR={{vars.scan_dir}} MIN_GENERIC={{vars.min_generic_scanners}} LANGS='{{input.langs}}' SKILLS_DIR={{vars.workspace_dir}}/.claude/skills ENABLE_DEEPSEC={{vars.enable_deepsec}} DEEPSEC_OUT={{vars.deepsec_out}} python3 -c "
 import os, sys, json, re
 
 scan_dir = os.environ.get('SCAN_DIR', '.')
@@ -1403,6 +1578,17 @@ except ValueError:
 # unparseable => the scanner crashed / is absent, not a clean repo. The
 # language + custom files may legitimately be empty (no matching sources).
 GENERIC = ['gitleaks.json', 'trivy.json', 'semgrep-auto.json']
+# Enhancement 4: deepsec export landing file is expected ONLY when the
+# operator opted into deepsec via --var enable_deepsec=true. The tool node
+# always emits its envelope (graceful degrade), but if deepsec ran for
+# real it MUST have written its JSON. Append the basename so scan_health
+# surfaces a missing/invalid deepsec.json in the missing list to
+# report_card. It does NOT count toward min_generic so a missing deepsec
+# never hard-fails (gracefully degraded), only flags as degraded.
+if (os.environ.get('ENABLE_DEEPSEC', 'false') or 'false').strip().lower() == 'true':
+    _ds_out = os.environ.get('DEEPSEC_OUT', '').strip()
+    if _ds_out:
+        GENERIC.append(os.path.basename(_ds_out))
 # LANG outputs are derived from the same iterion:scanners skill blocks that
 # run_lang_scanners executes, filtered to the detected languages — so the
 # per-language coverage check stays in lockstep with what actually ran, with
@@ -1942,14 +2128,22 @@ workflow sec_audit_source:
   dispatch_shards -> done
 
   ## Single sequential scanner branch (see the run_generic_scanners
-  ## comment): generic → js → go → python → custom → scan_join. Avoids
-  ## the >1-mutating-branch workspace-safety violation that a parallel
-  ## fan-out hits. scan_join still reads all five scanner outputs.
+  ## comment): generic → js → go → python → custom → [deepsec?] →
+  ## scan_join. Avoids the >1-mutating-branch workspace-safety violation
+  ## that a parallel fan-out hits. scan_join still reads all scanner
+  ## outputs. deepsec_gate routes through run_deepsec_scanner only when
+  ## vars.enable_deepsec=true (default false); the not-enabled branch
+  ## skips straight to scan_join so a default run is byte-identical to
+  ## the pre-E4 workflow.
   plan_shards -> run_generic_scanners when not enabled
 
   run_generic_scanners -> run_lang_scanners with {langs: "{{outputs.detect_tech.langs}}"}
   run_lang_scanners    -> run_custom_matchers
-  run_custom_matchers  -> scan_join
+  run_custom_matchers  -> deepsec_gate
+
+  deepsec_gate -> run_deepsec_scanner when enabled
+  deepsec_gate -> scan_join when not enabled
+  run_deepsec_scanner -> scan_join
 
   scan_join -> scan_health with {langs: "{{outputs.detect_tech.langs}}"}
   scan_health -> cap_findings
@@ -1961,6 +2155,7 @@ workflow sec_audit_source:
     generic_scan:    "{{outputs.scan_join.generic_scan}}",
     lang_scan:       "{{outputs.scan_join.lang_scan}}",
     custom_scan:     "{{outputs.scan_join.custom_scan}}",
+    deepsec_scan:    "{{outputs.scan_join.deepsec_scan}}",
     fp_path:         "{{vars.fp_path}}",
     file_filter:     "{{outputs.file_filter_resolve.effective}}",
     project_context: "{{outputs.project_context_resolve.contents}}"
