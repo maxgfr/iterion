@@ -1,21 +1,21 @@
 ## ─────────────────────────────────────────────────────────────────
-## docs-refresh v0.2.0
+## docs-refresh v0.3.0
 ##
-## Detects mismatches between documentation (README, docs/*.md,
-## CLAUDE.md, bundled skills, optionally Go code comments) and the
-## actual current state of the code, then fixes the DOCUMENTATION
-## (never the code) and auto-commits on convergence.
+## Refreshes a repo's documentation against the actual current state of
+## the code: detects mismatches between docs (README, docs/*.md,
+## CLAUDE.md, bundled skills, optionally Go code comments) and the code,
+## fixes the DOCUMENTATION (never the code), and auto-commits on
+## convergence. When a repo has NO docs yet, it bootstraps an initial
+## set first (see DEFAULT-CREATE below).
 ##
-## ROADMAP (operator-directed):
-##  - RENAME docs-refresh → "docs-refresh" (it REFRESHES docs, not only
-##    aligns pre-existing ones; persona stays Doki). ~40-file rename — see
-##    the bot-validation-campaign notes for the care-points (migrate_run_
-##    paths back-compat rule, dispatch_defaults aliases, botreplay golden
-##    dir, embed.go, the docs_refresh internal workflow name, peer-bot refs).
-##  - DEFAULT-CREATE: when a repo has NO pre-existing documentation
-##    structure, create a docs/ directory and author the docs there
-##    (refresh from zero), not only edit existing files. The docs target
-##    dir must be a launch-configurable var, DEFAULT "docs".
+## v0.3.0 — DEFAULT-CREATE (operator-directed): when scan_docs finds
+## ZERO documentation files in scope, the `author_docs` node creates the
+## docs directory (`docs_dir` var, DEFAULT "docs") and authors an
+## initial documentation set from the code; the run then loops back
+## through scan_docs (author_rescan) and the normal review/refresh loop
+## polishes + commits it. So docs-refresh refreshes from zero, not only
+## edits pre-existing files. (The earlier doc-align → docs-refresh
+## rename — operator-directed alongside this — is also complete.)
 ##
 ## v0.2.0 fixes 7 issues uncovered by the v0.1.0 dogfood run on
 ## this repo:
@@ -226,6 +226,17 @@ vars:
   ## scatter `.iterion/` paths into their tree. Add the cache file to
   ## the target repo's .gitignore (or leave empty to disable).
   audit_cache_path: string = ".docs-refresh-cache.json"
+
+  ## DEFAULT-CREATE (v0.3.0): when scan_docs finds ZERO documentation
+  ## files in scope (a repo with no docs yet), the `author_docs` node
+  ## creates this directory and authors an initial documentation set
+  ## there from the code; the run then re-scans and the normal review/
+  ## refresh loop polishes + commits it. Repo-relative; DEFAULT "docs"
+  ## (the universal convention, already covered by the default doc_globs
+  ## entry "docs/**/*.md"). Override per-run with `--var docs_dir=<dir>`;
+  ## if you point it OUTSIDE the default doc_globs, widen doc_globs too
+  ## so the post-authoring re-scan picks the new docs up.
+  docs_dir: string = "docs"
 
 
 ## ─── Prompts ────────────────────────────────────────────────────
@@ -670,6 +681,64 @@ prompt fix_user:
    - pushback_justification: explanation
 
 
+## ─── Prompts : Default-create (author docs from zero) ──────────────
+
+prompt author_docs_system:
+  You are the doc author for the `docs-refresh` workflow, invoked on a
+  repository that currently has NO documentation in scope. Your job is
+  to BOOTSTRAP an initial documentation set by reading the code and
+  writing accurate Markdown, so the run's normal review/refresh loop has
+  something real to polish.
+
+  Load the `docs-refresh.md` skill for the operating context.
+
+  WHAT TO CREATE:
+   - Create the docs directory (`{{input.docs_dir}}`) if it does not
+     exist, and author your documentation there as `.md` files.
+   - Author or refresh a top-level `README.md` if the repo has none — a
+     short overview that links into `{{input.docs_dir}}/`.
+   - Cover, at minimum: a project overview (what it is / what it does),
+     how to build & run it, the high-level architecture or module map,
+     and how to use the main entry points. Add further pages only where
+     the code clearly warrants them — do not pad.
+
+  HARD CONSTRAINTS:
+   1. Documentation only — write `.md` files. NEVER modify source code,
+      build files, or configuration.
+   2. EVIDENCE OVER INVENTION. Every statement must reflect what the
+      code actually does. Read the relevant files before describing
+      them; never document aspirational or assumed behaviour. If you
+      cannot verify a claim, omit it rather than guess.
+   3. STACK-AGNOSTIC. This repo may be in ANY language. Detect the
+      language / build system from the repo itself (manifest files,
+      entry points, lockfiles) — never assume a particular ecosystem.
+   4. Do NOT commit. A later step commits on convergence.
+
+prompt author_docs_user:
+  Author initial documentation for the repository at
+  {{input.workspace_dir}}.
+
+  Target docs directory (create if absent): {{input.docs_dir}}
+
+  Recently changed code files (a hint, may be empty — non-authoritative):
+  {{input.recently_changed_code_files}}
+
+  Steps:
+   1. Survey the repository to understand its purpose, language/stack,
+      structure, and entry points (read manifest files, top-level
+      directories, and the main entry file(s)).
+   2. Create `{{input.docs_dir}}/` if needed and author the initial
+      `.md` pages described in your system prompt, each grounded in what
+      you read. Author/refresh a root `README.md` overview if missing.
+   3. Keep each page focused and accurate; cross-link the pages.
+
+  Output fields:
+   - docs_created: true if you created at least one doc file
+   - created_doc_files: repo-relative paths you wrote
+   - summary: what you authored, and the evidence (files you read)
+     behind the key claims
+
+
 ## ─── Prompts : Commit ──────────────────────────────────────────
 
 prompt prepare_commit_system:
@@ -681,7 +750,13 @@ prompt prepare_commit_system:
 
   Procedure (in order):
    1. Run `git status` and `git diff HEAD` (read-only) to
-      enumerate working-tree changes.
+      enumerate working-tree changes. `git status` ALSO lists NEW,
+      untracked doc files (shown as `??`) — e.g. the initial set
+      authored on a from-zero refresh of a repo that had no docs.
+      INCLUDE those new `.md` files in the commit set. A brand-new
+      file shows nothing under `git diff HEAD -- <file>` (it is not in
+      HEAD yet), so confirm a new file by READING it, not by diffing —
+      do not drop a new doc just because its diff is empty.
    2. Cross-reference with the scanner footprint (visible in your
       conversation history). The commit set must be a subset of
       that footprint, plus any Go file whose comments were edited
@@ -790,6 +865,11 @@ schema code_surface:
 schema scan_output:
   doc_files: string[]
   doc_count: int
+  ## DEFAULT-CREATE gate (v0.3.0): true when doc_count == 0 (no docs in
+  ## scope). Routes scan_docs -> author_docs (bootstrap an initial doc
+  ## set) instead of straight into the review loop. After authoring, the
+  ## run re-scans; no_docs is then false and the normal path runs.
+  no_docs: bool
   footprint_hash: string
   scope_globs: string[]
   recently_changed_code_files: string[]
@@ -928,6 +1008,21 @@ schema fix_output:
   code_files_touched: string[]
   pushback: string[]
   pushback_justification: string
+
+## DEFAULT-CREATE (v0.3.0) schemas. author_docs bootstraps an initial
+## documentation set when a repo has none. Its OUTPUT is observational
+## only: the run re-scans the filesystem afterward (scan_docs re-globs),
+## so nothing downstream consumes these fields — the schema exists to
+## make the node DSL-valid and to surface what was authored in reports.
+schema author_input:
+  workspace_dir: string
+  docs_dir: string
+  recently_changed_code_files: string[]
+
+schema author_output:
+  docs_created: bool
+  created_doc_files: string[]
+  summary: string
 
 ## Commit-phase schemas.
 schema commit_output:
@@ -1173,7 +1268,7 @@ if cache_path:
                 misses += 1
     except (FileNotFoundError, json.JSONDecodeError):
         pass
-print(json.dumps({'doc_files': files, 'doc_count': len(files), 'footprint_hash': h, 'scope_globs': globs, 'recently_changed_code_files': recent, 'bundle_self_path': bundle_self, 'pre_verified_docs': pre_verified, 'cache_hits': hits, 'cache_misses': misses}))
+print(json.dumps({'doc_files': files, 'doc_count': len(files), 'no_docs': len(files) == 0, 'footprint_hash': h, 'scope_globs': globs, 'recently_changed_code_files': recent, 'bundle_self_path': bundle_self, 'pre_verified_docs': pre_verified, 'cache_hits': hits, 'cache_misses': misses}))
 "`
   output: scan_output
 
@@ -1746,6 +1841,25 @@ agent fix_gpt:
   interaction: human
 
 
+## ─── Nodes : Default-create (author docs from zero) ─────────────
+
+## DEFAULT-CREATE (v0.3.0): when scan_docs reports no_docs, this node
+## bootstraps an initial documentation set from the code, then the run
+## re-scans (author_rescan loop) so the normal review/refresh loop
+## polishes + commits it. claude_code so it has the full native toolset
+## to read the repo and write files; one-shot fresh session.
+agent author_docs:
+  backend: "claude_code"
+  model: "${ITERION_DOC_ALIGN_MODEL_CLAUDE:-claude-opus-4-8}"
+  reasoning_effort: "${ITERION_DOC_ALIGN_EFFORT_CLAUDE:-max}"
+  input: author_input
+  output: author_output
+  system: author_docs_system
+  user: author_docs_user
+  session: fresh
+  interaction: human
+
+
 ## ─── Nodes : Commit ─────────────────────────────────────────────
 
 agent prepare_commit:
@@ -1911,12 +2025,19 @@ print(json.dumps({
 ## done — so docs-refresh only pays the commit-prep turn when there is
 ## something to commit. Both unstaged and staged diffs are checked.
 tool detect_doc_changes:
-  command: `WS={{vars.workspace_dir}} python3 -c "
+  command: `WS={{vars.workspace_dir}} CACHE={{vars.audit_cache_path}} python3 -c "
 import os, subprocess, json
 os.chdir(os.environ['WS'])
-r1 = subprocess.run(['git', 'diff', '--quiet']).returncode
-r2 = subprocess.run(['git', 'diff', '--cached', '--quiet']).returncode
-print(json.dumps({'has_changes': (r1 != 0 or r2 != 0)}))
+cache = os.environ.get('CACHE', '').strip()
+# git status --porcelain reports BOTH tracked modifications AND untracked
+# files (?? lines). Plain 'git diff' misses untracked — which is exactly
+# the DEFAULT-CREATE case (author_docs writes brand-new, never-added .md
+# files), so the commit step must still fire. Exclude the audit cache
+# (written later / not a doc) so a stale cache file is not mistaken for
+# doc work on a re-run.
+lines = subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True).stdout.splitlines()
+sig = [l for l in lines if l.strip() and not (cache and l[3:].strip() == cache)]
+print(json.dumps({'has_changes': len(sig) > 0}))
 "`
   output: detect_changes_output
 
@@ -1981,7 +2102,20 @@ workflow docs_refresh:
     threshold: 0.9
     preserve_recent: 8
 
-  scan_docs -> scan_code_surface
+  ## DEFAULT-CREATE (v0.3.0): if the repo has ZERO docs in scope,
+  ## bootstrap an initial set first (author_docs), then loop back to
+  ## scan_docs (author_rescan) so the re-scan picks the new docs up and
+  ## the normal review/refresh loop polishes + commits them. Otherwise
+  ## go straight to the review path. author_rescan(1) = exactly one
+  ## authoring pass; if it still produces nothing in scope the bounded
+  ## loop fails loudly (resumable) rather than spinning.
+  scan_docs -> author_docs when no_docs with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    docs_dir: "{{vars.docs_dir}}",
+    recently_changed_code_files: "{{outputs.scan_docs.recently_changed_code_files}}"
+  }
+  scan_docs -> scan_code_surface when not no_docs
+  author_docs -> scan_docs as author_rescan(1)
 
   ## v0.15.0: build_manifest runs after scan_code_surface (initial)
   ## AND after every enforce_fix_scope (loop re-entry), so the
