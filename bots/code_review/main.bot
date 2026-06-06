@@ -323,7 +323,32 @@ schema emit_output:
   issues_created: string[]
   failed_issues: string[]
 
+schema diff_precheck_output:
+  is_empty: bool
+  changed_files: int
+
 ## ─── Nodes ──────────────────────────────────────────────────────
+
+## EFFICIENCY guard (deterministic, no LLM): compute the review diff
+## (working tree vs the merge-base of base_ref + HEAD — the same diff the
+## reviewers audit). If it is empty there is nothing to review, so
+## short-circuit past both LLM reviewers + emit and finish fast. Only skips
+## when the merge-base resolves AND the diff is empty; on any ambiguity
+## (e.g. base_ref absent) it runs the reviewers — never wrongly skips a
+## real review.
+tool diff_precheck:
+  command: `WS={{vars.workspace_dir}} BASE={{vars.base_ref}} python3 -c "
+import os, subprocess, json
+os.chdir(os.environ['WS'])
+base = os.environ.get('BASE', 'main')
+mb = subprocess.run(['git', 'merge-base', base, 'HEAD'], capture_output=True, text=True).stdout.strip()
+if not mb:
+    print(json.dumps({'is_empty': False, 'changed_files': -1})); raise SystemExit(0)
+out = subprocess.run(['git', 'diff', '--name-only', mb], capture_output=True, text=True).stdout.strip()
+files = [f for f in out.splitlines() if f.strip()]
+print(json.dumps({'is_empty': len(files) == 0, 'changed_files': len(files)}))
+"`
+  output: diff_precheck_output
 
 router fan:
   mode: fan_out_all
@@ -377,7 +402,7 @@ agent emit:
 ## ─── Workflow ───────────────────────────────────────────────────
 
 workflow code_review:
-  entry: fan
+  entry: diff_precheck
 
   budget:
     ## Two read-only reviewer branches run in parallel; emit runs alone
@@ -385,6 +410,10 @@ workflow code_review:
     max_parallel_branches: 2
     max_duration: "45m"
     max_cost_usd: 20
+
+  ## EFFICIENCY: an empty review diff skips both LLM reviewers + emit.
+  diff_precheck -> fan when not is_empty
+  diff_precheck -> done when is_empty
 
   ## Fan out to both family reviewers.
   fan -> reviewer_claude
