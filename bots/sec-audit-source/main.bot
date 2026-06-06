@@ -1867,7 +1867,7 @@ print(json.dumps({'listing': listing}))
   output: inventory_output
 
 agent detect_tech:
-  backend: "claw"
+  backend: "${ITERION_SEC_AUDIT_BACKEND:-claw}"
   model: "${ITERION_SEC_AUDIT_MODEL:-openai/gpt-5.5}"
   reasoning_effort: "${ITERION_SEC_AUDIT_EFFORT_DETECT:-medium}"
   output: tech_output
@@ -2726,7 +2726,7 @@ print(json.dumps({
   output: findings_budget_output
 
 agent triage:
-  backend: "claw"
+  backend: "${ITERION_SEC_AUDIT_BACKEND:-claw}"
   model: "${ITERION_SEC_AUDIT_MODEL:-openai/gpt-5.5}"
   reasoning_effort: "${ITERION_SEC_AUDIT_EFFORT_TRIAGE:-high}"
   input: triage_input
@@ -2873,7 +2873,7 @@ router fan_voters:
   mode: fan_out_all
 
 judge voter_v1:
-  backend: "claw"
+  backend: "${ITERION_SEC_AUDIT_BACKEND:-claw}"
   model: "${ITERION_SEC_AUDIT_VOTER_V1_MODEL:-openai/gpt-5.5}"
   reasoning_effort: "${ITERION_SEC_AUDIT_EFFORT_VOTER:-high}"
   input: voter_input
@@ -2903,7 +2903,7 @@ judge voter_v2:
   readonly: true
 
 judge voter_v3:
-  backend: "claw"
+  backend: "${ITERION_SEC_AUDIT_BACKEND:-claw}"
   model: "${ITERION_SEC_AUDIT_VOTER_V3_MODEL:-openai/gpt-5.5}"
   reasoning_effort: "${ITERION_SEC_AUDIT_EFFORT_VOTER:-high}"
   input: voter_input
