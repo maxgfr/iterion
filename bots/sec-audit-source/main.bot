@@ -2863,14 +2863,16 @@ print(json.dumps({
 ## ONLY mutator in this subgraph is fp_append, downstream of the
 ## majority converge — preserves the one-mutating-branch rule.
 ##
-## To scale to 5 voters: declare voter_v4 / voter_v5 here, add
-## `fan_voters -> voter_vN with {voter_id: "vN", ...}` edges below,
-## add `voter_vN -> majority_verdict` edges, raise confirm_threshold
-## to 3 (still simple majority), and add V4/V5 env vars to the
-## majority_verdict command.
-
-router fan_voters:
-  mode: fan_out_all
+## To scale to 5 voters: declare voter_v4 / voter_v5 here, extend the
+## sequential chain (voter_v3 -> voter_v4 -> voter_v5 -> majority_verdict)
+## with the same with{} mapping, raise confirm_threshold to 3, and add
+## V4/V5 env vars to the majority_verdict command.
+##
+## NOTE: voters run SEQUENTIALLY (not via a fan_out_all router) so their
+## outputs keep normal node keys (outputs.voter_vN) that majority_verdict
+## interpolates in its command — fan_out_all branch outputs
+## (branch_<router>_<node>/<node>) do NOT resolve in a tool command.
+## Independence is enforced by the prompt, not by parallelism.
 
 judge voter_v1:
   backend: "${ITERION_SEC_AUDIT_BACKEND:-claw}"
@@ -4297,33 +4299,30 @@ workflow sec_audit_source:
   }
 
   ## Enhancement 2 — N-vote adversarial revalidation.
-  ## filter_cached_files fans out to a fixed pool of 3 voters via the
-  ## `fan_voters` fan_out_all router; each voter is an INDEPENDENT
-  ## read-only judge whose verdict feeds the deterministic
-  ## majority_verdict tool (await: best_effort — one crashed voter
-  ## does not abort the workflow). majority_verdict then routes
-  ## conditionally to fp_append (when its has_fp_appends bool field is
-  ## true) before converging on merge_with_cache, which unifies the
-  ## majority output with the cache-replay verdicts for report_card.
-  ## See bots/code-review/main.bot:353-401 for the canonical
-  ## fan_out_all → wait_all converge pattern this mirrors.
-  filter_cached_files -> fan_voters
-
-  fan_voters -> voter_v1 with {
+  ## SEQUENTIAL voter chain (not a fan_out_all router): each voter is an
+  ## INDEPENDENT read-only judge that analyses the SAME fresh candidates
+  ## and emits its own verdict. They run in series so their outputs keep
+  ## normal node keys (outputs.voter_v1/v2/v3) that the downstream
+  ## majority_verdict tool interpolates in its command — fan_out_all
+  ## branch outputs (branch_<router>_<node>/<node>) do NOT resolve in a
+  ## tool command. Independence is enforced by the prompt (voters never
+  ## read each other), not by parallelism. candidates + project context
+  ## come from earlier nodes, so each voter receives identical input.
+  filter_cached_files -> voter_v1 with {
     voter_id:        "v1",
     candidates:      "{{outputs.filter_cached_files.fresh_candidates}}",
     workspace_dir:   "{{vars.workspace_dir}}",
     fp_path:         "{{vars.fp_path}}",
     project_context: "{{outputs.project_context_resolve.contents}}"
   }
-  fan_voters -> voter_v2 with {
+  voter_v1 -> voter_v2 with {
     voter_id:        "v2",
     candidates:      "{{outputs.filter_cached_files.fresh_candidates}}",
     workspace_dir:   "{{vars.workspace_dir}}",
     fp_path:         "{{vars.fp_path}}",
     project_context: "{{outputs.project_context_resolve.contents}}"
   }
-  fan_voters -> voter_v3 with {
+  voter_v2 -> voter_v3 with {
     voter_id:        "v3",
     candidates:      "{{outputs.filter_cached_files.fresh_candidates}}",
     workspace_dir:   "{{vars.workspace_dir}}",
@@ -4332,10 +4331,8 @@ workflow sec_audit_source:
   }
 
   ## Converge: majority_verdict reads outputs.voter_v1/v2/v3.verdicts
-  ## directly via template interpolation in its command (no edge data
-  ## mapping needed). await: best_effort tolerates a voter crash.
-  voter_v1 -> majority_verdict
-  voter_v2 -> majority_verdict
+  ## directly via template interpolation in its command (all three ran
+  ## upstream in the chain, so the keys resolve).
   voter_v3 -> majority_verdict
 
   ## Conditional split on the bool field has_fp_appends (C012-exhaustive
