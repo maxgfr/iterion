@@ -71,6 +71,13 @@ type Entry struct {
 	// The studio uses it to gate manifest editing — only bundles have a
 	// manifest.yaml to write.
 	IsBundleDir bool `json:"is_bundle,omitempty" yaml:"is_bundle,omitempty"`
+
+	// RelPath is Path made workspace-relative (slash form), set by List
+	// only when ListOptions.Workdir is given and Path is inside it. The
+	// studio uses it to open a bot's main.bot without reconstructing the
+	// relative path from the absolute one. Empty when no workdir is known
+	// or the bot lives outside it.
+	RelPath string `json:"rel_path,omitempty" yaml:"rel_path,omitempty"`
 }
 
 // IsBundle reports whether the entry came from a .botz bundle (Path
@@ -127,8 +134,9 @@ func List(opts ListOptions) ([]Entry, error) {
 	}
 	// Compose the workspace overlay over each bot's manifest `enabled`
 	// default so Entry.Enabled is the resolved catalog-visibility
-	// decision. Disabled bots are still returned (the studio shows them
-	// to flip back on); only catalog generation + auto-dispatch filter.
+	// decision, and fill RelPath. Disabled bots are still returned (the
+	// studio shows them to flip back on); only catalog generation +
+	// auto-dispatch filter.
 	if opts.Workdir != "" {
 		ov, err := LoadOverrides(opts.Workdir)
 		if err != nil {
@@ -136,10 +144,29 @@ func List(opts ListOptions) ([]Entry, error) {
 		}
 		for i := range entries {
 			entries[i].Enabled = ResolveEnabled(entries[i].Name, entries[i].Enabled, ov)
+			if rel, relErr := filepath.Rel(opts.Workdir, entries[i].Path); relErr == nil && !strings.HasPrefix(rel, "..") {
+				entries[i].RelPath = filepath.ToSlash(rel)
+			}
 		}
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 	return entries, nil
+}
+
+// WorkdirFromPaths recovers the workspace root from a set of discovery
+// paths produced by DefaultPaths (i.e. the parent of a `bots`,
+// `examples`, or `.botz` root). Returns "" for custom path sets with no
+// recognised root — callers then fall back to manifest-default behaviour
+// (no overlay). Lets the dispatcher's RoutingRunner apply the workspace
+// overlay without threading an explicit workdir through its Config.
+func WorkdirFromPaths(paths []string) string {
+	for _, p := range paths {
+		switch filepath.Base(p) {
+		case "bots", "examples", ".botz":
+			return filepath.Dir(p)
+		}
+	}
+	return ""
 }
 
 // ResolveBotPath looks up a bot by name across paths and returns the

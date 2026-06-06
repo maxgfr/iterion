@@ -20,6 +20,10 @@ export interface BotEntry {
   display_name?: string;
   description?: string;
   path: string;
+  /** Path made workspace-relative by the server (slash form), when a
+   *  workspace root is known. The studio opens `<rel_path>/main.bot`
+   *  directly instead of reconstructing it from the absolute `path`. */
+  rel_path?: string;
   triggers?: string[];
   capabilities?: string[];
   /** Orchestrator-facing "use when" guidance (manifest when_to_use) that

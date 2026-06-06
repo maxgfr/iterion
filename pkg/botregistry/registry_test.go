@@ -157,3 +157,41 @@ func TestEntry_MainFile(t *testing.T) {
 		t.Errorf("loose MainFile = %q", got)
 	}
 }
+
+func TestWorkdirFromPaths(t *testing.T) {
+	cases := []struct {
+		in   []string
+		want string
+	}{
+		{[]string{"/w/bots", "/w/examples", "/w/.botz"}, "/w"},
+		{[]string{"/w/examples"}, "/w"},
+		{[]string{"/some/custom/dir"}, ""}, // base not a recognised discovery root
+		{nil, ""},
+	}
+	for _, c := range cases {
+		if got := WorkdirFromPaths(c.in); got != c.want {
+			t.Errorf("WorkdirFromPaths(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestList_SetsRelPath(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bots", "b1", "manifest.yaml"), "name: b1\n")
+	writeFile(t, filepath.Join(dir, "bots", "b1", "main.bot"), "agent x:\n  model: \"test\"\n")
+	entries, err := List(ListOptions{Paths: DefaultPaths(dir), Workdir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries", len(entries))
+	}
+	if entries[0].RelPath != "bots/b1" {
+		t.Errorf("RelPath = %q, want bots/b1", entries[0].RelPath)
+	}
+	// Without a workdir, RelPath stays empty.
+	bare, _ := List(ListOptions{Paths: DefaultPaths(dir)})
+	if bare[0].RelPath != "" {
+		t.Errorf("RelPath without workdir = %q, want empty", bare[0].RelPath)
+	}
+}

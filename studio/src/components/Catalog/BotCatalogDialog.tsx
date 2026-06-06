@@ -8,18 +8,11 @@ import { useBotsStore } from "@/store/bots";
 import { useTabsStore } from "@/store/tabs";
 import { useUIStore } from "@/store/ui";
 
-// bundleMainRelPath turns a discovered bundle's absolute Path into the
-// workspace-relative `<root>/<dir>/main.bot` the editor's openFile
-// expects. Returns null when the path doesn't sit under a known
-// discovery root (then the Edit affordance is disabled).
-function bundleMainRelPath(botPath: string): string | null {
-  const norm = botPath.replace(/\/+$/, "");
-  for (const root of ["/bots/", "/examples/", "/.botz/"]) {
-    const idx = norm.lastIndexOf(root);
-    if (idx >= 0) return `${norm.slice(idx + 1)}/main.bot`;
-  }
-  if (!norm.startsWith("/")) return `${norm}/main.bot`; // already relative
-  return null;
+// bundleMainRel returns the workspace-relative main.bot path the editor's
+// openFile expects, using the server-provided rel_path. Null when the bot
+// isn't an editable bundle or the server couldn't relativise it.
+function bundleMainRel(b: BotEntryWithSchema): string | null {
+  return b.is_bundle && b.rel_path ? `${b.rel_path}/main.bot` : null;
 }
 
 /**
@@ -71,7 +64,7 @@ export function BotCatalogDialog({
   };
 
   const onEdit = (b: BotEntryWithSchema) => {
-    const rel = b.is_bundle ? bundleMainRelPath(b.path) : null;
+    const rel = bundleMainRel(b);
     if (!rel) return;
     useTabsStore.getState().openTab("editor", { file: rel });
     setActiveTab("bot");
@@ -101,7 +94,7 @@ export function BotCatalogDialog({
             const enabled = b.enabled !== false;
             const identity = botIdentity(b.name);
             const label = b.display_name?.trim();
-            const canEdit = b.is_bundle && bundleMainRelPath(b.path) !== null;
+            const canEdit = bundleMainRel(b) !== null;
             return (
               <li
                 key={b.name}

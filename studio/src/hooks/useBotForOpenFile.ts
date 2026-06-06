@@ -5,16 +5,12 @@ import { useBotsStore } from "@/store/bots";
 import { useDocumentStore } from "@/store/document";
 
 // matchesBundleMain reports whether the open file is `<bundle>/main.bot`
-// for the given bot. It compares the bundle directory's basename so it
-// tolerates the abs/relative mismatch between the registry's Entry.path
-// (server-absolute) and the editor's currentFilePath (workspace-relative).
+// for the given bot, by exact match against the server-provided
+// workspace-relative path (Entry.rel_path) — the same form the editor
+// opens (currentFilePath is workspace-relative).
 function matchesBundleMain(filePath: string, bot: BotEntryWithSchema): boolean {
-  if (!bot.is_bundle) return false;
-  const suffix = "/main.bot";
-  if (!filePath.endsWith(suffix)) return false;
-  const botDir = bot.path.replace(/\/+$/, "").split("/").pop() ?? "";
-  const fileDir = filePath.slice(0, filePath.length - suffix.length).split("/").pop() ?? "";
-  return botDir !== "" && botDir === fileDir;
+  if (!bot.is_bundle || !bot.rel_path) return false;
+  return filePath === `${bot.rel_path}/main.bot`;
 }
 
 /**

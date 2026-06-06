@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/SocialGouv/iterion/pkg/botregistry"
 )
 
 func writeDispatcherBot(t *testing.T, path, content string) {
@@ -256,6 +258,40 @@ func TestRoutingRunnerDynamicResolvesEnabledBot(t *testing.T) {
 	}
 	if !dyn.close {
 		t.Error("dynamic runner not closed")
+	}
+}
+
+// TestRoutingRunnerDynamicHonorsOverlay pins that dynamic routing applies
+// the workspace overlay (derived from the bots paths), so a bot disabled
+// from the Catalog manager is not auto-routed and a manifest-disabled bot
+// re-enabled by the overlay IS — matching what Nexie sees.
+func TestRoutingRunnerDynamicHonorsOverlay(t *testing.T) {
+	dir := t.TempDir()
+	botsDir := filepath.Join(dir, "bots")
+	stub := "agent x:\n  model: \"test\"\n"
+	writeDispatcherBot(t, filepath.Join(botsDir, "customy", "manifest.yaml"), "name: customy\n") // manifest default = enabled
+	writeDispatcherBot(t, filepath.Join(botsDir, "customy", "main.bot"), stub)
+	writeDispatcherBot(t, filepath.Join(botsDir, "offy", "manifest.yaml"), "name: offy\nenabled: false\n")
+	writeDispatcherBot(t, filepath.Join(botsDir, "offy", "main.bot"), stub)
+
+	no, yes := false, true
+	if err := botregistry.SetOverlayEnabled(dir, "customy", &no); err != nil {
+		t.Fatal(err)
+	}
+	if err := botregistry.SetOverlayEnabled(dir, "offy", &yes); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := &RoutingRunner{
+		Default:   &recordingRunner{name: "default"},
+		BotsPaths: []string{botsDir},
+		compile:   func(string) (Runner, error) { return &recordingRunner{name: "dyn"}, nil },
+	}
+	if rr.HasRoute("customy") {
+		t.Error("overlay-disabled bot must not be routable")
+	}
+	if !rr.HasRoute("offy") {
+		t.Error("overlay re-enabled (manifest-disabled) bot must be routable")
 	}
 }
 

@@ -107,19 +107,19 @@ func (r *RoutingRunner) routeFor(key string) (Runner, bool) {
 // autonomous dispatch). Does NOT compile — cheap enough for the actor's
 // pre-claim HasRoute guard.
 //
-// Enablement here is the bot's MANIFEST default; the workspace overlay
-// (.iterion/bot-overrides.yaml) is intentionally NOT applied, because the
-// dispatcher Config has no single workspace root to read it from (file
-// config, studio-embedded, and zero-config resolve it differently). This
-// is acceptable: the overlay's job is upstream catalog visibility — Nexie
-// won't assign an overlay-disabled bot — and an operator who needs a
-// hard, dispatch-time gate sets the manifest `enabled: false`. Plumbing
-// the overlay through the dispatcher is a tracked follow-up.
+// Enablement is the resolved value: the manifest `enabled` default
+// composed with the workspace overlay (.iterion/bot-overrides.yaml). The
+// workspace root is recovered from the discovery paths
+// (WorkdirFromPaths), so a bot disabled OR re-enabled from the studio
+// Catalog manager is honoured at dispatch time, matching what Nexie sees.
 func (r *RoutingRunner) resolveDynamicPath(key string) (string, bool) {
 	if r == nil || len(r.BotsPaths) == 0 || key == "" {
 		return "", false
 	}
-	entries, err := botregistry.List(botregistry.ListOptions{Paths: r.BotsPaths})
+	entries, err := botregistry.List(botregistry.ListOptions{
+		Paths:   r.BotsPaths,
+		Workdir: botregistry.WorkdirFromPaths(r.BotsPaths),
+	})
 	if err != nil {
 		return "", false
 	}
