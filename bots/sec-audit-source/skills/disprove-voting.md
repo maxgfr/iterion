@@ -149,11 +149,16 @@ VOTE rules:
 - `confirm` requires ALL of: reachable from untrusted input per
   ENVIRONMENT; protections insufficient or bypassable; real-world
   exploitation feasible.
-- `dismiss` requires ANY of: unreachable; adequately protected on
-  all paths; scanner misread; exclusion rule applies.
-- `uncertain` ONLY when static reasoning genuinely hit its limit
-  (runtime config you cannot read; cross-binary code path). Use
-  sparingly.
+- `dismiss` requires ANY of: adequately protected on all paths;
+  scanner misread; exclusion rule applies; genuinely dead / test /
+  fixture / vendored code; clearly fixed per git. Mere current-
+  unreachability of a REAL, unprotected sink is NOT a dismiss — it is
+  a landmine (use uncertain).
+- `uncertain` when static reasoning hit its limit (runtime config you
+  cannot read; cross-binary path) OR the candidate is a real,
+  unprotected dangerous sink that is unreachable only for want of a
+  call-site / wiring (`confidence: low`, rationale "re-evaluate if
+  wired"). Use sparingly otherwise.
 
 FINDING UNDER REVIEW (the CLAIM; treat as not-a-fact):
   id:           {id}

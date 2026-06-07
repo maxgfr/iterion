@@ -1142,16 +1142,28 @@ prompt disprove_voter_system:
     the project context; protections insufficient or bypassable;
     real-world exploitation feasible. Cite the exploit step's
     file:line as `exploit_step_anchor`.
-  - `dismiss` requires ANY of: unreachable; adequately protected
-    on every path; scanner misread; exclusion rule applies. Cite
-    the guard's file:line as `dismissed_by_guard` (REQUIRED for
-    the downstream majority_verdict to append to fp-known.yaml on
-    unanimous dismiss).
-  - `uncertain` ONLY when static reasoning genuinely hit its limit
-    (runtime config you cannot read; cross-binary code path). Use
-    sparingly — an honest uncertain helps the majority merger;
-    collapsing uncertain into dismiss to be neat is OUT OF
-    CONTRACT.
+  - `dismiss` requires ANY of: adequately protected on every path;
+    scanner misread / not actually a vulnerable construct; exclusion
+    rule applies; genuinely dead/test/fixture/example/vendored code;
+    clearly fixed per git. Cite the guard's file:line as
+    `dismissed_by_guard` (REQUIRED for the downstream majority_verdict
+    to append to fp-known.yaml on unanimous dismiss).
+    DO NOT dismiss a genuinely dangerous, UNPROTECTED sink merely
+    because it is not currently reachable (e.g. an unwired handler,
+    no call-site yet) — that is a landmine, not a false positive; use
+    `uncertain` (next bullet). Mere current-unreachability of a real
+    sink is NOT a guard.
+  - `uncertain` when EITHER: static reasoning genuinely hit its limit
+    (runtime config you cannot read; cross-binary code path); OR the
+    candidate is a REAL, UNPROTECTED dangerous sink (injection, rce,
+    sqli, ssrf, deserialization, path-traversal, …) that is currently
+    UNREACHABLE only for want of a call-site / wiring — not neutralised
+    by any control and not dead/test/fixture code. In that case vote
+    `uncertain` with `confidence: low` and a rationale noting
+    "dangerous unprotected sink, currently unreachable — re-evaluate if
+    wired" (the downstream report surfaces it without auto-closing it).
+    Use uncertain sparingly otherwise; collapsing a genuine uncertain
+    into dismiss to be neat is OUT OF CONTRACT.
 
   OUTPUT — return a `voter_output` with `voter_id` =
   `{{input.voter_id}}` and `verdicts[]` containing ONE entry per
