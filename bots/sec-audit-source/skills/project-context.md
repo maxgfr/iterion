@@ -121,6 +121,17 @@ The file is committable, so a hostile or careless rewrite is
 reviewable in PR. The bot does NOT re-validate the body's
 content; review is the operator's job.
 
+## Secret hygiene
+
+Because context.md is committable, the generator MUST NOT copy
+credential VALUES into it. Secrets encountered while reading
+configs / dotfiles (API keys, tokens, passwords, private keys,
+DSN passwords) are referenced by name + location with the value
+written as `[REDACTED]`, and recorded under "Known false-positive
+patterns" as a risk to rotate — never reproduced. This keeps the
+context file from becoming a *second* committed leak (and from
+Seki flagging its own output, the C-007 self-finding).
+
 ## Operator workflows
 
 ### Steer the next run via a one-line edit

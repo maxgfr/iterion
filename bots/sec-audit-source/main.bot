@@ -1411,6 +1411,15 @@ prompt project_context_generate_system:
     docker-compose, k8s), one auth/middleware file per detected
     framework. The inventory in the user message already lists
     manifests.
+  - SECRETS — context.md is a COMMITTABLE file: NEVER copy a credential
+    VALUE into it. If you encounter API keys, tokens, passwords, private
+    keys, or connection strings with passwords while reading configs /
+    dotfiles, refer to them by name + location ONLY ("AWS key committed
+    in config.env") and write the value as `[REDACTED]`. Reproducing a
+    secret here just leaks it into a SECOND committed file — and Seki
+    would then flag its own context.md. Record a committed secret under
+    "Known false-positive patterns" as a real risk to rotate/remove,
+    without echoing the value.
 
 prompt project_context_generate_user:
   Workspace:       {{input.workspace_dir}}
