@@ -800,51 +800,45 @@ func forwardableProviderEnv() map[string]string {
 	return env
 }
 
-// mcpDotToUnderscore returns the claude_code-style FQN alias for a
-// dot-delimited MCP tool name ("mcp.server.tool" → "mcp__server__tool")
-// or "" when the input is not an MCP tool. Used by the claw launcher
-// + Registry.Resolve so a prompt that names tools in either convention
-// resolves under either backend.
-func mcpDotToUnderscore(name string) string {
-	const prefix = "mcp."
-	if !strings.HasPrefix(name, prefix) {
-		return ""
+// canonicalMCPToolName maps an MCP tool name the model emitted in the
+// claude_code FQN convention ("mcp__server__tool") to the sanitized
+// single-underscore form ("mcp_server_tool") that iterion advertises to
+// the provider (see (*tool.ToolDef).sanitizedName, which turns the
+// dot-delimited qualified name into underscores). Names without the
+// "mcp__" FQN prefix are returned unchanged.
+//
+// Bot prompts name board/MCP tools in the double-underscore form for
+// cross-backend parity with claude_code, but every claw dispatch path
+// advertises them sanitized — so the model's call can arrive in either
+// spelling. Normalising at lookup time lets both dispatch. The collapse
+// is unambiguous: a sanitized key never contains "__" (qualified-name
+// dots each become a single "_"), so reducing "__"→"_" only ever maps an
+// FQN onto its registered key, never onto a different tool.
+func canonicalMCPToolName(name string) string {
+	const fqnPrefix = "mcp__"
+	if !strings.HasPrefix(name, fqnPrefix) {
+		return name
 	}
-	body := name[len(prefix):]
-	// Find LAST dot so tool names with embedded dots (none today, but
-	// don't break on them) split server/tool the same way Resolve does.
-	idx := strings.LastIndex(body, ".")
-	if idx <= 0 {
-		return ""
-	}
-	server := body[:idx]
-	tool := body[idx+1:]
-	if server == "" || tool == "" {
-		return ""
-	}
-	return "mcp__" + server + "__" + tool
+	return strings.ReplaceAll(name, "__", "_")
 }
 
 func (b *ClawBackend) multiplexerHandler(ctx context.Context, task delegate.Task) delegate.MultiplexerHandler {
 	// Index ToolDefs by name once so OnToolCall is O(1) instead of
-	// scanning the slice on each runner-initiated tool_call. MCP tools
-	// also get a claude_code-style FQN alias ("mcp__server__tool" →
-	// same ToolDef as "mcp.server.tool") so a bot prompt written for
-	// claude_code calls land here regardless of which backend is
-	// resolved. Without the alias, claw's strict ToolDefs check
-	// rejects the call before iterion's Registry.Resolve (which has
-	// the same normalisation) ever sees it.
-	toolByName := make(map[string]delegate.ToolDef, len(task.ToolDefs)*2)
+	// scanning the slice on each runner-initiated tool_call.
+	toolByName := make(map[string]delegate.ToolDef, len(task.ToolDefs))
 	for _, td := range task.ToolDefs {
 		toolByName[td.Name] = td
-		if alias := mcpDotToUnderscore(td.Name); alias != "" {
-			toolByName[alias] = td
-		}
 	}
 	hostRunID, hostStore := runtimeContextFrom(ctx)
 	return delegate.MultiplexerHandler{
 		OnToolCall: func(toolCtx context.Context, name string, input json.RawMessage) (string, error) {
+			// The runner forwards the model's tool name verbatim, which
+			// may be the claude_code double-underscore FQN even though
+			// ToolDefs are keyed by the sanitized name; bridge the two.
 			td, ok := toolByName[name]
+			if !ok {
+				td, ok = toolByName[canonicalMCPToolName(name)]
+			}
 			if !ok {
 				return "", fmt.Errorf("launcher: tool %q not in task.ToolDefs (runner asked for an unknown tool)", name)
 			}
