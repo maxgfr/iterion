@@ -2492,6 +2492,17 @@ if [ ! -f "$DSW/deepsec.config.ts" ]; then
   deepsec init "$DSW" "$WS" --force >"$LOG_DIR/init.log" 2>&1 || ERRS="$ERRS init"
 fi
 
+# The scaffolded deepsec.config.ts imports from "deepsec/config". Resolve
+# it OFFLINE by linking the globally-installed deepsec into the workspace
+# node_modules -- instead of a per-run pnpm install of ~150 packages
+# (slow, egress-bound, and the scaffold pins pnpm@9.x which self-bootstraps
+# and hangs). 0.2s vs minutes, and works with the sandbox allowlist closed.
+GLOBAL_NM="$(npm root -g 2>/dev/null)"
+if [ -n "$GLOBAL_NM" ] && [ -d "$GLOBAL_NM/deepsec" ]; then
+  mkdir -p "$DSW/node_modules"
+  ln -sfn "$GLOBAL_NM/deepsec" "$DSW/node_modules/deepsec"
+fi
+
 # scan / process / export run from inside the .deepsec workspace.
 ( cd "$DSW" && deepsec scan ) >"$LOG_DIR/scan.log" 2>&1 || ERRS="$ERRS scan"
 
