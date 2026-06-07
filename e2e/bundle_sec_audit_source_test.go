@@ -9,11 +9,13 @@ import (
 )
 
 // expectedSecAuditSourceNodes lists the node IDs the sec-audit-source
-// bundle must expose. Drift on a node *name* surfaces here. See
-// bots/sec-audit-source/main.bot and its README for the pipeline:
+// bundle must expose. Drift on a node *name* surfaces here. The
+// detection → N-vote verdict → report backbone (see
+// bots/sec-audit-source/main.bot):
 //
-//	detect_tech → scan_fanout → run_*_scanners → scan_join → triage
-//	  → revalidate → report_card → done
+//	detect_tech → run_*_scanners → scan_join → scan_health → cap_findings
+//	  → triage → filter_cached_files → voter_v1/v2/v3 → majority_verdict
+//	  → merge_with_cache → report_card → update_file_records → remediate_gate
 var expectedSecAuditSourceNodes = []string{
 	"detect_tech",
 	"run_generic_scanners",
@@ -34,10 +36,19 @@ var expectedSecAuditSourceNodes = []string{
 	"triage",
 	// Cap1 FileRecords: see skills/file-records.md
 	"filter_cached_files",
-	"revalidate",
-	"merge_verdicts",
+	// N-vote adversarial revalidation (Seki uplift, 2026-06): three disprove
+	// voters feed majority_verdict — together they replaced the single
+	// revalidate node, and merge_with_cache replaced merge_verdicts.
+	"voter_v1",
+	"voter_v2",
+	"voter_v3",
+	"majority_verdict",
+	"merge_with_cache",
 	"report_card",
 	"update_file_records",
+	// remediate_gate: entry to the optional verified-remediation phase
+	// (Seki uplift) — always on the main path; the phase beyond it is gated.
+	"remediate_gate",
 }
 
 // TestBundle_SecAuditSource_PackOpenCompile exercises the full bundle
