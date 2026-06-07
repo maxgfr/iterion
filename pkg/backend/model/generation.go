@@ -411,6 +411,13 @@ func executeToolsDirect(
 	for _, tu := range toolUses {
 		gt, ok := toolMap[tu.Name]
 		if !ok {
+			// A bot prompt may name an MCP/board tool in the claude_code
+			// double-underscore FQN convention ("mcp__server__tool") while
+			// the claw in-process loop advertises it sanitized
+			// ("mcp_server_tool"); bridge the two so the call dispatches.
+			gt, ok = toolMap[canonicalMCPToolName(tu.Name)]
+		}
+		if !ok {
 			results = append(results, api.ToolResult{
 				ToolUseID: tu.ID,
 				Content:   fmt.Sprintf("unknown tool: %s", tu.Name),

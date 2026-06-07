@@ -422,6 +422,60 @@ func TestGenerateTextDirect_ToolLoop(t *testing.T) {
 	}
 }
 
+// TestGenerateTextDirect_MCPToolNameNormalization verifies that an MCP
+// tool registered under its sanitized single-underscore name
+// ("mcp_iterion_board_assign_issue") still dispatches when the model
+// emits the claude_code double-underscore FQN convention
+// ("mcp__iterion_board__assign_issue"). Bot prompts name board/MCP tools
+// in the double-underscore form for cross-backend parity, but the claw
+// in-process loop advertises them sanitized — the lookup must bridge the
+// two. Regression test for the whats-next assign_to_bots "unknown tool:
+// mcp__iterion_board__assign_issue" failure.
+func TestGenerateTextDirect_MCPToolNameNormalization(t *testing.T) {
+	client := newMockClient(
+		toolUseEvents("tu_1", "mcp__iterion_board__assign_issue", `{"id":"abc","bot":"featurly"}`, 100, 30),
+		textEvents("done", 150, 25),
+	)
+
+	var executed bool
+	boardTool := GenerationTool{
+		// Registered under the sanitized name, exactly as
+		// (*tool.ToolDef).sanitizedName produces for "mcp.iterion_board.assign_issue".
+		Name:        "mcp_iterion_board_assign_issue",
+		Description: "Assign an issue to a bot",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"bot":{"type":"string"}}}`),
+		Execute: func(_ context.Context, _ json.RawMessage) (string, error) {
+			executed = true
+			return "assigned", nil
+		},
+	}
+
+	result, err := GenerateTextDirect(context.Background(), client, GenerationOptions{
+		Model: "claude-sonnet-4-6",
+		Tools: []GenerationTool{boardTool},
+		Messages: []api.Message{
+			{Role: "user", Content: []api.ContentBlock{{Type: "text", Text: "assign it"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !executed {
+		t.Fatal("board tool Execute did not run — the double-underscore FQN was not bridged to the sanitized registration name (regression: unknown tool)")
+	}
+	if result.Text != "done" {
+		t.Errorf("Text = %q, want %q", result.Text, "done")
+	}
+	// The emitted call name is recorded verbatim (we faithfully drove the
+	// double-underscore path), and the bridge resolved it.
+	if len(result.Steps) == 0 || len(result.Steps[0].ToolCalls) != 1 {
+		t.Fatalf("Steps[0].ToolCalls = %v, want exactly 1 call", result.Steps)
+	}
+	if got := result.Steps[0].ToolCalls[0].Name; got != "mcp__iterion_board__assign_issue" {
+		t.Errorf("ToolCalls[0].Name = %q, want the emitted double-underscore FQN", got)
+	}
+}
+
 func TestGenerateTextDirect_MaxSteps(t *testing.T) {
 	// Model always calls a tool — should be limited by MaxSteps.
 	scripts := make([][]api.StreamEvent, 5)
