@@ -56,6 +56,13 @@ func (s *Service) reconcileSandboxContainers() {
 // dogfood run is live in the same store) cannot kill it. This is safer
 // than — and independent of — the status check, which can't see a status
 // that is mid-write or briefly unreadable.
+//
+// CROSS-STORE: LockRun/LoadRun key on this store's root and ignore the
+// tenant ctx, so a run living under a DIFFERENT project/store root (a CLI
+// run dogfooding in another project) is invisible to the lock probe. For
+// that case the LoadRun-failure branch below is the backstop: a record
+// absent from this store is treated as "not ours, don't touch", never as a
+// reapable orphan — so a cross-project live run is never reaped either.
 func (s *Service) sandboxContainerReapable(ctx context.Context, runID string) bool {
 	if runID == "" {
 		return true // managed container with no run owner → orphan
@@ -67,7 +74,18 @@ func (s *Service) sandboxContainerReapable(ctx context.Context, runID string) bo
 	}
 	r, loadErr := s.store.LoadRun(ctx, runID)
 	if loadErr != nil {
-		return true // owner gone + record unreadable → orphan
+		// The run record is absent from THIS store. LoadRun and LockRun key
+		// on this store's root and ignore the tenant ctx (pkg/store), so a
+		// container whose run lives under a different project/store root lands
+		// here — most commonly a concurrent `iterion run` dogfooding in
+		// another project while the studio bounces under watchexec. This
+		// service is not that run's authority and cannot see its lock, so
+		// reaping would kill a live cross-project run mid-flight (observed:
+		// scanner / voter nodes dying with "No such container" + exit 137).
+		// Leave it: its own owner reaps it on exit, and a genuinely-dead
+		// container is cleanable via `docker container prune`. Favour leaking
+		// a container over killing a live run.
+		return false
 	}
 	switch r.Status {
 	case store.RunStatusRunning, store.RunStatusPausedWaitingHuman:

@@ -46,9 +46,12 @@ func TestSandboxContainerReapable_NeverReapsLiveRun(t *testing.T) {
 	if !svc.sandboxContainerReapable(ctx, "") {
 		t.Error("empty runID should be reapable (orphan with no owner)")
 	}
-	// Missing run record (unlocked + LoadRun error) → reapable.
-	if !svc.sandboxContainerReapable(ctx, "ghost-run") {
-		t.Error("missing run should be reapable")
+	// Missing run record (unlocked + LoadRun error) → NOT reapable: the run
+	// may live under a different store/project root (a concurrent cross-store
+	// CLI run) whose lock this store cannot see. Never reap what isn't ours —
+	// reaping killed live cross-project runs with "No such container" + 137.
+	if svc.sandboxContainerReapable(ctx, "ghost-run") {
+		t.Error("a run absent from this store must NOT be reapable (could be a live cross-store run)")
 	}
 	// Unlocked + running → NOT reapable (status path keeps active runs).
 	mustRun("r-running", store.RunStatusRunning)
