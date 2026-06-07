@@ -141,6 +141,36 @@ for run-time resolution and not statically validated.
 Single-value `provider:` (and unset) behaviour is unchanged — the chain
 form is purely additive and fully back-compatible.
 
+## Transient-error & network resilience
+
+A brief internet/API outage should not abort a whole run. Every backend
+call goes through a retry loop (`RetryPolicy`) with **capped exponential
+backoff + jitter**, and the classifier treats connectivity failures as
+retryable:
+
+- **Detection** (`delegate.IsNetworkError`): `net.Error` timeouts, wrapped
+  syscall errnos (`ECONNRESET`, `ECONNREFUSED`, `ETIMEDOUT`, …),
+  `io.ErrUnexpectedEOF`, and a broad message-substring fallback for errors
+  that cross the CLI/SDK boundary as text — `fetch failed`, `socket hang
+  up`, `getaddrinfo ENOTFOUND`, `overloaded`, 5xx. The run's own
+  `context.Canceled` / `DeadlineExceeded` are deliberately **excluded** so
+  a cancelled or timed-out run never thrashes the retry budget.
+- **`claude_code` silent exits**: a connectivity drop surfaces as an opaque
+  `session ended without result message (cli_exit_code=N)`, with the real
+  cause only on the CLI's stderr. The delegate re-types it as
+  `ErrTransient` when stderr shows a network marker (one explicit
+  `network connectivity issue detected` warn), so the loop retries instead
+  of failing the node.
+- **Adaptive budget**: network/transient errors get a larger attempt
+  budget (`MaxAttemptsTransient`, default **6**) than ordinary retryable
+  errors (`MaxAttempts`, default **3**), so the backoff spans roughly a
+  minute of outage. An explicitly pinned `MaxAttempts` is always respected
+  (the inflated default only applies when neither is set). Each retry logs
+  `network connectivity issue — delegate retry k/n … (backoff …)`.
+
+Only after a provider exhausts this budget does the run fall through to the
+next entry in the `provider:` chain (above).
+
 ## Per-backend detection rules
 
 A backend reports `Available: true` only when **both** a binary/runtime
