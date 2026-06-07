@@ -3,6 +3,7 @@ package delegate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -586,6 +587,12 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 			BackendName: BackendClaudeCode,
 		}
 		applyClaudeCodeSessionMeta(&errResult, rm, sessMeta)
+		// A connectivity drop during the API call surfaces as an opaque
+		// "session ended without result" — the CLI exits non-zero and the
+		// only network evidence (fetch failed / ECONNRESET / overloaded …)
+		// lands on stderr. Re-type it as ErrTransient so the executor's
+		// retry loop rides the blip out instead of failing the whole node.
+		streamErr = b.retypeNetworkError(streamErr, stderrBuf.String(), task)
 		return errResult, fmt.Errorf("delegate: claude-code failed: %w", streamErr)
 	}
 
@@ -971,6 +978,30 @@ func applyClaudeCodeSessionMeta(out *Result, rm *claudesdk.ResultMessage, sm ses
 			return
 		}
 	}
+}
+
+// retypeNetworkError re-classifies an opaque claude_code failure as an
+// ErrTransient when the error message or captured stderr shows a transient-
+// connectivity marker (fetch failed, ECONNRESET, overloaded, 5xx, …), so the
+// executor retries it with backoff instead of failing the node on a blip.
+// Already-typed transient / rate-limit errors pass through unchanged. Emits
+// one explicit warn so the operator sees a connectivity issue, not just a
+// generic retry.
+func (b *ClaudeCodeBackend) retypeNetworkError(err error, stderr string, task Task) error {
+	if err == nil {
+		return nil
+	}
+	var t *ErrTransient
+	var rl *ErrRateLimited
+	if errors.As(err, &t) || errors.As(err, &rl) {
+		return err
+	}
+	if !MatchesNetworkSignature(err.Error()) && !MatchesNetworkSignature(stderr) {
+		return err
+	}
+	b.Logger.Warn("[%s#%d/claude-code] network connectivity issue detected; flagging for retry: %v",
+		task.NodeID, task.Iteration, err)
+	return &ErrTransient{Provider: BackendClaudeCode, Reason: "network", Detail: err.Error()}
 }
 
 // runSession opens an interactive Session with the Claude CLI, sends the

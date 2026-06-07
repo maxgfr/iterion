@@ -41,6 +41,12 @@ var ErrCompactionUnsupported = errors.New("model: compaction not supported by ex
 // DefaultMaxAttempts is the default number of LLM call attempts (initial + retries).
 const DefaultMaxAttempts = 3
 
+// DefaultMaxAttemptsTransient is the attempt budget for connectivity/transient
+// failures. Larger than DefaultMaxAttempts so a brief internet/API outage is
+// ridden out rather than aborting a long run: with a 1s base and the capped
+// exponential backoff below, 6 attempts span roughly a minute of retrying.
+const DefaultMaxAttemptsTransient = 6
+
 // DefaultBackoffBase is the base duration for exponential backoff.
 const DefaultBackoffBase = time.Second
 
@@ -53,6 +59,11 @@ const defaultRouterModel = "anthropic/claude-sonnet-4-6"
 type RetryPolicy struct {
 	// MaxAttempts is the total number of attempts (1 = no retry). Default: 3.
 	MaxAttempts int
+	// MaxAttemptsTransient is the attempt budget for connectivity/transient
+	// failures (network blips, upstream 5xx). Default: 6. Falls back to
+	// max(MaxAttempts, DefaultMaxAttemptsTransient) so it is never smaller
+	// than the standard budget.
+	MaxAttemptsTransient int
 	// BackoffBase is the base delay for exponential backoff. Default: 1s.
 	BackoffBase time.Duration
 }
@@ -62,6 +73,35 @@ func (rp RetryPolicy) maxAttempts() int {
 		return DefaultMaxAttempts
 	}
 	return rp.MaxAttempts
+}
+
+// maxAttemptsTransient returns the retry budget for transient/connectivity
+// errors. An explicit value wins (clamped up so it is never smaller than the
+// standard budget). When unset, it inflates to DefaultMaxAttemptsTransient
+// ONLY if MaxAttempts is also unset — the production-default path. A caller
+// that pinned MaxAttempts (a fail-fast config, or a test) keeps that cap
+// rather than having network errors silently retried beyond what was asked.
+func (rp RetryPolicy) maxAttemptsTransient() int {
+	if rp.MaxAttemptsTransient > 0 {
+		n := rp.MaxAttemptsTransient
+		if std := rp.maxAttempts(); n < std {
+			n = std
+		}
+		return n
+	}
+	if rp.MaxAttempts > 0 {
+		return rp.maxAttempts()
+	}
+	return DefaultMaxAttemptsTransient
+}
+
+// effectiveMaxAttempts picks the attempt budget for err: the larger transient
+// budget for network/connectivity failures, the standard budget otherwise.
+func (rp RetryPolicy) effectiveMaxAttempts(err error) int {
+	if delegate.IsNetworkError(err) {
+		return rp.maxAttemptsTransient()
+	}
+	return rp.maxAttempts()
 }
 
 func (rp RetryPolicy) backoffBase() time.Duration {

@@ -32,7 +32,10 @@ func isRetryable(err error) bool {
 	if errors.As(err, &clawErr) {
 		return clawErr.IsRetryable()
 	}
-	return false
+	// Raw transport failures the typed API errors don't cover: a mid-call
+	// connection reset / DNS flap / i/o timeout reaches the in-process claw
+	// backend as a bare net error, not an *APIError.
+	return delegate.IsNetworkError(err)
 }
 
 // statusCodeOf extracts the HTTP status code from a recognised API error
@@ -69,6 +72,13 @@ func isDelegateRetryable(err error) bool {
 	}
 	var rateLimited *delegate.ErrRateLimited
 	if errors.As(err, &rateLimited) {
+		return true
+	}
+	// Transient connectivity failure (DNS / TCP / TLS / upstream 5xx) — a
+	// net.Error, a wrapped syscall errno, or a stringified marker bubbled up
+	// from a CLI delegate ("fetch failed", "ECONNRESET", "overloaded"). A
+	// brief internet outage must not abort a whole multi-node run.
+	if delegate.IsNetworkError(err) {
 		return true
 	}
 	msg := err.Error()
@@ -129,16 +139,32 @@ func extractExitCode(msg string) int {
 	return n
 }
 
-// retryDelegateLoop retries a backend execution call with exponential backoff.
-func (e *ClawExecutor) retryDelegateLoop(ctx context.Context, nodeID string, backendName string, fn func() (delegate.Result, error)) (delegate.Result, error) {
-	maxAttempts := e.retry.maxAttempts()
+// retryReason renders a short human label for the retry log, distinguishing
+// a connectivity blip from other transient failures (OOM signal, idle hang)
+// so the operator can tell "internet hiccup" from "subprocess died".
+func retryReason(err error) string {
+	if delegate.IsNetworkError(err) {
+		return "network connectivity issue"
+	}
+	return "transient backend error"
+}
 
+// retryDelegateLoop retries a backend execution call with exponential backoff.
+// The attempt budget is error-adaptive: a network/connectivity failure gets
+// the larger transient budget (rides out a multi-second outage), while a
+// deterministic-but-retryable error (signal kill, idle hang) keeps the
+// standard budget.
+func (e *ClawExecutor) retryDelegateLoop(ctx context.Context, nodeID string, backendName string, fn func() (delegate.Result, error)) (delegate.Result, error) {
 	result, err := fn()
-	for attempt := 1; err != nil && isDelegateRetryable(err) && attempt < maxAttempts; attempt++ {
+	for attempt := 1; err != nil && isDelegateRetryable(err); attempt++ {
+		maxAttempts := e.retry.effectiveMaxAttempts(err)
+		if attempt >= maxAttempts {
+			break
+		}
 		delay := e.retry.backoff(attempt - 1)
 
-		e.logger.Warn("[%s#%d/%s] delegate retry %d/%d after error: %v (backoff %s)",
-			nodeID, LoopIterationFromContext(ctx), backendName, attempt, maxAttempts-1, err, delay.Round(time.Millisecond))
+		e.logger.Warn("[%s#%d/%s] %s — delegate retry %d/%d after error: %v (backoff %s)",
+			nodeID, LoopIterationFromContext(ctx), backendName, retryReason(err), attempt, maxAttempts-1, err, delay.Round(time.Millisecond))
 
 		if e.hooks.OnDelegateRetry != nil {
 			e.hooks.OnDelegateRetry(nodeID, DelegateInfo{

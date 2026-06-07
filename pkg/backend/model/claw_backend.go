@@ -378,9 +378,14 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 // ---------------------------------------------------------------------------
 
 func (b *ClawBackend) retryLoop(ctx context.Context, nodeID string, fn func() (delegate.Result, error)) (delegate.Result, error) {
-	maxAttempts := b.retry.maxAttempts()
 	result, err := fn()
-	for attempt := 1; err != nil && isRetryable(err) && attempt < maxAttempts; attempt++ {
+	for attempt := 1; err != nil && isRetryable(err); attempt++ {
+		// Error-adaptive budget: a connectivity failure gets the larger
+		// transient budget to ride out a brief outage.
+		maxAttempts := b.retry.effectiveMaxAttempts(err)
+		if attempt >= maxAttempts {
+			break
+		}
 		delay := b.retry.backoff(attempt - 1)
 
 		if b.hooks.OnLLMRetry != nil {
