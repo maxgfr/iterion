@@ -693,6 +693,17 @@ schema select_finding_output:
   remaining:  int
   attempted:  json
 
+## fix_ledger output. Passthrough that re-publishes select_finding's
+## attempted ledger from a NON-loop-target node. A loop edge's with{}
+## cannot carry the loop TARGET's own output forward:
+## {{outputs.select_finding.attempted}} on the back-edge resolves empty
+## on re-entry, so the ledger never grows and select_finding re-picks the
+## same finding until the run times out. Routing the back-edge through
+## fix_ledger (which reads outputs.select_finding.attempted mid-iteration,
+## where it resolves fine) fixes the monotonic pop.
+schema fix_ledger_output:
+  attempted:  json
+
 ## ladder_rung_input — shared input shape for the rungs that read the
 ## current finding's metadata (reproduce_rung needs the scanner +
 ## matcher; reattack needs the finding + candidate diff).
@@ -3874,6 +3885,17 @@ compute aggregate_verdict:
     diff:             "outputs.patch_author.diff"
     rejection_reason: "if(outputs.build_rung.ok, if(outputs.reproduce_rung.gone, if(outputs.regress_rung.passed, if(outputs.reattack.held, if(outputs.reviewer_isolation.approved, '', 'reviewer_rejected'), 'reattack_found_variants'), 'tests_failed'), 'reproduce_still_hits'), 'build_failed')"
 
+## fix_ledger — loop-carried ledger relay. Reads select_finding's
+## attempted list mid-iteration (a normal cross-node ref that resolves
+## fine) and re-publishes it so the back-edge to select_finding can carry
+## it forward. Without this relay the back-edge referenced the loop
+## TARGET's own output, which resolves empty on re-entry → the ledger
+## never grew → select_finding re-picked the same finding until timeout.
+compute fix_ledger:
+  output: fix_ledger_output
+  expr:
+    attempted: "outputs.select_finding.attempted"
+
 ## record_finding — mode-aware finalize.
 ##
 ## ALL modes: writes the diff artifact to
@@ -4560,10 +4582,16 @@ workflow sec_audit_source:
 
   ## Loop back to select_finding to process the next finding. The
   ## fix_loop cap (vars.max_fix_per_run) bounds the per-run patch
-  ## budget. attempted carries the ledger of already-attempted
-  ## finding ids so select_finding's pop is monotonic.
-  record_finding -> select_finding as fix_loop(500) with {
-    attempted: "{{outputs.select_finding.attempted}}",
+  ## budget. The ledger of already-attempted finding ids is relayed
+  ## through fix_ledger (NOT select_finding directly): a loop edge's
+  ## with{} cannot read the loop target's own output — referencing
+  ## {{outputs.select_finding.attempted}} here resolved empty on
+  ## re-entry, so the ledger never grew and the loop re-picked the same
+  ## finding until timeout. fix_ledger re-publishes it from off the
+  ## target, keeping select_finding's pop monotonic.
+  record_finding -> fix_ledger
+  fix_ledger -> select_finding as fix_loop(500) with {
+    attempted: "{{outputs.fix_ledger.attempted}}",
     to_fix:    "{{outputs.remediation_plan.to_fix}}",
     max:       "{{vars.max_fix_per_run}}"
   }
