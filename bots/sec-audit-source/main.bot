@@ -2510,7 +2510,18 @@ PROC_ARGS=""
 if [ "$PROC_LIMIT" -gt 0 ] 2>/dev/null; then
   PROC_ARGS="--limit $PROC_LIMIT"
 fi
-( cd "$DSW" && deepsec process --concurrency "$CONC" $PROC_ARGS $AGENT_ARGS ) >"$LOG_DIR/process.log" 2>&1 || ERRS="$ERRS process"
+# deepsec process drives @anthropic-ai/claude-agent-sdk, which otherwise
+# hunts for its own bundled native CLI binary -- skipped by the
+# --ignore-scripts deepsec install in the image (that flag avoids the unused
+# @openai/codex native binary download). Point the SDK at the claude CLI
+# already baked into the sec image via CLAUDE_CODE_EXECUTABLE, which the
+# deepsec processor honours (-> pathToClaudeCodeExecutable). Reuses the
+# mounted ~/.claude OAuth from the run.
+# NOTE: keep this whole tool command free of apostrophes -- it runs inside a
+# bash -c single-quoted string, so a stray apostrophe silently breaks shell
+# parsing (exit 2) while iterion validate still passes.
+CLAUDE_BIN="$(command -v claude 2>/dev/null)"
+( cd "$DSW" && CLAUDE_CODE_EXECUTABLE="$CLAUDE_BIN" deepsec process --concurrency "$CONC" $PROC_ARGS $AGENT_ARGS ) >"$LOG_DIR/process.log" 2>&1 || ERRS="$ERRS process"
 
 ( cd "$DSW" && deepsec export --format json --out "$OUT_JSON" ) >"$LOG_DIR/export.log" 2>&1 || ERRS="$ERRS export"
 
