@@ -107,7 +107,7 @@ Iterion ships a team of named, first-class bots — your legion. Each is a gener
 | 🌿 **Billy** | Branch reviewer-fixer — alternating Claude/GPT review-fix on the branch diff, auto-commits on convergence | [`branch_improve_loop`](bots/branch-improve-loop/) |
 | 🌍 **Willy** | Whole-repo reviewer-fixer — the same loop across the entire codebase | [`whole_improve_loop`](bots/whole-improve-loop/) |
 | 📚 **Doki** | Doc aligner — detects & fixes doc/code drift (the docs, never the code) | [`docs-refresh`](bots/docs-refresh/) |
-| 🔎 **Revi** | Code reviewer — read-only cross-family review, publishes findings to the board | [`code_review`](bots/code-review/) |
+| 🔎 **Revi** | Code reviewer — read-only cross-family review, publishes findings to the board | [`review_pr`](bots/review-pr/) |
 | 🛡️ **Seki** | Source security auditor — SAST + secret scan + LLM triage | [`sec-audit-source`](bots/sec-audit-source/) |
 | 📦 **Depsy** | Supply-chain auditor — dependency malware / CVE scan | [`sec-audit-deps`](bots/sec-audit-deps/) |
 | ⬆️ **Renovacy** | Security-aware dependency upgrader | [`secured-renovacy`](bots/secured-renovacy/) |

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/SocialGouv/iterion/pkg/botregistry"
 	"github.com/SocialGouv/iterion/pkg/dispatcher"
 )
 
@@ -28,12 +29,6 @@ var defaultBotsFS embed.FS
 // on-disk catalogue mirrors the embedded layout, not the package path.
 const defaultBotsFSRoot = "templates/dispatch_bots"
 
-// defaultBotIssuePrompt is the standard binding mapping the kanban
-// issue title + body into a single multi-line string. The bots in the
-// embedded catalogue each pick which workflow var to receive this
-// blob into via [defaultAssigneeDispatch].
-const defaultBotIssuePrompt = "{{issue.title}}\n\n{{issue.body}}"
-
 // defaultDispatchPort is the studio HTTP surface for the no-arg mode.
 // 4892 matches the example in docs/dispatcher.md so the published port
 // stays stable across iterations.
@@ -44,94 +39,33 @@ const defaultDispatchPort = 4892
 // fleet operation. Operators who need more should write a YAML.
 const defaultDispatchMaxConcurrent = 2
 
-// defaultAssigneeDispatch wires the issue title/body into each bot's
-// expected input contract. Keys must match the assignee labels in
-// [defaultAssigneeWorkflows] (the validator in pkg/dispatcher/config.go
-// enforces this). Every entry binds `workspace_dir` to the per-issue
-// workspace path so bots that default it to `${PROJECT_DIR}` run
-// against the dispatcher-allocated worktree rather than wherever the
-// daemon was started.
+// discoverAssigneeDispatch builds the per-assignee dispatch-var map by
+// DISCOVERING the bots reachable via paths and reading each one's manifest
+// `dispatch_vars` (botregistry.Entry.DispatchVars). It replaces the former
+// hardcoded name→vars table: routing is handled by RoutingRunner via
+// Bots.Paths, and the per-bot var wiring now travels with each bot's
+// manifest — so adding/renaming a bot (shipped OR a custom one the operator
+// drops in <projectDir>/bots) needs no edit here. Bots with no dispatch_vars
+// receive only the global dispatch vars (issue_title/body/id).
 //
-// The bot-specific main prompt var (feature_prompt, improvement_prompt,
-// scope_notes, user_prompt, …) was extracted from each bot's `vars:`
-// block. When a bot has no obvious prompt-shaped input (sec-audit-deps,
-// branch-improve-loop's diff focus), only `workspace_dir` is bound and
-// `scope_notes` carries the issue text when the bot accepts it.
-//
-// Both kebab-case (`feature-dev`) and snake_case (`feature_dev`)
-// assignee labels are mapped to the same workflow. The whats-next bot
-// emits snake_case (matching the Go package convention used inside the
-// bots/ tree); hand-written or git-versioned configs typically use
-// kebab-case (matching the bot directory names). Supporting both makes
-// auto-config robust to either origin without forcing the operator or
-// the bot to pick one.
-// workspace_dir is INTENTIONALLY omitted from the per-bot dispatch
-// configs below — every shipped bot defaults it to "${PROJECT_DIR}",
-// which the runtime expands to the worktree path the workflow's
-// `worktree: auto` block produces (and remaps to the in-container
-// path when sandbox is active, per pkg/runtime/engine.go:90's
-// containerWorkspace logic). Overriding workspace_dir to
-// {{dispatcher.workspace_path}} (the prior default) defeated both
-// branches: the bot's prompt referenced an empty dir that wasn't
-// bind-mounted into the sandbox, while the runtime's actual worktree
-// got ignored — every Read tool call failed in cascade.
-func defaultAssigneeDispatch() map[string]dispatcher.DispatchConfig {
-	featureDev := dispatcher.DispatchConfig{Vars: map[string]string{
-		"feature_prompt": defaultBotIssuePrompt,
-	}}
-	wholeImproveLoop := dispatcher.DispatchConfig{Vars: map[string]string{
-		"improvement_prompt": defaultBotIssuePrompt,
-		"scope_notes":        "{{issue.body}}",
-	}}
-	branchImproveLoop := dispatcher.DispatchConfig{Vars: map[string]string{
-		"scope_notes": defaultBotIssuePrompt,
-	}}
-	whatsNext := dispatcher.DispatchConfig{Vars: map[string]string{
-		"scope_notes": defaultBotIssuePrompt,
-	}}
-	docsRefresh := dispatcher.DispatchConfig{Vars: map[string]string{
-		"scope_notes": defaultBotIssuePrompt,
-		// v0.15.4: the bot transitions the issue out of `ready` once
-		// the run reaches a clean terminal state, so the dispatcher
-		// doesn't re-pick it on the next poll. Requires the issue's
-		// short identifier; `iterion issue move` accepts the prefix.
-		"issue_id": "{{issue.identifier}}",
-	}}
-	secAuditSource := dispatcher.DispatchConfig{Vars: map[string]string{
-		"scope_notes": defaultBotIssuePrompt,
-	}}
-	secAuditDeps := dispatcher.DispatchConfig{Vars: map[string]string{}}
-	securedRenovacy := dispatcher.DispatchConfig{Vars: map[string]string{
-		"user_prompt": defaultBotIssuePrompt,
-	}}
-	// Revi (code_review) is read-only: the issue body steers what the
-	// reviewers focus on (scope_notes), the diff itself is the input.
-	codeReview := dispatcher.DispatchConfig{Vars: map[string]string{
-		"scope_notes": defaultBotIssuePrompt,
-	}}
-	return map[string]dispatcher.DispatchConfig{
-		"feature-dev":         featureDev,
-		"feature_dev":         featureDev,
-		"whole-improve-loop":  wholeImproveLoop,
-		"whole_improve_loop":  wholeImproveLoop,
-		"branch-improve-loop": branchImproveLoop,
-		"branch_improve_loop": branchImproveLoop,
-		"whats-next":          whatsNext,
-		"whats_next":          whatsNext,
-		"docs-refresh":        docsRefresh,
-		"docs_refresh":        docsRefresh,
-		// back-compat aliases for the pre-rename name (doc-align -> docs-refresh, 2026-06)
-		"doc-align":        docsRefresh,
-		"doc_align":        docsRefresh,
-		"sec-audit-source": secAuditSource,
-		"sec_audit_source": secAuditSource,
-		"sec-audit-deps":   secAuditDeps,
-		"sec_audit_deps":   secAuditDeps,
-		"secured-renovacy": securedRenovacy,
-		"secured_renovacy": securedRenovacy,
-		"code-review":      codeReview,
-		"code_review":      codeReview,
+// workspace_dir is INTENTIONALLY never bound — every bot defaults it to
+// "${PROJECT_DIR}", which the runtime expands to the worktree the run's
+// `worktree: auto` produces (and remaps for sandbox); overriding it to the
+// pre-seed workspace path made the bot's prompt reference an unmounted dir
+// and every Read tool call failed in cascade.
+func discoverAssigneeDispatch(paths []string) (map[string]dispatcher.DispatchConfig, error) {
+	entries, err := botregistry.List(botregistry.ListOptions{Paths: paths})
+	if err != nil {
+		return nil, fmt.Errorf("dispatch defaults: discover bots for dispatch vars: %w", err)
 	}
+	out := make(map[string]dispatcher.DispatchConfig, len(entries))
+	for _, e := range entries {
+		if len(e.DispatchVars) == 0 {
+			continue
+		}
+		out[e.Name] = dispatcher.DispatchConfig{Vars: e.DispatchVars}
+	}
+	return out, nil
 }
 
 // extractDefaultBots materialises the embedded catalogue under
@@ -277,6 +211,25 @@ fi
 		}
 	}
 
+	// Discover the bots so routing + per-bot dispatch vars come from each
+	// bot's MANIFEST (dispatch_vars), not a hardcoded name→workflow/vars
+	// map. Adding/renaming a bot — shipped (materialized at botsDir) OR a
+	// custom one the operator drops in the project — is then a manifest
+	// change with ZERO dispatcher-code edits. The project roots use the
+	// canonical botregistry.DefaultPaths (bots/ + examples/ + .botz) — the
+	// SAME set studio/server discover, so the CLI dispatcher and studio see
+	// one catalog. botsDir (the embedded shipped catalogue) is prepended so
+	// a shipped bot is never shadowed by a partial user override; missing
+	// project roots are skipped by discovery (botregistry.List stats each).
+	botsPaths := []string{botsDir}
+	if projectDir != "" {
+		botsPaths = append(botsPaths, botregistry.DefaultPaths(projectDir)...)
+	}
+	assigneeDispatch, err := discoverAssigneeDispatch(botsPaths)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &dispatcher.Config{
 		Name:     "iterion-default",
 		Workflow: filepath.Join(botsDir, "default"),
@@ -293,38 +246,13 @@ fi
 			RunningState: dispatcher.DefaultRunningState,
 		},
 		Server: dispatcher.ServerConfig{Port: defaultDispatchPort},
-		AssigneeWorkflows: map[string]string{
-			// kebab-case canonical (matches the bot directory names
-			// + the names a hand-written iterion.dispatcher.yaml
-			// typically uses).
-			"feature-dev":         filepath.Join(botsDir, "feature-dev"),
-			"whole-improve-loop":  filepath.Join(botsDir, "whole-improve-loop"),
-			"branch-improve-loop": filepath.Join(botsDir, "branch-improve-loop"),
-			"whats-next":          filepath.Join(botsDir, "whats-next"),
-			"docs-refresh":        filepath.Join(botsDir, "docs-refresh"),
-			"doc-align":           filepath.Join(botsDir, "docs-refresh"), // back-compat alias (renamed 2026-06)
-			"sec-audit-source":    filepath.Join(botsDir, "sec-audit-source"),
-			"sec-audit-deps":      filepath.Join(botsDir, "sec-audit-deps"),
-			"secured-renovacy":    filepath.Join(botsDir, "secured-renovacy"),
-			"code-review":         filepath.Join(botsDir, "code-review"),
-			// snake_case aliases — what whats-next' assign_to_bots
-			// emits (matching the Go pkg naming convention used in
-			// bots/feature_dev/, bots/whole_improve_loop/).
-			// Pre-aliased here so the dispatcher routes existing
-			// snake_case assignees without the operator needing to
-			// rename tickets or edit the config.
-			"feature_dev":         filepath.Join(botsDir, "feature-dev"),
-			"whole_improve_loop":  filepath.Join(botsDir, "whole-improve-loop"),
-			"branch_improve_loop": filepath.Join(botsDir, "branch-improve-loop"),
-			"whats_next":          filepath.Join(botsDir, "whats-next"),
-			"docs_refresh":        filepath.Join(botsDir, "docs-refresh"),
-			"doc_align":           filepath.Join(botsDir, "docs-refresh"), // back-compat alias (renamed 2026-06)
-			"sec_audit_source":    filepath.Join(botsDir, "sec-audit-source"),
-			"sec_audit_deps":      filepath.Join(botsDir, "sec-audit-deps"),
-			"code_review":         filepath.Join(botsDir, "code-review"),
-			"secured_renovacy":    filepath.Join(botsDir, "secured-renovacy"),
-		},
-		AssigneeDispatch: defaultAssigneeDispatch(),
+		// Discovery-driven routing: RoutingRunner resolves any ENABLED
+		// discovered bot by name against Bots.Paths (HasRoute consults the
+		// registry), so there is no hardcoded assignee_workflows map —
+		// shipped + custom bots route identically. snake_case is no longer
+		// special-cased: the catalog is kebab and Nexie emits kebab names.
+		Bots:             botregistry.Config{Paths: botsPaths},
+		AssigneeDispatch: assigneeDispatch,
 		Dispatch: dispatcher.DispatchConfig{
 			Vars: map[string]string{
 				"issue_title": "{{issue.title}}",
@@ -341,26 +269,20 @@ fi
 	return cfg, nil
 }
 
-// DefaultAssigneeNames returns the canonical (kebab-case) assignee
-// labels shipped in the embedded catalogue, sorted by name
-// (deterministic output for the CLI banner). Snake_case aliases are
-// folded out so the human-readable list stays one entry per bot.
-// Exposed so the CLI can print the list at startup.
-func DefaultAssigneeNames() []string {
-	dispatch := defaultAssigneeDispatch()
-	seen := make(map[string]struct{}, len(dispatch))
-	names := make([]string, 0, len(dispatch)/2)
-	for k := range dispatch {
-		// Skip snake_case aliases — they share the same DispatchConfig
-		// value as the kebab-case canonical entry.
-		if strings.ContainsRune(k, '_') {
+// DefaultAssigneeNames returns the enabled bots discovered under paths,
+// by name, sorted — the routable assignees for the CLI startup banner.
+// Discovery-driven (no hardcoded list), so it reflects custom bots too.
+func DefaultAssigneeNames(paths []string) []string {
+	entries, err := botregistry.List(botregistry.ListOptions{Paths: paths})
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.Enabled {
 			continue
 		}
-		if _, dup := seen[k]; dup {
-			continue
-		}
-		seen[k] = struct{}{}
-		names = append(names, k)
+		names = append(names, e.Name)
 	}
 	sort.Strings(names)
 	return names

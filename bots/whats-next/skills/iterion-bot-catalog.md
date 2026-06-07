@@ -77,7 +77,7 @@ Walk top-to-bottom; first match wins.
 | "review the whole codebase", "audit production-readiness", "find bugs anywhere" | `whole-improve-loop` |
 | "focus on axis X" (observability / perf / DX / refactoring) ACROSS the codebase — improvement loop, not detection | `whole-improve-loop` (with `--var improvement_prompt=…`) |
 | "review this branch", "review the PR", "fix the diff against main" — review AND fix AND commit | `branch-improve-loop` |
-| "review this PR / branch and just REPORT the issues" — read-only review, posts findings to the board, does NOT fix or commit | `code-review` |
+| "review this PR / branch and just REPORT the issues" — read-only review, posts findings to the board, does NOT fix or commit | `review-pr` |
 | "upgrade dependencies", "patch CVEs", "bump versions", "renovate" — MUTATING (writes package.json / go.mod / lockfiles) | `secured-renovacy` |
 | "audit the docs", "find code↔doc drift", "doc/code alignment", "fix outdated README/CLAUDE.md" | `docs-refresh` |
 | "audit the source for vulns", "find injection / SSRF / IDOR / secrets", "OWASP source scan" — DETECTION (writes findings, not fixes) | `sec-audit-source` |
@@ -191,9 +191,9 @@ dispatcher routes on it), never the persona.
 | Persona | `assignee` (technical name) |
 |---|---|
 | Billy | `branch-improve-loop` |
-| Revi | `code-review` |
 | Doki | `docs-refresh` |
 | Featurly | `feature-dev` |
+| Revi | `review-pr` |
 | Depsy | `sec-audit-deps` |
 | Seki | `sec-audit-source` |
 | Renovacy | `secured-renovacy` |
@@ -214,29 +214,6 @@ fix, and stops on cross-family double-approval.
   a semantic message; pass base_ref for a non-main integration base.
 - **Vars**: `base_ref` (string), `chunk_dir` (string), `chunk_max_loc` (int), `chunk_threshold_loc` (int), `scope_notes` (string), `workspace_dir` (string)
 - **Path**: `bots/branch-improve-loop/main.bot`
-
-### `code-review` — Revi
-
-Read-only cross-family code reviewer. Reviews the working-tree diff
-of the current branch against its base with two independent reviewers
-(Claude + GPT), merges and de-duplicates their findings (cross-family
-agreement raises confidence), then publishes one issue per finding to
-the iterion native kanban board (labelled severity + type +
-source:revi) and writes a markdown report. Given a pull/merge-request
-URL (--var pr_url), it ALSO posts the findings onto that PR as a real
-forge review — inline comments anchored to file:line with one-click
-```suggestion blocks (GitHub / GitLab / Forgejo). Never edits, fixes,
-or commits code — that is the improve-loops' job (Billy / Willy).
-
-- **Use when**:
-  Use when you want a PR/branch REVIEWED and its issues surfaced — to
-  the board for triage and/or posted directly onto the PR (pass
-  --var pr_url) as inline comments + ```suggestion fixes — but NOT
-  auto-fixed. Read-only: Revi reports; Billy (branch-improve-loop)
-  reviews AND fixes AND commits.
-- **Triggers**: code-review, review, pr-review
-- **Vars**: `base_ref` (string), `max_findings` (int), `post_to_board` (bool), `pr_url` (string), `report_path` (string), `scope_notes` (string), `severity_threshold` (string), `workspace_dir` (string)
-- **Path**: `bots/code-review/main.bot`
 
 ### `docs-refresh` — Doki
 
@@ -290,6 +267,29 @@ loop until two consecutive cross-family approvals.
   feature_prompt at the new .bot file to author.
 - **Vars**: `feature_prompt` (string, required), `workspace_dir` (string)
 - **Path**: `bots/feature-dev/main.bot`
+
+### `review-pr` — Revi
+
+Read-only cross-family code reviewer. Reviews the working-tree diff
+of the current branch against its base with two independent reviewers
+(Claude + GPT), merges and de-duplicates their findings (cross-family
+agreement raises confidence), then publishes one issue per finding to
+the iterion native kanban board (labelled severity + type +
+source:revi) and writes a markdown report. Given a pull/merge-request
+URL (--var pr_url), it ALSO posts the findings onto that PR as a real
+forge review — inline comments anchored to file:line with one-click
+```suggestion blocks (GitHub / GitLab / Forgejo). Never edits, fixes,
+or commits code — that is the improve-loops' job (Billy / Willy).
+
+- **Use when**:
+  Use when you want a PR/branch REVIEWED and its issues surfaced — to
+  the board for triage and/or posted directly onto the PR (pass
+  --var pr_url) as inline comments + ```suggestion fixes — but NOT
+  auto-fixed. Read-only: Revi reports; Billy (branch-improve-loop)
+  reviews AND fixes AND commits.
+- **Triggers**: review-pr, pr-review, review
+- **Vars**: `base_ref` (string), `max_findings` (int), `post_to_board` (bool), `pr_url` (string), `report_path` (string), `scope_notes` (string), `severity_threshold` (string), `workspace_dir` (string)
+- **Path**: `bots/review-pr/main.bot`
 
 ### `sec-audit-deps` — Depsy
 
@@ -353,7 +353,7 @@ language-agnostic baseline. Add a language by dropping a
   SSRF, IDOR, broken auth, hardcoded secrets, crypto misuse,
   deserialisation, path traversal, misconfig). Emits findings to the
   board; does not fix. Pre-release hardening / PR-scope review.
-- **Vars**: `file_filter` (string), `findings_cap_per_file` (int), `fp_path` (string), `matchers_dir` (string), `min_generic_scanners` (int), `records_dir` (string), `records_ttl_days` (int), `scan_dir` (string), `scanner_version` (string), `scope_notes` (string), `severity_threshold` (string), `shard_concurrency` (int), `shard_size` (int), `workflow_path` (string), `workspace_dir` (string)
+- **Vars**: `confirm_threshold` (int), `context_path` (string), `context_ttl_days` (int), `deepsec_concurrency` (int), `deepsec_out` (string), `deepsec_process_limit` (int), `deepsec_root` (string), `diff_base` (string), `enable_deepsec` (bool), `enable_project_context` (bool), `file_filter` (string), `findings_cap_per_file` (int), `force_context_refresh` (bool), `fp_append_policy` (string), `fp_path` (string), `hard_stop_categories` (string), `matchers_dir` (string), `max_fix_per_run` (int), `min_generic_scanners` (int), `patch_attempts` (int), `patch_dir` (string), `records_dir` (string), `records_ttl_days` (int), `remediate` (bool), `remediation_mode` (string), `scan_dir` (string), `scanner_version` (string), `scope_notes` (string), `severity_threshold` (string), `shard_concurrency` (int), `shard_size` (int), `workflow_path` (string), `workspace_dir` (string)
 - **Path**: `bots/sec-audit-source/main.bot`
 
 ### `secured-renovacy` — Renovacy

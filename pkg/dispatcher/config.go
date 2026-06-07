@@ -493,12 +493,32 @@ func (c *Config) Validate() error {
 	if len(c.Dispatch.Attachments) > 0 {
 		return errors.New(unsupportedAttachmentsErr("dispatch.attachments"))
 	}
+	// Pre-walk discovery ONCE so each assignee_dispatch resolvability check
+	// below is an O(1) set lookup, not an O(N) re-walk of the bots tree per
+	// entry (botregistry.ResolveBotPath does a full List per call).
+	var discoverable map[string]struct{}
+	if len(c.Bots.Paths) > 0 {
+		if entries, derr := botregistry.List(botregistry.ListOptions{Paths: c.Bots.Paths}); derr == nil {
+			discoverable = make(map[string]struct{}, len(entries))
+			for _, e := range entries {
+				discoverable[botregistry.NormalizeName(e.Name)] = struct{}{}
+			}
+		}
+	}
 	for assignee, dc := range c.AssigneeDispatch {
 		if assignee == "" {
 			return errors.New("config: assignee_dispatch contains an empty key")
 		}
 		if _, ok := c.AssigneeWorkflows[assignee]; !ok {
-			return fmt.Errorf("config: assignee_dispatch[%q] has no matching assignee_workflows entry", assignee)
+			// With discovery configured, an assignee_dispatch entry is valid
+			// when the bot resolves via the registry (Bots.Paths) — the stock
+			// config derives BOTH routing and these vars from discovery, so
+			// there is no assignee_workflows literal to match against. Only
+			// when neither a static route NOR a discoverable bot exists is
+			// the entry dangling.
+			if _, ok := discoverable[botregistry.NormalizeName(assignee)]; !ok {
+				return fmt.Errorf("config: assignee_dispatch[%q] has no matching assignee_workflows entry and is not a discoverable bot under bots.paths", assignee)
+			}
 		}
 		for k, v := range dc.Vars {
 			if _, err := ParseTemplate(v); err != nil {

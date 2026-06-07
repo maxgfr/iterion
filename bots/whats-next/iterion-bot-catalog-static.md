@@ -77,7 +77,7 @@ Walk top-to-bottom; first match wins.
 | "review the whole codebase", "audit production-readiness", "find bugs anywhere" | `whole-improve-loop` |
 | "focus on axis X" (observability / perf / DX / refactoring) ACROSS the codebase — improvement loop, not detection | `whole-improve-loop` (with `--var improvement_prompt=…`) |
 | "review this branch", "review the PR", "fix the diff against main" — review AND fix AND commit | `branch-improve-loop` |
-| "review this PR / branch and just REPORT the issues" — read-only review, posts findings to the board, does NOT fix or commit | `code-review` |
+| "review this PR / branch and just REPORT the issues" — read-only review, posts findings to the board, does NOT fix or commit | `review-pr` |
 | "upgrade dependencies", "patch CVEs", "bump versions", "renovate" — MUTATING (writes package.json / go.mod / lockfiles) | `secured-renovacy` |
 | "audit the docs", "find code↔doc drift", "doc/code alignment", "fix outdated README/CLAUDE.md" | `docs-refresh` |
 | "audit the source for vulns", "find injection / SSRF / IDOR / secrets", "OWASP source scan" — DETECTION (writes findings, not fixes) | `sec-audit-source` |

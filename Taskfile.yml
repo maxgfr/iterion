@@ -54,7 +54,7 @@ tasks:
       - cp -R bots/sec-audit-source pkg/cli/templates/dispatch_bots/sec-audit-source
       - cp -R bots/sec-audit-deps pkg/cli/templates/dispatch_bots/sec-audit-deps
       - cp -R bots/secured-renovacy pkg/cli/templates/dispatch_bots/secured-renovacy
-      - cp -R bots/code-review pkg/cli/templates/dispatch_bots/code-review
+      - cp -R bots/review-pr pkg/cli/templates/dispatch_bots/review-pr
     sources:
       - pkg/cli/templates/dispatch_bots_default.bot
       - bots/feature-dev/**
@@ -65,7 +65,7 @@ tasks:
       - bots/sec-audit-source/**
       - bots/sec-audit-deps/**
       - bots/secured-renovacy/**
-      - bots/code-review/**
+      - bots/review-pr/**
     generates:
       - pkg/cli/templates/dispatch_bots/**
 

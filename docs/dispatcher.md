@@ -40,7 +40,7 @@ Built-in assignees ([source bots](../examples/)):
 | 🌿 Billy | `branch-improve-loop` | `bots/branch-improve-loop/` | Branch-scoped improvement + auto-commit on convergence |
 | 🧭 Nexie | `whats-next` | `bots/whats-next/` | Repo survey → roadmap synthesis → kanban materialisation |
 | 📚 Doki | `docs-refresh` | `bots/docs-refresh/` | Detect & fix doc/code mismatches |
-| 🔎 Revi | `code-review` | `bots/code-review/` | Read-only cross-family code review; publishes findings to the board |
+| 🔎 Revi | `review-pr` | `bots/review-pr/` | Read-only cross-family code review; publishes findings to the board |
 | 🛡️ Seki | `sec-audit-source` | `bots/sec-audit-source/` | Source-code security audit (gitleaks/trivy/semgrep/gosec) |
 | 📦 Depsy | `sec-audit-deps` | `bots/sec-audit-deps/` | Supply-chain dep audit + LLM review |
 | ⬆️ Renovacy | `secured-renovacy` | `bots/secured-renovacy/` | Security-aware dependency upgrades with cumulative review |

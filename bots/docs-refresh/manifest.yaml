@@ -36,3 +36,10 @@ when_to_use: |
   and commits.
 author: SocialGouv (devthejo) — docs-refresh/main.bot
 schema_version: 1
+
+dispatch_vars:
+  scope_notes: |-
+    {{issue.title}}
+
+    {{issue.body}}
+  issue_id: "{{issue.identifier}}"

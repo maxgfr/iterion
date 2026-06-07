@@ -78,6 +78,18 @@ type Manifest struct {
 	// Edited via the studio Bot-metadata panel.
 	WhenToUse string `yaml:"when_to_use,omitempty"`
 
+	// DispatchVars maps the issue into THIS bot's input vars when the
+	// dispatcher runs it (e.g. {"feature_prompt": "{{issue.title}}\n\n
+	// {{issue.body}}"} for feature-dev, {"scope_notes": "…"} for a
+	// reviewer). Values are dispatcher var templates ({{issue.*}}),
+	// rendered per issue; per-ticket bot_args merge on top. This makes
+	// the per-bot dispatch wiring DISCOVERY-DRIVEN — the stock
+	// `iterion dispatch` no longer hardcodes a name→vars map; it reads
+	// this from each discovered bot's manifest, so adding/renaming a bot
+	// (shipped or custom) needs zero dispatcher-code edits. Optional;
+	// empty = the bot receives only the global dispatch vars.
+	DispatchVars map[string]string `yaml:"dispatch_vars,omitempty"`
+
 	// Enabled toggles whether this bot is advertised in the catalog
 	// exposed to orchestrator bots (Nexie). Tri-state on purpose:
 	//   nil   → key absent → treated as enabled, so manifests authored

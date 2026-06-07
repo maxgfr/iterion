@@ -11,3 +11,9 @@ when_to_use: |
   a semantic message; pass base_ref for a non-main integration base.
 author: SocialGouv (devthejo) — branch-improve-loop/main.bot
 schema_version: 1
+
+dispatch_vars:
+  scope_notes: |-
+    {{issue.title}}
+
+    {{issue.body}}

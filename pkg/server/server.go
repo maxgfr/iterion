@@ -1023,11 +1023,11 @@ func shortDescription(desc string) string {
 // outside the roster sort after it, alphabetically.
 var botRosterOrder = []string{
 	"whats-next",          // Nexie
-	"feature_dev",         // Featurly
-	"branch_improve_loop", // Billy
-	"whole_improve_loop",  // Willy
+	"feature-dev",         // Featurly
+	"branch-improve-loop", // Billy
+	"whole-improve-loop",  // Willy
 	"docs-refresh",        // Doki
-	"code_review",         // Revi
+	"review-pr",           // Revi
 	"sec-audit-source",    // Seki
 	"sec-audit-deps",      // Depsy
 	"secured-renovacy",    // Renovacy

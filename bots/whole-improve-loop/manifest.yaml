@@ -19,3 +19,10 @@ when_to_use: |
   No new capability — just better/cleaner code.
 author: SocialGouv (devthejo) — whole-improve-loop/main.bot
 schema_version: 1
+
+dispatch_vars:
+  improvement_prompt: |-
+    {{issue.title}}
+
+    {{issue.body}}
+  scope_notes: "{{issue.body}}"

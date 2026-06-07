@@ -16,3 +16,9 @@ when_to_use: |
   major_policy: attempt.
 author: SocialGouv (devthejo) — secured-renovacy/main.bot
 schema_version: 1
+
+dispatch_vars:
+  user_prompt: |-
+    {{issue.title}}
+
+    {{issue.body}}

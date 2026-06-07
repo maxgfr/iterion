@@ -1,4 +1,4 @@
-name: code-review
+name: review-pr
 display_name: Revi
 version: 0.2.0
 description: |
@@ -18,6 +18,12 @@ when_to_use: |
   --var pr_url) as inline comments + ```suggestion fixes — but NOT
   auto-fixed. Read-only: Revi reports; Billy (branch-improve-loop)
   reviews AND fixes AND commits.
-author: SocialGouv (devthejo) — code-review/main.bot
+author: SocialGouv (devthejo) — review-pr/main.bot
 schema_version: 1
-triggers: [code-review, review, pr-review]
+triggers: [review-pr, pr-review, review]
+
+dispatch_vars:
+  scope_notes: |-
+    {{issue.title}}
+
+    {{issue.body}}

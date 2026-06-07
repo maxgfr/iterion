@@ -403,7 +403,7 @@ agent reviewer:
   system: review_system
   user: review_user
 
-workflow code_review:
+workflow review_pr:
   entry: reviewer
   reviewer -> done when approved
   reviewer -> fail when not approved

@@ -29,3 +29,9 @@ when_to_use: |
   board; does not fix. Pre-release hardening / PR-scope review.
 author: SocialGouv (devthejo) — bots/sec-audit-source/main.bot
 schema_version: 1
+
+dispatch_vars:
+  scope_notes: |-
+    {{issue.title}}
+
+    {{issue.body}}

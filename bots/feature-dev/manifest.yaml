@@ -13,3 +13,9 @@ when_to_use: |
   feature_prompt at the new .bot file to author.
 author: SocialGouv (devthejo) — feature-dev/main.bot
 schema_version: 1
+
+dispatch_vars:
+  feature_prompt: |-
+    {{issue.title}}
+
+    {{issue.body}}

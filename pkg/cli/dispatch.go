@@ -172,7 +172,7 @@ func RunDispatch(p *Printer, opts DispatchOptions) error {
 	if p.Format == OutputHuman {
 		if opts.ConfigPath == "" {
 			p.Line("iterion dispatch: running with baked-in defaults (no YAML) — write iterion.dispatcher.yaml + pass it as argument to customise")
-			p.Line("iterion dispatch: assignee bots: %v", DefaultAssigneeNames())
+			p.Line("iterion dispatch: assignee bots: %v", DefaultAssigneeNames(cfg.Bots.Paths))
 		}
 		p.Line("iterion dispatch: workflow %s", cfg.Workflow)
 		p.Line("iterion dispatch: tracker %s", cfg.Tracker.Kind)

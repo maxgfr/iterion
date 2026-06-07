@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/SocialGouv/iterion/pkg/botregistry"
 )
 
 // skipIfCatalogueEmpty skips a test when the embedded catalogue is
@@ -48,14 +50,24 @@ func TestBuildDefaultConfig_ValidatesAndExtractsCatalogue(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cfg.Workflow, "main.bot")); err != nil {
 		t.Fatalf("default bot main.bot missing on disk: %v", err)
 	}
-	// Every assignee_workflow entry must point at an existing directory
-	// with a main.bot (bundle dir) — required by bundle.Detect.
-	for name, path := range cfg.AssigneeWorkflows {
-		if _, err := os.Stat(filepath.Join(path, "main.bot")); err != nil {
-			t.Fatalf("assignee_workflows[%s] (%s) missing main.bot: %v", name, path, err)
-		}
-		if _, ok := cfg.AssigneeDispatch[name]; !ok {
-			t.Fatalf("assignee_workflows[%s] has no matching AssigneeDispatch entry", name)
+	// Routing is discovery-driven (2026-06): Bots.Paths is set so
+	// RoutingRunner resolves bots by name; there is no hardcoded
+	// AssigneeWorkflows literal anymore.
+	if len(cfg.Bots.Paths) == 0 {
+		t.Fatal("Bots.Paths should be set for discovery-driven routing")
+	}
+	if len(cfg.AssigneeWorkflows) != 0 {
+		t.Fatalf("AssigneeWorkflows should be empty (discovery-driven), got %v", cfg.AssigneeWorkflows)
+	}
+	// Per-bot dispatch vars are derived from each bot's manifest
+	// dispatch_vars; every entry must name a bot that resolves to a real
+	// main.bot via discovery.
+	if len(cfg.AssigneeDispatch) == 0 {
+		t.Fatal("expected discovered AssigneeDispatch entries (from manifest dispatch_vars)")
+	}
+	for name := range cfg.AssigneeDispatch {
+		if _, err := botregistry.ResolveBotPath(name, cfg.Bots.Paths); err != nil {
+			t.Fatalf("assignee_dispatch[%s] does not resolve via discovery: %v", name, err)
 		}
 	}
 }
@@ -87,7 +99,13 @@ func TestBuildDefaultConfig_PreservesUserEdits(t *testing.T) {
 }
 
 func TestDefaultAssigneeNames_Sorted(t *testing.T) {
-	got := DefaultAssigneeNames()
+	skipIfCatalogueEmpty(t)
+	storeDir := t.TempDir()
+	cfg, err := BuildDefaultConfig(storeDir, "")
+	if err != nil {
+		t.Fatalf("BuildDefaultConfig: %v", err)
+	}
+	got := DefaultAssigneeNames(cfg.Bots.Paths)
 	if len(got) == 0 {
 		t.Fatal("expected at least one default assignee")
 	}

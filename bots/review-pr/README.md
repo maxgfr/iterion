@@ -1,4 +1,4 @@
-# code_review — Revi
+# review_pr — Revi
 
 Read-only cross-family **code reviewer**. Revi reviews the changes on the
 current branch and *publishes* the findings — it never edits, fixes, or
@@ -42,13 +42,13 @@ All inputs are workflow `vars` (override with `--var name=value`):
 | `severity_threshold` | `low` | Drop findings below this (low < medium < high < critical). |
 | `max_findings` | `40` | Cap on issues/rows (highest severity first); a capped run says so. |
 | `post_to_board` | `true` | File findings on the native board; `false` = report only. |
-| `report_path` | `.code-review/findings.md` | Markdown report destination (gitignorable; not under `.iterion/`). |
+| `report_path` | `.review-pr/findings.md` | Markdown report destination (gitignorable; not under `.iterion/`). |
 | `pr_url` | `""` | When set, ALSO publish the review onto this PR/MR (see below). Empty = board + report only. |
 
 ## Run
 
 ```bash
-iterion run bots/code-review/main.bot \
+iterion run bots/review-pr/main.bot \
   --var workspace_dir=/path/to/repo \
   --var base_ref=main
 ```
@@ -67,7 +67,7 @@ board + report still run; the PR review is additive.
 
 ```bash
 # Check out the PR's branch locally, then:
-iterion run bots/code-review/main.bot \
+iterion run bots/review-pr/main.bot \
   --var workspace_dir=/path/to/repo \
   --var base_ref=main \
   --var pr_url=https://github.com/owner/repo/pull/42

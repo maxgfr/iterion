@@ -1,5 +1,5 @@
 ## ─────────────────────────────────────────────────────────────────
-## code_review — "Revi", a read-only cross-family code reviewer.
+## review_pr — "Revi", a read-only cross-family code reviewer.
 ##
 ## Revi reviews the changes on the current branch and PUBLISHES the
 ## findings — it never edits, fixes, or commits code. That mutation
@@ -105,7 +105,7 @@ vars:
   ## dotfile the operator can gitignore — deliberately NOT under
   ## .iterion/ so Revi never scatters engine state into the target
   ## repo's tree.
-  report_path: string = ".code-review/findings.md"
+  report_path: string = ".review-pr/findings.md"
 
   ## FORGE PR REVIEW (v0.2.0). When set to a pull/merge-request URL,
   ## Revi ALSO publishes its merged findings onto that PR as a real
@@ -632,7 +632,7 @@ print(json.dumps({'degraded': degraded, 'banner': banner}))
 
 ## ─── Workflow ───────────────────────────────────────────────────
 
-workflow code_review:
+workflow review_pr:
   entry: diff_precheck
 
   budget:

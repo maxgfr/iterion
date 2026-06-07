@@ -39,6 +39,16 @@ type Entry struct {
 	Triggers     []string `json:"triggers,omitempty" yaml:"triggers,omitempty"`
 	Capabilities []string `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
 
+	// DispatchVars is the bot's default dispatch var template (manifest
+	// dispatch_vars) — how the dispatcher maps the issue into THIS bot's
+	// inputs (e.g. {"feature_prompt": "{{issue.title}}\n\n{{issue.body}}"}
+	// for feature-dev, {"scope_notes": "…"} for a reviewer). The
+	// dispatcher renders these per issue (per-ticket bot_args merge on
+	// top). Empty = the bot reads only the global dispatch vars
+	// (issue_title/body/id). This lives in the manifest so adding/renaming
+	// a bot needs ZERO dispatcher-code edits — discovery carries it.
+	DispatchVars map[string]string `json:"dispatch_vars,omitempty" yaml:"dispatch_vars,omitempty"`
+
 	// WhenToUse is the orchestrator-facing "use when" guidance from the
 	// bundle manifest (manifest.yaml when_to_use). Empty for loose .bot
 	// files. Surfaced in the generated iterion-bot-catalog "Use when"
@@ -320,6 +330,7 @@ func parseBundle(dir string) (*Entry, error) {
 		Path:            dir,
 		Triggers:        m.Triggers,
 		Capabilities:    m.Capabilities,
+		DispatchVars:    m.DispatchVars,
 		WhenToUse:       strings.TrimSpace(m.WhenToUse),
 		Author:          m.Author,
 		Version:         m.Version,
