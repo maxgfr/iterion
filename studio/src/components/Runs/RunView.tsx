@@ -361,22 +361,27 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
   // header-level metrics until the user opened the Events tab. The
   // action dedupes per run via historyFetchedForRun, so this stays
   // cheap on re-renders and tab toggles.
-  useEffect(() => {
+  // On failure, surface a *persistent* toast with a Retry action so the
+  // operator can re-attempt in place instead of having to close and
+  // re-open the run. loadEventHistoryIfMissing rolls back its
+  // historyFetchedForRun marker on failure, so re-invoking it here
+  // genuinely retries the fetch.
+  const loadHistory = useCallback(() => {
     if (!runId) return;
     loadEventHistoryIfMissing(runId).catch((err) => {
-      // The store rolls back its historyFetchedForRun marker, but the
-      // user-visible Events tab / scrubber would otherwise render
-      // empty with no indication of why. Surface a toast so the
-      // operator knows the next retry is on them (re-open the tab).
       // eslint-disable-next-line no-console
       console.warn("[run] event history hydration failed:", err);
       const msg = err instanceof Error ? err.message : String(err);
       useUIStore.getState().addToast(
         `Couldn't load event history: ${msg}`,
         "error",
+        { persistent: true, action: { label: "Retry", onClick: () => loadHistory() } },
       );
     });
   }, [runId, loadEventHistoryIfMissing]);
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   // Initial snapshot via REST so the page renders immediately even if
   // the WS is still connecting; the hook's `applySnapshot` on connect
