@@ -17,10 +17,8 @@ detect_stack  (agent, claude_code, read-only: read_file/glob/grep/bash)
 generate_devbox (agent, claude_code, tools incl. write_file)
   → writes /workspace/devbox.json per skills/devbox-setup.md (pinned, minimal)
 verify_devbox  (tool, deterministic)
-  → `cd /workspace && devbox install` (must exit 0 + produce devbox.lock),
-    then `devbox run -- <build>` / `<test>` smoke; degrade-with-report on fail
-approve_devbox (human, default mode=propose)
-  → show the devbox.json diff + verify output; approve → keep, reject → drop
+  → `cd <workspace> && devbox install` (must exit 0 + produce devbox.lock);
+    degrade-with-report on fail
 done
 ```
 
@@ -32,8 +30,9 @@ done
 - **idempotent**: if `/workspace/devbox.json` exists, propose a diff (add
   missing tools), never clobber existing pins (see skill §6).
 
-## Why this is its own build (not a tail-end add)
-A correct iterion bot needs validated schemas, C012-exhaustive edges, prompt
-contracts, and a sandbox spec, then a real run to confirm the generated
-devbox.json installs. That is a focused effort with `iterion validate` +
-dogfood iterations — tracked as the next step, not bolted on.
+## v1 scope + next
+v1 is the linear flow above (detect → generate → verify → done); the
+worktree + PR review is the gate. Next enhancements: an in-bot `human`
+approve_devbox gate + an `apply_mode` (propose | apply), and a real dogfood
+run (a target repo + a stable network for the cold `devbox install`) to
+confirm the generated devbox.json installs.

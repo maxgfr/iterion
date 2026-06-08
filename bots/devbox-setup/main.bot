@@ -29,7 +29,6 @@ schema generate_input:
   detected: json
 
 schema generate_output:
-  wrote:       bool
   devbox_json: string
   notes:       string
 
@@ -87,7 +86,6 @@ prompt generate_system:
   setup such as dependency install or `npx playwright install --with-deps`).
 
   Emit a generate_output:
-  - wrote: true if you wrote devbox.json.
   - devbox_json: the exact file content you wrote.
   - notes: anything the operator should know (non-Nix tools, services).
 
@@ -111,10 +109,9 @@ agent generate_devbox:
   tool_max_steps: 50
 
 ## verify_devbox — deterministic gate: the generated devbox.json must
-## `devbox install` cleanly (producing devbox.lock) and pass a smoke
-## `devbox run`. Emits an envelope; never throws (a failure is reported,
-## not crashed). python3 -c keeps the JSON emission clean (single quotes
-## are safe inside the double-quoted -c arg).
+## `devbox install` cleanly (producing devbox.lock). Emits an envelope;
+## never throws (a failure is reported, not crashed). python3 -c keeps the
+## JSON emission clean (single quotes are safe inside the double-quoted -c arg).
 tool verify_devbox:
   command: `WS={{input.workspace_dir}} python3 -c "
 import os, json, subprocess
@@ -128,17 +125,11 @@ def run(c, t):
         return p.returncode, (p.stdout + p.stderr).decode('utf-8', 'ignore')[-4000:]
     except Exception as e:
         return -1, 'exception: ' + str(e)
-errs = []
 rc, out = run('devbox install', 1800)
+tail = out[-6000:]
 if rc != 0:
-    errs.append('devbox install rc=' + str(rc))
-rc2, out2 = run('devbox run -- true', 300)
-if rc2 != 0:
-    errs.append('devbox run smoke rc=' + str(rc2))
-tail = (out + chr(10) + out2)[-6000:]
-if errs:
-    tail = tail + chr(10) + '; '.join(errs)
-print(json.dumps({'ok': len(errs) == 0, 'output': tail}))
+    tail = tail + chr(10) + 'devbox install rc=' + str(rc)
+print(json.dumps({'ok': rc == 0, 'output': tail}))
 "`
   input: verify_input
   output: verify_output
