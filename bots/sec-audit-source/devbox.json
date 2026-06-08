@@ -9,10 +9,5 @@
   ],
   "env": {
     "DEVBOX_NO_PROMPT": "true"
-  },
-  "shell": {
-    "init_hook": [
-      "echo 'sec-audit-source toolchain (Tier-1 bot devbox) ready' >&2"
-    ]
   }
 }
