@@ -5,13 +5,10 @@ import { useProjectInfo } from "@/hooks/useProjectInfo";
 import { desktop, isDesktop } from "@/lib/desktopBridge";
 import { useRunStore } from "@/store/run";
 import { useTabsStore } from "@/store/tabs";
+import { useBotsStore } from "@/store/bots";
+import { botDisplayLabel } from "@/lib/botLabel";
 
 const APP = "iterion studio";
-
-function basename(path: string): string {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] || path;
-}
 
 /**
  * useDocumentTitle keeps `document.title` in sync with the route, the
@@ -42,6 +39,13 @@ export function useDocumentTitle() {
     const tab = s.tabs.find((t) => t.id === s.activeEditorTabId);
     return tab?.label ?? null;
   });
+  // The catalog carries each bot's persona display_name; load it lazily
+  // while on the editor so a bot's title shows "Featurly" not "main.bot".
+  const bots = useBotsStore((s) => s.bots);
+  const fetchBots = useBotsStore((s) => s.fetch);
+  useEffect(() => {
+    if (location === "/editor" && bots === null) void fetchBots();
+  }, [location, bots, fetchBots]);
 
   useEffect(() => {
     let context = "";
@@ -62,10 +66,13 @@ export function useDocumentTitle() {
         // No tab open → the picker is showing, not a document.
         context = "Editor";
       } else if (activeEditorTabFile) {
-        context = basename(activeEditorTabFile);
+        // Persona display_name / technical id for a bot bundle's main.bot;
+        // meaningful basename for loose files.
+        context = botDisplayLabel(activeEditorTabFile, bots);
       } else {
-        // Tab without a file param: examples (label = example name) or
-        // blank scratchpads (label defaults to "untitled.bot").
+        // Tab with only a label (example opened via newEditorTab): the
+        // label is already the display name, kept current by
+        // EditorTabHost's TabLabelSync.
         context = activeEditorTabLabel || "untitled.bot";
       }
     } else {
@@ -102,6 +109,7 @@ export function useDocumentTitle() {
     activeEditorTabId,
     activeEditorTabFile,
     activeEditorTabLabel,
+    bots,
     runHeader,
   ]);
 }

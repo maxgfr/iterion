@@ -13,7 +13,9 @@ import {
 } from "@/store/selection";
 import * as api from "@/api/client";
 import { useTabsStore } from "@/store/tabs";
+import { useBotsStore } from "@/store/bots";
 import { useUIStore } from "@/store/ui";
+import { botDisplayLabel } from "@/lib/botLabel";
 
 const EditorView = lazy(() => import("@/components/EditorView"));
 
@@ -83,29 +85,33 @@ export default function EditorTabHost({ tabId, file }: Props) {
   );
 }
 
-function basename(path: string): string {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] || path;
-}
-
 // TabLabelSync mirrors the document's current file path onto the tab
 // label so opening a file (deep link, RecentFiles click, Save As)
 // retitles the tab. Hosted under DocumentStoreProvider so the selector
 // hits the per-tab store, not the module default.
 //
-// Only acts when `currentFilePath` is non-null. Resetting the label to
-// "untitled.bot" whenever path is null would race the openFile
-// resolution on every new tab open and clobber labels set by the
-// caller (e.g. an example name passed to newEditorTab).
+// Uses botDisplayLabel so a bundle's `main.bot` shows the persona
+// display_name (e.g. "Featurly") / technical id ("feature-dev") rather
+// than the non-distinctive basename "main.bot". Only acts when
+// `currentFilePath` is non-null. Resetting the label to "untitled.bot"
+// whenever path is null would race the openFile resolution on every new
+// tab open and clobber labels set by the caller.
 function TabLabelSync({ tabId }: { tabId: string }) {
   const path = useDocumentStore((s) => s.currentFilePath);
+  const bots = useBotsStore((s) => s.bots);
+  const fetchBots = useBotsStore((s) => s.fetch);
+  useEffect(() => {
+    // A bot bundle's main.bot needs the catalog to resolve its persona
+    // name; fetch it lazily so the tab can settle on "Featurly".
+    if (path && bots === null) void fetchBots();
+  }, [path, bots, fetchBots]);
   useEffect(() => {
     if (!path) return;
-    const next = basename(path);
+    const next = botDisplayLabel(path, bots);
     const tabs = useTabsStore.getState().tabs;
     const current = tabs.find((t) => t.id === tabId);
     if (!current || current.label === next) return;
     useTabsStore.getState().rename(tabId, next);
-  }, [path, tabId]);
+  }, [path, bots, tabId]);
   return null;
 }
