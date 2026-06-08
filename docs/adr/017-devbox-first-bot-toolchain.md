@@ -134,15 +134,42 @@ one, so every downstream bot can run build/test/e2e in a reproducible env.
    devbox is the layer the team already uses and ships in the image.
 
 ## Rollout (staged, each independently shippable)
-1. **First-class devbox in the sandbox**: fix root-`$HOME`, mount `/nix` +
-   devbox cache, allowlist the substituter.
-2. **Tier 1**: add `devbox.json` to the sec bot; slim the sec image toward
-   `base + devbox + node` (this ADR's prototype measures cold/warm cost).
-3. **Tier 2**: detect the project `devbox.json` → `devbox install` on start
+
+**Verified already in place (2026-06-08) — step 1 is mostly done:**
+- First-class `$HOME`: `pkg/runtime/sandbox_mounts.go` already lays a
+  uid-owned writable tmpfs HOME (+ nested `.cache/go-build`, `go/pkg/mod`
+  binds). The prototype confirmed `$HOME` writable as uid 1000 and
+  `devbox install` succeeds — the "not first-class" comment predates this;
+  the residual gap is the store, below.
+- Substituter allowlist: `cache.nixos.org` / `channels.nixos.org` /
+  `releases.nixos.org` + `registry.npmjs.org` are already in
+  `pkg/sandbox/netproxy/preset.go`.
+
+**Remaining — persistent store (the only real gap; prototype: cold 16 min vs
+warm 0 s).** A per-run container's `/nix/store` + devbox profile are
+ephemeral, so each run re-provisions. Two paths:
+- **(A) Pre-warm in the image** — `devbox install` the bot's `devbox.json`
+  at image build so the closure is baked. Simple, deterministic; but a
+  per-bot-image rebuild, and **redundant for today's sec image** (its
+  scanners are already baked). This is the path for a *slim* base
+  (`base + devbox + node`, image built FROM `devbox.json`).
+- **(B) Named `/nix` docker volume** (seeded from the image on first mount)
+  — warms Tier-1 *and* Tier-2 with no rebuild. Footguns to handle before
+  shipping: ~596 MB first-seed copy; concurrent runs sharing the store (nix
+  db lock); k8s can't `host_state` (gate docker-only); volume
+  lifecycle/prune; and the big one — **a stale volume shadows a rebuilt
+  image's `/nix`**, so the volume must be keyed/invalidated on the image
+  digest. Worth it for Tier-2, but it needs the careful version — not a
+  rushed mount.
+
+**Then:**
+1. **Tier 2**: detect the project `devbox.json` → `devbox install` on start
    → route `build_rung`/`regress_rung`/`reproduce_rung`/e2e through
    `devbox run --` when present.
-4. **Tier 3**: build the `devbox-setup` bot.
-5. **Non-Nix**: keep deepsec baked / init-hook (Tier-1 devbox gives node;
+2. **Tier 3**: build the `devbox-setup` bot.
+3. **Slim**: once (A)/(B) is solid, drop the baked scanners and rely on the
+   `devbox.json` closure.
+4. **Non-Nix**: keep deepsec baked / init-hook (Tier-1 devbox gives node;
    deepsec install stays npm).
 
 ## Prototype results (2026-06-08, `iterion-sandbox-sec:edge`, uid 1000)
