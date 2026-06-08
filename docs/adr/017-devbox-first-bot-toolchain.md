@@ -145,7 +145,29 @@ one, so every downstream bot can run build/test/e2e in a reproducible env.
 5. **Non-Nix**: keep deepsec baked / init-hook (Tier-1 devbox gives node;
    deepsec install stays npm).
 
+## Prototype results (2026-06-08, `iterion-sandbox-sec:edge`, uid 1000)
+
+Provisioned `bots/sec-audit-source/devbox.json` (gosec, gitleaks, semgrep,
+trivy, ripgrep) in the sec image (already has nix 2.34.6 + devbox 0.17.2 +
+a 596 MB baked `/nix/store`), as the `devbox` user:
+
+| Metric | Result |
+|---|---|
+| `$HOME` writable as uid 1000 | **yes** — `devbox install` works in a plain container; the "not first-class" friction is **sandbox-mount-specific** (root-owned `$HOME` via mounts), not inherent |
+| Cold `devbox install` (store miss + network) | **~955 s (16 min)** — dominated by semgrep's Python closure (`python3.13-semgrep` + `mcp` + `pydantic` …) from `cache.nixos.org` |
+| Warm `devbox install` (cached) | **0 s** |
+| All 5 tools resolve via `devbox run -- <tool>` | **yes** (gosec, gitleaks, trivy, semgrep, rg) |
+
+**Reading.** The model works end-to-end (declared → provisioned → resolved).
+The decisive number is **cold 16 min vs warm 0 s**: a **persistent Nix
+store is non-negotiable** — without it every run pays ~16 min. So the
+rollout MUST pre-warm the store (bake the closure into the base image, or a
+shared cache volume) so "cold" is effectively warm; then the
+slim-base + per-bot `devbox.json` model gives reproducibility at ~0
+provisioning cost. semgrep (Python) is the heavy item; the Go-binary
+scanners are cheap. The `$HOME`-writable result also shows the "first-class
+devbox" fix is a sandbox-mount detail, not a blocker.
+
 ## See also
-- Prototype results + measured cold/warm provisioning: appended to this ADR
-  (or `bots/sec-audit-source/devbox.json` + the dogfood log).
+- Prototype: [bots/sec-audit-source/devbox.json](../../bots/sec-audit-source/devbox.json).
 - Existing devbox hooks: `claw_builtins.go`, `sandbox_mounts.go`.
