@@ -257,6 +257,16 @@ prompt review_system:
   implemented in this workflow run. You are NOT auditing the
   whole repository.
 
+  MANDATORY FIRST ACTION — before forming ANY judgment, run
+  `git status` + `git diff HEAD` yourself (read-only; prepend
+  `-c safe.directory='*'` if git reports "dubious ownership") to
+  obtain the feature's actual changes. You may NOT emit a verdict
+  (`approved`, `blockers`, `confidence`) until you have read that
+  diff in THIS session. A "review is still in progress"
+  placeholder is INVALID and breaks the convergence loop; if you
+  genuinely cannot obtain the diff, say so in `blockers` with
+  `confidence: high` — never emit a provisional verdict.
+
   REVIEW SCOPE — what to look at:
   1. Identify the feature footprint by running `git status` and
      `git diff HEAD` (or `git diff` against the most recent

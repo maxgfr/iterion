@@ -766,6 +766,13 @@ separate store:
 - worktree/branch changes → `--merge-into none` (commits land on a storage
   branch only, never the operator's checked-out branch),
 - report/scratch output → a scratch `report_path` (e.g. under `/tmp`).
+- **`worktree: auto` bots: don't pass `--var workspace_dir=$(pwd)`** — omit it
+  so it defaults to `${PROJECT_DIR}`, which the engine resolves to the worktree
+  (the clean, fully-mounted tree). A literal repo-root override aims agents at
+  the main checkout, which under sandbox has `.git` mounted but no working-tree
+  files → git there reports a phantom "all files deleted". The engine now
+  auto-remaps a repo-root override back to the worktree (with a warning), but
+  omitting it is cleaner.
 
 The same applies to a dedicated server instance you spin up from a worktree to
 exercise modified engine code: bind it to the operator's store dir (or tell

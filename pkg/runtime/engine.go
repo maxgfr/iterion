@@ -1798,7 +1798,36 @@ func (e *Engine) resolveVars(inputs map[string]interface{}) map[string]interface
 		}
 		vars[k] = coerced
 	}
+
+	// Foot-gun guard: a var explicitly set to the repo root — e.g.
+	// `--var workspace_dir=$(pwd)` — points agents at the MAIN checkout
+	// rather than the active worktree. Under worktree:auto the repo root
+	// IS the worktree, and under sandbox the main-checkout path has `.git`
+	// mounted but NO working-tree files, so git there reports a phantom
+	// "all files deleted". Remap any repo-root-valued var to the same
+	// target `${PROJECT_DIR}` resolves to (the worktree / in-container
+	// workspace). No-op when that target already equals the repo root
+	// (no worktree and no sandbox path remap), so a plain run is untouched.
+	if e.repoRoot != "" {
+		if projectDir := expandFn("PROJECT_DIR"); projectDir != "" && !samePath(projectDir, e.repoRoot) {
+			for k, val := range vars {
+				if s, ok := val.(string); ok && samePath(s, e.repoRoot) {
+					vars[k] = projectDir
+					if e.logger != nil {
+						e.logger.Warn("runtime: var %q was set to the repo root %q; remapped to the worktree/sandbox workspace %q to avoid a phantom working-tree view. Prefer omitting it so it defaults to ${PROJECT_DIR}.", k, e.repoRoot, projectDir)
+					}
+				}
+			}
+		}
+	}
 	return vars
+}
+
+// samePath reports whether two paths are the same after lexical cleaning.
+// Used to detect a var explicitly set to the repo root so it can be
+// remapped to the worktree/sandbox workspace.
+func samePath(a, b string) bool {
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 // coerceVarValue narrows a user-provided override (typically a

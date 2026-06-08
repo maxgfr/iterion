@@ -108,6 +108,10 @@ prompt review_system:
      - The chunk's full source is provided INLINE in the user
        message (`chunk_content`). That inline content is your
        primary artifact — you do NOT need to read it from disk.
+     - NEVER emit a provisional "review is still in progress"
+       verdict: you have the full chunk inline, so judge it now
+       and fill `approved`/`blockers`/`confidence` from it. A
+       placeholder is INVALID and breaks the convergence loop.
      - You MAY use your read tools to follow a SPECIFIC
        cross-reference into another file, but you MUST NEVER
        bulk-read, `glob **/*`, `find` without a tight path, or

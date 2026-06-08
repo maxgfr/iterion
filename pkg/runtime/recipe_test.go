@@ -265,6 +265,43 @@ func TestResolveVarsExpandsProjectDirInOverrides(t *testing.T) {
 	}
 }
 
+// TestResolveVarsRemapsRepoRootToWorktree locks the foot-gun guard: under
+// worktree:auto a var explicitly set to the repo root (e.g.
+// `--var workspace_dir=$(pwd)`) is remapped to the worktree (what
+// ${PROJECT_DIR} resolves to), so agents don't get pointed at the main
+// checkout — which under sandbox is a phantom "all files deleted" view.
+func TestResolveVarsRemapsRepoRootToWorktree(t *testing.T) {
+	wf := &ir.Workflow{
+		Name:    "wf",
+		Schemas: map[string]*ir.Schema{},
+		Prompts: map[string]*ir.Prompt{},
+		Vars: map[string]*ir.Var{
+			"workspace_dir": {Name: "workspace_dir", Type: ir.VarString, HasDefault: true, Default: "${PROJECT_DIR}"},
+		},
+		Loops: map[string]*ir.Loop{},
+	}
+	exec := newStubExecutor()
+	s := tmpStore(t)
+	// Simulate a worktree:auto run — workDir is the worktree, repoRoot the
+	// original main checkout.
+	eng := New(wf, s, exec, WithWorkDir("/repo/.iterion/worktrees/run-1"))
+	eng.repoRoot = "/repo"
+
+	// A var explicitly set to the repo root is remapped to the worktree.
+	if got := eng.resolveVars(map[string]interface{}{"workspace_dir": "/repo"}); got["workspace_dir"] != "/repo/.iterion/worktrees/run-1" {
+		t.Errorf("repo-root override should remap to the worktree, got %q", got["workspace_dir"])
+	}
+	// A var pointing elsewhere is left untouched.
+	if got := eng.resolveVars(map[string]interface{}{"workspace_dir": "/some/other/path"}); got["workspace_dir"] != "/some/other/path" {
+		t.Errorf("non-repo-root path should pass through, got %q", got["workspace_dir"])
+	}
+	// The ${PROJECT_DIR} default still resolves to the worktree (and is not
+	// re-remapped, since it already equals the target).
+	if got := eng.resolveVars(nil); got["workspace_dir"] != "/repo/.iterion/worktrees/run-1" {
+		t.Errorf("${PROJECT_DIR} should resolve to the worktree, got %q", got["workspace_dir"])
+	}
+}
+
 // TestResolveVarsExpandsProjectMemoryDir locks the `${PROJECT_MEMORY_DIR}`
 // expansion: bots in dispatcher worktrees declare project-rooted memory
 // paths (e.g. `vars.memory_dir: "${PROJECT_MEMORY_DIR}/session-continuity"`),
