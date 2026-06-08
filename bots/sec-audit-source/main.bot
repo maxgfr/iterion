@@ -3712,12 +3712,16 @@ else:
     cmd = 'true'
 # Tier-2 (ADR-017): build in the project OWN declared toolchain when the
 # repo ships a devbox.json and devbox is on PATH (project pinned Go/Node/
-# etc.); bare command otherwise. Skips the no-op true.
-import shutil
+# etc.); bare command otherwise. Skips the no-op true. For the devbox path,
+# HOME must be the container user real home (nix profile + cache live there,
+# NOT in the sandbox-forced HOME) or devbox cannot resolve its store.
+import shutil, pwd
+_env = dict(os.environ)
 if cmd != 'true' and shutil.which('devbox') and os.path.isfile(os.path.join(ws, 'devbox.json')):
     cmd = 'devbox run -- ' + cmd
+    _env['HOME'] = pwd.getpwuid(os.getuid()).pw_dir
 try:
-    p = subprocess.run(cmd, shell=True, cwd=ws, capture_output=True, timeout=900)
+    p = subprocess.run(cmd, shell=True, cwd=ws, capture_output=True, timeout=900, env=_env)
     out = (p.stdout + p.stderr).decode('utf-8', errors='ignore')[-8000:]
     print(json.dumps({'ok': p.returncode == 0, 'exit_code': p.returncode, 'output': out, 'command': cmd}))
 except Exception as e:
@@ -3827,12 +3831,16 @@ else:
     cmd = 'true'
 # Tier-2 (ADR-017): run the project tests in the project OWN declared
 # toolchain when the repo ships a devbox.json and devbox is on PATH; bare
-# command otherwise. Skips the no-op true.
-import shutil
+# command otherwise. Skips the no-op true. For the devbox path, HOME must be
+# the container user real home (nix profile + cache live there, NOT in the
+# sandbox-forced HOME) or devbox cannot resolve its store.
+import shutil, pwd
+_env = dict(os.environ)
 if cmd != 'true' and shutil.which('devbox') and os.path.isfile(os.path.join(ws, 'devbox.json')):
     cmd = 'devbox run -- ' + cmd
+    _env['HOME'] = pwd.getpwuid(os.getuid()).pw_dir
 try:
-    p = subprocess.run(cmd, shell=True, cwd=ws, capture_output=True, timeout=1800)
+    p = subprocess.run(cmd, shell=True, cwd=ws, capture_output=True, timeout=1800, env=_env)
     out = (p.stdout + p.stderr).decode('utf-8', errors='ignore')[-8000:]
     print(json.dumps({'passed': p.returncode == 0, 'test_command': cmd, 'exit_code': p.returncode, 'output': out}))
 except Exception as e:

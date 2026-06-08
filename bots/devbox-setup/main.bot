@@ -37,6 +37,10 @@ schema verify_output:
   ok:     bool
   output: string
 
+schema commit_output:
+  committed: bool
+  output:    string
+
 prompt detect_system:
   You are bootstrapping a reproducible dev environment for the repository
   at {{vars.workspace_dir}}. Read the manifests (go.mod, package.json,
@@ -112,8 +116,11 @@ agent generate_devbox:
 ## JSON emission clean (single quotes are safe inside the double-quoted -c arg).
 tool verify_devbox:
   command: `WS={{input.workspace_dir}} python3 -c "
-import os, json, subprocess
+import os, json, subprocess, pwd
 ws = os.environ['WS']
+# devbox/nix live in the container user real home (e.g. /home/devbox), not
+# the sandbox-forced HOME (=host home), which lacks the nix profile + cache.
+os.environ['HOME'] = pwd.getpwuid(os.getuid()).pw_dir
 if not os.path.isfile(os.path.join(ws, 'devbox.json')):
     print(json.dumps({'ok': False, 'output': 'no devbox.json was written'}))
     raise SystemExit(0)
@@ -132,6 +139,25 @@ print(json.dumps({'ok': rc == 0, 'output': tail}))
   input: verify_input
   output: verify_output
 
+## commit_devbox — persist the generated devbox.json (+ devbox.lock) in the
+## worktree so worktree:auto can land it. Without a commit the file is
+## written but the worktree is discarded at finalize ("no commits produced")
+## and the bot delivers nothing.
+tool commit_devbox:
+  command: `WS={{input.workspace_dir}} python3 -c "
+import os, subprocess, json
+ws = os.environ['WS']
+files = [f for f in ('devbox.json', 'devbox.lock') if os.path.isfile(os.path.join(ws, f))]
+if not files:
+    print(json.dumps({'committed': False, 'output': 'no devbox.json to commit'}))
+    raise SystemExit(0)
+subprocess.run(['git', 'add'] + files, cwd=ws, capture_output=True)
+r = subprocess.run(['git', '-c', 'user.email=devy@iterion.local', '-c', 'user.name=Devy', 'commit', '-m', 'chore(devbox): add devbox.json toolchain (devbox-setup)'], cwd=ws, capture_output=True)
+print(json.dumps({'committed': r.returncode == 0, 'output': (r.stdout + r.stderr).decode('utf-8', 'ignore')[-2000:]}))
+"`
+  input: verify_input
+  output: commit_output
+
 workflow devbox_setup:
   entry: detect_stack
   sandbox:
@@ -147,4 +173,5 @@ workflow devbox_setup:
 
   detect_stack -> generate_devbox with { detected: "{{outputs.detect_stack}}" }
   generate_devbox -> verify_devbox with { workspace_dir: "{{vars.workspace_dir}}" }
-  verify_devbox -> done
+  verify_devbox -> commit_devbox with { workspace_dir: "{{vars.workspace_dir}}" }
+  commit_devbox -> done

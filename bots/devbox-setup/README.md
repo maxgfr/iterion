@@ -1,22 +1,26 @@
-# devbox-setup (Devy) — status: v1 (detect+generate dogfood-validated; verify blocked by a sandbox devbox-HOME friction)
+# devbox-setup (Devy) — status: v1, dogfood-validated end-to-end (detect → generate → verify → commit → deliver)
 
 Devy authors a pinned `devbox.json` for a repo so its build/test/e2e run in a
 reproducible toolchain (ADR-017 Tier-3). This bundle ships the **manifest**,
 the **playbook skill** (`skills/devbox-setup.md` — the substance: detect →
 map to Nix → shape → validate → scope), and the **`main.bot`** (linear
-detect → generate → verify → done; `iterion validate` OK, 5 nodes).
+detect → generate → verify → commit → done; `iterion validate` OK, 6 nodes).
 
-**Dogfood (2026-06-08, minimal Go repo).** `detect_stack` correctly
-identified Go 1.22 and `generate_devbox` produced a correct pinned
-`devbox.json` — `{"packages":["go@1.22"],"env":{"DEVBOX_NO_PROMPT":"true"}}`
-with sound notes — so the AI core works end-to-end. `verify_devbox` (which
-runs `devbox install` IN the sandbox) returned `ok:false` on a permission
-issue: inside the container the worktree appears root-owned (uid remap) and
-`$HOME/.cache/devbox` is not writable, so `devbox install` can't run. That is
-the "devbox first-class in the sandbox" friction (ADR-017), not a bot-logic
-flaw — the bot ran the whole pipeline and reported the failure gracefully.
-Making `verify` pass needs the sandbox to expose a uid-aligned, writable
-workspace + devbox cache to tool nodes (a sandbox-engine follow-up).
+**Dogfood (2026-06-08, minimal Go repo) — green end-to-end.** `detect_stack`
+identified Go 1.22, `generate_devbox` wrote a correct pinned `devbox.json`
+(`{"packages":["go@1.22"]}`), `verify_devbox` ran `devbox install` in the
+sandbox to `ok:true`, `commit_devbox` committed it, and the run
+fast-forwarded the target → the `devbox.json` was delivered. Three bugs were
+found + fixed along the way: (1) the `model:` field needs `${ENV}` not
+`{{vars}}` (a `{{vars}}` value was passed literally to the CLI); (2) `$HOME`
+is force-set to the host home in the sandbox, but the image's nix/devbox live
+under the container user's home (`/home/devbox`) → run devbox with
+`HOME = the real user home` (`pwd.getpwuid(os.getuid()).pw_dir`) or it can't
+resolve its store (the same fix applies to Seki's Tier-2 build/regress
+rungs); (3) without a commit the generated file was discarded with the
+worktree, so a `commit_devbox` node was added. Set
+`ITERION_SANDBOX_PERSIST_NIX=1` to reuse the `/nix` store across runs
+(ADR-017 #1) so `devbox install` warms.
 
 ## Intended workflow (build spec)
 
