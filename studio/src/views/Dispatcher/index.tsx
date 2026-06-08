@@ -29,6 +29,12 @@ export default function DispatcherView() {
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  // The dispatcher manager's WS only exists while it is running or paused;
+  // idle / error / absent all 503. Gate the live socket on that so an
+  // unconfigured dashboard doesn't spin an endless failed-handshake loop
+  // that spams the console (~1 error every 1.5s).
+  const dispatcherAttached =
+    status?.state === "running" || status?.state === "paused";
   const openRun = useCallback(
     (runID: string) => setLocation(`/runs/${encodeURIComponent(runID)}`),
     [setLocation],
@@ -48,6 +54,10 @@ export default function DispatcherView() {
 
   useEffect(() => {
     void reload();
+    // Only the running/paused manager serves the WS; skip it while idle so
+    // we don't loop on 503s. The 2s status poll re-runs this effect once
+    // the dispatcher attaches.
+    if (!dispatcherAttached) return;
     let cancelled = false;
     let retryTimer: number | null = null;
     let attempt = 0;
@@ -70,8 +80,14 @@ export default function DispatcherView() {
           ws.close();
           return;
         }
-        attempt = 0;
         wsRef.current = ws;
+        // Reset the backoff only on a real connection: openWS resolves a
+        // still-connecting socket, so a 503 handshake failure surfaces
+        // later via onerror/onclose. Resetting here would defeat the
+        // backoff and retry every 1.5s.
+        ws.onopen = () => {
+          attempt = 0;
+        };
         ws.onmessage = (e) => {
           try {
             setSnap(JSON.parse(e.data) as DispatcherSnapshot);
@@ -110,7 +126,7 @@ export default function DispatcherView() {
         ws.close();
       }
     };
-  }, [reload]);
+  }, [reload, dispatcherAttached]);
 
   useEffect(() => {
     let cancelled = false;
