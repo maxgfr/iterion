@@ -307,13 +307,25 @@ function PlanHandedOffRow({
   // backlog and lets the triage loop transition; older bots created
   // straight in ready). The IssuesSummaryCard above shows the live
   // list; the milestone just confirms emit_action landed.
+  //
+  // createdCount comes from the emit_action `created_issues` array,
+  // which some bot versions / degraded board-MCP runs leave empty even
+  // when the run summary reports issues materialised. Asserting "0
+  // issues created on the board" right above a summary that says "6
+  // materialised" reads as a failure/contradiction — so when the count
+  // is 0 we render the bare milestone and let the summary (below, and
+  // the IssuesSummaryCard above) carry the real detail.
   const issueLabel =
     message.createdCount === 1 ? "1 issue" : `${message.createdCount} issues`;
   return (
     <div className="border-t border-success/40 pt-3 text-center">
       <div className="inline-flex items-center gap-2 rounded-full border border-success/40 bg-success-soft px-3 py-1 text-[12px] text-success-fg">
         <span aria-hidden="true">✓</span>
-        <span>Plan handed off — {issueLabel} created on the board</span>
+        <span>
+          {message.createdCount > 0
+            ? `Plan handed off — ${issueLabel} created on the board`
+            : "Plan handed off"}
+        </span>
       </div>
       {message.summary && (
         <div className="mt-1 text-[11px] italic text-fg-muted">
