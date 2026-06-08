@@ -159,8 +159,14 @@ ephemeral, so each run re-provisions. Two paths:
   db lock); k8s can't `host_state` (gate docker-only); volume
   lifecycle/prune; and the big one — **a stale volume shadows a rebuilt
   image's `/nix`**, so the volume must be keyed/invalidated on the image
-  digest. Worth it for Tier-2, but it needs the careful version — not a
-  rushed mount.
+  digest. **IMPLEMENTED** (commit `806f53f6`, opt-in
+  `ITERION_SANDBOX_PERSIST_NIX`, default OFF → merge-safe): the docker driver
+  mounts a digest-keyed named volume at `/nix`. Disambiguation confirmed the
+  volume is **viable** — `nix-store --verify` + `devbox` both succeed on a
+  seeded volume; the earlier cold-install rc=1 was the flaky network, not the
+  volume. Remaining for full prod: concurrency review (shared store nix-db
+  lock), a volume-prune reaper for stale image digests, and an end-to-end
+  warm-reuse run on a stable network.
 
 **Then:**
 1. **Tier 2**: detect the project `devbox.json` → `devbox install` on start
