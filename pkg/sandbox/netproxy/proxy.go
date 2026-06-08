@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -57,6 +58,10 @@ type Proxy struct {
 	// the bytes are opaque TLS.
 	forwardTransport *http.Transport
 
+	// inspect holds the TLS-inspection state (Layer 2 secret egress
+	// substitution). Nil keeps the proxy a transparent CONNECT tunnel.
+	inspect *inspectConfig
+
 	mu      sync.Mutex
 	running bool
 }
@@ -79,6 +84,23 @@ type Options struct {
 	// Dial overrides the upstream dialer. Tests use this to redirect
 	// CONNECTs to a loopback echo server.
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
+
+	// InspectCA, when non-nil, enables TLS-inspection mode (Layer 2):
+	// CONNECT tunnels are terminated with leaves minted by this CA so the
+	// proxy can rewrite the plaintext request. The CA's public cert must
+	// be trusted inside the sandbox.
+	InspectCA *EphemeralCA
+
+	// Rewriter is consulted in inspection mode to substitute secret
+	// placeholders and to block exfiltration. Nil leaves inspection a
+	// pure decrypt/re-encrypt passthrough.
+	Rewriter SecretRewriter
+
+	// InspectUpstreamTLS overrides the TLS config used for the proxy's
+	// connection to the REAL upstream in inspection mode (tests inject a
+	// RootCAs trusting a local httptest server). Nil uses the system
+	// trust store with proper verification.
+	InspectUpstreamTLS *tls.Config
 }
 
 // New constructs a Proxy. The proxy is not yet listening — call
@@ -108,6 +130,25 @@ func New(opts Options) (*Proxy, error) {
 		// Content-Encoding (if any) reaches the client unchanged —
 		// the proxy is byte-transparent for non-CONNECT traffic.
 		DisableCompression: true,
+	}
+	if opts.InspectCA != nil {
+		upstreamTLS := opts.InspectUpstreamTLS
+		if upstreamTLS == nil {
+			upstreamTLS = &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+		p.inspect = &inspectConfig{
+			ca:       opts.InspectCA,
+			rewriter: opts.Rewriter,
+			upstream: &http.Transport{
+				DialContext:         dial,
+				TLSClientConfig:     upstreamTLS,
+				ForceAttemptHTTP2:   false, // stay HTTP/1.1 end-to-end
+				DisableCompression:  true,
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 8,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		}
 	}
 	return p, nil
 }
@@ -361,6 +402,33 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	if _, _, err := net.SplitHostPort(host); err != nil {
 		host = net.JoinHostPort(host, "443")
 	}
+
+	// TLS-inspection mode (Layer 2): terminate TLS on the client side and
+	// rewrite the plaintext request instead of tunnelling opaque bytes.
+	// Policy was already enforced in [Proxy.handle] before dispatch here.
+	if p.inspect != nil {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijacking not supported", http.StatusInternalServerError)
+			return
+		}
+		clientConn, bufrw, err := hijacker.Hijack()
+		if err != nil {
+			http.Error(w, "hijack failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if _, err := bufrw.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
+			clientConn.Close()
+			return
+		}
+		if err := bufrw.Flush(); err != nil {
+			clientConn.Close()
+			return
+		}
+		p.handleConnectInspect(host, clientConn, bufrw)
+		return
+	}
+
 	upstream, err := p.dial(r.Context(), "tcp", host)
 	if err != nil {
 		http.Error(w, "upstream dial: "+err.Error(), http.StatusBadGateway)

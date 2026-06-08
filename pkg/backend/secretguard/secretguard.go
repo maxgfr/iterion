@@ -102,10 +102,11 @@ func PlaceholderForName(name string) string { return defaultPlaceholder(name) }
 // Guard is an immutable, concurrency-safe scrubber built once per run.
 type Guard struct {
 	secrets            []Secret
-	literalPlaceholder map[string]string // every encoding → its placeholder
-	matcher            *regexp.Regexp    // alternation of known encodings
-	placeholderValue   map[string]string // placeholder → raw value (Materialize)
-	placeholdersByLen  []string          // placeholders, longest first
+	literalPlaceholder map[string]string   // every encoding → its placeholder
+	matcher            *regexp.Regexp      // alternation of known encodings
+	placeholderValue   map[string]string   // placeholder → raw value (Materialize)
+	placeholdersByLen  []string            // placeholders, longest first
+	encodingsByName    map[string][]string // secret name → its value encodings (egress DLP)
 	det                *detector.Detector
 	cfg                Config
 }
@@ -141,6 +142,7 @@ func New(secrets []Secret, cfg Config) *Guard {
 	g := &Guard{
 		literalPlaceholder: make(map[string]string),
 		placeholderValue:   make(map[string]string),
+		encodingsByName:    make(map[string][]string),
 		cfg:                cfg,
 	}
 	if cfg.Heuristic {
@@ -158,7 +160,9 @@ func New(secrets []Secret, cfg Config) *Guard {
 		s.Placeholder = ph
 		g.secrets = append(g.secrets, s)
 		g.placeholderValue[ph] = s.Value
-		for _, enc := range encodingsOf(s.Value) {
+		encs := encodingsOf(s.Value)
+		g.encodingsByName[s.Name] = encs
+		for _, enc := range encs {
 			// First registration wins so a value shared by two names
 			// keeps a stable placeholder.
 			if _, ok := g.literalPlaceholder[enc]; !ok {
