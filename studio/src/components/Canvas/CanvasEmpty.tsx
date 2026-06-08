@@ -4,7 +4,8 @@ import { useDocumentStore } from "@/store/document";
 import { useUIStore } from "@/store/ui";
 import { createEmptyDocument } from "@/lib/defaults";
 import { Button, Dialog } from "@/components/ui";
-import { listExamples, loadExample } from "@/api/client";
+import { listExamples } from "@/api/client";
+import { openExampleIntoStore } from "@/lib/openExample";
 import {
   FileIcon,
   RocketIcon,
@@ -37,17 +38,16 @@ export default function CanvasEmpty() {
 
   const handleLoadExample = async (name: string) => {
     try {
-      const res = await loadExample(name);
-      setDocument(res.document);
-      setCurrentSource(res.source);
-      // Bind the productised bot path (mirrors RecentFilesPanel /
-      // Toolbar.handlePickFile) so the Run button enables immediately —
-      // previously null left every example loaded here stuck on "Save the
-      // workflow first". Set before markSaved() so the clean state is the
-      // saved baseline.
-      setCurrentFilePath(`bots/${name}`);
-      setDiagnostics([], []);
-      markSaved();
+      // Shared helper: load + bind bots/<name> (so Run enables) + keep the
+      // example's source/diagnostics + markSaved. Same path as
+      // RecentFilesPanel and Toolbar.handlePickFile.
+      await openExampleIntoStore(name, {
+        setDocument,
+        setDiagnostics,
+        setCurrentSource,
+        setCurrentFilePath,
+        markSaved,
+      });
       setExamplesOpen(false);
     } catch {
       // The server returns useful errors; the modal stays open so the

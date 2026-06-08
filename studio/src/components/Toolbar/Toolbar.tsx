@@ -5,6 +5,7 @@ import { useRecentsStore } from "@/store/recents";
 import { useBackendDetectStore } from "@/store/backendDetect";
 import { createEmptyDocument } from "@/lib/defaults";
 import * as api from "@/api/client";
+import { openExampleIntoStore } from "@/lib/openExample";
 import ConfirmDialog from "../shared/ConfirmDialog";
 import { useConfirm } from "@/hooks/useConfirm";
 import { DISCARD_CHANGES_PROMPT } from "@/lib/copy";
@@ -112,21 +113,18 @@ export default function Toolbar() {
           pushRecent(result.path);
           markSaved();
         } else {
-          const result = await api.loadExample(path);
-          setDocument(result.document);
-          setDiagnostics(result.diagnostics);
-          // The productised bots live at <WorkDir>/bots/<name>, so the
-          // same relative path is reachable via the file API. Setting it
-          // here lets the user Save edits back to the bot file and —
-          // more importantly — enables the Launch run button, which
-          // would otherwise be disabled with "Save the workflow first"
-          // on every bot.
-          setCurrentFilePath(`bots/${path}`);
-          // loadExample doesn't return raw .iter source (it returns the
-          // parsed document only). Cloud-mode resume after launching
-          // an example would need a re-open to populate currentSource.
-          setCurrentSource(null);
-          markSaved();
+          // Productised bots live at <WorkDir>/bots/<name>; the shared
+          // helper binds that path (so Save works and the Run button
+          // enables instead of "Save the workflow first") and keeps the
+          // example's source + diagnostics. Same path as RecentFilesPanel
+          // and CanvasEmpty.
+          await openExampleIntoStore(path, {
+            setDocument,
+            setDiagnostics,
+            setCurrentSource,
+            setCurrentFilePath,
+            markSaved,
+          });
         }
       } catch (err) {
         console.error("Open failed:", err);

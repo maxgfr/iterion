@@ -10,6 +10,7 @@ import {
 
 import * as api from "@/api/client";
 import { getOrCreateDocumentStore } from "@/store/document";
+import { openExampleIntoStore } from "@/lib/openExample";
 import { useRecentsStore } from "@/store/recents";
 import { useTabsStore } from "@/store/tabs";
 import { useUIStore } from "@/store/ui";
@@ -104,33 +105,17 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
   const handleOpenExample = useCallback(
     async (name: string) => {
       setBusy(true);
+      // Open the bot in a fresh editor tab. Create the tab first so its
+      // per-tab document store exists, then load + apply via the shared
+      // helper (binds bots/<name> so Run enables, keeps source/diagnostics,
+      // marks the loaded state as the clean baseline). On failure, close
+      // the empty tab so a load error doesn't strand an untitled tab.
+      const tabId = useTabsStore.getState().newEditorTab(name);
       try {
-        // Examples live behind a dedicated endpoint and aren't files
-        // the user can save back to. Load the content first, spawn a
-        // fresh untitled tab via newEditorTab, then push the loaded
-        // document into the tab's store directly. Mark the freshly-
-        // loaded state as the saved baseline — without this, isDirty()
-        // is true from the first paint and navigating away triggers
-        // the unsaved-changes confirm dialog even when the user just
-        // browsed the example without typing.
-        const result = await api.loadExample(name);
-        const tabId = useTabsStore.getState().newEditorTab(name);
-        const docStore = getOrCreateDocumentStore(tabId);
-        const s = docStore.getState();
-        s.setDocument(result.document);
-        s.setDiagnostics(result.diagnostics);
-        s.setCurrentSource(result.source);
-        // The productised bots live at <WorkDir>/bots/<name>, so this
-        // relative path is reachable via the file/launch API. Setting it
-        // enables the Run button immediately (otherwise it's disabled with
-        // "Save the workflow first" while currentFilePath is null) and lets
-        // the user save edits back to the bot file. Mirrors the Toolbar
-        // handlePickFile example branch, which already does the same.
-        // Set before markSaved() so the clean state is the saved baseline.
-        s.setCurrentFilePath(`bots/${name}`);
-        s.markSaved();
+        await openExampleIntoStore(name, getOrCreateDocumentStore(tabId).getState());
         setLocation("/editor");
       } catch {
+        useTabsStore.getState().closeTab(tabId);
         addToast("Failed to open example", "error");
       } finally {
         setBusy(false);

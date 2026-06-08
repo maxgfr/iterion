@@ -41,9 +41,10 @@ afterEach(cleanup);
 describe("RecentFilesPanel — launching a first-class bot from Home", () => {
   // Regression guard for the "can't Run a bot until you save" friction:
   // opening a bot must bind currentFilePath = bots/<name> so the Toolbar
-  // Run button (disabled while currentFilePath is null) enables immediately,
-  // mirroring the Toolbar handlePickFile example branch.
-  it("sets currentFilePath to bots/<name> and stays non-dirty", async () => {
+  // Run button (disabled while currentFilePath is null) enables immediately.
+  // Goes through the shared openExampleIntoStore helper (also used by
+  // Toolbar.handlePickFile and CanvasEmpty).
+  it("binds bots/<name> path + keeps source and stays non-dirty", async () => {
     render(<RecentFilesPanel />);
 
     // The Bots section auto-opens when there are no recents; click Featurly.
@@ -55,6 +56,10 @@ describe("RecentFilesPanel — launching a first-class bot from Home", () => {
       expect(tabId).toBeTruthy();
       const doc = getOrCreateDocumentStore(tabId!).getState();
       expect(doc.currentFilePath).toBe("bots/feature-dev/main.bot");
+      // The helper also keeps the example's source (so Save / cloud-mode
+      // resume work without a re-open) — this is the behaviour Toolbar's
+      // old "setCurrentSource(null)" branch diverged from before the merge.
+      expect(doc.currentSource).toBe("agent a:\n  system: hi\n");
       // markSaved() ran after setCurrentFilePath, so the freshly-opened bot
       // is the clean baseline: no phantom unsaved-changes prompt, and the
       // file badge reads as a named file rather than "Unsaved".
