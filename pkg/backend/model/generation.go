@@ -83,6 +83,7 @@ func aggregateStream(ctx context.Context, ch <-chan api.StreamEvent) aggregatedR
 	var res aggregatedResponse
 	blocks := make(map[int]*blockState)
 	drained := false
+	sawStop := false
 	defer func() {
 		if drained {
 			return
@@ -104,8 +105,28 @@ func aggregateStream(ctx context.Context, ch <-chan api.StreamEvent) aggregatedR
 				res.text, res.toolUses, res.thinkingText, res.thinkingMs = collectBlocks(blocks)
 				for _, bs := range blocks {
 					if bs.blockType == "tool_use" && !bs.stopped {
-						res.err = fmt.Errorf("incomplete tool_use block: %s (content_block_stop not received)", bs.toolUse.Name)
+						// Retryable: a truncated tool_use is a dropped
+						// stream, not a permanent failure.
+						res.err = &APIError{
+							Message:     fmt.Sprintf("incomplete tool_use block: %s (content_block_stop not received)", bs.toolUse.Name),
+							IsRetryable: true,
+						}
 						return res
+					}
+				}
+				// Truncation backstop: a complete response always ends with a
+				// message_delta carrying a stop_reason AND a message_stop. If
+				// the channel closed with NEITHER terminal signal (and no
+				// explicit stream error fired), the connection dropped
+				// mid-stream. Surface a retryable error so the retry loop
+				// re-issues the request instead of silently accepting a
+				// truncated partial turn — which otherwise reads as a clean
+				// but degenerate response (e.g. a reviewer's narration cut off
+				// before it ever calls a tool).
+				if res.err == nil && res.stopReason == "" && !sawStop {
+					res.err = &APIError{
+						Message:     "incomplete stream: connection closed before completion (no stop_reason or message_stop received)",
+						IsRetryable: true,
 					}
 				}
 				return res
@@ -166,15 +187,16 @@ func aggregateStream(ctx context.Context, ch <-chan api.StreamEvent) aggregatedR
 				res.stopReason = event.StopReason
 
 			case api.EventError:
-				if classified := ClassifyStreamError([]byte(event.ErrorMessage)); classified != nil {
-					res.err = classified
-				} else {
-					res.err = fmt.Errorf("stream error: %s", event.ErrorMessage)
-				}
+				// Transport / truncation stream errors are classified
+				// retryable so the retry loop re-issues the request; a
+				// permanent provider error (quota, overflow) stays terminal.
+				res.err = classifyStreamEventError(event.ErrorMessage)
 				res.text, res.toolUses, res.thinkingText, res.thinkingMs = collectBlocks(blocks)
 				return res
 
-			case api.EventMessageStop, api.EventPing:
+			case api.EventMessageStop:
+				sawStop = true
+			case api.EventPing:
 				// No action needed.
 			}
 		}

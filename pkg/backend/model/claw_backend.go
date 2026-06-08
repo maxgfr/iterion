@@ -503,6 +503,48 @@ func (b *ClawBackend) generateText(ctx context.Context, client api.APIClient, ta
 	}, nil
 }
 
+// countToolCalls returns how many tool calls the model made across every
+// step of an agentic-loop result.
+func countToolCalls(r *TextResult) int {
+	if r == nil {
+		return 0
+	}
+	n := 0
+	for i := range r.Steps {
+		n += len(r.Steps[i].ToolCalls)
+	}
+	return n
+}
+
+// looksStructured reports whether text already carries a JSON object —
+// i.e. the model committed to a structured verdict on its own. Used to
+// skip the tool-use nudge for a node that answered directly from inline
+// context rather than narrating an unfinished plan. extractJSON returns
+// the {...} object substring (or "" when none is present, which json.Valid
+// rejects), so a valid result here means a real structured payload.
+func looksStructured(text string) bool {
+	return json.Valid([]byte(extractJSON(text)))
+}
+
+// toolUseReminder is the one-shot nudge sent to a tool-equipped model
+// that concluded without calling any tool, asking it to gather evidence
+// before answering — or to finalize now if its context is already
+// sufficient.
+func toolUseReminder() api.Message {
+	return api.Message{
+		Role: "user",
+		Content: []api.ContentBlock{{
+			Type: "text",
+			Text: "You ended without using any of your available tools. If your task " +
+				"requires inspecting files, running commands, or reading a diff that is " +
+				"not already present in this conversation, you MUST use your tools now to " +
+				"gather that evidence before producing your final answer. If everything " +
+				"you need is already in the conversation above, output your final " +
+				"structured result now.",
+		}},
+	}
+}
+
 func (b *ClawBackend) generateTextWithToolsAndSchemaRetry(ctx context.Context, client api.APIClient, task delegate.Task, opts GenerationOptions) (delegate.Result, error) {
 	return b.retryLoop(ctx, task.NodeID, func() (delegate.Result, error) {
 		return b.generateTextWithToolsAndSchema(ctx, client, task, opts)
@@ -518,6 +560,55 @@ func (b *ClawBackend) generateTextWithToolsAndSchema(ctx context.Context, client
 			return r, nil
 		}
 		return delegate.Result{}, fmt.Errorf("claw backend: text+tools generation: %w", err)
+	}
+
+	// A tool-equipped reviewer/judge that ended the loop WITHOUT calling a
+	// single tool — and without already committing to a JSON verdict — has
+	// almost certainly narrated a plan ("I'll review the diff…") and
+	// stopped before doing the work (observed with gpt-5.5 at high
+	// reasoning, and a likely outcome of a stalled/truncated stream).
+	// Letting the recovery pass below coerce that narration into the
+	// schema freezes a "still in progress" placeholder into the output —
+	// fatal for any convergence loop that needs a real cross-family
+	// approval. Give the model ONE explicit nudge to use its tools, then
+	// re-run the loop. No-op on the healthy path: a model that already
+	// emitted a JSON verdict (looksStructured) or that used its tools is
+	// left untouched, so a reviewer whose data is inline (e.g.
+	// whole_improve_loop's chunk_content) never pays for it.
+	if task.HasTools && countToolCalls(result) == 0 && !looksStructured(result.Text) {
+		nudged := opts
+		nudged.Messages = append(append([]api.Message(nil), result.Messages...), toolUseReminder())
+		if b.hooks.OnLLMRequest != nil {
+			b.hooks.OnLLMRequest(task.NodeID, LLMRequestInfo{
+				Model:        task.Model,
+				MessageCount: len(nudged.Messages),
+				Timestamp:    time.Now(),
+			})
+		}
+		reRun, reErr := GenerateTextDirect(ctx, client, nudged)
+		switch {
+		case reErr == nil:
+			// Carry the wasted first-pass usage into the re-run so cost
+			// accounting reflects both turns.
+			accumulateUsage(&reRun.TotalUsage, result.TotalUsage)
+			result = reRun
+			captureSessionMessages(ctx, task.NodeID, result)
+		default:
+			// A failure DURING the nudge must not be silently swallowed:
+			// otherwise the degenerate first-pass result falls through to
+			// the recovery coercion below and re-creates the placeholder
+			// verdict this guard exists to prevent. An ask_user surfaces as
+			// a pause; a transient/network failure propagates so the outer
+			// retryLoop re-issues the whole turn; only a permanent failure
+			// (e.g. context overflow — retrying won't help) falls through to
+			// recovery with the original result.
+			if r, ok := askUserResult(reErr); ok {
+				return r, nil
+			}
+			if isRetryable(reErr) {
+				return delegate.Result{}, fmt.Errorf("claw backend: nudge re-run: %w", reErr)
+			}
+		}
 	}
 
 	text := strings.TrimSpace(result.Text)

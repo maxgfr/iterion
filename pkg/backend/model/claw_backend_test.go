@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -173,6 +174,223 @@ func TestClawBackend_TextWithToolsAndSchema(t *testing.T) {
 	}
 	if result.ParseFallback {
 		t.Error("expected ParseFallback=false for valid JSON output")
+	}
+}
+
+// TestClawBackend_ZeroToolCallNudgeReRunsLoop verifies the FINDING-3
+// guard: a tool-equipped node that ends the agentic loop having made NO
+// tool calls and produced non-JSON narration (the "review is still in
+// progress" failure mode) gets ONE nudge re-run before the structured
+// recovery. The first stream is pure narration; the second (the nudge
+// re-run) is the real JSON verdict. Without the guard the narration would
+// fall straight into the GenerateObjectDirect recovery, which forces a
+// synthetic-tool tool_use — the plain-text 2nd stream would not satisfy
+// it and Execute would error. So a clean parse here proves the re-run ran.
+func TestClawBackend_ZeroToolCallNudgeReRunsLoop(t *testing.T) {
+	reg := NewRegistry()
+	mock := &execMockClient{streams: []<-chan api.StreamEvent{
+		mockStreamEvents("I will start by reviewing the branch diff.", "end_turn"),
+		mockStreamEvents(`{"approved":true,"summary":"looks good"}`, "end_turn"),
+	}}
+	reg.Register("test", func(string) (api.APIClient, error) { return mock, nil })
+
+	schema := &ir.Schema{
+		Name: "verdict",
+		Fields: []*ir.SchemaField{
+			{Name: "approved", Type: ir.FieldTypeBool},
+			{Name: "summary", Type: ir.FieldTypeString},
+		},
+	}
+	schemaJSON, _ := SchemaToJSON(schema)
+
+	toolDefs := []delegate.ToolDef{{
+		Name:        "bash",
+		Description: "Run a shell command",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+		Execute:     func(context.Context, json.RawMessage) (string, error) { return "diff output", nil },
+	}}
+
+	backend := NewClawBackend(reg, EventHooks{}, RetryPolicy{})
+	result, err := backend.Execute(context.Background(), delegate.Task{
+		NodeID:       "reviewer_gpt",
+		Model:        "test/test-model",
+		UserPrompt:   "Review the branch.",
+		OutputSchema: schemaJSON,
+		HasTools:     true,
+		ToolDefs:     toolDefs,
+		ToolMaxSteps: 5,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Output["approved"] != true {
+		t.Errorf("approved = %v, want true (the nudge re-run should surface the real verdict, not a provisional one)", result.Output["approved"])
+	}
+	if mock.calls != 2 {
+		t.Errorf("StreamResponse calls = %d, want 2 (initial narration + one nudge re-run); a different count means the guard mis-fired or recovery ran", mock.calls)
+	}
+}
+
+// TestClawBackend_NudgeSkippedWhenModelStructuresDirectly verifies the
+// guard is a no-op when the model already committed to a JSON verdict on
+// its first turn even with zero tool calls — the legitimate inline-context
+// reviewer (e.g. whole_improve_loop's chunk_content). It must NOT pay for
+// an extra re-run.
+func TestClawBackend_NudgeSkippedWhenModelStructuresDirectly(t *testing.T) {
+	reg := NewRegistry()
+	mock := &execMockClient{streams: []<-chan api.StreamEvent{
+		mockStreamEvents(`{"approved":true,"summary":"inline review"}`, "end_turn"),
+	}}
+	reg.Register("test", func(string) (api.APIClient, error) { return mock, nil })
+
+	schema := &ir.Schema{
+		Name: "verdict",
+		Fields: []*ir.SchemaField{
+			{Name: "approved", Type: ir.FieldTypeBool},
+			{Name: "summary", Type: ir.FieldTypeString},
+		},
+	}
+	schemaJSON, _ := SchemaToJSON(schema)
+	toolDefs := []delegate.ToolDef{{
+		Name:        "bash",
+		Description: "Run a shell command",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+		Execute:     func(context.Context, json.RawMessage) (string, error) { return "", nil },
+	}}
+
+	backend := NewClawBackend(reg, EventHooks{}, RetryPolicy{})
+	result, err := backend.Execute(context.Background(), delegate.Task{
+		NodeID:       "reviewer_inline",
+		Model:        "test/test-model",
+		UserPrompt:   "Review the inline content.",
+		OutputSchema: schemaJSON,
+		HasTools:     true,
+		ToolDefs:     toolDefs,
+		ToolMaxSteps: 5,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Output["approved"] != true {
+		t.Errorf("approved = %v, want true", result.Output["approved"])
+	}
+	if mock.calls != 1 {
+		t.Errorf("StreamResponse calls = %d, want 1 (direct JSON verdict must NOT trigger the tool-use nudge)", mock.calls)
+	}
+}
+
+func TestLooksStructured(t *testing.T) {
+	cases := []struct {
+		text string
+		want bool
+	}{
+		{`{"approved":true}`, true},
+		{"  \n{\"a\":1}\n", true},
+		{"Here is my verdict:\n{\"approved\":false}", true}, // extractJSON pulls the object out
+		{"I will start by reviewing the branch diff.", false},
+		{"", false},
+		{"Review is still in progress; no final verdict yet.", false},
+	}
+	for _, c := range cases {
+		if got := looksStructured(c.text); got != c.want {
+			t.Errorf("looksStructured(%q) = %v, want %v", c.text, got, c.want)
+		}
+	}
+}
+
+// TestClassifyStreamEventError verifies that transport / truncation stream
+// error events are classified RETRYABLE while permanent provider errors
+// stay terminal — the detection half of the network-resilience hardening.
+func TestClassifyStreamEventError(t *testing.T) {
+	cases := []struct {
+		name      string
+		msg       string
+		retryable bool
+	}{
+		{"anthropic read-stream drop", "read stream: connection reset by peer", true},
+		{"openai stream read error", "openai stream read: unexpected EOF", true},
+		{"openai clean-eof truncation", "openai stream truncated: closed without finish_reason or [DONE]", true},
+		{"bare i/o timeout", "i/o timeout", true},
+		{"upstream overloaded", "upstream overloaded", true},
+		{"sse parse mid-drop", "parse SSE: unexpected end of JSON input", true},
+		{"permanent context overflow", `{"type":"error","error":{"code":"context_length_exceeded"}}`, false},
+		{"permanent content refusal", "model refused: content policy violation", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := classifyStreamEventError(c.msg)
+			if err == nil {
+				t.Fatal("expected a non-nil error")
+			}
+			if got := isRetryable(err); got != c.retryable {
+				t.Errorf("isRetryable(classifyStreamEventError(%q)) = %v, want %v", c.msg, got, c.retryable)
+			}
+		})
+	}
+}
+
+// streamThenErrorClient returns a scripted stream on the first call, then
+// a fixed error on every subsequent call — used to fail a SPECIFIC later
+// call (e.g. the nudge re-run) while the initial turn succeeds.
+type streamThenErrorClient struct {
+	first <-chan api.StreamEvent
+	err   error
+	mu    sync.Mutex
+	calls int
+}
+
+func (m *streamThenErrorClient) StreamResponse(_ context.Context, _ api.CreateMessageRequest) (<-chan api.StreamEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls++
+	if m.calls == 1 {
+		return m.first, nil
+	}
+	return nil, m.err
+}
+
+// TestClawBackend_NudgeRetryableErrorPropagates verifies the FINDING-3
+// guard composes with the network-resilience retry: when the nudge re-run
+// itself fails transiently (a mid-stream drop — the exact class the
+// truncation work classifies retryable), the error must PROPAGATE so the
+// outer retry loop re-issues the turn, NOT be swallowed back into the
+// degenerate first-pass result that the recovery pass would then coerce
+// into a placeholder verdict.
+func TestClawBackend_NudgeRetryableErrorPropagates(t *testing.T) {
+	reg := NewRegistry()
+	mock := &streamThenErrorClient{
+		first: mockStreamEvents("I will review the diff.", "end_turn"), // narration, 0 tools → guard fires
+		err:   &APIError{Message: "incomplete stream: connection closed", IsRetryable: true},
+	}
+	reg.Register("test", func(string) (api.APIClient, error) { return mock, nil })
+
+	schema := &ir.Schema{Name: "verdict", Fields: []*ir.SchemaField{{Name: "approved", Type: ir.FieldTypeBool}}}
+	schemaJSON, _ := SchemaToJSON(schema)
+	toolDefs := []delegate.ToolDef{{
+		Name:        "bash",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+		Execute:     func(context.Context, json.RawMessage) (string, error) { return "", nil },
+	}}
+
+	// MaxAttempts:1 → no retry, so the propagated error surfaces directly.
+	backend := NewClawBackend(reg, EventHooks{}, RetryPolicy{MaxAttempts: 1})
+	_, err := backend.Execute(context.Background(), delegate.Task{
+		NodeID:       "reviewer_gpt",
+		Model:        "test/test-model",
+		UserPrompt:   "Review.",
+		OutputSchema: schemaJSON,
+		HasTools:     true,
+		ToolDefs:     toolDefs,
+		ToolMaxSteps: 5,
+	})
+	if err == nil {
+		t.Fatal("expected the retryable nudge error to propagate, got nil (it was swallowed into a recovery verdict)")
+	}
+	if !isRetryable(err) {
+		t.Errorf("propagated error must stay retryable, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "nudge re-run") {
+		t.Errorf("error should identify the nudge re-run as the source, got: %v", err)
 	}
 }
 

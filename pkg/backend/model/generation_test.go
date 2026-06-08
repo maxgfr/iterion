@@ -277,6 +277,62 @@ func TestAggregateStream_IncompleteToolUse(t *testing.T) {
 	}
 }
 
+func TestAggregateStream_TruncatedTextStream(t *testing.T) {
+	// A connection that drops mid-response: text deltas arrive but the
+	// stream closes WITHOUT a terminal message_delta(stop_reason) or
+	// message_stop. Must surface a RETRYABLE error so the retry loop
+	// re-issues the request rather than accepting a truncated partial turn
+	// (the silent-truncation root of the degenerate-verdict failure mode).
+	ch := make(chan api.StreamEvent, 10)
+	events := []api.StreamEvent{
+		{Type: api.EventMessageStart, InputTokens: 10},
+		{Type: api.EventContentBlockStart, Index: 0, ContentBlock: api.ContentBlockInfo{Type: "text", Index: 0}},
+		{Type: api.EventContentBlockDelta, Index: 0, Delta: api.Delta{Type: "text_delta", Text: "I will start by reviewing the"}},
+		// connection dropped here — no content_block_stop, no message_delta, no message_stop
+	}
+	for _, ev := range events {
+		ch <- ev
+	}
+	close(ch)
+
+	agg := aggregateStream(context.Background(), ch)
+	if agg.err == nil {
+		t.Fatal("expected an error for a truncated stream, got nil")
+	}
+	if !isRetryable(agg.err) {
+		t.Errorf("truncation error must be retryable, got non-retryable: %v", agg.err)
+	}
+	if !strings.Contains(agg.err.Error(), "incomplete stream") {
+		t.Errorf("error = %q, want it to mention 'incomplete stream'", agg.err.Error())
+	}
+}
+
+func TestAggregateStream_CompleteStreamNotFlagged(t *testing.T) {
+	// Guard against false positives: a complete stream (stop_reason AND
+	// message_stop present) must NOT be flagged as truncated.
+	ch := make(chan api.StreamEvent, 10)
+	events := []api.StreamEvent{
+		{Type: api.EventMessageStart, InputTokens: 10},
+		{Type: api.EventContentBlockStart, Index: 0, ContentBlock: api.ContentBlockInfo{Type: "text", Index: 0}},
+		{Type: api.EventContentBlockDelta, Index: 0, Delta: api.Delta{Type: "text_delta", Text: "done"}},
+		{Type: api.EventContentBlockStop, Index: 0},
+		{Type: api.EventMessageDelta, StopReason: "end_turn", Usage: api.UsageDelta{OutputTokens: 5}},
+		{Type: api.EventMessageStop},
+	}
+	for _, ev := range events {
+		ch <- ev
+	}
+	close(ch)
+
+	agg := aggregateStream(context.Background(), ch)
+	if agg.err != nil {
+		t.Fatalf("complete stream wrongly flagged as truncated: %v", agg.err)
+	}
+	if agg.text != "done" {
+		t.Errorf("text = %q, want %q", agg.text, "done")
+	}
+}
+
 func TestAggregateStream_CacheTokens(t *testing.T) {
 	ch := make(chan api.StreamEvent, 5)
 	ch <- api.StreamEvent{

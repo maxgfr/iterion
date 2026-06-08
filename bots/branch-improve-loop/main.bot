@@ -108,6 +108,18 @@ prompt review_system:
   branch on top of the base (`base_ref`), NOT the
   pre-existing code that the branch did not touch.
 
+  MANDATORY FIRST ACTION — before forming ANY judgment, run the
+  branch diff yourself with the bash tool:
+  `git diff $(git merge-base {{vars.base_ref}} HEAD)` (prepend
+  `-c safe.directory='*'` if git reports "dubious ownership"). You
+  may NOT emit a verdict (`approved`, `blockers`, `confidence`)
+  until you have actually read that diff output in THIS session. A
+  verdict produced without having run the diff — e.g. a "review is
+  still in progress" placeholder — is INVALID and breaks the
+  convergence loop. If you genuinely cannot obtain the diff, say so
+  in `blockers` with `confidence: high`; never emit a provisional
+  verdict.
+
   REVIEW SCOPE (CRUCIAL):
   1. Enumerate the branch footprint via
      `git diff $(git merge-base {{vars.base_ref}} HEAD) --name-only`.

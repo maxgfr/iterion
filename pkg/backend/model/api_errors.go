@@ -1,6 +1,12 @@
 package model
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/SocialGouv/iterion/pkg/backend/delegate"
+)
 
 // ContextOverflowError indicates the prompt exceeded the model's context window.
 type ContextOverflowError struct {
@@ -56,4 +62,44 @@ func ClassifyStreamError(body []byte) error {
 	}
 
 	return nil
+}
+
+// streamTransportMarkers identify a stream `error` event that stems from a
+// truncated / partially-read stream — the protocol-shape failures the
+// generic network-signature list (delegate.MatchesNetworkSignature) does
+// NOT cover. Genuine network/transport signatures (connection reset, EOF,
+// timeout, 5xx, …) are matched via that shared list so the two never
+// drift; these are only the stream-reader-specific additions
+// (claw-code-go surfaces them as "read stream: …", "openai stream
+// read: …", "… truncated …", "parse SSE: …").
+var streamTransportMarkers = []string{
+	"read stream", "stream read", "parse sse", "truncat", "incomplete",
+}
+
+// classifyStreamEventError turns a stream `error` event's message into a
+// typed error. A recognised provider error (quota, context overflow,
+// invalid prompt) keeps its permanent classification via
+// ClassifyStreamError. A transport / truncation failure — matched either by
+// the shared network-signature list or a stream-reader-specific marker — is
+// wrapped as a RETRYABLE *APIError so the retry loop re-issues the request
+// instead of surfacing a half-response as if it were complete. Anything
+// else stays a plain, non-retryable stream error.
+func classifyStreamEventError(msg string) error {
+	if classified := ClassifyStreamError([]byte(msg)); classified != nil {
+		return classified
+	}
+	if delegate.MatchesNetworkSignature(msg) || matchesStreamTransportMarker(msg) {
+		return &APIError{Message: "stream error: " + msg, IsRetryable: true}
+	}
+	return fmt.Errorf("stream error: %s", msg)
+}
+
+func matchesStreamTransportMarker(msg string) bool {
+	lower := strings.ToLower(msg)
+	for _, marker := range streamTransportMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
