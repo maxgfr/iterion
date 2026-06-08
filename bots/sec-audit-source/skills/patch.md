@@ -110,6 +110,13 @@ PROCEDURE:
    Go -> [[reproducer-go]]; TS/JS -> [[reproducer-ts]]. If no test
    directory exists, omit and say so in <test_note>.
 
+7. TOOLCHAIN (Tier-2, ADR-017). If the repo ships a `devbox.json`, run any
+   build / test / e2e you use to check your work THROUGH it —
+   `devbox run -- <cmd>` (e.g. `devbox run -- go test ./...`,
+   `devbox run -- npm test`, `devbox run -- npx playwright test`) — so you
+   use the project's pinned toolchain, matching how the build / regress
+   rungs verify. Bare command when there is no devbox.json.
+
 OUTPUT — your final response MUST contain exactly these tags:
 
 <patch_diff>

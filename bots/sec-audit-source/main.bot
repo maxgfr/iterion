@@ -3710,6 +3710,12 @@ elif 'js' in langs or 'ts' in langs or 'javascript' in langs or 'typescript' in 
             pass
 else:
     cmd = 'true'
+# Tier-2 (ADR-017): build in the project OWN declared toolchain when the
+# repo ships a devbox.json and devbox is on PATH (project pinned Go/Node/
+# etc.); bare command otherwise. Skips the no-op true.
+import shutil
+if cmd != 'true' and shutil.which('devbox') and os.path.isfile(os.path.join(ws, 'devbox.json')):
+    cmd = 'devbox run -- ' + cmd
 try:
     p = subprocess.run(cmd, shell=True, cwd=ws, capture_output=True, timeout=900)
     out = (p.stdout + p.stderr).decode('utf-8', errors='ignore')[-8000:]
@@ -3819,6 +3825,12 @@ elif 'js' in langs or 'ts' in langs or 'javascript' in langs or 'typescript' in 
             pass
 else:
     cmd = 'true'
+# Tier-2 (ADR-017): run the project tests in the project OWN declared
+# toolchain when the repo ships a devbox.json and devbox is on PATH; bare
+# command otherwise. Skips the no-op true.
+import shutil
+if cmd != 'true' and shutil.which('devbox') and os.path.isfile(os.path.join(ws, 'devbox.json')):
+    cmd = 'devbox run -- ' + cmd
 try:
     p = subprocess.run(cmd, shell=True, cwd=ws, capture_output=True, timeout=1800)
     out = (p.stdout + p.stderr).decode('utf-8', errors='ignore')[-8000:]
