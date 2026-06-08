@@ -1,0 +1,24 @@
+name: devbox-setup
+display_name: Devy
+version: 0.1.0
+description: |
+  Bootstraps a reproducible dev environment for a repository. Detects the
+  project's languages, runtimes, build + test tools and e2e stack (e.g.
+  Playwright), then authors a PINNED `devbox.json` (Nix-packaged toolchain)
+  at the repo root and validates it with `devbox install`. The generated
+  `devbox.json` is what other iterion bots — and humans — use to run the
+  project's build / test / e2e in a reproducible toolchain (ADR-017 Tier-2/
+  Tier-3): once a repo has one, `build_rung` / `regress_rung` / patch_author
+  run project commands via `devbox run -- …`.
+
+  Scope discipline: writes ONLY `devbox.json` (+ `devbox.lock`); never edits
+  source. Default mode proposes the change in a worktree behind a human gate
+  (the project's dev environment is consequential — an operator confirms
+  before it lands).
+when_to_use: |
+  Run on a repo that has NO `devbox.json` yet (so iterion bots can run its
+  build/test/e2e reproducibly), or when its toolchain drifted from what the
+  code now needs (new language, runtime bump, added e2e). Produces a pinned
+  `devbox.json` + `devbox.lock`; it does not change source.
+author: SocialGouv (devthejo) — devbox-setup/main.bot
+schema_version: 1
