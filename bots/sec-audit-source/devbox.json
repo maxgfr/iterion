@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.17.2/.schema/devbox.schema.json",
+  "packages": [
+    "gosec@latest",
+    "gitleaks@latest",
+    "semgrep@latest",
+    "trivy@latest",
+    "ripgrep@latest"
+  ],
+  "env": {
+    "DEVBOX_NO_PROMPT": "true"
+  },
+  "shell": {
+    "init_hook": [
+      "echo 'sec-audit-source toolchain (Tier-1 bot devbox) ready' >&2"
+    ]
+  }
+}
