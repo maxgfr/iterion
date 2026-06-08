@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -33,6 +34,32 @@ import (
 // (host) didn't exist inside the container — only /workspace did,
 // but the prompt didn't say /workspace.
 const LegacyDefaultWorkspace = "/workspace"
+
+// nixVolumeNameFromID derives the persistent-/nix docker volume name from a
+// container-image id (ADR-017 #1, opt-in). Keying on the image content id
+// means a rebuilt image (different baked /nix) gets a FRESH, correctly-
+// seeded volume rather than a stale one shadowing the new image's store.
+// Returns "" when the id is too short to key on (caller then skips the
+// volume and falls back to the ephemeral image /nix).
+func nixVolumeNameFromID(id string) string {
+	id = strings.TrimSpace(id)
+	id = strings.TrimPrefix(id, "sha256:")
+	if len(id) < 12 {
+		return ""
+	}
+	return "iterion-nix-" + id[:12]
+}
+
+// nixStoreVolumeName resolves the image's content id via `image inspect` and
+// returns its persistent-/nix volume name, or "" if it can't be resolved
+// (the run then proceeds without the persistent store — non-fatal).
+func nixStoreVolumeName(ctx context.Context, rt Runtime, image string) string {
+	out, err := runtimeCmdContext(ctx, rt, "image", "inspect", "--format", "{{.Id}}", image).Output()
+	if err != nil {
+		return ""
+	}
+	return nixVolumeNameFromID(string(out))
+}
 
 // New returns a Docker driver bound to the given runtime, or an error
 // when neither docker nor podman are on PATH. The constructor itself
@@ -215,6 +242,19 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 			return nil, fmt.Errorf("docker driver: %w", err)
 		}
 		args = append(args, "--mount", m)
+	}
+	// Opt-in persistent Nix store (ADR-017 #1): a named docker volume at
+	// /nix, seeded from the image on first mount and reused across runs so
+	// devbox-provisioned toolchains (the bot's devbox.json and, Tier-2, the
+	// project's) resolve WARM instead of re-fetching every run. Default OFF
+	// — no behaviour change unless ITERION_SANDBOX_PERSIST_NIX is set. Keyed
+	// on the image id so a rebuilt image gets a fresh, correctly-seeded
+	// volume (a stale volume would shadow the new image's /nix). Seeded
+	// store is consistent: `nix-store --verify` + devbox both succeed on it.
+	if os.Getenv("ITERION_SANDBOX_PERSIST_NIX") != "" && p.spec.Image != "" {
+		if vol := nixStoreVolumeName(ctx, d.rt, p.spec.Image); vol != "" {
+			args = append(args, "--mount", "type=volume,source="+vol+",target=/nix")
+		}
 	}
 	// Tmpfs entries (host_state's writable HOME). docker treats the value
 	// after --tmpfs as a single arg ("/path:opts"), so the same
