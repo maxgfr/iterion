@@ -468,6 +468,26 @@ func (e *ClawExecutor) secretMaterializer() func(string) string {
 	return e.secretGuard.Materialize
 }
 
+// MaterializeForHost / ExfiltratesTo / SecretsInspectActive let the
+// engine use the executor's guard as the egress rewriter for the
+// sandbox proxy's TLS-inspection mode (Layer 2), via a structural
+// interface — so the runtime needn't import pkg/backend/secretguard.
+func (e *ClawExecutor) MaterializeForHost(s, host string) string {
+	return e.secretGuard.MaterializeForHost(s, host)
+}
+
+func (e *ClawExecutor) ExfiltratesTo(s, host string) bool {
+	return e.secretGuard.ExfiltratesTo(s, host)
+}
+
+// SecretsInspectActive reports whether the run has known secrets worth
+// inspecting egress for. Egress TLS inspection only pays its cost (CA
+// minting + trust injection) when there is something to substitute or
+// protect.
+func (e *ClawExecutor) SecretsInspectActive() bool {
+	return e.secretGuard != nil && e.secretGuard.HasKnownSecrets()
+}
+
 // WithExecutorInbox installs the operator-chatbox binder on the
 // executor. Every Task built by executeBackend / executeLLMRouterUnified
 // then carries an InboxDrain closure so CLI-based backends

@@ -297,6 +297,27 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 		args = append(args, "--add-host", "host.docker.internal:host-gateway")
 	}
 
+	// Egress TLS-inspection CA (Layer 2 secret substitution): when the
+	// proxy runs in inspection mode it mints leaves the in-container
+	// clients must trust. Bind-mount the per-run CA cert and point
+	// NODE_EXTRA_CA_CERTS at it (additive — Node/Claude Code, the
+	// dominant LLM path). NOTE (needs live validation): broader trust
+	// (system store append for python/curl/git, and the undici/WebFetch
+	// inheritance gotcha) is a follow-up — see docs/secrets.md.
+	if len(info.ProxyCACert) > 0 {
+		caDir, err := os.MkdirTemp("", "iterion-egress-ca-")
+		if err != nil {
+			return nil, fmt.Errorf("docker driver: egress CA dir: %w", err)
+		}
+		caHostPath := filepath.Join(caDir, "egress-ca.pem")
+		if err := os.WriteFile(caHostPath, info.ProxyCACert, 0o644); err != nil {
+			return nil, fmt.Errorf("docker driver: write egress CA: %w", err)
+		}
+		const caContainerPath = "/run/iterion/egress-ca.pem"
+		args = append(args, "-v", caHostPath+":"+caContainerPath+":ro")
+		args = append(args, "--env", "NODE_EXTRA_CA_CERTS="+caContainerPath)
+	}
+
 	// PID 1 is `sleep infinity` so the container stays alive while
 	// the run streams in N `docker exec` calls. We deliberately do
 	// not use the image's CMD/ENTRYPOINT — that would shadow our

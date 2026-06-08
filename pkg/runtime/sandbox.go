@@ -131,6 +131,15 @@ type SandboxParams struct {
 	// other's worktree state. Empty disables the mount (non-worktree
 	// runs, cloud runners with no host filesystem).
 	WorktreeGitDir string
+
+	// SecretRewriter, when non-nil, enables the egress proxy's
+	// TLS-inspection mode (Layer 2): the proxy terminates TLS and uses
+	// this rewriter to substitute secret placeholders for real values
+	// toward approved hosts and to block real-secret exfiltration. The
+	// engine sets it from the executor's guard when the run has known
+	// secrets and ITERION_SANDBOX_TLS_INSPECT is not disabled. Enabling
+	// inspection also forces a proxy to run even under network: open.
+	SecretRewriter netproxy.SecretRewriter
 }
 
 // resolveAndStartSandbox produces an [activeSandbox] for the workflow's
@@ -220,7 +229,7 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	// explicit network policy, default to the iterion-default
 	// allowlist preset so users get sensible defaults out of the box —
 	// this is the security-first posture the design plan §5 calls for.
-	proxy, proxyEndpoint, err := startNetworkProxy(spec, driver, p.RunID, emitEvent, logger)
+	proxy, proxyEndpoint, proxyCACert, err := startNetworkProxy(spec, driver, p.RunID, p.SecretRewriter, emitEvent, logger)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: sandbox: network proxy: %w", err)
 	}
@@ -230,6 +239,7 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 		FriendlyName:  p.FriendlyName,
 		WorkspacePath: p.WorkspacePath,
 		ProxyEndpoint: proxyEndpoint,
+		ProxyCACert:   proxyCACert,
 	}
 
 	prepared, err := driver.Prepare(ctx, *spec)
@@ -259,9 +269,49 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	return &activeSandbox{run: run, proxy: proxy, workspaceFolder: spec.WorkspaceFolder}, nil
 }
 
+// secretEgressRewriter is the structural view of the executor's secret
+// guard that drives the proxy's TLS-inspection mode (Layer 2).
+// ClawExecutor implements it; defining it here keeps the runtime
+// decoupled from pkg/backend/secretguard.
+type secretEgressRewriter interface {
+	MaterializeForHost(s, host string) string
+	ExfiltratesTo(s, host string) bool
+	SecretsInspectActive() bool
+}
+
+// resolveSecretRewriter returns the egress rewriter for the sandbox
+// proxy's TLS-inspection mode, or nil to keep the proxy a transparent
+// tunnel. Inspection is ON by default whenever the run carries known
+// secrets; ITERION_SANDBOX_TLS_INSPECT=off disables it — the escape
+// hatch for a client that genuinely pins or a broken trust-store
+// injection (degrades gracefully to Layer 1 placeholders + Layer 0
+// redaction + the network allowlist).
+func (e *Engine) resolveSecretRewriter() netproxy.SecretRewriter {
+	if !sandboxTLSInspectEnabled() {
+		return nil
+	}
+	rw, ok := e.executor.(secretEgressRewriter)
+	if !ok || !rw.SecretsInspectActive() {
+		return nil
+	}
+	return rw
+}
+
+// sandboxTLSInspectEnabled reports the ITERION_SANDBOX_TLS_INSPECT
+// kill-switch state (default on).
+func sandboxTLSInspectEnabled() bool {
+	switch strings.TrimSpace(strings.ToLower(os.Getenv("ITERION_SANDBOX_TLS_INSPECT"))) {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
+}
+
 // startNetworkProxy compiles the spec's network policy (with sensible
 // defaults) and binds an HTTP CONNECT proxy on 127.0.0.1:0. Returns
-// (nil, "", nil) when policy mode is "open" — no proxy is needed.
+// (nil, "", nil, nil) when policy mode is "open" and no secret
+// inspection is requested — no proxy is needed.
 //
 // The returned endpoint is the URL the container should set as
 // HTTPS_PROXY / HTTP_PROXY. On Linux containers we use the docker
@@ -272,30 +322,46 @@ func startNetworkProxy(
 	spec *sandbox.Spec,
 	driver sandbox.Driver,
 	runID string,
+	rewriter netproxy.SecretRewriter,
 	emitEvent func(store.EventType, map[string]interface{}) error,
 	logger *iterlog.Logger,
-) (*netproxy.Proxy, string, error) {
+) (*netproxy.Proxy, string, []byte, error) {
 	mode, rules := ResolveNetworkPolicy(spec)
-	if mode == netproxy.ModeOpen {
-		return nil, "", nil
+
+	// Only the docker driver injects the inspection CA into the container
+	// trust store today; on any other driver (kubernetes), enabling
+	// inspection would mint leaves the container can't trust and break
+	// every TLS call. Degrade to a transparent proxy there until the CA
+	// injection lands (k8s needs a ConfigMap/Secret) — see docs/secrets.md.
+	if rewriter != nil && driver.Name() != "docker" {
+		if logger != nil {
+			logger.Warn("sandbox: TLS inspection not supported on %q driver — disabling (Layer 1 + redaction + allowlist still apply)", driver.Name())
+		}
+		rewriter = nil
+	}
+
+	// With no host filtering AND no secret inspection there is nothing
+	// for the proxy to do — keep the zero-overhead open path.
+	if mode == netproxy.ModeOpen && rewriter == nil {
+		return nil, "", nil, nil
 	}
 
 	policy, err := netproxy.Compile(mode, rules)
 	if err != nil {
-		return nil, "", fmt.Errorf("compile policy: %w", err)
+		return nil, "", nil, fmt.Errorf("compile policy: %w", err)
 	}
 
 	token, err := netproxy.NewToken()
 	if err != nil {
-		return nil, "", fmt.Errorf("generate proxy token: %w", err)
+		return nil, "", nil, fmt.Errorf("generate proxy token: %w", err)
 	}
 
 	bind, advertise, err := proxyAddressesForDriver(driver)
 	if err != nil {
-		return nil, "", fmt.Errorf("driver proxy config: %w", err)
+		return nil, "", nil, fmt.Errorf("driver proxy config: %w", err)
 	}
 
-	prx, err := netproxy.New(netproxy.Options{
+	opts := netproxy.Options{
 		Policy: policy,
 		Token:  token,
 		OnBlocked: func(host, reason string) {
@@ -308,20 +374,37 @@ func startNetworkProxy(
 				logger.Warn("sandbox: network: blocked %s (%s)", host, reason)
 			}
 		},
-	})
+	}
+
+	// TLS-inspection mode (Layer 2): mint a per-run CA so the proxy can
+	// terminate TLS and rewrite the plaintext request (secret egress
+	// substitution + DLP). The CA cert PEM is returned for the driver to
+	// inject into the container trust stores.
+	var caPEM []byte
+	if rewriter != nil {
+		ca, err := netproxy.NewEphemeralCA()
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("egress inspection CA: %w", err)
+		}
+		opts.InspectCA = ca
+		opts.Rewriter = rewriter
+		caPEM = ca.CertPEM()
+	}
+
+	prx, err := netproxy.New(opts)
 	if err != nil {
-		return nil, "", fmt.Errorf("new proxy: %w", err)
+		return nil, "", nil, fmt.Errorf("new proxy: %w", err)
 	}
 	if err := prx.Start(bind); err != nil {
-		return nil, "", fmt.Errorf("start proxy: %w", err)
+		return nil, "", nil, fmt.Errorf("start proxy: %w", err)
 	}
 
 	endpoint := prx.Endpoint(advertise)
 	if logger != nil {
-		logger.Info("sandbox: network proxy on %s advertised as %s (mode=%s, %d rules)",
-			prx.Addr(), advertise, mode, len(rules))
+		logger.Info("sandbox: network proxy on %s advertised as %s (mode=%s, %d rules, inspect=%t)",
+			prx.Addr(), advertise, mode, len(rules), rewriter != nil)
 	}
-	return prx, endpoint, nil
+	return prx, endpoint, caPEM, nil
 }
 
 // proxyAddressesForDriver consults the optional [sandbox.ProxyConfigurer]
@@ -956,6 +1039,7 @@ func (e *Engine) startSandbox(ctx context.Context, runID string, repoRoot string
 		BundleHostDir:            bundleHost,
 		BundleContainerPath:      "/run/iterion/bundle",
 		WorktreeGitDir:           worktreeGitDir,
+		SecretRewriter:           e.resolveSecretRewriter(),
 	})
 	if sbErr != nil {
 		return noopCleanup, sbErr

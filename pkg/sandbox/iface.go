@@ -221,6 +221,14 @@ type RunInfo struct {
 	// that support [Capabilities.SupportsNetworkPolicy]. Phase 3
 	// populates this; Phase 0 leaves it empty.
 	ProxyEndpoint string
+
+	// ProxyCACert, if non-empty, is the PEM of the per-run egress CA the
+	// proxy uses in TLS-inspection mode (Layer 2 secret substitution).
+	// Drivers must make in-container clients trust it: write it to a path
+	// inside the container and point NODE_EXTRA_CA_CERTS / SSL_CERT_FILE
+	// at it (and ideally append it to the system store). Empty when
+	// inspection is off — the proxy is then a transparent tunnel.
+	ProxyCACert []byte
 }
 
 // ExecOpts controls a single [Run.Exec] invocation.
