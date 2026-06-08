@@ -1,12 +1,12 @@
-# devbox-setup (Devy) — status: SCAFFOLD (manifest + skill ready; main.bot to build)
+# devbox-setup (Devy) — status: v1 (manifest + skill + main.bot validate; run-test pending)
 
 Devy authors a pinned `devbox.json` for a repo so its build/test/e2e run in a
-reproducible toolchain (ADR-017 Tier-3). This bundle ships the **manifest**
-and the **playbook skill** (`skills/devbox-setup.md` — the substance: detect
-→ map to Nix → shape → validate → scope). The **`main.bot` (executable DSL)
-is the remaining focused build** — deliberately not rushed, because the
-smallest existing bot is ~685 lines of careful DSL (schemas, edges, sandbox)
-and a half-correct one that doesn't `iterion validate` is worse than none.
+reproducible toolchain (ADR-017 Tier-3). This bundle ships the **manifest**,
+the **playbook skill** (`skills/devbox-setup.md` — the substance: detect →
+map to Nix → shape → validate → scope), and the **`main.bot`** (linear
+detect → generate → verify → done; `iterion validate` OK, 5 nodes). It is
+**not yet run-tested** — a real run needs a target repo and a stable network
+for the cold `devbox install`; that dogfood is the remaining step.
 
 ## Intended workflow (build spec)
 

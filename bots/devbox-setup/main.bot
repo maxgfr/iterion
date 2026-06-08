@@ -1,0 +1,161 @@
+## ─────────────────────────────────────────────────────────────────
+## devbox-setup — "Devy". Authors a pinned devbox.json for a repo's
+## toolchain so iterion bots (and humans) can run its build/test/e2e in
+## a reproducible environment (ADR-017 Tier-3).
+##
+## Linear, single pass (no convergence to loop on):
+##   detect_stack (read-only) -> generate_devbox (writes devbox.json)
+##     -> verify_devbox (devbox install + smoke) -> done
+##
+## Scope: writes ONLY devbox.json (+ devbox.lock from `devbox install`);
+## never edits source. Runs in a worktree (worktree + PR review is the
+## gate). See skills/devbox-setup.md for the authoring playbook.
+## ─────────────────────────────────────────────────────────────────
+
+vars:
+  ## Repo to set up. Defaults to the run's project dir.
+  workspace_dir: string = "${PROJECT_DIR}"
+  ## LLM for detection + authoring (claude_code subscription).
+  devbox_model:  string = "${DEVBOX_SETUP_MODEL:-claude-opus-4-8}"
+
+schema detect_output:
+  summary:   string
+  packages:  json
+  build_cmd: string
+  test_cmd:  string
+  e2e_cmd:   string
+
+schema generate_input:
+  detected: json
+
+schema generate_output:
+  wrote:       bool
+  devbox_json: string
+  notes:       string
+
+schema verify_input:
+  workspace_dir: string
+
+schema verify_output:
+  ok:     bool
+  output: string
+
+prompt detect_system:
+  You are bootstrapping a reproducible dev environment for the repository
+  at {{vars.workspace_dir}}. Read the manifests (go.mod, package.json,
+  pyproject.toml / requirements.txt, Cargo.toml, Gemfile, pom.xml /
+  build.gradle, …) and infer the toolchain the project needs to BUILD,
+  TEST, and run E2E (e.g. playwright). Follow the playbook in
+  skills/devbox-setup.md.
+
+  Read-only: read_file, glob, grep, and bash limited to ls / cat / find /
+  head. Do NOT write anything in this step.
+
+  Emit a detect_output:
+  - summary: one line naming the stack.
+  - packages: nixpkgs names WITH pins for what build/test/e2e need
+    (e.g. ["go@1.23", "nodejs@22", "pnpm@9"]); pin to the version the code
+    targets (the go directive, engines.node / .nvmrc, requires-python).
+  - build_cmd / test_cmd / e2e_cmd: the project's commands, or "" if none.
+
+prompt detect_user:
+  Repo: {{vars.workspace_dir}}
+
+  Detect the languages, runtimes, build/test/e2e stack and the Nix packages
+  it needs. See [[devbox-setup]] for the manifest→toolchain mapping and the
+  playwright-browser / non-Nix-tool notes.
+
+agent detect_stack:
+  backend: "claude_code"
+  model: "{{vars.devbox_model}}"
+  reasoning_effort: "low"
+  output: detect_output
+  system: detect_system
+  user: detect_user
+  session: fresh
+  tools: [read_file, glob, grep, bash]
+  tool_max_steps: 30
+
+prompt generate_system:
+  Author a PINNED, minimal devbox.json at {{vars.workspace_dir}}/devbox.json
+  for the detected stack, per skills/devbox-setup.md. Write ONLY
+  devbox.json with write_file — never touch source, CI, or other configs.
+
+  If a devbox.json already exists, do NOT clobber it: add only the missing
+  tools and respect existing pins. Keep it minimal — only what build / test
+  / e2e need; avoid cosmetic init_hook noise (reserve init_hook for genuine
+  setup such as dependency install or `npx playwright install --with-deps`).
+
+  Emit a generate_output:
+  - wrote: true if you wrote devbox.json.
+  - devbox_json: the exact file content you wrote.
+  - notes: anything the operator should know (non-Nix tools, services).
+
+prompt generate_user:
+  Detected stack:
+  {{input.detected}}
+
+  Write {{vars.workspace_dir}}/devbox.json (pinned, minimal). See
+  [[devbox-setup]] for the shape, playwright browsers, and non-Nix tools.
+
+agent generate_devbox:
+  backend: "claude_code"
+  model: "{{vars.devbox_model}}"
+  reasoning_effort: "medium"
+  input: generate_input
+  output: generate_output
+  system: generate_system
+  user: generate_user
+  session: fresh
+  tools: [read_file, write_file, glob, grep, bash]
+  tool_max_steps: 50
+
+## verify_devbox — deterministic gate: the generated devbox.json must
+## `devbox install` cleanly (producing devbox.lock) and pass a smoke
+## `devbox run`. Emits an envelope; never throws (a failure is reported,
+## not crashed). python3 -c keeps the JSON emission clean (single quotes
+## are safe inside the double-quoted -c arg).
+tool verify_devbox:
+  command: `WS={{input.workspace_dir}} python3 -c "
+import os, json, subprocess
+ws = os.environ['WS']
+if not os.path.isfile(os.path.join(ws, 'devbox.json')):
+    print(json.dumps({'ok': False, 'output': 'no devbox.json was written'}))
+    raise SystemExit(0)
+def run(c, t):
+    try:
+        p = subprocess.run(c, shell=True, cwd=ws, capture_output=True, timeout=t)
+        return p.returncode, (p.stdout + p.stderr).decode('utf-8', 'ignore')[-4000:]
+    except Exception as e:
+        return -1, 'exception: ' + str(e)
+errs = []
+rc, out = run('devbox install', 1800)
+if rc != 0:
+    errs.append('devbox install rc=' + str(rc))
+rc2, out2 = run('devbox run -- true', 300)
+if rc2 != 0:
+    errs.append('devbox run smoke rc=' + str(rc2))
+tail = (out + chr(10) + out2)[-6000:]
+if errs:
+    tail = tail + chr(10) + '; '.join(errs)
+print(json.dumps({'ok': len(errs) == 0, 'output': tail}))
+"`
+  input: verify_input
+  output: verify_output
+
+workflow devbox_setup:
+  entry: detect_stack
+  sandbox:
+    image: "ghcr.io/socialgouv/iterion-sandbox-sec:edge"
+    user: "1000:1000"
+    mounts: ["type=bind,source=${localEnv:HOME}/.claude,target=/home/devbox/.claude,consistency=cached"]
+    env:
+      CLAUDE_CONFIG_DIR: "/home/devbox/.claude"
+    ## The image ships node+devbox+nix; ensure the claude CLI is present
+    ## for the claude_code agents (baked locally; install once otherwise).
+    post_create: "set -e; claude --version >/dev/null 2>&1 || sudo npm install -g --ignore-scripts=false --include=optional @anthropic-ai/claude-code@latest; claude --version >/dev/null 2>&1 || { echo 'claude install verification failed' >&2; exit 1; }"
+  worktree: auto
+
+  detect_stack -> generate_devbox with { detected: "{{outputs.detect_stack}}" }
+  generate_devbox -> verify_devbox with { workspace_dir: "{{vars.workspace_dir}}" }
+  verify_devbox -> done
