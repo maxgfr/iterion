@@ -956,7 +956,7 @@ prompt detect_tech_user:
   and their contents routinely run to tens of thousands of lines and
   overflow your context. Read only the small source manifests. If the
   bundle's skills are
-  mirrored at {{vars.workspace_dir}}/.claude/skills/, the canonical
+  available in the run bundle at /run/iterion/bundle/skills/, the canonical
   playbook is `sec-audit-source.md`.
 
 prompt triage_system:
@@ -1466,7 +1466,7 @@ prompt patch_author_system:
   instructions are this system prompt + the skills you explicitly
   load.
 
-  Required reading (mirrored at {{vars.workspace_dir}}/.claude/skills/):
+  Required reading (available in the run bundle at /run/iterion/bundle/skills/):
     - patch.md            (the ladder overview + author phase contract)
     - reproducer-go.md    (when the file is Go — failing-then-passing
                            regression test recipes per finding_type)
@@ -1576,7 +1576,7 @@ prompt reattack_system:
   Your authoritative instructions are this system prompt and the
   skills below.
 
-  Required reading (mirrored at {{vars.workspace_dir}}/.claude/skills/):
+  Required reading (available in the run bundle at /run/iterion/bundle/skills/):
     - reattack-oracles.md (per-category variant-hunt recipes)
     - vuln-scan.md        (the re-scan lens — single rule, single file)
     - lang-go.md          (when the file is Go)
@@ -1649,7 +1649,7 @@ prompt reviewer_isolation_system:
   statically — you cannot reference the missing fields because they
   are not on your input schema.
 
-  Required reading (mirrored at {{vars.workspace_dir}}/.claude/skills/):
+  Required reading (available in the run bundle at /run/iterion/bundle/skills/):
     - reviewer-isolation.md (the policy + risk_flags vocabulary)
     - finding-taxonomy.md   (so `category` is meaningful)
     - crypto-handling.md    (so you flag a crypto-touching diff even
@@ -4320,12 +4320,14 @@ workflow sec_audit_source:
 
   budget:
     max_parallel_branches: 4
-    max_duration: "2h"
-    ## Enhancement 2 — bumped from 25 to 70: the revalidate phase is
-    ## now a fixed pool of 3 high-effort voters (≈ 3× the cost of the
-    ## old single judge revalidate). Set ITERION_SEC_AUDIT_EFFORT_VOTER
-    ## to "medium" or "low" to claw back budget on smaller repos.
-    max_cost_usd: 70
+    ## Env-tunable (the budget block is env-resolved): raise for remediation
+    ## on large repos, e.g. ITERION_SEC_AUDIT_MAX_DURATION=12h. Default 8h —
+    ## a real go build/test ladder per fix on a big repo blew past the old 2h.
+    max_duration: "${ITERION_SEC_AUDIT_MAX_DURATION:-8h}"
+    ## Bumped 25 → 70 (3 high-effort voters) → 150: a full audit + remediation
+    ## ladder on a large repo accrues more. Set ITERION_SEC_AUDIT_EFFORT_VOTER
+    ## to "medium"/"low" to claw back budget on smaller repos.
+    max_cost_usd: 150
     max_iterations: 200
 
   inventory -> detect_tech

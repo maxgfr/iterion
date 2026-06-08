@@ -54,7 +54,11 @@ func newSharedBudget(b *ir.Budget, logger *iterlog.Logger) *SharedBudget {
 
 	var maxDur time.Duration
 	if b.MaxDuration != "" {
-		parsed, err := time.ParseDuration(b.MaxDuration)
+		// Expand ${VAR:-default} forms so a bot's budget can be tuned per
+		// run/env (e.g. a longer max_duration for remediation on a large
+		// repo) without editing the .bot — the budget block, unlike the
+		// effort/model fields, was not previously env-resolved.
+		parsed, err := time.ParseDuration(ir.ExpandEnvWithDefault(b.MaxDuration))
 		if err == nil {
 			maxDur = parsed
 		}

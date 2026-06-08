@@ -61,6 +61,16 @@ func nixStoreVolumeName(ctx context.Context, rt Runtime, image string) string {
 	return nixVolumeNameFromID(string(out))
 }
 
+// persistNixStore reports whether to mount the persistent /nix volume.
+// Default ON; opt OUT with ITERION_SANDBOX_PERSIST_NIX in {0,false,off,no}.
+func persistNixStore() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ITERION_SANDBOX_PERSIST_NIX"))) {
+	case "0", "false", "off", "no":
+		return false
+	}
+	return true
+}
+
 // New returns a Docker driver bound to the given runtime, or an error
 // when neither docker nor podman are on PATH. The constructor itself
 // is cheap — no images are pulled, no containers created.
@@ -244,15 +254,17 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 		}
 		args = append(args, "--mount", m)
 	}
-	// Opt-in persistent Nix store (ADR-017 #1): a named docker volume at
-	// /nix, seeded from the image on first mount and reused across runs so
+	// Persistent Nix store (ADR-017 #1): a named docker volume at /nix,
+	// seeded from the image on first mount and reused across runs so
 	// devbox-provisioned toolchains (the bot's devbox.json and, Tier-2, the
-	// project's) resolve WARM instead of re-fetching every run. Default OFF
-	// — no behaviour change unless ITERION_SANDBOX_PERSIST_NIX is set. Keyed
-	// on the image id so a rebuilt image gets a fresh, correctly-seeded
-	// volume (a stale volume would shadow the new image's /nix). Seeded
-	// store is consistent: `nix-store --verify` + devbox both succeed on it.
-	if os.Getenv("ITERION_SANDBOX_PERSIST_NIX") != "" && p.spec.Image != "" {
+	// project's) resolve WARM instead of re-fetching every run. Default ON
+	// (validated: warm-reuse cuts the per-run cold devbox install — the
+	// dogfood remediation builds ran cold without it) — opt OUT with
+	// ITERION_SANDBOX_PERSIST_NIX=0/false/off. Keyed on the image id so a
+	// rebuilt image gets a fresh, correctly-seeded volume (a stale volume
+	// would shadow the new image's /nix). Seeded store is consistent:
+	// `nix-store --verify` + devbox both succeed on it.
+	if persistNixStore() && p.spec.Image != "" {
 		if vol := nixStoreVolumeName(ctx, d.rt, p.spec.Image); vol != "" {
 			args = append(args, "--mount", "type=volume,source="+vol+",target=/nix")
 		}
