@@ -491,7 +491,7 @@ func (e *Engine) execBranch(ctx context.Context, rs *runState, branchID string, 
 		}
 
 		// Emit node_finished with usage data.
-		if err := e.emitBranch(ctx, runID, branchID, store.EventNodeFinished, currentNodeID, buildNodeFinishedData(sanitizeOutputForEvent(node, output))); err != nil {
+		if err := e.emitBranch(ctx, runID, branchID, store.EventNodeFinished, currentNodeID, buildNodeFinishedData(e.sanitizeOutputForEvent(node, output))); err != nil {
 			e.logger.Warn("branch %s: failed to emit node_finished: %v", branchID, err)
 			result.eventErrors++
 		}

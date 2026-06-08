@@ -84,7 +84,12 @@ func BuildExecutor(spec ExecutorSpec) (*model.ClawExecutor, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	hooks := model.NewStoreEventHooks(ctx, spec.Store, spec.RunID, spec.Logger)
+	// Build the per-run secret guard (Layer 0/1/2) from the resolved
+	// credentials in ctx + sensitive host env + declared workflow
+	// secrets, then thread it through the event hooks so every sink is
+	// scrubbed before persistence.
+	guard := model.BuildSecretGuard(ctx, spec.Workflow, spec.Vars)
+	hooks := model.NewStoreEventHooks(ctx, spec.Store, spec.RunID, spec.Logger, guard)
 	for _, extra := range spec.ExtraHooks {
 		hooks = model.ChainHooks(hooks, extra)
 	}
@@ -129,6 +134,7 @@ func BuildExecutor(spec ExecutorSpec) (*model.ClawExecutor, error) {
 		model.WithLogger(spec.Logger),
 		model.WithLifecycleHooks(lifecycle),
 		model.WithStoreDir(dispatcherStoreDir),
+		model.WithSecretGuard(guard),
 	}
 	if spec.Inbox != nil {
 		opts = append(opts, model.WithExecutorInbox(spec.Inbox))

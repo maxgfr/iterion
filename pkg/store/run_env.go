@@ -85,6 +85,15 @@ func hasCapturedPrefix(name string) bool {
 }
 
 func isSecretName(name string) bool {
+	return IsSecretEnvName(name)
+}
+
+// IsSecretEnvName reports whether an environment variable name looks
+// like it holds a secret (case-insensitive substring match against
+// secretValuePatterns). Exported so pkg/backend/secretguard can seed
+// its value-taint set from the host's sensitive env vars using the
+// same definition this package uses for LaunchEnv redaction.
+func IsSecretEnvName(name string) bool {
 	upper := strings.ToUpper(name)
 	for _, p := range secretValuePatterns {
 		if strings.Contains(upper, p) {

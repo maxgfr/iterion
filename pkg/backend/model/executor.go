@@ -20,6 +20,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
 	"github.com/SocialGouv/iterion/pkg/backend/detect"
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
+	"github.com/SocialGouv/iterion/pkg/backend/secretguard"
 	"github.com/SocialGouv/iterion/pkg/backend/tool"
 	"github.com/SocialGouv/iterion/pkg/backend/tool/privacy"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
@@ -351,6 +352,13 @@ type ClawExecutor struct {
 	// PostToolUse hook. The claw backend reads its own copy via the
 	// backend-level WithInbox option (set in runview/executor.go).
 	inbox InboxBinder
+
+	// secretGuard is the per-run secrets scrubber (Layer 0/1/2). It is
+	// shared with the event hooks (Layer 0 sink redaction); the executor
+	// holds its own reference so it can (a) satisfy runtime.SecretScrubber
+	// for node_finished output redaction, (b) materialise ${secret.X}
+	// placeholders at tool/shell exec (Layer 1). Nil disables it.
+	secretGuard *secretguard.Guard
 }
 
 // SetSandbox installs the live sandbox handle on the executor. The
@@ -432,6 +440,22 @@ func WithLogger(l *iterlog.Logger) ClawExecutorOption {
 // A nil runner disables the integration (default).
 func WithLifecycleHooks(r *hooks.Runner) ClawExecutorOption {
 	return func(e *ClawExecutor) { e.lifecycleHooks = r }
+}
+
+// WithSecretGuard installs the per-run secrets scrubber. Shared with the
+// event hooks; the executor uses it to redact node_finished output
+// (runtime.SecretScrubber) and to materialise ${secret.X} placeholders
+// at tool/shell exec. A nil guard disables secrets protection.
+func WithSecretGuard(g *secretguard.Guard) ClawExecutorOption {
+	return func(e *ClawExecutor) { e.secretGuard = g }
+}
+
+// ScrubOutput satisfies runtime.SecretScrubber: it returns a redacted
+// deep copy of a node's output for the (observational) node_finished
+// event stream, never mutating the live output (which feeds downstream
+// nodes and the resume checkpoint). Nil-safe via the guard.
+func (e *ClawExecutor) ScrubOutput(output map[string]interface{}) map[string]interface{} {
+	return e.secretGuard.RedactMap(output)
 }
 
 // WithExecutorInbox installs the operator-chatbox binder on the

@@ -13,10 +13,31 @@ import (
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
+	"github.com/SocialGouv/iterion/pkg/backend/secretguard"
 	"github.com/SocialGouv/iterion/pkg/backend/tooldisplay"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
+
+// redactingEmitter wraps an EventEmitter and scrubs secret values from
+// every event Data field before it is persisted (Layer 0). It is the
+// single chokepoint that covers events.jsonl regardless of which hook
+// emitted the event. It deliberately implements ONLY AppendEvent — the
+// optional capability interfaces (ToolBlobWriter / TurnWriter /
+// AttachmentWriter) are detected on the original emitter in
+// NewStoreEventHooks and redacted at their own call sites, so wrapping
+// must not mask their presence.
+type redactingEmitter struct {
+	inner EventEmitter
+	guard *secretguard.Guard
+}
+
+func (r redactingEmitter) AppendEvent(ctx context.Context, runID string, evt store.Event) (*store.Event, error) {
+	if r.guard != nil && evt.Data != nil {
+		evt.Data = r.guard.RedactMap(evt.Data)
+	}
+	return r.inner.AppendEvent(ctx, runID, evt)
+}
 
 // sha256Hex returns the hex-encoded SHA-256 of s, or "" when s is
 // empty. Used as the TurnCheckpoint.TextDigest fingerprint so the
@@ -101,10 +122,14 @@ type TurnWriter interface {
 // When blobSink is nil or toolUseID is empty (legacy paths, cloud
 // stores), falls back to capped inline persistence so the studio still
 // shows *something*.
-func persistToolPayload(ctx context.Context, blobSink ToolBlobWriter, runID, toolUseID, key string, content []byte, data map[string]interface{}) {
+func persistToolPayload(ctx context.Context, guard *secretguard.Guard, blobSink ToolBlobWriter, runID, toolUseID, key string, content []byte, data map[string]interface{}) {
 	if len(content) == 0 {
 		return
 	}
+	// Scrub secrets once at the top so both the inline field and the
+	// sidecar blob (which bypasses the redacting AppendEvent wrapper)
+	// carry redacted content.
+	content = guard.RedactBytes(content)
 	if len(content) <= toolInlineThreshold {
 		data[key] = string(content)
 		return
@@ -138,10 +163,17 @@ func persistToolPayload(ctx context.Context, blobSink ToolBlobWriter, runID, too
 // ctx is captured by the returned hook closures: filesystem stores ignore
 // it but cloud (Mongo) stores honor cancellation/timeout. The hook lifetime
 // is bounded by the engine.Run call that constructed it.
-func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string, logger *iterlog.Logger) EventHooks {
+func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string, logger *iterlog.Logger, guard *secretguard.Guard) EventHooks {
+	// Capability detection must happen on the ORIGINAL emitter — the
+	// redacting wrapper below only implements AppendEvent.
 	attachmentSink, _ := emitter.(AttachmentWriter)
 	toolBlobSink, _ := emitter.(ToolBlobWriter)
 	turnSink, _ := emitter.(TurnWriter)
+	// All event payloads go through the redacting wrapper (Layer 0).
+	emitter = redactingEmitter{inner: emitter, guard: guard}
+	// red scrubs run.log block bodies (a separate sink from
+	// events.jsonl). Nil-safe: a nil guard returns the input unchanged.
+	red := guard.Redact
 	return EventHooks{
 		OnLLMPrompt: func(nodeID string, systemPrompt string, userMessage string) {
 			data := map[string]interface{}{
@@ -161,11 +193,11 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			// a Wrap toggle + per-block expand/collapse).
 			if userMessage != "" {
 				logger.LogBlock(iterlog.LevelInfo, "💬",
-					fmt.Sprintf("Prompt [%s]:", nodeID), userMessage)
+					fmt.Sprintf("Prompt [%s]:", nodeID), red(userMessage))
 			}
 			if systemPrompt != "" {
 				logger.LogBlock(iterlog.LevelDebug, "📝",
-					fmt.Sprintf("System prompt [%s]:", nodeID), systemPrompt)
+					fmt.Sprintf("System prompt [%s]:", nodeID), red(systemPrompt))
 			}
 		},
 
@@ -278,7 +310,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				// per-node Logs tab's prefix filter associates the line.
 				logger.LogBlock(iterlog.LevelInfo, "💬",
 					fmt.Sprintf("[%s#%d/claw] response step %d:", nodeID, step.Iteration, step.Number),
-					step.Text)
+					red(step.Text))
 			}
 			// Per-tool log line for the claw (in-process) path. The
 			// claude_code delegate prints its own
@@ -290,19 +322,19 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				for _, tc := range step.ToolCalls {
 					detail := tooldisplay.HeaderDetail(tc.Name, tc.Input, tooldisplay.SnakeCaseKeys)
 					if detail != "" {
-						logger.Logf(iterlog.LevelInfo, "🔧", "[%s#%d/claw] %s %s", nodeID, step.Iteration, tc.Name, detail)
+						logger.Logf(iterlog.LevelInfo, "🔧", "[%s#%d/claw] %s %s", nodeID, step.Iteration, tc.Name, red(detail))
 					} else {
 						logger.Logf(iterlog.LevelInfo, "🔧", "[%s#%d/claw] %s", nodeID, step.Iteration, tc.Name)
 					}
 					if body := tooldisplay.BlockBody(tc.Name, tc.Input); body != "" {
 						logger.LogBlock(iterlog.LevelInfo, "🔧",
 							fmt.Sprintf("[%s#%d/claw] tool input %s:", nodeID, step.Iteration, tc.Name),
-							body)
+							red(body))
 					}
 					if logger.IsEnabled(iterlog.LevelDebug) {
 						logger.LogBlock(iterlog.LevelDebug, "🔧",
 							fmt.Sprintf("[%s#%d/claw] raw input %s:", nodeID, step.Iteration, tc.Name),
-							string(tc.Input))
+							red(string(tc.Input)))
 					}
 				}
 			}
@@ -337,7 +369,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			for i, tc := range info.ToolCalls {
 				toolCalls[i] = store.TurnToolCall{
 					Name:         tc.Name,
-					InputPreview: iterlog.Truncate(string(tc.Input), toolInlineThreshold),
+					InputPreview: iterlog.Truncate(red(string(tc.Input)), toolInlineThreshold),
 				}
 			}
 			backend := info.Backend
@@ -368,7 +400,10 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			// transcript length, and the hook fires on every turn.
 			if conv := info.MarshalConversation(); len(conv) > 0 {
 				turn.MessagesRef = turnMessagesRef(nodeID, iter, turnIdx)
-				turn.Messages = conv
+				// The turn snapshot holds the full conversation (system +
+				// user + every tool result) and feeds the Fork API — scrub
+				// secrets before it lands on disk.
+				turn.Messages = guard.RedactBytes(conv)
 			}
 			if err := turnSink.WriteTurn(ctx, turn); err != nil {
 				logger.Warn("turn capture [%s] step %d: %v", nodeID, info.Step, err)
@@ -405,7 +440,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			// event stream stays bounded, with the event carrying a
 			// 4 KB preview + a ref the studio uses to fetch the rest
 			// paginated.
-			persistToolPayload(ctx, toolBlobSink, runID, info.ToolUseID, "input", info.Input, data)
+			persistToolPayload(ctx, guard, toolBlobSink, runID, info.ToolUseID, "input", info.Input, data)
 			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
 				Type:   store.EventToolStarted,
 				RunID:  runID,
@@ -433,7 +468,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			// inline display). Small outputs inline; large outputs go
 			// to a sidecar blob with a 4 KB preview + ref, fetched
 			// paginated on demand.
-			persistToolPayload(ctx, toolBlobSink, runID, info.ToolUseID, "output", []byte(info.Output), data)
+			persistToolPayload(ctx, guard, toolBlobSink, runID, info.ToolUseID, "output", []byte(info.Output), data)
 
 			evtType := store.EventToolCalled
 			if info.Error != nil {
@@ -496,7 +531,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			}
 			if info.Stderr != "" {
 				logger.LogBlock(iterlog.LevelDebug, "⚠️",
-					fmt.Sprintf("Delegation stderr [%s]:", nodeID), info.Stderr)
+					fmt.Sprintf("Delegation stderr [%s]:", nodeID), red(info.Stderr))
 			}
 		},
 
@@ -589,7 +624,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				if output != "" {
 					logger.LogBlock(iterlog.LevelDebug, "🔬",
 						fmt.Sprintf("Tool output [%s/%s]:", nodeID, toolName),
-						iterlog.BlockPreview(output, 1500))
+						iterlog.BlockPreview(red(output), 1500))
 				}
 				for _, payload := range scanPreviewURLs(output) {
 					_, _ = emitter.AppendEvent(ctx, runID, store.Event{

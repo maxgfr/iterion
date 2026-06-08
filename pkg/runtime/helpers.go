@@ -638,39 +638,53 @@ func buildNodeFinishedData(output map[string]interface{}) map[string]interface{}
 	return data
 }
 
-// sanitizeOutputForEvent returns a copy of output with PII fields
-// scrubbed before the runtime emits a node_finished event. The
-// rule set is hard-coded to the two privacy tools — same trade-off
-// as the executor's switch on toolName: a generic mechanism would
-// require a registry pass-through in v1 that no other tool needs.
+// SecretScrubber is optionally implemented by a NodeExecutor to scrub
+// secret values from a node's output before the engine persists it to
+// an OBSERVATIONAL sink (the node_finished event). It is Layer 0 of
+// iterion's secrets protection.
 //
-// privacy_filter's output is already safe (the `redacted` field
-// contains the placeholder form, not raw text), so the helper is
-// a no-op for it.
+// ScrubOutput MUST return a redacted deep copy and never mutate its
+// input: the live output map feeds downstream nodes (`{{outputs.X}}` /
+// `{{artifacts.X}}`) and the resume checkpoint, both of which must keep
+// the real values. For that reason the engine applies scrubbing only on
+// the event path here — NOT to persisted artifacts or the checkpoint,
+// which are load-bearing for resume.
+type SecretScrubber interface {
+	ScrubOutput(map[string]interface{}) map[string]interface{}
+}
+
+// sanitizeOutputForEvent returns a copy of output scrubbed for the
+// node_finished event stream. Two layers apply:
 //
-// privacy_unfilter's output carries the restored text in the
-// `text` field — that must not enter the persisted event stream.
-// Returns the original map when sanitisation is unnecessary.
-func sanitizeOutputForEvent(node ir.Node, output map[string]interface{}) map[string]interface{} {
+//   - Secret redaction (Layer 0): when the active executor implements
+//     SecretScrubber, secret values are replaced with placeholders /
+//     markers in a deep copy. The live output is untouched.
+//   - The privacy_unfilter special-case: that tool's output carries the
+//     restored text in the `text` field, which must not enter the event
+//     stream (replaced with privacy.EventTextMarker).
+//
+// Returns the original map only when neither layer changes anything.
+func (e *Engine) sanitizeOutputForEvent(node ir.Node, output map[string]interface{}) map[string]interface{} {
 	if output == nil {
 		return nil
 	}
-	toolNode, ok := node.(*ir.ToolNode)
-	if !ok {
-		return output
+	out := output
+	if scrubber, ok := e.executor.(SecretScrubber); ok {
+		// ScrubOutput returns a redacted deep copy (never the original),
+		// so the live output map is safe.
+		out = scrubber.ScrubOutput(out)
 	}
-	if toolNode.Command != privacy.UnfilterToolName {
-		return output
+	if toolNode, ok := node.(*ir.ToolNode); ok && toolNode.Command == privacy.UnfilterToolName {
+		if _, has := out["text"]; has {
+			sanitized := make(map[string]interface{}, len(out))
+			for k, v := range out {
+				sanitized[k] = v
+			}
+			sanitized["text"] = privacy.EventTextMarker
+			out = sanitized
+		}
 	}
-	if _, has := output["text"]; !has {
-		return output
-	}
-	sanitized := make(map[string]interface{}, len(output))
-	for k, v := range output {
-		sanitized[k] = v
-	}
-	sanitized["text"] = privacy.EventTextMarker
-	return sanitized
+	return out
 }
 
 // formatOutputPreview builds a human-readable single-line summary of a
