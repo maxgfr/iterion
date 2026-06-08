@@ -115,17 +115,21 @@ vars:
   ## narrowing happens at triage via file_filter — same mechanism as
   ## Cap. 3 shard child runs.
   diff_base:           string = ""
-  ## Optional deepsec backend (Enhancement 4) — https://github.com/vercel-labs/deepsec.
-  ## When true, runs `deepsec init/scan/process/export` headlessly in the
-  ## target workspace and emits a scanner_output envelope downstream
-  ## triage consumes via json_paths.deepsec, exactly like any other
-  ## scanner. Default false: the deepsec_gate routes straight to
-  ## scan_join and the workflow is byte-identical to pre-E4 runs.
+  ## deepsec backend (Enhancement 4) — https://github.com/vercel-labs/deepsec.
+  ## When true (DEFAULT), runs `deepsec init/scan/process/export` headlessly
+  ## in the target workspace and emits a scanner_output envelope downstream
+  ## triage consumes via json_paths.deepsec, exactly like any other scanner —
+  ## adding deepsec's framework-aware matchers + LLM investigation to the
+  ## candidate set (deepsec_gate routes to run_deepsec_scanner).
   ## Requires deepsec on PATH + Node 22+ in the sandbox image
-  ## (sandbox/sec/Dockerfile Layer 4). The tool degrades gracefully
-  ## when either is missing — never fails the run. See
-  ## skills/scanner-deepsec.md for the field mapping.
-  enable_deepsec:      bool   = false
+  ## (sandbox/sec/Dockerfile). run_deepsec_scanner ALWAYS exits 0 and
+  ## degrades gracefully when deepsec / Node 22 / network is missing — never
+  ## fails the run (the envelope carries an errors[] tail; the report notes
+  ## "deepsec degraded"). Cost: the `process` step makes LLM calls per
+  ## candidate batch, capped by deepsec_process_limit. Set
+  ## `--var enable_deepsec=false` for a leaner, deepsec-free run.
+  ## See skills/scanner-deepsec.md for the field mapping.
+  enable_deepsec:      bool   = true
   ## Note: deepsec's CLI does not expose a tier/`--tier` flag (verified
   ## against deepsec packages/deepsec/src/cli.ts v2.0.x — `scan` runs the
   ## full ~110 regex matcher pack; per-run narrowing is via `--matchers
@@ -254,10 +258,10 @@ schema scan_join_output:
   generic_scan:  json
   lang_scan:     json
   custom_scan:   json
-  ## Enhancement 4 — deepsec backend. When vars.enable_deepsec=false (the
-  ## default), the deepsec_gate routes around run_deepsec_scanner and this
-  ## field resolves to an empty object (the runtime tolerates missing-node
-  ## refs in compute exprs; see compute scan_join).
+  ## Enhancement 4 — deepsec backend. When vars.enable_deepsec=false
+  ## (default is true), the deepsec_gate routes around run_deepsec_scanner
+  ## and this field resolves to an empty object (the runtime tolerates
+  ## missing-node refs in compute exprs; see compute scan_join).
   deepsec_scan:  json
 
 ## cap_findings emits the truncation budget so triage can surface it in
@@ -4369,10 +4373,9 @@ workflow sec_audit_source:
   ## comment): generic → js → go → python → custom → [deepsec?] →
   ## scan_join. Avoids the >1-mutating-branch workspace-safety violation
   ## that a parallel fan-out hits. scan_join still reads all scanner
-  ## outputs. deepsec_gate routes through run_deepsec_scanner only when
-  ## vars.enable_deepsec=true (default false); the not-enabled branch
-  ## skips straight to scan_join so a default run is byte-identical to
-  ## the pre-E4 workflow.
+  ## outputs. deepsec_gate routes through run_deepsec_scanner when
+  ## vars.enable_deepsec=true (the DEFAULT); set it false to skip straight
+  ## to scan_join (the pre-E4, deepsec-free workflow).
   plan_shards -> run_generic_scanners when not enabled
 
   run_generic_scanners -> run_lang_scanners with {langs: "{{outputs.detect_tech.langs}}"}
