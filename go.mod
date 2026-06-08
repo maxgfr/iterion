@@ -110,7 +110,7 @@ require (
 )
 
 require (
-	github.com/SocialGouv/claw-code-go v0.1.1-0.20260530092037-868917aa5284
+	github.com/SocialGouv/claw-code-go v0.1.1-0.20260608063524-b23879f45e03
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.16
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.15
