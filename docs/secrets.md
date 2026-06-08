@@ -113,29 +113,35 @@ credentials are protected by **the network allowlist + Layer 0 redaction
 substitution/DLP value is for **declared workflow secrets** (a
 `GITHUB_TOKEN`, a deploy key) and API-key mode.
 
-### ⚠ Status: Layer 2 sandbox wiring needs live validation
+### Status: live-validated in a docker sandbox (with trust-store caveat)
 
 The MITM mechanism is hermetically tested end-to-end
-([`inspect_test.go`](../pkg/sandbox/netproxy/inspect_test.go)). The
-**sandbox CA injection** is implemented for the **docker driver only**
-(bind-mounts the CA + sets `NODE_EXTRA_CA_CERTS`) and is **not yet
-live-validated**. Known follow-ups before relying on it:
+([`inspect_test.go`](../pkg/sandbox/netproxy/inspect_test.go)) **and**
+live-validated in a real docker sandbox (2026-06-08): a sandboxed `tool`
+run with a `secrets:` entry scoped `hosts: ["example.com"]` confirmed
+`inspect=true`, the per-run CA bind-mounted at `/run/iterion/egress-ca.pem`
+and trusted in-container, a `--data {{secrets.X}}` call to the approved
+host forwarded through the MITM to the real upstream (HTTP 405 from
+example.com), and the same call to an unapproved host blocked by content
+DLP (HTTP 403 + `secret exfiltration blocked` event). The real value
+never appeared in the run store.
+
+Remaining follow-ups before relying on it broadly:
 
 - **Trust-store breadth.** Only `NODE_EXTRA_CA_CERTS` (additive, Node /
-  Claude Code — the dominant LLM path) is set today. Python (`certifi` /
-  `SSL_CERT_FILE`), curl/git, and the OS store (`update-ca-certificates`)
-  need additive injection for non-Node clients.
+  Claude Code — the dominant LLM path) is injected. Non-Node clients
+  (curl, python via `certifi`, git) need the CA in the OS store
+  (`update-ca-certificates`) — in the live test curl had to be pointed at
+  the CA with `--cacert`. The slim image runs as non-root with no
+  `update-ca-certificates`, so OS-store injection wants a root post-create
+  step (or `SSL_CERT_FILE`/`CURL_CA_BUNDLE`/`REQUESTS_CA_BUNDLE`).
 - **undici / WebFetch gotcha.** Claude Code's `WebFetch` tool bundles its
   own undici dispatcher that can ignore `NODE_EXTRA_CA_CERTS` — validate
   it picks up the CA, or document `skipWebFetchPreflight`.
-- **Kubernetes driver.** Inspection is auto-disabled on non-docker
-  drivers (degrades to Layer 1 + redaction + allowlist); k8s CA injection
-  (ConfigMap/Secret) is a follow-up.
-
-To validate: run a sandboxed `claude_code` workflow that declares a
-`secrets:` entry with `hosts:` and has the agent `curl` the placeholder
-to the approved host; confirm the upstream receives the real value and an
-exfil attempt to another host is blocked.
+- **Kubernetes driver.** Inspection is auto-disabled where
+  `Capabilities.SupportsTLSInspection` is false (k8s, noop), degrading to
+  Layer 1 + redaction + allowlist; k8s CA injection (ConfigMap/Secret) is
+  a follow-up.
 
 ## Environment kill-switches
 
