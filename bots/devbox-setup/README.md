@@ -1,12 +1,22 @@
-# devbox-setup (Devy) — status: v1 (manifest + skill + main.bot validate; run-test pending)
+# devbox-setup (Devy) — status: v1 (detect+generate dogfood-validated; verify blocked by a sandbox devbox-HOME friction)
 
 Devy authors a pinned `devbox.json` for a repo so its build/test/e2e run in a
 reproducible toolchain (ADR-017 Tier-3). This bundle ships the **manifest**,
 the **playbook skill** (`skills/devbox-setup.md` — the substance: detect →
 map to Nix → shape → validate → scope), and the **`main.bot`** (linear
-detect → generate → verify → done; `iterion validate` OK, 5 nodes). It is
-**not yet run-tested** — a real run needs a target repo and a stable network
-for the cold `devbox install`; that dogfood is the remaining step.
+detect → generate → verify → done; `iterion validate` OK, 5 nodes).
+
+**Dogfood (2026-06-08, minimal Go repo).** `detect_stack` correctly
+identified Go 1.22 and `generate_devbox` produced a correct pinned
+`devbox.json` — `{"packages":["go@1.22"],"env":{"DEVBOX_NO_PROMPT":"true"}}`
+with sound notes — so the AI core works end-to-end. `verify_devbox` (which
+runs `devbox install` IN the sandbox) returned `ok:false` on a permission
+issue: inside the container the worktree appears root-owned (uid remap) and
+`$HOME/.cache/devbox` is not writable, so `devbox install` can't run. That is
+the "devbox first-class in the sandbox" friction (ADR-017), not a bot-logic
+flaw — the bot ran the whole pipeline and reported the failure gracefully.
+Making `verify` pass needs the sandbox to expose a uid-aligned, writable
+workspace + devbox cache to tool nodes (a sandbox-engine follow-up).
 
 ## Intended workflow (build spec)
 

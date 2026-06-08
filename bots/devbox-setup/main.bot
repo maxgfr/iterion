@@ -15,8 +15,6 @@
 vars:
   ## Repo to set up. Defaults to the run's project dir.
   workspace_dir: string = "${PROJECT_DIR}"
-  ## LLM for detection + authoring (claude_code subscription).
-  devbox_model:  string = "${DEVBOX_SETUP_MODEL:-claude-opus-4-8}"
 
 schema detect_output:
   summary:   string
@@ -66,7 +64,7 @@ prompt detect_user:
 
 agent detect_stack:
   backend: "claude_code"
-  model: "{{vars.devbox_model}}"
+  model: "${DEVBOX_SETUP_MODEL:-claude-opus-4-8}"
   reasoning_effort: "low"
   output: detect_output
   system: detect_system
@@ -98,7 +96,7 @@ prompt generate_user:
 
 agent generate_devbox:
   backend: "claude_code"
-  model: "{{vars.devbox_model}}"
+  model: "${DEVBOX_SETUP_MODEL:-claude-opus-4-8}"
   reasoning_effort: "medium"
   input: generate_input
   output: generate_output
