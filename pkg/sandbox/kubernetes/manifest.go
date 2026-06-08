@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -35,7 +36,22 @@ type PodManifestInput struct {
 	Spec           sandbox.Spec
 	WorkspaceMount string // in-pod path; defaults to /workspace
 	ProxyEndpoint  string // optional HTTPS_PROXY URL
+	// CASecretName, when non-empty, is the name of a Secret (created by
+	// the driver before the pod) holding the egress TLS-inspection CA
+	// under key caSecretKey. The manifest mounts it and points the
+	// CA-bundle env vars at it so in-pod clients trust the proxy's
+	// minted leaves (Layer 2 secret egress substitution).
+	CASecretName string
 }
+
+// caSecretKey is the Secret data key + projected filename for the egress
+// inspection CA. caMountDir is where the Secret volume is mounted in the
+// pod; caContainerPath is the resulting in-pod CA file path.
+const (
+	caSecretKey     = "egress-ca.pem"
+	caMountDir      = "/run/iterion-ca"
+	caContainerPath = caMountDir + "/" + caSecretKey
+)
 
 // BuildPodManifest renders the YAML for a sibling pod that hosts a
 // single iterion run.
@@ -105,6 +121,12 @@ func BuildPodManifest(in PodManifestInput) ([]byte, error) {
 		envSlice = upsertEnv(envSlice, "NO_PROXY", "localhost,127.0.0.1")
 	}
 
+	// Egress TLS-inspection CA (Layer 2): mount the per-run CA Secret and
+	// point every common client's CA-bundle env var at it. In inspection
+	// mode the proxy terminates all egress TLS, so the only certificate
+	// an in-pod client ever sees is our leaf — our-CA-only is correct.
+	caVolumes, caVolumeMounts := caInjection(in.CASecretName, &envSlice)
+
 	// V2-7: parse spec.Mounts (devcontainer-style strings) into k8s
 	// Volumes + VolumeMounts. Bind mounts are rejected at the driver
 	// layer (cloud pods don't have host filesystem access) so we only
@@ -123,6 +145,7 @@ func BuildPodManifest(in PodManifestInput) ([]byte, error) {
 	for _, vm := range extraVolumeMounts {
 		volumeMounts = append(volumeMounts, vm)
 	}
+	volumeMounts = append(volumeMounts, caVolumeMounts...)
 
 	volumes := []any{
 		map[string]any{
@@ -133,6 +156,7 @@ func BuildPodManifest(in PodManifestInput) ([]byte, error) {
 	for _, v := range extraVolumes {
 		volumes = append(volumes, v)
 	}
+	volumes = append(volumes, caVolumes...)
 
 	pod := map[string]any{
 		"apiVersion": "v1",
@@ -166,6 +190,75 @@ func BuildPodManifest(in PodManifestInput) ([]byte, error) {
 	}
 
 	return json.MarshalIndent(pod, "", "  ")
+}
+
+// caInjection returns the Secret volume + mount for the egress
+// inspection CA and appends the CA-bundle env vars to envSlice. Returns
+// nils when no CA secret is configured.
+func caInjection(secretName string, envSlice *[]any) (volumes, volumeMounts []any) {
+	if secretName == "" {
+		return nil, nil
+	}
+	for _, name := range []string{
+		"NODE_EXTRA_CA_CERTS", // Node / Claude Code (additive)
+		"SSL_CERT_FILE",       // OpenSSL: python ssl, git-over-openssl, …
+		"CURL_CA_BUNDLE",      // curl
+		"GIT_SSL_CAINFO",      // git
+		"REQUESTS_CA_BUNDLE",  // python requests
+	} {
+		*envSlice = upsertEnv(*envSlice, name, caContainerPath)
+	}
+	volumes = []any{
+		map[string]any{
+			"name": "iterion-egress-ca",
+			"secret": map[string]any{
+				"secretName": secretName,
+				"items": []any{
+					map[string]any{"key": caSecretKey, "path": caSecretKey},
+				},
+			},
+		},
+	}
+	volumeMounts = []any{
+		map[string]any{
+			"name":      "iterion-egress-ca",
+			"mountPath": caMountDir,
+			"readOnly":  true,
+		},
+	}
+	return volumes, volumeMounts
+}
+
+// BuildCASecret renders the per-run Secret holding the egress
+// TLS-inspection CA (the public CA cert only — the private key never
+// leaves the runner). Applied by the driver before the pod so the pod
+// can mount it. The data is the PEM, base64-encoded under caSecretKey.
+func BuildCASecret(namespace, name, runID, friendlyName string, caPEM []byte) ([]byte, error) {
+	if namespace == "" || name == "" {
+		return nil, fmt.Errorf("kubernetes: CA secret namespace and name are required")
+	}
+	labels := map[string]string{
+		LabelManaged:   "true",
+		LabelRunID:     runID,
+		LabelComponent: ComponentSandboxRun,
+	}
+	if friendlyName != "" {
+		labels[LabelRunName] = friendlyName
+	}
+	secret := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata": map[string]any{
+			"name":      name,
+			"namespace": namespace,
+			"labels":    labels,
+		},
+		"type": "Opaque",
+		"data": map[string]any{
+			caSecretKey: base64.StdEncoding.EncodeToString(caPEM),
+		},
+	}
+	return json.MarshalIndent(secret, "", "  ")
 }
 
 // defaultContainerSecurityContext returns the per-container

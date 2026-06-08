@@ -300,11 +300,15 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 
 	// Egress TLS-inspection CA (Layer 2 secret substitution): when the
 	// proxy runs in inspection mode it mints leaves the in-container
-	// clients must trust. Bind-mount the per-run CA cert and point
-	// NODE_EXTRA_CA_CERTS at it (additive — Node/Claude Code, the
-	// dominant LLM path). NOTE (needs live validation): broader trust
-	// (system store append for python/curl/git, and the undici/WebFetch
-	// inheritance gotcha) is a follow-up — see docs/secrets.md.
+	// clients must trust. Bind-mount the per-run CA cert and point every
+	// common client's CA-bundle env var at it. This works WITHOUT root or
+	// update-ca-certificates (the slim image runs as uid 1000): in
+	// inspection mode the proxy terminates ALL egress TLS, so the only
+	// certificate any in-container client ever sees is our leaf — pointing
+	// the bundle at our CA alone is correct (NO_PROXY=localhost is the
+	// only exception, and localhost rarely speaks TLS in a sandbox).
+	// NODE_EXTRA_CA_CERTS is additive; the rest replace, which is fine
+	// here. See docs/secrets.md.
 	if len(info.ProxyCACert) > 0 {
 		caDir, err := os.MkdirTemp("", "iterion-egress-ca-")
 		if err != nil {
@@ -316,7 +320,15 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 		}
 		const caContainerPath = "/run/iterion/egress-ca.pem"
 		args = append(args, "-v", caHostPath+":"+caContainerPath+":ro")
-		args = append(args, "--env", "NODE_EXTRA_CA_CERTS="+caContainerPath)
+		for _, caEnv := range []string{
+			"NODE_EXTRA_CA_CERTS", // Node / Claude Code (additive)
+			"SSL_CERT_FILE",       // OpenSSL: python ssl, git-over-openssl, ruby, …
+			"CURL_CA_BUNDLE",      // curl
+			"GIT_SSL_CAINFO",      // git
+			"REQUESTS_CA_BUNDLE",  // python requests
+		} {
+			args = append(args, "--env", caEnv+"="+caContainerPath)
+		}
 	}
 
 	// PID 1 is `sleep infinity` so the container stays alive while

@@ -191,6 +191,7 @@ dispatcher routes on it), never the persona.
 | Persona | `assignee` (technical name) |
 |---|---|
 | Billy | `branch-improve-loop` |
+| Devy | `devbox-setup` |
 | Doki | `docs-refresh` |
 | Featurly | `feature-dev` |
 | Revi | `review-pr` |
@@ -214,6 +215,30 @@ fix, and stops on cross-family double-approval.
   a semantic message; pass base_ref for a non-main integration base.
 - **Vars**: `base_ref` (string), `chunk_dir` (string), `chunk_max_loc` (int), `chunk_threshold_loc` (int), `scope_notes` (string), `workspace_dir` (string)
 - **Path**: `bots/branch-improve-loop/main.bot`
+
+### `devbox-setup` — Devy
+
+Bootstraps a reproducible dev environment for a repository. Detects the
+project's languages, runtimes, build + test tools and e2e stack (e.g.
+Playwright), then authors a PINNED `devbox.json` (Nix-packaged toolchain)
+at the repo root and validates it with `devbox install`. The generated
+`devbox.json` is what other iterion bots — and humans — use to run the
+project's build / test / e2e in a reproducible toolchain (ADR-017 Tier-2/
+Tier-3): once a repo has one, `build_rung` / `regress_rung` / patch_author
+run project commands via `devbox run -- …`.
+
+Scope discipline: writes ONLY `devbox.json` (+ `devbox.lock`); never edits
+source. Default mode proposes the change in a worktree behind a human gate
+(the project's dev environment is consequential — an operator confirms
+before it lands).
+
+- **Use when**:
+  Run on a repo that has NO `devbox.json` yet (so iterion bots can run its
+  build/test/e2e reproducibly), or when its toolchain drifted from what the
+  code now needs (new language, runtime bump, added e2e). Produces a pinned
+  `devbox.json` + `devbox.lock`; it does not change source.
+- **Vars**: `workspace_dir` (string)
+- **Path**: `bots/devbox-setup/main.bot`
 
 ### `docs-refresh` — Doki
 

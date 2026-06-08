@@ -124,6 +124,7 @@ func (d *Driver) Capabilities() sandbox.Capabilities {
 		SupportsNetworkPolicy: true,  // V2-5 — synthesised per-run; CNI must enforce
 		SupportsPostCreate:    true,
 		SupportsRemoteUser:    true,
+		SupportsTLSInspection: true, // per-run CA Secret mounted into the pod (not cluster-validated)
 	}
 }
 
@@ -164,6 +165,22 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 	}
 
 	podName := podNameFor(info.RunID)
+
+	// Egress TLS-inspection CA (Layer 2): create the per-run CA Secret
+	// BEFORE the pod so the pod can mount it. The Secret holds only the
+	// public CA cert; the private key never leaves the runner.
+	caSecretName := ""
+	if len(info.ProxyCACert) > 0 {
+		caSecretName = podName + "-ca"
+		caSecret, err := BuildCASecret(d.namespace, caSecretName, info.RunID, info.FriendlyName, info.ProxyCACert)
+		if err != nil {
+			return nil, fmt.Errorf("kubernetes: build CA secret: %w", err)
+		}
+		if err := applyManifest(ctx, d.namespace, caSecret); err != nil {
+			return nil, fmt.Errorf("kubernetes: apply CA secret: %w", err)
+		}
+	}
+
 	manifest, err := BuildPodManifest(PodManifestInput{
 		Namespace:      d.namespace,
 		Name:           podName,
@@ -172,21 +189,29 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 		Spec:           p.spec,
 		WorkspaceMount: p.workspace,
 		ProxyEndpoint:  info.ProxyEndpoint,
+		CASecretName:   caSecretName,
 	})
 	if err != nil {
+		if caSecretName != "" {
+			_ = deleteResource(ctx, d.namespace, "secret", caSecretName)
+		}
 		return nil, fmt.Errorf("kubernetes: build manifest: %w", err)
 	}
 
 	if err := applyManifest(ctx, d.namespace, manifest); err != nil {
+		if caSecretName != "" {
+			_ = deleteResource(ctx, d.namespace, "secret", caSecretName)
+		}
 		return nil, fmt.Errorf("kubernetes: apply pod: %w", err)
 	}
 
 	r := &Run{
-		driver:    d,
-		podName:   podName,
-		namespace: d.namespace,
-		prepared:  p,
-		info:      info,
+		driver:       d,
+		podName:      podName,
+		namespace:    d.namespace,
+		prepared:     p,
+		info:         info,
+		caSecretName: caSecretName,
 	}
 
 	// V2-5: synthesise a per-run NetworkPolicy when the proxy is
@@ -269,6 +294,11 @@ type Run struct {
 	// networkPolicyApplied tracks whether a per-run NetworkPolicy was
 	// created in [Driver.Start] so [Run.Cleanup] knows to delete it.
 	networkPolicyApplied bool
+
+	// caSecretName is the per-run egress-CA Secret created in
+	// [Driver.Start] (Layer 2 TLS inspection), deleted in [Run.Cleanup].
+	// Empty when inspection is off.
+	caSecretName string
 
 	mu      sync.Mutex
 	cleaned bool
@@ -359,6 +389,11 @@ func (r *Run) Cleanup(_ context.Context) error {
 	if r.networkPolicyApplied {
 		if err := deleteResource(deleteCtx, r.namespace, "networkpolicy", r.podName); err != nil {
 			r.driver.logger.Debug("sandbox: kubernetes netpolicy cleanup of %s/%s reported: %v", r.namespace, r.podName, err)
+		}
+	}
+	if r.caSecretName != "" {
+		if err := deleteResource(deleteCtx, r.namespace, "secret", r.caSecretName); err != nil {
+			r.driver.logger.Debug("sandbox: kubernetes CA secret cleanup of %s/%s reported: %v", r.namespace, r.caSecretName, err)
 		}
 	}
 	return nil

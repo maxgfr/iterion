@@ -126,22 +126,34 @@ example.com), and the same call to an unapproved host blocked by content
 DLP (HTTP 403 + `secret exfiltration blocked` event). The real value
 never appeared in the run store.
 
-Remaining follow-ups before relying on it broadly:
+Trust injection by client (the docker driver sets all of these env vars
+at the CA path, plus mounts the CA; in inspection mode every egress cert
+is our leaf, so our-CA-only is correct):
 
-- **Trust-store breadth.** Only `NODE_EXTRA_CA_CERTS` (additive, Node /
-  Claude Code — the dominant LLM path) is injected. Non-Node clients
-  (curl, python via `certifi`, git) need the CA in the OS store
-  (`update-ca-certificates`) — in the live test curl had to be pointed at
-  the CA with `--cacert`. The slim image runs as non-root with no
-  `update-ca-certificates`, so OS-store injection wants a root post-create
-  step (or `SSL_CERT_FILE`/`CURL_CA_BUNDLE`/`REQUESTS_CA_BUNDLE`).
-- **undici / WebFetch gotcha.** Claude Code's `WebFetch` tool bundles its
-  own undici dispatcher that can ignore `NODE_EXTRA_CA_CERTS` — validate
-  it picks up the CA, or document `skipWebFetchPreflight`.
-- **Kubernetes driver.** Inspection is auto-disabled where
-  `Capabilities.SupportsTLSInspection` is false (k8s, noop), degrading to
-  Layer 1 + redaction + allowlist; k8s CA injection (ConfigMap/Secret) is
-  a follow-up.
+| Client | Trust mechanism | Status |
+|---|---|---|
+| Node / Claude Code | `NODE_EXTRA_CA_CERTS` (additive) | live-validated — `fetch`/undici → example.com 200 through the MITM |
+| curl | `CURL_CA_BUNDLE` | live-validated — approved→405, exfil→403, no `--cacert` needed |
+| python ssl / requests | `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` | env set (same mechanism as curl) |
+| git | `GIT_SSL_CAINFO` / `SSL_CERT_FILE` | env set |
+
+Remaining follow-ups:
+
+- **Claude Code `WebFetch` specifically.** Plain Node `fetch`/undici
+  honours `NODE_EXTRA_CA_CERTS` (validated above), but Claude Code's
+  `WebFetch` tool has historically bundled its own undici dispatcher +
+  does an `api.anthropic.com` domain-safety preflight. Confirm against a
+  live `claude_code` run; if it trips, set `skipWebFetchPreflight: true`.
+  The known `NODE_EXTRA_CA_CERTS`-ignored reports are Bun-runtime
+  specific, not standard Node.
+- **Kubernetes driver.** CA injection is implemented — `Driver.Start`
+  creates a per-run Secret holding the public CA, the pod mounts it and
+  the CA env vars point at it (`BuildCASecret` / `caInjection`,
+  manifest-tested in `secrets_ca_test.go`), and
+  `Capabilities.SupportsTLSInspection` is true. **Not yet
+  cluster-validated** (needs a real cluster + a NetworkPolicy-aware CNI);
+  the runner's RBAC must allow `secrets` create/delete in the sandbox
+  namespace.
 
 ## Environment kill-switches
 
