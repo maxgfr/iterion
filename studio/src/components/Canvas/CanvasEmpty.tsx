@@ -40,7 +40,12 @@ export default function CanvasEmpty() {
       const res = await loadExample(name);
       setDocument(res.document);
       setCurrentSource(res.source);
-      setCurrentFilePath(null);
+      // Bind the productised bot path (mirrors RecentFilesPanel /
+      // Toolbar.handlePickFile) so the Run button enables immediately —
+      // previously null left every example loaded here stuck on "Save the
+      // workflow first". Set before markSaved() so the clean state is the
+      // saved baseline.
+      setCurrentFilePath(`bots/${name}`);
       setDiagnostics([], []);
       markSaved();
       setExamplesOpen(false);
