@@ -68,6 +68,12 @@ var allowlist = []allowEntry{
 	{"sec-audit-source", "fp_path", ".iterion/", "scratch dir; pending relocation"},
 	{"sec-audit-source", "records_dir", ".iterion/", "scratch dir; pending relocation"},
 	{"sec-audit-source", "matchers_dir", ".iterion/", "scratch dir; pending relocation"},
+	// deepsec defaults added by the enable_deepsec-by-default work — same
+	// .iterion/security/ scratch convention as the entries above, tracked
+	// for the same neutral-path relocation.
+	{"sec-audit-source", "context_path", ".iterion/", "security context; pending relocation"},
+	{"sec-audit-source", "deepsec_out", ".iterion/", "deepsec scan output; pending relocation"},
+	{"sec-audit-source", "patch_dir", ".iterion/", "patch scratch; pending relocation"},
 }
 
 func isAllowed(bot, varName, pattern string) bool {
