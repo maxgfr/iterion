@@ -213,6 +213,7 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 		MaxTokens:             task.MaxTokens,
 		CompactThresholdRatio: task.CompactThresholdRatio,
 		CompactPreserveRecent: task.CompactPreserveRecent,
+		MaterializeSecrets:    task.MaterializeSecrets,
 	}
 
 	// Reasoning effort via ProviderOptions. Coerce against the model's

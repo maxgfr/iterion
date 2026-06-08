@@ -110,6 +110,7 @@ type jsonFile struct {
 	Vars        *jsonVarsBlock        `json:"vars,omitempty"`
 	Presets     *jsonPresetsBlock     `json:"presets,omitempty"`
 	Attachments *jsonAttachmentsBlock `json:"attachments,omitempty"`
+	Secrets     *jsonSecretsBlock     `json:"secrets,omitempty"`
 	MCPServers  []*jsonMCPServerDecl  `json:"mcp_servers,omitempty"`
 	Prompts     []*jsonPromptDecl     `json:"prompts,omitempty"`
 	Schemas     []*jsonSchemaDecl     `json:"schemas,omitempty"`
@@ -136,6 +137,17 @@ type jsonVarField struct {
 	Name    string       `json:"name,omitempty"`
 	Type    string       `json:"type,omitempty"`
 	Default *jsonLiteral `json:"default,omitempty"`
+}
+
+type jsonSecretsBlock struct {
+	Fields []*jsonSecretField `json:"fields,omitempty"`
+}
+
+type jsonSecretField struct {
+	Name        string   `json:"name,omitempty"`
+	Value       string   `json:"value,omitempty"`
+	Hosts       []string `json:"hosts,omitempty"`
+	Description string   `json:"description,omitempty"`
 }
 
 type jsonPresetsBlock struct {
@@ -552,6 +564,9 @@ func toJSON(f *File) *jsonFile {
 	if f.Presets != nil {
 		jf.Presets = presetsBlockToJSON(f.Presets)
 	}
+	if f.Secrets != nil {
+		jf.Secrets = secretsBlockToJSON(f.Secrets)
+	}
 	if f.Attachments != nil {
 		jf.Attachments = attachmentsBlockToJSON(f.Attachments)
 	}
@@ -829,6 +844,19 @@ func varsBlockToJSON(v *VarsBlock) *jsonVarsBlock {
 	return jv
 }
 
+func secretsBlockToJSON(s *SecretsBlock) *jsonSecretsBlock {
+	js := &jsonSecretsBlock{}
+	for _, f := range s.Fields {
+		js.Fields = append(js.Fields, &jsonSecretField{
+			Name:        f.Name,
+			Value:       f.Value,
+			Hosts:       f.Hosts,
+			Description: f.Description,
+		})
+	}
+	return js
+}
+
 func literalToJSON(l *Literal) *jsonLiteral {
 	return &jsonLiteral{
 		Kind:     literalKindToStr[l.Kind],
@@ -1025,6 +1053,9 @@ func fromJSON(jf *jsonFile) (*File, error) {
 		}
 		f.Vars = v
 	}
+	if jf.Secrets != nil {
+		f.Secrets = secretsBlockFromJSON(jf.Secrets)
+	}
 	if jf.Presets != nil {
 		p, err := presetsBlockFromJSON(jf.Presets)
 		if err != nil {
@@ -1209,6 +1240,19 @@ func memoryFromJSON(jm *jsonMemoryBlock) *MemoryBlock {
 		PreCompactInject: jm.PreCompactInject,
 		ProjectRoot:      jm.ProjectRoot,
 	}
+}
+
+func secretsBlockFromJSON(js *jsonSecretsBlock) *SecretsBlock {
+	s := &SecretsBlock{}
+	for _, jf := range js.Fields {
+		s.Fields = append(s.Fields, &SecretField{
+			Name:        jf.Name,
+			Value:       jf.Value,
+			Hosts:       jf.Hosts,
+			Description: jf.Description,
+		})
+	}
+	return s
 }
 
 func varsBlockFromJSON(jv *jsonVarsBlock) (*VarsBlock, error) {

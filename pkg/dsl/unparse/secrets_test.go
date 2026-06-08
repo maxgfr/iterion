@@ -1,0 +1,82 @@
+package unparse
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/SocialGouv/iterion/pkg/dsl/ast"
+	"github.com/SocialGouv/iterion/pkg/dsl/parser"
+)
+
+const secretsRoundtripSrc = `secrets:
+  github_token: "${GITHUB_TOKEN}"
+  deploy_key:
+    value: "${DEPLOY_KEY}"
+    hosts: ["api.github.com", "github.com"]
+    description: "deploy key"
+
+agent x:
+  model: "anthropic/c"
+  system: p
+
+prompt p:
+  Use {{secrets.github_token}}.
+
+workflow w:
+  entry: x
+  x -> done
+`
+
+func TestSecretsRoundtrip(t *testing.T) {
+	pr1 := parser.Parse("t.iter", secretsRoundtripSrc)
+	if len(pr1.Diagnostics) > 0 {
+		t.Fatalf("first parse diagnostics: %+v", pr1.Diagnostics)
+	}
+	out1 := Unparse(pr1.File)
+
+	pr2 := parser.Parse("t.iter", out1)
+	if len(pr2.Diagnostics) > 0 {
+		t.Fatalf("re-parse produced diagnostics:\n%s\n%+v", out1, pr2.Diagnostics)
+	}
+	out2 := Unparse(pr2.File)
+	if out1 != out2 {
+		t.Fatalf("round-trip drift:\n--- pass 1 ---\n%s\n--- pass 2 ---\n%s", out1, out2)
+	}
+
+	for _, want := range []string{
+		"secrets:",
+		`github_token: "${GITHUB_TOKEN}"`,
+		"deploy_key:",
+		`value: "${DEPLOY_KEY}"`,
+		`hosts: ["api.github.com", "github.com"]`,
+	} {
+		if !strings.Contains(out1, want) {
+			t.Errorf("unparsed output missing %q:\n%s", want, out1)
+		}
+	}
+}
+
+func TestSecretsASTJSONRoundtrip(t *testing.T) {
+	pr := parser.Parse("t.iter", secretsRoundtripSrc)
+	if len(pr.Diagnostics) > 0 {
+		t.Fatalf("parse diagnostics: %+v", pr.Diagnostics)
+	}
+	blob, err := ast.MarshalFile(pr.File)
+	if err != nil {
+		t.Fatalf("MarshalFile: %v", err)
+	}
+	if !strings.Contains(string(blob), "github_token") {
+		t.Fatalf("AST JSON dropped the secrets block:\n%s", blob)
+	}
+	back, err := ast.UnmarshalFile(blob)
+	if err != nil {
+		t.Fatalf("UnmarshalFile: %v", err)
+	}
+	if back.Secrets == nil || len(back.Secrets.Fields) != 2 {
+		t.Fatalf("secrets lost through AST JSON round-trip: %+v", back.Secrets)
+	}
+	dk := back.Secrets.Fields[1]
+	if dk.Name != "deploy_key" || len(dk.Hosts) != 2 || dk.Value != "${DEPLOY_KEY}" {
+		t.Errorf("deploy_key not preserved: %+v", dk)
+	}
+}

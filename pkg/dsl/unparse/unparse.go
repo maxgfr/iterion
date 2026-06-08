@@ -53,6 +53,12 @@ func Unparse(f *ast.File) string {
 		writeAttachmentsBlock(&b, f.Attachments, "")
 	}
 
+	// --- Secrets ---
+	if f.Secrets != nil && len(f.Secrets.Fields) > 0 {
+		blankLine()
+		writeSecretsBlock(&b, f.Secrets, "")
+	}
+
 	// --- MCP servers ---
 	for _, s := range f.MCPServers {
 		blankLine()
@@ -416,6 +422,30 @@ func writeVarsBlock(b *strings.Builder, vars *ast.VarsBlock, indent string) {
 			writeLiteral(b, v.Default)
 		}
 		b.WriteByte('\n')
+	}
+}
+
+func writeSecretsBlock(b *strings.Builder, sb *ast.SecretsBlock, indent string) {
+	fmt.Fprintf(b, "%ssecrets:\n", indent)
+	for _, s := range sb.Fields {
+		// Short form when only a value is set; block form when egress
+		// hosts or a description accompany it.
+		hasProps := len(s.Hosts) > 0 || s.Description != ""
+		b.WriteString(indent)
+		b.WriteString("  ")
+		b.WriteString(s.Name)
+		if !hasProps {
+			fmt.Fprintf(b, ": %q\n", s.Value)
+			continue
+		}
+		b.WriteString(":\n")
+		fmt.Fprintf(b, "%s    value: %q\n", indent, s.Value)
+		if len(s.Hosts) > 0 {
+			fmt.Fprintf(b, "%s    hosts: [%s]\n", indent, quoteList(s.Hosts))
+		}
+		if s.Description != "" {
+			fmt.Fprintf(b, "%s    description: %q\n", indent, s.Description)
+		}
 	}
 }
 

@@ -26,9 +26,7 @@ import (
 // non-nil guard even with zero known values, so the heuristic detector
 // pass still scrubs unknown token shapes from the run's sinks.
 func BuildSecretGuard(ctx context.Context, wf *ir.Workflow, vars map[string]string) *secretguard.Guard {
-	if !envFlagEnabled("ITERION_SECRETS_REDACT", true) {
-		return nil
-	}
+	cfg := secretGuardConfigFromEnv()
 
 	var known []secretguard.Secret
 
@@ -67,26 +65,66 @@ func BuildSecretGuard(ctx context.Context, wf *ir.Workflow, vars map[string]stri
 	//    egress host scoping consumed by Layer 2.
 	known = append(known, declaredWorkflowSecrets(wf, vars)...)
 
-	return secretguard.New(known, secretGuardConfigFromEnv())
+	g := secretguard.New(known, cfg)
+	// Return nil only when the guard would do nothing at all: no known
+	// values to redact/materialise and the heuristic pass is disabled.
+	// This keeps the common no-secrets path allocation-free downstream.
+	if !g.HasKnownSecrets() && !cfg.Heuristic {
+		return nil
+	}
+	return g
 }
 
 // declaredWorkflowSecrets resolves the workflow's `secrets:` block into
-// guard entries. The DSL block is wired by Layer 1; until then this
-// returns nil (no declared secrets), keeping Layer 0 self-contained.
+// guard entries. Each declared value (typically "${ENV}" or a
+// "{{vars.X}}" reference) is resolved to its real plaintext here; the
+// agent only ever sees the placeholder (PlaceholderForName), which the
+// guard materialises at tool/shell exec.
 func declaredWorkflowSecrets(wf *ir.Workflow, vars map[string]string) []secretguard.Secret {
-	if wf == nil {
+	if wf == nil || len(wf.Secrets) == 0 {
 		return nil
 	}
-	// Layer 1 will read wf.Secrets here and resolve ${VAR}/vars values
-	// into secretguard.Secret entries with explicit placeholders + host
-	// scoping. No-op for Layer 0.
-	return nil
+	out := make([]secretguard.Secret, 0, len(wf.Secrets))
+	for name, s := range wf.Secrets {
+		val := resolveSecretValue(s.Value, vars)
+		if val == "" {
+			continue // unset/unresolved — nothing to taint or materialise
+		}
+		out = append(out, secretguard.Secret{
+			Name:        name,
+			Value:       val,
+			Placeholder: secretguard.PlaceholderForName(name),
+			Hosts:       s.Hosts,
+		})
+	}
+	return out
+}
+
+// resolveSecretValue resolves a declared secret's value expression:
+// ${ENV} / ${ENV:-default} via the shared IR expander, or a single
+// {{vars.NAME}} reference against the run's vars. A plain literal is
+// returned unchanged.
+func resolveSecretValue(expr string, vars map[string]string) string {
+	expr = strings.TrimSpace(expr)
+	if strings.HasPrefix(expr, "{{") && strings.HasSuffix(expr, "}}") {
+		inner := strings.TrimSpace(expr[2 : len(expr)-2])
+		if rest, ok := strings.CutPrefix(inner, "vars."); ok {
+			return vars[strings.TrimSpace(rest)]
+		}
+	}
+	return ir.ExpandEnvWithDefault(expr)
 }
 
 // secretGuardConfigFromEnv resolves the guard's tunables from the
 // environment, falling back to the production defaults.
 func secretGuardConfigFromEnv() secretguard.Config {
 	cfg := secretguard.DefaultConfig()
+	// Master kill-switch: disable all sink redaction (known + heuristic)
+	// while leaving placeholder materialisation intact.
+	if !envFlagEnabled("ITERION_SECRETS_REDACT", true) {
+		cfg.RedactKnown = false
+		cfg.Heuristic = false
+	}
 	if !envFlagEnabled("ITERION_SECRETS_REDACT_HEURISTIC", true) {
 		cfg.Heuristic = false
 	}
@@ -97,6 +135,9 @@ func secretGuardConfigFromEnv() secretguard.Config {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
 			cfg.MinScore = f
 		}
+	}
+	if !envFlagEnabled("ITERION_SECRETS_PLACEHOLDERS", true) {
+		cfg.Placeholders = false
 	}
 	return cfg
 }

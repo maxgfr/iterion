@@ -11,6 +11,7 @@ type File struct {
 	Vars        *VarsBlock        // top-level vars (optional, at most one)
 	Presets     *PresetsBlock     // top-level named preset value sets (optional, at most one)
 	Attachments *AttachmentsBlock // top-level attachments (optional, at most one)
+	Secrets     *SecretsBlock     // top-level secrets (optional, at most one)
 	MCPServers  []*MCPServerDecl  // top-level reusable MCP server declarations
 	Prompts     []*PromptDecl     // prompt declarations
 	Schemas     []*SchemaDecl     // schema declarations
@@ -174,6 +175,36 @@ type AttachmentField struct {
 	Type        AttachmentTypeExpr
 	Required    *bool    // nil = false (default)
 	AcceptMIME  []string // nil = inherit server allowlist
+	Description string
+	Span        Span
+}
+
+// ---------------------------------------------------------------------------
+// Secrets
+// ---------------------------------------------------------------------------
+
+// SecretsBlock represents a top-level `secrets:` block. Each secret
+// declares a value source (typically a "${ENV}" reference) the agent
+// never sees directly — references render as opaque placeholders and
+// iterion materialises the real value at tool/shell execution.
+type SecretsBlock struct {
+	Fields []*SecretField
+	Span   Span
+}
+
+// SecretField is a single secret declaration. The short form is
+// `name: "value"`. The block form additionally accepts `value`,
+// `hosts` (egress scoping consumed by Layer 2), and `description`:
+//
+//	secrets:
+//	  github_token: "${GITHUB_TOKEN}"
+//	  deploy_key:
+//	    value: "${DEPLOY_KEY}"
+//	    hosts: ["api.github.com", "github.com"]
+type SecretField struct {
+	Name        string
+	Value       string   // raw value expr (may contain ${ENV} / {{vars.X}})
+	Hosts       []string // approved egress hosts (nil = no restriction)
 	Description string
 	Span        Span
 }

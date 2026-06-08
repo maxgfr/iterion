@@ -418,6 +418,36 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 		}
 	}
 
+	// Secret materialisation (Layer 1, structural): a PreToolUse hook
+	// swaps __ITERION_SECRET_<name>__ placeholders for their real values
+	// in agent-emitted tool input, immediately before the CLI runs the
+	// tool. The placeholder is all the model ever emits/sees; the real
+	// value is spliced in here and never enters the prompt, the event
+	// stream, or the run store. Matches all tools (Matcher nil) but is a
+	// no-op for any input that carries no placeholder.
+	if materialize := task.MaterializeSecrets; materialize != nil {
+		opts = append(opts, claudesdk.WithHook(claudesdk.HookPreToolUse, claudesdk.HookMatcher{
+			Handler: func(_ context.Context, in claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
+				if len(in.ToolInput) == 0 {
+					return claudesdk.HookOutput{}, nil
+				}
+				raw, err := json.Marshal(in.ToolInput)
+				if err != nil {
+					return claudesdk.HookOutput{}, nil
+				}
+				swapped := materialize(string(raw))
+				if swapped == string(raw) {
+					return claudesdk.HookOutput{}, nil // no placeholder present
+				}
+				var updated map[string]any
+				if err := json.Unmarshal([]byte(swapped), &updated); err != nil {
+					return claudesdk.HookOutput{}, nil
+				}
+				return claudesdk.HookOutput{Decision: "allow", UpdatedInput: updated}, nil
+			},
+		}))
+	}
+
 	// Board MCP wiring. When the node was granted any board.* capability,
 	// register the internal __mcp-board server so the bot can mutate the
 	// kanban from inside its reasoning loop. Same sandbox limitation as

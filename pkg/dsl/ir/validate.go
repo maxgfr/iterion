@@ -60,6 +60,12 @@ const (
 	DiagPresetUnknownVar   DiagCode = "C070" // preset references a variable not declared in vars:
 	DiagPresetTypeMismatch DiagCode = "C071" // preset value type does not match the declared variable type
 	DiagDuplicatePreset    DiagCode = "C072" // preset name declared more than once
+
+	// Secrets diagnostics (in-source `secrets:` block).
+	DiagDuplicateSecret   DiagCode = "C090" // secret name declared more than once
+	DiagSecretVarConflict DiagCode = "C091" // secret name collides with a declared var
+	DiagInvalidSecretHost DiagCode = "C092" // secret egress host scoping ill-formed (Layer 2)
+	DiagUnknownSecret     DiagCode = "C093" // {{secrets.X}} but X not declared
 )
 
 // validate performs static validation on a compiled workflow.
@@ -1332,7 +1338,23 @@ func (c *compiler) validateTemplateRefs(w *Workflow) {
 			c.validateArtifactsRef(w, rc, predecessors, artifactProducers)
 		case RefAttachments:
 			c.validateAttachmentsRef(w, rc)
+		case RefSecrets:
+			c.validateSecretsRef(w, rc)
 		}
+	}
+}
+
+// validateSecretsRef flags a {{secrets.X}} reference whose secret X is
+// not declared in the workflow's `secrets:` block.
+func (c *compiler) validateSecretsRef(w *Workflow, rc refContext) {
+	if len(rc.Ref.Path) == 0 {
+		return
+	}
+	name := rc.Ref.Path[0]
+	if _, ok := w.Secrets[name]; !ok {
+		c.errorf(DiagUnknownSecret,
+			"%s: reference %s targets undeclared secret %q",
+			rc.Location, rc.Ref.Raw, name)
 	}
 }
 

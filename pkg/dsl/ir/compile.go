@@ -443,6 +443,9 @@ func (c *compiler) compile() *Workflow {
 	// Compile vars (merge top-level + workflow-level).
 	vars := c.compileVars(c.file.Vars, wf.Vars)
 
+	// Compile secrets (top-level only).
+	secrets := c.compileSecrets(c.file.Secrets, vars)
+
 	// Compile presets (depend on vars for type coercion + name validation).
 	presets := c.compilePresets(c.file.Presets, vars)
 
@@ -479,6 +482,7 @@ func (c *compiler) compile() *Workflow {
 		Schemas:        c.schemas,
 		Prompts:        c.prompts,
 		Vars:           vars,
+		Secrets:        secrets,
 		Presets:        presets,
 		Attachments:    attachments,
 		Loops:          loops,
@@ -1192,6 +1196,33 @@ func (c *compiler) compileVars(topLevel *ast.VarsBlock, workflowLevel *ast.VarsB
 	addVars(workflowLevel)
 
 	return vars
+}
+
+// compileSecrets resolves a top-level `secrets:` block into the IR map.
+// Values stay as raw expressions (${ENV} / {{vars.X}}); the runtime
+// resolves them to plaintext at run start. Returns nil when no block is
+// declared.
+func (c *compiler) compileSecrets(block *ast.SecretsBlock, vars map[string]*Var) map[string]*Secret {
+	if block == nil || len(block.Fields) == 0 {
+		return nil
+	}
+	secrets := make(map[string]*Secret, len(block.Fields))
+	for _, f := range block.Fields {
+		if _, dup := secrets[f.Name]; dup {
+			c.errorf(DiagDuplicateSecret, "duplicate secret %q — keeping first declaration", f.Name)
+			continue
+		}
+		if _, clash := vars[f.Name]; clash {
+			c.errorf(DiagSecretVarConflict, "secret %q collides with a variable of the same name", f.Name)
+		}
+		secrets[f.Name] = &Secret{
+			Name:        f.Name,
+			Value:       f.Value,
+			Hosts:       f.Hosts,
+			Description: f.Description,
+		}
+	}
+	return secrets
 }
 
 // ---------------------------------------------------------------------------

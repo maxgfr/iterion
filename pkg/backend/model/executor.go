@@ -458,6 +458,16 @@ func (e *ClawExecutor) ScrubOutput(output map[string]interface{}) map[string]int
 	return e.secretGuard.RedactMap(output)
 }
 
+// secretMaterializer returns the placeholder→value substitution used to
+// populate Task.MaterializeSecrets. Returns nil when no known secrets
+// are registered so backends skip the work entirely.
+func (e *ClawExecutor) secretMaterializer() func(string) string {
+	if e.secretGuard == nil || !e.secretGuard.HasKnownSecrets() {
+		return nil
+	}
+	return e.secretGuard.Materialize
+}
+
 // WithExecutorInbox installs the operator-chatbox binder on the
 // executor. Every Task built by executeBackend / executeLLMRouterUnified
 // then carries an InboxDrain closure so CLI-based backends
@@ -1114,6 +1124,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		Ultracode:             ultracode,
 		InteractionEnabled:    f.interaction != ir.InteractionNone,
 		SecretsHygiene:        e.secretGuard.HasKnownSecrets(),
+		MaterializeSecrets:    e.secretMaterializer(),
 		CompactThresholdRatio: compactRatio,
 		CompactPreserveRecent: compactPreserve,
 		Sandbox:               e.sandbox,
@@ -2198,6 +2209,16 @@ func (e *ClawExecutor) resolveTemplateRef(ref string, input map[string]interface
 		if e.vars != nil {
 			if v, ok := e.vars[key]; ok {
 				return formatValue(v), true
+			}
+		}
+	case "secrets":
+		// {{secrets.X}} renders the opaque placeholder (Layer 1); the
+		// real value is materialised by the secret guard at tool/shell
+		// execution. With the placeholders kill-switch off it renders the
+		// real value directly.
+		if e.secretGuard != nil {
+			if v := e.secretGuard.ResolveSecretRef(key); v != "" {
+				return v, true
 			}
 		}
 	case "outputs":

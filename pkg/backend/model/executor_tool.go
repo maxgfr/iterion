@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SocialGouv/iterion/pkg/backend/secretguard"
 	"github.com/SocialGouv/iterion/pkg/backend/tool"
 	"github.com/SocialGouv/iterion/pkg/backend/tool/privacy"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
@@ -151,7 +152,10 @@ func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNo
 	}
 
 	start := time.Now()
-	cmd := e.toolNodeCommand(ctx, resolved)
+	// Materialise secret placeholders ONLY into the command actually
+	// executed — `resolved` (placeholder form) is what the hooks/logs
+	// above and below persist, so the real value never hits the store.
+	cmd := e.toolNodeCommand(ctx, e.secretGuard.Materialize(resolved))
 	// Separate stdout (for structured JSON parsing) from stderr (for
 	// diagnostic logging). Tools that emit a JSON result on stdout MUST
 	// be able to use stderr for prose (yarn's resolution output, git's
@@ -312,7 +316,10 @@ func (e *ClawExecutor) executeToolNodeScript(ctx context.Context, node *ir.ToolN
 	}
 	tmpPath := tmpFile.Name()
 	defer func() { _ = os.Remove(tmpPath) }()
-	if _, werr := tmpFile.WriteString(resolved); werr != nil {
+	// Materialise secret placeholders into the executed script body only.
+	// `resolved` (placeholder form) stays the value passed to hooks/logs,
+	// so the real secret never reaches the persisted event stream.
+	if _, werr := tmpFile.WriteString(e.secretGuard.Materialize(resolved)); werr != nil {
 		_ = tmpFile.Close()
 		return nil, fmt.Errorf("model: tool node %q: write temp script: %w", node.ID, werr)
 	}
@@ -526,6 +533,13 @@ func resolveTemplateWith(template string, refs []*ir.Ref, input map[string]inter
 			handled = true
 		case ref.Kind == ir.RefVars && len(ref.Path) > 0:
 			val = vars[ref.Path[0]]
+			handled = true
+		case ref.Kind == ir.RefSecrets && len(ref.Path) > 0:
+			// Render the opaque placeholder into the command; the real
+			// value is swapped in by the secret guard immediately before
+			// exec (executeToolNodeShell / Script), never landing in the
+			// persisted command text or logs.
+			val = secretguard.PlaceholderForName(ref.Path[0])
 			handled = true
 		}
 		if !handled {

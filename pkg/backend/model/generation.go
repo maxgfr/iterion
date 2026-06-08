@@ -427,6 +427,7 @@ func executeToolsDirect(
 	onToolStarted func(ToolCallInfo),
 	onToolCall func(ToolCallInfo),
 	runner *hooks.Runner,
+	materialize func(string) string,
 ) ([]api.ContentBlock, error) {
 	results := make([]api.ContentBlock, 0, len(toolUses))
 
@@ -514,8 +515,16 @@ func executeToolsDirect(
 			})
 		}
 
+		// Materialise secret placeholders into the input the tool actually
+		// executes with. The placeholder form (tu.PartialJSON) is what the
+		// hooks and event log above/below persist, so the real secret
+		// never reaches the store — only the live tool call (Layer 1).
+		execInput := json.RawMessage(tu.PartialJSON)
+		if materialize != nil {
+			execInput = json.RawMessage(materialize(string(tu.PartialJSON)))
+		}
 		start := time.Now()
-		output, err := gt.Execute(ctx, json.RawMessage(tu.PartialJSON))
+		output, err := gt.Execute(ctx, execInput)
 		dur := time.Since(start)
 
 		if onToolCall != nil {
@@ -739,7 +748,7 @@ func GenerateTextDirect(ctx context.Context, client api.APIClient, opts Generati
 		messages = append(messages, assistantToolUseMessage(agg.text, agg.toolUses))
 
 		// Execute tools and append tool_result message.
-		toolResults, toolErr := executeToolsDirect(ctx, agg.toolUses, toolMap, opts.OnToolStarted, opts.OnToolCall, opts.Hooks)
+		toolResults, toolErr := executeToolsDirect(ctx, agg.toolUses, toolMap, opts.OnToolStarted, opts.OnToolCall, opts.Hooks, opts.MaterializeSecrets)
 		if toolErr != nil {
 			// ErrAskUser (and any future suspension signal) bubbles up to
 			// the backend, which converts it into iterion's pause flow.

@@ -88,7 +88,7 @@ func (p *parser) skipToNextTopLevel() {
 		switch t.Type {
 		case TokenEOF:
 			return
-		case TokenVars, TokenPresets, TokenAttachments,
+		case TokenVars, TokenPresets, TokenAttachments, TokenSecrets,
 			TokenMCPServer, TokenPrompt, TokenSchema, TokenCursor,
 			TokenAgent, TokenJudge, TokenRouter, TokenHuman,
 			TokenTool, TokenCompute, TokenWorkflow:
@@ -178,6 +178,16 @@ func (p *parser) parseFile() *ast.File {
 					p.addError(DiagDuplicateBlock, t, "duplicate 'attachments:' block — keeping first declaration")
 				} else {
 					f.Attachments = ab
+				}
+			}
+
+		case TokenSecrets:
+			sb := p.parseSecretsBlock()
+			if sb != nil {
+				if f.Secrets != nil {
+					p.addError(DiagDuplicateBlock, t, "duplicate 'secrets:' block — keeping first declaration")
+				} else {
+					f.Secrets = sb
 				}
 			}
 
@@ -538,6 +548,100 @@ func (p *parser) parseAttachmentField() *ast.AttachmentField {
 		p.skipNewlines()
 	}
 	return af
+}
+
+// parseSecretsBlock parses a top-level `secrets:` block. Mirrors
+// parseVarsBlock's INDENT/DEDENT loop; each field is a SecretField.
+func (p *parser) parseSecretsBlock() *ast.SecretsBlock {
+	start := p.next() // consume "secrets"
+	p.expect(TokenColon)
+	p.skipNewlines()
+	if _, ok := p.expect(TokenIndent); !ok {
+		return nil
+	}
+
+	sb := &ast.SecretsBlock{Span: ast.Span{Start: p.pos(start)}}
+	for {
+		p.skipNewlines()
+		t := p.peek()
+		if t.Type == TokenDedent || t.Type == TokenEOF {
+			if t.Type == TokenDedent {
+				p.next()
+			}
+			break
+		}
+		sf := p.parseSecretField()
+		if sf != nil {
+			sb.Fields = append(sb.Fields, sf)
+		}
+	}
+	if len(sb.Fields) > 0 {
+		sb.Span.End = sb.Fields[len(sb.Fields)-1].Span.End
+	} else {
+		sb.Span.End = sb.Span.Start
+	}
+	return sb
+}
+
+// parseSecretField parses one secret declaration. Short form
+// `name: "value"`; block form with optional `value`, `hosts`,
+// `description` sub-properties. Mirrors parseAttachmentField.
+func (p *parser) parseSecretField() *ast.SecretField {
+	nameT := p.next()
+	if nameT.Type != TokenIdent && !isKeywordToken(nameT.Type) {
+		p.addError(DiagExpectedToken, nameT, "expected secret name, got "+nameT.Type.String())
+		p.skipToNewline()
+		return nil
+	}
+	p.expect(TokenColon)
+
+	sf := &ast.SecretField{
+		Name: nameT.Value,
+		Span: ast.Span{Start: p.pos(nameT), End: p.pos(nameT)},
+	}
+	// Short form: a quoted value on the same line.
+	if p.peek().Type == TokenString {
+		sf.Value = p.expectString()
+	}
+	p.skipNewlines()
+
+	// Optional indented sub-block (value / hosts / description).
+	if p.peek().Type != TokenIndent {
+		return sf
+	}
+	p.next() // consume indent
+	for {
+		p.skipNewlines()
+		t := p.peek()
+		if t.Type == TokenDedent || t.Type == TokenEOF {
+			if t.Type == TokenDedent {
+				p.next()
+			}
+			break
+		}
+		if t.Type != TokenIdent && !isKeywordToken(t.Type) {
+			p.addError(DiagUnexpectedToken, t, "unexpected token in secret block: "+t.Value)
+			p.next()
+			p.skipToNewline()
+			continue
+		}
+		propName := t.Value
+		p.next()
+		p.expect(TokenColon)
+		switch propName {
+		case "value":
+			sf.Value = p.expectString()
+		case "hosts":
+			sf.Hosts = p.parseStringList()
+		case "description":
+			sf.Description = p.expectString()
+		default:
+			p.addError(DiagUnknownProperty, t, "unknown secret property '"+propName+"'")
+			p.skipToNewline()
+		}
+		p.skipNewlines()
+	}
+	return sf
 }
 
 func (p *parser) parseAttachmentType() ast.AttachmentTypeExpr {

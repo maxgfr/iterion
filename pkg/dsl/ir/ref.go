@@ -80,6 +80,8 @@ func parseRef(expr, raw string) (*Ref, error) {
 		kind = RefLoop
 	case "run":
 		kind = RefRun
+	case "secrets":
+		kind = RefSecrets
 	default:
 		return nil, fmt.Errorf("unknown reference namespace %q in %q", namespace, raw)
 	}

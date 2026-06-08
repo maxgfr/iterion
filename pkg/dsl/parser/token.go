@@ -41,6 +41,7 @@ const (
 	TokenVars
 	TokenPresets
 	TokenAttachments
+	TokenSecrets
 	TokenMCPServer
 	TokenPrompt
 	TokenSchema
@@ -186,6 +187,7 @@ var tokenNames = map[TokenType]string{
 	TokenVars:               "vars",
 	TokenPresets:            "presets",
 	TokenAttachments:        "attachments",
+	TokenSecrets:            "secrets",
 	TokenTypeFile:           "file",
 	TokenTypeImage:          "image",
 	TokenMCPServer:          "mcp_server",
@@ -302,6 +304,7 @@ var keywords = map[string]TokenType{
 	"vars":                  TokenVars,
 	"presets":               TokenPresets,
 	"attachments":           TokenAttachments,
+	"secrets":               TokenSecrets,
 	"file":                  TokenTypeFile,
 	"image":                 TokenTypeImage,
 	"mcp_server":            TokenMCPServer,

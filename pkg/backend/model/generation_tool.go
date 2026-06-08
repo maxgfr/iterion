@@ -61,6 +61,12 @@ type GenerationOptions struct {
 	// ProviderOptions are provider-specific options (e.g., reasoning_effort).
 	ProviderOptions map[string]any
 
+	// MaterializeSecrets, when non-nil, swaps secret placeholders for
+	// their real values in agent-emitted tool input immediately before
+	// execution (Layer 1). The placeholder form is what hooks/events
+	// persist, so the real secret never reaches the store.
+	MaterializeSecrets func(string) string
+
 	// CompactThresholdRatio overrides the default compaction trigger as a
 	// fraction of the model's context window. 0 falls back to the built-in
 	// default (0.85). Values outside (0, 1] fall back to the default.

@@ -343,6 +343,16 @@ type Task struct {
 	// placeholder materialisation (Layer 1) and egress DLP (Layer 2).
 	SecretsHygiene bool
 
+	// MaterializeSecrets, when non-nil, swaps secret placeholders
+	// (__ITERION_SECRET_<name>__) for their real values in a string. The
+	// structural half of Layer 1: backends apply it to agent-emitted tool
+	// input immediately BEFORE execution, so the real secret never enters
+	// the agent's view, the prompt, the event log, or the run store —
+	// only the live syscall/subprocess. Set by the executor from the
+	// secret guard; nil disables materialisation. Kept as a closure so
+	// the delegate package stays decoupled from pkg/backend/secretguard.
+	MaterializeSecrets func(string) string
+
 	// CursorFragments are resolved prompt-engineering cursor fragments
 	// to append to the system prompt under a "## Calibration" section.
 	// Each entry is one cursor activation, pre-formatted as

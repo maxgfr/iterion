@@ -50,6 +50,11 @@ type Secret struct {
 // Config tunes Redact. The zero value is not useful — use
 // DefaultConfig and override.
 type Config struct {
+	// RedactKnown gates the known-value redaction pass in Redact. The
+	// ITERION_SECRETS_REDACT=off kill-switch clears this (and Heuristic),
+	// disabling sink redaction while leaving Materialize/ResolveSecretRef
+	// working so declared-secret placeholders still flow.
+	RedactKnown bool
 	// Heuristic enables the detector pass over UNKNOWN token shapes in
 	// Redact. Known-value redaction is independent of this flag.
 	Heuristic bool
@@ -67,19 +72,32 @@ type Config struct {
 	Marker string
 	// DecodeDepth bounds the recursive-decode recursion.
 	DecodeDepth int
+	// Placeholders enables Layer 1 placeholder rendering for declared
+	// secrets: when true, {{secrets.X}} renders the opaque placeholder
+	// (materialised at exec); when false (kill-switch), it renders the
+	// real value directly. Redaction is unaffected either way.
+	Placeholders bool
 }
 
 // DefaultConfig returns the production defaults.
 func DefaultConfig() Config {
 	return Config{
+		RedactKnown:   true,
 		Heuristic:     true,
 		RecurseDecode: true,
 		MinLen:        5,
 		MinScore:      0.7,
 		Marker:        "[redacted]",
 		DecodeDepth:   2,
+		Placeholders:  true,
 	}
 }
+
+// PlaceholderForName returns the deterministic placeholder token for a
+// secret name — the agent-facing stand-in that Materialize swaps for the
+// real value. Exported so the DSL template resolver renders
+// {{secrets.NAME}} to the exact token the guard registers.
+func PlaceholderForName(name string) string { return defaultPlaceholder(name) }
 
 // Guard is an immutable, concurrency-safe scrubber built once per run.
 type Guard struct {
@@ -211,7 +229,7 @@ func (g *Guard) Redact(s string) string {
 	if g == nil || s == "" {
 		return s
 	}
-	if g.matcher != nil {
+	if g.matcher != nil && g.cfg.RedactKnown {
 		s = g.matcher.ReplaceAllStringFunc(s, func(m string) string {
 			if ph, ok := g.literalPlaceholder[m]; ok {
 				return ph
@@ -368,6 +386,22 @@ func (g *Guard) Materialize(s string) string {
 		}
 	}
 	return s
+}
+
+// ResolveSecretRef renders a {{secrets.NAME}} reference. With
+// placeholders enabled (default) it returns the opaque placeholder —
+// the agent never sees the real value, which Materialize swaps in at
+// exec. With the kill-switch off it returns the real value directly.
+// Returns "" on a nil guard or an unknown/unregistered name.
+func (g *Guard) ResolveSecretRef(name string) string {
+	if g == nil {
+		return ""
+	}
+	ph := defaultPlaceholder(name)
+	if g.cfg.Placeholders {
+		return ph
+	}
+	return g.placeholderValue[ph]
 }
 
 // ContainsPlaceholder reports whether s carries any placeholder (i.e.

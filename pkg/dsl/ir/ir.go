@@ -24,6 +24,7 @@ type Workflow struct {
 	Schemas        map[string]*Schema     // schema name → resolved schema
 	Prompts        map[string]*Prompt     // prompt name → resolved prompt
 	Vars           map[string]*Var        // var name → resolved variable
+	Secrets        map[string]*Secret     // secret name → resolved secret declaration
 	Presets        map[string]Preset      // preset name → resolved preset values (var name → typed value)
 	Attachments    map[string]*Attachment // attachment name → resolved attachment
 	Loops          map[string]*Loop       // loop name → loop definition
@@ -596,6 +597,7 @@ const (
 	RefAttachments                // {{attachments.name[.path|.url|.mime|.size|.sha256]}}
 	RefLoop                       // {{loop.<name>.iteration}} / .max / .previous_output[.field]
 	RefRun                        // {{run.id}}
+	RefSecrets                    // {{secrets.<name>}} — renders the placeholder; materialised at exec
 )
 
 func (rk RefKind) String() string {
@@ -614,6 +616,8 @@ func (rk RefKind) String() string {
 		return "loop"
 	case RefRun:
 		return "run"
+	case RefSecrets:
+		return "secrets"
 	default:
 		return "unknown"
 	}
@@ -692,6 +696,18 @@ type Var struct {
 	Type       VarType
 	HasDefault bool
 	Default    interface{} // string, int64, float64, or bool
+}
+
+// Secret is a resolved workflow secret declaration. Value is the raw
+// value expression (typically "${ENV}" / a {{vars.X}} reference),
+// resolved to the real plaintext at run start by the runtime; the agent
+// only ever sees the placeholder. Hosts scopes which egress
+// destinations the secret may be materialised toward (Layer 2).
+type Secret struct {
+	Name        string
+	Value       string
+	Hosts       []string
+	Description string
 }
 
 // VarType enumerates variable types.
