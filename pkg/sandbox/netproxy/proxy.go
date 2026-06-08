@@ -20,9 +20,18 @@ import (
 // [Policy] on the host portion of every CONNECT and plain-HTTP
 // request, then tunnels accepted traffic transparently.
 //
-// The proxy never MITMs TLS — it only inspects the SNI / Host header.
-// This preserves cert pinning in client SDKs and avoids the friction
-// of injecting a CA into the sandbox.
+// By default the proxy does NOT terminate TLS — it inspects only the
+// CONNECT host:port (and the plain-HTTP Host header) and shuttles the
+// encrypted bytes through untouched. The reason is cost and simplicity,
+// NOT client cert pinning: the clients iterion actually runs (the Claude
+// Code CLI, the Anthropic/OpenAI SDKs, npm/pip/go/git) are standard
+// trust-store clients with no certificate pinning — they work behind
+// TLS-inspecting proxies (Zscaler, CrowdStrike, mitmproxy) once the
+// proxy CA is trusted, which is exactly how the opt-in TLS-inspection
+// mode (secret egress substitution, Layer 2) works. Transparent
+// tunnelling is the default because it needs no CA minted, no CA private
+// key to custody, and no per-runtime trust-store injection
+// (NODE_EXTRA_CA_CERTS, certifi, the system store, …).
 //
 // Proxy authentication is via Proxy-Authorization: Bearer <token>.
 // Each run gets a fresh token (so a leaked token from one run cannot

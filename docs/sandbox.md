@@ -145,9 +145,16 @@ code hosts (github, gitlab, bitbucket) plus apt mirrors. It is
 default-open posture and the curated-allowlist posture are
 unambiguous from the YAML.
 
-The proxy does NOT MITM TLS — only the SNI / Host header is
-inspected. The Anthropic SDK's cert pinning continues to work
-unchanged.
+By default the proxy does NOT terminate TLS — only the CONNECT
+host:port is inspected, and the encrypted bytes pass through
+untouched. This is a cost/simplicity choice (no CA to mint, custody,
+or inject), **not** a cert-pinning constraint: the clients iterion
+runs (Claude Code, the Anthropic/OpenAI SDKs) are standard
+trust-store clients with no certificate pinning — they work behind
+TLS-inspecting proxies (Zscaler, CrowdStrike, mitmproxy) once the
+proxy CA is trusted. That same property is what the opt-in
+TLS-inspection mode (secret egress substitution, see the secrets
+docs) relies on.
 
 Pattern syntax (last-match-wins evaluation):
 

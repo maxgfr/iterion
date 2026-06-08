@@ -3,10 +3,14 @@
 //
 // The proxy runs as a goroutine on the host (engine side) and is
 // joined by every sandboxed container via HTTPS_PROXY/HTTP_PROXY env
-// vars. It does NOT MITM TLS — only the SNI / Host header is
-// inspected. This preserves cert pinning in SDKs (notably the
-// Anthropic SDK pins api.anthropic.com) while still enforcing
-// per-host filtering.
+// vars. By default it does NOT terminate TLS — only the CONNECT
+// host:port is inspected — so host filtering works without minting a
+// CA or injecting trust into the container. This is a cost/simplicity
+// choice, not a cert-pinning constraint: the clients iterion runs
+// (Claude Code, the Anthropic/OpenAI SDKs) are standard trust-store
+// clients with no pinning and work behind a TLS-inspecting proxy once
+// its CA is trusted — which is how the opt-in inspection mode (Layer 2
+// secret egress substitution) operates.
 //
 // Pattern semantics, copied from the design plan (.plans/...,§5):
 //

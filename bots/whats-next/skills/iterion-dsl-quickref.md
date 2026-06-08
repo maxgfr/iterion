@@ -28,6 +28,12 @@ vars:
   feature_prompt: string
   workspace_dir:  string = "${PROJECT_DIR}"
 
+secrets:                            # optional; agent sees only an opaque placeholder
+  github_token: "${GITHUB_TOKEN}"   #   __ITERION_SECRET_github_token__, materialised at exec
+  deploy_key:
+    value: "${DEPLOY_KEY}"
+    hosts: ["api.github.com"]        # egress scoping (Layer 2). Reference as {{secrets.deploy_key}}
+
 schema verdict:
   approved:   bool
   summary:    string
