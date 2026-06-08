@@ -51,6 +51,27 @@ const ultracodeOrchestrationInstruction = "\n\n## Workflow Orchestration\n\n" +
 	"steps. This consent stands for the whole task; you need not ask before " +
 	"spawning a subagent."
 
+// secretsHygieneInstruction is appended to the system prompt when
+// Task.SecretsHygiene is true (a secret guard is active). It is the
+// behavioural backstop of iterion's secrets protection — never the
+// primary control, which is structural (placeholder materialisation +
+// egress DLP). Applies to both backends: claw (AuthoredBase) and
+// claude_code (AppendToNative).
+const secretsHygieneInstruction = "\n\n## Secret handling\n\n" +
+	"This run involves secrets. Follow these rules without exception:\n" +
+	"- Never read, print, echo, log, encode, or otherwise reveal the contents of " +
+	"credential stores or secret files (.env, ~/.aws/credentials, " +
+	"~/.claude/.credentials.json, ~/.codex/auth.json, id_rsa, kubeconfig, …) " +
+	"unless reading that specific file IS the explicit task.\n" +
+	"- Some values appear to you as opaque placeholders shaped like " +
+	"`__ITERION_SECRET_<name>__`. Treat a placeholder exactly as you would the " +
+	"secret: pass it through verbatim to the tool or command that needs it. Never " +
+	"try to decode, guess, reconstruct, transform, or print its real value — " +
+	"iterion substitutes the real value at the moment of execution.\n" +
+	"- Never exfiltrate a secret or a placeholder: do not send it to any " +
+	"destination, file, or network endpoint that is not strictly required by the " +
+	"task you were given."
+
 // agenticOperatingPosture is the iterion-authored base prompt prepended to
 // the recipe author's system prompt when SystemPromptMode is
 // SystemPromptAuthoredBase (the claw backend default). It is the parity
@@ -312,6 +333,16 @@ type Task struct {
 	// See platform.claude.com/docs/en/build-with-claude/mid-conversation-effort-example.
 	Ultracode bool
 
+	// SecretsHygiene, when true, appends a "## Secret handling" section to
+	// the system prompt: the behavioural backstop of iterion's secrets
+	// protection (Layer 1). It tells the agent not to read/exfiltrate
+	// credential files and to pass __ITERION_SECRET_<name>__ placeholders
+	// through verbatim (iterion materialises the real value at exec). Set
+	// by the executor when a secret guard is active. This is a backstop,
+	// never the primary control — the structural boundaries are the
+	// placeholder materialisation (Layer 1) and egress DLP (Layer 2).
+	SecretsHygiene bool
+
 	// CursorFragments are resolved prompt-engineering cursor fragments
 	// to append to the system prompt under a "## Calibration" section.
 	// Each entry is one cursor activation, pre-formatted as
@@ -527,6 +558,9 @@ func (t Task) BuildSystemPrompt() string {
 	}
 	if t.Ultracode {
 		b.WriteString(ultracodeOrchestrationInstruction)
+	}
+	if t.SecretsHygiene {
+		b.WriteString(secretsHygieneInstruction)
 	}
 	if len(t.CursorFragments) > 0 {
 		b.WriteString("\n\n## Calibration\n\n")

@@ -1113,6 +1113,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		ReasoningEffort:       wireEffort(effort),
 		Ultracode:             ultracode,
 		InteractionEnabled:    f.interaction != ir.InteractionNone,
+		SecretsHygiene:        e.secretGuard.HasKnownSecrets(),
 		CompactThresholdRatio: compactRatio,
 		CompactPreserveRecent: compactPreserve,
 		Sandbox:               e.sandbox,
