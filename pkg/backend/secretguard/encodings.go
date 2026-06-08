@@ -74,18 +74,21 @@ func encodingsOf(v string) []string {
 //
 // An empty return means "not a useful decode" — the caller leaves the
 // token untouched.
+// decodeAttempts is the fixed set of decoders tryDecode walks, hoisted
+// to package scope so it isn't reallocated on every base64-shaped token.
+var decodeAttempts = []func(string) ([]byte, error){
+	base64.RawStdEncoding.DecodeString,
+	base64.StdEncoding.DecodeString,
+	base64.RawURLEncoding.DecodeString,
+	base64.URLEncoding.DecodeString,
+	hex.DecodeString,
+}
+
 func tryDecode(tok string) string {
 	if len(tok) < 12 {
 		return ""
 	}
-	decoders := []func(string) ([]byte, error){
-		func(s string) ([]byte, error) { return base64.RawStdEncoding.DecodeString(s) },
-		func(s string) ([]byte, error) { return base64.StdEncoding.DecodeString(s) },
-		func(s string) ([]byte, error) { return base64.RawURLEncoding.DecodeString(s) },
-		func(s string) ([]byte, error) { return base64.URLEncoding.DecodeString(s) },
-		hex.DecodeString,
-	}
-	for _, dec := range decoders {
+	for _, dec := range decodeAttempts {
 		raw, err := dec(tok)
 		if err != nil || len(raw) < 8 {
 			continue
@@ -108,7 +111,7 @@ func mostlyPrintable(b []byte) bool {
 	printable, total := 0, 0
 	for _, r := range string(b) {
 		total++
-		if r == '\t' || r == '\n' || r == '\r' || (r >= 0x20 && r != utf8.RuneError) {
+		if r == '\t' || r == '\n' || r == '\r' || r >= 0x20 {
 			printable++
 		}
 	}

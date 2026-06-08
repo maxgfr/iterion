@@ -33,6 +33,13 @@ func (g *Guard) ExfiltratesTo(s, host string) bool {
 	if g == nil || s == "" {
 		return false
 	}
+	// Fast path: the precompiled matcher spans every encoding of every
+	// known secret. No match → no secret value is present at all, so
+	// nothing can be exfiltrating — skip the per-secret/per-encoding scan
+	// (this is the common case on the proxy hot path).
+	if g.matcher == nil || !g.matcher.MatchString(s) {
+		return false
+	}
 	host = canonicalHostname(host)
 	for _, sec := range g.secrets {
 		if hostAllowed(sec.Hosts, host) {

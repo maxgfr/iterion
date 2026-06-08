@@ -136,6 +136,7 @@ func (d *Driver) Capabilities() sandbox.Capabilities {
 		SupportsNetworkPolicy: false, // Phase 3
 		SupportsPostCreate:    true,
 		SupportsRemoteUser:    true,
+		SupportsTLSInspection: true, // injects RunInfo.ProxyCACert via NODE_EXTRA_CA_CERTS
 	}
 }
 

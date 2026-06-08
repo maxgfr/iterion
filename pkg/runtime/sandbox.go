@@ -328,14 +328,15 @@ func startNetworkProxy(
 ) (*netproxy.Proxy, string, []byte, error) {
 	mode, rules := ResolveNetworkPolicy(spec)
 
-	// Only the docker driver injects the inspection CA into the container
-	// trust store today; on any other driver (kubernetes), enabling
-	// inspection would mint leaves the container can't trust and break
-	// every TLS call. Degrade to a transparent proxy there until the CA
-	// injection lands (k8s needs a ConfigMap/Secret) — see docs/secrets.md.
-	if rewriter != nil && driver.Name() != "docker" {
+	// TLS inspection needs the driver to inject the per-run CA into the
+	// container trust store; drivers advertise that via
+	// Capabilities.SupportsTLSInspection. Where it's unsupported (k8s,
+	// noop), enabling inspection would mint leaves the container can't
+	// trust and break every TLS call — degrade to a transparent proxy
+	// (Layer 1 + redaction + allowlist still apply). See docs/secrets.md.
+	if rewriter != nil && !driver.Capabilities().SupportsTLSInspection {
 		if logger != nil {
-			logger.Warn("sandbox: TLS inspection not supported on %q driver — disabling (Layer 1 + redaction + allowlist still apply)", driver.Name())
+			logger.Warn("sandbox: TLS inspection unsupported on %q driver — disabling (Layer 1 + redaction + allowlist still apply)", driver.Name())
 		}
 		rewriter = nil
 	}

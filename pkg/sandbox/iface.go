@@ -139,6 +139,14 @@ type Capabilities struct {
 	// SupportsRemoteUser means the driver honours [Spec.User] (the
 	// devcontainer `remoteUser` field).
 	SupportsRemoteUser bool
+
+	// SupportsTLSInspection means the driver can inject the egress
+	// proxy's per-run CA into the container trust store
+	// ([RunInfo.ProxyCACert]), which is required for the proxy's
+	// TLS-inspection mode (Layer 2 secret egress substitution). When
+	// false the runtime degrades inspection to a transparent tunnel so a
+	// container never gets leaves it can't trust.
+	SupportsTLSInspection bool
 }
 
 // PreparedSpec is the opaque result of [Driver.Prepare]. Drivers embed

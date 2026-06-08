@@ -105,7 +105,6 @@ type Guard struct {
 	literalPlaceholder map[string]string   // every encoding → its placeholder
 	matcher            *regexp.Regexp      // alternation of known encodings
 	placeholderValue   map[string]string   // placeholder → raw value (Materialize)
-	placeholdersByLen  []string            // placeholders, longest first
 	encodingsByName    map[string][]string // secret name → its value encodings (egress DLP)
 	det                *detector.Detector
 	cfg                Config
@@ -172,7 +171,6 @@ func New(secrets []Secret, cfg Config) *Guard {
 	}
 
 	g.buildMatcher()
-	g.buildPlaceholderOrder()
 	return g
 }
 
@@ -198,19 +196,6 @@ func (g *Guard) buildMatcher() {
 		quoted[i] = regexp.QuoteMeta(lit)
 	}
 	g.matcher = regexp.MustCompile(strings.Join(quoted, "|"))
-}
-
-func (g *Guard) buildPlaceholderOrder() {
-	for ph := range g.placeholderValue {
-		g.placeholdersByLen = append(g.placeholdersByLen, ph)
-	}
-	sort.Slice(g.placeholdersByLen, func(i, j int) bool {
-		a, b := g.placeholdersByLen[i], g.placeholdersByLen[j]
-		if len(a) != len(b) {
-			return len(a) > len(b)
-		}
-		return a < b
-	})
 }
 
 // HasKnownSecrets reports whether any known value is registered.
@@ -384,10 +369,11 @@ func (g *Guard) Materialize(s string) string {
 	if g == nil || s == "" || len(g.placeholderValue) == 0 {
 		return s
 	}
-	for _, ph := range g.placeholdersByLen {
-		if strings.Contains(s, ph) {
-			s = strings.ReplaceAll(s, ph, g.placeholderValue[ph])
-		}
+	// Placeholders all carry the __ITERION_SECRET_<name>__ shape, so none
+	// is a substring of another — iteration order is irrelevant, and
+	// ReplaceAll already no-ops when the token is absent.
+	for ph, val := range g.placeholderValue {
+		s = strings.ReplaceAll(s, ph, val)
 	}
 	return s
 }
@@ -414,7 +400,7 @@ func (g *Guard) ContainsPlaceholder(s string) bool {
 	if g == nil || s == "" {
 		return false
 	}
-	for _, ph := range g.placeholdersByLen {
+	for ph := range g.placeholderValue {
 		if strings.Contains(s, ph) {
 			return true
 		}
