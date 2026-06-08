@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { useUIStore, type SidebarTab } from "@/store/ui";
 import SchemaEditor from "@/components/Panels/SchemaEditor";
 import PromptEditor from "@/components/Panels/PromptEditor";
@@ -9,13 +11,17 @@ import BotMetadataForm from "@/components/Panels/BotMetadataForm";
 import { useBotForOpenFile } from "@/hooks/useBotForOpenFile";
 import { Tabs } from "@/components/ui";
 
-const BASE_TABS: { value: SidebarTab; label: string }[] = [
+// `comments` keeps the compact "##" glyph (the .iter comment sigil) so the
+// tab row doesn't overflow the inspector's default width, but carries a
+// title tooltip so the label isn't a mystery on first encounter. The other
+// tabs are short enough to spell out.
+const BASE_TABS: { value: SidebarTab; label: ReactNode }[] = [
   { value: "workflow", label: "Workflow" },
   { value: "vars", label: "Vars" },
   { value: "schemas", label: "Schemas" },
   { value: "prompts", label: "Prompts" },
   { value: "mcp", label: "MCP" },
-  { value: "comments", label: "##" },
+  { value: "comments", label: <span title="Comments (document-level ## notes)">##</span> },
 ];
 
 /**
@@ -55,7 +61,10 @@ export default function InspectorEmpty() {
         ...(bot ? { bot: <BotMetadataForm key={bot.name} bot={bot} /> } : {}),
       }}
       className="h-full"
-      listClassName="shrink-0 px-2"
+      // overflow-x-auto so the row stays reachable when a bundle's "Bot"
+      // tab pushes the tab count to 7 — without it the last tab(s) were
+      // clipped at the inspector's default width.
+      listClassName="shrink-0 px-2 overflow-x-auto"
     />
   );
 }
