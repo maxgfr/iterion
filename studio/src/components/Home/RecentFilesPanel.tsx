@@ -120,9 +120,15 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
         s.setDocument(result.document);
         s.setDiagnostics(result.diagnostics);
         s.setCurrentSource(result.source);
+        // The productised bots live at <WorkDir>/bots/<name>, so this
+        // relative path is reachable via the file/launch API. Setting it
+        // enables the Run button immediately (otherwise it's disabled with
+        // "Save the workflow first" while currentFilePath is null) and lets
+        // the user save edits back to the bot file. Mirrors the Toolbar
+        // handlePickFile example branch, which already does the same.
+        // Set before markSaved() so the clean state is the saved baseline.
+        s.setCurrentFilePath(`bots/${name}`);
         s.markSaved();
-        // No setCurrentFilePath — the example isn't on disk under
-        // this name in the user's workspace.
         setLocation("/editor");
       } catch {
         addToast("Failed to open example", "error");

@@ -534,7 +534,7 @@ export default function Toolbar() {
               !currentFilePath
                 ? "Save the workflow first to launch a run"
                 : !hasResolvedBackend
-                ? "No LLM credentials detected — click the status pill on the left to configure."
+                ? "No LLM credentials detected — open Settings → Backends to configure."
                 : `Launch ${currentFilePath}`
             }
           >
