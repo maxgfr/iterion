@@ -16,6 +16,7 @@ const BoardView = lazy(() => import("@/views/Board"));
 const LabelsView = lazy(() => import("@/views/Board/Labels"));
 const RunsAnalyticsView = lazy(() => import("@/views/RunsAnalytics"));
 const DispatcherView = lazy(() => import("@/views/Dispatcher"));
+const OrgsAdminPage = lazy(() => import("@/views/admin/OrgsAdminPage"));
 const Welcome = lazy(() => import("@/views/Welcome"));
 const Settings = lazy(() => import("@/views/Settings"));
 const ProjectSwitcher = lazy(() => import("@/views/ProjectSwitcher"));
@@ -209,6 +210,7 @@ function AuthedApp() {
           </Route>
           <Route path="/account" component={SettingsPage} />
           <Route path="/teams/:id" component={TeamPage} />
+          <Route path="/admin/orgs" component={OrgsAdminPage} />
           {serverInfo?.native_tracker_enabled && (
             <Route path="/board/labels">
               <ErrorBoundary area="Board labels view">
