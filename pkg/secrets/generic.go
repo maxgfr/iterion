@@ -52,7 +52,12 @@ type GenericResolution struct {
 	SecretID    string
 	Plaintext   []byte
 	SealedBlob  []byte
-	SourceScope string
+	SourceScope string // "user" | "binding" | "team"
+	// AllowedHosts is the egress host allowlist a bot-secret binding
+	// imposes on this secret (empty = no extra restriction). The
+	// publisher intersects it with the workflow's declared hosts so a
+	// binding can only narrow, never broaden, the policy.
+	AllowedHosts []string
 }
 
 func ResolveGeneric(

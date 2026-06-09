@@ -130,6 +130,12 @@ type Config struct {
 	WebhookDeliveries webhooks.DeliveryStore
 	WebhookCounter    webhooks.Counter
 
+	// BotBindings is the policy wrapper over GenericSecrets: it maps a
+	// stored org/user secret to a bot under the workflow's declared
+	// name. When non-nil, the server registers the bot-binding CRUD and
+	// the cloud publisher consults it during secret resolution.
+	BotBindings secrets.BotSecretBindingStore
+
 	// RunSecrets is the per-run sealed bundle store. Required when
 	// ApiKeys is set.
 	RunSecrets secrets.RunSecretsStore
@@ -301,6 +307,7 @@ type Server struct {
 	webhookConfigs    webhooks.ConfigStore
 	webhookDeliveries webhooks.DeliveryStore
 	webhookCounter    webhooks.Counter
+	botBindings       secrets.BotSecretBindingStore
 	httpClient        *http.Client
 
 	// detector is the cached LLM credential detector backing
@@ -392,6 +399,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		webhookConfigs:    cfg.WebhookConfigs,
 		webhookDeliveries: cfg.WebhookDeliveries,
 		webhookCounter:    cfg.WebhookCounter,
+		botBindings:       cfg.BotBindings,
 		httpClient:        &http.Client{Timeout: 15 * time.Second},
 		browserSessions:   cfg.BrowserRegistry,
 		statsCache:        newRunStatsCache(),
@@ -704,6 +712,11 @@ func (s *Server) routes() {
 	// each provider (see registerGitLabWebhookRoute).
 	if s.webhookConfigs != nil && s.authSvc != nil {
 		s.registerWebhookRoutes()
+	}
+
+	// Bot-secret bindings (policy wrapper over generic secrets).
+	if s.botBindings != nil && s.authSvc != nil {
+		s.registerBotBindingRoutes()
 	}
 
 	// OAuth-forfait endpoints. Same gating as BYOK plus the per-
