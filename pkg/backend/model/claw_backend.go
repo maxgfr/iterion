@@ -35,6 +35,17 @@ type ClawBackend struct {
 	// the generation loop: operator-typed chat messages are appended
 	// to the conversation between tool iterations. See [WithInbox].
 	inbox InboxBinder
+	// memStore overrides the workspace-memory backend. nil → the local
+	// filesystem store (memory.DefaultFSStore). Cloud runners inject a
+	// Mongo+inline store via WithMemoryStore so memory persists in the
+	// tenant's document store rather than the pod's ephemeral disk.
+	memStore knowledge.MemoryStore
+}
+
+// WithMemoryStore injects a non-default workspace-memory backend
+// (e.g. the cloud Mongo store). nil leaves the filesystem default.
+func WithMemoryStore(ms knowledge.MemoryStore) ClawBackendOption {
+	return func(c *ClawBackend) { c.memStore = ms }
 }
 
 // InboxHook is invoked by the generation tool-loop between
@@ -376,7 +387,11 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 		} else {
 			ref = memory.LegacyBotRef(memBase, m.Scope)
 		}
-		if err := installWorkspaceMemory(ctx, &opts, memory.DefaultFSStore(), ref, m); err != nil {
+		var memStore knowledge.MemoryStore = b.memStore
+		if memStore == nil {
+			memStore = memory.DefaultFSStore()
+		}
+		if err := installWorkspaceMemory(ctx, &opts, memStore, ref, m); err != nil {
 			return delegate.Result{}, fmt.Errorf("claw backend: memory: %w", err)
 		}
 	}

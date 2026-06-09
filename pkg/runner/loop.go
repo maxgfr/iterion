@@ -32,6 +32,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/cloud/metrics"
 	"github.com/SocialGouv/iterion/pkg/dsl/ast"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
+	"github.com/SocialGouv/iterion/pkg/knowledge"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/notify"
 	"github.com/SocialGouv/iterion/pkg/queue"
@@ -67,6 +68,10 @@ type Config struct {
 	PendingPoll       time.Duration // how often to refresh nats_pending_messages (0 = 15s)
 	FetchWait         time.Duration // long-poll wait per fetch
 	Logger            *iterlog.Logger
+	// MemoryStore, when non-nil, backs the agents' workspace-memory
+	// tools with a shared store (the cloud Mongo store) instead of the
+	// pod's ephemeral filesystem. nil → local filesystem memory.
+	MemoryStore knowledge.MemoryStore
 	// Metrics, when non-nil, receives counters/gauges updates from the
 	// runner loop (in-flight runs, durations, heartbeat errors, NATS
 	// queue depth, LLM token usage). Nil-safe: passing nil disables
@@ -845,13 +850,14 @@ func (r *Runner) buildExecutor(ctx context.Context, msg *queue.RunMessage, wf *i
 	}
 	vars := stringifyVars(msg.Vars)
 	return runview.BuildExecutor(runview.ExecutorSpec{
-		Ctx:      ctx,
-		Workflow: wf,
-		Vars:     vars,
-		Store:    emitter,
-		RunID:    msg.RunID,
-		Logger:   r.cfg.Logger,
-		StoreDir: r.cfg.WorkDir,
+		Ctx:         ctx,
+		Workflow:    wf,
+		Vars:        vars,
+		Store:       emitter,
+		RunID:       msg.RunID,
+		Logger:      r.cfg.Logger,
+		StoreDir:    r.cfg.WorkDir,
+		MemoryStore: r.cfg.MemoryStore,
 	})
 }
 

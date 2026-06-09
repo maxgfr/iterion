@@ -20,6 +20,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
 	"github.com/SocialGouv/iterion/pkg/dispatcher/native/boardops"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
+	"github.com/SocialGouv/iterion/pkg/knowledge"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/runtime"
 )
@@ -54,6 +55,10 @@ type ExecutorSpec struct {
 	// resolution chain). Used by the studio launch UI to A/B a
 	// workflow against different backends without editing the .iter.
 	Backend string
+	// MemoryStore overrides the workspace-memory backend. nil → the
+	// local filesystem store. Cloud runners pass the Mongo store so
+	// shared knowledge persists in the tenant's document store.
+	MemoryStore knowledge.MemoryStore
 }
 
 // BuildExecutor wires up the default ClawExecutor: registry, default
@@ -99,6 +104,9 @@ func BuildExecutor(spec ExecutorSpec) (*model.ClawExecutor, error) {
 	clawOpts := []model.ClawBackendOption{model.WithBackendLifecycleHooks(lifecycle)}
 	if spec.Inbox != nil {
 		clawOpts = append(clawOpts, model.WithInbox(spec.Inbox))
+	}
+	if spec.MemoryStore != nil {
+		clawOpts = append(clawOpts, model.WithMemoryStore(spec.MemoryStore))
 	}
 	clawBackend := model.NewClawBackend(reg, hooks, model.RetryPolicy{}, clawOpts...)
 	backendReg.Register(delegate.BackendClaw, clawBackend)
