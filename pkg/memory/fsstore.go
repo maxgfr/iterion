@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/knowledge"
@@ -46,42 +47,131 @@ func (s *FSStore) baseDir() string {
 // WorkspaceMemoryDir(memBase)/<scope> layout, so existing bots see the
 // same files.
 func LegacyBotRef(memBase, scope string) knowledge.SpaceRef {
-	key := ""
-	if memBase != "" {
-		abs := memBase
-		if !filepath.IsAbs(abs) {
-			if resolved, err := filepath.Abs(memBase); err == nil {
-				abs = resolved
-			}
-		}
-		key = store.EncodeWorkDirKey(abs)
-	}
 	return knowledge.SpaceRef{
 		Visibility: knowledge.VisibilityBot,
-		ProjectID:  key,
+		ProjectID:  ProjectKey(memBase),
 		Name:       scope,
 	}
 }
 
-// scopeFor resolves a SpaceRef to a path-clamped Scope on disk. Only
-// the bot/project visibilities are hosted by the FS adapter today; the
-// tenant-shared visibilities (cross_project/org/user/global) land with
-// the shared-tree layout in a later phase and return
-// ErrUnsupportedVisibility until then.
+// ProjectKey encodes a memory base dir (run workdir or repo root) into
+// the stable, filesystem-safe project key used in the on-disk layout.
+func ProjectKey(memBase string) string {
+	if memBase == "" {
+		return ""
+	}
+	abs := memBase
+	if !filepath.IsAbs(abs) {
+		if resolved, err := filepath.Abs(memBase); err == nil {
+			abs = resolved
+		}
+	}
+	return store.EncodeWorkDirKey(abs)
+}
+
+// SpaceRefInputs are the per-run identity values used to resolve a
+// structured memory space to a concrete SpaceRef.
+type SpaceRefInputs struct {
+	TenantID  string // org tenant ("" → local)
+	UserID    string // current operator/user
+	ProjectID string // encoded project key (store.EncodeWorkDirKey)
+	BotID     string // launching bot id
+}
+
+// ResolveSpaceRef builds a knowledge.SpaceRef from a DSL-declared memory
+// space (visibility + name + optional bot/user overrides) and the run's
+// resolved identity. Fields a visibility doesn't need stay empty (the FS
+// adapter maps an empty tenant/user to "local").
+func ResolveSpaceRef(vis knowledge.Visibility, name, botOverride, userOverride string, in SpaceRefInputs) knowledge.SpaceRef {
+	ref := knowledge.SpaceRef{Visibility: vis, Name: name, TenantID: in.TenantID}
+	switch vis {
+	case knowledge.VisibilityBot:
+		ref.ProjectID = in.ProjectID
+		ref.BotID = firstNonEmpty(botOverride, in.BotID)
+	case knowledge.VisibilityProject:
+		ref.ProjectID = in.ProjectID
+	case knowledge.VisibilityUser:
+		u := in.UserID
+		if userOverride != "" && userOverride != "self" {
+			u = userOverride
+		}
+		if u == "" {
+			u = "local"
+		}
+		ref.UserID = u
+	case knowledge.VisibilityGlobal:
+		ref.TenantID = "" // instance-wide, not tenant-scoped
+	}
+	return ref
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// scopeFor resolves a SpaceRef to a path-clamped Scope on disk.
+//
+// Layout:
+//   - bot/project → <base>/projects/<projectID>/memory/<name> (the
+//     legacy path; FS treats bot==project — both share by name within a
+//     project. True per-bot isolation is realized in the cloud adapter,
+//     which keys on bot_id).
+//   - user → <base>/shared/tenants/<tenant>/users/<user>/<name>
+//   - org → <base>/shared/tenants/<tenant>/org/<name>
+//   - cross_project → <base>/shared/tenants/<tenant>/cross_project/<name>
+//   - global → <base>/global/<name>
+//
+// In single-tenant local mode an empty tenant maps to "local".
 func (s *FSStore) scopeFor(ref knowledge.SpaceRef) (*Scope, error) {
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
+	base := s.baseDir()
+	var root string
 	switch ref.Visibility {
 	case knowledge.VisibilityBot, knowledge.VisibilityProject:
 		if ref.ProjectID == "" {
 			return nil, fmt.Errorf("memory: empty project for space %q", ref.Name)
 		}
-		root := filepath.Join(s.baseDir(), "projects", ref.ProjectID, "memory", ref.Name)
-		return &Scope{root: root}, nil
+		root = filepath.Join(base, "projects", ref.ProjectID, "memory", ref.Name)
+	case knowledge.VisibilityUser:
+		root = filepath.Join(base, "shared", "tenants", pathSeg(ref.TenantID), "users", pathSeg(ref.UserID), ref.Name)
+	case knowledge.VisibilityOrg:
+		root = filepath.Join(base, "shared", "tenants", pathSeg(ref.TenantID), "org", ref.Name)
+	case knowledge.VisibilityCrossProject:
+		root = filepath.Join(base, "shared", "tenants", pathSeg(ref.TenantID), "cross_project", ref.Name)
+	case knowledge.VisibilityGlobal:
+		root = filepath.Join(base, "global", ref.Name)
 	default:
+		// private (run-scoped, ephemeral) has no durable FS home yet.
 		return nil, fmt.Errorf("%w: %q", knowledge.ErrUnsupportedVisibility, ref.Visibility)
 	}
+	return &Scope{root: root}, nil
+}
+
+// pathSeg makes an identity component safe for a single path segment,
+// mapping empty to "local" (single-tenant / local mode).
+func pathSeg(v string) string {
+	if v == "" {
+		return "local"
+	}
+	var b strings.Builder
+	for _, r := range v {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	out := b.String()
+	if out == "" || out == "." || out == ".." {
+		return "local"
+	}
+	return out
 }
 
 // Root returns the space's absolute on-disk path.

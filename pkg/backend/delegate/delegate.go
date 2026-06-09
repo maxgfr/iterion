@@ -206,6 +206,10 @@ type MemorySpec struct {
 	Read             bool
 	Write            bool
 	PreCompactInject bool
+	// Visibility selects the sharing axis (bot|project|cross_project|
+	// user|org|global). Empty keeps the legacy per-bot/per-project
+	// behaviour; when set, Scope is the space name.
+	Visibility string
 	// ProjectRoot, when true, re-roots the scope under the run's
 	// `RepoRoot` (passed alongside via Task.RepoRoot) instead of the
 	// per-run workDir. Enables cross-worktree shared scopes (e.g.

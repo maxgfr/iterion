@@ -811,6 +811,9 @@ func writeMemory(b *strings.Builder, m *ast.MemoryBlock, indent string, leadingB
 	if m.ProjectRoot != nil {
 		fmt.Fprintf(b, "%s  project_root: %t\n", indent, *m.ProjectRoot)
 	}
+	if m.Visibility != nil {
+		fmt.Fprintf(b, "%s  visibility: %q\n", indent, *m.Visibility)
+	}
 }
 
 // writeCursorDecl renders a top-level `cursor NAME:` declaration.

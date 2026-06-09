@@ -595,7 +595,11 @@ type MemoryBlock struct {
 	// and whats-next runs that live at the repo root — e.g.
 	// session-continuity memory shared between bots and Nexie.
 	ProjectRoot *bool
-	Span        Span
+	// Visibility selects the sharing axis: bot | project | cross_project
+	// | user | org | global. Empty (or absent) keeps the legacy
+	// per-bot/per-project behaviour. When set, Scope is the space name.
+	Visibility *string
+	Span       Span
 }
 
 // SandboxBlock is the AST representation of a `sandbox:` block. Two

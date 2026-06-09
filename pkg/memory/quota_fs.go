@@ -144,8 +144,9 @@ func checkCeilings(ref knowledge.SpaceRef, space, agg usageSidecar, delta int64)
 	if delta <= 0 {
 		return nil
 	}
-	spaceQ := effectiveQuota(space.QuotaBytes, spaceQuotaFor(ref.Visibility))
-	if space.UsedBytes+delta > spaceQ {
+	// A per-space quota of 0 means "no sub-cap" (only the org aggregate
+	// applies) — e.g. the global space. It never means "deny".
+	if spaceQ := effectiveQuota(space.QuotaBytes, spaceQuotaFor(ref.Visibility)); spaceQ > 0 && space.UsedBytes+delta > spaceQ {
 		return &knowledge.QuotaError{Aggregate: false, Used: space.UsedBytes, Delta: delta, Quota: spaceQ}
 	}
 	aggQ := effectiveQuota(agg.QuotaBytes, aggregateQuota())

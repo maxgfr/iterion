@@ -16,6 +16,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/backend/cost"
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
+	"github.com/SocialGouv/iterion/pkg/knowledge"
 	"github.com/SocialGouv/iterion/pkg/memory"
 	"github.com/SocialGouv/iterion/pkg/sandbox"
 	"github.com/SocialGouv/iterion/pkg/secrets"
@@ -358,10 +359,23 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 		// into a bot-visibility SpaceRef pointing at the identical
 		// on-disk path the pre-knowledge layout used.
 		memBase := task.WorkDir
-		if m.ProjectRoot && task.RepoRoot != "" {
+		if (m.ProjectRoot || m.Visibility != "") && task.RepoRoot != "" {
 			memBase = task.RepoRoot
 		}
-		ref := memory.LegacyBotRef(memBase, m.Scope)
+		var ref knowledge.SpaceRef
+		if m.Visibility != "" {
+			// Structured space: resolve the sharing axis against the run's
+			// identity (tenant/owner from ctx, project from memBase).
+			tenant, _ := store.TenantFromContext(ctx)
+			owner, _ := store.OwnerFromContext(ctx)
+			ref = memory.ResolveSpaceRef(knowledge.Visibility(m.Visibility), m.Scope, "", "", memory.SpaceRefInputs{
+				TenantID:  tenant,
+				UserID:    owner,
+				ProjectID: memory.ProjectKey(memBase),
+			})
+		} else {
+			ref = memory.LegacyBotRef(memBase, m.Scope)
+		}
 		if err := installWorkspaceMemory(ctx, &opts, memory.DefaultFSStore(), ref, m); err != nil {
 			return delegate.Result{}, fmt.Errorf("claw backend: memory: %w", err)
 		}

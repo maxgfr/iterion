@@ -1450,7 +1450,16 @@ func compileMemory(b *ast.MemoryBlock) *Memory {
 	if b.ProjectRoot != nil {
 		out.ProjectRoot = *b.ProjectRoot
 	}
+	if b.Visibility != nil {
+		out.Visibility = strings.TrimSpace(*b.Visibility)
+	}
 	return out
+}
+
+// knownMemoryVisibilities is the closed enum accepted by `visibility:`.
+var knownMemoryVisibilities = map[string]bool{
+	"bot": true, "project": true, "cross_project": true,
+	"user": true, "org": true, "global": true,
 }
 
 // ---------------------------------------------------------------------------

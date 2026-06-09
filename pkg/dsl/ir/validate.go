@@ -17,35 +17,37 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	DiagSessionAfterConvergence DiagCode = "C009" // session: inherit or fork on convergence point
-	DiagMultipleDefaultEdges    DiagCode = "C010" // multiple unconditional edges from same non-fan_out source
-	DiagAmbiguousCondition      DiagCode = "C011" // ambiguous conditional edges from same source
-	DiagMissingFallback         DiagCode = "C012" // conditional edges with no default fallback
-	DiagConditionNotBool        DiagCode = "C013" // when field is not boolean in output schema
-	DiagConditionFieldNotFound  DiagCode = "C014" // when field not found in source output schema
-	DiagUnreachableNode         DiagCode = "C016" // node unreachable from entry
-	DiagHistoryRefNotInLoop     DiagCode = "C017" // outputs.<node>.history but node not in a loop
-	DiagUndeclaredCycle         DiagCode = "C019" // cycle without a declared loop (infinite loop risk)
-	DiagRoundRobinTooFewEdges   DiagCode = "C020" // round_robin router with fewer than 2 outgoing edges
-	DiagLLMRouterTooFewEdges    DiagCode = "C021" // llm router with fewer than 2 outgoing edges
-	DiagLLMRouterConditionEdge  DiagCode = "C022" // llm router edge has a 'when' condition
-	DiagRouterLLMOnlyProperty   DiagCode = "C023" // LLM-only property on non-llm router
-	DiagInvalidReasoningEffort  DiagCode = "C027" // invalid reasoning_effort value (was C024, clashed with DiagDuplicateMCPServer)
-	DiagUltracodeModelGate      DiagCode = "C089" // reasoning_effort: ultracode on a model that isn't claude-opus-4-8 (warning)
-	DiagInvalidLoopIterations   DiagCode = "C026" // loop max_iterations must be >= 1
-	DiagDuplicateWithKey        DiagCode = "C028" // duplicate with-mapping key across edges to same target
-	DiagUnknownRefNode          DiagCode = "C029" // outputs ref to non-existent node (was C030, clashed with DiagCodexDiscouraged)
-	DiagRefFieldNotInSchema     DiagCode = "C031" // outputs ref field not in output schema
-	DiagRefNodeNoSchema         DiagCode = "C032" // outputs ref field on node without output schema
-	DiagUndeclaredVar           DiagCode = "C033" // vars ref to undeclared variable
-	DiagInputFieldNotInSchema   DiagCode = "C034" // input ref field not in input schema
-	DiagUnknownArtifact         DiagCode = "C035" // artifacts ref to unpublished artifact
-	DiagRefNodeNotReachable     DiagCode = "C036" // outputs ref to node not reachable before consumer
-	DiagNodeMaxTokensVsBudget   DiagCode = "C037" // node-level max_tokens exceeds workflow.budget.max_tokens
-	DiagUnsupportedMCPAuth      DiagCode = "C038" // MCP server Auth.Type not supported (only "oauth2" is wired)
-	DiagInvalidCompaction       DiagCode = "C043" // compaction.threshold or compaction.preserve_recent out of range
-	DiagMemoryNotSupported      DiagCode = "C047" // memory: enabled on a backend that does not consume it (only claw does today)
-	DiagMemoryMissingScope      DiagCode = "C048" // memory: enabled without a scope: name
+	DiagSessionAfterConvergence  DiagCode = "C009" // session: inherit or fork on convergence point
+	DiagMultipleDefaultEdges     DiagCode = "C010" // multiple unconditional edges from same non-fan_out source
+	DiagAmbiguousCondition       DiagCode = "C011" // ambiguous conditional edges from same source
+	DiagMissingFallback          DiagCode = "C012" // conditional edges with no default fallback
+	DiagConditionNotBool         DiagCode = "C013" // when field is not boolean in output schema
+	DiagConditionFieldNotFound   DiagCode = "C014" // when field not found in source output schema
+	DiagUnreachableNode          DiagCode = "C016" // node unreachable from entry
+	DiagHistoryRefNotInLoop      DiagCode = "C017" // outputs.<node>.history but node not in a loop
+	DiagUndeclaredCycle          DiagCode = "C019" // cycle without a declared loop (infinite loop risk)
+	DiagRoundRobinTooFewEdges    DiagCode = "C020" // round_robin router with fewer than 2 outgoing edges
+	DiagLLMRouterTooFewEdges     DiagCode = "C021" // llm router with fewer than 2 outgoing edges
+	DiagLLMRouterConditionEdge   DiagCode = "C022" // llm router edge has a 'when' condition
+	DiagRouterLLMOnlyProperty    DiagCode = "C023" // LLM-only property on non-llm router
+	DiagInvalidReasoningEffort   DiagCode = "C027" // invalid reasoning_effort value (was C024, clashed with DiagDuplicateMCPServer)
+	DiagUltracodeModelGate       DiagCode = "C089" // reasoning_effort: ultracode on a model that isn't claude-opus-4-8 (warning)
+	DiagInvalidLoopIterations    DiagCode = "C026" // loop max_iterations must be >= 1
+	DiagDuplicateWithKey         DiagCode = "C028" // duplicate with-mapping key across edges to same target
+	DiagUnknownRefNode           DiagCode = "C029" // outputs ref to non-existent node (was C030, clashed with DiagCodexDiscouraged)
+	DiagRefFieldNotInSchema      DiagCode = "C031" // outputs ref field not in output schema
+	DiagRefNodeNoSchema          DiagCode = "C032" // outputs ref field on node without output schema
+	DiagUndeclaredVar            DiagCode = "C033" // vars ref to undeclared variable
+	DiagInputFieldNotInSchema    DiagCode = "C034" // input ref field not in input schema
+	DiagUnknownArtifact          DiagCode = "C035" // artifacts ref to unpublished artifact
+	DiagRefNodeNotReachable      DiagCode = "C036" // outputs ref to node not reachable before consumer
+	DiagNodeMaxTokensVsBudget    DiagCode = "C037" // node-level max_tokens exceeds workflow.budget.max_tokens
+	DiagUnsupportedMCPAuth       DiagCode = "C038" // MCP server Auth.Type not supported (only "oauth2" is wired)
+	DiagInvalidCompaction        DiagCode = "C043" // compaction.threshold or compaction.preserve_recent out of range
+	DiagMemoryNotSupported       DiagCode = "C047" // memory: enabled on a backend that does not consume it (only claw does today)
+	DiagMemoryMissingScope       DiagCode = "C048" // memory: enabled without a scope: name
+	DiagMemoryInvalidVisibility  DiagCode = "C170" // memory: unknown visibility value
+	DiagMemoryVisibilityConflict DiagCode = "C171" // memory: visibility: with the legacy project_root:
 
 	// Attachments diagnostics
 	DiagDuplicateAttachment       DiagCode = "C050" // attachment name declared more than once
@@ -113,6 +115,16 @@ func (c *compiler) validateMemory(w *Workflow) {
 		if m.Scope == "" {
 			c.errorf(DiagMemoryMissingScope,
 				"%s %q: memory: enabled requires a scope: name", scope, id)
+		}
+		if m.Visibility != "" {
+			if !knownMemoryVisibilities[m.Visibility] {
+				c.errorf(DiagMemoryInvalidVisibility,
+					"%s %q: memory: unknown visibility %q (bot|project|cross_project|user|org|global)", scope, id, m.Visibility)
+			}
+			if m.ProjectRoot {
+				c.errorf(DiagMemoryVisibilityConflict,
+					"%s %q: memory: visibility: and the legacy project_root: are mutually exclusive", scope, id)
+			}
 		}
 		if backend != "" && backend != "claw" {
 			c.warnf(DiagMemoryNotSupported,

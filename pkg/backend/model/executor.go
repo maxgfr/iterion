@@ -1177,6 +1177,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 			Write:            m.Write,
 			PreCompactInject: m.PreCompactInject,
 			ProjectRoot:      m.ProjectRoot,
+			Visibility:       m.Visibility,
 		}
 		task.RepoRoot = e.repoRoot
 	}
