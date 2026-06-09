@@ -54,6 +54,11 @@ type MemoryStore interface {
 	// DeleteDocument removes a document. Deleting an absent document is
 	// not an error.
 	DeleteDocument(ctx context.Context, ref SpaceRef, path string) error
+
+	// UsageBytes returns the space's current usage and its effective
+	// quota (the per-space sub-cap). Used by `iterion memory du`, the
+	// studio usage panel, and admin quota reporting.
+	UsageBytes(ctx context.Context, ref SpaceRef) (used, quota int64, err error)
 }
 
 // Document is a memory document's metadata plus its full content.

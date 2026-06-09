@@ -168,25 +168,66 @@ func (s *FSStore) ReadDocument(_ context.Context, ref knowledge.SpaceRef, path s
 	}, nil
 }
 
-// WriteDocument creates or replaces a document and returns its metadata.
+// WriteDocument creates or replaces a document and returns its
+// metadata. It enforces the per-document size cap and both the
+// per-space and org-aggregate quota ceilings BEFORE committing bytes —
+// an over-quota write returns a *knowledge.QuotaError and never lands
+// on disk. Counters are updated only after the write succeeds, under
+// the global quota lock, so concurrent writers stay consistent.
 func (s *FSStore) WriteDocument(_ context.Context, ref knowledge.SpaceRef, in knowledge.DocumentInput) (knowledge.DocumentMeta, error) {
 	sc, err := s.scopeFor(ref)
 	if err != nil {
 		return knowledge.DocumentMeta{}, err
 	}
+	newSize := int64(len(in.Content))
+	if max := maxDocumentSize(); newSize > max {
+		return knowledge.DocumentMeta{}, &knowledge.QuotaError{Aggregate: false, Used: 0, Delta: newSize, Quota: max}
+	}
+	abs, err := sc.Resolve(in.Path)
+	if err != nil {
+		return knowledge.DocumentMeta{}, err
+	}
+	var oldSize int64
+	if fi, statErr := os.Stat(abs); statErr == nil {
+		oldSize = fi.Size()
+	}
+	delta := newSize - oldSize
+
+	base := s.baseDir()
+	lock, err := acquireQuotaLock(base)
+	if err != nil {
+		return knowledge.DocumentMeta{}, err
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	space, err := readSidecar(spaceSidecarPath(base, ref))
+	if err != nil {
+		return knowledge.DocumentMeta{}, err
+	}
+	agg, err := readSidecar(aggregatePath(base))
+	if err != nil {
+		return knowledge.DocumentMeta{}, err
+	}
+	if err := checkCeilings(ref, space, agg, delta); err != nil {
+		return knowledge.DocumentMeta{}, err
+	}
 	if err := sc.Write(in.Path, in.Content); err != nil {
+		return knowledge.DocumentMeta{}, err
+	}
+	if err := commitDelta(base, ref, space, agg, delta); err != nil {
 		return knowledge.DocumentMeta{}, err
 	}
 	return knowledge.DocumentMeta{
 		Path:      in.Path,
-		Size:      int64(len(in.Content)),
+		Size:      newSize,
 		Checksum:  checksum(in.Content),
 		UpdatedBy: in.UpdatedBy,
 		UpdatedAt: time.Now(),
 	}, nil
 }
 
-// DeleteDocument removes a document; deleting an absent doc is a no-op.
+// DeleteDocument removes a document (no-op if absent) and credits its
+// bytes back to the per-space and aggregate counters.
 func (s *FSStore) DeleteDocument(_ context.Context, ref knowledge.SpaceRef, path string) error {
 	sc, err := s.scopeFor(ref)
 	if err != nil {
@@ -196,10 +237,54 @@ func (s *FSStore) DeleteDocument(_ context.Context, ref knowledge.SpaceRef, path
 	if err != nil {
 		return err
 	}
+	fi, statErr := os.Stat(abs)
+	if os.IsNotExist(statErr) {
+		return nil
+	}
+	var size int64
+	if statErr == nil {
+		size = fi.Size()
+	}
+	base := s.baseDir()
+	lock, err := acquireQuotaLock(base)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Unlock() }()
+
 	if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	if size > 0 {
+		space, err := readSidecar(spaceSidecarPath(base, ref))
+		if err != nil {
+			return err
+		}
+		agg, err := readSidecar(aggregatePath(base))
+		if err != nil {
+			return err
+		}
+		if err := commitDelta(base, ref, space, agg, -size); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// UsageBytes returns the space's tracked usage and its effective
+// per-space quota (explicit override, else env/default for the
+// visibility). Bytes written through the legacy Scope API (or before
+// this adapter) are not counted — quota gates new growth, not history.
+func (s *FSStore) UsageBytes(_ context.Context, ref knowledge.SpaceRef) (int64, int64, error) {
+	if err := ref.Validate(); err != nil {
+		return 0, 0, err
+	}
+	base := s.baseDir()
+	space, err := readSidecar(spaceSidecarPath(base, ref))
+	if err != nil {
+		return 0, 0, err
+	}
+	return space.UsedBytes, effectiveQuota(space.QuotaBytes, spaceQuotaFor(ref.Visibility)), nil
 }
 
 func checksum(b []byte) string {
