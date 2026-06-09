@@ -16,6 +16,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/backend/cost"
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
+	"github.com/SocialGouv/iterion/pkg/memory"
 	"github.com/SocialGouv/iterion/pkg/sandbox"
 	"github.com/SocialGouv/iterion/pkg/secrets"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -353,12 +354,15 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 		// Resolve the memory base path: project_root re-roots the scope
 		// under the run's RepoRoot so dispatcher worktrees + Nexie share
 		// the same tree; falls back to WorkDir when RepoRoot is empty
-		// (legacy / non-worktree runs).
+		// (legacy / non-worktree runs). LegacyBotRef encodes that base
+		// into a bot-visibility SpaceRef pointing at the identical
+		// on-disk path the pre-knowledge layout used.
 		memBase := task.WorkDir
 		if m.ProjectRoot && task.RepoRoot != "" {
 			memBase = task.RepoRoot
 		}
-		if err := installWorkspaceMemory(&opts, memBase, m); err != nil {
+		ref := memory.LegacyBotRef(memBase, m.Scope)
+		if err := installWorkspaceMemory(ctx, &opts, memory.DefaultFSStore(), ref, m); err != nil {
 			return delegate.Result{}, fmt.Errorf("claw backend: memory: %w", err)
 		}
 	}
