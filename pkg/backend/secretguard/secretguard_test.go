@@ -128,6 +128,25 @@ func TestContainsSecret_DeterministicGate(t *testing.T) {
 	}
 }
 
+func TestFileSecretReferenceRendersPathAndRegistersValue(t *testing.T) {
+	g := newTestGuard(t, Secret{
+		Name:     "kubeconfig",
+		Value:    fakeKey,
+		FilePath: "/run/iterion/secrets/kubeconfig",
+		Env:      "KUBECONFIG",
+	})
+	if got := g.ResolveSecretRef("kubeconfig"); got != "/run/iterion/secrets/kubeconfig" {
+		t.Fatalf("ResolveSecretRef(file) = %q", got)
+	}
+	if !g.ContainsSecret("payload=" + fakeKey) {
+		t.Fatal("file secret value should remain registered for DLP/redaction")
+	}
+	hints := g.SecretFileHints()
+	if len(hints) != 1 || hints[0].Path != "/run/iterion/secrets/kubeconfig" || hints[0].Env != "KUBECONFIG" {
+		t.Fatalf("file hints not preserved: %+v", hints)
+	}
+}
+
 func TestRedact_HeuristicUnknownToken(t *testing.T) {
 	g := newTestGuard(t) // no known secrets
 	in := "leaked: " + awsKey + " end"

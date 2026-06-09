@@ -23,3 +23,25 @@ func TestBuildSystemPrompt_SecretsHygiene(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildSystemPrompt_SecretFileHints(t *testing.T) {
+	got := Task{
+		SystemPrompt: "do the task",
+		SecretFiles: []SecretFileHint{{
+			Name: "kubeconfig",
+			Path: "/run/iterion/secrets/kubeconfig",
+			Env:  "KUBECONFIG",
+		}},
+	}.BuildSystemPrompt()
+	for _, want := range []string{
+		"## Secret handling",
+		"Mounted secret files",
+		"/run/iterion/secrets/kubeconfig",
+		"$KUBECONFIG",
+		"do not open, read, cat, print",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, got)
+		}
+	}
+}

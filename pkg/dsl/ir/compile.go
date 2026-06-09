@@ -1215,9 +1215,16 @@ func (c *compiler) compileSecrets(block *ast.SecretsBlock, vars map[string]*Var)
 		if _, clash := vars[f.Name]; clash {
 			c.errorf(DiagSecretVarConflict, "secret %q collides with a variable of the same name", f.Name)
 		}
+		as := f.As
+		if as == "" {
+			as = "value"
+		}
 		secrets[f.Name] = &Secret{
 			Name:        f.Name,
 			Value:       f.Value,
+			As:          as,
+			MountPath:   f.MountPath,
+			Env:         f.Env,
 			Hosts:       f.Hosts,
 			Description: f.Description,
 		}

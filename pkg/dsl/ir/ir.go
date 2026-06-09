@@ -701,13 +701,21 @@ type Var struct {
 // Secret is a resolved workflow secret declaration. Value is the raw
 // value expression (typically "${ENV}" / a {{vars.X}} reference),
 // resolved to the real plaintext at run start by the runtime; the agent
-// only ever sees the placeholder. Hosts scopes which egress
-// destinations the secret may be materialised toward (Layer 2).
+// only ever sees either a placeholder (As=value) or the mounted file path
+// (As=file). Hosts scopes which egress destinations the secret may be
+// materialised toward (Layer 2).
 type Secret struct {
 	Name        string
 	Value       string
+	As          string
+	MountPath   string
+	Env         string
 	Hosts       []string
 	Description string
+}
+
+func (s *Secret) IsFile() bool {
+	return s != nil && s.As == "file"
 }
 
 // VarType enumerates variable types.

@@ -230,7 +230,7 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 	if repoRoot == "" {
 		repoRoot = engineRepoRoot(e.workDir)
 	}
-	sandboxCleanup, sbErr := e.startSandbox(ctx, runID, repoRoot, resolveWorktreeGitDir(repoRoot, r.WorkDir))
+	sandboxCleanup, sbErr := e.startSandbox(ctx, runID, repoRoot, resolveWorktreeGitDir(repoRoot, r.WorkDir), r.Inputs)
 	if sbErr != nil {
 		// Same rationale as resumeFromFailure: a sandbox-start failure
 		// at resume time is almost always recoverable (stale container,
@@ -393,7 +393,7 @@ func (e *Engine) resumeFromFailure(ctx context.Context, r *store.Run) error {
 	if repoRoot == "" {
 		repoRoot = engineRepoRoot(e.workDir)
 	}
-	sandboxCleanup, sbErr := e.startSandbox(ctx, runID, repoRoot, resolveWorktreeGitDir(repoRoot, r.WorkDir))
+	sandboxCleanup, sbErr := e.startSandbox(ctx, runID, repoRoot, resolveWorktreeGitDir(repoRoot, r.WorkDir), r.Inputs)
 	if sbErr != nil {
 		// Sandbox-start failures on resume are almost always recoverable
 		// from the operator's side: stale containers (force-removable),

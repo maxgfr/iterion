@@ -717,6 +717,7 @@ func (r *Runner) injectCredentials(ctx context.Context, msg *queue.RunMessage) (
 
 	creds := secrets.Credentials{
 		APIKeys:              bundle.APIKeys,
+		Generic:              bundle.GenericSecrets,
 		OAuthCredentialFiles: map[string]string{},
 	}
 	tmpDirs := make([]string, 0, len(bundle.OAuthCredentials))
@@ -731,6 +732,9 @@ func (r *Runner) injectCredentials(ctx context.Context, msg *queue.RunMessage) (
 	cleanup := func() {
 		for k := range bundle.APIKeys {
 			bundle.APIKeys[k] = ""
+		}
+		for k := range bundle.GenericSecrets {
+			bundle.GenericSecrets[k] = ""
 		}
 		for _, dir := range tmpDirs {
 			_ = os.RemoveAll(dir)

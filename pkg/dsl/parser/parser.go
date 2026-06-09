@@ -584,8 +584,9 @@ func (p *parser) parseSecretsBlock() *ast.SecretsBlock {
 }
 
 // parseSecretField parses one secret declaration. Short form
-// `name: "value"`; block form with optional `value`, `hosts`,
-// `description` sub-properties. Mirrors parseAttachmentField.
+// `name: "value"`; block form with optional `value`, `as`,
+// `mount_path`, `env`, `hosts`, `description` sub-properties.
+// Mirrors parseAttachmentField.
 func (p *parser) parseSecretField() *ast.SecretField {
 	nameT := p.next()
 	if nameT.Type != TokenIdent && !isKeywordToken(nameT.Type) {
@@ -631,6 +632,12 @@ func (p *parser) parseSecretField() *ast.SecretField {
 		switch propName {
 		case "value":
 			sf.Value = p.expectString()
+		case "as":
+			sf.As = p.expectStringOrIdent()
+		case "mount_path":
+			sf.MountPath = p.expectString()
+		case "env":
+			sf.Env = p.expectStringOrIdent()
 		case "hosts":
 			sf.Hosts = p.parseStringList()
 		case "description":

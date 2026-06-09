@@ -194,16 +194,23 @@ type SecretsBlock struct {
 
 // SecretField is a single secret declaration. The short form is
 // `name: "value"`. The block form additionally accepts `value`,
-// `hosts` (egress scoping consumed by Layer 2), and `description`:
+// `as` ("value" or "file"), `mount_path`, `env`, `hosts`
+// (egress scoping consumed by Layer 2), and `description`:
 //
 //	secrets:
 //	  github_token: "${GITHUB_TOKEN}"
 //	  deploy_key:
 //	    value: "${DEPLOY_KEY}"
+//	    as: file
+//	    mount_path: "/run/iterion/secrets/deploy_key"
+//	    env: "GIT_SSH_KEY_PATH"
 //	    hosts: ["api.github.com", "github.com"]
 type SecretField struct {
 	Name        string
 	Value       string   // raw value expr (may contain ${ENV} / {{vars.X}})
+	As          string   // ""/"value" (placeholder) or "file" (mounted file)
+	MountPath   string   // in-sandbox path for file secrets; empty = runtime default
+	Env         string   // optional env var pointing at MountPath for file secrets
 	Hosts       []string // approved egress hosts (nil = no restriction)
 	Description string
 	Span        Span

@@ -78,6 +78,7 @@ type SandboxParams struct {
 	FriendlyName  string
 	RepoRoot      string
 	WorkspacePath string
+	SecretVars    map[string]interface{}
 	CLIOverride   string // "" means no override
 	GlobalDefault string // "" means no global default
 	DefaultImage  string // "" lets the runtime pick the built-in default
@@ -203,6 +204,9 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	applyHostStateMounts(spec, p.Workflow, p, emitEvent, logger)
 	addClawBinaryMount(spec, p.Workflow)
 	addWorktreeGitMount(spec, p.WorktreeGitDir, logger)
+	if err := addSecretFileMounts(ctx, spec, p.Workflow, p.SecretVars); err != nil {
+		return nil, err
+	}
 
 	// Phase 4 V1: claw nodes are forwarded to the iterion-claw-runner
 	// sub-process inside the container so their tool calls (Bash, file
@@ -222,6 +226,9 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	}
 
 	if driver.Name() == "noop" {
+		if len(spec.SecretFiles) > 0 {
+			return nil, fmt.Errorf("runtime: sandbox: file secrets require a real sandbox driver; noop cannot mount secret files")
+		}
 		return startNoopSandbox(ctx, driver, spec, source, p.RunID, p.FriendlyName, p.WorkspacePath, emitEvent)
 	}
 
@@ -989,7 +996,7 @@ type sandboxSetter interface {
 // A non-nil error means the sandbox was requested but couldn't start.
 // The caller is responsible for failing the run; the returned cleanup
 // is a noop in that case but safe to defer.
-func (e *Engine) startSandbox(ctx context.Context, runID string, repoRoot string, worktreeGitDir string) (func(), error) {
+func (e *Engine) startSandbox(ctx context.Context, runID string, repoRoot string, worktreeGitDir string, inputs map[string]interface{}) (func(), error) {
 	noopCleanup := func() {}
 	emitForSandbox := func(t store.EventType, data map[string]interface{}) error {
 		return e.emit(ctx, runID, t, "", data)
@@ -1020,12 +1027,17 @@ func (e *Engine) startSandbox(ctx context.Context, runID string, repoRoot string
 	if e.bundle != nil {
 		bundleHost = e.bundle.Dir
 	}
+	var secretVars map[string]interface{}
+	if workflowHasFileSecrets(e.workflow) {
+		secretVars = e.resolveVars(inputs)
+	}
 	active, sbErr := resolveAndStartSandbox(ctx, SandboxParams{
 		Workflow:                 e.workflow,
 		RunID:                    runID,
 		FriendlyName:             e.runName,
 		RepoRoot:                 repoRoot,
 		WorkspacePath:            e.workDir,
+		SecretVars:               secretVars,
 		CLIOverride:              e.sandboxOverride,
 		GlobalDefault:            e.sandboxDefault,
 		DefaultImage:             e.sandboxDefaultImage,

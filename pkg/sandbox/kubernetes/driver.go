@@ -166,6 +166,21 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 
 	podName := podNameFor(info.RunID)
 
+	// File secrets: create a per-run opaque Secret BEFORE the pod so the
+	// workload can mount each key as a read-only file. The Secret is
+	// deleted in Cleanup together with the pod.
+	secretFilesSecretName := ""
+	if len(p.spec.SecretFiles) > 0 {
+		secretFilesSecretName = podName + "-secret-files"
+		secretManifest, err := BuildSecretFilesSecret(d.namespace, secretFilesSecretName, info.RunID, info.FriendlyName, p.spec.SecretFiles)
+		if err != nil {
+			return nil, fmt.Errorf("kubernetes: build file secrets secret: %w", err)
+		}
+		if err := applyManifest(ctx, d.namespace, secretManifest); err != nil {
+			return nil, fmt.Errorf("kubernetes: apply file secrets secret: %w", err)
+		}
+	}
+
 	// Egress TLS-inspection CA (Layer 2): create the per-run CA Secret
 	// BEFORE the pod so the pod can mount it. The Secret holds only the
 	// public CA cert; the private key never leaves the runner.
@@ -174,26 +189,36 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 		caSecretName = podName + "-ca"
 		caSecret, err := BuildCASecret(d.namespace, caSecretName, info.RunID, info.FriendlyName, info.ProxyCACert)
 		if err != nil {
+			if secretFilesSecretName != "" {
+				_ = deleteResource(ctx, d.namespace, "secret", secretFilesSecretName)
+			}
 			return nil, fmt.Errorf("kubernetes: build CA secret: %w", err)
 		}
 		if err := applyManifest(ctx, d.namespace, caSecret); err != nil {
+			if secretFilesSecretName != "" {
+				_ = deleteResource(ctx, d.namespace, "secret", secretFilesSecretName)
+			}
 			return nil, fmt.Errorf("kubernetes: apply CA secret: %w", err)
 		}
 	}
 
 	manifest, err := BuildPodManifest(PodManifestInput{
-		Namespace:      d.namespace,
-		Name:           podName,
-		RunID:          info.RunID,
-		FriendlyName:   info.FriendlyName,
-		Spec:           p.spec,
-		WorkspaceMount: p.workspace,
-		ProxyEndpoint:  info.ProxyEndpoint,
-		CASecretName:   caSecretName,
+		Namespace:             d.namespace,
+		Name:                  podName,
+		RunID:                 info.RunID,
+		FriendlyName:          info.FriendlyName,
+		Spec:                  p.spec,
+		WorkspaceMount:        p.workspace,
+		ProxyEndpoint:         info.ProxyEndpoint,
+		CASecretName:          caSecretName,
+		SecretFilesSecretName: secretFilesSecretName,
 	})
 	if err != nil {
 		if caSecretName != "" {
 			_ = deleteResource(ctx, d.namespace, "secret", caSecretName)
+		}
+		if secretFilesSecretName != "" {
+			_ = deleteResource(ctx, d.namespace, "secret", secretFilesSecretName)
 		}
 		return nil, fmt.Errorf("kubernetes: build manifest: %w", err)
 	}
@@ -202,16 +227,20 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 		if caSecretName != "" {
 			_ = deleteResource(ctx, d.namespace, "secret", caSecretName)
 		}
+		if secretFilesSecretName != "" {
+			_ = deleteResource(ctx, d.namespace, "secret", secretFilesSecretName)
+		}
 		return nil, fmt.Errorf("kubernetes: apply pod: %w", err)
 	}
 
 	r := &Run{
-		driver:       d,
-		podName:      podName,
-		namespace:    d.namespace,
-		prepared:     p,
-		info:         info,
-		caSecretName: caSecretName,
+		driver:                d,
+		podName:               podName,
+		namespace:             d.namespace,
+		prepared:              p,
+		info:                  info,
+		caSecretName:          caSecretName,
+		secretFilesSecretName: secretFilesSecretName,
 	}
 
 	// V2-5: synthesise a per-run NetworkPolicy when the proxy is
@@ -299,6 +328,10 @@ type Run struct {
 	// [Driver.Start] (Layer 2 TLS inspection), deleted in [Run.Cleanup].
 	// Empty when inspection is off.
 	caSecretName string
+
+	// secretFilesSecretName is the per-run Secret containing mounted file
+	// secrets. Empty when the workflow declares no file secrets.
+	secretFilesSecretName string
 
 	mu      sync.Mutex
 	cleaned bool
@@ -394,6 +427,11 @@ func (r *Run) Cleanup(_ context.Context) error {
 	if r.caSecretName != "" {
 		if err := deleteResource(deleteCtx, r.namespace, "secret", r.caSecretName); err != nil {
 			r.driver.logger.Debug("sandbox: kubernetes CA secret cleanup of %s/%s reported: %v", r.namespace, r.caSecretName, err)
+		}
+	}
+	if r.secretFilesSecretName != "" {
+		if err := deleteResource(deleteCtx, r.namespace, "secret", r.secretFilesSecretName); err != nil {
+			r.driver.logger.Debug("sandbox: kubernetes file secrets cleanup of %s/%s reported: %v", r.namespace, r.secretFilesSecretName, err)
 		}
 	}
 	return nil

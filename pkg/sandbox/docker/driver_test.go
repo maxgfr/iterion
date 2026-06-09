@@ -2,9 +2,13 @@ package docker
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/SocialGouv/iterion/pkg/sandbox"
+	"github.com/SocialGouv/iterion/pkg/secrets"
 )
 
 func TestCapabilitiesAdvertisedFeatures(t *testing.T) {
@@ -203,4 +207,74 @@ Run 'docker run --help' for more information
 	if isContainerNameConflict(nil) {
 		t.Error("nil/empty must not match")
 	}
+}
+
+func TestAppendSecretFileMountArgsMountsDefaultDirOnce(t *testing.T) {
+	tempDirs := []string{}
+	args, err := appendSecretFileMountArgs([]string{"run"}, []sandbox.SecretFileMount{
+		{Name: "kubeconfig", MountPath: "/run/iterion/secrets/kubeconfig", Value: []byte("one")},
+		{Name: "nested", MountPath: "/run/iterion/secrets/nested/token", Value: []byte("two")},
+	}, &tempDirs)
+	defer cleanupTempDirs(tempDirs)
+	if err != nil {
+		t.Fatalf("appendSecretFileMountArgs: %v", err)
+	}
+	if len(tempDirs) != 1 {
+		t.Fatalf("tempDirs = %+v, want one directory mount", tempDirs)
+	}
+	mounts := secretMountArgs(args)
+	if len(mounts) != 1 {
+		t.Fatalf("mount args = %+v, want one default directory mount", mounts)
+	}
+	if !strings.Contains(mounts[0], "target="+secrets.SecretFilesMountDir+",readonly") {
+		t.Fatalf("default mount target mismatch: %s", mounts[0])
+	}
+	if got, err := os.ReadFile(filepath.Join(tempDirs[0], "kubeconfig")); err != nil || string(got) != "one" {
+		t.Fatalf("default secret file = %q / %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(tempDirs[0], "nested", "token")); err != nil || string(got) != "two" {
+		t.Fatalf("nested secret file = %q / %v", got, err)
+	}
+}
+
+func TestAppendSecretFileMountArgsMountsCustomFileDirectly(t *testing.T) {
+	tempDirs := []string{}
+	args, err := appendSecretFileMountArgs([]string{"run"}, []sandbox.SecretFileMount{
+		{Name: "kubeconfig", MountPath: "/root/.kube/config", Value: []byte("payload")},
+	}, &tempDirs)
+	defer cleanupTempDirs(tempDirs)
+	if err != nil {
+		t.Fatalf("appendSecretFileMountArgs: %v", err)
+	}
+	if len(tempDirs) != 1 {
+		t.Fatalf("tempDirs = %+v, want one file mount temp dir", tempDirs)
+	}
+	mounts := secretMountArgs(args)
+	if len(mounts) != 1 {
+		t.Fatalf("mount args = %+v, want one direct file mount", mounts)
+	}
+	if !strings.Contains(mounts[0], "target=/root/.kube/config,readonly") {
+		t.Fatalf("custom mount target mismatch: %s", mounts[0])
+	}
+}
+
+func TestAppendSecretFileMountArgsRejectsDirtyPath(t *testing.T) {
+	tempDirs := []string{}
+	_, err := appendSecretFileMountArgs(nil, []sandbox.SecretFileMount{
+		{Name: "bad", MountPath: "/run/iterion/secrets/../bad", Value: []byte("payload")},
+	}, &tempDirs)
+	defer cleanupTempDirs(tempDirs)
+	if err == nil {
+		t.Fatal("expected dirty mount_path to fail")
+	}
+}
+
+func secretMountArgs(args []string) []string {
+	var out []string
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--mount" && strings.Contains(args[i+1], "iterion-secret") {
+			out = append(out, args[i+1])
+		}
+	}
+	return out
 }

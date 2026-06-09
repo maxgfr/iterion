@@ -26,6 +26,9 @@ import (
 // the shared master key.
 type RunBundle struct {
 	APIKeys map[Provider]string `json:"api_keys,omitempty"`
+	// GenericSecrets maps workflow secret names to plaintext payloads
+	// resolved from the tenant/user secret store at publish time.
+	GenericSecrets map[string]string `json:"generic_secrets,omitempty"`
 	// OAuthCredentials maps "claude_code" / "codex" → opaque blob
 	// that the runner materialises as a credentials.json /
 	// auth.json before spawning the CLI subprocess.

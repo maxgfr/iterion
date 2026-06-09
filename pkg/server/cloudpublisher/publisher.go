@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,6 +54,9 @@ type Config struct {
 	// them into a per-run RunSecrets record. The runner unseals
 	// and injects them into the engine ctx.
 	ApiKeys secrets.ApiKeyStore
+	// GenericSecrets stores workflow/user secrets addressable by name
+	// from the DSL `secrets:` block.
+	GenericSecrets secrets.GenericSecretStore
 	// RunSecrets persists the sealed bundle keyed by SecretsRef.
 	RunSecrets secrets.RunSecretsStore
 	// Sealer is the AES-GCM master-key sealer (shared with the
@@ -68,15 +72,16 @@ type Config struct {
 
 // Publisher is a runview.LaunchPublisher backed by NATS + Mongo.
 type Publisher struct {
-	nats         *natsq.Conn
-	store        store.RunStore
-	runs         *mongo.Collection
-	logger       *iterlog.Logger
-	metrics      *metrics.Registry
-	apiKeys      secrets.ApiKeyStore
-	runSecrets   secrets.RunSecretsStore
-	sealer       secrets.Sealer
-	oauthForfait secrets.OAuthStore
+	nats           *natsq.Conn
+	store          store.RunStore
+	runs           *mongo.Collection
+	logger         *iterlog.Logger
+	metrics        *metrics.Registry
+	apiKeys        secrets.ApiKeyStore
+	genericSecrets secrets.GenericSecretStore
+	runSecrets     secrets.RunSecretsStore
+	sealer         secrets.Sealer
+	oauthForfait   secrets.OAuthStore
 
 	// detached tracks fire-and-forget goroutines (e.g. MarkUsed
 	// observability writes) so Drain can wait for them on shutdown
@@ -100,15 +105,16 @@ func New(cfg Config) (*Publisher, error) {
 		cfg.Logger = iterlog.New(iterlog.LevelInfo, nil)
 	}
 	return &Publisher{
-		nats:         cfg.NATS,
-		store:        cfg.Store,
-		runs:         cfg.MongoColl,
-		logger:       cfg.Logger,
-		metrics:      cfg.Metrics,
-		apiKeys:      cfg.ApiKeys,
-		runSecrets:   cfg.RunSecrets,
-		sealer:       cfg.Sealer,
-		oauthForfait: cfg.OAuthForfait,
+		nats:           cfg.NATS,
+		store:          cfg.Store,
+		runs:           cfg.MongoColl,
+		logger:         cfg.Logger,
+		metrics:        cfg.Metrics,
+		apiKeys:        cfg.ApiKeys,
+		genericSecrets: cfg.GenericSecrets,
+		runSecrets:     cfg.RunSecrets,
+		sealer:         cfg.Sealer,
+		oauthForfait:   cfg.OAuthForfait,
 	}, nil
 }
 
@@ -126,12 +132,26 @@ var allKnownProviders = []secrets.Provider{
 	secrets.ProviderXAI,
 }
 
+func genericSecretNamesForWorkflow(wf *ir.Workflow) []string {
+	if wf == nil || len(wf.Secrets) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(wf.Secrets))
+	for name, s := range wf.Secrets {
+		if strings.TrimSpace(s.Value) != "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
 // resolveAndSealCredentials looks up every provider key visible to
 // (tenantID, ownerID), pairs it with any OAuth-forfait the owner has
 // connected, seals the resulting bundle, and persists it under a
 // fresh secrets ref. Returns the ref or an empty string when no
 // credentials are available — the runner then falls back to env.
-func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenantID, ownerID string) (string, error) {
+func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenantID, ownerID string, wf *ir.Workflow) (string, error) {
 	if p.runSecrets == nil || p.sealer == nil {
 		return "", nil
 	}
@@ -148,6 +168,7 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 	}
 	bundle := secrets.RunBundle{
 		APIKeys:          map[secrets.Provider]string{},
+		GenericSecrets:   map[string]string{},
 		OAuthCredentials: map[string][]byte{},
 	}
 
@@ -183,7 +204,37 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 		}
 	}
 
-	// 2. OAuth-forfait blobs. Only embed the kinds the owner has
+	// 2. Workflow/user generic secrets. A declared secret with an empty
+	// value means "resolve a stored secret of the same name" for this run.
+	if p.genericSecrets != nil && wf != nil && len(wf.Secrets) > 0 {
+		names := genericSecretNamesForWorkflow(wf)
+		resolved, err := secrets.ResolveGeneric(ctx, p.genericSecrets, tenantID, ownerID, names, p.sealer)
+		if err != nil {
+			return "", fmt.Errorf("cloudpublisher: resolve workflow secrets: %w", err)
+		}
+		now := time.Now().UTC()
+		usedIDs := make([]string, 0, len(resolved))
+		for name, r := range resolved {
+			if len(r.Plaintext) == 0 {
+				continue
+			}
+			bundle.GenericSecrets[name] = string(r.Plaintext)
+			usedIDs = append(usedIDs, r.SecretID)
+		}
+		if len(usedIDs) > 0 {
+			p.detached.Add(1)
+			go func(ids []string, t time.Time, tenant string) {
+				defer p.detached.Done()
+				bg, cancel := context.WithTimeout(store.WithTenant(context.Background(), tenant), 5*time.Second)
+				defer cancel()
+				for _, id := range ids {
+					_ = p.genericSecrets.MarkUsed(bg, id, t)
+				}
+			}(usedIDs, now, tenantID)
+		}
+	}
+
+	// 3. OAuth-forfait blobs. Only embed the kinds the owner has
 	//    actively connected; the runner falls back to env when
 	//    neither an API key nor an OAuth bundle is present.
 	if p.oauthForfait != nil && ownerID != "" {
@@ -203,7 +254,7 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 		}
 	}
 
-	if len(bundle.APIKeys) == 0 && len(bundle.OAuthCredentials) == 0 {
+	if len(bundle.APIKeys) == 0 && len(bundle.GenericSecrets) == 0 && len(bundle.OAuthCredentials) == 0 {
 		return "", nil
 	}
 
@@ -274,7 +325,7 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 	// 1b. Resolve BYOK credentials and seal them under a fresh
 	//     secrets_ref. Empty ref means "no team-scoped credentials
 	//     configured" — the runner falls back to env.
-	secretsRef, err := p.resolveAndSealCredentials(ctx, runID, tenantID, ownerID)
+	secretsRef, err := p.resolveAndSealCredentials(ctx, runID, tenantID, ownerID, wf)
 	if err != nil {
 		return 0, err
 	}
@@ -415,7 +466,7 @@ func (p *Publisher) SubmitResume(ctx context.Context, spec runview.ResumeSpec, w
 	// Re-resolve BYOK credentials for the resume publication. Keys
 	// may have rotated between launch and resume; using the prior
 	// run's secrets ref blindly would inject stale plaintext.
-	secretsRef, secretsErr := p.resolveAndSealCredentials(ctx, spec.RunID, prior.TenantID, prior.OwnerID)
+	secretsRef, secretsErr := p.resolveAndSealCredentials(ctx, spec.RunID, prior.TenantID, prior.OwnerID, wf)
 	if secretsErr != nil {
 		return secretsErr
 	}

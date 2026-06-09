@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -31,6 +32,7 @@ func BuildSecretGuard(ctx context.Context, wf *ir.Workflow, vars map[string]stri
 	var known []secretguard.Secret
 
 	// 1. Resolved credentials (cloud / runner-injected).
+	var genericSecrets map[string]string
 	if creds, ok := secrets.CredentialsFromContext(ctx); ok {
 		for prov, val := range creds.APIKeys {
 			if val == "" {
@@ -41,6 +43,7 @@ func BuildSecretGuard(ctx context.Context, wf *ir.Workflow, vars map[string]stri
 				Value: val,
 			})
 		}
+		genericSecrets = creds.Generic
 	}
 
 	// 2. Sensitive host env vars (local runs, where keys come from the
@@ -63,13 +66,13 @@ func BuildSecretGuard(ctx context.Context, wf *ir.Workflow, vars map[string]stri
 	// 3. Declared workflow secrets (Layer 1). These carry an explicit
 	//    placeholder the agent sees in place of the value, plus optional
 	//    egress host scoping consumed by Layer 2.
-	known = append(known, declaredWorkflowSecrets(wf, vars)...)
+	known = append(known, declaredWorkflowSecrets(wf, vars, genericSecrets)...)
 
 	g := secretguard.New(known, cfg)
 	// Return nil only when the guard would do nothing at all: no known
 	// values to redact/materialise and the heuristic pass is disabled.
 	// This keeps the common no-secrets path allocation-free downstream.
-	if !g.HasKnownSecrets() && !cfg.Heuristic {
+	if !g.HasKnownSecrets() && len(g.SecretFileHints()) == 0 && !cfg.Heuristic {
 		return nil
 	}
 	return g
@@ -80,20 +83,37 @@ func BuildSecretGuard(ctx context.Context, wf *ir.Workflow, vars map[string]stri
 // "{{vars.X}}" reference) is resolved to its real plaintext here; the
 // agent only ever sees the placeholder (PlaceholderForName), which the
 // guard materialises at tool/shell exec.
-func declaredWorkflowSecrets(wf *ir.Workflow, vars map[string]string) []secretguard.Secret {
+func declaredWorkflowSecrets(wf *ir.Workflow, vars map[string]string, generic map[string]string) []secretguard.Secret {
 	if wf == nil || len(wf.Secrets) == 0 {
 		return nil
 	}
 	out := make([]secretguard.Secret, 0, len(wf.Secrets))
-	for name, s := range wf.Secrets {
-		val := resolveSecretValue(s.Value, vars)
-		if val == "" {
+	names := make([]string, 0, len(wf.Secrets))
+	for name := range wf.Secrets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		s := wf.Secrets[name]
+		val := ""
+		if strings.TrimSpace(s.Value) != "" {
+			val = resolveSecretValue(s.Value, vars)
+		} else if generic != nil {
+			val = generic[name]
+		}
+		filePath := ""
+		if s.IsFile() {
+			filePath = secrets.ResolveFileMountPath(name, s.MountPath)
+		}
+		if val == "" && filePath == "" {
 			continue // unset/unresolved — nothing to taint or materialise
 		}
 		out = append(out, secretguard.Secret{
 			Name:        name,
 			Value:       val,
 			Placeholder: secretguard.PlaceholderForName(name),
+			FilePath:    filePath,
+			Env:         s.Env,
 			Hosts:       s.Hosts,
 		})
 	}

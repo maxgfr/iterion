@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -103,6 +104,20 @@ type Spec struct {
 
 	// Network, when non-nil, controls egress filtering. Phase 3.
 	Network *Network
+
+	// SecretFiles are per-run plaintext payloads materialised as read-only
+	// files inside the sandbox. Runtime fills this from protected workflow
+	// secrets after resolving the effective spec; drivers must never log
+	// Value. Docker writes Value to a host temp file and bind-mounts it;
+	// Kubernetes creates a per-run Secret and projects each key.
+	SecretFiles []SecretFileMount
+}
+
+type SecretFileMount struct {
+	Name      string
+	MountPath string
+	Env       string
+	Value     []byte
 }
 
 // HostState selects how the host's persistent state directories
@@ -250,5 +265,36 @@ func (s *Spec) Validate() error {
 	if !s.HostState.IsValid() {
 		return fmt.Errorf("sandbox: invalid host_state %q (want \"\", auto, or none)", s.HostState)
 	}
+	for _, sf := range s.SecretFiles {
+		if sf.MountPath == "" || !strings.HasPrefix(sf.MountPath, "/") {
+			return fmt.Errorf("sandbox.secretFiles[%s]: mount_path %q must be absolute", sf.Name, sf.MountPath)
+		}
+		if strings.ContainsAny(sf.MountPath, "\n\r\x00") {
+			return fmt.Errorf("sandbox.secretFiles[%s]: mount_path contains a control character", sf.Name)
+		}
+		if path.Clean(sf.MountPath) != sf.MountPath || sf.MountPath == "/" {
+			return fmt.Errorf("sandbox.secretFiles[%s]: mount_path %q must be a clean absolute file path", sf.Name, sf.MountPath)
+		}
+		if sf.Env != "" && !validEnvName(sf.Env) {
+			return fmt.Errorf("sandbox.secretFiles[%s]: env %q is not a valid environment variable name", sf.Name, sf.Env)
+		}
+	}
 	return nil
+}
+
+func validEnvName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r == '_':
+			continue
+		case i > 0 && r >= '0' && r <= '9':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }

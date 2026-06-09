@@ -14,6 +14,11 @@ const secretsRoundtripSrc = `secrets:
     value: "${DEPLOY_KEY}"
     hosts: ["api.github.com", "github.com"]
     description: "deploy key"
+  kubeconfig:
+    as: file
+    value: "${KUBECONFIG}"
+    mount_path: "/run/iterion/secrets/kubeconfig"
+    env: "KUBECONFIG"
 
 agent x:
   model: "anthropic/c"
@@ -49,6 +54,10 @@ func TestSecretsRoundtrip(t *testing.T) {
 		"deploy_key:",
 		`value: "${DEPLOY_KEY}"`,
 		`hosts: ["api.github.com", "github.com"]`,
+		"kubeconfig:",
+		"as: file",
+		`mount_path: "/run/iterion/secrets/kubeconfig"`,
+		`env: "KUBECONFIG"`,
 	} {
 		if !strings.Contains(out1, want) {
 			t.Errorf("unparsed output missing %q:\n%s", want, out1)
@@ -72,11 +81,15 @@ func TestSecretsASTJSONRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshalFile: %v", err)
 	}
-	if back.Secrets == nil || len(back.Secrets.Fields) != 2 {
+	if back.Secrets == nil || len(back.Secrets.Fields) != 3 {
 		t.Fatalf("secrets lost through AST JSON round-trip: %+v", back.Secrets)
 	}
 	dk := back.Secrets.Fields[1]
 	if dk.Name != "deploy_key" || len(dk.Hosts) != 2 || dk.Value != "${DEPLOY_KEY}" {
 		t.Errorf("deploy_key not preserved: %+v", dk)
+	}
+	kc := back.Secrets.Fields[2]
+	if kc.Name != "kubeconfig" || kc.As != "file" || kc.MountPath != "/run/iterion/secrets/kubeconfig" || kc.Env != "KUBECONFIG" {
+		t.Errorf("kubeconfig file metadata not preserved: %+v", kc)
 	}
 }

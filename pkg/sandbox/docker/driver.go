@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/internal/proc"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/sandbox"
+	"github.com/SocialGouv/iterion/pkg/secrets"
 )
 
 // LegacyDefaultWorkspace is the historical devcontainer convention
@@ -226,6 +228,13 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 	}
 
 	containerName := containerNameFor(info.RunID)
+	tempDirs := []string{}
+	cleanupOnFailure := true
+	defer func() {
+		if cleanupOnFailure {
+			cleanupTempDirs(tempDirs)
+		}
+	}()
 	args := []string{"run", "--detach", "--rm",
 		"--name", containerName,
 		"--label", "iterion.io/managed=true",
@@ -253,6 +262,13 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 			return nil, fmt.Errorf("docker driver: %w", err)
 		}
 		args = append(args, "--mount", m)
+	}
+	if len(p.spec.SecretFiles) > 0 {
+		var err error
+		args, err = appendSecretFileMountArgs(args, p.spec.SecretFiles, &tempDirs)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Persistent Nix store (ADR-017 #1): a named docker volume at /nix,
 	// seeded from the image on first mount and reused across runs so
@@ -326,6 +342,7 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 		if err != nil {
 			return nil, fmt.Errorf("docker driver: egress CA dir: %w", err)
 		}
+		tempDirs = append(tempDirs, caDir)
 		caHostPath := filepath.Join(caDir, "egress-ca.pem")
 		if err := os.WriteFile(caHostPath, info.ProxyCACert, 0o644); err != nil {
 			return nil, fmt.Errorf("docker driver: write egress CA: %w", err)
@@ -379,6 +396,7 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 		prepared:             p,
 		info:                 info,
 		inContainerWorkspace: inContainerWorkspace,
+		tempDirs:             tempDirs,
 	}
 
 	if p.spec.PostCreate != "" {
@@ -395,6 +413,7 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 	}
 
 	d.logger.Info("sandbox: container %s started (image=%s, workspace=%s)", containerShortID(containerID), p.spec.Image, inContainerWorkspace)
+	cleanupOnFailure = false
 	return r, nil
 }
 
@@ -430,6 +449,10 @@ type Run struct {
 	// default). Used as the default --workdir for `docker exec`
 	// when the caller doesn't override per-call.
 	inContainerWorkspace string
+
+	// tempDirs holds per-run host temp dirs used for mounted secret files
+	// and other ephemeral driver files. They are removed in Cleanup.
+	tempDirs []string
 
 	mu      sync.Mutex
 	stopped bool
@@ -541,6 +564,7 @@ func (r *Run) Cleanup(ctx context.Context) error {
 	}
 	r.cleaned = true
 	r.mu.Unlock()
+	defer cleanupTempDirs(r.tempDirs)
 
 	// Best-effort stop first to give --rm a chance to fire normally.
 	_ = r.stop(ctx)
@@ -569,6 +593,116 @@ func (r *Run) Cleanup(ctx context.Context) error {
 		r.driver.logger.Debug("sandbox: cleanup of %s reported: %v (output: %s)", containerShortID(r.containerID), err, string(out))
 	}
 	return nil
+}
+
+func writeSecretFileTemp(sf sandbox.SecretFileMount) (hostPath, dir string, err error) {
+	if len(sf.Value) == 0 {
+		return "", "", fmt.Errorf("docker driver: file secret %s has empty payload", sf.Name)
+	}
+	if err := validateSecretFileMount(sf.MountPath); err != nil {
+		return "", "", fmt.Errorf("docker driver: file secret %s: %w", sf.Name, err)
+	}
+	dir, err = os.MkdirTemp("", "iterion-secret-file-")
+	if err != nil {
+		return "", "", fmt.Errorf("docker driver: file secret temp dir: %w", err)
+	}
+	hostPath = filepath.Join(dir, "payload")
+	if err := os.WriteFile(hostPath, sf.Value, 0o400); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", "", fmt.Errorf("docker driver: write file secret %s: %w", sf.Name, err)
+	}
+	return hostPath, dir, nil
+}
+
+func appendSecretFileMountArgs(args []string, files []sandbox.SecretFileMount, tempDirs *[]string) ([]string, error) {
+	defaultDirFiles := make([]sandbox.SecretFileMount, 0, len(files))
+	directFiles := make([]sandbox.SecretFileMount, 0, len(files))
+	for _, sf := range files {
+		if len(sf.Value) == 0 {
+			return nil, fmt.Errorf("docker driver: file secret %s has empty payload", sf.Name)
+		}
+		if err := validateSecretFileMount(sf.MountPath); err != nil {
+			return nil, fmt.Errorf("docker driver: file secret %s: %w", sf.Name, err)
+		}
+		if _, ok := secrets.RelativeToSecretFilesMountDir(sf.MountPath); ok {
+			defaultDirFiles = append(defaultDirFiles, sf)
+		} else {
+			directFiles = append(directFiles, sf)
+		}
+	}
+
+	if len(defaultDirFiles) > 0 {
+		hostDir, err := writeSecretFilesDirTemp(defaultDirFiles)
+		if err != nil {
+			return nil, err
+		}
+		*tempDirs = append(*tempDirs, hostDir)
+		args = append(args, "--mount", "type=bind,source="+hostDir+",target="+secrets.SecretFilesMountDir+",readonly")
+	}
+
+	for _, sf := range directFiles {
+		hostPath, dir, err := writeSecretFileTemp(sf)
+		if err != nil {
+			return nil, err
+		}
+		*tempDirs = append(*tempDirs, dir)
+		args = append(args, "--mount", "type=bind,source="+hostPath+",target="+sf.MountPath+",readonly")
+	}
+	return args, nil
+}
+
+func writeSecretFilesDirTemp(files []sandbox.SecretFileMount) (dir string, err error) {
+	dir, err = os.MkdirTemp("", "iterion-secret-files-")
+	if err != nil {
+		return "", fmt.Errorf("docker driver: file secrets temp dir: %w", err)
+	}
+	seen := map[string]string{}
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(dir)
+		}
+	}()
+	for _, sf := range files {
+		rel, ok := secrets.RelativeToSecretFilesMountDir(sf.MountPath)
+		if !ok {
+			return "", fmt.Errorf("docker driver: file secret %s mount_path %q is not under %s", sf.Name, sf.MountPath, secrets.SecretFilesMountDir)
+		}
+		if prev := seen[rel]; prev != "" {
+			return "", fmt.Errorf("docker driver: file secrets %s and %s both target %s/%s", prev, sf.Name, secrets.SecretFilesMountDir, rel)
+		}
+		seen[rel] = sf.Name
+		hostPath := filepath.Join(dir, filepath.FromSlash(rel))
+		cleanHostPath := filepath.Clean(hostPath)
+		if cleanHostPath == dir || !strings.HasPrefix(cleanHostPath, dir+string(filepath.Separator)) {
+			return "", fmt.Errorf("docker driver: file secret %s mount_path escapes temp dir", sf.Name)
+		}
+		if err := os.MkdirAll(filepath.Dir(cleanHostPath), 0o700); err != nil {
+			return "", fmt.Errorf("docker driver: create file secret dir %s: %w", sf.Name, err)
+		}
+		if err := os.WriteFile(cleanHostPath, sf.Value, 0o400); err != nil {
+			return "", fmt.Errorf("docker driver: write file secret %s: %w", sf.Name, err)
+		}
+	}
+	return dir, nil
+}
+
+func validateSecretFileMount(mountPath string) error {
+	if mountPath == "" || !strings.HasPrefix(mountPath, "/") {
+		return fmt.Errorf("mount_path %q must be absolute", mountPath)
+	}
+	if strings.ContainsAny(mountPath, "\n\r\x00,") {
+		return fmt.Errorf("mount_path contains a control character or comma")
+	}
+	if path.Clean(mountPath) != mountPath || mountPath == "/" {
+		return fmt.Errorf("mount_path %q must be a clean absolute file path", mountPath)
+	}
+	return nil
+}
+
+func cleanupTempDirs(dirs []string) {
+	for _, dir := range dirs {
+		_ = os.RemoveAll(dir)
+	}
 }
 
 // runPostCreate runs the spec's post-create command inside the

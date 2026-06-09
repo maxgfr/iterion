@@ -116,6 +116,11 @@ type Config struct {
 	// publisher resolves keys at launch time.
 	ApiKeys secrets.ApiKeyStore
 
+	// GenericSecrets stores workflow/user secrets addressable by name
+	// from the DSL `secrets:` block. Plaintexts are sealed at rest and
+	// are only resolved into per-run sealed bundles by the cloud publisher.
+	GenericSecrets secrets.GenericSecretStore
+
 	// RunSecrets is the per-run sealed bundle store. Required when
 	// ApiKeys is set.
 	RunSecrets secrets.RunSecretsStore
@@ -274,16 +279,17 @@ type Server struct {
 	// Cleared on project switch. Non-nil after New.
 	statsCache *runStatsCache
 
-	authSvc      *auth.Service
-	authLimiter  *authRateLimiter
-	signer       *auth.JWTSigner
-	oidcRegistry *oidc.Registry
-	oidcStates   oidc.StateStore
-	apiKeys      secrets.ApiKeyStore
-	runSecrets   secrets.RunSecretsStore
-	sealer       secrets.Sealer
-	oauthStore   secrets.OAuthStore
-	httpClient   *http.Client
+	authSvc        *auth.Service
+	authLimiter    *authRateLimiter
+	signer         *auth.JWTSigner
+	oidcRegistry   *oidc.Registry
+	oidcStates     oidc.StateStore
+	apiKeys        secrets.ApiKeyStore
+	genericSecrets secrets.GenericSecretStore
+	runSecrets     secrets.RunSecretsStore
+	sealer         secrets.Sealer
+	oauthStore     secrets.OAuthStore
+	httpClient     *http.Client
 
 	// detector is the cached LLM credential detector backing
 	// /api/backends/detect. Lazily constructed on first request.
@@ -367,6 +373,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		oidcRegistry:    cfg.OIDCRegistry,
 		oidcStates:      cfg.OIDCStates,
 		apiKeys:         cfg.ApiKeys,
+		genericSecrets:  cfg.GenericSecrets,
 		runSecrets:      cfg.RunSecrets,
 		sealer:          cfg.Sealer,
 		oauthStore:      cfg.OAuthForfait,
@@ -672,6 +679,9 @@ func (s *Server) routes() {
 	// place — caller must wire AuthService + ApiKeys + Sealer.
 	if s.apiKeys != nil && s.sealer != nil && s.authSvc != nil {
 		s.registerBYOKRoutes()
+	}
+	if s.genericSecrets != nil && s.sealer != nil && s.authSvc != nil {
+		s.registerGenericSecretRoutes()
 	}
 
 	// OAuth-forfait endpoints. Same gating as BYOK plus the per-

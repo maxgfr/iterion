@@ -429,8 +429,9 @@ func writeSecretsBlock(b *strings.Builder, sb *ast.SecretsBlock, indent string) 
 	fmt.Fprintf(b, "%ssecrets:\n", indent)
 	for _, s := range sb.Fields {
 		// Short form when only a value is set; block form when egress
-		// hosts or a description accompany it.
-		hasProps := len(s.Hosts) > 0 || s.Description != ""
+		// hosts, file materialisation, env wiring, or a description
+		// accompany it.
+		hasProps := s.As != "" || s.MountPath != "" || s.Env != "" || len(s.Hosts) > 0 || s.Description != ""
 		b.WriteString(indent)
 		b.WriteString("  ")
 		b.WriteString(s.Name)
@@ -439,7 +440,18 @@ func writeSecretsBlock(b *strings.Builder, sb *ast.SecretsBlock, indent string) 
 			continue
 		}
 		b.WriteString(":\n")
-		fmt.Fprintf(b, "%s    value: %q\n", indent, s.Value)
+		if s.Value != "" {
+			fmt.Fprintf(b, "%s    value: %q\n", indent, s.Value)
+		}
+		if s.As != "" {
+			fmt.Fprintf(b, "%s    as: %s\n", indent, s.As)
+		}
+		if s.MountPath != "" {
+			fmt.Fprintf(b, "%s    mount_path: %q\n", indent, s.MountPath)
+		}
+		if s.Env != "" {
+			fmt.Fprintf(b, "%s    env: %q\n", indent, s.Env)
+		}
 		if len(s.Hosts) > 0 {
 			fmt.Fprintf(b, "%s    hosts: [%s]\n", indent, quoteList(s.Hosts))
 		}

@@ -180,6 +180,10 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	if err := apiKeysStore.EnsureSchema(rootCtx); err != nil {
 		return fmt.Errorf("server: ensure api_keys schema: %w", err)
 	}
+	genericSecretsStore := secrets.NewMongoGenericSecretStore(st.DB())
+	if err := genericSecretsStore.EnsureSchema(rootCtx); err != nil {
+		return fmt.Errorf("server: ensure generic_secrets schema: %w", err)
+	}
 	runSecretsStore := secrets.NewMongoRunSecretsStore(st.DB())
 	if err := runSecretsStore.EnsureSchema(rootCtx); err != nil {
 		return fmt.Errorf("server: ensure run_secrets schema: %w", err)
@@ -190,15 +194,16 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	}
 
 	pub, err := cloudpublisher.New(cloudpublisher.Config{
-		NATS:         natsConn,
-		Store:        st,
-		MongoColl:    st.RunsCollection(),
-		Logger:       logger,
-		Metrics:      mreg,
-		ApiKeys:      apiKeysStore,
-		RunSecrets:   runSecretsStore,
-		Sealer:       sealer,
-		OAuthForfait: oauthStore,
+		NATS:           natsConn,
+		Store:          st,
+		MongoColl:      st.RunsCollection(),
+		Logger:         logger,
+		Metrics:        mreg,
+		ApiKeys:        apiKeysStore,
+		GenericSecrets: genericSecretsStore,
+		RunSecrets:     runSecretsStore,
+		Sealer:         sealer,
+		OAuthForfait:   oauthStore,
 	})
 	if err != nil {
 		return fmt.Errorf("server: build cloud publisher: %w", err)
@@ -295,6 +300,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		AuthSigner:             signer,
 		OIDCRegistry:           registry,
 		ApiKeys:                apiKeysStore,
+		GenericSecrets:         genericSecretsStore,
 		RunSecrets:             runSecretsStore,
 		Sealer:                 sealer,
 		OAuthForfait:           oauthStore,

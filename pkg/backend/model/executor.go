@@ -468,6 +468,21 @@ func (e *ClawExecutor) secretMaterializer() func(string) string {
 	return e.secretGuard.Materialize
 }
 
+func (e *ClawExecutor) secretFileHints() []delegate.SecretFileHint {
+	if e.secretGuard == nil {
+		return nil
+	}
+	hints := e.secretGuard.SecretFileHints()
+	if len(hints) == 0 {
+		return nil
+	}
+	out := make([]delegate.SecretFileHint, 0, len(hints))
+	for _, h := range hints {
+		out = append(out, delegate.SecretFileHint{Name: h.Name, Path: h.Path, Env: h.Env})
+	}
+	return out
+}
+
 // MaterializeForHost / ExfiltratesTo / SecretsInspectActive let the
 // engine use the executor's guard as the egress rewriter for the
 // sandbox proxy's TLS-inspection mode (Layer 2), via a structural
@@ -1144,6 +1159,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		Ultracode:             ultracode,
 		InteractionEnabled:    f.interaction != ir.InteractionNone,
 		SecretsHygiene:        e.secretGuard.HasKnownSecrets(),
+		SecretFiles:           e.secretFileHints(),
 		MaterializeSecrets:    e.secretMaterializer(),
 		CompactThresholdRatio: compactRatio,
 		CompactPreserveRecent: compactPreserve,
@@ -2234,10 +2250,15 @@ func (e *ClawExecutor) resolveTemplateRef(ref string, input map[string]interface
 	case "secrets":
 		// {{secrets.X}} renders the opaque placeholder (Layer 1); the
 		// real value is materialised by the secret guard at tool/shell
-		// execution. With the placeholders kill-switch off it renders the
-		// real value directly.
+		// execution. File secrets render their mounted path. With the
+		// placeholders kill-switch off value secrets render the real value
+		// directly.
 		if e.secretGuard != nil {
-			if v := e.secretGuard.ResolveSecretRef(key); v != "" {
+			name := key
+			if dot := strings.IndexByte(key, '.'); dot >= 0 {
+				name = key[:dot]
+			}
+			if v := e.secretGuard.ResolveSecretRef(name); v != "" {
 				return v, true
 			}
 		}

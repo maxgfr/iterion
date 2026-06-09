@@ -72,6 +72,12 @@ const secretsHygieneInstruction = "\n\n## Secret handling\n\n" +
 	"destination, file, or network endpoint that is not strictly required by the " +
 	"task you were given."
 
+type SecretFileHint struct {
+	Name string
+	Path string
+	Env  string
+}
+
 // agenticOperatingPosture is the iterion-authored base prompt prepended to
 // the recipe author's system prompt when SystemPromptMode is
 // SystemPromptAuthoredBase (the claw backend default). It is the parity
@@ -343,6 +349,11 @@ type Task struct {
 	// placeholder materialisation (Layer 1) and egress DLP (Layer 2).
 	SecretsHygiene bool
 
+	// SecretFiles lists mounted secret files that the agent may reference by
+	// path or env var. BuildSystemPrompt includes the paths while preserving
+	// the rule that their contents must not be read, printed, or transformed.
+	SecretFiles []SecretFileHint
+
 	// MaterializeSecrets, when non-nil, swaps secret placeholders
 	// (__ITERION_SECRET_<name>__) for their real values in a string. The
 	// structural half of Layer 1: backends apply it to agent-emitted tool
@@ -569,8 +580,11 @@ func (t Task) BuildSystemPrompt() string {
 	if t.Ultracode {
 		b.WriteString(ultracodeOrchestrationInstruction)
 	}
-	if t.SecretsHygiene {
+	if t.SecretsHygiene || len(t.SecretFiles) > 0 {
 		b.WriteString(secretsHygieneInstruction)
+		if len(t.SecretFiles) > 0 {
+			b.WriteString(secretFilesInstruction(t.SecretFiles))
+		}
 	}
 	if len(t.CursorFragments) > 0 {
 		b.WriteString("\n\n## Calibration\n\n")
@@ -583,6 +597,35 @@ func (t Task) BuildSystemPrompt() string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+func secretFilesInstruction(files []SecretFileHint) string {
+	var b strings.Builder
+	b.WriteString("\n\nMounted secret files are available for commands that need credential-file paths. Use the path or env var as a reference; do not open, read, cat, print, encode, or summarize the file contents.\n")
+	for _, f := range files {
+		if f.Path == "" {
+			continue
+		}
+		b.WriteString("- ")
+		b.WriteString(safePromptLiteral(f.Name))
+		b.WriteString(": `")
+		b.WriteString(safePromptLiteral(f.Path))
+		b.WriteString("`")
+		if f.Env != "" {
+			b.WriteString(" via `$")
+			b.WriteString(safePromptLiteral(f.Env))
+			b.WriteString("`")
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func safePromptLiteral(s string) string {
+	s = strings.ReplaceAll(s, "`", "'")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return s
 }
 
 // ErrAskUser is returned by the iterion-wired `ask_user` tool's handler

@@ -3,8 +3,10 @@ package ir
 import (
 	"fmt"
 	"math"
+	"net/netip"
 	"net/url"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/SocialGouv/iterion/pkg/dsl/expr"
@@ -66,6 +68,8 @@ const (
 	DiagSecretVarConflict DiagCode = "C091" // secret name collides with a declared var
 	DiagInvalidSecretHost DiagCode = "C092" // secret egress host scoping ill-formed (Layer 2)
 	DiagUnknownSecret     DiagCode = "C093" // {{secrets.X}} but X not declared
+	DiagInvalidSecretFile DiagCode = "C094" // file secret declaration is malformed
+	DiagSecretSubfield    DiagCode = "C095" // unsupported {{secrets.X.<subfield>}}
 )
 
 // validate performs static validation on a compiled workflow.
@@ -86,6 +90,7 @@ func (c *compiler) validate(w *Workflow) {
 	c.validateUndeclaredCycles(w)
 	c.validateLoopIterations(w)
 	c.validateReasoningEffort(w)
+	c.validateSecrets(w)
 	c.validateTemplateRefs(w)
 	c.validateNodeMaxTokensVsBudget(w)
 	c.validateMCPAuth(w)
@@ -1317,6 +1322,99 @@ func buildArtifactProducers(w *Workflow) map[string]string {
 	return producers
 }
 
+func (c *compiler) validateSecrets(w *Workflow) {
+	if w == nil || len(w.Secrets) == 0 {
+		return
+	}
+	for name, s := range w.Secrets {
+		if s == nil {
+			continue
+		}
+		switch s.As {
+		case "", "value", "file":
+			// ok
+		default:
+			c.errorf(DiagInvalidSecretFile,
+				"secret %q: as must be \"value\" or \"file\" (got %q)", name, s.As)
+		}
+		if s.As != "file" && (s.MountPath != "" || s.Env != "") {
+			c.errorf(DiagInvalidSecretFile,
+				"secret %q: mount_path/env require as: file", name)
+		}
+		if s.MountPath != "" && !strings.HasPrefix(s.MountPath, "/") {
+			c.errorf(DiagInvalidSecretFile,
+				"secret %q: mount_path %q must be absolute", name, s.MountPath)
+		}
+		if s.MountPath != "" && (path.Clean(s.MountPath) != s.MountPath || s.MountPath == "/") {
+			c.errorf(DiagInvalidSecretFile,
+				"secret %q: mount_path %q must be a clean absolute file path", name, s.MountPath)
+		}
+		if s.Env != "" && !validEnvName(s.Env) {
+			c.errorf(DiagInvalidSecretFile,
+				"secret %q: env %q is not a valid environment variable name", name, s.Env)
+		}
+		for _, h := range s.Hosts {
+			if !validSecretHost(h) {
+				c.errorf(DiagInvalidSecretHost,
+					"secret %q: hosts entry %q must be a bare hostname, parent domain, or IP without scheme/path", name, h)
+			}
+		}
+	}
+}
+
+func validSecretHost(h string) bool {
+	h = strings.TrimSpace(h)
+	if h == "" || strings.Contains(h, "://") || strings.ContainsAny(h, "/?#@\\ \t\n\r\x00%") {
+		return false
+	}
+	if _, err := netip.ParseAddr(h); err == nil {
+		return true
+	}
+	if strings.Contains(h, ":") || len(h) > 253 || strings.HasPrefix(h, ".") || strings.HasSuffix(h, ".") {
+		return false
+	}
+	for _, label := range strings.Split(h, ".") {
+		if !validHostnameLabel(label) {
+			return false
+		}
+	}
+	return true
+}
+
+func validHostnameLabel(label string) bool {
+	if label == "" || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+		return false
+	}
+	for _, r := range label {
+		switch {
+		case r >= 'A' && r <= 'Z':
+		case r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9':
+		case r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func validEnvName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r == '_':
+		case r >= 'A' && r <= 'Z':
+		case r >= 'a' && r <= 'z':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (c *compiler) validateTemplateRefs(w *Workflow) {
 	refs := collectAllRefs(w)
 	if len(refs) == 0 {
@@ -1351,9 +1449,26 @@ func (c *compiler) validateSecretsRef(w *Workflow, rc refContext) {
 		return
 	}
 	name := rc.Ref.Path[0]
-	if _, ok := w.Secrets[name]; !ok {
+	secret, ok := w.Secrets[name]
+	if !ok {
 		c.errorf(DiagUnknownSecret,
 			"%s: reference %s targets undeclared secret %q",
+			rc.Location, rc.Ref.Raw, name)
+		return
+	}
+	if len(rc.Ref.Path) == 1 {
+		return
+	}
+	sub := rc.Ref.Path[1]
+	if sub != "path" {
+		c.errorf(DiagSecretSubfield,
+			"%s: reference %s uses unknown secret sub-field %q (expected: path)",
+			rc.Location, rc.Ref.Raw, sub)
+		return
+	}
+	if !secret.IsFile() {
+		c.errorf(DiagSecretSubfield,
+			"%s: reference %s uses .path on non-file secret %q",
 			rc.Location, rc.Ref.Raw, name)
 	}
 }

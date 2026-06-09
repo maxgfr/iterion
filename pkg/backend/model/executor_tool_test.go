@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SocialGouv/iterion/pkg/backend/secretguard"
 	"github.com/SocialGouv/iterion/pkg/backend/tool"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 )
@@ -225,9 +226,23 @@ func TestResolveScriptTemplate_ObjectAndArray(t *testing.T) {
 }
 
 func TestResolveTemplateWith_NoRefsPassthrough(t *testing.T) {
-	got := resolveTemplateWith("plain text {no template}", nil, nil, nil, shellEscapeValue, false)
+	got := resolveTemplateWith("plain text {no template}", nil, nil, nil, nil, shellEscapeValue, false)
 	if got != "plain text {no template}" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestResolveCommandTemplate_FileSecretPath(t *testing.T) {
+	guard := secretguard.New([]secretguard.Secret{{
+		Name:     "kubeconfig",
+		Value:    "apiVersion: v1",
+		FilePath: "/run/iterion/secrets/kubeconfig",
+	}}, secretguard.DefaultConfig())
+	got := resolveCommandTemplate("kubectl --kubeconfig {{secrets.kubeconfig.path}} get pods", []*ir.Ref{
+		ref(ir.RefSecrets, "kubeconfig", "{{secrets.kubeconfig.path}}", false),
+	}, nil, nil, guard)
+	if got != "kubectl --kubeconfig '/run/iterion/secrets/kubeconfig' get pods" {
+		t.Fatalf("got %q", got)
 	}
 }
 

@@ -37,14 +37,24 @@ import (
 
 // Secret is one protected value. Value is the plaintext; Placeholder
 // is the reversible token the agent sees in its place (defaulted from
-// Name when empty). Hosts, when set, are the only egress destinations
-// the secret may be materialised toward (Layer 2 scoping); empty means
-// "no host restriction".
+// Name when empty). FilePath, when set, means {{secrets.NAME}} renders
+// that mounted file path instead of the placeholder; the Value is still
+// registered for redaction and egress DLP. Hosts, when set, are the only
+// egress destinations the secret may be materialised toward (Layer 2
+// scoping); empty means "no host restriction".
 type Secret struct {
 	Name        string
 	Value       string
 	Placeholder string
+	FilePath    string
+	Env         string
 	Hosts       []string
+}
+
+type FileSecretHint struct {
+	Name string
+	Path string
+	Env  string
 }
 
 // Config tunes Redact. The zero value is not useful — use
@@ -102,9 +112,11 @@ func PlaceholderForName(name string) string { return defaultPlaceholder(name) }
 // Guard is an immutable, concurrency-safe scrubber built once per run.
 type Guard struct {
 	secrets            []Secret
-	literalPlaceholder map[string]string   // every encoding → its placeholder
-	matcher            *regexp.Regexp      // alternation of known encodings
-	placeholderValue   map[string]string   // placeholder → raw value (Materialize)
+	literalPlaceholder map[string]string // every encoding → its placeholder
+	matcher            *regexp.Regexp    // alternation of known encodings
+	placeholderValue   map[string]string // placeholder → raw value (Materialize)
+	filePathByName     map[string]string // secret name → mounted file path
+	fileHints          []FileSecretHint
 	encodingsByName    map[string][]string // secret name → its value encodings (egress DLP)
 	det                *detector.Detector
 	cfg                Config
@@ -141,6 +153,7 @@ func New(secrets []Secret, cfg Config) *Guard {
 	g := &Guard{
 		literalPlaceholder: make(map[string]string),
 		placeholderValue:   make(map[string]string),
+		filePathByName:     make(map[string]string),
 		encodingsByName:    make(map[string][]string),
 		cfg:                cfg,
 	}
@@ -149,14 +162,18 @@ func New(secrets []Secret, cfg Config) *Guard {
 	}
 
 	for _, s := range secrets {
-		if len([]rune(s.Value)) < cfg.MinLen {
-			continue
-		}
 		ph := s.Placeholder
 		if ph == "" {
 			ph = defaultPlaceholder(s.Name)
 		}
 		s.Placeholder = ph
+		if s.FilePath != "" {
+			g.filePathByName[s.Name] = s.FilePath
+			g.fileHints = append(g.fileHints, FileSecretHint{Name: s.Name, Path: s.FilePath, Env: s.Env})
+		}
+		if len([]rune(s.Value)) < cfg.MinLen {
+			continue
+		}
 		g.secrets = append(g.secrets, s)
 		g.placeholderValue[ph] = s.Value
 		encs := encodingsOf(s.Value)
@@ -387,11 +404,32 @@ func (g *Guard) ResolveSecretRef(name string) string {
 	if g == nil {
 		return ""
 	}
+	if path := g.SecretFilePath(name); path != "" {
+		return path
+	}
 	ph := defaultPlaceholder(name)
 	if g.cfg.Placeholders {
 		return ph
 	}
 	return g.placeholderValue[ph]
+}
+
+// SecretFilePath returns the mounted path for a file secret, or "" for
+// value secrets / unknown names.
+func (g *Guard) SecretFilePath(name string) string {
+	if g == nil || name == "" {
+		return ""
+	}
+	return g.filePathByName[name]
+}
+
+func (g *Guard) SecretFileHints() []FileSecretHint {
+	if g == nil || len(g.fileHints) == 0 {
+		return nil
+	}
+	out := make([]FileSecretHint, len(g.fileHints))
+	copy(out, g.fileHints)
+	return out
 }
 
 // ContainsPlaceholder reports whether s carries any placeholder (i.e.

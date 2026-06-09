@@ -77,6 +77,62 @@ clause (both backends) tells the agent not to read/exfiltrate credential
 files and to pass placeholders through verbatim. Never the primary
 control — the structural boundary is the materialization above.
 
+### File secrets
+
+Some credentials are safer and more ergonomic as files (`kubeconfig`,
+cloud SDK config, deploy certs). Declare them with `as: file`:
+
+```iter
+secrets:
+  kubeconfig:
+    as: file
+    # Optional in cloud: when omitted, iterion resolves a stored secret
+    # named "kubeconfig" from /api/me/secrets or /api/teams/:id/secrets.
+    value: "${KUBECONFIG_CONTENT}"
+    mount_path: "/run/iterion/secrets/kubeconfig"
+    env: "KUBECONFIG"
+    hosts: ["api.cluster.example"]
+```
+
+For file secrets, `{{secrets.kubeconfig}}` and
+`{{secrets.kubeconfig.path}}` render the mounted path, not the secret
+content. The runtime writes the plaintext into a read-only file inside
+the sandbox and injects `env` to point at that path when configured. The
+agent prompt lists the mounted paths and explicitly instructs the agent
+to pass the path/env var to commands, without opening, printing, encoding
+or summarizing the file contents.
+
+Default path when `mount_path` is omitted:
+`/run/iterion/secrets/<sanitized-secret-name>`.
+
+Custom `mount_path` values must be clean absolute file paths (no `..`,
+duplicate separators, trailing slash, or `/`). Prefer the default
+directory: the drivers create/mount it for the run. Custom file targets
+depend on the parent directory already existing in the sandbox image.
+
+Driver behaviour:
+
+- Docker/Podman: writes payloads to private host temp files, mounts the
+  default secret directory read-only (or custom file targets read-only),
+  and deletes the temp directories at sandbox cleanup.
+- Kubernetes: creates a per-run opaque Secret, mounts the default secret
+  directory read-only (or custom file targets via `subPath`), and deletes
+  the Secret with the sandbox pod.
+
+Cloud setup API:
+
+- `GET/POST /api/me/secrets`
+- `PATCH/DELETE /api/me/secrets/{secret_id}`
+- `GET/POST /api/teams/{id}/secrets`
+- `PATCH/DELETE /api/teams/{id}/secrets/{secret_id}`
+
+Responses never include plaintext, only metadata (`name`, `last4`,
+`fingerprint`, timestamps, scope). At publish time the cloud publisher
+resolves declared secrets whose `value` is empty by name, seals them into
+the per-run bundle, and the runner injects them into the sandbox runtime.
+Secret names must be DSL identifiers (`[A-Za-z_][A-Za-z0-9_]*`) so they
+can be referenced from `secrets:`.
+
 ## Layer 2 — TLS-inspection egress (default on for sandboxed runs)
 
 For secrets the agent uses in its *own* TLS calls (e.g. claude_code's
@@ -170,4 +226,6 @@ Remaining follow-ups:
 
 `C090` duplicate secret · `C091` secret/var name collision · `C092`
 malformed egress host (Layer 2) · `C093` `{{secrets.X}}` references an
-undeclared secret.
+undeclared secret · `C094` invalid file-secret declaration · `C095`
+invalid secret subfield reference (for example `.path` on a value
+secret).

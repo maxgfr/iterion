@@ -16,6 +16,11 @@ import (
 // the bundle's TTL bounds exposure on the wire and at rest).
 type Credentials struct {
 	APIKeys map[Provider]string
+	// Generic maps workflow/user secret names to plaintext values. It is
+	// populated by the cloud runner from sealed per-run bundles and used
+	// by declared workflow secrets whose value is intentionally empty
+	// (meaning "resolve by name from the user's/team's stored secrets").
+	Generic map[string]string
 	// OAuthCredentialFiles maps "claude_code" / "codex" → the
 	// absolute path of a temp directory holding the materialised
 	// credentials.json or auth.json. The delegate backends pass
@@ -31,6 +36,13 @@ func (c Credentials) APIKey(p Provider) string {
 		return ""
 	}
 	return c.APIKeys[p]
+}
+
+func (c Credentials) GenericSecret(name string) string {
+	if c.Generic == nil {
+		return ""
+	}
+	return c.Generic[name]
 }
 
 // OAuthDir returns the temp dir holding sealed credentials for kind

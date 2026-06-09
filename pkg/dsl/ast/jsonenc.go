@@ -146,6 +146,9 @@ type jsonSecretsBlock struct {
 type jsonSecretField struct {
 	Name        string   `json:"name,omitempty"`
 	Value       string   `json:"value,omitempty"`
+	As          string   `json:"as,omitempty"`
+	MountPath   string   `json:"mount_path,omitempty"`
+	Env         string   `json:"env,omitempty"`
 	Hosts       []string `json:"hosts,omitempty"`
 	Description string   `json:"description,omitempty"`
 }
@@ -850,6 +853,9 @@ func secretsBlockToJSON(s *SecretsBlock) *jsonSecretsBlock {
 		js.Fields = append(js.Fields, &jsonSecretField{
 			Name:        f.Name,
 			Value:       f.Value,
+			As:          f.As,
+			MountPath:   f.MountPath,
+			Env:         f.Env,
 			Hosts:       f.Hosts,
 			Description: f.Description,
 		})
@@ -1248,6 +1254,9 @@ func secretsBlockFromJSON(js *jsonSecretsBlock) *SecretsBlock {
 		s.Fields = append(s.Fields, &SecretField{
 			Name:        jf.Name,
 			Value:       jf.Value,
+			As:          jf.As,
+			MountPath:   jf.MountPath,
+			Env:         jf.Env,
 			Hosts:       jf.Hosts,
 			Description: jf.Description,
 		})

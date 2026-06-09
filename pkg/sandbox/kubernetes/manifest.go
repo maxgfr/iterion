@@ -4,10 +4,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
 	"github.com/SocialGouv/iterion/pkg/sandbox"
+	"github.com/SocialGouv/iterion/pkg/secrets"
 )
 
 // LabelManaged identifies pods iterion owns. Used by Cleanup to
@@ -42,6 +44,10 @@ type PodManifestInput struct {
 	// CA-bundle env vars at it so in-pod clients trust the proxy's
 	// minted leaves (Layer 2 secret egress substitution).
 	CASecretName string
+	// SecretFilesSecretName, when non-empty, is the name of a per-run
+	// Secret holding runtime-materialised workflow file secrets. The pod
+	// mounts each Secret key read-only at its requested in-sandbox path.
+	SecretFilesSecretName string
 }
 
 // caSecretKey is the Secret data key + projected filename for the egress
@@ -126,6 +132,7 @@ func BuildPodManifest(in PodManifestInput) ([]byte, error) {
 	// mode the proxy terminates all egress TLS, so the only certificate
 	// an in-pod client ever sees is our leaf — our-CA-only is correct.
 	caVolumes, caVolumeMounts := caInjection(in.CASecretName, &envSlice)
+	secretFileVolumes, secretFileVolumeMounts := secretFilesInjection(in.SecretFilesSecretName, in.Spec.SecretFiles)
 
 	// V2-7: parse spec.Mounts (devcontainer-style strings) into k8s
 	// Volumes + VolumeMounts. Bind mounts are rejected at the driver
@@ -145,6 +152,7 @@ func BuildPodManifest(in PodManifestInput) ([]byte, error) {
 	for _, vm := range extraVolumeMounts {
 		volumeMounts = append(volumeMounts, vm)
 	}
+	volumeMounts = append(volumeMounts, secretFileVolumeMounts...)
 	volumeMounts = append(volumeMounts, caVolumeMounts...)
 
 	volumes := []any{
@@ -156,6 +164,7 @@ func BuildPodManifest(in PodManifestInput) ([]byte, error) {
 	for _, v := range extraVolumes {
 		volumes = append(volumes, v)
 	}
+	volumes = append(volumes, secretFileVolumes...)
 	volumes = append(volumes, caVolumes...)
 
 	pod := map[string]any{
@@ -190,6 +199,68 @@ func BuildPodManifest(in PodManifestInput) ([]byte, error) {
 	}
 
 	return json.MarshalIndent(pod, "", "  ")
+}
+
+const secretFilesVolumeName = "iterion-secret-files"
+
+func secretFilesInjection(secretName string, files []sandbox.SecretFileMount) (volumes, volumeMounts []any) {
+	if secretName == "" || len(files) == 0 {
+		return nil, nil
+	}
+	defaultItems := make([]any, 0, len(files))
+	customItems := make([]any, 0, len(files))
+	customMounts := make([]any, 0, len(files))
+	for i, sf := range files {
+		key := secretFileKey(i, sf.Name)
+		if rel, ok := secrets.RelativeToSecretFilesMountDir(sf.MountPath); ok {
+			defaultItems = append(defaultItems, map[string]any{"key": key, "path": rel})
+			continue
+		}
+		customItems = append(customItems, map[string]any{"key": key, "path": key})
+		customMounts = append(customMounts, map[string]any{
+			"mountPath": sf.MountPath,
+			"subPath":   key,
+			"readOnly":  true,
+		})
+	}
+
+	if len(defaultItems) > 0 {
+		name := secretFilesVolumeName
+		if len(customItems) > 0 {
+			name = secretFilesVolumeName + "-dir"
+		}
+		volumes = append(volumes, secretFileVolume(name, secretName, defaultItems))
+		volumeMounts = append(volumeMounts, map[string]any{
+			"name":      name,
+			"mountPath": secrets.SecretFilesMountDir,
+			"readOnly":  true,
+		})
+	}
+	if len(customItems) > 0 {
+		name := secretFilesVolumeName
+		if len(defaultItems) > 0 {
+			name = secretFilesVolumeName + "-custom"
+		}
+		volumes = append(volumes, secretFileVolume(name, secretName, customItems))
+		for _, mount := range customMounts {
+			if m, ok := mount.(map[string]any); ok {
+				m["name"] = name
+			}
+			volumeMounts = append(volumeMounts, mount)
+		}
+	}
+	return volumes, volumeMounts
+}
+
+func secretFileVolume(volumeName, secretName string, items []any) map[string]any {
+	return map[string]any{
+		"name": volumeName,
+		"secret": map[string]any{
+			"secretName":  secretName,
+			"items":       items,
+			"defaultMode": 0o440,
+		},
+	}
 }
 
 // caInjection returns the Secret volume + mount for the egress
@@ -259,6 +330,55 @@ func BuildCASecret(namespace, name, runID, friendlyName string, caPEM []byte) ([
 		},
 	}
 	return json.MarshalIndent(secret, "", "  ")
+}
+
+// BuildSecretFilesSecret renders the per-run Secret that holds
+// runtime-materialised file secrets. Values are base64-encoded under
+// deterministic keys shared with BuildPodManifest; callers must never log
+// the returned manifest because it contains plaintext-equivalent data.
+func BuildSecretFilesSecret(namespace, name, runID, friendlyName string, files []sandbox.SecretFileMount) ([]byte, error) {
+	if namespace == "" || name == "" {
+		return nil, fmt.Errorf("kubernetes: file secret namespace and name are required")
+	}
+	labels := map[string]string{
+		LabelManaged:   "true",
+		LabelRunID:     runID,
+		LabelComponent: ComponentSandboxRun,
+	}
+	if friendlyName != "" {
+		labels[LabelRunName] = friendlyName
+	}
+	data := make(map[string]any, len(files))
+	for i, sf := range files {
+		if len(sf.Value) == 0 {
+			return nil, fmt.Errorf("kubernetes: file secret %s has empty payload", sf.Name)
+		}
+		data[secretFileKey(i, sf.Name)] = base64.StdEncoding.EncodeToString(sf.Value)
+	}
+	secret := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata": map[string]any{
+			"name":      name,
+			"namespace": namespace,
+			"labels":    labels,
+		},
+		"type": "Opaque",
+		"data": data,
+	}
+	return json.MarshalIndent(secret, "", "  ")
+}
+
+func secretFileKey(i int, name string) string {
+	clean := sanitizeVolumeName(name)
+	if clean == "" {
+		clean = path.Base(name)
+		clean = sanitizeVolumeName(clean)
+	}
+	if clean == "" {
+		clean = "secret"
+	}
+	return fmt.Sprintf("secret-%d-%s", i, clean)
 }
 
 // defaultContainerSecurityContext returns the per-container

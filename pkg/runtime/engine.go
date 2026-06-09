@@ -568,7 +568,7 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 	// re-derive it. runPersistWorkspace already wrote `run.RepoRoot`
 	// to the store; this is the in-memory mirror for the live run.
 	e.repoRoot = repoRoot
-	sandboxCleanup, sbErr := e.startSandbox(ctx, runID, repoRoot, wtCtx.gitDir)
+	sandboxCleanup, sbErr := e.startSandbox(ctx, runID, repoRoot, wtCtx.gitDir, inputs)
 	if sbErr != nil {
 		e.markFailedBestEffort(ctx, runID, "sandbox start", sbErr)
 		return fmt.Errorf("runtime: sandbox: %w", sbErr)
