@@ -57,6 +57,10 @@ type Config struct {
 	// GenericSecrets stores workflow/user secrets addressable by name
 	// from the DSL `secrets:` block.
 	GenericSecrets secrets.GenericSecretStore
+	// BotBindings, when non-nil, is consulted during generic-secret
+	// resolution so an org-bound secret resolves for the launching bot
+	// (user > binding > team priority).
+	BotBindings secrets.BotSecretBindingStore
 	// RunSecrets persists the sealed bundle keyed by SecretsRef.
 	RunSecrets secrets.RunSecretsStore
 	// Sealer is the AES-GCM master-key sealer (shared with the
@@ -79,6 +83,7 @@ type Publisher struct {
 	metrics        *metrics.Registry
 	apiKeys        secrets.ApiKeyStore
 	genericSecrets secrets.GenericSecretStore
+	botBindings    secrets.BotSecretBindingStore
 	runSecrets     secrets.RunSecretsStore
 	sealer         secrets.Sealer
 	oauthForfait   secrets.OAuthStore
@@ -112,6 +117,7 @@ func New(cfg Config) (*Publisher, error) {
 		metrics:        cfg.Metrics,
 		apiKeys:        cfg.ApiKeys,
 		genericSecrets: cfg.GenericSecrets,
+		botBindings:    cfg.BotBindings,
 		runSecrets:     cfg.RunSecrets,
 		sealer:         cfg.Sealer,
 		oauthForfait:   cfg.OAuthForfait,
@@ -151,7 +157,7 @@ func genericSecretNamesForWorkflow(wf *ir.Workflow) []string {
 // connected, seals the resulting bundle, and persists it under a
 // fresh secrets ref. Returns the ref or an empty string when no
 // credentials are available — the runner then falls back to env.
-func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenantID, ownerID string, wf *ir.Workflow) (string, error) {
+func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenantID, ownerID, botID string, wf *ir.Workflow) (string, error) {
 	if p.runSecrets == nil || p.sealer == nil {
 		return "", nil
 	}
@@ -208,7 +214,7 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 	// value means "resolve a stored secret of the same name" for this run.
 	if p.genericSecrets != nil && wf != nil && len(wf.Secrets) > 0 {
 		names := genericSecretNamesForWorkflow(wf)
-		resolved, err := secrets.ResolveGeneric(ctx, p.genericSecrets, tenantID, ownerID, names, p.sealer)
+		resolved, err := secrets.ResolveGenericWithBindings(ctx, p.genericSecrets, p.botBindings, tenantID, ownerID, botID, names, p.sealer)
 		if err != nil {
 			return "", fmt.Errorf("cloudpublisher: resolve workflow secrets: %w", err)
 		}
@@ -325,7 +331,7 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 	// 1b. Resolve BYOK credentials and seal them under a fresh
 	//     secrets_ref. Empty ref means "no team-scoped credentials
 	//     configured" — the runner falls back to env.
-	secretsRef, err := p.resolveAndSealCredentials(ctx, runID, tenantID, ownerID, wf)
+	secretsRef, err := p.resolveAndSealCredentials(ctx, runID, tenantID, ownerID, spec.BotID, wf)
 	if err != nil {
 		return 0, err
 	}
@@ -361,6 +367,10 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 		CallbackURL:        spec.CallbackURL,
 		CallbackToken:      spec.CallbackToken,
 		CallbackAnswerNode: spec.CallbackAnswerNode,
+		// Repo to clone before sandboxing (webhook-launched runs have no
+		// operator checkout). RepoRef carries a branch or sha.
+		RepoURL: spec.RepoURL,
+		RepoSHA: spec.RepoRef,
 	}
 	if _, err := p.nats.PublishRun(ctx, msg); err != nil {
 		// Best-effort: roll the run doc back to failed so the studio
@@ -466,7 +476,9 @@ func (p *Publisher) SubmitResume(ctx context.Context, spec runview.ResumeSpec, w
 	// Re-resolve BYOK credentials for the resume publication. Keys
 	// may have rotated between launch and resume; using the prior
 	// run's secrets ref blindly would inject stale plaintext.
-	secretsRef, secretsErr := p.resolveAndSealCredentials(ctx, spec.RunID, prior.TenantID, prior.OwnerID, wf)
+	// botID "" on resume: bot-secret bindings are resolved fresh only at
+	// launch; a resume falls back to user/team-scoped secrets.
+	secretsRef, secretsErr := p.resolveAndSealCredentials(ctx, spec.RunID, prior.TenantID, prior.OwnerID, "", wf)
 	if secretsErr != nil {
 		return secretsErr
 	}

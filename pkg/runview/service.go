@@ -94,6 +94,16 @@ type LaunchSpec struct {
 	// holds the run's user-facing answer (the "final_answer" field).
 	// Empty → the notifier scans all artifact nodes for "final_answer".
 	CallbackAnswerNode string
+	// RepoURL / RepoRef, when set, propagate onto the published
+	// RunMessage so a cloud runner clones the repo before sandboxing.
+	// Used by webhook-launched runs (inbound MR review) where the
+	// operator has no local checkout.
+	RepoURL string
+	RepoRef string
+	// BotID is the bot bundle name (e.g. "review-pr") this run launches.
+	// The cloud publisher uses it to resolve bot-secret bindings during
+	// credential sealing. Empty for plain .iter/.bot launches.
+	BotID string
 }
 
 // ResumeSpec describes a resume request.

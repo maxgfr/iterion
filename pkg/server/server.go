@@ -308,7 +308,10 @@ type Server struct {
 	webhookDeliveries webhooks.DeliveryStore
 	webhookCounter    webhooks.Counter
 	botBindings       secrets.BotSecretBindingStore
-	httpClient        *http.Client
+	// webhookLaunchBot overrides the inbound-webhook launch path (test
+	// seam). nil → realWebhookLaunchBot (resolve bot source + s.runs.Launch).
+	webhookLaunchBot func(ctx context.Context, botID string, vars map[string]string, repoURL, repoRef string) (string, error)
+	httpClient       *http.Client
 
 	// detector is the cached LLM credential detector backing
 	// /api/backends/detect. Lazily constructed on first request.
@@ -712,6 +715,11 @@ func (s *Server) routes() {
 	// each provider (see registerGitLabWebhookRoute).
 	if s.webhookConfigs != nil && s.authSvc != nil {
 		s.registerWebhookRoutes()
+	}
+	// Inbound GitLab MR delivery route (self-authenticating via
+	// webhookAuth) — registered whenever the config store is present.
+	if s.webhookConfigs != nil {
+		s.registerGitLabWebhookRoute()
 	}
 
 	// Bot-secret bindings (policy wrapper over generic secrets).

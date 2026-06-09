@@ -29,6 +29,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/server/cloudpublisher"
 	"github.com/SocialGouv/iterion/pkg/store/blob"
 	mongostore "github.com/SocialGouv/iterion/pkg/store/mongo"
+	"github.com/SocialGouv/iterion/pkg/webhooks"
 )
 
 // `iterion server` is the cloud-mode HTTP server entry point. In
@@ -192,6 +193,14 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	if err := oauthStore.EnsureSchema(rootCtx); err != nil {
 		return fmt.Errorf("server: ensure oauth schema: %w", err)
 	}
+	botBindingsStore := secrets.NewMongoBotSecretBindingStore(st.DB())
+	if err := botBindingsStore.EnsureSchema(rootCtx); err != nil {
+		return fmt.Errorf("server: ensure bot_secret_bindings schema: %w", err)
+	}
+	webhookStores := webhooks.NewMongoStores(st.DB())
+	if err := webhooks.EnsureSchema(rootCtx, st.DB()); err != nil {
+		return fmt.Errorf("server: ensure webhooks schema: %w", err)
+	}
 
 	pub, err := cloudpublisher.New(cloudpublisher.Config{
 		NATS:           natsConn,
@@ -201,6 +210,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		Metrics:        mreg,
 		ApiKeys:        apiKeysStore,
 		GenericSecrets: genericSecretsStore,
+		BotBindings:    botBindingsStore,
 		RunSecrets:     runSecretsStore,
 		Sealer:         sealer,
 		OAuthForfait:   oauthStore,
@@ -301,6 +311,10 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		OIDCRegistry:           registry,
 		ApiKeys:                apiKeysStore,
 		GenericSecrets:         genericSecretsStore,
+		BotBindings:            botBindingsStore,
+		WebhookConfigs:         webhookStores.Configs,
+		WebhookDeliveries:      webhookStores.Deliveries,
+		WebhookCounter:         webhookStores.Counter,
 		RunSecrets:             runSecretsStore,
 		Sealer:                 sealer,
 		OAuthForfait:           oauthStore,
