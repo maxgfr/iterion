@@ -41,7 +41,7 @@ func buildResumeAnswers(opts ResumeOptions, resumingFromFailure bool) (map[strin
 // session. When the run was launched from a `.botz` archive or
 // directory, the bundle is re-opened so prompts/skills/attachments
 // flow back into the resumed engine; the returned iterFile is then
-// the in-bundle .iter path. Otherwise the .iter file is compiled
+// the in-bundle .bot path. Otherwise the .bot file is compiled
 // directly from disk.
 //
 // The caller MUST defer the returned cleanup (no-op on the
@@ -72,7 +72,7 @@ func resumeOpenWorkflow(r *store.Run, iterFile string) (*ir.Workflow, string, st
 // openResumeBundle re-opens a previously-launched bundle by path,
 // distinguishing archive (.botz) from extracted directory layouts.
 // Returns (nil, no-op, nil) when the path is neither — the caller
-// then falls back to a plain .iter compile.
+// then falls back to a plain .bot compile.
 func openResumeBundle(path string) (*bundle.Bundle, func() error, error) {
 	cleanup := func() error { return nil }
 	kind, detectErr := bundle.Detect(path)

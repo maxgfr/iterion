@@ -4,12 +4,13 @@ import (
 	"fmt"
 
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
+	"github.com/SocialGouv/iterion/pkg/dsl/workflowfile"
 	"github.com/SocialGouv/iterion/pkg/runview"
 )
 
 // DiagramOptions holds options for the diagram command.
 type DiagramOptions struct {
-	File string // .iter file path
+	File string // .bot file path
 	View string // "compact" (default), "detailed", or "full"
 }
 
@@ -21,12 +22,15 @@ type DiagramResult struct {
 	Mermaid      string `json:"mermaid"`
 }
 
-// RunDiagram compiles an .iter file and outputs its Mermaid diagram.
+// RunDiagram compiles a .bot file and outputs its Mermaid diagram.
 func RunDiagram(opts DiagramOptions, p *Printer) error {
 	if opts.File == "" {
 		return fmt.Errorf("no file specified")
 	}
 	opts.File = ResolveRecipePath(opts.File)
+	if !workflowfile.IsWorkflowFile(opts.File) {
+		return fmt.Errorf("diagram file %q must end in .bot", opts.File)
+	}
 
 	wf, err := runview.CompileWorkflow(opts.File)
 	if err != nil {

@@ -60,19 +60,19 @@ describe("filterRuns", () => {
       id: "run_aaa",
       name: "kanban refresh",
       workflow_name: "feature-dev",
-      file_path: "examples/feature-dev.iter",
+      file_path: "examples/feature-dev.bot",
       created_at: "2026-05-18T10:00:00Z", // today
     }),
     mkRun({
       id: "run_bbb",
       workflow_name: "review",
-      file_path: "examples/review.iter",
+      file_path: "examples/review.bot",
       created_at: "2026-05-15T10:00:00Z", // 3d ago
     }),
     mkRun({
       id: "run_ccc",
       workflow_name: "old-thing",
-      file_path: "examples/old.iter",
+      file_path: "examples/old.bot",
       created_at: "2026-04-10T10:00:00Z", // 38d ago
     }),
   ];
@@ -93,7 +93,7 @@ describe("filterRuns", () => {
   });
 
   it("matches the file path", () => {
-    const out = filterRuns(runs, { query: "old.iter", since: "all", now: NOW });
+    const out = filterRuns(runs, { query: "old.bot", since: "all", now: NOW });
     expect(out.map((r) => r.id)).toEqual(["run_ccc"]);
   });
 

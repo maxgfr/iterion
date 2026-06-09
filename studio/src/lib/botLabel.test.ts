@@ -29,7 +29,7 @@ describe("botDisplayLabel", () => {
   });
 
   it("keeps the basename for loose files", () => {
-    expect(botDisplayLabel("flows/my-flow.iter", bots)).toBe("my-flow.iter");
+    expect(botDisplayLabel("flows/my-flow.bot", bots)).toBe("my-flow.bot");
     expect(botDisplayLabel("scratch.bot", bots)).toBe("scratch.bot");
   });
 });

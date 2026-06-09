@@ -91,7 +91,7 @@ func (s *Server) registerRunRoutes() {
 
 type launchRunRequest struct {
 	FilePath string `json:"file_path"`
-	// Source is the .iter contents uploaded inline. In cloud mode the
+	// Source is the workflow contents uploaded inline. In cloud mode the
 	// studio sends this so the server pod doesn't need a shared
 	// filesystem; FilePath is then advisory (used for display + as the
 	// AST parserPath). When both are set, Source wins.
@@ -160,7 +160,7 @@ type launchRunResponse struct {
 
 type resumeRunRequest struct {
 	FilePath string `json:"file_path,omitempty"` // optional; falls back to run.FilePath
-	// Source carries the .iter contents inline. Used in cloud mode
+	// Source carries the workflow contents inline. Used in cloud mode
 	// when the resumer (studio) wants to push a possibly-modified
 	// workflow without depending on the server pod's filesystem.
 	Source  string                 `json:"source,omitempty"`
@@ -1140,7 +1140,7 @@ func (s *Server) resolveCachedInlineSource(filePath string) (string, bool) {
 	return clean, true
 }
 
-// materializeInlineSource writes the SPA-provided inline .iter content
+// materializeInlineSource writes the SPA-provided inline workflow content
 // into a stable per-store cache directory and returns its absolute
 // path. The cache lives at <storeDir>/inline-sources/<sha12>-<basename>:
 //   - the file persists for the lifetime of the run store (resume,
@@ -1153,7 +1153,7 @@ func (s *Server) resolveCachedInlineSource(filePath string) (string, bool) {
 //     even when a newer launch of the same recipe touched the cache.
 //
 // When filePath is empty (an studio-only buffer that was never saved on
-// disk), we synthesise a basename of "inline.iter" so the cache layout
+// disk), we synthesise a basename of "inline.bot" so the cache layout
 // stays predictable.
 //
 // Returns ok=false when no writable cache dir can be derived — the
@@ -1161,7 +1161,7 @@ func (s *Server) resolveCachedInlineSource(filePath string) (string, bool) {
 func (s *Server) materializeInlineSource(filePath, source string) (string, bool) {
 	base := filepath.Base(filePath)
 	if base == "" || base == "." || base == string(filepath.Separator) {
-		base = "inline.iter"
+		base = "inline.bot"
 	}
 	cacheRoot := s.inlineSourceCacheDir()
 	if cacheRoot == "" {
@@ -1211,8 +1211,8 @@ func (s *Server) resolvedStoreDir() string {
 // per-run-store directory (one copy per binary release) and returns
 // its absolute path. The lookup key is filePath as given; the caller
 // passes whatever the API received, so a UI that lists recipes by
-// basename ("minimal_linear.iter", "skill/minimal_linear.iter", or
-// "feature_dev/main.bot") all resolve correctly.
+// basename ("feature-dev/main.bot" or another embedded bot path) all
+// resolve correctly.
 //
 // We materialise rather than reading from embed.FS at execution time
 // because the engine, parser, and several runtime helpers operate on

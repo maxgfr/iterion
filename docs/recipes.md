@@ -2,7 +2,7 @@
 
 # Recipes
 
-Recipes let you run the same workflow with different configurations without editing the `.iter` file. They're useful for benchmarking models, comparing prompts, or creating reusable presets:
+Recipes let you run the same workflow with different configurations without editing the `.bot` file. They're useful for benchmarking models, comparing prompts, or creating reusable presets:
 
 ```json
 {
@@ -29,7 +29,7 @@ Recipes let you run the same workflow with different configurations without edit
 ```
 
 ```bash
-iterion run workflow.iter --recipe fast_review.json
+iterion run workflow.bot --recipe fast_review.json
 ```
 
 Recipes can override variables, prompts, budgets, and define success criteria for automated evaluation.

@@ -21,7 +21,7 @@ const (
 	EventFileDeleted  = "file_deleted"
 )
 
-// Watcher watches WorkDir for .iter file changes and pushes events to a Hub.
+// Watcher watches WorkDir for workflow file changes and pushes events to a Hub.
 type Watcher struct {
 	workDir   string
 	hub       *Hub

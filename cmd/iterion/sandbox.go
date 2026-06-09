@@ -22,7 +22,7 @@ Subcommands:
 var sandboxDoctorOpts cli.SandboxDoctorOptions
 
 var sandboxDoctorCmd = &cobra.Command{
-	Use:   "doctor [workflow.iter]",
+	Use:   "doctor [workflow.bot|workflow.botz|bundle-dir]",
 	Short: "Report the active sandbox driver, capabilities, and (--strict) validate a run's config",
 	Long: `Report the active sandbox driver and capabilities.
 
@@ -38,8 +38,8 @@ hint and the command exits non-zero.
 Examples:
   iterion sandbox doctor                              # host report (default)
   iterion sandbox doctor --strict                     # strict host checks
-  iterion sandbox doctor --strict workflow.iter       # validate a workflow's sandbox: block
-  iterion sandbox doctor --strict workflow.iter --target cloud   # validate cloud-compat from a laptop
+  iterion sandbox doctor --strict workflow.bot        # validate a workflow's sandbox: block
+  iterion sandbox doctor --strict workflow.bot --target cloud    # validate cloud-compat from a laptop
 `,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

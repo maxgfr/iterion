@@ -15,7 +15,7 @@ export function botDisplayLabel(
 ): string {
   const segs = path.split(/[\\/]/).filter(Boolean);
   const base = segs[segs.length - 1] ?? "";
-  if ((base === "main.bot" || base === "main.iter") && segs.length >= 2) {
+  if (base === "main.bot" && segs.length >= 2) {
     const tech = segs[segs.length - 2]!;
     const bot = bots?.find((b) => {
       const relTech = (b.rel_path ?? "").split(/[\\/]/).filter(Boolean).pop();

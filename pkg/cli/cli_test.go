@@ -117,7 +117,7 @@ func newTestPrinter(format cli.OutputFormat) (*cli.Printer, *bytes.Buffer) {
 
 func TestValidate_Valid(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFixture(t, dir, "test.iter", minimalWorkflow)
+	path := writeFixture(t, dir, "test.bot", minimalWorkflow)
 
 	p, buf := newTestPrinter(cli.OutputHuman)
 	err := cli.RunValidate(path, p)
@@ -136,7 +136,7 @@ func TestValidate_Valid(t *testing.T) {
 
 func TestValidate_ValidJSON(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFixture(t, dir, "test.iter", minimalWorkflow)
+	path := writeFixture(t, dir, "test.bot", minimalWorkflow)
 
 	p, buf := newTestPrinter(cli.OutputJSON)
 	err := cli.RunValidate(path, p)
@@ -158,7 +158,7 @@ func TestValidate_ValidJSON(t *testing.T) {
 
 func TestValidate_Invalid(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFixture(t, dir, "bad.iter", "this is not valid iterion DSL")
+	path := writeFixture(t, dir, "bad.bot", "this is not valid iterion DSL")
 
 	p, _ := newTestPrinter(cli.OutputHuman)
 	err := cli.RunValidate(path, p)
@@ -169,7 +169,7 @@ func TestValidate_Invalid(t *testing.T) {
 
 func TestValidate_FileNotFound(t *testing.T) {
 	p, _ := newTestPrinter(cli.OutputHuman)
-	err := cli.RunValidate("/nonexistent/file.iter", p)
+	err := cli.RunValidate("/nonexistent/file.bot", p)
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
@@ -194,7 +194,7 @@ func (e *approveExecutor) Execute(_ context.Context, node ir.Node, input map[str
 
 func TestRun_Success(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFixture(t, dir, "test.iter", minimalWorkflow)
+	path := writeFixture(t, dir, "test.bot", minimalWorkflow)
 	storeDir := filepath.Join(dir, "store")
 
 	p, buf := newTestPrinter(cli.OutputHuman)
@@ -227,7 +227,7 @@ func TestRun_Success(t *testing.T) {
 
 func TestRun_SuccessJSON(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFixture(t, dir, "test.iter", minimalWorkflow)
+	path := writeFixture(t, dir, "test.bot", minimalWorkflow)
 	storeDir := filepath.Join(dir, "store")
 
 	p, buf := newTestPrinter(cli.OutputJSON)
@@ -253,7 +253,7 @@ func TestRun_SuccessJSON(t *testing.T) {
 
 func TestRun_WithVars(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFixture(t, dir, "test.iter", minimalWorkflow)
+	path := writeFixture(t, dir, "test.bot", minimalWorkflow)
 	storeDir := filepath.Join(dir, "store")
 
 	p, _ := newTestPrinter(cli.OutputHuman)
@@ -307,7 +307,7 @@ func (e *rejectExecutor) Execute(_ context.Context, node ir.Node, input map[stri
 
 func TestRun_HumanPause(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFixture(t, dir, "test.iter", humanWorkflow)
+	path := writeFixture(t, dir, "test.bot", humanWorkflow)
 	storeDir := filepath.Join(dir, "store")
 
 	p, buf := newTestPrinter(cli.OutputHuman)
@@ -1269,13 +1269,13 @@ func TestInspect_LegacyPathUnchanged(t *testing.T) {
 
 func TestResume_Success(t *testing.T) {
 	dir := t.TempDir()
-	iterPath := writeFixture(t, dir, "test.iter", humanWorkflow)
+	botPath := writeFixture(t, dir, "test.bot", humanWorkflow)
 	storeDir := filepath.Join(dir, "store")
 
 	// First, run the workflow to get it paused.
 	p1, _ := newTestPrinter(cli.OutputHuman)
 	err := cli.RunRun(context.Background(), cli.RunOptions{
-		File:     iterPath,
+		File:     botPath,
 		StoreDir: storeDir,
 		RunID:    "resume-test",
 		Executor: &rejectExecutor{},
@@ -1298,7 +1298,7 @@ func TestResume_Success(t *testing.T) {
 
 	// Resume.
 	p2, buf := newTestPrinter(cli.OutputHuman)
-	err = cli.RunResumeWithFile(context.Background(), iterPath, cli.ResumeOptions{
+	err = cli.RunResumeWithFile(context.Background(), botPath, cli.ResumeOptions{
 		RunID:       "resume-test",
 		StoreDir:    storeDir,
 		AnswersFile: answersPath,
@@ -1323,13 +1323,13 @@ func TestResume_Success(t *testing.T) {
 
 func TestResume_NotPaused(t *testing.T) {
 	dir := t.TempDir()
-	iterPath := writeFixture(t, dir, "test.iter", humanWorkflow)
+	botPath := writeFixture(t, dir, "test.bot", humanWorkflow)
 	storeDir := filepath.Join(dir, "store")
 	s, _ := store.New(storeDir)
 	_, _ = s.CreateRun(context.Background(), "not-paused", "wf", nil)
 
 	p, _ := newTestPrinter(cli.OutputHuman)
-	err := cli.RunResumeWithFile(context.Background(), iterPath, cli.ResumeOptions{
+	err := cli.RunResumeWithFile(context.Background(), botPath, cli.ResumeOptions{
 		RunID:    "not-paused",
 		StoreDir: storeDir,
 		Answers:  map[string]string{"feedback": "ok"},
@@ -1345,7 +1345,7 @@ func TestResume_NotPaused(t *testing.T) {
 
 func TestResume_NoAnswers(t *testing.T) {
 	dir := t.TempDir()
-	iterPath := writeFixture(t, dir, "test.iter", humanWorkflow)
+	botPath := writeFixture(t, dir, "test.bot", humanWorkflow)
 	storeDir := filepath.Join(dir, "store")
 	s, _ := store.New(storeDir)
 	r, _ := s.CreateRun(context.Background(), "no-answers", "test_human_workflow", nil)
@@ -1353,7 +1353,7 @@ func TestResume_NoAnswers(t *testing.T) {
 	_ = s.SaveCheckpoint(context.Background(), r.ID, &store.Checkpoint{NodeID: "clarify", InteractionID: "int-1"})
 
 	p, _ := newTestPrinter(cli.OutputHuman)
-	err := cli.RunResumeWithFile(context.Background(), iterPath, cli.ResumeOptions{
+	err := cli.RunResumeWithFile(context.Background(), botPath, cli.ResumeOptions{
 		RunID:    "no-answers",
 		StoreDir: storeDir,
 	}, p)

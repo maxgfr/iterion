@@ -11,7 +11,7 @@ import Codex from "@lobehub/icons/es/Codex";
 import { backendEmoji } from "./backendEmoji";
 
 interface Props {
-  // Raw backend value from the .iter source. Empty/undefined → "claw".
+  // Raw backend value from the workflow source. Empty/undefined → "claw".
   backend?: string;
   // resolved is the backend name the runtime would actually pick at run
   // time when `backend` is empty. When supplied AND backend is empty,

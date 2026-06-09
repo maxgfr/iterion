@@ -50,7 +50,7 @@ import { readNodeOutputMeta, type DelegateOutputMeta } from "@/lib/delegateMeta"
 
 // `RuntimeLLMOverride` aliases the cross-file `DelegateOutputMeta`
 // shape — kept under this name locally so its run-view role (override
-// of the .iter-declared model/effort for the canvas "live" badge) is
+// of the workflow-declared model/effort for the canvas "live" badge) is
 // obvious at call sites.
 type RuntimeLLMOverride = DelegateOutputMeta;
 

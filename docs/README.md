@@ -19,10 +19,10 @@ Welcome to the Iterion docs. Pages are organised by audience and topic.
 | [install.md](install.md) | …you want to install Iterion. Covers all seven delivery modes (CLI, web editor, desktop, Docker, cloud, dispatcher, SDK). |
 | [visual-editor.md](visual-editor.md) | …you want a browser-based drag-and-drop workflow editor. |
 | [desktop.md](desktop.md) | …you want the native window app with multi-project + OS keychain + auto-update. |
-| [examples.md](examples.md) | …you want to learn from working `.iter` files. |
+| [examples.md](examples.md) | …you want to learn from working `.bot` files. |
 | [skill.md](skill.md) | …you want your AI coding agent (Claude Code, Cursor, Copilot…) to author workflows for you. |
 
-## Authoring `.iter` workflows
+## Authoring `.bot` workflows
 
 | Page | Topic |
 |---|---|

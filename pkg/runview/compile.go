@@ -57,7 +57,7 @@ func computeWorkflowHash(src []byte, b *bundle.Bundle, _ *ast.File) string {
 	return hex.EncodeToString(sum)
 }
 
-// CompileWorkflow parses and compiles a .iter file at path. It returns
+// CompileWorkflow parses and compiles a workflow source file at path. It returns
 // the compiled workflow or an error with the first parse / compile
 // diagnostic encountered.
 //
@@ -70,7 +70,7 @@ func CompileWorkflow(path string) (*ir.Workflow, error) {
 
 // CompileWorkflowWithHash is CompileWorkflow plus a SHA-256 hash of the
 // raw source bytes. The hash is persisted in run.json so that resume
-// can detect when the .iter file has changed under it (and require
+// can detect when the workflow file has changed under it (and require
 // --force to proceed). Use this everywhere a workflow is loaded for
 // execution; CompileWorkflow is for static-only callers (validate,
 // diagram).
@@ -86,7 +86,7 @@ func CompileBundleWorkflow(path string, b *bundle.Bundle) (*ir.Workflow, string,
 	return compileWith(path, "", true, b)
 }
 
-// CompileWorkflowFromSource is the cloud-mode entry point: the .iter
+// CompileWorkflowFromSource is the cloud-mode entry point: the workflow
 // content is supplied verbatim (uploaded by the studio SPA). Path is
 // retained as a logical label for diagnostics + MCP relative-path
 // resolution; when empty, MCP resolution falls back to the current
@@ -107,8 +107,8 @@ func compileForLaunch(path, source string) (*ir.Workflow, string, error) {
 }
 
 // ResolveBundleFromFilePath inspects filePath and, when it looks like
-// the canonical entrypoint of a directory bundle (named main.bot or
-// main.iter, in a parent dir that carries `skills/` or
+// the canonical entrypoint of a directory bundle (named main.bot, in a
+// parent dir that carries `skills/` or
 // `manifest.yaml`), opens the parent as a bundle so the engine can
 // mirror skills/, recipes/, attachments/ into the workspace at run
 // time. Returns nil when filePath is empty, not the canonical name,
@@ -127,7 +127,7 @@ func ResolveBundleFromFilePath(filePath string) *bundle.Bundle {
 		return nil
 	}
 	base := filepath.Base(abs)
-	if base != "main.bot" && base != "main.iter" {
+	if base != "main.bot" {
 		return nil
 	}
 	parent := filepath.Dir(abs)

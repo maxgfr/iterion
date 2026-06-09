@@ -50,7 +50,7 @@ var effortTokens = map[string]struct{ in, out int }{
 	"max":    {80_000, 16_000},
 }
 
-// A fresh .iter with no effort annotation should map to the mid-tier
+// A fresh workflow with no effort annotation should map to the mid-tier
 // estimate, not the cheapest one.
 var defaultEffortTokens = effortTokens["medium"]
 
@@ -99,7 +99,7 @@ func (s *Server) handlePreviewCost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if parserPath == "" {
-		parserPath = "studio.iter"
+		parserPath = "studio.bot"
 	}
 
 	pr := parser.Parse(parserPath, src)

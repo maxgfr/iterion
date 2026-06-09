@@ -105,7 +105,7 @@ export default function ResumeDialog({ run, open, onOpenChange }: Props) {
         <p className="text-fg-muted">
           Restart this run from its last checkpoint. The engine reuses the
           {" "}
-          <span className="font-mono">.iter</span> file persisted at launch.
+          <span className="font-mono">.bot</span> file persisted at launch.
         </p>
         <label className="flex items-start gap-2 cursor-pointer select-none">
           <input
@@ -121,7 +121,7 @@ export default function ResumeDialog({ run, open, onOpenChange }: Props) {
               Allow resume even when the workflow file changed since launch
               ({" "}
               <span className="font-mono">--force</span>). Use after fixing a
-              bug in the <span className="font-mono">.iter</span> source.
+              bug in the <span className="font-mono">.bot</span> source.
             </span>
           </span>
         </label>

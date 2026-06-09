@@ -15,7 +15,7 @@ interface Props {
 // conversation view when run.status === "paused_operator". Visually
 // distinct from the human-input pause (info/cyan instead of amber) and
 // offers a single-click Resume that bypasses the workflow-hash check
-// (the operator deliberately paused; no .iter edit between
+// (the operator deliberately paused; no workflow edit between
 // pause→resume is expected).
 export default function OperatorPauseBanner({ run }: Props) {
   const [busy, setBusy] = useState(false);

@@ -11,7 +11,7 @@ package bundle
 type Kind int
 
 const (
-	// KindIter is a plain `.iter` or `.bot` source file.
+	// KindIter is a plain `.bot` source file.
 	KindIter Kind = iota
 	// KindBundle is a `.botz` tar.gz archive.
 	KindBundle

@@ -14,7 +14,7 @@ import (
 func seedManagerFixture(t *testing.T) string {
 	t.Helper()
 	dir := newTestStoreDir(t)
-	wfPath := filepath.Join(dir, "flow.iter")
+	wfPath := filepath.Join(dir, "flow.bot")
 	// Minimal tool-only workflow — Manager.Start calls NewRoutingRunner
 	// which compiles the workflow file at boot. A bare-bones tool
 	// definition + a single edge to done is the smallest legal form

@@ -20,7 +20,7 @@ import (
 // fresh executor for the requested RunID and drives the iterion
 // runtime engine until completion or cancellation.
 //
-// The workflow source can be a plain `.iter` / `.bot` file, a `.botz`
+// The workflow source can be a plain `.bot` file, a `.botz`
 // archive, or an unpacked bundle directory. Bundles are opened once
 // at NewEngineRunner — the bundle handle is shared across dispatches,
 // then released via Close() when the dispatcher shuts down.
@@ -28,7 +28,7 @@ type EngineRunner struct {
 	workflow     *ir.Workflow
 	workflowPath string
 	workflowHash string
-	bundle       *bundle.Bundle // nil for plain .iter/.bot
+	bundle       *bundle.Bundle // nil for plain .bot
 	bundleClean  func() error   // no-op when bundle is nil
 	logger       *iterlog.Logger
 }

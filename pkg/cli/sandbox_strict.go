@@ -468,7 +468,7 @@ func doctorRepoRoot(file string) string {
 	return dir
 }
 
-// loadWorkflowForDoctor resolves a .iter/.bot file or a .botz/dir bundle
+// loadWorkflowForDoctor resolves a .bot file or a .botz/dir bundle
 // to its compiled IR workflow so the doctor can read its sandbox: block.
 // It detects + opens the bundle (the part RunValidate/run.go also do)
 // and then delegates to the shared runview compile pipeline, so the

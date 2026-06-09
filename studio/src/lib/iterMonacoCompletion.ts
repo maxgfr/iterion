@@ -17,7 +17,7 @@ const SORT_PREFIX: Record<string, string> = {
 let registered = false;
 
 /**
- * Register a Monaco completion provider for `.iter` source that suggests
+ * Register a Monaco completion provider for `.bot` source that suggests
  * `{{...}}` references from the live document state. Idempotent — safe to
  * call on every editor mount.
  */

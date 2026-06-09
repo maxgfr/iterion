@@ -12,6 +12,7 @@ import (
 	"go.yaml.in/yaml/v2"
 
 	"github.com/SocialGouv/iterion/pkg/botregistry"
+	"github.com/SocialGouv/iterion/pkg/bundle"
 )
 
 // Config is the parsed dispatcher configuration. Sources:
@@ -422,13 +423,13 @@ func (c *Config) applyEnvAndPaths() {
 }
 
 // Validate checks fields are coherent. Workflow file existence is
-// checked here; deeper compile-time validation of the .iter is the
+// checked here; deeper compile-time validation of the workflow is the
 // caller's responsibility (typically performed by Dispatcher.Start).
 func (c *Config) Validate() error {
 	if c.Workflow == "" {
 		return errors.New("config: workflow is required")
 	}
-	if _, err := os.Stat(c.Workflow); err != nil {
+	if _, err := bundle.Detect(c.Workflow); err != nil {
 		return fmt.Errorf("config: workflow %s: %w", c.Workflow, err)
 	}
 	for assignee, wfPath := range c.AssigneeWorkflows {
@@ -438,7 +439,7 @@ func (c *Config) Validate() error {
 		if wfPath == "" {
 			return fmt.Errorf("config: assignee_workflows[%q] is empty", assignee)
 		}
-		if _, err := os.Stat(wfPath); err != nil {
+		if _, err := bundle.Detect(wfPath); err != nil {
 			return fmt.Errorf("config: assignee_workflows[%q] %s: %w", assignee, wfPath, err)
 		}
 	}

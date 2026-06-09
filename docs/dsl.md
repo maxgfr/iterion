@@ -1,10 +1,10 @@
 [← Documentation index](README.md) · [← Iterion](../README.md)
 
-# The `.iter` DSL
+# The `.bot` DSL
 
 Workflows are written in a declarative, indentation-significant language. The formal grammar is in [`grammar/iterion_v1.ebnf`](grammar/iterion_v1.ebnf).
 
-> Workflow files use either the `.iter` or `.bot` extension — the two are technically identical (same parser, same runtime). The distinction is narrative: see [`.iter` vs `.bot`](../README.md#iter-vs-bot) in the README.
+> Workflow source files use the `.bot` extension. Packaged workflows use `.botz`.
 
 ## Variables
 
@@ -264,7 +264,7 @@ Environment variables are supported with `${ENV_VAR}` syntax (resolved at compil
 
 ## MCP Servers
 
-You can declare MCP (Model Context Protocol) servers directly in your `.iter` files:
+You can declare MCP (Model Context Protocol) servers directly in your `.bot` files:
 
 ```iter
 mcp_server code_tools:

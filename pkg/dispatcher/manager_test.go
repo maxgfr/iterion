@@ -102,7 +102,7 @@ func TestNewManager_LoadsPersistedConfig(t *testing.T) {
 	t.Setenv("ITERION_DISPATCHER_AUTOSTART", "0")
 	dir := newTestStoreDir(t)
 	// Create the workflow file Validate() will stat.
-	wfPath := filepath.Join(dir, "flow.iter")
+	wfPath := filepath.Join(dir, "flow.bot")
 	if err := os.WriteFile(wfPath, []byte("workflow x: x -> done\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestErrString(t *testing.T) {
 
 func TestRedactedConfig_MasksGitHubToken(t *testing.T) {
 	cfg := &Config{
-		Workflow: "./flow.iter",
+		Workflow: "./flow.bot",
 		Tracker: TrackerConfig{
 			Kind:   TrackerKindGitHub,
 			GitHub: &GitHubTrackerConfig{Repo: "org/repo", Token: "ghp_secret123"},
@@ -190,7 +190,7 @@ func TestRedactedConfig_MasksGitHubToken(t *testing.T) {
 
 func TestRedactedConfig_MasksForgejoToken(t *testing.T) {
 	cfg := &Config{
-		Workflow: "./flow.iter",
+		Workflow: "./flow.bot",
 		Tracker: TrackerConfig{
 			Kind:    TrackerKindForgejo,
 			Forgejo: &ForgejoTrackerConfig{Host: "https://forge.example", Repo: "g/r", Token: "fj_secret"},
@@ -212,7 +212,7 @@ func TestRedactedConfig_EmptyTokenLeftAlone(t *testing.T) {
 	// Token empty → don't replace with "***" (that would imply a secret
 	// where there is none and confuse the operator).
 	cfg := &Config{
-		Workflow: "./flow.iter",
+		Workflow: "./flow.bot",
 		Tracker: TrackerConfig{
 			Kind:   TrackerKindGitHub,
 			GitHub: &GitHubTrackerConfig{Repo: "org/repo"},
@@ -227,7 +227,7 @@ func TestRedactedConfig_EmptyTokenLeftAlone(t *testing.T) {
 func TestRedactedConfig_NoTrackerBlocks(t *testing.T) {
 	// Native tracker has no token to redact — no panic, faithful copy.
 	cfg := &Config{
-		Workflow: "./flow.iter",
+		Workflow: "./flow.bot",
 		Tracker:  TrackerConfig{Kind: TrackerKindNative},
 	}
 	out := redactedConfig(cfg)
@@ -241,7 +241,7 @@ func TestRedactedConfig_NoTrackerBlocks(t *testing.T) {
 func TestSaveAndLoadConfigJSON_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	// Create the workflow file Validate() will stat.
-	wfPath := filepath.Join(dir, "flow.iter")
+	wfPath := filepath.Join(dir, "flow.bot")
 	if err := os.WriteFile(wfPath, []byte("workflow x: x -> done\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestSaveConfigJSON_CreatesParentDirs(t *testing.T) {
 	dir := t.TempDir()
 	// Nested path that doesn't exist yet.
 	path := filepath.Join(dir, "a", "b", "dispatcher.json")
-	cfg := &Config{Workflow: "./flow.iter", Tracker: TrackerConfig{Kind: TrackerKindNative}}
+	cfg := &Config{Workflow: "./flow.bot", Tracker: TrackerConfig{Kind: TrackerKindNative}}
 	if err := saveConfigJSON(path, cfg); err != nil {
 		t.Fatalf("saveConfigJSON: %v", err)
 	}

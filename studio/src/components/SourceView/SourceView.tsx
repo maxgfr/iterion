@@ -56,7 +56,7 @@ export default function SourceView() {
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-2 py-1 bg-surface-1 border-b border-border-default shrink-0">
-        <span className="text-xs text-fg-subtle">.iter Source</span>
+        <span className="text-xs text-fg-subtle">.bot Source</span>
         <div className="flex gap-2">
           {!editing ? (
             <button

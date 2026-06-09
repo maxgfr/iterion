@@ -7,15 +7,16 @@ func TestIsWorkflowFile(t *testing.T) {
 		path string
 		want bool
 	}{
-		{"foo.iter", true},
+		{"foo.iter", false},
 		{"foo.bot", true},
-		{"path/to/foo.iter", true},
+		{"path/to/foo.iter", false},
 		{"path/to/foo.bot", true},
 		{"foo.txt", false},
 		{"foo", false},
 		{"foo.iter.bak", false},
-		{".iter", true},
+		{".iter", false},
 		{".bot", true},
+		{"foo.botz", false},
 		{"", false},
 	}
 	for _, tc := range cases {

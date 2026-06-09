@@ -24,7 +24,7 @@ interface Props {
   // declared) level; this flag just appends the marker.
   live?: boolean;
   // Render in attenuated style when the level was resolved from the
-  // provider's documented default rather than declared in the .iter
+  // provider's documented default rather than declared in the workflow
   // or set at runtime. Lets the user distinguish "I chose this" from
   // "this is what the provider would use anyway".
   muted?: boolean;
@@ -123,7 +123,7 @@ export function EffortBar({ level, live, muted, supported, className, title }: P
       {muted && !live && (
         <span
           className="ml-0.5 text-[8px] uppercase tracking-wide"
-          title="provider default — no value declared in .iter"
+          title="provider default — no value declared in workflow"
         >
           default
         </span>

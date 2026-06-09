@@ -11,7 +11,7 @@ import (
 
 // Template is a parsed dispatch.vars / dispatch.attachments template.
 // It supports {{issue.path}} and {{dispatcher.path}} references with the
-// same brace syntax used by .iter workflows (but with a narrower set of
+// same brace syntax used by .bot workflows (but with a narrower set of
 // resolvable namespaces).
 type Template struct {
 	raw      string

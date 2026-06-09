@@ -12,7 +12,7 @@ import {
 } from "@/store/tabs";
 
 // EditorTabsView is the /editor route. It hosts an inner tab strip
-// listing every open editor tab (one per .iter file) and renders all
+// listing every open editor tab (one per .bot file) and renders all
 // hydrated tabs in parallel with display:none on inactive ones so
 // switching is instant and dirty state survives.
 //

@@ -261,13 +261,13 @@ tasks:
       - rm -f {{.BINARY}}
 
   validate:
-    desc: Validate an .iter file (pass file after --)
+    desc: Validate a .bot file (pass file after --)
     deps: [build]
     cmds:
       - ./{{.BINARY}} validate {{.CLI_ARGS}}
 
   diagram:
-    desc: Generate Mermaid diagram from an .iter file (pass file after --)
+    desc: Generate Mermaid diagram from a .bot file (pass file after --)
     deps: [build]
     cmds:
       - ./{{.BINARY}} diagram {{.CLI_ARGS}}

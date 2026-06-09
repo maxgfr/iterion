@@ -185,7 +185,7 @@ func TestManager_TransitionMergedIssue_HappyPath(t *testing.T) {
 func seedManagerFixtureWithMergedState(t *testing.T, mergedState string) string {
 	t.Helper()
 	dir := newTestStoreDir(t)
-	wfPath := filepath.Join(dir, "flow.iter")
+	wfPath := filepath.Join(dir, "flow.bot")
 	wfBody := `tool noop:
   command: "true"
 

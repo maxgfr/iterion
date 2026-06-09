@@ -370,7 +370,7 @@ func TestResolveWorkflowPath_InlineCacheFallback(t *testing.T) {
 	if err := os.MkdirAll(cacheRoot, 0o755); err != nil {
 		t.Fatalf("mkdir cache root: %v", err)
 	}
-	cached := filepath.Join(cacheRoot, "resume.iter")
+	cached := filepath.Join(cacheRoot, "resume.bot")
 	if err := os.WriteFile(cached, []byte("workflow x:\n"), 0o644); err != nil {
 		t.Fatalf("write cached source: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestResolveWorkflowPath_InlineCacheFallback(t *testing.T) {
 
 	// An absolute path that escapes both WorkDir AND the inline cache
 	// stays rejected — the fallback must not become a host-FS opener.
-	outside := filepath.Join(t.TempDir(), "evil.iter")
+	outside := filepath.Join(t.TempDir(), "evil.bot")
 	if err := os.WriteFile(outside, []byte("workflow x:\n"), 0o644); err != nil {
 		t.Fatalf("write outside file: %v", err)
 	}
@@ -415,11 +415,11 @@ func TestMaterializeInlineSource_NoOverwriteAcrossContent(t *testing.T) {
 	srcA := "workflow a:\n  entry: x\n"
 	srcB := "workflow b:\n  entry: y\n"
 
-	pathA, okA := srv.materializeInlineSource("/some/where/recipe.iter", srcA)
+	pathA, okA := srv.materializeInlineSource("/some/where/recipe.bot", srcA)
 	if !okA {
 		t.Fatalf("materialize A failed")
 	}
-	pathB, okB := srv.materializeInlineSource("/some/where/recipe.iter", srcB)
+	pathB, okB := srv.materializeInlineSource("/some/where/recipe.bot", srcB)
 	if !okB {
 		t.Fatalf("materialize B failed")
 	}
@@ -436,7 +436,7 @@ func TestMaterializeInlineSource_NoOverwriteAcrossContent(t *testing.T) {
 	}
 
 	// Same content re-materialized → idempotent (same path).
-	pathA2, okA2 := srv.materializeInlineSource("/some/where/recipe.iter", srcA)
+	pathA2, okA2 := srv.materializeInlineSource("/some/where/recipe.bot", srcA)
 	if !okA2 || pathA2 != pathA {
 		t.Fatalf("idempotent re-materialize: got (%q, %v), want %q", pathA2, okA2, pathA)
 	}

@@ -95,7 +95,7 @@ func newStateTestDispatcher(t *testing.T, runner Runner, ft *stateAwareTracker, 
 	wsDir := dir + "/ws"
 	cfg := &Config{
 		Name:     "test",
-		Workflow: t.TempDir() + "/fake.iter",
+		Workflow: t.TempDir() + "/fake.bot",
 		Tracker:  TrackerConfig{Kind: "fake"},
 		Polling:  PollingConfig{IntervalMS: int(polling.Milliseconds())},
 		Agent: AgentConfig{
@@ -282,7 +282,7 @@ func TestDispatch_RevertsOnWorkspaceCreateFailure(t *testing.T) {
 
 	cfg := &Config{
 		Name:      "test",
-		Workflow:  t.TempDir() + "/fake.iter",
+		Workflow:  t.TempDir() + "/fake.bot",
 		Tracker:   TrackerConfig{Kind: "fake"},
 		Polling:   PollingConfig{IntervalMS: 50},
 		Agent:     AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000, RunningState: "in_progress"},

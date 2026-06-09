@@ -215,7 +215,7 @@ function renameNodeInGroups(comments: Comment[], oldName: string, newName: strin
 
 // createDocumentStore builds a fresh Zustand store with the existing
 // reducer/action surface. Each editor tab owns its own store so two
-// .iter files can be edited side-by-side with independent dirty
+// .bot files can be edited side-by-side with independent dirty
 // state, undo history, and diagnostics. The module-level
 // `documentStore` façade preserves the legacy singleton entry point
 // for App-level callers and imperative side-effects.

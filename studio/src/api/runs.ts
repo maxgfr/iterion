@@ -57,7 +57,7 @@ export interface RunSummary {
   workflow_name: string;
   // Bot/bundle label (e.g. "docs-refresh"). Sourced from the bundle's
   // manifest.yaml name; server falls back to basename(bundle_path) for
-  // legacy runs. Empty for plain .iter/.bot runs with no bundle.
+  // legacy runs. Empty for plain .bot runs with no bundle.
   bundle_name?: string;
   status: RunStatus;
   file_path?: string;
@@ -127,7 +127,7 @@ export interface RunHeader {
   file_path?: string;
   // Bundle's manifest.yaml `name` field captured at launch (e.g.
   // "feature-dev"). May differ from workflow_name when the bundle
-  // ships a customised manifest. Empty for plain .iter / .bot runs.
+  // ships a customised manifest. Empty for plain .bot runs.
   bundle_name?: string;
   // Bundle's manifest.yaml `display_name` field — the persona an
   // operator actually uses in conversation (e.g. "Nexie"). When
@@ -181,7 +181,7 @@ export interface RunHeader {
   forked_from?: string;
   fork_anchor?: ForkAnchor;
   // source_hash mirrors the parent's workflow hash at fork time.
-  // Different from workflow_hash (the child's own) when the .iter has
+  // Different from workflow_hash (the child's own) when the workflow has
   // been edited between parent run and fork.
   source_hash?: string;
   // source describes the originating action that produced this run.
@@ -578,7 +578,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
 
 export interface CreateRunRequest {
   file_path: string;
-  // Inline .iter source — required in cloud mode (no shared FS),
+  // Inline workflow source — required in cloud mode (no shared FS),
   // ignored in local mode where file_path resolves on disk.
   source?: string;
   run_id?: string;
@@ -612,7 +612,7 @@ export interface CreateRunRequest {
   // for this run only. Node-level explicit `backend:` still wins.
   // Empty preserves the resolver chain (workflow default → env →
   // auto-detect). Useful for A/B-testing the same workflow against
-  // different backends without editing the .iter source.
+  // different backends without editing the workflow source.
   backend?: string;
 }
 

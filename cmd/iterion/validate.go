@@ -6,7 +6,7 @@ import (
 )
 
 var validateCmd = &cobra.Command{
-	Use:   "validate <file.iter|file.bot>",
+	Use:   "validate <file.bot|file.botz|bundle-dir>",
 	Short: "Parse, compile, and validate a workflow file",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

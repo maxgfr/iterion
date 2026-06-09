@@ -12,8 +12,8 @@ import (
 // falling back to the recipes shipped embedded in the binary when the
 // requested path does not exist on disk. This makes commands like
 //
-//	iterion run skill/minimal_linear.iter
-//	iterion run bots/whole_improve_loop.bot
+//	iterion run feature-dev/main.bot
+//	iterion run bots/whole-improve-loop/main.bot
 //
 // work from any working directory — the user does not have to
 // explicitly point at `<repo>/examples/...`. Bundle directories

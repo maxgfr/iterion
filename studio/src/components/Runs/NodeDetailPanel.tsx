@@ -29,7 +29,7 @@ import { formatToolCall, type ToolField, type TodoItem } from "./toolFormatters"
 
 interface Props {
   runId: string;
-  // The .iter source path for this run; used to wire "Open in editor".
+  // The workflow source path for this run; used to wire "Open in editor".
   filePath?: string;
   // All executions of the selected IR node, ordered by start time.
   // Empty array = no node selected. The active `exec` is derived from

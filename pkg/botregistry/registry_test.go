@@ -57,6 +57,43 @@ func TestList_MissingPathIsSkipped(t *testing.T) {
 	}
 }
 
+func TestList_IgnoresIterFilesInDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "legacy.iter"), `## ---
+## name: legacy
+## ---
+`)
+	writeFile(t, filepath.Join(dir, "current.bot"), `## ---
+## name: current
+## ---
+`)
+
+	entries, err := List(ListOptions{Paths: []string{dir}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries: %#v", len(entries), entries)
+	}
+	if entries[0].Name != "current" {
+		t.Errorf("Name = %q, want current", entries[0].Name)
+	}
+}
+
+func TestList_RejectsIterFileRoot(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy.iter")
+	writeFile(t, path, `## ---
+## name: legacy
+## ---
+`)
+
+	_, err := List(ListOptions{Paths: []string{path}})
+	if err == nil {
+		t.Fatal("expected .iter root to be rejected")
+	}
+}
+
 func TestList_BundleCarriesDisplayName(t *testing.T) {
 	dir := t.TempDir()
 	bundleDir := filepath.Join(dir, "whats-next")

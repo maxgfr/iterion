@@ -136,7 +136,7 @@ function Form({ cfg, setCfg }: FormProps) {
         </Field>
         <Field
           label="Workflow path"
-          hint=".iter, .bot, .botz, or unpacked-bundle dir. Path is resolved relative to the project root."
+          hint=".bot, .botz, or unpacked-bundle dir. Path is resolved relative to the project root."
         >
           <input
             className="input"

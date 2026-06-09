@@ -42,7 +42,7 @@ export function iterationColor(index: number): string {
 // `runtimeOverridden*` flags signal divergence from the declared value
 // so the UI can show a "live" badge. `effortIsResolvedDefault` is true
 // when `reasoningEffort` was filled from the provider's documented
-// default (registry) rather than declared in the .iter or set at
+// default (registry) rather than declared in the workflow or set at
 // runtime — used to render the badge in attenuated style.
 // `effortSupported` carries the model's supported effort levels so
 // EffortBar can normalise to the model's max (a gpt-5 node at "high"
@@ -385,4 +385,3 @@ function OverflowPopover({
     </Popover>
   );
 }
-

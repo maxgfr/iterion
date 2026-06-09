@@ -187,7 +187,7 @@ func RegenerateWhatsNextCatalog(workdir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("botregistry: read catalog template %s: %w", staticPath, err)
 	}
-	// Nexie routes to dispatchable bundles only. Loose .bot/.iter demo
+	// Nexie routes to dispatchable bundles only. Loose .bot demo
 	// files (examples/, smoke/) are not catalog bots — exclude them so
 	// the generated catalog matches the set the dispatcher can resolve.
 	bundles := make([]EntryWithSchema, 0, len(entries))

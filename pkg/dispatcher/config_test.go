@@ -10,11 +10,11 @@ import (
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
-	workflow := filepath.Join(dir, "wf.iter")
+	workflow := filepath.Join(dir, "wf.bot")
 	if err := os.WriteFile(workflow, []byte("workflow x:\n  done\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	body = strings.ReplaceAll(body, "{{WORKFLOW}}", "wf.iter")
+	body = strings.ReplaceAll(body, "{{WORKFLOW}}", "wf.bot")
 	cfgPath := filepath.Join(dir, "iterion.dispatcher.yaml")
 	if err := os.WriteFile(cfgPath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ agent:
 }
 
 func TestConfigMissingWorkflow(t *testing.T) {
-	p := writeConfig(t, `workflow: ./nope.iter
+	p := writeConfig(t, `workflow: ./nope.bot
 tracker:
   kind: native
 `)
@@ -227,13 +227,13 @@ workspace:
 }
 
 // writeConfigWithAssigneeWorkflow extends writeConfig by also creating
-// a sibling .iter for the named assignee so the validator's stat check
+// a sibling .bot for the named assignee so the validator's stat check
 // on assignee_workflows entries passes.
 func writeConfigWithAssigneeWorkflow(t *testing.T, body string) string {
 	t.Helper()
 	cfgPath := writeConfig(t, body)
 	dir := filepath.Dir(cfgPath)
-	if err := os.WriteFile(filepath.Join(dir, "bot.iter"), []byte("workflow x:\n  done\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "bot.bot"), []byte("workflow x:\n  done\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return cfgPath
@@ -244,7 +244,7 @@ func TestConfigAssigneeDispatch(t *testing.T) {
 tracker:
   kind: native
 assignee_workflows:
-  feature-bot: ./bot.iter
+  feature-bot: ./bot.bot
 assignee_dispatch:
   feature-bot:
     vars:
@@ -285,7 +285,7 @@ func TestConfigAssigneeDispatchBadTemplate(t *testing.T) {
 tracker:
   kind: native
 assignee_workflows:
-  feature-bot: ./bot.iter
+  feature-bot: ./bot.bot
 assignee_dispatch:
   feature-bot:
     vars:
@@ -326,7 +326,7 @@ func TestConfigAssigneeDispatchAttachmentsRejected(t *testing.T) {
 tracker:
   kind: native
 assignee_workflows:
-  feature-bot: ./bot.iter
+  feature-bot: ./bot.bot
 assignee_dispatch:
   feature-bot:
     attachments:

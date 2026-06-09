@@ -1,5 +1,5 @@
 class Iterion < Formula
-  desc "Workflow orchestration engine with a custom DSL (.iter files)"
+  desc "Workflow orchestration engine with a custom DSL (.bot files)"
   homepage "https://github.com/SocialGouv/iterion"
   version "0.14.0"
   license "MIT"

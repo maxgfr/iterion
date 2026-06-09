@@ -142,7 +142,7 @@ func validateScheduleEntry(e ScheduleEntry) error {
 		return fmt.Errorf("schedule name %q must not contain whitespace or path separators", e.Name)
 	}
 	if strings.TrimSpace(e.Bot) == "" {
-		return fmt.Errorf("--bot is required (path to a .bot/.iter workflow)")
+		return fmt.Errorf("--bot is required (path to a .bot workflow or .botz bundle)")
 	}
 	if err := validateCronExpr(e.Cron); err != nil {
 		return err

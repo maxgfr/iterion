@@ -72,7 +72,7 @@ function buildLLMMeta(
   const activeModel = override?.model ?? declared.model;
   // Caps lookup keys off the *declared* model because that's what
   // the prefetch effect populates the cache with. Runtime events
-  // sometimes log a canonical alias (e.g. event "gpt-5.5" vs .iter
+  // sometimes log a canonical alias (e.g. event "gpt-5.5" vs workflow
   // "openai/gpt-5.5") — the registry returns identical caps for
   // both, but the cache is keyed by the literal string.
   const capsModel = declared.model ?? activeModel;
@@ -83,7 +83,7 @@ function buildLLMMeta(
     : undefined;
   // Effective effort priority:
   //   1. runtime override (event llm_request)
-  //   2. value declared in the .iter (post-expansion would only show up
+  //   2. value declared in the workflow (post-expansion would only show up
   //      via the override path, so a literal here is what the user wrote)
   //   3. provider's documented default from the registry — flagged so
   //      the badge renders attenuated.
@@ -183,7 +183,7 @@ export default function RunCanvasIR({
   // `${backend} ${model}`. Populated once the workflow lands by
   // walking unique pairs and asking /api/effort-capabilities.
   // buildLLMMeta uses `default` to render an attenuated badge when
-  // the .iter declares no effort, and `supported` to normalise the
+  // the workflow declares no effort, and `supported` to normalise the
   // bar fill so a model's max always renders fully.
   const [effortCapsByPair, setEffortCapsByPair] = useState<
     Map<string, EffortCapabilities>
@@ -659,7 +659,7 @@ export default function RunCanvasIR({
     <div className="h-full w-full relative">
       {wf.stale_hash && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 px-2 py-1 text-[10px] rounded bg-warning-soft text-warning-fg border border-warning/60 shadow">
-          ⚠ The .iter source has changed since this run started; the
+          ⚠ The .bot source has changed since this run started; the
           structure shown may differ from what executed.
         </div>
       )}

@@ -59,7 +59,7 @@ func TestFinishRun_PausedForInputIsParkedNotRetried(t *testing.T) {
 			wsDir := filepath.Join(dir, "ws")
 			cfg := &Config{
 				Name:     "test",
-				Workflow: filepath.Join(t.TempDir(), "fake.iter"),
+				Workflow: filepath.Join(t.TempDir(), "fake.bot"),
 				Tracker:  TrackerConfig{Kind: "fake"},
 				Polling:  PollingConfig{IntervalMS: 50},
 				Agent: AgentConfig{

@@ -107,7 +107,7 @@ func newTestDispatcher(t *testing.T, runner Runner, ft *fakeTracker, polling tim
 	wsDir := dir + "/ws"
 	cfg := &Config{
 		Name:      "test",
-		Workflow:  t.TempDir() + "/fake.iter",
+		Workflow:  t.TempDir() + "/fake.bot",
 		Tracker:   TrackerConfig{Kind: "fake"},
 		Polling:   PollingConfig{IntervalMS: int(polling.Milliseconds())},
 		Agent:     AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000},

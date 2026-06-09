@@ -46,7 +46,7 @@ export default function ProjectPicker({ onNext }: Props) {
     <div className="max-w-xl flex flex-col gap-4">
       <h2 className="text-lg font-semibold">Where is your iterion project?</h2>
       <p className="text-fg-subtle text-sm">
-        Iterion projects are folders containing one or more <code>.iter</code>{" "}
+        Iterion projects are folders containing one or more <code>.bot</code>{" "}
         workflow files. Pick an existing one or create a new project (this
         runs <code>iterion init</code> in the chosen folder).
       </p>

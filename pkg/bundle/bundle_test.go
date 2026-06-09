@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-func TestDetect_IterFile(t *testing.T) {
+func TestDetect_BotFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "hello.iter")
+	path := filepath.Join(dir, "hello.bot")
 	if err := os.WriteFile(path, []byte("# stub"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -19,6 +19,16 @@ func TestDetect_IterFile(t *testing.T) {
 	if kind != KindIter {
 		t.Errorf("kind = %v, want KindIter", kind)
 	}
+}
+
+func TestDetect_RejectsIterFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hello.iter")
+	if err := os.WriteFile(path, []byte("# stub"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Detect(path)
+	errContains(t, err, "expected .bot or .botz")
 }
 
 func TestDetect_BotzArchive(t *testing.T) {
@@ -53,8 +63,7 @@ func TestDetect_DirWithoutBotIter(t *testing.T) {
 	}
 }
 
-func TestDetect_GzipMagicFallback(t *testing.T) {
-	// File without recognised extension but gzip header → treat as bundle.
+func TestDetect_RejectsBundleWithoutBotzExtension(t *testing.T) {
 	src := fixtureMinimalBundle(t)
 	dst := filepath.Join(t.TempDir(), "noext")
 	body, err := os.ReadFile(src)
@@ -64,13 +73,8 @@ func TestDetect_GzipMagicFallback(t *testing.T) {
 	if err := os.WriteFile(dst, body, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	kind, err := Detect(dst)
-	if err != nil {
-		t.Fatalf("detect: %v", err)
-	}
-	if kind != KindBundle {
-		t.Errorf("kind = %v, want KindBundle", kind)
-	}
+	_, err = Detect(dst)
+	errContains(t, err, "expected .bot or .botz")
 }
 
 func TestOpen_MinimalBundle(t *testing.T) {

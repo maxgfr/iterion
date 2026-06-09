@@ -3,12 +3,13 @@ package bundle
 import (
 	"compress/gzip"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/SocialGouv/iterion/pkg/dsl/workflowfile"
 )
 
 // botFileNames is the set of accepted workflow source file names at the
@@ -16,10 +17,8 @@ import (
 // `main.rs` convention, independent of the bundle directory name).
 var botFileNames = []string{"main.bot"}
 
-// Detect classifies path as a plain `.iter`/`.bot` file, a `.botz`
-// archive, or a directory bundle. The classifier reads the extension
-// first and falls back to gzip magic bytes for files without a
-// recognised extension.
+// Detect classifies path as a plain `.bot` file, a `.botz` archive, or a
+// directory bundle.
 func Detect(path string) (Kind, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -38,25 +37,10 @@ func Detect(path string) (Kind, error) {
 	if strings.HasSuffix(lower, ".botz") {
 		return KindBundle, nil
 	}
-	if strings.HasSuffix(lower, ".iter") || strings.HasSuffix(lower, ".bot") {
+	if workflowfile.IsWorkflowFile(lower) {
 		return KindIter, nil
 	}
-	// Magic-byte fallback for files with unrecognised extensions.
-	if isGzipFile(path) {
-		return KindBundle, nil
-	}
-	return KindIter, nil
-}
-
-func isGzipFile(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	buf := make([]byte, 2)
-	n, _ := io.ReadFull(f, buf)
-	return n == 2 && buf[0] == 0x1f && buf[1] == 0x8b
+	return KindIter, fmt.Errorf("bundle: unsupported workflow extension for %s (expected .bot or .botz)", path)
 }
 
 // Open loads a `.botz` archive from path, extracting it to a stable

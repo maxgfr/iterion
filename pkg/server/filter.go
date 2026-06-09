@@ -11,8 +11,8 @@ func isSkippedDir(name string) bool {
 	return strings.HasPrefix(name, ".") || name == "node_modules"
 }
 
-// isWorkflowFile returns true if the path is a recognised workflow file
-// (.iter or .bot). See pkg/dsl/workflowfile for the canonical list.
+// isWorkflowFile returns true if the path is a recognised workflow source
+// file. See pkg/dsl/workflowfile for the canonical list.
 func isWorkflowFile(path string) bool {
 	return workflowfile.IsWorkflowFile(path)
 }

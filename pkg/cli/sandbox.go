@@ -18,7 +18,7 @@ type SandboxDoctorOptions struct {
 	// image resolvability, k8s compatibility, network syntax, …) and
 	// makes the command exit non-zero on any failure.
 	Strict bool
-	// File is an optional workflow (.iter/.bot/.botz/dir) whose sandbox:
+	// File is an optional workflow (.bot/.botz/dir) whose sandbox:
 	// block is resolved and validated. Empty runs host-level checks only.
 	File string
 	// Sandbox / SandboxDefaultImage / SandboxHostState mirror the

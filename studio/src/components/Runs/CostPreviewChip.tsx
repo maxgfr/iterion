@@ -10,7 +10,7 @@ interface Props {
 }
 
 // Cheap, non-cryptographic source digest for the react-query cache key.
-// Stringifying the entire .iter source as a key causes lookups to
+// Stringifying the entire workflow source as a key causes lookups to
 // stringify-then-compare on every render; the digest collapses that to
 // a fixed-length number while still invalidating on real edits.
 function digest(s: string | undefined): number {

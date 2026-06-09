@@ -11,7 +11,7 @@ import BotMetadataForm from "@/components/Panels/BotMetadataForm";
 import { useBotForOpenFile } from "@/hooks/useBotForOpenFile";
 import { Tabs } from "@/components/ui";
 
-// `comments` keeps the compact "##" glyph (the .iter comment sigil) so the
+// `comments` keeps the compact "##" glyph (the DSL comment sigil) so the
 // tab row doesn't overflow the inspector's default width, but carries a
 // title tooltip so the label isn't a mystery on first encounter. The other
 // tabs are short enough to spell out.

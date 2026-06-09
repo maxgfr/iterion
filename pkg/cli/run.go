@@ -16,6 +16,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/backend/recipe"
 	"github.com/SocialGouv/iterion/pkg/bundle"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
+	"github.com/SocialGouv/iterion/pkg/dsl/workflowfile"
 	"github.com/SocialGouv/iterion/pkg/git"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/runtime"
@@ -26,12 +27,12 @@ import (
 
 // RunOptions holds the configuration for the run command.
 type RunOptions struct {
-	File          string               // .iter file path
+	File          string               // .bot file path or .botz bundle path
 	Recipe        string               // recipe JSON file path (alternative to File)
 	Vars          map[string]string    // --var key=value overrides
 	Preset        string               // --preset <name>: applies an in-source named preset before --var
 	RunID         string               // explicit run ID (auto-generated if empty)
-	StoreDir      string               // store directory (default: nearest .iterion ancestor of the .iter file, or alongside it)
+	StoreDir      string               // store directory (default: nearest .iterion ancestor of the workflow, or alongside it)
 	Timeout       time.Duration        // maximum run duration (0 = no limit)
 	LogLevel      string               // log level (default: "info", env: ITERION_LOG_LEVEL)
 	NoInteractive bool                 // disable interactive TTY prompting on human pause
@@ -124,7 +125,7 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 	}
 
 	// Resolve the workflow source: either via recipe (which may
-	// override prompts/tools/budget) or directly from a .iter file.
+	// override prompts/tools/budget) or directly from a .bot file.
 	// Recipe overrides MUST be applied before BuildExecutor — the
 	// executor snapshots Prompts/Schemas/ToolPolicy/Budget/Compaction
 	// at construction time, so feeding it the raw workflow would make
@@ -339,7 +340,7 @@ func buildEngine(
 }
 
 // resolveWorkflow loads the workflow either via a recipe, a `.botz`
-// bundle, or directly from a .iter file. When a recipe is given, its
+// bundle, or directly from a .bot file. When a recipe is given, its
 // overrides are applied before the workflow is returned so the caller
 // can hand a fully-realised workflow to BuildExecutor (which snapshots
 // the policy fields at construction time). When the input is a
@@ -366,6 +367,9 @@ func resolveWorkflow(opts RunOptions) (wf *ir.Workflow, hash, filePath, displayN
 			return nil, "", "", "", nil, cleanup, fmt.Errorf("recipe %q does not specify a workflow path; provide --file", spec.Name)
 		}
 		filePath = ResolveRecipePath(filePath)
+		if !workflowfile.IsWorkflowFile(filePath) {
+			return nil, "", "", "", nil, cleanup, fmt.Errorf("recipe workflow path %q must end in .bot", filePath)
+		}
 		raw, h, compileErr := runview.CompileWorkflowWithHash(filePath)
 		if compileErr != nil {
 			return nil, "", "", "", nil, cleanup, compileErr
@@ -377,7 +381,7 @@ func resolveWorkflow(opts RunOptions) (wf *ir.Workflow, hash, filePath, displayN
 		return applied, h, filePath, spec.Name + " (" + applied.Name + ")", nil, cleanup, nil
 	}
 	if opts.File == "" {
-		return nil, "", "", "", nil, cleanup, fmt.Errorf("provide a .iter file, .botz bundle, or --recipe")
+		return nil, "", "", "", nil, cleanup, fmt.Errorf("provide a .bot file, .botz bundle, or --recipe")
 	}
 	resolved := ResolveRecipePath(opts.File)
 	kind, detectErr := bundle.Detect(resolved)
@@ -415,8 +419,8 @@ func resolveWorkflow(opts RunOptions) (wf *ir.Workflow, hash, filePath, displayN
 		}
 		return raw, h, opened.IterPath, display, opened, cleanup, nil
 	}
-	// F-NEW-4: when the operator points at a bare `.bot` / `.iter`
-	// file whose parent directory looks like a bundle (has skills/ or
+	// F-NEW-4: when the operator points at a bare `main.bot` file whose
+	// parent directory looks like a bundle (has skills/ or
 	// manifest.yaml), promote to KindBundleDir on the parent so the
 	// runtime mirrors the bundled skills/ into .claude/skills/ at run
 	// time. Without this promotion, prompts that read
@@ -448,8 +452,8 @@ func resolveWorkflow(opts RunOptions) (wf *ir.Workflow, hash, filePath, displayN
 
 // bundleParentOf returns the absolute path of `path`'s parent
 // directory when the parent looks like a bundle (has skills/ or
-// manifest.yaml) AND `path` is named main.bot / main.iter (the canonical
-// bundle entrypoint). Returns "" when no promotion is warranted.
+// manifest.yaml) AND `path` is named main.bot (the canonical bundle
+// entrypoint). Returns "" when no promotion is warranted.
 // Conservative on purpose — promoting an arbitrary `*.bot` inside a
 // folder with a sibling `skills/` could surprise operators who
 // intentionally split bundle vs. one-off bots.
@@ -459,7 +463,7 @@ func bundleParentOf(path string) string {
 		return ""
 	}
 	base := filepath.Base(abs)
-	if base != "main.bot" && base != "main.iter" {
+	if base != "main.bot" {
 		return ""
 	}
 	parent := filepath.Dir(abs)

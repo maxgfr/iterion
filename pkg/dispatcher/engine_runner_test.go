@@ -11,7 +11,7 @@ import (
 
 // TestEngineRunnerAcceptsBundleDir verifies that an unpacked bundle
 // directory (manifest.yaml + main.bot alongside) is a valid workflow
-// source — the dispatcher can run it just like a plain `.iter`.
+// source — the dispatcher can run it just like a plain `.bot`.
 func TestEngineRunnerAcceptsBundleDir(t *testing.T) {
 	// bots/secured-renovacy/ has the canonical bundle shape:
 	// manifest.yaml + main.bot + prompts/. Walk up from the test
@@ -39,29 +39,29 @@ func TestEngineRunnerAcceptsBundleDir(t *testing.T) {
 		t.Fatal("workflow hash is empty")
 	}
 	// The compiled bundle path should resolve to the bundle's
-	// inner .iter, not the directory.
+	// inner .bot, not the directory.
 	if !filepath.IsAbs(r.workflowPath) {
 		t.Fatalf("workflowPath should be absolute: %s", r.workflowPath)
 	}
 }
 
-// TestEngineRunnerAcceptsPlainIter confirms the default (non-bundle)
+// TestEngineRunnerAcceptsPlainBot confirms the default (non-bundle)
 // path still works after the bundle branch was added.
-func TestEngineRunnerAcceptsPlainIter(t *testing.T) {
+func TestEngineRunnerAcceptsPlainBot(t *testing.T) {
 	dir := t.TempDir()
-	iter := filepath.Join(dir, "hello.iter")
+	bot := filepath.Join(dir, "hello.bot")
 	src := "workflow hello:\n  entry: done\n"
-	if err := os.WriteFile(iter, []byte(src), 0o644); err != nil {
-		t.Fatalf("write iter: %v", err)
+	if err := os.WriteFile(bot, []byte(src), 0o644); err != nil {
+		t.Fatalf("write bot: %v", err)
 	}
 
 	logger := iterlog.New(iterlog.LevelError, &bytes.Buffer{})
-	r, err := NewEngineRunner(iter, logger)
+	r, err := NewEngineRunner(bot, logger)
 	if err != nil {
 		t.Fatalf("NewEngineRunner: %v", err)
 	}
 	defer r.Close()
 	if r.bundle != nil {
-		t.Fatal("plain .iter should not carry a bundle handle")
+		t.Fatal("plain .bot should not carry a bundle handle")
 	}
 }

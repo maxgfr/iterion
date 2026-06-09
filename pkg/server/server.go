@@ -1,6 +1,6 @@
 // Package server provides an HTTP API for the iterion studio.
 // It wraps the parser, compiler, and unparser to provide endpoints
-// for parsing .iter files, validating workflows, and generating .iter text.
+// for parsing workflow files, validating workflows, and generating DSL text.
 package server
 
 import (
@@ -588,7 +588,7 @@ func (s *Server) routes() {
 	// CORS preflight handler — only echoes ACAO when the Origin is an
 	// allowed loopback origin. The wildcard ACAO previously emitted here
 	// (combined with POST /api/files/save accepting JSON bodies) allowed
-	// any browser tab the user visited to write attacker-controlled .iter
+	// any browser tab the user visited to write attacker-controlled workflow
 	// files into WorkDir, which iterion would then execute under `sh -c`
 	// the next time the user ran the workflow — drive-by RCE on the dev
 	// machine. The 'local-only server' framing didn't address this because
@@ -811,7 +811,7 @@ func (s *Server) handleParse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pr := parser.Parse("studio.iter", req.Source)
+	pr := parser.Parse("studio.bot", req.Source)
 
 	var diags []string
 	for _, d := range pr.Diagnostics {
@@ -1465,7 +1465,7 @@ func (s *Server) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !workflowfile.IsWorkflowFile(req.Path) {
-		httpError(w, http.StatusBadRequest, "filename must end in .iter or .bot")
+		httpError(w, http.StatusBadRequest, "filename must end in .bot")
 		return
 	}
 	absPath, err := s.safePath(req.Path)

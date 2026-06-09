@@ -153,6 +153,11 @@ export default function Toolbar() {
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
+      if (!file.name.endsWith(".bot")) {
+        addToast("Only .bot files can be imported", "error");
+        e.target.value = "";
+        return;
+      }
       if (!(await confirmDiscard())) {
         e.target.value = "";
         return;
@@ -170,7 +175,7 @@ export default function Toolbar() {
       }
       e.target.value = "";
     },
-    [setDocument, setDiagnostics, setCurrentFilePath, setCurrentSource, confirmDiscard],
+    [setDocument, setDiagnostics, setCurrentFilePath, setCurrentSource, confirmDiscard, addToast],
   );
 
   const handleValidate = useCallback(async () => {
@@ -226,10 +231,7 @@ export default function Toolbar() {
 
   const handleSaveAs = useCallback(async () => {
     if (!document || !saveFileName) return;
-    const fileName =
-      saveFileName.endsWith(".iter") || saveFileName.endsWith(".bot")
-        ? saveFileName
-        : `${saveFileName}.bot`;
+    const fileName = saveFileName.endsWith(".bot") ? saveFileName : `${saveFileName}.bot`;
     try {
       const result = await api.saveFile(fileName, document);
       setCurrentFilePath(result.path);
@@ -509,7 +511,7 @@ export default function Toolbar() {
         </ToolbarGroup>
       )}
 
-      <input ref={fileInputRef} type="file" accept=".iter,.bot" className="hidden" onChange={handleImport} />
+      <input ref={fileInputRef} type="file" accept=".bot" className="hidden" onChange={handleImport} />
 
       {/* Right-aligned: file status → Launch run; then navigation icons */}
       <div className="ml-auto flex items-center gap-3">

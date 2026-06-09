@@ -25,7 +25,7 @@ type ValidateResult struct {
 	CompileDiagnostics []string `json:"compile_diagnostics,omitempty"`
 }
 
-// RunValidate parses, compiles, and validates an .iter file or `.botz`
+// RunValidate parses, compiles, and validates a .bot file or `.botz`
 // archive. For bundles, the workflow source is extracted to a cache
 // directory and validated; bundle metadata (name, version) is reported
 // alongside the workflow result.
@@ -33,7 +33,7 @@ func RunValidate(path string, p *Printer) error {
 	path = ResolveRecipePath(path)
 
 	// Bundle dispatch: detect .botz or directory bundles and unpack
-	// before validating. Plain .iter/.bot paths fall through unchanged.
+	// before validating. Plain .bot paths fall through unchanged.
 	kind, err := bundle.Detect(path)
 	if err != nil {
 		return fmt.Errorf("cannot inspect %s: %w", path, err)

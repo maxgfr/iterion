@@ -61,9 +61,9 @@ export function inferMonacoLanguage(path: string): string {
   const base = path.split("/").pop() ?? path;
   const named = FILENAME_TO_LANG[base];
   if (named) return named;
-  // .iter / .bot are iterion's own DSL — not registered globally for
+  // .bot is iterion's own DSL — not registered globally for
   // this dialog, so plaintext keeps Monaco from trying to tokenize.
-  if (base.endsWith(".iter") || base.endsWith(".bot")) return "plaintext";
+  if (base.endsWith(".bot")) return "plaintext";
   const dot = base.lastIndexOf(".");
   if (dot < 0) return "plaintext";
   const ext = base.slice(dot + 1).toLowerCase();

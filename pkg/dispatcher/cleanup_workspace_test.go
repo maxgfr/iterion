@@ -19,7 +19,7 @@ func newCleanupTestDispatcher(t *testing.T, persist WorkspacePersistPolicy, wsRo
 	t.Helper()
 	cfg := &Config{
 		Name:      "test",
-		Workflow:  t.TempDir() + "/fake.iter",
+		Workflow:  t.TempDir() + "/fake.bot",
 		Tracker:   TrackerConfig{Kind: "fake"},
 		Polling:   PollingConfig{IntervalMS: 50},
 		Agent:     AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000, RunningState: "in_progress"},

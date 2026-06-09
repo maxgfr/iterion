@@ -191,7 +191,7 @@ var (
 	launchRunSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "file_path": {"type": "string", "description": "Absolute or project-relative path to the .iter recipe."},
+    "file_path": {"type": "string", "description": "Absolute or project-relative path to the .bot workflow."},
     "vars":      {"type": "object", "description": "Workflow vars overrides as a string-keyed map.", "additionalProperties": {"type": "string"}},
     "timeout":   {"type": "string", "description": "Go-style duration cap (e.g. '30m', '2h'). Empty disables."},
     "merge_into":     {"type": "string", "description": "Optional worktree-finalisation merge target branch."},

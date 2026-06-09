@@ -24,7 +24,7 @@ Stop coding like a mortal. Define your bots as readable `.bot` files — chain a
 - [Features](#features)
 - [Meet the legion](#meet-the-legion)
 - [Quick Start](#quick-start)
-- [`.iter` vs `.bot`](#iter-vs-bot)
+- [Workflow files](#workflow-files)
 - [A Taste of the DSL](#a-taste-of-the-dsl)
 - [Documentation](#documentation)
 - [License](#license)
@@ -33,12 +33,12 @@ Stop coding like a mortal. Define your bots as readable `.bot` files — chain a
 
 ## 🧩 What is Iterion?
 
-*If you've ever noticed yourself repeating the same prompt-and-review patterns while vibe-coding with an LLM — "ask the model, eyeball the diff, ask it to fix what it missed, run the tests, ask again" — and wondered how to **automate and optimize** that loop, Iterion is built for you.* Capture the pattern once as an `.iter` workflow, give it budget caps, parallel reviewers, judges and human gates, and let the engine run it deterministically every time.
+*If you've ever noticed yourself repeating the same prompt-and-review patterns while vibe-coding with an LLM — "ask the model, eyeball the diff, ask it to fix what it missed, run the tests, ask again" — and wondered how to **automate and optimize** that loop, Iterion is built for you.* Capture the pattern once as a `.bot` workflow, give it budget caps, parallel reviewers, judges and human gates, and let the engine run it deterministically every time.
 
-Iterion is a workflow engine that turns `.iter` files into executable AI pipelines. You describe *what* your agents should do — review code, plan fixes, check compliance, ask a human — and Iterion handles *how*: scheduling branches in parallel, enforcing budgets, persisting state, and routing between nodes.
+Iterion is a workflow engine that turns `.bot` files into executable AI pipelines. You describe *what* your agents should do — review code, plan fixes, check compliance, ask a human — and Iterion handles *how*: scheduling branches in parallel, enforcing budgets, persisting state, and routing between nodes.
 
 ```
-.iter file → Parse → Compile → Validate → Execute
+.bot file → Parse → Compile → Validate → Execute
                                             │
                     ┌───────────────────────┐│
                     │  agents, judges,      ││
@@ -59,7 +59,7 @@ Think of it as a DAG runner purpose-built for LLM workflows — with first-class
 
 ### Authoring & orchestration
 
-- 📝 **Declarative DSL** — Human-readable `.iter` files with indentation-based syntax
+- 📝 **Declarative DSL** — Human-readable `.bot` files with indentation-based syntax
 - 🤖 **Multi-agent orchestration** — Chain agents, judges, routers, and await-based convergence into complex graphs
 - 🖥️ **Visual editor** — Browser-based workflow builder with drag-and-drop, live validation, and source view
 - 🙋 **Human-in-the-loop** — Pause for human input, auto-answer via LLM, or let the LLM decide when to ask
@@ -67,7 +67,7 @@ Think of it as a DAG runner purpose-built for LLM workflows — with first-class
 - 🧭 **4 routing modes** — `fan_out_all`, `condition`, `round_robin`, and `llm`-driven routing
 - 🔁 **Bounded loops** — Retry and refinement cycles with configurable iteration limits
 - 🔲 **Structured I/O** — Typed schemas for inputs and outputs with enum constraints
-- 🔗 **MCP support** — Declare MCP servers directly in `.iter` files (`stdio`, `http`)
+- 🔗 **MCP support** — Declare MCP servers directly in `.bot` files (`stdio`, `http`)
 - 🧪 **Recipe system** — Bundle workflows with presets for comparison and benchmarking
 - 📐 **Mermaid diagrams** — Auto-generate visual workflow diagrams (compact / detailed / full)
 
@@ -172,9 +172,9 @@ All run data (events, artifacts, interactions) is stored in `.iterion/runs/`.
 
 ---
 
-## 🤖 `.iter` vs `.bot`
+## 🤖 Workflow files
 
-Iterion accepts two interchangeable file extensions: **`.iter`** for raw or experimental DSL (didactic examples, coverage tests, single-purpose scripts) and **`.bot`** for productized, operational bots (with human gates, mitigation steps, reports, and a documented runbook). The parser, compiler, runtime, and studio treat them identically — the distinction is narrative only. `iterion init` produces a `.bot` file by default; the `examples/` directory ships both, with `.bot` reserved for examples meant to be run unmodified against real systems.
+Iterion accepts plain workflow sources as **`.bot`** files. The former `.iter` extension is no longer supported at the CLI, server, dispatcher, or studio boundaries.
 
 Bots can also be shipped as **`.botz`** — a tar.gz packaging the workflow with adjacent resources (Claude Code skills, reusable prompts, default attachments, manifest). Scaffold with `iterion bundle init`, build with `iterion bundle pack`, run with `iterion run my.botz`. See [docs/bundles.md](docs/bundles.md).
 
@@ -231,7 +231,7 @@ The full documentation lives under [`docs/`](docs/) — start with the [document
 - [docs/skill.md](docs/skill.md) — install Iterion as an AI agent skill (Claude Code, Cursor, Copilot…)
 
 **Author workflows**
-- [docs/dsl.md](docs/dsl.md) — full `.iter` DSL reference
+- [docs/dsl.md](docs/dsl.md) — full `.bot` DSL reference
 - [docs/routers.md](docs/routers.md) — routing modes deep dive
 - [docs/recipes.md](docs/recipes.md) — preset-driven runs (benchmarking, prompt comparison)
 - [docs/delegation.md](docs/delegation.md) — `model:` vs `backend:` (claude_code, codex)

@@ -1,8 +1,8 @@
-// Package botregistry discovers bots on disk: single .bot/.iter files
-// and .botz bundles. It is the shared layer used by the `iterion bots
-// list` CLI command, the studio HTTP server (GET /api/v1/bots), and the
-// dispatcher when resolving a per-ticket bot override to a workflow
-// file path.
+// Package botregistry discovers bots on disk: single .bot files and
+// .botz bundle directories. It is the shared layer used by the
+// `iterion bots list` CLI command, the studio HTTP server
+// (GET /api/v1/bots), and the dispatcher when resolving a per-ticket
+// bot override to a workflow file path.
 //
 // Discovery is purely metadata (name, description, triggers,
 // capabilities). The companion file schema.go layers on the workflow's
@@ -21,6 +21,7 @@ import (
 	"go.yaml.in/yaml/v2"
 
 	"github.com/SocialGouv/iterion/pkg/bundle"
+	"github.com/SocialGouv/iterion/pkg/dsl/workflowfile"
 )
 
 // Entry is one bot discovered by List. Path is the file (single .bot)
@@ -77,7 +78,7 @@ type Entry struct {
 	ManifestEnabled bool `json:"manifest_enabled" yaml:"manifest_enabled"`
 
 	// IsBundleDir reports whether this entry is a bundle directory
-	// (manifest.yaml + main.bot) rather than a loose .bot/.iter file.
+	// (manifest.yaml + main.bot) rather than a loose .bot file.
 	// The studio uses it to gate manifest editing — only bundles have a
 	// manifest.yaml to write.
 	IsBundleDir bool `json:"is_bundle,omitempty" yaml:"is_bundle,omitempty"`
@@ -92,7 +93,7 @@ type Entry struct {
 
 // IsBundle reports whether the entry came from a .botz bundle (Path
 // points at a directory containing manifest.yaml + main.bot) rather
-// than a single .bot/.iter file.
+// than a single .bot file.
 func (e Entry) IsBundle() bool {
 	info, err := os.Stat(e.Path)
 	return err == nil && info.IsDir()
@@ -237,7 +238,7 @@ func DefaultPaths(workDir string) []string {
 
 // discoverBots walks each root and produces one Entry per discovered
 // bot. Bundles (directories with manifest.yaml + main.bot) collapse
-// into one entry; individual .bot/.iter files become one entry each.
+// into one entry; individual .bot files become one entry each.
 // Missing roots are skipped silently so callers can pass optimistic
 // default paths.
 func discoverBots(roots []string) ([]Entry, error) {
@@ -253,6 +254,9 @@ func discoverBots(roots []string) ([]Entry, error) {
 			return nil, fmt.Errorf("bots: stat %s: %w", root, err)
 		}
 		if !info.IsDir() {
+			if !workflowfile.IsWorkflowFile(root) {
+				return nil, fmt.Errorf("bots: unsupported bot file extension for %s (expected .bot)", root)
+			}
 			e, err := parseBotFile(root)
 			if err != nil {
 				return nil, err
@@ -284,7 +288,7 @@ func discoverBots(roots []string) ([]Entry, error) {
 				return nil
 			}
 			name := d.Name()
-			if !strings.HasSuffix(name, ".bot") && !strings.HasSuffix(name, ".iter") {
+			if !workflowfile.IsWorkflowFile(name) {
 				return nil
 			}
 			e, err := parseBotFile(path)
@@ -346,7 +350,7 @@ func parseBotFile(path string) (*Entry, error) {
 		return nil, fmt.Errorf("bots: read %s: %w", path, err)
 	}
 	fm := parseFrontmatterBody(raw)
-	// Loose .bot/.iter files carry no manifest, so they default to
+	// Loose .bot files carry no manifest, so they default to
 	// enabled (overlay may still flip them in List) and are not
 	// manifest-editable.
 	e := &Entry{Path: path, Enabled: true, ManifestEnabled: true}
@@ -358,7 +362,11 @@ func parseBotFile(path string) (*Entry, error) {
 	}
 	if e.Name == "" {
 		base := filepath.Base(path)
-		e.Name = strings.TrimSuffix(strings.TrimSuffix(base, ".bot"), ".iter")
+		if ext := filepath.Ext(base); strings.EqualFold(ext, ".bot") {
+			e.Name = strings.TrimSuffix(base, ext)
+		} else {
+			e.Name = base
+		}
 	}
 	if e.Description == "" {
 		e.Description = leadingCommentDescription(raw)

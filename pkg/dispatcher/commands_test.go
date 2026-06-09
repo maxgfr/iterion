@@ -68,7 +68,7 @@ func TestFinishRun_StampsLastRunOnNativeTracker(t *testing.T) {
 	storeDir := filepath.Join(dir, "store")
 	cfg := &Config{
 		Name:      "test",
-		Workflow:  t.TempDir() + "/fake.iter",
+		Workflow:  t.TempDir() + "/fake.bot",
 		Tracker:   TrackerConfig{Kind: "fake"},
 		Polling:   PollingConfig{IntervalMS: 50},
 		Agent:     AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000, RunningState: "in_progress"},
@@ -161,7 +161,7 @@ func TestFinishRun_StampsOnFailureToo(t *testing.T) {
 	wsDir := filepath.Join(dir, "ws")
 	cfg := &Config{
 		Name:      "test",
-		Workflow:  t.TempDir() + "/fake.iter",
+		Workflow:  t.TempDir() + "/fake.bot",
 		Tracker:   TrackerConfig{Kind: "fake"},
 		Polling:   PollingConfig{IntervalMS: 50},
 		Agent:     AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000, RunningState: "in_progress"},
@@ -250,7 +250,7 @@ func TestDispatch_SkipsUnresolvableExplicitBot(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{
 		Name:      "test",
-		Workflow:  t.TempDir() + "/fake.iter",
+		Workflow:  t.TempDir() + "/fake.bot",
 		Tracker:   TrackerConfig{Kind: "fake"},
 		Polling:   PollingConfig{IntervalMS: 50},
 		Agent:     AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000, RunningState: "in_progress"},
@@ -319,7 +319,7 @@ func TestDispatchSkip_SurfacedThenPruned(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{
 		Name:      "test",
-		Workflow:  t.TempDir() + "/fake.iter",
+		Workflow:  t.TempDir() + "/fake.bot",
 		Tracker:   TrackerConfig{Kind: "fake"},
 		Polling:   PollingConfig{IntervalMS: 50},
 		Agent:     AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000, RunningState: "in_progress"},
@@ -390,7 +390,7 @@ func TestDispatch_StampsLastRunAtStart(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{
 		Name:      "test",
-		Workflow:  t.TempDir() + "/fake.iter",
+		Workflow:  t.TempDir() + "/fake.bot",
 		Tracker:   TrackerConfig{Kind: "fake"},
 		Polling:   PollingConfig{IntervalMS: 30},
 		Agent:     AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000, RunningState: "in_progress"},
@@ -455,7 +455,7 @@ func TestFinishRun_WarnsOnZeroCommit(t *testing.T) {
 		storeDir := filepath.Join(dir, "store")
 		cfg := &Config{
 			Name:      "test",
-			Workflow:  t.TempDir() + "/fake.iter",
+			Workflow:  t.TempDir() + "/fake.bot",
 			Tracker:   TrackerConfig{Kind: "fake"},
 			Polling:   PollingConfig{IntervalMS: 50},
 			Agent:     AgentConfig{MaxConcurrent: 4, MaxRetryBackoffMS: 1000, RunningState: "in_progress"},

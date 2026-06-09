@@ -16,7 +16,7 @@ function matchesBundleMain(filePath: string, bot: BotEntryWithSchema): boolean {
 /**
  * useBotForOpenFile resolves the bundle bot whose `main.bot` is the file
  * currently open in the editor, or null when the open file is not a
- * bundle's main.bot (loose .bot / .iter, or no file). Drives the
+ * bundle's main.bot (loose .bot, or no file). Drives the
  * conditional Inspector "Bot" metadata tab. Triggers a one-time bots
  * fetch so the tab works on a cold editor load.
  */
