@@ -638,6 +638,10 @@ func (p *parser) parseSecretField() *ast.SecretField {
 			sf.MountPath = p.expectString()
 		case "env":
 			sf.Env = p.expectStringOrIdent()
+		case "optional":
+			if v := p.parseBool(); v != nil {
+				sf.Optional = *v
+			}
 		case "hosts":
 			sf.Hosts = p.parseStringList()
 		case "description":

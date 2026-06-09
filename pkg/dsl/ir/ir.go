@@ -710,6 +710,7 @@ type Secret struct {
 	As          string
 	MountPath   string
 	Env         string
+	Optional    bool // file secret: skip the mount (no error) when unresolved
 	Hosts       []string
 	Description string
 }

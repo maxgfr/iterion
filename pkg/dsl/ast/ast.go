@@ -211,6 +211,7 @@ type SecretField struct {
 	As          string   // ""/"value" (placeholder) or "file" (mounted file)
 	MountPath   string   // in-sandbox path for file secrets; empty = runtime default
 	Env         string   // optional env var pointing at MountPath for file secrets
+	Optional    bool     // file secret: skip the mount (no error) when unresolved
 	Hosts       []string // approved egress hosts (nil = no restriction)
 	Description string
 	Span        Span

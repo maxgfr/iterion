@@ -33,6 +33,10 @@ secrets:                            # optional; agent sees only an opaque placeh
   deploy_key:
     value: "${DEPLOY_KEY}"
     hosts: ["api.github.com"]        # egress scoping (Layer 2). Reference as {{secrets.deploy_key}}
+  kubeconfig:                        # FILE secret: mounted read-only in the sandbox; agent gets the path
+    as: file                        #   {{secrets.kubeconfig}} renders /run/iterion/secrets/kubeconfig
+    env: KUBECONFIG                 #   optional env var pointing at the file
+    optional: true                  #   skip the mount (no error) when unresolved
 
 schema verdict:
   approved:   bool

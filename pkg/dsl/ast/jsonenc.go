@@ -149,6 +149,7 @@ type jsonSecretField struct {
 	As          string   `json:"as,omitempty"`
 	MountPath   string   `json:"mount_path,omitempty"`
 	Env         string   `json:"env,omitempty"`
+	Optional    bool     `json:"optional,omitempty"`
 	Hosts       []string `json:"hosts,omitempty"`
 	Description string   `json:"description,omitempty"`
 }
@@ -858,6 +859,7 @@ func secretsBlockToJSON(s *SecretsBlock) *jsonSecretsBlock {
 			As:          f.As,
 			MountPath:   f.MountPath,
 			Env:         f.Env,
+			Optional:    f.Optional,
 			Hosts:       f.Hosts,
 			Description: f.Description,
 		})
@@ -1260,6 +1262,7 @@ func secretsBlockFromJSON(js *jsonSecretsBlock) *SecretsBlock {
 			As:          jf.As,
 			MountPath:   jf.MountPath,
 			Env:         jf.Env,
+			Optional:    jf.Optional,
 			Hosts:       jf.Hosts,
 			Description: jf.Description,
 		})

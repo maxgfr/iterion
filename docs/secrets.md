@@ -110,6 +110,35 @@ duplicate separators, trailing slash, or `/`). Prefer the default
 directory: the drivers create/mount it for the run. Custom file targets
 depend on the parent directory already existing in the sandbox image.
 
+#### `optional: true`
+
+By default a declared file secret with no resolved value (no `value:`
+expr, no host env, no stored/bound secret) is a hard run error. Mark it
+`optional: true` to skip the mount silently instead — for a bot that
+only needs the credential on *some* runs:
+
+```iter
+secrets:
+  forge_token:
+    as: file
+    optional: true   # mounted when bound/resolved; skipped otherwise
+```
+
+This is how a forge-agnostic reviewer (Revi) accepts an org's posting
+token on an unattended webhook launch (the org binds its credential to
+`forge_token`) while still running locally with host CLI auth when it
+isn't provided. The agent reads the file path/env only — never the
+contents.
+
+#### Recipe: deploy to a real test instance + e2e loop
+
+[`examples/deploy-e2e.bot`](../examples/deploy-e2e.bot) shows the full
+pattern: a `kubeconfig` (with `env: KUBECONFIG`) and a host-scoped
+`deploy_token`, both `as: file` + `optional: true`, mounted into a
+`sandbox: auto` run where the agent builds, redeploys and validates the
+deployment end-to-end (playwright MCP) in a bounded retry loop — passing
+the secret *paths* to its commands, never reading the bytes.
+
 Driver behaviour:
 
 - Docker/Podman: writes payloads to private host temp files, mounts the

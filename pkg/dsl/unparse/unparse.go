@@ -452,6 +452,9 @@ func writeSecretsBlock(b *strings.Builder, sb *ast.SecretsBlock, indent string) 
 		if s.Env != "" {
 			fmt.Fprintf(b, "%s    env: %q\n", indent, s.Env)
 		}
+		if s.Optional {
+			fmt.Fprintf(b, "%s    optional: true\n", indent)
+		}
 		if len(s.Hosts) > 0 {
 			fmt.Fprintf(b, "%s    hosts: [%s]\n", indent, quoteList(s.Hosts))
 		}
