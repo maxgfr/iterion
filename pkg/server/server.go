@@ -35,6 +35,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dsl/parser"
 	"github.com/SocialGouv/iterion/pkg/dsl/unparse"
 	"github.com/SocialGouv/iterion/pkg/dsl/workflowfile"
+	"github.com/SocialGouv/iterion/pkg/knowledge"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/secrets"
@@ -135,6 +136,11 @@ type Config struct {
 	// name. When non-nil, the server registers the bot-binding CRUD and
 	// the cloud publisher consults it during secret resolution.
 	BotBindings secrets.BotSecretBindingStore
+
+	// MemoryStore backs the shared-knowledge REST surface
+	// (/api/memory/*). nil → the local filesystem store. Cloud mode
+	// passes the Mongo store so the studio reads the tenant's memory.
+	MemoryStore knowledge.MemoryStore
 
 	// RunSecrets is the per-run sealed bundle store. Required when
 	// ApiKeys is set.
@@ -308,6 +314,7 @@ type Server struct {
 	webhookDeliveries webhooks.DeliveryStore
 	webhookCounter    webhooks.Counter
 	botBindings       secrets.BotSecretBindingStore
+	memStore          knowledge.MemoryStore
 	// webhookLaunchBot overrides the inbound-webhook launch path (test
 	// seam). nil → realWebhookLaunchBot (resolve bot source + s.runs.Launch).
 	webhookLaunchBot func(ctx context.Context, botID string, vars map[string]string, repoURL, repoRef string) (string, error)
@@ -403,6 +410,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		webhookDeliveries: cfg.WebhookDeliveries,
 		webhookCounter:    cfg.WebhookCounter,
 		botBindings:       cfg.BotBindings,
+		memStore:          cfg.MemoryStore,
 		httpClient:        &http.Client{Timeout: 15 * time.Second},
 		browserSessions:   cfg.BrowserRegistry,
 		statsCache:        newRunStatsCache(),
@@ -726,6 +734,9 @@ func (s *Server) routes() {
 	if s.botBindings != nil && s.authSvc != nil {
 		s.registerBotBindingRoutes()
 	}
+
+	// Shared-knowledge memory REST (FS fallback when no store wired).
+	s.registerMemoryRoutes()
 
 	// OAuth-forfait endpoints. Same gating as BYOK plus the per-
 	// user OAuthForfait store.

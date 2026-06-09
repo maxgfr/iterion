@@ -201,6 +201,10 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	if err := webhooks.EnsureSchema(rootCtx, st.DB()); err != nil {
 		return fmt.Errorf("server: ensure webhooks schema: %w", err)
 	}
+	memStore := mongostore.NewMongoMemoryStore(st.DB())
+	if err := memStore.EnsureSchema(rootCtx); err != nil {
+		return fmt.Errorf("server: ensure memory schema: %w", err)
+	}
 
 	pub, err := cloudpublisher.New(cloudpublisher.Config{
 		NATS:           natsConn,
@@ -315,6 +319,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		WebhookConfigs:         webhookStores.Configs,
 		WebhookDeliveries:      webhookStores.Deliveries,
 		WebhookCounter:         webhookStores.Counter,
+		MemoryStore:            memStore,
 		RunSecrets:             runSecretsStore,
 		Sealer:                 sealer,
 		OAuthForfait:           oauthStore,
