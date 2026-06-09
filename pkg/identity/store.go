@@ -22,6 +22,9 @@ type Store interface {
 	GetTeam(ctx context.Context, id string) (Team, error)
 	GetTeamBySlug(ctx context.Context, slug string) (Team, error)
 	UpdateTeam(ctx context.Context, t Team) error
+	// ListTeams returns all teams (super-admin org console), oldest
+	// first, offset/limit paginated.
+	ListTeams(ctx context.Context, page Page) ([]Team, error)
 
 	// Memberships
 	UpsertMembership(ctx context.Context, m Membership) error

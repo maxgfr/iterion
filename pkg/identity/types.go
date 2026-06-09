@@ -90,8 +90,28 @@ type User struct {
 	DefaultTeamID string     `bson:"default_team_id,omitempty" json:"default_team_id,omitempty"`
 }
 
-// Team is a tenant. Every business object (run, key, event) is
-// partitioned by Team.ID.
+// TeamStatus controls whether a team (org) can run work. An empty
+// value reads as active (back-compat for rows created before the field
+// existed) — always go through Team.EffectiveStatus.
+type TeamStatus string
+
+const (
+	TeamStatusActive    TeamStatus = "active"
+	TeamStatusSuspended TeamStatus = "suspended" // no run launches; super-admin only
+	TeamStatusReadOnly  TeamStatus = "read_only" // login + reads OK, no run launches
+)
+
+// ValidTeamStatus reports whether s is one of the known statuses.
+func ValidTeamStatus(s TeamStatus) bool {
+	switch s {
+	case TeamStatusActive, TeamStatusSuspended, TeamStatusReadOnly:
+		return true
+	}
+	return false
+}
+
+// Team is a tenant (an "org" in the public API). Every business object
+// (run, key, event) is partitioned by Team.ID.
 type Team struct {
 	ID        string    `bson:"_id" json:"id"`
 	Name      string    `bson:"name" json:"name"`
@@ -103,6 +123,38 @@ type Team struct {
 	// up without an invitation. Used to label the UI and to prevent
 	// inviting other users into someone's personal space.
 	Personal bool `bson:"personal,omitempty" json:"personal,omitempty"`
+
+	// Lifecycle (super-admin managed). Empty Status == active.
+	Status        TeamStatus `bson:"status,omitempty" json:"status,omitempty"`
+	SuspendedAt   *time.Time `bson:"suspended_at,omitempty" json:"suspended_at,omitempty"`
+	SuspendedBy   string     `bson:"suspended_by,omitempty" json:"suspended_by,omitempty"`
+	SuspendReason string     `bson:"suspend_reason,omitempty" json:"suspend_reason,omitempty"`
+
+	// Per-org caps. Zero means "inherit the platform default".
+	MonthlyRunQuota  int   `bson:"monthly_run_quota,omitempty" json:"monthly_run_quota,omitempty"`
+	MemoryQuotaBytes int64 `bson:"memory_quota_bytes,omitempty" json:"memory_quota_bytes,omitempty"`
+}
+
+// EffectiveStatus treats an empty status (legacy rows) as active.
+func (t Team) EffectiveStatus() TeamStatus {
+	if t.Status == "" {
+		return TeamStatusActive
+	}
+	return t.Status
+}
+
+// Suspended reports whether the team is suspended (no run launches).
+func (t Team) Suspended() bool { return t.EffectiveStatus() == TeamStatusSuspended }
+
+// CanLaunch reports whether the team may launch new runs — false when
+// suspended or read-only.
+func (t Team) CanLaunch() bool {
+	switch t.EffectiveStatus() {
+	case TeamStatusSuspended, TeamStatusReadOnly:
+		return false
+	default:
+		return true
+	}
 }
 
 // Membership glues a user to a team with a role.

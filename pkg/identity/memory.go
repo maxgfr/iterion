@@ -174,6 +174,32 @@ func (m *MemoryStore) UpdateTeam(_ context.Context, t Team) error {
 	return nil
 }
 
+func (m *MemoryStore) ListTeams(_ context.Context, page Page) ([]Team, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	teams := make([]Team, 0, len(m.teams))
+	for _, t := range m.teams {
+		teams = append(teams, t)
+	}
+	sort.Slice(teams, func(i, j int) bool { return teams[i].CreatedAt.Before(teams[j].CreatedAt) })
+	limit := page.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	offset := page.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(teams) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end < offset || end > len(teams) {
+		end = len(teams)
+	}
+	return teams[offset:end], nil
+}
+
 func (m *MemoryStore) UpsertMembership(_ context.Context, mb Membership) error {
 	if !mb.Role.Valid() {
 		return ErrInvalidRole

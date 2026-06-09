@@ -58,6 +58,7 @@ func (s *MongoStore) EnsureSchema(ctx context.Context) error {
 	if _, err := s.teams.Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{Keys: bson.D{{Key: "slug", Value: 1}}, Options: options.Index().SetUnique(true).SetName("slug_unique")},
 		{Keys: bson.D{{Key: "created_at", Value: -1}}, Options: options.Index().SetName("created_desc")},
+		{Keys: bson.D{{Key: "status", Value: 1}}, Options: options.Index().SetName("status")},
 	}); err != nil && !mongoutil.IsIndexConflict(err) {
 		return fmt.Errorf("identity: ensure teams indexes: %w", err)
 	}
@@ -226,6 +227,30 @@ func (s *MongoStore) UpdateTeam(ctx context.Context, t Team) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (s *MongoStore) ListTeams(ctx context.Context, page Page) ([]Team, error) {
+	limit := int64(page.Limit)
+	if limit <= 0 {
+		limit = 50
+	}
+	offset := int64(page.Offset)
+	if offset < 0 {
+		offset = 0
+	}
+	cur, err := s.teams.Find(ctx, bson.M{}, options.Find().
+		SetSort(bson.M{"created_at": 1}).
+		SetSkip(offset).
+		SetLimit(limit))
+	if err != nil {
+		return nil, fmt.Errorf("identity: list teams: %w", err)
+	}
+	defer cur.Close(ctx)
+	var out []Team
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, fmt.Errorf("identity: decode teams: %w", err)
+	}
+	return out, nil
 }
 
 // ----- Memberships -----

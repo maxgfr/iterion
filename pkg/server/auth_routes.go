@@ -90,6 +90,7 @@ func (s *Server) registerAuthRoutes() {
 	// Super-admin only.
 	s.mux.Handle("GET /api/admin/users", s.requireSuperAdmin(http.HandlerFunc(s.handleAdminListUsers)))
 	s.mux.Handle("PATCH /api/admin/users/{id}", s.requireSuperAdmin(http.HandlerFunc(s.handleAdminUpdateUser)))
+	s.registerAdminOrgRoutes()
 }
 
 // ---- Request / response shapes ----

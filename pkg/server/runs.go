@@ -213,6 +213,11 @@ func (s *Server) handleLaunchRun(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSafeOrigin(w, r) {
 		return
 	}
+	// Deny launches for a suspended/read-only org (super-admin bypasses).
+	if err := s.teamLaunchGate(r.Context()); err != nil {
+		s.httpErrorFor(w, r, http.StatusForbidden, "org cannot launch runs (suspended or read-only)")
+		return
+	}
 	// Root span for the launch path. Keeping it on the request ctx
 	// means the OTel HTTP middleware (when wired) sees it as a child
 	// of the inbound HTTP server span. The detached ctx below
