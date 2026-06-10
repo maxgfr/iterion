@@ -683,7 +683,7 @@ schema remediation_plan_output:
 ## command:` strings only interpolate input/vars, not outputs — the
 ## queue must come in via with{}).
 schema select_finding_input:
-  attempted:  json
+  attempted:  string
   to_fix:     json
   max:        int
 
@@ -695,7 +695,7 @@ schema select_finding_output:
   finding:    json
   has_more:   bool
   remaining:  int
-  attempted:  json
+  attempted:  string
 
 ## fix_ledger output. Passthrough that re-publishes select_finding's
 ## attempted ledger from a NON-loop-target node. A loop edge's with{}
@@ -706,7 +706,7 @@ schema select_finding_output:
 ## fix_ledger (which reads outputs.select_finding.attempted mid-iteration,
 ## where it resolves fine) fixes the monotonic pop.
 schema fix_ledger_output:
-  attempted:  json
+  attempted:  string
 
 ## ladder_rung_input — shared input shape for the rungs that read the
 ## current finding's metadata (reproduce_rung needs the scanner +
@@ -3659,7 +3659,7 @@ print(json.dumps({
     'finding':   finding,
     'has_more':  has_more,
     'remaining': remaining,
-    'attempted': sorted(seen),
+    'attempted': ','.join(sorted(seen)),
 }))
 "`
   input: select_finding_input
@@ -4596,12 +4596,12 @@ workflow sec_audit_source:
   ## carries the mode + branch context onto the loop body via with{}.
   remediation_mode_gate -> prepare_branch when is_apply
   remediation_mode_gate -> select_finding when not is_apply with {
-    attempted: "[]",
+    attempted: "",
     to_fix:    "{{outputs.remediation_plan.to_fix}}",
     max:       "{{vars.max_fix_per_run}}"
   }
   prepare_branch -> select_finding with {
-    attempted: "[]",
+    attempted: "",
     to_fix:    "{{outputs.remediation_plan.to_fix}}",
     max:       "{{vars.max_fix_per_run}}"
   }
