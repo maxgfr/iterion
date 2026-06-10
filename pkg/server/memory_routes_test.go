@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/knowledge"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 )
@@ -64,5 +65,44 @@ func TestMemoryRoutes_RoundTrip(t *testing.T) {
 	s.handleMemoryUsage(w, httptest.NewRequest("GET", "/api/memory/usage?visibility=org", nil).WithContext(ctx))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("missing name should 400, got %d", w.Code)
+	}
+
+	// traversal path → 400 (clamp)
+	for _, bad := range []string{"../evil", "/abs", "a/../../x"} {
+		w = httptest.NewRecorder()
+		s.handleMemoryWriteDoc(w, httptest.NewRequest("PUT", "/api/memory/doc?"+space+"&path="+bad, strings.NewReader("x")).WithContext(ctx))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("path %q should 400, got %d", bad, w.Code)
+		}
+	}
+}
+
+// TestMemoryRoutes_GlobalWriteGate: in multi-tenant (authStore set) mode,
+// writing the instance-global space requires super-admin; a member is
+// rejected. Local mode (no authStore) is covered by the round-trip test.
+func TestMemoryRoutes_GlobalWriteGate(t *testing.T) {
+	t.Setenv("ITERION_HOME", t.TempDir())
+	s := newOrgTestServer(t) // authSvc set → s.authStore() != nil
+	const gl = "visibility=global&name=shared"
+
+	member := auth.WithIdentity(context.Background(), auth.Identity{UserID: "m", TeamID: "t1"})
+	w := httptest.NewRecorder()
+	s.handleMemoryWriteDoc(w, httptest.NewRequest("PUT", "/api/memory/doc?"+gl+"&path=a.md", strings.NewReader("# A")).WithContext(member))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("member global write should 403, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	admin := auth.WithIdentity(context.Background(), auth.Identity{UserID: "admin", IsSuperAdmin: true})
+	w = httptest.NewRecorder()
+	s.handleMemoryWriteDoc(w, httptest.NewRequest("PUT", "/api/memory/doc?"+gl+"&path=a.md", strings.NewReader("# A")).WithContext(admin))
+	if w.Code != http.StatusOK {
+		t.Fatalf("super-admin global write should 200, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	// A tenant-scoped space (org) is NOT gated — a member may write it.
+	w = httptest.NewRecorder()
+	s.handleMemoryWriteDoc(w, httptest.NewRequest("PUT", "/api/memory/doc?visibility=org&name=team&path=a.md", strings.NewReader("# A")).WithContext(member))
+	if w.Code != http.StatusOK {
+		t.Fatalf("member org write should 200, got %d (%s)", w.Code, w.Body.String())
 	}
 }

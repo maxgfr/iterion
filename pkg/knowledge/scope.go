@@ -105,3 +105,34 @@ func ValidateName(name string) error {
 	}
 	return nil
 }
+
+// ErrInvalidDocPath is returned by ValidateDocPath (and the stores that
+// call it) for a document path that is absolute, contains a ".."
+// segment, or is otherwise unsafe. Callers can map it to a 400.
+var ErrInvalidDocPath = fmt.Errorf("knowledge: invalid document path")
+
+// ValidateDocPath clamps a document path to its space. Unlike a space
+// Name, a doc path MAY contain "/" (subdirectories, e.g.
+// "findings/2026.md"), but it must stay inside the space: no absolute
+// paths, no NUL byte, and no ".." segment. The FS adapter clamps via its
+// Scope; this is the shared check so the cloud adapter and the REST
+// boundary enforce the SAME rule (a "../" path must be rejected
+// everywhere, not silently stored as a weird Mongo key).
+func ValidateDocPath(path string) error {
+	if path == "" {
+		return fmt.Errorf("%w: path is required", ErrInvalidDocPath)
+	}
+	if strings.ContainsRune(path, 0) {
+		return fmt.Errorf("%w: %q contains a NUL byte", ErrInvalidDocPath, path)
+	}
+	if strings.HasPrefix(path, "/") || strings.HasPrefix(path, `\`) ||
+		(len(path) >= 2 && path[1] == ':') { // drive-letter / Windows abs
+		return fmt.Errorf("%w: %q must be relative", ErrInvalidDocPath, path)
+	}
+	for _, seg := range strings.Split(strings.ReplaceAll(path, `\`, "/"), "/") {
+		if seg == ".." {
+			return fmt.Errorf("%w: %q escapes the space root", ErrInvalidDocPath, path)
+		}
+	}
+	return nil
+}

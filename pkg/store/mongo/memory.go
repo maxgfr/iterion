@@ -206,6 +206,9 @@ func (s *MongoMemoryStore) ReadDocument(ctx context.Context, ref knowledge.Space
 	if err := ref.Validate(); err != nil {
 		return knowledge.Document{}, err
 	}
+	if err := knowledge.ValidateDocPath(path); err != nil {
+		return knowledge.Document{}, err
+	}
 	var d memDoc
 	err := s.docs.FindOne(ctx, docFilter(ref.ID(), path)).Decode(&d)
 	if errors.Is(err, mongo.ErrNoDocuments) {
@@ -244,6 +247,9 @@ func (s *MongoMemoryStore) DeleteDocument(ctx context.Context, ref knowledge.Spa
 	if err := ref.Validate(); err != nil {
 		return err
 	}
+	if err := knowledge.ValidateDocPath(path); err != nil {
+		return err
+	}
 	var d memDoc
 	err := s.docs.FindOne(ctx, docFilter(ref.ID(), path), options.FindOne().SetProjection(bson.M{"size": 1})).Decode(&d)
 	if errors.Is(err, mongo.ErrNoDocuments) {
@@ -267,6 +273,9 @@ func (s *MongoMemoryStore) DeleteDocument(ctx context.Context, ref knowledge.Spa
 // WriteDocument is the transactional path. See package comment.
 func (s *MongoMemoryStore) WriteDocument(ctx context.Context, ref knowledge.SpaceRef, in knowledge.DocumentInput) (knowledge.DocumentMeta, error) {
 	if err := ref.Validate(); err != nil {
+		return knowledge.DocumentMeta{}, err
+	}
+	if err := knowledge.ValidateDocPath(in.Path); err != nil {
 		return knowledge.DocumentMeta{}, err
 	}
 	newSize := int64(len(in.Content))
@@ -353,6 +362,29 @@ func (s *MongoMemoryStore) ensureTenant(ctx context.Context, tenant string) erro
 		bson.M{"$setOnInsert": bson.M{"used_bytes": int64(0), "quota_bytes": knowledge.DefaultOrgAggregateQuota}},
 		options.UpdateOne().SetUpsert(true))
 	return err
+}
+
+// SetTenantQuota sets the org-aggregate memory ceiling for a tenant,
+// preserving the running used_bytes. The super-admin org console calls
+// this when an operator changes Team.MemoryQuotaBytes — without it, the
+// override was persisted on the Team but never reached the counter the
+// CAS in bumpCounter actually enforces (so it had no effect). A
+// quotaBytes <= 0 resets to the platform default. Upserts so an org can
+// be capped before it has written any memory.
+func (s *MongoMemoryStore) SetTenantQuota(ctx context.Context, tenant string, quotaBytes int64) error {
+	if quotaBytes <= 0 {
+		quotaBytes = knowledge.DefaultOrgAggregateQuota
+	}
+	_, err := s.tenant.UpdateOne(ctx, bson.M{"_id": tenant},
+		bson.M{
+			"$set":         bson.M{"quota_bytes": quotaBytes},
+			"$setOnInsert": bson.M{"used_bytes": int64(0)},
+		},
+		options.UpdateOne().SetUpsert(true))
+	if err != nil {
+		return fmt.Errorf("memory: set tenant quota: %w", err)
+	}
+	return nil
 }
 
 func (s *MongoMemoryStore) bumpTenant(ctx context.Context, tenant string, delta int64) (bool, error) {

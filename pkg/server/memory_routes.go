@@ -58,6 +58,38 @@ func (s *Server) memoryRef(r *http.Request) (knowledge.SpaceRef, bool) {
 	return ref, true
 }
 
+// requireMemoryWriteAuth gates a memory MUTATION. The `global` space is
+// instance-wide (not tenant-scoped), so a write/delete/import there is
+// visible to EVERY tenant — in multi-tenant (cloud) mode that requires
+// super-admin (else any authenticated member could pollute or wipe other
+// orgs' shared knowledge). Tenant-scoped spaces only affect the caller's
+// own org, so a member may write them. Local single-tenant mode (no
+// identity store) has no cross-tenant concern and is always allowed.
+func (s *Server) requireMemoryWriteAuth(w http.ResponseWriter, r *http.Request, ref knowledge.SpaceRef) bool {
+	if ref.Visibility != knowledge.VisibilityGlobal {
+		return true
+	}
+	if s.authStore() == nil {
+		return true // local single-tenant
+	}
+	if id, ok := auth.FromContext(r.Context()); ok && id.IsSuperAdmin {
+		return true
+	}
+	httpError(w, http.StatusForbidden, "writing the global memory space requires super-admin")
+	return false
+}
+
+// memoryDocPath reads and validates the ?path= param, writing a 400 and
+// returning ok=false when it is missing or escapes the space.
+func memoryDocPath(w http.ResponseWriter, r *http.Request) (string, bool) {
+	path := r.URL.Query().Get("path")
+	if err := knowledge.ValidateDocPath(path); err != nil {
+		httpError(w, http.StatusBadRequest, "%s", err.Error())
+		return "", false
+	}
+	return path, true
+}
+
 func (s *Server) handleMemoryUsage(w http.ResponseWriter, r *http.Request) {
 	ref, ok := s.memoryRef(r)
 	if !ok {
@@ -97,7 +129,11 @@ func (s *Server) handleMemoryReadDoc(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "invalid space")
 		return
 	}
-	doc, err := s.memoryStore().ReadDocument(r.Context(), ref, r.URL.Query().Get("path"))
+	path, ok := memoryDocPath(w, r)
+	if !ok {
+		return
+	}
+	doc, err := s.memoryStore().ReadDocument(r.Context(), ref, path)
 	if err != nil {
 		httpError(w, http.StatusNotFound, "%s", err.Error())
 		return
@@ -112,9 +148,11 @@ func (s *Server) handleMemoryWriteDoc(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "invalid space")
 		return
 	}
-	path := r.URL.Query().Get("path")
-	if path == "" {
-		httpError(w, http.StatusBadRequest, "?path= required")
+	if !s.requireMemoryWriteAuth(w, r, ref) {
+		return
+	}
+	path, ok := memoryDocPath(w, r)
+	if !ok {
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, knowledge.DefaultMaxDocumentSize+1))
@@ -136,7 +174,14 @@ func (s *Server) handleMemoryDeleteDoc(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "invalid space")
 		return
 	}
-	if err := s.memoryStore().DeleteDocument(r.Context(), ref, r.URL.Query().Get("path")); err != nil {
+	if !s.requireMemoryWriteAuth(w, r, ref) {
+		return
+	}
+	path, ok := memoryDocPath(w, r)
+	if !ok {
+		return
+	}
+	if err := s.memoryStore().DeleteDocument(r.Context(), ref, path); err != nil {
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
 	}
@@ -163,6 +208,9 @@ func (s *Server) handleMemoryImport(w http.ResponseWriter, r *http.Request) {
 	ref, ok := s.memoryRef(r)
 	if !ok {
 		httpError(w, http.StatusBadRequest, "invalid space")
+		return
+	}
+	if !s.requireMemoryWriteAuth(w, r, ref) {
 		return
 	}
 	strategy := knowledge.ImportStrategy(r.URL.Query().Get("strategy"))

@@ -207,7 +207,26 @@ func (s *Server) handleAdminUpdateOrg(w http.ResponseWriter, r *http.Request) {
 		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
 		return
 	}
+	// Propagate a memory-quota change to the counter the CAS actually
+	// enforces. Persisting Team.MemoryQuotaBytes alone had no effect —
+	// the Mongo memory store seeds tenant quota from the platform default
+	// and never re-read the Team. No-op for the FS store (local mode has
+	// no per-tenant memory quota).
+	if req.MemoryQuotaBytes != nil {
+		if setter, ok := s.memoryStore().(tenantMemoryQuotaSetter); ok {
+			if err := setter.SetTenantQuota(r.Context(), t.ID, effectiveOrgMemoryQuota(t)); err != nil && s.logger != nil {
+				s.logger.Warn("admin: propagate memory quota for org %s: %v", t.ID, err)
+			}
+		}
+	}
 	writeJSON(w, toOrgView(t))
+}
+
+// tenantMemoryQuotaSetter is the capability the cloud (Mongo) memory
+// store implements so the org console can push a quota change onto the
+// enforced counter. The FS store does not implement it.
+type tenantMemoryQuotaSetter interface {
+	SetTenantQuota(ctx context.Context, tenantID string, quotaBytes int64) error
 }
 
 func (s *Server) handleAdminSetOrgStatus(w http.ResponseWriter, r *http.Request) {
