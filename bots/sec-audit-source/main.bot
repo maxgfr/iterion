@@ -3619,12 +3619,20 @@ except Exception:
     to_fix = []
 if not isinstance(to_fix, list):
     to_fix = []
+_raw_att = os.environ.get('ATTEMPTED','') or '[]'
 try:
-    attempted = json.loads(os.environ.get('ATTEMPTED','[]') or '[]')
+    attempted = json.loads(_raw_att)
+    if not isinstance(attempted, list):
+        attempted = []
 except Exception:
-    attempted = []
-if not isinstance(attempted, list):
-    attempted = []
+    # The attempted ledger is relayed through the fix_ledger compute and can
+    # reach this command as Go %v form [C-002 C-003] (unquoted, space-sep)
+    # which json rejects. Without this fallback seen is empty every loop and
+    # select_finding re-picks the same finding forever (infinite remediation
+    # loop until the iteration budget caps). chr(34)/chr(39) avoid bare
+    # quote chars that would close the python3 -c double-quote.
+    _s = _raw_att.strip().strip('[]')
+    attempted = [x.strip().strip(chr(34)).strip(chr(39)) for x in _s.replace(',', ' ').split() if x.strip()]
 try:
     maxfix = int(os.environ.get('MAXFIX','10') or '10')
 except ValueError:
@@ -4328,7 +4336,12 @@ workflow sec_audit_source:
     ## ladder on a large repo accrues more. Set ITERION_SEC_AUDIT_EFFORT_VOTER
     ## to "medium"/"low" to claw back budget on smaller repos.
     max_cost_usd: 150
-    max_iterations: 200
+    ## Bumped 200 → 2000. The real driver of runaway iterations was a
+    ## select_finding bug (the attempted-ledger arrived as Go %v form and
+    ## json.loads dropped it, so the loop re-picked the same finding forever)
+    ## — fixed in select_finding. 2000 is head-room: max_fix_per_run bounds
+    ## the real work (~50 node-executions/fix); this only caps a true runaway.
+    max_iterations: 2000
 
   inventory -> detect_tech
 
