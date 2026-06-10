@@ -2525,7 +2525,12 @@ fi
 # bash -c single-quoted string, so a stray apostrophe silently breaks shell
 # parsing (exit 2) while iterion validate still passes.
 CLAUDE_BIN="$(command -v claude 2>/dev/null)"
-_dsproc() { ( cd "$DSW" && CLAUDE_CODE_EXECUTABLE="$CLAUDE_BIN" deepsec process --concurrency "$CONC" $PROC_ARGS $AGENT_ARGS ); }
+# timeout bounds a network HANG: a mid-process connection loss leaves the
+# claude-agent-sdk waiting on a dead socket (it does NOT self-recover) and
+# would stall the whole node until the run timeout. 2400s is ~2x a legit
+# large-repo process; on timeout (124) the retry below re-runs it (network
+# back by then). This catches the hang case the exit-only retry cannot.
+_dsproc() { ( cd "$DSW" && CLAUDE_CODE_EXECUTABLE="$CLAUDE_BIN" timeout 2400 deepsec process --concurrency "$CONC" $PROC_ARGS $AGENT_ARGS ); }
 # deepsec process drives its OWN claude LLM calls (outside iterion network
 # retry). A transient blip (rate-limit / quota / network) here drops the
 # whole deepsec contribution and silently thins the audit. Retry once after a
