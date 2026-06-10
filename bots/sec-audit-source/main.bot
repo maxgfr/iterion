@@ -2525,7 +2525,13 @@ fi
 # bash -c single-quoted string, so a stray apostrophe silently breaks shell
 # parsing (exit 2) while iterion validate still passes.
 CLAUDE_BIN="$(command -v claude 2>/dev/null)"
-( cd "$DSW" && CLAUDE_CODE_EXECUTABLE="$CLAUDE_BIN" deepsec process --concurrency "$CONC" $PROC_ARGS $AGENT_ARGS ) >"$LOG_DIR/process.log" 2>&1 || ERRS="$ERRS process"
+_dsproc() { ( cd "$DSW" && CLAUDE_CODE_EXECUTABLE="$CLAUDE_BIN" deepsec process --concurrency "$CONC" $PROC_ARGS $AGENT_ARGS ); }
+# deepsec process drives its OWN claude LLM calls (outside iterion network
+# retry). A transient blip (rate-limit / quota / network) here drops the
+# whole deepsec contribution and silently thins the audit. Retry once after a
+# short backoff; degrade-with-report only if BOTH attempts fail. Diagnosed: a
+# real run lost all deepsec findings to one such blip.
+_dsproc >"$LOG_DIR/process.log" 2>&1 || { echo "[deepsec] process failed; retrying once after 20s (transient LLM blip)" >>"$LOG_DIR/process.log"; sleep 20; _dsproc >>"$LOG_DIR/process.log" 2>&1; } || ERRS="$ERRS process"
 
 ( cd "$DSW" && deepsec export --format json --out "$OUT_JSON" ) >"$LOG_DIR/export.log" 2>&1 || ERRS="$ERRS export"
 
