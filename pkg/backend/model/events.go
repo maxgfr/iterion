@@ -340,4 +340,13 @@ func applyHooks(nodeID string, iteration int, h EventHooks, opts *GenerationOpti
 			fn(nodeID, li)
 		}
 	}
+	// Surface a reactive context-window force-compaction (the loop hit the
+	// backend's real window and recovered) as an llm_retry, reusing the
+	// same event the network-retry path emits.
+	if h.OnLLMRetry != nil {
+		fn := h.OnLLMRetry
+		opts.OnContextCompactRetry = func(attempt int, err error, _, _ int) {
+			fn(nodeID, RetryInfo{Attempt: attempt, Error: err})
+		}
+	}
 }

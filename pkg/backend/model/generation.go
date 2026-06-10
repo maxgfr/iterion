@@ -612,6 +612,99 @@ func maybeCompactPause(messages []api.Message, model string, ratio float64, pres
 	return out
 }
 
+// maxContextCompactRetries bounds the reactive force-compaction that
+// runs when the backend REJECTS a request for exceeding its real context
+// window. Threshold compaction (maybeCompact) sizes itself to the model's
+// ADVERTISED window (e.g. gpt-5's 1.05M), but the active backend may
+// enforce a smaller one — most notably an OpenAI model driven through the
+// ChatGPT-forfait endpoint, whose effective context is far below the
+// API's. In that case the estimate stays under the advertised window so
+// threshold compaction never fires, and without this reactive pass the
+// tool loop dies mid-run with context_length_exceeded.
+const maxContextCompactRetries = 4
+
+// contextRetryTargets are the shrinking force-compaction token budgets
+// tried, in order, on a context-window rejection — stepped well below
+// common forfait caps so a compacted retry fits even when the backend's
+// real window is unknown.
+var contextRetryTargets = []int{256_000, 128_000, 64_000, 32_000}
+
+// isContextWindowError reports whether err is the backend rejecting a
+// request for exceeding the model's context window. claw's markers live
+// in an internal package, so we mirror them here (provider-agnostic).
+func isContextWindowError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	for _, m := range []string{
+		"context_length_exceeded", "maximum context length", "context window",
+		"context length", "too many tokens", "prompt is too long",
+		"input is too long", "request is too large",
+	} {
+		if strings.Contains(s, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// forceCompactToTokens force-compacts messages to a target token budget,
+// independent of the model's advertised window. Returns the compacted
+// slice and true only when it actually shrank the history (so the caller
+// stops retrying once the transcript can't get any smaller).
+func forceCompactToTokens(messages []api.Message, targetTokens, preserveRecent int) ([]api.Message, bool) {
+	if preserveRecent <= 0 {
+		preserveRecent = clawrt.DefaultCompactionPreserveRecent
+	}
+	res := clawrt.CompactMessages(messages, clawrt.CompactionConfig{
+		PreserveRecentMessages: preserveRecent,
+		MaxEstimatedTokens:     targetTokens,
+	})
+	if res == nil || len(res.CompactedMessages) == 0 || len(res.CompactedMessages) >= len(messages) {
+		return messages, false
+	}
+	return res.CompactedMessages, true
+}
+
+// callWithContextRetry runs one model call and, on a context-window
+// rejection, force-compacts the (pointer-shared) history to a shrinking
+// target and retries, up to maxContextCompactRetries. It mutates
+// *messages in place so the compaction persists into the rest of the
+// tool loop. Non-context errors and exhausted retries surface unchanged.
+func callWithContextRetry(ctx context.Context, client api.APIClient, opts GenerationOptions, messages *[]api.Message) (*aggregatedResponse, error) {
+	for attempt := 0; ; attempt++ {
+		req, err := buildRequest(opts, *messages, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		fireOnRequest(opts, len(*messages))
+		agg, callErr := callAndAggregate(ctx, client, req, opts)
+		e := callErr
+		if e == nil && agg != nil {
+			e = agg.err
+		}
+		if e == nil {
+			return agg, nil
+		}
+		if !isContextWindowError(e) || attempt >= maxContextCompactRetries {
+			return agg, e
+		}
+		target := contextRetryTargets[len(contextRetryTargets)-1]
+		if attempt < len(contextRetryTargets) {
+			target = contextRetryTargets[attempt]
+		}
+		compacted, ok := forceCompactToTokens(*messages, target, opts.CompactPreserveRecent)
+		if !ok {
+			return agg, e // can't shrink further → surface the original error
+		}
+		*messages = compacted
+		if opts.OnContextCompactRetry != nil {
+			opts.OnContextCompactRetry(attempt+1, e, len(compacted), target)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Finish reason mapping
 // ---------------------------------------------------------------------------
@@ -679,19 +772,14 @@ func GenerateTextDirect(ctx context.Context, client api.APIClient, opts Generati
 	}
 
 	for step := 1; step <= maxSteps; step++ {
-		req, err := buildRequest(opts, messages, nil, nil)
+		// callWithContextRetry builds the request, calls the model, and on
+		// a context-window rejection force-compacts `messages` (in place)
+		// and retries — so a backend whose real window is smaller than the
+		// model's advertised one (ChatGPT-forfait) recovers instead of
+		// killing the run.
+		agg, err := callWithContextRetry(ctx, client, opts, &messages)
 		if err != nil {
 			return partial(), err
-		}
-
-		fireOnRequest(opts, len(messages))
-
-		agg, err := callAndAggregate(ctx, client, req, opts)
-		if err != nil {
-			return partial(), err
-		}
-		if agg.err != nil {
-			return partial(), agg.err
 		}
 
 		accumulateUsage(&totalUsage, agg.usage)
