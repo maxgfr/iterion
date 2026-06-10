@@ -84,6 +84,9 @@ func (r SpaceRef) Validate() error {
 		if r.ProjectID == "" {
 			return fmt.Errorf("knowledge: bot space %q requires a project", r.Name)
 		}
+		if r.BotID == "" {
+			return fmt.Errorf("knowledge: bot space %q requires a bot", r.Name)
+		}
 	case VisibilityProject:
 		if r.ProjectID == "" {
 			return fmt.Errorf("knowledge: project space %q requires a project", r.Name)

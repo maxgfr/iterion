@@ -15,6 +15,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/gorilla/websocket"
 
+	"github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
@@ -189,6 +190,12 @@ func (s *Server) handleRunWebSocket(w http.ResponseWriter, r *http.Request) {
 		rc.tenantID = tenantID
 		rc.userID = userID
 	}
+	// Snapshot the RBAC identity (TeamID + IsSuperAdmin) too — the store
+	// tenant tag above does not carry it, and the suspend gate on
+	// answer→resume (handleAnswer) needs it to evaluate org status.
+	if id, ok := auth.FromContext(r.Context()); ok {
+		rc.identity = id
+	}
 	go rc.run()
 }
 
@@ -217,6 +224,13 @@ type runConn struct {
 	// Both empty in DisableAuth dev mode.
 	tenantID string
 	userID   string
+
+	// identity snapshots the full RBAC identity (TeamID + IsSuperAdmin)
+	// at upgrade time. The store tenant tag above does not carry it, so
+	// suspend-gate checks on state-changing commands (answer→resume)
+	// read this instead. Zero value in DisableAuth dev mode — but dev
+	// mode stamps a super-admin identity, which the gate lets through.
+	identity auth.Identity
 
 	mu            sync.Mutex
 	subscribed    bool
@@ -888,6 +902,17 @@ func (c *runConn) handlePause(env runWSEnvelope) {
 func (c *runConn) handleAnswer(env runWSEnvelope) {
 	if c.xStore != nil {
 		c.sendError("cross_store_readonly", "answer is not available for cross-store runs — open the owning daemon to answer", env.AckID)
+		return
+	}
+	// An answer resumes the run: runs.Resume below re-enters the engine
+	// (node execution + budget/cost spend), so it is a launch for
+	// suspend-gate purposes — exactly like handleResumeRun. Deny it for a
+	// suspended/read-only org (super-admin bypasses). orgCanLaunch reads
+	// the RBAC identity snapshotted at upgrade, NOT authCtx() (which only
+	// carries the store tenant tag, never the auth identity orgCanLaunch
+	// needs) — so this is a real gate, not a no-op.
+	if !orgCanLaunch(c.authCtx(), c.server.authStore(), c.identity) {
+		c.sendError("org_suspended", "org cannot launch runs (suspended or read-only)", env.AckID)
 		return
 	}
 	var req wsAnswerRequest

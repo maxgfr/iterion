@@ -21,6 +21,12 @@ type Credentials struct {
 	// by declared workflow secrets whose value is intentionally empty
 	// (meaning "resolve by name from the user's/team's stored secrets").
 	Generic map[string]string
+	// GenericHosts maps a generic secret name to the egress host
+	// allowlist a bot-secret binding imposes on it (empty/absent = no
+	// binding restriction). The secret guard intersects it with the
+	// workflow's declared `secrets.<name>.hosts` so a binding can only
+	// narrow, never broaden, where the credential may egress.
+	GenericHosts map[string][]string
 	// OAuthCredentialFiles maps "claude_code" / "codex" → the
 	// absolute path of a temp directory holding the materialised
 	// credentials.json or auth.json. The delegate backends pass

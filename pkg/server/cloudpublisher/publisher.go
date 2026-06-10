@@ -77,6 +77,8 @@ type Config struct {
 // Publisher is a runview.LaunchPublisher backed by NATS + Mongo.
 type Publisher struct {
 	nats           *natsq.Conn
+	publishRun     func(context.Context, *queue.RunMessage) error
+	cancelRun      func(string) error
 	store          store.RunStore
 	runs           *mongo.Collection
 	logger         *iterlog.Logger
@@ -110,7 +112,12 @@ func New(cfg Config) (*Publisher, error) {
 		cfg.Logger = iterlog.New(iterlog.LevelInfo, nil)
 	}
 	return &Publisher{
-		nats:           cfg.NATS,
+		nats: cfg.NATS,
+		publishRun: func(ctx context.Context, msg *queue.RunMessage) error {
+			_, err := cfg.NATS.PublishRun(ctx, msg)
+			return err
+		},
+		cancelRun:      cfg.NATS.CancelRun,
 		store:          cfg.Store,
 		runs:           cfg.MongoColl,
 		logger:         cfg.Logger,
@@ -173,9 +180,10 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 		return "", nil
 	}
 	bundle := secrets.RunBundle{
-		APIKeys:          map[secrets.Provider]string{},
-		GenericSecrets:   map[string]string{},
-		OAuthCredentials: map[string][]byte{},
+		APIKeys:            map[secrets.Provider]string{},
+		GenericSecrets:     map[string]string{},
+		GenericSecretHosts: map[string][]string{},
+		OAuthCredentials:   map[string][]byte{},
 	}
 
 	// 1. BYOK API keys.
@@ -225,6 +233,13 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 				continue
 			}
 			bundle.GenericSecrets[name] = string(r.Plaintext)
+			// A binding-sourced resolution may carry an egress allowlist
+			// that NARROWS where this credential can go. Thread it to the
+			// runner, which intersects it with the workflow's declared
+			// hosts in the secret guard. Empty = no binding restriction.
+			if len(r.AllowedHosts) > 0 {
+				bundle.GenericSecretHosts[name] = r.AllowedHosts
+			}
 			usedIDs = append(usedIDs, r.SecretID)
 		}
 		if len(usedIDs) > 0 {
@@ -312,6 +327,9 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 		QueuedAt:      &now,
 		TenantID:      tenantID,
 		OwnerID:       ownerID,
+		RepoURL:       spec.RepoURL,
+		RepoSHA:       spec.RepoRef,
+		BotID:         spec.BotID,
 		// Cap. 3 sharding fields — propagate to the persisted Run so
 		// studio surfaces can render the parent/child relationship,
 		// and onto the published RunMessage below so the runner pod
@@ -371,8 +389,9 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 		// operator checkout). RepoRef carries a branch or sha.
 		RepoURL: spec.RepoURL,
 		RepoSHA: spec.RepoRef,
+		BotID:   spec.BotID,
 	}
-	if _, err := p.nats.PublishRun(ctx, msg); err != nil {
+	if err := p.publish(ctx, msg); err != nil {
 		// Best-effort: roll the run doc back to failed so the studio
 		// surfaces the queue failure rather than a stuck "queued"
 		// row that never moves.
@@ -440,7 +459,7 @@ func (p *Publisher) CancelRun(ctx context.Context, runID string) error {
 		}
 		return nil
 	}
-	if err := p.nats.CancelRun(runID); err != nil {
+	if err := p.cancel(runID); err != nil {
 		p.logger.Warn("cloudpublisher: nats cancel %s: %v", runID, err)
 	}
 	return nil
@@ -473,12 +492,13 @@ func (p *Publisher) SubmitResume(ctx context.Context, spec runview.ResumeSpec, w
 	if err := p.store.UpdateRunStatus(ctx, spec.RunID, store.RunStatusQueued, ""); err != nil {
 		return fmt.Errorf("cloudpublisher: requeue %s: %w", spec.RunID, err)
 	}
-	// Re-resolve BYOK credentials for the resume publication. Keys
-	// may have rotated between launch and resume; using the prior
-	// run's secrets ref blindly would inject stale plaintext.
-	// botID "" on resume: bot-secret bindings are resolved fresh only at
-	// launch; a resume falls back to user/team-scoped secrets.
-	secretsRef, secretsErr := p.resolveAndSealCredentials(ctx, spec.RunID, prior.TenantID, prior.OwnerID, "", wf)
+	// Re-resolve credentials for the resume publication. Keys may have
+	// rotated between launch and resume; using the prior run's secrets ref
+	// blindly would inject stale plaintext. Preserve the launching BotID so
+	// bot-secret bindings remain durable across pause/failure/TTL republishes.
+	secretsCtx := store.WithTenant(ctx, prior.TenantID)
+	secretsCtx = store.WithOwner(secretsCtx, prior.OwnerID)
+	secretsRef, secretsErr := p.resolveAndSealCredentials(secretsCtx, spec.RunID, prior.TenantID, prior.OwnerID, prior.BotID, wf)
 	if secretsErr != nil {
 		return secretsErr
 	}
@@ -501,8 +521,13 @@ func (p *Publisher) SubmitResume(ctx context.Context, spec runview.ResumeSpec, w
 		// from another team's UI must still target that team's tenant.
 		TenantID: prior.TenantID,
 		OwnerID:  prior.OwnerID,
+		// Preserve webhook/cloud source metadata so a resumed runner can
+		// reconstruct the same workspace as the original launch.
+		RepoURL: prior.RepoURL,
+		RepoSHA: prior.RepoSHA,
+		BotID:   prior.BotID,
 	}
-	if _, err := p.nats.PublishRun(ctx, msg); err != nil {
+	if err := p.publish(ctx, msg); err != nil {
 		// Revert to the prior resumable status — typically
 		// failed_resumable so the next user action is "Resume"
 		// again. Falling back to failed_resumable is conservative
@@ -525,10 +550,34 @@ func (p *Publisher) SubmitResume(ctx context.Context, spec runview.ResumeSpec, w
 	return nil
 }
 
+func (p *Publisher) publish(ctx context.Context, msg *queue.RunMessage) error {
+	if p.publishRun != nil {
+		return p.publishRun(ctx, msg)
+	}
+	if p.nats == nil {
+		return fmt.Errorf("cloudpublisher: NATS publisher is not configured")
+	}
+	_, err := p.nats.PublishRun(ctx, msg)
+	return err
+}
+
+func (p *Publisher) cancel(runID string) error {
+	if p.cancelRun != nil {
+		return p.cancelRun(runID)
+	}
+	if p.nats == nil {
+		return fmt.Errorf("cloudpublisher: NATS publisher is not configured")
+	}
+	return p.nats.CancelRun(runID)
+}
+
 // queuePosition counts the runs with status=queued and created_at
 // less than or equal to ours. The result is 1-based, matching the
 // "1st in queue" copy the studio renders.
 func (p *Publisher) queuePosition(ctx context.Context, runID string) (int, error) {
+	if p.runs == nil {
+		return 0, nil
+	}
 	var doc struct {
 		CreatedAt time.Time `bson:"created_at"`
 	}

@@ -54,9 +54,11 @@ type GenericResolution struct {
 	SealedBlob  []byte
 	SourceScope string // "user" | "binding" | "team"
 	// AllowedHosts is the egress host allowlist a bot-secret binding
-	// imposes on this secret (empty = no extra restriction). The
-	// publisher intersects it with the workflow's declared hosts so a
-	// binding can only narrow, never broaden, the policy.
+	// imposes on this secret (empty = no extra restriction). The publisher
+	// threads it onto RunBundle.GenericSecretHosts; the runner's secret
+	// guard intersects it with the workflow's declared hosts
+	// (model.effectiveSecretHosts) so a binding can only narrow, never
+	// broaden, the policy.
 	AllowedHosts []string
 }
 

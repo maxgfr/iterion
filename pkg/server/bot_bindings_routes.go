@@ -23,20 +23,22 @@ func (s *Server) registerBotBindingRoutes() {
 type botBindingReq struct {
 	SecretID              *string  `json:"secret_id,omitempty"`
 	SecretNameForWorkflow *string  `json:"secret_name_for_workflow,omitempty"`
-	AllowedWorkflowFiles  []string `json:"allowed_workflows,omitempty"`
-	AllowedNodeIDs        []string `json:"allowed_nodes,omitempty"`
 	AllowedHosts          []string `json:"allowed_hosts,omitempty"`
 }
 
-// validateBindingSecret confirms the referenced generic secret is
-// visible to the caller's tenant (the generic-secret store enforces the
-// tenant filter from ctx, so a cross-tenant id resolves to not-found).
-func (s *Server) validateBindingSecret(r *http.Request, secretID string) bool {
+// validateBindingSecret confirms the referenced generic secret is bindable
+// for the route team. Bot bindings are shared org automation policy, so they
+// may only reference team-scoped generic secrets in that team; personal
+// (/api/me/secrets) credentials are intentionally not bindable by ID.
+func (s *Server) validateBindingSecret(r *http.Request, teamID, secretID string) bool {
 	if s.genericSecrets == nil {
 		return true // can't validate; allow (binding still tenant-scoped)
 	}
-	_, err := s.genericSecrets.Get(r.Context(), secretID)
-	return err == nil
+	sec, err := s.genericSecrets.Get(r.Context(), secretID)
+	if err != nil {
+		return false
+	}
+	return sec.ScopeTeamID == teamID && sec.ScopeUserID == ""
 }
 
 func (s *Server) bindingForTenantBot(w http.ResponseWriter, r *http.Request, teamID, botID, bindingID string) (secrets.BotSecretBinding, bool) {
@@ -84,8 +86,8 @@ func (s *Server) handleCreateBotBinding(w http.ResponseWriter, r *http.Request) 
 		httpError(w, http.StatusBadRequest, "secret_id and secret_name_for_workflow required")
 		return
 	}
-	if !s.validateBindingSecret(r, *req.SecretID) {
-		httpError(w, http.StatusBadRequest, "secret_id not found in this org")
+	if !s.validateBindingSecret(r, teamID, *req.SecretID) {
+		httpError(w, http.StatusBadRequest, "secret_id is not a team-scoped secret in this org")
 		return
 	}
 	now := time.Now().UTC()
@@ -95,8 +97,6 @@ func (s *Server) handleCreateBotBinding(w http.ResponseWriter, r *http.Request) 
 		BotID:                 botID,
 		SecretID:              *req.SecretID,
 		SecretNameForWorkflow: *req.SecretNameForWorkflow,
-		AllowedWorkflowFiles:  req.AllowedWorkflowFiles,
-		AllowedNodeIDs:        req.AllowedNodeIDs,
 		AllowedHosts:          req.AllowedHosts,
 		CreatedBy:             id.UserID,
 		CreatedAt:             now,
@@ -127,20 +127,14 @@ func (s *Server) handleUpdateBotBinding(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if req.SecretID != nil && *req.SecretID != "" {
-		if !s.validateBindingSecret(r, *req.SecretID) {
-			httpError(w, http.StatusBadRequest, "secret_id not found in this org")
+		if !s.validateBindingSecret(r, teamID, *req.SecretID) {
+			httpError(w, http.StatusBadRequest, "secret_id is not a team-scoped secret in this org")
 			return
 		}
 		b.SecretID = *req.SecretID
 	}
 	if req.SecretNameForWorkflow != nil && *req.SecretNameForWorkflow != "" {
 		b.SecretNameForWorkflow = *req.SecretNameForWorkflow
-	}
-	if req.AllowedWorkflowFiles != nil {
-		b.AllowedWorkflowFiles = req.AllowedWorkflowFiles
-	}
-	if req.AllowedNodeIDs != nil {
-		b.AllowedNodeIDs = req.AllowedNodeIDs
 	}
 	if req.AllowedHosts != nil {
 		b.AllowedHosts = req.AllowedHosts

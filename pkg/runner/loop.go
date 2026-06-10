@@ -721,8 +721,12 @@ func (r *Runner) injectCredentials(ctx context.Context, msg *queue.RunMessage) (
 	}
 
 	creds := secrets.Credentials{
-		APIKeys:              bundle.APIKeys,
-		Generic:              bundle.GenericSecrets,
+		APIKeys: bundle.APIKeys,
+		Generic: bundle.GenericSecrets,
+		// Per-secret egress narrowing from bot-secret bindings; the guard
+		// intersects these with the workflow's declared hosts. Hostnames
+		// are not secret, so cleanup below leaves them untouched.
+		GenericHosts:         bundle.GenericSecretHosts,
 		OAuthCredentialFiles: map[string]string{},
 	}
 	tmpDirs := make([]string, 0, len(bundle.OAuthCredentials))
@@ -857,6 +861,7 @@ func (r *Runner) buildExecutor(ctx context.Context, msg *queue.RunMessage, wf *i
 		RunID:       msg.RunID,
 		Logger:      r.cfg.Logger,
 		StoreDir:    r.cfg.WorkDir,
+		BotID:       msg.BotID,
 		MemoryStore: r.cfg.MemoryStore,
 	})
 }

@@ -17,6 +17,10 @@ func quotaStore(t *testing.T) *FSStore {
 	return DefaultFSStore()
 }
 
+// botRef builds the SpaceRef a legacy `memory: scope:` block resolves to.
+// LegacyBotRef maps that legacy path to PROJECT visibility (true per-bot
+// isolation is an explicit visibility: bot space), so the per-space quota
+// for these refs is keyed by ITERION_MEMORY_QUOTA_PROJECT.
 func botRef(scope string) knowledge.SpaceRef { return LegacyBotRef("/tmp/proj", scope) }
 
 func bytesOf(n int) []byte { return bytes.Repeat([]byte("x"), n) }
@@ -36,7 +40,7 @@ func TestFSStore_RejectsOversizeDocument(t *testing.T) {
 }
 
 func TestFSStore_PerSpaceQuota(t *testing.T) {
-	t.Setenv("ITERION_MEMORY_QUOTA_BOT", "30")
+	t.Setenv("ITERION_MEMORY_QUOTA_PROJECT", "30")
 	s := quotaStore(t)
 	ctx := context.Background()
 	ref := botRef("notes")
@@ -58,7 +62,7 @@ func TestFSStore_PerSpaceQuota(t *testing.T) {
 }
 
 func TestFSStore_OrgAggregateQuota(t *testing.T) {
-	t.Setenv("ITERION_MEMORY_QUOTA_ORG_TOTAL", "30") // per-space stays at the 256MiB bot default
+	t.Setenv("ITERION_MEMORY_QUOTA_ORG_TOTAL", "30") // per-space stays at the 256MiB project default
 	s := quotaStore(t)
 	ctx := context.Background()
 	refA, refB := botRef("a"), botRef("b")
@@ -99,7 +103,7 @@ func TestFSStore_ConcurrentWritersSumCorrectly(t *testing.T) {
 }
 
 func TestFSStore_DeleteFreesQuota(t *testing.T) {
-	t.Setenv("ITERION_MEMORY_QUOTA_BOT", "30")
+	t.Setenv("ITERION_MEMORY_QUOTA_PROJECT", "30")
 	s := quotaStore(t)
 	ctx := context.Background()
 	ref := botRef("notes")

@@ -994,6 +994,15 @@ func (s *Server) handleResumeRun(w http.ResponseWriter, r *http.Request) {
 	if s.rejectCrossStoreWrite(w, r) {
 		return
 	}
+	// A resume re-enters the engine (node execution + budget/cost spend),
+	// so it is a run launch for suspend-gate purposes: deny it for a
+	// suspended/read-only org exactly like handleLaunchRun, else a
+	// suspended org keeps executing in-flight (notably failed_resumable)
+	// work via operator/auto resume. Super-admin bypasses.
+	if err := s.teamLaunchGate(r.Context()); err != nil {
+		s.httpErrorFor(w, r, http.StatusForbidden, "org cannot launch runs (suspended or read-only)")
+		return
+	}
 	id := r.PathValue("id")
 	if id == "" {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "missing run id")

@@ -43,7 +43,7 @@ func TestFSStore_SharedTreeVisibilities(t *testing.T) {
 		{Visibility: knowledge.VisibilityOrg, TenantID: "acme", Name: "conventions"},
 		{Visibility: knowledge.VisibilityCrossProject, TenantID: "acme", Name: "libs"},
 		{Visibility: knowledge.VisibilityGlobal, Name: "policy"},
-		{Visibility: knowledge.VisibilityBot, ProjectID: "pkey", Name: "findings"},
+		{Visibility: knowledge.VisibilityBot, ProjectID: "pkey", BotID: "revi", Name: "findings"},
 	}
 	roots := map[string]bool{}
 	for _, ref := range refs {

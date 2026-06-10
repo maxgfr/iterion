@@ -120,6 +120,7 @@ func (s *Service) Launch(parent context.Context, spec LaunchSpec) (*LaunchResult
 		StoreDir: s.storeDir,
 		Inbox:    s.inboxBinder(),
 		Backend:  spec.Backend,
+		BotID:    spec.BotID,
 	})
 	if err != nil {
 		s.dropRunLog(runID)

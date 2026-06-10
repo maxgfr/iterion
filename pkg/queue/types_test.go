@@ -14,6 +14,7 @@ func TestRunMessage_RoundTripJSON(t *testing.T) {
 		WorkflowHash:   "sha256:deadbeef",
 		IRCompiled:     json.RawMessage(`{"nodes":[]}`),
 		Vars:           map[string]interface{}{"k": "v"},
+		BotID:          "review-pr",
 		BackendConfig:  BackendConfig{Default: BackendClaw},
 		Trace:          TraceContext{TraceID: "0123456789abcdef0123456789abcdef"},
 		PublishedAtRFC: "2026-05-05T11:00:00Z",
@@ -31,6 +32,9 @@ func TestRunMessage_RoundTripJSON(t *testing.T) {
 	}
 	if dst.BackendConfig.Default != BackendClaw {
 		t.Errorf("BackendConfig.Default: got %q", dst.BackendConfig.Default)
+	}
+	if dst.BotID != "review-pr" {
+		t.Errorf("BotID: got %q", dst.BotID)
 	}
 	if string(dst.IRCompiled) != `{"nodes":[]}` {
 		t.Errorf("IRCompiled lost on round-trip: %q", dst.IRCompiled)
@@ -156,9 +160,9 @@ func TestRunMessage_ValidateNilReceiver(t *testing.T) {
 
 func TestSchemaVersionConstant(t *testing.T) {
 	// Pinning the constant is a deliberate guard: bumping it should be a
-	// conscious commit, not an accident. v=2 (2026-05-07) added the
-	// TenantID + OwnerID fields for multitenant isolation.
-	if SchemaVersion != 2 {
-		t.Errorf("SchemaVersion = %d, want 2 (bump intentionally)", SchemaVersion)
+	// conscious commit, not an accident. v=3 (2026-06-10) added BotID
+	// so cloud runners can qualify structured bot memory.
+	if SchemaVersion != 3 {
+		t.Errorf("SchemaVersion = %d, want 3 (bump intentionally)", SchemaVersion)
 	}
 }

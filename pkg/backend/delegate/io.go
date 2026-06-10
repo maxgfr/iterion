@@ -64,6 +64,7 @@ type IOTask struct {
 	ResumeConversation     json.RawMessage `json:"resume_conversation,omitempty"`
 	ResumePendingToolUseID string          `json:"resume_pending_tool_use_id,omitempty"`
 	ResumeAnswer           string          `json:"resume_answer,omitempty"`
+	Memory                 *MemorySpec     `json:"memory,omitempty"`
 }
 
 // IOToolDef is the wire form of a [ToolDef]. The Execute closure is
@@ -141,6 +142,7 @@ func ToIOTask(t Task) IOTask {
 		ResumeConversation:     t.ResumeConversation,
 		ResumePendingToolUseID: t.ResumePendingToolUseID,
 		ResumeAnswer:           t.ResumeAnswer,
+		Memory:                 t.Memory,
 	}
 }
 
@@ -177,6 +179,7 @@ func FromIOTask(t IOTask) Task {
 		ResumeConversation:     t.ResumeConversation,
 		ResumePendingToolUseID: t.ResumePendingToolUseID,
 		ResumeAnswer:           t.ResumeAnswer,
+		Memory:                 t.Memory,
 	}
 }
 

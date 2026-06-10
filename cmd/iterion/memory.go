@@ -16,6 +16,7 @@ var memoryOpts struct {
 	project    string
 	user       string
 	tenant     string
+	bot        string
 	out        string
 	in         string
 	strategy   string
@@ -58,6 +59,7 @@ func init() {
 		f.StringVar(&memoryOpts.visibility, "visibility", "bot", "space visibility (bot|project|cross_project|user|org|global)")
 		f.StringVar(&memoryOpts.name, "name", "", "space name (required)")
 		f.StringVar(&memoryOpts.project, "project", "", "project dir (bot/project spaces; default cwd)")
+		f.StringVar(&memoryOpts.bot, "bot", "", "bot id (required for visibility=bot)")
 		f.StringVar(&memoryOpts.user, "user", "", "user id (user spaces)")
 		f.StringVar(&memoryOpts.tenant, "tenant", "", "tenant id (org/cross_project spaces)")
 	}
@@ -76,10 +78,14 @@ func memoryRefFromFlags() (knowledge.SpaceRef, error) {
 	if project == "" {
 		project, _ = os.Getwd()
 	}
+	vis := knowledge.Visibility(memoryOpts.visibility)
+	if vis == knowledge.VisibilityBot && memoryOpts.bot == "" {
+		return knowledge.SpaceRef{}, fmt.Errorf("--bot is required when --visibility=bot")
+	}
 	ref := memory.ResolveSpaceRef(
-		knowledge.Visibility(memoryOpts.visibility),
-		memoryOpts.name, "", memoryOpts.user,
-		memory.SpaceRefInputs{TenantID: memoryOpts.tenant, UserID: memoryOpts.user, ProjectID: memory.ProjectKey(project)},
+		vis,
+		memoryOpts.name, memoryOpts.bot, memoryOpts.user,
+		memory.SpaceRefInputs{TenantID: memoryOpts.tenant, UserID: memoryOpts.user, ProjectID: memory.ProjectKey(project), BotID: memoryOpts.bot},
 	)
 	if err := ref.Validate(); err != nil {
 		return knowledge.SpaceRef{}, err

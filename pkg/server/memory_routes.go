@@ -41,16 +41,21 @@ func (s *Server) memoryRef(r *http.Request) (knowledge.SpaceRef, bool) {
 	}
 	vis := knowledge.Visibility(q.Get("visibility"))
 	if vis == "" {
-		vis = knowledge.VisibilityBot
+		vis = knowledge.VisibilityProject
+	}
+	botID := q.Get("bot")
+	if vis == knowledge.VisibilityBot && botID == "" {
+		return knowledge.SpaceRef{}, false
 	}
 	// Tenant/user are taken from the request identity (cloud); in local
 	// mode they're empty → the store maps them to "local".
 	tenant, _ := store.TenantFromContext(r.Context())
 	owner, _ := store.OwnerFromContext(r.Context())
-	ref := memory.ResolveSpaceRef(vis, name, "", owner, memory.SpaceRefInputs{
+	ref := memory.ResolveSpaceRef(vis, name, botID, owner, memory.SpaceRefInputs{
 		TenantID:  tenant,
 		UserID:    owner,
 		ProjectID: q.Get("project"),
+		BotID:     botID,
 	})
 	if err := ref.Validate(); err != nil {
 		return knowledge.SpaceRef{}, false
@@ -93,7 +98,7 @@ func memoryDocPath(w http.ResponseWriter, r *http.Request) (string, bool) {
 func (s *Server) handleMemoryUsage(w http.ResponseWriter, r *http.Request) {
 	ref, ok := s.memoryRef(r)
 	if !ok {
-		httpError(w, http.StatusBadRequest, "invalid space (need ?name=, valid ?visibility=)")
+		httpError(w, http.StatusBadRequest, "invalid space (need ?name=, valid ?visibility=; visibility=bot also needs ?bot=)")
 		return
 	}
 	used, quota, err := s.memoryStore().UsageBytes(r.Context(), ref)

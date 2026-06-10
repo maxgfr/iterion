@@ -32,7 +32,7 @@ func TestSpaceRef_Validate(t *testing.T) {
 		ref     SpaceRef
 		wantErr bool
 	}{
-		{"bot ok", SpaceRef{Visibility: VisibilityBot, ProjectID: "p1", Name: "findings"}, false},
+		{"bot ok", SpaceRef{Visibility: VisibilityBot, ProjectID: "p1", BotID: "revi", Name: "findings"}, false},
 		{"project ok", SpaceRef{Visibility: VisibilityProject, ProjectID: "p1", Name: "findings"}, false},
 		{"user ok", SpaceRef{Visibility: VisibilityUser, UserID: "u1", Name: "notes"}, false},
 		{"org ok", SpaceRef{Visibility: VisibilityOrg, Name: "conventions"}, false},
@@ -41,6 +41,7 @@ func TestSpaceRef_Validate(t *testing.T) {
 		{"traversal name", SpaceRef{Visibility: VisibilityOrg, Name: "../escape"}, true},
 		{"slash name", SpaceRef{Visibility: VisibilityOrg, Name: "a/b"}, true},
 		{"bot without project", SpaceRef{Visibility: VisibilityBot, Name: "findings"}, true},
+		{"bot without bot id", SpaceRef{Visibility: VisibilityBot, ProjectID: "p1", Name: "findings"}, true},
 		{"user without user id", SpaceRef{Visibility: VisibilityUser, Name: "notes"}, true},
 	}
 	for _, tc := range tests {

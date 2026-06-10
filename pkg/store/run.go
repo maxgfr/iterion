@@ -218,6 +218,12 @@ type Run struct {
 	// the run. Empty in local mode (workspace is the user's cwd).
 	RepoURL string `json:"repo_url,omitempty" bson:"repo_url,omitempty"`
 	RepoSHA string `json:"repo_sha,omitempty" bson:"repo_sha,omitempty"`
+	// BotID is the bot bundle name (for example, "review-pr") that
+	// launched this run. It is persisted so cloud resume/retry can
+	// re-resolve bot-secret bindings after the initial queue message
+	// has been consumed or its sealed secrets bundle has expired. Empty
+	// for plain .iter/.bot launches and legacy runs.
+	BotID string `json:"bot_id,omitempty" bson:"bot_id,omitempty"`
 	// QueueMsgID is the NATS Nats-Msg-Id header value, exposed so a
 	// cancel can target the queued message before pickup. Empty after
 	// pickup or when not in cloud mode.

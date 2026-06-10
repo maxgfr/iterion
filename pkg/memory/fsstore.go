@@ -39,14 +39,15 @@ func (s *FSStore) baseDir() string {
 }
 
 // LegacyBotRef builds the SpaceRef a legacy `memory: scope:` block
-// resolves to: a bot-visibility space keyed by the encoded project key
-// of memBase (the run workDir, or the repo root when project_root is
-// set). The resolved on-disk path is identical to the pre-knowledge
-// WorkspaceMemoryDir(memBase)/<scope> layout, so existing bots see the
-// same files.
+// resolves to: an explicit project-visibility space keyed by the
+// encoded project key of memBase (the run workDir, or the repo root
+// when project_root is set). The resolved on-disk path is identical
+// to the pre-knowledge WorkspaceMemoryDir(memBase)/<scope> layout,
+// so existing local bots see the same files without masquerading as a
+// structured bot-qualified space.
 func LegacyBotRef(memBase, scope string) knowledge.SpaceRef {
 	return knowledge.SpaceRef{
-		Visibility: knowledge.VisibilityBot,
+		Visibility: knowledge.VisibilityProject,
 		ProjectID:  ProjectKey(memBase),
 		Name:       scope,
 	}
@@ -113,10 +114,10 @@ func firstNonEmpty(a, b string) string {
 // scopeFor resolves a SpaceRef to a path-clamped Scope on disk.
 //
 // Layout:
-//   - bot/project → <base>/projects/<projectID>/memory/<name> (the
-//     legacy path; FS treats bot==project — both share by name within a
-//     project. True per-bot isolation is realized in the cloud adapter,
-//     which keys on bot_id).
+//   - bot → <base>/projects/<projectID>/bots/<botID>/memory/<name>
+//     (structured per-bot isolation)
+//   - project → <base>/projects/<projectID>/memory/<name> (also the
+//     legacy `memory: scope:` path returned by LegacyBotRef).
 //   - user → <base>/shared/tenants/<tenant>/users/<user>/<name>
 //   - org → <base>/shared/tenants/<tenant>/org/<name>
 //   - cross_project → <base>/shared/tenants/<tenant>/cross_project/<name>
@@ -130,7 +131,15 @@ func (s *FSStore) scopeFor(ref knowledge.SpaceRef) (*Scope, error) {
 	base := s.baseDir()
 	var root string
 	switch ref.Visibility {
-	case knowledge.VisibilityBot, knowledge.VisibilityProject:
+	case knowledge.VisibilityBot:
+		if ref.ProjectID == "" {
+			return nil, fmt.Errorf("memory: empty project for space %q", ref.Name)
+		}
+		if ref.BotID == "" {
+			return nil, fmt.Errorf("memory: empty bot for space %q", ref.Name)
+		}
+		root = filepath.Join(base, "projects", ref.ProjectID, "bots", ref.BotID, "memory", ref.Name)
+	case knowledge.VisibilityProject:
 		if ref.ProjectID == "" {
 			return nil, fmt.Errorf("memory: empty project for space %q", ref.Name)
 		}

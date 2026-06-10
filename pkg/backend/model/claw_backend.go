@@ -379,10 +379,11 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 			// identity (tenant/owner from ctx, project from memBase).
 			tenant, _ := store.TenantFromContext(ctx)
 			owner, _ := store.OwnerFromContext(ctx)
-			ref = memory.ResolveSpaceRef(knowledge.Visibility(m.Visibility), m.Scope, "", "", memory.SpaceRefInputs{
+			ref = memory.ResolveSpaceRef(knowledge.Visibility(m.Visibility), m.Scope, m.BotID, "", memory.SpaceRefInputs{
 				TenantID:  tenant,
 				UserID:    owner,
 				ProjectID: memory.ProjectKey(memBase),
+				BotID:     m.BotID,
 			})
 		} else {
 			ref = memory.LegacyBotRef(memBase, m.Scope)

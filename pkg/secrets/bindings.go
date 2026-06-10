@@ -29,11 +29,13 @@ type BotSecretBinding struct {
 	SecretID              string `bson:"secret_id" json:"secret_id"` // -> GenericSecret._id
 	SecretNameForWorkflow string `bson:"secret_name_for_workflow" json:"secret_name_for_workflow"`
 
-	// Optional scope tightening.
-	AllowedWorkflowFiles []string `bson:"allowed_workflows,omitempty" json:"allowed_workflows,omitempty"`
-	AllowedNodeIDs       []string `bson:"allowed_nodes,omitempty" json:"allowed_nodes,omitempty"`
 	// AllowedHosts, when non-empty, intersects (never broadens) the
-	// workflow secret's declared egress hosts.
+	// workflow secret's declared egress hosts. This is an ENFORCED egress
+	// control: the resolver carries it on GenericResolution.AllowedHosts,
+	// the publisher threads it onto RunBundle.GenericSecretHosts, the
+	// runner puts it on Credentials.GenericHosts, and the secret guard
+	// intersects it with the workflow's `secrets.<name>.hosts`
+	// (model.effectiveSecretHosts). Empty = no binding-level restriction.
 	AllowedHosts []string `bson:"allowed_hosts,omitempty" json:"allowed_hosts,omitempty"`
 
 	CreatedBy string    `bson:"created_by" json:"created_by"`
@@ -84,11 +86,19 @@ func IntersectHosts(a, b []string) []string {
 	return out
 }
 
+// Bot bindings may only dereference team-scoped generic secrets from the
+// binding's own team. Personal (/api/me/secrets) credentials are deliberately
+// excluded: a binding is shared org automation policy and synthetic/webhook
+// runs do not carry the original user's consent/ownership context.
+func bindableGenericSecretForBotBinding(sec GenericSecret, teamID string) bool {
+	return sec.ScopeTeamID == teamID && sec.ScopeUserID == ""
+}
+
 // ResolveGenericWithBindings resolves each requested workflow-secret
 // name with the priority user-scoped > bot-binding > team-scoped:
 //   - a developer's personal secret of that name still wins (interactive
 //     opt-in);
-//   - else a bot binding maps the name to a stored org/user secret —
+//   - else a bot binding maps the name to a stored team-scoped secret —
 //     the canonical route for unattended (webhook) runs whose synthetic
 //     actor owns no user secrets;
 //   - else a team-scoped secret of that name (the existing fallback).
@@ -162,6 +172,13 @@ func ResolveGenericWithBindings(
 			sec, err := secretStore.Get(ctx, b.SecretID)
 			if err != nil {
 				// dangling binding (secret deleted) — skip, don't fail the run.
+				continue
+			}
+			if !bindableGenericSecretForBotBinding(sec, teamID) {
+				// Defensive authorization check: older/compromised bindings may
+				// point at a personal secret or a secret moved out of this team.
+				// Treat those like dangling bindings rather than injecting them
+				// into synthetic bot/webhook runs.
 				continue
 			}
 			bindingByName[b.SecretNameForWorkflow] = boundSecret{sec: sec, hosts: b.AllowedHosts}

@@ -55,6 +55,9 @@ type ExecutorSpec struct {
 	// resolution chain). Used by the studio launch UI to A/B a
 	// workflow against different backends without editing the .iter.
 	Backend string
+	// BotID is the stable bundle/bot identifier used to qualify
+	// structured visibility=bot memory. Empty falls back to Workflow.Name.
+	BotID string
 	// MemoryStore overrides the workspace-memory backend. nil → the
 	// local filesystem store. Cloud runners pass the Mongo store so
 	// shared knowledge persists in the tenant's document store.
@@ -149,6 +152,9 @@ func BuildExecutor(spec ExecutorSpec) (*model.ClawExecutor, error) {
 	}
 	if spec.Backend != "" {
 		opts = append(opts, model.WithDefaultBackend(spec.Backend))
+	}
+	if spec.BotID != "" {
+		opts = append(opts, model.WithBotID(spec.BotID))
 	}
 
 	checker := buildToolChecker(spec.Workflow)
