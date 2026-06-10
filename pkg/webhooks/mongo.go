@@ -61,15 +61,13 @@ func EnsureSchema(ctx context.Context, db *mongo.Database) error {
 	return nil
 }
 
-func isDuplicateKey(err error) bool { return err != nil && mongo.IsDuplicateKeyError(err) }
-
 // ---- MongoConfigStore ----
 
 type MongoConfigStore struct{ col *mongo.Collection }
 
 func (s *MongoConfigStore) Create(ctx context.Context, c Config) error {
 	if _, err := s.col.InsertOne(ctx, c); err != nil {
-		if isDuplicateKey(err) {
+		if mongoutil.IsDuplicateKey(err) {
 			return ErrDuplicate
 		}
 		return fmt.Errorf("webhooks: insert config: %w", err)
@@ -92,7 +90,7 @@ func (s *MongoConfigStore) Get(ctx context.Context, id string) (Config, error) {
 func (s *MongoConfigStore) Update(ctx context.Context, c Config) error {
 	res, err := s.col.ReplaceOne(ctx, bson.M{"_id": c.ID}, c)
 	if err != nil {
-		if isDuplicateKey(err) {
+		if mongoutil.IsDuplicateKey(err) {
 			return ErrDuplicate
 		}
 		return fmt.Errorf("webhooks: update config: %w", err)
@@ -141,7 +139,7 @@ type MongoDeliveryStore struct{ col *mongo.Collection }
 
 func (s *MongoDeliveryStore) Insert(ctx context.Context, d Delivery) error {
 	if _, err := s.col.InsertOne(ctx, d); err != nil {
-		if isDuplicateKey(err) {
+		if mongoutil.IsDuplicateKey(err) {
 			return ErrDuplicate
 		}
 		return fmt.Errorf("webhooks: insert delivery: %w", err)

@@ -2,20 +2,18 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/SocialGouv/iterion/pkg/botregistry"
+	"github.com/SocialGouv/iterion/pkg/knowledge"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/webhooks"
 	"github.com/SocialGouv/iterion/pkg/webhooks/gitlab"
@@ -34,11 +32,6 @@ func (s *Server) registerGitLabWebhookRoute() {
 	s.mux.Handle("POST /api/webhooks/gitlab/{id}", s.webhookAuth(webhooks.ProviderGitLab, http.HandlerFunc(s.handleGitLabWebhook)))
 }
 
-func sha256Hex(b []byte) string {
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
-}
-
 // handleGitLabWebhook handles a verified inbound GitLab MR webhook. Auth,
 // rate-limit, quota, suspend-check and tenant stamping are already done
 // by webhookAuth; the config is on ctx.
@@ -54,7 +47,7 @@ func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "read body: %v", err)
 		return
 	}
-	payloadHash := sha256Hex(body)
+	payloadHash := knowledge.ChecksumHex(body)
 	srcIP := s.clientIP(r)
 
 	if r.Header.Get("X-Gitlab-Event") != gitlab.EventHeaderMergeRequest {
@@ -92,24 +85,10 @@ func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Idempotency: one launch per (tenant, webhook, project, MR, head sha).
-	idemKey := sha256Hex([]byte(fmt.Sprintf("%s|%s|%d|%d|%s", cfg.TenantID, cfg.ID, p.ProjectID, p.MRIID, p.HeadSHA)))
-	delivery := webhooks.Delivery{
-		ID:             uuid.NewString(),
-		TenantID:       cfg.TenantID,
-		WebhookID:      cfg.ID,
-		Provider:       webhooks.ProviderGitLab,
-		IdempotencyKey: idemKey,
-		EventKind:      "merge_request",
-		EventAction:    p.Action,
-		ProjectPath:    p.ProjectPath,
-		SubjectID:      p.SubjectID(),
-		SubjectSHA:     p.HeadSHA,
-		PayloadHash:    payloadHash,
-		Status:         webhooks.StatusAccepted,
-		BotID:          botID,
-		SourceIP:       srcIP,
-		ReceivedAt:     time.Now().UTC(),
-	}
+	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("%s|%s|%d|%d|%s", cfg.TenantID, cfg.ID, p.ProjectID, p.MRIID, p.HeadSHA)))
+	delivery := newGitLabDelivery(cfg, p, webhooks.StatusAccepted, payloadHash, srcIP)
+	delivery.IdempotencyKey = idemKey
+	delivery.BotID = botID
 	if s.webhookDeliveries != nil {
 		if err := s.webhookDeliveries.Insert(ctx, delivery); err != nil {
 			if errors.Is(err, webhooks.ErrDuplicate) {
@@ -162,6 +141,30 @@ func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// newGitLabDelivery builds the common fields of a delivery audit row;
+// callers layer the idempotency key + outcome-specific fields on top.
+func newGitLabDelivery(cfg webhooks.Config, p gitlab.Parsed, status, payloadHash, srcIP string) webhooks.Delivery {
+	subject := ""
+	if p.MRIID != 0 {
+		subject = p.SubjectID()
+	}
+	return webhooks.Delivery{
+		ID:          uuid.NewString(),
+		TenantID:    cfg.TenantID,
+		WebhookID:   cfg.ID,
+		Provider:    cfg.Provider,
+		EventKind:   "merge_request",
+		EventAction: p.Action,
+		ProjectPath: p.ProjectPath,
+		SubjectID:   subject,
+		SubjectSHA:  p.HeadSHA,
+		PayloadHash: payloadHash,
+		Status:      status,
+		SourceIP:    srcIP,
+		ReceivedAt:  time.Now().UTC(),
+	}
+}
+
 // recordWebhookDelivery inserts a terminal (non-launched) audit row with
 // a unique idempotency key so it never collides with the dedup key.
 // Best-effort.
@@ -169,27 +172,10 @@ func (s *Server) recordWebhookDelivery(ctx context.Context, cfg webhooks.Config,
 	if s.webhookDeliveries == nil {
 		return
 	}
-	subject := ""
-	if p.MRIID != 0 {
-		subject = "mr:" + strconv.FormatInt(p.MRIID, 10)
-	}
-	_ = s.webhookDeliveries.Insert(ctx, webhooks.Delivery{
-		ID:             uuid.NewString(),
-		TenantID:       cfg.TenantID,
-		WebhookID:      cfg.ID,
-		Provider:       cfg.Provider,
-		IdempotencyKey: uuid.NewString(),
-		EventKind:      "merge_request",
-		EventAction:    p.Action,
-		ProjectPath:    p.ProjectPath,
-		SubjectID:      subject,
-		SubjectSHA:     p.HeadSHA,
-		PayloadHash:    payloadHash,
-		Status:         status,
-		Error:          errMsg,
-		SourceIP:       srcIP,
-		ReceivedAt:     time.Now().UTC(),
-	})
+	d := newGitLabDelivery(cfg, p, status, payloadHash, srcIP)
+	d.IdempotencyKey = uuid.NewString()
+	d.Error = errMsg
+	_ = s.webhookDeliveries.Insert(ctx, d)
 }
 
 func (s *Server) updateWebhookDelivery(ctx context.Context, d webhooks.Delivery) {

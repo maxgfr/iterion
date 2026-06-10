@@ -89,12 +89,23 @@ func effectiveOrgMemoryQuota(t identity.Team) int64 {
 	return knowledge.DefaultOrgAggregateQuota
 }
 
+// authStoreOrFail returns the identity store, writing a 500 and
+// reporting ok=false when it isn't wired (so super-admin handlers don't
+// each repeat the nil check).
+func (s *Server) authStoreOrFail(w http.ResponseWriter) (identity.Store, bool) {
+	st := s.authStore()
+	if st == nil {
+		httpError(w, http.StatusInternalServerError, "identity store unavailable")
+		return nil, false
+	}
+	return st, true
+}
+
 // ---- handlers ----
 
 func (s *Server) handleAdminListOrgs(w http.ResponseWriter, r *http.Request) {
-	store := s.authStore()
-	if store == nil {
-		httpError(w, http.StatusInternalServerError, "identity store unavailable")
+	store, ok := s.authStoreOrFail(w)
+	if !ok {
 		return
 	}
 	teams, err := store.ListTeams(r.Context(), identity.Page{Limit: 500})
@@ -144,9 +155,8 @@ func (s *Server) handleAdminCreateOrg(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminGetOrg(w http.ResponseWriter, r *http.Request) {
-	store := s.authStore()
-	if store == nil {
-		httpError(w, http.StatusInternalServerError, "identity store unavailable")
+	store, ok := s.authStoreOrFail(w)
+	if !ok {
 		return
 	}
 	t, err := store.GetTeam(r.Context(), r.PathValue("id"))
@@ -158,9 +168,8 @@ func (s *Server) handleAdminGetOrg(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminUpdateOrg(w http.ResponseWriter, r *http.Request) {
-	store := s.authStore()
-	if store == nil {
-		httpError(w, http.StatusInternalServerError, "identity store unavailable")
+	store, ok := s.authStoreOrFail(w)
+	if !ok {
 		return
 	}
 	t, err := store.GetTeam(r.Context(), r.PathValue("id"))
@@ -202,9 +211,8 @@ func (s *Server) handleAdminUpdateOrg(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminSetOrgStatus(w http.ResponseWriter, r *http.Request) {
-	store := s.authStore()
-	if store == nil {
-		httpError(w, http.StatusInternalServerError, "identity store unavailable")
+	store, ok := s.authStoreOrFail(w)
+	if !ok {
 		return
 	}
 	id, _ := auth.FromContext(r.Context())
@@ -246,9 +254,8 @@ func (s *Server) handleAdminSetOrgStatus(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleAdminOrgUsage(w http.ResponseWriter, r *http.Request) {
-	store := s.authStore()
-	if store == nil {
-		httpError(w, http.StatusInternalServerError, "identity store unavailable")
+	store, ok := s.authStoreOrFail(w)
+	if !ok {
 		return
 	}
 	t, err := store.GetTeam(r.Context(), r.PathValue("id"))

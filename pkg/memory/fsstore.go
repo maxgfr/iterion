@@ -2,8 +2,6 @@ package memory
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -252,7 +250,7 @@ func (s *FSStore) ReadDocument(_ context.Context, ref knowledge.SpaceRef, path s
 		Meta: knowledge.DocumentMeta{
 			Path:     path,
 			Size:     int64(len(data)),
-			Checksum: checksum(data),
+			Checksum: knowledge.ChecksumHex(data),
 		},
 		Content: data,
 	}, nil
@@ -310,7 +308,7 @@ func (s *FSStore) WriteDocument(_ context.Context, ref knowledge.SpaceRef, in kn
 	return knowledge.DocumentMeta{
 		Path:      in.Path,
 		Size:      newSize,
-		Checksum:  checksum(in.Content),
+		Checksum:  knowledge.ChecksumHex(in.Content),
 		UpdatedBy: in.UpdatedBy,
 		UpdatedAt: time.Now(),
 	}, nil
@@ -375,9 +373,4 @@ func (s *FSStore) UsageBytes(_ context.Context, ref knowledge.SpaceRef) (int64, 
 		return 0, 0, err
 	}
 	return space.UsedBytes, effectiveQuota(space.QuotaBytes, spaceQuotaFor(ref.Visibility)), nil
-}
-
-func checksum(b []byte) string {
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
 }

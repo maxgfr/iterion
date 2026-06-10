@@ -48,7 +48,7 @@ func quotaLockPath(base string) string { return filepath.Join(quotaDir(base), ".
 func aggregatePath(base string) string { return filepath.Join(quotaDir(base), "aggregate.json") }
 
 func spaceSidecarPath(base string, ref knowledge.SpaceRef) string {
-	return filepath.Join(quotaDir(base), "spaces", checksum([]byte(ref.ID()))+".json")
+	return filepath.Join(quotaDir(base), "spaces", knowledge.ChecksumHex([]byte(ref.ID()))+".json")
 }
 
 // envQuota reads a non-negative int64 byte ceiling from an env var,

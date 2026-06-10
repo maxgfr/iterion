@@ -84,22 +84,12 @@ func (s *MongoStore) EnsureSchema(ctx context.Context) error {
 	return nil
 }
 
-func isDuplicateKey(err error) bool {
-	if err == nil {
-		return false
-	}
-	if mongo.IsDuplicateKeyError(err) {
-		return true
-	}
-	return false
-}
-
 // ----- Users -----
 
 func (s *MongoStore) CreateUser(ctx context.Context, u User) (User, error) {
 	u.Email = NormalizeEmail(u.Email)
 	if _, err := s.users.InsertOne(ctx, u); err != nil {
-		if isDuplicateKey(err) {
+		if mongoutil.IsDuplicateKey(err) {
 			return User{}, ErrEmailAlreadyTaken
 		}
 		return User{}, fmt.Errorf("identity: insert user: %w", err)
@@ -136,7 +126,7 @@ func (s *MongoStore) UpdateUser(ctx context.Context, u User) error {
 	u.Email = NormalizeEmail(u.Email)
 	res, err := s.users.ReplaceOne(ctx, bson.M{"_id": u.ID}, u)
 	if err != nil {
-		if isDuplicateKey(err) {
+		if mongoutil.IsDuplicateKey(err) {
 			return ErrEmailAlreadyTaken
 		}
 		return fmt.Errorf("identity: update user: %w", err)
@@ -183,7 +173,7 @@ func (s *MongoStore) UserCount(ctx context.Context) (int64, error) {
 
 func (s *MongoStore) CreateTeam(ctx context.Context, t Team) (Team, error) {
 	if _, err := s.teams.InsertOne(ctx, t); err != nil {
-		if isDuplicateKey(err) {
+		if mongoutil.IsDuplicateKey(err) {
 			return Team{}, ErrSlugAlreadyTaken
 		}
 		return Team{}, fmt.Errorf("identity: insert team: %w", err)
@@ -218,7 +208,7 @@ func (s *MongoStore) GetTeamBySlug(ctx context.Context, slug string) (Team, erro
 func (s *MongoStore) UpdateTeam(ctx context.Context, t Team) error {
 	res, err := s.teams.ReplaceOne(ctx, bson.M{"_id": t.ID}, t)
 	if err != nil {
-		if isDuplicateKey(err) {
+		if mongoutil.IsDuplicateKey(err) {
 			return ErrSlugAlreadyTaken
 		}
 		return fmt.Errorf("identity: update team: %w", err)

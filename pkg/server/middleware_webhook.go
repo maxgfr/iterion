@@ -115,7 +115,15 @@ func (s *Server) webhookAuth(provider webhooks.Provider, next http.Handler) http
 		})
 		ctx = store.WithIdentity(ctx, cfg.TenantID, actor)
 		ctx = context.WithValue(ctx, webhookCtxKey{}, cfg)
-		_ = s.webhookConfigs.MarkUsed(ctx, cfg.ID, time.Now().UTC())
+		// last_used_at is observability, not on the inbound critical
+		// path — write it detached (bounded, survives request cancel) so
+		// the handler isn't serialised behind a Mongo round-trip.
+		id, now := cfg.ID, time.Now().UTC()
+		go func() {
+			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = s.webhookConfigs.MarkUsed(store.WithIdentity(bg, cfg.TenantID, actor), id, now)
+		}()
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

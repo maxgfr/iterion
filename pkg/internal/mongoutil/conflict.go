@@ -30,3 +30,10 @@ func IsIndexConflict(err error) bool {
 	}
 	return false
 }
+
+// IsDuplicateKey reports whether err is a Mongo E11000 duplicate-key
+// error, so InsertOne/ReplaceOne callers across storage packages can
+// translate it to a domain sentinel without each re-deriving the check.
+func IsDuplicateKey(err error) bool {
+	return err != nil && mongo.IsDuplicateKeyError(err)
+}

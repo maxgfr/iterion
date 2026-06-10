@@ -116,8 +116,15 @@ func (s *MongoMemoryStore) Root(ref knowledge.SpaceRef) (string, error) {
 	return "mem://" + string(ref.Visibility) + "/" + ref.ID(), nil
 }
 
-func (s *MongoMemoryStore) allDocs(ctx context.Context, spaceID string) ([]memDoc, error) {
-	cur, err := s.docs.Find(ctx, bson.M{"space_id": spaceID}, options.Find().SetSort(bson.M{"path": 1}))
+// allDocs lists a space's docs sorted by path. withBody=false excludes
+// the (up to 2 MiB) markdown body — metadata-only callers (index, list)
+// must not pull every body off Mongo just to render a few KB of labels.
+func (s *MongoMemoryStore) allDocs(ctx context.Context, spaceID string, withBody bool) ([]memDoc, error) {
+	opt := options.Find().SetSort(bson.M{"path": 1})
+	if !withBody {
+		opt.SetProjection(bson.M{"content": 0})
+	}
+	cur, err := s.docs.Find(ctx, bson.M{"space_id": spaceID}, opt)
 	if err != nil {
 		return nil, fmt.Errorf("memory: list docs: %w", err)
 	}
@@ -133,7 +140,7 @@ func (s *MongoMemoryStore) BuildIndex(ctx context.Context, ref knowledge.SpaceRe
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
-	docs, err := s.allDocs(ctx, ref.ID())
+	docs, err := s.allDocs(ctx, ref.ID(), false)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +162,7 @@ func (s *MongoMemoryStore) Autoload(ctx context.Context, ref knowledge.SpaceRef,
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
-	docs, err := s.allDocs(ctx, ref.ID())
+	docs, err := s.allDocs(ctx, ref.ID(), true)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +184,7 @@ func (s *MongoMemoryStore) ListDocuments(ctx context.Context, ref knowledge.Spac
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
-	docs, err := s.allDocs(ctx, ref.ID())
+	docs, err := s.allDocs(ctx, ref.ID(), false)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +245,7 @@ func (s *MongoMemoryStore) DeleteDocument(ctx context.Context, ref knowledge.Spa
 		return err
 	}
 	var d memDoc
-	err := s.docs.FindOne(ctx, docFilter(ref.ID(), path)).Decode(&d)
+	err := s.docs.FindOne(ctx, docFilter(ref.ID(), path), options.FindOne().SetProjection(bson.M{"size": 1})).Decode(&d)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil
 	}
@@ -270,7 +277,7 @@ func (s *MongoMemoryStore) WriteDocument(ctx context.Context, ref knowledge.Spac
 
 	var existing memDoc
 	var oldSize, prevRev int64
-	if err := s.docs.FindOne(ctx, docFilter(spaceID, in.Path)).Decode(&existing); err == nil {
+	if err := s.docs.FindOne(ctx, docFilter(spaceID, in.Path), options.FindOne().SetProjection(bson.M{"size": 1, "revision": 1})).Decode(&existing); err == nil {
 		oldSize, prevRev = existing.Size, existing.Revision
 	}
 	if in.ExpectedRev != 0 && in.ExpectedRev != prevRev {
@@ -293,7 +300,7 @@ func (s *MongoMemoryStore) WriteDocument(ctx context.Context, ref knowledge.Spac
 			return knowledge.DocumentMeta{}, err
 		}
 		if !ok {
-			used, quota := s.tenantUsage(ctx, tenantID)
+			used, quota := s.readUsage(ctx, s.tenant, tenantID, knowledge.DefaultOrgAggregateQuota)
 			return knowledge.DocumentMeta{}, &knowledge.QuotaError{Aggregate: true, Used: used, Delta: delta, Quota: quota}
 		}
 	}
@@ -308,7 +315,7 @@ func (s *MongoMemoryStore) WriteDocument(ctx context.Context, ref knowledge.Spac
 			if err != nil {
 				return knowledge.DocumentMeta{}, err
 			}
-			used, quota := s.spaceUsage(ctx, spaceID)
+			used, quota := s.readUsage(ctx, s.spaces, spaceID, 0)
 			return knowledge.DocumentMeta{}, &knowledge.QuotaError{Aggregate: false, Used: used, Delta: delta, Quota: quota}
 		}
 	} else if delta < 0 {
@@ -349,16 +356,7 @@ func (s *MongoMemoryStore) ensureTenant(ctx context.Context, tenant string) erro
 }
 
 func (s *MongoMemoryStore) bumpTenant(ctx context.Context, tenant string, delta int64) (bool, error) {
-	if delta <= 0 {
-		_, err := s.tenant.UpdateOne(ctx, bson.M{"_id": tenant}, bson.M{"$inc": bson.M{"used_bytes": delta}})
-		_ = s.clampUsage(ctx, s.tenant, tenant)
-		return true, err
-	}
-	res, err := s.tenant.UpdateOne(ctx, bson.M{"_id": tenant, "$expr": lteAddExpr(delta)}, bson.M{"$inc": bson.M{"used_bytes": delta}})
-	if err != nil {
-		return false, err
-	}
-	return res.MatchedCount == 1, nil
+	return s.bumpCounter(ctx, s.tenant, tenant, delta, false)
 }
 
 func (s *MongoMemoryStore) ensureSpace(ctx context.Context, ref knowledge.SpaceRef) error {
@@ -377,16 +375,25 @@ func (s *MongoMemoryStore) ensureSpace(ctx context.Context, ref knowledge.SpaceR
 }
 
 func (s *MongoMemoryStore) bumpSpace(ctx context.Context, spaceID string, delta int64) (bool, error) {
+	// allowZeroQuota: a space quota_bytes of 0 means "no sub-cap" (global).
+	return s.bumpCounter(ctx, s.spaces, spaceID, delta, true)
+}
+
+// bumpCounter applies a byte delta to a used_bytes counter under its
+// cap. A non-positive delta always succeeds (and clamps any drift back
+// to 0); a positive delta is gated by the $expr CAS, with allowZeroQuota
+// treating quota_bytes==0 as "unlimited". Returns whether it applied.
+func (s *MongoMemoryStore) bumpCounter(ctx context.Context, coll *mongo.Collection, id string, delta int64, allowZeroQuota bool) (bool, error) {
 	if delta <= 0 {
-		_, err := s.spaces.UpdateOne(ctx, bson.M{"_id": spaceID}, bson.M{"$inc": bson.M{"used_bytes": delta}})
-		_ = s.clampUsage(ctx, s.spaces, spaceID)
+		_, err := coll.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$inc": bson.M{"used_bytes": delta}})
+		_ = s.clampUsage(ctx, coll, id)
 		return true, err
 	}
-	// quota_bytes == 0 means "no sub-cap" (e.g. global) → always allow.
-	res, err := s.spaces.UpdateOne(ctx, bson.M{"_id": spaceID, "$or": []bson.M{
-		{"quota_bytes": int64(0)},
-		{"$expr": lteAddExpr(delta)},
-	}}, bson.M{"$inc": bson.M{"used_bytes": delta}})
+	filter := bson.M{"_id": id, "$expr": lteAddExpr(delta)}
+	if allowZeroQuota {
+		filter = bson.M{"_id": id, "$or": []bson.M{{"quota_bytes": int64(0)}, {"$expr": lteAddExpr(delta)}}}
+	}
+	res, err := coll.UpdateOne(ctx, filter, bson.M{"$inc": bson.M{"used_bytes": delta}})
 	if err != nil {
 		return false, err
 	}
@@ -404,21 +411,15 @@ func (s *MongoMemoryStore) clampUsage(ctx context.Context, coll *mongo.Collectio
 	return err
 }
 
-func (s *MongoMemoryStore) tenantUsage(ctx context.Context, tenant string) (used, quota int64) {
-	var t struct {
+// readUsage returns (used, quota) for a counter doc, or (0, missQuota)
+// when absent. Used by the quota-deny error paths for both counters.
+func (s *MongoMemoryStore) readUsage(ctx context.Context, coll *mongo.Collection, id string, missQuota int64) (used, quota int64) {
+	var doc struct {
 		Used  int64 `bson:"used_bytes"`
 		Quota int64 `bson:"quota_bytes"`
 	}
-	if err := s.tenant.FindOne(ctx, bson.M{"_id": tenant}).Decode(&t); err != nil {
-		return 0, knowledge.DefaultOrgAggregateQuota
+	if err := coll.FindOne(ctx, bson.M{"_id": id}).Decode(&doc); err != nil {
+		return 0, missQuota
 	}
-	return t.Used, t.Quota
-}
-
-func (s *MongoMemoryStore) spaceUsage(ctx context.Context, spaceID string) (used, quota int64) {
-	var sp memSpaceDoc
-	if err := s.spaces.FindOne(ctx, bson.M{"_id": spaceID}).Decode(&sp); err != nil {
-		return 0, 0
-	}
-	return sp.UsedBytes, sp.QuotaBytes
+	return doc.Used, doc.Quota
 }
