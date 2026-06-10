@@ -66,6 +66,19 @@ func (r SpaceRef) Validate() error {
 	if err := ValidateName(r.Name); err != nil {
 		return err
 	}
+	// Every qualifier becomes a path segment (FS adapter scopeFor) and an
+	// ID component (cloud _id), so a present value must be a single safe
+	// segment — otherwise an untrusted REST `?project=`/`?user=` could
+	// reach scopeFor() as `../../etc` and escape the store tree. Empty is
+	// allowed; the switch below enforces presence where required.
+	for _, c := range []struct{ field, val string }{
+		{"tenant", r.TenantID}, {"user", r.UserID},
+		{"project", r.ProjectID}, {"bot", r.BotID},
+	} {
+		if err := validateSegment(c.field, c.val); err != nil {
+			return err
+		}
+	}
 	switch r.Visibility {
 	case VisibilityBot:
 		if r.ProjectID == "" {
@@ -90,6 +103,20 @@ func (r SpaceRef) ID() string {
 	return strings.Join([]string{
 		"v1", string(r.Visibility), r.TenantID, r.ProjectID, r.BotID, r.UserID, r.Name,
 	}, ":")
+}
+
+// validateSegment guards a SpaceRef qualifier (tenant/user/project/bot)
+// that becomes a path segment + ID component. Empty is allowed (presence
+// is the visibility switch's job); a present value must not contain a
+// path separator or be a traversal token.
+func validateSegment(field, v string) error {
+	if v == "" {
+		return nil
+	}
+	if strings.ContainsAny(v, `/\`) || v == "." || v == ".." {
+		return fmt.Errorf("knowledge: %s %q must not contain a path separator or traversal", field, v)
+	}
+	return nil
 }
 
 // ValidateName rejects names that are empty, contain path separators,

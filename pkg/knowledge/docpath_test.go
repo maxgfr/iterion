@@ -30,3 +30,21 @@ func TestValidateDocPath(t *testing.T) {
 		}
 	}
 }
+
+func TestSpaceRefValidate_RejectsTraversalSegments(t *testing.T) {
+	if err := (SpaceRef{Visibility: VisibilityBot, ProjectID: "proj", BotID: "bot", Name: "n"}).Validate(); err != nil {
+		t.Fatalf("clean ref should validate: %v", err)
+	}
+	bad := []SpaceRef{
+		{Visibility: VisibilityBot, ProjectID: "../../etc", BotID: "bot", Name: "n"}, // project traversal
+		{Visibility: VisibilityBot, ProjectID: "a/b", BotID: "bot", Name: "n"},       // project separator
+		{Visibility: VisibilityBot, ProjectID: "proj", BotID: "..", Name: "n"},       // bot traversal
+		{Visibility: VisibilityUser, UserID: "../x", Name: "n"},                      // user traversal
+		{Visibility: VisibilityOrg, TenantID: `a\b`, Name: "n"},                      // tenant separator
+	}
+	for i, r := range bad {
+		if err := r.Validate(); err == nil {
+			t.Errorf("case %d (%+v): traversal segment should be rejected", i, r)
+		}
+	}
+}
