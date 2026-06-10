@@ -4641,7 +4641,18 @@ workflow sec_audit_source:
     attempt:       "1"
   }
   reattack -> project_review_input
-  project_review_input -> reviewer_isolation
+  ## Forward the 4-field projection into the judge's input. Without this
+  ## with{}, reviewer_isolation received NO input, so its {{input.file/line/
+  ## category/diff}} stayed literal placeholders and the judge fail-closed
+  ## (approved=false) on every finding -> every verdict came out "uncertain".
+  ## The compute already produces exactly these four fields (the isolation
+  ## projection); the edge just has to carry them.
+  project_review_input -> reviewer_isolation with {
+    file:     "{{outputs.project_review_input.file}}",
+    line:     "{{outputs.project_review_input.line}}",
+    category: "{{outputs.project_review_input.category}}",
+    diff:     "{{outputs.project_review_input.diff}}"
+  }
   reviewer_isolation -> aggregate_verdict
   aggregate_verdict -> record_finding with {
     is_apply:        "{{outputs.remediation_mode_gate.is_apply}}",
