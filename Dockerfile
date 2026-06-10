@@ -91,6 +91,19 @@ RUN apt-get update \
         passwd \
  && rm -rf /var/lib/apt/lists/*
 
+# glab (GitLab CLI) — review-pr (Revi) runs WITHOUT a sandbox, so in
+# cloud it executes inside the runner pod and posts code reviews onto
+# GitLab merge requests (inline comments + one-click ```suggestion
+# blocks) from here. Single static binary from the gitlab-org/cli
+# goreleaser archive (binary at bin/glab); dpkg arch matches the asset.
+# (gh is intentionally not added here yet — GitHub cloud posting is a
+# separate follow-up; the GitLab webhook flow is the current target.)
+ARG GLAB_VERSION=1.102.0
+RUN ARCH="$(dpkg --print-architecture)" \
+ && curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_${ARCH}.tar.gz" \
+        | tar -xz -C /usr/local/bin --strip-components=1 bin/glab \
+ && chmod +x /usr/local/bin/glab
+
 # kubectl — required by the kubernetes sandbox driver (Phase 5) when
 # the runner pod creates per-run sibling pods. Pinned to a recent
 # stable release; Kubernetes guarantees client/server compatibility

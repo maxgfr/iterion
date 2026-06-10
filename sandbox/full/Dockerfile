@@ -69,6 +69,19 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
  && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------
+# Layer 2b — glab (GitLab CLI), sibling to gh. Revi publishes code
+# reviews onto GitLab merge requests (inline comments + one-click
+# ```suggestion blocks) via `glab`. Single static binary from the
+# gitlab-org/cli goreleaser archive; the dpkg arch matches the asset
+# name, and the binary lives at bin/glab inside the tarball.
+# ---------------------------------------------------------------------
+ARG GLAB_VERSION=1.102.0
+RUN ARCH=$(dpkg --print-architecture) \
+ && curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_${ARCH}.tar.gz" \
+        | tar -xz -C /usr/local/bin --strip-components=1 bin/glab \
+ && chmod +x /usr/local/bin/glab
+
+# ---------------------------------------------------------------------
 # Layer 3 — single-binary tools. Each install respects $TARGETARCH so
 # the multi-arch buildx pipeline produces a working image on both
 # amd64 and arm64.
