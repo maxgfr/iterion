@@ -9,11 +9,12 @@ import (
 	"github.com/SocialGouv/claw-code-go/pkg/api"
 
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
-	"github.com/SocialGouv/iterion/pkg/memory"
+	"github.com/SocialGouv/iterion/pkg/knowledge"
 )
 
 // Tool names surfaced to the LLM. Tracked as constants so prompts,
-// skills, and validators can refer to them without drifting.
+// skills, and validators can refer to them without drifting. They are
+// stable across the FS/cloud MemoryStore backends.
 const (
 	MemoryReadToolName  = "memory_read"
 	MemoryWriteToolName = "memory_write"
@@ -21,26 +22,29 @@ const (
 )
 
 // installWorkspaceMemory wires the per-node memory index + autoload
-// + tools + pre-compact hook into opts.
-func installWorkspaceMemory(opts *GenerationOptions, workDir string, spec *delegate.MemorySpec) error {
-	scope, err := memory.OpenScope(workDir, spec.Scope)
+// + tools + pre-compact hook into opts, routed through a
+// knowledge.MemoryStore + resolved SpaceRef. The store abstracts the
+// local-filesystem vs cloud backend; the tool names and prompt blocks
+// are identical either way.
+func installWorkspaceMemory(ctx context.Context, opts *GenerationOptions, store knowledge.MemoryStore, ref knowledge.SpaceRef, spec *delegate.MemorySpec) error {
+	root, err := store.Root(ref)
 	if err != nil {
 		return err
 	}
 
-	index, err := scope.BuildIndex()
+	index, err := store.BuildIndex(ctx, ref)
 	if err != nil {
 		return fmt.Errorf("auto-index: %w", err)
 	}
-	if block := renderIndexBlock(scope.Root(), index); block != "" {
+	if block := renderIndexBlock(root, index); block != "" {
 		opts.SystemBlocks = append(opts.SystemBlocks, api.ContentBlock{Type: "text", Text: block})
 	}
 
-	entries, err := scope.Autoload(spec.Autoload)
+	entries, err := store.Autoload(ctx, ref, spec.Autoload)
 	if err != nil {
 		return fmt.Errorf("autoload: %w", err)
 	}
-	if block := renderAutoloadBlock(scope.Root(), entries); block != "" {
+	if block := renderAutoloadBlock(root, entries); block != "" {
 		opts.SystemBlocks = append(opts.SystemBlocks, api.ContentBlock{Type: "text", Text: block})
 	}
 
@@ -53,20 +57,20 @@ func installWorkspaceMemory(opts *GenerationOptions, workDir string, spec *deleg
 	}
 
 	if spec.Read {
-		opts.Tools = append(opts.Tools, memoryReadTool(scope), memoryListTool(scope))
+		opts.Tools = append(opts.Tools, memoryReadTool(store, ref), memoryListTool(store, ref))
 	}
 	if spec.Write {
-		opts.Tools = append(opts.Tools, memoryWriteTool(scope))
+		opts.Tools = append(opts.Tools, memoryWriteTool(store, ref))
 	}
 	if spec.PreCompactInject {
-		opts.OnBeforeCompact = memoryPreCompactInjector(scope, spec.Autoload)
+		opts.OnBeforeCompact = memoryPreCompactInjector(ctx, store, ref, spec.Autoload)
 	}
 	return nil
 }
 
 // renderIndexBlock formats the auto-generated index as a single
 // XML-tagged block. Empty index → empty string (no block emitted).
-func renderIndexBlock(scopeRoot string, entries []memory.IndexEntry) string {
+func renderIndexBlock(scopeRoot string, entries []knowledge.IndexEntry) string {
 	if len(entries) == 0 {
 		return ""
 	}
@@ -93,7 +97,7 @@ func renderIndexBlock(scopeRoot string, entries []memory.IndexEntry) string {
 
 // renderAutoloadBlock formats the full-content autoload set as a
 // single XML-tagged block. Empty set → empty string.
-func renderAutoloadBlock(scopeRoot string, entries []memory.AutoloadEntry) string {
+func renderAutoloadBlock(scopeRoot string, entries []knowledge.AutoloadEntry) string {
 	if len(entries) == 0 {
 		return ""
 	}
@@ -106,7 +110,7 @@ func renderAutoloadBlock(scopeRoot string, entries []memory.AutoloadEntry) strin
 	return b.String()
 }
 
-func memoryReadTool(scope *memory.Scope) GenerationTool {
+func memoryReadTool(store knowledge.MemoryStore, ref knowledge.SpaceRef) GenerationTool {
 	return GenerationTool{
 		Name:        MemoryReadToolName,
 		Description: "Read a Markdown file from this node's workspace memory scope. Paths are relative to the scope root.",
@@ -115,23 +119,23 @@ func memoryReadTool(scope *memory.Scope) GenerationTool {
             "properties": {"path": {"type": "string"}},
             "required": ["path"]
         }`),
-		Execute: func(_ context.Context, input json.RawMessage) (string, error) {
+		Execute: func(ctx context.Context, input json.RawMessage) (string, error) {
 			var args struct {
 				Path string `json:"path"`
 			}
 			if err := json.Unmarshal(input, &args); err != nil {
 				return "", fmt.Errorf("memory_read: decode args: %w", err)
 			}
-			data, err := scope.Read(args.Path)
+			doc, err := store.ReadDocument(ctx, ref, args.Path)
 			if err != nil {
 				return "", fmt.Errorf("memory_read %q: %w", args.Path, err)
 			}
-			return string(data), nil
+			return string(doc.Content), nil
 		},
 	}
 }
 
-func memoryWriteTool(scope *memory.Scope) GenerationTool {
+func memoryWriteTool(store knowledge.MemoryStore, ref knowledge.SpaceRef) GenerationTool {
 	return GenerationTool{
 		Name:        MemoryWriteToolName,
 		Description: "Write Markdown content to a file in this node's workspace memory scope. Overwrites on each call. Paths are relative to the scope root.",
@@ -143,7 +147,7 @@ func memoryWriteTool(scope *memory.Scope) GenerationTool {
             },
             "required": ["path", "content"]
         }`),
-		Execute: func(_ context.Context, input json.RawMessage) (string, error) {
+		Execute: func(ctx context.Context, input json.RawMessage) (string, error) {
 			var args struct {
 				Path    string `json:"path"`
 				Content string `json:"content"`
@@ -151,16 +155,20 @@ func memoryWriteTool(scope *memory.Scope) GenerationTool {
 			if err := json.Unmarshal(input, &args); err != nil {
 				return "", fmt.Errorf("memory_write: decode args: %w", err)
 			}
-			if err := scope.Write(args.Path, []byte(args.Content)); err != nil {
+			meta, err := store.WriteDocument(ctx, ref, knowledge.DocumentInput{Path: args.Path, Content: []byte(args.Content)})
+			if err != nil {
 				return "", fmt.Errorf("memory_write %q: %w", args.Path, err)
 			}
-			abs, _ := scope.Resolve(args.Path)
-			return fmt.Sprintf("checkpoint written: %s (%d bytes)", abs, len(args.Content)), nil
+			loc := meta.Path
+			if root, rerr := store.Root(ref); rerr == nil && root != "" {
+				loc = strings.TrimRight(root, "/") + "/" + meta.Path
+			}
+			return fmt.Sprintf("checkpoint written: %s (%d bytes)", loc, meta.Size), nil
 		},
 	}
 }
 
-func memoryListTool(scope *memory.Scope) GenerationTool {
+func memoryListTool(store knowledge.MemoryStore, ref knowledge.SpaceRef) GenerationTool {
 	return GenerationTool{
 		Name:        MemoryListToolName,
 		Description: "List files in a subdirectory of this node's workspace memory scope. Pass an empty path for the scope root.",
@@ -169,7 +177,7 @@ func memoryListTool(scope *memory.Scope) GenerationTool {
             "properties": {"path": {"type": "string"}},
             "required": []
         }`),
-		Execute: func(_ context.Context, input json.RawMessage) (string, error) {
+		Execute: func(ctx context.Context, input json.RawMessage) (string, error) {
 			var args struct {
 				Path string `json:"path"`
 			}
@@ -178,14 +186,18 @@ func memoryListTool(scope *memory.Scope) GenerationTool {
 					return "", fmt.Errorf("memory_list: decode args: %w", err)
 				}
 			}
-			files, err := scope.List(args.Path)
+			docs, err := store.ListDocuments(ctx, ref, args.Path)
 			if err != nil {
 				return "", fmt.Errorf("memory_list %q: %w", args.Path, err)
 			}
-			if len(files) == 0 {
+			if len(docs) == 0 {
 				return "(empty)", nil
 			}
-			return strings.Join(files, "\n"), nil
+			paths := make([]string, len(docs))
+			for i, d := range docs {
+				paths[i] = d.Path
+			}
+			return strings.Join(paths, "\n"), nil
 		},
 	}
 }
@@ -194,18 +206,19 @@ func memoryListTool(scope *memory.Scope) GenerationTool {
 // and prepends them as a synthetic user turn so claw's summariser
 // folds them into the surviving summary. Returns nil (no-op) when
 // the scope is empty.
-func memoryPreCompactInjector(scope *memory.Scope, autoload []string) func(messages []api.Message) []api.Message {
+func memoryPreCompactInjector(ctx context.Context, store knowledge.MemoryStore, ref knowledge.SpaceRef, autoload []string) func(messages []api.Message) []api.Message {
 	return func(messages []api.Message) []api.Message {
-		index, err := scope.BuildIndex()
+		index, err := store.BuildIndex(ctx, ref)
 		if err != nil {
 			return nil
 		}
-		entries, err := scope.Autoload(autoload)
+		entries, err := store.Autoload(ctx, ref, autoload)
 		if err != nil {
 			return nil
 		}
-		indexText := renderIndexBlock(scope.Root(), index)
-		autoloadText := renderAutoloadBlock(scope.Root(), entries)
+		root, _ := store.Root(ref)
+		indexText := renderIndexBlock(root, index)
+		autoloadText := renderAutoloadBlock(root, entries)
 		if indexText == "" && autoloadText == "" {
 			return nil
 		}

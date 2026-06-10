@@ -452,6 +452,9 @@ func writeSecretsBlock(b *strings.Builder, sb *ast.SecretsBlock, indent string) 
 		if s.Env != "" {
 			fmt.Fprintf(b, "%s    env: %q\n", indent, s.Env)
 		}
+		if s.Optional {
+			fmt.Fprintf(b, "%s    optional: true\n", indent)
+		}
 		if len(s.Hosts) > 0 {
 			fmt.Fprintf(b, "%s    hosts: [%s]\n", indent, quoteList(s.Hosts))
 		}
@@ -810,6 +813,9 @@ func writeMemory(b *strings.Builder, m *ast.MemoryBlock, indent string, leadingB
 	}
 	if m.ProjectRoot != nil {
 		fmt.Fprintf(b, "%s  project_root: %t\n", indent, *m.ProjectRoot)
+	}
+	if m.Visibility != nil {
+		fmt.Fprintf(b, "%s  visibility: %q\n", indent, *m.Visibility)
 	}
 }
 

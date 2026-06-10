@@ -35,10 +35,12 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dsl/parser"
 	"github.com/SocialGouv/iterion/pkg/dsl/unparse"
 	"github.com/SocialGouv/iterion/pkg/dsl/workflowfile"
+	"github.com/SocialGouv/iterion/pkg/knowledge"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/secrets"
 	"github.com/SocialGouv/iterion/pkg/store"
+	"github.com/SocialGouv/iterion/pkg/webhooks"
 )
 
 // StaticFS embeds the built studio so any importer (the server
@@ -120,6 +122,25 @@ type Config struct {
 	// from the DSL `secrets:` block. Plaintexts are sealed at rest and
 	// are only resolved into per-run sealed bundles by the cloud publisher.
 	GenericSecrets secrets.GenericSecretStore
+
+	// Webhook* wire the inbound webhook spine. When WebhookConfigs is
+	// non-nil (and the auth stack is present), the server registers the
+	// per-org webhook CRUD under /api/teams/:id/webhooks and the inbound
+	// /api/webhooks/{provider}/{id} routes.
+	WebhookConfigs    webhooks.ConfigStore
+	WebhookDeliveries webhooks.DeliveryStore
+	WebhookCounter    webhooks.Counter
+
+	// BotBindings is the policy wrapper over GenericSecrets: it maps a
+	// stored org/user secret to a bot under the workflow's declared
+	// name. When non-nil, the server registers the bot-binding CRUD and
+	// the cloud publisher consults it during secret resolution.
+	BotBindings secrets.BotSecretBindingStore
+
+	// MemoryStore backs the shared-knowledge REST surface
+	// (/api/memory/*). nil → the local filesystem store. Cloud mode
+	// passes the Mongo store so the studio reads the tenant's memory.
+	MemoryStore knowledge.MemoryStore
 
 	// RunSecrets is the per-run sealed bundle store. Required when
 	// ApiKeys is set.
@@ -279,17 +300,25 @@ type Server struct {
 	// Cleared on project switch. Non-nil after New.
 	statsCache *runStatsCache
 
-	authSvc        *auth.Service
-	authLimiter    *authRateLimiter
-	signer         *auth.JWTSigner
-	oidcRegistry   *oidc.Registry
-	oidcStates     oidc.StateStore
-	apiKeys        secrets.ApiKeyStore
-	genericSecrets secrets.GenericSecretStore
-	runSecrets     secrets.RunSecretsStore
-	sealer         secrets.Sealer
-	oauthStore     secrets.OAuthStore
-	httpClient     *http.Client
+	authSvc           *auth.Service
+	authLimiter       *authRateLimiter
+	signer            *auth.JWTSigner
+	oidcRegistry      *oidc.Registry
+	oidcStates        oidc.StateStore
+	apiKeys           secrets.ApiKeyStore
+	genericSecrets    secrets.GenericSecretStore
+	runSecrets        secrets.RunSecretsStore
+	sealer            secrets.Sealer
+	oauthStore        secrets.OAuthStore
+	webhookConfigs    webhooks.ConfigStore
+	webhookDeliveries webhooks.DeliveryStore
+	webhookCounter    webhooks.Counter
+	botBindings       secrets.BotSecretBindingStore
+	memStore          knowledge.MemoryStore
+	// webhookLaunchBot overrides the inbound-webhook launch path (test
+	// seam). nil → realWebhookLaunchBot (resolve bot source + s.runs.Launch).
+	webhookLaunchBot func(ctx context.Context, botID string, vars map[string]string, repoURL, repoRef string) (string, error)
+	httpClient       *http.Client
 
 	// detector is the cached LLM credential detector backing
 	// /api/backends/detect. Lazily constructed on first request.
@@ -363,23 +392,28 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		cfg.OIDCStates = oidc.NewMemoryStateStore(10 * time.Minute)
 	}
 	s := &Server{
-		cfg:             cfg,
-		logger:          logger,
-		mux:             http.NewServeMux(),
-		addrReady:       make(chan struct{}),
-		shutdown:        make(chan struct{}),
-		authSvc:         cfg.AuthService,
-		signer:          cfg.AuthSigner,
-		oidcRegistry:    cfg.OIDCRegistry,
-		oidcStates:      cfg.OIDCStates,
-		apiKeys:         cfg.ApiKeys,
-		genericSecrets:  cfg.GenericSecrets,
-		runSecrets:      cfg.RunSecrets,
-		sealer:          cfg.Sealer,
-		oauthStore:      cfg.OAuthForfait,
-		httpClient:      &http.Client{Timeout: 15 * time.Second},
-		browserSessions: cfg.BrowserRegistry,
-		statsCache:      newRunStatsCache(),
+		cfg:               cfg,
+		logger:            logger,
+		mux:               http.NewServeMux(),
+		addrReady:         make(chan struct{}),
+		shutdown:          make(chan struct{}),
+		authSvc:           cfg.AuthService,
+		signer:            cfg.AuthSigner,
+		oidcRegistry:      cfg.OIDCRegistry,
+		oidcStates:        cfg.OIDCStates,
+		apiKeys:           cfg.ApiKeys,
+		genericSecrets:    cfg.GenericSecrets,
+		runSecrets:        cfg.RunSecrets,
+		sealer:            cfg.Sealer,
+		oauthStore:        cfg.OAuthForfait,
+		webhookConfigs:    cfg.WebhookConfigs,
+		webhookDeliveries: cfg.WebhookDeliveries,
+		webhookCounter:    cfg.WebhookCounter,
+		botBindings:       cfg.BotBindings,
+		memStore:          cfg.MemoryStore,
+		httpClient:        &http.Client{Timeout: 15 * time.Second},
+		browserSessions:   cfg.BrowserRegistry,
+		statsCache:        newRunStatsCache(),
 	}
 	if cfg.NativeTrackerStore != nil {
 		s.boardMCPTokens = NewBoardMCPTokenRegistry()
@@ -683,6 +717,26 @@ func (s *Server) routes() {
 	if s.genericSecrets != nil && s.sealer != nil && s.authSvc != nil {
 		s.registerGenericSecretRoutes()
 	}
+
+	// Inbound webhook spine: per-org webhook token CRUD. The inbound
+	// /api/webhooks/{provider}/{id} delivery routes are registered by
+	// each provider (see registerGitLabWebhookRoute).
+	if s.webhookConfigs != nil && s.authSvc != nil {
+		s.registerWebhookRoutes()
+	}
+	// Inbound GitLab MR delivery route (self-authenticating via
+	// webhookAuth) — registered whenever the config store is present.
+	if s.webhookConfigs != nil {
+		s.registerGitLabWebhookRoute()
+	}
+
+	// Bot-secret bindings (policy wrapper over generic secrets).
+	if s.botBindings != nil && s.authSvc != nil {
+		s.registerBotBindingRoutes()
+	}
+
+	// Shared-knowledge memory REST (FS fallback when no store wired).
+	s.registerMemoryRoutes()
 
 	// OAuth-forfait endpoints. Same gating as BYOK plus the per-
 	// user OAuthForfait store.

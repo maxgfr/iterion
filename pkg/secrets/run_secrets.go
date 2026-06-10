@@ -29,6 +29,13 @@ type RunBundle struct {
 	// GenericSecrets maps workflow secret names to plaintext payloads
 	// resolved from the tenant/user secret store at publish time.
 	GenericSecrets map[string]string `json:"generic_secrets,omitempty"`
+	// GenericSecretHosts maps a workflow secret name to the egress host
+	// allowlist a bot-secret binding imposes on it (empty/absent = no
+	// binding-level restriction). The runner intersects this with the
+	// workflow's own declared `secrets.<name>.hosts` so a binding can
+	// only NARROW egress, never broaden it. This is what makes a
+	// binding's AllowedHosts an enforced control rather than metadata.
+	GenericSecretHosts map[string][]string `json:"generic_secret_hosts,omitempty"`
 	// OAuthCredentials maps "claude_code" / "codex" → opaque blob
 	// that the runner materialises as a credentials.json /
 	// auth.json before spawning the CLI subprocess.

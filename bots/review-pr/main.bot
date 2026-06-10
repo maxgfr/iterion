@@ -71,6 +71,20 @@
 ## remaining enhancement.
 ## ─────────────────────────────────────────────────────────────────
 
+secrets:
+  ## Forge API token used to post the review on a PR/MR when the run is
+  ## unattended — e.g. an org webhook launch where no forge CLI is
+  ## pre-authenticated on the host. Mounted read-only as a FILE the
+  ## publish step hands to `gh`/`glab` (path/env only, never read into a
+  ## prompt). `optional: true` so manual/local runs that rely on host
+  ## auth (or don't post at all) are unaffected when it isn't provided.
+  ## An org binds its forge credential to this name via a bot-secret
+  ## binding and can scope egress with the binding's allowed_hosts;
+  ## forge-agnostic, so the same name serves GitHub / GitLab / Forgejo.
+  forge_token:
+    as: file
+    optional: true
+
 vars:
   workspace_dir: string = "${PROJECT_DIR}"
 
@@ -125,6 +139,13 @@ vars:
   ## `--var base_ref=main --var pr_url=https://github.com/o/r/pull/42`).
   ## Auto-resolving base/head from the PR URL is a future enhancement.
   pr_url: string = ""
+
+  ## Review posting mode when pr_url is set: "inline" (default — one
+  ## comment per finding anchored to file:line) or "summary" (a single
+  ## rolled-up note). Unattended webhook launches default to "summary"
+  ## for a lower failure surface (no diff-position mapping); flip to
+  ## inline once validated for the target forge.
+  pr_review_mode: string = "inline"
 
 ## ─── Prompts ────────────────────────────────────────────────────
 

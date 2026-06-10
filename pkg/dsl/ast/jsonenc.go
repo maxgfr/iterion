@@ -149,6 +149,7 @@ type jsonSecretField struct {
 	As          string   `json:"as,omitempty"`
 	MountPath   string   `json:"mount_path,omitempty"`
 	Env         string   `json:"env,omitempty"`
+	Optional    bool     `json:"optional,omitempty"`
 	Hosts       []string `json:"hosts,omitempty"`
 	Description string   `json:"description,omitempty"`
 }
@@ -226,6 +227,7 @@ type jsonMemoryBlock struct {
 	Write            *bool    `json:"write,omitempty"`
 	PreCompactInject *bool    `json:"pre_compact_inject,omitempty"`
 	ProjectRoot      *bool    `json:"project_root,omitempty"`
+	Visibility       *string  `json:"visibility,omitempty"`
 }
 
 type jsonPromptDecl struct {
@@ -743,6 +745,7 @@ func memoryToJSON(m *MemoryBlock) *jsonMemoryBlock {
 		Write:            m.Write,
 		PreCompactInject: m.PreCompactInject,
 		ProjectRoot:      m.ProjectRoot,
+		Visibility:       m.Visibility,
 	}
 }
 
@@ -856,6 +859,7 @@ func secretsBlockToJSON(s *SecretsBlock) *jsonSecretsBlock {
 			As:          f.As,
 			MountPath:   f.MountPath,
 			Env:         f.Env,
+			Optional:    f.Optional,
 			Hosts:       f.Hosts,
 			Description: f.Description,
 		})
@@ -1245,6 +1249,7 @@ func memoryFromJSON(jm *jsonMemoryBlock) *MemoryBlock {
 		Write:            jm.Write,
 		PreCompactInject: jm.PreCompactInject,
 		ProjectRoot:      jm.ProjectRoot,
+		Visibility:       jm.Visibility,
 	}
 }
 
@@ -1257,6 +1262,7 @@ func secretsBlockFromJSON(js *jsonSecretsBlock) *SecretsBlock {
 			As:          jf.As,
 			MountPath:   jf.MountPath,
 			Env:         jf.Env,
+			Optional:    jf.Optional,
 			Hosts:       jf.Hosts,
 			Description: jf.Description,
 		})

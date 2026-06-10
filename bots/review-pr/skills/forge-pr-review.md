@@ -22,11 +22,28 @@ Parse the URL host and path:
 - otherwise assume **Forgejo / Gitea** (self-hosted) → REST API.
   `https://<host>/<owner>/<repo>/pulls/<index>`
 
+### Unattended auth: the `forge_token` file secret
+
+This run may be unattended (an org webhook launch) with no
+pre-authenticated forge CLI on the host. If the mounted secret file
+`/run/iterion/secrets/forge_token` EXISTS, authenticate the matching CLI
+with it before posting — pass the path/value to the CLI, never read the
+token into a prompt or echo it:
+- GitHub: `gh auth login --with-token < /run/iterion/secrets/forge_token`
+- GitLab: `glab auth login --hostname <host-from-pr_url> --stdin < /run/iterion/secrets/forge_token`
+- Forgejo/Gitea: `export FORGEJO_TOKEN="$(cat /run/iterion/secrets/forge_token)"`
+
+When the file is absent (manual/local runs), assume host auth.
+
 Confirm the matching CLI is authenticated BEFORE building anything:
 - GitHub: `gh auth status` (exit 0 = ok).
 - GitLab: `glab auth status`.
 - Forgejo/Gitea: a token in `$FORGEJO_TOKEN` / `$GITEA_TOKEN`, or
   `tea login list` showing the host.
+
+Honour `pr_review_mode`: `summary` posts ONE rolled-up note (the safe
+default for unattended webhook runs — no diff-position mapping);
+`inline` posts one anchored comment per finding (section 2).
 
 If the forge is unrecognised or the CLI is not authenticated, publish
 NOTHING: return `published=false` with a precise `skipped_reason`

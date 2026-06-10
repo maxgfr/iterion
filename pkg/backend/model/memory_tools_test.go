@@ -9,22 +9,26 @@ import (
 	"github.com/SocialGouv/claw-code-go/pkg/api"
 
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
+	"github.com/SocialGouv/iterion/pkg/knowledge"
 	"github.com/SocialGouv/iterion/pkg/memory"
 )
 
-func newTestScope(t *testing.T) *memory.Scope {
+// memTest sets up an isolated ITERION_HOME and returns the FS store +
+// the legacy bot SpaceRef the tools run against, plus a direct Scope
+// pointing at the same on-disk location for read/write assertions.
+func memTest(t *testing.T, scope string) (*memory.FSStore, knowledge.SpaceRef, *memory.Scope) {
 	t.Helper()
 	t.Setenv("ITERION_HOME", t.TempDir())
-	s, err := memory.OpenScope("/tmp/wn", "session-continuity")
+	s, err := memory.OpenScope("/tmp/wn", scope)
 	if err != nil {
 		t.Fatalf("OpenScope: %v", err)
 	}
-	return s
+	return memory.DefaultFSStore(), memory.LegacyBotRef("/tmp/wn", scope), s
 }
 
 func TestMemoryWriteTool_RoundtripsToScope(t *testing.T) {
-	s := newTestScope(t)
-	tool := memoryWriteTool(s)
+	store, ref, s := memTest(t, "session-continuity")
+	tool := memoryWriteTool(store, ref)
 	if tool.Name != MemoryWriteToolName {
 		t.Fatalf("name: %q", tool.Name)
 	}
@@ -43,9 +47,9 @@ func TestMemoryWriteTool_RoundtripsToScope(t *testing.T) {
 }
 
 func TestMemoryReadTool_ReturnsContent(t *testing.T) {
-	s := newTestScope(t)
+	store, ref, s := memTest(t, "session-continuity")
 	_ = s.Write("brief.md", []byte("hello"))
-	tool := memoryReadTool(s)
+	tool := memoryReadTool(store, ref)
 	in, _ := json.Marshal(map[string]string{"path": "brief.md"})
 	out, err := tool.Execute(context.Background(), in)
 	if err != nil {
@@ -57,8 +61,8 @@ func TestMemoryReadTool_ReturnsContent(t *testing.T) {
 }
 
 func TestMemoryListTool_EmptyAndPopulated(t *testing.T) {
-	s := newTestScope(t)
-	tool := memoryListTool(s)
+	store, ref, s := memTest(t, "session-continuity")
+	tool := memoryListTool(store, ref)
 	out, err := tool.Execute(context.Background(), nil)
 	if err != nil || out != "(empty)" {
 		t.Fatalf("empty: out=%q err=%v", out, err)
@@ -74,10 +78,10 @@ func TestMemoryListTool_EmptyAndPopulated(t *testing.T) {
 }
 
 func TestMemoryPreCompactInjector_PrependsAutoload(t *testing.T) {
-	s := newTestScope(t)
+	store, ref, s := memTest(t, "session-continuity")
 	_ = s.Write("CONTEXT_BRIEF.md", []byte("brief body"))
 
-	inject := memoryPreCompactInjector(s, []string{"CONTEXT_BRIEF.md"})
+	inject := memoryPreCompactInjector(context.Background(), store, ref, []string{"CONTEXT_BRIEF.md"})
 	original := []api.Message{{Role: "user", Content: []api.ContentBlock{{Type: "text", Text: "orig"}}}}
 	got := inject(original)
 	if len(got) != 2 {
@@ -95,8 +99,8 @@ func TestMemoryPreCompactInjector_PrependsAutoload(t *testing.T) {
 }
 
 func TestMemoryPreCompactInjector_MissingScopeNoOp(t *testing.T) {
-	s := newTestScope(t)
-	inject := memoryPreCompactInjector(s, nil) // defaults to INDEX.md, absent
+	store, ref, _ := memTest(t, "session-continuity")
+	inject := memoryPreCompactInjector(context.Background(), store, ref, nil) // no autoload, empty scope
 	got := inject([]api.Message{{Role: "user"}})
 	if got != nil {
 		t.Fatalf("expected nil (no-op), got %d msgs", len(got))
@@ -104,7 +108,7 @@ func TestMemoryPreCompactInjector_MissingScopeNoOp(t *testing.T) {
 }
 
 func TestInstallWorkspaceMemory_WiresEverything(t *testing.T) {
-	t.Setenv("ITERION_HOME", t.TempDir())
+	store, ref, _ := memTest(t, "session-continuity")
 	opts := &GenerationOptions{}
 	spec := &delegate.MemorySpec{
 		Scope:            "session-continuity",
@@ -113,7 +117,7 @@ func TestInstallWorkspaceMemory_WiresEverything(t *testing.T) {
 		Write:            true,
 		PreCompactInject: true,
 	}
-	if err := installWorkspaceMemory(opts, "/tmp/wn", spec); err != nil {
+	if err := installWorkspaceMemory(context.Background(), opts, store, ref, spec); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	names := make(map[string]bool)
@@ -131,13 +135,12 @@ func TestInstallWorkspaceMemory_WiresEverything(t *testing.T) {
 }
 
 func TestInstallWorkspaceMemory_EmitsAutoIndex(t *testing.T) {
-	t.Setenv("ITERION_HOME", t.TempDir())
-	scope, _ := memory.OpenScope("/tmp/wn", "whats-next")
+	store, ref, scope := memTest(t, "whats-next")
 	_ = scope.Write("brief.md", []byte("---\ntitle: Brief\ntags: [a, b]\n---\n"))
 	_ = scope.Write("decisions/dropped-x.md", []byte("# Dropped X\n"))
 
 	opts := &GenerationOptions{}
-	err := installWorkspaceMemory(opts, "/tmp/wn", &delegate.MemorySpec{
+	err := installWorkspaceMemory(context.Background(), opts, store, ref, &delegate.MemorySpec{
 		Scope: "whats-next",
 		Read:  true,
 	})
@@ -159,13 +162,12 @@ func TestInstallWorkspaceMemory_EmitsAutoIndex(t *testing.T) {
 }
 
 func TestInstallWorkspaceMemory_AutoIndexPlusAutoload(t *testing.T) {
-	t.Setenv("ITERION_HOME", t.TempDir())
-	scope, _ := memory.OpenScope("/tmp/wn", "whats-next")
+	store, ref, scope := memTest(t, "whats-next")
 	_ = scope.Write("CONTEXT_BRIEF.md", []byte("---\ntitle: Brief\n---\nFULL CONTENT\n"))
 	_ = scope.Write("decisions/dropped-x.md", []byte("# Dropped X\n"))
 
 	opts := &GenerationOptions{}
-	err := installWorkspaceMemory(opts, "/tmp/wn", &delegate.MemorySpec{
+	err := installWorkspaceMemory(context.Background(), opts, store, ref, &delegate.MemorySpec{
 		Scope:    "whats-next",
 		Autoload: []string{"CONTEXT_BRIEF.md"},
 		Read:     true,
@@ -185,14 +187,14 @@ func TestInstallWorkspaceMemory_AutoIndexPlusAutoload(t *testing.T) {
 }
 
 func TestInstallWorkspaceMemory_ReadOnly(t *testing.T) {
-	t.Setenv("ITERION_HOME", t.TempDir())
+	store, ref, _ := memTest(t, "session-continuity")
 	opts := &GenerationOptions{}
 	spec := &delegate.MemorySpec{
 		Scope: "session-continuity",
 		Read:  true,
 		Write: false,
 	}
-	if err := installWorkspaceMemory(opts, "/tmp/wn", spec); err != nil {
+	if err := installWorkspaceMemory(context.Background(), opts, store, ref, spec); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	for _, tool := range opts.Tools {
@@ -205,7 +207,8 @@ func TestInstallWorkspaceMemory_ReadOnly(t *testing.T) {
 func TestInstallWorkspaceMemory_RejectsBadScope(t *testing.T) {
 	t.Setenv("ITERION_HOME", t.TempDir())
 	opts := &GenerationOptions{}
-	if err := installWorkspaceMemory(opts, "/tmp/wn", &delegate.MemorySpec{Scope: "../escape"}); err == nil {
+	ref := memory.LegacyBotRef("/tmp/wn", "../escape")
+	if err := installWorkspaceMemory(context.Background(), opts, memory.DefaultFSStore(), ref, &delegate.MemorySpec{Scope: "../escape"}); err == nil {
 		t.Fatalf("expected scope rejection")
 	}
 }

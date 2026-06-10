@@ -1362,3 +1362,102 @@ func TestGenerateTextDirect_StopFiredOnError(t *testing.T) {
 		t.Errorf("Stop hook was not fired on error path")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Tests: reactive context-window force-compaction (forfait window < model)
+// ---------------------------------------------------------------------------
+
+func TestIsContextWindowError(t *testing.T) {
+	yes := []string{
+		"openai stream error: context_length_exceeded: Your input exceeds the context window",
+		"maximum context length is 272000 tokens",
+		"prompt is too long",
+		"request is too large",
+	}
+	for _, s := range yes {
+		if !isContextWindowError(fmt.Errorf("%s", s)) {
+			t.Errorf("isContextWindowError(%q) = false, want true", s)
+		}
+	}
+	no := []string{"connection refused", "rate limit exceeded", "401 unauthorized", ""}
+	for _, s := range no {
+		if isContextWindowError(fmt.Errorf("%s", s)) {
+			t.Errorf("isContextWindowError(%q) = true, want false", s)
+		}
+	}
+	if isContextWindowError(nil) {
+		t.Error("isContextWindowError(nil) = true, want false")
+	}
+}
+
+// ctxOverflowClient returns a context_length_exceeded error for its first
+// failFirst calls, then a successful text response — modelling a backend
+// whose real window is smaller than the model's advertised one.
+type ctxOverflowClient struct {
+	failFirst int
+	calls     int
+}
+
+func (c *ctxOverflowClient) StreamResponse(_ context.Context, _ api.CreateMessageRequest) (<-chan api.StreamEvent, error) {
+	c.calls++
+	if c.calls <= c.failFirst {
+		return nil, fmt.Errorf("claw backend: text+tools generation: stream error: openai stream error: context_length_exceeded: Your input exceeds the context window of this model")
+	}
+	ch := make(chan api.StreamEvent, 8)
+	for _, ev := range textEvents("done", 10, 2) {
+		ch <- ev
+	}
+	close(ch)
+	return ch, nil
+}
+
+func TestGenerateTextDirect_RecoversFromContextOverflow(t *testing.T) {
+	// A transcript large enough (~450k est. tokens) that force-compaction
+	// to the first 256k target actually shrinks it.
+	big := strings.Repeat("x ", 30_000) // ~60k chars ≈ ~15k tokens
+	var msgs []api.Message
+	for i := 0; i < 30; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		msgs = append(msgs, api.Message{Role: role, Content: []api.ContentBlock{{Type: "text", Text: big}}})
+	}
+
+	client := &ctxOverflowClient{failFirst: 1}
+	var retried int
+	res, err := GenerateTextDirect(context.Background(), client, GenerationOptions{
+		Model:                 "openai/gpt-5.5",
+		Messages:              msgs,
+		OnContextCompactRetry: func(_ int, _ error, _, _ int) { retried++ },
+	})
+	if err != nil {
+		t.Fatalf("expected recovery via compaction, got error: %v", err)
+	}
+	if res == nil || res.Text != "done" {
+		t.Fatalf("expected recovered text %q, got %+v", "done", res)
+	}
+	if retried == 0 {
+		t.Fatal("expected at least one context-compaction retry")
+	}
+	if client.calls < 2 {
+		t.Fatalf("expected >=2 model calls (fail + retry), got %d", client.calls)
+	}
+}
+
+func TestGenerateTextDirect_NonContextErrorNotRetried(t *testing.T) {
+	// A non-context error must surface immediately, no compaction retry.
+	ec := &errorClient{err: fmt.Errorf("connection refused")}
+	var retried int
+	_, err := GenerateTextDirect(context.Background(), ec, GenerationOptions{
+		Model:                 "openai/gpt-5.5",
+		Messages:              []api.Message{{Role: "user", Content: []api.ContentBlock{{Type: "text", Text: "hi"}}}},
+		OnContextCompactRetry: func(_ int, _ error, _, _ int) { retried++ },
+	})
+	if err == nil || err.Error() != "connection refused" {
+		t.Fatalf("expected connection refused, got %v", err)
+	}
+	if retried != 0 {
+		t.Fatalf("non-context error should not trigger compaction retry, got %d", retried)
+	}
+}

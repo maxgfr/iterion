@@ -145,6 +145,12 @@ func isPublicPath(path string) bool {
 	if strings.HasPrefix(path, "/api/auth/oidc/") {
 		return true
 	}
+	// Inbound webhooks authenticate themselves via a per-org token
+	// (webhookAuth), not the operator JWT — bypass the JWT gate so the
+	// middleware never rejects a tokened forge call as "unauthenticated".
+	if strings.HasPrefix(path, "/api/webhooks/") {
+		return true
+	}
 	if strings.HasPrefix(path, "/assets/") || strings.HasPrefix(path, "/static/") {
 		return true
 	}

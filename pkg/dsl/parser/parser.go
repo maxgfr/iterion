@@ -638,6 +638,10 @@ func (p *parser) parseSecretField() *ast.SecretField {
 			sf.MountPath = p.expectString()
 		case "env":
 			sf.Env = p.expectStringOrIdent()
+		case "optional":
+			if v := p.parseBool(); v != nil {
+				sf.Optional = *v
+			}
 		case "hosts":
 			sf.Hosts = p.parseStringList()
 		case "description":
@@ -1981,6 +1985,10 @@ func (p *parser) parseMemoryProp(mb *ast.MemoryBlock, propTok Token) {
 		if v := p.parseBool(); v != nil {
 			mb.ProjectRoot = v
 		}
+	case TokenVisibility:
+		p.expect(TokenColon)
+		v := p.expectString()
+		mb.Visibility = &v
 	default:
 		p.addError(DiagUnknownProperty, propTok, "unknown memory property '"+propTok.Value+"'")
 		p.skipToNewline()

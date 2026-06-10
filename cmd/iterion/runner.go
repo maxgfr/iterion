@@ -175,6 +175,13 @@ func runRunner(cmd *cobra.Command, _ []string) error {
 		}, true
 	})
 
+	// Shared knowledge memory persists in the tenant's document store
+	// (not the pod's ephemeral disk) so it survives across runs/pods.
+	memStore := mongostore.NewMongoMemoryStore(st.DB())
+	if err := memStore.EnsureSchema(rootCtx); err != nil {
+		return fmt.Errorf("runner: ensure memory schema: %w", err)
+	}
+
 	// 5. Runner loop.
 	r, err := runner.New(rootCtx, runner.Config{
 		NATS:              natsConn,
@@ -186,6 +193,7 @@ func runRunner(cmd *cobra.Command, _ []string) error {
 		Metrics:           mreg,
 		RunSecrets:        runSecretsStore,
 		Sealer:            sealer,
+		MemoryStore:       memStore,
 	})
 	if err != nil {
 		return fmt.Errorf("runner: build: %w", err)

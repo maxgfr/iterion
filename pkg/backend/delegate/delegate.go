@@ -206,6 +206,15 @@ type MemorySpec struct {
 	Read             bool
 	Write            bool
 	PreCompactInject bool
+	// Visibility selects the sharing axis (bot|project|cross_project|
+	// user|org|global). Empty keeps the legacy project-shared
+	// behaviour; when set, Scope is the space name.
+	Visibility string
+	// BotID is the stable bot/workflow identifier used to qualify
+	// structured visibility=bot spaces. Empty is invalid for
+	// structured bot visibility; callers should populate it from the
+	// launching bundle/bot id or Workflow.Name.
+	BotID string
 	// ProjectRoot, when true, re-roots the scope under the run's
 	// `RepoRoot` (passed alongside via Task.RepoRoot) instead of the
 	// per-run workDir. Enables cross-worktree shared scopes (e.g.

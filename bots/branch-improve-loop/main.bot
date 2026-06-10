@@ -95,11 +95,13 @@ vars:
   ## (catalog-universality).
   chunk_threshold_loc: int = 300
   chunk_max_loc: int = 200
-  ## Scratch dir (repo-root-relative, gitignorable) where plan_chunks
-  ## writes per-chunk diff files + manifest.json. Deliberately NOT
-  ## under .iterion/ — keep the target repo's tree clean; the
-  ## prepare_commit step excludes it from the commit.
-  chunk_dir: string = ".branch-improve-chunks"
+  ## Scratch dir where plan_chunks writes per-chunk diff files +
+  ## manifest.json. Defaults to an OUT-OF-TREE per-project location
+  ## (${PROJECT_SCRATCH_DIR} → ~/.iterion/projects/<key>/scratch/) so the
+  ## chunks never appear in the worktree, the git diff, or a commit —
+  ## and the same host path is bind-mounted inside the sandbox. Override
+  ## with a repo-relative path only if you deliberately want them in-tree.
+  chunk_dir: string = "${PROJECT_SCRATCH_DIR}/branch-improve-chunks"
 
 prompt review_system:
   You are an EXTREMELY demanding, methodical code reviewer in
@@ -436,6 +438,20 @@ prompt fix_system:
   because the chunk notes already localise every blocker. When
   `large` is false, fix normally against the whole diff.
 
+  BOUNDED PASS (context-overflow guard): some backends have no
+  automatic mid-loop context compaction, so reading many chunks/files
+  in ONE invocation can overflow the model's context window and fail
+  the whole run. So when `large` is true, BOUND this pass: fix the
+  highest-severity blockers spanning at most ~6 chunks, then STOP and
+  return — record the still-unaddressed blockers in `summary` as
+  "deferred to next iteration". This is not giving up: the recovery
+  loop re-invokes you and the next reviewer re-flags whatever is still
+  open, so the remaining blockers get fixed ACROSS iterations instead
+  of overflowing in one. Prefer fixing FEWER blockers completely over
+  attempting ALL of them and dying mid-pass. Never read more chunk
+  diffs "just to understand the whole picture" — the per-chunk notes
+  already localise each blocker.
+
   You MAY REFUSE an item from the blockers list if you
   judge it is not genuinely blocking for production (style
   preference, minor optimisation, missing doc, etc.). List
@@ -553,8 +569,10 @@ prompt prepare_commit_system:
            improvement)
          - editor / IDE scratch files
          - LLM scratch files (`notes.md`, `plan.txt`, etc.)
-         - the chunked-review scratch dir ({{vars.chunk_dir}},
-           default `.branch-improve-chunks/`) written by plan_chunks
+         - the chunked-review scratch dir ({{vars.chunk_dir}}) written
+           by plan_chunks (its default is now OUT-OF-TREE under
+           ~/.iterion/.../scratch/, so it won't show in git status —
+           this stays a safety net for an in-tree override)
        When in doubt, EXCLUDE. Under-staging is recoverable
        (operator commits the missing file in a follow-up);
        over-staging pollutes the commit and is much harder

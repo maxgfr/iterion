@@ -33,6 +33,7 @@ func BuildSecretGuard(ctx context.Context, wf *ir.Workflow, vars map[string]stri
 
 	// 1. Resolved credentials (cloud / runner-injected).
 	var genericSecrets map[string]string
+	var genericHosts map[string][]string
 	if creds, ok := secrets.CredentialsFromContext(ctx); ok {
 		for prov, val := range creds.APIKeys {
 			if val == "" {
@@ -44,6 +45,7 @@ func BuildSecretGuard(ctx context.Context, wf *ir.Workflow, vars map[string]stri
 			})
 		}
 		genericSecrets = creds.Generic
+		genericHosts = creds.GenericHosts
 	}
 
 	// 2. Sensitive host env vars (local runs, where keys come from the
@@ -66,7 +68,7 @@ func BuildSecretGuard(ctx context.Context, wf *ir.Workflow, vars map[string]stri
 	// 3. Declared workflow secrets (Layer 1). These carry an explicit
 	//    placeholder the agent sees in place of the value, plus optional
 	//    egress host scoping consumed by Layer 2.
-	known = append(known, declaredWorkflowSecrets(wf, vars, genericSecrets)...)
+	known = append(known, declaredWorkflowSecrets(wf, vars, genericSecrets, genericHosts)...)
 
 	g := secretguard.New(known, cfg)
 	// Return nil only when the guard would do nothing at all: no known
@@ -83,7 +85,7 @@ func BuildSecretGuard(ctx context.Context, wf *ir.Workflow, vars map[string]stri
 // "{{vars.X}}" reference) is resolved to its real plaintext here; the
 // agent only ever sees the placeholder (PlaceholderForName), which the
 // guard materialises at tool/shell exec.
-func declaredWorkflowSecrets(wf *ir.Workflow, vars map[string]string, generic map[string]string) []secretguard.Secret {
+func declaredWorkflowSecrets(wf *ir.Workflow, vars map[string]string, generic map[string]string, genericHosts map[string][]string) []secretguard.Secret {
 	if wf == nil || len(wf.Secrets) == 0 {
 		return nil
 	}
@@ -114,10 +116,39 @@ func declaredWorkflowSecrets(wf *ir.Workflow, vars map[string]string, generic ma
 			Placeholder: secretguard.PlaceholderForName(name),
 			FilePath:    filePath,
 			Env:         s.Env,
-			Hosts:       s.Hosts,
+			// A bot-secret binding may NARROW egress for this secret.
+			// effectiveSecretHosts intersects the workflow's declared hosts
+			// with the binding's allowed hosts; a binding can only restrict,
+			// never broaden.
+			Hosts: effectiveSecretHosts(s.Hosts, genericHosts[name]),
 		})
 	}
 	return out
+}
+
+// effectiveSecretHosts computes the egress host allowlist for a secret
+// from the workflow's declared hosts and a bot-secret binding's allowed
+// hosts. Empty on either side means "that side imposes no restriction".
+// A binding can only NARROW, never broaden:
+//   - binding empty            -> the workflow's hosts (unchanged)
+//   - workflow empty, binding set -> the binding's hosts (narrows from any)
+//   - both set, overlapping     -> their intersection (narrowest)
+//   - both set, disjoint        -> deny-all ([""], an unmatchable host —
+//     secretguard.hostMatch returns false for the empty pattern, so the
+//     secret is never materialised toward any host; this is distinct from
+//     a nil list, which means allow-any).
+func effectiveSecretHosts(workflow, binding []string) []string {
+	if len(binding) == 0 {
+		return workflow
+	}
+	if len(workflow) == 0 {
+		return binding
+	}
+	isect := secrets.IntersectHosts(workflow, binding)
+	if len(isect) == 0 {
+		return []string{""}
+	}
+	return isect
 }
 
 // resolveSecretValue resolves a declared secret's value expression:

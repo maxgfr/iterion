@@ -16,6 +16,8 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/backend/cost"
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
+	"github.com/SocialGouv/iterion/pkg/knowledge"
+	"github.com/SocialGouv/iterion/pkg/memory"
 	"github.com/SocialGouv/iterion/pkg/sandbox"
 	"github.com/SocialGouv/iterion/pkg/secrets"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -33,6 +35,17 @@ type ClawBackend struct {
 	// the generation loop: operator-typed chat messages are appended
 	// to the conversation between tool iterations. See [WithInbox].
 	inbox InboxBinder
+	// memStore overrides the workspace-memory backend. nil → the local
+	// filesystem store (memory.DefaultFSStore). Cloud runners inject a
+	// Mongo+inline store via WithMemoryStore so memory persists in the
+	// tenant's document store rather than the pod's ephemeral disk.
+	memStore knowledge.MemoryStore
+}
+
+// WithMemoryStore injects a non-default workspace-memory backend
+// (e.g. the cloud Mongo store). nil leaves the filesystem default.
+func WithMemoryStore(ms knowledge.MemoryStore) ClawBackendOption {
+	return func(c *ClawBackend) { c.memStore = ms }
 }
 
 // InboxHook is invoked by the generation tool-loop between
@@ -353,12 +366,33 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 		// Resolve the memory base path: project_root re-roots the scope
 		// under the run's RepoRoot so dispatcher worktrees + Nexie share
 		// the same tree; falls back to WorkDir when RepoRoot is empty
-		// (legacy / non-worktree runs).
+		// (legacy / non-worktree runs). LegacyBotRef encodes that base
+		// into a bot-visibility SpaceRef pointing at the identical
+		// on-disk path the pre-knowledge layout used.
 		memBase := task.WorkDir
-		if m.ProjectRoot && task.RepoRoot != "" {
+		if (m.ProjectRoot || m.Visibility != "") && task.RepoRoot != "" {
 			memBase = task.RepoRoot
 		}
-		if err := installWorkspaceMemory(&opts, memBase, m); err != nil {
+		var ref knowledge.SpaceRef
+		if m.Visibility != "" {
+			// Structured space: resolve the sharing axis against the run's
+			// identity (tenant/owner from ctx, project from memBase).
+			tenant, _ := store.TenantFromContext(ctx)
+			owner, _ := store.OwnerFromContext(ctx)
+			ref = memory.ResolveSpaceRef(knowledge.Visibility(m.Visibility), m.Scope, m.BotID, "", memory.SpaceRefInputs{
+				TenantID:  tenant,
+				UserID:    owner,
+				ProjectID: memory.ProjectKey(memBase),
+				BotID:     m.BotID,
+			})
+		} else {
+			ref = memory.LegacyBotRef(memBase, m.Scope)
+		}
+		var memStore knowledge.MemoryStore = b.memStore
+		if memStore == nil {
+			memStore = memory.DefaultFSStore()
+		}
+		if err := installWorkspaceMemory(ctx, &opts, memStore, ref, m); err != nil {
 			return delegate.Result{}, fmt.Errorf("claw backend: memory: %w", err)
 		}
 	}

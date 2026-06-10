@@ -64,6 +64,19 @@ func TestAddSecretFileMounts_MissingValueFails(t *testing.T) {
 	}
 }
 
+func TestAddSecretFileMounts_OptionalUnresolvedSkips(t *testing.T) {
+	wf := &ir.Workflow{Secrets: map[string]*ir.Secret{
+		"gitlab_token": {As: "file", Optional: true},
+	}}
+	var spec sandbox.Spec
+	if err := addSecretFileMounts(context.Background(), &spec, wf, nil); err != nil {
+		t.Fatalf("optional unresolved file secret should be skipped, not error: %v", err)
+	}
+	if len(spec.SecretFiles) != 0 {
+		t.Fatalf("no mount expected, got %d", len(spec.SecretFiles))
+	}
+}
+
 func TestAddSecretFileMounts_DuplicatePathFails(t *testing.T) {
 	wf := &ir.Workflow{Secrets: map[string]*ir.Secret{
 		"a": {As: "file", Value: "one", MountPath: "/run/iterion/secrets/shared"},

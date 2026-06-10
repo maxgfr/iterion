@@ -143,6 +143,7 @@ const (
 	TokenWrite
 	TokenPreCompactInject
 	TokenProjectRoot
+	TokenVisibility
 	// Worktree
 	TokenWorktree
 	// Sandbox (Phase 0: simple "sandbox: ident" form for none|auto)
@@ -280,6 +281,7 @@ var tokenNames = map[TokenType]string{
 	TokenWrite:            "write",
 	TokenPreCompactInject: "pre_compact_inject",
 	TokenProjectRoot:      "project_root",
+	TokenVisibility:       "visibility",
 	TokenWorktree:         "worktree",
 	TokenSandbox:          "sandbox",
 	TokenCursor:           "cursor",
@@ -395,6 +397,7 @@ var keywords = map[string]TokenType{
 	"write":                 TokenWrite,
 	"pre_compact_inject":    TokenPreCompactInject,
 	"project_root":          TokenProjectRoot,
+	"visibility":            TokenVisibility,
 	"worktree":              TokenWorktree,
 	"sandbox":               TokenSandbox,
 	"cursor":                TokenCursor,

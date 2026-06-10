@@ -710,6 +710,7 @@ type Secret struct {
 	As          string
 	MountPath   string
 	Env         string
+	Optional    bool // file secret: skip the mount (no error) when unresolved
 	Hosts       []string
 	Description string
 }
@@ -897,6 +898,11 @@ type Memory struct {
 	// scope (e.g. session-continuity memory) with a whats-next run
 	// that lives at the repo root.
 	ProjectRoot bool
+	// Visibility selects the sharing axis (bot | project | cross_project
+	// | user | org | global). Empty keeps the legacy per-bot/per-project
+	// behaviour; when set, Scope is the space name and the runtime
+	// resolves the tenant/user/project identity.
+	Visibility string
 }
 
 // ---------------------------------------------------------------------------

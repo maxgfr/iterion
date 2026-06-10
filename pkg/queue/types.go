@@ -21,8 +21,8 @@ import (
 // rolling-upgrade always upgrades the server first (which then never
 // emits an unsupported version).
 //
-// v=2 (2026-05-07): added TenantID + OwnerID for multitenant isolation.
-const SchemaVersion = 2
+// v=3 (2026-06-10): added BotID so cloud runners can qualify structured bot memory.
+const SchemaVersion = 3
 
 // RunMessage is the JSON envelope published on
 // `iterion.queue.runs`. The runner deserialises it, takes the
@@ -31,14 +31,17 @@ const SchemaVersion = 2
 //
 // Field order is stable to keep readable JSON diffs in tests.
 type RunMessage struct {
-	V              int                    `json:"v"`
-	RunID          string                 `json:"run_id"`
-	WorkflowName   string                 `json:"workflow_name"`
-	WorkflowHash   string                 `json:"workflow_hash"`
-	IRCompiled     json.RawMessage        `json:"ir_compiled,omitempty"`
-	IRRef          *IRRef                 `json:"ir_ref,omitempty"`
-	RepoURL        string                 `json:"repo_url,omitempty"`
-	RepoSHA        string                 `json:"repo_sha,omitempty"`
+	V            int             `json:"v"`
+	RunID        string          `json:"run_id"`
+	WorkflowName string          `json:"workflow_name"`
+	WorkflowHash string          `json:"workflow_hash"`
+	IRCompiled   json.RawMessage `json:"ir_compiled,omitempty"`
+	IRRef        *IRRef          `json:"ir_ref,omitempty"`
+	RepoURL      string          `json:"repo_url,omitempty"`
+	RepoSHA      string          `json:"repo_sha,omitempty"`
+	// BotID is the stable bundle/bot identifier for this run. It qualifies
+	// structured visibility=bot memory and is preserved on resume.
+	BotID          string                 `json:"bot_id,omitempty"`
 	Vars           map[string]interface{} `json:"vars,omitempty"`
 	SecretsRef     string                 `json:"secrets_ref,omitempty"`
 	TimeoutSec     int                    `json:"timeout_sec,omitempty"`

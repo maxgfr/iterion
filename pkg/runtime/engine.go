@@ -1766,6 +1766,20 @@ func (e *Engine) resolveVars(inputs map[string]interface{}) map[string]interface
 			}
 			return memory.WorkspaceMemoryDir(base)
 		}
+		if key == "PROJECT_SCRATCH_DIR" {
+			// Out-of-tree scratch dir keyed off the run's repo_root, a
+			// sibling of PROJECT_MEMORY_DIR at ~/.iterion/projects/<key>/
+			// scratch/. For working files a bot must NOT leave in the
+			// target repo (e.g. a chunked review's per-chunk diffs) so
+			// they never pollute the worktree or the run diff. Same host
+			// path is bind-mounted inside the sandbox, so it resolves in
+			// both modes without remapping.
+			base := e.repoRoot
+			if base == "" {
+				base = e.workDir
+			}
+			return memory.WorkspaceScratchDir(base)
+		}
 		return os.Getenv(key)
 	}
 	for name, v := range e.workflow.Vars {

@@ -213,6 +213,11 @@ func (s *Server) handleLaunchRun(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSafeOrigin(w, r) {
 		return
 	}
+	// Deny launches for a suspended/read-only org (super-admin bypasses).
+	if err := s.teamLaunchGate(r.Context()); err != nil {
+		s.httpErrorFor(w, r, http.StatusForbidden, "org cannot launch runs (suspended or read-only)")
+		return
+	}
 	// Root span for the launch path. Keeping it on the request ctx
 	// means the OTel HTTP middleware (when wired) sees it as a child
 	// of the inbound HTTP server span. The detached ctx below
@@ -987,6 +992,15 @@ func (s *Server) handleResumeRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.rejectCrossStoreWrite(w, r) {
+		return
+	}
+	// A resume re-enters the engine (node execution + budget/cost spend),
+	// so it is a run launch for suspend-gate purposes: deny it for a
+	// suspended/read-only org exactly like handleLaunchRun, else a
+	// suspended org keeps executing in-flight (notably failed_resumable)
+	// work via operator/auto resume. Super-admin bypasses.
+	if err := s.teamLaunchGate(r.Context()); err != nil {
+		s.httpErrorFor(w, r, http.StatusForbidden, "org cannot launch runs (suspended or read-only)")
 		return
 	}
 	id := r.PathValue("id")

@@ -30,6 +30,28 @@ func WorkspaceMemoryDir(workDir string) string {
 	return filepath.Join(store.GlobalIterionDataDir(), "projects", store.EncodeWorkDirKey(abs), "memory")
 }
 
+// WorkspaceScratchDir returns the per-workspace scratch root, a sibling
+// of WorkspaceMemoryDir at ~/.iterion/projects/<encoded-workdir>/scratch/.
+// It is the home for OUT-OF-TREE working files a bot must not leave in
+// the target repo (e.g. a chunked-review's per-chunk diffs) — keyed off
+// the repo root like the memory tree, and the SAME host path is
+// bind-mounted inside the sandbox (~/.iterion auto-mount), so it resolves
+// in both modes without remapping. Returns "" when workDir is empty.
+func WorkspaceScratchDir(workDir string) string {
+	if workDir == "" {
+		return ""
+	}
+	abs := workDir
+	if !filepath.IsAbs(abs) {
+		resolved, err := filepath.Abs(workDir)
+		if err != nil {
+			return ""
+		}
+		abs = resolved
+	}
+	return filepath.Join(store.GlobalIterionDataDir(), "projects", store.EncodeWorkDirKey(abs), "scratch")
+}
+
 // Scope is a sandboxed view of a single feature subfolder. All
 // read/write/list ops are path-clamped to the scope's root —
 // callers cannot escape via "../" or absolute paths.

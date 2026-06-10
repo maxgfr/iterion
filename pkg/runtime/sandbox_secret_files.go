@@ -47,7 +47,14 @@ func addSecretFileMounts(ctx context.Context, spec *sandbox.Spec, wf *ir.Workflo
 			value = creds.GenericSecret(name)
 		}
 		if value == "" {
-			return fmt.Errorf("runtime: sandbox: file secret %q has no resolved value; set secrets.%s.value or configure a stored secret named %q", name, name, name)
+			if s.Optional {
+				// Optional file secret with no resolved value: skip the
+				// mount silently so a bot that only needs it on some runs
+				// (e.g. a forge token when posting a review) still runs
+				// without it. The agent simply won't find the file.
+				continue
+			}
+			return fmt.Errorf("runtime: sandbox: file secret %q has no resolved value; set secrets.%s.value or configure a stored secret named %q (or mark it optional: true)", name, name, name)
 		}
 
 		mountPath := secrets.ResolveFileMountPath(name, s.MountPath)

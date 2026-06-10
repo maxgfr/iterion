@@ -322,6 +322,7 @@ type ClawExecutor struct {
 	defaultBackend  string // workflow-level default backend (empty = use "claw")
 	wfCompaction    *ir.Compaction
 	wfCapabilities  []string // workflow-level default host capabilities (nil = none)
+	botID           string   // stable bot/workflow id used for bot-scoped memory
 	storeDir        string   // dispatcher store root (empty = backend default)
 	lifecycleHooks  *hooks.Runner
 
@@ -417,6 +418,13 @@ func WithWorkDir(dir string) ClawExecutorOption {
 // WithDefaultBackend sets the workflow-level default backend.
 func WithDefaultBackend(name string) ClawExecutorOption {
 	return func(e *ClawExecutor) { e.defaultBackend = name }
+}
+
+// WithBotID sets the stable bot identity used to qualify structured
+// visibility=bot memory spaces. When unset, NewClawExecutor falls back
+// to Workflow.Name.
+func WithBotID(botID string) ClawExecutorOption {
+	return func(e *ClawExecutor) { e.botID = botID }
 }
 
 // WithStoreDir sets the dispatcher store root forwarded to capability-gated
@@ -620,6 +628,7 @@ func NewClawExecutor(registry *Registry, wf *ir.Workflow, opts ...ClawExecutorOp
 		defaultBackend: wf.DefaultBackend,
 		wfCompaction:   wf.Compaction,
 		wfCapabilities: wf.Capabilities,
+		botID:          wf.Name,
 		sessions:       newNodeSessionStore(),
 		vars:           seed,
 		detector:       detect.NewCachedDetector(5 * time.Minute),
@@ -1177,6 +1186,8 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 			Write:            m.Write,
 			PreCompactInject: m.PreCompactInject,
 			ProjectRoot:      m.ProjectRoot,
+			Visibility:       m.Visibility,
+			BotID:            e.botID,
 		}
 		task.RepoRoot = e.repoRoot
 	}

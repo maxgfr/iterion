@@ -118,6 +118,13 @@ type GenerationOptions struct {
 	// (transcript too short) do not fire the callback.
 	OnCompact func(CompactInfo)
 
+	// OnContextCompactRetry fires when a model call was REJECTED for
+	// exceeding the backend's real context window and the loop reacted by
+	// force-compacting the history and retrying. afterMessages is the
+	// post-compaction message count; targetTokens the budget it shrank to.
+	// Lets the backend surface the recovery as an llm_retry event.
+	OnContextCompactRetry func(attempt int, err error, afterMessages, targetTokens int)
+
 	// Hooks, when non-nil, is consulted around tool execution and at
 	// session end. PreToolUse fires before each Execute and may Block
 	// (the tool returns a synthetic refusal). PostToolUse fires after
