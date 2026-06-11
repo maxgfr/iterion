@@ -387,6 +387,23 @@ func (s *MongoMemoryStore) SetTenantQuota(ctx context.Context, tenant string, qu
 	return nil
 }
 
+// TenantUsedBytes reports the org-aggregate memory consumption — the
+// same running counter the write-path CAS enforces. Consumed by the
+// usage REST views; an org with no memory activity reads 0.
+func (s *MongoMemoryStore) TenantUsedBytes(ctx context.Context, tenant string) (int64, error) {
+	var doc struct {
+		UsedBytes int64 `bson:"used_bytes"`
+	}
+	err := s.tenant.FindOne(ctx, bson.M{"_id": tenant}).Decode(&doc)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("memory: tenant used bytes: %w", err)
+	}
+	return doc.UsedBytes, nil
+}
+
 func (s *MongoMemoryStore) bumpTenant(ctx context.Context, tenant string, delta int64) (bool, error) {
 	return s.bumpCounter(ctx, s.tenant, tenant, delta, false)
 }

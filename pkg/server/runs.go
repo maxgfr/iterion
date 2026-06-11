@@ -213,9 +213,10 @@ func (s *Server) handleLaunchRun(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSafeOrigin(w, r) {
 		return
 	}
-	// Deny launches for a suspended/read-only org (super-admin bypasses).
-	if err := s.teamLaunchGate(r.Context()); err != nil {
-		s.httpErrorFor(w, r, http.StatusForbidden, "org cannot launch runs (suspended or read-only)")
+	// Launch admission: suspend → concurrency → rate → cost cap →
+	// monthly run quota (which also meters). Super-admin bypasses.
+	if d := s.gateLaunch(r.Context()); d != nil {
+		s.writeLaunchDenial(w, r, d)
 		return
 	}
 	// Root span for the launch path. Keeping it on the request ctx
@@ -995,12 +996,13 @@ func (s *Server) handleResumeRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A resume re-enters the engine (node execution + budget/cost spend),
-	// so it is a run launch for suspend-gate purposes: deny it for a
-	// suspended/read-only org exactly like handleLaunchRun, else a
-	// suspended org keeps executing in-flight (notably failed_resumable)
-	// work via operator/auto resume. Super-admin bypasses.
-	if err := s.teamLaunchGate(r.Context()); err != nil {
-		s.httpErrorFor(w, r, http.StatusForbidden, "org cannot launch runs (suspended or read-only)")
+	// so it is a run launch for admission purposes: it passes the same
+	// gate as handleLaunchRun (suspend, concurrency, rate, cost cap,
+	// monthly quota — a resume consumes run budget like a launch), else
+	// a capped org keeps executing in-flight work via operator/auto
+	// resume. Super-admin bypasses.
+	if d := s.gateLaunch(r.Context()); d != nil {
+		s.writeLaunchDenial(w, r, d)
 		return
 	}
 	id := r.PathValue("id")

@@ -37,6 +37,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/knowledge"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/notify"
+	"github.com/SocialGouv/iterion/pkg/orgusage"
 	"github.com/SocialGouv/iterion/pkg/queue"
 	natsq "github.com/SocialGouv/iterion/pkg/queue/nats"
 	"github.com/SocialGouv/iterion/pkg/runtime"
@@ -86,6 +87,12 @@ type Config struct {
 	// vars at the LLM call site.
 	RunSecrets secrets.RunSecretsStore
 	Sealer     secrets.Sealer
+
+	// OrgUsage, when non-nil, receives each run's accumulated LLM
+	// cost/tokens into the org's monthly bucket at the end of every
+	// execution attempt (the billing source of truth — Prometheus
+	// counters above stay tenant-unlabelled). nil → no org metering.
+	OrgUsage orgusage.Counter
 }
 
 // Runner is the long-running consumer loop.
@@ -658,10 +665,13 @@ func (r *Runner) executeRun(ctx context.Context, msg *queue.RunMessage) error {
 		defer rm()
 	}
 
-	executor, err := r.buildExecutor(ctx, msg, wf)
+	executor, usage, err := r.buildExecutor(ctx, msg, wf)
 	if err != nil {
 		return err
 	}
+	// Charge the org's monthly usage whatever the outcome — paused,
+	// cancelled and failed attempts incurred real LLM spend.
+	defer r.recordOrgSpend(msg, usage)
 
 	engineOpts := []runtime.EngineOption{
 		runtime.WithLogger(r.cfg.Logger),
@@ -997,30 +1007,59 @@ func loadWorkflow(msg *queue.RunMessage) (*ir.Workflow, error) {
 // exactly the same backend / tool / MCP wiring as the studio server
 // and the CLI run path. Vars from the message are forwarded so
 // {{vars.X}} expansion works without re-resolving from disk.
-func (r *Runner) buildExecutor(ctx context.Context, msg *queue.RunMessage, wf *ir.Workflow) (runtime.NodeExecutor, error) {
+//
+// The returned metricsEmitter is the same wrapper the executor writes
+// through — executeRun reads its RunTotals at the end of the attempt
+// to charge the org's monthly usage. Always wrapped (Prometheus
+// registry may be nil) so org metering works without metrics.
+func (r *Runner) buildExecutor(ctx context.Context, msg *queue.RunMessage, wf *ir.Workflow) (runtime.NodeExecutor, *metricsEmitter, error) {
 	emitter, ok := r.cfg.Store.(model.EventEmitter)
 	if !ok {
-		return nil, fmt.Errorf("runner: store does not satisfy model.EventEmitter")
+		return nil, nil, fmt.Errorf("runner: store does not satisfy model.EventEmitter")
 	}
 	// Wrap the emitter so LLM step + delegate events update the
 	// iterion_llm_tokens_total / iterion_llm_cost_usd_total counters
-	// as they are written to Mongo. Wrapping at the runner boundary
-	// keeps pkg/backend/model free of any metrics dependency.
-	if r.cfg.Metrics != nil {
-		emitter = newMetricsEmitter(emitter, r.cfg.Metrics)
-	}
+	// (and the per-run totals) as they are written to Mongo. Wrapping
+	// at the runner boundary keeps pkg/backend/model free of any
+	// metrics dependency.
+	usage := newMetricsEmitter(emitter, r.cfg.Metrics)
 	vars := stringifyVars(msg.Vars)
-	return runview.BuildExecutor(runview.ExecutorSpec{
+	exec, err := runview.BuildExecutor(runview.ExecutorSpec{
 		Ctx:         ctx,
 		Workflow:    wf,
 		Vars:        vars,
-		Store:       emitter,
+		Store:       usage,
 		RunID:       msg.RunID,
 		Logger:      r.cfg.Logger,
 		StoreDir:    r.cfg.WorkDir,
 		BotID:       msg.BotID,
 		MemoryStore: r.cfg.MemoryStore,
 	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return exec, usage, nil
+}
+
+// recordOrgSpend charges the run's accumulated LLM consumption to the
+// org's monthly usage bucket. Called at the end of every execution
+// attempt — paused/cancelled/failed attempts incurred real spend too,
+// and a redelivered attempt re-charges only what it re-executed.
+// Detached ctx: a Mongo blip must not fail the run path; the miss is
+// logged and the Prometheus counters still carry the global totals.
+func (r *Runner) recordOrgSpend(msg *queue.RunMessage, usage *metricsEmitter) {
+	if r.cfg.OrgUsage == nil || usage == nil || msg.TenantID == "" {
+		return
+	}
+	costUSD, in, out := usage.RunTotals()
+	if costUSD <= 0 && in <= 0 && out <= 0 {
+		return
+	}
+	bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := r.cfg.OrgUsage.AddSpend(bg, msg.TenantID, time.Now().UTC(), costUSD, in, out); err != nil {
+		r.cfg.Logger.Warn("runner: org spend record for %s (run %s): %v", msg.TenantID, msg.RunID, err)
+	}
 }
 
 // pollPending samples the JetStream consumer info on a fixed cadence
@@ -1050,6 +1089,11 @@ func (r *Runner) pollPending(ctx context.Context) {
 // / delegate_finished events to keep the LLM token + cost counters
 // up-to-date. The forward call to the underlying emitter happens
 // regardless of metric outcome so write durability is unaffected.
+//
+// It also accumulates the run's own totals (cost + tokens) so the
+// runner can charge the org's monthly usage bucket once at the end of
+// the attempt — reg may be nil (no Prometheus) while the run totals
+// still accumulate.
 type metricsEmitter struct {
 	inner model.EventEmitter
 	reg   *metrics.Registry
@@ -1067,6 +1111,13 @@ type metricsEmitter struct {
 	mu           sync.Mutex
 	modelByNode  map[string]string
 	priceByModel map[string]modelRate
+
+	// Per-run accumulation for org metering. Cost covers claw steps
+	// only (delegate backends report tokens without a price table) —
+	// a floor, not an exact invoice; documented on orgusage.
+	runCostUSD      float64
+	runInputTokens  int64
+	runOutputTokens int64
 }
 
 // modelRate is the per-token cost (USD) for a given model, derived
@@ -1125,23 +1176,32 @@ func (m *metricsEmitter) observe(evt store.Event) {
 			modelName = "unknown"
 		}
 		const backend = "claw"
+		inputT := toFloat(evt.Data["input_tokens"])
+		outputT := toFloat(evt.Data["output_tokens"])
 		m.addTokens(backend, modelName, "input", evt.Data["input_tokens"])
 		m.addTokens(backend, modelName, "output", evt.Data["output_tokens"])
 		m.addTokens(backend, modelName, "cache_read", evt.Data["cache_read_tokens"])
 		m.addTokens(backend, modelName, "cache_write", evt.Data["cache_write_tokens"])
+		m.mu.Lock()
+		m.runInputTokens += int64(inputT)
+		m.runOutputTokens += int64(outputT)
+		m.mu.Unlock()
 		// LLMCostUSDTotal: apply the cached per-token rates for this
 		// model. Unknown models leave the counter untouched so
 		// observers can tell "no data" from "$0" via the absence of
 		// samples.
 		if modelName != "" && modelName != "unknown" {
-			inputT := toFloat(evt.Data["input_tokens"])
-			outputT := toFloat(evt.Data["output_tokens"])
 			m.mu.Lock()
 			rate := m.rateForLocked(modelName)
 			m.mu.Unlock()
 			if rate.known {
 				if c := inputT*rate.inputUSDPerToken + outputT*rate.outputUSDPerToken; c > 0 {
-					m.reg.LLMCostUSDTotal.WithLabelValues(backend, normalizeModelLabel(modelName)).Add(c)
+					m.mu.Lock()
+					m.runCostUSD += c
+					m.mu.Unlock()
+					if m.reg != nil {
+						m.reg.LLMCostUSDTotal.WithLabelValues(backend, normalizeModelLabel(modelName)).Add(c)
+					}
 				}
 			}
 		}
@@ -1153,7 +1213,18 @@ func (m *metricsEmitter) observe(evt store.Event) {
 		// Delegate events report a single aggregated token count;
 		// label as input so a sum across directions stays meaningful.
 		m.addTokens(backend, m.lookupModel(evt.NodeID), "input", evt.Data["tokens"])
+		m.mu.Lock()
+		m.runInputTokens += int64(toFloat(evt.Data["tokens"]))
+		m.mu.Unlock()
 	}
+}
+
+// RunTotals snapshots the run's accumulated LLM consumption — what
+// the runner charges to the org's monthly usage bucket.
+func (m *metricsEmitter) RunTotals() (costUSD float64, inputTokens, outputTokens int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.runCostUSD, m.runInputTokens, m.runOutputTokens
 }
 
 func (m *metricsEmitter) lookupModel(nodeID string) string {
@@ -1167,7 +1238,7 @@ func (m *metricsEmitter) lookupModel(nodeID string) string {
 
 func (m *metricsEmitter) addTokens(backend, modelName, direction string, raw interface{}) {
 	n := toFloat(raw)
-	if n <= 0 || backend == "" {
+	if n <= 0 || backend == "" || m.reg == nil {
 		return
 	}
 	m.reg.LLMTokensTotal.WithLabelValues(backend, normalizeModelLabel(modelName), direction).Add(n)

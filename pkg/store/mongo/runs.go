@@ -175,6 +175,22 @@ func (s *Store) ListRuns(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
+// CountActiveRunsByTenant counts the org's queued + running runs.
+// Consumed by the server's launch gate (per-org concurrency cap) with
+// an explicit tenant — deliberately NOT the ctx-derived tenant filter,
+// because the gate evaluates a specific org and the parameter makes
+// the scope auditable.
+func (s *Store) CountActiveRunsByTenant(ctx context.Context, tenantID string) (int, error) {
+	n, err := s.runs.CountDocuments(ctx, bson.M{
+		"tenant_id": tenantID,
+		"status":    bson.M{"$in": []string{string(store.RunStatusQueued), string(store.RunStatusRunning)}},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("store/mongo: count active runs: %w", err)
+	}
+	return int(n), nil
+}
+
 // UpdateRunStatus mutates only the status / error / timestamps and
 // bumps the CAS counter. Resume paths clear the FinishedAt sentinel
 // (plan parity with FilesystemRunStore.UpdateRunStatus).

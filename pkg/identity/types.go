@@ -133,6 +133,16 @@ type Team struct {
 	// Per-org caps. Zero means "inherit the platform default".
 	MonthlyRunQuota  int   `bson:"monthly_run_quota,omitempty" json:"monthly_run_quota,omitempty"`
 	MemoryQuotaBytes int64 `bson:"memory_quota_bytes,omitempty" json:"memory_quota_bytes,omitempty"`
+	// MonthlyCostCapUSD caps the month's metered LLM spend in USD.
+	// Enforced pre-launch against the orgusage counter (a soft cap:
+	// in-flight runs finish; new launches are denied once crossed).
+	MonthlyCostCapUSD float64 `bson:"monthly_cost_cap_usd,omitempty" json:"monthly_cost_cap_usd,omitempty"`
+	// MaxConcurrentRuns caps simultaneously active (queued + running)
+	// runs for the org.
+	MaxConcurrentRuns int `bson:"max_concurrent_runs,omitempty" json:"max_concurrent_runs,omitempty"`
+	// LaunchRatePerMin caps run-launch requests per minute (token
+	// bucket, burst = the same value).
+	LaunchRatePerMin int `bson:"launch_rate_per_min,omitempty" json:"launch_rate_per_min,omitempty"`
 }
 
 // EffectiveStatus treats an empty status (legacy rows) as active.

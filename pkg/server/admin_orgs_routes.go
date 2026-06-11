@@ -2,13 +2,13 @@ package server
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/identity"
 	"github.com/SocialGouv/iterion/pkg/knowledge"
+	"github.com/SocialGouv/iterion/pkg/store"
 )
 
 // registerAdminOrgRoutes wires the super-admin org (team) console.
@@ -21,36 +21,49 @@ func (s *Server) registerAdminOrgRoutes() {
 	s.mux.Handle("PATCH /api/admin/orgs/{id}", s.requireSuperAdmin(http.HandlerFunc(s.handleAdminUpdateOrg)))
 	s.mux.Handle("POST /api/admin/orgs/{id}/status", s.requireSuperAdmin(http.HandlerFunc(s.handleAdminSetOrgStatus)))
 	s.mux.Handle("GET /api/admin/orgs/{id}/usage", s.requireSuperAdmin(http.HandlerFunc(s.handleAdminOrgUsage)))
+	// Org-admin self-serve mirror of the usage view (any member can
+	// read their own org's consumption).
+	s.mux.Handle("GET /api/teams/{id}/usage", s.requireAuth(http.HandlerFunc(s.handleTeamUsage)))
 }
 
 // ---- views / requests ----
 
 type orgView struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Slug             string `json:"slug"`
-	Status           string `json:"status"`
-	Personal         bool   `json:"personal,omitempty"`
-	MonthlyRunQuota  int    `json:"monthly_run_quota,omitempty"`
-	MemoryQuotaBytes int64  `json:"memory_quota_bytes,omitempty"`
-	SuspendReason    string `json:"suspend_reason,omitempty"`
-	CreatedAt        string `json:"created_at,omitempty"`
+	ID                string  `json:"id"`
+	Name              string  `json:"name"`
+	Slug              string  `json:"slug"`
+	Status            string  `json:"status"`
+	Personal          bool    `json:"personal,omitempty"`
+	MonthlyRunQuota   int     `json:"monthly_run_quota,omitempty"`
+	MemoryQuotaBytes  int64   `json:"memory_quota_bytes,omitempty"`
+	MonthlyCostCapUSD float64 `json:"monthly_cost_cap_usd,omitempty"`
+	MaxConcurrentRuns int     `json:"max_concurrent_runs,omitempty"`
+	LaunchRatePerMin  int     `json:"launch_rate_per_min,omitempty"`
+	SuspendReason     string  `json:"suspend_reason,omitempty"`
+	CreatedAt         string  `json:"created_at,omitempty"`
 }
 
 func toOrgView(t identity.Team) orgView {
 	return orgView{
-		ID:               t.ID,
-		Name:             t.Name,
-		Slug:             t.Slug,
-		Status:           string(t.EffectiveStatus()),
-		Personal:         t.Personal,
-		MonthlyRunQuota:  t.MonthlyRunQuota,
-		MemoryQuotaBytes: t.MemoryQuotaBytes,
-		SuspendReason:    t.SuspendReason,
-		CreatedAt:        t.CreatedAt.Format(time.RFC3339),
+		ID:                t.ID,
+		Name:              t.Name,
+		Slug:              t.Slug,
+		Status:            string(t.EffectiveStatus()),
+		Personal:          t.Personal,
+		MonthlyRunQuota:   t.MonthlyRunQuota,
+		MemoryQuotaBytes:  t.MemoryQuotaBytes,
+		MonthlyCostCapUSD: t.MonthlyCostCapUSD,
+		MaxConcurrentRuns: t.MaxConcurrentRuns,
+		LaunchRatePerMin:  t.LaunchRatePerMin,
+		SuspendReason:     t.SuspendReason,
+		CreatedAt:         t.CreatedAt.Format(time.RFC3339),
 	}
 }
 
+// orgUsageView is the consumption snapshot for one org — served to
+// super-admins (/api/admin/orgs/{id}/usage) and to the org's own
+// members (/api/teams/{id}/usage). Counter-backed fields read zero
+// when the corresponding store isn't wired (local mode).
 type orgUsageView struct {
 	Org     orgView `json:"org"`
 	Members int     `json:"members"`
@@ -58,8 +71,25 @@ type orgUsageView struct {
 	// platform default) so the console shows the real ceiling.
 	EffectiveMemoryQuotaBytes int64 `json:"effective_memory_quota_bytes"`
 	MonthlyRunQuota           int   `json:"monthly_run_quota"`
-	// TODO(phases 3/5/6): runs this month, webhook calls, memory used
-	// bytes, secret/BYOK counts — wired in as those stores land.
+
+	// Current-month metering (orgusage counter).
+	RunsThisMonth    int     `json:"runs_this_month"`
+	CostUSDThisMonth float64 `json:"cost_usd_this_month"`
+	InputTokens      int64   `json:"input_tokens_this_month"`
+	OutputTokens     int64   `json:"output_tokens_this_month"`
+	// Caps as enforced by the launch gate (org override or platform
+	// default; 0 = unlimited).
+	MonthlyCostCapUSD float64 `json:"monthly_cost_cap_usd,omitempty"`
+	MaxConcurrentRuns int     `json:"max_concurrent_runs,omitempty"`
+
+	// Live + auxiliary counters.
+	ActiveRuns            int   `json:"active_runs"`
+	WebhookCallsThisMonth int   `json:"webhook_calls_this_month"`
+	MemoryUsedBytes       int64 `json:"memory_used_bytes"`
+	APIKeyCount           int   `json:"api_key_count"`
+	GenericSecretCount    int   `json:"generic_secret_count"`
+	BotBindingCount       int   `json:"bot_binding_count"`
+	WebhookCount          int   `json:"webhook_count"`
 }
 
 type createOrgReq struct {
@@ -69,10 +99,13 @@ type createOrgReq struct {
 }
 
 type updateOrgReq struct {
-	Name             *string `json:"name,omitempty"`
-	Slug             *string `json:"slug,omitempty"`
-	MonthlyRunQuota  *int    `json:"monthly_run_quota,omitempty"`
-	MemoryQuotaBytes *int64  `json:"memory_quota_bytes,omitempty"`
+	Name              *string  `json:"name,omitempty"`
+	Slug              *string  `json:"slug,omitempty"`
+	MonthlyRunQuota   *int     `json:"monthly_run_quota,omitempty"`
+	MemoryQuotaBytes  *int64   `json:"memory_quota_bytes,omitempty"`
+	MonthlyCostCapUSD *float64 `json:"monthly_cost_cap_usd,omitempty"`
+	MaxConcurrentRuns *int     `json:"max_concurrent_runs,omitempty"`
+	LaunchRatePerMin  *int     `json:"launch_rate_per_min,omitempty"`
 }
 
 type setOrgStatusReq struct {
@@ -202,6 +235,27 @@ func (s *Server) handleAdminUpdateOrg(w http.ResponseWriter, r *http.Request) {
 		}
 		t.MemoryQuotaBytes = *req.MemoryQuotaBytes
 	}
+	if req.MonthlyCostCapUSD != nil {
+		if *req.MonthlyCostCapUSD < 0 {
+			httpError(w, http.StatusBadRequest, "monthly_cost_cap_usd must be >= 0")
+			return
+		}
+		t.MonthlyCostCapUSD = *req.MonthlyCostCapUSD
+	}
+	if req.MaxConcurrentRuns != nil {
+		if *req.MaxConcurrentRuns < 0 {
+			httpError(w, http.StatusBadRequest, "max_concurrent_runs must be >= 0")
+			return
+		}
+		t.MaxConcurrentRuns = *req.MaxConcurrentRuns
+	}
+	if req.LaunchRatePerMin != nil {
+		if *req.LaunchRatePerMin < 0 {
+			httpError(w, http.StatusBadRequest, "launch_rate_per_min must be >= 0")
+			return
+		}
+		t.LaunchRatePerMin = *req.LaunchRatePerMin
+	}
 	t.UpdatedAt = time.Now().UTC()
 	if err := store.UpdateTeam(r.Context(), t); err != nil {
 		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
@@ -282,32 +336,113 @@ func (s *Server) handleAdminOrgUsage(w http.ResponseWriter, r *http.Request) {
 		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
 		return
 	}
-	members, _ := store.ListMembershipsByTeam(r.Context(), t.ID)
-	writeJSON(w, orgUsageView{
+	writeJSON(w, s.buildOrgUsageView(r.Context(), store, t))
+}
+
+// handleTeamUsage is the org-admin self-serve mirror: any member of
+// the team can read its consumption (writes stay admin-gated).
+func (s *Server) handleTeamUsage(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.authStoreOrFail(w)
+	if !ok {
+		return
+	}
+	id, _ := auth.FromContext(r.Context())
+	teamID := r.PathValue("id")
+	if !s.canViewTeam(r.Context(), id, teamID) {
+		httpError(w, http.StatusForbidden, "not a member of this team")
+		return
+	}
+	t, err := store.GetTeam(r.Context(), teamID)
+	if err != nil {
+		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
+		return
+	}
+	writeJSON(w, s.buildOrgUsageView(r.Context(), store, t))
+}
+
+// tenantMemoryUsageReader is the capability the cloud memory store
+// implements for the org-aggregate consumption readout. The FS store
+// doesn't (local mode has no per-tenant aggregate).
+type tenantMemoryUsageReader interface {
+	TenantUsedBytes(ctx context.Context, tenantID string) (int64, error)
+}
+
+// buildOrgUsageView assembles the usage snapshot from every wired
+// store. Each sub-read is best-effort: a missing store or a transient
+// error leaves its field at zero rather than failing the whole view.
+//
+// The ctx is re-stamped onto the TARGET org before the tenant-scoped
+// reads: the caller's ctx carries their ACTIVE team (super-admin
+// inspecting org X, or a member whose active team is a sibling), and
+// the secrets stores' ctx tenant filter would otherwise silently
+// zero every count. Authorization happened in the handlers; this is
+// scoping, not privilege.
+func (s *Server) buildOrgUsageView(ctx context.Context, st identity.Store, t identity.Team) orgUsageView {
+	id, _ := auth.FromContext(ctx)
+	ctx = store.WithIdentity(ctx, t.ID, id.UserID)
+	members, _ := st.ListMembershipsByTeam(ctx, t.ID)
+	v := orgUsageView{
 		Org:                       toOrgView(t),
 		Members:                   len(members),
 		EffectiveMemoryQuotaBytes: effectiveOrgMemoryQuota(t),
-		MonthlyRunQuota:           t.MonthlyRunQuota,
-	})
+		MonthlyRunQuota:           orValue(t.MonthlyRunQuota, s.orgDefaults.MonthlyRunQuota),
+		MonthlyCostCapUSD:         orValue(t.MonthlyCostCapUSD, s.orgDefaults.MonthlyCostCapUSD),
+		MaxConcurrentRuns:         orValue(t.MaxConcurrentRuns, s.orgDefaults.MaxConcurrentRuns),
+	}
+	now := time.Now().UTC()
+	if s.orgUsage != nil {
+		if u, err := s.orgUsage.Usage(ctx, t.ID, now); err == nil {
+			v.RunsThisMonth = u.Runs
+			v.CostUSDThisMonth = u.CostUSD
+			v.InputTokens = u.InputTokens
+			v.OutputTokens = u.OutputTokens
+		}
+	}
+	if s.webhookCounter != nil {
+		if n, err := s.webhookCounter.OrgCount(ctx, t.ID, now); err == nil {
+			v.WebhookCallsThisMonth = n
+		}
+	}
+	if counter, ok := s.cfg.Store.(activeRunCounter); ok {
+		if n, err := counter.CountActiveRunsByTenant(ctx, t.ID); err == nil {
+			v.ActiveRuns = n
+		}
+	}
+	if reader, ok := s.memoryStore().(tenantMemoryUsageReader); ok {
+		if n, err := reader.TenantUsedBytes(ctx, t.ID); err == nil {
+			v.MemoryUsedBytes = n
+		}
+	}
+	if s.apiKeys != nil {
+		// "" requesting user → team-wide keys only (the admin path
+		// documented on ApiKeyStore.ListByTeam).
+		if keys, err := s.apiKeys.ListByTeam(ctx, t.ID, ""); err == nil {
+			v.APIKeyCount = len(keys)
+		}
+	}
+	if s.genericSecrets != nil {
+		if secs, err := s.genericSecrets.ListByTeam(ctx, t.ID, ""); err == nil {
+			v.GenericSecretCount = len(secs)
+		}
+	}
+	if s.botBindings != nil {
+		if bs, err := s.botBindings.ListByTenant(ctx, t.ID); err == nil {
+			v.BotBindingCount = len(bs)
+		}
+	}
+	if s.webhookConfigs != nil {
+		if whs, err := s.webhookConfigs.ListByTenant(ctx, t.ID); err == nil {
+			v.WebhookCount = len(whs)
+		}
+	}
+	return v
 }
 
 // ---- launch suspend gate ----
 
-// errTeamCannotLaunch signals the caller's active team is suspended or
-// read-only.
-var errTeamCannotLaunch = errors.New("team cannot launch runs")
-
-// teamLaunchGate denies a run launch when the caller's active team is
-// suspended/read-only.
-func (s *Server) teamLaunchGate(ctx context.Context) error {
-	id, _ := auth.FromContext(ctx)
-	if orgCanLaunch(ctx, s.authStore(), id) {
-		return nil
-	}
-	return errTeamCannotLaunch
-}
-
-// orgCanLaunch is the gate decision, isolated for testability. It
+// orgCanLaunch is the suspend-only gate decision, isolated for
+// testability. The full launch admission (quotas, concurrency, rate)
+// lives in gateLaunch (launch_gate.go), which folds this check in. It
 // returns true (allow) when there is no identity store (local mode),
 // the caller is a super-admin, has no active team, or the team lookup
 // fails (fail-open: suspension is an operator action, not a hard

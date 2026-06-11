@@ -13,6 +13,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/cloud/tracing"
 	iterconfig "github.com/SocialGouv/iterion/pkg/config"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/orgusage"
 	natsq "github.com/SocialGouv/iterion/pkg/queue/nats"
 	"github.com/SocialGouv/iterion/pkg/runner"
 	"github.com/SocialGouv/iterion/pkg/secrets"
@@ -182,6 +183,14 @@ func runRunner(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("runner: ensure memory schema: %w", err)
 	}
 
+	// Org metering: the runner charges each run's accumulated LLM
+	// cost/tokens to the org's monthly bucket (the same collection the
+	// server's launch gate + usage views read).
+	orgUsageCounter := orgusage.NewMongoCounter(st.DB())
+	if err := orgusage.EnsureSchema(rootCtx, st.DB()); err != nil {
+		return fmt.Errorf("runner: ensure org_usage schema: %w", err)
+	}
+
 	// 5. Runner loop.
 	r, err := runner.New(rootCtx, runner.Config{
 		NATS:              natsConn,
@@ -194,6 +203,7 @@ func runRunner(cmd *cobra.Command, _ []string) error {
 		RunSecrets:        runSecretsStore,
 		Sealer:            sealer,
 		MemoryStore:       memStore,
+		OrgUsage:          orgUsageCounter,
 	})
 	if err != nil {
 		return fmt.Errorf("runner: build: %w", err)

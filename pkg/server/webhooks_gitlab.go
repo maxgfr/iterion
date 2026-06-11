@@ -94,6 +94,17 @@ func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Run-launch admission (monthly run quota, cost cap, concurrency —
+	// a separate axis from the webhook-call quota the middleware already
+	// charged). Checked BEFORE the idempotency insert so a denied event
+	// records a terminal row under a random key and the forge's later
+	// retry can still launch once the quota resets.
+	if d := s.gateLaunch(ctx); d != nil {
+		s.recordWebhookDelivery(ctx, cfg, webhooks.StatusLaunchError, payloadHash, srcIP, p, d.reason)
+		s.writeLaunchDenial(w, r, d)
+		return
+	}
+
 	// Idempotency: one launch per (tenant, webhook, project, MR, head sha).
 	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("%s|%s|%d|%d|%s", cfg.TenantID, cfg.ID, p.ProjectID, p.MRIID, p.HeadSHA)))
 	delivery := newGitLabDelivery(cfg, p, webhooks.StatusAccepted, payloadHash, srcIP)

@@ -37,6 +37,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dsl/workflowfile"
 	"github.com/SocialGouv/iterion/pkg/knowledge"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/orgusage"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/secrets"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -130,6 +131,15 @@ type Config struct {
 	WebhookConfigs    webhooks.ConfigStore
 	WebhookDeliveries webhooks.DeliveryStore
 	WebhookCounter    webhooks.Counter
+
+	// OrgUsage is the per-org monthly run/cost metering counter. When
+	// non-nil, every launch (REST, resume, webhook) passes the
+	// gateLaunch quota checks and increments the month's run counter;
+	// the usage REST views read it back. nil → no metering (local mode).
+	OrgUsage orgusage.Counter
+	// OrgDefaults are the platform-wide launch limits applied when a
+	// team has no per-org override. Zero values mean "no limit".
+	OrgDefaults OrgLimitDefaults
 
 	// BotBindings is the policy wrapper over GenericSecrets: it maps a
 	// stored org/user secret to a bot under the workflow's declared
@@ -313,6 +323,8 @@ type Server struct {
 	webhookConfigs    webhooks.ConfigStore
 	webhookDeliveries webhooks.DeliveryStore
 	webhookCounter    webhooks.Counter
+	orgUsage          orgusage.Counter
+	orgDefaults       OrgLimitDefaults
 	botBindings       secrets.BotSecretBindingStore
 	memStore          knowledge.MemoryStore
 	// webhookLaunchBot overrides the inbound-webhook launch path (test
@@ -409,6 +421,8 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		webhookConfigs:    cfg.WebhookConfigs,
 		webhookDeliveries: cfg.WebhookDeliveries,
 		webhookCounter:    cfg.WebhookCounter,
+		orgUsage:          cfg.OrgUsage,
+		orgDefaults:       cfg.OrgDefaults,
 		botBindings:       cfg.BotBindings,
 		memStore:          cfg.MemoryStore,
 		httpClient:        &http.Client{Timeout: 15 * time.Second},

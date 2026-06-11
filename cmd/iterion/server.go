@@ -23,6 +23,7 @@ import (
 	iterconfig "github.com/SocialGouv/iterion/pkg/config"
 	"github.com/SocialGouv/iterion/pkg/identity"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/orgusage"
 	natsq "github.com/SocialGouv/iterion/pkg/queue/nats"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/runview/eventstream"
@@ -87,6 +88,29 @@ func init() {
 // randomBootstrapPassword returns a URL-safe random temporary password for the
 // bootstrap super-admin. base64 of 18 bytes (~24 chars) is comfortably above
 // the MinPasswordLen the rotation endpoint enforces.
+// orgLimitDefaultsFromEnv reads the platform-wide launch limits
+// applied to teams without a per-org override. Unset / invalid /
+// zero values mean "no limit" — the safe default for existing
+// deployments. Per-org overrides live on the Team document and are
+// managed via PATCH /api/admin/orgs/{id}.
+func orgLimitDefaultsFromEnv() server.OrgLimitDefaults {
+	intEnv := func(key string) int {
+		n, err := strconv.Atoi(os.Getenv(key))
+		if err != nil || n < 0 {
+			return 0
+		}
+		return n
+	}
+	var d server.OrgLimitDefaults
+	d.MonthlyRunQuota = intEnv("ITERION_ORG_DEFAULT_MONTHLY_RUN_QUOTA")
+	d.MaxConcurrentRuns = intEnv("ITERION_ORG_DEFAULT_MAX_CONCURRENT_RUNS")
+	d.LaunchRatePerMin = intEnv("ITERION_ORG_DEFAULT_LAUNCH_RATE_PER_MIN")
+	if f, err := strconv.ParseFloat(os.Getenv("ITERION_ORG_DEFAULT_MONTHLY_COST_CAP_USD"), 64); err == nil && f > 0 {
+		d.MonthlyCostCapUSD = f
+	}
+	return d
+}
+
 func randomBootstrapPassword() (string, error) {
 	b := make([]byte, 18)
 	if _, err := rand.Read(b); err != nil {
@@ -213,6 +237,10 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	webhookStores := webhooks.NewMongoStores(st.DB())
 	if err := webhooks.EnsureSchema(rootCtx, st.DB()); err != nil {
 		return fmt.Errorf("server: ensure webhooks schema: %w", err)
+	}
+	orgUsageCounter := orgusage.NewMongoCounter(st.DB())
+	if err := orgusage.EnsureSchema(rootCtx, st.DB()); err != nil {
+		return fmt.Errorf("server: ensure org_usage schema: %w", err)
 	}
 	memStore := mongostore.NewMongoMemoryStore(st.DB())
 	if err := memStore.EnsureSchema(rootCtx); err != nil {
@@ -368,6 +396,8 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		WebhookConfigs:         webhookStores.Configs,
 		WebhookDeliveries:      webhookStores.Deliveries,
 		WebhookCounter:         webhookStores.Counter,
+		OrgUsage:               orgUsageCounter,
+		OrgDefaults:            orgLimitDefaultsFromEnv(),
 		MemoryStore:            memStore,
 		RunSecrets:             runSecretsStore,
 		Sealer:                 sealer,
