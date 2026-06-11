@@ -317,7 +317,7 @@ type Server struct {
 	memStore          knowledge.MemoryStore
 	// webhookLaunchBot overrides the inbound-webhook launch path (test
 	// seam). nil → realWebhookLaunchBot (resolve bot source + s.runs.Launch).
-	webhookLaunchBot func(ctx context.Context, botID string, vars map[string]string, repoURL, repoRef string, keyOverrides map[string]string) (string, error)
+	webhookLaunchBot func(ctx context.Context, botID string, vars map[string]string, repoURL, repoRef string, keyOverrides, secretOverrides map[string]string) (string, error)
 	httpClient       *http.Client
 
 	// detector is the cached LLM credential detector backing

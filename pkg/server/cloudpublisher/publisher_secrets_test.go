@@ -43,7 +43,7 @@ func TestResolveAndSealCredentials_GenericWorkflowSecrets(t *testing.T) {
 		"kubeconfig": {As: "file"},
 	}}
 	ctx := store.WithTenant(context.Background(), "team")
-	ref, err := p.resolveAndSealCredentials(ctx, "run-1", "team", "alice", "", wf, nil)
+	ref, err := p.resolveAndSealCredentials(ctx, "run-1", "team", "alice", "", wf, nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAndSealCredentials: %v", err)
 	}

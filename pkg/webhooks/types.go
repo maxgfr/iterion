@@ -64,6 +64,13 @@ type Config struct {
 	// same bot bill against different keys. See docs/byok.md.
 	KeyOverrides map[string]string `bson:"key_overrides,omitempty" json:"key_overrides,omitempty"`
 
+	// SecretOverrides pins a specific stored secret per workflow-secret name
+	// (name -> secret id) for runs launched through this webhook, overriding
+	// the org bot-secret binding in secrets.ResolveGenericWithBindings. Lets
+	// several webhooks for the same bot post under different forge tokens /
+	// bot identities. See docs/byok.md.
+	SecretOverrides map[string]string `bson:"secret_overrides,omitempty" json:"secret_overrides,omitempty"`
+
 	CreatedBy  string     `bson:"created_by" json:"created_by"`
 	CreatedAt  time.Time  `bson:"created_at" json:"created_at"`
 	UpdatedAt  time.Time  `bson:"updated_at" json:"updated_at"`

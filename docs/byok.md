@@ -155,6 +155,41 @@ The webhook spine keys configs by `_id`, not by bot; nothing stops N
 with per-webhook overrides, that yields "same bot, different key per
 webhook." No work needed beyond the override field above.
 
+## Per-webhook secret override (e.g. a distinct forge token)
+
+The same per-webhook idea applies to the bot's **stored secrets** (the
+`secrets:` block), not just LLM keys. A bot like `review-pr` declares
+`forge_token` and the org binds it to one stored secret (bot-secret
+bindings; `ResolveGenericWithBindings` precedence user → binding → team).
+A webhook can **override** that binding per workflow-secret name via
+`webhooks.Config.SecretOverrides` (name → `secret_id`), threaded exactly
+like `KeyOverrides` (handler → `LaunchSpec` → `store.Run` →
+`ResolveGenericWithBindings` **Tier 0**, which wins over the binding). Set
+it on the webhook create/PATCH API as `secret_overrides`;
+`validateSecretOverrides` rejects a `secret_id` that isn't an org-scoped
+secret of the webhook's tenant. Use it to post under a **different GitLab
+token / bot identity per webhook** (webhook A → bot-1's token, webhook B →
+bot-2's). The override carries no binding-level `allowed_hosts`, so egress
+falls back to the workflow's own `secrets.<name>.hosts` declaration.
+
+## Plugging many repos into auto-review with one token
+
+Two knobs make "one token, every repo" work **at the org level** (no
+per-repo setup), with no instance-wide secret:
+
+1. **Token scope.** Use a GitLab **group access token** (covers every
+   project in the group) as the org's `forge_token`, instead of a
+   single-project token. One token authenticates posting on all repos.
+2. **Webhook scope.** Register the GitLab webhook at the **group** level —
+   GitLab fires it for every project in the group — pointing at one
+   iterion `webhook_config` with a broad/empty `project_allowlist`.
+
+So 1 group token (org binding) + 1 iterion webhook + 1 GitLab group
+webhook = the whole group auto-reviewed. An **instance-wide default**
+forge token (shared across orgs) is deliberately *not* a concept — secrets
+are per-tenant for isolation; the org + group-token model gives "one
+token, all repos" without crossing the tenant boundary.
+
 ## Deployment guidance (cloud)
 
 - **Proper model:** each org enters its keys via `POST /api/teams/{id}/api-keys`

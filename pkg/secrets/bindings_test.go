@@ -72,7 +72,7 @@ func TestResolveGenericWithBindings_TierOrdering(t *testing.T) {
 	}
 
 	// (a) unattended actor (no user secrets) → binding beats team-scoped.
-	got, err := ResolveGenericWithBindings(ctx, secStore, bindStore, "team", "", "review-pr", []string{"gitlab_token"}, sealer)
+	got, err := ResolveGenericWithBindings(ctx, secStore, bindStore, "team", "", "review-pr", []string{"gitlab_token"}, nil, sealer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,16 +85,51 @@ func TestResolveGenericWithBindings_TierOrdering(t *testing.T) {
 	}
 
 	// (b) no bot id → binding skipped, team-scoped wins.
-	got, _ = ResolveGenericWithBindings(ctx, secStore, bindStore, "team", "", "", []string{"gitlab_token"}, sealer)
+	got, _ = ResolveGenericWithBindings(ctx, secStore, bindStore, "team", "", "", []string{"gitlab_token"}, nil, sealer)
 	if string(got["gitlab_token"].Plaintext) != "team-val" || got["gitlab_token"].SourceScope != "team" {
 		t.Fatalf("no-bot tier: %+v", got["gitlab_token"])
 	}
 
 	// (c) a personal user secret of the same name beats the binding.
 	mkGenericSecret(t, secStore, sealer, "team", "alice", "gitlab_token", "user-val")
-	got, _ = ResolveGenericWithBindings(ctx, secStore, bindStore, "team", "alice", "review-pr", []string{"gitlab_token"}, sealer)
+	got, _ = ResolveGenericWithBindings(ctx, secStore, bindStore, "team", "alice", "review-pr", []string{"gitlab_token"}, nil, sealer)
 	if string(got["gitlab_token"].Plaintext) != "user-val" || got["gitlab_token"].SourceScope != "user" {
 		t.Fatalf("user tier: %+v", got["gitlab_token"])
+	}
+}
+
+func TestResolveGenericWithBindings_WebhookOverride(t *testing.T) {
+	ctx := context.Background()
+	sealer := newSealer(t)
+	secStore := NewMemoryGenericSecretStore()
+	bindStore := NewMemoryBotSecretBindingStore()
+
+	// Org binding maps gitlab_token -> the default org credential.
+	def := mkGenericSecret(t, secStore, sealer, "team", "", "org_default_token", "binding-val")
+	if err := bindStore.Create(ctx, BotSecretBinding{
+		ID: "b1", TenantID: "team", BotID: "review-pr",
+		SecretID: def.ID, SecretNameForWorkflow: "gitlab_token", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A second org secret a webhook can pin instead.
+	alt := mkGenericSecret(t, secStore, sealer, "team", "", "alt_token", "override-val")
+
+	// (a) with an override, Tier 0 (webhook-override) wins over the binding.
+	got, err := ResolveGenericWithBindings(ctx, secStore, bindStore, "team", "", "review-pr",
+		[]string{"gitlab_token"}, map[string]string{"gitlab_token": alt.ID}, sealer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := got["gitlab_token"]; string(r.Plaintext) != "override-val" || r.SourceScope != "webhook-override" {
+		t.Fatalf("override should win over binding: %+v", r)
+	}
+
+	// (b) a dangling override id is ignored → falls back to the binding.
+	got, _ = ResolveGenericWithBindings(ctx, secStore, bindStore, "team", "", "review-pr",
+		[]string{"gitlab_token"}, map[string]string{"gitlab_token": "nonexistent"}, sealer)
+	if string(got["gitlab_token"].Plaintext) != "binding-val" {
+		t.Fatalf("dangling override should fall back to binding: %+v", got["gitlab_token"])
 	}
 }
 
@@ -107,7 +142,7 @@ func TestResolveGenericWithBindings_DanglingBindingSkipped(t *testing.T) {
 	// binding points at a secret that doesn't exist → must fall through, not error.
 	_ = bindStore.Create(ctx, BotSecretBinding{ID: "b1", TenantID: "team", BotID: "review-pr",
 		SecretID: "ghost", SecretNameForWorkflow: "gitlab_token", CreatedAt: time.Now()})
-	got, err := ResolveGenericWithBindings(ctx, secStore, bindStore, "team", "", "review-pr", []string{"gitlab_token"}, sealer)
+	got, err := ResolveGenericWithBindings(ctx, secStore, bindStore, "team", "", "review-pr", []string{"gitlab_token"}, nil, sealer)
 	if err != nil {
 		t.Fatalf("dangling binding should not error: %v", err)
 	}

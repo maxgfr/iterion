@@ -111,6 +111,7 @@ func ResolveGenericWithBindings(
 	bindingStore BotSecretBindingStore,
 	teamID, userID, botID string,
 	names []string,
+	secretOverrides map[string]string,
 	sealer Sealer,
 ) (map[string]GenericResolution, error) {
 	if secretStore == nil {
@@ -185,8 +186,36 @@ func ResolveGenericWithBindings(
 		}
 	}
 
+	// Tier 0 source: per-webhook secret overrides (name -> secret id), the
+	// highest precedence. Lets a webhook pin a specific stored secret — e.g. a
+	// distinct forge_token / bot identity — over the org binding, mirroring the
+	// BYOK keyOverrides path. See docs/byok.md. The override carries no
+	// binding-level AllowedHosts, so egress falls back to the workflow's own
+	// secret host declaration.
+	overrideByName := make(map[string]GenericSecret)
+	for name, secretID := range secretOverrides {
+		if !want[name] || strings.TrimSpace(secretID) == "" {
+			continue
+		}
+		sec, err := secretStore.Get(ctx, secretID)
+		if err != nil {
+			continue // dangling override -> fall through to the lower tiers
+		}
+		if !bindableGenericSecretForBotBinding(sec, teamID) {
+			continue // cross-tenant / personal secret -> ignore
+		}
+		overrideByName[name] = sec
+	}
+
 	out := make(map[string]GenericResolution, len(want))
 	for name := range want {
+		if s, ok := overrideByName[name]; ok {
+			if r, ok := buildGenericResolution(s, sealer, userID); ok {
+				r.SourceScope = "webhook-override"
+				out[name] = r
+				continue
+			}
+		}
 		if s, ok := userByName[name]; ok {
 			if r, ok := buildGenericResolution(s, sealer, userID); ok {
 				r.SourceScope = "user"

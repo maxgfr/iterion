@@ -229,6 +229,10 @@ type Run struct {
 	// keys. Set by webhook launches carrying per-webhook key bindings;
 	// empty otherwise. See docs/byok.md.
 	KeyOverrides map[string]string `json:"key_overrides,omitempty" bson:"key_overrides,omitempty"`
+	// SecretOverrides pins a stored secret per workflow-secret name (name ->
+	// secret id) for this run, persisted so cloud resume re-resolves the same
+	// secrets. Set by webhook launches. See docs/byok.md.
+	SecretOverrides map[string]string `json:"secret_overrides,omitempty" bson:"secret_overrides,omitempty"`
 	// QueueMsgID is the NATS Nats-Msg-Id header value, exposed so a
 	// cancel can target the queued message before pickup. Empty after
 	// pickup or when not in cloud mode.

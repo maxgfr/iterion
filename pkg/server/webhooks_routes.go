@@ -49,6 +49,7 @@ type webhookConfigReq struct {
 	MonthlyCallLimit *int              `json:"monthly_call_limit,omitempty"`
 	LaunchVars       map[string]string `json:"launch_vars,omitempty"`
 	KeyOverrides     map[string]string `json:"key_overrides,omitempty"`
+	SecretOverrides  map[string]string `json:"secret_overrides,omitempty"`
 }
 
 type webhookWithToken struct {
@@ -183,6 +184,7 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		RateLimit:        rate,
 		LaunchVars:       req.LaunchVars,
 		KeyOverrides:     req.KeyOverrides,
+		SecretOverrides:  req.SecretOverrides,
 		CreatedBy:        id.UserID,
 		CreatedAt:        now,
 		UpdatedAt:        now,
@@ -194,6 +196,10 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		cfg.MonthlyCallLimit = *req.MonthlyCallLimit
 	}
 	if err := s.validateKeyOverrides(r.Context(), teamID, cfg.KeyOverrides); err != nil {
+		httpError(w, http.StatusBadRequest, "%s", err.Error())
+		return
+	}
+	if err := s.validateSecretOverrides(r.Context(), teamID, cfg.SecretOverrides); err != nil {
 		httpError(w, http.StatusBadRequest, "%s", err.Error())
 		return
 	}
@@ -226,6 +232,26 @@ func (s *Server) validateKeyOverrides(ctx context.Context, tenantID string, over
 		}
 		if string(k.Provider) != prov {
 			return fmt.Errorf("key_overrides[%s]: api key %q is for provider %q", prov, keyID, k.Provider)
+		}
+	}
+	return nil
+}
+
+// validateSecretOverrides rejects a webhook secret override that references a
+// stored secret the webhook's tenant doesn't own at the org level. Like the
+// key-override guard, the resolver is already tenant-scoped (a foreign id
+// silently won't bind), so this is a fail-fast UX check.
+func (s *Server) validateSecretOverrides(ctx context.Context, tenantID string, overrides map[string]string) error {
+	if len(overrides) == 0 || s.genericSecrets == nil {
+		return nil
+	}
+	for name, secretID := range overrides {
+		sec, err := s.genericSecrets.Get(ctx, secretID)
+		if err != nil {
+			return fmt.Errorf("secret_overrides[%s]: stored secret %q not found", name, secretID)
+		}
+		if sec.ScopeTeamID != tenantID || sec.ScopeUserID != "" {
+			return fmt.Errorf("secret_overrides[%s]: secret %q must be an org-scoped secret of this team", name, secretID)
 		}
 	}
 	return nil
@@ -277,6 +303,13 @@ func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cfg.KeyOverrides = req.KeyOverrides
+	}
+	if req.SecretOverrides != nil {
+		if err := s.validateSecretOverrides(r.Context(), teamID, req.SecretOverrides); err != nil {
+			httpError(w, http.StatusBadRequest, "%s", err.Error())
+			return
+		}
+		cfg.SecretOverrides = req.SecretOverrides
 	}
 	// Re-normalise bot scope only when the caller touched it.
 	if req.BotIDs != nil || req.WildcardBots != nil {

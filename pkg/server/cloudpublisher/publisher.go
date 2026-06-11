@@ -164,7 +164,7 @@ func genericSecretNamesForWorkflow(wf *ir.Workflow) []string {
 // connected, seals the resulting bundle, and persists it under a
 // fresh secrets ref. Returns the ref or an empty string when no
 // credentials are available — the runner then falls back to env.
-func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenantID, ownerID, botID string, wf *ir.Workflow, keyOverrides map[string]string) (string, error) {
+func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenantID, ownerID, botID string, wf *ir.Workflow, keyOverrides, secretOverrides map[string]string) (string, error) {
 	if p.runSecrets == nil || p.sealer == nil {
 		return "", nil
 	}
@@ -234,7 +234,7 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 	// value means "resolve a stored secret of the same name" for this run.
 	if p.genericSecrets != nil && wf != nil && len(wf.Secrets) > 0 {
 		names := genericSecretNamesForWorkflow(wf)
-		resolved, err := secrets.ResolveGenericWithBindings(ctx, p.genericSecrets, p.botBindings, tenantID, ownerID, botID, names, p.sealer)
+		resolved, err := secrets.ResolveGenericWithBindings(ctx, p.genericSecrets, p.botBindings, tenantID, ownerID, botID, names, secretOverrides, p.sealer)
 		if err != nil {
 			return "", fmt.Errorf("cloudpublisher: resolve workflow secrets: %w", err)
 		}
@@ -327,22 +327,23 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 	tenantID, _ := store.TenantFromContext(ctx)
 	ownerID, _ := store.OwnerFromContext(ctx)
 	r := &store.Run{
-		FormatVersion: store.RunFormatVersion,
-		ID:            runID,
-		WorkflowName:  wf.Name,
-		WorkflowHash:  hash,
-		FilePath:      spec.FilePath,
-		Status:        store.RunStatusQueued,
-		Inputs:        varsAsAny(spec.Vars),
-		CreatedAt:     now,
-		UpdatedAt:     now,
-		QueuedAt:      &now,
-		TenantID:      tenantID,
-		OwnerID:       ownerID,
-		RepoURL:       spec.RepoURL,
-		RepoSHA:       spec.RepoRef,
-		BotID:         spec.BotID,
-		KeyOverrides:  spec.KeyOverrides,
+		FormatVersion:   store.RunFormatVersion,
+		ID:              runID,
+		WorkflowName:    wf.Name,
+		WorkflowHash:    hash,
+		FilePath:        spec.FilePath,
+		Status:          store.RunStatusQueued,
+		Inputs:          varsAsAny(spec.Vars),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		QueuedAt:        &now,
+		TenantID:        tenantID,
+		OwnerID:         ownerID,
+		RepoURL:         spec.RepoURL,
+		RepoSHA:         spec.RepoRef,
+		BotID:           spec.BotID,
+		KeyOverrides:    spec.KeyOverrides,
+		SecretOverrides: spec.SecretOverrides,
 		// Cap. 3 sharding fields — propagate to the persisted Run so
 		// studio surfaces can render the parent/child relationship,
 		// and onto the published RunMessage below so the runner pod
@@ -362,7 +363,7 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 	// 1b. Resolve BYOK credentials and seal them under a fresh
 	//     secrets_ref. Empty ref means "no team-scoped credentials
 	//     configured" — the runner falls back to env.
-	secretsRef, err := p.resolveAndSealCredentials(ctx, runID, tenantID, ownerID, spec.BotID, wf, spec.KeyOverrides)
+	secretsRef, err := p.resolveAndSealCredentials(ctx, runID, tenantID, ownerID, spec.BotID, wf, spec.KeyOverrides, spec.SecretOverrides)
 	if err != nil {
 		return 0, err
 	}
@@ -511,7 +512,7 @@ func (p *Publisher) SubmitResume(ctx context.Context, spec runview.ResumeSpec, w
 	// bot-secret bindings remain durable across pause/failure/TTL republishes.
 	secretsCtx := store.WithTenant(ctx, prior.TenantID)
 	secretsCtx = store.WithOwner(secretsCtx, prior.OwnerID)
-	secretsRef, secretsErr := p.resolveAndSealCredentials(secretsCtx, spec.RunID, prior.TenantID, prior.OwnerID, prior.BotID, wf, prior.KeyOverrides)
+	secretsRef, secretsErr := p.resolveAndSealCredentials(secretsCtx, spec.RunID, prior.TenantID, prior.OwnerID, prior.BotID, wf, prior.KeyOverrides, prior.SecretOverrides)
 	if secretsErr != nil {
 		return secretsErr
 	}

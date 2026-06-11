@@ -109,6 +109,10 @@ type LaunchSpec struct {
 	// secrets.Resolve. Set by webhook launches that carry per-webhook key
 	// bindings; empty for normal launches. See docs/byok.md.
 	KeyOverrides map[string]string
+	// SecretOverrides pins a stored secret per workflow-secret name (name ->
+	// secret id) for this run, overriding the org bot-secret binding. Set by
+	// webhook launches carrying per-webhook secret bindings. See docs/byok.md.
+	SecretOverrides map[string]string
 }
 
 // ResumeSpec describes a resume request.
