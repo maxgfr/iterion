@@ -107,13 +107,22 @@ RUN apt-get update \
 # GitLab merge requests (inline comments + one-click ```suggestion
 # blocks) from here. Single static binary from the gitlab-org/cli
 # goreleaser archive (binary at bin/glab); dpkg arch matches the asset.
-# (gh is intentionally not added here yet — GitHub cloud posting is a
-# separate follow-up; the GitLab webhook flow is the current target.)
 ARG GLAB_VERSION=1.102.0
 RUN ARCH="$(dpkg --print-architecture)" \
  && curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_${ARCH}.tar.gz" \
         | tar -xz -C /usr/local/bin --strip-components=1 bin/glab \
  && chmod +x /usr/local/bin/glab
+
+# gh (GitHub CLI) — the GitHub-webhook leg of review-pr posts its
+# summary as an issue-comment (`gh api repos/{owner}/{repo}/issues/{n}/comments`)
+# from the same runner pod as glab. Single static tarball; the asset
+# layout is `gh_${VERSION}_linux_${ARCH}/bin/gh`, so `--strip-components 2`
+# pulls the binary out of the versioned directory.
+ARG GH_VERSION=2.65.0
+RUN ARCH="$(dpkg --print-architecture)" \
+ && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.tar.gz" \
+        | tar -xz -C /usr/local/bin --strip-components=2 "gh_${GH_VERSION}_linux_${ARCH}/bin/gh" \
+ && chmod +x /usr/local/bin/gh
 
 # kubectl — required by the kubernetes sandbox driver (Phase 5) when
 # the runner pod creates per-run sibling pods. Pinned to a recent
@@ -179,6 +188,16 @@ RUN /usr/sbin/groupadd --system --gid 10001 iterion \
  && /usr/sbin/useradd  --system --uid 10001 --gid iterion --home /home/iterion --create-home iterion \
  && mkdir -p /var/lib/iterion /var/run/iterion \
  && chown -R iterion:iterion /var/lib/iterion /var/run/iterion /home/iterion
+
+# System-wide git identity for in-pod commits. Without this, any commit
+# from a webhook-launched bot (review-pr suggestion blocks, feature_dev
+# patches, etc.) fails with "please tell me who you are". The clone
+# path in pkg/runner/loop.go runGit explicitly sets GIT_CONFIG_NOSYSTEM=1,
+# so this only affects subsequent commits made by the bot inside the
+# pod — never the clone HTTPS auth — and is deliberately overridden by
+# any per-repo `.gitconfig` the workflow stages.
+RUN git config --system user.email "bot@iterion.dev" \
+ && git config --system user.name "iterion-bot"
 
 USER iterion
 WORKDIR /home/iterion

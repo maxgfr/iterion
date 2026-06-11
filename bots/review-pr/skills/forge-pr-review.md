@@ -11,6 +11,19 @@ PR's diff, with a one-click `suggestion` block when the finding carries a
 concrete `replacement`. You only POST comments — never edit, fix, or
 commit the workspace.
 
+### Cloud runner image — which CLIs are bundled
+
+The iterion cloud runner image (`iterion-runner`, built from the repo's
+`Dockerfile`) ships with `glab` AND `gh` preinstalled — both are static
+tarballs pulled at image build time, available on `$PATH`. `forgejo`/
+`gitea` CLIs are deliberately NOT bundled (no first-party static binary
+matches our distribution constraints), so the Forgejo path uses `curl`
+against the REST API directly — see §6. The same image also carries a
+system git identity (`bot@iterion.dev` / `iterion-bot`) so any commit a
+bot creates inside the pod succeeds; clone auth is unaffected because
+the runner sets `GIT_CONFIG_NOSYSTEM=1` on the clone path
+(`pkg/runner/loop.go runGit`).
+
 ## 1. Detect the forge from the PR URL
 
 Parse the URL host and path:
@@ -48,6 +61,34 @@ default for unattended webhook runs — no diff-position mapping);
 If the forge is unrecognised or the CLI is not authenticated, publish
 NOTHING: return `published=false` with a precise `skipped_reason`
 (e.g. `"gh not authenticated; run gh auth login"`). Do not pretend.
+
+### Re-review trigger (`re_review=true`)
+
+When the launch var `re_review=true` is set, the run was triggered by
+an operator's `/revi` comment (or equivalent re-review trigger), not by
+the initial PR open. Prepend `🔁 Re-review` to the rolled-up summary
+title / body header so the operator can tell at a glance which note is
+the original vs which is the re-review:
+
+```
+🔁 Re-review · totals: 3 high, 5 medium, 2 low
+```
+
+### Anti-trigger-loop rule (every forge)
+
+NEVER let a posted note BEGIN with the literal token `/revi` (any
+case). The webhook re-review trigger fires on a comment whose FIRST
+non-whitespace token is `/revi` — if Revi posts a body starting with
+that command, the forge fires the webhook back to Revi, which posts
+another note, and the bot loops forever. Safe phrasings:
+
+- Quote it: `Run \`/revi\` to retry.`
+- Re-anchor it: `Re-trigger via /revi.` (the token is not first).
+- Mention it in mid-sentence: `Use /revi for a fresh pass.`
+
+The middleware-side guard (`gitlab.ParsedNote.IsReviewCommand`) only
+fires on a strict prefix match, so any of the above is fine; the rule
+is "first non-whitespace token must NOT be `/revi`".
 
 ## 2. Anchoring rule (all forges)
 
@@ -123,6 +164,33 @@ gh api "repos/<owner>/<repo>/pulls/<number>/reviews" --jq '.[-1].html_url'
 Report that count as `comments_posted` and the review URL as
 `review_url`. Cite these calls in your `summary`.
 
+### Summary-mode recipe (`pr_review_mode=summary`)
+
+Webhook launches set `pr_review_mode=summary` by default — no diff
+position mapping, ONE rolled-up note. On GitHub, summary-mode posts
+the rolled-up review as an issue-comment (the GitHub API treats PR
+threads as issue threads for this endpoint):
+
+```sh
+# Body: 1-line title + totals + per-severity bullet list. Honour
+# the re_review prefix when set (see "Re-review trigger" above).
+cat > /tmp/revi-summary.md <<'MD'
+🔁 Re-review · Revi summary
+
+- 2 high, 4 medium, 1 low (1 cross-confirmed)
+- src/x.js:142 — sanitize untrusted input
+- src/y.js:14 — null-guard before deref
+MD
+
+gh api --method POST "repos/<owner>/<repo>/issues/<number>/comments" \
+    -F body=@/tmp/revi-summary.md
+```
+
+VERIFY: `gh api "repos/<owner>/<repo>/issues/<number>/comments" --jq '.[-1].html_url'`
+and report that URL as `review_url`; `comments_posted=1` (the summary
+note itself). Set `suggestions_posted=0` (summary mode never emits
+suggestion blocks).
+
 ## 5. GitLab (`glab`)
 
 Inline comments are MR discussion threads carrying a `position`. Fetch the
@@ -194,23 +262,46 @@ Report that number as `comments_posted` (never an optimistic self-estimate);
 
 ## 6. Forgejo / Gitea (REST API)
 
-One review with comments, via the API (`tea` has no inline-review
-command). Token from `$FORGEJO_TOKEN`/`$GITEA_TOKEN`:
+There is NO forgejo / gitea CLI bundled in the cloud runner image —
+the upstreams don't ship a single static binary that fits our
+distribution constraints. Use `curl` directly against the REST API.
+The token comes from the mounted file secret (see "Unattended auth"
+above): read it with `cat /run/iterion/secrets/forge_token` and pass it
+as a header. Never echo or template the token into a prompt.
+
+### Inline mode
 
 ```sh
+TOKEN="$(cat /run/iterion/secrets/forge_token)"
 curl -sS -X POST \
-  -H "Authorization: token $FORGEJO_TOKEN" -H "Content-Type: application/json" \
+  -H "Authorization: token ${TOKEN}" -H "Content-Type: application/json" \
   "https://<host>/api/v1/repos/<owner>/<repo>/pulls/<index>/reviews" \
   -d '{"event":"COMMENT","body":"<summary>","comments":[
        {"path":"src/x.js","new_position":142,"body":"**[high · security]** ...\n\n```suggestion\n<replacement>\n```"}
      ]}'
 ```
 - `new_position` = line on the new side; use `old_position` for a
-  removed line. Gita/Forgejo renders the same ```suggestion fence as
+  removed line. Gitea/Forgejo renders the same ```suggestion fence as
   GitHub.
 - `event: "COMMENT"`.
 
-VERIFY: `GET .../pulls/<index>/reviews` (and its `/comments`) and count.
+### Summary mode (`pr_review_mode=summary`)
+
+A rolled-up summary on Forgejo / Gitea is one issue-comment, same as
+GitHub. Honour the `re_review` prefix when set:
+
+```sh
+TOKEN="$(cat /run/iterion/secrets/forge_token)"
+curl -sS -X POST \
+  -H "Authorization: token ${TOKEN}" -H "Content-Type: application/json" \
+  "https://<host>/api/v1/repos/<owner>/<repo>/issues/<number>/comments" \
+  -d "$(jq -n --arg body "$SUMMARY" '{body:$body}')"
+```
+
+VERIFY: re-fetch and count.
+- Inline: `GET .../pulls/<index>/reviews` (and its `/comments`).
+- Summary: `GET .../issues/<number>/comments` — the last entry's
+  `html_url` is the `review_url`; `comments_posted=1`.
 
 ## 7. Output contract
 
