@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/SocialGouv/iterion/pkg/audit"
 	iterauth "github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/auth/oidc"
 	"github.com/SocialGouv/iterion/pkg/cli"
@@ -242,6 +243,10 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	if err := orgusage.EnsureSchema(rootCtx, st.DB()); err != nil {
 		return fmt.Errorf("server: ensure org_usage schema: %w", err)
 	}
+	auditStore := audit.NewMongoStore(st.DB())
+	if err := audit.EnsureSchema(rootCtx, st.DB()); err != nil {
+		return fmt.Errorf("server: ensure audit schema: %w", err)
+	}
 	memStore := mongostore.NewMongoMemoryStore(st.DB())
 	if err := memStore.EnsureSchema(rootCtx); err != nil {
 		return fmt.Errorf("server: ensure memory schema: %w", err)
@@ -398,6 +403,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		WebhookCounter:         webhookStores.Counter,
 		OrgUsage:               orgUsageCounter,
 		OrgDefaults:            orgLimitDefaultsFromEnv(),
+		Audit:                  auditStore,
 		MemoryStore:            memStore,
 		RunSecrets:             runSecretsStore,
 		Sealer:                 sealer,

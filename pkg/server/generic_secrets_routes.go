@@ -145,6 +145,7 @@ func (s *Server) handleCreateGenericSecret(w http.ResponseWriter, r *http.Reques
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
 	}
+	s.auditTenant(r, teamID, "secret.created", "secret", secretID, map[string]any{"name": name, "user_scoped": userID != ""})
 	writeJSON(w, toGenericSecretView(rec))
 }
 
@@ -191,6 +192,7 @@ func (s *Server) handleUpdateGenericSecret(w http.ResponseWriter, r *http.Reques
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
 	}
+	s.auditTenant(r, rec.ScopeTeamID, "secret.updated", "secret", rec.ID, map[string]any{"name": rec.Name, "rotated": req.Secret != nil && *req.Secret != ""})
 	writeJSON(w, toGenericSecretView(rec))
 }
 
@@ -214,6 +216,7 @@ func (s *Server) handleDeleteGenericSecret(w http.ResponseWriter, r *http.Reques
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
 	}
+	s.auditTenant(r, rec.ScopeTeamID, "secret.deleted", "secret", rec.ID, map[string]any{"name": rec.Name})
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -800,6 +800,7 @@ func (s *Server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
 		return
 	}
+	s.auditTenant(r, teamID, "invitation.created", "invitation", inv.ID, map[string]any{"email": inv.Email, "role": string(inv.Role)})
 	// Return both the persistent ID and the plaintext token so the
 	// admin can copy/email it. The plaintext is never recoverable
 	// after this response.
@@ -850,6 +851,7 @@ func (s *Server) handleDeleteInvitation(w http.ResponseWriter, r *http.Request) 
 		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
 		return
 	}
+	s.auditTenant(r, teamID, "invitation.deleted", "invitation", inviteID, map[string]any{"email": inv.Email})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -881,6 +883,7 @@ func (s *Server) handleUpdateMember(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
 	}
+	s.auditTenant(r, teamID, "member.role_changed", "member", memberID, map[string]any{"role": string(role)})
 	writeJSON(w, mb)
 }
 
@@ -896,6 +899,7 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
 		return
 	}
+	s.auditTenant(r, teamID, "member.removed", "member", memberID, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -969,6 +973,7 @@ func (s *Server) handleInvitationAcceptForLoggedIn(w http.ResponseWriter, r *htt
 		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
 		return
 	}
+	s.auditTenant(r, mb.TeamID, "invitation.accepted", "member", id.UserID, map[string]any{"role": string(mb.Role)})
 	writeJSON(w, mb)
 }
 
@@ -1037,6 +1042,11 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 			s.logger.Warn("auth: revoke sessions on user %s disable: %v", u.ID, err)
 		}
 	}
+	meta := map[string]any{"status": string(u.Status), "is_super_admin": u.IsSuperAdmin}
+	if req.IsSuperAdmin != nil {
+		meta["super_admin_changed"] = true
+	}
+	s.auditPlatform(r, "", "user.updated", "user", u.ID, meta)
 	writeJSON(w, s.toUserView(u))
 }
 

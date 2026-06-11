@@ -106,6 +106,7 @@ func (s *Server) handleCreateBotBinding(w http.ResponseWriter, r *http.Request) 
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
 	}
+	s.auditTenant(r, teamID, "binding.created", "binding", b.ID, map[string]any{"bot_id": botID, "secret_name": b.SecretNameForWorkflow, "allowed_hosts": len(b.AllowedHosts)})
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, b)
 }
@@ -144,6 +145,7 @@ func (s *Server) handleUpdateBotBinding(w http.ResponseWriter, r *http.Request) 
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
 	}
+	s.auditTenant(r, teamID, "binding.updated", "binding", b.ID, map[string]any{"bot_id": botID, "secret_name": b.SecretNameForWorkflow})
 	writeJSON(w, b)
 }
 
@@ -161,5 +163,6 @@ func (s *Server) handleDeleteBotBinding(w http.ResponseWriter, r *http.Request) 
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
 	}
+	s.auditTenant(r, teamID, "binding.deleted", "binding", r.PathValue("binding_id"), map[string]any{"bot_id": botID})
 	w.WriteHeader(http.StatusNoContent)
 }

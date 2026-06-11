@@ -184,6 +184,7 @@ func (s *Server) handleAdminCreateOrg(w http.ResponseWriter, r *http.Request) {
 		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
 		return
 	}
+	s.auditPlatform(r, t.ID, "org.created", "org", t.ID, map[string]any{"name": t.Name, "owner": ownerID})
 	writeJSON(w, toOrgView(t))
 }
 
@@ -273,6 +274,10 @@ func (s *Server) handleAdminUpdateOrg(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	s.auditPlatform(r, t.ID, "org.updated", "org", t.ID, map[string]any{
+		"monthly_run_quota": t.MonthlyRunQuota, "memory_quota_bytes": t.MemoryQuotaBytes,
+		"monthly_cost_cap_usd": t.MonthlyCostCapUSD, "max_concurrent_runs": t.MaxConcurrentRuns,
+	})
 	writeJSON(w, toOrgView(t))
 }
 
@@ -323,6 +328,7 @@ func (s *Server) handleAdminSetOrgStatus(w http.ResponseWriter, r *http.Request)
 	if s.logger != nil {
 		s.logger.Info("admin: org %s status -> %s by %s", t.ID, st, id.UserID)
 	}
+	s.auditPlatform(r, t.ID, "org.status_changed", "org", t.ID, map[string]any{"status": string(st), "reason": req.Reason})
 	writeJSON(w, toOrgView(t))
 }
 

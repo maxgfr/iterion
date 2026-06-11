@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/SocialGouv/iterion/bots"
+	"github.com/SocialGouv/iterion/pkg/audit"
 	"github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/auth/oidc"
 	"github.com/SocialGouv/iterion/pkg/backend/detect"
@@ -137,6 +138,11 @@ type Config struct {
 	// gateLaunch quota checks and increments the month's run counter;
 	// the usage REST views read it back. nil → no metering (local mode).
 	OrgUsage orgusage.Counter
+
+	// Audit, when non-nil, persists control-plane mutations (org
+	// status, secrets/bindings/webhooks CRUD, member changes…) and
+	// enables GET /api/teams/{id}/audit + /api/admin/audit.
+	Audit audit.Store
 	// OrgDefaults are the platform-wide launch limits applied when a
 	// team has no per-org override. Zero values mean "no limit".
 	OrgDefaults OrgLimitDefaults
@@ -325,6 +331,7 @@ type Server struct {
 	webhookCounter    webhooks.Counter
 	orgUsage          orgusage.Counter
 	orgDefaults       OrgLimitDefaults
+	auditStore        audit.Store
 	botBindings       secrets.BotSecretBindingStore
 	memStore          knowledge.MemoryStore
 	// webhookLaunchBot overrides the inbound-webhook launch path (test
@@ -423,6 +430,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		webhookCounter:    cfg.WebhookCounter,
 		orgUsage:          cfg.OrgUsage,
 		orgDefaults:       cfg.OrgDefaults,
+		auditStore:        cfg.Audit,
 		botBindings:       cfg.BotBindings,
 		memStore:          cfg.MemoryStore,
 		httpClient:        &http.Client{Timeout: 15 * time.Second},
@@ -747,6 +755,12 @@ func (s *Server) routes() {
 	// Bot-secret bindings (policy wrapper over generic secrets).
 	if s.botBindings != nil && s.authSvc != nil {
 		s.registerBotBindingRoutes()
+	}
+
+	// Audit log read surface (writes happen inline in the mutation
+	// handlers via auditTenant/auditPlatform). No-op when no store.
+	if s.authSvc != nil {
+		s.registerAuditRoutes()
 	}
 
 	// Shared-knowledge memory REST (FS fallback when no store wired).

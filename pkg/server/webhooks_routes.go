@@ -216,6 +216,7 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	if wildcard && s.logger != nil {
 		s.logger.Warn("webhooks: org %s created a wildcard-bot webhook %s (by %s)", teamID, cfg.ID, id.UserID)
 	}
+	s.auditTenant(r, teamID, "webhook.created", "webhook", cfg.ID, map[string]any{"name": cfg.Name, "provider": string(cfg.Provider), "wildcard_bots": cfg.WildcardBots})
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, webhookWithToken{Config: cfg, Token: plaintext})
 }
@@ -345,6 +346,7 @@ func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
 	}
+	s.auditTenant(r, teamID, "webhook.updated", "webhook", cfg.ID, map[string]any{"name": cfg.Name, "enabled": cfg.Enabled})
 	writeJSON(w, cfg)
 }
 
@@ -362,6 +364,7 @@ func (s *Server) handleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
 	}
+	s.auditTenant(r, teamID, "webhook.deleted", "webhook", r.PathValue("webhook_id"), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -389,6 +392,7 @@ func (s *Server) handleRotateWebhook(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
 	}
+	s.auditTenant(r, teamID, "webhook.rotated", "webhook", cfg.ID, map[string]any{"name": cfg.Name})
 	writeJSON(w, webhookWithToken{Config: cfg, Token: plaintext})
 }
 
