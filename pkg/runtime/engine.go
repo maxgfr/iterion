@@ -893,6 +893,13 @@ func (e *Engine) evictRunSessions(runID string, loopErr error) {
 // It walks the graph from startNodeID until a terminal node, human pause,
 // or error.
 func (e *Engine) execLoop(ctx context.Context, rs *runState, startNodeID string) error {
+	// Pin the loop ctx onto runState so every emit/AppendEvent uses a live
+	// context. The normal launch sets rs.ctx in runInitState, but the resume
+	// paths (resumeFromFailure / resumeFromPause) build rs without it — a nil
+	// rs.ctx then panics on the first AppendEvent retry (backoffOrCancel →
+	// nil ctx.Done()). Setting it here covers every caller.
+	rs.ctx = ctx
+
 	currentNodeID := startNodeID
 
 	for {

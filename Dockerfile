@@ -87,6 +87,10 @@ ENV ITERION_VERSION=${VERSION} \
 #   passwd    — provides groupadd/useradd. debian:12-slim drops it
 #               from the default footprint; without it the non-root
 #               user setup below fails with `groupadd: not found`.
+#   python3   — catalog bots (e.g. review-pr) shell out to `python3 -c …`
+#               in their deterministic tool nodes (diff_precheck,
+#               publish_health). review-pr runs in the runner pod (no
+#               sandbox), so without python3 here those nodes exit 127.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         git \
@@ -95,6 +99,7 @@ RUN apt-get update \
         procps \
         curl \
         passwd \
+        python3 \
  && rm -rf /var/lib/apt/lists/*
 
 # glab (GitLab CLI) — review-pr (Revi) runs WITHOUT a sandbox, so in
