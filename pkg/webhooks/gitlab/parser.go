@@ -58,15 +58,15 @@ func ParseMergeRequest(body []byte) (Parsed, error) {
 	}, nil
 }
 
-// IsReviewable reports whether the MR action should trigger a review.
-// open/reopen always do; update only when it carries a new head (a push)
-// — GitLab fires "update" on label/description edits too, which we skip.
+// IsReviewable reports whether the MR action should AUTO-trigger a review.
+// Only open/reopen do: a review fires once when the MR is created (or
+// reopened). Pushes to the MR ("update" with a new head) deliberately do
+// NOT re-trigger — auto-review-on-every-push was found too heavy. Re-review
+// after a push is on-demand via the `/revi` note command instead.
 func (p Parsed) IsReviewable() bool {
 	switch p.Action {
 	case "open", "reopen":
 		return true
-	case "update":
-		return p.OldRev != "" && p.OldRev != p.HeadSHA
 	default:
 		return false
 	}

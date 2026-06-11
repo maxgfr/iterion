@@ -62,9 +62,9 @@ func TestIsReviewable(t *testing.T) {
 	}{
 		{"open", "", "h", true},
 		{"reopen", "", "h", true},
-		{"update", "old", "h", true}, // push: oldrev != head
-		{"update", "h", "h", false},  // metadata edit: oldrev == head
-		{"update", "", "h", false},   // label-only: no oldrev
+		{"update", "old", "h", false}, // push no longer auto-triggers (re-review is on-demand via /revi)
+		{"update", "h", "h", false},   // metadata edit
+		{"update", "", "h", false},    // label-only
 		{"close", "", "h", false},
 		{"approved", "", "h", false},
 	}

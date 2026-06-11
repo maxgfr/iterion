@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -301,9 +302,19 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		BaseURL:      cfg.Auth.PublicURL,
 	}
 
+	// Bots: where the inbound-webhook bot resolution (botregistry.ResolveBotPath)
+	// looks for recipes. The official image ships the catalog at /opt/iterion/bots
+	// and sets ITERION_BOTS_PATH; operators may override with a colon-separated
+	// list. Empty → no webhook bot resolution (studio still discovers via WorkDir).
+	var botsPaths []string
+	if bp := os.Getenv("ITERION_BOTS_PATH"); bp != "" {
+		botsPaths = filepath.SplitList(bp)
+	}
+
 	srv := server.New(server.Config{
 		Port:                   serverOpts.port,
 		Bind:                   serverOpts.bind,
+		Bots:                   server.BotsConfig{Paths: botsPaths},
 		WorkDir:                serverOpts.dir,
 		Store:                  st,
 		Alerts:                 alertSettings,

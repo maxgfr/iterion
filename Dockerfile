@@ -153,6 +153,15 @@ RUN ln -s /opt/iterion/llm-clis/node_modules/.bin/claude /usr/local/bin/claude &
 # Iterion binary.
 COPY --from=go-builder /out/iterion /usr/local/bin/iterion
 
+# Productised bot catalog on disk. Cloud bot resolution
+# (botregistry.ResolveBotPath, used by the inbound-webhook launch path) and
+# the runner's per-run skill mirroring read recipes from a real path — the
+# embedded `bots` package only carries the 3 single-file bots, while bundles
+# like review-pr (Revi) need their skills/ tree, which exists only on disk.
+# ITERION_BOTS_PATH points the server + runner at it (colon-sep, overridable).
+COPY bots /opt/iterion/bots
+ENV ITERION_BOTS_PATH=/opt/iterion/bots
+
 # Non-root runtime user (UID/GID 10001 — high enough to avoid host
 # overlap, matches Helm chart securityContext.runAsUser).
 #
