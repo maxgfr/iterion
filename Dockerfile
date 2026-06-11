@@ -41,6 +41,12 @@ COPY cmd ./cmd
 COPY pkg ./pkg
 COPY e2e ./e2e
 COPY examples ./examples
+# bots/ holds the 9 productised bot bundles (relocated from examples/ in
+# 969d55b4). pkg/cli/embedded_recipes.go embeds them via the
+# github.com/SocialGouv/iterion/bots package, so the source tree must be
+# present for `go build` under -mod=vendor — without this COPY the build
+# fails: "cannot find module providing package .../bots".
+COPY bots ./bots
 # Embed the freshly-built studio assets the Go binary serves at GET /.
 COPY --from=studio-builder /app/studio/dist ./pkg/server/static
 ENV CGO_ENABLED=0 GOFLAGS="-mod=vendor -trimpath"
