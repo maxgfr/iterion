@@ -22,7 +22,10 @@ func webhookConfigFromContext(ctx context.Context) (webhooks.Config, bool) {
 }
 
 // extractWebhookToken pulls the presented token from the provider's
-// native header, falling back to iterion's own header.
+// native header, falling back to iterion's own header. Only invoked
+// in SignModeToken — hmac-mode providers (GitHub, Forgejo) DO NOT
+// echo a token header at all, so the middleware skips this entirely
+// (see webhookAuth).
 func extractWebhookToken(r *http.Request, provider webhooks.Provider) string {
 	if provider == webhooks.ProviderGitLab {
 		if t := r.Header.Get("X-Gitlab-Token"); t != "" {
@@ -60,12 +63,23 @@ func (s *Server) webhookAuth(provider webhooks.Provider, next http.Handler) http
 			httpError(w, http.StatusUnauthorized, "invalid webhook")
 			return
 		}
-		if !webhooks.VerifyToken(extractWebhookToken(r, provider), cfg.TokenHash) {
-			if s.logger != nil {
-				s.logger.Warn("webhooks: bad token for %s from %s", cfg.ID, s.clientIP(r))
+		// SignModeHMAC providers (GitHub, Forgejo, optionally generic)
+		// authenticate the BODY, not a header. The middleware MUST NOT
+		// read the body here (we'd consume the bytes the provider
+		// handler needs for signature recomputation) and MUST NOT
+		// reject the request just because the token header is absent.
+		// The provider handler is responsible for VerifyHMACSignature
+		// over the raw body BEFORE any side effect — otherwise the
+		// admission gate above gives the caller a free run-launch with
+		// no proof of identity.
+		if cfg.SignMode != webhooks.SignModeHMAC {
+			if !webhooks.VerifyToken(extractWebhookToken(r, provider), cfg.TokenHash) {
+				if s.logger != nil {
+					s.logger.Warn("webhooks: bad token for %s from %s", cfg.ID, s.clientIP(r))
+				}
+				httpError(w, http.StatusUnauthorized, "invalid webhook token")
+				return
 			}
-			httpError(w, http.StatusUnauthorized, "invalid webhook token")
-			return
 		}
 		if !cfg.Enabled {
 			httpError(w, http.StatusGone, "webhook disabled")

@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -22,22 +21,19 @@ import (
 	"github.com/SocialGouv/iterion/pkg/webhooks/gitlab"
 )
 
-// gitlabDefaultBot is the bot V1 pins for an MR review when the webhook
-// scope is a wildcard or otherwise ambiguous.
-const gitlabDefaultBot = "review-pr"
-
-// maxWebhookBodyBytes caps the inbound payload we read.
-const maxWebhookBodyBytes = 5 << 20
-
-// registerGitLabWebhookRoute wires the inbound GitLab MR delivery
-// endpoint behind webhookAuth.
+// registerGitLabWebhookRoute wires the inbound GitLab delivery endpoint
+// behind webhookAuth. The single route dispatches on X-Gitlab-Event so
+// MR opens and `/revi` note commands share one provider URL — exactly
+// the path the operator pastes into GitLab's "Webhook URL" field.
 func (s *Server) registerGitLabWebhookRoute() {
 	s.mux.Handle("POST /api/webhooks/gitlab/{id}", s.webhookAuth(webhooks.ProviderGitLab, http.HandlerFunc(s.handleGitLabWebhook)))
 }
 
-// handleGitLabWebhook handles a verified inbound GitLab MR webhook. Auth,
-// rate-limit, quota, suspend-check and tenant stamping are already done
-// by webhookAuth; the config is on ctx.
+// handleGitLabWebhook is the entry point for every GitLab delivery on
+// this route. Auth, rate-limit, quota, suspend-check and tenant
+// stamping are already done by webhookAuth; the config is on ctx. The
+// only thing this function does itself is pick the per-event-kind sub-
+// handler — everything provider-specific lives in handleGitLab* below.
 func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	cfg, ok := webhookConfigFromContext(ctx)
@@ -53,78 +49,58 @@ func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 	payloadHash := knowledge.ChecksumHex(body)
 	srcIP := s.clientIP(r)
 
-	// Conversational layer: dispatch a note (a /revi command or a reply to
-	// the bot) to the note flow. See docs/forge-conversations.md.
-	if r.Header.Get("X-Gitlab-Event") == gitlab.EventHeaderNote {
-		s.handleGitLabNote(ctx, w, cfg, body, payloadHash, srcIP)
-		return
+	switch r.Header.Get("X-Gitlab-Event") {
+	case gitlab.EventHeaderMergeRequest:
+		s.handleGitLabMergeRequestEvent(ctx, w, r, cfg, body, payloadHash, srcIP)
+	case gitlab.EventHeaderNote:
+		// Conversational layer: a /revi command (or, later, a reply to
+		// the bot's thread). See docs/forge-conversations.md.
+		s.handleGitLabNote(ctx, w, r, cfg, body, payloadHash, srcIP)
+	default:
+		s.recordTerminalWebhookDelivery(ctx, cfg, webhookEventMeta{}, webhooks.StatusInvalid, payloadHash, srcIP, "unsupported X-Gitlab-Event")
+		httpError(w, http.StatusBadRequest, "unsupported event (merge_request or note only)")
 	}
+}
 
-	if r.Header.Get("X-Gitlab-Event") != gitlab.EventHeaderMergeRequest {
-		s.recordWebhookDelivery(ctx, cfg, webhooks.StatusInvalid, payloadHash, srcIP, gitlab.Parsed{}, "unsupported X-Gitlab-Event")
-		httpError(w, http.StatusBadRequest, "unsupported event (merge_request only)")
-		return
-	}
+// handleGitLabMergeRequestEvent handles a verified MR open/reopen. The
+// merge-request path covers the auto-launch ("review on open") leg;
+// pushes do NOT re-trigger (see gitlab.IsReviewable) — re-review is
+// on-demand via the `/revi` Note hook below.
+func (s *Server) handleGitLabMergeRequestEvent(ctx context.Context, w http.ResponseWriter, r *http.Request, cfg webhooks.Config, body []byte, payloadHash, srcIP string) {
 	p, err := gitlab.ParseMergeRequest(body)
 	if err != nil {
-		s.recordWebhookDelivery(ctx, cfg, webhooks.StatusInvalid, payloadHash, srcIP, gitlab.Parsed{}, err.Error())
+		s.recordTerminalWebhookDelivery(ctx, cfg, webhookEventMeta{Kind: "merge_request"}, webhooks.StatusInvalid, payloadHash, srcIP, err.Error())
 		httpError(w, http.StatusBadRequest, "invalid merge_request payload")
 		return
 	}
+	meta := gitlabMRMeta(p)
 
-	// Filter: only review on open/reopen/new-push, allowed event + project.
-	// A filtered delivery returns 200 (a 4xx would make GitLab disable the
-	// webhook after repeated metadata-only edits).
+	// Filter: only review on open/reopen, allowed event + project.
+	// A filtered delivery returns 200 (a 4xx would make GitLab disable
+	// the webhook after repeated metadata-only edits).
 	if !p.IsReviewable() ||
 		!gitlab.MatchEvent(cfg.EventAllowlist, "merge_request") ||
 		!gitlab.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
-		s.recordWebhookDelivery(ctx, cfg, webhooks.StatusFiltered, payloadHash, srcIP, p, "")
+		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusFiltered, payloadHash, srcIP, "")
 		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
 		return
 	}
 
-	// Bot selection (V1 pins Revi for wildcard/ambiguous).
 	botID := cfg.SelectBot()
 	if botID == "" {
-		botID = gitlabDefaultBot
+		botID = defaultWebhookBotReviewPR
 	}
 	if !cfg.AllowsBot(botID) {
-		s.recordWebhookDelivery(ctx, cfg, webhooks.StatusInvalid, payloadHash, srcIP, p, "bot not permitted by webhook scope")
+		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusInvalid, payloadHash, srcIP, "bot not permitted by webhook scope")
 		httpError(w, http.StatusForbidden, "bot %q not permitted by this webhook", botID)
 		return
 	}
 
-	// Run-launch admission (monthly run quota, cost cap, concurrency —
-	// a separate axis from the webhook-call quota the middleware already
-	// charged). Checked BEFORE the idempotency insert so a denied event
-	// records a terminal row under a random key and the forge's later
-	// retry can still launch once the quota resets.
-	if d := s.gateLaunch(ctx); d != nil {
-		s.recordWebhookDelivery(ctx, cfg, webhooks.StatusLaunchError, payloadHash, srcIP, p, d.reason)
-		s.writeLaunchDenial(w, r, d)
-		return
-	}
-
 	// Idempotency: one launch per (tenant, webhook, project, MR, head sha).
-	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("%s|%s|%d|%d|%s", cfg.TenantID, cfg.ID, p.ProjectID, p.MRIID, p.HeadSHA)))
-	delivery := newGitLabDelivery(cfg, p, webhooks.StatusAccepted, payloadHash, srcIP)
-	delivery.IdempotencyKey = idemKey
-	delivery.BotID = botID
-	if s.webhookDeliveries != nil {
-		if err := s.webhookDeliveries.Insert(ctx, delivery); err != nil {
-			if errors.Is(err, webhooks.ErrDuplicate) {
-				existing, _ := s.webhookDeliveries.GetByIdempotencyKey(ctx, idemKey)
-				writeJSONStatus(w, http.StatusOK, map[string]string{
-					"status": webhooks.StatusDuplicate, "run_id": existing.RunID, "delivery_id": existing.ID,
-				})
-				return
-			}
-			httpError(w, http.StatusInternalServerError, "record delivery: %v", err)
-			return
-		}
-	}
+	// "mr|" prefix keeps the key space disjoint from the Note hook
+	// ("note|") so a /revi on the same MR can't collide with the open.
+	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("mr|%s|%s|%d|%d|%s", cfg.TenantID, cfg.ID, p.ProjectID, p.MRIID, p.HeadSHA)))
 
-	// Build the launch vars. cfg.LaunchVars (operator-pinned) override.
 	vars := map[string]string{
 		"pr_url":         p.MRURL,
 		"base_ref":       p.TargetBranch,
@@ -136,39 +112,30 @@ func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 		vars[k] = v
 	}
 
-	launch := s.webhookLaunchBot
-	if launch == nil {
-		launch = s.realWebhookLaunchBot
-	}
-	runID, lerr := launch(ctx, botID, vars, p.CloneURL, p.SourceBranch, cfg.KeyOverrides, cfg.SecretOverrides)
-	if lerr != nil {
-		delivery.Status = webhooks.StatusLaunchError
-		delivery.Error = lerr.Error()
-		s.updateWebhookDelivery(ctx, delivery)
-		httpError(w, http.StatusBadGateway, "launch failed: %v", lerr)
-		return
-	}
-	launchedAt := time.Now().UTC()
-	delivery.Status = webhooks.StatusLaunched
-	delivery.RunID = runID
-	delivery.LaunchedAt = &launchedAt
-	s.updateWebhookDelivery(ctx, delivery)
-
-	if s.logger != nil {
-		s.logger.Info("webhooks: gitlab MR %s/%s!%d launched %s run=%s", p.ProjectPath, botID, p.MRIID, botID, runID)
-	}
-	writeJSONStatus(w, http.StatusAccepted, map[string]string{
-		"status": webhooks.StatusLaunched, "run_id": runID, "delivery_id": delivery.ID,
-	})
+	s.insertAndLaunchWebhook(ctx, w, r, cfg, meta, idemKey, botID, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
 }
 
 // handleGitLabNote handles an inbound GitLab note (comment / reply) — the
-// conversational path. A note triggers a run when it is a /revi command, the
-// author is authorized (allowlist OR role-gate), and it is not the bot's own
-// note (loop-guard). See docs/forge-conversations.md.
-func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, cfg webhooks.Config, body []byte, payloadHash, srcIP string) {
+// conversational path (docs/forge-conversations.md). A note triggers a
+// run when it is a /revi command on an OPEN MR, the author is authorized
+// (allowlist OR role-gate), and it is not the bot's own note (loop-guard).
+// The launch funnels through insertAndLaunchWebhook so the per-org
+// admission gate, idempotent delivery flow and metrics apply exactly as
+// on every other provider path. The note's id (not the head SHA) drives
+// idempotency so a fresh `/revi` after a new push re-launches.
+func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, r *http.Request, cfg webhooks.Config, body []byte, payloadHash, srcIP string) {
 	p, err := gitlab.ParseNote(body)
 	if err != nil {
+		// A structurally-valid note on a non-MR noteable (issue, commit,
+		// snippet — ParseNote errors but still returns the decoded note)
+		// is FILTERED with 200, not 400: operators commonly enable note
+		// events broadly, and repeated 4xx make GitLab auto-disable the
+		// webhook.
+		if p.NoteID != 0 {
+			s.recordNoteDelivery(ctx, cfg, webhooks.StatusFiltered, payloadHash, srcIP, p, "not a merge-request note")
+			writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
+			return
+		}
 		s.recordNoteDelivery(ctx, cfg, webhooks.StatusInvalid, payloadHash, srcIP, p, err.Error())
 		httpError(w, http.StatusBadRequest, "invalid note payload")
 		return
@@ -177,10 +144,10 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, cf
 		s.recordNoteDelivery(ctx, cfg, webhooks.StatusFiltered, payloadHash, srcIP, p, reason)
 		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
 	}
-	if !p.IsMergeRequestNote() ||
+	if !p.IsMergeRequestNote() || p.MRState != "opened" ||
 		!gitlab.MatchEvent(cfg.EventAllowlist, "note") ||
 		!gitlab.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
-		filtered("out of scope (not an MR note / event / project)")
+		filtered("out of scope (not an open-MR note / event / project)")
 		return
 	}
 	// Trigger gate: an explicit /revi command. Reply-in-thread detection is a
@@ -192,59 +159,41 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, cf
 	}
 	botID := cfg.SelectBot()
 	if botID == "" {
-		botID = gitlabDefaultBot
+		botID = defaultWebhookBotReviewPR
 	}
 	if !cfg.AllowsBot(botID) {
 		s.recordNoteDelivery(ctx, cfg, webhooks.StatusInvalid, payloadHash, srcIP, p, "bot not permitted by webhook scope")
 		httpError(w, http.StatusForbidden, "bot %q not permitted by this webhook", botID)
 		return
 	}
-	// Resolve the bot's forge token (honouring per-webhook secret overrides):
-	// it authenticates the auth checks AND is the identity the bot posts as.
-	token, terr := s.resolveForgeToken(ctx, cfg, botID)
-	if terr != nil || token == "" {
-		filtered("no forge token resolved (configure a forge_token binding)")
-		return
+	// Gate the replier (forge-token resolution → loop-guard → allowlist
+	// OR role-gate) — externalities live behind a seam so handler tests
+	// don't need a live GitLab.
+	gate := s.webhookNoteGate
+	if gate == nil {
+		gate = s.realWebhookNoteGate
 	}
-	api := gitlab.API{HTTP: s.httpClient, BaseURL: "https://" + hostFromURL(p.MRURL), Token: token}
-	// Loop-guard: never act on the bot's own notes (else its reply re-fires).
-	if bot, err := api.CurrentUser(ctx); err == nil && bot.ID == p.AuthorID {
-		filtered("self note (loop-guard)")
-		return
-	}
-	// Authorization: allowlist OR role-gate.
-	ok, reason, aerr := gitlab.AuthorizeReplier(ctx, api, gitlab.ReplierAuth{
-		AuthorID: p.AuthorID, AuthorUsername: p.AuthorUsername, ProjectID: p.ProjectID,
-		Allowlist: cfg.AuthorizedRepliers, MinRole: cfg.MinReplierRole,
-	})
+	ok, reason, aerr := gate(ctx, cfg, p, botID)
 	if aerr != nil {
 		s.recordNoteDelivery(ctx, cfg, webhooks.StatusLaunchError, payloadHash, srcIP, p, "authz check: "+aerr.Error())
 		httpError(w, http.StatusBadGateway, "authorization check failed")
 		return
 	}
 	if !ok {
-		filtered("replier not authorized: " + p.AuthorUsername)
+		filtered(reason)
 		return
 	}
+	if s.logger != nil {
+		s.logger.Debug("webhooks: gitlab note %s!%d /%s by %s authorized (%s)", p.ProjectPath, p.MRIID, cmd, p.AuthorUsername, reason)
+	}
+
 	// Idempotency: one launch per note.
 	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("%s|%s|%d|%s", cfg.TenantID, cfg.ID, p.ProjectID, p.SubjectID())))
-	delivery := s.newGitLabNoteDelivery(cfg, p, webhooks.StatusAccepted, payloadHash, srcIP)
-	delivery.IdempotencyKey = idemKey
-	delivery.BotID = botID
-	if s.webhookDeliveries != nil {
-		if err := s.webhookDeliveries.Insert(ctx, delivery); err != nil {
-			if errors.Is(err, webhooks.ErrDuplicate) {
-				existing, _ := s.webhookDeliveries.GetByIdempotencyKey(ctx, idemKey)
-				writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusDuplicate, "run_id": existing.RunID})
-				return
-			}
-			httpError(w, http.StatusInternalServerError, "record delivery: %v", err)
-			return
-		}
-	}
+
 	// Launch: review-pr re-reviews the current MR state. The conversation vars
 	// (discussion_id/trigger_note/replier) carry the thread context for the
-	// converse bot + the forge.reply capability (A4/A5).
+	// converse bot + the forge.reply capability (A4/A5); re_review marks the
+	// posted summary with the 🔁 prefix (forge-pr-review skill).
 	vars := map[string]string{
 		"pr_url":            p.MRURL,
 		"base_ref":          p.TargetBranch,
@@ -257,60 +206,58 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, cf
 		"trigger_command":   cmd,
 		"trigger_args":      cmdArgs,
 		"replier":           p.AuthorUsername,
+		"re_review":         "true",
 	}
 	for k, v := range cfg.LaunchVars {
 		vars[k] = v
 	}
-	launch := s.webhookLaunchBot
-	if launch == nil {
-		launch = s.realWebhookLaunchBot
-	}
-	runID, lerr := launch(ctx, botID, vars, p.CloneURL, p.SourceBranch, cfg.KeyOverrides, cfg.SecretOverrides)
-	if lerr != nil {
-		delivery.Status = webhooks.StatusLaunchError
-		delivery.Error = lerr.Error()
-		s.updateWebhookDelivery(ctx, delivery)
-		httpError(w, http.StatusBadGateway, "launch failed: %v", lerr)
-		return
-	}
-	now := time.Now().UTC()
-	delivery.Status = webhooks.StatusLaunched
-	delivery.RunID = runID
-	delivery.LaunchedAt = &now
-	s.updateWebhookDelivery(ctx, delivery)
-	if s.logger != nil {
-		s.logger.Info("webhooks: gitlab note %s!%d /%s by %s (authz=%s) launched %s run=%s", p.ProjectPath, p.MRIID, cmd, p.AuthorUsername, reason, botID, runID)
-	}
-	writeJSONStatus(w, http.StatusAccepted, map[string]string{"status": webhooks.StatusLaunched, "run_id": runID, "delivery_id": delivery.ID})
+
+	s.insertAndLaunchWebhook(ctx, w, r, cfg, gitlabNoteMeta(p), idemKey, botID, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
 }
 
-// newGitLabNoteDelivery builds a delivery audit row for a note event.
-func (s *Server) newGitLabNoteDelivery(cfg webhooks.Config, p gitlab.ParsedNote, status, payloadHash, srcIP string) webhooks.Delivery {
-	return webhooks.Delivery{
-		ID:          uuid.NewString(),
-		TenantID:    cfg.TenantID,
-		WebhookID:   cfg.ID,
-		Provider:    cfg.Provider,
-		EventKind:   "note",
-		EventAction: "create",
-		ProjectPath: p.ProjectPath,
-		SubjectID:   p.SubjectID(),
-		SubjectSHA:  p.HeadSHA,
-		PayloadHash: payloadHash,
-		Status:      status,
-		SourceIP:    srcIP,
-		ReceivedAt:  time.Now().UTC(),
-	}
-}
-
+// recordNoteDelivery inserts a terminal note-event audit row with a
+// human-readable reason (richer than the generic terminal recorder —
+// the conversational path has many distinct filter causes operators
+// want to tell apart in the deliveries view).
 func (s *Server) recordNoteDelivery(ctx context.Context, cfg webhooks.Config, status, payloadHash, srcIP string, p gitlab.ParsedNote, errMsg string) {
 	if s.webhookDeliveries == nil {
 		return
 	}
-	d := s.newGitLabNoteDelivery(cfg, p, status, payloadHash, srcIP)
+	d := newWebhookDelivery(cfg, gitlabNoteMeta(p), status, payloadHash, srcIP)
 	d.IdempotencyKey = uuid.NewString()
 	d.Error = errMsg
 	_ = s.webhookDeliveries.Insert(ctx, d)
+}
+
+// realWebhookNoteGate is the production replier gate: resolve the
+// bot's forge token, reject the bot's own notes (loop-guard), then
+// authorize the replier via allowlist OR GitLab role-gate. Returns
+// ok=false with a human filter reason for the benign refusals; err
+// only for an authz infrastructure failure (502 upstream).
+func (s *Server) realWebhookNoteGate(ctx context.Context, cfg webhooks.Config, p gitlab.ParsedNote, botID string) (bool, string, error) {
+	// Resolve the bot's forge token (honouring per-webhook secret overrides):
+	// it authenticates the auth checks AND is the identity the bot posts as.
+	token, terr := s.resolveForgeToken(ctx, cfg, botID)
+	if terr != nil || token == "" {
+		return false, "no forge token resolved (configure a forge_token binding)", nil
+	}
+	api := gitlab.API{HTTP: s.httpClient, BaseURL: "https://" + hostFromURL(p.MRURL), Token: token}
+	// Loop-guard: never act on the bot's own notes (else its reply re-fires).
+	if bot, err := api.CurrentUser(ctx); err == nil && bot.ID == p.AuthorID {
+		return false, "self note (loop-guard)", nil
+	}
+	// Authorization: allowlist OR role-gate.
+	ok, reason, aerr := gitlab.AuthorizeReplier(ctx, api, gitlab.ReplierAuth{
+		AuthorID: p.AuthorID, AuthorUsername: p.AuthorUsername, ProjectID: p.ProjectID,
+		Allowlist: cfg.AuthorizedRepliers, MinRole: cfg.MinReplierRole,
+	})
+	if aerr != nil {
+		return false, "", aerr
+	}
+	if !ok {
+		return false, "replier not authorized: " + p.AuthorUsername, nil
+	}
+	return true, reason, nil
 }
 
 // resolveForgeToken resolves the bot's forge_token for the webhook's tenant,
@@ -338,43 +285,39 @@ func hostFromURL(raw string) string {
 	return ""
 }
 
-// newGitLabDelivery builds the common fields of a delivery audit row;
-// callers layer the idempotency key + outcome-specific fields on top.
-func newGitLabDelivery(cfg webhooks.Config, p gitlab.Parsed, status, payloadHash, srcIP string) webhooks.Delivery {
+// gitlabMRMeta flattens a Parsed merge-request into the generic
+// webhookEventMeta the shared helpers consume.
+func gitlabMRMeta(p gitlab.Parsed) webhookEventMeta {
 	subject := ""
 	if p.MRIID != 0 {
 		subject = p.SubjectID()
 	}
-	return webhooks.Delivery{
-		ID:          uuid.NewString(),
-		TenantID:    cfg.TenantID,
-		WebhookID:   cfg.ID,
-		Provider:    cfg.Provider,
-		EventKind:   "merge_request",
-		EventAction: p.Action,
+	return webhookEventMeta{
+		Kind:        "merge_request",
+		Action:      p.Action,
 		ProjectPath: p.ProjectPath,
 		SubjectID:   subject,
 		SubjectSHA:  p.HeadSHA,
-		PayloadHash: payloadHash,
-		Status:      status,
-		SourceIP:    srcIP,
-		ReceivedAt:  time.Now().UTC(),
 	}
 }
 
-// recordWebhookDelivery inserts a terminal (non-launched) audit row with
-// a unique idempotency key so it never collides with the dedup key.
-// Best-effort.
-func (s *Server) recordWebhookDelivery(ctx context.Context, cfg webhooks.Config, status, payloadHash, srcIP string, p gitlab.Parsed, errMsg string) {
-	if s.webhookDeliveries == nil {
-		return
+// gitlabNoteMeta flattens a ParsedNote. The audit row's EventKind is
+// "note" — different from "merge_request" — so a per-tenant analytics
+// query can split "auto-review on open" vs "operator-triggered /revi".
+func gitlabNoteMeta(p gitlab.ParsedNote) webhookEventMeta {
+	return webhookEventMeta{
+		Kind:         "note",
+		Action:       "comment",
+		ProjectPath:  p.ProjectPath,
+		SubjectID:    p.SubjectID(),
+		SubjectSHA:   p.HeadSHA,
+		SenderHandle: p.AuthorUsername,
 	}
-	d := newGitLabDelivery(cfg, p, status, payloadHash, srcIP)
-	d.IdempotencyKey = uuid.NewString()
-	d.Error = errMsg
-	_ = s.webhookDeliveries.Insert(ctx, d)
 }
 
+// updateWebhookDelivery is the best-effort delivery row update used by
+// insertAndLaunchWebhook; an audit-store error must NOT poison the
+// inbound request.
 func (s *Server) updateWebhookDelivery(ctx context.Context, d webhooks.Delivery) {
 	if s.webhookDeliveries == nil {
 		return

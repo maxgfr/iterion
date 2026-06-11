@@ -39,6 +39,7 @@ func (s *Server) registerWebhookRoutes() {
 type webhookConfigReq struct {
 	Name               *string           `json:"name,omitempty"`
 	Provider           *string           `json:"provider,omitempty"`
+	SignMode           *string           `json:"sign_mode,omitempty"`
 	Enabled            *bool             `json:"enabled,omitempty"`
 	BotIDs             []string          `json:"bot_ids,omitempty"`
 	WildcardBots       *bool             `json:"wildcard_bots,omitempty"`
@@ -52,6 +53,54 @@ type webhookConfigReq struct {
 	SecretOverrides    map[string]string `json:"secret_overrides,omitempty"`
 	AuthorizedRepliers []string          `json:"authorized_repliers,omitempty"`
 	MinReplierRole     *string           `json:"min_replier_role,omitempty"`
+}
+
+// supportedProviders is the closed enum the create endpoint accepts.
+// Listing it once (vs. an ad-hoc switch) lets the UI and API docs
+// reflect the same source of truth.
+var supportedProviders = map[webhooks.Provider]bool{
+	webhooks.ProviderGitLab:  true,
+	webhooks.ProviderGitHub:  true,
+	webhooks.ProviderForgejo: true,
+	webhooks.ProviderGeneric: true,
+}
+
+// defaultSignMode picks the right SignatureMode for a provider when the
+// caller leaves it unset. GitHub + Forgejo only ever sign the body;
+// GitLab + the generic webhook stick to header-token auth unless the
+// caller explicitly opts in to HMAC (generic-only). Centralised here so
+// the create handler stays readable.
+func defaultSignMode(provider webhooks.Provider, req *string) (webhooks.SignatureMode, error) {
+	if req != nil && *req != "" {
+		mode := webhooks.SignatureMode(*req)
+		switch mode {
+		case webhooks.SignModeToken, webhooks.SignModeHMAC:
+		default:
+			return "", fmt.Errorf("unsupported sign_mode %q (token|hmac)", mode)
+		}
+		// Only the generic provider lets the operator pick; the
+		// forge-specific providers carry a fixed sign mode (otherwise
+		// we'd send GitLab's secret-token down the HMAC code path).
+		switch provider {
+		case webhooks.ProviderGitHub, webhooks.ProviderForgejo:
+			if mode != webhooks.SignModeHMAC {
+				return "", fmt.Errorf("sign_mode for %s is always hmac", provider)
+			}
+		case webhooks.ProviderGitLab:
+			if mode != webhooks.SignModeToken {
+				return "", fmt.Errorf("sign_mode for gitlab is always token")
+			}
+		case webhooks.ProviderGeneric:
+			// either mode is fine
+		}
+		return mode, nil
+	}
+	switch provider {
+	case webhooks.ProviderGitHub, webhooks.ProviderForgejo:
+		return webhooks.SignModeHMAC, nil
+	default:
+		return webhooks.SignModeToken, nil
+	}
 }
 
 type webhookWithToken struct {
@@ -146,8 +195,13 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	if req.Provider != nil && *req.Provider != "" {
 		provider = webhooks.Provider(*req.Provider)
 	}
-	if provider != webhooks.ProviderGitLab {
-		httpError(w, http.StatusBadRequest, "unsupported provider %q (gitlab only for now)", provider)
+	if !supportedProviders[provider] {
+		httpError(w, http.StatusBadRequest, "unsupported provider %q (gitlab|github|forgejo|generic)", provider)
+		return
+	}
+	signMode, err := defaultSignMode(provider, req.SignMode)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "%s", err.Error())
 		return
 	}
 	wildcard := req.WildcardBots != nil && *req.WildcardBots
@@ -175,6 +229,7 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		TenantID:           teamID,
 		Name:               *req.Name,
 		Provider:           provider,
+		SignMode:           signMode,
 		Enabled:            enabled,
 		TokenHash:          hash,
 		TokenLast4:         last4,
@@ -201,6 +256,17 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	if req.MinReplierRole != nil {
 		cfg.MinReplierRole = *req.MinReplierRole
 	}
+	// HMAC-mode webhooks need the minted plaintext sealed at rest so a
+	// later request can recompute HMAC(body) — the operator pastes the
+	// same iwh_ value into the forge's "secret" field.
+	if signMode == webhooks.SignModeHMAC {
+		sealed, err := s.sealWebhookHMAC(cfg.ID, plaintext)
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, "seal hmac secret: %v", err)
+			return
+		}
+		cfg.HMACSecretSealed = sealed
+	}
 	if err := s.validateKeyOverrides(r.Context(), teamID, cfg.KeyOverrides); err != nil {
 		httpError(w, http.StatusBadRequest, "%s", err.Error())
 		return
@@ -219,6 +285,17 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	s.auditTenant(r, teamID, "webhook.created", "webhook", cfg.ID, map[string]any{"name": cfg.Name, "provider": string(cfg.Provider), "wildcard_bots": cfg.WildcardBots})
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, webhookWithToken{Config: cfg, Token: plaintext})
+}
+
+// sealWebhookHMAC is the thin wrapper around webhooks.SealHMACSecret —
+// it pins the AAD to the webhook ID and surfaces a clean error when
+// the server was built without a sealer (a deployment misconfiguration
+// — hmac-mode webhooks require Sealer to be wired).
+func (s *Server) sealWebhookHMAC(webhookID, plaintext string) ([]byte, error) {
+	if s.sealer == nil {
+		return nil, errors.New("server: hmac webhook requires sealer (configure Sealer)")
+	}
+	return webhooks.SealHMACSecret(s.sealer, webhookID, plaintext)
 }
 
 // validateKeyOverrides rejects a webhook key override that references a BYOK
@@ -388,6 +465,17 @@ func (s *Server) handleRotateWebhook(w http.ResponseWriter, r *http.Request) {
 	cfg.TokenHash, cfg.TokenLast4, cfg.Fingerprint = hash, last4, fp
 	cfg.RotatedAt = &now
 	cfg.UpdatedAt = now
+	// Reseal the HMAC plaintext under the new token so an hmac-mode
+	// webhook keeps verifying after rotate. The operator must update
+	// the forge's "secret" field with the same new plaintext.
+	if cfg.SignMode == webhooks.SignModeHMAC {
+		sealed, err := s.sealWebhookHMAC(cfg.ID, plaintext)
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, "seal hmac secret: %v", err)
+			return
+		}
+		cfg.HMACSecretSealed = sealed
+	}
 	if err := s.webhookConfigs.Update(r.Context(), cfg); err != nil {
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return

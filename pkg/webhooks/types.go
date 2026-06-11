@@ -17,7 +17,32 @@ import "time"
 type Provider string
 
 const (
-	ProviderGitLab Provider = "gitlab"
+	ProviderGitLab  Provider = "gitlab"
+	ProviderGitHub  Provider = "github"
+	ProviderForgejo Provider = "forgejo" // same wire shape as Gitea
+	ProviderGeneric Provider = "generic"
+)
+
+// SignatureMode selects how an inbound delivery proves authenticity.
+//
+// "token" (the default — empty string) means the forge presents the
+// minted iwh_ plaintext in a header; the middleware does a
+// constant-time hash compare. GitLab's "secret token" model + iterion's
+// own X-Iterion-Webhook-Token fall under this mode.
+//
+// "hmac" means the forge sends a hex HMAC-SHA256 of the raw request
+// body computed with the SAME minted iwh_ plaintext as the key. The
+// provider handler verifies the signature itself BEFORE acting on the
+// body. The middleware MUST NOT touch the body (so we keep the bytes
+// for signature recomputation) and MUST skip the header-token check
+// (GitHub/Forgejo don't echo the token in any header). The plaintext
+// is sealed at-rest on cfg.HMACSecretSealed so we can recompute the
+// signature without storing it in cleartext.
+type SignatureMode string
+
+const (
+	SignModeToken SignatureMode = ""     // header-presented bearer
+	SignModeHMAC  SignatureMode = "hmac" // X-*-Signature over body
 )
 
 // Rate is a token-bucket rate limit for a webhook.
@@ -30,14 +55,23 @@ type Rate struct {
 // exactly once at create/rotate; only TokenHash/TokenLast4/Fingerprint
 // persist.
 type Config struct {
-	ID          string   `bson:"_id" json:"id"`
-	TenantID    string   `bson:"tenant_id" json:"tenant_id"`
-	Name        string   `bson:"name" json:"name"`
-	Provider    Provider `bson:"provider" json:"provider"`
-	Enabled     bool     `bson:"enabled" json:"enabled"`
-	TokenHash   string   `bson:"token_hash" json:"-"`
-	TokenLast4  string   `bson:"token_last4" json:"token_last4"`
-	Fingerprint string   `bson:"fingerprint,omitempty" json:"fingerprint,omitempty"`
+	ID          string        `bson:"_id" json:"id"`
+	TenantID    string        `bson:"tenant_id" json:"tenant_id"`
+	Name        string        `bson:"name" json:"name"`
+	Provider    Provider      `bson:"provider" json:"provider"`
+	SignMode    SignatureMode `bson:"sign_mode,omitempty" json:"sign_mode,omitempty"`
+	Enabled     bool          `bson:"enabled" json:"enabled"`
+	TokenHash   string        `bson:"token_hash" json:"-"`
+	TokenLast4  string        `bson:"token_last4" json:"token_last4"`
+	Fingerprint string        `bson:"fingerprint,omitempty" json:"fingerprint,omitempty"`
+
+	// HMACSecretSealed holds the sealed plaintext used to recompute the
+	// body HMAC for hmac-mode providers (GitHub, Forgejo). Same plaintext
+	// as the minted iwh_ token — the operator pastes it once into the
+	// forge's "secret" field. Empty for token-mode webhooks. Sealed via
+	// secrets.Sealer with AAD bound to the webhook ID so a sealed blob
+	// cannot be silently transplanted across configs.
+	HMACSecretSealed []byte `bson:"hmac_secret_sealed,omitempty" json:"-"`
 
 	// Bot scoping. BotIDs lists the allowed bot names; WildcardBots
 	// (BotIDs == ["*"]) permits any bot and must be set explicitly so

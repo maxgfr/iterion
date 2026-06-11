@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,7 +11,9 @@ import (
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/auth"
+	"github.com/SocialGouv/iterion/pkg/secrets"
 	"github.com/SocialGouv/iterion/pkg/webhooks"
+	"github.com/SocialGouv/iterion/pkg/webhooks/gitlab"
 )
 
 func newWebhookTestServer(t *testing.T) *Server {
@@ -20,6 +23,24 @@ func newWebhookTestServer(t *testing.T) *Server {
 	s.webhookDeliveries = webhooks.NewMemoryDeliveryStore()
 	s.webhookCounter = webhooks.NewMemoryCounter()
 	s.authLimiter = newAuthRateLimiter()
+	// Wire a sealer so hmac-mode webhook tests can seal/verify
+	// signatures. Same construction as the BYOK + bindings tests.
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	sealer, err := secrets.NewAESGCMSealer(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.sealer = sealer
+	// Allow-all conversational gate: the real gate needs a forge token
+	// + live GitLab API (loop-guard, role authz) — exercised by the
+	// pkg/webhooks/gitlab unit tests; handler tests pin the flow around
+	// it. Tests that target the gate itself override this seam.
+	s.webhookNoteGate = func(context.Context, webhooks.Config, gitlab.ParsedNote, string) (bool, string, error) {
+		return true, "test-gate", nil
+	}
 	return s
 }
 
@@ -80,6 +101,142 @@ func TestHandleCreateWebhook_TokenOnceAndScope(t *testing.T) {
 	s.handleGetWebhook(w, whReq(ctx, "GET", "/api/teams/t1/webhooks/"+created.Config.ID, "", "t1", created.Config.ID))
 	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), created.Token) || strings.Contains(w.Body.String(), "token_hash") {
 		t.Fatalf("GET leaked token material: code=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestHandleCreateWebhook_ProviderEnum pins the closed provider enum:
+// gitlab|github|forgejo|generic accepted, anything else → 400.
+func TestHandleCreateWebhook_ProviderEnum(t *testing.T) {
+	s := newWebhookTestServer(t)
+	ctx := superAdminCtx()
+	for _, p := range []string{"gitlab", "github", "forgejo", "generic"} {
+		w := httptest.NewRecorder()
+		body := `{"name":"x","bot_ids":["review-pr"],"provider":"` + p + `"}`
+		s.handleCreateWebhook(w, whReq(ctx, "POST", "/api/teams/t1/webhooks", body, "t1", ""))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("provider=%s: code=%d body=%s", p, w.Code, w.Body.String())
+		}
+	}
+	// unknown provider → 400
+	w := httptest.NewRecorder()
+	s.handleCreateWebhook(w, whReq(ctx, "POST", "/api/teams/t1/webhooks", `{"name":"x","bot_ids":["b"],"provider":"slack"}`, "t1", ""))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown provider should 400: code=%d", w.Code)
+	}
+}
+
+// TestHandleCreateWebhook_SignModeAutoAndSeal pins the sign-mode
+// dispatch + the HMAC seal-on-create contract.
+//
+//   - GitHub auto-picks SignModeHMAC; HMACSecretSealed is populated and
+//     decrypts to the same plaintext returned to the operator.
+//   - GitLab auto-picks SignModeToken; no sealed secret.
+//   - Generic accepts an explicit hmac override.
+//   - GitHub rejects an explicit "token" override (would break body auth).
+func TestHandleCreateWebhook_SignModeAutoAndSeal(t *testing.T) {
+	s := newWebhookTestServer(t)
+	ctx := superAdminCtx()
+
+	// GitHub → hmac, sealed plaintext matches returned token. We read
+	// the sealed blob from the store directly: HMACSecretSealed is
+	// json:"-" so the create-response body never leaks it.
+	w := httptest.NewRecorder()
+	s.handleCreateWebhook(w, whReq(ctx, "POST", "/api/teams/t1/webhooks", `{"name":"gh","provider":"github","bot_ids":["review-pr"]}`, "t1", ""))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("github create: code=%d body=%s", w.Code, w.Body.String())
+	}
+	var created webhookWithToken
+	json.Unmarshal(w.Body.Bytes(), &created)
+	if created.Config.SignMode != webhooks.SignModeHMAC {
+		t.Fatalf("github should auto-pick hmac, got %q", created.Config.SignMode)
+	}
+	stored, err := s.webhookConfigs.Get(context.Background(), created.Config.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.HMACSecretSealed) == 0 {
+		t.Fatal("github should seal the hmac plaintext")
+	}
+	opened, err := s.sealer.Open(stored.HMACSecretSealed, []byte("webhook_hmac_secret:"+stored.ID))
+	if err != nil || string(opened) != created.Token {
+		t.Fatalf("sealed hmac plaintext mismatch: err=%v opened=%q token=%q", err, string(opened), created.Token)
+	}
+
+	// GitLab → token, no sealed secret. Use a fresh struct so leftover
+	// fields from the previous unmarshal (SignMode default omitempty
+	// "" is fine, but the safer pattern is a brand-new value).
+	w = httptest.NewRecorder()
+	s.handleCreateWebhook(w, whReq(ctx, "POST", "/api/teams/t1/webhooks", `{"name":"gl","provider":"gitlab","bot_ids":["review-pr"]}`, "t1", ""))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("gitlab create: %d", w.Code)
+	}
+	var createdGL webhookWithToken
+	json.Unmarshal(w.Body.Bytes(), &createdGL)
+	if createdGL.Config.SignMode != webhooks.SignModeToken {
+		t.Fatalf("gitlab should be token mode: %+v", createdGL.Config)
+	}
+	storedGL, _ := s.webhookConfigs.Get(context.Background(), createdGL.Config.ID)
+	if len(storedGL.HMACSecretSealed) != 0 {
+		t.Fatalf("gitlab should NOT seal a hmac plaintext: %v", storedGL.HMACSecretSealed)
+	}
+
+	// Generic + explicit hmac → seals
+	w = httptest.NewRecorder()
+	s.handleCreateWebhook(w, whReq(ctx, "POST", "/api/teams/t1/webhooks", `{"name":"gn","provider":"generic","sign_mode":"hmac","bot_ids":["review-pr"]}`, "t1", ""))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("generic hmac: %d body=%s", w.Code, w.Body.String())
+	}
+	var createdGen webhookWithToken
+	json.Unmarshal(w.Body.Bytes(), &createdGen)
+	if createdGen.Config.SignMode != webhooks.SignModeHMAC {
+		t.Fatalf("generic hmac should be hmac: %+v", createdGen.Config)
+	}
+	storedGen, _ := s.webhookConfigs.Get(context.Background(), createdGen.Config.ID)
+	if len(storedGen.HMACSecretSealed) == 0 {
+		t.Fatal("generic hmac should seal the plaintext")
+	}
+
+	// GitHub + explicit token override → 400 (sign mode is fixed per forge)
+	w = httptest.NewRecorder()
+	s.handleCreateWebhook(w, whReq(ctx, "POST", "/api/teams/t1/webhooks", `{"name":"gh2","provider":"github","sign_mode":"token","bot_ids":["b"]}`, "t1", ""))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("github with explicit token should 400: %d", w.Code)
+	}
+}
+
+// TestHandleRotateWebhook_ResealsHMAC pins that rotating an hmac webhook
+// produces a fresh sealed plaintext aligned with the freshly minted
+// token.
+func TestHandleRotateWebhook_ResealsHMAC(t *testing.T) {
+	s := newWebhookTestServer(t)
+	ctx := superAdminCtx()
+	// Create an hmac webhook to get a baseline sealed blob (read from
+	// the store — HMACSecretSealed is json:"-").
+	w := httptest.NewRecorder()
+	s.handleCreateWebhook(w, whReq(ctx, "POST", "/api/teams/t1/webhooks", `{"name":"gh","provider":"github","bot_ids":["b"]}`, "t1", ""))
+	var created webhookWithToken
+	json.Unmarshal(w.Body.Bytes(), &created)
+	storedBefore, _ := s.webhookConfigs.Get(context.Background(), created.Config.ID)
+	originalSealed := append([]byte{}, storedBefore.HMACSecretSealed...)
+	originalToken := created.Token
+
+	w = httptest.NewRecorder()
+	s.handleRotateWebhook(w, whReq(ctx, "POST", "/api/teams/t1/webhooks/"+created.Config.ID+"/rotate", "", "t1", created.Config.ID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("rotate: %d", w.Code)
+	}
+	var rotated webhookWithToken
+	json.Unmarshal(w.Body.Bytes(), &rotated)
+	if rotated.Token == originalToken {
+		t.Fatal("rotate should mint a new token")
+	}
+	storedAfter, _ := s.webhookConfigs.Get(context.Background(), rotated.Config.ID)
+	if len(storedAfter.HMACSecretSealed) == 0 || string(storedAfter.HMACSecretSealed) == string(originalSealed) {
+		t.Fatal("rotate should reseal the hmac plaintext")
+	}
+	opened, err := s.sealer.Open(storedAfter.HMACSecretSealed, []byte("webhook_hmac_secret:"+storedAfter.ID))
+	if err != nil || string(opened) != rotated.Token {
+		t.Fatalf("rotated sealed != new token: err=%v opened=%q token=%q", err, string(opened), rotated.Token)
 	}
 }
 
@@ -178,6 +335,40 @@ func TestWebhookAuth_Admission(t *testing.T) {
 	// unknown id → 401 (not probeable)
 	if code, _, _, _ := runWebhookAuth(s, "ghost", pt); code != http.StatusUnauthorized {
 		t.Fatalf("unknown id: code=%d", code)
+	}
+}
+
+// TestWebhookAuth_HMACModeSkipsTokenCheck pins the SignModeHMAC branch:
+// a webhook configured for HMAC signing MUST NOT require a header
+// token. Body verification happens in the provider handler — the
+// middleware just admits the call. Other admission checks (enabled,
+// rate, quota, suspend) still apply, but no token header is read.
+func TestWebhookAuth_HMACModeSkipsTokenCheck(t *testing.T) {
+	s := newWebhookTestServer(t)
+	cfg := webhooks.Config{
+		ID: "ghub", TenantID: "t1", Provider: webhooks.ProviderGitHub,
+		SignMode: webhooks.SignModeHMAC, Enabled: true, BotIDs: []string{"review-pr"},
+		// TokenHash deliberately empty: an hmac-mode webhook may have
+		// a TokenHash mirror (for management UX) but the middleware
+		// must NOT consult it.
+		RateLimit: webhooks.Rate{Rate: 100, Burst: 100}, CreatedAt: time.Now(),
+	}
+	if err := s.webhookConfigs.Create(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	var ran bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		ran = true
+		w.WriteHeader(http.StatusOK)
+	})
+	h := s.webhookAuth(webhooks.ProviderGitHub, next)
+	r := httptest.NewRequest("POST", "/api/webhooks/github/ghub", strings.NewReader(`{}`))
+	r.SetPathValue("id", "ghub")
+	// No X-Gitlab-Token / X-Iterion-Webhook-Token / etc.
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK || !ran {
+		t.Fatalf("hmac-mode admission failed: code=%d ran=%v body=%s", w.Code, ran, w.Body.String())
 	}
 }
 

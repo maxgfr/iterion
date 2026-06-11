@@ -3,11 +3,14 @@ package gitlab
 import "strings"
 
 // MatchEvent reports whether kind is permitted by the allowlist. An
-// empty allowlist defaults to {"merge_request"} — the only event V1
-// handles.
+// empty allowlist defaults to the union {merge_request, note} — both
+// the auto-review path (MR open/reopen) and the on-demand /revi note
+// trigger reach a zero-config webhook. Operators who want to gate one
+// off list the other explicitly (e.g. ["merge_request"] disables /revi
+// while keeping auto-review).
 func MatchEvent(allowlist []string, kind string) bool {
 	if len(allowlist) == 0 {
-		return kind == "merge_request"
+		return kind == "merge_request" || kind == "note"
 	}
 	for _, a := range allowlist {
 		if a == kind || a == "*" {

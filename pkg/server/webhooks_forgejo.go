@@ -1,0 +1,134 @@
+package server
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
+	"github.com/SocialGouv/iterion/pkg/knowledge"
+	"github.com/SocialGouv/iterion/pkg/webhooks"
+	"github.com/SocialGouv/iterion/pkg/webhooks/forgejo"
+)
+
+// registerForgejoWebhookRoute wires the inbound Forgejo/Gitea delivery
+// endpoint behind webhookAuth. Forgejo + Gitea sign the body with HMAC,
+// so the middleware admits the call and this handler is responsible for
+// the signature gate.
+func (s *Server) registerForgejoWebhookRoute() {
+	s.mux.Handle("POST /api/webhooks/forgejo/{id}", s.webhookAuth(webhooks.ProviderForgejo, http.HandlerFunc(s.handleForgejoWebhook)))
+}
+
+// forgejoSignatureHeader returns the presented HMAC value, preferring
+// X-Forgejo-Signature (current spelling) but falling back to
+// X-Gitea-Signature (older / Gitea-compatible deployments). Both are
+// raw hex digests (NO "sha256=" prefix); webhooks.VerifyHMACSignature
+// tolerates the prefix anyway so we don't have to special-case it.
+func forgejoSignatureHeader(r *http.Request) string {
+	if v := r.Header.Get("X-Forgejo-Signature"); v != "" {
+		return v
+	}
+	return r.Header.Get("X-Gitea-Signature")
+}
+
+// forgejoEventHeader returns the event-kind value, accepting either
+// X-Forgejo-Event or X-Gitea-Event (Forgejo's compatibility header).
+func forgejoEventHeader(r *http.Request) string {
+	if v := r.Header.Get("X-Forgejo-Event"); v != "" {
+		return v
+	}
+	return r.Header.Get("X-Gitea-Event")
+}
+
+// handleForgejoWebhook is the inbound handler for both Forgejo and
+// Gitea (one wire shape, two header names). Mirrors the GitHub flow:
+// signature gate FIRST, then event-kind filter, then parse → filter →
+// bot select → admission → launch.
+func (s *Server) handleForgejoWebhook(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	cfg, ok := webhookConfigFromContext(ctx)
+	if !ok {
+		httpError(w, http.StatusInternalServerError, "webhook context missing")
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBodyBytes))
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "read body: %v", err)
+		return
+	}
+
+	if !webhooks.VerifyHMACSignature(s.sealer, cfg.ID, cfg.HMACSecretSealed, body, forgejoSignatureHeader(r)) {
+		if s.logger != nil {
+			s.logger.Warn("webhooks: forgejo bad HMAC for %s from %s", cfg.ID, s.clientIP(r))
+		}
+		httpError(w, http.StatusUnauthorized, "invalid signature")
+		return
+	}
+
+	payloadHash := knowledge.ChecksumHex(body)
+	srcIP := s.clientIP(r)
+
+	event := forgejoEventHeader(r)
+	if event != forgejo.EventHeaderPullRequestValue {
+		s.recordTerminalWebhookDelivery(ctx, cfg, webhookEventMeta{Kind: event}, webhooks.StatusFiltered, payloadHash, srcIP, "unsupported event")
+		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
+		return
+	}
+
+	p, err := forgejo.ParsePullRequest(body)
+	if err != nil {
+		s.recordTerminalWebhookDelivery(ctx, cfg, webhookEventMeta{Kind: "pull_request"}, webhooks.StatusInvalid, payloadHash, srcIP, err.Error())
+		httpError(w, http.StatusBadRequest, "invalid pull_request payload")
+		return
+	}
+	meta := forgejoPRMeta(p)
+
+	if !p.IsReviewable() ||
+		!forgejo.MatchEvent(cfg.EventAllowlist, "pull_request") ||
+		!forgejo.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
+		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusFiltered, payloadHash, srcIP, "")
+		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
+		return
+	}
+
+	botID := cfg.SelectBot()
+	if botID == "" {
+		botID = defaultWebhookBotReviewPR
+	}
+	if !cfg.AllowsBot(botID) {
+		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusInvalid, payloadHash, srcIP, "bot not permitted by webhook scope")
+		httpError(w, http.StatusForbidden, "bot %q not permitted by this webhook", botID)
+		return
+	}
+
+	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("fj|%s|%s|%s|%d|%s", cfg.TenantID, cfg.ID, p.ProjectPath, p.PRNumber, p.HeadSHA)))
+
+	vars := map[string]string{
+		"pr_url":         p.PRURL,
+		"base_ref":       p.TargetBranch,
+		"scope_notes":    strings.TrimSpace(p.Title + "\n\n" + p.Description),
+		"post_to_board":  "false",
+		"pr_review_mode": "summary",
+	}
+	for k, v := range cfg.LaunchVars {
+		vars[k] = v
+	}
+
+	s.insertAndLaunchWebhook(ctx, w, r, cfg, meta, idemKey, botID, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
+}
+
+// forgejoPRMeta flattens a Parsed Forgejo PR into webhookEventMeta.
+func forgejoPRMeta(p forgejo.Parsed) webhookEventMeta {
+	subject := ""
+	if p.PRNumber != 0 {
+		subject = p.SubjectID()
+	}
+	return webhookEventMeta{
+		Kind:         "pull_request",
+		Action:       p.Action,
+		ProjectPath:  p.ProjectPath,
+		SubjectID:    subject,
+		SubjectSHA:   p.HeadSHA,
+		SenderHandle: p.SenderLogin,
+	}
+}

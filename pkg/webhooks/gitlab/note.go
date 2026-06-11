@@ -45,6 +45,7 @@ type NoteAttributes struct {
 // MergeRequestNoteable is the MR a note is attached to (present on MR notes).
 type MergeRequestNoteable struct {
 	IID          int64  `json:"iid"`
+	State        string `json:"state"` // "opened" | "closed" | "merged" — gates re-review
 	SourceBranch string `json:"source_branch"`
 	TargetBranch string `json:"target_branch"`
 	Title        string `json:"title"`
@@ -67,6 +68,10 @@ type ParsedNote struct {
 	MRDesc       string
 	MRURL        string
 	HeadSHA      string
+
+	// MRState gates command handling: re-review only acts on "opened"
+	// MRs (closed/merged notes are filtered, not errors).
+	MRState string
 
 	NoteID       int64
 	NoteBody     string
@@ -100,6 +105,7 @@ func ParseNote(body []byte) (ParsedNote, error) {
 	}
 	if e.MergeRequest != nil {
 		p.MRIID = e.MergeRequest.IID
+		p.MRState = e.MergeRequest.State
 		p.SourceBranch = e.MergeRequest.SourceBranch
 		p.TargetBranch = e.MergeRequest.TargetBranch
 		p.MRTitle = e.MergeRequest.Title
@@ -145,4 +151,17 @@ func (p ParsedNote) Command() (cmd, args string) {
 // idempotency (one launch per note).
 func (p ParsedNote) SubjectID() string {
 	return "note:" + strconv.FormatInt(p.NoteID, 10)
+}
+
+// IsReviewCommand is the `/revi` specialization of Command(): true only
+// for a note on an OPEN merge request whose leading slash-command is
+// `revi` (args tolerated and ignored v1). Built on the generic
+// extractor so the forge-conversations layer and the re-review trigger
+// share one command grammar (quote-reply tolerance included).
+func (p ParsedNote) IsReviewCommand() bool {
+	if p.MRIID == 0 || p.MRState != "opened" {
+		return false
+	}
+	cmd, _ := p.Command()
+	return cmd == "revi"
 }

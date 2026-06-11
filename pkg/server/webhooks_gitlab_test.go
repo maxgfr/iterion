@@ -116,6 +116,189 @@ func TestGitLabWebhook_Idempotent(t *testing.T) {
 	}
 }
 
+// glNoteReq builds a request carrying the Note Hook event header.
+func glNoteReq(ctx context.Context, body string) *http.Request {
+	return glReq(ctx, body, gitlab.EventHeaderNote)
+}
+
+const glNoteRevi = `{
+  "object_kind": "note",
+  "project": {"id": 42, "path_with_namespace": "acme/widgets", "git_http_url": "https://gitlab.com/acme/widgets.git"},
+  "user": {"username": "alice"},
+  "object_attributes": {"id": 99, "note": "/revi", "noteable_type": "MergeRequest", "discussion_id": "d-1", "author_id": 1},
+  "merge_request": {"iid": 7, "state": "opened", "source_branch": "feature/x", "target_branch": "main",
+    "title": "Add X", "description": "desc", "url": "https://gitlab.com/acme/widgets/-/merge_requests/7",
+    "last_commit": {"id": "headsha"}}
+}`
+
+// TestGitLabNoteHook_ReviCommandLaunches pins the happy path for the
+// /revi re-review command: bare `/revi` triggers a fresh review with
+// re_review=true and scope_notes = the note body.
+func TestGitLabNoteHook_ReviCommandLaunches(t *testing.T) {
+	s := newWebhookTestServer(t)
+	var calls int
+	var gotBot, gotURL, gotRef string
+	var gotVars map[string]string
+	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, repoURL, repoRef string, _, _ map[string]string) (string, error) {
+		calls++
+		gotBot, gotVars, gotURL, gotRef = botID, vars, repoURL, repoRef
+		return "run-note-1", nil
+	}
+	cfg := glConfig()
+	w := httptest.NewRecorder()
+	s.handleGitLabWebhook(w, glNoteReq(gitlabCtx(cfg), glNoteRevi))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	if calls != 1 || gotBot != "review-pr" {
+		t.Fatalf("launch: calls=%d bot=%q", calls, gotBot)
+	}
+	if gotVars["re_review"] != "true" {
+		t.Fatalf("re_review flag missing: %v", gotVars)
+	}
+	// Conversational contract (forge-conversations A2): scope_notes
+	// carries the MR context; the triggering note rides separately.
+	if !strings.Contains(gotVars["scope_notes"], "Add X") {
+		t.Fatalf("scope_notes should carry the MR title/desc: %v", gotVars["scope_notes"])
+	}
+	if gotVars["trigger_note"] != "/revi" || gotVars["trigger_command"] != "revi" {
+		t.Fatalf("trigger vars: %v", gotVars)
+	}
+	if gotVars["conversation_mode"] != "reply" || gotVars["discussion_id"] != "d-1" || gotVars["replier"] != "alice" {
+		t.Fatalf("conversation vars: %v", gotVars)
+	}
+	if gotURL != "https://gitlab.com/acme/widgets.git" || gotRef != "feature/x" {
+		t.Fatalf("repo: url=%q ref=%q", gotURL, gotRef)
+	}
+}
+
+// TestGitLabNoteHook_FocusArgTolerated pins that args after /revi are
+// tolerated (the bare command still wins; v1 ignores the arg).
+func TestGitLabNoteHook_FocusArgTolerated(t *testing.T) {
+	s := newWebhookTestServer(t)
+	var calls int
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+		calls++
+		return "run-note-2", nil
+	}
+	cfg := glConfig()
+	body := strings.Replace(glNoteRevi, `"note": "/revi"`, `"note": "/revi focus=security"`, 1)
+	w := httptest.NewRecorder()
+	s.handleGitLabWebhook(w, glNoteReq(gitlabCtx(cfg), body))
+	if w.Code != http.StatusAccepted || calls != 1 {
+		t.Fatalf("focus arg: code=%d calls=%d body=%s", w.Code, calls, w.Body.String())
+	}
+}
+
+// TestGitLabNoteHook_QuotedMidTextDoesNotTrigger pins the anti-loop
+// guardrail: "please run /revi" in the middle of a comment must NOT
+// launch a review, otherwise reviewers casually quoting the command
+// would re-trigger the bot forever.
+func TestGitLabNoteHook_QuotedMidTextDoesNotTrigger(t *testing.T) {
+	s := newWebhookTestServer(t)
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+		t.Fatal("mid-text /revi must not trigger")
+		return "", nil
+	}
+	cfg := glConfig()
+	body := strings.Replace(glNoteRevi, `"note": "/revi"`, `"note": "please run /revi when you can"`, 1)
+	w := httptest.NewRecorder()
+	s.handleGitLabWebhook(w, glNoteReq(gitlabCtx(cfg), body))
+	if w.Code != http.StatusOK {
+		t.Fatalf("mid-text /revi: code=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["status"] != webhooks.StatusFiltered {
+		t.Fatalf("should be filtered: %v", resp)
+	}
+}
+
+// TestGitLabNoteHook_ClosedMRFiltered pins that /revi on a closed MR is
+// filtered (no re-review on a merged/closed MR).
+func TestGitLabNoteHook_ClosedMRFiltered(t *testing.T) {
+	s := newWebhookTestServer(t)
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+		t.Fatal("closed MR must not re-review")
+		return "", nil
+	}
+	cfg := glConfig()
+	body := strings.Replace(glNoteRevi, `"state": "opened"`, `"state": "closed"`, 1)
+	w := httptest.NewRecorder()
+	s.handleGitLabWebhook(w, glNoteReq(gitlabCtx(cfg), body))
+	if w.Code != http.StatusOK {
+		t.Fatalf("closed: code=%d", w.Code)
+	}
+}
+
+// TestGitLabNoteHook_IdempotencyByNoteID pins both halves of the note
+// idempotency contract: replay of the same delivery (same note id)
+// dedupes, but a SECOND /revi on the same MR (new note id) launches
+// fresh.
+func TestGitLabNoteHook_IdempotencyByNoteID(t *testing.T) {
+	s := newWebhookTestServer(t)
+	var calls int
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+		calls++
+		return "run-note-N", nil
+	}
+	cfg := glConfig()
+	// First /revi
+	w := httptest.NewRecorder()
+	s.handleGitLabWebhook(w, glNoteReq(gitlabCtx(cfg), glNoteRevi))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("first: %d body=%s", w.Code, w.Body.String())
+	}
+	// Same delivery replayed → duplicate (200), no new launch
+	w = httptest.NewRecorder()
+	s.handleGitLabWebhook(w, glNoteReq(gitlabCtx(cfg), glNoteRevi))
+	if w.Code != http.StatusOK {
+		t.Fatalf("replay: %d", w.Code)
+	}
+	var resp map[string]string
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["status"] != webhooks.StatusDuplicate {
+		t.Fatalf("expected duplicate: %v", resp)
+	}
+	// Fresh note (different id) on same MR → new launch (calls bumps).
+	body2 := strings.Replace(glNoteRevi, `"id": 99`, `"id": 100`, 1)
+	w = httptest.NewRecorder()
+	s.handleGitLabWebhook(w, glNoteReq(gitlabCtx(cfg), body2))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("second /revi: %d body=%s", w.Code, w.Body.String())
+	}
+	if calls != 2 {
+		t.Fatalf("expected two launches across two distinct notes, got %d", calls)
+	}
+}
+
+// TestGitLabWebhook_MROpenAndNoteCoexist pins that the MR open key
+// (mr|…) and the note key (note|…) do NOT collide for the same tenant
+// + webhook + MR — both can land back-to-back without one looking like
+// a replay of the other.
+func TestGitLabWebhook_MROpenAndNoteCoexist(t *testing.T) {
+	s := newWebhookTestServer(t)
+	var calls int
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+		calls++
+		return "ok", nil
+	}
+	cfg := glConfig()
+	w := httptest.NewRecorder()
+	s.handleGitLabWebhook(w, glReq(gitlabCtx(cfg), glOpenMR, gitlab.EventHeaderMergeRequest))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("mr open: %d", w.Code)
+	}
+	w = httptest.NewRecorder()
+	s.handleGitLabWebhook(w, glNoteReq(gitlabCtx(cfg), glNoteRevi))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("note coexisting w/ mr-open: %d body=%s", w.Code, w.Body.String())
+	}
+	if calls != 2 {
+		t.Fatalf("mr-open + note must each launch independently, got %d", calls)
+	}
+}
+
 func TestGitLabWebhook_FiltersAndRejects(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int

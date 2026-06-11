@@ -44,6 +44,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/secrets"
 	"github.com/SocialGouv/iterion/pkg/store"
 	"github.com/SocialGouv/iterion/pkg/webhooks"
+	"github.com/SocialGouv/iterion/pkg/webhooks/gitlab"
 )
 
 // StaticFS embeds the built studio so any importer (the server
@@ -346,7 +347,11 @@ type Server struct {
 	// webhookLaunchBot overrides the inbound-webhook launch path (test
 	// seam). nil → realWebhookLaunchBot (resolve bot source + s.runs.Launch).
 	webhookLaunchBot func(ctx context.Context, botID string, vars map[string]string, repoURL, repoRef string, keyOverrides, secretOverrides map[string]string) (string, error)
-	httpClient       *http.Client
+	// webhookNoteGate overrides the conversational replier gate (forge
+	// token + loop-guard + allowlist/role authz — test seam, the real
+	// gate calls the GitLab API). nil → realWebhookNoteGate.
+	webhookNoteGate func(ctx context.Context, cfg webhooks.Config, p gitlab.ParsedNote, botID string) (bool, string, error)
+	httpClient      *http.Client
 
 	// detector is the cached LLM credential detector backing
 	// /api/backends/detect. Lazily constructed on first request.
@@ -756,10 +761,15 @@ func (s *Server) routes() {
 	if s.webhookConfigs != nil && s.authSvc != nil {
 		s.registerWebhookRoutes()
 	}
-	// Inbound GitLab MR delivery route (self-authenticating via
-	// webhookAuth) — registered whenever the config store is present.
+	// Inbound delivery routes (self-authenticating via webhookAuth) —
+	// one per supported provider, registered whenever the config store
+	// is present. Each handler is independent: a tenant who only wires
+	// up GitLab can ignore the GitHub/Forgejo/generic URLs.
 	if s.webhookConfigs != nil {
 		s.registerGitLabWebhookRoute()
+		s.registerGitHubWebhookRoute()
+		s.registerForgejoWebhookRoute()
+		s.registerGenericWebhookRoute()
 	}
 
 	// Bot-secret bindings (policy wrapper over generic secrets).

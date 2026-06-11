@@ -2,10 +2,16 @@ package webhooks
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/SocialGouv/iterion/pkg/secrets"
 )
 
 func TestMintAndVerifyToken(t *testing.T) {
@@ -28,6 +34,66 @@ func TestMintAndVerifyToken(t *testing.T) {
 	if VerifyToken("", hash) || VerifyToken(pt, "") {
 		t.Fatal("empty inputs must fail")
 	}
+}
+
+func TestSealAndVerifyHMACSignature(t *testing.T) {
+	sealer := newTestSealer(t)
+
+	pt, _, _, _, err := MintToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := SealHMACSecret(sealer, "w1", pt)
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	body := []byte(`{"hello":"world"}`)
+	mac := hmac.New(sha256.New, []byte(pt))
+	mac.Write(body)
+	sig := hex.EncodeToString(mac.Sum(nil))
+
+	if !VerifyHMACSignature(sealer, "w1", sealed, body, sig) {
+		t.Fatal("raw hex signature should verify")
+	}
+	if !VerifyHMACSignature(sealer, "w1", sealed, body, "sha256="+sig) {
+		t.Fatal("sha256= prefix should be tolerated")
+	}
+	// wrong webhook id → AAD mismatch → false
+	if VerifyHMACSignature(sealer, "other", sealed, body, sig) {
+		t.Fatal("AAD mismatch must fail")
+	}
+	// tampered body
+	if VerifyHMACSignature(sealer, "w1", sealed, []byte("tampered"), sig) {
+		t.Fatal("tampered body must fail")
+	}
+	// malformed hex
+	if VerifyHMACSignature(sealer, "w1", sealed, body, "zz") {
+		t.Fatal("non-hex must fail")
+	}
+	// empty signature, empty sealed, nil sealer all return false (never panic)
+	if VerifyHMACSignature(sealer, "w1", sealed, body, "") {
+		t.Fatal("empty signature must fail")
+	}
+	if VerifyHMACSignature(sealer, "w1", nil, body, sig) {
+		t.Fatal("empty sealed must fail")
+	}
+	if VerifyHMACSignature(nil, "w1", sealed, body, sig) {
+		t.Fatal("nil sealer must fail")
+	}
+}
+
+// newTestSealer returns a deterministic AES-GCM sealer for HMAC tests.
+func newTestSealer(t *testing.T) secrets.Sealer {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	s, err := secrets.NewAESGCMSealer(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }
 
 func TestConfig_AllowsBotAndSelect(t *testing.T) {

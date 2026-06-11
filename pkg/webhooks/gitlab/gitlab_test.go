@@ -76,15 +76,86 @@ func TestIsReviewable(t *testing.T) {
 	}
 }
 
+const noteRevi = `{
+  "object_kind": "note",
+  "project": {"id": 42, "path_with_namespace": "acme/widgets", "git_http_url": "https://gitlab.com/acme/widgets.git"},
+  "user": {"username": "alice"},
+  "object_attributes": {"id": 99, "note": "/revi", "noteable_type": "MergeRequest", "author_id": 1},
+  "merge_request": {"iid": 7, "state": "opened", "source_branch": "feature/x", "target_branch": "main",
+    "title": "Add X", "description": "desc", "url": "https://gitlab.com/acme/widgets/-/merge_requests/7",
+    "last_commit": {"id": "headsha"}}
+}`
+
+// Parser-level note tests (TestParseNote, TestParseNote_NonMR,
+// TestNoteCommand) live in note_test.go next to the parser. Here we
+// cover the /revi specialization the re-review trigger consumes: MR
+// state + command grammar through IsReviewCommand, against the same
+// payload shape the handler sees.
+func TestParseNote_ReviewCommandEndToEnd(t *testing.T) {
+	p, err := ParseNote([]byte(noteRevi))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.MRState != "opened" || p.AuthorUsername != "alice" {
+		t.Fatalf("note: %+v", p)
+	}
+	if !p.IsReviewCommand() {
+		t.Fatal("bare /revi on an open MR should be a review command")
+	}
+}
+
+func TestIsReviewCommand(t *testing.T) {
+	base := ParsedNote{MRIID: 7, MRState: "opened"}
+	cases := []struct {
+		note string
+		want bool
+	}{
+		{"/revi", true},
+		{"/revi focus=security", true},
+		{"   /revi   ", true}, // surrounding whitespace tolerated
+		{"please run /revi", false},
+		{"/revia", false},                  // longer token; must NOT match
+		{"/REVI", true},                    // Command() is case-insensitive by design
+		{"> /revi quoted\n/revi", true},    // quote-reply prefix skipped (Command grammar)
+		{"> some quoted context\nhi", false},
+		{"", false},
+		{"hi", false},
+	}
+	for _, c := range cases {
+		p := base
+		p.NoteBody = c.note
+		if got := p.IsReviewCommand(); got != c.want {
+			t.Errorf("note=%q => %v want %v", c.note, got, c.want)
+		}
+	}
+	// closed MR is filtered even with the exact command
+	closed := ParsedNote{MRIID: 7, MRState: "closed", NoteBody: "/revi"}
+	if closed.IsReviewCommand() {
+		t.Fatal("closed MR must filter /revi")
+	}
+	// non-MR note (no MR attached — commit/issue/snippet) is filtered
+	issue := ParsedNote{MRState: "opened", NoteBody: "/revi"}
+	if issue.IsReviewCommand() {
+		t.Fatal("non-MR note must filter")
+	}
+}
+
 func TestMatchEvent(t *testing.T) {
-	if !MatchEvent(nil, "merge_request") || MatchEvent(nil, "push") {
-		t.Fatal("default allowlist should be merge_request only")
+	// empty allowlist: merge_request + note both allowed; everything
+	// else (push/pipeline/…) denied. Lets a zero-config GitLab webhook
+	// reach both the auto-review and the /revi paths.
+	if !MatchEvent(nil, "merge_request") || !MatchEvent(nil, "note") || MatchEvent(nil, "push") {
+		t.Fatal("default allowlist should be {merge_request, note}")
 	}
 	if !MatchEvent([]string{"*"}, "anything") {
 		t.Fatal("wildcard event")
 	}
 	if !MatchEvent([]string{"push", "merge_request"}, "push") {
 		t.Fatal("explicit allow")
+	}
+	// explicit allowlist excludes by omission (gates /revi off).
+	if MatchEvent([]string{"merge_request"}, "note") {
+		t.Fatal("explicit allowlist must exclude unlisted kinds")
 	}
 }
 
