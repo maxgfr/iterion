@@ -7,6 +7,11 @@ nor the node spell out which one to use. This page documents the
 resolution chain, the credentials each backend understands, and how
 to override the auto-selection.
 
+> **Cloud BYOK.** The auto-detection below is the *host/env* path. In
+> cloud mode, provider API keys are owned per-org and sealed in Mongo,
+> resolved per-run with a precedence chain (per-webhook override → user
+> default → org default → env fallback). See [byok.md](byok.md).
+
 ## TL;DR
 
 If you have **at least one** of:
