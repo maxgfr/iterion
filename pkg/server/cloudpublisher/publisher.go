@@ -216,14 +216,17 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 		// publish.
 		if len(usedIDs) > 0 {
 			p.detached.Add(1)
-			go func(ids []string, t time.Time) {
+			go func(ids []string, t time.Time, tenant string) {
 				defer p.detached.Done()
-				bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				// MarkUsed is tenant-filtered; carry the run's tenant onto the
+				// detached ctx (matching the generic-secrets path below) or the
+				// update silently matches nothing and last_used_at never moves.
+				bg, cancel := context.WithTimeout(store.WithTenant(context.Background(), tenant), 5*time.Second)
 				defer cancel()
 				for _, id := range ids {
 					_ = p.apiKeys.MarkUsed(bg, id, t)
 				}
-			}(usedIDs, now)
+			}(usedIDs, now, tenantID)
 		}
 	}
 
