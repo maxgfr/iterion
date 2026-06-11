@@ -223,15 +223,23 @@ prompt review_system:
       `line` / `line_end`: the anchor span IN THE CHANGED CODE (a single
       line → set both equal). Anchor to lines the branch actually added
       or modified — that is where a forge can attach an inline comment.
-      `replacement`: USUALLY EMPTY. Fill it ONLY when you have a
-      concrete, high-confidence, self-contained fix that EXACTLY
-      replaces lines [`line`..`line_end`] verbatim — the literal new
-      code, ready to apply in one click (a forge renders it as a
-      ```suggestion block). Leave it "" when the fix is not a clean
-      line-for-line swap (spans scattered edits, needs a new import,
-      is judgement-dependent); a plain comment with your `suggestion`
-      sketch is posted instead. Never put a diff, prose, or a partial
-      line in `replacement` — only the exact replacement text.
+      `replacement`: the literal new code for lines [`line`..`line_end`],
+      ready to apply in one click (the forge renders it as a ```suggestion
+      block). PROVIDE IT whenever the fix is LOCAL and HIGH-CONFIDENCE —
+      a competent dev would accept it verbatim. It MAY span several lines
+      and change the line count: the forge replaces the WHOLE anchored
+      range, so set `line`/`line_end` to the smallest range that fully
+      contains the fix and reproduce every UNCHANGED line inside that
+      range verbatim. (To ADD a line — e.g. a `defer resp.Body.Close()`
+      before line 18 — anchor line=18,line_end=18 and put BOTH the new
+      line and the original line 18 in `replacement`.) A clean one-click
+      fix is high-value: prefer it over a prose-only sketch. Leave it ""
+      ONLY when the fix genuinely is not a localizable replacement — it
+      needs edits in other files, an import far from the anchor, or it is
+      judgement-dependent (several equally valid approaches). Never put a
+      diff, prose, or a partial line in `replacement` — only the literal,
+      complete replacement text; when empty, your one-line `suggestion`
+      sketch is posted as a plain comment instead.
     - `scanned_areas`: the (axis, file) surfaces you actually audited.
     - `summary`: one paragraph — overall risk read + anything notable
       that did not rise to a finding.

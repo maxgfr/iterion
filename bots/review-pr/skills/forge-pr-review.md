@@ -75,6 +75,13 @@ The fence keyword differs slightly per forge (below). The body shape:
 ```​
 ```
 
+The suggestion REPLACES the anchored `line..line_end` range — its content
+is the complete new text for those lines. A single-line anchor
+(`line == line_end`) replaced by multi-line content is normal: most
+one-click fixes are one line in, several out. Each forge carries the
+replaced range in its own fence syntax (§4–§6) — derive it from the
+finding's `line`/`line_end`, never guess.
+
 When `replacement` is empty, post a plain comment: the bold header line,
 `detail`, then `Suggested fix: <suggestion>` (the one-line sketch). No
 fenced block.
@@ -150,8 +157,12 @@ POST fails (400/422 — line not in the diff, or a bad position), do NOT
 silently downgrade it to a plain note: collect that finding and list it under
 "could not be anchored inline" in the summary. Capture each returned id.
 
-GitLab suggestion fence is `suggestion:-0+0` (covers the single anchored
-line; `-1+2` spans more):
+GitLab suggestion fence is `suggestion:-K+N`: it replaces `K` lines ABOVE
+the anchored line plus `N` below. Anchor the discussion at the finding's
+`line_end` (`position[new_line]=line_end`) and set `K = line_end - line`,
+`N = 0` — so a single-line finding is `suggestion:-0+0`, a 3-line finding
+(anchored at its last line) is `suggestion:-2+0`. The block body is the
+full `replacement` (one line in, several out is fine):
 
 ```
 ```suggestion:-0+0
