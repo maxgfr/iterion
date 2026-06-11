@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useState } from "react";
-import { Route, Switch } from "wouter";
+import { Route, Switch, useLocation } from "wouter";
 
 import AppShell from "@/components/shared/AppShell";
 
@@ -17,11 +17,19 @@ const LabelsView = lazy(() => import("@/views/Board/Labels"));
 const RunsAnalyticsView = lazy(() => import("@/views/RunsAnalytics"));
 const DispatcherView = lazy(() => import("@/views/Dispatcher"));
 const OrgsAdminPage = lazy(() => import("@/views/admin/OrgsAdminPage"));
+const UsersAdminPage = lazy(() => import("@/views/admin/UsersAdminPage"));
 const Welcome = lazy(() => import("@/views/Welcome"));
 const Settings = lazy(() => import("@/views/Settings"));
 const ProjectSwitcher = lazy(() => import("@/views/ProjectSwitcher"));
 const SettingsPage = lazy(() => import("@/views/settings/SettingsPage"));
 const TeamPage = lazy(() => import("@/views/teams/TeamPage"));
+
+// Auth side-doors reachable when anonymous (forced password rotation,
+// forgot/reset password) and when authed (invitation accept).
+const ForcedPasswordChange = lazy(() => import("@/views/auth/ForcedPasswordChange"));
+const ForgotPassword = lazy(() => import("@/views/auth/ForgotPassword"));
+const ResetPassword = lazy(() => import("@/views/auth/ResetPassword"));
+const AcceptInvitation = lazy(() => import("@/views/auth/AcceptInvitation"));
 
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import GlobalCommandPalette from "@/components/shared/GlobalCommandPalette";
@@ -63,8 +71,14 @@ export default function App() {
 // on the AuthProvider's status. It also wires the global 401
 // interceptor so editor API calls bounce the user back to /login on
 // session expiration.
+//
+// Side-doors: a small set of paths (forgot-password, reset, forced
+// password change, invitation accept) must be reachable WITHOUT a
+// session so the AuthGate consults the URL when it sees the
+// "anonymous" state and dispatches to the matching public view.
 function AuthGate() {
   const { status, signOut } = useAuth();
+  const [location] = useLocation();
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
@@ -81,7 +95,32 @@ function AuthGate() {
     );
   }
   if (status === "anonymous") {
-    return <Login />;
+    return (
+      <Suspense
+        fallback={
+          <div className="h-screen flex items-center justify-center bg-surface-0 text-fg-muted">
+            Loading…
+          </div>
+        }
+      >
+        <Switch>
+          <Route path="/auth/password/change" component={ForcedPasswordChange} />
+          <Route path="/auth/forgot-password" component={ForgotPassword} />
+          <Route path="/auth/reset" component={ResetPassword} />
+          <Route path="/invitations/accept" component={AcceptInvitation} />
+          <Route component={Login} />
+        </Switch>
+      </Suspense>
+    );
+  }
+  // Authenticated paths that don't belong in the AppShell go here (the
+  // invitation accept needs the AuthContext but not the full shell).
+  if (location.startsWith("/invitations/accept")) {
+    return (
+      <Suspense fallback={<div className="h-screen bg-surface-0 text-fg-default p-8">Loading…</div>}>
+        <AcceptInvitation />
+      </Suspense>
+    );
   }
   return <AuthedApp />;
 }
@@ -210,7 +249,9 @@ function AuthedApp() {
           </Route>
           <Route path="/account" component={SettingsPage} />
           <Route path="/teams/:id" component={TeamPage} />
+          <Route path="/admin" component={OrgsAdminPage} />
           <Route path="/admin/orgs" component={OrgsAdminPage} />
+          <Route path="/admin/users" component={UsersAdminPage} />
           {serverInfo?.native_tracker_enabled && (
             <Route path="/board/labels">
               <ErrorBoundary area="Board labels view">

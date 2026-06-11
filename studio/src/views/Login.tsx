@@ -3,12 +3,14 @@ import { useLocation } from "wouter";
 import { listProviders, register, type ProvidersResponse } from "@/api/auth";
 import { ApiError } from "@/api/auth";
 import { useAuth } from "@/auth/AuthContext";
+import { useServerInfoStore } from "@/store/serverInfo";
 
 const BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/$/, "");
 
 export default function Login() {
   const { signIn, status } = useAuth();
   const [, navigate] = useLocation();
+  const serverInfo = useServerInfoStore((s) => s.info);
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,6 +23,11 @@ export default function Login() {
   useEffect(() => {
     void listProviders().then(setProviders).catch(() => setProviders(null));
   }, []);
+
+  // Ensure serverInfo is loaded so we can gate the forgot-password link.
+  useEffect(() => {
+    if (!serverInfo) void useServerInfoStore.getState().refresh();
+  }, [serverInfo]);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -39,12 +46,19 @@ export default function Login() {
   }, []);
 
   // returnTo captures the in-app URL the user was on before being
-  // bounced to /login (typically by AuthGate on session expiry). We
+  // bounced to /login (typically by AuthGate on session expiry), OR
+  // honours an explicit ?next= param (e.g. /invitations/accept bounces
+  // here with `?invite=…&next=/invitations/accept?token=…`). We
   // restrict to relative same-origin paths so a hostile `?next=`
   // injection can't open-redirect after login.
   const returnTo = (): string => {
+    const u = new URL(window.location.href);
+    const next = u.searchParams.get("next");
+    if (next && next.startsWith("/") && !next.startsWith("//")) {
+      return next;
+    }
     const here = window.location.pathname + window.location.search + window.location.hash;
-    if (!here || here.startsWith("/login")) return "/";
+    if (!here || here.startsWith("/login") || here.startsWith("/auth/")) return "/";
     if (!here.startsWith("/") || here.startsWith("//")) return "/";
     return here;
   };
@@ -61,6 +75,18 @@ export default function Login() {
       }
       navigate(returnTo());
     } catch (e) {
+      // 403 "password change required" → forced rotation flow. Carry the
+      // email + the rejected password as the temporary credential so the
+      // user only has to type the new one.
+      if (
+        e instanceof ApiError &&
+        e.status === 403 &&
+        /password change required/i.test(e.message)
+      ) {
+        const qs = new URLSearchParams({ email, temp: password }).toString();
+        navigate(`/auth/password/change?${qs}`, { replace: true });
+        return;
+      }
       const msg = e instanceof ApiError ? e.message : (e as Error).message;
       setErr(msg);
     } finally {
@@ -160,13 +186,27 @@ export default function Login() {
           </div>
         )}
 
-        <div className="mt-6 text-sm text-fg-muted text-center">
+        <div className="mt-6 text-sm text-fg-muted text-center space-y-1">
           {mode === "login" ? (
-            showRegister ? (
-              <button onClick={() => setMode("register")} className="underline">
-                Need an account? Sign up
-              </button>
-            ) : null
+            <>
+              {showRegister && (
+                <div>
+                  <button onClick={() => setMode("register")} className="underline">
+                    Need an account? Sign up
+                  </button>
+                </div>
+              )}
+              {serverInfo?.email_enabled && (
+                <div>
+                  <button
+                    onClick={() => navigate("/auth/forgot-password")}
+                    className="underline"
+                  >
+                    Forgot your password?
+                  </button>
+                </div>
+              )}
+            </>
           ) : (
             <button onClick={() => setMode("login")} className="underline">
               Already have an account? Sign in

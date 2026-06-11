@@ -1,0 +1,137 @@
+import { useEffect, useState } from "react";
+import { useLocation } from "wouter";
+
+import {
+  ApiError,
+  type InvitationLookup,
+  acceptInvitationLoggedIn,
+  lookupInvitation,
+} from "@/api/auth";
+import { useAuth } from "@/auth/AuthContext";
+
+// AcceptInvitation handles /invitations/accept?token=…:
+//   anonymous → bounce to /login?invite=TOKEN&next=/invitations/accept?token=…
+//   authed    → lookup → accept → reload identity → switch to the new team → /teams/{id}
+//
+// The Login view already handles the `?invite=` query for the register
+// flow; we add `?next=` so a fresh login lands back here to finish.
+export default function AcceptInvitation() {
+  const { status, reloadIdentity, selectTeam } = useAuth();
+  const [, navigate] = useLocation();
+  const [token, setToken] = useState("");
+  const [info, setInfo] = useState<InvitationLookup | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Parse the token once.
+  useEffect(() => {
+    const u = new URL(window.location.href);
+    setToken(u.searchParams.get("token") ?? "");
+  }, []);
+
+  // Look up the invitation as soon as we have a token. This works whether
+  // or not the user is signed in (the endpoint is public).
+  useEffect(() => {
+    if (!token) return;
+    setErr(null);
+    lookupInvitation(token)
+      .then(setInfo)
+      .catch((e) => {
+        const msg = e instanceof ApiError ? e.message : (e as Error).message;
+        setErr(msg);
+      });
+  }, [token]);
+
+  // Anonymous → bounce to /login with the invite + return URL.
+  useEffect(() => {
+    if (status === "anonymous" && token) {
+      const next = encodeURIComponent(
+        `/invitations/accept?token=${encodeURIComponent(token)}`,
+      );
+      navigate(`/login?invite=${encodeURIComponent(token)}&next=${next}`, {
+        replace: true,
+      });
+    }
+  }, [status, token, navigate]);
+
+  const accept = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const mb = await acceptInvitationLoggedIn(token);
+      await reloadIdentity();
+      try {
+        await selectTeam(mb.team_id);
+      } catch {
+        // Ignore — reloadIdentity may have already picked the team.
+      }
+      navigate(`/teams/${mb.team_id}`, { replace: true });
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : (e as Error).message;
+      setErr(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (status === "loading") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-surface-0 text-fg-default">
+        Loading…
+      </div>
+    );
+  }
+  if (status === "anonymous") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-surface-0 text-fg-default">
+        Redirecting to sign-in…
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-surface-0 text-fg-default px-4">
+      <div className="w-full max-w-md bg-surface-1 border border-border-subtle rounded-lg p-8 shadow-md space-y-4">
+        <h1 className="text-2xl font-semibold">Join a team</h1>
+        {!token && (
+          <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+            No invitation token found in the URL.
+          </div>
+        )}
+        {err && (
+          <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+            {err}
+          </div>
+        )}
+        {info && !err && (
+          <div className="space-y-2 text-sm">
+            <div>
+              <span className="text-fg-muted">Team:</span>{" "}
+              <span className="font-medium">{info.team_name}</span>
+            </div>
+            <div>
+              <span className="text-fg-muted">Role:</span>{" "}
+              <span className="font-medium">{info.role}</span>
+            </div>
+            <div>
+              <span className="text-fg-muted">Invited email:</span>{" "}
+              <span className="font-mono text-xs">{info.email}</span>
+            </div>
+            <button
+              onClick={() => void accept()}
+              disabled={busy}
+              className="w-full bg-fg-accent text-surface-0 rounded px-3 py-2 font-medium disabled:opacity-50 mt-3"
+            >
+              {busy ? "Joining…" : `Join ${info.team_name}`}
+            </button>
+          </div>
+        )}
+        <div className="text-sm text-fg-muted text-center">
+          <button onClick={() => navigate("/")} className="underline">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

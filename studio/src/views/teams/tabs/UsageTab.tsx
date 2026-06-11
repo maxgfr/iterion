@@ -1,0 +1,175 @@
+import { useEffect, useState } from "react";
+
+import {
+  FeatureUnavailableError,
+  type OrgUsage,
+  fmtBytes,
+  fmtUSD,
+  getTeamUsage,
+  pct,
+} from "@/api/usage";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Tooltip } from "@/components/ui/Tooltip";
+
+interface Props {
+  teamID: string;
+}
+
+export default function UsageTab({ teamID }: Props) {
+  const [usage, setUsage] = useState<OrgUsage | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setErr(null);
+    setUnavailable(false);
+    getTeamUsage(teamID)
+      .then((u) => {
+        if (alive) setUsage(u);
+      })
+      .catch((e) => {
+        if (!alive) return;
+        if (e instanceof FeatureUnavailableError) setUnavailable(true);
+        else setErr((e as Error).message);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [teamID]);
+
+  if (unavailable) {
+    return (
+      <EmptyState
+        title="Usage not enabled on this server"
+        message="Per-org usage metering requires the cloud-mode metric store."
+      />
+    );
+  }
+  if (err) {
+    return (
+      <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+        {err}
+      </div>
+    );
+  }
+  if (!usage) {
+    return <div className="text-sm text-fg-muted">Loading…</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <UsageCard
+          title="Runs this month"
+          used={usage.runs_this_month}
+          quota={usage.monthly_run_quota}
+          fmt={(n) => String(n)}
+          quotaHelp="Monthly run quota"
+        />
+        <UsageCard
+          title="Cost this month"
+          used={usage.cost_usd_this_month}
+          quota={usage.monthly_cost_cap_usd}
+          fmt={fmtUSD}
+          quotaHelp="Monthly spend cap (USD)"
+        />
+        <UsageCard
+          title="Active runs"
+          used={usage.active_runs}
+          quota={usage.max_concurrent_runs}
+          fmt={(n) => String(n)}
+          quotaHelp="Max concurrent runs"
+        />
+        <UsageCard
+          title="Memory used"
+          used={usage.memory_used_bytes}
+          quota={usage.effective_memory_quota_bytes}
+          fmt={fmtBytes}
+          quotaHelp="Shared-memory ceiling (effective)"
+        />
+        <UsageCard
+          title="Webhook calls this month"
+          used={usage.webhook_calls_this_month}
+          fmt={(n) => String(n)}
+        />
+        <UsageCard
+          title="Input tokens this month"
+          used={usage.input_tokens_this_month}
+          fmt={(n) => n.toLocaleString()}
+        />
+        <UsageCard
+          title="Output tokens this month"
+          used={usage.output_tokens_this_month}
+          fmt={(n) => n.toLocaleString()}
+        />
+        <UsageCard
+          title="Members"
+          used={usage.members}
+          fmt={(n) => String(n)}
+        />
+      </section>
+
+      <section className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+        <CountCard title="API keys" n={usage.api_key_count} />
+        <CountCard title="Team secrets" n={usage.generic_secret_count} />
+        <CountCard title="Bot bindings" n={usage.bot_binding_count} />
+        <CountCard title="Webhooks" n={usage.webhook_count} />
+      </section>
+    </div>
+  );
+}
+
+function UsageCard({
+  title,
+  used,
+  quota,
+  fmt,
+  quotaHelp,
+}: {
+  title: string;
+  used: number | undefined;
+  quota?: number;
+  fmt: (n: number) => string;
+  quotaHelp?: string;
+}) {
+  const usedN = used ?? 0;
+  const p = pct(usedN, quota);
+  const undefinedField = used == null;
+  return (
+    <div className="bg-surface-1 border border-border-subtle rounded p-3 space-y-1">
+      <div className="text-xs uppercase tracking-wider text-fg-muted">{title}</div>
+      <div className="flex items-baseline gap-1">
+        {undefinedField ? (
+          <Tooltip content="Not reported by this server.">
+            <span className="text-2xl font-semibold">—</span>
+          </Tooltip>
+        ) : (
+          <span className="text-2xl font-semibold">{fmt(usedN)}</span>
+        )}
+        {quota != null && quota > 0 && (
+          <Tooltip content={quotaHelp ?? "Quota"}>
+            <span className="text-xs text-fg-muted">/ {fmt(quota)}</span>
+          </Tooltip>
+        )}
+      </div>
+      {p != null && (
+        <div className="h-1.5 bg-surface-2 rounded overflow-hidden">
+          <div
+            className={`h-full ${p > 90 ? "bg-danger" : p > 70 ? "bg-warning" : "bg-accent"}`}
+            style={{ width: `${p}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CountCard({ title, n }: { title: string; n: number | undefined }) {
+  return (
+    <div className="bg-surface-1 border border-border-subtle rounded p-2">
+      <div className="text-fg-muted">{title}</div>
+      <div className="text-lg font-semibold">{n ?? 0}</div>
+    </div>
+  );
+}

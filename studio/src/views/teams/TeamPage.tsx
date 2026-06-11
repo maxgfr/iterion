@@ -14,9 +14,35 @@ import {
 import ApiKeysPanel from "@/views/settings/ApiKeys";
 import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
 
+import WebhooksTab from "./tabs/WebhooksTab";
+import SecretsTab from "./tabs/SecretsTab";
+import BindingsTab from "./tabs/BindingsTab";
+import UsageTab from "./tabs/UsageTab";
+import AuditTab from "./tabs/AuditTab";
+import MemoryTab from "./tabs/MemoryTab";
+
 const ROLES = ["viewer", "member", "admin", "owner"] as const;
 
-type Tab = "members" | "api-keys";
+type Tab =
+  | "members"
+  | "api-keys"
+  | "webhooks"
+  | "secrets"
+  | "bindings"
+  | "usage"
+  | "audit"
+  | "memory";
+
+const TABS: Array<{ id: Tab; label: string }> = [
+  { id: "members", label: "Members + invitations" },
+  { id: "api-keys", label: "API keys" },
+  { id: "webhooks", label: "Webhooks" },
+  { id: "secrets", label: "Secrets" },
+  { id: "bindings", label: "Bot bindings" },
+  { id: "usage", label: "Usage" },
+  { id: "audit", label: "Audit log" },
+  { id: "memory", label: "Memory" },
+];
 
 export default function TeamPage() {
   const params = useParams<{ id: string }>();
@@ -52,14 +78,9 @@ export default function TeamPage() {
 
   return (
     <div className="h-full overflow-auto">
-      <div className="max-w-5xl mx-auto p-3 sm:p-6 grid grid-cols-1 sm:grid-cols-[200px,1fr] gap-4 sm:gap-6">
+      <div className="max-w-6xl mx-auto p-3 sm:p-6 grid grid-cols-1 sm:grid-cols-[200px,1fr] gap-4 sm:gap-6">
         <nav className="flex sm:block sm:space-y-1 gap-1 flex-wrap">
-          {(
-            [
-              { id: "members", label: "Members + invitations" },
-              { id: "api-keys", label: "API keys" },
-            ] as Array<{ id: Tab; label: string }>
-          ).map((t) => (
+          {TABS.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
@@ -77,6 +98,18 @@ export default function TeamPage() {
           {tab === "api-keys" && (
             <ApiKeysPanel team={{ id: team.team_id, name: team.team_name }} />
           )}
+          {tab === "webhooks" && (
+            <WebhooksTab teamID={team.team_id} canManage={canManage} />
+          )}
+          {tab === "secrets" && (
+            <SecretsTab teamID={team.team_id} canManage={canManage} />
+          )}
+          {tab === "bindings" && (
+            <BindingsTab teamID={team.team_id} canManage={canManage} />
+          )}
+          {tab === "usage" && <UsageTab teamID={team.team_id} />}
+          {tab === "audit" && <AuditTab teamID={team.team_id} canManage={canManage} />}
+          {tab === "memory" && <MemoryTab teamID={team.team_id} />}
         </main>
       </div>
     </div>

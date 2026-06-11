@@ -53,7 +53,20 @@ export async function extractErrorMessage(res: Response): Promise<string> {
   try {
     const body = JSON.parse(text) as unknown;
     if (body && typeof body === "object") {
-      const env = body as { error?: unknown; message?: unknown };
+      const env = body as {
+        error?: unknown;
+        message?: unknown;
+        detail?: unknown;
+        reset_at?: unknown;
+      };
+      // Quota/launch denial envelopes carry the human-readable copy in
+      // `detail`; prefer it (with the short `error` token as a prefix)
+      // so toasts read "monthly_run_quota_exceeded: 1000/1000 — resets …".
+      if (typeof env.detail === "string" && env.detail) {
+        const token = typeof env.error === "string" && env.error ? env.error : "";
+        const tail = typeof env.reset_at === "string" ? ` (resets ${env.reset_at})` : "";
+        return token ? `${token}: ${env.detail}${tail}` : `${env.detail}${tail}`;
+      }
       if (typeof env.error === "string" && env.error) return env.error;
       if (typeof env.message === "string" && env.message) return env.message;
     }

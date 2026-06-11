@@ -125,6 +125,14 @@ export interface ServerInfo {
   // is configured. The SPA polls GET /api/v1/limits/cost for live status
   // and renders the cost-cap banner only when this is true.
   cost_cap_enabled?: boolean;
+  // auth_required is false in local / desktop mode (single-user TTY,
+  // no JWT) and true in cloud mode (multi-tenant). The SettingsPage
+  // gates auth-only tabs (Tokens, change password) on this.
+  auth_required?: boolean;
+  // email_enabled is true when an SMTP mailer is wired. The SPA only
+  // offers email-dependent flows (forgot-password link, "send invite
+  // by email") when true.
+  email_enabled?: boolean;
 }
 
 // CostCapStatus mirrors runtime.CapStatus (GET /api/v1/limits/cost).

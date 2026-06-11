@@ -1,0 +1,424 @@
+import { useEffect, useState } from "react";
+
+import {
+  FeatureUnavailableError,
+  type GenericSecretView,
+  createMySecret,
+  createTeamSecret,
+  deleteMySecret,
+  deleteTeamSecret,
+  isValidSecretName,
+  listMySecrets,
+  listTeamSecrets,
+  updateMySecret,
+  updateTeamSecret,
+} from "@/api/secrets";
+
+import { Button } from "@/components/ui/Button";
+import { Dialog } from "@/components/ui/Dialog";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Input } from "@/components/ui/Input";
+import ConfirmDialog from "@/components/shared/ConfirmDialog";
+
+interface Props {
+  teamID: string;
+  canManage: boolean;
+}
+
+export default function SecretsTab({ teamID, canManage }: Props) {
+  const [teamSecrets, setTeamSecrets] = useState<GenericSecretView[]>([]);
+  const [mySecrets, setMySecrets] = useState<GenericSecretView[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+  const [creating, setCreating] = useState<null | "team" | "me">(null);
+  const [rotating, setRotating] = useState<{ scope: "team" | "me"; rec: GenericSecretView } | null>(
+    null,
+  );
+  const [deleting, setDeleting] = useState<{ scope: "team" | "me"; rec: GenericSecretView } | null>(
+    null,
+  );
+
+  const reload = async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const [t, m] = await Promise.all([
+        listTeamSecrets(teamID).catch((e) => {
+          if (e instanceof FeatureUnavailableError) throw e;
+          throw e;
+        }),
+        listMySecrets().catch(() => [] as GenericSecretView[]),
+      ]);
+      setTeamSecrets(t);
+      setMySecrets(m);
+      setUnavailable(false);
+    } catch (e) {
+      if (e instanceof FeatureUnavailableError) {
+        setUnavailable(true);
+      } else {
+        setErr((e as Error).message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamID]);
+
+  const doDelete = async () => {
+    if (!deleting) return;
+    try {
+      if (deleting.scope === "team") await deleteTeamSecret(teamID, deleting.rec.id);
+      else await deleteMySecret(deleting.rec.id);
+      setDeleting(null);
+      void reload();
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+
+  if (unavailable) {
+    return (
+      <EmptyState
+        title="Secrets not enabled on this server"
+        message="Generic secrets require a multi-tenant deployment."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {err && (
+        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+          {err}
+        </div>
+      )}
+
+      <section>
+        <SecretsSectionHeader
+          title="Team secrets"
+          description="Org-wide credentials available to every bot the org runs. Admin-managed."
+          onCreate={canManage ? () => setCreating("team") : undefined}
+        />
+        <SecretsTable
+          secrets={teamSecrets}
+          loading={loading}
+          emptyText={
+            canManage
+              ? "No team secrets yet. Use them in bot bindings to expose them to a workflow under a chosen name."
+              : "No team secrets yet. Ask an admin to add them."
+          }
+          canManage={canManage}
+          onRotate={(rec) => setRotating({ scope: "team", rec })}
+          onDelete={(rec) => setDeleting({ scope: "team", rec })}
+        />
+      </section>
+
+      <section>
+        <SecretsSectionHeader
+          title="My secrets"
+          description="Personal credentials scoped to your user. Useful when running bots interactively."
+          onCreate={() => setCreating("me")}
+        />
+        <SecretsTable
+          secrets={mySecrets}
+          loading={loading}
+          emptyText="No personal secrets yet."
+          canManage
+          onRotate={(rec) => setRotating({ scope: "me", rec })}
+          onDelete={(rec) => setDeleting({ scope: "me", rec })}
+        />
+      </section>
+
+      {creating && (
+        <CreateSecretDialog
+          scope={creating}
+          teamID={teamID}
+          onClose={() => setCreating(null)}
+          onCreated={() => {
+            setCreating(null);
+            void reload();
+          }}
+        />
+      )}
+
+      {rotating && (
+        <RotateSecretDialog
+          scope={rotating.scope}
+          teamID={teamID}
+          rec={rotating.rec}
+          onClose={() => setRotating(null)}
+          onRotated={() => {
+            setRotating(null);
+            void reload();
+          }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={deleting !== null}
+        title={`Delete ${deleting?.rec.name ?? ""}?`}
+        message="Bot bindings that reference this secret will stop resolving immediately. Workflows that need it will fail until you add a new secret with the same workflow name."
+        confirmLabel="Delete"
+        confirmVariant="danger"
+        onConfirm={() => void doDelete()}
+        onCancel={() => setDeleting(null)}
+      />
+    </div>
+  );
+}
+
+function SecretsSectionHeader({
+  title,
+  description,
+  onCreate,
+}: {
+  title: string;
+  description: string;
+  onCreate?: () => void;
+}) {
+  return (
+    <div className="flex items-start justify-between mb-2">
+      <div>
+        <h3 className="font-medium">{title}</h3>
+        <p className="text-xs text-fg-subtle mt-0.5">{description}</p>
+      </div>
+      {onCreate && (
+        <Button size="sm" variant="primary" onClick={onCreate}>
+          Add secret
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function SecretsTable({
+  secrets,
+  loading,
+  emptyText,
+  canManage,
+  onRotate,
+  onDelete,
+}: {
+  secrets: GenericSecretView[];
+  loading: boolean;
+  emptyText: string;
+  canManage: boolean;
+  onRotate: (rec: GenericSecretView) => void;
+  onDelete: (rec: GenericSecretView) => void;
+}) {
+  if (loading) return <div className="text-sm text-fg-muted">Loading…</div>;
+  if (secrets.length === 0) return <EmptyState message={emptyText} />;
+  return (
+    <table className="w-full text-sm">
+      <thead className="text-xs uppercase tracking-wider text-fg-muted text-left">
+        <tr>
+          <th className="px-2 py-1">Name</th>
+          <th className="px-2 py-1">Last4</th>
+          <th className="px-2 py-1">Fingerprint</th>
+          <th className="px-2 py-1">Created</th>
+          <th className="px-2 py-1">Last used</th>
+          <th className="px-2 py-1 text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {secrets.map((s) => (
+          <tr key={s.id} className="border-t border-border-subtle">
+            <td className="px-2 py-2 font-mono">{s.name}</td>
+            <td className="px-2 py-2 font-mono text-fg-muted">…{s.last4 ?? "????"}</td>
+            <td className="px-2 py-2 font-mono text-fg-muted text-xs break-all">
+              {s.fingerprint ? s.fingerprint.slice(0, 12) : "—"}
+            </td>
+            <td className="px-2 py-2 text-fg-muted text-xs">
+              {new Date(s.created_at).toLocaleString()}
+            </td>
+            <td className="px-2 py-2 text-fg-muted text-xs">
+              {s.last_used_at ? new Date(s.last_used_at).toLocaleString() : "—"}
+            </td>
+            <td className="px-2 py-2 text-right space-x-1 whitespace-nowrap">
+              {canManage && (
+                <>
+                  <Button size="sm" variant="ghost" onClick={() => onRotate(s)}>
+                    Rotate
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-fg-error"
+                    onClick={() => onDelete(s)}
+                  >
+                    Delete
+                  </Button>
+                </>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function CreateSecretDialog({
+  scope,
+  teamID,
+  onClose,
+  onCreated,
+}: {
+  scope: "team" | "me";
+  teamID: string;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [secret, setSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const v = isValidSecretName(name);
+
+  const submit = async () => {
+    if (!v.ok || !secret) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      if (scope === "team") await createTeamSecret(teamID, { name, secret });
+      else await createMySecret({ name, secret });
+      onCreated();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+      title={scope === "team" ? "Add team secret" : "Add personal secret"}
+      description="The secret value is stored sealed; only the last4 + fingerprint are returned by the API."
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            loading={busy}
+            disabled={!v.ok || !secret}
+            onClick={() => void submit()}
+          >
+            Create
+          </Button>
+        </>
+      }
+    >
+      {err && (
+        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2 mb-3">
+          {err}
+        </div>
+      )}
+      <div className="space-y-3 text-sm">
+        <label className="block">
+          <div className="text-xs text-fg-muted mb-1">Name</div>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            error={name !== "" && !v.ok}
+            placeholder="GITLAB_TOKEN"
+            autoFocus
+          />
+          <div className={`text-xs mt-1 ${v.ok ? "text-fg-muted" : "text-fg-error"}`}>
+            {v.ok ? "OK" : v.error ?? "—"}
+          </div>
+        </label>
+        <label className="block">
+          <div className="text-xs text-fg-muted mb-1">Secret value</div>
+          <Input
+            type="password"
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            placeholder="paste here — never shown again"
+          />
+        </label>
+      </div>
+    </Dialog>
+  );
+}
+
+function RotateSecretDialog({
+  scope,
+  teamID,
+  rec,
+  onClose,
+  onRotated,
+}: {
+  scope: "team" | "me";
+  teamID: string;
+  rec: GenericSecretView;
+  onClose: () => void;
+  onRotated: () => void;
+}) {
+  const [secret, setSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!secret) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      if (scope === "team") await updateTeamSecret(teamID, rec.id, { secret });
+      else await updateMySecret(rec.id, { secret });
+      onRotated();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+      title={`Rotate ${rec.name}`}
+      description="The previous value is replaced atomically. Workflows currently running continue with the old value until they finish."
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" loading={busy} disabled={!secret} onClick={() => void submit()}>
+            Rotate
+          </Button>
+        </>
+      }
+    >
+      {err && (
+        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2 mb-3">
+          {err}
+        </div>
+      )}
+      <label className="block text-sm">
+        <div className="text-xs text-fg-muted mb-1">New value</div>
+        <Input
+          type="password"
+          value={secret}
+          onChange={(e) => setSecret(e.target.value)}
+          placeholder="paste new value"
+          autoFocus
+        />
+      </label>
+    </Dialog>
+  );
+}

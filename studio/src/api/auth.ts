@@ -135,3 +135,67 @@ export async function acceptInvitationLoggedIn(token: string): Promise<Membershi
     body: JSON.stringify({ token }),
   });
 }
+
+// ---- Password flows ----
+
+// Anti-enumeration: this endpoint always returns 200 with the same body
+// regardless of whether the email matches an account. The view shows a
+// generic "If we have an account for that email, you'll receive a link"
+// confirmation regardless of outcome.
+export async function requestPasswordReset(email: string): Promise<void> {
+  await send("/auth/password/reset/request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+// Redeems the emailed token: new password is set, every prior session is
+// revoked, and a fresh login is issued (cookies set).
+export async function confirmPasswordReset(
+  token: string,
+  password: string,
+): Promise<AuthResponse> {
+  return send("/auth/password/reset/confirm", {
+    method: "POST",
+    body: JSON.stringify({ token, password }),
+  });
+}
+
+// Forced rotation for a pending_password_change account (e.g. the
+// bootstrapped super-admin). Public + anti-enumeration: a bad email/temp
+// password is opaquely 401.
+export async function completePendingPasswordChange(
+  email: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<AuthResponse> {
+  return send("/auth/password/change", {
+    method: "POST",
+    body: JSON.stringify({
+      email,
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
+}
+
+// Authenticated self-service rotation. Server revokes other sessions
+// and re-issues the calling session's cookies.
+export async function changeMyPassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<AuthResponse> {
+  return send("/me/password", {
+    method: "POST",
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
+}
+
+// "Sign out everywhere": every live refresh dies now; the caller's own
+// cookies are cleared too.
+export async function revokeAllMySessions(): Promise<void> {
+  await send("/me/sessions/revoke-all", { method: "POST" });
+}

@@ -11,9 +11,12 @@ import {
   ChevronRightIcon,
   Cross2Icon,
   PlayIcon,
+  PersonIcon,
+  GearIcon,
 } from "@radix-ui/react-icons";
 import { useShallow } from "zustand/react/shallow";
 
+import { useAuth } from "@/auth/AuthContext";
 import { useServerInfoStore } from "@/store/serverInfo";
 import {
   selectEditorTabs,
@@ -30,7 +33,9 @@ export type Section =
   | "editor"
   | "runs"
   | "board"
-  | "dispatcher";
+  | "dispatcher"
+  | "team"
+  | "admin";
 
 interface Props {
   collapsed: boolean;
@@ -63,6 +68,8 @@ const SEGMENT_TO_SECTION: Record<string, Section> = {
   insights: "runs",
   board: "board",
   dispatcher: "dispatcher",
+  teams: "team",
+  admin: "admin",
 };
 
 function deriveSection(pathname: string): Section | undefined {
@@ -79,6 +86,7 @@ function deriveSection(pathname: string): Section | undefined {
 // specific file/run without going through the section's inner strip.
 export default function NavLinks({ collapsed }: Props) {
   const info = useServerInfoStore((s) => s.info);
+  const { activeTeam, user } = useAuth();
   const [location] = useLocation();
   const active = deriveSection(location);
   const alertUnseen = useUIStore((s) => s.alertUnseen);
@@ -90,6 +98,19 @@ export default function NavLinks({ collapsed }: Props) {
   }
   if (info?.dispatcher_enabled) {
     links.push({ section: "dispatcher", href: "/dispatcher", label: "Dispatcher", icon: RocketIcon });
+  }
+  // Team entry hidden when no team is active (e.g. desktop / local mode).
+  if (activeTeam) {
+    links.push({
+      section: "team",
+      href: `/teams/${activeTeam.team_id}`,
+      label: activeTeam.team_name || "Team",
+      icon: PersonIcon,
+    });
+  }
+  // Admin section visible only to super-admins.
+  if (user?.is_super_admin) {
+    links.push({ section: "admin", href: "/admin/orgs", label: "Admin", icon: GearIcon });
   }
 
   return (
