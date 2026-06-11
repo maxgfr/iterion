@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -81,6 +82,17 @@ func init() {
 	f.StringVar(&serverOpts.storeDir, "store-dir", "", "Run store directory (local mode only)")
 	f.StringVar(&serverOpts.configPath, "config", "", "Path to YAML config (env vars take precedence)")
 	rootCmd.AddCommand(serverCmd)
+}
+
+// randomBootstrapPassword returns a URL-safe random temporary password for the
+// bootstrap super-admin. base64 of 18 bytes (~24 chars) is comfortably above
+// the MinPasswordLen the rotation endpoint enforces.
+func randomBootstrapPassword() (string, error) {
+	b := make([]byte, 18)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 func runServer(cmd *cobra.Command, _ []string) error {
@@ -260,21 +272,47 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	}
 
 	if email := cfg.Auth.BootstrapAdminEmail; email != "" && !disableAuth {
-		count, err := identityStore.UserCount(rootCtx)
-		if err != nil {
-			return fmt.Errorf("server: user count: %w", err)
-		}
-		if count == 0 {
-			pwBytes := make([]byte, 18)
-			if _, err := rand.Read(pwBytes); err != nil {
+		existing, getErr := identityStore.GetUserByEmail(rootCtx, email)
+		switch {
+		case getErr == nil && existing.Status == identity.UserStatusPendingPasswordChange:
+			// The configured bootstrap admin exists but was never activated.
+			// Re-issue a fresh temp password so an operator who lost the first
+			// one (e.g. the pod restarted before it was captured) can recover
+			// by restarting, instead of being permanently locked out. An
+			// already-active admin's password is never reset this way.
+			pw, err := randomBootstrapPassword()
+			if err != nil {
 				return fmt.Errorf("server: bootstrap password: %w", err)
 			}
-			pw := base64.RawURLEncoding.EncodeToString(pwBytes)
-			if _, _, err := authSvc.CreateUserAndPersonalTeam(rootCtx, email, "Bootstrap admin", pw, true, identity.UserStatusPendingPasswordChange); err != nil {
-				return fmt.Errorf("server: bootstrap admin: %w", err)
+			hash, err := iterauth.HashPassword(pw)
+			if err != nil {
+				return fmt.Errorf("server: hash bootstrap password: %w", err)
 			}
-			logger.Warn("server: BOOTSTRAP super-admin created — email=%s temp_password=%s (change on first login)", email, pw)
+			existing.PasswordHash = hash
+			if err := identityStore.UpdateUser(rootCtx, existing); err != nil {
+				return fmt.Errorf("server: re-issue bootstrap admin: %w", err)
+			}
+			logger.Warn("server: BOOTSTRAP super-admin %s still pending — re-issued temp_password=%s (rotate via POST /api/auth/password/change)", email, pw)
+		case errors.Is(getErr, identity.ErrNotFound):
+			// First boot with an empty users collection → create the admin.
+			count, err := identityStore.UserCount(rootCtx)
+			if err != nil {
+				return fmt.Errorf("server: user count: %w", err)
+			}
+			if count == 0 {
+				pw, err := randomBootstrapPassword()
+				if err != nil {
+					return fmt.Errorf("server: bootstrap password: %w", err)
+				}
+				if _, _, err := authSvc.CreateUserAndPersonalTeam(rootCtx, email, "Bootstrap admin", pw, true, identity.UserStatusPendingPasswordChange); err != nil {
+					return fmt.Errorf("server: bootstrap admin: %w", err)
+				}
+				logger.Warn("server: BOOTSTRAP super-admin created — email=%s temp_password=%s (rotate via POST /api/auth/password/change)", email, pw)
+			}
+		case getErr != nil:
+			return fmt.Errorf("server: bootstrap admin lookup: %w", getErr)
 		}
+		// getErr == nil && status active/disabled → already onboarded; no-op.
 	}
 
 	registry := oidc.NewRegistry()
