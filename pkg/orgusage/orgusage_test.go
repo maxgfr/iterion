@@ -17,9 +17,9 @@ func runCounterSuite(t *testing.T, c Counter) {
 
 	t.Run("unlimited still meters", func(t *testing.T) {
 		for i := 0; i < 3; i++ {
-			ok, err := c.AllowRun(ctx, "t-unlimited", now, 0)
-			if err != nil || !ok {
-				t.Fatalf("AllowRun #%d: ok=%v err=%v", i, ok, err)
+			deny, err := c.AllowRun(ctx, "t-unlimited", now, 0, 0)
+			if err != nil || deny != DenyNone {
+				t.Fatalf("AllowRun #%d: deny=%v err=%v", i, deny, err)
 			}
 		}
 		u, err := c.Usage(ctx, "t-unlimited", now)
@@ -33,16 +33,16 @@ func runCounterSuite(t *testing.T, c Counter) {
 
 	t.Run("cap denies without consuming", func(t *testing.T) {
 		for i := 0; i < 2; i++ {
-			if ok, err := c.AllowRun(ctx, "t-capped", now, 2); err != nil || !ok {
-				t.Fatalf("AllowRun #%d: ok=%v err=%v", i, ok, err)
+			if deny, err := c.AllowRun(ctx, "t-capped", now, 2, 0); err != nil || deny != DenyNone {
+				t.Fatalf("AllowRun #%d: deny=%v err=%v", i, deny, err)
 			}
 		}
-		ok, err := c.AllowRun(ctx, "t-capped", now, 2)
+		deny, err := c.AllowRun(ctx, "t-capped", now, 2, 0)
 		if err != nil {
 			t.Fatalf("AllowRun denied: %v", err)
 		}
-		if ok {
-			t.Fatal("AllowRun = true past the cap")
+		if deny != DenyRuns {
+			t.Fatalf("deny = %v, want DenyRuns past the cap", deny)
 		}
 		u, _ := c.Usage(ctx, "t-capped", now)
 		if u.Runs != 2 {
@@ -51,13 +51,13 @@ func runCounterSuite(t *testing.T, c Counter) {
 	})
 
 	t.Run("months are disjoint buckets", func(t *testing.T) {
-		if ok, _ := c.AllowRun(ctx, "t-months", now, 1); !ok {
+		if deny, _ := c.AllowRun(ctx, "t-months", now, 1, 0); deny != DenyNone {
 			t.Fatal("first month launch denied")
 		}
 		nextMonth := now.AddDate(0, 1, 0)
-		ok, err := c.AllowRun(ctx, "t-months", nextMonth, 1)
-		if err != nil || !ok {
-			t.Fatalf("next month launch: ok=%v err=%v", ok, err)
+		deny, err := c.AllowRun(ctx, "t-months", nextMonth, 1, 0)
+		if err != nil || deny != DenyNone {
+			t.Fatalf("next month launch: deny=%v err=%v", deny, err)
 		}
 		u, _ := c.Usage(ctx, "t-months", now)
 		if u.Runs != 1 {
@@ -66,10 +66,10 @@ func runCounterSuite(t *testing.T, c Counter) {
 	})
 
 	t.Run("tenants are isolated", func(t *testing.T) {
-		if ok, _ := c.AllowRun(ctx, "t-a", now, 1); !ok {
+		if deny, _ := c.AllowRun(ctx, "t-a", now, 1, 0); deny != DenyNone {
 			t.Fatal("t-a launch denied")
 		}
-		if ok, _ := c.AllowRun(ctx, "t-b", now, 1); !ok {
+		if deny, _ := c.AllowRun(ctx, "t-b", now, 1, 0); deny != DenyNone {
 			t.Fatal("t-b denied by t-a's consumption")
 		}
 	})
@@ -110,6 +110,29 @@ func runCounterSuite(t *testing.T, c Counter) {
 		}
 	})
 
+	t.Run("cost cap denies new launches", func(t *testing.T) {
+		if err := c.AddSpend(ctx, "t-costcap", now, 5.0, 0, 0); err != nil {
+			t.Fatal(err)
+		}
+		deny, err := c.AllowRun(ctx, "t-costcap", now, 0, CostToMillis(5.0))
+		if err != nil {
+			t.Fatalf("AllowRun: %v", err)
+		}
+		if deny != DenyCost {
+			t.Fatalf("deny = %v, want DenyCost at the cap", deny)
+		}
+		// The denied launch must not have consumed a run increment.
+		u, _ := c.Usage(ctx, "t-costcap", now)
+		if u.Runs != 0 {
+			t.Fatalf("Runs = %d, want 0 after cost-cap denial", u.Runs)
+		}
+		// Under the cap → allowed.
+		deny, _ = c.AllowRun(ctx, "t-costcap", now, 0, CostToMillis(10.0))
+		if deny != DenyNone {
+			t.Fatalf("deny = %v, want allowed under a higher cap", deny)
+		}
+	})
+
 	t.Run("concurrent launches never overshoot the cap", func(t *testing.T) {
 		const cap = 10
 		const callers = 40
@@ -120,12 +143,12 @@ func runCounterSuite(t *testing.T, c Counter) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				ok, err := c.AllowRun(ctx, "t-race", now, cap)
+				deny, err := c.AllowRun(ctx, "t-race", now, cap, 0)
 				if err != nil {
 					t.Errorf("AllowRun: %v", err)
 					return
 				}
-				if ok {
+				if deny == DenyNone {
 					mu.Lock()
 					allowed++
 					mu.Unlock()
@@ -156,8 +179,8 @@ func TestCostMillisRoundTrip(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(fmt.Sprintf("%v", c.usd), func(t *testing.T) {
-			if got := costToMillis(c.usd); got != c.want {
-				t.Fatalf("costToMillis(%v) = %d, want %d", c.usd, got, c.want)
+			if got := CostToMillis(c.usd); got != c.want {
+				t.Fatalf("CostToMillis(%v) = %d, want %d", c.usd, got, c.want)
 			}
 		})
 	}

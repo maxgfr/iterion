@@ -7,7 +7,8 @@ package forgejo
 // Forgejo and Gitea both send the same event header VALUE
 // ("pull_request") on different header NAMES. The handler accepts
 // either; this constant is the header value to check against.
-const EventHeaderPullRequestValue = "pull_request"
+// Naming mirrors github.EventHeaderPullRequest.
+const EventHeaderPullRequest = "pull_request"
 
 // PullRequestEvent is the subset of Forgejo/Gitea's pull_request
 // webhook we decode.

@@ -33,18 +33,34 @@ type MonthlyUsage struct {
 	OutputTokens int64   `json:"output_tokens"`
 }
 
+// DenyReason qualifies an AllowRun refusal so the launch gate can map
+// it onto the right stable denial token.
+type DenyReason string
+
+const (
+	// DenyNone — the launch is allowed (and metered).
+	DenyNone DenyReason = ""
+	// DenyRuns — the monthly run quota is exhausted.
+	DenyRuns DenyReason = "runs"
+	// DenyCost — the month's accumulated LLM spend has reached the cap.
+	DenyCost DenyReason = "cost"
+)
+
 // Counter is the per-org monthly metering + enforcement surface.
 // Implementations: MongoCounter (production, atomic CAS) and
 // MemoryCounter (tests/local). Keep semantics in lock-step.
 type Counter interface {
 	// AllowRun atomically increments the month's launched-run counter
-	// and reports whether the new total fits under maxRuns (0 = no
-	// cap, but the increment still happens — that is the metering).
-	// A denied call does not consume quota.
-	AllowRun(ctx context.Context, tenantID string, when time.Time, maxRuns int) (bool, error)
+	// and checks BOTH launch-time caps against the post-increment
+	// document in one round trip: maxRuns on the run count and
+	// maxCostMillis on the accumulated spend (each 0 = no cap; with no
+	// caps the increment still happens — that is the metering). A
+	// denied call rolls the increment back and reports which cap hit.
+	// The cost check is a soft cap by nature (a run's future spend is
+	// unknowable) — in-flight runs finish, new launches are denied.
+	AllowRun(ctx context.Context, tenantID string, when time.Time, maxRuns int, maxCostMillis int64) (DenyReason, error)
 	// AddSpend accumulates post-hoc LLM cost/token usage for the
-	// month. Never gates — enforcement of a cost cap is a pre-launch
-	// read (Usage) because a run's future spend is unknowable.
+	// month. Never gates — AllowRun enforces the cap pre-launch.
 	AddSpend(ctx context.Context, tenantID string, when time.Time, costUSD float64, inputTokens, outputTokens int64) error
 	// Usage returns the month's counters for the org. A month with no
 	// activity returns the zero value (Month still filled).
@@ -71,9 +87,11 @@ func usageKey(tenantID string, when time.Time) string {
 	return "org|" + tenantID + "|" + monthKey(when)
 }
 
-// costToMillis converts a USD amount to integer thousandths so the
-// Mongo $inc stays integral (float $inc would accumulate drift).
-func costToMillis(usd float64) int64 {
+// CostToMillis converts a USD amount to integer thousandths so the
+// Mongo $inc stays integral (float $inc would accumulate drift) and
+// the launch gate can express Team.MonthlyCostCapUSD in the counter's
+// native unit.
+func CostToMillis(usd float64) int64 {
 	if usd <= 0 {
 		return 0
 	}

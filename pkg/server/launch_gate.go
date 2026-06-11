@@ -10,6 +10,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/identity"
+	"github.com/SocialGouv/iterion/pkg/orgusage"
 )
 
 // OrgLimitDefaults are the platform-wide launch limits applied when a
@@ -78,9 +79,16 @@ func (s *Server) gateLaunch(ctx context.Context) *launchDenial {
 	if st == nil || id.IsSuperAdmin || id.TeamID == "" {
 		return nil
 	}
-	t, err := st.GetTeam(ctx, id.TeamID)
-	if err != nil {
-		return nil // fail-open (see doc comment)
+	// Reuse a Team the webhook middleware already loaded for its
+	// suspend check (same document, same request) — one Mongo round
+	// trip instead of two on the inbound-webhook hot path.
+	t, ok := teamFromContext(ctx)
+	if !ok || t.ID != id.TeamID {
+		var err error
+		t, err = st.GetTeam(ctx, id.TeamID)
+		if err != nil {
+			return nil // fail-open (see doc comment)
+		}
 	}
 	if !t.CanLaunch() {
 		return &launchDenial{
@@ -96,10 +104,7 @@ func (s *Server) gateLaunch(ctx context.Context) *launchDenial {
 	if d := s.gateLaunchRate(t); d != nil {
 		return d
 	}
-	if d := s.gateCostCap(ctx, t, now); d != nil {
-		return d
-	}
-	return s.gateRunQuota(ctx, t, now)
+	return s.gateMonthlyCaps(ctx, t, now)
 }
 
 func (s *Server) gateConcurrency(ctx context.Context, t identity.Team) *launchDenial {
@@ -146,46 +151,36 @@ func (s *Server) gateLaunchRate(t identity.Team) *launchDenial {
 	return nil
 }
 
-func (s *Server) gateCostCap(ctx context.Context, t identity.Team, now time.Time) *launchDenial {
-	capUSD := orValue(t.MonthlyCostCapUSD, s.orgDefaults.MonthlyCostCapUSD)
-	if capUSD <= 0 || s.orgUsage == nil {
-		return nil
-	}
-	u, err := s.orgUsage.Usage(ctx, t.ID, now)
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn("launch gate: usage read for %s: %v (fail-open)", t.ID, err)
-		}
-		return nil
-	}
-	if u.CostUSD >= capUSD {
-		return &launchDenial{
-			status:  http.StatusPaymentRequired,
-			reason:  denyMonthlyCostCap,
-			detail:  fmt.Sprintf("monthly LLM cost cap reached ($%.2f of $%.2f)", u.CostUSD, capUSD),
-			resetAt: nextMonthStart(now),
-		}
-	}
-	return nil
-}
-
-func (s *Server) gateRunQuota(ctx context.Context, t identity.Team, now time.Time) *launchDenial {
+// gateMonthlyCaps charges the month's run counter and checks BOTH
+// monthly caps (run quota + LLM cost cap) off the counter's single
+// CAS round trip — the increment IS the metering, so this runs even
+// with no caps configured.
+func (s *Server) gateMonthlyCaps(ctx context.Context, t identity.Team, now time.Time) *launchDenial {
 	if s.orgUsage == nil {
 		return nil
 	}
-	max := orValue(t.MonthlyRunQuota, s.orgDefaults.MonthlyRunQuota)
-	ok, err := s.orgUsage.AllowRun(ctx, t.ID, now, max)
+	maxRuns := orValue(t.MonthlyRunQuota, s.orgDefaults.MonthlyRunQuota)
+	capUSD := orValue(t.MonthlyCostCapUSD, s.orgDefaults.MonthlyCostCapUSD)
+	deny, err := s.orgUsage.AllowRun(ctx, t.ID, now, maxRuns, orgusage.CostToMillis(capUSD))
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("launch gate: run metering for %s: %v (fail-open, launch unmetered)", t.ID, err)
 		}
 		return nil
 	}
-	if !ok {
+	switch deny {
+	case orgusage.DenyRuns:
 		return &launchDenial{
 			status:  http.StatusPaymentRequired,
 			reason:  denyMonthlyRunQuota,
-			detail:  fmt.Sprintf("monthly run quota (%d) exhausted", max),
+			detail:  fmt.Sprintf("monthly run quota (%d) exhausted", maxRuns),
+			resetAt: nextMonthStart(now),
+		}
+	case orgusage.DenyCost:
+		return &launchDenial{
+			status:  http.StatusPaymentRequired,
+			reason:  denyMonthlyCostCap,
+			detail:  fmt.Sprintf("monthly LLM cost cap ($%.2f) reached", capUSD),
 			resetAt: nextMonthStart(now),
 		}
 	}

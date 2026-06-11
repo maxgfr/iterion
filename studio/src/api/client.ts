@@ -11,6 +11,50 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
   onUnauthorized = fn;
 }
 
+// ApiError is the typed error thrown by request/apiRequest when the
+// HTTP status is non-2xx. Domain clients use `err instanceof ApiError
+// && err.status === N` to react to specific statuses (notably 404 for
+// feature-gating via `guard404`). The message keeps the historical
+// `API error <status>: <body>` shape so toasts read the same as
+// before.
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "ApiError";
+  }
+}
+
+// FeatureUnavailableError marks a server endpoint that is not enabled
+// on the current deployment (HTTP 404 on a domain route). Views catch
+// it and render an EmptyState "Not enabled on this server" instead of
+// crashing. Detection is class-based (instanceof) so the guard is
+// robust against minified error messages.
+export class FeatureUnavailableError extends Error {
+  feature: string;
+  constructor(feature: string, message?: string) {
+    super(message ?? `${feature} not available on this server`);
+    this.feature = feature;
+    this.name = "FeatureUnavailableError";
+  }
+}
+
+// guard404 wraps a domain request and converts an ApiError(404) into
+// a typed FeatureUnavailableError so the calling view can show the
+// "not enabled" empty state. Any other error type or status is
+// rethrown unchanged.
+export async function guard404<T>(feature: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      throw new FeatureUnavailableError(feature, err.message);
+    }
+    throw err;
+  }
+}
+
 // request is exported so other api/*.ts modules (api/projects.ts,
 // future per-domain clients) share the same 401-handling and JSON-
 // decoding semantics. It prefixes BASE_URL on the supplied path.
@@ -33,7 +77,7 @@ export async function apiRequest<T>(fullPath: string, init?: RequestInit): Promi
     onUnauthorized();
   }
   if (!res.ok) {
-    throw new Error(`API error ${res.status}: ${await extractErrorMessage(res)}`);
+    throw new ApiError(res.status, `API error ${res.status}: ${await extractErrorMessage(res)}`);
   }
   // 204 No Content (e.g. DELETE endpoints) has an empty body. Don't
   // try to parse it — return undefined and let the typed caller cast.

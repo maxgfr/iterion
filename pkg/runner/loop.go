@@ -1201,51 +1201,63 @@ func (m *metricsEmitter) observe(evt store.Event) {
 			m.mu.Unlock()
 		}
 	case store.EventLLMStepFinished:
-		modelName := m.lookupModel(evt.NodeID)
-		if modelName == "" {
-			modelName = "unknown"
-		}
 		const backend = "claw"
 		inputT := toFloat(evt.Data["input_tokens"])
 		outputT := toFloat(evt.Data["output_tokens"])
+
+		// Single critical section: resolve the per-node model name,
+		// accumulate run-level token + cost totals, and compute the
+		// per-model cost delta against the cached rate (rateForLocked
+		// requires the lock held by its caller). Prometheus writes and
+		// the addTokens helper run AFTER the unlock — counter Add is
+		// atomic on the vec, addTokens reads only its locals.
+		m.mu.Lock()
+		modelName := m.modelByNode[evt.NodeID]
+		if modelName == "" {
+			modelName = "unknown"
+		}
+		m.runInputTokens += int64(inputT)
+		m.runOutputTokens += int64(outputT)
+		var costDelta float64
+		if modelName != "unknown" {
+			rate := m.rateForLocked(modelName)
+			if rate.known {
+				if c := inputT*rate.inputUSDPerToken + outputT*rate.outputUSDPerToken; c > 0 {
+					m.runCostUSD += c
+					costDelta = c
+				}
+			}
+		}
+		m.mu.Unlock()
+
 		m.addTokens(backend, modelName, "input", evt.Data["input_tokens"])
 		m.addTokens(backend, modelName, "output", evt.Data["output_tokens"])
 		m.addTokens(backend, modelName, "cache_read", evt.Data["cache_read_tokens"])
 		m.addTokens(backend, modelName, "cache_write", evt.Data["cache_write_tokens"])
-		m.mu.Lock()
-		m.runInputTokens += int64(inputT)
-		m.runOutputTokens += int64(outputT)
-		m.mu.Unlock()
-		// LLMCostUSDTotal: apply the cached per-token rates for this
-		// model. Unknown models leave the counter untouched so
+		// LLMCostUSDTotal: unknown models leave the counter untouched so
 		// observers can tell "no data" from "$0" via the absence of
 		// samples.
-		if modelName != "" && modelName != "unknown" {
-			m.mu.Lock()
-			rate := m.rateForLocked(modelName)
-			m.mu.Unlock()
-			if rate.known {
-				if c := inputT*rate.inputUSDPerToken + outputT*rate.outputUSDPerToken; c > 0 {
-					m.mu.Lock()
-					m.runCostUSD += c
-					m.mu.Unlock()
-					if m.reg != nil {
-						m.reg.LLMCostUSDTotal.WithLabelValues(backend, normalizeModelLabel(modelName)).Add(c)
-					}
-				}
-			}
+		if costDelta > 0 && m.reg != nil {
+			m.reg.LLMCostUSDTotal.WithLabelValues(backend, normalizeModelLabel(modelName)).Add(costDelta)
 		}
 	case store.EventDelegateFinished:
 		backend, _ := evt.Data["backend"].(string)
 		if backend == "" {
 			backend = "delegate"
 		}
+		tokensF := toFloat(evt.Data["tokens"])
+
+		// Single critical section: resolve the per-node model name and
+		// accumulate the aggregated token count. Prometheus write
+		// happens after the unlock via addTokens (counter Add is atomic).
+		m.mu.Lock()
+		modelName := m.modelByNode[evt.NodeID]
+		m.runInputTokens += int64(tokensF)
+		m.mu.Unlock()
+
 		// Delegate events report a single aggregated token count;
 		// label as input so a sum across directions stays meaningful.
-		m.addTokens(backend, m.lookupModel(evt.NodeID), "input", evt.Data["tokens"])
-		m.mu.Lock()
-		m.runInputTokens += int64(toFloat(evt.Data["tokens"]))
-		m.mu.Unlock()
+		m.addTokens(backend, modelName, "input", evt.Data["tokens"])
 	}
 }
 

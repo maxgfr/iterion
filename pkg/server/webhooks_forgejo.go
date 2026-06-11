@@ -69,7 +69,7 @@ func (s *Server) handleForgejoWebhook(w http.ResponseWriter, r *http.Request) {
 	srcIP := s.clientIP(r)
 
 	event := forgejoEventHeader(r)
-	if event != forgejo.EventHeaderPullRequestValue {
+	if event != forgejo.EventHeaderPullRequest {
 		s.recordTerminalWebhookDelivery(ctx, cfg, webhookEventMeta{Kind: event}, webhooks.StatusFiltered, payloadHash, srcIP, "unsupported event")
 		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
 		return
@@ -91,28 +91,14 @@ func (s *Server) handleForgejoWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	botID := cfg.SelectBot()
-	if botID == "" {
-		botID = defaultWebhookBotReviewPR
-	}
-	if !cfg.AllowsBot(botID) {
-		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusInvalid, payloadHash, srcIP, "bot not permitted by webhook scope")
-		httpError(w, http.StatusForbidden, "bot %q not permitted by this webhook", botID)
+	botID, ok := s.resolveReviewBot(ctx, w, cfg, meta, payloadHash, srcIP)
+	if !ok {
 		return
 	}
 
 	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("fj|%s|%s|%s|%d|%s", cfg.TenantID, cfg.ID, p.ProjectPath, p.PRNumber, p.HeadSHA)))
 
-	vars := map[string]string{
-		"pr_url":         p.PRURL,
-		"base_ref":       p.TargetBranch,
-		"scope_notes":    strings.TrimSpace(p.Title + "\n\n" + p.Description),
-		"post_to_board":  "false",
-		"pr_review_mode": "summary",
-	}
-	for k, v := range cfg.LaunchVars {
-		vars[k] = v
-	}
+	vars := reviewPRVars(p.PRURL, p.TargetBranch, strings.TrimSpace(p.Title+"\n\n"+p.Description), cfg.LaunchVars, nil)
 
 	s.insertAndLaunchWebhook(ctx, w, r, cfg, meta, idemKey, botID, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
 }

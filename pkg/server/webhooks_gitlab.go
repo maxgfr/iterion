@@ -86,13 +86,8 @@ func (s *Server) handleGitLabMergeRequestEvent(ctx context.Context, w http.Respo
 		return
 	}
 
-	botID := cfg.SelectBot()
-	if botID == "" {
-		botID = defaultWebhookBotReviewPR
-	}
-	if !cfg.AllowsBot(botID) {
-		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusInvalid, payloadHash, srcIP, "bot not permitted by webhook scope")
-		httpError(w, http.StatusForbidden, "bot %q not permitted by this webhook", botID)
+	botID, ok := s.resolveReviewBot(ctx, w, cfg, meta, payloadHash, srcIP)
+	if !ok {
 		return
 	}
 
@@ -101,16 +96,7 @@ func (s *Server) handleGitLabMergeRequestEvent(ctx context.Context, w http.Respo
 	// ("note|") so a /revi on the same MR can't collide with the open.
 	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("mr|%s|%s|%d|%d|%s", cfg.TenantID, cfg.ID, p.ProjectID, p.MRIID, p.HeadSHA)))
 
-	vars := map[string]string{
-		"pr_url":         p.MRURL,
-		"base_ref":       p.TargetBranch,
-		"scope_notes":    strings.TrimSpace(p.Title + "\n\n" + p.Description),
-		"post_to_board":  "false",
-		"pr_review_mode": "summary",
-	}
-	for k, v := range cfg.LaunchVars {
-		vars[k] = v
-	}
+	vars := reviewPRVars(p.MRURL, p.TargetBranch, strings.TrimSpace(p.Title+"\n\n"+p.Description), cfg.LaunchVars, nil)
 
 	s.insertAndLaunchWebhook(ctx, w, r, cfg, meta, idemKey, botID, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
 }
@@ -157,13 +143,8 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, r 
 		filtered("no /revi trigger")
 		return
 	}
-	botID := cfg.SelectBot()
-	if botID == "" {
-		botID = defaultWebhookBotReviewPR
-	}
-	if !cfg.AllowsBot(botID) {
-		s.recordNoteDelivery(ctx, cfg, webhooks.StatusInvalid, payloadHash, srcIP, p, "bot not permitted by webhook scope")
-		httpError(w, http.StatusForbidden, "bot %q not permitted by this webhook", botID)
+	botID, ok := s.resolveReviewBot(ctx, w, cfg, gitlabNoteMeta(p), payloadHash, srcIP)
+	if !ok {
 		return
 	}
 	// Gate the replier (forge-token resolution → loop-guard → allowlist
@@ -190,16 +171,13 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, r 
 	// Idempotency: one launch per note.
 	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("%s|%s|%d|%s", cfg.TenantID, cfg.ID, p.ProjectID, p.SubjectID())))
 
-	// Launch: review-pr re-reviews the current MR state. The conversation vars
-	// (discussion_id/trigger_note/replier) carry the thread context for the
-	// converse bot + the forge.reply capability (A4/A5); re_review marks the
-	// posted summary with the 🔁 prefix (forge-pr-review skill).
-	vars := map[string]string{
-		"pr_url":            p.MRURL,
-		"base_ref":          p.TargetBranch,
-		"scope_notes":       strings.TrimSpace(p.MRTitle + "\n\n" + p.MRDesc),
-		"post_to_board":     "false",
-		"pr_review_mode":    "summary",
+	// Launch: review-pr re-reviews the current MR state. The conversation
+	// vars (discussion_id/trigger_note/replier) carry the thread context
+	// for the converse bot + the forge.reply capability (A4/A5);
+	// re_review marks the posted summary with the 🔁 prefix
+	// (forge-pr-review skill). scope_notes carries the MR context — the
+	// triggering note rides separately as trigger_note.
+	vars := reviewPRVars(p.MRURL, p.TargetBranch, strings.TrimSpace(p.MRTitle+"\n\n"+p.MRDesc), cfg.LaunchVars, map[string]string{
 		"conversation_mode": "reply",
 		"discussion_id":     p.DiscussionID,
 		"trigger_note":      p.NoteBody,
@@ -207,10 +185,7 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, r 
 		"trigger_args":      cmdArgs,
 		"replier":           p.AuthorUsername,
 		"re_review":         "true",
-	}
-	for k, v := range cfg.LaunchVars {
-		vars[k] = v
-	}
+	})
 
 	s.insertAndLaunchWebhook(ctx, w, r, cfg, gitlabNoteMeta(p), idemKey, botID, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
 }

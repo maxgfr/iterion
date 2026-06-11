@@ -2,8 +2,7 @@
 // pkg/knowledge/iface.go. Spaces are addressed by query params; the
 // tenant/user come from the auth identity (cookie), never the URL.
 
-import { request, extractErrorMessage } from "./client";
-import { FeatureUnavailableError } from "./webhooks";
+import { ApiError, FeatureUnavailableError, extractErrorMessage, guard404, request } from "./client";
 
 export { FeatureUnavailableError };
 
@@ -53,26 +52,15 @@ function spaceQuery(ref: MemorySpaceRef, extra?: Record<string, string>): string
   return sp.toString();
 }
 
-async function guard<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    if (err instanceof Error && /API error 404:/.test(err.message)) {
-      throw new FeatureUnavailableError("memory", err.message);
-    }
-    throw err;
-  }
-}
-
 export function getMemoryUsage(ref: MemorySpaceRef): Promise<MemoryUsage> {
-  return guard(() => request<MemoryUsage>(`/memory/usage?${spaceQuery(ref)}`));
+  return guard404("memory", () => request<MemoryUsage>(`/memory/usage?${spaceQuery(ref)}`));
 }
 
 export async function listMemoryDocuments(
   ref: MemorySpaceRef,
   dir?: string,
 ): Promise<MemoryDocumentMeta[]> {
-  return guard(async () => {
+  return guard404("memory", async () => {
     const extra = dir ? { dir } : undefined;
     const r = await request<{ documents: MemoryDocumentMeta[] }>(
       `/memory/docs?${spaceQuery(ref, extra)}`,
@@ -94,7 +82,7 @@ export async function readMemoryDocument(
     throw new FeatureUnavailableError("memory", `document ${path} not found`);
   }
   if (!res.ok) {
-    throw new Error(`API error ${res.status}: ${await extractErrorMessage(res)}`);
+    throw new ApiError(res.status, `API error ${res.status}: ${await extractErrorMessage(res)}`);
   }
   return res.text();
 }

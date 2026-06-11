@@ -47,7 +47,7 @@ type usageDoc struct {
 	MonthStart    time.Time `bson:"month_start"`
 }
 
-func (c *MongoCounter) AllowRun(ctx context.Context, tenantID string, when time.Time, maxRuns int) (bool, error) {
+func (c *MongoCounter) AllowRun(ctx context.Context, tenantID string, when time.Time, maxRuns int, maxCostMillis int64) (DenyReason, error) {
 	key := usageKey(tenantID, when)
 	var doc usageDoc
 	err := c.col.FindOneAndUpdate(ctx,
@@ -59,22 +59,29 @@ func (c *MongoCounter) AllowRun(ctx context.Context, tenantID string, when time.
 		options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After),
 	).Decode(&doc)
 	if err != nil {
-		return false, fmt.Errorf("orgusage: run bump: %w", err)
+		return DenyNone, fmt.Errorf("orgusage: run bump: %w", err)
 	}
-	if maxRuns > 0 && doc.Runs > maxRuns {
-		// Roll back the optimistic increment so a denied call doesn't
-		// consume quota. Eventually consistent under heavy concurrency;
-		// the allow/deny decision itself is atomic — the property a
-		// monthly cap needs.
+	// Both caps read off the SAME post-increment document — one round
+	// trip covers run quota AND cost cap. A denied call rolls back the
+	// optimistic increment so it doesn't consume quota. Eventually
+	// consistent under heavy concurrency; the allow/deny decision
+	// itself is atomic — the property a monthly cap needs.
+	deny := DenyNone
+	switch {
+	case maxRuns > 0 && doc.Runs > maxRuns:
+		deny = DenyRuns
+	case maxCostMillis > 0 && doc.CostUSDMillis >= maxCostMillis:
+		deny = DenyCost
+	}
+	if deny != DenyNone {
 		_, _ = c.col.UpdateOne(ctx, bson.M{"_id": key}, bson.M{"$inc": bson.M{"runs": -1}})
-		return false, nil
 	}
-	return true, nil
+	return deny, nil
 }
 
 func (c *MongoCounter) AddSpend(ctx context.Context, tenantID string, when time.Time, costUSD float64, inputTokens, outputTokens int64) error {
 	inc := bson.M{}
-	if m := costToMillis(costUSD); m > 0 {
+	if m := CostToMillis(costUSD); m > 0 {
 		inc["cost_usd_millis"] = m
 	}
 	if inputTokens > 0 {

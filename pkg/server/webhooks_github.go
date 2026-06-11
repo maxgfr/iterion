@@ -80,13 +80,8 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	botID := cfg.SelectBot()
-	if botID == "" {
-		botID = defaultWebhookBotReviewPR
-	}
-	if !cfg.AllowsBot(botID) {
-		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusInvalid, payloadHash, srcIP, "bot not permitted by webhook scope")
-		httpError(w, http.StatusForbidden, "bot %q not permitted by this webhook", botID)
+	botID, ok := s.resolveReviewBot(ctx, w, cfg, meta, payloadHash, srcIP)
+	if !ok {
 		return
 	}
 
@@ -95,16 +90,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	// for the same tenant in case ids get reused.
 	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("gh|%s|%s|%s|%d|%s", cfg.TenantID, cfg.ID, p.ProjectPath, p.PRNumber, p.HeadSHA)))
 
-	vars := map[string]string{
-		"pr_url":         p.PRURL,
-		"base_ref":       p.TargetBranch,
-		"scope_notes":    strings.TrimSpace(p.Title + "\n\n" + p.Description),
-		"post_to_board":  "false",
-		"pr_review_mode": "summary",
-	}
-	for k, v := range cfg.LaunchVars {
-		vars[k] = v
-	}
+	vars := reviewPRVars(p.PRURL, p.TargetBranch, strings.TrimSpace(p.Title+"\n\n"+p.Description), cfg.LaunchVars, nil)
 
 	s.insertAndLaunchWebhook(ctx, w, r, cfg, meta, idemKey, botID, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
 }

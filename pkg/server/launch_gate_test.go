@@ -28,8 +28,8 @@ func (f fakeActiveStore) CountActiveRunsByTenant(context.Context, string) (int, 
 // erroringCounter forces the fail-open paths.
 type erroringCounter struct{}
 
-func (erroringCounter) AllowRun(context.Context, string, time.Time, int) (bool, error) {
-	return false, context.DeadlineExceeded
+func (erroringCounter) AllowRun(context.Context, string, time.Time, int, int64) (orgusage.DenyReason, error) {
+	return orgusage.DenyNone, context.DeadlineExceeded
 }
 func (erroringCounter) AddSpend(context.Context, string, time.Time, float64, int64, int64) error {
 	return context.DeadlineExceeded

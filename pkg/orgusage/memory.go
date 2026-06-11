@@ -34,22 +34,25 @@ func (c *MemoryCounter) get(tenantID string, when time.Time) *memUsage {
 	return u
 }
 
-func (c *MemoryCounter) AllowRun(_ context.Context, tenantID string, when time.Time, maxRuns int) (bool, error) {
+func (c *MemoryCounter) AllowRun(_ context.Context, tenantID string, when time.Time, maxRuns int, maxCostMillis int64) (DenyReason, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	u := c.get(tenantID, when)
 	if maxRuns > 0 && u.runs+1 > maxRuns {
-		return false, nil
+		return DenyRuns, nil
+	}
+	if maxCostMillis > 0 && u.costUSDMillis >= maxCostMillis {
+		return DenyCost, nil
 	}
 	u.runs++
-	return true, nil
+	return DenyNone, nil
 }
 
 func (c *MemoryCounter) AddSpend(_ context.Context, tenantID string, when time.Time, costUSD float64, inputTokens, outputTokens int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	u := c.get(tenantID, when)
-	u.costUSDMillis += costToMillis(costUSD)
+	u.costUSDMillis += CostToMillis(costUSD)
 	if inputTokens > 0 {
 		u.inputTokens += inputTokens
 	}

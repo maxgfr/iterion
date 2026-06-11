@@ -1,7 +1,6 @@
 // Audit-log REST client. Mirrors pkg/server/audit_helper.go + pkg/audit.
 
-import { request } from "./client";
-import { FeatureUnavailableError } from "./webhooks";
+import { FeatureUnavailableError, guard404, request } from "./client";
 
 export { FeatureUnavailableError };
 
@@ -46,23 +45,12 @@ function qstr(q: AuditQuery): string {
   return s ? `?${s}` : "";
 }
 
-async function guard<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    if (err instanceof Error && /API error 404:/.test(err.message)) {
-      throw new FeatureUnavailableError("audit", err.message);
-    }
-    throw err;
-  }
-}
-
 export function listTeamAudit(teamID: string, q: AuditQuery = {}): Promise<AuditListResponse> {
-  return guard(() =>
+  return guard404("audit", () =>
     request<AuditListResponse>(`/teams/${encodeURIComponent(teamID)}/audit${qstr(q)}`),
   );
 }
 
 export function listAdminAudit(q: AuditQuery = {}): Promise<AuditListResponse> {
-  return guard(() => request<AuditListResponse>(`/admin/audit${qstr(q)}`));
+  return guard404("audit", () => request<AuditListResponse>(`/admin/audit${qstr(q)}`));
 }

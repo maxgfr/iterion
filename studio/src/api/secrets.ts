@@ -1,8 +1,7 @@
 // Generic-secret REST client. Mirrors pkg/server/generic_secrets_routes.go.
 // Two scopes: team (org admin) and personal (`/me`).
 
-import { request } from "./client";
-import { FeatureUnavailableError } from "./webhooks";
+import { FeatureUnavailableError, guard404, request } from "./client";
 
 export { FeatureUnavailableError };
 
@@ -26,19 +25,8 @@ export interface UpdateSecretInput {
   secret?: string;
 }
 
-async function guard<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    if (err instanceof Error && /API error 404:/.test(err.message)) {
-      throw new FeatureUnavailableError("secrets", err.message);
-    }
-    throw err;
-  }
-}
-
 export async function listTeamSecrets(teamID: string): Promise<GenericSecretView[]> {
-  return guard(async () => {
+  return guard404("secrets", async () => {
     const r = await request<{ secrets: GenericSecretView[] }>(
       `/teams/${encodeURIComponent(teamID)}/secrets`,
     );
@@ -50,7 +38,7 @@ export function createTeamSecret(
   teamID: string,
   input: CreateSecretInput,
 ): Promise<GenericSecretView> {
-  return guard(() =>
+  return guard404("secrets", () =>
     request<GenericSecretView>(`/teams/${encodeURIComponent(teamID)}/secrets`, {
       method: "POST",
       body: JSON.stringify(input),
@@ -63,7 +51,7 @@ export function updateTeamSecret(
   secretID: string,
   input: UpdateSecretInput,
 ): Promise<GenericSecretView> {
-  return guard(() =>
+  return guard404("secrets", () =>
     request<GenericSecretView>(
       `/teams/${encodeURIComponent(teamID)}/secrets/${encodeURIComponent(secretID)}`,
       { method: "PATCH", body: JSON.stringify(input) },
@@ -72,7 +60,7 @@ export function updateTeamSecret(
 }
 
 export async function deleteTeamSecret(teamID: string, secretID: string): Promise<void> {
-  await guard(() =>
+  await guard404("secrets", () =>
     request<void>(
       `/teams/${encodeURIComponent(teamID)}/secrets/${encodeURIComponent(secretID)}`,
       { method: "DELETE" },
@@ -81,14 +69,14 @@ export async function deleteTeamSecret(teamID: string, secretID: string): Promis
 }
 
 export async function listMySecrets(): Promise<GenericSecretView[]> {
-  return guard(async () => {
+  return guard404("secrets", async () => {
     const r = await request<{ secrets: GenericSecretView[] }>(`/me/secrets`);
     return r.secrets ?? [];
   });
 }
 
 export function createMySecret(input: CreateSecretInput): Promise<GenericSecretView> {
-  return guard(() =>
+  return guard404("secrets", () =>
     request<GenericSecretView>(`/me/secrets`, {
       method: "POST",
       body: JSON.stringify(input),
@@ -100,7 +88,7 @@ export function updateMySecret(
   secretID: string,
   input: UpdateSecretInput,
 ): Promise<GenericSecretView> {
-  return guard(() =>
+  return guard404("secrets", () =>
     request<GenericSecretView>(`/me/secrets/${encodeURIComponent(secretID)}`, {
       method: "PATCH",
       body: JSON.stringify(input),
@@ -109,7 +97,7 @@ export function updateMySecret(
 }
 
 export async function deleteMySecret(secretID: string): Promise<void> {
-  await guard(() =>
+  await guard404("secrets", () =>
     request<void>(`/me/secrets/${encodeURIComponent(secretID)}`, { method: "DELETE" }),
   );
 }

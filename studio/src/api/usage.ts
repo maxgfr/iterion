@@ -3,8 +3,7 @@
 //   GET /api/teams/{id}/usage          — any member of the team
 //   GET /api/admin/orgs/{id}/usage     — super-admin only
 
-import { request } from "./client";
-import { FeatureUnavailableError } from "./webhooks";
+import { FeatureUnavailableError, guard404, request } from "./client";
 
 export { FeatureUnavailableError };
 
@@ -47,23 +46,12 @@ export interface OrgUsage {
   webhook_count: number;
 }
 
-async function guard<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    if (err instanceof Error && /API error 404:/.test(err.message)) {
-      throw new FeatureUnavailableError("usage", err.message);
-    }
-    throw err;
-  }
-}
-
 export function getTeamUsage(teamID: string): Promise<OrgUsage> {
-  return guard(() => request<OrgUsage>(`/teams/${encodeURIComponent(teamID)}/usage`));
+  return guard404("usage", () => request<OrgUsage>(`/teams/${encodeURIComponent(teamID)}/usage`));
 }
 
 export function getAdminOrgUsage(orgID: string): Promise<OrgUsage> {
-  return guard(() => request<OrgUsage>(`/admin/orgs/${encodeURIComponent(orgID)}/usage`));
+  return guard404("usage", () => request<OrgUsage>(`/admin/orgs/${encodeURIComponent(orgID)}/usage`));
 }
 
 // ---- formatting helpers ----

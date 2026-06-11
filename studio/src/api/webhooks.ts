@@ -4,13 +4,15 @@
 // persists hash + last4 + fingerprint. The UI must surface the plaintext
 // in a token-once panel and then drop it from memory.
 
-import { request } from "./client";
+import { FeatureUnavailableError, guard404, request } from "./client";
 
-// The backend currently restricts Provider to "gitlab" but the wire
-// type leaves room for future providers; we keep the alias union
-// (gitlab|github|forgejo|generic) so the UI can be ready when they
-// come online. Servers reject anything other than "gitlab" with 400 —
-// the form gates the picker accordingly.
+// Re-export so views that already import {FeatureUnavailableError}
+// alongside webhook helpers (WebhooksTab, …) keep working without
+// touching their import lists.
+export { FeatureUnavailableError };
+
+// All four providers (gitlab|github|forgejo|generic) are accepted by
+// the backend — see pkg/server/webhooks_routes.go's provider switch.
 export type WebhookProvider = "gitlab" | "github" | "forgejo" | "generic";
 
 export interface WebhookRate {
@@ -95,33 +97,6 @@ export interface UpdateWebhookInput {
   monthly_call_limit?: number;
   launch_vars?: Record<string, string>;
   key_overrides?: Record<string, string>;
-}
-
-// FeatureUnavailableError is thrown by every client function on a 404.
-// Views catch it and render an EmptyState "Not enabled on this server"
-// instead of crashing. Detection is class-based (instanceof) so the
-// guard is robust against minified error messages.
-export class FeatureUnavailableError extends Error {
-  feature: string;
-  constructor(feature: string, message?: string) {
-    super(message ?? `${feature} not available on this server`);
-    this.feature = feature;
-    this.name = "FeatureUnavailableError";
-  }
-}
-
-// guard404 wraps a request and converts a 404 into a typed
-// FeatureUnavailableError. The shared `request()` wrapper throws
-// `API error 404: ...`; we sniff that prefix to detect the status.
-async function guard404<T>(feature: string, fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    if (err instanceof Error && /API error 404:/.test(err.message)) {
-      throw new FeatureUnavailableError(feature, err.message);
-    }
-    throw err;
-  }
 }
 
 export async function listWebhooks(teamID: string): Promise<WebhookConfig[]> {

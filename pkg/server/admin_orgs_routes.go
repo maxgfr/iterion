@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/identity"
 	"github.com/SocialGouv/iterion/pkg/knowledge"
@@ -396,51 +398,84 @@ func (s *Server) buildOrgUsageView(ctx context.Context, st identity.Store, t ide
 		MaxConcurrentRuns:         orValue(t.MaxConcurrentRuns, s.orgDefaults.MaxConcurrentRuns),
 	}
 	now := time.Now().UTC()
+
+	// Fan out the ~8 independent best-effort reads. Each goroutine
+	// writes its OWN distinct field of `v` (no shared field → no
+	// mutex needed); transient errors still just leave a zero value
+	// rather than failing the whole view, so we never propagate them
+	// through the errgroup (Wait's return value is intentionally
+	// discarded).
+	g, gctx := errgroup.WithContext(ctx)
 	if s.orgUsage != nil {
-		if u, err := s.orgUsage.Usage(ctx, t.ID, now); err == nil {
-			v.RunsThisMonth = u.Runs
-			v.CostUSDThisMonth = u.CostUSD
-			v.InputTokens = u.InputTokens
-			v.OutputTokens = u.OutputTokens
-		}
+		g.Go(func() error {
+			if u, err := s.orgUsage.Usage(gctx, t.ID, now); err == nil {
+				v.RunsThisMonth = u.Runs
+				v.CostUSDThisMonth = u.CostUSD
+				v.InputTokens = u.InputTokens
+				v.OutputTokens = u.OutputTokens
+			}
+			return nil
+		})
 	}
 	if s.webhookCounter != nil {
-		if n, err := s.webhookCounter.OrgCount(ctx, t.ID, now); err == nil {
-			v.WebhookCallsThisMonth = n
-		}
+		g.Go(func() error {
+			if n, err := s.webhookCounter.OrgCount(gctx, t.ID, now); err == nil {
+				v.WebhookCallsThisMonth = n
+			}
+			return nil
+		})
 	}
 	if counter, ok := s.cfg.Store.(activeRunCounter); ok {
-		if n, err := counter.CountActiveRunsByTenant(ctx, t.ID); err == nil {
-			v.ActiveRuns = n
-		}
+		g.Go(func() error {
+			if n, err := counter.CountActiveRunsByTenant(gctx, t.ID); err == nil {
+				v.ActiveRuns = n
+			}
+			return nil
+		})
 	}
 	if reader, ok := s.memoryStore().(tenantMemoryUsageReader); ok {
-		if n, err := reader.TenantUsedBytes(ctx, t.ID); err == nil {
-			v.MemoryUsedBytes = n
-		}
+		g.Go(func() error {
+			if n, err := reader.TenantUsedBytes(gctx, t.ID); err == nil {
+				v.MemoryUsedBytes = n
+			}
+			return nil
+		})
 	}
 	if s.apiKeys != nil {
-		// "" requesting user → team-wide keys only (the admin path
-		// documented on ApiKeyStore.ListByTeam).
-		if keys, err := s.apiKeys.ListByTeam(ctx, t.ID, ""); err == nil {
-			v.APIKeyCount = len(keys)
-		}
+		g.Go(func() error {
+			// "" requesting user → team-wide keys only (the admin path
+			// documented on ApiKeyStore.ListByTeam).
+			if keys, err := s.apiKeys.ListByTeam(gctx, t.ID, ""); err == nil {
+				v.APIKeyCount = len(keys)
+			}
+			return nil
+		})
 	}
 	if s.genericSecrets != nil {
-		if secs, err := s.genericSecrets.ListByTeam(ctx, t.ID, ""); err == nil {
-			v.GenericSecretCount = len(secs)
-		}
+		g.Go(func() error {
+			if secs, err := s.genericSecrets.ListByTeam(gctx, t.ID, ""); err == nil {
+				v.GenericSecretCount = len(secs)
+			}
+			return nil
+		})
 	}
 	if s.botBindings != nil {
-		if bs, err := s.botBindings.ListByTenant(ctx, t.ID); err == nil {
-			v.BotBindingCount = len(bs)
-		}
+		g.Go(func() error {
+			if bs, err := s.botBindings.ListByTenant(gctx, t.ID); err == nil {
+				v.BotBindingCount = len(bs)
+			}
+			return nil
+		})
 	}
 	if s.webhookConfigs != nil {
-		if whs, err := s.webhookConfigs.ListByTenant(ctx, t.ID); err == nil {
-			v.WebhookCount = len(whs)
-		}
+		g.Go(func() error {
+			if whs, err := s.webhookConfigs.ListByTenant(gctx, t.ID); err == nil {
+				v.WebhookCount = len(whs)
+			}
+			return nil
+		})
 	}
+	_ = g.Wait()
 	return v
 }
 

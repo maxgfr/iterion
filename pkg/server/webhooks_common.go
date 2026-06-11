@@ -38,6 +38,57 @@ type webhookEventMeta struct {
 	SenderHandle string // username for audit (logged only, never in delivery audit row v1)
 }
 
+// reviewPRVars composes the launch-vars map every forge-specific
+// review-PR path produces: the canonical {pr_url, base_ref, scope_notes,
+// post_to_board:"false", pr_review_mode:"summary"} base, an optional
+// per-handler `extra` overlay (the Note handler injects "re_review":
+// "true"), then the operator's `launchVars` LAST so the per-webhook
+// pin always wins. `extra` may be nil; `launchVars` may be nil.
+func reviewPRVars(prURL, baseRef, scopeNotes string, launchVars map[string]string, extra map[string]string) map[string]string {
+	vars := map[string]string{
+		"pr_url":         prURL,
+		"base_ref":       baseRef,
+		"scope_notes":    scopeNotes,
+		"post_to_board":  "false",
+		"pr_review_mode": "summary",
+	}
+	for k, v := range extra {
+		vars[k] = v
+	}
+	for k, v := range launchVars {
+		vars[k] = v
+	}
+	return vars
+}
+
+// resolveReviewBot picks the bot id for a forge-specific review-PR
+// delivery: the webhook's SelectBot() result, falling back to the
+// defaultWebhookBotReviewPR constant when the operator didn't pin one.
+// The chosen bot is then validated against AllowsBot; a denied bot
+// writes a terminal "invalid" delivery + 403 and ok=false (the caller
+// must return immediately).
+//
+// Returned ok=false means the response was already written; the caller
+// must not write a second response.
+func (s *Server) resolveReviewBot(
+	ctx context.Context,
+	w http.ResponseWriter,
+	cfg webhooks.Config,
+	meta webhookEventMeta,
+	payloadHash, srcIP string,
+) (string, bool) {
+	botID := cfg.SelectBot()
+	if botID == "" {
+		botID = defaultWebhookBotReviewPR
+	}
+	if !cfg.AllowsBot(botID) {
+		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusInvalid, payloadHash, srcIP, "bot not permitted by webhook scope")
+		httpError(w, http.StatusForbidden, "bot %q not permitted by this webhook", botID)
+		return "", false
+	}
+	return botID, true
+}
+
 // newWebhookDelivery builds the common fields of a delivery audit row.
 // Provider handlers layer the idempotency key + outcome-specific fields
 // (BotID, RunID, Error) on top.

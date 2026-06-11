@@ -21,6 +21,21 @@ func webhookConfigFromContext(ctx context.Context) (webhooks.Config, bool) {
 	return c, ok
 }
 
+type teamCtxKey struct{}
+
+// withTeam stashes a freshly-loaded Team on ctx so downstream gates
+// (gateLaunch) can skip re-fetching the same document — the webhook
+// path otherwise pays two Mongo round trips per delivery for one team.
+func withTeam(ctx context.Context, t identity.Team) context.Context {
+	return context.WithValue(ctx, teamCtxKey{}, t)
+}
+
+// teamFromContext returns the pre-loaded Team when one was stashed.
+func teamFromContext(ctx context.Context) (identity.Team, bool) {
+	t, ok := ctx.Value(teamCtxKey{}).(identity.Team)
+	return t, ok
+}
+
 // extractWebhookToken pulls the presented token from the provider's
 // native header, falling back to iterion's own header. Only invoked
 // in SignModeToken — hmac-mode providers (GitHub, Forgejo) DO NOT
@@ -119,11 +134,16 @@ func (s *Server) webhookAuth(provider webhooks.Provider, next http.Handler) http
 				return
 			}
 		}
-		// Org must be active.
+		// Org must be active. The loaded Team is stashed on ctx below so
+		// the launch gate downstream reuses it instead of re-fetching.
+		var loadedTeam *identity.Team
 		if st := s.authStore(); st != nil {
-			if t, terr := st.GetTeam(r.Context(), cfg.TenantID); terr == nil && !t.CanLaunch() {
-				httpError(w, http.StatusForbidden, "org suspended")
-				return
+			if t, terr := st.GetTeam(r.Context(), cfg.TenantID); terr == nil {
+				if !t.CanLaunch() {
+					httpError(w, http.StatusForbidden, "org suspended")
+					return
+				}
+				loadedTeam = &t
 			}
 		}
 		// Stamp the tenant identity (synthetic webhook actor) + config.
@@ -135,6 +155,9 @@ func (s *Server) webhookAuth(provider webhooks.Provider, next http.Handler) http
 		})
 		ctx = store.WithIdentity(ctx, cfg.TenantID, actor)
 		ctx = context.WithValue(ctx, webhookCtxKey{}, cfg)
+		if loadedTeam != nil {
+			ctx = withTeam(ctx, *loadedTeam)
+		}
 		// last_used_at is observability, not on the inbound critical
 		// path — write it detached (bounded, survives request cancel) so
 		// the handler isn't serialised behind a Mongo round-trip.

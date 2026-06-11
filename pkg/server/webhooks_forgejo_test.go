@@ -78,7 +78,7 @@ func TestForgejoWebhook_HappyPath_ForgejoHeaders(t *testing.T) {
 	}
 	cfg, pt := fjConfig(t, s)
 	w := httptest.NewRecorder()
-	s.handleForgejoWebhook(w, fjReq(gitlabCtx(cfg), fjOpenPR, "X-Forgejo-Event", forgejo.EventHeaderPullRequestValue, pt, "X-Forgejo-Signature"))
+	s.handleForgejoWebhook(w, fjReq(gitlabCtx(cfg), fjOpenPR, "X-Forgejo-Event", forgejo.EventHeaderPullRequest, pt, "X-Forgejo-Signature"))
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
@@ -97,7 +97,7 @@ func TestForgejoWebhook_HappyPath_GiteaHeaders(t *testing.T) {
 	}
 	cfg, pt := fjConfig(t, s)
 	w := httptest.NewRecorder()
-	s.handleForgejoWebhook(w, fjReq(gitlabCtx(cfg), fjOpenPR, "X-Gitea-Event", forgejo.EventHeaderPullRequestValue, pt, "X-Gitea-Signature"))
+	s.handleForgejoWebhook(w, fjReq(gitlabCtx(cfg), fjOpenPR, "X-Gitea-Event", forgejo.EventHeaderPullRequest, pt, "X-Gitea-Signature"))
 	if w.Code != http.StatusAccepted || calls != 1 {
 		t.Fatalf("gitea headers: code=%d calls=%d body=%s", w.Code, calls, w.Body.String())
 	}
@@ -111,7 +111,7 @@ func TestForgejoWebhook_BadHMAC(t *testing.T) {
 	}
 	cfg, _ := fjConfig(t, s)
 	w := httptest.NewRecorder()
-	s.handleForgejoWebhook(w, fjReq(gitlabCtx(cfg), fjOpenPR, "X-Forgejo-Event", forgejo.EventHeaderPullRequestValue, "iwh_wrong", "X-Forgejo-Signature"))
+	s.handleForgejoWebhook(w, fjReq(gitlabCtx(cfg), fjOpenPR, "X-Forgejo-Event", forgejo.EventHeaderPullRequest, "iwh_wrong", "X-Forgejo-Signature"))
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("bad hmac: %d", w.Code)
 	}
@@ -127,7 +127,7 @@ func TestForgejoWebhook_IdempotentReplay(t *testing.T) {
 	cfg, pt := fjConfig(t, s)
 	for i := 0; i < 2; i++ {
 		w := httptest.NewRecorder()
-		s.handleForgejoWebhook(w, fjReq(gitlabCtx(cfg), fjOpenPR, "X-Forgejo-Event", forgejo.EventHeaderPullRequestValue, pt, "X-Forgejo-Signature"))
+		s.handleForgejoWebhook(w, fjReq(gitlabCtx(cfg), fjOpenPR, "X-Forgejo-Event", forgejo.EventHeaderPullRequest, pt, "X-Forgejo-Signature"))
 		if i == 0 && w.Code != http.StatusAccepted {
 			t.Fatalf("first: %d", w.Code)
 		}

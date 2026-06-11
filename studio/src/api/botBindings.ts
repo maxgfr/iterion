@@ -1,7 +1,6 @@
 // Bot-secret binding REST client. Mirrors pkg/server/bot_bindings_routes.go.
 
-import { request } from "./client";
-import { FeatureUnavailableError } from "./webhooks";
+import { FeatureUnavailableError, guard404, request } from "./client";
 
 export { FeatureUnavailableError };
 
@@ -29,22 +28,11 @@ export interface UpdateBindingInput {
   allowed_hosts?: string[];
 }
 
-async function guard<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    if (err instanceof Error && /API error 404:/.test(err.message)) {
-      throw new FeatureUnavailableError("bindings", err.message);
-    }
-    throw err;
-  }
-}
-
 export async function listBindings(
   teamID: string,
   botID: string,
 ): Promise<BotSecretBinding[]> {
-  return guard(async () => {
+  return guard404("bindings", async () => {
     const r = await request<{ bindings: BotSecretBinding[] }>(
       `/teams/${encodeURIComponent(teamID)}/bots/${encodeURIComponent(botID)}/bindings`,
     );
@@ -57,7 +45,7 @@ export function createBinding(
   botID: string,
   input: CreateBindingInput,
 ): Promise<BotSecretBinding> {
-  return guard(() =>
+  return guard404("bindings", () =>
     request<BotSecretBinding>(
       `/teams/${encodeURIComponent(teamID)}/bots/${encodeURIComponent(botID)}/bindings`,
       { method: "POST", body: JSON.stringify(input) },
@@ -71,7 +59,7 @@ export function updateBinding(
   bindingID: string,
   input: UpdateBindingInput,
 ): Promise<BotSecretBinding> {
-  return guard(() =>
+  return guard404("bindings", () =>
     request<BotSecretBinding>(
       `/teams/${encodeURIComponent(teamID)}/bots/${encodeURIComponent(botID)}/bindings/${encodeURIComponent(bindingID)}`,
       { method: "PATCH", body: JSON.stringify(input) },
@@ -84,7 +72,7 @@ export async function deleteBinding(
   botID: string,
   bindingID: string,
 ): Promise<void> {
-  await guard(() =>
+  await guard404("bindings", () =>
     request<void>(
       `/teams/${encodeURIComponent(teamID)}/bots/${encodeURIComponent(botID)}/bindings/${encodeURIComponent(bindingID)}`,
       { method: "DELETE" },

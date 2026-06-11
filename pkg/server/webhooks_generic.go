@@ -131,30 +131,9 @@ func genericRequestMeta(req generic.Request) webhookEventMeta {
 // genericMatchProject mirrors the gitlab/github project matcher but is
 // permissive when the request omits a project path (the operator who
 // wired the allowlist accepts that contract — the generic endpoint is
-// the only way to launch a project-less workflow this way).
+// the only way to launch a project-less workflow this way). All other
+// pattern semantics (trailing /*, bare *, exact) come from the canonical
+// webhooks.MatchProject.
 func genericMatchProject(allowlist []string, path string) bool {
-	if len(allowlist) == 0 || path == "" {
-		return true
-	}
-	// Reuse the forgejo matcher's pattern semantics (trailing /*, bare
-	// *, exact). Inlined to avoid importing a sibling provider for one
-	// helper.
-	for _, pat := range allowlist {
-		if pat == "" {
-			continue
-		}
-		if pat == "*" {
-			return true
-		}
-		if len(pat) > 1 && pat[len(pat)-2:] == "/*" {
-			if len(path) >= len(pat)-1 && path[:len(pat)-1] == pat[:len(pat)-1] {
-				return true
-			}
-			continue
-		}
-		if pat == path {
-			return true
-		}
-	}
-	return false
+	return path == "" || webhooks.MatchProject(allowlist, path)
 }

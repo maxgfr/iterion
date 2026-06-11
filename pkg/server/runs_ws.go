@@ -906,13 +906,14 @@ func (c *runConn) handleAnswer(env runWSEnvelope) {
 	}
 	// An answer resumes the run: runs.Resume below re-enters the engine
 	// (node execution + budget/cost spend), so it is a launch for
-	// suspend-gate purposes — exactly like handleResumeRun. Deny it for a
-	// suspended/read-only org (super-admin bypasses). orgCanLaunch reads
-	// the RBAC identity snapshotted at upgrade, NOT authCtx() (which only
-	// carries the store tenant tag, never the auth identity orgCanLaunch
-	// needs) — so this is a real gate, not a no-op.
-	if !orgCanLaunch(c.authCtx(), c.server.authStore(), c.identity) {
-		c.sendError("org_suspended", "org cannot launch runs (suspended or read-only)", env.AckID)
+	// admission purposes — the FULL gate (suspend, concurrency, launch
+	// rate, cost cap, monthly run quota), exactly like handleResumeRun,
+	// else the WS answer surface bypasses the org quotas the REST paths
+	// enforce. The auth identity is the one snapshotted at upgrade, NOT
+	// authCtx() (which only carries the store tenant tag) — re-stamped
+	// here so gateLaunch sees it.
+	if d := c.server.gateLaunch(auth.WithIdentity(c.authCtx(), c.identity)); d != nil {
+		c.sendError(d.reason, d.detail, env.AckID)
 		return
 	}
 	var req wsAnswerRequest
