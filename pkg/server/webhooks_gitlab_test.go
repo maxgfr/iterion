@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -173,7 +174,9 @@ func TestGitLabNoteHook_ReviCommandLaunches(t *testing.T) {
 }
 
 // TestGitLabNoteHook_FocusArgTolerated pins that args after /revi are
-// tolerated (the bare command still wins; v1 ignores the arg).
+// tolerated on a webhook whose scope does NOT include the converse bot:
+// the handler falls back to today's review-pr re-review path with the
+// args ignored. This is the back-compat half of the A5 routing.
 func TestGitLabNoteHook_FocusArgTolerated(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int
@@ -187,6 +190,101 @@ func TestGitLabNoteHook_FocusArgTolerated(t *testing.T) {
 	s.handleGitLabWebhook(w, glNoteReq(gitlabCtx(cfg), body))
 	if w.Code != http.StatusAccepted || calls != 1 {
 		t.Fatalf("focus arg: code=%d calls=%d body=%s", w.Code, calls, w.Body.String())
+	}
+}
+
+// botsDirAbs returns the absolute path to the repo's bots/ directory
+// from a test in pkg/server/. Used by the conversational-routing test
+// to wire the bot registry so revi-converse resolves on disk.
+func botsDirAbs(t *testing.T) string {
+	t.Helper()
+	abs, err := filepath.Abs(filepath.Join("..", "..", "bots"))
+	if err != nil {
+		t.Fatalf("resolve bots dir: %v", err)
+	}
+	return abs
+}
+
+// TestGitLabNoteHook_ConverseRoutesQuestionToConverseBot pins the A5
+// conversational route: when an authorized user asks `/revi <question>`
+// AND the webhook scope includes revi-converse AND the bot is
+// resolvable on disk, the handler launches revi-converse (NOT
+// review-pr) with the question threaded as `converse_question`. The
+// re_review flag is dropped (it's a question, not a re-review).
+func TestGitLabNoteHook_ConverseRoutesQuestionToConverseBot(t *testing.T) {
+	s := newWebhookTestServer(t)
+	s.cfg.Bots.Paths = []string{botsDirAbs(t)}
+	var calls int
+	var gotBot string
+	var gotVars map[string]string
+	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, _, _ string, _, _ map[string]string) (string, error) {
+		calls++
+		gotBot, gotVars = botID, vars
+		return "run-converse-1", nil
+	}
+	cfg := glConfig()
+	cfg.BotIDs = []string{"review-pr", "revi-converse"}
+	body := strings.Replace(glNoteRevi, `"note": "/revi"`, `"note": "/revi why is the SSRF critical?"`, 1)
+	w := httptest.NewRecorder()
+	s.handleGitLabWebhook(w, glNoteReq(gitlabCtx(cfg), body))
+	if w.Code != http.StatusAccepted || calls != 1 {
+		t.Fatalf("converse route: code=%d calls=%d body=%s", w.Code, calls, w.Body.String())
+	}
+	if gotBot != "revi-converse" {
+		t.Fatalf("expected revi-converse routing, got bot=%q", gotBot)
+	}
+	if gotVars["converse_question"] != "why is the SSRF critical?" {
+		t.Fatalf("converse_question not threaded: %v", gotVars["converse_question"])
+	}
+	// Conversation context is carried for both routing paths.
+	if gotVars["discussion_id"] != "d-1" || gotVars["replier"] != "alice" {
+		t.Fatalf("conversation vars: %v", gotVars)
+	}
+	if gotVars["trigger_args"] != "why is the SSRF critical?" || gotVars["trigger_command"] != "revi" {
+		t.Fatalf("trigger vars: %v", gotVars)
+	}
+	// re_review must be dropped on the converse path — it's a question,
+	// not a fresh review.
+	if _, present := gotVars["re_review"]; present {
+		t.Fatalf("re_review flag must be dropped on the converse path: %v", gotVars)
+	}
+}
+
+// TestGitLabNoteHook_ConverseFallsBackWhenBotMissing pins that even
+// when the webhook scope ALLOWS revi-converse, if the bot bundle is
+// NOT resolvable on disk (older deploy without the bundle) the handler
+// gracefully falls back to the review-pr re-review path with the args
+// ignored — same outcome as a webhook that doesn't scope the converse
+// bot. The fallback keeps a /revi <question> note useful instead of
+// erroring out the inbound webhook.
+func TestGitLabNoteHook_ConverseFallsBackWhenBotMissing(t *testing.T) {
+	s := newWebhookTestServer(t)
+	// Point at an empty bot dir so revi-converse does not resolve.
+	s.cfg.Bots.Paths = []string{t.TempDir()}
+	var calls int
+	var gotBot string
+	var gotVars map[string]string
+	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, _, _ string, _, _ map[string]string) (string, error) {
+		calls++
+		gotBot, gotVars = botID, vars
+		return "run-fallback-1", nil
+	}
+	cfg := glConfig()
+	cfg.BotIDs = []string{"review-pr", "revi-converse"}
+	body := strings.Replace(glNoteRevi, `"note": "/revi"`, `"note": "/revi why is the SSRF critical?"`, 1)
+	w := httptest.NewRecorder()
+	s.handleGitLabWebhook(w, glNoteReq(gitlabCtx(cfg), body))
+	if w.Code != http.StatusAccepted || calls != 1 {
+		t.Fatalf("fallback: code=%d calls=%d body=%s", w.Code, calls, w.Body.String())
+	}
+	if gotBot != "review-pr" {
+		t.Fatalf("expected review-pr fallback, got bot=%q", gotBot)
+	}
+	if gotVars["re_review"] != "true" {
+		t.Fatalf("re_review flag must be set on the fallback re-review path: %v", gotVars)
+	}
+	if _, present := gotVars["converse_question"]; present {
+		t.Fatalf("converse_question must NOT be set on the fallback path: %v", gotVars)
 	}
 }
 

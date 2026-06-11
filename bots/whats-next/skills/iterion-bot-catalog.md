@@ -194,6 +194,7 @@ dispatcher routes on it), never the persona.
 | Devy | `devbox-setup` |
 | Doki | `docs-refresh` |
 | Featurly | `feature-dev` |
+| Revi (converse) | `revi-converse` |
 | Revi | `review-pr` |
 | Depsy | `sec-audit-deps` |
 | Seki | `sec-audit-source` |
@@ -292,6 +293,31 @@ loop until two consecutive cross-family approvals.
   feature_prompt at the new .bot file to author.
 - **Vars**: `feature_prompt` (string, required), `workspace_dir` (string)
 - **Path**: `bots/feature-dev/main.bot`
+
+### `revi-converse` — Revi (converse)
+
+Conversational sibling of Revi (review-pr). Triggered when an
+authorized forge user asks a focused QUESTION on an open merge /
+pull request — `/revi <question>` (e.g.
+`/revi why is the SSRF critical?`). Reads the question + the MR
+diff against the branch's merge-base, formulates a CONCISE,
+GROUNDED answer (a senior code reviewer's follow-up — not a
+fresh full review), and posts the answer as a REPLY in the same
+discussion thread via the forge_token. Never edits, fixes, or
+commits code. When `/revi` is sent without a question, the
+webhook handler routes to review-pr for a fresh re-review
+instead.
+
+- **Use when**:
+  Use when an operator asks a follow-up question on an open MR
+  about Revi's earlier findings or the diff itself — clarification,
+  rationale, severity justification, alternative fixes. NOT for
+  re-reviewing the MR (that is review-pr / Revi), NOT for editing
+  code (that is Billy or Featurly), NOT for triaging issues on the
+  board.
+- **Triggers**: revi-converse, ask, converse
+- **Vars**: `base_ref` (string), `converse_question` (string), `discussion_id` (string), `pr_url` (string), `replier` (string), `trigger_note` (string), `workspace_dir` (string)
+- **Path**: `bots/revi-converse/main.bot`
 
 ### `review-pr` — Revi
 

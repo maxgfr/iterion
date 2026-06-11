@@ -149,7 +149,10 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, r 
 	}
 	// Gate the replier (forge-token resolution → loop-guard → allowlist
 	// OR role-gate) — externalities live behind a seam so handler tests
-	// don't need a live GitLab.
+	// don't need a live GitLab. Authorisation is identical whether we
+	// end up routing to review-pr (re-review) or revi-converse (in-thread
+	// answer), so we run it once on the review bot's identity (forge_token
+	// binding is the same name across both bots).
 	gate := s.webhookNoteGate
 	if gate == nil {
 		gate = s.realWebhookNoteGate
@@ -168,16 +171,41 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, r 
 		s.logger.Debug("webhooks: gitlab note %s!%d /%s by %s authorized (%s)", p.ProjectPath, p.MRIID, cmd, p.AuthorUsername, reason)
 	}
 
+	// Route: `/revi <question>` with non-empty args → revi-converse
+	// (in-thread answer). Bare `/revi` (no args) keeps today's review-pr
+	// re-review behaviour. The converse bot must be permitted by the
+	// webhook scope AND resolvable on disk; otherwise we fall back to
+	// the re-review path with the args ignored (matching pre-A5
+	// behaviour and TestGitLabNoteHook_FocusArgTolerated).
+	vars := s.buildGitLabNoteVars(p, cmd, cmdArgs, cfg.LaunchVars)
+	if cmdArgs != "" && s.canRouteToConverseBot(cfg) {
+		botID = defaultWebhookBotReviConverse
+		// Drop the re_review flag for the converse path — it's a
+		// question, not a fresh review — and pass the question
+		// explicitly. Other conversation vars (discussion_id,
+		// trigger_note, replier) are already in vars.
+		delete(vars, "re_review")
+		vars["converse_question"] = cmdArgs
+		if s.logger != nil {
+			s.logger.Debug("webhooks: gitlab note %s!%d /revi <question> routed to %s", p.ProjectPath, p.MRIID, botID)
+		}
+	}
+
 	// Idempotency: one launch per note.
 	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("%s|%s|%d|%s", cfg.TenantID, cfg.ID, p.ProjectID, p.SubjectID())))
 
-	// Launch: review-pr re-reviews the current MR state. The conversation
-	// vars (discussion_id/trigger_note/replier) carry the thread context
-	// for the converse bot + the forge.reply capability (A4/A5);
-	// re_review marks the posted summary with the 🔁 prefix
-	// (forge-pr-review skill). scope_notes carries the MR context — the
-	// triggering note rides separately as trigger_note.
-	vars := reviewPRVars(p.MRURL, p.TargetBranch, strings.TrimSpace(p.MRTitle+"\n\n"+p.MRDesc), cfg.LaunchVars, map[string]string{
+	s.insertAndLaunchWebhook(ctx, w, r, cfg, gitlabNoteMeta(p), idemKey, botID, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
+}
+
+// buildGitLabNoteVars composes the launch-vars map common to both note
+// routing paths (review-pr re-review and revi-converse in-thread
+// answer). The conversation vars (discussion_id / trigger_note /
+// replier / trigger_command / trigger_args) carry the thread context
+// for both bots; re_review marks the posted summary with the 🔁
+// prefix on the re-review path (the converse path deletes it before
+// launching). scope_notes carries the MR context.
+func (s *Server) buildGitLabNoteVars(p gitlab.ParsedNote, cmd, cmdArgs string, launchVars map[string]string) map[string]string {
+	return reviewPRVars(p.MRURL, p.TargetBranch, strings.TrimSpace(p.MRTitle+"\n\n"+p.MRDesc), launchVars, map[string]string{
 		"conversation_mode": "reply",
 		"discussion_id":     p.DiscussionID,
 		"trigger_note":      p.NoteBody,
@@ -186,8 +214,20 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, r 
 		"replier":           p.AuthorUsername,
 		"re_review":         "true",
 	})
+}
 
-	s.insertAndLaunchWebhook(ctx, w, r, cfg, gitlabNoteMeta(p), idemKey, botID, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
+// canRouteToConverseBot reports whether the conversational bot can be
+// launched on this webhook: both permitted by the webhook scope AND
+// resolvable on disk (older deploys without the bundle gracefully
+// fall back to the re-review path). The check is cheap — a single
+// botregistry.ResolveBotPath scan — but happens only on `/revi
+// <question>` deliveries, not on every note.
+func (s *Server) canRouteToConverseBot(cfg webhooks.Config) bool {
+	if !cfg.AllowsBot(defaultWebhookBotReviConverse) {
+		return false
+	}
+	_, _, err := s.resolveBotSource(defaultWebhookBotReviConverse)
+	return err == nil
 }
 
 // recordNoteDelivery inserts a terminal note-event audit row with a

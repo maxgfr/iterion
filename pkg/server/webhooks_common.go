@@ -25,6 +25,15 @@ const maxWebhookBodyBytes = 5 << 20
 // this default — it's bot-agnostic by design.
 const defaultWebhookBotReviewPR = "review-pr"
 
+// defaultWebhookBotReviConverse is the conversational sibling iterion
+// routes to when a `/revi <question>` note carries non-empty args (a
+// follow-up question, not a re-review request). See
+// docs/forge-conversations.md §A5. When this bot isn't permitted by
+// the webhook scope OR isn't resolvable on disk (older deploy without
+// the bundle), the handler gracefully falls back to the re-review
+// path with the args ignored — matching today's behaviour.
+const defaultWebhookBotReviConverse = "revi-converse"
+
 // webhookEventMeta is the provider-agnostic carrier of "what happened
 // upstream" the common helpers consume. Every field is optional: a
 // provider that doesn't have e.g. a project path leaves it empty and

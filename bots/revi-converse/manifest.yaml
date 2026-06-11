@@ -1,0 +1,25 @@
+name: revi-converse
+display_name: Revi (converse)
+version: 0.1.0
+description: |
+  Conversational sibling of Revi (review-pr). Triggered when an
+  authorized forge user asks a focused QUESTION on an open merge /
+  pull request — `/revi <question>` (e.g.
+  `/revi why is the SSRF critical?`). Reads the question + the MR
+  diff against the branch's merge-base, formulates a CONCISE,
+  GROUNDED answer (a senior code reviewer's follow-up — not a
+  fresh full review), and posts the answer as a REPLY in the same
+  discussion thread via the forge_token. Never edits, fixes, or
+  commits code. When `/revi` is sent without a question, the
+  webhook handler routes to review-pr for a fresh re-review
+  instead.
+when_to_use: |
+  Use when an operator asks a follow-up question on an open MR
+  about Revi's earlier findings or the diff itself — clarification,
+  rationale, severity justification, alternative fixes. NOT for
+  re-reviewing the MR (that is review-pr / Revi), NOT for editing
+  code (that is Billy or Featurly), NOT for triaging issues on the
+  board.
+author: SocialGouv (devthejo) — revi-converse/main.bot
+schema_version: 1
+triggers: [revi-converse, ask, converse]
