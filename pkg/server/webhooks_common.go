@@ -63,12 +63,22 @@ func newWebhookDelivery(cfg webhooks.Config, meta webhookEventMeta, status, payl
 	}
 }
 
+// markWebhookOutcome bumps the per-provider delivery counter. The
+// status label space is the small fixed Delivery status enum — no
+// tenant label (cardinality discipline; Mongo counters are billing).
+func (s *Server) markWebhookOutcome(provider webhooks.Provider, status string) {
+	if s.cfg.Metrics != nil {
+		s.cfg.Metrics.WebhookDeliveriesTotal.WithLabelValues(string(provider), status).Inc()
+	}
+}
+
 // recordTerminalWebhookDelivery inserts a non-launched audit row with a
 // uuid idempotency key — terminal rows must NEVER collide with the
 // dedup key (otherwise a real subsequent event under that key would
 // look like a replay). Best-effort: an audit-store error doesn't fail
 // the inbound request.
 func (s *Server) recordTerminalWebhookDelivery(ctx context.Context, cfg webhooks.Config, meta webhookEventMeta, status, payloadHash, srcIP, errMsg string) {
+	s.markWebhookOutcome(cfg.Provider, status)
 	if s.webhookDeliveries == nil {
 		return
 	}
@@ -128,6 +138,7 @@ func (s *Server) insertAndLaunchWebhook(
 		if err := s.webhookDeliveries.Insert(ctx, delivery); err != nil {
 			if errors.Is(err, webhooks.ErrDuplicate) {
 				existing, _ := s.webhookDeliveries.GetByIdempotencyKey(ctx, idemKey)
+				s.markWebhookOutcome(cfg.Provider, webhooks.StatusDuplicate)
 				writeJSONStatus(w, http.StatusOK, map[string]string{
 					"status": webhooks.StatusDuplicate, "run_id": existing.RunID, "delivery_id": existing.ID,
 				})
@@ -148,6 +159,7 @@ func (s *Server) insertAndLaunchWebhook(
 		delivery.Status = webhooks.StatusLaunchError
 		delivery.Error = lerr.Error()
 		s.updateWebhookDelivery(ctx, delivery)
+		s.markWebhookOutcome(cfg.Provider, webhooks.StatusLaunchError)
 		httpError(w, http.StatusBadGateway, "launch failed: %v", lerr)
 		return
 	}
@@ -156,6 +168,7 @@ func (s *Server) insertAndLaunchWebhook(
 	delivery.RunID = runID
 	delivery.LaunchedAt = &launchedAt
 	s.updateWebhookDelivery(ctx, delivery)
+	s.markWebhookOutcome(cfg.Provider, webhooks.StatusLaunched)
 
 	if s.logger != nil {
 		s.logger.Info("webhooks: %s/%s %s launched %s run=%s", cfg.Provider, meta.ProjectPath, meta.SubjectID, botID, runID)

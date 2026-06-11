@@ -1,0 +1,37 @@
+{{- if and (eq .Values.mode "cloud") (gt (int .Values.server.replicas) 1) -}}
+# Keep at least one server pod through voluntary disruptions (node
+# drains, cluster upgrades) — without this a drain can take every
+# replica down simultaneously and drop the API + webhook intake.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "iterion.fullname" . }}-server
+  labels:
+    {{- include "iterion.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "iterion.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
+{{- end }}
+{{- /* Render the runner PDB when the pool can exceed one pod: a static
+     replicas>1, or KEDA (which scales past the static count). */ -}}
+{{- if and (eq .Values.mode "cloud") .Values.runner.enabled (or (gt (int .Values.runner.replicas) 1) .Values.runner.keda.enabled) }}
+---
+# Same guard for the runner pool: a drain that evicts every runner at
+# once interrupts all in-flight runs simultaneously (each checkpoints
+# and naks, but the thundering-herd resume is avoidable).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "iterion.fullname" . }}-runner
+  labels:
+    {{- include "iterion.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "iterion.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: runner
+{{- end }}

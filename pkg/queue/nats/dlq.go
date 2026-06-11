@@ -161,6 +161,20 @@ func (c *Conn) RepublishDLQ(ctx context.Context, seq uint64) (string, error) {
 	return view.RunID, nil
 }
 
+// DLQDepth reports how many messages are currently parked. Feeds the
+// iterion_dlq_depth gauge (polled by the server's sweeper loop).
+func (c *Conn) DLQDepth(ctx context.Context) (uint64, error) {
+	stream, err := c.js.Stream(ctx, c.cfg.DLQStream)
+	if err != nil {
+		return 0, fmt.Errorf("queue/nats: dlq stream: %w", err)
+	}
+	info, err := stream.Info(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("queue/nats: dlq info: %w", err)
+	}
+	return info.State.Msgs, nil
+}
+
 // DiscardDLQ permanently deletes one parked message.
 func (c *Conn) DiscardDLQ(ctx context.Context, seq uint64) error {
 	stream, err := c.js.Stream(ctx, c.cfg.DLQStream)

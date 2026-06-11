@@ -203,6 +203,9 @@ func nextMonthStart(now time.Time) time.Time {
 // reason token (machine contract), `detail` the human message, plus
 // Retry-After / reset_at when applicable.
 func (s *Server) writeLaunchDenial(w http.ResponseWriter, r *http.Request, d *launchDenial) {
+	if s.cfg.Metrics != nil {
+		s.cfg.Metrics.LaunchDeniedTotal.WithLabelValues(d.reason).Inc()
+	}
 	if d.retryAfter > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(d.retryAfter.Seconds())+1))
 	}

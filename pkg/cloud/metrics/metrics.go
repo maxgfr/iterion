@@ -43,6 +43,17 @@ type Registry struct {
 	LLMTokensTotal         *prometheus.CounterVec // backend, model, direction
 	LLMCostUSDTotal        *prometheus.CounterVec // backend, model
 	RunnerHeartbeatErrors  prometheus.Counter
+
+	// --- Control-plane metrics ------------------------------------
+	// Deliberately NO tenant labels anywhere (cardinality discipline);
+	// per-org accounting lives in the Mongo orgusage counters.
+	WebhookDeliveriesTotal  *prometheus.CounterVec // provider, status
+	WebhookThrottledTotal   *prometheus.CounterVec // provider, reason (rate_limited|quota_exceeded)
+	AuthLoginsTotal         *prometheus.CounterVec // result (success|invalid|locked|password_change_required|error)
+	AuthPasswordResetsTotal *prometheus.CounterVec // step (requested|confirmed)
+	LaunchDeniedTotal       *prometheus.CounterVec // reason (org_suspended|monthly_run_quota_exceeded|…)
+	RunsOrphanRecovered     prometheus.Counter
+	DLQDepth                prometheus.Gauge
 }
 
 // Default returns a process-wide singleton Registry, lazily
@@ -106,11 +117,43 @@ func New() *Registry {
 		Help: "Number of NATS KV lease refresh failures encountered while a run was in flight.",
 	})
 
+	r.WebhookDeliveriesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "iterion_webhook_deliveries_total",
+		Help: "Inbound webhook deliveries by provider and terminal status (launched/filtered/invalid/duplicate/launch_error).",
+	}, []string{"provider", "status"})
+	r.WebhookThrottledTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "iterion_webhook_throttled_total",
+		Help: "Inbound webhook deliveries rejected before processing, by provider and reason (rate_limited|quota_exceeded).",
+	}, []string{"provider", "reason"})
+	r.AuthLoginsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "iterion_auth_logins_total",
+		Help: "Password login attempts by result.",
+	}, []string{"result"})
+	r.AuthPasswordResetsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "iterion_auth_password_resets_total",
+		Help: "Self-service password reset flow progression (requested|confirmed).",
+	}, []string{"step"})
+	r.LaunchDeniedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "iterion_launch_denied_total",
+		Help: "Run launches denied by the admission gate, by stable reason token.",
+	}, []string{"reason"})
+	r.RunsOrphanRecovered = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "iterion_runs_orphan_recovered_total",
+		Help: "Stranded queued/running runs the sweeper flipped to failed_resumable.",
+	})
+	r.DLQDepth = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "iterion_dlq_depth",
+		Help: "Messages currently parked on the runs DLQ stream.",
+	})
+
 	reg.MustRegister(
 		r.RunsCreatedTotal, r.RunsActive, r.RunDurationSeconds,
 		r.WSConnections, r.MongoChangeStreamLagS,
 		r.NATSPendingMessages, r.WorkspaceCloneDuration,
 		r.LLMTokensTotal, r.LLMCostUSDTotal, r.RunnerHeartbeatErrors,
+		r.WebhookDeliveriesTotal, r.WebhookThrottledTotal,
+		r.AuthLoginsTotal, r.AuthPasswordResetsTotal,
+		r.LaunchDeniedTotal, r.RunsOrphanRecovered, r.DLQDepth,
 	)
 	return r
 }

@@ -1,0 +1,55 @@
+{{- if and .Values.metrics.enabled .Values.metrics.prometheusRule.enabled -}}
+# Starter alert pack for the cloud control plane. Opt-in
+# (metrics.prometheusRule.enabled) because it requires the
+# PrometheusRule CRD (prometheus-operator). Thresholds are deliberately
+# conservative — tune per deployment.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "iterion.fullname" . }}
+  labels:
+    {{- include "iterion.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: iterion.cloud
+      rules:
+        - alert: IterionDLQNotEmpty
+          expr: iterion_dlq_depth > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Runs are parked on the DLQ"
+            description: "{{ `{{ $value }}` }} message(s) have exhausted MaxDeliver and need an operator decision: replay or discard via /api/admin/dlq."
+        - alert: IterionRunnerHeartbeatErrors
+          expr: increase(iterion_runner_heartbeat_errors_total[5m]) > 3
+          labels:
+            severity: warning
+          annotations:
+            summary: "Runner lease refreshes are failing"
+            description: "NATS KV lease refresh failures — runs may be cancelled to avoid split-brain. Check NATS health."
+        - alert: IterionOrphanRunsRecovered
+          expr: increase(iterion_runs_orphan_recovered_total[30m]) > 0
+          labels:
+            severity: info
+          annotations:
+            summary: "The sweeper recovered orphaned runs"
+            description: "Runner pods are dying without terminal status writes (crash/OOM/eviction). The runs are resumable; investigate the pod churn."
+        - alert: IterionLaunchDeniesSpiking
+          expr: sum(rate(iterion_launch_denied_total[10m])) > 0.5
+          labels:
+            severity: info
+          annotations:
+            summary: "Run launches are being denied at a sustained rate"
+            description: "Orgs are hitting quotas/caps (see reason label). Expected under abuse; worth a look if it's a paying tenant."
+        - alert: IterionWebhookThrottling
+          expr: increase(iterion_webhook_throttled_total[1h]) > 50
+          labels:
+            severity: info
+          annotations:
+            summary: "Inbound webhooks are being throttled"
+            description: "Sustained rate-limit/quota rejections on inbound webhooks — a noisy forge integration or an abusive caller."
+{{- end }}

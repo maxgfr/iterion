@@ -362,6 +362,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		// addresses correspond to disabled accounts. The detailed err
 		// stays available in logs.
 		if errors.Is(err, auth.ErrAccountDisabled) || errors.Is(err, auth.ErrInvalidCredentials) {
+			s.markLogin("invalid")
 			httpError(w, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
@@ -370,13 +371,27 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		// flow. Don't mint cookies here — issuing tokens before the
 		// password is rotated would defeat the gate entirely.
 		if errors.Is(err, auth.ErrPasswordChangeRequired) {
+			s.markLogin("password_change_required")
 			httpError(w, http.StatusForbidden, "password change required")
 			return
 		}
+		// Lockout deliberately surfaces as ErrInvalidCredentials above
+		// (timing-indistinguishable), so there is no separate "locked"
+		// label — anything else is an internal error.
+		s.markLogin("error")
 		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
 		return
 	}
+	s.markLogin("success")
 	s.renderAuthResponse(w, r, res)
+}
+
+// markLogin bumps the password-login outcome counter (no-op without a
+// metrics registry).
+func (s *Server) markLogin(result string) {
+	if s.cfg.Metrics != nil {
+		s.cfg.Metrics.AuthLoginsTotal.WithLabelValues(result).Inc()
+	}
 }
 
 // handleChangePassword completes the forced-rotation flow for a

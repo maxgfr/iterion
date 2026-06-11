@@ -92,6 +92,9 @@ func (s *Server) webhookAuth(provider webhooks.Provider, next http.Handler) http
 				bucket = authBucketCfg{rate: defaultWebhookRate.Rate, burst: defaultWebhookRate.Burst}
 			}
 			if ok, retry := s.authLimiter.allow("wh:"+cfg.ID, bucket); !ok {
+				if s.cfg.Metrics != nil {
+					s.cfg.Metrics.WebhookThrottledTotal.WithLabelValues(string(cfg.Provider), "rate_limited").Inc()
+				}
 				w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())+1))
 				httpError(w, http.StatusTooManyRequests, "rate limited")
 				return
@@ -109,6 +112,9 @@ func (s *Server) webhookAuth(provider webhooks.Provider, next http.Handler) http
 				return
 			}
 			if !ok {
+				if s.cfg.Metrics != nil {
+					s.cfg.Metrics.WebhookThrottledTotal.WithLabelValues(string(cfg.Provider), "quota_exceeded").Inc()
+				}
 				httpError(w, http.StatusTooManyRequests, "monthly call quota exceeded")
 				return
 			}

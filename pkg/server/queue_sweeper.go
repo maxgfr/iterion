@@ -66,6 +66,13 @@ func (s *Server) runQueueSweeper(ctx context.Context, lister staleRunLister, lea
 			return
 		case <-t.C:
 			s.sweepOrphanRuns(ctx, lister, leases, time.Now().UTC())
+			// Piggy-back the DLQ depth gauge on the same cadence — the
+			// sweeper only runs in cloud mode where the queue is wired.
+			if s.queue != nil && s.cfg.Metrics != nil {
+				if depth, err := s.queue.DLQDepth(ctx); err == nil {
+					s.cfg.Metrics.DLQDepth.Set(float64(depth))
+				}
+			}
 		}
 	}
 }
@@ -107,8 +114,13 @@ func (s *Server) sweepOrphanRuns(ctx context.Context, lister staleRunLister, lea
 				}
 				continue
 			}
-			if changed && s.logger != nil {
-				s.logger.Info("sweeper: orphan run %s (%s, tenant %s) → failed_resumable", ref.ID, ref.Status, ref.TenantID)
+			if changed {
+				if s.cfg.Metrics != nil {
+					s.cfg.Metrics.RunsOrphanRecovered.Inc()
+				}
+				if s.logger != nil {
+					s.logger.Info("sweeper: orphan run %s (%s, tenant %s) → failed_resumable", ref.ID, ref.Status, ref.TenantID)
+				}
 			}
 		}
 	}

@@ -339,6 +339,12 @@ metrics:
     namespace: ""
     interval: 30s
     labels: {}
+  # Starter alert pack (DLQ depth, heartbeat errors, orphan recoveries,
+  # launch denials, webhook throttling). Needs the PrometheusRule CRD
+  # (prometheus-operator).
+  prometheusRule:
+    enabled: false
+    additionalLabels: {}
 
 # --- Sub-charts (off by default; values-dev.yaml turns them on) ----
 mongodb:

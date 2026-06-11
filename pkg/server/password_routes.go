@@ -22,6 +22,9 @@ func (s *Server) handlePasswordResetRequest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	_ = s.authSvc.RequestPasswordReset(r.Context(), req.Email)
+	if s.cfg.Metrics != nil {
+		s.cfg.Metrics.AuthPasswordResetsTotal.WithLabelValues("requested").Inc()
+	}
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
@@ -46,6 +49,9 @@ func (s *Server) handlePasswordResetConfirm(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	s.auditPlatform(r, res.ActiveTeamID, "user.password_reset", "user", res.User.ID, nil)
+	if s.cfg.Metrics != nil {
+		s.cfg.Metrics.AuthPasswordResetsTotal.WithLabelValues("confirmed").Inc()
+	}
 	s.renderAuthResponse(w, r, res)
 }
 
