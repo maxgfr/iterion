@@ -71,6 +71,14 @@ type Config struct {
 	// bot identities. See docs/byok.md.
 	SecretOverrides map[string]string `bson:"secret_overrides,omitempty" json:"secret_overrides,omitempty"`
 
+	// AuthorizedRepliers + MinReplierRole gate who may "talk back" to the bot
+	// via a note (a /revi command or a reply): a note author is authorized
+	// when they are in AuthorizedRepliers (usernames with/without @, or numeric
+	// ids) OR a project member at >= MinReplierRole (guest|reporter|developer|
+	// maintainer|owner; empty → developer). See docs/forge-conversations.md.
+	AuthorizedRepliers []string `bson:"authorized_repliers,omitempty" json:"authorized_repliers,omitempty"`
+	MinReplierRole     string   `bson:"min_replier_role,omitempty" json:"min_replier_role,omitempty"`
+
 	CreatedBy  string     `bson:"created_by" json:"created_by"`
 	CreatedAt  time.Time  `bson:"created_at" json:"created_at"`
 	UpdatedAt  time.Time  `bson:"updated_at" json:"updated_at"`

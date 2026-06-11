@@ -37,19 +37,21 @@ func (s *Server) registerWebhookRoutes() {
 }
 
 type webhookConfigReq struct {
-	Name             *string           `json:"name,omitempty"`
-	Provider         *string           `json:"provider,omitempty"`
-	Enabled          *bool             `json:"enabled,omitempty"`
-	BotIDs           []string          `json:"bot_ids,omitempty"`
-	WildcardBots     *bool             `json:"wildcard_bots,omitempty"`
-	DefaultBotID     *string           `json:"default_bot_id,omitempty"`
-	ProjectAllowlist []string          `json:"project_allowlist,omitempty"`
-	EventAllowlist   []string          `json:"event_allowlist,omitempty"`
-	RateLimit        *webhooks.Rate    `json:"rate_limit,omitempty"`
-	MonthlyCallLimit *int              `json:"monthly_call_limit,omitempty"`
-	LaunchVars       map[string]string `json:"launch_vars,omitempty"`
-	KeyOverrides     map[string]string `json:"key_overrides,omitempty"`
-	SecretOverrides  map[string]string `json:"secret_overrides,omitempty"`
+	Name               *string           `json:"name,omitempty"`
+	Provider           *string           `json:"provider,omitempty"`
+	Enabled            *bool             `json:"enabled,omitempty"`
+	BotIDs             []string          `json:"bot_ids,omitempty"`
+	WildcardBots       *bool             `json:"wildcard_bots,omitempty"`
+	DefaultBotID       *string           `json:"default_bot_id,omitempty"`
+	ProjectAllowlist   []string          `json:"project_allowlist,omitempty"`
+	EventAllowlist     []string          `json:"event_allowlist,omitempty"`
+	RateLimit          *webhooks.Rate    `json:"rate_limit,omitempty"`
+	MonthlyCallLimit   *int              `json:"monthly_call_limit,omitempty"`
+	LaunchVars         map[string]string `json:"launch_vars,omitempty"`
+	KeyOverrides       map[string]string `json:"key_overrides,omitempty"`
+	SecretOverrides    map[string]string `json:"secret_overrides,omitempty"`
+	AuthorizedRepliers []string          `json:"authorized_repliers,omitempty"`
+	MinReplierRole     *string           `json:"min_replier_role,omitempty"`
 }
 
 type webhookWithToken struct {
@@ -169,31 +171,35 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		enabled = *req.Enabled
 	}
 	cfg := webhooks.Config{
-		ID:               uuid.NewString(),
-		TenantID:         teamID,
-		Name:             *req.Name,
-		Provider:         provider,
-		Enabled:          enabled,
-		TokenHash:        hash,
-		TokenLast4:       last4,
-		Fingerprint:      fp,
-		BotIDs:           botIDs,
-		WildcardBots:     wildcard,
-		ProjectAllowlist: req.ProjectAllowlist,
-		EventAllowlist:   req.EventAllowlist,
-		RateLimit:        rate,
-		LaunchVars:       req.LaunchVars,
-		KeyOverrides:     req.KeyOverrides,
-		SecretOverrides:  req.SecretOverrides,
-		CreatedBy:        id.UserID,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		ID:                 uuid.NewString(),
+		TenantID:           teamID,
+		Name:               *req.Name,
+		Provider:           provider,
+		Enabled:            enabled,
+		TokenHash:          hash,
+		TokenLast4:         last4,
+		Fingerprint:        fp,
+		BotIDs:             botIDs,
+		WildcardBots:       wildcard,
+		ProjectAllowlist:   req.ProjectAllowlist,
+		EventAllowlist:     req.EventAllowlist,
+		RateLimit:          rate,
+		LaunchVars:         req.LaunchVars,
+		KeyOverrides:       req.KeyOverrides,
+		SecretOverrides:    req.SecretOverrides,
+		AuthorizedRepliers: req.AuthorizedRepliers,
+		CreatedBy:          id.UserID,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	if req.DefaultBotID != nil {
 		cfg.DefaultBotID = *req.DefaultBotID
 	}
 	if req.MonthlyCallLimit != nil {
 		cfg.MonthlyCallLimit = *req.MonthlyCallLimit
+	}
+	if req.MinReplierRole != nil {
+		cfg.MinReplierRole = *req.MinReplierRole
 	}
 	if err := s.validateKeyOverrides(r.Context(), teamID, cfg.KeyOverrides); err != nil {
 		httpError(w, http.StatusBadRequest, "%s", err.Error())
@@ -310,6 +316,12 @@ func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cfg.SecretOverrides = req.SecretOverrides
+	}
+	if req.AuthorizedRepliers != nil {
+		cfg.AuthorizedRepliers = req.AuthorizedRepliers
+	}
+	if req.MinReplierRole != nil {
+		cfg.MinReplierRole = *req.MinReplierRole
 	}
 	// Re-normalise bot scope only when the caller touched it.
 	if req.BotIDs != nil || req.WildcardBots != nil {
