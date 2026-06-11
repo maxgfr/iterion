@@ -106,6 +106,7 @@ func (s *Service) ListCtx(ctx context.Context, f ListFilter) ([]RunSummary, erro
 			Name:             r.Name,
 			WorkflowName:     r.WorkflowName,
 			BundleName:       resolveBundleName(r.BundleName, r.BundlePath),
+			SourceKind:       deriveSourceKind(r),
 			Status:           r.Status,
 			FilePath:         r.FilePath,
 			CreatedAt:        r.CreatedAt,
@@ -130,6 +131,25 @@ func (s *Service) ListCtx(ctx context.Context, f ListFilter) ([]RunSummary, erro
 		out = out[:f.Limit]
 	}
 	return out, nil
+}
+
+// deriveSourceKind classifies how a run was triggered, for list grouping /
+// filtering. Derived from the run's source/owner; not persisted. Trigger
+// sources (dispatcher, webhook) take precedence over the structural ones
+// (fork, shard); a plain human launch (CLI / studio / cloud API) is "manual".
+func deriveSourceKind(r *store.Run) string {
+	switch {
+	case r.Source != nil && r.Source.Kind != "":
+		return r.Source.Kind // "dispatcher"
+	case strings.HasPrefix(r.OwnerID, "webhook:"):
+		return "webhook"
+	case r.ForkedFrom != "":
+		return "fork"
+	case r.ParentRunID != "":
+		return "shard"
+	default:
+		return "manual"
+	}
 }
 
 // runTouchedNode returns true if the run's events.jsonl contains at

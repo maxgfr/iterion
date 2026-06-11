@@ -15,18 +15,33 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { IconButton } from "@/components/ui/IconButton";
 import { Input } from "@/components/ui/Input";
 import { LiveDot } from "@/components/ui/LiveDot";
-import type { RunStatus, RunSummary } from "@/api/runs";
+import { Select } from "@/components/ui/Select";
+import type { RunSourceKind, RunStatus, RunSummary } from "@/api/runs";
 import { formatRelative } from "@/lib/format";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useRuns } from "@/hooks/useRuns";
 import { STATUS_VARIANT, labelForStatus } from "./runStatusMeta";
+import { metaForSource, runSourceKind } from "./runSourceMeta";
 import QueueDepthBar from "./QueueDepthBar";
 import {
+  availableSourceKinds,
   filterRuns,
   parseSince,
+  parseSource,
   SINCE_FILTERS,
   type SinceFilter,
+  type SourceFilter,
 } from "./runListFilter";
+import {
+  GROUP_OPTIONS,
+  groupRuns,
+  parseGroup,
+  parseSort,
+  SORT_OPTIONS,
+  sortRuns,
+  type GroupKey,
+  type SortKey,
+} from "./runListSortGroup";
 
 const STATUS_FILTERS: Array<{ value: RunStatus | ""; label: string }> = [
   { value: "", label: "All" },
@@ -35,6 +50,10 @@ const STATUS_FILTERS: Array<{ value: RunStatus | ""; label: string }> = [
   // progression naturally (cloud-ready plan §F T-13).
   { value: "queued", label: "Queued" },
   { value: "paused_waiting_human", label: "Paused" },
+  // Operator soft-pause has its own status; the row above is the
+  // human-input variant. Keep both addressable in the filter strip so
+  // an operator triaging "what's paused" can disambiguate at-a-glance.
+  { value: "paused_operator", label: "Paused (operator)" },
   { value: "finished", label: "Finished" },
   { value: "failed", label: "Failed" },
   { value: "failed_resumable", label: "Failed (resumable)" },
@@ -54,6 +73,9 @@ export default function RunListView() {
     return {
       query: p.get("q") ?? "",
       since: parseSince(p.get("since")),
+      source: parseSource(p.get("source")),
+      sort: parseSort(p.get("sort")),
+      group: parseGroup(p.get("group")),
     };
     // Mount-only: subsequent search-string changes come from our own
     // setLocation calls below and must not clobber in-flight state.
@@ -64,6 +86,9 @@ export default function RunListView() {
   const [queryInput, setQueryInput] = useState(initial.query);
   const query = useDebounce(queryInput, QUERY_DEBOUNCE_MS);
   const [since, setSince] = useState<SinceFilter>(initial.since);
+  const [source, setSource] = useState<SourceFilter>(initial.source);
+  const [sort, setSort] = useState<SortKey>(initial.sort);
+  const [group, setGroup] = useState<GroupKey>(initial.group);
 
   // Mirror committed (debounced) filters into the URL with replace
   // semantics — keeps the back-button stack uncluttered while still
@@ -73,18 +98,38 @@ export default function RunListView() {
     const p = new URLSearchParams();
     if (query) p.set("q", query);
     if (since !== "all") p.set("since", since);
+    if (source !== "") p.set("source", source);
+    if (sort !== "started") p.set("sort", sort);
+    if (group !== "none") p.set("group", group);
     const qs = p.toString();
     const target = qs ? `/runs?${qs}` : "/runs";
     const current = search ? `${location}?${search}` : location;
     if (target !== current) setLocation(target, { replace: true });
-  }, [query, since, setLocation, location, search]);
+  }, [query, since, source, sort, group, setLocation, location, search]);
 
   const { runs, counts, loading, error } = useRuns({ status });
 
   const filteredRuns = useMemo(
-    () => filterRuns(runs, { query, since }),
-    [runs, query, since],
+    () => filterRuns(runs, { query, since, source }),
+    [runs, query, since, source],
   );
+
+  // Source-filter chip strip: only show kinds present in the current
+  // (status-filtered) fetched list. Recomputed off `runs` (not the
+  // post-filter list) so picking "Webhook" doesn't make the other
+  // chips vanish.
+  const availableSources = useMemo(() => availableSourceKinds(runs), [runs]);
+
+  // Per-source counts for the chip strip — informational, mirrors the
+  // status chip's count rendering.
+  const sourceCounts = useMemo(() => {
+    const m: Partial<Record<RunSourceKind, number>> = {};
+    for (const r of runs) {
+      const k = runSourceKind(r);
+      m[k] = (m[k] ?? 0) + 1;
+    }
+    return m;
+  }, [runs]);
 
   const openRun = useCallback(
     (id: string) => setLocation(`/runs/${encodeURIComponent(id)}`),
@@ -109,10 +154,23 @@ export default function RunListView() {
   // void prevents the linter from treating it as dead.
   void tick;
 
-  const filtersActive = query !== "" || since !== "all";
+  // Sort + group are layered on top of the filtered list. We anchor
+  // the "duration" sort and the in-flight tick on a captured `now` so
+  // re-renders within the same tick produce a stable order.
+  const now = useMemo(() => Date.now(), [tick]);
+  const sortedRuns = useMemo(
+    () => sortRuns(filteredRuns, sort, now),
+    [filteredRuns, sort, now],
+  );
+  const groups = useMemo(() => groupRuns(sortedRuns, group), [sortedRuns, group]);
+  const isGrouped = group !== "none";
+
+  const filtersActive =
+    query !== "" || since !== "all" || source !== "";
   const clearFilters = useCallback(() => {
     setQueryInput("");
     setSince("all");
+    setSource("");
   }, []);
 
   return (
@@ -151,16 +209,23 @@ export default function RunListView() {
               <Cross2Icon />
             </IconButton>
           )}
-          <Button
-            className="ml-auto"
-            variant="ghost"
-            size="sm"
-            leadingIcon={<BarChartIcon />}
-            onClick={() => setLocation("/insights")}
-            title="Cross-run cost, fail rate, and duration over a configurable window"
-          >
-            Analytics
-          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <SortGroupControls
+              sort={sort}
+              onSort={setSort}
+              group={group}
+              onGroup={setGroup}
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              leadingIcon={<BarChartIcon />}
+              onClick={() => setLocation("/insights")}
+              title="Cross-run cost, fail rate, and duration over a configurable window"
+            >
+              Analytics
+            </Button>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {STATUS_FILTERS.map((f) => {
@@ -180,6 +245,43 @@ export default function RunListView() {
             );
           })}
         </div>
+        {availableSources.length > 0 && (
+          <div
+            className="flex flex-wrap items-center gap-1.5"
+            aria-label="Filter by run source"
+          >
+            <span className="text-fg-subtle text-xs mr-0.5">Source</span>
+            <FilterChip
+              active={source === ""}
+              label="All"
+              count={runs.length > 0 ? runs.length : undefined}
+              size="sm"
+              onClick={() => setSource("")}
+            />
+            {availableSources.map((kind) => {
+              const meta = metaForSource(kind);
+              const Icon = meta.Icon;
+              return (
+                <FilterChip
+                  key={kind}
+                  active={source === kind}
+                  label={
+                    <span
+                      className="inline-flex items-center gap-1"
+                      title={meta.description}
+                    >
+                      <Icon className="w-3 h-3" />
+                      <span>{meta.label}</span>
+                    </span>
+                  }
+                  count={sourceCounts[kind]}
+                  size="sm"
+                  onClick={() => setSource(kind)}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-auto">
@@ -245,12 +347,15 @@ export default function RunListView() {
           )
         ) : (
           <>
-            {/* Desktop / tablet: standard 6-column table. */}
+            {/* Desktop / tablet: standard table. Adds a Source column
+                so the user can tell at a glance how each run was
+                triggered without expanding the row. */}
             <table className="w-full text-xs hidden sm:table">
               <thead className="text-fg-subtle">
                 <tr className="border-b border-border-default">
                   <th className="text-left px-4 py-2 font-medium">Run</th>
                   <th className="text-left px-4 py-2 font-medium">Workflow</th>
+                  <th className="text-left px-4 py-2 font-medium">Source</th>
                   <th className="text-left px-4 py-2 font-medium">Status</th>
                   <th className="text-left px-4 py-2 font-medium">Started</th>
                   <th className="text-left px-4 py-2 font-medium">Duration</th>
@@ -258,18 +363,37 @@ export default function RunListView() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRuns.map((r) => (
-                  <RunRow key={r.id} run={r} onOpen={openRun} />
+                {groups.map((g) => (
+                  <RunRowGroup
+                    key={g.id}
+                    label={g.label}
+                    count={g.runs.length}
+                    showHeader={isGrouped}
+                    columnSpan={7}
+                  >
+                    {g.runs.map((r) => (
+                      <RunRow key={r.id} run={r} onOpen={openRun} />
+                    ))}
+                  </RunRowGroup>
                 ))}
               </tbody>
             </table>
-            <ul className="sm:hidden divide-y divide-border-default">
-              {filteredRuns.map((r) => (
-                <li key={r.id}>
-                  <RunCard run={r} onOpen={openRun} />
-                </li>
+            <div className="sm:hidden">
+              {groups.map((g) => (
+                <div key={g.id}>
+                  {isGrouped && (
+                    <RunCardGroupHeader label={g.label} count={g.runs.length} />
+                  )}
+                  <ul className="divide-y divide-border-default">
+                    {g.runs.map((r) => (
+                      <li key={r.id}>
+                        <RunCard run={r} onOpen={openRun} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ))}
-            </ul>
+            </div>
           </>
         )}
       </div>
@@ -334,6 +458,9 @@ const RunRow = memo(function RunRow({
         )}
       </td>
       <td className="px-4 py-2">
+        <SourceBadge run={run} />
+      </td>
+      <td className="px-4 py-2">
         <Badge variant={STATUS_VARIANT[run.status]}>
           {labelForStatus(run.status)}
         </Badge>
@@ -370,10 +497,11 @@ const RunCard = memo(function RunCard({
       onClick={() => onOpen(run.id)}
       className="w-full text-left px-4 py-3 flex flex-col gap-1 min-h-[44px] hover:bg-surface-2 active:bg-surface-3"
     >
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center gap-2 min-w-0 flex-wrap">
         <Badge variant={STATUS_VARIANT[run.status]}>
           {labelForStatus(run.status)}
         </Badge>
+        <SourceBadge run={run} />
         {run.active && (
           <LiveDot tone="live" size="sm" label="Active in this process" />
         )}
@@ -400,6 +528,134 @@ const RunCard = memo(function RunCard({
     </button>
   );
 });
+
+// SourceBadge renders the derived source classification for a run.
+// Empty / unknown source_kind values normalise to "manual" so legacy
+// rows still get a glyph instead of an awkward blank cell.
+const SourceBadge = memo(function SourceBadge({ run }: { run: RunSummary }) {
+  const kind = runSourceKind(run);
+  const meta = metaForSource(kind);
+  const Icon = meta.Icon;
+  return (
+    <Badge
+      variant={meta.variant}
+      size="sm"
+      title={meta.description}
+      leadingIcon={<Icon className="w-3 h-3" />}
+    >
+      {meta.label}
+    </Badge>
+  );
+});
+
+// SortGroupControls renders the two compact <select> dropdowns that
+// drive the client-side sort + grouping axes. Stateless: the parent
+// owns the URL-synced state. Hidden on the tightest viewports — at
+// that width the search box + chip strips already saturate the toolbar
+// row, and the dropdowns wrap awkwardly.
+function SortGroupControls({
+  sort,
+  onSort,
+  group,
+  onGroup,
+}: {
+  sort: SortKey;
+  onSort: (next: SortKey) => void;
+  group: GroupKey;
+  onGroup: (next: GroupKey) => void;
+}) {
+  return (
+    <div className="hidden md:flex items-center gap-1.5">
+      <label className="text-fg-subtle text-xs flex items-center gap-1">
+        <span>Sort</span>
+        <Select
+          size="sm"
+          value={sort}
+          onChange={(e) => onSort(e.currentTarget.value as SortKey)}
+          aria-label="Sort runs"
+          className="w-32"
+        >
+          {SORT_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </Select>
+      </label>
+      <label className="text-fg-subtle text-xs flex items-center gap-1">
+        <span>Group</span>
+        <Select
+          size="sm"
+          value={group}
+          onChange={(e) => onGroup(e.currentTarget.value as GroupKey)}
+          aria-label="Group runs"
+          className="w-32"
+        >
+          {GROUP_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </Select>
+      </label>
+    </div>
+  );
+}
+
+// RunRowGroup renders one group's rows inside the desktop <table>. When
+// the active group key is "none", the header row is suppressed and
+// only the rows pass through — keeps the table identical to the
+// pre-feature layout.
+function RunRowGroup({
+  label,
+  count,
+  showHeader,
+  columnSpan,
+  children,
+}: {
+  label: string;
+  count: number;
+  showHeader: boolean;
+  columnSpan: number;
+  children: ReactNode;
+}) {
+  if (!showHeader) {
+    // Fragments in <tbody> render directly as a child sequence — no
+    // wrapping element, so the rows keep their normal striping.
+    return <>{children}</>;
+  }
+  return (
+    <>
+      <tr className="bg-surface-2 border-y border-border-default">
+        <th
+          colSpan={columnSpan}
+          scope="rowgroup"
+          className="text-left px-4 py-1.5 font-medium text-fg-muted text-micro uppercase tracking-wide"
+        >
+          <span>{label}</span>
+          <span className="ml-2 text-fg-subtle normal-case tracking-normal">
+            {count}
+          </span>
+        </th>
+      </tr>
+      {children}
+    </>
+  );
+}
+
+// RunCardGroupHeader is the mobile-list counterpart to RunRowGroup —
+// rendered above each group's <ul>. Visually subdued so the rows still
+// dominate the scroll.
+function RunCardGroupHeader({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="px-4 py-1.5 bg-surface-2 border-y border-border-default text-fg-muted text-micro uppercase tracking-wide">
+      <span>{label}</span>
+      <span className="ml-2 text-fg-subtle normal-case tracking-normal">
+        {count}
+      </span>
+    </div>
+  );
+}
 
 // hasFriendlyName returns true when run.name is set AND differs from
 // run.id. Defensive guard against historical bugs where dispatcher-

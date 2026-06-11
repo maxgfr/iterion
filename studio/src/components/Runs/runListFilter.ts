@@ -1,8 +1,17 @@
-import type { RunSummary } from "@/api/runs";
+import type { RunSourceKind, RunSummary } from "@/api/runs";
+
+import {
+  normalizeSourceKind,
+  SOURCE_KIND_ORDER,
+} from "./runSourceMeta";
 
 // Date-range chip values. "all" keeps the previous behaviour where the
 // list is unfiltered by creation time.
 export type SinceFilter = "all" | "today" | "7d" | "30d";
+
+// Source-filter chip values. "" is the "All" pseudo-value (no source
+// filter applied), matching the existing status chip's contract.
+export type SourceFilter = "" | RunSourceKind;
 
 export const SINCE_FILTERS: Array<{ value: SinceFilter; label: string }> = [
   { value: "all", label: "All time" },
@@ -22,6 +31,22 @@ export function parseSince(raw: string | null | undefined): SinceFilter {
       return raw;
     default:
       return "all";
+  }
+}
+
+// parseSource normalises the `?source=` URL value into a SourceFilter.
+// Empty / unknown values fall back to "" ("All") so a stale bookmark
+// can't pin the view to a kind that no longer exists.
+export function parseSource(raw: string | null | undefined): SourceFilter {
+  switch (raw) {
+    case "manual":
+    case "webhook":
+    case "dispatcher":
+    case "fork":
+    case "shard":
+      return raw;
+    default:
+      return "";
   }
 }
 
@@ -59,28 +84,42 @@ function matchesQuery(run: RunSummary, needle: string): boolean {
 export interface FilterOptions {
   query: string;
   since: SinceFilter;
+  // Source classifier filter ("" = all kinds). Defaults to "" so
+  // existing call sites stay source-agnostic.
+  source?: SourceFilter;
   // Injected for deterministic tests; defaults to Date.now() in
   // production callers.
   now?: number;
 }
 
-// filterRuns applies the search box + date chip filters in one pass.
-// Status filtering is intentionally out of scope here — the server
-// already does it via `useRuns({ status })`, and we want this helper
-// to operate on whatever the hook returns.
+// filterRuns applies the search box + date chip + source filters in one
+// pass. Status filtering is intentionally out of scope here — the
+// server already does it via `useRuns({ status })`, and we want this
+// helper to operate on whatever the hook returns.
 export function filterRuns(
   runs: RunSummary[],
-  { query, since, now = Date.now() }: FilterOptions,
+  { query, since, source = "", now = Date.now() }: FilterOptions,
 ): RunSummary[] {
   const needle = query.trim().toLowerCase();
   const cutoff = sinceCutoff(since, now);
-  if (!needle && cutoff === null) return runs;
+  if (!needle && cutoff === null && source === "") return runs;
   return runs.filter((r) => {
     if (needle && !matchesQuery(r, needle)) return false;
     if (cutoff !== null) {
       const t = Date.parse(r.created_at);
       if (Number.isNaN(t) || t < cutoff) return false;
     }
+    if (source !== "" && normalizeSourceKind(r.source_kind) !== source) return false;
     return true;
   });
+}
+
+// availableSourceKinds returns the (ordered) subset of source kinds
+// present in the fetched list. The Source chip row uses it to hide
+// kinds that would never produce a hit — keeps the chip strip tight
+// on small projects.
+export function availableSourceKinds(runs: RunSummary[]): RunSourceKind[] {
+  const seen = new Set<RunSourceKind>();
+  for (const r of runs) seen.add(normalizeSourceKind(r.source_kind));
+  return SOURCE_KIND_ORDER.filter((k) => seen.has(k));
 }

@@ -48,6 +48,17 @@ export type ExecStatus =
   | "paused_waiting_human"
   | "skipped";
 
+// Derived classification of how a run was triggered. Mirror of
+// pkg/runview.deriveSourceKind. The backend omits the field when it
+// would be the default ("manual") and pre-source_kind legacy runs
+// lack it entirely — callers must treat an empty value as "manual".
+export type RunSourceKind =
+  | "manual"
+  | "webhook"
+  | "dispatcher"
+  | "fork"
+  | "shard";
+
 // Mirror of runview.RunSummary.
 export interface RunSummary {
   id: string;
@@ -85,6 +96,11 @@ export interface RunSummary {
   // queued banner copy ("3rd in queue"). See cloud-ready plan §F (T-03,
   // T-31).
   queue_position?: number;
+  // Derived classifier (manual | webhook | dispatcher | fork | shard).
+  // Server omits the field for legacy runs and for the default value
+  // "manual"; the UI must treat empty as "manual" — see
+  // runSourceMeta.normalizeSourceKind.
+  source_kind?: RunSourceKind;
 }
 
 export type MergeStrategy = "squash" | "merge";

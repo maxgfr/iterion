@@ -141,7 +141,11 @@ type RunSummary struct {
 	// from the persisted Run.BundleName; falls back server-side to
 	// basename(BundlePath) (stripped of `.botz`) for legacy runs.
 	// Empty for plain .iter/.bot runs with no bundle.
-	BundleName string          `json:"bundle_name,omitempty"`
+	BundleName string `json:"bundle_name,omitempty"`
+	// SourceKind classifies how the run was triggered, for list filtering /
+	// grouping: "manual" | "webhook" | "dispatcher" | "fork" | "shard".
+	// Derived server-side from the run's source/owner; never persisted.
+	SourceKind string          `json:"source_kind,omitempty"`
 	Status     store.RunStatus `json:"status"`
 	FilePath   string          `json:"file_path,omitempty"`
 	CreatedAt  time.Time       `json:"created_at"`
