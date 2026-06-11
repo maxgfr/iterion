@@ -15,7 +15,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -620,6 +622,42 @@ func (r *Runner) executeRun(ctx context.Context, msg *queue.RunMessage) error {
 		return err
 	}
 
+	// Phase C: fetch + decrypt the per-run sealed credentials bundle when the
+	// publisher attached one — BEFORE the repo clone + executor so all three
+	// see the credentials in ctx. The result lives only in ctx; the runner
+	// process itself stays clean of plaintext keys.
+	ctx, cleanup, credErr := r.injectCredentials(ctx, msg)
+	if credErr != nil {
+		r.cfg.Logger.Warn("runner: credentials inject %s: %v (continuing without)", msg.RunID, credErr)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	// Workspace: an inbound webhook/repo-bound run carries RepoURL/RepoSHA —
+	// clone it into a per-run dir (authed with the bound forge token for a
+	// private repo) and point the engine there so ${PROJECT_DIR} is the repo
+	// under review. Otherwise use the runner's base WorkDir.
+	workDir := r.cfg.WorkDir
+	if strings.TrimSpace(msg.RepoURL) != "" {
+		repoDir, derr := r.prepareRepoWorkspace(ctx, msg)
+		if derr != nil {
+			return fmt.Errorf("runner: prepare repo workspace for %s: %w", msg.RunID, derr)
+		}
+		workDir = repoDir
+		defer func() { _ = os.RemoveAll(repoDir) }()
+	}
+
+	// No-sandbox file secrets: a workflow with `as: file` secrets but no
+	// sandbox (the noop driver can't mount) needs them materialized as 0600
+	// files at their mount paths in the runner pod so the in-pod agent can
+	// read them — e.g. review-pr's forge_token for glab. Removed on return.
+	if rm, ferr := r.materializeFileSecretsNoSandbox(ctx, wf); ferr != nil {
+		r.cfg.Logger.Warn("runner: materialize file secrets %s: %v", msg.RunID, ferr)
+	} else if rm != nil {
+		defer rm()
+	}
+
 	executor, err := r.buildExecutor(ctx, msg, wf)
 	if err != nil {
 		return err
@@ -628,7 +666,7 @@ func (r *Runner) executeRun(ctx context.Context, msg *queue.RunMessage) error {
 	engineOpts := []runtime.EngineOption{
 		runtime.WithLogger(r.cfg.Logger),
 		runtime.WithWorkflowHash(msg.WorkflowHash),
-		runtime.WithWorkDir(r.cfg.WorkDir),
+		runtime.WithWorkDir(workDir),
 	}
 	if msg.Resume != nil && msg.Resume.Force {
 		// Force-resume must be applied at engine construction so the
@@ -637,17 +675,6 @@ func (r *Runner) executeRun(ctx context.Context, msg *queue.RunMessage) error {
 		engineOpts = append(engineOpts, runtime.WithForceResume(true))
 	}
 	engine := runtime.New(wf, r.cfg.Store, executor, engineOpts...)
-
-	// Phase C: fetch + decrypt the per-run sealed credentials bundle
-	// when the publisher attached one. The result lives only in ctx —
-	// the runner process itself stays clean of plaintext keys.
-	ctx, cleanup, credErr := r.injectCredentials(ctx, msg)
-	if credErr != nil {
-		r.cfg.Logger.Warn("runner: credentials inject %s: %v (continuing without)", msg.RunID, credErr)
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
 
 	var runErr error
 	if msg.Resume != nil {
@@ -693,6 +720,136 @@ func (r *Runner) executeRun(ctx context.Context, msg *queue.RunMessage) error {
 // Credentials.OAuthCredentialFiles so the delegate backends point
 // the spawned CLI at them. The cleanup func tears the dirs down on
 // every exit path.
+// prepareRepoWorkspace clones the run's RepoURL@RepoSHA into a fresh per-run
+// directory and returns its path. For a private repo it authenticates the
+// HTTPS clone with the bound forge token (forge_token / gitlab_token /
+// github_token from the sealed bundle). The default branch is cloned first so
+// the review base (typically `main`) is present, then the run's ref is fetched
+// and checked out so merge-base diffs resolve.
+func (r *Runner) prepareRepoWorkspace(ctx context.Context, msg *queue.RunMessage) (string, error) {
+	dir := filepath.Join(r.cfg.WorkDir, "repos", msg.RunID)
+	if err := os.RemoveAll(dir); err != nil {
+		return "", fmt.Errorf("clean repo dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return "", fmt.Errorf("mkdir repo parent: %w", err)
+	}
+
+	cloneURL, tok := msg.RepoURL, ""
+	if creds, ok := secrets.CredentialsFromContext(ctx); ok {
+		tok = firstNonBlank(creds.GenericSecret("forge_token"), creds.GenericSecret("gitlab_token"), creds.GenericSecret("github_token"))
+		if tok != "" {
+			cloneURL = injectGitToken(msg.RepoURL, tok)
+		}
+	}
+
+	if err := r.runGit(ctx, "", tok, "clone", "--no-tags", "--quiet", cloneURL, dir); err != nil {
+		return "", err
+	}
+	if ref := strings.TrimSpace(msg.RepoSHA); ref != "" {
+		if err := r.runGit(ctx, dir, tok, "fetch", "--no-tags", "--quiet", "origin", ref); err != nil {
+			return "", err
+		}
+		if err := r.runGit(ctx, dir, tok, "checkout", "--quiet", "-B", ref, "FETCH_HEAD"); err != nil {
+			return "", err
+		}
+	}
+	r.cfg.Logger.Info("runner: cloned %s@%s for run %s", msg.RepoURL, msg.RepoSHA, msg.RunID)
+	return dir, nil
+}
+
+// runGit runs a git subprocess, redacting tok from any error output so an
+// authed clone URL never leaks into logs.
+func (r *Runner) runGit(ctx context.Context, dir, tok string, args ...string) error {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	// Never prompt for credentials (fail fast instead of hanging), and ignore
+	// any host-level git config in the runner image.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		detail, shown := strings.TrimSpace(string(out)), strings.Join(args, " ")
+		if tok != "" {
+			detail = strings.ReplaceAll(detail, tok, "***")
+			shown = strings.ReplaceAll(shown, tok, "***")
+		}
+		return fmt.Errorf("git %s: %w: %s", shown, err, detail)
+	}
+	return nil
+}
+
+// injectGitToken rewrites an https clone URL to carry an oauth2 token in its
+// userinfo (works for GitLab project/personal access tokens and GitHub PATs).
+func injectGitToken(rawURL, token string) string {
+	if token == "" {
+		return rawURL
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "https" {
+		return rawURL
+	}
+	u.User = url.UserPassword("oauth2", token)
+	return u.String()
+}
+
+// materializeFileSecretsNoSandbox writes the workflow's `as: file` secrets to
+// 0600 files at their mount paths in the runner pod when the run has no
+// sandbox (a sandboxed run mounts them into the container instead). Returns a
+// cleanup that removes the written files, or nil when nothing was written.
+func (r *Runner) materializeFileSecretsNoSandbox(ctx context.Context, wf *ir.Workflow) (func(), error) {
+	if wf == nil || len(wf.Secrets) == 0 || wf.Sandbox != nil {
+		// No secrets, or the workflow opts into a sandbox (which mounts file
+		// secrets into the container). review-pr et al. have no sandbox block
+		// → wf.Sandbox is nil and we materialize below.
+		return nil, nil
+	}
+	creds, _ := secrets.CredentialsFromContext(ctx)
+	var written []string
+	for name, s := range wf.Secrets {
+		if !s.IsFile() {
+			continue
+		}
+		val := creds.GenericSecret(name)
+		if val == "" {
+			continue // optional / unresolved → skip; the agent just won't find it
+		}
+		mp := secrets.ResolveFileMountPath(name, s.MountPath)
+		if !strings.HasPrefix(mp, "/") {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(mp), 0o700); err != nil {
+			return removeFilesFunc(written), err
+		}
+		if err := os.WriteFile(mp, []byte(val), 0o600); err != nil {
+			return removeFilesFunc(written), err
+		}
+		written = append(written, mp)
+	}
+	if len(written) == 0 {
+		return nil, nil
+	}
+	return removeFilesFunc(written), nil
+}
+
+func removeFilesFunc(paths []string) func() {
+	return func() {
+		for _, p := range paths {
+			_ = os.Remove(p)
+		}
+	}
+}
+
+func firstNonBlank(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func (r *Runner) injectCredentials(ctx context.Context, msg *queue.RunMessage) (context.Context, func(), error) {
 	if msg.SecretsRef == "" {
 		return ctx, nil, nil
