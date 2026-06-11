@@ -64,6 +64,10 @@ func (s *Server) registerAuthRoutes() {
 	)
 	// Anonymous routes (public via isPublicPath).
 	s.mux.HandleFunc("POST /api/auth/login", loginLimit(s.handleLogin))
+	// Complete a forced password rotation for a pending_password_change
+	// account (e.g. the bootstrapped super-admin). Public + login-rate-limited
+	// because the user holds no session until they have rotated.
+	s.mux.HandleFunc("POST /api/auth/password/change", loginLimit(s.handleChangePassword))
 	s.mux.HandleFunc("POST /api/auth/register", registerLimit(s.handleRegister))
 	s.mux.HandleFunc("POST /api/auth/refresh", refreshLimit(s.handleRefresh))
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
@@ -124,6 +128,12 @@ type membershipView struct {
 type loginReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+type changePasswordReq struct {
+	Email           string `json:"email"`
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
 }
 
 type registerReq struct {
@@ -354,6 +364,29 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			httpError(w, http.StatusForbidden, "password change required")
 			return
 		}
+		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
+		return
+	}
+	s.renderAuthResponse(w, r, res)
+}
+
+// handleChangePassword completes the forced-rotation flow for a
+// pending_password_change account: verify the temp password, set the new
+// one, activate, and return a session. Errors map opaquely (401 for a bad
+// email/temp/status, 400 for a too-weak new password) so the endpoint can't
+// be used to probe account existence or state.
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	var req changePasswordReq
+	if err := readJSON(r, &req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+		return
+	}
+	if req.Email == "" || req.CurrentPassword == "" || req.NewPassword == "" {
+		httpError(w, http.StatusBadRequest, "email, current_password and new_password required")
+		return
+	}
+	res, err := s.authSvc.ChangePasswordPending(r.Context(), req.Email, req.CurrentPassword, req.NewPassword, r.UserAgent(), s.clientIP(r))
+	if err != nil {
 		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
 		return
 	}

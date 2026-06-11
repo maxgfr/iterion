@@ -231,6 +231,45 @@ func (s *Service) Login(ctx context.Context, email, password, userAgent, ip stri
 	return s.issueLogin(ctx, u, userAgent, ip)
 }
 
+// ChangePasswordPending completes the forced-rotation flow for a user in
+// pending_password_change status (e.g. the bootstrapped super-admin): it
+// verifies the temporary password, sets the chosen new one, marks the
+// account active, and issues a normal session. It applies ONLY to
+// pending_password_change accounts — rotating an already-active account's
+// password is a separate, authenticated concern — and returns the opaque
+// ErrInvalidCredentials for a missing user, wrong status, or bad temp
+// password so the endpoint cannot enumerate accounts or their state.
+func (s *Service) ChangePasswordPending(ctx context.Context, email, currentPassword, newPassword, userAgent, ip string) (LoginResult, error) {
+	if len(newPassword) < MinPasswordLen {
+		return LoginResult{}, ErrPasswordWeak
+	}
+	u, err := s.store.GetUserByEmail(ctx, email)
+	if err != nil {
+		return LoginResult{}, ErrInvalidCredentials
+	}
+	if u.Status != identity.UserStatusPendingPasswordChange {
+		return LoginResult{}, ErrInvalidCredentials
+	}
+	ok, err := VerifyPassword(currentPassword, u.PasswordHash)
+	if err != nil || !ok {
+		return LoginResult{}, ErrInvalidCredentials
+	}
+	hash, err := HashPassword(newPassword)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	now := s.now().UTC()
+	u.PasswordHash = hash
+	u.Status = identity.UserStatusActive
+	u.FailedLogins = 0
+	u.LockedUntil = nil
+	u.LastLoginAt = &now
+	if err := s.store.UpdateUser(ctx, u); err != nil {
+		return LoginResult{}, err
+	}
+	return s.issueLogin(ctx, u, userAgent, ip)
+}
+
 // issueLogin is the shared post-authentication path used by Login
 // and AcceptInvitation. It picks the active team, mints tokens, and
 // records the refresh session.

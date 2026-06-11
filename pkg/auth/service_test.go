@@ -89,6 +89,57 @@ func TestLoginInvalidCredentialsAndDisabled(t *testing.T) {
 	}
 }
 
+func TestChangePasswordPending(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService(t, SignupOpen)
+
+	// Bootstrap-style account: a temp password + pending_password_change.
+	if _, _, err := svc.CreateUserAndPersonalTeam(ctx, "ops@example.com", "Ops", "temp-pass-123", true, identity.UserStatusPendingPasswordChange); err != nil {
+		t.Fatalf("CreateUserAndPersonalTeam: %v", err)
+	}
+
+	// Login is gated until the password is rotated.
+	if _, err := svc.Login(ctx, "ops@example.com", "temp-pass-123", "ua", "ip"); !errors.Is(err, ErrPasswordChangeRequired) {
+		t.Fatalf("expected ErrPasswordChangeRequired, got %v", err)
+	}
+	// Wrong temp password → opaque invalid-credentials.
+	if _, err := svc.ChangePasswordPending(ctx, "ops@example.com", "wrong", "brand-new-pass", "ua", "ip"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wrong temp: expected ErrInvalidCredentials, got %v", err)
+	}
+	// Too-weak new password → ErrPasswordWeak.
+	if _, err := svc.ChangePasswordPending(ctx, "ops@example.com", "temp-pass-123", "short", "ua", "ip"); !errors.Is(err, ErrPasswordWeak) {
+		t.Fatalf("weak new: expected ErrPasswordWeak, got %v", err)
+	}
+	// Unknown account stays opaque (no enumeration).
+	if _, err := svc.ChangePasswordPending(ctx, "nobody@example.com", "temp-pass-123", "brand-new-pass", "ua", "ip"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("unknown: expected ErrInvalidCredentials, got %v", err)
+	}
+
+	// Correct rotation activates the account and issues a session.
+	res, err := svc.ChangePasswordPending(ctx, "ops@example.com", "temp-pass-123", "brand-new-pass", "ua", "ip")
+	if err != nil {
+		t.Fatalf("ChangePasswordPending: %v", err)
+	}
+	if res.AccessToken == "" || res.RefreshToken == "" {
+		t.Fatal("expected a session after rotation")
+	}
+	if u, _ := svc.store.GetUserByEmail(ctx, "ops@example.com"); u.Status != identity.UserStatusActive {
+		t.Fatalf("expected active status after rotation, got %q", u.Status)
+	}
+
+	// The new password logs in; the temp no longer works.
+	if _, err := svc.Login(ctx, "ops@example.com", "brand-new-pass", "ua", "ip"); err != nil {
+		t.Fatalf("login with new password: %v", err)
+	}
+	if _, err := svc.Login(ctx, "ops@example.com", "temp-pass-123", "ua", "ip"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("old temp should fail, got %v", err)
+	}
+	// Single-use: an already-active account cannot re-run the rotation flow.
+	if _, err := svc.ChangePasswordPending(ctx, "ops@example.com", "brand-new-pass", "another-pass", "ua", "ip"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("active account: expected ErrInvalidCredentials, got %v", err)
+	}
+}
+
 func TestRegisterInviteOnlyRequiresToken(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService(t, SignupInviteOnly)
