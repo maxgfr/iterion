@@ -47,13 +47,14 @@ func TestGitLabWebhook_HappyPath(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int
 	var gotBot, gotURL, gotRef string
-	var gotVars map[string]string
-	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, repoURL, repoRef string) (string, error) {
+	var gotVars, gotKeyOverrides map[string]string
+	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, repoURL, repoRef string, keyOverrides map[string]string) (string, error) {
 		calls++
-		gotBot, gotVars, gotURL, gotRef = botID, vars, repoURL, repoRef
+		gotBot, gotVars, gotURL, gotRef, gotKeyOverrides = botID, vars, repoURL, repoRef, keyOverrides
 		return "run-123", nil
 	}
 	cfg := glConfig()
+	cfg.KeyOverrides = map[string]string{"anthropic": "key-abc"}
 	w := httptest.NewRecorder()
 	s.handleGitLabWebhook(w, glReq(gitlabCtx(cfg), glOpenMR, gitlab.EventHeaderMergeRequest))
 	if w.Code != http.StatusAccepted {
@@ -73,6 +74,9 @@ func TestGitLabWebhook_HappyPath(t *testing.T) {
 	if gotURL != "https://gitlab.com/acme/widgets.git" || gotRef != "feature/x" {
 		t.Fatalf("repo: url=%q ref=%q", gotURL, gotRef)
 	}
+	if gotKeyOverrides["anthropic"] != "key-abc" {
+		t.Fatalf("key overrides not threaded to launch: %v", gotKeyOverrides)
+	}
 	// delivery recorded as launched
 	if list, _ := s.webhookDeliveries.ListByWebhook(context.Background(), "t1", "w1", 10); len(list) != 1 || list[0].Status != webhooks.StatusLaunched || list[0].RunID != "run-123" {
 		t.Fatalf("delivery: %+v", list)
@@ -82,7 +86,7 @@ func TestGitLabWebhook_HappyPath(t *testing.T) {
 func TestGitLabWebhook_Idempotent(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int
-	s.webhookLaunchBot = func(_ context.Context, _ string, _ map[string]string, _, _ string) (string, error) {
+	s.webhookLaunchBot = func(_ context.Context, _ string, _ map[string]string, _, _ string, _ map[string]string) (string, error) {
 		calls++
 		return "run-123", nil
 	}
@@ -111,7 +115,7 @@ func TestGitLabWebhook_Idempotent(t *testing.T) {
 func TestGitLabWebhook_FiltersAndRejects(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int
-	s.webhookLaunchBot = func(_ context.Context, _ string, _ map[string]string, _, _ string) (string, error) {
+	s.webhookLaunchBot = func(_ context.Context, _ string, _ map[string]string, _, _ string, _ map[string]string) (string, error) {
 		calls++
 		return "r", nil
 	}

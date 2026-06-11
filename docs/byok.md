@@ -126,23 +126,27 @@ Studio UI: Settings → API Keys ([studio/src/views/Settings/ApiKeysTab.tsx](../
 org default — and you can have several webhooks for the same bot, each on
 a different key (e.g. billing/quota separation per integration).
 
-**Engine: already done.** `Resolve`'s `keyOverrides` (Pass 1) is the
-mechanism. **Wiring: the piece to build** — the webhook `Config`
-([pkg/webhooks/types.go:32](../pkg/webhooks/types.go#L32)) carries
-`BotIDs`, `LaunchVars`, etc. but **no** key binding yet, and the
-publisher passes `nil` overrides ([publisher.go:191](../pkg/server/cloudpublisher/publisher.go#L191)).
+**Built** — engine + wiring. `Resolve`'s `keyOverrides` (Pass 1) is the
+mechanism; the wiring threads a webhook's pinned keys through to it:
 
-The build:
-1. Add `KeyOverrides map[Provider]string` (provider → `key_id`) to
-   `webhooks.Config` (+ bson/json, + CRUD validation that each `key_id`
-   is same-tenant and matches the provider).
-2. Thread it: webhook handler → `runview.LaunchSpec` (new field) →
-   `RunMessage` → `resolveAndSealCredentials` → pass to `Resolve(...)`
-   instead of `nil`.
-3. Expose it on the webhook create/PATCH API + the studio webhook editor.
+1. `webhooks.Config.KeyOverrides map[string]string` (provider name →
+   `key_id`) — [pkg/webhooks/types.go](../pkg/webhooks/types.go).
+2. Threaded: webhook handler → `runview.LaunchSpec.KeyOverrides` →
+   persisted on `store.Run.KeyOverrides` (so cloud **resume** re-resolves
+   the same keys) → `resolveAndSealCredentials(…, keyOverrides)` →
+   `secrets.Resolve(…, overrides, …)`.
+3. Set via the webhook create/PATCH API — `key_overrides` on
+   `webhookConfigReq`. `validateKeyOverrides` rejects a `key_id` from
+   another tenant or the wrong provider at config time (the resolver is
+   already tenant-scoped, so this is a fail-fast UX guard, not the
+   security boundary).
 
-Validation must reject a `key_id` from another tenant or the wrong
-provider (otherwise a webhook could pin a key it can't see).
+Example: `PATCH /api/teams/{id}/webhooks/{wid}` with
+`{"key_overrides": {"anthropic": "<key_id>", "openai": "<key_id>"}}`.
+The studio webhook-editor field for it is the remaining follow-up (the
+API is functional). Covered by `TestResolve_OverrideWins`
+([pkg/secrets/byok_test.go](../pkg/secrets/byok_test.go)) +
+`TestGitLabWebhook` threading assertion.
 
 ## Multiple webhooks per bot — already supported
 

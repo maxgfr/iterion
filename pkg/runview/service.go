@@ -104,6 +104,11 @@ type LaunchSpec struct {
 	// The cloud publisher uses it to resolve bot-secret bindings during
 	// credential sealing. Empty for plain .iter/.bot launches.
 	BotID string
+	// KeyOverrides pins a specific BYOK key per LLM provider for this run
+	// (provider name → api_key id), overriding the org/user default in
+	// secrets.Resolve. Set by webhook launches that carry per-webhook key
+	// bindings; empty for normal launches. See docs/byok.md.
+	KeyOverrides map[string]string
 }
 
 // ResumeSpec describes a resume request.

@@ -224,6 +224,11 @@ type Run struct {
 	// has been consumed or its sealed secrets bundle has expired. Empty
 	// for plain .iter/.bot launches and legacy runs.
 	BotID string `json:"bot_id,omitempty" bson:"bot_id,omitempty"`
+	// KeyOverrides pins a BYOK key per LLM provider (provider → api_key id)
+	// for this run, persisted so cloud resume re-resolves with the same
+	// keys. Set by webhook launches carrying per-webhook key bindings;
+	// empty otherwise. See docs/byok.md.
+	KeyOverrides map[string]string `json:"key_overrides,omitempty" bson:"key_overrides,omitempty"`
 	// QueueMsgID is the NATS Nats-Msg-Id header value, exposed so a
 	// cancel can target the queued message before pickup. Empty after
 	// pickup or when not in cloud mode.

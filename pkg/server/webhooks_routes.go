@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -46,6 +48,7 @@ type webhookConfigReq struct {
 	RateLimit        *webhooks.Rate    `json:"rate_limit,omitempty"`
 	MonthlyCallLimit *int              `json:"monthly_call_limit,omitempty"`
 	LaunchVars       map[string]string `json:"launch_vars,omitempty"`
+	KeyOverrides     map[string]string `json:"key_overrides,omitempty"`
 }
 
 type webhookWithToken struct {
@@ -179,6 +182,7 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		EventAllowlist:   req.EventAllowlist,
 		RateLimit:        rate,
 		LaunchVars:       req.LaunchVars,
+		KeyOverrides:     req.KeyOverrides,
 		CreatedBy:        id.UserID,
 		CreatedAt:        now,
 		UpdatedAt:        now,
@@ -189,6 +193,10 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	if req.MonthlyCallLimit != nil {
 		cfg.MonthlyCallLimit = *req.MonthlyCallLimit
 	}
+	if err := s.validateKeyOverrides(r.Context(), teamID, cfg.KeyOverrides); err != nil {
+		httpError(w, http.StatusBadRequest, "%s", err.Error())
+		return
+	}
 	if err := s.webhookConfigs.Create(r.Context(), cfg); err != nil {
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
@@ -198,6 +206,29 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, webhookWithToken{Config: cfg, Token: plaintext})
+}
+
+// validateKeyOverrides rejects a webhook key override that references a BYOK
+// key the webhook's tenant doesn't own, or whose provider doesn't match. The
+// resolver is already tenant-scoped (a foreign key_id silently won't match in
+// secrets.Resolve), so this is a fail-fast UX guard, not the security boundary.
+func (s *Server) validateKeyOverrides(ctx context.Context, tenantID string, overrides map[string]string) error {
+	if len(overrides) == 0 || s.apiKeys == nil {
+		return nil
+	}
+	for prov, keyID := range overrides {
+		k, err := s.apiKeys.Get(ctx, keyID)
+		if err != nil {
+			return fmt.Errorf("key_overrides[%s]: api key %q not found", prov, keyID)
+		}
+		if k.TenantID != tenantID {
+			return fmt.Errorf("key_overrides[%s]: api key %q belongs to another org", prov, keyID)
+		}
+		if string(k.Provider) != prov {
+			return fmt.Errorf("key_overrides[%s]: api key %q is for provider %q", prov, keyID, k.Provider)
+		}
+	}
+	return nil
 }
 
 func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
@@ -239,6 +270,13 @@ func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.LaunchVars != nil {
 		cfg.LaunchVars = req.LaunchVars
+	}
+	if req.KeyOverrides != nil {
+		if err := s.validateKeyOverrides(r.Context(), teamID, req.KeyOverrides); err != nil {
+			httpError(w, http.StatusBadRequest, "%s", err.Error())
+			return
+		}
+		cfg.KeyOverrides = req.KeyOverrides
 	}
 	// Re-normalise bot scope only when the caller touched it.
 	if req.BotIDs != nil || req.WildcardBots != nil {

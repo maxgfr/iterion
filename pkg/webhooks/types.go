@@ -58,6 +58,12 @@ type Config struct {
 	// (e.g. severity_threshold), overriding the handler-derived vars.
 	LaunchVars map[string]string `bson:"launch_vars,omitempty" json:"launch_vars,omitempty"`
 
+	// KeyOverrides pins a BYOK key per LLM provider for runs launched
+	// through this webhook (provider name → api_key id), overriding the
+	// org/user default in secrets.Resolve. Lets several webhooks for the
+	// same bot bill against different keys. See docs/byok.md.
+	KeyOverrides map[string]string `bson:"key_overrides,omitempty" json:"key_overrides,omitempty"`
+
 	CreatedBy  string     `bson:"created_by" json:"created_by"`
 	CreatedAt  time.Time  `bson:"created_at" json:"created_at"`
 	UpdatedAt  time.Time  `bson:"updated_at" json:"updated_at"`

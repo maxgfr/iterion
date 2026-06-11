@@ -164,7 +164,7 @@ func genericSecretNamesForWorkflow(wf *ir.Workflow) []string {
 // connected, seals the resulting bundle, and persists it under a
 // fresh secrets ref. Returns the ref or an empty string when no
 // credentials are available — the runner then falls back to env.
-func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenantID, ownerID, botID string, wf *ir.Workflow) (string, error) {
+func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenantID, ownerID, botID string, wf *ir.Workflow, keyOverrides map[string]string) (string, error) {
 	if p.runSecrets == nil || p.sealer == nil {
 		return "", nil
 	}
@@ -188,7 +188,16 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 
 	// 1. BYOK API keys.
 	if p.apiKeys != nil {
-		resolved, err := secrets.Resolve(ctx, p.apiKeys, tenantID, ownerID, allKnownProviders, nil, p.sealer)
+		// Per-webhook key overrides (provider name → api_key id) take
+		// precedence over the org/user default inside secrets.Resolve.
+		var overrides map[secrets.Provider]string
+		if len(keyOverrides) > 0 {
+			overrides = make(map[secrets.Provider]string, len(keyOverrides))
+			for prov, keyID := range keyOverrides {
+				overrides[secrets.Provider(prov)] = keyID
+			}
+		}
+		resolved, err := secrets.Resolve(ctx, p.apiKeys, tenantID, ownerID, allKnownProviders, overrides, p.sealer)
 		if err != nil {
 			return "", fmt.Errorf("cloudpublisher: resolve creds: %w", err)
 		}
@@ -330,6 +339,7 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 		RepoURL:       spec.RepoURL,
 		RepoSHA:       spec.RepoRef,
 		BotID:         spec.BotID,
+		KeyOverrides:  spec.KeyOverrides,
 		// Cap. 3 sharding fields — propagate to the persisted Run so
 		// studio surfaces can render the parent/child relationship,
 		// and onto the published RunMessage below so the runner pod
@@ -349,7 +359,7 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 	// 1b. Resolve BYOK credentials and seal them under a fresh
 	//     secrets_ref. Empty ref means "no team-scoped credentials
 	//     configured" — the runner falls back to env.
-	secretsRef, err := p.resolveAndSealCredentials(ctx, runID, tenantID, ownerID, spec.BotID, wf)
+	secretsRef, err := p.resolveAndSealCredentials(ctx, runID, tenantID, ownerID, spec.BotID, wf, spec.KeyOverrides)
 	if err != nil {
 		return 0, err
 	}
@@ -498,7 +508,7 @@ func (p *Publisher) SubmitResume(ctx context.Context, spec runview.ResumeSpec, w
 	// bot-secret bindings remain durable across pause/failure/TTL republishes.
 	secretsCtx := store.WithTenant(ctx, prior.TenantID)
 	secretsCtx = store.WithOwner(secretsCtx, prior.OwnerID)
-	secretsRef, secretsErr := p.resolveAndSealCredentials(secretsCtx, spec.RunID, prior.TenantID, prior.OwnerID, prior.BotID, wf)
+	secretsRef, secretsErr := p.resolveAndSealCredentials(secretsCtx, spec.RunID, prior.TenantID, prior.OwnerID, prior.BotID, wf, prior.KeyOverrides)
 	if secretsErr != nil {
 		return secretsErr
 	}

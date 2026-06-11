@@ -119,7 +119,7 @@ func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 	if launch == nil {
 		launch = s.realWebhookLaunchBot
 	}
-	runID, lerr := launch(ctx, botID, vars, p.CloneURL, p.SourceBranch)
+	runID, lerr := launch(ctx, botID, vars, p.CloneURL, p.SourceBranch, cfg.KeyOverrides)
 	if lerr != nil {
 		delivery.Status = webhooks.StatusLaunchError
 		delivery.Error = lerr.Error()
@@ -201,7 +201,7 @@ func (s *Server) resolveBotSource(botID string) (path, source string, err error)
 // realWebhookLaunchBot is the production launch path for an inbound
 // webhook: resolve the bot's source and submit it through the run
 // service (which, in cloud mode, routes to the publisher).
-func (s *Server) realWebhookLaunchBot(ctx context.Context, botID string, vars map[string]string, repoURL, repoRef string) (string, error) {
+func (s *Server) realWebhookLaunchBot(ctx context.Context, botID string, vars map[string]string, repoURL, repoRef string, keyOverrides map[string]string) (string, error) {
 	if s.runs == nil {
 		return "", errors.New("run service unavailable")
 	}
@@ -210,12 +210,13 @@ func (s *Server) realWebhookLaunchBot(ctx context.Context, botID string, vars ma
 		return "", err
 	}
 	res, err := s.runs.Launch(ctx, runview.LaunchSpec{
-		FilePath: path,
-		Source:   source,
-		Vars:     vars,
-		RepoURL:  repoURL,
-		RepoRef:  repoRef,
-		BotID:    botID,
+		FilePath:     path,
+		Source:       source,
+		Vars:         vars,
+		RepoURL:      repoURL,
+		RepoRef:      repoRef,
+		BotID:        botID,
+		KeyOverrides: keyOverrides,
 	})
 	if err != nil {
 		return "", err
