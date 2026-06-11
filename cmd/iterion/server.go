@@ -25,6 +25,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/identity"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/orgusage"
+	"github.com/SocialGouv/iterion/pkg/pat"
 	natsq "github.com/SocialGouv/iterion/pkg/queue/nats"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/runview/eventstream"
@@ -247,6 +248,20 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	if err := audit.EnsureSchema(rootCtx, st.DB()); err != nil {
 		return fmt.Errorf("server: ensure audit schema: %w", err)
 	}
+	patStore := pat.NewMongoStore(st.DB())
+	if err := pat.EnsureSchema(rootCtx, st.DB()); err != nil {
+		return fmt.Errorf("server: ensure pat schema: %w", err)
+	}
+	// ITERION_PAT_MAX_TTL (Go duration, e.g. "2160h" = 90 days) caps
+	// every personal access token's lifetime. Unset = no platform cap.
+	var patMaxTTL time.Duration
+	if v := os.Getenv("ITERION_PAT_MAX_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			patMaxTTL = d
+		} else {
+			logger.Warn("server: invalid ITERION_PAT_MAX_TTL %q ignored", v)
+		}
+	}
 	memStore := mongostore.NewMongoMemoryStore(st.DB())
 	if err := memStore.EnsureSchema(rootCtx); err != nil {
 		return fmt.Errorf("server: ensure memory schema: %w", err)
@@ -404,6 +419,8 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		OrgUsage:               orgUsageCounter,
 		OrgDefaults:            orgLimitDefaultsFromEnv(),
 		Audit:                  auditStore,
+		PATs:                   patStore,
+		PATMaxTTL:              patMaxTTL,
 		MemoryStore:            memStore,
 		RunSecrets:             runSecretsStore,
 		Sealer:                 sealer,

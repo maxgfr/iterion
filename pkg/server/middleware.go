@@ -7,6 +7,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/identity"
+	"github.com/SocialGouv/iterion/pkg/pat"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
@@ -51,19 +52,34 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			httpError(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
-		if s.signer == nil {
-			httpError(w, http.StatusInternalServerError, "auth not configured")
-			return
-		}
-		id, err := s.signer.Verify(token)
-		if err != nil {
-			switch {
-			case errors.Is(err, auth.ErrTokenExpired):
-				httpError(w, http.StatusUnauthorized, "token expired")
-			default:
-				httpError(w, http.StatusUnauthorized, "token invalid")
+		var id auth.Identity
+		if strings.HasPrefix(token, pat.TokenPrefix) {
+			// Personal access token path (programmatic clients). The
+			// prefix branch keeps the JWT hot path allocation-free.
+			// Fail-closed: an iap_ bearer with no PAT store is a 401,
+			// never a fall-through to JWT parsing.
+			var err error
+			id, err = s.identityFromPAT(r.Context(), token)
+			if err != nil {
+				httpError(w, http.StatusUnauthorized, "%s", err.Error())
+				return
 			}
-			return
+		} else {
+			if s.signer == nil {
+				httpError(w, http.StatusInternalServerError, "auth not configured")
+				return
+			}
+			var err error
+			id, err = s.signer.Verify(token)
+			if err != nil {
+				switch {
+				case errors.Is(err, auth.ErrTokenExpired):
+					httpError(w, http.StatusUnauthorized, "token expired")
+				default:
+					httpError(w, http.StatusUnauthorized, "token invalid")
+				}
+				return
+			}
 		}
 		// Stamp both the auth identity (for handlers + RBAC checks)
 		// and the store-level tenant_id / user_id (for the Mongo

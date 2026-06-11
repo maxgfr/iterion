@@ -39,6 +39,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/knowledge"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/orgusage"
+	"github.com/SocialGouv/iterion/pkg/pat"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/secrets"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -146,6 +147,13 @@ type Config struct {
 	// OrgDefaults are the platform-wide launch limits applied when a
 	// team has no per-org override. Zero values mean "no limit".
 	OrgDefaults OrgLimitDefaults
+
+	// PATs, when non-nil, enables personal access tokens: the
+	// /api/me/tokens CRUD plus `iap_` bearer authentication in
+	// requireAuth. PATMaxTTL (0 = none) caps every token's lifetime
+	// regardless of what the caller requests.
+	PATs      pat.Store
+	PATMaxTTL time.Duration
 
 	// BotBindings is the policy wrapper over GenericSecrets: it maps a
 	// stored org/user secret to a bot under the workflow's declared
@@ -332,6 +340,7 @@ type Server struct {
 	orgUsage          orgusage.Counter
 	orgDefaults       OrgLimitDefaults
 	auditStore        audit.Store
+	pats              pat.Store
 	botBindings       secrets.BotSecretBindingStore
 	memStore          knowledge.MemoryStore
 	// webhookLaunchBot overrides the inbound-webhook launch path (test
@@ -431,6 +440,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		orgUsage:          cfg.OrgUsage,
 		orgDefaults:       cfg.OrgDefaults,
 		auditStore:        cfg.Audit,
+		pats:              cfg.PATs,
 		botBindings:       cfg.BotBindings,
 		memStore:          cfg.MemoryStore,
 		httpClient:        &http.Client{Timeout: 15 * time.Second},
@@ -761,6 +771,11 @@ func (s *Server) routes() {
 	// handlers via auditTenant/auditPlatform). No-op when no store.
 	if s.authSvc != nil {
 		s.registerAuditRoutes()
+	}
+
+	// Personal access tokens (programmatic API access).
+	if s.pats != nil && s.authSvc != nil {
+		s.registerPATRoutes()
 	}
 
 	// Shared-knowledge memory REST (FS fallback when no store wired).
