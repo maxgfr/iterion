@@ -40,6 +40,7 @@ import (
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/orgusage"
 	"github.com/SocialGouv/iterion/pkg/pat"
+	natsq "github.com/SocialGouv/iterion/pkg/queue/nats"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/secrets"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -155,6 +156,11 @@ type Config struct {
 	// regardless of what the caller requests.
 	PATs      pat.Store
 	PATMaxTTL time.Duration
+
+	// Queue is the cloud-mode NATS connection. When non-nil the
+	// server registers the super-admin DLQ endpoints and starts the
+	// orphan-run sweeper (paired with a Mongo store).
+	Queue *natsq.Conn
 
 	// BotBindings is the policy wrapper over GenericSecrets: it maps a
 	// stored org/user secret to a bot under the workflow's declared
@@ -342,6 +348,7 @@ type Server struct {
 	orgDefaults       OrgLimitDefaults
 	auditStore        audit.Store
 	pats              pat.Store
+	queue             *natsq.Conn
 	botBindings       secrets.BotSecretBindingStore
 	memStore          knowledge.MemoryStore
 	// webhookLaunchBot overrides the inbound-webhook launch path (test
@@ -446,6 +453,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		orgDefaults:       cfg.OrgDefaults,
 		auditStore:        cfg.Audit,
 		pats:              cfg.PATs,
+		queue:             cfg.Queue,
 		botBindings:       cfg.BotBindings,
 		memStore:          cfg.MemoryStore,
 		httpClient:        &http.Client{Timeout: 15 * time.Second},
@@ -598,6 +606,21 @@ func (s *Server) ListenAndServe() error {
 				cancel()
 			}()
 			mss.StartSweeper(ctx, 0) // 0 = use store TTL as interval
+		}()
+	}
+	// Orphan-run sweeper (cloud only): flips queued/running rows whose
+	// runner died without a terminal write to failed_resumable. Needs
+	// both the Mongo store (stale scan capability) and the queue (KV
+	// lease check) — silently absent otherwise (local mode).
+	if lister, ok := s.cfg.Store.(staleRunLister); ok && s.queue != nil {
+		go func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go func() {
+				<-s.shutdown
+				cancel()
+			}()
+			s.runQueueSweeper(ctx, lister, s.queue)
 		}()
 	}
 	// Truthful URL in the log: if the operator chose a non-loopback bind we
@@ -786,6 +809,11 @@ func (s *Server) routes() {
 	// Personal access tokens (programmatic API access).
 	if s.pats != nil && s.authSvc != nil {
 		s.registerPATRoutes()
+	}
+
+	// Super-admin DLQ inspection/replay (cloud only — needs the queue).
+	if s.authSvc != nil {
+		s.registerQueueAdminRoutes()
 	}
 
 	// Shared-knowledge memory REST (FS fallback when no store wired).

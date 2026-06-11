@@ -175,6 +175,48 @@ func (s *Store) ListRuns(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
+// StaleRunRef identifies one run the orphan sweeper should examine:
+// id + tenant (the sweeper re-stamps per-run tenant ctx for the CAS
+// status flip).
+type StaleRunRef struct {
+	ID       string `bson:"_id"`
+	TenantID string `bson:"tenant_id"`
+	Status   string `bson:"status"`
+}
+
+// ListStaleActiveRuns returns queued/running runs whose last update
+// precedes `before` — orphan candidates (runner crashed pre-status-
+// write, message purged, MaxDeliver exhausted without the DLQ
+// bridge). Platform-level scan: callers pass a WithoutTenantFilter
+// ctx; the per-run tenant comes back on the ref.
+func (s *Store) ListStaleActiveRuns(ctx context.Context, statuses []store.RunStatus, before time.Time, limit int) ([]StaleRunRef, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	in := make([]string, 0, len(statuses))
+	for _, st := range statuses {
+		in = append(in, string(st))
+	}
+	cur, err := s.runs.Find(ctx,
+		withTenantFilter(ctx, bson.M{
+			"status":     bson.M{"$in": in},
+			"updated_at": bson.M{"$lt": before},
+		}),
+		options.Find().
+			SetProjection(bson.M{"_id": 1, "tenant_id": 1, "status": 1}).
+			SetSort(bson.M{"updated_at": 1}).
+			SetLimit(int64(limit)))
+	if err != nil {
+		return nil, fmt.Errorf("store/mongo: list stale runs: %w", err)
+	}
+	defer cur.Close(ctx)
+	var out []StaleRunRef
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, fmt.Errorf("store/mongo: decode stale runs: %w", err)
+	}
+	return out, nil
+}
+
 // CountActiveRunsByTenant counts the org's queued + running runs.
 // Consumed by the server's launch gate (per-org concurrency cap) with
 // an explicit tenant — deliberately NOT the ctx-derived tenant filter,

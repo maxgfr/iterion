@@ -1,0 +1,191 @@
+package server
+
+import (
+	"context"
+	"net/http"
+	"strconv"
+	"time"
+
+	mongostore "github.com/SocialGouv/iterion/pkg/store/mongo"
+
+	"github.com/SocialGouv/iterion/pkg/store"
+)
+
+// Orphan sweeper: a run is QUEUED in Mongo until a runner's first
+// status write, and RUNNING until its last. A runner pod that dies at
+// the wrong instant (crash mid-decode, eviction before the terminal
+// write, message purged after MaxDeliver) strands the row in a state
+// no operator action can reach — the studio shows an eternal spinner
+// and `iterion resume` refuses (status isn't resumable).
+//
+// The sweeper closes that gap: periodically scan for queued/running
+// rows whose updated_at is stale AND whose NATS KV lease is absent
+// (the lease TTL is ~60s with 20s refreshes, so "no lease" is a
+// strong crashed-or-never-claimed signal — a healthy long LLM step
+// keeps the lease alive even when the run doc goes quiet), then CAS
+// them to failed_resumable so resume/replay paths light up. A false
+// positive self-heals: the runner's redelivery reconciliation
+// auto-converts failed_resumable back into a resume.
+
+// staleRunLister is the store capability the sweeper scans with
+// (implemented by the Mongo store; local mode has no queue and no
+// sweeper).
+type staleRunLister interface {
+	ListStaleActiveRuns(ctx context.Context, statuses []store.RunStatus, before time.Time, limit int) ([]mongostore.StaleRunRef, error)
+}
+
+// runLeaseChecker reports whether a runner currently holds the run's
+// KV lease (implemented by natsq.Conn).
+type runLeaseChecker interface {
+	IsRunLocked(ctx context.Context, runID string) (bool, error)
+}
+
+const (
+	// sweepInterval is how often the sweeper scans.
+	sweepInterval = 60 * time.Second
+	// sweepQueuedAfter must exceed MaxDeliver × AckWait (3 × 5m) so a
+	// message still bouncing through redeliveries isn't declared
+	// orphaned mid-flight.
+	sweepQueuedAfter = 20 * time.Minute
+	// sweepRunningAfter bounds how long a quiet `running` row may go
+	// without a lease before being flipped. The lease check is the
+	// real signal; the time floor just avoids racing a run between
+	// claim and first heartbeat.
+	sweepRunningAfter = 10 * time.Minute
+)
+
+// runQueueSweeper loops until ctx is cancelled. Started by
+// ListenAndServe in cloud mode when both the Mongo store and the
+// queue connection are wired.
+func (s *Server) runQueueSweeper(ctx context.Context, lister staleRunLister, leases runLeaseChecker) {
+	t := time.NewTicker(sweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.sweepOrphanRuns(ctx, lister, leases, time.Now().UTC())
+		}
+	}
+}
+
+// sweepOrphanRuns performs one scan pass. Extracted (with an
+// injectable clock) for tests.
+func (s *Server) sweepOrphanRuns(ctx context.Context, lister staleRunLister, leases runLeaseChecker, now time.Time) {
+	type pass struct {
+		statuses []store.RunStatus
+		before   time.Time
+	}
+	passes := []pass{
+		{[]store.RunStatus{store.RunStatusQueued}, now.Add(-sweepQueuedAfter)},
+		{[]store.RunStatus{store.RunStatusRunning}, now.Add(-sweepRunningAfter)},
+	}
+	// Platform-level scan — the per-run tenant comes back on each ref
+	// and is re-stamped for the CAS below.
+	scanCtx := store.WithoutTenantFilter(ctx)
+	for _, p := range passes {
+		refs, err := lister.ListStaleActiveRuns(scanCtx, p.statuses, p.before, 100)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Warn("sweeper: scan %v: %v", p.statuses, err)
+			}
+			continue
+		}
+		for _, ref := range refs {
+			locked, err := leases.IsRunLocked(ctx, ref.ID)
+			if err != nil || locked {
+				continue // in flight (or lease state unknown — fail safe, retry next pass)
+			}
+			runCtx := store.WithIdentity(ctx, ref.TenantID, "sweeper")
+			changed, err := s.cfg.Store.UpdateRunStatusIf(runCtx, ref.ID, store.RunStatusFailedResumable,
+				"orphaned by a runner crash or exhausted redelivery — resume to retry",
+				p.statuses)
+			if err != nil {
+				if s.logger != nil {
+					s.logger.Warn("sweeper: flip %s: %v", ref.ID, err)
+				}
+				continue
+			}
+			if changed && s.logger != nil {
+				s.logger.Info("sweeper: orphan run %s (%s, tenant %s) → failed_resumable", ref.ID, ref.Status, ref.TenantID)
+			}
+		}
+	}
+}
+
+// ---- DLQ admin REST ----
+
+// The DLQ admin endpoints talk to the concrete *natsq.Conn (the
+// jetstream types don't warrant an abstraction layer); they're only
+// registered when cloud mode wired a queue connection.
+
+func (s *Server) registerQueueAdminRoutes() {
+	if s.queue == nil {
+		return
+	}
+	s.mux.Handle("GET /api/admin/dlq", s.requireSuperAdmin(http.HandlerFunc(s.handleDLQList)))
+	s.mux.Handle("GET /api/admin/dlq/{seq}", s.requireSuperAdmin(http.HandlerFunc(s.handleDLQPeek)))
+	s.mux.Handle("POST /api/admin/dlq/{seq}/replay", s.requireSuperAdmin(http.HandlerFunc(s.handleDLQReplay)))
+	s.mux.Handle("DELETE /api/admin/dlq/{seq}", s.requireSuperAdmin(http.HandlerFunc(s.handleDLQDiscard)))
+}
+
+func dlqSeq(r *http.Request) (uint64, bool) {
+	seq, err := strconv.ParseUint(r.PathValue("seq"), 10, 64)
+	return seq, err == nil && seq > 0
+}
+
+func (s *Server) handleDLQList(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	cursor, _ := strconv.ParseUint(q.Get("cursor"), 10, 64)
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	msgs, next, err := s.queue.ListDLQ(r.Context(), cursor, limit)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "dlq list: %v", err)
+		return
+	}
+	writeJSON(w, map[string]any{"messages": msgs, "next_cursor": next})
+}
+
+func (s *Server) handleDLQPeek(w http.ResponseWriter, r *http.Request) {
+	seq, ok := dlqSeq(r)
+	if !ok {
+		httpError(w, http.StatusBadRequest, "invalid seq")
+		return
+	}
+	view, payload, err := s.queue.PeekDLQ(r.Context(), seq)
+	if err != nil {
+		httpError(w, http.StatusNotFound, "dlq peek: %v", err)
+		return
+	}
+	writeJSON(w, map[string]any{"message": view, "payload": payload})
+}
+
+func (s *Server) handleDLQReplay(w http.ResponseWriter, r *http.Request) {
+	seq, ok := dlqSeq(r)
+	if !ok {
+		httpError(w, http.StatusBadRequest, "invalid seq")
+		return
+	}
+	runID, err := s.queue.RepublishDLQ(r.Context(), seq)
+	if err != nil && runID == "" {
+		httpError(w, http.StatusBadGateway, "dlq replay: %v", err)
+		return
+	}
+	s.auditPlatform(r, "", "dlq.replayed", "run", runID, map[string]any{"seq": seq})
+	writeJSON(w, map[string]any{"status": "replayed", "run_id": runID})
+}
+
+func (s *Server) handleDLQDiscard(w http.ResponseWriter, r *http.Request) {
+	seq, ok := dlqSeq(r)
+	if !ok {
+		httpError(w, http.StatusBadRequest, "invalid seq")
+		return
+	}
+	if err := s.queue.DiscardDLQ(r.Context(), seq); err != nil {
+		httpError(w, http.StatusNotFound, "dlq discard: %v", err)
+		return
+	}
+	s.auditPlatform(r, "", "dlq.discarded", "run", "", map[string]any{"seq": seq})
+	w.WriteHeader(http.StatusNoContent)
+}

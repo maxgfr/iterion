@@ -549,6 +549,36 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 			return
 		}
 		// Other errors → nak so JetStream redelivers up to MaxDeliver.
+		// On the LAST permitted attempt, park a copy on the DLQ and
+		// Term instead: without the bridge JetStream silently drops
+		// the message after MaxDeliver and the run is unrecoverable
+		// except by hand. The admin DLQ endpoints (peek/replay/
+		// discard) operate on the parked copy; the run row is flipped
+		// to failed_resumable (best-effort CAS from running) so the
+		// studio shows an actionable state instead of eternal
+		// "running".
+		if r.cfg.NATS != nil && delivery.NumDelivered() >= r.cfg.NATS.MaxDeliver() {
+			logger.Error("runner: run %s failed on final delivery %d/%d — parking on DLQ: %v",
+				msg.RunID, delivery.NumDelivered(), r.cfg.NATS.MaxDeliver(), err)
+			finalStatus = "dlq"
+			bg, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if perr := r.cfg.NATS.PublishDLQ(bg, delivery, err.Error()); perr != nil {
+				// DLQ unavailable: keep the JetStream redelivery as
+				// the only remaining safety net.
+				logger.Error("runner: DLQ park for %s failed: %v — naking instead", msg.RunID, perr)
+				logDeliveryErr(logger, "nak-dlq-failed", msg.RunID, delivery.Nak())
+				return
+			}
+			sctx := store.WithIdentity(bg, msg.TenantID, msg.OwnerID)
+			if _, serr := r.cfg.Store.UpdateRunStatusIf(sctx, msg.RunID, store.RunStatusFailedResumable,
+				fmt.Sprintf("max deliveries exhausted: %v (parked on DLQ — replay via /api/admin/dlq)", err),
+				[]store.RunStatus{store.RunStatusRunning, store.RunStatusQueued}); serr != nil {
+				logger.Warn("runner: DLQ status flip for %s: %v", msg.RunID, serr)
+			}
+			logDeliveryErr(logger, "term-dlq-parked", msg.RunID, delivery.Term())
+			return
+		}
 		logger.Error("runner: run %s execution failed: %v", msg.RunID, err)
 		logDeliveryErr(logger, "nak-exec-failed", msg.RunID, delivery.Nak())
 		return

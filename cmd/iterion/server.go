@@ -455,6 +455,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		Audit:                  auditStore,
 		PATs:                   patStore,
 		PATMaxTTL:              patMaxTTL,
+		Queue:                  natsConn,
 		MemoryStore:            memStore,
 		RunSecrets:             runSecretsStore,
 		Sealer:                 sealer,
