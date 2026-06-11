@@ -132,34 +132,41 @@ diff refs ONCE (`:id` = URL-encoded `group/project`, or the numeric id):
 glab api "projects/:id/merge_requests/<iid>/versions" --jq '.[0]'
 ```
 Read `base_commit_sha`, `head_commit_sha`, `start_commit_sha` → BASE, HEAD,
-START. Then post ONE discussion per finding. GitLab's position is picky — get
-it exactly right or the call 400s and the comment is silently lost:
+START. Then post ONE discussion per finding with a NESTED `position` object.
 
-- ALWAYS send BOTH `position[new_path]` AND `position[old_path]`, set to the
-  SAME path — **even for a brand-new file**. Omitting `old_path` is the single
-  most common reason an added line fails to anchor (it then falls back to a
-  plain note, which is what we must avoid).
-- ADDED line (a new file, or a `+` line): send ONLY `position[new_line]`.
-- UNCHANGED context line: send BOTH `position[new_line]` and
-  `position[old_line]` (same value when nothing above it shifted).
+**Do NOT use `glab api -f position[...]`** — glab serialises `position[base_sha]`
+as a *literal flat* JSON key, never a nested object, so GitLab drops the
+position and you silently get a plain note. Send real nested JSON via curl +
+the forge token (host, URL-encoded `group/project`, and iid all come from the
+`pr_url`):
 
 ```sh
-glab api --method POST "projects/:id/merge_requests/<iid>/discussions" \
-  -f body="$BODY" \
-  -f position[position_type]=text \
-  -f position[base_sha]="$BASE" -f position[head_sha]="$HEAD" -f position[start_sha]="$START" \
-  -f position[new_path]="fetch.go" -f position[old_path]="fetch.go" \
-  -f position[new_line]=15
+TOKEN="$(cat /run/iterion/secrets/forge_token)"
+jq -nc --arg body "$BODY" --arg bs "$BASE" --arg hs "$HEAD" --arg ss "$START" \
+       --arg path "fetch.go" --argjson line 15 \
+  '{body:$body, position:{position_type:"text", base_sha:$bs, head_sha:$hs,
+    start_sha:$ss, new_path:$path, old_path:$path, new_line:$line}}' \
+| curl -sS -H "PRIVATE-TOKEN: $TOKEN" -H 'Content-Type: application/json' \
+    -X POST "https://<host>/api/v4/projects/<group%2Fproject>/merge_requests/<iid>/discussions" -d @-
 ```
 
-Loop over EVERY finding; do not stop on the first error. If a discussion
+Position rules (wrong → 400 or a dropped anchor):
+- ALWAYS set BOTH `new_path` AND `old_path` to the SAME path — **even for a
+  brand-new file**. Omitting `old_path` is the #1 reason an added line won't
+  anchor.
+- ADDED line (new file, or a `+` line): set ONLY `new_line` (no `old_line`).
+- UNCHANGED context line: set BOTH `new_line` and `old_line` (same value when
+  nothing above it shifted).
+
+Loop over EVERY finding in ONE bash script; don't stop on the first error. If a
 POST fails (400/422 — line not in the diff, or a bad position), do NOT
-silently downgrade it to a plain note: collect that finding and list it under
-"could not be anchored inline" in the summary. Capture each returned id.
+downgrade it to a plain note: collect it and list it under "could not be
+anchored inline" in the summary. Capture each returned discussion id, and
+VERIFY with the position-aware count below.
 
 GitLab suggestion fence is `suggestion:-K+N`: it replaces `K` lines ABOVE
 the anchored line plus `N` below. Anchor the discussion at the finding's
-`line_end` (`position[new_line]=line_end`) and set `K = line_end - line`,
+`line_end` (the position's `new_line`) and set `K = line_end - line`,
 `N = 0` — so a single-line finding is `suggestion:-0+0`, a 3-line finding
 (anchored at its last line) is `suggestion:-2+0`. The block body is the
 full `replacement` (one line in, several out is fine):
