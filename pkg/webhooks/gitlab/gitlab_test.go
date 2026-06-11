@@ -114,9 +114,9 @@ func TestIsReviewCommand(t *testing.T) {
 		{"/revi focus=security", true},
 		{"   /revi   ", true}, // surrounding whitespace tolerated
 		{"please run /revi", false},
-		{"/revia", false},                  // longer token; must NOT match
-		{"/REVI", true},                    // Command() is case-insensitive by design
-		{"> /revi quoted\n/revi", true},    // quote-reply prefix skipped (Command grammar)
+		{"/revia", false},               // longer token; must NOT match
+		{"/REVI", true},                 // Command() is case-insensitive by design
+		{"> /revi quoted\n/revi", true}, // quote-reply prefix skipped (Command grammar)
 		{"> some quoted context\nhi", false},
 		{"", false},
 		{"hi", false},
