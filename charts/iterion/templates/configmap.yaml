@@ -36,6 +36,28 @@ data:
   ITERION_ACCESS_TTL: {{ .Values.config.auth.accessTtl | quote }}
   ITERION_REFRESH_TTL: {{ .Values.config.auth.refreshTtl | quote }}
   ITERION_SIGNUP_MODE: {{ .Values.config.auth.signupMode | quote }}
+  {{- with .Values.config.smtp.host }}
+  # --- SMTP (transactional email) ---------------------------------
+  ITERION_SMTP_HOST: {{ . | quote }}
+  ITERION_SMTP_PORT: {{ $.Values.config.smtp.port | quote }}
+  ITERION_SMTP_FROM: {{ $.Values.config.smtp.from | quote }}
+  ITERION_SMTP_STARTTLS: {{ $.Values.config.smtp.startTLS | quote }}
+  {{- end }}
+  {{- with .Values.config.orgDefaults }}
+  # --- Org launch limit defaults ----------------------------------
+  {{- if .monthlyRunQuota }}
+  ITERION_ORG_DEFAULT_MONTHLY_RUN_QUOTA: {{ .monthlyRunQuota | quote }}
+  {{- end }}
+  {{- if .monthlyCostCapUsd }}
+  ITERION_ORG_DEFAULT_MONTHLY_COST_CAP_USD: {{ .monthlyCostCapUsd | quote }}
+  {{- end }}
+  {{- if .maxConcurrentRuns }}
+  ITERION_ORG_DEFAULT_MAX_CONCURRENT_RUNS: {{ .maxConcurrentRuns | quote }}
+  {{- end }}
+  {{- if .launchRatePerMin }}
+  ITERION_ORG_DEFAULT_LAUNCH_RATE_PER_MIN: {{ .launchRatePerMin | quote }}
+  {{- end }}
+  {{- end }}
   {{- if .Values.secrets.auth.oidc.google.enabled }}
   ITERION_OIDC_GOOGLE_ENABLED: "true"
   ITERION_OIDC_GOOGLE_CLIENT_ID: {{ .Values.config.auth.oidc.google.clientId | quote }}

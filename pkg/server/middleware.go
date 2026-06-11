@@ -146,6 +146,8 @@ func isPublicPath(path string) bool {
 	case "/healthz", "/readyz",
 		"/api/auth/login",
 		"/api/auth/password/change",
+		"/api/auth/password/reset/request",
+		"/api/auth/password/reset/confirm",
 		"/api/auth/register",
 		"/api/auth/refresh",
 		"/api/auth/logout",

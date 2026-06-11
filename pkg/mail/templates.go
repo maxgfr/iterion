@@ -1,0 +1,61 @@
+package mail
+
+import (
+	"fmt"
+	"html/template"
+	"strings"
+)
+
+// ResetData parameterises the password-reset email.
+type ResetData struct {
+	// ResetURL is the SPA link carrying the one-shot token, e.g.
+	// https://iterion.example.org/auth/reset?token=iar_…
+	ResetURL string
+	// ExpiresMinutes is the token lifetime for the copy.
+	ExpiresMinutes int
+}
+
+// InviteData parameterises the invitation email.
+type InviteData struct {
+	TeamName string
+	Role     string
+	// AcceptURL is the SPA link carrying the invitation token.
+	AcceptURL string
+	// InvitedBy is a display hint (email of the inviting admin).
+	InvitedBy string
+}
+
+// RenderPasswordReset builds the password-reset message for `to`.
+func RenderPasswordReset(to string, d ResetData) Message {
+	text := fmt.Sprintf(`Someone (hopefully you) requested a password reset for this iterion account.
+
+Reset your password: %s
+
+The link expires in %d minutes and can be used once. If you didn't
+request this, ignore this email — your password is unchanged.`, d.ResetURL, d.ExpiresMinutes)
+	html := fmt.Sprintf(`<p>Someone (hopefully you) requested a password reset for this iterion account.</p>
+<p><a href="%s">Reset your password</a></p>
+<p>The link expires in %d minutes and can be used once. If you didn't request this, ignore this email — your password is unchanged.</p>`,
+		template.HTMLEscapeString(d.ResetURL), d.ExpiresMinutes)
+	return Message{To: to, Subject: "Reset your iterion password", TextBody: text, HTMLBody: html}
+}
+
+// RenderInvitation builds the team-invitation message for `to`.
+func RenderInvitation(to string, d InviteData) Message {
+	by := ""
+	if d.InvitedBy != "" {
+		by = fmt.Sprintf(" by %s", d.InvitedBy)
+	}
+	text := fmt.Sprintf(`You've been invited%s to join the iterion org %q as %s.
+
+Accept the invitation: %s
+
+If you don't have an account yet, the link lets you register with
+this email address.`, by, d.TeamName, d.Role, d.AcceptURL)
+	html := fmt.Sprintf(`<p>You've been invited%s to join the iterion org <b>%s</b> as <b>%s</b>.</p>
+<p><a href="%s">Accept the invitation</a></p>
+<p>If you don't have an account yet, the link lets you register with this email address.</p>`,
+		template.HTMLEscapeString(by), template.HTMLEscapeString(d.TeamName),
+		template.HTMLEscapeString(d.Role), template.HTMLEscapeString(d.AcceptURL))
+	return Message{To: to, Subject: fmt.Sprintf("Invitation to join %s on iterion", strings.TrimSpace(d.TeamName)), TextBody: text, HTMLBody: html}
+}

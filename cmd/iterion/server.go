@@ -24,6 +24,7 @@ import (
 	iterconfig "github.com/SocialGouv/iterion/pkg/config"
 	"github.com/SocialGouv/iterion/pkg/identity"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/mail"
 	"github.com/SocialGouv/iterion/pkg/orgusage"
 	"github.com/SocialGouv/iterion/pkg/pat"
 	natsq "github.com/SocialGouv/iterion/pkg/queue/nats"
@@ -308,12 +309,45 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("server: build jwt signer: %w", err)
 	}
+	// SMTP: ITERION_SMTP_HOST switches the real mailer on; otherwise
+	// the log fallback keeps flows testable and server_info reports
+	// email_enabled=false so the SPA hides forgot-password.
+	var mailer mail.Mailer = &mail.LogMailer{Logger: logger}
+	if host := os.Getenv("ITERION_SMTP_HOST"); host != "" {
+		port, _ := strconv.Atoi(os.Getenv("ITERION_SMTP_PORT"))
+		startTLS := true
+		if v := os.Getenv("ITERION_SMTP_STARTTLS"); v != "" {
+			startTLS, _ = strconv.ParseBool(v)
+		}
+		smtpMailer, merr := mail.NewSMTP(mail.Config{
+			Host:     host,
+			Port:     port,
+			Username: os.Getenv("ITERION_SMTP_USERNAME"),
+			Password: os.Getenv("ITERION_SMTP_PASSWORD"),
+			From:     os.Getenv("ITERION_SMTP_FROM"),
+			StartTLS: startTLS,
+		})
+		if merr != nil {
+			return fmt.Errorf("server: smtp config: %w", merr)
+		}
+		mailer = smtpMailer
+		logger.Info("server: SMTP mailer enabled (host=%s)", host)
+	}
+	resetStore := iterauth.NewMongoPasswordResetStore(st.DB())
+	if err := resetStore.EnsureSchema(rootCtx); err != nil {
+		return fmt.Errorf("server: ensure password_resets schema: %w", err)
+	}
+
 	authSvc, err := iterauth.NewService(iterauth.Config{
 		Store:      identityStore,
 		Sessions:   sessions,
 		Signer:     signer,
 		SignupMode: iterauth.SignupMode(cfg.Auth.SignupMode),
 		RefreshTTL: cfg.Auth.RefreshTTL,
+		Logger:     logger,
+		Resets:     resetStore,
+		Mailer:     mailer,
+		PublicURL:  cfg.Auth.PublicURL,
 	})
 	if err != nil {
 		return fmt.Errorf("server: build auth service: %w", err)

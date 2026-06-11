@@ -10,12 +10,14 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/auth/oidc"
 	"github.com/SocialGouv/iterion/pkg/identity"
+	"github.com/SocialGouv/iterion/pkg/mail"
 )
 
 // oidcAgentBindingCookie is the per-flow HttpOnly cookie set at
@@ -68,6 +70,11 @@ func (s *Server) registerAuthRoutes() {
 	// account (e.g. the bootstrapped super-admin). Public + login-rate-limited
 	// because the user holds no session until they have rotated.
 	s.mux.HandleFunc("POST /api/auth/password/change", loginLimit(s.handleChangePassword))
+	// Self-service reset: request is anti-enumeration (always 200) and
+	// shares the login bucket so it can't be abused as an email cannon;
+	// confirm redeems the one-shot emailed token.
+	s.mux.HandleFunc("POST /api/auth/password/reset/request", loginLimit(s.handlePasswordResetRequest))
+	s.mux.HandleFunc("POST /api/auth/password/reset/confirm", loginLimit(s.handlePasswordResetConfirm))
 	s.mux.HandleFunc("POST /api/auth/register", registerLimit(s.handleRegister))
 	s.mux.HandleFunc("POST /api/auth/refresh", refreshLimit(s.handleRefresh))
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
@@ -80,6 +87,8 @@ func (s *Server) registerAuthRoutes() {
 	// Authenticated routes.
 	s.mux.Handle("GET /api/auth/me", s.requireAuth(http.HandlerFunc(s.handleMe)))
 	s.mux.Handle("POST /api/auth/me/team/{team_id}", s.requireAuth(http.HandlerFunc(s.handleSwitchTeam)))
+	s.mux.Handle("POST /api/me/password", s.requireAuth(http.HandlerFunc(s.handleChangeMyPassword)))
+	s.mux.Handle("POST /api/me/sessions/revoke-all", s.requireAuth(http.HandlerFunc(s.handleRevokeAllSessions)))
 
 	// Team management.
 	s.mux.Handle("GET /api/teams", s.requireAuth(http.HandlerFunc(s.handleListTeams)))
@@ -801,6 +810,30 @@ func (s *Server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.auditTenant(r, teamID, "invitation.created", "invitation", inv.ID, map[string]any{"email": inv.Email, "role": string(inv.Role)})
+	// When a real mailer is wired, deliver the invitation by email too
+	// (detached — a relay blip must not fail the create). The in-band
+	// token below stays: CLI/SDK flows and operators without SMTP
+	// copy it manually.
+	if s.authSvc.EmailEnabled() {
+		team, terr := s.authStore().GetTeam(r.Context(), teamID)
+		teamName := teamID
+		if terr == nil {
+			teamName = team.Name
+		}
+		msg := mail.RenderInvitation(inv.Email, mail.InviteData{
+			TeamName:  teamName,
+			Role:      string(inv.Role),
+			AcceptURL: s.authSvc.PublicURL() + "/invitations/accept?token=" + tok,
+			InvitedBy: id.Email,
+		})
+		go func() {
+			bg, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := s.authSvc.Mailer().Send(bg, msg); err != nil && s.logger != nil {
+				s.logger.Warn("auth: invitation email to %s: %v", msg.To, err)
+			}
+		}()
+	}
 	// Return both the persistent ID and the plaintext token so the
 	// admin can copy/email it. The plaintext is never recoverable
 	// after this response.
@@ -980,7 +1013,21 @@ func (s *Server) handleInvitationAcceptForLoggedIn(w http.ResponseWriter, r *htt
 // ---- Admin handlers ----
 
 func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := s.authStore().ListUsers(r.Context(), identity.Page{Limit: 200})
+	// ?offset / ?limit pagination — the previous hardcoded Page{Limit:
+	// 200} silently truncated any deployment past 200 users.
+	q := r.URL.Query()
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	switch {
+	case limit <= 0:
+		limit = 50
+	case limit > 200:
+		limit = 200
+	}
+	users, err := s.authStore().ListUsers(r.Context(), identity.Page{Offset: offset, Limit: limit})
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
@@ -990,8 +1037,10 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		views = append(views, s.toUserView(u))
 	}
 	writeJSON(w, struct {
-		Users []userView `json:"users"`
-	}{Users: views})
+		Users  []userView `json:"users"`
+		Offset int        `json:"offset"`
+		Limit  int        `json:"limit"`
+	}{Users: views, Offset: offset, Limit: limit})
 }
 
 func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {

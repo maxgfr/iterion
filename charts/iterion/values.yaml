@@ -191,6 +191,25 @@ config:
     oauthForfait:
       anthropicClientId: ""
       codexClientId: ""
+  # --- SMTP (cloud only) -------------------------------------------
+  # Transactional email: invitations + self-service password reset.
+  # host empty = email disabled (the SPA hides forgot-password; reset
+  # tokens land in server logs via the log-mailer fallback). Relay
+  # credentials live in secrets.smtp below.
+  smtp:
+    host: ""
+    port: 587
+    # Envelope + header sender, e.g. "iterion <no-reply@example.org>"
+    from: ""
+    startTLS: true
+  # --- Org launch limit defaults (cloud only) ----------------------
+  # Platform-wide caps applied to orgs without a per-org override
+  # (PATCH /api/admin/orgs/{id}). 0 = unlimited.
+  orgDefaults:
+    monthlyRunQuota: 0
+    monthlyCostCapUsd: 0
+    maxConcurrentRuns: 0
+    launchRatePerMin: 0
 
 # --- Secrets --------------------------------------------------------
 # Two opt-in patterns:
@@ -207,6 +226,12 @@ secrets:
     existingSecret: ""
     anthropicApiKey: ""
     openaiApiKey: ""
+  # SMTP relay credentials (host/port/from live in config.smtp).
+  smtp:
+    create: false
+    existingSecret: ""
+    username: ""
+    password: ""
   storage:
     create: false
     existingSecret: ""
@@ -231,6 +256,10 @@ secrets:
     # empty in established deployments where users have been
     # provisioned through the admin UI.
     bootstrapAdminEmail: ""
+    # HMAC key signing outbound run-completion callbacks
+    # (X-Iterion-Signature). Read by both the server and the runner;
+    # empty = unsigned callbacks. `openssl rand -base64 32`.
+    completionWebhookSecret: ""
     # OIDC client_secrets. Public client_ids and discovery URLs go
     # into the ConfigMap (values.config.auth.oidc) — the secret
     # bundle only carries the secrets that should not be readable

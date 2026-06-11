@@ -48,6 +48,10 @@ type serverInfoResponse struct {
 	// configured. The SPA polls GET /api/v1/limits/cost for live status
 	// and renders the cost-cap banner only when this is true.
 	CostCapEnabled bool `json:"cost_cap_enabled"`
+	// EmailEnabled is true when a real SMTP mailer is wired. The SPA
+	// only offers email-dependent flows (forgot-password, "send
+	// invitation by email") when true.
+	EmailEnabled bool `json:"email_enabled"`
 }
 
 type serverLimitsBlock struct {
@@ -83,6 +87,7 @@ func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
 		},
 		NativeTrackerEnabled: s.cfg.NativeTrackerStore != nil,
 		DispatcherEnabled:    s.cfg.Dispatcher != nil,
+		EmailEnabled:         s.authSvc != nil && s.authSvc.EmailEnabled(),
 	}
 	// Surface whether the daily spend cap is active so the SPA knows to
 	// poll for live status. DailyCap() is nil when disabled.

@@ -71,6 +71,12 @@ spec:
             - secretRef:
                 name: {{ default (printf "%s-auth" (include "iterion.fullname" .)) .Values.secrets.auth.existingSecret }}
             {{- end }}
+            {{- if and (eq .Values.mode "cloud") (or .Values.secrets.smtp.create .Values.secrets.smtp.existingSecret) }}
+            # SMTP relay credentials (server only — the runner never
+            # sends transactional email).
+            - secretRef:
+                name: {{ default (printf "%s-smtp" (include "iterion.fullname" .)) .Values.secrets.smtp.existingSecret }}
+            {{- end }}
           livenessProbe:
             httpGet:
               path: {{ .Values.probes.liveness.path }}

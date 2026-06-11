@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/SocialGouv/iterion/pkg/identity"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/mail"
 )
 
 // Sentinel errors raised by Service. Handlers map them to HTTP
@@ -81,6 +83,13 @@ type Service struct {
 	// "stored hash unparseable for user X" that we don't want to
 	// silently swallow into a generic ErrInvalidCredentials response.
 	logger *iterlog.Logger
+	// resets + mailer + publicURL power the self-service password
+	// reset (password_reset.go) and invitation emails. All optional:
+	// nil resets/mailer disable the reset flow (request becomes a
+	// logged no-op).
+	resets    PasswordResetStore
+	mailer    mail.Mailer
+	publicURL string
 }
 
 // Config wires the Service.
@@ -98,6 +107,11 @@ type Config struct {
 	// manually from their settings.
 	TrustedAutoLinkProviders []string
 	Logger                   *iterlog.Logger
+	// Resets + Mailer + PublicURL enable the password-reset flow and
+	// invitation emails (all optional — see Service fields).
+	Resets    PasswordResetStore
+	Mailer    mail.Mailer
+	PublicURL string
 }
 
 // NewService validates the config and returns a wired Service.
@@ -137,8 +151,22 @@ func NewService(cfg Config) (*Service, error) {
 		now:                      time.Now,
 		trustedAutoLinkProviders: trusted,
 		logger:                   cfg.Logger,
+		resets:                   cfg.Resets,
+		mailer:                   cfg.Mailer,
+		publicURL:                strings.TrimRight(cfg.PublicURL, "/"),
 	}, nil
 }
+
+// EmailEnabled reports whether a real mailer is wired (drives the
+// SPA's forgot-password entry point via server_info).
+func (s *Service) EmailEnabled() bool { return s.mailer != nil && s.mailer.Enabled() }
+
+// Mailer exposes the wired mailer (nil-safe for callers that send
+// optional notifications like invitation emails).
+func (s *Service) Mailer() mail.Mailer { return s.mailer }
+
+// PublicURL is the externally-reachable base URL used in email links.
+func (s *Service) PublicURL() string { return s.publicURL }
 
 // LoginResult bundles the artifacts returned to the caller after a
 // successful login or refresh. The HTTP layer translates these into
