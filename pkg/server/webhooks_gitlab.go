@@ -193,8 +193,10 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, r 
 // recordNoteDelivery inserts a terminal note-event audit row with a
 // human-readable reason (richer than the generic terminal recorder —
 // the conversational path has many distinct filter causes operators
-// want to tell apart in the deliveries view).
+// want to tell apart in the deliveries view). Metrics parity with the
+// common helpers via markWebhookOutcome.
 func (s *Server) recordNoteDelivery(ctx context.Context, cfg webhooks.Config, status, payloadHash, srcIP string, p gitlab.ParsedNote, errMsg string) {
+	s.markWebhookOutcome(cfg.Provider, status)
 	if s.webhookDeliveries == nil {
 		return
 	}
