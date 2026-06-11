@@ -435,9 +435,14 @@ prompt publish_review_user:
 
   Follow your system prompt and the `forge-pr-review.md` skill. Post one
   review with inline comments (```suggestion blocks where `replacement`
-  is set), then re-fetch to verify and return `publish_output` with the
-  re-fetched `comments_posted`, `suggestions_posted`, `review_url`, and
-  a `summary` citing the verification call.
+  is set), then re-fetch to verify.
+
+  Your FINAL action MUST be to emit the `publish_output` structured object
+  with ALL fields set: published, forge, review_url, comments_posted,
+  suggestions_posted, skipped_reason, summary. Emit it even if some posts
+  failed — report the partial counts and put the reason in `summary`. Do NOT
+  finish with a prose message; the run fails when the structured output is
+  missing.
 
 ## ─── Schemas ────────────────────────────────────────────────────
 
@@ -625,9 +630,12 @@ agent publish_review:
   system: publish_review_system
   user: publish_review_user
   session: fresh
-  ## The reviewer can ask the operator (e.g. ambiguous PR target) rather
-  ## than guess; same escalation contract as the reviewers.
-  interaction: human
+  ## No `interaction: human` here: unlike the reviewers' escalation contract,
+  ## the publish step MUST reliably END by emitting the publish_output schema.
+  ## An interactive turn let the agent finish with prose instead, so the run
+  ## ended failed_resumable on a missing-fields validation even though the
+  ## inline comments had already posted. The webhook always supplies a concrete
+  ## pr_url, so there is nothing to ask a human about.
 
 ## Deterministic anti-façade gate (no LLM): when findings existed but
 ## zero inline comments landed, emit a loud banner. The board + report

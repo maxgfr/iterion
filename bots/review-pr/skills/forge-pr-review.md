@@ -118,26 +118,40 @@ Report that count as `comments_posted` and the review URL as
 
 ## 5. GitLab (`glab`)
 
-Inline comments are MR discussion threads with a `position`. You need the
-diff refs first:
+Inline comments are MR discussion threads carrying a `position`. Fetch the
+diff refs ONCE (`:id` = URL-encoded `group/project`, or the numeric id):
 
 ```sh
-glab api "projects/:id/merge_requests/<iid>/versions" # or .../diffs
+glab api "projects/:id/merge_requests/<iid>/versions" --jq '.[0]'
 ```
-Grab `base_commit_sha`, `head_commit_sha`, `start_commit_sha`. Then per
-finding:
+Read `base_commit_sha`, `head_commit_sha`, `start_commit_sha` → BASE, HEAD,
+START. Then post ONE discussion per finding. GitLab's position is picky — get
+it exactly right or the call 400s and the comment is silently lost:
+
+- ALWAYS send BOTH `position[new_path]` AND `position[old_path]`, set to the
+  SAME path — **even for a brand-new file**. Omitting `old_path` is the single
+  most common reason an added line fails to anchor (it then falls back to a
+  plain note, which is what we must avoid).
+- ADDED line (a new file, or a `+` line): send ONLY `position[new_line]`.
+- UNCHANGED context line: send BOTH `position[new_line]` and
+  `position[old_line]` (same value when nothing above it shifted).
 
 ```sh
 glab api --method POST "projects/:id/merge_requests/<iid>/discussions" \
   -f body="$BODY" \
   -f position[position_type]=text \
-  -f position[base_sha]=$BASE -f position[head_sha]=$HEAD -f position[start_sha]=$START \
-  -f position[new_path]=src/x.js -f position[new_line]=142
+  -f position[base_sha]="$BASE" -f position[head_sha]="$HEAD" -f position[start_sha]="$START" \
+  -f position[new_path]="fetch.go" -f position[old_path]="fetch.go" \
+  -f position[new_line]=15
 ```
-(`:id` = URL-encoded `group/project`, or the numeric project id.)
 
-GitLab suggestion fence is `suggestion:-0+0` (the `-0+0` covers the
-single anchored line; `-1+2` would span more lines):
+Loop over EVERY finding; do not stop on the first error. If a discussion
+POST fails (400/422 — line not in the diff, or a bad position), do NOT
+silently downgrade it to a plain note: collect that finding and list it under
+"could not be anchored inline" in the summary. Capture each returned id.
+
+GitLab suggestion fence is `suggestion:-0+0` (covers the single anchored
+line; `-1+2` spans more):
 
 ```
 ```suggestion:-0+0
@@ -145,7 +159,20 @@ single anchored line; `-1+2` would span more lines):
 ```​
 ```
 
-VERIFY: `glab api "projects/:id/merge_requests/<iid>/discussions" --jq 'length'`.
+After the per-finding discussions, post ONE summary note (totals, severity
+counts, cross-confirmed count, and any unanchorable findings):
+```sh
+glab api --method POST "projects/:id/merge_requests/<iid>/notes" -f body="$SUMMARY"
+```
+
+VERIFY (mandatory): count the discussions that actually carry a diff position
+— those are the inline comments GitLab stored — and capture the MR URL:
+```sh
+glab api "projects/:id/merge_requests/<iid>/discussions" --paginate \
+  --jq '[.[].notes[] | select(.position != null)] | length'
+```
+Report that number as `comments_posted` (never an optimistic self-estimate);
+`review_url` is the MR URL.
 
 ## 6. Forgejo / Gitea (REST API)
 
