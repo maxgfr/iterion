@@ -12,7 +12,7 @@ everything it sends to the model is **anonymised**.
 
 This service lives *outside* the iterion engine on purpose. iterion
 ships a generic primitive — a **run-completion webhook** (see
-[`docs/completion-webhooks.md`](../../docs/completion-webhooks.md)): you
+[`docs/outbound-callbacks.md`](../../docs/outbound-callbacks.md)): you
 launch a run with a `callback_url`, and iterion POSTs the final answer
 there when the run finishes. This adapter is all the Mattermost-specific
 glue around that primitive. A Slack adapter would implement the same
@@ -93,7 +93,7 @@ their secret is configured (and log a startup warning when not):
   with `ITERION_COMPLETION_WEBHOOK_SECRET`; the adapter verifies the
   `X-Iterion-Signature` HMAC against `CLARIFY_WEBHOOK_SECRET` over the
   raw body and returns `401` on mismatch. Set the **same** value on both
-  sides. See [docs/completion-webhooks.md](../../docs/completion-webhooks.md#authenticating-the-payload-hmac-signature).
+  sides. See [docs/outbound-callbacks.md](../../docs/outbound-callbacks.md#authenticating-the-payload-hmac-signature).
 - **`POST /mm/actions`** (Mattermost → adapter). The adapter embeds
   `CLARIFY_MM_ACTION_TOKEN` in each consent button's context; Mattermost
   echoes it back, and the adapter constant-time-compares it on receipt,

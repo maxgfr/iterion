@@ -1,6 +1,11 @@
-# Run-completion webhooks
+# Outbound run-completion callbacks
 
-A **run-completion webhook** lets an external integration trigger an
+> **Inbound** webhooks (an external event triggering an iterion run)
+> live in [docs/webhooks.md](webhooks.md). This page covers the
+> opposite direction: a run reaching a terminal state and POSTing the
+> result somewhere.
+
+A **run-completion callback** lets an external integration trigger an
 iterion run asynchronously and be told — without polling — when the run
 finished and what its final answer was. It is a generic engine
 primitive: the payload is a neutral JSON envelope, and all

@@ -90,9 +90,39 @@ Think of it as a DAG runner purpose-built for LLM workflows — with first-class
 
 ### Distribution & integration
 
-- ☁️ **Cloud mode** — Multi-tenant Helm deployment with MongoDB + S3-compatible blob store + NATS JetStream queue; KEDA-scaled runner pool; per-run Kubernetes sandbox pods
+- ☁️ **Bot-as-a-Service platform** — Multi-tenant Helm deployment (MongoDB + S3 + NATS JetStream, KEDA-scaled runners, per-run Kubernetes sandboxes) with the full platform layer: orgs + quotas + metering, inbound webhooks for GitLab / GitHub / Forgejo / generic JSON, bound credentials, audit log, PATs, SMTP onboarding, self-serve studio — see [docs/baas-overview.md](docs/baas-overview.md)
 - 🧰 **TypeScript SDK** — [`@iterion/sdk`](sdks/typescript/) wraps the CLI with typed `run` / `resume` / `events` streaming for Node, Deno, and Bun apps
 - 🧠 **AI agent skill** — Install as a skill in Claude Code, Codex, Cursor, Windsurf, GitHub Copilot, Cline, Aider, and other AI coding agents
+
+---
+
+## ☁️ Iterion Cloud — Bot-as-a-Service
+
+The same engine, hosted: an external event fires → an autonomous bot
+runs with your org's **bound** credentials → the result lands back in
+your own system. Open a merge request, get Revi's review as inline
+comments — no human in the loop, no secret ever in a prompt.
+
+From dev to imperator: the legion, as a service.
+
+```text
+forge event ──▶ POST /api/webhooks/{provider}/{id}   (token/HMAC, rate, quota)
+            ──▶ NATS queue ──▶ runner pod (KEDA-scaled)
+            ──▶ bot executes with bound creds (BYOK key + file secrets)
+            ──▶ review/fix/report posted back on the MR/PR
+```
+
+Five steps to a working loop:
+
+1. `helm install iterion oci://ghcr.io/socialgouv/charts/iterion -f values.yaml` — [chart README](charts/iterion/README.md)
+2. Activate the bootstrap super-admin (temp password in the boot logs), create an org
+3. In the studio: org → Webhooks → create (provider, bot scope) — copy the one-time token + URL
+4. Paste them into your forge's webhook settings; add a `forge_token` secret + bot binding
+5. Open an MR — watch the run in the studio, the review lands on the MR
+
+Org quotas (runs / cost / concurrency / rate), audit log, personal
+access tokens, DLQ ops and Prometheus metrics make it operable as a
+real multi-tenant service. Start at [docs/baas-overview.md](docs/baas-overview.md).
 
 ---
 

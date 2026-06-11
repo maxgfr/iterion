@@ -1,0 +1,132 @@
+[← Documentation index](README.md) · [← Iterion](../README.md)
+
+# Iterion as Bot-as-a-Service
+
+**Audience.** Anyone evaluating iterion as a multi-tenant platform — a
+platform engineer about to `helm install`, a tech-lead choosing between
+self-hosting and managed, or an operator who needs to explain to a
+review board what iterion *is* before they let it near production.
+
+Iterion is two things in one repository:
+
+1. **An open-source workflow engine** you run locally (`iterion run`,
+   `iterion studio`, the desktop app) — the same engine the rest of the
+   docs cover.
+2. **A self-hostable multi-tenant platform** built on top of that engine:
+   orgs, teams, BYOK LLM keys, generic + bot-secret bindings, inbound
+   webhooks for four providers, NATS-queued runner pods, per-org quotas,
+   audit log, PATs, SMTP onboarding. We call the product
+   **Bot-as-a-Service** (BaaS) and the category
+   **Agent-as-a-Service** (AaaS).
+
+> *From dev to imperator — command a legion of bots at the next level.*
+
+## The BaaS loop
+
+A bot in iterion is an autonomous agent compiled from a `.bot` file. In
+platform mode the loop is end-to-end:
+
+```
+  external event           runner pod                  external system
+  (forge/CI/cron)           (iterion)                    (forge/Slack/…)
+        │                       │                            │
+        │  POST /api/webhooks/  │                            │
+        ├──────────────────────▶│                            │
+        │   <iwh_ token>        │ admit (auth/rate/quota)    │
+        │                       │ publish to NATS queue      │
+        │                       │ runner claims + executes   │
+        │                       │ binds org credentials      │
+        │                       │ (BYOK key + file secret)   │
+        │                       │                            │
+        │                       │      bot acts (commit,     │
+        │                       │      review, post note…)   │
+        │                       ├───────────────────────────▶│
+        │                       │                            │
+        │  202 launched + run id│                            │
+        │◀──────────────────────┤                            │
+```
+
+The event is the **trigger**; the bot is the **autonomous worker**; the
+org-bound credentials let it **act in the user's own system** (GitLab MR
+comment, GitHub PR review, Mattermost note); the result lands back in
+that system without anyone clicking a UI in between.
+
+## A concrete walkthrough — GitLab MR → Revi review
+
+The operator's seed (a one-off):
+
+1. Helm-install the chart against Mongo + NATS + S3 (see
+   [cloud-deployment.md](cloud-deployment.md)).
+2. Bootstrap the super-admin and create an org for the team
+   (see [baas-admin-guide.md](baas-admin-guide.md)).
+3. The org admin opens `/teams/<id>` in the studio → Webhooks →
+   "Create webhook" → provider: GitLab → bots: `review-pr`. The studio
+   shows the inbound URL `https://iterion.example.com/api/webhooks/gitlab/<id>`
+   and the minted `iwh_…` token *once*. They paste both into the GitLab
+   project's Webhook page (URL + Secret Token).
+4. Optionally: bind a `forge_token` generic secret to the `review-pr` bot
+   with `allowed_hosts: ["gitlab.example.com"]` so Revi can post the
+   review note using the org's own GitLab account
+   (see [secrets-reference.md](secrets-reference.md)).
+
+After that, every MR-open in the GitLab project triggers Revi
+autonomously:
+
+| Step | Where the code lives | What happens |
+|---|---|---|
+| GitLab POSTs the merge_request event | the forge | Header `X-Gitlab-Token: iwh_…` |
+| Token check + rate/quota gates | [pkg/server/middleware_webhook.go](../pkg/server/middleware_webhook.go) | 401/410/429/403 if anything fails |
+| Parse + filter (open/reopen on allowed project) | [pkg/webhooks/gitlab/parser.go](../pkg/webhooks/gitlab/parser.go) | 200 `filtered` for noise (updates, label edits) |
+| Launch admission (org suspend / concurrency / cost cap / run quota) | [pkg/server/launch_gate.go](../pkg/server/launch_gate.go) | 402/403/429 with a stable reason token |
+| Bundle the org's BYOK keys + bound secrets, seal them | [pkg/secrets/run_secrets.go](../pkg/secrets/run_secrets.go) | Per-run AES-GCM, run-id-bound AAD |
+| Publish on NATS `iterion.queue.runs` | [pkg/queue/nats/nats.go](../pkg/queue/nats/nats.go) | KEDA scales the runner pool on lag |
+| A runner pod claims, unseals, runs the `review-pr` bot | [pkg/runner/loop.go](../pkg/runner/loop.go) | One in-flight run per pod (MaxAckPending=1) |
+| The bot clones, reviews, posts the note via `forge_token` | the bot | The org's identity, not iterion's |
+| Audit row + delivery row + Prometheus counters | [pkg/audit/audit.go](../pkg/audit/audit.go) + [pkg/cloud/metrics/metrics.go](../pkg/cloud/metrics/metrics.go) | Both tenant and platform timelines |
+
+The same chain handles an on-demand re-review: a reviewer types `/revi`
+in the MR's notes, GitLab POSTs a Note Hook to the same URL, iterion's
+GitLab handler recognises the command word
+([pkg/webhooks/gitlab/note.go:IsReviewCommand](../pkg/webhooks/gitlab/note.go)),
+and a fresh review fires under a different idempotency key.
+
+## The primitives
+
+| Primitive | Owns | Where |
+|---|---|---|
+| **Webhook token** (`iwh_…`) | inbound auth + tenant resolution + per-org rate/quota | [docs/webhooks.md](webhooks.md) · [pkg/webhooks/](../pkg/webhooks/) |
+| **Bot catalog** | what a webhook can launch — bots discovered from `ITERION_BOTS_PATH` | [docs/bundles.md](bundles.md) |
+| **BYOK API keys + bindings** | the org's LLM and forge credentials, sealed at rest | [docs/secrets-reference.md](secrets-reference.md) · [pkg/secrets/](../pkg/secrets/) |
+| **Runner pool** | claims a queued run, unseals the bundle, runs the bot | [docs/cloud-architecture.md](cloud-architecture.md) · [pkg/runner/](../pkg/runner/) |
+| **Orgs + quotas + audit** | the multitenancy and metering layer | [docs/quotas-and-limits.md](quotas-and-limits.md) · [pkg/orgusage/](../pkg/orgusage/) · [pkg/audit/](../pkg/audit/) |
+| **PATs** (`iap_…`) | long-lived, programmatic API access for CI/SDKs | [docs/baas-admin-guide.md](baas-admin-guide.md) · [pkg/pat/](../pkg/pat/) |
+
+Everything is **opt-in**. A self-hosted iterion that hasn't enabled
+webhooks is still a perfectly fine multi-tenant studio (`iterion server`
+in cloud mode); a `helm install` that turns on webhooks but no
+PrometheusRule still runs — the chart's defaults are non-destructive
+([charts/iterion/README.md](../charts/iterion/README.md)).
+
+## Reading map
+
+If you arrived here looking for…
+
+| You want… | Read |
+|---|---|
+| The conceptual loop (you're here) | this page |
+| The webhook reference (auth modes, providers, idempotency, CRUD API) | [webhooks.md](webhooks.md) |
+| The quota / metering / enforcement contract (denial tokens, HTTP semantics) | [quotas-and-limits.md](quotas-and-limits.md) |
+| The platform-operator + org-admin runbook (UI + curl side by side) | [baas-admin-guide.md](baas-admin-guide.md) |
+| Every kind of secret and where it lives | [secrets-reference.md](secrets-reference.md) (engine-side layers in [secrets.md](secrets.md)) |
+| The full REST surface (every endpoint, auth class, purpose) | [cloud-rest-api.md](cloud-rest-api.md) |
+| Memory + knowledge spaces (visibilities, quotas, REST) | [memory-and-knowledge.md](memory-and-knowledge.md) |
+| Control plane vs data plane, queue internals, multitenancy enforcement | [cloud-architecture.md](cloud-architecture.md) |
+| How to install the chart | [cloud-deployment.md](cloud-deployment.md) · [charts/iterion/README.md](../charts/iterion/README.md) |
+| The OPERATOR-side bootstrap (super-admin, SSO, suspending an org) | [cloud-admin.md](cloud-admin.md) |
+| The END-USER-side flows (login, BYOK, OAuth-forfait, PATs, reset) | [cloud-user.md](cloud-user.md) |
+| Outbound run-completion callbacks (the original "webhook" feature) | [outbound-callbacks.md](outbound-callbacks.md) |
+
+The catalog of bots iterion ships with — Nexie, Featurly, Billy, Revi,
+Seki and friends — lives in [examples.md](examples.md) and
+[bundles.md](bundles.md). They are the legion you command; this page is
+how that legion gets paged.

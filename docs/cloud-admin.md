@@ -117,6 +117,28 @@ decode, and `pkg/store/mongo` augments every query with that filter
 unless the ctx is privileged (super-admin, runner bootstrap, the
 `migrate` tool).
 
+### Organisations & quotas
+
+The full org admin runbook (create org, set quotas, suspend/read-only,
+invite members, watch usage, mint PATs, triage the DLQ) lives in
+[baas-admin-guide.md](baas-admin-guide.md). The exact denial reasons +
+HTTP semantics + Prometheus metrics every quota emits are in
+[quotas-and-limits.md](quotas-and-limits.md).
+
+Also wired and admin-readable:
+
+- **Audit log** — `/api/admin/audit` (platform) +
+  `/api/teams/{id}/audit` (tenant), 400-day retention. Action token
+  list and filter params in
+  [baas-admin-guide.md §1.5](baas-admin-guide.md#15-audit-log).
+- **Personal access tokens** — `/api/me/tokens` (mint / revoke);
+  platform ceiling via `ITERION_PAT_MAX_TTL`. See
+  [baas-admin-guide.md §2.6](baas-admin-guide.md#26-personal-access-tokens-for-ci).
+- **SMTP** — `ITERION_SMTP_*` env (or the chart's `config.smtp` +
+  `secrets.smtp`); without it the `LogMailer` falls back to the log
+  fallback and `/api/server/info` advertises `email_enabled=false`.
+  See [baas-admin-guide.md §1.9](baas-admin-guide.md#19-smtp-configuration).
+
 Roles inside a team:
 
 | Role | Can read runs | Can launch | Can manage members | Can manage team API keys |

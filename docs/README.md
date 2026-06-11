@@ -50,14 +50,33 @@ Welcome to the Iterion docs. Pages are organised by audience and topic.
 | [observability/README.md](observability/README.md) | Prometheus metrics, OTLP traces, Grafana dashboards. |
 | [persisted-formats.md](persisted-formats.md) | On-disk format spec for `run.json`, `events.jsonl`, artifacts, interactions. |
 
-## Cloud mode
+## Cloud platform (Bot-as-a-Service)
+
+Iterion ships as a self-hostable multi-tenant platform — orgs + teams,
+BYOK LLM keys, inbound webhooks for 4 forges, NATS-queued runner pool,
+per-org quotas, audit log, PATs, SMTP onboarding. We call it
+**Bot-as-a-Service** (BaaS).
+
+| Page | Topic |
+|---|---|
+| [baas-overview.md](baas-overview.md) | Start here — the event → autonomous agent → result-posted-back loop, a concrete GitLab-MR → Revi walkthrough, the primitives table. |
+| [webhooks.md](webhooks.md) | Inbound webhooks (GitLab + `/revi`, GitHub, Forgejo/Gitea, generic) — auth modes, idempotency, CRUD API. |
+| [quotas-and-limits.md](quotas-and-limits.md) | Run/cost/concurrency/rate caps, denial reasons + HTTP semantics, Prometheus metrics. |
+| [baas-admin-guide.md](baas-admin-guide.md) | Platform operator + org admin runbook (UI paths + curl), DLQ triage, audit, PATs. |
+| [secrets-reference.md](secrets-reference.md) | The single map of every secret kind (BYOK, generic, bindings, file, OAuth-forfait, tokens) and the sealing model. |
+| [cloud-rest-api.md](cloud-rest-api.md) | Every REST endpoint grouped by domain, auth class, purpose. |
+| [memory-and-knowledge.md](memory-and-knowledge.md) | Memory visibilities, per-org + per-space quotas, REST surface. |
+| [cloud-architecture.md](cloud-architecture.md) | Control plane vs data plane, run lifecycle + sealed bundle, queue internals, multitenancy enforcement layers. |
+| [outbound-callbacks.md](outbound-callbacks.md) | The mirror direction — runs POSTing their result back to the launcher. |
+
+## Cloud mode — operator
 
 | Page | Topic |
 |---|---|
 | [cloud.md](cloud.md) | Architecture overview — server + runner + Mongo + NATS + S3. |
 | [cloud-deployment.md](cloud-deployment.md) | Operator runbook: secrets, NetworkPolicy, observability, resume, migration. |
 | [cloud-admin.md](cloud-admin.md) | Multitenant admin guide: bootstrap super-admin, SSO config, BYOK + OAuth-forfait, secret rotation. |
-| [cloud-user.md](cloud-user.md) | User-facing guide: login, teams, BYOK, OAuth subscriptions, invitations. |
+| [cloud-user.md](cloud-user.md) | User-facing guide: login, teams, BYOK, OAuth subscriptions, invitations, PATs, password reset. |
 | [cloud-troubleshooting.md](cloud-troubleshooting.md) | Symptoms-first reference: queued runs not starting, hangs, /readyz 503s, WS streaming, budget overruns, Trivy CVE findings. |
 | [cloud-public-exposure-checklist.md](cloud-public-exposure-checklist.md) | 10-section checklist before opening a deployment to public traffic. Hard prerequisites: auth, multitenancy, NetworkPolicy, secrets, image supply chain, observability, probes, budgets, backups, runbooks. |
 

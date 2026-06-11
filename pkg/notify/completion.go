@@ -41,7 +41,7 @@ const DefaultAnswerField = "final_answer"
 
 // CompletionPayload is the JSON body POSTed to a run's callback URL
 // when the run reaches a terminal state. Stable wire contract — see
-// docs/completion-webhooks.md.
+// docs/outbound-callbacks.md.
 type CompletionPayload struct {
 	V             int    `json:"v"`
 	RunID         string `json:"run_id"`

@@ -111,7 +111,11 @@ Other top-level directories: `studio/` (React/Vite frontend), `examples/` (.iter
 - `pkg/cli/` — CLI command implementations (init, validate, run, inspect, resume, diagram, studio, report, dispatch, issue, bench, bots, bundle, sandbox, version)
 - `pkg/benchmark/` — Metrics collection and reporting
 - `pkg/log/` — Leveled logger (error, warn, info, debug, trace) — public so e2e tests can construct it
-- `pkg/auth/` — Operator authentication primitives (SSO, session cookies) for cloud-mode endpoints
+- `pkg/auth/` — Operator authentication primitives (SSO, session cookies, password reset) for cloud-mode endpoints
+- `pkg/audit/` — Tenant + platform audit log (control-plane mutations; Mongo TTL store, `/api/teams/{id}/audit` + `/api/admin/audit`)
+- `pkg/orgusage/` — Per-org monthly run/cost counters (Mongo CAS) feeding the launch gate + usage views (see [docs/quotas-and-limits.md](docs/quotas-and-limits.md))
+- `pkg/pat/` — Personal access tokens (`iap_` bearers for programmatic API access)
+- `pkg/mail/` — Stdlib SMTP mailer (invitations + password reset) with a log fallback when unconfigured
 - `pkg/bundle/` — `.botz` bundle loader (workflow + skills + recipes packaged together)
 - `pkg/cloud/` — Cloud-mode runtime wiring (queue dispatch, runner orchestration, multitenancy)
 - `pkg/config/` — Config-file loader (`iterion dispatch` YAML + cloud config)
@@ -338,6 +342,21 @@ The studio's SPA exposes two new routes when the corresponding server
 flags are set: `/board` (kanban CRUD with drag-and-drop, gated on
 `server_info.native_tracker_enabled`) and `/dispatcher` (live dashboard
 with running + retry tables, gated on `server_info.dispatcher_enabled`).
+
+### Inbound webhooks (cloud BaaS triggers)
+
+Distinct from the dispatcher (which polls): cloud mode exposes
+self-authenticating inbound webhook endpoints that launch a bot per
+external event — GitLab MR open/reopen **and** `/revi` note re-review,
+GitHub PR, Forgejo/Gitea PR, and a generic JSON trigger. Per-org
+`iwh_` tokens (token or HMAC mode), rate limits, monthly quotas,
+idempotent delivery audit, and the per-org launch gate (run quota /
+cost cap / concurrency — `pkg/orgusage` + `pkg/server/launch_gate.go`)
+all sit in front of the launch. Key files:
+[pkg/webhooks/](pkg/webhooks/) (spine + per-provider parsers),
+[pkg/server/webhooks_common.go](pkg/server/webhooks_common.go) (shared
+admission→idempotency→launch tail). Reference: [docs/webhooks.md](docs/webhooks.md);
+platform overview: [docs/baas-overview.md](docs/baas-overview.md).
 
 ### Bot board access (capabilities)
 

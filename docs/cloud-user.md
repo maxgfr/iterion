@@ -133,12 +133,42 @@ To invite someone to your team:
 4. Send it to them however you want (email / chat / SMS).
 
 They paste the token into the "Create account" form (or, if they
-already have an iterion account, into `/invite/<token>` on a
-logged-in session).
+already have an iterion account, into `/invitations/accept?token=<token>`
+on a logged-in session). When the deployment has SMTP configured, the
+invitation is also emailed automatically with that accept link.
 
 Invitations expire after 7 days.
 
-## 6. Common errors
+## 6. Personal access tokens (PATs)
+
+For CI jobs, SDKs and curl — anywhere the 15-minute browser session is
+impractical. `/account` → Tokens → create: the `iap_…` value is shown
+**once**. Use it as `Authorization: Bearer iap_…`. A PAT authenticates
+as *you* (your role, your team — optionally pinned to one team at
+creation) and dies instantly on revoke, on account disable, or when
+you leave the pinned team. The operator may cap token lifetimes
+(`ITERION_PAT_MAX_TTL`). Details: [secrets-reference.md](secrets-reference.md).
+
+## 7. Password & account security
+
+- **Forgot password** — when the deployment has email enabled, the
+  login page offers a reset link (valid 60 minutes, single use; every
+  other session is revoked on completion). Without email, ask an
+  admin to force a password rotation on your account.
+- **Change password** — `/account` → Profile: rotating your password
+  signs out every *other* session; yours continues seamlessly.
+- **Sign out everywhere** — same page; kills every refresh session
+  (active browser tabs lose access within ≤15 minutes).
+
+## 8. My org's usage
+
+`/teams/<id>` → Usage shows the month's consumption against your org's
+limits: runs vs quota, metered LLM cost vs cap, live concurrency,
+webhook calls, memory bytes, key/secret/webhook counts. The same data
+is at `GET /api/teams/{id}/usage`. Denial semantics when a cap is hit:
+[quotas-and-limits.md](quotas-and-limits.md).
+
+## 9. Common errors
 
 | What you see | What's going on |
 |---|---|
@@ -147,7 +177,7 @@ Invitations expire after 7 days.
 | "invitation expired" / "invitation already accepted" | Ask the inviter to issue a new one. |
 | Login redirects you back to `/login` after the OIDC bounce | The IdP and iterion disagree on the redirect URI; ping your operator with the URL bar contents at the moment of the bounce. |
 
-## 7. Where the data lives
+## 10. Where the data lives
 
 - **Your runs**: visible to every member of the team that owns them.
   Switching teams hides them; super-admins (your operator) can
