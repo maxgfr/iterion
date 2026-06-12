@@ -91,6 +91,10 @@ ENV ITERION_VERSION=${VERSION} \
 #               in their deterministic tool nodes (diff_precheck,
 #               publish_health). review-pr runs in the runner pod (no
 #               sandbox), so without python3 here those nodes exit 127.
+#   jq        — forge-posting skills (forge-reply.md, forge-pr-review.md)
+#               build JSON note payloads with `jq -nc --arg`; without it
+#               every cloud converse/review run burned an LLM round-trip
+#               on exit-127 before falling back to python3.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         git \
@@ -100,6 +104,7 @@ RUN apt-get update \
         curl \
         passwd \
         python3 \
+        jq \
  && rm -rf /var/lib/apt/lists/*
 
 # glab (GitLab CLI) — review-pr (Revi) runs WITHOUT a sandbox, so in
