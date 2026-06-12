@@ -26,6 +26,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/identity"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/mail"
+	"github.com/SocialGouv/iterion/pkg/marketplace"
 	"github.com/SocialGouv/iterion/pkg/orgusage"
 	"github.com/SocialGouv/iterion/pkg/pat"
 	natsq "github.com/SocialGouv/iterion/pkg/queue/nats"
@@ -249,6 +250,19 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	auditStore := audit.NewMongoStore(st.DB())
 	if err := audit.EnsureSchema(rootCtx, st.DB()); err != nil {
 		return fmt.Errorf("server: ensure audit schema: %w", err)
+	}
+	// Hosted marketplace (Mongo-backed) — opt-in for cloud via
+	// ITERION_CLOUD_MARKETPLACE because the submit/install paths are
+	// local-mode only today (cloud is rejected pending a vetted submission
+	// flow — see pkg/server/marketplace_routes.go). When enabled it surfaces
+	// the read-only browse view + sets marketplace_enabled. Local self-host
+	// wires a JSONStore unconditionally in pkg/cli/studio.go.
+	var marketplaceStore marketplace.Store
+	if enabled, _ := strconv.ParseBool(os.Getenv("ITERION_CLOUD_MARKETPLACE")); enabled {
+		if err := marketplace.EnsureSchema(rootCtx, st.DB()); err != nil {
+			return fmt.Errorf("server: ensure marketplace schema: %w", err)
+		}
+		marketplaceStore = marketplace.NewMongoStore(st.DB())
 	}
 	patStore := pat.NewMongoStore(st.DB())
 	if err := pat.EnsureSchema(rootCtx, st.DB()); err != nil {
@@ -494,6 +508,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		OrgUsage:               orgUsageCounter,
 		OrgDefaults:            orgLimitDefaultsFromEnv(),
 		Audit:                  auditStore,
+		Marketplace:            marketplaceStore,
 		PATs:                   patStore,
 		PATMaxTTL:              patMaxTTL,
 		Queue:                  natsConn,
