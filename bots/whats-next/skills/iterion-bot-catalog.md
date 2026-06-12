@@ -316,7 +316,7 @@ instead.
   code (that is Billy or Featurly), NOT for triaging issues on the
   board.
 - **Triggers**: revi-converse, ask, converse
-- **Vars**: `base_ref` (string), `converse_question` (string), `discussion_id` (string), `pr_url` (string), `replier` (string), `trigger_note` (string), `workspace_dir` (string)
+- **Vars**: `base_ref` (string), `converse_question` (string), `discussion_id` (string), `pr_url` (string), `replier` (string), `thread_context` (string), `trigger_note` (string), `workspace_dir` (string)
 - **Path**: `bots/revi-converse/main.bot`
 
 ### `review-pr` — Revi
