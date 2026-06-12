@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/SocialGouv/iterion/pkg/botinstall"
 	"github.com/SocialGouv/iterion/pkg/cli"
 	"github.com/spf13/cobra"
 )
@@ -66,11 +67,68 @@ by hand after editing a manifest outside the studio.`,
 	},
 }
 
+var botsInstallCmd = &cobra.Command{
+	Use:   "install <git-url|path>",
+	Short: "Install a bot bundle from a git repository or local path",
+	Long: `Import a bot bundle from a git URL (optionally URL#ref) or a local
+directory into the workspace, so iterion bots list, the dispatcher, and the
+studio discover it.
+
+A source repository publishes bots by holding bundle directories (each a
+main.bot + manifest.yaml) and, optionally, an iterion-bots.yaml index at its
+root listing them. When the repo holds a single bundle it is installed
+directly; when it holds several, pass --path <subdir|name> to choose one.
+
+Installed bots are NEVER run automatically — inspect, then launch (run-time
+sandboxing applies as usual). By default bots install under <workdir>/.botz/
+(git-ignored); pass --dest bots to install into a committable location.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ref, _ := cmd.Flags().GetString("ref")
+		path, _ := cmd.Flags().GetString("path")
+		dest, _ := cmd.Flags().GetString("dest")
+		name, _ := cmd.Flags().GetString("name")
+		force, _ := cmd.Flags().GetBool("force")
+		workdir, _ := cmd.Flags().GetString("workdir")
+		p := newPrinter()
+		res, err := botinstall.Install(cmd.Context(), botinstall.Options{
+			Source: args[0], Ref: ref, Path: path, Dest: dest, Name: name, Force: force, Workdir: workdir,
+		})
+		if err != nil {
+			return err
+		}
+		if p.Format == cli.OutputJSON {
+			p.JSON(res)
+			return nil
+		}
+		p.Header("Bot installed")
+		p.KV("Name", res.Name)
+		p.KV("From", res.Source)
+		if res.Ref != "" {
+			p.KV("Ref", res.Ref)
+		}
+		p.KV("Path", res.InstalledPath)
+		p.KV("Skills", fmt.Sprintf("%d", res.Skills))
+		p.KV("Presets", fmt.Sprintf("%d", res.Presets))
+		p.Blank()
+		p.Line("  Inspect it, then launch:")
+		p.Line("    iterion run %s", res.InstalledPath)
+		return nil
+	},
+}
+
 func init() {
 	botsListCmd.Flags().StringSlice("paths", nil, "Directories or .bot files to scan (default: bots, examples)")
 	botsListCmd.Flags().String("format", "json", "Output format: json|markdown|skill")
 	botsRegenCatalogCmd.Flags().String("workdir", "", "Workspace root to scan (default: current directory)")
+	botsInstallCmd.Flags().String("ref", "", "Git ref (branch or tag) to clone")
+	botsInstallCmd.Flags().String("path", "", "Subdirectory or iterion-bots.yaml bot name to install when the repo holds several")
+	botsInstallCmd.Flags().String("dest", "", "Install destination root (default: <workdir>/.botz)")
+	botsInstallCmd.Flags().String("name", "", "Install under this name instead of the source's")
+	botsInstallCmd.Flags().Bool("force", false, "Overwrite an existing install of the same name")
+	botsInstallCmd.Flags().String("workdir", "", "Workspace root for catalog refresh (default: current directory)")
 	botsCmd.AddCommand(botsListCmd)
 	botsCmd.AddCommand(botsRegenCatalogCmd)
+	botsCmd.AddCommand(botsInstallCmd)
 	rootCmd.AddCommand(botsCmd)
 }

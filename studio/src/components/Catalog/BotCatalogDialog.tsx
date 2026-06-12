@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 
 import type { BotEntryWithSchema } from "@/api/bots";
+import { installBot } from "@/api/bots";
 import { Dialog } from "@/components/ui";
 import { botIdentity } from "@/lib/personas";
 import { useBotsStore } from "@/store/bots";
@@ -38,6 +39,37 @@ export function BotCatalogDialog({
   const addToast = useUIStore((s) => s.addToast);
   const setActiveTab = useUIStore((s) => s.setActiveTab);
   const [busy, setBusy] = useState<string | null>(null);
+  const [showImport, setShowImport] = useState(false);
+  const [importUrl, setImportUrl] = useState("");
+  const [importRef, setImportRef] = useState("");
+  const [importPath, setImportPath] = useState("");
+  const [importing, setImporting] = useState(false);
+
+  const onImport = async () => {
+    const url = importUrl.trim();
+    if (!url) return;
+    setImporting(true);
+    try {
+      const res = await installBot({
+        url,
+        ref: importRef.trim() || undefined,
+        path: importPath.trim() || undefined,
+      });
+      addToast(
+        `Imported ${res.name} (${res.presets} presets, ${res.skills} skills) → ${res.installed_path}`,
+        "success",
+      );
+      setImportUrl("");
+      setImportRef("");
+      setImportPath("");
+      setShowImport(false);
+      await refetch();
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : "Import failed", "error");
+    } finally {
+      setImporting(false);
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -82,6 +114,61 @@ export function BotCatalogDialog({
       description="Toggle which bots are exposed to Nexie and the board picker. Toggles are workspace-local (they don't edit the bot's manifest)."
       widthClass="max-w-2xl"
     >
+      <div className="mb-3 border-b border-border-default pb-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-medium text-fg-muted">
+            Import a bot from a repository
+          </h3>
+          <button
+            type="button"
+            onClick={() => setShowImport((v) => !v)}
+            className="rounded bg-surface-2 px-2 py-1 text-[11px] text-fg-muted hover:bg-surface-3 hover:text-fg-default"
+          >
+            {showImport ? "Cancel" : "Import from repo…"}
+          </button>
+        </div>
+        {showImport && (
+          <div className="mt-2 space-y-2">
+            <input
+              type="text"
+              value={importUrl}
+              onChange={(e) => setImportUrl(e.target.value)}
+              placeholder="git URL (https://… or git@…) or local path"
+              className="w-full rounded border border-border-default bg-surface-2 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={importRef}
+                onChange={(e) => setImportRef(e.target.value)}
+                placeholder="ref (branch/tag, optional)"
+                className="min-w-0 flex-1 rounded border border-border-default bg-surface-2 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+              <input
+                type="text"
+                value={importPath}
+                onChange={(e) => setImportPath(e.target.value)}
+                placeholder="subpath or bot name (optional)"
+                className="min-w-0 flex-1 rounded border border-border-default bg-surface-2 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[10px] text-fg-subtle">
+                Installs into .botz/ (git-ignored). Bots are never run
+                automatically — inspect, then launch.
+              </p>
+              <button
+                type="button"
+                onClick={() => void onImport()}
+                disabled={importing || !importUrl.trim()}
+                className="shrink-0 rounded bg-success/20 px-2.5 py-1 text-[11px] font-medium text-success hover:bg-success/30 disabled:opacity-50"
+              >
+                {importing ? "Importing…" : "Install"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
       <div className="max-h-[60vh] overflow-y-auto">
         {loading && rows.length === 0 && (
           <p className="px-1 py-4 text-sm text-fg-subtle">Loading bots…</p>

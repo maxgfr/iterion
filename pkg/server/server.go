@@ -727,6 +727,7 @@ func (s *Server) routes() {
 	// args form per bot. Read-only, gated by the same auth middleware
 	// as the rest of /api/* (the wrapper at line ~427 wraps the mux).
 	s.mux.HandleFunc("GET /api/v1/bots", s.handleBotsList)
+	s.mux.HandleFunc("POST /api/v1/bots/install", s.handleBotInstall)
 	s.mux.HandleFunc("GET /api/v1/bots/{name}", s.handleBotsGet)
 	s.mux.HandleFunc("PUT /api/v1/bots/{name}", s.handleBotsPut)
 	s.mux.HandleFunc("PUT /api/v1/bots/{name}/overlay", s.handleBotOverlay)

@@ -113,3 +113,30 @@ export function setBotOverlay(name: string, enabled: boolean | null): Promise<Bo
     body: JSON.stringify({ enabled }),
   });
 }
+
+export interface InstallBotRequest {
+  url: string;
+  ref?: string;
+  path?: string;
+  name?: string;
+  force?: boolean;
+}
+
+export interface InstallBotResult {
+  name: string;
+  source: string;
+  ref?: string;
+  installed_path: string;
+  skills: number;
+  presets: number;
+}
+
+/** installBot imports a bot bundle from a git URL (or a local path on a
+ *  self-hosted server) into the workspace, then returns where it landed.
+ *  Local-mode only — the server returns 403 in cloud mode. */
+export function installBot(req: InstallBotRequest): Promise<InstallBotResult> {
+  return apiRequest<InstallBotResult>(`${BASE}/install`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}

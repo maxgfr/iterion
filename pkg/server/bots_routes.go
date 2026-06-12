@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/SocialGouv/iterion/pkg/botinstall"
 	"github.com/SocialGouv/iterion/pkg/botregistry"
 	"github.com/SocialGouv/iterion/pkg/bundle"
 )
@@ -214,4 +215,54 @@ func (s *Server) regenCatalog(name, action string) {
 	if _, err := botregistry.RegenerateWhatsNextCatalog(s.cfg.WorkDir); err != nil && s.logger != nil {
 		s.logger.Warn("bots: catalog regen after %q %s: %v", name, action, err)
 	}
+}
+
+// botInstallRequest is the wire body for POST /api/v1/bots/install.
+type botInstallRequest struct {
+	URL   string `json:"url"`
+	Ref   string `json:"ref,omitempty"`
+	Path  string `json:"path,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Force bool   `json:"force,omitempty"`
+}
+
+// handleBotInstall imports a bot bundle from a git URL (or a local path on a
+// self-hosted server) into the workspace's .botz/ and returns the install
+// result. Workspace-mutating + clones an arbitrary URL server-side, so it is
+// LOCAL-MODE ONLY: cloud deployments must go through the vetted hosted
+// marketplace flow (Phase B), never this raw clone-and-write path.
+func (s *Server) handleBotInstall(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSafeOrigin(w, r) {
+		return
+	}
+	if s.cfg.Mode == "cloud" {
+		s.httpErrorFor(w, r, http.StatusForbidden, "bots: install is not available in cloud mode")
+		return
+	}
+	if s.cfg.WorkDir == "" {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "bots: no workspace configured to install into")
+		return
+	}
+	var req botInstallRequest
+	if err := readJSON(r, &req); err != nil {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "invalid request: %v", err)
+		return
+	}
+	if strings.TrimSpace(req.URL) == "" {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "bots: url is required")
+		return
+	}
+	res, err := botinstall.Install(r.Context(), botinstall.Options{
+		Source:  req.URL,
+		Ref:     req.Ref,
+		Path:    req.Path,
+		Name:    req.Name,
+		Force:   req.Force,
+		Workdir: s.cfg.WorkDir,
+	})
+	if err != nil {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "bots: install: %v", err)
+		return
+	}
+	s.writeJSONFor(w, r, res)
 }
