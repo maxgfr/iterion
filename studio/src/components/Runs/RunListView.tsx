@@ -37,7 +37,7 @@ import {
   type SinceFilter,
   type SourceFilter,
 } from "./runListFilter";
-import { availableBots, type BotDescriptor } from "./runBotMeta";
+import { availableBots, botEmoji, botLabel, type BotDescriptor } from "./runBotMeta";
 import {
   availableRepos,
   repoAxisLabel,
@@ -51,6 +51,7 @@ import {
   parseSort,
   SORT_OPTIONS,
   sortRuns,
+  workflowLabel,
   type GroupKey,
   type SortKey,
 } from "./runListSortGroup";
@@ -195,6 +196,14 @@ export default function RunListView() {
   const openRun = useCallback(
     (id: string) => setLocation(`/runs/${encodeURIComponent(id)}`),
     [setLocation],
+  );
+
+  // Click a row's bot avatar to filter to that bot — or toggle it off
+  // when it's already the active bot. Stable so memoised rows don't
+  // re-render when other state changes.
+  const filterByBot = useCallback(
+    (key: string) => setBot((prev) => (prev === key ? "" : key)),
+    [],
   );
 
   // Force a re-render once per second while at least one visible run
@@ -478,7 +487,12 @@ export default function RunListView() {
                     columnSpan={7}
                   >
                     {g.runs.map((r) => (
-                      <RunRow key={r.id} run={r} onOpen={openRun} />
+                      <RunRow
+                        key={r.id}
+                        run={r}
+                        onOpen={openRun}
+                        onFilterBot={filterByBot}
+                      />
                     ))}
                   </RunRowGroup>
                 ))}
@@ -493,7 +507,7 @@ export default function RunListView() {
                   <ul className="divide-y divide-border-default">
                     {g.runs.map((r) => (
                       <li key={r.id}>
-                        <RunCard run={r} onOpen={openRun} />
+                        <RunCard run={r} onOpen={openRun} onFilterBot={filterByBot} />
                       </li>
                     ))}
                   </ul>
@@ -598,14 +612,45 @@ function FilterMenu({
   );
 }
 
+// BotAvatar is the per-row bot glyph that doubles as a quick filter:
+// clicking it filters the list to that bot (toggling off if already
+// active). stopPropagation keeps the row's open-run click from firing.
+const BotAvatar = memo(function BotAvatar({
+  run,
+  onFilter,
+}: {
+  run: RunSummary;
+  onFilter: (botKey: string) => void;
+}) {
+  const key = workflowLabel(run);
+  if (!key) return null;
+  const label = botLabel(run);
+  return (
+    <button
+      type="button"
+      title={`Filter by ${label}`}
+      aria-label={`Filter by ${label}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onFilter(key);
+      }}
+      className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded text-sm leading-none hover:bg-surface-3"
+    >
+      <span aria-hidden>{botEmoji(run)}</span>
+    </button>
+  );
+});
+
 // Memoised so the parent's per-row callback (now stable via useCallback)
 // doesn't force every row to re-render when one run mutates.
 const RunRow = memo(function RunRow({
   run,
   onOpen,
+  onFilterBot,
 }: {
   run: RunSummary;
   onOpen: (id: string) => void;
+  onFilterBot: (botKey: string) => void;
 }) {
   return (
     <tr
@@ -613,7 +658,10 @@ const RunRow = memo(function RunRow({
       onClick={() => onOpen(run.id)}
     >
       <td className="px-4 py-2">
-        <div className="font-medium">{friendlyLabel(run)}</div>
+        <div className="flex items-center gap-2">
+          <BotAvatar run={run} onFilter={onFilterBot} />
+          <span className="font-medium truncate">{friendlyLabel(run)}</span>
+        </div>
       </td>
       <td className="px-4 py-2">
         {workflowDisplay(run) && (
@@ -655,17 +703,29 @@ const RunRow = memo(function RunRow({
 const RunCard = memo(function RunCard({
   run,
   onOpen,
+  onFilterBot,
 }: {
   run: RunSummary;
   onOpen: (id: string) => void;
+  onFilterBot: (botKey: string) => void;
 }) {
+  // A div (not a <button>) so the bot-avatar button can nest validly;
+  // keyboard semantics are restored via role + Enter/Space handling.
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onOpen(run.id)}
-      className="w-full text-left px-4 py-3 flex flex-col gap-1 min-h-[44px] hover:bg-surface-2 active:bg-surface-3"
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen(run.id);
+        }
+      }}
+      className="w-full text-left px-4 py-3 flex flex-col gap-1 min-h-[44px] cursor-pointer hover:bg-surface-2 active:bg-surface-3"
     >
       <div className="flex items-center gap-2 min-w-0 flex-wrap">
+        <BotAvatar run={run} onFilter={onFilterBot} />
         <Badge variant={STATUS_VARIANT[run.status]}>
           {labelForStatus(run.status)}
         </Badge>
@@ -693,7 +753,7 @@ const RunCard = memo(function RunCard({
       >
         {shortRunID(run.id)}
       </div>
-    </button>
+    </div>
   );
 });
 
