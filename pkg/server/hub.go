@@ -3,7 +3,9 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -79,6 +81,14 @@ var upgrader = websocket.Upgrader{
 			// Browsers always send Origin on cross-origin WS handshakes.
 			return true
 		}
+		// Same-origin — the SPA dialing the host that served it (local, behind
+		// a proxy, or in the cloud) — is always allowed: a cross-site drive-by
+		// carries a different Origin host and falls through to the allowlist
+		// below. Deployment-agnostic, so the served studio works on any host
+		// without configuring its public URL.
+		if sameWSOrigin(origin, r) {
+			return true
+		}
 		check := loadOriginCheck()
 		if check == nil {
 			// Defensive fallback: refuse rather than re-open the hole if
@@ -87,6 +97,18 @@ var upgrader = websocket.Upgrader{
 		}
 		return check(origin)
 	},
+}
+
+// sameWSOrigin reports whether the WS Origin header's host matches the
+// request's own Host (the SPA dialing the host that served it). Browsers set
+// Origin to the SPA's true origin; a request from another site carries a
+// different host and is rejected by the allowlist instead.
+func sameWSOrigin(origin string, r *http.Request) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return strings.EqualFold(u.Host, r.Host)
 }
 
 // currentOriginCheck is set by Server.routes() to the same allowlist used
