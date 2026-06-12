@@ -1,0 +1,37 @@
+name: bmady
+display_name: Bmady
+version: 0.1.0
+description: |
+  BMAD-METHOD-inspired agile delivery bot. Runs a structured
+  multi-persona pipeline — Analyst → PM → Architect → Dev → QA —
+  with a human collaboration gate between every phase. Each gate is
+  a different kind of decision (free-text elicitation, an
+  advanced-elicitation option menu, a document approve/reject, a
+  story multi-select with priority + WIP, a ship/changes/hold
+  sign-off) so the operator stays in the driver's seat from brief to
+  commit.
+
+  Vehicle for iterion's human-interaction surface: one run exercises
+  every studio form widget (free-text, radio, select, checkbox
+  multi-select, numeric, approve/reject).
+when_to_use: |
+  Use when you want a feature delivered the BMAD way — explicit
+  human-approved planning artifacts (analysis, PRD, architecture)
+  before any code is written, then an implement → QA → sign-off loop
+  you steer at each step. Pick this over feature_dev when you want to
+  collaborate on the plan rather than hand off an autonomous run.
+author: SocialGouv (devthejo) — bmady/main.bot
+schema_version: 1
+
+triggers:
+  - bmad
+  - agile
+  - plan-then-build
+  - prd
+  - architecture
+
+dispatch_vars:
+  brief: |-
+    {{issue.title}}
+
+    {{issue.body}}

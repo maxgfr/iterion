@@ -1,0 +1,654 @@
+## ─────────────────────────────────────────────────────────────────
+## bmady — BMAD-METHOD-inspired agile delivery, human in the loop
+##
+## A structured multi-persona pipeline with a human collaboration
+## gate between every phase. Each gate is a DIFFERENT kind of
+## decision, so one run exercises the whole studio human-interaction
+## surface:
+##
+##   analyst   → elicit_brief    (free-text elicitation)
+##   pm        → review_prd      (advanced-elicitation option menu — radio)
+##   architect → approve_arch    (document approve / reject — bool)
+##             → select_stories  (story multi-select + priority + WIP — checkbox/select/int)
+##   dev       → qa              (implement → quality verdict)
+##             → final_review    (ship / request_changes / hold — radio)
+##                              → commit_changes → done
+##
+## Personas are plain `agent`/`judge` nodes, one `system:` prompt
+## each (the canonical multi-persona pattern from feature-dev). The
+## per-persona discipline lives in skills/bmady-<persona>.md, read at
+## run time — so adding a stack or changing a persona never touches
+## this graph (universal-bot rule).
+##
+## Reviewer/QA diffs the WORKING TREE (`git diff HEAD`), never the
+## last commit — the commit step runs only AFTER the human ships.
+## ─────────────────────────────────────────────────────────────────
+
+vars:
+  ## ${PROJECT_DIR} resolves to the run worktree under worktree: auto
+  ## (do NOT override with a literal repo root — that aims agents at
+  ## the main checkout; see CLAUDE.md dogfood note).
+  workspace_dir: string = "${PROJECT_DIR}"
+  ## The feature / change request. Required — no default.
+  brief: string
+
+## ═══ Prompts : personas ══════════════════════════════════════════
+
+prompt analyst_system:
+  You are Mary, the BMAD Analyst. You turn a raw request into a
+  crisp, testable problem analysis BEFORE anyone writes code. You
+  are READ-ONLY: explore the workspace, never modify it.
+
+  Read your operating playbook first, then follow it exactly:
+
+      read_file {{vars.workspace_dir}}/.claude/skills/bmady-analyst.md
+
+  The skill defines the analysis_output contract and the discipline
+  (no solutioning, surface the real open questions, name the
+  stakeholders). Return the structured analysis_output when done.
+
+prompt analyst_user:
+  Request to analyse:
+  {{vars.brief}}
+
+  Workspace: {{vars.workspace_dir}}
+
+  Explore read-only, then emit analysis_output. Do not modify any
+  file.
+
+prompt pm_system:
+  You are John, the BMAD Product Manager. You turn an approved
+  problem analysis into a Product Requirements Document: epics, then
+  user stories small enough to implement, each with acceptance
+  criteria.
+
+  Read your playbook first:
+
+      read_file {{vars.workspace_dir}}/.claude/skills/bmady-pm.md
+
+  IMPORTANT: every story in `stories` MUST carry a stable `id`
+  (e.g. "S1", "S2") and a one-line `title` — the operator selects
+  stories by id downstream, so missing ids break the workflow.
+
+prompt pm_user:
+  Problem analysis (approved):
+  {{input.analysis}}
+
+  Operator clarifications gathered after analysis:
+  {{input.clarifications}}
+
+  Refinement requested by the operator on the previous PRD draft
+  (empty on the first pass — when set, address it specifically):
+  {{input.refinement}}
+  {{input.feedback}}
+
+  Produce the PRD as prd_output. Keep stories small and id'd.
+
+prompt architect_system:
+  You are Winston, the BMAD Architect. You turn an approved PRD into
+  a pragmatic architecture: the shape of the solution, the key
+  components, the ADR-worthy decisions, and the risks. READ-ONLY —
+  you design, you do not implement.
+
+  Read your playbook first:
+
+      read_file {{vars.workspace_dir}}/.claude/skills/bmady-architect.md
+
+prompt architect_user:
+  PRD (approved):
+  {{input.prd}}
+
+  Problem analysis:
+  {{input.analysis}}
+
+  Operator feedback on the previous architecture draft (empty on the
+  first pass — when set, address it specifically):
+  {{input.feedback}}
+
+  Produce arch_output. Anchor every decision to a PRD story or risk.
+
+prompt dev_system:
+  You are James, the BMAD Developer. You implement EXACTLY the
+  stories the operator selected, against the approved architecture.
+  Mutating tools are allowed. Do NOT commit — a downstream step
+  commits only after QA and the operator sign off.
+
+  Read your playbook first:
+
+      read_file {{vars.workspace_dir}}/.claude/skills/bmady-dev.md
+
+  Run the project's own tests after each meaningful change. Stay
+  inside the selected stories' scope; if a selected story turns out
+  to be unrealistic, implement what you can and record the deviation
+  in `pushback`.
+
+prompt dev_user:
+  Implement the SELECTED stories in {{vars.workspace_dir}}.
+
+  Selected story ids: {{input.selected_story_ids}}
+  WIP limit (max stories to carry in parallel): {{input.wip_limit}}
+  Operator note: {{input.note}}
+
+  All stories (for reference — implement only the selected ids):
+  {{input.stories}}
+
+  Approved architecture:
+  {{input.architecture_doc}}
+
+  Operator change request from the previous QA round (empty on the
+  first pass — when set, fix exactly this):
+  {{input.feedback}}
+
+  Apply the changes, run the tests, then emit dev_output. Do NOT
+  run `git commit`.
+
+prompt qa_system:
+  You are Quinn, the BMAD QA architect. You judge the work that was
+  just implemented in this run.
+
+  MANDATORY FIRST ACTION — before any verdict, run
+  `git -C {{vars.workspace_dir}} status` and
+  `git -C {{vars.workspace_dir}} diff HEAD` (read-only; prepend
+  `-c safe.directory='*'` if git reports dubious ownership) to obtain
+  the actual changes. The work is UNCOMMITTED in the working tree —
+  diff against HEAD, NEVER `HEAD^...HEAD` (that shows the base and
+  makes you wrongly conclude nothing was implemented).
+
+  Read your playbook first:
+
+      read_file {{vars.workspace_dir}}/.claude/skills/bmady-qa.md
+
+  Judge correctness, security, robustness, tests, and whether the
+  implemented work satisfies the SELECTED stories' acceptance
+  criteria. Report only real, production-blocking issues in
+  `blockers` — preferences and pre-existing unrelated code are not
+  blockers. Set `confidence` honestly.
+
+prompt qa_user:
+  Stories that were in scope this round:
+  {{input.selected_story_ids}}
+
+  Developer's summary of what was done:
+  {{input.dev_summary}}
+
+  Diff the working tree, audit it, and emit qa_output.
+
+## ═══ Prompts : human gate instructions (rendered in the form) ═════
+
+prompt elicit_brief_instructions:
+  # Clarify the brief
+
+  Mary analysed the request. Before John drafts the PRD, fill any
+  gaps she surfaced.
+
+  **Problem statement**
+
+  {{input.problem_statement}}
+
+  **Proposed scope**
+
+  {{input.proposed_scope}}
+
+  **Open questions Mary needs you to answer**
+
+  {{input.open_questions}}
+
+  Answer what you can and add any constraint, preference, or context
+  that should shape the plan. Free-form — bullet points are fine. You
+  can also _Skip_ if the analysis is already complete.
+
+prompt review_prd_instructions:
+  # Review the PRD
+
+  John drafted the Product Requirements Document.
+
+  **Epics**
+
+  {{input.epics}}
+
+  **User stories**
+
+  {{input.stories}}
+
+  **Acceptance criteria**
+
+  {{input.acceptance}}
+
+  Choose how to proceed:
+
+  - **approve** — the PRD is good; move on to architecture.
+  - **expand** — flesh out a thin epic or story (say which in the feedback).
+  - **add_risks** — call out risks / edge cases John missed.
+  - **revise** — change scope or priorities (describe the change).
+
+  Put any detail for `expand` / `add_risks` / `revise` in the
+  feedback box.
+
+prompt approve_arch_instructions:
+  # Approve the architecture
+
+  Winston proposed the architecture for the approved PRD.
+
+  **Architecture**
+
+  {{input.architecture_doc}}
+
+  **Key components**
+
+  {{input.components}}
+
+  **Risks**
+
+  {{input.risks}}
+
+  **Approve** to proceed to story selection, or **Reject** and tell
+  Winston what to change in the feedback box.
+
+prompt select_stories_instructions:
+  # Select stories to implement now
+
+  Pick the stories James should implement in this round. Anything you
+  leave unchecked stays on the backlog.
+
+  **Available stories**
+
+  {{input.stories}}
+
+  **Architecture (for reference)**
+
+  {{input.architecture_doc}}
+
+  - **Stories** — tick the ones to build now.
+  - **Priority** — where this slice sits in the plan.
+  - **WIP limit** — how many stories James should carry in parallel.
+  - **Note** — anything James should keep in mind.
+
+prompt final_review_instructions:
+  # Sign off
+
+  Quinn finished QA on the implemented work.
+
+  **Passed:** {{input.passed}}
+  **Confidence:** {{input.confidence}}
+
+  **Blockers**
+
+  {{input.blockers}}
+
+  **Developer summary**
+
+  {{input.dev_summary}}
+
+  Decide:
+
+  - **ship** — accept the work; iterion commits it and the run ends.
+  - **request_changes** — send it back to James with your notes.
+  - **hold_for_later** — stop without committing (keep the worktree).
+
+## ═══ Schemas ═════════════════════════════════════════════════════
+
+schema analysis_output:
+  problem_statement: string
+  stakeholders: string[]
+  open_questions: string[]
+  proposed_scope: string
+  rationale: string
+
+schema elicit_input:
+  problem_statement: string
+  proposed_scope: string
+  open_questions: string[]
+
+schema elicit_output:
+  clarifications: string
+
+schema prd_input:
+  analysis: json
+  clarifications: string
+  ## refinement/feedback are set only on the revise loop edge.
+  refinement: string
+  feedback: string
+
+schema prd_output:
+  epics: json
+  ## stories MUST be an array of objects each with `id` + `title`
+  ## (the operator multi-selects by id downstream).
+  stories: json
+  acceptance: string[]
+  rationale: string
+
+schema review_prd_input:
+  epics: json
+  stories: json
+  acceptance: string[]
+
+schema review_prd_output:
+  action: string [enum: "approve", "expand", "add_risks", "revise"]
+  feedback: string
+
+schema prd_derived:
+  is_approve: bool
+  action: string
+  feedback: string
+
+schema arch_input:
+  prd: json
+  analysis: json
+  feedback: string
+
+schema arch_output:
+  architecture_doc: string
+  components: string[]
+  adrs: json
+  risks: string[]
+  rationale: string
+
+schema approve_arch_input:
+  architecture_doc: string
+  components: string[]
+  risks: string[]
+
+schema approve_arch_output:
+  approved: bool
+  feedback: string
+
+schema select_stories_input:
+  stories: json
+  architecture_doc: string
+
+schema select_stories_output:
+  ## selected_story_ids renders as a checkbox column over the sibling
+  ## `stories` array in the questions context (formSpecFromSchema
+  ## selection-field detection: name starts "selected_" / ends "_ids").
+  selected_story_ids: json
+  priority: string [enum: "now", "next", "later", "backlog", "icebox"]
+  wip_limit: int
+  note: string
+
+schema dev_input:
+  selected_story_ids: json
+  stories: json
+  architecture_doc: string
+  wip_limit: int
+  note: string
+  feedback: string
+
+schema dev_output:
+  applied: bool
+  summary: string
+  files: string[]
+  pushback: string[]
+
+schema qa_input:
+  selected_story_ids: json
+  dev_summary: string
+
+schema qa_output:
+  passed: bool
+  blockers: string[]
+  confidence: string [enum: "low", "medium", "high"]
+  scanned_areas: string[]
+
+schema final_input:
+  passed: bool
+  blockers: string[]
+  confidence: string
+  dev_summary: string
+
+schema final_output:
+  action: string [enum: "ship", "request_changes", "hold_for_later"]
+  feedback: string
+
+schema final_derived:
+  is_ship: bool
+  is_changes: bool
+  action: string
+  feedback: string
+
+schema commit_tool_input:
+  workspace_dir: string
+  message: string
+
+schema commit_result:
+  success: bool
+  output: string
+
+## ═══ Nodes ═══════════════════════════════════════════════════════
+
+agent analyst:
+  backend: "claude_code"
+  model: "${BMADY_MODEL_CLAUDE:-claude-opus-4-8}"
+  reasoning_effort: "${BMADY_EFFORT_PLAN:-high}"
+  output: analysis_output
+  system: analyst_system
+  user: analyst_user
+  session: fresh
+  tools: [bash, read_file, glob, grep]
+  tool_max_steps: 40
+  readonly: true
+
+human elicit_brief:
+  input: elicit_input
+  output: elicit_output
+  instructions: elicit_brief_instructions
+  interaction: human
+
+agent pm:
+  backend: "claude_code"
+  model: "${BMADY_MODEL_CLAUDE:-claude-opus-4-8}"
+  reasoning_effort: "${BMADY_EFFORT_PLAN:-high}"
+  input: prd_input
+  output: prd_output
+  system: pm_system
+  user: pm_user
+  session: fresh
+  tools: [bash, read_file, glob, grep]
+  tool_max_steps: 30
+  readonly: true
+
+human review_prd:
+  input: review_prd_input
+  output: review_prd_output
+  instructions: review_prd_instructions
+  interaction: human
+
+## Project the elicitation menu into the boolean the routing reads —
+## keeps `action` (4 options) in the form while the graph branches on
+## a clean approve / not-approve pair.
+compute derive_prd:
+  input: review_prd_output
+  output: prd_derived
+  expr:
+    is_approve: "input.action == 'approve'"
+    action: "input.action"
+    feedback: "input.feedback"
+
+agent architect:
+  backend: "claude_code"
+  model: "${BMADY_MODEL_CLAUDE:-claude-opus-4-8}"
+  reasoning_effort: "${BMADY_EFFORT_PLAN:-high}"
+  input: arch_input
+  output: arch_output
+  system: architect_system
+  user: architect_user
+  session: fresh
+  tools: [bash, read_file, glob, grep]
+  tool_max_steps: 30
+  readonly: true
+
+human approve_arch:
+  input: approve_arch_input
+  output: approve_arch_output
+  instructions: approve_arch_instructions
+  interaction: human
+
+human select_stories:
+  input: select_stories_input
+  output: select_stories_output
+  instructions: select_stories_instructions
+  interaction: human
+
+agent dev:
+  backend: "claude_code"
+  model: "${BMADY_MODEL_CLAUDE:-claude-opus-4-8}"
+  reasoning_effort: "${BMADY_EFFORT_DEV:-high}"
+  input: dev_input
+  output: dev_output
+  system: dev_system
+  user: dev_user
+  session: fresh
+  tools: [bash, read_file, write_file, file_edit, glob, grep]
+  tool_max_steps: 120
+
+judge qa:
+  backend: "claude_code"
+  model: "${BMADY_MODEL_QA:-claude-opus-4-8}"
+  reasoning_effort: "${BMADY_EFFORT_QA:-medium}"
+  input: qa_input
+  output: qa_output
+  system: qa_system
+  user: qa_user
+  session: fresh
+  tools: [bash, read_file, glob, grep]
+  tool_max_steps: 30
+  readonly: true
+
+human final_review:
+  input: final_input
+  output: final_output
+  instructions: final_review_instructions
+  interaction: human
+
+compute derive_final:
+  input: final_output
+  output: final_derived
+  expr:
+    is_ship: "input.action == 'ship'"
+    is_changes: "input.action == 'request_changes'"
+    action: "input.action"
+    feedback: "input.feedback"
+
+## Deterministic commit — no LLM. `git add -A` is safe because
+## worktree: auto means the whole dirty tree IS this run's work.
+## Guarded so an empty diff doesn't error.
+tool commit_changes:
+  command: "git -C {{input.workspace_dir}} add -A && (git -C {{input.workspace_dir}} diff --cached --quiet || git -C {{input.workspace_dir}} commit -m {{input.message}})"
+  input: commit_tool_input
+  output: commit_result
+
+## ═══ Workflow ════════════════════════════════════════════════════
+
+workflow bmady:
+  entry: analyst
+
+  ## Isolate every mutation in a fresh git worktree. On a clean ship
+  ## the engine persists the commit to a branch and fast-forwards the
+  ## operator's checked-out branch (override with --merge-into).
+  worktree: auto
+
+  budget:
+    max_parallel_branches: 1
+    ## Caps a single autonomous BURST between two human pauses — the
+    ## runtime suspends the budget while paused, so a multi-day
+    ## collaborative session never accumulates against these.
+    max_duration: "4h"
+    max_cost_usd: 50
+    max_iterations: 60
+
+  ## ── Phase 1 : Analysis ──────────────────────────────────────────
+  analyst -> elicit_brief with {
+    problem_statement: "{{outputs.analyst.problem_statement}}",
+    proposed_scope:    "{{outputs.analyst.proposed_scope}}",
+    open_questions:    "{{outputs.analyst.open_questions}}"
+  }
+
+  ## ── Phase 2 : PRD (+ advanced-elicitation revise loop) ──────────
+  elicit_brief -> pm with {
+    analysis:       "{{outputs.analyst}}",
+    clarifications: "{{outputs.elicit_brief.clarifications}}"
+  }
+
+  pm -> review_prd with {
+    epics:      "{{outputs.pm.epics}}",
+    stories:    "{{outputs.pm.stories}}",
+    acceptance: "{{outputs.pm.acceptance}}"
+  }
+
+  review_prd -> derive_prd with {
+    action:   "{{outputs.review_prd.action}}",
+    feedback: "{{outputs.review_prd.feedback}}"
+  }
+
+  ## approve → architecture ; anything else → John revises (bounded).
+  derive_prd -> architect when is_approve with {
+    prd:      "{{outputs.pm}}",
+    analysis: "{{outputs.analyst}}"
+  }
+  derive_prd -> pm when not is_approve as prd_loop(5) with {
+    analysis:       "{{outputs.analyst}}",
+    clarifications: "{{outputs.elicit_brief.clarifications}}",
+    refinement:     "{{outputs.derive_prd.action}}",
+    feedback:       "{{outputs.derive_prd.feedback}}"
+  }
+
+  ## ── Phase 3 : Architecture (+ approve/reject loop) ──────────────
+  architect -> approve_arch with {
+    architecture_doc: "{{outputs.architect.architecture_doc}}",
+    components:       "{{outputs.architect.components}}",
+    risks:            "{{outputs.architect.risks}}"
+  }
+
+  approve_arch -> select_stories when approved with {
+    stories:          "{{outputs.pm.stories}}",
+    architecture_doc: "{{outputs.architect.architecture_doc}}"
+  }
+  approve_arch -> architect when not approved as arch_loop(5) with {
+    prd:      "{{outputs.pm}}",
+    analysis: "{{outputs.analyst}}",
+    feedback: "{{outputs.approve_arch.feedback}}"
+  }
+
+  ## ── Phase 4 : Story selection → implement ───────────────────────
+  select_stories -> dev with {
+    selected_story_ids: "{{outputs.select_stories.selected_story_ids}}",
+    stories:            "{{outputs.pm.stories}}",
+    architecture_doc:   "{{outputs.architect.architecture_doc}}",
+    wip_limit:          "{{outputs.select_stories.wip_limit}}",
+    note:               "{{outputs.select_stories.note}}"
+  }
+
+  ## ── Phase 5 : QA → sign-off (+ change loop) ─────────────────────
+  dev -> qa with {
+    selected_story_ids: "{{outputs.select_stories.selected_story_ids}}",
+    dev_summary:        "{{outputs.dev.summary}}"
+  }
+
+  qa -> final_review with {
+    passed:      "{{outputs.qa.passed}}",
+    blockers:    "{{outputs.qa.blockers}}",
+    confidence:  "{{outputs.qa.confidence}}",
+    dev_summary: "{{outputs.dev.summary}}"
+  }
+
+  final_review -> derive_final with {
+    action:   "{{outputs.final_review.action}}",
+    feedback: "{{outputs.final_review.feedback}}"
+  }
+
+  ## ship → commit ; request_changes → James (bounded) ; hold/other →
+  ## the unconditional fallback ends the run without committing.
+  derive_final -> commit_changes when is_ship with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    message:       "feat(bmady): {{vars.brief}}"
+  }
+  derive_final -> dev when is_changes as dev_loop(5) with {
+    selected_story_ids: "{{outputs.select_stories.selected_story_ids}}",
+    stories:            "{{outputs.pm.stories}}",
+    architecture_doc:   "{{outputs.architect.architecture_doc}}",
+    wip_limit:          "{{outputs.select_stories.wip_limit}}",
+    note:               "{{outputs.select_stories.note}}",
+    feedback:           "{{outputs.derive_final.feedback}}"
+  }
+  derive_final -> done
+
+  commit_changes -> done
