@@ -306,6 +306,16 @@ interface RunStoreState {
   // EventLog tab, the Scrubber) can pay the cost on demand while
   // canvas-only views skip it.
   loadEventHistoryIfMissing: (runId: string) => Promise<void>;
+  // resyncEventsAfterResume re-pulls the event log a couple of times,
+  // detached from any component lifecycle, after a Resume. When a resume
+  // re-pauses almost immediately (a human-only flow with no LLM between
+  // gates) the WS reconnect can race the broker's subscriber-drop and miss
+  // the next human_input_requested event, so the next gate's form never
+  // folds into the conversation. Scheduling the refetch here — not in the
+  // submitting form's setTimeout, which is cleared when that gate flips to
+  // answered and the form unmounts — guarantees it fires. applyEventsBatch
+  // dedupes by seq, so the repeated pulls only append the missed tail.
+  resyncEventsAfterResume: (runId: string) => void;
   // Optimistic header status flip — used after Resume/Cancel HTTP calls
   // so the UI doesn't wait for the corresponding event to arrive.
   setRunStatus: (status: RunHeader["status"]) => void;
@@ -506,6 +516,21 @@ export function createRunStore() {
   applyEventsBatch: (evts) => {
     if (evts.length === 0) return;
     set((state) => reduceEvents(state, evts));
+  },
+
+  resyncEventsAfterResume: (runId) => {
+    const refetch = () => {
+      if (get().runId !== runId) return;
+      loadEvents(runId)
+        .then((evts) => {
+          if (get().runId === runId) get().applyEventsBatch(evts);
+        })
+        .catch(() => {});
+    };
+    // Two detached pulls cover variable resume→re-pause latency without a
+    // poll loop; reduceEvents dedupes by seq so the overlap is free.
+    setTimeout(refetch, 400);
+    setTimeout(refetch, 1300);
   },
 
   loadEventHistoryIfMissing: async (runId) => {

@@ -44,6 +44,9 @@ export default function HumanPromptForm({
   const setRunStatus = useRunStore((s) => s.setRunStatus);
   const requestWsReconnect = useRunStore((s) => s.requestWsReconnect);
   const applySnapshot = useRunStore((s) => s.applySnapshot);
+  const resyncEventsAfterResume = useRunStore(
+    (s) => s.resyncEventsAfterResume,
+  );
   const currentSource = useDocumentStore((s) => s.currentSource);
 
   const { fields, loading, staleHash } = useHumanNodeSchema(runId, nodeId);
@@ -120,6 +123,12 @@ export default function HumanPromptForm({
       // engine publishes node updates into the void and the canvas
       // stays frozen until the user reloads.
       requestWsReconnect();
+      // Detached event re-sync (store-level, survives this form
+      // unmounting when its gate flips to answered). Covers the
+      // human-only flow where the resume re-pauses faster than the WS
+      // can resubscribe, otherwise dropping the next gate's question
+      // event and leaving its form unrendered until a manual reload.
+      resyncEventsAfterResume(runId);
       // Belt-and-braces: fetch a REST snapshot ~600ms later so a
       // short-lived run (resume → done in <2s) that finishes before
       // the WS redial completes still surfaces in the canvas. The WS
