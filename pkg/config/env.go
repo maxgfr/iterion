@@ -143,6 +143,9 @@ func loadEnv(cfg *Config) error {
 	if v, ok := lookup("ITERION_BOOTSTRAP_ADMIN_EMAIL"); ok {
 		cfg.Auth.BootstrapAdminEmail = strings.ToLower(strings.TrimSpace(v))
 	}
+	if v, ok := lookup("ITERION_BOOTSTRAP_ADMIN_PASSWORD"); ok {
+		cfg.Auth.BootstrapAdminPassword = v
+	}
 	if v, ok := lookup("ITERION_SIGNUP_MODE"); ok {
 		cfg.Auth.SignupMode = strings.ToLower(v)
 	}

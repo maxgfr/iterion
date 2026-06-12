@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -354,27 +355,59 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	}
 
 	if email := cfg.Auth.BootstrapAdminEmail; email != "" && !disableAuth {
+		declaredPW := strings.TrimSpace(cfg.Auth.BootstrapAdminPassword)
 		existing, getErr := identityStore.GetUserByEmail(rootCtx, email)
 		switch {
-		case getErr == nil && existing.Status == identity.UserStatusPendingPasswordChange:
-			// The configured bootstrap admin exists but was never activated.
-			// Re-issue a fresh temp password so an operator who lost the first
-			// one (e.g. the pod restarted before it was captured) can recover
-			// by restarting, instead of being permanently locked out. An
-			// already-active admin's password is never reset this way.
-			pw, err := randomBootstrapPassword()
-			if err != nil {
-				return fmt.Errorf("server: bootstrap password: %w", err)
+		case getErr == nil:
+			switch {
+			case declaredPW != "":
+				// Declarative admin: ITERION_BOOTSTRAP_ADMIN_PASSWORD (a k8s
+				// secret) is AUTHORITATIVE — ensure an active super-admin whose
+				// password matches it, resetting only on drift so idempotent
+				// restarts are no-ops. The password is never logged.
+				changed := false
+				if !existing.IsSuperAdmin {
+					existing.IsSuperAdmin = true
+					changed = true
+				}
+				if existing.Status != identity.UserStatusActive {
+					existing.Status = identity.UserStatusActive
+					changed = true
+				}
+				if ok, _ := iterauth.VerifyPassword(declaredPW, existing.PasswordHash); !ok {
+					hash, err := iterauth.HashPassword(declaredPW)
+					if err != nil {
+						return fmt.Errorf("server: hash bootstrap password: %w", err)
+					}
+					existing.PasswordHash = hash
+					changed = true
+					logger.Info("server: BOOTSTRAP super-admin %s password reconciled to ITERION_BOOTSTRAP_ADMIN_PASSWORD", email)
+				}
+				if changed {
+					if err := identityStore.UpdateUser(rootCtx, existing); err != nil {
+						return fmt.Errorf("server: reconcile bootstrap admin: %w", err)
+					}
+				}
+			case existing.Status == identity.UserStatusPendingPasswordChange:
+				// No declared password and the admin was never activated. Re-issue
+				// a fresh temp password so an operator who lost the first one (e.g.
+				// the pod restarted before it was captured) can recover by
+				// restarting. An already-active admin's password is never reset.
+				pw, err := randomBootstrapPassword()
+				if err != nil {
+					return fmt.Errorf("server: bootstrap password: %w", err)
+				}
+				hash, err := iterauth.HashPassword(pw)
+				if err != nil {
+					return fmt.Errorf("server: hash bootstrap password: %w", err)
+				}
+				existing.PasswordHash = hash
+				if err := identityStore.UpdateUser(rootCtx, existing); err != nil {
+					return fmt.Errorf("server: re-issue bootstrap admin: %w", err)
+				}
+				logger.Warn("server: BOOTSTRAP super-admin %s still pending — re-issued temp_password=%s (rotate via POST /api/auth/password/change, or set ITERION_BOOTSTRAP_ADMIN_PASSWORD)", email, pw)
 			}
-			hash, err := iterauth.HashPassword(pw)
-			if err != nil {
-				return fmt.Errorf("server: hash bootstrap password: %w", err)
-			}
-			existing.PasswordHash = hash
-			if err := identityStore.UpdateUser(rootCtx, existing); err != nil {
-				return fmt.Errorf("server: re-issue bootstrap admin: %w", err)
-			}
-			logger.Warn("server: BOOTSTRAP super-admin %s still pending — re-issued temp_password=%s (rotate via POST /api/auth/password/change)", email, pw)
+			// getErr == nil && active && no declared password → no-op.
 		case errors.Is(getErr, identity.ErrNotFound):
 			// First boot with an empty users collection → create the admin.
 			count, err := identityStore.UserCount(rootCtx)
@@ -382,19 +415,27 @@ func runServer(cmd *cobra.Command, _ []string) error {
 				return fmt.Errorf("server: user count: %w", err)
 			}
 			if count == 0 {
-				pw, err := randomBootstrapPassword()
-				if err != nil {
-					return fmt.Errorf("server: bootstrap password: %w", err)
+				if declaredPW != "" {
+					// Declarative: create an ACTIVE super-admin with the secret
+					// password — no temp-password dance, GitOps-friendly.
+					if _, _, err := authSvc.CreateUserAndPersonalTeam(rootCtx, email, "Bootstrap admin", declaredPW, true, identity.UserStatusActive); err != nil {
+						return fmt.Errorf("server: bootstrap admin: %w", err)
+					}
+					logger.Info("server: BOOTSTRAP super-admin created (active) from ITERION_BOOTSTRAP_ADMIN_PASSWORD — email=%s", email)
+				} else {
+					pw, err := randomBootstrapPassword()
+					if err != nil {
+						return fmt.Errorf("server: bootstrap password: %w", err)
+					}
+					if _, _, err := authSvc.CreateUserAndPersonalTeam(rootCtx, email, "Bootstrap admin", pw, true, identity.UserStatusPendingPasswordChange); err != nil {
+						return fmt.Errorf("server: bootstrap admin: %w", err)
+					}
+					logger.Warn("server: BOOTSTRAP super-admin created — email=%s temp_password=%s (rotate via POST /api/auth/password/change, or set ITERION_BOOTSTRAP_ADMIN_PASSWORD)", email, pw)
 				}
-				if _, _, err := authSvc.CreateUserAndPersonalTeam(rootCtx, email, "Bootstrap admin", pw, true, identity.UserStatusPendingPasswordChange); err != nil {
-					return fmt.Errorf("server: bootstrap admin: %w", err)
-				}
-				logger.Warn("server: BOOTSTRAP super-admin created — email=%s temp_password=%s (rotate via POST /api/auth/password/change)", email, pw)
 			}
 		case getErr != nil:
 			return fmt.Errorf("server: bootstrap admin lookup: %w", getErr)
 		}
-		// getErr == nil && status active/disabled → already onboarded; no-op.
 	}
 
 	registry := oidc.NewRegistry()

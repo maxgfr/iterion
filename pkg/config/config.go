@@ -104,6 +104,15 @@ type AuthConfig struct {
 	// log. The user is required to change it on first login.
 	BootstrapAdminEmail string `yaml:"bootstrap_admin_email"`
 
+	// BootstrapAdminPassword, when set (typically from a k8s secret via
+	// ITERION_BOOTSTRAP_ADMIN_PASSWORD), makes the bootstrap super-admin
+	// DECLARATIVE: the account is created active with this password and, on
+	// every boot, reconciled to it (active super-admin, password reset only on
+	// drift). The secret is authoritative — rotate by updating it + restart;
+	// UI password changes to this account revert on restart by design. Never
+	// logged. When empty, the legacy one-time temp-password flow applies.
+	BootstrapAdminPassword string `yaml:"bootstrap_admin_password"`
+
 	// SignupMode controls who may create new users without an
 	// invitation. "invite_only" (default) — registration requires a
 	// matching invitation token. "open" — anyone can register; first
