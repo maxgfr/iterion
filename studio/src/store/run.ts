@@ -520,17 +520,26 @@ export function createRunStore() {
 
   resyncEventsAfterResume: (runId) => {
     const refetch = () => {
-      if (get().runId !== runId) return;
-      loadEvents(runId)
+      const state = get();
+      if (state.runId !== runId) return;
+      // Incremental tail fetch: only events newer than what the store
+      // already holds (loadEvents supports ?from), not the whole log.
+      const tail = state.events[state.events.length - 1];
+      const fromSeq = tail ? tail.seq + 1 : 0;
+      loadEvents(runId, fromSeq)
         .then((evts) => {
           if (get().runId === runId) get().applyEventsBatch(evts);
         })
         .catch(() => {});
     };
-    // Two detached pulls cover variable resume→re-pause latency without a
-    // poll loop; reduceEvents dedupes by seq so the overlap is free.
-    setTimeout(refetch, 400);
-    setTimeout(refetch, 1300);
+    // Two detached pulls cover the fast window (WS reconnected but the
+    // broker already missed the event) and the slow one (resume→re-pause
+    // is itself slow) without a poll loop; reduceEvents dedupes by seq so
+    // the overlap is free. This is a client-side compensation for the
+    // broker dropping a run's subscribers on every pause — the deeper fix
+    // is to keep subscribers across a pause (pkg/runview broker lifecycle).
+    const delaysMs = [400, 1300];
+    delaysMs.forEach((ms) => setTimeout(refetch, ms));
   },
 
   loadEventHistoryIfMissing: async (runId) => {

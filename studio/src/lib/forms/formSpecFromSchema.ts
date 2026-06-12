@@ -1,4 +1,5 @@
 import type { WireSchemaField } from "@/api/runs";
+import { humanizeKey } from "@/lib/humanizeKey";
 import { shortIssueId } from "@/lib/whats-next/issueId";
 import type {
   FormAnswer,
@@ -49,9 +50,12 @@ function buildQuestion(
     id: field.name,
     // Humanise the raw schema field name (selected_story_ids →
     // "Selected story ids") so the operator reads a label, not an
-    // identifier. The author's `instructions:` carries the real
-    // per-field explanation above the form.
-    label: humanizeFieldName(field.name),
+    // identifier — shared with the output-card renderer so both
+    // surfaces agree. The author's `instructions:` carries the real
+    // per-field explanation above the form. (A first-class `label:`
+    // schema primitive would supersede this fallback — see the
+    // human-form follow-ups.)
+    label: humanizeKey(field.name),
     description,
     // A constrained choice (enum radio/select or a bool) is a decision
     // the operator must make; free-form values (text, numbers, JSON,
@@ -366,36 +370,4 @@ function stringifyContext(v: unknown): string | undefined {
   } catch {
     return String(v);
   }
-}
-
-// humanizeFieldName turns a snake_case / kebab-case schema field name
-// into a readable label: "selected_story_ids" → "Selected story ids",
-// "wip_limit" → "Wip limit", "action" → "Action". A few common
-// all-caps tokens are preserved (id/url/api/wip/csv/...).
-const ACRONYMS = new Set([
-  "url",
-  "uri",
-  "api",
-  "wip",
-  "csv",
-  "json",
-  "ui",
-  "qa",
-  "pr",
-  "sql",
-]);
-export function humanizeFieldName(name: string): string {
-  const words = name
-    .replace(/[_-]+/g, " ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  if (words.length === 0) return name;
-  return words
-    .map((w, i) => {
-      if (ACRONYMS.has(w.toLowerCase())) return w.toUpperCase();
-      if (i === 0) return w.charAt(0).toUpperCase() + w.slice(1);
-      return w;
-    })
-    .join(" ");
 }

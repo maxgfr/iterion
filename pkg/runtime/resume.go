@@ -685,9 +685,9 @@ func (e *Engine) humanInstructionsExtra(nodeID string, questions map[string]inte
 
 // renderHumanInstructions substitutes a prompt body's {{...}} references
 // against the paused node's questions (the {{input.*}} namespace) plus the
-// run vars / outputs / artifacts. Single-pass scan (mirrors
-// model.resolveTemplateWith) so a substituted value that itself contains a
-// "{{...}}" literal can't cascade into later refs.
+// run vars / outputs / artifacts. strings.NewReplacer does a single
+// left-to-right pass that never re-scans substituted output, so a value
+// that itself contains a "{{...}}" literal can't cascade into later refs.
 func (e *Engine) renderHumanInstructions(p *ir.Prompt, questions map[string]interface{}, rs *runState) string {
 	if p == nil {
 		return ""
@@ -695,29 +695,12 @@ func (e *Engine) renderHumanInstructions(p *ir.Prompt, questions map[string]inte
 	if len(p.TemplateRefs) == 0 {
 		return p.Body
 	}
-	subs := make(map[string]string, len(p.TemplateRefs))
+	pairs := make([]string, 0, 2*len(p.TemplateRefs))
 	for _, ref := range p.TemplateRefs {
 		val := e.resolveRef(ref, rs.vars, rs.outputs, questions, rs.artifacts, rs)
-		subs[ref.Raw] = renderInstructionValue(val)
+		pairs = append(pairs, ref.Raw, renderInstructionValue(val))
 	}
-	var b strings.Builder
-	b.Grow(len(p.Body))
-	i := 0
-	for i < len(p.Body) {
-		if i+1 < len(p.Body) && p.Body[i] == '{' && p.Body[i+1] == '{' {
-			if end := strings.Index(p.Body[i:], "}}"); end != -1 {
-				raw := p.Body[i : i+end+2]
-				if r, ok := subs[raw]; ok {
-					b.WriteString(r)
-					i += end + 2
-					continue
-				}
-			}
-		}
-		b.WriteByte(p.Body[i])
-		i++
-	}
-	return b.String()
+	return strings.NewReplacer(pairs...).Replace(p.Body)
 }
 
 // renderInstructionValue renders a resolved reference value as
@@ -736,24 +719,19 @@ func renderInstructionValue(v interface{}) string {
 		}
 		return "false"
 	case []interface{}:
-		allScalar := true
+		// Any nested map/slice → render the whole array as a JSON block;
+		// a flat scalar array → a Markdown bullet list.
 		for _, it := range val {
 			switch it.(type) {
 			case map[string]interface{}, []interface{}:
-				allScalar = false
-			}
-			if !allScalar {
-				break
+				return jsonInstructionBlock(val)
 			}
 		}
-		if allScalar {
-			lines := make([]string, 0, len(val))
-			for _, it := range val {
-				lines = append(lines, "- "+fmt.Sprintf("%v", it))
-			}
-			return strings.Join(lines, "\n")
+		lines := make([]string, 0, len(val))
+		for _, it := range val {
+			lines = append(lines, "- "+fmt.Sprintf("%v", it))
 		}
-		return jsonInstructionBlock(val)
+		return strings.Join(lines, "\n")
 	case map[string]interface{}:
 		return jsonInstructionBlock(val)
 	default:

@@ -1,5 +1,6 @@
 import { memo, useMemo } from "react";
 
+import { humanizeKey } from "@/lib/humanizeKey";
 import type { NodeOutputMessage } from "@/lib/runChat/types";
 
 import MarkdownText from "./MarkdownText";
@@ -156,9 +157,3 @@ function renderCard(it: Record<string, unknown>, index?: number): string {
   return lines.join("\n\n");
 }
 
-// humanizeKey turns snake_case / camelCase field names into a title
-// the operator reads as English (e.g. `next_action` → "Next action").
-function humanizeKey(k: string): string {
-  const spaced = k.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2");
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -100,7 +101,11 @@ const REMARK_PLUGINS = [remarkGfm];
 // component is misnamed — its `preview` mode returns raw text, so we
 // can't reuse it. react-markdown is small (~5KB gzip), MIT, and escapes
 // HTML by default so untrusted agent output can't inject script tags.
-export default function MarkdownText({ value, size = "md" }: Props) {
+// Memoised: the COMPONENTS/REMARK_PLUGINS objects are module-scoped and
+// the props are a plain (value, size) pair, so the shallow compare is
+// exact. Without it react-markdown re-parses every visible prompt/output
+// card on each event tick of a streaming run.
+function MarkdownText({ value, size = "md" }: Props) {
   const base = size === "sm" ? "text-[11px]" : "text-[12px]";
   return (
     <div className={`prose-iterion ${base} text-fg-default leading-snug`}>
@@ -110,3 +115,5 @@ export default function MarkdownText({ value, size = "md" }: Props) {
     </div>
   );
 }
+
+export default memo(MarkdownText);
