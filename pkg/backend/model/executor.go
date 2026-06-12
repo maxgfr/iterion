@@ -775,7 +775,16 @@ func (e *ClawExecutor) delegateHooksFor(nodeID string, backendName string, itera
 					Output:    output,
 				}
 				if isError {
-					info.Error = fmt.Errorf("tool error")
+					// The tool_result content IS the error message (e.g. the
+					// CLI's StructuredOutput schema-validation detail). Losing
+					// it to a generic "tool error" cost a real debugging hour:
+					// 2.1.128's stringified-bool emissions surfaced as five
+					// opaque "tool error (0ms)" lines. Keep it, truncated.
+					msg := strings.TrimSpace(output)
+					if msg == "" {
+						msg = "tool error"
+					}
+					info.Error = errors.New(iterlog.Truncate(msg, 500))
 				}
 				fn(nodeID, info)
 			}
