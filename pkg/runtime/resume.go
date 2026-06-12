@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,6 +98,15 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 
 	cp := r.Checkpoint
 	humanNodeID := cp.NodeID
+
+	// Coerce string-typed answers (from `iterion resume --answer key=value`,
+	// which can only carry strings) into the human node's output-schema
+	// types, so a `when <bool>` edge sees true, not "true", and a typed
+	// downstream ref sees 5 / [...] not "5" / "[...]". A JSON --answers-file
+	// already supplies correctly-typed values, and the studio coerces in
+	// the form before POSTing — both are left untouched (only strings are
+	// converted).
+	answers = e.coerceAnswersToSchema(humanNodeID, answers)
 
 	// Record answers on the interaction. Fall back to the checkpoint's
 	// embedded questions if the interaction file has been deleted.
@@ -745,6 +755,72 @@ func jsonInstructionBlock(v interface{}) string {
 		return fmt.Sprintf("%v", v)
 	}
 	return "```json\n" + string(b) + "\n```"
+}
+
+// coerceAnswersToSchema converts string-typed human answers into the field
+// types the node's output schema declares. `iterion resume --answer
+// key=value` can only carry strings, so without this a `when approved`
+// edge sees "true" (a string) and fails its bool check — the run dies with
+// NO_OUTGOING_EDGE. Only string values are converted; anything already of
+// the right Go type (a JSON --answers-file, or the studio's pre-coerced
+// POST) passes through untouched.
+func (e *Engine) coerceAnswersToSchema(humanNodeID string, answers map[string]interface{}) map[string]interface{} {
+	hn, ok := e.workflow.Nodes[humanNodeID].(*ir.HumanNode)
+	if !ok || hn.OutputSchema == "" {
+		return answers
+	}
+	schema := e.workflow.Schemas[hn.OutputSchema]
+	if schema == nil {
+		return answers
+	}
+	for _, f := range schema.Fields {
+		s, isStr := answers[f.Name].(string)
+		if !isStr {
+			continue
+		}
+		if v, ok := coerceStringToFieldType(s, f.Type); ok {
+			answers[f.Name] = v
+		}
+	}
+	return answers
+}
+
+// coerceStringToFieldType parses a CLI-supplied string into the Go value a
+// schema field type expects. Returns ok=false (leaving the raw string in
+// place) when the string isn't a clean instance of the type, so a bad
+// --answer surfaces downstream rather than being silently zeroed.
+func coerceStringToFieldType(s string, t ir.FieldType) (interface{}, bool) {
+	switch t {
+	case ir.FieldTypeBool:
+		switch s {
+		case "true":
+			return true, true
+		case "false":
+			return false, true
+		}
+		return nil, false
+	case ir.FieldTypeInt:
+		if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+			return n, true
+		}
+		return nil, false
+	case ir.FieldTypeFloat:
+		if f, err := strconv.ParseFloat(strings.TrimSpace(s), 64); err == nil {
+			return f, true
+		}
+		return nil, false
+	case ir.FieldTypeJSON, ir.FieldTypeStringArray:
+		ts := strings.TrimSpace(s)
+		if ts == "" {
+			return nil, false
+		}
+		var v interface{}
+		if err := json.Unmarshal([]byte(ts), &v); err == nil {
+			return v, true
+		}
+		return nil, false
+	}
+	return nil, false
 }
 
 // ---------------------------------------------------------------------------
