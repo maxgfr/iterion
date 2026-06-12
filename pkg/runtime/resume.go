@@ -652,7 +652,121 @@ func (e *Engine) pauseAtHuman(rs *runState, nodeID string, node ir.Node) error {
 // before calling this method.
 func (e *Engine) persistPause(rs *runState, nodeID string) error {
 	questions := e.buildNodeInputRS(nodeID, rs.vars, rs.outputs, nil, rs.artifacts, rs)
-	return e.doPause(rs, nodeID, questions, nil, pauseInfo{})
+	return e.doPause(rs, nodeID, questions, e.humanInstructionsExtra(nodeID, questions, rs), pauseInfo{})
+}
+
+// humanInstructionsExtra resolves a human node's `instructions:` prompt
+// against the paused node's questions (its resolved input) so the studio
+// can show the operator the author's per-situation context instead of the
+// generic "Reply to continue." fallback. Returns nil when the node has no
+// instructions prompt — doPause then omits the field. The resolved text
+// rides on the human_input_requested event, which is persisted in
+// events.jsonl, so both the live WS path and a page reload (event refetch)
+// surface it.
+func (e *Engine) humanInstructionsExtra(nodeID string, questions map[string]interface{}, rs *runState) map[string]interface{} {
+	node, ok := e.workflow.Nodes[nodeID]
+	if !ok {
+		return nil
+	}
+	hn, ok := node.(*ir.HumanNode)
+	if !ok || hn.Instructions == "" {
+		return nil
+	}
+	p := e.workflow.Prompts[hn.Instructions]
+	if p == nil {
+		return nil
+	}
+	text := e.renderHumanInstructions(p, questions, rs)
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	return map[string]interface{}{"instructions": text}
+}
+
+// renderHumanInstructions substitutes a prompt body's {{...}} references
+// against the paused node's questions (the {{input.*}} namespace) plus the
+// run vars / outputs / artifacts. Single-pass scan (mirrors
+// model.resolveTemplateWith) so a substituted value that itself contains a
+// "{{...}}" literal can't cascade into later refs.
+func (e *Engine) renderHumanInstructions(p *ir.Prompt, questions map[string]interface{}, rs *runState) string {
+	if p == nil {
+		return ""
+	}
+	if len(p.TemplateRefs) == 0 {
+		return p.Body
+	}
+	subs := make(map[string]string, len(p.TemplateRefs))
+	for _, ref := range p.TemplateRefs {
+		val := e.resolveRef(ref, rs.vars, rs.outputs, questions, rs.artifacts, rs)
+		subs[ref.Raw] = renderInstructionValue(val)
+	}
+	var b strings.Builder
+	b.Grow(len(p.Body))
+	i := 0
+	for i < len(p.Body) {
+		if i+1 < len(p.Body) && p.Body[i] == '{' && p.Body[i+1] == '{' {
+			if end := strings.Index(p.Body[i:], "}}"); end != -1 {
+				raw := p.Body[i : i+end+2]
+				if r, ok := subs[raw]; ok {
+					b.WriteString(r)
+					i += end + 2
+					continue
+				}
+			}
+		}
+		b.WriteByte(p.Body[i])
+		i++
+	}
+	return b.String()
+}
+
+// renderInstructionValue renders a resolved reference value as
+// Markdown-friendly text for the operator-facing instructions: scalars
+// verbatim, scalar arrays as a bullet list, structured values as a fenced
+// JSON block.
+func renderInstructionValue(v interface{}) string {
+	switch val := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return val
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	case []interface{}:
+		allScalar := true
+		for _, it := range val {
+			switch it.(type) {
+			case map[string]interface{}, []interface{}:
+				allScalar = false
+			}
+			if !allScalar {
+				break
+			}
+		}
+		if allScalar {
+			lines := make([]string, 0, len(val))
+			for _, it := range val {
+				lines = append(lines, "- "+fmt.Sprintf("%v", it))
+			}
+			return strings.Join(lines, "\n")
+		}
+		return jsonInstructionBlock(val)
+	case map[string]interface{}:
+		return jsonInstructionBlock(val)
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
+func jsonInstructionBlock(v interface{}) string {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+	return "```json\n" + string(b) + "\n```"
 }
 
 // ---------------------------------------------------------------------------

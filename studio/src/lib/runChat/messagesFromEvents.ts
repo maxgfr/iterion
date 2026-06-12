@@ -511,12 +511,21 @@ function processEvent(
           ? (evt.data.questions as Record<string, unknown>)
           : undefined;
       const hints = resolver.humanRenderHints?.(nodeId);
+      // The runtime resolves a human node's `instructions:` prompt against
+      // the paused node's input and ships it on the event, so a generic
+      // bot's per-situation context is shown instead of "Reply to
+      // continue." A first-class bot's bespoke hint still wins when set.
+      const instructions =
+        typeof evt.data?.instructions === "string" &&
+        evt.data.instructions.trim().length > 0
+          ? (evt.data.instructions as string)
+          : undefined;
       const idx = out.length;
       out.push({
         kind: "human-question",
         id: key,
         nodeId,
-        prompt: hints?.prompt ?? "Reply to continue.",
+        prompt: hints?.prompt ?? instructions ?? "Reply to continue.",
         status: "pending",
         actions: hints?.actions,
         quickActions: hints?.quickActions,

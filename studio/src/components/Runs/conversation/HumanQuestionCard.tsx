@@ -1,6 +1,7 @@
 import type { HumanQuestionMessage } from "@/lib/runChat/types";
 
 import HumanPromptForm from "./HumanPromptForm";
+import MarkdownText from "./MarkdownText";
 
 interface Props {
   runId: string;
@@ -43,7 +44,9 @@ export default function HumanQuestionCard({ runId, message, isActive }: Props) {
           {message.nodeId}
         </code>
       </div>
-      <p className="text-[12px] text-fg-default">{message.prompt}</p>
+      <div className="text-[12px] text-fg-default">
+        <MarkdownText value={message.prompt} size="sm" />
+      </div>
       <HumanPromptForm
         runId={runId}
         nodeId={message.nodeId}
