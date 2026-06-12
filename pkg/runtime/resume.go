@@ -220,6 +220,9 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 	if err := mirrorBundleSkills(e.workDir, e.bundle, e.logger); err != nil {
 		return fmt.Errorf("runtime: bundle skills (resume): %w", err)
 	}
+	// Re-apply the preset's "## Focus" bias + skill hints on resume so a
+	// paused run that resumes keeps running as the selected sous-bot.
+	e.applyPresetFocus()
 
 	// Re-bootstrap the sandbox container (see resumeFromFailure for the
 	// rationale — same lifecycle issue applies here: the original Run()
@@ -379,6 +382,9 @@ func (e *Engine) resumeFromFailure(ctx context.Context, r *store.Run) error {
 	if err := mirrorBundleSkills(e.workDir, e.bundle, e.logger); err != nil {
 		return fmt.Errorf("runtime: bundle skills (resume): %w", err)
 	}
+	// Re-apply the preset's "## Focus" bias + skill hints on resume so a
+	// failed-then-resumed run keeps running as the selected sous-bot.
+	e.applyPresetFocus()
 
 	// Re-bootstrap the sandbox container. The original Run() process
 	// owned it through a defer that ran on exit, so a resumed run finds

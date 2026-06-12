@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -222,6 +223,53 @@ func mirrorBundleSkills(workDir string, b *bundle.Bundle, logger *iterlog.Logger
 		logger.Info("bundle: skills mirrored=%d refreshed=%d up-to-date=%d shadowed=%d at %s", mirrored, refreshed, uptodate, shadowed, dest)
 	}
 	return nil
+}
+
+// MergeBundlePresets folds a bundle's file-based presets
+// (presets/<name>.md) into the compiled workflow's preset set. A file
+// preset OVERWRITES an in-source `presets:` entry of the same name — the
+// explicit, richer artifact wins. Best-effort: a malformed preset file is
+// logged and skipped, never failing the merge. Idempotent, so it can run
+// both at compile (CLI/dispatcher paths that pass the bundle to the
+// compiler) and again as an engine backstop at run start (studio / cloud
+// paths that compiled without the bundle but attached it via WithBundle).
+//
+// Var-only file presets behave exactly like an in-source preset; the extra
+// Prompt/Skills/DisplayName/Description dimensions are what the inline
+// block can't express (a launch-time "## Focus" bias + skill hints).
+func MergeBundlePresets(wf *ir.Workflow, b *bundle.Bundle, logger *iterlog.Logger) {
+	if wf == nil || b == nil || b.PresetsDir == "" {
+		return
+	}
+	specs, errs := bundle.LoadPresets(b.PresetsDir)
+	for _, err := range errs {
+		if logger != nil {
+			logger.Warn("runtime: bundle preset: %v", err)
+		}
+	}
+	if len(specs) == 0 {
+		return
+	}
+	if wf.Presets == nil {
+		wf.Presets = make(map[string]ir.Preset, len(specs))
+	}
+	for _, ps := range specs {
+		wf.Presets[ps.Name] = presetSpecToIR(ps)
+	}
+}
+
+// presetSpecToIR converts a bundle's on-disk preset into the runtime IR
+// form. The bundle package stays decoupled from pkg/dsl/ir, so the bridge
+// lives here.
+func presetSpecToIR(ps bundle.PresetSpec) ir.Preset {
+	return ir.Preset{
+		Name:        ps.Name,
+		Values:      maps.Clone(ps.Vars), // nil-safe; engine coerces values to var types
+		DisplayName: ps.DisplayName,
+		Description: ps.Description,
+		Prompt:      ps.Prompt,
+		Skills:      ps.Skills,
+	}
 }
 
 // hashFile returns the hex sha256 of path's content.

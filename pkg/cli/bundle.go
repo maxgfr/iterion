@@ -20,6 +20,9 @@ var bundleStubManifest []byte
 //go:embed templates/bundle_README.md
 var bundleStubReadme []byte
 
+//go:embed templates/bundle_preset_example.md
+var bundleStubPresetExample []byte
+
 // BundleInitResult is the JSON shape emitted by `iterion bundle init --json`.
 type BundleInitResult struct {
 	Dir          string   `json:"dir"`
@@ -64,7 +67,7 @@ func RunBundleInit(dir string, p *Printer) error {
 	}
 
 	// Layout directories — `.gitkeep` makes them survive `git add`.
-	for _, sub := range []string{"skills", "prompts", "attachments"} {
+	for _, sub := range []string{"skills", "prompts", "attachments", "presets"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", sub, err)
 		}
@@ -75,6 +78,15 @@ func RunBundleInit(dir string, p *Printer) error {
 		}
 		trackFile(&created, &skipped, gk, status)
 	}
+
+	// A starter preset (sous-bot) so authors see the file format. Skipped
+	// if the author already created one.
+	pex := filepath.Join("presets", "example.md")
+	pexStatus, err := writeIfAbsent(filepath.Join(dir, pex), bundleStubPresetExample)
+	if err != nil {
+		return err
+	}
+	trackFile(&created, &skipped, pex, pexStatus)
 
 	// .gitignore tracks the same patterns the pack walker already
 	// filters out, so users don't accidentally commit local builds.

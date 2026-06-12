@@ -209,6 +209,9 @@ func assembleBundle(dir string) (*Bundle, error) {
 	if info, err := os.Stat(filepath.Join(dir, "attachments")); err == nil && info.IsDir() {
 		b.AttachmentsDir = filepath.Join(dir, "attachments")
 	}
+	if info, err := os.Stat(filepath.Join(dir, "presets")); err == nil && info.IsDir() {
+		b.PresetsDir = filepath.Join(dir, "presets")
+	}
 	manifest, err := LoadManifest(filepath.Join(dir, "manifest.yaml"))
 	if err != nil {
 		return nil, err

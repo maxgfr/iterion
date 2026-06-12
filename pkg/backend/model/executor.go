@@ -314,6 +314,8 @@ type ClawExecutor struct {
 	cursors         map[string]*ir.CursorDef
 	imageAttachs    map[string]bool // names of image-typed attachments declared in the workflow
 	vars            map[string]interface{}
+	presetPrompt    string   // selected preset's "## Focus" bias, {{vars}}-templated per node
+	presetSkills    []string // selected preset's relevant-skill hint names
 	hooks           EventHooks
 	retry           RetryPolicy
 	logger          *iterlog.Logger
@@ -674,6 +676,17 @@ func (e *ClawExecutor) SetVars(vars map[string]interface{}) {
 	for k, v := range vars {
 		e.vars[k] = v
 	}
+}
+
+// SetPresetFocus records the selected launch-time preset's prompt bias and
+// relevant-skill hints. The engine calls this at run start (and on resume)
+// for the `--preset <name>` selection; every LLM node then renders a
+// "## Focus" section in its system prompt (see executeBackend). The prompt
+// is stored raw and {{vars.X}}-resolved per node. Empty args clear the
+// focus. Must be called before Execute; not safe to call concurrently.
+func (e *ClawExecutor) SetPresetFocus(prompt string, skills []string) {
+	e.presetPrompt = prompt
+	e.presetSkills = skills
 }
 
 // SetWorkDir updates the working directory for backend subprocesses
@@ -1201,6 +1214,21 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		task.RepoRoot = e.repoRoot
 	}
 	task.CursorFragments = resolveCursorFragments(f.cursors, e.cursors)
+	// Launch-time preset bias ("## Focus"): the preset's prompt body
+	// {{vars}}-resolved against this node's context, plus an optional
+	// relevant-skills hint line. Applies run-wide to every LLM node, so a
+	// "sous-bot" focus (e.g. Willy as improve-quality SRE) shapes the reviewer
+	// and fixer alike without the author wiring it into each prompt.
+	if e.presetPrompt != "" || len(e.presetSkills) > 0 {
+		frag := e.resolveTemplate(e.presetPrompt, input, td)
+		if len(e.presetSkills) > 0 {
+			if frag != "" {
+				frag += "\n\n"
+			}
+			frag += "Relevant skills (consult before acting): " + strings.Join(e.presetSkills, ", ")
+		}
+		task.PresetFragment = frag
+	}
 
 	// When interaction is enabled, ensure `ask_user` is in the node's
 	// tool list so the LLM can natively escalate. We don't require the

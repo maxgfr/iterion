@@ -754,14 +754,35 @@ func (vt VarType) String() string {
 // Preset — resolved named bundle of variable values
 // ---------------------------------------------------------------------------
 
-// Preset is a resolved named bundle of variable values. Values are stored
-// with their coerced Go types (string, int64, float64, bool) matching the
-// declared Var's type. Workflow authors select a preset at run time via
-// `--preset <name>`; the runtime overlays these values onto the default
-// vars before applying any `--var` flag.
+// Preset is a resolved named "sous-bot": a launch-time specialization of a
+// bot. Values are variable overrides stored with their coerced Go types
+// (string, int64, float64, bool) matching the declared Var's type; the
+// runtime overlays them onto the default vars before applying any `--var`
+// flag. Prompt/Skills/DisplayName/Description are populated only for
+// file-based presets (a bundle's `presets/<name>.md`); in-source `presets:`
+// blocks leave them empty (var-only). Operators select a preset at run time
+// via `--preset <name>` or the studio Launch picker.
 type Preset struct {
-	Name   string
+	Name string
+	// Values are variable overrides applied to the run (defaults < preset <
+	// --var). Keys not declared by the workflow's `vars:` are dropped by the
+	// engine's resolveVars, same as a stray --var.
 	Values map[string]interface{}
+	// DisplayName is the operator-facing label (e.g. "Improve Quality (SRE)");
+	// falls back to Name when empty. File-based presets only.
+	DisplayName string
+	// Description is a one-line summary surfaced in the studio Launch picker.
+	// File-based presets only.
+	Description string
+	// Prompt is the bias fragment appended to every LLM node's system prompt
+	// under a "## Focus" section at run time (see delegate.Task.PresetFragment).
+	// Supports `{{vars.X}}` template refs, resolved per node. File-based only.
+	Prompt string
+	// Skills lists bundle skill names this preset makes relevant (e.g.
+	// "lang-js-fallow"). All bundle skills are mirrored regardless; this list
+	// is surfaced as a hint in the "## Focus" section and in the studio.
+	// File-based presets only.
+	Skills []string
 }
 
 // ---------------------------------------------------------------------------

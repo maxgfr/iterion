@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,33 +29,47 @@ import (
 func computeWorkflowHash(src []byte, b *bundle.Bundle, _ *ast.File) string {
 	h := sha256.New()
 	h.Write(src)
-	if b != nil && b.PromptsDir != "" {
-		if entries, err := os.ReadDir(b.PromptsDir); err == nil {
-			names := make([]string, 0, len(entries))
-			for _, e := range entries {
-				if e.IsDir() {
-					continue
-				}
-				if !strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
-					continue
-				}
-				names = append(names, e.Name())
-			}
-			sort.Strings(names)
-			for _, name := range names {
-				body, err := os.ReadFile(filepath.Join(b.PromptsDir, name))
-				if err != nil {
-					continue
-				}
-				h.Write([]byte("\x00bundle.prompt:"))
-				h.Write([]byte(name))
-				h.Write([]byte{0})
-				h.Write(body)
-			}
-		}
+	if b != nil {
+		// Bundle resources whose content changes what the agent reads — a
+		// prompt body or a preset's bias/vars — must invalidate the resume
+		// hash, same as the .iter source. Each is a directory of *.md files.
+		hashBundleResourceDir(h, b.PromptsDir, "\x00bundle.prompt:")
+		hashBundleResourceDir(h, b.PresetsDir, "\x00bundle.preset:")
 	}
 	sum := h.Sum(nil)
 	return hex.EncodeToString(sum)
+}
+
+// hashBundleResourceDir folds every *.md file under dir into h, in sorted
+// name order, framed as `<tag><name>\x00<body>`. No-op for an empty/missing
+// dir. Shared by computeWorkflowHash across bundle resource directories so
+// the framing stays identical and a new resource dir is one call, not a copy.
+func hashBundleResourceDir(h hash.Hash, dir, tag string) {
+	if dir == "" {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		body, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		h.Write([]byte(tag))
+		h.Write([]byte(name))
+		h.Write([]byte{0})
+		h.Write(body)
+	}
 }
 
 // CompileWorkflow parses and compiles a workflow source file at path. It returns

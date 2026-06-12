@@ -49,7 +49,7 @@ type PackResult struct {
 // PackDir creates a .botz tar.gz archive at outPath from the contents
 // of srcDir. The bundle layout is the same as accepted by [Open] /
 // [OpenDir]: main.bot at the root, plus optional manifest.yaml,
-// skills/, prompts/, attachments/.
+// skills/, prompts/, presets/, attachments/.
 //
 // The archive is deterministic — entries are sorted alphabetically,
 // timestamps zeroed, ownership stripped, modes uniformly set — so two

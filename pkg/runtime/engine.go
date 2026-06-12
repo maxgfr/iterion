@@ -766,7 +766,34 @@ func (e *Engine) runPersistWorkspace(ctx context.Context, runID string, run *sto
 		e.markFailedBestEffort(ctx, runID, "bundle skills", err)
 		return fmt.Errorf("runtime: bundle skills: %w", err)
 	}
+	e.applyPresetFocus()
 	return nil
+}
+
+// applyPresetFocus wires the selected preset's launch-time bias into the
+// run. It first folds the bundle's file-based presets into the workflow as
+// a backstop for paths that compiled without the bundle (studio in-process,
+// cloud runner), then pushes the selected preset's prompt fragment + skill
+// hints into the executor so every LLM node's system prompt gains a
+// "## Focus" section (see delegate.Task.BuildSystemPrompt). Var-only presets
+// (no prompt, no skills) are a no-op here — their overrides already flowed
+// through the launch wiring. The executor focus is best-effort: only
+// ClawExecutor implements SetPresetFocus.
+func (e *Engine) applyPresetFocus() {
+	MergeBundlePresets(e.workflow, e.bundle, e.logger)
+	if e.preset == "" {
+		return
+	}
+	p, ok := e.workflow.Presets[e.preset]
+	if !ok || (p.Prompt == "" && len(p.Skills) == 0) {
+		return
+	}
+	type presetFocusSetter interface {
+		SetPresetFocus(prompt string, skills []string)
+	}
+	if s, ok := e.executor.(presetFocusSetter); ok {
+		s.SetPresetFocus(p.Prompt, p.Skills)
+	}
 }
 
 // runInitState constructs the per-run runState, resolves vars,

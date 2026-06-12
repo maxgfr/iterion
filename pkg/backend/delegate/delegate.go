@@ -384,6 +384,16 @@ type Task struct {
 	// the calibration section entirely. See docs/cursors.md.
 	CursorFragments []string
 
+	// PresetFragment is the resolved launch-time preset bias appended to the
+	// system prompt under a "## Focus" section. It carries the selected
+	// file-based preset's prompt body (template-expanded) plus an optional
+	// "Relevant skills:" hint line, set by the executor from the engine's
+	// SetPresetFocus. Empty means no preset (or a var-only preset) — backends
+	// skip the section. Distinct from CursorFragments: cursors are an
+	// author-time per-node dial ("## Calibration"); a preset is an
+	// operator-time, run-wide "sous-bot" focus. See ir.Preset.
+	PresetFragment string
+
 	// CompactThresholdRatio is the resolved compaction trigger as a
 	// fraction of the model's context window (0 = use backend default).
 	// Backends that maintain their own session history (claw) honor this;
@@ -603,6 +613,14 @@ func (t Task) BuildSystemPrompt() string {
 			}
 			b.WriteString(frag)
 		}
+		b.WriteByte('\n')
+	}
+	// The preset focus is the operator-selected "sous-bot" bias for this run,
+	// emitted last so it frames the task after the author's prompt and any
+	// calibration. Kept byte-stable across nodes for prompt-cache stability.
+	if t.PresetFragment != "" {
+		b.WriteString("\n\n## Focus\n\n")
+		b.WriteString(t.PresetFragment)
 		b.WriteByte('\n')
 	}
 	return b.String()

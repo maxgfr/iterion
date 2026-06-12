@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 
+	"github.com/SocialGouv/iterion/pkg/bundle"
 	"github.com/SocialGouv/iterion/pkg/dsl/ast"
 	"github.com/SocialGouv/iterion/pkg/dsl/parser"
 )
@@ -57,10 +59,18 @@ type PresetsBlock struct {
 	Entries []*Preset `json:"entries,omitempty"`
 }
 
-// Preset is a named bundle of variable values.
+// Preset is a named "sous-bot": a launch-time specialization of a bot. For an
+// in-source `presets:` block only Name + Values are set (var overrides). A
+// file-based preset (a bundle's presets/<name>.md) additionally carries
+// DisplayName / Description / Prompt / Skills — the studio Launch picker shows
+// these and previews the prompt bias.
 type Preset struct {
-	Name   string         `json:"name,omitempty"`
-	Values []*PresetValue `json:"values,omitempty"`
+	Name        string         `json:"name,omitempty"`
+	DisplayName string         `json:"display_name,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Prompt      string         `json:"prompt,omitempty"`
+	Skills      []string       `json:"skills,omitempty"`
+	Values      []*PresetValue `json:"values,omitempty"`
 }
 
 // PresetValue binds one variable to a literal within a Preset.
@@ -124,10 +134,14 @@ func LoadSchema(e Entry) (*VarsBlock, *PresetsBlock, error) {
 	if v, ok := schemaCache.Load(abs); ok {
 		c := v.(cachedSchema)
 		if c.mtime == info.ModTime().UnixNano() && c.size == info.Size() {
+			var schemaErr error
 			if c.err != "" {
-				return nil, nil, fmt.Errorf("%s", c.err)
+				schemaErr = fmt.Errorf("%s", c.err)
 			}
-			return c.vars, c.presets, nil
+			// File-based presets are merged AFTER the cache: they live in
+			// sibling files, so a preset edit must reflect without bumping
+			// main.bot's mtime. The per-call reads are a handful per bot.
+			return c.vars, mergeFilePresets(e, c.presets), schemaErr
 		}
 	}
 	vars, presets, schemaErr := loadSchemaUncached(abs)
@@ -135,13 +149,82 @@ func LoadSchema(e Entry) (*VarsBlock, *PresetsBlock, error) {
 		mtime:   info.ModTime().UnixNano(),
 		size:    info.Size(),
 		vars:    vars,
-		presets: presets,
+		presets: presets, // cache the in-source block only; file presets merge fresh
 	}
 	if schemaErr != nil {
 		cached.err = schemaErr.Error()
 	}
 	schemaCache.Store(abs, cached)
-	return vars, presets, schemaErr
+	return vars, mergeFilePresets(e, presets), schemaErr
+}
+
+// mergeFilePresets overlays a bundle's file-based presets (presets/<name>.md)
+// onto the in-source presets block so the studio Launch picker shows both. A
+// file preset WINS over an in-source entry of the same name (the richer,
+// explicit artifact). No-op for loose .bot files (no bundle dir) and bundles
+// without a presets/ directory.
+func mergeFilePresets(e Entry, inSource *PresetsBlock) *PresetsBlock {
+	if !e.IsBundleDir {
+		return inSource
+	}
+	specs, _ := bundle.LoadPresets(filepath.Join(e.Path, "presets"))
+	if len(specs) == 0 {
+		return inSource
+	}
+	byName := map[string]*Preset{}
+	if inSource != nil {
+		for _, p := range inSource.Entries {
+			byName[p.Name] = p
+		}
+	}
+	for _, ps := range specs {
+		byName[ps.Name] = presetSpecToWire(ps) // file preset wins on name collision
+	}
+	out := &PresetsBlock{Entries: make([]*Preset, 0, len(byName))}
+	for _, p := range byName {
+		out.Entries = append(out.Entries, p)
+	}
+	sort.SliceStable(out.Entries, func(i, j int) bool { return out.Entries[i].Name < out.Entries[j].Name })
+	return out
+}
+
+// presetSpecToWire converts a bundle's on-disk preset into the studio wire
+// shape, encoding var values as typed literals identical to the AST encoder
+// so the Launch form consumes them without translation.
+func presetSpecToWire(ps bundle.PresetSpec) *Preset {
+	p := &Preset{
+		Name:        ps.Name,
+		DisplayName: ps.DisplayName,
+		Description: ps.Description,
+		Prompt:      ps.Prompt,
+		Skills:      ps.Skills,
+	}
+	for k, v := range ps.Vars {
+		p.Values = append(p.Values, &PresetValue{Key: k, Value: presetLiteralFromYAML(v)})
+	}
+	sort.SliceStable(p.Values, func(i, j int) bool { return p.Values[i].Key < p.Values[j].Key })
+	return p
+}
+
+// presetLiteralFromYAML maps a YAML-native preset var value to the typed
+// literal wire shape (kind + typed field + raw), matching ast jsonenc so the
+// studio renders file-preset values exactly like in-source ones.
+func presetLiteralFromYAML(v interface{}) *Literal {
+	switch t := v.(type) {
+	case string:
+		return &Literal{Kind: "string", StrVal: t, Raw: t}
+	case bool:
+		return &Literal{Kind: "bool", BoolVal: t, Raw: strconv.FormatBool(t)}
+	case int:
+		return &Literal{Kind: "int", IntVal: int64(t), Raw: strconv.FormatInt(int64(t), 10)}
+	case int64:
+		return &Literal{Kind: "int", IntVal: t, Raw: strconv.FormatInt(t, 10)}
+	case float64:
+		return &Literal{Kind: "float", FloatVal: t, Raw: strconv.FormatFloat(t, 'g', -1, 64)}
+	default:
+		s := fmt.Sprintf("%v", v)
+		return &Literal{Kind: "string", StrVal: s, Raw: s}
+	}
 }
 
 func loadSchemaUncached(path string) (*VarsBlock, *PresetsBlock, error) {

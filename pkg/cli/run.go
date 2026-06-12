@@ -183,6 +183,12 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 
 	eng := buildEngine(wf, s, executor, opts, wfHash, iterFile, runName, bundleHandle, engineOpts)
 
+	// Fold the bundle's file-based presets (presets/<name>.md) into the
+	// workflow's preset set so `--preset <name>` resolves them and their var
+	// overrides flow through buildRunInputs. The engine re-applies this as a
+	// backstop and logs any malformed preset files.
+	runtime.MergeBundlePresets(wf, bundleHandle, nil)
+
 	inputs, err := buildRunInputs(wf, opts.Preset, opts.Vars)
 	if err != nil {
 		return err

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 
+import { useBotsStore } from "@/store/bots";
 import * as filesApi from "@/api/client";
 import { createRun, getServerInfo, uploadAttachment } from "@/api/runs";
 import type { MergeStrategy } from "@/api/runs";
@@ -246,7 +247,28 @@ export default function LaunchView() {
   }, [filePath]);
 
   const fields = pickVars(doc);
-  const presets = pickPresets(doc);
+
+  // Prefer the bot schema's presets (the union of in-source `presets:` and
+  // file-based presets/<name>.md, carrying display_name / description / prompt
+  // / skills) when the open file is a bundle's main.bot; fall back to the
+  // workflow doc's in-source presets for a loose .iter file.
+  const allBots = useBotsStore((s) => s.bots);
+  const fetchBots = useBotsStore((s) => s.fetch);
+  useEffect(() => {
+    if (allBots === null) void fetchBots();
+  }, [allBots, fetchBots]);
+  const bot = useMemo(
+    () =>
+      allBots?.find(
+        (b) => b.is_bundle && b.rel_path && filePath === `${b.rel_path}/main.bot`,
+      ) ?? null,
+    [allBots, filePath],
+  );
+  const presets = bot?.presets?.entries ?? pickPresets(doc);
+  const selectedPresetMeta = useMemo(
+    () => presets.find((p) => p.name === selectedPreset),
+    [presets, selectedPreset],
+  );
   const attachmentFields = pickAttachments(doc);
   const limits = serverInfo?.limits.upload ?? null;
 
@@ -504,14 +526,40 @@ export default function LaunchView() {
                   <option value="">— none —</option>
                   {presets.map((p) => (
                     <option key={p.name} value={p.name}>
-                      {p.name}
+                      {p.display_name ?? p.name}
                     </option>
                   ))}
                 </Select>
+                {selectedPresetMeta &&
+                  !!(
+                    selectedPresetMeta.description ||
+                    selectedPresetMeta.prompt ||
+                    selectedPresetMeta.skills?.length
+                  ) && (
+                    <div className="mt-2 rounded bg-surface-2 border border-border-default px-2 py-1.5 text-[11px] text-fg-muted">
+                      {selectedPresetMeta.description && (
+                        <p className="text-fg-default">
+                          {selectedPresetMeta.description}
+                        </p>
+                      )}
+                      {selectedPresetMeta.prompt && (
+                        <p className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap">
+                          {selectedPresetMeta.prompt}
+                        </p>
+                      )}
+                      {selectedPresetMeta.skills &&
+                        selectedPresetMeta.skills.length > 0 && (
+                          <p className="mt-1 text-fg-subtle">
+                            Skills: {selectedPresetMeta.skills.join(", ")}
+                          </p>
+                        )}
+                    </div>
+                  )}
                 <p className="mt-1 text-[10px] text-fg-subtle">
                   Selecting a preset overlays its values onto the inputs
-                  below. Any further edits override the preset; the engine
-                  applies the same precedence (preset &lt; vars).
+                  below and biases every step (its “## Focus”). Any further
+                  edits override the preset; the engine applies the same
+                  precedence (preset &lt; vars).
                 </p>
               </section>
             )}

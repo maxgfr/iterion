@@ -1,6 +1,6 @@
 // Package bundle implements the `.botz` archive format: a tar.gz that
 // packages an iterion workflow (`main.bot`) with adjacent resources
-// (skills, prompts, default attachments, manifest). A bundle is loaded
+// (skills, prompts, presets, default attachments, manifest). A bundle is loaded
 // once per run, extracted into a content-addressed cache directory, and
 // then exposed to the engine as a *Bundle so skills/prompts become
 // visible to claude_code and the claw tool registry without authoring
@@ -59,6 +59,13 @@ type Bundle struct {
 	// else "". Holds pre-bundled default values for the workflow's
 	// `attachments:` block — runtime uploads (Launch modal) override.
 	AttachmentsDir string
+
+	// PresetsDir is `<Dir>/presets` when the directory exists, else "".
+	// Holds file-based presets (`<name>.md`, YAML frontmatter + prompt
+	// body) — named sous-bots that bias the workflow at launch. Parsed
+	// by LoadPresets; merged into the runtime workflow's preset set by
+	// the engine at run start.
+	PresetsDir string
 
 	// Hash is the SHA-256 of the uncompressed tar stream, used as
 	// the cache key. Empty for KindBundleDir bundles (no archive

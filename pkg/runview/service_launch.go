@@ -127,6 +127,15 @@ func (s *Service) Launch(parent context.Context, spec LaunchSpec) (*LaunchResult
 		return nil, err
 	}
 
+	// Fold the bundle's file-based presets (presets/<name>.md) into wf so a
+	// studio `--preset <name>` selection resolves a file-based sous-bot — not
+	// just an in-source presets: entry — and its var overrides apply below.
+	// The engine re-applies this as a backstop and also pushes the prompt
+	// bias + skill hints into every LLM node ("## Focus").
+	if b := ResolveBundleFromFilePath(spec.FilePath); b != nil {
+		runtime.MergeBundlePresets(wf, b, runLogger)
+	}
+
 	inputs := make(map[string]interface{}, len(spec.Vars))
 	if spec.Preset != "" {
 		preset, ok := wf.Presets[spec.Preset]

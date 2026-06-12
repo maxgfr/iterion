@@ -62,6 +62,12 @@ export interface PresetsBlock {
 
 export interface Preset {
   name: string;
+  // Rich metadata, present only for file-based presets (a bundle's
+  // presets/<name>.md). In-source `presets:` entries set only name + values.
+  display_name?: string;
+  description?: string;
+  prompt?: string;
+  skills?: string[];
   values: PresetValue[];
 }
 
