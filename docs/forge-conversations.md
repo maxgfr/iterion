@@ -8,7 +8,11 @@ the webhook override model ([byok.md](byok.md)), the capability model
 (`board.*`), and runtime input injection (`RepoURL`/`RepoSHA`) — so the
 DSL stays small.
 
-Status: A1 (note parsing) shipped. A2–A5 below are the build order.
+Status: A1 (note parsing), A2 (handler + authz + loop-guard +
+reply-in-thread trigger), A3 (conversation vars incl. the fetched thread
+transcript as `thread_context`) and A5 (`revi-converse`) are shipped.
+A4 (`forge.reply` capability) is the remaining deferred step — the reply
+POST is skill-based (`curl`) until then.
 
 ## Model — stateless, the thread is the state
 
@@ -83,6 +87,16 @@ the engine vars. Fields: `thread_id` (discussion), `trigger_note`,
 `replier` (username), `mr_url`, and optionally the fetched thread history.
 Any bot becomes conversational with no per-bot plumbing — it just reads
 `{{conversation.*}}`.
+
+**Shipped (vars-level):** the handler injects `discussion_id`,
+`trigger_note`, `trigger_command`/`trigger_args`, `replier` and — on the
+converse route — `converse_question` plus `thread_context`, the discussion
+transcript fetched from the forge API (chronological, the bot's own notes
+labelled, capped at ~16k chars keeping the thread anchor + the newest
+notes; see `gitlab.FormatThreadTranscript`). The gate fetches the
+discussion ONCE and reuses it for both the reply-in-thread classification
+and the transcript. The dedicated `Conversation` struct on `LaunchSpec`
+(vs plain vars) remains the refactor to do when a second forge needs it.
 
 ## A4 — `forge.reply` capability (the DSL answer)
 

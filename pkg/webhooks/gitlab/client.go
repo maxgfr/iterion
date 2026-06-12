@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // GitLab numeric access levels.
@@ -103,36 +104,121 @@ func (a API) MemberAccessLevel(ctx context.Context, projectID, userID int64) (le
 	}
 }
 
-// DiscussionHasBotNote reports whether the MR discussion already contains a
-// note authored by botUserID — i.e. it is a thread Revi started or replied
-// in, so a plain reply in it is "talking to Revi". Drives the reply-in-thread
-// trigger (a conversational answer without an explicit /revi command).
-func (a API) DiscussionHasBotNote(ctx context.Context, projectID, mrIID int64, discussionID string, botUserID int64) (bool, error) {
-	if discussionID == "" || botUserID == 0 {
-		return false, nil
+// DiscussionNote is one note of an MR discussion thread — just the fields
+// the conversational layer needs: authorship for the reply-in-thread
+// classification (NotesHaveAuthor) and body for the thread transcript the
+// converse bot receives (FormatThreadTranscript).
+type DiscussionNote struct {
+	AuthorID       int64
+	AuthorUsername string
+	Body           string
+	System         bool
+}
+
+// Discussion fetches the notes of one MR discussion thread, in API order
+// (chronological). An empty discussionID or a 404 returns (nil, nil) —
+// callers treat "no thread" as benign.
+func (a API) Discussion(ctx context.Context, projectID, mrIID int64, discussionID string) ([]DiscussionNote, error) {
+	if discussionID == "" {
+		return nil, nil
 	}
 	var d struct {
 		Notes []struct {
 			Author struct {
-				ID int64 `json:"id"`
+				ID       int64  `json:"id"`
+				Username string `json:"username"`
 			} `json:"author"`
+			Body   string `json:"body"`
+			System bool   `json:"system"`
 		} `json:"notes"`
 	}
 	code, err := a.get(ctx, fmt.Sprintf("/projects/%d/merge_requests/%d/discussions/%s", projectID, mrIID, discussionID), &d)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	switch code {
 	case http.StatusOK:
+		notes := make([]DiscussionNote, 0, len(d.Notes))
 		for _, n := range d.Notes {
-			if n.Author.ID == botUserID {
-				return true, nil
-			}
+			notes = append(notes, DiscussionNote{AuthorID: n.Author.ID, AuthorUsername: n.Author.Username, Body: n.Body, System: n.System})
 		}
-		return false, nil
+		return notes, nil
 	case http.StatusNotFound:
-		return false, nil
+		return nil, nil
 	default:
-		return false, fmt.Errorf("gitlab: get discussion: HTTP %d", code)
+		return nil, fmt.Errorf("gitlab: get discussion: HTTP %d", code)
 	}
+}
+
+// NotesHaveAuthor reports whether any note is authored by userID — the "is
+// this a Revi thread" classification driving the reply-in-thread trigger
+// (a plain reply in a thread the bot is part of is "talking to Revi").
+func NotesHaveAuthor(notes []DiscussionNote, userID int64) bool {
+	if userID == 0 {
+		return false
+	}
+	for _, n := range notes {
+		if n.AuthorID == userID {
+			return true
+		}
+	}
+	return false
+}
+
+// FormatThreadTranscript renders a discussion's notes as the plain-text
+// transcript the converse bot receives as {{vars.thread_context}}:
+// chronological, system notes skipped, the bot's own notes labelled so the
+// model knows which earlier statements are its own. maxChars caps the
+// result — the FIRST note (the thread anchor, typically the review comment
+// the operator replied to) is always kept, then the most recent notes fill
+// the remaining budget with an omission marker for the middle.
+func FormatThreadTranscript(notes []DiscussionNote, botUserID int64, maxChars int) string {
+	const sep = "\n\n---\n\n"
+	rendered := make([]string, 0, len(notes))
+	for _, n := range notes {
+		if n.System {
+			continue
+		}
+		who := "@" + n.AuthorUsername
+		if botUserID != 0 && n.AuthorID == botUserID {
+			who += " (you, the bot)"
+		}
+		rendered = append(rendered, who+":\n"+strings.TrimSpace(n.Body))
+	}
+	if len(rendered) == 0 {
+		return ""
+	}
+	full := strings.Join(rendered, sep)
+	if maxChars <= 0 || len(full) <= maxChars {
+		return full
+	}
+	// Over budget: anchor + newest notes, omission marker in between.
+	const omitted = "[… earlier notes omitted …]"
+	anchor := rendered[0]
+	budget := maxChars - len(anchor) - len(omitted) - 2*len(sep)
+	var tail []string
+	for i := len(rendered) - 1; i >= 1; i-- {
+		need := len(rendered[i]) + len(sep)
+		if need > budget {
+			break
+		}
+		budget -= need
+		tail = append([]string{rendered[i]}, tail...)
+	}
+	parts := []string{anchor}
+	if len(tail) < len(rendered)-1 {
+		parts = append(parts, omitted)
+	}
+	parts = append(parts, tail...)
+	out := strings.Join(parts, sep)
+	if len(out) > maxChars {
+		// The anchor alone overflows the budget — hard-truncate on a rune
+		// boundary so the transcript stays valid UTF-8.
+		cut := maxChars
+		for cut > 0 && !utf8.RuneStart(out[cut]) {
+			cut--
+		}
+		out = out[:cut] + "\n[… truncated …]"
+	}
+	return out
 }

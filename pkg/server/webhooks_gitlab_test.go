@@ -296,8 +296,9 @@ func TestGitLabNoteHook_ConverseFallsBackWhenBotMissing(t *testing.T) {
 func TestGitLabNoteHook_ReplyInThreadRoutesToConverse(t *testing.T) {
 	s := newWebhookTestServer(t)
 	s.cfg.Bots.Paths = []string{botsDirAbs(t)}
-	s.webhookNoteGate = func(context.Context, webhooks.Config, gitlab.ParsedNote, string) (bool, bool, string, error) {
-		return true, true, "reply", nil // authorized + a reply in a Revi thread
+	s.webhookNoteGate = func(context.Context, webhooks.Config, gitlab.ParsedNote, string) (bool, bool, string, string, error) {
+		// authorized + a reply in a Revi thread, with the fetched transcript.
+		return true, true, "@revi (you, the bot):\nThe SSRF fix pins the host.\n\n---\n\n@alice:\nCan you expand on the SSRF fix?", "reply", nil
 	}
 	var calls int
 	var gotBot string
@@ -320,6 +321,11 @@ func TestGitLabNoteHook_ReplyInThreadRoutesToConverse(t *testing.T) {
 	}
 	if gotVars["converse_question"] != "Can you expand on the SSRF fix?" {
 		t.Fatalf("converse_question should be the reply body: %q", gotVars["converse_question"])
+	}
+	// The discussion transcript the gate fetched must reach the bot as
+	// thread_context — it grounds the answer in Revi's earlier note.
+	if !strings.Contains(gotVars["thread_context"], "The SSRF fix pins the host.") {
+		t.Fatalf("thread_context not threaded to launch vars: %q", gotVars["thread_context"])
 	}
 	if _, present := gotVars["re_review"]; present {
 		t.Fatalf("re_review must be dropped on the converse path: %v", gotVars)

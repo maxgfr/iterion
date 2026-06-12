@@ -357,9 +357,11 @@ type Server struct {
 	// webhookNoteGate overrides the conversational replier gate (forge
 	// token + loop-guard + reply-in-thread detection + allowlist/role authz
 	// — test seam, the real gate calls the GitLab API). nil →
-	// realWebhookNoteGate. Returns (authorized, replyInThread, reason, err):
-	// replyInThread marks a plain reply in a Revi thread (no /revi command).
-	webhookNoteGate func(ctx context.Context, cfg webhooks.Config, p gitlab.ParsedNote, botID string) (authorized, replyInThread bool, reason string, err error)
+	// realWebhookNoteGate. Returns (authorized, replyInThread, threadContext,
+	// reason, err): replyInThread marks a plain reply in a Revi thread (no
+	// /revi command); threadContext is the discussion transcript the converse
+	// bot receives as {{vars.thread_context}} ("" when not fetched).
+	webhookNoteGate func(ctx context.Context, cfg webhooks.Config, p gitlab.ParsedNote, botID string) (authorized, replyInThread bool, threadContext, reason string, err error)
 	httpClient      *http.Client
 
 	// detector is the cached LLM credential detector backing

@@ -78,6 +78,14 @@ vars:
   ## primary question to answer. Empty falls back to trigger_note.
   converse_question: string = ""
 
+  ## The discussion-thread transcript (chronological, the bot's own
+  ## notes labelled), fetched + injected by the webhook handler from
+  ## the forge API. This is the conversational context the operator's
+  ## reply refers to — typically Revi's earlier review comment. Empty
+  ## on manual runs or when the fetch failed; the system prompt then
+  ## tells the agent when to fetch it itself (forge-reply.md GET).
+  thread_context: string = ""
+
   ## The forge username of the operator who asked the question.
   ## Used to address them in the answer ("Re: <replier> — …").
   replier: string = ""
@@ -104,6 +112,14 @@ prompt converse_system:
      Do NOT branch into adjacent advice unless the answer genuinely
      requires it. A concise answer is a sign of mastery, not
      laziness.
+  3. The DISCUSSION THREAD transcript (user message, when present) is
+     the conversational context: the operator is replying to it —
+     typically to YOUR earlier review note. Ground "why did you say
+     X" / "is that still true" answers in what the thread actually
+     says. When the transcript section is EMPTY and the question
+     clearly references prior discussion, fetch the thread yourself
+     first (the GET in forge-reply.md — same call as VERIFY) before
+     answering; never guess at what was said.
 
   ── ANSWER SHAPE ──
   - 3-8 sentences, prose. Markdown fences (≤3 lines of code) only
@@ -159,6 +175,9 @@ prompt converse_user:
 
   ── Original note body (for context — includes the leading slash-command) ──
   {{vars.trigger_note}}
+
+  ── Discussion thread (chronological; your earlier notes labelled) ──
+  {{vars.thread_context}}
 
   Read the question, read the relevant slice of the MR diff (and any
   surrounding code you need to ground a claim), draft a concise

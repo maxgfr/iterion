@@ -40,8 +40,8 @@ func newWebhookTestServer(t *testing.T) *Server {
 	// tests pin the flow around it. The default stub authorizes a /revi
 	// command (replyInThread=false); tests targeting the reply-in-thread
 	// route override this seam to return replyInThread=true.
-	s.webhookNoteGate = func(context.Context, webhooks.Config, gitlab.ParsedNote, string) (bool, bool, string, error) {
-		return true, false, "test-gate", nil
+	s.webhookNoteGate = func(context.Context, webhooks.Config, gitlab.ParsedNote, string) (bool, bool, string, string, error) {
+		return true, false, "", "test-gate", nil
 	}
 	return s
 }

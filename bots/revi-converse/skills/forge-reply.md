@@ -10,6 +10,14 @@ land as a REPLY in the SAME discussion thread the operator's note opened
 (`{{vars.discussion_id}}`), not as a new top-level comment. You POST one
 note — you NEVER edit, fix, or commit the workspace.
 
+Reading the thread: the webhook handler injects the discussion transcript
+as `{{vars.thread_context}}`, so you normally do NOT need to fetch it.
+When that var is EMPTY (manual run, fetch failure) and the question
+references prior discussion, READ the thread first with the same GET the
+VERIFY step uses (GitLab: §3's re-fetch call; GitHub:
+`GET .../pulls/:number/comments` filtered on the thread; Forgejo/Gitea:
+`GET .../issues/:index/comments`), then answer.
+
 ## 0. Anti-trigger-loop rule (CRITICAL — every forge)
 
 The forge webhook re-fires on a comment whose FIRST non-whitespace token
