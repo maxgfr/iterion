@@ -56,6 +56,26 @@ describe("formSpecFromSchema — JSON checkbox auto-detection", () => {
     ]);
   });
 
+  it("parses a sibling array delivered as a JSON string (real agent `json` output)", () => {
+    // A real agent's `json`-typed output (e.g. the Bmady PM's `stories`)
+    // reaches the form as a JSON-encoded STRING — iterion stores json
+    // fields as raw text so `{{input.stories}}` hands the LLM JSON, not
+    // "[object Object]". The checkbox detection must parse it; the earlier
+    // tests pass a pre-parsed array (the --var path) and so missed this.
+    // Regression for the Bmady select_stories gate found by dogfooding.
+    const spec = formSpecFromSchema([jsonField("selected_story_ids")], {
+      stories: JSON.stringify([
+        { id: "S1", title: "--quiet flag prints the bare version" },
+        { id: "S2", title: "Default output unchanged" },
+      ]),
+    });
+    const q = spec.questions[0]!;
+    expect(q.kind).toBe("checkbox");
+    if (q.kind !== "checkbox") return;
+    expect(q.options.map((o) => o.value)).toEqual(["S1", "S2"]);
+    expect(q.options[0]?.label).toContain("--quiet flag");
+  });
+
   it("descends into sibling objects and flattens nested arrays into one checkbox column", () => {
     // The whats-next human_review case: the review_input ships a
     // single `roadmap` object that itself carries long_term[],

@@ -157,6 +157,24 @@ function isLikelySelectionField(name: string): boolean {
   return n.endsWith("_ids") || n.endsWith("_keys") || n.startsWith("selected_");
 }
 
+// coerceMaybeJson parses a value that arrived as a JSON-encoded string.
+// iterion stores `json`-typed agent output fields as their raw JSON text
+// (correct for prompt rendering — `{{input.stories}}` must hand the LLM
+// JSON, not "[object Object]"), so a real agent's stories/created_issues
+// reach the form as a string while a --var-supplied one arrives already
+// parsed. The checkbox detection needs the array either way. Returns the
+// parsed value when the string is a JSON array/object, else v unchanged.
+function coerceMaybeJson(v: unknown): unknown {
+  if (typeof v !== "string") return v;
+  const s = v.trim();
+  if (s.length < 2 || (s[0] !== "[" && s[0] !== "{")) return v;
+  try {
+    return JSON.parse(s);
+  } catch {
+    return v;
+  }
+}
+
 // findSelectableItems scans the questions context for a collection
 // of selectable items. Returns option entries built from the first
 // usable array discovered, or null when nothing is in scope.
@@ -183,9 +201,10 @@ function findSelectableItems(
   // Pass 1: direct sibling arrays.
   for (const [k, v] of Object.entries(questions)) {
     if (k === selfName) continue;
-    if (!Array.isArray(v) || v.length === 0) continue;
-    if (!v.every(looksLikeSelectable)) continue;
-    return (v as Array<Record<string, unknown>>).map(toOption);
+    const cv = coerceMaybeJson(v);
+    if (!Array.isArray(cv) || cv.length === 0) continue;
+    if (!cv.every(looksLikeSelectable)) continue;
+    return (cv as Array<Record<string, unknown>>).map(toOption);
   }
   // Pass 2: descend into sibling objects. Collect arrays of card-
   // shaped items across all eligible nested fields and concatenate
@@ -196,10 +215,12 @@ function findSelectableItems(
   // mixing semantically different domains.
   for (const [k, v] of Object.entries(questions)) {
     if (k === selfName) continue;
-    if (!isPlainObject(v)) continue;
+    const cv = coerceMaybeJson(v);
+    if (!isPlainObject(cv)) continue;
     const collected: Array<Record<string, unknown>> = [];
     let usable = true;
-    for (const inner of Object.values(v as Record<string, unknown>)) {
+    for (const innerRaw of Object.values(cv)) {
+      const inner = coerceMaybeJson(innerRaw);
       if (Array.isArray(inner)) {
         if (inner.length === 0) continue;
         if (!inner.every(looksLikeSelectable)) {
