@@ -3,6 +3,8 @@ import { useLocation, useSearch } from "wouter";
 
 import {
   BarChartIcon,
+  CheckIcon,
+  ChevronDownIcon,
   Cross2Icon,
   MagnifyingGlassIcon,
   ReloadIcon,
@@ -15,6 +17,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { IconButton } from "@/components/ui/IconButton";
 import { Input } from "@/components/ui/Input";
 import { LiveDot } from "@/components/ui/LiveDot";
+import { Popover } from "@/components/ui/Popover";
 import { Select } from "@/components/ui/Select";
 import type { RunRepo, RunSourceKind, RunStatus, RunSummary } from "@/api/runs";
 import { formatRelative } from "@/lib/format";
@@ -223,9 +226,62 @@ export default function RunListView() {
   const groups = useMemo(() => groupRuns(sortedRuns, group), [sortedRuns, group]);
   const isGrouped = group !== "none";
 
-  // Shared "All" chip count for the source + bot strips (the full
-  // status-filtered fetch size). Omitted when zero so the chip stays bare.
+  // Shared "All" option count for the source + bot menus (the full
+  // status-filtered fetch size). Omitted when zero.
   const totalCount = runs.length > 0 ? runs.length : undefined;
+
+  // Per-axis menu option lists. Status/Since are tiny and built inline in
+  // the JSX; the data-driven axes are memoised because they map over
+  // potentially many bots/repos and build label nodes.
+  const sourceOptions = useMemo<FilterMenuOption[]>(
+    () => [
+      { key: "", label: "All", count: totalCount },
+      ...availableSources.map((kind) => {
+        const meta = metaForSource(kind);
+        const Icon = meta.Icon;
+        return {
+          key: kind,
+          label: (
+            <span className="inline-flex items-center gap-1.5" title={meta.description}>
+              <Icon className="w-3 h-3" />
+              <span>{meta.label}</span>
+            </span>
+          ),
+          count: sourceCounts[kind],
+        };
+      }),
+    ],
+    [availableSources, sourceCounts, totalCount],
+  );
+
+  const botOptions = useMemo<FilterMenuOption[]>(
+    () => [
+      { key: "", label: "All", count: totalCount },
+      ...botChips.map((b) => ({
+        key: b.key,
+        label: (
+          <span className="inline-flex items-center gap-1.5">
+            <span>{b.emoji}</span>
+            <span>{b.label}</span>
+          </span>
+        ),
+        count: b.count > 0 ? b.count : undefined,
+      })),
+    ],
+    [botChips, totalCount],
+  );
+
+  const repoOptions = useMemo<FilterMenuOption[]>(
+    () => [
+      { key: "", label: "All" },
+      ...repoChips.map((c) => ({
+        key: c.key,
+        label: c.label,
+        count: c.count > 0 ? c.count : undefined,
+      })),
+    ],
+    [repoChips],
+  );
 
   const filtersActive =
     query !== "" ||
@@ -245,133 +301,93 @@ export default function RunListView() {
     <div className="h-full flex flex-col overflow-hidden bg-surface-1 text-fg-default">
       <QueueDepthBar counts={counts} />
 
-      <div className="px-4 py-2 flex flex-col gap-2 border-b border-border-default">
-        <div className="flex items-center gap-2">
-          <div className="flex-1 max-w-md">
-            <Input
-              type="search"
-              value={queryInput}
-              onChange={(e) => setQueryInput(e.currentTarget.value)}
-              placeholder="Search name, workflow, file path, run id…"
-              leadingIcon={<MagnifyingGlassIcon />}
-              aria-label="Search runs"
-            />
-          </div>
-          <div className="flex items-center gap-1.5">
-            {SINCE_FILTERS.map((f) => (
-              <FilterChip
-                key={f.value}
-                active={since === f.value}
-                label={f.label}
-                onClick={() => setSince(f.value)}
-              />
-            ))}
-          </div>
-          {filtersActive && (
-            <IconButton
-              label="Clear filters"
-              size="sm"
-              variant="ghost"
-              onClick={clearFilters}
-            >
-              <Cross2Icon />
-            </IconButton>
-          )}
-          <div className="ml-auto flex items-center gap-2">
-            <SortGroupControls
-              sort={sort}
-              onSort={setSort}
-              group={group}
-              onGroup={setGroup}
-              groupOptions={groupOptionsFor(mode)}
-            />
-            <Button
-              variant="ghost"
-              size="sm"
-              leadingIcon={<BarChartIcon />}
-              onClick={() => setLocation("/insights")}
-              title="Cross-run cost, fail rate, and duration over a configurable window"
-            >
-              Analytics
-            </Button>
-          </div>
+      <div className="px-4 py-2 flex flex-wrap items-center gap-2 border-b border-border-default">
+        <div className="flex-1 min-w-48 max-w-md">
+          <Input
+            type="search"
+            value={queryInput}
+            onChange={(e) => setQueryInput(e.currentTarget.value)}
+            placeholder="Search name, workflow, file path, run id…"
+            leadingIcon={<MagnifyingGlassIcon />}
+            aria-label="Search runs"
+          />
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {STATUS_FILTERS.map((f) => {
-            const count =
-              f.value === ""
-                ? runs.length
-                : counts[f.value as RunStatus] ?? 0;
-            return (
-              <FilterChip
-                key={f.value || "all"}
-                active={status === f.value}
-                label={f.label}
-                count={count > 0 ? count : undefined}
-                size="sm"
-                onClick={() => setStatus(f.value)}
-              />
-            );
+
+        <FilterMenu
+          axis="Status"
+          ariaLabel="Filter by status"
+          value={status}
+          options={STATUS_FILTERS.map((f) => {
+            const n =
+              f.value === "" ? runs.length : counts[f.value as RunStatus] ?? 0;
+            return { key: f.value, label: f.label, count: n > 0 ? n : undefined };
           })}
-        </div>
+          onSelect={(k) => setStatus(k as RunStatus | "")}
+        />
         {availableSources.length > 0 && (
-          <FilterChipStrip
+          <FilterMenu
+            axis="Source"
             ariaLabel="Filter by run source"
-            header="Source"
             value={source}
-            allCount={totalCount}
-            options={availableSources.map((kind) => {
-              const meta = metaForSource(kind);
-              const Icon = meta.Icon;
-              return {
-                key: kind,
-                label: (
-                  <span
-                    className="inline-flex items-center gap-1"
-                    title={meta.description}
-                  >
-                    <Icon className="w-3 h-3" />
-                    <span>{meta.label}</span>
-                  </span>
-                ),
-                count: sourceCounts[kind],
-              };
-            })}
+            options={sourceOptions}
             onSelect={(k) => setSource(k as SourceFilter)}
           />
         )}
         {(botChips.length > 1 || bot !== "") && (
-          <FilterChipStrip
+          <FilterMenu
+            axis="Bot"
             ariaLabel="Filter by bot"
-            header="Bot"
             value={bot}
-            allCount={totalCount}
-            options={botChips.map((b) => ({
-              key: b.key,
-              label: (
-                <span className="inline-flex items-center gap-1" title={b.key}>
-                  <span>{b.emoji}</span>
-                  <span>{b.label}</span>
-                </span>
-              ),
-              count: b.count > 0 ? b.count : undefined,
-            }))}
+            options={botOptions}
             onSelect={setBot}
           />
         )}
         {(repoChips.length > 1 || repo !== "") && (
-          <FilterChipStrip
+          <FilterMenu
+            axis={repoAxisLabel(mode)}
             ariaLabel={`Filter by ${repoAxisLabel(mode).toLowerCase()}`}
-            header={repoAxisLabel(mode)}
             value={repo}
-            options={repoChips.map((c) => ({
-              key: c.key,
-              label: <span title={c.title}>{c.label}</span>,
-              count: c.count > 0 ? c.count : undefined,
-            }))}
+            options={repoOptions}
             onSelect={setRepo}
           />
         )}
+        <FilterMenu
+          axis="Since"
+          ariaLabel="Filter by date"
+          value={since}
+          defaultValue="all"
+          options={SINCE_FILTERS.map((f) => ({ key: f.value, label: f.label }))}
+          onSelect={(k) => setSince(k as SinceFilter)}
+        />
+        {filtersActive && (
+          <IconButton
+            label="Clear filters"
+            size="sm"
+            variant="ghost"
+            onClick={clearFilters}
+          >
+            <Cross2Icon />
+          </IconButton>
+        )}
+
+        <div className="ml-auto flex items-center gap-2">
+          <SortGroupControls
+            sort={sort}
+            onSort={setSort}
+            group={group}
+            onGroup={setGroup}
+            groupOptions={groupOptionsFor(mode)}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            leadingIcon={<BarChartIcon />}
+            onClick={() => setLocation("/insights")}
+            title="Cross-run cost, fail rate, and duration over a configurable window"
+          >
+            Analytics
+          </Button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto">
@@ -491,75 +507,94 @@ export default function RunListView() {
   );
 }
 
-function FilterChip({
-  active,
-  label,
-  count,
-  size = "md",
-  onClick,
-}: {
-  active: boolean;
+// One option in a FilterMenu. `key` is the filter value ("" = the
+// unset/"All" entry); `label` is a (possibly icon/emoji-laden) node;
+// `count` is an optional right-aligned tally.
+interface FilterMenuOption {
+  key: string;
   label: ReactNode;
   count?: number;
-  size?: "sm" | "md";
-  onClick: () => void;
-}) {
-  const heightCls = size === "sm" ? "h-6" : "h-7";
-  const activeCls = active
-    ? "border-accent/40 bg-accent-soft text-fg-default"
-    : "border-border-default bg-surface-2 text-fg-default hover:bg-surface-3";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`inline-flex items-center gap-1 rounded-md border text-xs px-2 ${heightCls} ${activeCls}`}
-    >
-      {label}
-      {count !== undefined && <span className="text-fg-subtle">{count}</span>}
-    </button>
-  );
 }
 
-// FilterChipStrip is the shared "header + All chip + one chip per option"
-// row used by the Source, Bot, and Repo/Folder filters. value === ""
-// selects "All"; each option supplies its own (possibly icon/emoji-laden)
-// label node, optional count, and stable key.
-function FilterChipStrip({
+// FilterMenu is the per-axis dropdown pill used by the Status, Source,
+// Bot, Repo/Folder, and Since filters. The trigger shows the axis name
+// and, when a non-default value is selected, the active option's label
+// (and an accent highlight). The popover lists the options with a check
+// on the active one. Selecting closes the menu.
+function FilterMenu({
+  axis,
   ariaLabel,
-  header,
   value,
-  allCount,
+  defaultValue = "",
   options,
   onSelect,
 }: {
+  axis: string;
   ariaLabel: string;
-  header: string;
   value: string;
-  allCount?: number;
-  options: Array<{ key: string; label: ReactNode; count?: number }>;
+  defaultValue?: string;
+  options: FilterMenuOption[];
   onSelect: (key: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const active = value !== defaultValue;
+  const activeOption = active ? options.find((o) => o.key === value) : undefined;
+  const triggerCls = active
+    ? "border-accent/40 bg-accent-soft text-fg-default"
+    : "border-border-default bg-surface-2 text-fg-muted hover:bg-surface-3";
   return (
-    <div className="flex flex-wrap items-center gap-1.5" aria-label={ariaLabel}>
-      <span className="text-fg-subtle text-xs mr-0.5">{header}</span>
-      <FilterChip
-        active={value === ""}
-        label="All"
-        count={allCount}
-        size="sm"
-        onClick={() => onSelect("")}
-      />
-      {options.map((o) => (
-        <FilterChip
-          key={o.key}
-          active={value === o.key}
-          label={o.label}
-          count={o.count}
-          size="sm"
-          onClick={() => onSelect(o.key)}
-        />
-      ))}
-    </div>
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+      contentClassName="p-1"
+      trigger={
+        <button
+          type="button"
+          aria-label={ariaLabel}
+          className={`inline-flex items-center gap-1 rounded-md border text-xs h-7 px-2 ${triggerCls}`}
+        >
+          <span>{axis}</span>
+          {activeOption && (
+            <span className="flex items-center gap-1 max-w-40 truncate text-fg-default">
+              <span className="text-fg-subtle">:</span>
+              {activeOption.label}
+            </span>
+          )}
+          <ChevronDownIcon className="w-3 h-3 opacity-60" />
+        </button>
+      }
+    >
+      <div role="listbox" aria-label={ariaLabel} className="min-w-44 max-h-72 overflow-auto">
+        {options.map((o) => {
+          const selected = o.key === value;
+          return (
+            <button
+              key={o.key || "__all"}
+              type="button"
+              role="option"
+              aria-selected={selected}
+              onClick={() => {
+                onSelect(o.key);
+                setOpen(false);
+              }}
+              className={`w-full flex items-center gap-2 rounded px-2 h-7 text-xs text-left ${
+                selected
+                  ? "bg-accent-soft text-fg-default"
+                  : "text-fg-default hover:bg-surface-2"
+              }`}
+            >
+              <CheckIcon
+                className={`w-3 h-3 shrink-0 text-accent ${selected ? "opacity-100" : "opacity-0"}`}
+              />
+              <span className="flex-1 truncate">{o.label}</span>
+              {o.count !== undefined && (
+                <span className="text-fg-subtle tabular-nums">{o.count}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </Popover>
   );
 }
 
