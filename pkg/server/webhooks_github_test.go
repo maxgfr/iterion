@@ -78,7 +78,7 @@ func TestGitHubWebhook_HappyPath(t *testing.T) {
 	var calls int
 	var gotBot, gotURL, gotRef string
 	var gotVars map[string]string
-	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, repoURL, repoRef string, _, _ map[string]string) (string, error) {
+	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, repoURL, repoRef, projectPath string, _, _ map[string]string) (string, error) {
 		calls++
 		gotBot, gotVars, gotURL, gotRef = botID, vars, repoURL, repoRef
 		return "run-7", nil
@@ -108,7 +108,7 @@ func TestGitHubWebhook_HappyPath(t *testing.T) {
 
 func TestGitHubWebhook_BadHMAC(t *testing.T) {
 	s := newWebhookTestServer(t)
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		t.Fatal("launch must not be reached on bad signature")
 		return "", nil
 	}
@@ -127,7 +127,7 @@ func TestGitHubWebhook_BadHMAC(t *testing.T) {
 
 func TestGitHubWebhook_NonPullRequestEventFiltered(t *testing.T) {
 	s := newWebhookTestServer(t)
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		t.Fatal("ping must not launch")
 		return "", nil
 	}
@@ -146,7 +146,7 @@ func TestGitHubWebhook_NonPullRequestEventFiltered(t *testing.T) {
 
 func TestGitHubWebhook_SynchronizeFiltered(t *testing.T) {
 	s := newWebhookTestServer(t)
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		t.Fatal("synchronize must not launch (auto-review on open only)")
 		return "", nil
 	}
@@ -166,7 +166,7 @@ func TestGitHubWebhook_SynchronizeFiltered(t *testing.T) {
 
 func TestGitHubWebhook_ProjectAllowlistMismatch(t *testing.T) {
 	s := newWebhookTestServer(t)
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		t.Fatal("mismatched repo must not launch")
 		return "", nil
 	}
@@ -187,7 +187,7 @@ func TestGitHubWebhook_ProjectAllowlistMismatch(t *testing.T) {
 func TestGitHubWebhook_IdempotentReplay(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		calls++
 		return "run-7", nil
 	}
@@ -214,7 +214,7 @@ func TestGitHubWebhook_IdempotentReplay(t *testing.T) {
 
 func TestGitHubWebhook_BotNotAllowed(t *testing.T) {
 	s := newWebhookTestServer(t)
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		t.Fatal("disallowed bot must not launch")
 		return "", nil
 	}

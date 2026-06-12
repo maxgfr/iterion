@@ -28,7 +28,7 @@ func TestGenericWebhook_HappyPath_VarsPrecedence(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var gotVars map[string]string
 	var gotBot, gotURL, gotRef string
-	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, repoURL, repoRef string, _, _ map[string]string) (string, error) {
+	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, repoURL, repoRef, projectPath string, _, _ map[string]string) (string, error) {
 		gotBot, gotVars, gotURL, gotRef = botID, vars, repoURL, repoRef
 		return "run-g-1", nil
 	}
@@ -61,7 +61,7 @@ func TestGenericWebhook_HappyPath_VarsPrecedence(t *testing.T) {
 
 func TestGenericWebhook_MissingBotIs400(t *testing.T) {
 	s := newWebhookTestServer(t)
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		t.Fatal("must not launch")
 		return "", nil
 	}
@@ -78,7 +78,7 @@ func TestGenericWebhook_MissingBotIs400(t *testing.T) {
 func TestGenericWebhook_BodyHashIdempotency(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		calls++
 		return "run-g-2", nil
 	}
@@ -109,7 +109,7 @@ func TestGenericWebhook_BodyHashIdempotency(t *testing.T) {
 
 func TestGenericWebhook_OversizedVarRejected(t *testing.T) {
 	s := newWebhookTestServer(t)
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		t.Fatal("must not launch")
 		return "", nil
 	}

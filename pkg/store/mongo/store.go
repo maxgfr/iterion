@@ -219,6 +219,11 @@ func (s *Store) EnsureSchema(ctx context.Context, eventsTTLDays int) error {
 		{Keys: bson.D{{Key: "updated_at", Value: -1}}, Options: options.Index().SetName("updated_desc")},
 		{Keys: bson.D{{Key: "tenant_id", Value: 1}, {Key: "status", Value: 1}, {Key: "created_at", Value: -1}}, Options: options.Index().SetName("tenant_status_created").SetPartialFilterExpression(bson.M{"tenant_id": bson.M{"$exists": true}})},
 		{Keys: bson.D{{Key: "tenant_id", Value: 1}, {Key: "owner_id", Value: 1}, {Key: "created_at", Value: -1}}, Options: options.Index().SetName("tenant_owner_created").SetPartialFilterExpression(bson.M{"tenant_id": bson.M{"$exists": true}})},
+		// (tenant_id, project_path, created_at desc) backs the "filter
+		// runs by repository" studio feature + the distinct-repos
+		// aggregation. Partial on project_path so only repo-scoped
+		// (webhook-launched) runs index — local/manual runs leave it empty.
+		{Keys: bson.D{{Key: "tenant_id", Value: 1}, {Key: "project_path", Value: 1}, {Key: "created_at", Value: -1}}, Options: options.Index().SetName("tenant_project_created").SetPartialFilterExpression(bson.M{"project_path": bson.M{"$exists": true}})},
 		{
 			Keys:    bson.D{{Key: "runner_id", Value: 1}},
 			Options: options.Index().SetName("runner_id_partial").SetPartialFilterExpression(bson.M{"runner_id": bson.M{"$exists": true}}),

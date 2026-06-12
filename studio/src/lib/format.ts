@@ -82,12 +82,15 @@ export function formatRelative(iso: string): string {
   return `${days}d ago`;
 }
 
-// basename returns the trailing path segment after the last "/", or
-// the whole string if there is no slash. Suitable for slash-only paths
-// (git uses "/" everywhere); not a drop-in for os.path.basename.
+// basename returns the trailing path segment after the last "/" or "\",
+// ignoring a trailing separator. "/a/b" → "b", "/a/b/" → "b",
+// "C:\\dev\\x" → "x", "group/project" → "project". Returns the input
+// unchanged when it has no separator. Handles both POSIX git paths and
+// host filesystem paths (incl. Windows for the desktop app).
 export function basename(path: string): string {
-  const i = path.lastIndexOf("/");
-  return i < 0 ? path : path.slice(i + 1);
+  const trimmed = path.replace(/[/\\]+$/, "");
+  const i = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return i < 0 ? trimmed : trimmed.slice(i + 1);
 }
 
 export function formatBytes(n: number): string {

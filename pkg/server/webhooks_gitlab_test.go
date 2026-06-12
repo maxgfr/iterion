@@ -47,11 +47,12 @@ const glOpenMR = `{
 func TestGitLabWebhook_HappyPath(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int
-	var gotBot, gotURL, gotRef string
+	var gotBot, gotURL, gotRef, gotProjectPath string
 	var gotVars, gotKeyOverrides, gotSecretOverrides map[string]string
-	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, repoURL, repoRef string, keyOverrides, secretOverrides map[string]string) (string, error) {
+	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, repoURL, repoRef, projectPath string, keyOverrides, secretOverrides map[string]string) (string, error) {
 		calls++
 		gotBot, gotVars, gotURL, gotRef, gotKeyOverrides, gotSecretOverrides = botID, vars, repoURL, repoRef, keyOverrides, secretOverrides
+		gotProjectPath = projectPath
 		return "run-123", nil
 	}
 	cfg := glConfig()
@@ -76,6 +77,11 @@ func TestGitLabWebhook_HappyPath(t *testing.T) {
 	if gotURL != "https://gitlab.com/acme/widgets.git" || gotRef != "feature/x" {
 		t.Fatalf("repo: url=%q ref=%q", gotURL, gotRef)
 	}
+	// project_path (the stable forge slug) must reach the launch so the
+	// run is filterable by repository in the studio.
+	if gotProjectPath != "acme/widgets" {
+		t.Fatalf("project path not threaded to launch: %q", gotProjectPath)
+	}
 	if gotKeyOverrides["anthropic"] != "key-abc" {
 		t.Fatalf("key overrides not threaded to launch: %v", gotKeyOverrides)
 	}
@@ -91,7 +97,7 @@ func TestGitLabWebhook_HappyPath(t *testing.T) {
 func TestGitLabWebhook_Idempotent(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int
-	s.webhookLaunchBot = func(_ context.Context, _ string, _ map[string]string, _, _ string, _, _ map[string]string) (string, error) {
+	s.webhookLaunchBot = func(_ context.Context, _ string, _ map[string]string, _, _, _ string, _, _ map[string]string) (string, error) {
 		calls++
 		return "run-123", nil
 	}
@@ -140,7 +146,7 @@ func TestGitLabNoteHook_ReviCommandLaunches(t *testing.T) {
 	var calls int
 	var gotBot, gotURL, gotRef string
 	var gotVars map[string]string
-	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, repoURL, repoRef string, _, _ map[string]string) (string, error) {
+	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, repoURL, repoRef, projectPath string, _, _ map[string]string) (string, error) {
 		calls++
 		gotBot, gotVars, gotURL, gotRef = botID, vars, repoURL, repoRef
 		return "run-note-1", nil
@@ -180,7 +186,7 @@ func TestGitLabNoteHook_ReviCommandLaunches(t *testing.T) {
 func TestGitLabNoteHook_FocusArgTolerated(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		calls++
 		return "run-note-2", nil
 	}
@@ -217,7 +223,7 @@ func TestGitLabNoteHook_ConverseRoutesQuestionToConverseBot(t *testing.T) {
 	var calls int
 	var gotBot string
 	var gotVars map[string]string
-	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, _, _ string, _, _ map[string]string) (string, error) {
+	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, _, _, _ string, _, _ map[string]string) (string, error) {
 		calls++
 		gotBot, gotVars = botID, vars
 		return "run-converse-1", nil
@@ -264,7 +270,7 @@ func TestGitLabNoteHook_ConverseFallsBackWhenBotMissing(t *testing.T) {
 	var calls int
 	var gotBot string
 	var gotVars map[string]string
-	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, _, _ string, _, _ map[string]string) (string, error) {
+	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, _, _, _ string, _, _ map[string]string) (string, error) {
 		calls++
 		gotBot, gotVars = botID, vars
 		return "run-fallback-1", nil
@@ -303,7 +309,7 @@ func TestGitLabNoteHook_ReplyInThreadRoutesToConverse(t *testing.T) {
 	var calls int
 	var gotBot string
 	var gotVars map[string]string
-	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, _, _ string, _, _ map[string]string) (string, error) {
+	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, _, _, _ string, _, _ map[string]string) (string, error) {
 		calls++
 		gotBot, gotVars = botID, vars
 		return "run-reply-1", nil
@@ -338,7 +344,7 @@ func TestGitLabNoteHook_ReplyInThreadRoutesToConverse(t *testing.T) {
 // call, no launch).
 func TestGitLabNoteHook_PlainCommentWithoutConverseBotFiltered(t *testing.T) {
 	s := newWebhookTestServer(t)
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		t.Fatal("a plain comment without the converse bot must not launch")
 		return "", nil
 	}
@@ -357,7 +363,7 @@ func TestGitLabNoteHook_PlainCommentWithoutConverseBotFiltered(t *testing.T) {
 // would re-trigger the bot forever.
 func TestGitLabNoteHook_QuotedMidTextDoesNotTrigger(t *testing.T) {
 	s := newWebhookTestServer(t)
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		t.Fatal("mid-text /revi must not trigger")
 		return "", nil
 	}
@@ -379,7 +385,7 @@ func TestGitLabNoteHook_QuotedMidTextDoesNotTrigger(t *testing.T) {
 // filtered (no re-review on a merged/closed MR).
 func TestGitLabNoteHook_ClosedMRFiltered(t *testing.T) {
 	s := newWebhookTestServer(t)
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		t.Fatal("closed MR must not re-review")
 		return "", nil
 	}
@@ -399,7 +405,7 @@ func TestGitLabNoteHook_ClosedMRFiltered(t *testing.T) {
 func TestGitLabNoteHook_IdempotencyByNoteID(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		calls++
 		return "run-note-N", nil
 	}
@@ -440,7 +446,7 @@ func TestGitLabNoteHook_IdempotencyByNoteID(t *testing.T) {
 func TestGitLabWebhook_MROpenAndNoteCoexist(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		calls++
 		return "ok", nil
 	}
@@ -463,7 +469,7 @@ func TestGitLabWebhook_MROpenAndNoteCoexist(t *testing.T) {
 func TestGitLabWebhook_FiltersAndRejects(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int
-	s.webhookLaunchBot = func(_ context.Context, _ string, _ map[string]string, _, _ string, _, _ map[string]string) (string, error) {
+	s.webhookLaunchBot = func(_ context.Context, _ string, _ map[string]string, _, _, _ string, _, _ map[string]string) (string, error) {
 		calls++
 		return "r", nil
 	}

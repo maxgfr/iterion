@@ -4,6 +4,8 @@ import {
   normalizeSourceKind,
   SOURCE_KIND_ORDER,
 } from "./runSourceMeta";
+import { workflowLabel } from "./runListSortGroup";
+import { repoKey } from "./runRepoMeta";
 
 // Date-range chip values. "all" keeps the previous behaviour where the
 // list is unfiltered by creation time.
@@ -72,6 +74,7 @@ function matchesQuery(run: RunSummary, needle: string): boolean {
     run.name,
     run.workflow_name,
     run.bundle_name,
+    run.bundle_display_name,
     run.file_path,
     run.id,
   ]
@@ -87,22 +90,32 @@ export interface FilterOptions {
   // Source classifier filter ("" = all kinds). Defaults to "" so
   // existing call sites stay source-agnostic.
   source?: SourceFilter;
+  // Bot filter ("" = all bots). Matches workflowLabel (bundle_name ||
+  // workflow_name) exactly. Client-side in both modes.
+  bot?: string;
+  // Repo/folder filter ("" = all), matched against repoKey. The caller
+  // passes this ONLY in local mode; in cloud mode the repo filter is
+  // enforced server-side (useRuns({ repo })), so the caller leaves it
+  // empty here. Keeping this helper mode-agnostic.
+  repo?: string;
   // Injected for deterministic tests; defaults to Date.now() in
   // production callers.
   now?: number;
 }
 
-// filterRuns applies the search box + date chip + source filters in one
-// pass. Status filtering is intentionally out of scope here — the
-// server already does it via `useRuns({ status })`, and we want this
-// helper to operate on whatever the hook returns.
+// filterRuns applies the search box + date chip + source + bot + repo
+// filters in one pass. Status filtering is intentionally out of scope
+// here — the server already does it via `useRuns({ status })`, and we
+// want this helper to operate on whatever the hook returns.
 export function filterRuns(
   runs: RunSummary[],
-  { query, since, source = "", now = Date.now() }: FilterOptions,
+  { query, since, source = "", bot = "", repo = "", now = Date.now() }: FilterOptions,
 ): RunSummary[] {
   const needle = query.trim().toLowerCase();
   const cutoff = sinceCutoff(since, now);
-  if (!needle && cutoff === null && source === "") return runs;
+  if (!needle && cutoff === null && source === "" && bot === "" && repo === "") {
+    return runs;
+  }
   return runs.filter((r) => {
     if (needle && !matchesQuery(r, needle)) return false;
     if (cutoff !== null) {
@@ -110,6 +123,8 @@ export function filterRuns(
       if (Number.isNaN(t) || t < cutoff) return false;
     }
     if (source !== "" && normalizeSourceKind(r.source_kind) !== source) return false;
+    if (bot !== "" && workflowLabel(r) !== bot) return false;
+    if (repo !== "" && repoKey(r) !== repo) return false;
     return true;
   });
 }

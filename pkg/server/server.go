@@ -353,7 +353,7 @@ type Server struct {
 	memStore          knowledge.MemoryStore
 	// webhookLaunchBot overrides the inbound-webhook launch path (test
 	// seam). nil → realWebhookLaunchBot (resolve bot source + s.runs.Launch).
-	webhookLaunchBot func(ctx context.Context, botID string, vars map[string]string, repoURL, repoRef string, keyOverrides, secretOverrides map[string]string) (string, error)
+	webhookLaunchBot func(ctx context.Context, botID string, vars map[string]string, repoURL, repoRef, projectPath string, keyOverrides, secretOverrides map[string]string) (string, error)
 	// webhookNoteGate overrides the conversational replier gate (forge
 	// token + loop-guard + reply-in-thread detection + allowlist/role authz
 	// — test seam, the real gate calls the GitLab API). nil →
@@ -849,6 +849,10 @@ func (s *Server) routes() {
 	// Cross-run stats aggregation backing /insights. No-op when the
 	// server runs without a run-store handle (cloud control plane).
 	s.registerRunsStatsRoutes()
+
+	// Distinct repositories (project_path) backing the run-list "by repo"
+	// filter chips. No-op without a run-store handle.
+	s.registerRunsReposRoutes()
 
 	// Daily spend-cap status + one-click override. No-op without a run
 	// store. Gated by the global /api/* auth middleware.

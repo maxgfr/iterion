@@ -180,6 +180,7 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filter := runview.ListFilter{
 		Workflow: q.Get("workflow"),
+		Repo:     q.Get("repo"),
 		Node:     q.Get("node"),
 	}
 	if status := q.Get("status"); status != "" {

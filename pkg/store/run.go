@@ -218,6 +218,13 @@ type Run struct {
 	// the run. Empty in local mode (workspace is the user's cwd).
 	RepoURL string `json:"repo_url,omitempty" bson:"repo_url,omitempty"`
 	RepoSHA string `json:"repo_sha,omitempty" bson:"repo_sha,omitempty"`
+	// ProjectPath is the stable forge slug ("group/project" on GitLab,
+	// "owner/repo" on GitHub/Forgejo) the run targets. Distinct from the
+	// raw RepoURL clone URL: it is the normalized, human-meaningful
+	// identifier used to filter/group runs by repository in the studio.
+	// Set by inbound-webhook launches (the repo-scoped cloud case);
+	// empty for local runs and non-webhook cloud launches.
+	ProjectPath string `json:"project_path,omitempty" bson:"project_path,omitempty"`
 	// BotID is the bot bundle name (for example, "review-pr") that
 	// launched this run. It is persisted so cloud resume/retry can
 	// re-resolve bot-secret bindings after the initial queue message

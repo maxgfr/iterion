@@ -16,10 +16,12 @@ import { IconButton } from "@/components/ui/IconButton";
 import { Input } from "@/components/ui/Input";
 import { LiveDot } from "@/components/ui/LiveDot";
 import { Select } from "@/components/ui/Select";
-import type { RunSourceKind, RunStatus, RunSummary } from "@/api/runs";
+import type { RunRepo, RunSourceKind, RunStatus, RunSummary } from "@/api/runs";
 import { formatRelative } from "@/lib/format";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useRuns } from "@/hooks/useRuns";
+import { useRunRepos } from "@/hooks/useRunRepos";
+import { useServerInfoStore } from "@/store/serverInfo";
 import { STATUS_VARIANT, labelForStatus } from "./runStatusMeta";
 import { metaForSource, runSourceKind } from "./runSourceMeta";
 import QueueDepthBar from "./QueueDepthBar";
@@ -32,8 +34,15 @@ import {
   type SinceFilter,
   type SourceFilter,
 } from "./runListFilter";
+import { availableBots, type BotDescriptor } from "./runBotMeta";
 import {
-  GROUP_OPTIONS,
+  availableRepos,
+  repoAxisLabel,
+  type RepoChip,
+  type RunMode,
+} from "./runRepoMeta";
+import {
+  groupOptionsFor,
   groupRuns,
   parseGroup,
   parseSort,
@@ -74,6 +83,8 @@ export default function RunListView() {
       query: p.get("q") ?? "",
       since: parseSince(p.get("since")),
       source: parseSource(p.get("source")),
+      bot: p.get("bot") ?? "",
+      repo: p.get("repo") ?? "",
       sort: parseSort(p.get("sort")),
       group: parseGroup(p.get("group")),
     };
@@ -82,11 +93,19 @@ export default function RunListView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Server mode selects the repo axis: cloud filters by repository
+  // (project_path, server-side); local/desktop filters by folder
+  // (repo_root||work_dir, client-side). Anything non-cloud is "local".
+  const serverMode = useServerInfoStore((s) => s.info?.mode);
+  const mode: RunMode = serverMode === "cloud" ? "cloud" : "local";
+
   const [status, setStatus] = useState<RunStatus | "">("");
   const [queryInput, setQueryInput] = useState(initial.query);
   const query = useDebounce(queryInput, QUERY_DEBOUNCE_MS);
   const [since, setSince] = useState<SinceFilter>(initial.since);
   const [source, setSource] = useState<SourceFilter>(initial.source);
+  const [bot, setBot] = useState<string>(initial.bot);
+  const [repo, setRepo] = useState<string>(initial.repo);
   const [sort, setSort] = useState<SortKey>(initial.sort);
   const [group, setGroup] = useState<GroupKey>(initial.group);
 
@@ -99,19 +118,28 @@ export default function RunListView() {
     if (query) p.set("q", query);
     if (since !== "all") p.set("since", since);
     if (source !== "") p.set("source", source);
+    if (bot !== "") p.set("bot", bot);
+    if (repo !== "") p.set("repo", repo);
     if (sort !== "started") p.set("sort", sort);
     if (group !== "none") p.set("group", group);
     const qs = p.toString();
     const target = qs ? `/runs?${qs}` : "/runs";
     const current = search ? `${location}?${search}` : location;
     if (target !== current) setLocation(target, { replace: true });
-  }, [query, since, source, sort, group, setLocation, location, search]);
+  }, [query, since, source, bot, repo, sort, group, setLocation, location, search]);
 
-  const { runs, counts, loading, error } = useRuns({ status });
+  // The repo axis splits by mode: cloud filters server-side (index-backed,
+  // a project_path slug), local filters client-side (a folder path that is
+  // not a project_path and would match nothing server-side). Resolve the
+  // split once so neither the fetch nor filterRuns has to know about mode.
+  const serverRepo = mode === "cloud" ? repo : "";
+  const clientRepo = mode === "cloud" ? "" : repo;
+
+  const { runs, counts, loading, error } = useRuns({ status, repo: serverRepo });
 
   const filteredRuns = useMemo(
-    () => filterRuns(runs, { query, since, source }),
-    [runs, query, since, source],
+    () => filterRuns(runs, { query, since, source, bot, repo: clientRepo }),
+    [runs, query, since, source, bot, clientRepo],
   );
 
   // Source-filter chip strip: only show kinds present in the current
@@ -130,6 +158,36 @@ export default function RunListView() {
     }
     return m;
   }, [runs]);
+
+  // Bot-filter chip strip: distinct bots (with counts) present in the
+  // fetched list — computed off `runs` (not the post-filter list) so
+  // picking one bot doesn't hide the others. An active bot with no
+  // surviving runs is prepended so it stays visible and clearable.
+  const botChips = useMemo<BotDescriptor[]>(() => {
+    const base = availableBots(runs);
+    if (bot === "" || base.some((b) => b.key === bot)) return base;
+    return [{ key: bot, label: bot, emoji: "🤖", count: 0 }, ...base];
+  }, [runs, bot]);
+
+  // Repo/folder chip strip. Cloud: the index-backed distinct-repos
+  // endpoint, decoupled from the list so selecting a repo (which narrows
+  // the server-side fetch) doesn't empty the strip. Local: derived
+  // client-side from the fetched runs' folders. An active value absent
+  // from the set is prepended so it stays clearable.
+  const { repos: cloudRepos } = useRunRepos(mode === "cloud");
+  const repoChips = useMemo<RepoChip[]>(() => {
+    const base: RepoChip[] =
+      mode === "cloud"
+        ? cloudRepos.map((r: RunRepo) => ({
+            key: r.project_path,
+            label: r.project_path,
+            title: r.project_path,
+            count: r.count,
+          }))
+        : availableRepos(runs);
+    if (repo === "" || base.some((c) => c.key === repo)) return base;
+    return [{ key: repo, label: repo, title: repo, count: 0 }, ...base];
+  }, [mode, cloudRepos, runs, repo]);
 
   const openRun = useCallback(
     (id: string) => setLocation(`/runs/${encodeURIComponent(id)}`),
@@ -165,12 +223,22 @@ export default function RunListView() {
   const groups = useMemo(() => groupRuns(sortedRuns, group), [sortedRuns, group]);
   const isGrouped = group !== "none";
 
+  // Shared "All" chip count for the source + bot strips (the full
+  // status-filtered fetch size). Omitted when zero so the chip stays bare.
+  const totalCount = runs.length > 0 ? runs.length : undefined;
+
   const filtersActive =
-    query !== "" || since !== "all" || source !== "";
+    query !== "" ||
+    since !== "all" ||
+    source !== "" ||
+    bot !== "" ||
+    repo !== "";
   const clearFilters = useCallback(() => {
     setQueryInput("");
     setSince("all");
     setSource("");
+    setBot("");
+    setRepo("");
   }, []);
 
   return (
@@ -215,6 +283,7 @@ export default function RunListView() {
               onSort={setSort}
               group={group}
               onGroup={setGroup}
+              groupOptions={groupOptionsFor(mode)}
             />
             <Button
               variant="ghost"
@@ -246,41 +315,62 @@ export default function RunListView() {
           })}
         </div>
         {availableSources.length > 0 && (
-          <div
-            className="flex flex-wrap items-center gap-1.5"
-            aria-label="Filter by run source"
-          >
-            <span className="text-fg-subtle text-xs mr-0.5">Source</span>
-            <FilterChip
-              active={source === ""}
-              label="All"
-              count={runs.length > 0 ? runs.length : undefined}
-              size="sm"
-              onClick={() => setSource("")}
-            />
-            {availableSources.map((kind) => {
+          <FilterChipStrip
+            ariaLabel="Filter by run source"
+            header="Source"
+            value={source}
+            allCount={totalCount}
+            options={availableSources.map((kind) => {
               const meta = metaForSource(kind);
               const Icon = meta.Icon;
-              return (
-                <FilterChip
-                  key={kind}
-                  active={source === kind}
-                  label={
-                    <span
-                      className="inline-flex items-center gap-1"
-                      title={meta.description}
-                    >
-                      <Icon className="w-3 h-3" />
-                      <span>{meta.label}</span>
-                    </span>
-                  }
-                  count={sourceCounts[kind]}
-                  size="sm"
-                  onClick={() => setSource(kind)}
-                />
-              );
+              return {
+                key: kind,
+                label: (
+                  <span
+                    className="inline-flex items-center gap-1"
+                    title={meta.description}
+                  >
+                    <Icon className="w-3 h-3" />
+                    <span>{meta.label}</span>
+                  </span>
+                ),
+                count: sourceCounts[kind],
+              };
             })}
-          </div>
+            onSelect={(k) => setSource(k as SourceFilter)}
+          />
+        )}
+        {(botChips.length > 1 || bot !== "") && (
+          <FilterChipStrip
+            ariaLabel="Filter by bot"
+            header="Bot"
+            value={bot}
+            allCount={totalCount}
+            options={botChips.map((b) => ({
+              key: b.key,
+              label: (
+                <span className="inline-flex items-center gap-1" title={b.key}>
+                  <span>{b.emoji}</span>
+                  <span>{b.label}</span>
+                </span>
+              ),
+              count: b.count > 0 ? b.count : undefined,
+            }))}
+            onSelect={setBot}
+          />
+        )}
+        {(repoChips.length > 1 || repo !== "") && (
+          <FilterChipStrip
+            ariaLabel={`Filter by ${repoAxisLabel(mode).toLowerCase()}`}
+            header={repoAxisLabel(mode)}
+            value={repo}
+            options={repoChips.map((c) => ({
+              key: c.key,
+              label: <span title={c.title}>{c.label}</span>,
+              count: c.count > 0 ? c.count : undefined,
+            }))}
+            onSelect={setRepo}
+          />
         )}
       </div>
 
@@ -430,6 +520,49 @@ function FilterChip({
   );
 }
 
+// FilterChipStrip is the shared "header + All chip + one chip per option"
+// row used by the Source, Bot, and Repo/Folder filters. value === ""
+// selects "All"; each option supplies its own (possibly icon/emoji-laden)
+// label node, optional count, and stable key.
+function FilterChipStrip({
+  ariaLabel,
+  header,
+  value,
+  allCount,
+  options,
+  onSelect,
+}: {
+  ariaLabel: string;
+  header: string;
+  value: string;
+  allCount?: number;
+  options: Array<{ key: string; label: ReactNode; count?: number }>;
+  onSelect: (key: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" aria-label={ariaLabel}>
+      <span className="text-fg-subtle text-xs mr-0.5">{header}</span>
+      <FilterChip
+        active={value === ""}
+        label="All"
+        count={allCount}
+        size="sm"
+        onClick={() => onSelect("")}
+      />
+      {options.map((o) => (
+        <FilterChip
+          key={o.key}
+          active={value === o.key}
+          label={o.label}
+          count={o.count}
+          size="sm"
+          onClick={() => onSelect(o.key)}
+        />
+      ))}
+    </div>
+  );
+}
+
 // Memoised so the parent's per-row callback (now stable via useCallback)
 // doesn't force every row to re-render when one run mutates.
 const RunRow = memo(function RunRow({
@@ -558,11 +691,13 @@ function SortGroupControls({
   onSort,
   group,
   onGroup,
+  groupOptions,
 }: {
   sort: SortKey;
   onSort: (next: SortKey) => void;
   group: GroupKey;
   onGroup: (next: GroupKey) => void;
+  groupOptions: ReadonlyArray<{ value: GroupKey; label: string }>;
 }) {
   return (
     <div className="hidden md:flex items-center gap-1.5">
@@ -591,7 +726,7 @@ function SortGroupControls({
           aria-label="Group runs"
           className="w-32"
         >
-          {GROUP_OPTIONS.map((opt) => (
+          {groupOptions.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>

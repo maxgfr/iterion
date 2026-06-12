@@ -5,6 +5,12 @@ import {
   metaForSource,
   normalizeSourceKind,
 } from "./runSourceMeta";
+import {
+  repoAxisLabel,
+  repoKey,
+  repoLabel,
+  type RunMode,
+} from "./runRepoMeta";
 
 // Available client-side sort axes. The server hard-sorts created_at
 // DESC; this is purely a re-arrangement on top of that.
@@ -16,8 +22,9 @@ export type SortKey =
   | "workflow"; // bundle_name||workflow_name ASC, tiebreak by created_at DESC
 
 // Group-by axes. "none" keeps today's flat list; the others wrap rows
-// in labelled section headers.
-export type GroupKey = "none" | "source" | "workflow" | "day";
+// in labelled section headers. "repo" buckets by the repo/folder axis
+// (mode-dependent label — see groupOptionsFor).
+export type GroupKey = "none" | "source" | "workflow" | "repo" | "day";
 
 export const SORT_OPTIONS: ReadonlyArray<{ value: SortKey; label: string }> = [
   { value: "started", label: "Started" },
@@ -31,8 +38,25 @@ export const GROUP_OPTIONS: ReadonlyArray<{ value: GroupKey; label: string }> = 
   { value: "none", label: "None" },
   { value: "source", label: "Source" },
   { value: "workflow", label: "Workflow" },
+  { value: "repo", label: repoAxisLabel("cloud") }, // "Repo"
   { value: "day", label: "Day" },
 ];
+
+// Local-mode variant: the "repo" entry reads "Folder" instead of "Repo",
+// matching the filter-strip header. Precomputed (not rebuilt per render).
+const GROUP_OPTIONS_LOCAL: ReadonlyArray<{ value: GroupKey; label: string }> =
+  GROUP_OPTIONS.map((opt) =>
+    opt.value === "repo" ? { value: opt.value, label: repoAxisLabel("local") } : opt,
+  );
+
+// groupOptionsFor returns the mode-appropriate group dropdown options:
+// the "repo" entry is "Repo" in cloud mode, "Folder" locally. Both
+// arrays are module constants — stable identity across renders.
+export function groupOptionsFor(
+  mode: RunMode,
+): ReadonlyArray<{ value: GroupKey; label: string }> {
+  return mode === "cloud" ? GROUP_OPTIONS : GROUP_OPTIONS_LOCAL;
+}
 
 // parseSort/parseGroup are the URL guards. Any unknown value collapses
 // to the default so a stale bookmark can't break the page.
@@ -53,6 +77,7 @@ export function parseGroup(raw: string | null | undefined): GroupKey {
   switch (raw) {
     case "source":
     case "workflow":
+    case "repo":
     case "day":
       return raw;
     default:
@@ -173,6 +198,8 @@ function bucketIDFor(run: RunSummary, key: GroupKey): string {
       return `source:${normalizeSourceKind(run.source_kind)}`;
     case "workflow":
       return `workflow:${workflowLabel(run) || "(unnamed)"}`;
+    case "repo":
+      return `repo:${repoKey(run) || "(none)"}`;
     case "day":
       return `day:${dayBucket(run.created_at)}`;
     case "none":
@@ -186,6 +213,8 @@ function bucketLabelFor(run: RunSummary, key: GroupKey): string {
       return metaForSource(normalizeSourceKind(run.source_kind)).label;
     case "workflow":
       return workflowLabel(run) || "(unnamed workflow)";
+    case "repo":
+      return repoLabel(run) || "(none)";
     case "day":
       return dayBucketLabel(run.created_at);
     case "none":

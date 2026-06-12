@@ -100,6 +100,10 @@ type LaunchSpec struct {
 	// operator has no local checkout.
 	RepoURL string
 	RepoRef string
+	// ProjectPath is the stable forge slug ("group/project") the run
+	// targets, persisted on the run so the studio can filter/group runs
+	// by repository. Set by inbound-webhook launches; empty otherwise.
+	ProjectPath string
 	// BotID is the bot bundle name (e.g. "review-pr") this run launches.
 	// The cloud publisher uses it to resolve bot-secret bindings during
 	// credential sealing. Empty for plain .iter/.bot launches.
@@ -142,6 +146,11 @@ type RunSummary struct {
 	// basename(BundlePath) (stripped of `.botz`) for legacy runs.
 	// Empty for plain .iter/.bot runs with no bundle.
 	BundleName string `json:"bundle_name,omitempty"`
+	// BundleDisplayName is the bot's persona label (e.g. "Nexie") from
+	// the bundle manifest. Empty for plain runs; the studio falls back
+	// to BundleName then WorkflowName. Carried so the run list can
+	// render readable bot-filter chips without a per-run fetch.
+	BundleDisplayName string `json:"bundle_display_name,omitempty"`
 	// SourceKind classifies how the run was triggered, for list filtering /
 	// grouping: "manual" | "webhook" | "dispatcher" | "fork" | "shard".
 	// Derived server-side from the run's source/owner; never persisted.
@@ -168,6 +177,17 @@ type RunSummary struct {
 	MergeStrategy    store.MergeStrategy `json:"merge_strategy,omitempty"`
 	MergeStatus      store.MergeStatus   `json:"merge_status,omitempty"`
 	AutoMerge        bool                `json:"auto_merge,omitempty"`
+	// WorkDir / RepoRoot locate where a local run executed: WorkDir is
+	// the absolute exec dir (worktree path or inherited cwd), RepoRoot
+	// the main git repo it was forked from. The studio uses these to
+	// offer a "by folder" run filter in desktop/local mode. Empty for
+	// cloud runs (which carry ProjectPath instead) and legacy runs.
+	WorkDir  string `json:"work_dir,omitempty"`
+	RepoRoot string `json:"repo_root,omitempty"`
+	// ProjectPath is the stable forge slug ("group/project") for
+	// cloud webhook-launched runs, powering the "by repo" filter.
+	// Empty in local mode.
+	ProjectPath string `json:"project_path,omitempty"`
 	// QueuePosition is set only for cloud-mode runs whose Status is
 	// "queued"; nil otherwise. 1 means "next to be picked up". Computed
 	// by the server (Mongo aggregation), not persisted on the run doc.
@@ -179,6 +199,7 @@ type RunSummary struct {
 type ListFilter struct {
 	Status   store.RunStatus // exact match
 	Workflow string          // exact match on WorkflowName
+	Repo     string          // exact match on ProjectPath (cloud repo slug)
 	Since    time.Time       // UpdatedAt >= Since
 	Limit    int             // 0 = no limit
 	// Node filters runs to those whose persisted events include at

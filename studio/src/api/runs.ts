@@ -70,6 +70,10 @@ export interface RunSummary {
   // manifest.yaml name; server falls back to basename(bundle_path) for
   // legacy runs. Empty for plain .bot runs with no bundle.
   bundle_name?: string;
+  // Bot persona label (e.g. "Nexie") from the bundle manifest. Empty for
+  // plain runs; render falls back to bundle_name then workflow_name.
+  // Used for readable "by bot" filter chips.
+  bundle_display_name?: string;
   status: RunStatus;
   file_path?: string;
   created_at: string;
@@ -91,6 +95,15 @@ export interface RunSummary {
   merge_strategy?: MergeStrategy;
   merge_status?: MergeStatus;
   auto_merge?: boolean;
+  // Local-mode run location, powering the "by folder" filter in
+  // desktop/local mode: work_dir is the absolute exec dir (worktree or
+  // cwd), repo_root the main git repo. Empty for cloud runs and legacy
+  // runs.
+  work_dir?: string;
+  repo_root?: string;
+  // Cloud-mode stable forge slug ("group/project") powering the "by
+  // repo" filter. Empty in local mode.
+  project_path?: string;
   // Cloud-only: 1-based queue position when status === "queued".
   // Computed server-side via Mongo aggregation; the UI uses it for the
   // queued banner copy ("3rd in queue"). See cloud-ready plan §F (T-03,
@@ -260,6 +273,11 @@ export interface Artifact {
 export interface ListRunsParams {
   status?: RunStatus | "";
   workflow?: string;
+  // Repo filters runs to a stable forge slug (project_path) — cloud mode
+  // only. Local-mode folder filtering is client-side (the server has no
+  // project_path on local runs), so the studio must not send this in
+  // local mode (it would match nothing).
+  repo?: string;
   since?: string; // RFC3339
   limit?: number;
   // Node filters runs to those whose persisted events include at
@@ -272,6 +290,7 @@ export async function listRuns(params: ListRunsParams = {}): Promise<RunSummary[
   const qs = new URLSearchParams();
   if (params.status) qs.set("status", params.status);
   if (params.workflow) qs.set("workflow", params.workflow);
+  if (params.repo) qs.set("repo", params.repo);
   if (params.since) qs.set("since", params.since);
   if (params.limit) qs.set("limit", String(params.limit));
   if (params.node) qs.set("node", params.node);
@@ -280,6 +299,22 @@ export async function listRuns(params: ListRunsParams = {}): Promise<RunSummary[
     `/runs${suffix ? `?${suffix}` : ""}`,
   );
   return res.runs ?? [];
+}
+
+// One repository (project_path) that has runs, with a per-repo count.
+// Mirror of server.RepoBucket. Returned by GET /api/v1/runs/repos.
+export interface RunRepo {
+  project_path: string;
+  count: number;
+}
+
+// listRunRepos fetches the distinct repositories (cloud project_path)
+// that have runs in the caller's tenant, with counts — feeds the
+// run-list "by repo" filter chips. Cloud-mode only; returns [] in local
+// mode (local/manual runs carry no project_path).
+export async function listRunRepos(): Promise<RunRepo[]> {
+  const res = await request<{ repos: RunRepo[] }>(`/v1/runs/repos`);
+  return res.repos ?? [];
 }
 
 // Shape of GET /api/runs/global-active — runs currently active in

@@ -3,6 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 
 import { listRuns, type RunStatus, type RunSummary } from "@/api/runs";
 
+// Stable empty fallback so the undefined→loaded transition doesn't hand
+// the (many) downstream useMemos a fresh [] reference each render.
+const EMPTY_RUNS: RunSummary[] = [];
+
 const POLL_INTERVAL_FAST_MS = 3000;
 const POLL_INTERVAL_SLOW_MS = 8000;
 // Above this many queued runs we slow polling to relieve the cloud
@@ -21,6 +25,10 @@ export function computePollingInterval(
 export interface UseRunsOptions {
   status?: RunStatus | "";
   limit?: number;
+  // Repo scopes the list to a stable forge slug (project_path) — cloud
+  // mode only (server-side, index-backed). Local-mode folder filtering
+  // is client-side, so callers leave this empty in local mode.
+  repo?: string;
   // When false, the hook skips fetching and returns the empty result.
   // Used by surfaces that only need the runs list while a UI is open
   // (e.g. the global command palette) to avoid background polling.
@@ -40,10 +48,11 @@ export interface UseRunsResult {
 // is hidden) and de-dupes consumers that mount the same key, so the
 // previous fingerprint + visibilitychange machinery falls away.
 export function useRuns(opts: UseRunsOptions = {}): UseRunsResult {
-  const { status = "", limit, enabled = true } = opts;
+  const { status = "", limit, repo = "", enabled = true } = opts;
   const query = useQuery<RunSummary[]>({
-    queryKey: ["runs", status, limit],
-    queryFn: () => listRuns({ status: status || undefined, limit }),
+    queryKey: ["runs", status, limit, repo],
+    queryFn: () =>
+      listRuns({ status: status || undefined, limit, repo: repo || undefined }),
     enabled,
     refetchInterval: (q) => {
       const data = q.state.data;
@@ -57,7 +66,7 @@ export function useRuns(opts: UseRunsOptions = {}): UseRunsResult {
     refetchIntervalInBackground: false,
   });
 
-  const runs = query.data ?? [];
+  const runs = query.data ?? EMPTY_RUNS;
   const counts = useMemo(() => {
     const m: Partial<Record<RunStatus, number>> = {};
     for (const r of runs) m[r.status] = (m[r.status] ?? 0) + 1;

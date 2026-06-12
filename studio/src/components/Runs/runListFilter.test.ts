@@ -10,7 +10,12 @@ function mkRun(partial: Partial<RunSummary>): RunSummary {
     id: partial.id ?? "run_x",
     workflow_name: partial.workflow_name ?? "workflow",
     name: partial.name,
+    bundle_name: partial.bundle_name,
+    bundle_display_name: partial.bundle_display_name,
     file_path: partial.file_path,
+    work_dir: partial.work_dir,
+    repo_root: partial.repo_root,
+    project_path: partial.project_path,
     status: (partial.status ?? "finished") as RunStatus,
     created_at: created,
     updated_at: partial.updated_at ?? created,
@@ -126,5 +131,86 @@ describe("filterRuns", () => {
     const bad = [...runs, mkRun({ id: "run_bad", created_at: "not-a-date" })];
     const out = filterRuns(bad, { query: "", since: "7d", now: NOW });
     expect(out.map((r) => r.id)).not.toContain("run_bad");
+  });
+});
+
+describe("filterRuns — bot axis", () => {
+  const NOW = Date.parse("2026-05-18T15:00:00Z");
+  const runs: RunSummary[] = [
+    mkRun({
+      id: "a",
+      workflow_name: "feature-dev",
+      bundle_name: "feature-dev",
+      bundle_display_name: "Featurly",
+    }),
+    mkRun({
+      id: "b",
+      workflow_name: "review",
+      bundle_name: "review-pr",
+      bundle_display_name: "Revi",
+    }),
+    mkRun({ id: "c", workflow_name: "plain-wf" }), // no bundle
+  ];
+
+  it("filters by bot key (bundle_name)", () => {
+    const out = filterRuns(runs, { query: "", since: "all", bot: "feature-dev", now: NOW });
+    expect(out.map((r) => r.id)).toEqual(["a"]);
+  });
+
+  it("bot key falls back to workflow_name for plain runs", () => {
+    const out = filterRuns(runs, { query: "", since: "all", bot: "plain-wf", now: NOW });
+    expect(out.map((r) => r.id)).toEqual(["c"]);
+  });
+
+  it("empty bot applies no bot filter", () => {
+    const out = filterRuns(runs, { query: "", since: "all", bot: "", now: NOW });
+    expect(out).toHaveLength(3);
+  });
+
+  it("search box matches the persona display name", () => {
+    const out = filterRuns(runs, { query: "Featurly", since: "all", now: NOW });
+    expect(out.map((r) => r.id)).toEqual(["a"]);
+  });
+});
+
+describe("filterRuns — repo/folder axis", () => {
+  // filterRuns is mode-free: it matches repoKey exactly. The caller
+  // (RunListView) only passes `repo` in local mode; in cloud mode the
+  // repo filter is enforced server-side, so the caller passes "" here.
+  const NOW = Date.parse("2026-05-18T15:00:00Z");
+  const runs: RunSummary[] = [
+    mkRun({ id: "cloud1", project_path: "acme/widgets" }),
+    mkRun({ id: "local1", repo_root: "/home/jo/widgets" }),
+    mkRun({ id: "local2", work_dir: "/home/jo/gadgets/wt" }),
+  ];
+
+  it("filters by a folder key (repo_root || work_dir)", () => {
+    const out = filterRuns(runs, {
+      query: "",
+      since: "all",
+      repo: "/home/jo/widgets",
+      now: NOW,
+    });
+    expect(out.map((r) => r.id)).toEqual(["local1"]);
+  });
+
+  it("filters by a cloud slug key (project_path)", () => {
+    const out = filterRuns(runs, {
+      query: "",
+      since: "all",
+      repo: "acme/widgets",
+      now: NOW,
+    });
+    expect(out.map((r) => r.id)).toEqual(["cloud1"]);
+  });
+
+  it("empty repo applies no filter", () => {
+    const out = filterRuns(runs, { query: "", since: "all", repo: "", now: NOW });
+    expect(out).toHaveLength(3);
+  });
+
+  it("excludes runs that don't match the key", () => {
+    const out = filterRuns(runs, { query: "", since: "all", repo: "/nope", now: NOW });
+    expect(out).toHaveLength(0);
   });
 });

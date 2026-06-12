@@ -102,26 +102,30 @@ func (s *Service) ListCtx(ctx context.Context, f ListFilter) ([]RunSummary, erro
 			continue
 		}
 		out = append(out, RunSummary{
-			ID:               r.ID,
-			Name:             r.Name,
-			WorkflowName:     r.WorkflowName,
-			BundleName:       resolveBundleName(r.BundleName, r.BundlePath),
-			SourceKind:       deriveSourceKind(r),
-			Status:           r.Status,
-			FilePath:         r.FilePath,
-			CreatedAt:        r.CreatedAt,
-			UpdatedAt:        r.UpdatedAt,
-			FinishedAt:       r.FinishedAt,
-			Error:            r.Error,
-			Active:           s.manager.Active(r.ID),
-			FinalCommit:      r.FinalCommit,
-			FinalBranch:      r.FinalBranch,
-			FinalBranchError: r.FinalBranchError,
-			MergedInto:       r.MergedInto,
-			MergedCommit:     r.MergedCommit,
-			MergeStrategy:    r.MergeStrategy,
-			MergeStatus:      r.MergeStatus,
-			AutoMerge:        r.AutoMerge,
+			ID:                r.ID,
+			Name:              r.Name,
+			WorkflowName:      r.WorkflowName,
+			BundleName:        resolveBundleName(r.BundleName, r.BundlePath),
+			BundleDisplayName: r.BundleDisplayName,
+			SourceKind:        deriveSourceKind(r),
+			Status:            r.Status,
+			FilePath:          r.FilePath,
+			CreatedAt:         r.CreatedAt,
+			UpdatedAt:         r.UpdatedAt,
+			FinishedAt:        r.FinishedAt,
+			Error:             r.Error,
+			Active:            s.manager.Active(r.ID),
+			FinalCommit:       r.FinalCommit,
+			FinalBranch:       r.FinalBranch,
+			FinalBranchError:  r.FinalBranchError,
+			MergedInto:        r.MergedInto,
+			MergedCommit:      r.MergedCommit,
+			MergeStrategy:     r.MergeStrategy,
+			MergeStatus:       r.MergeStatus,
+			AutoMerge:         r.AutoMerge,
+			WorkDir:           r.WorkDir,
+			RepoRoot:          r.RepoRoot,
+			ProjectPath:       r.ProjectPath,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -178,6 +182,9 @@ func matchesFilter(r *store.Run, f ListFilter) bool {
 		return false
 	}
 	if f.Workflow != "" && r.WorkflowName != f.Workflow {
+		return false
+	}
+	if f.Repo != "" && r.ProjectPath != f.Repo {
 		return false
 	}
 	if !f.Since.IsZero() && r.UpdatedAt.Before(f.Since) {

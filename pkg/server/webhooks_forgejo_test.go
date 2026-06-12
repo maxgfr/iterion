@@ -71,7 +71,7 @@ func TestForgejoWebhook_HappyPath_ForgejoHeaders(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int
 	var gotURL, gotRef string
-	s.webhookLaunchBot = func(_ context.Context, _ string, _ map[string]string, repoURL, repoRef string, _, _ map[string]string) (string, error) {
+	s.webhookLaunchBot = func(_ context.Context, _ string, _ map[string]string, repoURL, repoRef, projectPath string, _, _ map[string]string) (string, error) {
 		calls++
 		gotURL, gotRef = repoURL, repoRef
 		return "run-fj-1", nil
@@ -91,7 +91,7 @@ func TestForgejoWebhook_HappyPath_GiteaHeaders(t *testing.T) {
 	// Gitea spelling for both event + signature headers.
 	s := newWebhookTestServer(t)
 	var calls int
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		calls++
 		return "run-fj-2", nil
 	}
@@ -105,7 +105,7 @@ func TestForgejoWebhook_HappyPath_GiteaHeaders(t *testing.T) {
 
 func TestForgejoWebhook_BadHMAC(t *testing.T) {
 	s := newWebhookTestServer(t)
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		t.Fatal("must not launch")
 		return "", nil
 	}
@@ -120,7 +120,7 @@ func TestForgejoWebhook_BadHMAC(t *testing.T) {
 func TestForgejoWebhook_IdempotentReplay(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var calls int
-	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
 		calls++
 		return "run-fj-3", nil
 	}

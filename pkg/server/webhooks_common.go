@@ -214,7 +214,10 @@ func (s *Server) insertAndLaunchWebhook(
 	if launch == nil {
 		launch = s.realWebhookLaunchBot
 	}
-	runID, lerr := launch(ctx, botID, vars, repoURL, repoRef, cfg.KeyOverrides, cfg.SecretOverrides)
+	// meta.ProjectPath is the forge slug already parsed by the provider
+	// handler — thread it onto the launch so the run is filterable by
+	// repository in the studio.
+	runID, lerr := launch(ctx, botID, vars, repoURL, repoRef, meta.ProjectPath, cfg.KeyOverrides, cfg.SecretOverrides)
 	if lerr != nil {
 		delivery.Status = webhooks.StatusLaunchError
 		delivery.Error = lerr.Error()

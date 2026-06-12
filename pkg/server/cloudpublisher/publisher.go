@@ -341,6 +341,7 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 		OwnerID:         ownerID,
 		RepoURL:         spec.RepoURL,
 		RepoSHA:         spec.RepoRef,
+		ProjectPath:     spec.ProjectPath,
 		BotID:           spec.BotID,
 		KeyOverrides:    spec.KeyOverrides,
 		SecretOverrides: spec.SecretOverrides,
@@ -400,7 +401,9 @@ func (p *Publisher) SubmitLaunch(ctx context.Context, runID string, spec runview
 		CallbackToken:      spec.CallbackToken,
 		CallbackAnswerNode: spec.CallbackAnswerNode,
 		// Repo to clone before sandboxing (webhook-launched runs have no
-		// operator checkout). RepoRef carries a branch or sha.
+		// operator checkout). RepoRef carries a branch or sha. ProjectPath
+		// is NOT on the wire — the runner clones from RepoURL and the
+		// persisted run doc is the authoritative carrier of the slug.
 		RepoURL: spec.RepoURL,
 		RepoSHA: spec.RepoRef,
 		BotID:   spec.BotID,
@@ -536,7 +539,8 @@ func (p *Publisher) SubmitResume(ctx context.Context, spec runview.ResumeSpec, w
 		TenantID: prior.TenantID,
 		OwnerID:  prior.OwnerID,
 		// Preserve webhook/cloud source metadata so a resumed runner can
-		// reconstruct the same workspace as the original launch.
+		// reconstruct the same workspace as the original launch. ProjectPath
+		// is carried by the persisted run doc, not the wire.
 		RepoURL: prior.RepoURL,
 		RepoSHA: prior.RepoSHA,
 		BotID:   prior.BotID,

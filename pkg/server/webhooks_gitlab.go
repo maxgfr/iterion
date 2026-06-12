@@ -425,7 +425,7 @@ func (s *Server) resolveBotSource(botID string) (path, source string, err error)
 // realWebhookLaunchBot is the production launch path for an inbound
 // webhook: resolve the bot's source and submit it through the run
 // service (which, in cloud mode, routes to the publisher).
-func (s *Server) realWebhookLaunchBot(ctx context.Context, botID string, vars map[string]string, repoURL, repoRef string, keyOverrides, secretOverrides map[string]string) (string, error) {
+func (s *Server) realWebhookLaunchBot(ctx context.Context, botID string, vars map[string]string, repoURL, repoRef, projectPath string, keyOverrides, secretOverrides map[string]string) (string, error) {
 	if s.runs == nil {
 		return "", errors.New("run service unavailable")
 	}
@@ -439,6 +439,7 @@ func (s *Server) realWebhookLaunchBot(ctx context.Context, botID string, vars ma
 		Vars:            vars,
 		RepoURL:         repoURL,
 		RepoRef:         repoRef,
+		ProjectPath:     projectPath,
 		BotID:           botID,
 		KeyOverrides:    keyOverrides,
 		SecretOverrides: secretOverrides,
