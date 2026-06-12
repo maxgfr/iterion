@@ -44,11 +44,21 @@ function buildQuestion(
   questions: Record<string, unknown>,
 ): FormQuestion {
   const description = stringifyContext(context);
+  const hasEnum = !!(field.enum_values && field.enum_values.length > 0);
   const base = {
     id: field.name,
-    label: field.name,
+    // Humanise the raw schema field name (selected_story_ids →
+    // "Selected story ids") so the operator reads a label, not an
+    // identifier. The author's `instructions:` carries the real
+    // per-field explanation above the form.
+    label: humanizeFieldName(field.name),
     description,
-    required: true as const,
+    // A constrained choice (enum radio/select or a bool) is a decision
+    // the operator must make; free-form values (text, numbers, JSON,
+    // lists) are elaboration and stay optional — so an "approve" no
+    // longer forces a feedback note. The json multi-select branch
+    // below additionally pins required:false.
+    required: hasEnum || field.type === "bool",
   };
 
   if (field.enum_values && field.enum_values.length > 0) {
@@ -356,4 +366,36 @@ function stringifyContext(v: unknown): string | undefined {
   } catch {
     return String(v);
   }
+}
+
+// humanizeFieldName turns a snake_case / kebab-case schema field name
+// into a readable label: "selected_story_ids" → "Selected story ids",
+// "wip_limit" → "Wip limit", "action" → "Action". A few common
+// all-caps tokens are preserved (id/url/api/wip/csv/...).
+const ACRONYMS = new Set([
+  "url",
+  "uri",
+  "api",
+  "wip",
+  "csv",
+  "json",
+  "ui",
+  "qa",
+  "pr",
+  "sql",
+]);
+export function humanizeFieldName(name: string): string {
+  const words = name
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length === 0) return name;
+  return words
+    .map((w, i) => {
+      if (ACRONYMS.has(w.toLowerCase())) return w.toUpperCase();
+      if (i === 0) return w.charAt(0).toUpperCase() + w.slice(1);
+      return w;
+    })
+    .join(" ");
 }
