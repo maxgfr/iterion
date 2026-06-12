@@ -16,6 +16,7 @@ const BoardView = lazy(() => import("@/views/Board"));
 const LabelsView = lazy(() => import("@/views/Board/Labels"));
 const RunsAnalyticsView = lazy(() => import("@/views/RunsAnalytics"));
 const DispatcherView = lazy(() => import("@/views/Dispatcher"));
+const MarketplaceView = lazy(() => import("@/views/Marketplace"));
 const OrgsAdminPage = lazy(() => import("@/views/admin/OrgsAdminPage"));
 const UsersAdminPage = lazy(() => import("@/views/admin/UsersAdminPage"));
 const Welcome = lazy(() => import("@/views/Welcome"));
@@ -275,6 +276,13 @@ function AuthedApp() {
             <Route path="/dispatcher">
               <ErrorBoundary area="Dispatcher view">
                 <DispatcherView />
+              </ErrorBoundary>
+            </Route>
+          )}
+          {serverInfo?.marketplace_enabled && (
+            <Route path="/marketplace">
+              <ErrorBoundary area="Marketplace view">
+                <MarketplaceView />
               </ErrorBoundary>
             </Route>
           )}

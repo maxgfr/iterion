@@ -1,0 +1,143 @@
+import { Cross2Icon } from "@radix-ui/react-icons";
+
+import type { MarketplaceEntry } from "@/api/marketplace";
+
+interface Props {
+  entry: MarketplaceEntry;
+  installing: boolean;
+  onInstall: () => void;
+  onClose: () => void;
+}
+
+/** MarketplaceDetail is the right-side drawer that opens when the
+ *  operator clicks a card. Shows the README + preset list so they can
+ *  decide before clicking Install. Implemented as a fixed-overlay panel
+ *  rather than a Dialog to keep the card list visible alongside. */
+export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Props) {
+  const label = entry.display_name?.trim() || entry.name;
+  return (
+    <div
+      className="fixed inset-0 z-40 flex justify-end bg-black/30"
+      onClick={onClose}
+    >
+      <aside
+        className="flex h-full w-full max-w-xl flex-col bg-surface-1 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-3 border-b border-border-default px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-sm font-semibold text-fg-default">{label}</h2>
+            <p className="truncate font-mono text-[10px] text-fg-subtle">
+              {entry.slug}
+              {entry.version ? ` · v${entry.version}` : ""}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-fg-muted hover:bg-surface-2 hover:text-fg-default focus:outline-none focus:ring-1 focus:ring-accent"
+            aria-label="Close detail"
+          >
+            <Cross2Icon className="h-3.5 w-3.5" />
+          </button>
+        </header>
+
+        <div className="flex-1 overflow-y-auto px-4 py-3">
+          <section className="space-y-2 text-xs text-fg-default">
+            {entry.description && (
+              <p className="text-fg-muted">{entry.description}</p>
+            )}
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-[11px] text-fg-muted">
+              {entry.author && (
+                <>
+                  <dt className="text-fg-subtle">Author</dt>
+                  <dd className="truncate text-fg-default">{entry.author}</dd>
+                </>
+              )}
+              <dt className="text-fg-subtle">Repo</dt>
+              <dd className="truncate font-mono text-fg-default">
+                {entry.repo_url}
+                {entry.ref ? `#${entry.ref}` : ""}
+                {entry.subpath ? ` (${entry.subpath})` : ""}
+              </dd>
+              <dt className="text-fg-subtle">Installs</dt>
+              <dd className="text-fg-default">{entry.installs}</dd>
+            </dl>
+            {entry.tags && entry.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {entry.tags.map((t) => (
+                  <span
+                    key={t}
+                    className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-fg-muted"
+                  >
+                    {t}
+                  </span>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {entry.presets && entry.presets.length > 0 && (
+            <section className="mt-4 space-y-1">
+              <h3 className="text-[10px] uppercase tracking-wide text-fg-subtle">
+                Presets ({entry.presets.length})
+              </h3>
+              <ul className="space-y-1">
+                {entry.presets.map((p) => (
+                  <li
+                    key={p.name}
+                    className="rounded border border-border-default bg-surface-2 p-2 text-xs"
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="truncate font-medium text-fg-default">
+                        {p.display_name || p.name}
+                      </span>
+                      <span className="shrink-0 font-mono text-[10px] text-fg-subtle">
+                        {p.name}
+                      </span>
+                    </div>
+                    {p.description && (
+                      <p className="mt-0.5 text-[11px] text-fg-muted">{p.description}</p>
+                    )}
+                    {p.skills && p.skills.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-fg-subtle">
+                        {p.skills.map((s) => (
+                          <span key={s} className="rounded bg-surface-1 px-1 py-0.5">
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {entry.readme && (
+            <section className="mt-4 space-y-1">
+              <h3 className="text-[10px] uppercase tracking-wide text-fg-subtle">README</h3>
+              <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded border border-border-default bg-surface-2 p-3 font-mono text-[11px] text-fg-default">
+                {entry.readme}
+              </pre>
+            </section>
+          )}
+        </div>
+
+        <footer className="flex items-center justify-between gap-2 border-t border-border-default px-4 py-3">
+          <span className="text-[10px] text-fg-subtle">
+            Installs into <code className="text-fg-default">.botz/</code> — never run automatically.
+          </span>
+          <button
+            type="button"
+            onClick={onInstall}
+            disabled={installing}
+            className="rounded bg-success/20 px-3 py-1.5 text-xs font-medium text-success hover:bg-success/30 disabled:opacity-50"
+          >
+            {installing ? "Installing…" : "Install"}
+          </button>
+        </footer>
+      </aside>
+    </div>
+  );
+}

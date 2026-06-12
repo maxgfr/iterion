@@ -7,6 +7,7 @@ import {
   ViewGridIcon,
   RocketIcon,
   PaperPlaneIcon,
+  ArchiveIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   Cross2Icon,
@@ -34,6 +35,7 @@ export type Section =
   | "runs"
   | "board"
   | "dispatcher"
+  | "marketplace"
   | "team"
   | "admin";
 
@@ -68,6 +70,7 @@ const SEGMENT_TO_SECTION: Record<string, Section> = {
   insights: "runs",
   board: "board",
   dispatcher: "dispatcher",
+  marketplace: "marketplace",
   teams: "team",
   admin: "admin",
 };
@@ -98,6 +101,9 @@ export default function NavLinks({ collapsed }: Props) {
   }
   if (info?.dispatcher_enabled) {
     links.push({ section: "dispatcher", href: "/dispatcher", label: "Dispatcher", icon: RocketIcon });
+  }
+  if (info?.marketplace_enabled) {
+    links.push({ section: "marketplace", href: "/marketplace", label: "Marketplace", icon: ArchiveIcon });
   }
   // Team entry hidden when no team is active (e.g. desktop / local mode).
   if (activeTeam) {

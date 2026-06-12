@@ -1,0 +1,100 @@
+// Hosted bot marketplace — REST client. Mirrors
+// pkg/server/marketplace_routes.go and pkg/marketplace types.
+
+import { apiRequest } from "./client";
+import type { InstallBotResult } from "./bots";
+
+const BASE = "/api/v1/marketplace";
+
+// ---------------------------------------------------------------------------
+// Types — mirror pkg/marketplace JSON tags
+// ---------------------------------------------------------------------------
+
+/** MarketplaceEntryPreset is the registry-facing slice of a bundle's
+ *  preset metadata (no prompt body / vars map — install the bot for the
+ *  full bias). */
+export interface MarketplaceEntryPreset {
+  name: string;
+  display_name?: string;
+  description?: string;
+  skills?: string[];
+}
+
+/** MarketplaceEntry is one listing in the hosted bot registry. */
+export interface MarketplaceEntry {
+  slug: string;
+  name: string;
+  display_name?: string;
+  description?: string;
+  author?: string;
+  tags?: string[];
+  repo_url: string;
+  ref?: string;
+  subpath?: string;
+  version?: string;
+  readme?: string;
+  presets?: MarketplaceEntryPreset[];
+  installs: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** SubmitMarketplaceRequest is the wire body for
+ *  POST /api/v1/marketplace/submit. */
+export interface SubmitMarketplaceRequest {
+  repo_url: string;
+  ref?: string;
+  path?: string;
+  tags?: string[];
+}
+
+/** InstallMarketplaceResponse is the wire body returned by
+ *  POST /api/v1/marketplace/bots/{slug}/install — the install result
+ *  plus the post-bump entry (so callers don't need a follow-up GET). */
+export interface InstallMarketplaceResponse {
+  install: InstallBotResult;
+  entry: MarketplaceEntry;
+}
+
+interface ListResponse {
+  bots: MarketplaceEntry[];
+}
+
+// ---------------------------------------------------------------------------
+// REST surface
+// ---------------------------------------------------------------------------
+
+/** listMarketplace returns every entry matching the optional free-text
+ *  and tag filters. Returns [] for both omitted (server applies no
+ *  filter). */
+export async function listMarketplace(q?: string, tag?: string): Promise<MarketplaceEntry[]> {
+  const params = new URLSearchParams();
+  if (q && q.trim() !== "") params.set("q", q.trim());
+  if (tag && tag.trim() !== "") params.set("tag", tag.trim());
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const r = await apiRequest<ListResponse>(`${BASE}/bots${suffix}`);
+  return r.bots ?? [];
+}
+
+/** getMarketplaceBot fetches a single entry by slug. */
+export function getMarketplaceBot(slug: string): Promise<MarketplaceEntry> {
+  return apiRequest<MarketplaceEntry>(`${BASE}/bots/${encodeURIComponent(slug)}`);
+}
+
+/** submitMarketplaceBot validates a repository and adds (or refreshes)
+ *  the registry entry it publishes. Returns the persisted entry. */
+export function submitMarketplaceBot(req: SubmitMarketplaceRequest): Promise<MarketplaceEntry> {
+  return apiRequest<MarketplaceEntry>(`${BASE}/submit`, {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** installMarketplaceBot installs the entry's bundle into the workspace
+ *  (.botz/) and returns the install result + the entry with its bumped
+ *  install counter. Local-mode only (server returns 403 in cloud mode). */
+export function installMarketplaceBot(slug: string): Promise<InstallMarketplaceResponse> {
+  return apiRequest<InstallMarketplaceResponse>(`${BASE}/bots/${encodeURIComponent(slug)}/install`, {
+    method: "POST",
+  });
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dispatcher"
 	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/marketplace"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/server"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -251,6 +252,16 @@ func RunStudio(ctx context.Context, opts StudioOptions, p *Printer) error {
 		// <store>/dispatcher/board.json) so it's actionable. Non-fatal: the
 		// studio still serves the editor / run console for everything else.
 		logger.Warn("studio: native tracker store init failed: %v — Board and Dispatcher views are disabled this session (check permissions / integrity of %s/board.json)", nsErr, filepath.Join(resolvedStoreDir, "dispatcher"))
+	}
+
+	// Open the hosted-marketplace store eagerly so the studio's
+	// Marketplace view works without extra wiring. The store lives at
+	// <store-dir>/marketplace/marketplace.json; init failure is non-fatal
+	// (the view stays hidden via MarketplaceEnabled=false).
+	if mp, mpErr := marketplace.NewJSONStore(filepath.Join(resolvedStoreDir, "marketplace")); mpErr == nil {
+		cfg.Marketplace = mp
+	} else {
+		logger.Warn("studio: marketplace store init failed: %v — Marketplace view disabled this session", mpErr)
 	}
 
 	srv := server.New(cfg, logger)

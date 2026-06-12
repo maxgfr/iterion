@@ -52,6 +52,10 @@ type serverInfoResponse struct {
 	// only offers email-dependent flows (forgot-password, "send
 	// invitation by email") when true.
 	EmailEnabled bool `json:"email_enabled"`
+	// MarketplaceEnabled is true when the hosted bot registry store is
+	// wired (Config.Marketplace). The SPA conditionally exposes the
+	// Marketplace view + nav entry.
+	MarketplaceEnabled bool `json:"marketplace_enabled"`
 }
 
 type serverLimitsBlock struct {
@@ -88,6 +92,7 @@ func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
 		NativeTrackerEnabled: s.cfg.NativeTrackerStore != nil,
 		DispatcherEnabled:    s.cfg.Dispatcher != nil,
 		EmailEnabled:         s.authSvc != nil && s.authSvc.EmailEnabled(),
+		MarketplaceEnabled:   s.marketplace != nil,
 	}
 	// Surface whether the daily spend cap is active so the SPA knows to
 	// poll for live status. DailyCap() is nil when disabled.

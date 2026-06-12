@@ -139,6 +139,9 @@ export interface ServerInfo {
   // offers email-dependent flows (forgot-password link, "send invite
   // by email") when true.
   email_enabled?: boolean;
+  // marketplace_enabled is true when the hosted bot registry is wired.
+  // The SPA exposes the Marketplace view + nav entry conditionally.
+  marketplace_enabled?: boolean;
 }
 
 // CostCapStatus mirrors runtime.CapStatus (GET /api/v1/limits/cost).

@@ -38,6 +38,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dsl/workflowfile"
 	"github.com/SocialGouv/iterion/pkg/knowledge"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/marketplace"
 	"github.com/SocialGouv/iterion/pkg/orgusage"
 	"github.com/SocialGouv/iterion/pkg/pat"
 	natsq "github.com/SocialGouv/iterion/pkg/queue/nats"
@@ -297,6 +298,14 @@ type Config struct {
 	// the always-on browser sink publishes EventAlert to each run's broker
 	// so the SPA can toast. nil disables alerting entirely.
 	Alerts *runview.AlertSettings
+
+	// Marketplace, when non-nil, enables the hosted bot registry under
+	// /api/v1/marketplace/* (browse + submit + install). The studio
+	// surfaces the Marketplace view only when this is wired; nil hides
+	// the feature entirely. Self-host / local mode typically passes the
+	// JSON-file store (marketplace.NewJSONStore); cloud mode passes the
+	// Mongo store (marketplace.NewMongoStore).
+	Marketplace marketplace.Store
 }
 
 // ReadinessCheck is the contract /readyz invokes on each external
@@ -398,6 +407,12 @@ type Server struct {
 	// cfg.NativeTrackerStore is non-nil (handler is only mounted when
 	// the board exists).
 	boardMCPTokens *BoardMCPTokenRegistry
+
+	// marketplace is the hosted bot registry store. Mirrors
+	// Config.Marketplace; nil disables every /api/v1/marketplace/*
+	// endpoint (and the studio's Marketplace view via
+	// MarketplaceEnabled).
+	marketplace marketplace.Store
 }
 
 // BoardMCPTokens returns the per-run token registry the runtime uses
@@ -463,6 +478,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		httpClient:        &http.Client{Timeout: 15 * time.Second},
 		browserSessions:   cfg.BrowserRegistry,
 		statsCache:        newRunStatsCache(),
+		marketplace:       cfg.Marketplace,
 	}
 	if cfg.NativeTrackerStore != nil {
 		s.boardMCPTokens = NewBoardMCPTokenRegistry()
@@ -731,6 +747,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/bots/{name}", s.handleBotsGet)
 	s.mux.HandleFunc("PUT /api/v1/bots/{name}", s.handleBotsPut)
 	s.mux.HandleFunc("PUT /api/v1/bots/{name}/overlay", s.handleBotOverlay)
+
+	// Hosted marketplace — curated registry of bot bundles published by
+	// repos. Each endpoint short-circuits to 404 when s.marketplace is
+	// nil so wiring is single-config (the studio gates its view on
+	// MarketplaceEnabled in /api/server/info).
+	s.mux.HandleFunc("GET /api/v1/marketplace/bots", s.handleMarketplaceList)
+	s.mux.HandleFunc("POST /api/v1/marketplace/submit", s.handleMarketplaceSubmit)
+	s.mux.HandleFunc("GET /api/v1/marketplace/bots/{slug}", s.handleMarketplaceGet)
+	s.mux.HandleFunc("POST /api/v1/marketplace/bots/{slug}/install", s.handleMarketplaceInstall)
 
 	// Health endpoints — liveness (always 200 if the mux is alive)
 	// and readiness (cloud-mode dependency pings come via T-26 when
