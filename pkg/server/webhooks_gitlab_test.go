@@ -288,6 +288,63 @@ func TestGitLabNoteHook_ConverseFallsBackWhenBotMissing(t *testing.T) {
 	}
 }
 
+// TestGitLabNoteHook_ReplyInThreadRoutesToConverse pins the reply-in-thread
+// trigger: a plain reply (NO /revi command) in a thread Revi is part of
+// launches revi-converse with the reply body as the question. The real gate
+// confirms "Revi is in this thread" via the GitLab discussions API; here the
+// seam reports replyInThread=true so the handler routing is exercised.
+func TestGitLabNoteHook_ReplyInThreadRoutesToConverse(t *testing.T) {
+	s := newWebhookTestServer(t)
+	s.cfg.Bots.Paths = []string{botsDirAbs(t)}
+	s.webhookNoteGate = func(context.Context, webhooks.Config, gitlab.ParsedNote, string) (bool, bool, string, error) {
+		return true, true, "reply", nil // authorized + a reply in a Revi thread
+	}
+	var calls int
+	var gotBot string
+	var gotVars map[string]string
+	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, _, _ string, _, _ map[string]string) (string, error) {
+		calls++
+		gotBot, gotVars = botID, vars
+		return "run-reply-1", nil
+	}
+	cfg := glConfig()
+	cfg.BotIDs = []string{"review-pr", "revi-converse"}
+	body := strings.Replace(glNoteRevi, `"note": "/revi"`, `"note": "Can you expand on the SSRF fix?"`, 1)
+	w := httptest.NewRecorder()
+	s.handleGitLabWebhook(w, glNoteReq(gitlabCtx(cfg), body))
+	if w.Code != http.StatusAccepted || calls != 1 {
+		t.Fatalf("reply route: code=%d calls=%d body=%s", w.Code, calls, w.Body.String())
+	}
+	if gotBot != "revi-converse" {
+		t.Fatalf("a reply in a Revi thread should route to revi-converse, got %q", gotBot)
+	}
+	if gotVars["converse_question"] != "Can you expand on the SSRF fix?" {
+		t.Fatalf("converse_question should be the reply body: %q", gotVars["converse_question"])
+	}
+	if _, present := gotVars["re_review"]; present {
+		t.Fatalf("re_review must be dropped on the converse path: %v", gotVars)
+	}
+}
+
+// TestGitLabNoteHook_PlainCommentWithoutConverseBotFiltered pins that a
+// non-/revi note on a webhook WITHOUT the converse bot enabled triggers
+// nothing (the reply-in-thread feature is off → early-filtered, no gate
+// call, no launch).
+func TestGitLabNoteHook_PlainCommentWithoutConverseBotFiltered(t *testing.T) {
+	s := newWebhookTestServer(t)
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, map[string]string, map[string]string) (string, error) {
+		t.Fatal("a plain comment without the converse bot must not launch")
+		return "", nil
+	}
+	cfg := glConfig() // BotIDs = ["review-pr"] only → converse disabled
+	body := strings.Replace(glNoteRevi, `"note": "/revi"`, `"note": "just a normal comment"`, 1)
+	w := httptest.NewRecorder()
+	s.handleGitLabWebhook(w, glNoteReq(gitlabCtx(cfg), body))
+	if w.Code != http.StatusOK {
+		t.Fatalf("plain comment should be filtered (200): code=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
 // TestGitLabNoteHook_QuotedMidTextDoesNotTrigger pins the anti-loop
 // guardrail: "please run /revi" in the middle of a comment must NOT
 // launch a review, otherwise reviewers casually quoting the command

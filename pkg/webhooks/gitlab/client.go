@@ -102,3 +102,37 @@ func (a API) MemberAccessLevel(ctx context.Context, projectID, userID int64) (le
 		return 0, false, fmt.Errorf("gitlab: member check: HTTP %d", code)
 	}
 }
+
+// DiscussionHasBotNote reports whether the MR discussion already contains a
+// note authored by botUserID — i.e. it is a thread Revi started or replied
+// in, so a plain reply in it is "talking to Revi". Drives the reply-in-thread
+// trigger (a conversational answer without an explicit /revi command).
+func (a API) DiscussionHasBotNote(ctx context.Context, projectID, mrIID int64, discussionID string, botUserID int64) (bool, error) {
+	if discussionID == "" || botUserID == 0 {
+		return false, nil
+	}
+	var d struct {
+		Notes []struct {
+			Author struct {
+				ID int64 `json:"id"`
+			} `json:"author"`
+		} `json:"notes"`
+	}
+	code, err := a.get(ctx, fmt.Sprintf("/projects/%d/merge_requests/%d/discussions/%s", projectID, mrIID, discussionID), &d)
+	if err != nil {
+		return false, err
+	}
+	switch code {
+	case http.StatusOK:
+		for _, n := range d.Notes {
+			if n.Author.ID == botUserID {
+				return true, nil
+			}
+		}
+		return false, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		return false, fmt.Errorf("gitlab: get discussion: HTTP %d", code)
+	}
+}

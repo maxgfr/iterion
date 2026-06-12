@@ -35,11 +35,13 @@ func newWebhookTestServer(t *testing.T) *Server {
 	}
 	s.sealer = sealer
 	// Allow-all conversational gate: the real gate needs a forge token
-	// + live GitLab API (loop-guard, role authz) — exercised by the
-	// pkg/webhooks/gitlab unit tests; handler tests pin the flow around
-	// it. Tests that target the gate itself override this seam.
-	s.webhookNoteGate = func(context.Context, webhooks.Config, gitlab.ParsedNote, string) (bool, string, error) {
-		return true, "test-gate", nil
+	// + live GitLab API (loop-guard, reply-in-thread classification, role
+	// authz) — exercised by the pkg/webhooks/gitlab unit tests; handler
+	// tests pin the flow around it. The default stub authorizes a /revi
+	// command (replyInThread=false); tests targeting the reply-in-thread
+	// route override this seam to return replyInThread=true.
+	s.webhookNoteGate = func(context.Context, webhooks.Config, gitlab.ParsedNote, string) (bool, bool, string, error) {
+		return true, false, "test-gate", nil
 	}
 	return s
 }

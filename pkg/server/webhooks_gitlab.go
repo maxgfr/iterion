@@ -136,10 +136,14 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, r 
 		filtered("out of scope (not an open-MR note / event / project)")
 		return
 	}
-	// Trigger gate: an explicit /revi command. Reply-in-thread detection is a
-	// follow-up (needs bot-thread tracking).
+	// Trigger: a `/revi` command, OR — when the converse bot is enabled — a
+	// plain reply in a thread Revi is part of (so "just replying" to Revi's
+	// comment works, no command). The reply-in-thread check needs the bot
+	// identity, so it runs in the gate (which resolves the forge token). A
+	// non-command note with the converse bot disabled can't trigger anything.
 	cmd, cmdArgs := p.Command()
-	if cmd != "revi" {
+	converseEnabled := s.canRouteToConverseBot(cfg)
+	if cmd != "revi" && !converseEnabled {
 		filtered("no /revi trigger")
 		return
 	}
@@ -147,47 +151,53 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, r 
 	if !ok {
 		return
 	}
-	// Gate the replier (forge-token resolution → loop-guard → allowlist
-	// OR role-gate) — externalities live behind a seam so handler tests
-	// don't need a live GitLab. Authorisation is identical whether we
-	// end up routing to review-pr (re-review) or revi-converse (in-thread
-	// answer), so we run it once on the review bot's identity (forge_token
-	// binding is the same name across both bots).
+	// Gate the replier (forge-token resolution → loop-guard → reply-in-thread
+	// classification → allowlist OR role-gate) — externalities live behind a
+	// seam so handler tests don't need a live GitLab. Authorisation is
+	// identical whether we route to review-pr (re-review) or revi-converse
+	// (in-thread answer); the forge_token binding name is shared across bots.
 	gate := s.webhookNoteGate
 	if gate == nil {
 		gate = s.realWebhookNoteGate
 	}
-	ok, reason, aerr := gate(ctx, cfg, p, botID)
+	authorized, replyInThread, reason, aerr := gate(ctx, cfg, p, botID)
 	if aerr != nil {
 		s.recordNoteDelivery(ctx, cfg, webhooks.StatusLaunchError, payloadHash, srcIP, p, "authz check: "+aerr.Error())
 		httpError(w, http.StatusBadGateway, "authorization check failed")
 		return
 	}
-	if !ok {
+	if !authorized {
 		filtered(reason)
 		return
 	}
+	triggerLabel := "/" + cmd
+	if replyInThread {
+		triggerLabel = "reply"
+	}
 	if s.logger != nil {
-		s.logger.Debug("webhooks: gitlab note %s!%d /%s by %s authorized (%s)", p.ProjectPath, p.MRIID, cmd, p.AuthorUsername, reason)
+		s.logger.Debug("webhooks: gitlab note %s!%d (%s) by %s authorized (%s)", p.ProjectPath, p.MRIID, triggerLabel, p.AuthorUsername, reason)
 	}
 
-	// Route: `/revi <question>` with non-empty args → revi-converse
-	// (in-thread answer). Bare `/revi` (no args) keeps today's review-pr
-	// re-review behaviour. The converse bot must be permitted by the
-	// webhook scope AND resolvable on disk; otherwise we fall back to
-	// the re-review path with the args ignored (matching pre-A5
-	// behaviour and TestGitLabNoteHook_FocusArgTolerated).
+	// Route to the converse bot when there's a question to answer: `/revi
+	// <question>`, or any reply in a Revi thread (the reply itself is the
+	// question). Bare `/revi` (no args) stays a review-pr re-review. A reply
+	// always reaches revi-converse — replyInThread implies the bot is enabled
+	// (the early gate above). `/revi <question>` with the converse bot absent
+	// falls back to re-review (matching pre-A5 behaviour).
 	vars := s.buildGitLabNoteVars(p, cmd, cmdArgs, cfg.LaunchVars)
-	if cmdArgs != "" && s.canRouteToConverseBot(cfg) {
+	question := cmdArgs
+	if replyInThread {
+		question = strings.TrimSpace(p.NoteBody)
+	}
+	if question != "" && converseEnabled {
 		botID = defaultWebhookBotReviConverse
-		// Drop the re_review flag for the converse path — it's a
-		// question, not a fresh review — and pass the question
-		// explicitly. Other conversation vars (discussion_id,
-		// trigger_note, replier) are already in vars.
+		// Drop the re_review flag for the converse path — it's a question,
+		// not a fresh review — and pass the question explicitly. Other
+		// conversation vars (discussion_id, trigger_note, replier) are in vars.
 		delete(vars, "re_review")
-		vars["converse_question"] = cmdArgs
+		vars["converse_question"] = question
 		if s.logger != nil {
-			s.logger.Debug("webhooks: gitlab note %s!%d /revi <question> routed to %s", p.ProjectPath, p.MRIID, botID)
+			s.logger.Debug("webhooks: gitlab note %s!%d routed to %s (%s)", p.ProjectPath, p.MRIID, botID, triggerLabel)
 		}
 	}
 
@@ -251,30 +261,49 @@ func (s *Server) recordNoteDelivery(ctx context.Context, cfg webhooks.Config, st
 // authorize the replier via allowlist OR GitLab role-gate. Returns
 // ok=false with a human filter reason for the benign refusals; err
 // only for an authz infrastructure failure (502 upstream).
-func (s *Server) realWebhookNoteGate(ctx context.Context, cfg webhooks.Config, p gitlab.ParsedNote, botID string) (bool, string, error) {
+func (s *Server) realWebhookNoteGate(ctx context.Context, cfg webhooks.Config, p gitlab.ParsedNote, botID string) (authorized, replyInThread bool, reason string, err error) {
 	// Resolve the bot's forge token (honouring per-webhook secret overrides):
 	// it authenticates the auth checks AND is the identity the bot posts as.
 	token, terr := s.resolveForgeToken(ctx, cfg, botID)
 	if terr != nil || token == "" {
-		return false, "no forge token resolved (configure a forge_token binding)", nil
+		return false, false, "no forge token resolved (configure a forge_token binding)", nil
 	}
 	api := gitlab.API{HTTP: s.httpClient, BaseURL: "https://" + hostFromURL(p.MRURL), Token: token}
+	bot, berr := api.CurrentUser(ctx)
 	// Loop-guard: never act on the bot's own notes (else its reply re-fires).
-	if bot, err := api.CurrentUser(ctx); err == nil && bot.ID == p.AuthorID {
-		return false, "self note (loop-guard)", nil
+	if berr == nil && bot.ID == p.AuthorID {
+		return false, false, "self note (loop-guard)", nil
 	}
-	// Authorization: allowlist OR role-gate.
+	// A note with no /revi command is a trigger ONLY when it is a reply in a
+	// thread Revi is part of (so "just replying" to Revi's comment works).
+	// We need a confirmed bot identity to classify the thread; without it we
+	// can't tell a Revi thread from any other, so we don't trigger.
+	if cmd, _ := p.Command(); cmd != "revi" {
+		if berr != nil {
+			return false, false, "bot identity unresolved; cannot classify reply", nil
+		}
+		inThread, derr := api.DiscussionHasBotNote(ctx, p.ProjectID, p.MRIID, p.DiscussionID, bot.ID)
+		if derr != nil {
+			return false, false, "", derr
+		}
+		if !inThread {
+			return false, false, "not a /revi command or a reply in a Revi thread", nil
+		}
+		replyInThread = true
+	}
+	// Trigger confirmed (/revi command or reply-in-thread) → authorize the
+	// replier: allowlist OR role-gate.
 	ok, reason, aerr := gitlab.AuthorizeReplier(ctx, api, gitlab.ReplierAuth{
 		AuthorID: p.AuthorID, AuthorUsername: p.AuthorUsername, ProjectID: p.ProjectID,
 		Allowlist: cfg.AuthorizedRepliers, MinRole: cfg.MinReplierRole,
 	})
 	if aerr != nil {
-		return false, "", aerr
+		return false, replyInThread, "", aerr
 	}
 	if !ok {
-		return false, "replier not authorized: " + p.AuthorUsername, nil
+		return false, replyInThread, "replier not authorized: " + p.AuthorUsername, nil
 	}
-	return true, reason, nil
+	return true, replyInThread, reason, nil
 }
 
 // resolveForgeToken resolves the bot's forge_token for the webhook's tenant,
