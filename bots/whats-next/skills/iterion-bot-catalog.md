@@ -190,6 +190,7 @@ dispatcher routes on it), never the persona.
 
 | Persona | `assignee` (technical name) |
 |---|---|
+| Bmady | `bmady` |
 | Billy | `branch-improve-loop` |
 | Devy | `devbox-setup` |
 | Doki | `docs-refresh` |
@@ -203,6 +204,31 @@ dispatcher routes on it), never the persona.
 | Willy | `whole-improve-loop` |
 
 ## Bot reference
+
+### `bmady` — Bmady
+
+BMAD-METHOD-inspired agile delivery bot. Runs a structured
+multi-persona pipeline — Analyst → PM → Architect → Dev → QA —
+with a human collaboration gate between every phase. Each gate is
+a different kind of decision (free-text elicitation, an
+advanced-elicitation option menu, a document approve/reject, a
+story multi-select with priority + WIP, a ship/changes/hold
+sign-off) so the operator stays in the driver's seat from brief to
+commit.
+
+Vehicle for iterion's human-interaction surface: one run exercises
+every studio form widget (free-text, radio, select, checkbox
+multi-select, numeric, approve/reject).
+
+- **Use when**:
+  Use when you want a feature delivered the BMAD way — explicit
+  human-approved planning artifacts (analysis, PRD, architecture)
+  before any code is written, then an implement → QA → sign-off loop
+  you steer at each step. Pick this over feature_dev when you want to
+  collaborate on the plan rather than hand off an autonomous run.
+- **Triggers**: bmad, agile, plan-then-build, prd, architecture
+- **Vars**: `brief` (string, required), `workspace_dir` (string)
+- **Path**: `bots/bmady/main.bot`
 
 ### `branch-improve-loop` — Billy
 
