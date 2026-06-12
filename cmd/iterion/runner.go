@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -191,6 +192,14 @@ func runRunner(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("runner: ensure org_usage schema: %w", err)
 	}
 
+	// Bots: where bot-qualified runs resolve their bundle so skills/
+	// mirror into the workspace — same env contract as the server
+	// (the official image sets ITERION_BOTS_PATH=/opt/iterion/bots).
+	var botsPaths []string
+	if bp := os.Getenv("ITERION_BOTS_PATH"); bp != "" {
+		botsPaths = filepath.SplitList(bp)
+	}
+
 	// 5. Runner loop.
 	r, err := runner.New(rootCtx, runner.Config{
 		NATS:              natsConn,
@@ -204,6 +213,7 @@ func runRunner(cmd *cobra.Command, _ []string) error {
 		Sealer:            sealer,
 		MemoryStore:       memStore,
 		OrgUsage:          orgUsageCounter,
+		BotsPaths:         botsPaths,
 	})
 	if err != nil {
 		return fmt.Errorf("runner: build: %w", err)

@@ -31,6 +31,8 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/backend/cost"
 	"github.com/SocialGouv/iterion/pkg/backend/model"
+	"github.com/SocialGouv/iterion/pkg/botregistry"
+	"github.com/SocialGouv/iterion/pkg/bundle"
 	"github.com/SocialGouv/iterion/pkg/cloud/metrics"
 	"github.com/SocialGouv/iterion/pkg/dsl/ast"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
@@ -93,6 +95,14 @@ type Config struct {
 	// execution attempt (the billing source of truth — Prometheus
 	// counters above stay tenant-unlabelled). nil → no org metering.
 	OrgUsage orgusage.Counter
+
+	// BotsPaths is where bot bundles are resolved from (the image ships
+	// the catalog at /opt/iterion/bots via ITERION_BOTS_PATH). A run
+	// carrying a BotID gets its bundle wired into the engine so the
+	// bundle's skills/ are mirrored into <workspace>/.claude/skills —
+	// without it, system prompts referencing `.claude/skills/<x>.md`
+	// point at nothing in cloud runs. Empty → no bundle resolution.
+	BotsPaths []string
 }
 
 // Runner is the long-running consumer loop.
@@ -707,6 +717,22 @@ func (r *Runner) executeRun(ctx context.Context, msg *queue.RunMessage) error {
 		runtime.WithLogger(r.cfg.Logger),
 		runtime.WithWorkflowHash(msg.WorkflowHash),
 		runtime.WithWorkDir(workDir),
+	}
+	// Bundle skills: a bot-qualified run mirrors its bundle's skills/ into
+	// <workspace>/.claude/skills exactly like a local `iterion run
+	// bots/<bot>` does (the engine's mirrorBundleSkills reads the bundle).
+	// Best-effort: an unresolvable bot id or a loose .bot just skips the
+	// mirror with a warning — the run proceeds without skills.
+	if msg.BotID != "" && len(r.cfg.BotsPaths) > 0 {
+		if mainFile, rerr := botregistry.ResolveBotPath(msg.BotID, r.cfg.BotsPaths); rerr == nil {
+			if b, berr := bundle.OpenDir(filepath.Dir(mainFile)); berr == nil {
+				engineOpts = append(engineOpts, runtime.WithBundle(b))
+			} else {
+				r.cfg.Logger.Warn("runner: bot %q bundle open: %v (skills not mirrored)", msg.BotID, berr)
+			}
+		} else {
+			r.cfg.Logger.Warn("runner: bot %q not resolvable in %v (skills not mirrored)", msg.BotID, r.cfg.BotsPaths)
+		}
 	}
 	if msg.Resume != nil && msg.Resume.Force {
 		// Force-resume must be applied at engine construction so the
