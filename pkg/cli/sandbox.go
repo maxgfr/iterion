@@ -2,11 +2,13 @@ package cli
 
 import (
 	"context"
+	"debug/elf"
 	"fmt"
 	"os"
 	"runtime"
 	"strings"
 
+	"github.com/SocialGouv/iterion/pkg/internal/proc"
 	"github.com/SocialGouv/iterion/pkg/sandbox"
 	"github.com/SocialGouv/iterion/pkg/sandbox/registry"
 )
@@ -85,14 +87,23 @@ func runSandboxDoctorBasic(p *Printer) error {
 		defaultMode = "<unset>"
 	}
 
+	hostBin := proc.LocateIterionBinary()
+	binLink := detectBinaryLinkage(hostBin)
+	binPath := hostBin
+	if binPath == "" {
+		binPath = "<none>"
+	}
+
 	report := map[string]any{
-		"host":              string(factory.Host()),
-		"os":                runtime.GOOS,
-		"arch":              runtime.GOARCH,
-		"container_runtime": containerRuntime,
-		"sandbox_default":   defaultMode,
-		"selected_driver":   driverName,
-		"available_drivers": factory.Available(),
+		"host":                string(factory.Host()),
+		"os":                  runtime.GOOS,
+		"arch":                runtime.GOARCH,
+		"container_runtime":   containerRuntime,
+		"sandbox_default":     defaultMode,
+		"selected_driver":     driverName,
+		"available_drivers":   factory.Available(),
+		"iterion_binary":      binPath,
+		"iterion_binary_link": binLink.String(),
 		"capabilities": map[string]bool{
 			"image":          caps.SupportsImage,
 			"build":          caps.SupportsBuild,
@@ -129,6 +140,11 @@ func runSandboxDoctorBasic(p *Printer) error {
 	fmt.Fprintf(p.W, "    network policy : %v\n", caps.SupportsNetworkPolicy)
 	fmt.Fprintf(p.W, "    post create    : %v\n", caps.SupportsPostCreate)
 	fmt.Fprintf(p.W, "    remote user    : %v\n", caps.SupportsRemoteUser)
+	fmt.Fprintf(p.W, "  iterion binary      : %s (%s)\n", binPath, binLink)
+	if w := staticBinaryWarning(binPath, binLink); w != "" {
+		fmt.Fprintln(p.W)
+		fmt.Fprint(p.W, w)
+	}
 	fmt.Fprintln(p.W)
 	if driverName == "noop" {
 		fmt.Fprintln(p.W, "Note: the noop driver is the safe fallback. Workflows that declare")
@@ -143,4 +159,80 @@ func runSandboxDoctorBasic(p *Printer) error {
 // and the runtime engine share a single source of truth.
 func defaultDriverRegistry() map[string]sandbox.DriverConstructor {
 	return registry.Default()
+}
+
+// binaryLinkage classifies how the host iterion binary is linked. It
+// governs whether the binary can exec inside a sandbox container, where
+// it is bind-mounted at /usr/local/bin/iterion (see
+// runtime.addClawBinaryMount): a dynamically-linked build resolves its
+// loader (e.g. the nix/glibc ld-linux) from the *host* filesystem, which
+// is absent in the container, so the in-container `iterion __claw-runner`
+// dies with `exec: ... no such file or directory`.
+type binaryLinkage int
+
+const (
+	// linkUnknown — the binary could not be probed (empty path, unreadable,
+	// or not an ELF object such as a macOS Mach-O). No warning is emitted:
+	// the dynamic-loader failure mode is Linux/ELF-specific.
+	linkUnknown binaryLinkage = iota
+	// linkStatic — no PT_INTERP program header; the binary carries no
+	// external loader dependency and execs cleanly inside the container.
+	linkStatic
+	// linkDynamic — a PT_INTERP program header names a host dynamic loader;
+	// the binary will fail to exec inside a sandbox container.
+	linkDynamic
+)
+
+func (l binaryLinkage) String() string {
+	switch l {
+	case linkStatic:
+		return "static"
+	case linkDynamic:
+		return "dynamic"
+	default:
+		return "unknown"
+	}
+}
+
+// detectBinaryLinkage reports whether the ELF binary at path is
+// statically or dynamically linked. The signal is the PT_INTERP program
+// header — present iff the binary defers to an external dynamic loader,
+// which is exactly what determines whether it can exec inside a sandbox
+// container. A non-ELF file (macOS Mach-O), an unreadable path, or an
+// empty path yields linkUnknown so the doctor stays silent off-Linux
+// rather than emitting a false-positive warning.
+func detectBinaryLinkage(path string) binaryLinkage {
+	if path == "" {
+		return linkUnknown
+	}
+	f, err := elf.Open(path)
+	if err != nil {
+		return linkUnknown
+	}
+	defer f.Close()
+	for _, prog := range f.Progs {
+		if prog.Type == elf.PT_INTERP {
+			return linkDynamic
+		}
+	}
+	return linkStatic
+}
+
+// staticBinaryWarning returns an operator-facing WARNING when the host
+// iterion binary is dynamically linked, naming the in-container failure
+// mode and the fix. It returns "" for static or unknown linkage so the
+// message fires only when the failure is positively detected.
+func staticBinaryWarning(path string, link binaryLinkage) string {
+	if link != linkDynamic {
+		return ""
+	}
+	return fmt.Sprintf(`  ⚠ WARNING: the host iterion binary is dynamically linked.
+    %s is bind-mounted into sandbox containers at /usr/local/bin/iterion,
+    but its dynamic loader (e.g. the nix/glibc ld-linux) is absent there —
+    the in-container `+"`iterion __claw-runner`"+` will fail with
+    `+"`exec: /usr/local/bin/iterion: no such file or directory`"+`.
+    Fix: rebuild static, then reinstall —
+      CGO_ENABLED=0 go build -o ./iterion ./cmd/iterion
+    (or `+"`devbox run -- task build`"+`, which pins CGO_ENABLED=0).
+`, path)
 }

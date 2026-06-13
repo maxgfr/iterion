@@ -85,6 +85,48 @@ func TestCrossHostDoctorValidation(t *testing.T) {
 	})
 }
 
+func TestStaticBinaryWarning(t *testing.T) {
+	t.Run("linkage String", func(t *testing.T) {
+		cases := map[binaryLinkage]string{
+			linkStatic:  "static",
+			linkDynamic: "dynamic",
+			linkUnknown: "unknown",
+		}
+		for link, want := range cases {
+			if got := link.String(); got != want {
+				t.Errorf("binaryLinkage(%d).String() = %q, want %q", link, got, want)
+			}
+		}
+	})
+
+	t.Run("warning only on dynamic", func(t *testing.T) {
+		if w := staticBinaryWarning("/usr/bin/iterion", linkStatic); w != "" {
+			t.Errorf("staticBinaryWarning(static) = %q, want empty", w)
+		}
+		if w := staticBinaryWarning("/usr/bin/iterion", linkUnknown); w != "" {
+			t.Errorf("staticBinaryWarning(unknown) = %q, want empty", w)
+		}
+		w := staticBinaryWarning("/usr/bin/iterion", linkDynamic)
+		if w == "" {
+			t.Fatal("staticBinaryWarning(dynamic) = empty, want a warning")
+		}
+		for _, want := range []string{"/usr/bin/iterion", "CGO_ENABLED=0", "__claw-runner", "WARNING"} {
+			if !strings.Contains(w, want) {
+				t.Errorf("staticBinaryWarning(dynamic) missing %q in:\n%s", want, w)
+			}
+		}
+	})
+
+	t.Run("detectBinaryLinkage unprobeable", func(t *testing.T) {
+		if got := detectBinaryLinkage(""); got != linkUnknown {
+			t.Errorf("detectBinaryLinkage(\"\") = %v, want linkUnknown", got)
+		}
+		if got := detectBinaryLinkage("/nonexistent/iterion/binary"); got != linkUnknown {
+			t.Errorf("detectBinaryLinkage(nonexistent) = %v, want linkUnknown", got)
+		}
+	})
+}
+
 func TestRunNetworkStrictChecks(t *testing.T) {
 	t.Run("good preset + rules", func(t *testing.T) {
 		r := &SandboxStrictReport{}
