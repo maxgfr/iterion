@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"iter"
-	"os"
 	"sync"
 )
 
@@ -283,26 +282,19 @@ func (s *Session) setupMcpConfig(args *[]string) (func(), error) {
 		return nil, fmt.Errorf("claude: mcp config: %w", err)
 	}
 
-	tmpFile, err := os.CreateTemp("", "claude-mcp-*.json")
-	if err != nil {
-		return nil, fmt.Errorf("claude: mcp temp file: %w", err)
-	}
-	if _, err := tmpFile.Write(configJSON); err != nil {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name())
-		return nil, err
-	}
-	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpFile.Name())
-		return nil, fmt.Errorf("claude: mcp temp file close: %w", err)
-	}
+	// Pass the MCP config as an inline JSON STRING, not a temp file.
+	// claude's `--mcp-config` accepts JSON strings directly (claude
+	// --help: "Load MCP servers from JSON files or strings"). A host
+	// /tmp file (os.CreateTemp) is invisible to a sandboxed claude run
+	// via `docker exec` — the container has its own /tmp — which silently
+	// broke every sandboxed MCP server (ask_user, and board → C082:
+	// "MCP config file not found"). Inlining works for both host and
+	// sandbox with no file to mount, and needs no cleanup. The JSON is a
+	// single argv element (no shell escaping); the config is small (a
+	// handful of servers), well within ARG_MAX.
+	*args = append(*args, "--mcp-config", string(configJSON))
 
-	*args = append(*args, "--mcp-config", tmpFile.Name())
-
-	cleanup := func() {
-		_ = os.Remove(tmpFile.Name())
-	}
-	return cleanup, nil
+	return func() {}, nil
 }
 
 // sendInitialize sends the initialize control request with hook

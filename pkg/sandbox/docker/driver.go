@@ -322,7 +322,12 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 		// services (rare, but legal — e.g. an inner devbox cache) to
 		// bypass the proxy. The container's own services on its loop-
 		// back interface should not be tunneled through the host.
-		args = append(args, "--env", "NO_PROXY=localhost,127.0.0.1")
+		// host.docker.internal is the host gateway where iterion's own
+		// per-run services live (the board MCP listener — C082); calls to
+		// it MUST go direct, not through HTTP_PROXY (the egress proxy runs
+		// on the host and cannot itself resolve host.docker.internal, so
+		// proxying a board call would fail the MCP connect).
+		args = append(args, "--env", "NO_PROXY=localhost,127.0.0.1,host.docker.internal")
 		args = append(args, "--add-host", "host.docker.internal:host-gateway")
 	}
 
