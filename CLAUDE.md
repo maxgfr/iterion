@@ -556,6 +556,21 @@ reviewer_claude, and every other loop bot). When a review loop
 oscillates, first verify **both** reviewers are diffing the same,
 correct (uncommitted) artifact.
 
+There is a second, subtler way to judge the wrong artifact: **`git diff
+HEAD` omits *untracked* files.** A feature that ADDS files (the common
+case) leaves them `??` untracked unless the implementer `git add`s them,
+so the reviewers' `git diff HEAD --name-only` shows the *modified* files
+referencing new symbols but not the new files that define them — and a
+diligent reviewer correctly rejects the "incomplete committable diff"
+**forever** (observed in a feature-dev dogfood: a 26-line feature looped
+to `review_loop(15)` because its new helper + test were untracked — see
+[docs/bot-runs/feature-dev.md](docs/bot-runs/feature-dev.md)). So the
+review anchor must make untracked files visible before diffing — `git
+add -N .` (intent-to-add) then `git diff HEAD`, or have `act`/`fix_*`
+`git add` new files as they create them. When a review loop won't
+converge on a feature that adds files, check the worktree's `git status`
+for `??` entries first.
+
 ## Catalog bots are repo-agnostic
 
 Every bot shipped in `bots/` (the catalog `iterion bots list`
