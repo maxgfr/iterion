@@ -250,6 +250,22 @@ func collectBlocks(blocks map[int]*blockState) (string, []toolUseBlock, string, 
 
 // buildRequest constructs a CreateMessageRequest from GenerationOptions and messages.
 // extraTools and toolChoice are appended/set on top of opts.Tools.
+// wireModelID strips an optional "provider/" routing prefix from a model
+// spec, returning the bare model ID the wire API expects. iterion selects
+// the provider via Registry.Resolve(spec); the resolved client then needs
+// only the bare model on the request — claw_backend and subagent already
+// pass bare, but the direct-generation callers (executeHumanLLM,
+// ExecuteReviewCompanion) pass the full spec. Without this, "anthropic/
+// claude-sonnet-4-6" reaches the Anthropic API verbatim and 404s (the
+// openai/bedrock claw providers strip it incidentally; anthropic does not).
+// A bare "claude-opus-4-8" (no slash) is returned unchanged.
+func wireModelID(spec string) string {
+	if i := strings.Index(spec, "/"); i >= 0 {
+		return spec[i+1:]
+	}
+	return spec
+}
+
 func buildRequest(opts GenerationOptions, messages []api.Message, extraTools []api.Tool, toolChoice *api.ToolChoice) (api.CreateMessageRequest, error) {
 	maxTokens := opts.MaxTokens
 	if maxTokens <= 0 {
@@ -257,7 +273,7 @@ func buildRequest(opts GenerationOptions, messages []api.Message, extraTools []a
 	}
 
 	req := api.CreateMessageRequest{
-		Model:       opts.Model,
+		Model:       wireModelID(opts.Model),
 		MaxTokens:   maxTokens,
 		Messages:    messages,
 		Temperature: opts.Temperature,
@@ -276,6 +292,17 @@ func buildRequest(opts GenerationOptions, messages []api.Message, extraTools []a
 		if re, ok := opts.ProviderOptions["reasoning_effort"].(string); ok && re != "" {
 			req.ReasoningEffort = re
 		}
+	}
+
+	// Anthropic rejects extended thinking when tool_choice forces a specific
+	// tool ("Thinking may not be enabled when tool_choice forces tool use").
+	// Structured output (GenerateObjectDirect) always forces the synthetic
+	// tool, so on a model with adaptive thinking on by default (e.g.
+	// claude-sonnet-4-6) the call 400s. Force thinking off for forced-tool
+	// requests. Harmless for OpenAI (the field is ignored by the openai
+	// provider's request conversion).
+	if toolChoice != nil && (toolChoice.Type == "tool" || toolChoice.Type == "any") {
+		req.Thinking = &api.ThinkingConfig{Type: "off"}
 	}
 
 	for _, gt := range opts.Tools {
