@@ -141,6 +141,11 @@ func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNo
 	// capture exit codes or compose intermediate shell values.
 	expandedCommand := expandBracedEnv(node.Command)
 
+	// Resolve {{run.id}} first — resolveCommandTemplate only knows the
+	// input/vars/secrets namespaces, so a direct run ref would survive
+	// into the command verbatim.
+	expandedCommand = resolveRunRefs(expandedCommand, e.currentRunID, node.CommandRefs, shellEscapeValue)
+
 	// Resolve template references in the (env-expanded) command.
 	resolved := resolveCommandTemplate(expandedCommand, node.CommandRefs, input, e.vars, e.secretGuard)
 
@@ -295,6 +300,8 @@ func (e *ClawExecutor) executeToolNodeScript(ctx context.Context, node *ir.ToolN
 	// parsers when the value contains embedded apostrophes (e.g. an
 	// agent output blob with `yarn workspaces foreach ... '\''…'\''`).
 	expanded := expandBracedEnv(node.Script)
+	// {{run.id}} first — resolveScriptTemplate only knows input/vars/secrets.
+	expanded = resolveRunRefs(expanded, e.currentRunID, node.ScriptRefs, jsonLiteralValue)
 	resolved := resolveScriptTemplate(expanded, node.ScriptRefs, input, e.vars, e.secretGuard)
 
 	interp, ext := scriptInterpreter(node.Language)
@@ -512,6 +519,38 @@ func resolveScriptTemplate(script string, refs []*ir.Ref, input map[string]inter
 	// language's null literal (rendered as JSON null = "null") so the
 	// script can still run and handle the missing input itself.
 	return resolveTemplateWith(script, refs, input, vars, guard, jsonLiteralValue, true)
+}
+
+// resolveRunRefs substitutes run-namespace refs ({{run.id}}) into a tool
+// command / script template. The shared resolveTemplateWith handles only
+// the input / vars / secrets namespaces — the ones tool nodes normally
+// reach via edge `with`-mappings — so a *direct* {{run.id}} (there is no
+// node output to map it from) would otherwise survive verbatim and run as
+// the literal text "{{run.id}}". That bit sec-audit-source's
+// apply-mode prepare_branch, which named its temp branch
+// `iterion/sec-fix/{{run.id}}` and ended up on `iterion/sec-fix/run.id`
+// after its sanitiser stripped the braces. `render` formats the value for
+// the target context (shellEscapeValue for command bodies, jsonLiteralValue
+// for script bodies), matching the main resolver; the bang form keeps the
+// raw passthrough. Only run.id is defined today. A run id is a stable
+// UUID-shaped token (no `{{` of its own), so the literal ReplaceAll
+// cannot re-trigger on a substituted value.
+func resolveRunRefs(template, runID string, refs []*ir.Ref, render func(interface{}) string) string {
+	for _, r := range refs {
+		if r == nil || r.Kind != ir.RefRun {
+			continue
+		}
+		var val interface{}
+		if len(r.Path) > 0 && r.Path[0] == "id" {
+			val = runID
+		}
+		rendered := render(val)
+		if r.Unquoted {
+			rendered = rawTemplateValue(val)
+		}
+		template = strings.ReplaceAll(template, r.Raw, rendered)
+	}
+	return template
 }
 
 // resolveTemplateWith is the shared core: walk refs, look up each value,
