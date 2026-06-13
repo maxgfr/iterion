@@ -454,7 +454,11 @@ func dispatchCloud(ctx context.Context, plans []shardPlan, baseVars map[string]s
 			"shard_count":   len(plans),
 			"shard_label":   p.Label,
 		})
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, serverURL+"/api/v1/runs/launch", bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, serverURL+"/api/v1/runs/launch", bytes.NewReader(body))
+		if err != nil {
+			r.Error = fmt.Sprintf("build launch request: %v", err)
+			return
+		}
 		req.Header.Set("Content-Type", "application/json")
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
