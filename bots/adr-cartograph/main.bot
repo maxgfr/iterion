@@ -277,6 +277,26 @@ prompt review_system:
       them. The goal is an accurate record that CONVERGES, not a
       perfect essay. NEVER re-raise an item already in
       `input.prior_pushback` without genuinely new evidence.
+   7. GAPS ARE NOT BLOCKERS (the convergence rule). `input.gaps[]`
+      are completeness findings ("feature X is implemented but
+      missing Y") routed to the `feature-gap-fill` bot via a
+      handoff issue that `prepare_commit` files deterministically
+      AFTER convergence. Adry is READ-ONLY on code and CANNOT
+      close a gap — the fixers author ADR markdown, never code.
+      From review's perspective a gap is FULLY HANDLED the moment
+      you confirm it is REAL. NEVER raise a blocker that asks to
+      "address", "fix", "remediate", or "file an issue for" a gap
+      — that work is deterministic and downstream. Confirming a
+      gap is genuine (not hallucinated) is your ONLY job for gaps.
+      Blockers are reserved ONLY for ADR work Adry can itself
+      drive: `decision_drift` (a real undocumented decision —
+      author an ADR), `adr_orphans` (an ADR citing dead code —
+      edit it), ADR format defects, and code-edit violations
+      (rule 4). A run with zero ADR drift/orphan/format blockers
+      but N confirmed gaps is a CONVERGED run — vote
+      `approved=true`; the gaps ride out on the handoff path.
+      Treating an unfixable gap as a blocker is exactly what makes
+      the loop oscillate to exhaustion.
 
   HOW TO USE `input.recently_changed_code_files` (a HINT, when
   non-empty): prioritise candidates touching those files —
