@@ -42,6 +42,13 @@ pr_url` it also posts an inline forge review. Never edits or commits. See
   published at the `low` threshold). No false positives.
 - Minor: the `emit`/`reviewer_*` node outputs aren't surfaced in `run.json.checkpoint`
   in a easily-parsed shape (had to read the board to see findings) — cosmetic.
+- **Repo scatter (low — repo-agnostic):** `report_path` defaults to
+  `.review-pr/findings.md`, so Revi drops an **untracked `.review-pr/` dir into the
+  target repo root** (not gitignored). Per CLAUDE.md "Catalog bots are repo-agnostic",
+  a default that writes into the target tree should be gitignore-friendly. Fixed here by
+  adding `.review-pr/` to iterion's `.gitignore`; for a pure dry-run pass
+  `--var report_path=/tmp/revi-findings.md`. (A nicer bot-side default would append the
+  dir to the target's `.gitignore`, or write under a path the operator already ignores.)
 
 ### Engine hardening
 - `awaitTerminal` pre-dispatch-failure hang — **fixed `59cfedcc`** (+ regression test

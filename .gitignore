@@ -136,3 +136,8 @@ charts/iterion/Chart.lock
 # at the repo root so any *.botz at any depth is excluded.
 *.botz
 .plans/
+
+# Revi (review-pr) writes its findings markdown to .review-pr/findings.md by
+# default (report_path) — a per-run local artifact, not source. Ignore it when
+# dogfooding Revi on this repo (or point report_path at /tmp for a dry run).
+.review-pr/
