@@ -10,10 +10,10 @@ backlog tickets + findings for Nexie. See
 
 ## 2026-06-13 — first dogfood: per-bot memory + full pipeline (runs 019ec1d5, 019ec1dc)
 
-- **Status:** validated (core pipeline survey→elicit→investigate→synthesize→
-  cross-family review→human-review proven live; propose_evolutions +
-  emit_backlog not yet exercised live — they run after vision approval, the
-  well-trodden Nexie board path).
+- **Status:** validated — the **full** pipeline ran live end-to-end:
+  survey → ask_brief → investigate → synthesize → cross-family review →
+  human_review (approved) → **propose_evolutions (9 findings) →
+  emit_backlog (9 dispatch-ready backlog tickets) → home base**.
 - **Versions:** bot 0.1.0 · iterion worktree `worktree-evolve-bot` (base
   `d1fe421c`).
 - **Method:** all memory-bearing nodes `claw` + `openai/gpt-5.5` (ChatGPT
@@ -30,6 +30,18 @@ backlog tickets + findings for Nexie. See
   pipeline through both reviewers → aggregate (wait_all) → carry →
   human_review pause. review_claude on claude_code: 48s, 7979 tok, $0.34.
   Per-node gpt-5.5 nodes ~$0.05–0.09 each.
+- **Propose + emit (resumed 019ec1dc with approval):** `propose_evolutions`
+  wrote **9 deep finding artifacts** to `findings/` (decompose-ClawExecutor,
+  capability-context-policy, bot-contract-v1, run-lifecycle-transition-policy,
+  observability-event-taxonomy, persisted-format-stable-subset,
+  dogfood-data-contracts, dispatcher-claims-leases, cloud-local-alignment) —
+  each with proper frontmatter (`kind:evolution` / `source_bot:evolve` /
+  axis+horizon+severity tags) and a grounded Why/Plan/Acceptance body.
+  `emit_backlog` then created **9 `backlog` kanban tickets** on the main-repo
+  board, **`bot: feature-dev` set via `set_bot` on 8** (the 9th left bot-less,
+  no confident match), labelled `<axis>` + `horizon:<now|next|later>`. So a
+  human can drag any ticket to `ready` to launch it, or Nexie can ingest them
+  — exactly the requested handoff. ~$0.09 propose + $0.09 emit.
 - **Value:** genuinely useful strategic output — a 10-axis vision *"Iterion
   as a Trustworthy Local Team Engine"* (backend-pipeline decomposition,
   one RunLifecycle contract, an auditable CapabilityContext, dispatcher
@@ -86,30 +98,54 @@ backlog tickets + findings for Nexie. See
    so the workspace-safety guard rejected 2 mutating parallel branches.
    Added `readonly: true` to both (they only inspect). Lesson for any
    fan-out of tool-equipped judges: mark them `readonly`.
-3. **(ENGINE NIT, MEDIUM) structured `{{outputs.X}}` substitution renders as
-   a Go `map[...]` string, not JSON.** `review_claude` (claude_code)
-   reported the vision arrived as an unrendered/odd blob and recovered via
-   fallback; the human_review form likewise shows `map[_backend:claw …]`.
-   The aggregate + pipeline still worked, but passing large structured
-   outputs into prompts should render JSON, not Go's map stringification.
-   Worth a templating fix.
-4. **(NIT) `iterion validate` is more lenient than `iterion run`.** A literal
+3. **(BOT BUG, fixed) review prompts referenced a whole-node output.** The
+   reviewers' verdicts revealed they received the **literal unsubstituted
+   `{{outputs.synthesize_vision}}`** token — so they reviewed nothing (and
+   correctly withheld approval). Root cause: in a **prompt body**,
+   `{{outputs.<node>}}` (a whole node output) does NOT resolve — only
+   `{{outputs.<node>.<field>}}` does — whereas edge `with` mappings DO
+   resolve whole-output refs (that's why human_review got the full vision via
+   `carry_vision.vision`). Fixed: the review prompts now reference the
+   edge-mapped `{{input.vision}}`. *Underlying engine asymmetry worth noting:*
+   whole-output `{{outputs.<node>}}` resolves in an edge `with` but silently
+   no-ops in a prompt body (and structured outputs render as Go `map[...]`,
+   not JSON, in prompts/forms).
+4. **(BOT BUG, fixed) findings scope keyed off WorkDir, not RepoRoot.**
+   `propose_evolutions` wrote its 9 findings to
+   `projects/<WORKTREE-key>/memory/findings/`, while the board tickets and
+   Nexie's inbox live at the stable `<REPO-ROOT-key>`. The per-bot **vision**
+   scope (`visibility: bot`) correctly re-roots to `RepoRoot`; the **findings**
+   scope used the bare legacy form (→ `WorkDir`), which diverges under a git
+   worktree. In normal (non-worktree) use they coincide, but fixed by adding
+   `visibility: "project"` to the findings block (re-roots to `RepoRoot`,
+   matching the board + Nexie). Validated by analogy to the vision scope,
+   whose `RepoRoot` keying is proven live.
+5. **(NIT) `iterion validate` is more lenient than `iterion run`.** A literal
    `{{issue.title}}` mention in a prompt body (documentation text) passed
    `validate` but failed `run` with `C004 unknown reference namespace`.
    Validate should catch C004 too. (Fixed in the bot by de-bracing.)
+
+> Dogfood side-effect: this validation created 9 real `backlog` tickets on the
+> local main-repo board (gitignored `.iterion/dispatcher/`). They are genuine,
+> useful iterion-evolution proposals, but their finding-file links point at the
+> (ephemeral) worktree key — dispatch or delete them, then re-run Evoly from the
+> main checkout for cleanly-keyed output.
 
 ### Lessons for next run
 
 - The mid-turn ask_user limitation is real for forfait users — until the
   claw+openai fix lands, **author operator interaction as graph-level
   `human` nodes**, not mid-turn `ask_user`, on any claw+openai bot.
-- Drive one full cycle THROUGH approval next time to exercise
-  `propose_evolutions` (findings/ writes) + `emit_backlog` (backlog tickets
-  with `set_bot` + self-contained body). Verify on `/board` that tickets are
-  `backlog`, labelled `source:evolve`, and that a drag-to-`ready` dispatches
-  the named bot.
-- Consider rendering reviewer/human inputs as JSON (finding #3) so the
-  reviewer sees clean structured data.
+- Full cycle (incl. propose + emit) now proven. Next: confirm on `/board`
+  that a drag-to-`ready` actually dispatches `feature-dev` from a ticket whose
+  body is the spec (the dispatch_vars title+body path), and that the
+  visibility:project findings now co-locate with the board on a real run.
+- The reviewers should reference `{{input.X}}`, never `{{outputs.<node>}}`
+  (whole-output) in prompt bodies. Consider an engine fix so whole-output
+  refs resolve (and render as JSON) in prompts, matching edge `with`.
+- Add `source:evolve` to emit's label set explicitly (this run labelled by
+  axis + horizon but the `source:evolve` label didn't appear — verify the
+  set_labels call includes it).
 - The vision quality on gpt-5.5 was high; opus (via `claude_code`, or claw
   if an API key is ever acceptable) would only be worth it for the synthesis
   node if the operator wants more depth.

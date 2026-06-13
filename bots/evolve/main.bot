@@ -436,17 +436,17 @@ prompt review_user_claude:
   Review this proposed vision. Set family="claude".
 
   Vision under review:
-  {{outputs.synthesize_vision}}
+  {{input.vision}}
 
-  Workspace (for evidence spot-checks): {{vars.workspace_dir}}
+  Workspace (for evidence spot-checks): {{input.workspace_dir}}
 
 prompt review_user_gpt:
   Review this proposed vision. Set family="gpt".
 
   Vision under review:
-  {{outputs.synthesize_vision}}
+  {{input.vision}}
 
-  Workspace (for evidence spot-checks): {{vars.workspace_dir}}
+  Workspace (for evidence spot-checks): {{input.workspace_dir}}
 
 prompt human_review_instructions:
   Evoly has synthesised a long-horizon architectural vision and had it
@@ -790,12 +790,16 @@ agent propose_evolutions:
   tools: [bash, read_file, glob, grep]
   tool_max_steps: 30
   readonly: true
-  ## findings/ is the SHARED cross-bot inbox (project visibility — NO
-  ## visibility:bot). Legacy scope form resolves to
-  ## projects/<key>/memory/findings/, exactly where Nexie's emit_action
-  ## hygiene scans. Evoly writes the deep evolution artifacts here.
+  ## findings/ is the SHARED cross-bot inbox. `visibility: "project"`
+  ## resolves it to projects/<RepoRoot-key>/memory/findings/ — keyed off
+  ## the STABLE repo root (like the vision scope and the board), so the
+  ## findings land where Nexie's emit_action hygiene scans even when Evoly
+  ## runs from a git worktree (a bare `scope:` would key off the ephemeral
+  ## WorkDir and strand findings under the worktree key — see
+  ## docs/bot-runs/evolve.md). Evoly writes the deep evolution artifacts here.
   memory:
     enabled: true
+    visibility: "project"
     scope: "findings"
     read: true
     write: true
