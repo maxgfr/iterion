@@ -1,8 +1,44 @@
 # Seki + deepsec — validation
 
-## 2026-06-13 — iterion self-audit dogfood (runs 019ec10f, 019ec13a)
+## 2026-06-13 — iterion self-audit dogfood (runs 019ec10f, 019ec13a, **019ec142**)
 
-- Status: **blocked → 2 engine fixes; SAST validation still pending a clean run.**
+> **Update — run 019ec142 (after both engine fixes + static-binary re-copy):
+> the SAST read pipeline VALIDATED end-to-end, with 3 new findings.**
+> - Ran clean through `detect_tech → scanners → scan_health → cap_findings →
+>   triage → adversarial N-vote → merge_with_cache → report_card`. The
+>   sandbox-claw fixes (backendIsClaw + static binary) **work**. ($4.26, 91k
+>   tokens, 285 steps before the remediation phase self-killed — see #5.)
+> - **Value:** deepsec found 14 candidates → triage 13 → N-vote **11 confirmed
+>   (2 HIGH incl. the SSRF), 2 uncertain**; results written to
+>   `.iterion/security/findings.md`. The detect_tech tech-map is excellent.
+> - **#3 Degraded scanner coverage (medium):** `scan_health` correctly flagged
+>   `degraded` — **`trivy` + `semgrep-auto` errored / produced no output** in the
+>   `iterion-sandbox-sec` image (2 of 4 generic scanners missing; it cleared the
+>   `min_generic=2` floor so it ran with a banner rather than hard-failing). All
+>   13 triaged candidates came from **deepsec**; the generic AST/regex scanners
+>   contributed 0. The sec image's trivy + semgrep-auto invocation needs fixing.
+> - **#4 Board emit didn't land (medium):** `report_card` wrote findings.md
+>   claiming "2 board issues created (high)", but the board has **0**
+>   `source:sec-audit-source` issues. Sandboxed `report_card` emits via the HTTP
+>   board transport (`/api/v1/mcp/board` + run-token); the writes didn't surface
+>   (failed silently or were confabulated). Seki's value is currently trapped in
+>   the gitignored findings.md, not on the board as designed.
+> - **#5 SEVERE — `remediate` + `enable_deepsec` default `true`, and Seki has NO
+>   `worktree: auto`.** So by default Seki *edits code* (it is **not** read-only,
+>   contra the doc "does not fix unless remediate enabled"), and the edits hit the
+>   **main tree**. `patch_author` edited `pkg/webhooks/generic/generic.go`
+>   (SSRF-hardening intent) → its own `.go` edit tripped `task studio:dev`
+>   watchexec → backend restart → `context canceled`. Worse, it was cancelled
+>   **mid-Edit**, leaving the file with unused imports → **broke compilation → the
+>   `go run` studio backend couldn't restart → studio bricked** until the partial
+>   patch was `git restore`d. Same watchexec self-kill class as Willy, but it also
+>   takes the studio down. **Fix directions:** default `remediate=false` (match the
+>   doc + make Seki read-only by default); give the remediation phase
+>   `worktree: auto` isolation; never run a remediating Seki under `task
+>   studio:dev`. (deepsec default-on also makes every run long/expensive.)
+
+- Status: **read pipeline VALIDATED (019ec142); remediation phase unsafe
+  (self-kill + studio brick). Original blockers ↓ fixed.**
 - Versions: bot sec-audit-source 0.1.0 · iterion 7fea84cd→f247f360
 - Method: `POST /api/runs`, `severity_threshold=high`, sandboxed
   (`iterion-sandbox-sec:edge`, present). Goal: re-find the known HIGH
