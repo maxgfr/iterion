@@ -112,15 +112,16 @@ func (s *Service) Launch(parent context.Context, spec LaunchSpec) (*LaunchResult
 	_, runLogger := s.prepareRunLog(runID)
 
 	executor, err := BuildExecutor(ExecutorSpec{
-		Workflow: wf,
-		Vars:     spec.Vars,
-		Store:    s.store,
-		RunID:    runID,
-		Logger:   runLogger,
-		StoreDir: s.storeDir,
-		Inbox:    s.inboxBinder(),
-		Backend:  spec.Backend,
-		BotID:    spec.BotID,
+		Workflow:      wf,
+		Vars:          spec.Vars,
+		Store:         s.store,
+		RunID:         runID,
+		Logger:        runLogger,
+		StoreDir:      s.storeDir,
+		Inbox:         s.inboxBinder(),
+		Backend:       spec.Backend,
+		BotID:         spec.BotID,
+		BoardRegister: s.boardRegister,
 	})
 	if err != nil {
 		s.dropRunLog(runID)
@@ -251,12 +252,13 @@ func (s *Service) Resume(parent context.Context, spec ResumeSpec) (*LaunchResult
 	_, runLogger := s.prepareRunLog(spec.RunID)
 
 	executor, err := BuildExecutor(ExecutorSpec{
-		Workflow: wf,
-		Store:    s.store,
-		RunID:    spec.RunID,
-		Logger:   runLogger,
-		StoreDir: s.storeDir,
-		Inbox:    s.inboxBinder(),
+		Workflow:      wf,
+		Store:         s.store,
+		RunID:         spec.RunID,
+		Logger:        runLogger,
+		StoreDir:      s.storeDir,
+		Inbox:         s.inboxBinder(),
+		BoardRegister: s.boardRegister,
 	})
 	if err != nil {
 		s.dropRunLog(spec.RunID)
@@ -452,6 +454,9 @@ func (s *Service) engineOptions(runLogger *iterlog.Logger, hash, filePath, runNa
 	}
 	if s.workDir != "" {
 		opts = append(opts, runtime.WithWorkDir(s.workDir))
+	}
+	if s.boardMCPHandler != nil {
+		opts = append(opts, runtime.WithBoardMCP(s.boardMCPHandler))
 	}
 	if s.dailyCap != nil {
 		opts = append(opts, runtime.WithDailyCap(s.dailyCap))

@@ -291,6 +291,9 @@ func (s *Server) swapWorkDir(_ context.Context, newDir string) error {
 			runview.WithLogger(s.logger),
 			runview.WithWorkDir(abs),
 		}
+		if opt, ok := s.boardMCPServiceOption(s.logger); ok {
+			svcOpts = append(svcOpts, opt)
+		}
 		svc, svcErr := runview.NewService(storeDir, svcOpts...)
 		if svcErr != nil {
 			return fmt.Errorf("runview service: %w", svcErr)

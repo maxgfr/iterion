@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -45,6 +47,18 @@ func NewBoardMCPTokenRegistry() *BoardMCPTokenRegistry {
 		tokens: map[string]boardMCPGrant{},
 		now:    time.Now,
 	}
+}
+
+// newBoardMCPToken mints a random opaque X-Iterion-Run token (32 bytes
+// hex) for a per-node board MCP grant. Returns "" on the (effectively
+// impossible) crypto/rand failure so callers degrade to board-disabled
+// rather than panicking.
+func newBoardMCPToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b)
 }
 
 // Register stores a token with its grant. A subsequent call with the same

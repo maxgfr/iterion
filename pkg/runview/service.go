@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"sync"
@@ -226,6 +227,12 @@ type ArtifactSummary struct {
 type Service struct {
 	store    store.RunStore
 	storeDir string
+	// boardMCPHandler serves the board MCP routes for the per-run
+	// gateway-reachable listener (C082); boardRegister mints per-node
+	// board tokens. Both nil unless the server wires them via
+	// WithBoardMCP — sandboxed board-emit then stays disabled.
+	boardMCPHandler http.Handler
+	boardRegister   func(caps []string) string
 	// workDir is the directory the engine should treat as ${PROJECT_DIR}
 	// and as the repo-lookup seed for worktree: auto. Empty means
 	// "default to os.Getwd() at Run() time" — the right thing for the
@@ -438,6 +445,19 @@ func WithLaunchPublisher(p LaunchPublisher) ServiceOption {
 // (T-19, T-30).
 func WithStore(s store.RunStore) ServiceOption {
 	return func(svc *Service) { svc.injectedStore = s }
+}
+
+// WithBoardMCP wires the board MCP HTTP transport for sandboxed
+// board-capability nodes (C082). handler must serve ONLY the board MCP
+// routes (it is exposed gateway-reachable, token-gated) — never the full
+// server mux. register mints a per-node run token against the server's
+// BoardMCPTokenRegistry. Both are threaded into the engine + executor so
+// sandboxed claude_code can write the operator's board.
+func WithBoardMCP(handler http.Handler, register func(caps []string) string) ServiceOption {
+	return func(svc *Service) {
+		svc.boardMCPHandler = handler
+		svc.boardRegister = register
+	}
 }
 
 // WithEventSource installs an alternative event source (typically

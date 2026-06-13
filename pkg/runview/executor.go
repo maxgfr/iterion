@@ -62,6 +62,11 @@ type ExecutorSpec struct {
 	// local filesystem store. Cloud runners pass the Mongo store so
 	// shared knowledge persists in the tenant's document store.
 	MemoryStore knowledge.MemoryStore
+	// BoardRegister mints a per-node board MCP run token (C082, server
+	// path): it registers the node's board caps with the server's token
+	// registry and returns the token. nil (CLI) leaves sandboxed
+	// board-emit disabled.
+	BoardRegister func(caps []string) string
 }
 
 // BuildExecutor wires up the default ClawExecutor: registry, default
@@ -146,6 +151,9 @@ func BuildExecutor(spec ExecutorSpec) (*model.ClawExecutor, error) {
 		model.WithLifecycleHooks(lifecycle),
 		model.WithStoreDir(dispatcherStoreDir),
 		model.WithSecretGuard(guard),
+	}
+	if spec.BoardRegister != nil {
+		opts = append(opts, model.WithBoardRegister(spec.BoardRegister))
 	}
 	if spec.Inbox != nil {
 		opts = append(opts, model.WithExecutorInbox(spec.Inbox))

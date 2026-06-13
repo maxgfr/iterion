@@ -422,6 +422,33 @@ func (s *Server) BoardMCPTokens() *BoardMCPTokenRegistry {
 	return s.boardMCPTokens
 }
 
+// boardMCPServiceOption builds the runview option that wires the sandboxed
+// board MCP transport (C082). It hands the runview Service a DEDICATED mux
+// serving ONLY the board MCP routes — safe to expose on the per-run
+// gateway-reachable listener (it is token-gated), unlike s.mux which also
+// carries authenticated routes — plus a per-node token minter against this
+// server's registry. Returns (nil, false) when the native board store
+// isn't configured (board-emit then stays disabled, as before).
+func (s *Server) boardMCPServiceOption(logger *iterlog.Logger) (runview.ServiceOption, bool) {
+	if s.cfg.NativeTrackerStore == nil || s.boardMCPTokens == nil {
+		return nil, false
+	}
+	mux := http.NewServeMux()
+	RegisterBoardMCPRoutes(mux, "/api/v1/mcp/board", s.cfg.NativeTrackerStore, s.boardMCPTokens)
+	reg := s.boardMCPTokens
+	return runview.WithBoardMCP(mux, func(caps []string) string {
+		token := newBoardMCPToken()
+		if token == "" {
+			if logger != nil {
+				logger.Warn("board MCP: token generation failed; sandboxed board-emit disabled for a node")
+			}
+			return ""
+		}
+		reg.Register(token, caps)
+		return token
+	}), true
+}
+
 // New creates a new studio server.
 //
 // Port semantics: cfg.Port == 0 means "let the OS pick a free port"
@@ -539,6 +566,9 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		}
 		if cfg.Alerts != nil {
 			svcOpts = append(svcOpts, runview.WithAlerts(*cfg.Alerts))
+		}
+		if opt, ok := s.boardMCPServiceOption(logger); ok {
+			svcOpts = append(svcOpts, opt)
 		}
 		svc, svcErr := runview.NewService(storeDir, svcOpts...)
 		if svcErr != nil {
