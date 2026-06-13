@@ -812,6 +812,22 @@ live-tree-editing bot: launch it via a CLI `iterion run` (a separate process
 watchexec's restart can't cancel) or against a non-watchexec studio
 (`iterion studio` from the built binary), not the `task studio:dev` backend.
 
+**Keep the installed binary fresh — delegated subprocesses use it, not the
+running code.** Bot capabilities that run out-of-process — the `__mcp-board`
+server (board.* tools), the sandboxed `__claw-runner`, the `__mcp-ask-user`
+server — are spawned via `proc.LocateIterionBinary()`. Under `task studio:dev`
+(`go run`) the studio's own `os.Executable()` is a volatile build path, so
+LocateIterionBinary **falls back to the installed `/usr/bin/iterion`** (then
+`/usr/local/bin`, `~/.local/bin`). If that install is older than your working
+tree, agents silently get the **stale** capability set — e.g. a dogfood run saw
+the board MCP advertise only 7 tools (no `set_bot`/`list_labels`) because the
+installed binary predated them, and the agent (correctly) fell back to routing by
+`assignee`. After adding or changing any delegated capability, **reinstall the
+binary** (`sudo cp ./iterion /usr/bin/iterion`, or `task install` to a dir that
+wins LocateIterionBinary's order) or export `ITERION_BIN=<fresh binary>` for the
+studio process — otherwise the gap reads as an agent/bot bug when it's a stale
+binary.
+
 ### Every dogfood run gets a bilan in `docs/bot-runs/<bot>.md`
 
 The run artifacts under `.iterion/runs/<id>/` are gitignored — they vanish from

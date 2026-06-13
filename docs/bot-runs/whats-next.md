@@ -35,28 +35,28 @@ a roadmap, materialises it as kanban issues, and triages the board. See
 - Findings auto-hygiene was conservative (archived 2 of 11, safe under-archive default).
 
 ### Findings / misses
-1. **`set_bot` ignored + confabulated (medium — agent/bot reliability).** Both
-   `emit_action` and `triage_board` route the bot via the human `assignee` field
-   (`create_issue.assignee` / `assign_issue`) and justify it with *"this board build
-   registers no set_bot/list_labels MCP tools"*. **The claim is provably false**:
-   `printf '{...tools/list...}' | ITERION_BOARD_CAPS=<nexie caps> iterion __mcp-board`
-   advertises all 9 tools incl. `set_bot` + `list_labels`, and it is internally
-   impossible — `list_issues` (used) and `list_labels` ("missing") share the **same**
-   `board.read` cap via `boardops.ToolsFor`, so one cannot exist without the other.
-   Crucially, the bot's **own `iterion-board` skill already mandates `set_bot`**:
-   it calls `set_bot` *"the canonical dispatcher selector"* (l.21), says *"Prefer
-   set_bot over assign_issue for 'run bot X'"* (l.86), and *"assign_issue … NOT for
-   bot selection (use set_bot)"* (l.22). So this is **not** a missing-guidance gap and
-   **not** an engine bug — the claude_code agent (opus-4.7) **disobeyed clear skill
-   guidance and confabulated a false reason**. Impact is mostly low (the native
-   dispatcher falls back to assignee-as-bot-selector, so routing still works) but: the
-   `bot` field is left empty while `assignee` shows a bot name as if it were a human
-   owner, and the run summary misleads operators into thinking the board MCP is broken.
-   **Fix is non-trivial** (the skill is already explicit and was ignored): needs a look
-   at whether the `iterion-board` skill is actually loaded at `emit_action` time, and a
-   reinforcement in the `emit_action`/`triage_board` *node* prompt to bridge
-   `roadmap_item.assignee` (the planning field) → `set_bot` (the native-board write) —
-   not a one-line skill edit. Tracked as a follow-up, not patched in this pass.
+1. **`set_bot`/`list_labels` truly absent at runtime — STALE INSTALLED BINARY (medium
+   — dev-infra, ROOT-CAUSED).** Both `emit_action` and `triage_board` routed the bot
+   via the human `assignee` field and reported *"this board build registers no
+   set_bot/list_labels MCP tools"*. **The agent was correct, not confabulating.** The
+   studio under `task studio:dev` runs via `go run`, whose `os.Executable()` is a
+   volatile build path, so `proc.LocateIterionBinary()` skips it and falls back to the
+   **installed `/usr/bin/iterion`** to serve the `__mcp-board` stdio MCP. That installed
+   binary was **stale (commit 62aac3cc, pre-dating `set_bot`/`list_labels`)** and its
+   `tools/list` advertises only **7 tools** (`assign_issue, close_issue, create_issue,
+   get_issue, list_issues, set_labels, transition_issue`) — no `set_bot`, no
+   `list_labels`. Proof: `ITERION_BOARD_CAPS=<6 caps> /usr/bin/iterion __mcp-board`
+   tools/list → 7 tools; the **freshly-built** binary (current code) → all 9. So the
+   bot prompt (`emit_action_system` l.709-713 already maps `item.assignee → set_bot`)
+   and the `iterion-board` skill are **correct**; the agent faithfully used what the
+   stale board server offered (assignee fallback, which the dispatcher honours). **Fix
+   is operational, not a bot/code change:** refresh the installed binary
+   (`sudo cp ./iterion /usr/bin/iterion`) or run the studio with
+   `ITERION_BIN=<fresh>` so delegated subprocesses match the running code. **This skew
+   affects EVERY delegated capability** (board MCP, the sandboxed `__claw-runner`, the
+   `__mcp-ask-user` server) — see the CLAUDE.md note added under the live-dogfood
+   section. (The chained findings #2–#5 below are downstream of routing via `assignee`
+   and may differ once the binary is fresh and `set_bot` is used.)
 2. **`emit_action` dedup miss (low-medium — bot improvement).** It created a *new*
    "Restore sec-audit-source scanner output under dispatcher sandbox" item even though
    its own body says *"Fix the existing backlog item native:f3a888dc"* — duplicating
@@ -88,11 +88,15 @@ a roadmap, materialises it as kanban issues, and triages the board. See
    `pkg/botregistry` discovery — deferred to a focused follow-up.
 
 ### Engine hardening
-- The suspected `set_bot`/`list_labels` registration gap is **not** an engine bug
-  (verified the `__mcp-board` advertise path + `boardops.ToolsFor`); fix is in the bot.
-- **One real engine follow-up:** `pkg/botregistry` discovery should dedupe bundles by
-  name across roots (finding #7) so a stray local `.botz/` copy can't duplicate a
-  catalog card. Low severity, deferred.
+- **Dev-mode delegated-binary skew (finding #1):** real, root-caused — the studio
+  under `go run` serves `__mcp-board` (and the claw runner / ask-user MCP) from the
+  **stale installed `/usr/bin/iterion`**, which silently lacks capabilities added since
+  the last install (`set_bot`/`list_labels` here). Code is correct; refresh the binary
+  or set `ITERION_BIN`. Documented in CLAUDE.md so it doesn't re-bite the campaign.
+- **`pkg/botregistry` cross-root dedupe (finding #7): FIXED** — `discoverBots` now
+  dedupes by normalized bundle name across roots (precedence `bots/` > `.botz/`), with
+  a regression test (`TestList_DedupesSameBotAcrossRoots`). So a stray packed `.botz/`
+  copy can no longer duplicate a catalog card.
 
 ### Lessons for next run
 - Apply the finding-1 fix to the bot before the next Nexie run, then confirm the
