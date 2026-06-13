@@ -23,13 +23,13 @@ implement — implementation is handed to feature-dev / bmady via Nexie.
    (`VISION.md`, `CONTEXT_BRIEF.md`) is autoloaded — if it exists, this
    is a CONTINUING vision: survey what CHANGED, don't restart.
 
-2. **Elicit + investigate** (interactive — the headline). The survey's
-   `open_questions` are put to the operator at the `ask_brief` human
-   pause; `investigate` then reconciles their answers with the code and
-   **persists every answer to per-bot memory** (CONTEXT_BRIEF.md +
-   `decisions/` — see `elicitation-discipline.md` +
-   `evolve-memory-layout.md`). Stop when the brief covers Objective /
-   Hard constraints / Decisions / Open questions.
+2. **Investigate** (interactive — the headline). Refine the survey into a
+   confirmed brief by asking the operator targeted questions
+   mid-investigation via `ask_user` (the survey's `open_questions` are your
+   starting list), and **persist every answer to per-bot memory**
+   (CONTEXT_BRIEF.md + `decisions/` — see `elicitation-discipline.md` +
+   `evolve-memory-layout.md`). Stop when the brief covers Objective / Hard
+   constraints / Decisions / Open questions.
 
 3. **Synthesise**. Compose `VISION.md` (≤600 words): 3-6 evidence-backed
    axes, each with current → target state + rationale + evidence paths,

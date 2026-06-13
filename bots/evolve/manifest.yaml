@@ -24,12 +24,10 @@ description: |
     - per-bot persistent memory (visibility: "bot"): VISION.md +
       CONTEXT_BRIEF.md + decisions/ accumulate across sessions WITHOUT
       leaking into Nexie or other bots' memory;
-    - operator elicitation during investigation: the survey surfaces the
-      questions only the operator can answer, they answer at a graph-level
-      human pause, and every answer is persisted to per-bot memory so it
-      is never asked twice (the backend-agnostic interaction path, since
-      mid-turn ask_user is currently broken on the claw+openai forfait
-      provider — see docs/bot-runs/evolve.md).
+    - mid-turn ask_user MCP escalation from the investigation agent so the
+      operator is interrogated only when the LLM cannot resolve an
+      ambiguity from the code alone — and every answer is persisted to
+      per-bot memory so it is never asked twice.
 when_to_use: |
   Use ONLY when the project is mature / stable enough that the question
   worth answering is "where should this go next?" (a quarter and beyond),

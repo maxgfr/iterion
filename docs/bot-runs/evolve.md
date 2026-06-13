@@ -8,6 +8,24 @@ backlog tickets + findings for Nexie. See
 
 ---
 
+## 2026-06-13 — mid-turn ask_user restored + validated (run 019ec2f6)
+
+- **Status:** validated. After the engine fix (commit e93ccc1b — see
+  finding #1), `investigate` reverted from the `ask_brief` human-node
+  workaround back to the **original design: mid-turn `ask_user`** on the
+  agent (`interaction: human`). Live on claw + openai/gpt-5.5 forfait:
+  survey → investigate **asks the operator via ask_user** ("what objective
+  + horizon?") → pauses cleanly → resume injects the answer → investigate
+  **persists to memory + asks a follow-up ask_user** ("which backend
+  combos must be conformance-tested?") → pauses again. Genuinely iterative
+  mid-investigation elicitation, multiple ask_user round-trips on a
+  schema+tools node, zero 400s. The `ask_brief` node + its schemas were
+  removed; the graph is back to 17 nodes.
+- **Misc:** the agent persisted the first answer to `vision_interrogation.md`
+  rather than the prompt's `CONTEXT_BRIEF.md` — it persists correctly, just
+  off the named file; tighten the prompt if strict filename adherence
+  matters (non-blocking — the auto-index surfaces it either way).
+
 ## 2026-06-13 — first dogfood: per-bot memory + full pipeline (runs 019ec1d5, 019ec1dc)
 
 - **Status:** validated — the **full** pipeline ran live end-to-end:

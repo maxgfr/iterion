@@ -10,10 +10,10 @@ where the project should be in a year, and feeds Nexie the work.
 
 1. **Surveys** the repo and scores its maturity (a vision on a churning
    project is waste).
-2. **Investigates interactively** — the survey's open questions are put
-   to you at a human pause (intent, constraints, priorities the code
-   can't answer), and Evoly **remembers every answer across sessions** in
-   its own private memory.
+2. **Investigates interactively** — it asks you targeted questions
+   mid-investigation via `ask_user` whenever the code can't answer them
+   (intent, constraints, priorities), and **remembers every answer across
+   sessions** in its own private memory.
 3. **Synthesises** a long-horizon `VISION.md`: a few evidence-backed axes
    (current → target) plus guardrails.
 4. **Reviews** it (two independent perspectives) and converges with you
@@ -47,11 +47,10 @@ vision review and the home-base pivot. Answer in the studio or with
   accumulates under `~/.iterion/projects/<repo-key>/bots/evolve/memory/vision/`
   — private to Evoly, surviving across sessions, never leaking into
   Nexie or any other bot's context.
-- **Operator elicitation during investigation**. The survey surfaces the
-  questions only you can answer; you answer them at a graph-level human
-  pause; and Evoly persists each answer to memory so it is never asked
-  twice. (Mid-turn `ask_user` is intentionally avoided — it is currently
-  broken on the claw + openai/forfait provider; see the bilan.)
+- **Mid-investigation `ask_user`**. The investigation agent interrogates
+  you only when it must (an ambiguity the code can't resolve), the run
+  pauses for your answer, and Evoly persists each answer to memory so it is
+  never asked twice.
 
 ## How it partners with Nexie
 
