@@ -125,10 +125,24 @@ func (p *Proxy) serveInspectedRequest(client net.Conn, req *http.Request, hostna
 	}
 	defer resp.Body.Close()
 
+	// Force connection-close framing on the response we hand back to the
+	// client. Streaming LLM/SSE endpoints (and any HTTP/1.1 response with
+	// no Content-Length and no chunked transfer-encoding) are
+	// *close-delimited*: the body ends when the server closes the socket.
+	// If we keep the inspected client connection alive after such a
+	// response, the in-container HTTP/1.1 client blocks forever waiting for
+	// more bytes — observed as a hard hang on every sandboxed `claw` LLM
+	// call once Layer-2 TLS inspection is active. Emitting `Connection:
+	// close` and tearing the conn down after the body lets the client
+	// detect EOF deterministically. resp.Write copies the body straight to
+	// the raw *tls.Conn (no buffering), so streamed tokens still flush as
+	// they arrive; we trade HTTP keep-alive reuse for correctness, and the
+	// client simply opens a fresh connection for its next request.
+	resp.Close = true
 	if err := resp.Write(client); err != nil {
 		return false
 	}
-	return !req.Close && !resp.Close
+	return false
 }
 
 // inspectScanText assembles the request surface a secret could leak
