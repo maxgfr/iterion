@@ -69,7 +69,7 @@ workflow my_workflow:
 | `agent` | LLM with tools and structured I/O | Most common |
 | `judge` | LLM verdict, no mutation | Tools optional |
 | `router` | Branch selection | Modes: `fan_out_all`, `condition`, `round_robin`, `llm` |
-| `human` | Pause for human input | `interaction: human | llm | llm_or_human` |
+| `human` | Pause for human input | `interaction: human | llm | llm_or_human | review` |
 | `tool` | Deterministic shell | No LLM; uses `{{input.x}}` templates with auto shell-escape |
 | `compute` | Deterministic expression | No LLM, no shell. Use for passthrough, derived booleans, loop guards. |
 | `done` / `fail` | Built-in terminals | Never declare them |
@@ -174,6 +174,41 @@ human ask_priorities:
   + `interaction_prompt`, no human pause.
 - `interaction: llm_or_human` — LLM tries first; if it sets
   `_escalate=true` the run pauses for human input.
+- `interaction: review` — a guided review-&-merge gate: a
+  companion LLM walks the human through testing the change via a
+  multi-turn dialogue, then **squash-merges the run's worktree
+  during the pause** when approved. Requires `worktree: auto`
+  (C100). See below.
+
+### Review-&-merge gate (`interaction: review`)
+
+```iter
+human ship_review:
+  interaction: review
+  model: "anthropic/claude-sonnet-4-6"   # the companion (writes test steps + verdict)
+  system: companion_system               # companion contract prompt
+  output: review_verdict                 # decision/confidence/blockers — routes downstream edges
+  review_url: "{{outputs.provision.url}}" # optional: env to open & test (studio Browser pane)
+  posture: human_required                # human_required (default) | agent_verdict_ok
+  merge_strategy: squash                 # squash (default) | merge
+  merge_into: current                    # current (default) | none | <branch>
+  max_turns: 8                           # dialogue asymptote backstop
+```
+
+```iter
+ship_review -> done   when "decision == 'approved'"
+ship_review -> implement when "decision == 'changes_requested'" as fix_loop(5)
+ship_review -> fail    # default fallback
+```
+
+The operator (studio) can: reply to continue the dialogue,
+**Approve & merge**, **Force-merge** (skips the verdict; git
+guards still apply), or **Request changes** (routes the
+`changes_requested` edge). With `posture: agent_verdict_ok` a
+high-confidence companion approval auto-merges without a click.
+The gate requires `worktree: auto` — it squash-merges the run's
+commits when approved. Reference: `examples/review-merge-gate.bot`,
+`docs/review-merge-gate.md`.
 
 ## Tool node
 

@@ -914,8 +914,9 @@ func (c *compiler) compileHumans() {
 			AwaitMode:    h.Await,
 		}
 
-		// LLM-based interaction modes require a model and output schema.
-		if interaction == InteractionLLM || interaction == InteractionLLMOrHuman {
+		// LLM-driven interaction modes (llm, llm_or_human, review) require a
+		// companion model and an output schema.
+		if interaction == InteractionLLM || interaction == InteractionLLMOrHuman || interaction == InteractionReview {
 			model := h.InteractionModel
 			if model == "" {
 				model = h.Model
@@ -933,6 +934,35 @@ func (c *compiler) compileHumans() {
 			if h.System != "" {
 				c.validatePromptRef(h.Name, "system", h.System)
 				node.SystemPrompt = h.System
+			}
+		}
+
+		// Review-gate configuration: defaults + ReviewURL ref parsing.
+		if interaction == InteractionReview {
+			node.Posture = h.Posture
+			if node.Posture == "" {
+				node.Posture = PostureHumanRequired
+			}
+			node.MergeStrategy = h.MergeStrategy
+			if node.MergeStrategy == "" {
+				node.MergeStrategy = "squash"
+			}
+			node.MergeInto = h.MergeInto
+			if node.MergeInto == "" {
+				node.MergeInto = "current"
+			}
+			node.MaxTurns = h.MaxTurns
+			if node.MaxTurns <= 0 {
+				node.MaxTurns = DefaultReviewMaxTurns
+			}
+			node.ReviewURL = h.ReviewURL
+			if h.ReviewURL != "" {
+				refs, err := ParseRefs(h.ReviewURL)
+				if err != nil {
+					c.errorf(DiagBadTemplateRef, "human %q review_url: %v", h.Name, err)
+				} else {
+					node.ReviewURLRefs = refs
+				}
 			}
 		}
 

@@ -72,6 +72,10 @@ const (
 	DiagUnknownSecret     DiagCode = "C093" // {{secrets.X}} but X not declared
 	DiagInvalidSecretFile DiagCode = "C094" // file secret declaration is malformed
 	DiagSecretSubfield    DiagCode = "C095" // unsupported {{secrets.X.<subfield>}}
+
+	// Review-gate diagnostics (interaction: review).
+	DiagReviewNeedsWorktree DiagCode = "C100" // interaction: review without worktree: auto — nothing to merge (error)
+	DiagReviewURLUnknownRef DiagCode = "C101" // review_url references an output node that does not exist (warning)
 )
 
 // validate performs static validation on a compiled workflow.
@@ -102,6 +106,37 @@ func (c *compiler) validate(w *Workflow) {
 	c.validateCapabilities(w)
 	c.validateProviders(w)
 	c.validateCursorInvocations(w)
+	c.validateReviewGates(w)
+}
+
+// validateReviewGates enforces the review-&-merge gate's preconditions.
+// A review gate squash-merges the run's worktree during the human pause,
+// so it is meaningless without worktree: auto (C100, error). Its optional
+// review_url may reference an upstream node output; a dangling reference is
+// a warning (C101) since the URL simply renders empty at runtime.
+func (c *compiler) validateReviewGates(w *Workflow) {
+	worktreeAuto := strings.EqualFold(strings.TrimSpace(w.Worktree), "auto")
+	for _, node := range w.Nodes {
+		h, ok := node.(*HumanNode)
+		if !ok || h.Interaction != InteractionReview {
+			continue
+		}
+		if !worktreeAuto {
+			c.errorf(DiagReviewNeedsWorktree,
+				"human %q uses interaction: review but the workflow does not declare worktree: auto — a review gate squash-merges the run's worktree, so there is nothing to merge without one",
+				h.NodeID())
+		}
+		for _, ref := range h.ReviewURLRefs {
+			if ref.Kind != RefOutputs || len(ref.Path) == 0 {
+				continue
+			}
+			if _, exists := w.Nodes[ref.Path[0]]; !exists {
+				c.warnf(DiagReviewURLUnknownRef,
+					"human %q review_url references output of unknown node %q",
+					h.NodeID(), ref.Path[0])
+			}
+		}
+	}
 }
 
 // validateMemory enforces shape on the per-node `memory:` block and

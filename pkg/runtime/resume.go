@@ -99,6 +99,16 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 	cp := r.Checkpoint
 	humanNodeID := cp.NodeID
 
+	// A review gate (interaction: review) resumes through a dedicated path:
+	// the answers carry a __review_action (reply / approve_merge /
+	// force_merge / request_changes), the companion↔human dialogue may
+	// re-pause, and approve/force perform a squash-merge during the pause.
+	// resumeReviewGate does its own turn recording, claim, rebuild, and
+	// action handling, so we return before the single-shot answer machinery.
+	if hn, ok := e.workflow.Nodes[humanNodeID].(*ir.HumanNode); ok && hn.Interaction == ir.InteractionReview {
+		return e.resumeReviewGate(ctx, r, cp, hn, answers)
+	}
+
 	// Coerce string-typed answers (from `iterion resume --answer key=value`,
 	// which can only carry strings) into the human node's output-schema
 	// types, so a `when <bool>` edge sees true, not "true", and a typed
@@ -204,6 +214,69 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 	// Init maps when the checkpoint deserialised with omitted fields
 	// (Mongo bson omitempty, legacy stores) — a nil map here would
 	// crash selectEdgeRS the first time it tries `rs.loopCounters[X]++`.
+	rs, sandboxCleanup, rbErr := e.resumeRebuildState(ctx, r, cp, outputs, artifactVersions)
+	if rbErr != nil {
+		return rbErr
+	}
+	defer sandboxCleanup()
+
+	// When the pause originated from a delegate (an agent/judge that
+	// emitted _needs_interaction or called the native ask_user tool),
+	// the paused node still owes its work — re-invoke it with the
+	// answer merged into the input. Without this branch, the runtime
+	// would treat the agent/judge as a finished human node and skip
+	// past it, losing the verdict it was supposed to produce.
+	if cp.BackendName != "" {
+		node, ok := e.workflow.Nodes[humanNodeID]
+		if !ok {
+			return fmt.Errorf("runtime: paused node %q not found in workflow", humanNodeID)
+		}
+		ni := &model.ErrNeedsInteraction{
+			NodeID:           humanNodeID,
+			Questions:        cp.InteractionQuestions,
+			SessionID:        cp.BackendSessionID,
+			Backend:          cp.BackendName,
+			Conversation:     cp.BackendConversation,
+			PendingToolUseID: cp.BackendPendingToolUseID,
+		}
+		loopErr := e.reInvokeBackend(ctx, rs, humanNodeID, node, ni, answers, 0)
+		e.evictRunSessions(runID, loopErr)
+		return loopErr
+	}
+
+	// Select edge from the human node to find the next node.
+	nextNodeID, err := e.selectEdgeRS(rs, humanNodeID, answers)
+	if err != nil {
+		return e.failRunErrWithCheckpoint(rs, humanNodeID, err)
+	}
+
+	loopErr := e.execLoop(ctx, rs, nextNodeID)
+	e.evictRunSessions(runID, loopErr)
+	// Resumed worktree runs need the same persistent-branch + FF step
+	// fresh launches get; without this the GC guard never lands and
+	// commits are reachable only via reflog. See F-RT-1.
+	if wtCtx := e.reconstructWorktreeContext(r); wtCtx != nil {
+		e.finalizeOnExit(ctx, runID, wtCtx, nil, loopErr)
+	}
+	return loopErr
+}
+
+// resumeRebuildState restores the per-run environment, re-mirrors bundle
+// skills, re-bootstraps the sandbox, and rebuilds the in-memory runState
+// from the checkpoint. Shared by resumeFromPause and resumeReviewGate —
+// both resume a paused run and must reconstruct identical execution state.
+//
+// Returns the runState plus a sandbox-cleanup func the caller MUST defer.
+// On a sandbox-start failure it persists failed_resumable (PRESERVING the
+// rich checkpoint so the next resume doesn't restart from entry) and
+// returns the error with a nil runState and a no-op cleanup.
+func (e *Engine) resumeRebuildState(ctx context.Context, r *store.Run, cp *store.Checkpoint, outputs map[string]map[string]interface{}, artifactVersions map[string]int) (*runState, func(), error) {
+	runID := r.ID
+	humanNodeID := cp.NodeID
+
+	// Init maps when the checkpoint deserialised with omitted fields
+	// (Mongo bson omitempty, legacy stores) — a nil map here would
+	// crash selectEdgeRS the first time it tries `rs.loopCounters[X]++`.
 	loopCounters := cp.LoopCounters
 	if loopCounters == nil {
 		loopCounters = make(map[string]int)
@@ -228,7 +301,7 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 	// the host has v0.2.0 — the marker file logic preserves any user
 	// customisation. See F-RT-7.
 	if err := mirrorBundleSkills(e.workDir, e.bundle, e.logger); err != nil {
-		return fmt.Errorf("runtime: bundle skills (resume): %w", err)
+		return nil, nil, fmt.Errorf("runtime: bundle skills (resume): %w", err)
 	}
 	// Re-apply the preset's "## Focus" bias + skill hints on resume so a
 	// paused run that resumes keeps running as the selected sous-bot.
@@ -273,9 +346,8 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 				e.logger.Warn("runtime: resume: failed both FailRunResumable (%v) and UpdateRunStatus (%v) for run %s after sandbox error: %v", err, uerr, runID, sbErr)
 			}
 		}
-		return fmt.Errorf("runtime: sandbox: %w", sbErr)
+		return nil, nil, fmt.Errorf("runtime: sandbox: %w", sbErr)
 	}
-	defer sandboxCleanup()
 
 	rs := e.newRunState(runID, r.Inputs)
 	rs.vars = e.resolveVars(r.Inputs)
@@ -292,45 +364,7 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 	// just built.
 	e.pushExecutorVars(rs.vars)
 
-	// When the pause originated from a delegate (an agent/judge that
-	// emitted _needs_interaction or called the native ask_user tool),
-	// the paused node still owes its work — re-invoke it with the
-	// answer merged into the input. Without this branch, the runtime
-	// would treat the agent/judge as a finished human node and skip
-	// past it, losing the verdict it was supposed to produce.
-	if cp.BackendName != "" {
-		node, ok := e.workflow.Nodes[humanNodeID]
-		if !ok {
-			return fmt.Errorf("runtime: paused node %q not found in workflow", humanNodeID)
-		}
-		ni := &model.ErrNeedsInteraction{
-			NodeID:           humanNodeID,
-			Questions:        cp.InteractionQuestions,
-			SessionID:        cp.BackendSessionID,
-			Backend:          cp.BackendName,
-			Conversation:     cp.BackendConversation,
-			PendingToolUseID: cp.BackendPendingToolUseID,
-		}
-		loopErr := e.reInvokeBackend(ctx, rs, humanNodeID, node, ni, answers, 0)
-		e.evictRunSessions(runID, loopErr)
-		return loopErr
-	}
-
-	// Select edge from the human node to find the next node.
-	nextNodeID, err := e.selectEdgeRS(rs, humanNodeID, answers)
-	if err != nil {
-		return e.failRunErrWithCheckpoint(rs, humanNodeID, err)
-	}
-
-	loopErr := e.execLoop(ctx, rs, nextNodeID)
-	e.evictRunSessions(runID, loopErr)
-	// Resumed worktree runs need the same persistent-branch + FF step
-	// fresh launches get; without this the GC guard never lands and
-	// commits are reachable only via reflog. See F-RT-1.
-	if wtCtx := e.reconstructWorktreeContext(r); wtCtx != nil {
-		e.finalizeOnExit(ctx, runID, wtCtx, nil, loopErr)
-	}
-	return loopErr
+	return rs, sandboxCleanup, nil
 }
 
 // resumeFromFailure resumes a failed_resumable run by re-executing from
@@ -1064,6 +1098,11 @@ type pauseInfo struct {
 	BackendName             string
 	BackendConversation     json.RawMessage
 	BackendPendingToolUseID string
+	// Turns carries the accumulated companion↔human dialogue for a review
+	// gate (interaction: review). doPause stamps it onto the written
+	// Interaction so the whole thread re-renders on resume. Nil for
+	// ordinary single-shot human pauses.
+	Turns []store.InteractionTurn
 }
 
 // drainOperatorMessagesForPause empties the run's operator-queued
@@ -1125,6 +1164,7 @@ func (e *Engine) doPause(rs *runState, nodeID string, questions map[string]inter
 		NodeID:      nodeID,
 		RequestedAt: time.Now().UTC(),
 		Questions:   questions,
+		Turns:       info.Turns,
 	}
 	if err := e.store.WriteInteraction(rs.ctx, interaction); err != nil {
 		return fmt.Errorf("runtime: write interaction: %w", err)

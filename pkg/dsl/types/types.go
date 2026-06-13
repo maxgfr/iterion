@@ -166,6 +166,7 @@ const (
 	InteractionHuman                             // always pause for human input (default for human nodes)
 	InteractionLLM                               // LLM auto-answers interaction questions
 	InteractionLLMOrHuman                        // LLM decides whether to answer or escalate to human
+	InteractionReview                            // guided review-&-merge gate: companion-driven multi-turn dialogue ending in a squash-merge
 )
 
 func (im InteractionMode) String() string {
@@ -178,6 +179,8 @@ func (im InteractionMode) String() string {
 		return "llm"
 	case InteractionLLMOrHuman:
 		return "llm_or_human"
+	case InteractionReview:
+		return "review"
 	default:
 		return "unknown"
 	}

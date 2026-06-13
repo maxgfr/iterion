@@ -36,14 +36,19 @@ const (
 	EventRunPaused            EventType = "run_paused"
 	EventHumanAnswersRecorded EventType = "human_answers_recorded"
 	EventRunResumed           EventType = "run_resumed"
-	EventJoinReady            EventType = "join_ready"
-	EventNodeFinished         EventType = "node_finished"
-	EventEdgeSelected         EventType = "edge_selected"
-	EventBudgetWarning        EventType = "budget_warning"
-	EventBudgetExceeded       EventType = "budget_exceeded"
-	EventRunFinished          EventType = "run_finished"
-	EventRunFailed            EventType = "run_failed"
-	EventRunCancelled         EventType = "run_cancelled"
+	// Review-&-merge gate events (interaction: review). The gate runs a
+	// companion↔human dialogue and squash-merges during the pause.
+	EventReviewTurn     EventType = "review_turn"    // data: {interaction_id, role, turn}
+	EventReviewVerdict  EventType = "review_verdict" // data: {decision, confidence, blockers}
+	EventReviewMerged   EventType = "review_merged"  // data: {final_commit, merged_into, strategy}
+	EventJoinReady      EventType = "join_ready"
+	EventNodeFinished   EventType = "node_finished"
+	EventEdgeSelected   EventType = "edge_selected"
+	EventBudgetWarning  EventType = "budget_warning"
+	EventBudgetExceeded EventType = "budget_exceeded"
+	EventRunFinished    EventType = "run_finished"
+	EventRunFailed      EventType = "run_failed"
+	EventRunCancelled   EventType = "run_cancelled"
 	// EventAlert is an in-process-only run-health alert (stall, budget,
 	// failure) fanned out to studio browser sessions via the event
 	// broker. It is NEVER persisted to events.jsonl — the alert Manager

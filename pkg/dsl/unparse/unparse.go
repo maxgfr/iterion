@@ -238,6 +238,21 @@ func Unparse(f *ast.File) string {
 		if h.System != "" {
 			writeProp(&b, "system", h.System)
 		}
+		if h.ReviewURL != "" {
+			writeQuotedProp(&b, "review_url", h.ReviewURL)
+		}
+		if h.Posture != "" {
+			writeProp(&b, "posture", h.Posture)
+		}
+		if h.MergeStrategy != "" {
+			writeProp(&b, "merge_strategy", h.MergeStrategy)
+		}
+		if h.MergeInto != "" {
+			writeQuotedProp(&b, "merge_into", h.MergeInto)
+		}
+		if h.MaxTurns > 0 {
+			fmt.Fprintf(&b, "  max_turns: %d\n", h.MaxTurns)
+		}
 		if h.Await != ast.AwaitNone {
 			writeProp(&b, "await", h.Await.String())
 		}

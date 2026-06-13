@@ -63,6 +63,28 @@ export interface BannerMessage {
 // flow can re-ask; outside it's effectively a "skip".
 export type QuickActionKind = "skip" | "idk" | "later";
 
+// One turn in a review-gate (interaction: review) companion↔human dialogue.
+export interface ReviewTurn {
+  role: "companion" | "human";
+  content?: string;
+  verdict?: Record<string, unknown>;
+  at?: string;
+}
+
+// Metadata for a guided review-&-merge gate, carried on the paused
+// human_input_requested event (evt.data.review === true). Drives the
+// ReviewMergeCard: the dialogue thread + the squash-merge controls.
+export interface ReviewGateMeta {
+  turns: ReadonlyArray<ReviewTurn>;
+  posture: string; // "human_required" | "agent_verdict_ok"
+  mergeStrategy: string; // "squash" | "merge"
+  mergeInto: string; // "current" | "none" | <branch>
+  maxTurns: number;
+  turn: number;
+  reviewUrl?: string;
+  verdict?: Record<string, unknown>;
+}
+
 export interface HumanQuestionMessage {
   kind: "human-question";
   id: string;
@@ -88,6 +110,11 @@ export interface HumanQuestionMessage {
   // already gives the operator structured choices). Default for
   // free-text turns: ["skip", "idk"].
   quickActions?: ReadonlyArray<QuickActionKind>;
+  // Set when this pause is a guided review-&-merge gate
+  // (interaction: review). The renderer shows ReviewMergeCard — the
+  // companion dialogue + squash-merge controls — instead of the
+  // free-text / schema form.
+  review?: ReviewGateMeta;
 }
 
 // Generic node-output card pushed after an agent/judge/compute node

@@ -1510,10 +1510,26 @@ func (p *parser) parseHumanProp(hd *ast.HumanDecl, propTok Token) {
 		p.expect(TokenColon)
 		hd.Await = p.parseAwaitMode()
 	case TokenIdent:
-		if propTok.Value == "min_answers" {
+		switch propTok.Value {
+		case "min_answers":
 			p.expect(TokenColon)
 			hd.MinAnswers = p.expectInt()
-		} else {
+		case "review_url":
+			p.expect(TokenColon)
+			hd.ReviewURL = p.expectString()
+		case "posture":
+			p.expect(TokenColon)
+			hd.Posture = p.expectStringOrIdent()
+		case "merge_strategy":
+			p.expect(TokenColon)
+			hd.MergeStrategy = p.expectStringOrIdent()
+		case "merge_into":
+			p.expect(TokenColon)
+			hd.MergeInto = p.expectStringOrIdent()
+		case "max_turns":
+			p.expect(TokenColon)
+			hd.MaxTurns = p.expectInt()
+		default:
 			p.addError(DiagUnknownProperty, propTok, "unknown human property '"+propTok.Value+"'")
 			p.skipToNewline()
 		}
@@ -1535,8 +1551,10 @@ func (p *parser) parseInteractionMode() ast.InteractionMode {
 		return ast.InteractionLLM
 	case "llm_or_human":
 		return ast.InteractionLLMOrHuman
+	case "review":
+		return ast.InteractionReview
 	default:
-		p.addError(DiagInvalidValue, t, "expected interaction mode (none, human, llm, llm_or_human), got '"+t.Value+"'")
+		p.addError(DiagInvalidValue, t, "expected interaction mode (none, human, llm, llm_or_human, review), got '"+t.Value+"'")
 		return ast.InteractionNone
 	}
 }

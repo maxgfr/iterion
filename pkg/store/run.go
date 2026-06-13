@@ -574,8 +574,24 @@ type Interaction struct {
 	AnsweredAt  *time.Time             `json:"answered_at,omitempty" bson:"answered_at,omitempty"`
 	Questions   map[string]interface{} `json:"questions,omitempty" bson:"questions,omitempty"`
 	Answers     map[string]interface{} `json:"answers,omitempty" bson:"answers,omitempty"`
+	// Turns is the ordered companion↔human dialogue for a review gate
+	// (interaction: review). The gate re-pauses on the same interaction ID
+	// each round and appends a turn, so the whole conversation lives here
+	// and re-renders verbatim on resume. Empty for ordinary single-shot
+	// human pauses.
+	Turns []InteractionTurn `json:"turns,omitempty" bson:"turns,omitempty"`
 	// TenantID mirrors Run.TenantID so cross-tenant access checks can
 	// be enforced at the interaction layer too. Empty for legacy
 	// filesystem records.
 	TenantID string `json:"tenant_id,omitempty" bson:"tenant_id,omitempty"`
+}
+
+// InteractionTurn is one message in a guided review-gate dialogue.
+// The companion (an LLM that walks the human through testing the change)
+// and the human alternate turns until the gate squash-merges.
+type InteractionTurn struct {
+	Role    string                 `json:"role" bson:"role"`                           // "companion" | "human"
+	Content string                 `json:"content,omitempty" bson:"content,omitempty"` // rendered companion message, or the human's reply text
+	Verdict map[string]interface{} `json:"verdict,omitempty" bson:"verdict,omitempty"` // companion's structured verdict (decision/confidence/blockers)
+	At      time.Time              `json:"at" bson:"at"`
 }

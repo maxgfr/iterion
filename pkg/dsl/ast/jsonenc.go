@@ -70,6 +70,7 @@ var interactionModeToStr = map[InteractionMode]string{
 	InteractionHuman:      "human",
 	InteractionLLM:        "llm",
 	InteractionLLMOrHuman: "llm_or_human",
+	InteractionReview:     "review",
 }
 
 var strToInteractionMode = reverseMap(interactionModeToStr)
@@ -356,6 +357,11 @@ type jsonHumanDecl struct {
 	Model             string `json:"model,omitempty"`
 	System            string `json:"system,omitempty"`
 	Await             string `json:"await,omitempty"`
+	ReviewURL         string `json:"review_url,omitempty"`
+	Posture           string `json:"posture,omitempty"`
+	MergeStrategy     string `json:"merge_strategy,omitempty"`
+	MergeInto         string `json:"merge_into,omitempty"`
+	MaxTurns          int    `json:"max_turns,omitempty"`
 }
 
 type jsonToolNodeDecl struct {
@@ -966,6 +972,11 @@ func humanToJSON(h *HumanDecl) *jsonHumanDecl {
 		Model:             h.Model,
 		System:            h.System,
 		Await:             awaitModeToStr[h.Await],
+		ReviewURL:         h.ReviewURL,
+		Posture:           h.Posture,
+		MergeStrategy:     h.MergeStrategy,
+		MergeInto:         h.MergeInto,
+		MaxTurns:          h.MaxTurns,
 	}
 }
 
@@ -1437,6 +1448,11 @@ func humanFromJSONWithInteraction(jh *jsonHumanDecl, interaction InteractionMode
 		Model:             jh.Model,
 		System:            jh.System,
 		Await:             aw,
+		ReviewURL:         jh.ReviewURL,
+		Posture:           jh.Posture,
+		MergeStrategy:     jh.MergeStrategy,
+		MergeInto:         jh.MergeInto,
+		MaxTurns:          jh.MaxTurns,
 	}, nil
 }
 

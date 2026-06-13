@@ -2,6 +2,7 @@ import type { HumanQuestionMessage } from "@/lib/runChat/types";
 
 import HumanPromptForm from "./HumanPromptForm";
 import MarkdownText from "./MarkdownText";
+import ReviewMergeCard from "./ReviewMergeCard";
 
 interface Props {
   runId: string;
@@ -33,6 +34,11 @@ export default function HumanQuestionCard({ runId, message, isActive }: Props) {
         </code>
       </div>
     );
+  }
+  // Guided review-&-merge gate (interaction: review) → the dialogue + merge
+  // controls replace the standard reply form.
+  if (message.review) {
+    return <ReviewMergeCard runId={runId} message={message} />;
   }
   return (
     <div className="mt-1 rounded-md border-2 border-warning bg-warning-soft/20 px-3 py-2 space-y-2">

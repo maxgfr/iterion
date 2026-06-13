@@ -33,6 +33,7 @@ import type {
   ExtensionMessage,
   HumanQuestionMessage,
   NodeOutputMessage,
+  ReviewGateMeta,
   RunChatMessage,
   UserMessage,
   UserMessageStatus,
@@ -520,6 +521,30 @@ function processEvent(
         evt.data.instructions.trim().length > 0
           ? (evt.data.instructions as string)
           : undefined;
+      // Guided review-&-merge gate (interaction: review): the event carries
+      // the companion dialogue + merge config so ReviewMergeCard renders
+      // self-contained.
+      const review =
+        evt.data?.review === true
+          ? ({
+              turns: Array.isArray(evt.data?.turns)
+                ? (evt.data.turns as ReviewGateMeta["turns"])
+                : [],
+              posture: String(evt.data?.posture ?? "human_required"),
+              mergeStrategy: String(evt.data?.merge_strategy ?? "squash"),
+              mergeInto: String(evt.data?.merge_into ?? "current"),
+              maxTurns: Number(evt.data?.max_turns ?? 0),
+              turn: Number(evt.data?.turn ?? 0),
+              reviewUrl:
+                typeof evt.data?.review_url === "string"
+                  ? (evt.data.review_url as string)
+                  : undefined,
+              verdict:
+                evt.data?.verdict && typeof evt.data.verdict === "object"
+                  ? (evt.data.verdict as Record<string, unknown>)
+                  : undefined,
+            } satisfies ReviewGateMeta)
+          : undefined;
       const idx = out.length;
       out.push({
         kind: "human-question",
@@ -530,6 +555,7 @@ function processEvent(
         actions: hints?.actions,
         quickActions: hints?.quickActions,
         questions,
+        review,
       } satisfies HumanQuestionMessage);
       humanIdx.set(key, idx);
       latestPendingHumanKey = key;

@@ -837,6 +837,24 @@ func (e *Engine) finalizeOnExit(ctx context.Context, runID string, wtCtx *worktr
 		}
 		return
 	}
+	// Idempotency guard for the review-&-merge gate: a review gate
+	// (interaction: review) finalizes the worktree DURING the human pause —
+	// it creates the storage branch and squash-merges (or, for
+	// merge_into: none, creates the branch only). It records final_branch
+	// either way. In the live Run/resume path final_branch is otherwise
+	// empty until finalizeWorktree sets it, so its presence here means the
+	// gate already finalized. Re-running finalizeWorktree would create a
+	// duplicate storage branch and possibly re-merge — skip it, just clean up.
+	if r, err := e.store.LoadRun(ctx, runID); err == nil && r.FinalBranch != "" {
+		if e.logger != nil {
+			e.logger.Info("runtime: finalize: run already finalized at review gate (%s, status=%s); skipping",
+				r.FinalBranch, r.MergeStatus)
+		}
+		if cleanup != nil {
+			cleanup()
+		}
+		return
+	}
 	finRes := finalizeWorktree(*wtCtx, finalizeOptions{
 		runName:       e.runName,
 		runID:         runID,
@@ -1021,6 +1039,22 @@ func (e *Engine) execLoopDispatchSpecial(ctx context.Context, rs *runState, curr
 			// LLM interaction human nodes execute via the standard
 			// pipeline below (executeHumanLLM handles model + schema).
 			return false, false, "", nil
+		case ir.InteractionReview:
+			// Guided review-&-merge gate: run the companion for the first
+			// turn, then either pause for the human or (posture:
+			// agent_verdict_ok) auto-merge on a favorable verdict and
+			// advance to the next node.
+			next, terminal, gErr := e.execReviewGate(ctx, rs, currentNodeID, n)
+			if gErr != nil {
+				return true, true, "", gErr
+			}
+			if terminal {
+				return true, true, "", nil
+			}
+			if next != "" {
+				return true, false, next, nil
+			}
+			return true, true, "", ErrRunPaused
 		case ir.InteractionLLMOrHuman:
 			paused, autoErr := e.execAutoOrPauseHuman(ctx, rs, currentNodeID, node)
 			if autoErr != nil {

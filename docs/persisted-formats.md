@@ -128,10 +128,13 @@ The authoritative list is `pkg/store/event.go` (`EventType` constants). Current 
 | `tool_called` | yes | `tool`, `input_size`, `duration_ms`, `tool_use_id?`, `input?`, `output?`, `output_preview?`, `output_size?`, `output_ref?` |
 | `tool_error` | yes | `tool`, `input_size`, `duration_ms`, `tool_use_id?`, `error`, `input?`, `output?`, `output_preview?`, `output_size?`, `output_ref?` |
 | `artifact_written` | yes | `publish`, `version` |
-| `human_input_requested` | yes | `interaction_id`, `questions` |
+| `human_input_requested` | yes | `interaction_id`, `questions`, (review gate also: `review`, `instructions`, `posture`, `merge_strategy`, `merge_into`, `review_url?`, `verdict?`, `turn`, `turns`) |
 | `run_paused` | yes | — |
 | `human_answers_recorded` | yes | `interaction_id`, `answers` |
 | `run_resumed` | no | `resumed_from?`, `restart_node?`, `from_entry?` |
+| `review_turn` | yes | `role` (companion/human), `turn` |
+| `review_verdict` | yes | `decision`, `confidence?`, `blockers?` |
+| `review_merged` | yes | `final_commit`, `merged_into`, `strategy` |
 | `join_ready` | yes | `strategy`, `failed_branches?` |
 | `node_finished` | yes | `output`, `_tokens`, `_cost_usd` (router nodes may instead emit `selected_route`, `reasoning`) |
 | `edge_selected` | no | `from`, `to`, `condition?`, `negated?`, `loop?`, `iteration?`, `expression?` |
@@ -183,7 +186,16 @@ and falls back to a directory scan for runs created before the index was introdu
   "requested_at": "2026-01-01T00:01:00Z",
   "answered_at": "2026-01-01T00:05:00Z",  // null until answered
   "questions": { "summary": "..." },       // mapped from upstream
-  "answers": { "approve": true }           // filled on resume
+  "answers": { "approve": true },          // filled on resume
+  // Review-&-merge gate (interaction: review) only — the ordered
+  // companion↔human dialogue. The gate re-pauses on the same
+  // interaction id each round and appends a turn, so the whole
+  // thread re-renders verbatim on resume. Absent for ordinary
+  // single-shot human pauses.
+  "turns": [
+    { "role": "companion", "content": "1. Run `npm run dev`…", "verdict": { "decision": "changes_requested" }, "at": "…" },
+    { "role": "human",     "content": "page is blank",                                                          "at": "…" }
+  ]
 }
 ```
 

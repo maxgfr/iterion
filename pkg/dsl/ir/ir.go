@@ -209,6 +209,16 @@ type HumanNode struct {
 	Model        string // model for LLM-based interaction modes
 	SystemPrompt string // prompt reference for LLM-based interaction modes
 	AwaitMode    AwaitMode
+
+	// Review-gate fields (interaction: review). The gate runs a
+	// companion-driven multi-turn dialogue that walks the human through
+	// testing the change, then squash-merges the worktree during the pause.
+	ReviewURL     string // raw template (e.g. "{{outputs.provision.url}}") for the review env; resolved at runtime
+	ReviewURLRefs []*Ref // parsed refs in ReviewURL (compile-time validation)
+	Posture       string // PostureHumanRequired (default) | PostureAgentVerdictOK
+	MergeStrategy string // "squash" (default) | "merge"
+	MergeInto     string // "current" (default) | "none" | <branch>
+	MaxTurns      int    // dialogue asymptote backstop (0 → DefaultReviewMaxTurns)
 }
 
 // NodeKind implements Node.
@@ -472,7 +482,18 @@ const (
 	InteractionHuman      = types.InteractionHuman
 	InteractionLLM        = types.InteractionLLM
 	InteractionLLMOrHuman = types.InteractionLLMOrHuman
+	InteractionReview     = types.InteractionReview
 )
+
+// Review-gate posture values (interaction: review).
+const (
+	PostureHumanRequired  = "human_required"   // always wait for the human's merge action (default)
+	PostureAgentVerdictOK = "agent_verdict_ok" // a high-confidence companion approval may auto-merge
+)
+
+// DefaultReviewMaxTurns bounds the companion↔human dialogue so it always
+// converges to an asymptote rather than re-pausing forever.
+const DefaultReviewMaxTurns = 8
 
 // ---------------------------------------------------------------------------
 // MCP

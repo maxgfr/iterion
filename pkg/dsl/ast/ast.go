@@ -454,6 +454,7 @@ const (
 	InteractionHuman      = types.InteractionHuman
 	InteractionLLM        = types.InteractionLLM
 	InteractionLLMOrHuman = types.InteractionLLMOrHuman
+	InteractionReview     = types.InteractionReview
 )
 
 // ---------------------------------------------------------------------------
@@ -471,10 +472,18 @@ type HumanDecl struct {
 	InteractionPrompt string          // prompt reference guiding LLM for llm_or_human decisions
 	InteractionModel  string          // model for llm/llm_or_human modes (fallback to Model)
 	MinAnswers        int             // minimum human answers required
-	Model             string          // model identifier (required for llm / llm_or_human)
+	Model             string          // model identifier (required for llm / llm_or_human / review)
 	System            string          // prompt reference for LLM system prompt
 	Await             AwaitMode       // convergence strategy (none/wait_all/best_effort)
-	Span              Span
+
+	// Review-gate fields (interaction: review).
+	ReviewURL     string // template for the review env URL (e.g. "{{outputs.provision.url}}")
+	Posture       string // "human_required" (default) | "agent_verdict_ok"
+	MergeStrategy string // "squash" (default) | "merge"
+	MergeInto     string // "current" (default) | "none" | <branch>
+	MaxTurns      int    // dialogue asymptote backstop
+
+	Span Span
 }
 
 // ---------------------------------------------------------------------------
