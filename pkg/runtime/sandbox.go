@@ -19,6 +19,8 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -42,6 +44,8 @@ type activeSandbox struct {
 	run             sandbox.Run
 	proxy           *netproxy.Proxy
 	workspaceFolder string // in-container path the host worktree is bind-mounted to (Spec.WorkspaceFolder, e.g. "/workspace"); used by Engine to remap ${PROJECT_DIR}
+	boardEndpoint   string       // http URL of the per-run gateway-reachable board MCP listener (C082); empty when not started (no handler / not sandboxed)
+	boardListener   *http.Server // the board listener to shut down at teardown; nil when not started
 }
 
 // shutdown tears down both handles best-effort. Safe to call multiple
@@ -60,6 +64,74 @@ func (a *activeSandbox) shutdown(ctx context.Context, logger *iterlog.Logger) {
 			logger.Warn("runtime: sandbox proxy shutdown: %v", err)
 		}
 	}
+	if a.boardListener != nil {
+		if err := a.boardListener.Shutdown(ctx); err != nil && logger != nil {
+			logger.Warn("runtime: sandbox board listener shutdown: %v", err)
+		}
+	}
+}
+
+// startBoardMCPListener binds a per-run, gateway-reachable HTTP listener
+// serving the board MCP routes (handler) so a sandboxed claude_code node
+// can reach the operator's board from inside the container (C082). It
+// reuses the egress proxy's driver-specific bind (docker → 0.0.0.0:0
+// advertised as host.docker.internal) so the container can dial it the
+// same way it dials the proxy. The listener serves the SAME in-process
+// native.Store the studio uses (via the handler), so writes serialize
+// through that Store's mutex — the reason the board transport is HTTP and
+// not a second in-container process. Returns the container-reachable
+// endpoint URL and the *http.Server (shut down at sandbox teardown).
+func startBoardMCPListener(driver sandbox.Driver, handler http.Handler) (endpoint string, srv *http.Server, err error) {
+	bind, advertise, err := proxyAddressesForDriver(driver)
+	if err != nil {
+		return "", nil, err
+	}
+	ln, err := net.Listen("tcp", bind)
+	if err != nil {
+		return "", nil, err
+	}
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		_ = ln.Close()
+		return "", nil, err
+	}
+	srv = &http.Server{Handler: handler}
+	go func() { _ = srv.Serve(ln) }()
+	endpoint = "http://" + net.JoinHostPort(advertise, port) + "/api/v1/mcp/board"
+	return endpoint, srv, nil
+}
+
+// workflowHasBoardCapability reports whether the workflow (or any of its
+// agent/judge nodes) declares a `board.*` capability — the gate for
+// starting the per-run board MCP listener.
+func workflowHasBoardCapability(wf *ir.Workflow) bool {
+	if wf == nil {
+		return false
+	}
+	has := func(caps []string) bool {
+		for _, c := range caps {
+			if strings.HasPrefix(c, "board.") {
+				return true
+			}
+		}
+		return false
+	}
+	if has(wf.Capabilities) {
+		return true
+	}
+	for _, n := range wf.Nodes {
+		switch nn := n.(type) {
+		case *ir.AgentNode:
+			if has(nn.Capabilities) {
+				return true
+			}
+		case *ir.JudgeNode:
+			if has(nn.Capabilities) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // SandboxParams bundles the resolution inputs for
@@ -141,6 +213,13 @@ type SandboxParams struct {
 	// secrets and ITERION_SANDBOX_TLS_INSPECT is not disabled. Enabling
 	// inspection also forces a proxy to run even under network: open.
 	SecretRewriter netproxy.SecretRewriter
+
+	// BoardMCPHandler, when non-nil, serves the board MCP routes for a
+	// per-run gateway-reachable listener started alongside the egress
+	// proxy, so sandboxed board-capability nodes can write the operator's
+	// board (C082). The engine sets it from WithBoardMCP (server path);
+	// nil (CLI / no server) leaves sandboxed board-emit disabled.
+	BoardMCPHandler http.Handler
 }
 
 // resolveAndStartSandbox produces an [activeSandbox] for the workflow's
@@ -273,7 +352,29 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 		return nil, fmt.Errorf("runtime: sandbox: start: %w", err)
 	}
 	emitSandboxStarted(prepared, spec, driver.Name(), source, emitEvent)
-	return &activeSandbox{run: run, proxy: proxy, workspaceFolder: spec.WorkspaceFolder}, nil
+
+	active := &activeSandbox{run: run, proxy: proxy, workspaceFolder: spec.WorkspaceFolder}
+
+	// C082: when the server supplies a board MCP handler and a board-cap
+	// node exists, start a per-run gateway-reachable board listener so
+	// sandboxed claude_code can write the operator's board. Non-fatal: a
+	// failure degrades to the prior (board-disabled) behaviour rather than
+	// breaking the run.
+	if p.BoardMCPHandler != nil && workflowHasBoardCapability(p.Workflow) {
+		endpoint, srv, berr := startBoardMCPListener(driver, p.BoardMCPHandler)
+		if berr != nil {
+			if logger != nil {
+				logger.Warn("runtime: sandbox: board MCP listener failed to start (board-emit disabled for this run): %v", berr)
+			}
+		} else {
+			active.boardEndpoint = endpoint
+			active.boardListener = srv
+			if logger != nil {
+				logger.Info("sandbox: board MCP listener on %s (sandboxed board-emit enabled)", endpoint)
+			}
+		}
+	}
+	return active, nil
 }
 
 // secretEgressRewriter is the structural view of the executor's secret
@@ -977,6 +1078,15 @@ type sandboxSetter interface {
 	SetSandbox(run sandbox.Run)
 }
 
+// boardMCPSetter is the optional interface ClawExecutor implements so the
+// engine can push the per-run board MCP HTTP endpoint (started with the
+// sandbox) into the executor after the run starts. The executor sets
+// Task.BoardHTTPEndpoint/BoardRunToken from it for sandboxed board-cap
+// nodes (C082). Type-asserted at call time so test stubs need not implement it.
+type boardMCPSetter interface {
+	SetBoardEndpoint(endpoint string)
+}
+
 // startSandbox boots the run's sandbox container (if the workflow opts
 // in), wires it into the executor, stashes the in-container workspace
 // path, and returns a no-arg cleanup the caller must defer.
@@ -1061,6 +1171,7 @@ func (e *Engine) startSandbox(ctx context.Context, runID string, repoRoot string
 		BundleContainerPath:      "/run/iterion/bundle",
 		WorktreeGitDir:           worktreeGitDir,
 		SecretRewriter:           e.resolveSecretRewriter(),
+		BoardMCPHandler:          e.boardMCPHandler,
 	})
 	if sbErr != nil {
 		return noopCleanup, sbErr
@@ -1068,6 +1179,15 @@ func (e *Engine) startSandbox(ctx context.Context, runID string, repoRoot string
 	if active != nil && active.run != nil {
 		if s, ok := e.executor.(sandboxSetter); ok {
 			s.SetSandbox(active.run)
+		}
+		// C082: hand the per-run board MCP endpoint to the executor so it
+		// can wire Task.BoardHTTPEndpoint/BoardRunToken for sandboxed
+		// board-cap nodes. Empty when no listener started (no handler /
+		// no board cap / start failed) — executor then leaves it disabled.
+		if active.boardEndpoint != "" {
+			if bs, ok := e.executor.(boardMCPSetter); ok {
+				bs.SetBoardEndpoint(active.boardEndpoint)
+			}
 		}
 		// Stash the in-container bind-mount target so resolveVars can
 		// remap ${PROJECT_DIR} to a path processes RUNNING in the

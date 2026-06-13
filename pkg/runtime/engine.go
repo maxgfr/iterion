@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -105,6 +106,7 @@ type Engine struct {
 	callbackURL              string                // optional: run-completion webhook target persisted on the run; set via WithCallback
 	callbackToken            string                // optional: opaque correlation token echoed in the completion payload; set via WithCallback
 	callbackAnswerNode       string                // optional: node whose latest artifact holds the run's final answer; set via WithCallback
+	boardMCPHandler          http.Handler          // optional: serves the board MCP routes; when set + a sandbox is active, a per-run gateway-reachable listener is started so sandboxed board-cap nodes can write the operator's board (C082). Set via WithBoardMCP; nil disables sandboxed board-emit (CLI runs with no server).
 }
 
 // AttachmentPromoteFunc is invoked once at the start of a run, right
@@ -120,6 +122,16 @@ type EngineOption func(*Engine)
 // WithLogger sets a leveled logger for console output during execution.
 func WithLogger(l *iterlog.Logger) EngineOption {
 	return func(e *Engine) { e.logger = l }
+}
+
+// WithBoardMCP wires the board MCP HTTP handler used to serve a per-run
+// gateway-reachable board listener when a sandbox is active, so sandboxed
+// board-capability nodes (claude_code) can write the operator's board
+// (C082). The handler must serve ONLY the board MCP routes (it is exposed
+// gateway-reachable, token-gated) — never the full server mux. Nil (CLI
+// runs with no server) leaves sandboxed board-emit disabled.
+func WithBoardMCP(h http.Handler) EngineOption {
+	return func(e *Engine) { e.boardMCPHandler = h }
 }
 
 // WithSandboxOverride sets the CLI / Launch-modal level sandbox mode.

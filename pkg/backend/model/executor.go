@@ -344,6 +344,16 @@ type ClawExecutor struct {
 	// runtime.Compactor structural interface only carries nodeID.
 	currentRunID string
 
+	// boardRegister mints a per-node board MCP run token for the given
+	// capabilities (returns the token registered with the server's
+	// BoardMCPTokenRegistry). Set via WithBoardRegister on the server
+	// path; nil on CLI runs (sandboxed board-emit then stays disabled).
+	boardRegister func(caps []string) string
+	// boardEndpoint is the per-run gateway-reachable board MCP URL pushed
+	// in by the engine after the sandbox starts (SetBoardEndpoint). Empty
+	// disables sandboxed board-emit wiring (C082).
+	boardEndpoint string
+
 	// detector lazily probes host credentials (claude_code OAuth,
 	// codex OAuth, ANTHROPIC_API_KEY, …) so resolveBackendName can
 	// auto-select a backend when neither node nor workflow specifies one.
@@ -374,8 +384,25 @@ func (e *ClawExecutor) SetSandbox(run sandbox.Run) {
 	e.sandbox = run
 }
 
+// SetBoardEndpoint installs the per-run gateway-reachable board MCP URL
+// (started with the sandbox) so the executor can wire
+// Task.BoardHTTPEndpoint/BoardRunToken for sandboxed board-cap nodes
+// (C082). Called by the engine after the sandbox starts; no-op endpoint
+// "" leaves sandboxed board-emit disabled.
+func (e *ClawExecutor) SetBoardEndpoint(endpoint string) {
+	e.boardEndpoint = endpoint
+}
+
 // ClawExecutorOption configures a ClawExecutor.
 type ClawExecutorOption func(*ClawExecutor)
+
+// WithBoardRegister installs the per-node board MCP token minter (server
+// path). The closure registers a token for the node's board capabilities
+// with the server's BoardMCPTokenRegistry and returns it; the executor
+// pairs it with the board endpoint on each sandboxed board-cap node.
+func WithBoardRegister(fn func(caps []string) string) ClawExecutorOption {
+	return func(e *ClawExecutor) { e.boardRegister = fn }
+}
 
 // WithEventHooks sets observability callbacks on the executor.
 func WithEventHooks(h EventHooks) ClawExecutorOption {
@@ -1244,6 +1271,16 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 	// restriction" — the MCP server is still registered and discoverable.
 	if delegate.HasBoardCapability(effectiveCaps) && len(effectiveTools) > 0 {
 		effectiveTools = append(effectiveTools, delegate.BoardToolsFor(effectiveCaps)...)
+	}
+	// C082: for a sandboxed board-cap node, wire the per-run board MCP HTTP
+	// transport (gateway listener started with the sandbox) so claude_code
+	// can reach the operator's board from inside the container. Mint a
+	// per-node token scoped to exactly this node's board caps. Non-sandboxed
+	// runs use the stdio __mcp-board server; CLI runs without a server leave
+	// boardEndpoint/boardRegister unset → board-emit disabled (documented).
+	if delegate.HasBoardCapability(effectiveCaps) && e.sandbox != nil && e.boardEndpoint != "" && e.boardRegister != nil {
+		task.BoardHTTPEndpoint = e.boardEndpoint
+		task.BoardRunToken = e.boardRegister(effectiveCaps)
 	}
 	// Ultracode grants standing consent to orchestrate subagents. On claw,
 	// the orchestration capability is the `agent` subagent tool; ensure it is
