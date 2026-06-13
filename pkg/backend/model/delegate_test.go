@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -125,6 +126,72 @@ func TestDelegation_EmitsStartedAndFinished(t *testing.T) {
 	}
 	if output["_tokens"] != 100 {
 		t.Errorf("expected _tokens=100, got %v", output["_tokens"])
+	}
+}
+
+// TestDelegation_InteractionSignalSkipsSchemaValidation is the regression
+// guard for the ask_user-on-schema+tools bug: a node with BOTH an output
+// schema AND interaction, whose backend returns a _needs_interaction pause
+// Result, must surface ErrNeedsInteraction WITHOUT first running schema
+// validation. Validating the {_needs_interaction:…} Output against the
+// node's schema would fail and trigger the schema-validation backend retry,
+// which replays the unanswered tool_call into a fresh generation (openai
+// 400 "tool_call_ids did not have response messages"). See
+// docs/bot-runs/evolve.md. The fix moves the interaction short-circuit
+// ahead of schema validation in executor.go.
+func TestDelegation_InteractionSignalSkipsSchemaValidation(t *testing.T) {
+	backend := &stubBackend{
+		results: []delegate.Result{{
+			Output: map[string]interface{}{
+				"_needs_interaction": true,
+				"_interaction_questions": map[string]interface{}{
+					"ask_user_response": "What is your favorite color?",
+				},
+			},
+			BackendName: "test_backend",
+		}},
+		// If the executor wrongly retries (the bug), the 2nd call returns
+		// this schema-shaped Result and the test would NOT see a pause —
+		// the calls-count assertion catches the regression either way.
+		fallback: delegate.Result{
+			Output:      map[string]interface{}{"answer": "blue"},
+			BackendName: "test_backend",
+		},
+	}
+
+	reg := delegate.NewRegistry()
+	reg.Register("test_backend", backend)
+	wf := &ir.Workflow{
+		Prompts: map[string]*ir.Prompt{},
+		Schemas: map[string]*ir.Schema{
+			"out_schema": {
+				Name:   "out_schema",
+				Fields: []*ir.SchemaField{{Name: "answer", Type: ir.FieldTypeString}},
+			},
+		},
+	}
+	exec := NewClawExecutor(NewRegistry(), wf,
+		WithBackendRegistry(reg),
+		WithRetryPolicy(RetryPolicy{MaxAttempts: 3, BackoffBase: time.Millisecond}),
+	)
+
+	node := &ir.AgentNode{
+		BaseNode:          ir.BaseNode{ID: "investigate"},
+		LLMFields:         ir.LLMFields{Backend: "test_backend"},
+		SchemaFields:      ir.SchemaFields{OutputSchema: "out_schema"},
+		InteractionFields: ir.InteractionFields{Interaction: ir.InteractionHuman},
+	}
+
+	_, err := exec.executeBackend(context.Background(), node, map[string]interface{}{})
+	var ni *ErrNeedsInteraction
+	if !errors.As(err, &ni) {
+		t.Fatalf("expected *ErrNeedsInteraction (clean pause), got %T: %v", err, err)
+	}
+	if got := ni.Questions["ask_user_response"]; got != "What is your favorite color?" {
+		t.Errorf("interaction question not propagated: %v", ni.Questions)
+	}
+	if backend.calls != 1 {
+		t.Fatalf("expected exactly 1 backend call (interaction must skip schema-validation retry), got %d", backend.calls)
 	}
 }
 

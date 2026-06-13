@@ -1387,6 +1387,36 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 	// Attach metadata.
 	stampDelegateOutputMeta(result.Output, result, backendName)
 
+	// Check for a backend interaction signal BEFORE schema validation.
+	// A `_needs_interaction` pause Result (e.g. an LLM ask_user call on a
+	// node that ALSO declares an output schema) is a control signal, not a
+	// schema-shaped data output — its Output is {_needs_interaction, …},
+	// which never matches the node's schema. Validating it first would fail
+	// and trigger the schema-validation backend retry below, which replays
+	// the unanswered tool_call into a fresh generation (openai 400
+	// "tool_call_ids did not have response messages" / Responses
+	// "No tool output found"). Short-circuit here so ask_user pauses
+	// cleanly on schema+tools nodes (e.g. claw + openai/forfait). See
+	// docs/bot-runs/evolve.md.
+	if f.interaction != ir.InteractionNone {
+		if needsInteraction, ok := result.Output["_needs_interaction"].(bool); ok && needsInteraction {
+			questions, _ := result.Output["_interaction_questions"].(map[string]interface{})
+			if questions == nil {
+				questions = map[string]interface{}{"input": "The backend needs your input to continue."}
+			}
+			delete(result.Output, "_needs_interaction")
+			delete(result.Output, "_interaction_questions")
+			return nil, &ErrNeedsInteraction{
+				NodeID:           f.id,
+				Questions:        questions,
+				SessionID:        result.SessionID,
+				Backend:          backendName,
+				Conversation:     result.PendingConversation,
+				PendingToolUseID: result.PendingToolUseID,
+			}
+		}
+	}
+
 	// Validate output against schema if present. Defence-in-depth: the
 	// IR compiler should reject any node whose `output:` names a schema
 	// absent from e.schemas (DiagUnknownSchema), so the "key missing"
@@ -1446,26 +1476,6 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		}
 	}
 validated:
-
-	// Check if the backend signaled that it needs user interaction.
-	if f.interaction != ir.InteractionNone {
-		if needsInteraction, ok := result.Output["_needs_interaction"].(bool); ok && needsInteraction {
-			questions, _ := result.Output["_interaction_questions"].(map[string]interface{})
-			if questions == nil {
-				questions = map[string]interface{}{"input": "The backend needs your input to continue."}
-			}
-			delete(result.Output, "_needs_interaction")
-			delete(result.Output, "_interaction_questions")
-			return nil, &ErrNeedsInteraction{
-				NodeID:           f.id,
-				Questions:        questions,
-				SessionID:        result.SessionID,
-				Backend:          backendName,
-				Conversation:     result.PendingConversation,
-				PendingToolUseID: result.PendingToolUseID,
-			}
-		}
-	}
 
 	return result.Output, nil
 }
