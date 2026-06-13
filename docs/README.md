@@ -87,6 +87,7 @@ per-org quotas, audit log, PATs, SMTP onboarding. We call it
 | [architecture.md](architecture.md) | Compiler pipeline, runtime engine, persistence layout. |
 | [adr/](adr/) | Architecture Decision Records (router semantics, AssetServer proxy, runview separation, privacy tools). |
 | [development.md](development.md) | Build, test, project structure — for contributors working on the Iterion codebase itself. |
+| [bot-runs/](bot-runs/) | **Bot validation & knowledge base** — one dated bilan per catalog-bot dogfood run (what it caught/missed, lessons, engine bugs surfaced). Read a bot's file before launching it. |
 | [desktop-architecture.md](desktop-architecture.md) | Desktop app's proxy-based AssetServer architecture (Wails v2 + embedded `pkg/server`). |
 | [desktop-build.md](desktop-build.md) | Local build flow + Docker reproducible builder + per-OS deps. |
 | [desktop-distribution.md](desktop-distribution.md) | Release signing + Ed25519 keypair setup. |

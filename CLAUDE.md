@@ -797,6 +797,39 @@ The same applies to a dedicated server instance you spin up from a worktree to
 exercise modified engine code: bind it to the operator's store dir (or tell
 the operator the port) so the runs are observable.
 
+### Every dogfood run gets a bilan in `docs/bot-runs/<bot>.md`
+
+The run artifacts under `.iterion/runs/<id>/` are gitignored — they vanish from
+everyone but you. So when you dogfood a catalog bot, **the run does not count as
+done until you've written a dated bilan** to `docs/bot-runs/<bot>.md` (named by
+bot **directory**, e.g. `whole-improve-loop.md`, not by persona). This is the
+repo's committed bot knowledge base: the next contributor reads a bot's file
+before launching it — what it caught, what it missed, what to change, which
+engine bugs the run surfaced. Append newest-first, one section per run:
+
+```markdown
+## YYYY-MM-DD — <short label> (run <id-prefix>)
+- Status: validated | partial | failed
+- Versions: bot <manifest version> · iterion <git sha>
+- Method: backend(s)/model(s), budget, key --vars, flags (--merge-into, post_to_board, sandbox image)
+- Result: converged? iterations, cost $, duration, where commits landed (branch/sha)
+- Value: the high-value thing it actually produced (or: low value + why)
+- Findings / misses: what the bot caught or missed
+- Engine hardening: iterion bugs found → commits/ADRs
+- Lessons for next run: what to change (vars, prompt, scanner, skill)
+```
+
+Cite the run-id; the full chronological report is reconstructable any time with
+`iterion report --run-id <id> --output /tmp/<bot>-<id>.md`. Cross-bot lessons
+(Goodhart, façade, asymptote) still go in
+[docs/workflow_authoring_pitfalls.md](docs/workflow_authoring_pitfalls.md), not
+the per-bot file. The bilan is **one of three knowledge channels — keep them
+distinct**: workspace memory (`~/.iterion/projects/.../memory/`, per-operator,
+gitignored — [docs/memory-and-knowledge.md](docs/memory-and-knowledge.md)) is
+session scratch; **board issues** are open tasks; **bilans** are the durable,
+committed, PR-reviewable record. Index + template:
+[docs/bot-runs/README.md](docs/bot-runs/README.md).
+
 ## CI/CD
 
 - **tests.yml** — on push/PR: gofmt, go vet, unit tests, e2e tests
