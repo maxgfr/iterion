@@ -170,3 +170,27 @@ never wired") is fixed + verified. Board-emit end-to-end is one focused
 claude-code-MCP-client step away: enable claude-code MCP debug, capture the
 `iterion_board` connect attempt, and align the handler's Streamable-HTTP behavior
 (session-id / SSE / protocol-version) to what the client requires.
+
+### Update — tried inline-config + NO_PROXY + proxy-resolve + GET→405; remaining cause is very likely HTTPS-only MCP
+
+Additional fixes applied + re-validated (all correct, none closed it alone):
+- inline `--mcp-config` JSON (part 3), NO_PROXY host.docker.internal (part 3),
+  proxy host.docker.internal→loopback (part 4), and GET→405 on the board endpoint
+  (Streamable-HTTP spec: a no-SSE server must 405 the GET, not 404).
+
+**Strongest remaining hypothesis: claude-code requires HTTPS for remote MCP
+servers and silently drops the plain-`http://` board listener.** Evidence: across
+every run, the ONLY MCP servers that connect are the operator's `https` claude.ai
+ones (Gmail/Calendar/Drive); `iterion_board` (http://host.docker.internal:<port>)
+never registers and never logs a connect error. A reachable, protocol-correct,
+spec-compliant http endpoint that simply never appears points at client-side
+scheme filtering.
+
+**Precise next step:** serve the per-run board listener over **TLS** using the
+sandbox's per-run ephemeral CA (already minted + injected into the container trust
+store for the egress proxy's inspection mode — see `netproxy.NewEphemeralCA` +
+the driver's CA injection). i.e. give `startBoardMCPListener` a `tls.Config` whose
+leaf is signed by that CA, advertise `https://host.docker.internal:<port>/...`,
+and the in-container claude (trusting the CA) accepts it. Confirm first by enabling
+claude-code MCP debug (`--mcp-debug`/verbose) to capture the exact reason
+`iterion_board` is dropped (https-only vs a config-shape nuance), then wire the TLS.

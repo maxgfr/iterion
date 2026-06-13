@@ -131,8 +131,25 @@ func (r *BoardMCPTokenRegistry) sweepLocked() {
 // over POST — one request per body, one response.
 func RegisterBoardMCPRoutes(mux *http.ServeMux, prefix string, store *native.Store, reg *BoardMCPTokenRegistry) {
 	h := &boardMCPHandler{store: store, registry: reg}
-	mux.HandleFunc("POST "+strings.TrimRight(prefix, "/"), h.serve)
-	mux.HandleFunc("POST "+strings.TrimRight(prefix, "/")+"/", h.serve)
+	p := strings.TrimRight(prefix, "/")
+	mux.HandleFunc("POST "+p, h.serve)
+	mux.HandleFunc("POST "+p+"/", h.serve)
+	// MCP Streamable HTTP clients (e.g. claude_code) open an optional
+	// server→client SSE stream with a GET to the same endpoint. We don't
+	// offer SSE (single-response JSON over POST is a valid Streamable HTTP
+	// mode), but the spec requires 405 Method Not Allowed for the GET so
+	// the client falls back to POST-only — NOT a 404, which a client reads
+	// as "endpoint doesn't exist" and aborts the whole connection (this is
+	// what kept iterion_board from registering in sandboxed claude_code).
+	mux.HandleFunc("GET "+p, boardMCPMethodNotAllowed)
+	mux.HandleFunc("GET "+p+"/", boardMCPMethodNotAllowed)
+}
+
+// boardMCPMethodNotAllowed signals "no SSE stream here; use POST" per the
+// MCP Streamable HTTP transport contract.
+func boardMCPMethodNotAllowed(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Allow", "POST")
+	http.Error(w, "method not allowed: board MCP endpoint accepts POST only", http.StatusMethodNotAllowed)
 }
 
 type boardMCPHandler struct {
