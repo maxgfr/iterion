@@ -29,6 +29,13 @@ func TestBackendIsClaw(t *testing.T) {
 		{"claude_code", false},
 		{"codex", false},
 		{"openai", false},
+		// Env-templated backends must be expanded before the check — the
+		// sec-audit-source/-deps `${ITERION_SEC_AUDIT_BACKEND:-claw}` pattern
+		// reaches us verbatim in the IR. A definitely-unset var exercises the
+		// `:-default` branch deterministically (regression: the unexpanded
+		// template used to read as non-claw, skipping the iterion bind-mount).
+		{"${ITERION_TEST_UNSET_BACKEND_XYZ:-claw}", true},
+		{"${ITERION_TEST_UNSET_BACKEND_XYZ:-claude_code}", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

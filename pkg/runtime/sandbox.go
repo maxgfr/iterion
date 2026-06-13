@@ -852,8 +852,16 @@ func containsClawNode(wf *ir.Workflow) bool {
 // backend is the *implicit* default when neither model nor backend is
 // set on a claude/codex-eligible node, so we treat both the explicit
 // "claw" name and the empty string as claw.
+//
+// The IR stores `backend:` verbatim, so an env-templated value like
+// `${ITERION_SEC_AUDIT_BACKEND:-claw}` reaches us unexpanded — the
+// executor only resolves it at run time (resolveBackendName →
+// ExpandEnvWithDefault). Expand here too, or a sandboxed bot whose claw
+// nodes are env-templated (sec-audit-source/-deps) is mis-detected as
+// claw-free, the iterion binary is never bind-mounted, and the claw
+// runner dies with `exec: "iterion": executable file not found in $PATH`.
 func backendIsClaw(name string) bool {
-	switch strings.ToLower(name) {
+	switch strings.ToLower(ir.ExpandEnvWithDefault(name)) {
 	case "", "claw":
 		return true
 	}
