@@ -114,6 +114,22 @@ func New(opts Options) (*Proxy, error) {
 		d := &net.Dialer{Timeout: 10 * time.Second}
 		dial = d.DialContext
 	}
+	// host.docker.internal is the container-side alias for the host
+	// gateway. When a sandboxed client routes a call to an iterion host
+	// service (the per-run board MCP listener — C082) THROUGH this proxy
+	// (some MCP clients ignore NO_PROXY), the proxy — which runs ON the
+	// host — must dial the host's own loopback, not literally resolve
+	// "host.docker.internal" (which has no host-side DNS entry, so the dial
+	// would fail). Rewrite it to 127.0.0.1 so host-gateway services are
+	// reachable whether the client honours NO_PROXY (direct) or not
+	// (proxied). External egress is unaffected — it uses real hostnames.
+	baseDial := dial
+	dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if host, port, err := net.SplitHostPort(addr); err == nil && host == "host.docker.internal" {
+			addr = net.JoinHostPort("127.0.0.1", port)
+		}
+		return baseDial(ctx, network, addr)
+	}
 	p := &Proxy{
 		policy:    opts.Policy,
 		token:     opts.Token,
