@@ -129,3 +129,44 @@ granted under a sandbox but `BoardHTTPEndpoint` is empty, claude_code should
 expose a board tool that returns an explicit "board unavailable in this run"
 error rather than no tool (the agent then can't confabulate created IDs). This
 turns a silent data-loss into a visible degradation.
+
+## Validation findings (2026-06-14) — implemented; one layer remains in claude-code
+
+Implemented on this branch (parts 1–4) and live-validated each iterion-side layer
+in isolation via a dedicated studio (worktree binary, port 4899, isolated store)
+running a minimal sandboxed claude_code board.create bot:
+
+1. **Gateway listener** — starts per run: `board MCP listener on
+   http://host.docker.internal:<port>/api/v1/mcp/board`. ✅
+2. **Producer wiring** — claude is exec'd with the correct inline
+   `--mcp-config {"mcpServers":{"iterion_board":{"type":"http","url":...,
+   "headers":{"X-Iterion-Run":...}}}}`. ✅
+3. **Inline MCP config** (part 3) — fixed `MCP config file not found` (host /tmp
+   file invisible to the container); config now passed as an inline JSON string. ✅
+4. **NO_PROXY + proxy host.docker.internal→loopback** (parts 3–4) — a container
+   reaches a host `0.0.0.0` listener via `host.docker.internal` directly (verified
+   with a controlled `docker run` curl). ✅
+5. **Handler MCP protocol** — `initialize` + `tools/list` return correct responses
+   with `Content-Type: application/json` (verified via curl against the live
+   endpoint with a real token). ✅
+
+**Remaining gap (claude-code's own MCP client, NOT iterion):** despite a reachable,
+protocol-correct endpoint, the sandboxed `claude_code` run reports `iterion_board`
+is "not registered" / never appears among connected MCP servers (only the operator's
+user-config servers — claude.ai Gmail/Calendar/Drive — connect). No MCP connect
+error is surfaced to stderr. So claude-code's **Streamable-HTTP MCP client** is not
+completing the handshake against our endpoint. Likely suspects to debug with
+claude-code's internal MCP logging (e.g. `--mcp-debug` / verbose):
+- It may require an `Mcp-Session-Id` header on the `initialize` response (the
+  handler is stateless/token-based and returns none).
+- It may require SSE (`text/event-stream`) or a GET endpoint for the stream, not
+  just single `application/json` POST responses.
+- Protocol-version negotiation mismatch (client sends a newer `protocolVersion`
+  than the handler's `2024-11-05`).
+- Its proxy-agent handling of the MCP URL.
+
+**Net:** the entire iterion producer side (the documented root cause — "producer
+never wired") is fixed + verified. Board-emit end-to-end is one focused
+claude-code-MCP-client step away: enable claude-code MCP debug, capture the
+`iterion_board` connect attempt, and align the handler's Streamable-HTTP behavior
+(session-id / SSE / protocol-version) to what the client requires.
