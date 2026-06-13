@@ -838,6 +838,13 @@ ld-linux loader isn't there). Always refresh the install from a static build:
 `CGO_ENABLED=0`). The production sandbox images can also ship their own static
 iterion on PATH, which sidesteps the host-mount entirely.
 
+**In dev, `task studio:dev` now handles this for you** — `studio:dev:backend`
+builds a static `./iterion` (`CGO_ENABLED=0`) and runs *that* (with `ITERION_BIN`
+pinned to it) instead of `go run`, so every watchexec restart hands the delegated
+subprocesses a fresh, static, matching binary with **no `sudo cp`**. The manual
+install refresh above is only for non-dev setups (plain `iterion studio` /
+`server` / `dispatch`) or a stale system install.
+
 ### Every dogfood run gets a bilan in `docs/bot-runs/<bot>.md`
 
 The run artifacts under `.iterion/runs/<id>/` are gitignored — they vanish from

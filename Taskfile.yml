@@ -315,8 +315,22 @@ tasks:
 
   studio:dev:backend:
     desc: Run Go studio backend with auto-restart on changes
+    # Build a STATIC iterion and run THAT (not `go run`) so the subprocesses
+    # the studio delegates to — the __mcp-board MCP server, the sandboxed
+    # __claw-runner, __mcp-ask-user — use this exact fresh binary instead of a
+    # stale `/usr/bin/iterion`. Under `go run`, os.Executable() is a volatile
+    # temp path, so proc.LocateIterionBinary / locateHostIterionBinary fall back
+    # to whatever is installed → capability skew (e.g. board MCP missing
+    # set_bot/list_labels). Running the built binary makes os.Executable() stable
+    # (repo ./iterion) and ITERION_BIN pins it; CGO_ENABLED=0 keeps it static so
+    # it execs inside sandbox containers (a dynamic nix-glibc build fails there).
+    # Net effect: dev-mode delegated capabilities always match the running code,
+    # with no `sudo cp ./iterion /usr/bin/iterion`.
+    env:
+      CGO_ENABLED: "0"
+      ITERION_BIN: "{{.ROOT_DIR}}/iterion"
     cmds:
-      - watchexec -r -e go -w cmd -w pkg -w vendor -- go run {{.CMD}} studio --no-browser --port 4891
+      - watchexec -r -e go -w cmd -w pkg -w vendor -- sh -c 'go build -o {{.ROOT_DIR}}/iterion {{.CMD}} && exec {{.ROOT_DIR}}/iterion studio --no-browser --port 4891'
     interactive: true
 
   studio:dev:frontend:
