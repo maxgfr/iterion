@@ -1,5 +1,43 @@
 # Seki + deepsec — validation
 
+## 2026-06-13 (retest, FIXED) — scanner invocations repaired → full pipeline (run 019ec230)
+
+- Status: **scan_health now PASSES; Seki runs the full read pipeline end-to-end**
+  (detect_tech → scanners → scan_health → cap_findings → triage → N-vote → report_card).
+  The 019ec1e0 hard-fail below was NOT a broken sec image — it was four broken scanner
+  *invocations* in the bot/skills (the binaries all work). Fixed in `a8fac4c5`; **no
+  Dockerfile change needed.**
+- The fixes (see commit): **semgrep** `--config=auto --metrics=off` → `--config=p/default`
+  (auto-config is rejected with metrics off — the silent error that left only 1/3 generic
+  scanners; this is THE unblock — semgrep-auto.json now lands → 2/3 floor → scan_health
+  passes degraded). **gosec** was scanning `.iterion/worktrees/` (dozens of repo copies) →
+  11 min/no-output; `-exclude-dir=.iterion -exclude-dir=.works` → **125 s + 168 KB output**
+  (validated standalone). **trivy** choked traversing `.iterion`/`.works` → `--scanners`
+  (modern flag, was deprecated `--security-checks`) + `--skip-dirs=.iterion,.works,vendor`.
+- **Validated end-to-end**: 019ec230 reached scan_health (degraded, 2/3 generic) → triage →
+  N-vote (voter_v1/v2/v3) → report_card. (One earlier attempt was drained mid-N-vote by a
+  *parallel session*'s `.go` edit restarting `task studio:dev` — an environment artifact,
+  not a Seki bug; resumed from the `voter_v1` checkpoint to finish.)
+- **Value proven**: even deepsec-OFF, Seki surfaced a **real CRITICAL candidate** —
+  *"RCE in cloud runner via unvalidated RepoURL passed to git clone (pkg/runner/loop.go)"*
+  (the file does clone `msg.RepoURL` at L689 → `prepareRepoWorkspace` L789). Status
+  `uncertain` (N-vote didn't fully confirm) — worth operator triage.
+- **board-emit (C082) STILL DOESN'T LAND (bilan #4 persists — a distinct engine gap).**
+  report_card DID invoke `board.create`×3 / `board.label`×3 / `board.move`×2 and its
+  `created_issues` output carries real native-looking IDs (`native:90543c66…`), but the
+  issues are **NOT on the operator's board** (total unchanged at 94; fetch-by-id + every
+  label query miss). The sandboxed board MCP HTTP transport (`/api/v1/mcp/board` +
+  ephemeral run token) returns success but the writes don't persist to the operator's
+  native board — even when launched via the studio. Seki's findings are recoverable from
+  the run (`iterion report --run-id 019ec230`), not the board. This is the one remaining
+  Seki gap; it is **separate from the scanner fixes** (which are done) and needs a focused
+  look at the sandboxed board HTTP transport.
+- **Residual (tracked, non-blocking)**: gosec + trivy still emit nothing *inside the
+  sandbox specifically* (both work standalone) — a deeper sandbox/proxy/go-module
+  interaction. scan_health passes on gitleaks + semgrep (2/3) regardless; semgrep
+  (go/js/py/default) + bandit carry the SAST coverage; deepsec ON remains the
+  highest-value path (019ec142).
+
 ## 2026-06-13 (retest) — engine fixes + safe default, via STUDIO (run 019ec1e0)
 
 - Status: **engine fixes validated via the studio path; safe default shipped; but
