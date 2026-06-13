@@ -76,11 +76,23 @@ a roadmap, materialises it as kanban issues, and triages the board. See
 6. **Minor.** Transient `GET /api/runs/{id}` 404 console error right after launch
    (run.json flush race); the human-gate form lagged the backend pause by a moment
    (a page reload always showed it).
+7. **Bot discovery double-counts across roots (low — engine/botregistry).** The
+   auto-regenerated `iterion-bot-catalog.md` (regen runs before every Nexie launch)
+   grew a **duplicate Revi / `review-pr` card** — one for `bots/review-pr/main.bot`,
+   one for a stray gitignored `.botz/review-pr/main.bot` (a leftover `iterion bundle
+   pack` artifact, also surfaced in Nexie's own survey). `pkg/botregistry` treats both
+   `bots/` and `.botz/` as discovery roots but **does not dedupe by bundle name**, so a
+   local packed copy of a source bot shows up twice in the catalog Nexie routes from.
+   Worked around locally by removing the stray `.botz/review-pr` + restoring the regen
+   artifact; the proper fix is dedupe-by-bundle-name (precedence `bots/` > `.botz/`) in
+   `pkg/botregistry` discovery — deferred to a focused follow-up.
 
 ### Engine hardening
-- None required — the suspected `set_bot`/`list_labels` registration gap is **not** an
-  engine bug (verified the `__mcp-board` advertise path + `boardops.ToolsFor`). The
-  fix is in the bot, not iterion.
+- The suspected `set_bot`/`list_labels` registration gap is **not** an engine bug
+  (verified the `__mcp-board` advertise path + `boardops.ToolsFor`); fix is in the bot.
+- **One real engine follow-up:** `pkg/botregistry` discovery should dedupe bundles by
+  name across roots (finding #7) so a stray local `.botz/` copy can't duplicate a
+  catalog card. Low severity, deferred.
 
 ### Lessons for next run
 - Apply the finding-1 fix to the bot before the next Nexie run, then confirm the
