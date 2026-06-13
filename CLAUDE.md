@@ -823,10 +823,20 @@ tree, agents silently get the **stale** capability set — e.g. a dogfood run sa
 the board MCP advertise only 7 tools (no `set_bot`/`list_labels`) because the
 installed binary predated them, and the agent (correctly) fell back to routing by
 `assignee`. After adding or changing any delegated capability, **reinstall the
-binary** (`sudo cp ./iterion /usr/bin/iterion`, or `task install` to a dir that
-wins LocateIterionBinary's order) or export `ITERION_BIN=<fresh binary>` for the
-studio process — otherwise the gap reads as an agent/bot bug when it's a stale
-binary.
+binary** or export `ITERION_BIN=<fresh binary>` for the studio process —
+otherwise the gap reads as an agent/bot bug when it's a stale binary.
+
+**The installed binary must be built STATIC (`CGO_ENABLED=0`)** — it is
+bind-mounted into sandbox containers (`addClawBinaryMount` → `/usr/local/bin/iterion`)
+so the in-container `iterion __claw-runner` can run. devbox's default is
+`CGO_ENABLED=1`, so a plain `devbox run -- go build` produces a binary
+**dynamically linked against nix glibc**; it runs on the host but fails inside a
+container with `exec: /usr/local/bin/iterion: no such file or directory` (the nix
+ld-linux loader isn't there). Always refresh the install from a static build:
+`CGO_ENABLED=0 devbox run -- go build -o ./iterion ./cmd/iterion && sudo cp
+./iterion /usr/bin/iterion` (or `devbox run -- task build`, which already pins
+`CGO_ENABLED=0`). The production sandbox images can also ship their own static
+iterion on PATH, which sidesteps the host-mount entirely.
 
 ### Every dogfood run gets a bilan in `docs/bot-runs/<bot>.md`
 

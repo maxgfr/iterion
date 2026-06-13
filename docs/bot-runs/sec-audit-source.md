@@ -1,5 +1,41 @@
 # Seki + deepsec — validation
 
+## 2026-06-13 — iterion self-audit dogfood (runs 019ec10f, 019ec13a)
+
+- Status: **blocked → 2 engine fixes; SAST validation still pending a clean run.**
+- Versions: bot sec-audit-source 0.1.0 · iterion 7fea84cd→f247f360
+- Method: `POST /api/runs`, `severity_threshold=high`, sandboxed
+  (`iterion-sandbox-sec:edge`, present). Goal: re-find the known HIGH
+  `source:sec-audit-self` issues (SSRF `runs_preview.go`, path-traversal
+  `runs_files.go`) and validate `scan_health` + `cap_findings`.
+- Result: **never reached the scanners** — failed at `detect_tech` (first `claw`
+  node) both runs. But each failure root-caused a real sandbox/claw bug:
+  1. **`backendIsClaw` missed env-templated backends (FIXED `f247f360`).** Seki's
+     nodes use `backend: "${ITERION_SEC_AUDIT_BACKEND:-claw}"`; the IR stores it
+     verbatim, so `containsClawNode` read it as non-claw at spec-build time and
+     `addClawBinaryMount` never bind-mounted the host iterion → the in-container
+     `iterion __claw-runner` died with `exec: "iterion": executable file not
+     found in $PATH`. Fix: expand the template in `backendIsClaw` like the
+     executor does (`ir.ExpandEnvWithDefault`). Regression test added. **This also
+     unblocks Depsy (`sec-audit-deps`)**, which uses the same pattern.
+  2. **The host iterion bind-mounted into the container must be STATIC.** Once #1
+     mounted it, the next failure was `exec: /usr/local/bin/iterion: no such file
+     or directory` — the mounted binary was a devbox `go build` (default
+     `CGO_ENABLED=1`) **dynamically linked against nix glibc**, whose loader isn't
+     in the container. Fix is operational: install a static build
+     (`CGO_ENABLED=0` / `task build`); CLAUDE.md's live-dogfood note now spells
+     this out. (Candidate engine hardening: `iterion sandbox doctor` / the mount
+     path could detect a dynamic host binary and fail with a clear message
+     instead of a retry-then-cryptic-ENOENT; or the sec/full images could bake a
+     static iterion on PATH.)
+- Lessons for next run: after the operator re-copies the **static** binary to
+  `/usr/bin/iterion`, re-launch; `detect_tech` should clear and the run proceed to
+  the scanners + `scan_health` gate. Then validate it re-finds the known HIGH
+  findings. The SAST capability itself is unproven on iterion *yet* — only the
+  sandbox plumbing was exercised.
+
+---
+
 **Status:** validated end-to-end (2026-06). **Scope of this report:** the
 capability and the engineering hardening only — it carries **no information
 about the audited codebase** (a third-party repository; all target details are
