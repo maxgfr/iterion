@@ -36,7 +36,6 @@ const (
 	reviewReplyKey         = "__review_reply"          // free-text reply for action=reply
 	reviewMessageKey       = "__review_message"        // optional squash-commit message override
 	reviewMergeStrategyKey = "__review_merge_strategy" // optional strategy override (squash|merge)
-	reviewMergeIntoKey     = "__review_merge_into"     // optional merge target override
 )
 
 // Review-gate actions.
@@ -148,7 +147,19 @@ func (e *Engine) resumeReviewGate(ctx context.Context, r *store.Run, cp *store.C
 			store.InteractionTurn{Role: "human", Content: replyText, At: time.Now().UTC()})
 		e.emitReviewTurn(ctx, runID, nodeID, "human", len(turns), nil)
 
-		companion := e.runReviewCompanion(ctx, rs, hn, nodeID, turns)
+		// Asymptote backstop: once the companion has spoken max_turns times,
+		// stop re-invoking it. The human must conclude (approve / force-merge /
+		// request changes); further replies re-pause without growing the
+		// dialogue, so the gate always converges.
+		var companion map[string]interface{}
+		if countCompanionTurns(priorTurns) >= hn.MaxTurns {
+			companion = map[string]interface{}{
+				"message":           "Maximum review turns reached. Please approve, force-merge, or request changes.",
+				"needs_human_input": true,
+			}
+		} else {
+			companion = e.runReviewCompanion(ctx, rs, hn, nodeID, turns)
+		}
 		turns = append(turns, companionTurn(companion))
 		e.emitReviewTurn(ctx, runID, nodeID, "companion", len(turns), companion)
 
@@ -280,8 +291,11 @@ func (e *Engine) performGateMerge(ctx context.Context, rs *runState, hn *ir.Huma
 		branchName = "iterion/run/" + label
 	}
 
-	strategy := firstNonEmpty(stringAnswer(answers, reviewMergeStrategyKey), hn.MergeStrategy, e.mergeStrategy, "squash")
-	mergeInto := firstNonEmpty(stringAnswer(answers, reviewMergeIntoKey), hn.MergeInto, e.mergeInto)
+	// Precedence: studio merge-form override > launch flag (--merge-strategy /
+	// --merge-into) > the bot's DSL default. The launch flag wins over the bot
+	// so an operator can redirect a dogfood merge to a scratch branch.
+	strategy := firstNonEmpty(stringAnswer(answers, reviewMergeStrategyKey), e.mergeStrategy, hn.MergeStrategy)
+	mergeInto := firstNonEmpty(e.mergeInto, hn.MergeInto)
 
 	// No commits → nothing to merge. Record skipped so the run-end finalize
 	// doesn't try again, and so the studio shows "no commits".
@@ -368,13 +382,14 @@ func (e *Engine) pauseReviewGate(rs *runState, nodeID string, hn *ir.HumanNode, 
 	}
 
 	extra := map[string]interface{}{
-		"review":         true,
-		"instructions":   message, // reuse the studio's existing instructions rendering
-		"posture":        hn.Posture,
-		"merge_strategy": firstNonEmpty(hn.MergeStrategy, "squash"),
-		"merge_into":     firstNonEmpty(hn.MergeInto, "current"),
+		"review":       true,
+		"instructions": message, // reuse the studio's existing instructions rendering
+		"posture":      hn.Posture,
+		// Show the EFFECTIVE merge target/strategy (launch flag > bot default),
+		// matching what performGateMerge will actually do.
+		"merge_strategy": firstNonEmpty(e.mergeStrategy, hn.MergeStrategy),
+		"merge_into":     firstNonEmpty(e.mergeInto, hn.MergeInto),
 		"max_turns":      hn.MaxTurns,
-		"turn":           len(turns),
 		"turns":          turns, // the full companion↔human thread, for self-contained studio rendering
 	}
 	if url := e.resolveReviewURL(hn, questions, rs); url != "" {
@@ -482,7 +497,7 @@ func (e *Engine) resolveReviewURL(hn *ir.HumanNode, questions map[string]interfa
 	pairs := make([]string, 0, 2*len(hn.ReviewURLRefs))
 	for _, ref := range hn.ReviewURLRefs {
 		val := e.resolveRef(ref, rs.vars, rs.outputs, questions, rs.artifacts, rs)
-		pairs = append(pairs, ref.Raw, fmt.Sprintf("%v", deref(val)))
+		pairs = append(pairs, ref.Raw, renderInstructionValue(val))
 	}
 	return strings.TrimSpace(strings.NewReplacer(pairs...).Replace(hn.ReviewURL))
 }
@@ -519,6 +534,18 @@ func reviewActionOf(answers map[string]interface{}) string {
 	default:
 		return reviewActionReply
 	}
+}
+
+// countCompanionTurns returns how many turns the companion has spoken — the
+// dialogue length the max_turns backstop bounds.
+func countCompanionTurns(turns []store.InteractionTurn) int {
+	n := 0
+	for _, t := range turns {
+		if t.Role == "companion" {
+			n++
+		}
+	}
+	return n
 }
 
 // companionTurn builds an InteractionTurn from a companion result.
@@ -606,11 +633,4 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
-}
-
-func deref(v interface{}) interface{} {
-	if v == nil {
-		return ""
-	}
-	return v
 }

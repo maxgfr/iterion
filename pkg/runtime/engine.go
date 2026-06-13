@@ -839,16 +839,16 @@ func (e *Engine) finalizeOnExit(ctx context.Context, runID string, wtCtx *worktr
 	}
 	// Idempotency guard for the review-&-merge gate: a review gate
 	// (interaction: review) finalizes the worktree DURING the human pause —
-	// it creates the storage branch and squash-merges (or, for
-	// merge_into: none, creates the branch only). It records final_branch
-	// either way. In the live Run/resume path final_branch is otherwise
-	// empty until finalizeWorktree sets it, so its presence here means the
-	// gate already finalized. Re-running finalizeWorktree would create a
+	// it squash-merges (merge_status=merged) or, for merge_into: none / no
+	// commits, records merge_status=skipped. MergeStatus is the canonical
+	// "finalize already happened" signal (the run-end finalizeWorktree only
+	// ever sets it from empty), so its presence here means the gate already
+	// owns this run's finalize. Re-running finalizeWorktree would create a
 	// duplicate storage branch and possibly re-merge — skip it, just clean up.
-	if r, err := e.store.LoadRun(ctx, runID); err == nil && r.FinalBranch != "" {
+	if r, err := e.store.LoadRun(ctx, runID); err == nil && r.MergeStatus != "" {
 		if e.logger != nil {
-			e.logger.Info("runtime: finalize: run already finalized at review gate (%s, status=%s); skipping",
-				r.FinalBranch, r.MergeStatus)
+			e.logger.Info("runtime: finalize: run already finalized at review gate (status=%s, branch=%s); skipping",
+				r.MergeStatus, r.FinalBranch)
 		}
 		if cleanup != nil {
 			cleanup()

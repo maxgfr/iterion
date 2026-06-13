@@ -534,7 +534,6 @@ function processEvent(
               mergeStrategy: String(evt.data?.merge_strategy ?? "squash"),
               mergeInto: String(evt.data?.merge_into ?? "current"),
               maxTurns: Number(evt.data?.max_turns ?? 0),
-              turn: Number(evt.data?.turn ?? 0),
               reviewUrl:
                 typeof evt.data?.review_url === "string"
                   ? (evt.data.review_url as string)

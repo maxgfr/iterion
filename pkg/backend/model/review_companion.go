@@ -31,16 +31,14 @@ func (e *ClawExecutor) ExecuteReviewCompanion(ctx context.Context, node *ir.Huma
 		return nil, fmt.Errorf("model: review node %q references unknown output schema %q", node.ID, node.OutputSchema)
 	}
 
-	// Companion schema = the node's verdict schema + {message, needs_human_input}.
-	// Built per-call (not registered on e.schemas) to avoid the concurrent-map
-	// race that bit ExecuteHumanLLMForInteraction.
-	fields := make([]*ir.SchemaField, len(base.Fields), len(base.Fields)+2)
-	copy(fields, base.Fields)
-	fields = append(fields,
-		&ir.SchemaField{Name: "message", Type: ir.FieldTypeString},
-		&ir.SchemaField{Name: "needs_human_input", Type: ir.FieldTypeBool},
-	)
-	companionSchema := &ir.Schema{Name: base.Name + "_review_companion", Fields: fields}
+	// Companion schema = the node's verdict schema + {needs_human_input, message}.
+	// Reuse wrapSchemaWithHumanFlag for the needs_human_input clone (same
+	// per-call, no-shared-map discipline as ExecuteHumanLLMForInteraction),
+	// then append the companion's `message` field.
+	companionSchema := wrapSchemaWithHumanFlag(base)
+	companionSchema.Name = base.Name + "_review_companion"
+	companionSchema.Fields = append(companionSchema.Fields,
+		&ir.SchemaField{Name: "message", Type: ir.FieldTypeString})
 	jsonSchema, err := SchemaToJSON(companionSchema)
 	if err != nil {
 		return nil, fmt.Errorf("model: review node %q: schema conversion: %w", node.ID, err)

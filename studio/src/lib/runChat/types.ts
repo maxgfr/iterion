@@ -80,7 +80,6 @@ export interface ReviewGateMeta {
   mergeStrategy: string; // "squash" | "merge"
   mergeInto: string; // "current" | "none" | <branch>
   maxTurns: number;
-  turn: number;
   reviewUrl?: string;
   verdict?: Record<string, unknown>;
 }

@@ -82,15 +82,9 @@ export default function ReviewMergeCard({ runId, message }: Props) {
 
   const sendReply = () =>
     resume({ [ACTION_KEY]: "reply", [REPLY_KEY]: reply });
-  const approveMerge = () =>
+  const merge = (action: "approve_merge" | "force_merge") =>
     resume({
-      [ACTION_KEY]: "approve_merge",
-      [STRATEGY_KEY]: strategy,
-      ...(commitMsg.trim() ? { [MESSAGE_KEY]: commitMsg } : {}),
-    });
-  const forceMerge = () =>
-    resume({
-      [ACTION_KEY]: "force_merge",
+      [ACTION_KEY]: action,
       [STRATEGY_KEY]: strategy,
       ...(commitMsg.trim() ? { [MESSAGE_KEY]: commitMsg } : {}),
     });
@@ -109,7 +103,7 @@ export default function ReviewMergeCard({ runId, message }: Props) {
           {message.nodeId}
         </code>
         <span className="text-fg-muted">
-          turn {review.turn}
+          turn {turns.length}
           {review.maxTurns > 0 ? `/${review.maxTurns}` : ""}
         </span>
         {review.posture === "agent_verdict_ok" && (
@@ -183,10 +177,10 @@ export default function ReviewMergeCard({ runId, message }: Props) {
           />
         )}
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="primary" onClick={approveMerge} disabled={busy}>
+          <Button size="sm" variant="primary" onClick={() => merge("approve_merge")} disabled={busy}>
             {noMerge ? "Approve" : "Approve & merge"}
           </Button>
-          <Button size="sm" variant="ghost" onClick={forceMerge} disabled={busy}>
+          <Button size="sm" variant="ghost" onClick={() => merge("force_merge")} disabled={busy}>
             Force-merge
           </Button>
           <Button size="sm" variant="ghost" onClick={requestChanges} disabled={busy}>
