@@ -70,29 +70,31 @@ backlog tickets + findings for Nexie. See
 
 ### Findings / engine hardening
 
-1. **(ENGINE BUG, HIGH) mid-turn `ask_user` is broken on claw +
-   openai/gpt-5.5 (forfait).** The bot's first design used
-   `interaction: human`/`llm_or_human` on the investigate agent so it could
-   ask the operator mid-turn via the `ask_user` MCP tool. On claw+openai
-   this fails: the `ask_user` call is **not** converted to a clean pause —
-   the tool loop continues to a second LLM call, which openai rejects with
-   `400: No tool output found for function call`. Reproduced with BOTH
-   `interaction: human` and `llm_or_human`, so it is not mode-specific.
-   - Static trace: the whole iterion chain preserves `*delegate.ErrAskUser`
-     (handler → `ExecuteAskUser` → `RegisterClawTool` wrapper →
-     `RegisterBuiltin` → `toolDefsToGeneration` →
-     `executeToolsDirect`'s `errors.As` at
-     [generation.go:576](../../pkg/backend/model/generation.go)). Yet the
-     runtime decisively continued to step 2, so `errors.As` returned false —
-     i.e. the claw-code-go **openai/forfait provider intercepts `ask_user`
-     internally during streaming**, before iterion's `executeToolsDirect`
-     sees the `ErrAskUser`. claw+anthropic ask_user was validated previously;
-     claw+openai-forfait was not. Needs a focused fix in the openai-provider
-     tool-result lifecycle (likely a claw-code-go revendor) + a live test.
-   - **Workaround shipped:** elicitation now uses a graph-level `human` node
-     (`ask_brief`) — the proven, backend-agnostic interaction path (Nexie's
-     shape). The user goal (interrogate the operator during investigation,
-     persist cross-session) is fully met; only the *mechanism* changed.
+1. **(ENGINE BUG, HIGH — FIXED) mid-turn `ask_user` failed on schema+tools
+   interaction nodes.** The bot's first design used `interaction: human`
+   on the investigate agent to ask mid-turn via the `ask_user` MCP tool.
+   On claw+openai it failed: instead of pausing, the run hit `openai 400:
+   No tool output found` / `tool_call_ids did not have response messages`.
+   - **Root cause (iterion, NOT claw-code-go).** Reproduced minimally:
+     ask_user pauses fine on a node WITHOUT an output schema, but FAILS on
+     one WITH a schema. `ClawExecutor` (executor.go) ran schema validation
+     BEFORE the `_needs_interaction` short-circuit. The pause Result
+     (`{_needs_interaction:true, …}`) is a control signal, not schema data,
+     so `ValidateOutput` failed → triggered the schema-validation backend
+     RETRY → the retry replayed the unanswered tool_call into a fresh
+     generation → orphaned function_call → 400. (My earlier "claw-code-go
+     intercepts ask_user" hypothesis was wrong — instrumented logging
+     showed `errors.As` matched and the pause Result was returned correctly;
+     a *higher* layer re-invoked.)
+   - **Fixed** in `pkg/backend/model/executor.go` (move the interaction
+     short-circuit ahead of schema validation) + regression test
+     `TestDelegation_InteractionSignalSkipsSchemaValidation`. Verified live:
+     a schema+tools+interaction node now pauses on ask_user and resumes to a
+     valid structured output. Commit e93ccc1b (on main).
+   - **Evoly impact:** the `ask_brief` graph-level human node shipped as a
+     workaround and still works; it can now optionally revert to the
+     original mid-turn `ask_user` design (set `interaction: human` on
+     `investigate` + restore the ask_user prompt).
 2. **(BOT BUG, fixed) reviewers needed `readonly: true`.** The two parallel
    judge reviewers had mutation-capable tools (`bash`) without `readonly`,
    so the workspace-safety guard rejected 2 mutating parallel branches.
