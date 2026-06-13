@@ -1004,7 +1004,7 @@ agent survey_code:
 ## Pure python; no LLM. Inputs flow via env vars (JSON-encoded for
 ## arrays).
 tool build_manifest:
-  command: `WS={{input.workspace_dir}} ADR_DIR={{input.adr_dir}} ADRS='{{!input.adrs}}' DECISIONS='{{!input.decisions}}' GAPS='{{!input.gaps}}' CODE_GLOBS={{input.code_scope_globs}} RECHALLENGE_DAYS={{input.rechallenge_after_days}} python3 -c "
+  command: `WS={{input.workspace_dir}} ADR_DIR={{input.adr_dir}} ADRS={{input.adrs}} DECISIONS={{input.decisions}} GAPS={{input.gaps}} CODE_GLOBS={{input.code_scope_globs}} RECHALLENGE_DAYS={{input.rechallenge_after_days}} python3 -c "
 import os, json
 ws = os.environ['WS']
 os.chdir(ws)
