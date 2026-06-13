@@ -177,11 +177,23 @@ vars:
   fp_append_policy:    string = "unanimous_dismiss"
 
   ## ─── D5a — Verification-ladder remediation phase ─────────────────
-  ## Gates the whole remediation phase. true (default) enables it; the
-  ## phase becomes a clean no-op when there are zero patchable findings
-  ## (remediation_plan.enabled=false → done). Set --var remediate=false
-  ## on the CLI to fully skip the phase (behaviour identical to pre-D5a).
-  remediate:           bool   = true
+  ## Gates the whole remediation phase. DEFAULT false → Seki is a
+  ## read-only SAST auditor out of the box (detect → scan → triage →
+  ## N-vote → report_card → board emit); it touches NO code and never
+  ## moves your git branch. This matches the bot's documented contract
+  ## and is the safe default for scheduled / studio runs.
+  ##
+  ## Opt IN with `--var remediate=true` to enable the verification-ladder
+  ## remediation phase (propose / apply_gated / apply_auto per
+  ## apply_mode). IMPORTANT: remediation mutates the working tree and
+  ## creates a temporary git branch in the CURRENT checkout (there is no
+  ## per-run worktree isolation yet — tracked follow-up). So run an
+  ## opt-in remediation pass via a dedicated `iterion run` against a
+  ## clean checkout, NEVER on your live working tree under
+  ## `task studio:dev` (a mid-run backend restart can strand the checkout
+  ## on the temp branch). The phase is still a clean no-op when there are
+  ## zero patchable findings (remediation_plan.enabled=false → done).
+  remediate:           bool   = false
 
   ## Categories that hard-stop without auto-patching even when the
   ## ladder could plausibly verify the fix. Comma-separated finding_type
