@@ -54,7 +54,7 @@ first bilan for a bot lands.
 | Persona | Bot | Kind | Bilan |
 |---|---|---|---|
 | Nexie | `whats-next` | orchestrator / board triage | [whats-next.md](whats-next.md) |
-| Willy | `whole-improve-loop` | whole-repo review-fix loop | _not yet_ |
+| Willy | `whole-improve-loop` | whole-repo review-fix loop | [whole-improve-loop.md](whole-improve-loop.md) |
 | Billy | `branch-improve-loop` | branch-scoped review-fix loop (commits) | [branch-improve-loop.md](branch-improve-loop.md) |
 | Featurly | `feature-dev` | one-shot feature dev + review loop | _not yet_ |
 | Doki | `docs-refresh` | docs↔code convergence loop | _not yet_ |

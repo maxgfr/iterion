@@ -797,6 +797,21 @@ The same applies to a dedicated server instance you spin up from a worktree to
 exercise modified engine code: bind it to the operator's store dir (or tell
 the operator the port) so the runs are observable.
 
+**Do NOT dogfood a code-editing bot on the live tree under `task studio:dev`.**
+The dev backend runs under `watchexec -r -e go -w cmd -w pkg -w vendor`. Because
+of the `-e go` filter, only a **`.go` edit under `cmd/`/`pkg/`/`vendor/`** trips it
+(a docs bot writing `.md`, or a studio bot writing `.ts`, is unaffected). So the
+moment a code-mutating bot (Willy/Featurly/Billy/Renovacy/Devy) edits a watched
+`.go` file on the live tree, watchexec restarts the backend and **drains the
+in-flight run** (`"server drained: studio process
+shutting down"` → `failed_resumable`). Bots with `worktree: auto` are mostly
+insulated (their edits land in `.iterion/worktrees/<run-id>`, outside the watched
+paths) — but **Willy (`whole-improve-loop`) edits the live workspace directly**
+(no `worktree: auto`) and will cancel its own run this way. To dogfood a
+live-tree-editing bot: launch it via a CLI `iterion run` (a separate process
+watchexec's restart can't cancel) or against a non-watchexec studio
+(`iterion studio` from the built binary), not the `task studio:dev` backend.
+
 ### Every dogfood run gets a bilan in `docs/bot-runs/<bot>.md`
 
 The run artifacts under `.iterion/runs/<id>/` are gitignored — they vanish from
