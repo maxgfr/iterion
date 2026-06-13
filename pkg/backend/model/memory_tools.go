@@ -60,7 +60,7 @@ func installWorkspaceMemory(ctx context.Context, opts *GenerationOptions, store 
 		opts.Tools = append(opts.Tools, memoryReadTool(store, ref), memoryListTool(store, ref))
 	}
 	if spec.Write {
-		opts.Tools = append(opts.Tools, memoryWriteTool(store, ref))
+		opts.Tools = append(opts.Tools, memoryWriteTool(store, ref, memoryAttribution(spec.BotID)))
 	}
 	if spec.PreCompactInject {
 		opts.OnBeforeCompact = memoryPreCompactInjector(ctx, store, ref, spec.Autoload)
@@ -135,7 +135,20 @@ func memoryReadTool(store knowledge.MemoryStore, ref knowledge.SpaceRef) Generat
 	}
 }
 
-func memoryWriteTool(store knowledge.MemoryStore, ref knowledge.SpaceRef) GenerationTool {
+// memoryAttribution renders the UpdatedBy stamp for agent-written
+// documents. The bot id is the stable identity that owns the scope, so
+// "bot:<id>" lets the studio memory panel + `iterion memory` attribute a
+// write to the bot rather than leaving it blank (the REST path stamps the
+// operator id; the tool path had no attribution before this). Empty bot
+// id → empty stamp (unchanged behaviour).
+func memoryAttribution(botID string) string {
+	if botID == "" {
+		return ""
+	}
+	return "bot:" + botID
+}
+
+func memoryWriteTool(store knowledge.MemoryStore, ref knowledge.SpaceRef, updatedBy string) GenerationTool {
 	return GenerationTool{
 		Name:        MemoryWriteToolName,
 		Description: "Write Markdown content to a file in this node's workspace memory scope. Overwrites on each call. Paths are relative to the scope root.",
@@ -155,7 +168,7 @@ func memoryWriteTool(store knowledge.MemoryStore, ref knowledge.SpaceRef) Genera
 			if err := json.Unmarshal(input, &args); err != nil {
 				return "", fmt.Errorf("memory_write: decode args: %w", err)
 			}
-			meta, err := store.WriteDocument(ctx, ref, knowledge.DocumentInput{Path: args.Path, Content: []byte(args.Content)})
+			meta, err := store.WriteDocument(ctx, ref, knowledge.DocumentInput{Path: args.Path, Content: []byte(args.Content), UpdatedBy: updatedBy})
 			if err != nil {
 				return "", fmt.Errorf("memory_write %q: %w", args.Path, err)
 			}

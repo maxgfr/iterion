@@ -38,6 +38,52 @@ workflow w:
 	}
 }
 
+// TestMemoryVisibilityBotCompiles pins the exact DSL shape Evoly uses —
+// the first shipped consumer of per-bot memory (visibility: "bot"). It
+// proves the full block (autoload + read + write + pre_compact_inject)
+// survives compilation with the bot axis intact.
+func TestMemoryVisibilityBotCompiles(t *testing.T) {
+	src := `
+agent x:
+  model: "anthropic/c"
+  system: p
+  backend: "claw"
+  memory:
+    enabled: true
+    visibility: "bot"
+    scope: "vision"
+    autoload: ["VISION.md", "CONTEXT_BRIEF.md"]
+    read: true
+    write: true
+    pre_compact_inject: true
+
+prompt p:
+  hi
+
+workflow w:
+  entry: x
+  x -> done
+`
+	pr := parser.Parse("t.iter", src)
+	if len(pr.Diagnostics) > 0 {
+		t.Fatalf("parse: %+v", pr.Diagnostics)
+	}
+	cr := Compile(pr.File)
+	if cr.HasErrors() {
+		t.Fatalf("compile: %+v", cr.Diagnostics)
+	}
+	n := cr.Workflow.Nodes["x"].(*AgentNode)
+	if n.Memory == nil || n.Memory.Visibility != "bot" || n.Memory.Scope != "vision" {
+		t.Fatalf("memory not compiled: %+v", n.Memory)
+	}
+	if !n.Memory.Read || !n.Memory.Write || !n.Memory.PreCompactInject {
+		t.Fatalf("memory flags lost: %+v", n.Memory)
+	}
+	if len(n.Memory.Autoload) != 2 {
+		t.Fatalf("autoload lost: %+v", n.Memory.Autoload)
+	}
+}
+
 func TestValidateMemory_Visibility(t *testing.T) {
 	mk := func(vis string, projectRoot bool) *compiler {
 		w := &Workflow{Name: "t", Nodes: map[string]Node{

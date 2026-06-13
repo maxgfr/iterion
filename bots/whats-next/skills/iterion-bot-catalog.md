@@ -72,6 +72,7 @@ Walk top-to-bottom; first match wins.
 
 | If the work sounds like… | → `assignee` |
 |---|---|
+| "where should this project go next?", "long-term vision", "architectural direction", "strategic axes for the next quarter/year" — STRATEGIC (a quarter+ horizon) AND the project is mature/stable | `evolve` |
 | "implement feature X", "add capability", "build the thing" | `feature-dev` |
 | "build a new bot for Y" / "create a workflow that does Y" — the catalogue lacks a fit and we need to author one | `feature-dev` (with `feature_prompt` pointing at the new `.bot` file to create) |
 | "review the whole codebase", "audit production-readiness", "find bugs anywhere" | `whole-improve-loop` |
@@ -84,7 +85,8 @@ Walk top-to-bottom; first match wins.
 | "audit dependencies for malware / typosquats / install hooks", "supply-chain check", "post-`npm install` triage" — DETECTION across installed deps | `sec-audit-deps` |
 | architectural choice, hiring, prioritisation meeting, alignment | `""` |
 | operator is vague or it's cross-cutting | `""` |
-| long-term theme (a quarter+ horizon) | usually `""` |
+| long-term theme (a quarter+ horizon) on a mature/stable project | `evolve` (it accumulates the vision + proposes evolutions) |
+| long-term theme on a greenfield / unstable project | `""` (vision is premature — drive stability first) |
 
 When in doubt, prefer `""` and let the operator triage manually
 in the board UI. An empty assignee is honest; a wrong one
@@ -136,6 +138,30 @@ before you walk the table on a new roadmap item.
   reviewed?" → `branch-improve-loop`. "is the work
   workspace-wide / no specific branch?" → `whole-improve-loop`.
 
+### `evolve` (Evoly) vs `whats-next` (Nexie) — altitude
+
+- `whats-next` / Nexie is the **tactical** orchestrator (you). It
+  answers "what should we work on this week?" — one next_action,
+  ≤2-week-horizon items, kanban dispatch.
+- `evolve` / Evoly is the **strategic** partner, one altitude ABOVE
+  you. It answers "where should this project go next quarter / year?":
+  it accumulates a long-horizon architectural vision in its OWN per-bot
+  memory across sessions, interrogates the operator mid-investigation,
+  and proposes natural evolutions as dispatch-ready backlog tickets +
+  findings — which YOU then pick up on your next survey and triage into
+  roadmap items.
+- Tie-break — **horizon**: ≤2 weeks → Nexie. ≥ a quarter → Evoly.
+  And **altitude**: "what's next?" → Nexie. "where to next?" → Evoly.
+- Tie-break — **maturity**: greenfield / unstable / WIP → Nexie (a
+  vision is premature; drive stability first). Settled, mature project
+  where the question is direction not throughput → Evoly.
+- Evoly does NOT implement. Its output is a vision + evolution proposals
+  (in `findings/` + `backlog` tickets). You ingest those into roadmap
+  items; the dispatcher then routes them to feature-dev /
+  whole-improve-loop / etc. When an operator asks you for a long-horizon
+  vision on a mature repo, the right move is often to route to `evolve`
+  rather than answer at your own altitude.
+
 ## When no row matches confidently — three escape hatches
 
 1. **Propose the closest match in rationale, leave `assignee=""`**
@@ -180,6 +206,11 @@ item that called for it.
   `secured-renovacy` could prune by bumping; `whole-improve-loop`
   could refactor to drop dependencies; `feature-dev` could build
   an in-house replacement. Surface as a three-way question.
+- "I want a vision for the next year of this project" → `evolve`
+  (clear) when the project is mature/stable. If it's greenfield or
+  still churning, surface the question instead: "a vision before the
+  project has settled is usually waste — want me to drive a few
+  stability iterations first, then hand off to Evoly?"
 
 <!-- ITERION:CATALOG:GENERATED:BEGIN -->
 
@@ -194,6 +225,7 @@ dispatcher routes on it), never the persona.
 | Billy | `branch-improve-loop` |
 | Devy | `devbox-setup` |
 | Doki | `docs-refresh` |
+| Evoly | `evolve` |
 | Featurly | `feature-dev` |
 | Revi (converse) | `revi-converse` |
 | Revi | `review-pr` |
@@ -304,6 +336,57 @@ STEP-0 preamble).
   and commits.
 - **Vars**: `audit_cache_path` (string), `bundle_self_path` (string), `cli_surface_globs` (string), `code_scope_globs` (string), `coverage_target_pct` (int), `diagnostic_surface_globs` (string), `diff_since` (string), `doc_globs` (string), `docs_dir` (string), `excluded_dirs` (string), `go_comment_globs` (string), `issue_id` (string), `max_drift_candidates` (int), `max_recovery_iterations` (int), `max_review_chunk_docs` (int), `max_review_iterations` (int), `scope_notes` (string), `workspace_dir` (string)
 - **Path**: `bots/docs-refresh/main.bot`
+
+### `evolve` — Evoly
+
+Strategic / architectural / visionary partner. On a mature, stable
+repository, Evoly surveys the codebase, accumulates a long-horizon
+architectural VISION in PER-BOT persistent memory across sessions,
+interrogates the operator MID-INVESTIGATION (ask_user) to collect the
+context the code alone cannot give, and proposes natural evolutions as
+dispatch-ready backlog tickets.
+
+Evoly sits ABOVE Nexie in the workflow stack: Evoly names where the
+project should be in a year; Nexie names what to do this week. Each
+proposed evolution lands as a kanban ticket pre-filled with bot +
+bot_args (so a human can launch it by dragging it to ready, or Nexie
+can action it) plus the full plan / technical decisions in the
+project-shared findings/ memory scope.
+
+Evoly PROPOSES and ARCHITECTS — it does not implement features.
+Implementation is handed to feature-dev / bmady via Nexie's
+roadmap-and-dispatch pipeline.
+
+Showcase of two iterion features:
+  - per-bot persistent memory (visibility: "bot"): VISION.md +
+    CONTEXT_BRIEF.md + decisions/ accumulate across sessions WITHOUT
+    leaking into Nexie or other bots' memory;
+  - operator elicitation during investigation: the survey surfaces the
+    questions only the operator can answer, they answer at a graph-level
+    human pause, and every answer is persisted to per-bot memory so it
+    is never asked twice (the backend-agnostic interaction path, since
+    mid-turn ask_user is currently broken on the claw+openai forfait
+    provider — see docs/bot-runs/evolve.md).
+
+- **Use when**:
+  Use ONLY when the project is mature / stable enough that the question
+  worth answering is "where should this go next?" (a quarter and beyond),
+  not "what should we ship this week?" (that is Nexie / whats-next).
+  Engage when:
+    - the operator asks for a long-horizon vision, architectural
+      direction, or strategic axes;
+    - the codebase has settled (low recent breaking-change cadence,
+      present ADRs, stable CI) and warrants a vision pass;
+    - Nexie has run repeatedly and the operator wants to step UP one
+      altitude — from "what's next" to "where to next".
+  
+  Do NOT use for tactical "what to ship this week" questions (that is
+  Nexie), nor on greenfield / unstable projects (premature vision is
+  waste). The repo-maturity-assessment skill captures the gating
+  heuristic; Nexie can consult it before deciding to route here.
+- **Triggers**: evolve, evolution, vision, architecture, long-term, strategy, roadmap-vision
+- **Vars**: `scope_notes` (string), `workspace_dir` (string)
+- **Path**: `bots/evolve/main.bot`
 
 ### `feature-dev` — Featurly
 

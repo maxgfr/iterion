@@ -1,0 +1,67 @@
+name: evolve
+display_name: Evoly
+version: 0.1.0
+description: |
+  Strategic / architectural / visionary partner. On a mature, stable
+  repository, Evoly surveys the codebase, accumulates a long-horizon
+  architectural VISION in PER-BOT persistent memory across sessions,
+  interrogates the operator MID-INVESTIGATION (ask_user) to collect the
+  context the code alone cannot give, and proposes natural evolutions as
+  dispatch-ready backlog tickets.
+
+  Evoly sits ABOVE Nexie in the workflow stack: Evoly names where the
+  project should be in a year; Nexie names what to do this week. Each
+  proposed evolution lands as a kanban ticket pre-filled with bot +
+  bot_args (so a human can launch it by dragging it to ready, or Nexie
+  can action it) plus the full plan / technical decisions in the
+  project-shared findings/ memory scope.
+
+  Evoly PROPOSES and ARCHITECTS — it does not implement features.
+  Implementation is handed to feature-dev / bmady via Nexie's
+  roadmap-and-dispatch pipeline.
+
+  Showcase of two iterion features:
+    - per-bot persistent memory (visibility: "bot"): VISION.md +
+      CONTEXT_BRIEF.md + decisions/ accumulate across sessions WITHOUT
+      leaking into Nexie or other bots' memory;
+    - operator elicitation during investigation: the survey surfaces the
+      questions only the operator can answer, they answer at a graph-level
+      human pause, and every answer is persisted to per-bot memory so it
+      is never asked twice (the backend-agnostic interaction path, since
+      mid-turn ask_user is currently broken on the claw+openai forfait
+      provider — see docs/bot-runs/evolve.md).
+when_to_use: |
+  Use ONLY when the project is mature / stable enough that the question
+  worth answering is "where should this go next?" (a quarter and beyond),
+  not "what should we ship this week?" (that is Nexie / whats-next).
+  Engage when:
+    - the operator asks for a long-horizon vision, architectural
+      direction, or strategic axes;
+    - the codebase has settled (low recent breaking-change cadence,
+      present ADRs, stable CI) and warrants a vision pass;
+    - Nexie has run repeatedly and the operator wants to step UP one
+      altitude — from "what's next" to "where to next".
+
+  Do NOT use for tactical "what to ship this week" questions (that is
+  Nexie), nor on greenfield / unstable projects (premature vision is
+  waste). The repo-maturity-assessment skill captures the gating
+  heuristic; Nexie can consult it before deciding to route here.
+author: SocialGouv (devthejo) — evolve/main.bot
+schema_version: 1
+
+triggers:
+  - evolve
+  - evolution
+  - vision
+  - architecture
+  - long-term
+  - strategy
+  - roadmap-vision
+
+dispatch_vars:
+  scope_notes: |-
+    {{issue.title}}
+
+    {{issue.body}}
+
+enabled: true

@@ -3,6 +3,8 @@ package model
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,7 +30,7 @@ func memTest(t *testing.T, scope string) (*memory.FSStore, knowledge.SpaceRef, *
 
 func TestMemoryWriteTool_RoundtripsToScope(t *testing.T) {
 	store, ref, s := memTest(t, "session-continuity")
-	tool := memoryWriteTool(store, ref)
+	tool := memoryWriteTool(store, ref, "")
 	if tool.Name != MemoryWriteToolName {
 		t.Fatalf("name: %q", tool.Name)
 	}
@@ -210,5 +212,117 @@ func TestInstallWorkspaceMemory_RejectsBadScope(t *testing.T) {
 	ref := memory.LegacyBotRef("/tmp/wn", "../escape")
 	if err := installWorkspaceMemory(context.Background(), opts, memory.DefaultFSStore(), ref, &delegate.MemorySpec{Scope: "../escape"}); err == nil {
 		t.Fatalf("expected scope rejection")
+	}
+}
+
+// findTool returns the registered GenerationTool by name, failing the
+// test if absent.
+func findTool(t *testing.T, tools []GenerationTool, name string) GenerationTool {
+	t.Helper()
+	for _, tool := range tools {
+		if tool.Name == name {
+			return tool
+		}
+	}
+	t.Fatalf("tool %q not registered (have %d tools)", name, len(tools))
+	return GenerationTool{}
+}
+
+// botVisionRef resolves the SpaceRef exactly as claw_backend.go does for a
+// `memory: { visibility: "bot" }` block — project key from the repo root,
+// bot id from the workflow name. Centralised so the bot-path tests share
+// one resolution and drift with the production path, not a hand-built ref.
+func botVisionRef(repo, botID string) knowledge.SpaceRef {
+	return memory.ResolveSpaceRef(knowledge.VisibilityBot, "vision", botID, "", memory.SpaceRefInputs{
+		ProjectID: memory.ProjectKey(repo),
+		BotID:     botID,
+	})
+}
+
+// TestInstallWorkspaceMemory_VisibilityBot_HonoursBotPath is the end-to-end
+// proof of the per-bot cross-session memory feature Evoly relies on: a
+// visibility:bot write lands at the per-bot path (NOT the legacy
+// project-shared path), and a fresh session autoloads it back into the
+// system prompt. This is the single test that exercises the real
+// installWorkspaceMemory + FSStore + ResolveSpaceRef chain for the
+// bot-visibility axis, which had no shipped consumer before Evoly.
+func TestInstallWorkspaceMemory_VisibilityBot_HonoursBotPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ITERION_HOME", home)
+	store := memory.DefaultFSStore()
+	const repo = "/tmp/evolve-repo"
+	ref := botVisionRef(repo, "evolve")
+
+	// Session 1: write VISION.md through the registered tool.
+	opts := &GenerationOptions{}
+	if err := installWorkspaceMemory(context.Background(), opts, store, ref, &delegate.MemorySpec{
+		Scope: "vision", Visibility: "bot", BotID: "evolve", Write: true,
+	}); err != nil {
+		t.Fatalf("install s1: %v", err)
+	}
+	writeTool := findTool(t, opts.Tools, MemoryWriteToolName)
+	in, _ := json.Marshal(map[string]string{"path": "VISION.md", "content": "long-term resilience"})
+	if _, err := writeTool.Execute(context.Background(), in); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// The file MUST land at the per-bot path, NOT the legacy project path.
+	pkey := memory.ProjectKey(repo)
+	botPath := filepath.Join(home, "projects", pkey, "bots", "evolve", "memory", "vision", "VISION.md")
+	if _, err := os.Stat(botPath); err != nil {
+		t.Fatalf("expected per-bot file at %s: %v", botPath, err)
+	}
+	legacyPath := filepath.Join(home, "projects", pkey, "memory", "vision", "VISION.md")
+	if _, err := os.Stat(legacyPath); err == nil {
+		t.Fatalf("write leaked to legacy project path %s — visibility:bot not honoured", legacyPath)
+	}
+
+	// Session 2: a fresh install with autoload must re-inject session 1's
+	// content into the system prompt (cross-session memory).
+	opts2 := &GenerationOptions{}
+	if err := installWorkspaceMemory(context.Background(), opts2, store, ref, &delegate.MemorySpec{
+		Scope: "vision", Visibility: "bot", BotID: "evolve", Autoload: []string{"VISION.md"}, Read: true,
+	}); err != nil {
+		t.Fatalf("install s2: %v", err)
+	}
+	var autoloaded bool
+	for _, b := range opts2.SystemBlocks {
+		if strings.Contains(b.Text, "long-term resilience") {
+			autoloaded = true
+		}
+	}
+	if !autoloaded {
+		t.Fatalf("session 2 did not autoload session 1's VISION.md; blocks=%+v", opts2.SystemBlocks)
+	}
+}
+
+// TestInstallWorkspaceMemory_RejectsBadDocPath guards the agent-chosen
+// document path against traversal on the bot-visibility tool path.
+func TestInstallWorkspaceMemory_RejectsBadDocPath(t *testing.T) {
+	t.Setenv("ITERION_HOME", t.TempDir())
+	store := memory.DefaultFSStore()
+	ref := botVisionRef("/tmp/evolve-repo", "evolve")
+	opts := &GenerationOptions{}
+	if err := installWorkspaceMemory(context.Background(), opts, store, ref, &delegate.MemorySpec{
+		Scope: "vision", Visibility: "bot", BotID: "evolve", Write: true,
+	}); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	writeTool := findTool(t, opts.Tools, MemoryWriteToolName)
+	in, _ := json.Marshal(map[string]string{"path": "../escape.md", "content": "x"})
+	if _, err := writeTool.Execute(context.Background(), in); err == nil {
+		t.Fatalf("expected rejection of traversal doc path")
+	}
+}
+
+// TestMemoryAttribution covers the bot-id attribution stamp threaded into
+// agent memory writes (blank before this; the REST path stamps the
+// operator, the tool path now stamps the bot).
+func TestMemoryAttribution(t *testing.T) {
+	if got := memoryAttribution("evolve"); got != "bot:evolve" {
+		t.Fatalf("attribution: got %q", got)
+	}
+	if got := memoryAttribution(""); got != "" {
+		t.Fatalf("empty bot id should yield empty attribution, got %q", got)
 	}
 }

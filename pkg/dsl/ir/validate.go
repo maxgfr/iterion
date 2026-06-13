@@ -163,7 +163,7 @@ func (c *compiler) validateMemory(w *Workflow) {
 		}
 		if backend != "" && backend != "claw" {
 			c.warnf(DiagMemoryNotSupported,
-				"%s %q: memory: is only consumed by backend=claw; backend=%q ignores it",
+				"%s %q: memory: has NO effect on backend=%q — memory_read/memory_write/memory_list and autoload are claw-only; switch to backend: \"claw\" or remove the memory: block",
 				scope, id, backend)
 		}
 	}

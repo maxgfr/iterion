@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/SocialGouv/iterion/pkg/knowledge"
@@ -30,6 +32,33 @@ func TestResolveSpaceRef(t *testing.T) {
 	}
 	if glob := ResolveSpaceRef(knowledge.VisibilityGlobal, "x", "", "", in); glob.TenantID != "" {
 		t.Fatalf("global must not be tenant-scoped: %+v", glob)
+	}
+}
+
+// TestFSStore_BotVisibility_PathLayout pins the exact on-disk layout of a
+// visibility:bot space — the per-bot tree Evoly accumulates its vision in.
+// Suffix match keeps it portable; the round-trip proves the path is usable.
+func TestFSStore_BotVisibility_PathLayout(t *testing.T) {
+	t.Setenv("ITERION_HOME", t.TempDir())
+	s := DefaultFSStore()
+	ctx := context.Background()
+	ref := ResolveSpaceRef(knowledge.VisibilityBot, "vision", "evolve", "", SpaceRefInputs{
+		ProjectID: ProjectKey("/tmp/evolve-repo"), BotID: "evolve",
+	})
+	root, err := s.Root(ref)
+	if err != nil {
+		t.Fatalf("root: %v", err)
+	}
+	want := filepath.Join("projects", ProjectKey("/tmp/evolve-repo"), "bots", "evolve", "memory", "vision")
+	if !strings.HasSuffix(root, want) {
+		t.Fatalf("root %q does not end with %q", root, want)
+	}
+	if _, err := s.WriteDocument(ctx, ref, knowledge.DocumentInput{Path: "VISION.md", Content: []byte("v1")}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	doc, err := s.ReadDocument(ctx, ref, "VISION.md")
+	if err != nil || string(doc.Content) != "v1" {
+		t.Fatalf("readback: %q err=%v", string(doc.Content), err)
 	}
 }
 
