@@ -65,3 +65,6 @@ first bilan for a bot lands.
 | Renovacy | `secured-renovacy` | dependency upgrade pipeline | _not yet_ |
 | Bmady | `bmady` | BMAD multi-persona human-gated delivery | _not yet_ |
 | Devy | `devbox-setup` | devbox.json bootstrap | _not yet_ |
+| Adry | `adr-cartograph` | ADR cartographer + completeness audit (idempotent) | _not yet_ |
+| ReArchi | `adr-rechallenge` | human-gated ADR re-challenge | _not yet_ |
+| Fini | `feature-gap-fill` | gap-driven feature completion loop | _not yet_ |

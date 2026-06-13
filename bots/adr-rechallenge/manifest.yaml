@@ -1,0 +1,34 @@
+name: adr-rechallenge
+display_name: ReArchi
+version: 0.1.0
+description: |
+  Human-in-the-loop ADR re-challenge. Loads an ADR + the current code,
+  presents fresh arguments (changed assumptions, alternatives that
+  matured, dependency updates, code drift), and asks the human:
+  keep / change / addendum.
+    keep     -> end, no change.
+    change   -> file a board ticket describing the proposed change.
+    addendum -> write a short dated addendum note appended to the ADR,
+                then ask the human commit / skip. commit -> git commit;
+                skip -> end (the note is optional).
+when_to_use: |
+  Run on a type:adr-rechallenge issue created by the adr-cartograph (Adry)
+  bot, OR manually via --var adr_path=docs/adr/NNN-<slug>.md when an
+  operator wants to revisit a specific decision.
+author: SocialGouv (devthejo) - adr-rechallenge/main.bot
+schema_version: 1
+
+triggers:
+  - adr
+  - architecture-decision
+  - re-challenge
+  - revisit-decision
+  - design-review
+
+dispatch_vars:
+  adr_path: "{{issue.bot_args.adr_path}}"
+  scope_notes: |-
+    {{issue.title}}
+
+    {{issue.body}}
+  issue_id: "{{issue.identifier}}"
