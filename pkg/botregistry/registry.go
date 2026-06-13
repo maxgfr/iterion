@@ -305,7 +305,25 @@ func discoverBots(roots []string) ([]Entry, error) {
 			return nil, err
 		}
 	}
-	return entries, nil
+	// Dedupe by bundle name across roots, keeping the first occurrence.
+	// Roots are walked in precedence order (DefaultPaths = bots, examples,
+	// .botz), so a source bot in bots/ shadows a stray packed copy of the
+	// same bot in a later root — e.g. a local `iterion bundle pack`
+	// artifact under the gitignored .botz/, which otherwise duplicates the
+	// catalog card and the routing target. Keyed on NormalizeName so
+	// kebab/snake spellings of the same bot collapse the way ResolveBotPath
+	// already resolves them.
+	seenName := make(map[string]bool, len(entries))
+	deduped := entries[:0]
+	for _, e := range entries {
+		key := NormalizeName(e.Name)
+		if seenName[key] {
+			continue
+		}
+		seenName[key] = true
+		deduped = append(deduped, e)
+	}
+	return deduped, nil
 }
 
 func parseBundle(dir string) (*Entry, error) {

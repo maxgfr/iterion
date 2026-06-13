@@ -3,6 +3,7 @@ package botregistry
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -39,6 +40,37 @@ agent y:
 	}
 	if entries[0].Name != "alpha" || entries[1].Name != "zebra" {
 		t.Errorf("entries not sorted: %v", entries)
+	}
+}
+
+func TestList_DedupesSameBotAcrossRoots(t *testing.T) {
+	// A source bot in bots/ and a stray packed copy under the gitignored
+	// .botz/ (a local `iterion bundle pack` artifact) must collapse to ONE
+	// catalog entry — not duplicate the card and the routing target.
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bots", "review-pr", "manifest.yaml"), "name: review-pr\ndisplay_name: Revi\n")
+	writeFile(t, filepath.Join(dir, "bots", "review-pr", "main.bot"), "agent x:\n  model: \"test\"\n")
+	writeFile(t, filepath.Join(dir, ".botz", "review-pr", "manifest.yaml"), "name: review-pr\ndisplay_name: Revi\n")
+	writeFile(t, filepath.Join(dir, ".botz", "review-pr", "main.bot"), "agent x:\n  model: \"test\"\n")
+
+	entries, err := List(ListOptions{Paths: DefaultPaths(dir)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	var got Entry
+	for _, e := range entries {
+		if NormalizeName(e.Name) == "review-pr" {
+			count++
+			got = e
+		}
+	}
+	if count != 1 {
+		t.Fatalf("review-pr should dedupe to 1 entry across bots/ and .botz/, got %d", count)
+	}
+	// Precedence: the bots/ source wins over the .botz/ stray (root order).
+	if !strings.Contains(got.Path, filepath.Join("bots", "review-pr")) {
+		t.Errorf("bots/ copy should win precedence, got path %q", got.Path)
 	}
 }
 
