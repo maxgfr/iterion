@@ -1,5 +1,66 @@
 # Seki + deepsec — validation
 
+## 2026-06-13 (retest) — engine fixes + safe default, via STUDIO (run 019ec1e0)
+
+- Status: **engine fixes validated via the studio path; safe default shipped; but
+  the run HARD-FAILED at `scan_health` — correctly — because the sec image's generic
+  scanner toolchain is broken.** detect_tech (which FAILED in 019ec10f/019ec13a) now
+  completes; the read chain ran to the coverage gate, which then refused to certify a
+  thin audit. Board-emit NOT reached (failed before `report_card`).
+- Versions: bot sec-audit-source 0.1.0 · iterion 778b9860 / bbdca0da / ea61817a /
+  92c40d62
+- Method: launched via **studio** `POST /api/runs` (so the HTTP board transport is
+  wired — C082), `remediate=false` (now the default), `enable_deepsec=false` (lean:
+  validate generic+lang scanners → triage → report → board-emit cheaply; deepsec's
+  vuln-finding was already proven in 019ec142). Sandbox `iterion-sandbox-sec:edge`.
+
+### Validated by the engine fixes (the headline)
+- **detect_tech now completes** (claw + sandbox). In 019ec10f/019ec13a it died at
+  this first claw node; the TLS-inspect-proxy hang (FIXED 778b9860) was the cause.
+  The whole read chain ran: inventory → detect_tech → context → diff_scope →
+  plan_shards → run_generic_scanners → run_lang_scanners → … Confirms the proxy +
+  empty-tool-result fixes hold for the **operator's actual (studio) path**, not just
+  CLI.
+- **remediate=false (92c40d62)** — `iterion validate` clean; the run is read-only by
+  default (no live-tree edits, no branch hijack). Safe under `task studio:dev`.
+- **{{run.id}} (ea61817a)** — opt-in remediation will now name its branch
+  `iterion/sec-fix/<real-run-id>` instead of the literal `iterion/sec-fix/run.id`.
+
+### scan_health hard-failed — CORRECTLY (the headline blocker)
+The run reached `scan_health` and **hard-failed (run_failed, exit 1)** with:
+`{"generic_expected":3,"generic_present":1,"min_generic":2,"missing":[trivy.json,
+semgrep-auto.json (generic), gosec.json (lang)],"total_findings_seen":1596,
+"healthy":false,"degraded":true}` — *"only 1 of 3 always-on generic scanners produced
+output (need ≥2)"*. This is the **anti-façade gate working as designed**: it refuses to
+certify an audit when the core generic toolchain is down, even though lang/custom
+scanners saw 1596 raw findings. (019ec142 passed because ≥2 generic scanners happened
+to run that time — the toolchain is flaky.)
+
+### THE BLOCKER: the sec image's scanner toolchain is broken (infra, not engine/bot)
+Scanners are installed (`trivy 0.70.0`, `gosec`, `gitleaks 8.21.2`, `govulncheck`,
+`semgrep` on PATH) but **fail at runtime** in `iterion-sandbox-sec:edge`:
+1. **trivy** → `FATAL ... unable to create temporary directory: stat /tmp/trivy-10:
+   no such file or directory`. A /tmp/TMPDIR issue in the image (reproduced with a bare
+   `docker run … trivy fs`). Also the bot still passes the **deprecated** `--security-checks`
+   flag (renamed `--scanners` in modern trivy) — fix both.
+2. **semgrep** → `semgrep --version` prints nothing; `--config=auto` needs to fetch its
+   rule pack from the registry (network) and produced no output. Broken install and/or
+   registry fetch.
+3. **gosec** → ran **>11 min** then produced **no `gosec.json`** (timed out / errored
+   after type-checking the full import graph — `-exclude-dir=vendor` filters reporting,
+   not loading). Needs a timeout + scoping.
+→ **Both sec bots (Seki + Depsy) are gated on this.** The fix is a focused
+`sandbox/sec/Dockerfile` + scanner-invocation pass (TMPDIR for trivy, `--scanners`,
+fix/repin semgrep, bound gosec), then republish via CI `build-sandbox-sec`. Not done
+here — it's image infra, out of scope for the bot retest; tracked as the sec-bot blocker.
+
+### Lessons for next run
+- Launch sec bots **via the studio** (board transport wired) — a bare CLI run no-ops
+  board writes (C082). detect_tech + the claw path now work end-to-end (engine fixes).
+- **Don't trust sec-bot output until the sec image's trivy/semgrep/gosec are fixed** —
+  `scan_health` will (rightly) hard-fail or banner on the broken toolchain. deepsec ON
+  is the only currently-working value path (019ec142), and even it runs degraded.
+
 ## 2026-06-13 — iterion self-audit dogfood (runs 019ec10f, 019ec13a, **019ec142**)
 
 > **Update — run 019ec142 (after both engine fixes + static-binary re-copy):
