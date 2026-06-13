@@ -22,6 +22,31 @@
   *"RCE in cloud runner via unvalidated RepoURL passed to git clone (pkg/runner/loop.go)"*
   (the file does clone `msg.RepoURL` at L689 → `prepareRepoWorkspace` L789). Status
   `uncertain` (N-vote didn't fully confirm) — worth operator triage.
+### C082 root cause + fix design (board-emit, the remaining gap)
+
+Traced precisely (2026-06-13): the sandboxed board MCP HTTP transport is **declared on
+both ends but the PRODUCER side is never wired**, so sandboxed claude_code/claw board
+caps silently no-op and the agent **confabulates** the board.create IDs:
+- **Server side exists**: `BoardMCPTokenRegistry` + `RegisterBoardMCPRoutes(/api/v1/mcp/board,
+  store, reg)` ([pkg/server/mcp_board_handler.go](pkg/server/mcp_board_handler.go),
+  server.go:870) — BUT `boardMCPTokens.Register(token, caps)` is **never called** for a run.
+- **Consumer side exists**: `Task.BoardHTTPEndpoint`/`BoardRunToken` + claude_code.go:477
+  consume them (and :490 warns + disables board MCP when empty) — BUT **nothing in the
+  runtime/executor ever SETS them** (grep: zero assignments). So they're always "" →
+  board MCP disabled under sandbox → confabulation.
+- **Fix design**: (1) plumb a `register(caps)→token` closure + a board endpoint URL from
+  the server into `model.ExecutorSpec`→`ClawExecutor`; (2) in the Task builder
+  ([executor.go ~1245](pkg/backend/model/executor.go)) for sandboxed board-cap nodes:
+  `task.BoardRunToken = register(caps); task.BoardHTTPEndpoint = url`. (3) **CRITICAL
+  networking caveat** — the endpoint must be *container-reachable*: `iterion studio` binds
+  `127.0.0.1` (loopback, NOT reachable via `host.docker.internal`); the egress proxy only
+  works because the docker driver's `ProxyConfigurer` binds a gateway-reachable interface.
+  The board endpoint needs the same (bind gateway/0.0.0.0, or tunnel via the proxy). This
+  networking requirement = it MUST be live-validated against a container (a sandboxed run
+  confirming the write lands), so it should be implemented when the studio is free (no
+  parallel session to drain on the rebuild) or against a dedicated `iterion server` bound
+  on a gateway-reachable port. Not shipped blind.
+
 - **board-emit (C082) STILL DOESN'T LAND (bilan #4 persists — a distinct engine gap).**
   report_card DID invoke `board.create`×3 / `board.label`×3 / `board.move`×2 and its
   `created_issues` output carries real native-looking IDs (`native:90543c66…`), but the
