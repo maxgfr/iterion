@@ -258,6 +258,25 @@ prompt review_system:
       You may still vote `approved=true` on a partial audit if
       blockers is empty, but the workflow won't terminate until
       coverage meets the threshold across both families.
+   6. APPROVAL CALIBRATION (anti-oscillation) — an ADR draft is
+      APPROVED once it FACTUALLY and ACCURATELY records the
+      decision: correct Nygard shape (H1 `# ADR-NNN: …`, bullet
+      front-matter, `../../` code refs that resolve), the
+      Context/Decision/Alternatives it states match the cited
+      code, no hallucinated symbols, `is_mechanic` correctly
+      false. When a draft clears that bar, vote `approved=true` —
+      do NOT keep rejecting for prose polish, extra nuance, or
+      "could be more thorough". Raise a blocker with
+      `confidence: high` ONLY for a real defect: a factual
+      misstatement, a broken/wrong code ref, a missing required
+      section, a mechanic entry that shouldn't be an ADR, or a
+      code edit (rule 4). Style / wording / completeness-of-detail
+      preferences are `confidence: low` at most — the streak
+      treats a low-confidence rejection as NON-blocking, so a
+      noisy nitpick won't reset convergence — or better, omit
+      them. The goal is an accurate record that CONVERGES, not a
+      perfect essay. NEVER re-raise an item already in
+      `input.prior_pushback` without genuinely new evidence.
 
   HOW TO USE `input.recently_changed_code_files` (a HINT, when
   non-empty): prioritise candidates touching those files —
@@ -1158,7 +1177,7 @@ judge reviewer_gpt:
 compute streak_check:
   output: streak_state
   expr:
-    stop: "(input.approved || input.blocker_count == 0) && (loop.review_loop.previous_output.approved || loop.review_loop.previous_output.blocker_count == 0) && input.family != loop.review_loop.previous_output.family && outputs.build_manifest.coverage_pct >= vars.coverage_target_pct"
+    stop: "(input.approved || input.blocker_count == 0 || input.confidence == 'low') && (loop.review_loop.previous_output.approved || loop.review_loop.previous_output.blocker_count == 0 || loop.review_loop.previous_output.confidence == 'low') && input.family != loop.review_loop.previous_output.family && outputs.build_manifest.coverage_pct >= vars.coverage_target_pct"
     approved: "input.approved || input.confidence == 'low' || input.blocker_count == 0"
     family: "input.family"
     blockers: "input.blockers"
