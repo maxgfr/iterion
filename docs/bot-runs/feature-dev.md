@@ -4,10 +4,21 @@ Autonomous end-to-end feature development: plan → act → `/simplify` →
 prepare_commit → alternating Claude/GPT review-fix loop → commit, in an isolated
 `worktree: auto`. See [bots/feature-dev/](../../bots/feature-dev/).
 
-## 2026-06-13 — sandbox-doctor static-binary check (run 019ec149)
+## 2026-06-13 — sandbox-doctor static-binary check (runs 019ec149, **019ec180**)
 
-- Status: **failed to converge — implementation correct, review loop is broken for
-  new-file features.**
+> **Update — fix applied + validated (run 019ec180).** Taught `act`/`fix` to
+> `git -C <workspace_dir> add -A` after editing (commit `44d34c9d`), so new files
+> are tracked and visible to the reviewers' `git diff HEAD`. Re-running the SAME
+> feature_prompt: Featurly **converged and committed** (`finished`, **$2.85 / 247
+> steps** vs the looping `$4.95 / 507 / cancelled`), shipping commit `439d1116`
+> on `iterion/run/opal-flash-mothbeam-80d7` — `pkg/cli/sandbox.go` (+106, the
+> doctor static/dynamic ELF check + WARNING), a **tracked** test, AND
+> `docs/adr/019-sandbox-doctor-static-binary-check.md`. The new test being in the
+> commit is the direct proof the untracked-files bug is fixed. Feature pending
+> integration to main (after the parallel Depsy run, to avoid a watchexec restart).
+
+- Status (original run 019ec149): **failed to converge — implementation correct,
+  review loop broken for new-file features → FIXED + validated (see update above).**
 - Versions: bot feature-dev 0.1.0 · iterion f247f360
 - Method: `POST /api/runs`, `feature_prompt` = add a static-binary check to
   `iterion sandbox doctor` (warn when the host iterion is dynamically linked — the
