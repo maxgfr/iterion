@@ -200,3 +200,40 @@ func TestAwaitTerminal_LoadRunMissTransient(t *testing.T) {
 		t.Errorf("status = %q, want finished (transient miss should not be permanent)", results[0].Status)
 	}
 }
+
+// A shard that already failed AT or BEFORE dispatch (r.Error set, run
+// document never created — cloud-mode pre-launch failures like a bad
+// ITERION_SERVER_URL, an unreadable workflow, or a request-build/POST/non-2xx
+// error) is already terminal: awaitTerminal must report it immediately, NOT
+// keep polling a document that will never appear until ctx timeout. Regression
+// for the multi-hour hang Revi (review-pr) caught reviewing the campaign diff.
+func TestAwaitTerminal_PreDispatchFailureDoesNotHang(t *testing.T) {
+	rs, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	// Deliberately NO CreateRun — the run document never exists.
+	results := []shardResult{{
+		Plan:  shardPlan{Index: 0, RunID: "shard-neverlaunched"},
+		Error: "build launch request: net/url: invalid control character in URL",
+	}}
+
+	// Long ctx so a regression hangs visibly; the watchdog below asserts
+	// awaitTerminal returns fast (first tick) rather than via ctx timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() { awaitTerminal(ctx, rs, results, 10*time.Millisecond); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("awaitTerminal hung on a pre-dispatch failure (no run document) instead of reporting it immediately")
+	}
+
+	if results[0].Status != store.RunStatusFailed {
+		t.Errorf("status = %q, want failed", results[0].Status)
+	}
+	if !strings.Contains(results[0].Error, "build launch request") {
+		t.Errorf("error = %q, want the original pre-dispatch error preserved (not a timeout)", results[0].Error)
+	}
+}

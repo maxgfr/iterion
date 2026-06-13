@@ -223,9 +223,23 @@ func awaitTerminal(ctx context.Context, rs store.RunStore, results []shardResult
 		for i := range pending {
 			r, loadErr := rs.LoadRun(ctx, results[i].Plan.RunID)
 			if loadErr != nil {
-				// Run document hasn't appeared yet (cloud-mode publisher
-				// may lag behind the HTTP response by a few ms). Keep
-				// polling; on context expiry the outer select bails.
+				// No run document yet. Two cases:
+				//   - The shard already failed AT or BEFORE dispatch (cloud-mode
+				//     pre-launch errors — bad ITERION_SERVER_URL, unreadable
+				//     workflow, request-build / POST / non-2xx — set r.Error
+				//     without ever creating a run). No document will EVER appear,
+				//     so it is already terminal: report it now rather than poll
+				//     until ctx timeout (which turned a handled failure into a
+				//     multi-hour hang).
+				//   - A freshly-launched cloud shard whose publisher just lags
+				//     behind the HTTP response by a few ms (no error). Keep
+				//     polling; on context expiry the outer select bails.
+				if results[i].Error != "" {
+					if results[i].Status == "" {
+						results[i].Status = store.RunStatusFailed
+					}
+					delete(pending, i)
+				}
 				continue
 			}
 			if results[i].Started == nil {
