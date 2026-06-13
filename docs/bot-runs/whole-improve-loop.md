@@ -57,6 +57,16 @@ cross-family approvals. See [bots/whole-improve-loop/](../../bots/whole-improve-
    a commit step. **Recommendation:** give Willy `worktree: auto` + a commit-on-
    convergence step (consistent with Billy), or at minimum document loudly that it
    edits the live tree. ADR-level decision, not a quick patch.
+   **Evaluated 2026-06-13 — deferred.** The clean `worktree: auto` move has a real
+   conflict: Willy's cross-run convergence relies on `.whole_improve_loop.state`
+   (cursor + clean_streak) persisted at the **workspace root** to amortize the
+   num_chunks-deep sweep across re-dispatches (issue-#12 / ADR-011). A `worktree: auto`
+   worktree is created fresh from HEAD and **removed on finalize**, so that state would
+   vanish each run → cross-run streak amortization breaks (every run re-sweeps from
+   cursor 0). Doing it correctly means relocating the state off the ephemeral worktree
+   (run-store or parent repo) **and** adding a commit step — a genuine ADR, not a patch.
+   Since #1 is also solvable operationally (CLI launch / non-watchexec studio), the
+   worktree change is deferred pending that ADR rather than rushed.
 3. **Chunk grouping can exceed `max_review_chunk_tokens` ~7× (coverage).** Chunk 0
    was **218K est tokens / 149 files** against the 30K default budget; the renderer
    then hard-caps content at `budget*4+4096` (~124K chars), emitting
