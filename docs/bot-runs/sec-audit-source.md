@@ -36,6 +36,14 @@
 >   doc + make Seki read-only by default); give the remediation phase
 >   `worktree: auto` isolation; never run a remediating Seki under `task
 >   studio:dev`. (deepsec default-on also makes every run long/expensive.)
+> - **#6 Remediation hijacked the operator's git branch (severe).** With no
+>   worktree, remediation ran `git checkout -b` **on the main checkout**, moving it
+>   off `main` onto a branch named literally **`iterion/sec-fix/run.id`** — an
+>   **unrendered `{{run.id}}` template**. Subsequent operator commits then silently
+>   landed on that branch instead of `main` (reconciled by hand). Two bugs: (a)
+>   remediation must use an isolated worktree, never `git checkout` the live tree;
+>   (b) the branch-name template isn't substituted (`run.id` literal). Reinforces
+>   the case for default `remediate=false`.
 
 - Status: **read pipeline VALIDATED (019ec142); remediation phase unsafe
   (self-kill + studio brick). Original blockers ↓ fixed.**
