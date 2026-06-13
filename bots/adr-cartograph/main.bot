@@ -1016,7 +1016,51 @@ def jload(name, default):
         return json.loads(raw)
     except json.JSONDecodeError:
         return default
-adrs = jload('ADRS', [])
+import glob, datetime
+adr_dir = os.environ.get('ADR_DIR', 'docs/adr')
+def _parse_adr(path):
+    try:
+        txt = open(path, encoding='utf-8').read()
+    except Exception:
+        txt = ''
+    cited = []
+    i = 0
+    while True:
+        j = txt.find('../../', i)
+        if j < 0:
+            break
+        k = j + 6
+        e = k
+        while e < len(txt) and txt[e] not in ')#\n ':
+            e += 1
+        seg = txt[k:e]
+        if seg:
+            cited.append(seg)
+        i = max(e, j + 6)
+    status = ''
+    date = ''
+    for line in txt.splitlines():
+        s = line.strip()
+        if s.startswith('- **Status**:'):
+            status = s.split(':', 1)[1].strip()
+        elif s.startswith('- **Date**:'):
+            date = s.split(':', 1)[1].strip()
+    age = None
+    if date:
+        try:
+            d = datetime.date.fromisoformat(date[:10])
+            age = (datetime.date.today() - d).days
+        except ValueError:
+            age = None
+    base = os.path.basename(path)
+    nnn = base.split('-', 1)[0]
+    return {'path': path, 'nnn': nnn, 'cited_paths': sorted(set(cited)), 'status': status, 'date': date, 'age_days': age}
+## Re-glob the CURRENT docs/adr/ each pass (NOT the frozen scan_adrs.adrs
+## input): the fixers author new ADR files inside the review loop, and the
+## coverage gate must SEE them or it can never reach the convergence
+## threshold (dogfood finding: coverage froze at 71% through 10 iterations
+## because the authored ADRs were invisible to the frozen input set).
+adrs = [_parse_adr(p) for p in sorted(glob.glob(os.path.join(adr_dir, '*.md')))]
 decisions = jload('DECISIONS', [])
 gaps = jload('GAPS', [])
 try:
