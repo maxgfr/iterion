@@ -140,6 +140,14 @@ prompt act_user:
   Edit the necessary files, run the tests, and iterate until the
   build is green and the new tests pass.
 
+  Finally, STAGE YOUR WORK so review can see it: run
+  `git -C {{vars.workspace_dir}} add -A`. This is REQUIRED, not
+  optional — the reviewers anchor on `git diff HEAD`, which IGNORES
+  untracked files. A NEW file you created but never `git add`ed is
+  invisible to the review diff, so the reviewer correctly rejects an
+  "incomplete committable diff" and the review loop can NEVER converge.
+  Staging is safe: the commit step re-stages a curated file list later.
+
 prompt simplify_user:
   /simplify
 
@@ -559,6 +567,12 @@ prompt fix_user:
       it targets pre-existing code outside the feature scope:
       add the exact item to `pushback` with a clear rationale
       in `pushback_justification`.
+
+  After applying fixes, STAGE everything: run
+  `git -C {{vars.workspace_dir}} add -A` so any NEW files are visible
+  to the next reviewer's `git diff HEAD` (it ignores untracked files —
+  an unstaged new file reads as "missing implementation" and blocks
+  convergence forever). Safe: the commit step re-stages its own list.
 
   Output:
     - applied: true if at least one fix was applied
