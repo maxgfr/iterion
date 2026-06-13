@@ -456,6 +456,44 @@ Alternative: produce JSON via `printf '{"count":%d,"done":false}\n' N`.
 `printf` is POSIX, has no brace expansion semantics, and reads as
 intent-first.
 
+### Never pass LLM-generated values into a command via the raw `{{!ref}}` form
+
+A tool `command:` resolves `{{input.x}}` / `{{vars.x}}` through
+`shellEscapeValue` (`pkg/backend/model/executor_tool.go`): complex values are
+JSON-encoded and the whole token is wrapped + `'\''`-escaped, so it survives
+`bash -c` no matter what it contains. The **raw** form `{{!input.x}}` (bang
+prefix) deliberately bypasses that escaping and inserts the value verbatim —
+intended only for *trusted* shell snippets an upstream node hands down.
+
+The trap: passing an upstream node's structured output (especially an
+**LLM-authored** field) via `{{!input.x}}`, or wrapping the escaped form in
+your own literal quotes:
+
+```
+# BROKEN — raw prose JSON in single quotes:
+DECISIONS='{{!input.decisions}}' python3 -c "..."
+```
+
+LLM prose is full of apostrophes ("iterion's") and parens ("(CLI/studio)").
+The first `'` closes the shell quote and the next `)` yields
+`bash: -c: syntax error near unexpected token ')'`. Observed live in
+adr-cartograph's `build_manifest` (dogfood, 2026-06-13): the survey's
+decisions/gaps JSON broke the node on every run until fixed.
+
+**Rule:** pass structured/LLM data with the **default** form and **no
+surrounding quotes** — let `shellEscapeValue` quote it:
+
+```
+# CORRECT — shellEscapeValue wraps + escapes; json.loads gets exact JSON:
+DECISIONS={{input.decisions}} python3 -c "import os,json; d=json.loads(os.environ['DECISIONS'])"
+```
+
+Reserve `{{!ref}}` for values you control that are *meant* to be
+re-interpreted as shell. A tool node that only ever saw path tokens (e.g.
+docs-refresh's `build_manifest`) can carry the `'{{!input.x}}'` pattern
+latently for a long time — it breaks the day an apostrophe-bearing value
+flows through, so fix the pattern, not just the one value that tripped it.
+
 ### Diagnostics
 
 If a downstream node fails with "expected object, got string" or
