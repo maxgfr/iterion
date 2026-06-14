@@ -103,7 +103,7 @@ main() {
   info "${BINARY_NAME} ${VERSION} installed to ${INSTALL_DIR}/${BINARY_NAME}${EXT}"
   info ""
   info "get started:"
-  info "  iterion validate examples/pr_refine_single_model.iter"
+  info "  iterion validate examples/deploy-e2e.bot"
 }
 
 main "$@"
