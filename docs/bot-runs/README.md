@@ -63,6 +63,6 @@ first bilan for a bot lands.
 | Revi (converse) | `revi-converse` | conversational PR follow-up | _not yet_ |
 | Seki | `sec-audit-source` | source SAST audit | [sec-audit-source.md](sec-audit-source.md) |
 | Depsy | `sec-audit-deps` | supply-chain SCA audit (scaffold) | [sec-audit-deps.md](sec-audit-deps.md) |
-| Renovacy | `secured-renovacy` | dependency upgrade pipeline | _not yet_ |
+| Renovacy | `secured-renovacy` | dependency upgrade pipeline | [secured-renovacy.md](secured-renovacy.md) |
 | Bmady | `bmady` | BMAD multi-persona human-gated delivery | _not yet_ |
 | Devy | `devbox-setup` | devbox.json bootstrap | [devbox-setup.md](devbox-setup.md) |
