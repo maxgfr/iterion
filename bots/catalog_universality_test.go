@@ -167,7 +167,14 @@ var stackPatterns = []stackPattern{
 	{regexp.MustCompile(`\bgovulncheck\s+(-|\./)`), "hardcoded Go SCA scanner invocation"},
 	{regexp.MustCompile(`\bpip-audit\s+-`), "hardcoded Python SCA scanner invocation"},
 	{regexp.MustCompile(`\bnpm\s+audit\s+--`), "hardcoded npm SCA scanner invocation"},
-	{regexp.MustCompile(`semgrep\s+--config=p/`), "hardcoded per-language semgrep ruleset"},
+	// Per-LANGUAGE semgrep packs (p/golang, p/python, …) enumerate a stack in
+	// the DSL and belong in skills. p/default — Semgrep's universal
+	// cross-language pack — is the always-on generic floor (the metrics-off
+	// equivalent of --config=auto, which CLAUDE.md's "always-on generic floor"
+	// explicitly allows: `--config=auto --metrics=off` is rejected by semgrep,
+	// so the floor uses p/default instead). So match the language packs, not
+	// p/default (nor non-language packs like p/ci, p/secrets).
+	{regexp.MustCompile(`semgrep\s+--config=p/(golang|go|python|py|javascript|js|typescript|ts|java|ruby|php|rust|csharp|kotlin|scala|swift|elixir|bash)\b`), "hardcoded per-language semgrep ruleset"},
 	{regexp.MustCompile(`^\s*has_(js|go|python|npm|pypi|gomod|rust|ruby|php|java)\s*:\s*bool`), "closed-enum tech boolean in schema (emit an open langs/ecosystems list)"},
 	{regexp.MustCompile(`^(agent|tool|judge)\s+run_(js|go|py|python)_(scanners|heuristics)\s*:`), "per-language scanner/heuristic node (use one adaptive agent step)"},
 }
