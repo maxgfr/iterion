@@ -10,6 +10,82 @@ cross-family approvals. See [bots/whole-improve-loop/](../../bots/whole-improve-
 > [branch-improve-loop.md](branch-improve-loop.md). This page covers Willy's
 > whole-repo specifics.
 
+## 2026-06-14 — scope_globs shipped + pkg/store hardening + fixer-placeholder finding (run 019ec7ed, cancelled-for-value)
+
+- Status: **partial by design** — cancelled mid-sweep once it had produced its
+  value (real fixes + clear findings) rather than run to convergence on a tree
+  the fixer had silently broken. Converted directly into repatriated commits.
+- Versions: bot whole-improve-loop 0.3.0 **+ new `scope_globs` var** · iterion
+  base `2707ea2f`, fixes `9d53e0fc..99cb81ef` (worktree `worktree-willy-improve`).
+- Method: CLI `iterion run` (a separate process — dodges the `task studio:dev`
+  watchexec self-kill), `--var scope_globs=pkg/store` (the new var), into the
+  operator's visible store (`/.iterion`, studio :4891). Backends: reviewer/fix
+  `claude_code` opus-4-8 (max) + `claw` openai/gpt-5.5 (high) via ChatGPT
+  forfait. `sandbox-full:edge`. Workspace = the worktree (Willy has no
+  `worktree: auto`, so it edits its `workspace_dir` directly).
+- Result: NOT run to convergence (cancelled after 3 chunks, ~$3.79, ~30 min).
+  `scope_globs` pruned pkg/store to **4 chunks / 51 files / loop_max 19**
+  (whole-repo iterion is **29 chunks / loop_max 44** — the cost the var fixes).
+  chunk 0 clean (claude); chunk 1 → **4 real blockers** (gpt) → fix_gpt; chunk 2
+  clean (claude). Repatriated by hand to the worktree branch.
+
+### Value
+- **`scope_globs` works end-to-end** — fixes the focused-run cost finding from the
+  019ec598 bilan below. A focused pkg/store pass cost **~$3.79** instead of paying
+  the whole-repo sweep (~$20-60 to crawl to the chunks you care about). This is the
+  way to dogfood Willy affordably: scope to a package, get a converging run for a
+  few dollars.
+- **4 genuine pkg/store production-readiness blockers**, all verified real against
+  the code, repatriated as `0ddd6227` (+ `hardening_test.go` regression tests the
+  fixer's own plan called for but never wrote):
+  - **B1** run dir/run.log created `0755`/`0644` (logs hold prompts/outputs/secrets →
+    world-readable) + path built before run-ID validation → private `dirPerm`/`filePerm`
+    + validate-first; `TeeRunLog(storeRoot, runID)`.
+  - **B2** `AppendEvent`/`scanMaxSeqLocked` skipped `SanitizePathComponent`
+    (traversal-defense asymmetry vs Load*/Artifact/Interaction).
+  - **B3** `CreateRun` clobbered an existing `run.json` (run-ID reuse/race reset
+    status/checkpoint) → exclusive create (`WriteFileAtomicNew` hard-link, `fs.ErrExist`).
+  - **B4** a torn final JSONL line after a crash lost the first post-resume event →
+    separate-with-newline repair.
+
+### Findings / misses (bot + engine)
+1. **fix_gpt returns a "work in progress" placeholder and ships unverified edits.**
+   The fixer edited 5 files (9.3 min, 29k tokens) but its final turn produced empty
+   output (`raw_output_len: 0`, `formatting_pass_used: true`), so iterion's
+   formatting pass synthesized `applied=false` + "validating and fixing". Two
+   regressions rode through unverified: **B4** `ReadAt` on a write-only fd (EBADF →
+   broke *every* event append; 6 test failures) and **B1** a missed caller in
+   `pkg/cli/resume.go` (build break). Root cause: the **review** prompt forbids
+   provisional verdicts; the **fix** prompt did not. Fixed — FINALIZE guard in
+   `fix_system` (`99cb81ef`): no placeholder + self-verify with the project's own
+   build/test + update ALL callers.
+2. **The loop cannot catch a fixer that breaks the build (no deterministic post-fix
+   gate).** Reviewers review their chunk's *source*; a cross-file build break
+   (`resume.go`, outside the pkg/store scope) or a runtime-only bug (B4) is invisible,
+   so the loop rebuilt a clean streak on a broken tree and would have
+   **converged-on-broken**. The fix is the CLAUDE.md "deterministic gate" pattern:
+   run the repo's OWN build/test as a `tool`/`compute` gate after fixes / before
+   `commit_changes`, degrading the run if red. Universality-constrained (the
+   build/test command is per-repo) → skill-guided detect + deterministic gate, like
+   sec-audit-source's `scan_health`. **Recommended follow-up — not yet implemented.**
+3. **scope_globs ↔ out-of-scope callers**: a scoped review can't see a signature
+   change's callers outside the scope. The FINALIZE "update ALL callers" clause
+   mitigates from the fixer side; the build gate (2) is the deterministic backstop.
+
+### Engine / repo hardening produced
+- `9d53e0fc` + `b5302d37` — `scope_globs` (feature + README); `72ffd4f1` — catalog regen.
+- `0ddd6227` — pkg/store B1-B4 hardening + 4 regression tests.
+- `99cb81ef` — `fix_system` FINALIZE guard (no placeholder + self-verify).
+
+### Lessons for next run
+- Don't trust fix_gpt's `applied` flag or summary — **always run a build/test gate on
+  the worktree before repatriating** (until the deterministic gate node lands).
+- gpt-5.5 is a strong **reviewer** (4 real, well-analyzed blockers) but an unreliable
+  **fixer** at the budget ceiling (placeholder + unverified edits). Until the build
+  gate exists, prefer routing fixes to `claude_code` even for gpt-found blockers.
+- For a clean convergence demo, scope tighter and raise `max_review_passes`; the
+  persisted streak carries multi-run convergence regardless.
+
 ## 2026-06-14 — convergence machinery re-confirmed + path-scope finding (run 019ec598, cancelled)
 
 - Status: **partial** (machinery confirmed; cancelled before the scoped edit —
