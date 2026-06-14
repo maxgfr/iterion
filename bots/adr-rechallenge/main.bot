@@ -132,6 +132,7 @@ schema addendum_input:
 schema addendum_output:
   preview: string
   adr_path: string
+  full_message: string
 
 ## human_commit_gate: the second radio. `commit: bool` -> required
 ## Yes/No radio; `note: string` -> optional.
@@ -363,6 +364,12 @@ prompt addendum_system:
   - preview: the exact addendum block you wrote (for the human gate
     to confirm).
   - adr_path: the path of the ADR you edited.
+  - full_message: a complete conventional-commit message for the
+    addendum — the subject `docs(adr): addendum to ADR-<num> —
+    re-challenge pass` (substitute the ADR's real number, e.g. 008),
+    then a blank line, then the trailer `Bot: adr-rechallenge`. This
+    whole string becomes the commit message verbatim, so include the
+    real newlines (do NOT write a literal `\n`).
 
 prompt addendum_user:
   ADR under review:
@@ -655,7 +662,7 @@ workflow adr_rechallenge:
   derive_commit -> commit_changes when is_commit with {
     workspace_dir: "{{vars.workspace_dir}}",
     files: "{{outputs.load_adr.path_list}}",
-    full_message: "docs(adr): addendum to ADR-{{outputs.load_adr.num}} re-challenge\n\n{{outputs.derive_commit.note}}\n\nBot: adr-rechallenge"
+    full_message: "{{outputs.write_addendum.full_message}}"
   }
   commit_changes -> done
   derive_commit -> done
