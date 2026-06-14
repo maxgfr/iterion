@@ -20,7 +20,7 @@ Creates `pr_refine_single_model_backend.bot`, `.env.example`, and `.gitignore`. 
 Parse, compile, and validate a workflow without running it:
 
 ```bash
-iterion validate workflow.iter
+iterion validate workflow.bot
 ```
 
 Reports errors and warnings with diagnostic codes (C001–C086, sparse — see [references/diagnostics.md](references/diagnostics.md) for the authoritative list), file positions, and descriptions.
@@ -30,7 +30,7 @@ Reports errors and warnings with diagnostic codes (C001–C086, sparse — see [
 Execute a workflow:
 
 ```bash
-iterion run workflow.iter [flags]
+iterion run workflow.bot [flags]
 ```
 
 | Flag | Description |
@@ -83,8 +83,8 @@ Node-scoped inspection flags:
 Resume a paused workflow run with human answers:
 
 ```bash
-iterion resume --run-id <id> --file workflow.iter --answer key=value
-iterion resume --run-id <id> --file workflow.iter --answers-file answers.json
+iterion resume --run-id <id> --file workflow.bot --answer key=value
+iterion resume --run-id <id> --file workflow.bot --answers-file answers.json
 ```
 
 See [resume.md](resume.md) for the full failure / resume matrix.
@@ -116,9 +116,9 @@ The forked run is created in `cancelled` status with a synthetic checkpoint anch
 Generate a Mermaid diagram from a workflow:
 
 ```bash
-iterion diagram workflow.iter              # Compact view (default)
-iterion diagram workflow.iter --detailed   # Include node properties
-iterion diagram workflow.iter --full       # Include templates and loop details
+iterion diagram workflow.bot              # Compact view (default)
+iterion diagram workflow.bot --detailed   # Include node properties
+iterion diagram workflow.bot --full       # Include templates and loop details
 ```
 
 Paste the output into any Mermaid-compatible renderer (GitHub Markdown, [Mermaid Live Editor](https://mermaid.live), etc.).

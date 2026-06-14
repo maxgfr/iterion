@@ -121,7 +121,7 @@ Fix:
 
 Diagnose:
 1. `iterion inspect --run-id <id> --events | grep -E 'edge_selected|node_finished' | head -20`
-2. `iterion validate <workflow.iter>` — confirm node IDs match what `--judge-node` expects.
+2. `iterion validate <workflow.bot>` — confirm node IDs match what `--judge-node` expects.
 
 Fix:
 - Pass the right node ID. The IR node ID is the value after `judge` / `agent` in the `.iter` source (e.g. `judge reviewer:` → `--judge-node reviewer`).

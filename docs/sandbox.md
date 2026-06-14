@@ -27,7 +27,7 @@ To enable sandboxing without touching the workflow source, pass
 `--sandbox=auto` to `iterion run`:
 
 ```bash
-iterion run review.iter --sandbox=auto
+iterion run review.bot --sandbox=auto
 ```
 
 ## How it works
@@ -259,13 +259,13 @@ agent custom_env:
 ### CLI
 
 ```bash
-iterion run foo.iter --sandbox=auto    # one-shot override
-iterion run foo.iter --sandbox=none    # force off
-iterion run foo.iter                   # use workflow + global default
-iterion run foo.iter \
+iterion run foo.bot --sandbox=auto    # one-shot override
+iterion run foo.bot --sandbox=none    # force off
+iterion run foo.bot                   # use workflow + global default
+iterion run foo.bot \
     --sandbox-default-image ghcr.io/socialgouv/iterion-sandbox-full:edge
                                        # override the auto-mode fallback image
-iterion run foo.iter --sandbox-host-state=none
+iterion run foo.bot --sandbox-host-state=none
                                        # disable ~/.iterion + ~/.claude auto-mount
 iterion sandbox doctor                 # report driver + capabilities
 ```
@@ -319,7 +319,7 @@ CLIs, GitHub CLI, …) on every run.
 **Selecting the full variant per-run:**
 
 ```bash
-iterion run foo.iter \
+iterion run foo.bot \
   --sandbox-default-image ghcr.io/socialgouv/iterion-sandbox-full:edge
 ```
 
@@ -429,7 +429,7 @@ current host and what capabilities it advertises.
 
 ### Strict pre-flight (`--strict`)
 
-`iterion sandbox doctor --strict [workflow.iter]` resolves the **exact
+`iterion sandbox doctor --strict [workflow.bot]` resolves the **exact
 sandbox spec a run would use** — host detection + the workflow's
 `sandbox:` block (when a file is given) + the same
 `--sandbox` / `--sandbox-default-image` / `--sandbox-host-state` flags
@@ -440,9 +440,9 @@ into a run with a cryptic Docker/K8s error are caught in ~1s.
 
 ```bash
 iterion sandbox doctor --strict                          # host-level checks only
-iterion sandbox doctor --strict workflow.iter            # validate the workflow's sandbox: block
-iterion sandbox doctor --strict workflow.iter --target cloud   # validate cloud (k8s) compat from a laptop
-iterion sandbox doctor --strict --json workflow.iter     # machine-readable report
+iterion sandbox doctor --strict workflow.bot            # validate the workflow's sandbox: block
+iterion sandbox doctor --strict workflow.bot --target cloud   # validate cloud (k8s) compat from a laptop
+iterion sandbox doctor --strict --json workflow.bot     # machine-readable report
 ```
 
 Checks (each `pass` / `warn` / `fail`):

@@ -202,7 +202,7 @@ workflow gated:
 **Key points:**
 - `interaction: human` (default for human nodes) always pauses for input
 - Use `interaction: llm_or_human` to let an LLM auto-answer when confident
-- Resume paused workflows with `iterion resume --run-id <id> --file f.iter --answers-file answers.json`
+- Resume paused workflows with `iterion resume --run-id <id> --file f.bot --answers-file answers.json`
 
 ---
 

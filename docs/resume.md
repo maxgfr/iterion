@@ -18,13 +18,13 @@ Three run statuses support resume:
 
 ```bash
 # Resume a paused run (requires answers)
-iterion resume --run-id <id> --file workflow.iter --answers-file answers.json
+iterion resume --run-id <id> --file workflow.bot --answers-file answers.json
 
 # Resume a failed run (no answers needed)
-iterion resume --run-id <id> --file workflow.iter
+iterion resume --run-id <id> --file workflow.bot
 
 # Resume after editing the .iter file (e.g., fixing a bug)
-iterion resume --run-id <id> --file workflow.iter --force
+iterion resume --run-id <id> --file workflow.bot --force
 ```
 
 ## Checkpoint Semantics
