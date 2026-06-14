@@ -73,6 +73,39 @@ fix. Design rationale and the rejected alternatives (per-pass fan-out +
 merge; `__scan-shards` child runs; loop-counter rotation) are in
 [ADR-011](../../docs/adr/011-whole-improve-loop-context-chunking.md).
 
+### Focused runs: `scope_globs` (the WHERE)
+
+`improvement_prompt` / `scope_notes` are the **WHAT** (the review axis);
+they do **not** restrict which files are chunked. So a focused
+`improvement_prompt` ("just pkg/runtime") still chunks the *whole*
+workspace and the reviewers no-op every irrelevant chunk at full
+per-chunk review cost — ~$30 to crawl to the one chunk you care about on
+an iterion-sized repo (the 2026-06-14 finding in
+[docs/bot-runs/whole-improve-loop.md](../../docs/bot-runs/whole-improve-loop.md)).
+
+`scope_globs` is the **WHERE**: a comma/space-separated list of fnmatch
+globs matched against workspace-relative paths, applied by
+`snapshot_chunk` at the `os.walk` source **before** chunking. Empty
+(default) = the whole workspace (unchanged behaviour). A bare directory,
+or a `dir/**` / `dir/*` form, matches the whole subtree.
+
+```sh
+iterion run bots/whole-improve-loop/main.bot --var scope_globs=pkg/runtime
+iterion run bots/whole-improve-loop/main.bot --var scope_globs="pkg/runtime,pkg/store"
+```
+
+Because the prune happens at the source, `total_files` / `num_chunks` /
+`loop_max` / the `num_chunks + 1` streak threshold all scale to the
+focused set — a focused run converges **in-bound like a small repo**
+instead of inheriting the whole-repo pass budget. It does **not** loosen
+review rigor (the reviewer still audits its chunk against the full
+production-ready grid); it only restricts which files are chunked. A glob
+that matches nothing yields the empty-workspace sentinel (`num_chunks=1`,
+`chunk_label=empty`) rather than silently reviewing everything, so a typo
+fails loud. Pair it with `improvement_prompt` to focus both axis and
+files (e.g. `--var scope_globs=pkg/server --var improvement_prompt="auth
+and input validation only"`).
+
 ### Large workspaces: convergence spans passes (and sometimes runs)
 
 Reviewing ~2.2M tokens of source with premium models needs ~`num_chunks`
@@ -155,6 +188,7 @@ No single prompt resolves the trade-off. Current levers:
 | `previous_scanned_areas` | Encourages broadening coverage iter after iter, instead of revisiting the same files |
 | `max_review_passes` (issue #12) | Per-run pass bound that guarantees termination (wires `review_loop`). Raise it (with budget) to converge a mid-size repo in one run; on iterion-scale repos the persisted `clean_streak` carries convergence across re-dispatches regardless |
 | `max_review_chunk_tokens` (issue #12) | Per-pass context budget. Smaller → more chunks, safer context, more passes to converge; larger → fewer chunks, faster convergence, bigger per-pass prompt |
+| `scope_globs` | Path-scope filter (the WHERE). Prunes the chunk plan to matching subtrees before chunking, so a focused run converges in-bound like a small repo instead of paying the whole-repo sweep cost. Empty = whole workspace |
 
 ## Open prompt-engineering directions
 
