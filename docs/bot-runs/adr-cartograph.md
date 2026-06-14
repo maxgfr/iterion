@@ -33,21 +33,38 @@ stochastic, and one still occasionally raises a gap as a blocker
 (`bot-marketplace-shallow-clone`) despite rule 7, resetting the cross-family
 streak. A prompt instruction alone is not a reliable gate.
 
-**Structural completion (next step, NOT yet done):** stop passing `gaps`
-into the reviewers' `review_input` entirely — let gaps flow from
-`build_manifest` straight to `prepare_commit`'s handoff, never through the
-review loop. With the reviewers blind to gaps (and rule 6 calibrating ADR
-prose), an aligned tree has nothing to block on → it converges. This removes
-the gap-blocker source *deterministically* instead of relying on the model
-to obey rule 7. Needs a `review_input` schema/edge change + one validation
-run. **Firm stop taken here** (5 Adry runs this campaign; survey ~$3.58 +
-~10 min each is the floor since `survey_code` always runs before the
-deterministic aligned-check).
+**Structural fix `09910359` — DONE, and run6 (019ec51f) CONVERGED.** The fix:
+stop passing `gaps`/`total_gaps` into the reviewers' `review_input` entirely
+(both `alt -> reviewer_*` edges) and clean the review prompts of gap-review
+references — gaps now flow `build_manifest -> prepare_commit`'s handoff,
+never through the review loop. With the reviewers *structurally* blind to
+gaps (not just instructed to ignore them) and rule 6 calibrating ADR prose,
+an aligned tree has nothing to block on. **run6 result:** reviewer_claude
+approved → reviewer_gpt approved (cross-family, 0 blockers, **0 fixer runs**)
+→ streak_check stop → detect_changes → prepare_commit → commit_changes →
+done. First clean convergence. prepare_commit ($0.83) committed **no** ADR
+change (0 drift on the aligned tree — correct idempotent behaviour, the
+`git diff --cached --quiet` guard skipped the commit) and **filed the 3
+`type:feature-gap` handoff issues** to the board (`source:adr-cartograph`:
+file-diff-payload, ShallowClone-tests, marketplace-transport) — the A→Fini
+handoff is validated end-to-end. **#6 is FIXED.**
+
+Minor follow-up: `detect_changes` counted the engine's bot-catalog
+regeneration (an unrelated side-effect) as a working-tree change, so it
+routed through `prepare_commit` ($0.83) instead of the pure
+`update_cache -> done` no-op; the outcome was still correct (no spurious
+commit). Filtering the catalog regen (like the cache) in `detect_changes`
+would make the aligned re-run a true zero-LLM-commit no-op.
+
+Cost: 6 Adry runs this campaign; survey ~$3.58 + ~10 min each is the floor
+(survey_code always runs before the deterministic aligned-check).
 
 ## 2026-06-13 — first dogfood, scoped pkg/git (runs 019ec1f8 + 019ec25f)
 
 - **Status: partial** — core machinery validated end-to-end and 2 real bugs
-  fixed, but the bot does **not yet converge autonomously** (finding #6).
+  fixed; the bot did not converge on *this* run (finding #6) — **since FIXED**
+  (structural fix `09910359`; Adry converged on run6 019ec51f — see the
+  2026-06-14 section).
 - **Versions:** bot 0.1.0 · iterion @ `f3289632` (worktree `worktree-adr-bot-suite`, unmerged)
 - **Method:** `iterion run bots/adr-cartograph/main.bot --var code_scope_globs='pkg/git/**'`,
   forfait forced (`ITERION_OPENAI_USE_OAUTH=1`, API keys unset), claude_code
@@ -77,7 +94,7 @@ deterministic aligned-check).
 |---|---|---|---|
 | 1 | `build_manifest` passed survey JSON via raw `{{!input.x}}` wrapped in literal quotes — LLM prose (apostrophes/parens) broke `bash -c` (`syntax error near ')'`) | real bug | **FIXED** `1bbca1c0` (drop `!` + quotes → `{{input.x}}` routes through shellEscapeValue). docs-refresh shares the latent pattern (only passes apostrophe-free tokens) → cross-bot pitfall added to [workflow_authoring_pitfalls.md](../workflow_authoring_pitfalls.md) |
 | 5 | `build_manifest` computed coverage from the **frozen** `scan_adrs.adrs` (entry snapshot), so ADRs the fixers authored mid-loop were invisible → `coverage_pct` froze at 71% < 80% → the gate was unreachable → loop exhausted with 8 good ADRs on disk | real bug, convergence-breaking | **FIXED** `f3289632` (re-glob `docs/adr/*.md` each pass, parse `../../<code>` refs). Proven deterministically + LIVE on run3: coverage 71%→**100%**, drift 8→0 |
-| 6 | Even with coverage=100% (aligned tree, 0 drift), the review loop **never reaches cross-family double-approval** — the two reviewers keep finding prose blockers on the 8 ADRs and oscillate to `review_loop(10/10)` → `fail` | real, **OPEN** | the bot cannot self-converge yet; see Lessons |
+| 6 | Even with coverage=100% (aligned tree, 0 drift), the review loop **never reaches cross-family double-approval** — root cause: reviewers treated unfixable GAPS as blockers → oscillate to `review_loop(10/10)` → `fail` | real, **FIXED** | structural fix `09910359` (gaps bypass review_input); **run6 (019ec51f) CONVERGED** — see the 2026-06-14 section |
 | 2 | `fix_claude` (claude_code, output-schema+tools → two-pass) hit `StructuredOutput — No such tool available` in Pass 1 (it's a Pass-2 mechanism), then recovered | benign engine quirk, pre-existing (all fix-nodes; `claude_code.go:341`) | note only |
 | 3 | `enforce_fix_scope` `git checkout -- <p>` reverts ALL tracked changes outside `docs/adr/`, incl. pre-existing uncommitted WIP (it ate my own mid-run hot-fix of main.bot) | known loop-bot behavior (docs-refresh idem) | mitigation: commit fixes BEFORE resume (in HEAD = not "changed"); don't hot-edit tracked files during a run |
 | 4 | `reviewer_gpt` → 401 OpenAI "token is expired" mid-run (forfait `~/.codex` 10 days stale) | infra | operator re-authed codex → resumed on forfait. See workspace memory `project_openai_oauth_token_invalidation` |
