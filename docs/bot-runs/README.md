@@ -67,5 +67,5 @@ first bilan for a bot lands.
 | Bmady | `bmady` | BMAD multi-persona human-gated delivery | _not yet_ |
 | Devy | `devbox-setup` | devbox.json bootstrap | _not yet_ |
 | Adry | `adr-cartograph` | ADR cartographer + completeness audit (idempotent) | [adr-cartograph.md](adr-cartograph.md) |
-| ReArchi | `adr-rechallenge` | human-gated ADR re-challenge | _not yet_ |
+| ReArchi | `adr-rechallenge` | human-gated ADR re-challenge | [adr-rechallenge.md](adr-rechallenge.md) |
 | Fini | `feature-gap-fill` | gap-driven feature completion loop | [feature-gap-fill.md](feature-gap-fill.md) |
