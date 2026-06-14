@@ -104,6 +104,10 @@ e2e/.workspaces/
 .claude/*.local.json
 .claude/scheduled_tasks.lock
 
+# adr-cartograph (Adry) inter-run sha-cache — repo-root dotfile that drives
+# its idempotency; a per-run local artifact, not source.
+.adr-cartograph-cache.json
+
 # Wails / Iterion Desktop
 build/bin/
 cmd/iterion-desktop/wailsjs/

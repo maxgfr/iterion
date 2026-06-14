@@ -190,11 +190,14 @@ dispatcher routes on it), never the persona.
 
 | Persona | `assignee` (technical name) |
 |---|---|
+| Adry | `adr-cartograph` |
+| ReArchi | `adr-rechallenge` |
 | Bmady | `bmady` |
 | Billy | `branch-improve-loop` |
 | Devy | `devbox-setup` |
 | Doki | `docs-refresh` |
 | Featurly | `feature-dev` |
+| Fini | `feature-gap-fill` |
 | Revi (converse) | `revi-converse` |
 | Revi | `review-pr` |
 | Depsy | `sec-audit-deps` |
@@ -204,6 +207,52 @@ dispatcher routes on it), never the persona.
 | Willy | `whole-improve-loop` |
 
 ## Bot reference
+
+### `adr-cartograph` — Adry
+
+Observes the code-as-implemented and produces committable ADR markdown
+(Nygard format) in docs/adr/ — every ADR is a "constat" recording the
+decision the code embodies, so a future maintainer can re-challenge it.
+Also produces a completeness audit for in-flight features: what is fully
+implemented vs what is missing/unfinished.
+
+Idempotent: re-running on a converged tree does (almost) nothing — no
+new ADR, no commit. Reuses docs-refresh's sha-cache + a detect_changes
+early-exit so a no-op pass is essentially free.
+
+Read-only on code (no code-modification phase — it only writes .md under
+docs/adr/). Optional handoff: files type:adr-rechallenge issues routed
+to the adr-rechallenge bot and type:feature-gap issues routed to the
+feature-gap-fill bot.
+
+- **Use when**:
+  Run after a code-mutating session (feature_dev, branch-improve-loop,
+  bmady) lands non-trivial decisions, before a release, or on a nightly
+  cadence to keep docs/adr/ honest against the code. Use
+  --var rechallenge_after_days=90 to invite re-challenge on ADRs older
+  than that.
+- **Vars**: `adr_dir` (string), `audit_cache_path` (string), `bundle_self_path` (string), `code_scope_globs` (string), `coverage_target_pct` (int), `diff_since` (string), `excluded_dirs` (string), `issue_id` (string), `max_recovery_iterations` (int), `max_review_iterations` (int), `rechallenge_after_days` (int), `scope_notes` (string), `workspace_dir` (string)
+- **Path**: `bots/adr-cartograph/main.bot`
+
+### `adr-rechallenge` — ReArchi
+
+Human-in-the-loop ADR re-challenge. Loads an ADR + the current code,
+presents fresh arguments (changed assumptions, alternatives that
+matured, dependency updates, code drift), and asks the human:
+keep / change / addendum.
+  keep     -> end, no change.
+  change   -> file a board ticket describing the proposed change.
+  addendum -> write a short dated addendum note appended to the ADR,
+              then ask the human commit / skip. commit -> git commit;
+              skip -> end (the note is optional).
+
+- **Use when**:
+  Run on a type:adr-rechallenge issue created by the adr-cartograph (Adry)
+  bot, OR manually via --var adr_path=docs/adr/NNN-<slug>.md when an
+  operator wants to revisit a specific decision.
+- **Triggers**: adr, architecture-decision, re-challenge, revisit-decision, design-review
+- **Vars**: `adr_dir` (string), `adr_path` (string, required), `issue_id` (string), `scope_notes` (string), `workspace_dir` (string)
+- **Path**: `bots/adr-rechallenge/main.bot`
 
 ### `bmady` — Bmady
 
@@ -319,6 +368,25 @@ loop until two consecutive cross-family approvals.
   feature_prompt at the new .bot file to author.
 - **Vars**: `feature_prompt` (string, required), `workspace_dir` (string)
 - **Path**: `bots/feature-dev/main.bot`
+
+### `feature-gap-fill` — Fini
+
+Gap-driven feature completer. Specialisation of feature_dev: the input
+is a STRUCTURED gap spec ("here is what's implemented, here is what's
+missing") rather than a feature description from zero. Fini reads the
+partial implementation, completes the missing parts, runs the
+alternating Claude/GPT review-fix loop until two cross-family
+approvals, then commits. Use feature_dev for greenfield work; use Fini
+to FINISH an existing partial implementation without re-architecting
+what already works.
+
+- **Use when**:
+  Run on a type:feature-gap issue created by the adr-cartograph (Adry)
+  bot, OR manually via --var gap_spec='<spec>' when an operator wants to
+  close a specific gap on a feature. Prefer feature_dev when the work is
+  greenfield (no existing partial implementation to preserve).
+- **Vars**: `gap_spec` (string, required), `workspace_dir` (string)
+- **Path**: `bots/feature-gap-fill/main.bot`
 
 ### `revi-converse` — Revi (converse)
 
