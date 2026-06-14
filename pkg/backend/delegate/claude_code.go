@@ -334,12 +334,23 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 		}
 	}
 
-	// Structured output handling:
-	// - When schema is set and NO tools: use native WithOutputFormat (single pass).
-	// - When schema is set and tools are present: two-pass execution (see below).
+	// Structured output handling. claude CLI >= 2.1 accepts --json-schema
+	// (WithOutputFormat) TOGETHER with --allowedTools in a single pass: the
+	// agent does its tool work and then calls the native StructuredOutput
+	// tool, which populates result.structured_output. So we always set
+	// WithOutputFormat when a schema is present, even WITH tools. The
+	// `needsTwoPass` flag no longer gates whether structured output is
+	// requested — it gates only the Pass-2 FALLBACK (resume with no tools to
+	// extract the schema) used when Pass 1 returns no structured output
+	// (e.g. the agent hit --max-turns before calling StructuredOutput, or a
+	// sandbox edge case). Setting the schema in Pass 1 also stops the agent
+	// from reaching for an unregistered StructuredOutput tool and logging a
+	// spurious "No such tool available: StructuredOutput" error. Empirically
+	// the agent still completes its tool work BEFORE finalizing (verified
+	// against claude 2.1.177), so this does not make it rush its output.
 	prompt := task.UserPrompt
 	needsTwoPass := len(task.OutputSchema) > 0 && len(task.AllowedTools) > 0
-	if len(task.OutputSchema) > 0 && !needsTwoPass {
+	if len(task.OutputSchema) > 0 {
 		var schema map[string]any
 		if json.Unmarshal(task.OutputSchema, &schema) == nil {
 			opts = append(opts, claudesdk.WithOutputFormat(schema))
@@ -664,12 +675,27 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 		}
 	}
 
-	// Two-pass execution: when tools + schema are both present, Pass 1 output
-	// is free-form text. Pass 2 resumes the session with WithOutputFormat to
-	// extract a structured output. Both passes route through the sandbox
-	// command builder when sandboxed, so the resumed session is found inside
-	// the container where Pass 1 created it.
+	// Two-pass execution: when tools + schema are both present, Pass 1 now
+	// carries --json-schema (set above), so a well-behaved agent finishes its
+	// tool work and calls the native StructuredOutput tool, populating
+	// rm.StructuredOutput. The formatting pass below is therefore a FALLBACK,
+	// not the default: it runs only when Pass 1 returned no usable structured
+	// output. Both passes route through the sandbox command builder when
+	// sandboxed, so the resumed session is found inside the container where
+	// Pass 1 created it.
 	if needsTwoPass && rm.SessionID != "" {
+		// Fast path: Pass 1 already produced valid structured output. The
+		// empty-map guard in parseSDKOutput rejects the `structured_output: {}`
+		// a tool session emits when the agent never called StructuredOutput
+		// (e.g. --max-turns), so a non-empty, non-fallback result here means
+		// the schema was genuinely satisfied in one pass — skip Pass 2.
+		if output, rawLen, fallback := parseSDKOutput(rm.Result, rm.StructuredOutput, task.OutputSchema); len(output) > 0 && !fallback {
+			result.Output = output
+			result.RawOutputLen = rawLen
+			result.ParseFallback = false
+			cost.Annotate(result.Output, task.Model, totalIn, totalOut)
+			return result, nil
+		}
 		const maxFmtAttempts = 2
 		var lastFmtErr error
 		for attempt := 1; attempt <= maxFmtAttempts; attempt++ {
