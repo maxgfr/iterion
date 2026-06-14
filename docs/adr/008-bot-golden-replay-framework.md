@@ -161,3 +161,18 @@ the two code paths.
   replay binary imports only `pkg/dsl/*`, `pkg/backend/model`
   (for `ValidateOutput`), and `pkg/botregistry`; the heavy executor
   stack compiles only under `goldens_record`.
+
+## Addendum (2026-06-14) — re-challenge pass
+
+Decision confirmed. The strongest survey signal was record-keeping, not
+drift: the `api.APIClient` injection seam still does not exist
+(`pkg/backend/model/executor.go`), so Alternative 1 stays infeasible for
+exactly the reason given, and the assignee-coupling consequence has not
+fired (`set_bot` is only the MCP routing tool, never a recorded field).
+Two divergences to note for the historical record: (1) this ADR's prose
+names the pre-rename bots `feature_dev`/`doc-align`, since renamed to
+`docs-refresh`/kebab-case (`c9996d98`, `8784d677`) — `scenarios.go`
+already tracks the new names; (2) the four golden fixtures are still the
+original 2026-05-29 hand-authored seeds, never regenerated via record
+mode despite credentials now being available — the "Deviations" note's
+follow-up remains open.
