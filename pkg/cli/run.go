@@ -143,7 +143,7 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 	runName := store.GenerateRunName(iterFile + ":" + runID)
 	storeDir := store.ResolveStoreDir(filepath.Dir(iterFile), opts.StoreDir)
 
-	logger, logCloser := teeRunLog(logger, level, filepath.Join(storeDir, "runs", runID))
+	logger, logCloser := teeRunLog(logger, level, storeDir, runID)
 	if logCloser != nil {
 		defer logCloser.Close()
 		// Re-emit the engineOpts entry so the engine sees the tee'd
@@ -270,8 +270,8 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 // teeRunLog defers to store.TeeRunLog so the dispatcher and any
 // other in-process runner share the same per-run log-file convention.
 // Kept as a thin wrapper for the CLI's call sites; no behavior change.
-func teeRunLog(logger *iterlog.Logger, level iterlog.Level, runDir string) (*iterlog.Logger, io.Closer) {
-	return store.TeeRunLog(logger, level, runDir)
+func teeRunLog(logger *iterlog.Logger, level iterlog.Level, storeRoot, runID string) (*iterlog.Logger, io.Closer) {
+	return store.TeeRunLog(logger, level, storeRoot, runID)
 }
 
 // buildRunExecutor constructs the default ClawExecutor for the run

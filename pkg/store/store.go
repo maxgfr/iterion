@@ -132,6 +132,55 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
+// WriteFileAtomicNew writes data to path durably but refuses to clobber an
+// existing destination. It stages through a sibling temp file, fsyncs the
+// bytes, then atomically links the temp inode into place. The hard-link step is
+// an exclusive create: if path already exists (or a racing creator wins), the
+// destination is left untouched and fs.ErrExist is returned in the error chain.
+func WriteFileAtomicNew(path string, data []byte, perm os.FileMode) error {
+	dir, base := filepath.Split(path)
+	if dir == "" {
+		dir = "."
+	}
+	f, err := os.CreateTemp(dir, "."+base+".create-*")
+	if err != nil {
+		return fmt.Errorf("store: open temp file: %w", err)
+	}
+	tmp := f.Name()
+	defer func() { _ = os.Remove(tmp) }()
+	if err := os.Chmod(tmp, perm); err != nil {
+		f.Close()
+		return fmt.Errorf("store: chmod temp file: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return fmt.Errorf("store: write temp file: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return fmt.Errorf("store: sync temp file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("store: close temp file: %w", err)
+	}
+	if err := os.Link(tmp, path); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("store: create %s: %w", path, fs.ErrExist)
+		}
+		return fmt.Errorf("store: link temp file: %w", err)
+	}
+	// Drop the temp directory entry now that path links to the fsynced inode,
+	// then sync the directory so both the new run.json name and temp cleanup are
+	// durable. The deferred Remove is harmless if this succeeds.
+	if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("store: remove temp file: %w", err)
+	}
+	if err := fsyncDir(dir); err != nil {
+		return fmt.Errorf("store: sync dir: %w", err)
+	}
+	return nil
+}
+
 // fsyncDir opens dir and calls Sync on the descriptor so the directory
 // entry update from the most recent rename/create reaches the platter.
 // On platforms where opening a directory for sync isn't supported the
@@ -296,6 +345,11 @@ func (s *FilesystemRunStore) Root() string { return s.root }
 // iterion build version so the run record is reproducible later —
 // without these, "why did the same recipe + same inputs produce
 // different outputs across two daemon builds" is unanswerable.
+//
+// CreateRun is intentionally no-clobber: reusing a run ID must fail
+// instead of resetting an existing run's metadata/checkpoint. Resume and
+// crash-recovery code relies on run.json being the authoritative identity
+// and checkpoint record for a run.
 func (s *FilesystemRunStore) CreateRun(_ context.Context, id, workflowName string, inputs map[string]interface{}) (*Run, error) {
 	if err := sanitizePathComponent("run ID", id); err != nil {
 		return nil, err
@@ -312,7 +366,7 @@ func (s *FilesystemRunStore) CreateRun(_ context.Context, id, workflowName strin
 		LaunchEnv:      CaptureLaunchEnv(),
 		IterionVersion: appinfo.FullVersion(),
 	}
-	if err := s.writeRun(r); err != nil {
+	if err := s.writeRunNew(r); err != nil {
 		return nil, err
 	}
 	return r, nil
@@ -583,6 +637,9 @@ func (s *FilesystemRunStore) ListRuns(_ context.Context) ([]string, error) {
 // from concurrent branches. The sequence counter is only incremented after
 // a successful write to avoid gaps in the event stream.
 func (s *FilesystemRunStore) AppendEvent(_ context.Context, runID string, evt Event) (*Event, error) {
+	if err := sanitizePathComponent("run ID", runID); err != nil {
+		return nil, err
+	}
 	evt.RunID = runID
 	if evt.Timestamp.IsZero() {
 		evt.Timestamp = time.Now().UTC()
@@ -644,11 +701,21 @@ func (s *FilesystemRunStore) AppendEvent(_ context.Context, runID string, evt Ev
 		return nil, fmt.Errorf("store: mkdir events: %w", err)
 	}
 
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, filePerm)
+	// O_RDWR (not O_WRONLY): the torn-tail repair below ReadAt's the final
+	// byte to detect a partial last line left by a prior crash, and ReadAt on
+	// a write-only descriptor returns EBADF. O_APPEND still forces every Write
+	// to EOF regardless of the read offset, so append semantics are unchanged.
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR|os.O_APPEND, filePerm)
 	if err != nil {
 		return nil, fmt.Errorf("store: open events: %w", err)
 	}
 	defer f.Close()
+	// Tighten permissions on legacy files that may have been created before
+	// store-wide filePerm was enforced. events.jsonl carries prompts, model
+	// outputs, and tool data.
+	if err := f.Chmod(filePerm); err != nil {
+		return nil, fmt.Errorf("store: chmod events: %w", err)
+	}
 
 	// Capture the pre-write size so a short write (typically ENOSPC
 	// mid-line) can be rolled back. Without this, a partial JSON line
@@ -660,6 +727,23 @@ func (s *FilesystemRunStore) AppendEvent(_ context.Context, runID string, evt Ev
 	var preSize int64
 	if statErr == nil {
 		preSize = info.Size()
+	}
+	if statErr == nil && preSize > 0 {
+		last := make([]byte, 1)
+		if _, err := f.ReadAt(last, preSize-1); err != nil {
+			return nil, fmt.Errorf("store: inspect events tail: %w", err)
+		}
+		if last[0] != '\n' {
+			// A previous process crashed after writing only part of the final
+			// JSONL record. Separate the torn bytes from the next valid event so
+			// scanners skip exactly the corrupt tail line instead of losing the
+			// first post-crash event to concatenation. This runs under s.mu, so
+			// sequence seeding and repair are atomic within this process.
+			if _, err := f.Write([]byte("\n")); err != nil {
+				return nil, fmt.Errorf("store: separate torn event tail: %w", err)
+			}
+			preSize++
+		}
 	}
 
 	n, writeErr := f.Write(line)
@@ -1318,6 +1402,9 @@ func (s *FilesystemRunStore) eventsPath(runID string) string {
 // This intentionally does NOT use LoadEvents (which allocates the full slice
 // of events) — we only need the max Seq, so we scan and discard.
 func (s *FilesystemRunStore) scanMaxSeqLocked(runID string) (int64, error) {
+	if err := sanitizePathComponent("run ID", runID); err != nil {
+		return 0, err
+	}
 	p := s.eventsPath(runID)
 	f, err := os.Open(p)
 	if err != nil {
@@ -1363,6 +1450,35 @@ func (s *FilesystemRunStore) scanMaxSeqLocked(runID string) (int64, error) {
 	return next, scanErr
 }
 
+func (s *FilesystemRunStore) writeRunNew(r *Run) error {
+	// Defence in depth for CreateRun's exclusive create path: sanitise here as
+	// well as at the public entry point so future internal callers cannot path
+	// join a tampered Run.ID outside the store root.
+	if err := sanitizePathComponent("run ID", r.ID); err != nil {
+		return err
+	}
+	dir := s.runDir(r.ID)
+	if err := os.MkdirAll(dir, dirPerm); err != nil {
+		return fmt.Errorf("store: mkdir run: %w", err)
+	}
+	// Tighten existing directories (MkdirAll is a no-op on them). A stale or
+	// pre-created run directory must not remain world-readable.
+	if err := os.Chmod(dir, dirPerm); err != nil {
+		return fmt.Errorf("store: chmod run: %w", err)
+	}
+	data, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return fmt.Errorf("store: marshal run: %w", err)
+	}
+	if err := WriteFileAtomicNew(s.runJSONPath(r.ID), data, filePerm); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("store: run %s already exists: %w", r.ID, fs.ErrExist)
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *FilesystemRunStore) writeRun(r *Run) error {
 	// Defence in depth: every public entry point that mutates a run
 	// (SaveRun, UpdateRunStatus, SaveCheckpoint, PauseRun,
@@ -1375,6 +1491,9 @@ func (s *FilesystemRunStore) writeRun(r *Run) error {
 	dir := s.runDir(r.ID)
 	if err := os.MkdirAll(dir, dirPerm); err != nil {
 		return fmt.Errorf("store: mkdir run: %w", err)
+	}
+	if err := os.Chmod(dir, dirPerm); err != nil {
+		return fmt.Errorf("store: chmod run: %w", err)
 	}
 	data, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {

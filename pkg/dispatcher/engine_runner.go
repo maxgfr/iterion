@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 
 	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/bundle"
@@ -160,7 +159,8 @@ func (r *EngineRunner) Dispatch(ctx context.Context, spec DispatchSpec) error {
 	// tails.
 	runLogger, logCloser := store.TeeRunLog(
 		r.logger, r.logger.Level(),
-		filepath.Join(spec.StoreDir, "runs", spec.RunID),
+		spec.StoreDir,
+		spec.RunID,
 	)
 	if logCloser != nil {
 		defer func() {

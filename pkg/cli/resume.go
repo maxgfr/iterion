@@ -76,7 +76,7 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 	// output for resumed runs. Resume re-uses the same file via
 	// O_APPEND so the original run.log + resume sessions stack into
 	// one timeline, matching what the daemon-launched path produces.
-	logger, logCloser := teeRunLog(logger, level, filepath.Join(storeDir, "runs", opts.RunID))
+	logger, logCloser := teeRunLog(logger, level, storeDir, opts.RunID)
 	if logCloser != nil {
 		defer logCloser.Close()
 	}
