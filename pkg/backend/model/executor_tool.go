@@ -851,6 +851,18 @@ func shellEscapeValue(val interface{}) string {
 		if len(v) == 0 {
 			return ""
 		}
+		// KNOWN BUG (deferred — see memory project_bot_dogfood_campaign + the
+		// 3-option design): an all-string []interface{} (the shape a `json`-typed
+		// schema field decodes to) falls through to the space-join below, so a
+		// `KEY={{input.langs}} … python3 json.loads(KEY)` tool node gets
+		// `KEY=Go TypeScript` and the shell runs `TypeScript` (exit 127). Object
+		// arrays already JSON-encode via sliceHasComplexElement. Can't just flip
+		// the all-string case to JSON: the 7 `git add -- {{input.files}}` sites
+		// rely on space-join, and agent outputs aren't type-coerced (string[]
+		// schema → []interface{} here, indistinguishable from a json field).
+		// Fix needs output coercion + arm-flip, OR an additive shell-quoted-JSON
+		// template form, OR per-site `'{{!input.x}}'`; all need a sec-image Seki
+		// run to validate (shape-dependent: langs as list vs dict).
 		if sliceHasComplexElement(v) {
 			// Mixed or complex slice → JSON-encode as a single shell token.
 			b, err := json.Marshal(v)
