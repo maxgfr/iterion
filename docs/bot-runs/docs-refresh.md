@@ -11,6 +11,51 @@ reviewers, deterministic `streak_check` (two cross-family approvals), a
 agents can't truncate the audit set. Runs on ANY repo; iterion is the
 reference self-host case.
 
+## 2026-06-14 — repo-wide .iter→.bot CLI-example drift (run 019ec7ba)
+
+- **Status: validated** — fixed exactly the drift the ticket flagged; correct,
+  complete, scoped, intentional mentions preserved.
+- **Versions:** bot v0.15.0 · iterion @ `8a00e93b` (main)
+- **Method:** board ticket `a3b57a17` ("docs-refresh missed repo-wide .iter→.bot
+  CLI-example drift"). docs-refresh has **no `worktree: auto` and no sandbox** →
+  ran on the **live tree** (host mode: `claude` 2.1.177 on PATH, forfait forced),
+  scoped to the 5 drifted files via `doc_globs`, `bundle_self_path=bots/docs-refresh`,
+  `store-dir=.iterion`. Committed directly to main.
+- **Result: converged + committed `211e69f7`** ("docs(cli): update CLI examples
+  to use the .bot extension", **5 files, 23/23**). 3 reviewer cycles, **$8.40 /
+  127k tokens**. Independently verified mid-loop: **0 runnable `.iter` left** in
+  all 5 files, **zero over-reach** (nothing outside the 5 in-scope docs),
+  `examples.md`/README/CLAUDE intentional "rejected/legacy" mentions untouched.
+  `.docs-refresh-cache.json` is gitignored (no repo pollution). Board a3b57a17 → done.
+- **Value: correct + scoped.** The commit message even states "Prose references
+  to .iter as the DSL raw/source form are intentionally left unchanged" — the bot
+  understood the preserve-intentional-mentions instruction.
+
+### Findings / misses
+- **Doki's automated scanners do NOT auto-detect CLI-example extension-literal
+  drift.** `iterion run X.iter` in a code fence is not a dead link/anchor, so
+  `md_link`/`build_manifest` don't flag it. Doki fixed it **only because
+  scope_notes pointed the reviewers at it** — an *unguided* run would miss
+  a3b57a17 again. The "miss" is a real scanner-coverage gap. Improvement idea:
+  a CLI-example scanner that cross-refs example arg extensions against the
+  CLI's accepted extensions (.bot/.botz).
+- **cwd foot-gun (caught live by the Monitor).** For a bot with NO `worktree: auto`,
+  the claude_code agents' cwd = the launch *process* cwd, **not** `--var
+  workspace_dir`. First attempt isolated Doki in a worktree but launched from the
+  main repo → reviewers got `File does not exist` (reading the wrong tree). Fix:
+  to isolate a non-worktree:auto bot, launch **from** the target dir (cwd ==
+  workspace_dir), or just run on the live tree. (workspace_dir only affects
+  tool-node `git -C {{workspace_dir}}` commands, not agent cwd.)
+- **Launch lesson:** a backgrounded `iterion run … | head -N` gets SIGPIPE-killed
+  after N lines (head closes the pipe). Never pipe a long-running background
+  command to `head` — redirect only.
+- **Cost note:** $8.40 for a 23-line mechanical fix. Doki's opus review loop is
+  expensive; for pure mechanical drift a manual edit is ~free. Reserve Doki for
+  genuine doc-vs-code mismatches that need judgment, not trivial find-replace.
+- Engine health clean: no `StructuredOutput` error; reviewer_gpt (claw/forfait)
+  fine; the `fix_claude` Read-before-Edit + grep-exit-2 errors were transient
+  self-corrections, not failures.
+
 ## 2026-06-14 — first dogfood + md_link scanner improvement (runs 019ec675, 019ec69f)
 
 First recorded dogfood, on the real board ticket `c4043495` ("Align the
