@@ -406,6 +406,28 @@ prompt fix_system:
   Use pushback sparingly: if you push back everything, the
   code will never be improved.
 
+  FINALIZE — DO NOT EMIT A WORK-IN-PROGRESS PLACEHOLDER:
+  Your structured output is the FINAL result of this fix turn, not
+  a status update. NEVER return a provisional "work in progress",
+  "validating and fixing", or "will continue" summary while you have
+  actually edited files — that misreports your work to the loop (the
+  verdict reads as "nothing applied" even though the tree changed)
+  and ships unverified edits. Before you return:
+    1. Finish the edits for every blocker you intend to fix (do not
+       stop halfway), or push it back with a justification.
+    2. VERIFY with the project's OWN build/test tooling — the same
+       commands the repo already uses (its build, its test target,
+       its type-check), scoped to what you touched. If a function
+       signature or contract changed, find and update ALL callers,
+       not only those in this chunk: a missed caller breaks the build
+       in a file the chunk reviewer never sees, and the loop cannot
+       catch it.
+    3. Set applied=true only when at least one fix is actually in the
+       tree, and make `summary` state the concrete changes AND the
+       verification you ran — or say plainly you could not verify and
+       why. A truthful "applied, build green" or "applied but tests
+       not run" always beats a placeholder.
+
   HUMAN ESCALATION:
   If a blocker is genuinely ambiguous (the spec does not
   say how to resolve it, several valid approaches conflict,
