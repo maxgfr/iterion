@@ -1,5 +1,31 @@
 # Billy — branch-improvement validation
 
+## 2026-06-14 — re-validation on a clean clone + good dead-code judgment (run 019ec5bc)
+
+- Status: **validated.** Re-ran in the C082 worktree studio (non-watchexec) on a
+  clean iterion clone with a synthetic `billy-test` branch: one added file
+  `pkg/log/billy_demo.go` exporting `WriteMarker`, which had no godoc AND
+  swallowed the `os.Create` error. `base_ref=main`, `merge_into=none`.
+- Result: cross-family review loop **converged** (review → fix → re-review →
+  streak), `Run finished`, committed to storage branch
+  `iterion/run/feral-crash-duskvane-127c` (`final_commit 9c5a5891`), not merged
+  (merge_into=none respected).
+- Value — **correct judgment, not a cosmetic fix.** Rather than just adding godoc
+  + handling the error, Billy recognized `WriteMarker` as *unreferenced dead code
+  that swallows an error* and **removed it** (`refactor(log): remove unused
+  WriteMarker demo helper`, "No code in the tree calls it, so remove the dead
+  code."). That's the right call — exactly what a demanding reviewer should do.
+- Finding (minor, non-fatal): `fix_claude` (claude_code) emitted one
+  `Tool error: StructuredOutput — No such tool available: StructuredOutput`
+  before recovering and producing its output normally. The agent appears to try a
+  `StructuredOutput` tool that isn't registered in the claude_code delegate — a
+  wasted step, same broad family as the Devy claude_code-structured-output gap.
+  Worth wiring/​silencing, but it did NOT block convergence.
+- Convergence machinery (shared with Willy) is reference-correct; this run
+  re-confirms it + the asymptote (no oscillation) on a fresh target.
+
+---
+
 **Status:** validated end-to-end (2026-06). **Scope of this report:** the
 capability and the engineering hardening it drove. The target here is
 iterion's own repository (the `feat/cloud-control-plane` epic), so target
