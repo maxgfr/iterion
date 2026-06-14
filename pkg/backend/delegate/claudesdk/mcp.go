@@ -31,6 +31,12 @@ func (*MCPSSEServer) sealedMcp()      {}
 type MCPHTTPServer struct {
 	URL     string            `json:"url"`
 	Headers map[string]string `json:"headers,omitempty"`
+	// AlwaysLoad exempts this server from claude-code's tool-search
+	// deferral (its tools surface without a ToolSearch hit) AND blocks
+	// startup until it connects — so a misconfigured/unreachable server
+	// fails loudly instead of being silently deferred. Set for the board
+	// MCP server (C082) so a sandboxed agent reliably sees board.* tools.
+	AlwaysLoad bool `json:"-"`
 }
 
 func (*MCPHTTPServer) mcpType() string { return "http" }
@@ -60,6 +66,9 @@ func mcpServerJSON(srv MCPServerConfig) map[string]any {
 		m["url"] = s.URL
 		if len(s.Headers) > 0 {
 			m["headers"] = s.Headers
+		}
+		if s.AlwaysLoad {
+			m["alwaysLoad"] = true
 		}
 	}
 	return m

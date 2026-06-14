@@ -480,6 +480,10 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 				Headers: map[string]string{
 					"X-Iterion-Run": task.BoardRunToken,
 				},
+				// Force the board server past claude-code's tool-search
+				// deferral so board.* tools surface without a ToolSearch
+				// hit, and fail loudly at startup if unreachable (C082).
+				AlwaysLoad: true,
 			}))
 			if len(task.AllowedTools) > 0 {
 				combined := append([]string(nil), task.AllowedTools...)

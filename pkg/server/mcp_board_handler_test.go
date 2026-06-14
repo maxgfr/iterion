@@ -58,6 +58,40 @@ func TestBoardMCP_HTTP_UnknownToken(t *testing.T) {
 	}
 }
 
+// TestBoardMCP_HTTP_InitializeServerInfoVersion guards the C082 closer: the
+// claude-code MCP client validates the initialize response with a Zod schema
+// that requires serverInfo.version to be a (non-empty) string and rejects the
+// WHOLE connection with a ZodError ("serverInfo.version: expected string,
+// received undefined") if it is missing — which silently kept the sandboxed
+// board MCP from ever registering. The field must always be present.
+func TestBoardMCP_HTTP_InitializeServerInfoVersion(t *testing.T) {
+	srv, reg, _ := newMCPBoardTestServer(t)
+	reg.Register("tok", []string{"board.read"})
+	defer reg.Revoke("tok")
+	resp := doMCP(t, srv, "tok", map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	var r struct {
+		Result struct {
+			ServerInfo struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			} `json:"serverInfo"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if r.Result.ServerInfo.Version == "" {
+		t.Fatal("initialize response is missing serverInfo.version — claude-code's Zod schema rejects the connection without it (C082)")
+	}
+	if r.Result.ServerInfo.Name == "" {
+		t.Fatal("initialize response is missing serverInfo.name")
+	}
+}
+
 func TestBoardMCP_HTTP_ToolsListFiltersByCaps(t *testing.T) {
 	srv, reg, _ := newMCPBoardTestServer(t)
 	reg.Register("tok", []string{"board.read"})

@@ -1,7 +1,14 @@
 # C082 board-emit fix — implementation plan
 
-Status: **root-caused + fully designed; ready for a focused implementation pass.**
-Branch: `c082-board-emit` (worktree off local HEAD).
+Status: **RESOLVED + live-validated end-to-end (2026-06-14).** A sandboxed
+`claude_code` agent now reaches the per-run board MCP listener over HTTP and
+its `create_issue` call lands on the operator's board (validated: board count
+0→1, real native id, fetchable, `run finished`). Branch: `c082-board-emit`
+(worktree off local HEAD). See "Resolution" at the bottom for the actual root
+cause — it was **not** any of the hypotheses in the design below (https-only /
+tool-search deferral / session-id), but a **missing `serverInfo.version`** field
+in the handler's `initialize` response that made claude-code's MCP client
+Zod-reject the whole connection.
 
 ## Symptom
 
@@ -130,11 +137,13 @@ expose a board tool that returns an explicit "board unavailable in this run"
 error rather than no tool (the agent then can't confabulate created IDs). This
 turns a silent data-loss into a visible degradation.
 
-## Validation findings (2026-06-14) — implemented; one layer remains in claude-code
+## Validation findings (2026-06-14) — iterion-side layers (all ✅)
 
 Implemented on this branch (parts 1–4) and live-validated each iterion-side layer
 in isolation via a dedicated studio (worktree binary, port 4899, isolated store)
-running a minimal sandboxed claude_code board.create bot:
+running a minimal sandboxed claude_code board.create bot. (The final missing
+piece was in the handler's `initialize` response, not in any of these layers —
+see "Resolution" below.)
 
 1. **Gateway listener** — starts per run: `board MCP listener on
    http://host.docker.internal:<port>/api/v1/mcp/board`. ✅
@@ -150,47 +159,67 @@ running a minimal sandboxed claude_code board.create bot:
    with `Content-Type: application/json` (verified via curl against the live
    endpoint with a real token). ✅
 
-**Remaining gap (claude-code's own MCP client, NOT iterion):** despite a reachable,
-protocol-correct endpoint, the sandboxed `claude_code` run reports `iterion_board`
-is "not registered" / never appears among connected MCP servers (only the operator's
-user-config servers — claude.ai Gmail/Calendar/Drive — connect). No MCP connect
-error is surfaced to stderr. So claude-code's **Streamable-HTTP MCP client** is not
-completing the handshake against our endpoint. Likely suspects to debug with
-claude-code's internal MCP logging (e.g. `--mcp-debug` / verbose):
-- It may require an `Mcp-Session-Id` header on the `initialize` response (the
-  handler is stateless/token-based and returns none).
-- It may require SSE (`text/event-stream`) or a GET endpoint for the stream, not
-  just single `application/json` POST responses.
-- Protocol-version negotiation mismatch (client sends a newer `protocolVersion`
-  than the handler's `2024-11-05`).
-- Its proxy-agent handling of the MCP URL.
+Earlier this section listed a "remaining gap" attributing the non-registration to
+claude-code's own MCP client (suspecting session-id / SSE / protocol-version /
+https-only). That diagnosis was incomplete: the client *did* attempt the connect
+and failed on a response-shape validation — see below.
 
-**Net:** the entire iterion producer side (the documented root cause — "producer
-never wired") is fixed + verified. Board-emit end-to-end is one focused
-claude-code-MCP-client step away: enable claude-code MCP debug, capture the
-`iterion_board` connect attempt, and align the handler's Streamable-HTTP behavior
-(session-id / SSE / protocol-version) to what the client requires.
+## Resolution (2026-06-14) — actual root cause + the closing fixes
 
-### Update — tried inline-config + NO_PROXY + proxy-resolve + GET→405; remaining cause is very likely HTTPS-only MCP
+The https-only / TLS hypothesis above was **wrong** (kept for the record; do not
+act on it). Enabling claude-code's own MCP debug — env-gated `--debug mcp`
+passthrough → logs under `CLAUDE_CODE_DEBUG_LOGS_DIR` — captured the real
+behaviour against the LIVE per-run listener:
 
-Additional fixes applied + re-validated (all correct, none closed it alone):
-- inline `--mcp-config` JSON (part 3), NO_PROXY host.docker.internal (part 3),
-  proxy host.docker.internal→loopback (part 4), and GET→405 on the board endpoint
-  (Streamable-HTTP spec: a no-SSE server must 405 the GET, not 404).
+```
+MCP server "iterion_board": Testing basic HTTP connectivity to http://host.docker.internal:<port>/api/v1/mcp/board
+MCP server "iterion_board": HTTP Connection failed after 9ms: [{
+  "expected":"string","code":"invalid_type","path":["serverInfo","version"],
+  "message":"Invalid input: expected string, received undefined" }]
+$ZodError: ... serverInfo.version ...
+```
 
-**Strongest remaining hypothesis: claude-code requires HTTPS for remote MCP
-servers and silently drops the plain-`http://` board listener.** Evidence: across
-every run, the ONLY MCP servers that connect are the operator's `https` claude.ai
-ones (Gmail/Calendar/Drive); `iterion_board` (http://host.docker.internal:<port>)
-never registers and never logs a connect error. A reachable, protocol-correct,
-spec-compliant http endpoint that simply never appears points at client-side
-scheme filtering.
+claude-code **connected fine over plain HTTP** (so: not https-only, not a
+reachability problem, not deferral) — it then **validated the `initialize`
+response with a Zod schema that requires `serverInfo.version` to be a string**,
+and our handler returned only `serverInfo:{name:"iterion-board-http"}` (no
+`version`). The missing field made the client reject the *entire* connection, so
+`iterion_board` never registered and the agent confabulated board ids (C082).
 
-**Precise next step:** serve the per-run board listener over **TLS** using the
-sandbox's per-run ephemeral CA (already minted + injected into the container trust
-store for the egress proxy's inspection mode — see `netproxy.NewEphemeralCA` +
-the driver's CA injection). i.e. give `startBoardMCPListener` a `tls.Config` whose
-leaf is signed by that CA, advertise `https://host.docker.internal:<port>/...`,
-and the in-container claude (trusting the CA) accepts it. Confirm first by enabling
-claude-code MCP debug (`--mcp-debug`/verbose) to capture the exact reason
-`iterion_board` is dropped (https-only vs a config-shape nuance), then wire the TLS.
+### The two closing fixes
+
+1. **`serverInfo.version` (THE fix).** [pkg/server/mcp_board_handler.go](pkg/server/mcp_board_handler.go)
+   `initialize` now returns `serverInfo:{name,version:"1.0.0"}`. Guarded by
+   `TestBoardMCP_HTTP_InitializeServerInfoVersion`. After this alone the debug log
+   flips to `Successfully connected (transport: http) in 13ms` /
+   `Connection established with capabilities: {"hasTools":true,...}`.
+2. **`alwaysLoad:true` on the board MCP server** (belt-and-suspenders).
+   [pkg/backend/delegate/claudesdk/mcp.go](pkg/backend/delegate/claudesdk/mcp.go)
+   `MCPHTTPServer.AlwaysLoad` → `"alwaysLoad":true` in the `--mcp-config` JSON;
+   set in [pkg/backend/delegate/claude_code.go](pkg/backend/delegate/claude_code.go).
+   Exempts the board server from claude-code's tool-search deferral so a board-cap
+   node reliably *sees* `mcp__iterion_board__*` without a ToolSearch hit, and forces
+   connect-at-startup so a misconfig fails loudly instead of silently deferring.
+
+### Secondary finding — `--debug <value>` breaks `--print --input-format stream-json`
+
+The diagnostic `ITERION_CLAUDE_DEBUG=mcp` → `--debug mcp` passthrough I added to
+capture the logs **must not ship**: claude-code consumes the `--debug` *value* as
+a positional prompt argument, which conflicts with `--input-format stream-json`
+and makes the CLI exit 1 with `Input must be provided either through stdin or as a
+prompt argument when using --print`. Proven empirically: identical binary/bot/
+config, the run **fails** with `ITERION_CLAUDE_DEBUG` set and **succeeds**
+(board lands) without it. The passthrough has been **reverted**. To re-capture MCP
+debug in future, set `CLAUDE_CODE_DEBUG_LOGS_DIR` and pass `--debug=mcp` (equals
+form, so the value isn't taken as positional) — or run the `claude` CLI directly,
+not through the stream-json delegate path.
+
+### End-to-end validation (live)
+
+Dedicated worktree studio (fresh static binary, isolated store `/tmp/c082val`),
+minimal sandboxed `claude_code` `create_issue` bot against the
+`iterion-sandbox-sec:edge` image: `mcp__iterion_board__create_issue` was invoked,
+the board total went **0 → 1**, the issue is fetchable by its real native id
+(`native:1714f23b…`, state `inbox`), and the run **finished**. The full producer
+chain — gateway listener → inline `--mcp-config` → NO_PROXY/proxy-resolve →
+`serverInfo.version` → `alwaysLoad` — is now proven, not just verified in isolation.

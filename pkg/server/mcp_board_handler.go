@@ -212,10 +212,16 @@ func dispatchHTTP(req mcpReq, store *native.Store, caps boardops.Capabilities) m
 
 	switch req.Method {
 	case "initialize":
+		// serverInfo.version is REQUIRED by the MCP spec (a string); the
+		// claude-code client validates it with a Zod schema and rejects the
+		// whole connection with a ZodError ("serverInfo.version: expected
+		// string, received undefined") if it's missing — which silently
+		// kept the board MCP from ever registering in sandboxed claude_code
+		// (C082). Always include it.
 		resp.Result = map[string]any{
 			"protocolVersion": "2024-11-05",
 			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "iterion-board-http"},
+			"serverInfo":      map[string]any{"name": "iterion-board-http", "version": "1.0.0"},
 		}
 	case "tools/list":
 		tools := boardops.ToolsFor(caps)
