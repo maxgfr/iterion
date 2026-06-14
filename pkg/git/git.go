@@ -58,14 +58,23 @@ type FileStatus struct {
 // `After == nil` for deleted files. Binary files set Binary = true and
 // leave Before/After nil — the studio swaps in a "binary file not shown"
 // message instead of feeding non-text into Monaco.
+//
+// Oversized mirrors Binary for files that exceed the diff payload cap on
+// either side: Before/After are left nil and Oversized = true, so the
+// studio can surface a "file too large to diff" placeholder rather than
+// the server reading a multi-GB tracked file entirely into memory on a
+// diff click. The size check runs independently for each side before any
+// content is read, and takes precedence over binary detection (an
+// oversized side is never loaded, so it cannot be NUL-scanned).
 // Status is intentionally absent: the caller already has it from the
 // prior /files listing and feeds it back as UI metadata. Recomputing it
 // here would force a second `git status` scan on every diff click.
 type DiffPayload struct {
-	Path   string  `json:"path"`
-	Before *string `json:"before"`
-	After  *string `json:"after"`
-	Binary bool    `json:"binary"`
+	Path      string  `json:"path"`
+	Before    *string `json:"before"`
+	After     *string `json:"after"`
+	Binary    bool    `json:"binary"`
+	Oversized bool    `json:"oversized,omitempty"`
 }
 
 // gitEnv returns an environment that pins git's user-facing messages to

@@ -2,10 +2,12 @@ package git
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -59,7 +61,9 @@ func StatusBetween(repoRoot, baseRef, finalRef string) ([]FileStatus, error) {
 // for relPath in repoRoot. Either side is nil when the path does not exist
 // at that ref (added on After-only, deleted on Before-only). Binary detection
 // mirrors Diff(): a NUL byte on either side blanks both contents and sets
-// Binary = true so Monaco does not try to render raw bytes.
+// Binary = true so Monaco does not try to render raw bytes. Likewise, a side
+// whose blob exceeds diffPayloadCap blanks both contents and sets
+// Oversized = true without reading the blob into memory.
 func DiffBetween(repoRoot, baseRef, finalRef, relPath string) (DiffPayload, error) {
 	if !isGitDir(repoRoot) {
 		return DiffPayload{}, ErrNotGitRepo
@@ -67,34 +71,32 @@ func DiffBetween(repoRoot, baseRef, finalRef, relPath string) (DiffPayload, erro
 	payload := DiffPayload{Path: relPath}
 
 	beforeOut, beforeErr := showAt(repoRoot, baseRef, relPath)
-	switch beforeErr {
-	case nil:
+	switch {
+	case beforeErr == nil:
 		s := string(beforeOut)
 		payload.Before = &s
-	case errNotInHead:
+	case errors.Is(beforeErr, errNotInHead):
 		// nil Before — path didn't exist at baseRef
+	case errors.Is(beforeErr, errOversized):
+		payload.Oversized = true
 	default:
 		return DiffPayload{}, beforeErr
 	}
 
 	afterOut, afterErr := showAt(repoRoot, finalRef, relPath)
-	switch afterErr {
-	case nil:
+	switch {
+	case afterErr == nil:
 		s := string(afterOut)
 		payload.After = &s
-	case errNotInHead:
+	case errors.Is(afterErr, errNotInHead):
 		// nil After — path was deleted at finalRef
+	case errors.Is(afterErr, errOversized):
+		payload.Oversized = true
 	default:
 		return DiffPayload{}, afterErr
 	}
 
-	if (payload.Before != nil && bytes.IndexByte([]byte(*payload.Before), 0) >= 0) ||
-		(payload.After != nil && bytes.IndexByte([]byte(*payload.After), 0) >= 0) {
-		payload.Binary = true
-		payload.Before = nil
-		payload.After = nil
-	}
-
+	payload.finalize()
 	return payload, nil
 }
 
@@ -341,7 +343,17 @@ func DiffOfCommit(repo, sha, relPath string) (DiffPayload, error) {
 // (mapped to errNotInHead so callers can render it as a nil side) from
 // genuine failures. Used directly by DiffBetween and via showHead for the
 // HEAD-only fast path.
+//
+// Before reading the blob, it runs a cheap `git cat-file -s <ref>:<relPath>`
+// size pre-check and returns errOversized when the blob exceeds
+// diffPayloadCap — bounding the bytes read into memory. The pre-check is
+// best-effort: any cat-file failure (missing path, unknown ref, a tree
+// object) falls through to the read below, whose stderr-substring logic
+// still maps "missing at ref" to errNotInHead and surfaces real errors.
 func showAt(dir, ref, relPath string) ([]byte, error) {
+	if size, ok := blobSizeAt(dir, ref, relPath); ok && size > diffPayloadCap {
+		return nil, errOversized
+	}
 	cmd := exec.Command("git", "show", ref+":"+relPath)
 	cmd.Dir = dir
 	cmd.Env = gitEnv()
@@ -359,6 +371,23 @@ func showAt(dir, ref, relPath string) ([]byte, error) {
 		return nil, errNotInHead
 	}
 	return nil, err
+}
+
+// blobSizeAt returns the byte size of the object at `<ref>:<relPath>` via
+// `git cat-file -s`, without reading its content. ok is false on any
+// failure (missing path, unknown ref, non-numeric output) so callers treat
+// a failed pre-check as "size unknown" and fall through to the real read
+// rather than misclassifying it as oversized.
+func blobSizeAt(dir, ref, relPath string) (size int64, ok bool) {
+	out, err := run(dir, "cat-file", "-s", ref+":"+relPath)
+	if err != nil {
+		return 0, false
+	}
+	n, parseErr := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if parseErr != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // parseDiffNameStatusZ walks NUL-separated `git diff --name-status -z` output.
