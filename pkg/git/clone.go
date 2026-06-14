@@ -13,9 +13,14 @@ import (
 // enough to read a bot bundle, not its history. Network access and
 // authentication are git's responsibility: the host's configured credential
 // helpers and SSH keys apply, exactly as for a manual `git clone`.
+//
+// url is gated by ValidateCloneSource: only https:// and ssh git URLs are
+// accepted, so dangerous transports (ext::, file://, …) are rejected before
+// git runs. The `--` sentinel below is kept as additional flag-injection
+// defense in depth — it is NOT a transport check.
 func ShallowClone(ctx context.Context, url, ref, dest string) error {
-	if strings.TrimSpace(url) == "" {
-		return fmt.Errorf("git: clone url is empty")
+	if err := ValidateCloneSource(url); err != nil {
+		return err
 	}
 	args := []string{"clone", "--depth", "1", "--single-branch"}
 	if ref != "" {

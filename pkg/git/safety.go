@@ -51,6 +51,72 @@ func ValidateRelPath(p string) error {
 // error).
 var branchNameAllowed = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 
+// ValidateCloneSource gates the URL passed to `git clone`. The `--` sentinel
+// in ShallowClone already blocks command-line flag injection, but it does NOT
+// constrain git's URL transports: git supports remote-helper transports such
+// as `ext::` (which executes an arbitrary command) and `file://` (which clones
+// an arbitrary local repository). Those are a security boundary issue the
+// moment a less-trusted surface — marketplace catalogs, webhooks — can feed an
+// install source, so we allow only a small set of known-safe transports rather
+// than reject a blocklist that git keeps extending.
+//
+// Accepted:
+//   - `https://…` Git URLs.
+//   - `ssh://…` Git URLs.
+//   - scp-like SSH syntax `[user@]host:path` (e.g. `git@github.com:org/repo.git`).
+//
+// Rejected (with a clear error): the remote-helper marker `::` in any position
+// (`ext::…`, `<transport>::address`), and every other URL scheme — `file://`,
+// `git://` and `http://` (cleartext/unauthenticated), `ftp://`, etc. A bare
+// local or relative path is also rejected here: intentional local-directory
+// installs are handled upstream by botinstall.resolveRepoRoot (os.Stat+IsDir)
+// before a source ever reaches the clone path, so anything left that looks
+// like a path is not a recognised git transport.
+//
+// Edge cases left deliberately permissive (not security regressions — none is
+// `ext::`/`file://`): a Windows drive path like `C:\repo` matches the scp-like
+// shape, and an `ssh://` URL without a user is accepted. iterion targets Linux
+// and local directories are diverted upstream, so widening the rules to chase
+// these would add complexity without closing a real hole.
+func ValidateCloneSource(src string) error {
+	s := strings.TrimSpace(src)
+	if s == "" {
+		return fmt.Errorf("git: clone url is empty")
+	}
+	if strings.ContainsRune(s, 0) {
+		return fmt.Errorf("git: clone url contains null byte")
+	}
+	// `::` is git's remote-helper transport marker (`ext::`, `transport::addr`).
+	// Reject it in any position before scheme parsing so `ext::sh -c …` cannot
+	// slip through as a path-shaped value.
+	if strings.Contains(s, "::") {
+		return fmt.Errorf("git: clone source %q uses an unsupported transport (remote-helper transports such as ext:: are not allowed; use an https:// or ssh git URL)", src)
+	}
+	if i := strings.Index(s, "://"); i >= 0 {
+		scheme := strings.ToLower(s[:i])
+		switch scheme {
+		case "https", "ssh":
+			return nil
+		default:
+			return fmt.Errorf("git: clone source %q uses an unsupported transport %q (only https:// and ssh git URLs are allowed)", src, scheme)
+		}
+	}
+	// No explicit scheme: the only accepted form is scp-like SSH, which git
+	// recognises when a colon appears before the first slash (`host:path`).
+	colon := strings.Index(s, ":")
+	slash := strings.Index(s, "/")
+	if colon > 0 && (slash == -1 || colon < slash) {
+		host := s[:colon]
+		if at := strings.LastIndex(host, "@"); at >= 0 {
+			host = host[at+1:]
+		}
+		if host != "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("git: clone source %q is not a supported git transport (only https:// and ssh git URLs are allowed; install a local bundle by its directory path instead)", src)
+}
+
 // ValidateBranchName accepts a branch name coming from a user-controlled
 // surface (`--branch-name` CLI flag, Launch API, studio modal) and
 // rejects forms that could either confuse `git branch` flag parsing or

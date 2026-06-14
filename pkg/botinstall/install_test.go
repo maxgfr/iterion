@@ -116,6 +116,26 @@ func TestInstall_PathTraversalRejected(t *testing.T) {
 	}
 }
 
+// TestInstall_RejectsDangerousTransport verifies the transport allowlist gates
+// non-local sources before git runs. The local-directory install path is
+// covered by TestInstall_SingleBundleRoot (os.Stat+IsDir diverts it before
+// ShallowClone), so dangerous transports never short-circuit a real install.
+func TestInstall_RejectsDangerousTransport(t *testing.T) {
+	for _, src := range []string{
+		"ext::sh -c 'touch pwned'",
+		"file:///etc",
+	} {
+		dest := t.TempDir()
+		_, err := Install(context.Background(), Options{Source: src, Dest: dest, Workdir: t.TempDir()})
+		if err == nil {
+			t.Fatalf("Install(%q) = nil, want rejection", src)
+		}
+		if entries, _ := os.ReadDir(dest); len(entries) != 0 {
+			t.Errorf("nothing should be installed for rejected source %q, got %d entries", src, len(entries))
+		}
+	}
+}
+
 func TestInstall_RepoIndexConvention(t *testing.T) {
 	repo := t.TempDir()
 	writeBundle(t, filepath.Join(repo, "tools", "willy"), "willy", 0)
