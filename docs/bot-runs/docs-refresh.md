@@ -64,17 +64,23 @@ dead anchors (`CLAUDE.md:3` + `docs/examples.md:12` → `README.md#iter-vs-bot`,
 internal links/anchors are a universal doc-drift class, not iterion-specific.
 
 ### Engine hardening
-- Filed board ticket **`d8e8dde1`**: every claude_code node with schema +
-  tools emits `tool_error: No such tool available: StructuredOutput` — the
-  agent (behaving natively, as the adaptivity work intends) reaches for the
-  SDK's `StructuredOutput` tool, which iterion never registers, wasting its
-  Pass-1 final turn (`raw_output_len: 0`) before the unconditional Pass-2
-  formatting round-trip. Cosmetic + one wasted LLM round-trip per such node
-  across all loop bots. Fix sketch in the ticket: register a capturing
-  `StructuredOutput` tool via the same `WithHook(HookPreToolUse)` +
-  short-circuit pattern iterion already uses for `ask_user`
-  ([claude_code.go:364](../../pkg/backend/delegate/claude_code.go)) — would
-  eliminate Pass-2. Deferred (core machinery, needs its own tested change).
+- Ticket **`d8e8dde1`** — **FIXED this session** (`3b29efb1`). Every
+  claude_code node with schema + tools emitted `tool_error: No such tool
+  available: StructuredOutput`: the agent (behaving natively, as the
+  adaptivity work intends) reached for the SDK's `StructuredOutput` tool —
+  available only under `--json-schema`, which iterion set in Pass-2, never
+  Pass-1 — wasting its Pass-1 final turn (`raw_output_len: 0`) before the
+  **unconditional** Pass-2 formatting round-trip. Root insight (verified
+  empirically against claude 2.1.177): `--json-schema` composes with
+  `--allowedTools` in ONE pass — the agent does its tool work, then calls the
+  native StructuredOutput tool, populating `result.structured_output`. So the
+  fix sets `WithOutputFormat` in Pass-1 even with tools, returns Pass-1's
+  structured output directly when valid, and keeps the two-pass `formatOutput`
+  as a fallback (max-turns / sandbox edge cases). Validated on run `019ec727`:
+  both `reviewer_claude` (reader) and `prepare_commit` (writer) →
+  `formatting_pass_used=false`, no error, valid output; converged; A/B vs the
+  pre-change binary shows no regression. Saves one LLM round-trip per
+  schema+tools claude_code node across all bots.
 - Side: closed a **stale "ready" board ticket** (`native:21065752`, Revi
   "scan_shards.go:458 blocks until shard timeout") — already fixed on HEAD
   by `59cfedcc` + covered by `TestAwaitTerminal_PreDispatchFailureDoesNotHang`
