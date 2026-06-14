@@ -2,6 +2,7 @@ package runview
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -552,9 +553,26 @@ func extractStringIDs(v interface{}) []string {
 		}
 		return out
 	case string:
-		if t != "" {
-			return []string{t}
+		s := strings.TrimSpace(t)
+		if s == "" {
+			return nil
 		}
+		// A `json`-typed schema field can arrive as the literal *text* of
+		// a JSON array — e.g. an LLM emits `dispatched_ids: []` (or a
+		// populated `["native:abc"]`) as a string rather than a real
+		// array. Parse those so an empty array yields zero IDs instead of
+		// a phantom `"[]"` watch (which then 404s in the run console), and
+		// a populated one contributes its real elements.
+		if s[0] == '[' {
+			var arr []interface{}
+			if err := json.Unmarshal([]byte(s), &arr); err == nil {
+				return extractStringIDs(arr)
+			}
+			// Looked like an array but didn't parse — drop it rather than
+			// watch the malformed literal.
+			return nil
+		}
+		return []string{s}
 	}
 	return nil
 }
