@@ -16,7 +16,7 @@ cross-family approvals. See [bots/whole-improve-loop/](../../bots/whole-improve-
   value (real fixes + clear findings) rather than run to convergence on a tree
   the fixer had silently broken. Converted directly into repatriated commits.
 - Versions: bot whole-improve-loop 0.3.0 **+ new `scope_globs` var** · iterion
-  base `2707ea2f`, fixes `9d53e0fc..99cb81ef` (worktree `worktree-willy-improve`).
+  base `2707ea2f`, fixes `ec2752ca..3be59a70` (worktree `worktree-willy-improve`).
 - Method: CLI `iterion run` (a separate process — dodges the `task studio:dev`
   watchexec self-kill), `--var scope_globs=pkg/store` (the new var), into the
   operator's visible store (`/.iterion`, studio :4891). Backends: reviewer/fix
@@ -36,7 +36,7 @@ cross-family approvals. See [bots/whole-improve-loop/](../../bots/whole-improve-
   way to dogfood Willy affordably: scope to a package, get a converging run for a
   few dollars.
 - **4 genuine pkg/store production-readiness blockers**, all verified real against
-  the code, repatriated as `0ddd6227` (+ `hardening_test.go` regression tests the
+  the code, repatriated as `a79ffa76` (+ `hardening_test.go` regression tests the
   fixer's own plan called for but never wrote):
   - **B1** run dir/run.log created `0755`/`0644` (logs hold prompts/outputs/secrets →
     world-readable) + path built before run-ID validation → private `dirPerm`/`filePerm`
@@ -57,7 +57,7 @@ cross-family approvals. See [bots/whole-improve-loop/](../../bots/whole-improve-
    broke *every* event append; 6 test failures) and **B1** a missed caller in
    `pkg/cli/resume.go` (build break). Root cause: the **review** prompt forbids
    provisional verdicts; the **fix** prompt did not. Fixed — FINALIZE guard in
-   `fix_system` (`99cb81ef`): no placeholder + self-verify with the project's own
+   `fix_system` (`3be59a70`): no placeholder + self-verify with the project's own
    build/test + update ALL callers.
 2. **The loop cannot catch a fixer that breaks the build (no deterministic post-fix
    gate).** Reviewers review their chunk's *source*; a cross-file build break
@@ -73,9 +73,9 @@ cross-family approvals. See [bots/whole-improve-loop/](../../bots/whole-improve-
    mitigates from the fixer side; the build gate (2) is the deterministic backstop.
 
 ### Engine / repo hardening produced
-- `9d53e0fc` + `b5302d37` — `scope_globs` (feature + README); `72ffd4f1` — catalog regen.
-- `0ddd6227` — pkg/store B1-B4 hardening + 4 regression tests.
-- `99cb81ef` — `fix_system` FINALIZE guard (no placeholder + self-verify).
+- `ec2752ca` + `deec5543` — `scope_globs` (feature + README); `f3df9cc7` — catalog regen.
+- `a79ffa76` — pkg/store B1-B4 hardening + 4 regression tests.
+- `3be59a70` — `fix_system` FINALIZE guard (no placeholder + self-verify).
 
 ### Lessons for next run
 - Don't trust fix_gpt's `applied` flag or summary — **always run a build/test gate on
