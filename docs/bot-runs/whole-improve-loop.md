@@ -10,6 +10,36 @@ cross-family approvals. See [bots/whole-improve-loop/](../../bots/whole-improve-
 > [branch-improve-loop.md](branch-improve-loop.md). This page covers Willy's
 > whole-repo specifics.
 
+## 2026-06-14 — convergence machinery re-confirmed + path-scope finding (run 019ec598, cancelled)
+
+- Status: **partial** (machinery confirmed; cancelled before the scoped edit —
+  by design, see finding). Run on a clean iterion clone via the C082 worktree
+  studio (non-watchexec, so no self-kill), `improvement_prompt` scoped to
+  "pkg/log/ only", `merge_into=none`.
+- Machinery: **confirmed healthy.** `alt` round-robin → `reviewer_claude`/
+  `reviewer_gpt` → `streak_check` → `snapshot_chunk` turned correctly; reviewers
+  emitted clean cross-family verdicts and `streak_check` accumulated approvals (4
+  chunks swept, `review_loop=2`). No oscillation, no crash (Willy has a python
+  state node but it does NOT parse json arrays from env, so it's immune to the
+  Seki-class shape bug).
+- **Finding — no path-scope glob → focused runs pay full-repo cost.** A
+  `pkg/log/`-only `improvement_prompt` does NOT prune the chunk set: Willy still
+  chunks the WHOLE repo and the reviewers no-op every non-pkg/log chunk
+  (`"No action required... zero pkg/log/ source files"`) at ~$0.5/review/chunk.
+  iterion has ~30+ packages, so a single-package focus would burn ~$30 of review
+  to reach the one relevant chunk. `improvement_prompt`/`scope_notes` are prose
+  (the WHAT), not a path filter (the WHERE). Recommended enhancement: add a
+  `scope_globs` var (like sec-audit-source's `code_scope_globs`) that prunes the
+  chunk plan, so focused improvements skip irrelevant packages. Cancelled here
+  once the machinery + this finding were clear, to avoid the full-repo spend.
+- Note: Willy's improvement *value* (catching/fixing a real dropped error) was
+  already validated in the 2026-06-13 run below; this run targeted convergence +
+  the scope behaviour, not re-proving value. Willy does not emit to the board.
+- Lessons for next run: for a single-package improvement, either accept the
+  full-repo sweep cost or use a different tool; pushing for a `scope_globs` var
+  is the real fix. Whole-repo axes (e.g. "all error handling") are Willy's
+  intended sweet spot, where the full sweep is correct.
+
 ## 2026-06-13 — bounded error-handling dogfood (run 019ec0c8)
 
 - Status: **partial — core value validated, full convergence NOT reached** (the run
