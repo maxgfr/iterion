@@ -68,4 +68,4 @@ first bilan for a bot lands.
 | Devy | `devbox-setup` | devbox.json bootstrap | _not yet_ |
 | Adry | `adr-cartograph` | ADR cartographer + completeness audit (idempotent) | [adr-cartograph.md](adr-cartograph.md) |
 | ReArchi | `adr-rechallenge` | human-gated ADR re-challenge | _not yet_ |
-| Fini | `feature-gap-fill` | gap-driven feature completion loop | _not yet_ |
+| Fini | `feature-gap-fill` | gap-driven feature completion loop | [feature-gap-fill.md](feature-gap-fill.md) |
