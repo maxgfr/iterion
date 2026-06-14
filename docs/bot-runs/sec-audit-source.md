@@ -1,5 +1,35 @@
 # Seki + deepsec — validation
 
+## 2026-06-14 — C082 board-emit RESOLVED + validated end-to-end (run 019ec4fe)
+
+- Status: **FIXED.** The board-emit gap that made Seki's `report_card` confabulate
+  `board.create` ids now works: a sandboxed `claude_code` board-cap node reaches the
+  per-run board MCP listener and its `create_issue` lands on the operator board.
+- Versions: iterion branch `c082-board-emit` (closer `21e9a66b`, on top of the
+  8-commit C082 stack `ee406ac6`→`816dcd0f`) · validated with a minimal
+  `claude_code` `create_issue` bot, not Seki itself (faster signal, same code path).
+- Method: dedicated worktree studio (fresh static binary, isolated store
+  `/tmp/c082val`, `iterion-sandbox-sec:edge`); `merge_into=none`.
+- Result: board total **0 → 1**, issue fetchable by real native id
+  (`native:1714f23b…`, state `inbox`), `mcp__iterion_board__create_issue` invoked,
+  run **finished**.
+- Engine hardening — the closer after the 8-commit producer stack:
+  1. **`serverInfo.version` (THE fix, `21e9a66b`)** — claude-code's MCP client
+     connected over plain HTTP but Zod-**rejected** the `initialize` response because
+     `serverInfo.version` was missing ("expected string, received undefined") → the
+     whole connection was dropped → tools never surfaced → confabulation. Handler now
+     returns `serverInfo.version "1.0.0"`. This disproves the earlier
+     https-only / tool-search-deferral / session-id hypotheses (captured the actual
+     ZodError via claude-code's own MCP debug against the live listener).
+  2. **`alwaysLoad:true` on the board MCP server** — exempts it from claude-code's
+     tool-search deferral so `mcp__iterion_board__*` surface without a ToolSearch hit.
+- Lessons for next run: (a) the diagnostic `--debug` passthrough does **not** ship —
+  claude-code eats the `--debug` value as a positional prompt arg, conflicting with
+  `--input-format stream-json` (CLI exit 1); use `--debug=mcp` +
+  `CLAUDE_CODE_DEBUG_LOGS_DIR` to re-capture. (b) Re-run Seki itself sandboxed to
+  confirm `report_card` now posts real (not confabulated) ids to the board.
+- Full technical writeup: [docs/c082-board-emit-fix-plan.md](../c082-board-emit-fix-plan.md).
+
 ## 2026-06-13 (retest, FIXED) — scanner invocations repaired → full pipeline (run 019ec230)
 
 - Status: **scan_health now PASSES; Seki runs the full read pipeline end-to-end**
