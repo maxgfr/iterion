@@ -9,6 +9,60 @@ missing parts, runs the alternating Claude/GPT review-fix loop to convergence,
 then commits. Inputs are typically the `type:feature-gap` issues filed by the
 adr-cartograph (Adry) bot.
 
+## 2026-06-14 — clone transport validation, SANDBOXED (run 019ec75f)
+
+- **Status: validated** — Fini produced a real, correct, tested security fix
+  from Adry's gap spec and converged cleanly. Independently verified (tests run
+  on host).
+- **Versions:** bot 0.1.0 · iterion @ `030031f6` (main)
+- **Method:** `ITERION_OPENAI_USE_OAUTH=1 ./iterion run
+  bots/feature-gap-fill/main.bot --var gap_spec='<08aaf4ef body>' --store-dir
+  .iterion --merge-into none`. gap_spec = Adry's `bot-marketplace-shallow-clone`
+  issue (`Add transport validation for bot marketplace shallow clone sources`).
+  **Ran SANDBOXED** (`iterion-sandbox-full:edge`, `worktree: auto`) — unlike the
+  019ec599 run which forced `--sandbox none`. Forfait forced.
+- **Result: converged + committed.** survey_existing → plan → act → simplify →
+  **2 review cycles** (reviewer_claude→streak_check→reviewer_gpt→streak_check,
+  cross-family double-approval, **0 fixer iterations, no oscillation**) →
+  prepare_commit → commit. **$3.52 / ~16 min / 58k tokens.** Committed
+  `a7f44eb3` ("feat(git): gate git clone sources to safe https/ssh transports",
+  **4 files +154/-2**) on storage branch `iterion/run/chrome-surge-scalarsmol-9428`.
+  I reviewed + validated (`go test ./pkg/git ./pkg/botinstall` → ok) then
+  FF-merged to main. Board 08aaf4ef → done.
+- **Value: high — real security hardening.** `ValidateCloneSource`
+  (pkg/git/safety.go) allowlists `https://`/`ssh://`/scp-like and rejects the
+  `::` remote-helper marker (catches `ext::` arbitrary-command-exec) +
+  `file://`/`git://`/`http://`/bare paths; `ShallowClone` now calls it (keeping
+  `--` as flag-injection defense-in-depth). `clone_test.go` tests 6 accept + 12
+  reject cases incl. the error-message acceptance criterion. Survey was
+  excellent: found ADR-020 as the doc home, identified the HTTP marketplace
+  routes as the actual untrusted surface, noted `ValidateRelPath`/
+  `ValidateBranchName` pre-existed (stayed in scope).
+- **Engine/forfait health:** clean run — **no `StructuredOutput: no such tool`
+  error** (d8e8dde1 holding on schema+tools claude_code nodes), no forfait
+  flakiness, no retries. **Sandboxed claude_code + reviewer_gpt (claw/forfait)
+  both ran cleanly in-container** — the sandbox path is viable for Fini now
+  (contrast the 019ec599 bilan's "host-mode until ~/.codex mounted" caveat).
+
+### Findings / misses
+- **Fini cannot run the test suite in-sandbox** (`devbox cache permission-denied`
+  + host `go` can't fetch the 1.26.0 toolchain in the container). Reviewers
+  approved by *reading* the diff; tests were never *executed* by Fini. So a
+  human/CLI must `go test` on the host before merge (I did → pass). Known
+  "devbox silently broken in sandbox" limitation.
+- **08aaf4ef ↔ 50bbe258 interaction conflict (Adry gap-spec coupling).**
+  50bbe258 asks to test `ShallowClone` hermetically via a `file://` URL — but
+  08aaf4ef's new gate **rejects `file://`**, obsoleting that approach. The
+  empty/whitespace-guard intent is now covered by `clone_test.go`
+  (`ValidateCloneSource` is the guard); the actual-clone cases (with/without
+  ref, stderr-wrap) can't be tested hermetically post-gate (would need a
+  `cloneArgs(url,ref,dest)` extraction or a test seam). **50bbe258 needs
+  re-scope; left in inbox, not run as-is.** Lesson: when Adry files multiple
+  gap tickets on one function, one fix can invalidate another's approach.
+- Good bot judgment on out-of-scope items: flagged `http://` rejection as a
+  possible config need (internal cleartext servers) and the `go.mod` `yaml.v3`
+  indirect→direct drift, both as *observations*, not scope creep.
+
 ## 2026-06-14 — first dogfood, file-diff size-cap gap (run 019ec599)
 
 - **Status: validated** — Fini produced real, correct, tested code from a gap
