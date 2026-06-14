@@ -1,0 +1,33 @@
+name: adr-cartograph
+display_name: Adry
+version: 0.1.0
+description: |
+  Observes the code-as-implemented and produces committable ADR markdown
+  (Nygard format) in docs/adr/ — every ADR is a "constat" recording the
+  decision the code embodies, so a future maintainer can re-challenge it.
+  Also produces a completeness audit for in-flight features: what is fully
+  implemented vs what is missing/unfinished.
+
+  Idempotent: re-running on a converged tree does (almost) nothing — no
+  new ADR, no commit. Reuses docs-refresh's sha-cache + a detect_changes
+  early-exit so a no-op pass is essentially free.
+
+  Read-only on code (no code-modification phase — it only writes .md under
+  docs/adr/). Optional handoff: files type:adr-rechallenge issues routed
+  to the adr-rechallenge bot and type:feature-gap issues routed to the
+  feature-gap-fill bot.
+when_to_use: |
+  Run after a code-mutating session (feature_dev, branch-improve-loop,
+  bmady) lands non-trivial decisions, before a release, or on a nightly
+  cadence to keep docs/adr/ honest against the code. Use
+  --var rechallenge_after_days=90 to invite re-challenge on ADRs older
+  than that.
+author: SocialGouv (devthejo) — adr-cartograph/main.bot
+schema_version: 1
+
+dispatch_vars:
+  scope_notes: |-
+    {{issue.title}}
+
+    {{issue.body}}
+  issue_id: "{{issue.identifier}}"

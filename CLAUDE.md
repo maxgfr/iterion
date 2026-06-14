@@ -1,6 +1,6 @@
 # Iterion
 
-Workflow orchestration engine with a custom DSL (`.iter` / `.bot` files — identical semantics, see [README "`.iter` vs `.bot`"](README.md#iter-vs-bot)).
+Workflow orchestration engine with a custom DSL. Runnable workflows are `.bot` files (`.botz` for packaged bundles); the former `.iter` extension is no longer accepted at the CLI/server/studio boundaries and survives only as the DSL's raw/testdata form ([`pkg/dsl/workflowfile`](pkg/dsl/workflowfile/workflowfile.go)).
 
 ## Project nature
 
@@ -755,12 +755,12 @@ board under `source:sec-audit-self`.
 
 ```
 iterion init [dir]                      # Scaffold new project
-iterion validate <file.iter>            # Parse and validate workflow
-iterion run <file.iter> [flags]         # Execute workflow (--var, --recipe, --timeout, --store-dir, --merge-into, --branch-name)
+iterion validate <file.bot>            # Parse and validate workflow
+iterion run <file.bot> [flags]         # Execute workflow (--var, --recipe, --timeout, --store-dir, --merge-into, --branch-name)
 iterion inspect [--run-id] [--events]   # View run state and events
 iterion resume --run-id --file [--answers-file] [--force]  # Resume paused/failed/cancelled run
 iterion fork --run-id <parent> --node <id> [--turn N] [--rewind-code]  # Fork a run at a prior LLM turn (resume with `iterion resume`)
-iterion diagram <file.iter> [--view]    # Generate Mermaid diagram (compact|detailed|full)
+iterion diagram <file.bot> [--view]    # Generate Mermaid diagram (compact|detailed|full)
 iterion studio [--port] [--dir] [--bind] [--bots-path] [--no-browser-pane]  # Launch visual workflow editor (+ kanban /board, /dispatcher dashboard, Browser pane, Launch modal)
 iterion report --run-id <id> [--store-dir] [--output]  # Generate chronological run report
 iterion dispatch <config.yaml> [--port]  # Long-running dispatcher (tracker → workflow per issue)

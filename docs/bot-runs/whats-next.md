@@ -17,7 +17,8 @@ a roadmap, materialises it as kanban issues, and triages the board. See
   human_review → emit_action → (dispatch picker) → assign_to_bots → triage_board →
   standby`. Materialised **5 backlog issues** (board 88→93), reassigned 1 via triage,
   ended on standby (the intended reachable co-CTO state). Zero node failures.
-  Audit markdown: `docs/plans/whats-next-20260613-130840.md`.
+  Audit markdown was produced as a local run artifact (`docs/plans/whats-next-20260613-130840.md`)
+  and was not committed with this bot-run note.
 
 ### Value (genuinely high)
 - **Survey is accurate and grounded**: enumerated all 13 `bots/*/main.bot` paths,

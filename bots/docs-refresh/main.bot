@@ -1438,6 +1438,38 @@ def excerpt(line_text, limit=140):
     s = line_text.strip()
     return s if len(s) <= limit else s[:limit] + '…'
 
+## md_link (v0.16.x): internal markdown links [text](path#anchor).
+## FILE_RE only matches prose paths under known roots and never the
+## #anchor fragment, so a dead doc-to-doc link or a broken heading
+## anchor (e.g. CLAUDE.md -> README.md#iter-vs-bot) slipped through the
+## whole audit. This captures the link URL (first token after '(',
+## stopping at whitespace so an optional "title" is ignored without
+## needing a literal double-quote in this backtick command body) and
+## verifies BOTH the target file's existence AND, for .md targets, the
+## heading anchor — slugified GitHub-style. dead_link is already in the
+## reviewer taxonomy; this feeds it deterministic candidates.
+MD_LINK_RE = re.compile(r'\[(?:[^\]]*)\]\(([^)\s]+)')
+_heading_cache = {}
+def slugify(text):
+    s = text.strip().lower().replace(BT, '')
+    s = re.sub(r'[^\w\s-]', '', s)
+    s = re.sub(r'\s', '-', s)
+    return s.strip('-')
+def headings_of(path):
+    if path in _heading_cache:
+        return _heading_cache[path]
+    slugs = set()
+    try:
+        with open(path, encoding='utf-8', errors='replace') as fh:
+            for ln in fh:
+                hm = re.match(r'\s{0,3}(#{1,6})\s+(.+)', ln)
+                if hm:
+                    slugs.add(slugify(hm.group(2)))
+    except (FileNotFoundError, IsADirectoryError, PermissionError):
+        pass
+    _heading_cache[path] = slugs
+    return slugs
+
 anchors = []
 per_doc_counts = {}
 for doc in doc_files:
@@ -1490,6 +1522,20 @@ for doc in doc_files:
                 continue
             seen_in_doc.add(key)
             doc_anchors.append({'doc': doc, 'line': lineno, 'kind': 'symbol_ref', 'value': value, 'excerpt': excerpt(line)})
+        for m in MD_LINK_RE.finditer(line):
+            target = m.group(1)
+            same_doc = target.startswith('#')
+            if not same_doc and (re.match(r'^[a-z][a-z0-9+.-]*://', target) or target.startswith(('mailto:', 'tel:', '//', 'www.'))):
+                continue
+            if '#' in target:
+                path_part, frag = target.split('#', 1)
+            else:
+                path_part, frag = target, ''
+            key = ('md_link', target)
+            if key in seen_in_doc:
+                continue
+            seen_in_doc.add(key)
+            doc_anchors.append({'doc': doc, 'line': lineno, 'kind': 'md_link', 'value': target, 'path_part': path_part, 'frag': frag, 'excerpt': excerpt(line)})
     anchors.extend(doc_anchors)
     per_doc_counts[doc] = {'total': len(doc_anchors), 'verified': 0}
 
@@ -1596,6 +1642,33 @@ for a in anchors:
             a['status'] = 'unverifiable'
             a['evidence'] = 'no match in code_scope_globs (may be prose or external ref)'
             unverifiable.append(a)
+    elif k == 'md_link':
+        ## Internal markdown link: verify the target file exists, and for
+        ## a .md target verify the #heading-anchor too (line anchors #Lnn
+        ## are code-line refs, not headings — skip those). High precision:
+        ## os.path.exists + GitHub-slug heading match. Misses are real dead
+        ## links (objective, verifiable), so they are 'drifted', not the
+        ## softer 'unverifiable' used for the brittle symbol heuristic.
+        path_part = a.get('path_part', '')
+        frag = a.get('frag', '')
+        tgt = a['doc'] if not path_part else os.path.normpath(os.path.join(os.path.dirname(a['doc']), path_part))
+        if path_part and not os.path.exists(tgt):
+            a['status'] = 'drifted'
+            a['evidence'] = 'link target not found: ' + tgt
+            drifted.append(a)
+        elif frag and not re.match(r'^[Ll][0-9]', frag) and tgt.endswith('.md'):
+            if frag.lower() in headings_of(tgt):
+                a['status'] = 'verified'
+                a['evidence'] = 'anchor present in target'
+                verified.append(a)
+            else:
+                a['status'] = 'drifted'
+                a['evidence'] = 'dead anchor #' + frag + ' in ' + tgt
+                drifted.append(a)
+        else:
+            a['status'] = 'verified'
+            a['evidence'] = 'link target exists'
+            verified.append(a)
     per_doc_counts[a['doc']]['verified'] += 1 if a['status'] == 'verified' else 0
 
 ## Prioritise candidates: drifted CLI surface first (highest signal),
@@ -1604,6 +1677,7 @@ for a in anchors:
 priority = {
     ('drifted', 'cli_command'): 0,
     ('drifted', 'cli_flag'): 0,
+    ('drifted', 'md_link'): 1,
     ('drifted', 'diagnostic'): 1,
     ('drifted', 'file_ref'): 2,
     ('drifted', 'symbol_ref'): 3,

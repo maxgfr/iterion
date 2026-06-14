@@ -61,5 +61,12 @@ func readWorktreeFile(dir, relPath string) ([]byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, &os.PathError{Op: "read", Path: abs, Err: fs.ErrInvalid}
 	}
+	// Size guard: refuse to read an oversized regular file into memory.
+	// The Lstat size is authoritative for a one-shot read here (unlike the
+	// streaming CountUntrackedLines path, no re-stat-after-open is needed).
+	// The symlink branch above is exempt — a link target is always tiny.
+	if info.Size() > diffPayloadCap {
+		return nil, errOversized
+	}
 	return os.ReadFile(abs)
 }
