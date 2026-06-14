@@ -30,6 +30,49 @@
   confirm `report_card` now posts real (not confabulated) ids to the board.
 - Full technical writeup: [docs/c082-board-emit-fix-plan.md](../c082-board-emit-fix-plan.md).
 
+## 2026-06-14 — real-bot Seki re-run for C082: 2 forfait-robustness bugs (runs 019ec55a, 019ec579)
+
+- Status: **partial.** Goal was to confirm `report_card` posts REAL board ids on
+  the actual bot (not just the minimal validation bot above). BOTH attempts
+  **failed before `report_card`**, on two DISTINCT bugs — neither is C082 (C082
+  board-emit is proven by the minimal bot; the per-run board MCP listener started
+  fine on both: `host.docker.internal:42053`/`:37717`). Root cause of both: the
+  flaky `claw/openai/gpt-5.5` (forfait) agents return `json`-typed fields in
+  **variable shapes** across runs, and several deterministic consumers don't
+  normalize them. Method: worktree binary (C082) + isolated studio :4899 +
+  `iterion-sandbox-sec:edge` scanning a clean iterion clone, `enable_deepsec=false`,
+  `remediate=false`.
+- **Bug A — `filter_cached_files` crash → FIXED (`d6ad8f3c`).** `triage` emitted
+  `candidates` as a dict keyed by candidate-id (`{CAND-001:{...}}`) instead of a
+  list; `for c in candidates: c.get(...)` iterated the dict KEYS (strings) →
+  `AttributeError: 'str' object has no attribute 'get'` (exit 1). This is the
+  newer incremental-cache node, never run end-to-end before (the 2026-06-13 run
+  had no such node), so it shipped unguarded while `majority_verdict` was already
+  defensive. Fix: normalize dict→list at the funnel that feeds `fresh_candidates`.
+- **Bug B — `run_lang_scanners` exit 127 → ROOT-CAUSED, not fixed (engine).**
+  `detect_tech` returned `langs` as a **list of plain strings** in run #2
+  (`["Go","TypeScript",...]`) vs a **dict** in run #1. iterion's
+  `shellEscapeValue` renders a `[]interface{}` of strings **space-separated**, so
+  `LANGS={{input.langs}}` became `LANGS=Go TypeScript JavaScript …` → the shell
+  set `LANGS=Go` and ran `TypeScript` as a command → `bash: line 1: TypeScript:
+  command not found` (exit 127). The dict shape JSON-marshals to ONE shell-escaped
+  token, which is why run #1 got past it. The node's own `_norm_langs` handles
+  both shapes — but the value never survives the shell. **Recommended fix
+  (tracked, NOT done — blast radius):** make `shellEscapeValue` render a
+  `[]interface{}` of strings as compact JSON (a single shell-escaped token, like
+  it already does for maps and complex slices), reserving space-join for typed
+  `[string]` fields (which arrive as `[]string`, not `[]interface{}`). 8 catalog
+  bots use `VAR={{...}}` patterns, so this needs a blast-radius audit + test
+  before shipping ([pkg/backend/model/executor_tool.go](../../pkg/backend/model/executor_tool.go) `shellEscapeValue`).
+- Systemic lesson: gpt-5.5/forfait `json` fields are shape-unstable (dict↔list)
+  run-to-run; every deterministic consumer (python tool node) of an agent `json`
+  array-field must normalize, OR the engine must render `json` fields canonically.
+  `majority_verdict` is the model (it normalizes both shapes + guards
+  `isinstance`). Until the engine fix lands, Seki's SAST read-pipeline is not
+  reliably end-to-end on forfait; running its agent nodes on `claude_code`/opus
+  (`ITERION_SEC_AUDIT_BACKEND=claude_code`) would sidestep the shape flakiness for
+  a clean validation.
+
 ## 2026-06-13 (retest, FIXED) — scanner invocations repaired → full pipeline (run 019ec230)
 
 - Status: **scan_health now PASSES; Seki runs the full read pipeline end-to-end**
