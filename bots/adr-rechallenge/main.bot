@@ -1,0 +1,661 @@
+## ─────────────────────────────────────────────────────────────────
+## adr-rechallenge (ReArchi) — human-in-the-loop ADR re-challenger
+##
+## Loads ONE existing ADR and the current code state, surveys what
+## drifted since the decision was made, frames the case for revisiting
+## it, and asks the human ONE question with three options:
+##
+##   keep     -> end, no change.
+##   change   -> file a board ticket describing the proposed change.
+##   addendum -> append a dated re-challenge note to the ADR, then
+##               ask the human commit / skip. commit -> git commit;
+##               skip -> end (the note is optional).
+##
+## Design discipline:
+##  * No worktree:auto — the only mutation is one Edit appending a
+##    paragraph to the ADR file (low blast radius). The human gates
+##    the commit. Operator-friendly: the change is right there in
+##    their working tree to inspect before commit.
+##  * NEVER edit code. The bot is read-only against the code; the
+##    one optional write is the addendum appended to the ADR.
+##  * The argument-framing skill REQUIRES one concrete piece of
+##    evidence per claim — no speculative "maybe X is better now".
+## ─────────────────────────────────────────────────────────────────
+
+vars:
+  ## ${PROJECT_DIR} is the workspace root the engine launches against.
+  ## On a sandboxed run it resolves to the in-container mount point;
+  ## locally it's the host cwd. Do NOT override with a literal repo
+  ## root (see CLAUDE.md dogfood note).
+  workspace_dir: string = "${PROJECT_DIR}"
+  ## REQUIRED. Repo-relative path to the ADR file under review,
+  ## e.g. "docs/adr/008-bot-golden-replay-framework.md".
+  adr_path: string
+  ## Default ADR directory — only used as prose context inside
+  ## prompts, not as a default scope glob. `docs/adr` is the
+  ## convention adr-tools / MADR / ADR-tools all converge on, so
+  ## it's stack/repo-agnostic.
+  adr_dir: string = "docs/adr"
+  ## Free-form context from the operator / dispatched issue body.
+  scope_notes: string = ""
+  ## Set by the dispatcher when this run was triggered by a tracker
+  ## issue (issue.identifier). Empty for manual CLI runs.
+  issue_id: string = ""
+
+## ═══ Schemas ═════════════════════════════════════════════════════
+
+## load_adr: deterministic Python parse of the ADR markdown.
+schema load_adr_input:
+  workspace_dir: string
+  adr_path: string
+
+## adr_meta carries the structured projection of the ADR. Sections
+## are extracted verbatim as text — agents downstream re-read the
+## source file too when they need more detail.
+schema adr_meta_output:
+  path: string
+  num: string
+  title: string
+  status: string
+  date: string
+  authors: string
+  code_refs: string[]
+  decision_text: string
+  alternatives_text: string
+  consequences_text: string
+  ## path_list: a single-element [adr_path] projection so the
+  ## downstream commit edge can pass it as `files: string[]`
+  ## without needing an array-literal in the compute expression
+  ## language (which doesn't support `[x]` literals).
+  path_list: string[]
+
+## survey_code: the read-only agent that diffs the world since the
+## ADR's date and lists drift signals against `code_refs`.
+schema survey_input:
+  adr_meta: json
+  workspace_dir: string
+
+schema survey_output:
+  changed_since: string[]
+  new_dependencies: string[]
+  signals_for_change: string[]
+  summary: string
+
+## frame_arguments: synthesise the case for keep / change / addendum.
+schema frame_input:
+  adr_meta: json
+  survey: json
+
+schema frame_output:
+  case_for_keep: string
+  case_for_change: string
+  case_for_addendum: string
+  summary: string
+
+## human_decision: the radio gate. Three options (<=4) -> the studio
+## auto-renders a required radio. rationale: string -> optional
+## textarea.
+schema decision_input:
+  adr_meta: json
+  arguments: json
+  current_state: json
+
+schema decision_output:
+  decision: string [enum: "keep", "change", "addendum"]
+  rationale: string
+
+## derive_decision: project the enum into the booleans the routing
+## reads. Mirrors bmady's derive_final.
+schema decision_derived:
+  is_keep: bool
+  is_change: bool
+  is_addendum: bool
+  decision: string
+  rationale: string
+
+## file_change_ticket inputs and outputs.
+schema change_ticket_input:
+  adr_meta: json
+  rationale: string
+
+schema change_ticket_output:
+  issue_id: string
+  title: string
+  summary: string
+
+## write_addendum: append a dated re-challenge note to the ADR.
+schema addendum_input:
+  adr_meta: json
+  arguments: json
+  rationale: string
+
+schema addendum_output:
+  preview: string
+  adr_path: string
+
+## human_commit_gate: the second radio. `commit: bool` -> required
+## Yes/No radio; `note: string` -> optional.
+schema commit_gate_input:
+  adr_meta: json
+  addendum_preview: string
+
+schema commit_gate_output:
+  commit: bool
+  note: string
+
+schema commit_decision_derived:
+  is_commit: bool
+  note: string
+
+## commit_changes deterministic git wrap.
+schema commit_tool_input:
+  workspace_dir: string
+  files: string[]
+  full_message: string
+
+schema commit_result:
+  success: bool
+  output: string
+
+## ═══ Prompts : load + survey + framing ════════════════════════════
+
+prompt survey_system:
+  You are ReArchi, a read-only code archaeologist. Your job is to find
+  out what has CHANGED in the codebase since this ADR was authored.
+  You never modify files.
+
+  Read your operating playbook first:
+
+      read_file {{vars.workspace_dir}}/.claude/skills/rearchi.md
+
+  Then read the argument-framing skill so you know what kinds of
+  signal matter:
+
+      read_file {{vars.workspace_dir}}/.claude/skills/argument-framing.md
+
+  Your output feeds the next persona, who frames the arguments. Stay
+  factual: only report drift, dependency, and code-state evidence you
+  can cite (path:line, commit, dependency version). No speculation.
+
+prompt survey_user:
+  ADR under review:
+  {{input.adr_meta}}
+
+  Workspace: {{input.workspace_dir}}
+
+  Procedure:
+
+  1. Read the ADR file in full to get the full context.
+  2. For each entry in adr_meta.code_refs, read the current file and
+     compare it to the decision: does the code still embody the
+     decision? Has it drifted?
+  3. Run `git -C {{input.workspace_dir}} log --since=<adr date>
+     --name-only -- <code_refs>` (prepend `-c safe.directory='*'`
+     if git complains) to find what changed in the cited surface
+     since the decision date.
+  4. Inspect dependency manifests in the workspace (package.json,
+     go.mod, requirements.txt, Cargo.toml, pyproject.toml, etc.) for
+     versions or new entries that materially affect the decision.
+  5. List any concrete drift, dependency, or code-state signal that
+     argues for revisiting the decision.
+
+  Emit survey_output. Empty arrays are fine when there is no signal.
+
+prompt frame_system:
+  You are ReArchi, the re-challenge framer. You assemble the case for
+  revisiting an ADR based on the survey persona's findings. You are
+  read-only.
+
+  Read your operating playbook and the argument-framing rules:
+
+      read_file {{vars.workspace_dir}}/.claude/skills/rearchi.md
+      read_file {{vars.workspace_dir}}/.claude/skills/argument-framing.md
+
+  The framing rules are load-bearing: every claim MUST cite a
+  concrete piece of evidence from the survey (a file path, a
+  dependency version, a date). Speculative "maybe X is now better"
+  framing is forbidden — the human can see through it and your
+  framing loses credibility.
+
+prompt frame_user:
+  ADR under review:
+  {{input.adr_meta}}
+
+  Survey findings:
+  {{input.survey}}
+
+  Produce three short cases (each 3-6 sentences):
+
+  - case_for_keep: why the decision still stands. Cite stability, the
+    absence of drift, or evidence that the original trade-offs still
+    apply. "No signal for change" is a perfectly honest case.
+  - case_for_change: why a different decision might be warranted now.
+    Cite specific drift, new alternatives that have matured, or a
+    triggered consequence from the ADR's `## Consequences`. NO
+    speculative "alternative X might be better" without evidence.
+  - case_for_addendum: a middle path — what would the addendum say?
+    A factual note that records "we revisited this on YYYY-MM-DD and
+    confirmed/qualified the decision because Y".
+
+  summary: 1-2 sentences naming the strongest signal, if any.
+
+## ═══ Prompts : human gate instructions ════════════════════════════
+
+prompt decision_instructions:
+  # Re-challenge this ADR
+
+  ReArchi loaded the decision and surveyed the current code state.
+
+  **ADR**
+
+  {{input.adr_meta}}
+
+  **The case for keeping it**
+
+  {{input.arguments.case_for_keep}}
+
+  **The case for changing it**
+
+  {{input.arguments.case_for_change}}
+
+  **The case for an addendum**
+
+  {{input.arguments.case_for_addendum}}
+
+  **Strongest signal**
+
+  {{input.arguments.summary}}
+
+  Decide:
+
+  - **keep** — the decision still stands; end the run, no change.
+  - **change** — file a backlog ticket proposing a different
+    decision (you triage it later).
+  - **addendum** — append a dated re-challenge note to the ADR, then
+    you decide whether to commit it.
+
+  Use the rationale box for any context that should travel with the
+  decision (it gets written into a change ticket or the addendum
+  body).
+
+prompt commit_gate_instructions:
+  # Commit the addendum?
+
+  ReArchi appended a dated re-challenge note to the ADR.
+
+  **Addendum preview**
+
+  {{input.addendum_preview}}
+
+  **ADR**
+
+  {{input.adr_meta.path}}
+
+  Decide:
+
+  - **Yes** — commit the addendum to the ADR. ReArchi will create a
+    `docs(adr):` commit scoped to this file only.
+  - **No** — skip; the run ends. The change stays in your working
+    tree for you to inspect, edit, or revert by hand.
+
+  Use the note box for any extra body to fold into the commit
+  message (optional).
+
+## ═══ Prompts : agent system/user for the branches ═════════════════
+
+prompt ticket_system:
+  You are ReArchi, in the "change" branch. Your job: file ONE board
+  ticket describing the proposed change to the ADR. You never edit
+  code or the ADR — the ticket is the deliverable.
+
+  Read your operating playbook first:
+
+      read_file {{vars.workspace_dir}}/.claude/skills/rearchi.md
+
+  Use the `mcp__iterion_board__create_issue` tool to create the
+  ticket. The board has the `board.create` capability granted to
+  you (no `board.assign` and no `set_bot` — leave triage to the
+  operator).
+
+  Required ticket shape:
+
+  - title: a short "ADR-<num>: <succinct proposal>"
+  - body: the rationale (from the operator), the strongest signal
+    from the survey, and a clear pointer back to the ADR file path.
+  - labels: ["type:adr-change-proposal", "source:adr-rechallenge",
+    "axis:architecture"]
+  - state: backlog (the default first state; omit if your board
+    starts in backlog)
+
+  Do NOT set assignee or bot — the operator triages.
+
+prompt ticket_user:
+  Operator's rationale for proposing a change:
+  {{input.rationale}}
+
+  ADR under review:
+  {{input.adr_meta}}
+
+  File the ticket via mcp__iterion_board__create_issue, then emit
+  change_ticket_output (issue_id, title, summary). The issue_id is
+  the id returned by create_issue.
+
+prompt addendum_system:
+  You are ReArchi, in the "addendum" branch. Your job: append a
+  short, dated addendum block to the ADR file, then exit. You make
+  ONE targeted edit — appending text after the existing content.
+  You do NOT rewrite the file, you do NOT touch code.
+
+  Read your operating playbook first:
+
+      read_file {{vars.workspace_dir}}/.claude/skills/rearchi.md
+
+  Use the file_edit / write_file / bash tools to append the block.
+  The block format (use today's date in YYYY-MM-DD form):
+
+      ## Addendum (YYYY-MM-DD) — re-challenge pass
+
+      <2-4 line summary of the pass outcome, referencing the
+      strongest signal from the survey and the operator's rationale>
+
+  After appending, emit addendum_output with:
+
+  - preview: the exact addendum block you wrote (for the human gate
+    to confirm).
+  - adr_path: the path of the ADR you edited.
+
+prompt addendum_user:
+  ADR under review:
+  {{input.adr_meta}}
+
+  Framed arguments:
+  {{input.arguments}}
+
+  Operator's rationale:
+  {{input.rationale}}
+
+  Append a dated addendum block (single-file edit, append-only).
+  Emit addendum_output.
+
+## ═══ Nodes ═══════════════════════════════════════════════════════
+
+## Deterministic markdown parse — no LLM. Reads the ADR's
+## bullet-list front-matter (Status / Date / Authors / Code refs)
+## plus the body sections. Code refs may be a markdown link list,
+## an inline-code list, or a comma-separated path list; the parser
+## accepts all three by extracting any `path/like/this` tokens.
+tool load_adr:
+  command: `WS={{input.workspace_dir}} ADR_PATH={{input.adr_path}} python3 -c "
+import os, sys, json, re
+ws = os.environ['WS']
+adr_path = os.environ['ADR_PATH']
+full = os.path.join(ws, adr_path)
+try:
+    with open(full, 'r', encoding='utf-8') as fh:
+        text = fh.read()
+except OSError as exc:
+    print(json.dumps({'error': 'cannot read ADR: ' + str(exc)}), file=sys.stderr)
+    sys.exit(1)
+lines = text.splitlines()
+title_re = re.compile(r'^#\s*(ADR-)?([0-9]+)?[:\-\s]*\s*(.+?)\s*$')
+title = ''
+num = ''
+for line in lines:
+    m = title_re.match(line)
+    if m:
+        if m.group(2):
+            num = m.group(2)
+        title = m.group(3) or ''
+        break
+if not num:
+    base = os.path.basename(adr_path)
+    bm = re.match(r'^(\d+)', base)
+    if bm:
+        num = bm.group(1)
+def field(label):
+    pat = re.compile(r'^[\-*]\s*\**' + re.escape(label) + r'\**\s*[:\-]\s*(.+)$', re.IGNORECASE)
+    for line in lines:
+        m = pat.match(line.strip())
+        if m:
+            return m.group(1).strip().rstrip('.')
+    return ''
+status = field('Status')
+date = field('Date')
+authors = field('Authors')
+code_refs_raw = field('Code context') or field('Code refs') or field('References') or ''
+path_re = re.compile(r'[A-Za-z0-9_\-./]+/[A-Za-z0-9_\-./]+')
+code_refs = []
+seen = set()
+_strip_chars = '.,()[] '
+for tok in path_re.findall(code_refs_raw):
+    cleaned = tok.strip(_strip_chars)
+    if cleaned and cleaned not in seen:
+        seen.add(cleaned)
+        code_refs.append(cleaned)
+def section(name):
+    pat = re.compile(r'^##\s+' + re.escape(name) + r'\b', re.IGNORECASE)
+    out = []
+    in_section = False
+    for line in lines:
+        if pat.match(line):
+            in_section = True
+            continue
+        if in_section and line.startswith('## '):
+            break
+        if in_section:
+            out.append(line)
+    return '\n'.join(out).strip()
+decision_text = section('Decision')
+alternatives_text = section('Alternatives considered') or section('Alternatives')
+consequences_text = section('Consequences')
+print(json.dumps({
+    'path': adr_path,
+    'num': num,
+    'title': title,
+    'status': status,
+    'date': date,
+    'authors': authors,
+    'code_refs': code_refs,
+    'decision_text': decision_text,
+    'alternatives_text': alternatives_text,
+    'consequences_text': consequences_text,
+    'path_list': [adr_path],
+}))
+"`
+  input: load_adr_input
+  output: adr_meta_output
+
+## Survey the current code state vs the ADR. claude_code so it has
+## bash + git access; readonly to make the no-mutation contract
+## explicit; session: fresh because no prior context is useful.
+agent survey_code:
+  backend: "claude_code"
+  model: "${REARCHI_MODEL_CLAUDE:-claude-opus-4-8}"
+  reasoning_effort: "${REARCHI_EFFORT:-high}"
+  input: survey_input
+  output: survey_output
+  system: survey_system
+  user: survey_user
+  session: fresh
+  tools: [bash, read_file, glob, grep]
+  tool_max_steps: 30
+  readonly: true
+
+## Frame the arguments — separate persona, separate session, but it
+## consumes the survey output and the same skills, so a session:
+## inherit save would be a small win. Kept fresh for simplicity and
+## because the prompt is small (no need to inherit a large turn cache).
+agent frame_arguments:
+  backend: "claude_code"
+  model: "${REARCHI_MODEL_CLAUDE:-claude-opus-4-8}"
+  reasoning_effort: "${REARCHI_EFFORT:-high}"
+  input: frame_input
+  output: frame_output
+  system: frame_system
+  user: frame_user
+  session: fresh
+  tools: [read_file, glob, grep]
+  tool_max_steps: 10
+  readonly: true
+
+## The human decision gate. interaction: human pauses for input.
+human human_decision:
+  input: decision_input
+  output: decision_output
+  instructions: decision_instructions
+  interaction: human
+
+## Project the enum into routing booleans. Pure passthrough +
+## projection — no LLM, no side effect.
+compute derive_decision:
+  input: decision_output
+  output: decision_derived
+  expr:
+    is_keep: "input.decision == 'keep'"
+    is_change: "input.decision == 'change'"
+    is_addendum: "input.decision == 'addendum'"
+    decision: "input.decision"
+    rationale: "input.rationale"
+
+## "change" branch: file ONE board ticket. Capability-gated —
+## board.read for context, board.create for the ticket itself. No
+## board.assign / no set_bot: triage stays with the operator.
+agent file_change_ticket:
+  backend: "claude_code"
+  model: "${REARCHI_MODEL_CLAUDE:-claude-opus-4-8}"
+  reasoning_effort: "${REARCHI_EFFORT:-high}"
+  input: change_ticket_input
+  output: change_ticket_output
+  system: ticket_system
+  user: ticket_user
+  session: fresh
+  tools: [read_file, glob, grep]
+  tool_max_steps: 10
+  readonly: true
+  capabilities: [board.read, board.create]
+
+## "addendum" branch: append a dated note to the ADR. claude_code
+## with file_edit + write_file so the agent can append the block.
+## NOT readonly — this is the one write step in the bot.
+agent write_addendum:
+  backend: "claude_code"
+  model: "${REARCHI_MODEL_CLAUDE:-claude-opus-4-8}"
+  reasoning_effort: "${REARCHI_EFFORT:-high}"
+  input: addendum_input
+  output: addendum_output
+  system: addendum_system
+  user: addendum_user
+  session: fresh
+  tools: [bash, read_file, write_file, file_edit, glob, grep]
+  tool_max_steps: 15
+
+## The second human gate: commit or skip the addendum. `commit:
+## bool` -> required Yes/No radio; `note: string` -> optional.
+human human_commit_gate:
+  input: commit_gate_input
+  output: commit_gate_output
+  instructions: commit_gate_instructions
+  interaction: human
+
+compute derive_commit:
+  input: commit_gate_output
+  output: commit_decision_derived
+  expr:
+    is_commit: "input.commit"
+    note: "input.note"
+
+## Deterministic commit — copies the docs-refresh scoped-file form
+## verbatim (stage only the listed files; guard against an empty
+## staged diff so the bot exits cleanly when there's nothing to
+## commit, e.g. if the human edited the addendum away before
+## confirming).
+tool commit_changes:
+  command: "git -C {{input.workspace_dir}} add -- {{input.files}} && (git -C {{input.workspace_dir}} diff --cached --quiet || git -C {{input.workspace_dir}} commit -m {{input.full_message}})"
+  input: commit_tool_input
+  output: commit_result
+
+## ═══ Workflow ════════════════════════════════════════════════════
+
+workflow adr_rechallenge:
+  entry: load_adr
+
+  ## Single-edit, low-stakes — no worktree:auto. The one change
+  ## lands in the operator's working tree as an unstaged edit; the
+  ## human gate decides commit. Operator can inspect, edit, or
+  ## revert by hand before confirming.
+  budget:
+    max_parallel_branches: 1
+    max_duration: "2h"
+    max_cost_usd: 15
+    max_iterations: 20
+
+  ## Phase 1: deterministic parse.
+  load_adr -> survey_code with {
+    adr_meta: "{{outputs.load_adr}}",
+    workspace_dir: "{{vars.workspace_dir}}"
+  }
+
+  ## Phase 2: survey + frame.
+  survey_code -> frame_arguments with {
+    adr_meta: "{{outputs.load_adr}}",
+    survey:   "{{outputs.survey_code}}"
+  }
+
+  ## Phase 3: human gate (the radio decision).
+  frame_arguments -> human_decision with {
+    adr_meta:      "{{outputs.load_adr}}",
+    arguments:     "{{outputs.frame_arguments}}",
+    current_state: "{{outputs.survey_code}}"
+  }
+
+  human_decision -> derive_decision with {
+    decision:  "{{outputs.human_decision.decision}}",
+    rationale: "{{outputs.human_decision.rationale}}"
+  }
+
+  ## keep -> done. The simplest, cheapest branch.
+  derive_decision -> done when is_keep
+
+  ## change -> file a backlog ticket -> done.
+  derive_decision -> file_change_ticket when is_change with {
+    adr_meta:  "{{outputs.load_adr}}",
+    rationale: "{{outputs.derive_decision.rationale}}"
+  }
+  file_change_ticket -> done
+
+  ## addendum -> write the dated note -> ask the second human gate.
+  derive_decision -> write_addendum when is_addendum with {
+    adr_meta:  "{{outputs.load_adr}}",
+    arguments: "{{outputs.frame_arguments}}",
+    rationale: "{{outputs.derive_decision.rationale}}"
+  }
+
+  ## Unconditional fallback: if none of the three branches fired
+  ## (shouldn't happen — the enum is exhaustive — but C012 requires
+  ## a default), end the run cleanly.
+  derive_decision -> done
+
+  write_addendum -> human_commit_gate with {
+    adr_meta:         "{{outputs.load_adr}}",
+    addendum_preview: "{{outputs.write_addendum.preview}}"
+  }
+
+  human_commit_gate -> derive_commit with {
+    commit: "{{outputs.human_commit_gate.commit}}",
+    note:   "{{outputs.human_commit_gate.note}}"
+  }
+
+  ## commit -> stage + commit -> done. Skip -> the unconditional
+  ## fallback ends the run without committing (the addendum stays
+  ## in the working tree for the operator to inspect / revert /
+  ## edit by hand). The full_message and files string[] are
+  ## interpolated directly from upstream outputs; the commit
+  ## message includes a literal \n via the standard string-literal
+  ## escape so it renders as multi-line in `git log`.
+  derive_commit -> commit_changes when is_commit with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    files: "{{outputs.load_adr.path_list}}",
+    full_message: "docs(adr): addendum to ADR-{{outputs.load_adr.num}} re-challenge\n\n{{outputs.derive_commit.note}}\n\nBot: adr-rechallenge"
+  }
+  commit_changes -> done
+  derive_commit -> done
