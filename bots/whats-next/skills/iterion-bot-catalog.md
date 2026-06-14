@@ -639,7 +639,7 @@ failing forever. See docs/adr/011-whole-improve-loop-context-chunking.md.
   production-readiness audit across the whole workspace, or to drive
   iterative improvement on a specific axis (pass improvement_prompt).
   No new capability — just better/cleaner code.
-- **Vars**: `improvement_prompt` (string), `max_review_chunk_tokens` (int), `max_review_passes` (int), `scope_notes` (string), `workspace_dir` (string)
+- **Vars**: `improvement_prompt` (string), `max_review_chunk_tokens` (int), `max_review_passes` (int), `scope_globs` (string), `scope_notes` (string), `workspace_dir` (string)
 - **Path**: `bots/whole-improve-loop/main.bot`
 
 <!-- ITERION:CATALOG:GENERATED:END -->
