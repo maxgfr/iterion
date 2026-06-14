@@ -58,6 +58,20 @@ vars:
   ## observability: structured logs, traces, metrics, lost error
   ## signals."
   improvement_prompt: string = ""
+  ## Optional path-scope filter (focused runs). A comma- or space-
+  ## separated list of fnmatch globs matched against workspace-relative
+  ## paths; empty (default) = the WHOLE workspace. A bare directory, or a
+  ## `dir/**` / `dir/*` form, also matches everything under that directory.
+  ## This PRUNES the chunk plan in snapshot_chunk BEFORE chunking, so a
+  ## focused run (e.g. --var scope_globs=pkg/runtime) reviews only that
+  ## subtree instead of paying the whole-repo sweep cost — num_chunks and
+  ## the streak threshold scale to the focused set, so a focused run
+  ## converges in-bound like a small repo. improvement_prompt/scope_notes
+  ## are the WHAT (the axis); scope_globs is the WHERE (the files). It does
+  ## NOT loosen review rigor — it only restricts which files are chunked.
+  ## See the focused-run finding in docs/bot-runs/whole-improve-loop.md
+  ## (2026-06-14). Example: --var scope_globs="pkg/runtime,pkg/store"
+  scope_globs: string = ""
   ## Context-budget chunking (issue #12). The reviewer never sees the
   ## whole workspace at once: the deterministic `snapshot_chunk` tool
   ## groups source files by package/folder into chunks of at most this
@@ -634,8 +648,8 @@ schema fix_output:
 ## POSIX + python3 (the same toolchain sec-audit-source's tool nodes
 ## rely on); keep it double-quote-free so `python3 -c "..."` stays intact.
 tool snapshot_chunk:
-  command: `WS={{vars.workspace_dir}} BUDGET={{vars.max_review_chunk_tokens}} MAXPASSES={{vars.max_review_passes}} STATE_IN={{input.incoming_clean_streak}} STATE_CURSOR={{input.incoming_cursor}} python3 -c "
-import os, sys, json
+  command: `WS={{vars.workspace_dir}} BUDGET={{vars.max_review_chunk_tokens}} MAXPASSES={{vars.max_review_passes}} SCOPE_GLOBS={{vars.scope_globs}} STATE_IN={{input.incoming_clean_streak}} STATE_CURSOR={{input.incoming_cursor}} python3 -c "
+import os, sys, json, fnmatch
 
 ws = os.environ.get('WS', '.')
 budget = int(os.environ.get('BUDGET', '30000') or '30000')
@@ -654,6 +668,37 @@ if budget <= 0:
 max_passes = int(os.environ.get('MAXPASSES', '15') or '15')
 if max_passes < 2:
     max_passes = 2
+
+# Optional path-scope filter (focused runs). SCOPE_GLOBS is a comma/space-
+# separated list of fnmatch patterns matched against workspace-relative
+# paths; empty (default) = the whole workspace. A bare directory, or a
+# 'dir/**' / 'dir/*' form, also matches everything under that directory, so
+# --var scope_globs=pkg/runtime PRUNES the chunk plan to that package
+# instead of paying the whole-repo sweep cost (the focused-run finding in
+# docs/bot-runs/whole-improve-loop.md, 2026-06-14). resolveCommandTemplate
+# shell-escapes the value as a single token (so '*' and spaces survive the
+# shell without globbing/word-splitting); split it back here. Pruning at the
+# os.walk source keeps total_files / total_tokens / num_chunks / the streak
+# threshold all scaled to the focused set, so a focused run converges
+# in-bound like a small repo.
+scope_raw = os.environ.get('SCOPE_GLOBS', '') or ''
+scope_globs = [g.strip() for g in scope_raw.replace(',', ' ').split() if g.strip()]
+
+
+def in_scope(rel):
+    if not scope_globs:
+        return True
+    for g in scope_globs:
+        if fnmatch.fnmatch(rel, g):
+            return True
+        pref = g
+        for suf in ('/**', '/*', '/'):
+            if pref.endswith(suf):
+                pref = pref[:-len(suf)]
+                break
+        if pref and (rel == pref or rel.startswith(pref + '/')):
+            return True
+    return False
 
 # Persistent state (issue #12): ONE json dotfile at the workspace root
 # holds BOTH the package-chunk rotation cursor AND the cross-run
@@ -782,6 +827,8 @@ for root, dirs, names in os.walk(ws):
         except OSError:
             continue
         rel = os.path.relpath(full, ws)
+        if not in_scope(rel):
+            continue
         tok = est_tokens(sz)
         pkgs.setdefault(os.path.dirname(rel) or '.', []).append((rel, tok))
         total_files += 1
