@@ -64,5 +64,5 @@ first bilan for a bot lands.
 | Seki | `sec-audit-source` | source SAST audit | [sec-audit-source.md](sec-audit-source.md) |
 | Depsy | `sec-audit-deps` | supply-chain SCA audit (scaffold) | [sec-audit-deps.md](sec-audit-deps.md) |
 | Renovacy | `secured-renovacy` | dependency upgrade pipeline | [secured-renovacy.md](secured-renovacy.md) |
-| Bmady | `bmady` | BMAD multi-persona human-gated delivery | _not yet_ |
+| Bmady | `bmady` | BMAD multi-persona human-gated delivery | [bmady.md](bmady.md) |
 | Devy | `devbox-setup` | devbox.json bootstrap | [devbox-setup.md](devbox-setup.md) |
