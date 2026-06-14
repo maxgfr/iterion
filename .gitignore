@@ -103,6 +103,14 @@ e2e/.workspaces/
 # Claude
 .claude/*.local.json
 .claude/scheduled_tasks.lock
+# Runtime skill mirror: the engine mirrors <bundle>/skills/*.md into
+# <workspace>/.claude/skills/ at run start (every backend) — a pure runtime
+# artifact, never hand-authored, so it must not pollute git status or be
+# swept into a code bot's commit. (Surfaced by a docs-refresh dogfood run.)
+.claude/skills/
+
+# docs-refresh bot cache (neutral repo-root dotfile it writes by design)
+.docs-refresh-cache.json
 
 # Wails / Iterion Desktop
 build/bin/
