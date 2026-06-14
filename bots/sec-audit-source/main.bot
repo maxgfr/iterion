@@ -2878,6 +2878,17 @@ import os, sys, json, hashlib, datetime
 ws         = os.environ['WS']
 records    = os.environ['RECORDS_DIR']
 candidates = json.loads(os.environ.get('CANDIDATES','[]') or '[]')
+# triage emits candidates as a json field, which the schema does not force
+# to be an array; a flaky agent (e.g. gpt-5.5/forfait) may shape it as a dict
+# keyed by candidate-id instead of a list, which made the per-candidate loops
+# below iterate the dict KEYS (strings) and crash on c.get(...). This node is
+# the single funnel that feeds fresh_candidates to every downstream voter, so
+# normalize once here: coerce a dict to a list of its dict values (injecting
+# the key as id when the value lacks one).
+if isinstance(candidates, dict):
+    candidates = [dict(v, id=v.get('id', k)) for k, v in candidates.items() if isinstance(v, dict)]
+elif not isinstance(candidates, list):
+    candidates = []
 scanner_v  = os.environ.get('SCANNER_V','')
 ttl_days   = int(os.environ.get('TTL','30'))
 
