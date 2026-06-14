@@ -5,12 +5,15 @@
 The [`examples/`](../examples/) directory ships a curated set of
 proven, productized bots and one actively-developed workflow.
 
-> **Extensions.** Iterion accepts both `.iter` and `.bot`. We use
-> `.iter` for raw DSL or work-in-progress workflows and `.bot` for
-> productized operational bots — workflows meant to run unmodified
-> against real systems with human gates, mitigation steps and reports
-> (see [`.iter` vs `.bot`](../README.md#iter-vs-bot)). The parser,
-> runtime, and editor treat them identically.
+> **Extensions.** Iterion runs workflows from `.bot` files; packaged
+> bundles use `.botz`. The former `.iter` extension is no longer
+> accepted at the CLI, server, dispatcher, or studio boundaries —
+> `iterion run foo.iter` is rejected ("unsupported workflow extension
+> … expected .bot or .botz"). `.iter` survives only as the raw /
+> work-in-progress form of the same DSL: the parser still reads it (it
+> lives under `pkg/dsl/testdata/`, `examples/`, and ad-hoc scripts),
+> but `.bot` is the only runnable source
+> ([`pkg/dsl/workflowfile`](../pkg/dsl/workflowfile/workflowfile.go)).
 
 ## 🤖 Productized bots (folder-per-bot under [`examples/`](../examples/))
 
