@@ -8,6 +8,42 @@ ADRs in `docs/adr/`, plus a feature-completeness audit; files optional
 handoff issues to `adr-rechallenge` (re-challenge) and `feature-gap-fill`
 (gap completion). Template: docs-refresh (Doki).
 
+## 2026-06-14 — finding #6 convergence tuning (runs 019ec2f3, 019ec4ec)
+
+Two prompt-level fixes for #6, each validated by a live re-run on the
+aligned tree (8 ADRs committed, 0 ADR-drift, coverage 100%):
+
+- `7546d0d1` — `streak_check.stop` was stricter than its own `approved`
+  passthrough (it omitted the low-confidence clause); aligned it so a
+  low-confidence rejection is non-blocking (CLAUDE.md asymptote rule).
+  **run4 (019ec2f3) still failed** — the blocker was `confidence: high`,
+  not low, so the quick-win mis-aimed.
+- `61e995bb` — the real root cause: the persistent high-confidence blocker
+  was a **GAP** (the survey's file-diff-payload completeness finding), and
+  both reviewers were treating the unfixable gap as a blocker ("file an
+  issue for / address this gap"). Adry is read-only on code → it cannot
+  close a gap → permanent oscillation. `review_system` rule 7: gaps are
+  NEVER blockers (confirm-real → ride the deterministic handoff path to
+  `feature-gap-fill`; only ADR drift / orphans / format defects block).
+
+**Result: partial.** Rule 7 measurably helped — reviewers now sometimes vote
+`approved=true, blocker_count=0` (they never did before) — but **run5
+(019ec4ec) still exhausted `review_loop(10/10)`**: the LLM reviewers are
+stochastic, and one still occasionally raises a gap as a blocker
+(`bot-marketplace-shallow-clone`) despite rule 7, resetting the cross-family
+streak. A prompt instruction alone is not a reliable gate.
+
+**Structural completion (next step, NOT yet done):** stop passing `gaps`
+into the reviewers' `review_input` entirely — let gaps flow from
+`build_manifest` straight to `prepare_commit`'s handoff, never through the
+review loop. With the reviewers blind to gaps (and rule 6 calibrating ADR
+prose), an aligned tree has nothing to block on → it converges. This removes
+the gap-blocker source *deterministically* instead of relying on the model
+to obey rule 7. Needs a `review_input` schema/edge change + one validation
+run. **Firm stop taken here** (5 Adry runs this campaign; survey ~$3.58 +
+~10 min each is the floor since `survey_code` always runs before the
+deterministic aligned-check).
+
 ## 2026-06-13 — first dogfood, scoped pkg/git (runs 019ec1f8 + 019ec25f)
 
 - **Status: partial** — core machinery validated end-to-end and 2 real bugs
