@@ -174,7 +174,7 @@ only. The `codex` OAuth flow has no equivalent restriction.
 | (no prefix) | Access JWT (HS256) | not stored — signed at issue | the `iterion_auth` cookie / `Authorization: Bearer` |
 
 All four `i…_` tokens use the same primitive
-([pkg/auth/auth.go:GenerateRandomToken](../pkg/auth/auth.go) +
+([pkg/auth/password.go:GenerateRandomToken](../pkg/auth/password.go) +
 `HashRefreshToken`): 32 random bytes URL-safe-encoded, the prefix is
 recognisability for humans. The hash on disk is salted; verification is
 constant-time.
