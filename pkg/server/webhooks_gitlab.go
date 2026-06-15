@@ -286,7 +286,14 @@ func (s *Server) realWebhookNoteGate(ctx context.Context, cfg webhooks.Config, p
 	if terr != nil || token == "" {
 		return false, false, "", "no forge token resolved (configure a forge_token binding)", nil
 	}
-	api := gitlab.API{HTTP: s.httpClient, BaseURL: "https://" + hostFromURL(p.MRURL), Token: token}
+	host := hostFromURL(p.MRURL)
+	if host == "" {
+		return false, false, "", "merge_request URL has no usable forge host", nil
+	}
+	if !forgeHostAllowed(host) {
+		return false, false, "", "forge host not in ITERION_WEBHOOK_FORGE_HOSTS allowlist", nil
+	}
+	api := gitlab.API{HTTP: s.httpClient, BaseURL: "https://" + host, Token: token}
 	bot, berr := api.CurrentUser(ctx)
 	// Loop-guard: never act on the bot's own notes (else its reply re-fires).
 	if berr == nil && bot.ID == p.AuthorID {
@@ -363,10 +370,34 @@ func (s *Server) resolveForgeToken(ctx context.Context, cfg webhooks.Config, bot
 }
 
 func hostFromURL(raw string) string {
-	if u, err := url.Parse(raw); err == nil {
-		return u.Host
+	u, err := url.Parse(raw)
+	if err != nil || u.User != nil {
+		// Reject unparseable URLs and any URL carrying userinfo
+		// (https://user:pass@host) — the bot's forge_token must never be
+		// sent to a credential-confusing host derived from the payload.
+		return ""
 	}
-	return ""
+	return u.Host
+}
+
+// forgeHostAllowed gates which forge host the bot's forge_token may be sent
+// to. The host is derived from the (secret-authenticated) webhook payload's
+// MR URL so iterion can call back arbitrary self-hosted GitLab instances; an
+// operator running against a known, fixed set of instances can pin them via
+// ITERION_WEBHOOK_FORGE_HOSTS (comma-separated host[:port]) so a hostile
+// payload cannot exfiltrate the token elsewhere. Empty env = no restriction
+// (any well-formed host), preserving prior behaviour.
+func forgeHostAllowed(host string) bool {
+	raw := strings.TrimSpace(os.Getenv("ITERION_WEBHOOK_FORGE_HOSTS"))
+	if raw == "" {
+		return true
+	}
+	for _, h := range strings.Split(raw, ",") {
+		if strings.EqualFold(strings.TrimSpace(h), host) {
+			return true
+		}
+	}
+	return false
 }
 
 // gitlabMRMeta flattens a Parsed merge-request into the generic

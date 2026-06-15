@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -132,7 +133,7 @@ func (a API) Discussion(ctx context.Context, projectID, mrIID int64, discussionI
 			System bool   `json:"system"`
 		} `json:"notes"`
 	}
-	code, err := a.get(ctx, fmt.Sprintf("/projects/%d/merge_requests/%d/discussions/%s", projectID, mrIID, discussionID), &d)
+	code, err := a.get(ctx, fmt.Sprintf("/projects/%d/merge_requests/%d/discussions/%s", projectID, mrIID, url.PathEscape(discussionID)), &d)
 	if err != nil {
 		return nil, err
 	}
