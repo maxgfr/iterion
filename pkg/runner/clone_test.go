@@ -19,6 +19,48 @@ func TestInjectGitToken(t *testing.T) {
 	}
 }
 
+func TestValidateRepoTarget(t *testing.T) {
+	cases := []struct {
+		name             string
+		repoURL, repoSHA string
+		wantErr          bool
+	}{
+		// Valid: https + ssh URLs, with/without a ref.
+		{"https no ref", "https://github.com/org/repo.git", "", false},
+		{"https with sha", "https://github.com/org/repo.git", "a1b2c3d4e5f6", false},
+		{"https with branch ref", "https://gitlab.example/grp/repo.git", "feature/x", false},
+		{"https with pull ref", "https://github.com/org/repo.git", "refs/pull/12/head", false},
+		{"scp-like ssh", "git@github.com:org/repo.git", "main", false},
+		{"ssh url", "ssh://git@host/org/repo.git", "main", false},
+		// Injection: remote-helper transport in the URL → RCE vector.
+		{"ext remote helper", "ext::sh -c 'id'", "main", true},
+		{"transport marker", "fd::17", "main", true},
+		// Injection: local-repo / cleartext transports git would honour.
+		{"file url", "file:///etc/passwd", "main", true},
+		{"git proto", "git://host/repo.git", "main", true},
+		{"http cleartext", "http://host/repo.git", "main", true},
+		// Empty / null URL.
+		{"empty url", "", "main", true},
+		{"null byte url", "https://h/r\x00.git", "main", true},
+		// Injection: flag-shaped ref → `git fetch`/`checkout` option injection.
+		{"flag ref upload-pack", "https://github.com/org/repo.git", "--upload-pack=/evil", true},
+		{"flag ref dash", "https://github.com/org/repo.git", "-O/tmp/x", true},
+		{"traversal ref", "https://github.com/org/repo.git", "a/../../b", true},
+		{"null byte ref", "https://github.com/org/repo.git", "ma\x00in", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := validateRepoTarget(c.repoURL, c.repoSHA)
+			if c.wantErr && err == nil {
+				t.Fatalf("validateRepoTarget(%q, %q) = nil; want error", c.repoURL, c.repoSHA)
+			}
+			if !c.wantErr && err != nil {
+				t.Fatalf("validateRepoTarget(%q, %q) = %v; want nil", c.repoURL, c.repoSHA, err)
+			}
+		})
+	}
+}
+
 func TestFirstNonBlank(t *testing.T) {
 	if got := firstNonBlank("", "  ", "x", "y"); got != "x" {
 		t.Fatalf("firstNonBlank = %q; want x", got)

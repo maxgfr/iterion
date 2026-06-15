@@ -36,6 +36,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/cloud/metrics"
 	"github.com/SocialGouv/iterion/pkg/dsl/ast"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
+	gitlib "github.com/SocialGouv/iterion/pkg/git"
 	"github.com/SocialGouv/iterion/pkg/knowledge"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/notify"
@@ -793,6 +794,16 @@ func (r *Runner) executeRun(ctx context.Context, msg *queue.RunMessage) error {
 // the review base (typically `main`) is present, then the run's ref is fetched
 // and checked out so merge-base diffs resolve.
 func (r *Runner) prepareRepoWorkspace(ctx context.Context, msg *queue.RunMessage) (string, error) {
+	// RepoURL/RepoSHA arrive from a webhook payload (the generic webhook
+	// body is fully attacker-controlled) and flow into git below
+	// unmodified. Validate the transport + ref shape BEFORE touching the
+	// filesystem or spawning git so a remote-helper URL (`ext::sh -c …`)
+	// or a flag-shaped ref (`--upload-pack=…`) can never reach the
+	// subprocess. This is the runner's flag/transport-injection boundary,
+	// mirroring the bot-install path.
+	if err := validateRepoTarget(msg.RepoURL, msg.RepoSHA); err != nil {
+		return "", err
+	}
 	dir := filepath.Join(r.cfg.WorkDir, "repos", msg.RunID)
 	if err := os.RemoveAll(dir); err != nil {
 		return "", fmt.Errorf("clean repo dir: %w", err)
@@ -822,6 +833,25 @@ func (r *Runner) prepareRepoWorkspace(ctx context.Context, msg *queue.RunMessage
 	}
 	r.cfg.Logger.Info("runner: cloned %s@%s for run %s", msg.RepoURL, msg.RepoSHA, msg.RunID)
 	return dir, nil
+}
+
+// validateRepoTarget gates the webhook-sourced clone URL and ref before
+// they reach git. It rejects remote-helper transports (`ext::`, `file://`)
+// via ValidateCloneSource and flag-shaped refs (leading `-`) via
+// ValidateBranchName — the two ways an attacker-controlled RepoURL/RepoSHA
+// could turn `git clone`/`git fetch` into arbitrary command execution. Pure
+// (no git, no filesystem) so it is unit-testable. An empty ref is allowed
+// (the caller only fetches when RepoSHA is non-blank).
+func validateRepoTarget(repoURL, repoSHA string) error {
+	if err := gitlib.ValidateCloneSource(repoURL); err != nil {
+		return fmt.Errorf("runner: reject repo url: %w", err)
+	}
+	if ref := strings.TrimSpace(repoSHA); ref != "" {
+		if err := gitlib.ValidateBranchName(ref); err != nil {
+			return fmt.Errorf("runner: reject repo ref: %w", err)
+		}
+	}
+	return nil
 }
 
 // runGit runs a git subprocess, redacting tok from any error output so an
