@@ -571,7 +571,7 @@ func (c *compiler) validateLLMRouterEdges(w *Workflow) {
 		for _, e := range w.Edges {
 			if e.From == r.ID {
 				count++
-				if e.Condition != "" {
+				if e.IsConditional() {
 					c.errorf(DiagLLMRouterConditionEdge,
 						"llm router %q edge to %q has a 'when' condition; LLM routers select targets directly",
 						r.ID, e.To)

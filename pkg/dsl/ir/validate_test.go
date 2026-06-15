@@ -860,6 +860,55 @@ workflow test:
 	expectDiag(t, r, DiagLLMRouterConditionEdge)
 }
 
+// TestValidateLLMRouterExpressionConditionEdge guards that the
+// DiagLLMRouterConditionEdge check fires for the EXPRESSION form of a
+// condition (`when "expr"`, which lands in e.Expression) and not only the
+// simple boolean-field form (e.Condition). The validator must use
+// IsConditional() so an LLM router can't smuggle a `when "..."` past it.
+func TestValidateLLMRouterExpressionConditionEdge(t *testing.T) {
+	src := `
+prompt sys:
+  System.
+
+prompt usr:
+  User.
+
+prompt route_sys:
+  Route wisely.
+
+schema s:
+  ok: bool
+
+agent a1:
+  model: "m"
+  input: s
+  output: s
+  system: sys
+  user: usr
+
+agent a2:
+  model: "m"
+  input: s
+  output: s
+  system: sys
+  user: usr
+
+router r1:
+  mode: llm
+  model: "test-model"
+  system: route_sys
+
+workflow test:
+  entry: r1
+  r1 -> a1 when "ok"
+  r1 -> a2
+  a1 -> done
+  a2 -> done
+`
+	r := compileFile(t, src)
+	expectDiag(t, r, DiagLLMRouterConditionEdge)
+}
+
 // ---------------------------------------------------------------------------
 // LLM router — valid configuration (no diagnostics)
 // ---------------------------------------------------------------------------

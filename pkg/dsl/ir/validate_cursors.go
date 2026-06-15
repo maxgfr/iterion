@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"math"
 	"strconv"
 	"strings"
 )
@@ -73,6 +74,9 @@ func ResolveCursorValue(def *CursorDef, raw string) (prompt string, ok bool, rea
 		return "", false, "cursor not declared"
 	}
 	if v, parsed := tryParseFloat(raw); parsed {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return "", false, "numeric cursor values must be finite"
+		}
 		if v < 0 || v > 1 {
 			return "", false, "numeric cursor values must lie in [0.0, 1.0]"
 		}

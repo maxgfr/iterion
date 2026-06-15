@@ -69,3 +69,30 @@ workflow trivial:
 		t.Fatalf("presets block lost after vars error; expected at least one preset to survive")
 	}
 }
+
+// TestPromptNamedWithKeywordToken guards the lexer fix that lets a prompt
+// whose name collides with a DSL keyword (e.g. `prompt llm:`, `prompt join:`)
+// still enter prompt-body mode. Before the fix, isPromptIndent only matched
+// TokenIdent, so the indented body was lexed as ordinary tokens and produced
+// a cascade of "unexpected token in prompt body" diagnostics.
+func TestPromptNamedWithKeywordToken(t *testing.T) {
+	names := []string{"llm", "join", "auth", "readonly", "fork"}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			src := "prompt " + name + ":\n  Hello from the body.\n"
+			res := parser.Parse("kwprompt.iter", src)
+			for _, d := range res.Diagnostics {
+				t.Errorf("unexpected diagnostic on `prompt %s:` -> %v", name, d)
+			}
+			if len(res.File.Prompts) != 1 {
+				t.Fatalf("expected 1 prompt, got %d", len(res.File.Prompts))
+			}
+			if got := res.File.Prompts[0].Name; got != name {
+				t.Errorf("prompt name = %q, want %q", got, name)
+			}
+			if res.File.Prompts[0].Body == "" {
+				t.Errorf("prompt body empty — lexer did not enter prompt mode")
+			}
+		})
+	}
+}

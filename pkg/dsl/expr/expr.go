@@ -28,6 +28,7 @@ package expr
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -954,6 +955,9 @@ func arith(op string, a, b interface{}) (interface{}, error) {
 			if bi == 0 {
 				return nil, fmt.Errorf("expr: integer division by zero")
 			}
+			if ai == math.MinInt64 && bi == -1 {
+				return nil, fmt.Errorf("expr: integer division overflow (%d / %d)", ai, bi)
+			}
 			return ai / bi, nil
 		case "%":
 			if bi == 0 {
@@ -1085,6 +1089,11 @@ func subCheckedInt64(a, b int64) (int64, bool) {
 func mulCheckedInt64(a, b int64) (int64, bool) {
 	if a == 0 || b == 0 {
 		return 0, true
+	}
+	// MinInt64 * -1 overflows, but Go's MinInt64 / -1 == MinInt64 spec quirk
+	// fools the r/b != a check below, so guard that case explicitly.
+	if (a == math.MinInt64 && b == -1) || (b == math.MinInt64 && a == -1) {
+		return 0, false
 	}
 	r := a * b
 	if r/b != a {

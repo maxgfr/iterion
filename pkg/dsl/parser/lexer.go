@@ -282,7 +282,7 @@ func (l *Lexer) isPromptIndent() bool {
 	if idx >= 0 && l.tokens[idx].Type == TokenColon {
 		idx--
 	}
-	if idx >= 0 && l.tokens[idx].Type == TokenIdent {
+	if idx >= 0 && (l.tokens[idx].Type == TokenIdent || isKeywordToken(l.tokens[idx].Type)) {
 		idx--
 	}
 	if idx >= 0 && l.tokens[idx].Type == TokenPrompt {
