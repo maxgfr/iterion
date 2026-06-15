@@ -73,3 +73,25 @@ pass. Re-run until green.
 If the repository genuinely has no build/test system (pure docs/config), write
 a script that echoes that fact and exits 0, and say so plainly in your summary —
 do not invent a build.
+
+## Safety — never destroy or recreate version-control state
+
+The verify script and your fixes run against the operator's real working tree —
+often a **git worktree bind-mounted into a sandbox**. NEVER:
+
+- `rm`, move, truncate, or recreate `.git` (or `.hg`/`.svn`), and NEVER run
+  `git init` / `git clone` over an existing checkout. A worktree's `.git` is a
+  *file* pointing at the parent repo; deleting it or `git init`-ing over it
+  **disconnects the operator's worktree and strands their commits** (observed
+  2026-06-15, run 019eca0d — a bootstrap that ran `rm -f .git; git init` severed
+  the worktree's link to the repo).
+- Reset, force-checkout, `git clean`, or otherwise discard tracked files or
+  history.
+
+If a build/test step needs git and git is **unavailable in this environment**
+(e.g. `git rev-parse` fails because a worktree's `.git` target isn't mounted in
+the sandbox), do NOT manufacture a repo. Make the verify script **skip** the
+git-dependent tests — guard them behind `git rev-parse --is-inside-work-tree` —
+and note the skip in your summary. A gate that skips a few git-dependent tests
+with a loud note is correct; one that destroys the operator's repo to run them
+is not.
