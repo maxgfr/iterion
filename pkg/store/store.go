@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -422,6 +423,11 @@ func healRun(r *Run) bool {
 	return changed
 }
 
+// loadRunHealBeforeLockHook is a test hook used to deterministically
+// exercise the stale-read window before LoadRun's heal persistence enters the
+// run-mutation critical section. Nil in production.
+var loadRunHealBeforeLockHook func()
+
 // LoadRun reads run.json for the given run ID.
 //
 // The run ID is sanitised before path-joining so a hostile or
@@ -444,11 +450,33 @@ func (s *FilesystemRunStore) LoadRun(_ context.Context, id string) (*Run, error)
 		return nil, err
 	}
 	if healRun(r) {
-		// Best-effort persist; a write failure (read-only fs, racing
-		// process) leaves the in-memory name set and lets the next
-		// successful write fix it up. Never fail LoadRun on this path.
-		if writeErr := s.writeRun(r); writeErr != nil && s.logger != nil {
-			s.logger.Warn("store: heal-on-read for run %s failed: %v", id, writeErr)
+		if loadRunHealBeforeLockHook != nil {
+			loadRunHealBeforeLockHook()
+		}
+		// Persist heal-on-read under the same mutex as every other run.json
+		// read-modify-write. The first load above may have observed a legacy
+		// stale copy; before writing the heal, re-read the current on-disk run
+		// while holding s.mu so a concurrent SaveCheckpoint/UpdateRunStatus/
+		// SaveRun cannot have its authoritative fields clobbered by this
+		// best-effort migration write.
+		s.mu.Lock()
+		fresh, reloadErr := s.loadRunRaw(id)
+		if reloadErr == nil {
+			if healRun(fresh) {
+				if writeErr := s.writeRun(fresh); writeErr != nil && s.logger != nil {
+					s.logger.Warn("store: heal-on-read for run %s failed: %v", id, writeErr)
+				}
+			}
+			s.mu.Unlock()
+			return fresh, nil
+		}
+		s.mu.Unlock()
+
+		// Best-effort persist; a write/reload failure (read-only fs, racing
+		// process, deleted run) leaves the in-memory heal applied and lets the
+		// next successful write fix it up. Never fail LoadRun on this path.
+		if s.logger != nil {
+			s.logger.Warn("store: reload for heal-on-read for run %s failed: %v", id, reloadErr)
 		}
 	}
 	return r, nil
@@ -1184,8 +1212,16 @@ func (s *FilesystemRunStore) EnsureRunFilesDir(_ context.Context, runID string) 
 	if err := sanitizePathComponent("run ID", runID); err != nil {
 		return "", err
 	}
+	runDir := s.runDir(runID)
+	if err := os.MkdirAll(runDir, dirPerm); err != nil {
+		return "", fmt.Errorf("store: mkdir run dir: %w", err)
+	}
+	if err := os.Chmod(runDir, dirPerm); err != nil {
+		return "", fmt.Errorf("store: chmod run dir: %w", err)
+	}
+
 	dir := s.runFilesDir(runID)
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
+	if err := ensurePlainDirNoSymlink(dir, dirPerm); err != nil {
 		return "", fmt.Errorf("store: mkdir run files dir: %w", err)
 	}
 	// Loosen perms so the in-sandbox container user (devbox, typically
@@ -1195,6 +1231,72 @@ func (s *FilesystemRunStore) EnsureRunFilesDir(_ context.Context, runID string) 
 	// 1001" deployment from silently failing the bind-mount writes.
 	_ = os.Chmod(dir, 0o775)
 	return dir, nil
+}
+
+// ensurePlainDirNoSymlink creates dir but refuses to treat an existing
+// symlink as success. os.MkdirAll follows a final symlink to a directory,
+// which would let a sandbox-controlled artifact_files entry redirect the
+// bind-mount/output area outside the run; replace that stale symlink with a
+// real directory instead.
+func ensurePlainDirNoSymlink(dir string, perm os.FileMode) error {
+	info, err := os.Lstat(dir)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			if err := os.Remove(dir); err != nil {
+				return err
+			}
+		} else {
+			if !info.IsDir() {
+				return fmt.Errorf("%s exists and is not a directory", dir)
+			}
+			return nil
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Mkdir(dir, perm); err != nil {
+		if os.IsExist(err) {
+			info, lstatErr := os.Lstat(dir)
+			if lstatErr != nil {
+				return lstatErr
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("%s exists as symlink", dir)
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("%s exists and is not a directory", dir)
+			}
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// cleanRunFilePath validates a user-supplied artifact file path before the
+// openat walk. Reject escapes lexically instead of normalising them away:
+// "a/../run.json" must be denied, not collapsed to "run.json".
+func cleanRunFilePath(relPath string) ([]string, string, error) {
+	slashPath := strings.ReplaceAll(relPath, "\\", "/")
+	if slashPath == "" || path.IsAbs(slashPath) {
+		return nil, "", fmt.Errorf("store: run file not found")
+	}
+	for _, part := range strings.Split(slashPath, "/") {
+		if part == ".." {
+			return nil, "", fmt.Errorf("store: run file not found")
+		}
+	}
+	cleaned := path.Clean(slashPath)
+	if cleaned == "." {
+		return nil, "", fmt.Errorf("store: run file not found")
+	}
+	components := strings.Split(cleaned, "/")
+	for _, part := range components {
+		if part == "" || part == "." || part == ".." {
+			return nil, "", fmt.Errorf("store: run file not found")
+		}
+	}
+	return components, cleaned, nil
 }
 
 // ListRunFiles satisfies RunFilesStore. Returns a sorted slice (by path)
@@ -1241,49 +1343,28 @@ func (s *FilesystemRunStore) ListRunFiles(_ context.Context, runID string) ([]Ru
 }
 
 // OpenRunFile satisfies RunFilesStore. Implements path-traversal
-// protection: the cleaned absolute path MUST stay strictly under the
-// per-run files area. Any escape attempt (`..`, absolute paths, symlinks
-// pointing outside the area) is rejected with a clean "not found" error
-// — callers and HTTP clients can't distinguish those cases (both are
-// 404), which keeps probing attacks blind.
+// protection by walking from an already-open artifact_files directory fd.
+// Absolute paths and any `..` component are rejected lexically, every
+// intermediate component is opened with O_DIRECTORY|O_NOFOLLOW, and the
+// final file is opened with O_NOFOLLOW before fstat. That openat-style walk
+// avoids the EvalSymlinks-then-open TOCTOU gap where a sandbox-controlled
+// artifact_files tree could swap an intermediate directory for a symlink
+// after validation and trick the server into streaming an arbitrary host file.
 func (s *FilesystemRunStore) OpenRunFile(_ context.Context, runID, relPath string) (io.ReadCloser, RunFileInfo, error) {
 	if err := sanitizePathComponent("run ID", runID); err != nil {
 		return nil, RunFileInfo{}, err
 	}
+	components, cleaned, err := cleanRunFilePath(relPath)
+	if err != nil {
+		return nil, RunFileInfo{}, err
+	}
 	root := s.runFilesDir(runID)
-	rootReal, err := filepath.EvalSymlinks(root)
+	f, info, err := openRunFileAt(root, components)
 	if err != nil {
-		// Files dir doesn't exist yet → no files to open.
-		return nil, RunFileInfo{}, fmt.Errorf("store: run file not found")
-	}
-	cleaned := filepath.Clean("/" + filepath.ToSlash(relPath))
-	abs := filepath.Join(rootReal, cleaned)
-	absReal, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		return nil, RunFileInfo{}, fmt.Errorf("store: run file not found")
-	}
-	// Containment check on the symlink-resolved paths.
-	rel, err := filepath.Rel(rootReal, absReal)
-	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
-		return nil, RunFileInfo{}, fmt.Errorf("store: run file not found")
-	}
-	// Open with O_NOFOLLOW on the final component to close the TOCTOU
-	// window between EvalSymlinks/Stat above and Open: an attacker who
-	// could swap absReal for a symlink to /etc/shadow between the
-	// resolve and the open would be defeated — the open returns ELOOP
-	// instead of following the new symlink. Stat the descriptor itself
-	// (not the path) so the size/mtime reflect what we actually opened.
-	f, err := openNoFollow(absReal)
-	if err != nil {
-		return nil, RunFileInfo{}, fmt.Errorf("store: run file not found")
-	}
-	info, err := f.Stat()
-	if err != nil || info.IsDir() {
-		_ = f.Close()
 		return nil, RunFileInfo{}, fmt.Errorf("store: run file not found")
 	}
 	return f, RunFileInfo{
-		Path:       filepath.ToSlash(rel),
+		Path:       filepath.ToSlash(cleaned),
 		Size:       info.Size(),
 		ModifiedAt: info.ModTime().UTC(),
 	}, nil

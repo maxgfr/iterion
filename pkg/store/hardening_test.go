@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
@@ -153,5 +154,146 @@ func TestTeeRunLogHardening(t *testing.T) {
 		t.Fatalf("stat run.log: %v", err)
 	} else if fi.Mode().Perm() != filePerm {
 		t.Errorf("run.log perm = %#o, want %#o", fi.Mode().Perm(), filePerm)
+	}
+}
+
+func TestLoadRunHealDoesNotClobberConcurrentMutation(t *testing.T) {
+	s := tmpStore(t)
+	ctx := context.Background()
+	const runID = "heal-race"
+
+	r, err := s.CreateRun(ctx, runID, "wf", nil)
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	// Simulate a legacy run: Name was empty on disk, so LoadRun will heal and
+	// persist. Write directly so the setup itself does not trigger healing.
+	r.Name = ""
+	if err := s.writeRun(r); err != nil {
+		t.Fatalf("seed legacy run: %v", err)
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	loadRunHealBeforeLockHook = func() {
+		close(started)
+		<-release
+	}
+	defer func() { loadRunHealBeforeLockHook = nil }()
+
+	loadErr := make(chan error, 1)
+	go func() {
+		_, err := s.LoadRun(ctx, runID)
+		loadErr <- err
+	}()
+
+	<-started
+	cp := &Checkpoint{
+		NodeID:           "human_review",
+		InteractionID:    "int-1",
+		Outputs:          map[string]map[string]interface{}{},
+		LoopCounters:     map[string]int{},
+		ArtifactVersions: map[string]int{},
+		Vars:             map[string]interface{}{"k": "v"},
+	}
+	if err := s.PauseRun(ctx, runID, cp); err != nil {
+		close(release)
+		t.Fatalf("PauseRun: %v", err)
+	}
+	close(release)
+	if err := <-loadErr; err != nil {
+		t.Fatalf("LoadRun: %v", err)
+	}
+
+	got, err := s.loadRunRaw(runID)
+	if err != nil {
+		t.Fatalf("loadRunRaw: %v", err)
+	}
+	if got.Name == "" {
+		t.Fatal("Name was not healed")
+	}
+	if got.Status != RunStatusPausedWaitingHuman {
+		t.Fatalf("Status = %q, want %q (heal clobbered concurrent status update)", got.Status, RunStatusPausedWaitingHuman)
+	}
+	if got.Checkpoint == nil || got.Checkpoint.NodeID != "human_review" || got.Checkpoint.InteractionID != "int-1" {
+		t.Fatalf("Checkpoint = %#v, want concurrent checkpoint preserved", got.Checkpoint)
+	}
+}
+
+func TestEnsureRunFilesDirReplacesSymlink(t *testing.T) {
+	s := tmpStore(t)
+	ctx := context.Background()
+	const runID = "run-files-symlink"
+	if _, err := s.CreateRun(ctx, runID, "wf", nil); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	outside := t.TempDir()
+	dir := s.runFilesDir(runID)
+	if err := os.Symlink(outside, dir); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink unavailable on windows: %v", err)
+		}
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	got, err := s.EnsureRunFilesDir(ctx, runID)
+	if err != nil {
+		t.Fatalf("EnsureRunFilesDir: %v", err)
+	}
+	if got != dir {
+		t.Fatalf("dir = %q, want %q", got, dir)
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		t.Fatalf("Lstat: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("artifact_files remained a symlink")
+	}
+	if !info.IsDir() {
+		t.Fatalf("artifact_files mode = %v, want directory", info.Mode())
+	}
+}
+
+func TestOpenRunFileRejectsIntermediateSymlinkSwap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix openat/O_NOFOLLOW hardening is not available on windows")
+	}
+	s := tmpStore(t)
+	ctx := context.Background()
+	const runID = "run-files-openat"
+	if _, err := s.CreateRun(ctx, runID, "wf", nil); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	dir, err := s.EnsureRunFilesDir(ctx, runID)
+	if err != nil {
+		t.Fatalf("EnsureRunFilesDir: %v", err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("SHOULD-NOT-LEAK"), 0o644); err != nil {
+		t.Fatalf("write outside secret: %v", err)
+	}
+	mid := filepath.Join(dir, "mid")
+	if err := os.Mkdir(mid, 0o755); err != nil {
+		t.Fatalf("mkdir mid: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mid, "secret.txt"), []byte("inside"), 0o644); err != nil {
+		t.Fatalf("write inside file: %v", err)
+	}
+
+	// Simulate the vulnerable post-validation race: an intermediate directory
+	// is replaced with a symlink to an outside tree. OpenRunFile must fail at
+	// the intermediate O_DIRECTORY|O_NOFOLLOW open, not follow it and stream the
+	// outside secret.
+	if err := os.RemoveAll(mid); err != nil {
+		t.Fatalf("remove mid: %v", err)
+	}
+	if err := os.Symlink(outside, mid); err != nil {
+		t.Fatalf("symlink mid: %v", err)
+	}
+	if rc, _, err := s.OpenRunFile(ctx, runID, "mid/secret.txt"); err == nil {
+		defer rc.Close()
+		body, _ := io.ReadAll(rc)
+		t.Fatalf("OpenRunFile unexpectedly succeeded and returned %q", body)
 	}
 }
