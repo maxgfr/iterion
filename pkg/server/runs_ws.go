@@ -142,6 +142,14 @@ func (s *Server) handleRunWebSocket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing run id", http.StatusBadRequest)
 		return
 	}
+	// Sanitize before the run ID is path-joined into log/event files
+	// downstream (cross-store run.log / events.jsonl tail, log replay).
+	// The store's own readers go through this guard; the direct file
+	// readers reached from this WS handler must too.
+	if err := store.SanitizePathComponent("run ID", runID); err != nil {
+		http.Error(w, "invalid run id", http.StatusBadRequest)
+		return
+	}
 	// Cross-store check BEFORE upgrade so an invalid store= produces a
 	// clean HTTP 400 instead of a WS error envelope at first message.
 	xStore, xStorePath, err := s.resolveCrossStore(r)
@@ -815,6 +823,12 @@ func (c *runConn) streamEventsCloud(fromSeq int64) {
 			}
 		case err, ok := <-errs:
 			if !ok {
+				// Source closed Errors but may keep Events open (the
+				// "transient blip, keep the WS open" case the doc comment
+				// describes). Nil the channel so this select case stops
+				// firing — a closed channel is always ready to receive,
+				// which would otherwise spin a CPU core.
+				errs = nil
 				continue
 			}
 			if c.server.logger != nil {
