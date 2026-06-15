@@ -181,15 +181,25 @@ func updateGitignore(dir string, entries []string) (fileStatus, error) {
 	if err != nil {
 		return 0, fmt.Errorf("cannot open .gitignore: %w", err)
 	}
-	defer f.Close()
-
 	// Ensure we start on a new line if the file doesn't end with one.
 	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
-		fmt.Fprintln(f)
+		if _, werr := fmt.Fprintln(f); werr != nil {
+			_ = f.Close()
+			return 0, fmt.Errorf("write .gitignore: %w", werr)
+		}
 	}
 
 	for _, e := range toAdd {
-		fmt.Fprintln(f, e)
+		if _, werr := fmt.Fprintln(f, e); werr != nil {
+			_ = f.Close()
+			return 0, fmt.Errorf("write .gitignore: %w", werr)
+		}
+	}
+
+	// Surface flush-on-close errors (e.g. ENOSPC) rather than reporting a
+	// write that never landed.
+	if cerr := f.Close(); cerr != nil {
+		return 0, fmt.Errorf("close .gitignore: %w", cerr)
 	}
 
 	if isNew {

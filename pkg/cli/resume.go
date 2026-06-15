@@ -86,7 +86,7 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 		return fmt.Errorf("cannot open store: %w", err)
 	}
 
-	r, err := s.LoadRun(context.Background(), opts.RunID)
+	r, err := s.LoadRun(ctx, opts.RunID)
 	if err != nil {
 		return fmt.Errorf("cannot load run: %w", err)
 	}
@@ -146,14 +146,19 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 	}
 
 	wf, wfHash, iterFile, bundleHandle, bundleCleanup, err := resumeOpenWorkflow(r, iterFile)
+	// Install cleanup BEFORE the error check: resumeOpenWorkflow returns a
+	// live cleanup (the .botz temp-dir remover) even on a bundle compile
+	// error, so returning on err without deferring it leaks the extracted dir.
+	if bundleCleanup != nil {
+		defer func() {
+			if cerr := bundleCleanup(); cerr != nil {
+				logger.Warn("bundle cleanup: %v", cerr)
+			}
+		}()
+	}
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if cerr := bundleCleanup(); cerr != nil {
-			logger.Warn("bundle cleanup: %v", cerr)
-		}
-	}()
 
 	executor, err := buildResumeExecutor(opts, wf, s, storeDir, logger, r)
 	if err != nil {
@@ -190,7 +195,7 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 
 	// Re-check run status under the lock to prevent a TOCTOU race
 	// against a concurrent process that flipped the run to terminal.
-	r, err = s.LoadRun(context.Background(), opts.RunID)
+	r, err = s.LoadRun(ctx, opts.RunID)
 	if err != nil {
 		return fmt.Errorf("cannot reload run: %w", err)
 	}

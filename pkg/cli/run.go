@@ -131,14 +131,19 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 	// at construction time, so feeding it the raw workflow would make
 	// the recipe's overrides invisible to the model/tool layer.
 	wf, wfHash, iterFile, workflowName, bundleHandle, bundleCleanup, err := resolveWorkflow(opts)
+	// Install cleanup BEFORE the error check: resolveWorkflow returns a live
+	// cleanup (the .botz temp-dir remover) even on a bundle compile error, so
+	// returning on err without deferring it leaks the extracted bundle dir.
+	if bundleCleanup != nil {
+		defer func() {
+			if cerr := bundleCleanup(); cerr != nil {
+				logger.Warn("bundle cleanup: %v", cerr)
+			}
+		}()
+	}
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if cerr := bundleCleanup(); cerr != nil {
-			logger.Warn("bundle cleanup: %v", cerr)
-		}
-	}()
 
 	runName := store.GenerateRunName(iterFile + ":" + runID)
 	storeDir := store.ResolveStoreDir(filepath.Dir(iterFile), opts.StoreDir)

@@ -83,6 +83,7 @@ type nodeArtifact struct {
 	Version   int                    `json:"version"`
 	WrittenAt time.Time              `json:"written_at"`
 	Data      map[string]interface{} `json:"data,omitempty"`
+	Error     string                 `json:"error,omitempty"`
 }
 
 type interactionSummary struct {
@@ -91,6 +92,7 @@ type interactionSummary struct {
 	AnsweredAt  *time.Time             `json:"answered_at,omitempty"`
 	Questions   map[string]interface{} `json:"questions,omitempty"`
 	Answers     map[string]interface{} `json:"answers,omitempty"`
+	Error       string                 `json:"error,omitempty"`
 }
 
 // nodeLogSlice is a best-effort timestamp-windowed slice of run.log.
@@ -517,10 +519,14 @@ func buildArtifactList(s store.RunStore, runID, nodeID string, events []*store.E
 		if includeBodies {
 			a, err := s.LoadArtifact(context.Background(), runID, nodeID, version)
 			if err != nil {
-				continue
+				// Surface the load failure instead of dropping the version
+				// silently — a transient store error otherwise makes a real
+				// artifact vanish from `inspect --full`.
+				entry.Error = err.Error()
+			} else {
+				entry.WrittenAt = a.WrittenAt
+				entry.Data = a.Data
 			}
-			entry.WrittenAt = a.WrittenAt
-			entry.Data = a.Data
 		}
 		out = append(out, entry)
 	}
@@ -557,6 +563,8 @@ func buildInteractionList(s store.RunStore, runID, nodeID string, events []*stor
 	for _, id := range keys {
 		inter, err := s.LoadInteraction(context.Background(), runID, id)
 		if err != nil {
+			// Surface the load failure instead of dropping it silently.
+			out = append(out, interactionSummary{ID: id, Error: err.Error()})
 			continue
 		}
 		if inter.NodeID != "" && inter.NodeID != nodeID {

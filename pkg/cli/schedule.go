@@ -379,8 +379,15 @@ func RunScheduleRun(ctx context.Context, p *Printer, opts ScheduleRunOptions) er
 	}
 
 	if e.Workdir != "" {
+		prev, _ := os.Getwd()
 		if err := os.Chdir(e.Workdir); err != nil {
 			return fmt.Errorf("schedule %q: chdir %s: %w", e.Name, e.Workdir, err)
+		}
+		if prev != "" {
+			// chdir is process-global, not goroutine-local: restore it so
+			// RunScheduleRun is safe to call from a long-lived process, not
+			// only a one-shot cron child.
+			defer func() { _ = os.Chdir(prev) }()
 		}
 	}
 	p.Line("▶ schedule %q: iterion run %s", e.Name, e.Bot)
