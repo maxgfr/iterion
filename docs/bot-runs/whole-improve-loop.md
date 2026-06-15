@@ -92,6 +92,31 @@ The converge-on-broken backstop working against the gate's own gap.
   worktree's real `.git` (or the skill's no-bootstrap guard is confirmed) — see
   finding 2.
 
+### Follow-ups fixed (2026-06-15, same session)
+
+All deferred items above are now fixed + verified:
+
+- **Finding 1 — sandbox Go 1.26** (`af07835f`): `iterion-sandbox-full` now
+  installs Go 1.26.4 from the official tarball (was apt's 1.24). A `go 1.26`
+  go.mod builds in-sandbox with no per-run GOTOOLCHAIN fetch — which is what
+  starved the fixer's step budget and produced the placeholder. Built + verified
+  locally (`go version` → go1.26.4); CI publishes it on push to main.
+- **Finding 3 — claw placeholder (engine)** (`4bfa4830`): the claw recovery
+  pass now appends a `finalizeReminder` so a tool loop that ended without
+  committing to JSON (narrated, or cut off at MaxSteps) reports the state it
+  ACTUALLY reached instead of a coerced "work in progress" placeholder.
+- **Skill no-bootstrap guard** (`487b0c10`, finding 2) shipped during recovery.
+- **Mongo blockers** (`0473021d`, from run 019ec9d5): `validateCloudTenant`
+  fail-close at every entry point (host-tested) + `WriteDocument` compare-and-swap
+  on `revision` with bounded retry (verified against a real Mongo —
+  `TestWriteDocumentConcurrent_Mongo`: 12 writers → revision 12 + no quota drift;
+  the test fails on the old unconditional path, proving it catches the bug).
+
+Remaining smaller nicety (not blocking): full step-exhaustion *telemetry* (a
+distinct `StepsExhausted` signal on the delegate Result for the event log) —
+the recovery-honesty fix + the Go-1.26 image already remove the placeholder's
+cause and symptom.
+
 ## 2026-06-14 — scope_globs shipped + pkg/store hardening + fixer-placeholder finding (run 019ec7ed, cancelled-for-value)
 
 - Status: **partial by design** — cancelled mid-sweep once it had produced its
