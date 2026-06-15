@@ -397,6 +397,7 @@ func loadLatestQueuedMessages(path string) (map[string]QueuedUserMessage, error)
 	out := map[string]QueuedUserMessage{}
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxEventLineSize)
+	var skipped, valid int
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -404,12 +405,23 @@ func loadLatestQueuedMessages(path string) (map[string]QueuedUserMessage, error)
 		}
 		var m QueuedUserMessage
 		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, fmt.Errorf("store: decode user_message: %w", err)
+			// Tolerate a torn line — a crash/OOM/ENOSPC mid-append
+			// leaves a partial JSON record — the same way LoadEvents
+			// does, instead of bricking every inbox read
+			// (LoadPendingQueuedMessages / ListQueuedMessages /
+			// UpdateQueuedMessageStatus) for the rest of the run's
+			// life. Wholesale corruption still fails loudly below.
+			skipped++
+			continue
 		}
+		valid++
 		out[m.ID] = m
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("store: scan user_messages: %w", err)
+	}
+	if eventsCorruptionExceeded(skipped, valid) {
+		return nil, fmt.Errorf("%w: user_messages skipped=%d valid=%d", ErrEventsCorrupted, skipped, valid)
 	}
 	return out, nil
 }
