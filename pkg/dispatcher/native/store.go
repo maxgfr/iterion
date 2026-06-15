@@ -971,13 +971,53 @@ func (s *Store) writeEventLineLocked(evt Event) error {
 	}
 	line = append(line, '\n')
 	p := filepath.Join(s.root, eventsFile)
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, filePerm)
+	// O_RDWR (not O_WRONLY) so the torn-tail repair below can ReadAt the
+	// final byte (ReadAt on a write-only fd returns EBADF). O_APPEND
+	// still forces every write to EOF, so append semantics are unchanged.
+	// Mirrors the runs-store hardening (a79ffa76).
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR|os.O_APPEND, filePerm)
 	if err != nil {
 		return fmt.Errorf("native store: open events: %w", err)
 	}
 	defer f.Close()
-	if _, err := f.Write(line); err != nil {
-		return fmt.Errorf("native store: write event: %w", err)
+
+	// Repair a torn final line left by a prior crash (a partial JSONL
+	// record with no trailing newline). Without this the next append
+	// concatenates onto the torn bytes, merging two records into one
+	// corrupt line — so a tailer skips it and loses BOTH the torn tail
+	// AND this event. Runs under s.mu, so seq seeding + repair are atomic
+	// within this process.
+	info, statErr := f.Stat()
+	var preSize int64
+	if statErr == nil {
+		preSize = info.Size()
+	}
+	if statErr == nil && preSize > 0 {
+		last := make([]byte, 1)
+		if _, err := f.ReadAt(last, preSize-1); err != nil {
+			return fmt.Errorf("native store: inspect events tail: %w", err)
+		}
+		if last[0] != '\n' {
+			if _, err := f.Write([]byte("\n")); err != nil {
+				return fmt.Errorf("native store: separate torn event tail: %w", err)
+			}
+			preSize++
+		}
+	}
+
+	n, writeErr := f.Write(line)
+	if writeErr != nil || n != len(line) {
+		// Roll back a short write (typically ENOSPC mid-line) to the
+		// captured size so the file stays JSONL-clean. Only safe when
+		// Stat succeeded; otherwise leaving the partial line is the
+		// lesser evil (a guessed offset could drop prior good lines).
+		if statErr == nil {
+			_ = f.Truncate(preSize)
+		}
+		if writeErr != nil {
+			return fmt.Errorf("native store: write event: %w", writeErr)
+		}
+		return fmt.Errorf("native store: short write on event (wrote %d of %d bytes)", n, len(line))
 	}
 	if err := f.Sync(); err != nil {
 		return fmt.Errorf("native store: sync event: %w", err)
