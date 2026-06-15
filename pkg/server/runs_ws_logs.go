@@ -175,6 +175,14 @@ func (c *runConn) replayPersistedLog(fromOffset int64) {
 // stream); a missing file or short read is best-effort and returns
 // true so the live stream can still take over.
 func (c *runConn) replayPersistedLogRange(from, until int64) bool {
+	if from < 0 {
+		// Defensive: a negative client-supplied offset must never reach the
+		// Seek / make([]byte, until-from) below. Clamp to 0 (replay from the
+		// start of the persisted log), matching replayPersistedLog. Today a
+		// negative Seek would fail and silently skip the gap-fill; clamping
+		// removes that reliance and gives the client the persisted prefix.
+		from = 0
+	}
 	if from >= until {
 		return true
 	}
