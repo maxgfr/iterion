@@ -61,11 +61,19 @@ func (h *heartbeatStore) WriteToolBlob(ctx context.Context, runID, toolUseID, ki
 	return 0, nil
 }
 
-func (h *heartbeatStore) WriteTurn(ctx context.Context, runID string, t *store.TurnCheckpoint) error {
+// WriteTurn must match store.TurnStore / model.TurnWriter exactly —
+// (ctx, t), two args, NOT (ctx, runID, t); the TurnCheckpoint already
+// carries RunID. An earlier 3-arg signature here meant the type
+// assertion below never matched the wrapped FilesystemRunStore AND
+// *heartbeatStore failed to satisfy model.TurnWriter, so the hook
+// layer's `emitter.(TurnWriter)` probe came back nil and every
+// dispatcher-launched run silently dropped its per-turn checkpoints
+// (studio timeline + Fork API blind).
+func (h *heartbeatStore) WriteTurn(ctx context.Context, t *store.TurnCheckpoint) error {
 	if w, ok := h.RunStore.(interface {
-		WriteTurn(ctx context.Context, runID string, t *store.TurnCheckpoint) error
+		WriteTurn(ctx context.Context, t *store.TurnCheckpoint) error
 	}); ok {
-		return w.WriteTurn(ctx, runID, t)
+		return w.WriteTurn(ctx, t)
 	}
 	return nil
 }
