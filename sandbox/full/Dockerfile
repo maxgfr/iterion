@@ -30,9 +30,9 @@ USER root
 # ---------------------------------------------------------------------
 # Layer 1 — apt-installable toolchains + ops dependencies.
 #
-#   golang-go        — common Go workflows; baseline version pinned by
-#                      Debian. Use `g` (installed below) to switch
-#                      Go versions per bot when needed.
+#   (Go is NOT from apt — installed from the official tarball in Layer 1b
+#    below, pinned to match devbox.json's go@1.26. `g` (Layer 4) switches
+#    Go versions per bot when needed.)
 #   python3 + venv   — many tool-node shell snippets shell out to python.
 #   direnv           — operator-grade env-loading; `direnv allow` works
 #                      out of the box for repos that ship a `.envrc`.
@@ -43,7 +43,6 @@ USER root
 # ---------------------------------------------------------------------
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-        golang-go \
         python3 \
         python3-pip \
         python3-venv \
@@ -54,6 +53,24 @@ RUN apt-get update \
         gnupg \
  && corepack enable pnpm \
  && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------
+# Layer 1b — Go toolchain, pinned to match devbox.json's go@1.26 (the
+# repo's host source of truth). Installed from the official go.dev tarball
+# rather than apt's older golang-go so a `go 1.26` go.mod builds in-sandbox
+# WITHOUT a per-run GOTOOLCHAIN download — apt shipped Go 1.24, which forced
+# every in-sandbox Go build/test (and the whole_improve_loop verify gate) to
+# fetch the toolchain on the fly: slow, and it starved the in-loop fixers of
+# their step budget (the placeholder cause, run 019ec9d5). Newer/older repos
+# still auto-fetch their own pinned toolchain via the default GOTOOLCHAIN=auto.
+# ---------------------------------------------------------------------
+ARG GO_VERSION=1.26.4
+RUN ARCH=$(dpkg --print-architecture) \
+ && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" -o /tmp/go.tgz \
+ && rm -rf /usr/local/go \
+ && tar -C /usr/local -xzf /tmp/go.tgz \
+ && rm /tmp/go.tgz
+ENV PATH="/usr/local/go/bin:${PATH}"
 
 # ---------------------------------------------------------------------
 # Layer 2 — gh (GitHub CLI) via official deb repo. Pinned to the apt
@@ -134,8 +151,8 @@ RUN case "$(uname -m)" in \
 # that want to switch Go versions should export those (e.g. into
 # `/home/devbox/.g/go` + `/home/devbox/go`) before calling
 # `g install <version>`. We intentionally do NOT set them globally so
-# the apt-installed `go` keeps working out of the box for the common
-# case where one Go version is enough.
+# the tarball `go` (1.26, Layer 1b) keeps working out of the box for the
+# common case where one Go version is enough.
 # ---------------------------------------------------------------------
 RUN curl -fsSL https://raw.githubusercontent.com/stefanmaric/g/master/bin/g \
         -o /usr/local/bin/g \
