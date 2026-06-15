@@ -700,10 +700,15 @@ func (r *Runner) executeRun(ctx context.Context, msg *queue.RunMessage) error {
 	// sandbox (the noop driver can't mount) needs them materialized as 0600
 	// files at their mount paths in the runner pod so the in-pod agent can
 	// read them — e.g. review-pr's forge_token for glab. Removed on return.
-	if rm, ferr := r.materializeFileSecretsNoSandbox(ctx, wf); ferr != nil {
-		r.cfg.Logger.Warn("runner: materialize file secrets %s: %v", msg.RunID, ferr)
-	} else if rm != nil {
+	rm, ferr := r.materializeFileSecretsNoSandbox(ctx, wf)
+	if rm != nil {
+		// Always schedule cleanup, even on error: materialize returns a
+		// non-nil remover covering the files it wrote BEFORE failing, so
+		// partial 0600 secret files (e.g. forge_token) don't leak on disk.
 		defer rm()
+	}
+	if ferr != nil {
+		r.cfg.Logger.Warn("runner: materialize file secrets %s: %v", msg.RunID, ferr)
 	}
 
 	executor, usage, err := r.buildExecutor(ctx, msg, wf)
