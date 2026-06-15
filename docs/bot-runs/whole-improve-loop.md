@@ -10,6 +10,88 @@ cross-family approvals. See [bots/whole-improve-loop/](../../bots/whole-improve-
 > [branch-improve-loop.md](branch-improve-loop.md). This page covers Willy's
 > whole-repo specifics.
 
+## 2026-06-15 — deterministic build/test gate shipped + validated live; 2 more pkg/store fixes; placeholder root cause (runs 019ec9d5, 019eca0d)
+
+Follow-up to the 019ec7ed run below. Implemented the recommended **deterministic
+build/test gate** (the converge-on-broken backstop), re-ran Willy to exercise it,
+and the gate **caught a real regression — its own e2e-test gap.**
+
+### The gate (commit `9419b12f`)
+Per the CLAUDE.md "skill-guided + deterministic gate" doctrine, between
+`streak_check`'s `stop` and `commit_changes`:
+- **`verify_build`** (adaptive agent) reads the new `skills/verify-build.md`,
+  detects the repo's OWN build+test tooling (honouring pinned toolchains), writes
+  `.whole_improve_loop.verify.sh`, runs it, and fixes breakage the review fixes
+  introduced.
+- **`verify_run`** (deterministic tool, no LLM) re-runs that script and gates on
+  the REAL exit code. Green → commit; red → bounded `verify_loop(3)` back to fix;
+  still red → `fail`; no script → skipped+passed but surfaced. Universal: no
+  language/PM named in the DSL. validate 12 nodes/21 edges; `verify_run` logic
+  unit-tested (pass/fail/skip).
+
+### Run 019ec9d5 (pkg/store re-run) — 2 more real fixes + the placeholder recurs
+- chunks 0 & 2 clean (run-1 hardening holds); chunk 1 → 2 blockers; chunk 3 → 2 blockers.
+- **`LoadRun` heal-on-read mutex race** + **`OpenRunFile` intermediate-component
+  symlink TOCTOU** — both genuine, fixed correctly (the chunk-1 fix_gpt finally
+  honoured the FINALIZE guard: applied=true, regression tests, honest verify note),
+  host-tested green. Commit **`c7d1f195`** (+ openat-style `openRunFileAt` walk,
+  `ensurePlainDirNoSymlink`).
+- **The "work in progress" placeholder recurred on chunk 3** despite the FINALIZE
+  prompt guard. Root cause is NOT the prompt: the claw fixer's *self-verify*
+  mandate, against a sandbox **missing iterion's pinned Go 1.26**, made it loop on
+  a doomed build until it exhausted `tool_max_steps` and was cut off mid-task — the
+  empty final turn is what `parseSDKOutput`/the formatting pass renders as the
+  placeholder. The chunk-3 mongo edit was left half-done (build-broke) → reverted;
+  its 2 blockers (`mongo/memory.go` WriteDocument concurrency + `MongoMemoryStore`
+  TenantID fail-close) are **deferred findings** (gpt's fix plans captured).
+- **Mitigation (commit `2f987b3c`)**: FINALIZE "verify ONCE — don't loop on a
+  doomed build"; `fix_gpt tool_max_steps 30→45`. Cancelled the run (broken tree +
+  recurring placeholder + the rich-package convergence was uncertain/costly).
+
+### Run 019eca0d (pkg/clock) — gate validated live, end to end
+Tiny clean scope (1 chunk → converges in 2 cross-family passes) purely to fire
+the gate. Converged → `verify_build` (prepared=true) → **`verify_run` passed,
+exit_code 0** → `commit_changes` → **done**. The gate fired, built iterion
+in-sandbox (its script self-handles GOTOOLCHAIN/devbox, vendor mode, writable
+GOCACHE, a flake-guard), and committed. **Crucially `verify_build` caught a real
+regression**: commit `9419b12f` added the verify nodes but never stubbed them in
+`e2e/whole_improve_loop_test.go`, so the 4 convergence e2e tests would route to
+`fail` — invisible to the chunk reviewers, but `verify_build`'s `go test ./...`
+caught it and authored the `stubVerifyGate` fix (repatriated as **`fb503a8f`**).
+The converge-on-broken backstop working against the gate's own gap.
+
+### Findings / misses
+1. **Sandbox image lacks iterion's pinned Go 1.26** (`full:edge` ships 1.24).
+   Blocks in-sandbox build/test for every node, makes `verify_build` slow+costly
+   (~33 min / ~$3.91 fighting the toolchain on this run), and is what induced the
+   placeholder. **Real fix = publish the sandbox image with Go 1.26** (infra
+   follow-up); the gate is sound, the environment isn't.
+2. **`verify_build` ran `rm -f .git; git init`** to bootstrap a repo for the e2e
+   worktree tests (the worktree's `.git` *file* points outside the sandbox mount),
+   which **severed the operator's worktree** and stranded the run's commits
+   (recovered by hand). **Guarded (commit `487b0c10`)**: the verify-build skill now
+   forbids destroying/recreating `.git` and says to SKIP git-dependent tests when
+   git is unavailable. (Also: the sandbox should mount the worktree's real git dir.)
+3. **The placeholder is ultimately an engine bug** — a claw delegate that did tool
+   work but ends with an empty final turn should not be rendered as an
+   `applied=false` "work in progress" by the formatting pass; it should reflect the
+   work or report step-exhaustion honestly. **Deferred engine follow-up**
+   (`pkg/backend/delegate/parse.go` + the claw backend).
+4. **Gate cost on iterion**: `verify_build` + `verify_run` build+test the WHOLE
+   repo at convergence. Cheap when the toolchain is present (verify_run reused the
+   warmed cache in ~45s); expensive when it isn't (finding 1).
+
+### Lessons for next run
+- The gate delivers exactly its promise (caught a cross-file/test break the chunk
+  reviewers structurally cannot). Land the **Go-1.26 sandbox image** so it (and the
+  in-loop fixers' self-verify) run fast instead of fighting the toolchain.
+- The FINALIZE "verify-once" guard + the engine empty-output fix together should
+  end the placeholder; until the engine fix lands, prefer routing fixes to
+  `claude_code`, or accept the bot-side mitigation.
+- Don't run code-mutating bots in a git **worktree** until the sandbox mounts the
+  worktree's real `.git` (or the skill's no-bootstrap guard is confirmed) — see
+  finding 2.
+
 ## 2026-06-14 — scope_globs shipped + pkg/store hardening + fixer-placeholder finding (run 019ec7ed, cancelled-for-value)
 
 - Status: **partial by design** — cancelled mid-sweep once it had produced its
