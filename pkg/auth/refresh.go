@@ -118,9 +118,17 @@ func RotateSession(ctx context.Context, store SessionStore, presentedToken, user
 	if !revoked {
 		// A concurrent rotation already consumed this token. Treat as
 		// reuse: revoke every session of the user and surface the
-		// stronger error so callers force a clean re-login.
-		_ = store.RevokeUserSessions(ctx, prev.UserID, now)
-		return "", Session{}, prev, ErrSessionRevoked
+		// stronger error so callers force a clean re-login. Failing to
+		// revoke the siblings is a security event (a possibly-stolen
+		// token's siblings stay live), so join that error onto
+		// ErrSessionRevoked rather than dropping it — callers still map
+		// to a 401 via errors.Is, but the cleanup failure is no longer
+		// invisible.
+		out := ErrSessionRevoked
+		if rerr := store.RevokeUserSessions(ctx, prev.UserID, now); rerr != nil {
+			out = errors.Join(out, fmt.Errorf("auth: revoke sibling sessions after token reuse: %w", rerr))
+		}
+		return "", Session{}, prev, out
 	}
 	rawTok, _, err := GenerateRandomToken(48)
 	if err != nil {

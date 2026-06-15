@@ -1,13 +1,39 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	iterlog "github.com/SocialGouv/iterion/pkg/log"
 )
+
+// flakyRevokeStore wraps the in-memory store but can force the
+// CAS-revoke to report "already revoked" (driving the token-reuse
+// branch) and make RevokeUserSessions fail, to prove the cleanup error
+// is surfaced rather than swallowed.
+type flakyRevokeStore struct {
+	*MemorySessionStore
+	forceCASLost    bool
+	revokeUserErr   error
+	revokeUserCalls int
+}
+
+func (s *flakyRevokeStore) RevokeSessionIfNotRevoked(ctx context.Context, id string, at time.Time) (bool, error) {
+	if s.forceCASLost {
+		return false, nil
+	}
+	return s.MemorySessionStore.RevokeSessionIfNotRevoked(ctx, id, at)
+}
+
+func (s *flakyRevokeStore) RevokeUserSessions(ctx context.Context, userID string, at time.Time) error {
+	s.revokeUserCalls++
+	return s.revokeUserErr
+}
 
 func TestHashRefreshToken_Deterministic(t *testing.T) {
 	a := HashRefreshToken("hello-world")
@@ -149,6 +175,69 @@ func TestRotateSession_ConcurrentRotationsExactlyOneWins(t *testing.T) {
 	}
 	if losses != N-1 {
 		t.Errorf("expected N-1 losses with ErrSessionRevoked; got %d", losses)
+	}
+}
+
+// On the token-reuse branch, a failed RevokeUserSessions must be
+// surfaced (joined onto ErrSessionRevoked), not silently dropped —
+// otherwise a possibly-stolen token's sibling sessions stay live with
+// no trace.
+func TestRotateSession_RevokeFailureSurfaced(t *testing.T) {
+	store := &flakyRevokeStore{
+		MemorySessionStore: NewMemorySessionStore(),
+		forceCASLost:       true,
+		revokeUserErr:      errors.New("mongo down"),
+	}
+	ctx := context.Background()
+	tok, _, err := IssueSession(ctx, store, "u-1", "", "", time.Hour)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+
+	_, _, _, err = RotateSession(ctx, store, tok, "", "", time.Hour)
+	if !errors.Is(err, ErrSessionRevoked) {
+		t.Fatalf("want ErrSessionRevoked (so caller still 401s), got %v", err)
+	}
+	if store.revokeUserCalls != 1 {
+		t.Fatalf("RevokeUserSessions calls = %d; want 1", store.revokeUserCalls)
+	}
+	if !strings.Contains(err.Error(), "mongo down") {
+		t.Fatalf("revoke failure was swallowed; err = %v", err)
+	}
+}
+
+// Service.Refresh logs (does not swallow) a failed sibling-revoke on the
+// reuse branch.
+func TestServiceRefresh_RevokeFailureLogged(t *testing.T) {
+	store := &flakyRevokeStore{
+		MemorySessionStore: NewMemorySessionStore(),
+		revokeUserErr:      errors.New("mongo down"),
+	}
+	ctx := context.Background()
+	tok, sess, err := IssueSession(ctx, store, "u-1", "", "", time.Hour)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	// Pre-revoke the session so Refresh hits the "RevokedAt != nil"
+	// reuse branch.
+	if err := store.MemorySessionStore.RevokeSession(ctx, sess.ID, time.Now().UTC()); err != nil {
+		t.Fatalf("pre-revoke: %v", err)
+	}
+
+	buf := &bytes.Buffer{}
+	svc := &Service{
+		sessions: store,
+		now:      func() time.Time { return time.Now().UTC() },
+		logger:   iterlog.New(iterlog.LevelError, buf),
+	}
+	if _, err := svc.Refresh(ctx, tok, "", ""); !errors.Is(err, ErrSessionRevoked) {
+		t.Fatalf("want ErrSessionRevoked, got %v", err)
+	}
+	if store.revokeUserCalls != 1 {
+		t.Fatalf("RevokeUserSessions calls = %d; want 1", store.revokeUserCalls)
+	}
+	if !strings.Contains(buf.String(), "mongo down") {
+		t.Fatalf("revoke failure not logged; log = %q", buf.String())
 	}
 }
 

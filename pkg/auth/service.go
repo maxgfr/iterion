@@ -363,7 +363,11 @@ func (s *Service) Refresh(ctx context.Context, presented, userAgent, ip string) 
 	now := s.now().UTC()
 	if prev.RevokedAt != nil {
 		// Token reuse is suspicious: revoke all sessions of this user.
-		_ = s.sessions.RevokeUserSessions(ctx, prev.UserID, now)
+		// A failed revoke leaves the (possibly stolen) siblings live, so
+		// log it rather than swallow it — this is a security event.
+		if err := s.sessions.RevokeUserSessions(ctx, prev.UserID, now); err != nil && s.logger != nil {
+			s.logger.Error("auth: failed to revoke sessions after refresh-token reuse for user %s: %v", prev.UserID, err)
+		}
 		return LoginResult{}, ErrSessionRevoked
 	}
 	if !prev.ExpiresAt.IsZero() && now.After(prev.ExpiresAt) {
@@ -391,8 +395,12 @@ func (s *Service) Refresh(ctx context.Context, presented, userAgent, ip string) 
 	if !revoked {
 		// A concurrent Refresh already rotated this session. Treat as
 		// reuse: revoke every session of the user and surface the
-		// stronger error so the SPA forces a clean re-login.
-		_ = s.sessions.RevokeUserSessions(ctx, prev.UserID, now)
+		// stronger error so the SPA forces a clean re-login. A failed
+		// revoke leaves the (possibly stolen) siblings live — log it
+		// rather than swallow it.
+		if err := s.sessions.RevokeUserSessions(ctx, prev.UserID, now); err != nil && s.logger != nil {
+			s.logger.Error("auth: failed to revoke sessions after refresh-token reuse for user %s: %v", prev.UserID, err)
+		}
 		return LoginResult{}, ErrSessionRevoked
 	}
 	return s.issueLogin(ctx, u, userAgent, ip)
