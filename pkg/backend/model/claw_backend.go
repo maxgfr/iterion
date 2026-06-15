@@ -580,6 +580,32 @@ func toolUseReminder() api.Message {
 	}
 }
 
+// finalizeReminder is appended to the recovery (formatting) pass so a tool
+// loop that ended without committing to JSON — whether it narrated instead of
+// answering, or was cut off at the MaxSteps limit mid-task — is pushed to emit
+// a FINAL, honest structured result rather than a provisional placeholder. The
+// recovery pass is schema-forced with no tools, so the model cannot do more
+// work; it must report the state it actually reached. A "work in progress" /
+// "still validating" verdict otherwise freezes a placeholder into convergence
+// loops (observed with a gpt-5.5 fixer cut off at the step limit mid-fix —
+// run 019ec9d5: it reported applied=false + "validating… before finalizing"
+// even though it had edited files).
+func finalizeReminder() api.Message {
+	return api.Message{
+		Role: "user",
+		Content: []api.ContentBlock{{
+			Type: "text",
+			Text: "This is your FINAL turn — you cannot run any more tools. Output " +
+				"your structured result now, reflecting the state you have ACTUALLY " +
+				"reached. Do NOT return a provisional 'work in progress', 'still " +
+				"validating', or 'will continue' placeholder. Fill every required " +
+				"field with your real current result: if you applied changes, say so " +
+				"and summarise exactly what you did and what (if anything) remains; if " +
+				"you only inspected, report your actual findings.",
+		}},
+	}
+}
+
 func (b *ClawBackend) generateTextWithToolsAndSchemaRetry(ctx context.Context, client api.APIClient, task delegate.Task, opts GenerationOptions) (delegate.Result, error) {
 	return b.retryLoop(ctx, task.NodeID, func() (delegate.Result, error) {
 		return b.generateTextWithToolsAndSchema(ctx, client, task, opts)
@@ -674,7 +700,10 @@ func (b *ClawBackend) generateTextWithToolsAndSchema(ctx context.Context, client
 	// structured output on its next turn. Mirrors claude_code's
 	// two-pass formatting.
 	recoveryOpts := opts
-	recoveryOpts.Messages = result.Messages
+	// Append finalizeReminder so the schema-forced pass reports the state the
+	// model actually reached instead of coercing a "work in progress"
+	// placeholder (run 019ec9d5). Copy result.Messages rather than mutate it.
+	recoveryOpts.Messages = append(append([]api.Message(nil), result.Messages...), finalizeReminder())
 	recoveryOpts.Tools = nil
 	recoveryOpts.MaxSteps = 1
 	recoveryOpts.ExplicitSchema = task.OutputSchema
