@@ -209,12 +209,43 @@ func (n *Notifier) answerFromNode(ctx context.Context, st store.RunStore, runID,
 // best-effort with logging; the callback URL itself is never logged
 // (it can embed a secret token in its query string).
 func (n *Notifier) deliver(ctx context.Context, rawURL string, payload CompletionPayload) {
-	if err := n.vetURL(rawURL); err != nil {
+	u, err := url.Parse(rawURL)
+	if err != nil {
 		if n.logger != nil {
 			n.logger.Warn("completion webhook: rejected callback URL for run %s: %v", payload.RunID, err)
 		}
 		return
 	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		if n.logger != nil {
+			n.logger.Warn("completion webhook: rejected callback URL for run %s: scheme %q not allowed", payload.RunID, u.Scheme)
+		}
+		return
+	}
+	// Resolve + validate the host ONCE and pin the resulting IP into the
+	// dialer below, so the address we vetted is exactly the address we
+	// connect to. Without this, the http.Client would re-resolve the
+	// host independently — a DNS-rebinding window an attacker who
+	// controls the callback host's DNS could use to redirect the
+	// (token-bearing) delivery at a private/metadata address after it
+	// passed validation.
+	pinnedIP, err := n.resolveCallbackIP(ctx, u.Hostname())
+	if err != nil {
+		if n.logger != nil {
+			n.logger.Warn("completion webhook: rejected callback URL for run %s: %v", payload.RunID, err)
+		}
+		return
+	}
+	port := u.Port()
+	if port == "" {
+		if u.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	pinnedAddr := net.JoinHostPort(pinnedIP.String(), port)
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		if n.logger != nil {
@@ -239,7 +270,26 @@ func (n *Notifier) deliver(ctx context.Context, rawURL string, payload Completio
 		req.Header.Set(SignatureHeader, sig)
 	}
 
-	resp, err := n.client.Do(req)
+	// Per-delivery client: dial only the pinned IP (so the TLS handshake
+	// still uses the URL's host for SNI/verification while the TCP target
+	// is fixed) and never auto-follow redirects — a 3xx to a fresh host
+	// would re-open the rebinding window.
+	client := &http.Client{
+		Timeout: n.client.Timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				d := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 15 * time.Second}
+				return d.DialContext(ctx, network, pinnedAddr)
+			},
+			TLSHandshakeTimeout: 10 * time.Second,
+		},
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		if n.logger != nil {
 			n.logger.Warn("completion webhook: delivery failed for run %s", payload.RunID)
@@ -252,11 +302,10 @@ func (n *Notifier) deliver(ctx context.Context, rawURL string, payload Completio
 	}
 }
 
-// vetURL enforces the SSRF guard: http/https only, a host must be
-// present, and — unless allowPrivate is set — the host must resolve
-// exclusively to public-unicast addresses. Resolution fails closed (an
-// unresolvable host is rejected). Mirrors the blocklist in
-// pkg/server.isPublicUnicast.
+// vetURL enforces the SSRF guard: http/https only and a host present.
+// The host/IP validation + resolution is shared with deliver via
+// resolveCallbackIP so the address that is validated is exactly the one
+// the delivery dials. Kept as a standalone validator for tests.
 func (n *Notifier) vetURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -269,41 +318,53 @@ func (n *Notifier) vetURL(rawURL string) error {
 	if host == "" {
 		return fmt.Errorf("missing host")
 	}
-	if n.allowPrivate {
-		return nil
-	}
+	_, err = n.resolveCallbackIP(context.Background(), host)
+	return err
+}
 
+// resolveCallbackIP resolves host to a single IP and validates it,
+// returning that IP so the caller can PIN it into the dialer — closing
+// the DNS-rebinding window that exists when validation and the actual
+// request each resolve the host independently. Unless allowPrivate is
+// set, the IP (or every resolved address) must be public-unicast, and
+// the conventional cluster-internal aliases are refused outright
+// (service meshes re-route these even with no DNS record). Resolution
+// fails closed. Mirrors pkg/server.resolvePreviewHost.
+func (n *Notifier) resolveCallbackIP(ctx context.Context, host string) (net.IP, error) {
+	if host == "" {
+		return nil, fmt.Errorf("missing host")
+	}
 	// Numeric literal: validate directly.
 	if ip := net.ParseIP(host); ip != nil {
-		if !isPublicUnicast(ip) {
-			return fmt.Errorf("address %s is not a public unicast IP", ip)
+		if !n.allowPrivate && !isPublicUnicast(ip) {
+			return nil, fmt.Errorf("address %s is not a public unicast IP", ip)
 		}
-		return nil
+		return ip, nil
 	}
-
-	// Refuse cluster-internal aliases outright (service meshes re-route
-	// these even when DNS has no record).
-	lower := strings.ToLower(host)
-	if strings.HasSuffix(lower, ".svc.cluster.local") ||
-		strings.HasSuffix(lower, ".svc") ||
-		lower == "kubernetes.default" ||
-		lower == "metadata.google.internal" {
-		return fmt.Errorf("hostname %q is reserved for cluster-internal services", host)
+	if !n.allowPrivate {
+		lower := strings.ToLower(host)
+		if strings.HasSuffix(lower, ".svc.cluster.local") ||
+			strings.HasSuffix(lower, ".svc") ||
+			lower == "kubernetes.default" ||
+			lower == "metadata.google.internal" {
+			return nil, fmt.Errorf("hostname %q is reserved for cluster-internal services", host)
+		}
 	}
-
-	addrs, err := net.LookupIP(host)
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
-		return fmt.Errorf("resolve %q: %w", host, err) // fail closed
+		return nil, fmt.Errorf("resolve %q: %w", host, err) // fail closed
 	}
 	if len(addrs) == 0 {
-		return fmt.Errorf("resolve %q: no addresses", host)
+		return nil, fmt.Errorf("resolve %q: no addresses", host)
 	}
-	for _, a := range addrs {
-		if !isPublicUnicast(a) {
-			return fmt.Errorf("resolved address %s is not a public unicast IP", a)
+	if !n.allowPrivate {
+		for _, a := range addrs {
+			if !isPublicUnicast(a.IP) {
+				return nil, fmt.Errorf("resolved address %s is not a public unicast IP", a.IP)
+			}
 		}
 	}
-	return nil
+	return addrs[0].IP, nil
 }
 
 // isPublicUnicast reports whether ip is safe to POST to from the
