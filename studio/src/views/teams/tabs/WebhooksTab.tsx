@@ -297,6 +297,7 @@ function CreateWebhookDialog({
   const [defaultBot, setDefaultBot] = useState("");
   const [projectAllow, setProjectAllow] = useState<string[]>([]);
   const [eventAllow, setEventAllow] = useState<string[]>([]);
+  const [forgeBaseURL, setForgeBaseURL] = useState("");
   const [rate, setRate] = useState<number>(1.0);
   const [burst, setBurst] = useState<number>(10);
   const [monthlyCap, setMonthlyCap] = useState<number>(0);
@@ -322,6 +323,7 @@ function CreateWebhookDialog({
         default_bot_id: defaultBot || undefined,
         project_allowlist: projectAllow.length ? projectAllow : undefined,
         event_allowlist: eventAllow.length ? eventAllow : undefined,
+        forge_base_url: forgeBaseURL.trim() || undefined,
         rate_limit: { rate, burst },
         monthly_call_limit: monthlyCap > 0 ? monthlyCap : undefined,
         launch_vars: Object.keys(lvs).length ? lvs : undefined,
@@ -394,6 +396,21 @@ function CreateWebhookDialog({
             ))}
           </div>
         </Field>
+
+        {provider === "gitlab" && (
+          <Field label="Forge base URL (optional)">
+            <Input
+              value={forgeBaseURL}
+              onChange={(e) => setForgeBaseURL(e.target.value)}
+              placeholder="https://gitlab.example.com"
+            />
+            <div className="text-xs text-fg-subtle mt-1">
+              Pin the GitLab instance this webhook may send its bot token to. A
+              delivery whose merge-request URL host differs is refused. Leave
+              empty to derive the host from the payload.
+            </div>
+          </Field>
+        )}
 
         <Field label="Bot scope">
           <div className="space-y-2">

@@ -33,6 +33,7 @@ export interface WebhookConfig {
   default_bot_id?: string;
   project_allowlist?: string[];
   event_allowlist?: string[];
+  forge_base_url?: string;
   rate_limit: WebhookRate;
   monthly_call_limit?: number;
   launch_vars?: Record<string, string>;
@@ -78,6 +79,7 @@ export interface CreateWebhookInput {
   default_bot_id?: string;
   project_allowlist?: string[];
   event_allowlist?: string[];
+  forge_base_url?: string;
   rate_limit?: WebhookRate;
   monthly_call_limit?: number;
   launch_vars?: Record<string, string>;
@@ -93,6 +95,7 @@ export interface UpdateWebhookInput {
   wildcard_bots?: boolean;
   project_allowlist?: string[];
   event_allowlist?: string[];
+  forge_base_url?: string;
   rate_limit?: WebhookRate;
   monthly_call_limit?: number;
   launch_vars?: Record<string, string>;

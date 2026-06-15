@@ -84,6 +84,15 @@ type Config struct {
 	ProjectAllowlist []string `bson:"project_allowlist,omitempty" json:"project_allowlist,omitempty"`
 	EventAllowlist   []string `bson:"event_allowlist,omitempty" json:"event_allowlist,omitempty"`
 
+	// ForgeBaseURL, when set, pins the forge instance this webhook's bot
+	// token may call back to (e.g. "https://gitlab.example.com"). The
+	// inbound payload's MR-URL host must match it or the delivery is
+	// refused, so a hostile (but secret-authenticated) payload can't
+	// redirect the bot's forge_token to an arbitrary host. Empty = derive
+	// the host from the payload, still gated by the optional global
+	// ITERION_WEBHOOK_FORGE_HOSTS allowlist. GitLab note/MR flows only.
+	ForgeBaseURL string `bson:"forge_base_url,omitempty" json:"forge_base_url,omitempty"`
+
 	// Limits.
 	RateLimit        Rate `bson:"rate_limit" json:"rate_limit"`
 	MonthlyCallLimit int  `bson:"monthly_call_limit,omitempty" json:"monthly_call_limit,omitempty"` // 0 = inherit org

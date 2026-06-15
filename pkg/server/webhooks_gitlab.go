@@ -286,14 +286,11 @@ func (s *Server) realWebhookNoteGate(ctx context.Context, cfg webhooks.Config, p
 	if terr != nil || token == "" {
 		return false, false, "", "no forge token resolved (configure a forge_token binding)", nil
 	}
-	host := hostFromURL(p.MRURL)
-	if host == "" {
-		return false, false, "", "merge_request URL has no usable forge host", nil
+	baseURL, refusal := resolveForgeBaseURL(cfg, p.MRURL)
+	if refusal != "" {
+		return false, false, "", refusal, nil
 	}
-	if !forgeHostAllowed(host) {
-		return false, false, "", "forge host not in ITERION_WEBHOOK_FORGE_HOSTS allowlist", nil
-	}
-	api := gitlab.API{HTTP: s.httpClient, BaseURL: "https://" + host, Token: token}
+	api := gitlab.API{HTTP: s.httpClient, BaseURL: baseURL, Token: token}
 	bot, berr := api.CurrentUser(ctx)
 	// Loop-guard: never act on the bot's own notes (else its reply re-fires).
 	if berr == nil && bot.ID == p.AuthorID {
@@ -398,6 +395,35 @@ func forgeHostAllowed(host string) bool {
 		}
 	}
 	return false
+}
+
+// resolveForgeBaseURL decides the forge base URL the bot's forge_token may be
+// sent to for a delivery, returning a non-empty refusal when it must not be
+// sent at all. Precedence:
+//   - cfg.ForgeBaseURL set (per-webhook pin): the payload MR-URL host MUST
+//     match the configured host, else refuse — the precise per-tenant control
+//     for multi-instance BaaS.
+//   - otherwise: derive the host from the (secret-authenticated) payload,
+//     gated by the optional global ITERION_WEBHOOK_FORGE_HOSTS allowlist.
+func resolveForgeBaseURL(cfg webhooks.Config, mrURL string) (baseURL, refusal string) {
+	payloadHost := hostFromURL(mrURL)
+	if payloadHost == "" {
+		return "", "merge_request URL has no usable forge host"
+	}
+	if cfg.ForgeBaseURL != "" {
+		want := hostFromURL(cfg.ForgeBaseURL)
+		if want == "" {
+			return "", "webhook forge_base_url is malformed"
+		}
+		if !strings.EqualFold(want, payloadHost) {
+			return "", fmt.Sprintf("merge_request host %q does not match the webhook's pinned forge %q", payloadHost, want)
+		}
+		return "https://" + want, ""
+	}
+	if !forgeHostAllowed(payloadHost) {
+		return "", "forge host not in ITERION_WEBHOOK_FORGE_HOSTS allowlist"
+	}
+	return "https://" + payloadHost, ""
 }
 
 // gitlabMRMeta flattens a Parsed merge-request into the generic

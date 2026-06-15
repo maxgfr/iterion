@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -53,6 +54,7 @@ type webhookConfigReq struct {
 	SecretOverrides    map[string]string `json:"secret_overrides,omitempty"`
 	AuthorizedRepliers []string          `json:"authorized_repliers,omitempty"`
 	MinReplierRole     *string           `json:"min_replier_role,omitempty"`
+	ForgeBaseURL       *string           `json:"forge_base_url,omitempty"`
 }
 
 // supportedProviders is the closed enum the create endpoint accepts.
@@ -256,6 +258,14 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	if req.MinReplierRole != nil {
 		cfg.MinReplierRole = *req.MinReplierRole
 	}
+	if req.ForgeBaseURL != nil {
+		normalized, verr := validateForgeBaseURL(*req.ForgeBaseURL)
+		if verr != nil {
+			httpError(w, http.StatusBadRequest, "%s", verr.Error())
+			return
+		}
+		cfg.ForgeBaseURL = normalized
+	}
 	// HMAC-mode webhooks need the minted plaintext sealed at rest so a
 	// later request can recompute HMAC(body) — the operator pastes the
 	// same iwh_ value into the forge's "secret" field.
@@ -296,6 +306,22 @@ func (s *Server) sealWebhookHMAC(webhookID, plaintext string) ([]byte, error) {
 		return nil, errors.New("server: hmac webhook requires sealer (configure Sealer)")
 	}
 	return webhooks.SealHMACSecret(s.sealer, webhookID, plaintext)
+}
+
+// validateForgeBaseURL normalizes a webhook's optional forge pin. Empty is
+// allowed (no pin). A non-empty value must be an absolute https URL with a
+// host and no userinfo; it is normalized to scheme://host (path/query dropped)
+// so the runtime can compare it against the payload's MR-URL host.
+func validateForgeBaseURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+		return "", fmt.Errorf("forge_base_url must be an absolute https URL with a host (e.g. https://gitlab.example.com)")
+	}
+	return "https://" + u.Host, nil
 }
 
 // validateKeyOverrides rejects a webhook key override that references a BYOK
@@ -400,6 +426,14 @@ func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.MinReplierRole != nil {
 		cfg.MinReplierRole = *req.MinReplierRole
+	}
+	if req.ForgeBaseURL != nil {
+		normalized, verr := validateForgeBaseURL(*req.ForgeBaseURL)
+		if verr != nil {
+			httpError(w, http.StatusBadRequest, "%s", verr.Error())
+			return
+		}
+		cfg.ForgeBaseURL = normalized
 	}
 	// Re-normalise bot scope only when the caller touched it.
 	if req.BotIDs != nil || req.WildcardBots != nil {
