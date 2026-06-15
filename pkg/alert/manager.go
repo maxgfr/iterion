@@ -338,6 +338,16 @@ func (m *Manager) dispatch(sinks []Sink, alerts []Alert) {
 		for _, s := range sinks {
 			s, a := s, a
 			go func() {
+				// Sinks are user-supplied integrations (webhook, slack,
+				// …) — the most likely panic surface in the product. A
+				// panic in a detached goroutine takes down the whole
+				// process, so contain it here (matching the recover
+				// guards on the runtime/dispatcher goroutines).
+				defer func() {
+					if r := recover(); r != nil && m.logger != nil {
+						m.logger.Error("alert: sink panicked for %s run=%s: %v", a.Kind, a.RunID, r)
+					}
+				}()
 				ctx, cancel := context.WithTimeout(context.Background(), m.notifyTimeout)
 				defer cancel()
 				s.Notify(ctx, a)

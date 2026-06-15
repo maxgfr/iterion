@@ -52,6 +52,23 @@ func newTestManager(sink Sink) *Manager {
 	)
 }
 
+// A panicking sink must be contained: it must neither crash the process
+// (a panic in a detached goroutine is unrecoverable by the caller) nor
+// stop sibling sinks from receiving the alert. Without the recover guard
+// in dispatch, this test aborts the whole test binary.
+func TestDispatchRecoversFromPanickingSink(t *testing.T) {
+	capture := &captureSink{}
+	panicSink := FuncSink(func(context.Context, Alert) { panic("boom") })
+	m := NewManager()
+
+	m.dispatch([]Sink{panicSink, capture}, []Alert{{RunID: "r1"}})
+
+	waitFor(t, func() bool { return len(capture.snapshot()) == 1 })
+	if got := capture.snapshot(); got[0].RunID != "r1" {
+		t.Fatalf("capture got %+v; want RunID r1", got)
+	}
+}
+
 func TestBudgetWarningFiresOncePerAxis(t *testing.T) {
 	sink := &captureSink{}
 	m := newTestManager(sink)
