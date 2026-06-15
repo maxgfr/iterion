@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
@@ -294,6 +295,21 @@ func (e *Engine) execLLMRouterMulti(ctx context.Context, rs *runState, routerNod
 	// Pre-compute convergence point so branches know where to stop.
 	llmPreComputedConvergence := e.findConvergencePoint(routerNodeID, fanEdges)
 
+	// Decide the sibling-cancellation policy, mirroring execFanOut: under
+	// wait_all (the default at the convergence node) any branch failure
+	// dooms the run, so cancel siblings to stop them spending tokens/USD on
+	// work that will be discarded. Under best_effort, peer failures are
+	// tolerated, so cancel siblings only on budget exhaustion or parent ctx
+	// cancellation (both global).
+	cancelOnFirstFailure := true
+	if llmPreComputedConvergence != "" {
+		if convNode, ok := e.workflow.Nodes[llmPreComputedConvergence]; ok {
+			if mode := nodeAwaitMode(convNode); mode == ir.AwaitBestEffort {
+				cancelOnFirstFailure = false
+			}
+		}
+	}
+
 	// Deep-copy parent outputs and artifacts so branches can't mutate shared state.
 	parentOutputs := copyOutputs(rs.outputs)
 	parentArtifacts := copyOutputs(rs.artifacts)
@@ -324,31 +340,72 @@ func (e *Engine) execLLMRouterMulti(ctx context.Context, rs *runState, routerNod
 					}
 				}
 			}()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+			// Acquire a semaphore slot, but bail if the fan-out is already
+			// cancelled (budget trip, sibling failure under wait_all, or
+			// parent cancel) — otherwise a branch queued behind maxParallel
+			// would block here forever waiting for a slot held by a branch
+			// wedged in executor.Execute. Emitting a cancelled result keeps
+			// the collector's count balanced. (Mirrors execFanOut.)
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }() // release
+			case <-branchCtx.Done():
+				resultsCh <- &branchResult{
+					branchID: branchID,
+					outputs:  make(map[string]map[string]interface{}),
+					err:      e.wrapContextErr(branchCtx.Err()),
+				}
+				return
+			}
 
 			result := e.execBranch(branchCtx, rs, branchID, edge, parentOutputs, parentArtifacts, llmPreComputedConvergence)
-			if result != nil && result.err != nil && errors.Is(result.err, ErrBudgetExceeded) {
-				cancelBranches()
+			// Cancel siblings on budget exhaustion (any await mode) or on any
+			// failure under wait_all — see cancelOnFirstFailure above.
+			if result != nil && result.err != nil {
+				if errors.Is(result.err, ErrBudgetExceeded) || cancelOnFirstFailure {
+					cancelBranches()
+				}
 			}
 			resultsCh <- result
 		}(edge, branchID)
 	}
 
-	// Collect all results, ctx-aware so parent cancellation propagates.
+	// Collect all results. The collector is ctx-aware: if the parent ctx
+	// fires (run cancellation, timeout) we still drain branches that already
+	// started but won't honour cancellation immediately, bounded by a grace
+	// timer so a branch wedged in executor.Execute can't hang the engine
+	// forever. doneCh is niled after the first ctx fire so the (always-ready)
+	// closed channel doesn't busy-spin the select. (Mirrors execFanOut.)
 	results := make([]*branchResult, 0, len(fanEdges))
 	var ctxErr error
-	for i := 0; i < len(fanEdges); i++ {
+	doneCh := ctx.Done()
+	var graceCh <-chan time.Time
+	var graceTimer *time.Timer
+	for collected := 0; collected < len(fanEdges); {
 		select {
 		case r := <-resultsCh:
 			results = append(results, r)
-		case <-ctx.Done():
-			if ctxErr == nil {
-				ctxErr = ctx.Err()
-				cancelBranches()
+			collected++
+		case <-doneCh:
+			ctxErr = ctx.Err()
+			cancelBranches()
+			doneCh = nil
+			graceTimer = time.NewTimer(branchCancelGracePeriod)
+			graceCh = graceTimer.C
+		case <-graceCh:
+			// Cancelled, and the grace window elapsed with branches still
+			// running — they're wedged in executor.Execute ignoring ctx.
+			// Stop waiting so the run can fail/checkpoint instead of hanging
+			// forever. resultsCh is buffered to len(fanEdges), so a wedged
+			// branch's eventual send never blocks.
+			if abandoned := len(fanEdges) - collected; abandoned > 0 && e.logger != nil {
+				e.logger.Warn("llm router fan_out from %s: abandoning %d branch(es) still running %s after cancellation (wedged in executor.Execute?)", routerNodeID, abandoned, branchCancelGracePeriod)
 			}
-			results = append(results, <-resultsCh)
+			collected = len(fanEdges)
 		}
+	}
+	if graceTimer != nil {
+		graceTimer.Stop()
 	}
 	if ctxErr != nil {
 		return "", e.wrapContextErr(ctxErr)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -507,4 +508,87 @@ func TestLLMRouterNoExplicitModel(t *testing.T) {
 	if r.Status != store.RunStatusFinished {
 		t.Errorf("expected status finished, got %s", r.Status)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: LLM multi-router cancellation abandons a wedged branch (F1)
+// ---------------------------------------------------------------------------
+
+// A branch wedged in executor.Execute (ignores ctx) under an LLM
+// multi-select router must not hang the run after cancellation: like
+// execFanOut, execLLMRouterMulti bounds its post-cancel collector drain by
+// branchCancelGracePeriod and abandons the wedged branch. Without the bound
+// the collector blocks forever on the wedged branch's result.
+//
+// Regression test for the LLM-router fan-out missing the cancellation
+// hardening that fan_out.go received (ctx-aware semaphore acquire + bounded
+// collector drain). Mirrors TestFanOutCancelAbandonsWedgedBranch.
+func TestLLMRouterMultiCancelAbandonsWedgedBranch(t *testing.T) {
+	oldGrace := branchCancelGracePeriod
+	branchCancelGracePeriod = 100 * time.Millisecond
+	defer func() { branchCancelGracePeriod = oldGrace }()
+
+	wf := &ir.Workflow{
+		Name:  "llm_router_wedged",
+		Entry: "entry",
+		Nodes: map[string]ir.Node{
+			"entry":      &ir.AgentNode{BaseNode: ir.BaseNode{ID: "entry"}},
+			"llm_router": &ir.RouterNode{BaseNode: ir.BaseNode{ID: "llm_router"}, LLMFields: ir.LLMFields{Model: "test-model"}, RouterMode: ir.RouterLLM, RouterMulti: true},
+			"agent_a":    &ir.AgentNode{BaseNode: ir.BaseNode{ID: "agent_a"}},
+			"agent_b":    &ir.AgentNode{BaseNode: ir.BaseNode{ID: "agent_b"}},
+			"final":      &ir.AgentNode{BaseNode: ir.BaseNode{ID: "final"}, AwaitMode: ir.AwaitWaitAll},
+			"done":       &ir.DoneNode{BaseNode: ir.BaseNode{ID: "done"}},
+			"fail":       &ir.FailNode{BaseNode: ir.BaseNode{ID: "fail"}},
+		},
+		Edges: []*ir.Edge{
+			{From: "entry", To: "llm_router"},
+			{From: "llm_router", To: "agent_a"},
+			{From: "llm_router", To: "agent_b"},
+			{From: "agent_a", To: "final"},
+			{From: "agent_b", To: "final"},
+			{From: "final", To: "done"},
+		},
+		Schemas: map[string]*ir.Schema{},
+		Prompts: map[string]*ir.Prompt{},
+		Vars:    map[string]*ir.Var{},
+		Loops:   map[string]*ir.Loop{},
+		Budget:  &ir.Budget{MaxParallelBranches: 2}, // both branches run concurrently
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	release := make(chan struct{})
+	exec := newStubExecutor()
+	exec.on("entry", func(_ map[string]interface{}) (map[string]interface{}, error) {
+		return map[string]interface{}{}, nil
+	})
+	exec.on("llm_router", func(_ map[string]interface{}) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"selected_routes": []interface{}{"agent_a", "agent_b"},
+			"reasoning":       "need both",
+		}, nil
+	})
+	exec.on("agent_a", func(_ map[string]interface{}) (map[string]interface{}, error) {
+		cancel() // trip cancellation while agent_b is mid-flight
+		return nil, ctx.Err()
+	})
+	exec.on("agent_b", func(_ map[string]interface{}) (map[string]interface{}, error) {
+		<-release // wedged: ignores ctx, never returns until released
+		return map[string]interface{}{}, nil
+	})
+
+	s := tmpStore(t)
+	eng := New(wf, s, exec)
+
+	done := make(chan error, 1)
+	go func() { done <- eng.Run(ctx, "run-llm-wedged", nil) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected a cancellation error")
+		}
+	case <-time.After(3 * time.Second):
+		close(release)
+		t.Fatal("llm router fan_out hung on a wedged branch despite cancellation (collector drain not bounded)")
+	}
+	close(release) // let the wedged branch goroutine exit cleanly
 }
