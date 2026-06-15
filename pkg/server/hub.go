@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -36,6 +37,7 @@ type Hub struct {
 	register   chan *wsClient
 	unregister chan *wsClient
 	done       chan struct{}
+	stopOnce   sync.Once // guards done against a double close (panic)
 }
 
 // wsClient wraps a single WebSocket connection.
@@ -184,9 +186,11 @@ func (h *Hub) Run() {
 	}
 }
 
-// Stop signals the hub to shut down.
+// Stop signals the hub to shut down. Idempotent: closing done twice would
+// panic, so the close is guarded by sync.Once (matching the other Stop/Close
+// methods in this tree, e.g. dispatcher's config_watcher / engine_runner).
 func (h *Hub) Stop() {
-	close(h.done)
+	h.stopOnce.Do(func() { close(h.done) })
 }
 
 // Broadcast marshals a FileEvent to JSON and sends it to all connected clients.
