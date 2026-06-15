@@ -65,6 +65,27 @@ func stubSnapshotChunk(exec *scenarioExecutor) {
 	})
 }
 
+// stubVerifyGate registers stubs for the deterministic build/test gate
+// the loop runs AFTER streak_check fires `stop` and BEFORE committing
+// (streak_check -> verify_build -> verify_run -> commit_changes -> done).
+// The e2e executor cannot run the real verify nodes (verify_build adapts
+// to the repo's tooling; verify_run executes .whole_improve_loop.verify.sh),
+// so this models a GREEN gate: verify_run reports passed=true so the run
+// routes verify_run -> commit_changes when passed -> done. Without it the
+// unstubbed verify_run returns no `passed` field, the `when passed` edge is
+// never taken, verify_loop(3) exhausts and the run routes to `fail`. Tests
+// that never converge (loop-exhaustion scenarios) never reach this gate and
+// don't need it.
+func stubVerifyGate(exec *scenarioExecutor) {
+	exec.on("verify_run", func(_ map[string]interface{}) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"passed":   true,
+			"log_tail": "",
+			"_tokens":  1,
+		}, nil
+	})
+}
+
 // TestWholeImproveLoop_HappyPath simulates the canonical "two
 // consecutive cross-family approvals" scenario:
 //
@@ -74,6 +95,7 @@ func TestWholeImproveLoop_HappyPath(t *testing.T) {
 	wf := compileFixtureStubSafe(t, "whole-improve-loop/main.bot")
 	exec := newScenarioExecutor()
 	stubSnapshotChunk(exec)
+	stubVerifyGate(exec)
 
 	exec.on("reviewer_claude", func(_ map[string]interface{}) (map[string]interface{}, error) {
 		return map[string]interface{}{
@@ -137,6 +159,7 @@ func TestWholeImproveLoop_FixThenApprove(t *testing.T) {
 	wf := compileFixtureStubSafe(t, "whole-improve-loop/main.bot")
 	exec := newScenarioExecutor()
 	stubSnapshotChunk(exec)
+	stubVerifyGate(exec)
 
 	claudeCalls := 0
 	exec.on("reviewer_claude", func(_ map[string]interface{}) (map[string]interface{}, error) {
@@ -250,6 +273,7 @@ func TestWholeImproveLoop_EventTrace(t *testing.T) {
 	wf := compileFixtureStubSafe(t, "whole-improve-loop/main.bot")
 	exec := newScenarioExecutor()
 	stubSnapshotChunk(exec)
+	stubVerifyGate(exec)
 	exec.on("reviewer_claude", func(_ map[string]interface{}) (map[string]interface{}, error) {
 		return map[string]interface{}{
 			"approved": true, "family": "claude",
@@ -434,6 +458,7 @@ func TestWholeImproveLoop_CursorThreadsAndStreakAccumulates(t *testing.T) {
 	}
 	exec.on("reviewer_claude", approve("claude"))
 	exec.on("reviewer_gpt", approve("gpt"))
+	stubVerifyGate(exec)
 
 	s := tmpStore(t)
 	eng := runtime.New(wf, s, exec)
