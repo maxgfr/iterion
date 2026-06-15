@@ -544,6 +544,13 @@ func (s *Server) handleGetToolBlob(w http.ResponseWriter, r *http.Request) {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "kind must be input or output")
 		return
 	}
+	// Tenant scoping (see handleListArtifacts): reject cross-tenant
+	// before reading the blob. Dormant today (mongo lacks ToolBlobStore
+	// → 503 below) but keeps the guard uniform for when it lands.
+	if _, err := s.runs.LoadRunCtx(r.Context(), id); err != nil {
+		s.httpErrorFor(w, r, http.StatusNotFound, "run not found: %v", err)
+		return
+	}
 	q := r.URL.Query()
 	var offset, limit int64
 	if v := q.Get("offset"); v != "" {
@@ -690,6 +697,15 @@ func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "missing run id")
 		return
 	}
+	// Tenant scoping: confirm the caller can see this run before any
+	// cancel mutation. In cloud mode Cancel descends into the publisher
+	// with a non-request context, so without this gate the mongo tenant
+	// filter never runs and a cross-tenant run could be cancelled by id.
+	// (Also rejects a malformed id via the store's path-component check.)
+	if _, err := s.runs.LoadRunCtx(r.Context(), id); err != nil {
+		s.httpErrorFor(w, r, http.StatusNotFound, "run not found: %v", err)
+		return
+	}
 	// Log cancel intent with source attribution. Mystery context-canceled
 	// failures during a run mid-flight typically trace back to either this
 	// HTTP endpoint or the WS `cancel` envelope (handleCancel in runs_ws.go);
@@ -813,6 +829,12 @@ func (s *Server) handlePauseRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "missing run id")
+		return
+	}
+	// Tenant scoping: confirm the caller can see this run before the
+	// pause mutation (see handleCancelRun for the cloud-mode rationale).
+	if _, err := s.runs.LoadRunCtx(r.Context(), id); err != nil {
+		s.httpErrorFor(w, r, http.StatusNotFound, "run not found: %v", err)
 		return
 	}
 	if s.logger != nil {

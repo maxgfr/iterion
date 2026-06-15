@@ -24,6 +24,14 @@ func (s *Server) handleGetRunLog(w http.ResponseWriter, r *http.Request) {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "missing run id")
 		return
 	}
+	// Tenant scoping + id validation: load under the caller's context so
+	// the mongo tenant filter rejects cross-tenant reads, and the store's
+	// path-component sanitiser rejects a traversal-shaped id, before we
+	// join it into <store>/runs/<id>/run.log below.
+	if _, err := s.runs.LoadRunCtx(r.Context(), id); err != nil {
+		s.httpErrorFor(w, r, http.StatusNotFound, "run not found: %v", err)
+		return
+	}
 	from, _ := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64)
 	if from < 0 {
 		from = 0
