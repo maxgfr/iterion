@@ -103,10 +103,15 @@ func (s *FilesystemRunStore) WriteTurn(_ context.Context, t *TurnCheckpoint) err
 
 // refreshTurnIndex merges the (LoopIter, TurnIndex, WrittenAt) tuple
 // into the per-node index. Reads the current index, updates the slot,
-// writes atomically. Concurrent writes from parallel branches are
-// serialised by FilesystemRunStore.mu — held by the caller (Engine
-// keeps turn writes single-threaded per node).
+// writes atomically. The read-modify-write of index.json is guarded by
+// s.mu: WriteTurn is driven by the per-turn backend hook on EACH
+// parallel branch's goroutine (model/hooks.go), not under s.mu, so two
+// turns of the same node racing here would otherwise lose index entries
+// (last-writer-wins on the whole file). No caller holds s.mu when
+// reaching WriteTurn, so taking it here cannot deadlock.
 func (s *FilesystemRunStore) refreshTurnIndex(runID, nodeID string, loopIter, turn int, writtenAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	path := s.turnIndexPath(runID, nodeID)
 	var idx turnNodeIndex
 	if data, err := os.ReadFile(path); err == nil {
