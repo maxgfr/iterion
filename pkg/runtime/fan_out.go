@@ -111,8 +111,27 @@ func (e *Engine) execFanOut(ctx context.Context, rs *runState, routerNodeID stri
 					}
 				}
 			}()
-			sem <- struct{}{}        // acquire semaphore slot
-			defer func() { <-sem }() // release
+			// Acquire a semaphore slot, but bail if the fan-out is already
+			// cancelled (budget trip, sibling failure with wait_all, or
+			// parent cancel) — otherwise a branch queued behind
+			// maxParallel would block here waiting for a slot held by a
+			// branch wedged in executor.Execute, even though its result is
+			// already doomed. Emitting a cancelled result keeps the
+			// collector's count balanced; it's equivalent to what
+			// execBranch returns at its top-of-loop ctx check, minus the
+			// wait. (No branch_started was emitted yet, so there's no
+			// started/finished imbalance.)
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }() // release
+			case <-branchCtx.Done():
+				resultsCh <- &branchResult{
+					branchID: branchID,
+					outputs:  make(map[string]map[string]interface{}),
+					err:      e.wrapContextErr(branchCtx.Err()),
+				}
+				return
+			}
 
 			result := e.execBranch(branchCtx, rs, branchID, edge, parentOutputs, parentArtifacts, preComputedConvergence)
 			// Cancel siblings to stop them calling executor.Execute when:

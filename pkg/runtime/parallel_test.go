@@ -538,6 +538,66 @@ func TestFanOutContextCancellation(t *testing.T) {
 	}
 }
 
+// Test: bounded parallelism + cancellation must not deadlock. With
+// max_parallel=1 and three branches, b and c queue on the semaphore
+// behind a; when a cancels the run, the ctx-aware acquire lets the
+// queued branches resolve instead of blocking on a slot. (Guards the
+// queued-branch cancel path against a deadlock regression.)
+func TestFanOutBoundedCancellationNoDeadlock(t *testing.T) {
+	wf := &ir.Workflow{
+		Name:  "bounded_cancel",
+		Entry: "entry",
+		Nodes: map[string]ir.Node{
+			"entry":  &ir.AgentNode{BaseNode: ir.BaseNode{ID: "entry"}},
+			"router": &ir.RouterNode{BaseNode: ir.BaseNode{ID: "router"}, RouterMode: ir.RouterFanOutAll},
+			"a":      &ir.AgentNode{BaseNode: ir.BaseNode{ID: "a"}},
+			"b":      &ir.AgentNode{BaseNode: ir.BaseNode{ID: "b"}},
+			"c":      &ir.AgentNode{BaseNode: ir.BaseNode{ID: "c"}},
+			"done":   &ir.DoneNode{BaseNode: ir.BaseNode{ID: "done"}, AwaitMode: ir.AwaitWaitAll},
+			"fail":   &ir.FailNode{BaseNode: ir.BaseNode{ID: "fail"}},
+		},
+		Edges: []*ir.Edge{
+			{From: "entry", To: "router"},
+			{From: "router", To: "a"}, {From: "router", To: "b"}, {From: "router", To: "c"},
+			{From: "a", To: "done"}, {From: "b", To: "done"}, {From: "c", To: "done"},
+		},
+		Schemas: map[string]*ir.Schema{},
+		Prompts: map[string]*ir.Prompt{},
+		Vars:    map[string]*ir.Var{},
+		Loops:   map[string]*ir.Loop{},
+		Budget:  &ir.Budget{MaxParallelBranches: 1},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	exec := newStubExecutor()
+	exec.on("entry", func(_ map[string]interface{}) (map[string]interface{}, error) {
+		return map[string]interface{}{}, nil
+	})
+	exec.on("a", func(_ map[string]interface{}) (map[string]interface{}, error) {
+		cancel() // cancel while b and c are queued on the semaphore
+		return nil, ctx.Err()
+	})
+	noop := func(_ map[string]interface{}) (map[string]interface{}, error) {
+		return map[string]interface{}{}, nil
+	}
+	exec.on("b", noop)
+	exec.on("c", noop)
+
+	s := tmpStore(t)
+	eng := New(wf, s, exec)
+
+	done := make(chan error, 1)
+	go func() { done <- eng.Run(ctx, "run-bounded-cancel", nil) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected a cancellation error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("fan-out deadlocked under bounded parallelism + cancellation")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Test: branch events carry correct branch_id
 // ---------------------------------------------------------------------------
