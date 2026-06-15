@@ -4,11 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
+
+// branchCancelGracePeriod bounds how long the fan-out collector waits,
+// after cancellation, for still-running branches to honour ctx and
+// return. Branches that observe ctx (the production backends kill their
+// subprocess / abort the stream) return well within this; the bound only
+// matters for a branch wedged in executor.Execute that ignores ctx —
+// without it the collector would block forever on that branch's result.
+// A package var so tests can shorten it.
+var branchCancelGracePeriod = 5 * time.Second
 
 // ---------------------------------------------------------------------------
 // Fan-out / Join — parallel branch scheduler
@@ -160,21 +170,39 @@ func (e *Engine) execFanOut(ctx context.Context, rs *runState, routerNodeID stri
 	// cancellation so the final aggregate error reflects it.
 	results := make([]*branchResult, 0, len(fanEdges))
 	var ctxErr error
-	for i := 0; i < len(fanEdges); i++ {
+	// doneCh is niled after the first ctx fire so the (always-ready)
+	// closed channel doesn't busy-spin the select. graceCh stays nil
+	// until cancellation, then bounds how long we wait for the remaining
+	// branches.
+	doneCh := ctx.Done()
+	var graceCh <-chan time.Time
+	var graceTimer *time.Timer
+	for collected := 0; collected < len(fanEdges); {
 		select {
 		case r := <-resultsCh:
 			results = append(results, r)
-		case <-ctx.Done():
-			if ctxErr == nil {
-				ctxErr = ctx.Err()
-				cancelBranches()
+			collected++
+		case <-doneCh:
+			ctxErr = ctx.Err()
+			cancelBranches()
+			doneCh = nil
+			graceTimer = time.NewTimer(branchCancelGracePeriod)
+			graceCh = graceTimer.C
+		case <-graceCh:
+			// Cancelled, and the grace window elapsed with branches still
+			// running — they're wedged in executor.Execute ignoring ctx.
+			// Stop waiting so the run can fail/checkpoint instead of
+			// hanging forever. resultsCh is buffered to len(fanEdges), so
+			// a wedged branch's eventual send never blocks; its goroutine
+			// exits when Execute finally returns.
+			if abandoned := len(fanEdges) - collected; abandoned > 0 && e.logger != nil {
+				e.logger.Warn("fan_out from %s: abandoning %d branch(es) still running %s after cancellation (wedged in executor.Execute?)", routerNodeID, abandoned, branchCancelGracePeriod)
 			}
-			// Re-receive on resultsCh; we MUST drain to avoid goroutine
-			// leaks (a goroutine blocked on `resultsCh <- result` would
-			// otherwise leak). The buffered channel of size len(fanEdges)
-			// guarantees no producer ever blocks on send.
-			results = append(results, <-resultsCh)
+			collected = len(fanEdges)
 		}
+	}
+	if graceTimer != nil {
+		graceTimer.Stop()
 	}
 	if ctxErr != nil {
 		return "", e.wrapContextErr(ctxErr)

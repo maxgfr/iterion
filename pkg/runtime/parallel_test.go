@@ -598,6 +598,70 @@ func TestFanOutBoundedCancellationNoDeadlock(t *testing.T) {
 	}
 }
 
+// A branch wedged in executor.Execute (ignores ctx) must not hang the
+// whole run after cancellation: the collector bounds its post-cancel
+// drain by branchCancelGracePeriod and abandons the wedged branch.
+// Without the bound, the collector blocks forever on the wedged result.
+func TestFanOutCancelAbandonsWedgedBranch(t *testing.T) {
+	oldGrace := branchCancelGracePeriod
+	branchCancelGracePeriod = 100 * time.Millisecond
+	defer func() { branchCancelGracePeriod = oldGrace }()
+
+	wf := &ir.Workflow{
+		Name:  "wedged_branch",
+		Entry: "entry",
+		Nodes: map[string]ir.Node{
+			"entry":  &ir.AgentNode{BaseNode: ir.BaseNode{ID: "entry"}},
+			"router": &ir.RouterNode{BaseNode: ir.BaseNode{ID: "router"}, RouterMode: ir.RouterFanOutAll},
+			"a":      &ir.AgentNode{BaseNode: ir.BaseNode{ID: "a"}},
+			"b":      &ir.AgentNode{BaseNode: ir.BaseNode{ID: "b"}},
+			"done":   &ir.DoneNode{BaseNode: ir.BaseNode{ID: "done"}, AwaitMode: ir.AwaitWaitAll},
+			"fail":   &ir.FailNode{BaseNode: ir.BaseNode{ID: "fail"}},
+		},
+		Edges: []*ir.Edge{
+			{From: "entry", To: "router"},
+			{From: "router", To: "a"}, {From: "router", To: "b"},
+			{From: "a", To: "done"}, {From: "b", To: "done"},
+		},
+		Schemas: map[string]*ir.Schema{},
+		Prompts: map[string]*ir.Prompt{},
+		Vars:    map[string]*ir.Var{},
+		Loops:   map[string]*ir.Loop{},
+		Budget:  &ir.Budget{MaxParallelBranches: 2}, // both branches run concurrently
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	release := make(chan struct{})
+	exec := newStubExecutor()
+	exec.on("entry", func(_ map[string]interface{}) (map[string]interface{}, error) {
+		return map[string]interface{}{}, nil
+	})
+	exec.on("a", func(_ map[string]interface{}) (map[string]interface{}, error) {
+		cancel() // trip cancellation while b is mid-flight
+		return nil, ctx.Err()
+	})
+	exec.on("b", func(_ map[string]interface{}) (map[string]interface{}, error) {
+		<-release // wedged: ignores ctx, never returns until released
+		return map[string]interface{}{}, nil
+	})
+
+	s := tmpStore(t)
+	eng := New(wf, s, exec)
+
+	done := make(chan error, 1)
+	go func() { done <- eng.Run(ctx, "run-wedged", nil) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected a cancellation error")
+		}
+	case <-time.After(3 * time.Second):
+		close(release)
+		t.Fatal("fan_out hung on a wedged branch despite cancellation (collector drain not bounded)")
+	}
+	close(release) // let the wedged branch goroutine exit cleanly
+}
+
 // ---------------------------------------------------------------------------
 // Test: branch events carry correct branch_id
 // ---------------------------------------------------------------------------
