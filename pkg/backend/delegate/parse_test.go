@@ -53,11 +53,11 @@ func TestParseSDKOutput(t *testing.T) {
 			wantKey:    "echoed", wantVal: "FENCED", wantFallback: false,
 		},
 		{
-			name:         "plain text with schema wraps as fallback",
-			resultText:   strptr("just some prose, no json"),
-			structured:   nil,
-			schema:       schema,
-			wantKey:      "text", wantVal: "just some prose, no json", wantFallback: true,
+			name:       "plain text with schema wraps as fallback",
+			resultText: strptr("just some prose, no json"),
+			structured: nil,
+			schema:     schema,
+			wantKey:    "text", wantVal: "just some prose, no json", wantFallback: true,
 		},
 		{
 			name:       "empty structured_output AND empty text yields empty map (drives formatting fallback)",
