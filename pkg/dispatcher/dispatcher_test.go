@@ -20,6 +20,14 @@ type fakeTracker struct {
 	issues    map[string]*tracker.Issue
 	claims    map[string]string
 	listCalls atomic.Int64
+
+	// Optional gate used by TestSnapshotLockFreeWhileActorBlocked. When
+	// listBlock is non-nil, the first ListCandidates call signals
+	// listEntered (once) then blocks receiving on listBlock until the
+	// test closes it — simulating a slow tracker call wedging the actor.
+	listBlock     chan struct{}
+	listEntered   chan struct{}
+	listEnterOnce sync.Once
 }
 
 func newFakeTracker() *fakeTracker {
@@ -42,6 +50,12 @@ func (f *fakeTracker) Name() string { return "fake" }
 
 func (f *fakeTracker) ListCandidates(_ context.Context) ([]tracker.Issue, error) {
 	f.listCalls.Add(1)
+	if f.listBlock != nil {
+		if f.listEntered != nil {
+			f.listEnterOnce.Do(func() { close(f.listEntered) })
+		}
+		<-f.listBlock
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make([]tracker.Issue, 0, len(f.issues))
@@ -184,6 +198,52 @@ func TestDispatcherDispatchAndFinish(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("dispatcher did not release claim, last snapshot=%+v", c.Snapshot())
+}
+
+// TestSnapshotLockFreeWhileActorBlocked proves ADR-028 Step 1: Snapshot()
+// reads the last-published immutable snapshot lock-free and returns
+// promptly even while the actor goroutine is provably blocked inside a
+// slow tracker ListCandidates call. Before the read-path decouple,
+// Snapshot() routed through the actor and would wedge until the 5s
+// timeout, returning a zero Snapshot.
+func TestSnapshotLockFreeWhileActorBlocked(t *testing.T) {
+	ft := newFakeTracker()
+	ft.add(tracker.Issue{ID: "fake:1", Identifier: "fake#1", Title: "go", WorkflowState: "ready"})
+	ft.listBlock = make(chan struct{})
+	ft.listEntered = make(chan struct{})
+
+	runner := &StubRunner{Handler: func(_ context.Context, _ DispatchSpec) error { return nil }}
+	// Long polling so only the kick-off tick fires while we hold the gate.
+	c := newTestDispatcher(t, runner, ft, time.Hour)
+
+	// Release the gate first (LIFO defer) so the actor always unblocks,
+	// even if an assertion below fails.
+	defer c.Stop()
+	defer close(ft.listBlock)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.Start(ctx)
+
+	// Wait until the actor is provably parked inside ListCandidates.
+	select {
+	case <-ft.listEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("actor never entered the blocked ListCandidates call")
+	}
+
+	// While the actor is blocked, Snapshot() must return promptly with
+	// the last-published (seeded) state — not wait on the wedged actor.
+	got := make(chan Snapshot, 1)
+	go func() { got <- c.Snapshot() }()
+	select {
+	case snap := <-got:
+		if snap.Name != "test" {
+			t.Fatalf("Snapshot returned an empty/zero view while actor blocked: %+v", snap)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Snapshot() blocked on the wedged actor — read path is not decoupled")
+	}
 }
 
 func TestDispatcherRetriesOnFailure(t *testing.T) {

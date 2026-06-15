@@ -94,15 +94,6 @@ type cmdRefresh struct{}
 
 func (cmdRefresh) apply(c *Dispatcher, ctx context.Context) { c.tick(ctx) }
 
-// cmdSnapshot returns the current snapshot via reply channel.
-type cmdSnapshot struct {
-	reply chan Snapshot
-}
-
-func (m cmdSnapshot) apply(c *Dispatcher, _ context.Context) {
-	m.reply <- c.buildSnapshot()
-}
-
 // cmdReload swaps in a new validated config.
 type cmdReload struct {
 	cfg *Config

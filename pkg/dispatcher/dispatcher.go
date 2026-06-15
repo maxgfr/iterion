@@ -51,6 +51,13 @@ type Dispatcher struct {
 	tracker tracker.Tracker
 	runner  Runner
 
+	// snapshot holds the most-recently-published immutable Snapshot. The
+	// actor is the sole writer (via fireSnapshot); Snapshot() reads it
+	// lock-free so dashboard reads never wait on the actor's in-flight
+	// tracker I/O. Mirrors the cfg atomic.Pointer precedent above. See
+	// docs/adr/028-dispatcher-actor-io-offload.md.
+	snapshot atomic.Pointer[Snapshot]
+
 	workspaces *Workspaces
 	logger     *iterlog.Logger
 	storeDir   string
@@ -145,6 +152,11 @@ func New(opts Options) (*Dispatcher, error) {
 		ws:         newWsBridge(opts.Logger),
 	}
 	c.cfg.Store(opts.Config)
+	// Seed the published snapshot so Snapshot() never reads a nil pointer
+	// before the actor's first fireSnapshot. Safe to build here: cfg and
+	// state are both set and no other goroutine exists yet.
+	seed := c.buildSnapshot()
+	c.snapshot.Store(&seed)
 	// Wire the daily spend-cap ledger when a store dir is available. The
 	// FilesystemRunStore implements store.SpendStore; the runtime runs
 	// launched by this dispatcher write into the same <store>/spend/
@@ -330,35 +342,18 @@ func (c *Dispatcher) Resume() {
 // IsPaused reports whether new dispatches are currently suspended.
 func (c *Dispatcher) IsPaused() bool { return c.paused.Load() }
 
-// Snapshot returns a consistent view of the actor's state. After Stop
-// (or before Start) it returns a zero Snapshot rather than blocking
-// the caller indefinitely.
-//
-// The 5-second cap on the reply select guards against the actor
-// panicking between consuming the command and writing the reply
-// (the recovery is in actorLoop's defer, but a recovered panic still
-// drops the in-flight command). HTTP handlers calling Snapshot during
-// shutdown were observed wedged on the bare <-reply read.
+// Snapshot returns a consistent view of the actor's state. The read is
+// lock-free: it loads the most-recently-published immutable Snapshot
+// (written by the actor via fireSnapshot) and never waits on the actor
+// goroutine — so a dashboard read returns promptly even while the actor
+// is blocked inside a slow synchronous tracker call. Before Start it
+// returns the construction-time seed; after Stop it returns the
+// last-published state. See docs/adr/028-dispatcher-actor-io-offload.md.
 func (c *Dispatcher) Snapshot() Snapshot {
-	reply := make(chan Snapshot, 1)
-	select {
-	case c.cmds <- cmdSnapshot{reply: reply}:
-	case <-c.stop:
-		return Snapshot{}
-	}
-	// NewTimer + Stop so an early return via reply/stop doesn't leak a
-	// timer goroutine waiting out the full 5s — under shutdown bursts
-	// that leaked tens of timers per second.
-	t := time.NewTimer(5 * time.Second)
-	defer t.Stop()
-	select {
-	case s := <-reply:
-		return s
-	case <-c.stop:
-		return Snapshot{}
-	case <-t.C:
-		return Snapshot{}
-	}
+	// New() always seeds the pointer before returning, so Load() is never
+	// nil. A nil-fallback to buildSnapshot() would read c.state off the
+	// actor goroutine — the very race this read path removes — so we don't.
+	return *c.snapshot.Load()
 }
 
 // SetSnapshotPublisher swaps the fan-out hook (used to wire/unwire WS).
@@ -472,6 +467,10 @@ func (c *Dispatcher) shutdown() {
 // the optional user-supplied publisher.
 func (c *Dispatcher) fireSnapshot() {
 	snap := c.buildSnapshot()
+	// Publish the immutable copy into the lock-free read path before the
+	// fan-out, so Snapshot() readers see this state without touching the
+	// actor. The actor is the sole writer of c.snapshot.
+	c.snapshot.Store(&snap)
 	c.ws.broadcast(snap)
 	c.publishMu.Lock()
 	pub := c.publisher
