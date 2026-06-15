@@ -135,11 +135,17 @@ func (m *Manager) EnsureServers(ctx context.Context, registry *tool.Registry, se
 	var errs []error
 	var landed []string
 	for _, server := range servers {
-		if err := m.ensureServer(ctx, registry, server); err != nil {
+		newly, err := m.ensureServer(ctx, registry, server)
+		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		landed = append(landed, server)
+		// Only roll back servers THIS call discovered — a server already
+		// live from a previous EnsureServers must survive an unrelated
+		// failure here, else its tools vanish from the registry.
+		if newly {
+			landed = append(landed, server)
+		}
 	}
 	if len(errs) > 0 {
 		for _, server := range landed {
@@ -307,17 +313,21 @@ func (m *Manager) Close() error {
 	return firstErr
 }
 
-func (m *Manager) ensureServer(ctx context.Context, registry *tool.Registry, server string) error {
+// ensureServer discovers and registers one server's tools. newlyDiscovered is
+// true only when THIS call performed the discovery, so the caller's
+// transactional rollback never tears down a server that was already live from
+// a previous call.
+func (m *Manager) ensureServer(ctx context.Context, registry *tool.Registry, server string) (newlyDiscovered bool, err error) {
 	state, err := m.state(server)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
 	if state.discovered {
-		return nil
+		return false, nil
 	}
 
 	// Try cache first to avoid the ListTools RPC latency.
@@ -332,7 +342,7 @@ func (m *Manager) ensureServer(ctx context.Context, registry *tool.Registry, ser
 	// client for CallTool; the connection is lazy (deferred to first call).
 	client, err := m.clientForState(state)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	didListTools := false
@@ -341,7 +351,7 @@ func (m *Manager) ensureServer(ctx context.Context, registry *tool.Registry, ser
 		var listErr error
 		toolsList, listErr = client.ListTools(ctx)
 		if listErr != nil {
-			return fmt.Errorf("mcp: discover tools for %q: %w", server, listErr)
+			return false, fmt.Errorf("mcp: discover tools for %q: %w", server, listErr)
 		}
 		if m.cache != nil {
 			_ = m.cache.Set(server, state.cfg, toolsList) // best-effort
@@ -391,7 +401,7 @@ func (m *Manager) ensureServer(ctx context.Context, registry *tool.Registry, ser
 			}
 			return text, fmtErr
 		}); err != nil {
-			return fmt.Errorf("mcp: register %s.%s: %w", server, info.Name, err)
+			return false, fmt.Errorf("mcp: register %s.%s: %w", server, info.Name, err)
 		}
 		if m.fingerprints != nil {
 			qualified := "mcp." + serverName + "." + toolName
@@ -414,7 +424,7 @@ func (m *Manager) ensureServer(ctx context.Context, registry *tool.Registry, ser
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
 // smokeTestWorkspace verifies that an MCP server can access the configured
