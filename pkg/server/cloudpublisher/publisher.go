@@ -215,9 +215,8 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 		// timeout so a slow Mongo write doesn't block the NATS
 		// publish.
 		if len(usedIDs) > 0 {
-			p.detached.Add(1)
-			go func(ids []string, t time.Time, tenant string) {
-				defer p.detached.Done()
+			ids, t, tenant := usedIDs, now, tenantID
+			p.goSafeDetached("apikey-markused", func() {
 				// MarkUsed is tenant-filtered; carry the run's tenant onto the
 				// detached ctx (matching the generic-secrets path below) or the
 				// update silently matches nothing and last_used_at never moves.
@@ -226,7 +225,7 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 				for _, id := range ids {
 					_ = p.apiKeys.MarkUsed(bg, id, t)
 				}
-			}(usedIDs, now, tenantID)
+			})
 		}
 	}
 
@@ -255,15 +254,14 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 			usedIDs = append(usedIDs, r.SecretID)
 		}
 		if len(usedIDs) > 0 {
-			p.detached.Add(1)
-			go func(ids []string, t time.Time, tenant string) {
-				defer p.detached.Done()
+			ids, t, tenant := usedIDs, now, tenantID
+			p.goSafeDetached("generic-secret-markused", func() {
 				bg, cancel := context.WithTimeout(store.WithTenant(context.Background(), tenant), 5*time.Second)
 				defer cancel()
 				for _, id := range ids {
 					_ = p.genericSecrets.MarkUsed(bg, id, t)
 				}
-			}(usedIDs, now, tenantID)
+			})
 		}
 	}
 
@@ -671,6 +669,24 @@ func (p *Publisher) Drain(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// goSafeDetached runs fn in a tracked, panic-recovering goroutine: it
+// increments the detached WaitGroup so Drain still waits for it, and
+// contains any panic in the best-effort body (a MarkUsed write into a
+// driver) so it can't crash the process from a goroutine the caller
+// can't recover. label identifies the task in the recovery log.
+func (p *Publisher) goSafeDetached(label string, fn func()) {
+	p.detached.Add(1)
+	go func() {
+		defer p.detached.Done()
+		defer func() {
+			if r := recover(); r != nil && p.logger != nil {
+				p.logger.Error("cloudpublisher: detached task %q panicked: %v", label, r)
+			}
+		}()
+		fn()
+	}()
 }
 
 // varsAsAny upgrades a string-keyed map to interface{} so the wire

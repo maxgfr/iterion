@@ -162,11 +162,11 @@ func (s *Server) webhookAuth(provider webhooks.Provider, next http.Handler) http
 		// path — write it detached (bounded, survives request cancel) so
 		// the handler isn't serialised behind a Mongo round-trip.
 		id, now := cfg.ID, time.Now().UTC()
-		go func() {
+		s.goSafe("webhook-markused", func() {
 			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_ = s.webhookConfigs.MarkUsed(store.WithIdentity(bg, cfg.TenantID, actor), id, now)
-		}()
+		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

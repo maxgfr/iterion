@@ -175,11 +175,11 @@ func (s *Server) identityFromPAT(ctx context.Context, presented string) (auth.Id
 	}
 	// last_used_at is observability — detached write off the hot path.
 	tokenID := t.ID
-	go func() {
+	s.goSafe("pat-markused", func() {
 		bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = s.pats.MarkUsed(bg, tokenID, now)
-	}()
+	})
 	return auth.Identity{
 		UserID:       u.ID,
 		Email:        u.Email,

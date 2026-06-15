@@ -841,13 +841,13 @@ func (s *Server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 			AcceptURL: s.authSvc.PublicURL() + "/invitations/accept?token=" + tok,
 			InvitedBy: id.Email,
 		})
-		go func() {
+		s.goSafe("invitation-email", func() {
 			bg, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			if err := s.authSvc.Mailer().Send(bg, msg); err != nil && s.logger != nil {
 				s.logger.Warn("auth: invitation email to %s: %v", msg.To, err)
 			}
-		}()
+		})
 	}
 	// Return both the persistent ID and the plaintext token so the
 	// admin can copy/email it. The plaintext is never recoverable

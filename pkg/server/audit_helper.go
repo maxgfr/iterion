@@ -57,13 +57,13 @@ func (s *Server) auditWrite(r *http.Request, scope audit.Scope, tenantID, action
 		UserAgent: r.UserAgent(),
 		CreatedAt: time.Now().UTC(),
 	}
-	go func() {
+	s.goSafe("audit-insert", func() {
 		bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := s.auditStore.Insert(bg, e); err != nil && s.logger != nil {
 			s.logger.Warn("audit: insert %s: %v", action, err)
 		}
-	}()
+	})
 }
 
 // ---- REST ----
