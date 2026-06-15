@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 
 import {
   FeatureUnavailableError,
@@ -105,9 +106,9 @@ export default function BindingsTab({ teamID, canManage }: Props) {
   return (
     <div className="space-y-4">
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+        <InlineBanner tone="danger" layout="inline">
           {err}
-        </div>
+        </InlineBanner>
       )}
 
       <div className="flex flex-wrap items-end justify-between gap-2">
@@ -141,7 +142,7 @@ export default function BindingsTab({ teamID, canManage }: Props) {
       {!activeBot ? (
         <EmptyState message="Pick a bot to view its bindings." />
       ) : loading ? (
-        <div className="text-sm text-fg-muted">Loading…</div>
+        <EmptyState message="Loading…" />
       ) : bindings.length === 0 ? (
         <EmptyState
           message={
@@ -174,7 +175,7 @@ export default function BindingsTab({ teamID, canManage }: Props) {
                         <span className="text-fg-muted">…{sec.last4 ?? "????"}</span>
                       </span>
                     ) : (
-                      <span className="text-fg-error text-xs">missing ({b.secret_id})</span>
+                      <span className="text-danger text-xs">missing ({b.secret_id})</span>
                     )}
                   </td>
                   <td className="px-2 py-2 text-xs">
@@ -203,7 +204,7 @@ export default function BindingsTab({ teamID, canManage }: Props) {
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="text-fg-error"
+                          className="text-danger"
                           onClick={() => setDeleting(b)}
                         >
                           Delete
@@ -317,9 +318,9 @@ function BindingDialog({
       }
     >
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2 mb-3">
+        <InlineBanner tone="danger" layout="inline" className="mb-3">
           {err}
-        </div>
+        </InlineBanner>
       )}
       <div className="space-y-3 text-sm">
         <label className="block">

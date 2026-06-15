@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useLocation } from "wouter";
 
 import {
@@ -94,14 +95,14 @@ export default function AcceptInvitation() {
       <div className="w-full max-w-md bg-surface-1 border border-border-subtle rounded-lg p-8 shadow-md space-y-4">
         <h1 className="text-2xl font-semibold">Join a team</h1>
         {!token && (
-          <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+          <InlineBanner tone="danger" layout="inline">
             No invitation token found in the URL.
-          </div>
+          </InlineBanner>
         )}
         {err && (
-          <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+          <InlineBanner tone="danger" layout="inline">
             {err}
-          </div>
+          </InlineBanner>
         )}
         {info && !err && (
           <div className="space-y-2 text-sm">

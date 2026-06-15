@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useParams } from "wouter";
+import { useConfirm } from "@/hooks/useConfirm";
 import { useAuth } from "@/auth/AuthContext";
 import {
   type InvitationView,
@@ -123,6 +125,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState({ email: "", role: "member" });
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   const reload = async () => {
     setErr(null);
@@ -157,7 +160,13 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
   };
 
   const cancel = async (id: string) => {
-    if (!confirm("Cancel this invitation?")) return;
+    const ok = await confirm({
+      title: "Cancel invitation?",
+      message: "Cancel this invitation?",
+      confirmLabel: "Cancel invitation",
+      confirmVariant: "danger",
+    });
+    if (!ok) return;
     try {
       await deleteInvitation(teamID, id);
       void reload();
@@ -176,7 +185,13 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
   };
 
   const kick = async (userID: string) => {
-    if (!confirm("Remove this member from the team?")) return;
+    const ok = await confirm({
+      title: "Remove member?",
+      message: "Remove this member from the team?",
+      confirmLabel: "Remove member",
+      confirmVariant: "danger",
+    });
+    if (!ok) return;
     try {
       await removeMember(teamID, userID);
       void reload();
@@ -187,10 +202,11 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
 
   return (
     <div className="space-y-6">
+      {dialog}
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+        <InlineBanner tone="danger" layout="inline">
           {err}
-        </div>
+        </InlineBanner>
       )}
 
       {canManage && (
@@ -287,7 +303,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
                 </td>
                 <td className="px-2 py-2 text-right">
                   {canManage && (
-                    <button onClick={() => kick(m.user_id)} className="text-fg-error hover:underline text-xs">
+                    <button onClick={() => kick(m.user_id)} className="text-danger hover:underline text-xs">
                       Remove
                     </button>
                   )}
@@ -322,7 +338,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
                   </td>
                   <td className="px-2 py-2 text-right">
                     {canManage && (
-                      <button onClick={() => cancel(i.id)} className="text-fg-error hover:underline text-xs">
+                      <button onClick={() => cancel(i.id)} className="text-danger hover:underline text-xs">
                         Cancel
                       </button>
                     )}

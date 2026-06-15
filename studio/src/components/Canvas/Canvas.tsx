@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { ReactFlow, Background, Controls, MiniMap, useReactFlow } from "@xyflow/react";
-import type { NodeMouseHandler, EdgeMouseHandler, Node, Viewport } from "@xyflow/react";
+import type { NodeMouseHandler, EdgeMouseHandler, Node, Edge, Viewport } from "@xyflow/react";
 import { useDocumentStore, useDocumentStoreInstance } from "@/store/document";
 import { useSelectionStore } from "@/store/selection";
 import { useUIStore } from "@/store/ui";
@@ -223,12 +223,13 @@ export default function Canvas() {
     [search, fitView],
   );
 
-  // Node event handlers
-  const onNodeClick: NodeMouseHandler = useCallback(
-    (_event, node) => {
-      connections.setQuickAddMenu(null);
+  // Maps a React Flow node to the studio selection store. Shared by the
+  // mouse path (onNodeClick) and the keyboard path (onSelectionChange) so
+  // the node-id dispatch (auxiliary / detail central|tool / edge / plain)
+  // lives in one place.
+  const selectFromNode = useCallback(
+    (node: Node) => {
       if (isAuxiliaryNodeId(node.id)) return;
-
       const detail = parseDetailId(node.id);
       if (detail) {
         if (detail.kind === "central") {
@@ -240,14 +241,19 @@ export default function Canvas() {
         // schema/prompt/var/edge: DetailSubNode's onClick drives the action.
         return;
       }
-
-      if (node.id.startsWith(DETAIL_PREFIX_EDGE)) {
-        return;
-      }
-
+      if (node.id.startsWith(DETAIL_PREFIX_EDGE)) return;
       setSelectedNode(node.id);
     },
-    [setSelectedNode, connections],
+    [setSelectedNode],
+  );
+
+  // Node event handlers
+  const onNodeClick: NodeMouseHandler = useCallback(
+    (_event, node) => {
+      connections.setQuickAddMenu(null);
+      selectFromNode(node);
+    },
+    [selectFromNode, connections],
   );
 
   const onNodeDoubleClick: NodeMouseHandler = useCallback(
@@ -281,6 +287,27 @@ export default function Canvas() {
     setContextMenu(null);
     connections.setQuickAddMenu(null);
   }, [clearSelection, connections]);
+
+  // Keyboard reachability. React Flow makes nodes focusable (Tab) and
+  // fires this on Enter/Space selection — unlike onNodeClick, which is
+  // mouse-only — so it's the one hook that catches keyboard selection.
+  // Mirror a single selected node/edge into the studio selection store
+  // so Tab→Enter opens the inspector exactly like a click. We do NOT
+  // clear on an empty selection: onPaneClick and the Escape stack own
+  // deselection, and acting on empty here would fight transient
+  // selection resets during re-layout.
+  const onSelectionChange = useCallback(
+    ({ nodes, edges }: { nodes: Node[]; edges: Edge[] }) => {
+      const node = nodes.length === 1 ? nodes[0] : undefined;
+      if (node) {
+        selectFromNode(node);
+        return;
+      }
+      const edge = nodes.length === 0 && edges.length === 1 ? edges[0] : undefined;
+      if (edge) setSelectedEdge(edge.id);
+    },
+    [selectFromNode, setSelectedEdge],
+  );
 
   const onNodeContextMenu = useCallback(
     (event: ReactMouseEvent, node: Node) => {
@@ -444,6 +471,7 @@ export default function Canvas() {
         onNodeDoubleClick={onNodeDoubleClick}
         onEdgeClick={onEdgeClick}
         onPaneClick={onPaneClick}
+        onSelectionChange={onSelectionChange}
         onNodeContextMenu={onNodeContextMenu}
         onConnect={connections.onConnect}
         onConnectStart={connections.onConnectStart}
@@ -457,6 +485,12 @@ export default function Canvas() {
         selectionOnDrag={canvasTool === "select"}
         panOnDrag={canvasTool === "select" ? [1, 2] : true}
         multiSelectionKeyCode="Shift"
+        nodesFocusable
+        // Free up Space so it activates the keyboard-focused node (React
+        // Flow's node wrapper handles Enter/Space → select) instead of
+        // being captured as pan-on-hold. Pan stays available via drag and
+        // the pan tool.
+        panActivationKeyCode={null}
         colorMode={resolvedTheme}
       >
         <Background />

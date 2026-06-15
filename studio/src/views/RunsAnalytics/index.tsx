@@ -24,6 +24,8 @@ import { ArrowLeftIcon } from "@radix-ui/react-icons";
 
 import { getRunsStats, type StatsResponse } from "@/api/runsStats";
 import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { formatCost, formatMs } from "@/lib/format";
 
@@ -114,12 +116,26 @@ function RunsAnalyticsViewInner() {
         </div>
       )}
 
+      {!stats && loading && (
+        <div className="space-y-4">
+          <Skeleton className="h-56 w-full" />
+          <Skeleton className="h-40 w-full" />
+          <Skeleton className="h-40 w-full" />
+        </div>
+      )}
+
       {stats && stats.total_runs === 0 && (
-        <p className="text-fg-muted text-[11px] italic">
-          No runs in the last {stats.since_days} days. Launch one from{" "}
-          <code className="text-[10px]">/whats-next</code> or{" "}
-          <code className="text-[10px]">/editor</code> to populate this dashboard.
-        </p>
+        <EmptyState
+          title="No runs in this window"
+          message={`No runs in the last ${stats.since_days} days. Launch one from /whats-next or the editor to populate this dashboard.`}
+          action={
+            <Link href="/whats-next">
+              <Button variant="primary" size="sm">
+                Open /whats-next
+              </Button>
+            </Link>
+          }
+        />
       )}
 
       {stats && stats.total_runs > 0 && (
@@ -133,7 +149,7 @@ function RunsAnalyticsViewInner() {
             <Legend
               entries={stats.workflows.map((w) => ({
                 label: w.workflow,
-                color: workflowColors[w.workflow] ?? "#888",
+                color: workflowColors[w.workflow] ?? "var(--color-fg-subtle)",
                 value: formatCost(w.total_cost_usd),
               }))}
             />
@@ -263,7 +279,7 @@ function CostChart({ buckets, workflows, colors }: CostChartProps) {
               y={yTop}
               width={barW}
               height={h}
-              fill={colors[wf] ?? "#888"}
+              fill={colors[wf] ?? "var(--color-fg-subtle)"}
               opacity={0.85}
             >
               <title>{`${b.day} — ${wf}: ${formatCost(v)}`}</title>
@@ -336,7 +352,7 @@ function DurationChart({ workflows, colors }: DurationChartProps) {
                 className="absolute inset-y-0 left-0"
                 style={{
                   width: `${p95Pct}%`,
-                  background: colors[w.workflow] ?? "#888",
+                  background: colors[w.workflow] ?? "var(--color-fg-subtle)",
                   opacity: 0.45,
                 }}
               />
@@ -344,7 +360,7 @@ function DurationChart({ workflows, colors }: DurationChartProps) {
                 className="absolute inset-y-0 left-0"
                 style={{
                   width: `${p50Pct}%`,
-                  background: colors[w.workflow] ?? "#888",
+                  background: colors[w.workflow] ?? "var(--color-fg-subtle)",
                 }}
               />
             </div>
@@ -398,7 +414,7 @@ function WorkflowTable({ workflows, colors }: WorkflowTableProps) {
               <td className="py-1">
                 <span
                   className="inline-block w-2 h-2 rounded-full mr-2 align-middle"
-                  style={{ background: colors[w.workflow] ?? "#888" }}
+                  style={{ background: colors[w.workflow] ?? "var(--color-fg-subtle)" }}
                 />
                 <span className="font-mono text-fg-default">{w.workflow}</span>
               </td>
@@ -474,24 +490,28 @@ function StatusHistogram({
   );
 }
 
+// Maps each run status to a semantic design-system token (resolved at
+// paint time against the active theme, so the charts invert for light
+// mode for free). queued + cancelled intentionally collapse onto the
+// muted foreground — both are inert, non-running states.
 function statusColor(status: string): string {
   switch (status) {
     case "finished":
-      return "#22c55e"; // emerald
+      return "var(--color-success)";
     case "running":
-      return "#3b82f6"; // blue
+      return "var(--color-live)";
     case "paused_waiting_human":
-      return "#a855f7"; // violet
+      return "var(--color-iteration-1)"; // purple
     case "queued":
-      return "#64748b"; // slate
+      return "var(--color-fg-subtle)";
     case "failed_resumable":
-      return "#f59e0b"; // amber
+      return "var(--color-warning)";
     case "failed":
-      return "#ef4444"; // red
+      return "var(--color-danger)";
     case "cancelled":
-      return "#94a3b8"; // slate-light
+      return "var(--color-fg-subtle)";
     default:
-      return "#64748b";
+      return "var(--color-fg-subtle)";
   }
 }
 
@@ -522,22 +542,22 @@ function Legend({
 // palette in stable order — so a workflow keeps its color across
 // re-renders and across different windows (same workflow ≡ same hue
 // in the chart, table, and legend).
+// The design-system iteration palette: six intentionally-distinct hues
+// (theme-aware via app.css). A workflow keeps a stable hue across the
+// chart, table, and legend; >6 distinct workflows wrap the cycle.
 const PALETTE = [
-  "#3b82f6", // blue
-  "#a855f7", // violet
-  "#22c55e", // emerald
-  "#f59e0b", // amber
-  "#ec4899", // pink
-  "#06b6d4", // cyan
-  "#84cc16", // lime
-  "#f43f5e", // rose
-  "#0ea5e9", // sky
+  "var(--color-iteration-0)", // cyan
+  "var(--color-iteration-1)", // purple
+  "var(--color-iteration-2)", // amber
+  "var(--color-iteration-3)", // teal
+  "var(--color-iteration-4)", // pink
+  "var(--color-iteration-5)", // lime
 ];
 
 function assignWorkflowColors(workflows: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   workflows.forEach((wf, i) => {
-    out[wf] = PALETTE[i % PALETTE.length] ?? "#888";
+    out[wf] = PALETTE[i % PALETTE.length] ?? "var(--color-fg-subtle)";
   });
   return out;
 }

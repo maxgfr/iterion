@@ -7,6 +7,9 @@ import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
 import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
 import DispatcherControlBar from "@/components/shared/DispatcherControlBar";
 import { Button } from "@/components/ui/Button";
+import { InlineBanner } from "@/components/ui/InlineBanner";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { softColor } from "@/lib/constants";
 import {
   cancelIssue,
   getState,
@@ -844,7 +847,7 @@ export default function BoardView() {
   });
 
   if (loading) {
-    return <div className="p-8 text-fg-muted">Loading kanban…</div>;
+    return <EmptyState message="Loading kanban…" />;
   }
   if (!board) {
     return <EmptyBoard kind="missing" />;
@@ -859,11 +862,7 @@ export default function BoardView() {
         onSaved={() => void refresh()}
       />
 
-      {error && (
-        <div className="bg-red-500/10 border-b border-red-500/40 px-4 py-2 text-xs text-red-200">
-          {error}
-        </div>
-      )}
+      {error && <InlineBanner tone="danger">{error}</InlineBanner>}
       {trackerError && (
         <TrackerErrorBanner
           tracker={trackerError.tracker}
@@ -871,13 +870,10 @@ export default function BoardView() {
         />
       )}
       {dispatcherPaused && (
-        <div className="bg-yellow-500/10 border-b border-yellow-500/40 px-4 py-2 text-xs text-yellow-200 flex items-center gap-2">
-          <span className="font-medium">Dispatcher paused</span>
-          <span className="text-yellow-200/80">
-            New issues won't be dispatched until you resume from the toolbar
-            above. In-flight runs continue unaffected.
-          </span>
-        </div>
+        <InlineBanner tone="warning" title="Dispatcher paused">
+          New issues won't be dispatched until you resume from the toolbar
+          above. In-flight runs continue unaffected.
+        </InlineBanner>
       )}
 
       <BoardFilters
@@ -1353,7 +1349,7 @@ function SelectionToolbar({
             ? "Move all selected into the dispatch lane"
             : "All selected cards must be in Inbox or Backlog"
         }
-        className="px-2 py-0.5 rounded bg-emerald-600/90 text-white hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed"
+        className="px-2 py-0.5 rounded bg-success text-white hover:bg-success/90 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         ▶ Let's go
       </button>
@@ -1419,7 +1415,7 @@ function SelectionToolbar({
         <button
           type="button"
           onClick={onDelete}
-          className="px-2 py-0.5 rounded border border-red-500/50 text-red-300 hover:bg-red-500/10"
+          className="px-2 py-0.5 rounded border border-danger/50 text-danger-fg hover:bg-danger-soft"
         >
           Delete
         </button>
@@ -1775,7 +1771,7 @@ function Column({
             <span className="text-accent font-medium">{selCount} sel ·</span>
           )}
           {issues.length}
-          {eligible && <span className="ml-1 text-emerald-400">●</span>}
+          {eligible && <span className="ml-1 text-success">●</span>}
           {terminal && <span className="ml-1 text-fg-muted">✓</span>}
         </span>
       </div>
@@ -1875,9 +1871,17 @@ function IssueCard({
   return (
     <div
       role="button"
+      tabIndex={0}
+      aria-label={iss.title}
       draggable
       data-issue-card
       title={hoverTitle}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
       onDragStart={(e) => {
         onDragStart(e);
         setDragging(true);
@@ -1908,7 +1912,7 @@ function IssueCard({
           {iss.title}
         </span>
         {iss.priority && iss.priority > 0 ? (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning-soft text-warning-fg">
             P{iss.priority}
           </span>
         ) : null}
@@ -1977,7 +1981,7 @@ function IssueCard({
         {iss.assignee && <span>@{iss.assignee}</span>}
         {iss.claim && (
           <span
-            className="text-amber-300"
+            className="text-warning-fg"
             title={`Locked by ${iss.claim} — the dispatcher holds the claim until the run finishes.`}
           >
             claimed by {iss.claim}
@@ -2003,7 +2007,7 @@ function IssueCard({
         )}
       </div>
       {running && (
-        <div className="mt-1 flex items-center justify-between gap-2 rounded bg-green-500/10 px-1.5 py-1 text-[10px] text-green-300">
+        <div className="mt-1 flex items-center justify-between gap-2 rounded bg-success-soft px-1.5 py-1 text-[10px] text-success-fg">
           <button
             type="button"
             onClick={(e) => {
@@ -2019,14 +2023,14 @@ function IssueCard({
           >
             ● {running.attempt && running.attempt > 0 ? "resuming" : "running"}
             {running.attempt && running.attempt > 0 ? (
-              <span className="ml-1 text-amber-300/90">#{running.attempt + 1}</span>
+              <span className="ml-1 text-warning-fg/90">#{running.attempt + 1}</span>
             ) : null}
             {running.last_event_name && (
-              <span className="ml-1 text-green-200/70">— {running.last_event_name}</span>
+              <span className="ml-1 text-success-fg/70">— {running.last_event_name}</span>
             )}
           </button>
           <button
-            className="rounded border border-green-500/40 px-1.5 py-0.5 text-[10px] hover:bg-green-500/20"
+            className="rounded border border-success/40 px-1.5 py-0.5 text-[10px] hover:bg-success-soft"
             onClick={(e) => {
               e.stopPropagation();
               onCancelRun();
@@ -2039,7 +2043,7 @@ function IssueCard({
       )}
       {!running && retrying && !TERMINAL_BOARD_STATES.has(iss.state) && (
         <div
-          className="mt-1 rounded bg-amber-500/10 px-1.5 py-1 text-[10px] text-amber-300 cursor-pointer hover:bg-amber-500/20"
+          className="mt-1 rounded bg-warning-soft px-1.5 py-1 text-[10px] text-warning-fg cursor-pointer hover:bg-warning-soft"
           onClick={(e) => {
             e.stopPropagation();
             onShowRetryDetails();
@@ -2048,7 +2052,7 @@ function IssueCard({
         >
           ⏳ retrying (attempt {retrying.attempt})
           {retrying.error && (
-            <span className="ml-1 text-amber-200/80 truncate">— {retrying.error}</span>
+            <span className="ml-1 text-warning-fg/80 truncate">— {retrying.error}</span>
           )}
         </div>
       )}
@@ -2062,7 +2066,7 @@ function IssueCard({
       )}
       {!running && skip && (
         <div
-          className="mt-1 rounded bg-red-500/10 px-1.5 py-1 text-[10px] text-red-300 cursor-pointer hover:bg-red-500/20"
+          className="mt-1 rounded bg-danger-soft px-1.5 py-1 text-[10px] text-danger-fg cursor-pointer hover:bg-danger-soft"
           onClick={(e) => {
             e.stopPropagation();
             onOpen();
@@ -2070,7 +2074,7 @@ function IssueCard({
           title={`The dispatcher refuses to run this issue: ${skip.reason}. Fix the bot in the issue editor or add it to assignee_workflows.`}
         >
           ⚠ won&apos;t dispatch
-          <span className="ml-1 text-red-200/80 truncate">— {skip.reason}</span>
+          <span className="ml-1 text-danger-fg/80 truncate">— {skip.reason}</span>
         </div>
       )}
     </div>
@@ -2084,17 +2088,25 @@ function IssueCard({
 // backend — operators get colour scanning today without configuration.
 // A small alias table covers common semantic labels with sensible
 // presets (red for "urgent" / "bug", green for "ready", etc.).
+// Token-driven alias table at module scope: built once, not per-label
+// per-card per-render. Severity labels reuse the prebuilt design-system
+// *-soft pairs (single source of truth for the 18% tint); docs borrows the
+// iteration-1 (purple) hue, which has no -soft token, via softColor. The
+// chips invert correctly in light mode because the values are CSS vars.
+const DANGER_CHIP = { backgroundColor: "var(--color-danger-soft)", color: "var(--color-danger-fg)" };
+const SUCCESS_CHIP = { backgroundColor: "var(--color-success-soft)", color: "var(--color-success-fg)" };
+const LABEL_ALIASES: Record<string, { backgroundColor: string; color: string }> = {
+  urgent: DANGER_CHIP,
+  blocker: DANGER_CHIP,
+  bug: DANGER_CHIP,
+  infra: { backgroundColor: "var(--color-info-soft)", color: "var(--color-info-fg)" },
+  docs: { backgroundColor: softColor("var(--color-iteration-1)", 18), color: "var(--color-fg-default)" },
+  feature: SUCCESS_CHIP,
+  ready: SUCCESS_CHIP,
+};
+
 function labelPalette(label: string): { backgroundColor: string; color: string } {
-  const aliases: Record<string, { backgroundColor: string; color: string }> = {
-    urgent: { backgroundColor: "rgba(239,68,68,0.18)", color: "#fecaca" },
-    blocker: { backgroundColor: "rgba(239,68,68,0.18)", color: "#fecaca" },
-    bug: { backgroundColor: "rgba(244,63,94,0.18)", color: "#fecdd3" },
-    infra: { backgroundColor: "rgba(59,130,246,0.18)", color: "#bfdbfe" },
-    docs: { backgroundColor: "rgba(168,85,247,0.18)", color: "#e9d5ff" },
-    feature: { backgroundColor: "rgba(16,185,129,0.18)", color: "#bbf7d0" },
-    ready: { backgroundColor: "rgba(16,185,129,0.18)", color: "#bbf7d0" },
-  };
-  const hit = aliases[label.toLowerCase()];
+  const hit = LABEL_ALIASES[label.toLowerCase()];
   if (hit) return hit;
   // Stable 32-bit FNV-1a hash → hue. Fixed S/L keeps the palette readable
   // against both light and dark surfaces.

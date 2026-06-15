@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { InlineBanner } from "@/components/ui/InlineBanner";
+import { useConfirm } from "@/hooks/useConfirm";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { useAuth } from "@/auth/AuthContext";
 import {
   type ApiKeyView,
@@ -34,6 +37,7 @@ export default function ApiKeysPanel({ team }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [adding, setAdding] = useState(false);
+  const { confirm, dialog } = useConfirm();
   const [draft, setDraft] = useState({
     provider: "anthropic" as Provider,
     name: "",
@@ -95,7 +99,13 @@ export default function ApiKeysPanel({ team }: Props) {
   };
 
   const remove = async (k: ApiKeyView) => {
-    if (!confirm(`Delete API key “${k.name}”? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: "Delete API key?",
+      message: `Delete API key “${k.name}”? This cannot be undone.`,
+      confirmLabel: "Delete",
+      confirmVariant: "danger",
+    });
+    if (!ok) return;
     try {
       await deleteApiKey(team ? { team_id: team.id } : { mine: true }, k.id);
       void reload();
@@ -106,6 +116,7 @@ export default function ApiKeysPanel({ team }: Props) {
 
   return (
     <div className="space-y-4">
+      {dialog}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">
           {team ? `${team.name} — Team API keys` : "My API keys"}
@@ -177,13 +188,13 @@ export default function ApiKeysPanel({ team }: Props) {
       )}
 
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+        <InlineBanner tone="danger" layout="inline">
           {err}
-        </div>
+        </InlineBanner>
       )}
 
       {loading ? (
-        <div className="text-fg-muted">Loading…</div>
+        <EmptyState message="Loading…" />
       ) : keys.length === 0 ? (
         <div className="text-fg-muted text-sm">No keys yet.</div>
       ) : (
@@ -222,7 +233,7 @@ export default function ApiKeysPanel({ team }: Props) {
                   {canManage && (
                     <button
                       onClick={() => remove(k)}
-                      className="text-fg-error hover:underline"
+                      className="text-danger hover:underline"
                     >
                       Delete
                     </button>

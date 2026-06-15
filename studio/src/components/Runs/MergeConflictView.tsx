@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Button, EmptyState, Spinner, Textarea } from "@/components/ui";
+import { useConfirm } from "@/hooks/useConfirm";
 import {
   abortMergeConflict,
   finalizeMergeConflict,
@@ -48,6 +49,7 @@ export default function MergeConflictView({
     null,
   );
   const [finalizeMessage, setFinalizeMessage] = useState("");
+  const { confirm, dialog } = useConfirm();
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -133,14 +135,14 @@ export default function MergeConflictView({
   };
 
   const onAbort = async () => {
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(
-        "Abort the merge? The worktree will reset to the target branch; any in-progress resolutions will be lost.",
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: "Abort the merge?",
+      message:
+        "The worktree will reset to the target branch; any in-progress resolutions will be lost.",
+      confirmLabel: "Abort merge",
+      confirmVariant: "danger",
+    });
+    if (!ok) return;
     setBusyGlobal("abort");
     setError(null);
     try {
@@ -178,6 +180,7 @@ export default function MergeConflictView({
 
   return (
     <div className="shrink-0 border-t border-border-default bg-warning-soft max-h-[70%] overflow-y-auto">
+      {dialog}
       <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border-default bg-warning-soft px-3 py-2">
         <span className="text-[11px] font-semibold text-warning-fg">
           Merge conflict

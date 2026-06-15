@@ -19,6 +19,7 @@ import { useAutoOpenDiagnosticsOnError } from "@/hooks/useAutoOpenDiagnosticsOnE
 import { useFileWatcher } from "@/hooks/useFileWatcher";
 import { useConfirm } from "@/hooks/useConfirm";
 import { DISCARD_CHANGES_PROMPT } from "@/lib/copy";
+import { toastError } from "@/lib/errorHints";
 import * as api from "@/api/client";
 
 export default function EditorView() {
@@ -95,7 +96,7 @@ export default function EditorView() {
         // center on one of them.
         setTimeout(applyNodeFocus, 0);
       } catch (err) {
-        addToast(`Open from run failed: ${(err as Error).message}`, "error");
+        toastError(addToast, err, "Open from run failed");
       }
     };
 

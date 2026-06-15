@@ -3,6 +3,7 @@ import { useDocumentStoreInstance } from "@/store/document";
 import { useUIStore } from "@/store/ui";
 import { fileWatcher } from "@/api/ws";
 import * as api from "@/api/client";
+import { errorMessage } from "@/lib/errorHints";
 import type { ServerWsEvent } from "@/api/types";
 
 const RELOAD_DEBOUNCE_MS = 500;
@@ -45,14 +46,51 @@ export function useFileWatcher() {
           }
           break;
 
-        case "file_modified":
+        case "file_modified": {
           if (event.path !== filePath) break;
+
+          // Shared reload: re-open the file and apply it to this tab's
+          // store. On failure, surface an actionable toast that names the
+          // file and offers a Retry — a silently dropped reload is worse
+          // than a sticky, recoverable error. `notifySuccess` is set only
+          // for the automatic (clean-buffer) path; the manual Reload
+          // action stays quiet on success.
+          const reload = (path: string, notifySuccess: boolean) => {
+            api
+              .openFile(path)
+              .then((result) => {
+                const s = docStoreRef.current.getState();
+                if (s.currentFilePath !== path) return;
+                s.setDocument(result.document);
+                s.setDiagnostics(result.diagnostics);
+                s.setCurrentSource(result.source);
+                s.markSaved();
+                if (notifySuccess) {
+                  useUIStore.getState().addToast("File reloaded", "info");
+                }
+              })
+              .catch((err) => {
+                console.error("Failed to reload file:", err);
+                const name = path.split("/").pop() ?? path;
+                useUIStore.getState().addToast(
+                  `Failed to reload ${name}: ${errorMessage(err)}`,
+                  "error",
+                  {
+                    persistent: true,
+                    action: {
+                      label: "Retry",
+                      onClick: () => reload(path, notifySuccess),
+                    },
+                  },
+                );
+              });
+          };
+
           if (!dirty) {
-            // Debounce auto-reload to avoid rapid re-parses. The
-            // path is re-read inside the timer so a user switching
-            // the open file between the event arrival and the 500ms
-            // fire doesn't get the OLD file's contents stomped onto
-            // the new one.
+            // Debounce auto-reload to avoid rapid re-parses. The path is
+            // re-read inside the timer so a user switching the open file
+            // between the event arrival and the 500ms fire doesn't get
+            // the OLD file's contents stomped onto the new one.
             const targetPath = event.path;
             clearTimeout(reloadTimerRef.current);
             reloadTimerRef.current = setTimeout(() => {
@@ -60,18 +98,7 @@ export function useFileWatcher() {
               if (current.currentFilePath !== targetPath || current.isDirty()) {
                 return;
               }
-              api.openFile(targetPath).then((result) => {
-                const s = docStoreRef.current.getState();
-                if (s.currentFilePath !== targetPath) return;
-                s.setDocument(result.document);
-                s.setDiagnostics(result.diagnostics);
-                s.setCurrentSource(result.source);
-                s.markSaved();
-                useUIStore.getState().addToast("File reloaded", "info");
-              }).catch((err) => {
-                console.error("Failed to reload file:", err);
-                useUIStore.getState().addToast("Failed to reload file", "error");
-              });
+              reload(targetPath, true);
             }, RELOAD_DEBOUNCE_MS);
           } else {
             addToast("File changed externally", "warning", {
@@ -79,24 +106,14 @@ export function useFileWatcher() {
               action: {
                 label: "Reload",
                 onClick: () => {
-                  const s = docStoreRef.current.getState();
-                  const path = s.currentFilePath;
-                  if (!path) return;
-                  api.openFile(path).then((result) => {
-                    const inner = docStoreRef.current.getState();
-                    inner.setDocument(result.document);
-                    inner.setDiagnostics(result.diagnostics);
-                    inner.setCurrentSource(result.source);
-                    inner.markSaved();
-                  }).catch((err) => {
-                    console.error("Failed to reload file:", err);
-                    useUIStore.getState().addToast("Failed to reload file", "error");
-                  });
+                  const path = docStoreRef.current.getState().currentFilePath;
+                  if (path) reload(path, false);
                 },
               },
             });
           }
           break;
+        }
       }
     });
 

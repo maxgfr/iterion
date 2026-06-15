@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 
 import { useAuth } from "@/auth/AuthContext";
 import { type UserStatus, type UserView } from "@/api/auth";
@@ -114,9 +115,9 @@ export default function UsersAdminPage() {
     <div className="h-full overflow-auto">
       <div className="max-w-5xl mx-auto p-3 sm:p-6 space-y-4">
         {err && (
-          <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+          <InlineBanner tone="danger" layout="inline">
             {err}
-          </div>
+          </InlineBanner>
         )}
 
         <section className="bg-surface-1 border border-border-subtle rounded overflow-hidden">
@@ -157,7 +158,7 @@ export default function UsersAdminPage() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="text-fg-error"
+                        className="text-danger"
                         onClick={() => setConfirm({ user: u, action: "disable" })}
                       >
                         Disable
@@ -250,7 +251,7 @@ export default function UsersAdminPage() {
 function StatusPill({ status }: { status: UserStatus }) {
   const variant: Record<UserStatus, string> = {
     active: "text-fg-success",
-    disabled: "text-fg-error",
+    disabled: "text-danger",
     pending_password_change: "text-fg-warn",
   };
   return <span className={`text-xs ${variant[status] ?? ""}`}>{status}</span>;

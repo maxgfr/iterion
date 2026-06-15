@@ -8,6 +8,7 @@ import * as api from "@/api/client";
 import { openExampleIntoStore } from "@/lib/openExample";
 import ConfirmDialog from "../shared/ConfirmDialog";
 import { useConfirm } from "@/hooks/useConfirm";
+import { Spinner } from "@/components/ui/Spinner";
 import { DISCARD_CHANGES_PROMPT } from "@/lib/copy";
 import ShortcutsHelp from "../shared/ShortcutsHelp";
 import FilePicker from "../FilePicker/FilePicker";
@@ -517,7 +518,11 @@ export default function Toolbar() {
 
       {/* Right-aligned: file status → Launch run; then navigation icons */}
       <div className="ml-auto flex items-center gap-3">
-        {loading && <span className="text-xs text-fg-subtle">Loading...</span>}
+        {loading && (
+          <span className="text-xs text-fg-subtle inline-flex items-center gap-1">
+            <Spinner size="xs" /> Loading…
+          </span>
+        )}
         <div className="flex items-center gap-2">
           <FileStatusBadge
             currentFilePath={currentFilePath}

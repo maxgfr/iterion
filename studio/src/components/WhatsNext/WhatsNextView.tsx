@@ -35,6 +35,7 @@ import HumanChatTurn from "./HumanChatTurn";
 import PreFlightPanel from "./PreFlightPanel";
 import SessionLauncher from "./SessionLauncher";
 import WatchPanel from "./WatchPanel";
+import { useConfirm } from "@/hooks/useConfirm";
 
 // WhatsNextView is the /whats-next route. It owns one whats-next session at a
 // time via the useWhatsNextSession hook: the launcher creates the run,
@@ -851,6 +852,7 @@ function SessionHeader({
   session: ReturnType<typeof useWhatsNextSession>;
 }) {
   const [abandoning, setAbandoning] = useState(false);
+  const { confirm, dialog } = useConfirm();
   // A session is "live" when it has an in-flight run that hasn't reached
   // a terminal state. Abandoning a live run must cancel it server-side
   // before resetting the UI — otherwise newSession just orphans the
@@ -863,9 +865,13 @@ function SessionHeader({
 
   const onNewSession = useCallback(async () => {
     if (isLive) {
-      const ok = window.confirm(
-        "The current Nexie session is still running. Cancel it and start a new one?",
-      );
+      const ok = await confirm({
+        title: "Cancel running Nexie session?",
+        message:
+          "The current Nexie session is still running. Cancel it and start a new one?",
+        confirmLabel: "Cancel and start new",
+        confirmVariant: "danger",
+      });
       if (!ok) return;
       setAbandoning(true);
       try {
@@ -882,7 +888,7 @@ function SessionHeader({
       }
     }
     session.newSession();
-  }, [isLive, session]);
+  }, [isLive, session, confirm]);
 
   // The button is hidden when there's nothing to reset (no runId yet,
   // pre-launch). Otherwise it stays available across every run state
@@ -893,6 +899,7 @@ function SessionHeader({
 
   return (
     <div className="px-4 py-3 border-b border-border-subtle flex items-baseline justify-between gap-3">
+      {dialog}
       <h2 className="text-[13px] font-semibold text-fg-default">
         {bot.label}
         {session.runId && (

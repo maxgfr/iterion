@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useLocation } from "wouter";
 
 import { ApiError, completePendingPasswordChange } from "@/api/auth";
@@ -107,9 +108,9 @@ export default function ForcedPasswordChange() {
             required
           />
           {err && (
-            <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+            <InlineBanner tone="danger" layout="inline">
               {err}
-            </div>
+            </InlineBanner>
           )}
           <button
             type="submit"

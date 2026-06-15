@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 
 import {
   type PersonalAccessToken,
@@ -80,13 +81,13 @@ export default function TokensPanel() {
       </div>
 
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+        <InlineBanner tone="danger" layout="inline">
           {err}
-        </div>
+        </InlineBanner>
       )}
 
       {loading ? (
-        <div className="text-sm text-fg-muted">Loading…</div>
+        <EmptyState message="Loading…" />
       ) : tokens.length === 0 ? (
         <EmptyState message="No tokens yet." />
       ) : (
@@ -121,12 +122,12 @@ export default function TokensPanel() {
                 </td>
                 <td className="px-2 py-2 text-right">
                   {t.revoked_at ? (
-                    <span className="text-xs text-fg-error">revoked</span>
+                    <span className="text-xs text-danger">revoked</span>
                   ) : (
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="text-fg-error"
+                      className="text-danger"
                       onClick={() => setDeleting(t)}
                     >
                       Revoke
@@ -238,9 +239,9 @@ function CreateTokenDialog({
       }
     >
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2 mb-3">
+        <InlineBanner tone="danger" layout="inline" className="mb-3">
           {err}
-        </div>
+        </InlineBanner>
       )}
       <div className="space-y-3 text-sm">
         <label className="block">

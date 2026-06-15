@@ -7,6 +7,7 @@ import {
   type MarketplaceEntry,
 } from "@/api/marketplace";
 import { useUIStore } from "@/store/ui";
+import { toastError } from "@/lib/errorHints";
 
 import { MarketplaceCard } from "./MarketplaceCard";
 import { MarketplaceDetail } from "./MarketplaceDetail";
@@ -32,7 +33,7 @@ export default function MarketplaceView() {
       const list = await listMarketplace(search, tag);
       setEntries(list);
     } catch (e) {
-      addToast(e instanceof Error ? e.message : String(e), "error");
+      toastError(addToast, e, "Failed to load marketplace");
     } finally {
       setLoading(false);
     }
@@ -58,7 +59,7 @@ export default function MarketplaceView() {
         prev?.map((x) => (x.slug === e.slug ? res.entry : x)) ?? prev,
       );
     } catch (err) {
-      addToast(err instanceof Error ? err.message : String(err), "error");
+      toastError(addToast, err, "Install failed");
     } finally {
       setInstalling(null);
     }
@@ -76,7 +77,7 @@ export default function MarketplaceView() {
       await refresh();
       setActiveSlug(stored.slug);
     } catch (e) {
-      addToast(e instanceof Error ? e.message : String(e), "error");
+      toastError(addToast, e, "Submission failed");
       throw e;
     }
   };

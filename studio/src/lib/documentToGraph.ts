@@ -85,6 +85,9 @@ export function documentToGraph(doc: IterDocument, activeWorkflowName?: string):
     return {
       id: name,
       type: "workflowNode",
+      // Announced by screen readers when the node receives keyboard
+      // focus (React Flow makes nodes Tab-focusable).
+      ariaLabel: `${entry.kind} node: ${name}`,
       position: {
         x: (i % COLS) * X_GAP + 50,
         y: Math.floor(i / COLS) * Y_GAP + 50,

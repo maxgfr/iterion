@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useAuth } from "@/auth/AuthContext";
 import {
   type OrgView,
@@ -80,9 +81,9 @@ export default function OrgsAdminPage() {
     <div className="h-full overflow-auto">
       <div className="max-w-5xl mx-auto p-3 sm:p-6 space-y-4">
         {error && (
-          <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+          <InlineBanner tone="danger" layout="inline">
             {error}
-          </div>
+          </InlineBanner>
         )}
 
         <section className="bg-surface-1 border border-border-subtle rounded p-4 space-y-3">
@@ -139,7 +140,7 @@ export default function OrgsAdminPage() {
                     <span
                       className={
                         o.status === "suspended"
-                          ? "text-fg-error"
+                          ? "text-danger"
                           : o.status === "read_only"
                             ? "text-fg-muted"
                             : "text-fg-success"
@@ -265,7 +266,7 @@ function OrgDrawer({
       }
     >
       {usageErr && (
-        <div className="text-sm text-fg-muted bg-surface-warn-subtle border border-border-warn rounded px-3 py-2 mb-3">
+        <div className="text-sm text-fg-muted bg-warning-soft border border-warning/40 rounded px-3 py-2 mb-3">
           {usageErr}
         </div>
       )}

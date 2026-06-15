@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -146,6 +147,8 @@ export function Combobox<T = string>({
       ? emptyLabel
       : "";
 
+  const listboxId = useId();
+
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -160,6 +163,7 @@ export function Combobox<T = string>({
         className={`w-full text-left bg-surface-1 text-fg-default rounded-md border border-border-strong outline-none transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus:border-accent focus:ring-1 focus:ring-accent ${sizeClass} flex items-center justify-between gap-2`}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={open ? listboxId : undefined}
       >
         <span className={headerText ? "" : "text-fg-subtle"}>
           {headerText || placeholder}
@@ -170,6 +174,7 @@ export function Combobox<T = string>({
       {open && (
         <div
           role="listbox"
+          id={listboxId}
           className="absolute z-30 mt-1 w-full max-h-72 overflow-auto rounded-md border border-border-strong bg-surface-0 shadow-lg"
         >
           <div className="p-1 sticky top-0 bg-surface-0 border-b border-border-default">

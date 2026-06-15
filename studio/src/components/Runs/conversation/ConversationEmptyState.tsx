@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { RunStatus } from "@/api/runs";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 interface Props {
   status: RunStatus | undefined;
@@ -81,26 +82,22 @@ export default function ConversationEmptyState({
   }
 
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center px-6 py-8 text-center">
-      <div className="text-2xl mb-2 select-none" aria-hidden>
-        {icon}
-      </div>
-      <p className="text-[13px] font-medium text-fg-default">{primary}</p>
-      {secondary && (
-        <p className="mt-1 max-w-xs text-[11px] text-fg-subtle leading-snug">
-          {secondary}
-        </p>
-      )}
-      {showEventLogLink && (
-        <button
-          type="button"
-          onClick={onShowEventLog}
-          className="mt-3 text-[11px] text-accent underline-offset-2 hover:underline focus:outline-none focus-visible:underline"
-        >
-          Show event log →
-        </button>
-      )}
-    </div>
+    <EmptyState
+      icon={<span className="text-2xl select-none">{icon}</span>}
+      title={primary}
+      message={secondary ?? ""}
+      action={
+        showEventLogLink ? (
+          <button
+            type="button"
+            onClick={onShowEventLog}
+            className="text-[11px] text-accent underline-offset-2 hover:underline focus:outline-none focus-visible:underline"
+          >
+            Show event log →
+          </button>
+        ) : undefined
+      }
+    />
   );
 }
 

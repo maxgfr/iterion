@@ -4,6 +4,7 @@ import { ChevronLeftIcon, OpenInNewWindowIcon } from "@radix-ui/react-icons";
 import { Button, Dialog, Input } from "@/components/ui";
 import { listFilesystem, type FilesystemListing } from "@/api/projects";
 import { useServerInfoStore } from "@/store/serverInfo";
+import { ErrorNotice } from "@/components/shared/ErrorNotice";
 
 interface Props {
   open: boolean;
@@ -97,11 +98,7 @@ export default function AddProjectDialog({ open, onClose, onAdd }: Props) {
                 </span>
               </Button>
             )}
-            {error && (
-              <div className="text-[11px] text-danger-fg bg-danger-soft px-2 py-1 rounded">
-                {error}
-              </div>
-            )}
+            {error && <ErrorNotice error={error} />}
             <div className="flex items-center justify-end gap-2 pt-1">
               <Button variant="ghost" size="sm" onClick={onClose} disabled={busy}>
                 Cancel
@@ -202,9 +199,7 @@ function BrowsePanel({ initialPath, onPick, onBack }: BrowsePanelProps) {
         {loading && (
           <div className="px-3 py-2 text-[11px] text-fg-subtle italic">Loading…</div>
         )}
-        {error && (
-          <div className="px-3 py-2 text-[11px] text-danger-fg">{error}</div>
-        )}
+        {error && <ErrorNotice error={error} />}
         {listing && !loading && listing.entries.length === 0 && (
           <div className="px-3 py-2 text-[11px] text-fg-subtle italic">
             No sub-directories here.

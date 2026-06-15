@@ -79,6 +79,7 @@ function DraggableItem({
       draggable
       role="button"
       tabIndex={0}
+      aria-label={`Add ${item.label}`}
       onDragStart={(e) => onDragStart(e, dragData)}
       onClick={(e) => onActivate(dragData, { x: e.clientX, y: e.clientY })}
       onKeyDown={handleKey}

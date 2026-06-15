@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { InlineBanner } from "@/components/ui/InlineBanner";
+import { useConfirm } from "@/hooks/useConfirm";
 import ApiKeysPanel from "./ApiKeys";
 import OAuthConnections from "./OAuthConnections";
 import TokensPanel from "./TokensPanel";
@@ -143,9 +145,9 @@ function ChangePasswordSection() {
           required
         />
         {err && (
-          <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+          <InlineBanner tone="danger" layout="inline">
             {err}
-          </div>
+          </InlineBanner>
         )}
         {ok && (
           <div className="text-sm text-fg-success">Password updated.</div>
@@ -166,9 +168,16 @@ function SignOutEverywhereSection() {
   const { signOut } = useAuth();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   const submit = async () => {
-    if (!confirm("Revoke every signed-in session for this account?")) return;
+    const ok = await confirm({
+      title: "Sign out everywhere?",
+      message: "Revoke every signed-in session for this account?",
+      confirmLabel: "Sign out everywhere",
+      confirmVariant: "danger",
+    });
+    if (!ok) return;
     setBusy(true);
     setErr(null);
     try {
@@ -186,6 +195,7 @@ function SignOutEverywhereSection() {
 
   return (
     <section className="space-y-3 text-sm bg-surface-1 border border-border-subtle rounded p-4">
+      {dialog}
       <div>
         <h3 className="font-medium">Sign out everywhere</h3>
         <p className="text-xs text-fg-subtle mt-0.5">
@@ -194,9 +204,9 @@ function SignOutEverywhereSection() {
         </p>
       </div>
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+        <InlineBanner tone="danger" layout="inline">
           {err}
-        </div>
+        </InlineBanner>
       )}
       <button
         type="button"

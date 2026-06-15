@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 
 import {
   FeatureUnavailableError,
@@ -93,9 +94,9 @@ export default function SecretsTab({ teamID, canManage }: Props) {
   return (
     <div className="space-y-6">
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+        <InlineBanner tone="danger" layout="inline">
           {err}
-        </div>
+        </InlineBanner>
       )}
 
       <section>
@@ -211,7 +212,7 @@ function SecretsTable({
   onRotate: (rec: GenericSecretView) => void;
   onDelete: (rec: GenericSecretView) => void;
 }) {
-  if (loading) return <div className="text-sm text-fg-muted">Loading…</div>;
+  if (loading) return <EmptyState message="Loading…" />;
   if (secrets.length === 0) return <EmptyState message={emptyText} />;
   return (
     <table className="w-full text-sm">
@@ -248,7 +249,7 @@ function SecretsTable({
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="text-fg-error"
+                    className="text-danger"
                     onClick={() => onDelete(s)}
                   >
                     Delete
@@ -321,9 +322,9 @@ function CreateSecretDialog({
       }
     >
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2 mb-3">
+        <InlineBanner tone="danger" layout="inline" className="mb-3">
           {err}
-        </div>
+        </InlineBanner>
       )}
       <div className="space-y-3 text-sm">
         <label className="block">
@@ -335,7 +336,7 @@ function CreateSecretDialog({
             placeholder="GITLAB_TOKEN"
             autoFocus
           />
-          <div className={`text-xs mt-1 ${v.ok ? "text-fg-muted" : "text-fg-error"}`}>
+          <div className={`text-xs mt-1 ${v.ok ? "text-fg-muted" : "text-danger"}`}>
             {v.ok ? "OK" : v.error ?? "—"}
           </div>
         </label>
@@ -405,9 +406,9 @@ function RotateSecretDialog({
       }
     >
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2 mb-3">
+        <InlineBanner tone="danger" layout="inline" className="mb-3">
           {err}
-        </div>
+        </InlineBanner>
       )}
       <label className="block text-sm">
         <div className="text-xs text-fg-muted mb-1">New value</div>

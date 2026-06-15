@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { InlineBanner } from "@/components/ui/InlineBanner";
+import { useConfirm } from "@/hooks/useConfirm";
+import { EmptyState } from "@/components/ui/EmptyState";
 import {
   type OAuthConnection,
   type OAuthKind,
@@ -35,6 +38,7 @@ export default function OAuthConnections() {
   const [editingKind, setEditingKind] = useState<OAuthKind | null>(null);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const { confirm, dialog } = useConfirm();
 
   const reload = async () => {
     setLoading(true);
@@ -83,7 +87,13 @@ export default function OAuthConnections() {
   };
 
   const remove = async (kind: OAuthKind) => {
-    if (!confirm(`Disconnect ${kind}? You'll need to re-paste the credentials to reconnect.`)) return;
+    const ok = await confirm({
+      title: `Disconnect ${kind}?`,
+      message: `You'll need to re-paste the credentials to reconnect.`,
+      confirmLabel: "Disconnect",
+      confirmVariant: "danger",
+    });
+    if (!ok) return;
     try {
       await deleteOAuth(kind);
       void reload();
@@ -96,6 +106,7 @@ export default function OAuthConnections() {
 
   return (
     <div className="space-y-4">
+      {dialog}
       <div>
         <h2 className="text-lg font-semibold">OAuth subscriptions (forfait)</h2>
         <p className="text-sm text-fg-muted mt-1">
@@ -106,13 +117,13 @@ export default function OAuthConnections() {
       </div>
 
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+        <InlineBanner tone="danger" layout="inline">
           {err}
-        </div>
+        </InlineBanner>
       )}
 
       {loading ? (
-        <div className="text-fg-muted">Loading…</div>
+        <EmptyState message="Loading…" />
       ) : (
         <div className="space-y-4">
           {KINDS.map(({ kind, display, filename, hint }) => {
@@ -196,7 +207,7 @@ export default function OAuthConnections() {
                         </button>
                         <button
                           onClick={() => remove(kind)}
-                          className="bg-surface-0 border border-border-subtle rounded px-3 py-1.5 text-sm text-fg-error"
+                          className="bg-surface-0 border border-border-subtle rounded px-3 py-1.5 text-sm text-danger"
                         >
                           Disconnect
                         </button>

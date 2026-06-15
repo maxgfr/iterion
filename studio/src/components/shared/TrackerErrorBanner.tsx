@@ -6,6 +6,8 @@
 // Recognised substrings get a more specific guidance line so common
 // failure modes (expired GitHub token, Forgejo 401, unreachable
 // host) read at a glance.
+import { InlineBanner } from "@/components/ui/InlineBanner";
+
 export interface TrackerErrorBannerProps {
   tracker: string;
   message: string;
@@ -17,14 +19,10 @@ export default function TrackerErrorBanner({
 }: TrackerErrorBannerProps) {
   const guidance = trackerErrorGuidance(tracker, message);
   return (
-    <div className="bg-amber-500/10 border-b border-amber-500/40 px-4 py-2 text-xs text-amber-200 flex items-start gap-2">
-      <span className="font-medium shrink-0">Tracker error:</span>
-      <div className="flex-1 min-w-0">
-        <div className="font-mono break-words">{message}</div>
-        {guidance && <div className="mt-0.5 text-amber-200/80">{guidance}</div>}
-      </div>
-      <span className="text-amber-200/60 shrink-0">({tracker})</span>
-    </div>
+    <InlineBanner tone="warning" title="Tracker error" suffix={`(${tracker})`}>
+      <div className="font-mono break-words">{message}</div>
+      {guidance && <div className="mt-0.5 opacity-80">{guidance}</div>}
+    </InlineBanner>
   );
 }
 

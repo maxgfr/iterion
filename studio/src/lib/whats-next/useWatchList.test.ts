@@ -49,6 +49,29 @@ describe("deriveWatchedIds", () => {
     expect(deriveWatchedIds(undefined, [])).toEqual([]);
     expect(deriveWatchedIds([], [])).toEqual([]);
   });
+
+  it("ignores a stringified-array selected_issue_ids ('[]') — phantom-watch guard", () => {
+    // Bilan whats-next finding #5: a regressed server emitted
+    // selected_issue_ids as the STRING "[]" (not an array), which became a
+    // phantom watch row → GET /api/issues/%5B%5D 404 spam.
+    const evt = {
+      seq: 1,
+      timestamp: "2026-05-28T10:00:00Z",
+      type: "human_answers_recorded",
+      run_id: "run-1",
+      node_id: "ask_which_to_process",
+      data: { answers: { selected_issue_ids: "[]" } },
+    } as unknown as RunEvent;
+    expect(deriveWatchedIds(undefined, [evt])).toEqual([]);
+  });
+
+  it("drops stringified-array elements ('[]', '[native:x]') from the id list", () => {
+    expect(
+      deriveWatchedIds(undefined, [
+        dispatchEvent(["[]", "native:a", "[native:x]"]),
+      ]),
+    ).toEqual(["native:a"]);
+  });
 });
 
 describe("formatUpdatesAsChatMessage", () => {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 
 import {
   FeatureUnavailableError,
@@ -48,13 +49,13 @@ export default function UsageTab({ teamID }: Props) {
   }
   if (err) {
     return (
-      <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+      <InlineBanner tone="danger" layout="inline">
         {err}
-      </div>
+      </InlineBanner>
     );
   }
   if (!usage) {
-    return <div className="text-sm text-fg-muted">Loading…</div>;
+    return <EmptyState message="Loading…" />;
   }
 
   return (

@@ -25,6 +25,7 @@ import {
   type LabelUsage,
 } from "@/api/native";
 import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { formatRelative } from "@/lib/format";
 
@@ -162,7 +163,7 @@ function LabelsViewInner() {
         </div>
       )}
 
-      {!labels && <p className="text-fg-muted text-[11px]">Loading…</p>}
+      {!labels && <EmptyState message="Loading…" />}
 
       {grouped && grouped.length === 0 && (
         <p className="text-fg-muted text-[11px] italic">

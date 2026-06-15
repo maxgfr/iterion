@@ -36,6 +36,9 @@ export type { DialogProps } from "./Dialog";
 export { Badge } from "./Badge";
 export type { BadgeProps, BadgeVariant, BadgeSize } from "./Badge";
 
+export { InlineBanner } from "./InlineBanner";
+export type { InlineBannerProps, InlineBannerTone } from "./InlineBanner";
+
 export { Chip } from "./Chip";
 export type { ChipProps } from "./Chip";
 

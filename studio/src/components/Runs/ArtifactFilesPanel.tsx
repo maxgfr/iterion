@@ -256,7 +256,7 @@ export default function ArtifactFilesPanel({ runId }: Props) {
   if (error) {
     return (
       <div className="h-full overflow-auto px-4 py-3 text-xs">
-        <div className="text-fg-error">Failed to load artifacts: {error}</div>
+        <div className="text-danger">Failed to load artifacts: {error}</div>
         <button
           type="button"
           className="mt-2 text-fg-link hover:underline"
@@ -542,7 +542,7 @@ function PreviewBody({ preview }: { preview: PreviewState }) {
   }
   if (preview.error) {
     return (
-      <div className="text-xs text-fg-error">Failed to load: {preview.error}</div>
+      <div className="text-xs text-danger">Failed to load: {preview.error}</div>
     );
   }
   if (preview.textBody !== null) {

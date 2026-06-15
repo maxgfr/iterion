@@ -226,7 +226,7 @@ export default function BrowserLivePane({ runId, sessionId }: BrowserLivePanePro
     <div className="flex h-full min-h-0 flex-col bg-black">
       <div className="flex-1 min-h-0 overflow-auto flex items-center justify-center">
         {status === "error" ? (
-          <div className="p-6 text-center text-sm text-red-400">
+          <div className="p-6 text-center text-sm text-danger">
             CDP connection failed: {errorMsg}
           </div>
         ) : status === "connecting" ? (

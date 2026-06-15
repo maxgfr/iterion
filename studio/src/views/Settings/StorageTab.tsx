@@ -1,8 +1,9 @@
 import { useServerInfoStore } from "@/store/serverInfo";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export default function StorageTab() {
   const info = useServerInfoStore((s) => s.info);
-  if (!info) return <p className="text-fg-subtle p-4">Loading…</p>;
+  if (!info) return <EmptyState message="Loading…" />;
   return (
     <div className="flex flex-col gap-3 p-4 text-sm">
       <div>

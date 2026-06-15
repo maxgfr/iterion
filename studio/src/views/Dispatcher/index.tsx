@@ -4,6 +4,9 @@ import { useLocation } from "wouter";
 import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
 import DispatcherControlBar from "@/components/shared/DispatcherControlBar";
 import { Button } from "@/components/ui/Button";
+import { InlineBanner } from "@/components/ui/InlineBanner";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { useConfirm } from "@/hooks/useConfirm";
 import {
   cancelIssue,
   getState,
@@ -28,6 +31,7 @@ export default function DispatcherView() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const { confirm, dialog } = useConfirm();
   const wsRef = useRef<WebSocket | null>(null);
   // The dispatcher manager's WS only exists while it is running or paused;
   // idle / error / absent all 503. Gate the live socket on that so an
@@ -162,19 +166,23 @@ export default function DispatcherView() {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
-  const doCancel = useCallback(async (issueID: string) => {
-    if (
-      !confirm(
-        `Cancel the in-flight run for ${issueID}? The issue stays on the board and can be re-dispatched.`,
-      )
-    )
-      return;
-    try {
-      await cancelIssue(issueID);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, []);
+  const doCancel = useCallback(
+    async (issueID: string) => {
+      const ok = await confirm({
+        title: "Cancel in-flight run?",
+        message: `Cancel the in-flight run for ${issueID}? The issue stays on the board and can be re-dispatched.`,
+        confirmLabel: "Cancel run",
+        confirmVariant: "danger",
+      });
+      if (!ok) return;
+      try {
+        await cancelIssue(issueID);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [confirm],
+  );
 
   useHeaderSlot({
     left: <span className="text-xs font-medium text-fg-default">Dispatcher</span>,
@@ -203,7 +211,7 @@ export default function DispatcherView() {
   });
 
   if (loading) {
-    return <div className="p-8 text-fg-muted">Loading dispatcher state…</div>;
+    return <EmptyState message="Loading dispatcher state…" />;
   }
   if (!snap) {
     return (
@@ -226,6 +234,7 @@ export default function DispatcherView() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
+      {dialog}
       <DispatcherControlBar onOpenSettings={() => setSettingsOpen(true)} />
       <SettingsDrawer
         open={settingsOpen}
@@ -233,11 +242,7 @@ export default function DispatcherView() {
         onSaved={() => void reload()}
       />
 
-      {error && (
-        <div className="bg-red-500/10 border-b border-red-500/40 px-4 py-2 text-xs text-red-200">
-          {error}
-        </div>
-      )}
+      {error && <InlineBanner tone="danger">{error}</InlineBanner>}
 
       {snap.last_tracker_error && (
         <TrackerErrorBanner
@@ -253,13 +258,10 @@ export default function DispatcherView() {
       <CostCapBanner />
 
       {snap.paused && (
-        <div className="bg-yellow-500/10 border-b border-yellow-500/40 px-4 py-2 text-xs text-yellow-200 flex items-center gap-2">
-          <span className="font-medium">Dispatcher paused</span>
-          <span className="text-yellow-200/80">
-            New dispatches are suspended. The retry queue won't fire, and new ready
-            issues won't be picked up. In-flight runs continue. Resume from the toolbar above.
-          </span>
-        </div>
+        <InlineBanner tone="warning" title="Dispatcher paused">
+          New dispatches are suspended. The retry queue won't fire, and new ready
+          issues won't be picked up. In-flight runs continue. Resume from the toolbar above.
+        </InlineBanner>
       )}
 
       <div className="flex-1 overflow-auto p-4 space-y-4 max-w-4xl">
@@ -354,13 +356,13 @@ function stallStyle(
   const elapsedS = (Date.now() - last) / 1000;
   if (elapsedS >= stallTimeoutS) {
     return {
-      rowClass: "bg-red-500/10",
+      rowClass: "bg-danger-soft",
       hint: `Silent for ${Math.round(elapsedS)}s ≥ stall timeout (${Math.round(stallTimeoutS)}s) — will be cancelled on the next reconciliation tick.`,
     };
   }
   if (elapsedS >= stallTimeoutS / 2) {
     return {
-      rowClass: "bg-amber-500/10",
+      rowClass: "bg-warning-soft",
       hint: `Silent for ${Math.round(elapsedS)}s — half the stall budget (${Math.round(stallTimeoutS)}s) consumed.`,
     };
   }
@@ -422,7 +424,7 @@ function RunningTable({
                   </button>
                   {r.attempt && r.attempt > 0 ? (
                     <span
-                      className="ml-1.5 inline-flex items-center rounded bg-amber-500/15 text-amber-300 px-1.5 py-0.5 text-[10px] font-mono align-middle"
+                      className="ml-1.5 inline-flex items-center rounded bg-warning-soft text-warning-fg px-1.5 py-0.5 text-[10px] font-mono align-middle"
                       title={`Resume of a prior failed_resumable run — attempt ${r.attempt + 1}. The dispatcher continues from the failing node's checkpoint instead of starting fresh.`}
                     >
                       resume #{r.attempt + 1}
@@ -441,7 +443,7 @@ function RunningTable({
                   {r.last_event_name ? r.last_event_name + " · " : ""}
                   {relTime(r.last_event_at)}
                   {stall.hint && (
-                    <span className="ml-1 text-amber-300/90">⏱</span>
+                    <span className="ml-1 text-warning-fg/90">⏱</span>
                   )}
                 </td>
                 <td className="py-1.5 px-3 text-right">
@@ -550,7 +552,7 @@ function RetriesTable({
               <tr
                 key={r.issue_id}
                 className={`border-b border-border-default/60 hover:bg-surface-2/40 cursor-pointer ${
-                  isDue ? "bg-amber-500/5" : ""
+                  isDue ? "bg-warning-soft" : ""
                 }`}
                 onClick={() => onFocusIssue(r.issue_id)}
                 title="Open this issue on the board"
@@ -558,11 +560,11 @@ function RetriesTable({
                 <td className="py-1.5 px-3 font-mono whitespace-nowrap">{r.identifier || r.issue_id}</td>
                 <td className="py-1.5 px-3">{r.attempt}</td>
                 <td className="py-1.5 px-3 whitespace-nowrap">
-                  <span className={isDue ? "text-amber-300" : "text-fg-muted"}>
+                  <span className={isDue ? "text-warning-fg" : "text-fg-muted"}>
                     {dueLabel || relTime(r.due_at)}
                   </span>
                 </td>
-                <td className="py-1.5 px-3 text-red-300/80 truncate max-w-[24rem]">
+                <td className="py-1.5 px-3 text-danger-fg/80 truncate max-w-[24rem]">
                   {r.error}
                 </td>
               </tr>
@@ -598,10 +600,10 @@ function DispatchSkipsTable({
 }) {
   if (rows.length === 0) return null;
   return (
-    <section className="rounded border border-red-500/40 bg-red-500/5">
-      <header className="px-4 py-2 border-b border-red-500/30 text-sm font-semibold text-red-200 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+    <section className="rounded border border-danger/40 bg-danger-soft">
+      <header className="px-4 py-2 border-b border-danger/30 text-sm font-semibold text-danger-fg flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span>⚠ Won&apos;t dispatch ({rows.length})</span>
-        <span className="text-[11px] font-normal text-red-200/70">
+        <span className="text-[11px] font-normal text-danger-fg/70">
           eligible issues the dispatcher refuses to claim — fix the{" "}
           <code>bot</code> in the issue editor or add it to{" "}
           <code>assignee_workflows</code>
@@ -630,7 +632,7 @@ function DispatchSkipsTable({
                 <td className="py-1.5 px-3 font-mono">
                   {s.bot ? s.bot : <span className="text-fg-subtle">—</span>}
                 </td>
-                <td className="py-1.5 px-3 text-red-300/80">{s.reason}</td>
+                <td className="py-1.5 px-3 text-danger-fg/80">{s.reason}</td>
               </tr>
             ))}
           </tbody>

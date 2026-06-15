@@ -254,7 +254,7 @@ export default function BrowserPane({
         ) : null}
       </div>
       {attachError ? (
-        <div className="border-b border-red-700 bg-red-950/40 px-3 py-1 text-[11px] text-red-300">
+        <div className="border-b border-danger/40 bg-danger-soft px-3 py-1 text-[11px] text-danger-fg">
           {attachError}
         </div>
       ) : null}

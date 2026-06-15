@@ -72,6 +72,11 @@ function extractDispatchedIds(events: ReadonlyArray<RunEvent>): string[] {
     if (!Array.isArray(raw)) continue;
     for (const v of raw) {
       if (typeof v !== "string" || v.length === 0) continue;
+      // Defence-in-depth against a regressed server re-introducing a
+      // stringified array ("[]" / "[native:x]") as an element — those are
+      // never real issue ids and produced the phantom "[]" watch row +
+      // 404 spam (bilan whats-next finding #5; backend fix ed7caa5f).
+      if (v.startsWith("[")) continue;
       if (seen.has(v)) continue;
       seen.add(v);
       out.push(v);

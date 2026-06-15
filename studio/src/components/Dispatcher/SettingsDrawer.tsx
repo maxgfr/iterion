@@ -2,6 +2,7 @@ import * as RD from "@radix-ui/react-dialog";
 import { useEffect, useState } from "react";
 
 import * as dispatcher from "@/api/dispatcher";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 
 interface Props {
   open: boolean;
@@ -81,9 +82,7 @@ export default function SettingsDrawer({ open, onClose, onSaved }: Props) {
             </div>
           </header>
 
-          {error && (
-            <div className="border-b border-red-500/40 bg-red-500/10 px-4 py-2 text-xs text-red-200">{error}</div>
-          )}
+          {error && <InlineBanner tone="danger">{error}</InlineBanner>}
 
           <div className="flex-1 overflow-auto p-4 text-sm">
             {cfg && <Form cfg={cfg} setCfg={setCfg} />}

@@ -16,6 +16,7 @@ import { useTabsStore } from "@/store/tabs";
 import { useBotsStore } from "@/store/bots";
 import { useUIStore } from "@/store/ui";
 import { botDisplayLabel } from "@/lib/botLabel";
+import { toastError } from "@/lib/errorHints";
 
 const EditorView = lazy(() => import("@/components/EditorView"));
 
@@ -64,7 +65,7 @@ export default function EditorTabHost({ tabId, file }: Props) {
       })
       .catch((err) => {
         if (cancelled) return;
-        addToast(`Open file failed: ${(err as Error).message}`, "error");
+        toastError(addToast, err, "Open file failed");
       });
     return () => {
       cancelled = true;

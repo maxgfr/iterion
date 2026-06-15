@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 
 import {
   type AuditEvent,
@@ -76,9 +77,9 @@ export default function AuditTab({ teamID, canManage }: Props) {
   return (
     <div className="space-y-3">
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+        <InlineBanner tone="danger" layout="inline">
           {err}
-        </div>
+        </InlineBanner>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-sm">

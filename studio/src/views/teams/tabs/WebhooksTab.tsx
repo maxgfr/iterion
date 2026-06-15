@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 
 import {
   FeatureUnavailableError,
@@ -123,9 +124,9 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
   return (
     <div className="space-y-4">
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2">
+        <InlineBanner tone="danger" layout="inline">
           {err}
-        </div>
+        </InlineBanner>
       )}
 
       <div className="flex items-center justify-between">
@@ -143,7 +144,7 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
       </div>
 
       {loading ? (
-        <div className="text-sm text-fg-muted">Loading…</div>
+        <EmptyState message="Loading…" />
       ) : webhooks.length === 0 ? (
         <EmptyState
           message={
@@ -213,7 +214,7 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
                         size="sm"
                         variant="ghost"
                         onClick={() => setDeleteTarget(w)}
-                        className="text-fg-error"
+                        className="text-danger"
                       >
                         Delete
                       </Button>
@@ -358,9 +359,9 @@ function CreateWebhookDialog({
       }
     >
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2 mb-3">
+        <InlineBanner tone="danger" layout="inline" className="mb-3">
           {err}
-        </div>
+        </InlineBanner>
       )}
       <div className="space-y-3 text-sm">
         <Field label="Name">
@@ -681,12 +682,12 @@ function DeliveriesDrawer({
       }
     >
       {err && (
-        <div className="text-sm text-fg-error bg-surface-warn-subtle border border-border-warn rounded px-3 py-2 mb-3">
+        <InlineBanner tone="danger" layout="inline" className="mb-3">
           {err}
-        </div>
+        </InlineBanner>
       )}
       {loading ? (
-        <div className="text-sm text-fg-muted">Loading…</div>
+        <EmptyState message="Loading…" />
       ) : deliveries.length === 0 ? (
         <EmptyState message="No deliveries yet. Push an event from the forge to see it appear here." />
       ) : (
@@ -714,7 +715,7 @@ function DeliveriesDrawer({
                   {d.event_action ? ` / ${d.event_action}` : ""}
                 </td>
                 <td className="px-2 py-2 text-fg-muted">{d.source_ip ?? "—"}</td>
-                <td className="px-2 py-2 text-fg-error">{d.error ?? "—"}</td>
+                <td className="px-2 py-2 text-danger">{d.error ?? "—"}</td>
               </tr>
             ))}
           </tbody>

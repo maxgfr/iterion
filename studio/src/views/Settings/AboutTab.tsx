@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { desktop, type AppInfo } from "@/lib/desktopBridge";
 import { useServerInfoStore } from "@/store/serverInfo";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 interface Props {
   desktopFeatures: boolean;
@@ -16,7 +17,7 @@ export default function AboutTab({ desktopFeatures }: Props) {
     desktop.getAppInfo().then(setInfo).catch(() => setInfo(null));
   }, [desktopFeatures]);
 
-  if (desktopFeatures && !info) return <p className="text-fg-subtle p-4">Loading…</p>;
+  if (desktopFeatures && !info) return <EmptyState message="Loading…" />;
 
   return (
     <div className="flex flex-col gap-3 p-4 text-sm">

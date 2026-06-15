@@ -12,6 +12,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { LiveDot } from "@/components/ui/LiveDot";
 import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 
 // Smoke a11y test for the shared UI primitives. Uses axe-core in
 // jsdom and focuses on WCAG 2.1 A + AA rules. The aim is to catch
@@ -139,6 +140,37 @@ describe("a11y / primitives", () => {
   it("Skeleton is aria-hidden", async () => {
     const root = mount(<Skeleton className="h-6 w-32" />);
     await expectNoViolations(root, "Skeleton");
+  });
+
+  it("InlineBanner — every tone × layout, with action + dismiss", async () => {
+    const tones = ["info", "warning", "danger", "success"] as const;
+    const root = mount(
+      <main>
+        {tones.map((tone) => (
+          <div key={tone}>
+            <InlineBanner tone={tone} layout="sticky" title="Heading">
+              Body copy for the {tone} banner.
+            </InlineBanner>
+            <InlineBanner
+              tone={tone}
+              layout="inline"
+              suffix="(github)"
+              action={
+                <Button variant="ghost" size="sm">
+                  Retry
+                </Button>
+              }
+            >
+              Inline {tone} message.
+            </InlineBanner>
+            <InlineBanner tone={tone} dismissable onDismiss={() => {}}>
+              Dismissable {tone}.
+            </InlineBanner>
+          </div>
+        ))}
+      </main>,
+    );
+    await expectNoViolations(root, "InlineBanner");
   });
 
   it("Button loading state still passes axe (no orphaned spinner label)", async () => {

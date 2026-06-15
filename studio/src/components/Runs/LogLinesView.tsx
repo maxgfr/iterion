@@ -718,6 +718,7 @@ const LogBlockRow = memo(function LogBlockRow({
         role="button"
         tabIndex={0}
         aria-expanded={open}
+        aria-label={open ? "Collapse log line" : "Expand log line"}
         onClick={toggle}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
