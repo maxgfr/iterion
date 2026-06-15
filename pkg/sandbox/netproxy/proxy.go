@@ -530,23 +530,28 @@ func (p *Proxy) handleForward(w http.ResponseWriter, r *http.Request) {
 // tunnel turns "either side closes" into a deterministic teardown.
 func tunnel(a, b net.Conn) {
 	done := make(chan struct{}, 2)
-	go func() {
-		_, _ = io.Copy(a, b)
+	cp := func(dst, src net.Conn) {
+		_, _ = io.Copy(dst, src)
 		done <- struct{}{}
-	}()
-	go func() {
-		_, _ = io.Copy(b, a)
-		done <- struct{}{}
-	}()
+	}
+	go cp(a, b)
+	go cp(b, a)
 	<-done
-	_ = a.Close()
-	_ = b.Close()
-	// Wait for the second goroutine, but cap the wait so a peer in a
-	// pathological TCP state (half-closed, RST swallowed by netfilter,
-	// etc.) can't keep an io.Copy parked indefinitely. The first Close
-	// above should unblock it; if it doesn't within a few seconds the
-	// goroutine is genuinely wedged and waiting longer would only leak
-	// us along with it.
+	// First direction finished → tear the tunnel down. Closing both ends
+	// unblocks the peer io.Copy in the common case; SetDeadline in the
+	// past additionally forces a Read/Write parked in a pathological TCP
+	// state (half-closed, RST swallowed by netfilter, etc.) to return
+	// immediately — Close alone does not always wake such a parked
+	// syscall. Together they make the second goroutine's exit reliable
+	// rather than something we wait on and then leak.
+	for _, c := range []net.Conn{a, b} {
+		_ = c.SetDeadline(time.Now())
+		_ = c.Close()
+	}
+	// The deadline+close above guarantees the second copy returns; the
+	// bounded wait remains only as a last-ditch backstop so tunnel itself
+	// can never block forever on an exotic Conn whose SetDeadline is a
+	// no-op.
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
