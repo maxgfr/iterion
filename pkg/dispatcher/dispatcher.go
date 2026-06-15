@@ -89,6 +89,26 @@ type Dispatcher struct {
 	ws *wsBridge
 }
 
+// cmdBufferSize sizes the actor's command channel. The hazard it guards:
+// a burst of cmdRunFinished from up to MaxConcurrent in-flight workers,
+// arriving while the actor is busy inside a single finishRun (which may
+// make a blocking tracker HTTP call). With a fixed buffer smaller than
+// MaxConcurrent, a high-concurrency config could fill the channel and
+// wedge workers on the send. Scale the buffer past MaxConcurrent (×2 +
+// headroom for ticks / external commands), with a 64 floor for the
+// common low-concurrency case. (The deeper fix — never block the actor
+// on tracker I/O — is tracked separately; this removes the realistic
+// deadlock window.)
+func cmdBufferSize(maxConcurrent int) int {
+	const floor = 64
+	if maxConcurrent > 0 {
+		if sized := 2*maxConcurrent + 16; sized > floor {
+			return sized
+		}
+	}
+	return floor
+}
+
 // New constructs a Dispatcher with the given Options. It does not start
 // the actor goroutine; call Start.
 func New(opts Options) (*Dispatcher, error) {
@@ -118,7 +138,7 @@ func New(opts Options) (*Dispatcher, error) {
 		storeDir:   opts.StoreDir,
 		hostMarker: opts.HostMarker,
 		state:      newState(),
-		cmds:       make(chan cmd, 64),
+		cmds:       make(chan cmd, cmdBufferSize(opts.Config.Agent.MaxConcurrent)),
 		publisher:  opts.SnapshotPublisher,
 		stop:       make(chan struct{}),
 		done:       make(chan struct{}),
