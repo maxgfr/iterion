@@ -129,6 +129,20 @@ func extractBearer(r *http.Request) string {
 	// so we accept ?t=<jwt> on the WS endpoints (same-origin only).
 	// We match both /api/ws (the file-event hub at exactly that path)
 	// and /api/ws/* (per-run streams under /api/ws/runs/<id>).
+	//
+	// SECURITY / future work: this branch is dead for every shipped
+	// client today — the browser/cloud SPA authenticates the same-origin
+	// WS via the HttpOnly cookie (it never appends ?t=), and the desktop
+	// build runs the embedded server with DisableAuth=true and returns an
+	// empty session token, so nothing puts a JWT in the URL (see
+	// cmd/iterion-desktop/bindings.go GetSessionToken). It is kept only
+	// for a future hosted-desktop-with-auth build. When that lands, do
+	// NOT carry the long-lived access JWT in the URL — query strings leak
+	// to access logs, proxies and Referer. Replace this with a single-use,
+	// short-TTL ticket: an authenticated POST /api/ws/ticket mints an
+	// opaque ticket bound to the identity, the client passes it as
+	// ?ticket=, and the server consumes (and invalidates) it before the
+	// upgrade.
 	if t := r.URL.Query().Get("t"); t != "" && (r.URL.Path == "/api/ws" || strings.HasPrefix(r.URL.Path, "/api/ws/")) {
 		return t
 	}
