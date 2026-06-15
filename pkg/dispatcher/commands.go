@@ -82,6 +82,24 @@ func forceRemoveSandboxContainer(logger *iterlog.Logger, runID string) {
 	}
 }
 
+// scheduleForceRemoveSandboxContainer fires forceRemoveSandboxContainer after
+// cancelGracePeriod in a detached goroutine. The work is intentionally
+// fire-and-forget — it must outlive the cancel command (and even a dispatcher
+// shutdown) so a lingering container is still reaped — but it is wrapped in a
+// recover so a panic in the docker-rm path can't crash the process, matching
+// the actor loop's safeTick / safeCmdApply discipline.
+func scheduleForceRemoveSandboxContainer(logger *iterlog.Logger, runID string) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil && logger != nil {
+				logger.Error("dispatcher: panic in deferred force-remove of run %s: %v", runID, r)
+			}
+		}()
+		time.Sleep(cancelGracePeriod)
+		forceRemoveSandboxContainer(logger, runID)
+	}()
+}
+
 // cmd is the typed command interface processed by the actor goroutine.
 // Each implementation is a small struct so command intent is visible
 // in stack traces and log lines.
@@ -748,12 +766,7 @@ func (m cmdCancel) apply(c *Dispatcher, _ context.Context) {
 	// often outlives the host-side docker exec SIGKILL and keeps
 	// streaming events for tens of seconds — operators perceive cancel
 	// as broken.
-	runID := r.RunID
-	logger := c.logger
-	go func() {
-		time.Sleep(cancelGracePeriod)
-		forceRemoveSandboxContainer(logger, runID)
-	}()
+	scheduleForceRemoveSandboxContainer(c.logger, r.RunID)
 }
 
 // cmdCancelByRunID cancels an in-flight run identified by its RunID
@@ -774,12 +787,7 @@ func (m cmdCancelByRunID) apply(c *Dispatcher, _ context.Context) {
 			r.Cancel()
 		}
 		c.logger.Info("dispatcher: %s cancel requested (run %s)", r.Identifier, m.runID)
-		runID := r.RunID
-		logger := c.logger
-		go func() {
-			time.Sleep(cancelGracePeriod)
-			forceRemoveSandboxContainer(logger, runID)
-		}()
+		scheduleForceRemoveSandboxContainer(c.logger, r.RunID)
 		m.reply <- true
 		return
 	}
