@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/bundle"
@@ -29,6 +30,8 @@ type EngineRunner struct {
 	workflowHash string
 	bundle       *bundle.Bundle // nil for plain .bot
 	bundleClean  func() error   // no-op when bundle is nil
+	closeOnce    sync.Once      // guards bundleClean against concurrent/repeat Close
+	closeErr     error          // result of the single bundleClean run
 	logger       *iterlog.Logger
 }
 
@@ -118,14 +121,17 @@ func (r *EngineRunner) DeclaredVars(string) map[string]struct{} {
 
 // Close releases any resources tied to the workflow source — in
 // particular, removes the extraction directory of a `.botz` archive.
-// Safe to call multiple times.
+// Safe to call multiple times AND concurrently: the cleanup runs exactly
+// once (sync.Once), so two racing Close calls can't both invoke
+// RemoveAll on the extraction dir (the prior nil-check + swap was a
+// read-read-write race that let both pass).
 func (r *EngineRunner) Close() error {
-	if r.bundleClean == nil {
-		return nil
-	}
-	clean := r.bundleClean
-	r.bundleClean = func() error { return nil }
-	return clean()
+	r.closeOnce.Do(func() {
+		if r.bundleClean != nil {
+			r.closeErr = r.bundleClean()
+		}
+	})
+	return r.closeErr
 }
 
 // Dispatch implements Runner. Opens the store, builds an executor for
