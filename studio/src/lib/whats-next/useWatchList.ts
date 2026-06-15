@@ -111,6 +111,14 @@ export function useWatchList(runId: string | null): UseWatchListResult {
 
   const lastObservedRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
+    // Tear down the previous run's pollers on ANY runId change (incl. →null):
+    // a stale fetchOnce closure captured the OLD runId but reads the ref we
+    // reassign below, so it would persist the new run's observed-map under the
+    // OLD run's localStorage key (and keep polling the wrong run). This effect
+    // runs before the poll-setup effect, so every interval is recreated fresh.
+    const pollers = pollersRef.current;
+    for (const timer of pollers.values()) clearInterval(timer);
+    pollers.clear();
     if (!runId) return;
     lastObservedRef.current = loadObservedMap(runId);
     setPendingUpdates(loadJSON(STORAGE_PREFIX_PENDING + runId, validateUpdates, []));

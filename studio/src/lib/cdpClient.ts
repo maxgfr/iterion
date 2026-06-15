@@ -138,6 +138,14 @@ export class CDPClient {
     if (this.ws && this.ws.readyState <= WebSocket.OPEN) {
       this.ws.close(1000, "client closed");
     }
+    // Reject in-flight calls synchronously: onclose only fires if the WS was
+    // actually open, so close() before connect (or after the socket already
+    // closed) would otherwise leave callers hanging forever. Re-rejecting a
+    // settled promise from a later onclose is a harmless no-op.
+    for (const p of this.pending.values()) {
+      p.reject(new Error("cdp: client closed"));
+    }
+    this.pending.clear();
   }
 
   private buildURL(): string {
@@ -181,7 +189,7 @@ export class CDPClient {
     if (data instanceof ArrayBuffer) {
       handle(decode(data));
     } else if (data instanceof Blob) {
-      data.arrayBuffer().then((b) => handle(decode(b)));
+      data.arrayBuffer().then((b) => handle(decode(b))).catch(() => undefined);
     } else {
       handle(decode(data));
     }

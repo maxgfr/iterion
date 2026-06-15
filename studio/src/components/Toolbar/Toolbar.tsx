@@ -281,7 +281,9 @@ export default function Toolbar() {
       const name = document.workflows?.[0]?.name || "workflow";
       a.download = `${name}.bot`;
       a.click();
-      URL.revokeObjectURL(url);
+      // Defer revoke: revoking synchronously can cancel the download in
+      // Firefox/Safari before the browser reads the blob (matches LogLinesView).
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
       console.error("Download failed:", err);
     }

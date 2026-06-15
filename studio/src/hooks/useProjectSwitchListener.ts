@@ -41,6 +41,10 @@ export function useProjectSwitchListener(): void {
     });
     return () => {
       off();
+      // Release our refCount on the shared file-watcher socket. Without this,
+      // every mount (incl. StrictMode double-invoke and any AuthedApp remount)
+      // leaks a +1 and the singleton WS never tears down.
+      fileWatcher.disconnect();
     };
   }, [setLocation]);
 }
