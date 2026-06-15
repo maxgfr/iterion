@@ -115,6 +115,9 @@ func (a *ForgejoAdapter) ListCandidates(ctx context.Context) ([]Issue, error) {
 		// pathological responses (e.g. a buggy server returning
 		// pageSize entries forever).
 		if page >= 100 {
+			if a.opts.Logger != nil {
+				a.opts.Logger.Warn("forgejo tracker: ListCandidates hit the 100-page cap on repo %s — beyond this point issues are silently dropped from dispatch; consider tightening label filters", a.opts.Repo)
+			}
 			break
 		}
 	}
@@ -424,7 +427,10 @@ func labelNames(in []forgejoLabel) []string {
 func trimHost(h string) string {
 	h = strings.TrimPrefix(h, "https://")
 	h = strings.TrimPrefix(h, "http://")
-	return strings.TrimRight(h, "/")
+	// Lowercase: RFC 3986 hosts are case-insensitive, and this value is used
+	// both to BUILD an issue ID and to PARSE it back — a case mismatch across
+	// processes would silently lose claim/state tracking.
+	return strings.ToLower(strings.TrimRight(h, "/"))
 }
 
 // parseForgejoID expects "forgejo:<host>/<owner>/<repo>#<num>".
@@ -435,6 +441,9 @@ func parseForgejoID(host, repo, id string) (int, bool) {
 	}
 	var n int
 	if _, err := fmt.Sscanf(strings.TrimPrefix(id, prefix), "%d", &n); err != nil {
+		return 0, false
+	}
+	if n <= 0 {
 		return 0, false
 	}
 	return n, true

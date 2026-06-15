@@ -35,9 +35,11 @@ import (
 // that, a "skip if matches just-written hash" optimisation can
 // fit on top of this without changing the interface.
 type indexWatcher struct {
-	w    *fsnotify.Watcher
-	stop chan struct{}
-	done chan struct{}
+	w         *fsnotify.Watcher
+	stop      chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // startIndexWatcher launches a goroutine that mirrors issues/ disk
@@ -74,14 +76,15 @@ func (iw *indexWatcher) Close() error {
 	if iw == nil {
 		return nil
 	}
-	select {
-	case <-iw.stop:
-		return nil
-	default:
+	// sync.Once makes Close idempotent AND concurrency-safe: the prior
+	// select/default idiom let two concurrent callers both reach the
+	// default branch and double-close iw.stop (panic).
+	iw.closeOnce.Do(func() {
 		close(iw.stop)
-	}
-	<-iw.done
-	return iw.w.Close()
+		<-iw.done
+		iw.closeErr = iw.w.Close()
+	})
+	return iw.closeErr
 }
 
 func (iw *indexWatcher) loop(s *Store, issuesPath string) {

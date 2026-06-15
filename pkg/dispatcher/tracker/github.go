@@ -390,6 +390,11 @@ func parseGitHubID(repo, id string) (int, bool) {
 	if _, err := fmt.Sscanf(strings.TrimPrefix(id, prefix), "%d", &n); err != nil {
 		return 0, false
 	}
+	if n <= 0 {
+		// Reject non-positive issue numbers: a "#-5" would become a
+		// `gh issue edit -5 …` flag injection.
+		return 0, false
+	}
 	return n, true
 }
 
