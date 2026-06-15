@@ -421,7 +421,12 @@ prompt fix_system:
        signature or contract changed, find and update ALL callers,
        not only those in this chunk: a missed caller breaks the build
        in a file the chunk reviewer never sees, and the loop cannot
-       catch it.
+       catch it. Attempt verification ONCE. If the build/test cannot
+       run in this environment (e.g. a pinned toolchain is missing from
+       the sandbox), do NOT keep retrying it — retrying burns your step
+       budget and can cut you off mid-task, which produces exactly the
+       useless placeholder this section forbids. Note the limitation and
+       FINALIZE NOW; a deterministic gate re-runs the build afterwards.
     3. Set applied=true only when at least one fix is actually in the
        tree, and make `summary` state the concrete changes AND the
        verification you ran — or say plainly you could not verify and
@@ -1169,7 +1174,13 @@ agent fix_gpt:
   ## claw needs the same read/write toolset the reviewer used so
   ## the fixer can actually apply edits.
   tools: [bash, read_file, write_file, file_edit, glob, grep]
-  tool_max_steps: 30
+  ## 45 (was 30): a multi-file fix (read several files + edit + verify) can
+  ## legitimately need more than 30 tool steps; getting cut off mid-edit at the
+  ## cap leaves a partial edit + an empty final turn that the formatting pass
+  ## renders as a useless "work in progress" placeholder (run 019ec9d5). The
+  ## FINALIZE "verify once, don't loop" guard is the primary mitigation; this is
+  ## the backstop headroom.
+  tool_max_steps: 45
   interaction: human
 
 ## ─── Commit (close the no-commit gap) ──────────────────────────
