@@ -62,7 +62,7 @@ func Open(path, cacheRoot string) (*Bundle, func() error, error) {
 			return nil, nil, err
 		}
 	}
-	if err := os.MkdirAll(cacheRoot, 0o755); err != nil {
+	if err := os.MkdirAll(cacheRoot, 0o700); err != nil {
 		return nil, nil, fmt.Errorf("bundle: mkdir cache %s: %w", cacheRoot, err)
 	}
 

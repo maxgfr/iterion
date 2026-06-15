@@ -43,7 +43,7 @@ func extractTarGz(r io.Reader, dest string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("bundle: resolve dest %s: %w", dest, err)
 	}
-	if err := os.MkdirAll(absDest, 0o755); err != nil {
+	if err := os.MkdirAll(absDest, 0o700); err != nil {
 		return 0, fmt.Errorf("bundle: mkdir %s: %w", absDest, err)
 	}
 
@@ -72,14 +72,14 @@ func extractTarGz(r io.Reader, dest string) (int, error) {
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := os.MkdirAll(target, 0o700); err != nil {
 				return written, fmt.Errorf("bundle: mkdir %s: %w", target, err)
 			}
 		case tar.TypeReg, tar.TypeRegA:
 			if hdr.Size > maxBytes-totalBytes {
 				return written, fmt.Errorf("bundle: total size exceeds limit (%d bytes)", maxBytes)
 			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 				return written, fmt.Errorf("bundle: mkdir parent %s: %w", filepath.Dir(target), err)
 			}
 			// O_TRUNC because we may be extracting into a cache dir that
@@ -220,9 +220,12 @@ func (hr *hashingReader) Sum() string {
 }
 
 // fileMode masks the supplied tar mode to the subset we permit on disk.
-// Tar headers can carry sticky/suid bits; bundles must not.
+// Tar headers can carry sticky/suid bits; bundles must not. We also strip
+// group/other bits (& 0o700): bundle files (skills, recipes, the .bot) are
+// read by the iterion process only, so a world-readable extraction would
+// expose potentially-sensitive prompts to other UIDs on a shared host.
 func fileMode(m int64) os.FileMode {
-	return os.FileMode(m) & 0o777
+	return os.FileMode(m) & 0o700
 }
 
 func envInt(name string, def int) int {
