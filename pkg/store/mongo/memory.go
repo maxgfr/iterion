@@ -108,9 +108,28 @@ func docFilter(spaceID, path string) bson.M {
 	return bson.M{"_id": memDocID{SpaceID: spaceID, Path: path}}
 }
 
+// validateCloudTenant layers the cloud adapter's tenancy contract on top of
+// the generic SpaceRef validation. knowledge.SpaceRef.Validate() deliberately
+// allows an empty TenantID ("required in cloud, empty for local single-tenant"
+// — see scope.go) and leaves enforcement to the cloud adapter. THIS store is
+// that adapter: every non-global space is tenant-scoped, so a missing TenantID
+// is a fail-closed error here. Without it, a non-global ref with TenantID==""
+// would compute a tenant-less _id (ref.ID()) and read/write a space outside any
+// org's isolation boundary — a cross-tenant leak. Only VisibilityGlobal (the
+// instance-wide, org-read-only catalogue) legitimately has no tenant.
+func validateCloudTenant(ref knowledge.SpaceRef) error {
+	if vErr := ref.Validate(); vErr != nil {
+		return vErr
+	}
+	if ref.Visibility != knowledge.VisibilityGlobal && ref.TenantID == "" {
+		return fmt.Errorf("knowledge: %q space %q requires a tenant in cloud mode", ref.Visibility, ref.Name)
+	}
+	return nil
+}
+
 // Root returns a mem:// display URI (no IO).
 func (s *MongoMemoryStore) Root(ref knowledge.SpaceRef) (string, error) {
-	if err := ref.Validate(); err != nil {
+	if err := validateCloudTenant(ref); err != nil {
 		return "", err
 	}
 	return "mem://" + string(ref.Visibility) + "/" + ref.ID(), nil
@@ -137,7 +156,7 @@ func (s *MongoMemoryStore) allDocs(ctx context.Context, spaceID string, withBody
 }
 
 func (s *MongoMemoryStore) BuildIndex(ctx context.Context, ref knowledge.SpaceRef) ([]knowledge.IndexEntry, error) {
-	if err := ref.Validate(); err != nil {
+	if err := validateCloudTenant(ref); err != nil {
 		return nil, err
 	}
 	docs, err := s.allDocs(ctx, ref.ID(), false)
@@ -159,7 +178,7 @@ func (s *MongoMemoryStore) Autoload(ctx context.Context, ref knowledge.SpaceRef,
 	if len(patterns) == 0 {
 		return nil, nil
 	}
-	if err := ref.Validate(); err != nil {
+	if err := validateCloudTenant(ref); err != nil {
 		return nil, err
 	}
 	docs, err := s.allDocs(ctx, ref.ID(), true)
@@ -181,7 +200,7 @@ func (s *MongoMemoryStore) Autoload(ctx context.Context, ref knowledge.SpaceRef,
 }
 
 func (s *MongoMemoryStore) ListDocuments(ctx context.Context, ref knowledge.SpaceRef, dir string) ([]knowledge.DocumentMeta, error) {
-	if err := ref.Validate(); err != nil {
+	if err := validateCloudTenant(ref); err != nil {
 		return nil, err
 	}
 	docs, err := s.allDocs(ctx, ref.ID(), false)
@@ -203,7 +222,7 @@ func (s *MongoMemoryStore) ListDocuments(ctx context.Context, ref knowledge.Spac
 }
 
 func (s *MongoMemoryStore) ReadDocument(ctx context.Context, ref knowledge.SpaceRef, path string) (knowledge.Document, error) {
-	if err := ref.Validate(); err != nil {
+	if err := validateCloudTenant(ref); err != nil {
 		return knowledge.Document{}, err
 	}
 	if err := knowledge.ValidateDocPath(path); err != nil {
@@ -229,7 +248,7 @@ func metaOf(d memDoc) knowledge.DocumentMeta {
 }
 
 func (s *MongoMemoryStore) UsageBytes(ctx context.Context, ref knowledge.SpaceRef) (int64, int64, error) {
-	if err := ref.Validate(); err != nil {
+	if err := validateCloudTenant(ref); err != nil {
 		return 0, 0, err
 	}
 	var sp memSpaceDoc
@@ -244,7 +263,7 @@ func (s *MongoMemoryStore) UsageBytes(ctx context.Context, ref knowledge.SpaceRe
 }
 
 func (s *MongoMemoryStore) DeleteDocument(ctx context.Context, ref knowledge.SpaceRef, path string) error {
-	if err := ref.Validate(); err != nil {
+	if err := validateCloudTenant(ref); err != nil {
 		return err
 	}
 	if err := knowledge.ValidateDocPath(path); err != nil {
@@ -272,7 +291,7 @@ func (s *MongoMemoryStore) DeleteDocument(ctx context.Context, ref knowledge.Spa
 
 // WriteDocument is the transactional path. See package comment.
 func (s *MongoMemoryStore) WriteDocument(ctx context.Context, ref knowledge.SpaceRef, in knowledge.DocumentInput) (knowledge.DocumentMeta, error) {
-	if err := ref.Validate(); err != nil {
+	if err := validateCloudTenant(ref); err != nil {
 		return knowledge.DocumentMeta{}, err
 	}
 	if err := knowledge.ValidateDocPath(in.Path); err != nil {
@@ -283,76 +302,109 @@ func (s *MongoMemoryStore) WriteDocument(ctx context.Context, ref knowledge.Spac
 		return knowledge.DocumentMeta{}, &knowledge.QuotaError{Aggregate: false, Used: 0, Delta: newSize, Quota: knowledge.DefaultMaxDocumentSize}
 	}
 	spaceID := ref.ID()
-
-	var existing memDoc
-	var oldSize, prevRev int64
-	if err := s.docs.FindOne(ctx, docFilter(spaceID, in.Path), options.FindOne().SetProjection(bson.M{"size": 1, "revision": 1})).Decode(&existing); err == nil {
-		oldSize, prevRev = existing.Size, existing.Revision
-	}
-	if in.ExpectedRev != 0 && in.ExpectedRev != prevRev {
-		return knowledge.DocumentMeta{}, fmt.Errorf("memory: revision conflict (expected %d, have %d)", in.ExpectedRev, prevRev)
-	}
-	delta := newSize - oldSize
+	tenantID := ref.TenantID
 
 	if err := s.ensureSpace(ctx, ref); err != nil {
 		return knowledge.DocumentMeta{}, err
 	}
-	tenantID := ref.TenantID
 
-	// 1) org aggregate ceiling.
-	if tenantID != "" && delta > 0 {
-		if err := s.ensureTenant(ctx, tenantID); err != nil {
-			return knowledge.DocumentMeta{}, err
+	// Optimistic-concurrency loop (compare-and-swap on `revision`). Two writers
+	// to the same (space, path) used to each FindOne prevRev, each bump the
+	// quota counters, then each UNCONDITIONALLY ReplaceOne — collapsing both
+	// into one revision (a lost update) and leaving BOTH per-write counter bumps
+	// applied even though only one body survived (quota drift). Now the
+	// ReplaceOne is conditioned on the revision we read ({_id, revision} filter
+	// + upsert): the writer that lost the race hits an E11000 duplicate-key on
+	// its insert, rolls its own counter bump back, and — unless the caller
+	// pinned ExpectedRev — re-reads the advanced revision and retries. So the
+	// surviving write is the ONLY one whose counters persist. ensureSpace runs
+	// once above (idempotent); ensureTenant stays in-loop (also idempotent).
+	const maxWriteAttempts = 5
+	for attempt := 0; ; attempt++ {
+		var existing memDoc
+		var oldSize, prevRev int64
+		if err := s.docs.FindOne(ctx, docFilter(spaceID, in.Path), options.FindOne().SetProjection(bson.M{"size": 1, "revision": 1})).Decode(&existing); err == nil {
+			oldSize, prevRev = existing.Size, existing.Revision
 		}
-		ok, err := s.bumpTenant(ctx, tenantID, delta)
-		if err != nil {
-			return knowledge.DocumentMeta{}, err
+		if in.ExpectedRev != 0 && in.ExpectedRev != prevRev {
+			return knowledge.DocumentMeta{}, fmt.Errorf("memory: revision conflict (expected %d, have %d)", in.ExpectedRev, prevRev)
 		}
-		if !ok {
-			used, quota := s.readUsage(ctx, s.tenant, tenantID, knowledge.DefaultOrgAggregateQuota)
-			return knowledge.DocumentMeta{}, &knowledge.QuotaError{Aggregate: true, Used: used, Delta: delta, Quota: quota}
-		}
-	}
+		delta := newSize - oldSize
 
-	// 2) per-space sub-cap.
-	if delta > 0 {
-		ok, err := s.bumpSpace(ctx, spaceID, delta)
-		if err != nil || !ok {
-			if tenantID != "" {
-				_, _ = s.bumpTenant(ctx, tenantID, -delta) // rollback aggregate
+		// 1) org aggregate ceiling.
+		if tenantID != "" && delta > 0 {
+			if err := s.ensureTenant(ctx, tenantID); err != nil {
+				return knowledge.DocumentMeta{}, err
 			}
+			ok, err := s.bumpTenant(ctx, tenantID, delta)
 			if err != nil {
 				return knowledge.DocumentMeta{}, err
 			}
-			used, quota := s.readUsage(ctx, s.spaces, spaceID, 0)
-			return knowledge.DocumentMeta{}, &knowledge.QuotaError{Aggregate: false, Used: used, Delta: delta, Quota: quota}
+			if !ok {
+				used, quota := s.readUsage(ctx, s.tenant, tenantID, knowledge.DefaultOrgAggregateQuota)
+				return knowledge.DocumentMeta{}, &knowledge.QuotaError{Aggregate: true, Used: used, Delta: delta, Quota: quota}
+			}
 		}
-	} else if delta < 0 {
-		_, _ = s.bumpSpace(ctx, spaceID, delta)
-		if tenantID != "" {
-			_, _ = s.bumpTenant(ctx, tenantID, delta)
-		}
-	}
 
-	// 3) upsert the doc.
-	title, desc, tags := knowledge.ParseMarkdownMeta(in.Content)
-	now := time.Now().UTC()
-	doc := memDoc{
-		ID: memDocID{SpaceID: spaceID, Path: in.Path}, TenantID: tenantID, SpaceID: spaceID,
-		Path: in.Path, Title: title, Description: desc, Tags: tags,
-		Size: newSize, Checksum: knowledge.ChecksumHex(in.Content), Revision: prevRev + 1,
-		Content: in.Content, UpdatedBy: in.UpdatedBy, UpdatedAt: now,
-	}
-	if _, err := s.docs.ReplaceOne(ctx, docFilter(spaceID, in.Path), doc, options.Replace().SetUpsert(true)); err != nil {
-		if delta != 0 { // roll counters back on a failed body write
+		// 2) per-space sub-cap.
+		if delta > 0 {
+			ok, err := s.bumpSpace(ctx, spaceID, delta)
+			if err != nil || !ok {
+				if tenantID != "" {
+					_, _ = s.bumpTenant(ctx, tenantID, -delta) // rollback aggregate
+				}
+				if err != nil {
+					return knowledge.DocumentMeta{}, err
+				}
+				used, quota := s.readUsage(ctx, s.spaces, spaceID, 0)
+				return knowledge.DocumentMeta{}, &knowledge.QuotaError{Aggregate: false, Used: used, Delta: delta, Quota: quota}
+			}
+		} else if delta < 0 {
+			_, _ = s.bumpSpace(ctx, spaceID, delta)
+			if tenantID != "" {
+				_, _ = s.bumpTenant(ctx, tenantID, delta)
+			}
+		}
+
+		// 3) compare-and-swap upsert: matches (and replaces) only if the on-disk
+		// revision is still prevRev. A mismatch (a concurrent writer advanced it,
+		// or inserted first) makes the upsert attempt an insert of an
+		// already-present _id => E11000 duplicate-key, which we treat as a lost CAS.
+		title, desc, tags := knowledge.ParseMarkdownMeta(in.Content)
+		now := time.Now().UTC()
+		doc := memDoc{
+			ID: memDocID{SpaceID: spaceID, Path: in.Path}, TenantID: tenantID, SpaceID: spaceID,
+			Path: in.Path, Title: title, Description: desc, Tags: tags,
+			Size: newSize, Checksum: knowledge.ChecksumHex(in.Content), Revision: prevRev + 1,
+			Content: in.Content, UpdatedBy: in.UpdatedBy, UpdatedAt: now,
+		}
+		casFilter := bson.M{"_id": memDocID{SpaceID: spaceID, Path: in.Path}, "revision": prevRev}
+		_, err := s.docs.ReplaceOne(ctx, casFilter, doc, options.Replace().SetUpsert(true))
+		if err == nil {
+			return metaOf(doc), nil
+		}
+
+		// Failed write — roll this attempt's counter bumps back so a retry (or
+		// the returned error) leaves the counters consistent with what is on disk.
+		if delta != 0 {
 			_, _ = s.bumpSpace(ctx, spaceID, -delta)
 			if tenantID != "" {
 				_, _ = s.bumpTenant(ctx, tenantID, -delta)
 			}
 		}
+		if mongo.IsDuplicateKeyError(err) {
+			// Lost the CAS: another writer advanced the revision between our
+			// FindOne and our ReplaceOne.
+			if in.ExpectedRev != 0 {
+				return knowledge.DocumentMeta{}, fmt.Errorf("memory: revision conflict (expected %d, lost a concurrent write)", in.ExpectedRev)
+			}
+			if attempt+1 < maxWriteAttempts {
+				continue // re-read the advanced revision and retry
+			}
+			return knowledge.DocumentMeta{}, fmt.Errorf("memory: write doc: lost the revision race after %d attempts", maxWriteAttempts)
+		}
 		return knowledge.DocumentMeta{}, fmt.Errorf("memory: write doc: %w", err)
 	}
-	return metaOf(doc), nil
 }
 
 // ---- quota helpers ----
