@@ -17,8 +17,11 @@
 # whole_improve_loop (issue #12) persists its package-chunk rotation
 # cursor AND its cross-run clean_streak here when dogfooded on this repo.
 # It's coverage+convergence state, not source — regenerable (delete to
-# restart coverage and the streak from 0).
+# restart coverage and the streak from 0). The .verify.* files are the
+# build/test gate's scratch (the agent-written verify script + its log).
 .whole_improve_loop.state
+.whole_improve_loop.verify.sh
+.whole_improve_loop.verify.log
 
 # Sandbox runtime scratch — the container redirects HOME / XDG_CACHE_HOME
 # and the Go toolchain caches (GOPATH / GOCACHE) into the bind-mounted

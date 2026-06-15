@@ -1181,6 +1181,140 @@ agent fix_gpt:
 ## branch like feature_dev / docs-refresh. `git add -A` because the loop
 ## touches the whole workspace, not a known file list; no-op-safe — a clean
 ## tree skips the commit via `diff --cached --quiet`.
+## ─── Build/test gate (deterministic, before commit) ───────────────
+## A whole_improve_loop reviewer reads only its CHUNK'S SOURCE, so a fix
+## that breaks compilation in a file OUTSIDE the current chunk (e.g. a
+## renamed/retyped symbol with a caller the chunk reviewer never saw) — or
+## a bug only a test catches — is invisible to the review loop. The loop
+## could then rebuild a clean streak and converge on a BROKEN tree (observed
+## 2026-06-14, run 019ec7ed: a fixer left a write-only ReadAt + a missed
+## out-of-scope caller; both passed source review and the loop kept going).
+##
+## So before committing, an ADAPTIVE agent (skill-guided, stack-agnostic)
+## builds + tests the repo with its OWN tooling and writes a re-runnable
+## script; a DETERMINISTIC tool node re-runs that script and gates the commit
+## on the REAL exit code (no LLM judgment). Red build/tests => the run does
+## NOT commit: it loops back to the agent to fix the breakage (bounded), and
+## fails loudly if it cannot. This is the CLAUDE.md "skill-guided + determin-
+## istic gate" doctrine (cf. sec-audit-source's scan_health). UNIVERSAL: no
+## language or package manager is named in this DSL — the agent reads
+## skills/verify-build.md and dispatches to whatever THIS repo uses.
+
+prompt verify_system:
+  You are a release engineer. The review loop just converged on a set
+  of changes its reviewers approved by reading SOURCE — but each
+  reviewer sees only ONE chunk at a time, so a change that breaks
+  compilation in another file (a renamed/retyped symbol with a caller
+  the chunk reviewer never saw) or a bug only a test catches can slip
+  through. Your single job: make this repository actually BUILD and its
+  tests PASS using the repo's OWN tooling, and leave a script the
+  deterministic gate can re-run.
+
+  STEPS:
+  1. Detect how THIS repo builds and tests itself — read the
+     `verify-build` skill. Use the repo's own toolchain: a task runner /
+     Makefile target, a package-manager test script, or a language
+     build+test command, HONOURING any pinned toolchain (version
+     managers, lockfiles, devbox, GOTOOLCHAIN). Do NOT assume a language.
+  2. Write an executable POSIX-sh script to
+     `{{vars.workspace_dir}}/.whole_improve_loop.verify.sh` that runs the
+     repo's build AND its tests (or the closest fast equivalent) and
+     exits non-zero on any failure. Keep it to the commands a developer
+     of THIS repo would run; no network-heavy or destructive steps.
+  3. Run it. If it FAILS, the failure is almost always introduced by the
+     just-applied review fixes — read the error and FIX it at the source
+     (update the missed caller, correct the signature, fix the test) with
+     the SMALLEST change that restores build+tests. Do NOT refactor or
+     change behaviour beyond what is needed to compile and pass. Re-run
+     until green.
+  4. If the repo genuinely has no build/test system (pure docs/config),
+     write a script that echoes that and exits 0, and say so.
+
+  A deterministic tool node will RE-RUN your script and gate the commit on
+  its real exit code, so claiming "it passes" without making it pass is
+  pointless. Output prepared=true once
+  `.whole_improve_loop.verify.sh` exists and reflects the repo's real
+  build+test; summary = the command you settled on and what you fixed.
+
+prompt verify_user:
+  Repository to verify: {{vars.workspace_dir}}
+
+  Make it build + test green with its OWN tooling and write
+  `.whole_improve_loop.verify.sh` (see the system prompt + the
+  `verify-build` skill).
+
+  Output from the PREVIOUS verify attempt's deterministic gate (empty on
+  the first attempt — when present, fix exactly what it shows, it is the
+  real build/test failure):
+  {{input.fail_log}}
+
+schema verify_input:
+  fail_log: string
+
+schema verify_plan:
+  prepared: bool
+  summary: string
+
+## verify_result is the DETERMINISTIC gate's contract. `passed` is set from
+## the real process exit code of re-running .whole_improve_loop.verify.sh —
+## NOT an LLM judgment. `skipped` is true only when no verify script was
+## produced (treated as pass but surfaced loudly, never a silent façade).
+schema verify_result:
+  passed: bool
+  skipped: bool
+  exit_code: int
+  log_tail: string
+
+agent verify_build:
+  backend: "claude_code"
+  model: "${ITERION_VIBE_MODEL_CLAUDE:-claude-opus-4-8}"
+  ## high, not max: this is mechanical build-repair work, not deep review.
+  reasoning_effort: "${ITERION_VIBE_EFFORT_CLAUDE:-high}"
+  input: verify_input
+  output: verify_plan
+  system: verify_system
+  user: verify_user
+  ## fresh: a distinct task from the chunk reviewers/fixers; it inspects the
+  ## whole tree's buildability, not a single inherited chunk session.
+  session: fresh
+  interaction: human
+
+## verify_run is the DETERMINISTIC half: it re-runs the agent-prepared
+## .whole_improve_loop.verify.sh and reports the REAL exit code. No language
+## or package manager appears here — it just executes whatever the adaptive
+## verify_build agent wrote, so the gate stays universal while the verdict
+## stays deterministic. Runs in the same sandbox the agent used, so the
+## toolchain it found is present. python3 (the snapshot_chunk toolchain) is
+## used for safe JSON + subprocess capture; keep the body double-quote-free.
+tool verify_run:
+  command: `WS={{vars.workspace_dir}} python3 -c "
+import os, subprocess, json
+ws = os.environ.get('WS', '.')
+script = os.path.join(ws, '.whole_improve_loop.verify.sh')
+if not os.path.exists(script):
+    print(json.dumps({'passed': True, 'skipped': True, 'exit_code': 0, 'log_tail': 'verify_build produced no .whole_improve_loop.verify.sh; build/test gate SKIPPED (counted as pass, but surfaced) -- verify_build should write the script'}))
+    raise SystemExit(0)
+rc = 0
+out = ''
+try:
+    p = subprocess.run(['sh', script], cwd=ws, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=1500)
+    out = p.stdout or ''
+    rc = p.returncode
+except subprocess.TimeoutExpired as e:
+    out = (e.output or '') + chr(10) + '[verify timed out after 1500s]'
+    rc = 124
+except Exception as e:
+    out = 'verify_run could not execute the script: ' + str(e)
+    rc = 1
+try:
+    with open(os.path.join(ws, '.whole_improve_loop.verify.log'), 'w', encoding='utf-8') as lf:
+        lf.write(out)
+except OSError:
+    pass
+print(json.dumps({'passed': rc == 0, 'skipped': False, 'exit_code': rc, 'log_tail': out[-4000:]}))
+"`
+  output: verify_result
+
 schema commit_result:
   success: bool
   output: string
@@ -1199,7 +1333,7 @@ schema commit_result:
 ## fixes, nothing stays staged and the `diff --cached --quiet` guard makes
 ## NO empty commit.
 tool commit_changes:
-  command: `git -C {{vars.workspace_dir}} add -A && { git -C {{vars.workspace_dir}} reset -q -- .whole_improve_loop.state >/dev/null 2>&1 || true; git -C {{vars.workspace_dir}} diff --cached --quiet || git -C {{vars.workspace_dir}} commit -m "chore(improve): production-readiness pass (whole_improve_loop)"; }`
+  command: `git -C {{vars.workspace_dir}} add -A && { git -C {{vars.workspace_dir}} reset -q -- .whole_improve_loop.state .whole_improve_loop.verify.sh .whole_improve_loop.verify.log >/dev/null 2>&1 || true; git -C {{vars.workspace_dir}} diff --cached --quiet || git -C {{vars.workspace_dir}} commit -m "chore(improve): production-readiness pass (whole_improve_loop)"; }`
   output: commit_result
 
 ## ─── Workflow ───────────────────────────────────────────────────
@@ -1296,10 +1430,25 @@ workflow whole_improve_loop:
     cursor: "{{outputs.snapshot_chunk.cursor}}"
   }
 
-  ## Stop when streak detected (cross-family double approval) → commit
-  ## the converged work, THEN finish (was `-> done` directly, which left
-  ## the validated diff uncommitted).
-  streak_check -> commit_changes when stop
+  ## Stop when streak detected (cross-family double approval) → run the
+  ## deterministic build/test gate BEFORE committing (reviewers approve from
+  ## chunk source and cannot see a cross-file build break or a test-only bug
+  ## — see the verify_build/verify_run section). verify_build adapts to the
+  ## repo's own tooling and fixes any breakage; verify_run re-runs it and
+  ## gates on the REAL exit code.
+  streak_check -> verify_build when stop with { fail_log: "" }
+  verify_build -> verify_run
+  ## Green build+tests → commit the converged work, THEN finish.
+  verify_run -> commit_changes when passed
+  ## Red → loop back to verify_build to fix the breakage, bounded. The gate's
+  ## log_tail is handed back as the failure to fix.
+  verify_run -> verify_build as verify_loop(3) with {
+    fail_log: "{{outputs.verify_run.log_tail}}"
+  }
+  ## Still red after the bounded retries → FAIL (never commit a broken tree;
+  ## the converge-on-broken backstop). The operator inspects the worktree +
+  ## the .whole_improve_loop.verify.log.
+  verify_run -> fail
   commit_changes -> done
 
   ## Otherwise approved (no streak yet, OR low-confidence rejection
