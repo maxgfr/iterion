@@ -42,7 +42,12 @@ func NewFingerprintStore(dir string) *FingerprintStore {
 	if err := json.Unmarshal(raw, &loaded); err != nil {
 		return fs
 	}
-	fs.data = loaded
+	// A file containing literal `null` unmarshals to a nil map without
+	// error; assigning it would make Check() panic on the first
+	// `fs.data[name] = …` write. Keep the initialised map in that case.
+	if loaded != nil {
+		fs.data = loaded
+	}
 	return fs
 }
 

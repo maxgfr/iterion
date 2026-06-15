@@ -31,6 +31,27 @@ func TestFingerprintStore_FirstDiscovery(t *testing.T) {
 	}
 }
 
+func TestFingerprintStore_NullPayloadDoesNotPanic(t *testing.T) {
+	dir := t.TempDir()
+	cacheDir := filepath.Join(dir, "mcp-cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// A cache file written as literal `null` (a prior bad Save, manual
+	// edit, or odd write) unmarshals to a nil map *without* error.
+	if err := os.WriteFile(filepath.Join(cacheDir, "schema-fingerprints.json"), []byte("null"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	fs := NewFingerprintStore(dir)
+	// Before the fix, fs.data was the nil map and this Check() panicked
+	// with "assignment to entry in nil map".
+	change := fs.Check("mcp.s.t", "s", "t", json.RawMessage(`{"type":"string"}`))
+	if change == nil || !change.IsNew {
+		t.Fatalf("expected a first-discovery change after loading a null cache, got %+v", change)
+	}
+}
+
 func TestFingerprintStore_Unchanged(t *testing.T) {
 	dir := t.TempDir()
 	fs := NewFingerprintStore(dir)
