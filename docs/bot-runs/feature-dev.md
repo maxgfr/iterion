@@ -4,6 +4,18 @@ Autonomous end-to-end feature development: plan → act → `/simplify` →
 prepare_commit → alternating Claude/GPT review-fix loop → commit, in an isolated
 `worktree: auto`. See [bots/feature-dev/](../../bots/feature-dev/).
 
+## 2026-06-17 — ADR-028 Steps 2-4 dispatcher I/O offload (runs 019ed4cd, 019ed4eb, 019ed51d)
+- Status: 2 validated+converged (Steps 2, 3) · 1 implemented+validated+manually-repatriated (Step 4 — bot review loop blocked by a runtime stall, not the code)
+- Versions: bot feature-dev 0.1.0 · iterion run-binary fresh static `fe132645` · dispatched via the **dispatcher** (own `iterion dispatch` daemon on the operator's repaired config, `--no-server`, sandbox `iterion-sandbox-full:edge`, `worktree: auto`). Each step: isolated ticket with an anti-façade done-criterion, reviewed + race-verified + repatriated before the next.
+- Result:
+  - **Step 2** (ListCandidates off-actor) — converged ~27 min, `77a2cb80`, FF to main. `launchDiscovery`→`cmdCandidates`, single-flight `discoveryInFlight`, `postCmd` shutdown-safe choke point.
+  - **Step 3** (finishRun tracker HTTP off-actor) — converged, `a72d40f7`, FF. `finishPlan` value-copy; transition-FIRST/Release-LAST to close the re-dispatch window; optimistic-retry-as-guard for the give-up HTTP window (`cmdDropRetry`).
+  - **Step 4** (post-claim UpdateState + workspaces.Create off-actor; Claim stays atomic — the reduced/safe variant, chosen over full optimistic-claim) — implemented + build/vet/gofmt clean + full dispatcher race suite green + 3 anti-façade tests pass, BUT the bot's own review loop could NOT converge: `fix_gpt` (sandboxed gpt-5.5 via claw) repeatedly hit "context canceled" at the dispatcher's 10-min **stall timeout**, looping retry→re-dispatch→stall. I reviewed the uncommitted worktree directly (max rigor), confirmed correctness, and **manually repatriated** (`9b3bd3bd` → cherry-pick `70b3d4ed`, auto-merged clean over the operator's parallel commands.go bug-sweep).
+- Value: high — ADR-028 Steps 2-4 land; discovery, finishRun, and post-claim dispatch I/O are now all off the actor goroutine (only `RefreshStates` remains, deliberately deferred).
+- Findings / quality: exemplary anti-façade across all three. The Step-4 standout: it kept Claim atomic, allocated the slot post-claim (`setupPending=true`), and guarded **both** reapers (`refreshRunningStates` + `reconcileStalled`) against the setup window — correctly identifying that the off-actor `UpdateState` makes the tracker read RunningState before the entry records `TransitionedFromState`, which would otherwise self-cancel the run.
+- Engine hardening (the real finding): **`fix_gpt`/reviewer-fix on sandboxed `gpt-5.5` (claw) hangs >10 min → trips the dispatcher's 10-min stall timeout → cancel → retry loop**, blocking review-loop convergence on a perfectly good change. Runtime issue (sandboxed claw streaming / context on a large review-loop context), not the bot. Relates to the known sandboxed-claw streaming + gpt-5.5-forfait-context work. Worth a ticket. Secondary: the run-status monitor false-terminals on a transient cancel→auto-resume — key on issue-state, not run-status.
+- Lessons for next run: a review loop stuck on a RUNTIME stall ≠ bad code — validate the worktree directly (build + `-race` + manual review) and repatriate rather than re-dispatching into the same stall. For the riskiest step, the reduced variant (Claim-atomic, offload post-claim) avoids the reserved-before-claim state entirely and was the right call.
+
 ## 2026-06-15 — ADR-028 + Step 1 lock-free dispatcher Snapshot (run 019ecafa)
 - Status: validated
 - Versions: bot feature-dev 0.1.0 · iterion run-binary fresh static build of main `8477a067` (≈ HEAD)

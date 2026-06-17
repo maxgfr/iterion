@@ -1,6 +1,6 @@
 # ADR-028 — Dispatcher actor: offload blocking tracker I/O
 
-Status: Accepted (roadmap). This ticket implements **Step 1 only**.
+Status: Accepted. **Steps 1-4 shipped** — Step 1 on its own ticket, Steps 2-4 operator-triggered 2026-06-17 (the "advance past Step 1" trigger below was exercised by an explicit operator decision rather than an observed production symptom). Step 4 landed as the **reduced/safe variant** (claim stays atomic on the actor — see the Step 4 section). `RefreshStates`/`refreshRunningStates` offload remains the one deliberately-deferred item. Per-step implementation notes are appended below.
 
 ## Context
 The dispatcher is an actor: a single goroutine (`actorLoop`, `pkg/dispatcher/dispatcher.go`) owns all mutable state (`c.state`); other goroutines send typed commands on `c.cmds`. No locks, deterministic ordering — deliberately simple.
@@ -31,7 +31,7 @@ Incremental sequence, safest first (each step independently mergeable + tested):
 - **Do nothing**: latency persists and the invariant stays silently violated.
 
 ### Trigger to advance past Step 1
-An observed symptom: dashboard snapshot lag during polls, per-state concurrency starved by serial claims, or a flaky tracker freezing the actor. Until then, Steps 2–4 stay documented future work.
+An observed symptom: dashboard snapshot lag during polls, per-state concurrency starved by serial claims, or a flaky tracker freezing the actor. **(Exercised 2026-06-17: the operator elected to advance proactively rather than wait for a symptom — Steps 2-4 are now shipped; see the dated sections below.)**
 
 ## Consequences
 - Step 1 removes the most visible symptom (dashboard lag) at low risk and lock-free.
