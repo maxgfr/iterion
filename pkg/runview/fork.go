@@ -80,9 +80,11 @@ func (s *Service) Fork(ctx context.Context, spec ForkSpec) (*ForkResult, error) 
 	if spec.TurnIndex < 0 {
 		turn, err = turnStore.LatestTurn(ctx, spec.RunID, spec.NodeID)
 	} else {
-		// Pick the highest LoopIter that has a turn at TurnIndex.
-		// For the common single-iteration node, that's loop_iter=0.
-		turn, err = turnStore.LoadTurn(ctx, spec.RunID, spec.NodeID, 0, spec.TurnIndex)
+		// Resolve the turn at TurnIndex on the highest loop iteration that has
+		// one. A node inside a loop may only have a checkpoint at this turn on
+		// iter > 0, so the old hardcoded loop_iter=0 spuriously failed with
+		// ErrTurnNotFound for any forked-at-explicit-turn looped node.
+		turn, err = turnStore.LoadTurnAtIndex(ctx, spec.RunID, spec.NodeID, spec.TurnIndex)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("load turn checkpoint: %w", err)

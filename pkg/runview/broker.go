@@ -160,10 +160,16 @@ func (b *EventBroker) Publish(evt store.Event) {
 // fires (callers should use cold reads for terminated runs).
 func (b *EventBroker) CloseRun(runID string) {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	subs := b.subscribers[runID]
 	delete(b.subscribers, runID)
-	b.mu.Unlock()
 
+	// Close under the lock: the subscription's cancel() closure also writes
+	// sub.closed / closes sub.ch under the write lock. Doing it here after
+	// Unlock left no happens-before with a concurrent cancel() for the same
+	// sub — a data race on sub.closed and, worse, a double close(sub.ch)
+	// panic (both guards could pass before either set the flag). close() is
+	// cheap and Publish's sends are non-blocking, so holding the lock is safe.
 	for _, sub := range subs {
 		if !sub.closed {
 			sub.closed = true

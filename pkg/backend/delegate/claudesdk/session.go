@@ -420,6 +420,18 @@ func (s *Session) handleHookCallback(ctx context.Context, req controlRequest) {
 	if output.Continue != nil {
 		resp["continue"] = *output.Continue
 	}
+	// Stop-hook blocking: the Claude Code hook protocol blocks a stop with a
+	// top-level {"decision":"block","reason":...}, distinct from PreToolUse's
+	// permissionDecision (carried in hookSpecificOutput above). Without this the
+	// Stop-hook's BlockStop/Reason were dropped, so our operator-message drainer
+	// (claude_code.go HookStop) could never actually hold the session open to
+	// inject a queued message — it was silently ineffective.
+	if output.BlockStop {
+		resp["decision"] = "block"
+		if output.Reason != "" {
+			resp["reason"] = output.Reason
+		}
+	}
 
 	_ = s.ctrl.sendResponse(req.RequestID, "success", resp)
 }

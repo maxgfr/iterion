@@ -269,6 +269,11 @@ type TurnStore interface {
 	// exists. Used by Fork to default `turn_index` to "the last
 	// completed turn".
 	LatestTurn(ctx context.Context, runID, nodeID string) (*TurnCheckpoint, error)
+	// LoadTurnAtIndex returns the turn at the given TurnIndex on the
+	// highest loop iteration that has one (scanning all iterations).
+	// Used by Fork for an explicit turn_index so a node that only ran
+	// on a higher loop iteration still resolves instead of failing.
+	LoadTurnAtIndex(ctx context.Context, runID, nodeID string, turn int) (*TurnCheckpoint, error)
 	// LoadTurnMessages reads the sibling messages.json blob
 	// referenced by a claw TurnCheckpoint.MessagesRef. Returns a
 	// typed not-found error when the blob is missing (e.g. legacy

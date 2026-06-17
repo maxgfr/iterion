@@ -339,10 +339,6 @@ type ClawExecutor struct {
 	// something to actually compact. The claw backend reads this
 	// store via ctx values plumbed by executeBackend.
 	sessions *nodeSessionStore
-	// currentRunID is set by executeNode at the top of each call
-	// and cleared at the bottom. Compact reads it because the
-	// runtime.Compactor structural interface only carries nodeID.
-	currentRunID string
 
 	// boardRegister mints a per-node board MCP run token for the given
 	// capabilities (returns the token registered with the server's

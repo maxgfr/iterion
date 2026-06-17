@@ -144,7 +144,7 @@ func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNo
 	// Resolve {{run.id}} first — resolveCommandTemplate only knows the
 	// input/vars/secrets namespaces, so a direct run ref would survive
 	// into the command verbatim.
-	expandedCommand = resolveRunRefs(expandedCommand, e.currentRunID, node.CommandRefs, shellEscapeValue)
+	expandedCommand = resolveRunRefs(expandedCommand, RunIDFromContext(ctx), node.CommandRefs, shellEscapeValue)
 
 	// Resolve template references in the (env-expanded) command.
 	resolved := resolveCommandTemplate(expandedCommand, node.CommandRefs, input, e.vars, e.secretGuard)
@@ -301,7 +301,7 @@ func (e *ClawExecutor) executeToolNodeScript(ctx context.Context, node *ir.ToolN
 	// agent output blob with `yarn workspaces foreach ... '\''…'\''`).
 	expanded := expandBracedEnv(node.Script)
 	// {{run.id}} first — resolveScriptTemplate only knows input/vars/secrets.
-	expanded = resolveRunRefs(expanded, e.currentRunID, node.ScriptRefs, jsonLiteralValue)
+	expanded = resolveRunRefs(expanded, RunIDFromContext(ctx), node.ScriptRefs, jsonLiteralValue)
 	resolved := resolveScriptTemplate(expanded, node.ScriptRefs, input, e.vars, e.secretGuard)
 
 	interp, ext := scriptInterpreter(node.Language)

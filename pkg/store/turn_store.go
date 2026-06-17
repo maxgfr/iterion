@@ -271,6 +271,47 @@ func (s *FilesystemRunStore) LatestTurn(ctx context.Context, runID, nodeID strin
 	return turns[len(turns)-1], nil
 }
 
+// LoadTurnAtIndex returns the turn at TurnIndex on the highest loop
+// iteration that has one, scanning all iterations (highest-first). Fork
+// uses it for an explicit turn_index: a node inside a loop may only have a
+// checkpoint at that turn on iteration > 0, so probing loop_iter=0 alone
+// would spuriously fail with ErrTurnNotFound.
+func (s *FilesystemRunStore) LoadTurnAtIndex(ctx context.Context, runID, nodeID string, turn int) (*TurnCheckpoint, error) {
+	if err := sanitizePathComponent("run ID", runID); err != nil {
+		return nil, err
+	}
+	if err := sanitizePathComponent("node ID", nodeID); err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(s.turnNodeDir(runID, nodeID))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: run=%s node=%s turn=%d", ErrTurnNotFound, runID, nodeID, turn)
+		}
+		return nil, fmt.Errorf("store: scan turn node dir: %w", err)
+	}
+	iters := make([]int, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if iter, perr := strconv.Atoi(e.Name()); perr == nil {
+			iters = append(iters, iter)
+		}
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(iters)))
+	for _, iter := range iters {
+		t, err := s.LoadTurn(ctx, runID, nodeID, iter, turn)
+		if err == nil {
+			return t, nil
+		}
+		if !errors.Is(err, ErrTurnNotFound) {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("%w: run=%s node=%s turn=%d (any loop iter)", ErrTurnNotFound, runID, nodeID, turn)
+}
+
 // LoadTurnMessages satisfies TurnStore. Returns the sibling
 // messages.json blob, or ErrTurnNotFound when missing.
 func (s *FilesystemRunStore) LoadTurnMessages(_ context.Context, runID, nodeID string, loopIter, turn int) ([]byte, error) {

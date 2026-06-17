@@ -2250,6 +2250,10 @@ func (p *parser) parseSessionMode() ast.SessionMode {
 func (p *parser) parseIdentList() []string {
 	p.expect(TokenLBrack)
 	var names []string
+	if p.peek().Type == TokenRBrack { // empty list: [] (matches parseStringList)
+		p.next()
+		return names
+	}
 	t := p.next()
 	id := tokenAsIdent(t)
 	if id != "" {
@@ -2288,6 +2292,10 @@ func (p *parser) parseStringList() []string {
 func (p *parser) parseToolList() []string {
 	p.expect(TokenLBrack)
 	var names []string
+	if p.peek().Type == TokenRBrack { // empty list: [] (matches parseStringList)
+		p.next()
+		return names
+	}
 	name := p.parseToolRef()
 	if name != "" {
 		names = append(names, name)
