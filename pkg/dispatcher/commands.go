@@ -245,6 +245,45 @@ func (m cmdRunFinished) apply(c *Dispatcher, ctx context.Context) {
 	delete(c.state.tombstones, m.issueID)
 }
 
+// cmdDispatchSetupDone is posted by the off-actor dispatch-setup worker
+// (runDispatchSetup, ADR-028 Step 4) once the post-claim in-progress
+// UpdateState + workspaces.Create have run. It records the (possibly-performed)
+// transition source onto the running entry and clears setupPending so the
+// actor's reapers (refreshRunningStates, reconcileStalled) resume evaluating
+// the entry. On setup FAILURE (err != nil) it reuses the Step-3 finishRun
+// teardown — slot free + transition revert (reads the TransitionedFromState we
+// set here) + claim release + retry — rather than duplicating it.
+//
+// All c.state writes for the claimed→running setup land here, on the actor:
+// the worker only ever posts this value-copy command.
+type cmdDispatchSetupDone struct {
+	issueID          string
+	transitionedFrom string
+	err              error
+}
+
+func (m cmdDispatchSetupDone) apply(c *Dispatcher, ctx context.Context) {
+	r, ok := c.state.running[m.issueID]
+	if !ok {
+		// The entry was already torn down (e.g. shutdown drained it) while
+		// setup was in flight. The setupPending guards keep the reapers from
+		// reaping it mid-setup, so this is rare; nothing to record. On the
+		// failure path finishRun is a no-op for a missing entry anyway.
+		return
+	}
+	// Record the transition source BEFORE any teardown so finishRun's revert
+	// (and refreshRunningStates' expected-state comparison) read the move the
+	// worker actually performed off-actor.
+	r.TransitionedFromState = m.transitionedFrom
+	r.setupPending = false
+	if m.err != nil {
+		// Setup failed (workspaces.Create). Reuse the Step-3 path.
+		c.finishRun(ctx, m.issueID, m.err)
+		return
+	}
+	c.fireSnapshot()
+}
+
 // cmdDropRetry drops a pending retry entry. Posted by the off-actor finish
 // worker (runFinishWorker) when an exhausted run's give-up transition to
 // FailedState SUCCEEDS: finishRun optimistically scheduled the retry on the

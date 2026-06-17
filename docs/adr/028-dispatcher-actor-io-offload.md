@@ -159,3 +159,85 @@ applies a `cmdReload` posted on `c.cmds` *while* `Release` is still blocked.
 release HTTP. `TestFinishRun_GiveUpMovesToFailedState` and
 `TestFinishRun_GiveUpFallsBackToRetryWhenMoveRejected`
 (`pkg/dispatcher/commands_test.go`) cover both give-up worker outcomes.
+
+## 2026-06-17 — Step 4 implemented (reduced/safe variant: post-claim dispatch I/O offloaded, claim stays atomic)
+
+`dispatch` (`pkg/dispatcher/loop.go`) used to run the post-claim setup I/O —
+the in-progress `tracker.UpdateState` transition and `workspaces.Create` — inline
+on the actor between `tracker.Claim` and the run-worker spawn. The `UpdateState`
+HTTP can be slow (and a flaky tracker freezes it), parking the actor.
+
+Now the actor, immediately after a confirmed `Claim`, allocates the running
+entry + concurrency slot synchronously (`setupPending=true`,
+`TransitionedFromState` not-yet-known) and hands the `UpdateState` + `Create` to a
+tracked worker (`launchDispatchSetup` → `runDispatchSetup`). On success the
+worker posts `cmdDispatchSetupDone{transitionedFrom}` (the actor records the
+transition source + clears `setupPending`) and continues into `runWorker` on the
+same goroutine; on `Create` failure it posts `cmdDispatchSetupDone{err}`, whose
+apply reuses the Step-3 `finishRun` teardown. The actor's reapers
+(`refreshRunningStates`, `reconcileStalled`) skip `setupPending` entries so the
+in-flight transition isn't misread as an external move and a not-yet-started run
+isn't stall-reaped on its claim-time watermark.
+
+### Decision: keep `Claim` atomic on the actor — NOT the ADR's original "optimistic claim"
+
+The original Step 4 above proposed **optimistic claim**: the actor reserves a
+slot, a worker does `Claim`, and `ErrClaimConflict` releases the slot. We
+deliberately did **not** do that. The trade-off:
+
+- **Optimistic claim (rejected).** Moves the `Claim` HTTP off the actor too, but
+  introduces a *reserved-but-not-yet-claimed* slot on the dispatch entry point —
+  the highest-blast-radius path, the one that gates every run. That speculative
+  reservation can leak (worker dies between reserve and conflict-release) and
+  forces the slot/cap accounting to reason about a third, transient state.
+- **Reduced variant (chosen).** Keep `Claim` atomic on the actor — it is already
+  the conflict authority, and `ErrClaimConflict` simply skips the issue with **no
+  slot allocated** (cheap, in-memory, no HTTP-shaped blocking on the conflict
+  path). Offload only the work that happens *after* a confirmed claim. The slot
+  is allocated post-claim, so concurrency stays enforced from claim time and
+  there is no speculative reservation to leak. We give up moving the `Claim` HTTP
+  itself off the actor — an acceptable residual, since `Claim` is a single fast
+  CAS, not the slow `UpdateState`/`Create` pair this step targets.
+
+### Implementation choices and their trade-offs
+
+- **Setup failure folds into `cmdDispatchSetupDone{err}`, not a bare
+  `cmdRunFinished`.** `finishRun`'s revert reads `r.TransitionedFromState` off the
+  entry, so the transition the worker performed off-actor MUST be recorded on the
+  entry *before* the teardown runs. Routing the failure through the same command
+  (which sets `TransitionedFromState` then calls `finishRun`) keeps "record then
+  revert" atomic in one actor-side apply, avoiding a two-command ordering
+  dependency. It still **reuses** the Step-3 teardown — it does not duplicate
+  slot-free / revert / release / retry.
+
+- **Slot allocated at claim time, before the off-actor setup.** The running entry
+  + `slotsByState++` land on the actor the instant `Claim` succeeds, so
+  `MaxConcurrent` / per-state caps hold from claim time and `isClaimed` / the
+  dispatch loop won't re-pick the issue while setup is in flight — no
+  over-dispatch window.
+
+- **Workspace path computed on the actor.** `Workspaces.Path(issueID)` is
+  deterministic (it's the directory `Create` materialises), so the entry/spec
+  carry the path without waiting on the off-actor `Create`; the worker's `Create`
+  only does the mkdir + reports `created` (gating the after_create hook) and
+  surfaces disk errors. The setup worker never touches `c.state` or `c.cfg` —
+  cfg-derived inputs (`runningTarget`) are captured into the value-copy
+  `dispatchSetupPlan` on the actor.
+
+- **One `workersWG` slot for setup+run.** `launchDispatchSetup` adds a single
+  worker-group entry that covers both the setup I/O and the folded run, so
+  `Stop()` drains it; its panic-recovery guards ONLY the setup I/O (`runWorker` is
+  invoked outside it, preserving its existing panic semantics).
+
+Anti-façade tests: `TestActorResponsiveWhileDispatchSetupInFlight`
+(`pkg/dispatcher/loop_setup_offload_test.go`) gates the fake tracker's
+`UpdateState` and proves the actor applies a `cmdReload` while the transition is
+blocked. `TestDispatch_ClaimConflictAllocatesNothing` proves an
+`ErrClaimConflict` records no entry, consumes no slot, performs no transition,
+and launches no worker. `TestDispatch_SlotCountedFromClaimTime` proves the cap
+holds from claim time (one slot used, one running entry, under
+`MaxConcurrent=1` with two ready issues while setup is gated).
+`TestDispatch_RevertsOnWorkspaceCreateFailure` (`pkg/dispatcher/loop_state_test.go`)
+proves a `Create` failure reuses the `finishRun` teardown (slot freed,
+transition reverted, claim released, retry scheduled). The optimistic-claim
+offload and `RefreshStates`/`refreshRunningStates` offload remain future work.

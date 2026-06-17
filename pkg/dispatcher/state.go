@@ -86,7 +86,9 @@ func (s *state) isClaimed(issueID string) bool {
 }
 
 // runningEntry tracks one in-flight dispatch. It outlives the actor's
-// view of the goroutine: the goroutine writes LastEventAt via cmdEvent.
+// view of the goroutine. The actor owns the struct fields; the only
+// off-actor liveness signal is the separate atomic heartbeat pointer
+// below, which is intentionally shared with DispatchSpec.OnEvent.
 type runningEntry struct {
 	IssueID       string
 	Identifier    string
@@ -104,6 +106,18 @@ type runningEntry struct {
 	// while the worker drains (F-CD-12). The actor goroutine is the
 	// single writer so no mutex is needed.
 	CancelIssuedAt time.Time
+
+	// setupPending is true between claim-time allocation (dispatch, on the
+	// actor) and the off-actor setup worker reporting the in-progress
+	// transition + workspace back via cmdDispatchSetupDone. It marks the
+	// explicit claimed→running intermediate state (ADR-028 Step 4): the
+	// transition's UpdateState runs off the actor, so for a brief window the
+	// tracker may already read RunningState while the entry has not yet
+	// recorded TransitionedFromState. The actor's reapers (refreshRunningStates,
+	// reconcileStalled) skip setupPending entries so that in-flight transition
+	// is not misread as an external move, and a run that has not started yet is
+	// not stall-reaped on its claim-time watermark. Actor-owned; no mutex.
+	setupPending bool
 
 	// TransitionedFromState is the issue's tracker state at Claim time
 	// IFF the dispatcher then successfully moved it to

@@ -209,6 +209,13 @@ func (c *Dispatcher) reconcileStalled(ctx context.Context, cfg *Config) {
 	}
 	for _, row := range rows {
 		id, r := row.id, row.r
+		// A run still in its claimed→running setup hasn't started — don't
+		// stall-reap it on its claim-time watermark (ADR-028 Step 4). The
+		// setup worker will report back (cmdDispatchSetupDone) or fail
+		// (cmdRunFinished) promptly; the regular path handles it from there.
+		if r.setupPending {
+			continue
+		}
 		if r.CancelIssuedAt.IsZero() {
 			atomicLag := now.Sub(r.lastEventTime())
 			actorLag := now.Sub(r.LastEventAt)
@@ -251,6 +258,15 @@ func (c *Dispatcher) refreshRunningStates(ctx context.Context) {
 	}
 	for _, id := range ids {
 		r := c.state.running[id]
+		// Skip entries still in their claimed→running setup (ADR-028 Step 4).
+		// The in-progress transition's UpdateState runs off the actor, so the
+		// tracker may already read RunningState while the entry has not yet
+		// recorded TransitionedFromState — comparing now would misread our own
+		// in-flight move as an external one and spuriously cancel the run. The
+		// next tick re-evaluates once cmdDispatchSetupDone has landed.
+		if r.setupPending {
+			continue
+		}
 		newState, ok := states[id]
 		if !ok {
 			c.logger.Info("dispatcher: %s disappeared from tracker — cancelling", r.Identifier)
@@ -353,40 +369,16 @@ func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 	// claim/workspace failure still reflects "no longer a routing skip".
 	delete(c.state.dispatchSkips, iss.ID)
 
+	// Claim stays ATOMIC on the actor — it is the conflict authority. A
+	// conflict (or any claim error) skips the issue with NO slot allocated and
+	// NO setup worker launched; the post-claim I/O offload below only runs
+	// AFTER a confirmed claim. See ADR-028 Step 4.
 	if err := c.tracker.Claim(ctx, iss.ID, c.hostMarker); err != nil {
 		if errors.Is(err, tracker.ErrClaimConflict) {
 			c.logger.Info("dispatcher: %s already claimed elsewhere, skipping", iss.Identifier)
 			return
 		}
 		c.logger.Warn("dispatcher: claim %s: %v", iss.Identifier, err)
-		return
-	}
-
-	// In-progress transition: best-effort move out of the issue's
-	// source state (typically "ready") into cfg.Agent.RunningState
-	// (typically "in_progress") so the kanban surfaces in-flight work.
-	// Skipped when running_state is disabled or the issue is already in
-	// the target state. Failures don't abort dispatch — the claim is
-	// already taken and a stuck UpdateState shouldn't strand the work.
-	// transitionedFrom records the source state IFF the move
-	// succeeded; the rollback paths and finishRun read it to revert.
-	var transitionedFrom string
-	if target := cfg.Agent.RunningState; target != "" && iss.WorkflowState != target {
-		if err := c.tracker.UpdateState(ctx, iss.ID, target); err != nil {
-			if !errors.Is(err, tracker.ErrTransitionRejected) && !errors.Is(err, tracker.ErrNotSupported) {
-				c.logger.Warn("dispatcher: in-progress transition %s: %v", iss.Identifier, err)
-			}
-			// continue regardless — claim is already taken.
-		} else {
-			transitionedFrom = iss.WorkflowState
-		}
-	}
-
-	wsPath, created, err := c.workspaces.Create(iss.ID)
-	if err != nil {
-		c.logger.Warn("dispatcher: workspace create %s: %v", iss.Identifier, err)
-		c.revertTransition(ctx, iss.ID, iss.Identifier, transitionedFrom, cfg.Agent.RunningState)
-		_ = c.tracker.Release(ctx, iss.ID, c.hostMarker)
 		return
 	}
 
@@ -451,25 +443,40 @@ func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 		runID, err = store.GenerateRunID()
 		if err != nil {
 			c.logger.Warn("dispatcher: mint run id for %s: %v", iss.Identifier, err)
-			c.revertTransition(ctx, iss.ID, iss.Identifier, transitionedFrom, cfg.Agent.RunningState)
+			// Nothing was transitioned and no slot was allocated yet (the
+			// post-claim setup I/O runs off the actor below, only after the
+			// entry is in place) — just release the claim. See ADR-028 Step 4.
 			_ = c.tracker.Release(ctx, iss.ID, c.hostMarker)
 			return
 		}
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 
+	// The per-issue workspace path is deterministic from the issue ID
+	// (Workspaces.Path == the directory Create materialises), so it is known
+	// here on the actor for the spec/env even though the actual mkdir +
+	// in-progress transition run off-actor below. See ADR-028 Step 4.
+	wsPath := c.workspaces.Path(iss.ID)
+
+	// ADR-028 Step 4: allocate the running entry + concurrency slot on the
+	// actor IMMEDIATELY after the confirmed claim, with setupPending=true and
+	// TransitionedFromState not-yet-known. This keeps MaxConcurrent / per-state
+	// caps enforced from claim time (no over-dispatch window while the setup
+	// I/O is in flight) and makes isClaimed/the dispatch loop skip the issue.
+	// The off-actor setup worker fills TransitionedFromState via
+	// cmdDispatchSetupDone once the in-progress transition has run.
 	entry := &runningEntry{
-		IssueID:               iss.ID,
-		Identifier:            iss.Identifier,
-		RunID:                 runID,
-		WorkflowState:         iss.WorkflowState,
-		WorkspacePath:         wsPath,
-		StartedAt:             time.Now().UTC(),
-		LastEventAt:           time.Now().UTC(),
-		Attempt:               attempt,
-		Cancel:                cancel,
-		issueSnapshot:         iss,
-		TransitionedFromState: transitionedFrom,
+		IssueID:       iss.ID,
+		Identifier:    iss.Identifier,
+		RunID:         runID,
+		WorkflowState: iss.WorkflowState,
+		WorkspacePath: wsPath,
+		StartedAt:     time.Now().UTC(),
+		LastEventAt:   time.Now().UTC(),
+		Attempt:       attempt,
+		Cancel:        cancel,
+		issueSnapshot: iss,
+		setupPending:  true,
 	}
 	entry.touchEvent(time.Now())
 	c.state.running[iss.ID] = entry
@@ -492,11 +499,109 @@ func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 		c.logger.Info("dispatcher: dispatching %s → run=%s (attempt=%d, workspace=%s)", iss.Identifier, runID, attempt, wsPath)
 	}
 
+	// Offload the post-claim setup I/O (in-progress UpdateState +
+	// workspaces.Create) off the actor, then continue into the run worker on
+	// the same goroutine. The actor returns here immediately, staying
+	// responsive while the (potentially slow) tracker transition runs.
+	c.launchDispatchSetup(dispatchSetupPlan{
+		issueID:       iss.ID,
+		identifier:    iss.Identifier,
+		sourceState:   iss.WorkflowState,
+		runningTarget: cfg.Agent.RunningState,
+		runCtx:        runCtx,
+		entry:         entry,
+		spec:          spec,
+	})
+}
+
+// dispatchSetupPlan is the value-copy of everything the off-actor dispatch
+// setup worker (runDispatchSetup) needs. Following the ADR-028 Step 2/3
+// anti-race boundary, the SETUP portion (UpdateState + workspaces.Create) reads
+// ONLY these immutable fields plus dispatcher-immutables (c.tracker,
+// c.workspaces, c.logger) — never c.state or c.cfg. cfg-derived inputs
+// (runningTarget) are captured on the actor here so a mid-flight Reload can't
+// split the decision. entry/spec are carried through solely to hand to
+// runWorker AFTER setup; the setup portion never touches them.
+type dispatchSetupPlan struct {
+	issueID       string
+	identifier    string
+	sourceState   string // iss.WorkflowState at claim time (the transition source)
+	runningTarget string // cfg.Agent.RunningState snapshot at claim time
+	runCtx        context.Context
+	entry         *runningEntry
+	spec          DispatchSpec
+}
+
+// launchDispatchSetup runs the post-claim dispatch setup OFF the actor and,
+// on success, continues into the run worker on the same goroutine. Tracked on
+// workersWG so Stop() drains it (covering both the setup I/O and the run).
+// Mirrors launchDiscovery / launchFinish. See ADR-028 Step 4.
+func (c *Dispatcher) launchDispatchSetup(plan dispatchSetupPlan) {
 	c.workersWG.Add(1)
 	go func() {
 		defer c.workersWG.Done()
-		c.runWorker(runCtx, entry, created, spec)
+		created, ok := c.runDispatchSetup(plan)
+		if !ok {
+			// Setup failed (or panicked): runDispatchSetup already posted
+			// cmdDispatchSetupDone{err}, whose apply reuses finishRun's
+			// teardown (slot free + transition revert + claim release +
+			// retry). Nothing more to do — do NOT start the run.
+			return
+		}
+		c.runWorker(plan.runCtx, plan.entry, created, plan.spec)
 	}()
+}
+
+// runDispatchSetup performs the in-progress transition (best-effort) and the
+// workspace mkdir off the actor, posting the result back via
+// cmdDispatchSetupDone. Returns (created, ok); ok=false means setup failed and
+// the run must NOT start (the failure command already drove finishRun). The
+// recover guards ONLY the setup I/O — runWorker is invoked by the caller
+// OUTSIDE it, preserving its existing panic semantics.
+func (c *Dispatcher) runDispatchSetup(plan dispatchSetupPlan) (created bool, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			err := fmt.Errorf("panic in dispatch setup for %s: %v", plan.identifier, r)
+			c.logger.Error("dispatcher: %v", err)
+			c.postCmd(cmdDispatchSetupDone{issueID: plan.issueID, err: err})
+			created, ok = false, false
+		}
+	}()
+
+	// In-progress transition: best-effort move out of the issue's source state
+	// (typically "ready") into cfg.Agent.RunningState (typically "in_progress")
+	// so the kanban surfaces in-flight work. Skipped when running_state is
+	// disabled or the issue is already in the target state. Failures don't abort
+	// dispatch — the claim is already taken and a stuck UpdateState shouldn't
+	// strand the work. transitionedFrom records the source state IFF the move
+	// succeeded; the rollback paths and finishRun read it (via the entry) to
+	// revert. Moved off the actor in ADR-028 Step 4.
+	var transitionedFrom string
+	if target := plan.runningTarget; target != "" && plan.sourceState != target {
+		if err := c.tracker.UpdateState(plan.runCtx, plan.issueID, target); err != nil {
+			if !errors.Is(err, tracker.ErrTransitionRejected) && !errors.Is(err, tracker.ErrNotSupported) {
+				c.logger.Warn("dispatcher: in-progress transition %s: %v", plan.identifier, err)
+			}
+			// continue regardless — claim is already taken.
+		} else {
+			transitionedFrom = plan.sourceState
+		}
+	}
+
+	_, created, err := c.workspaces.Create(plan.issueID)
+	if err != nil {
+		c.logger.Warn("dispatcher: workspace create %s: %v", plan.identifier, err)
+		// Carry transitionedFrom so the actor records it on the entry BEFORE
+		// finishRun's revert reads it — then reuse the Step-3 teardown rather
+		// than duplicating slot-free + revert + release + retry here.
+		c.postCmd(cmdDispatchSetupDone{issueID: plan.issueID, transitionedFrom: transitionedFrom, err: err})
+		return false, false
+	}
+
+	// Setup confirmed: hand the transition source back to the actor (which
+	// records it + clears setupPending), then the caller runs the worker.
+	c.postCmd(cmdDispatchSetupDone{issueID: plan.issueID, transitionedFrom: transitionedFrom})
+	return created, true
 }
 
 func (c *Dispatcher) buildSpec(cfg *Config, iss tracker.Issue, runID, wsPath string, attempt int, entry *runningEntry) DispatchSpec {

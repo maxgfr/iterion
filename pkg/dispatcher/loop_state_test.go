@@ -305,37 +305,71 @@ func TestDispatch_RevertsOnWorkspaceCreateFailure(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	// Invoke dispatch directly (don't run the actor — we want to
-	// observe the synchronous rollback without a tick interleaving).
+	// ADR-028 Step 4: the post-claim setup I/O (in-progress UpdateState +
+	// workspaces.Create) now runs OFF the actor. dispatch() allocates the
+	// running entry + slot on the actor (setupPending=true), the setup worker
+	// hits the Create failure, and posts cmdDispatchSetupDone{err}, whose apply
+	// reuses finishRun's teardown — slot free + transition revert + claim
+	// release + retry. We invoke dispatch directly (no tick interleaving) and
+	// drive the single posted command by hand to keep the sequence
+	// deterministic.
+	ctx := context.Background()
 	iss := tracker.Issue{
 		ID: "fake:t4", Identifier: "fake#t4",
 		Title: "go", WorkflowState: "ready",
 	}
-	c.dispatch(context.Background(), iss)
+	c.dispatch(ctx, iss)
 
-	// Workspace-create-fail path: claim → transition → workspace fails
-	// → revert → release. The issue should be back in ready and not
-	// running.
+	// The slot is allocated synchronously at claim time, BEFORE the off-actor
+	// setup runs — concurrency stays enforced from claim time, so the entry is
+	// present (and setupPending) the instant dispatch returns.
+	if r, running := c.state.running["fake:t4"]; !running {
+		t.Fatal("running entry should be allocated at claim time (slot counted before off-actor setup)")
+	} else if !r.setupPending {
+		t.Fatal("entry should be setupPending until the off-actor setup reports back")
+	}
+
+	// Drain the one command the setup worker posts (the Create failure) and
+	// apply it — this runs finishRun on the (test-driven) actor goroutine.
+	select {
+	case cmd := <-c.cmds:
+		cmd.apply(c, ctx)
+	case <-time.After(2 * time.Second):
+		t.Fatal("setup worker never posted cmdDispatchSetupDone after the Create failure")
+	}
+
+	// finishRun fired the off-actor finish worker (revert + release). Drain
+	// both the setup worker and the finish worker.
+	c.workersWG.Wait()
+
+	// Teardown must have reused the finishRun path: entry gone (slot freed),
+	// issue reverted to ready, claim released, and a retry scheduled.
+	if _, running := c.state.running["fake:t4"]; running {
+		t.Fatal("running entry should be removed after the workspace-create failure teardown")
+	}
 	if got := ft.issueState("fake:t4"); got != "ready" {
 		t.Fatalf("issue state = %q, want ready after revert", got)
 	}
-	if _, running := c.state.running["fake:t4"]; running {
-		t.Fatal("running entry should not be recorded after workspace failure")
-	}
 	calls := ft.calls()
-	// Expect exactly two UpdateState calls: forward to in_progress,
-	// then revert back to ready.
+	// Expect exactly two UpdateState calls: forward to in_progress (setup
+	// worker), then revert back to ready (finish worker).
 	if len(calls) != 2 ||
 		calls[0].newState != "in_progress" ||
 		calls[1].newState != "ready" {
 		t.Fatalf("UpdateState calls = %+v, want [in_progress, ready]", calls)
 	}
-	// And the claim should be released.
 	ft.mu.Lock()
 	_, stillClaimed := ft.claims["fake:t4"]
 	ft.mu.Unlock()
 	if stillClaimed {
 		t.Fatal("claim not released after workspace failure")
+	}
+	// The teardown reused finishRun, which scheduled a retry (the colliding
+	// file is non-fatal/retryable). Stop its timer so the test exits clean.
+	if e, ok := c.state.retries["fake:t4"]; !ok {
+		t.Fatal("workspace-create failure should reuse finishRun and schedule a retry")
+	} else if e.Timer != nil {
+		e.Timer.Stop()
 	}
 }
 

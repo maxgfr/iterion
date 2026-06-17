@@ -39,6 +39,14 @@ type fakeTracker struct {
 	releaseBlock     chan struct{}
 	releaseEntered   chan struct{}
 	releaseEnterOnce sync.Once
+
+	// Optional gate used by the ADR-028 Step 4 tests. When updateBlock is
+	// non-nil, the first UpdateState call signals updateEntered (once) then
+	// blocks receiving on updateBlock until the test closes it — simulating a
+	// slow in-progress transition wedging the off-actor dispatch-setup worker.
+	updateBlock     chan struct{}
+	updateEntered   chan struct{}
+	updateEnterOnce sync.Once
 }
 
 func newFakeTracker() *fakeTracker {
@@ -98,6 +106,12 @@ func (f *fakeTracker) RefreshStates(_ context.Context, ids []string) (map[string
 }
 
 func (f *fakeTracker) UpdateState(_ context.Context, id, newState string) error {
+	if f.updateBlock != nil {
+		if f.updateEntered != nil {
+			f.updateEnterOnce.Do(func() { close(f.updateEntered) })
+		}
+		<-f.updateBlock
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	iss, ok := f.issues[id]
