@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -1274,7 +1275,9 @@ func (s *Server) materializeEmbeddedRecipe(filePath string) (string, bool) {
 		return "", false
 	}
 	// Idempotent: skip the write if the cached file already matches.
-	if existing, err := os.ReadFile(dst); err == nil && len(existing) == len(data) {
+	// Compare bytes, not just length — a same-length but changed recipe
+	// must be rewritten, not silently served from the stale cache.
+	if existing, err := os.ReadFile(dst); err == nil && bytes.Equal(existing, data) {
 		return dst, true
 	}
 	if err := os.WriteFile(dst, data, 0o644); err != nil {

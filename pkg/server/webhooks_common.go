@@ -197,7 +197,15 @@ func (s *Server) insertAndLaunchWebhook(
 	if s.webhookDeliveries != nil {
 		if err := s.webhookDeliveries.Insert(ctx, delivery); err != nil {
 			if errors.Is(err, webhooks.ErrDuplicate) {
-				existing, _ := s.webhookDeliveries.GetByIdempotencyKey(ctx, idemKey)
+				// Read back the prior delivery so the duplicate 200
+				// echoes its run_id/delivery_id. A failed read would
+				// otherwise emit a misleading 200 with empty IDs —
+				// surface it as a 500 instead.
+				existing, gerr := s.webhookDeliveries.GetByIdempotencyKey(ctx, idemKey)
+				if gerr != nil {
+					httpError(w, http.StatusInternalServerError, "lookup duplicate delivery: %v", gerr)
+					return
+				}
 				s.markWebhookOutcome(cfg.Provider, webhooks.StatusDuplicate)
 				writeJSONStatus(w, http.StatusOK, map[string]string{
 					"status": webhooks.StatusDuplicate, "run_id": existing.RunID, "delivery_id": existing.ID,

@@ -81,8 +81,10 @@ func (s *Service) CancelInactiveCtx(ctx context.Context, runID string) (bool, er
 		return false, fmt.Errorf("load run: %w", err)
 	}
 	switch r.Status {
-	case store.RunStatusPausedWaitingHuman, store.RunStatusFailedResumable:
-		// flippable
+	case store.RunStatusPausedWaitingHuman, store.RunStatusFailedResumable, store.RunStatusPausedOperator:
+		// flippable — paused_operator included so an orphaned operator-paused
+		// run can still be cancelled after a daemon restart
+
 	default:
 		return false, nil // already terminal — no-op
 	}
