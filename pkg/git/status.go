@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"fmt"
+	"time"
 )
 
 // Status returns one entry per modified/untracked file in dir, derived from
@@ -47,8 +48,17 @@ func Status(dir string) ([]FileStatus, error) {
 		return nil, err
 	}
 
-	if ns := <-nsCh; ns.err == nil {
-		applyNumStats(files, ns.stats)
+	// Bound the wait on numstat: if `git diff --numstat` hangs (e.g. a
+	// stuck index.lock), proceed with zeroed counts rather than blocking
+	// the status call forever. nsCh is buffered(1) so the goroutine still
+	// completes and never leaks.
+	select {
+	case ns := <-nsCh:
+		if ns.err == nil {
+			applyNumStats(files, ns.stats)
+		}
+	case <-time.After(3 * time.Second):
+		// numstat is purely an annotation; degrade to zeroed counts.
 	}
 	// Untracked entries don't appear in numstat; scan the file directly
 	// for line counts and binary detection.

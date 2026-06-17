@@ -123,7 +123,10 @@ func ImportSpace(ctx context.Context, store MemoryStore, ref SpaceRef, r io.Read
 	tr := tar.NewReader(gz)
 
 	var sum ImportSummary
-	const maxEntry = 8 << 20
+	// Match the per-document write cap so an oversized entry fails with a
+	// clear size error here rather than a confusing late QuotaError from
+	// WriteDocument deeper in the import.
+	const maxEntry = DefaultMaxDocumentSize
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {

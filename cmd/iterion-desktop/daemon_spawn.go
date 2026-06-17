@@ -52,6 +52,13 @@ func spawnDaemonForProject(projectDir string) (string, error) {
 		}
 		return "", fmt.Errorf("daemon spawn: %w", err)
 	}
+	// Close our copy of the log FD now that Start has succeeded: the
+	// child inherited its own dup'd descriptor for stdout/stderr, so the
+	// parent's handle is redundant and would otherwise leak for the GUI's
+	// lifetime (one per spawned daemon).
+	if logFile != nil {
+		_ = logFile.Close()
+	}
 	// Don't wait on the child — it's intentionally orphaned. Release
 	// the process handle so the GUI doesn't hold onto a zombie reaper
 	// duty for the daemon's lifetime.
@@ -80,9 +87,10 @@ func selfExecPath() (string, error) {
 }
 
 // openDaemonLogFile opens (creating + appending) the per-project daemon
-// log file at ~/.iterion/daemons/<key>.log. Returned file MUST be kept
-// open by the caller (it owns the cmd's stdio); closing it would route
-// the daemon's writes to a closed fd.
+// log file at ~/.iterion/daemons/<key>.log. The caller wires it to the
+// child's stdout/stderr and may close its own copy once cmd.Start has
+// succeeded — the child inherits an independent dup'd descriptor, so the
+// parent's handle is no longer needed.
 func openDaemonLogFile(projectDir string) (*os.File, error) {
 	dir := daemonRegistryDir()
 	if dir == "" {

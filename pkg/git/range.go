@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // StatusBetween lists files that differ between two commits inside repoRoot,
@@ -51,8 +52,16 @@ func StatusBetween(repoRoot, baseRef, finalRef string) ([]FileStatus, error) {
 		return nil, err
 	}
 
-	if ns := <-nsCh; ns.err == nil {
-		applyNumStats(files, ns.stats)
+	// Bound the wait on numstat: if `git diff --numstat` hangs, proceed
+	// with zeroed counts rather than blocking forever. nsCh is
+	// buffered(1) so the goroutine still completes and never leaks.
+	select {
+	case ns := <-nsCh:
+		if ns.err == nil {
+			applyNumStats(files, ns.stats)
+		}
+	case <-time.After(3 * time.Second):
+		// numstat is purely an annotation; degrade to zeroed counts.
 	}
 	return files, nil
 }

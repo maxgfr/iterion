@@ -273,9 +273,15 @@ func (s *Service) ChangePasswordPending(ctx context.Context, email, currentPassw
 	}
 	u, err := s.store.GetUserByEmail(ctx, email)
 	if err != nil {
+		// Spend the same argon2id cycles a real attempt would so a
+		// network observer can't distinguish "no such account" from
+		// "wrong temp password" by response timing (matches Login).
+		_, _ = VerifyPassword(currentPassword, dummyHash)
 		return LoginResult{}, ErrInvalidCredentials
 	}
 	if u.Status != identity.UserStatusPendingPasswordChange {
+		// Same timing-equalisation for the wrong-status branch.
+		_, _ = VerifyPassword(currentPassword, dummyHash)
 		return LoginResult{}, ErrInvalidCredentials
 	}
 	ok, err := VerifyPassword(currentPassword, u.PasswordHash)

@@ -510,5 +510,13 @@ func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	return s[:max] + "..."
+	// Cut on a rune boundary: the for-range index always lands at the
+	// start of a rune, so slicing there never splits a multi-byte UTF-8
+	// sequence (which s[:max] would).
+	for i := range s {
+		if i >= max {
+			return s[:i] + "..."
+		}
+	}
+	return s
 }

@@ -298,11 +298,41 @@ func findDaemonForStorePath(storePath string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	dir := projectDirFromKey(key)
+	// The daemon.json filename is encodeProjectDirKey(projectDir)+".json",
+	// and `key` is exactly that encoded stem (same encoding as
+	// pkg/store/storedir). So read the discovery file directly by key and
+	// trust its recorded ProjectDir, rather than lossily decoding the key
+	// back to a path — projectDirFromKey can't recover an original "-" in
+	// the project dir, which would re-encode to the wrong filename and
+	// miss a live daemon.
+	dir := daemonRegistryDir()
 	if dir == "" {
 		return "", false
 	}
-	return findDaemonForProject(dir)
+	raw, err := os.ReadFile(filepath.Join(dir, key+".json"))
+	if err != nil {
+		// No discovery file for this key — fall back to the lossy decode
+		// as a best-effort hint (covers legacy files that predate the
+		// recorded project_dir field).
+		if hint := projectDirFromKey(key); hint != "" {
+			return findDaemonForProject(hint)
+		}
+		return "", false
+	}
+	var info daemonInfo
+	if err := json.Unmarshal(raw, &info); err != nil {
+		return "", false
+	}
+	if info.ProjectDir != "" {
+		return findDaemonForProject(info.ProjectDir)
+	}
+	// Recorded file without a project_dir — use the live URL directly if
+	// the daemon is alive (the round-trip through findDaemonForProject
+	// would re-derive the same filename we just read).
+	if daemonAlive(info.PID, info.URL) {
+		return info.URL, true
+	}
+	return "", false
 }
 
 // encodeProjectDirKey mirrors pkg/store/storedir.go's encodeWorkDirKey

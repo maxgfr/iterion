@@ -320,7 +320,7 @@ func copyTree(src, dst string) error {
 	})
 }
 
-func copyFileTo(src, dst string) error {
+func copyFileTo(src, dst string) (err error) {
 	info, err := os.Stat(src)
 	if err != nil {
 		return err
@@ -340,7 +340,14 @@ func copyFileTo(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	// Close explicitly and surface its error: on NFS / full disks
+	// io.Copy can succeed while the buffered write only fails at Close,
+	// so a deferred-and-ignored Close would hide a real write failure.
+	defer func() {
+		if cerr := out.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	if _, err := io.Copy(out, in); err != nil {
 		return err
 	}
