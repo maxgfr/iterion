@@ -1292,6 +1292,9 @@ func refFromExpr(r expr.Ref) *Ref {
 		kind = RefArtifacts
 	case "attachments":
 		kind = RefAttachments
+	case "secrets":
+		// So C093 (unknown secret) fires for {{secrets.X}} in compute exprs too.
+		kind = RefSecrets
 	default:
 		return nil
 	}

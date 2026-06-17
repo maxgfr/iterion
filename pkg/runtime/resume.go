@@ -673,6 +673,13 @@ func (e *Engine) execAutoOrPauseHuman(ctx context.Context, rs *runState, nodeID 
 		e.onNodeFinished(rs.runID, nodeID, output)
 	}
 
+	// Best-effort checkpoint for resume-from-failed (parity with execLoopAfterExec).
+	if err := e.store.SaveCheckpoint(rs.ctx, rs.runID, buildCheckpoint(rs, nodeID)); err != nil {
+		e.logger.Error("failed to save checkpoint after node %q: %v", nodeID, err)
+	}
+	// Per-node snapshot so the Fork API's rewind_code=true mode has an anchor.
+	e.snapshotAtNodeBoundary(rs, nodeID)
+
 	return false, nil
 }
 

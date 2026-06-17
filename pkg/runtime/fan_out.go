@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/backend/model"
@@ -626,6 +627,13 @@ func (e *Engine) processConvergence(rs *runState, convergenceNodeID string, resu
 			rs.outputs[nodeID] = output
 		}
 		for name, output := range r.artifacts {
+			// Last-write-wins, but make a silent clobber observable: two
+			// parallel branches publishing the same artifact name would
+			// otherwise overwrite each other with no trace.
+			if prev, ok := rs.artifacts[name]; ok && !reflect.DeepEqual(prev, output) {
+				e.logger.Warn("convergence at %s: artifact %q published by multiple branches with differing values — last write wins",
+					convergenceNodeID, name)
+			}
 			rs.artifacts[name] = output
 		}
 		for nodeID, version := range r.artifactVersions {

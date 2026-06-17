@@ -867,12 +867,17 @@ func (p *parser) parseEnumConstraint() []string {
 	t := p.next()
 	if t.Type == TokenString {
 		vals = append(vals, t.Value)
+	} else {
+		// Don't silently drop bare identifiers — enum values must be quoted.
+		p.addError(DiagInvalidValue, t, "enum values must be quoted strings, got "+t.Type.String())
 	}
 	for p.peek().Type == TokenComma {
 		p.next() // consume ,
 		t = p.next()
 		if t.Type == TokenString {
 			vals = append(vals, t.Value)
+		} else {
+			p.addError(DiagInvalidValue, t, "enum values must be quoted strings, got "+t.Type.String())
 		}
 	}
 	p.expect(TokenRBrack)
@@ -2193,6 +2198,7 @@ func (p *parser) parseWithEntry() *ast.WithEntry {
 	valT := p.next()
 	if valT.Type != TokenString {
 		p.addError(DiagExpectedToken, valT, "expected string value in with block")
+		p.skipToNewline() // recover to avoid cascading mis-parse of the rest of the line
 		return nil
 	}
 	// optional trailing comma
@@ -2437,6 +2443,8 @@ func isKeywordToken(tt TokenType) bool {
 		TokenSandbox,
 		TokenCursor, TokenCursors, TokenValues, TokenBands,
 		TokenAttachments, TokenTypeFile, TokenTypeImage,
+		// secrets / sandbox-host-state / forge keywords usable as identifiers in name positions
+		TokenSecrets, TokenInheritIfAvailable, TokenProjectRoot, TokenVisibility,
 		TokenDone, TokenFail:
 		return true
 	}
