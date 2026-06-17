@@ -917,7 +917,16 @@ func (r *Runner) materializeFileSecretsNoSandbox(ctx context.Context, wf *ir.Wor
 			continue // optional / unresolved → skip; the agent just won't find it
 		}
 		mp := secrets.ResolveFileMountPath(name, s.MountPath)
-		if !strings.HasPrefix(mp, "/") {
+		// Confine writes to the secrets mount dir. The default mount path is
+		// always under it; a DSL-supplied mount_path is tenant-controlled and
+		// this runner pod is NOT sandboxed, so without this guard a crafted
+		// mount_path (e.g. /root/.ssh/authorized_keys, /etc/cron.d/x) would
+		// write the secret value to an arbitrary host path. The helper also
+		// rejects path traversal and non-clean paths.
+		if _, ok := secrets.RelativeToSecretFilesMountDir(mp); !ok {
+			if r.cfg.Logger != nil {
+				r.cfg.Logger.Warn("runner: refusing out-of-tree mount_path %q for file secret %q (must be under %s)", mp, name, secrets.SecretFilesMountDir)
+			}
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(mp), 0o700); err != nil {
