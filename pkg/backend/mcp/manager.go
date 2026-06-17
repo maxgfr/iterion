@@ -390,7 +390,13 @@ func (m *Manager) ensureServer(ctx context.Context, registry *tool.Registry, ser
 				if args == nil {
 					args = make(map[string]interface{})
 				}
-				if _, callerSet := args["limit"]; !callerSet {
+				// Shrink to 300 and retry when no caller-supplied limit exists
+				// OR the current limit is still above 300. The DefaultSanitization
+				// rules inject limit=500, so a bare `!callerSet` guard never fired —
+				// the retry path was effectively dead. The float64 assertion is
+				// guarded so a non-numeric limit falls through to the shrink.
+				curLimit, isFloat := args["limit"].(float64)
+				if _, callerSet := args["limit"]; !callerSet || !isFloat || curLimit > 300 {
 					args["limit"] = float64(300)
 					retryResult, retryErr := client.CallTool(callCtx, toolName, args)
 					if retryErr != nil {

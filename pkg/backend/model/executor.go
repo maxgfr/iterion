@@ -1483,7 +1483,13 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 							Attempt:            1,
 						})
 					}
-					retryResult, retryErr := backend.Execute(ctx, task)
+					// Route the schema-fallback retry through retryDelegateLoop so
+					// it inherits the same transient-error backoff every other
+					// delegate call gets — a direct backend.Execute here skipped
+					// the retry budget and gave up on the first transient SDK hiccup.
+					retryResult, retryErr := e.retryDelegateLoop(ctx, f.id, backendName, func() (delegate.Result, error) {
+						return backend.Execute(ctx, task)
+					})
 					if retryErr == nil && !retryResult.ParseFallback {
 						// Accumulate token/duration/cost from the first
 						// attempt so per-node accounting reflects the full
@@ -1766,10 +1772,29 @@ func extractJSON(text string) string {
 	// Try to find embedded JSON object in the text.
 	start := strings.Index(text, "{")
 	if start >= 0 {
-		// Find the matching closing brace.
+		// Find the matching closing brace. Track whether we are inside a
+		// double-quoted string (respecting backslash escapes) so braces that
+		// appear inside string literals — e.g. {"k":"a } b"} — don't terminate
+		// the scan early and truncate the object.
 		depth := 0
+		inString := false
+		escaped := false
 		for i := start; i < len(text); i++ {
-			switch text[i] {
+			c := text[i]
+			if inString {
+				switch {
+				case escaped:
+					escaped = false
+				case c == '\\':
+					escaped = true
+				case c == '"':
+					inString = false
+				}
+				continue
+			}
+			switch c {
+			case '"':
+				inString = true
 			case '{':
 				depth++
 			case '}':

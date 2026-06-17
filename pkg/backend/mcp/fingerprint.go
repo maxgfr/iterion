@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/SocialGouv/iterion/pkg/backend/tool"
+	"github.com/SocialGouv/iterion/pkg/store"
 )
 
 // SchemaChange describes a detected change in an MCP tool's input schema.
@@ -104,7 +105,9 @@ func (fs *FingerprintStore) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, raw, 0o644)
+	// Atomic write (temp file + rename) so a concurrent reader/process never
+	// observes a half-written fingerprint file.
+	return store.WriteFileAtomic(path, raw, 0o644)
 }
 
 func (fs *FingerprintStore) filePath() string {

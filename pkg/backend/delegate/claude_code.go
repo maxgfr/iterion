@@ -231,9 +231,12 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 	if task.Sandbox != nil {
 		opts = append(opts, claudesdk.WithCLIPath("claude"))
 	}
-	if len(task.AllowedTools) > 0 {
-		opts = append(opts, claudesdk.WithAllowedTools(task.AllowedTools...))
-	}
+	// Allowed-tools registration is deferred to a single call near the end
+	// of this function. WithAllowedTools APPENDS to the SDK's slice, so
+	// registering the base set here and again below (combined with MCP
+	// extras) would list every base tool twice. We accumulate the MCP
+	// extras (ask_user, board.*) into extraAllowedTools and emit one call.
+	var extraAllowedTools []string
 	// Bypass interactive permission prompts: the runtime enforces safety via
 	// workspace isolation and allowed-tool lists, so the delegate subprocess
 	// does not need its own permission gate.
@@ -243,20 +246,11 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 	// --print mode. The SDK always uses stream-json, so we must enable verbose.
 	opts = append(opts, claudesdk.WithVerbose(true))
 
-	// Forward stderr from the CLI to the backend logger so silent-failure
-	// modes ("session ended without result message") leave a trail of the
-	// underlying process output instead of being completely opaque. Auth
-	// errors, network errors, config parse errors all emit on stderr —
-	// without this they vanish into the SDK's pump and only the wrapping
-	// "no result message" surfaces upstream.
-	// *iterlog.Logger methods are nil-safe (see pkg/log/log.go), so the
-	// per-call guard is redundant; the stderr stream is always worth
-	// wiring and the nil-receiver short-circuit costs nothing.
-	opts = append(opts, claudesdk.WithStderrCallback(func(line string) {
-		if line != "" {
-			b.Logger.Warn("claude-code [stderr]: %s", line)
-		}
-	}))
+	// Stderr forwarding is registered once, further down (the
+	// stderrBuf-capturing callback): WithStderrCallback assigns (not
+	// appends) the SDK's single callback slot, so a logger-only
+	// registration here would simply be overwritten by that later,
+	// richer one (live Info logging + buffered capture for diagnostics).
 
 	model := task.Model
 	if model == "" {
@@ -403,10 +397,7 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 			// An empty AllowedTools means "no restriction", and the MCP tool will
 			// be discoverable without explicit listing.
 			if len(task.AllowedTools) > 0 {
-				combined := make([]string, 0, len(task.AllowedTools)+1)
-				combined = append(combined, task.AllowedTools...)
-				combined = append(combined, askUserMCPToolName)
-				opts = append(opts, claudesdk.WithAllowedTools(combined...))
+				extraAllowedTools = append(extraAllowedTools, askUserMCPToolName)
 			}
 			matcher := "^" + askUserMCPToolName + "$"
 			noContinue := false
@@ -477,9 +468,7 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 				Env:     env,
 			}))
 			if len(task.AllowedTools) > 0 {
-				combined := append([]string(nil), task.AllowedTools...)
-				combined = append(combined, BoardToolsFor(task.Capabilities)...)
-				opts = append(opts, claudesdk.WithAllowedTools(combined...))
+				extraAllowedTools = append(extraAllowedTools, BoardToolsFor(task.Capabilities)...)
 			}
 		} else {
 			b.Logger.Warn("[%s#%d/claude-code] could not resolve iterion CLI binary path; board MCP server disabled", task.NodeID, task.Iteration)
@@ -497,9 +486,7 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 				AlwaysLoad: true,
 			}))
 			if len(task.AllowedTools) > 0 {
-				combined := append([]string(nil), task.AllowedTools...)
-				combined = append(combined, BoardToolsFor(task.Capabilities)...)
-				opts = append(opts, claudesdk.WithAllowedTools(combined...))
+				extraAllowedTools = append(extraAllowedTools, BoardToolsFor(task.Capabilities)...)
 			}
 		} else {
 			b.Logger.Warn("[%s#%d/claude-code] board capabilities granted but workflow is sandboxed and BoardHTTPEndpoint/BoardRunToken not configured; board MCP disabled for this node", task.NodeID, task.Iteration)
@@ -514,6 +501,18 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 	// there mid-loop.
 	if HasWatchCapability(task.Capabilities) {
 		b.Logger.Warn("[%s#%d/claude-code] watch.* capabilities are not yet supported on the claude_code backend (claw only); ignoring for this node", task.NodeID, task.Iteration)
+	}
+
+	// Single allowed-tools registration: the node's restrictive base list
+	// plus any MCP extras accumulated above (ask_user, board.*), built once
+	// so no tool is listed twice (WithAllowedTools appends). An empty base
+	// list means "no restriction", so we register nothing in that case —
+	// matching the per-block guards that only extended the allowlist when
+	// task.AllowedTools was non-empty.
+	if len(task.AllowedTools) > 0 {
+		combined := append([]string(nil), task.AllowedTools...)
+		combined = append(combined, extraAllowedTools...)
+		opts = append(opts, claudesdk.WithAllowedTools(combined...))
 	}
 
 	// Operator-chatbox mid-session inbox delivery (parity with the claw

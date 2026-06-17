@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/SocialGouv/iterion/pkg/store"
 )
 
 const (
@@ -73,7 +75,9 @@ func (c *ToolCache) Set(serverName string, cfg *ServerConfig, tools []ToolInfo) 
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	// Atomic write (temp file + rename) so a concurrent reader/process never
+	// observes a half-written cache file.
+	return store.WriteFileAtomic(path, data, 0o644)
 }
 
 func (c *ToolCache) cacheFile(serverName string, cfg *ServerConfig) string {
