@@ -591,4 +591,24 @@ func TestLLMRouterMultiCancelAbandonsWedgedBranch(t *testing.T) {
 		t.Fatal("llm router fan_out hung on a wedged branch despite cancellation (collector drain not bounded)")
 	}
 	close(release) // let the wedged branch goroutine exit cleanly
+
+	// The abandoned branch keeps emitting events (its deferred branch_finished)
+	// after Run already returned. Wait for that last write before the test's
+	// t.TempDir cleanup runs, otherwise RemoveAll races the late write and
+	// fails with "directory not empty".
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		evs, _ := s.LoadEvents(context.Background(), "run-llm-wedged")
+		drained := false
+		for _, e := range evs {
+			if e.BranchID == "branch_llm_router_agent_b" && e.Type == store.EventBranchFinished {
+				drained = true
+				break
+			}
+		}
+		if drained || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
