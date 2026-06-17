@@ -89,3 +89,73 @@ side goroutine, and asserts the actor applies a `cmdReload` posted on
 `c.cmds` (republishing the snapshot) within a tight deadline *while*
 `ListCandidates` is still blocked — which fails before this change because
 the actor was parked inside the synchronous call.
+
+## 2026-06-17 — Step 3 implemented (finishRun tracker HTTP offloaded)
+
+`finishRun` (`pkg/dispatcher/commands.go`) used to interleave fast in-memory
+`c.state` mutations with the run's blocking tracker HTTP — `tracker.Release`
+plus exactly one of the clean-finish transition (`maybeTransitionToCompleted`),
+the cancel/retry revert (`revertTransition`), or the exhausted-failure give-up
+move — all on the actor goroutine. While the actor was parked in that HTTP it
+processed no other command.
+
+Now the actor does ALL the state work synchronously (free the slot, clear or
+schedule retries, decide the give-up-vs-retry outcome) and computes a
+value-copy **`finishPlan`** capturing the immutable inputs the HTTP needs
+(issueID, identifier, running-state target, completed-state target, source
+state, failed state, attempt/run for logging). A tracked worker
+(`launchFinish` → `runFinishWorker`) then executes the plan's tracker calls off
+the actor, using the same background-derived 5s context so Release/transition
+survive run-context / shutdown cancellation. The worker reads ONLY the plan plus
+dispatcher-immutables (`c.tracker`, `c.logger`, `c.hostMarker`) — it never
+touches `c.state`, and it never re-reads `c.cfg` for finishRun transition
+targets. The actor remains the sole writer of `c.state`, and its finish-time cfg
+snapshot remains authoritative even if a Reload is processed while the finish
+worker's HTTP is in flight. Steps 4 (claim/dispatch offload) and
+`RefreshStates`/`refreshRunningStates` remain future work, deliberately
+untouched here.
+
+Implementation choices and their trade-offs:
+
+- **Transition first, `Release` last (reordered).** finishRun previously ran
+  `Release` *before* the transition, but synchronously — no tick could
+  interleave. Off the actor, releasing first would briefly leave a
+  cleanly-finished issue *released + still in RunningState* = an eligible,
+  unclaimed candidate, opening a spurious re-dispatch window (a tick's
+  discovery could see it and `Claim` it for a duplicate run). Doing the
+  transition first keeps the tracker claim held — so `ListCandidates` filters
+  the issue — until it has been moved to its final, mostly-non-eligible state;
+  `Release` runs last. This is invisible to existing assertions, which key on
+  `UpdateState` call order/counts (`Release` is not an `UpdateState`).
+
+- **Give-up uses an optimistic retry as the in-memory guard.** The give-up
+  decision's fallback — "if the board can't represent FailedState, keep
+  retrying rather than freeze the ticket" — is HTTP-result-dependent and must
+  be preserved. The former `giveUpIfExhausted` is split into a pure in-memory
+  predicate `exhausted(r)` (max-attempts + FailedState-set gate, decided on the
+  actor) and the off-actor move. When exhausted, the actor **schedules the
+  retry synchronously**; that retry entry is the re-dispatch guard
+  (`isClaimed`) that blocks a tick from re-picking the issue for the whole
+  worker HTTP window. The worker attempts the FailedState move: on success it
+  posts `cmdDropRetry` so the actor drops the guard (give-up is final); on
+  failure it reverts and leaves the retry in place — reproducing the legacy
+  fallback exactly (same attempt count + backoff). A tombstone can't serve as
+  the guard because `cmdRunFinished.apply` deletes tombstones immediately after
+  `finishRun` returns. The only artifact is a transient "retry queued" log
+  before "gave up" in the give-up-success case — informative, not wrong.
+
+- **Finish workers tracked on `workersWG`.** Reusing the existing worker
+  WaitGroup means `Stop()` already drains them; the `cmdDropRetry` send is
+  guarded by `c.stop` (via `postCmd`) so a worker finishing after the actor
+  exits never leaks on a blocked send.
+
+Anti-façade tests (`pkg/dispatcher/dispatcher_test.go`):
+`TestActorResponsiveWhileFinishHTTPInFlight` gates the fake tracker's
+`Release` on a channel, drives a run to a clean finish so the finish worker
+parks in `Release`, asserts the slot is already freed, and proves the actor
+applies a `cmdReload` posted on `c.cmds` *while* `Release` is still blocked.
+`TestSlotFreedBeforeReleaseHTTP` asserts `Snapshot().Slots.GlobalUsed` drops to
+0 while `Release` is still in flight — slot accounting decoupled from the
+release HTTP. `TestFinishRun_GiveUpMovesToFailedState` and
+`TestFinishRun_GiveUpFallsBackToRetryWhenMoveRejected`
+(`pkg/dispatcher/commands_test.go`) cover both give-up worker outcomes.

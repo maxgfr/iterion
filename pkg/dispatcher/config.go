@@ -373,7 +373,7 @@ func (c *Config) applyDefaults() {
 	}
 	// MaxAttempts: 0 (unset) → finite default so retries can't run forever;
 	// a negative value is the explicit "retry indefinitely" escape hatch,
-	// mapped to 0 which giveUpIfExhausted reads as "no cap".
+	// mapped to 0 which the exhausted() give-up gate reads as "no cap".
 	if c.Agent.MaxAttempts == 0 {
 		c.Agent.MaxAttempts = DefaultMaxAttempts
 	} else if c.Agent.MaxAttempts < 0 {

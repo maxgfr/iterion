@@ -31,6 +31,14 @@ type fakeTracker struct {
 	listBlock     chan struct{}
 	listEntered   chan struct{}
 	listEnterOnce sync.Once
+
+	// Optional gate used by the ADR-028 Step 3 tests. When releaseBlock is
+	// non-nil, the first Release call signals releaseEntered (once) then
+	// blocks receiving on releaseBlock until the test closes it — simulating
+	// a slow tracker Release wedging the off-actor finish worker.
+	releaseBlock     chan struct{}
+	releaseEntered   chan struct{}
+	releaseEnterOnce sync.Once
 }
 
 func newFakeTracker() *fakeTracker {
@@ -113,6 +121,12 @@ func (f *fakeTracker) Claim(_ context.Context, id, marker string) error {
 }
 
 func (f *fakeTracker) Release(_ context.Context, id, _ string) error {
+	if f.releaseBlock != nil {
+		if f.releaseEntered != nil {
+			f.releaseEnterOnce.Do(func() { close(f.releaseEntered) })
+		}
+		<-f.releaseBlock
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.claims, id)
@@ -305,6 +319,99 @@ func TestActorResponsiveWhileDiscoveryInFlight(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("actor did not apply cmdReload while ListCandidates was in flight (snapshot name=%q) — discovery is not off-actor", c.Snapshot().Name)
+}
+
+// driveGatedReleaseRun starts c, dispatches the seeded ready issue, drives it
+// to a clean finish, and blocks until the off-actor finish worker is provably
+// parked inside the gated tracker.Release. Returns once releaseEntered fires.
+// The caller MUST `defer close(ft.releaseBlock)` (before `defer c.Stop()`, so
+// LIFO unblocks the worker before Stop drains workersWG) and own ctx/cancel.
+func driveGatedReleaseRun(t *testing.T, c *Dispatcher, ft *fakeTracker, ctx context.Context) {
+	t.Helper()
+	c.Start(ctx)
+	select {
+	case <-ft.releaseEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("finish worker never entered the blocked tracker.Release call")
+	}
+}
+
+// TestActorResponsiveWhileFinishHTTPInFlight proves ADR-028 Step 3: finishRun's
+// blocking tracker HTTP (Release + the clean-finish transition) now runs on an
+// off-actor finish worker, so the actor keeps processing commands while that
+// HTTP is in flight. We gate the fake tracker's Release on a channel, drive a
+// run to a clean finish (so the finish worker parks in Release), and — while
+// Release is still blocked — post a Reload through the actor's command channel
+// and assert its handler runs (republishing the snapshot with the new name)
+// within a tight deadline. Before Step 3 the actor was parked INSIDE the
+// synchronous Release in finishRun and could not apply cmdReload.
+func TestActorResponsiveWhileFinishHTTPInFlight(t *testing.T) {
+	ft := newFakeTracker()
+	ft.add(tracker.Issue{ID: "fake:1", Identifier: "fake#1", Title: "go", WorkflowState: "ready"})
+	ft.releaseBlock = make(chan struct{})
+	ft.releaseEntered = make(chan struct{})
+
+	runner := &StubRunner{Handler: func(_ context.Context, _ DispatchSpec) error { return nil }}
+	// Long polling so only the kick-off tick fires while we hold the gate.
+	c := newTestDispatcher(t, runner, ft, time.Hour)
+
+	// Release the gate first (LIFO defer) so the off-actor finish worker always
+	// unblocks — Stop() waits on it via workersWG — even if an assertion fails.
+	defer c.Stop()
+	defer close(ft.releaseBlock)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	driveGatedReleaseRun(t, c, ft, ctx)
+
+	// The slot must already be freed: finishRun deletes the running entry on
+	// the actor BEFORE handing the Release HTTP to the worker.
+	if n := len(c.Snapshot().Running); n != 0 {
+		t.Fatalf("running entries = %d while Release in flight, want 0 (slot freed before the release HTTP)", n)
+	}
+
+	// While Release is blocked, post a command through the actor's command
+	// channel. cmdReload.apply runs on the actor and republishes the snapshot,
+	// so a responsive actor flips the published name.
+	newCfg := *c.cfg.Load()
+	newCfg.Name = "reloaded"
+	c.Reload(&newCfg)
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if c.Snapshot().Name == "reloaded" {
+			return // actor processed a command concurrently with the in-flight finish HTTP
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("actor did not apply cmdReload while tracker.Release was in flight (snapshot name=%q) — finishRun HTTP is not off-actor", c.Snapshot().Name)
+}
+
+// TestSlotFreedBeforeReleaseHTTP proves the freed concurrency slot is
+// observable immediately — Snapshot().Slots.GlobalUsed drops to 0 — even though
+// the tracker Release HTTP for the finished run has NOT completed. Slot
+// accounting (actor, in-memory) is decoupled from the release HTTP (off-actor
+// worker). See ADR-028 Step 3.
+func TestSlotFreedBeforeReleaseHTTP(t *testing.T) {
+	ft := newFakeTracker()
+	ft.add(tracker.Issue{ID: "fake:1", Identifier: "fake#1", Title: "go", WorkflowState: "ready"})
+	ft.releaseBlock = make(chan struct{})
+	ft.releaseEntered = make(chan struct{})
+
+	runner := &StubRunner{Handler: func(_ context.Context, _ DispatchSpec) error { return nil }}
+	c := newTestDispatcher(t, runner, ft, time.Hour)
+
+	defer c.Stop()
+	defer close(ft.releaseBlock)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	driveGatedReleaseRun(t, c, ft, ctx)
+
+	// Release is still blocked in the worker, yet the slot must read free.
+	if used := c.Snapshot().Slots.GlobalUsed; used != 0 {
+		t.Fatalf("Slots.GlobalUsed = %d while Release in flight, want 0 (slot accounting decoupled from the release HTTP)", used)
+	}
 }
 
 // TestDiscoveryPanicPostsCandidateError proves the off-actor discovery

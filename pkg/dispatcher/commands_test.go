@@ -229,6 +229,172 @@ type errPermanentFailure struct{}
 
 func (errPermanentFailure) Error() string { return "permanent failure" }
 
+// applyNextCmd drains one command the off-actor finish worker posted on c.cmds
+// and applies it on the test goroutine. Used by the give-up tests, which drive
+// finishRun directly (no actor running) and need the worker's cmdDropRetry
+// applied before asserting retry bookkeeping. Only valid when no actor
+// goroutine owns c.cmds.
+func applyNextCmd(t *testing.T, c *Dispatcher, ctx context.Context) {
+	t.Helper()
+	select {
+	case command := <-c.cmds:
+		command.apply(c, ctx)
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected a command posted by the off-actor finish worker, got none")
+	}
+}
+
+// TestFinishRun_GiveUpMovesToFailedState exercises the ADR-028 Step 3 give-up
+// path: an exhausted failure schedules the retry optimistically (the in-memory
+// re-dispatch guard) on the actor, then the off-actor finish worker moves the
+// issue to FailedState and — on success — drops that guard so the give-up is
+// final. End state: "blocked", no retry entry. Behaviour is unchanged from the
+// former on-actor giveUpIfExhausted; only WHERE the tracker move runs changed.
+func TestFinishRun_GiveUpMovesToFailedState(t *testing.T) {
+	ft := newStateAwareTracker()
+	ft.add(tracker.Issue{ID: "fake:gv", Identifier: "fake#gv", Title: "go", WorkflowState: "in_progress"})
+
+	c, wsDir := newStateTestDispatcher(t, &StubRunner{}, ft, time.Hour, "in_progress")
+	cfg := c.cfg.Load()
+	cfg.Agent.MaxAttempts = 1 // Attempt+1 == 1 reaches the cap → exhausted
+	cfg.Agent.FailedState = "blocked"
+	c.cfg.Store(cfg)
+
+	issueID := "fake:gv"
+	c.state.running[issueID] = &runningEntry{
+		IssueID:               issueID,
+		Identifier:            "fake#gv",
+		RunID:                 "run-gv",
+		WorkflowState:         "in_progress",
+		WorkspacePath:         filepath.Join(wsDir, "fake_gv"),
+		StartedAt:             time.Now(),
+		TransitionedFromState: "ready",
+	}
+
+	c.finishRun(context.Background(), issueID, errPermanentFailure{})
+	// The retry guard is scheduled synchronously on the actor.
+	if _, ok := c.state.retries[issueID]; !ok {
+		t.Fatal("exhausted failure must schedule the optimistic retry guard before the worker runs")
+	}
+	c.workersWG.Wait()                       // drain the give-up worker
+	applyNextCmd(t, c, context.Background()) // apply the cmdDropRetry it posted
+
+	if got := ft.issueState(issueID); got != "blocked" {
+		t.Fatalf("issue state = %q after give-up, want blocked", got)
+	}
+	if _, ok := c.state.retries[issueID]; ok {
+		t.Fatal("retry guard not dropped after a successful give-up move")
+	}
+}
+
+// TestFinishRun_GiveUpFallsBackToRetryWhenMoveRejected proves the deliberate
+// fallback: when the board can't represent FailedState (tracker rejects the
+// move), the give-up worker reverts to the source state and KEEPS the
+// optimistically-scheduled retry — preserving the legacy unbounded retry
+// rather than freezing the ticket. The worker posts no cmdDropRetry.
+func TestFinishRun_GiveUpFallsBackToRetryWhenMoveRejected(t *testing.T) {
+	ft := newStateAwareTracker()
+	ft.updateRejectState = "blocked" // tracker refuses the terminal move
+	ft.add(tracker.Issue{ID: "fake:gv2", Identifier: "fake#gv2", Title: "go", WorkflowState: "in_progress"})
+
+	c, wsDir := newStateTestDispatcher(t, &StubRunner{}, ft, time.Hour, "in_progress")
+	cfg := c.cfg.Load()
+	cfg.Agent.MaxAttempts = 1
+	cfg.Agent.FailedState = "blocked"
+	c.cfg.Store(cfg)
+
+	issueID := "fake:gv2"
+	c.state.running[issueID] = &runningEntry{
+		IssueID:               issueID,
+		Identifier:            "fake#gv2",
+		RunID:                 "run-gv2",
+		WorkflowState:         "in_progress",
+		WorkspacePath:         filepath.Join(wsDir, "fake_gv2"),
+		StartedAt:             time.Now(),
+		TransitionedFromState: "ready",
+	}
+
+	c.finishRun(context.Background(), issueID, errPermanentFailure{})
+	c.workersWG.Wait() // worker: rejected give-up → revert; posts nothing back
+
+	if got := ft.issueState(issueID); got != "ready" {
+		t.Fatalf("issue state = %q after rejected give-up, want ready (reverted)", got)
+	}
+	if _, ok := c.state.retries[issueID]; !ok {
+		t.Fatal("retry must be preserved when the give-up move is rejected (board can't represent failed)")
+	}
+}
+
+// TestFinishRun_CompletedStateCapturedBeforeReload is the focused regression
+// for the Step-3 offload race: a clean finish must capture CompletedState in
+// the actor-built finishPlan. A Reload applied after finishRun returns but
+// before the off-actor worker performs the completed-state transition must NOT
+// retarget this just-finished run.
+func TestFinishRun_CompletedStateCapturedBeforeReload(t *testing.T) {
+	ft := newStateAwareTracker()
+	issueID := "fake:captured-completed"
+	ft.add(tracker.Issue{
+		ID: issueID, Identifier: "fake#captured-completed",
+		Title: "go", WorkflowState: "in_progress",
+	})
+
+	c, wsDir := newStateTestDispatcherWithCompleted(t, &StubRunner{}, ft, time.Hour, "in_progress", "review")
+	c.state.running[issueID] = &runningEntry{
+		IssueID:       issueID,
+		Identifier:    "fake#captured-completed",
+		RunID:         "run-captured-completed",
+		WorkflowState: "in_progress",
+		WorkspacePath: filepath.Join(wsDir, "fake_captured-completed"),
+		StartedAt:     time.Now(),
+	}
+
+	entered := make(chan finishPlan, 1)
+	proceed := make(chan struct{})
+	defer func() {
+		select {
+		case <-proceed:
+		default:
+			close(proceed)
+		}
+		c.workersWG.Wait()
+	}()
+	c.beforeFinishWorker = func(plan finishPlan) {
+		entered <- plan
+		<-proceed
+	}
+
+	c.finishRun(context.Background(), issueID, nil)
+
+	var plan finishPlan
+	select {
+	case plan = <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("finish worker never reached the pre-transition gate")
+	}
+	if plan.kind != finishCompleted || plan.completedState != "review" {
+		t.Fatalf("finishPlan captured kind/completedState = %v/%q, want finishCompleted/review", plan.kind, plan.completedState)
+	}
+
+	// Simulate the actor having processed a Reload after finishRun built the
+	// plan but before the worker performs maybeTransitionToCompleted. The old
+	// worker path read c.cfg.Load().Agent.CompletedState here and would have
+	// moved this just-finished run to "done".
+	reloaded := *c.cfg.Load()
+	reloaded.Agent.CompletedState = "done"
+	c.cfg.Store(&reloaded)
+
+	close(proceed)
+	c.workersWG.Wait()
+
+	if got := ft.issueState(issueID); got != "review" {
+		t.Fatalf("issue state = %q after post-finish reload, want originally captured CompletedState %q", got, "review")
+	}
+	calls := ft.calls()
+	if len(calls) != 1 || calls[0].newState != "review" {
+		t.Fatalf("UpdateState calls = %+v, want exactly one move to captured CompletedState review", calls)
+	}
+}
+
 // TestDispatch_SkipsUnresolvableExplicitBot asserts the honest-fail
 // guard: a ticket naming a bot the registry can't resolve must NOT be
 // dispatched against the default workflow (which would run an unrelated
@@ -530,6 +696,13 @@ func TestFinishRun_WarnsOnZeroCommit(t *testing.T) {
 		}
 
 		c.finishRun(context.Background(), issueID, nil)
+		// ADR-028 Step 3: finishRun hands the CompletedState transition to an
+		// off-actor finish worker. The honesty-guard WARN/INFO is logged
+		// synchronously on the actor (above), but the tracker move is async —
+		// drain the finish worker before asserting the issue advanced. The
+		// clean path posts nothing back, so Wait() can't deadlock (no actor is
+		// draining c.cmds here, and the buffer would absorb a post anyway).
+		c.workersWG.Wait()
 
 		states, _ := ft.RefreshStates(context.Background(), []string{issueID})
 		return buf.String(), states[issueID]

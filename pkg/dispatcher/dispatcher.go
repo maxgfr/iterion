@@ -66,6 +66,10 @@ type Dispatcher struct {
 	state *state
 	cmds  chan cmd
 
+	// beforeFinishWorker is a test seam invoked at the start of the off-actor
+	// finish worker with the actor-captured value-copy plan. Nil in production.
+	beforeFinishWorker func(finishPlan)
+
 	publishMu sync.Mutex
 	publisher func(Snapshot)
 
@@ -444,11 +448,7 @@ func (c *Dispatcher) shutdown() {
 			r.Cancel()
 		}
 		relCtx, relCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := c.tracker.Release(relCtx, r.IssueID, c.hostMarker); err != nil &&
-			!errors.Is(err, tracker.ErrNotFound) &&
-			!errors.Is(err, tracker.ErrClaimConflict) {
-			c.logger.Warn("dispatcher: shutdown release %s: %v", r.Identifier, err)
-		}
+		c.releaseClaim(relCtx, r.IssueID, r.Identifier)
 		// Revert the in-progress transition (best-effort) so tickets
 		// snap back to their source state for the next daemon start.
 		// Without this, an operator-triggered Ctrl+C would leave every

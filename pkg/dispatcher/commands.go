@@ -227,6 +227,66 @@ func (m cmdRunFinished) apply(c *Dispatcher, ctx context.Context) {
 	delete(c.state.tombstones, m.issueID)
 }
 
+// cmdDropRetry drops a pending retry entry. Posted by the off-actor finish
+// worker (runFinishWorker) when an exhausted run's give-up transition to
+// FailedState SUCCEEDS: finishRun optimistically scheduled the retry on the
+// actor as an in-memory re-dispatch guard for the worker's HTTP window, and
+// once the issue has actually landed in the terminal state that guard must
+// drop so the give-up is final (no retry). See ADR-028 Step 3.
+type cmdDropRetry struct {
+	issueID string
+}
+
+func (m cmdDropRetry) apply(c *Dispatcher, _ context.Context) {
+	if cur, ok := c.state.retries[m.issueID]; ok {
+		if cur.Timer != nil {
+			cur.Timer.Stop()
+		}
+		delete(c.state.retries, m.issueID)
+	}
+	c.fireSnapshot()
+}
+
+// finishKind selects which tracker transition the off-actor finish worker
+// performs in addition to the always-present Release. The actor decides the
+// kind synchronously from c.state (in finishRun) and the worker only executes
+// the chosen HTTP — it never reads c.state. See ADR-028 Step 3.
+type finishKind int
+
+const (
+	// finishCompleted: clean finish — maybeTransitionToCompleted, then Release.
+	finishCompleted finishKind = iota
+	// finishRevert: cancellation or a non-exhausted failure — revertTransition
+	// back to the source state (the retry, if any, was scheduled on the actor),
+	// then Release.
+	finishRevert
+	// finishGiveUp: exhausted failure — UpdateState to FailedState; on success
+	// post cmdDropRetry (drop the optimistically-scheduled guard) and Release;
+	// on failure keep the retry (revertTransition + Release), matching today's
+	// "board can't represent failed → preserve unbounded retry" fallback.
+	finishGiveUp
+)
+
+// finishPlan is the value-copy of everything the off-actor finish worker
+// (runFinishWorker) needs to run finishRun's tracker HTTP. It carries NO
+// pointers into c.state or the *runningEntry — the actor computes it
+// synchronously, captures the immutable inputs, and the worker reads only
+// these fields plus dispatcher-immutables (c.tracker, c.logger, c.hostMarker).
+// This is the anti-race boundary for ADR-028 Step 3: cfg-derived transition
+// targets are captured here on the actor, never re-read by the worker.
+type finishPlan struct {
+	kind           finishKind
+	issueID        string
+	identifier     string
+	runningTarget  string // cfg.Agent.RunningState snapshot at finish time
+	completedState string // cfg.Agent.CompletedState snapshot (clean finish only)
+	sourceState    string // r.TransitionedFromState (revert / give-up fallback)
+	failedState    string // cfg.Agent.FailedState snapshot (give-up only)
+	attemptCount   int    // r.Attempt+1, for give-up logging only
+	runID          string // for give-up logging only
+	runErrText     string // for give-up logging only
+}
+
 // finishRun is the actor-goroutine-side teardown for a running entry.
 // Idempotent — a second call (e.g. the worker eventually returns and
 // posts cmdRunFinished after refreshRunningStates already reaped the
@@ -279,32 +339,39 @@ func (c *Dispatcher) finishRun(ctx context.Context, issueID string, err error) {
 		return
 	}
 
-	// Always release the tracker claim — if the issue is still active
-	// on the tracker side, the next tick will re-pick it (unless we
-	// schedule a retry below).
-	//
-	// Detach the release from the caller's ctx: refreshRunningStates
-	// may invoke finishRun on the actor's ctx which is itself in the
-	// shutdown-cancel state, and we don't want the tracker.Release
-	// to short-circuit just because the dispatcher is winding down —
-	// a stuck "claimed" label on GitHub blocks the next dispatcher
-	// from re-picking the issue until the label is manually removed.
-	relCtx, relCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if relErr := c.tracker.Release(relCtx, issueID, c.hostMarker); relErr != nil &&
-		!errors.Is(relErr, tracker.ErrNotFound) &&
-		!errors.Is(relErr, tracker.ErrClaimConflict) {
-		c.logger.Warn("dispatcher: release %s: %v", r.Identifier, relErr)
-	}
-
-	currentTarget := c.cfg.Load().Agent.RunningState
+	// One cfg snapshot for the whole teardown: the plan's running/completed/
+	// failed-state targets, the honesty-guard log, and the give-up move all
+	// read from the same config, so a mid-finish Reload can't split the
+	// decision across two configs.
+	cfg := c.cfg.Load()
 	_ = ctx // caller ctx not used for the release; kept in signature for future audit hooks
 
 	// Stamp the run + workdir back onto the tracker issue so the studio
 	// can pivot from the kanban card to the run console / diff inspector.
 	// Best-effort: only native trackers implement this, and a transient
-	// disk failure shouldn't block the cleanup path.
+	// disk failure shouldn't block the cleanup path. Stays on the actor:
+	// SetLastRun is a native-tracker local write (a no-op for github/forgejo),
+	// not the blocking tracker HTTP that ADR-028 Step 3 offloads.
 	c.stampLastRun(issueID, r)
 
+	// Decide the outcome on the actor — all c.state mutation (retry
+	// scheduling, retries-clear) happens here, synchronously, and we capture
+	// the immutable inputs the tracker HTTP needs into a value-copy plan. The
+	// blocking tracker calls (Release + the chosen transition/revert) then run
+	// off the actor in runFinishWorker. See ADR-028 Step 3. The worker always
+	// does the transition FIRST and Release LAST: that keeps the tracker claim
+	// held (so ListCandidates filters the issue) until it has been moved to its
+	// final, mostly-non-eligible state — closing the re-dispatch window a
+	// release-first ordering would open now that the HTTP no longer runs
+	// atomically on the actor.
+	plan := finishPlan{
+		issueID:       issueID,
+		identifier:    r.Identifier,
+		runningTarget: cfg.Agent.RunningState,
+		// Always captured; only the revert + give-up-fallback paths read it,
+		// and it's harmlessly unused on the clean-finish path.
+		sourceState: r.TransitionedFromState,
+	}
 	switch {
 	case err == nil:
 		// Honesty guard: a "clean" finish with no commit produced nothing
@@ -318,7 +385,7 @@ func (c *Dispatcher) finishRun(ctx context.Context, issueID string, err error) {
 		// uncommitted (needs commit-and-finalize). Non-fatal: we still
 		// transition (reverting would loop the dispatcher), just visibly.
 		if c.runFinalCommit(r.RunID) == "" {
-			c.logger.Warn("dispatcher: %s finished cleanly but produced NO commit (run=%s) — nothing directly mergeable. Moving to %q anyway; inspect before merging (wrong bot for the task, or work left uncommitted → commit-and-finalize).", r.Identifier, r.RunID, c.cfg.Load().Agent.CompletedState)
+			c.logger.Warn("dispatcher: %s finished cleanly but produced NO commit (run=%s) — nothing directly mergeable. Moving to %q anyway; inspect before merging (wrong bot for the task, or work left uncommitted → commit-and-finalize).", r.Identifier, r.RunID, cfg.Agent.CompletedState)
 		} else {
 			c.logger.Info("dispatcher: %s finished cleanly (run=%s)", r.Identifier, r.RunID)
 		}
@@ -328,22 +395,20 @@ func (c *Dispatcher) finishRun(ctx context.Context, issueID string, err error) {
 		// state itself (e.g. docs-refresh → "review"). When the workflow
 		// did NOT move the state (most often because it lacks
 		// board.move capability — dispatcher_default is the
-		// archetypal case), an explicit move to CompletedState here
-		// prevents the next tick from re-picking the same issue:
-		// RunningState is marked eligible:true on the board (needed
-		// for crash-recovery), so without this transition a
-		// no-board-move workflow would loop indefinitely and burn
-		// model spend on every poll interval. Disabled when
-		// CompletedState is empty (Validate maps "none" to "") or
-		// when CompletedState == RunningState (the transition would
-		// be a no-op anyway).
+		// archetypal case), an explicit move to CompletedState (done by
+		// the worker via maybeTransitionToCompleted) prevents the next
+		// tick from re-picking the same issue: RunningState is marked
+		// eligible:true on the board (needed for crash-recovery), so
+		// without this transition a no-board-move workflow would loop
+		// indefinitely and burn model spend on every poll interval.
 		if cur, ok := c.state.retries[issueID]; ok {
 			if cur.Timer != nil {
 				cur.Timer.Stop()
 			}
 			delete(c.state.retries, issueID)
 		}
-		c.maybeTransitionToCompleted(relCtx, issueID, r.Identifier, currentTarget)
+		plan.kind = finishCompleted
+		plan.completedState = cfg.Agent.CompletedState
 		// NOTE: workspace teardown (incl. the before_remove hook) is NOT
 		// done here. It runs on the dispatch worker goroutine in runWorker,
 		// before postFinished — so a shell hook can't block the actor and
@@ -357,7 +422,7 @@ func (c *Dispatcher) finishRun(ctx context.Context, issueID string, err error) {
 		// safety check inside revertTransition skips when the workflow
 		// or operator already moved the state elsewhere.
 		c.logger.Info("dispatcher: %s cancelled (run=%s)", r.Identifier, r.RunID)
-		c.revertTransition(relCtx, issueID, r.Identifier, r.TransitionedFromState, currentTarget)
+		plan.kind = finishRevert
 	default:
 		// Non-cancellation failure → retry, unless the attempt ceiling is
 		// reached. On exhaustion, give up: move the issue to a terminal
@@ -366,58 +431,131 @@ func (c *Dispatcher) finishRun(ctx context.Context, issueID string, err error) {
 		// forever and silently bouncing a doomed ticket between its source
 		// and running states (burning model spend with no board signal).
 		c.logger.Warn("dispatcher: %s failed (run=%s): %v", r.Identifier, r.RunID, err)
-		if c.giveUpIfExhausted(relCtx, issueID, r, err) {
-			break
-		}
-		// Revert the in-progress transition so the next retry tick sees the
-		// issue eligible again from its source state. Without the revert,
-		// the issue would sit in `in_progress` (no longer in the eligible
-		// "ready" set) until the operator dragged it back.
-		c.revertTransition(relCtx, issueID, r.Identifier, r.TransitionedFromState, currentTarget)
+		// scheduleRetry runs on the actor in BOTH branches. In the exhausted
+		// branch it is OPTIMISTIC: the retry entry is the in-memory
+		// re-dispatch guard (isClaimed) that blocks a tick from re-picking
+		// the issue while the worker's give-up HTTP is in flight. The worker
+		// drops it (cmdDropRetry) iff the FailedState move succeeds; if the
+		// move is unavailable the retry stays, exactly reproducing today's
+		// giveUpIfExhausted fallback (board can't represent "failed" →
+		// preserve unbounded retry rather than freeze the ticket).
 		c.scheduleRetry(issueID, r, err)
+		if exhausted(cfg, r) {
+			plan.kind = finishGiveUp
+			plan.failedState = cfg.Agent.FailedState
+			plan.attemptCount = r.Attempt + 1
+			plan.runID = r.RunID
+			if err != nil {
+				plan.runErrText = err.Error()
+			}
+		} else {
+			plan.kind = finishRevert
+		}
 	}
-	relCancel()
+
+	c.launchFinish(plan)
 	c.fireSnapshot()
 }
 
-// giveUpIfExhausted ends the retry loop once an issue has reached the
-// configured attempt ceiling (cfg.Agent.MaxAttempts; 0/negative = no cap).
-// On give-up it moves the issue to a terminal FailedState (default
-// "blocked") so the failure is visible on the board and the issue stops
-// being eligible for re-dispatch, then drops any pending retry bookkeeping.
-//
-// Returns true when it took ownership of the terminal outcome. It returns
-// FALSE — deferring to the normal revert+retry path — when the cap is
-// disabled, attempts remain, FailedState is unset, or the terminal move is
-// unavailable (board doesn't define the state, tracker rejects / doesn't
-// support it, or a transient tracker error). That fallback is deliberate:
-// the cap must never strand an issue in a non-terminal-but-eligible state,
-// so on a board that can't represent "failed" we preserve the legacy
-// unbounded retry rather than freeze the ticket. Runs on the actor goroutine.
-func (c *Dispatcher) giveUpIfExhausted(ctx context.Context, issueID string, r *runningEntry, runErr error) bool {
-	cfg := c.cfg.Load()
+// exhausted reports whether a failing issue has reached the configured
+// attempt ceiling (cfg.Agent.MaxAttempts; 0/negative = no cap) AND the board
+// can represent a terminal FailedState. It is the pure in-memory gate of the
+// former giveUpIfExhausted — the actor calls it synchronously to decide
+// between the give-up and the normal retry path; the actual terminal move
+// (tracker UpdateState) runs off the actor in runFinishWorker. Returns false
+// when the cap is disabled, attempts remain, or FailedState is unset — in all
+// of which the issue must keep retrying. (Whether the terminal MOVE itself
+// then succeeds is decided by the worker: if the tracker rejects it, the
+// optimistically-scheduled retry is preserved, reproducing the legacy
+// "board can't represent failed → keep retrying" fallback.) Takes the caller's
+// cfg snapshot so the give-up gate and the FailedState move it guards read the
+// same config. Runs on the actor goroutine.
+func exhausted(cfg *Config, r *runningEntry) bool {
 	max := cfg.Agent.MaxAttempts
 	// r.Attempt is 0-indexed (0 = initial run), so r.Attempt+1 is the
 	// number of attempts made so far. Give up once that reaches the cap.
 	if max <= 0 || r.Attempt+1 < max {
 		return false
 	}
-	failed := cfg.Agent.FailedState
-	if failed == "" {
-		return false
+	return cfg.Agent.FailedState != ""
+}
+
+// launchFinish runs a finishPlan's tracker HTTP (Release + the chosen
+// transition/revert) on a short-lived goroutine OFF the actor and, for the
+// give-up-success case, posts cmdDropRetry back. The actor has already done
+// every c.state mutation (slot-free, retry/give-up bookkeeping) in finishRun;
+// the worker reads ONLY the value-copy plan plus dispatcher-immutables
+// (c.tracker, c.logger, c.hostMarker) — never c.state or c.cfg. Tracked on
+// workersWG so Stop() drains it; the cmdDropRetry send is guarded by c.stop
+// (via postCmd). Mirrors launchDiscovery (ADR-028 Step 2). See ADR-028 Step 3.
+func (c *Dispatcher) launchFinish(plan finishPlan) {
+	c.workersWG.Add(1)
+	go func() {
+		defer c.workersWG.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				c.logger.Error("dispatcher: panic in finish worker for %s: %v", plan.identifier, r)
+			}
+		}()
+		c.runFinishWorker(plan)
+	}()
+}
+
+// runFinishWorker executes a finishPlan off the actor goroutine. It performs
+// the chosen transition FIRST and Release LAST (see finishRun's plan comment
+// for the re-dispatch-window rationale), using a background-derived context so
+// the release/transition survive a run-context or shutdown cancellation — a
+// stuck "claimed" label on GitHub would otherwise block the next dispatcher
+// from re-picking the issue. Best-effort throughout: errors are logged, never
+// fatal, matching finishRun's prior on-actor behaviour.
+func (c *Dispatcher) runFinishWorker(plan finishPlan) {
+	if c.beforeFinishWorker != nil {
+		c.beforeFinishWorker(plan)
 	}
-	if err := c.tracker.UpdateState(ctx, issueID, failed); err != nil {
-		c.logger.Warn("dispatcher: %s exhausted %d attempts but the move to failed state %q failed (%v) — keeping retry behaviour", r.Identifier, r.Attempt+1, failed, err)
-		return false
-	}
-	if cur, ok := c.state.retries[issueID]; ok {
-		if cur.Timer != nil {
-			cur.Timer.Stop()
+
+	relCtx, relCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer relCancel()
+
+	switch plan.kind {
+	case finishCompleted:
+		c.maybeTransitionToCompleted(relCtx, plan.issueID, plan.identifier, plan.runningTarget, plan.completedState)
+	case finishRevert:
+		// Revert the in-progress transition so the next retry/dispatch tick
+		// sees the issue eligible again from its source state. Without it the
+		// issue would sit in `in_progress` (no longer eligible) until the
+		// operator dragged it back.
+		c.revertTransition(relCtx, plan.issueID, plan.identifier, plan.sourceState, plan.runningTarget)
+	case finishGiveUp:
+		if err := c.tracker.UpdateState(relCtx, plan.issueID, plan.failedState); err != nil {
+			// The board can't represent "failed" (state undefined, transition
+			// rejected, or a transient tracker error) — preserve the legacy
+			// unbounded retry rather than freeze the ticket: revert to the
+			// source state and KEEP the retry finishRun optimistically
+			// scheduled (no cmdDropRetry).
+			c.logger.Warn("dispatcher: %s exhausted %d attempts but the move to failed state %q failed (%v) — keeping retry behaviour", plan.identifier, plan.attemptCount, plan.failedState, err)
+			c.revertTransition(relCtx, plan.issueID, plan.identifier, plan.sourceState, plan.runningTarget)
+		} else {
+			// Terminal move succeeded — the give-up is final, so drop the
+			// optimistic retry guard the actor scheduled.
+			c.logger.Warn("dispatcher: %s gave up after %d attempts (run=%s): %s — moved to %q; clear the blocker or re-open the issue to retry", plan.identifier, plan.attemptCount, plan.runID, plan.runErrText, plan.failedState)
+			c.postCmd(cmdDropRetry{issueID: plan.issueID})
 		}
-		delete(c.state.retries, issueID)
 	}
-	c.logger.Warn("dispatcher: %s gave up after %d attempts (run=%s): %v — moved to %q; clear the blocker or re-open the issue to retry", r.Identifier, r.Attempt+1, r.RunID, runErr, failed)
-	return true
+
+	c.releaseClaim(relCtx, plan.issueID, plan.identifier)
+}
+
+// releaseClaim releases the tracker claim, tolerating the benign races where
+// the claim is already gone (ErrNotFound) or held by someone else
+// (ErrClaimConflict). Best-effort: any other error is logged at warn. Shared
+// by the finish worker; the issue is re-pickable by the next tick once this
+// returns (subject to the issue's final tracker state and any retry guard).
+func (c *Dispatcher) releaseClaim(ctx context.Context, issueID, identifier string) {
+	if err := c.tracker.Release(ctx, issueID, c.hostMarker); err != nil &&
+		!errors.Is(err, tracker.ErrNotFound) &&
+		!errors.Is(err, tracker.ErrClaimConflict) {
+		c.logger.Warn("dispatcher: release %s: %v", identifier, err)
+	}
 }
 
 // stampLastRun records the (run_id, workdir) pair on the tracker
@@ -465,9 +603,7 @@ func (c *Dispatcher) stampLastRun(issueID string, r *runningEntry) {
 // config.go; this helper is just the application path. Detached
 // ctx is the caller's relCtx so a winding-down dispatcher still
 // completes the move (parallels the Release path).
-func (c *Dispatcher) maybeTransitionToCompleted(ctx context.Context, issueID, identifier, runningTarget string) {
-	cfg := c.cfg.Load()
-	completed := cfg.Agent.CompletedState
+func (c *Dispatcher) maybeTransitionToCompleted(ctx context.Context, issueID, identifier, runningTarget, completed string) {
 	if completed == "" || completed == runningTarget {
 		return
 	}
