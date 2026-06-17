@@ -330,7 +330,13 @@ tasks:
       CGO_ENABLED: "0"
       ITERION_BIN: "{{.ROOT_DIR}}/iterion"
     cmds:
-      - watchexec -r -e go -w cmd -w pkg -w vendor -- sh -c 'go build -o {{.ROOT_DIR}}/iterion {{.CMD}} && exec {{.ROOT_DIR}}/iterion studio --no-browser --port 4891'
+      # NB: pass the script as a single quoted arg, NOT `sh -c '...'`. watchexec
+      # runs its command through a shell by default (`--shell` != none), so an
+      # explicit `sh -c '<script>'` gets its parts re-joined and re-shelled —
+      # the inner quoting is lost and only the bare word `go` survives as the
+      # script (→ `go` prints help, exit 2, backend never starts). Letting
+      # watchexec's own shell run the script keeps `&&`/`exec` working.
+      - watchexec -r -e go -w cmd -w pkg -w vendor -- 'go build -o {{.ROOT_DIR}}/iterion {{.CMD}} && exec {{.ROOT_DIR}}/iterion studio --no-browser --port 4891'
     interactive: true
 
   studio:dev:frontend:
@@ -696,7 +702,9 @@ tasks:
     desc: Hot-reload iterion in the cloud stack via watchexec rebuild + container restart
     deps: [cloud:up:deps]
     cmds:
-      - watchexec -r -e go -w cmd -w pkg -- sh -c 'docker compose -f docker-compose.cloud.yml up -d --build iterion-server'
+      # Single quoted arg, not `sh -c '...'` — see studio:dev:backend note
+      # (watchexec's default shell re-shells `sh -c`, losing the quoting).
+      - watchexec -r -e go -w cmd -w pkg -- 'docker compose -f docker-compose.cloud.yml up -d --build iterion-server'
 
   # --- Helm chart targets (plan §F T-36, T-39) --------------------
   chart:sync-version:
