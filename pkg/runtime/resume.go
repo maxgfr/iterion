@@ -220,6 +220,14 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 	}
 	defer sandboxCleanup()
 
+	// Pin the resume ctx onto runState now. execLoop also does this, but the
+	// delegate-pause branch below (cp.BackendName != "") calls reInvokeBackend
+	// — which emits events and SaveCheckpoint — BEFORE execLoop ever runs, and
+	// the selectEdgeRS error branch calls failRunErrWithCheckpoint. A nil
+	// rs.ctx is a no-op on the filesystem store but panics in the MongoDB
+	// driver (ctx.Done()) on cloud-mode resumes. Mirrors engine.go's execLoop.
+	rs.ctx = ctx
+
 	// When the pause originated from a delegate (an agent/judge that
 	// emitted _needs_interaction or called the native ask_user tool),
 	// the paused node still owes its work — re-invoke it with the
@@ -869,6 +877,17 @@ func coerceStringToFieldType(s string, t ir.FieldType) (interface{}, bool) {
 // re-asking. 5 is generous for legitimate multi-turn dialogues — most
 // real interactions resolve in 1–2 rounds.
 const maxInteractionDepth = 5
+
+// errInteractionHandledInline is an execLoop-internal control-flow sentinel.
+// When a node with interaction: llm / llm_or_human auto-answers, the inline
+// path (handleNeedsInteraction → handleInteractionLLM → reInvokeBackend) drives
+// the REST of the workflow to completion via its own execLoop and returns nil.
+// execLoopRunNode converts that nil into this sentinel so the outer execLoop
+// STOPS rather than falling through to execLoopAfterExec — which would
+// re-process the current node with a nil output and re-run every downstream
+// node a second time (overwriting outputs, emitting duplicate node_finished).
+// execLoop translates it back to nil; it never escapes the engine.
+var errInteractionHandledInline = errors.New("interaction handled inline")
 
 // handleNeedsInteraction is called when a delegate or LLM signals it needs
 // user input. The behavior depends on the node's InteractionMode:

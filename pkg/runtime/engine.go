@@ -994,6 +994,12 @@ func (e *Engine) execLoop(ctx context.Context, rs *runState, startNodeID string)
 		}
 
 		output, retry, err := e.execLoopRunNode(ctx, rs, currentNodeID, node)
+		if errors.Is(err, errInteractionHandledInline) {
+			// The interaction was auto-answered and the rest of the workflow
+			// already ran inline (see errInteractionHandledInline). Stop here;
+			// the run is complete (or already failed/paused via that path).
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -1200,7 +1206,16 @@ func (e *Engine) execLoopRunNode(ctx context.Context, rs *runState, currentNodeI
 		// Check if the delegate needs user interaction.
 		var needsInput *model.ErrNeedsInteraction
 		if errors.As(execErr, &needsInput) {
-			return nil, false, e.handleNeedsInteraction(ctx, rs, currentNodeID, node, needsInput, 0)
+			ierr := e.handleNeedsInteraction(ctx, rs, currentNodeID, node, needsInput, 0)
+			if ierr == nil {
+				// interaction: llm / llm_or_human auto-answered and
+				// reInvokeBackend already drove the rest of the workflow to
+				// completion (its own execLoop ran node post-processing and
+				// every downstream node). Signal execLoop to stop instead of
+				// re-running this node via execLoopAfterExec with a nil output.
+				ierr = errInteractionHandledInline
+			}
+			return nil, false, ierr
 		}
 		// Recovery dispatch (when wired via WithRecoveryDispatch):
 		// classify the error, look up a recipe, and either retry,

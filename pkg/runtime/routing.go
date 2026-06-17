@@ -411,19 +411,40 @@ func (e *Engine) execLLMRouterMulti(ctx context.Context, rs *runState, routerNod
 		return "", e.wrapContextErr(ctxErr)
 	}
 
-	// Determine convergence point.
+	// Determine convergence point. Prefer the one reported by successful
+	// branches; under best_effort, branches may legitimately diverge or each
+	// terminate at their own Done node — handle those exactly as execFanOut
+	// does rather than hard-erroring (which made any best_effort LLM-router
+	// workflow with terminal branches fail unconditionally at runtime).
 	convergenceNodeID := ""
+	isBestEffort := !cancelOnFirstFailure
 	for _, r := range results {
-		if r.joinNodeID != "" {
-			if convergenceNodeID == "" {
-				convergenceNodeID = r.joinNodeID
-			} else if convergenceNodeID != r.joinNodeID {
-				return "", fmt.Errorf("branches converge to different nodes: %s vs %s", convergenceNodeID, r.joinNodeID)
+		if r.joinNodeID == "" {
+			continue
+		}
+		if convergenceNodeID == "" {
+			convergenceNodeID = r.joinNodeID
+			continue
+		}
+		if convergenceNodeID != r.joinNodeID {
+			if isBestEffort {
+				if e.logger != nil {
+					e.logger.Warn("llm router fan_out from %s: branches converge to different nodes (%s vs %s in branch %s) — best_effort, keeping first",
+						routerNodeID, convergenceNodeID, r.joinNodeID, r.branchID)
+				}
+				continue
 			}
+			return "", fmt.Errorf("branches converge to different nodes: %s vs %s", convergenceNodeID, r.joinNodeID)
 		}
 	}
 	if convergenceNodeID == "" {
-		convergenceNodeID = e.findConvergencePoint(routerNodeID, fanEdges)
+		// All-done topology under best_effort: every selected branch ran to its
+		// own Done node without a shared convergence point and none failed.
+		// Mirror execFanOut's processConvergenceTerminal handoff.
+		if isBestEffort && allTerminatedAtDone(results) {
+			return e.processConvergenceTerminal(rs, results)
+		}
+		convergenceNodeID = llmPreComputedConvergence
 		if convergenceNodeID == "" {
 			return "", fmt.Errorf("no convergence point found after llm router fan-out from %s", routerNodeID)
 		}
