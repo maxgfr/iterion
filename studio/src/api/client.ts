@@ -82,7 +82,20 @@ export async function apiRequest<T>(fullPath: string, init?: RequestInit): Promi
   // 204 No Content (e.g. DELETE endpoints) has an empty body. Don't
   // try to parse it — return undefined and let the typed caller cast.
   if (res.status === 204) return undefined as unknown as T;
-  return res.json() as Promise<T>;
+  // A 2xx with a non-JSON body — e.g. the SPA index.html served for an
+  // unrouted /api path — would make res.json() throw a cryptic
+  // "JSON.parse: unexpected character at line 1 column 1". Surface a clear,
+  // actionable error instead. (The backend now returns a JSON 404 for such
+  // paths; this is defense-in-depth against any other non-JSON 2xx.)
+  try {
+    return (await res.json()) as T;
+  } catch {
+    const ct = res.headers.get("content-type") ?? "unknown";
+    throw new ApiError(
+      res.status,
+      `expected JSON from ${fullPath} but received ${ct} — the endpoint may be unavailable in this mode`,
+    );
+  }
 }
 
 // extractErrorMessage prefers a structured envelope field (`error` or

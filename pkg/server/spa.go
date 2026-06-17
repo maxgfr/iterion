@@ -16,11 +16,21 @@ import (
 func SPAHandler(sub fs.FS) http.Handler {
 	fileServer := http.FileServer(http.FS(sub))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		clean := path.Clean(r.URL.Path)
+		// Any /api/* request reaching this catch-all is a genuinely unrouted
+		// endpoint (e.g. a cloud-only admin route on a local-mode server). It
+		// must NOT fall back to the SPA shell: a JSON client would JSON.parse
+		// the returned index.html and die with a cryptic "unexpected character
+		// at line 1 column 1". Return an authoritative JSON 404 instead — this
+		// is the /api/ gate this handler's doc comment always promised.
+		if strings.HasPrefix(clean, "/api/") {
+			httpError(w, http.StatusNotFound, "no such API endpoint: %s", clean)
+			return
+		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-		clean := path.Clean(r.URL.Path)
 		if clean == "/" || clean == "." {
 			fileServer.ServeHTTP(w, r)
 			return

@@ -36,6 +36,11 @@ func TestSPAHandler(t *testing.T) {
 		{"unknown spa route falls back to index", "GET", "/runs/abc-xyz", http.StatusOK, "SHELL"},
 		{"deep unknown spa route falls back to index", "GET", "/projects/p1/runs/abc", http.StatusOK, "SHELL"},
 		{"HEAD on unknown route returns 200 no body", "HEAD", "/runs/abc-xyz", http.StatusOK, ""},
+		// Unrouted /api/* must be an authoritative 404, never the SPA shell —
+		// else a JSON client JSON.parses index.html and crashes (the
+		// /admin/orgs-in-local-mode bug). Covers GET and non-GET.
+		{"unrouted GET /api is 404 not shell", "GET", "/api/admin/orgs", http.StatusNotFound, "no such API endpoint"},
+		{"unrouted POST /api is 404 not shell", "POST", "/api/foo", http.StatusNotFound, "no such API endpoint"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
