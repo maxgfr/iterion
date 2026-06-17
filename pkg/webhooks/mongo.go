@@ -207,7 +207,9 @@ func (s *MongoCounter) Allow(ctx context.Context, tenantID, webhookID string, wh
 		whKey := "wh|" + tenantID + "|" + webhookID + "|" + m
 		ok, err := s.bump(ctx, whKey, lim.PerWebhookMonthly)
 		if err != nil || !ok {
-			_, _ = s.col.UpdateOne(ctx, bson.M{"_id": orgKey}, bson.M{"$inc": bson.M{"count": -1}})
+			// Detached ctx so a cancelled request still rolls back the org
+			// increment; otherwise the per-org monthly count leaks a unit.
+			_, _ = s.col.UpdateOne(context.WithoutCancel(ctx), bson.M{"_id": orgKey}, bson.M{"$inc": bson.M{"count": -1}})
 			return false, err
 		}
 	}

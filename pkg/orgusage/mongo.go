@@ -74,7 +74,10 @@ func (c *MongoCounter) AllowRun(ctx context.Context, tenantID string, when time.
 		deny = DenyCost
 	}
 	if deny != DenyNone {
-		_, _ = c.col.UpdateOne(ctx, bson.M{"_id": key}, bson.M{"$inc": bson.M{"runs": -1}})
+		// Detached ctx: a cancelled request must still release the
+		// optimistically-consumed quota unit, else a denied call leaves the
+		// monthly run counter permanently inflated.
+		_, _ = c.col.UpdateOne(context.WithoutCancel(ctx), bson.M{"_id": key}, bson.M{"$inc": bson.M{"runs": -1}})
 	}
 	return deny, nil
 }

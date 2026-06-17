@@ -552,9 +552,11 @@ func tunnel(a, b net.Conn) {
 	// bounded wait remains only as a last-ditch backstop so tunnel itself
 	// can never block forever on an exotic Conn whose SetDeadline is a
 	// no-op.
+	backstop := time.NewTimer(5 * time.Second)
+	defer backstop.Stop() // release immediately on the common <-done path; time.After would leak the timer for 5s per tunnel teardown
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-backstop.C:
 	}
 }
 

@@ -243,10 +243,17 @@ func (s *Store) EnsureSchema(ctx context.Context, eventsTTLDays int) error {
 	}
 	if eventsTTLDays > 0 {
 		// MongoDB requires the TTL to be on a top-level date field.
-		// Plan §D.2 names this `ts`.
+		// Plan §D.2 names this `ts`. expireAfterSeconds is an int32, so a very
+		// large TTL (> ~24855 days) would overflow the cast to a negative
+		// value; clamp to int32 max (~68 years) instead.
+		secs := int64(eventsTTLDays) * 86400
+		const maxTTLSeconds = int64(1<<31 - 1)
+		if secs > maxTTLSeconds {
+			secs = maxTTLSeconds
+		}
 		eventIdx = append(eventIdx, mongo.IndexModel{
 			Keys:    bson.D{{Key: "ts", Value: 1}},
-			Options: options.Index().SetName("events_ttl").SetExpireAfterSeconds(int32(eventsTTLDays * 86400)),
+			Options: options.Index().SetName("events_ttl").SetExpireAfterSeconds(int32(secs)),
 		})
 	}
 	_, err = s.events.Indexes().CreateMany(ctx, eventIdx)

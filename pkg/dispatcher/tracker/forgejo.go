@@ -391,7 +391,13 @@ func (a *ForgejoAdapter) do(ctx context.Context, method, path string, in any, ou
 	if err != nil {
 		return fmt.Errorf("forgejo: do: %w", err)
 	}
-	defer resp.Body.Close()
+	// Drain before close on every return path: the 404/409 cases below return
+	// without reading the body, which prevents the keep-alive connection from
+	// being reused (the transport can only reuse a fully-drained connection).
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
 		return ErrNotFound

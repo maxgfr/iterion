@@ -658,7 +658,9 @@ func redactedConfig(cfg *Config) *Config {
 
 func (m *Manager) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	var cfg Config
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+	// Cap the body: a dispatcher config is small, and an unbounded Decode lets
+	// a client stream arbitrary memory into the process.
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&cfg); err != nil {
 		WriteErr(w, http.StatusBadRequest, fmt.Errorf("parse body: %w", err))
 		return
 	}
