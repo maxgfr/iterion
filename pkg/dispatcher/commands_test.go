@@ -304,6 +304,22 @@ func TestDispatch_SkipsUnresolvableExplicitBot(t *testing.T) {
 	}
 }
 
+// pumpCandidates drains the cmdCandidates that tick()'s off-actor discovery
+// goroutine posts on c.cmds and applies it on the test goroutine. Since
+// ADR-028 Step 2 the candidate sort / dispatch-skip prune / dispatch loop
+// runs in cmdCandidates.apply rather than inline in tick(), so a direct
+// c.tick(ctx) drive must pump the resulting command to complete the cycle.
+// Only valid when no actor goroutine is running (the test owns c.cmds).
+func pumpCandidates(t *testing.T, c *Dispatcher, ctx context.Context) {
+	t.Helper()
+	select {
+	case command := <-c.cmds:
+		command.apply(c, ctx)
+	case <-time.After(2 * time.Second):
+		t.Fatal("no cmdCandidates posted by the off-actor discovery goroutine")
+	}
+}
+
 // TestDispatchSkip_SurfacedThenPruned drives the actor's tick directly:
 // an eligible ticket naming an unrouteable bot must surface a
 // dispatch-skip entry (so the operator can reconcile the silent stall),
@@ -348,7 +364,10 @@ func TestDispatchSkip_SurfacedThenPruned(t *testing.T) {
 	ctx := context.Background()
 
 	// Tick 1: the unrouteable ticket is an eligible candidate → skip recorded.
+	// Discovery runs off-actor (ADR-028 Step 2), so pump the cmdCandidates it
+	// posts to complete the dispatch decision on this goroutine.
 	c.tick(ctx)
+	pumpCandidates(t, c, ctx)
 	snap := c.buildSnapshot()
 	if len(snap.DispatchSkips) != 1 || snap.DispatchSkips[0].IssueID != "fake:ghost" {
 		t.Fatalf("after tick 1: DispatchSkips = %+v, want one fake:ghost entry", snap.DispatchSkips)
@@ -363,6 +382,7 @@ func TestDispatchSkip_SurfacedThenPruned(t *testing.T) {
 		t.Fatalf("UpdateState: %v", err)
 	}
 	c.tick(ctx)
+	pumpCandidates(t, c, ctx)
 	if snap := c.buildSnapshot(); len(snap.DispatchSkips) != 0 {
 		t.Fatalf("after tick 2: DispatchSkips = %+v, want pruned (empty)", snap.DispatchSkips)
 	}

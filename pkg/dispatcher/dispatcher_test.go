@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -20,6 +21,8 @@ type fakeTracker struct {
 	issues    map[string]*tracker.Issue
 	claims    map[string]string
 	listCalls atomic.Int64
+
+	panicListCandidates atomic.Bool
 
 	// Optional gate used by TestSnapshotLockFreeWhileActorBlocked. When
 	// listBlock is non-nil, the first ListCandidates call signals
@@ -50,6 +53,9 @@ func (f *fakeTracker) Name() string { return "fake" }
 
 func (f *fakeTracker) ListCandidates(_ context.Context) ([]tracker.Issue, error) {
 	f.listCalls.Add(1)
+	if f.panicListCandidates.Swap(false) {
+		panic("simulated ListCandidates panic")
+	}
 	if f.listBlock != nil {
 		if f.listEntered != nil {
 			f.listEnterOnce.Do(func() { close(f.listEntered) })
@@ -243,6 +249,124 @@ func TestSnapshotLockFreeWhileActorBlocked(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("Snapshot() blocked on the wedged actor — read path is not decoupled")
+	}
+}
+
+// TestActorResponsiveWhileDiscoveryInFlight proves ADR-028 Step 2: the
+// blocking tracker.ListCandidates call now runs on an off-actor discovery
+// goroutine, so the actor keeps processing commands while discovery is in
+// flight. We gate the fake tracker's ListCandidates on a channel, let the
+// kick-off tick dispatch discovery to the side goroutine, then — while that
+// call is still blocked — post a Reload through the actor's command channel
+// and assert its handler runs (republishing the snapshot with the new name)
+// within a tight deadline. Before Step 2 the actor was parked INSIDE
+// ListCandidates during the kick-off tick and could not apply cmdReload, so
+// the name would stay "test" until the gate released.
+func TestActorResponsiveWhileDiscoveryInFlight(t *testing.T) {
+	ft := newFakeTracker()
+	ft.add(tracker.Issue{ID: "fake:1", Identifier: "fake#1", Title: "go", WorkflowState: "ready"})
+	ft.listBlock = make(chan struct{})
+	ft.listEntered = make(chan struct{})
+
+	runner := &StubRunner{Handler: func(_ context.Context, _ DispatchSpec) error { return nil }}
+	// Long polling so only the kick-off tick fires while we hold the gate.
+	c := newTestDispatcher(t, runner, ft, time.Hour)
+
+	// Release the gate first (LIFO defer) so the off-actor discovery
+	// goroutine always unblocks — Stop() waits on it via workersWG — even
+	// if an assertion below fails.
+	defer c.Stop()
+	defer close(ft.listBlock)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.Start(ctx)
+
+	// Wait until the discovery goroutine is provably parked inside
+	// ListCandidates (i.e. the actor handed the I/O off and returned).
+	select {
+	case <-ft.listEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("discovery goroutine never entered the blocked ListCandidates call")
+	}
+
+	// While discovery is blocked, post a command through the actor's
+	// command channel. cmdReload.apply runs on the actor and republishes
+	// the snapshot, so a responsive actor flips the published name.
+	newCfg := *c.cfg.Load()
+	newCfg.Name = "reloaded"
+	c.Reload(&newCfg)
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if c.Snapshot().Name == "reloaded" {
+			return // actor processed a command concurrently with in-flight discovery
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("actor did not apply cmdReload while ListCandidates was in flight (snapshot name=%q) — discovery is not off-actor", c.Snapshot().Name)
+}
+
+// TestDiscoveryPanicPostsCandidateError proves the off-actor discovery
+// goroutine keeps the actor loop's panic-containment contract for tracker
+// adapters: a ListCandidates panic must be logged/reported back as a
+// cmdCandidates error so the actor clears discoveryInFlight and a later poll
+// can launch discovery again instead of wedging forever.
+func TestDiscoveryPanicPostsCandidateError(t *testing.T) {
+	ft := newFakeTracker()
+	ft.panicListCandidates.Store(true)
+	ft.add(tracker.Issue{ID: "fake:panic", Identifier: "fake#panic", Title: "go", WorkflowState: "ready"})
+
+	dispatched := make(chan struct{}, 1)
+	runner := &StubRunner{Handler: func(_ context.Context, _ DispatchSpec) error {
+		select {
+		case dispatched <- struct{}{}:
+		default:
+		}
+		return nil
+	}}
+	c := newTestDispatcher(t, runner, ft, time.Hour)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.Start(ctx)
+	defer c.Stop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if calls := ft.listCalls.Load(); calls >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if calls := ft.listCalls.Load(); calls < 1 {
+		t.Fatalf("initial ListCandidates call never happened")
+	}
+
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		snap := c.Snapshot()
+		if snap.LastTrackerError != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if errText := c.Snapshot().LastTrackerError; !strings.Contains(errText, "simulated ListCandidates panic") {
+		t.Fatalf("LastTrackerError = %q, want recovered panic", errText)
+	}
+
+	c.Refresh()
+
+	select {
+	case <-dispatched:
+		// A later poll launched a fresh ListCandidates call and dispatched
+		// the candidate, proving discoveryInFlight was not stranded by the
+		// recovered panic and the dispatcher stayed responsive.
+	case <-time.After(2 * time.Second):
+		t.Fatalf("dispatcher did not recover from ListCandidates panic and dispatch on a later poll; listCalls=%d snapshot=%+v", ft.listCalls.Load(), c.Snapshot())
+	}
+	if calls := ft.listCalls.Load(); calls < 2 {
+		t.Fatalf("ListCandidates calls = %d, want at least 2 (panic + later poll)", calls)
 	}
 }
 

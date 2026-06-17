@@ -37,3 +37,55 @@ An observed symptom: dashboard snapshot lag during polls, per-state concurrency 
 - Step 1 removes the most visible symptom (dashboard lag) at low risk and lock-free.
 - The durable direction is recorded; the heavy steps are deferred behind an explicit trigger.
 - Each future step composes along existing invariants (tracker = claim authority; explicit state machine).
+
+## 2026-06-17 — Step 2 implemented (candidate discovery offloaded)
+
+`tracker.ListCandidates` — "the slowest synchronous step inside the actor
+goroutine" — now runs on a short-lived goroutine (`launchDiscovery`,
+`pkg/dispatcher/loop.go`) instead of inline in `tick()`. The goroutine does
+only the HTTP/I/O and posts the result back as `cmdCandidates`
+(`pkg/dispatcher/commands.go`); the actor runs the unchanged in-memory
+sort / dispatch-skip prune / per-issue `dispatch` logic in
+`cmdCandidates.apply`. The actor keeps draining `cmdRunFinished` /
+`cmdEvent` / `cmdCancel` while a poll's discovery is in flight. Steps 3
+(`finishRun` Release/revert) and 4 (claim/dispatch offload) remain future
+work; `RefreshStates` is still synchronous on the actor (a later
+sub-step of discovery, deliberately not touched here).
+
+Implementation choices and their trade-offs:
+
+- **Single-flight via a plain `bool`, skip not queue.** The discovery
+  goroutine MUST NOT touch `c.state` (actor-only); the only shared
+  bookkeeping is `state.discoveryInFlight`, set in `tick()` and cleared in
+  `cmdCandidates.apply` — both on the actor goroutine, so a plain bool is
+  race-free (no atomic). When a tick fires while a discovery is still in
+  flight it *skips* launching a second one rather than queueing it. The
+  rejected alternative — let ticks stack discoveries — risks unbounded
+  goroutines + redundant tracker HTTP against a flaky/slow tracker, for no
+  gain: a poller only needs the *latest* candidate set, and the next tick
+  re-evaluates after the in-flight one posts.
+
+- **Re-check pause + cost-cap gates in `cmdCandidates.apply`.** Discovery
+  is now asynchronous, so the pause/cost-cap state the actor checked before
+  launching it can flip during the I/O window — the old fully-synchronous
+  `tick()` held them constant across the whole poll. We re-read the two
+  cheap gates before dispatching so we never dispatch into a state the
+  operator just paused/capped. Concurrency is *not* re-gated separately —
+  the dispatch loop's own `MaxConcurrent` / `hasSlot` / `isClaimed` checks
+  already re-validate it per issue. Accepted trade-off: candidates are a
+  beat stale by the time they're dispatched, which ADR §Step 2 already
+  declared tolerable (the tracker `Claim` CAS remains the conflict
+  authority).
+
+- **Discovery goroutines tracked on `workersWG`.** Reusing the existing
+  worker WaitGroup (rather than a new one) means `Stop()` already drains
+  them; the `cmds`-send is guarded by `c.stop` so a discovery that finishes
+  after the actor exits never leaks on a blocked send.
+
+Anti-façade test: `TestActorResponsiveWhileDiscoveryInFlight`
+(`pkg/dispatcher/dispatcher_test.go`) gates the fake tracker's
+`ListCandidates` on a channel, lets the kick-off tick hand discovery to the
+side goroutine, and asserts the actor applies a `cmdReload` posted on
+`c.cmds` (republishing the snapshot) within a tight deadline *while*
+`ListCandidates` is still blocked — which fails before this change because
+the actor was parked inside the synchronous call.

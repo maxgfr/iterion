@@ -47,65 +47,60 @@ func (c *Dispatcher) tick(ctx context.Context) {
 	}
 
 	// Skip the tracker call when we're already at the global cap —
-	// any candidate we'd see is unactionable, and ListCandidates is
-	// the slowest synchronous step inside the actor goroutine
-	// (external HTTP for github/forgejo; in-memory but still locked
-	// for native). Keeping the actor responsive for cmdRunFinished /
-	// cmdEvent matters more than discovering candidates we can't
-	// dispatch. Once an in-flight run finishes the next tick will
-	// pick up the work.
+	// any candidate we'd see is unactionable. Keeping the actor
+	// responsive for cmdRunFinished / cmdEvent matters more than
+	// discovering candidates we can't dispatch. Once an in-flight run
+	// finishes the next tick will pick up the work.
 	if len(c.state.running) >= cfg.Agent.MaxConcurrent {
 		c.fireSnapshot()
 		return
 	}
 
-	candidates, err := c.tracker.ListCandidates(ctx)
-	if err != nil {
-		c.logger.Warn("dispatcher: tracker ListCandidates: %v", err)
-		c.state.lastTrackerErr = err.Error()
-		c.state.lastTrackerErrAt = time.Now().UTC()
+	// Discovery (tracker.ListCandidates) is the slowest step a poll makes
+	// — external HTTP for github/forgejo. Run it OFF the actor goroutine
+	// (ADR-028 Step 2): a side goroutine does the I/O and posts the result
+	// back as cmdCandidates, where the actor runs the fast in-memory
+	// sort/prune/dispatch logic. While discovery is in flight the actor
+	// keeps draining cmdRunFinished / cmdEvent / cmdCancel instead of
+	// parking inside the HTTP call.
+	//
+	// Single-flight: skip launching a second discovery while one is still
+	// running. The in-flight one will post its candidates and the next
+	// tick re-evaluates. discoveryInFlight is set/cleared on the actor
+	// (here + cmdCandidates.apply), so no atomic is needed.
+	if c.state.discoveryInFlight {
 		c.fireSnapshot()
 		return
 	}
-	// Clear the sticky tracker error once a poll succeeds so the
-	// dashboard banner drops as soon as the operator fixes the token.
-	c.state.lastTrackerErr = ""
-	c.state.lastTrackerErrAt = time.Time{}
-	sortCandidates(candidates)
-
-	// Prune dispatch-skip entries whose issue is no longer an eligible,
-	// unclaimed candidate — it was claimed, closed, or dragged out of the
-	// ready lane, so the stale "won't dispatch" reason should disappear
-	// from the UI. Issues that re-skip below re-populate the map; ones
-	// that became dispatchable are cleared by dispatch() when they claim.
-	if len(c.state.dispatchSkips) > 0 {
-		live := make(map[string]struct{}, len(candidates))
-		for _, iss := range candidates {
-			live[iss.ID] = struct{}{}
-		}
-		for id := range c.state.dispatchSkips {
-			if _, ok := live[id]; !ok {
-				delete(c.state.dispatchSkips, id)
-			}
-		}
-	}
-
-	for _, iss := range candidates {
-		// Global cap full → no further candidate can run; stop scanning.
-		if len(c.state.running) >= cfg.Agent.MaxConcurrent {
-			break
-		}
-		// Per-state cap full → skip this candidate but keep scanning;
-		// other candidates may be in states that still have room.
-		if !c.hasSlot(iss.WorkflowState, cfg) {
-			continue
-		}
-		if c.state.isClaimed(iss.ID) {
-			continue
-		}
-		c.dispatch(ctx, iss)
-	}
+	c.state.discoveryInFlight = true
+	c.launchDiscovery(ctx)
 	c.fireSnapshot()
+}
+
+// launchDiscovery runs tracker.ListCandidates on a short-lived goroutine
+// OFF the actor and posts the result back as cmdCandidates. It MUST NOT
+// read or write c.state (running, slots, claims, retries, costCap) — those
+// are actor-only. It only reads cfg via the atomic pointer (indirectly,
+// through the tracker) and calls the tracker. Single-flight is guaranteed
+// by the actor's c.state.discoveryInFlight guard in tick().
+//
+// Tracked on workersWG so Stop() drains it; the send is guarded by c.stop
+// so a discovery that finishes after the actor has exited never leaks on a
+// blocked channel send. See ADR-028 Step 2.
+func (c *Dispatcher) launchDiscovery(ctx context.Context) {
+	c.workersWG.Add(1)
+	go func() {
+		defer c.workersWG.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				err := fmt.Errorf("panic in tracker ListCandidates: %v", r)
+				c.logger.Error("dispatcher: %v", err)
+				c.postCmd(cmdCandidates{err: err})
+			}
+		}()
+		issues, err := c.tracker.ListCandidates(ctx)
+		c.postCmd(cmdCandidates{issues: issues, err: err})
+	}()
 }
 
 // refreshCostCap recomputes the daily spend-cap status into state.costCap
@@ -712,8 +707,17 @@ func (c *Dispatcher) runWorker(ctx context.Context, entry *runningEntry, created
 }
 
 func (c *Dispatcher) postFinished(issueID string, err error) {
+	c.postCmd(cmdRunFinished{issueID: issueID, err: err})
+}
+
+// postCmd posts a command to the actor from a worker/discovery goroutine,
+// abandoning the send if the dispatcher is shutting down (c.stop closed) so
+// a late goroutine never leaks blocked on a full channel after the actor has
+// exited. The single choke point for the actor-bound blocking send shared by
+// postFinished, launchDiscovery, and the off-actor steps to come (ADR-028).
+func (c *Dispatcher) postCmd(command cmd) {
 	select {
-	case c.cmds <- cmdRunFinished{issueID: issueID, err: err}:
+	case c.cmds <- command:
 	case <-c.stop:
 	}
 }

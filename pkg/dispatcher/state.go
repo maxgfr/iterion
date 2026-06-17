@@ -37,6 +37,14 @@ type state struct {
 	// Snapshot so the studio dispatcher view can render the cap banner.
 	// Actor-goroutine-owned; no mutex needed.
 	costCap *CostCapView
+	// discoveryInFlight is true while a candidate-discovery goroutine
+	// (launchDiscovery → tracker.ListCandidates) is running off the actor
+	// and has not yet posted its cmdCandidates result back. tick() sets it
+	// before spawning the goroutine and cmdCandidates.apply clears it, so a
+	// second poll tick while one is in flight skips starting another (no
+	// overlapping discovery). Both writers run on the actor goroutine, so a
+	// plain bool is race-free — no atomic needed. See ADR-028 Step 2.
+	discoveryInFlight bool
 	// dispatchSkips records eligible issues the actor refused to claim
 	// because their explicit `bot` couldn't be resolved or has no
 	// dispatch route. Keyed by issueID. Without this, an honest-fail

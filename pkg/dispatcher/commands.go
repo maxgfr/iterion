@@ -94,6 +94,87 @@ type cmdRefresh struct{}
 
 func (cmdRefresh) apply(c *Dispatcher, ctx context.Context) { c.tick(ctx) }
 
+// cmdCandidates carries the result of an off-actor candidate discovery
+// (launchDiscovery → tracker.ListCandidates) back to the actor. The actor
+// runs the fast in-memory dispatch decision on the posted list — sort,
+// dispatch-skip prune, per-issue cap checks + dispatch — keeping the
+// blocking ListCandidates HTTP off the actor goroutine. See ADR-028 Step 2.
+type cmdCandidates struct {
+	issues []tracker.Issue
+	err    error
+}
+
+func (m cmdCandidates) apply(c *Dispatcher, ctx context.Context) {
+	// The discovery goroutine has returned; let the next tick start a fresh
+	// one. Cleared first so an early return below (error / re-gate) doesn't
+	// strand the flag and wedge discovery forever.
+	c.state.discoveryInFlight = false
+
+	if m.err != nil {
+		c.logger.Warn("dispatcher: tracker ListCandidates: %v", m.err)
+		c.state.lastTrackerErr = m.err.Error()
+		c.state.lastTrackerErrAt = time.Now().UTC()
+		c.fireSnapshot()
+		return
+	}
+	// Clear the sticky tracker error once a poll succeeds so the
+	// dashboard banner drops as soon as the operator fixes the token.
+	c.state.lastTrackerErr = ""
+	c.state.lastTrackerErrAt = time.Time{}
+
+	// Discovery ran asynchronously, so the gates tick() checked before
+	// launching it may have flipped in the meantime. Re-check the cheap
+	// ones (pause + cost cap) so we don't dispatch into a state the
+	// operator just closed. Concurrency is re-validated per-issue by the
+	// dispatch loop's MaxConcurrent / hasSlot checks below.
+	cfg := c.cfg.Load()
+	if c.paused.Load() {
+		c.fireSnapshot()
+		return
+	}
+	if cc := c.state.costCap; cc != nil && cc.Exceeded {
+		c.fireSnapshot()
+		return
+	}
+
+	candidates := m.issues
+	sortCandidates(candidates)
+
+	// Prune dispatch-skip entries whose issue is no longer an eligible,
+	// unclaimed candidate — it was claimed, closed, or dragged out of the
+	// ready lane, so the stale "won't dispatch" reason should disappear
+	// from the UI. Issues that re-skip below re-populate the map; ones
+	// that became dispatchable are cleared by dispatch() when they claim.
+	if len(c.state.dispatchSkips) > 0 {
+		live := make(map[string]struct{}, len(candidates))
+		for _, iss := range candidates {
+			live[iss.ID] = struct{}{}
+		}
+		for id := range c.state.dispatchSkips {
+			if _, ok := live[id]; !ok {
+				delete(c.state.dispatchSkips, id)
+			}
+		}
+	}
+
+	for _, iss := range candidates {
+		// Global cap full → no further candidate can run; stop scanning.
+		if len(c.state.running) >= cfg.Agent.MaxConcurrent {
+			break
+		}
+		// Per-state cap full → skip this candidate but keep scanning;
+		// other candidates may be in states that still have room.
+		if !c.hasSlot(iss.WorkflowState, cfg) {
+			continue
+		}
+		if c.state.isClaimed(iss.ID) {
+			continue
+		}
+		c.dispatch(ctx, iss)
+	}
+	c.fireSnapshot()
+}
+
 // cmdReload swaps in a new validated config.
 type cmdReload struct {
 	cfg *Config

@@ -73,12 +73,14 @@ type Dispatcher struct {
 	stopOnce  sync.Once
 	stop      chan struct{}
 	done      chan struct{}
-	// workersWG counts active worker goroutines spawned by runWorker.
-	// Stop() blocks on this AFTER the actor exits, so the EngineRunner
-	// the workers still reference isn't released until they've all
-	// returned — closing the F-CD-1 window where Runner.Close ran
-	// while workers were still inside Runner.Dispatch reading the
-	// extracted bundle dir.
+	// workersWG counts active goroutines spawned by the actor: the dispatch
+	// workers (runWorker) and the off-actor candidate-discovery goroutines
+	// (launchDiscovery, ADR-028 Step 2). Stop() blocks on this AFTER the
+	// actor exits, so the EngineRunner the workers still reference isn't
+	// released until they've all returned — closing the F-CD-1 window where
+	// Runner.Close ran while workers were still inside Runner.Dispatch
+	// reading the extracted bundle dir. Discovery goroutines guard their
+	// cmds send on c.stop, so they too drain promptly once the actor exits.
 	workersWG sync.WaitGroup
 
 	// paused, when true, makes tick() skip new dispatches without
