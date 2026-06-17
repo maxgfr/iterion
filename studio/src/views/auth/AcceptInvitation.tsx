@@ -121,7 +121,7 @@ export default function AcceptInvitation() {
             <button
               onClick={() => void accept()}
               disabled={busy}
-              className="w-full bg-fg-accent text-surface-0 rounded px-3 py-2 font-medium disabled:opacity-50 mt-3"
+              className="w-full bg-accent text-fg-onAccent rounded px-3 py-2 font-medium disabled:opacity-50 mt-3"
             >
               {busy ? "Joining…" : `Join ${info.team_name}`}
             </button>

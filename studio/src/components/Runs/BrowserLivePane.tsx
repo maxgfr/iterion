@@ -230,7 +230,7 @@ export default function BrowserLivePane({ runId, sessionId }: BrowserLivePanePro
             CDP connection failed: {errorMsg}
           </div>
         ) : status === "connecting" ? (
-          <div className="p-6 text-center text-sm text-text-2">
+          <div className="p-6 text-center text-sm text-fg-muted">
             Connecting to Chromium…
           </div>
         ) : null}
@@ -248,7 +248,7 @@ export default function BrowserLivePane({ runId, sessionId }: BrowserLivePanePro
           }`}
         />
       </div>
-      <div className="border-t border-border-default px-3 py-1 text-[11px] text-text-2 flex items-center gap-2">
+      <div className="border-t border-border-default px-3 py-1 text-[11px] text-fg-muted flex items-center gap-2">
         <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
         live · session {sessionId.slice(0, 8)}
         {frameSize ? ` · ${frameSize.w}×${frameSize.h}` : null}

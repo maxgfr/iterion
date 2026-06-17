@@ -152,7 +152,7 @@ export default function BindingsTab({ teamID, canManage }: Props) {
           }
         />
       ) : (
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs uppercase tracking-wider text-fg-muted text-left">
             <tr>
               <th className="px-2 py-1">Workflow name</th>
@@ -216,7 +216,7 @@ export default function BindingsTab({ teamID, canManage }: Props) {
               );
             })}
           </tbody>
-        </table>
+        </table></div>
       )}
 
       {(creating || editing) && activeBot && (

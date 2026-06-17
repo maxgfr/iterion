@@ -154,7 +154,7 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
           }
         />
       ) : (
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs uppercase tracking-wider text-fg-muted text-left">
             <tr>
               <th className="px-2 py-1">Name</th>
@@ -224,7 +224,7 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
 
       {creating && (
@@ -691,7 +691,7 @@ function DeliveriesDrawer({
       ) : deliveries.length === 0 ? (
         <EmptyState message="No deliveries yet. Push an event from the forge to see it appear here." />
       ) : (
-        <table className="w-full text-xs">
+        <div className="overflow-x-auto"><table className="w-full text-xs">
           <thead className="text-fg-muted text-left">
             <tr>
               <th className="px-2 py-1">Status</th>
@@ -719,7 +719,7 @@ function DeliveriesDrawer({
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </Dialog>
   );

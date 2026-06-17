@@ -73,7 +73,7 @@ export default function SettingsDrawer({ open, onClose, onSaved }: Props) {
                 Cancel
               </button>
               <button
-                className="rounded bg-accent px-2 py-1 text-xs text-on-accent hover:opacity-90 disabled:opacity-50"
+                className="rounded bg-accent px-2 py-1 text-xs text-fg-onAccent hover:opacity-90 disabled:opacity-50"
                 disabled={!cfg || saving}
                 onClick={() => void onSave()}
               >
@@ -533,7 +533,8 @@ function KVTable({
           />
           <button
             type="button"
-            className="text-xs text-red-300 hover:underline"
+            aria-label={k ? `Remove ${k}` : "Remove row"}
+            className="text-xs text-danger-fg hover:underline"
             onClick={() => remove(k)}
           >
             ×

@@ -170,9 +170,9 @@ function FileList({ files, selectedPath, onSelect }: FileListProps) {
                     <span className="text-fg-subtle">(binary)</span>
                   ) : (
                     <>
-                      <span className="text-emerald-500">+{f.added}</span>
+                      <span className="text-success-fg">+{f.added}</span>
                       <span className="text-fg-subtle"> | </span>
-                      <span className="text-rose-500">-{f.deleted}</span>
+                      <span className="text-danger-fg">-{f.deleted}</span>
                     </>
                   )}
                 </span>
@@ -263,11 +263,11 @@ function CommitFileDiff({ runId, sha, path }: CommitFileDiffProps) {
 }
 
 const STATUS_CLASS: Record<string, string> = {
-  M: "text-amber-500",
-  A: "text-emerald-500",
-  D: "text-rose-500",
-  R: "text-sky-500",
-  "??": "text-emerald-400/70",
+  M: "text-warning-fg",
+  A: "text-success-fg",
+  D: "text-danger-fg",
+  R: "text-info-fg",
+  "??": "text-success-fg/70",
 };
 
 function StatusDot({ status }: { status: RunFileStatus }) {

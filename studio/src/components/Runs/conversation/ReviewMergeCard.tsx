@@ -130,7 +130,7 @@ export default function ReviewMergeCard({ runId, message }: Props) {
       {/* Continue the dialogue */}
       <div className="space-y-1">
         <textarea
-          className="w-full rounded border border-border bg-bg-default px-2 py-1 text-[12px] text-fg-default"
+          className="w-full rounded border border-border-default bg-surface-0 px-2 py-1 text-[12px] text-fg-default"
           rows={2}
           placeholder="Reply to the reviewer (e.g. what you tested, what you saw)…"
           value={reply}
@@ -148,12 +148,12 @@ export default function ReviewMergeCard({ runId, message }: Props) {
       </div>
 
       {/* Merge controls */}
-      <div className="space-y-2 border-t border-border pt-2">
+      <div className="space-y-2 border-t border-border-default pt-2">
         {!noMerge && (
           <div className="flex items-center gap-2 text-[11px]">
             <label className="text-fg-muted">Strategy</label>
             <select
-              className="rounded border border-border bg-bg-default px-1.5 py-0.5 text-[11px] text-fg-default"
+              className="rounded border border-border-default bg-surface-0 px-1.5 py-0.5 text-[11px] text-fg-default"
               value={strategy}
               onChange={(e) => setStrategy(e.target.value)}
               disabled={busy}
@@ -168,7 +168,7 @@ export default function ReviewMergeCard({ runId, message }: Props) {
         )}
         {!noMerge && strategy === "squash" && (
           <textarea
-            className="w-full rounded border border-border bg-bg-default px-2 py-1 text-[11px] font-mono text-fg-default"
+            className="w-full rounded border border-border-default bg-surface-0 px-2 py-1 text-[11px] font-mono text-fg-default"
             rows={2}
             placeholder="(optional) squash commit message — defaults to the run's commits"
             value={commitMsg}

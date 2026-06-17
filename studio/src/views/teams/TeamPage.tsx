@@ -235,7 +235,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
             <button
               type="submit"
               disabled={busy}
-              className="bg-fg-accent text-surface-0 rounded px-3 py-2 text-sm disabled:opacity-50"
+              className="bg-accent text-fg-onAccent rounded px-3 py-2 text-sm disabled:opacity-50"
             >
               Send invite
             </button>
@@ -270,7 +270,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
 
       <section>
         <h3 className="font-medium mb-2">Members</h3>
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs uppercase tracking-wider text-fg-muted text-left">
             <tr>
               <th className="px-2 py-1">Email</th>
@@ -311,7 +311,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </section>
 
       <section>
@@ -319,7 +319,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
         {invs.length === 0 ? (
           <div className="text-fg-muted text-sm">None.</div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full text-sm">
             <thead className="text-xs uppercase tracking-wider text-fg-muted text-left">
               <tr>
                 <th className="px-2 py-1">Email</th>
@@ -346,7 +346,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       </section>
     </div>

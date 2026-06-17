@@ -121,7 +121,7 @@ export default function UsersAdminPage() {
         )}
 
         <section className="bg-surface-1 border border-border-subtle rounded overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full text-sm">
             <thead className="text-left text-fg-muted border-b border-border-subtle">
               <tr>
                 <th className="px-3 py-2 font-medium">Email</th>
@@ -144,7 +144,7 @@ export default function UsersAdminPage() {
                   </td>
                   <td className="px-3 py-2">
                     {u.is_super_admin ? (
-                      <span className="text-fg-warn text-xs">yes</span>
+                      <span className="text-warning-fg text-xs">yes</span>
                     ) : (
                       <span className="text-fg-muted text-xs">no</span>
                     )}
@@ -175,7 +175,7 @@ export default function UsersAdminPage() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="text-fg-warn"
+                        className="text-warning-fg"
                         disabled={guardSelfDemote(u) != null}
                         title={guardSelfDemote(u) ?? "Revoke super-admin"}
                         onClick={() => setConfirm({ user: u, action: "revoke" })}
@@ -186,7 +186,7 @@ export default function UsersAdminPage() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="text-fg-warn"
+                        className="text-warning-fg"
                         disabled={guardSelfDemote(u) != null}
                         title={guardSelfDemote(u) ?? "Grant super-admin"}
                         onClick={() => setConfirm({ user: u, action: "grant" })}
@@ -205,7 +205,7 @@ export default function UsersAdminPage() {
                 </tr>
               )}
             </tbody>
-          </table>
+          </table></div>
         </section>
 
         <div className="flex justify-between items-center">
@@ -250,9 +250,9 @@ export default function UsersAdminPage() {
 
 function StatusPill({ status }: { status: UserStatus }) {
   const variant: Record<UserStatus, string> = {
-    active: "text-fg-success",
+    active: "text-success-fg",
     disabled: "text-danger",
-    pending_password_change: "text-fg-warn",
+    pending_password_change: "text-warning-fg",
   };
   return <span className={`text-xs ${variant[status] ?? ""}`}>{status}</span>;
 }

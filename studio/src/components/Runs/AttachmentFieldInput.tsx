@@ -142,7 +142,7 @@ export default function AttachmentFieldInput({
       )}
 
       {showProgress && (
-        <div className="h-1 w-full bg-bg-subtle rounded">
+        <div className="h-1 w-full bg-surface-2 rounded">
           <div
             className="h-1 bg-accent rounded transition-[width] duration-150"
             style={{ width: `${Math.round((value!.progress ?? 0) * 100)}%` }}

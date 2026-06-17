@@ -124,7 +124,7 @@ export default function ApiKeysPanel({ team }: Props) {
         {canManage && (
           <button
             onClick={() => setShowAdd((v) => !v)}
-            className="bg-fg-accent text-surface-0 rounded px-3 py-1.5 text-sm"
+            className="bg-accent text-fg-onAccent rounded px-3 py-1.5 text-sm"
           >
             {showAdd ? "Cancel" : "Add key"}
           </button>
@@ -180,7 +180,7 @@ export default function ApiKeysPanel({ team }: Props) {
           <button
             type="submit"
             disabled={adding}
-            className="bg-fg-accent text-surface-0 rounded px-3 py-1.5 text-sm disabled:opacity-50"
+            className="bg-accent text-fg-onAccent rounded px-3 py-1.5 text-sm disabled:opacity-50"
           >
             {adding ? "Saving…" : "Save key"}
           </button>
@@ -198,7 +198,7 @@ export default function ApiKeysPanel({ team }: Props) {
       ) : keys.length === 0 ? (
         <div className="text-fg-muted text-sm">No keys yet.</div>
       ) : (
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs uppercase tracking-wider text-fg-muted text-left">
             <tr>
               <th className="px-2 py-1">Provider</th>
@@ -242,7 +242,7 @@ export default function ApiKeysPanel({ team }: Props) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   );

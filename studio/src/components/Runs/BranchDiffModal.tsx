@@ -40,8 +40,8 @@ export default function BranchDiffModal({
             {files.length > 0 && (
               <span className="text-[11px] font-normal text-fg-subtle">
                 {files.length} file{files.length === 1 ? "" : "s"} ·{" "}
-                <span className="text-emerald-400">+{totalAdded}</span>{" "}
-                <span className="text-red-400">−{totalDeleted}</span>
+                <span className="text-success-fg">+{totalAdded}</span>{" "}
+                <span className="text-danger-fg">−{totalDeleted}</span>
               </span>
             )}
           </span>
@@ -74,8 +74,8 @@ export default function BranchDiffModal({
                       <span className="text-[10px] text-fg-subtle shrink-0">(binary)</span>
                     ) : (
                       <span className="text-[10px] shrink-0 tabular-nums">
-                        <span className="text-emerald-400">+{Math.max(0, f.added)}</span>{" "}
-                        <span className="text-red-400">−{Math.max(0, f.deleted)}</span>
+                        <span className="text-success-fg">+{Math.max(0, f.added)}</span>{" "}
+                        <span className="text-danger-fg">−{Math.max(0, f.deleted)}</span>
                       </span>
                     )}
                   </button>
@@ -110,16 +110,16 @@ function StatusGlyph({ status }: { status: string }) {
 function statusMeta(status: string): { ch: string; cls: string } {
   switch (status) {
     case "A":
-      return { ch: "A", cls: "text-emerald-400" };
+      return { ch: "A", cls: "text-success-fg" };
     case "D":
-      return { ch: "D", cls: "text-red-400" };
+      return { ch: "D", cls: "text-danger-fg" };
     case "R":
-      return { ch: "R", cls: "text-violet-400" };
+      return { ch: "R", cls: "text-info-fg" };
     case "??":
       return { ch: "?", cls: "text-fg-subtle" };
     case "M":
     default:
-      return { ch: "M", cls: "text-amber-400" };
+      return { ch: "M", cls: "text-warning-fg" };
   }
 }
 

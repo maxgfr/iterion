@@ -74,6 +74,7 @@ describe("a11y / primitives", () => {
         <Button variant="secondary" size="sm">Cancel</Button>
         <Button variant="ghost" size="sm">Skip</Button>
         <Button variant="danger" size="md">Delete</Button>
+        <Button variant="success" size="md">Go</Button>
         <Button variant="primary" size="md" disabled>Disabled</Button>
         <Button variant="primary" size="md" loading>Loading</Button>
       </div>,

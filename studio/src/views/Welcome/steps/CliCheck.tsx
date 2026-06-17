@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 
 import { Badge, Button } from "@/components/ui";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 
 import { desktop, type CLIStatus } from "@/lib/desktopBridge";
+import { errorMessage } from "@/lib/errorHints";
 
 interface Props {
   onNext: () => void;
@@ -11,6 +13,7 @@ interface Props {
 
 export default function CliCheck({ onNext, onBack }: Props) {
   const [statuses, setStatuses] = useState<CLIStatus[] | null>(null);
+  const [detectError, setDetectError] = useState<string | null>(null);
 
   useEffect(() => {
     desktop
@@ -18,6 +21,7 @@ export default function CliCheck({ onNext, onBack }: Props) {
       .then(setStatuses)
       .catch((err) => {
         console.error(err);
+        setDetectError(errorMessage(err));
         setStatuses([]);
       });
   }, []);
@@ -30,6 +34,12 @@ export default function CliCheck({ onNext, onBack }: Props) {
         <strong>optional</strong> — Iterion's built-in claw backend works
         without any of them.
       </p>
+      {detectError && (
+        <InlineBanner tone="warning" layout="inline">
+          Couldn't check for installed tools ({detectError}). You can continue —
+          the built-in claw backend doesn't need any of them.
+        </InlineBanner>
+      )}
       {statuses === null ? (
         <p>Detecting…</p>
       ) : (

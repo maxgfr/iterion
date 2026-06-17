@@ -115,7 +115,7 @@ export default function EdgeForm({ edge, edgeIndex, workflowName }: Props) {
               <button
                 type="button"
                 className={`px-2 py-0.5 rounded ${
-                  !when.expr ? "bg-accent text-on-accent" : "bg-surface-2 hover:bg-surface-3"
+                  !when.expr ? "bg-accent text-fg-onAccent" : "bg-surface-2 hover:bg-surface-3"
                 }`}
                 onClick={() =>
                   setWhen({
@@ -129,7 +129,7 @@ export default function EdgeForm({ edge, edgeIndex, workflowName }: Props) {
               <button
                 type="button"
                 className={`px-2 py-0.5 rounded ${
-                  when.expr ? "bg-accent text-on-accent" : "bg-surface-2 hover:bg-surface-3"
+                  when.expr ? "bg-accent text-fg-onAccent" : "bg-surface-2 hover:bg-surface-3"
                 }`}
                 onClick={() => setWhen({ expr: when.expr ?? "" })}
                 title="Switch to a raw boolean expression (e.g. approved && loop.l.previous_output.x)"

@@ -115,7 +115,7 @@ export default function ForcedPasswordChange() {
           <button
             type="submit"
             disabled={busy}
-            className="w-full bg-fg-accent text-surface-0 rounded px-3 py-2 font-medium disabled:opacity-50"
+            className="w-full bg-accent text-fg-onAccent rounded px-3 py-2 font-medium disabled:opacity-50"
           >
             {busy ? "Working…" : "Set new password & sign in"}
           </button>

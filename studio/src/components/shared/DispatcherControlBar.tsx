@@ -5,6 +5,7 @@ import {
   dispatcherPillMeta,
   type DispatcherPillState,
 } from "@/components/shared/dispatcherPillMeta";
+import { useConfirm } from "@/hooks/useConfirm";
 
 interface Props {
   /** Called when the operator clicks the "Settings" button. */
@@ -54,6 +55,18 @@ export default function DispatcherControlBar({ onOpenSettings, pollIntervalMs = 
     [],
   );
 
+  const { confirm, dialog } = useConfirm();
+  const stopWithConfirm = useCallback(async () => {
+    const ok = await confirm({
+      title: "Stop the dispatcher?",
+      message:
+        "This disposes the dispatcher and clears its eligible queue. You'll need to Start it again to resume polling.",
+      confirmLabel: "Stop",
+      confirmVariant: "danger",
+    });
+    if (ok) void guard(dispatcher.stop);
+  }, [confirm, guard]);
+
   const pill = renderPill(status, error);
   const state = status?.state ?? "idle";
   const hasConfig = status?.has_config ?? false;
@@ -62,7 +75,7 @@ export default function DispatcherControlBar({ onOpenSettings, pollIntervalMs = 
     <div className="flex items-center gap-2 border-b border-border-default bg-surface-1 px-4 py-2 text-xs">
       {pill}
       {status?.last_error && (
-        <span className="ml-2 max-w-[400px] truncate text-red-300" title={status.last_error}>
+        <span className="ml-2 max-w-[400px] truncate text-danger-fg" title={status.last_error}>
           ⚠ {status.last_error}
         </span>
       )}
@@ -71,6 +84,7 @@ export default function DispatcherControlBar({ onOpenSettings, pollIntervalMs = 
           <button
             className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
             disabled={busy || !hasConfig}
+            aria-label="Start the dispatcher"
             title={hasConfig ? "Start the dispatcher" : "Save a config in Settings first"}
             onClick={() => void guard(dispatcher.start)}
           >
@@ -82,6 +96,7 @@ export default function DispatcherControlBar({ onOpenSettings, pollIntervalMs = 
             <button
               className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               disabled={busy}
+              aria-label="Pause the dispatcher"
               onClick={() => void guard(dispatcher.pause)}
             >
               ⏸ Pause
@@ -89,7 +104,8 @@ export default function DispatcherControlBar({ onOpenSettings, pollIntervalMs = 
             <button
               className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               disabled={busy}
-              onClick={() => void guard(dispatcher.stop)}
+              aria-label="Stop the dispatcher"
+              onClick={() => void stopWithConfirm()}
             >
               ■ Stop
             </button>
@@ -100,6 +116,7 @@ export default function DispatcherControlBar({ onOpenSettings, pollIntervalMs = 
             <button
               className="rounded bg-accent px-2 py-1 text-fg-onAccent hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={busy}
+              aria-label="Resume the dispatcher"
               onClick={() => void guard(dispatcher.resume)}
             >
               ▶ Resume
@@ -107,7 +124,8 @@ export default function DispatcherControlBar({ onOpenSettings, pollIntervalMs = 
             <button
               className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               disabled={busy}
-              onClick={() => void guard(dispatcher.stop)}
+              aria-label="Stop the dispatcher"
+              onClick={() => void stopWithConfirm()}
             >
               ■ Stop
             </button>
@@ -115,11 +133,13 @@ export default function DispatcherControlBar({ onOpenSettings, pollIntervalMs = 
         )}
         <button
           className="rounded border border-border-default px-2 py-1 hover:bg-surface-2"
+          aria-label="Dispatcher settings"
           onClick={onOpenSettings}
         >
           ⚙ Settings
         </button>
       </div>
+      {dialog}
     </div>
   );
 }

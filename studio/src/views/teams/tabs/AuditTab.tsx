@@ -123,7 +123,7 @@ export default function AuditTab({ teamID, canManage }: Props) {
       {events.length === 0 && !loading ? (
         <EmptyState message="No events for this filter." />
       ) : (
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs uppercase tracking-wider text-fg-muted text-left">
             <tr>
               <th className="px-2 py-1">When</th>
@@ -160,7 +160,7 @@ export default function AuditTab({ teamID, canManage }: Props) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
 
       {nextOffset != null && (

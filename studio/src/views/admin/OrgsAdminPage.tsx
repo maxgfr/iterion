@@ -106,7 +106,7 @@ export default function OrgsAdminPage() {
             <button
               type="submit"
               disabled={busy}
-              className="bg-fg-accent text-surface-0 rounded px-3 py-2 text-sm disabled:opacity-50"
+              className="bg-accent text-fg-onAccent rounded px-3 py-2 text-sm disabled:opacity-50"
             >
               Create
             </button>
@@ -114,7 +114,7 @@ export default function OrgsAdminPage() {
         </section>
 
         <section className="bg-surface-1 border border-border-subtle rounded overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full text-sm">
             <thead className="text-left text-fg-muted border-b border-border-subtle">
               <tr>
                 <th className="px-3 py-2 font-medium">Name</th>
@@ -143,7 +143,7 @@ export default function OrgsAdminPage() {
                           ? "text-danger"
                           : o.status === "read_only"
                             ? "text-fg-muted"
-                            : "text-fg-success"
+                            : "text-success-fg"
                       }
                     >
                       {o.status}
@@ -165,7 +165,7 @@ export default function OrgsAdminPage() {
                 </tr>
               )}
             </tbody>
-          </table>
+          </table></div>
         </section>
       </div>
 

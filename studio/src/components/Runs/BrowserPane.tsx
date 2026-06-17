@@ -201,7 +201,7 @@ export default function BrowserPane({
             href={browser.currentUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs text-text-2 underline hover:text-text-1"
+            className="text-xs text-fg-muted underline hover:text-fg-default"
             title="Open in a new tab — useful when the target site forbids embedding"
           >
             open ↗
@@ -213,7 +213,7 @@ export default function BrowserPane({
             setDraftUrl("");
             setManualPreviewUrl(null);
           }}
-          className="text-xs text-text-2 hover:text-text-1"
+          className="text-xs text-fg-muted hover:text-fg-default"
           title="Clear the current preview"
         >
           clear
@@ -242,7 +242,7 @@ export default function BrowserPane({
           <button
             type="button"
             onClick={() => onDockChange(dock === "bottom" ? "right" : "bottom")}
-            className="text-xs text-text-2 hover:text-text-1"
+            className="text-xs text-fg-muted hover:text-fg-default"
             title={
               dock === "bottom"
                 ? "Dock the browser pane on the right side"
@@ -270,7 +270,7 @@ export default function BrowserPane({
               className="h-full w-full object-contain"
             />
           ) : (
-            <div className="flex h-full items-center justify-center p-6 text-center text-sm text-text-2">
+            <div className="flex h-full items-center justify-center p-6 text-center text-sm text-fg-muted">
               No screenshot captured before seq {scrubSeq}. The workflow
               had not yet published a frame at this point.
             </div>
@@ -291,7 +291,7 @@ export default function BrowserPane({
             sandbox="allow-scripts allow-forms allow-popups"
           />
         ) : (
-          <div className="flex h-full items-center justify-center p-6 text-center text-sm text-text-2">
+          <div className="flex h-full items-center justify-center p-6 text-center text-sm text-fg-muted">
             No preview URL yet. The workflow can publish one with{" "}
             <code className="mx-1 rounded bg-surface-2 px-1 font-mono">
               [iterion] preview_url=&lt;url&gt;
@@ -308,7 +308,7 @@ export default function BrowserPane({
             : ""}
         </div>
       ) : sourceLabel ? (
-        <div className="border-t border-border-default px-3 py-1 text-[11px] text-text-2">
+        <div className="border-t border-border-default px-3 py-1 text-[11px] text-fg-muted">
           {sourceLabel}
           {browser.kind ? ` · ${browser.kind}` : null}
           {browser.scope === "internal" ? " · proxied" : null}

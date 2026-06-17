@@ -215,7 +215,7 @@ function SecretsTable({
   if (loading) return <EmptyState message="Loading…" />;
   if (secrets.length === 0) return <EmptyState message={emptyText} />;
   return (
-    <table className="w-full text-sm">
+    <div className="overflow-x-auto"><table className="w-full text-sm">
       <thead className="text-xs uppercase tracking-wider text-fg-muted text-left">
         <tr>
           <th className="px-2 py-1">Name</th>
@@ -260,7 +260,7 @@ function SecretsTable({
           </tr>
         ))}
       </tbody>
-    </table>
+    </table></div>
   );
 }
 

@@ -58,7 +58,7 @@ export default function SettingsPage() {
                 {user?.name && <div>Name: {user.name}</div>}
                 <div>Status: {user?.status}</div>
                 {user?.is_super_admin && (
-                  <div className="text-fg-warn">You are a platform super-admin.</div>
+                  <div className="text-warning-fg">You are a platform super-admin.</div>
                 )}
               </section>
               {showAuthTabs && <ChangePasswordSection />}
@@ -150,12 +150,12 @@ function ChangePasswordSection() {
           </InlineBanner>
         )}
         {ok && (
-          <div className="text-sm text-fg-success">Password updated.</div>
+          <div className="text-sm text-success-fg">Password updated.</div>
         )}
         <button
           type="submit"
           disabled={busy}
-          className="bg-fg-accent text-surface-0 rounded px-3 py-2 text-sm disabled:opacity-50"
+          className="bg-accent text-fg-onAccent rounded px-3 py-2 text-sm disabled:opacity-50"
         >
           {busy ? "Working…" : "Change password"}
         </button>

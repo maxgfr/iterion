@@ -10,6 +10,7 @@ import ConfirmDialog from "../shared/ConfirmDialog";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Spinner } from "@/components/ui/Spinner";
 import { DISCARD_CHANGES_PROMPT } from "@/lib/copy";
+import { toastError } from "@/lib/errorHints";
 import ShortcutsHelp from "../shared/ShortcutsHelp";
 import FilePicker from "../FilePicker/FilePicker";
 import {
@@ -173,6 +174,7 @@ export default function Toolbar() {
         setCurrentSource(text);
       } catch (err) {
         console.error("Import failed:", err);
+        toastError(addToast, err, "Import failed");
       }
       e.target.value = "";
     },

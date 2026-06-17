@@ -143,7 +143,7 @@ export default function OAuthConnections() {
                   </div>
                   <div className="text-sm">
                     {conn ? (
-                      <span className={expiring ? "text-fg-warn" : "text-fg-success"}>
+                      <span className={expiring ? "text-warning-fg" : "text-success-fg"}>
                         Connected
                         {conn.access_token_expires_at &&
                           ` · expires ${new Date(conn.access_token_expires_at).toLocaleString()}`}
@@ -169,7 +169,7 @@ export default function OAuthConnections() {
                       <button
                         type="submit"
                         disabled={busy}
-                        className="bg-fg-accent text-surface-0 rounded px-3 py-1.5 text-sm disabled:opacity-50"
+                        className="bg-accent text-fg-onAccent rounded px-3 py-1.5 text-sm disabled:opacity-50"
                       >
                         {busy ? "Sealing…" : "Save"}
                       </button>
@@ -192,7 +192,7 @@ export default function OAuthConnections() {
                         setEditingKind(kind);
                         setDraft("");
                       }}
-                      className="bg-fg-accent text-surface-0 rounded px-3 py-1.5 text-sm"
+                      className="bg-accent text-fg-onAccent rounded px-3 py-1.5 text-sm"
                     >
                       {conn ? "Update credentials" : "Connect"}
                     </button>

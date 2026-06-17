@@ -91,7 +91,7 @@ export default function TokensPanel() {
       ) : tokens.length === 0 ? (
         <EmptyState message="No tokens yet." />
       ) : (
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs uppercase tracking-wider text-fg-muted text-left">
             <tr>
               <th className="px-2 py-1">Name</th>
@@ -137,7 +137,7 @@ export default function TokensPanel() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
 
       {creating && (

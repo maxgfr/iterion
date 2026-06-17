@@ -84,7 +84,7 @@ export default function UserTeamChip() {
           <PopoverClose asChild>
             <button
               onClick={closeAfter(() => navigate("/admin/orgs"))}
-              className="w-full text-left px-2 py-1.5 rounded hover:bg-surface-2 text-fg-warn"
+              className="w-full text-left px-2 py-1.5 rounded hover:bg-surface-2 text-warning-fg"
             >
               Platform admin · Organizations
             </button>
@@ -92,7 +92,7 @@ export default function UserTeamChip() {
           <PopoverClose asChild>
             <button
               onClick={closeAfter(() => navigate("/admin/users"))}
-              className="w-full text-left px-2 py-1.5 rounded hover:bg-surface-2 text-fg-warn"
+              className="w-full text-left px-2 py-1.5 rounded hover:bg-surface-2 text-warning-fg"
             >
               Platform admin · Users
             </button>

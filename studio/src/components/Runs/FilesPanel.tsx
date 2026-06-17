@@ -287,7 +287,7 @@ function LargeChangesetHint({
   return (
     <div className="mb-1 flex flex-col gap-1 border-b border-border-default bg-surface-1 px-2 py-1.5 text-micro">
       <div className="text-fg-muted">
-        <span className="font-medium text-amber-500">
+        <span className="font-medium text-warning-fg">
           {count.toLocaleString()} changes
         </span>{" "}
         — folders collapsed to keep the view responsive; expand to drill in.
@@ -508,13 +508,13 @@ function FolderRow({
       {showAggregate && (
         <span className="ml-auto shrink-0 pl-2 text-[10px] tabular-nums">
           {folder.added > 0 && (
-            <span className="text-emerald-500">+{folder.added}</span>
+            <span className="text-success-fg">+{folder.added}</span>
           )}
           {folder.added > 0 && folder.deleted > 0 && (
             <span className="text-fg-subtle"> </span>
           )}
           {folder.deleted > 0 && (
-            <span className="text-rose-500">-{folder.deleted}</span>
+            <span className="text-danger-fg">-{folder.deleted}</span>
           )}
         </span>
       )}
@@ -569,9 +569,9 @@ function FileRow({
             <span className="text-fg-subtle">(binary)</span>
           ) : (
             <>
-              <span className="text-emerald-500">+{f.added}</span>
+              <span className="text-success-fg">+{f.added}</span>
               <span className="text-fg-subtle"> | </span>
-              <span className="text-rose-500">-{f.deleted}</span>
+              <span className="text-danger-fg">-{f.deleted}</span>
             </>
           )}
         </span>
@@ -586,11 +586,11 @@ function FileRow({
 // kept rather than a shape so screen readers can announce status
 // without aria gymnastics.
 const STATUS_CLASS: Record<string, string> = {
-  M: "text-amber-500",
-  A: "text-emerald-500",
-  D: "text-rose-500",
-  R: "text-sky-500",
-  "??": "text-emerald-400/70",
+  M: "text-warning-fg",
+  A: "text-success-fg",
+  D: "text-danger-fg",
+  R: "text-info-fg",
+  "??": "text-success-fg/70",
 };
 
 function StatusDot({ status }: { status: RunFileStatus }) {

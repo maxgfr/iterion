@@ -16,6 +16,7 @@ import { useAddNode } from "@/hooks/useAddNode";
 import { useAddFromLibrary } from "@/hooks/useAddFromLibrary";
 import { useAddSubNode, type SubNodeDragData } from "@/hooks/useAddSubNode";
 import { useFullscreen } from "@/hooks/useFullscreen";
+import { useConfirm } from "@/hooks/useConfirm";
 import { useLibraryStore, selectAllItems } from "@/store/library";
 import { isAuxiliaryNodeId } from "@/lib/documentToGraph";
 import { isGroupNodeId } from "@/lib/groups";
@@ -413,6 +414,8 @@ export default function Canvas() {
     return () => setCanvasActions(null);
   }, [setCanvasActions, handleArrange, handleFitView]);
 
+  const { confirm, dialog } = useConfirm();
+
   return (
     <div className={`h-full w-full relative${canvasTool === "pan" ? " cursor-grab" : ""}`} ref={reactFlowWrapper} onKeyDown={onKeyDown} tabIndex={0}>
       <ToolPalette />
@@ -531,8 +534,16 @@ export default function Canvas() {
             const newName = duplicateNode(contextMenu.nodeId);
             if (newName) setSelectedNode(newName);
           }}
-          onDelete={() => {
-            removeNode(contextMenu.nodeId);
+          onDelete={async () => {
+            const id = contextMenu.nodeId;
+            const ok = await confirm({
+              title: "Delete node?",
+              message: `Delete "${id}" and its edges? You can undo with Cmd/Ctrl+Z.`,
+              confirmLabel: "Delete",
+              confirmVariant: "danger",
+            });
+            if (!ok) return;
+            removeNode(id);
             clearSelection();
           }}
           onCreateGroup={(name, nodeIds) => {
@@ -585,6 +596,7 @@ export default function Canvas() {
           onClose={() => connections.setQuickAddMenu(null)}
         />
       )}
+      {dialog}
     </div>
   );
 }

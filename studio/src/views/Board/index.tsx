@@ -2042,8 +2042,9 @@ function IssueCard({
         </div>
       )}
       {!running && retrying && !TERMINAL_BOARD_STATES.has(iss.state) && (
-        <div
-          className="mt-1 rounded bg-warning-soft px-1.5 py-1 text-[10px] text-warning-fg cursor-pointer hover:bg-warning-soft"
+        <button
+          type="button"
+          className="mt-1 w-full text-left rounded bg-warning-soft px-1.5 py-1 text-[10px] text-warning-fg cursor-pointer hover:bg-warning-soft"
           onClick={(e) => {
             e.stopPropagation();
             onShowRetryDetails();
@@ -2054,7 +2055,7 @@ function IssueCard({
           {retrying.error && (
             <span className="ml-1 text-warning-fg/80 truncate">— {retrying.error}</span>
           )}
-        </div>
+        </button>
       )}
       {!running && retrying && TERMINAL_BOARD_STATES.has(iss.state) && (
         <div
@@ -2065,8 +2066,9 @@ function IssueCard({
         </div>
       )}
       {!running && skip && (
-        <div
-          className="mt-1 rounded bg-danger-soft px-1.5 py-1 text-[10px] text-danger-fg cursor-pointer hover:bg-danger-soft"
+        <button
+          type="button"
+          className="mt-1 w-full text-left rounded bg-danger-soft px-1.5 py-1 text-[10px] text-danger-fg cursor-pointer hover:bg-danger-soft"
           onClick={(e) => {
             e.stopPropagation();
             onOpen();
@@ -2075,7 +2077,7 @@ function IssueCard({
         >
           ⚠ won&apos;t dispatch
           <span className="ml-1 text-danger-fg/80 truncate">— {skip.reason}</span>
-        </div>
+        </button>
       )}
     </div>
   );

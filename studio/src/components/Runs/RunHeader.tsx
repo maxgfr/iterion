@@ -6,6 +6,7 @@ import type { RunHeader as RunHeaderType } from "@/api/runs";
 import { cancelRun, getRun, loadEvents, pauseRun, renameRun } from "@/api/runs";
 import { Button, CopyButton, LiveDot, StatusBadge, Tooltip } from "@/components/ui";
 import WSStatusDot from "@/components/shared/WSStatusDot";
+import { useConfirm } from "@/hooks/useConfirm";
 import { formatRelative } from "@/lib/format";
 import { botIdentity } from "@/lib/personas";
 import { useRunStore, type WsState } from "@/store/run";
@@ -160,6 +161,18 @@ export default function RunHeader({ run, active, wsState }: Props) {
     }
   };
 
+  const { confirm, dialog } = useConfirm();
+  const cancelWithConfirm = async () => {
+    const ok = await confirm({
+      title: "Cancel this run?",
+      message:
+        "The run stops and any in-progress work is aborted. A checkpoint is saved, so you can resume or fork it later.",
+      confirmLabel: "Cancel run",
+      confirmVariant: "danger",
+    });
+    if (ok) await onCancel();
+  };
+
   return (
     <>
       <div className="shrink-0 border-b border-border-default px-3 sm:px-4 py-2 flex flex-col gap-1.5 text-sm">
@@ -228,7 +241,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
               <Button
                 variant="danger"
                 size="sm"
-                onClick={() => void onCancel()}
+                onClick={() => void cancelWithConfirm()}
                 disabled={busy}
                 title={cancelTooltip(run.status)}
               >
@@ -311,6 +324,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
           onOpenChange={setForkOpen}
         />
       )}
+      {dialog}
     </>
   );
 }

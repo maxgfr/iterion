@@ -6,6 +6,7 @@ import { desktop, type Release } from "@/lib/desktopBridge";
 
 export default function UpdatesTab() {
   const [checking, setChecking] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [release, setRelease] = useState<Release | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,10 +24,13 @@ export default function UpdatesTab() {
 
   const handleApply = async () => {
     setError(null);
+    setApplying(true);
     try {
       await desktop.downloadAndApplyUpdate();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -37,7 +41,7 @@ export default function UpdatesTab() {
         matching private key are accepted by the embedded verifier.
       </p>
       <div>
-        <Button onClick={handleCheck} loading={checking} variant="primary">
+        <Button onClick={handleCheck} loading={checking} disabled={applying} variant="primary">
           Check for updates
         </Button>
       </div>
@@ -62,7 +66,7 @@ export default function UpdatesTab() {
             View release notes
           </button>
           <div>
-            <Button onClick={handleApply} variant="primary">
+            <Button onClick={handleApply} variant="primary" loading={applying}>
               Download &amp; apply
             </Button>
           </div>

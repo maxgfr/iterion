@@ -4,8 +4,10 @@ import { Link } from "wouter";
 import { listBots, type BotEntryWithSchema } from "@/api/bots";
 import type { NativeBoard, NativeIssue } from "@/api/native";
 import BranchDiffModal from "@/components/Runs/BranchDiffModal";
+import { Button } from "@/components/ui/Button";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { Dialog } from "@/components/ui/Dialog";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 import { Input } from "@/components/ui/Input";
 import { MarkdownPreview } from "@/components/ui/MarkdownPreview";
 import { Select } from "@/components/ui/Select";
@@ -211,49 +213,51 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
         </div>
 
         {submitError && (
-          <div className="px-4 pb-2 text-xs text-red-400" role="alert">
-            {submitError}
+          <div className="px-4 pb-2">
+            <InlineBanner tone="danger" layout="inline">
+              {submitError}
+            </InlineBanner>
           </div>
         )}
         <footer className="px-4 py-2.5 border-t border-border-default flex items-center justify-between bg-surface-0">
           <div className="flex items-center gap-3">
             {onDispatch && (
-              <button
+              <Button
                 type="button"
+                variant="success"
+                size="sm"
                 onClick={onDispatch}
                 disabled={submitting}
-                className="text-xs px-2.5 py-1 rounded bg-emerald-600/90 text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ▶ Let's go
-              </button>
+              </Button>
             )}
             {onDelete && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={onDelete}
                 disabled={submitting}
-                className="text-xs text-red-400 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                className="text-danger hover:text-danger"
               >
                 Delete
-              </button>
+              </Button>
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={onClose}
               disabled={submitting}
-              className="text-xs px-3 py-1.5 rounded border border-border-default hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="text-xs px-3 py-1.5 rounded bg-accent text-on-accent hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {submitting ? "Saving…" : initial ? "Save" : "Create"}
-            </button>
+            </Button>
+            <Button type="submit" variant="primary" size="sm" loading={submitting}>
+              {initial ? "Save" : "Create"}
+            </Button>
           </div>
         </footer>
       </form>

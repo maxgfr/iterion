@@ -1,7 +1,7 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { Spinner } from "./Spinner";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "success";
 export type ButtonSize = "sm" | "md";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -21,6 +21,8 @@ const variantClass: Record<ButtonVariant, string> = {
     "bg-transparent text-fg-muted hover:bg-surface-2 hover:text-fg-default disabled:text-fg-subtle",
   danger:
     "bg-danger text-fg-onAccent hover:opacity-90 disabled:bg-surface-2 disabled:text-fg-subtle",
+  success:
+    "bg-success text-fg-onAccent hover:opacity-90 disabled:bg-surface-2 disabled:text-fg-subtle",
 };
 
 const sizeClass: Record<ButtonSize, string> = {
