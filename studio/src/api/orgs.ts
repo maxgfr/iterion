@@ -2,7 +2,7 @@
 // Mirrors pkg/server/admin_orgs_routes.go. "org" is the public alias
 // for the internal Team/tenant.
 
-import { request } from "./client";
+import { guard404, request } from "./client";
 
 export interface OrgView {
   id: string;
@@ -47,7 +47,10 @@ export interface OrgUsage {
 }
 
 export async function listOrgs(): Promise<OrgView[]> {
-  const res = await request<{ orgs: OrgView[] }>("/admin/orgs");
+  // guard404 → FeatureUnavailableError when /api/admin/orgs isn't registered
+  // (local/desktop mode — orgs are a cloud-only concept), so the page renders
+  // a "cloud-mode feature" notice instead of a raw "404 no such API endpoint".
+  const res = await guard404("admin", () => request<{ orgs: OrgView[] }>("/admin/orgs"));
   return res.orgs ?? [];
 }
 

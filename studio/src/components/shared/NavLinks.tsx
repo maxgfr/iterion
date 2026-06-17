@@ -114,8 +114,10 @@ export default function NavLinks({ collapsed }: Props) {
       icon: PersonIcon,
     });
   }
-  // Admin section visible only to super-admins.
-  if (user?.is_super_admin) {
+  // Admin section: super-admins, and only in cloud mode. /admin/orgs is the
+  // org/tenant console, a cloud-only concept whose API isn't registered in
+  // local/desktop mode — surfacing the link there leads to a dead page.
+  if (user?.is_super_admin && info?.mode === "cloud") {
     links.push({ section: "admin", href: "/admin/orgs", label: "Admin", icon: GearIcon });
   }
 

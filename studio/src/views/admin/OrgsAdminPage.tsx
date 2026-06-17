@@ -39,7 +39,11 @@ export default function OrgsAdminPage() {
       setOrgs(await listOrgs());
       setError(null);
     } catch (e) {
-      setError(String(e));
+      setError(
+        e instanceof FeatureUnavailableError
+          ? "Organization administration is a cloud-mode feature — it isn't available on this server (local/desktop mode)."
+          : String(e),
+      );
     }
   }, []);
 
