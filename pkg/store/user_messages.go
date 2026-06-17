@@ -198,11 +198,28 @@ func appendJSONL(path string, v interface{}) error {
 	if err != nil {
 		return fmt.Errorf("store: marshal user_message: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
+	// O_RDWR (not O_WRONLY) so we can inspect the tail. If a prior process was
+	// killed mid-write, the file ends with a torn line lacking a trailing
+	// newline; appending directly would fuse our record onto it and both lines
+	// become unparseable — loadLatestQueuedMessages then skips the fused line,
+	// losing a status transition and re-delivering an already-handled message.
+	// Insert a separator first, mirroring AppendEvent's torn-tail repair.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, filePerm)
 	if err != nil {
 		return fmt.Errorf("store: open user_messages: %w", err)
 	}
 	defer f.Close()
+	if info, statErr := f.Stat(); statErr == nil && info.Size() > 0 {
+		last := make([]byte, 1)
+		if _, err := f.ReadAt(last, info.Size()-1); err != nil {
+			return fmt.Errorf("store: inspect user_messages tail: %w", err)
+		}
+		if last[0] != '\n' {
+			if _, err := f.Write([]byte("\n")); err != nil {
+				return fmt.Errorf("store: separate torn user_messages tail: %w", err)
+			}
+		}
+	}
 	if _, err := f.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("store: write user_message: %w", err)
 	}

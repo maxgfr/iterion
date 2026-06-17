@@ -1062,8 +1062,15 @@ func (s *Store) appendEventLocked(evt Event) error {
 // transition once the filesystem cooperates again.
 func (s *Store) emitPostCommitEvent(evt Event) error {
 	if err := s.appendEventLocked(evt); err != nil {
+		// The issue file + in-memory index are already updated (the
+		// authoritative state) and appendEventLocked buffered the event in
+		// pendingEvents for replay. events.jsonl is non-authoritative, so we
+		// must NOT propagate this as a mutation failure: a caller that maps it
+		// to a 4xx/5xx for a write that actually succeeded would, on retry,
+		// create a duplicate issue (Create generates a fresh UUID) or re-emit
+		// the mutation. Warn and swallow. (Always returns nil; the error
+		// return is kept only for the call-site signatures.)
 		fmt.Fprintf(os.Stderr, "native store: WARN event log fsync failed; buffered for replay on next operation: %v\n", err)
-		return err
 	}
 	return nil
 }

@@ -77,6 +77,12 @@ func (c *runConn) tailCrossStoreLog(logPath string, offset int64) {
 	terminalTicker := time.NewTicker(crossStoreTerminalCheckInterval)
 	defer terminalTicker.Stop()
 
+	// Snapshot the Errors channel so we can nil our reference if fsnotify
+	// closes it (a fatal backend error closes both Events and Errors). A
+	// closed channel is always ready, which would spin this select in the
+	// window before the closed Events case returns. Mirrors tailCrossStoreEvents.
+	errs := watcher.Errors
+
 	for {
 		select {
 		case <-c.closed:
@@ -97,7 +103,11 @@ func (c *runConn) tailCrossStoreLog(logPath string, offset int64) {
 			}
 		case <-pollTicker.C:
 			offset = c.drainCrossStoreLog(logPath, offset)
-		case err := <-watcher.Errors:
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil // fsnotify closed Errors; stop selecting on it
+				continue
+			}
 			c.server.logger.Warn("runs_ws: cross-store log tail (%s): watcher error: %v", c.runID, err)
 		}
 	}

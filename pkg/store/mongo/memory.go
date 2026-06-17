@@ -269,15 +269,16 @@ func (s *MongoMemoryStore) DeleteDocument(ctx context.Context, ref knowledge.Spa
 	if err := knowledge.ValidateDocPath(path); err != nil {
 		return err
 	}
+	// Atomically delete and read the size in one op. A separate
+	// FindOne→DeleteOne races a concurrent WriteDocument that replaces the
+	// doc between the two calls: the quota would then be decremented by the
+	// stale (pre-write) size, leaving used_bytes permanently inflated.
 	var d memDoc
-	err := s.docs.FindOne(ctx, docFilter(ref.ID(), path), options.FindOne().SetProjection(bson.M{"size": 1})).Decode(&d)
-	if errors.Is(err, mongo.ErrNoDocuments) {
+	res := s.docs.FindOneAndDelete(ctx, docFilter(ref.ID(), path), options.FindOneAndDelete().SetProjection(bson.M{"size": 1}))
+	if errors.Is(res.Err(), mongo.ErrNoDocuments) {
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("memory: delete lookup: %w", err)
-	}
-	if _, err := s.docs.DeleteOne(ctx, docFilter(ref.ID(), path)); err != nil {
+	if err := res.Decode(&d); err != nil {
 		return fmt.Errorf("memory: delete doc: %w", err)
 	}
 	if d.Size > 0 {
