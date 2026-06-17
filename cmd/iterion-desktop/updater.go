@@ -182,7 +182,12 @@ func (u *Updater) fetchManifestAndSig(ctx context.Context, url string) ([]byte, 
 	return body, sig, nil
 }
 
-func (u *Updater) fetchArtifact(ctx context.Context, url string, _ int64, progress func(float64)) ([]byte, error) {
+// maxManifestBytes caps the manifest + signature reads. Both are tiny
+// (a JSON blob and a hex signature); the cap only guards against a
+// hostile/misconfigured endpoint returning an oversized body.
+const maxManifestBytes = 4 << 20 // 4 MiB
+
+func (u *Updater) fetchArtifact(ctx context.Context, url string, size int64, progress func(float64)) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -196,13 +201,23 @@ func (u *Updater) fetchArtifact(ctx context.Context, url string, _ int64, progre
 		return nil, fmt.Errorf("updater: GET %s: %s", url, resp.Status)
 	}
 	// We could stream; for v1 a buffered read is simpler and lets us
-	// hash + verify before touching the disk.
+	// hash + verify before touching the disk. Bound the read by the
+	// manifest-declared size so a compromised CDN / MITM can't OOM the
+	// process with a multi-GiB body — the Ed25519 verification runs AFTER
+	// this read, so it can't protect the allocation.
 	if progress != nil {
 		progress(0)
 	}
-	body, err := io.ReadAll(resp.Body)
+	var reader io.Reader = resp.Body
+	if size > 0 {
+		reader = io.LimitReader(resp.Body, size+1) // +1 to detect an oversize body
+	}
+	body, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, err
+	}
+	if size > 0 && int64(len(body)) > size {
+		return nil, fmt.Errorf("updater: artifact at %s exceeds manifest size %d", url, size)
 	}
 	if progress != nil {
 		progress(1)
@@ -232,7 +247,7 @@ func (u *Updater) httpGet(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("updater: GET %s: %s", url, resp.Status)
 	}
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, maxManifestBytes))
 }
 
 func manifestURL(channel string) string {

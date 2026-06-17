@@ -284,18 +284,21 @@ func (s *FSStore) WriteDocument(_ context.Context, ref knowledge.SpaceRef, in kn
 	if err != nil {
 		return knowledge.DocumentMeta{}, err
 	}
-	var oldSize int64
-	if fi, statErr := os.Stat(abs); statErr == nil {
-		oldSize = fi.Size()
-	}
-	delta := newSize - oldSize
-
 	base := s.baseDir()
 	lock, err := acquireQuotaLock(base)
 	if err != nil {
 		return knowledge.DocumentMeta{}, err
 	}
 	defer func() { _ = lock.Unlock() }()
+
+	// Read the existing size INSIDE the quota lock. Two concurrent overwrites
+	// that both stat before acquiring the lock would compute delta off the same
+	// pre-write oldSize and double-count it into the quota counters.
+	var oldSize int64
+	if fi, statErr := os.Stat(abs); statErr == nil {
+		oldSize = fi.Size()
+	}
+	delta := newSize - oldSize
 
 	space, err := readSidecar(spaceSidecarPath(base, ref))
 	if err != nil {
