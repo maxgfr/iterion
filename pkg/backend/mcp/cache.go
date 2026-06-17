@@ -78,7 +78,31 @@ func (c *ToolCache) Set(serverName string, cfg *ServerConfig, tools []ToolInfo) 
 
 func (c *ToolCache) cacheFile(serverName string, cfg *ServerConfig) string {
 	hash := configHash(cfg)
-	return filepath.Join(c.dir, "mcp-cache", fmt.Sprintf("%s-%s.json", serverName, hash))
+	// Sanitize serverName: it can come from less-trusted MCP config and is used
+	// as a filename component, so a name containing "/" or ".." would write the
+	// cache outside c.dir/mcp-cache. The configHash already guarantees
+	// uniqueness; the name is only a human-readable prefix.
+	return filepath.Join(c.dir, "mcp-cache", fmt.Sprintf("%s-%s.json", sanitizeCacheName(serverName), hash))
+}
+
+// sanitizeCacheName maps a server name to a safe filename prefix: only
+// alphanumerics, dot, underscore and dash survive; everything else (path
+// separators included) becomes '_'. The "%s-%s.json" format means the result
+// is never exactly "." or "..".
+func sanitizeCacheName(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	if b.Len() == 0 {
+		return "server"
+	}
+	return b.String()
 }
 
 // configHash produces a deterministic short hash of a ServerConfig.

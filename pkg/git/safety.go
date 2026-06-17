@@ -40,6 +40,15 @@ func ValidateRelPath(p string) error {
 	if !filepath.IsLocal(osPath) {
 		return fmt.Errorf("git: path %q escapes working directory", p)
 	}
+	// Reject any ".git" path component. filepath.IsLocal allows ".git/config",
+	// ".git/HEAD", etc. (they don't escape the root), but the read/diff
+	// endpoints serve working-tree files, never the repository's internal git
+	// dir — exposing it would leak config, refs, hooks and packed objects.
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".git" {
+			return fmt.Errorf("git: path %q must not reference the .git directory", p)
+		}
+	}
 	return nil
 }
 

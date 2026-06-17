@@ -109,6 +109,12 @@ func parseArgonParams(s string, m, t *uint32, p *uint8) error {
 			return fmt.Errorf("unknown param %q", k)
 		}
 	}
+	// argon2.IDKey panics when time or threads is 0 (and memory must be
+	// non-zero too). A crafted encoded hash with t=0 / p=0 / m=0 would
+	// otherwise crash VerifyPassword instead of being rejected as malformed.
+	if *m == 0 || *t == 0 || *p == 0 {
+		return fmt.Errorf("argon2 params must be non-zero (m=%d, t=%d, p=%d)", *m, *t, *p)
+	}
 	return nil
 }
 

@@ -555,6 +555,12 @@ type cronBlockParams struct {
 	tz           string
 }
 
+// stripCRLF removes carriage returns and newlines so an env value written
+// into the crontab block (PATH, CRON_TZ) can't inject additional cron lines.
+func stripCRLF(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
+}
+
 // renderCronBlock turns the manifest into the managed crontab block. Each
 // enabled entry routes through `iterion schedule run <name>` so the manifest
 // stays authoritative at trigger time; disabled entries are emitted as
@@ -568,12 +574,13 @@ func renderCronBlock(m *ScheduleManifest, prm cronBlockParams) string {
 		// CRON_TZ is honoured by cronie/Vixie cron; elsewhere it is a harmless
 		// env var. It makes the schedules fire in the intended zone (UTC by
 		// default) regardless of the host's local time.
-		b.WriteString("CRON_TZ=" + prm.tz + "\n")
+		b.WriteString("CRON_TZ=" + stripCRLF(prm.tz) + "\n")
 	}
 	if prm.pathEnv != "" {
 		// cron runs with a minimal PATH; capture the install-time PATH so
-		// docker/git/the scanners are reachable.
-		b.WriteString("PATH=" + prm.pathEnv + "\n")
+		// docker/git/the scanners are reachable. Strip CR/LF so a hostile
+		// PATH (or TZ) value can't inject extra crontab lines.
+		b.WriteString("PATH=" + stripCRLF(prm.pathEnv) + "\n")
 	}
 	for _, e := range m.Schedules {
 		if e.Disabled {
