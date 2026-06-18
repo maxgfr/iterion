@@ -16,6 +16,7 @@ import {
 import ApiKeysPanel from "@/views/settings/ApiKeys";
 import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
 
+import IntegrationsTab from "./tabs/IntegrationsTab";
 import WebhooksTab from "./tabs/WebhooksTab";
 import SecretsTab from "./tabs/SecretsTab";
 import BindingsTab from "./tabs/BindingsTab";
@@ -28,6 +29,7 @@ const ROLES = ["viewer", "member", "admin", "owner"] as const;
 type Tab =
   | "members"
   | "api-keys"
+  | "integrations"
   | "webhooks"
   | "secrets"
   | "bindings"
@@ -38,6 +40,7 @@ type Tab =
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "members", label: "Members + invitations" },
   { id: "api-keys", label: "API keys" },
+  { id: "integrations", label: "Integrations" },
   { id: "webhooks", label: "Webhooks" },
   { id: "secrets", label: "Secrets" },
   { id: "bindings", label: "Bot bindings" },
@@ -99,6 +102,9 @@ export default function TeamPage() {
           {tab === "members" && <Members teamID={team.team_id} canManage={canManage} />}
           {tab === "api-keys" && (
             <ApiKeysPanel team={{ id: team.team_id, name: team.team_name }} />
+          )}
+          {tab === "integrations" && (
+            <IntegrationsTab teamID={team.team_id} canManage={canManage} />
           )}
           {tab === "webhooks" && (
             <WebhooksTab teamID={team.team_id} canManage={canManage} />
