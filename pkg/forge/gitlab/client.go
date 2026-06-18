@@ -1,0 +1,233 @@
+// Package gitlab is the GitLab implementation of forge.Admin: the
+// OUTBOUND write-side client the orchestrator uses to list a connection's
+// projects and create/update/delete the iterion webhook on them. It is
+// deliberately separate from pkg/webhooks/gitlab (the read-only inbound
+// conversational-auth client) so the inbound path stays decoupled.
+package gitlab
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+
+	"github.com/SocialGouv/iterion/pkg/forge"
+)
+
+// AdminClient talks to one GitLab instance as one connection. BaseURL is
+// "https://<host>" (no /api/v4). Auth is a Bearer token — GitLab accepts
+// BOTH a personal access token and an OAuth access token in the
+// Authorization: Bearer header, so PAT and OAuth connections share this
+// one path.
+type AdminClient struct {
+	HTTP    *http.Client
+	BaseURL string
+	Token   string
+}
+
+// New builds an AdminClient. A nil httpClient falls back to
+// http.DefaultClient.
+func New(httpClient *http.Client, baseURL, token string) *AdminClient {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	return &AdminClient{HTTP: httpClient, BaseURL: strings.TrimRight(baseURL, "/"), Token: token}
+}
+
+func (c *AdminClient) Provider() forge.Provider { return forge.ProviderGitLab }
+
+// do performs one API call. body (when non-nil) is JSON-encoded; out (when
+// non-nil and the status is 2xx) is JSON-decoded. The returned status lets
+// callers map 401/403/404 to the forge sentinel errors. The token is never
+// placed in the URL, so it cannot leak through error strings.
+func (c *AdminClient) do(ctx context.Context, method, path string, body any, out any) (int, error) {
+	var reqBody io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return 0, fmt.Errorf("gitlab: marshal body: %w", err)
+		}
+		reqBody = bytes.NewReader(raw)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+"/api/v4"+path, reqBody)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if out != nil && resp.StatusCode/100 == 2 {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			return resp.StatusCode, fmt.Errorf("gitlab: decode response: %w", err)
+		}
+	} else {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	}
+	return resp.StatusCode, nil
+}
+
+// statusErr maps a non-2xx status to the appropriate forge sentinel.
+func statusErr(op string, code int) error {
+	switch code {
+	case http.StatusUnauthorized:
+		return forge.ErrUnauthorized
+	case http.StatusForbidden:
+		return forge.ErrForbidden
+	case http.StatusNotFound:
+		return forge.ErrHookNotFound
+	default:
+		return fmt.Errorf("gitlab: %s: HTTP %d", op, code)
+	}
+}
+
+// WhoAmI returns the account the token authenticates as.
+func (c *AdminClient) WhoAmI(ctx context.Context) (forge.Identity, error) {
+	var u struct {
+		ID       int64  `json:"id"`
+		Username string `json:"username"`
+		Email    string `json:"email"`
+		Name     string `json:"name"`
+	}
+	code, err := c.do(ctx, http.MethodGet, "/user", nil, &u)
+	if err != nil {
+		return forge.Identity{}, err
+	}
+	if code != http.StatusOK {
+		return forge.Identity{}, statusErr("GET /user", code)
+	}
+	return forge.Identity{
+		Login:     u.Username,
+		ID:        strconv.FormatInt(u.ID, 10),
+		Email:     u.Email,
+		Kind:      "user",
+		Namespace: u.Username,
+	}, nil
+}
+
+// ListRepos returns projects on which the token has at least Maintainer
+// access (level 40 — the floor for managing project hooks), so the picker
+// never offers a repo where CreateHook would 403.
+func (c *AdminClient) ListRepos(ctx context.Context, q forge.RepoQuery) ([]forge.RepoSummary, error) {
+	perPage := q.PerPage
+	if perPage <= 0 || perPage > 100 {
+		perPage = 50
+	}
+	page := q.Page
+	if page <= 0 {
+		page = 1
+	}
+	vals := url.Values{}
+	vals.Set("membership", "true")
+	vals.Set("min_access_level", "40") // Maintainer — can manage hooks
+	vals.Set("per_page", strconv.Itoa(perPage))
+	vals.Set("page", strconv.Itoa(page))
+	vals.Set("order_by", "last_activity_at")
+	if s := strings.TrimSpace(q.Search); s != "" {
+		vals.Set("search", s)
+	}
+	var projects []struct {
+		ID                int64  `json:"id"`
+		PathWithNamespace string `json:"path_with_namespace"`
+		Description       string `json:"description"`
+		Visibility        string `json:"visibility"`
+		DefaultBranch     string `json:"default_branch"`
+		WebURL            string `json:"web_url"`
+	}
+	code, err := c.do(ctx, http.MethodGet, "/projects?"+vals.Encode(), nil, &projects)
+	if err != nil {
+		return nil, err
+	}
+	if code != http.StatusOK {
+		return nil, statusErr("GET /projects", code)
+	}
+	out := make([]forge.RepoSummary, 0, len(projects))
+	for _, p := range projects {
+		out = append(out, forge.RepoSummary{
+			FullName:      p.PathWithNamespace,
+			Description:   p.Description,
+			Private:       p.Visibility != "public",
+			DefaultBranch: p.DefaultBranch,
+			WebURL:        p.WebURL,
+			CanAdmin:      true,
+		})
+	}
+	return out, nil
+}
+
+// GetHook finds the iterion hook on repo by its delivery URL (idempotency
+// probe). Returns (nil, nil) when no hook matches.
+func (c *AdminClient) GetHook(ctx context.Context, repo, deliveryURL string) (*forge.HookHandle, error) {
+	var hooks []gitlabHook
+	code, err := c.do(ctx, http.MethodGet, "/projects/"+projectID(repo)+"/hooks", nil, &hooks)
+	if err != nil {
+		return nil, err
+	}
+	if code != http.StatusOK {
+		return nil, statusErr("GET hooks", code)
+	}
+	for _, h := range hooks {
+		if h.URL == deliveryURL {
+			hh := h.toHandle()
+			return &hh, nil
+		}
+	}
+	return nil, nil
+}
+
+// CreateHook registers a new project hook.
+func (c *AdminClient) CreateHook(ctx context.Context, repo string, spec forge.HookSpec) (forge.HookHandle, error) {
+	var h gitlabHook
+	code, err := c.do(ctx, http.MethodPost, "/projects/"+projectID(repo)+"/hooks", hookBody(spec), &h)
+	if err != nil {
+		return forge.HookHandle{}, err
+	}
+	if code/100 != 2 {
+		return forge.HookHandle{}, statusErr("create hook", code)
+	}
+	return h.toHandle(), nil
+}
+
+// UpdateHook edits an existing project hook in place.
+func (c *AdminClient) UpdateHook(ctx context.Context, repo, hookID string, spec forge.HookSpec) (forge.HookHandle, error) {
+	var h gitlabHook
+	code, err := c.do(ctx, http.MethodPut, "/projects/"+projectID(repo)+"/hooks/"+url.PathEscape(hookID), hookBody(spec), &h)
+	if err != nil {
+		return forge.HookHandle{}, err
+	}
+	if code/100 != 2 {
+		return forge.HookHandle{}, statusErr("update hook", code)
+	}
+	return h.toHandle(), nil
+}
+
+// DeleteHook removes a project hook. A 404 maps to forge.ErrHookNotFound so
+// the orchestrator's deprovision treats it as success.
+func (c *AdminClient) DeleteHook(ctx context.Context, repo, hookID string) error {
+	code, err := c.do(ctx, http.MethodDelete, "/projects/"+projectID(repo)+"/hooks/"+url.PathEscape(hookID), nil, nil)
+	if err != nil {
+		return err
+	}
+	if code/100 != 2 {
+		return statusErr("delete hook", code)
+	}
+	return nil
+}
+
+// projectID URL-encodes an "owner/repo" path so GitLab's
+// /projects/:id-or-url-encoded-path endpoint resolves it. The slash is
+// encoded too (PathEscape turns "/" into "%2F"), which is what GitLab
+// expects for a namespaced path id.
+func projectID(repo string) string {
+	return url.PathEscape(strings.TrimSpace(repo))
+}

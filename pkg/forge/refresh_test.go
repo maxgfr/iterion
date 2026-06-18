@@ -14,7 +14,7 @@ type fakeRefresher struct {
 	err       error
 }
 
-func (f fakeRefresher) Refresh(context.Context, Connection, connectionRefreshInput) (RefreshedToken, error) {
+func (f fakeRefresher) Refresh(context.Context, Connection, string) (RefreshedToken, error) {
 	if f.err != nil {
 		return RefreshedToken{}, f.err
 	}

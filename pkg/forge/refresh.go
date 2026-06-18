@@ -12,17 +12,13 @@ import (
 // implementations (OAuth refresh-token grant, GitHub-App installation-token
 // mint) satisfy it; PAT connections have no refresher and are skipped.
 //
-// Refresh returns the new token material. A nil error with an empty
-// AccessToken means "nothing to do" (the implementation decided no refresh
-// was needed). Returning ErrUnauthorized marks the connection revoked.
+// refreshToken is the connection's current refresh token (already unsealed
+// by the worker). Refresh returns the new token material. A nil error with
+// an empty AccessToken means "nothing to do" (the implementation decided no
+// refresh was needed). Returning ErrUnauthorized marks the connection
+// revoked.
 type TokenRefresher interface {
-	Refresh(ctx context.Context, conn Connection, current connectionRefreshInput) (RefreshedToken, error)
-}
-
-// connectionRefreshInput hands the refresher the current refresh token
-// without exposing the whole sealed blob.
-type connectionRefreshInput struct {
-	RefreshToken string
+	Refresh(ctx context.Context, conn Connection, refreshToken string) (RefreshedToken, error)
 }
 
 // RefreshedToken is the output of a successful refresh.
@@ -103,7 +99,7 @@ func (w *RefreshWorker) refreshOne(ctx context.Context, conn Connection) error {
 	if err != nil {
 		return err
 	}
-	out, err := r.Refresh(ctx, conn, connectionRefreshInput{RefreshToken: cur.RefreshToken})
+	out, err := r.Refresh(ctx, conn, cur.RefreshToken)
 	if err != nil {
 		if isUnauthorized(err) {
 			return w.markRevoked(ctx, conn)
