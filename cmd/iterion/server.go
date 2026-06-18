@@ -23,6 +23,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/cloud/metrics"
 	"github.com/SocialGouv/iterion/pkg/cloud/tracing"
 	iterconfig "github.com/SocialGouv/iterion/pkg/config"
+	"github.com/SocialGouv/iterion/pkg/forge"
 	"github.com/SocialGouv/iterion/pkg/identity"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/mail"
@@ -114,6 +115,28 @@ func orgLimitDefaultsFromEnv() server.OrgLimitDefaults {
 		d.MonthlyCostCapUSD = f
 	}
 	return d
+}
+
+// forgeOAuthFromEnv reads the per-provider forge OAuth-app credentials from
+// the environment. A provider with no client id is simply absent from the
+// map — its connect flow then offers only the PAT fallback. Env keys:
+//
+//	ITERION_FORGE_<PROVIDER>_OAUTH_CLIENT_ID / _CLIENT_SECRET
+//	(PROVIDER ∈ GITLAB, GITHUB, FORGEJO)
+func forgeOAuthFromEnv() server.ForgeOAuthConfig {
+	out := server.ForgeOAuthConfig{}
+	for _, p := range []forge.Provider{forge.ProviderGitLab, forge.ProviderGitHub, forge.ProviderForgejo} {
+		prefix := "ITERION_FORGE_" + strings.ToUpper(string(p)) + "_OAUTH_"
+		clientID := strings.TrimSpace(os.Getenv(prefix + "CLIENT_ID"))
+		if clientID == "" {
+			continue
+		}
+		out[p] = server.ForgeOAuthAppCreds{
+			ClientID:     clientID,
+			ClientSecret: strings.TrimSpace(os.Getenv(prefix + "CLIENT_SECRET")),
+		}
+	}
+	return out
 }
 
 func randomBootstrapPassword() (string, error) {
@@ -242,6 +265,14 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	webhookStores := webhooks.NewMongoStores(st.DB())
 	if err := webhooks.EnsureSchema(rootCtx, st.DB()); err != nil {
 		return fmt.Errorf("server: ensure webhooks schema: %w", err)
+	}
+	forgeConnStore := forge.NewMongoConnectionStore(st.DB())
+	if err := forgeConnStore.EnsureSchema(rootCtx); err != nil {
+		return fmt.Errorf("server: ensure forge_connections schema: %w", err)
+	}
+	forgeIntegrationStore := forge.NewMongoRepoIntegrationStore(st.DB())
+	if err := forgeIntegrationStore.EnsureSchema(rootCtx); err != nil {
+		return fmt.Errorf("server: ensure repo_integrations schema: %w", err)
 	}
 	orgUsageCounter := orgusage.NewMongoCounter(st.DB())
 	if err := orgusage.EnsureSchema(rootCtx, st.DB()); err != nil {
@@ -502,6 +533,9 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		ApiKeys:                apiKeysStore,
 		GenericSecrets:         genericSecretsStore,
 		BotBindings:            botBindingsStore,
+		ForgeConnections:       forgeConnStore,
+		ForgeIntegrations:      forgeIntegrationStore,
+		ForgeOAuth:             forgeOAuthFromEnv(),
 		WebhookConfigs:         webhookStores.Configs,
 		WebhookDeliveries:      webhookStores.Deliveries,
 		WebhookCounter:         webhookStores.Counter,

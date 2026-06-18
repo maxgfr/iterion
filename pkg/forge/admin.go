@@ -47,6 +47,16 @@ type Admin interface {
 	DeleteHook(ctx context.Context, repo, hookID string) error
 }
 
+// OAuthExchanger drives a provider's OAuth authorization-code(+PKCE) flow
+// at connect time: build the authorize URL the operator is redirected to,
+// then trade the returned code for tokens. The per-provider OAuth clients
+// (e.g. gitlab.OAuthApp) implement it; the server's connect/callback
+// handlers consume it generically.
+type OAuthExchanger interface {
+	AuthorizeURL(redirectURI, state, codeChallenge string, scopes []string) string
+	Exchange(ctx context.Context, code, redirectURI, codeVerifier string) (RefreshedToken, error)
+}
+
 // Identity is the account a credential authenticates as.
 type Identity struct {
 	Login string `json:"login"`

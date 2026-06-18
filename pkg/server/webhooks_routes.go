@@ -468,7 +468,12 @@ func (s *Server) handleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusForbidden, "admin or owner required")
 		return
 	}
-	if _, ok := s.webhookForTenant(w, r, teamID, r.PathValue("webhook_id")); !ok {
+	cfg, ok := s.webhookForTenant(w, r, teamID, r.PathValue("webhook_id"))
+	if !ok {
+		return
+	}
+	if cfg.ProvisionedBy != "" {
+		httpError(w, http.StatusConflict, "this webhook is managed by a forge integration — disable it from the Integrations tab instead")
 		return
 	}
 	if err := s.webhookConfigs.Delete(r.Context(), r.PathValue("webhook_id")); err != nil {
@@ -488,6 +493,13 @@ func (s *Server) handleRotateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg, ok := s.webhookForTenant(w, r, teamID, r.PathValue("webhook_id"))
 	if !ok {
+		return
+	}
+	if cfg.ProvisionedBy != "" {
+		// Rotating a managed webhook's token without re-pushing it to the
+		// forge hook would silently brick delivery — re-provision via the
+		// Integrations tab instead (it re-mints + UpdateHook atomically).
+		httpError(w, http.StatusConflict, "this webhook is managed by a forge integration — rotate it by disabling and re-enabling the bot in the Integrations tab")
 		return
 	}
 	plaintext, hash, last4, fp, err := webhooks.MintToken()

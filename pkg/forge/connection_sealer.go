@@ -8,6 +8,34 @@ import (
 	"github.com/SocialGouv/iterion/pkg/secrets"
 )
 
+// SealPAT seals a personal access token into a connection payload. Used by
+// the server's PAT-connect handler (which holds the sealer but not the
+// internal payload shape).
+func SealPAT(sealer secrets.Sealer, connID, pat string) ([]byte, error) {
+	return sealConnectionSecret(sealer, connID, connectionSecret{PATToken: pat})
+}
+
+// SealOAuthTokens seals an OAuth access/refresh token pair into a
+// connection payload. expiresAt may be zero for non-expiring tokens.
+func SealOAuthTokens(sealer secrets.Sealer, connID, accessToken, refreshToken string, expiresAt time.Time) ([]byte, error) {
+	return sealConnectionSecret(sealer, connID, connectionSecret{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresAt:    expiresAt,
+	})
+}
+
+// AdminTokenFor opens a connection's sealed payload and returns the token
+// its admin client should authenticate with (PAT or access token). Used by
+// the server's admin-client factory.
+func AdminTokenFor(sealer secrets.Sealer, conn Connection) (string, error) {
+	sec, err := openConnectionSecret(sealer, conn.ID, conn.SealedPayload)
+	if err != nil {
+		return "", err
+	}
+	return sec.AdminToken(), nil
+}
+
 // connectionSecret is the token blob sealed on Connection.SealedPayload.
 // It is never exposed outside this package — the orchestrator and refresh
 // worker open it, use the token in memory, and re-seal.

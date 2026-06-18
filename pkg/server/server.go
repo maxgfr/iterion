@@ -36,6 +36,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dsl/parser"
 	"github.com/SocialGouv/iterion/pkg/dsl/unparse"
 	"github.com/SocialGouv/iterion/pkg/dsl/workflowfile"
+	"github.com/SocialGouv/iterion/pkg/forge"
 	"github.com/SocialGouv/iterion/pkg/knowledge"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/marketplace"
@@ -168,6 +169,19 @@ type Config struct {
 	// name. When non-nil, the server registers the bot-binding CRUD and
 	// the cloud publisher consults it during secret resolution.
 	BotBindings secrets.BotSecretBindingStore
+
+	// ForgeConnections + ForgeIntegrations wire the OUTBOUND forge
+	// integration layer (pkg/forge): connect a GitLab/GitHub/Forgejo repo
+	// via OAuth/PAT and auto-provision the inbound webhook + token binding
+	// when a bot is enabled on it. Both (plus WebhookConfigs + GenericSecrets
+	// + Sealer + the auth stack) must be present for /api/teams/:id/forge/*
+	// and the OAuth callback to register.
+	ForgeConnections  forge.ConnectionStore
+	ForgeIntegrations forge.RepoIntegrationStore
+	// ForgeOAuth holds the per-provider OAuth-app client credentials the
+	// connect flow uses. A provider absent here only accepts the PAT
+	// fallback (the path for self-hosted instances with no registrable app).
+	ForgeOAuth ForgeOAuthConfig
 
 	// MemoryStore backs the shared-knowledge REST surface
 	// (/api/memory/*). nil → the local filesystem store. Cloud mode
@@ -359,6 +373,11 @@ type Server struct {
 	pats              pat.Store
 	queue             *natsq.Conn
 	botBindings       secrets.BotSecretBindingStore
+	forgeConnections  forge.ConnectionStore
+	forgeIntegrations forge.RepoIntegrationStore
+	forgeOrchestrator *forge.Orchestrator
+	forgeStates       *forgeStateStore
+	forgeOAuth        ForgeOAuthConfig
 	memStore          knowledge.MemoryStore
 	// webhookLaunchBot overrides the inbound-webhook launch path (test
 	// seam). nil → realWebhookLaunchBot (resolve bot source + s.runs.Launch).
@@ -501,6 +520,9 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		pats:              cfg.PATs,
 		queue:             cfg.Queue,
 		botBindings:       cfg.BotBindings,
+		forgeConnections:  cfg.ForgeConnections,
+		forgeIntegrations: cfg.ForgeIntegrations,
+		forgeOAuth:        cfg.ForgeOAuth,
 		memStore:          cfg.MemoryStore,
 		httpClient:        &http.Client{Timeout: 15 * time.Second},
 		browserSessions:   cfg.BrowserRegistry,
@@ -509,6 +531,23 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 	}
 	if cfg.NativeTrackerStore != nil {
 		s.boardMCPTokens = NewBoardMCPTokenRegistry()
+	}
+	// Outbound forge integrations: build the orchestrator + OAuth state
+	// store when the full dependency set is present. The orchestrator reuses
+	// the existing webhook config + generic secret stores (the managed
+	// forge_token rides the unchanged binding/run path).
+	if s.forgeConnections != nil && s.forgeIntegrations != nil && s.webhookConfigs != nil && s.genericSecrets != nil && s.sealer != nil {
+		s.forgeStates = newForgeStateStore(10 * time.Minute)
+		s.forgeOrchestrator = &forge.Orchestrator{
+			Connections:  s.forgeConnections,
+			Integrations: s.forgeIntegrations,
+			Webhooks:     s.webhookConfigs,
+			Secrets:      s.genericSecrets,
+			Sealer:       s.sealer,
+			Bots:         s.forgeBotForge,
+			AdminFor:     s.forgeAdminFor,
+			PublicURL:    cfg.PublicURL,
+		}
 	}
 	s.hub = NewHub(logger)
 	go s.hub.Run()
@@ -858,6 +897,13 @@ func (s *Server) routes() {
 	// Bot-secret bindings (policy wrapper over generic secrets).
 	if s.botBindings != nil && s.authSvc != nil {
 		s.registerBotBindingRoutes()
+	}
+
+	// Outbound forge integrations (connect a repo + auto-provision). Gated
+	// on the orchestrator being built (full dependency set) + the auth stack.
+	if s.forgeOrchestrator != nil && s.authSvc != nil {
+		s.registerForgeRoutes()
+		s.registerForgeProvisioningRoutes()
 	}
 
 	// Audit log read surface (writes happen inline in the mutation
