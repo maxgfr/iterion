@@ -70,11 +70,11 @@ export interface ForgeProvisionResult {
 
 export interface ConnectForgeInput {
   provider: ForgeProvider;
-  mode: "oauth" | "pat";
+  mode: "oauth" | "pat" | "app";
   forge_base_url?: string;
   pat?: string;
   display_name?: string;
-  /** Studio path to return to after an OAuth round-trip. */
+  /** Studio path to return to after an OAuth / App-install round-trip. */
   next?: string;
 }
 
@@ -82,6 +82,8 @@ export interface ConnectForgeResult {
   connection?: ForgeConnection;
   /** Present for mode=oauth — the studio redirects the window here. */
   authorize_url?: string;
+  /** Present for mode=app (GitHub) — the App install URL to redirect to. */
+  install_url?: string;
 }
 
 export async function listForgeConnections(teamID: string): Promise<ForgeConnection[]> {

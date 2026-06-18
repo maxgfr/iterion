@@ -135,16 +135,30 @@ agent-binding cookie:
 
 ## Provider support
 
-| Provider | OAuth | PAT | Status |
-|---|---|---|---|
-| GitLab | ✅ | ✅ | live ([pkg/forge/gitlab](../pkg/forge/gitlab)) |
-| GitHub OAuth App | ✅ | ✅ | live ([pkg/forge/github](../pkg/forge/github)) |
-| Forgejo / Gitea | ✅¹ | ✅ | live ([pkg/forge/forgejo](../pkg/forge/forgejo)) |
-| GitHub App | — | — | Phase 2 (planned) |
+| Provider | Mode(s) | Status |
+|---|---|---|
+| GitLab | OAuth · PAT | live ([pkg/forge/gitlab](../pkg/forge/gitlab)) |
+| GitHub | OAuth App · PAT · **GitHub App** | live ([pkg/forge/github](../pkg/forge/github)) |
+| Forgejo / Gitea | OAuth · PAT¹ | live ([pkg/forge/forgejo](../pkg/forge/forgejo)) |
 
 ¹ Forgejo OAuth-token API auth uses the Gitea `token` scheme like the PAT
 path; validate against a live instance before relying on the OAuth (vs PAT)
 mode there.
+
+The **GitHub App** mode (a third connect option for GitHub) authenticates
+with a per-installation token minted on demand from the App private key
+(RS256 JWT → `POST /app/installations/{id}/access_tokens`, cached, re-minted
+≈60 s before its ~1 h expiry by the refresh worker). The operator installs
+the App via `github.com/apps/<slug>/installations/new?state=…`; GitHub's
+"Setup URL" must point at `<PublicURL>/api/forge/github/app/callback`. The
+App posts as itself (`<slug>[bot]`), needs no user seat, and uses
+fine-grained per-repo permissions. Config:
+
+```
+ITERION_FORGE_GITHUB_APP_ID
+ITERION_FORGE_GITHUB_APP_PRIVATE_KEY_FILE   (PEM; or _PRIVATE_KEY inline)
+ITERION_FORGE_GITHUB_APP_SLUG
+```
 
 Adding a provider = implement the `forge.Admin` interface (+ an
 `OAuthExchanger`/`TokenRefresher` for OAuth) and register it in the server's

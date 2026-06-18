@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +34,23 @@ type ForgeOAuthConfig map[forge.Provider]ForgeOAuthAppCreds
 type ForgeOAuthAppCreds struct {
 	ClientID     string
 	ClientSecret string
+}
+
+// ForgeGitHubAppConfig is the global GitHub-App identity (registered once on
+// GitHub), used for the installation-token connect mode. Empty/unconfigured
+// → the GitHub-App connect path is unavailable (OAuth/PAT still work).
+type ForgeGitHubAppConfig struct {
+	AppID      int64
+	PrivateKey string // PEM
+	AppSlug    string // for the install URL github.com/apps/<slug>/installations/new
+}
+
+func (c ForgeGitHubAppConfig) Configured() bool {
+	return c.AppID != 0 && strings.TrimSpace(c.PrivateKey) != ""
+}
+
+func (s *Server) githubAppConfig() forgegithub.AppConfig {
+	return forgegithub.AppConfig{AppID: s.forgeGitHubApp.AppID, PrivateKeyPEM: s.forgeGitHubApp.PrivateKey, AppSlug: s.forgeGitHubApp.AppSlug}
 }
 
 // forgeAgentBindingCookie is the per-flow CSRF-binding cookie for the
@@ -96,9 +114,10 @@ func (s *Server) registerForgeRoutes() {
 	s.mux.Handle("POST /api/teams/{id}/forge/connections", s.requireAuth(http.HandlerFunc(s.handleConnectForge)))
 	s.mux.Handle("DELETE /api/teams/{id}/forge/connections/{conn_id}", s.requireAuth(http.HandlerFunc(s.handleDeleteForgeConnection)))
 	s.mux.Handle("GET /api/teams/{id}/forge/connections/{conn_id}/repos", s.requireAuth(http.HandlerFunc(s.handleListForgeRepos)))
-	// Public IdP redirect target (see isPublicPath); authenticates via the
+	// Public IdP redirect targets (see isPublicPath); authenticate via the
 	// signed state + the agent-binding cookie.
 	s.mux.HandleFunc("GET /api/forge/oauth/callback", s.handleForgeOAuthCallback)
+	s.mux.HandleFunc("GET /api/forge/github/app/callback", s.handleForgeGitHubAppCallback)
 }
 
 // ---- factories (provider dispatch) ----
@@ -130,9 +149,19 @@ func (s *Server) forgeAdminForToken(provider forge.Provider, baseURL, token stri
 	}
 }
 
-// forgeAdminFor opens a connection's sealed token and builds its admin
-// client (the orchestrator's AdminFor).
+// forgeAdminFor builds a connection's admin client (the orchestrator's
+// AdminFor). A GitHub-App connection mints a fresh installation token from
+// the App private key on demand; every other kind opens its sealed token.
 func (s *Server) forgeAdminFor(_ context.Context, conn forge.Connection) (forge.Admin, error) {
+	if conn.Kind == forge.KindGitHubApp {
+		if !s.forgeGitHubApp.Configured() {
+			return nil, fmt.Errorf("forge: github app is not configured on this server")
+		}
+		return &forgegithub.AppClient{
+			HTTP: s.httpClient, WebBaseURL: conn.BaseURL(),
+			Cfg: s.githubAppConfig(), InstallationID: conn.InstallationID,
+		}, nil
+	}
 	token, err := forge.AdminTokenFor(s.sealer, conn)
 	if err != nil {
 		return nil, err
@@ -168,6 +197,12 @@ func (s *Server) forgeOAuthRedirectURI() string {
 // configured OAuth app). The per-provider OAuth clients implement both
 // OAuthExchanger and TokenRefresher.
 func (s *Server) forgeRefresherFor(conn forge.Connection) forge.TokenRefresher {
+	if conn.Kind == forge.KindGitHubApp {
+		if !s.forgeGitHubApp.Configured() {
+			return nil
+		}
+		return forgegithub.AppRefresher{HTTP: s.httpClient, Cfg: s.githubAppConfig()}
+	}
 	if conn.Kind != forge.KindOAuthApp {
 		return nil
 	}
@@ -213,6 +248,7 @@ type forgeConnectReq struct {
 type forgeConnectResp struct {
 	Connection   *forge.Connection `json:"connection,omitempty"`
 	AuthorizeURL string            `json:"authorize_url,omitempty"`
+	InstallURL   string            `json:"install_url,omitempty"`
 }
 
 func (s *Server) handleConnectForge(w http.ResponseWriter, r *http.Request) {
@@ -239,9 +275,47 @@ func (s *Server) handleConnectForge(w http.ResponseWriter, r *http.Request) {
 		s.connectForgePAT(w, r, teamID, id.UserID, provider, baseURL, req)
 	case "oauth", "":
 		s.connectForgeOAuth(w, r, teamID, id.UserID, provider, baseURL, req)
+	case "app":
+		s.connectForgeGitHubApp(w, r, teamID, id.UserID, provider, req)
 	default:
-		httpError(w, http.StatusBadRequest, "mode must be oauth or pat")
+		httpError(w, http.StatusBadRequest, "mode must be oauth, pat, or app")
 	}
+}
+
+// connectForgeGitHubApp starts the GitHub-App install flow: it returns the
+// App's install URL carrying a signed state, and stashes the pending tenant
+// binding so the install callback can resolve the team.
+func (s *Server) connectForgeGitHubApp(w http.ResponseWriter, _ *http.Request, teamID, userID string, provider forge.Provider, req forgeConnectReq) {
+	if provider != forge.ProviderGitHub {
+		httpError(w, http.StatusBadRequest, "the app mode is GitHub-only")
+		return
+	}
+	if !s.forgeGitHubApp.Configured() {
+		httpError(w, http.StatusBadRequest, "the GitHub App is not configured on this server — use OAuth or a PAT")
+		return
+	}
+	state, _, _, err := oidc.GenerateStateAndPKCE()
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	binding, err := newAgentBindingToken()
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	s.forgeStates.put(forgePending{
+		State: state, Provider: forge.ProviderGitHub, ForgeBaseURL: forge.DefaultBaseURL(forge.ProviderGitHub),
+		TenantID: teamID, UserID: userID, AgentBinding: binding,
+		NextURL: safeNext(req.Next), IssuedAt: time.Now().UTC(),
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name: forgeAgentBindingCookie, Value: binding, Path: "/api/forge/",
+		Domain: s.cfg.CookieDomain, HttpOnly: true, Secure: s.cfg.CookieSecure,
+		SameSite: http.SameSiteLaxMode, MaxAge: int((10 * time.Minute).Seconds()),
+	})
+	installURL := "https://github.com/apps/" + url.PathEscape(s.forgeGitHubApp.AppSlug) + "/installations/new?state=" + url.QueryEscape(state)
+	writeJSON(w, forgeConnectResp{InstallURL: installURL})
 }
 
 func (s *Server) connectForgePAT(w http.ResponseWriter, r *http.Request, teamID, userID string, provider forge.Provider, baseURL string, req forgeConnectReq) {
@@ -395,6 +469,75 @@ func (s *Server) handleForgeOAuthCallback(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.auditTenant(r, pending.TenantID, "forge.connection.created", "forge_connection", connID, map[string]any{"provider": pending.Provider, "kind": "oauth_app"})
+	target := pending.NextURL
+	if target == "" {
+		target = "/teams/" + pending.TenantID
+	}
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// handleForgeGitHubAppCallback is the GitHub-App "Setup URL" target after an
+// operator installs the App. GitHub appends installation_id + state; we
+// resolve the team from the signed state (not the URL), mint an initial
+// installation token, seal it, and persist a github_app connection.
+func (s *Server) handleForgeGitHubAppCallback(w http.ResponseWriter, r *http.Request) {
+	if s.forgeStates == nil || !s.forgeGitHubApp.Configured() {
+		httpError(w, http.StatusNotFound, "github app not enabled")
+		return
+	}
+	state := r.URL.Query().Get("state")
+	instStr := r.URL.Query().Get("installation_id")
+	if state == "" || instStr == "" {
+		httpError(w, http.StatusBadRequest, "missing state or installation_id")
+		return
+	}
+	pending, ok := s.forgeStates.take(state)
+	clearForgeAgentBindingCookie(w, s.cfg.CookieDomain, s.cfg.CookieSecure)
+	if !ok {
+		httpError(w, http.StatusBadRequest, "state expired or invalid")
+		return
+	}
+	if pending.AgentBinding != "" {
+		c, cerr := r.Cookie(forgeAgentBindingCookie)
+		if cerr != nil || subtle.ConstantTimeCompare([]byte(c.Value), []byte(pending.AgentBinding)) != 1 {
+			httpError(w, http.StatusBadRequest, "agent binding mismatch")
+			return
+		}
+	}
+	installationID, err := strconv.ParseInt(instStr, 10, 64)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "invalid installation_id")
+		return
+	}
+	cfg := s.githubAppConfig()
+	base := forge.DefaultBaseURL(forge.ProviderGitHub)
+	now := time.Now().UTC()
+	tok, exp, err := forgegithub.MintInstallationToken(r.Context(), s.httpClient, forgegithub.APIBaseFor(base), cfg, installationID, now)
+	if err != nil {
+		httpError(w, http.StatusBadGateway, "could not mint installation token: %v", err)
+		return
+	}
+	connID := uuid.NewString()
+	// Seal the installation token like an OAuth access token (no refresh
+	// token — the refresh worker re-mints from the App private key).
+	sealed, err := forge.SealOAuthTokens(s.sealer, connID, tok, "", exp)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "seal token: %v", err)
+		return
+	}
+	conn := forge.Connection{
+		ID: connID, TenantID: pending.TenantID, Provider: forge.ProviderGitHub, Kind: forge.KindGitHubApp,
+		DisplayName: cfg.AppSlug, ForgeBaseURL: base,
+		AccountLogin: cfg.AppSlug + "[bot]", Namespace: cfg.AppSlug,
+		InstallationID: installationID, AppSlug: cfg.AppSlug,
+		Status: forge.StatusActive, SealedPayload: sealed, AccessTokenExpiresAt: &exp,
+		CreatedBy: pending.UserID, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.forgeConnections.Create(store.WithTenant(r.Context(), pending.TenantID), conn); err != nil {
+		httpError(w, http.StatusInternalServerError, "persist connection: %v", err)
+		return
+	}
+	s.auditTenant(r, pending.TenantID, "forge.connection.created", "forge_connection", connID, map[string]any{"provider": "github", "kind": "github_app"})
 	target := pending.NextURL
 	if target == "" {
 		target = "/teams/" + pending.TenantID

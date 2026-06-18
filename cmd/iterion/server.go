@@ -139,6 +139,25 @@ func forgeOAuthFromEnv() server.ForgeOAuthConfig {
 	return out
 }
 
+// forgeGitHubAppFromEnv reads the GitHub-App identity for the
+// installation-token connect mode. The PEM private key is loaded from a file
+// (the canonical k8s-secret mount), falling back to an inline env value.
+// Empty AppID → the App mode is unavailable (OAuth/PAT still work).
+func forgeGitHubAppFromEnv() server.ForgeGitHubAppConfig {
+	appID, _ := strconv.ParseInt(strings.TrimSpace(os.Getenv("ITERION_FORGE_GITHUB_APP_ID")), 10, 64)
+	key := strings.TrimSpace(os.Getenv("ITERION_FORGE_GITHUB_APP_PRIVATE_KEY"))
+	if path := strings.TrimSpace(os.Getenv("ITERION_FORGE_GITHUB_APP_PRIVATE_KEY_FILE")); path != "" {
+		if b, err := os.ReadFile(path); err == nil {
+			key = string(b)
+		}
+	}
+	return server.ForgeGitHubAppConfig{
+		AppID:      appID,
+		PrivateKey: key,
+		AppSlug:    strings.TrimSpace(os.Getenv("ITERION_FORGE_GITHUB_APP_SLUG")),
+	}
+}
+
 func randomBootstrapPassword() (string, error) {
 	b := make([]byte, 18)
 	if _, err := rand.Read(b); err != nil {
@@ -536,6 +555,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		ForgeConnections:       forgeConnStore,
 		ForgeIntegrations:      forgeIntegrationStore,
 		ForgeOAuth:             forgeOAuthFromEnv(),
+		ForgeGitHubApp:         forgeGitHubAppFromEnv(),
 		WebhookConfigs:         webhookStores.Configs,
 		WebhookDeliveries:      webhookStores.Deliveries,
 		WebhookCounter:         webhookStores.Counter,

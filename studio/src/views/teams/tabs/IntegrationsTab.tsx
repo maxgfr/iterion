@@ -445,9 +445,14 @@ function ConnectForm({
 }) {
   const [provider, setProvider] = useState<ForgeProvider>("gitlab");
   const [baseURL, setBaseURL] = useState("");
-  const [mode, setMode] = useState<"oauth" | "pat">("pat");
+  const [mode, setMode] = useState<"oauth" | "pat" | "app">("pat");
   const [pat, setPat] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const pickProvider = (p: ForgeProvider) => {
+    setProvider(p);
+    if (p !== "github" && mode === "app") setMode("pat");
+  };
 
   const connect = async () => {
     setBusy(true);
@@ -459,8 +464,9 @@ function ConnectForm({
         pat: mode === "pat" ? pat : undefined,
         next: window.location.pathname,
       });
-      if (res.authorize_url) {
-        window.location.href = res.authorize_url; // full-page OAuth round-trip
+      // full-page round-trip for OAuth / App install.
+      if (res.authorize_url || res.install_url) {
+        window.location.href = (res.authorize_url ?? res.install_url) as string;
         return;
       }
       setPat("");
@@ -472,10 +478,11 @@ function ConnectForm({
     }
   };
 
-  const oauthHint = useMemo(
-    () => (mode === "oauth" ? "You'll be redirected to authorize iterion, then back here." : ""),
-    [mode],
-  );
+  const redirectHint = useMemo(() => {
+    if (mode === "oauth") return "You'll be redirected to authorize iterion, then back here.";
+    if (mode === "app") return "You'll be redirected to GitHub to install the app, then back here.";
+    return "";
+  }, [mode]);
 
   return (
     <section className="bg-surface-1 border border-border-subtle rounded p-4 space-y-3">
@@ -485,7 +492,7 @@ function ConnectForm({
           <button
             key={p}
             disabled={!CONNECTABLE.includes(p)}
-            onClick={() => setProvider(p)}
+            onClick={() => pickProvider(p)}
             className={`text-sm rounded px-3 py-1 border ${
               provider === p ? "border-accent bg-surface-2" : "border-border-subtle"
             } disabled:opacity-40`}
@@ -521,6 +528,12 @@ function ConnectForm({
           />
           Use OAuth
         </label>
+        {provider === "github" && (
+          <label className="flex items-center gap-1">
+            <input type="radio" checked={mode === "app"} onChange={() => setMode("app")} />
+            Install GitHub App
+          </label>
+        )}
       </div>
 
       {mode === "pat" && (
@@ -532,7 +545,7 @@ function ConnectForm({
           onChange={(e) => setPat(e.target.value)}
         />
       )}
-      {oauthHint && <p className="text-caption text-fg-muted">{oauthHint}</p>}
+      {redirectHint && <p className="text-caption text-fg-muted">{redirectHint}</p>}
 
       <button
         onClick={() => void connect()}

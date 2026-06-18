@@ -182,6 +182,9 @@ type Config struct {
 	// connect flow uses. A provider absent here only accepts the PAT
 	// fallback (the path for self-hosted instances with no registrable app).
 	ForgeOAuth ForgeOAuthConfig
+	// ForgeGitHubApp is the global GitHub-App identity for the
+	// installation-token connect mode. Empty → that mode is unavailable.
+	ForgeGitHubApp ForgeGitHubAppConfig
 
 	// MemoryStore backs the shared-knowledge REST surface
 	// (/api/memory/*). nil → the local filesystem store. Cloud mode
@@ -378,6 +381,7 @@ type Server struct {
 	forgeOrchestrator *forge.Orchestrator
 	forgeStates       *forgeStateStore
 	forgeOAuth        ForgeOAuthConfig
+	forgeGitHubApp    ForgeGitHubAppConfig
 	memStore          knowledge.MemoryStore
 	// webhookLaunchBot overrides the inbound-webhook launch path (test
 	// seam). nil → realWebhookLaunchBot (resolve bot source + s.runs.Launch).
@@ -523,6 +527,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		forgeConnections:  cfg.ForgeConnections,
 		forgeIntegrations: cfg.ForgeIntegrations,
 		forgeOAuth:        cfg.ForgeOAuth,
+		forgeGitHubApp:    cfg.ForgeGitHubApp,
 		memStore:          cfg.MemoryStore,
 		httpClient:        &http.Client{Timeout: 15 * time.Second},
 		browserSessions:   cfg.BrowserRegistry,
