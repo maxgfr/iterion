@@ -122,6 +122,15 @@ type Config struct {
 	AuthorizedRepliers []string `bson:"authorized_repliers,omitempty" json:"authorized_repliers,omitempty"`
 	MinReplierRole     string   `bson:"min_replier_role,omitempty" json:"min_replier_role,omitempty"`
 
+	// ProvisionedBy marks a config the forge Integrations orchestrator
+	// created + owns (value "forge:<connection_id>"), as opposed to one an
+	// operator hand-created. Non-empty configs are managed: the CRUD layer
+	// blocks direct delete (the operator disables the integration instead)
+	// and the studio Webhooks tab renders them read-only with a "Managed via
+	// Integrations" pill. Empty = a normal operator-created webhook (the
+	// default; every pre-existing row decodes to "" and behaves as before).
+	ProvisionedBy string `bson:"provisioned_by,omitempty" json:"provisioned_by,omitempty"`
+
 	CreatedBy  string     `bson:"created_by" json:"created_by"`
 	CreatedAt  time.Time  `bson:"created_at" json:"created_at"`
 	UpdatedAt  time.Time  `bson:"updated_at" json:"updated_at"`

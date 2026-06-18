@@ -1,0 +1,527 @@
+package forge
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/SocialGouv/iterion/pkg/bundle"
+	"github.com/SocialGouv/iterion/pkg/secrets"
+	"github.com/SocialGouv/iterion/pkg/webhooks"
+)
+
+// BotForgeLookup returns a bot's declared forge requirements (its manifest
+// forge: block). A nil result with a nil error means the bot exists but
+// declares no forge: block — it cannot be auto-provisioned. A non-nil error
+// means the bot could not be resolved. The server wires this to
+// botregistry; tests pass a closure.
+type BotForgeLookup func(botID string) (*bundle.ForgeRequirements, error)
+
+// Orchestrator turns "enable bot(s) X on repo Y of connection C" into the
+// concrete trio — an iterion webhooks.Config, a forge-side hook, and a
+// per-webhook secret override pinning the connection's managed forge token
+// — recorded as one RepoIntegration. Idempotent and reversible.
+type Orchestrator struct {
+	Connections  ConnectionStore
+	Integrations RepoIntegrationStore
+	Webhooks     webhooks.ConfigStore
+	Secrets      secrets.GenericSecretStore
+	Sealer       secrets.Sealer
+	Bots         BotForgeLookup
+	// AdminFor builds the outbound client for a connection (opens its sealed
+	// token). Injected so the orchestrator stays provider-agnostic and
+	// testable with a fake admin.
+	AdminFor  func(ctx context.Context, conn Connection) (Admin, error)
+	PublicURL string
+
+	// Optional injection points for tests (default to time.Now / uuid).
+	Now   func() time.Time
+	NewID func() string
+}
+
+func (o *Orchestrator) clock() time.Time {
+	if o.Now != nil {
+		return o.Now()
+	}
+	return time.Now().UTC()
+}
+
+func (o *Orchestrator) id() string {
+	if o.NewID != nil {
+		return o.NewID()
+	}
+	return uuid.NewString()
+}
+
+// ProvisionRequest enables a set of bots on one repo of one connection.
+type ProvisionRequest struct {
+	TenantID     string
+	ConnectionID string
+	RepoFullName string // "owner/repo" (GitLab: namespace/project path)
+	BotIDs       []string
+	ActorID      string // operator who triggered it (audit / created_by)
+}
+
+// ProvisionResult reports what the orchestrator created or reused.
+type ProvisionResult struct {
+	IntegrationID   string   `json:"integration_id"`
+	WebhookID       string   `json:"webhook_id"`
+	HookID          string   `json:"hook_id"`
+	ManagedSecretID string   `json:"managed_secret_id"`
+	BotIDs          []string `json:"bot_ids"`
+	// Created is false when the call was a fully idempotent no-op (the repo
+	// already had exactly these bots + events enabled).
+	Created bool `json:"created"`
+}
+
+// Provision is the one-action enable flow. See the package doc for the
+// separation of concerns. Requires the ctx to carry the tenant for the
+// Mongo secret store (the provisioning route wraps it); the Memory store
+// used in tests does not need it.
+func (o *Orchestrator) Provision(ctx context.Context, req ProvisionRequest) (ProvisionResult, error) {
+	if req.TenantID == "" || req.ConnectionID == "" || strings.TrimSpace(req.RepoFullName) == "" {
+		return ProvisionResult{}, fmt.Errorf("forge: provision requires tenant, connection and repo")
+	}
+	if len(req.BotIDs) == 0 {
+		return ProvisionResult{}, fmt.Errorf("forge: provision requires at least one bot")
+	}
+
+	conn, err := o.Connections.Get(ctx, req.ConnectionID)
+	if err != nil {
+		return ProvisionResult{}, err
+	}
+	if conn.TenantID != req.TenantID {
+		return ProvisionResult{}, ErrConnectionNotFound // cross-tenant — do not leak existence
+	}
+
+	existing, exErr := o.Integrations.GetByConnRepo(ctx, req.TenantID, conn.ID, req.RepoFullName)
+	hasExisting := exErr == nil
+	if exErr != nil && !errors.Is(exErr, ErrIntegrationNotFound) {
+		return ProvisionResult{}, exErr
+	}
+
+	desiredBots := dedupSorted(req.BotIDs)
+	if hasExisting {
+		desiredBots = dedupSorted(append(append([]string{}, existing.BotIDs...), req.BotIDs...))
+	}
+
+	// Resolve every bot's forge requirements (fail loudly if a bot declares
+	// no forge: block — it cannot be auto-provisioned).
+	reqs := make([]*bundle.ForgeRequirements, 0, len(desiredBots))
+	for _, b := range desiredBots {
+		fr, err := o.Bots(b)
+		if err != nil {
+			return ProvisionResult{}, fmt.Errorf("forge: resolve bot %q: %w", b, err)
+		}
+		if fr == nil {
+			return ProvisionResult{}, fmt.Errorf("forge: bot %q declares no forge: block; cannot auto-provision", b)
+		}
+		reqs = append(reqs, fr)
+	}
+	eventsNormalized := UnionEvents(reqs...)
+	nativeEvents := ToNativeEvents(conn.Provider, eventsNormalized)
+	if len(nativeEvents) == 0 {
+		return ProvisionResult{}, fmt.Errorf("forge: bots %v declare no forge events to subscribe to", desiredBots)
+	}
+
+	// Idempotent no-op: same bots + same events already provisioned.
+	if hasExisting && equalStringSet(existing.BotIDs, desiredBots) && equalStringSet(existing.EventsNormalized, eventsNormalized) {
+		return ProvisionResult{
+			IntegrationID:   existing.ID,
+			WebhookID:       existing.WebhookID,
+			HookID:          existing.HookID,
+			ManagedSecretID: existing.ManagedSecretID,
+			BotIDs:          existing.BotIDs,
+			Created:         false,
+		}, nil
+	}
+
+	managedSecretID, err := o.ensureManagedSecret(ctx, &conn, req.ActorID)
+	if err != nil {
+		return ProvisionResult{}, err
+	}
+
+	// Per-webhook secret override pinning the connection's managed forge
+	// token under each bot's declared workflow-secret name (Tier-0 in
+	// ResolveGenericWithBindings — wins over any org binding, and avoids the
+	// (tenant,bot,name) binding unique-constraint when the same bot runs on
+	// several connections).
+	secretOverrides := map[string]string{}
+	launchVars := map[string]string{}
+	minRole := ""
+	for _, fr := range reqs {
+		secretOverrides[fr.SecretName()] = managedSecretID
+		if fr.Webhook != nil {
+			for k, v := range fr.Webhook.LaunchVars {
+				launchVars[k] = v
+			}
+			if fr.Webhook.MinReplierRole != "" && webhookRoleRank(fr.Webhook.MinReplierRole) > webhookRoleRank(minRole) {
+				minRole = fr.Webhook.MinReplierRole
+			}
+		}
+	}
+
+	// Mint a fresh iwh_ on every mutating provision (create OR event-widen):
+	// it keeps the forge hook secret and the iterion config hash in lockstep
+	// without ever needing the prior plaintext. The operator never sees it —
+	// iterion holds both ends.
+	plaintext, hash, last4, fingerprint, err := webhooks.MintToken()
+	if err != nil {
+		return ProvisionResult{}, fmt.Errorf("forge: mint webhook token: %w", err)
+	}
+
+	webhookID := o.id()
+	if hasExisting && existing.WebhookID != "" {
+		webhookID = existing.WebhookID
+	}
+
+	now := o.clock()
+	cfg := webhooks.Config{
+		ID:               webhookID,
+		TenantID:         req.TenantID,
+		Name:             provisionedWebhookName(conn.Provider, req.RepoFullName),
+		Provider:         webhooks.Provider(conn.Provider),
+		SignMode:         signModeFor(conn.Provider),
+		Enabled:          true,
+		TokenHash:        hash,
+		TokenLast4:       last4,
+		Fingerprint:      fingerprint,
+		BotIDs:           desiredBots,
+		DefaultBotID:     singleBotDefault(desiredBots),
+		ProjectAllowlist: []string{req.RepoFullName},
+		EventAllowlist:   nativeEvents,
+		ForgeBaseURL:     conn.BaseURL(),
+		RateLimit:        webhooks.Rate{Rate: 1, Burst: 10},
+		LaunchVars:       nilIfEmpty(launchVars),
+		SecretOverrides:  secretOverrides,
+		MinReplierRole:   minRole,
+		ProvisionedBy:    "forge:" + conn.ID,
+		CreatedBy:        req.ActorID,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if cfg.SignMode == webhooks.SignModeHMAC {
+		sealed, err := webhooks.SealHMACSecret(o.Sealer, cfg.ID, plaintext)
+		if err != nil {
+			return ProvisionResult{}, fmt.Errorf("forge: seal webhook hmac secret: %w", err)
+		}
+		cfg.HMACSecretSealed = sealed
+	}
+
+	createdConfig := false
+	if hasExisting && existing.WebhookID != "" {
+		if old, gerr := o.Webhooks.Get(ctx, webhookID); gerr == nil {
+			cfg.CreatedAt = old.CreatedAt
+			cfg.CreatedBy = old.CreatedBy
+		}
+		cfg.RotatedAt = &now
+		if err := o.Webhooks.Update(ctx, cfg); err != nil {
+			return ProvisionResult{}, fmt.Errorf("forge: update webhook config: %w", err)
+		}
+	} else {
+		if err := o.Webhooks.Create(ctx, cfg); err != nil {
+			return ProvisionResult{}, fmt.Errorf("forge: create webhook config: %w", err)
+		}
+		createdConfig = true
+	}
+
+	// Register / update the forge-side hook. On any failure during a fresh
+	// provision, roll the just-created config back so we don't strand an
+	// orphan inbound endpoint.
+	admin, err := o.AdminFor(ctx, conn)
+	if err != nil {
+		o.rollbackConfig(ctx, createdConfig, webhookID)
+		return ProvisionResult{}, fmt.Errorf("forge: build admin client: %w", err)
+	}
+	hookURL := o.inboundURL(conn.Provider, webhookID)
+	spec := HookSpec{URL: hookURL, Secret: plaintext, Events: nativeEvents, Active: true}
+
+	hookID, err := o.upsertHook(ctx, admin, req.RepoFullName, priorHookID(hasExisting, existing), hookURL, spec)
+	if err != nil {
+		o.rollbackConfig(ctx, createdConfig, webhookID)
+		return ProvisionResult{}, err
+	}
+
+	ri := RepoIntegration{
+		ID:               firstNonEmpty(existingID(hasExisting, existing), o.id()),
+		TenantID:         req.TenantID,
+		ConnectionID:     conn.ID,
+		Provider:         conn.Provider,
+		RepoFullName:     req.RepoFullName,
+		BotIDs:           desiredBots,
+		EventsNormalized: eventsNormalized,
+		WebhookID:        webhookID,
+		HookID:           hookID,
+		HookURL:          hookURL,
+		ManagedSecretID:  managedSecretID,
+		CreatedBy:        req.ActorID,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if hasExisting {
+		ri.CreatedAt = existing.CreatedAt
+		ri.CreatedBy = existing.CreatedBy
+		if err := o.Integrations.Update(ctx, ri); err != nil {
+			return ProvisionResult{}, fmt.Errorf("forge: update integration: %w", err)
+		}
+	} else {
+		if err := o.Integrations.Create(ctx, ri); err != nil {
+			o.rollbackConfig(ctx, createdConfig, webhookID)
+			return ProvisionResult{}, fmt.Errorf("forge: record integration: %w", err)
+		}
+	}
+
+	return ProvisionResult{
+		IntegrationID:   ri.ID,
+		WebhookID:       webhookID,
+		HookID:          hookID,
+		ManagedSecretID: managedSecretID,
+		BotIDs:          desiredBots,
+		Created:         !hasExisting,
+	}, nil
+}
+
+// upsertHook reuses an existing iterion hook (by stored id or by probing
+// the delivery URL) or creates a fresh one, always pushing the current
+// spec (events + secret).
+func (o *Orchestrator) upsertHook(ctx context.Context, admin Admin, repo, priorID, hookURL string, spec HookSpec) (string, error) {
+	if priorID != "" {
+		h, err := admin.UpdateHook(ctx, repo, priorID, spec)
+		if err == nil {
+			return h.ID, nil
+		}
+		if !errors.Is(err, ErrHookNotFound) {
+			return "", fmt.Errorf("forge: update hook: %w", err)
+		}
+		// fall through: the stored hook is gone on the forge — recreate it.
+	}
+	if found, err := admin.GetHook(ctx, repo, hookURL); err == nil && found != nil {
+		h, err := admin.UpdateHook(ctx, repo, found.ID, spec)
+		if err != nil {
+			return "", fmt.Errorf("forge: update hook: %w", err)
+		}
+		return h.ID, nil
+	}
+	h, err := admin.CreateHook(ctx, repo, spec)
+	if err != nil {
+		return "", fmt.Errorf("forge: create hook: %w", err)
+	}
+	return h.ID, nil
+}
+
+func (o *Orchestrator) rollbackConfig(ctx context.Context, created bool, webhookID string) {
+	if created && webhookID != "" {
+		_ = o.Webhooks.Delete(ctx, webhookID)
+	}
+}
+
+// ensureManagedSecret creates (once per connection) the team-scoped generic
+// secret holding the connection's admin token as the bot-runtime forge
+// token, stamping its id onto the connection. Reused across every repo/bot
+// of the connection; the refresh worker rewrites its plaintext on rotation.
+func (o *Orchestrator) ensureManagedSecret(ctx context.Context, conn *Connection, actor string) (string, error) {
+	if conn.ManagedSecretID != "" {
+		return conn.ManagedSecretID, nil
+	}
+	sec, err := openConnectionSecret(o.Sealer, conn.ID, conn.SealedPayload)
+	if err != nil {
+		return "", err
+	}
+	token := sec.AdminToken()
+	if token == "" {
+		return "", fmt.Errorf("forge: connection %s holds no usable token", conn.ID)
+	}
+	secID := secrets.NewGenericSecretID()
+	sealed, err := secrets.SealGenericSecret(o.Sealer, secID, []byte(token))
+	if err != nil {
+		return "", fmt.Errorf("forge: seal managed secret: %w", err)
+	}
+	now := o.clock()
+	gs := secrets.GenericSecret{
+		ID:           secID,
+		TenantID:     conn.TenantID,
+		ScopeTeamID:  conn.TenantID,
+		Name:         managedSecretName(conn),
+		Last4:        secrets.Last4(token),
+		Fingerprint:  secrets.FingerprintSHA256(token),
+		SealedSecret: sealed,
+		CreatedBy:    actor,
+		CreatedAt:    now,
+	}
+	if err := o.Secrets.Create(ctx, gs); err != nil {
+		return "", fmt.Errorf("forge: create managed secret: %w", err)
+	}
+	conn.ManagedSecretID = secID
+	conn.UpdatedAt = now
+	if err := o.Connections.Update(ctx, *conn); err != nil {
+		return "", fmt.Errorf("forge: stamp managed secret on connection: %w", err)
+	}
+	return secID, nil
+}
+
+// Deprovision removes one repo integration: the forge hook (best-effort —
+// a 404 is success), the iterion webhook config, and the join row. The
+// connection's managed secret survives (it is connection-level, shared
+// across that connection's other repos).
+func (o *Orchestrator) Deprovision(ctx context.Context, tenantID, integrationID string) error {
+	ri, err := o.Integrations.Get(ctx, integrationID)
+	if err != nil {
+		return err
+	}
+	if ri.TenantID != tenantID {
+		return ErrIntegrationNotFound
+	}
+	if ri.HookID != "" {
+		if conn, cerr := o.Connections.Get(ctx, ri.ConnectionID); cerr == nil {
+			if admin, aerr := o.AdminFor(ctx, conn); aerr == nil {
+				if derr := admin.DeleteHook(ctx, ri.RepoFullName, ri.HookID); derr != nil && !errors.Is(derr, ErrHookNotFound) {
+					return fmt.Errorf("forge: delete forge hook: %w", derr)
+				}
+			}
+		}
+	}
+	if ri.WebhookID != "" {
+		if derr := o.Webhooks.Delete(ctx, ri.WebhookID); derr != nil && !errors.Is(derr, webhooks.ErrNotFound) {
+			return fmt.Errorf("forge: delete webhook config: %w", derr)
+		}
+	}
+	return o.Integrations.Delete(ctx, ri.ID)
+}
+
+// DeprovisionConnection tears down every integration for a connection, then
+// deletes the connection's managed secret and the connection itself.
+func (o *Orchestrator) DeprovisionConnection(ctx context.Context, tenantID, connID string) error {
+	conn, err := o.Connections.Get(ctx, connID)
+	if err != nil {
+		return err
+	}
+	if conn.TenantID != tenantID {
+		return ErrConnectionNotFound
+	}
+	items, err := o.Integrations.ListByConnection(ctx, tenantID, connID)
+	if err != nil {
+		return err
+	}
+	for _, ri := range items {
+		if derr := o.Deprovision(ctx, tenantID, ri.ID); derr != nil {
+			return derr
+		}
+	}
+	if conn.ManagedSecretID != "" {
+		if derr := o.Secrets.Delete(ctx, conn.ManagedSecretID); derr != nil && !errors.Is(derr, secrets.ErrGenericSecretNotFound) {
+			return fmt.Errorf("forge: delete managed secret: %w", derr)
+		}
+	}
+	return o.Connections.Delete(ctx, connID)
+}
+
+func (o *Orchestrator) inboundURL(p Provider, webhookID string) string {
+	return strings.TrimRight(o.PublicURL, "/") + "/api/webhooks/" + string(p) + "/" + webhookID
+}
+
+// ---- small helpers ----
+
+func signModeFor(p Provider) webhooks.SignatureMode {
+	switch p {
+	case ProviderGitHub, ProviderForgejo:
+		return webhooks.SignModeHMAC
+	default: // gitlab uses the secret-token header
+		return webhooks.SignModeToken
+	}
+}
+
+func provisionedWebhookName(p Provider, repo string) string {
+	return string(p) + ":" + repo
+}
+
+func managedSecretName(conn *Connection) string {
+	short := strings.ReplaceAll(conn.ID, "-", "")
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	return "forge_" + string(conn.Provider) + "_" + short
+}
+
+func singleBotDefault(bots []string) string {
+	if len(bots) == 1 {
+		return bots[0]
+	}
+	return ""
+}
+
+// webhookRoleRank mirrors gitlab role precedence so UnionScopes-style merges
+// keep the MOST restrictive declared min-replier-role.
+func webhookRoleRank(role string) int {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "owner":
+		return 5
+	case "maintainer":
+		return 4
+	case "developer":
+		return 3
+	case "reporter":
+		return 2
+	case "guest":
+		return 1
+	}
+	return 0
+}
+
+func dedupSorted(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if s = strings.TrimSpace(s); s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func equalStringSet(a, b []string) bool {
+	as, bs := dedupSorted(a), dedupSorted(b)
+	if len(as) != len(bs) {
+		return false
+	}
+	for i := range as {
+		if as[i] != bs[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func nilIfEmpty(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func existingID(has bool, ri RepoIntegration) string {
+	if has {
+		return ri.ID
+	}
+	return ""
+}
+
+func priorHookID(has bool, ri RepoIntegration) string {
+	if has {
+		return ri.HookID
+	}
+	return ""
+}

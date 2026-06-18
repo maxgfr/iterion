@@ -1,0 +1,180 @@
+package forge
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/SocialGouv/iterion/pkg/secrets"
+)
+
+// TokenRefresher renews one connection's admin credential. Per-provider
+// implementations (OAuth refresh-token grant, GitHub-App installation-token
+// mint) satisfy it; PAT connections have no refresher and are skipped.
+//
+// Refresh returns the new token material. A nil error with an empty
+// AccessToken means "nothing to do" (the implementation decided no refresh
+// was needed). Returning ErrUnauthorized marks the connection revoked.
+type TokenRefresher interface {
+	Refresh(ctx context.Context, conn Connection, current connectionRefreshInput) (RefreshedToken, error)
+}
+
+// connectionRefreshInput hands the refresher the current refresh token
+// without exposing the whole sealed blob.
+type connectionRefreshInput struct {
+	RefreshToken string
+}
+
+// RefreshedToken is the output of a successful refresh.
+type RefreshedToken struct {
+	AccessToken  string
+	RefreshToken string // may be rotated by the provider; empty = keep current
+	ExpiresAt    time.Time
+	Scopes       []string
+}
+
+// RefreshWorker keeps OAuth-app and GitHub-App connection tokens fresh and
+// rewrites the connection's managed generic secret so bot runs always read
+// a live token. Mirrors pkg/secrets/oauth_refresh.go's role for LLM
+// forfaits. PAT connections are never touched.
+type RefreshWorker struct {
+	Connections ConnectionStore
+	Secrets     secrets.GenericSecretStore
+	Sealer      secrets.Sealer
+	// Refresher resolves a per-provider/kind refresher for a connection.
+	// Returns (nil, nil) when the connection kind cannot/should-not refresh
+	// (e.g. PAT) — the worker skips it.
+	RefresherFor func(conn Connection) TokenRefresher
+	// Lead is how far before expiry a token is refreshed (default 5m).
+	Lead time.Duration
+	Now  func() time.Time
+}
+
+func (w *RefreshWorker) now() time.Time {
+	if w.Now != nil {
+		return w.Now()
+	}
+	return time.Now().UTC()
+}
+
+func (w *RefreshWorker) lead() time.Duration {
+	if w.Lead > 0 {
+		return w.Lead
+	}
+	return 5 * time.Minute
+}
+
+// RunOnce refreshes every connection expiring within the lead window.
+// Returns the number refreshed; per-connection errors are collected but do
+// not abort the sweep (one bad connection must not wedge the others).
+func (w *RefreshWorker) RunOnce(ctx context.Context) (int, error) {
+	cutoff := w.now().Add(w.lead())
+	due, err := w.Connections.ExpiringBefore(ctx, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("forge: list expiring connections: %w", err)
+	}
+	refreshed := 0
+	var firstErr error
+	for _, conn := range due {
+		if err := w.refreshOne(ctx, conn); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		refreshed++
+	}
+	return refreshed, firstErr
+}
+
+// refreshOne renews one connection. Ordering is load-bearing: the
+// connection blob is written FIRST (the canonical record), the managed
+// generic secret SECOND, so a crash between them leaves a working-but-old
+// secret rather than a zero value.
+func (w *RefreshWorker) refreshOne(ctx context.Context, conn Connection) error {
+	if w.RefresherFor == nil {
+		return nil
+	}
+	r := w.RefresherFor(conn)
+	if r == nil {
+		return nil // not refreshable (PAT) — skip
+	}
+	cur, err := openConnectionSecret(w.Sealer, conn.ID, conn.SealedPayload)
+	if err != nil {
+		return err
+	}
+	out, err := r.Refresh(ctx, conn, connectionRefreshInput{RefreshToken: cur.RefreshToken})
+	if err != nil {
+		if isUnauthorized(err) {
+			return w.markRevoked(ctx, conn)
+		}
+		return err
+	}
+	if out.AccessToken == "" {
+		return nil // refresher decided nothing to do
+	}
+
+	// 1) re-seal the connection blob (canonical).
+	cur.AccessToken = out.AccessToken
+	if out.RefreshToken != "" {
+		cur.RefreshToken = out.RefreshToken
+	}
+	if !out.ExpiresAt.IsZero() {
+		cur.ExpiresAt = out.ExpiresAt
+	}
+	sealed, err := sealConnectionSecret(w.Sealer, conn.ID, cur)
+	if err != nil {
+		return err
+	}
+	now := w.now()
+	conn.SealedPayload = sealed
+	conn.Status = StatusActive
+	conn.LastRefreshedAt = &now
+	if !out.ExpiresAt.IsZero() {
+		exp := out.ExpiresAt
+		conn.AccessTokenExpiresAt = &exp
+	}
+	if len(out.Scopes) > 0 {
+		conn.Scopes = out.Scopes
+	}
+	conn.UpdatedAt = now
+	if err := w.Connections.Update(ctx, conn); err != nil {
+		return err
+	}
+
+	// 2) rewrite the managed generic secret plaintext so bot runs read the
+	// fresh token. A failure here leaves the secret stale-but-valid until
+	// the next tick — acceptable (the connection is already updated).
+	if conn.ManagedSecretID != "" {
+		if err := w.rewriteManagedSecret(ctx, conn.ManagedSecretID, out.AccessToken); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *RefreshWorker) rewriteManagedSecret(ctx context.Context, secretID, token string) error {
+	gs, err := w.Secrets.Get(ctx, secretID)
+	if err != nil {
+		return fmt.Errorf("forge: load managed secret for rewrite: %w", err)
+	}
+	sealed, err := secrets.SealGenericSecret(w.Sealer, secretID, []byte(token))
+	if err != nil {
+		return err
+	}
+	gs.SealedSecret = sealed
+	gs.Last4 = secrets.Last4(token)
+	gs.Fingerprint = secrets.FingerprintSHA256(token)
+	return w.Secrets.Update(ctx, gs)
+}
+
+func (w *RefreshWorker) markRevoked(ctx context.Context, conn Connection) error {
+	now := w.now()
+	conn.Status = StatusNeedsReauth
+	conn.UpdatedAt = now
+	return w.Connections.Update(ctx, conn)
+}
+
+func isUnauthorized(err error) bool {
+	return err == ErrUnauthorized
+}

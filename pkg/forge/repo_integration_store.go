@@ -1,0 +1,249 @@
+package forge
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"sync"
+	"time"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/SocialGouv/iterion/pkg/internal/mongoutil"
+)
+
+// RepoIntegration is the join row recording what the orchestrator
+// provisioned for one (connection, repo): the bots enabled, the iterion
+// webhook config, the forge-side hook, the bot-secret bindings, and the
+// managed secret. It is the studio Integrations tab's source of truth and
+// the unit of deprovision.
+type RepoIntegration struct {
+	ID               string   `bson:"_id" json:"id"`
+	TenantID         string   `bson:"tenant_id" json:"tenant_id"`
+	ConnectionID     string   `bson:"connection_id" json:"connection_id"`
+	Provider         Provider `bson:"provider" json:"provider"`
+	RepoFullName     string   `bson:"repo_full_name" json:"repo_full_name"`
+	BotIDs           []string `bson:"bot_ids" json:"bot_ids"`
+	EventsNormalized []string `bson:"events_normalized" json:"events_normalized"`
+
+	WebhookID       string   `bson:"webhook_id" json:"webhook_id"`                 // -> webhooks.Config._id
+	HookID          string   `bson:"hook_id" json:"hook_id"`                       // forge-side hook id
+	HookURL         string   `bson:"hook_url,omitempty" json:"hook_url,omitempty"` // the inbound URL we registered
+	BindingIDs      []string `bson:"binding_ids" json:"binding_ids"`               // -> bot_secret_bindings._id
+	ManagedSecretID string   `bson:"managed_secret_id,omitempty" json:"managed_secret_id,omitempty"`
+
+	CreatedBy string    `bson:"created_by" json:"created_by"`
+	CreatedAt time.Time `bson:"created_at" json:"created_at"`
+	UpdatedAt time.Time `bson:"updated_at" json:"updated_at"`
+}
+
+// RepoIntegrationStore persists repo integrations. GetByConnRepo backs the
+// orchestrator's race-safe find-or-create; ListByWebhook backs the
+// webhook-delete "in use by integration" guard.
+type RepoIntegrationStore interface {
+	Create(ctx context.Context, ri RepoIntegration) error
+	Get(ctx context.Context, id string) (RepoIntegration, error)
+	Update(ctx context.Context, ri RepoIntegration) error
+	Delete(ctx context.Context, id string) error
+	GetByConnRepo(ctx context.Context, tenantID, connID, repo string) (RepoIntegration, error)
+	ListByTenant(ctx context.Context, tenantID string) ([]RepoIntegration, error)
+	ListByConnection(ctx context.Context, tenantID, connID string) ([]RepoIntegration, error)
+	ListByWebhook(ctx context.Context, tenantID, webhookID string) ([]RepoIntegration, error)
+}
+
+// ---- in-memory store (tests / local) ----
+
+type MemoryRepoIntegrationStore struct {
+	mu    sync.RWMutex
+	items map[string]RepoIntegration
+}
+
+func NewMemoryRepoIntegrationStore() *MemoryRepoIntegrationStore {
+	return &MemoryRepoIntegrationStore{items: make(map[string]RepoIntegration)}
+}
+
+func (m *MemoryRepoIntegrationStore) Create(_ context.Context, ri RepoIntegration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, ex := range m.items {
+		if ex.TenantID == ri.TenantID && ex.ConnectionID == ri.ConnectionID && ex.RepoFullName == ri.RepoFullName {
+			return fmt.Errorf("forge: integration already exists for %s on connection %s", ri.RepoFullName, ri.ConnectionID)
+		}
+	}
+	m.items[ri.ID] = ri
+	return nil
+}
+
+func (m *MemoryRepoIntegrationStore) Get(_ context.Context, id string) (RepoIntegration, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ri, ok := m.items[id]
+	if !ok {
+		return RepoIntegration{}, ErrIntegrationNotFound
+	}
+	return ri, nil
+}
+
+func (m *MemoryRepoIntegrationStore) Update(_ context.Context, ri RepoIntegration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.items[ri.ID]; !ok {
+		return ErrIntegrationNotFound
+	}
+	m.items[ri.ID] = ri
+	return nil
+}
+
+func (m *MemoryRepoIntegrationStore) Delete(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.items[id]; !ok {
+		return ErrIntegrationNotFound
+	}
+	delete(m.items, id)
+	return nil
+}
+
+func (m *MemoryRepoIntegrationStore) GetByConnRepo(_ context.Context, tenantID, connID, repo string) (RepoIntegration, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, ri := range m.items {
+		if ri.TenantID == tenantID && ri.ConnectionID == connID && ri.RepoFullName == repo {
+			return ri, nil
+		}
+	}
+	return RepoIntegration{}, ErrIntegrationNotFound
+}
+
+func (m *MemoryRepoIntegrationStore) ListByTenant(_ context.Context, tenantID string) ([]RepoIntegration, error) {
+	return m.filter(func(ri RepoIntegration) bool { return ri.TenantID == tenantID }), nil
+}
+
+func (m *MemoryRepoIntegrationStore) ListByConnection(_ context.Context, tenantID, connID string) ([]RepoIntegration, error) {
+	return m.filter(func(ri RepoIntegration) bool {
+		return ri.TenantID == tenantID && ri.ConnectionID == connID
+	}), nil
+}
+
+func (m *MemoryRepoIntegrationStore) ListByWebhook(_ context.Context, tenantID, webhookID string) ([]RepoIntegration, error) {
+	return m.filter(func(ri RepoIntegration) bool {
+		return ri.TenantID == tenantID && ri.WebhookID == webhookID
+	}), nil
+}
+
+func (m *MemoryRepoIntegrationStore) filter(keep func(RepoIntegration) bool) []RepoIntegration {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []RepoIntegration
+	for _, ri := range m.items {
+		if keep(ri) {
+			out = append(out, ri)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out
+}
+
+// ---- Mongo store ----
+
+const RepoIntegrationsCollectionName = "repo_integrations"
+
+type MongoRepoIntegrationStore struct {
+	coll *mongo.Collection
+}
+
+func NewMongoRepoIntegrationStore(db *mongo.Database) *MongoRepoIntegrationStore {
+	return &MongoRepoIntegrationStore{coll: db.Collection(RepoIntegrationsCollectionName)}
+}
+
+func (s *MongoRepoIntegrationStore) EnsureSchema(ctx context.Context) error {
+	_, err := s.coll.Indexes().CreateMany(ctx, []mongo.IndexModel{
+		{Keys: bson.D{{Key: "tenant_id", Value: 1}, {Key: "connection_id", Value: 1}, {Key: "repo_full_name", Value: 1}}, Options: options.Index().SetUnique(true).SetName("tenant_conn_repo_unique")},
+		{Keys: bson.D{{Key: "tenant_id", Value: 1}, {Key: "webhook_id", Value: 1}}, Options: options.Index().SetName("tenant_webhook")},
+	})
+	if err != nil && !mongoutil.IsIndexConflict(err) {
+		return fmt.Errorf("forge: ensure repo_integrations indexes: %w", err)
+	}
+	return nil
+}
+
+func (s *MongoRepoIntegrationStore) Create(ctx context.Context, ri RepoIntegration) error {
+	if _, err := s.coll.InsertOne(ctx, ri); err != nil {
+		return fmt.Errorf("forge: insert repo integration: %w", err)
+	}
+	return nil
+}
+
+func (s *MongoRepoIntegrationStore) Get(ctx context.Context, id string) (RepoIntegration, error) {
+	var ri RepoIntegration
+	err := s.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&ri)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return RepoIntegration{}, ErrIntegrationNotFound
+	}
+	if err != nil {
+		return RepoIntegration{}, fmt.Errorf("forge: get repo integration: %w", err)
+	}
+	return ri, nil
+}
+
+func (s *MongoRepoIntegrationStore) Update(ctx context.Context, ri RepoIntegration) error {
+	res, err := s.coll.ReplaceOne(ctx, bson.M{"_id": ri.ID}, ri)
+	if err != nil {
+		return fmt.Errorf("forge: update repo integration: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrIntegrationNotFound
+	}
+	return nil
+}
+
+func (s *MongoRepoIntegrationStore) Delete(ctx context.Context, id string) error {
+	res, err := s.coll.DeleteOne(ctx, bson.M{"_id": id})
+	if err != nil {
+		return fmt.Errorf("forge: delete repo integration: %w", err)
+	}
+	if res.DeletedCount == 0 {
+		return ErrIntegrationNotFound
+	}
+	return nil
+}
+
+func (s *MongoRepoIntegrationStore) GetByConnRepo(ctx context.Context, tenantID, connID, repo string) (RepoIntegration, error) {
+	var ri RepoIntegration
+	err := s.coll.FindOne(ctx, bson.M{"tenant_id": tenantID, "connection_id": connID, "repo_full_name": repo}).Decode(&ri)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return RepoIntegration{}, ErrIntegrationNotFound
+	}
+	if err != nil {
+		return RepoIntegration{}, fmt.Errorf("forge: get repo integration by conn/repo: %w", err)
+	}
+	return ri, nil
+}
+
+func (s *MongoRepoIntegrationStore) ListByTenant(ctx context.Context, tenantID string) ([]RepoIntegration, error) {
+	return s.find(ctx, bson.M{"tenant_id": tenantID})
+}
+
+func (s *MongoRepoIntegrationStore) ListByConnection(ctx context.Context, tenantID, connID string) ([]RepoIntegration, error) {
+	return s.find(ctx, bson.M{"tenant_id": tenantID, "connection_id": connID})
+}
+
+func (s *MongoRepoIntegrationStore) ListByWebhook(ctx context.Context, tenantID, webhookID string) ([]RepoIntegration, error) {
+	return s.find(ctx, bson.M{"tenant_id": tenantID, "webhook_id": webhookID})
+}
+
+func (s *MongoRepoIntegrationStore) find(ctx context.Context, filter bson.M) ([]RepoIntegration, error) {
+	cur, err := s.coll.Find(ctx, filter, options.Find().SetSort(bson.M{"created_at": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("forge: list repo integrations: %w", err)
+	}
+	defer cur.Close(ctx)
+	var out []RepoIntegration
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, fmt.Errorf("forge: decode repo integrations: %w", err)
+	}
+	return out, nil
+}
