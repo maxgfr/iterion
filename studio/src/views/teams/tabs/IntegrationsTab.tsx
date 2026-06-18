@@ -20,10 +20,9 @@ import {
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useConfirm } from "@/hooks/useConfirm";
 
-// GitLab + GitHub have wired admin clients; Forgejo is accepted by the
-// model but its client lands in a later phase — keep it out of the connect
-// picker until then.
-const CONNECTABLE: ForgeProvider[] = ["gitlab", "github"];
+// All three forges have wired admin clients (PAT + OAuth App). GitHub App
+// (installation-token) is a separate connect mode handled server-side.
+const CONNECTABLE: ForgeProvider[] = ["gitlab", "github", "forgejo"];
 
 export default function IntegrationsTab({
   teamID,

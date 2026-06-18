@@ -138,9 +138,13 @@ agent-binding cookie:
 | Provider | OAuth | PAT | Status |
 |---|---|---|---|
 | GitLab | ✅ | ✅ | live ([pkg/forge/gitlab](../pkg/forge/gitlab)) |
+| GitHub OAuth App | ✅ | ✅ | live ([pkg/forge/github](../pkg/forge/github)) |
+| Forgejo / Gitea | ✅¹ | ✅ | live ([pkg/forge/forgejo](../pkg/forge/forgejo)) |
 | GitHub App | — | — | Phase 2 (planned) |
-| GitHub OAuth App | — | — | Phase 3 (planned) |
-| Forgejo / Gitea | — | — | Phase 4 (planned) |
+
+¹ Forgejo OAuth-token API auth uses the Gitea `token` scheme like the PAT
+path; validate against a live instance before relying on the OAuth (vs PAT)
+mode there.
 
 Adding a provider = implement the `forge.Admin` interface (+ an
 `OAuthExchanger`/`TokenRefresher` for OAuth) and register it in the server's

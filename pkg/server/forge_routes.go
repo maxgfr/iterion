@@ -17,6 +17,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/auth/oidc"
 	"github.com/SocialGouv/iterion/pkg/bundle"
 	"github.com/SocialGouv/iterion/pkg/forge"
+	forgeforgejo "github.com/SocialGouv/iterion/pkg/forge/forgejo"
 	forgegithub "github.com/SocialGouv/iterion/pkg/forge/github"
 	forgegitlab "github.com/SocialGouv/iterion/pkg/forge/gitlab"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -122,6 +123,8 @@ func (s *Server) forgeAdminForToken(provider forge.Provider, baseURL, token stri
 		return forgegitlab.New(s.httpClient, baseURL, token), nil
 	case forge.ProviderGitHub:
 		return forgegithub.New(s.httpClient, baseURL, token), nil
+	case forge.ProviderForgejo:
+		return forgeforgejo.New(s.httpClient, baseURL, token), nil
 	default:
 		return nil, fmt.Errorf("forge: provider %q is not yet supported", provider)
 	}
@@ -149,6 +152,8 @@ func (s *Server) forgeOAuthApp(provider forge.Provider, baseURL string) (forge.O
 		return &forgegitlab.OAuthApp{HTTP: s.httpClient, BaseURL: baseURL, ClientID: creds.ClientID, ClientSecret: creds.ClientSecret}, true
 	case forge.ProviderGitHub:
 		return &forgegithub.OAuthApp{HTTP: s.httpClient, BaseURL: baseURL, ClientID: creds.ClientID, ClientSecret: creds.ClientSecret}, true
+	case forge.ProviderForgejo:
+		return &forgeforgejo.OAuthApp{HTTP: s.httpClient, BaseURL: baseURL, ClientID: creds.ClientID, ClientSecret: creds.ClientSecret}, true
 	default:
 		return nil, false
 	}

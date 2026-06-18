@@ -1,0 +1,83 @@
+package forgejo
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/SocialGouv/iterion/pkg/forge"
+)
+
+var _ forge.Admin = (*AdminClient)(nil)
+
+func TestForgejoCreateHook_TypeAndConfig(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "token tok" {
+			t.Errorf("auth = %q", r.Header.Get("Authorization"))
+		}
+		if !strings.HasSuffix(r.URL.Path, "/api/v1/repos/org/api/hooks") {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 5, "active": true, "events": body["events"], "config": body["config"]})
+	}))
+	defer srv.Close()
+
+	c := New(srv.Client(), srv.URL, "tok")
+	h, err := c.CreateHook(context.Background(), "org/api", forge.HookSpec{
+		URL: "https://it/api/webhooks/forgejo/wh1", Secret: "iwh_s", Events: []string{"pull_request", "issue_comment"}, Active: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body["type"] != "gitea" {
+		t.Errorf("type = %v, want gitea", body["type"])
+	}
+	config, _ := body["config"].(map[string]any)
+	if config["url"] != "https://it/api/webhooks/forgejo/wh1" || config["secret"] != "iwh_s" || config["content_type"] != "json" {
+		t.Errorf("config = %v", config)
+	}
+	if h.ID != "5" {
+		t.Errorf("hook id = %q", h.ID)
+	}
+}
+
+func TestForgejoDeleteHook_404(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	if err := New(srv.Client(), srv.URL, "t").DeleteHook(context.Background(), "o/r", "9"); !errors.Is(err, forge.ErrHookNotFound) {
+		t.Errorf("delete 404 = %v", err)
+	}
+}
+
+func TestForgejoOAuth_AuthorizeWithPKCEAndRefresh(t *testing.T) {
+	a := &OAuthApp{BaseURL: "https://codeberg.org", ClientID: "cid"}
+	u := a.AuthorizeURL("https://it/cb", "st", "chal", nil)
+	if !strings.Contains(u, "/login/oauth/authorize") || !strings.Contains(u, "code_challenge=chal") {
+		t.Errorf("authorize url wrong: %s", u)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.Form.Get("grant_type") != "refresh_token" {
+			t.Errorf("grant_type = %q", r.Form.Get("grant_type"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "at2", "refresh_token": "rt2", "expires_in": 3600})
+	}))
+	defer srv.Close()
+	a2 := &OAuthApp{HTTP: srv.Client(), BaseURL: srv.URL, ClientID: "c", ClientSecret: "s"}
+	tok, err := a2.Refresh(context.Background(), forge.Connection{}, "rt1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok.AccessToken != "at2" || tok.RefreshToken != "rt2" || tok.ExpiresAt.IsZero() {
+		t.Errorf("refreshed token = %+v", tok)
+	}
+}
