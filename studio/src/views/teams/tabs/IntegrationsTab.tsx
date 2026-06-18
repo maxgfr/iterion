@@ -20,10 +20,10 @@ import {
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useConfirm } from "@/hooks/useConfirm";
 
-// Only GitLab has a wired admin client today; github/forgejo are accepted
-// by the model but the server returns "not yet supported" — keep them out
-// of the connect picker until their clients land (Phases 2-4).
-const CONNECTABLE: ForgeProvider[] = ["gitlab"];
+// GitLab + GitHub have wired admin clients; Forgejo is accepted by the
+// model but its client lands in a later phase — keep it out of the connect
+// picker until then.
+const CONNECTABLE: ForgeProvider[] = ["gitlab", "github"];
 
 export default function IntegrationsTab({
   teamID,
