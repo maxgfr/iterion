@@ -50,6 +50,14 @@ type Entry struct {
 	// a bot needs ZERO dispatcher-code edits — discovery carries it.
 	DispatchVars map[string]string `json:"dispatch_vars,omitempty" yaml:"dispatch_vars,omitempty"`
 
+	// Forge mirrors the manifest forge: block (forge-access
+	// requirements). Nil when the bot declares no forge ambitions; the
+	// studio Integrations "enable on this repo" picker filters those out
+	// and renders this verbatim ("Revi will subscribe to … and post
+	// as …") for the rest. Carried by discovery so the studio knows what
+	// a bot will provision before any run exists.
+	Forge *bundle.ForgeRequirements `json:"forge,omitempty" yaml:"forge,omitempty"`
+
 	// WhenToUse is the orchestrator-facing "use when" guidance from the
 	// bundle manifest (manifest.yaml when_to_use). Empty for loose .bot
 	// files. Surfaced in the generated iterion-bot-catalog "Use when"
@@ -353,6 +361,7 @@ func parseBundle(dir string) (*Entry, error) {
 		Triggers:        m.Triggers,
 		Capabilities:    m.Capabilities,
 		DispatchVars:    m.DispatchVars,
+		Forge:           m.Forge,
 		WhenToUse:       strings.TrimSpace(m.WhenToUse),
 		Author:          m.Author,
 		Version:         m.Version,

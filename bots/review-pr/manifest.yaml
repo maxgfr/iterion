@@ -27,3 +27,20 @@ dispatch_vars:
     {{issue.title}}
 
     {{issue.body}}
+
+# Forge-access requirements for the studio Integrations auto-provisioner
+# (advisory + discovery-time — the runtime does not read this).
+forge:
+  events: [pull_request, pull_request_comment]  # MR/PR open → review ; /revi note → re-review
+  token_scopes:
+    pull_requests: write     # post the review + inline ```suggestion blocks
+    repository: read         # clone + read the diff
+  secret: forge_token        # cross-ref with main.bot `secrets: { forge_token }`
+  webhook:
+    launch_vars:
+      pr_review_mode: summary
+      post_to_board: "false"
+  rationale: |
+    Revi reads the MR/PR diff and posts one forge review with inline
+    comments + ```suggestion blocks. /revi in a note triggers a
+    re-review on the same PR.

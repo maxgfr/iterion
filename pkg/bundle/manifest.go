@@ -102,6 +102,115 @@ type Manifest struct {
 	// per-workspace without editing the manifest — see
 	// botregistry.ResolveEnabled.
 	Enabled *bool `yaml:"enabled,omitempty"`
+
+	// Forge declares the forge-access requirements this bot needs to be
+	// auto-provisioned onto a connected repo through the studio's
+	// Integrations flow. Advisory + discovery-time metadata, like
+	// DispatchVars — the runtime itself does not read this; the
+	// auto-provisioning orchestrator (pkg/forge) does, to compute the
+	// forge webhook events, request the right token-scope subset, and
+	// create the matching webhooks.Config + bot-secret binding in one
+	// transaction. Nil when the bot declares no forge ambitions (the
+	// Integrations "enable on this repo" picker filters those out).
+	Forge *ForgeRequirements `yaml:"forge,omitempty"`
+}
+
+// Normalized forge event vocabulary used in a manifest `forge.events`
+// block. The auto-provisioner (pkg/forge) maps each entry to the
+// per-provider native event when it creates the forge-side hook:
+//
+//	pull_request          -> gitlab "merge_requests_events",
+//	                         github / forgejo "pull_request"
+//	pull_request_comment  -> gitlab "note_events",
+//	                         github / forgejo "issue_comment"
+const (
+	ForgeEventPullRequest        = "pull_request"
+	ForgeEventPullRequestComment = "pull_request_comment"
+)
+
+// DefaultForgeSecretName is the workflow-secret name an integration
+// binds the connection's forge token under when a manifest's
+// forge.secret is empty. Matches the name review-pr / revi-converse
+// declare in their .bot `secrets:` block.
+const DefaultForgeSecretName = "forge_token"
+
+// KnownForgeEvents is the closed set of normalized event names a
+// manifest may declare in forge.events. decodeManifest rejects anything
+// else so a typo fails fast at parse time (same bar as attachments:).
+var KnownForgeEvents = map[string]bool{
+	ForgeEventPullRequest:        true,
+	ForgeEventPullRequestComment: true,
+}
+
+// knownForgeScopeKeys / knownForgeScopeLevels constrain a manifest
+// forge.token_scopes block. The provisioner unions the keys across the
+// bots co-enabled on a repo and translates them to the tightest OAuth
+// scope / GitHub-App permission that satisfies the union.
+var (
+	knownForgeScopeKeys = map[string]bool{
+		"pull_requests": true,
+		"repository":    true,
+		"issues":        true,
+		"webhooks":      true,
+	}
+	knownForgeScopeLevels = map[string]bool{
+		"read":  true,
+		"write": true,
+		"admin": true,
+	}
+)
+
+// ForgeRequirements is the `forge:` block of a bundle manifest. All
+// fields are optional; a bundle with no forge: block has Forge == nil.
+type ForgeRequirements struct {
+	// Events is the normalized event vocabulary this bot wants the
+	// auto-created webhook to subscribe to (see KnownForgeEvents).
+	Events []string `yaml:"events,omitempty"`
+
+	// TokenScopes is a normalized permission map (key -> "read" |
+	// "write" | "admin"); keys ∈ {pull_requests, repository, issues,
+	// webhooks}. The provisioner always needs webhook-admin regardless
+	// of this map — declaring it is informational. Unioned across
+	// co-enabled bots to size the requested OAuth scope.
+	TokenScopes map[string]string `yaml:"token_scopes,omitempty"`
+
+	// Secret is the workflow-secret name the bundle's main.bot
+	// `secrets:` block expects (e.g. "forge_token"). Empty defaults to
+	// DefaultForgeSecretName. The orchestrator binds the connection's
+	// managed forge token under this name; botregistry cross-references
+	// it against the parsed .bot secret names.
+	Secret string `yaml:"secret,omitempty"`
+
+	// Webhook carries the launch-side knobs the orchestrator copies into
+	// the auto-created webhooks.Config.
+	Webhook *ForgeWebhookHints `yaml:"webhook,omitempty"`
+
+	// Rationale is free text shown verbatim in the Integrations enable
+	// dialog so the operator understands why each scope is requested.
+	Rationale string `yaml:"rationale,omitempty"`
+}
+
+// ForgeWebhookHints are the webhook-launch knobs an auto-provisioned
+// integration copies into webhooks.Config.
+type ForgeWebhookHints struct {
+	// LaunchVars are default vars the auto-created webhook stamps onto
+	// every run it launches (merged with the handler defaults; operator
+	// overrides still win).
+	LaunchVars map[string]string `yaml:"launch_vars,omitempty"`
+
+	// MinReplierRole mirrors webhooks.Config.MinReplierRole — the
+	// minimum forge role a commenter must have to trigger the bot via a
+	// note. Empty inherits the webhook default.
+	MinReplierRole string `yaml:"min_replier_role,omitempty"`
+}
+
+// SecretName returns the workflow-secret name this bot binds its forge
+// token under, applying DefaultForgeSecretName when unset.
+func (f *ForgeRequirements) SecretName() string {
+	if f == nil || strings.TrimSpace(f.Secret) == "" {
+		return DefaultForgeSecretName
+	}
+	return f.Secret
 }
 
 // IsEnabled reports whether this bot should be advertised in the
@@ -159,7 +268,35 @@ func decodeManifest(body []byte, srcLabel string) (*Manifest, error) {
 			return nil, fmt.Errorf("bundle: manifest %s: %w", srcLabel, err)
 		}
 	}
+	if err := validateForgeRequirements(m.Forge); err != nil {
+		return nil, fmt.Errorf("bundle: manifest %s: %w", srcLabel, err)
+	}
 	return &m, nil
+}
+
+// validateForgeRequirements rejects an unknown event name or a malformed
+// token-scope entry in a manifest `forge:` block at parse time, so a typo
+// fails fast (same bar as attachments:). The forge.secret cross-reference
+// against the bundle's main.bot `secrets:` block is a soft check surfaced
+// by botregistry, not enforced here — decodeManifest does not see main.bot.
+func validateForgeRequirements(f *ForgeRequirements) error {
+	if f == nil {
+		return nil
+	}
+	for _, ev := range f.Events {
+		if !KnownForgeEvents[ev] {
+			return fmt.Errorf("forge: unknown event %q (known: %s, %s)", ev, ForgeEventPullRequest, ForgeEventPullRequestComment)
+		}
+	}
+	for key, level := range f.TokenScopes {
+		if !knownForgeScopeKeys[key] {
+			return fmt.Errorf("forge.token_scopes: unknown scope %q (known: pull_requests, repository, issues, webhooks)", key)
+		}
+		if !knownForgeScopeLevels[level] {
+			return fmt.Errorf("forge.token_scopes[%s]: invalid level %q (want read, write, or admin)", key, level)
+		}
+	}
+	return nil
 }
 
 // validateAttachmentRelPath rejects a manifest `attachments:` value that

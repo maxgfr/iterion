@@ -125,7 +125,7 @@ export default function BotMetadataForm({ bot }: { bot: BotEntryWithSchema }) {
           help="When on, Nexie can route tasks to this bot and it shows in the board bot picker. This sets the bot's manifest default; the Catalog manager can override it per-workspace."
         />
         {overlayDiffers && (
-          <p className="mt-0.5 text-[10px] text-warning">
+          <p className="mt-0.5 text-caption text-warning">
             Locally overridden: this workspace currently treats it as{" "}
             {bot.enabled ? "enabled" : "disabled"} (via the Catalog manager),
             regardless of the manifest default above.
@@ -142,8 +142,76 @@ export default function BotMetadataForm({ bot }: { bot: BotEntryWithSchema }) {
         >
           {saving ? "Saving…" : "Save changes"}
         </button>
-        {dirty && !saving && <span className="text-[10px] text-warning">Unsaved changes</span>}
+        {dirty && !saving && <span className="text-caption text-warning">Unsaved changes</span>}
       </div>
+
+      {bot.forge && <ForgeAccessSection forge={bot.forge} />}
+    </div>
+  );
+}
+
+/**
+ * ForgeAccessSection renders the manifest `forge:` block read-only — what
+ * the studio's Integrations flow will auto-provision when this bot is
+ * enabled on a connected repo (webhook events + token scopes + the bound
+ * secret name). Declared in manifest.yaml; edited there, not here.
+ */
+function ForgeAccessSection({ forge }: { forge: NonNullable<BotEntryWithSchema["forge"]> }) {
+  const events = forge.events ?? [];
+  const scopes = Object.entries(forge.token_scopes ?? {});
+  return (
+    <div className="mt-3 border-t border-border-default pt-2">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-xs font-medium text-fg-default">Forge access</span>
+        <span className="rounded bg-surface-2 px-1 text-caption text-fg-subtle">auto-provisioned · read-only</span>
+      </div>
+      <p className="mb-2 text-caption text-fg-subtle">
+        What enabling this bot on a connected repo (Integrations) will set up. Declared in
+        manifest.yaml.
+      </p>
+
+      {events.length > 0 && (
+        <div className="mb-2">
+          <div className="mb-0.5 text-caption text-fg-subtle">Webhook events</div>
+          <div className="flex flex-wrap gap-1">
+            {events.map((e) => (
+              <span key={e} className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-caption text-fg-default">
+                {e}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {scopes.length > 0 && (
+        <div className="mb-2">
+          <div className="mb-0.5 text-caption text-fg-subtle">Token scopes</div>
+          <ul className="space-y-0.5">
+            {scopes.map(([k, v]) => (
+              <li key={k} className="font-mono text-caption text-fg-default">
+                {k}: <span className="text-accent">{v}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="mb-2 grid grid-cols-2 gap-2">
+        <div>
+          <div className="mb-0.5 text-caption text-fg-subtle">Bound secret</div>
+          <div className="font-mono text-caption text-fg-default">{forge.secret || "forge_token"}</div>
+        </div>
+        {forge.webhook?.min_replier_role && (
+          <div>
+            <div className="mb-0.5 text-caption text-fg-subtle">Min replier role</div>
+            <div className="font-mono text-caption text-fg-default">{forge.webhook.min_replier_role}</div>
+          </div>
+        )}
+      </div>
+
+      {forge.rationale && (
+        <p className="whitespace-pre-wrap text-caption italic text-fg-subtle">{forge.rationale}</p>
+      )}
     </div>
   );
 }

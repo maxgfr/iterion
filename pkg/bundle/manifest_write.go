@@ -38,6 +38,11 @@ type ManifestPatch struct {
 	// declares its own `## triggers:` frontmatter, discovery overlays it
 	// over the manifest value (see botregistry.parseBundle).
 	Triggers *[]string
+	// Forge is nil for "no change"; a non-nil pointer rewrites the whole
+	// `forge:` block (forge-access requirements). Reserved for a future
+	// studio Integrations editor — the value is encoded with its yaml
+	// tags and re-validated through decodeManifest before the file lands.
+	Forge *ForgeRequirements
 }
 
 // WriteManifest applies patch to the manifest.yaml at path, preserving
@@ -116,6 +121,11 @@ func WriteManifest(path string, patch ManifestPatch) (*Manifest, error) {
 	}
 	if patch.Triggers != nil {
 		if err := setMapField(root, "triggers", *patch.Triggers, false, ""); err != nil {
+			return nil, err
+		}
+	}
+	if patch.Forge != nil {
+		if err := setMapField(root, "forge", *patch.Forge, false, ""); err != nil {
 			return nil, err
 		}
 	}

@@ -45,6 +45,36 @@ export interface BotEntry {
    *  this; `enabled` is the resolved value the Catalog manager overlay
    *  controls. They differ when a workspace overlay is active. */
   manifest_enabled?: boolean;
+  /** Forge-access requirements (manifest `forge:` block). Present only
+   *  when the bot declares forge ambitions; the Integrations flow reads
+   *  it to auto-provision the webhook + token binding, and the Bot panel
+   *  renders it read-only so an operator sees what enabling the bot on a
+   *  repo will set up. */
+  forge?: ForgeRequirements;
+}
+
+/** ForgeRequirements mirrors the manifest `forge:` block — what a bot
+ *  needs to be auto-provisioned onto a connected repo. Advisory +
+ *  discovery-time; the runtime does not read it. */
+export interface ForgeRequirements {
+  /** Normalized events the bot wants the webhook to subscribe to
+   *  (`pull_request`, `pull_request_comment`). */
+  events?: string[];
+  /** Normalized permission map (key -> "read" | "write" | "admin");
+   *  keys ∈ {pull_requests, repository, issues, webhooks}. */
+  token_scopes?: Record<string, string>;
+  /** Workflow-secret name the bot binds its forge token under
+   *  (default "forge_token"). */
+  secret?: string;
+  webhook?: ForgeWebhookHints;
+  /** Free text shown in the enable dialog explaining why the scopes are
+   *  requested. */
+  rationale?: string;
+}
+
+export interface ForgeWebhookHints {
+  launch_vars?: Record<string, string>;
+  min_replier_role?: string;
 }
 
 /** BotPatch is the editable subset of a bot's manifest. Omitted fields

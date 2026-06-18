@@ -23,3 +23,18 @@ when_to_use: |
 author: SocialGouv (devthejo) — revi-converse/main.bot
 schema_version: 1
 triggers: [revi-converse, ask, converse]
+
+# Forge-access requirements for the studio Integrations auto-provisioner
+# (advisory + discovery-time — the runtime does not read this).
+forge:
+  events: [pull_request_comment]  # conversational sibling only; no MR-open auto-trigger
+  token_scopes:
+    pull_requests: write     # reply in-thread via the forge_token
+    repository: read
+  secret: forge_token
+  webhook:
+    min_replier_role: developer
+  rationale: |
+    Revi-converse only answers focused /revi <question> notes on an
+    open merge/pull request. It never edits code or posts a fresh
+    review.
