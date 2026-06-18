@@ -153,6 +153,22 @@ func (s *Server) forgeOAuthRedirectURI() string {
 	return strings.TrimRight(s.cfg.PublicURL, "/") + "/api/forge/oauth/callback"
 }
 
+// forgeRefresherFor returns the token refresher for a connection, or nil
+// when it cannot/should-not refresh (PAT, GitHub-App, or a provider with no
+// configured OAuth app). The per-provider OAuth clients implement both
+// OAuthExchanger and TokenRefresher.
+func (s *Server) forgeRefresherFor(conn forge.Connection) forge.TokenRefresher {
+	if conn.Kind != forge.KindOAuthApp {
+		return nil
+	}
+	app, ok := s.forgeOAuthApp(conn.Provider, conn.BaseURL())
+	if !ok {
+		return nil
+	}
+	r, _ := app.(forge.TokenRefresher)
+	return r
+}
+
 // ---- handlers ----
 
 func (s *Server) handleListForgeConnections(w http.ResponseWriter, r *http.Request) {

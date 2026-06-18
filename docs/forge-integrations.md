@@ -1,0 +1,147 @@
+[← Documentation index](README.md) · [← BaaS overview](baas-overview.md) · [← Inbound webhooks](webhooks.md)
+
+# Forge integrations (connect a repo, auto-provision)
+
+**Audience.** Org admins who want to wire a GitLab/GitHub/Forgejo repo to a
+bot (e.g. Revi on merge-request open) without the manual
+PAT→secret→binding→webhook→forge-hook chain.
+
+This is the **outbound** complement of [inbound webhooks](webhooks.md):
+inbound (`pkg/webhooks`) authenticates deliveries the forge sends *to*
+iterion; forge integrations (`pkg/forge`) hold the admin credential that
+lets iterion call *out* to the forge to register that delivery — and the
+bot-secret binding — in one action.
+
+## What it does
+
+In the studio, **`/teams/<id>` → Integrations**:
+
+1. **Connect a forge** once — OAuth (when an OAuth app is configured) or
+   paste a personal access token (the fallback, and the only path for
+   self-hosted instances with no registrable OAuth app). iterion validates
+   the token (`GET /user`), reads the identity, and stores the credential
+   **sealed**.
+2. **Enable a repo** — pick a repo the credential can administer, check the
+   forge-capable bots (each shows the events it subscribes to + its manifest
+   rationale), and click Enable. In one server action iterion:
+   - derives a team-scoped **managed `forge_token`** secret from the
+     connection (created once per connection);
+   - creates (or extends) the iterion **webhook config** for that repo, with
+     a fresh `iwh_` secret it holds on both ends, the events the bots need,
+     and a per-webhook `SecretOverrides` pin to the managed token;
+   - calls the forge API to **create the webhook** on the repo pointing at
+     iterion's inbound URL with that `iwh_` secret;
+   - records a **`RepoIntegration`** join row.
+
+Disable is the inverse, one click: delete the forge hook, the webhook
+config, and the join row (the managed secret survives — it is shared by the
+connection's other repos; it is removed when the connection is deleted).
+
+## What a bot declares (`forge:` in its manifest)
+
+A bot opts into auto-provisioning with a `forge:` block in its
+`manifest.yaml` — advisory, discovery-time metadata (like `dispatch_vars`),
+read by the orchestrator, not the runtime:
+
+```yaml
+forge:
+  events: [pull_request, pull_request_comment]  # normalized; mapped per provider
+  token_scopes:
+    pull_requests: write
+    repository: read
+  secret: forge_token            # the workflow-secret name the bot consumes
+  webhook:
+    launch_vars: { pr_review_mode: summary }
+    min_replier_role: developer
+  rationale: |
+    Shown in the enable dialog so the operator sees why each scope is asked.
+```
+
+Normalized event vocabulary (mapped to the forge's native names by
+[pkg/forge/event_map.go](../pkg/forge/event_map.go)):
+
+| normalized | GitLab | GitHub | Forgejo |
+|---|---|---|---|
+| `pull_request` | `merge_requests_events` | `pull_request` | `pull_request` |
+| `pull_request_comment` | `note_events` | `issue_comment` | `issue_comment` |
+
+Unknown events / scope keys / levels fail manifest parsing
+([pkg/bundle/manifest.go:validateForgeRequirements](../pkg/bundle/manifest.go)).
+
+## The managed-token design (why the downstream is unchanged)
+
+The connection's admin token (OAuth user token / installation token / PAT)
+is used **only** to manage iterion's footprint on the forge — create hooks,
+list repos. It is **never** what a bot posts with. Instead the orchestrator
+derives a managed, team-scoped `forge_token` generic secret from it and pins
+it on the webhook via `SecretOverrides` (Tier-0 in
+`ResolveGenericWithBindings`). So the entire existing run path —
+`forge_token` → `RunBundle` → `/run/iterion/secrets/forge_token` →
+`glab`/`gh` — is **unchanged**. OAuth/App tokens are kept fresh by a
+background worker ([pkg/forge/refresh.go](../pkg/forge/refresh.go)) that
+re-seals the connection blob, then rewrites the managed secret's plaintext;
+PAT connections never refresh.
+
+## Configuration (cloud)
+
+The Mongo stores (`forge_connections`, `repo_integrations`) and the routes
+are wired automatically in `iterion server` cloud mode. OAuth apps are
+opt-in per provider via env (a provider with no client id offers only the
+PAT path):
+
+```
+ITERION_FORGE_GITLAB_OAUTH_CLIENT_ID / _CLIENT_SECRET
+ITERION_FORGE_GITHUB_OAUTH_CLIENT_ID / _CLIENT_SECRET   (Phase 3)
+ITERION_FORGE_FORGEJO_OAUTH_CLIENT_ID / _CLIENT_SECRET  (Phase 4)
+```
+
+`PublicURL` must be set (the OAuth redirect + the forge hook URL are built
+from it).
+
+## Security envelopes
+
+- Connection tokens are sealed with AAD `forge_conn:<id>`; the managed
+  secret keeps the existing `generic_secret:<id>` AAD; the GitHub-App
+  private key (Phase 2) lives in deployment config, never in Mongo. No token
+  is ever logged or placed in a URL.
+- `Connection.ForgeBaseURL` is threaded onto `webhooks.Config.ForgeBaseURL`
+  so the existing inbound SSRF host-pin keeps applying; the global
+  `ITERION_WEBHOOK_FORGE_HOSTS` allowlist still wins.
+- The `iwh_` webhook secret is minted server-side and **never shown to the
+  operator** — iterion holds both ends. A fresh one is minted on every
+  mutating provision so the forge hook secret and the iterion config hash
+  stay in lockstep without needing the prior plaintext.
+- Insufficient scope (the token can't create a hook) surfaces as a
+  structured `insufficient_scope` 403 so the studio can prompt to reconnect
+  with broader scope or paste a PAT.
+
+## API
+
+All under `/api/teams/{id}/forge/` (admin/owner), except the OAuth callback
+which is a public IdP redirect target authenticated by signed state + an
+agent-binding cookie:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/connections` | list connections |
+| POST | `/connections` | connect (`mode: pat` \| `oauth`) → `{connection}` or `{authorize_url}` |
+| DELETE | `/connections/{conn_id}` | disconnect (deprovisions every repo first) |
+| GET | `/connections/{conn_id}/repos?search=&page=` | repo picker (admin-capable only) |
+| GET | `/api/forge/oauth/callback` | **public** OAuth redirect target |
+| GET | `/repo-bots` | list active integrations |
+| GET | `/repo-bots/preview?connection_id=&repo=&bots=` | events + scopes + conflicts, no writes |
+| POST | `/repo-bots` | enable `{connection_id, repo, bot_ids}` → `ProvisionResult` |
+| DELETE | `/repo-bots/{integration_id}` | disable |
+
+## Provider support
+
+| Provider | OAuth | PAT | Status |
+|---|---|---|---|
+| GitLab | ✅ | ✅ | live ([pkg/forge/gitlab](../pkg/forge/gitlab)) |
+| GitHub App | — | — | Phase 2 (planned) |
+| GitHub OAuth App | — | — | Phase 3 (planned) |
+| Forgejo / Gitea | — | — | Phase 4 (planned) |
+
+Adding a provider = implement the `forge.Admin` interface (+ an
+`OAuthExchanger`/`TokenRefresher` for OAuth) and register it in the server's
+provider dispatch; the orchestrator + studio are provider-agnostic.

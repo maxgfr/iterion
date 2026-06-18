@@ -4,6 +4,7 @@ import { type BotEntryWithSchema, listBots } from "@/api/bots";
 import { FeatureUnavailableError } from "@/api/client";
 import {
   type ForgeConnection,
+  type ForgeEnablePreview,
   type ForgeIntegration,
   type ForgeProvider,
   type ForgeRepo,
@@ -14,6 +15,7 @@ import {
   listForgeConnections,
   listForgeIntegrations,
   listForgeRepos,
+  previewForgeEnable,
 } from "@/api/forgeConnections";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -264,6 +266,7 @@ function EnableRepoPanel({
   const [loadingRepos, setLoadingRepos] = useState(false);
   const [repo, setRepo] = useState("");
   const [selectedBots, setSelectedBots] = useState<string[]>([]);
+  const [preview, setPreview] = useState<ForgeEnablePreview | null>(null);
   const [busy, setBusy] = useState(false);
 
   const loadRepos = async () => {
@@ -282,8 +285,32 @@ function EnableRepoPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fetch the authoritative preview (native events the hook will subscribe
+  // to + identity + any scope/forge-block conflicts) whenever the selection
+  // changes, so the operator sees exactly what Enable will provision.
+  useEffect(() => {
+    if (!repo || selectedBots.length === 0) {
+      setPreview(null);
+      return;
+    }
+    let cancelled = false;
+    void previewForgeEnable(teamID, conn.id, repo, selectedBots)
+      .then((p) => {
+        if (!cancelled) setPreview(p);
+      })
+      .catch(() => {
+        if (!cancelled) setPreview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo, selectedBots]);
+
   const toggleBot = (name: string) =>
     setSelectedBots((s) => (s.includes(name) ? s.filter((b) => b !== name) : [...s, name]));
+
+  const hasConflicts = (preview?.conflicts?.length ?? 0) > 0;
 
   const enable = async () => {
     if (!repo || selectedBots.length === 0) return;
@@ -370,10 +397,32 @@ function EnableRepoPanel({
         )}
       </div>
 
+      {preview && (
+        <div className="bg-surface-1 border border-border-subtle rounded p-2 text-xs space-y-1">
+          {preview.forge_native_events.length > 0 && (
+            <div>
+              <span className="text-fg-muted">Will subscribe to:</span>{" "}
+              <span className="font-mono">{preview.forge_native_events.join(", ")}</span>
+            </div>
+          )}
+          {preview.identity.handle && (
+            <div>
+              <span className="text-fg-muted">Will post as:</span> @{preview.identity.handle}
+            </div>
+          )}
+          {hasConflicts &&
+            preview.conflicts.map((c) => (
+              <div key={c} className="text-danger">
+                ⚠ {c}
+              </div>
+            ))}
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         <button
           onClick={() => void enable()}
-          disabled={busy || !repo || selectedBots.length === 0}
+          disabled={busy || !repo || selectedBots.length === 0 || hasConflicts}
           className="bg-accent text-fg-onAccent rounded px-3 py-1 text-sm disabled:opacity-50"
         >
           {busy ? "Enabling…" : "Enable"}

@@ -59,15 +59,21 @@ The operator's seed (a one-off):
    [cloud-deployment.md](cloud-deployment.md)).
 2. Bootstrap the super-admin and create an org for the team
    (see [baas-admin-guide.md](baas-admin-guide.md)).
-3. The org admin opens `/teams/<id>` in the studio → Webhooks →
-   "Create webhook" → provider: GitLab → bots: `review-pr`. The studio
-   shows the inbound URL `https://iterion.example.com/api/webhooks/gitlab/<id>`
-   and the minted `iwh_…` token *once*. They paste both into the GitLab
-   project's Webhook page (URL + Secret Token).
-4. Optionally: bind a `forge_token` generic secret to the `review-pr` bot
-   with `allowed_hosts: ["gitlab.example.com"]` so Revi can post the
-   review note using the org's own GitLab account
-   (see [secrets-reference.md](secrets-reference.md)).
+3. The org admin opens `/teams/<id>` in the studio → **Integrations** →
+   "Connect a forge" → GitLab → paste a project access token (or use OAuth
+   when an OAuth app is configured) → **Enable a repo** → pick the project →
+   check `review-pr` → **Enable**. In one action iterion creates the GitLab
+   project hook (pointing at its own inbound URL, with a fresh `iwh_` secret
+   it holds on both ends), the matching webhook config, and the
+   `forge_token` binding so Revi posts the review under the org's own GitLab
+   account. The operator never sees or pastes a token URL. See
+   [forge-integrations.md](forge-integrations.md).
+
+   *(The raw `Webhooks` / `Secrets` / `Bindings` tabs remain for advanced /
+   non-forge cases — e.g. a generic JSON trigger — and for hand-wiring a
+   webhook the operator wants to manage themselves. Configs created by
+   Integrations are marked managed and can only be torn down from the
+   Integrations tab.)*
 
 After that, every MR-open in the GitLab project triggers Revi
 autonomously:

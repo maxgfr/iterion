@@ -48,6 +48,17 @@ export interface ForgeIntegration {
   created_at: string;
 }
 
+export interface ForgeEnablePreview {
+  events_normalized: string[];
+  /** The forge's native event names the hook will subscribe to. */
+  forge_native_events: string[];
+  scopes: Record<string, string>;
+  secrets: Array<{ bot_id: string; secret: string }>;
+  identity: { handle: string; provider: string; base_url: string };
+  /** Non-empty = a bot can't be auto-installed (no forge: block / not found). */
+  conflicts: string[];
+}
+
 export interface ForgeProvisionResult {
   integration_id: string;
   webhook_id: string;
@@ -115,6 +126,16 @@ export async function listForgeIntegrations(teamID: string): Promise<ForgeIntegr
     request<{ integrations: ForgeIntegration[] }>(`/teams/${teamID}/forge/repo-bots`),
   );
   return r.integrations ?? [];
+}
+
+export async function previewForgeEnable(
+  teamID: string,
+  connID: string,
+  repo: string,
+  bots: string[],
+): Promise<ForgeEnablePreview> {
+  const params = new URLSearchParams({ connection_id: connID, repo, bots: bots.join(",") });
+  return request(`/teams/${teamID}/forge/repo-bots/preview?${params.toString()}`);
 }
 
 export async function enableForgeRepoBots(

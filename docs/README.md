@@ -61,6 +61,7 @@ per-org quotas, audit log, PATs, SMTP onboarding. We call it
 |---|---|
 | [baas-overview.md](baas-overview.md) | Start here — the event → autonomous agent → result-posted-back loop, a concrete GitLab-MR → Revi walkthrough, the primitives table. |
 | [webhooks.md](webhooks.md) | Inbound webhooks (GitLab + `/revi`, GitHub, Forgejo/Gitea, generic) — auth modes, idempotency, CRUD API. |
+| [forge-integrations.md](forge-integrations.md) | Connect a GitLab/GitHub/Forgejo repo (OAuth/PAT) and auto-provision the webhook + token binding when you enable a bot — the self-serve replacement for the manual webhook chain. |
 | [quotas-and-limits.md](quotas-and-limits.md) | Run/cost/concurrency/rate caps, denial reasons + HTTP semantics, Prometheus metrics. |
 | [baas-admin-guide.md](baas-admin-guide.md) | Platform operator + org admin runbook (UI paths + curl), DLQ triage, audit, PATs. |
 | [secrets-reference.md](secrets-reference.md) | The single map of every secret kind (BYOK, generic, bindings, file, OAuth-forfait, tokens) and the sealing model. |

@@ -697,6 +697,39 @@ func (s *Server) ListenAndServe() error {
 			mss.StartSweeper(ctx, 0) // 0 = use store TTL as interval
 		}()
 	}
+	// Forge OAuth token refresh: keep oauth_app connection tokens (and their
+	// managed forge_token secrets) fresh so bot runs never read an expired
+	// credential. PAT connections are skipped by the worker. No-op when the
+	// forge orchestrator isn't wired (local mode).
+	if s.forgeOrchestrator != nil {
+		worker := &forge.RefreshWorker{
+			Connections:  s.forgeConnections,
+			Secrets:      s.genericSecrets,
+			Sealer:       s.sealer,
+			RefresherFor: s.forgeRefresherFor,
+			Lead:         5 * time.Minute,
+		}
+		go func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go func() {
+				<-s.shutdown
+				cancel()
+			}()
+			t := time.NewTicker(10 * time.Minute)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					if _, err := worker.RunOnce(ctx); err != nil && s.logger != nil {
+						s.logger.Warn("forge token refresh: %v", err)
+					}
+				}
+			}
+		}()
+	}
 	// Orphan-run sweeper (cloud only): flips queued/running rows whose
 	// runner died without a terminal write to failed_resumable. Needs
 	// both the Mongo store (stale scan capability) and the queue (KV

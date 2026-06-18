@@ -11,6 +11,17 @@ This document covers **inbound** webhooks — external events arriving on
 ("call me back when this run finishes") is documented in
 [outbound-callbacks.md](outbound-callbacks.md).
 
+> **Prefer the Integrations tab for forge repos.** The manual lifecycle
+> below (mint a token, paste the URL + token into the forge) is the
+> low-level path. For a GitLab/GitHub/Forgejo repo, the studio's
+> **Integrations** tab connects the forge once (OAuth or PAT) and
+> **provisions the hook + token + this webhook config for you** when you
+> enable a bot — see [forge-integrations.md](forge-integrations.md). Such
+> configs carry a `provisioned_by` marker, render read-only here, and
+> reject direct delete/rotate (409) — manage them from Integrations. The
+> manual path remains for the Generic JSON trigger and for webhooks you
+> want to own by hand.
+
 Four providers are wired: GitLab (incl. `/revi` re-review command),
 GitHub, Forgejo/Gitea, and a bot-agnostic Generic JSON endpoint
 ([pkg/server/webhooks_routes.go:supportedProviders](../pkg/server/webhooks_routes.go)).
