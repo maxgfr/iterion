@@ -711,6 +711,40 @@ func (r *Runner) executeRun(ctx context.Context, msg *queue.RunMessage) error {
 		r.cfg.Logger.Warn("runner: materialize file secrets %s: %v", msg.RunID, ferr)
 	}
 
+	// Isolate the forge CLI (glab/gh) auth config to a PER-RUN directory so a
+	// bot's `glab auth login` / `gh auth login` can never leak its forge
+	// identity to a LATER run on the same (reused) runner pod. Without this,
+	// glab persists its token in $HOME/.config/glab-cli; a subsequent run
+	// whose `glab auth status` reports "ok" (against the stale token) skips
+	// re-login and posts under the PREVIOUS run's bot account — a cross-run /
+	// cross-tenant forge-identity leak (observed live: a review summary posted
+	// under a prior run's identity). The per-run forge_token FILE is already
+	// isolated above; this isolates the CLI's own persisted auth. The delegate
+	// subprocess inherits these from os.Environ(); no-op for sandboxed runs
+	// (fresh container HOME). Safe because the runner is sequential
+	// (MaxAckPending=1).
+	if cliDir, derr := os.MkdirTemp("", "iterion-cli-"); derr == nil {
+		prevGlab, hadGlab := os.LookupEnv("GLAB_CONFIG_DIR")
+		prevGH, hadGH := os.LookupEnv("GH_CONFIG_DIR")
+		_ = os.Setenv("GLAB_CONFIG_DIR", filepath.Join(cliDir, "glab"))
+		_ = os.Setenv("GH_CONFIG_DIR", filepath.Join(cliDir, "gh"))
+		defer func() {
+			if hadGlab {
+				_ = os.Setenv("GLAB_CONFIG_DIR", prevGlab)
+			} else {
+				_ = os.Unsetenv("GLAB_CONFIG_DIR")
+			}
+			if hadGH {
+				_ = os.Setenv("GH_CONFIG_DIR", prevGH)
+			} else {
+				_ = os.Unsetenv("GH_CONFIG_DIR")
+			}
+			_ = os.RemoveAll(cliDir)
+		}()
+	} else {
+		r.cfg.Logger.Warn("runner: isolate forge CLI config %s: %v", msg.RunID, derr)
+	}
+
 	executor, usage, err := r.buildExecutor(ctx, msg, wf)
 	if err != nil {
 		return err

@@ -40,15 +40,21 @@ Parse the URL host and path:
 This run may be unattended (an org webhook launch) with no
 pre-authenticated forge CLI on the host. If the mounted secret file
 `/run/iterion/secrets/forge_token` EXISTS, authenticate the matching CLI
-with it before posting — pass the path/value to the CLI, never read the
-token into a prompt or echo it:
+with it FIRST — **unconditionally, even if the CLI already reports
+authenticated**. A reused runner pod can carry a PREVIOUS run's forge
+login (`glab`/`gh` persist their token in a config dir), so a stale
+`auth status: ok` is NOT this run's identity — re-authenticating with this
+run's token overwrites it so you post under the right account. Pass the
+path/value to the CLI, never read the token into a prompt or echo it:
 - GitHub: `gh auth login --with-token < /run/iterion/secrets/forge_token`
 - GitLab: `glab auth login --hostname <host-from-pr_url> --stdin < /run/iterion/secrets/forge_token`
 - Forgejo/Gitea: `export FORGEJO_TOKEN="$(cat /run/iterion/secrets/forge_token)"`
 
 When the file is absent (manual/local runs), assume host auth.
 
-Confirm the matching CLI is authenticated BEFORE building anything:
+After (re-)authenticating, confirm the matching CLI is ready BEFORE
+building anything — but do NOT use a pre-existing "ok" to skip the login
+above:
 - GitHub: `gh auth status` (exit 0 = ok).
 - GitLab: `glab auth status`.
 - Forgejo/Gitea: a token in `$FORGEJO_TOKEN` / `$GITEA_TOKEN`, or
