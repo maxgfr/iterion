@@ -17,9 +17,10 @@ import (
 
 // RepoIntegration is the join row recording what the orchestrator
 // provisioned for one (connection, repo): the bots enabled, the iterion
-// webhook config, the forge-side hook, the bot-secret bindings, and the
-// managed secret. It is the studio Integrations tab's source of truth and
-// the unit of deprovision.
+// webhook config, the forge-side hook, and the managed secret (the
+// connection's forge token is pinned per-webhook via Config.SecretOverrides,
+// not a bot binding). It is the studio Integrations tab's source of truth
+// and the unit of deprovision.
 type RepoIntegration struct {
 	ID               string   `bson:"_id" json:"id"`
 	TenantID         string   `bson:"tenant_id" json:"tenant_id"`
@@ -29,11 +30,10 @@ type RepoIntegration struct {
 	BotIDs           []string `bson:"bot_ids" json:"bot_ids"`
 	EventsNormalized []string `bson:"events_normalized" json:"events_normalized"`
 
-	WebhookID       string   `bson:"webhook_id" json:"webhook_id"`                 // -> webhooks.Config._id
-	HookID          string   `bson:"hook_id" json:"hook_id"`                       // forge-side hook id
-	HookURL         string   `bson:"hook_url,omitempty" json:"hook_url,omitempty"` // the inbound URL we registered
-	BindingIDs      []string `bson:"binding_ids" json:"binding_ids"`               // -> bot_secret_bindings._id
-	ManagedSecretID string   `bson:"managed_secret_id,omitempty" json:"managed_secret_id,omitempty"`
+	WebhookID       string `bson:"webhook_id" json:"webhook_id"`                 // -> webhooks.Config._id
+	HookID          string `bson:"hook_id" json:"hook_id"`                       // forge-side hook id
+	HookURL         string `bson:"hook_url,omitempty" json:"hook_url,omitempty"` // the inbound URL we registered
+	ManagedSecretID string `bson:"managed_secret_id,omitempty" json:"managed_secret_id,omitempty"`
 
 	CreatedBy string    `bson:"created_by" json:"created_by"`
 	CreatedAt time.Time `bson:"created_at" json:"created_at"`

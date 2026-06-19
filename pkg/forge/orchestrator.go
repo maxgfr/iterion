@@ -241,14 +241,15 @@ func (o *Orchestrator) Provision(ctx context.Context, req ProvisionRequest) (Pro
 	hookURL := o.inboundURL(conn.Provider, webhookID)
 	spec := HookSpec{URL: hookURL, Secret: plaintext, Events: nativeEvents, Active: true}
 
-	hookID, err := o.upsertHook(ctx, admin, req.RepoFullName, priorHookID(hasExisting, existing), hookURL, spec)
+	// existing is the zero RepoIntegration when !hasExisting, so its HookID
+	// is "" — upsertHook treats that as "no prior hook".
+	hookID, err := o.upsertHook(ctx, admin, req.RepoFullName, existing.HookID, hookURL, spec)
 	if err != nil {
 		o.rollbackConfig(ctx, createdConfig, webhookID)
 		return ProvisionResult{}, err
 	}
 
 	ri := RepoIntegration{
-		ID:               firstNonEmpty(existingID(hasExisting, existing), o.id()),
 		TenantID:         req.TenantID,
 		ConnectionID:     conn.ID,
 		Provider:         conn.Provider,
@@ -264,12 +265,14 @@ func (o *Orchestrator) Provision(ctx context.Context, req ProvisionRequest) (Pro
 		UpdatedAt:        now,
 	}
 	if hasExisting {
+		ri.ID = existing.ID
 		ri.CreatedAt = existing.CreatedAt
 		ri.CreatedBy = existing.CreatedBy
 		if err := o.Integrations.Update(ctx, ri); err != nil {
 			return ProvisionResult{}, fmt.Errorf("forge: update integration: %w", err)
 		}
 	} else {
+		ri.ID = o.id()
 		if err := o.Integrations.Create(ctx, ri); err != nil {
 			o.rollbackConfig(ctx, createdConfig, webhookID)
 			return ProvisionResult{}, fmt.Errorf("forge: record integration: %w", err)
@@ -503,25 +506,4 @@ func nilIfEmpty(m map[string]string) map[string]string {
 		return nil
 	}
 	return m
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
-}
-
-func existingID(has bool, ri RepoIntegration) string {
-	if has {
-		return ri.ID
-	}
-	return ""
-}
-
-func priorHookID(has bool, ri RepoIntegration) string {
-	if has {
-		return ri.HookID
-	}
-	return ""
 }

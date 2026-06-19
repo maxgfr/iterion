@@ -2,6 +2,7 @@ package forge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -101,7 +102,7 @@ func (w *RefreshWorker) refreshOne(ctx context.Context, conn Connection) error {
 	}
 	out, err := r.Refresh(ctx, conn, cur.RefreshToken)
 	if err != nil {
-		if isUnauthorized(err) {
+		if errors.Is(err, ErrUnauthorized) {
 			return w.markRevoked(ctx, conn)
 		}
 		return err
@@ -169,8 +170,4 @@ func (w *RefreshWorker) markRevoked(ctx context.Context, conn Connection) error 
 	conn.Status = StatusNeedsReauth
 	conn.UpdatedAt = now
 	return w.Connections.Update(ctx, conn)
-}
-
-func isUnauthorized(err error) bool {
-	return err == ErrUnauthorized
 }

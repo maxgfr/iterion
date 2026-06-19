@@ -309,11 +309,7 @@ func (s *Server) connectForgeGitHubApp(w http.ResponseWriter, _ *http.Request, t
 		TenantID: teamID, UserID: userID, AgentBinding: binding,
 		NextURL: safeNext(req.Next), IssuedAt: time.Now().UTC(),
 	})
-	http.SetCookie(w, &http.Cookie{
-		Name: forgeAgentBindingCookie, Value: binding, Path: "/api/forge/",
-		Domain: s.cfg.CookieDomain, HttpOnly: true, Secure: s.cfg.CookieSecure,
-		SameSite: http.SameSiteLaxMode, MaxAge: int((10 * time.Minute).Seconds()),
-	})
+	s.setForgeAgentBindingCookie(w, binding)
 	installURL := "https://github.com/apps/" + url.PathEscape(s.forgeGitHubApp.AppSlug) + "/installations/new?state=" + url.QueryEscape(state)
 	writeJSON(w, forgeConnectResp{InstallURL: installURL})
 }
@@ -382,16 +378,7 @@ func (s *Server) connectForgeOAuth(w http.ResponseWriter, r *http.Request, teamI
 		TenantID: teamID, UserID: userID, AgentBinding: binding,
 		NextURL: safeNext(req.Next), IssuedAt: time.Now().UTC(),
 	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     forgeAgentBindingCookie,
-		Value:    binding,
-		Path:     "/api/forge/",
-		Domain:   s.cfg.CookieDomain,
-		HttpOnly: true,
-		Secure:   s.cfg.CookieSecure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int((10 * time.Minute).Seconds()),
-	})
+	s.setForgeAgentBindingCookie(w, binding)
 	authURL := app.AuthorizeURL(s.forgeOAuthRedirectURI(), state, challenge, nil)
 	writeJSON(w, forgeConnectResp{AuthorizeURL: authURL})
 }
@@ -614,6 +601,22 @@ func (s *Server) forgeConnForTenant(w http.ResponseWriter, r *http.Request, team
 }
 
 // ---- helpers ----
+
+// setForgeAgentBindingCookie issues the per-flow CSRF-binding cookie for a
+// forge connect flow (the OAuth + GitHub-App callbacks verify it; the PAT
+// path has no redirect and skips it). Mirrors clearForgeAgentBindingCookie.
+func (s *Server) setForgeAgentBindingCookie(w http.ResponseWriter, binding string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     forgeAgentBindingCookie,
+		Value:    binding,
+		Path:     "/api/forge/",
+		Domain:   s.cfg.CookieDomain,
+		HttpOnly: true,
+		Secure:   s.cfg.CookieSecure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int((10 * time.Minute).Seconds()),
+	})
+}
 
 func clearForgeAgentBindingCookie(w http.ResponseWriter, domain string, secure bool) {
 	http.SetCookie(w, &http.Cookie{
