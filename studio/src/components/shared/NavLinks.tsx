@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import {
   HomeIcon,
   Pencil2Icon,
@@ -13,6 +13,7 @@ import {
   Cross2Icon,
   PlayIcon,
   PersonIcon,
+  Link2Icon,
   GearIcon,
 } from "@radix-ui/react-icons";
 import { useShallow } from "zustand/react/shallow";
@@ -37,6 +38,7 @@ export type Section =
   | "dispatcher"
   | "marketplace"
   | "team"
+  | "integrations"
   | "admin";
 
 interface Props {
@@ -91,7 +93,14 @@ export default function NavLinks({ collapsed }: Props) {
   const info = useServerInfoStore((s) => s.info);
   const { activeTeam, user } = useAuth();
   const [location] = useLocation();
-  const active = deriveSection(location);
+  const search = useSearch();
+  let active = deriveSection(location);
+  // The team page hosts the Integrations tab under ?tab=integrations; give
+  // the dedicated Integrations nav entry its own highlight there so it and
+  // the team entry don't both light up.
+  if (active === "team" && new URLSearchParams(search).get("tab") === "integrations") {
+    active = "integrations";
+  }
   const alertUnseen = useUIStore((s) => s.alertUnseen);
   const clearAlertUnseen = useUIStore((s) => s.clearAlertUnseen);
 
@@ -113,6 +122,19 @@ export default function NavLinks({ collapsed }: Props) {
       label: activeTeam.team_name || "Team",
       icon: PersonIcon,
     });
+    // Integrations: connect a GitLab/GitHub/Forgejo repo and enable a bot on
+    // it (the team page's Integrations tab). Cloud-only (the forge stores are
+    // wired only in cloud mode); surfaced as its own top-level entry because
+    // "connect a repo to Revi" is otherwise buried two clicks deep under the
+    // team-name link.
+    if (info?.mode === "cloud") {
+      links.push({
+        section: "integrations",
+        href: `/teams/${activeTeam.team_id}?tab=integrations`,
+        label: "Integrations",
+        icon: Link2Icon,
+      });
+    }
   }
   // Admin section: super-admins, and only in cloud mode. /admin/orgs is the
   // org/tenant console, a cloud-only concept whose API isn't registered in

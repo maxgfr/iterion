@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
-import { useParams } from "wouter";
+import { useLocation, useParams, useSearch } from "wouter";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useAuth } from "@/auth/AuthContext";
 import {
@@ -54,7 +54,26 @@ export default function TeamPage() {
   const teamID = params.id;
   const { teams, activeRole, user } = useAuth();
   const team = useMemo(() => teams.find((t) => t.team_id === teamID), [teams, teamID]);
-  const [tab, setTab] = useState<Tab>("members");
+  const search = useSearch();
+  const [, navigate] = useLocation();
+  const tabFromURL = (s: string): Tab => {
+    const t = new URLSearchParams(s).get("tab");
+    return TABS.some((x) => x.id === t) ? (t as Tab) : "members";
+  };
+  const [tab, setTab] = useState<Tab>(() => tabFromURL(search));
+  // Keep the tab in sync with ?tab= so a deep link (e.g. the sidebar's
+  // Integrations entry) selects the right tab even when TeamPage is already
+  // mounted; selectTab writes it back so the URL stays shareable + the nav
+  // highlight follows.
+  useEffect(() => {
+    const t = tabFromURL(search);
+    setTab((cur) => (cur === t ? cur : t));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+  const selectTab = (t: Tab) => {
+    setTab(t);
+    navigate(`/teams/${teamID}?tab=${t}`, { replace: true });
+  };
 
   const canManage =
     activeRole === "admin" || activeRole === "owner" || (user?.is_super_admin ?? false);
@@ -88,7 +107,7 @@ export default function TeamPage() {
           {TABS.map((t) => (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => selectTab(t.id)}
               className={`sm:w-full text-left px-3 py-2 rounded text-sm min-h-[44px] sm:min-h-0 ${
                 tab === t.id ? "bg-surface-2" : "hover:bg-surface-1"
               }`}
