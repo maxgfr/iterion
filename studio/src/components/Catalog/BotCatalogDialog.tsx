@@ -3,9 +3,11 @@ import { useLocation } from "wouter";
 
 import type { BotEntryWithSchema } from "@/api/bots";
 import { installBot } from "@/api/bots";
+import { useAuth } from "@/auth/AuthContext";
 import { Dialog } from "@/components/ui";
 import { botIdentity } from "@/lib/personas";
 import { useBotsStore } from "@/store/bots";
+import { useServerInfoStore } from "@/store/serverInfo";
 import { useTabsStore } from "@/store/tabs";
 import { useUIStore } from "@/store/ui";
 
@@ -38,6 +40,11 @@ export function BotCatalogDialog({
   const setOverlay = useBotsStore((s) => s.setOverlay);
   const addToast = useUIStore((s) => s.addToast);
   const setActiveTab = useUIStore((s) => s.setActiveTab);
+  const { activeTeam } = useAuth();
+  const info = useServerInfoStore((s) => s.info);
+  // Forge integrations are cloud-only and team-scoped, so the "Connect to a
+  // repo" affordance only applies when a team is active in cloud mode.
+  const canConnectRepo = !!activeTeam && info?.mode === "cloud";
   const [busy, setBusy] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [importUrl, setImportUrl] = useState("");
@@ -102,6 +109,15 @@ export function BotCatalogDialog({
     setActiveTab("bot");
     onOpenChange(false);
     setLocation(`/editor?file=${encodeURIComponent(rel)}`);
+  };
+
+  // onConnect jumps to the team's Integrations tab to connect a forge + enable
+  // this bot on a repo. The bot picker in the enable dialog is filtered to
+  // forge-capable bots, so it surfaces this one there.
+  const onConnect = () => {
+    if (!activeTeam) return;
+    onOpenChange(false);
+    setLocation(`/teams/${activeTeam.team_id}?tab=integrations`);
   };
 
   const rows = bots ?? [];
@@ -208,6 +224,16 @@ export function BotCatalogDialog({
                     <div className="truncate text-[11px] text-fg-muted">{b.description}</div>
                   )}
                 </div>
+                {b.forge && canConnectRepo && (
+                  <button
+                    type="button"
+                    onClick={onConnect}
+                    title="Connect a GitLab/GitHub/Forgejo repo and enable this bot on it"
+                    className="shrink-0 rounded bg-accent/15 px-2 py-1 text-[11px] font-medium text-accent hover:bg-accent/25"
+                  >
+                    Connect to a repo
+                  </button>
+                )}
                 {canEdit && (
                   <button
                     type="button"
