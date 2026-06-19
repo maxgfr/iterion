@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearch } from "wouter";
 
 import { type BotEntryWithSchema, listBots } from "@/api/bots";
 import { FeatureUnavailableError } from "@/api/client";
@@ -37,6 +38,9 @@ export default function IntegrationsTab({
   const [unavailable, setUnavailable] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
+  // ?bot=<name> (set by the catalog's "Connect to a repo" affordance) pre-checks
+  // that bot in the enable dialog and auto-opens it when there's one connection.
+  const preselectBot = new URLSearchParams(useSearch()).get("bot") ?? undefined;
 
   const reload = async () => {
     setErr(null);
@@ -103,6 +107,8 @@ export default function IntegrationsTab({
                 onChanged={reload}
                 onError={setErr}
                 confirm={confirm}
+                preselectBot={preselectBot}
+                autoOpenEnable={!!preselectBot && connections.length === 1}
               />
             ))}
           </div>
@@ -129,6 +135,8 @@ function ConnectionCard({
   onChanged,
   onError,
   confirm,
+  preselectBot,
+  autoOpenEnable,
 }: {
   teamID: string;
   conn: ForgeConnection;
@@ -138,8 +146,10 @@ function ConnectionCard({
   onChanged: () => void;
   onError: (m: string) => void;
   confirm: ReturnType<typeof useConfirm>["confirm"];
+  preselectBot?: string;
+  autoOpenEnable?: boolean;
 }) {
-  const [enabling, setEnabling] = useState(false);
+  const [enabling, setEnabling] = useState(!!autoOpenEnable);
 
   const disconnect = async () => {
     const ok = await confirm({
@@ -226,6 +236,7 @@ function ConnectionCard({
             teamID={teamID}
             conn={conn}
             forgeBots={forgeBots}
+            preselectBot={preselectBot}
             onDone={() => {
               setEnabling(false);
               onChanged();
@@ -249,6 +260,7 @@ function EnableRepoPanel({
   teamID,
   conn,
   forgeBots,
+  preselectBot,
   onDone,
   onCancel,
   onError,
@@ -256,6 +268,7 @@ function EnableRepoPanel({
   teamID: string;
   conn: ForgeConnection;
   forgeBots: BotEntryWithSchema[];
+  preselectBot?: string;
   onDone: () => void;
   onCancel: () => void;
   onError: (m: string) => void;
@@ -264,7 +277,9 @@ function EnableRepoPanel({
   const [repos, setRepos] = useState<ForgeRepo[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
   const [repo, setRepo] = useState("");
-  const [selectedBots, setSelectedBots] = useState<string[]>([]);
+  const [selectedBots, setSelectedBots] = useState<string[]>(
+    preselectBot ? [preselectBot] : [],
+  );
   const [preview, setPreview] = useState<ForgeEnablePreview | null>(null);
   const [busy, setBusy] = useState(false);
 

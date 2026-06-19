@@ -112,12 +112,14 @@ export function BotCatalogDialog({
   };
 
   // onConnect jumps to the team's Integrations tab to connect a forge + enable
-  // this bot on a repo. The bot picker in the enable dialog is filtered to
-  // forge-capable bots, so it surfaces this one there.
-  const onConnect = () => {
+  // this bot on a repo. The ?bot= hint pre-checks it in the enable dialog (and
+  // auto-opens that dialog when there's a single connection).
+  const onConnect = (botName: string) => {
     if (!activeTeam) return;
     onOpenChange(false);
-    setLocation(`/teams/${activeTeam.team_id}?tab=integrations`);
+    setLocation(
+      `/teams/${activeTeam.team_id}?tab=integrations&bot=${encodeURIComponent(botName)}`,
+    );
   };
 
   const rows = bots ?? [];
@@ -138,7 +140,7 @@ export function BotCatalogDialog({
           <button
             type="button"
             onClick={() => setShowImport((v) => !v)}
-            className="rounded bg-surface-2 px-2 py-1 text-[11px] text-fg-muted hover:bg-surface-3 hover:text-fg-default"
+            className="rounded bg-surface-2 px-2 py-1 text-micro text-fg-muted hover:bg-surface-3 hover:text-fg-default"
           >
             {showImport ? "Cancel" : "Import from repo…"}
           </button>
@@ -169,7 +171,7 @@ export function BotCatalogDialog({
               />
             </div>
             <div className="flex items-center justify-between gap-3">
-              <p className="text-[10px] text-fg-subtle">
+              <p className="text-caption text-fg-subtle">
                 Installs into .botz/ (git-ignored). Bots are never run
                 automatically — inspect, then launch.
               </p>
@@ -177,7 +179,7 @@ export function BotCatalogDialog({
                 type="button"
                 onClick={() => void onImport()}
                 disabled={importing || !importUrl.trim()}
-                className="shrink-0 rounded bg-success/20 px-2.5 py-1 text-[11px] font-medium text-success hover:bg-success/30 disabled:opacity-50"
+                className="shrink-0 rounded bg-success/20 px-2.5 py-1 text-micro font-medium text-success hover:bg-success/30 disabled:opacity-50"
               >
                 {importing ? "Importing…" : "Install"}
               </button>
@@ -212,24 +214,24 @@ export function BotCatalogDialog({
                       {label || b.name}
                     </span>
                     {label && (
-                      <span className="shrink-0 truncate font-mono text-[10px] text-fg-subtle">
+                      <span className="shrink-0 truncate font-mono text-caption text-fg-subtle">
                         {b.name}
                       </span>
                     )}
                     {!b.is_bundle && (
-                      <span className="shrink-0 text-[10px] text-fg-subtle">(single file)</span>
+                      <span className="shrink-0 text-caption text-fg-subtle">(single file)</span>
                     )}
                   </div>
                   {b.description && (
-                    <div className="truncate text-[11px] text-fg-muted">{b.description}</div>
+                    <div className="truncate text-micro text-fg-muted">{b.description}</div>
                   )}
                 </div>
                 {b.forge && canConnectRepo && (
                   <button
                     type="button"
-                    onClick={onConnect}
+                    onClick={() => onConnect(b.name)}
                     title="Connect a GitLab/GitHub/Forgejo repo and enable this bot on it"
-                    className="shrink-0 rounded bg-accent/15 px-2 py-1 text-[11px] font-medium text-accent hover:bg-accent/25"
+                    className="shrink-0 rounded bg-accent/15 px-2 py-1 text-micro font-medium text-accent hover:bg-accent/25"
                   >
                     Connect to a repo
                   </button>
@@ -238,7 +240,7 @@ export function BotCatalogDialog({
                   <button
                     type="button"
                     onClick={() => onEdit(b)}
-                    className="shrink-0 rounded bg-surface-2 px-2 py-1 text-[11px] text-fg-muted hover:bg-surface-3 hover:text-fg-default"
+                    className="shrink-0 rounded bg-surface-2 px-2 py-1 text-micro text-fg-muted hover:bg-surface-3 hover:text-fg-default"
                   >
                     Edit
                   </button>
@@ -250,7 +252,7 @@ export function BotCatalogDialog({
                   disabled={busy === b.name}
                   onClick={() => onToggle(b)}
                   title={enabled ? "Disable (hide from Nexie)" : "Enable (expose to Nexie)"}
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-50 ${
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-micro font-medium transition-colors disabled:opacity-50 ${
                     enabled
                       ? "bg-success/20 text-success hover:bg-success/30"
                       : "bg-surface-2 text-fg-subtle hover:bg-surface-3"
