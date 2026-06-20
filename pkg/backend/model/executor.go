@@ -147,6 +147,24 @@ type DelegateInfo struct {
 	Delay              time.Duration // backoff delay (for OnDelegateRetry)
 }
 
+// delegateInfoFromResult fills the result-derived fields of a DelegateInfo —
+// the eight fields every post-call hook (OnDelegateFinished / OnDelegateError /
+// the schema-fallback OnDelegateRetry) copies off delegate.Result. Callers pass
+// BackendName explicitly (it varies: result.BackendName, a fallback, or the
+// requested name) and set Error / Attempt afterward as the hook needs.
+func delegateInfoFromResult(backendName string, result delegate.Result) DelegateInfo {
+	return DelegateInfo{
+		BackendName:        backendName,
+		Duration:           result.Duration,
+		Tokens:             result.Tokens,
+		ExitCode:           result.ExitCode,
+		Stderr:             result.Stderr,
+		RawOutputLen:       result.RawOutputLen,
+		ParseFallback:      result.ParseFallback,
+		FormattingPassUsed: result.FormattingPassUsed,
+	}
+}
+
 // ProviderFallbackInfo describes a single fall-through within a node's
 // provider fallback chain, passed to the OnProviderFallback hook.
 type ProviderFallbackInfo struct {
@@ -1383,33 +1401,16 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 			if bn == "" {
 				bn = backendName
 			}
-			e.hooks.OnDelegateError(f.id, DelegateInfo{
-				BackendName:        bn,
-				Duration:           result.Duration,
-				Tokens:             result.Tokens,
-				ExitCode:           result.ExitCode,
-				Stderr:             result.Stderr,
-				RawOutputLen:       result.RawOutputLen,
-				ParseFallback:      result.ParseFallback,
-				FormattingPassUsed: result.FormattingPassUsed,
-				Error:              err,
-			})
+			di := delegateInfoFromResult(bn, result)
+			di.Error = err
+			e.hooks.OnDelegateError(f.id, di)
 		}
 		return nil, fmt.Errorf("model: node %q: backend %q failed: %w", f.id, backendName, err)
 	}
 
 	// Emit backend finished event.
 	if e.hooks.OnDelegateFinished != nil {
-		e.hooks.OnDelegateFinished(f.id, DelegateInfo{
-			BackendName:        result.BackendName,
-			Duration:           result.Duration,
-			Tokens:             result.Tokens,
-			ExitCode:           result.ExitCode,
-			Stderr:             result.Stderr,
-			RawOutputLen:       result.RawOutputLen,
-			ParseFallback:      result.ParseFallback,
-			FormattingPassUsed: result.FormattingPassUsed,
-		})
+		e.hooks.OnDelegateFinished(f.id, delegateInfoFromResult(result.BackendName, result))
 	}
 
 	// Flag if structured output parsing fell back to text wrapper.
@@ -1470,18 +1471,10 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 					// outer retryDelegateLoop only knows about transient
 					// errors, not schema-shape failures.
 					if e.hooks.OnDelegateRetry != nil {
-						e.hooks.OnDelegateRetry(f.id, DelegateInfo{
-							BackendName:        backendName,
-							Duration:           result.Duration,
-							Tokens:             result.Tokens,
-							ExitCode:           result.ExitCode,
-							Stderr:             result.Stderr,
-							RawOutputLen:       result.RawOutputLen,
-							ParseFallback:      result.ParseFallback,
-							FormattingPassUsed: result.FormattingPassUsed,
-							Error:              err,
-							Attempt:            1,
-						})
+						di := delegateInfoFromResult(backendName, result)
+						di.Error = err
+						di.Attempt = 1
+						e.hooks.OnDelegateRetry(f.id, di)
 					}
 					// Route the schema-fallback retry through retryDelegateLoop so
 					// it inherits the same transient-error backoff every other
@@ -1955,33 +1948,16 @@ func (e *ClawExecutor) executeLLMRouterUnified(ctx context.Context, node *ir.Rou
 			if bn == "" {
 				bn = backendName
 			}
-			e.hooks.OnDelegateError(node.ID, DelegateInfo{
-				BackendName:        bn,
-				Duration:           result.Duration,
-				Tokens:             result.Tokens,
-				ExitCode:           result.ExitCode,
-				Stderr:             result.Stderr,
-				RawOutputLen:       result.RawOutputLen,
-				ParseFallback:      result.ParseFallback,
-				FormattingPassUsed: result.FormattingPassUsed,
-				Error:              err,
-			})
+			di := delegateInfoFromResult(bn, result)
+			di.Error = err
+			e.hooks.OnDelegateError(node.ID, di)
 		}
 		return nil, fmt.Errorf("model: llm router %q: backend %q failed: %w", node.ID, backendName, err)
 	}
 
 	// Emit backend finished event.
 	if e.hooks.OnDelegateFinished != nil {
-		e.hooks.OnDelegateFinished(node.ID, DelegateInfo{
-			BackendName:        result.BackendName,
-			Duration:           result.Duration,
-			Tokens:             result.Tokens,
-			ExitCode:           result.ExitCode,
-			Stderr:             result.Stderr,
-			RawOutputLen:       result.RawOutputLen,
-			ParseFallback:      result.ParseFallback,
-			FormattingPassUsed: result.FormattingPassUsed,
-		})
+		e.hooks.OnDelegateFinished(node.ID, delegateInfoFromResult(result.BackendName, result))
 	}
 
 	output := result.Output

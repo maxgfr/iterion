@@ -31,25 +31,14 @@ var (
 // Event emission
 // ---------------------------------------------------------------------------
 
-// emit is a convenience wrapper for appending an event.
+// emit is a convenience wrapper for appending an event with no branch ID.
 func (e *Engine) emit(ctx context.Context, runID string, typ store.EventType, nodeID string, data map[string]interface{}) error {
-	evt := store.Event{
-		Type:   typ,
-		NodeID: nodeID,
-		Data:   data,
-	}
-	persisted, err := e.store.AppendEvent(ctx, runID, evt)
-	if err != nil {
-		return fmt.Errorf("runtime: emit %s: %w", typ, err)
-	}
-	if e.onEvent != nil && persisted != nil {
-		e.onEvent(*persisted)
-	}
-	e.logEvent(typ, nodeID, "", data)
-	return nil
+	return e.emitBranch(ctx, runID, "", typ, nodeID, data)
 }
 
-// emitBranch appends an event with a branch ID.
+// emitBranch appends an event, optionally tagged with a branch ID. A blank
+// branchID is the non-branch case (what emit forwards) and keeps the
+// branch-free error message.
 func (e *Engine) emitBranch(ctx context.Context, runID, branchID string, typ store.EventType, nodeID string, data map[string]interface{}) error {
 	evt := store.Event{
 		Type:     typ,
@@ -59,7 +48,10 @@ func (e *Engine) emitBranch(ctx context.Context, runID, branchID string, typ sto
 	}
 	persisted, err := e.store.AppendEvent(ctx, runID, evt)
 	if err != nil {
-		return fmt.Errorf("runtime: emit %s (branch %s): %w", typ, branchID, err)
+		if branchID != "" {
+			return fmt.Errorf("runtime: emit %s (branch %s): %w", typ, branchID, err)
+		}
+		return fmt.Errorf("runtime: emit %s: %w", typ, err)
 	}
 	if e.onEvent != nil && persisted != nil {
 		e.onEvent(*persisted)

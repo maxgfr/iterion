@@ -122,6 +122,19 @@ func (p *parser) consumeBlock() {
 
 // ---- file ----
 
+// isReservedName reports whether name collides with a reserved target
+// (done/fail/…). On collision it records a DiagReservedName diagnostic at tok
+// naming the offending declaration kind and returns true, so the caller drops
+// the decl rather than appending a phantom entry that downstream consumers
+// (the JSON marshaller, the unparse path) would surface alongside the error.
+func (p *parser) isReservedName(tok Token, name, kind string) bool {
+	if ast.ReservedTargets[name] {
+		p.addError(DiagReservedName, tok, "cannot use reserved name '"+name+"' as "+kind+" name")
+		return true
+	}
+	return false
+}
+
 func (p *parser) parseFile() *ast.File {
 	f := &ast.File{}
 	startTok := p.peek()
@@ -198,58 +211,28 @@ func (p *parser) parseFile() *ast.File {
 			}
 
 		case TokenPrompt:
-			pd := p.parsePromptDecl()
-			if pd != nil {
-				if ast.ReservedTargets[pd.Name] {
-					p.addError(DiagReservedName, t, "cannot use reserved name '"+pd.Name+"' as prompt name")
-					// Drop the reserved-name decl rather than appending
-					// it: downstream consumers iterating f.Prompts (the
-					// JSON marshaller, the unparse path) used to surface
-					// a phantom `prompt done:` entry alongside the
-					// diagnostic.
-				} else {
-					f.Prompts = append(f.Prompts, pd)
-				}
+			if pd := p.parsePromptDecl(); pd != nil && !p.isReservedName(t, pd.Name, "prompt") {
+				f.Prompts = append(f.Prompts, pd)
 			}
 
 		case TokenSchema:
-			sd := p.parseSchemaDecl()
-			if sd != nil {
-				if ast.ReservedTargets[sd.Name] {
-					p.addError(DiagReservedName, t, "cannot use reserved name '"+sd.Name+"' as schema name")
-				} else {
-					f.Schemas = append(f.Schemas, sd)
-				}
+			if sd := p.parseSchemaDecl(); sd != nil && !p.isReservedName(t, sd.Name, "schema") {
+				f.Schemas = append(f.Schemas, sd)
 			}
 
 		case TokenCursor:
-			cd := p.parseCursorDecl()
-			if cd != nil {
-				if ast.ReservedTargets[cd.Name] {
-					p.addError(DiagReservedName, t, "cannot use reserved name '"+cd.Name+"' as cursor name")
-				} else {
-					f.Cursors = append(f.Cursors, cd)
-				}
+			if cd := p.parseCursorDecl(); cd != nil && !p.isReservedName(t, cd.Name, "cursor") {
+				f.Cursors = append(f.Cursors, cd)
 			}
 
 		case TokenAgent:
-			ad := p.parseAgentDecl()
-			if ad != nil {
-				if ast.ReservedTargets[ad.Name] {
-					p.addError(DiagReservedName, t, "cannot use reserved name '"+ad.Name+"' as agent name")
-				} else {
-					f.Agents = append(f.Agents, ad)
-				}
+			if ad := p.parseAgentDecl(); ad != nil && !p.isReservedName(t, ad.Name, "agent") {
+				f.Agents = append(f.Agents, ad)
 			}
 
 		case TokenJudge:
-			jd := p.parseJudgeDecl()
-			if jd != nil {
-				if ast.ReservedTargets[jd.Name] {
-					p.addError(DiagReservedName, t, "cannot use reserved name '"+jd.Name+"' as judge name")
-				} else {
-					f.Judges = append(f.Judges, jd)
-				}
+			if jd := p.parseJudgeDecl(); jd != nil && !p.isReservedName(t, jd.Name, "judge") {
+				f.Judges = append(f.Judges, jd)
 			}
 
 		case TokenRouter:
@@ -271,13 +254,8 @@ func (p *parser) parseFile() *ast.File {
 			}
 
 		case TokenCompute:
-			cd := p.parseComputeDecl()
-			if cd != nil {
-				if ast.ReservedTargets[cd.Name] {
-					p.addError(DiagReservedName, t, "cannot use reserved name '"+cd.Name+"' as compute name")
-				} else {
-					f.Computes = append(f.Computes, cd)
-				}
+			if cd := p.parseComputeDecl(); cd != nil && !p.isReservedName(t, cd.Name, "compute") {
+				f.Computes = append(f.Computes, cd)
 			}
 
 		case TokenWorkflow:
