@@ -81,7 +81,13 @@ const COMPONENTS: Components = {
     />
   ),
   table: ({ node: _node, ...props }) => (
-    <table className="my-2 border-collapse text-[11px]" {...props} />
+    // Wide markdown tables would otherwise force the conversation
+    // column to scroll horizontally; wrapping in an overflow container
+    // keeps the table itself scrollable while the prose around it
+    // stays contained.
+    <div className="overflow-x-auto">
+      <table className="my-2 border-collapse text-[11px]" {...props} />
+    </div>
   ),
   th: ({ node: _node, ...props }) => (
     <th

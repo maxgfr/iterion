@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { getRun, resumeRun } from "@/api/runs";
 import { Button } from "@/components/ui/Button";
+import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Select } from "@/components/ui/Select";
 import type { HumanQuestionMessage, ReviewTurn } from "@/lib/runChat/types";
 import { useDocumentStore } from "@/store/document";
 import { useRunStore } from "@/store/run";
@@ -72,7 +74,16 @@ export default function ReviewMergeCard({ runId, message }: Props) {
       if (snapshotTimerRef.current != null) clearTimeout(snapshotTimerRef.current);
       snapshotTimerRef.current = setTimeout(() => {
         snapshotTimerRef.current = null;
-        getRun(runId).then(applySnapshot).catch(() => {});
+        // Snapshot refresh failure here means the WS reconnect hasn't
+        // landed yet — the next event will redrive the store, so we
+        // surface a soft notice rather than block the card.
+        getRun(runId)
+          .then(applySnapshot)
+          .catch((e: unknown) => {
+            setError(
+              `Snapshot refresh failed: ${(e as Error).message}. The card is up to date with the run's next event.`,
+            );
+          });
       }, 600);
     } catch (e) {
       setError((e as Error).message);
@@ -151,16 +162,20 @@ export default function ReviewMergeCard({ runId, message }: Props) {
       <div className="space-y-2 border-t border-border-default pt-2">
         {!noMerge && (
           <div className="flex items-center gap-2 text-[11px]">
-            <label className="text-fg-muted">Strategy</label>
-            <select
-              className="rounded border border-border-default bg-surface-0 px-1.5 py-0.5 text-[11px] text-fg-default"
+            <label htmlFor="review-merge-strategy" className="text-fg-muted">
+              Strategy
+            </label>
+            <Select
+              id="review-merge-strategy"
+              aria-label="Merge strategy"
               value={strategy}
               onChange={(e) => setStrategy(e.target.value)}
               disabled={busy}
+              className="w-auto"
             >
               <option value="squash">Squash and merge</option>
               <option value="merge">Merge commit (FF)</option>
-            </select>
+            </Select>
             <span className="text-fg-subtle">
               → {review.mergeInto === "current" ? "current branch" : review.mergeInto}
             </span>
@@ -193,7 +208,11 @@ export default function ReviewMergeCard({ runId, message }: Props) {
         </p>
       </div>
 
-      {error && <div className="text-[11px] text-danger-fg">{error}</div>}
+      {error && (
+        <InlineBanner tone="danger" layout="inline">
+          {error}
+        </InlineBanner>
+      )}
     </div>
   );
 }

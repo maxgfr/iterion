@@ -390,7 +390,8 @@ interface WorkflowTableProps {
 function WorkflowTable({ workflows, colors }: WorkflowTableProps) {
   const totalRuns = workflows.reduce((a, w) => a + w.run_count, 0);
   return (
-    <table className="w-full text-[12px] border-collapse">
+    <div className="overflow-x-auto">
+      <table className="w-full text-[12px] border-collapse">
       <thead>
         <tr className="text-left text-fg-muted text-[11px]">
           <th className="font-medium py-1">Workflow</th>
@@ -446,7 +447,8 @@ function WorkflowTable({ workflows, colors }: WorkflowTableProps) {
           );
         })}
       </tbody>
-    </table>
+      </table>
+    </div>
   );
 }
 

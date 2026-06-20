@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { Artifact, ArtifactSummary } from "@/api/runs";
 import { getArtifact } from "@/api/runs";
-import { CopyButton } from "@/components/ui";
+import { CopyButton, Select } from "@/components/ui";
 
 interface Props {
   runId: string;
@@ -271,35 +271,37 @@ export default function ArtifactDiff({ runId, nodeId, versions }: Props) {
         <PlanCard data={toBody.data as Record<string, unknown>} />
       )}
       <div className="flex items-center gap-2 mb-2 text-[10px]">
-        <label>
+        <span className="flex items-center gap-1">
           from{" "}
-          <select
+          <Select
+            aria-label="Compare from version"
             value={fromV}
             onChange={(e) => setFromV(Number(e.target.value))}
-            className="bg-surface-2 px-1 py-0.5 rounded font-mono"
+            className="font-mono w-auto"
           >
             {sorted.map((v) => (
               <option key={v.version} value={v.version}>
                 v{v.version}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </span>
         <span className="text-fg-subtle">→</span>
-        <label>
+        <span className="flex items-center gap-1">
           to{" "}
-          <select
+          <Select
+            aria-label="Compare to version"
             value={toV}
             onChange={(e) => setToV(Number(e.target.value))}
-            className="bg-surface-2 px-1 py-0.5 rounded font-mono"
+            className="font-mono w-auto"
           >
             {sorted.map((v) => (
               <option key={v.version} value={v.version}>
                 v{v.version}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </span>
       </div>
       {fromV === toV ? (
         <div className="relative">

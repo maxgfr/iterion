@@ -79,6 +79,7 @@ export default function DiagnosticsPanel() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search code or message…"
+            aria-label="Filter diagnostics"
             className="flex-1 px-1.5 py-0.5 rounded border border-border-default bg-surface-0 text-[11px]"
           />
           <button

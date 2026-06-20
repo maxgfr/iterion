@@ -2,7 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import * as api from "@/api/client";
 import type { FileEntry } from "@/api/types";
 import { useRecentsStore } from "@/store/recents";
-import { Badge, Dialog, Tabs, Input } from "@/components/ui";
+import {
+  Badge,
+  Dialog,
+  Tabs,
+  Input,
+  InlineBanner,
+  Spinner,
+} from "@/components/ui";
 import { MagnifyingGlassIcon, FileIcon, ClockIcon, RocketIcon, TrashIcon } from "@radix-ui/react-icons";
 import { buildSearchResults, type SearchResult } from "./searchResults";
 
@@ -18,14 +25,39 @@ export default function FilePicker({ open, onOpenChange, onPick }: FilePickerPro
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [examples, setExamples] = useState<string[]>([]);
   const [query, setQuery] = useState("");
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [filesError, setFilesError] = useState<string | null>(null);
+  const [loadingExamples, setLoadingExamples] = useState(false);
+  const [examplesError, setExamplesError] = useState<string | null>(null);
   const recents = useRecentsStore((s) => s.recents);
   const removeRecent = useRecentsStore((s) => s.removeRecent);
   const clearRecents = useRecentsStore((s) => s.clearRecents);
 
   useEffect(() => {
     if (!open) return;
-    api.listFiles().then(setFiles).catch(() => setFiles([]));
-    api.listExamples().then(setExamples).catch(() => setExamples([]));
+    // Track loading + error per source so the panels can distinguish
+    // "still fetching" / "fetch failed" / "genuinely empty" — collapsing
+    // a failure into an empty list hides the real problem from the user.
+    setLoadingFiles(true);
+    setFilesError(null);
+    api
+      .listFiles()
+      .then((f) => setFiles(f))
+      .catch((e: unknown) => {
+        setFilesError(e instanceof Error ? e.message : String(e));
+        setFiles([]);
+      })
+      .finally(() => setLoadingFiles(false));
+    setLoadingExamples(true);
+    setExamplesError(null);
+    api
+      .listExamples()
+      .then((e) => setExamples(e))
+      .catch((e: unknown) => {
+        setExamplesError(e instanceof Error ? e.message : String(e));
+        setExamples([]);
+      })
+      .finally(() => setLoadingExamples(false));
     setQuery("");
     // Fresh / first-time users have no recents — Examples is a better
     // discovery surface than the raw workspace file listing. Returning
@@ -131,27 +163,45 @@ export default function FilePicker({ open, onOpenChange, onPick }: FilePickerPro
       </List>
     );
 
-  const filesPanel =
-    files.length === 0 ? (
-      <Empty>No files in workspace.</Empty>
-    ) : (
-      <List>
-        {files.map((f) => (
-          <Row key={f.name} label={f.name} onPick={() => pick("file", f.name)} />
-        ))}
-      </List>
-    );
+  const filesPanel = loadingFiles ? (
+    <LoadingState>Loading files…</LoadingState>
+  ) : filesError ? (
+    <InlineBanner
+      tone="danger"
+      layout="inline"
+      title="Could not load workspace files"
+    >
+      {filesError}
+    </InlineBanner>
+  ) : files.length === 0 ? (
+    <Empty>No files in workspace.</Empty>
+  ) : (
+    <List>
+      {files.map((f) => (
+        <Row key={f.name} label={f.name} onPick={() => pick("file", f.name)} />
+      ))}
+    </List>
+  );
 
-  const examplesPanel =
-    examples.length === 0 ? (
-      <Empty>No examples available.</Empty>
-    ) : (
-      <List>
-        {examples.map((n) => (
-          <Row key={n} label={n} onPick={() => pick("example", n)} />
-        ))}
-      </List>
-    );
+  const examplesPanel = loadingExamples ? (
+    <LoadingState>Loading examples…</LoadingState>
+  ) : examplesError ? (
+    <InlineBanner
+      tone="danger"
+      layout="inline"
+      title="Could not load examples"
+    >
+      {examplesError}
+    </InlineBanner>
+  ) : examples.length === 0 ? (
+    <Empty>No examples available.</Empty>
+  ) : (
+    <List>
+      {examples.map((n) => (
+        <Row key={n} label={n} onPick={() => pick("example", n)} />
+      ))}
+    </List>
+  );
 
   const panels: Record<string, React.ReactNode> = isSearching
     ? { recents: searchPanel, files: searchPanel, examples: searchPanel }
@@ -215,6 +265,15 @@ export default function FilePicker({ open, onOpenChange, onPick }: FilePickerPro
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <p className="text-xs text-fg-subtle py-6 text-center">{children}</p>;
+}
+
+function LoadingState({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="py-6 text-center text-xs text-fg-subtle flex items-center justify-center gap-2">
+      <Spinner size="sm" />
+      <span>{children}</span>
+    </div>
+  );
 }
 
 function List({ children }: { children: React.ReactNode }) {

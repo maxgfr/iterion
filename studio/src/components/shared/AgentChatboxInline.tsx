@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Cross1Icon, PlusIcon, TrashIcon } from "@radix-ui/react-icons";
 
-import { Badge, Button, IconButton, Textarea } from "@/components/ui";
+import { Badge, Button, IconButton, Input, Textarea } from "@/components/ui";
 import type { BadgeVariant } from "@/components/ui";
 import {
   cancelQueuedMessage,
@@ -76,8 +76,17 @@ export default function AgentChatboxInline({
         if (cancelled) return;
         setQueuedMessages(msgs);
       })
-      .catch(() => {
-        /* swallow: live events will heal the inbox */
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        // The initial inbox snapshot may fail (run not found yet, WS
+        // mid-reconnect). Live events still heal it, but a stale
+        // composer with no past messages is confusing — surface the
+        // error in the existing error slot so the operator knows.
+        setError(
+          `Could not load queued messages: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
       });
     return () => {
       cancelled = true;
@@ -232,12 +241,13 @@ export default function AgentChatboxInline({
 
       {pickerOpen && skillCatalog.length > 0 && (
         <div className="rounded border border-border-default bg-surface-0 p-2 text-[11px] shadow-sm">
-          <input
+          <Input
             type="text"
             value={pickerFilter}
             onChange={(e) => setPickerFilter(e.target.value)}
             placeholder="Filter skills…"
-            className="mb-1 w-full rounded border border-border-default bg-surface-1 px-2 py-1 text-[11px]"
+            aria-label="Filter skills"
+            className="mb-1"
             autoFocus
           />
           <ul className="max-h-48 overflow-y-auto">

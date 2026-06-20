@@ -4,7 +4,7 @@ import { useLocation } from "wouter";
 import type { BotEntryWithSchema } from "@/api/bots";
 import { installBot } from "@/api/bots";
 import { useAuth } from "@/auth/AuthContext";
-import { Dialog } from "@/components/ui";
+import { Button, Dialog, Input } from "@/components/ui";
 import { botIdentity } from "@/lib/personas";
 import { useBotsStore } from "@/store/bots";
 import { useServerInfoStore } from "@/store/serverInfo";
@@ -137,37 +137,43 @@ export function BotCatalogDialog({
           <h3 className="text-xs font-medium text-fg-muted">
             Import a bot from a repository
           </h3>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => setShowImport((v) => !v)}
-            className="rounded bg-surface-2 px-2 py-1 text-micro text-fg-muted hover:bg-surface-3 hover:text-fg-default"
+            aria-expanded={showImport}
           >
             {showImport ? "Cancel" : "Import from repo…"}
-          </button>
+          </Button>
         </div>
         {showImport && (
           <div className="mt-2 space-y-2">
-            <input
+            <Input
               type="text"
               value={importUrl}
               onChange={(e) => setImportUrl(e.target.value)}
               placeholder="git URL (https://… or git@…) or local path"
-              className="w-full rounded border border-border-default bg-surface-2 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+              aria-label="Bot repository URL or local path"
+              size="md"
             />
             <div className="flex gap-2">
-              <input
+              <Input
                 type="text"
                 value={importRef}
                 onChange={(e) => setImportRef(e.target.value)}
                 placeholder="ref (branch/tag, optional)"
-                className="min-w-0 flex-1 rounded border border-border-default bg-surface-2 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                aria-label="Git ref (branch or tag)"
+                size="md"
+                className="min-w-0 flex-1"
               />
-              <input
+              <Input
                 type="text"
                 value={importPath}
                 onChange={(e) => setImportPath(e.target.value)}
                 placeholder="subpath or bot name (optional)"
-                className="min-w-0 flex-1 rounded border border-border-default bg-surface-2 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                aria-label="Subpath or bot name within repository"
+                size="md"
+                className="min-w-0 flex-1"
               />
             </div>
             <div className="flex items-center justify-between gap-3">
@@ -175,14 +181,16 @@ export function BotCatalogDialog({
                 Installs into .botz/ (git-ignored). Bots are never run
                 automatically — inspect, then launch.
               </p>
-              <button
-                type="button"
+              <Button
+                variant="success"
+                size="sm"
                 onClick={() => void onImport()}
                 disabled={importing || !importUrl.trim()}
-                className="shrink-0 rounded bg-success/20 px-2.5 py-1 text-micro font-medium text-success hover:bg-success/30 disabled:opacity-50"
+                loading={importing}
+                className="shrink-0"
               >
                 {importing ? "Importing…" : "Install"}
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -227,39 +235,38 @@ export function BotCatalogDialog({
                   )}
                 </div>
                 {b.forge && canConnectRepo && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="primary"
+                    size="sm"
                     onClick={() => onConnect(b.name)}
                     title="Connect a GitLab/GitHub/Forgejo repo and enable this bot on it"
-                    className="shrink-0 rounded bg-accent/15 px-2 py-1 text-micro font-medium text-accent hover:bg-accent/25"
+                    className="shrink-0"
                   >
                     Connect to a repo
-                  </button>
+                  </Button>
                 )}
                 {canEdit && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => onEdit(b)}
-                    className="shrink-0 rounded bg-surface-2 px-2 py-1 text-micro text-fg-muted hover:bg-surface-3 hover:text-fg-default"
+                    className="shrink-0"
                   >
                     Edit
-                  </button>
+                  </Button>
                 )}
-                <button
-                  type="button"
+                <Button
+                  variant={enabled ? "success" : "secondary"}
+                  size="sm"
                   role="switch"
                   aria-checked={enabled}
                   disabled={busy === b.name}
                   onClick={() => onToggle(b)}
                   title={enabled ? "Disable (hide from Nexie)" : "Enable (expose to Nexie)"}
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-micro font-medium transition-colors disabled:opacity-50 ${
-                    enabled
-                      ? "bg-success/20 text-success hover:bg-success/30"
-                      : "bg-surface-2 text-fg-subtle hover:bg-surface-3"
-                  }`}
+                  className="shrink-0"
                 >
                   {enabled ? "On" : "Off"}
-                </button>
+                </Button>
               </li>
             );
           })}
