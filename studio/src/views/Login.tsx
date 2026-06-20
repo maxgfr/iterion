@@ -129,21 +129,30 @@ export default function Login() {
           <input
             className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
             type="email"
+            name="email"
+            id="email"
             placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
+            // "username" (not "email") is the token password managers pair with
+            // current-password to recognise a login + offer to save it. On
+            // register, "email" is the right collect-an-address semantics.
+            autoComplete={mode === "login" ? "username" : "email"}
             required
           />
           <input
             className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
             type="password"
+            name="password"
+            id="password"
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete={mode === "login" ? "current-password" : "new-password"}
             required
-            minLength={8}
+            // Only enforce a minimum when creating a password; a login must
+            // accept whatever length the existing password is.
+            minLength={mode === "register" ? 8 : undefined}
           />
           {mode === "register" && providers?.signup_mode === "invite_only" && (
             <input
