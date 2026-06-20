@@ -276,7 +276,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
                   onClick={() => {
                     void navigator.clipboard?.writeText(issuedToken);
                   }}
-                  className="text-fg-accent hover:underline"
+                  className="text-accent hover:underline"
                 >
                   Copy
                 </button>

@@ -2,6 +2,7 @@ import { ReloadIcon } from "@radix-ui/react-icons";
 
 import { useBackendDetectStore } from "@/store/backendDetect";
 import { BackendBadge } from "@/components/icons/BackendBadge";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 import type { BackendStatus } from "@/api/backends";
 import { desktop, isDesktop } from "@/lib/desktopBridge";
 
@@ -46,9 +47,9 @@ export default function BackendsTab() {
       </div>
 
       {error && (
-        <div className="rounded border border-error/50 bg-error/5 text-error text-xs p-2">
-          Backend detect failed: {error}
-        </div>
+        <InlineBanner tone="danger" layout="inline" title="Backend detect failed">
+          {error}
+        </InlineBanner>
       )}
 
       {report && (
@@ -61,10 +62,10 @@ export default function BackendsTab() {
                 <BackendBadge backend="" resolved={resolved!} size={12} showLabel />
               </div>
             ) : (
-              <div className="text-error">
+              <InlineBanner tone="warning" layout="inline">
                 No credential detected. The Run button will fail until one of
                 the options below is configured.
-              </div>
+              </InlineBanner>
             )}
             <div className="text-[10px] text-fg-subtle mt-2">
               Preference order: {report.preference_order.join(" → ")}

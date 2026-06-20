@@ -287,7 +287,7 @@ function ConnectionCard({
         ) : (
           <button
             onClick={() => setEnabling(true)}
-            className="text-fg-accent hover:underline text-sm"
+            className="text-accent hover:underline text-sm"
           >
             + Enable a repo
           </button>
@@ -845,7 +845,7 @@ function RegisterOAuthAppForm({
 
   if (!show) {
     return (
-      <button onClick={() => setShow(true)} className="mt-3 text-fg-accent hover:underline text-sm">
+      <button onClick={() => setShow(true)} className="mt-3 text-accent hover:underline text-sm">
         + Register an OAuth app
       </button>
     );
