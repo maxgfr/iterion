@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { useConfirm } from "@/hooks/useConfirm";
 import ApiKeysPanel from "./ApiKeys";
 import OAuthConnections from "./OAuthConnections";
@@ -115,35 +117,53 @@ function ChangePasswordSection() {
         </p>
       </div>
       <form onSubmit={submit} className="space-y-2 max-w-md">
-        <input
-          type="password"
-          className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
-          placeholder="Current password"
-          value={current}
-          onChange={(e) => setCurrent(e.target.value)}
-          autoComplete="current-password"
-          required
-        />
-        <input
-          type="password"
-          className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
-          placeholder="New password (≥ 8 characters)"
-          value={next}
-          onChange={(e) => setNext(e.target.value)}
-          autoComplete="new-password"
-          minLength={8}
-          required
-        />
-        <input
-          type="password"
-          className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
-          placeholder="Confirm new password"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          autoComplete="new-password"
-          minLength={8}
-          required
-        />
+        <div>
+          <label htmlFor="settings-current-password" className="sr-only">
+            Current password
+          </label>
+          <Input
+            size="md"
+            type="password"
+            id="settings-current-password"
+            placeholder="Current password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+            autoComplete="current-password"
+            required
+          />
+        </div>
+        <div>
+          <label htmlFor="settings-new-password" className="sr-only">
+            New password
+          </label>
+          <Input
+            size="md"
+            type="password"
+            id="settings-new-password"
+            placeholder="New password (≥ 8 characters)"
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            autoComplete="new-password"
+            minLength={8}
+            required
+          />
+        </div>
+        <div>
+          <label htmlFor="settings-confirm-password" className="sr-only">
+            Confirm new password
+          </label>
+          <Input
+            size="md"
+            type="password"
+            id="settings-confirm-password"
+            placeholder="Confirm new password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            autoComplete="new-password"
+            minLength={8}
+            required
+          />
+        </div>
         {err && (
           <InlineBanner tone="danger" layout="inline">
             {err}
@@ -152,13 +172,9 @@ function ChangePasswordSection() {
         {ok && (
           <div className="text-sm text-success-fg">Password updated.</div>
         )}
-        <button
-          type="submit"
-          disabled={busy}
-          className="bg-accent text-fg-onAccent rounded px-3 py-2 text-sm disabled:opacity-50"
-        >
+        <Button variant="primary" type="submit" loading={busy}>
           {busy ? "Working…" : "Change password"}
-        </button>
+        </Button>
       </form>
     </section>
   );
@@ -208,14 +224,13 @@ function SignOutEverywhereSection() {
           {err}
         </InlineBanner>
       )}
-      <button
-        type="button"
-        disabled={busy}
+      <Button
+        variant="danger"
+        loading={busy}
         onClick={() => void submit()}
-        className="bg-danger text-fg-onAccent rounded px-3 py-2 text-sm disabled:opacity-50"
       >
         {busy ? "Working…" : "Sign out everywhere"}
-      </button>
+      </Button>
     </section>
   );
 }

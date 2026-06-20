@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Button } from "@/components/ui/Button";
+import { Textarea } from "@/components/ui/Textarea";
 import { useConfirm } from "@/hooks/useConfirm";
 import { EmptyState } from "@/components/ui/EmptyState";
 import {
@@ -156,9 +158,15 @@ export default function OAuthConnections() {
 
                 {editingKind === kind ? (
                   <form onSubmit={submit} className="space-y-2">
-                    <div className="text-xs text-fg-muted">{hint}</div>
-                    <textarea
-                      className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 font-mono text-xs"
+                    <label
+                      htmlFor={`oauth-creds-${kind}`}
+                      className="block text-xs text-fg-muted"
+                    >
+                      {hint}
+                    </label>
+                    <Textarea
+                      id={`oauth-creds-${kind}`}
+                      className="font-mono text-xs"
                       rows={6}
                       placeholder='{ "claudeAiOauth": { "accessToken": "...", … } }'
                       value={draft}
@@ -166,51 +174,50 @@ export default function OAuthConnections() {
                       required
                     />
                     <div className="flex gap-2">
-                      <button
+                      <Button
+                        variant="primary"
                         type="submit"
-                        disabled={busy}
-                        className="bg-accent text-fg-onAccent rounded px-3 py-1.5 text-sm disabled:opacity-50"
+                        loading={busy}
                       >
                         {busy ? "Sealing…" : "Save"}
-                      </button>
-                      <button
-                        type="button"
+                      </Button>
+                      <Button
+                        variant="secondary"
                         onClick={() => {
                           setEditingKind(null);
                           setDraft("");
                         }}
-                        className="bg-surface-0 border border-border-subtle rounded px-3 py-1.5 text-sm"
                       >
                         Cancel
-                      </button>
+                      </Button>
                     </div>
                   </form>
                 ) : (
                   <div className="flex gap-2">
-                    <button
+                    <Button
+                      variant="primary"
                       onClick={() => {
                         setEditingKind(kind);
                         setDraft("");
                       }}
-                      className="bg-accent text-fg-onAccent rounded px-3 py-1.5 text-sm"
                     >
                       {conn ? "Update credentials" : "Connect"}
-                    </button>
+                    </Button>
                     {conn && (
                       <>
-                        <button
+                        <Button
+                          variant="secondary"
                           onClick={() => refresh(kind)}
-                          className="bg-surface-0 border border-border-subtle rounded px-3 py-1.5 text-sm"
                           disabled={busy}
                         >
                           Refresh tokens
-                        </button>
-                        <button
+                        </Button>
+                        <Button
+                          variant="danger"
                           onClick={() => remove(kind)}
-                          className="bg-surface-0 border border-border-subtle rounded px-3 py-1.5 text-sm text-danger"
                         >
                           Disconnect
-                        </button>
+                        </Button>
                       </>
                     )}
                   </div>

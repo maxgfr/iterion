@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import { useLocation, useParams, useSearch } from "wouter";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useAuth } from "@/auth/AuthContext";
@@ -237,33 +240,41 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
       {canManage && (
         <section className="bg-surface-1 border border-border-subtle rounded p-4 space-y-3">
           <h3 className="font-medium">Invite a member</h3>
-          <form onSubmit={invite} className="flex gap-2">
-            <input
-              type="email"
-              className="flex-1 bg-surface-0 border border-border-subtle rounded px-3 py-2"
-              placeholder="email@example.com"
-              value={draft.email}
-              onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-              required
-            />
-            <select
-              className="bg-surface-0 border border-border-subtle rounded px-3 py-2"
-              value={draft.role}
-              onChange={(e) => setDraft({ ...draft, role: e.target.value })}
-            >
-              {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-            <button
-              type="submit"
-              disabled={busy}
-              className="bg-accent text-fg-onAccent rounded px-3 py-2 text-sm disabled:opacity-50"
-            >
+          <form onSubmit={invite} className="flex gap-2 items-end">
+            <div className="flex-1">
+              <label htmlFor="invite-email" className="sr-only">
+                Email
+              </label>
+              <Input
+                size="md"
+                type="email"
+                id="invite-email"
+                placeholder="email@example.com"
+                value={draft.email}
+                onChange={(e) => setDraft({ ...draft, email: e.target.value })}
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="invite-role" className="sr-only">
+                Role
+              </label>
+              <Select
+                size="md"
+                id="invite-role"
+                value={draft.role}
+                onChange={(e) => setDraft({ ...draft, role: e.target.value })}
+              >
+                {ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <Button variant="primary" type="submit" loading={busy}>
               Send invite
-            </button>
+            </Button>
           </form>
           {issuedToken && (
             <div className="text-xs bg-surface-0 border border-border-subtle rounded p-3 font-mono break-all">
@@ -271,22 +282,22 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
               <br />
               {issuedToken}
               <div className="mt-2 flex gap-2 font-sans">
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => {
                     void navigator.clipboard?.writeText(issuedToken);
                   }}
-                  className="text-accent hover:underline"
                 >
                   Copy
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setIssuedToken(null)}
-                  className="text-fg-muted hover:text-fg-default"
                 >
                   Done — hide
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -311,24 +322,28 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
                 <td className="px-2 py-2">{m.name ?? "—"}</td>
                 <td className="px-2 py-2">
                   {canManage ? (
-                    <select
+                    <Select
                       value={m.role}
                       onChange={(e) => setRole(m.user_id, e.target.value)}
-                      className="bg-surface-0 border border-border-subtle rounded px-2 py-1 text-xs"
+                      aria-label={`Role for ${m.email ?? m.user_id}`}
                     >
                       {ROLES.map((r) => (
                         <option key={r} value={r}>
                           {r}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   ) : (
                     m.role
                   )}
                 </td>
                 <td className="px-2 py-2 text-right">
                   {canManage && (
-                    <button onClick={() => kick(m.user_id)} className="text-danger hover:underline text-xs">
+                    <button
+                      type="button"
+                      onClick={() => kick(m.user_id)}
+                      className="text-danger hover:underline text-xs"
+                    >
                       Remove
                     </button>
                   )}

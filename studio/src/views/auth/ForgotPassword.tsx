@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { useLocation } from "wouter";
 
 import { requestPasswordReset } from "@/api/auth";
@@ -37,7 +39,11 @@ export default function ForgotPassword() {
             If we have an account for that email address, we sent a password-reset link.
             The link expires shortly — open it in the same browser to finish resetting.
           </p>
-          <button onClick={() => navigate("/login")} className="underline text-sm">
+          <button
+            type="button"
+            onClick={() => navigate("/login")}
+            className="underline text-sm"
+          >
             Back to sign-in
           </button>
         </div>
@@ -53,29 +59,40 @@ export default function ForgotPassword() {
           Enter your email and we'll send a one-time link to reset it.
         </p>
         <form onSubmit={submit} className="space-y-3">
-          <input
-            type="email"
-            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
+          <div>
+            <label htmlFor="forgot-email" className="sr-only">
+              Email
+            </label>
+            <Input
+              size="md"
+              type="email"
+              id="forgot-email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </div>
           {err && (
             <InlineBanner tone="danger" layout="inline">
               {err}
             </InlineBanner>
           )}
-          <button
+          <Button
+            variant="primary"
             type="submit"
-            disabled={busy}
-            className="w-full bg-accent text-fg-onAccent rounded px-3 py-2 font-medium disabled:opacity-50"
+            loading={busy}
+            className="w-full"
           >
             {busy ? "Sending…" : "Send reset link"}
-          </button>
+          </Button>
         </form>
         <div className="mt-4 text-sm text-fg-muted text-center">
-          <button onClick={() => navigate("/login")} className="underline">
+          <button
+            type="button"
+            onClick={() => navigate("/login")}
+            className="underline"
+          >
             Back to sign-in
           </button>
         </div>

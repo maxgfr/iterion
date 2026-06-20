@@ -25,6 +25,9 @@ import {
   startGitHubManifest,
 } from "@/api/forgeConnections";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import { useConfirm } from "@/hooks/useConfirm";
 
 // canonicalBase mirrors forge.CanonicalBaseURL (Go) so the connect form can
@@ -58,6 +61,7 @@ export default function IntegrationsTab({
   const [forgeBots, setForgeBots] = useState<BotEntryWithSchema[]>([]);
   const [unavailable, setUnavailable] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [botsWarning, setBotsWarning] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
   // ?bot=<name> (set by the catalog's "Connect to a repo" affordance) pre-checks
   // that bot in the enable dialog and auto-opens it when there's one connection.
@@ -86,8 +90,15 @@ export default function IntegrationsTab({
   useEffect(() => {
     void reload();
     void listBots()
-      .then((bots) => setForgeBots(bots.filter((b) => b.forge)))
-      .catch(() => {});
+      .then((bots) => {
+        setForgeBots(bots.filter((b) => b.forge));
+        setBotsWarning(null);
+      })
+      .catch((e) =>
+        setBotsWarning(
+          (e as Error)?.message ?? "Failed to load forge-capable bots.",
+        ),
+      );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamID]);
 
@@ -106,6 +117,11 @@ export default function IntegrationsTab({
       {err && (
         <InlineBanner tone="danger" layout="inline">
           {err}
+        </InlineBanner>
+      )}
+      {botsWarning && (
+        <InlineBanner tone="warning" layout="inline">
+          {botsWarning}
         </InlineBanner>
       )}
 
@@ -238,7 +254,11 @@ function ConnectionCard({
           </div>
         </div>
         {canManage && (
-          <button onClick={disconnect} className="text-danger hover:underline text-xs">
+          <button
+            type="button"
+            onClick={disconnect}
+            className="text-danger hover:underline text-xs"
+          >
             Disconnect
           </button>
         )}
@@ -260,7 +280,11 @@ function ConnectionCard({
                   <span className="text-fg-muted">· {i.bot_ids.join(", ")}</span>
                 </span>
                 {canManage && (
-                  <button onClick={() => disable(i)} className="text-danger hover:underline text-xs">
+                  <button
+                    type="button"
+                    onClick={() => disable(i)}
+                    className="text-danger hover:underline text-xs"
+                  >
                     Disable
                   </button>
                 )}
@@ -286,6 +310,7 @@ function ConnectionCard({
           />
         ) : (
           <button
+            type="button"
             onClick={() => setEnabling(true)}
             className="text-accent hover:underline text-sm"
           >
@@ -381,37 +406,49 @@ function EnableRepoPanel({
 
   return (
     <div className="bg-surface-0 border border-border-subtle rounded p-3 space-y-3">
-      <div className="flex gap-2">
-        <input
-          className="flex-1 bg-surface-1 border border-border-subtle rounded px-2 py-1 text-sm"
-          placeholder="Search repos…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void loadRepos();
-          }}
-        />
-        <button
+      <div className="flex gap-2 items-center">
+        <div className="flex-1">
+          <label htmlFor="forge-repo-search" className="sr-only">
+            Search repos
+          </label>
+          <Input
+            id="forge-repo-search"
+            placeholder="Search repos…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void loadRepos();
+            }}
+          />
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => void loadRepos()}
-          className="text-sm border border-border-subtle rounded px-2 py-1 hover:bg-surface-2"
+          loading={loadingRepos}
         >
           {loadingRepos ? "…" : "Search"}
-        </button>
+        </Button>
       </div>
 
-      <select
-        className="w-full bg-surface-1 border border-border-subtle rounded px-2 py-1 text-sm"
-        value={repo}
-        onChange={(e) => setRepo(e.target.value)}
-      >
-        <option value="">Select a repository…</option>
-        {repos.map((r) => (
-          <option key={r.full_name} value={r.full_name} disabled={!r.can_admin}>
-            {r.full_name}
-            {r.can_admin ? "" : " (no admin access)"}
-          </option>
-        ))}
-      </select>
+      <div>
+        <label htmlFor="forge-repo-pick" className="sr-only">
+          Repository
+        </label>
+        <Select
+          id="forge-repo-pick"
+          value={repo}
+          onChange={(e) => setRepo(e.target.value)}
+        >
+          <option value="">Select a repository…</option>
+          {repos.map((r) => (
+            <option key={r.full_name} value={r.full_name} disabled={!r.can_admin}>
+              {r.full_name}
+              {r.can_admin ? "" : " (no admin access)"}
+            </option>
+          ))}
+        </Select>
+      </div>
 
       <div>
         <div className="text-xs uppercase tracking-wider text-fg-muted mb-1">Bots to enable</div>
@@ -474,16 +511,17 @@ function EnableRepoPanel({
       )}
 
       <div className="flex items-center gap-2">
-        <button
+        <Button
+          variant="primary"
           onClick={() => void enable()}
           disabled={busy || !repo || selectedBots.length === 0 || hasConflicts}
-          className="bg-accent text-fg-onAccent rounded px-3 py-1 text-sm disabled:opacity-50"
+          loading={busy}
         >
           {busy ? "Enabling…" : "Enable"}
-        </button>
-        <button onClick={onCancel} className="text-fg-muted hover:text-fg-default text-sm">
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -585,6 +623,7 @@ function ConnectForm({
         {(["gitlab", "github", "forgejo"] as ForgeProvider[]).map((p) => (
           <button
             key={p}
+            type="button"
             disabled={!CONNECTABLE.includes(p)}
             onClick={() => pickProvider(p)}
             className={`text-sm rounded px-3 py-1 border ${
@@ -598,12 +637,18 @@ function ConnectForm({
         ))}
       </div>
 
-      <input
-        className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 text-sm"
-        placeholder="Forge base URL (optional — for self-hosted, e.g. https://gitlab.example.com)"
-        value={baseURL}
-        onChange={(e) => setBaseURL(e.target.value)}
-      />
+      <div>
+        <label htmlFor="forge-base-url" className="sr-only">
+          Forge base URL
+        </label>
+        <Input
+          size="md"
+          id="forge-base-url"
+          placeholder="Forge base URL (optional — for self-hosted, e.g. https://gitlab.example.com)"
+          value={baseURL}
+          onChange={(e) => setBaseURL(e.target.value)}
+        />
+      </div>
 
       <div className="flex gap-3 text-sm">
         <label
@@ -639,24 +684,31 @@ function ConnectForm({
       </div>
 
       {mode === "pat" && (
-        <input
-          type="password"
-          className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 text-sm"
-          placeholder="Personal access token (api / repo + hook-admin scope)"
-          value={pat}
-          onChange={(e) => setPat(e.target.value)}
-          autoComplete="off"
-        />
+        <div>
+          <label htmlFor="forge-pat" className="sr-only">
+            Personal access token
+          </label>
+          <Input
+            size="md"
+            type="password"
+            id="forge-pat"
+            placeholder="Personal access token (api / repo + hook-admin scope)"
+            value={pat}
+            onChange={(e) => setPat(e.target.value)}
+            autoComplete="off"
+          />
+        </div>
       )}
       {redirectHint && <p className="text-caption text-fg-muted">{redirectHint}</p>}
 
-      <button
+      <Button
+        variant="primary"
         onClick={() => void connect()}
         disabled={busy || (mode === "pat" && pat.trim() === "")}
-        className="bg-accent text-fg-onAccent rounded px-3 py-2 text-sm disabled:opacity-50"
+        loading={busy}
       >
         {busy ? "Connecting…" : "Connect"}
-      </button>
+      </Button>
     </section>
   );
 }
@@ -723,6 +775,7 @@ function OAuthAppsSection({
               </div>
               {canManage && (
                 <button
+                  type="button"
                   onClick={() => void remove(a)}
                   className="text-danger hover:underline text-xs shrink-0"
                 >
@@ -845,7 +898,11 @@ function RegisterOAuthAppForm({
 
   if (!show) {
     return (
-      <button onClick={() => setShow(true)} className="mt-3 text-accent hover:underline text-sm">
+      <button
+        type="button"
+        onClick={() => setShow(true)}
+        className="mt-3 text-accent hover:underline text-sm"
+      >
         + Register an OAuth app
       </button>
     );
@@ -858,6 +915,7 @@ function RegisterOAuthAppForm({
         {(["gitlab", "github", "forgejo"] as ForgeProvider[]).map((p) => (
           <button
             key={p}
+            type="button"
             onClick={() => pickProvider(p)}
             className={`text-sm rounded px-3 py-1 border ${
               provider === p ? "border-accent bg-surface-2" : "border-border-subtle"
@@ -870,13 +928,14 @@ function RegisterOAuthAppForm({
 
       {provider === "github" && (
         <div className="rounded border border-accent/40 bg-accent/5 p-3 space-y-2">
-          <button
+          <Button
+            variant="primary"
             onClick={() => void launchGitHubManifest()}
             disabled={busy}
-            className="bg-accent text-fg-onAccent rounded px-3 py-2 text-sm disabled:opacity-50"
+            loading={busy}
           >
             {busy ? "Opening GitHub…" : "Create a GitHub App"}
-          </button>
+          </Button>
           <p className="text-caption text-fg-muted">
             Recommended for GitHub — one click sends you to GitHub to confirm, then iterion stores
             the app's credentials automatically. (For GitHub Enterprise, set the base URL below
@@ -914,23 +973,35 @@ function RegisterOAuthAppForm({
         </label>
       </div>
 
-      <input
-        className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 text-sm"
-        placeholder="Forge base URL (optional — for self-hosted, e.g. https://gitlab.example.com)"
-        value={baseURL}
-        onChange={(e) => setBaseURL(e.target.value)}
-      />
+      <div>
+        <label htmlFor="oauth-app-base-url" className="sr-only">
+          Forge base URL
+        </label>
+        <Input
+          size="md"
+          id="oauth-app-base-url"
+          placeholder="Forge base URL (optional — for self-hosted, e.g. https://gitlab.example.com)"
+          value={baseURL}
+          onChange={(e) => setBaseURL(e.target.value)}
+        />
+      </div>
 
       {mode === "auto" && (
         <>
-          <input
-            type="password"
-            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 text-sm"
-            placeholder="Admin token (GitLab: instance-admin PAT with api scope)"
-            value={adminToken}
-            onChange={(e) => setAdminToken(e.target.value)}
-            autoComplete="off"
-          />
+          <div>
+            <label htmlFor="oauth-admin-token" className="sr-only">
+              Admin token
+            </label>
+            <Input
+              size="md"
+              type="password"
+              id="oauth-admin-token"
+              placeholder="Admin token (GitLab: instance-admin PAT with api scope)"
+              value={adminToken}
+              onChange={(e) => setAdminToken(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
           <p className="text-caption text-fg-muted">
             iterion creates the OAuth app on the forge for you (redirect URI + scope set
             automatically) and stores its credentials sealed. The admin token is used once and never
@@ -941,18 +1012,24 @@ function RegisterOAuthAppForm({
 
       {mode === "auto_from_connection" && (
         <>
-          <select
-            className="w-full bg-surface-0 border border-border-subtle rounded px-2 py-2 text-sm"
-            value={connectionID}
-            onChange={(e) => setConnectionID(e.target.value)}
-          >
-            <option value="">Select a {provider} connection…</option>
-            {usableConns.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.account_login ?? c.id} · {c.forge_base_url ?? c.provider}
-              </option>
-            ))}
-          </select>
+          <div>
+            <label htmlFor="oauth-conn-pick" className="sr-only">
+              Connection
+            </label>
+            <Select
+              size="md"
+              id="oauth-conn-pick"
+              value={connectionID}
+              onChange={(e) => setConnectionID(e.target.value)}
+            >
+              <option value="">Select a {provider} connection…</option>
+              {usableConns.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.account_login ?? c.id} · {c.forge_base_url ?? c.provider}
+                </option>
+              ))}
+            </Select>
+          </div>
           <p className="text-caption text-fg-muted">
             Reuses an existing {provider} connection's token to create the app — no admin token to
             paste. The connection's owner needs create-app rights on the instance.
@@ -962,21 +1039,33 @@ function RegisterOAuthAppForm({
 
       {mode === "manual" && (
         <>
-          <input
-            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 text-sm"
-            placeholder="Client ID (Application ID)"
-            value={clientID}
-            onChange={(e) => setClientID(e.target.value)}
-            autoComplete="off"
-          />
-          <input
-            type="password"
-            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 text-sm"
-            placeholder="Client secret"
-            value={clientSecret}
-            onChange={(e) => setClientSecret(e.target.value)}
-            autoComplete="off"
-          />
+          <div>
+            <label htmlFor="oauth-client-id" className="sr-only">
+              Client ID
+            </label>
+            <Input
+              size="md"
+              id="oauth-client-id"
+              placeholder="Client ID (Application ID)"
+              value={clientID}
+              onChange={(e) => setClientID(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <div>
+            <label htmlFor="oauth-client-secret" className="sr-only">
+              Client secret
+            </label>
+            <Input
+              size="md"
+              type="password"
+              id="oauth-client-secret"
+              placeholder="Client secret"
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
           <p className="text-caption text-fg-muted">
             Create the app on the forge with redirect URI{" "}
             <span className="font-mono break-all">{redirectURI}</span> and the scope it needs
@@ -986,19 +1075,17 @@ function RegisterOAuthAppForm({
       )}
 
       <div className="flex items-center gap-2">
-        <button
+        <Button
+          variant="primary"
           onClick={() => void submit()}
           disabled={busy || !canSubmit}
-          className="bg-accent text-fg-onAccent rounded px-3 py-2 text-sm disabled:opacity-50"
+          loading={busy}
         >
           {busy ? "Registering…" : "Register"}
-        </button>
-        <button
-          onClick={() => setShow(false)}
-          className="text-fg-muted hover:text-fg-default text-sm"
-        >
+        </Button>
+        <Button variant="ghost" onClick={() => setShow(false)}>
           Cancel
-        </button>
+        </Button>
       </div>
     </section>
   );

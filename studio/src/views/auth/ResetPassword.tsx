@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { useLocation } from "wouter";
 
 import { ApiError, confirmPasswordReset } from "@/api/auth";
@@ -57,41 +59,58 @@ export default function ResetPassword() {
         <h1 className="text-2xl font-semibold mb-2">Reset your password</h1>
         <p className="text-sm text-fg-muted mb-6">Pick a new password to finish.</p>
         <form onSubmit={submit} className="space-y-3">
-          <input
-            type="password"
-            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
-            placeholder="New password (≥ 8 characters)"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="new-password"
-            minLength={8}
-            required
-          />
-          <input
-            type="password"
-            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
-            placeholder="Confirm new password"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            autoComplete="new-password"
-            minLength={8}
-            required
-          />
+          <div>
+            <label htmlFor="reset-password" className="sr-only">
+              New password
+            </label>
+            <Input
+              size="md"
+              type="password"
+              id="reset-password"
+              placeholder="New password (≥ 8 characters)"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              minLength={8}
+              required
+            />
+          </div>
+          <div>
+            <label htmlFor="reset-password-confirm" className="sr-only">
+              Confirm new password
+            </label>
+            <Input
+              size="md"
+              type="password"
+              id="reset-password-confirm"
+              placeholder="Confirm new password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              autoComplete="new-password"
+              minLength={8}
+              required
+            />
+          </div>
           {err && (
             <InlineBanner tone="danger" layout="inline">
               {err}
             </InlineBanner>
           )}
-          <button
+          <Button
+            variant="primary"
             type="submit"
-            disabled={busy}
-            className="w-full bg-accent text-fg-onAccent rounded px-3 py-2 font-medium disabled:opacity-50"
+            loading={busy}
+            className="w-full"
           >
             {busy ? "Working…" : "Reset password & sign in"}
-          </button>
+          </Button>
         </form>
         <div className="mt-4 text-sm text-fg-muted text-center">
-          <button onClick={() => navigate("/login")} className="underline">
+          <button
+            type="button"
+            onClick={() => navigate("/login")}
+            className="underline"
+          >
             Back to sign-in
           </button>
         </div>

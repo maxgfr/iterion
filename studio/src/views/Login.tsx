@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { useLocation } from "wouter";
 import { listProviders, register, type ProvidersResponse } from "@/api/auth";
 import { ApiError } from "@/api/auth";
@@ -118,63 +120,87 @@ export default function Login() {
 
         <form onSubmit={submit} className="space-y-3">
           {mode === "register" && (
-            <input
-              className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
-              placeholder="Name (optional)"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoComplete="name"
-            />
+            <div>
+              <label htmlFor="login-name" className="sr-only">
+                Name
+              </label>
+              <Input
+                size="md"
+                id="login-name"
+                placeholder="Name (optional)"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                autoComplete="name"
+              />
+            </div>
           )}
-          <input
-            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
-            type="email"
-            name="email"
-            id="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            // "username" (not "email") is the token password managers pair with
-            // current-password to recognise a login + offer to save it. On
-            // register, "email" is the right collect-an-address semantics.
-            autoComplete={mode === "login" ? "username" : "email"}
-            required
-          />
-          <input
-            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
-            type="password"
-            name="password"
-            id="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={mode === "login" ? "current-password" : "new-password"}
-            required
-            // Only enforce a minimum when creating a password; a login must
-            // accept whatever length the existing password is.
-            minLength={mode === "register" ? 8 : undefined}
-          />
-          {mode === "register" && providers?.signup_mode === "invite_only" && (
-            <input
-              className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 font-mono text-sm"
-              placeholder="Invitation token"
-              value={invitation}
-              onChange={(e) => setInvitation(e.target.value)}
+          <div>
+            <label htmlFor="email" className="sr-only">
+              Email
+            </label>
+            <Input
+              size="md"
+              type="email"
+              name="email"
+              id="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              // "username" (not "email") is the token password managers pair with
+              // current-password to recognise a login + offer to save it. On
+              // register, "email" is the right collect-an-address semantics.
+              autoComplete={mode === "login" ? "username" : "email"}
               required
             />
+          </div>
+          <div>
+            <label htmlFor="password" className="sr-only">
+              Password
+            </label>
+            <Input
+              size="md"
+              type="password"
+              name="password"
+              id="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              required
+              // Only enforce a minimum when creating a password; a login must
+              // accept whatever length the existing password is.
+              minLength={mode === "register" ? 8 : undefined}
+            />
+          </div>
+          {mode === "register" && providers?.signup_mode === "invite_only" && (
+            <div>
+              <label htmlFor="login-invitation" className="sr-only">
+                Invitation token
+              </label>
+              <Input
+                size="md"
+                id="login-invitation"
+                className="font-mono"
+                placeholder="Invitation token"
+                value={invitation}
+                onChange={(e) => setInvitation(e.target.value)}
+                required
+              />
+            </div>
           )}
           {err && (
             <InlineBanner tone="danger" layout="inline">
               {err}
             </InlineBanner>
           )}
-          <button
+          <Button
+            variant="primary"
             type="submit"
-            disabled={busy}
-            className="w-full bg-accent text-fg-onAccent rounded px-3 py-2 font-medium disabled:opacity-50"
+            loading={busy}
+            className="w-full"
           >
             {busy ? "Working…" : mode === "login" ? "Sign in" : "Create account"}
-          </button>
+          </Button>
         </form>
 
         {(providers?.providers?.length ?? 0) > 0 && (
@@ -184,13 +210,14 @@ export default function Login() {
             </div>
             <div className="space-y-2">
               {providers!.providers.map((p) => (
-                <button
+                <Button
                   key={p.name}
+                  variant="secondary"
+                  className="w-full"
                   onClick={() => oidcStart(p.name)}
-                  className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 hover:bg-surface-2"
                 >
                   {p.display}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -201,7 +228,11 @@ export default function Login() {
             <>
               {showRegister && (
                 <div>
-                  <button onClick={() => setMode("register")} className="underline">
+                  <button
+                    type="button"
+                    onClick={() => setMode("register")}
+                    className="underline"
+                  >
                     Need an account? Sign up
                   </button>
                 </div>
@@ -209,6 +240,7 @@ export default function Login() {
               {serverInfo?.email_enabled && (
                 <div>
                   <button
+                    type="button"
                     onClick={() => navigate("/auth/forgot-password")}
                     className="underline"
                   >
@@ -218,7 +250,11 @@ export default function Login() {
               )}
             </>
           ) : (
-            <button onClick={() => setMode("login")} className="underline">
+            <button
+              type="button"
+              onClick={() => setMode("login")}
+              className="underline"
+            >
               Already have an account? Sign in
             </button>
           )}

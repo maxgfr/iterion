@@ -58,7 +58,11 @@ export default function BackendsTab() {
             <div className="text-xs text-fg-subtle mb-1">Resolved default</div>
             {hasAny ? (
               <div className="flex items-center gap-2">
-                <span className="inline-block w-2 h-2 rounded-full bg-success" />
+                <span
+                  role="img"
+                  aria-label="available"
+                  className="inline-block w-2 h-2 rounded-full bg-success"
+                />
                 <BackendBadge backend="" resolved={resolved!} size={12} showLabel />
               </div>
             ) : (
@@ -99,6 +103,8 @@ function BackendRow({ status }: { status: BackendStatus }) {
   return (
     <li className="rounded border border-border-default bg-surface-1 p-2 flex items-start gap-2">
       <span
+        role="img"
+        aria-label={status.available ? "available" : "unavailable"}
         className={`mt-1 inline-block w-2 h-2 rounded-full shrink-0 ${
           status.available ? "bg-success" : "bg-fg-subtle/40"
         }`}

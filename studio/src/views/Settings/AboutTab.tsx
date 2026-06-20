@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { desktop, type AppInfo } from "@/lib/desktopBridge";
 import { useServerInfoStore } from "@/store/serverInfo";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 
 interface Props {
   desktopFeatures: boolean;
@@ -10,14 +11,39 @@ interface Props {
 
 export default function AboutTab({ desktopFeatures }: Props) {
   const [info, setInfo] = useState<AppInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const serverInfo = useServerInfoStore((s) => s.info);
 
   useEffect(() => {
     if (!desktopFeatures) return;
-    desktop.getAppInfo().then(setInfo).catch(() => setInfo(null));
+    desktop
+      .getAppInfo()
+      .then((i) => {
+        setInfo(i);
+        setError(null);
+      })
+      .catch((e) => {
+        setInfo(null);
+        setError((e as Error)?.message ?? "Failed to load app info.");
+      });
   }, [desktopFeatures]);
 
-  if (desktopFeatures && !info) return <EmptyState message="Loading…" />;
+  if (desktopFeatures && !info) {
+    if (error) {
+      return (
+        <div className="p-4">
+          <InlineBanner
+            tone="danger"
+            layout="inline"
+            title="Failed to load app info"
+          >
+            {error}
+          </InlineBanner>
+        </div>
+      );
+    }
+    return <EmptyState message="Loading…" />;
+  }
 
   return (
     <div className="flex flex-col gap-3 p-4 text-sm">
