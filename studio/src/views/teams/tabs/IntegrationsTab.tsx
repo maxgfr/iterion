@@ -10,6 +10,7 @@ import {
   type ForgeOAuthApp,
   type ForgeProvider,
   type ForgeRepo,
+  type RegisterForgeOAuthAppInput,
   connectForge,
   deleteForgeConnection,
   deleteForgeOAuthApp,
@@ -139,6 +140,7 @@ export default function IntegrationsTab({
       <OAuthAppsSection
         teamID={teamID}
         apps={oauthApps}
+        connections={connections}
         canManage={canManage}
         onChanged={reload}
         onError={setErr}
@@ -661,6 +663,7 @@ function ConnectForm({
 function OAuthAppsSection({
   teamID,
   apps,
+  connections,
   canManage,
   onChanged,
   onError,
@@ -668,6 +671,7 @@ function OAuthAppsSection({
 }: {
   teamID: string;
   apps: ForgeOAuthApp[];
+  connections: ForgeConnection[];
   canManage: boolean;
   onChanged: () => void;
   onError: (m: string) => void;
@@ -729,40 +733,70 @@ function OAuthAppsSection({
         </ul>
       )}
       {canManage && (
-        <RegisterOAuthAppForm teamID={teamID} onRegistered={onChanged} onError={onError} />
+        <RegisterOAuthAppForm
+          teamID={teamID}
+          connections={connections}
+          onRegistered={onChanged}
+          onError={onError}
+        />
       )}
     </div>
   );
 }
 
+type RegisterMode = "auto" | "auto_from_connection" | "manual";
+
 function RegisterOAuthAppForm({
   teamID,
+  connections,
   onRegistered,
   onError,
 }: {
   teamID: string;
+  connections: ForgeConnection[];
   onRegistered: () => void;
   onError: (m: string) => void;
 }) {
   const [show, setShow] = useState(false);
   const [provider, setProvider] = useState<ForgeProvider>("gitlab");
   const [baseURL, setBaseURL] = useState("");
+  const [mode, setMode] = useState<RegisterMode>("auto");
+  const [adminToken, setAdminToken] = useState("");
+  const [connectionID, setConnectionID] = useState("");
   const [clientID, setClientID] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [busy, setBusy] = useState(false);
 
   const redirectURI = `${window.location.origin}/api/forge/oauth/callback`;
+  // GitHub has no create-app REST API (only the interactive App-Manifest flow),
+  // so token-based auto-create isn't available for it yet — nudge to manual.
+  const autoSupported = provider !== "github";
+  const usableConns = connections.filter((c) => c.provider === provider);
+
+  const pickProvider = (p: ForgeProvider) => {
+    setProvider(p);
+    if (p === "github" && mode !== "manual") setMode("manual");
+  };
 
   const submit = async () => {
     setBusy(true);
     try {
-      await registerForgeOAuthApp(teamID, {
+      const input: RegisterForgeOAuthAppInput = {
         provider,
         forge_base_url: baseURL.trim() || undefined,
-        mode: "manual",
-        client_id: clientID.trim(),
-        client_secret: clientSecret.trim(),
-      });
+        mode,
+      };
+      if (mode === "manual") {
+        input.client_id = clientID.trim();
+        input.client_secret = clientSecret.trim();
+      } else if (mode === "auto") {
+        input.admin_token = adminToken.trim();
+      } else {
+        input.connection_id = connectionID;
+      }
+      await registerForgeOAuthApp(teamID, input);
+      setAdminToken("");
+      setConnectionID("");
       setClientID("");
       setClientSecret("");
       setBaseURL("");
@@ -775,12 +809,16 @@ function RegisterOAuthAppForm({
     }
   };
 
+  const canSubmit =
+    mode === "manual"
+      ? !!clientID.trim() && !!clientSecret.trim()
+      : mode === "auto"
+        ? autoSupported && !!adminToken.trim()
+        : !!connectionID;
+
   if (!show) {
     return (
-      <button
-        onClick={() => setShow(true)}
-        className="mt-3 text-fg-accent hover:underline text-sm"
-      >
+      <button onClick={() => setShow(true)} className="mt-3 text-fg-accent hover:underline text-sm">
         + Register an OAuth app
       </button>
     );
@@ -793,7 +831,7 @@ function RegisterOAuthAppForm({
         {(["gitlab", "github", "forgejo"] as ForgeProvider[]).map((p) => (
           <button
             key={p}
-            onClick={() => setProvider(p)}
+            onClick={() => pickProvider(p)}
             className={`text-sm rounded px-3 py-1 border ${
               provider === p ? "border-accent bg-surface-2" : "border-border-subtle"
             }`}
@@ -802,37 +840,111 @@ function RegisterOAuthAppForm({
           </button>
         ))}
       </div>
+
+      <div className="flex flex-wrap gap-3 text-sm">
+        <label
+          className={`flex items-center gap-1 ${autoSupported ? "" : "opacity-50"}`}
+          title={
+            autoSupported ? "" : "GitHub auto-create needs the App-Manifest flow — paste credentials"
+          }
+        >
+          <input
+            type="radio"
+            checked={mode === "auto"}
+            onChange={() => setMode("auto")}
+            disabled={!autoSupported}
+          />
+          Auto-create (admin token)
+        </label>
+        <label className="flex items-center gap-1">
+          <input
+            type="radio"
+            checked={mode === "auto_from_connection"}
+            onChange={() => setMode("auto_from_connection")}
+          />
+          Reuse a connection
+        </label>
+        <label className="flex items-center gap-1">
+          <input type="radio" checked={mode === "manual"} onChange={() => setMode("manual")} />
+          Paste credentials
+        </label>
+      </div>
+
       <input
         className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 text-sm"
         placeholder="Forge base URL (optional — for self-hosted, e.g. https://gitlab.example.com)"
         value={baseURL}
         onChange={(e) => setBaseURL(e.target.value)}
       />
-      <input
-        className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 text-sm"
-        placeholder="Client ID (Application ID)"
-        value={clientID}
-        onChange={(e) => setClientID(e.target.value)}
-        autoComplete="off"
-      />
-      <input
-        type="password"
-        className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 text-sm"
-        placeholder="Client secret"
-        value={clientSecret}
-        onChange={(e) => setClientSecret(e.target.value)}
-        autoComplete="off"
-      />
-      <p className="text-caption text-fg-muted">
-        Create the app on the forge with redirect URI{" "}
-        <span className="font-mono break-all">{redirectURI}</span> and the scope it needs (GitLab:{" "}
-        <span className="font-mono">api</span>), then paste its credentials here. One-click
-        auto-create is coming.
-      </p>
+
+      {mode === "auto" && (
+        <>
+          <input
+            type="password"
+            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 text-sm"
+            placeholder="Admin token (GitLab: instance-admin PAT with api scope)"
+            value={adminToken}
+            onChange={(e) => setAdminToken(e.target.value)}
+            autoComplete="off"
+          />
+          <p className="text-caption text-fg-muted">
+            iterion creates the OAuth app on the forge for you (redirect URI + scope set
+            automatically) and stores its credentials sealed. The admin token is used once and never
+            stored.
+          </p>
+        </>
+      )}
+
+      {mode === "auto_from_connection" && (
+        <>
+          <select
+            className="w-full bg-surface-0 border border-border-subtle rounded px-2 py-2 text-sm"
+            value={connectionID}
+            onChange={(e) => setConnectionID(e.target.value)}
+          >
+            <option value="">Select a {provider} connection…</option>
+            {usableConns.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.account_login ?? c.id} · {c.forge_base_url ?? c.provider}
+              </option>
+            ))}
+          </select>
+          <p className="text-caption text-fg-muted">
+            Reuses an existing {provider} connection's token to create the app — no admin token to
+            paste. The connection's owner needs create-app rights on the instance.
+          </p>
+        </>
+      )}
+
+      {mode === "manual" && (
+        <>
+          <input
+            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 text-sm"
+            placeholder="Client ID (Application ID)"
+            value={clientID}
+            onChange={(e) => setClientID(e.target.value)}
+            autoComplete="off"
+          />
+          <input
+            type="password"
+            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 text-sm"
+            placeholder="Client secret"
+            value={clientSecret}
+            onChange={(e) => setClientSecret(e.target.value)}
+            autoComplete="off"
+          />
+          <p className="text-caption text-fg-muted">
+            Create the app on the forge with redirect URI{" "}
+            <span className="font-mono break-all">{redirectURI}</span> and the scope it needs
+            (GitLab: <span className="font-mono">api</span>), then paste its credentials here.
+          </p>
+        </>
+      )}
+
       <div className="flex items-center gap-2">
         <button
           onClick={() => void submit()}
-          disabled={busy || !clientID.trim() || !clientSecret.trim()}
+          disabled={busy || !canSubmit}
           className="bg-accent text-fg-onAccent rounded px-3 py-2 text-sm disabled:opacity-50"
         >
           {busy ? "Registering…" : "Register"}

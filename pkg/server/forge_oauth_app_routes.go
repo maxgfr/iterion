@@ -25,15 +25,17 @@ func (s *Server) registerForgeOAuthAppRoutes() {
 }
 
 // forgeOAuthAppReq registers an OAuth app for a (provider, instance). mode
-// "manual" pastes an existing client_id/client_secret; the "auto" /
-// "auto_from_connection" modes (which call the forge's create-app API) are
-// added with provider auto-create support.
+// "manual" pastes an existing client_id/client_secret; "auto" calls the forge's
+// create-app API with a pasted admin token; "auto_from_connection" reuses an
+// existing PAT/OAuth connection's token to create the app (no re-paste).
 type forgeOAuthAppReq struct {
 	Provider     string `json:"provider"`
 	ForgeBaseURL string `json:"forge_base_url,omitempty"`
 	Mode         string `json:"mode,omitempty"`
 	ClientID     string `json:"client_id,omitempty"`
 	ClientSecret string `json:"client_secret,omitempty"`
+	AdminToken   string `json:"admin_token,omitempty"`   // mode=auto
+	ConnectionID string `json:"connection_id,omitempty"` // mode=auto_from_connection
 }
 
 func (s *Server) handleListForgeOAuthApps(w http.ResponseWriter, r *http.Request) {
@@ -75,17 +77,78 @@ func (s *Server) handleRegisterForgeOAuthApp(w http.ResponseWriter, r *http.Requ
 	if mode == "" {
 		mode = "manual"
 	}
-	if mode != "manual" {
-		httpError(w, http.StatusBadRequest, "unsupported mode %q — paste client_id/client_secret with mode=manual (auto-create lands with provider support)", mode)
+	switch mode {
+	case "manual":
+		clientID := strings.TrimSpace(req.ClientID)
+		clientSecret := strings.TrimSpace(req.ClientSecret)
+		if clientID == "" || clientSecret == "" {
+			httpError(w, http.StatusBadRequest, "client_id and client_secret are required for mode=manual")
+			return
+		}
+		app, err := s.createForgeOAuthApp(r, teamID, id.UserID, provider, req.ForgeBaseURL, clientID, clientSecret, "", false, mode)
+		if err != nil {
+			s.writeForgeOAuthAppError(w, err)
+			return
+		}
+		writeJSON(w, app)
+	case "auto", "auto_from_connection":
+		s.autoCreateForgeOAuthApp(w, r, teamID, id.UserID, provider, mode, req)
+	default:
+		httpError(w, http.StatusBadRequest, "unknown mode %q", mode)
+	}
+}
+
+// autoCreateForgeOAuthApp obtains an admin token (pasted, or reused from an
+// existing connection), calls the forge's create-app API, then persists the
+// returned credentials — so the operator never hand-creates the app on the
+// forge or pastes its secret.
+func (s *Server) autoCreateForgeOAuthApp(w http.ResponseWriter, r *http.Request, teamID, userID string, provider forge.Provider, mode string, req forgeOAuthAppReq) {
+	baseURL := forge.CanonicalBaseURL(provider, req.ForgeBaseURL)
+	var adminToken string
+	switch mode {
+	case "auto":
+		adminToken = strings.TrimSpace(req.AdminToken)
+		if adminToken == "" {
+			httpError(w, http.StatusBadRequest, "admin_token is required for mode=auto")
+			return
+		}
+	case "auto_from_connection":
+		connID := strings.TrimSpace(req.ConnectionID)
+		if connID == "" {
+			httpError(w, http.StatusBadRequest, "connection_id is required for mode=auto_from_connection")
+			return
+		}
+		conn, ok := s.forgeConnForTenant(w, r, teamID, connID)
+		if !ok {
+			return // forgeConnForTenant already wrote the 404
+		}
+		tok, err := forge.AdminTokenFor(s.sealer, conn)
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, "open connection token: %v", err)
+			return
+		}
+		adminToken = tok
+		if strings.TrimSpace(req.ForgeBaseURL) == "" {
+			baseURL = conn.BaseURL() // default to the connection's instance
+		}
+	}
+
+	prov, err := s.forgeOAuthAppProvisioner(provider, baseURL, adminToken)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "%v", err)
 		return
 	}
-	clientID := strings.TrimSpace(req.ClientID)
-	clientSecret := strings.TrimSpace(req.ClientSecret)
-	if clientID == "" || clientSecret == "" {
-		httpError(w, http.StatusBadRequest, "client_id and client_secret are required for mode=manual")
+	creds, err := prov.CreateOAuthApp(r.Context(), forge.OAuthAppSpec{
+		Name:         "iterion",
+		RedirectURI:  s.forgeOAuthRedirectURI(),
+		Scopes:       forgeDefaultOAuthScopes(provider),
+		Confidential: true,
+	})
+	if err != nil {
+		s.writeForgeOAuthAppError(w, err)
 		return
 	}
-	app, err := s.createForgeOAuthApp(r, teamID, id.UserID, provider, req.ForgeBaseURL, clientID, clientSecret, "", false, mode)
+	app, err := s.createForgeOAuthApp(r, teamID, userID, provider, baseURL, creds.ClientID, creds.ClientSecret, creds.ProviderAppID, true, mode)
 	if err != nil {
 		s.writeForgeOAuthAppError(w, err)
 		return

@@ -57,6 +57,34 @@ type OAuthExchanger interface {
 	Exchange(ctx context.Context, code, redirectURI, codeVerifier string) (RefreshedToken, error)
 }
 
+// OAuthAppProvisioner creates an OAuth application on a forge instance using an
+// operator-supplied admin credential, so iterion can auto-register the app it
+// then drives the connect flow with — instead of the operator hand-creating it
+// on the forge. Implemented by the per-provider AdminClient where the forge
+// exposes a create-app API (GitLab /applications [admin], Forgejo
+// /user/applications/oauth2 [user]). Not part of Admin: it's a one-time
+// bootstrap, not a per-connection runtime op. Returns ErrForbidden when the
+// credential lacks the rights (e.g. GitLab needs an instance admin).
+type OAuthAppProvisioner interface {
+	CreateOAuthApp(ctx context.Context, spec OAuthAppSpec) (OAuthAppCredentials, error)
+}
+
+// OAuthAppSpec describes the OAuth application to create on the forge.
+type OAuthAppSpec struct {
+	Name         string
+	RedirectURI  string
+	Scopes       []string
+	Confidential bool
+}
+
+// OAuthAppCredentials is what a forge returns for a freshly created OAuth app.
+// ProviderAppID is the forge-side id (retained for later deletion).
+type OAuthAppCredentials struct {
+	ClientID      string
+	ClientSecret  string
+	ProviderAppID string
+}
+
 // Identity is the account a credential authenticates as.
 type Identity struct {
 	Login string `json:"login"`

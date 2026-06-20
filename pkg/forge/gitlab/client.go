@@ -231,3 +231,39 @@ func (c *AdminClient) DeleteHook(ctx context.Context, repo, hookID string) error
 func projectID(repo string) string {
 	return url.PathEscape(strings.TrimSpace(repo))
 }
+
+// CreateOAuthApp registers an instance-wide OAuth application via
+// POST /api/v4/applications. This endpoint requires GitLab instance-admin
+// rights — a non-admin token gets 403 → forge.ErrForbidden. GitLab returns
+// `application_id` (the client_id) + `secret` (the client_secret); `id` is the
+// internal id used to DELETE the app later.
+func (c *AdminClient) CreateOAuthApp(ctx context.Context, spec forge.OAuthAppSpec) (forge.OAuthAppCredentials, error) {
+	body := map[string]any{
+		"name":         spec.Name,
+		"redirect_uri": spec.RedirectURI,
+		"scopes":       strings.Join(spec.Scopes, " "),
+		"confidential": spec.Confidential,
+	}
+	var out struct {
+		ID            int64  `json:"id"`
+		ApplicationID string `json:"application_id"`
+		Secret        string `json:"secret"`
+	}
+	code, err := c.do(ctx, http.MethodPost, "/applications", body, &out)
+	if err != nil {
+		return forge.OAuthAppCredentials{}, err
+	}
+	if code/100 != 2 {
+		return forge.OAuthAppCredentials{}, statusErr("create oauth app", code)
+	}
+	if out.ApplicationID == "" || out.Secret == "" {
+		return forge.OAuthAppCredentials{}, fmt.Errorf("gitlab: create oauth app: empty credentials in response")
+	}
+	return forge.OAuthAppCredentials{
+		ClientID:      out.ApplicationID,
+		ClientSecret:  out.Secret,
+		ProviderAppID: strconv.FormatInt(out.ID, 10),
+	}, nil
+}
+
+var _ forge.OAuthAppProvisioner = (*AdminClient)(nil)

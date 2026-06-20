@@ -190,6 +190,38 @@ func (s *Server) forgeOAuthRedirectURI() string {
 	return strings.TrimRight(s.cfg.PublicURL, "/") + "/api/forge/oauth/callback"
 }
 
+// forgeOAuthAppProvisioner builds the create-app client for a provider from an
+// admin token. The per-provider AdminClient implements OAuthAppProvisioner
+// where the forge exposes a create-app API (GitLab, Forgejo); GitHub does not
+// (its create path is the interactive App-Manifest flow), so it returns a clear
+// "paste an existing app instead" error here.
+func (s *Server) forgeOAuthAppProvisioner(provider forge.Provider, baseURL, adminToken string) (forge.OAuthAppProvisioner, error) {
+	admin, err := s.forgeAdminForToken(provider, baseURL, adminToken)
+	if err != nil {
+		return nil, err
+	}
+	prov, ok := admin.(forge.OAuthAppProvisioner)
+	if !ok {
+		return nil, fmt.Errorf("auto-create is not available for %s — paste an existing client_id/client_secret instead", provider)
+	}
+	return prov, nil
+}
+
+// forgeDefaultOAuthScopes is the scope set an auto-created OAuth app requests,
+// per provider (the same defaults the connect flow uses at authorize time).
+func forgeDefaultOAuthScopes(p forge.Provider) []string {
+	switch p {
+	case forge.ProviderGitLab:
+		return forgegitlab.DefaultScopes
+	case forge.ProviderGitHub:
+		return forgegithub.DefaultScopes
+	case forge.ProviderForgejo:
+		return forgeforgejo.DefaultScopes
+	default:
+		return nil
+	}
+}
+
 // forgeRefresherFor returns the token refresher for a connection, or nil
 // when it cannot/should-not refresh (PAT, GitHub-App, or a provider with no
 // configured OAuth app). The per-provider OAuth clients implement both

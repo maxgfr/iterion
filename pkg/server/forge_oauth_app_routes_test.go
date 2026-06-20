@@ -135,3 +135,37 @@ func TestForgeOAuthApp_CRUD(t *testing.T) {
 		t.Fatalf("delete: code=%d body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestForgeOAuthApp_AutoCreate(t *testing.T) {
+	gl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v4/applications" && r.Method == http.MethodPost {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 9, "application_id": "auto-cid", "secret": "auto-sec"})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer gl.Close()
+
+	s := newForgeOAuthAppTestServer(t)
+	ctx := superAdminCtx()
+	const base = "/api/teams/t1/forge/oauth-apps"
+
+	body := `{"provider":"gitlab","forge_base_url":"` + gl.URL + `","mode":"auto","admin_token":"admintok"}`
+	w := httptest.NewRecorder()
+	s.handleRegisterForgeOAuthApp(w, oauthAppReq(ctx, "POST", base, body, "t1", ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("auto create: code=%d body=%s", w.Code, w.Body.String())
+	}
+	var created forge.ForgeOAuthApp
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.ClientID != "auto-cid" || !created.AutoCreated || created.ProviderAppID != "9" {
+		t.Fatalf("created = %+v", created)
+	}
+	// the resolver opens the sealed secret + builds the OAuth client for it
+	if _, ok := s.forgeOAuthAppFor(ctx, "t1", forge.ProviderGitLab, gl.URL); !ok {
+		t.Fatal("resolver did not find the auto-created app")
+	}
+}
