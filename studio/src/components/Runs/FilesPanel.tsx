@@ -15,7 +15,8 @@ import {
   type TreeNode,
 } from "@/lib/fileTree";
 import { basename } from "@/lib/format";
-import type { RunFile, RunFileStatus, RunFilesMode } from "@/api/runs";
+import type { RunFile, RunFilesMode } from "@/api/runs";
+import { StatusDot } from "./StatusDot";
 
 // View scope for the files tree. "combined" is the union of branch +
 // uncommitted (each file tagged with a lifecycle), surfaced to the operator
@@ -577,32 +578,6 @@ function FileRow({
         </span>
       </button>
     </Tooltip>
-  );
-}
-
-// VSCode-style palette. Compared to the previous flat-list `StatusBadge`,
-// the dot is leaner (no filled background) so the row chrome doesn't
-// compete with the line-count column on the right. The letter form is
-// kept rather than a shape so screen readers can announce status
-// without aria gymnastics.
-const STATUS_CLASS: Record<string, string> = {
-  M: "text-warning-fg",
-  A: "text-success-fg",
-  D: "text-danger-fg",
-  R: "text-info-fg",
-  "??": "text-success-fg/70",
-};
-
-function StatusDot({ status }: { status: RunFileStatus }) {
-  const cls = STATUS_CLASS[status] ?? "text-fg-muted";
-  const letter = status === "??" ? "U" : status;
-  return (
-    <span
-      className={`inline-flex h-3 w-3 shrink-0 items-center justify-center text-[10px] font-bold leading-none ${cls}`}
-      aria-label={`status ${status}`}
-    >
-      {letter}
-    </span>
   );
 }
 

@@ -9,11 +9,11 @@ import {
   type RunCommitDetail,
   type RunFile,
   type RunFileDiff,
-  type RunFileStatus,
 } from "@/api/runs";
 import { useThemeStore } from "@/store/theme";
 import { inferMonacoLanguage } from "@/lib/inferMonacoLanguage";
 import { formatRelative } from "@/lib/format";
+import { StatusDot } from "./StatusDot";
 
 interface CommitDetailDialogProps {
   runId: string;
@@ -259,27 +259,6 @@ function CommitFileDiff({ runId, sha, path }: CommitFileDiffProps) {
         scrollBeyondLastLine: false,
       }}
     />
-  );
-}
-
-const STATUS_CLASS: Record<string, string> = {
-  M: "text-warning-fg",
-  A: "text-success-fg",
-  D: "text-danger-fg",
-  R: "text-info-fg",
-  "??": "text-success-fg/70",
-};
-
-function StatusDot({ status }: { status: RunFileStatus }) {
-  const cls = STATUS_CLASS[status] ?? "text-fg-muted";
-  const letter = status === "??" ? "U" : status;
-  return (
-    <span
-      className={`inline-flex h-3 w-3 shrink-0 items-center justify-center text-[10px] font-bold leading-none ${cls}`}
-      aria-label={`status ${status}`}
-    >
-      {letter}
-    </span>
   );
 }
 
