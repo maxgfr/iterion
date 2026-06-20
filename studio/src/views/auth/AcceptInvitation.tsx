@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useLocation } from "wouter";
@@ -38,7 +39,7 @@ export default function AcceptInvitation() {
     lookupInvitation(token)
       .then(setInfo)
       .catch((e) => {
-        const msg = e instanceof ApiError ? e.message : (e as Error).message;
+        const msg = e instanceof ApiError ? e.message : errorMessage(e);
         setErr(msg);
       });
   }, [token]);
@@ -68,7 +69,7 @@ export default function AcceptInvitation() {
       }
       navigate(`/teams/${mb.team_id}`, { replace: true });
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : (e as Error).message;
+      const msg = e instanceof ApiError ? e.message : errorMessage(e);
       setErr(msg);
     } finally {
       setBusy(false);

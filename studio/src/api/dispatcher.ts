@@ -3,6 +3,7 @@
 // start / pause / resume / stop) and operational (state / refresh /
 // reload / issue cancel / ws) endpoints.
 
+import { errorMessage } from "@/lib/errorHints";
 import { apiRequest } from "./client";
 import { getDesktopWsBase, isDesktop, isWailsHosted } from "@/lib/desktopBridge";
 
@@ -158,7 +159,7 @@ export async function getConfig(): Promise<DispatcherConfig | null> {
   } catch (err: unknown) {
     // 404 = no config persisted yet → null is a meaningful "empty"
     // state the form binds to.
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     if (msg.includes(" 404")) return null;
     throw err;
   }

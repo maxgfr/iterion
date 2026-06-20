@@ -14,6 +14,7 @@
 // `iterion-label-vocabulary` skill; this view is the human-facing
 // counterpart that bots read via `mcp__iterion_board__list_labels`.
 
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 
@@ -57,7 +58,7 @@ function LabelsViewInner() {
       setLabels(next);
       setError(null);
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     }
   }, []);
 
@@ -102,7 +103,7 @@ function LabelsViewInner() {
           console.info("[labels]", successMsg);
         }
       } catch (e) {
-        setError((e as Error).message);
+        setError(errorMessage(e));
       } finally {
         setBusy(false);
       }

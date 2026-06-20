@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useLocation, useParams } from "wouter";
@@ -371,7 +372,7 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
     loadEventHistoryIfMissing(runId).catch((err) => {
       // eslint-disable-next-line no-console
       console.warn("[run] event history hydration failed:", err);
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       useUIStore.getState().addToast(
         `Couldn't load event history: ${msg}`,
         "error",

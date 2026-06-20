@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 
@@ -39,7 +40,7 @@ export default function AuditTab({ teamID, canManage }: Props) {
       setNextOffset(r.events.length < PAGE ? null : r.next_offset);
     } catch (e) {
       if (e instanceof FeatureUnavailableError) setUnavailable(true);
-      else setErr((e as Error).message);
+      else setErr(errorMessage(e));
     } finally {
       setLoading(false);
     }

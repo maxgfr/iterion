@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 
@@ -36,7 +37,7 @@ export default function TokensPanel() {
       setUnavailable(false);
     } catch (e) {
       if (e instanceof FeatureUnavailableError) setUnavailable(true);
-      else setErr((e as Error).message);
+      else setErr(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -53,7 +54,7 @@ export default function TokensPanel() {
       setDeleting(null);
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     }
   };
 
@@ -213,7 +214,7 @@ function CreateTokenDialog({
       });
       onCreated(r);
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setBusy(false);
     }

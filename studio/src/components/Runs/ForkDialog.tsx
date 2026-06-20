@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 
@@ -61,7 +62,7 @@ export default function ForkDialog({ run, anchor, open, onOpenChange }: Props) {
           parsedInputs = JSON.parse(newInputs);
         } catch (jerr) {
           throw new Error(
-            `Invalid JSON in new inputs: ${jerr instanceof Error ? jerr.message : String(jerr)}`,
+            `Invalid JSON in new inputs: ${errorMessage(jerr)}`,
           );
         }
       }
@@ -88,7 +89,7 @@ export default function ForkDialog({ run, anchor, open, onOpenChange }: Props) {
       );
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useState } from "react";
 
 import { Button } from "@/components/ui";
@@ -36,7 +37,7 @@ export default function ProjectPicker({ onNext }: Props) {
       const selected = await selectOnboardingProject(desktop, scaffold);
       if (selected) onNext();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }

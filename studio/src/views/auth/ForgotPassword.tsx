@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useLocation } from "wouter";
@@ -22,7 +23,7 @@ export default function ForgotPassword() {
       await requestPasswordReset(email);
       setSent(true);
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setBusy(false);
     }

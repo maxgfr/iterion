@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -99,7 +100,7 @@ function ChangePasswordSection() {
       setNext("");
       setConfirm("");
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : (e as Error).message;
+      const msg = e instanceof ApiError ? e.message : errorMessage(e);
       setErr(msg);
     } finally {
       setBusy(false);
@@ -187,7 +188,7 @@ function SignOutEverywhereSection() {
       // Login immediately rather than waiting for the next 401.
       await signOut();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setBusy(false);
     }

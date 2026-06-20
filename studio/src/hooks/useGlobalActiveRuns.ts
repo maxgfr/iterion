@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useQuery } from "@tanstack/react-query";
 
 import { listGlobalActiveRuns, type GlobalActiveRun } from "@/api/runs";
@@ -25,6 +26,6 @@ export function useGlobalActiveRuns(): UseGlobalActiveRunsResult {
   return {
     runs: query.data ?? [],
     loading: query.isLoading,
-    error: query.error ? (query.error as Error).message : null,
+    error: query.error ? errorMessage(query.error) : null,
   };
 }

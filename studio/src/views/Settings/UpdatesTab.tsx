@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useState } from "react";
 
 import { Button } from "@/components/ui";
@@ -16,7 +17,7 @@ export default function UpdatesTab() {
     try {
       setRelease(await desktop.checkForUpdate());
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setChecking(false);
     }
@@ -28,7 +29,7 @@ export default function UpdatesTab() {
     try {
       await desktop.downloadAndApplyUpdate();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setApplying(false);
     }

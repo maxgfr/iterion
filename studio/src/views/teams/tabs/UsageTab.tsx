@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 
@@ -32,7 +33,7 @@ export default function UsageTab({ teamID }: Props) {
       .catch((e) => {
         if (!alive) return;
         if (e instanceof FeatureUnavailableError) setUnavailable(true);
-        else setErr((e as Error).message);
+        else setErr(errorMessage(e));
       });
     return () => {
       alive = false;

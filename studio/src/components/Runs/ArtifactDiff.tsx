@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useMemo, useState } from "react";
 
 import type { Artifact, ArtifactSummary } from "@/api/runs";
@@ -243,7 +244,7 @@ export default function ArtifactDiff({ runId, nodeId, versions }: Props) {
         setToBody(b);
       })
       .catch((e) => {
-        if (!cancelled) setError((e as Error).message);
+        if (!cancelled) setError(errorMessage(e));
       });
     return () => {
       cancelled = true;

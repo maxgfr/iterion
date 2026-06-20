@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useState } from "react";
 
 import * as dispatcher from "@/api/dispatcher";
@@ -29,7 +30,7 @@ export default function DispatcherControlBar({ onOpenSettings, pollIntervalMs = 
       setStatus(s);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }, []);
 
@@ -47,7 +48,7 @@ export default function DispatcherControlBar({ onOpenSettings, pollIntervalMs = 
         setStatus(s);
         setError(null);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorMessage(e));
       } finally {
         setBusy(false);
       }

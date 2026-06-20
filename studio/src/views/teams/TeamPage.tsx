@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useMemo, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useLocation, useParams, useSearch } from "wouter";
@@ -159,7 +160,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
       setMembers(m);
       setInvs(i);
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     }
   };
 
@@ -178,7 +179,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
       setDraft({ email: "", role: "member" });
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -196,7 +197,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
       await deleteInvitation(teamID, id);
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     }
   };
 
@@ -205,7 +206,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
       await updateMemberRole(teamID, userID, role);
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     }
   };
 
@@ -221,7 +222,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
       await removeMember(teamID, userID);
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     }
   };
 

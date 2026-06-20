@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -77,6 +78,6 @@ export function useRuns(opts: UseRunsOptions = {}): UseRunsResult {
     runs,
     counts,
     loading: query.isLoading,
-    error: query.error ? (query.error as Error).message : null,
+    error: query.error ? errorMessage(query.error) : null,
   };
 }

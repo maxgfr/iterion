@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 
@@ -239,7 +240,7 @@ export default function LaunchView() {
         setValues(initial);
       })
       .catch((e) => {
-        if (!cancelled) setError((e as Error).message);
+        if (!cancelled) setError(errorMessage(e));
       });
     return () => {
       cancelled = true;
@@ -359,7 +360,7 @@ export default function LaunchView() {
           ...prev,
           [field.name]: {
             ...cur,
-            error: (err as Error).message,
+            error: errorMessage(err),
             progress: undefined,
           },
         };
@@ -394,7 +395,7 @@ export default function LaunchView() {
       });
       setLocation(`/runs/${encodeURIComponent(res.run_id)}`);
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
       setSubmitting(false);
     }
   };

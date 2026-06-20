@@ -18,6 +18,7 @@
 // dashboard is a manual surface, no auto-polling — operators hit
 // Refresh when they want a fresh number.
 
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { ArrowLeftIcon } from "@radix-ui/react-icons";
@@ -53,7 +54,7 @@ function RunsAnalyticsViewInner() {
       setStats(next);
       setError(null);
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }

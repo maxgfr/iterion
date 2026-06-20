@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
@@ -224,7 +225,7 @@ export default function RunCanvasIR({
       })
       .catch((e) => {
         if (cancelled) return;
-        setError((e as Error).message);
+        setError(errorMessage(e));
       });
     return () => {
       cancelled = true;

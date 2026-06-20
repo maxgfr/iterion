@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { ClockIcon, FileTextIcon, OpenInNewWindowIcon, Pencil1Icon } from "@radix-ui/react-icons";
@@ -81,7 +82,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
     try {
       await cancelRun(run.id);
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -98,7 +99,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
     try {
       await pauseRun(run.id);
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -129,7 +130,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
       // (it lazily resolves the blob URL).
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     }
   };
 
@@ -155,7 +156,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
       const snap = await getRun(run.id);
       applySnapshot(snap);
     } catch (e) {
-      setError(`Rename failed: ${(e as Error).message}`);
+      setError(`Rename failed: ${errorMessage(e)}`);
     } finally {
       setEditingName(false);
     }

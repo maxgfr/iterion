@@ -10,7 +10,7 @@ import ConfirmDialog from "../shared/ConfirmDialog";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Spinner } from "@/components/ui/Spinner";
 import { DISCARD_CHANGES_PROMPT } from "@/lib/copy";
-import { toastError } from "@/lib/errorHints";
+import { errorMessage, toastError } from "@/lib/errorHints";
 import ShortcutsHelp from "../shared/ShortcutsHelp";
 import FilePicker from "../FilePicker/FilePicker";
 import {
@@ -136,7 +136,7 @@ export default function Toolbar() {
         // doesn't contain it). Pruning here means the next time the
         // picker opens, the dead row is gone — instead of the user
         // having to manually click the trash icon on every stale row.
-        const message = (err as Error).message ?? "";
+        const message = errorMessage(err) ?? "";
         const isMissing = /file not found|no such file|404/i.test(message);
         if (kind === "file" && isMissing) {
           removeRecent(path);

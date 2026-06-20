@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -88,7 +89,7 @@ export function useRunFiles(
   return {
     data: query.data ?? null,
     loading: query.isLoading,
-    error: query.error ? (query.error as Error).message : null,
+    error: query.error ? errorMessage(query.error) : null,
     refresh,
   };
 }

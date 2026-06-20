@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 
 import { useDocumentStore } from "@/store/document";
@@ -122,7 +123,7 @@ function ExamplesPicker({
         if (!cancelled) setExamples(list);
       })
       .catch((e) => {
-        if (!cancelled) setErr((e as Error).message);
+        if (!cancelled) setErr(errorMessage(e));
       });
     return () => {
       cancelled = true;

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 
@@ -69,7 +70,7 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
         if (!cancelled) setBots(items);
       })
       .catch((err) => {
-        if (!cancelled) setBotsError((err as Error).message);
+        if (!cancelled) setBotsError(errorMessage(err));
       });
     return () => {
       cancelled = true;
@@ -134,7 +135,7 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
     try {
       await onSubmit(out);
     } catch (err) {
-      setSubmitError((err as Error).message || "Submit failed");
+      setSubmitError(errorMessage(err) || "Submit failed");
     } finally {
       setSubmitting(false);
     }

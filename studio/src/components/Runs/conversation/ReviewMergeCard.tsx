@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useRef, useState } from "react";
 
 import { getRun, resumeRun } from "@/api/runs";
@@ -75,7 +76,7 @@ export default function ReviewMergeCard({ runId, message }: Props) {
         getRun(runId).then(applySnapshot).catch(() => {});
       }, 600);
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
       setBusy(false); // keep the card interactive on failure
     }
   };

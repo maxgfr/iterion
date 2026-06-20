@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getIssue, type NativeIssue } from "@/api/native";
@@ -192,7 +193,7 @@ export function useWatchList(runId: string | null): UseWatchListResult {
             return { ...prev, [id]: { issueId: id, issue: iss } };
           });
         } catch (e) {
-          const msg = (e as Error).message ?? String(e);
+          const msg = errorMessage(e) ?? String(e);
           setById((prev) => {
             const existing = prev[id];
             if (existing?.lastFetchError === msg) return prev;

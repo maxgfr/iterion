@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 
@@ -50,7 +51,7 @@ export default function DispatcherView() {
       const s = await getState();
       setSnap(s);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -108,7 +109,7 @@ export default function DispatcherView() {
         };
         ws.onerror = () => ws.close();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorMessage(e));
         scheduleRetry();
       }
     };
@@ -156,14 +157,14 @@ export default function DispatcherView() {
     try {
       await refreshTick();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }, []);
   const doReload = useCallback(async () => {
     try {
       await reloadConfig();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }, []);
   const doCancel = useCallback(
@@ -178,7 +179,7 @@ export default function DispatcherView() {
       try {
         await cancelIssue(issueID);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorMessage(e));
       }
     },
     [confirm],

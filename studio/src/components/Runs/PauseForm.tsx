@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useMemo, useState } from "react";
 
 import { resumeRun } from "@/api/runs";
@@ -49,7 +50,7 @@ export default function PauseForm({ runId, questions, message, onSubmitted }: Pr
       await resumeRun(runId, { answers: values, source: currentSource ?? undefined });
       onSubmitted?.();
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

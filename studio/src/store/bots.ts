@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { create } from "zustand";
 
 import {
@@ -35,7 +36,7 @@ async function load(set: (partial: Partial<BotsState>) => void): Promise<void> {
     const bots = await listBots();
     set({ bots, loading: false });
   } catch (e) {
-    set({ error: e instanceof Error ? e.message : String(e), loading: false });
+    set({ error: errorMessage(e), loading: false });
   }
 }
 

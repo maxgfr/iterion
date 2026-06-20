@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 
@@ -42,7 +43,7 @@ export default function UsersAdminPage() {
         setUnavailable(false);
       } catch (e) {
         if (e instanceof FeatureUnavailableError) setUnavailable(true);
-        else setErr((e as Error).message);
+        else setErr(errorMessage(e));
       } finally {
         setBusy(false);
       }
@@ -98,7 +99,7 @@ export default function UsersAdminPage() {
       setConfirm(null);
       await refresh(offset);
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setBusy(false);
     }

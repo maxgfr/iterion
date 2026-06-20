@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useRunStore, type BrowserScreenshot } from "@/store/run";
@@ -99,7 +100,7 @@ export default function BrowserPane({
       setLiveSession({ sessionId: body.session_id, startedAt: new Date().toISOString() });
     } catch (err) {
       if (controller.signal.aborted) return;
-      setAttachError(err instanceof Error ? err.message : String(err));
+      setAttachError(errorMessage(err));
     } finally {
       if (!controller.signal.aborted) setAttachBusy(false);
     }

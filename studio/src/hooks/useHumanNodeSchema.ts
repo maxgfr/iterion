@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 
 import { getRunWorkflow, type WireSchemaField } from "@/api/runs";
@@ -46,7 +47,7 @@ export function useHumanNodeSchema(
           fields: null,
           loading: false,
           staleHash: false,
-          error: (e as Error).message,
+          error: errorMessage(e),
         });
       }
     })();

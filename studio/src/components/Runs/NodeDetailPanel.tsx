@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import {
   useEffect,
   useLayoutEffect,
@@ -1085,7 +1086,7 @@ function ToolPayloadBlock({
       );
       setExtra((prev) => prev + chunk.data);
     } catch (err) {
-      setFetchErr(err instanceof Error ? err.message : String(err));
+      setFetchErr(errorMessage(err));
     } finally {
       setLoading(false);
     }

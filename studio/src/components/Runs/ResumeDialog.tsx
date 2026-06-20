@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 
 import { resumeRun } from "@/api/runs";
@@ -54,7 +55,7 @@ export default function ResumeDialog({ run, open, onOpenChange }: Props) {
       );
       onOpenChange(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

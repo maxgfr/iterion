@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useState } from "react";
 
 import { resumeRun } from "@/api/runs";
@@ -34,7 +35,7 @@ export default function OperatorPauseBanner({ run }: Props) {
       requestWsReconnect();
       addToast("Resume requested", "info");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeftIcon, OpenInNewWindowIcon } from "@radix-ui/react-icons";
 
@@ -46,7 +47,7 @@ export default function AddProjectDialog({ open, onClose, onAdd }: Props) {
       await onAdd(trimmed);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -150,7 +151,7 @@ function BrowsePanel({ initialPath, onPick, onBack }: BrowsePanelProps) {
       })
       .catch((err) => {
         if (ctrl.signal.aborted) return;
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorMessage(err));
         setLoading(false);
       });
     return () => {

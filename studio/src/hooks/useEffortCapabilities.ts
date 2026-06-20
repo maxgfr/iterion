@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import {
@@ -82,7 +83,7 @@ export function useEffortCapabilities(
   return {
     capabilities: query.data ?? null,
     loading: enabled && query.isLoading,
-    error: query.error ? (query.error as Error).message : null,
+    error: query.error ? errorMessage(query.error) : null,
   };
 }
 

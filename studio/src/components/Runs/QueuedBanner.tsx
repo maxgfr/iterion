@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useState } from "react";
 
 import { cancelRun, type RunHeader as RunHeaderType } from "@/api/runs";
@@ -35,7 +36,7 @@ export default function QueuedBanner({ run }: Props) {
     try {
       await cancelRun(run.id);
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

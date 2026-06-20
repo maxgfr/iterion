@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useQuery } from "@tanstack/react-query";
 
 import { listRunRepos, type RunRepo } from "@/api/runs";
@@ -33,6 +34,6 @@ export function useRunRepos(enabled: boolean): UseRunReposResult {
   return {
     repos: query.data ?? EMPTY,
     loading: query.isLoading,
-    error: query.error ? (query.error as Error).message : null,
+    error: query.error ? errorMessage(query.error) : null,
   };
 }

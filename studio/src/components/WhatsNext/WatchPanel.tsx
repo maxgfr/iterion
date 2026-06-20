@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useState } from "react";
 import { Link } from "wouter";
 
@@ -32,7 +33,7 @@ export default function WatchPanel({ runId }: WatchPanelProps) {
       await queueMessage(runId, formatUpdatesAsChatMessage(pendingUpdates));
       acknowledgeUpdates();
     } catch (e) {
-      setForwardError((e as Error).message ?? String(e));
+      setForwardError(errorMessage(e) ?? String(e));
     } finally {
       setForwarding(false);
     }
@@ -116,7 +117,7 @@ function WatchRow({ entry, runId }: { entry: WatchEntry; runId: string | null })
       // watch still works for the live session.
       if (runId) void addWatch(runId, issueId).catch(() => {});
     } catch (e) {
-      setDispatchError((e as Error).message ?? String(e));
+      setDispatchError(errorMessage(e) ?? String(e));
     } finally {
       setDispatching(false);
     }

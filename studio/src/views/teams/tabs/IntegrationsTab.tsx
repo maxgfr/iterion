@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearch } from "wouter";
 
@@ -57,7 +58,7 @@ export default function IntegrationsTab({
         setUnavailable(true);
         return;
       }
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     }
   };
 
@@ -164,7 +165,7 @@ function ConnectionCard({
       await deleteForgeConnection(teamID, conn.id);
       onChanged();
     } catch (e) {
-      onError((e as Error).message);
+      onError(errorMessage(e));
     }
   };
 
@@ -180,7 +181,7 @@ function ConnectionCard({
       await disableForgeIntegration(teamID, i.id);
       onChanged();
     } catch (e) {
-      onError((e as Error).message);
+      onError(errorMessage(e));
     }
   };
 
@@ -289,7 +290,7 @@ function EnableRepoPanel({
     try {
       setRepos(await listForgeRepos(teamID, conn.id, search));
     } catch (e) {
-      onError((e as Error).message);
+      onError(errorMessage(e));
     } finally {
       setLoadingRepos(false);
     }
@@ -334,7 +335,7 @@ function EnableRepoPanel({
       await enableForgeRepoBots(teamID, conn.id, repo, selectedBots);
       onDone();
     } catch (e) {
-      onError((e as Error).message);
+      onError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -511,7 +512,7 @@ function ConnectForm({
       setPat("");
       onConnected();
     } catch (e) {
-      const msg = (e as Error).message;
+      const msg = errorMessage(e);
       // Self-hosted forges (e.g. a private GitLab) usually have no OAuth app
       // registered on this server. Rather than dead-ending on the raw 400,
       // steer the user to the PAT path (which is always available).

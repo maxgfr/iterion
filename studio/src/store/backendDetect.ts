@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { create } from "zustand";
 
 import { fetchBackendDetect, type BackendDetectReport } from "@/api/backends";
@@ -26,7 +27,7 @@ export const useBackendDetectStore = create<BackendDetectState>((set) => ({
     } catch (e) {
       set({
         loading: false,
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
       });
     }
   },

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 
@@ -63,7 +64,7 @@ export default function MemoryTab({ teamID: _teamID }: Props) {
       setUnavailable(false);
     } catch (e) {
       if (e instanceof FeatureUnavailableError) setUnavailable(true);
-      else setErr((e as Error).message);
+      else setErr(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -81,7 +82,7 @@ export default function MemoryTab({ teamID: _teamID }: Props) {
       const txt = await readMemoryDocument(ref, d.path);
       setBody(txt);
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     }
   };
 

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { create } from "zustand";
 
 import { getServerInfo } from "@/api/runs";
@@ -22,7 +23,7 @@ export const useServerInfoStore = create<ServerInfoState>((set) => ({
     } catch (e) {
       set({
         loading: false,
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
       });
     }
   },

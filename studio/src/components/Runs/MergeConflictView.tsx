@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useState } from "react";
 
 import { Button, EmptyState, Spinner, Textarea } from "@/components/ui";
@@ -67,7 +68,7 @@ export default function MergeConflictView({
         current || next.pending_message || defaultMessage || "",
       );
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     }
   }, [runId, defaultMessage]);
 
@@ -95,7 +96,7 @@ export default function MergeConflictView({
         return updated;
       });
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     } finally {
       setBusyFile(null);
     }
@@ -115,7 +116,7 @@ export default function MergeConflictView({
         return fresh;
       });
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     } finally {
       setBusyGlobal(null);
     }
@@ -128,7 +129,7 @@ export default function MergeConflictView({
       await finalizeMergeConflict(runId, { message: finalizeMessage || undefined });
       onMergeComplete?.();
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     } finally {
       setBusyGlobal(null);
     }
@@ -149,7 +150,7 @@ export default function MergeConflictView({
       await abortMergeConflict(runId);
       onMergeComplete?.();
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     } finally {
       setBusyGlobal(null);
     }

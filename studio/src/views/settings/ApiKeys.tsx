@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -56,7 +57,7 @@ export default function ApiKeysPanel({ team }: Props) {
       const k = team ? await listTeamApiKeys(team.id) : await listMyApiKeys();
       setKeys(k);
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -81,7 +82,7 @@ export default function ApiKeysPanel({ team }: Props) {
       setDraft({ provider: "anthropic", name: "", secret: "", is_default: false });
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setAdding(false);
     }
@@ -94,7 +95,7 @@ export default function ApiKeysPanel({ team }: Props) {
       });
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     }
   };
 
@@ -110,7 +111,7 @@ export default function ApiKeysPanel({ team }: Props) {
       await deleteApiKey(team ? { team_id: team.id } : { mine: true }, k.id);
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     }
   };
 

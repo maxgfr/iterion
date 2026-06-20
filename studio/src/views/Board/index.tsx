@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 
@@ -242,7 +243,7 @@ export default function BoardView() {
     try {
       await cancelIssue(issueID);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }, []);
 
@@ -253,7 +254,7 @@ export default function BoardView() {
       setBoard(b);
       setIssues(i ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -413,7 +414,7 @@ export default function BoardView() {
         }
         return true;
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorMessage(e));
         // Only revert this issue's row to its pre-drop state — leave
         // other concurrent edits in place. Falls back to full revert
         // when the row was reordered out of the snapshot.
@@ -553,7 +554,7 @@ export default function BoardView() {
         setCreating(false);
         await refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorMessage(e));
       }
     },
     [refresh],
@@ -585,7 +586,7 @@ export default function BoardView() {
         setEditing(null);
         await refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorMessage(e));
       }
     },
     [editing, refresh],
@@ -614,7 +615,7 @@ export default function BoardView() {
         setAnchorId((cur) => (cur === id ? null : cur));
         await refresh();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorMessage(e));
       }
     },
     [confirm, refresh],
@@ -694,7 +695,7 @@ export default function BoardView() {
         await refresh();
         if (n > 0) addToast(toastMsg, "success");
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorMessage(e));
       }
     },
     [selectedIssues, refresh, addToast],
@@ -764,7 +765,7 @@ export default function BoardView() {
       addToast(`Deleted ${ids.length} issue${ids.length > 1 ? "s" : ""}`, "success");
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }, [selectedIssues, confirm, setSingleSelection, addToast, refresh]);
 

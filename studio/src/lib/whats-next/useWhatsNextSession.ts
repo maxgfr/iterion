@@ -10,6 +10,8 @@
 // `null` keeps it idle.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// Aliased: this hook binds a local `errorMessage` state field of its own.
+import { errorMessage as toMessage } from "@/lib/errorHints";
 
 import {
   createRun,
@@ -413,7 +415,7 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
           // ignore; the WS will deliver the snapshot.
         }
       } catch (e) {
-        setErrorMessage((e as Error).message);
+        setErrorMessage(toMessage(e));
         setStatus("idle");
       }
     },
@@ -510,7 +512,7 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
         if (typeof console !== "undefined") {
           console.error("[whats-next] submitHumanAnswer error", e);
         }
-        setErrorMessage((e as Error).message);
+        setErrorMessage(toMessage(e));
         setStatus("active");
       } finally {
         setBusyMessageId(null);
@@ -556,7 +558,7 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
       }, 600);
       setStatus("active");
     } catch (e) {
-      setErrorMessage((e as Error).message);
+      setErrorMessage(toMessage(e));
       setStatus("ended");
     }
   }, [runId, setRunStatus, requestWsReconnect, applySnapshot]);

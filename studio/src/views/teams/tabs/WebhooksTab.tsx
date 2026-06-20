@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useMemo, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 
@@ -64,7 +65,7 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
       if (e instanceof FeatureUnavailableError) {
         setUnavailable(true);
       } else {
-        setErr((e as Error).message);
+        setErr(errorMessage(e));
       }
     } finally {
       setLoading(false);
@@ -85,7 +86,7 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
       await updateWebhook(teamID, cfg.id, { enabled: !cfg.enabled });
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     }
   };
 
@@ -97,7 +98,7 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
       setIssued(r);
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     }
   };
 
@@ -108,7 +109,7 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
       setDeleteTarget(null);
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     }
   };
 
@@ -331,7 +332,7 @@ function CreateWebhookDialog({
       });
       onCreated(r);
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -651,7 +652,7 @@ function DeliveriesDrawer({
     try {
       setDeliveries(await listWebhookDeliveries(teamID, webhook.id));
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setLoading(false);
     }

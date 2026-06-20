@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Cross1Icon, PlusIcon, TrashIcon } from "@radix-ui/react-icons";
 
@@ -120,7 +121,7 @@ export default function AgentChatboxInline({
       setAttachedSkills([]);
       setPickerOpen(false);
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -147,7 +148,7 @@ export default function AgentChatboxInline({
       try {
         await cancelQueuedMessage(runId, msgId);
       } catch (e) {
-        setError((e as Error).message);
+        setError(errorMessage(e));
       }
     },
     [runId],

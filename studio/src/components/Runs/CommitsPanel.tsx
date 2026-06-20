@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Pencil1Icon, ReloadIcon, ResetIcon } from "@radix-ui/react-icons";
@@ -337,7 +338,7 @@ function MergeFooter({
         onMergeComplete?.();
       }
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setSubmitting(false);
     }
@@ -501,7 +502,7 @@ function CommitAndFinalizeFooter({
       await commitAndFinalizeRun(runId, { commit_message: message.trim() });
       onMergeComplete?.();
     } catch (e) {
-      const msg = (e as Error).message;
+      const msg = errorMessage(e);
       // Idempotence guard: the run was finalized out-of-band (a prior
       // commit-and-finalize, or RecoverFinalize on daemon restart) since
       // this panel's snapshot was taken. The work is already on a branch

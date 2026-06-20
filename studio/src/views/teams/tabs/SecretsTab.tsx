@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 
@@ -58,7 +59,7 @@ export default function SecretsTab({ teamID, canManage }: Props) {
       if (e instanceof FeatureUnavailableError) {
         setUnavailable(true);
       } else {
-        setErr((e as Error).message);
+        setErr(errorMessage(e));
       }
     } finally {
       setLoading(false);
@@ -78,7 +79,7 @@ export default function SecretsTab({ teamID, canManage }: Props) {
       setDeleting(null);
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     }
   };
 
@@ -291,7 +292,7 @@ function CreateSecretDialog({
       else await createMySecret({ name, secret });
       onCreated();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -380,7 +381,7 @@ function RotateSecretDialog({
       else await updateMySecret(rec.id, { secret });
       onRotated();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setBusy(false);
     }

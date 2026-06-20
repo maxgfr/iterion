@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useRef, useState } from "react";
 
 import { CDPClient } from "@/lib/cdpClient";
@@ -109,7 +110,7 @@ export default function BrowserLivePane({ runId, sessionId }: BrowserLivePanePro
         );
       } catch (err) {
         if (cancelled) return;
-        setErrorMsg(err instanceof Error ? err.message : String(err));
+        setErrorMsg(errorMessage(err));
         setStatus("error");
       }
     })();

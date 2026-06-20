@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -16,7 +17,7 @@ export default function ApiKeysEditor() {
     queryFn: () => desktop.getSecretStatuses(),
   });
   const fetchError = fetchErrorObj
-    ? (fetchErrorObj as Error).message
+    ? errorMessage(fetchErrorObj)
     : null;
   const refresh = () => queryClient.invalidateQueries({ queryKey });
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -39,7 +40,7 @@ export default function ApiKeysEditor() {
       setDrafts((d) => ({ ...d, [key]: "" }));
       await refresh();
     } catch (err) {
-      setMutationError(err instanceof Error ? err.message : String(err));
+      setMutationError(errorMessage(err));
     }
   };
 
@@ -49,7 +50,7 @@ export default function ApiKeysEditor() {
       await desktop.deleteSecret(key);
       await refresh();
     } catch (err) {
-      setMutationError(err instanceof Error ? err.message : String(err));
+      setMutationError(errorMessage(err));
     }
   };
 

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -46,7 +47,7 @@ export default function OAuthConnections() {
     try {
       setConns(await listOAuthConnections());
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -67,7 +68,7 @@ export default function OAuthConnections() {
       setDraft("");
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -80,7 +81,7 @@ export default function OAuthConnections() {
       await refreshOAuth(kind);
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -98,7 +99,7 @@ export default function OAuthConnections() {
       await deleteOAuth(kind);
       void reload();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
     }
   };
 

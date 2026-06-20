@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useAuth } from "@/auth/AuthContext";
@@ -224,7 +225,7 @@ function OrgDrawer({
       .catch((e) => {
         if (!alive) return;
         if (e instanceof FeatureUnavailableError) setUsageErr("Usage view not enabled.");
-        else setUsageErr((e as Error).message);
+        else setUsageErr(errorMessage(e));
       });
     return () => {
       alive = false;

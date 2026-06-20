@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useRef } from "react";
 import { create } from "zustand";
 
@@ -246,7 +247,7 @@ export function useDesktop(): UseDesktopAPI {
 // useDesktop swallowed them silently (only logged on refresh) — so a
 // failed removeProject looked like a no-op to the user.
 function notifyDesktopError(label: string, err: unknown): void {
-  const msg = err instanceof Error ? err.message : String(err);
+  const msg = errorMessage(err);
   console.error(`useDesktop: ${label}`, err);
   try {
     useUIStore.getState().addToast(`${label}: ${msg}`, "error");

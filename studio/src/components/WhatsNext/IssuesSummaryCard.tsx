@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "wouter";
 import { ExternalLinkIcon } from "@radix-ui/react-icons";
@@ -134,7 +135,7 @@ function useDispatcherStatusPoll({
       setStatus(s);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }, [enabled]);
 
@@ -152,7 +153,7 @@ function useDispatcherStatusPoll({
       setStatus(s);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -165,7 +166,7 @@ function useDispatcherStatusPoll({
       setStatus(s);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

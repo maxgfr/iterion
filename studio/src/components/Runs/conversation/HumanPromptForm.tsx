@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getRun, resumeRun } from "@/api/runs";
@@ -143,7 +144,7 @@ export default function HumanPromptForm({
           .catch(() => {});
       }, 600);
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

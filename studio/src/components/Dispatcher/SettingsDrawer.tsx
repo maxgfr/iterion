@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errorHints";
 import * as RD from "@radix-ui/react-dialog";
 import { useEffect, useState } from "react";
 
@@ -29,7 +30,7 @@ export default function SettingsDrawer({ open, onClose, onSaved }: Props) {
         const c = await dispatcher.getConfig();
         if (alive) setCfg(c ?? defaultConfig());
       } catch (e) {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
+        if (alive) setError(errorMessage(e));
       } finally {
         if (alive) setLoading(false);
       }
@@ -48,7 +49,7 @@ export default function SettingsDrawer({ open, onClose, onSaved }: Props) {
       onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setSaving(false);
     }
