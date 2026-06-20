@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
+
 import { SORT_OPTIONS, type SortMode } from "./boardShared";
 
 export function BoardFilters({
@@ -37,26 +41,30 @@ export function BoardFilters({
     searchQuery.trim() !== "" || labelFilter.size > 0 || assigneeFilter !== "";
   return (
     <div className="px-3 py-2 border-b border-border-default bg-surface-1 flex flex-wrap items-center gap-2 text-xs">
-      <input
-        type="search"
-        value={searchQuery}
-        onChange={(e) => onSearchChange(e.target.value)}
-        placeholder="Search title / body / id…"
-        className="px-2 py-1 rounded border border-border-default bg-surface-0 text-fg-default text-xs min-w-[200px] flex-shrink-0"
-      />
+      <div className="min-w-[200px] flex-shrink-0">
+        <Input
+          type="search"
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Search title / body / id…"
+          aria-label="Search issues"
+        />
+      </div>
       {allAssignees.length > 0 && (
-        <select
-          value={assigneeFilter}
-          onChange={(e) => onAssigneeChange(e.target.value)}
-          className="px-2 py-1 rounded border border-border-default bg-surface-0 text-fg-default text-xs"
-        >
-          <option value="">All assignees</option>
-          {allAssignees.map((a) => (
-            <option key={a} value={a}>
-              @{a}
-            </option>
-          ))}
-        </select>
+        <div className="w-auto">
+          <Select
+            value={assigneeFilter}
+            onChange={(e) => onAssigneeChange(e.target.value)}
+            aria-label="Filter by assignee"
+          >
+            <option value="">All assignees</option>
+            {allAssignees.map((a) => (
+              <option key={a} value={a}>
+                @{a}
+              </option>
+            ))}
+          </Select>
+        </div>
       )}
       {allLabels.length > 0 && (
         <LabelFilter
@@ -66,12 +74,12 @@ export function BoardFilters({
           onClear={onClearLabels}
         />
       )}
-      <label className="flex items-center gap-1 text-fg-muted">
+      <label htmlFor="board-sort-select" className="flex items-center gap-1 text-fg-muted">
         Sort
-        <select
+        <Select
+          id="board-sort-select"
           value={sortMode}
           onChange={(e) => onSortChange(e.target.value as SortMode)}
-          className="px-2 py-1 rounded border border-border-default bg-surface-0 text-fg-default text-xs"
           title="Order cards within each column"
         >
           {SORT_OPTIONS.map((o) => (
@@ -79,19 +87,15 @@ export function BoardFilters({
               {o.label}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
       <span className="ml-auto text-fg-muted">
         {filtersActive ? `${filtered} / ${total}` : `${total} issue${total === 1 ? "" : "s"}`}
       </span>
       {filtersActive && (
-        <button
-          type="button"
-          onClick={onReset}
-          className="text-fg-subtle hover:text-fg-default underline text-[10px]"
-        >
+        <Button variant="ghost" size="sm" onClick={onReset}>
           reset
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -160,15 +164,15 @@ function LabelFilter({
       </button>
 
       {open && (
-        <div className="absolute z-30 mt-1 w-64 max-h-80 overflow-hidden rounded-md border border-border-strong bg-surface-0 shadow-lg flex flex-col">
+        <div className="absolute z-[var(--z-popover)] mt-1 w-64 max-h-80 overflow-hidden rounded-md border border-border-strong bg-surface-0 shadow-popover flex flex-col">
           <div className="p-1 border-b border-border-default shrink-0">
-            <input
+            <Input
               ref={inputRef}
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search labels…"
-              className="w-full bg-surface-1 text-fg-default rounded border border-border-default px-2 py-1 text-xs outline-none focus:border-accent"
+              aria-label="Search labels"
             />
           </div>
           <ul className="py-1 overflow-auto">
@@ -182,7 +186,7 @@ function LabelFilter({
                   <button
                     type="button"
                     onClick={() => onToggle(l)}
-                    className={`w-full text-left px-2 py-1.5 text-xs flex items-center gap-2 hover:bg-surface-1 ${
+                    className={`w-full text-left px-2 py-1.5 text-xs flex items-center gap-2 hover:bg-surface-1 rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                       active ? "text-fg-default" : "text-fg-muted"
                     }`}
                   >
@@ -203,13 +207,14 @@ function LabelFilter({
           </ul>
           {count > 0 && (
             <div className="p-1 border-t border-border-default shrink-0">
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={onClear}
-                className="w-full text-center text-[11px] text-fg-subtle hover:text-fg-default py-1"
+                className="w-full justify-center"
               >
                 Clear {count} label{count > 1 ? "s" : ""}
-              </button>
+              </Button>
             </div>
           )}
         </div>

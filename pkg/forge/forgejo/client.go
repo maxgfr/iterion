@@ -205,3 +205,38 @@ func (c *AdminClient) DeleteHook(ctx context.Context, repo, hookID string) error
 	}
 	return nil
 }
+
+// CreateOAuthApp registers a user-owned OAuth2 application via
+// POST /api/v1/user/applications/oauth2 — a normal authenticated user can do
+// this (no admin needed). Gitea/Forgejo attaches scopes at authorize time, not
+// at creation, so spec.Scopes is not sent here. Returns client_id +
+// client_secret and the numeric app id.
+func (c *AdminClient) CreateOAuthApp(ctx context.Context, spec forge.OAuthAppSpec) (forge.OAuthAppCredentials, error) {
+	body := map[string]any{
+		"name":                spec.Name,
+		"redirect_uris":       []string{spec.RedirectURI},
+		"confidential_client": spec.Confidential,
+	}
+	var out struct {
+		ID           int64  `json:"id"`
+		ClientID     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"`
+	}
+	code, err := c.do(ctx, http.MethodPost, "/user/applications/oauth2", body, &out)
+	if err != nil {
+		return forge.OAuthAppCredentials{}, err
+	}
+	if code/100 != 2 {
+		return forge.OAuthAppCredentials{}, statusErr("create oauth app", code)
+	}
+	if out.ClientID == "" || out.ClientSecret == "" {
+		return forge.OAuthAppCredentials{}, fmt.Errorf("forgejo: create oauth app: empty credentials in response")
+	}
+	return forge.OAuthAppCredentials{
+		ClientID:      out.ClientID,
+		ClientSecret:  out.ClientSecret,
+		ProviderAppID: strconv.FormatInt(out.ID, 10),
+	}, nil
+}
+
+var _ forge.OAuthAppProvisioner = (*AdminClient)(nil)

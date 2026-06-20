@@ -4,6 +4,7 @@ import { defaultPrompt } from "@/lib/defaults";
 import { TextField, CommittedTextField } from "./forms/FormField";
 import PromptBodyEditor from "./PromptBodyEditor";
 import ConfirmDialog from "../shared/ConfirmDialog";
+import { Button } from "@/components/ui/Button";
 
 interface PromptEditorProps {
   /** When set, renders only that prompt's card (used by the Inspector "edit item" mode). */
@@ -39,13 +40,14 @@ export default function PromptEditor({ filterName, compact = true }: PromptEdito
       {!filterName && (
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-bold text-fg-muted">Prompts</h2>
-          <button
-            className="bg-accent hover:bg-accent-hover text-xs px-2 py-1 rounded"
+          <Button
+            variant="primary"
+            size="sm"
             onClick={handleAdd}
             disabled={!document}
           >
             + New
-          </button>
+          </Button>
         </div>
       )}
       {visible.length === 0 && (
@@ -103,9 +105,14 @@ function PromptCard({
             return null;
           }}
         />
-        <button className="text-danger hover:text-danger-fg text-xs ml-2" onClick={() => setConfirmDelete(true)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-danger hover:text-danger-fg ml-2"
+          onClick={() => setConfirmDelete(true)}
+        >
           Delete
-        </button>
+        </Button>
       </div>
       {compact ? (
         <TextField

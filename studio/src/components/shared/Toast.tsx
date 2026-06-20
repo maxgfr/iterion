@@ -68,8 +68,14 @@ export default function ToastContainer() {
             <span className="font-bold" aria-hidden="true">{TYPE_ICONS[toast.type]}</span>
             <span>{toast.message}</span>
             {toast.action && (
+              // currentColor border + transparent fill renders consistently
+              // across the four tone surfaces (success/error/info/warning)
+              // in both light and dark themes — the previous bg-white/20
+              // disappeared on the success-soft / warning-soft toasts
+              // because the tinted background is already near-white.
               <button
-                className="ml-2 px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 text-xs font-medium"
+                type="button"
+                className="ml-2 px-2 py-0.5 rounded border border-current/40 bg-current/10 hover:bg-current/20 text-xs font-medium focus-visible:ring-1 focus-visible:ring-current"
                 onClick={(e) => {
                   e.stopPropagation();
                   toast.action!.onClick();
@@ -80,7 +86,8 @@ export default function ToastContainer() {
               </button>
             )}
             <button
-              className="ml-1 opacity-60 hover:opacity-100 text-xs"
+              type="button"
+              className="ml-1 opacity-60 hover:opacity-100 text-xs focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-current rounded"
               onClick={() => removeToast(toast.id)}
               aria-label="Dismiss notification"
               title="Dismiss"

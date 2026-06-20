@@ -532,8 +532,8 @@ const LIFECYCLE_META: Record<
   "committed" | "uncommitted",
   { row: string; label: string }
 > = {
-  uncommitted: { row: "bg-amber-500/10", label: "uncommitted · pending" },
-  committed: { row: "bg-sky-500/[0.07]", label: "committed · on branch" },
+  uncommitted: { row: "bg-warning/10", label: "uncommitted · pending" },
+  committed: { row: "bg-info/[0.07]", label: "committed · on branch" },
 };
 
 function FileRow({

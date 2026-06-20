@@ -24,18 +24,6 @@ import (
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
-// ForgeOAuthConfig carries the per-provider OAuth-app client credentials
-// the connect flow uses. A provider absent from the map (or with an empty
-// ClientID) only accepts the PAT fallback — the load-bearing path for
-// self-hosted instances with no registrable OAuth app.
-type ForgeOAuthConfig map[forge.Provider]ForgeOAuthAppCreds
-
-// ForgeOAuthAppCreds is one provider's OAuth-app credentials.
-type ForgeOAuthAppCreds struct {
-	ClientID     string
-	ClientSecret string
-}
-
 // ForgeGitHubAppConfig is the global GitHub-App identity (registered once on
 // GitHub), used for the installation-token connect mode. Empty/unconfigured
 // → the GitHub-App connect path is unavailable (OAuth/PAT still work).
@@ -169,20 +157,30 @@ func (s *Server) forgeAdminFor(_ context.Context, conn forge.Connection) (forge.
 	return s.forgeAdminForToken(conn.Provider, conn.BaseURL(), token)
 }
 
-// forgeOAuthApp builds a provider's OAuth client for a given base URL, or
-// (nil,false) when the provider has no configured OAuth-app credentials.
-func (s *Server) forgeOAuthApp(provider forge.Provider, baseURL string) (forge.OAuthExchanger, bool) {
-	creds, ok := s.forgeOAuth[provider]
-	if !ok || creds.ClientID == "" {
+// forgeOAuthAppFor builds a provider's OAuth client for a (tenant, provider,
+// instance) from the per-tenant OAuth-app store, or (nil,false) when no app is
+// registered for that instance or its sealed secret can't be opened. baseURL
+// is canonicalised so a connection's BaseURL() and a stored app key match.
+func (s *Server) forgeOAuthAppFor(ctx context.Context, tenantID string, provider forge.Provider, baseURL string) (forge.OAuthExchanger, bool) {
+	if s.forgeOAuthApps == nil {
+		return nil, false
+	}
+	base := forge.CanonicalBaseURL(provider, baseURL)
+	app, err := s.forgeOAuthApps.GetByInstance(ctx, tenantID, provider, base)
+	if err != nil {
+		return nil, false
+	}
+	secret, err := forge.OpenOAuthAppSecret(s.sealer, app.ID, app.SealedSecret)
+	if err != nil {
 		return nil, false
 	}
 	switch provider {
 	case forge.ProviderGitLab:
-		return &forgegitlab.OAuthApp{HTTP: s.httpClient, BaseURL: baseURL, ClientID: creds.ClientID, ClientSecret: creds.ClientSecret}, true
+		return &forgegitlab.OAuthApp{HTTP: s.httpClient, BaseURL: base, ClientID: app.ClientID, ClientSecret: secret}, true
 	case forge.ProviderGitHub:
-		return &forgegithub.OAuthApp{HTTP: s.httpClient, BaseURL: baseURL, ClientID: creds.ClientID, ClientSecret: creds.ClientSecret}, true
+		return &forgegithub.OAuthApp{HTTP: s.httpClient, BaseURL: base, ClientID: app.ClientID, ClientSecret: secret}, true
 	case forge.ProviderForgejo:
-		return &forgeforgejo.OAuthApp{HTTP: s.httpClient, BaseURL: baseURL, ClientID: creds.ClientID, ClientSecret: creds.ClientSecret}, true
+		return &forgeforgejo.OAuthApp{HTTP: s.httpClient, BaseURL: base, ClientID: app.ClientID, ClientSecret: secret}, true
 	default:
 		return nil, false
 	}
@@ -190,6 +188,38 @@ func (s *Server) forgeOAuthApp(provider forge.Provider, baseURL string) (forge.O
 
 func (s *Server) forgeOAuthRedirectURI() string {
 	return strings.TrimRight(s.cfg.PublicURL, "/") + "/api/forge/oauth/callback"
+}
+
+// forgeOAuthAppProvisioner builds the create-app client for a provider from an
+// admin token. The per-provider AdminClient implements OAuthAppProvisioner
+// where the forge exposes a create-app API (GitLab, Forgejo); GitHub does not
+// (its create path is the interactive App-Manifest flow), so it returns a clear
+// "paste an existing app instead" error here.
+func (s *Server) forgeOAuthAppProvisioner(provider forge.Provider, baseURL, adminToken string) (forge.OAuthAppProvisioner, error) {
+	admin, err := s.forgeAdminForToken(provider, baseURL, adminToken)
+	if err != nil {
+		return nil, err
+	}
+	prov, ok := admin.(forge.OAuthAppProvisioner)
+	if !ok {
+		return nil, fmt.Errorf("auto-create is not available for %s — paste an existing client_id/client_secret instead", provider)
+	}
+	return prov, nil
+}
+
+// forgeDefaultOAuthScopes is the scope set an auto-created OAuth app requests,
+// per provider (the same defaults the connect flow uses at authorize time).
+func forgeDefaultOAuthScopes(p forge.Provider) []string {
+	switch p {
+	case forge.ProviderGitLab:
+		return forgegitlab.DefaultScopes
+	case forge.ProviderGitHub:
+		return forgegithub.DefaultScopes
+	case forge.ProviderForgejo:
+		return forgeforgejo.DefaultScopes
+	default:
+		return nil
+	}
 }
 
 // forgeRefresherFor returns the token refresher for a connection, or nil
@@ -206,7 +236,7 @@ func (s *Server) forgeRefresherFor(conn forge.Connection) forge.TokenRefresher {
 	if conn.Kind != forge.KindOAuthApp {
 		return nil
 	}
-	app, ok := s.forgeOAuthApp(conn.Provider, conn.BaseURL())
+	app, ok := s.forgeOAuthAppFor(context.Background(), conn.TenantID, conn.Provider, conn.BaseURL())
 	if !ok {
 		return nil
 	}
@@ -358,9 +388,9 @@ func (s *Server) connectForgePAT(w http.ResponseWriter, r *http.Request, teamID,
 }
 
 func (s *Server) connectForgeOAuth(w http.ResponseWriter, r *http.Request, teamID, userID string, provider forge.Provider, baseURL string, req forgeConnectReq) {
-	app, ok := s.forgeOAuthApp(provider, baseURL)
+	app, ok := s.forgeOAuthAppFor(r.Context(), teamID, provider, baseURL)
 	if !ok {
-		httpError(w, http.StatusBadRequest, "OAuth is not configured for %s on this server — paste a personal access token (mode=pat) instead", provider)
+		httpError(w, http.StatusBadRequest, "no OAuth app is registered for %s on this instance — register one in Integrations → OAuth apps, or paste a personal access token (mode=pat)", provider)
 		return
 	}
 	state, verifier, challenge, err := oidc.GenerateStateAndPKCE()
@@ -413,9 +443,9 @@ func (s *Server) handleForgeOAuthCallback(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	app, ok := s.forgeOAuthApp(pending.Provider, pending.ForgeBaseURL)
+	app, ok := s.forgeOAuthAppFor(r.Context(), pending.TenantID, pending.Provider, pending.ForgeBaseURL)
 	if !ok {
-		httpError(w, http.StatusBadRequest, "oauth no longer configured for %s", pending.Provider)
+		httpError(w, http.StatusBadRequest, "oauth app no longer registered for %s", pending.Provider)
 		return
 	}
 	tok, err := app.Exchange(r.Context(), code, s.forgeOAuthRedirectURI(), pending.CodeVerifier)

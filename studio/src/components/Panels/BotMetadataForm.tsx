@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import type { BotEntryWithSchema, BotPatch } from "@/api/bots";
 import { CheckboxField, TagListField, TextField } from "@/components/Panels/forms/FormField";
+import { Button } from "@/components/ui/Button";
 import { useBotsStore } from "@/store/bots";
 import { useUIStore } from "@/store/ui";
 
@@ -134,14 +135,15 @@ export default function BotMetadataForm({ bot }: { bot: BotEntryWithSchema }) {
       </div>
 
       <div className="mt-3 flex items-center gap-2">
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="sm"
           disabled={!dirty || saving}
+          loading={saving}
           onClick={onSave}
-          className="rounded bg-accent px-3 py-1 text-xs text-fg-default disabled:cursor-not-allowed disabled:opacity-50"
         >
           {saving ? "Saving…" : "Save changes"}
-        </button>
+        </Button>
         {dirty && !saving && <span className="text-caption text-warning">Unsaved changes</span>}
       </div>
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { TrashIcon } from "@radix-ui/react-icons";
 
-import { Button, Dialog, Input } from "@/components/ui";
+import { Button, Dialog, IconButton, Input } from "@/components/ui";
 import { useProjects } from "@/hooks/useProjects";
 import { useDesktop } from "@/hooks/useDesktop";
 import { isDesktop } from "@/lib/desktopBridge";
@@ -110,7 +110,8 @@ export default function ProjectSwitcher({ open, onClose }: Props) {
                     takes the leftover space.
                   */}
                   <button
-                    className="flex-1 min-w-0 text-left pl-2 py-2 rounded hover:bg-surface-2 disabled:opacity-60"
+                    type="button"
+                    className="flex-1 min-w-0 text-left pl-2 py-2 rounded hover:bg-surface-2 disabled:opacity-60 focus-visible:ring-1 focus-visible:ring-accent"
                     disabled={isPending || isBusy}
                     onClick={async () => {
                       await switchProject(p.id);
@@ -150,14 +151,16 @@ export default function ProjectSwitcher({ open, onClose }: Props) {
                       </Button>
                     </div>
                   ) : (
-                    <button
-                      type="button"
-                      className="p-1.5 rounded opacity-0 group-hover:opacity-100 hover:bg-danger-soft hover:text-danger focus:opacity-100 transition-opacity"
-                      title={`Remove "${p.name}" from the list (folder kept on disk)`}
+                    <IconButton
+                      label={`Remove ${p.name} from the list (folder kept on disk)`}
+                      tooltip={`Remove "${p.name}" from the list (folder kept on disk)`}
+                      size="sm"
+                      variant="danger"
                       onClick={() => setPendingRemovalId(p.id)}
+                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 transition-opacity"
                     >
                       <TrashIcon />
-                    </button>
+                    </IconButton>
                   )}
                 </li>
               );

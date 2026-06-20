@@ -1,5 +1,7 @@
+import { useEffect, useId, useRef } from "react";
 import { Cross2Icon } from "@radix-ui/react-icons";
 
+import { Button } from "@/components/ui/Button";
 import type { MarketplaceEntry } from "@/api/marketplace";
 
 interface Props {
@@ -12,21 +14,50 @@ interface Props {
 /** MarketplaceDetail is the right-side drawer that opens when the
  *  operator clicks a card. Shows the README + preset list so they can
  *  decide before clicking Install. Implemented as a fixed-overlay panel
- *  rather than a Dialog to keep the card list visible alongside. */
+ *  rather than a Dialog to keep the card list visible alongside, but
+ *  carries the same keyboard / aria semantics (role=dialog, aria-modal,
+ *  Escape closes, focus moves into the panel on open and restores on
+ *  close). */
 export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Props) {
   const label = entry.display_name?.trim() || entry.name;
+  const titleId = useId();
+  const panelRef = useRef<HTMLElement | null>(null);
+  // Move focus into the panel on open, restore to whatever had focus
+  // before the drawer mounted on close.
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
+    return () => {
+      prev?.focus?.();
+    };
+  }, []);
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
   return (
     <div
-      className="fixed inset-0 z-40 flex justify-end bg-black/30"
+      className="fixed inset-0 z-[var(--z-modal)] flex justify-end bg-black/30"
       onClick={onClose}
     >
       <aside
-        className="flex h-full w-full max-w-xl flex-col bg-surface-1 shadow-xl"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="flex h-full w-full max-w-xl flex-col bg-surface-1 shadow-lg outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-start justify-between gap-3 border-b border-border-default px-4 py-3">
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-semibold text-fg-default">{label}</h2>
+            <h2 id={titleId} className="truncate text-sm font-semibold text-fg-default">{label}</h2>
             <p className="truncate font-mono text-[10px] text-fg-subtle">
               {entry.slug}
               {entry.version ? ` · v${entry.version}` : ""}
@@ -35,7 +66,7 @@ export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Pro
           <button
             type="button"
             onClick={onClose}
-            className="rounded p-1 text-fg-muted hover:bg-surface-2 hover:text-fg-default focus:outline-none focus:ring-1 focus:ring-accent"
+            className="rounded p-1 text-fg-muted hover:bg-surface-2 hover:text-fg-default focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             aria-label="Close detail"
           >
             <Cross2Icon className="h-3.5 w-3.5" />
@@ -128,14 +159,15 @@ export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Pro
           <span className="text-[10px] text-fg-subtle">
             Installs into <code className="text-fg-default">.botz/</code> — never run automatically.
           </span>
-          <button
-            type="button"
+          <Button
+            variant="success"
+            size="sm"
             onClick={onInstall}
             disabled={installing}
-            className="rounded bg-success/20 px-3 py-1.5 text-xs font-medium text-success hover:bg-success/30 disabled:opacity-50"
+            loading={installing}
           >
             {installing ? "Installing…" : "Install"}
-          </button>
+          </Button>
         </footer>
       </aside>
     </div>

@@ -5,12 +5,20 @@ import { ClockIcon, FileTextIcon, OpenInNewWindowIcon, Pencil1Icon } from "@radi
 
 import type { RunHeader as RunHeaderType } from "@/api/runs";
 import { cancelRun, getRun, loadEvents, pauseRun, renameRun } from "@/api/runs";
-import { Button, CopyButton, LiveDot, StatusBadge, Tooltip } from "@/components/ui";
+import {
+  Button,
+  CopyButton,
+  IconButton,
+  LiveDot,
+  StatusBadge,
+  Tooltip,
+} from "@/components/ui";
 import WSStatusDot from "@/components/shared/WSStatusDot";
 import { useConfirm } from "@/hooks/useConfirm";
 import { formatRelative } from "@/lib/format";
 import { botIdentity } from "@/lib/personas";
 import { useRunStore, type WsState } from "@/store/run";
+import { useUIStore } from "@/store/ui";
 
 import ForkDialog from "./ForkDialog";
 import ResumeDialog from "./ResumeDialog";
@@ -182,17 +190,28 @@ export default function RunHeader({ run, active, wsState }: Props) {
           {editingName ? (
             <RunNameEditor initial={friendlyName} onSubmit={onRename} onCancel={() => setEditingName(false)} />
           ) : (
-            <Tooltip content="Double-click to rename">
-              <button
-                type="button"
-                onDoubleClick={() => setEditingName(true)}
-                className="inline-flex items-center gap-1 font-medium truncate max-w-md text-left hover:text-fg-default group focus:outline-none"
-                title={friendlyName}
+            <div className="inline-flex items-center gap-1 min-w-0 group">
+              <Tooltip content="Double-click to rename">
+                <button
+                  type="button"
+                  onDoubleClick={() => setEditingName(true)}
+                  className="font-medium truncate max-w-md text-left hover:text-fg-default focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded"
+                  title={friendlyName}
+                >
+                  <span className="truncate">{friendlyName}</span>
+                </button>
+              </Tooltip>
+              <IconButton
+                label="Rename run"
+                tooltip="Rename run"
+                size="sm"
+                variant="ghost"
+                onClick={() => setEditingName(true)}
+                className="opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 transition-opacity h-6 w-6"
               >
-                <span className="truncate">{friendlyName}</span>
-                <Pencil1Icon className="w-3 h-3 text-fg-subtle opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-              </button>
-            </Tooltip>
+                <Pencil1Icon className="w-3 h-3" />
+              </IconButton>
+            </div>
           )}
           <StatusBadge status={run.status} />
           {active && (
@@ -491,7 +510,14 @@ function FinalizationRow({ run }: { run: RunHeaderType }) {
         setCopied(null);
       }, 1500);
     } catch {
-      // clipboard may be unavailable (insecure context) — silent
+      // navigator.clipboard is unavailable in insecure contexts (e.g.
+      // dev served over plain http without the bypass flag). Surface
+      // the failure rather than swallow it so the operator knows the
+      // SHA didn't reach their paste buffer.
+      useUIStore.getState().addToast(
+        "Copy unavailable in this context",
+        "warning",
+      );
     }
   };
 
@@ -499,7 +525,8 @@ function FinalizationRow({ run }: { run: RunHeaderType }) {
     <div className="shrink-0 px-4 py-1.5 bg-surface-2/40 border-b border-border-default flex items-center gap-3 text-[11px] flex-wrap">
       <span className="text-fg-muted">commit</span>
       <button
-        className="font-mono text-fg-default hover:text-info"
+        type="button"
+        className="font-mono text-fg-default hover:text-info focus-visible:ring-1 focus-visible:ring-accent rounded"
         onClick={() => void copy(run.final_commit ?? "", "sha")}
         title="Copy full SHA"
       >
@@ -510,7 +537,8 @@ function FinalizationRow({ run }: { run: RunHeaderType }) {
         <>
           <span className="text-fg-subtle">on</span>
           <button
-            className="font-mono text-fg-default hover:text-info truncate max-w-xs"
+            type="button"
+            className="font-mono text-fg-default hover:text-info focus-visible:ring-1 focus-visible:ring-accent rounded truncate max-w-xs"
             onClick={() => void copy(branch, "branch")}
             title="Copy branch name"
           >

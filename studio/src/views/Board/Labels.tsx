@@ -26,7 +26,9 @@ import {
   type LabelUsage,
 } from "@/api/native";
 import { Button } from "@/components/ui/Button";
+import { Dialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Input } from "@/components/ui/Input";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { formatRelative } from "@/lib/format";
 
@@ -120,13 +122,14 @@ function LabelsViewInner() {
         <span className="text-fg-muted text-[11px]">
           {total} distinct · {totalUsages} usage{totalUsages === 1 ? "" : "s"} total
         </span>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => setLocation("/board")}
-          className="ml-auto text-fg-subtle hover:text-fg-default underline text-[11px]"
+          className="ml-auto"
         >
           ← Back to board
-        </button>
+        </Button>
       </header>
 
       <p className="text-fg-muted text-[11px] max-w-3xl">
@@ -140,21 +143,23 @@ function LabelsViewInner() {
       </p>
 
       <div className="flex items-center gap-2">
-        <input
-          type="text"
-          placeholder="Filter by name…"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="px-2 py-1 rounded border border-border-default bg-surface-0 text-fg-default text-[12px] w-56"
-        />
+        <div className="w-56">
+          <Input
+            type="text"
+            placeholder="Filter by name…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            aria-label="Filter labels by name"
+          />
+        </div>
         {searchQuery && (
-          <button
-            type="button"
-            className="text-fg-subtle hover:text-fg-default text-[11px] underline"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setSearchQuery("")}
           >
             clear
-          </button>
+          </Button>
         )}
       </div>
 
@@ -183,84 +188,87 @@ function LabelsViewInner() {
                 · {rows.length} label{rows.length === 1 ? "" : "s"}
               </span>
             </h2>
-            <table className="w-full text-[12px] border border-border-subtle">
-              <thead>
-                <tr className="bg-surface-1 text-fg-muted text-left">
-                  <th className="px-2 py-1 font-medium">Label</th>
-                  <th className="px-2 py-1 font-medium w-16 text-right">
-                    Count
-                  </th>
-                  <th className="px-2 py-1 font-medium w-36">Last used</th>
-                  <th className="px-2 py-1 font-medium w-64">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr
-                    key={row.label}
-                    className="border-t border-border-subtle hover:bg-surface-1/40"
-                  >
-                    <td className="px-2 py-1 font-mono text-fg-default">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setLocation(
-                            `/board?label=${encodeURIComponent(row.label)}`,
-                          )
-                        }
-                        className="underline-offset-2 hover:underline text-left"
-                        title="Filter the board by this label"
-                      >
-                        {row.label}
-                      </button>
-                    </td>
-                    <td className="px-2 py-1 text-right tabular-nums text-fg-default">
-                      {row.count}
-                    </td>
-                    <td className="px-2 py-1 text-fg-muted">
-                      {row.last_used_at ? formatRelative(row.last_used_at) : "—"}
-                    </td>
-                    <td className="px-2 py-1">
-                      <div className="flex gap-1.5">
-                        <button
-                          type="button"
-                          className="text-fg-subtle hover:text-fg-default text-[11px] underline"
-                          onClick={() =>
-                            setDialog({
-                              kind: "rename",
-                              label: row,
-                              nextValue: row.label,
-                            })
-                          }
-                        >
-                          rename
-                        </button>
-                        <button
-                          type="button"
-                          className="text-fg-subtle hover:text-fg-default text-[11px] underline"
-                          onClick={() =>
-                            setDialog({
-                              kind: "merge",
-                              label: row,
-                              nextValue: "",
-                            })
-                          }
-                        >
-                          merge
-                        </button>
-                        <button
-                          type="button"
-                          className="text-danger-fg hover:text-danger text-[11px] underline"
-                          onClick={() => setDialog({ kind: "delete", label: row })}
-                        >
-                          delete
-                        </button>
-                      </div>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px] border border-border-subtle">
+                <thead>
+                  <tr className="bg-surface-1 text-fg-muted text-left">
+                    <th className="px-2 py-1 font-medium">Label</th>
+                    <th className="px-2 py-1 font-medium w-16 text-right">
+                      Count
+                    </th>
+                    <th className="px-2 py-1 font-medium w-36">Last used</th>
+                    <th className="px-2 py-1 font-medium w-64">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr
+                      key={row.label}
+                      className="border-t border-border-subtle hover:bg-surface-1/40"
+                    >
+                      <td className="px-2 py-1 font-mono text-fg-default">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setLocation(
+                              `/board?label=${encodeURIComponent(row.label)}`,
+                            )
+                          }
+                          className="underline-offset-2 hover:underline text-left rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                          title="Filter the board by this label"
+                        >
+                          {row.label}
+                        </button>
+                      </td>
+                      <td className="px-2 py-1 text-right tabular-nums text-fg-default">
+                        {row.count}
+                      </td>
+                      <td className="px-2 py-1 text-fg-muted">
+                        {row.last_used_at ? formatRelative(row.last_used_at) : "—"}
+                      </td>
+                      <td className="px-2 py-1">
+                        <div className="flex gap-1.5">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              setDialog({
+                                kind: "rename",
+                                label: row,
+                                nextValue: row.label,
+                              })
+                            }
+                          >
+                            rename
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              setDialog({
+                                kind: "merge",
+                                label: row,
+                                nextValue: "",
+                              })
+                            }
+                          >
+                            merge
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-danger-fg hover:text-danger"
+                            onClick={() => setDialog({ kind: "delete", label: row })}
+                          >
+                            delete
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         ))}
 
@@ -364,18 +372,34 @@ function LabelDialog({
   onSubmit,
 }: LabelDialogProps) {
   return (
-    <ModalShell onCancel={onCancel}>
-      <h3 className="text-[14px] font-medium text-fg-default">{title}</h3>
-      <p className="text-[12px] text-fg-muted">{description}</p>
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onCancel();
+      }}
+      title={title}
+      description={description}
+      widthClass="max-w-md"
+      footer={
+        <ModalActions
+          onCancel={onCancel}
+          primaryLabel={submitLabel}
+          primaryVariant="primary"
+          onPrimary={onSubmit}
+          busy={busy}
+          disabled={disabled}
+        />
+      }
+    >
       <label className="block space-y-1">
         <span className="text-[11px] text-fg-muted">{inputLabel}</span>
-        <input
+        <Input
           type="text"
           autoFocus
           list={autocomplete ? "labels-autocomplete" : undefined}
           value={inputValue}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full px-2 py-1 rounded border border-border-default bg-surface-0 text-fg-default text-[12px] font-mono"
+          className="font-mono"
         />
         {autocomplete && (
           <datalist id="labels-autocomplete">
@@ -385,15 +409,7 @@ function LabelDialog({
           </datalist>
         )}
       </label>
-      <ModalActions
-        onCancel={onCancel}
-        primaryLabel={submitLabel}
-        primaryVariant="primary"
-        onPrimary={onSubmit}
-        busy={busy}
-        disabled={disabled}
-      />
-    </ModalShell>
+    </Dialog>
   );
 }
 
@@ -415,48 +431,27 @@ function ConfirmDialog({
   onConfirm,
 }: ConfirmDialogProps) {
   return (
-    <ModalShell onCancel={onCancel}>
-      <h3 className="text-[14px] font-medium text-fg-default">{title}</h3>
-      <p className="text-[12px] text-fg-muted">{description}</p>
-      <ModalActions
-        onCancel={onCancel}
-        primaryLabel={confirmLabel}
-        primaryVariant="danger"
-        onPrimary={onConfirm}
-        busy={busy}
-      />
-    </ModalShell>
-  );
-}
-
-function ModalShell({
-  children,
-  onCancel,
-}: {
-  children: React.ReactNode;
-  onCancel: () => void;
-}) {
-  // Block-level modal pinned to the viewport via fixed positioning;
-  // we don't pull in a portal library for one screen. Escape closes;
-  // click-outside closes (the backdrop's onClick).
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onCancel]);
-  return (
-    <div
-      className="fixed inset-0 z-50 bg-surface-overlay/60 flex items-center justify-center p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onCancel();
       }}
+      title={title}
+      description={description}
+      widthClass="max-w-md"
+      footer={
+        <ModalActions
+          onCancel={onCancel}
+          primaryLabel={confirmLabel}
+          primaryVariant="danger"
+          onPrimary={onConfirm}
+          busy={busy}
+        />
+      }
     >
-      <div className="bg-surface-0 border border-border-default rounded-md shadow-lg p-4 w-full max-w-md space-y-3">
-        {children}
-      </div>
-    </div>
+      {/* description rendered via Dialog */}
+      <span className="sr-only">{description}</span>
+    </Dialog>
   );
 }
 
@@ -476,7 +471,7 @@ function ModalActions({
   disabled?: boolean;
 }) {
   return (
-    <div className="flex justify-end gap-2 pt-1">
+    <>
       <Button variant="secondary" size="sm" onClick={onCancel} disabled={busy}>
         Cancel
       </Button>
@@ -489,6 +484,6 @@ function ModalActions({
       >
         {busy ? "…" : primaryLabel}
       </Button>
-    </div>
+    </>
   );
 }

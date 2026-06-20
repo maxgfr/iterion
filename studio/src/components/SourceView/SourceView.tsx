@@ -5,6 +5,7 @@ import { useThemeStore } from "@/store/theme";
 import * as api from "@/api/client";
 import { ITER_LANGUAGE_ID, iterLanguageConfig, iterTokensProvider } from "@/lib/iterLanguage";
 import { registerIterCompletionProvider } from "@/lib/iterMonacoCompletion";
+import { Button } from "@/components/ui/Button";
 
 export default function SourceView() {
   const document = useDocumentStore((s) => s.document);
@@ -59,26 +60,30 @@ export default function SourceView() {
         <span className="text-xs text-fg-subtle">.bot Source</span>
         <div className="flex gap-2">
           {!editing ? (
-            <button
-              className="text-xs text-accent hover:text-accent"
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-accent hover:underline"
               onClick={() => setEditing(true)}
             >
               Edit
-            </button>
+            </Button>
           ) : (
             <>
-              <button
-                className="text-xs text-success hover:text-success-fg"
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={handleApply}
               >
                 Apply
-              </button>
-              <button
-                className="text-xs text-fg-subtle hover:text-fg-muted"
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => setEditing(false)}
               >
                 Cancel
-              </button>
+              </Button>
             </>
           )}
         </div>

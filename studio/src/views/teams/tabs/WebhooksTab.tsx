@@ -44,6 +44,7 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
   const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [botsError, setBotsError] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [creating, setCreating] = useState(false);
   const [bots, setBots] = useState<BotEntryWithSchema[]>([]);
@@ -76,8 +77,13 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
     void reload();
     // best-effort: load bots so the create dialog can render the picker
     void listBots()
-      .then((b) => setBots(b))
-      .catch(() => undefined);
+      .then((b) => {
+        setBots(b);
+        setBotsError(null);
+      })
+      .catch((e) =>
+        setBotsError((e as Error)?.message ?? "Failed to load bots."),
+      );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamID]);
 
@@ -127,6 +133,11 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
       {err && (
         <InlineBanner tone="danger" layout="inline">
           {err}
+        </InlineBanner>
+      )}
+      {botsError && (
+        <InlineBanner tone="danger" layout="inline" title="Bots unavailable">
+          {botsError}
         </InlineBanner>
       )}
 

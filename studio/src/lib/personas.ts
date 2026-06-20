@@ -18,6 +18,11 @@ export interface BotIdentity {
   color: string;
 }
 
+// TODO(ui-tokens): these are raw Tailwind -400 hues — a categorical identity
+// palette, like the tokenised iteration palette (--color-iteration-*). They
+// are allowlisted in __tests__/a11y/broken-classes.test.ts. Tokenise them as
+// --color-persona-* with light/dark values + contrast coverage so persona
+// labels stay legible on light surfaces, then drop the allowlist entry.
 export const BOT_IDENTITY: Record<string, BotIdentity> = {
   "whats-next": { emoji: "🧭", color: "text-sky-400" },
   "feature-dev": { emoji: "🛠️", color: "text-emerald-400" },

@@ -28,20 +28,25 @@ export default function AppearanceTab() {
             Persists in this browser. "System" follows your OS preference.
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div
+          className="grid grid-cols-3 gap-2"
+          role="radiogroup"
+          aria-label="Theme"
+        >
           {OPTIONS.map(({ mode: m, label, description, Icon }) => {
             const active = mode === m;
             return (
               <button
                 key={m}
                 type="button"
+                role="radio"
+                aria-checked={active}
                 onClick={() => setMode(m)}
                 className={`flex flex-col items-start gap-1 rounded border p-3 text-left transition-colors ${
                   active
                     ? "border-accent bg-accent-soft/30 ring-1 ring-accent/40"
                     : "border-border-default bg-surface-1 hover:bg-surface-2"
                 }`}
-                aria-pressed={active}
               >
                 <span className="flex items-center gap-2 text-fg-default font-medium">
                   <Icon className="w-4 h-4" />
@@ -62,16 +67,21 @@ export default function AppearanceTab() {
             interpret the Enter key.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div
+          className="grid grid-cols-2 gap-2"
+          role="radiogroup"
+          aria-label="Chat input Enter behaviour"
+        >
           <button
             type="button"
+            role="radio"
+            aria-checked={chatEnterSubmits}
             onClick={() => setChatEnterSubmits(true)}
             className={`flex flex-col items-start gap-1 rounded border p-3 text-left transition-colors ${
               chatEnterSubmits
                 ? "border-accent bg-accent-soft/30 ring-1 ring-accent/40"
                 : "border-border-default bg-surface-1 hover:bg-surface-2"
             }`}
-            aria-pressed={chatEnterSubmits}
           >
             <span className="text-fg-default font-medium">Enter submits</span>
             <span className="text-xs text-fg-subtle">
@@ -80,13 +90,14 @@ export default function AppearanceTab() {
           </button>
           <button
             type="button"
+            role="radio"
+            aria-checked={!chatEnterSubmits}
             onClick={() => setChatEnterSubmits(false)}
             className={`flex flex-col items-start gap-1 rounded border p-3 text-left transition-colors ${
               !chatEnterSubmits
                 ? "border-accent bg-accent-soft/30 ring-1 ring-accent/40"
                 : "border-border-default bg-surface-1 hover:bg-surface-2"
             }`}
-            aria-pressed={!chatEnterSubmits}
           >
             <span className="text-fg-default font-medium">
               Cmd/Ctrl+Enter submits

@@ -1,4 +1,3 @@
-import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 
@@ -32,16 +31,16 @@ import { BoardFilters } from "./BoardFilters";
 import { BoardKeyboardHelp } from "./BoardKeyboardHelp";
 import { Column } from "./Column";
 import { SelectionToolbar } from "./SelectionToolbar";
-import {
-  DRAG_MIME_ISSUE_IDS,
-  type SortMode,
-  defaultStateColor,
-} from "./boardShared";
 import SettingsDrawer from "@/components/Dispatcher/SettingsDrawer";
 import TrackerErrorBanner from "@/components/shared/TrackerErrorBanner";
 import { useBoardKeyboard } from "@/hooks/useBoardKeyboard";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useUIStore } from "@/store/ui";
+import {
+  defaultStateColor,
+  DRAG_MIME_ISSUE_IDS,
+  type SortMode,
+} from "./boardShared";
 
 // Pre-dispatch lanes: an issue here has not yet entered the dispatcher's
 // eligible queue, so it can be "dispatched" (transitioned into the
@@ -233,7 +232,7 @@ export default function BoardView() {
     try {
       await cancelIssue(issueID);
     } catch (e) {
-      setError(errorMessage(e));
+      setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
 
@@ -244,7 +243,7 @@ export default function BoardView() {
       setBoard(b);
       setIssues(i ?? []);
     } catch (e) {
-      setError(errorMessage(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -404,7 +403,7 @@ export default function BoardView() {
         }
         return true;
       } catch (e) {
-        setError(errorMessage(e));
+        setError(e instanceof Error ? e.message : String(e));
         // Only revert this issue's row to its pre-drop state — leave
         // other concurrent edits in place. Falls back to full revert
         // when the row was reordered out of the snapshot.
@@ -544,7 +543,7 @@ export default function BoardView() {
         setCreating(false);
         await refresh();
       } catch (e) {
-        setError(errorMessage(e));
+        setError(e instanceof Error ? e.message : String(e));
       }
     },
     [refresh],
@@ -576,7 +575,7 @@ export default function BoardView() {
         setEditing(null);
         await refresh();
       } catch (e) {
-        setError(errorMessage(e));
+        setError(e instanceof Error ? e.message : String(e));
       }
     },
     [editing, refresh],
@@ -605,7 +604,7 @@ export default function BoardView() {
         setAnchorId((cur) => (cur === id ? null : cur));
         await refresh();
       } catch (e) {
-        setError(errorMessage(e));
+        setError(e instanceof Error ? e.message : String(e));
       }
     },
     [confirm, refresh],
@@ -685,7 +684,7 @@ export default function BoardView() {
         await refresh();
         if (n > 0) addToast(toastMsg, "success");
       } catch (e) {
-        setError(errorMessage(e));
+        setError(e instanceof Error ? e.message : String(e));
       }
     },
     [selectedIssues, refresh, addToast],
@@ -755,7 +754,7 @@ export default function BoardView() {
       addToast(`Deleted ${ids.length} issue${ids.length > 1 ? "s" : ""}`, "success");
       await refresh();
     } catch (e) {
-      setError(errorMessage(e));
+      setError(e instanceof Error ? e.message : String(e));
     }
   }, [selectedIssues, confirm, setSingleSelection, addToast, refresh]);
 

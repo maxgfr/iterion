@@ -1,6 +1,8 @@
 import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
 import { useLocation } from "wouter";
 
 import {
@@ -78,15 +80,23 @@ export default function AcceptInvitation() {
 
   if (status === "loading") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-surface-0 text-fg-default">
-        Loading…
+      <div
+        className="min-h-screen flex items-center justify-center gap-2 bg-surface-0 text-fg-default"
+        aria-live="polite"
+      >
+        <Spinner size="sm" />
+        <span>Loading…</span>
       </div>
     );
   }
   if (status === "anonymous") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-surface-0 text-fg-default">
-        Redirecting to sign-in…
+      <div
+        className="min-h-screen flex items-center justify-center gap-2 bg-surface-0 text-fg-default"
+        aria-live="polite"
+      >
+        <Spinner size="sm" />
+        <span>Redirecting to sign-in…</span>
       </div>
     );
   }
@@ -119,17 +129,22 @@ export default function AcceptInvitation() {
               <span className="text-fg-muted">Invited email:</span>{" "}
               <span className="font-mono text-xs">{info.email}</span>
             </div>
-            <button
+            <Button
+              variant="primary"
               onClick={() => void accept()}
-              disabled={busy}
-              className="w-full bg-accent text-fg-onAccent rounded px-3 py-2 font-medium disabled:opacity-50 mt-3"
+              loading={busy}
+              className="w-full mt-3"
             >
               {busy ? "Joining…" : `Join ${info.team_name}`}
-            </button>
+            </Button>
           </div>
         )}
         <div className="text-sm text-fg-muted text-center">
-          <button onClick={() => navigate("/")} className="underline">
+          <button
+            type="button"
+            onClick={() => navigate("/")}
+            className="underline"
+          >
             Cancel
           </button>
         </div>

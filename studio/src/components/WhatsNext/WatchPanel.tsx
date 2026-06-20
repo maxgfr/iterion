@@ -49,7 +49,7 @@ export default function WatchPanel({ runId }: WatchPanelProps) {
         <div className="text-[10px] uppercase tracking-wide text-fg-subtle">
           Watching · {entries.length} dispatched
           {pendingUpdates.length > 0 && (
-            <span className="ml-2 text-amber-300 normal-case tracking-normal">
+            <span className="ml-2 text-warning-fg normal-case tracking-normal">
               · {pendingUpdates.length} update{pendingUpdates.length === 1 ? "" : "s"}
             </span>
           )}
@@ -72,7 +72,7 @@ export default function WatchPanel({ runId }: WatchPanelProps) {
         </div>
       </div>
       {forwardError && (
-        <div className="mb-1 text-[10px] text-red-300" title={forwardError}>
+        <div className="mb-1 text-[10px] text-danger-fg" title={forwardError}>
           Forward failed: {truncate(forwardError, 80)}
         </div>
       )}
@@ -135,7 +135,7 @@ function WatchRow({ entry, runId }: { entry: WatchEntry; runId: string | null })
         {title}
       </span>
       {dispatchError && (
-        <span className="text-[10px] text-red-300" title={dispatchError}>
+        <span className="text-[10px] text-danger-fg" title={dispatchError}>
           (failed)
         </span>
       )}

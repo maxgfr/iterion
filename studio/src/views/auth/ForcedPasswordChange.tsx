@@ -1,6 +1,8 @@
 import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { useLocation } from "wouter";
 
 import { ApiError, completePendingPasswordChange } from "@/api/auth";
@@ -70,59 +72,88 @@ export default function ForcedPasswordChange() {
           Your account was created with a temporary password. Set a new one to finish signing in.
         </p>
         <form onSubmit={submit} className="space-y-3" data-testid="forced-password-change-form">
-          <input
-            type="email"
-            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            required
-          />
-          <input
-            type="password"
-            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
-            placeholder="Current (temporary) password"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
-            autoComplete="current-password"
-            required
-          />
-          <input
-            type="password"
-            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
-            placeholder="New password (≥ 8 characters)"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            autoComplete="new-password"
-            minLength={8}
-            required
-          />
-          <input
-            type="password"
-            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2"
-            placeholder="Confirm new password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            autoComplete="new-password"
-            minLength={8}
-            required
-          />
+          <div>
+            <label htmlFor="forced-email" className="sr-only">
+              Email
+            </label>
+            <Input
+              size="md"
+              type="email"
+              id="forced-email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              required
+            />
+          </div>
+          <div>
+            <label htmlFor="forced-current-password" className="sr-only">
+              Current (temporary) password
+            </label>
+            <Input
+              size="md"
+              type="password"
+              id="forced-current-password"
+              placeholder="Current (temporary) password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          <div>
+            <label htmlFor="forced-new-password" className="sr-only">
+              New password
+            </label>
+            <Input
+              size="md"
+              type="password"
+              id="forced-new-password"
+              placeholder="New password (≥ 8 characters)"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              autoComplete="new-password"
+              minLength={8}
+              required
+            />
+          </div>
+          <div>
+            <label htmlFor="forced-confirm-password" className="sr-only">
+              Confirm new password
+            </label>
+            <Input
+              size="md"
+              type="password"
+              id="forced-confirm-password"
+              placeholder="Confirm new password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
+              minLength={8}
+              required
+            />
+          </div>
           {err && (
             <InlineBanner tone="danger" layout="inline">
               {err}
             </InlineBanner>
           )}
-          <button
+          <Button
+            variant="primary"
             type="submit"
-            disabled={busy}
-            className="w-full bg-accent text-fg-onAccent rounded px-3 py-2 font-medium disabled:opacity-50"
+            loading={busy}
+            className="w-full"
           >
             {busy ? "Working…" : "Set new password & sign in"}
-          </button>
+          </Button>
         </form>
         <div className="mt-4 text-sm text-fg-muted text-center">
-          <button onClick={() => navigate("/login")} className="underline">
+          <button
+            type="button"
+            onClick={() => navigate("/login")}
+            className="underline"
+          >
             Back to sign-in
           </button>
         </div>

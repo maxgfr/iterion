@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import type { NativeBoard, NativeIssue } from "@/api/native";
 
 import { PRIORITY_PRESETS } from "./boardShared";
@@ -36,15 +39,14 @@ export function SelectionToolbar({
   onDelete: () => void;
   onClear: () => void;
 }) {
-  const selectClass =
-    "px-2 py-0.5 rounded border border-border-default bg-surface-0 text-fg-muted hover:text-fg-default";
   return (
     <div className="shrink-0 px-3 py-1.5 border-b border-border-default bg-accent-soft/20 flex flex-wrap items-center gap-2 text-xs text-fg-default">
       <span>
         <strong>{count}</strong> selected
       </span>
-      <button
-        type="button"
+      <Button
+        variant="success"
+        size="sm"
         onClick={onDispatch}
         disabled={!allSelectedDispatchable}
         title={
@@ -52,61 +54,66 @@ export function SelectionToolbar({
             ? "Move all selected into the dispatch lane"
             : "All selected cards must be in Inbox or Backlog"
         }
-        className="px-2 py-0.5 rounded bg-success text-white hover:bg-success/90 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         ▶ Let's go
-      </button>
+      </Button>
 
-      <select
-        value=""
-        onChange={(e) => {
-          if (e.target.value) onMove(e.target.value);
-        }}
-        className={selectClass}
-        title="Move all selected to a column"
-      >
-        <option value="">Move to…</option>
-        {board.states.map((s) => (
-          <option key={s.name} value={s.name}>
-            {s.display ?? s.name}
-          </option>
-        ))}
-      </select>
+      <div className="w-auto">
+        <Select
+          value=""
+          onChange={(e) => {
+            if (e.target.value) onMove(e.target.value);
+          }}
+          title="Move all selected to a column"
+          aria-label="Bulk move to column"
+        >
+          <option value="">Move to…</option>
+          {board.states.map((s) => (
+            <option key={s.name} value={s.name}>
+              {s.display ?? s.name}
+            </option>
+          ))}
+        </Select>
+      </div>
 
-      <select
-        value=""
-        onChange={(e) => {
-          if (e.target.value !== "") onPriority(Number(e.target.value));
-        }}
-        className={selectClass}
-        title="Set priority on all selected"
-      >
-        <option value="">Priority…</option>
-        {PRIORITY_PRESETS.map((p) => (
-          <option key={p} value={p}>
-            P{p}
-          </option>
-        ))}
-      </select>
+      <div className="w-auto">
+        <Select
+          value=""
+          onChange={(e) => {
+            if (e.target.value !== "") onPriority(Number(e.target.value));
+          }}
+          title="Set priority on all selected"
+          aria-label="Bulk set priority"
+        >
+          <option value="">Priority…</option>
+          {PRIORITY_PRESETS.map((p) => (
+            <option key={p} value={p}>
+              P{p}
+            </option>
+          ))}
+        </Select>
+      </div>
 
-      <select
-        value=""
-        onChange={(e) => {
-          const v = e.target.value;
-          if (v === "") return;
-          onAssignee(v === "__clear__" ? "" : v);
-        }}
-        className={selectClass}
-        title="Assign all selected"
-      >
-        <option value="">Assignee…</option>
-        <option value="__clear__">(clear)</option>
-        {allAssignees.map((a) => (
-          <option key={a} value={a}>
-            @{a}
-          </option>
-        ))}
-      </select>
+      <div className="w-auto">
+        <Select
+          value=""
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "") return;
+            onAssignee(v === "__clear__" ? "" : v);
+          }}
+          title="Assign all selected"
+          aria-label="Bulk set assignee"
+        >
+          <option value="">Assignee…</option>
+          <option value="__clear__">(clear)</option>
+          {allAssignees.map((a) => (
+            <option key={a} value={a}>
+              @{a}
+            </option>
+          ))}
+        </Select>
+      </div>
 
       <BulkLabelPopover
         allLabels={allLabels}
@@ -115,20 +122,12 @@ export function SelectionToolbar({
       />
 
       <div className="ml-auto flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onDelete}
-          className="px-2 py-0.5 rounded border border-danger/50 text-danger-fg hover:bg-danger-soft"
-        >
+        <Button variant="danger" size="sm" onClick={onDelete}>
           Delete
-        </button>
-        <button
-          type="button"
-          onClick={onClear}
-          className="text-fg-subtle hover:text-fg-default underline"
-        >
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onClear}>
           clear
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -182,15 +181,15 @@ function BulkLabelPopover({
         Label <span className="text-fg-subtle text-[10px]">▾</span>
       </button>
       {open && (
-        <div className="absolute z-30 mt-1 w-64 max-h-80 overflow-hidden rounded-md border border-border-strong bg-surface-0 shadow-lg flex flex-col">
+        <div className="absolute z-[var(--z-popover)] mt-1 w-64 max-h-80 overflow-hidden rounded-md border border-border-strong bg-surface-0 shadow-popover flex flex-col">
           <div className="p-1 border-b border-border-default shrink-0">
-            <input
+            <Input
               ref={inputRef}
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search labels…"
-              className="w-full bg-surface-1 text-fg-default rounded border border-border-default px-2 py-1 text-xs outline-none focus:border-accent"
+              aria-label="Search labels"
             />
           </div>
           <ul className="py-1 overflow-auto">
@@ -209,7 +208,7 @@ function BulkLabelPopover({
                   <button
                     type="button"
                     onClick={() => onToggle(l)}
-                    className={`w-full text-left px-2 py-1.5 text-xs flex items-center gap-2 hover:bg-surface-1 ${
+                    className={`w-full text-left px-2 py-1.5 text-xs flex items-center gap-2 hover:bg-surface-1 rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                       active ? "text-fg-default" : "text-fg-muted"
                     }`}
                   >

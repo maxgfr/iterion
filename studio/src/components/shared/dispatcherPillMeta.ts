@@ -38,28 +38,28 @@ export function dispatcherPillMeta(
       return {
         label: "dispatcher: running",
         title: "Polling the tracker and dispatching ready issues.",
-        className: "bg-green-500/20 text-green-300",
+        className: "bg-success-soft text-success-fg",
       };
     case "paused":
       return {
         label: "dispatcher: paused",
         title:
           "Lifecycle paused — in-flight runs continue; no new dispatches until you Resume.",
-        className: "bg-amber-500/20 text-amber-300",
+        className: "bg-warning-soft text-warning-fg",
       };
     case "error":
       return {
         label: "dispatcher: error",
         title:
           "The dispatcher hit an error — see the message alongside the pill.",
-        className: "bg-red-500/20 text-red-300",
+        className: "bg-danger-soft text-danger-fg",
       };
     case "unreachable":
       return {
         label: "unreachable",
         title:
           "Can't reach the dispatcher API — the `iterion dispatch` process may have exited.",
-        className: "bg-red-500/20 text-red-300",
+        className: "bg-danger-soft text-danger-fg",
       };
     case "idle":
       return {

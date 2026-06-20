@@ -158,6 +158,23 @@ func DefaultBaseURL(p Provider) string {
 	return ""
 }
 
+// CanonicalBaseURL normalises an operator-supplied forge base URL to
+// scheme+host with no trailing slash (https assumed when no scheme), or the
+// provider's canonical SaaS host when empty. The OAuth-app store's (tenant,
+// provider, base URL) key and the connect resolver both run through this so a
+// pasted "gitlab.example.com", "https://gitlab.example.com/" and "" (→ SaaS)
+// all resolve to the same instance.
+func CanonicalBaseURL(p Provider, raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return DefaultBaseURL(p)
+	}
+	if !strings.Contains(s, "://") {
+		s = "https://" + s
+	}
+	return strings.TrimRight(s, "/")
+}
+
 // hostOf strips scheme + path from a base URL, returning bare host[:port].
 // Tolerant of a missing scheme so a pasted "gitlab.example.com" still works.
 func hostOf(base string) string {
@@ -175,6 +192,8 @@ func hostOf(base string) string {
 var (
 	ErrConnectionNotFound  = errors.New("forge: connection not found")
 	ErrIntegrationNotFound = errors.New("forge: repo integration not found")
+	ErrOAuthAppNotFound    = errors.New("forge: oauth app not found")
+	ErrOAuthAppExists      = errors.New("forge: oauth app already exists")
 	ErrHookNotFound        = errors.New("forge: hook not found")
 	// ErrForbidden is returned by an admin client when the credential lacks
 	// the scope to perform an operation (e.g. create a webhook). The

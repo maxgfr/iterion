@@ -68,6 +68,35 @@ export interface ForgeProvisionResult {
   created: boolean;
 }
 
+// ForgeOAuthApp is a per-tenant, per-instance OAuth application's credentials
+// (client_id + sealed client_secret). The connect form offers OAuth for a
+// (provider, instance) only when one of these exists for it.
+export interface ForgeOAuthApp {
+  id: string;
+  tenant_id: string;
+  provider: ForgeProvider;
+  forge_base_url?: string;
+  client_id: string;
+  scopes?: string[];
+  redirect_uri?: string;
+  provider_app_id?: string;
+  auto_created: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RegisterForgeOAuthAppInput {
+  provider: ForgeProvider;
+  forge_base_url?: string;
+  /** "manual" pastes client_id+client_secret; "auto"/"auto_from_connection" call the forge API. */
+  mode?: "manual" | "auto" | "auto_from_connection";
+  client_id?: string;
+  client_secret?: string;
+  admin_token?: string;
+  connection_id?: string;
+}
+
 export interface ConnectForgeInput {
   provider: ForgeProvider;
   mode: "oauth" | "pat" | "app";
@@ -157,4 +186,46 @@ export async function disableForgeIntegration(
   integrationID: string,
 ): Promise<void> {
   await request<void>(`/teams/${teamID}/forge/repo-bots/${integrationID}`, { method: "DELETE" });
+}
+
+export async function listForgeOAuthApps(teamID: string): Promise<ForgeOAuthApp[]> {
+  const r = await guard404("forge_integrations", () =>
+    request<{ apps: ForgeOAuthApp[] }>(`/teams/${teamID}/forge/oauth-apps`),
+  );
+  return r.apps ?? [];
+}
+
+export async function registerForgeOAuthApp(
+  teamID: string,
+  input: RegisterForgeOAuthAppInput,
+): Promise<ForgeOAuthApp> {
+  return request(`/teams/${teamID}/forge/oauth-apps`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteForgeOAuthApp(teamID: string, appID: string): Promise<void> {
+  await request<void>(`/teams/${teamID}/forge/oauth-apps/${appID}`, { method: "DELETE" });
+}
+
+export interface GitHubManifestStart {
+  /** github.com (or GHE) URL to POST the manifest form to. */
+  post_url: string;
+  /** The GitHub App manifest to submit as a hidden `manifest` form field. */
+  manifest: Record<string, unknown>;
+  state: string;
+}
+
+// startGitHubManifest returns the pre-filled GitHub App manifest + the
+// github.com POST target; the caller auto-submits a form so GitHub creates the
+// App and redirects back to iterion's callback (which stores the credentials).
+export async function startGitHubManifest(
+  teamID: string,
+  input: { forge_base_url?: string; next?: string },
+): Promise<GitHubManifestStart> {
+  return request(`/teams/${teamID}/forge/oauth-apps/github-manifest`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }

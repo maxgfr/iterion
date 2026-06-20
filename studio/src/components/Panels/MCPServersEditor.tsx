@@ -1,6 +1,5 @@
-import { useState } from "react";
-
 import { useDocumentStore } from "@/store/document";
+import { useConfirm } from "@/hooks/useConfirm";
 import type { MCPServerDecl, MCPTransport } from "@/api/types";
 
 import {
@@ -18,7 +17,7 @@ export default function MCPServersEditor() {
   const removeMCPServer = useDocumentStore((s) => s.removeMCPServer);
   const updateMCPServer = useDocumentStore((s) => s.updateMCPServer);
 
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   if (!document) return null;
   const servers = document.mcp_servers ?? [];
@@ -65,41 +64,30 @@ export default function MCPServersEditor() {
                   updateMCPServer(srv.name, { name: newName });
                 }}
                 onPatch={(patch) => updateMCPServer(srv.name, patch)}
-                onDelete={() => setConfirmDelete(srv.name)}
+                onDelete={async () => {
+                  if (
+                    await confirm({
+                      title: "Delete MCP server",
+                      message: (
+                        <>
+                          Delete MCP server <code>{srv.name}</code>? Nodes
+                          referencing it by name will fail validation until the
+                          reference is removed.
+                        </>
+                      ),
+                      confirmLabel: "Delete",
+                      confirmVariant: "danger",
+                    })
+                  ) {
+                    removeMCPServer(srv.name);
+                  }
+                }}
               />
             </li>
           ))}
         </ul>
       )}
-      {confirmDelete !== null && (
-        <div className="fixed inset-0 z-[var(--z-confirm)] flex items-center justify-center bg-black/40">
-          <div className="bg-surface-0 border border-border-default rounded p-3 max-w-sm">
-            <p className="text-sm mb-3">
-              Delete MCP server <code>{confirmDelete}</code>? Nodes referencing
-              it by name will fail validation until the reference is removed.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                className="text-xs px-2 py-1 rounded bg-surface-2"
-                onClick={() => setConfirmDelete(null)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="text-xs px-2 py-1 rounded bg-danger text-on-danger"
-                onClick={() => {
-                  removeMCPServer(confirmDelete);
-                  setConfirmDelete(null);
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {dialog}
     </div>
   );
 }

@@ -1,3 +1,5 @@
+import { Button } from "@/components/ui/Button";
+
 import type { MarketplaceEntry } from "@/api/marketplace";
 
 interface Props {
@@ -20,7 +22,7 @@ export function MarketplaceCard({ entry, installing, onInstall, onOpen }: Props)
       <button
         type="button"
         onClick={onOpen}
-        className="flex flex-col items-start gap-1 text-left focus:outline-none"
+        className="flex flex-col items-start gap-1 text-left rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
       >
         <div className="flex w-full items-baseline justify-between gap-2">
           <span className="truncate text-sm font-medium text-fg-default">{label}</span>
@@ -58,17 +60,19 @@ export function MarketplaceCard({ entry, installing, onInstall, onOpen }: Props)
           {entry.repo_url}
           {entry.ref ? `#${entry.ref}` : ""}
         </span>
-        <button
-          type="button"
+        <Button
+          variant="success"
+          size="sm"
           onClick={(e) => {
             e.stopPropagation();
             onInstall();
           }}
           disabled={installing}
-          className="shrink-0 rounded bg-success/20 px-2.5 py-1 text-[11px] font-medium text-success hover:bg-success/30 disabled:opacity-50"
+          loading={installing}
+          className="shrink-0"
         >
           {installing ? "Installing…" : "Install"}
-        </button>
+        </Button>
       </div>
     </li>
   );

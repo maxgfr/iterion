@@ -48,17 +48,64 @@ export default function FloatingChatPanel({
     );
   }
   return (
-    <div
-      className="fixed bottom-4 right-4 z-[var(--z-toast)] flex flex-col rounded-md border border-border-default bg-surface-1 shadow-xl resize overflow-hidden"
-      style={{ width: 420, height: 520, minWidth: 320, minHeight: 280 }}
-      role="dialog"
-      aria-label="Conversation"
+    <FloatingDialogShell
+      label="Conversation"
+      onClose={() => onDockChange("closed")}
     >
       <ChatPanelChrome
         onDockRight={() => onDockChange("docked-right")}
         onClose={() => onDockChange("closed")}
       />
       <ChatPanelBody runId={runId} inputDisabled={inputDisabled} compact />
+    </FloatingDialogShell>
+  );
+}
+
+// Non-blocking floating dialog: labelled, keyboard-reachable, and
+// dismissable via Escape. Focus moves into the panel on mount so a
+// keyboard user can immediately Tab through the chrome + body without
+// reaching the page background first. Intentionally NOT a focus trap —
+// the page underneath remains interactive (this is a docked helper,
+// not a modal).
+function FloatingDialogShell({
+  label,
+  onClose,
+  children,
+}: {
+  label: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Defer focus so any layout / autofocus inside children settles first.
+    const t = window.setTimeout(() => {
+      const root = ref.current;
+      if (!root) return;
+      if (root.contains(document.activeElement)) return;
+      const focusable = root.querySelector<HTMLElement>(
+        'button, [href], input, textarea, select, [tabindex]:not([tabindex="-1"])',
+      );
+      (focusable ?? root).focus();
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, []);
+  return (
+    <div
+      ref={ref}
+      tabIndex={-1}
+      className="fixed bottom-4 right-4 z-[var(--z-toast)] flex flex-col rounded-md border border-border-default bg-surface-1 shadow-[var(--shadow-popover)] resize overflow-hidden focus:outline-none"
+      style={{ width: 420, height: 520, minWidth: 320, minHeight: 280 }}
+      role="dialog"
+      aria-label={label}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onClose();
+        }
+      }}
+    >
+      {children}
     </div>
   );
 }

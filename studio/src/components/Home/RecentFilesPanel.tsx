@@ -17,6 +17,7 @@ import { useUIStore } from "@/store/ui";
 import { useConfirm } from "@/hooks/useConfirm";
 import { basename } from "@/lib/format";
 import { botIdentity } from "@/lib/personas";
+import { Button, IconButton, InlineBanner } from "@/components/ui";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { BotCatalogDialog } from "@/components/Catalog/BotCatalogDialog";
 
@@ -64,17 +65,25 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
 
   const [examples, setExamples] = useState<api.ExampleEntry[]>([]);
   const [examplesOpen, setExamplesOpen] = useState(false);
+  const [examplesError, setExamplesError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const { confirm, dialog: confirmDialog } = useConfirm();
 
   useEffect(() => {
     let cancelled = false;
+    setExamplesError(null);
     loadExamples()
       .then((list) => {
         if (!cancelled) setExamples(list);
       })
-      .catch(() => {});
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        // Quietly degrade — the examples list is only one of three entry
+        // points (recents + new blank stay reachable). Show an inline
+        // banner so the operator knows the bot catalog couldn't load.
+        setExamplesError(e instanceof Error ? e.message : String(e));
+      });
     return () => {
       cancelled = true;
     };
@@ -126,21 +135,34 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
 
   const body = (
     <div className={variant === "card" ? "p-3 space-y-3" : "space-y-3"}>
-      <button
+      <Button
         onClick={handleNewBlank}
         disabled={busy}
-        className="w-full flex items-center gap-2 px-3 py-2 rounded-md bg-accent-soft hover:bg-accent/20 border border-accent/40 text-sm disabled:opacity-50"
+        variant="primary"
+        size="md"
+        leadingIcon={<FilePlusIcon className="w-4 h-4" />}
+        className="w-full justify-start"
       >
-        <FilePlusIcon className="w-4 h-4" />
-        <span className="font-medium">New blank workflow</span>
-      </button>
+        New blank workflow
+      </Button>
+      {examplesError && (
+        <InlineBanner
+          tone="warning"
+          layout="inline"
+          title="Bot catalog unavailable"
+        >
+          {examplesError}
+        </InlineBanner>
+      )}
 
       {examples.length > 0 && (
         <div>
           <div className="flex items-center justify-between px-1">
             <button
+              type="button"
               onClick={() => setExamplesOpen((v) => !v)}
-              className="flex items-center gap-1 text-xs font-medium text-fg-muted hover:text-fg-default"
+              className="flex items-center gap-1 text-xs font-medium text-fg-muted hover:text-fg-default focus-visible:ring-1 focus-visible:ring-accent rounded"
+              aria-expanded={examplesOpen}
             >
               {examplesOpen ? (
                 <ChevronDownIcon className="w-3 h-3" />
@@ -149,13 +171,14 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
               )}
               <span>Bots ({examples.length})</span>
             </button>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setCatalogOpen(true)}
-              className="text-[10px] text-fg-subtle hover:text-fg-default"
               title="Enable/disable bots and edit their metadata"
             >
               Manage
-            </button>
+            </Button>
           </div>
           {examplesOpen && (
             <ul className="mt-1 space-y-0.5">
@@ -171,9 +194,10 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
                 return (
                   <li key={ex.name}>
                     <button
+                      type="button"
                       onClick={() => handleOpenExample(ex.name)}
                       disabled={busy}
-                      className="w-full flex items-start gap-2 px-2 py-1.5 rounded hover:bg-surface-2 text-left disabled:opacity-50"
+                      className="w-full flex items-start gap-2 px-2 py-1.5 rounded hover:bg-surface-2 text-left disabled:opacity-50 focus-visible:ring-1 focus-visible:ring-accent"
                     >
                       <span
                         className="text-sm leading-none shrink-0 mt-0.5"
@@ -215,7 +239,9 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
             Recent ({recents.length})
           </span>
           {recents.length > 0 && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={async () => {
                 const ok = await confirm({
                   title: "Clear recent files?",
@@ -226,10 +252,9 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
                 });
                 if (ok) clearRecents();
               }}
-              className="text-[10px] text-fg-subtle hover:text-fg-default"
             >
               Clear all
-            </button>
+            </Button>
           )}
         </div>
         {recents.length === 0 ? (
@@ -246,9 +271,10 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
             {recents.map((path) => (
               <li key={path} className="group flex items-center gap-1">
                 <button
+                  type="button"
                   onClick={() => handleOpenRecent(path)}
                   disabled={busy}
-                  className="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded hover:bg-surface-2 text-left text-xs disabled:opacity-50"
+                  className="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded hover:bg-surface-2 text-left text-xs disabled:opacity-50 focus-visible:ring-1 focus-visible:ring-accent"
                   title={path}
                 >
                   <FileIcon className="w-3.5 h-3.5 text-fg-subtle shrink-0" />
@@ -261,17 +287,19 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
                     </span>
                   )}
                 </button>
-                <button
+                <IconButton
+                  label={`Remove ${path} from recents`}
+                  tooltip="Remove from recents"
+                  size="sm"
+                  variant="ghost"
                   onClick={(e) => {
                     e.stopPropagation();
                     removeRecent(path);
                   }}
-                  className="p-1 text-fg-subtle hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="Remove from recents"
-                  aria-label={`Remove ${path} from recents`}
+                  className="h-7 w-7 text-fg-subtle hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity"
                 >
                   <TrashIcon className="w-3.5 h-3.5" />
-                </button>
+                </IconButton>
               </li>
             ))}
           </ul>
@@ -290,13 +318,14 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
         <h2 className="text-xs font-semibold uppercase tracking-wider text-fg-muted">
           Workflows
         </h2>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => setCatalogOpen(true)}
-          className="text-[10px] text-fg-subtle hover:text-fg-default"
           title="Enable/disable bots and edit their metadata"
         >
           Manage bots
-        </button>
+        </Button>
       </header>
       {body}
     </section>

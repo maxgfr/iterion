@@ -133,6 +133,7 @@ export function Column({
               }}
               onChange={() => onSelectColumn(name)}
               title={allSelected ? "Deselect all in column" : "Select all in column"}
+              aria-label={allSelected ? `Deselect all in ${display}` : `Select all in ${display}`}
               className="shrink-0 accent-accent cursor-pointer"
             />
           )}
@@ -520,7 +521,6 @@ function pickPinnedFields(fields: Record<string, unknown>): Array<[string, unkno
   }
   return picked;
 }
-
 
 function shortID(id: string) {
   const bare = id.replace(/^native:/, "").replace(/^github:[^#]+#/, "#");

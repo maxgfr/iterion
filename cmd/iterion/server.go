@@ -117,28 +117,6 @@ func orgLimitDefaultsFromEnv() server.OrgLimitDefaults {
 	return d
 }
 
-// forgeOAuthFromEnv reads the per-provider forge OAuth-app credentials from
-// the environment. A provider with no client id is simply absent from the
-// map — its connect flow then offers only the PAT fallback. Env keys:
-//
-//	ITERION_FORGE_<PROVIDER>_OAUTH_CLIENT_ID / _CLIENT_SECRET
-//	(PROVIDER ∈ GITLAB, GITHUB, FORGEJO)
-func forgeOAuthFromEnv() server.ForgeOAuthConfig {
-	out := server.ForgeOAuthConfig{}
-	for _, p := range []forge.Provider{forge.ProviderGitLab, forge.ProviderGitHub, forge.ProviderForgejo} {
-		prefix := "ITERION_FORGE_" + strings.ToUpper(string(p)) + "_OAUTH_"
-		clientID := strings.TrimSpace(os.Getenv(prefix + "CLIENT_ID"))
-		if clientID == "" {
-			continue
-		}
-		out[p] = server.ForgeOAuthAppCreds{
-			ClientID:     clientID,
-			ClientSecret: strings.TrimSpace(os.Getenv(prefix + "CLIENT_SECRET")),
-		}
-	}
-	return out
-}
-
 // forgeGitHubAppFromEnv reads the GitHub-App identity for the
 // installation-token connect mode. The PEM private key is loaded from a file
 // (the canonical k8s-secret mount), falling back to an inline env value.
@@ -292,6 +270,10 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	forgeIntegrationStore := forge.NewMongoRepoIntegrationStore(st.DB())
 	if err := forgeIntegrationStore.EnsureSchema(rootCtx); err != nil {
 		return fmt.Errorf("server: ensure repo_integrations schema: %w", err)
+	}
+	forgeOAuthAppStore := forge.NewMongoOAuthAppStore(st.DB())
+	if err := forgeOAuthAppStore.EnsureSchema(rootCtx); err != nil {
+		return fmt.Errorf("server: ensure forge_oauth_apps schema: %w", err)
 	}
 	orgUsageCounter := orgusage.NewMongoCounter(st.DB())
 	if err := orgusage.EnsureSchema(rootCtx, st.DB()); err != nil {
@@ -554,7 +536,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		BotBindings:            botBindingsStore,
 		ForgeConnections:       forgeConnStore,
 		ForgeIntegrations:      forgeIntegrationStore,
-		ForgeOAuth:             forgeOAuthFromEnv(),
+		ForgeOAuthApps:         forgeOAuthAppStore,
 		ForgeGitHubApp:         forgeGitHubAppFromEnv(),
 		WebhookConfigs:         webhookStores.Configs,
 		WebhookDeliveries:      webhookStores.Deliveries,

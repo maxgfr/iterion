@@ -6,6 +6,8 @@ import {
   submitMarketplaceBot,
   type MarketplaceEntry,
 } from "@/api/marketplace";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { useUIStore } from "@/store/ui";
 import { toastError } from "@/lib/errorHints";
 
@@ -99,33 +101,31 @@ export default function MarketplaceView() {
       <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 overflow-y-auto px-6 py-4">
         <section className="flex flex-col gap-2">
           <div className="flex flex-wrap items-end gap-2">
-            <label className="flex min-w-[14rem] flex-1 flex-col gap-1">
+            <label htmlFor="marketplace-search" className="flex min-w-[14rem] flex-1 flex-col gap-1">
               <span className="text-[10px] uppercase tracking-wide text-fg-subtle">Search</span>
-              <input
+              <Input
+                id="marketplace-search"
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="name, description, tag…"
-                className="rounded border border-border-default bg-surface-2 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                aria-label="Search bots"
               />
             </label>
-            <label className="flex w-44 flex-col gap-1">
+            <label htmlFor="marketplace-tag" className="flex w-44 flex-col gap-1">
               <span className="text-[10px] uppercase tracking-wide text-fg-subtle">Filter by tag</span>
-              <input
+              <Input
+                id="marketplace-tag"
                 type="text"
                 value={tag}
                 onChange={(e) => setTag(e.target.value)}
                 placeholder="(e.g. review)"
-                className="rounded border border-border-default bg-surface-2 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                aria-label="Filter by tag"
               />
             </label>
-            <button
-              type="button"
-              onClick={() => void refresh()}
-              className="rounded bg-surface-2 px-2.5 py-1.5 text-xs text-fg-muted hover:bg-surface-3 hover:text-fg-default"
-            >
+            <Button variant="secondary" size="sm" onClick={() => void refresh()}>
               Refresh
-            </button>
+            </Button>
           </div>
         </section>
 

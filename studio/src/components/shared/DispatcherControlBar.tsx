@@ -6,6 +6,7 @@ import {
   dispatcherPillMeta,
   type DispatcherPillState,
 } from "@/components/shared/dispatcherPillMeta";
+import { Button } from "@/components/ui";
 import { useConfirm } from "@/hooks/useConfirm";
 
 interface Props {
@@ -82,63 +83,69 @@ export default function DispatcherControlBar({ onOpenSettings, pollIntervalMs = 
       )}
       <div className="ml-auto flex items-center gap-2">
         {(state === "idle" || state === "error") && (
-          <button
-            className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+          <Button
+            variant="primary"
+            size="sm"
             disabled={busy || !hasConfig}
             aria-label="Start the dispatcher"
             title={hasConfig ? "Start the dispatcher" : "Save a config in Settings first"}
             onClick={() => void guard(dispatcher.start)}
           >
             ▶ Start
-          </button>
+          </Button>
         )}
         {state === "running" && (
           <>
-            <button
-              className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+            <Button
+              variant="secondary"
+              size="sm"
               disabled={busy}
               aria-label="Pause the dispatcher"
               onClick={() => void guard(dispatcher.pause)}
             >
               ⏸ Pause
-            </button>
-            <button
-              className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
               disabled={busy}
               aria-label="Stop the dispatcher"
               onClick={() => void stopWithConfirm()}
             >
               ■ Stop
-            </button>
+            </Button>
           </>
         )}
         {state === "paused" && (
           <>
-            <button
-              className="rounded bg-accent px-2 py-1 text-fg-onAccent hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+            <Button
+              variant="primary"
+              size="sm"
               disabled={busy}
               aria-label="Resume the dispatcher"
               onClick={() => void guard(dispatcher.resume)}
             >
               ▶ Resume
-            </button>
-            <button
-              className="rounded border border-border-default px-2 py-1 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
               disabled={busy}
               aria-label="Stop the dispatcher"
               onClick={() => void stopWithConfirm()}
             >
               ■ Stop
-            </button>
+            </Button>
           </>
         )}
-        <button
-          className="rounded border border-border-default px-2 py-1 hover:bg-surface-2"
+        <Button
+          variant="ghost"
+          size="sm"
           aria-label="Dispatcher settings"
           onClick={onOpenSettings}
         >
           ⚙ Settings
-        </button>
+        </Button>
       </div>
       {dialog}
     </div>

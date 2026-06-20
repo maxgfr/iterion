@@ -2,6 +2,7 @@ import { ReloadIcon } from "@radix-ui/react-icons";
 
 import { useBackendDetectStore } from "@/store/backendDetect";
 import { BackendBadge } from "@/components/icons/BackendBadge";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 import type { BackendStatus } from "@/api/backends";
 import { desktop, isDesktop } from "@/lib/desktopBridge";
 
@@ -46,9 +47,9 @@ export default function BackendsTab() {
       </div>
 
       {error && (
-        <div className="rounded border border-error/50 bg-error/5 text-error text-xs p-2">
-          Backend detect failed: {error}
-        </div>
+        <InlineBanner tone="danger" layout="inline" title="Backend detect failed">
+          {error}
+        </InlineBanner>
       )}
 
       {report && (
@@ -57,14 +58,18 @@ export default function BackendsTab() {
             <div className="text-xs text-fg-subtle mb-1">Resolved default</div>
             {hasAny ? (
               <div className="flex items-center gap-2">
-                <span className="inline-block w-2 h-2 rounded-full bg-success" />
+                <span
+                  role="img"
+                  aria-label="available"
+                  className="inline-block w-2 h-2 rounded-full bg-success"
+                />
                 <BackendBadge backend="" resolved={resolved!} size={12} showLabel />
               </div>
             ) : (
-              <div className="text-error">
+              <InlineBanner tone="warning" layout="inline">
                 No credential detected. The Run button will fail until one of
                 the options below is configured.
-              </div>
+              </InlineBanner>
             )}
             <div className="text-[10px] text-fg-subtle mt-2">
               Preference order: {report.preference_order.join(" → ")}
@@ -98,6 +103,8 @@ function BackendRow({ status }: { status: BackendStatus }) {
   return (
     <li className="rounded border border-border-default bg-surface-1 p-2 flex items-start gap-2">
       <span
+        role="img"
+        aria-label={status.available ? "available" : "unavailable"}
         className={`mt-1 inline-block w-2 h-2 rounded-full shrink-0 ${
           status.available ? "bg-success" : "bg-fg-subtle/40"
         }`}
