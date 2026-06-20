@@ -1,28 +1,18 @@
 import { create } from "zustand";
 
+import { readJSONFlag, writeJSONFlag } from "@/lib/localStorageFlag";
+
 const STORAGE_KEY = "iterion.recents";
 const MAX_RECENTS = 10;
 
 function readRecents(): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((s): s is string => typeof s === "string").slice(0, MAX_RECENTS);
-  } catch {
-    return [];
-  }
+  const parsed = readJSONFlag<unknown>(STORAGE_KEY, []);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((s): s is string => typeof s === "string").slice(0, MAX_RECENTS);
 }
 
 function writeRecents(list: string[]) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  } catch {
-    // localStorage may be unavailable (private mode, quota); silently ignore.
-  }
+  writeJSONFlag(STORAGE_KEY, list);
 }
 
 interface RecentsState {

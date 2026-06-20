@@ -1,4 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { readJSONFlag, writeJSONFlag, removeFlag } from "@/lib/localStorageFlag";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 
@@ -42,13 +44,9 @@ function filterStorageKey(runId: string): string {
 }
 
 function loadPersistedFilters(runId: string): PersistedFilters | null {
-  try {
-    const raw = window.localStorage.getItem(filterStorageKey(runId));
-    if (!raw) return null;
-    return normalizePersistedFilters(JSON.parse(raw));
-  } catch {
-    return null;
-  }
+  return normalizePersistedFilters(
+    readJSONFlag<unknown>(filterStorageKey(runId), null),
+  );
 }
 
 function normalizePersistedFilters(value: unknown): PersistedFilters | null {
@@ -64,17 +62,13 @@ function normalizePersistedFilters(value: unknown): PersistedFilters | null {
 }
 
 function savePersistedFilters(runId: string, value: PersistedFilters) {
-  try {
-    // Treat all-default as "delete entry" to keep storage clean. The
-    // common case (no filter applied) writes nothing.
-    if ((!value.search || value.search === "") && (!value.types || value.types.length === 0)) {
-      window.localStorage.removeItem(filterStorageKey(runId));
-      return;
-    }
-    window.localStorage.setItem(filterStorageKey(runId), JSON.stringify(value));
-  } catch {
-    // quota / privacy mode → silently degrade to non-persistent
+  // Treat all-default as "delete entry" to keep storage clean. The common
+  // case (no filter applied) writes nothing.
+  if ((!value.search || value.search === "") && (!value.types || value.types.length === 0)) {
+    removeFlag(filterStorageKey(runId));
+    return;
   }
+  writeJSONFlag(filterStorageKey(runId), value);
 }
 
 // Slack the bottom-detection threshold so dynamic-height row reflows

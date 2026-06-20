@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { readJSONFlag, writeJSONFlag } from "@/lib/localStorageFlag";
 import type { LibraryItem, LibraryCategory } from "@/lib/library/types";
 import { PRESET_ITEMS } from "@/lib/library/presets";
 
@@ -32,25 +33,13 @@ function isLibraryItem(value: unknown): value is LibraryItem {
 }
 
 function loadCustomItems(): LibraryItem[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isLibraryItem);
-  } catch {
-    return [];
-  }
+  const parsed = readJSONFlag<unknown>(STORAGE_KEY, []);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(isLibraryItem);
 }
 
 function saveCustomItems(items: LibraryItem[]) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-  } catch {
-    // Storage may be unavailable or full; keep the in-memory edit.
-  }
+  writeJSONFlag(STORAGE_KEY, items);
 }
 
 interface LibraryState {

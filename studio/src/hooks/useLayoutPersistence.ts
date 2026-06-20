@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Layout } from "react-resizable-panels";
 
+import { readJSONFlag, writeJSONFlag } from "@/lib/localStorageFlag";
+
 // useLayoutPersistence persists a Group's layout (a map of panel id →
 // flexGrow) in localStorage so the user's panel sizes survive reloads.
 // Returns the layout to feed into Group.defaultLayout and a stable
@@ -23,11 +25,7 @@ export function useLayoutPersistence(
       if (writeTimerRef.current) clearTimeout(writeTimerRef.current);
       writeTimerRef.current = setTimeout(() => {
         writeTimerRef.current = null;
-        try {
-          window.localStorage.setItem(key, JSON.stringify(next));
-        } catch {
-          // ignore — storage may be unavailable
-        }
+        writeJSONFlag(key, next);
       }, 200);
     },
     [key],
@@ -48,15 +46,8 @@ export function useLayoutPersistence(
 }
 
 function readLayout(key: string): Layout | null {
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (!isLayout(parsed)) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
+  const parsed = readJSONFlag<unknown>(key, null);
+  return isLayout(parsed) ? parsed : null;
 }
 
 function isLayout(v: unknown): v is Layout {

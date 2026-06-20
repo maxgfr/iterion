@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import { readEnumFlag, writeStringFlag } from "@/lib/localStorageFlag";
+
 export type ThemeMode = "system" | "light" | "dark";
 export type ResolvedTheme = "light" | "dark";
 
@@ -7,13 +9,7 @@ const STORAGE_KEY = "iterion.theme";
 const VALID_MODES: ThemeMode[] = ["system", "light", "dark"];
 
 function readStoredMode(): ThemeMode {
-  if (typeof window === "undefined") return "system";
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    return VALID_MODES.includes(raw as ThemeMode) ? (raw as ThemeMode) : "system";
-  } catch {
-    return "system";
-  }
+  return readEnumFlag(STORAGE_KEY, VALID_MODES, "system");
 }
 
 function systemPrefersDark(): boolean {
@@ -46,13 +42,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   mode: "system",
   resolved: "dark",
   setMode: (mode) => {
-    if (typeof window !== "undefined") {
-      try {
-        window.localStorage.setItem(STORAGE_KEY, mode);
-      } catch {
-        // Storage may be unavailable; still apply the in-memory theme.
-      }
-    }
+    writeStringFlag(STORAGE_KEY, mode);
     const resolved = resolveMode(mode);
     applyTheme(resolved);
     set({ mode, resolved });

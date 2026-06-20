@@ -1,5 +1,7 @@
 import { useState, useEffect, type ReactNode } from "react";
 
+import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
+
 import { Button } from "./Button";
 import { EmptyState } from "./EmptyState";
 
@@ -19,14 +21,9 @@ export function DesktopOnlyNotice({ feature, hint, children, lsKey }: Props) {
   // Assume desktop on first paint so the desktop branch hydrates
   // cleanly; the effect below corrects to the real viewport.
   const [isNarrow, setIsNarrow] = useState(false);
-  const [override, setOverride] = useState<boolean>(() => {
-    if (!lsKey || typeof window === "undefined") return false;
-    try {
-      return window.localStorage.getItem(lsKey) === "1";
-    } catch {
-      return false;
-    }
-  });
+  const [override, setOverride] = useState<boolean>(() =>
+    lsKey ? readBooleanFlag(lsKey) : false,
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -43,13 +40,7 @@ export function DesktopOnlyNotice({ feature, hint, children, lsKey }: Props) {
 
   const onContinue = () => {
     setOverride(true);
-    if (lsKey && typeof window !== "undefined") {
-      try {
-        window.localStorage.setItem(lsKey, "1");
-      } catch {
-        // Storage unavailable; the session-level state still suffices.
-      }
-    }
+    if (lsKey) writeBooleanFlag(lsKey, true);
   };
 
   return (

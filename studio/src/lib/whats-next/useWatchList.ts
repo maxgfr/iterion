@@ -1,4 +1,5 @@
 import { errorMessage } from "@/lib/errorHints";
+import { readJSONFlag, writeJSONFlag, removeFlag } from "@/lib/localStorageFlag";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getIssue, type NativeIssue } from "@/api/native";
@@ -138,8 +139,8 @@ export function useWatchList(runId: string | null): UseWatchListResult {
   // buffer with the previous run's state for one tick.
   const persistPending = useCallback((updates: WatchUpdate[]) => {
     if (!runId) return;
-    if (updates.length === 0) removeKey(STORAGE_PREFIX_PENDING + runId);
-    else saveJSON(STORAGE_PREFIX_PENDING + runId, updates);
+    if (updates.length === 0) removeFlag(STORAGE_PREFIX_PENDING + runId);
+    else writeJSONFlag(STORAGE_PREFIX_PENDING + runId, updates);
   }, [runId]);
 
   const pollersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(
@@ -245,32 +246,12 @@ export function useWatchList(runId: string | null): UseWatchListResult {
   return { entries, pendingUpdates, acknowledgeUpdates };
 }
 
+// Thin validation wrapper over the shared readJSONFlag helper (which owns
+// the try/catch + missing-key handling). undefined sentinel distinguishes
+// "absent" from a stored JSON null so the validator isn't run on absence.
 function loadJSON<T>(key: string, validate: (v: unknown) => T | null, fallback: T): T {
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return fallback;
-    const parsed: unknown = JSON.parse(raw);
-    const out = validate(parsed);
-    return out ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveJSON(key: string, value: unknown): void {
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // quota / denied storage — drop silently
-  }
-}
-
-function removeKey(key: string): void {
-  try {
-    window.localStorage.removeItem(key);
-  } catch {
-    // ignore
-  }
+  const parsed = readJSONFlag<unknown>(key, undefined);
+  return parsed === undefined ? fallback : (validate(parsed) ?? fallback);
 }
 
 function loadObservedMap(runId: string): Map<string, string> {
@@ -284,12 +265,12 @@ function loadObservedMap(runId: string): Map<string, string> {
 
 function persistObservedMap(runId: string, m: Map<string, string>): void {
   if (m.size === 0) {
-    removeKey(STORAGE_PREFIX_OBSERVED + runId);
+    removeFlag(STORAGE_PREFIX_OBSERVED + runId);
     return;
   }
   const obj: Record<string, string> = {};
   for (const [k, v] of m) obj[k] = v;
-  saveJSON(STORAGE_PREFIX_OBSERVED + runId, obj);
+  writeJSONFlag(STORAGE_PREFIX_OBSERVED + runId, obj);
 }
 
 function validateUpdates(v: unknown): WatchUpdate[] | null {

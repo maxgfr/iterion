@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import { readJSONFlag, writeJSONFlag } from "@/lib/localStorageFlag";
+
 // Downloads history for the Artifacts panel. Persisted to localStorage
 // so the list survives a SPA reload (matching browsers' built-in
 // download manager). Pure metadata: the file bytes are not stored —
@@ -27,25 +29,13 @@ export interface DownloadEntry {
 }
 
 function readEntries(): DownloadEntry[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isEntry).slice(0, MAX_ENTRIES);
-  } catch {
-    return [];
-  }
+  const parsed = readJSONFlag<unknown>(STORAGE_KEY, []);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(isEntry).slice(0, MAX_ENTRIES);
 }
 
 function writeEntries(list: DownloadEntry[]) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  } catch {
-    // localStorage may be unavailable (private mode, quota); silently ignore.
-  }
+  writeJSONFlag(STORAGE_KEY, list);
 }
 
 function isEntry(v: unknown): v is DownloadEntry {

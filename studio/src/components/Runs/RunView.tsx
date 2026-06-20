@@ -76,20 +76,11 @@ const BOTTOM_TAB_LABELS: Record<BottomTab, string> = {
 const BROWSER_DOCK_KEY = "run-console-v2.browser-dock";
 
 function readBrowserDock(): BrowserDock {
-  try {
-    const raw = window.localStorage.getItem(BROWSER_DOCK_KEY);
-    return raw === "right" ? "right" : "bottom";
-  } catch {
-    return "bottom";
-  }
+  return readEnumFlag<BrowserDock>(BROWSER_DOCK_KEY, ["right", "bottom"], "bottom");
 }
 
 function writeBrowserDock(dock: BrowserDock): void {
-  try {
-    window.localStorage.setItem(BROWSER_DOCK_KEY, dock);
-  } catch {
-    // storage may be unavailable
-  }
+  writeStringFlag(BROWSER_DOCK_KEY, dock);
 }
 
 interface RunViewProps {
