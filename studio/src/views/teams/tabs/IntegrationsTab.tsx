@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearch } from "wouter";
 
 import { type BotEntryWithSchema, listBots } from "@/api/bots";
@@ -20,6 +20,7 @@ import {
 } from "@/api/forgeConnections";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useConfirm } from "@/hooks/useConfirm";
+import { useServerInfoStore } from "@/store/serverInfo";
 
 // All three forges have wired admin clients (PAT + OAuth App). GitHub App
 // (installation-token) is a separate connect mode handled server-side.
@@ -458,15 +459,38 @@ function ConnectForm({
   onConnected: () => void;
   onError: (m: string) => void;
 }) {
+  // Providers with a server-side OAuth app. OAuth is the first-class default
+  // for these; everything else (self-hosted with no registrable app) gets the
+  // PAT fallback.
+  const oauthProviders = useServerInfoStore((s) => s.info?.forge_oauth_providers) ?? [];
   const [provider, setProvider] = useState<ForgeProvider>("gitlab");
   const [baseURL, setBaseURL] = useState("");
-  const [mode, setMode] = useState<"oauth" | "pat" | "app">("pat");
+  const [mode, setMode] = useState<"oauth" | "pat" | "app">("oauth");
   const [pat, setPat] = useState("");
   const [busy, setBusy] = useState(false);
+  // Once the user picks a mode explicitly, stop auto-steering it.
+  const modeTouched = useRef(false);
+
+  const oauthAvailable = oauthProviders.includes(provider);
+
+  // Steer to OAuth when it's configured for the selected provider, else PAT —
+  // re-runs when server info loads (oauthAvailable flips) unless overridden.
+  useEffect(() => {
+    if (modeTouched.current) return;
+    setMode(oauthAvailable ? "oauth" : "pat");
+  }, [oauthAvailable]);
+
+  const pickMode = (m: "oauth" | "pat" | "app") => {
+    modeTouched.current = true;
+    setMode(m);
+  };
 
   const pickProvider = (p: ForgeProvider) => {
     setProvider(p);
-    if (p !== "github" && mode === "app") setMode("pat");
+    // Re-steer to the new provider's best default (also clears a stale,
+    // github-only "app" mode when switching away).
+    modeTouched.current = false;
+    setMode(oauthProviders.includes(p) ? "oauth" : "pat");
   };
 
   const connect = async () => {
@@ -538,25 +562,33 @@ function ConnectForm({
       />
 
       <div className="flex gap-3 text-sm">
+        <label
+          className={`flex items-center gap-1 ${oauthAvailable ? "" : "opacity-50"}`}
+          title={
+            oauthAvailable
+              ? ""
+              : `OAuth isn't configured for ${provider} on this server — paste a token instead`
+          }
+        >
+          <input
+            type="radio"
+            checked={mode === "oauth"}
+            onChange={() => pickMode("oauth")}
+            disabled={!oauthAvailable}
+          />
+          Use OAuth{oauthAvailable ? "" : " (not configured)"}
+        </label>
         <label className="flex items-center gap-1">
           <input
             type="radio"
             checked={mode === "pat"}
-            onChange={() => setMode("pat")}
+            onChange={() => pickMode("pat")}
           />
           Paste a token
         </label>
-        <label className="flex items-center gap-1">
-          <input
-            type="radio"
-            checked={mode === "oauth"}
-            onChange={() => setMode("oauth")}
-          />
-          Use OAuth
-        </label>
         {provider === "github" && (
           <label className="flex items-center gap-1">
-            <input type="radio" checked={mode === "app"} onChange={() => setMode("app")} />
+            <input type="radio" checked={mode === "app"} onChange={() => pickMode("app")} />
             Install GitHub App
           </label>
         )}

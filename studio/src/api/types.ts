@@ -142,6 +142,10 @@ export interface ServerInfo {
   // marketplace_enabled is true when the hosted bot registry is wired.
   // The SPA exposes the Marketplace view + nav entry conditionally.
   marketplace_enabled?: boolean;
+  // forge_oauth_providers lists the forge providers with an OAuth app
+  // configured server-side. The Integrations connect form defaults to OAuth
+  // for these (first-class) and to the PAT fallback otherwise.
+  forge_oauth_providers?: string[];
 }
 
 // CostCapStatus mirrors runtime.CapStatus (GET /api/v1/limits/cost).

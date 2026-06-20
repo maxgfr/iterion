@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"path/filepath"
+	"sort"
 
 	"github.com/SocialGouv/iterion/pkg/internal/appinfo"
 )
@@ -56,6 +57,11 @@ type serverInfoResponse struct {
 	// wired (Config.Marketplace). The SPA conditionally exposes the
 	// Marketplace view + nav entry.
 	MarketplaceEnabled bool `json:"marketplace_enabled"`
+	// ForgeOAuthProviders lists the forge providers that have an OAuth app
+	// configured server-side (env ITERION_FORGE_<P>_OAUTH_CLIENT_ID). The
+	// Integrations connect form defaults to OAuth ("first-class") for these
+	// and to the PAT fallback otherwise, instead of dead-ending on a 400.
+	ForgeOAuthProviders []string `json:"forge_oauth_providers,omitempty"`
 }
 
 type serverLimitsBlock struct {
@@ -93,6 +99,7 @@ func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
 		DispatcherEnabled:    s.cfg.Dispatcher != nil,
 		EmailEnabled:         s.authSvc != nil && s.authSvc.EmailEnabled(),
 		MarketplaceEnabled:   s.marketplace != nil,
+		ForgeOAuthProviders:  s.forgeOAuthProviders(),
 	}
 	// Surface whether the daily spend cap is active so the SPA knows to
 	// poll for live status. DailyCap() is nil when disabled.
@@ -109,6 +116,21 @@ func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
 		resp.CurrentProjectID = s.CurrentProjectID()
 	}
 	s.writeJSONFor(w, r, resp)
+}
+
+// forgeOAuthProviders returns the sorted provider ids that have an OAuth app
+// configured (non-empty ClientID), so the SPA can default the connect form to
+// OAuth where it's first-class and to the PAT fallback elsewhere. Empty (and
+// thus omitted from the JSON) when no forge OAuth app is wired.
+func (s *Server) forgeOAuthProviders() []string {
+	out := make([]string, 0, len(s.forgeOAuth))
+	for p, c := range s.forgeOAuth {
+		if c.ClientID != "" {
+			out = append(out, string(p))
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // deriveProjectName picks a human-friendly label from the working
