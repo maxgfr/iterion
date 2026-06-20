@@ -14,37 +14,34 @@
 export interface BotIdentity {
   /** Single emoji standing in for the bot's avatar. */
   emoji: string;
-  /** Tailwind text-colour class for the persona name + emoji. */
+  /** Persona token text-colour class (`text-persona-*`). A categorical
+   *  identity hue tokenised in app.css (dark = Tailwind-400, light = -700)
+   *  so it keeps AA contrast on light surfaces. */
   color: string;
 }
 
-// TODO(ui-tokens): these are raw Tailwind -400 hues — a categorical identity
-// palette, like the tokenised iteration palette (--color-iteration-*). They
-// are allowlisted in __tests__/a11y/broken-classes.test.ts. Tokenise them as
-// --color-persona-* with light/dark values + contrast coverage so persona
-// labels stay legible on light surfaces, then drop the allowlist entry.
 export const BOT_IDENTITY: Record<string, BotIdentity> = {
-  "whats-next": { emoji: "🧭", color: "text-sky-400" },
-  "feature-dev": { emoji: "🛠️", color: "text-emerald-400" },
-  "branch-improve-loop": { emoji: "🌿", color: "text-violet-400" },
-  "whole-improve-loop": { emoji: "🌍", color: "text-teal-400" },
-  "docs-refresh": { emoji: "📚", color: "text-amber-400" },
-  "doc-align": { emoji: "📚", color: "text-amber-400" }, // back-compat alias (renamed 2026-06); keeps Doki's identity on pre-rename runs
-  "review-pr": { emoji: "🔎", color: "text-cyan-400" },
-  "sec-audit-source": { emoji: "🛡️", color: "text-rose-400" },
-  "sec-audit-deps": { emoji: "📦", color: "text-orange-400" },
-  "secured-renovacy": { emoji: "⬆️", color: "text-lime-400" },
+  "whats-next": { emoji: "🧭", color: "text-persona-sky" },
+  "feature-dev": { emoji: "🛠️", color: "text-persona-emerald" },
+  "branch-improve-loop": { emoji: "🌿", color: "text-persona-violet" },
+  "whole-improve-loop": { emoji: "🌍", color: "text-persona-teal" },
+  "docs-refresh": { emoji: "📚", color: "text-persona-amber" },
+  "doc-align": { emoji: "📚", color: "text-persona-amber" }, // back-compat alias (renamed 2026-06); keeps Doki's identity on pre-rename runs
+  "review-pr": { emoji: "🔎", color: "text-persona-cyan" },
+  "sec-audit-source": { emoji: "🛡️", color: "text-persona-rose" },
+  "sec-audit-deps": { emoji: "📦", color: "text-persona-orange" },
+  "secured-renovacy": { emoji: "⬆️", color: "text-persona-lime" },
 };
 
 const FALLBACK_COLORS = [
-  "text-sky-400",
-  "text-emerald-400",
-  "text-violet-400",
-  "text-amber-400",
-  "text-rose-400",
-  "text-cyan-400",
-  "text-orange-400",
-  "text-lime-400",
+  "text-persona-sky",
+  "text-persona-emerald",
+  "text-persona-violet",
+  "text-persona-amber",
+  "text-persona-rose",
+  "text-persona-cyan",
+  "text-persona-orange",
+  "text-persona-lime",
 ];
 
 /** Canonicalise a technical bot id: lower-case, collapse runs of `_`/`-`
@@ -70,6 +67,6 @@ export function botIdentity(name: string | undefined | null): BotIdentity {
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
   return {
     emoji: "🤖",
-    color: FALLBACK_COLORS[h % FALLBACK_COLORS.length] ?? "text-sky-400",
+    color: FALLBACK_COLORS[h % FALLBACK_COLORS.length] ?? "text-persona-sky",
   };
 }
