@@ -426,10 +426,12 @@ function IterationCrumb({
   const idx = executions.findIndex((e) => e.execution_id === exec.execution_id);
   const position = idx >= 0 ? idx + 1 : 1;
   const total = executions.length;
+  // Declared before the single-execution early return so the hook is
+  // unconditional (rules-of-hooks); unused when total <= 1.
+  const [open, setOpen] = useState(false);
   if (total <= 1) {
     return <span>iter: {position}</span>;
   }
-  const [open, setOpen] = useState(false);
   return (
     <Popover
       open={open}

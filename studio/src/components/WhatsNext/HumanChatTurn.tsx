@@ -62,6 +62,11 @@ export default function HumanChatTurn({
   // the message status advances to "answered" (or the parent reports
   // busy, whichever comes first).
   const [localSubmitting, setLocalSubmitting] = useState(false);
+  // formDraft holds the latest WizardForm answer so a hybrid turn (rich
+  // form + Approve/Reject actions) hands the operator's per-item selection
+  // to onSubmit on the action click. Declared with the other hooks so it
+  // precedes the answered-turn early return below (rules-of-hooks).
+  const [formDraft, setFormDraft] = useState<FormAnswer | null>(null);
   const chatEnterSubmits = useUIStore((s) => s.chatEnterSubmits);
 
   // Clear local submitting once the message moves to "answered" — the
@@ -105,8 +110,6 @@ export default function HumanChatTurn({
   // operator's per-item selection is dropped on the Approve click.
   // We track the latest WizardForm answer in formDraft and hand it
   // off to onSubmit from the action handlers below.
-  const [formDraft, setFormDraft] =
-    useState<FormAnswer | null>(null);
   const isFreeText = !hasForm && !hasActions;
   const formAndActions = hasForm && hasActions;
 

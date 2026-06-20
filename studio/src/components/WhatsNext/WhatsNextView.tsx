@@ -158,6 +158,27 @@ export default function WhatsNextView() {
     [session],
   );
 
+  // pendingHumanQuestion + the launcher-stash auto-submit effect are
+  // declared before the early return below so the effect runs on every
+  // render (rules-of-hooks); it no-ops until a bot is present.
+  const pendingHumanQuestion = session.messages.find(
+    (m): m is Extract<typeof m, { kind: "human-question" }> =>
+      m.kind === "human-question" && m.status === "pending",
+  );
+  // Auto-submit the stashed launcher form answer into the first pending
+  // human-question whose node id matches launcherFormTarget. The operator
+  // picked their priority before the bot ran; once explore finishes and
+  // ask_priorities surfaces, we resolve it silently rather than re-asking.
+  useEffect(() => {
+    if (!bot || !bot.launcherFormTarget) return;
+    if (!pendingHumanQuestion) return;
+    if (pendingHumanQuestion.nodeId !== bot.launcherFormTarget) return;
+    const stash = pendingLauncherAnswer.current;
+    if (!stash) return;
+    pendingLauncherAnswer.current = null;
+    void session.submitHumanAnswer(pendingHumanQuestion.id, stash);
+  }, [pendingHumanQuestion, bot?.launcherFormTarget, session]);
+
   if (!bot) {
     return (
       <div className="h-full grid place-items-center text-fg-muted">
@@ -171,29 +192,11 @@ export default function WhatsNextView() {
   // When the engine is waiting on a human turn, render that turn at
   // the bottom (in a fixed-footer wrapper) instead of the generic
   // AgentChatbox. Avoids the inline + footer double-render by passing
-  // excludeMessageId to ChatTranscript.
-  const pendingHumanQuestion = session.messages.find(
-    (m): m is Extract<typeof m, { kind: "human-question" }> =>
-      m.kind === "human-question" && m.status === "pending",
-  );
+  // excludeMessageId to ChatTranscript. (pendingHumanQuestion is declared
+  // above with the launcher-stash effect to keep that hook unconditional.)
   const pendingForm = pendingHumanQuestion
     ? resolveDynamicForm(pendingHumanQuestion, session.messages, bot.nodeMap)
     : undefined;
-
-  // Auto-submit the stashed launcher form answer into the first
-  // pending human-question whose node id matches launcherFormTarget.
-  // The operator picked their priority before the bot ran; once
-  // explore finishes and ask_priorities surfaces, we resolve it
-  // silently rather than asking again.
-  useEffect(() => {
-    if (!pendingHumanQuestion) return;
-    if (!bot.launcherFormTarget) return;
-    if (pendingHumanQuestion.nodeId !== bot.launcherFormTarget) return;
-    const stash = pendingLauncherAnswer.current;
-    if (!stash) return;
-    pendingLauncherAnswer.current = null;
-    void session.submitHumanAnswer(pendingHumanQuestion.id, stash);
-  }, [pendingHumanQuestion, bot.launcherFormTarget, session]);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">

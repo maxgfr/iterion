@@ -48,7 +48,9 @@ export function useDocumentTitle() {
   }, [location, bots, fetchBots]);
 
   useEffect(() => {
-    let context = "";
+    // Every branch below (including the final else) assigns context, so no
+    // initializer is needed — TS definite-assignment covers the use.
+    let context: string;
     if (location.startsWith("/runs/new")) {
       context = "Launch";
     } else if (location.startsWith("/runs/") && runHeader) {
