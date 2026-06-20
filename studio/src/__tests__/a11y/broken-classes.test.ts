@@ -69,3 +69,44 @@ describe("no phantom/legacy Tailwind classes", () => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Second guard: raw chromatic Tailwind palette utilities (text-amber-500,
+// bg-red-300, …). These DO render — Tailwind keeps its default palette — but
+// they bypass the semantic token system: a `-300` text on a light surface is
+// near-invisible (no light-mode inversion), and the colour drifts away from
+// the danger/warning/success/info severity language. Use the tokens:
+//   text-amber-* / bg-amber-*  -> text-warning(-fg) / bg-warning(-soft|/N)
+//   text-red-*   / bg-red-*    -> text-danger(-fg)  / bg-danger(-soft)
+//   text-emerald-/green-*      -> text-success(-fg) / bg-success(-soft)
+//   text-sky-/cyan-*           -> text-info(-fg)    / bg-info(-soft|/N)
+// Non-chromatic neutrals (bg-black/N modal scrims, the bg-black video
+// viewport, bg-white/N) carry no numeric palette step, so they are NOT
+// matched and stay allowed.
+const PALETTE_RE =
+  /\b(text|bg|border|ring|fill|stroke|from|to|via|outline|decoration|divide|caret)-(amber|red|orange|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-\d/;
+
+// Files that legitimately use a categorical (non-semantic) hue palette,
+// analogous to the tokenised iteration palette: each entry maps an item to a
+// fixed identity hue, not a status. personas.ts is the bot-identity palette;
+// tokenising it (9 hues × light/dark + contrast coverage) is a tracked
+// follow-up — until then it is allowlisted here, not exempted wholesale.
+const PALETTE_ALLOW = ["/lib/personas.ts"];
+
+describe("no raw chromatic Tailwind palette (use semantic tokens)", () => {
+  it("bans (text|bg|border|…)-<hue>-<step>", () => {
+    const hits: string[] = [];
+    for (const [path, content] of files) {
+      if (PALETTE_ALLOW.some((a) => path.includes(a))) continue;
+      content.split("\n").forEach((line, i) => {
+        if (PALETTE_RE.test(line)) {
+          hits.push(`${path}:${i + 1}  ${line.trim().slice(0, 100)}`);
+        }
+      });
+    }
+    expect(
+      hits,
+      `raw palette colour found — use a semantic token:\n${hits.join("\n")}`,
+    ).toEqual([]);
+  });
+});

@@ -1349,7 +1349,7 @@ function SelectionToolbar({
             ? "Move all selected into the dispatch lane"
             : "All selected cards must be in Inbox or Backlog"
         }
-        className="px-2 py-0.5 rounded bg-success text-white hover:bg-success/90 disabled:opacity-40 disabled:cursor-not-allowed"
+        className="px-2 py-0.5 rounded bg-success text-fg-onAccent hover:bg-success/90 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         ▶ Let's go
       </button>

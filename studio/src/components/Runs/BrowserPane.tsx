@@ -222,7 +222,7 @@ export default function BrowserPane({
           <button
             type="button"
             onClick={handleDetach}
-            className="text-xs text-amber-500 hover:text-amber-400"
+            className="text-xs text-warning hover:text-warning-fg"
             title="Stop the live Chromium session and return to viewer mode"
           >
             stop live
@@ -232,7 +232,7 @@ export default function BrowserPane({
             type="button"
             onClick={handleAttach}
             disabled={attachBusy}
-            className="text-xs text-emerald-500 hover:text-emerald-400 disabled:opacity-50"
+            className="text-xs text-success hover:text-success-fg disabled:opacity-50"
             title="Spawn a host Chromium and stream it here (requires chromium installed on PATH)"
           >
             {attachBusy ? "attaching…" : "attach live"}
@@ -301,7 +301,7 @@ export default function BrowserPane({
         )}
       </div>
       {showLive ? null : isScrubbing ? (
-        <div className="border-t border-border-default px-3 py-1 text-[11px] text-amber-500">
+        <div className="border-t border-border-default px-3 py-1 text-[11px] text-warning">
           scrubbed at seq {scrubSeq}
           {scrubbedShot
             ? ` · screenshot from ${scrubbedShot.nodeId ?? "unknown"} (seq ${scrubbedShot.seq})`

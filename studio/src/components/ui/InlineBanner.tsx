@@ -4,7 +4,7 @@ import { AlertCircle, AlertTriangle, CheckCircle2, Info, X } from "lucide-react"
 // InlineBanner is the single shape for soft-tinted, severity-coloured
 // status banners — the sticky page-top kind (Board / Dispatcher) and
 // the inset inline kind (inside cards / drawers). It replaces a family
-// of near-identical hand-rolled `bg-red-500/10 …` divs that drifted
+// of near-identical hand-rolled `bg-<sev>-500/10 …` divs that drifted
 // apart and bypassed the design-system tokens. Severity colour comes
 // only from the semantic tokens (mirrors Badge's variantClass), so
 // light/dark themes invert for free.

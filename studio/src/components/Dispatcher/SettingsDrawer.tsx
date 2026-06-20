@@ -471,7 +471,7 @@ function StateMappingField({
           />
           <button
             type="button"
-            className="text-xs text-red-300 hover:underline"
+            className="text-xs text-danger-fg hover:underline"
             onClick={() => remove(state)}
           >
             Remove
