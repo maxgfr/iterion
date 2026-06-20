@@ -4,6 +4,7 @@ import type { SchemaDecl, SchemaField, FieldType } from "@/api/types";
 import { defaultSchema } from "@/lib/defaults";
 import { TextField, CommittedTextField, SelectField, TagListField } from "./forms/FormField";
 import ConfirmDialog from "../shared/ConfirmDialog";
+import { Button } from "@/components/ui/Button";
 
 const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "string", label: "string" },
@@ -41,13 +42,14 @@ export default function SchemaEditor({ filterName }: SchemaEditorProps = {}) {
       {!filterName && (
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-bold text-fg-muted">Schemas</h2>
-          <button
-            className="bg-accent hover:bg-accent-hover text-xs px-2 py-1 rounded"
+          <Button
+            variant="primary"
+            size="sm"
             onClick={handleAdd}
             disabled={!document}
           >
             + New
-          </button>
+          </Button>
         </div>
       )}
       {visible.length === 0 && (
@@ -111,9 +113,14 @@ function SchemaCard({
             return null;
           }}
         />
-        <button className="text-danger hover:text-danger-fg text-xs ml-2" onClick={() => setConfirmDelete(true)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-danger hover:text-danger-fg ml-2"
+          onClick={() => setConfirmDelete(true)}
+        >
           Delete
-        </button>
+        </Button>
       </div>
       <div className="space-y-2">
         {schema.fields.map((field, i) => (
@@ -135,7 +142,12 @@ function SchemaCard({
                   options={FIELD_TYPES}
                 />
               </div>
-              <button className="text-danger hover:text-danger-fg text-xs pb-2" onClick={() => removeField(i)}>
+              <button
+                type="button"
+                aria-label={`Remove field ${field.name || i + 1}`}
+                className="text-danger hover:text-danger-fg text-xs pb-2"
+                onClick={() => removeField(i)}
+              >
                 x
               </button>
             </div>
@@ -152,7 +164,11 @@ function SchemaCard({
           </div>
         ))}
       </div>
-      <button className="text-accent hover:text-accent text-xs mt-1" onClick={addField}>
+      <button
+        type="button"
+        className="text-accent hover:underline text-xs mt-1"
+        onClick={addField}
+      >
         + Add Field
       </button>
       <ConfirmDialog

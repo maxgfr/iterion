@@ -51,7 +51,7 @@ export default function AuxiliaryNode({ data, selected }: NodeProps) {
       ))}
       <div className="flex items-center justify-center gap-1">
         <span className="text-xs">{icon}</span>
-        <span className="font-medium text-xs text-fg-default truncate max-w-[90px]">{label}</span>
+        <span className="font-medium text-xs text-fg-default truncate max-w-[90px]" title={label}>{label}</span>
         {badge && (
           <span
             className="text-[8px] px-1 rounded-full text-fg-default/80"

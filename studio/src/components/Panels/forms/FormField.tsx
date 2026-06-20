@@ -243,7 +243,7 @@ export function CommittedTextField({ label, value, onChange, onCommit, validate,
           {isDirty && (
             <button
               type="button"
-              className="bg-accent hover:bg-accent text-fg-default text-xs px-1.5 rounded shrink-0"
+              className="bg-accent hover:bg-accent-hover text-fg-onAccent text-xs px-1.5 rounded shrink-0"
               onMouseDown={(e) => {
                 e.preventDefault(); // prevent blur before commit
                 commit();
@@ -352,7 +352,7 @@ export function SelectFieldWithCreate({ label, value, onChange, options, allowEm
           </select>
           <button
             type="button"
-            className="bg-success hover:bg-success text-xs px-1.5 rounded shrink-0"
+            className="bg-success hover:bg-success/90 text-xs px-1.5 rounded shrink-0"
             onClick={() => {
               const newName = onCreate();
               onChange(newName);
@@ -376,15 +376,17 @@ interface CheckboxFieldProps {
 }
 
 export function CheckboxField({ label, checked, onChange, help }: CheckboxFieldProps) {
+  const id = useId();
   return (
     <div className="mb-2 flex items-center gap-2">
       <input
+        id={id}
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
         className="rounded border-border-strong bg-surface-1"
       />
-      <label className="text-xs text-fg-subtle">
+      <label htmlFor={id} className="text-xs text-fg-subtle">
         {label}
         {help && (
           <span className="text-fg-subtle hover:text-fg-muted cursor-help ml-1" title={help}>?</span>
@@ -430,6 +432,8 @@ export function TagListField({ label, values, onChange, placeholder = "Add..." }
           <span key={v} className="bg-surface-2 text-xs px-2 py-0.5 rounded flex items-center gap-1">
             {v}
             <button
+              type="button"
+              aria-label={`Remove ${v}`}
               className="text-fg-subtle hover:text-fg-default"
               onClick={() => onChange(values.filter((x) => x !== v))}
             >
@@ -448,6 +452,8 @@ export function TagListField({ label, values, onChange, placeholder = "Add..." }
           placeholder={placeholder}
         />
         <button
+          type="button"
+          aria-label="Add"
           className="bg-surface-2 hover:bg-surface-3 text-xs px-2 rounded"
           onClick={addTag}
         >
@@ -535,7 +541,7 @@ export function PromptPickerField({
             </button>
             <button
               type="button"
-              className="bg-success hover:bg-success text-xs px-1.5 rounded shrink-0"
+              className="bg-success hover:bg-success/90 text-xs px-1.5 rounded shrink-0"
               onClick={() => {
                 const newName = onCreate();
                 onChange(newName);

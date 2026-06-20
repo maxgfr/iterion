@@ -3,6 +3,7 @@ import { useDocumentStore } from "@/store/document";
 import { useActiveWorkflow } from "@/hooks/useActiveWorkflow";
 import type { VarField, TypeExpr, VarsBlock, Literal, LiteralKind } from "@/api/types";
 import { TextField, SelectField, NumberField } from "./forms/FormField";
+import { Select } from "@/components/ui/Select";
 
 const TYPE_OPTIONS: { value: TypeExpr; label: string }[] = [
   { value: "string", label: "string" },
@@ -129,7 +130,8 @@ function VarsSection({
         <h3 className="text-xs text-fg-subtle font-semibold">{title}</h3>
         {!filterName && (
           <button
-            className="text-accent hover:text-accent text-xs"
+            type="button"
+            className="text-accent hover:underline text-xs disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={addField}
             disabled={disabled}
           >
@@ -159,7 +161,12 @@ function VarsSection({
                 options={TYPE_OPTIONS}
               />
             </div>
-            <button className="text-danger hover:text-danger-fg text-xs pb-2" onClick={() => removeField(i)}>
+            <button
+              type="button"
+              aria-label={`Remove variable ${field.name || i + 1}`}
+              className="text-danger hover:text-danger-fg text-xs pb-2"
+              onClick={() => removeField(i)}
+            >
               x
             </button>
           </div>
@@ -167,15 +174,14 @@ function VarsSection({
             {field.type === "bool" ? (
               <div className="flex items-center gap-2">
                 <label className="text-xs text-fg-subtle">Default</label>
-                <select
-                  className="bg-surface-1 border border-border-strong rounded px-2 py-1 text-sm text-fg-default focus:border-accent focus:outline-none"
+                <Select
                   value={field.default ? displayDefault(field.default) : ""}
                   onChange={(e) => updateField(i, { default: e.target.value === "" ? undefined : rawToLiteral("bool", e.target.value) })}
                 >
                   <option value="">-- no default --</option>
                   <option value="true">true</option>
                   <option value="false">false</option>
-                </select>
+                </Select>
               </div>
             ) : field.type === "int" || field.type === "float" ? (
               <NumberField
