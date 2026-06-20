@@ -995,6 +995,154 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		return nil, fmt.Errorf("model: node %q: %w", f.id, err)
 	}
 
+	task, err := e.buildTask(ctx, node, f, input, backendName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Emit backend started event.
+	if e.hooks.OnDelegateStarted != nil {
+		e.hooks.OnDelegateStarted(f.id, backendName)
+	}
+
+	// For claw backends emit a tagged log line so the studio's per-node
+	// Logs tab (which greps `[<nodeID>#<iter>/...]`) surfaces the call.
+	// claude_code/codex subprocesses already produce equivalent tagged
+	// lines from their stderr capture path. Iter is hardcoded to 0 —
+	// same limitation as the per-tool tagging above; per-iter filtering
+	// requires plumbing LoopIteration through the hook chain.
+	if backendName == delegate.BackendClaw && e.logger != nil {
+		toolSuffix := ""
+		if n := len(task.AllowedTools); n > 0 {
+			toolSuffix = fmt.Sprintf(", %d tools", n)
+		}
+		e.logger.Info("[%s#%d/claw] 🤖 LLM call: %s%s",
+			f.id, 0, task.Model, toolSuffix)
+	}
+
+	result, err := e.dispatchWithProviderFallback(ctx, f.id, backendName, e.resolveProviderChain(node), backend, &task)
+	if err != nil {
+		if e.hooks.OnDelegateError != nil {
+			bn := result.BackendName
+			if bn == "" {
+				bn = backendName
+			}
+			di := delegateInfoFromResult(bn, result)
+			di.Error = err
+			e.hooks.OnDelegateError(f.id, di)
+		}
+		return nil, fmt.Errorf("model: node %q: backend %q failed: %w", f.id, backendName, err)
+	}
+
+	// Emit backend finished event.
+	if e.hooks.OnDelegateFinished != nil {
+		e.hooks.OnDelegateFinished(f.id, delegateInfoFromResult(result.BackendName, result))
+	}
+
+	// Flag if structured output parsing fell back to text wrapper.
+	if result.ParseFallback {
+		result.Output["_parse_fallback"] = true
+	}
+
+	// Attach metadata.
+	stampDelegateOutputMeta(result.Output, result, backendName)
+
+	// Check for a backend interaction signal BEFORE schema validation.
+	// A `_needs_interaction` pause Result (e.g. an LLM ask_user call on a
+	// node that ALSO declares an output schema) is a control signal, not a
+	// schema-shaped data output — its Output is {_needs_interaction, …},
+	// which never matches the node's schema. Validating it first would fail
+	// and trigger the schema-validation backend retry below, which replays
+	// the unanswered tool_call into a fresh generation (openai 400
+	// "tool_call_ids did not have response messages" / Responses
+	// "No tool output found"). Short-circuit here so ask_user pauses
+	// cleanly on schema+tools nodes (e.g. claw + openai/forfait). See
+	// docs/bot-runs/evolve.md.
+	if f.interaction != ir.InteractionNone {
+		if needsInteraction, ok := result.Output["_needs_interaction"].(bool); ok && needsInteraction {
+			questions, _ := result.Output["_interaction_questions"].(map[string]interface{})
+			if questions == nil {
+				questions = map[string]interface{}{"input": "The backend needs your input to continue."}
+			}
+			delete(result.Output, "_needs_interaction")
+			delete(result.Output, "_interaction_questions")
+			return nil, &ErrNeedsInteraction{
+				NodeID:           f.id,
+				Questions:        questions,
+				SessionID:        result.SessionID,
+				Backend:          backendName,
+				Conversation:     result.PendingConversation,
+				PendingToolUseID: result.PendingToolUseID,
+			}
+		}
+	}
+
+	// Validate output against schema if present. Defence-in-depth: the
+	// IR compiler should reject any node whose `output:` names a schema
+	// absent from e.schemas (DiagUnknownSchema), so the "key missing"
+	// branch here normally cannot happen. Log it loudly if it does —
+	// silently skipping validation in that case would mask either an
+	// IR regression or a programmatic schema-map mutation.
+	if f.outputSchema != "" {
+		if schema, ok := e.schemas[f.outputSchema]; ok {
+			if err := ValidateOutput(result.Output, schema); err != nil {
+				// If parsing fell back to text wrapper, the backend likely
+				// returned non-JSON output (transient SDK issue). Retry once
+				// before giving up.
+				if result.ParseFallback {
+					e.logger.Warn("[%s#%d/%s] structured output validation failed with parse fallback, retrying backend: %v", f.id, task.Iteration, backendName, err)
+					// Fire OnDelegateRetry so observers (Prometheus exporter,
+					// event sink) see the retry attempt — previously the
+					// schema-validation retry was invisible because the
+					// outer retryDelegateLoop only knows about transient
+					// errors, not schema-shape failures.
+					if e.hooks.OnDelegateRetry != nil {
+						di := delegateInfoFromResult(backendName, result)
+						di.Error = err
+						di.Attempt = 1
+						e.hooks.OnDelegateRetry(f.id, di)
+					}
+					// Route the schema-fallback retry through retryDelegateLoop so
+					// it inherits the same transient-error backoff every other
+					// delegate call gets — a direct backend.Execute here skipped
+					// the retry budget and gave up on the first transient SDK hiccup.
+					retryResult, retryErr := e.retryDelegateLoop(ctx, f.id, backendName, func() (delegate.Result, error) {
+						return backend.Execute(ctx, task)
+					})
+					if retryErr == nil && !retryResult.ParseFallback {
+						// Accumulate token/duration/cost from the first
+						// attempt so per-node accounting reflects the full
+						// cost paid (dropping it understated the run's
+						// real usage and broke budget enforcement at the
+						// margins).
+						retryResult.Tokens += result.Tokens
+						retryResult.Duration += result.Duration
+						result = retryResult
+						// Re-attach metadata and re-validate.
+						stampDelegateOutputMeta(result.Output, result, backendName)
+						if retryValErr := ValidateOutput(result.Output, schema); retryValErr != nil {
+							return nil, fmt.Errorf("model: node %q: structured output invalid after retry: %w", f.id, retryValErr)
+						}
+						goto validated
+					}
+				}
+				return nil, fmt.Errorf("model: node %q: structured output invalid: %w", f.id, err)
+			}
+		} else {
+			e.logger.Warn("[%s#%d/%s] node declares output schema %q but no schema with that name is registered — IR compiler should have rejected this; output passes through unvalidated",
+				f.id, task.Iteration, backendName, f.outputSchema)
+		}
+	}
+validated:
+
+	return result.Output, nil
+}
+
+// buildTask assembles the delegate.Task for an agent/judge LLM node from the
+// node's resolved fields, prompts, schema, reasoning effort, capabilities,
+// tool set, and session/resume continuity. Split out of executeBackend to
+// keep that method focused on dispatch + validation.
+func (e *ClawExecutor) buildTask(ctx context.Context, node ir.Node, f backendFields, input map[string]interface{}, backendName string) (delegate.Task, error) {
 	td := TemplateDataFromContext(ctx)
 
 	// Build system prompt.
@@ -1161,7 +1309,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 	if len(effectiveTools) > 0 && backendName == delegate.BackendClaw {
 		toolDefs, toolErr := e.resolveToolsForNode(ctx, node, effectiveTools)
 		if toolErr != nil {
-			return nil, fmt.Errorf("model: node %q: %w", f.id, toolErr)
+			return delegate.Task{}, fmt.Errorf("model: node %q: %w", f.id, toolErr)
 		}
 		task.ToolDefs = toolDefs
 		task.HasTools = true // claw needs the tool loop active for ask_user
@@ -1213,142 +1361,7 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		}
 	}
 
-	// Emit backend started event.
-	if e.hooks.OnDelegateStarted != nil {
-		e.hooks.OnDelegateStarted(f.id, backendName)
-	}
-
-	// For claw backends emit a tagged log line so the studio's per-node
-	// Logs tab (which greps `[<nodeID>#<iter>/...]`) surfaces the call.
-	// claude_code/codex subprocesses already produce equivalent tagged
-	// lines from their stderr capture path. Iter is hardcoded to 0 —
-	// same limitation as the per-tool tagging above; per-iter filtering
-	// requires plumbing LoopIteration through the hook chain.
-	if backendName == delegate.BackendClaw && e.logger != nil {
-		toolSuffix := ""
-		if n := len(task.AllowedTools); n > 0 {
-			toolSuffix = fmt.Sprintf(", %d tools", n)
-		}
-		e.logger.Info("[%s#%d/claw] 🤖 LLM call: %s%s",
-			f.id, 0, task.Model, toolSuffix)
-	}
-
-	result, err := e.dispatchWithProviderFallback(ctx, f.id, backendName, e.resolveProviderChain(node), backend, &task)
-	if err != nil {
-		if e.hooks.OnDelegateError != nil {
-			bn := result.BackendName
-			if bn == "" {
-				bn = backendName
-			}
-			di := delegateInfoFromResult(bn, result)
-			di.Error = err
-			e.hooks.OnDelegateError(f.id, di)
-		}
-		return nil, fmt.Errorf("model: node %q: backend %q failed: %w", f.id, backendName, err)
-	}
-
-	// Emit backend finished event.
-	if e.hooks.OnDelegateFinished != nil {
-		e.hooks.OnDelegateFinished(f.id, delegateInfoFromResult(result.BackendName, result))
-	}
-
-	// Flag if structured output parsing fell back to text wrapper.
-	if result.ParseFallback {
-		result.Output["_parse_fallback"] = true
-	}
-
-	// Attach metadata.
-	stampDelegateOutputMeta(result.Output, result, backendName)
-
-	// Check for a backend interaction signal BEFORE schema validation.
-	// A `_needs_interaction` pause Result (e.g. an LLM ask_user call on a
-	// node that ALSO declares an output schema) is a control signal, not a
-	// schema-shaped data output — its Output is {_needs_interaction, …},
-	// which never matches the node's schema. Validating it first would fail
-	// and trigger the schema-validation backend retry below, which replays
-	// the unanswered tool_call into a fresh generation (openai 400
-	// "tool_call_ids did not have response messages" / Responses
-	// "No tool output found"). Short-circuit here so ask_user pauses
-	// cleanly on schema+tools nodes (e.g. claw + openai/forfait). See
-	// docs/bot-runs/evolve.md.
-	if f.interaction != ir.InteractionNone {
-		if needsInteraction, ok := result.Output["_needs_interaction"].(bool); ok && needsInteraction {
-			questions, _ := result.Output["_interaction_questions"].(map[string]interface{})
-			if questions == nil {
-				questions = map[string]interface{}{"input": "The backend needs your input to continue."}
-			}
-			delete(result.Output, "_needs_interaction")
-			delete(result.Output, "_interaction_questions")
-			return nil, &ErrNeedsInteraction{
-				NodeID:           f.id,
-				Questions:        questions,
-				SessionID:        result.SessionID,
-				Backend:          backendName,
-				Conversation:     result.PendingConversation,
-				PendingToolUseID: result.PendingToolUseID,
-			}
-		}
-	}
-
-	// Validate output against schema if present. Defence-in-depth: the
-	// IR compiler should reject any node whose `output:` names a schema
-	// absent from e.schemas (DiagUnknownSchema), so the "key missing"
-	// branch here normally cannot happen. Log it loudly if it does —
-	// silently skipping validation in that case would mask either an
-	// IR regression or a programmatic schema-map mutation.
-	if f.outputSchema != "" {
-		if schema, ok := e.schemas[f.outputSchema]; ok {
-			if err := ValidateOutput(result.Output, schema); err != nil {
-				// If parsing fell back to text wrapper, the backend likely
-				// returned non-JSON output (transient SDK issue). Retry once
-				// before giving up.
-				if result.ParseFallback {
-					e.logger.Warn("[%s#%d/%s] structured output validation failed with parse fallback, retrying backend: %v", f.id, task.Iteration, backendName, err)
-					// Fire OnDelegateRetry so observers (Prometheus exporter,
-					// event sink) see the retry attempt — previously the
-					// schema-validation retry was invisible because the
-					// outer retryDelegateLoop only knows about transient
-					// errors, not schema-shape failures.
-					if e.hooks.OnDelegateRetry != nil {
-						di := delegateInfoFromResult(backendName, result)
-						di.Error = err
-						di.Attempt = 1
-						e.hooks.OnDelegateRetry(f.id, di)
-					}
-					// Route the schema-fallback retry through retryDelegateLoop so
-					// it inherits the same transient-error backoff every other
-					// delegate call gets — a direct backend.Execute here skipped
-					// the retry budget and gave up on the first transient SDK hiccup.
-					retryResult, retryErr := e.retryDelegateLoop(ctx, f.id, backendName, func() (delegate.Result, error) {
-						return backend.Execute(ctx, task)
-					})
-					if retryErr == nil && !retryResult.ParseFallback {
-						// Accumulate token/duration/cost from the first
-						// attempt so per-node accounting reflects the full
-						// cost paid (dropping it understated the run's
-						// real usage and broke budget enforcement at the
-						// margins).
-						retryResult.Tokens += result.Tokens
-						retryResult.Duration += result.Duration
-						result = retryResult
-						// Re-attach metadata and re-validate.
-						stampDelegateOutputMeta(result.Output, result, backendName)
-						if retryValErr := ValidateOutput(result.Output, schema); retryValErr != nil {
-							return nil, fmt.Errorf("model: node %q: structured output invalid after retry: %w", f.id, retryValErr)
-						}
-						goto validated
-					}
-				}
-				return nil, fmt.Errorf("model: node %q: structured output invalid: %w", f.id, err)
-			}
-		} else {
-			e.logger.Warn("[%s#%d/%s] node declares output schema %q but no schema with that name is registered — IR compiler should have rejected this; output passes through unvalidated",
-				f.id, task.Iteration, backendName, f.outputSchema)
-		}
-	}
-validated:
-
-	return result.Output, nil
+	return task, nil
 }
 
 // executeHumanLLM handles human nodes in llm or llm_or_human interaction mode.
