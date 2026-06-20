@@ -150,43 +150,13 @@ type ClaudeCodeBackend struct {
 }
 
 // Execute runs the claude CLI with the given task using the Claude Agent SDK.
-func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Result, err error) {
-	if task.WorkDir != "" {
-		if err := validateWorkDir(task.WorkDir, task.BaseDir); err != nil {
-			return Result{}, err
-		}
-	}
-	// Fire OnTurnFinished once on the way out, when the runtime wired
-	// the hook and the delegate produced a SessionID. Wrapped in a
-	// defer so every successful return path (Pass 1, recovery, two-
-	// pass, ask_user escalation) flows through the same notification —
-	// avoiding the maintenance trap of remembering to call it before
-	// every `return result, ...`. Skipped on hard errors with no
-	// captured session (rm.SessionID empty).
-	defer func() {
-		if task.Hooks.OnTurnFinished == nil {
-			return
-		}
-		if result.SessionID == "" {
-			return
-		}
-		text := ""
-		if s := result.Output["_assistant_text"]; s != nil {
-			text, _ = s.(string)
-		}
-		task.Hooks.OnTurnFinished(TurnFinishedInfo{
-			SessionID:    result.SessionID,
-			FinishReason: "", // claude_code SDK doesn't surface a granular reason at Result level
-			Text:         text,
-			// Token totals come from Result.Tokens (in+out) but the
-			// claude_code path doesn't split them apart — the hooks
-			// layer logs the total under InputTokens for now; a future
-			// refinement would track input/output split through the
-			// stream parser.
-			InputTokens: result.Tokens,
-		})
-	}()
-
+// buildTransportOptions assembles the base claudesdk options for a claude_code
+// run — system prompt, setting sources, cwd, CLI path, permission mode, model,
+// sandbox command builder, reasoning effort, and max-turns. Split out of the
+// long Execute method; this prefix carries no post-session state (the
+// closure-capturing hooks — stderr/ask_user/secret/board/inbox — stay in
+// Execute).
+func (b *ClaudeCodeBackend) buildTransportOptions(task Task) []claudesdk.Option {
 	var opts []claudesdk.Option
 
 	// APPEND, do not REPLACE. --system-prompt would discard Claude Code's
@@ -231,12 +201,6 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 	if task.Sandbox != nil {
 		opts = append(opts, claudesdk.WithCLIPath("claude"))
 	}
-	// Allowed-tools registration is deferred to a single call near the end
-	// of this function. WithAllowedTools APPENDS to the SDK's slice, so
-	// registering the base set here and again below (combined with MCP
-	// extras) would list every base tool twice. We accumulate the MCP
-	// extras (ask_user, board.*) into extraAllowedTools and emit one call.
-	var extraAllowedTools []string
 	// Bypass interactive permission prompts: the runtime enforces safety via
 	// workspace isolation and allowed-tool lists, so the delegate subprocess
 	// does not need its own permission gate.
@@ -308,6 +272,54 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 	if task.ToolMaxSteps > 0 {
 		opts = append(opts, claudesdk.WithMaxTurns(task.ToolMaxSteps))
 	}
+
+	return opts
+}
+
+func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Result, err error) {
+	if task.WorkDir != "" {
+		if err := validateWorkDir(task.WorkDir, task.BaseDir); err != nil {
+			return Result{}, err
+		}
+	}
+	// Fire OnTurnFinished once on the way out, when the runtime wired
+	// the hook and the delegate produced a SessionID. Wrapped in a
+	// defer so every successful return path (Pass 1, recovery, two-
+	// pass, ask_user escalation) flows through the same notification —
+	// avoiding the maintenance trap of remembering to call it before
+	// every `return result, ...`. Skipped on hard errors with no
+	// captured session (rm.SessionID empty).
+	defer func() {
+		if task.Hooks.OnTurnFinished == nil {
+			return
+		}
+		if result.SessionID == "" {
+			return
+		}
+		text := ""
+		if s := result.Output["_assistant_text"]; s != nil {
+			text, _ = s.(string)
+		}
+		task.Hooks.OnTurnFinished(TurnFinishedInfo{
+			SessionID:    result.SessionID,
+			FinishReason: "", // claude_code SDK doesn't surface a granular reason at Result level
+			Text:         text,
+			// Token totals come from Result.Tokens (in+out) but the
+			// claude_code path doesn't split them apart — the hooks
+			// layer logs the total under InputTokens for now; a future
+			// refinement would track input/output split through the
+			// stream parser.
+			InputTokens: result.Tokens,
+		})
+	}()
+
+	opts := b.buildTransportOptions(task)
+	// Allowed-tools registration is deferred to a single call near the end
+	// of this function. WithAllowedTools APPENDS to the SDK's slice, so
+	// registering the base set here and again below (combined with MCP
+	// extras) would list every base tool twice. We accumulate the MCP
+	// extras (ask_user, board.*) into extraAllowedTools and emit one call.
+	var extraAllowedTools []string
 
 	// Inject Anthropic-flavoured credentials into the CLI subprocess.
 	// Single helper so Pass 1 and Pass 2 (formatter) stay symmetric.
