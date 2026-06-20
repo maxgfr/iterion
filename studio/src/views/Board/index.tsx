@@ -7,7 +7,10 @@ import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
 import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
 import DispatcherControlBar from "@/components/shared/DispatcherControlBar";
 import { Button } from "@/components/ui/Button";
+import { Dialog } from "@/components/ui/Dialog";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { softColor } from "@/lib/constants";
 import {
@@ -1120,26 +1123,30 @@ function BoardFilters({
     searchQuery.trim() !== "" || labelFilter.size > 0 || assigneeFilter !== "";
   return (
     <div className="px-3 py-2 border-b border-border-default bg-surface-1 flex flex-wrap items-center gap-2 text-xs">
-      <input
-        type="search"
-        value={searchQuery}
-        onChange={(e) => onSearchChange(e.target.value)}
-        placeholder="Search title / body / id…"
-        className="px-2 py-1 rounded border border-border-default bg-surface-0 text-fg-default text-xs min-w-[200px] flex-shrink-0"
-      />
+      <div className="min-w-[200px] flex-shrink-0">
+        <Input
+          type="search"
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Search title / body / id…"
+          aria-label="Search issues"
+        />
+      </div>
       {allAssignees.length > 0 && (
-        <select
-          value={assigneeFilter}
-          onChange={(e) => onAssigneeChange(e.target.value)}
-          className="px-2 py-1 rounded border border-border-default bg-surface-0 text-fg-default text-xs"
-        >
-          <option value="">All assignees</option>
-          {allAssignees.map((a) => (
-            <option key={a} value={a}>
-              @{a}
-            </option>
-          ))}
-        </select>
+        <div className="w-auto">
+          <Select
+            value={assigneeFilter}
+            onChange={(e) => onAssigneeChange(e.target.value)}
+            aria-label="Filter by assignee"
+          >
+            <option value="">All assignees</option>
+            {allAssignees.map((a) => (
+              <option key={a} value={a}>
+                @{a}
+              </option>
+            ))}
+          </Select>
+        </div>
       )}
       {allLabels.length > 0 && (
         <LabelFilter
@@ -1149,12 +1156,12 @@ function BoardFilters({
           onClear={onClearLabels}
         />
       )}
-      <label className="flex items-center gap-1 text-fg-muted">
+      <label htmlFor="board-sort-select" className="flex items-center gap-1 text-fg-muted">
         Sort
-        <select
+        <Select
+          id="board-sort-select"
           value={sortMode}
           onChange={(e) => onSortChange(e.target.value as SortMode)}
-          className="px-2 py-1 rounded border border-border-default bg-surface-0 text-fg-default text-xs"
           title="Order cards within each column"
         >
           {SORT_OPTIONS.map((o) => (
@@ -1162,19 +1169,15 @@ function BoardFilters({
               {o.label}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
       <span className="ml-auto text-fg-muted">
         {filtersActive ? `${filtered} / ${total}` : `${total} issue${total === 1 ? "" : "s"}`}
       </span>
       {filtersActive && (
-        <button
-          type="button"
-          onClick={onReset}
-          className="text-fg-subtle hover:text-fg-default underline text-[10px]"
-        >
+        <Button variant="ghost" size="sm" onClick={onReset}>
           reset
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -1243,15 +1246,15 @@ function LabelFilter({
       </button>
 
       {open && (
-        <div className="absolute z-30 mt-1 w-64 max-h-80 overflow-hidden rounded-md border border-border-strong bg-surface-0 shadow-lg flex flex-col">
+        <div className="absolute z-[var(--z-popover)] mt-1 w-64 max-h-80 overflow-hidden rounded-md border border-border-strong bg-surface-0 shadow-popover flex flex-col">
           <div className="p-1 border-b border-border-default shrink-0">
-            <input
+            <Input
               ref={inputRef}
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search labels…"
-              className="w-full bg-surface-1 text-fg-default rounded border border-border-default px-2 py-1 text-xs outline-none focus:border-accent"
+              aria-label="Search labels"
             />
           </div>
           <ul className="py-1 overflow-auto">
@@ -1265,7 +1268,7 @@ function LabelFilter({
                   <button
                     type="button"
                     onClick={() => onToggle(l)}
-                    className={`w-full text-left px-2 py-1.5 text-xs flex items-center gap-2 hover:bg-surface-1 ${
+                    className={`w-full text-left px-2 py-1.5 text-xs flex items-center gap-2 hover:bg-surface-1 rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                       active ? "text-fg-default" : "text-fg-muted"
                     }`}
                   >
@@ -1286,13 +1289,14 @@ function LabelFilter({
           </ul>
           {count > 0 && (
             <div className="p-1 border-t border-border-default shrink-0">
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={onClear}
-                className="w-full text-center text-[11px] text-fg-subtle hover:text-fg-default py-1"
+                className="w-full justify-center"
               >
                 Clear {count} label{count > 1 ? "s" : ""}
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -1333,15 +1337,14 @@ function SelectionToolbar({
   onDelete: () => void;
   onClear: () => void;
 }) {
-  const selectClass =
-    "px-2 py-0.5 rounded border border-border-default bg-surface-0 text-fg-muted hover:text-fg-default";
   return (
     <div className="shrink-0 px-3 py-1.5 border-b border-border-default bg-accent-soft/20 flex flex-wrap items-center gap-2 text-xs text-fg-default">
       <span>
         <strong>{count}</strong> selected
       </span>
-      <button
-        type="button"
+      <Button
+        variant="success"
+        size="sm"
         onClick={onDispatch}
         disabled={!allSelectedDispatchable}
         title={
@@ -1349,61 +1352,66 @@ function SelectionToolbar({
             ? "Move all selected into the dispatch lane"
             : "All selected cards must be in Inbox or Backlog"
         }
-        className="px-2 py-0.5 rounded bg-success text-fg-onAccent hover:bg-success/90 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         ▶ Let's go
-      </button>
+      </Button>
 
-      <select
-        value=""
-        onChange={(e) => {
-          if (e.target.value) onMove(e.target.value);
-        }}
-        className={selectClass}
-        title="Move all selected to a column"
-      >
-        <option value="">Move to…</option>
-        {board.states.map((s) => (
-          <option key={s.name} value={s.name}>
-            {s.display ?? s.name}
-          </option>
-        ))}
-      </select>
+      <div className="w-auto">
+        <Select
+          value=""
+          onChange={(e) => {
+            if (e.target.value) onMove(e.target.value);
+          }}
+          title="Move all selected to a column"
+          aria-label="Bulk move to column"
+        >
+          <option value="">Move to…</option>
+          {board.states.map((s) => (
+            <option key={s.name} value={s.name}>
+              {s.display ?? s.name}
+            </option>
+          ))}
+        </Select>
+      </div>
 
-      <select
-        value=""
-        onChange={(e) => {
-          if (e.target.value !== "") onPriority(Number(e.target.value));
-        }}
-        className={selectClass}
-        title="Set priority on all selected"
-      >
-        <option value="">Priority…</option>
-        {PRIORITY_PRESETS.map((p) => (
-          <option key={p} value={p}>
-            P{p}
-          </option>
-        ))}
-      </select>
+      <div className="w-auto">
+        <Select
+          value=""
+          onChange={(e) => {
+            if (e.target.value !== "") onPriority(Number(e.target.value));
+          }}
+          title="Set priority on all selected"
+          aria-label="Bulk set priority"
+        >
+          <option value="">Priority…</option>
+          {PRIORITY_PRESETS.map((p) => (
+            <option key={p} value={p}>
+              P{p}
+            </option>
+          ))}
+        </Select>
+      </div>
 
-      <select
-        value=""
-        onChange={(e) => {
-          const v = e.target.value;
-          if (v === "") return;
-          onAssignee(v === "__clear__" ? "" : v);
-        }}
-        className={selectClass}
-        title="Assign all selected"
-      >
-        <option value="">Assignee…</option>
-        <option value="__clear__">(clear)</option>
-        {allAssignees.map((a) => (
-          <option key={a} value={a}>
-            @{a}
-          </option>
-        ))}
-      </select>
+      <div className="w-auto">
+        <Select
+          value=""
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "") return;
+            onAssignee(v === "__clear__" ? "" : v);
+          }}
+          title="Assign all selected"
+          aria-label="Bulk set assignee"
+        >
+          <option value="">Assignee…</option>
+          <option value="__clear__">(clear)</option>
+          {allAssignees.map((a) => (
+            <option key={a} value={a}>
+              @{a}
+            </option>
+          ))}
+        </Select>
+      </div>
 
       <BulkLabelPopover
         allLabels={allLabels}
@@ -1412,20 +1420,12 @@ function SelectionToolbar({
       />
 
       <div className="ml-auto flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onDelete}
-          className="px-2 py-0.5 rounded border border-danger/50 text-danger-fg hover:bg-danger-soft"
-        >
+        <Button variant="danger" size="sm" onClick={onDelete}>
           Delete
-        </button>
-        <button
-          type="button"
-          onClick={onClear}
-          className="text-fg-subtle hover:text-fg-default underline"
-        >
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onClear}>
           clear
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -1479,15 +1479,15 @@ function BulkLabelPopover({
         Label <span className="text-fg-subtle text-[10px]">▾</span>
       </button>
       {open && (
-        <div className="absolute z-30 mt-1 w-64 max-h-80 overflow-hidden rounded-md border border-border-strong bg-surface-0 shadow-lg flex flex-col">
+        <div className="absolute z-[var(--z-popover)] mt-1 w-64 max-h-80 overflow-hidden rounded-md border border-border-strong bg-surface-0 shadow-popover flex flex-col">
           <div className="p-1 border-b border-border-default shrink-0">
-            <input
+            <Input
               ref={inputRef}
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search labels…"
-              className="w-full bg-surface-1 text-fg-default rounded border border-border-default px-2 py-1 text-xs outline-none focus:border-accent"
+              aria-label="Search labels"
             />
           </div>
           <ul className="py-1 overflow-auto">
@@ -1506,7 +1506,7 @@ function BulkLabelPopover({
                   <button
                     type="button"
                     onClick={() => onToggle(l)}
-                    className={`w-full text-left px-2 py-1.5 text-xs flex items-center gap-2 hover:bg-surface-1 ${
+                    className={`w-full text-left px-2 py-1.5 text-xs flex items-center gap-2 hover:bg-surface-1 rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                       active ? "text-fg-default" : "text-fg-muted"
                     }`}
                   >
@@ -1532,9 +1532,11 @@ function BulkLabelPopover({
 }
 
 function BoardKeyboardHelp({ onClose }: { onClose: () => void }) {
+  // Esc is handled by Dialog; this hook still intercepts "?" so a second
+  // press of the help shortcut also closes the panel.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape" || e.key === "?") {
+      if (e.key === "?") {
         e.preventDefault();
         onClose();
       }
@@ -1544,41 +1546,35 @@ function BoardKeyboardHelp({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   return (
-    <div
-      className="fixed inset-0 z-[var(--z-modal)] bg-black/40 flex items-center justify-center"
-      onClick={onClose}
-    >
-      <div
-        className="bg-surface-1 border border-border-default rounded shadow-lg p-5 max-w-sm text-sm"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="font-semibold text-fg-default mb-3">
-          Keyboard shortcuts
-        </div>
-        <ul className="space-y-1.5 text-fg-default">
-          <ShortcutRow keys="c / n" desc="New issue" />
-          <ShortcutRow keys="click" desc="Select issue" />
-          <ShortcutRow keys="title / double-click" desc="Open issue" />
-          <ShortcutRow keys="Ctrl/⌘+click" desc="Toggle card in selection" />
-          <ShortcutRow keys="Shift+click" desc="Extend selection range" />
-          <ShortcutRow keys="Ctrl/⌘+A" desc="Select all visible cards" />
-          <ShortcutRow keys="x" desc="Toggle selected card" />
-          <ShortcutRow keys="drag selection" desc="Move all selected cards" />
-          <ShortcutRow keys="↑ ↓" desc="Navigate cards in column" />
-          <ShortcutRow keys="← →" desc="Move card to previous/next column" />
-          <ShortcutRow keys="Enter / e" desc="Open selected issue" />
-          <ShortcutRow keys="Del / Bksp" desc="Delete selected issue" />
-          <ShortcutRow keys="Esc" desc="Clear selection or close" />
-        </ul>
-        <button
-          type="button"
-          onClick={onClose}
-          className="mt-4 text-xs text-fg-subtle hover:text-fg-default"
-        >
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+      title="Keyboard shortcuts"
+      widthClass="max-w-sm"
+      footer={
+        <Button variant="secondary" size="sm" onClick={onClose}>
           Close
-        </button>
-      </div>
-    </div>
+        </Button>
+      }
+    >
+      <ul className="space-y-1.5 text-fg-default text-sm">
+        <ShortcutRow keys="c / n" desc="New issue" />
+        <ShortcutRow keys="click" desc="Select issue" />
+        <ShortcutRow keys="title / double-click" desc="Open issue" />
+        <ShortcutRow keys="Ctrl/⌘+click" desc="Toggle card in selection" />
+        <ShortcutRow keys="Shift+click" desc="Extend selection range" />
+        <ShortcutRow keys="Ctrl/⌘+A" desc="Select all visible cards" />
+        <ShortcutRow keys="x" desc="Toggle selected card" />
+        <ShortcutRow keys="drag selection" desc="Move all selected cards" />
+        <ShortcutRow keys="↑ ↓" desc="Navigate cards in column" />
+        <ShortcutRow keys="← →" desc="Move card to previous/next column" />
+        <ShortcutRow keys="Enter / e" desc="Open selected issue" />
+        <ShortcutRow keys="Del / Bksp" desc="Delete selected issue" />
+        <ShortcutRow keys="Esc" desc="Clear selection or close" />
+      </ul>
+    </Dialog>
   );
 }
 
@@ -1754,6 +1750,7 @@ function Column({
               }}
               onChange={() => onSelectColumn(name)}
               title={allSelected ? "Deselect all in column" : "Select all in column"}
+              aria-label={allSelected ? `Deselect all in ${display}` : `Select all in ${display}`}
               className="shrink-0 accent-accent cursor-pointer"
             />
           )}

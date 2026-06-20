@@ -167,10 +167,15 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
                       </span>
                     )}
                     {botRequiredMissing && (
-                      <span
-                        className="w-1.5 h-1.5 rounded-full bg-warning-fg"
-                        title="Required arguments missing"
-                      />
+                      <>
+                        <span
+                          role="img"
+                          aria-label="Required arguments missing"
+                          className="w-1.5 h-1.5 rounded-full bg-warning-fg"
+                          title="Required arguments missing"
+                        />
+                        <span className="sr-only">Required arguments missing</span>
+                      </>
                     )}
                   </span>
                 ),
@@ -541,14 +546,15 @@ function LastRunSection({
             {runLabel}
           </Link>
           <CopyButton value={runID} variant="icon" label="Copy run id" />
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => setDiffOpen(true)}
-            className="ml-auto text-[11px] px-1.5 py-0.5 rounded border border-border-default hover:bg-surface-2 text-fg-default"
+            className="ml-auto"
             title="View this run's full branch diff without leaving the board"
           >
             View diff
-          </button>
+          </Button>
         </div>
       )}
       {runID && (
