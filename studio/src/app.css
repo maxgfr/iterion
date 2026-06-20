@@ -116,6 +116,22 @@
   --color-board-done: #94a3b8;        /* slate-400 */
   --color-board-blocked: #ef4444;     /* red-500 */
 
+  /* Bot persona identity palette — one categorical hue per bot, rendered
+   * as the persona-name text colour (run-header chip, board picker,
+   * catalog, recents). Tokenised (was raw Tailwind -400 in personas.ts)
+   * so the light override can darken them to keep AA contrast on white.
+   * Dark = Tailwind-400; the [data-theme="light"] block uses -700.
+   * Contrast-audited in __tests__/a11y/contrast.test.ts. */
+  --color-persona-sky: #38bdf8;      /* sky-400 */
+  --color-persona-emerald: #34d399;  /* emerald-400 */
+  --color-persona-violet: #a78bfa;   /* violet-400 */
+  --color-persona-teal: #2dd4bf;     /* teal-400 */
+  --color-persona-amber: #fbbf24;    /* amber-400 */
+  --color-persona-cyan: #22d3ee;     /* cyan-400 */
+  --color-persona-rose: #fb7185;     /* rose-400 */
+  --color-persona-orange: #fb923c;   /* orange-400 */
+  --color-persona-lime: #a3e635;     /* lime-400 */
+
   /* Radii */
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -196,6 +212,15 @@
   --color-live: #22d3ee;
   --color-live-soft: rgba(34, 211, 238, 0.18);
   --color-live-fg: #cffafe;
+  --color-persona-sky: #38bdf8;
+  --color-persona-emerald: #34d399;
+  --color-persona-violet: #a78bfa;
+  --color-persona-teal: #2dd4bf;
+  --color-persona-amber: #fbbf24;
+  --color-persona-cyan: #22d3ee;
+  --color-persona-rose: #fb7185;
+  --color-persona-orange: #fb923c;
+  --color-persona-lime: #a3e635;
   color-scheme: dark;
 }
 
@@ -267,6 +292,16 @@
   --color-board-review: #7e22ce;      /* purple-700 */
   --color-board-done: #64748b;        /* slate-500 */
   --color-board-blocked: #b91c1c;     /* red-700 */
+  /* Bot persona palette in light mode: Tailwind-700 for AA on white. */
+  --color-persona-sky: #0369a1;     /* sky-700 */
+  --color-persona-emerald: #047857; /* emerald-700 */
+  --color-persona-violet: #6d28d9;  /* violet-700 */
+  --color-persona-teal: #0f766e;    /* teal-700 */
+  --color-persona-amber: #b45309;   /* amber-700 */
+  --color-persona-cyan: #0e7490;    /* cyan-700 */
+  --color-persona-rose: #be123c;    /* rose-700 */
+  --color-persona-orange: #c2410c;  /* orange-700 */
+  --color-persona-lime: #4d7c0f;    /* lime-700 */
   /* Light-mode shadow alphas — lighter than dark so the depth still
    * reads but doesn't bruise the canvas. */
   --shadow-sm:      0 1px 2px 0 rgb(0 0 0 / 0.06);

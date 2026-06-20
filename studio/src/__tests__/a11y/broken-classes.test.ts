@@ -86,12 +86,11 @@ describe("no phantom/legacy Tailwind classes", () => {
 const PALETTE_RE =
   /\b(text|bg|border|ring|fill|stroke|from|to|via|outline|decoration|divide|caret)-(amber|red|orange|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-\d/;
 
-// Files that legitimately use a categorical (non-semantic) hue palette,
-// analogous to the tokenised iteration palette: each entry maps an item to a
-// fixed identity hue, not a status. personas.ts is the bot-identity palette;
-// tokenising it (9 hues × light/dark + contrast coverage) is a tracked
-// follow-up — until then it is allowlisted here, not exempted wholesale.
-const PALETTE_ALLOW = ["/lib/personas.ts"];
+// Files allowed to use a categorical (non-semantic) hue palette. The bot
+// persona palette was tokenised to --color-persona-* (app.css + personas.ts,
+// contrast-audited), so this is currently empty — add a path here only for a
+// genuinely categorical identity palette that cannot be a semantic token.
+const PALETTE_ALLOW: string[] = [];
 
 describe("no raw chromatic Tailwind palette (use semantic tokens)", () => {
   it("bans (text|bg|border|…)-<hue>-<step>", () => {

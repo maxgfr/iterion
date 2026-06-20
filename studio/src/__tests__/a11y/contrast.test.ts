@@ -128,3 +128,35 @@ for (const [themeName, t] of Object.entries(THEMES)) {
     }
   });
 }
+
+// Persona identity palette — categorical hues used as the bot-name text
+// colour (run-header chip / board picker / catalog / recents) on the
+// surface-0/1 panels. Tokenised to --color-persona-* (was raw Tailwind
+// -400); mirrored here so the light-mode darkening keeps AA on white.
+// Dark = Tailwind-400, light = -700. Update on any app.css persona edit.
+const PERSONA = {
+  dark: {
+    sky: "#38bdf8", emerald: "#34d399", violet: "#a78bfa", teal: "#2dd4bf",
+    amber: "#fbbf24", cyan: "#22d3ee", rose: "#fb7185", orange: "#fb923c",
+    lime: "#a3e635",
+  },
+  light: {
+    sky: "#0369a1", emerald: "#047857", violet: "#6d28d9", teal: "#0f766e",
+    amber: "#b45309", cyan: "#0e7490", rose: "#be123c", orange: "#c2410c",
+    lime: "#4d7c0f",
+  },
+} as const;
+
+for (const [themeName, t] of Object.entries(THEMES)) {
+  describe(`a11y / persona contrast (${themeName} theme)`, () => {
+    const personas = PERSONA[themeName as "dark" | "light"];
+    for (const [hue, hex] of Object.entries(personas)) {
+      for (const s of [0, 1] as const) {
+        it(`persona-${hue} on surface-${s} ≥ ${AA_TEXT}`, () => {
+          const ratio = contrast(hexToRgb(hex), hexToRgb(t.surface[s]));
+          expect(ratio).toBeGreaterThanOrEqual(AA_TEXT);
+        });
+      }
+    }
+  });
+}
