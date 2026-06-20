@@ -40,10 +40,11 @@ describe("dispatcherPillMeta", () => {
   });
 
   it("maps each state to a background + foreground colour class", () => {
-    expect(dispatcherPillMeta("running").className).toMatch(/green/);
-    expect(dispatcherPillMeta("paused").className).toMatch(/amber/);
-    expect(dispatcherPillMeta("error").className).toMatch(/red/);
-    expect(dispatcherPillMeta("unreachable").className).toMatch(/red/);
+    // Semantic severity tokens (not raw palette) — success/warning/danger.
+    expect(dispatcherPillMeta("running").className).toMatch(/success/);
+    expect(dispatcherPillMeta("paused").className).toMatch(/warning/);
+    expect(dispatcherPillMeta("error").className).toMatch(/danger/);
+    expect(dispatcherPillMeta("unreachable").className).toMatch(/danger/);
     expect(dispatcherPillMeta("idle").className).toMatch(/fg-muted/);
   });
 });
