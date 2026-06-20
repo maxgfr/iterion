@@ -487,7 +487,18 @@ function ConnectForm({
       setPat("");
       onConnected();
     } catch (e) {
-      onError((e as Error).message);
+      const msg = (e as Error).message;
+      // Self-hosted forges (e.g. a private GitLab) usually have no OAuth app
+      // registered on this server. Rather than dead-ending on the raw 400,
+      // steer the user to the PAT path (which is always available).
+      if (mode === "oauth" && /oauth is not configured/i.test(msg)) {
+        setMode("pat");
+        onError(
+          "OAuth isn't configured for this forge on the server — paste a personal access token instead (the token field is now selected below).",
+        );
+      } else {
+        onError(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -558,6 +569,7 @@ function ConnectForm({
           placeholder="Personal access token (api / repo + hook-admin scope)"
           value={pat}
           onChange={(e) => setPat(e.target.value)}
+          autoComplete="off"
         />
       )}
       {redirectHint && <p className="text-caption text-fg-muted">{redirectHint}</p>}
