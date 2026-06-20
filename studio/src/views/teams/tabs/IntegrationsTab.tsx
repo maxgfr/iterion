@@ -22,6 +22,7 @@ import {
   listForgeRepos,
   previewForgeEnable,
   registerForgeOAuthApp,
+  startGitHubManifest,
 } from "@/api/forgeConnections";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -809,6 +810,32 @@ function RegisterOAuthAppForm({
     }
   };
 
+  // GitHub has no create-app API: instead iterion hands GitHub a pre-filled App
+  // manifest the browser POSTs; GitHub creates the App and redirects back to
+  // iterion's callback, which stores the credentials. One click, no admin token.
+  const launchGitHubManifest = async () => {
+    setBusy(true);
+    try {
+      const { post_url, manifest } = await startGitHubManifest(teamID, {
+        forge_base_url: baseURL.trim() || undefined,
+        next: window.location.pathname + window.location.search,
+      });
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = post_url;
+      const field = document.createElement("input");
+      field.type = "hidden";
+      field.name = "manifest";
+      field.value = JSON.stringify(manifest);
+      form.appendChild(field);
+      document.body.appendChild(form);
+      form.submit(); // navigates to GitHub; the callback brings us back
+    } catch (e) {
+      onError((e as Error).message);
+      setBusy(false);
+    }
+  };
+
   const canSubmit =
     mode === "manual"
       ? !!clientID.trim() && !!clientSecret.trim()
@@ -840,6 +867,23 @@ function RegisterOAuthAppForm({
           </button>
         ))}
       </div>
+
+      {provider === "github" && (
+        <div className="rounded border border-accent/40 bg-accent/5 p-3 space-y-2">
+          <button
+            onClick={() => void launchGitHubManifest()}
+            disabled={busy}
+            className="bg-accent text-fg-onAccent rounded px-3 py-2 text-sm disabled:opacity-50"
+          >
+            {busy ? "Opening GitHub…" : "Create a GitHub App"}
+          </button>
+          <p className="text-caption text-fg-muted">
+            Recommended for GitHub — one click sends you to GitHub to confirm, then iterion stores
+            the app's credentials automatically. (For GitHub Enterprise, set the base URL below
+            first.) Or use the options below.
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-3 text-sm">
         <label

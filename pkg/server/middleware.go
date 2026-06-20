@@ -181,7 +181,8 @@ func isPublicPath(path string) bool {
 	// The forge OAuth callback is a top-level GET navigation from the forge
 	// IdP carrying no operator JWT — it authenticates via the signed state +
 	// the per-flow agent-binding cookie, like the OIDC callback above.
-	if path == "/api/forge/oauth/callback" || path == "/api/forge/github/app/callback" {
+	if path == "/api/forge/oauth/callback" || path == "/api/forge/github/app/callback" ||
+		path == "/api/forge/github/app-manifest/callback" {
 		return true
 	}
 	// Inbound webhooks authenticate themselves via a per-org token

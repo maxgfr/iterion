@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/SocialGouv/iterion/pkg/forge"
 	"github.com/SocialGouv/iterion/pkg/secrets"
@@ -17,6 +18,8 @@ func newForgeOAuthAppTestServer(t *testing.T) *Server {
 	t.Helper()
 	s := newOrgTestServer(t)
 	s.forgeOAuthApps = forge.NewMemoryOAuthAppStore()
+	s.forgeStates = newForgeStateStore(10 * time.Minute)
+	s.cfg.PublicURL = "https://iterion.test"
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		t.Fatal(err)
@@ -167,5 +170,32 @@ func TestForgeOAuthApp_AutoCreate(t *testing.T) {
 	// the resolver opens the sealed secret + builds the OAuth client for it
 	if _, ok := s.forgeOAuthAppFor(ctx, "t1", forge.ProviderGitLab, gl.URL); !ok {
 		t.Fatal("resolver did not find the auto-created app")
+	}
+}
+
+func TestForgeGitHubManifest_Start(t *testing.T) {
+	s := newForgeOAuthAppTestServer(t)
+	ctx := superAdminCtx()
+	w := httptest.NewRecorder()
+	s.handleStartGitHubManifest(w, oauthAppReq(ctx, "POST", "/api/teams/t1/forge/oauth-apps/github-manifest", `{}`, "t1", ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("start: code=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		PostURL  string         `json:"post_url"`
+		Manifest map[string]any `json:"manifest"`
+		State    string         `json:"state"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(resp.PostURL, "https://github.com/settings/apps/new?state=") {
+		t.Fatalf("post_url = %q", resp.PostURL)
+	}
+	if resp.State == "" {
+		t.Fatal("empty state")
+	}
+	if resp.Manifest["redirect_url"] != "https://iterion.test/api/forge/github/app-manifest/callback" {
+		t.Fatalf("manifest redirect_url = %v", resp.Manifest["redirect_url"])
 	}
 }

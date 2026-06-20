@@ -22,6 +22,7 @@ func (s *Server) registerForgeOAuthAppRoutes() {
 	s.mux.Handle("GET /api/teams/{id}/forge/oauth-apps", s.requireAuth(http.HandlerFunc(s.handleListForgeOAuthApps)))
 	s.mux.Handle("POST /api/teams/{id}/forge/oauth-apps", s.requireAuth(http.HandlerFunc(s.handleRegisterForgeOAuthApp)))
 	s.mux.Handle("DELETE /api/teams/{id}/forge/oauth-apps/{app_id}", s.requireAuth(http.HandlerFunc(s.handleDeleteForgeOAuthApp)))
+	s.registerForgeGitHubManifestRoutes()
 }
 
 // forgeOAuthAppReq registers an OAuth app for a (provider, instance). mode
@@ -36,6 +37,7 @@ type forgeOAuthAppReq struct {
 	ClientSecret string `json:"client_secret,omitempty"`
 	AdminToken   string `json:"admin_token,omitempty"`   // mode=auto
 	ConnectionID string `json:"connection_id,omitempty"` // mode=auto_from_connection
+	Next         string `json:"next,omitempty"`          // github-manifest: studio return path
 }
 
 func (s *Server) handleListForgeOAuthApps(w http.ResponseWriter, r *http.Request) {

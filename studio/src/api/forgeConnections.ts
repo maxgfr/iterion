@@ -208,3 +208,24 @@ export async function registerForgeOAuthApp(
 export async function deleteForgeOAuthApp(teamID: string, appID: string): Promise<void> {
   await request<void>(`/teams/${teamID}/forge/oauth-apps/${appID}`, { method: "DELETE" });
 }
+
+export interface GitHubManifestStart {
+  /** github.com (or GHE) URL to POST the manifest form to. */
+  post_url: string;
+  /** The GitHub App manifest to submit as a hidden `manifest` form field. */
+  manifest: Record<string, unknown>;
+  state: string;
+}
+
+// startGitHubManifest returns the pre-filled GitHub App manifest + the
+// github.com POST target; the caller auto-submits a form so GitHub creates the
+// App and redirects back to iterion's callback (which stores the credentials).
+export async function startGitHubManifest(
+  teamID: string,
+  input: { forge_base_url?: string; next?: string },
+): Promise<GitHubManifestStart> {
+  return request(`/teams/${teamID}/forge/oauth-apps/github-manifest`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
