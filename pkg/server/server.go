@@ -178,10 +178,12 @@ type Config struct {
 	// and the OAuth callback to register.
 	ForgeConnections  forge.ConnectionStore
 	ForgeIntegrations forge.RepoIntegrationStore
-	// ForgeOAuth holds the per-provider OAuth-app client credentials the
-	// connect flow uses. A provider absent here only accepts the PAT
-	// fallback (the path for self-hosted instances with no registrable app).
-	ForgeOAuth ForgeOAuthConfig
+	// ForgeOAuthApps holds per-tenant, per-instance forge OAuth-app
+	// credentials (sealed client_secret). The connect flow resolves an app
+	// from this store for a (tenant, provider, base URL); an instance with no
+	// registered app only accepts the PAT fallback. Replaces the legacy
+	// process-global ITERION_FORGE_*_OAUTH_* env map.
+	ForgeOAuthApps forge.OAuthAppStore
 	// ForgeGitHubApp is the global GitHub-App identity for the
 	// installation-token connect mode. Empty → that mode is unavailable.
 	ForgeGitHubApp ForgeGitHubAppConfig
@@ -380,7 +382,7 @@ type Server struct {
 	forgeIntegrations forge.RepoIntegrationStore
 	forgeOrchestrator *forge.Orchestrator
 	forgeStates       *forgeStateStore
-	forgeOAuth        ForgeOAuthConfig
+	forgeOAuthApps    forge.OAuthAppStore
 	forgeGitHubApp    ForgeGitHubAppConfig
 	memStore          knowledge.MemoryStore
 	// webhookLaunchBot overrides the inbound-webhook launch path (test
@@ -526,7 +528,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		botBindings:       cfg.BotBindings,
 		forgeConnections:  cfg.ForgeConnections,
 		forgeIntegrations: cfg.ForgeIntegrations,
-		forgeOAuth:        cfg.ForgeOAuth,
+		forgeOAuthApps:    cfg.ForgeOAuthApps,
 		forgeGitHubApp:    cfg.ForgeGitHubApp,
 		memStore:          cfg.MemoryStore,
 		httpClient:        &http.Client{Timeout: 15 * time.Second},
@@ -942,6 +944,9 @@ func (s *Server) routes() {
 	if s.forgeOrchestrator != nil && s.authSvc != nil {
 		s.registerForgeRoutes()
 		s.registerForgeProvisioningRoutes()
+		if s.forgeOAuthApps != nil {
+			s.registerForgeOAuthAppRoutes()
+		}
 	}
 
 	// Audit log read surface (writes happen inline in the mutation

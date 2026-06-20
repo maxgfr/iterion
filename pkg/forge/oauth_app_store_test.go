@@ -1,0 +1,93 @@
+package forge
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/SocialGouv/iterion/pkg/secrets"
+)
+
+func TestOAuthAppStore_CRUD(t *testing.T) {
+	st := NewMemoryOAuthAppStore()
+	ctx := context.Background()
+	app := ForgeOAuthApp{
+		ID: "app-1", TenantID: "t1", Provider: ProviderGitLab,
+		ForgeBaseURL: "https://gitlab.example.com", ClientID: "cid", SealedSecret: []byte("sealed"),
+		CreatedAt: time.Unix(1700000000, 0).UTC(),
+	}
+	if err := st.Create(ctx, app); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := st.Get(ctx, "app-1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.ClientID != "cid" {
+		t.Fatalf("client id = %q", got.ClientID)
+	}
+
+	// GetByInstance canonicalises the query (trailing slash, no scheme).
+	bi, err := st.GetByInstance(ctx, "t1", ProviderGitLab, "gitlab.example.com/")
+	if err != nil {
+		t.Fatalf("getByInstance: %v", err)
+	}
+	if bi.ID != "app-1" {
+		t.Fatalf("getByInstance id = %q", bi.ID)
+	}
+
+	apps, err := st.ListByTenant(ctx, "t1")
+	if err != nil || len(apps) != 1 {
+		t.Fatalf("list: %v len=%d", err, len(apps))
+	}
+
+	if err := st.Delete(ctx, "app-1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := st.Get(ctx, "app-1"); !errors.Is(err, ErrOAuthAppNotFound) {
+		t.Fatalf("get after delete = %v", err)
+	}
+}
+
+func TestOAuthAppStore_DuplicateInstance(t *testing.T) {
+	st := NewMemoryOAuthAppStore()
+	ctx := context.Background()
+	a := ForgeOAuthApp{ID: "a", TenantID: "t1", Provider: ProviderGitLab, ForgeBaseURL: "https://gitlab.com", ClientID: "x"}
+	if err := st.Create(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	// Empty base URL canonicalises to the SaaS default → same instance as `a`.
+	b := ForgeOAuthApp{ID: "b", TenantID: "t1", Provider: ProviderGitLab, ForgeBaseURL: "", ClientID: "y"}
+	if err := st.Create(ctx, b); !errors.Is(err, ErrOAuthAppExists) {
+		t.Fatalf("expected ErrOAuthAppExists, got %v", err)
+	}
+	// Different tenant on the same instance is fine.
+	c := ForgeOAuthApp{ID: "c", TenantID: "t2", Provider: ProviderGitLab, ForgeBaseURL: "https://gitlab.com", ClientID: "z"}
+	if err := st.Create(ctx, c); err != nil {
+		t.Fatalf("different tenant create: %v", err)
+	}
+}
+
+func TestOAuthAppSealer_RoundTrip(t *testing.T) {
+	sealer, err := secrets.NewAESGCMSealer(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := SealOAuthAppSecret(sealer, "app-1", "s3cr3t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := OpenOAuthAppSecret(sealer, "app-1", sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "s3cr3t" {
+		t.Fatalf("got %q", got)
+	}
+	// AAD binds the blob to the app id — opening under another id must fail.
+	if _, err := OpenOAuthAppSecret(sealer, "app-2", sealed); err == nil {
+		t.Fatal("expected AAD mismatch error opening under a different app id")
+	}
+}
