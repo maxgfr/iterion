@@ -91,6 +91,37 @@ func editMissCount(toolName, response string, prev int) int {
 	return 0
 }
 
+// installEditMissResilience appends the PostToolUse hook that breaks the
+// Edit/MultiEdit blind-retry wedge: claude_code's Edit fails with "String
+// to replace not found in file" when old_string doesn't match the file
+// verbatim (a stale read or whitespace drift). The model tends to
+// blind-retry a mismatching edit until defaultMaxConsecutiveToolErrors
+// aborts the session — and recovery re-runs the node into the same wedge
+// (observed: a feature_dev act burned 4 recovery attempts integrating into
+// existing server files). After editMissHintAfter consecutive Edit-misses,
+// inject a corrective system message so the model re-Reads the verbatim
+// current text before editing. editMisses is closure-local: a session's
+// tool calls are sequential, so no synchronisation is needed. Counts misses
+// across intervening non-Edit tools (a Read between two misses doesn't reset
+// — the model still hasn't landed the edit); resets only on a successful Edit.
+func (b *ClaudeCodeBackend) installEditMissResilience(opts []claudesdk.Option, task Task) []claudesdk.Option {
+	editMisses := 0
+	return append(opts, claudesdk.WithHook(claudesdk.HookPostToolUse, claudesdk.HookMatcher{
+		Handler: func(_ context.Context, in claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
+			editMisses = editMissCount(in.ToolName, fmt.Sprintf("%v", in.ToolResponse), editMisses)
+			if editMisses < editMissHintAfter {
+				return claudesdk.HookOutput{}, nil
+			}
+			b.Logger.Info("[%s#%d/claude-code] 🩹 %d consecutive Edit-misses — injecting re-Read hint", task.NodeID, task.Iteration, editMisses)
+			hint := "Your Edit/MultiEdit failed: \"String to replace not found in file\". " +
+				"The old_string does not match the file's CURRENT content verbatim (usually a whitespace or stale-read mismatch). " +
+				"Do NOT retry the same edit. First Read the exact lines you intend to change to capture their verbatim current text (including leading whitespace), then issue the edit with that exact old_string. " +
+				"If edits keep failing on a file, Read the whole surrounding region before editing again."
+			return claudesdk.HookOutput{SystemMessage: hint, AdditionalContext: hint}, nil
+		},
+	}))
+}
+
 func resolveMaxConsecutiveToolErrors() int {
 	if v := os.Getenv("ITERION_CLAUDE_CODE_MAX_TOOL_ERRORS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
@@ -575,34 +606,9 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 		}))
 	}
 
-	// Edit-miss resilience (PostToolUse): claude_code's Edit/MultiEdit fail
-	// with "String to replace not found in file" when old_string doesn't
-	// match the file verbatim (a stale read or whitespace drift). The model
-	// tends to blind-retry a mismatching edit until defaultMaxConsecutiveToolErrors
-	// aborts the session — and recovery re-runs the node into the same wedge
-	// (observed: a feature_dev act burned 4 recovery attempts integrating
-	// into existing server files). After editMissHintAfter consecutive
-	// Edit-misses, inject a corrective system message so the model re-Reads
-	// the verbatim current text before editing. editMisses is closure-local:
-	// a session's tool calls are sequential, so no synchronisation is needed.
-	// Counts misses across intervening non-Edit tools (a Read between two
-	// misses doesn't reset — the model still hasn't landed the edit); resets
-	// only on a successful Edit.
-	editMisses := 0
-	opts = append(opts, claudesdk.WithHook(claudesdk.HookPostToolUse, claudesdk.HookMatcher{
-		Handler: func(_ context.Context, in claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
-			editMisses = editMissCount(in.ToolName, fmt.Sprintf("%v", in.ToolResponse), editMisses)
-			if editMisses < editMissHintAfter {
-				return claudesdk.HookOutput{}, nil
-			}
-			b.Logger.Info("[%s#%d/claude-code] 🩹 %d consecutive Edit-misses — injecting re-Read hint", task.NodeID, task.Iteration, editMisses)
-			hint := "Your Edit/MultiEdit failed: \"String to replace not found in file\". " +
-				"The old_string does not match the file's CURRENT content verbatim (usually a whitespace or stale-read mismatch). " +
-				"Do NOT retry the same edit. First Read the exact lines you intend to change to capture their verbatim current text (including leading whitespace), then issue the edit with that exact old_string. " +
-				"If edits keep failing on a file, Read the whole surrounding region before editing again."
-			return claudesdk.HookOutput{SystemMessage: hint, AdditionalContext: hint}, nil
-		},
-	}))
+	// Edit-miss resilience (PostToolUse) — breaks the Edit/MultiEdit
+	// blind-retry wedge; see installEditMissResilience for the rationale.
+	opts = b.installEditMissResilience(opts, task)
 
 	startTime := time.Now()
 	rm, sessMeta, streamErr := b.runSession(streamCtx, prompt, task, opts)
