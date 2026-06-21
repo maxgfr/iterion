@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 // This bans only names known to be undefined. Adding a *real* token to
 // app.css never requires touching this list. The canonical replacements:
 //   bg-fg-accent        -> bg-accent
-//   text-fg-accent      -> text-accent
+//   text-fg-accent      -> text-accent-text
 //   text-on-accent      -> text-fg-onAccent
 //   text-on-danger      -> text-danger-fg
 //   text-error/bg-error -> text-danger / bg-danger-soft (severity token is "danger")
@@ -52,7 +52,7 @@ const files = Object.entries(RAW).filter(
 
 describe("no phantom/legacy Tailwind classes", () => {
   it("scans a non-trivial number of source files", () => {
-    expect(files.length).toBeGreaterThan(100);
+    expect(files.length).toBeGreaterThan(150);
   });
 
   for (const { label, re } of BANNED) {
