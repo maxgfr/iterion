@@ -1,0 +1,304 @@
+import { useState } from "react";
+
+import {
+  type ForgeConnection,
+  type ForgeProvider,
+  type RegisterForgeOAuthAppInput,
+  registerForgeOAuthApp,
+  startGitHubManifest,
+} from "@/api/forgeConnections";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Radio } from "@/components/ui/Radio";
+import { Select } from "@/components/ui/Select";
+
+type RegisterMode = "auto" | "auto_from_connection" | "manual";
+
+export function RegisterOAuthAppForm({
+  teamID,
+  connections,
+  onRegistered,
+  onError,
+}: {
+  teamID: string;
+  connections: ForgeConnection[];
+  onRegistered: () => void;
+  onError: (m: string) => void;
+}) {
+  const [show, setShow] = useState(false);
+  const [provider, setProvider] = useState<ForgeProvider>("gitlab");
+  const [baseURL, setBaseURL] = useState("");
+  const [mode, setMode] = useState<RegisterMode>("auto");
+  const [adminToken, setAdminToken] = useState("");
+  const [connectionID, setConnectionID] = useState("");
+  const [clientID, setClientID] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const redirectURI = `${window.location.origin}/api/forge/oauth/callback`;
+  // GitHub has no create-app REST API (only the interactive App-Manifest flow),
+  // so token-based auto-create isn't available for it yet — nudge to manual.
+  const autoSupported = provider !== "github";
+  const usableConns = connections.filter((c) => c.provider === provider);
+
+  const pickProvider = (p: ForgeProvider) => {
+    setProvider(p);
+    if (p === "github" && mode !== "manual") setMode("manual");
+  };
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const input: RegisterForgeOAuthAppInput = {
+        provider,
+        forge_base_url: baseURL.trim() || undefined,
+        mode,
+      };
+      if (mode === "manual") {
+        input.client_id = clientID.trim();
+        input.client_secret = clientSecret.trim();
+      } else if (mode === "auto") {
+        input.admin_token = adminToken.trim();
+      } else {
+        input.connection_id = connectionID;
+      }
+      await registerForgeOAuthApp(teamID, input);
+      setAdminToken("");
+      setConnectionID("");
+      setClientID("");
+      setClientSecret("");
+      setBaseURL("");
+      setShow(false);
+      onRegistered();
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // GitHub has no create-app API: instead iterion hands GitHub a pre-filled App
+  // manifest the browser POSTs; GitHub creates the App and redirects back to
+  // iterion's callback, which stores the credentials. One click, no admin token.
+  const launchGitHubManifest = async () => {
+    setBusy(true);
+    try {
+      const { post_url, manifest } = await startGitHubManifest(teamID, {
+        forge_base_url: baseURL.trim() || undefined,
+        next: window.location.pathname + window.location.search,
+      });
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = post_url;
+      const field = document.createElement("input");
+      field.type = "hidden";
+      field.name = "manifest";
+      field.value = JSON.stringify(manifest);
+      form.appendChild(field);
+      document.body.appendChild(form);
+      form.submit(); // navigates to GitHub; the callback brings us back
+    } catch (e) {
+      onError((e as Error).message);
+      setBusy(false);
+    }
+  };
+
+  const canSubmit =
+    mode === "manual"
+      ? !!clientID.trim() && !!clientSecret.trim()
+      : mode === "auto"
+        ? autoSupported && !!adminToken.trim()
+        : !!connectionID;
+
+  if (!show) {
+    return (
+      <button
+        type="button"
+        onClick={() => setShow(true)}
+        className="mt-3 text-accent-text hover:underline text-sm"
+      >
+        + Register an OAuth app
+      </button>
+    );
+  }
+
+  return (
+    <section className="mt-3 bg-surface-1 border border-border-subtle rounded p-4 space-y-3">
+      <h4 className="font-medium text-sm">Register an OAuth app</h4>
+      <div className="flex gap-2 flex-wrap">
+        {(["gitlab", "github", "forgejo"] as ForgeProvider[]).map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => pickProvider(p)}
+            className={`text-sm rounded px-3 py-1 border ${
+              provider === p ? "border-accent bg-surface-2" : "border-border-subtle"
+            }`}
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+
+      {provider === "github" && (
+        <div className="rounded border border-accent/40 bg-accent/5 p-3 space-y-2">
+          <Button
+            variant="primary"
+            onClick={() => void launchGitHubManifest()}
+            disabled={busy}
+            loading={busy}
+          >
+            {busy ? "Opening GitHub…" : "Create a GitHub App"}
+          </Button>
+          <p className="text-caption text-fg-muted">
+            Recommended for GitHub — one click sends you to GitHub to confirm, then iterion stores
+            the app's credentials automatically. (For GitHub Enterprise, set the base URL below
+            first.) Or use the options below.
+          </p>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-3 text-sm">
+        <label
+          className={`flex items-center gap-1 ${autoSupported ? "" : "opacity-50"}`}
+          title={
+            autoSupported ? "" : "GitHub auto-create needs the App-Manifest flow — paste credentials"
+          }
+        >
+          <Radio
+            checked={mode === "auto"}
+            onChange={() => setMode("auto")}
+            disabled={!autoSupported}
+          />
+          Auto-create (admin token)
+        </label>
+        <label className="flex items-center gap-1">
+          <Radio
+            checked={mode === "auto_from_connection"}
+            onChange={() => setMode("auto_from_connection")}
+          />
+          Reuse a connection
+        </label>
+        <label className="flex items-center gap-1">
+          <Radio checked={mode === "manual"} onChange={() => setMode("manual")} />
+          Paste credentials
+        </label>
+      </div>
+
+      <div>
+        <label htmlFor="oauth-app-base-url" className="sr-only">
+          Forge base URL
+        </label>
+        <Input
+          size="md"
+          id="oauth-app-base-url"
+          placeholder="Forge base URL (optional — for self-hosted, e.g. https://gitlab.example.com)"
+          value={baseURL}
+          onChange={(e) => setBaseURL(e.target.value)}
+        />
+      </div>
+
+      {mode === "auto" && (
+        <>
+          <div>
+            <label htmlFor="oauth-admin-token" className="sr-only">
+              Admin token
+            </label>
+            <Input
+              size="md"
+              type="password"
+              id="oauth-admin-token"
+              placeholder="Admin token (GitLab: instance-admin PAT with api scope)"
+              value={adminToken}
+              onChange={(e) => setAdminToken(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <p className="text-caption text-fg-muted">
+            iterion creates the OAuth app on the forge for you (redirect URI + scope set
+            automatically) and stores its credentials sealed. The admin token is used once and never
+            stored.
+          </p>
+        </>
+      )}
+
+      {mode === "auto_from_connection" && (
+        <>
+          <div>
+            <label htmlFor="oauth-conn-pick" className="sr-only">
+              Connection
+            </label>
+            <Select
+              size="md"
+              id="oauth-conn-pick"
+              value={connectionID}
+              onChange={(e) => setConnectionID(e.target.value)}
+            >
+              <option value="">Select a {provider} connection…</option>
+              {usableConns.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.account_login ?? c.id} · {c.forge_base_url ?? c.provider}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <p className="text-caption text-fg-muted">
+            Reuses an existing {provider} connection's token to create the app — no admin token to
+            paste. The connection's owner needs create-app rights on the instance.
+          </p>
+        </>
+      )}
+
+      {mode === "manual" && (
+        <>
+          <div>
+            <label htmlFor="oauth-client-id" className="sr-only">
+              Client ID
+            </label>
+            <Input
+              size="md"
+              id="oauth-client-id"
+              placeholder="Client ID (Application ID)"
+              value={clientID}
+              onChange={(e) => setClientID(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <div>
+            <label htmlFor="oauth-client-secret" className="sr-only">
+              Client secret
+            </label>
+            <Input
+              size="md"
+              type="password"
+              id="oauth-client-secret"
+              placeholder="Client secret"
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <p className="text-caption text-fg-muted">
+            Create the app on the forge with redirect URI{" "}
+            <span className="font-mono break-all">{redirectURI}</span> and the scope it needs
+            (GitLab: <span className="font-mono">api</span>), then paste its credentials here.
+          </p>
+        </>
+      )}
+
+      <div className="flex items-center gap-2">
+        <Button
+          variant="primary"
+          onClick={() => void submit()}
+          disabled={busy || !canSubmit}
+          loading={busy}
+        >
+          {busy ? "Registering…" : "Register"}
+        </Button>
+        <Button variant="ghost" onClick={() => setShow(false)}>
+          Cancel
+        </Button>
+      </div>
+    </section>
+  );
+}
