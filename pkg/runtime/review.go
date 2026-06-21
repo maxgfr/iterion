@@ -369,7 +369,7 @@ func (e *Engine) persistGateMerge(ctx context.Context, runID, finalCommit, final
 // latest message + verdict + the merge configuration so the studio can render
 // the Review-&-Merge card. The full dialogue (turns) rides on the interaction.
 func (e *Engine) pauseReviewGate(rs *runState, nodeID string, hn *ir.HumanNode, companion map[string]interface{}, turns []store.InteractionTurn) error {
-	questions := e.buildNodeInputRS(nodeID, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
+	questions := e.buildNodeInputRS(nodeID, rs.scope())
 
 	message := stringAnswer(companion, "message")
 	if strings.TrimSpace(message) == "" {
@@ -413,7 +413,7 @@ func (e *Engine) runReviewCompanion(ctx context.Context, rs *runState, hn *ir.Hu
 		return map[string]interface{}{"needs_human_input": true}
 	}
 
-	questions := e.buildNodeInputRS(nodeID, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
+	questions := e.buildNodeInputRS(nodeID, rs.scope())
 	var systemText string
 	if hn.SystemPrompt != "" {
 		if p := e.workflow.Prompts[hn.SystemPrompt]; p != nil {
@@ -497,7 +497,13 @@ func (e *Engine) resolveReviewURL(hn *ir.HumanNode, questions map[string]interfa
 	}
 	pairs := make([]string, 0, 2*len(hn.ReviewURLRefs))
 	for _, ref := range hn.ReviewURLRefs {
-		val := e.resolveRef(ref, rs.vars, rs.outputs, questions, rs.artifacts, rs)
+		val := e.resolveRef(ref, resolveScope{
+			vars:      rs.vars,
+			outputs:   rs.outputs,
+			runInputs: questions,
+			artifacts: rs.artifacts,
+			rs:        rs,
+		})
 		pairs = append(pairs, ref.Raw, renderInstructionValue(val))
 	}
 	return strings.TrimSpace(strings.NewReplacer(pairs...).Replace(hn.ReviewURL))

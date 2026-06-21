@@ -1160,7 +1160,7 @@ func (e *Engine) execLoopRunNode(ctx context.Context, rs *runState, currentNodeI
 		return nil, false, err
 	}
 
-	nodeInput := e.buildNodeInputRS(currentNodeID, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
+	nodeInput := e.buildNodeInputRS(currentNodeID, rs.scope())
 
 	// Fork rehydration: when resumeFromFailure pinned a backend
 	// conversation / session id at currentNodeID, inject the matching
@@ -1360,7 +1360,7 @@ func (e *Engine) execCompute(rs *runState, nodeID string, cn *ir.ComputeNode) (s
 		return "", err
 	}
 
-	nodeInput := e.buildNodeInputRS(nodeID, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
+	nodeInput := e.buildNodeInputRS(nodeID, rs.scope())
 	output := make(map[string]interface{}, len(cn.Exprs))
 
 	exprCtx := e.exprContext(rs, nodeInput)
@@ -1511,14 +1511,44 @@ func (e *Engine) selectEdgeRS(rs *runState, fromNodeID string, output map[string
 // Input resolution
 // ---------------------------------------------------------------------------
 
+// resolveScope groups the five context maps + runState that every
+// reference-resolution call needs. It exists purely to flatten what was
+// a 5-param tail repeated across buildNodeInputRS / resolveMapping /
+// resolveRef and all their call sites — no behaviour change. Fields are
+// passed by reference value (map / pointer) just as before, so callers
+// can still mutate the underlying maps where they did previously
+// (e.g. fan_out's `merged` maps).
+type resolveScope struct {
+	vars      map[string]interface{}
+	outputs   map[string]map[string]interface{}
+	runInputs map[string]interface{}
+	artifacts map[string]map[string]interface{}
+	rs        *runState
+}
+
+// scope returns a resolveScope wired straight from rs — the common
+// shape "use the run's own vars/outputs/runInputs/artifacts" that the
+// vast majority of call sites need. Call sites that need to override
+// any field (e.g. fan_out's merged outputs, resume's per-question
+// runInputs) construct a literal resolveScope{} instead.
+func (rs *runState) scope() resolveScope {
+	return resolveScope{
+		vars:      rs.vars,
+		outputs:   rs.outputs,
+		runInputs: rs.runInputs,
+		artifacts: rs.artifacts,
+		rs:        rs,
+	}
+}
+
 // buildNodeInputRS constructs the input map for a node by looking at the
 // edge `with` mappings that target this node. For convergence points,
 // mappings from ALL resolved incoming edges are merged. If no mappings
 // exist, the run-level inputs are used for the entry node. The runState
-// is required so that `{{loop.*}}` / `{{run.*}}` references resolve
-// against the run's iteration state. Pass nil for rs only in tests that
-// don't exercise those namespaces.
-func (e *Engine) buildNodeInputRS(nodeID string, vars map[string]interface{}, outputs map[string]map[string]interface{}, runInputs map[string]interface{}, artifacts map[string]map[string]interface{}, rs *runState) map[string]interface{} {
+// (sc.rs) is required so that `{{loop.*}}` / `{{run.*}}` references
+// resolve against the run's iteration state. Pass nil for sc.rs only in
+// tests that don't exercise those namespaces.
+func (e *Engine) buildNodeInputRS(nodeID string, sc resolveScope) map[string]interface{} {
 	result := make(map[string]interface{})
 
 	// Merge with-mappings from ALL edges targeting this node whose source
@@ -1528,17 +1558,17 @@ func (e *Engine) buildNodeInputRS(nodeID string, vars map[string]interface{}, ou
 			continue
 		}
 		// Only use mappings from an edge whose source has already produced output.
-		if _, ok := outputs[edge.From]; !ok && edge.From != "" {
+		if _, ok := sc.outputs[edge.From]; !ok && edge.From != "" {
 			continue
 		}
 
 		// Build effective input context: {{input.X}} in with-mappings should
 		// resolve from the edge source's output (e.g. a router's pass-through
 		// input) with run-level inputs as fallback.
-		effectiveInputs := runInputs
-		if sourceOut := outputs[edge.From]; sourceOut != nil {
-			effectiveInputs = make(map[string]interface{}, len(runInputs)+len(sourceOut))
-			for k, v := range runInputs {
+		effectiveInputs := sc.runInputs
+		if sourceOut := sc.outputs[edge.From]; sourceOut != nil {
+			effectiveInputs = make(map[string]interface{}, len(sc.runInputs)+len(sourceOut))
+			for k, v := range sc.runInputs {
 				effectiveInputs[k] = v
 			}
 			for k, v := range sourceOut {
@@ -1546,8 +1576,15 @@ func (e *Engine) buildNodeInputRS(nodeID string, vars map[string]interface{}, ou
 			}
 		}
 
+		// Per-edge scope: same maps as the caller's scope, except
+		// runInputs is shadowed by the edge-source's outputs so
+		// {{input.*}} refs in the with-mapping resolve against the
+		// source node's output instead of the run-level inputs.
+		edgeScope := sc
+		edgeScope.runInputs = effectiveInputs
+
 		for _, dm := range edge.With {
-			val := e.resolveMapping(dm, vars, outputs, effectiveInputs, artifacts, rs)
+			val := e.resolveMapping(dm, edgeScope)
 			// Include nil values too: a ref that resolves to nil
 			// (e.g. `{{outputs.fixer.pushback}}` before the fixer
 			// has run, `{{loop.X.previous_output}}` on iteration 1)
@@ -1576,7 +1613,7 @@ func (e *Engine) buildNodeInputRS(nodeID string, vars map[string]interface{}, ou
 				result[name] = v.Default
 			}
 		}
-		for k, v := range runInputs {
+		for k, v := range sc.runInputs {
 			result[k] = v
 		}
 	}
@@ -1587,31 +1624,31 @@ func (e *Engine) buildNodeInputRS(nodeID string, vars map[string]interface{}, ou
 // resolveMapping resolves a DataMapping's references to concrete values.
 // For simplicity in the minimal runtime, if there is exactly one ref we
 // return the resolved value directly; otherwise we return the raw template.
-func (e *Engine) resolveMapping(dm *ir.DataMapping, vars map[string]interface{}, outputs map[string]map[string]interface{}, runInputs map[string]interface{}, artifacts map[string]map[string]interface{}, rs *runState) interface{} {
+func (e *Engine) resolveMapping(dm *ir.DataMapping, sc resolveScope) interface{} {
 	if len(dm.Refs) == 1 {
-		return e.resolveRef(dm.Refs[0], vars, outputs, runInputs, artifacts, rs)
+		return e.resolveRef(dm.Refs[0], sc)
 	}
 	return dm.Raw
 }
 
-// resolveRef resolves a single Ref to a concrete value. The runState is
-// required for `loop` and `run` namespace resolution; pass nil to skip
-// those (they'll resolve to nil).
-func (e *Engine) resolveRef(ref *ir.Ref, vars map[string]interface{}, outputs map[string]map[string]interface{}, runInputs map[string]interface{}, artifacts map[string]map[string]interface{}, rs *runState) interface{} {
+// resolveRef resolves a single Ref to a concrete value. The runState
+// (sc.rs) is required for `loop` and `run` namespace resolution; pass
+// nil to skip those (they'll resolve to nil).
+func (e *Engine) resolveRef(ref *ir.Ref, sc resolveScope) interface{} {
 	switch ref.Kind {
 	case ir.RefVars:
 		if len(ref.Path) > 0 {
-			return vars[ref.Path[0]]
+			return sc.vars[ref.Path[0]]
 		}
 	case ir.RefInput:
 		if len(ref.Path) > 0 {
-			return runInputs[ref.Path[0]]
+			return sc.runInputs[ref.Path[0]]
 		}
 	case ir.RefOutputs:
 		if len(ref.Path) == 0 {
 			return nil
 		}
-		nodeOut := outputs[ref.Path[0]]
+		nodeOut := sc.outputs[ref.Path[0]]
 		if nodeOut == nil {
 			return nil
 		}
@@ -1621,20 +1658,20 @@ func (e *Engine) resolveRef(ref *ir.Ref, vars map[string]interface{}, outputs ma
 		return nodeOut[ref.Path[1]]
 	case ir.RefArtifacts:
 		if len(ref.Path) > 0 {
-			return artifacts[ref.Path[0]]
+			return sc.artifacts[ref.Path[0]]
 		}
 	case ir.RefLoop:
-		if rs == nil || len(ref.Path) < 2 {
+		if sc.rs == nil || len(ref.Path) < 2 {
 			return nil
 		}
-		return e.resolveLoopPath(ref.Path, rs)
+		return e.resolveLoopPath(ref.Path, sc.rs)
 	case ir.RefRun:
-		if rs == nil || len(ref.Path) == 0 {
+		if sc.rs == nil || len(ref.Path) == 0 {
 			return nil
 		}
 		switch ref.Path[0] {
 		case "id":
-			return rs.runID
+			return sc.rs.runID
 		}
 	}
 	return nil
@@ -1678,7 +1715,7 @@ func (e *Engine) resolveLoopMax(loop *ir.Loop, rs *runState) int {
 	}
 	var resolved interface{}
 	for _, ref := range loop.MaxIterationsExprRefs {
-		v := e.resolveRef(ref, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
+		v := e.resolveRef(ref, rs.scope())
 		if v != nil {
 			resolved = v
 		}

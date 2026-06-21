@@ -606,7 +606,7 @@ func (e *Engine) execAutoOrPauseHuman(ctx context.Context, rs *runState, nodeID 
 	}
 
 	// Build input and execute LLM.
-	nodeInput := e.buildNodeInputRS(nodeID, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
+	nodeInput := e.buildNodeInputRS(nodeID, rs.scope())
 	execCtx := model.WithLoopIteration(ctx, iter)
 	output, err := e.executor.Execute(execCtx, node, nodeInput)
 	if err != nil {
@@ -710,7 +710,13 @@ func (e *Engine) pauseAtHuman(rs *runState, nodeID string, node ir.Node) error {
 // execAutoOrPauseHuman. The caller is responsible for emitting node_started
 // before calling this method.
 func (e *Engine) persistPause(rs *runState, nodeID string) error {
-	questions := e.buildNodeInputRS(nodeID, rs.vars, rs.outputs, nil, rs.artifacts, rs)
+	questions := e.buildNodeInputRS(nodeID, resolveScope{
+		vars:      rs.vars,
+		outputs:   rs.outputs,
+		runInputs: nil,
+		artifacts: rs.artifacts,
+		rs:        rs,
+	})
 	return e.doPause(rs, nodeID, questions, e.humanInstructionsExtra(nodeID, questions, rs), pauseInfo{})
 }
 
@@ -756,7 +762,13 @@ func (e *Engine) renderHumanInstructions(p *ir.Prompt, questions map[string]inte
 	}
 	pairs := make([]string, 0, 2*len(p.TemplateRefs))
 	for _, ref := range p.TemplateRefs {
-		val := e.resolveRef(ref, rs.vars, rs.outputs, questions, rs.artifacts, rs)
+		val := e.resolveRef(ref, resolveScope{
+			vars:      rs.vars,
+			outputs:   rs.outputs,
+			runInputs: questions,
+			artifacts: rs.artifacts,
+			rs:        rs,
+		})
 		pairs = append(pairs, ref.Raw, renderInstructionValue(val))
 	}
 	return strings.NewReplacer(pairs...).Replace(p.Body)
@@ -983,7 +995,7 @@ func (e *Engine) handleInteractionLLMOrHuman(ctx context.Context, rs *runState, 
 // LLM might call ask_user with the same question again.
 func (e *Engine) reInvokeBackend(ctx context.Context, rs *runState, nodeID string, node ir.Node, ni *model.ErrNeedsInteraction, answers map[string]interface{}, depth int) error {
 	// Build the input for re-invocation: original node input + answers.
-	nodeInput := e.buildNodeInputRS(nodeID, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
+	nodeInput := e.buildNodeInputRS(nodeID, rs.scope())
 	for k, v := range answers {
 		nodeInput[k] = v
 	}

@@ -58,7 +58,7 @@ func (e *Engine) execRoundRobin(ctx context.Context, rs *runState, routerNodeID 
 	}
 
 	// Router is a pass-through: its output = its input from incoming edges.
-	routerInput := e.buildNodeInputRS(routerNodeID, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
+	routerInput := e.buildNodeInputRS(routerNodeID, rs.scope())
 	rs.outputs[routerNodeID] = routerInput
 
 	// Emit router node_finished.
@@ -106,7 +106,7 @@ func (e *Engine) execLLMRouter(ctx context.Context, rs *runState, routerNodeID s
 	}
 
 	// Build router input.
-	routerInput := e.buildNodeInputRS(routerNodeID, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
+	routerInput := e.buildNodeInputRS(routerNodeID, rs.scope())
 
 	// Collect outgoing edge targets as candidates.
 	// NOTE: order follows edge declaration order in the .iter file, which the

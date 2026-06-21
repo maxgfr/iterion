@@ -39,7 +39,7 @@ func (e *Engine) execFanOut(ctx context.Context, rs *runState, routerNodeID stri
 	}
 
 	// Router is a pass-through: its output = its input from incoming edges.
-	routerInput := e.buildNodeInputRS(routerNodeID, rs.vars, rs.outputs, rs.runInputs, rs.artifacts, rs)
+	routerInput := e.buildNodeInputRS(routerNodeID, rs.scope())
 	rs.outputs[routerNodeID] = routerInput
 
 	// Emit router node_finished.
@@ -444,7 +444,13 @@ func (e *Engine) execBranch(ctx context.Context, rs *runState, branchID string, 
 		// loop snapshots (read-only — branches never traverse loop edges).
 		merged := mergeOutputs(parentOutputs, result.outputs)
 		mergedArt := mergeOutputs(parentArtifacts, result.artifacts)
-		nodeInput := e.buildNodeInputRS(currentNodeID, vars, merged, runInputs, mergedArt, rs)
+		nodeInput := e.buildNodeInputRS(currentNodeID, resolveScope{
+			vars:      vars,
+			outputs:   merged,
+			runInputs: runInputs,
+			artifacts: mergedArt,
+			rs:        rs,
+		})
 
 		execCtx := model.WithLoopIteration(ctx, iter)
 		output, err := e.executor.Execute(execCtx, node, nodeInput)
