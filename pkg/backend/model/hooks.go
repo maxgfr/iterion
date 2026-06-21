@@ -174,18 +174,28 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 	// red scrubs run.log block bodies (a separate sink from
 	// events.jsonl). Nil-safe: a nil guard returns the input unchanged.
 	red := guard.Redact
+	// emit is a closure-local shorthand for AppendEvent calls that share
+	// the captured (ctx, runID) and the (Type/RunID/NodeID/Data) Event
+	// shape — i.e. every event emitted from this NewStoreEventHooks
+	// closure. AppendEvent's error is intentionally discarded here, as
+	// it was at every call site before this refactor: the store layer
+	// already logs persistence failures and the hook path must never
+	// fail the in-flight LLM call.
+	emit := func(nodeID string, evType store.EventType, data map[string]interface{}) {
+		_, _ = emitter.AppendEvent(ctx, runID, store.Event{
+			Type:   evType,
+			RunID:  runID,
+			NodeID: nodeID,
+			Data:   data,
+		})
+	}
 	return EventHooks{
 		OnLLMPrompt: func(nodeID string, systemPrompt string, userMessage string) {
 			data := map[string]interface{}{
 				"system_prompt": iterlog.Truncate(systemPrompt, maxFieldSize),
 				"user_message":  iterlog.Truncate(userMessage, maxFieldSize),
 			}
-			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
-				Type:   store.EventLLMPrompt,
-				RunID:  runID,
-				NodeID: nodeID,
-				Data:   data,
-			})
+			emit(nodeID, store.EventLLMPrompt, data)
 
 			// Use LogBlock so the prompt body folds under the header
 			// in the studio's run log. Pass the full text — truncating
@@ -210,12 +220,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			if info.ReasoningEffort != "" {
 				data["reasoning_effort"] = info.ReasoningEffort
 			}
-			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
-				Type:   store.EventLLMRequest,
-				RunID:  runID,
-				NodeID: nodeID,
-				Data:   data,
-			})
+			emit(nodeID, store.EventLLMRequest, data)
 
 			toolInfo := ""
 			if info.ToolCount > 0 {
@@ -243,12 +248,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			if info.StatusCode != 0 {
 				data["status_code"] = info.StatusCode
 			}
-			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
-				Type:   store.EventLLMRetry,
-				RunID:  runID,
-				NodeID: nodeID,
-				Data:   data,
-			})
+			emit(nodeID, store.EventLLMRetry, data)
 
 			errMsg := ""
 			if info.Error != nil {
@@ -296,12 +296,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				data["tool_call_details"] = calls
 			}
 
-			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
-				Type:   store.EventLLMStepFinished,
-				RunID:  runID,
-				NodeID: nodeID,
-				Data:   data,
-			})
+			emit(nodeID, store.EventLLMStepFinished, data)
 
 			if step.Text != "" {
 				// Full response, no preview cap — the studio folds the
@@ -416,12 +411,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				"after_messages":        info.AfterMessages,
 				"removed_message_count": info.RemovedMessageCount,
 			}
-			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
-				Type:   store.EventLLMCompacted,
-				RunID:  runID,
-				NodeID: nodeID,
-				Data:   data,
-			})
+			emit(nodeID, store.EventLLMCompacted, data)
 
 			logger.Logf(iterlog.LevelInfo, "📦", "[%s#%d/claw] compacted: %d → %d msgs (%d removed)",
 				nodeID, info.Iteration, info.BeforeMessages, info.AfterMessages, info.RemovedMessageCount)
@@ -441,12 +431,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			// 4 KB preview + a ref the studio uses to fetch the rest
 			// paginated.
 			persistToolPayload(ctx, guard, toolBlobSink, runID, info.ToolUseID, "input", info.Input, data)
-			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
-				Type:   store.EventToolStarted,
-				RunID:  runID,
-				NodeID: nodeID,
-				Data:   data,
-			})
+			emit(nodeID, store.EventToolStarted, data)
 			// No console echo here: the claude_code delegate already
 			// emits its own `[node#iter/claude-code] 🔧 <Tool> <detail>`
 			// line as the SDK stream is decoded, and the claw path logs
@@ -475,12 +460,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				evtType = store.EventToolError
 				data["error"] = info.Error.Error()
 			}
-			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
-				Type:   evtType,
-				RunID:  runID,
-				NodeID: nodeID,
-				Data:   data,
-			})
+			emit(nodeID, evtType, data)
 
 			// Console output: errors only — the success case is fully
 			// captured by the tool_called event (duration + tool name)
@@ -493,12 +473,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 		},
 
 		OnDelegateStarted: func(nodeID string, backendName string) {
-			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
-				Type:   store.EventDelegateStarted,
-				RunID:  runID,
-				NodeID: nodeID,
-				Data:   map[string]interface{}{"backend": backendName},
-			})
+			emit(nodeID, store.EventDelegateStarted, map[string]interface{}{"backend": backendName})
 			logger.Logf(iterlog.LevelInfo, "🚀", "Delegation started [%s]: backend=%s", nodeID, backendName)
 		},
 
@@ -515,12 +490,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			if logger.IsEnabled(iterlog.LevelTrace) && info.Stderr != "" {
 				data["stderr"] = iterlog.Truncate(info.Stderr, maxFieldSize)
 			}
-			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
-				Type:   store.EventDelegateFinished,
-				RunID:  runID,
-				NodeID: nodeID,
-				Data:   data,
-			})
+			emit(nodeID, store.EventDelegateFinished, data)
 
 			logger.Logf(iterlog.LevelInfo, "✅", "Delegation finished [%s]: %s (%dms, %d tokens)",
 				nodeID, info.BackendName, info.Duration.Milliseconds(), info.Tokens)
@@ -548,12 +518,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			if logger.IsEnabled(iterlog.LevelTrace) && info.Stderr != "" {
 				data["stderr"] = iterlog.Truncate(info.Stderr, maxFieldSize)
 			}
-			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
-				Type:   store.EventDelegateError,
-				RunID:  runID,
-				NodeID: nodeID,
-				Data:   data,
-			})
+			emit(nodeID, store.EventDelegateError, data)
 
 			errMsg := ""
 			if info.Error != nil {
@@ -571,12 +536,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 			if info.Error != nil {
 				data["error"] = info.Error.Error()
 			}
-			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
-				Type:   store.EventDelegateRetry,
-				RunID:  runID,
-				NodeID: nodeID,
-				Data:   data,
-			})
+			emit(nodeID, store.EventDelegateRetry, data)
 
 			errMsg := ""
 			if info.Error != nil {
@@ -608,12 +568,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 				evtType = store.EventToolError
 				data["error"] = err.Error()
 			}
-			_, _ = emitter.AppendEvent(ctx, runID, store.Event{
-				Type:   evtType,
-				RunID:  runID,
-				NodeID: nodeID,
-				Data:   data,
-			})
+			emit(nodeID, evtType, data)
 
 			if err != nil {
 				logger.Error("Tool error [%s]: %s — %v (%dms)",
@@ -627,12 +582,7 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 						iterlog.BlockPreview(red(output), 1500))
 				}
 				for _, payload := range scanPreviewURLs(output) {
-					_, _ = emitter.AppendEvent(ctx, runID, store.Event{
-						Type:   store.EventPreviewURLAvailable,
-						RunID:  runID,
-						NodeID: nodeID,
-						Data:   payload,
-					})
+					emit(nodeID, store.EventPreviewURLAvailable, payload)
 					if url, _ := payload["url"].(string); url != "" {
 						logger.Logf(iterlog.LevelInfo, "🌐", "Preview URL [%s]: %s", nodeID, url)
 					}
