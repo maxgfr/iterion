@@ -56,7 +56,7 @@ export default function ResetPassword() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-surface-0 text-fg-default px-4">
-      <div className="w-full max-w-md bg-surface-1 border border-border-subtle rounded-lg p-8 shadow-md">
+      <div className="w-full max-w-md bg-surface-1 border border-border-subtle rounded-lg p-8 shadow-[var(--shadow-md)]">
         <h1 className="text-2xl font-semibold mb-2">Reset your password</h1>
         <p className="text-sm text-fg-muted mb-6">Pick a new password to finish.</p>
         <form onSubmit={submit} className="space-y-3">
@@ -107,13 +107,13 @@ export default function ResetPassword() {
           </Button>
         </form>
         <div className="mt-4 text-sm text-fg-muted text-center">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => navigate("/login")}
-            className="underline"
           >
             Back to sign-in
-          </button>
+          </Button>
         </div>
       </div>
     </div>

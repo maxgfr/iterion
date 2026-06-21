@@ -34,19 +34,19 @@ export default function ForgotPassword() {
   if (sent) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-surface-0 text-fg-default px-4">
-        <div className="w-full max-w-md bg-surface-1 border border-border-subtle rounded-lg p-8 shadow-md space-y-4">
+        <div className="w-full max-w-md bg-surface-1 border border-border-subtle rounded-lg p-8 shadow-[var(--shadow-md)] space-y-4">
           <h1 className="text-2xl font-semibold">Check your email</h1>
           <p className="text-sm text-fg-muted">
             If we have an account for that email address, we sent a password-reset link.
             The link expires shortly — open it in the same browser to finish resetting.
           </p>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => navigate("/login")}
-            className="underline text-sm"
           >
             Back to sign-in
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -54,7 +54,7 @@ export default function ForgotPassword() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-surface-0 text-fg-default px-4">
-      <div className="w-full max-w-md bg-surface-1 border border-border-subtle rounded-lg p-8 shadow-md">
+      <div className="w-full max-w-md bg-surface-1 border border-border-subtle rounded-lg p-8 shadow-[var(--shadow-md)]">
         <h1 className="text-2xl font-semibold mb-2">Forgot your password?</h1>
         <p className="text-sm text-fg-muted mb-6">
           Enter your email and we'll send a one-time link to reset it.
@@ -89,13 +89,13 @@ export default function ForgotPassword() {
           </Button>
         </form>
         <div className="mt-4 text-sm text-fg-muted text-center">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => navigate("/login")}
-            className="underline"
           >
             Back to sign-in
-          </button>
+          </Button>
         </div>
       </div>
     </div>

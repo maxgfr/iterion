@@ -103,7 +103,7 @@ export default function AcceptInvitation() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-surface-0 text-fg-default px-4">
-      <div className="w-full max-w-md bg-surface-1 border border-border-subtle rounded-lg p-8 shadow-md space-y-4">
+      <div className="w-full max-w-md bg-surface-1 border border-border-subtle rounded-lg p-8 shadow-[var(--shadow-md)] space-y-4">
         <h1 className="text-2xl font-semibold">Join a team</h1>
         {!token && (
           <InlineBanner tone="danger" layout="inline">
@@ -140,13 +140,13 @@ export default function AcceptInvitation() {
           </div>
         )}
         <div className="text-sm text-fg-muted text-center">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => navigate("/")}
-            className="underline"
           >
             Cancel
-          </button>
+          </Button>
         </div>
       </div>
     </div>
