@@ -132,9 +132,15 @@ func Unparse(f *ast.File) string {
 		if a.MCP != nil {
 			writeMCPConfigBlock(&b, a.MCP, "  ")
 		}
-		writeAgentFields(&b, a.Model, a.Backend, a.Provider, a.Input, a.Output, a.Publish,
-			a.System, a.User, a.Session, a.Tools, a.ToolPolicy, a.Capabilities, a.ToolMaxSteps, a.MaxTokens, a.ReasoningEffort, a.Readonly,
-			a.Interaction, a.InteractionPrompt, a.InteractionModel, a.Await)
+		writeAgentFields(&b, llmFields{
+			Model: a.Model, Backend: a.Backend, Provider: a.Provider,
+			Input: a.Input, Output: a.Output, Publish: a.Publish,
+			System: a.System, User: a.User, Session: a.Session,
+			Tools: a.Tools, ToolPolicy: a.ToolPolicy, Capabilities: a.Capabilities,
+			ToolMaxSteps: a.ToolMaxSteps, MaxTokens: a.MaxTokens, ReasoningEffort: a.ReasoningEffort,
+			Readonly: a.Readonly, Interaction: a.Interaction, InteractionPrompt: a.InteractionPrompt,
+			InteractionModel: a.InteractionModel, Await: a.Await,
+		})
 		if a.Compaction != nil {
 			writeCompaction(&b, a.Compaction, "  ", false)
 		}
@@ -154,9 +160,15 @@ func Unparse(f *ast.File) string {
 		if j.MCP != nil {
 			writeMCPConfigBlock(&b, j.MCP, "  ")
 		}
-		writeAgentFields(&b, j.Model, j.Backend, j.Provider, j.Input, j.Output, j.Publish,
-			j.System, j.User, j.Session, j.Tools, j.ToolPolicy, j.Capabilities, j.ToolMaxSteps, j.MaxTokens, j.ReasoningEffort, j.Readonly,
-			j.Interaction, j.InteractionPrompt, j.InteractionModel, j.Await)
+		writeAgentFields(&b, llmFields{
+			Model: j.Model, Backend: j.Backend, Provider: j.Provider,
+			Input: j.Input, Output: j.Output, Publish: j.Publish,
+			System: j.System, User: j.User, Session: j.Session,
+			Tools: j.Tools, ToolPolicy: j.ToolPolicy, Capabilities: j.Capabilities,
+			ToolMaxSteps: j.ToolMaxSteps, MaxTokens: j.MaxTokens, ReasoningEffort: j.ReasoningEffort,
+			Readonly: j.Readonly, Interaction: j.Interaction, InteractionPrompt: j.InteractionPrompt,
+			InteractionModel: j.InteractionModel, Await: j.Await,
+		})
 		if j.Compaction != nil {
 			writeCompaction(&b, j.Compaction, "  ", false)
 		}
@@ -594,71 +606,92 @@ func quoteList(vals []string) string {
 	return strings.Join(quoted, ", ")
 }
 
-func writeAgentFields(b *strings.Builder, model, backend, provider, input, output, publish, system, user string, session ast.SessionMode, tools []string, toolPolicy []string, capabilities []string, toolMaxSteps int, maxTokens int, reasoningEffort string, readonly bool, interaction ast.InteractionMode, interactionPrompt, interactionModel string, await ast.AwaitMode) {
-	if model != "" {
-		writeQuotedProp(b, "model", model)
+// llmFields bundles the agent/judge node properties shared by both
+// declaration kinds. It exists so writeAgentFields takes one named
+// argument instead of 22 positional ones — eight of which are
+// consecutive strings, where a transposition would compile cleanly but
+// silently corrupt the emitted source. Field names mirror ast.AgentDecl
+// / ast.JudgeDecl so the call-site literals read as a direct projection.
+type llmFields struct {
+	Model, Backend, Provider            string
+	Input, Output, Publish              string
+	System, User                        string
+	Session                             ast.SessionMode
+	Tools, ToolPolicy                   []string
+	Capabilities                        []string
+	ToolMaxSteps, MaxTokens             int
+	ReasoningEffort                     string
+	Readonly                            bool
+	Interaction                         ast.InteractionMode
+	InteractionPrompt, InteractionModel string
+	Await                               ast.AwaitMode
+}
+
+func writeAgentFields(b *strings.Builder, f llmFields) {
+	if f.Model != "" {
+		writeQuotedProp(b, "model", f.Model)
 	}
-	if backend != "" {
-		writeQuotedProp(b, "backend", backend)
+	if f.Backend != "" {
+		writeQuotedProp(b, "backend", f.Backend)
 	}
-	if provider != "" {
-		writeQuotedProp(b, "provider", provider)
+	if f.Provider != "" {
+		writeQuotedProp(b, "provider", f.Provider)
 	}
-	if input != "" {
-		writeIdentProp(b, "input", input)
+	if f.Input != "" {
+		writeIdentProp(b, "input", f.Input)
 	}
-	if output != "" {
-		writeIdentProp(b, "output", output)
+	if f.Output != "" {
+		writeIdentProp(b, "output", f.Output)
 	}
-	if publish != "" {
-		writeIdentProp(b, "publish", publish)
+	if f.Publish != "" {
+		writeIdentProp(b, "publish", f.Publish)
 	}
-	if system != "" {
-		writeIdentProp(b, "system", system)
+	if f.System != "" {
+		writeIdentProp(b, "system", f.System)
 	}
-	if user != "" {
-		writeIdentProp(b, "user", user)
+	if f.User != "" {
+		writeIdentProp(b, "user", f.User)
 	}
 	// Only emit session: when it's non-default. The previous if/else
 	// emitted it unconditionally — both branches called the same
 	// writeProp — which broke parse → unparse → re-parse round-trip
 	// stability (every agent/judge would gain a synthetic
 	// `session: fresh` line that wasn't in the source).
-	if session != ast.SessionFresh {
-		writeProp(b, "session", session.String())
+	if f.Session != ast.SessionFresh {
+		writeProp(b, "session", f.Session.String())
 	}
-	if len(tools) > 0 {
-		fmt.Fprintf(b, "  tools: [%s]\n", strings.Join(tools, ", "))
+	if len(f.Tools) > 0 {
+		fmt.Fprintf(b, "  tools: [%s]\n", strings.Join(f.Tools, ", "))
 	}
-	if len(toolPolicy) > 0 {
-		fmt.Fprintf(b, "  tool_policy: [%s]\n", strings.Join(toolPolicy, ", "))
+	if len(f.ToolPolicy) > 0 {
+		fmt.Fprintf(b, "  tool_policy: [%s]\n", strings.Join(f.ToolPolicy, ", "))
 	}
-	if len(capabilities) > 0 {
-		fmt.Fprintf(b, "  capabilities: [%s]\n", strings.Join(capabilities, ", "))
+	if len(f.Capabilities) > 0 {
+		fmt.Fprintf(b, "  capabilities: [%s]\n", strings.Join(f.Capabilities, ", "))
 	}
-	if toolMaxSteps > 0 {
-		fmt.Fprintf(b, "  tool_max_steps: %d\n", toolMaxSteps)
+	if f.ToolMaxSteps > 0 {
+		fmt.Fprintf(b, "  tool_max_steps: %d\n", f.ToolMaxSteps)
 	}
-	if maxTokens > 0 {
-		fmt.Fprintf(b, "  max_tokens: %d\n", maxTokens)
+	if f.MaxTokens > 0 {
+		fmt.Fprintf(b, "  max_tokens: %d\n", f.MaxTokens)
 	}
-	if reasoningEffort != "" {
-		writeReasoningEffortProp(b, reasoningEffort)
+	if f.ReasoningEffort != "" {
+		writeReasoningEffortProp(b, f.ReasoningEffort)
 	}
-	if readonly {
+	if f.Readonly {
 		writeProp(b, "readonly", "true")
 	}
-	if interaction != ast.InteractionNone {
-		writeProp(b, "interaction", interaction.String())
+	if f.Interaction != ast.InteractionNone {
+		writeProp(b, "interaction", f.Interaction.String())
 	}
-	if interactionPrompt != "" {
-		writeProp(b, "interaction_prompt", interactionPrompt)
+	if f.InteractionPrompt != "" {
+		writeProp(b, "interaction_prompt", f.InteractionPrompt)
 	}
-	if interactionModel != "" {
-		writeQuotedProp(b, "interaction_model", interactionModel)
+	if f.InteractionModel != "" {
+		writeQuotedProp(b, "interaction_model", f.InteractionModel)
 	}
-	if await != ast.AwaitNone {
-		writeProp(b, "await", await.String())
+	if f.Await != ast.AwaitNone {
+		writeProp(b, "await", f.Await.String())
 	}
 }
 
