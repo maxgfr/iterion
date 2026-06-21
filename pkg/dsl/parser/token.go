@@ -146,6 +146,8 @@ const (
 	TokenVisibility
 	// Worktree
 	TokenWorktree
+	// RTK output-compression mode: on|off|ultra
+	TokenRTK
 	// Sandbox (Phase 0: simple "sandbox: ident" form for none|auto)
 	TokenSandbox
 	// Cursor declaration + activation block
@@ -283,6 +285,7 @@ var tokenNames = map[TokenType]string{
 	TokenProjectRoot:      "project_root",
 	TokenVisibility:       "visibility",
 	TokenWorktree:         "worktree",
+	TokenRTK:              "rtk",
 	TokenSandbox:          "sandbox",
 	TokenCursor:           "cursor",
 	TokenCursors:          "cursors",
@@ -399,6 +402,7 @@ var keywords = map[string]TokenType{
 	"project_root":          TokenProjectRoot,
 	"visibility":            TokenVisibility,
 	"worktree":              TokenWorktree,
+	"rtk":                   TokenRTK,
 	"sandbox":               TokenSandbox,
 	"cursor":                TokenCursor,
 	"cursors":               TokenCursors,

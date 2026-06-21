@@ -36,6 +36,7 @@ type Workflow struct {
 	Capabilities   []string               // workflow-level default host capabilities (nil = inherit none)
 	Interaction    *InteractionMode       // workflow-level default interaction mode (nil = not set)
 	Worktree       string                 // "auto" runs in a per-run git worktree; "" or "none" runs in-place
+	RTK            string                 // rtk output-compression mode: on|ultra|off ("" = unset)
 	Sandbox        *SandboxSpec           // workflow-level sandbox spec (nil = inherit global / no sandbox)
 	// Cursors map of cursor name → resolved definition. Populated from
 	// top-level `cursor NAME:` declarations. Agent/judge `cursors:`
@@ -157,6 +158,7 @@ type AgentNode struct {
 	Memory           *Memory      // per-node workspace memory opt-in (nil = disabled)
 	Sandbox          *SandboxSpec // node-level sandbox override (nil = inherit workflow)
 	Cursors          *CursorInvocation
+	RTK              string // rtk output-compression mode: on|ultra|off ("" = inherit)
 }
 
 // NodeKind implements Node.
@@ -181,6 +183,7 @@ type JudgeNode struct {
 	Memory           *Memory      // per-node workspace memory opt-in (nil = disabled)
 	Sandbox          *SandboxSpec // node-level sandbox override (nil = inherit workflow)
 	Cursors          *CursorInvocation
+	RTK              string // rtk output-compression mode: on|ultra|off ("" = inherit)
 }
 
 // NodeKind implements Node.
@@ -242,6 +245,7 @@ type ToolNode struct {
 	Session     SessionMode
 	AwaitMode   AwaitMode
 	Sandbox     *SandboxSpec // node-level sandbox override (nil = inherit workflow)
+	RTK         string       // rtk output-compression mode: on|ultra|off ("" = inherit)
 }
 
 // NodeKind implements Node.

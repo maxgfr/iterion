@@ -301,6 +301,7 @@ type jsonAgentDecl struct {
 	Memory            *jsonMemoryBlock     `json:"memory,omitempty"`
 	Sandbox           *jsonSandboxBlock    `json:"sandbox,omitempty"`
 	Cursors           *jsonCursorBlock     `json:"cursors,omitempty"`
+	RTK               string               `json:"rtk,omitempty"`
 }
 
 type jsonJudgeDecl struct {
@@ -330,6 +331,7 @@ type jsonJudgeDecl struct {
 	Memory            *jsonMemoryBlock     `json:"memory,omitempty"`
 	Sandbox           *jsonSandboxBlock    `json:"sandbox,omitempty"`
 	Cursors           *jsonCursorBlock     `json:"cursors,omitempty"`
+	RTK               string               `json:"rtk,omitempty"`
 }
 
 type jsonRouterDecl struct {
@@ -374,6 +376,7 @@ type jsonToolNodeDecl struct {
 	Publish  string            `json:"publish,omitempty"`
 	Await    string            `json:"await,omitempty"`
 	Sandbox  *jsonSandboxBlock `json:"sandbox,omitempty"`
+	RTK      string            `json:"rtk,omitempty"`
 }
 
 // jsonSandboxBlock is the JSON form of an ast.SandboxBlock. The
@@ -515,6 +518,7 @@ type jsonWorkflowDecl struct {
 	Compaction     *jsonCompactionBlock  `json:"compaction,omitempty"`
 	Interaction    string                `json:"interaction,omitempty"`
 	Worktree       string                `json:"worktree,omitempty"`
+	RTK            string                `json:"rtk,omitempty"`
 	Sandbox        *jsonSandboxBlock     `json:"sandbox,omitempty"`
 	Edges          []*jsonEdge           `json:"edges,omitempty"`
 }
@@ -627,6 +631,7 @@ func toJSON(f *File) *jsonFile {
 			Publish:  t.Publish,
 			Await:    awaitModeToStr[t.Await],
 			Sandbox:  sandboxBlockToJSON(t.Sandbox),
+			RTK:      t.RTK,
 		})
 	}
 	for _, c := range f.Computes {
@@ -924,6 +929,7 @@ func agentToJSON(a *AgentDecl) *jsonAgentDecl {
 		Memory:            memoryToJSON(a.Memory),
 		Sandbox:           sandboxBlockToJSON(a.Sandbox),
 		Cursors:           cursorBlockToJSON(a.Cursors),
+		RTK:               a.RTK,
 	}
 }
 
@@ -955,6 +961,7 @@ func judgeToJSON(j *JudgeDecl) *jsonJudgeDecl {
 		Memory:            memoryToJSON(j.Memory),
 		Sandbox:           sandboxBlockToJSON(j.Sandbox),
 		Cursors:           cursorBlockToJSON(j.Cursors),
+		RTK:               j.RTK,
 	}
 }
 
@@ -990,6 +997,7 @@ func workflowToJSON(w *WorkflowDecl) *jsonWorkflowDecl {
 		MCP:            mcpConfigToJSON(w.MCP),
 		Compaction:     compactionToJSON(w.Compaction),
 		Worktree:       w.Worktree,
+		RTK:            w.RTK,
 		Sandbox:        sandboxBlockToJSON(w.Sandbox),
 	}
 	if w.Vars != nil {
@@ -1168,6 +1176,7 @@ func fromJSON(jf *jsonFile) (*File, error) {
 			Publish:  jt.Publish,
 			Await:    aw,
 			Sandbox:  sandboxBlockFromJSON(jt.Sandbox),
+			RTK:      jt.RTK,
 		})
 	}
 
@@ -1373,6 +1382,7 @@ func agentFromJSON(ja *jsonAgentDecl) (*AgentDecl, error) {
 			Memory:            memoryFromJSON(ja.Memory),
 			Sandbox:           sandboxBlockFromJSON(ja.Sandbox),
 			Cursors:           cursorBlockFromJSON(ja.Cursors),
+			RTK:               ja.RTK,
 		},
 	}, nil
 }
@@ -1418,6 +1428,7 @@ func judgeFromJSON(jj *jsonJudgeDecl) (*JudgeDecl, error) {
 			Memory:            memoryFromJSON(jj.Memory),
 			Sandbox:           sandboxBlockFromJSON(jj.Sandbox),
 			Cursors:           cursorBlockFromJSON(jj.Cursors),
+			RTK:               jj.RTK,
 		},
 	}, nil
 }
@@ -1470,6 +1481,7 @@ func workflowFromJSON(jw *jsonWorkflowDecl) (*WorkflowDecl, error) {
 		MCP:            mcpConfigFromJSON(jw.MCP),
 		Compaction:     compactionFromJSON(jw.Compaction),
 		Worktree:       jw.Worktree,
+		RTK:            jw.RTK,
 		Sandbox:        sandboxBlockFromJSON(jw.Sandbox),
 	}
 	if jw.Vars != nil {

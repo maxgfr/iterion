@@ -140,6 +140,7 @@ func Unparse(f *ast.File) string {
 			ToolMaxSteps: a.ToolMaxSteps, MaxTokens: a.MaxTokens, ReasoningEffort: a.ReasoningEffort,
 			Readonly: a.Readonly, Interaction: a.Interaction, InteractionPrompt: a.InteractionPrompt,
 			InteractionModel: a.InteractionModel, Await: a.Await,
+			RTK: a.RTK,
 		})
 		if a.Compaction != nil {
 			writeCompaction(&b, a.Compaction, "  ", false)
@@ -168,6 +169,7 @@ func Unparse(f *ast.File) string {
 			ToolMaxSteps: j.ToolMaxSteps, MaxTokens: j.MaxTokens, ReasoningEffort: j.ReasoningEffort,
 			Readonly: j.Readonly, Interaction: j.Interaction, InteractionPrompt: j.InteractionPrompt,
 			InteractionModel: j.InteractionModel, Await: j.Await,
+			RTK: j.RTK,
 		})
 		if j.Compaction != nil {
 			writeCompaction(&b, j.Compaction, "  ", false)
@@ -295,6 +297,9 @@ func Unparse(f *ast.File) string {
 		if t.Await != ast.AwaitNone {
 			writeProp(&b, "await", t.Await.String())
 		}
+		if t.RTK != "" {
+			writeProp(&b, "rtk", t.RTK)
+		}
 		writeSandboxBlock(&b, t.Sandbox, "  ")
 	}
 
@@ -355,6 +360,10 @@ func Unparse(f *ast.File) string {
 
 		if w.Worktree != "" {
 			writeProp(&b, "worktree", w.Worktree)
+		}
+
+		if w.RTK != "" {
+			writeProp(&b, "rtk", w.RTK)
 		}
 
 		writeSandboxBlock(&b, w.Sandbox, "  ")
@@ -625,6 +634,7 @@ type llmFields struct {
 	Interaction                         ast.InteractionMode
 	InteractionPrompt, InteractionModel string
 	Await                               ast.AwaitMode
+	RTK                                 string
 }
 
 func writeAgentFields(b *strings.Builder, f llmFields) {
@@ -692,6 +702,9 @@ func writeAgentFields(b *strings.Builder, f llmFields) {
 	}
 	if f.Await != ast.AwaitNone {
 		writeProp(b, "await", f.Await.String())
+	}
+	if f.RTK != "" {
+		writeProp(b, "rtk", f.RTK)
 	}
 }
 

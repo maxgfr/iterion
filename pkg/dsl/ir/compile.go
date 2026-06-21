@@ -493,6 +493,7 @@ func (c *compiler) compile() *Workflow {
 		Cursors:        cursors,
 		Interaction:    interaction,
 		Worktree:       wf.Worktree,
+		RTK:            wf.RTK,
 		Sandbox:        c.compileSandboxBlock(wf.Sandbox, "workflow", wf.Name),
 	}
 
@@ -740,6 +741,7 @@ func (c *compiler) compileAgents() {
 			Memory:       compileMemory(a.Memory),
 			Sandbox:      c.compileSandboxBlock(a.Sandbox, "agent", a.Name),
 			Cursors:      compileCursorInvocation(a.Cursors),
+			RTK:          a.RTK,
 		}
 	}
 }
@@ -805,6 +807,7 @@ func (c *compiler) compileJudges() {
 			Memory:       compileMemory(j.Memory),
 			Sandbox:      c.compileSandboxBlock(j.Sandbox, "judge", j.Name),
 			Cursors:      compileCursorInvocation(j.Cursors),
+			RTK:          j.RTK,
 		}
 	}
 }
@@ -1040,6 +1043,7 @@ func (c *compiler) compileTools() {
 			Publish:     t.Publish,
 			AwaitMode:   t.Await,
 			Sandbox:     c.compileSandboxBlock(t.Sandbox, "tool", t.Name),
+			RTK:         t.RTK,
 		}
 	}
 }

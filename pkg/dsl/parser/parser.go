@@ -1161,6 +1161,9 @@ func (p *parser) parseLLMProp(d *ast.LLMDecl, propTok Token, kind string) {
 	case TokenBackend:
 		p.expect(TokenColon)
 		d.Backend = p.expectString()
+	case TokenRTK:
+		p.expect(TokenColon)
+		d.RTK = p.expectIdent()
 	case TokenProvider:
 		p.expect(TokenColon)
 		d.Provider = p.expectString()
@@ -1523,6 +1526,9 @@ func (p *parser) parseToolNodeProp(td *ast.ToolNodeDecl, propTok Token) {
 	case TokenSandbox:
 		p.backup()
 		td.Sandbox = p.parseSandboxBlock()
+	case TokenRTK:
+		p.expect(TokenColon)
+		td.RTK = p.expectIdent()
 	default:
 		p.addError(DiagUnknownProperty, propTok, "unknown tool property '"+propTok.Value+"'")
 		p.skipToNewline()
@@ -1702,6 +1708,12 @@ func (p *parser) parseWorkflowDecl() *ast.WorkflowDecl {
 			p.next() // consume "worktree"
 			p.expect(TokenColon)
 			wd.Worktree = p.expectIdent()
+			p.skipNewlines()
+
+		case TokenRTK:
+			p.next() // consume "rtk"
+			p.expect(TokenColon)
+			wd.RTK = p.expectIdent()
 			p.skipNewlines()
 
 		case TokenSandbox:
@@ -2336,6 +2348,7 @@ func isKeywordToken(tt TokenType) bool {
 		TokenCompaction, TokenThreshold, TokenPreserveRecent,
 		TokenMemory, TokenEnabled, TokenScope, TokenAutoload, TokenRead, TokenWrite, TokenPreCompactInject,
 		TokenWorktree,
+		TokenRTK,
 		TokenSandbox,
 		TokenCursor, TokenCursors, TokenValues, TokenBands,
 		TokenAttachments, TokenTypeFile, TokenTypeImage,

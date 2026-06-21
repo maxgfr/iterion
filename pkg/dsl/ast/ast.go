@@ -361,6 +361,7 @@ type LLMDecl struct {
 	Memory            *MemoryBlock     // per-node workspace memory opt-in (nil = disabled)
 	Sandbox           *SandboxBlock    // node-level sandbox override; nil inherits from workflow (see pkg/sandbox)
 	Cursors           *CursorBlock     // prompt-engineering cursor activations (nil = none)
+	RTK               string           // rtk output-compression mode: on|ultra|off ("" = inherit)
 }
 
 // AgentDecl represents an `agent <name>:` node declaration.
@@ -494,6 +495,7 @@ type ToolNodeDecl struct {
 	Publish  string        // persistent artifact name (empty if not set)
 	Await    AwaitMode     // convergence strategy (none/wait_all/best_effort)
 	Sandbox  *SandboxBlock // node-level sandbox override; nil inherits from workflow
+	RTK      string        // rtk output-compression mode: on|ultra|off ("" = inherit)
 	Span     Span
 }
 
@@ -549,6 +551,7 @@ type WorkflowDecl struct {
 	Compaction     *CompactionBlock  // session compaction defaults for all nodes (optional)
 	Interaction    *InteractionMode  // workflow-level default interaction mode (nil = not set)
 	Worktree       string            // "auto" creates a per-run git worktree; "" or "none" runs in-place
+	RTK            string            // rtk output-compression mode: on|ultra|off ("" = unset)
 	Sandbox        *SandboxBlock     // sandbox: short or block form (nil = inherit global default)
 	Edges          []*Edge           // directed edges between nodes
 	Span           Span
