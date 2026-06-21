@@ -681,7 +681,7 @@ export default function LaunchView() {
               <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
                 <div>
                   <div className="text-xs font-medium font-mono">rtk</div>
-                  <div className="text-[10px] text-fg-subtle">output compression</div>
+                  <div className="text-caption text-fg-subtle">output compression</div>
                 </div>
                 <div>
                   <Select
@@ -693,7 +693,7 @@ export default function LaunchView() {
                     <option value="ultra">ultra — densest output</option>
                     <option value="off">off — disable for this run</option>
                   </Select>
-                  <div className="mt-1 text-[10px] text-fg-subtle">
+                  <div className="mt-1 text-caption text-fg-subtle">
                     Rewrites agent shell commands via{" "}
                     <a
                       href="https://github.com/rtk-ai/rtk"
