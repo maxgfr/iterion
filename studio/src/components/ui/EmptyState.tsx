@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { TerminalCaret } from "./TerminalCaret";
 
 export interface EmptyStateProps {
   // Body copy. Pass an empty string to render the centered slot
@@ -14,6 +15,9 @@ export interface EmptyStateProps {
   // the empty state has a second equally-weighted next step (e.g.
   // "Open Editor" + "Browse examples").
   secondaryAction?: ReactNode;
+  // Opt into a gentle blinking terminal caret after the message — the
+  // hacker-culture affordance for "waiting / nothing here yet" slates.
+  caret?: boolean;
   className?: string;
 }
 
@@ -32,6 +36,7 @@ export function EmptyState({
   icon,
   action,
   secondaryAction,
+  caret = false,
   className = "",
 }: EmptyStateProps) {
   const hasActions = Boolean(action || secondaryAction);
@@ -43,7 +48,12 @@ export function EmptyState({
       {title && (
         <div className="text-sm font-medium text-fg-default">{title}</div>
       )}
-      {message !== "" && <div className={title ? "max-w-sm" : ""}>{message}</div>}
+      {(message !== "" || caret) && (
+        <div className={title ? "max-w-sm" : ""}>
+          {message}
+          {caret && <TerminalCaret className={message !== "" ? "ml-1" : ""} />}
+        </div>
+      )}
       {hasActions && (
         <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
           {action}

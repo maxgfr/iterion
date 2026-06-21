@@ -67,6 +67,9 @@ export { Skeleton } from "./Skeleton";
 export { EmptyState } from "./EmptyState";
 export type { EmptyStateProps } from "./EmptyState";
 
+export { TerminalCaret } from "./TerminalCaret";
+export type { TerminalCaretProps } from "./TerminalCaret";
+
 export { DesktopOnlyNotice } from "./DesktopOnlyNotice";
 
 export { Spinner } from "./Spinner";

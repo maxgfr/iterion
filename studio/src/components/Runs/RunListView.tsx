@@ -411,6 +411,7 @@ export default function RunListView() {
           <EmptyState
             title="No runs yet"
             message="Launch a workflow from the editor to populate this list."
+            caret
             action={
               <Button
                 variant="primary"

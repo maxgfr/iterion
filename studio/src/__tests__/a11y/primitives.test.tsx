@@ -18,6 +18,7 @@ import { Radio } from "@/components/ui/Radio";
 import { RadioGroup } from "@/components/ui/RadioGroup";
 import { FieldLabel } from "@/components/ui/FieldLabel";
 import { BrandWordmark } from "@/components/ui/BrandWordmark";
+import { TerminalCaret } from "@/components/ui/TerminalCaret";
 
 // Smoke a11y test for the shared UI primitives. Uses axe-core in
 // jsdom and focuses on WCAG 2.1 A + AA rules. The aim is to catch
@@ -284,5 +285,15 @@ describe("a11y / primitives", () => {
       </div>,
     );
     await expectNoViolations(root, "BrandWordmark");
+  });
+
+  it("TerminalCaret + EmptyState caret stay decorative (aria-hidden)", async () => {
+    const root = mount(
+      <main>
+        <TerminalCaret />
+        <EmptyState message="No runs yet" caret />
+      </main>,
+    );
+    await expectNoViolations(root, "TerminalCaret");
   });
 });

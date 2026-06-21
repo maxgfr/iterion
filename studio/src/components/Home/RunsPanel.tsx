@@ -84,7 +84,7 @@ export default function RunsPanel({ runs, loading, error }: Props) {
         ) : error ? (
           <EmptyState message={<span className="text-danger">{error}</span>} className="py-6" />
         ) : !hasAnything ? (
-          <EmptyState message="No runs yet — launch one from the studio." className="py-6" />
+          <EmptyState message="No runs yet — launch one from the studio." caret className="py-6" />
         ) : (
           <ul className="divide-y divide-border-default">
             {active.map((r) => (
