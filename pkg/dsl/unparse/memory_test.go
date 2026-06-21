@@ -16,15 +16,17 @@ func TestUnparseMemory_OnAgent(t *testing.T) {
 	inject := true
 	f := &ast.File{
 		Agents: []*ast.AgentDecl{{
-			Name:    "reviser",
-			Backend: "claw",
-			Memory: &ast.MemoryBlock{
-				Enabled:          &enabled,
-				Scope:            &scope,
-				Autoload:         []string{"INDEX.md", "CONTEXT_BRIEF.md"},
-				Read:             &read,
-				Write:            &write,
-				PreCompactInject: &inject,
+			Name: "reviser",
+			LLMDecl: ast.LLMDecl{
+				Backend: "claw",
+				Memory: &ast.MemoryBlock{
+					Enabled:          &enabled,
+					Scope:            &scope,
+					Autoload:         []string{"INDEX.md", "CONTEXT_BRIEF.md"},
+					Read:             &read,
+					Write:            &write,
+					PreCompactInject: &inject,
+				},
 			},
 		}},
 		Workflows: []*ast.WorkflowDecl{{

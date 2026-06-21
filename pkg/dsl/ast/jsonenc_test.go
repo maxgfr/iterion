@@ -73,27 +73,31 @@ func buildTestFile() *ast.File {
 		},
 		Agents: []*ast.AgentDecl{
 			{
-				Name:            "coder",
-				Model:           "claude-sonnet-4-20250514",
-				Input:           "task_input",
-				Output:          "code_output",
-				Publish:         "code_artifact",
-				System:          "system_prompt",
-				User:            "user_prompt",
-				Session:         ast.SessionInherit,
-				Tools:           []string{"read_file", "write_file"},
-				ToolMaxSteps:    10,
-				ReasoningEffort: "high",
+				Name: "coder",
+				LLMDecl: ast.LLMDecl{
+					Model:           "claude-sonnet-4-20250514",
+					Input:           "task_input",
+					Output:          "code_output",
+					Publish:         "code_artifact",
+					System:          "system_prompt",
+					User:            "user_prompt",
+					Session:         ast.SessionInherit,
+					Tools:           []string{"read_file", "write_file"},
+					ToolMaxSteps:    10,
+					ReasoningEffort: "high",
+				},
 			},
 		},
 		Judges: []*ast.JudgeDecl{
 			{
-				Name:            "reviewer",
-				Model:           "claude-sonnet-4-20250514",
-				Input:           "code_output",
-				Output:          "review_output",
-				Session:         ast.SessionArtifactsOnly,
-				ReasoningEffort: "low",
+				Name: "reviewer",
+				LLMDecl: ast.LLMDecl{
+					Model:           "claude-sonnet-4-20250514",
+					Input:           "code_output",
+					Output:          "review_output",
+					Session:         ast.SessionArtifactsOnly,
+					ReasoningEffort: "low",
+				},
 			},
 		},
 		Routers: []*ast.RouterDecl{
@@ -239,7 +243,7 @@ func TestEnumsSerializeAsStrings(t *testing.T) {
 				{Name: "f", Type: ast.FieldTypeJSON},
 			}},
 		},
-		Agents:  []*ast.AgentDecl{{Name: "a", Session: ast.SessionArtifactsOnly, Await: ast.AwaitBestEffort}},
+		Agents:  []*ast.AgentDecl{{Name: "a", LLMDecl: ast.LLMDecl{Session: ast.SessionArtifactsOnly, Await: ast.AwaitBestEffort}}},
 		Routers: []*ast.RouterDecl{{Name: "r", Mode: ast.RouterCondition}},
 		Humans:  []*ast.HumanDecl{{Name: "h", Interaction: ast.InteractionLLMOrHuman}},
 	}
@@ -498,26 +502,30 @@ func TestEditorCriticalFieldsRoundtrip(t *testing.T) {
 			},
 		}},
 		Agents: []*ast.AgentDecl{{
-			Name:      "implement",
-			Backend:   "claude_code",
-			MCP:       &ast.MCPConfigDecl{Inherit: &inherit, Servers: []string{"github"}, Disable: []string{"local"}},
-			System:    "sys",
-			User:      "usr",
-			Session:   ast.SessionFork,
-			MaxTokens: 2048,
-			Readonly:  true,
-			Compaction: &ast.CompactionBlock{
-				Threshold:      &threshold,
-				PreserveRecent: &preserve,
+			Name: "implement",
+			LLMDecl: ast.LLMDecl{
+				Backend:   "claude_code",
+				MCP:       &ast.MCPConfigDecl{Inherit: &inherit, Servers: []string{"github"}, Disable: []string{"local"}},
+				System:    "sys",
+				User:      "usr",
+				Session:   ast.SessionFork,
+				MaxTokens: 2048,
+				Readonly:  true,
+				Compaction: &ast.CompactionBlock{
+					Threshold:      &threshold,
+					PreserveRecent: &preserve,
+				},
 			},
 		}},
 		Judges: []*ast.JudgeDecl{{
-			Name:        "review",
-			Backend:     "claude_code",
-			MaxTokens:   1024,
-			Readonly:    true,
-			Compaction:  &ast.CompactionBlock{Threshold: &threshold},
-			Interaction: ast.InteractionLLM,
+			Name: "review",
+			LLMDecl: ast.LLMDecl{
+				Backend:     "claude_code",
+				MaxTokens:   1024,
+				Readonly:    true,
+				Compaction:  &ast.CompactionBlock{Threshold: &threshold},
+				Interaction: ast.InteractionLLM,
+			},
 		}},
 		Workflows: []*ast.WorkflowDecl{{
 			Name:           "flow",
@@ -554,16 +562,20 @@ func TestCapabilitiesRoundtrip(t *testing.T) {
 	original := &ast.File{
 		Agents: []*ast.AgentDecl{
 			{
-				Name:         "writer",
-				Model:        "anthropic/claude-sonnet-4-6",
-				Capabilities: []string{"board.create", "board.move"},
+				Name: "writer",
+				LLMDecl: ast.LLMDecl{
+					Model:        "anthropic/claude-sonnet-4-6",
+					Capabilities: []string{"board.create", "board.move"},
+				},
 			},
 		},
 		Judges: []*ast.JudgeDecl{
 			{
-				Name:         "reviewer",
-				Model:        "anthropic/claude-sonnet-4-6",
-				Capabilities: []string{"board.read"},
+				Name: "reviewer",
+				LLMDecl: ast.LLMDecl{
+					Model:        "anthropic/claude-sonnet-4-6",
+					Capabilities: []string{"board.read"},
+				},
 			},
 		},
 		Workflows: []*ast.WorkflowDecl{

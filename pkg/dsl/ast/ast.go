@@ -329,9 +329,13 @@ const (
 	SessionFork               = types.SessionFork
 )
 
-// AgentDecl represents an `agent <name>:` node declaration.
-type AgentDecl struct {
-	Name              string
+// LLMDecl groups the node properties shared verbatim by AgentDecl and
+// JudgeDecl — the two kinds differ only semantically (an agent acts; a
+// judge produces verdicts and typically uses no tools), not
+// structurally. Embedded (not named) so existing `decl.Model`-style
+// field access keeps working via promotion, and parsed by the single
+// parseLLMProp helper.
+type LLMDecl struct {
 	Model             string // string literal, may contain ${...} env refs
 	Backend           string // execution backend name (e.g. "claude_code"); when set, bypasses direct LLM API
 	Provider          string // credential routing hint(s): single ("anthropic"/"zai"/"openai"/""=auto) or an ordered fallback chain ("anthropic,zai,openai"); may contain ${...} env refs
@@ -349,7 +353,7 @@ type AgentDecl struct {
 	MaxTokens         int              // max output tokens per LLM call (0 = inherit backend default)
 	ReasoningEffort   string           // reasoning effort level: "low", "medium", "high", "xhigh", "max"
 	Readonly          bool             // when true, node is not considered mutating for workspace safety
-	Interaction       InteractionMode  // interaction handling (default none for agents)
+	Interaction       InteractionMode  // interaction handling (default none)
 	InteractionPrompt string           // prompt reference guiding LLM for llm_or_human decisions
 	InteractionModel  string           // model for llm/llm_or_human modes (fallback to Model)
 	Await             AwaitMode        // convergence strategy (none/wait_all/best_effort)
@@ -357,44 +361,26 @@ type AgentDecl struct {
 	Memory            *MemoryBlock     // per-node workspace memory opt-in (nil = disabled)
 	Sandbox           *SandboxBlock    // node-level sandbox override; nil inherits from workflow (see pkg/sandbox)
 	Cursors           *CursorBlock     // prompt-engineering cursor activations (nil = none)
-	Span              Span
+}
+
+// AgentDecl represents an `agent <name>:` node declaration.
+type AgentDecl struct {
+	Name string
+	LLMDecl
+	Span Span
 }
 
 // ---------------------------------------------------------------------------
 // Nodes — Judge
 // ---------------------------------------------------------------------------
 
-// JudgeDecl represents a `judge <name>:` node declaration.
-// Structurally identical to AgentDecl; semantically a judge
+// JudgeDecl represents a `judge <name>:` node declaration. Structurally
+// identical to AgentDecl (both embed LLMDecl); semantically a judge
 // produces verdicts and typically does not use tools.
 type JudgeDecl struct {
-	Name              string
-	Model             string
-	Backend           string // execution backend name; when set, bypasses direct LLM API
-	Provider          string // credential routing hint(s): single ("anthropic"/"zai"/"openai"/""=auto) or an ordered fallback chain ("anthropic,zai,openai"); may contain ${...} env refs
-	MCP               *MCPConfigDecl
-	Input             string
-	Output            string
-	Publish           string
-	System            string
-	User              string
-	Session           SessionMode
-	Tools             []string // usually empty for judges, but allowed
-	ToolPolicy        []string // per-node tool policy patterns (nil = inherit workflow)
-	Capabilities      []string // host-side capabilities granted to the node (e.g. board.read)
-	ToolMaxSteps      int
-	MaxTokens         int              // max output tokens per LLM call (0 = inherit backend default)
-	ReasoningEffort   string           // reasoning effort level: "low", "medium", "high", "xhigh", "max"
-	Readonly          bool             // when true, node is not considered mutating for workspace safety
-	Interaction       InteractionMode  // interaction handling (default none for judges)
-	InteractionPrompt string           // prompt reference guiding LLM for llm_or_human decisions
-	InteractionModel  string           // model for llm/llm_or_human modes (fallback to Model)
-	Await             AwaitMode        // convergence strategy (none/wait_all/best_effort)
-	Compaction        *CompactionBlock // per-node compaction overrides (nil = inherit workflow)
-	Memory            *MemoryBlock     // per-node workspace memory opt-in (nil = disabled)
-	Sandbox           *SandboxBlock    // node-level sandbox override; nil inherits from workflow (see pkg/sandbox)
-	Cursors           *CursorBlock     // prompt-engineering cursor activations (nil = none)
-	Span              Span
+	Name string
+	LLMDecl
+	Span Span
 }
 
 // ---------------------------------------------------------------------------

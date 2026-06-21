@@ -30,13 +30,15 @@ func TestMinimalWorkflow(t *testing.T) {
 		},
 		Agents: []*ast.AgentDecl{
 			{
-				Name:    "greeter",
-				Model:   "${MODEL}",
-				Input:   "greeting_in",
-				Output:  "greeting_out",
-				System:  "sys",
-				User:    "usr",
-				Session: ast.SessionFresh,
+				Name: "greeter",
+				LLMDecl: ast.LLMDecl{
+					Model:   "${MODEL}",
+					Input:   "greeting_in",
+					Output:  "greeting_out",
+					System:  "sys",
+					User:    "usr",
+					Session: ast.SessionFresh,
+				},
 			},
 		},
 		Workflows: []*ast.WorkflowDecl{
@@ -112,8 +114,8 @@ func TestParallelFanOutJoin(t *testing.T) {
 			{Name: "fanout", Mode: ast.RouterFanOutAll},
 		},
 		Agents: []*ast.AgentDecl{
-			{Name: "worker_a", Model: "${MODEL_A}", Input: "req", Output: "res", System: "sys", User: "usr", Session: ast.SessionFresh},
-			{Name: "worker_b", Model: "${MODEL_B}", Input: "req", Output: "res", System: "sys", User: "usr", Session: ast.SessionFresh},
+			{Name: "worker_a", LLMDecl: ast.LLMDecl{Model: "${MODEL_A}", Input: "req", Output: "res", System: "sys", User: "usr", Session: ast.SessionFresh}},
+			{Name: "worker_b", LLMDecl: ast.LLMDecl{Model: "${MODEL_B}", Input: "req", Output: "res", System: "sys", User: "usr", Session: ast.SessionFresh}},
 		},
 		Workflows: []*ast.WorkflowDecl{
 			{
@@ -264,13 +266,13 @@ func TestFullWorkflowCoverage(t *testing.T) {
 			}},
 		},
 		Agents: []*ast.AgentDecl{
-			{Name: "context_builder", Model: "${CONTEXT_MODEL}", Input: "repo_context_request", Output: "pr_context", Publish: "pr_context", System: "context_builder_system", User: "context_builder_user", Session: ast.SessionFresh, Tools: []string{"git_diff", "read_file"}, ToolMaxSteps: 8},
-			{Name: "claude_review", Model: "${CLAUDE_MODEL}", Input: "review_request", Output: "review_result", System: "review_system", User: "review_user", Session: ast.SessionFresh, Tools: []string{"git_diff", "read_file"}, ToolMaxSteps: 10},
-			{Name: "act_on_plan", Model: "${ACT_MODEL}", Input: "act_request", Output: "act_result", Publish: "act_report", System: "act_system", User: "act_user", Session: ast.SessionFresh, Tools: []string{"read_file", "write_file", "patch"}, ToolMaxSteps: 20},
+			{Name: "context_builder", LLMDecl: ast.LLMDecl{Model: "${CONTEXT_MODEL}", Input: "repo_context_request", Output: "pr_context", Publish: "pr_context", System: "context_builder_system", User: "context_builder_user", Session: ast.SessionFresh, Tools: []string{"git_diff", "read_file"}, ToolMaxSteps: 8}},
+			{Name: "claude_review", LLMDecl: ast.LLMDecl{Model: "${CLAUDE_MODEL}", Input: "review_request", Output: "review_result", System: "review_system", User: "review_user", Session: ast.SessionFresh, Tools: []string{"git_diff", "read_file"}, ToolMaxSteps: 10}},
+			{Name: "act_on_plan", LLMDecl: ast.LLMDecl{Model: "${ACT_MODEL}", Input: "act_request", Output: "act_result", Publish: "act_report", System: "act_system", User: "act_user", Session: ast.SessionFresh, Tools: []string{"read_file", "write_file", "patch"}, ToolMaxSteps: 20}},
 		},
 		Judges: []*ast.JudgeDecl{
-			{Name: "plan_compliance_check", Model: "${JUDGE_MODEL}", Input: "plan_compliance_request", Output: "compliance_verdict", System: "compliance_system", User: "compliance_user", Session: ast.SessionFresh},
-			{Name: "final_compliance", Model: "${JUDGE_MODEL}", Input: "final_reviews_bundle", Output: "compliance_verdict", Publish: "final_verdict", System: "final_compliance_system", User: "final_compliance_user", Session: ast.SessionFresh},
+			{Name: "plan_compliance_check", LLMDecl: ast.LLMDecl{Model: "${JUDGE_MODEL}", Input: "plan_compliance_request", Output: "compliance_verdict", System: "compliance_system", User: "compliance_user", Session: ast.SessionFresh}},
+			{Name: "final_compliance", LLMDecl: ast.LLMDecl{Model: "${JUDGE_MODEL}", Input: "final_reviews_bundle", Output: "compliance_verdict", Publish: "final_verdict", System: "final_compliance_system", User: "final_compliance_user", Session: ast.SessionFresh}},
 		},
 		Routers: []*ast.RouterDecl{
 			{Name: "review_fanout", Mode: ast.RouterFanOutAll},

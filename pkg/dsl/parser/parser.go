@@ -1100,92 +1100,96 @@ func (p *parser) parseAgentDecl() *ast.AgentDecl {
 			}
 			break
 		}
-		p.parseAgentProp(ad, t)
+		p.parseLLMProp(&ad.LLMDecl, t, "agent")
 	}
 	return ad
 }
 
-func (p *parser) parseAgentProp(ad *ast.AgentDecl, propTok Token) {
+// parseLLMProp parses one property line shared by agent and judge nodes
+// into the embedded ast.LLMDecl. The two declaration kinds are
+// structurally identical, so a single switch serves both; kind ("agent"
+// /"judge") only personalises the unknown-property diagnostic.
+func (p *parser) parseLLMProp(d *ast.LLMDecl, propTok Token, kind string) {
 	p.next() // consume property keyword
 	switch propTok.Type {
 	case TokenModel:
 		p.expect(TokenColon)
-		ad.Model = p.expectString()
+		d.Model = p.expectString()
 	case TokenInput:
 		p.expect(TokenColon)
-		ad.Input = p.expectIdent()
+		d.Input = p.expectIdent()
 	case TokenOutput:
 		p.expect(TokenColon)
-		ad.Output = p.expectIdent()
+		d.Output = p.expectIdent()
 	case TokenPublish:
 		p.expect(TokenColon)
-		ad.Publish = p.expectIdent()
+		d.Publish = p.expectIdent()
 	case TokenSystem:
 		p.expect(TokenColon)
-		ad.System = p.expectIdent()
+		d.System = p.expectIdent()
 	case TokenUser:
 		p.expect(TokenColon)
-		ad.User = p.expectIdent()
+		d.User = p.expectIdent()
 	case TokenSession:
 		p.expect(TokenColon)
-		ad.Session = p.parseSessionMode()
+		d.Session = p.parseSessionMode()
 	case TokenTools:
 		p.expect(TokenColon)
-		ad.Tools = p.parseToolList()
+		d.Tools = p.parseToolList()
 	case TokenToolPolicy:
 		p.expect(TokenColon)
-		ad.ToolPolicy = p.parseToolList()
+		d.ToolPolicy = p.parseToolList()
 	case TokenCapabilities:
 		p.expect(TokenColon)
-		ad.Capabilities = p.parseToolList()
+		d.Capabilities = p.parseToolList()
 	case TokenToolMaxSteps:
 		p.expect(TokenColon)
-		ad.ToolMaxSteps = p.expectInt()
+		d.ToolMaxSteps = p.expectInt()
 	case TokenMaxTokens:
 		p.expect(TokenColon)
-		ad.MaxTokens = p.expectInt()
+		d.MaxTokens = p.expectInt()
 	case TokenReasoningEffort:
-		ad.ReasoningEffort = p.parseReasoningEffort()
+		d.ReasoningEffort = p.parseReasoningEffort()
 	case TokenReadonly:
 		p.expect(TokenColon)
 		if v := p.parseBool(); v != nil {
-			ad.Readonly = *v
+			d.Readonly = *v
 		}
 	case TokenMCP:
 		p.backup()
-		ad.MCP = p.parseMCPConfigBlock()
+		d.MCP = p.parseMCPConfigBlock()
 	case TokenBackend:
 		p.expect(TokenColon)
-		ad.Backend = p.expectString()
+		d.Backend = p.expectString()
 	case TokenProvider:
 		p.expect(TokenColon)
-		ad.Provider = p.expectString()
+		d.Provider = p.expectString()
 	case TokenInteraction:
 		p.expect(TokenColon)
-		ad.Interaction = p.parseInteractionMode()
+		d.Interaction = p.parseInteractionMode()
 	case TokenInteractionPrompt:
 		p.expect(TokenColon)
-		ad.InteractionPrompt = p.expectIdent()
+		d.InteractionPrompt = p.expectIdent()
 	case TokenInteractionModel:
 		p.expect(TokenColon)
-		ad.InteractionModel = p.expectString()
+		d.InteractionModel = p.expectString()
 	case TokenAwait:
 		p.expect(TokenColon)
-		ad.Await = p.parseAwaitMode()
+		d.Await = p.parseAwaitMode()
 	case TokenCompaction:
 		p.backup()
-		ad.Compaction = p.parseCompactionBlock()
+		d.Compaction = p.parseCompactionBlock()
 	case TokenMemory:
 		p.backup()
-		ad.Memory = p.parseMemoryBlock()
+		d.Memory = p.parseMemoryBlock()
 	case TokenSandbox:
 		p.backup()
-		ad.Sandbox = p.parseSandboxBlock()
+		d.Sandbox = p.parseSandboxBlock()
 	case TokenCursors:
 		p.backup()
-		ad.Cursors = p.parseCursorsBlock()
+		d.Cursors = p.parseCursorsBlock()
 	default:
-		p.addError(DiagUnknownProperty, propTok, "unknown agent property '"+propTok.Value+"'")
+		p.addError(DiagUnknownProperty, propTok, "unknown "+kind+" property '"+propTok.Value+"'")
 		p.skipToNewline()
 	}
 	p.skipNewlines()
@@ -1222,95 +1226,9 @@ func (p *parser) parseJudgeDecl() *ast.JudgeDecl {
 			}
 			break
 		}
-		p.parseJudgeProp(jd, t)
+		p.parseLLMProp(&jd.LLMDecl, t, "judge")
 	}
 	return jd
-}
-
-func (p *parser) parseJudgeProp(jd *ast.JudgeDecl, propTok Token) {
-	p.next()
-	switch propTok.Type {
-	case TokenModel:
-		p.expect(TokenColon)
-		jd.Model = p.expectString()
-	case TokenInput:
-		p.expect(TokenColon)
-		jd.Input = p.expectIdent()
-	case TokenOutput:
-		p.expect(TokenColon)
-		jd.Output = p.expectIdent()
-	case TokenPublish:
-		p.expect(TokenColon)
-		jd.Publish = p.expectIdent()
-	case TokenSystem:
-		p.expect(TokenColon)
-		jd.System = p.expectIdent()
-	case TokenUser:
-		p.expect(TokenColon)
-		jd.User = p.expectIdent()
-	case TokenSession:
-		p.expect(TokenColon)
-		jd.Session = p.parseSessionMode()
-	case TokenTools:
-		p.expect(TokenColon)
-		jd.Tools = p.parseToolList()
-	case TokenToolPolicy:
-		p.expect(TokenColon)
-		jd.ToolPolicy = p.parseToolList()
-	case TokenCapabilities:
-		p.expect(TokenColon)
-		jd.Capabilities = p.parseToolList()
-	case TokenToolMaxSteps:
-		p.expect(TokenColon)
-		jd.ToolMaxSteps = p.expectInt()
-	case TokenMaxTokens:
-		p.expect(TokenColon)
-		jd.MaxTokens = p.expectInt()
-	case TokenReasoningEffort:
-		jd.ReasoningEffort = p.parseReasoningEffort()
-	case TokenReadonly:
-		p.expect(TokenColon)
-		if v := p.parseBool(); v != nil {
-			jd.Readonly = *v
-		}
-	case TokenMCP:
-		p.backup()
-		jd.MCP = p.parseMCPConfigBlock()
-	case TokenBackend:
-		p.expect(TokenColon)
-		jd.Backend = p.expectString()
-	case TokenProvider:
-		p.expect(TokenColon)
-		jd.Provider = p.expectString()
-	case TokenInteraction:
-		p.expect(TokenColon)
-		jd.Interaction = p.parseInteractionMode()
-	case TokenInteractionPrompt:
-		p.expect(TokenColon)
-		jd.InteractionPrompt = p.expectIdent()
-	case TokenInteractionModel:
-		p.expect(TokenColon)
-		jd.InteractionModel = p.expectString()
-	case TokenAwait:
-		p.expect(TokenColon)
-		jd.Await = p.parseAwaitMode()
-	case TokenCompaction:
-		p.backup()
-		jd.Compaction = p.parseCompactionBlock()
-	case TokenMemory:
-		p.backup()
-		jd.Memory = p.parseMemoryBlock()
-	case TokenSandbox:
-		p.backup()
-		jd.Sandbox = p.parseSandboxBlock()
-	case TokenCursors:
-		p.backup()
-		jd.Cursors = p.parseCursorsBlock()
-	default:
-		p.addError(DiagUnknownProperty, propTok, "unknown judge property '"+propTok.Value+"'")
-		p.skipToNewline()
-	}
-	p.skipNewlines()
 }
 
 // ---- router ----

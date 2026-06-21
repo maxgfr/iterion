@@ -78,29 +78,33 @@ func TestUnparseBasic(t *testing.T) {
 		},
 		Agents: []*ast.AgentDecl{
 			{
-				Name:            "my_agent",
-				Model:           "${MODEL}",
-				Input:           "my_schema",
-				Output:          "result",
-				Publish:         "diagnosis",
-				System:          "my_prompt",
-				User:            "user_prompt",
-				Session:         ast.SessionFresh,
-				Tools:           []string{"read_file", "list_files"},
-				ToolMaxSteps:    10,
-				ReasoningEffort: "high",
+				Name: "my_agent",
+				LLMDecl: ast.LLMDecl{
+					Model:           "${MODEL}",
+					Input:           "my_schema",
+					Output:          "result",
+					Publish:         "diagnosis",
+					System:          "my_prompt",
+					User:            "user_prompt",
+					Session:         ast.SessionFresh,
+					Tools:           []string{"read_file", "list_files"},
+					ToolMaxSteps:    10,
+					ReasoningEffort: "high",
+				},
 			},
 		},
 		Judges: []*ast.JudgeDecl{
 			{
-				Name:            "my_judge",
-				Model:           "${MODEL}",
-				Input:           "verify_req",
-				Output:          "verdict",
-				System:          "judge_sys",
-				User:            "judge_user",
-				Session:         ast.SessionFresh,
-				ReasoningEffort: "low",
+				Name: "my_judge",
+				LLMDecl: ast.LLMDecl{
+					Model:           "${MODEL}",
+					Input:           "verify_req",
+					Output:          "verdict",
+					System:          "judge_sys",
+					User:            "judge_user",
+					Session:         ast.SessionFresh,
+					ReasoningEffort: "low",
+				},
 			},
 		},
 		Routers: []*ast.RouterDecl{
@@ -219,14 +223,18 @@ func TestUnparseBasic(t *testing.T) {
 func TestUnparseReasoningEffortEnvSubst(t *testing.T) {
 	f := &ast.File{
 		Agents: []*ast.AgentDecl{{
-			Name:            "a",
-			Model:           "claude-opus-4-7",
-			ReasoningEffort: "${VIBE_EFFORT:-max}",
+			Name: "a",
+			LLMDecl: ast.LLMDecl{
+				Model:           "claude-opus-4-7",
+				ReasoningEffort: "${VIBE_EFFORT:-max}",
+			},
 		}},
 		Judges: []*ast.JudgeDecl{{
-			Name:            "j",
-			Model:           "openai/gpt-5.5",
-			ReasoningEffort: "${VIBE_EFFORT_GPT:-high}",
+			Name: "j",
+			LLMDecl: ast.LLMDecl{
+				Model:           "openai/gpt-5.5",
+				ReasoningEffort: "${VIBE_EFFORT_GPT:-high}",
+			},
 		}},
 	}
 	got := Unparse(f)
@@ -301,13 +309,15 @@ func TestUnparseCriticalEditorFields(t *testing.T) {
 			},
 		}},
 		Agents: []*ast.AgentDecl{{
-			Name:       "implement",
-			Backend:    "claude_code",
-			MCP:        &ast.MCPConfigDecl{Inherit: &inherit, Servers: []string{"github"}, Disable: []string{"local"}},
-			Session:    ast.SessionFresh,
-			MaxTokens:  2048,
-			Readonly:   true,
-			Compaction: &ast.CompactionBlock{Threshold: &threshold, PreserveRecent: &preserve},
+			Name: "implement",
+			LLMDecl: ast.LLMDecl{
+				Backend:    "claude_code",
+				MCP:        &ast.MCPConfigDecl{Inherit: &inherit, Servers: []string{"github"}, Disable: []string{"local"}},
+				Session:    ast.SessionFresh,
+				MaxTokens:  2048,
+				Readonly:   true,
+				Compaction: &ast.CompactionBlock{Threshold: &threshold, PreserveRecent: &preserve},
+			},
 		}},
 		Workflows: []*ast.WorkflowDecl{{
 			Name:           "flow",
