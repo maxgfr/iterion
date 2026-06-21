@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import BootLoading from "@/components/shared/BootLoading";
 import {
   ApiError,
   getMe,
@@ -183,7 +184,7 @@ export function useAuth(): AuthCtx {
 export function RequireAuth({ children, fallback }: { children: ReactNode; fallback: ReactNode }) {
   const { status } = useAuth();
   if (status === "loading") {
-    return <div className="h-screen flex items-center justify-center text-fg-default">Loading…</div>;
+    return <BootLoading />;
   }
   if (status === "anonymous") {
     return <>{fallback}</>;

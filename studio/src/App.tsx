@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useState } from "react";
 import { Route, Switch, useLocation } from "wouter";
 
 import AppShell from "@/components/shared/AppShell";
+import BootLoading from "@/components/shared/BootLoading";
 
 // Routes are React.lazy'd so each view ships its own chunk and the
 // initial download covers only the shell + AuthGate. The eager imports
@@ -118,7 +119,7 @@ function AuthGate() {
   // invitation accept needs the AuthContext but not the full shell).
   if (location.startsWith("/invitations/accept")) {
     return (
-      <Suspense fallback={<div className="h-screen bg-surface-0 text-fg-default p-8">Loading…</div>}>
+      <Suspense fallback={<BootLoading />}>
         <AcceptInvitation />
       </Suspense>
     );
@@ -212,7 +213,7 @@ function AuthedApp() {
 
   if (!ready) {
     return (
-      <div className="h-screen bg-surface-0 text-fg-default p-8">Loading…</div>
+      <BootLoading />
     );
   }
 
@@ -220,7 +221,7 @@ function AuthedApp() {
     return (
       <Suspense
         fallback={
-          <div className="h-screen bg-surface-0 text-fg-default p-8">Loading…</div>
+          <BootLoading />
         }
       >
         <Welcome onComplete={refresh} />
