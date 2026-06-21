@@ -31,7 +31,7 @@ export default function AuxiliaryNode({ data, selected }: NodeProps) {
       role="button"
       tabIndex={0}
       aria-label={`Edit ${label}`}
-      className="rounded-full border px-3 py-1.5 min-w-[100px] text-center shadow-md cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent"
+      className="rounded-full border px-3 py-1.5 min-w-[100px] text-center shadow-[var(--shadow-sm)] cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent"
       style={{
         borderColor: selected ? SELECTED_BORDER : color,
         background: softColor(color),
@@ -55,7 +55,7 @@ export default function AuxiliaryNode({ data, selected }: NodeProps) {
         {badge && (
           <span
             className="text-[8px] px-1 rounded-full text-fg-default/80"
-            style={{ background: color + "44" }}
+            style={{ background: softColor(color, 27) }}
           >
             {badge}
           </span>

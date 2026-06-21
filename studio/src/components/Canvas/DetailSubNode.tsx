@@ -56,7 +56,7 @@ export default function DetailSubNode({ data, selected }: NodeProps) {
       role="button"
       tabIndex={0}
       aria-label={`Edit ${label}`}
-      className="rounded-lg border px-3 py-2 min-w-[130px] max-w-[200px] text-center shadow-md cursor-pointer hover:brightness-125 transition-all focus:outline-none focus:ring-2 focus:ring-accent"
+      className="rounded-lg border px-3 py-2 min-w-[130px] max-w-[200px] text-center shadow-[var(--shadow-sm)] cursor-pointer hover:brightness-125 transition-all focus:outline-none focus:ring-2 focus:ring-accent"
       style={{
         borderColor: selected ? SELECTED_BORDER : color,
         background: softColor(color, 9),
@@ -80,7 +80,7 @@ export default function DetailSubNode({ data, selected }: NodeProps) {
         {badge && (
           <span
             className="text-[8px] px-1.5 py-0.5 rounded-full text-fg-default/80"
-            style={{ background: color + "44" }}
+            style={{ background: softColor(color, 27) }}
           >
             {badge}
           </span>

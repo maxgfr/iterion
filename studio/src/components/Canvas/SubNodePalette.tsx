@@ -3,7 +3,7 @@ import { useDocumentStore } from "@/store/document";
 import { useUIStore } from "@/store/ui";
 import { useAddSubNode, type SubNodeDragData } from "@/hooks/useAddSubNode";
 import { findNodeDecl } from "@/lib/defaults";
-import { SUB_COLORS, SUB_ICONS } from "@/lib/constants";
+import { SUB_COLORS, SUB_ICONS, softColor } from "@/lib/constants";
 import type { SubNodeRelation } from "@/lib/docMutations";
 import type { NodeKind, AgentDecl, JudgeDecl, HumanDecl } from "@/api/types";
 import SchemaRoleDialog from "./SchemaRoleDialog";
@@ -84,7 +84,7 @@ function DraggableItem({
       onClick={(e) => onActivate(dragData, { x: e.clientX, y: e.clientY })}
       onKeyDown={handleKey}
       className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:brightness-125 transition-all border border-border-strong focus:outline-none focus:ring-1 focus:ring-accent"
-      style={{ backgroundColor: color + "18", borderColor: color + "66" }}
+      style={{ backgroundColor: softColor(color, 9), borderColor: softColor(color, 40) }}
       title={`Click or drag to add ${item.label}`}
     >
       <span className="text-xs">{icon}</span>
