@@ -21,6 +21,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
 import ConfirmDialog from "@/components/shared/ConfirmDialog";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 
 interface Props {
   teamID: string;
@@ -278,24 +279,17 @@ function CreateSecretDialog({
 }) {
   const [name, setName] = useState("");
   const [secret, setSecret] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const { busy, error: err, run } = useAsyncAction();
 
   const v = isValidSecretName(name);
 
-  const submit = async () => {
+  const submit = () => {
     if (!v.ok || !secret) return;
-    setBusy(true);
-    setErr(null);
-    try {
+    return run(async () => {
       if (scope === "team") await createTeamSecret(teamID, { name, secret });
       else await createMySecret({ name, secret });
       onCreated();
-    } catch (e) {
-      setErr(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
+    });
   };
 
   return (
@@ -369,22 +363,15 @@ function RotateSecretDialog({
   onRotated: () => void;
 }) {
   const [secret, setSecret] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const { busy, error: err, run } = useAsyncAction();
 
-  const submit = async () => {
+  const submit = () => {
     if (!secret) return;
-    setBusy(true);
-    setErr(null);
-    try {
+    return run(async () => {
       if (scope === "team") await updateTeamSecret(teamID, rec.id, { secret });
       else await updateMySecret(rec.id, { secret });
       onRotated();
-    } catch (e) {
-      setErr(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
+    });
   };
 
   return (

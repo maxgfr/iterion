@@ -29,6 +29,7 @@ import { Radio } from "@/components/ui/Radio";
 import { Select } from "@/components/ui/Select";
 import { TagInput } from "@/components/ui/TagInput";
 import ConfirmDialog from "@/components/shared/ConfirmDialog";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 
 interface Props {
   teamID: string;
@@ -316,13 +317,10 @@ function CreateWebhookDialog({
   const [burst, setBurst] = useState<number>(10);
   const [monthlyCap, setMonthlyCap] = useState<number>(0);
   const [launchVars, setLaunchVars] = useState<Array<{ k: string; v: string }>>([]);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const { busy, error: err, run } = useAsyncAction();
 
-  const submit = async () => {
-    setBusy(true);
-    setErr(null);
-    try {
+  const submit = () =>
+    run(async () => {
       const lvs = launchVars
         .filter((kv) => kv.k.trim() !== "")
         .reduce<Record<string, string>>((acc, kv) => {
@@ -343,12 +341,7 @@ function CreateWebhookDialog({
         launch_vars: Object.keys(lvs).length ? lvs : undefined,
       });
       onCreated(r);
-    } catch (e) {
-      setErr(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+    });
 
   const valid = name.trim() !== "" && (wildcard || botIDs.length > 0);
 

@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { TagInput } from "@/components/ui/TagInput";
 import ConfirmDialog from "@/components/shared/ConfirmDialog";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 
 interface Props {
   teamID: string;
@@ -269,13 +270,10 @@ function BindingDialog({
   const [secretID, setSecretID] = useState(initial?.secret_id ?? "");
   const [name, setName] = useState(initial?.secret_name_for_workflow ?? "");
   const [hosts, setHosts] = useState<string[]>(initial?.allowed_hosts ?? []);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const { busy, error: err, run } = useAsyncAction();
 
-  const submit = async () => {
-    setBusy(true);
-    setErr(null);
-    try {
+  const submit = () =>
+    run(async () => {
       if (initial) {
         await updateBinding(teamID, botID, initial.id, {
           secret_id: secretID,
@@ -290,12 +288,7 @@ function BindingDialog({
         });
       }
       onSaved();
-    } catch (e) {
-      setErr(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+    });
 
   const valid = secretID !== "" && name.trim() !== "";
 

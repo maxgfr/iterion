@@ -6,6 +6,7 @@ import { Button, Dialog, Input } from "@/components/ui";
 import { listFilesystem, type FilesystemListing } from "@/api/projects";
 import { useServerInfoStore } from "@/store/serverInfo";
 import { ErrorNotice } from "@/components/shared/ErrorNotice";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 
 interface Props {
   open: boolean;
@@ -22,35 +23,27 @@ export default function AddProjectDialog({ open, onClose, onAdd }: Props) {
   const browseEnabled = !!serverInfo?.browse_root;
 
   const [path, setPath] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run, setError, clearError } = useAsyncAction();
   const [browsing, setBrowsing] = useState(false);
 
   useEffect(() => {
     if (open) {
       setPath("");
-      setError(null);
+      clearError();
       setBrowsing(false);
-      setBusy(false);
     }
-  }, [open]);
+  }, [open, clearError]);
 
-  const confirm = async () => {
+  const confirm = () => {
     const trimmed = path.trim();
     if (!trimmed) {
       setError("Path is required");
       return;
     }
-    setBusy(true);
-    setError(null);
-    try {
+    return run(async () => {
       await onAdd(trimmed);
       onClose();
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
+    });
   };
 
   return (

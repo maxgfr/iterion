@@ -18,6 +18,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import ConfirmDialog from "@/components/shared/ConfirmDialog";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 
 export default function TokensPanel() {
   const { teams } = useAuth();
@@ -199,25 +200,18 @@ function CreateTokenDialog({
   const [name, setName] = useState("");
   const [teamID, setTeamID] = useState("");
   const [days, setDays] = useState<number>(90);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const { busy, error: err, run } = useAsyncAction();
 
-  const submit = async () => {
+  const submit = () => {
     if (!name.trim()) return;
-    setBusy(true);
-    setErr(null);
-    try {
+    return run(async () => {
       const r = await createMyToken({
         name: name.trim(),
         team_id: teamID || undefined,
         expires_in_days: days > 0 ? days : undefined,
       });
       onCreated(r);
-    } catch (e) {
-      setErr(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
+    });
   };
 
   return (
