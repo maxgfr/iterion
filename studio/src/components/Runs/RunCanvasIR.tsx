@@ -649,7 +649,7 @@ export default function RunCanvasIR({
   return (
     <div className="h-full w-full relative">
       {wf.stale_hash && (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 px-2 py-1 text-caption rounded bg-warning-soft text-warning-fg border border-warning/60 shadow">
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[var(--z-canvas)] px-2 py-1 text-caption rounded bg-warning-soft text-warning-fg border border-warning/60 shadow">
           ⚠ The .bot source has changed since this run started; the
           structure shown may differ from what executed.
         </div>
@@ -741,7 +741,7 @@ function StatusLegend() {
     { key: "none", sample: "bg-surface-1 border-border-default" },
   ];
   return (
-    <div className="absolute bottom-2 left-2 z-30">
+    <div className="absolute bottom-2 left-2 z-[var(--z-canvas)]">
       {open ? (
         <div className="bg-surface-1/95 backdrop-blur border border-border-default rounded shadow-lg p-2 min-w-[180px]">
           <div className="flex items-center justify-between gap-2 mb-1">

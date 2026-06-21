@@ -13,7 +13,7 @@ export default function BreadcrumbBar() {
   const workflowName = activeWorkflow?.name ?? "workflow";
 
   return (
-    <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 bg-surface-0/90 border border-border-default rounded-lg px-3 py-1.5 shadow-lg backdrop-blur-sm">
+    <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[var(--z-canvas)] flex items-center gap-1 bg-surface-0/90 border border-border-default rounded-lg px-3 py-1.5 shadow-lg backdrop-blur-sm">
       {/* Back button */}
       <button
         className="text-fg-subtle hover:text-fg-default text-sm mr-1 px-1"

@@ -57,7 +57,7 @@ export default function CanvasEmpty() {
   };
 
   return (
-    <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+    <div className="absolute inset-0 z-[var(--z-canvas)] flex items-center justify-center pointer-events-none">
       <div className="pointer-events-auto rounded-lg border border-border-default bg-surface-1/95 backdrop-blur px-6 py-5 text-center shadow-[var(--shadow-popover)] max-w-lg">
         <h2 className="text-base font-semibold text-fg-default mb-1">No workflow loaded</h2>
         <p className="text-xs text-fg-subtle mb-4">
