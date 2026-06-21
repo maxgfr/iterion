@@ -28,6 +28,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,14 +79,14 @@ func (m Mode) String() string {
 // Enabled reports whether the mode performs any rewriting.
 func (m Mode) Enabled() bool { return m == On || m == Ultra }
 
-// ParseMode maps a DSL/env/CLI string to a Mode (case-insensitive). Unknown or
-// empty values resolve to Off. The canonical DSL values are on|off|ultra; a few
-// lenient synonyms are accepted for env/CLI ergonomics.
+// ParseMode maps a DSL/env/CLI string to a Mode (case-insensitive). The
+// canonical values are on|off|ultra; the boolean spellings true/1 are accepted
+// for env/CLI ergonomics. Anything else (including "" and off) resolves to Off.
 func ParseMode(s string) Mode {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "on", "auto", "true", "1", "yes", "enabled":
+	case "on", "true", "1":
 		return On
-	case "ultra", "u", "ultra-compact", "ultracompact":
+	case "ultra":
 		return Ultra
 	default:
 		return Off
@@ -126,14 +127,11 @@ func Resolve(override, node, workflow, envDefault string) Mode {
 // into compression. Workflow/env defaults are intentionally ignored here.
 func ResolveToolNode(override, node string) Mode {
 	switch strings.ToLower(strings.TrimSpace(override)) {
-	case "off", "false", "0", "no", "none", "disabled":
+	case "off", "false", "0":
 		return Off
 	}
 	return ParseMode(node)
 }
-
-// EnvDefault returns the raw ITERION_RTK value (the lowest-priority default).
-func EnvDefault() string { return os.Getenv(ModeEnv) }
 
 type ctxKey struct{}
 
@@ -243,6 +241,29 @@ func Rewrite(ctx context.Context, m Mode, cmd string) (string, bool) {
 	if m == Ultra {
 		out = withUltra(out)
 	}
+	return out, true
+}
+
+// RewriteCommandField rewrites the "command" field of a tool-input map to its
+// rtk-compressed form. On a successful rewrite it returns a shallow copy of the
+// map (the caller's map is never mutated — PreToolUse hooks must not touch
+// caller state) with the new command, plus true. Otherwise it returns the input
+// unchanged and false. Shared by the claude_code Bash hook and the claw bash
+// builtin so the "clone-then-replace-command" policy lives in one place.
+func RewriteCommandField(ctx context.Context, m Mode, input map[string]any) (map[string]any, bool) {
+	if !m.Enabled() {
+		return input, false
+	}
+	cmd, ok := input["command"].(string)
+	if !ok || cmd == "" {
+		return input, false
+	}
+	rewritten, changed := Rewrite(ctx, m, cmd)
+	if !changed {
+		return input, false
+	}
+	out := maps.Clone(input)
+	out["command"] = rewritten
 	return out, true
 }
 

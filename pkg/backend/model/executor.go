@@ -188,10 +188,12 @@ type ClawExecutor struct {
 
 	// rtk command-output compression. wfRTK is the workflow-level `rtk:`
 	// DSL value; rtkOverride is the run-level override (CLI --rtk / studio
-	// Launch). Both feed rtk.Resolve to compute each node's effective mode
-	// (precedence: override > node DSL > workflow DSL > ITERION_RTK env).
-	wfRTK       string
-	rtkOverride string
+	// Launch); rtkEnvDefault is ITERION_RTK, read once at construction
+	// instead of per node. All three feed rtk.Resolve to compute each node's
+	// effective mode (precedence: override > node DSL > workflow DSL > env).
+	wfRTK         string
+	rtkOverride   string
+	rtkEnvDefault string
 
 	// sandbox is the live [sandbox.Run] for the current iterion run,
 	// or nil when the workflow doesn't activate a sandbox. The engine
@@ -524,6 +526,7 @@ func NewClawExecutor(registry *Registry, wf *ir.Workflow, opts ...ClawExecutorOp
 		imageAttachs:   imageAttachs,
 		defaultBackend: wf.DefaultBackend,
 		wfRTK:          wf.RTK,
+		rtkEnvDefault:  os.Getenv(rtk.ModeEnv),
 		wfCompaction:   wf.Compaction,
 		wfCapabilities: wf.Capabilities,
 		botID:          wf.Name,
@@ -1275,10 +1278,14 @@ func (e *ClawExecutor) buildTask(ctx context.Context, node ir.Node, f backendFie
 		// as it walks the node's provider chain.
 		Hooks:      e.delegateHooksFor(f.id, backendName, LoopIterationFromContext(ctx)),
 		InboxDrain: e.bindInboxDrain(ctx),
-		// rtk output-compression mode (precedence: run override > node DSL >
-		// workflow DSL > ITERION_RTK env). claude_code installs a PreToolUse
-		// hook when enabled; claw carries it into its tool loop via ctx.
-		RTKMode: rtk.Resolve(e.rtkOverride, f.rtk, e.wfRTK, rtk.EnvDefault()),
+	}
+	// rtk output-compression mode (precedence: run override > node DSL >
+	// workflow DSL > ITERION_RTK env). Stored as a string so the delegate
+	// layer + IPC wire form stay decoupled from the rtk enum; "" (off) is
+	// omitted. claude_code installs a PreToolUse hook when enabled; claw
+	// carries it into its tool loop via ctx.
+	if m := rtk.Resolve(e.rtkOverride, f.rtk, e.wfRTK, e.rtkEnvDefault); m.Enabled() {
+		task.RTKMode = m.String()
 	}
 	if m := f.memory; m != nil && m.Enabled {
 		task.Memory = &delegate.MemorySpec{

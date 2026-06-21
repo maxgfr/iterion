@@ -46,7 +46,9 @@ func RegisterClawBuiltins(reg *Registry, workspace string) error {
 // inheritance.
 func RegisterClawBuiltinsWithEnv(reg *Registry, workspace string, bashExtraEnv []string) error {
 	bashExec := func(ctx context.Context, input map[string]any) (string, error) {
-		input = rtkRewriteBashInput(ctx, input)
+		if rewritten, changed := rtk.RewriteCommandField(ctx, rtk.ModeFromContext(ctx), input); changed {
+			input = rewritten
+		}
 		if len(bashExtraEnv) > 0 {
 			return clawtools.ExecuteBashWithEnv(ctx, input, workspace, bashExtraEnv)
 		}
@@ -69,32 +71,6 @@ func RegisterClawBuiltinsWithEnv(reg *Registry, workspace string, bashExtraEnv [
 		}
 	}
 	return nil
-}
-
-// rtkRewriteBashInput rewrites the bash tool's "command" to its rtk-compressed
-// equivalent (e.g. "git status" → "rtk git status") when rtk is active for the
-// current node — the resolved mode is carried on ctx by the claw backend. It
-// is a no-op when rtk is off/absent or the command has no rtk equivalent, and
-// mutates a shallow copy so the caller's map is left untouched.
-func rtkRewriteBashInput(ctx context.Context, input map[string]any) map[string]any {
-	mode := rtk.ModeFromContext(ctx)
-	if !mode.Enabled() {
-		return input
-	}
-	cmd, ok := input["command"].(string)
-	if !ok || cmd == "" {
-		return input
-	}
-	rewritten, changed := rtk.Rewrite(ctx, mode, cmd)
-	if !changed {
-		return input
-	}
-	out := make(map[string]any, len(input))
-	for k, v := range input {
-		out[k] = v
-	}
-	out["command"] = rewritten
-	return out
 }
 
 // RegisterClawReadImage registers `read_image` only — the file/URL

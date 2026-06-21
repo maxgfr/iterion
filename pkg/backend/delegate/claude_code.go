@@ -503,24 +503,15 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 	// permission gate — so it always auto-allows the rewritten command. The
 	// rewrite runs host-side; the (sandboxed) CLI runs the rewritten command
 	// in-container against the bind-mounted rtk binary.
-	if task.RTKMode.Enabled() && rtk.Available() {
+	if rtkMode := rtk.ParseMode(task.RTKMode); rtkMode.Enabled() && rtk.Available() {
 		bashMatcher := "^Bash$"
 		opts = append(opts, claudesdk.WithHook(claudesdk.HookPreToolUse, claudesdk.HookMatcher{
 			Matcher: &bashMatcher,
 			Handler: func(hookCtx context.Context, in claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
-				cmd, ok := in.ToolInput["command"].(string)
-				if !ok || cmd == "" {
-					return claudesdk.HookOutput{}, nil
-				}
-				rewritten, changed := rtk.Rewrite(hookCtx, task.RTKMode, cmd)
+				updated, changed := rtk.RewriteCommandField(hookCtx, rtkMode, in.ToolInput)
 				if !changed {
 					return claudesdk.HookOutput{}, nil
 				}
-				updated := make(map[string]any, len(in.ToolInput))
-				for k, v := range in.ToolInput {
-					updated[k] = v
-				}
-				updated["command"] = rewritten
 				return claudesdk.HookOutput{
 					Decision:       "allow",
 					DecisionReason: "RTK auto-rewrite",

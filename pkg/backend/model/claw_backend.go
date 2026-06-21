@@ -189,7 +189,7 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 	// compress command output (rtk.ModeFromContext). Off is a no-op. For the
 	// sandboxed path the mode rides the IOTask to the in-container runner,
 	// whose own Execute re-applies it here.
-	ctx = rtk.WithMode(ctx, task.RTKMode)
+	ctx = rtk.WithMode(ctx, rtk.ParseMode(task.RTKMode))
 	if task.Sandbox != nil {
 		return b.executeViaSandboxRunner(ctx, task)
 	}

@@ -16,12 +16,12 @@ func TestParseMode(t *testing.T) {
 		"garbage":       Off,
 		"on":            On,
 		"On":            On,
-		" auto ":        On,
+		" auto ":        Off, // trimmed: "auto" is not a synonym
 		"true":          On,
 		"1":             On,
 		"ultra":         Ultra,
 		"ULTRA":         Ultra,
-		"ultra-compact": Ultra,
+		"ultra-compact": Off, // trimmed: use "ultra"
 	}
 	for in, want := range cases {
 		if got := ParseMode(in); got != want {
@@ -62,6 +62,58 @@ func TestResolvePrecedence(t *testing.T) {
 				t.Fatalf("Resolve(%q,%q,%q,%q) = %v; want %v", c.override, c.node, c.workflow, c.envDflt, got, c.want)
 			}
 		})
+	}
+}
+
+func TestResolveToolNode(t *testing.T) {
+	cases := []struct {
+		name, override, node string
+		want                 Mode
+	}{
+		{"node-on", "", "on", On},
+		{"node-ultra", "", "ultra", Ultra},
+		{"node-unset-off", "", "", Off},
+		{"override-off-kills-node-on", "off", "on", Off},     // kill switch
+		{"override-on-does-not-enable", "on", "", Off},       // override never force-enables a tool node
+		{"override-on-keeps-node-on", "on", "on", On},        // node already opted in
+		{"override-ultra-does-not-enable", "ultra", "", Off}, // only an off-ish override matters
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := ResolveToolNode(c.override, c.node); got != c.want {
+				t.Fatalf("ResolveToolNode(%q,%q) = %v; want %v", c.override, c.node, got, c.want)
+			}
+		})
+	}
+}
+
+func TestRewriteCommandField(t *testing.T) {
+	fake := writeFakeRtk(t)
+	old := resolveBin
+	resolveBin = func() string { return fake }
+	t.Cleanup(func() { resolveBin = old })
+	t.Setenv("FAKE_RTK_OUT", "rtk git status")
+	t.Setenv("FAKE_RTK_EXIT", "0")
+
+	// Off → unchanged, same map, false.
+	if out, changed := RewriteCommandField(context.Background(), Off, map[string]any{"command": "git status"}); changed || out["command"] != "git status" {
+		t.Fatalf("off: out=%v changed=%v", out, changed)
+	}
+	// On → rewritten copy; other keys preserved; caller's map untouched.
+	orig := map[string]any{"command": "git status", "description": "x"}
+	out, changed := RewriteCommandField(context.Background(), On, orig)
+	if !changed || out["command"] != "rtk git status" {
+		t.Fatalf("on: out=%v changed=%v; want rewritten", out, changed)
+	}
+	if out["description"] != "x" {
+		t.Fatalf("on: other keys dropped: %v", out)
+	}
+	if orig["command"] != "git status" {
+		t.Fatalf("on: caller map mutated: %v", orig["command"])
+	}
+	// Missing command → unchanged.
+	if out, changed := RewriteCommandField(context.Background(), On, map[string]any{}); changed || len(out) != 0 {
+		t.Fatalf("empty: out=%v changed=%v", out, changed)
 	}
 }
 

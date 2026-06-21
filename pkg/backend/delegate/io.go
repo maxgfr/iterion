@@ -3,8 +3,6 @@ package delegate
 import (
 	"encoding/json"
 	"time"
-
-	"github.com/SocialGouv/iterion/pkg/backend/rtk"
 )
 
 // IOTask is the on-the-wire form of a [Task] used by the claw
@@ -67,7 +65,7 @@ type IOTask struct {
 	ResumePendingToolUseID string          `json:"resume_pending_tool_use_id,omitempty"`
 	ResumeAnswer           string          `json:"resume_answer,omitempty"`
 	Memory                 *MemorySpec     `json:"memory,omitempty"`
-	RTKMode                rtk.Mode        `json:"rtk_mode,omitempty"`
+	RTKMode                string          `json:"rtk_mode,omitempty"`
 }
 
 // IOToolDef is the wire form of a [ToolDef]. The Execute closure is
