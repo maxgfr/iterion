@@ -563,11 +563,9 @@ func (e *Engine) restoreRunEnv(r *store.Run) {
 	// dispatcher worktree falls back to e.workDir's encoded key
 	// and the memory tree silently moves.
 	e.repoRoot = r.RepoRoot
-	type workDirSetter interface{ SetWorkDir(string) }
 	if s, ok := e.executor.(workDirSetter); ok {
 		s.SetWorkDir(e.workDir)
 	}
-	type repoRootSetter interface{ SetRepoRoot(string) }
 	if s, ok := e.executor.(repoRootSetter); ok {
 		s.SetRepoRoot(r.RepoRoot)
 	}
@@ -577,7 +575,6 @@ func (e *Engine) restoreRunEnv(r *store.Run) {
 // resolveVars on the resume path; the launch path does this inline in
 // Run().
 func (e *Engine) pushExecutorVars(vars map[string]interface{}) {
-	type varsSetter interface{ SetVars(map[string]interface{}) }
 	if sv, ok := e.executor.(varsSetter); ok {
 		sv.SetVars(vars)
 	}

@@ -70,6 +70,19 @@ type NodeExecutor interface {
 	Execute(ctx context.Context, node ir.Node, input map[string]interface{}) (map[string]interface{}, error)
 }
 
+// The following minimal interfaces are optional extensions to NodeExecutor:
+// the engine type-asserts the configured executor against each and, on a
+// match, pushes the corresponding launch-time state in (workDir, repoRoot,
+// resolved vars). Hoisted to package scope so the workspace-persist /
+// runInitState / restoreRunEnv / pushExecutorVars paths share one
+// declaration instead of redeclaring the same anonymous interface inline.
+
+type workDirSetter interface{ SetWorkDir(string) }
+
+type repoRootSetter interface{ SetRepoRoot(string) }
+
+type varsSetter interface{ SetVars(map[string]interface{}) }
+
 // Engine executes workflows. It supports sequential execution and
 // parallel fan-out via bounded branch scheduling.
 type Engine struct {
@@ -745,14 +758,12 @@ func (e *Engine) runPersistWorkspace(ctx context.Context, runID string, run *sto
 	// Push workDir into the executor so backend subprocesses (claude_code,
 	// codex) and tool nodes see it. Type-assert because NodeExecutor is a
 	// minimal interface; only ClawExecutor implements SetWorkDir.
-	type workDirSetter interface{ SetWorkDir(string) }
 	if s, ok := e.executor.(workDirSetter); ok {
 		s.SetWorkDir(e.workDir)
 	}
 	// Push repoRoot (when known) so memory specs with `project_root: true`
 	// resolve against the operator's main checkout instead of the per-run
 	// workspace. Same minimal-interface pattern as SetWorkDir.
-	type repoRootSetter interface{ SetRepoRoot(string) }
 	if s, ok := e.executor.(repoRootSetter); ok {
 		s.SetRepoRoot(run.RepoRoot)
 	}
@@ -821,7 +832,6 @@ func (e *Engine) runInitState(ctx context.Context, runID string, inputs map[stri
 	if r, err := e.store.LoadRun(ctx, runID); err == nil && r != nil {
 		rs.isWorktree = r.Worktree
 	}
-	type varsSetter interface{ SetVars(map[string]interface{}) }
 	if sv, ok := e.executor.(varsSetter); ok {
 		sv.SetVars(rs.vars)
 	}

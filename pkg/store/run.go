@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 )
 
@@ -362,9 +363,11 @@ func dedupeNonEmpty(ids []string) []string {
 }
 
 // mergeWatchedIssues returns the deduped union of existing and add,
-// insertion order preserved (existing entries lead).
+// insertion order preserved (existing entries lead). dedupeNonEmpty
+// preserves first-seen order, so feeding it slices.Concat(existing, add)
+// produces the same observable ordering as the prior hand-rolled append.
 func mergeWatchedIssues(existing, add []string) []string {
-	return dedupeNonEmpty(append(append(make([]string, 0, len(existing)+len(add)), existing...), add...))
+	return dedupeNonEmpty(slices.Concat(existing, add))
 }
 
 // removeWatchedIssues returns existing with every entry in drop removed.

@@ -492,24 +492,7 @@ func (s *FilesystemRunStore) UpdateRunStatus(ctx context.Context, id string, sta
 	if err != nil {
 		return err
 	}
-	r.Status = status
-	r.UpdatedAt = time.Now().UTC()
-	r.Error = runErr
-	switch status {
-	case RunStatusFinished, RunStatusFailed, RunStatusFailedResumable, RunStatusCancelled:
-		t := r.UpdatedAt
-		r.FinishedAt = &t
-	case RunStatusRunning, RunStatusPausedWaitingHuman:
-		// Resume paths (failed_resumable/cancelled → running) must clear
-		// FinishedAt — otherwise the studio's duration ticker uses the
-		// stale terminal timestamp and freezes mid-run.
-		r.FinishedAt = nil
-	}
-	// Clear checkpoint when leaving paused state (preserved for failed_resumable and cancelled).
-	if status == RunStatusRunning || status == RunStatusFinished || status == RunStatusFailed {
-		r.Checkpoint = nil
-	}
-	return s.writeRun(r)
+	return s.applyStatusTransition(r, status, runErr)
 }
 
 // UpdateRunStatusIf is a compare-and-set on the status field: the
@@ -536,6 +519,17 @@ func (s *FilesystemRunStore) UpdateRunStatusIf(ctx context.Context, id string, s
 	if !matched {
 		return false, nil
 	}
+	if err := s.applyStatusTransition(r, status, runErr); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// applyStatusTransition is the shared tail of UpdateRunStatus and
+// UpdateRunStatusIf: mutate r in-place (status, timestamps, terminal
+// finished_at / resume FinishedAt clear, checkpoint clear when leaving
+// paused state), then persist via writeRun. Caller must hold s.mu.
+func (s *FilesystemRunStore) applyStatusTransition(r *Run, status RunStatus, runErr string) error {
 	r.Status = status
 	r.UpdatedAt = time.Now().UTC()
 	r.Error = runErr
@@ -544,15 +538,16 @@ func (s *FilesystemRunStore) UpdateRunStatusIf(ctx context.Context, id string, s
 		t := r.UpdatedAt
 		r.FinishedAt = &t
 	case RunStatusRunning, RunStatusPausedWaitingHuman:
+		// Resume paths (failed_resumable/cancelled → running) must clear
+		// FinishedAt — otherwise the studio's duration ticker uses the
+		// stale terminal timestamp and freezes mid-run.
 		r.FinishedAt = nil
 	}
+	// Clear checkpoint when leaving paused state (preserved for failed_resumable and cancelled).
 	if status == RunStatusRunning || status == RunStatusFinished || status == RunStatusFailed {
 		r.Checkpoint = nil
 	}
-	if err := s.writeRun(r); err != nil {
-		return false, err
-	}
-	return true, nil
+	return s.writeRun(r)
 }
 
 // SaveCheckpoint persists a checkpoint on a paused run.
@@ -901,48 +896,18 @@ func (s *FilesystemRunStore) LoadEventsRange(ctx context.Context, runID string, 
 // LoadEvents reads all events for a run in sequence order.
 //
 // runID is sanitised before path-joining (see LoadRun for rationale).
-func (s *FilesystemRunStore) LoadEvents(_ context.Context, runID string) ([]*Event, error) {
-	if err := sanitizePathComponent("run ID", runID); err != nil {
-		return nil, err
-	}
-	p := s.eventsPath(runID)
-	f, err := os.Open(p)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("store: open events: %w", err)
-	}
-	defer f.Close()
-
+//
+// Delegates to ScanEvents: identical open/scan/decode/skip-corrupt semantics
+// (corruption threshold, partial-result return) are preserved because
+// ScanEvents populates events via the visit callback before returning the
+// ErrEventsCorrupted error.
+func (s *FilesystemRunStore) LoadEvents(ctx context.Context, runID string) ([]*Event, error) {
 	var events []*Event
-	var skipped int
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxEventLineSize)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var evt Event
-		if err := json.Unmarshal(line, &evt); err != nil {
-			// Skip corrupt lines rather than aborting — partial corruption
-			// should not prevent reading subsequent valid events.
-			skipped++
-			continue
-		}
-		events = append(events, &evt)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("store: scan events: %w", err)
-	}
-	if skipped > 0 && s.logger != nil {
-		s.logger.Warn("skipped %d corrupt event line(s) in run %s (valid=%d)", skipped, runID, len(events))
-	}
-	if eventsCorruptionExceeded(skipped, len(events)) {
-		return events, fmt.Errorf("%w: run %s, skipped=%d valid=%d", ErrEventsCorrupted, runID, skipped, len(events))
-	}
-	return events, nil
+	err := s.ScanEvents(ctx, runID, func(e *Event) bool {
+		events = append(events, e)
+		return true
+	})
+	return events, err
 }
 
 // ---------------------------------------------------------------------------
