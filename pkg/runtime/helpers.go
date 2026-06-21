@@ -471,17 +471,7 @@ func (e *Engine) checkBudgetBeforeExec(rs *runState, nodeID string) error {
 
 	// Hard exceeded (100%+).
 	if exc := findExceeded(checks); exc != nil {
-		_ = e.emit(rs.ctx, rs.runID, store.EventBudgetExceeded, nodeID, map[string]interface{}{
-			"dimension": exc.dimension,
-			"used":      exc.used,
-			"limit":     exc.limit,
-		})
-		return e.failRunErrWithCheckpoint(rs, nodeID, &RuntimeError{
-			Code:    ErrCodeBudgetExceeded,
-			Message: fmt.Sprintf("budget exceeded: %s (%.0f/%.0f)", exc.dimension, exc.used, exc.limit),
-			NodeID:  nodeID,
-			Hint:    fmt.Sprintf("increase the %s budget or optimize the workflow", exc.dimension),
-		})
+		return e.failBudgetExceeded(rs, nodeID, exc)
 	}
 
 	// Hard limit (90%+) — refuse new node executions to prevent concurrent overage.
@@ -536,20 +526,31 @@ func (e *Engine) recordAndCheckBudget(rs *runState, nodeID string, output map[st
 
 	// Fail on exceeded.
 	if exc := findExceeded(checks); exc != nil {
-		_ = e.emit(rs.ctx, rs.runID, store.EventBudgetExceeded, nodeID, map[string]interface{}{
-			"dimension": exc.dimension,
-			"used":      exc.used,
-			"limit":     exc.limit,
-		})
-		return e.failRunErrWithCheckpoint(rs, nodeID, &RuntimeError{
-			Code:    ErrCodeBudgetExceeded,
-			Message: fmt.Sprintf("budget exceeded: %s (%.0f/%.0f)", exc.dimension, exc.used, exc.limit),
-			NodeID:  nodeID,
-			Hint:    fmt.Sprintf("increase the %s budget or optimize the workflow", exc.dimension),
-		})
+		return e.failBudgetExceeded(rs, nodeID, exc)
 	}
 
 	return nil
+}
+
+// failBudgetExceeded emits a budget_exceeded event for a hard-exceeded
+// (100%+) dimension and fails the run with a checkpoint-preserving
+// RuntimeError. Shared by the pre-exec (checkBudgetBeforeExec) and
+// post-exec (recordAndCheckBudget) budget checks, which produced this
+// identical event+error pair. The 90% hard-limit case stays inline in
+// checkBudgetBeforeExec — it has a distinct message, hint, and event
+// field, and is reached from only one site.
+func (e *Engine) failBudgetExceeded(rs *runState, nodeID string, exc *budgetCheckResult) error {
+	_ = e.emit(rs.ctx, rs.runID, store.EventBudgetExceeded, nodeID, map[string]interface{}{
+		"dimension": exc.dimension,
+		"used":      exc.used,
+		"limit":     exc.limit,
+	})
+	return e.failRunErrWithCheckpoint(rs, nodeID, &RuntimeError{
+		Code:    ErrCodeBudgetExceeded,
+		Message: fmt.Sprintf("budget exceeded: %s (%.0f/%.0f)", exc.dimension, exc.used, exc.limit),
+		NodeID:  nodeID,
+		Hint:    fmt.Sprintf("increase the %s budget or optimize the workflow", exc.dimension),
+	})
 }
 
 // ---------------------------------------------------------------------------

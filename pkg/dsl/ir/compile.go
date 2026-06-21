@@ -679,69 +679,83 @@ func (c *compiler) compilePrompts() {
 // Nodes — Agent
 // ---------------------------------------------------------------------------
 
+// buildLLMNodeShared runs the validation + resolution shared by agent and
+// judge declarations (which embed the same ast.LLMDecl) and returns the
+// three field groups common to AgentNode/JudgeNode. ok is false when the
+// node must be skipped: a duplicate ID (validateNodeNames already emitted
+// the diagnostic — first-wins keeps validation running against the FIRST
+// declaration, the one that survives upstream review pipelines, instead of
+// letting a later duplicate silently shadow it) or a reserved target name.
+// kind ("agent"/"judge") only shapes diagnostics. The remaining flat node
+// fields stay in each caller because AgentNode and JudgeNode are distinct
+// types (constructed with field literals across the test suite), so they
+// can't share an embedded carrier without breaking that construction API.
+func (c *compiler) buildLLMNodeShared(kind, name string, d *ast.LLMDecl) (LLMFields, SchemaFields, InteractionFields, bool) {
+	if _, exists := c.nodes[name]; exists {
+		return LLMFields{}, SchemaFields{}, InteractionFields{}, false
+	}
+	if ast.ReservedTargets[name] {
+		return LLMFields{}, SchemaFields{}, InteractionFields{}, false
+	}
+	c.validateSchemaRef(name, "input", d.Input)
+	c.validateSchemaRef(name, "output", d.Output)
+	c.validatePromptRef(name, "system", d.System)
+	c.validatePromptRef(name, "user", d.User)
+	model := resolveSupervisorModel(d.Model)
+	if model == "" && d.Backend == "" && !c.canAutoResolveBackend() {
+		c.errorfAt(DiagMissingModelOrBackend, name, "", "%s %q must set 'model' or 'backend' (or configure a credential the runtime can detect — see docs/backends.md)", kind, name)
+	}
+	c.warnCodexDiscouraged(kind, name, d.Backend)
+
+	// Apply workflow-level interaction default when node doesn't set one.
+	interaction := d.Interaction
+	if interaction == InteractionNone {
+		interaction = c.workflowInteractionDefault()
+	}
+
+	return LLMFields{
+			Model:           model,
+			Backend:         d.Backend,
+			Provider:        d.Provider,
+			SystemPrompt:    d.System,
+			UserPrompt:      d.User,
+			MaxTokens:       d.MaxTokens,
+			ReasoningEffort: d.ReasoningEffort,
+			Readonly:        d.Readonly,
+		}, SchemaFields{
+			InputSchema:  d.Input,
+			OutputSchema: d.Output,
+		}, InteractionFields{
+			Interaction:       interaction,
+			InteractionPrompt: d.InteractionPrompt,
+			InteractionModel:  d.InteractionModel,
+		}, true
+}
+
 func (c *compiler) compileAgents() {
 	for _, a := range c.file.Agents {
-		// First-wins on duplicate node IDs (validateNodeNames already
-		// emitted the diagnostic). Skipping here keeps validation
-		// running against the FIRST declaration — the one that survives
-		// upstream review pipelines — instead of letting a later
-		// duplicate silently shadow it.
-		if _, exists := c.nodes[a.Name]; exists {
+		llm, sch, inter, ok := c.buildLLMNodeShared("agent", a.Name, &a.LLMDecl)
+		if !ok {
 			continue
 		}
-		if ast.ReservedTargets[a.Name] {
-			continue
-		}
-		c.validateSchemaRef(a.Name, "input", a.Input)
-		c.validateSchemaRef(a.Name, "output", a.Output)
-		c.validatePromptRef(a.Name, "system", a.System)
-		c.validatePromptRef(a.Name, "user", a.User)
-		model := resolveSupervisorModel(a.Model)
-		if model == "" && a.Backend == "" && !c.canAutoResolveBackend() {
-			c.errorfAt(DiagMissingModelOrBackend, a.Name, "", "agent %q must set 'model' or 'backend' (or configure a credential the runtime can detect — see docs/backends.md)", a.Name)
-		}
-		c.warnCodexDiscouraged("agent", a.Name, a.Backend)
-
-		// Apply workflow-level interaction default when node doesn't set one.
-		interaction := a.Interaction
-		if interaction == InteractionNone {
-			interaction = c.workflowInteractionDefault()
-		}
-
 		c.nodes[a.Name] = &AgentNode{
-			BaseNode: BaseNode{ID: a.Name},
-			LLMFields: LLMFields{
-				Model:           model,
-				Backend:         a.Backend,
-				Provider:        a.Provider,
-				SystemPrompt:    a.System,
-				UserPrompt:      a.User,
-				MaxTokens:       a.MaxTokens,
-				ReasoningEffort: a.ReasoningEffort,
-				Readonly:        a.Readonly,
-			},
-			SchemaFields: SchemaFields{
-				InputSchema:  a.Input,
-				OutputSchema: a.Output,
-			},
-			InteractionFields: InteractionFields{
-				Interaction:       interaction,
-				InteractionPrompt: a.InteractionPrompt,
-				InteractionModel:  a.InteractionModel,
-			},
-			MCP:          convertMCPConfig(a.MCP),
-			Publish:      a.Publish,
-			Session:      a.Session,
-			Tools:        a.Tools,
-			ToolPolicy:   a.ToolPolicy,
-			Capabilities: a.Capabilities,
-			ToolMaxSteps: a.ToolMaxSteps,
-			AwaitMode:    a.Await,
-			Compaction:   compileCompaction(a.Compaction),
-			Memory:       compileMemory(a.Memory),
-			Sandbox:      c.compileSandboxBlock(a.Sandbox, "agent", a.Name),
-			Cursors:      compileCursorInvocation(a.Cursors),
-			RTK:          a.RTK,
+			BaseNode:          BaseNode{ID: a.Name},
+			LLMFields:         llm,
+			SchemaFields:      sch,
+			InteractionFields: inter,
+			MCP:               convertMCPConfig(a.MCP),
+			Publish:           a.Publish,
+			Session:           a.Session,
+			Tools:             a.Tools,
+			ToolPolicy:        a.ToolPolicy,
+			Capabilities:      a.Capabilities,
+			ToolMaxSteps:      a.ToolMaxSteps,
+			AwaitMode:         a.Await,
+			Compaction:        compileCompaction(a.Compaction),
+			Memory:            compileMemory(a.Memory),
+			Sandbox:           c.compileSandboxBlock(a.Sandbox, "agent", a.Name),
+			Cursors:           compileCursorInvocation(a.Cursors),
+			RTK:               a.RTK,
 		}
 	}
 }
@@ -752,62 +766,28 @@ func (c *compiler) compileAgents() {
 
 func (c *compiler) compileJudges() {
 	for _, j := range c.file.Judges {
-		if _, exists := c.nodes[j.Name]; exists {
+		llm, sch, inter, ok := c.buildLLMNodeShared("judge", j.Name, &j.LLMDecl)
+		if !ok {
 			continue
 		}
-		if ast.ReservedTargets[j.Name] {
-			continue
-		}
-		c.validateSchemaRef(j.Name, "input", j.Input)
-		c.validateSchemaRef(j.Name, "output", j.Output)
-		c.validatePromptRef(j.Name, "system", j.System)
-		c.validatePromptRef(j.Name, "user", j.User)
-		model := resolveSupervisorModel(j.Model)
-		if model == "" && j.Backend == "" && !c.canAutoResolveBackend() {
-			c.errorfAt(DiagMissingModelOrBackend, j.Name, "", "judge %q must set 'model' or 'backend' (or configure a credential the runtime can detect — see docs/backends.md)", j.Name)
-		}
-		c.warnCodexDiscouraged("judge", j.Name, j.Backend)
-
-		// Apply workflow-level interaction default when node doesn't set one.
-		interaction := j.Interaction
-		if interaction == InteractionNone {
-			interaction = c.workflowInteractionDefault()
-		}
-
 		c.nodes[j.Name] = &JudgeNode{
-			BaseNode: BaseNode{ID: j.Name},
-			LLMFields: LLMFields{
-				Model:           model,
-				Backend:         j.Backend,
-				Provider:        j.Provider,
-				SystemPrompt:    j.System,
-				UserPrompt:      j.User,
-				MaxTokens:       j.MaxTokens,
-				ReasoningEffort: j.ReasoningEffort,
-				Readonly:        j.Readonly,
-			},
-			SchemaFields: SchemaFields{
-				InputSchema:  j.Input,
-				OutputSchema: j.Output,
-			},
-			InteractionFields: InteractionFields{
-				Interaction:       interaction,
-				InteractionPrompt: j.InteractionPrompt,
-				InteractionModel:  j.InteractionModel,
-			},
-			MCP:          convertMCPConfig(j.MCP),
-			Publish:      j.Publish,
-			Session:      j.Session,
-			Tools:        j.Tools,
-			ToolPolicy:   j.ToolPolicy,
-			Capabilities: j.Capabilities,
-			ToolMaxSteps: j.ToolMaxSteps,
-			AwaitMode:    j.Await,
-			Compaction:   compileCompaction(j.Compaction),
-			Memory:       compileMemory(j.Memory),
-			Sandbox:      c.compileSandboxBlock(j.Sandbox, "judge", j.Name),
-			Cursors:      compileCursorInvocation(j.Cursors),
-			RTK:          j.RTK,
+			BaseNode:          BaseNode{ID: j.Name},
+			LLMFields:         llm,
+			SchemaFields:      sch,
+			InteractionFields: inter,
+			MCP:               convertMCPConfig(j.MCP),
+			Publish:           j.Publish,
+			Session:           j.Session,
+			Tools:             j.Tools,
+			ToolPolicy:        j.ToolPolicy,
+			Capabilities:      j.Capabilities,
+			ToolMaxSteps:      j.ToolMaxSteps,
+			AwaitMode:         j.Await,
+			Compaction:        compileCompaction(j.Compaction),
+			Memory:            compileMemory(j.Memory),
+			Sandbox:           c.compileSandboxBlock(j.Sandbox, "judge", j.Name),
+			Cursors:           compileCursorInvocation(j.Cursors),
+			RTK:               j.RTK,
 		}
 	}
 }
