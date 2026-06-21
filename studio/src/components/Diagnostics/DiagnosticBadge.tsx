@@ -52,7 +52,7 @@ export default function DiagnosticBadge({
       trigger={
         <button
           type="button"
-          className={`inline-flex items-center justify-center gap-1 rounded-full border ${colorClass} ${sizeClasses[size]} font-semibold leading-none shadow-md cursor-pointer`}
+          className={`inline-flex items-center justify-center gap-1 rounded-full border ${colorClass} ${sizeClasses[size]} font-semibold leading-none shadow-[var(--shadow-sm)] cursor-pointer`}
           aria-label={`${diagnostics.length} ${sev}${diagnostics.length === 1 ? "" : "s"}`}
           onClick={(e) => {
             // Don't let the click propagate to underlying node/edge selection.

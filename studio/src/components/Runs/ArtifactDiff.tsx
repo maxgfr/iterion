@@ -317,7 +317,7 @@ export default function ArtifactDiff({ runId, nodeId, versions }: Props) {
       {fromV === toV ? (
         <div className="relative">
           {toBody && (
-            <div className="absolute right-1 top-1 z-10">
+            <div className="absolute right-1 top-1 z-[var(--z-canvas)]">
               <CopyButton value={JSON.stringify(toBody.data, null, 2)} />
             </div>
           )}

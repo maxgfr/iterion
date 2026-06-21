@@ -270,7 +270,7 @@ function IssueCard({
       onClick={onClick}
       onDoubleClick={onOpen}
       className={`bg-surface-0 border rounded p-2 text-sm cursor-grab active:cursor-grabbing transition-transform ${
-        dragging ? "scale-[1.02] shadow-lg" : ""
+        dragging ? "scale-[1.02] shadow-[var(--shadow-lg)]" : ""
       } ${
         selected
           ? "border-accent ring-1 ring-accent/40"

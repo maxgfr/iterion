@@ -743,7 +743,7 @@ function StatusLegend() {
   return (
     <div className="absolute bottom-2 left-2 z-[var(--z-canvas)]">
       {open ? (
-        <div className="bg-surface-1/95 backdrop-blur border border-border-default rounded shadow-lg p-2 min-w-[180px]">
+        <div className="bg-surface-1/95 backdrop-blur border border-border-default rounded shadow-[var(--shadow-popover)] p-2 min-w-[180px]">
           <div className="flex items-center justify-between gap-2 mb-1">
             <span className="text-caption font-semibold text-fg-default">
               Node colours

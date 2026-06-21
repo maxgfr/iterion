@@ -66,7 +66,7 @@ function CollapseButton({ onCollapse }: { onCollapse?: () => void }): ReactNode 
       label="Hide details panel"
       size="sm"
       variant="ghost"
-      className="absolute top-1.5 right-1.5 z-10"
+      className="absolute top-1.5 right-1.5 z-[var(--z-canvas)]"
       onClick={onCollapse}
     >
       <ChevronRightIcon />

@@ -182,7 +182,7 @@ export default function MergeConflictView({
   return (
     <div className="shrink-0 border-t border-border-default bg-warning-soft max-h-[70%] overflow-y-auto">
       {dialog}
-      <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border-default bg-warning-soft px-3 py-2">
+      <header className="sticky top-0 z-[var(--z-canvas)] flex items-center gap-2 border-b border-border-default bg-warning-soft px-3 py-2">
         <span className="text-micro font-semibold text-warning-fg">
           Merge conflict
         </span>

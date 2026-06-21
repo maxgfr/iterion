@@ -250,7 +250,7 @@ export default function EditorView() {
                   aria-orientation="vertical"
                   aria-label="Resize inspector"
                   onMouseDown={startResize}
-                  className="absolute left-0 top-0 bottom-0 w-1 -translate-x-1/2 cursor-col-resize hover:bg-accent/50 z-10"
+                  className="absolute left-0 top-0 bottom-0 w-1 -translate-x-1/2 cursor-col-resize hover:bg-accent/50 z-[var(--z-canvas)]"
                   title="Drag to resize"
                 />
                 <div className="flex items-center justify-end px-1 py-0.5 border-b border-border-default shrink-0 bg-surface-1">

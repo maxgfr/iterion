@@ -134,7 +134,7 @@ function ClosedBubble({
     <button
       type="button"
       onClick={onOpen}
-      className={`fixed bottom-4 right-4 z-[var(--z-toast)] h-12 w-12 rounded-full border shadow-lg flex items-center justify-center transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${needsAttention ? "border-warning bg-warning-soft animate-pulse" : "border-border-default bg-surface-2 text-fg-default"}`}
+      className={`fixed bottom-4 right-4 z-[var(--z-toast)] h-12 w-12 rounded-full border shadow-[var(--shadow-lg)] flex items-center justify-center transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${needsAttention ? "border-warning bg-warning-soft animate-pulse" : "border-border-default bg-surface-2 text-fg-default"}`}
       aria-label={`Open conversation${unread > 0 ? ` (${unread} new)` : ""}`}
       title={
         needsAttention

@@ -175,7 +175,7 @@ export function Combobox<T = string>({
         <div
           role="listbox"
           id={listboxId}
-          className="absolute z-[var(--z-popover)] mt-1 w-full max-h-72 overflow-auto rounded-md border border-border-strong bg-surface-0 shadow-lg"
+          className="absolute z-[var(--z-popover)] mt-1 w-full max-h-72 overflow-auto rounded-md border border-border-strong bg-surface-0 shadow-[var(--shadow-popover)]"
         >
           <div className="p-1 sticky top-0 bg-surface-0 border-b border-border-default">
             <input

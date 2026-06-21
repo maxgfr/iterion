@@ -150,7 +150,7 @@ export default function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeT
       }}
     >
       {nodeDiags.length > 0 && (
-        <div className="absolute -top-2 -right-2 z-10">
+        <div className="absolute -top-2 -right-2 z-[var(--z-canvas)]">
           <DiagnosticBadge
             diagnostics={nodeDiags}
             onReveal={() => setSelectedNode(label)}
