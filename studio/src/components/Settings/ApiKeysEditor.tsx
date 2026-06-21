@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, EmptyState, Input } from "@/components/ui";
 
 import { desktop, type SecretStatus } from "@/lib/desktopBridge";
+import { useConfirm } from "@/hooks/useConfirm";
 
 // ApiKeysEditor never displays secret values — only stored / not-stored /
 // shadowed-by-env status, plus an input for entering or replacing the
@@ -22,6 +23,7 @@ export default function ApiKeysEditor() {
   const refresh = () => queryClient.invalidateQueries({ queryKey });
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   if (!statuses) {
     return fetchError ? (
@@ -45,6 +47,13 @@ export default function ApiKeysEditor() {
   };
 
   const handleDelete = async (key: string) => {
+    const ok = await confirm({
+      title: "Delete stored API key?",
+      message: `Remove the stored value for ${key}. You'll need to paste it again to re-enable agents that use this provider.`,
+      confirmLabel: "Delete",
+      confirmVariant: "danger",
+    });
+    if (!ok) return;
     setMutationError(null);
     try {
       await desktop.deleteSecret(key);
@@ -95,6 +104,7 @@ export default function ApiKeysEditor() {
           {error}
         </p>
       )}
+      {confirmDialog}
     </div>
   );
 }

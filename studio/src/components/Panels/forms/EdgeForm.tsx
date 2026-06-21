@@ -3,6 +3,7 @@ import { useDocumentStore } from "@/store/document";
 import type { Edge, WhenClause, LoopClause, WithEntry } from "@/api/types";
 import { TextField, NumberField, CheckboxField, SelectField, CommittedTextField } from "./FormField";
 import type { RefContext } from "@/lib/refCompletion";
+import { useConfirm } from "@/hooks/useConfirm";
 
 interface Props {
   edge: Edge;
@@ -14,6 +15,7 @@ export default function EdgeForm({ edge, edgeIndex, workflowName }: Props) {
   const document = useDocumentStore((s) => s.document);
   const updateEdge = useDocumentStore((s) => s.updateEdge);
   const removeEdge = useDocumentStore((s) => s.removeEdge);
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const setWhen = useCallback(
     (when: WhenClause | undefined) => updateEdge(workflowName, edgeIndex, { when }),
@@ -247,11 +249,21 @@ export default function EdgeForm({ edge, edgeIndex, workflowName }: Props) {
       <div className="border-t border-border-default pt-2">
         <button
           className="w-full bg-danger-soft hover:bg-danger text-danger-fg text-xs py-1 rounded"
-          onClick={() => removeEdge(workflowName, edgeIndex, edge.from, edge.to)}
+          onClick={async () => {
+            const ok = await confirm({
+              title: "Delete this edge?",
+              message: `Remove the connection from "${edge.from}" to "${edge.to}". The nodes themselves are kept.`,
+              confirmLabel: "Delete",
+              confirmVariant: "danger",
+            });
+            if (!ok) return;
+            removeEdge(workflowName, edgeIndex, edge.from, edge.to);
+          }}
         >
           Delete Edge
         </button>
       </div>
+      {confirmDialog}
     </div>
   );
 }

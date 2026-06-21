@@ -2,9 +2,11 @@ import { Button } from "@/components/ui";
 
 import { useDesktop } from "@/hooks/useDesktop";
 import { desktop } from "@/lib/desktopBridge";
+import { useConfirm } from "@/hooks/useConfirm";
 
 export default function ProjectsTab() {
   const { projects, currentProject, switchProject, removeProject } = useDesktop();
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   return (
     <div className="flex flex-col gap-2 p-4">
@@ -36,13 +38,27 @@ export default function ProjectsTab() {
               <Button size="sm" variant="ghost" onClick={() => desktop.revealInFinder(p.dir)}>
                 Reveal
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => removeProject(p.id)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: "Remove project from list?",
+                    message: `Remove "${p.name}" from the projects list. Files on disk are not touched.`,
+                    confirmLabel: "Remove",
+                    confirmVariant: "danger",
+                  });
+                  if (!ok) return;
+                  removeProject(p.id);
+                }}
+              >
                 Remove
               </Button>
             </li>
           );
         })}
       </ul>
+      {confirmDialog}
     </div>
   );
 }
