@@ -20,6 +20,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
 	"github.com/SocialGouv/iterion/pkg/backend/detect"
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
+	"github.com/SocialGouv/iterion/pkg/backend/rtk"
 	"github.com/SocialGouv/iterion/pkg/backend/secretguard"
 	"github.com/SocialGouv/iterion/pkg/backend/tool"
 	"github.com/SocialGouv/iterion/pkg/backend/tool/privacy"
@@ -185,6 +186,13 @@ type ClawExecutor struct {
 	storeDir        string   // dispatcher store root (empty = backend default)
 	lifecycleHooks  *hooks.Runner
 
+	// rtk command-output compression. wfRTK is the workflow-level `rtk:`
+	// DSL value; rtkOverride is the run-level override (CLI --rtk / studio
+	// Launch). Both feed rtk.Resolve to compute each node's effective mode
+	// (precedence: override > node DSL > workflow DSL > ITERION_RTK env).
+	wfRTK       string
+	rtkOverride string
+
 	// sandbox is the live [sandbox.Run] for the current iterion run,
 	// or nil when the workflow doesn't activate a sandbox. The engine
 	// calls SetSandbox after the run starts; backends and tool nodes
@@ -300,6 +308,13 @@ func WithWorkDir(dir string) ClawExecutorOption {
 // WithDefaultBackend sets the workflow-level default backend.
 func WithDefaultBackend(name string) ClawExecutorOption {
 	return func(e *ClawExecutor) { e.defaultBackend = name }
+}
+
+// WithRTKOverride sets the run-level rtk override (CLI --rtk / studio Launch
+// toggle): on|ultra|off, or "" for "unset, defer to DSL/env". It is the
+// highest-priority input to rtk.Resolve.
+func WithRTKOverride(mode string) ClawExecutorOption {
+	return func(e *ClawExecutor) { e.rtkOverride = mode }
 }
 
 // WithBotID sets the stable bot identity used to qualify structured
@@ -508,6 +523,7 @@ func NewClawExecutor(registry *Registry, wf *ir.Workflow, opts ...ClawExecutorOp
 		cursors:        wf.Cursors,
 		imageAttachs:   imageAttachs,
 		defaultBackend: wf.DefaultBackend,
+		wfRTK:          wf.RTK,
 		wfCompaction:   wf.Compaction,
 		wfCapabilities: wf.Capabilities,
 		botID:          wf.Name,
@@ -889,6 +905,7 @@ type backendFields struct {
 	memory           *ir.Memory
 	capabilities     []string
 	cursors          *ir.CursorInvocation
+	rtk              string // node-level `rtk:` value ("" = unset)
 }
 
 // extractBackendFields normalises the LLM-relevant fields shared by
@@ -913,6 +930,7 @@ func extractBackendFields(node ir.Node) (backendFields, error) {
 			memory:           n.Memory,
 			capabilities:     n.Capabilities,
 			cursors:          n.Cursors,
+			rtk:              n.RTK,
 		}, nil
 	case *ir.JudgeNode:
 		return backendFields{
@@ -928,6 +946,7 @@ func extractBackendFields(node ir.Node) (backendFields, error) {
 			memory:           n.Memory,
 			capabilities:     n.Capabilities,
 			cursors:          n.Cursors,
+			rtk:              n.RTK,
 		}, nil
 	default:
 		return backendFields{}, fmt.Errorf("model: extractBackendFields called with unsupported node type %T", node)
@@ -1256,6 +1275,10 @@ func (e *ClawExecutor) buildTask(ctx context.Context, node ir.Node, f backendFie
 		// as it walks the node's provider chain.
 		Hooks:      e.delegateHooksFor(f.id, backendName, LoopIterationFromContext(ctx)),
 		InboxDrain: e.bindInboxDrain(ctx),
+		// rtk output-compression mode (precedence: run override > node DSL >
+		// workflow DSL > ITERION_RTK env). claude_code installs a PreToolUse
+		// hook when enabled; claw carries it into its tool loop via ctx.
+		RTKMode: rtk.Resolve(e.rtkOverride, f.rtk, e.wfRTK, rtk.EnvDefault()),
 	}
 	if m := f.memory; m != nil && m.Enabled {
 		task.Memory = &delegate.MemorySpec{

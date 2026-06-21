@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SocialGouv/iterion/pkg/backend/rtk"
 	"github.com/SocialGouv/iterion/pkg/sandbox"
 )
 
@@ -347,6 +348,15 @@ type Task struct {
 	// are 4.8-only); on other models it degrades to plain xhigh.
 	// See platform.claude.com/docs/en/build-with-claude/mid-conversation-effort-example.
 	Ultracode bool
+
+	// RTKMode is the resolved rtk command-output-compression mode for this
+	// node (Off|On|Ultra). When enabled and the rtk binary is present, the
+	// claude_code backend installs a PreToolUse hook that rewrites Bash
+	// commands to their `rtk <cmd>` equivalent, and the claw backend carries
+	// the mode into its tool loop so the bash builtin compresses too. The
+	// executor resolves it from the precedence chain (run override > node DSL
+	// > workflow DSL > ITERION_RTK). Off is the zero value (no-op).
+	RTKMode rtk.Mode
 
 	// SecretsHygiene, when true, appends a "## Secret handling" section to
 	// the system prompt: the behavioural backstop of iterion's secrets

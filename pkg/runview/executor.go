@@ -67,6 +67,10 @@ type ExecutorSpec struct {
 	// registry and returns the token. nil (CLI) leaves sandboxed
 	// board-emit disabled.
 	BoardRegister func(caps []string) string
+	// RTK is the run-level rtk override ("", "on", "ultra", "off"),
+	// forwarded to the executor as the highest-priority input to
+	// rtk.Resolve (above node/workflow DSL and the ITERION_RTK env).
+	RTK string
 }
 
 // BuildExecutor wires up the default ClawExecutor: registry, default
@@ -151,6 +155,7 @@ func BuildExecutor(spec ExecutorSpec) (*model.ClawExecutor, error) {
 		model.WithLifecycleHooks(lifecycle),
 		model.WithStoreDir(dispatcherStoreDir),
 		model.WithSecretGuard(guard),
+		model.WithRTKOverride(spec.RTK),
 	}
 	if spec.BoardRegister != nil {
 		opts = append(opts, model.WithBoardRegister(spec.BoardRegister))

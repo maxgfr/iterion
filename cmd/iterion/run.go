@@ -24,6 +24,7 @@ var runOpts struct {
 	sandbox             string
 	sandboxDefaultImage string
 	sandboxHostState    string
+	rtk                 string
 }
 
 var runCmd = &cobra.Command{
@@ -48,6 +49,7 @@ var runCmd = &cobra.Command{
 			Sandbox:             runOpts.sandbox,
 			SandboxDefaultImage: runOpts.sandboxDefaultImage,
 			SandboxHostState:    runOpts.sandboxHostState,
+			RTK:                 runOpts.rtk,
 		}
 		if len(runOpts.varFlags) > 0 {
 			vars, err := cli.ParseVarFlags(runOpts.varFlags)
@@ -79,5 +81,6 @@ func init() {
 	f.StringVar(&runOpts.sandbox, "sandbox", "", "Run-level sandbox override: \"none\" (force off), \"auto\" (read .devcontainer/devcontainer.json). Empty inherits ITERION_SANDBOX_DEFAULT then the workflow's own sandbox: block. See pkg/sandbox.")
 	f.StringVar(&runOpts.sandboxDefaultImage, "sandbox-default-image", "", "Image ref used by sandbox: auto when no .devcontainer/devcontainer.json is found (env: ITERION_SANDBOX_DEFAULT_IMAGE; built-in: ghcr.io/socialgouv/iterion-sandbox-slim:<iterion-version>)")
 	f.StringVar(&runOpts.sandboxHostState, "sandbox-host-state", "", "Bind host ~/.iterion and ~/.claude into the sandbox so persistent memory survives across runs: \"auto\" (default) | \"none\". Empty inherits ITERION_SANDBOX_HOST_STATE then the built-in default \"auto\". Use \"none\" on multi-tenant/cloud runners to avoid leaking host OAuth credentials. See docs/sandbox.md.")
+	f.StringVar(&runOpts.rtk, "rtk", "", "rtk command-output compression (https://github.com/rtk-ai/rtk): \"on\" rewrites agent shell commands to their compact \"rtk <cmd>\" form, \"ultra\" uses rtk's densest output, \"off\" disables. Empty inherits the workflow/node rtk: DSL then ITERION_RTK. Needs the rtk binary on PATH (or ITERION_RTK_BIN). See docs/rtk.md.")
 	rootCmd.AddCommand(runCmd)
 }

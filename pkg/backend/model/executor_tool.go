@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SocialGouv/iterion/pkg/backend/rtk"
 	"github.com/SocialGouv/iterion/pkg/backend/secretguard"
 	"github.com/SocialGouv/iterion/pkg/backend/tool"
 	"github.com/SocialGouv/iterion/pkg/backend/tool/privacy"
@@ -148,6 +149,19 @@ func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNo
 
 	// Resolve template references in the (env-expanded) command.
 	resolved := resolveCommandTemplate(expandedCommand, node.CommandRefs, input, e.vars, e.secretGuard)
+
+	// rtk (tool nodes): node-level opt-in ONLY — a tool node compresses its
+	// command output only when its own `rtk:` field is on/ultra (a run
+	// override can force-off as a kill switch, never force-on). This keeps
+	// deterministic tool output — e.g. a review loop's `git diff` feeding a
+	// reviewer — full-fidelity unless the author deliberately opts in. Done
+	// before secretGuard.Materialize so hooks/logs persist the placeholder
+	// (rtk-form) command, never the materialised secret value.
+	if m := rtk.ResolveToolNode(e.rtkOverride, node.RTK); m.Enabled() {
+		if rewritten, changed := rtk.Rewrite(ctx, m, resolved); changed {
+			resolved = rewritten
+		}
+	}
 
 	if e.hooks.OnToolStarted != nil {
 		e.hooks.OnToolStarted(node.ID, LLMToolStartedInfo{

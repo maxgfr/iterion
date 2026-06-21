@@ -16,6 +16,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/backend/cost"
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
+	"github.com/SocialGouv/iterion/pkg/backend/rtk"
 	"github.com/SocialGouv/iterion/pkg/knowledge"
 	"github.com/SocialGouv/iterion/pkg/memory"
 	"github.com/SocialGouv/iterion/pkg/sandbox"
@@ -184,6 +185,11 @@ func NewClawBackend(registry *Registry, hk EventHooks, retry RetryPolicy, opts .
 // [delegate.IOTask] and in docs/sandbox.md: no MCP servers, no
 // mid-tool-loop ask_user resume.
 func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate.Result, error) {
+	// Carry the resolved rtk mode into the tool loop so the bash builtin can
+	// compress command output (rtk.ModeFromContext). Off is a no-op. For the
+	// sandboxed path the mode rides the IOTask to the in-container runner,
+	// whose own Execute re-applies it here.
+	ctx = rtk.WithMode(ctx, task.RTKMode)
 	if task.Sandbox != nil {
 		return b.executeViaSandboxRunner(ctx, task)
 	}

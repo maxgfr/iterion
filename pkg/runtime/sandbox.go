@@ -282,6 +282,7 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	addOptionalBindMount(spec, p.BundleHostDir, p.BundleContainerPath, "/run/iterion/bundle", "bundle", true, logger)
 	applyHostStateMounts(spec, p.Workflow, p, emitEvent, logger)
 	addClawBinaryMount(spec, p.Workflow)
+	addRtkBinaryMount(spec)
 	addWorktreeGitMount(spec, p.WorktreeGitDir, logger)
 	if err := addSecretFileMounts(ctx, spec, p.Workflow, p.SecretVars); err != nil {
 		return nil, err

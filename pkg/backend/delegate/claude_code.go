@@ -16,6 +16,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/backend/cost"
 	"github.com/SocialGouv/iterion/pkg/backend/delegate/claudesdk"
+	"github.com/SocialGouv/iterion/pkg/backend/rtk"
 	"github.com/SocialGouv/iterion/pkg/backend/thinktokens"
 	"github.com/SocialGouv/iterion/pkg/backend/tooldisplay"
 	"github.com/SocialGouv/iterion/pkg/internal/proc"
@@ -489,6 +490,42 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 					return claudesdk.HookOutput{}, nil
 				}
 				return claudesdk.HookOutput{Decision: "allow", UpdatedInput: updated}, nil
+			},
+		}))
+	}
+
+	// rtk command-output compression. When enabled for this node and the rtk
+	// binary is present, install a PreToolUse hook on the Bash tool that
+	// rewrites commands to their `rtk <cmd>` equivalent (e.g. "git status" →
+	// "rtk git status"), saving 60–90% of the output tokens. The decision is
+	// delegated to rtk's own `rtk rewrite` (single source of truth) via
+	// rtk.Rewrite. iterion uses rtk purely as a compressor — never a
+	// permission gate — so it always auto-allows the rewritten command. The
+	// rewrite runs host-side; the (sandboxed) CLI runs the rewritten command
+	// in-container against the bind-mounted rtk binary.
+	if task.RTKMode.Enabled() && rtk.Available() {
+		bashMatcher := "^Bash$"
+		opts = append(opts, claudesdk.WithHook(claudesdk.HookPreToolUse, claudesdk.HookMatcher{
+			Matcher: &bashMatcher,
+			Handler: func(hookCtx context.Context, in claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
+				cmd, ok := in.ToolInput["command"].(string)
+				if !ok || cmd == "" {
+					return claudesdk.HookOutput{}, nil
+				}
+				rewritten, changed := rtk.Rewrite(hookCtx, task.RTKMode, cmd)
+				if !changed {
+					return claudesdk.HookOutput{}, nil
+				}
+				updated := make(map[string]any, len(in.ToolInput))
+				for k, v := range in.ToolInput {
+					updated[k] = v
+				}
+				updated["command"] = rewritten
+				return claudesdk.HookOutput{
+					Decision:       "allow",
+					DecisionReason: "RTK auto-rewrite",
+					UpdatedInput:   updated,
+				}, nil
 			},
 		}))
 	}
