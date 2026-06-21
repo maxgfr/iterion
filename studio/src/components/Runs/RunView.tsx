@@ -23,6 +23,7 @@ import {
   readEnumFlag,
   writeBooleanFlag,
   writeStringFlag,
+  hasFlag,
 } from "@/lib/localStorageFlag";
 
 import { buildExecutionsAt } from "@/lib/snapshotReducer";
@@ -264,11 +265,7 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
   // new preview_url event after they explicitly picked another panel.
   // A persisted tab counts as "pinned" — the user chose it last time.
   const [bottomTabPinned, setBottomTabPinned] = useState<boolean>(() => {
-    try {
-      return window.localStorage.getItem(BOTTOM_TAB_KEY) !== null;
-    } catch {
-      return false;
-    }
+    return hasFlag(BOTTOM_TAB_KEY);
   });
   const handleSetBottomTab = useCallback((tab: BottomTab) => {
     setBottomTab(tab);

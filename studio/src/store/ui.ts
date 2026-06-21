@@ -2,7 +2,12 @@ import type { ReactNode } from "react";
 import { create } from "zustand";
 import type { LayerKind } from "@/lib/constants";
 import { TOAST_DURATION_DEFAULT_MS } from "@/lib/constants";
-import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
+import {
+  readBooleanFlag,
+  writeBooleanFlag,
+  readNumberFlag,
+  writeNumberFlag,
+} from "@/lib/localStorageFlag";
 
 export type { LayerKind };
 export type SidebarTab = "properties" | "schemas" | "prompts" | "vars" | "workflow" | "comments" | "mcp" | "bot";
@@ -35,15 +40,10 @@ const CHAT_ENTER_SUBMITS_KEY = "iterion.chatEnterSubmits";
 const WHATS_NEXT_QUICK_MODE_KEY = "iterion.whatsNextQuickMode";
 
 function readInspectorWidth(): number {
-  if (typeof window === "undefined") return INSPECTOR_WIDTH_DEFAULT;
-  try {
-    const raw = window.localStorage.getItem(INSPECTOR_WIDTH_KEY);
-    const parsed = raw ? parseInt(raw, 10) : NaN;
-    if (!Number.isFinite(parsed)) return INSPECTOR_WIDTH_DEFAULT;
-    return Math.min(INSPECTOR_WIDTH_MAX, Math.max(INSPECTOR_WIDTH_MIN, parsed));
-  } catch {
-    return INSPECTOR_WIDTH_DEFAULT;
-  }
+  return readNumberFlag(INSPECTOR_WIDTH_KEY, INSPECTOR_WIDTH_DEFAULT, {
+    min: INSPECTOR_WIDTH_MIN,
+    max: INSPECTOR_WIDTH_MAX,
+  });
 }
 
 interface UIState {
@@ -261,13 +261,7 @@ export const useUIStore = create<UIState>((set) => ({
   // Inspector width
   setInspectorWidth: (px) => {
     const clamped = Math.min(INSPECTOR_WIDTH_MAX, Math.max(INSPECTOR_WIDTH_MIN, Math.round(px)));
-    if (typeof window !== "undefined") {
-      try {
-        window.localStorage.setItem(INSPECTOR_WIDTH_KEY, String(clamped));
-      } catch {
-        // Storage may be unavailable; keep the in-memory width.
-      }
-    }
+    writeNumberFlag(INSPECTOR_WIDTH_KEY, clamped);
     set({ inspectorWidth: clamped });
   },
   toggleInspectorCollapsed: () => set((s) => {

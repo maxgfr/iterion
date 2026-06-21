@@ -39,11 +39,64 @@ export function readEnumFlag<T extends string>(
   }
 }
 
+// readStringFlag reads a raw string flag, returning `fallback` when the
+// key is missing or storage is unreadable (private mode / SSR). Use for
+// free-form values (ids, paths) that don't fit the enum allowlist.
+export function readStringFlag(key: string, fallback = ""): string {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw === null ? fallback : raw;
+  } catch {
+    return fallback;
+  }
+}
+
 export function writeStringFlag(key: string, value: string): void {
   try {
     window.localStorage.setItem(key, value);
   } catch {
     // storage may be unavailable
+  }
+}
+
+// readNumberFlag parses an integer flag, returning `fallback` when the
+// key is missing, unreadable, or not a finite number, then clamps to the
+// optional [min, max] band. Pairs with writeNumberFlag for persisted
+// layout sizes.
+export function readNumberFlag(
+  key: string,
+  fallback: number,
+  opts?: { min?: number; max?: number },
+): number {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed = raw ? parseInt(raw, 10) : NaN;
+    if (!Number.isFinite(parsed)) return fallback;
+    let n = parsed;
+    if (opts?.min !== undefined) n = Math.max(opts.min, n);
+    if (opts?.max !== undefined) n = Math.min(opts.max, n);
+    return n;
+  } catch {
+    return fallback;
+  }
+}
+
+export function writeNumberFlag(key: string, value: number): void {
+  try {
+    window.localStorage.setItem(key, String(value));
+  } catch {
+    // storage may be unavailable
+  }
+}
+
+// hasFlag reports whether a key is present at all, swallowing the
+// unavailable-storage case. Useful for "first-run vs returning" gates
+// where the stored value itself is irrelevant.
+export function hasFlag(key: string): boolean {
+  try {
+    return window.localStorage.getItem(key) !== null;
+  } catch {
+    return false;
   }
 }
 

@@ -6,6 +6,8 @@
 // Keyed by (botId, projectId) so different first-class bots (when we
 // add more) and different projects don't trample each other.
 
+import { readStringFlag, writeStringFlag, removeFlag } from "../localStorageFlag";
+
 const KEY_PREFIX = "iterion.whats-next.runId";
 
 function key(botId: string, projectId: string | null | undefined): string {
@@ -17,32 +19,20 @@ export function rememberSessionRunId(
   projectId: string | null | undefined,
   runId: string,
 ): void {
-  try {
-    window.localStorage.setItem(key(botId, projectId), runId);
-  } catch {
-    // storage may be unavailable (private mode, quota); silently skip.
-  }
+  writeStringFlag(key(botId, projectId), runId);
 }
 
 export function recallSessionRunId(
   botId: string,
   projectId: string | null | undefined,
 ): string | null {
-  try {
-    const raw = window.localStorage.getItem(key(botId, projectId));
-    return raw && raw.length > 0 ? raw : null;
-  } catch {
-    return null;
-  }
+  const raw = readStringFlag(key(botId, projectId));
+  return raw.length > 0 ? raw : null;
 }
 
 export function forgetSessionRunId(
   botId: string,
   projectId: string | null | undefined,
 ): void {
-  try {
-    window.localStorage.removeItem(key(botId, projectId));
-  } catch {
-    // silently skip.
-  }
+  removeFlag(key(botId, projectId));
 }
