@@ -14,6 +14,7 @@ import { stepIteration } from "@/lib/eventIter";
 import { formatContextUsage, formatDurationBetween, formatMs } from "@/lib/format";
 import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
 import { readNodeOutputMeta } from "@/lib/delegateMeta";
+import { softColor } from "@/lib/constants";
 import { useToggleSet } from "@/hooks/useToggleSet";
 import { NodeIcon } from "@/components/icons/NodeIcon";
 import type { NodeKind } from "@/api/types";
@@ -149,7 +150,7 @@ function IterationPills({
             onClick={() => onSelect(idx)}
             title={`iter ${idx + 1} · ${s.label}`}
             className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[9px] font-mono text-fg-default transition-all ${pulse} ${opacity} ${selectedRing} ${failedRing}`}
-            style={{ backgroundColor: `${color}66` }}
+            style={{ backgroundColor: softColor(color, 40) }}
           >
             {idx + 1}
           </button>

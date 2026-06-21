@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useDocumentStore } from "@/store/document";
 import { useSelectionStore } from "@/store/selection";
-import { NODE_COLORS, NODE_ICONS } from "@/lib/constants";
+import { NODE_COLORS, NODE_ICONS, softColor } from "@/lib/constants";
 import type {
   AgentDecl,
   ComputeDecl,
@@ -153,7 +153,7 @@ function NodeHeader({
     <div className="flex items-center gap-2 border-b border-border-default px-3 py-2 shrink-0">
       <span
         className="inline-flex h-6 w-6 items-center justify-center rounded-md text-sm shrink-0"
-        style={{ background: `${color}33`, color }}
+        style={{ background: softColor(color, 20), color }}
         title={kind}
       >
         {icon}

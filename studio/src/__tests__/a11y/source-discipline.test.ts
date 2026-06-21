@@ -69,4 +69,24 @@ describe("source discipline", () => {
     }
     expect(hits).toHaveLength(0);
   });
+
+  it("has no legacy ${token}NN soft-bg interpolation — use softColor(token, pct)", () => {
+    // `${color}22` only worked when `color` was an inline hex string; with the
+    // var(--color-*) token strings it produces invalid CSS (var(--x)22) so the
+    // background/border silently renders nothing. softColor() (color-mix) is
+    // the correct replacement. The lookahead pins the 2 hex digits to a
+    // closing quote/backtick (the template-literal-as-value shape) to avoid
+    // matching incidental `${x}ed`-style text. lib/constants.ts documents the
+    // legacy pattern in a comment, so it is allow-listed.
+    const hits = scan(
+      /\$\{[^}]+\}[0-9a-fA-F]{2}(?=["'\x60])/,
+      (path) => path.endsWith("/lib/constants.ts"),
+    );
+    if (hits.length) {
+      throw new Error(
+        `legacy \${token}NN soft-bg is banned — use softColor(token, pct):\n${hits.join("\n")}`,
+      );
+    }
+    expect(hits).toHaveLength(0);
+  });
 });

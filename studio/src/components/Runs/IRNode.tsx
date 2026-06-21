@@ -10,6 +10,7 @@ import { EffortBar, isEffortLevel } from "@/components/ui/EffortBar";
 import { ProviderIcon } from "@/components/icons/ProviderIcon";
 import { BackendBadge } from "@/components/icons/BackendBadge";
 import { NodeIcon } from "@/components/icons/NodeIcon";
+import { softColor } from "@/lib/constants";
 
 import { statusClasses, type UnifiedStatus } from "./runStatusClasses";
 
@@ -132,7 +133,7 @@ export default function IRNode({ data }: NodeProps<IRNodeType>) {
       // borders". Subtle so it doesn't fight the status color.
       style={
         executions.length > 0
-          ? { boxShadow: `inset 0 0 0 2px ${iterationColor(activeIdx)}33` }
+          ? { boxShadow: `inset 0 0 0 2px ${softColor(iterationColor(activeIdx), 20)}` }
           : undefined
       }
     >
@@ -321,7 +322,7 @@ function IterationPip({
           : "opacity-70 hover:opacity-100"
       }`}
       style={{
-        backgroundColor: `${palette}33`,
+        backgroundColor: softColor(palette, 20),
         border: `1px solid ${palette}`,
         color: palette,
         minWidth: 18,

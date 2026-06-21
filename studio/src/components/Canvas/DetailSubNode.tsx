@@ -3,7 +3,7 @@ import type { NodeProps } from "@xyflow/react";
 import { useUIStore } from "@/store/ui";
 import { useSelectionStore } from "@/store/selection";
 import { makeEdgeId } from "@/lib/documentToGraph";
-import { SELECTED_BORDER, SELECTED_GLOW, SUB_COLORS, SUB_ICONS } from "@/lib/constants";
+import { SELECTED_BORDER, SELECTED_GLOW, softColor, SUB_COLORS, SUB_ICONS } from "@/lib/constants";
 import type { DetailSubKind } from "@/lib/constants";
 import { SIDES, POS_MAP } from "./handlePositions";
 
@@ -59,7 +59,7 @@ export default function DetailSubNode({ data, selected }: NodeProps) {
       className="rounded-lg border px-3 py-2 min-w-[130px] max-w-[200px] text-center shadow-md cursor-pointer hover:brightness-125 transition-all focus:outline-none focus:ring-2 focus:ring-accent"
       style={{
         borderColor: selected ? SELECTED_BORDER : color,
-        background: `${color}18`,
+        background: softColor(color, 9),
         boxShadow: selected ? SELECTED_GLOW : undefined,
       }}
       onClick={handleClick}

@@ -2,7 +2,7 @@ import { Handle } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import type { EditingItem } from "@/store/ui";
 import { useUIStore } from "@/store/ui";
-import { LAYER_COLORS, LAYER_ICONS, SELECTED_BORDER, SELECTED_GLOW } from "@/lib/constants";
+import { LAYER_COLORS, LAYER_ICONS, SELECTED_BORDER, SELECTED_GLOW, softColor } from "@/lib/constants";
 import type { LayerKind } from "@/lib/constants";
 import { SIDES, POS_MAP } from "./handlePositions";
 
@@ -34,7 +34,7 @@ export default function AuxiliaryNode({ data, selected }: NodeProps) {
       className="rounded-full border px-3 py-1.5 min-w-[100px] text-center shadow-md cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent"
       style={{
         borderColor: selected ? SELECTED_BORDER : color,
-        background: `${color}22`,
+        background: softColor(color),
         boxShadow: selected ? SELECTED_GLOW : undefined,
       }}
       onClick={openEditor}

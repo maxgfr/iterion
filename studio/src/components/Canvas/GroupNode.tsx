@@ -2,7 +2,7 @@ import { Handle } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import { useGroupStore } from "@/store/groups";
 import { groupNameFromNodeId } from "@/lib/groups";
-import { SELECTED_BORDER, SELECTED_GLOW } from "@/lib/constants";
+import { SELECTED_BORDER, SELECTED_GLOW, softColor } from "@/lib/constants";
 import { SIDES, POS_MAP } from "./handlePositions";
 
 export interface GroupNodeData extends Record<string, unknown> {
@@ -28,7 +28,7 @@ export default function GroupNode({ id, data, selected }: NodeProps) {
         className="rounded-lg border-2 px-4 py-3 min-w-[160px] text-center shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] transition-shadow cursor-pointer"
         style={{
           borderColor: selected ? SELECTED_BORDER : themeColor,
-          background: `${themeColor}22`,
+          background: softColor(themeColor),
           borderStyle: "dashed",
           boxShadow: selected ? SELECTED_GLOW : undefined,
         }}
@@ -64,8 +64,8 @@ export default function GroupNode({ id, data, selected }: NodeProps) {
     <div
       className="rounded-xl border-2 w-full h-full"
       style={{
-        borderColor: selected ? SELECTED_BORDER : `${themeColor}66`,
-        background: `${themeColor}0A`,
+        borderColor: selected ? SELECTED_BORDER : softColor(themeColor, 40),
+        background: softColor(themeColor, 4),
         borderStyle: "dashed",
         boxShadow: selected ? SELECTED_GLOW : undefined,
         minWidth: "100%",
@@ -75,7 +75,7 @@ export default function GroupNode({ id, data, selected }: NodeProps) {
       {/* Group header */}
       <div
         className="flex items-center gap-1.5 px-3 py-1.5 cursor-pointer select-none"
-        style={{ borderBottom: `1px solid ${themeColor}33` }}
+        style={{ borderBottom: `1px solid ${softColor(themeColor, 20)}` }}
         onDoubleClick={(e) => { e.stopPropagation(); toggleCollapse(name); }}
       >
         <span className="text-xs">{"\u{1F4E6}"}</span>
