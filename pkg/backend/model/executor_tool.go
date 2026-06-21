@@ -165,79 +165,114 @@ func parseToolNodeOutput(stdout, fallback string) map[string]interface{} {
 	return output
 }
 
-// executeToolNodeShell handles tool nodes whose command contains {{...}}
-// template references. Templates are resolved from the node's input map,
-// and the resulting string is executed as a shell command via sh -c.
-func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNode, input map[string]interface{}) (map[string]interface{}, error) {
-	toolName := shellToolNodeToolName(node)
+// executeToolNodeCommon is the shared execution skeleton for the two
+// direct virtual-tool node modes — shell (executeToolNodeShell) and script
+// (executeToolNodeScript). They differ only in how the final command
+// string is produced (resolve) and how the *exec.Cmd is built (buildCmd);
+// everything else is identical and lives here: the policy check, the
+// OnToolStarted hook, the separated-stream run, the OnToolCall /
+// OnToolNodeResult finish hooks, the error wrap, and the JSON-or-text
+// output parse.
+//
+// resolve returns the final command/script string (env-expand, run-ref +
+// template substitution, and — shell only — the rtk rewrite). buildCmd
+// turns that string into an *exec.Cmd, returning an optional cleanup (the
+// script path uses it to remove its temp file) and an error (e.g.
+// unsupported language / temp-file failure). buildCmd runs UNTIMED — only
+// the subprocess execution itself is measured into duration — and the
+// OnToolStarted hook fires only after it succeeds, so a build failure
+// emits neither a started nor a finished event (matching the original
+// per-mode functions). failVerb shapes the run-failure error ("shell
+// command failed" / "script failed").
+func (e *ClawExecutor) executeToolNodeCommon(
+	ctx context.Context,
+	node *ir.ToolNode,
+	toolName, failVerb string,
+	resolve func() string,
+	buildCmd func(resolved string) (cmd *exec.Cmd, cleanup func(), err error),
+) (map[string]interface{}, error) {
 	if err := e.checkToolNodePolicy(ctx, node, toolName); err != nil {
 		return nil, err
 	}
 
-	// Expand environment variables FIRST, on the author-controlled command
-	// template only. Doing this AFTER resolveCommandTemplate would re-introduce
-	// shell metacharacters into substituted values that shellEscape thought
-	// were inert single-quoted strings — e.g. an upstream-LLM-controlled input
-	// of `$INJECT` would survive shellEscape as `'$INJECT'`, then become
-	// `''; rm -rf ~; ''` if the env had INJECT=`'; rm -rf ~; '`. By expanding
-	// before substitution, only the .iter author's own `$VAR` references in
-	// the static command template are expanded; substituted values stay safely
-	// quoted.
-	//
-	// Only the BRACED form `${NAME}` is treated as an env var reference —
-	// matching the SKILL.md documentation ("Environment variables are
-	// supported with ${ENV_VAR} syntax"). Bare `$NAME`, `$ec`, `$?`, `$1`
-	// etc. are passed through verbatim so shell-level variables (positional
-	// args, exit-status, captured stdout) survive into the resolved command
-	// for sh -c to interpret. The previous os.ExpandEnv call ate those,
-	// silently turning `$ec` into `""` and breaking any tool that wanted to
-	// capture exit codes or compose intermediate shell values.
-	expandedCommand := expandBracedEnv(node.Command)
+	resolved := resolve()
 
-	// Resolve {{run.id}} first — resolveCommandTemplate only knows the
-	// input/vars/secrets namespaces, so a direct run ref would survive
-	// into the command verbatim.
-	expandedCommand = resolveRunRefs(expandedCommand, RunIDFromContext(ctx), node.CommandRefs, shellEscapeValue)
-
-	// Resolve template references in the (env-expanded) command.
-	resolved := resolveCommandTemplate(expandedCommand, node.CommandRefs, input, e.vars, e.secretGuard)
-
-	// rtk (tool nodes): node-level opt-in ONLY — a tool node compresses its
-	// command output only when its own `rtk:` field is on/ultra (a run
-	// override can force-off as a kill switch, never force-on). This keeps
-	// deterministic tool output — e.g. a review loop's `git diff` feeding a
-	// reviewer — full-fidelity unless the author deliberately opts in. Done
-	// before secretGuard.Materialize so hooks/logs persist the placeholder
-	// (rtk-form) command, never the materialised secret value.
-	if m := rtk.ResolveToolNode(e.rtkOverride, node.RTK); m.Enabled() {
-		if rewritten, changed := rtk.Rewrite(ctx, m, resolved); changed {
-			resolved = rewritten
-		}
+	cmd, cleanup, err := buildCmd(resolved)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	e.emitToolNodeStarted(node.ID, toolName, len(resolved))
 
 	start := time.Now()
-	// Materialise secret placeholders ONLY into the command actually
-	// executed — `resolved` (placeholder form) is what the hooks/logs
-	// above and below persist, so the real value never hits the store.
-	cmd := e.toolNodeCommand(ctx, e.secretGuard.Materialize(resolved))
 	// Separate stdout (for structured JSON parsing) from stderr (for
-	// diagnostic logging). Tools that emit a JSON result on stdout MUST
-	// be able to use stderr for prose (yarn's resolution output, git's
-	// `[detached HEAD ...]` line, etc.) without that prose breaking the
-	// JSON parse downstream. CombinedOutput() conflated the two and
-	// poisoned the parse.
+	// diagnostic logging). Tools that emit a JSON result on stdout MUST be
+	// able to use stderr for prose (yarn's resolution output, git's
+	// `[detached HEAD ...]` line, a `script: js` body's console.error)
+	// without that prose breaking the JSON parse downstream.
+	// CombinedOutput() conflated the two and poisoned the parse.
 	stdoutBytes, runErr, stderrStr := runWithSeparateStreams(cmd)
 	outputStr := string(stdoutBytes)
 	duration := time.Since(start)
 
 	e.emitToolNodeFinish(node.ID, toolName, resolved, outputStr, stderrStr, duration, runErr)
 	if runErr != nil {
-		return nil, fmt.Errorf("model: tool node %q: shell command failed: %w\nstdout: %s\nstderr: %s", node.ID, runErr, outputStr, stderrStr)
+		return nil, fmt.Errorf("model: tool node %q: %s: %w\nstdout: %s\nstderr: %s", node.ID, failVerb, runErr, outputStr, stderrStr)
 	}
 
 	return parseToolNodeOutput(outputStr, strings.TrimSpace(outputStr)), nil
+}
+
+// executeToolNodeShell handles tool nodes whose command contains {{...}}
+// template references. Templates are resolved from the node's input map,
+// and the resulting string is executed as a shell command via sh -c.
+func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNode, input map[string]interface{}) (map[string]interface{}, error) {
+	return e.executeToolNodeCommon(ctx, node, shellToolNodeToolName(node), "shell command failed",
+		func() string {
+			// Expand environment variables FIRST, on the author-controlled
+			// command template only. Doing this AFTER resolveCommandTemplate
+			// would re-introduce shell metacharacters into substituted values
+			// that shellEscape thought were inert single-quoted strings — e.g.
+			// an upstream-LLM-controlled input of `$INJECT` would survive
+			// shellEscape as `'$INJECT'`, then become `''; rm -rf ~; ''` if the
+			// env had INJECT=`'; rm -rf ~; '`. By expanding before substitution,
+			// only the .iter author's own `$VAR` references in the static
+			// command template are expanded; substituted values stay quoted.
+			//
+			// Only the BRACED form `${NAME}` is treated as an env var reference.
+			// Bare `$NAME`, `$ec`, `$?`, `$1` etc. pass through verbatim so
+			// shell-level variables (positional args, exit-status, captured
+			// stdout) survive into the resolved command for sh -c to interpret.
+			expandedCommand := expandBracedEnv(node.Command)
+			// Resolve {{run.id}} first — resolveCommandTemplate only knows the
+			// input/vars/secrets namespaces, so a direct run ref would survive
+			// into the command verbatim.
+			expandedCommand = resolveRunRefs(expandedCommand, RunIDFromContext(ctx), node.CommandRefs, shellEscapeValue)
+			resolved := resolveCommandTemplate(expandedCommand, node.CommandRefs, input, e.vars, e.secretGuard)
+			// rtk (tool nodes): node-level opt-in ONLY — compresses command
+			// output only when the node's own `rtk:` is on/ultra (a run override
+			// can force-off as a kill switch, never force-on), so a review
+			// loop's `git diff` stays full-fidelity unless the author opts in.
+			// Done before secretGuard.Materialize so hooks/logs persist the
+			// placeholder (rtk-form) command, never the materialised secret.
+			// Shell-only: a script body (executeToolNodeScript) is not a shell
+			// command line and never rtk-rewrites.
+			if m := rtk.ResolveToolNode(e.rtkOverride, node.RTK); m.Enabled() {
+				if rewritten, changed := rtk.Rewrite(ctx, m, resolved); changed {
+					resolved = rewritten
+				}
+			}
+			return resolved
+		},
+		func(resolved string) (*exec.Cmd, func(), error) {
+			// Materialise secret placeholders ONLY into the command actually
+			// executed — `resolved` (placeholder form) is what the hooks/logs
+			// persist, so the real value never hits the store.
+			return e.toolNodeCommand(ctx, e.secretGuard.Materialize(resolved)), nil, nil
+		})
 }
 
 // shellToolNodeToolName returns the canonical virtual tool name used for
@@ -327,76 +362,57 @@ func combineStreamsForLog(stdout, stderr string) string {
 // from inside the sandbox bind-mount, and is removed on success or
 // failure.
 func (e *ClawExecutor) executeToolNodeScript(ctx context.Context, node *ir.ToolNode, input map[string]interface{}) (map[string]interface{}, error) {
-	toolName := scriptToolNodeToolName(node)
-	if err := e.checkToolNodePolicy(ctx, node, toolName); err != nil {
-		return nil, err
-	}
-
-	// Same env-then-substitution ordering as executeToolNodeShell: only
-	// the author-controlled `${NAME}` braces are env-expanded so injected
-	// values from inputs/vars stay inert. But where the shell path uses
-	// shell-escape, script: tools use resolveScriptTemplate (JSON literal
-	// rendering) so values land as valid JS/Python/Ruby literals —
-	// shell-escape's single-quote wrapping breaks script-language string
-	// parsers when the value contains embedded apostrophes (e.g. an
-	// agent output blob with `yarn workspaces foreach ... '\''…'\''`).
-	expanded := expandBracedEnv(node.Script)
-	// {{run.id}} first — resolveScriptTemplate only knows input/vars/secrets.
-	expanded = resolveRunRefs(expanded, RunIDFromContext(ctx), node.ScriptRefs, jsonLiteralValue)
-	resolved := resolveScriptTemplate(expanded, node.ScriptRefs, input, e.vars, e.secretGuard)
-
-	interp, ext := scriptInterpreter(node.Language)
-	if interp == "" {
-		return nil, fmt.Errorf("model: tool node %q: unsupported language %q", node.ID, node.Language)
-	}
-
-	// Determine the workspace directory the temp file should live in.
-	// Inside a sandbox, e.workDir is the host-side bind source which the
-	// container also sees, so a basename written there is reachable from
-	// both sides via the same relative path.
-	wd := e.workDir
-	if wd == "" {
-		wd = "."
-	}
-	tmpFile, err := os.CreateTemp(wd, ".iterion-script-*"+ext)
-	if err != nil {
-		return nil, fmt.Errorf("model: tool node %q: create temp script: %w", node.ID, err)
-	}
-	tmpPath := tmpFile.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
-	// Materialise secret placeholders into the executed script body only.
-	// `resolved` (placeholder form) stays the value passed to hooks/logs,
-	// so the real secret never reaches the persisted event stream.
-	if _, werr := tmpFile.WriteString(e.secretGuard.Materialize(resolved)); werr != nil {
-		_ = tmpFile.Close()
-		return nil, fmt.Errorf("model: tool node %q: write temp script: %w", node.ID, werr)
-	}
-	if cerr := tmpFile.Close(); cerr != nil {
-		return nil, fmt.Errorf("model: tool node %q: close temp script: %w", node.ID, cerr)
-	}
-
-	// Compute the relative basename for the in-sandbox view (the bind
-	// mount uses the same path; passing just the basename keeps it
-	// portable whether we run via sandbox or host).
-	scriptBasename := filepath.Base(tmpPath)
-
-	e.emitToolNodeStarted(node.ID, toolName, len(resolved))
-
-	start := time.Now()
-	cmd := e.toolNodeScriptCommand(ctx, interp, scriptBasename)
-	// Same stdout/stderr separation as executeToolNodeShell — a
-	// `script: js` body can console.error() freely without breaking
-	// the JSON.parse on stdout.
-	stdoutBytes, runErr, stderrStr := runWithSeparateStreams(cmd)
-	outputStr := string(stdoutBytes)
-	duration := time.Since(start)
-
-	e.emitToolNodeFinish(node.ID, toolName, resolved, outputStr, stderrStr, duration, runErr)
-	if runErr != nil {
-		return nil, fmt.Errorf("model: tool node %q: script failed: %w\nstdout: %s\nstderr: %s", node.ID, runErr, outputStr, stderrStr)
-	}
-
-	return parseToolNodeOutput(outputStr, strings.TrimSpace(outputStr)), nil
+	return e.executeToolNodeCommon(ctx, node, scriptToolNodeToolName(node), "script failed",
+		func() string {
+			// Same env-then-substitution ordering as executeToolNodeShell:
+			// only the author-controlled `${NAME}` braces are env-expanded so
+			// injected values from inputs/vars stay inert. But where the shell
+			// path uses shell-escape, script: tools use resolveScriptTemplate
+			// (JSON literal rendering) so values land as valid JS/Python/Ruby
+			// literals — shell-escape's single-quote wrapping breaks
+			// script-language string parsers when the value contains embedded
+			// apostrophes. No rtk: a script body is not a shell command line.
+			expanded := expandBracedEnv(node.Script)
+			// {{run.id}} first — resolveScriptTemplate only knows input/vars/secrets.
+			expanded = resolveRunRefs(expanded, RunIDFromContext(ctx), node.ScriptRefs, jsonLiteralValue)
+			return resolveScriptTemplate(expanded, node.ScriptRefs, input, e.vars, e.secretGuard)
+		},
+		func(resolved string) (*exec.Cmd, func(), error) {
+			interp, ext := scriptInterpreter(node.Language)
+			if interp == "" {
+				return nil, nil, fmt.Errorf("model: tool node %q: unsupported language %q", node.ID, node.Language)
+			}
+			// Temp file lives in the workspace so it is visible from inside the
+			// sandbox bind-mount (e.workDir is the host-side bind source the
+			// container also sees); a basename written there is reachable from
+			// both sides via the same relative path. Removed on success or
+			// failure via the returned cleanup.
+			wd := e.workDir
+			if wd == "" {
+				wd = "."
+			}
+			tmpFile, err := os.CreateTemp(wd, ".iterion-script-*"+ext)
+			if err != nil {
+				return nil, nil, fmt.Errorf("model: tool node %q: create temp script: %w", node.ID, err)
+			}
+			tmpPath := tmpFile.Name()
+			cleanup := func() { _ = os.Remove(tmpPath) }
+			// Materialise secret placeholders into the executed script body
+			// only. `resolved` (placeholder form) stays the value passed to
+			// hooks/logs, so the real secret never reaches the event stream.
+			if _, werr := tmpFile.WriteString(e.secretGuard.Materialize(resolved)); werr != nil {
+				_ = tmpFile.Close()
+				cleanup()
+				return nil, nil, fmt.Errorf("model: tool node %q: write temp script: %w", node.ID, werr)
+			}
+			if cerr := tmpFile.Close(); cerr != nil {
+				cleanup()
+				return nil, nil, fmt.Errorf("model: tool node %q: close temp script: %w", node.ID, cerr)
+			}
+			// Pass just the basename for the in-sandbox view (the bind mount
+			// uses the same path; portable whether we run via sandbox or host).
+			return e.toolNodeScriptCommand(ctx, interp, filepath.Base(tmpPath)), cleanup, nil
+		})
 }
 
 // scriptInterpreter maps a `language:` token to the executable name on
