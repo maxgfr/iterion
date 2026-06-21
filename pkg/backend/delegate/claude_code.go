@@ -1019,22 +1019,24 @@ const (
 	defaultStreamHotTimeout  = 15 * time.Minute
 )
 
-func resolveStreamColdTimeout() time.Duration {
-	if v := os.Getenv("ITERION_CLAUDE_CODE_STREAM_COLD_TIMEOUT"); v != "" {
+// envDurationOr returns the time.Duration parsed from environment
+// variable `name`, falling back to `fallback` when the variable is
+// unset or holds an unparseable value.
+func envDurationOr(name string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(name); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			return d
 		}
 	}
-	return defaultStreamColdTimeout
+	return fallback
+}
+
+func resolveStreamColdTimeout() time.Duration {
+	return envDurationOr("ITERION_CLAUDE_CODE_STREAM_COLD_TIMEOUT", defaultStreamColdTimeout)
 }
 
 func resolveStreamHotTimeout() time.Duration {
-	if v := os.Getenv("ITERION_CLAUDE_CODE_STREAM_IDLE_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			return d
-		}
-	}
-	return defaultStreamHotTimeout
+	return envDurationOr("ITERION_CLAUDE_CODE_STREAM_IDLE_TIMEOUT", defaultStreamHotTimeout)
 }
 
 // sessionMeta captures cross-cutting metadata extracted from the Claude

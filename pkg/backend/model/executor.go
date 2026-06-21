@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1323,7 +1324,7 @@ func (e *ClawExecutor) buildTask(ctx context.Context, node ir.Node, f backendFie
 	// presence of `interaction:` is the opt-in.
 	effectiveTools := f.tools
 	if f.interaction != ir.InteractionNone {
-		effectiveTools = ensureAskUser(effectiveTools)
+		effectiveTools = ensureToolPresent(effectiveTools, askUserToolName)
 	}
 	// When board capabilities are granted and the node already restricts
 	// its tool set (non-empty tools:), append the board MCP tools so
@@ -1349,13 +1350,13 @@ func (e *ClawExecutor) buildTask(ctx context.Context, node ir.Node, f backendFie
 	// claw builtins, and the claude_code backend orchestrates via its native
 	// subagent mechanism, so neither needs the explicit append.
 	if ultracode && backendName == delegate.BackendClaw && len(effectiveTools) > 0 {
-		effectiveTools = ensureAgentTool(effectiveTools)
+		effectiveTools = ensureToolPresent(effectiveTools, "agent")
 	}
 	// CLI-based backends can't accept inline images on stdin: forward
 	// the image path via {{attachments.X}} text interpolation and
 	// auto-enable `read_image` so the agent can pull the bytes itself.
 	if backendName != delegate.BackendClaw && len(e.imageAttachs) > 0 && promptReferencesImage(f.userPrompt, e.prompts, e.imageAttachs) {
-		effectiveTools = ensureReadImage(effectiveTools)
+		effectiveTools = ensureToolPresent(effectiveTools, "read_image")
 	}
 	if !sameStringSlice(effectiveTools, f.tools) {
 		task.AllowedTools = effectiveTools // CLI backends read this
@@ -2614,41 +2615,24 @@ func formatValue(v interface{}) string {
 // nothing else hard-codes the string.
 const askUserToolName = "ask_user"
 
-// ensureAskUser returns tools with "ask_user" appended if not already
-// present. Used when a node has interaction enabled to guarantee the
-// LLM has a way to escalate to the human.
-func ensureAskUser(tools []string) []string {
-	for _, t := range tools {
-		if t == askUserToolName {
-			return tools
-		}
+// ensureToolPresent returns tools with `name` appended if not already
+// present. The returned slice is a fresh defensive copy when an append
+// happens, so the caller's slice header is never aliased.
+//
+// Callers:
+//   - ensureAskUser  (askUserToolName): guarantees a node with
+//     interaction enabled exposes a way to escalate to the human.
+//   - ensureAgentTool ("agent"): keeps the claw subagent tool reachable
+//     for ultracode nodes that restrict their tool set.
+//   - ensureReadImage ("read_image"): lets CLI-based backends
+//     (claude_code, codex) reach image attachments via their vision tool.
+//
+// Idempotent.
+func ensureToolPresent(tools []string, name string) []string {
+	if slices.Contains(tools, name) {
+		return tools
 	}
-	return append(append([]string(nil), tools...), askUserToolName)
-}
-
-// ensureAgentTool returns tools with the claw `agent` subagent tool
-// appended if not already present. Used for ultracode nodes so the
-// standing-consent orchestration prompt has a tool to act on even when the
-// node restricts its tool set. Idempotent.
-func ensureAgentTool(tools []string) []string {
-	for _, t := range tools {
-		if t == "agent" {
-			return tools
-		}
-	}
-	return append(append([]string(nil), tools...), "agent")
-}
-
-// ensureReadImage augments a tool list with "read_image" so CLI-based
-// backends (claude_code, codex) can reach image attachments via their
-// vision tool. Idempotent.
-func ensureReadImage(tools []string) []string {
-	for _, t := range tools {
-		if t == "read_image" {
-			return tools
-		}
-	}
-	return append(append([]string(nil), tools...), "read_image")
+	return append(append([]string(nil), tools...), name)
 }
 
 // promptReferencesImage returns true when promptName resolves to a

@@ -13,6 +13,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/backend/llmtypes"
 	"github.com/SocialGouv/iterion/pkg/backend/tool"
 	"github.com/SocialGouv/iterion/pkg/internal/appinfo"
+	"github.com/SocialGouv/iterion/pkg/internal/strutil"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 )
 
@@ -546,13 +547,7 @@ var fatalPatterns = []string{
 }
 
 func isFatalMCPError(msg string) bool {
-	lower := strings.ToLower(msg)
-	for _, pattern := range fatalPatterns {
-		if strings.Contains(lower, pattern) {
-			return true
-		}
-	}
-	return false
+	return strutil.ContainsAnyFold(msg, fatalPatterns)
 }
 
 // schemaDeclaresLimit reports whether an MCP tool's JSON-schema input
@@ -623,11 +618,7 @@ func stringsFromContent(content []ToolContent) string {
 			}
 		}
 	}
-	return joinLines(out)
-}
-
-func joinLines(lines []string) string {
-	return strings.Join(lines, "\n")
+	return strings.Join(out, "\n")
 }
 
 func (m *Manager) applySanitizationRules(toolName string, args map[string]interface{}, workDir string) {

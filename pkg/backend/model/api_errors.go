@@ -3,9 +3,9 @@ package model
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
+	"github.com/SocialGouv/iterion/pkg/internal/strutil"
 )
 
 // ContextOverflowError indicates the prompt exceeded the model's context window.
@@ -95,11 +95,5 @@ func classifyStreamEventError(msg string) error {
 }
 
 func matchesStreamTransportMarker(msg string) bool {
-	lower := strings.ToLower(msg)
-	for _, marker := range streamTransportMarkers {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-	return false
+	return strutil.ContainsAnyFold(msg, streamTransportMarkers)
 }

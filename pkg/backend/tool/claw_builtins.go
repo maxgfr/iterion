@@ -55,7 +55,7 @@ func RegisterClawBuiltinsWithEnv(reg *Registry, workspace string, bashExtraEnv [
 		return clawtools.ExecuteBash(ctx, input, workspace)
 	}
 
-	specs := []clawBuiltinSpec{
+	return registerClawSpecs(reg, []clawBuiltinSpec{
 		{tool: clawtools.ReadFileTool(), exec: clawtools.ExecuteReadFile},
 		{tool: clawtools.WriteFileTool(), exec: clawtools.ExecuteWriteFile},
 		{tool: clawtools.GlobTool(), exec: clawtools.ExecuteGlob},
@@ -63,8 +63,14 @@ func RegisterClawBuiltinsWithEnv(reg *Registry, workspace string, bashExtraEnv [
 		{tool: clawtools.FileEditTool(), exec: clawtools.ExecuteFileEdit},
 		{tool: clawtools.WebFetchTool(), exec: clawtools.ExecuteWebFetch},
 		{tool: clawtools.BashTool(), exec: bashExec},
-	}
+	})
+}
 
+// registerClawSpecs registers every spec in the supplied slice against
+// reg using RegisterClawTool, wrapping the first failure with the same
+// "register %q: %w" template each Register* helper used inline before
+// extraction.
+func registerClawSpecs(reg *Registry, specs []clawBuiltinSpec) error {
 	for _, s := range specs {
 		if err := RegisterClawTool(reg, s.tool, s.exec); err != nil {
 			return fmt.Errorf("register %q: %w", s.tool.Name, err)
@@ -99,16 +105,10 @@ func RegisterClawReadImage(reg *Registry) error {
 // agents can detect the gap with errors.Is rather than parsing
 // strings.
 func RegisterClawComputerUse(reg *Registry) error {
-	specs := []clawBuiltinSpec{
+	return registerClawSpecs(reg, []clawBuiltinSpec{
 		{tool: clawtools.ScreenshotTool(), exec: clawComputerUseAdapter(clawtools.ExecuteScreenshot)},
 		{tool: clawtools.ComputerUseTool(), exec: clawComputerUseAdapter(clawtools.ExecuteComputerUse)},
-	}
-	for _, s := range specs {
-		if err := RegisterClawTool(reg, s.tool, s.exec); err != nil {
-			return fmt.Errorf("register %q: %w", s.tool.Name, err)
-		}
-	}
-	return nil
+	})
 }
 
 // RegisterClawConfig registers the `config` tool against a
@@ -180,20 +180,14 @@ type clawBuiltinSpec struct {
 // process-level utilities (timing, cell edits, REPL evaluation) but
 // don't need a registry plumbed in.
 func RegisterClawSimple(reg *Registry) error {
-	specs := []clawBuiltinSpec{
+	return registerClawSpecs(reg, []clawBuiltinSpec{
 		{tool: clawtools.SendUserMessageTool(), exec: clawtools.ExecuteSendUserMessage},
 		{tool: clawtools.RemoteTriggerTool(), exec: clawtools.ExecuteRemoteTrigger},
 		{tool: clawtools.SleepTool(), exec: clawtools.ExecuteSleep},
 		{tool: clawtools.NotebookEditTool(), exec: clawtools.ExecuteNotebookEdit},
 		{tool: clawtools.REPLTool(), exec: clawtools.ExecuteREPL},
 		{tool: clawtools.StructuredOutputTool(), exec: clawtools.ExecuteStructuredOutput},
-	}
-	for _, s := range specs {
-		if err := RegisterClawTool(reg, s.tool, s.exec); err != nil {
-			return fmt.Errorf("register %q: %w", s.tool.Name, err)
-		}
-	}
-	return nil
+	})
 }
 
 // RegisterClawTodo registers the `todo_write` tool for read/write of
@@ -320,38 +314,29 @@ func RegisterClawTasks(reg *Registry, taskReg *clawtask.Registry) error {
 	if taskReg == nil {
 		return fmt.Errorf("register tasks: task registry is nil")
 	}
-	specs := []struct {
-		tool api.Tool
-		exec func(ctx context.Context, input map[string]any) (string, error)
-	}{
-		{clawtools.TaskCreateTool(), func(ctx context.Context, in map[string]any) (string, error) {
+	return registerClawSpecs(reg, []clawBuiltinSpec{
+		{tool: clawtools.TaskCreateTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteTaskCreate(ctx, in, taskReg)
 		}},
-		{clawtools.TaskGetTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.TaskGetTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteTaskGet(ctx, in, taskReg)
 		}},
-		{clawtools.TaskListTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.TaskListTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteTaskList(ctx, in, taskReg)
 		}},
-		{clawtools.TaskOutputTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.TaskOutputTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteTaskOutput(ctx, in, taskReg)
 		}},
-		{clawtools.TaskStopTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.TaskStopTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteTaskStop(ctx, in, taskReg)
 		}},
-		{clawtools.TaskUpdateTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.TaskUpdateTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteTaskUpdate(ctx, in, taskReg)
 		}},
-		{clawtools.RunTaskPacketTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.RunTaskPacketTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteRunTaskPacket(ctx, in, taskReg)
 		}},
-	}
-	for _, s := range specs {
-		if err := RegisterClawTool(reg, s.tool, s.exec); err != nil {
-			return fmt.Errorf("register %q: %w", s.tool.Name, err)
-		}
-	}
-	return nil
+	})
 }
 
 // RegisterClawWorkers registers the nine worker_* tools that share a
@@ -361,44 +346,35 @@ func RegisterClawWorkers(reg *Registry, workerReg *clawworker.WorkerRegistry) er
 	if workerReg == nil {
 		return fmt.Errorf("register workers: worker registry is nil")
 	}
-	specs := []struct {
-		tool api.Tool
-		exec func(ctx context.Context, input map[string]any) (string, error)
-	}{
-		{clawtools.WorkerCreateTool(), func(ctx context.Context, in map[string]any) (string, error) {
+	return registerClawSpecs(reg, []clawBuiltinSpec{
+		{tool: clawtools.WorkerCreateTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteWorkerCreate(ctx, in, workerReg)
 		}},
-		{clawtools.WorkerGetTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.WorkerGetTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteWorkerGet(ctx, in, workerReg)
 		}},
-		{clawtools.WorkerObserveTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.WorkerObserveTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteWorkerObserve(ctx, in, workerReg)
 		}},
-		{clawtools.WorkerResolveTrustTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.WorkerResolveTrustTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteWorkerResolveTrust(ctx, in, workerReg)
 		}},
-		{clawtools.WorkerAwaitReadyTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.WorkerAwaitReadyTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteWorkerAwaitReady(ctx, in, workerReg)
 		}},
-		{clawtools.WorkerSendPromptTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.WorkerSendPromptTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteWorkerSendPrompt(ctx, in, workerReg)
 		}},
-		{clawtools.WorkerRestartTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.WorkerRestartTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteWorkerRestart(ctx, in, workerReg)
 		}},
-		{clawtools.WorkerTerminateTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.WorkerTerminateTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteWorkerTerminate(ctx, in, workerReg)
 		}},
-		{clawtools.WorkerObserveCompletionTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.WorkerObserveCompletionTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteWorkerObserveCompletion(ctx, in, workerReg)
 		}},
-	}
-	for _, s := range specs {
-		if err := RegisterClawTool(reg, s.tool, s.exec); err != nil {
-			return fmt.Errorf("register %q: %w", s.tool.Name, err)
-		}
-	}
-	return nil
+	})
 }
 
 // RegisterClawTeams registers the four team_* tools that share a
@@ -407,29 +383,20 @@ func RegisterClawTeams(reg *Registry, teamReg *clawteam.TeamRegistry) error {
 	if teamReg == nil {
 		return fmt.Errorf("register teams: team registry is nil")
 	}
-	specs := []struct {
-		tool api.Tool
-		exec func(ctx context.Context, input map[string]any) (string, error)
-	}{
-		{clawtools.TeamCreateTool(), func(ctx context.Context, in map[string]any) (string, error) {
+	return registerClawSpecs(reg, []clawBuiltinSpec{
+		{tool: clawtools.TeamCreateTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteTeamCreate(ctx, in, teamReg)
 		}},
-		{clawtools.TeamGetTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.TeamGetTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteTeamGet(ctx, in, teamReg)
 		}},
-		{clawtools.TeamListTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.TeamListTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteTeamList(ctx, in, teamReg)
 		}},
-		{clawtools.TeamDeleteTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.TeamDeleteTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteTeamDelete(ctx, in, teamReg)
 		}},
-	}
-	for _, s := range specs {
-		if err := RegisterClawTool(reg, s.tool, s.exec); err != nil {
-			return fmt.Errorf("register %q: %w", s.tool.Name, err)
-		}
-	}
-	return nil
+	})
 }
 
 // RegisterClawCron registers the four cron_* tools that share a
@@ -438,29 +405,20 @@ func RegisterClawCron(reg *Registry, cronReg *clawteam.CronRegistry) error {
 	if cronReg == nil {
 		return fmt.Errorf("register cron: cron registry is nil")
 	}
-	specs := []struct {
-		tool api.Tool
-		exec func(ctx context.Context, input map[string]any) (string, error)
-	}{
-		{clawtools.CronCreateTool(), func(ctx context.Context, in map[string]any) (string, error) {
+	return registerClawSpecs(reg, []clawBuiltinSpec{
+		{tool: clawtools.CronCreateTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteCronCreate(ctx, in, cronReg)
 		}},
-		{clawtools.CronGetTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.CronGetTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteCronGet(ctx, in, cronReg)
 		}},
-		{clawtools.CronListTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.CronListTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteCronList(ctx, in, cronReg)
 		}},
-		{clawtools.CronDeleteTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.CronDeleteTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteCronDelete(ctx, in, cronReg)
 		}},
-	}
-	for _, s := range specs {
-		if err := RegisterClawTool(reg, s.tool, s.exec); err != nil {
-			return fmt.Errorf("register %q: %w", s.tool.Name, err)
-		}
-	}
-	return nil
+	})
 }
 
 // RegisterClawMCPResources registers list_mcp_resources,
@@ -473,26 +431,17 @@ func RegisterClawMCPResources(reg *Registry, provider clawmcp.Provider) error {
 	if provider == nil {
 		return fmt.Errorf("register mcp resources: provider is nil")
 	}
-	specs := []struct {
-		tool api.Tool
-		exec func(ctx context.Context, input map[string]any) (string, error)
-	}{
-		{clawtools.ListMcpResourcesTool(), func(ctx context.Context, in map[string]any) (string, error) {
+	return registerClawSpecs(reg, []clawBuiltinSpec{
+		{tool: clawtools.ListMcpResourcesTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteListMcpResources(ctx, in, provider)
 		}},
-		{clawtools.ReadMcpResourceTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.ReadMcpResourceTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteReadMcpResource(ctx, in, provider)
 		}},
-		{clawtools.McpAuthTool(), func(ctx context.Context, in map[string]any) (string, error) {
+		{tool: clawtools.McpAuthTool(), exec: func(ctx context.Context, in map[string]any) (string, error) {
 			return clawtools.ExecuteMcpAuth(ctx, in, provider)
 		}},
-	}
-	for _, s := range specs {
-		if err := RegisterClawTool(reg, s.tool, s.exec); err != nil {
-			return fmt.Errorf("register %q: %w", s.tool.Name, err)
-		}
-	}
-	return nil
+	})
 }
 
 // ClawDefaults bundles the registries and per-session state the

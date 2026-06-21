@@ -14,6 +14,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
 	"github.com/SocialGouv/iterion/pkg/backend/thinktokens"
+	"github.com/SocialGouv/iterion/pkg/internal/strutil"
 )
 
 const (
@@ -656,24 +657,22 @@ const maxContextCompactRetries = 4
 // real window is unknown.
 var contextRetryTargets = []int{256_000, 128_000, 64_000, 32_000}
 
+// contextWindowMarkers identifies a backend's rejection of a request
+// for exceeding the model's context window. claw's markers live in an
+// internal package, so we mirror them here (provider-agnostic).
+var contextWindowMarkers = []string{
+	"context_length_exceeded", "maximum context length", "context window",
+	"context length", "too many tokens", "prompt is too long",
+	"input is too long", "request is too large",
+}
+
 // isContextWindowError reports whether err is the backend rejecting a
-// request for exceeding the model's context window. claw's markers live
-// in an internal package, so we mirror them here (provider-agnostic).
+// request for exceeding the model's context window.
 func isContextWindowError(err error) bool {
 	if err == nil {
 		return false
 	}
-	s := strings.ToLower(err.Error())
-	for _, m := range []string{
-		"context_length_exceeded", "maximum context length", "context window",
-		"context length", "too many tokens", "prompt is too long",
-		"input is too long", "request is too large",
-	} {
-		if strings.Contains(s, m) {
-			return true
-		}
-	}
-	return false
+	return strutil.ContainsAnyFold(err.Error(), contextWindowMarkers)
 }
 
 // forceCompactToTokens force-compacts messages to a target token budget,

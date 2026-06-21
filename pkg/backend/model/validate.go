@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
@@ -43,7 +44,7 @@ func checkFieldType(f *ir.SchemaField, val interface{}) error {
 		if !ok {
 			return fmt.Errorf("field %q: expected string, got %T", f.Name, val)
 		}
-		if len(f.EnumValues) > 0 && !contains(f.EnumValues, s) {
+		if len(f.EnumValues) > 0 && !slices.Contains(f.EnumValues, s) {
 			return fmt.Errorf("field %q: value %q not in enum %v", f.Name, s, f.EnumValues)
 		}
 
@@ -86,20 +87,11 @@ func checkFieldType(f *ir.SchemaField, val interface{}) error {
 			// check the schema-level enum was advertised to the LLM
 			// but never enforced server-side, so a stray value would
 			// flow downstream unchecked).
-			if len(f.EnumValues) > 0 && !contains(f.EnumValues, s) {
+			if len(f.EnumValues) > 0 && !slices.Contains(f.EnumValues, s) {
 				return fmt.Errorf("field %q[%d]: value %q not in enum %v", f.Name, i, s, f.EnumValues)
 			}
 		}
 	}
 
 	return nil
-}
-
-func contains(vals []string, s string) bool {
-	for _, v := range vals {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

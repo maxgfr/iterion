@@ -19,3 +19,16 @@ func FirstNonBlank(vals ...string) string {
 	}
 	return ""
 }
+
+// ContainsAnyFold reports whether haystack contains any needle,
+// case-insensitively. Needles are assumed to be already lowercase; the
+// haystack is lowercased once and each needle tested with strings.Contains.
+func ContainsAnyFold(haystack string, needles []string) bool {
+	s := strings.ToLower(haystack)
+	for _, n := range needles {
+		if strings.Contains(s, n) {
+			return true
+		}
+	}
+	return false
+}
