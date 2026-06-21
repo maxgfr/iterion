@@ -13,6 +13,11 @@ import { LiveDot } from "@/components/ui/LiveDot";
 import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Checkbox } from "@/components/ui/Checkbox";
+import { Radio } from "@/components/ui/Radio";
+import { RadioGroup } from "@/components/ui/RadioGroup";
+import { FieldLabel } from "@/components/ui/FieldLabel";
+import { BrandWordmark } from "@/components/ui/BrandWordmark";
 
 // Smoke a11y test for the shared UI primitives. Uses axe-core in
 // jsdom and focuses on WCAG 2.1 A + AA rules. The aim is to catch
@@ -225,5 +230,59 @@ describe("a11y / primitives", () => {
       </main>,
     );
     await expectNoViolations(root, "Toast region");
+  });
+
+  it("Checkbox — labelled, help, standalone, disabled", async () => {
+    const root = mount(
+      <main>
+        <Checkbox label="Post to board" defaultChecked />
+        <Checkbox label="Dry run" help="Skips side effects" />
+        <Checkbox aria-label="Select row" />
+        <Checkbox label="Disabled option" disabled />
+      </main>,
+    );
+    await expectNoViolations(root, "Checkbox");
+  });
+
+  it("Radio + RadioGroup — labelled set", async () => {
+    const root = mount(
+      <main>
+        <RadioGroup
+          name="mode"
+          label="Connection mode"
+          value="app"
+          onChange={() => {}}
+          options={[
+            { value: "app", label: "OAuth app" },
+            { value: "pat", label: "Personal token" },
+            { value: "off", label: "Disabled", disabled: true },
+          ]}
+        />
+        <Radio name="solo" aria-label="Standalone radio" />
+      </main>,
+    );
+    await expectNoViolations(root, "Radio/RadioGroup");
+  });
+
+  it("FieldLabel — associates with its control via htmlFor", async () => {
+    const root = mount(
+      <main>
+        <FieldLabel htmlFor="fld" help="What this field does" helpId="fld-help">
+          Run name
+        </FieldLabel>
+        <input id="fld" type="text" aria-describedby="fld-help" />
+      </main>,
+    );
+    await expectNoViolations(root, "FieldLabel");
+  });
+
+  it("BrandWordmark — full + compact have an accessible name", async () => {
+    const root = mount(
+      <div>
+        <BrandWordmark />
+        <BrandWordmark compact />
+      </div>,
+    );
+    await expectNoViolations(root, "BrandWordmark");
   });
 });

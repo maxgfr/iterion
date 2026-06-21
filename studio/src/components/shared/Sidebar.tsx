@@ -8,6 +8,7 @@ import {
 import NavLinks from "./NavLinks";
 import SidebarContext from "./SidebarContext";
 import UserTeamChip from "./UserTeamChip";
+import { BrandWordmark } from "@/components/ui/BrandWordmark";
 import { useUIStore } from "@/store/ui";
 
 function openSettings() {
@@ -47,16 +48,7 @@ export default function Sidebar() {
           title="Iterion home"
           aria-label="Iterion home"
         >
-          <img
-            src="/favicon-96x96.png"
-            alt="Iterion"
-            className="h-7 w-7 dark:invert shrink-0"
-          />
-          {!collapsed && (
-            <span className="text-sm font-semibold tracking-tight text-fg-default">
-              Iterion
-            </span>
-          )}
+          <BrandWordmark compact={collapsed} />
         </Link>
         {!collapsed && (
           <button

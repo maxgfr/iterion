@@ -11,17 +11,18 @@ Single source of truth: [`studio/src/app.css`](../src/app.css). Everything below
 | Surfaces | `surface-0` / `surface-1` / `surface-2` / `surface-3` | See § Surface hierarchy below |
 | Foreground | `fg-default`, `fg-muted`, `fg-subtle`, `fg-onAccent` | Text contrast tiers |
 | Borders | `border-default`, `border-strong`, `border-subtle` | Dividers, card outlines |
-| Accent | `accent`, `accent-hover`, `accent-soft`, `accent-fg` | Primary interactive surfaces |
+| Accent | `accent`, `accent-hover`, `accent-soft`, `accent-fg` (bg/brand) · `accent-text` (links/icons) | **Decoupled**: `bg-accent` for button/brand backgrounds (white-on = AA); `text-accent-text` for accent-coloured text/links (AA on dark). See visual-identity.md § Primary accent. |
 | Severity | `danger`, `warning`, `success`, `info` (+ `-soft` and `-fg` variants) | Status, validation, badges |
 | Node-kind | `node-agent`, `node-judge`, `node-router`, `node-human`, `node-tool`, `node-compute`, `node-done`, `node-fail`, `node-start`, `node-join`, `node-group` | Canvas borders, form headers, library cards |
 | Layer | `layer-schemas`, `layer-prompts`, `layer-vars` | Layer overlay + sub-node palette |
 | Selection | `selected`, `sub-tool` | Selected highlights, sub-node tool kind |
 | Library | `library-pattern` | "Pattern" library category (no node-kind equivalent) |
 | Radii | `radius-sm`/`md`/`lg`/`xl` | Component corner radius |
-| Type | `text-caption` (10px) / `text-micro` (11px) / `text-body` (12px) / `text-label` (13px) / `text-title` (14px) / `text-display` (16px) | Use via `text-[length:var(--text-body)]` or directly as `font-size: var(--text-body)` |
+| Type | `text-caption` (10px) / `text-micro` (11px) / `text-body` (12px) / `text-label` (13px) / `text-title` (14px) / `text-display` (16px) | Use the generated utility directly — `text-body`, `text-title`, … — **not** `text-[12px]` arbitrary values |
 | Elevation | `shadow-sm` / `shadow-md` / `shadow-lg` / `shadow-popover` | Surface depth. Consume via `shadow-[var(--shadow-popover)]`. Light-mode alphas override automatically. |
 | Motion | `motion-fast` (120ms) / `motion-base` (180ms) / `motion-slow` (280ms), `motion-ease` | Transitions, animations |
 | Stacking | `z-canvas` (40, panel chrome) / `z-overlay` (40, modal backdrops) / `z-modal` (50) / `z-confirm` (60, confirm-on-modal + cmd-K) / `z-popover` (70) / `z-tooltip` (80) / `z-toast` (100, also focused skip-link) | Use via `z-[var(--z-modal)]` (Tailwind arbitrary value) or `style={{ zIndex: "var(--z-modal)" }}` |
+| Scrim | `scrim-modal` / `scrim-popover` / `scrim-soft` | Modal / drawer / popover backdrops. Consume via `bg-scrim-modal`. Replaces ad-hoc `bg-black/N`; light theme softens automatically. |
 
 ### Surface hierarchy
 
@@ -186,9 +187,9 @@ The library handles latest-wins race guards, deduplication across consumers of t
 
 **WebSocket lives outside the query cache.** [`useRunWebSocket`](../src/hooks/useRunWebSocket.ts) manages the connection + reconnect logic and pushes events into `useRunStore`. Components that need to react to those events watch the store directly; React Query only sees the consequent `queryClient.invalidateQueries()` calls.
 
-### Tabs, Inputs, Selects, Badges
+### Tabs, Inputs, Selects, Checkboxes, Radios, Badges
 
-See [`ui/index.ts`](../src/components/ui/index.ts) for the full export list. All wired with proper tokens, focus rings, and disabled states.
+See [`ui/index.ts`](../src/components/ui/index.ts) for the full export list — including `Checkbox`, `Radio` / `RadioGroup` (native controls, brand-accent check via `accent-accent`), `FieldLabel` (the canonical block label), and `BrandWordmark`. All wired with proper tokens, focus rings, and disabled states.
 
 ## Patterns
 
@@ -246,20 +247,22 @@ When adding a new color token to `@theme`, **always** add the matching `[data-th
 ## Accessibility
 
 What's already wired:
-- `:focus-visible` global outline ([app.css:148](../src/app.css#L148)).
+- `:focus-visible` global outline ([app.css](../src/app.css), `:focus-visible` block).
 - All `disabled:` controls pair their visual change with `disabled:cursor-not-allowed` (Q4).
 - `ConfirmDialog` traps focus and exits on Escape.
 - `useConfirm` returns a Promise so call-sites stay synchronous-shaped.
 - `Skeleton` renders `aria-hidden` so screen readers skip the shimmer.
 - `LiveDot` accepts an optional `label` for screen reader announcement.
+- **Reduced motion**: a global `@media (prefers-reduced-motion: reduce)` block in `app.css` removes decorative pulses/fades and collapses transitions to ~instant (WCAG 2.3.3 / 2.2.2). Status is always carried by colour/text, never motion alone.
+- `Checkbox` / `Radio` / `RadioGroup` are native controls (free keyboard + SR semantics); `FieldLabel` owns the block-label + `?` help affordance.
 - `IconButton` mandates a `label` prop and applies it as `aria-label`.
 - Toast component is announced via the toast bus.
 - FormField inputs wire `aria-describedby` to their help icon and error message via the `FieldRow` wrapper. Set the `error` prop to render `<p role="alert">` and add `aria-invalid` on the input.
-- **Skip-link** from `AppHeader` (`<a href="#main-content">`) becomes visible on keyboard focus and jumps to the main work surface. Implemented on Home, Editor, RunList, RunView, Board, Dispatcher — pages without an `id="main-content"` anchor degrade gracefully.
+- **Skip-link** from `AppShell` (`<a href="#main-content">`) becomes visible on keyboard focus and jumps to the main work surface. Implemented on Home, Editor, RunList, RunView, Board, Dispatcher — pages without an `id="main-content"` anchor degrade gracefully.
 
 ### Axe-core a11y tests
 
-A regression-trap for the shared primitives lives at [`src/__tests__/a11y/primitives.test.tsx`](../src/__tests__/a11y/primitives.test.tsx). It boots jsdom, renders Button / IconButton / EmptyState / Spinner / LiveDot / Badge / Skeleton in every variant, and asserts zero axe-core violations against `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa` rule sets. Add a new test there when you ship a new primitive.
+A regression-trap for the shared primitives lives at [`src/__tests__/a11y/primitives.test.tsx`](../src/__tests__/a11y/primitives.test.tsx). It boots jsdom, renders Button / IconButton / EmptyState / Spinner / LiveDot / Badge / Skeleton / Checkbox / Radio / FieldLabel / BrandWordmark in every variant, and asserts zero axe-core violations against `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa` rule sets. Add a new test there when you ship a new primitive.
 
 ```bash
 pnpm -F iterion-studio test
@@ -283,6 +286,9 @@ Open items still requiring human / browser verification:
 | `${hex}22` for soft bg | Doesn't work with `var()` strings | `softColor(token)` |
 | `<div>Loading…</div>` ad-hoc | Visual drift across panels | `<EmptyState message="Loading…" />` |
 | `<span className="animate-spin border-2 …" />` ad-hoc | Reinvents Button's spinner | `<Spinner size="sm" />` |
+| `shadow-lg` / `shadow-2xl` raw utility | Drifts from the elevation ladder; `shadow-2xl` isn't even a token | `shadow-[var(--shadow-popover)]` (or `-lg` / `-md`) |
+| `z-10` / `z-20` / `z-30` raw utility | Ad-hoc stacking races when surfaces nest | `z-[var(--z-canvas)]` … per the stacking ladder |
+| `text-[11px]` / `text-[12px]` arbitrary size | Drifts from the type scale | `text-micro` / `text-body` … (semantic type tokens) |
 | `disabled:opacity-50` alone on a button | a11y faux-positive (still looks clickable) | Add `disabled:cursor-not-allowed` |
 | `text-error`, `border-error` | These classes don't exist (no `--color-error` token) | `text-danger`, `border-danger` |
 | New CSS-in-JS hex outside `app.css` / `lib/constants.ts` | Bypasses palette, breaks future theme variants | Add a token to `app.css`, expose via constants |
@@ -302,7 +308,7 @@ Before adding a new primitive, ask:
 The studio is **desktop-first**. The Editor (xyflow canvas with drag-drop, multi-select, library palette) and RunView (resizable panels, scrubber, dock) are not designed for touch and remain effectively desktop-only.
 
 What does work on narrow viewports (tested ≥ 360 px wide):
-- AppHeader collapses gracefully — NavLinks become icon-only below `sm` (640 px), `ProjectLabel` caps at 140 px, the user-team chip drops the email line. Brand + right-actions stay shrink-0.
+- The Sidebar collapses gracefully — NavLinks become icon-only below `sm` (640 px), `ProjectLabel` caps at 140 px, the user-team chip drops the email line. Brand + right-actions stay shrink-0.
 - HomeView grid switches from 2-col to 1-col below `md` (768 px).
 - RunListView table scrolls horizontally inside its container.
 - Board kanban already scrolls horizontally by design.
