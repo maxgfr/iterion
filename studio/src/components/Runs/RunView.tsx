@@ -314,13 +314,24 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
   // initial snapshot eagerly. A short backoff loop closes the race
   // for the common case (run.json typically lands within ~50–200ms)
   // without papering over a genuinely missing run.
-  useEffect(() => {
+  //
+  // The fetch loop is exposed via a callback so both the initial
+  // mount effect AND the user-facing Retry button on RunViewLoadError
+  // can re-trigger it in place — no `window.location.reload()` (which
+  // would destroy tabs, scroll position, and chat dock state). The
+  // `loadAbortRef` holds the cancel handle of the in-flight attempt
+  // so a new fetch (or unmount) bails the previous loop before
+  // starting fresh, preventing two retry budgets from racing.
+  const loadAbortRef = useRef<(() => void) | null>(null);
+  const fetchSnapshot = useCallback(() => {
     if (!runId) return;
+    // Cancel any in-flight retry loop before kicking off a new one so
+    // a Retry click (or a runId change) can't leave the previous loop
+    // ticking against the network in the background.
+    loadAbortRef.current?.();
     let cancelled = false;
     let attempt = 0;
     let timerId: ReturnType<typeof setTimeout> | null = null;
-    // Reset failure state on every runId change so a navigation to a
-    // different (valid) run rehydrates cleanly after a prior 404.
     setLoadFailed(null);
     const fetchWithRetry = () => {
       getRun(runId)
@@ -347,15 +358,25 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
           }
         });
     };
-    fetchWithRetry();
-    return () => {
+    loadAbortRef.current = () => {
       cancelled = true;
       if (timerId != null) {
         clearTimeout(timerId);
         timerId = null;
       }
     };
+    fetchWithRetry();
   }, [runId, applySnapshot]);
+  useEffect(() => {
+    fetchSnapshot();
+    return () => {
+      loadAbortRef.current?.();
+      loadAbortRef.current = null;
+    };
+  }, [fetchSnapshot]);
+  const handleRetryLoad = useCallback(() => {
+    fetchSnapshot();
+  }, [fetchSnapshot]);
 
   // refreshSnapshot — used by post-merge UI to refetch run.json so
   // RunHeader and the merge-state-driven UI catch up after a Commits-
@@ -554,7 +575,14 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
   }
   if (!snapshot) {
     if (loadFailed) {
-      return <RunViewLoadError runId={runId} status={loadFailed.status} message={loadFailed.message} />;
+      return (
+        <RunViewLoadError
+          runId={runId}
+          status={loadFailed.status}
+          message={loadFailed.message}
+          onRetry={handleRetryLoad}
+        />
+      );
     }
     return <RunViewSkeleton />;
   }

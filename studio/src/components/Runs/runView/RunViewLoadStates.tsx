@@ -13,14 +13,21 @@ import { Button, Skeleton } from "@/components/ui";
 // Common cause: clicking a run whose store the current daemon can't
 // reach (e.g. a `~/.iterion/runs/...` global-slot run from a per-
 // project desktop daemon — Open → 404).
+//
+// `onRetry` re-runs the in-place fetch loop (clears the failure flag and
+// kicks the same routine the initial mount used). Used instead of a full
+// `window.location.reload()` so the surrounding tabs, scroll position,
+// and per-run UI state aren't destroyed when the operator retries.
 export function RunViewLoadError({
   runId,
   status,
   message,
+  onRetry,
 }: {
   runId: string;
   status: number;
   message: string;
+  onRetry: () => void;
 }) {
   const [, setLocation] = useLocation();
   const isNotFound = status === 404;
@@ -60,7 +67,7 @@ export function RunViewLoadError({
           <Button
             variant="primary"
             size="sm"
-            onClick={() => window.location.reload()}
+            onClick={onRetry}
           >
             Retry
           </Button>

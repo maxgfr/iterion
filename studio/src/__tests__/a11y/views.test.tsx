@@ -45,8 +45,18 @@ describe("a11y / composed surfaces", () => {
     await expectNoViolations(
       mount(
         <div>
-          <RunViewLoadError runId="run-abc" status={404} message="not found" />
-          <RunViewLoadError runId="run-def" status={500} message="boom" />
+          <RunViewLoadError
+            runId="run-abc"
+            status={404}
+            message="not found"
+            onRetry={() => {}}
+          />
+          <RunViewLoadError
+            runId="run-def"
+            status={500}
+            message="boom"
+            onRetry={() => {}}
+          />
         </div>,
       ),
       "RunViewLoadError",
