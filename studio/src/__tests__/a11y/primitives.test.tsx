@@ -19,6 +19,7 @@ import { RadioGroup } from "@/components/ui/RadioGroup";
 import { FieldLabel } from "@/components/ui/FieldLabel";
 import { BrandWordmark } from "@/components/ui/BrandWordmark";
 import { TerminalCaret } from "@/components/ui/TerminalCaret";
+import CommandPalette from "@/components/shared/CommandPalette";
 
 // Smoke a11y test for the shared UI primitives. Uses axe-core in
 // jsdom and focuses on WCAG 2.1 A + AA rules. The aim is to catch
@@ -295,5 +296,19 @@ describe("a11y / primitives", () => {
       </main>,
     );
     await expectNoViolations(root, "TerminalCaret");
+  });
+
+  it("CommandPalette — dialog + combobox + listbox roles pass axe", async () => {
+    const root = mount(
+      <CommandPalette
+        open
+        onClose={() => {}}
+        actions={[
+          { id: "a", title: "New file", group: "File", run: () => {} },
+          { id: "b", title: "Open run", group: "Navigate", run: () => {} },
+        ]}
+      />,
+    );
+    await expectNoViolations(root, "CommandPalette");
   });
 });
