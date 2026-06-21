@@ -123,7 +123,7 @@ export default function ComputeForm({ decl }: Props) {
           </span>
           <button
             type="button"
-            className="text-xs text-accent hover:text-accent"
+            className="text-xs text-accent-text hover:text-accent-text"
             onClick={addExpr}
           >
             + Add

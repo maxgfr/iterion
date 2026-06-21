@@ -598,7 +598,7 @@ function FilterMenu({
               }`}
             >
               <CheckIcon
-                className={`w-3 h-3 shrink-0 text-accent ${selected ? "opacity-100" : "opacity-0"}`}
+                className={`w-3 h-3 shrink-0 text-accent-text ${selected ? "opacity-100" : "opacity-0"}`}
               />
               <span className="flex-1 truncate">{o.label}</span>
               {o.count !== undefined && (

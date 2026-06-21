@@ -904,7 +904,7 @@ function SessionHeader({
         {session.runId && (
           <Link
             href={`/runs/${encodeURIComponent(session.runId)}`}
-            className="inline-flex items-center gap-1 text-[11px] text-accent hover:underline"
+            className="inline-flex items-center gap-1 text-[11px] text-accent-text hover:underline"
           >
             <ExternalLinkIcon className="w-3 h-3" />
             console
@@ -918,7 +918,7 @@ function SessionHeader({
             type="button"
             onClick={() => void onNewSession()}
             disabled={abandoning}
-            className="text-[11px] text-accent hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+            className="text-[11px] text-accent-text hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-wait"
             title={
               isLive
                 ? "Cancel the current run and start a fresh Nexie session."
@@ -945,7 +945,7 @@ function QuickModeToggle() {
       type="button"
       onClick={() => setQuickMode(!quickMode)}
       className={`text-[11px] hover:underline cursor-pointer ${
-        quickMode ? "text-accent" : "text-fg-subtle"
+        quickMode ? "text-accent-text" : "text-fg-subtle"
       }`}
       title="Quick mode: type a free-text instruction on the ask_continue turn instead of picking from the form. A dry-run banner lets you confirm the interpreted action."
     >

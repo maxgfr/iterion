@@ -59,7 +59,7 @@ function Section({
 }) {
   const toneClass =
     tone === "accent"
-      ? "text-accent"
+      ? "text-accent-text"
       : tone === "muted"
         ? "text-fg-muted"
         : "text-fg-default";

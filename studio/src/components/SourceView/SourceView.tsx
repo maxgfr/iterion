@@ -63,7 +63,7 @@ export default function SourceView() {
             <Button
               variant="ghost"
               size="sm"
-              className="text-accent hover:underline"
+              className="text-accent-text hover:underline"
               onClick={() => setEditing(true)}
             >
               Edit

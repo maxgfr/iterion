@@ -203,7 +203,7 @@ export function Combobox<T = string>({
                 }}
                 className={`px-2 py-1.5 cursor-pointer text-xs ${
                   focusIdx === -1 ? "bg-surface-2" : "hover:bg-surface-1"
-                } ${value === "" ? "text-accent" : "text-fg-muted italic"}`}
+                } ${value === "" ? "text-accent-text" : "text-fg-muted italic"}`}
               >
                 {emptyLabel}
                 {emptyDescription && (

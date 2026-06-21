@@ -121,7 +121,7 @@ export default function ProjectSwitcher({ open, onClose }: Props) {
                     <div className="font-semibold flex items-center gap-2 truncate">
                       <span className="truncate">{p.name}</span>
                       {isCurrent && (
-                        <span className="text-[10px] uppercase tracking-wider text-accent shrink-0">
+                        <span className="text-[10px] uppercase tracking-wider text-accent-text shrink-0">
                           current
                         </span>
                       )}

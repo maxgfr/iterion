@@ -163,7 +163,7 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
                   <span className="inline-flex items-center gap-1">
                     Bot
                     {bot && (
-                      <span className="text-[10px] font-mono bg-accent/15 text-accent rounded px-1">
+                      <span className="text-[10px] font-mono bg-accent/15 text-accent-text rounded px-1">
                         {bot}
                       </span>
                     )}
@@ -541,7 +541,7 @@ function LastRunSection({
           <span className="text-fg-muted">Run:</span>
           <Link
             href={`/runs/${encodeURIComponent(runID)}`}
-            className="font-mono text-accent hover:underline"
+            className="font-mono text-accent-text hover:underline"
             title={`Open run ${runID}`}
           >
             {runLabel}

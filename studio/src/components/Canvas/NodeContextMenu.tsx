@@ -153,7 +153,7 @@ export default function NodeContextMenu({
             className="w-full text-left px-3 py-1.5 hover:bg-surface-2 text-xs text-fg-default flex items-center gap-2 focus-visible:outline-none focus-visible:bg-surface-2"
             onClick={() => { onDuplicate(); onClose(); }}
           >
-            <span className="text-accent">&#x2398;</span>
+            <span className="text-accent-text">&#x2398;</span>
             Duplicate
           </button>
 
@@ -167,7 +167,7 @@ export default function NodeContextMenu({
               className="w-full text-left px-3 py-1.5 hover:bg-surface-2 text-xs text-fg-default flex items-center gap-2 focus-visible:outline-none focus-visible:bg-surface-2"
               onClick={() => setShowGroupInput(true)}
             >
-              <span className="text-accent">{"\u{1F4E6}"}</span>
+              <span className="text-accent-text">{"\u{1F4E6}"}</span>
               Group {selectedNodeIds.length} nodes...
             </button>
           )}

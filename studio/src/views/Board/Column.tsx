@@ -148,7 +148,7 @@ export function Column({
         </span>
         <span className="text-fg-muted flex items-center gap-1">
           {selCount > 0 && (
-            <span className="text-accent font-medium">{selCount} sel ·</span>
+            <span className="text-accent-text font-medium">{selCount} sel ·</span>
           )}
           {issues.length}
           {eligible && <span className="ml-1 text-success">●</span>}
@@ -352,7 +352,7 @@ function IssueCard({
         <code className="opacity-70">{shortID(iss.id)}</code>
         {iss.bot && (
           <span
-            className="font-mono bg-accent/15 text-accent rounded px-1 py-0.5"
+            className="font-mono bg-accent/15 text-accent-text rounded px-1 py-0.5"
             title={`Will dispatch via ${iss.bot} (overrides dispatcher config)`}
           >
             🤖 {iss.bot}

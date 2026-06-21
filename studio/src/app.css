@@ -34,11 +34,16 @@
   --color-border-strong: #4b5563;  /* matches gray-600 */
   --color-border-subtle: #1f2937;
 
-  /* Accent (interactive primary) */
-  --color-accent: #2563eb;          /* blue-600 */
-  --color-accent-hover: #1d4ed8;    /* blue-700 */
-  --color-accent-soft: rgba(37, 99, 235, 0.16);
+  /* Accent (interactive primary) — periwinkle/indigo identity (2026-06-21).
+   * Decoupled: --color-accent is the button/brand BACKGROUND (white text on it
+   * is AA); --color-accent-text is the brighter sibling for accent-coloured
+   * TEXT / links / icons on a surface (AA on dark). See docs/visual-identity.md. */
+  --color-accent: #4f46e5;          /* indigo-600 — bg/brand (white-on = 5.8:1) */
+  --color-accent-hover: #4338ca;    /* indigo-700 */
+  --color-accent-soft: rgba(79, 70, 229, 0.16);
   --color-accent-fg: #ffffff;
+  --color-accent-text: #818cf8;     /* indigo-400 — accent text/links (AA on dark) */
+  --accent-rgb: 129 140 248;        /* = accent-text; consumed by .pulse-flash */
 
   /* Severity */
   --color-danger: #dc2626;          /* red-600 */
@@ -178,6 +183,15 @@
   --z-popover: 70;       /* floating popovers (above modals if nested) */
   --z-tooltip: 80;       /* tooltips (always above popovers) */
   --z-toast: 100;        /* toasts, focused skip-link */
+
+  /* Scrim — modal/popover/drawer backdrops. Tokenised so the dim level is
+   * coherent (replaces ad-hoc bg-black/N) and the light theme can soften it
+   * (override in the [data-theme="light"] block). Dark values live here in
+   * @theme (applied at :root for the default/dark theme). Consume via the
+   * generated utilities: bg-scrim-modal | bg-scrim-popover | bg-scrim-soft. */
+  --color-scrim-modal: rgb(0 0 0 / 0.55);
+  --color-scrim-popover: rgb(0 0 0 / 0.4);
+  --color-scrim-soft: rgb(0 0 0 / 0.2);
 }
 
 /* Explicit dark theme override (== defaults; declared for parity with light) */
@@ -193,10 +207,12 @@
   --color-border-default: #374151;
   --color-border-strong: #4b5563;
   --color-border-subtle: #1f2937;
-  --color-accent: #2563eb;
-  --color-accent-hover: #1d4ed8;
-  --color-accent-soft: rgba(37, 99, 235, 0.16);
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-accent-soft: rgba(79, 70, 229, 0.16);
   --color-accent-fg: #ffffff;
+  --color-accent-text: #818cf8;
+  --accent-rgb: 129 140 248;
   --color-danger: #dc2626;
   --color-danger-soft: rgba(220, 38, 38, 0.18);
   --color-danger-fg: #fecaca;
@@ -237,10 +253,12 @@
   --color-border-default: #e5e7eb;
   --color-border-strong: #d1d5db;
   --color-border-subtle: #f3f4f6;
-  --color-accent: #2563eb;
-  --color-accent-hover: #1d4ed8;
-  --color-accent-soft: rgba(37, 99, 235, 0.12);
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-accent-soft: rgba(79, 70, 229, 0.12);
   --color-accent-fg: #ffffff;
+  --color-accent-text: #4f46e5;
+  --accent-rgb: 79 70 229;
   --color-danger: #b91c1c;
   --color-danger-soft: rgba(185, 28, 28, 0.10);
   --color-danger-fg: #7f1d1d;
@@ -308,6 +326,10 @@
   --shadow-md:      0 4px 8px -2px rgb(0 0 0 / 0.10);
   --shadow-lg:      0 10px 24px -6px rgb(0 0 0 / 0.16);
   --shadow-popover: 0 8px 20px -4px rgb(0 0 0 / 0.18);
+  /* Softer scrims on the light theme so backdrops dim without bruising. */
+  --color-scrim-modal: rgb(0 0 0 / 0.45);
+  --color-scrim-popover: rgb(0 0 0 / 0.32);
+  --color-scrim-soft: rgb(0 0 0 / 0.16);
   color-scheme: light;
 }
 
@@ -421,4 +443,26 @@ select:focus:not(:focus-visible) {
 }
 .input::placeholder {
   color: var(--color-fg-subtle);
+}
+
+/* =============================================================================
+ * Reduced motion — honour the OS preference (WCAG 2.3.3 Animation from
+ * Interactions / 2.2.2 Pause, Stop, Hide). Decorative pulses/fades are removed
+ * outright; every other animation/transition collapses to ~instant. Status is
+ * always carried by colour/text, never motion alone, so nothing is lost.
+ * ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-fade-in-opacity,
+  .pulse-flash {
+    animation: none !important;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

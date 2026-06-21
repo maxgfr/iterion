@@ -25,7 +25,7 @@ import { describe, expect, it } from "vitest";
 //   border-border       -> border-border-default
 
 const BANNED: { label: string; re: RegExp }[] = [
-  { label: "(bg|text|border)-fg-accent — use bg-accent / text-accent (no --color-fg-accent token)", re: /\b(bg|text|border)-fg-accent\b/ },
+  { label: "(bg|text|border)-fg-accent — use bg-accent / text-accent-text (no --color-fg-accent token)", re: /\b(bg|text|border)-fg-accent\b/ },
   { label: "(text|bg)-on-* — use text-fg-onAccent / text-danger-fg (no --color-on-* token)", re: /\b(text|bg)-on-(accent|danger|success|warning|info)\b/ },
   { label: "(bg|text|border|ring)-error — severity token is 'danger' (text-danger, bg-danger-soft…)", re: /\b(bg|text|border|ring)-error\b/ },
   { label: "*-surface-overlay — no such token; use a bg-black/N scrim or surface-0..3", re: /\bsurface-overlay\b/ },

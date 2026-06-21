@@ -81,7 +81,7 @@ export function BannerStatusIcon({ status }: { status: BannerStatus }) {
   if (status === "running") {
     return (
       <ReloadIcon
-        className="w-3.5 h-3.5 text-accent animate-spin"
+        className="w-3.5 h-3.5 text-accent-text animate-spin"
         aria-label="In progress"
       />
     );

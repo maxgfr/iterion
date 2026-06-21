@@ -25,7 +25,7 @@ export default function BreadcrumbBar() {
 
       {/* Workflow root */}
       <button
-        className="text-xs text-accent hover:text-accent transition-colors"
+        className="text-xs text-accent-text hover:text-accent-text transition-colors"
         onClick={clearSubNodeView}
       >
         {workflowName}
@@ -37,7 +37,7 @@ export default function BreadcrumbBar() {
           <span className="text-fg-subtle text-xs">{"\u203A"}</span>
           {index < subNodeViewStack.length - 1 ? (
             <button
-              className="text-xs text-accent hover:text-accent transition-colors"
+              className="text-xs text-accent-text hover:text-accent-text transition-colors"
               onClick={() => navigateSubNodeViewTo(index)}
             >
               {nodeId}

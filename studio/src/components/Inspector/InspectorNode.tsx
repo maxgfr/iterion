@@ -180,7 +180,7 @@ function NodeHeader({
         ) : (
           <button
             type="button"
-            className="text-sm font-semibold text-fg-default truncate hover:text-accent w-full text-left"
+            className="text-sm font-semibold text-fg-default truncate hover:text-accent-text w-full text-left"
             onClick={() => {
               setDraft(name);
               setEditing(true);

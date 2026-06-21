@@ -68,7 +68,7 @@ const COMPONENTS: Components = {
   ),
   a: ({ node: _node, ...props }) => (
     <a
-      className="text-accent underline underline-offset-2 hover:opacity-80"
+      className="text-accent-text underline underline-offset-2 hover:opacity-80"
       target="_blank"
       rel="noopener noreferrer"
       {...props}

@@ -209,7 +209,7 @@ export default function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeT
       {(inputSchema || outputSchema) && (
         <div className="flex items-center justify-center gap-1 mt-1">
           {inputSchema && (
-            <span className="text-[9px] bg-accent-soft text-accent px-1 rounded" title={`input: ${inputSchema}`}>
+            <span className="text-[9px] bg-accent-soft text-accent-text px-1 rounded" title={`input: ${inputSchema}`}>
               {"\u2192"}{inputSchema}
             </span>
           )}

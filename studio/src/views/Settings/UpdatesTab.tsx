@@ -53,7 +53,7 @@ export default function UpdatesTab() {
             Update available: <strong>{release.version}</strong>
           </p>
           <button
-            className="text-xs text-accent underline self-start"
+            className="text-xs text-accent-text underline self-start"
             onClick={() => {
               // Defence-in-depth: refuse anything that isn't a plain
               // https:// URL before handing off to the OS shell. The

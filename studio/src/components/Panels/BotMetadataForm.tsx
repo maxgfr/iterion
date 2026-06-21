@@ -191,7 +191,7 @@ function ForgeAccessSection({ forge }: { forge: NonNullable<BotEntryWithSchema["
           <ul className="space-y-0.5">
             {scopes.map(([k, v]) => (
               <li key={k} className="font-mono text-caption text-fg-default">
-                {k}: <span className="text-accent">{v}</span>
+                {k}: <span className="text-accent-text">{v}</span>
               </li>
             ))}
           </ul>

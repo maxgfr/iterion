@@ -39,7 +39,7 @@ export default function PreFlightPanel({ runId, runStatus }: Props) {
         {runId && (
           <Link
             href={`/runs/${encodeURIComponent(runId)}`}
-            className="inline-flex items-center gap-1 text-accent hover:underline"
+            className="inline-flex items-center gap-1 text-accent-text hover:underline"
           >
             <ExternalLinkIcon className="w-3 h-3" />
             console

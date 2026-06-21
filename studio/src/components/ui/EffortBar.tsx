@@ -54,7 +54,7 @@ const TONE: Record<EffortLevel, { text: string; bar: string; cell: string }> = {
     cell: "bg-fg-muted",
   },
   medium: {
-    text: "text-accent",
+    text: "text-accent-text",
     bar: "bg-accent/20",
     cell: "bg-accent",
   },
@@ -74,7 +74,7 @@ const TONE: Record<EffortLevel, { text: string; bar: string; cell: string }> = {
     cell: "bg-danger",
   },
   ultracode: {
-    text: "text-accent",
+    text: "text-accent-text",
     bar: "bg-accent/20",
     cell: "bg-accent",
   },

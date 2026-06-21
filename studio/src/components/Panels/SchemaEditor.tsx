@@ -166,7 +166,7 @@ function SchemaCard({
       </div>
       <button
         type="button"
-        className="text-accent hover:underline text-xs mt-1"
+        className="text-accent-text hover:underline text-xs mt-1"
         onClick={addField}
       >
         + Add Field

@@ -95,7 +95,7 @@ export default function EdgeForm({ edge, edgeIndex, workflowName }: Props) {
           <span className="text-xs text-fg-subtle font-semibold">When Condition <span className="text-fg-subtle hover:text-fg-muted cursor-help" title="Boolean field from the source node's output schema. Controls whether this edge is followed.">?</span></span>
           {!when ? (
             <button
-              className="text-xs text-accent hover:text-accent"
+              className="text-xs text-accent-text hover:text-accent-text"
               onClick={() => setWhen({ condition: "", negated: false })}
             >
               + Add
@@ -187,7 +187,7 @@ export default function EdgeForm({ edge, edgeIndex, workflowName }: Props) {
           <span className="text-xs text-fg-subtle font-semibold">Loop <span className="text-fg-subtle hover:text-fg-muted cursor-help" title="Creates a named loop through this edge, repeating up to max_iterations times. Use {{outputs.node.history}} to access previous iterations.">?</span></span>
           {!loop ? (
             <button
-              className="text-xs text-accent hover:text-accent"
+              className="text-xs text-accent-text hover:text-accent-text"
               onClick={() => setLoop({ name: "", max_iterations: 3 })}
             >
               + Add
@@ -224,7 +224,7 @@ export default function EdgeForm({ edge, edgeIndex, workflowName }: Props) {
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs text-fg-subtle font-semibold">With (data mapping) <span className="text-fg-subtle hover:text-fg-muted cursor-help" title="Map data to the target node's input fields. Use {{outputs.node.field}}, {{vars.name}}, or {{artifacts.name}} as values.">?</span></span>
           <button
-            className="text-xs text-accent hover:text-accent"
+            className="text-xs text-accent-text hover:text-accent-text"
             onClick={() => setWith([...withEntries, { key: "", value: "" }])}
           >
             + Add

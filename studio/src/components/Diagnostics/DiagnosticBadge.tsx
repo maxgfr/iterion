@@ -91,7 +91,7 @@ export default function DiagnosticBadge({
           <div className="pt-2 border-t border-border-default">
             <button
               type="button"
-              className="text-xs text-accent hover:underline"
+              className="text-xs text-accent-text hover:underline"
               onClick={(e) => {
                 e.stopPropagation();
                 onReveal();

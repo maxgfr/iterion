@@ -60,13 +60,13 @@ export default function WatchPanel({ runId }: WatchPanelProps) {
               type="button"
               onClick={() => void onTellNexie()}
               disabled={forwarding}
-              className="text-[11px] text-accent hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+              className="text-[11px] text-accent-text hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-wait"
               title="Forward these state changes into Nexie's chat so she can react on her next turn."
             >
               {forwarding ? "Forwarding…" : "Tell Nexie"}
             </button>
           )}
-          <Link href="/board" className="text-[10px] text-accent hover:underline">
+          <Link href="/board" className="text-[10px] text-accent-text hover:underline">
             board ↗
           </Link>
         </div>
@@ -149,7 +149,7 @@ function WatchRow({ entry, runId }: { entry: WatchEntry; runId: string | null })
           type="button"
           onClick={() => void onDispatch()}
           disabled={dispatching}
-          className="text-[11px] text-accent hover:underline shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+          className="text-[11px] text-accent-text hover:underline shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-wait"
           title="Push this ticket from backlog to ready — the dispatcher picks it up."
         >
           {dispatching ? "…" : "▶ dispatch"}
@@ -158,7 +158,7 @@ function WatchRow({ entry, runId }: { entry: WatchEntry; runId: string | null })
       {lastRunId && (
         <Link
           href={`/runs/${encodeURIComponent(lastRunId)}`}
-          className="text-[11px] text-accent hover:underline shrink-0"
+          className="text-[11px] text-accent-text hover:underline shrink-0"
           title={`Open last run ${lastRunId}`}
         >
           run ↗

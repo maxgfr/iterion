@@ -91,7 +91,7 @@ export default function IssuesSummaryCard({ message }: Props) {
         {boardEnabled && (
           <Link
             href="/board"
-            className="inline-flex items-center gap-1 text-[12px] text-accent hover:underline"
+            className="inline-flex items-center gap-1 text-[12px] text-accent-text hover:underline"
           >
             <ExternalLinkIcon className="w-3 h-3" />
             Open board
@@ -100,7 +100,7 @@ export default function IssuesSummaryCard({ message }: Props) {
         {dispatcherEnabled && (
           <Link
             href="/dispatcher"
-            className="inline-flex items-center gap-1 text-[12px] text-accent hover:underline"
+            className="inline-flex items-center gap-1 text-[12px] text-accent-text hover:underline"
           >
             <ExternalLinkIcon className="w-3 h-3" />
             Open dispatcher
@@ -235,7 +235,7 @@ function DispatcherChip({
             type="button"
             disabled={status.busy}
             onClick={() => void status.autoConfigureAndStart()}
-            className="rounded border border-accent/40 bg-accent-soft px-2 py-0.5 text-[11px] text-accent hover:bg-accent-soft/80 disabled:opacity-50"
+            className="rounded border border-accent/40 bg-accent-soft px-2 py-0.5 text-[11px] text-accent-text hover:bg-accent-soft/80 disabled:opacity-50"
             title="Auto-configure with the embedded bot catalogue (feature_dev, docs-refresh, …) and start the dispatcher"
           >
             {status.busy ? "…" : "⚡ Auto-configure & start"}

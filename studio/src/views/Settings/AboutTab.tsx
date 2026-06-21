@@ -80,7 +80,7 @@ export default function AboutTab({ desktopFeatures }: Props) {
           ).map(([label, url]) => (
             <li key={label}>
               <button
-                className="text-accent underline"
+                className="text-accent-text underline"
                 onClick={() => desktop.openExternal(url)}
               >
                 {label}

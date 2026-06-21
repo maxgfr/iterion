@@ -62,7 +62,7 @@ export default function SurveyCard({ message }: Props) {
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="text-[11px] text-accent hover:underline cursor-pointer"
+            className="text-[11px] text-accent-text hover:underline cursor-pointer"
           >
             {expanded ? "Hide" : "Show"} full survey
           </button>

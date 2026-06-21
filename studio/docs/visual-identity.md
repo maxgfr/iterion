@@ -33,32 +33,43 @@ Prefer:
 
 ## Primary accent
 
-**Decision (2026-05-18): keep `--color-accent = #2563eb` (Tailwind
-`blue-600`) for now.**
+**Decision (2026-06-21): shift to an electric indigo/periwinkle and
+*decouple* accent-background from accent-text.**
 
-A "move off generic Tailwind blue" was on the table for Phase 4 of the
-UX refresh. We deferred for these reasons:
+The previous accent (`#2563eb`, Tailwind `blue-600`, kept on 2026-05-18)
+had two problems we resolved together:
 
-1. The current blue already reads as a deliberate, restrained accent
-   on both themes. No live evidence that it competes with the node-
-   kind palette (the agent-node is `blue-500`, accent is `blue-600` —
-   close but the role separation is clear in practice).
-2. Picking a new identity hue without a design conversation is exactly
-   the kind of decision that should not be made unilaterally by an
-   implementation agent.
-3. The accent shows up in ~200+ callers via `bg-accent`, `text-accent`,
-   `border-accent`, `accent-soft`. Token-level swap is a 1-line edit
-   in `app.css` and everything follows; the harder work is choosing
-   the right hue.
+1. **A11y defect.** As link text on a dark surface, `text-accent` landed
+   at ~3.4:1 — below the WCAG AA 4.5:1 floor. Accent links are common in
+   WhatsNext / Board / Settings.
+2. **Identity.** The studio is tooling — neutral, modern, tech-oriented —
+   with room for a *gentle* cyberpunk/hacker nod (see § Brand voice). A
+   restrained electric indigo serves that better than generic Tailwind
+   blue and separates cleanly from the canvas `node-agent` (`blue-500`).
 
-**Migration path** when a direction emerges:
+A single accent token cannot be AA both as **white-on-accent** (button
+backgrounds need the accent *dark enough*) and as **accent-on-surface**
+(links need it *bright enough*). So the system now carries two tokens:
 
-- Update `--color-accent`, `--color-accent-hover`, `--color-accent-fg`,
-  `--color-accent-soft` in both `:root[data-theme="dark"]` and
-  `[data-theme="light"]` blocks of `studio/src/app.css`.
-- Verify WCAG AA contrast on `bg-accent text-fg-onAccent` and
-  `bg-accent-soft text-accent` in both themes.
-- Sweep `AppHeader.tsx` brand wordmark for any hue-specific styling.
+| Token | Dark | Light | Use for |
+|---|---|---|---|
+| `--color-accent` | `#4f46e5` (indigo-600) | `#4f46e5` | Button/brand **background**, focus ring, borders. White-on-accent = 5.8:1. |
+| `--color-accent-text` | `#818cf8` (indigo-400) | `#4f46e5` | Accent-coloured **text / links / icons** on a surface. AA on dark (5.7:1 on surface-0). |
+
+`--color-accent-fg` (white) is the text *on* an accent background;
+`--color-accent-soft` is the translucent tint for chips/hover. The
+`text-accent` utility was swept to `text-accent-text` across the app;
+`bg-accent` / `border-accent` / `ring-accent` stay on `--color-accent`.
+The `--accent-rgb` var (consumed by the canvas `.pulse-flash` ping) now
+matches the accent. `theme-color` in `index.html` + `manifest.json` was
+reconciled from a stray violet (`#7c3aed`) to `#4f46e5`.
+
+**Migration path** if the hue changes again: update the accent +
+accent-text quadruples in the `@theme`, `[data-theme="dark"]`, and
+`[data-theme="light"]` blocks of `studio/src/app.css`, keep the contrast
+assertions in `__tests__/a11y/contrast.test.ts` green (white-on-accent ≥
+4.5, accent-text-on-surface ≥ 4.5 in both themes), and update
+`theme-color`.
 
 ## Secondary accent: "live"
 
@@ -91,9 +102,32 @@ Don't introduce red anywhere else.
 
 ## Brand mark
 
-`AppHeader` currently renders the wordmark "ITERION" in tracked-out
-small-caps. No icon, no logotype. This stays minimal for now — a more
-deliberate mark is downstream of a fuller identity conversation.
+The wordmark lives in the **Sidebar** (`components/shared/Sidebar.tsx`),
+rendered by the `BrandWordmark` primitive (`components/ui/BrandWordmark`):
+tracked-out caps "ITERION" followed by a discreet accent caret (a static
+terminal cursor). Pure text + a CSS bar — crisp at any size and
+theme-perfect via `currentColor` / `text-accent-text`, replacing the
+previous rasterised favicon + `dark:invert` crutch. The collapsed sidebar
+shows the compact "I" monogram + caret. No icon, no logotype.
+
+## Brand voice — a gentle cyberpunk/hacker nod
+
+The studio stays **neutral, modern, tech-oriented** (it's tooling). The
+one identity flavour layered on top is a *subtle, gentle* nod to
+hacker/terminal culture — never the Roman-imperator marketing voice (that
+stays in the README, never in-app). "Tone only":
+
+- **Monospace for technical identifiers** — run-ids, commit SHAs,
+  node-ids, branch names render in `font-mono`. Reads as a terminal and
+  is genuinely more legible for fixed-width tokens.
+- **The accent caret** in the wordmark (above) — one static terminal cursor.
+- **The cyan `live` token** is the signature "alive" signal (§ Secondary
+  accent). Reduced-motion-safe.
+- **Gentle terminal microcopy** in a few empty/loading states (a blinking
+  caret affordance), neutral-toned.
+
+No neon glow, no scanlines, no grid texture, no mascots — the base
+posture (calm / technical / dense) is unchanged.
 
 ## Third-party design libraries
 
@@ -108,11 +142,11 @@ metrics dashboard but is overkill until then. See `design-system.md`
 
 ## Future work
 
-- Light-mode contrast sweep with axe browser extension on the canvas
-  (`softColor(color, 10)` backgrounds still need verification).
-- Identity exploration when there's a design conversation: candidates
-  to explore are indigo-600 (more saturated/distinctive) or a custom
-  brand hue. Test against the agent-node blue-500 to ensure separation.
+- Identity-hue exploration is **resolved** — see § Primary accent
+  (2026-06-21: electric indigo/periwinkle, decoupled accent/accent-text).
+- Light-mode contrast: now backed by deterministic assertions in
+  `__tests__/a11y/contrast.test.ts`; a manual axe browser-extension pass
+  on `/editor` in light mode is still worth doing before a release.
 - Iteration palette ↔ live-accent alignment: currently
   `--color-iteration-0` is `#06b6d4` (cyan-500), one step from `live`'s
   `#22d3ee`. They render as adjacent in flight; consider lifting

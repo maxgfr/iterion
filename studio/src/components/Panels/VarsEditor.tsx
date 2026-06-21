@@ -131,7 +131,7 @@ function VarsSection({
         {!filterName && (
           <button
             type="button"
-            className="text-accent hover:underline text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+            className="text-accent-text hover:underline text-xs disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={addField}
             disabled={disabled}
           >
