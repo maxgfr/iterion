@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, it } from "vitest";
 import { cleanup, render } from "@testing-library/react";
-import axe from "axe-core";
 
 // Composed-surface a11y layer — extends the primitives axe smoke
 // (primitives.test.tsx) up to whole panels/dialogs, where landmark
@@ -14,46 +13,16 @@ import axe from "axe-core";
 import AppearanceTab from "@/views/Settings/AppearanceTab";
 import AboutTab from "@/views/Settings/AboutTab";
 import { RunViewSkeleton, RunViewLoadError } from "@/components/Runs/runView/RunViewLoadStates";
+import { setupMatchMedia, expectNoViolations } from "./axeHelpers";
 
 // jsdom lacks matchMedia; the theme store + a few hooks read it on mount.
-if (typeof window !== "undefined" && !window.matchMedia) {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      addListener: () => {},
-      removeListener: () => {},
-      dispatchEvent: () => false,
-    }),
-  });
-}
-
-async function expectNoViolations(container: HTMLElement, label: string) {
-  const results = await axe.run(container, {
-    runOnly: {
-      type: "tag",
-      values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"],
-    },
-  });
-  if (results.violations.length > 0) {
-    const summary = results.violations
-      .map(
-        (v) =>
-          `  - [${v.id}] ${v.help} (${v.nodes.length} node${v.nodes.length > 1 ? "s" : ""})`,
-      )
-      .join("\n");
-    throw new Error(`${label} has axe violations:\n${summary}`);
-  }
-  expect(results.violations).toHaveLength(0);
-}
+setupMatchMedia();
 
 function mount(node: ReactNode): HTMLElement {
   // Wrap in <main> so single-panel surfaces sit in a landmark (axe's
-  // region rule otherwise flags top-level content as not contained).
+  // region rule otherwise flags top-level content as not contained). NB: a
+  // surface that renders its OWN <main> would be a nested-landmark bug
+  // masked here — render such a surface unwrapped, or inside a <div>.
   return render(<main>{node}</main>).container;
 }
 

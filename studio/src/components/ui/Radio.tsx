@@ -6,11 +6,17 @@ export interface RadioProps
   label?: ReactNode;
 }
 
+const DOT =
+  "h-3.5 w-3.5 shrink-0 border-border-strong bg-surface-1 accent-accent disabled:opacity-60 disabled:cursor-not-allowed";
+
 /**
  * Native radio styled with design tokens. Real `<input type="radio">` so
  * arrow-key roving + screen-reader semantics come for free; the brand accent
  * colours the dot via `accent-accent`. Prefer {@link RadioGroup} for the
  * common labelled-set case. Focus styling is the global `:focus-visible`.
+ *
+ * `className` always lands on the outermost element (the `<label>` when a
+ * label is given, otherwise the `<input>`).
  */
 export const Radio = forwardRef<HTMLInputElement, RadioProps>(function Radio(
   { label, className = "", id, ...rest },
@@ -18,24 +24,23 @@ export const Radio = forwardRef<HTMLInputElement, RadioProps>(function Radio(
 ) {
   const autoId = useId();
   const inputId = id ?? autoId;
-  const dot = (
-    <input
-      ref={ref}
-      id={inputId}
-      type="radio"
-      className={`h-3.5 w-3.5 shrink-0 border-border-strong bg-surface-1 accent-accent disabled:opacity-60 disabled:cursor-not-allowed ${
-        label ? "" : className
-      }`.trim()}
-      {...rest}
-    />
-  );
-  if (!label) return dot;
+  if (!label) {
+    return (
+      <input
+        ref={ref}
+        id={inputId}
+        type="radio"
+        className={`${DOT} ${className}`.trim()}
+        {...rest}
+      />
+    );
+  }
   return (
     <label
       htmlFor={inputId}
       className={`inline-flex items-center gap-2 text-xs text-fg-muted cursor-pointer select-none ${className}`.trim()}
     >
-      {dot}
+      <input ref={ref} id={inputId} type="radio" className={DOT} {...rest} />
       <span>{label}</span>
     </label>
   );

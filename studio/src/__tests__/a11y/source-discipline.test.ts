@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { files, scan, scanWhole } from "./_scanner";
 
 // Source-discipline regression traps. Each scans every source module as raw
 // text (Vite glob, no node:fs — works in vitest's node + jsdom envs) and
@@ -13,38 +14,6 @@ import { describe, expect, it } from "vitest";
 //                                           Tailwind utility
 //
 // Adding a real token to app.css never requires touching this file.
-
-const RAW = import.meta.glob("/src/**/*.{ts,tsx}", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
-const files = Object.entries(RAW).filter(
-  ([path]) => !path.includes("/__tests__/") && !/\.test\.tsx?$/.test(path),
-);
-
-/** Collect `path:line  excerpt` hits for `re`, skipping allow-listed paths. */
-function scan(re: RegExp, allow: (path: string) => boolean = () => false): string[] {
-  const hits: string[] = [];
-  for (const [path, src] of files) {
-    if (allow(path)) continue;
-    src.split("\n").forEach((line, i) => {
-      if (re.test(line)) hits.push(`${path}:${i + 1}  ${line.trim().slice(0, 100)}`);
-    });
-  }
-  return hits;
-}
-
-/** Whole-file variant for patterns that span lines (e.g. a multiline JSX tag). */
-function scanWhole(re: RegExp, allow: (path: string) => boolean = () => false): string[] {
-  const hits: string[] = [];
-  for (const [path, src] of files) {
-    if (allow(path)) continue;
-    if (re.test(src)) hits.push(path);
-  }
-  return hits;
-}
 
 describe("source discipline", () => {
   it("scans a non-trivial number of source files", () => {

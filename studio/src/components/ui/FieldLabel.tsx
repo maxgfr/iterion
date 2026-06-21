@@ -1,4 +1,5 @@
 import { type LabelHTMLAttributes, type ReactNode } from "react";
+import { HelpHint } from "./HelpHint";
 
 export interface FieldLabelProps extends LabelHTMLAttributes<HTMLLabelElement> {
   /** Optional help text shown as a `?` affordance after the label. */
@@ -23,16 +24,7 @@ export function FieldLabel({
   return (
     <label className={`block text-xs text-fg-subtle mb-1 ${className}`.trim()} {...rest}>
       {children}
-      {help && (
-        <span
-          id={helpId}
-          className="text-fg-subtle hover:text-fg-muted cursor-help ml-1"
-          title={help}
-          aria-label={help}
-        >
-          ?
-        </span>
-      )}
+      {help && <HelpHint text={help} id={helpId} />}
     </label>
   );
 }

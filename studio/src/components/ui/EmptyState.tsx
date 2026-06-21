@@ -40,6 +40,7 @@ export function EmptyState({
   className = "",
 }: EmptyStateProps) {
   const hasActions = Boolean(action || secondaryAction);
+  const hasMessage = message !== "";
   return (
     <div
       className={`flex h-full flex-col items-center justify-center gap-2 px-3 py-8 text-center text-xs text-fg-subtle ${className}`.trim()}
@@ -48,10 +49,10 @@ export function EmptyState({
       {title && (
         <div className="text-sm font-medium text-fg-default">{title}</div>
       )}
-      {(message !== "" || caret) && (
+      {(hasMessage || caret) && (
         <div className={title ? "max-w-sm" : ""}>
           {message}
-          {caret && <TerminalCaret className={message !== "" ? "ml-1" : ""} />}
+          {caret && <TerminalCaret className={hasMessage ? "ml-1" : ""} />}
         </div>
       )}
       {hasActions && (

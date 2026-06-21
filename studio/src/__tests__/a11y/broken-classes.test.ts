@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { files, scan } from "./_scanner";
 
 // Regression guard for phantom / legacy Tailwind utility classes — names
 // that have NO matching `--color-*` token in app.css, so Tailwind generates
@@ -37,19 +38,6 @@ const BANNED: { label: string; re: RegExp }[] = [
   { label: "bare border-border — use border-border-default", re: /\bborder-border(?![-\w])/ },
 ];
 
-// Load every source module as raw text via Vite's glob (works in vitest's
-// node + jsdom envs, no node:fs). Test files are excluded — this file holds
-// the banned names as regex data and must not match itself.
-const RAW = import.meta.glob("/src/**/*.{ts,tsx}", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
-const files = Object.entries(RAW).filter(
-  ([path]) => !path.includes("/__tests__/") && !/\.test\.tsx?$/.test(path),
-);
-
 describe("no phantom/legacy Tailwind classes", () => {
   it("scans a non-trivial number of source files", () => {
     expect(files.length).toBeGreaterThan(150);
@@ -57,14 +45,7 @@ describe("no phantom/legacy Tailwind classes", () => {
 
   for (const { label, re } of BANNED) {
     it(`bans ${label}`, () => {
-      const hits: string[] = [];
-      for (const [path, content] of files) {
-        content.split("\n").forEach((line, i) => {
-          if (re.test(line)) {
-            hits.push(`${path}:${i + 1}  ${line.trim().slice(0, 100)}`);
-          }
-        });
-      }
+      const hits = scan(re);
       expect(hits, `phantom class found — replace it:\n${hits.join("\n")}`).toEqual([]);
     });
   }
@@ -94,15 +75,7 @@ const PALETTE_ALLOW: string[] = [];
 
 describe("no raw chromatic Tailwind palette (use semantic tokens)", () => {
   it("bans (text|bg|border|…)-<hue>-<step>", () => {
-    const hits: string[] = [];
-    for (const [path, content] of files) {
-      if (PALETTE_ALLOW.some((a) => path.includes(a))) continue;
-      content.split("\n").forEach((line, i) => {
-        if (PALETTE_RE.test(line)) {
-          hits.push(`${path}:${i + 1}  ${line.trim().slice(0, 100)}`);
-        }
-      });
-    }
+    const hits = scan(PALETTE_RE, (path) => PALETTE_ALLOW.some((a) => path.includes(a)));
     expect(
       hits,
       `raw palette colour found — use a semantic token:\n${hits.join("\n")}`,

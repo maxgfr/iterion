@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, it } from "vitest";
 import { cleanup, render } from "@testing-library/react";
-import axe from "axe-core";
 
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
@@ -20,6 +19,7 @@ import { FieldLabel } from "@/components/ui/FieldLabel";
 import { BrandWordmark } from "@/components/ui/BrandWordmark";
 import { TerminalCaret } from "@/components/ui/TerminalCaret";
 import CommandPalette from "@/components/shared/CommandPalette";
+import { setupMatchMedia, expectNoViolations } from "./axeHelpers";
 
 // Smoke a11y test for the shared UI primitives. Uses axe-core in
 // jsdom and focuses on WCAG 2.1 A + AA rules. The aim is to catch
@@ -27,43 +27,8 @@ import CommandPalette from "@/components/shared/CommandPalette";
 // (axe browser extension) because the canvas + WebSocket flows are
 // out of jsdom's reach.
 
-// jsdom does not implement window.matchMedia. Components that read
-// the viewport size (DesktopOnlyNotice) need a stub so they don't
-// crash during mount. A real browser viewport sweep happens manually.
-if (typeof window !== "undefined" && !window.matchMedia) {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      addListener: () => {},
-      removeListener: () => {},
-      dispatchEvent: () => false,
-    }),
-  });
-}
-
-async function expectNoViolations(container: HTMLElement, label: string) {
-  const results = await axe.run(container, {
-    runOnly: {
-      type: "tag",
-      values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"],
-    },
-  });
-  if (results.violations.length > 0) {
-    const summary = results.violations
-      .map(
-        (v) =>
-          `  - [${v.id}] ${v.help} (${v.nodes.length} node${v.nodes.length > 1 ? "s" : ""})`,
-      )
-      .join("\n");
-    throw new Error(`${label} has axe violations:\n${summary}`);
-  }
-  expect(results.violations).toHaveLength(0);
-}
+// jsdom lacks matchMedia (DesktopOnlyNotice + theme store read it on mount).
+setupMatchMedia();
 
 function mount(node: ReactNode): HTMLElement {
   return render(node).container;

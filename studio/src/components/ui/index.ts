@@ -25,6 +25,9 @@ export type { RadioGroupProps, RadioGroupOption } from "./RadioGroup";
 export { FieldLabel } from "./FieldLabel";
 export type { FieldLabelProps } from "./FieldLabel";
 
+export { HelpHint } from "./HelpHint";
+export type { HelpHintProps } from "./HelpHint";
+
 export { Tabs, TabsRoot, TabsList, TabsTrigger, TabsContent } from "./Tabs";
 export type { TabsProps, TabItem } from "./Tabs";
 

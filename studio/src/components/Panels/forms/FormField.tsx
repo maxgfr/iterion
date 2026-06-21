@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import { Checkbox } from "@/components/ui/Checkbox";
+import { FieldLabel } from "@/components/ui/FieldLabel";
+import { HelpHint } from "@/components/ui/HelpHint";
 import { RefAwareInput, RefAwareTextarea } from "@/components/ui/RefAwareInput";
 import PromptOverlayHighlight from "@/components/ui/PromptOverlayHighlight";
 import type { RefContext } from "@/lib/refCompletion";
@@ -17,34 +19,6 @@ import { Pencil1Icon } from "@radix-ui/react-icons";
 const labelClass = "block text-xs text-fg-subtle mb-1";
 const inputClass = "w-full bg-surface-1 border border-border-strong rounded px-2 py-1 text-sm text-fg-default focus:border-accent focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed";
 const selectClass = inputClass;
-
-function FieldLabel({
-  label,
-  help,
-  htmlFor,
-  helpId,
-}: {
-  label: string;
-  help?: string;
-  htmlFor?: string;
-  helpId?: string;
-}) {
-  return (
-    <label className={labelClass} htmlFor={htmlFor}>
-      {label}
-      {help && (
-        <span
-          id={helpId}
-          className="text-fg-subtle hover:text-fg-muted cursor-help ml-1"
-          title={help}
-          aria-label={help}
-        >
-          ?
-        </span>
-      )}
-    </label>
-  );
-}
 
 interface FieldRowChildArgs {
   /** id to apply to the primary control inside the row. */
@@ -83,7 +57,7 @@ function FieldRow({
   const describedBy = [helpId, errorId].filter(Boolean).join(" ") || undefined;
   return (
     <div className={className}>
-      <FieldLabel label={label} help={help} htmlFor={inputId} helpId={helpId} />
+      <FieldLabel htmlFor={inputId} help={help} helpId={helpId}>{label}</FieldLabel>
       {typeof children === "function"
         ? children({ inputId, describedBy })
         : children}
@@ -387,9 +361,7 @@ export function CheckboxField({ label, checked, onChange, help }: CheckboxFieldP
       />
       <label htmlFor={id} className="text-xs text-fg-subtle">
         {label}
-        {help && (
-          <span className="text-fg-subtle hover:text-fg-muted cursor-help ml-1" title={help}>?</span>
-        )}
+        {help && <HelpHint text={help} />}
       </label>
     </div>
   );

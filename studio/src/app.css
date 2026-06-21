@@ -43,7 +43,6 @@
   --color-accent-soft: rgba(79, 70, 229, 0.16);
   --color-accent-fg: #ffffff;
   --color-accent-text: #818cf8;     /* indigo-400 — accent text/links (AA on dark) */
-  --accent-rgb: 129 140 248;        /* = accent-text; consumed by .pulse-flash */
 
   /* Severity */
   --color-danger: #dc2626;          /* red-600 */
@@ -212,7 +211,6 @@
   --color-accent-soft: rgba(79, 70, 229, 0.16);
   --color-accent-fg: #ffffff;
   --color-accent-text: #818cf8;
-  --accent-rgb: 129 140 248;
   --color-danger: #dc2626;
   --color-danger-soft: rgba(220, 38, 38, 0.18);
   --color-danger-fg: #fecaca;
@@ -258,7 +256,6 @@
   --color-accent-soft: rgba(79, 70, 229, 0.12);
   --color-accent-fg: #ffffff;
   --color-accent-text: #4f46e5;
-  --accent-rgb: 79 70 229;
   --color-danger: #b91c1c;
   --color-danger-soft: rgba(185, 28, 28, 0.10);
   --color-danger-fg: #7f1d1d;
@@ -411,13 +408,13 @@ select:focus:not(:focus-visible) {
  * nothing as the class is removed ~600ms later by the component. */
 @keyframes pulse-flash {
   0% {
-    box-shadow: 0 0 0 0 rgba(var(--accent-rgb, 96 165 250) / 0.55);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent-text) 55%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 8px rgba(var(--accent-rgb, 96 165 250) / 0.25);
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--color-accent-text) 25%, transparent);
   }
   100% {
-    box-shadow: 0 0 0 16px rgba(var(--accent-rgb, 96 165 250) / 0);
+    box-shadow: 0 0 0 16px transparent;
   }
 }
 
@@ -458,17 +455,11 @@ select:focus:not(:focus-visible) {
 
 /* =============================================================================
  * Reduced motion — honour the OS preference (WCAG 2.3.3 Animation from
- * Interactions / 2.2.2 Pause, Stop, Hide). Decorative pulses/fades are removed
- * outright; every other animation/transition collapses to ~instant. Status is
- * always carried by colour/text, never motion alone, so nothing is lost.
+ * Interactions / 2.2.2 Pause, Stop, Hide). Every animation + transition
+ * (decorative pulses/fades/caret included) collapses to ~instant via the
+ * blanket reset; status is always carried by colour/text, never motion alone.
  * ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
-  .animate-fade-in,
-  .animate-fade-in-opacity,
-  .animate-caret-blink,
-  .pulse-flash {
-    animation: none !important;
-  }
   *,
   *::before,
   *::after {
