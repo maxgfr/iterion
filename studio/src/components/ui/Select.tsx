@@ -1,4 +1,5 @@
 import { forwardRef, type SelectHTMLAttributes } from "react";
+import { ChevronDown } from "lucide-react";
 
 export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "size"> {
   error?: boolean;
@@ -19,24 +20,23 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
     : "border-border-strong focus:border-accent focus:ring-1 focus:ring-accent";
   const base =
     "w-full bg-surface-1 text-fg-default rounded-md border outline-none transition-colors appearance-none disabled:opacity-60 disabled:cursor-not-allowed";
-  // Inline SVG chevron, theme-aware via currentColor.
-  const chevron =
-    "bg-[length:14px] bg-no-repeat bg-[right_0.5rem_center] bg-[image:var(--select-chevron)]";
+  // Chevron: an overlaid Lucide icon coloured via the token so it
+  // follows the theme. A `fill='currentColor'` SVG baked into a CSS
+  // background-image would NOT inherit the host colour — data-URI
+  // images resolve currentColor against their own root (i.e. black).
   return (
     <div className="relative w-full">
       <select
         ref={ref}
-        className={`${base} ${sizeClass[size]} ${ringClass} ${chevron} ${className}`.trim()}
-        style={{
-          // currentColor-aware chevron via CSS variable
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ["--select-chevron" as any]:
-            "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 20 20' fill='%239ca3af'><path d='M5.5 7l4.5 5 4.5-5z'/></svg>\")",
-        }}
+        className={`${base} ${sizeClass[size]} ${ringClass} ${className}`.trim()}
         {...rest}
       >
         {children}
       </select>
+      <ChevronDown
+        aria-hidden
+        className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-subtle"
+      />
     </div>
   );
 });

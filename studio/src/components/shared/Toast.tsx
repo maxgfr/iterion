@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { AlertCircle, AlertTriangle, CheckCircle2, Info, X, type LucideIcon } from "lucide-react";
 
 import { useUIStore, type Toast } from "@/store/ui";
 
@@ -9,11 +10,13 @@ const TYPE_STYLES: Record<Toast["type"], string> = {
   warning: "bg-warning-soft text-warning-fg border-warning",
 };
 
-const TYPE_ICONS: Record<Toast["type"], string> = {
-  success: "\u2713",
-  error: "\u2716",
-  info: "\u2139",
-  warning: "\u26A0",
+// Lucide icons matching InlineBanner's tone glyphs so toasts and inline
+// banners read as one family (error reuses danger's AlertCircle).
+const TYPE_ICONS: Record<Toast["type"], LucideIcon> = {
+  success: CheckCircle2,
+  error: AlertCircle,
+  info: Info,
+  warning: AlertTriangle,
 };
 
 // Per-toast a11y role:
@@ -58,6 +61,7 @@ export default function ToastContainer() {
     >
       {toasts.map((toast) => {
         const { role, live } = roleFor(toast.type);
+        const Icon = TYPE_ICONS[toast.type];
         return (
           <div
             key={toast.id}
@@ -65,7 +69,7 @@ export default function ToastContainer() {
             aria-live={live}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg border shadow-[var(--shadow-md)] text-sm animate-fade-in ${TYPE_STYLES[toast.type]}`}
           >
-            <span className="font-bold" aria-hidden="true">{TYPE_ICONS[toast.type]}</span>
+            <Icon className="h-4 w-4 shrink-0" aria-hidden />
             <span>{toast.message}</span>
             {toast.action && (
               // currentColor border + transparent fill renders consistently
@@ -92,7 +96,7 @@ export default function ToastContainer() {
               aria-label="Dismiss notification"
               title="Dismiss"
             >
-              &#x2715;
+              <X className="h-3 w-3" aria-hidden />
             </button>
           </div>
         );

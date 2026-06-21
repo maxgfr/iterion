@@ -99,7 +99,7 @@ export default function ConfirmDialog({
   // always stacks above a parent modal that opened it. The semantic
   // ladder lives in app.css @theme.
   const content = (
-    <div className="fixed inset-0 z-[var(--z-confirm)] bg-black/50 flex items-center justify-center">
+    <div className="fixed inset-0 z-[var(--z-confirm)] bg-scrim-modal flex items-center justify-center">
       <div
         ref={dialogRef}
         role="dialog"
