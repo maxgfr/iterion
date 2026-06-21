@@ -1,9 +1,8 @@
 import { errorMessage } from "@/lib/errorHints";
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useParams } from "wouter";
-import { Group, Panel, Separator } from "react-resizable-panels";
-import { ChevronLeftIcon, ChevronUpIcon } from "@radix-ui/react-icons";
+import { Group, Panel } from "react-resizable-panels";
 
 import {
   getRun,
@@ -11,31 +10,22 @@ import {
   type RunFile,
   type RunFilesMode,
 } from "@/api/runs";
-import { IconButton, Tabs } from "@/components/ui";
+import { Tabs } from "@/components/ui";
 import { selectRunningExecution, useRunStore } from "@/store/run";
 import { useUIStore } from "@/store/ui";
 import { useRunWebSocket } from "@/hooks/useRunWebSocket";
 import { useLayoutPersistence } from "@/hooks/useLayoutPersistence";
 import { useRunToasts } from "@/hooks/useRunToasts";
 import { useRunKeyboard } from "@/hooks/useRunKeyboard";
-import {
-  readBooleanFlag,
-  readEnumFlag,
-  writeBooleanFlag,
-  writeStringFlag,
-  hasFlag,
-} from "@/lib/localStorageFlag";
+import { writeBooleanFlag, writeStringFlag } from "@/lib/localStorageFlag";
 
 import { buildExecutionsAt } from "@/lib/snapshotReducer";
 
-import BrowserPane, { type BrowserDock } from "./BrowserPane";
+import BrowserPane from "./BrowserPane";
 import EventLog from "./EventLog";
 import FileDiffDialog from "./FileDiffDialog";
 import FileEditDialog from "./FileEditDialog";
-import FloatingChatPanel, {
-  ChatPanelContent,
-  type ChatDock,
-} from "./FloatingChatPanel";
+import FloatingChatPanel, { ChatPanelContent } from "./FloatingChatPanel";
 import OperatorPauseBanner from "./OperatorPauseBanner";
 import LeftPanel from "./LeftPanel";
 import NodeDetailPanel from "./NodeDetailPanel";
@@ -47,43 +37,17 @@ import RunMetrics from "./RunMetrics";
 import ArtifactFilesPanel from "./ArtifactFilesPanel";
 import ReportTab from "./ReportTab";
 import Scrubber from "./Scrubber";
+import { ExpandStrip, ResizeSeparator } from "./runView/PanelChrome";
 import { RunViewLoadError, RunViewSkeleton } from "./runView/RunViewLoadStates";
-
-import { readNodeOutputMeta, type DelegateOutputMeta } from "@/lib/delegateMeta";
-
-// `RuntimeLLMOverride` aliases the cross-file `DelegateOutputMeta`
-// shape — kept under this name locally so its run-view role (override
-// of the workflow-declared model/effort for the canvas "live" badge) is
-// obvious at call sites.
-type RuntimeLLMOverride = DelegateOutputMeta;
-
-// Layout/panel preferences are namespaced under `run-console-v2.*`.
-// Never reuse `run-console-v1.*` keys — the layout shape changed
-// (no global view mode, chat is a separate panel) and mixing them
-// produces inconsistent restored state.
-const DETAIL_COLLAPSED_KEY = "run-console-v2.detail-collapsed";
-const EVENTLOG_COLLAPSED_KEY = "run-console-v2.eventlog-collapsed";
-const BOTTOM_TAB_KEY = "run-console-v2.bottom-tab";
-const BOTTOM_TABS = ["events", "logs", "report", "browser", "artifacts"] as const;
-type BottomTab = (typeof BOTTOM_TABS)[number];
-const CHAT_DOCK_KEY = "run-console-v2.chat-dock";
-const CHAT_DOCKS = ["closed", "floating", "docked-right"] as const;
-const BOTTOM_TAB_LABELS: Record<BottomTab, string> = {
-  events: "Events",
-  logs: "Logs",
-  report: "Report",
-  browser: "Browser",
-  artifacts: "Artifacts",
-};
-const BROWSER_DOCK_KEY = "run-console-v2.browser-dock";
-
-function readBrowserDock(): BrowserDock {
-  return readEnumFlag<BrowserDock>(BROWSER_DOCK_KEY, ["right", "bottom"], "bottom");
-}
-
-function writeBrowserDock(dock: BrowserDock): void {
-  writeStringFlag(BROWSER_DOCK_KEY, dock);
-}
+import {
+  BOTTOM_TABS,
+  BOTTOM_TAB_KEY,
+  BOTTOM_TAB_LABELS,
+  EVENTLOG_COLLAPSED_KEY,
+  type BottomTab,
+} from "./runView/layoutFlags";
+import { useDisplayedRunData } from "./runView/useDisplayedRunData";
+import { useRunConsoleLayout } from "./runView/useRunConsoleLayout";
 
 interface RunViewProps {
   // Passed by RunTabHost when this view is hosted in a tab subtree.
@@ -233,60 +197,25 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
     { canvas: 40, detail: 20, browserRight: 20, chat: 20 },
   );
 
-  const [browserDock, setBrowserDockState] = useState<BrowserDock>(() =>
-    readBrowserDock(),
-  );
-  const setBrowserDock = useCallback((next: BrowserDock) => {
-    setBrowserDockState(next);
-    writeBrowserDock(next);
-  }, []);
-
-  // Canvas-first defaults: node-detail starts collapsed so the canvas
-  // claims the full width on first render; the bottom events/logs
-  // drawer stays open because it carries actionable signal at every
-  // run state (queued progress, live tool output, post-mortem report).
-  const [detailCollapsed, setDetailCollapsed] = useState<boolean>(() =>
-    readBooleanFlag(DETAIL_COLLAPSED_KEY, true),
-  );
-  const [eventlogCollapsed, setEventlogCollapsed] = useState<boolean>(() =>
-    readBooleanFlag(EVENTLOG_COLLAPSED_KEY, false),
-  );
-  const [bottomTab, setBottomTab] = useState<BottomTab>(() =>
-    readEnumFlag(BOTTOM_TAB_KEY, BOTTOM_TABS, "logs"),
-  );
-  const [chatDock, setChatDockState] = useState<ChatDock>(() =>
-    readEnumFlag(CHAT_DOCK_KEY, CHAT_DOCKS, "closed") as ChatDock,
-  );
-  const setChatDock = useCallback((next: ChatDock) => {
-    setChatDockState(next);
-    writeStringFlag(CHAT_DOCK_KEY, next);
-  }, []);
-  // Tracks whether the user has manually changed the bottom tab during
-  // this run view, so we don't yank the tab back to "browser" on every
-  // new preview_url event after they explicitly picked another panel.
-  // A persisted tab counts as "pinned" — the user chose it last time.
-  const [bottomTabPinned, setBottomTabPinned] = useState<boolean>(() => {
-    return hasFlag(BOTTOM_TAB_KEY);
-  });
-  const handleSetBottomTab = useCallback((tab: BottomTab) => {
-    setBottomTab(tab);
-    setBottomTabPinned(true);
-    writeStringFlag(BOTTOM_TAB_KEY, tab);
-  }, []);
-  const toggleDetailCollapsed = useCallback(() => {
-    setDetailCollapsed((prev) => {
-      const next = !prev;
-      writeBooleanFlag(DETAIL_COLLAPSED_KEY, next);
-      return next;
-    });
-  }, []);
-  const toggleEventlogCollapsed = useCallback(() => {
-    setEventlogCollapsed((prev) => {
-      const next = !prev;
-      writeBooleanFlag(EVENTLOG_COLLAPSED_KEY, next);
-      return next;
-    });
-  }, []);
+  // Persisted run-console layout/dock dials. The cross-cutting effects
+  // below (auto-reveal Browser, "Show event log" token, browserDock →
+  // bottomTab redirect) drive the raw setters this hook exposes.
+  const {
+    browserDock,
+    setBrowserDock,
+    detailCollapsed,
+    toggleDetailCollapsed,
+    eventlogCollapsed,
+    toggleEventlogCollapsed,
+    setEventlogCollapsed,
+    bottomTab,
+    setBottomTab,
+    handleSetBottomTab,
+    bottomTabPinned,
+    setBottomTabPinned,
+    chatDock,
+    setChatDock,
+  } = useRunConsoleLayout();
 
   // ConversationEmptyState's "Show event log" link bumps a token on
   // the run store; we expand the bottom drawer + flip to "events"
@@ -311,7 +240,7 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
       writeBooleanFlag(EVENTLOG_COLLAPSED_KEY, false);
       return false;
     });
-  }, [uiOpenEventLogToken]);
+  }, [uiOpenEventLogToken, setBottomTab, setBottomTabPinned, setEventlogCollapsed]);
 
   // Auto-reveal the Browser tab the first time a preview URL becomes
   // available, but only if the user hasn't already pinned a different
@@ -326,7 +255,7 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
     ) {
       setBottomTab("browser");
     }
-  }, [browserAvailable, bottomTab, bottomTabPinned, browserDock]);
+  }, [browserAvailable, bottomTab, bottomTabPinned, browserDock, setBottomTab]);
 
   // If the user moves the browser pane to the right side while it was
   // the active bottom tab, redirect them to "logs" so the bottom panel
@@ -335,7 +264,7 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
     if (browserDock === "right" && bottomTab === "browser") {
       setBottomTab("logs");
     }
-  }, [browserDock, bottomTab]);
+  }, [browserDock, bottomTab, setBottomTab]);
 
   useEffect(() => {
     setRunId(runId);
@@ -562,84 +491,11 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
       : undefined,
   });
 
-  // When scrubbing, derive a virtual snapshot at the chosen seq.
-  // Otherwise use the live executions map.
-  //
-  // The range input on the Scrubber can fire onChange faster than 60 Hz
-  // on drag, and `buildExecutionsAt` folds the full events array (up to
-  // MAX_EVENTS = 5000) on each call. useDeferredValue lets React keep
-  // the slider responsive while the heavier downstream computations
-  // (executions snapshot, filtered events) catch up one frame behind.
-  const deferredScrubSeq = useDeferredValue(scrubSeq);
-  const displayedExecutions = useMemo(() => {
-    if (deferredScrubSeq === null) return liveExecutions;
-    return buildExecutionsAt(events, deferredScrubSeq);
-  }, [deferredScrubSeq, events, liveExecutions]);
-
-  const displayedEvents = useMemo(() => {
-    if (deferredScrubSeq === null) return events;
-    return events.filter((e) => e.seq <= deferredScrubSeq);
-  }, [deferredScrubSeq, events]);
-
-  // Absolute byte offset to clamp the bottom log panel during scrub /
-  // replay: the backend stamps each event with the log buffer's byte
-  // total at emission time (Event.log_offset). Take the latest event
-  // with seq <= scrubSeq and use its offset. Falls back to undefined
-  // for legacy runs whose events predate the feature — the log panel
-  // then stays in live mode rather than going blank, which is the
-  // less-bad degradation.
-  const logClampBytes = useMemo<number | null | undefined>(() => {
-    if (deferredScrubSeq === null) return null;
-    if (events.length === 0) return 0;
-    let lo = 0;
-    let hi = events.length - 1;
-    let best: number | undefined;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      const evt = events[mid]!;
-      if (evt.seq <= deferredScrubSeq) {
-        best = evt.log_offset;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return best;
-  }, [deferredScrubSeq, events]);
-
-  // Fold llm_request and node_finished events into a per-node "what
-  // actually ran" map. Latest event wins because seq is monotonic.
-  // displayedEvents (not raw) so the time-travel scrubber rewinds too.
-  // llm_request carries mid-flight overrides (claw); node_finished
-  // carries the executor-stamped effective model + context window
-  // (claude_code) via output._model / _context_*. See
-  // pkg/backend/model/executor.go stampDelegateOutputMeta.
-  const runtimeOverrideByNode = useMemo(() => {
-    const m = new Map<string, RuntimeLLMOverride>();
-    const update = (nodeID: string, patch: Partial<RuntimeLLMOverride>) => {
-      const prev = m.get(nodeID) ?? {};
-      m.set(nodeID, { ...prev, ...patch });
-    };
-    for (const e of displayedEvents) {
-      if (!e.node_id) continue;
-      const data = e.data ?? {};
-      if (e.type === "llm_request") {
-        const patch: Partial<RuntimeLLMOverride> = {};
-        if (typeof data.model === "string") patch.model = data.model;
-        if (typeof data.reasoning_effort === "string")
-          patch.reasoning_effort = data.reasoning_effort;
-        if (patch.model || patch.reasoning_effort) update(e.node_id, patch);
-        continue;
-      }
-      if (e.type === "node_finished") {
-        const patch = readNodeOutputMeta(
-          data.output as Record<string, unknown> | undefined,
-        );
-        if (Object.keys(patch).length > 0) update(e.node_id, patch);
-      }
-    }
-    return m;
-  }, [displayedEvents]);
+  // Everything the canvas / detail / event log render from the current
+  // scrub position (live data when scrubSeq is null) — see
+  // useDisplayedRunData. deferredScrubSeq stays internal to the hook.
+  const { displayedExecutions, displayedEvents, logClampBytes, runtimeOverrideByNode } =
+    useDisplayedRunData(scrubSeq, events, liveExecutions);
 
   // Workflow view: detail panel reflects the selected node's currently-
   // picked iteration. We expose the full per-node execution list plus
@@ -991,53 +847,6 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
         />
       </div>
     </ReactFlowProvider>
-  );
-}
-
-function ExpandStrip({
-  orientation,
-  label,
-  onClick,
-}: {
-  orientation: "right" | "bottom";
-  label: string;
-  onClick: () => void;
-}) {
-  const isRight = orientation === "right";
-  const stripClass = isRight
-    ? "flex flex-col items-center justify-start border-l w-7 py-2"
-    : "flex items-center justify-center border-t h-7";
-  return (
-    <div
-      className={`${stripClass} border-border-default bg-surface-1 shrink-0 animate-fade-in-opacity`}
-    >
-      <IconButton label={label} size="sm" variant="ghost" onClick={onClick}>
-        {isRight ? <ChevronLeftIcon /> : <ChevronUpIcon />}
-      </IconButton>
-    </div>
-  );
-}
-
-function ResizeSeparator({
-  orientation,
-}: {
-  orientation: "horizontal" | "vertical";
-}) {
-  // The Group's orientation defines the layout axis; the visible
-  // separator runs perpendicular to it. A horizontal Group lays out
-  // panels left-to-right, so the separator is a vertical bar (1px
-  // wide); a vertical Group stacks top-to-bottom, so it's a horizontal
-  // bar (1px tall).
-  const isHorizontalGroup = orientation === "horizontal";
-  return (
-    <Separator
-      className={
-        isHorizontalGroup
-          ? "w-1 bg-border-default/40 hover:bg-accent transition-colors data-[separator-state=drag]:bg-accent"
-          : "h-1 bg-border-default/40 hover:bg-accent transition-colors data-[separator-state=drag]:bg-accent"
-      }
-      aria-label={isHorizontalGroup ? "Resize detail panel" : "Resize event log"}
-    />
   );
 }
 
