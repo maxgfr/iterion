@@ -139,10 +139,8 @@ func (c *compiler) validateRTK(w *Workflow) {
 		var rtk string
 		var kind string
 		switch nn := n.(type) {
-		case *AgentNode:
-			rtk, kind = nn.RTK, "agent"
-		case *JudgeNode:
-			rtk, kind = nn.RTK, "judge"
+		case LLMNode:
+			rtk, kind = nn.GetRTK(), nn.NodeKind().String()
 		case *ToolNode:
 			rtk, kind = nn.RTK, "tool"
 		default:
@@ -215,11 +213,8 @@ func (c *compiler) validateMemory(w *Workflow) {
 		}
 	}
 	for _, n := range w.Nodes {
-		switch nn := n.(type) {
-		case *AgentNode:
-			check("agent", nn.ID, nn.Backend, nn.Memory)
-		case *JudgeNode:
-			check("judge", nn.ID, nn.Backend, nn.Memory)
+		if nn, ok := n.(LLMNode); ok {
+			check(nn.NodeKind().String(), nn.NodeID(), nn.GetLLMFields().Backend, nn.GetMemory())
 		}
 	}
 }
@@ -327,11 +322,8 @@ func (c *compiler) validateCompaction(w *Workflow) {
 	}
 	check("workflow", w.Name, w.Compaction)
 	for _, n := range w.Nodes {
-		switch nn := n.(type) {
-		case *AgentNode:
-			check("agent", nn.ID, nn.Compaction)
-		case *JudgeNode:
-			check("judge", nn.ID, nn.Compaction)
+		if nn, ok := n.(LLMNode); ok {
+			check(nn.NodeKind().String(), nn.NodeID(), nn.GetCompaction())
 		}
 	}
 }
@@ -421,10 +413,8 @@ func (c *compiler) validateNodeMaxTokensVsBudget(w *Workflow) {
 	}
 	for _, n := range w.Nodes {
 		switch nd := n.(type) {
-		case *AgentNode:
-			checkLLM(nd.ID, nd.MaxTokens)
-		case *JudgeNode:
-			checkLLM(nd.ID, nd.MaxTokens)
+		case LLMNode:
+			checkLLM(nd.NodeID(), nd.GetLLMFields().MaxTokens)
 		case *RouterNode:
 			if nd.RouterMode == RouterLLM {
 				checkLLM(nd.ID, nd.MaxTokens)
@@ -446,10 +436,8 @@ func (c *compiler) validateInheritAtConvergence(w *Workflow) {
 		var awaitMode AwaitMode
 		var session SessionMode
 		switch n := node.(type) {
-		case *AgentNode:
-			awaitMode, session = n.AwaitMode, n.Session
-		case *JudgeNode:
-			awaitMode, session = n.AwaitMode, n.Session
+		case LLMNode:
+			awaitMode, session = n.GetAwaitMode(), n.GetSession()
 		case *HumanNode:
 			awaitMode = n.AwaitMode
 		case *ToolNode:
@@ -1153,10 +1141,9 @@ func (c *compiler) validateReasoningEffort(w *Workflow) {
 	for _, node := range w.Nodes {
 		var effort, model string
 		switch n := node.(type) {
-		case *AgentNode:
-			effort, model = n.ReasoningEffort, n.Model
-		case *JudgeNode:
-			effort, model = n.ReasoningEffort, n.Model
+		case LLMNode:
+			f := n.GetLLMFields()
+			effort, model = f.ReasoningEffort, f.Model
 		case *RouterNode:
 			effort, model = n.ReasoningEffort, n.Model
 		default:

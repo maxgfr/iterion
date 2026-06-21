@@ -24,18 +24,13 @@ func (c *compiler) validateCursorInvocations(w *Workflow) {
 	for _, n := range w.Nodes {
 		var inv *CursorInvocation
 		var kind, id string
-		switch v := n.(type) {
-		case *AgentNode:
-			inv = v.Cursors
-			kind = "agent"
-			id = v.ID
-		case *JudgeNode:
-			inv = v.Cursors
-			kind = "judge"
-			id = v.ID
-		default:
+		ln, ok := n.(LLMNode)
+		if !ok {
 			continue
 		}
+		inv = ln.GetCursors()
+		kind = ln.NodeKind().String()
+		id = ln.NodeID()
 		if inv == nil {
 			continue
 		}

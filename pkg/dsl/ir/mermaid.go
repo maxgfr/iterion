@@ -106,10 +106,9 @@ func detailedShape(node Node) string {
 	lines = append(lines, icon+" "+node.NodeID())
 
 	switch n := node.(type) {
-	case *AgentNode:
-		lines = appendLLMDetailedLines(lines, n.Model, n.InputSchema, n.OutputSchema, n.Publish, n.Session, n.Interaction)
-	case *JudgeNode:
-		lines = appendLLMDetailedLines(lines, n.Model, n.InputSchema, n.OutputSchema, n.Publish, n.Session, n.Interaction)
+	case LLMNode:
+		f, sf := n.GetLLMFields(), n.GetSchemaFields()
+		lines = appendLLMDetailedLines(lines, f.Model, sf.InputSchema, sf.OutputSchema, n.GetPublish(), n.GetSession(), n.GetInteractionFields().Interaction)
 	case *RouterNode:
 		lines = append(lines, "mode: "+n.RouterMode.String())
 	case *HumanNode:
@@ -264,10 +263,8 @@ func fullShape(node Node, w *Workflow) string {
 	lines = append(lines, icon+" "+node.NodeID())
 
 	switch n := node.(type) {
-	case *AgentNode:
-		lines = appendLLMFullLines(lines, w, n.LLMFields, n.SchemaFields, n.Publish, n.Session, n.Tools, n.ToolMaxSteps)
-	case *JudgeNode:
-		lines = appendLLMFullLines(lines, w, n.LLMFields, n.SchemaFields, n.Publish, n.Session, n.Tools, n.ToolMaxSteps)
+	case LLMNode:
+		lines = appendLLMFullLines(lines, w, *n.GetLLMFields(), *n.GetSchemaFields(), n.GetPublish(), n.GetSession(), n.GetTools(), n.GetToolMaxSteps())
 	case *RouterNode:
 		lines = append(lines, "mode: "+n.RouterMode.String())
 	case *HumanNode:

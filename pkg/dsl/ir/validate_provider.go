@@ -76,10 +76,9 @@ func (c *compiler) validateProviders(w *Workflow) {
 	}
 	for _, n := range w.Nodes {
 		switch nn := n.(type) {
-		case *AgentNode:
-			check("agent", nn.ID, nn.Backend, nn.Provider)
-		case *JudgeNode:
-			check("judge", nn.ID, nn.Backend, nn.Provider)
+		case LLMNode:
+			f := nn.GetLLMFields()
+			check(nn.NodeKind().String(), nn.NodeID(), f.Backend, f.Provider)
 		case *RouterNode:
 			if nn.RouterMode == RouterLLM {
 				check("router", nn.ID, nn.Backend, nn.Provider)

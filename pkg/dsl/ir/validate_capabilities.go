@@ -68,18 +68,12 @@ func (c *compiler) validateCapabilities(w *Workflow) {
 	}
 	sandboxActive := workflowSandboxRequiresHTTPBoard(w)
 	for _, n := range w.Nodes {
-		var caps []string
-		var kind string
-		switch v := n.(type) {
-		case *AgentNode:
-			caps = v.Capabilities
-			kind = "agent"
-		case *JudgeNode:
-			caps = v.Capabilities
-			kind = "judge"
-		default:
+		ln, ok := n.(LLMNode)
+		if !ok {
 			continue
 		}
+		caps := ln.GetCapabilities()
+		kind := ln.NodeKind().String()
 		for _, cap := range caps {
 			c.validateOneCapability(cap, n.NodeID(), kind)
 			if sandboxActive && isBoardCapability(cap) {

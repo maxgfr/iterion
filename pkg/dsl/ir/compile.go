@@ -689,7 +689,11 @@ func (c *compiler) compilePrompts() {
 // kind ("agent"/"judge") only shapes diagnostics. The remaining flat node
 // fields stay in each caller because AgentNode and JudgeNode are distinct
 // types (constructed with field literals across the test suite), so they
-// can't share an embedded carrier without breaking that construction API.
+// can't share an embedded *carrier* without breaking that construction API.
+// They DO share a getter *interface* (LLMNode in ir.go): adding read
+// methods leaves the struct layout and JSON encoding untouched, so every
+// field-read site iterates over both via `case LLMNode` instead of an
+// AgentNode/JudgeNode ladder.
 func (c *compiler) buildLLMNodeShared(kind, name string, d *ast.LLMDecl) (LLMFields, SchemaFields, InteractionFields, bool) {
 	if _, exists := c.nodes[name]; exists {
 		return LLMFields{}, SchemaFields{}, InteractionFields{}, false

@@ -293,18 +293,91 @@ type FailNode struct {
 func (n *FailNode) NodeKind() NodeKind { return NodeFail }
 
 // ---------------------------------------------------------------------------
+// LLMNode — shared accessor interface for the two full LLM node kinds
+// ---------------------------------------------------------------------------
+
+// LLMNode is satisfied by *AgentNode and *JudgeNode — the two node kinds
+// that carry the complete LLM field set (LLMFields, SchemaFields,
+// InteractionFields plus tools, capabilities, MCP, memory, compaction,
+// cursors, rtk). It lets the field accessors below and the validators in
+// validate*.go / mermaid.go iterate over both uniformly instead of
+// repeating a `case *AgentNode … case *JudgeNode …` ladder at every read
+// site.
+//
+// RouterNode embeds LLMFields too but deliberately does NOT satisfy
+// LLMNode (it has no Publish/Session/Memory/…); call sites that also
+// handle RouterLLM keep an explicit `case *RouterNode`. HumanNode keeps
+// its own explicit branches as well. Because the methods are declared on
+// *AgentNode / *JudgeNode (not on an embedded carrier), adding LLMNode
+// changes neither the struct layout nor the JSON encoding — the
+// field-literal construction used across the test suite keeps compiling.
+type LLMNode interface {
+	Node
+	GetLLMFields() *LLMFields
+	GetSchemaFields() *SchemaFields
+	GetInteractionFields() *InteractionFields
+	GetAwaitMode() AwaitMode
+	GetSession() SessionMode
+	GetPublish() string
+	GetTools() []string
+	GetToolMaxSteps() int
+	GetCapabilities() []string
+	GetActiveMCPServers() []string
+	GetCompaction() *Compaction
+	GetMemory() *Memory
+	GetCursors() *CursorInvocation
+	GetRTK() string
+}
+
+var (
+	_ LLMNode = (*AgentNode)(nil)
+	_ LLMNode = (*JudgeNode)(nil)
+)
+
+// LLMNode accessor methods on *AgentNode.
+func (n *AgentNode) GetLLMFields() *LLMFields                 { return &n.LLMFields }
+func (n *AgentNode) GetSchemaFields() *SchemaFields           { return &n.SchemaFields }
+func (n *AgentNode) GetInteractionFields() *InteractionFields { return &n.InteractionFields }
+func (n *AgentNode) GetAwaitMode() AwaitMode                  { return n.AwaitMode }
+func (n *AgentNode) GetSession() SessionMode                  { return n.Session }
+func (n *AgentNode) GetPublish() string                       { return n.Publish }
+func (n *AgentNode) GetTools() []string                       { return n.Tools }
+func (n *AgentNode) GetToolMaxSteps() int                     { return n.ToolMaxSteps }
+func (n *AgentNode) GetCapabilities() []string                { return n.Capabilities }
+func (n *AgentNode) GetActiveMCPServers() []string            { return n.ActiveMCPServers }
+func (n *AgentNode) GetCompaction() *Compaction               { return n.Compaction }
+func (n *AgentNode) GetMemory() *Memory                       { return n.Memory }
+func (n *AgentNode) GetCursors() *CursorInvocation            { return n.Cursors }
+func (n *AgentNode) GetRTK() string                           { return n.RTK }
+
+// LLMNode accessor methods on *JudgeNode.
+func (n *JudgeNode) GetLLMFields() *LLMFields                 { return &n.LLMFields }
+func (n *JudgeNode) GetSchemaFields() *SchemaFields           { return &n.SchemaFields }
+func (n *JudgeNode) GetInteractionFields() *InteractionFields { return &n.InteractionFields }
+func (n *JudgeNode) GetAwaitMode() AwaitMode                  { return n.AwaitMode }
+func (n *JudgeNode) GetSession() SessionMode                  { return n.Session }
+func (n *JudgeNode) GetPublish() string                       { return n.Publish }
+func (n *JudgeNode) GetTools() []string                       { return n.Tools }
+func (n *JudgeNode) GetToolMaxSteps() int                     { return n.ToolMaxSteps }
+func (n *JudgeNode) GetCapabilities() []string                { return n.Capabilities }
+func (n *JudgeNode) GetActiveMCPServers() []string            { return n.ActiveMCPServers }
+func (n *JudgeNode) GetCompaction() *Compaction               { return n.Compaction }
+func (n *JudgeNode) GetMemory() *Memory                       { return n.Memory }
+func (n *JudgeNode) GetCursors() *CursorInvocation            { return n.Cursors }
+func (n *JudgeNode) GetRTK() string                           { return n.RTK }
+
+// ---------------------------------------------------------------------------
 // Node field accessors — exported helpers that extract fields from concrete
 // node types via the Node interface. Consumers should use these instead of
-// writing their own type switches.
+// writing their own type switches. The Agent/Judge arms collapse to a
+// single `case LLMNode` branch.
 // ---------------------------------------------------------------------------
 
 // NodeAwaitMode returns the AwaitMode for nodes that support it, or AwaitNone.
 func NodeAwaitMode(n Node) AwaitMode {
 	switch n := n.(type) {
-	case *AgentNode:
-		return n.AwaitMode
-	case *JudgeNode:
-		return n.AwaitMode
+	case LLMNode:
+		return n.GetAwaitMode()
 	case *HumanNode:
 		return n.AwaitMode
 	case *ToolNode:
@@ -322,10 +395,8 @@ func NodeAwaitMode(n Node) AwaitMode {
 // NodeOutputSchema returns the OutputSchema for nodes that support it, or "".
 func NodeOutputSchema(n Node) string {
 	switch n := n.(type) {
-	case *AgentNode:
-		return n.OutputSchema
-	case *JudgeNode:
-		return n.OutputSchema
+	case LLMNode:
+		return n.GetSchemaFields().OutputSchema
 	case *HumanNode:
 		return n.OutputSchema
 	case *ToolNode:
@@ -339,10 +410,8 @@ func NodeOutputSchema(n Node) string {
 // NodeInputSchema returns the InputSchema for nodes that support it, or "".
 func NodeInputSchema(n Node) string {
 	switch n := n.(type) {
-	case *AgentNode:
-		return n.InputSchema
-	case *JudgeNode:
-		return n.InputSchema
+	case LLMNode:
+		return n.GetSchemaFields().InputSchema
 	case *HumanNode:
 		return n.InputSchema
 	case *ToolNode:
@@ -356,10 +425,8 @@ func NodeInputSchema(n Node) string {
 // NodePublish returns the Publish field for nodes that support it, or "".
 func NodePublish(n Node) string {
 	switch n := n.(type) {
-	case *AgentNode:
-		return n.Publish
-	case *JudgeNode:
-		return n.Publish
+	case LLMNode:
+		return n.GetPublish()
 	case *HumanNode:
 		return n.Publish
 	case *ToolNode:
@@ -373,10 +440,8 @@ func NodePublish(n Node) string {
 // NodeInteraction returns the Interaction field for nodes that support it, or InteractionNone.
 func NodeInteraction(n Node) InteractionMode {
 	switch n := n.(type) {
-	case *AgentNode:
-		return n.Interaction
-	case *JudgeNode:
-		return n.Interaction
+	case LLMNode:
+		return n.GetInteractionFields().Interaction
 	case *HumanNode:
 		return n.Interaction
 	}
@@ -385,11 +450,8 @@ func NodeInteraction(n Node) InteractionMode {
 
 // NodeActiveMCPServers returns the ActiveMCPServers list for nodes that support it, or nil.
 func NodeActiveMCPServers(n Node) []string {
-	switch n := n.(type) {
-	case *AgentNode:
-		return n.ActiveMCPServers
-	case *JudgeNode:
-		return n.ActiveMCPServers
+	if ln, ok := n.(LLMNode); ok {
+		return ln.GetActiveMCPServers()
 	}
 	return nil
 }
@@ -408,15 +470,10 @@ func NodePromptRefs(node Node) []string {
 	var refs []string
 	// Extract LLMFields prompts if applicable.
 	switch n := node.(type) {
-	case *AgentNode:
-		refs = appendLLMPromptRefs(refs, &n.LLMFields)
-		if n.InteractionPrompt != "" {
-			refs = append(refs, n.InteractionPrompt)
-		}
-	case *JudgeNode:
-		refs = appendLLMPromptRefs(refs, &n.LLMFields)
-		if n.InteractionPrompt != "" {
-			refs = append(refs, n.InteractionPrompt)
+	case LLMNode:
+		refs = appendLLMPromptRefs(refs, n.GetLLMFields())
+		if p := n.GetInteractionFields().InteractionPrompt; p != "" {
+			refs = append(refs, p)
 		}
 	case *RouterNode:
 		refs = appendLLMPromptRefs(refs, &n.LLMFields)
