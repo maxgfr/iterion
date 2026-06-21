@@ -9,6 +9,7 @@ import { apiURL } from "@/api/runs";
 import { IconButton, Input, Popover } from "@/components/ui";
 import { desktop, isDesktop } from "@/lib/desktopBridge";
 import { formatBytes } from "@/lib/format";
+import { downloadBlob } from "@/lib/download";
 import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
 import { selectInFlightTools, useRunStore } from "@/store/run";
 import { useTabsStore } from "@/store/tabs";
@@ -442,14 +443,7 @@ export default function LogLinesView({
                     return;
                   }
                   const blob = await res.blob();
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = `${runId}.log`;
-                  document.body.appendChild(a);
-                  a.click();
-                  a.remove();
-                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                  downloadBlob(blob, `${runId}.log`);
                 } catch (err) {
                   console.error("[LogLinesView] download log failed:", err);
                 }

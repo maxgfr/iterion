@@ -1,6 +1,7 @@
 // Run-console HTTP client. Mirrors the Go service in pkg/runview/.
 
 import { desktop, isDesktop } from "@/lib/desktopBridge";
+import { downloadBlob } from "@/lib/download";
 import { apiRequest, extractErrorMessage } from "./client";
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
@@ -591,20 +592,7 @@ export async function downloadArtifactFile(
     return { cancelled: false, localPath, contentType };
   }
 
-  const blobURL = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = blobURL;
-  a.download = basename;
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Defer revoke so the browser has time to start the download.
-  // 0ms wasn't enough on WebKit (Safari/Wails) — the a.click() handoff
-  // sometimes hadn't kicked the download by the next microtask, and
-  // the revoke nuked the blob, producing "blob URL not found"
-  // download failures. 5s lines up with LogLinesView's pattern.
-  setTimeout(() => URL.revokeObjectURL(blobURL), 5000);
+  downloadBlob(blob, basename, { revokeMs: 5000 });
   return { cancelled: false, contentType };
 }
 

@@ -1,4 +1,5 @@
 import { errorMessage } from "@/lib/errorHints";
+import { downloadBlob } from "@/lib/download";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { ClockIcon, FileTextIcon, OpenInNewWindowIcon, Pencil1Icon } from "@radix-ui/react-icons";
@@ -127,16 +128,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
         2,
       );
       const blob = new Blob([payload], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `run-${run.id}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      // Defer revocation so Safari has a chance to start the download
-      // (it lazily resolves the blob URL).
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      downloadBlob(blob, `run-${run.id}.json`);
     } catch (e) {
       setError(errorMessage(e));
     }

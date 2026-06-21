@@ -6,6 +6,7 @@ import { useBackendDetectStore } from "@/store/backendDetect";
 import { createEmptyDocument } from "@/lib/defaults";
 import * as api from "@/api/client";
 import { openExampleIntoStore } from "@/lib/openExample";
+import { downloadBlob } from "@/lib/download";
 import ConfirmDialog from "../shared/ConfirmDialog";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Spinner } from "@/components/ui/Spinner";
@@ -278,15 +279,8 @@ export default function Toolbar() {
     try {
       const source = await api.unparse(document);
       const blob = new Blob([source], { type: "text/plain" });
-      const url = URL.createObjectURL(blob);
-      const a = window.document.createElement("a");
-      a.href = url;
       const name = document.workflows?.[0]?.name || "workflow";
-      a.download = `${name}.bot`;
-      a.click();
-      // Defer revoke: revoking synchronously can cancel the download in
-      // Firefox/Safari before the browser reads the blob (matches LogLinesView).
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      downloadBlob(blob, `${name}.bot`);
     } catch (err) {
       console.error("Download failed:", err);
     }
