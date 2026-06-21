@@ -3,8 +3,13 @@ import * as RD from "@radix-ui/react-dialog";
 import { useEffect, useState } from "react";
 
 import * as dispatcher from "@/api/dispatcher";
+import { Button } from "@/components/ui/Button";
 import { Checkbox } from "@/components/ui/Checkbox";
+import { IconButton } from "@/components/ui/IconButton";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
+import { Spinner } from "@/components/ui/Spinner";
 
 interface Props {
   open: boolean;
@@ -59,28 +64,32 @@ export default function SettingsDrawer({ open, onClose, onSaved }: Props) {
   return (
     <RD.Root open={open} onOpenChange={(o) => !o && onClose()}>
       <RD.Portal>
-        <RD.Overlay className="fixed inset-0 z-[var(--z-overlay)] bg-black/40 animate-fade-in" />
+        <RD.Overlay className="fixed inset-0 z-[var(--z-overlay)] bg-scrim-popover animate-fade-in" />
         <RD.Content
           aria-describedby={undefined}
           className="fixed inset-y-0 right-0 z-[var(--z-modal)] flex w-full max-w-3xl flex-col bg-surface-0 text-fg-default shadow-[var(--shadow-lg)]"
         >
           <header className="flex items-center gap-3 border-b border-border-default bg-surface-1 px-4 py-2.5">
             <RD.Title className="text-sm font-semibold">Dispatcher settings</RD.Title>
-            {loading && <span className="text-xs text-fg-muted">loading…</span>}
+            {loading && (
+              <span className="inline-flex items-center gap-1.5 text-xs text-fg-muted" aria-live="polite">
+                <Spinner size="sm" />
+                <span>loading…</span>
+              </span>
+            )}
             <div className="ml-auto flex items-center gap-2">
-              <button
-                className="rounded border border-border-default px-2 py-1 text-xs hover:bg-surface-2"
-                onClick={onClose}
-              >
+              <Button variant="secondary" size="sm" onClick={onClose}>
                 Cancel
-              </button>
-              <button
-                className="rounded bg-accent px-2 py-1 text-xs text-fg-onAccent hover:opacity-90 disabled:opacity-50"
-                disabled={!cfg || saving}
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={!cfg}
+                loading={saving}
                 onClick={() => void onSave()}
               >
-                {saving ? "Saving…" : "Save"}
-              </button>
+                Save
+              </Button>
             </div>
           </header>
 
@@ -128,8 +137,8 @@ function Form({ cfg, setCfg }: FormProps) {
     <div className="space-y-6">
       <Section title="General">
         <Field label="Name" hint="Display label in logs and dashboards">
-          <input
-            className="input"
+          <Input
+            size="sm"
             value={cfg.name ?? ""}
             onChange={(e) => update("name", e.target.value)}
             placeholder="my-dispatcher"
@@ -139,8 +148,8 @@ function Form({ cfg, setCfg }: FormProps) {
           label="Workflow path"
           hint=".bot, .botz, or unpacked-bundle dir. Path is resolved relative to the project root."
         >
-          <input
-            className="input"
+          <Input
+            size="sm"
             value={cfg.workflow}
             onChange={(e) => update("workflow", e.target.value)}
             placeholder="./bots/feature-dev/main.bot"
@@ -150,15 +159,15 @@ function Form({ cfg, setCfg }: FormProps) {
 
       <Section title="Tracker">
         <Field label="Kind">
-          <select
-            className="input"
+          <Select
+            size="sm"
             value={cfg.tracker.kind}
             onChange={(e) => update("tracker", { ...cfg.tracker, kind: e.target.value as dispatcher.TrackerKind })}
           >
             <option value="native">native (local kanban)</option>
             <option value="github">github</option>
             <option value="forgejo">forgejo / gitea</option>
-          </select>
+          </Select>
         </Field>
         {cfg.tracker.kind === "github" && (
           <GitHubTrackerFields
@@ -193,8 +202,8 @@ function Form({ cfg, setCfg }: FormProps) {
           label="Interval (ms)"
           hint="How often the dispatcher checks the tracker. Default 30 000 ms (30 s)."
         >
-          <input
-            className="input"
+          <Input
+            size="sm"
             type="number"
             min={1000}
             value={cfg.polling?.interval_ms ?? 30000}
@@ -205,8 +214,8 @@ function Form({ cfg, setCfg }: FormProps) {
 
       <Section title="Concurrency & retry">
         <Field label="Max concurrent dispatches">
-          <input
-            className="input"
+          <Input
+            size="sm"
             type="number"
             min={1}
             value={cfg.agent?.max_concurrent ?? 2}
@@ -216,8 +225,8 @@ function Form({ cfg, setCfg }: FormProps) {
           />
         </Field>
         <Field label="Max retry backoff (ms)" hint="Exponential cap. Default 300000 (5min)">
-          <input
-            className="input"
+          <Input
+            size="sm"
             type="number"
             min={1000}
             value={cfg.agent?.max_retry_backoff_ms ?? 300000}
@@ -233,16 +242,16 @@ function Form({ cfg, setCfg }: FormProps) {
           label="Root"
           hint="Per-issue workspaces live here. Empty = <store-dir>/dispatcher/workspaces."
         >
-          <input
-            className="input"
+          <Input
+            size="sm"
             value={cfg.workspace?.root ?? ""}
             onChange={(e) => update("workspace", { ...(cfg.workspace ?? {}), root: e.target.value })}
             placeholder="~/.iterion/dispatcher-workspaces"
           />
         </Field>
         <Field label="Persistence">
-          <select
-            className="input"
+          <Select
+            size="sm"
             value={cfg.workspace?.persist ?? ""}
             onChange={(e) =>
               update("workspace", {
@@ -254,7 +263,7 @@ function Form({ cfg, setCfg }: FormProps) {
             <option value="">keep (manual cleanup)</option>
             <option value="cleanup_on_done">cleanup on successful run</option>
             <option value="cleanup_on_terminal">cleanup on terminal state</option>
-          </select>
+          </Select>
         </Field>
       </Section>
 
@@ -291,8 +300,8 @@ function Form({ cfg, setCfg }: FormProps) {
           label="Timeout (ms)"
           hint="If a run is silent for this long, the dispatcher cancels and retries it. 0 disables stall detection."
         >
-          <input
-            className="input"
+          <Input
+            size="sm"
             type="number"
             min={0}
             value={cfg.stall?.timeout_ms ?? 600000}
@@ -345,13 +354,13 @@ function GitHubTrackerFields({
   return (
     <>
       <Field label="Repo" hint="owner/repo">
-        <input className="input" value={cfg.repo} onChange={(e) => set({ ...cfg, repo: e.target.value })} placeholder="SocialGouv/iterion" />
+        <Input size="sm" value={cfg.repo} onChange={(e) => set({ ...cfg, repo: e.target.value })} placeholder="SocialGouv/iterion" />
       </Field>
       <Field label="Token" hint="Env var name (e.g. $GITHUB_TOKEN) or literal. Leave blank to use `gh auth token`.">
-        <input className="input" value={cfg.token ?? ""} onChange={(e) => set({ ...cfg, token: e.target.value })} placeholder="$GITHUB_TOKEN" />
+        <Input size="sm" value={cfg.token ?? ""} onChange={(e) => set({ ...cfg, token: e.target.value })} placeholder="$GITHUB_TOKEN" />
       </Field>
       <Field label="Claimed label" hint="Label added to claimed issues. Default 'iterion-claimed'.">
-        <input className="input" value={cfg.claimed_label ?? ""} onChange={(e) => set({ ...cfg, claimed_label: e.target.value })} placeholder="iterion-claimed" />
+        <Input size="sm" value={cfg.claimed_label ?? ""} onChange={(e) => set({ ...cfg, claimed_label: e.target.value })} placeholder="iterion-claimed" />
       </Field>
       <LabelListField label="Include labels (AND filter)" value={cfg.include_labels ?? []} onChange={(v) => set({ ...cfg, include_labels: v })} />
       <LabelListField label="Exclude labels" value={cfg.exclude_labels ?? []} onChange={(v) => set({ ...cfg, exclude_labels: v })} />
@@ -370,16 +379,16 @@ function ForgejoTrackerFields({
   return (
     <>
       <Field label="Host" hint="Base URL, e.g. https://codeberg.org">
-        <input className="input" value={cfg.host} onChange={(e) => set({ ...cfg, host: e.target.value })} placeholder="https://codeberg.org" />
+        <Input size="sm" value={cfg.host} onChange={(e) => set({ ...cfg, host: e.target.value })} placeholder="https://codeberg.org" />
       </Field>
       <Field label="Repo" hint="owner/repo">
-        <input className="input" value={cfg.repo} onChange={(e) => set({ ...cfg, repo: e.target.value })} placeholder="forgejo/forgejo" />
+        <Input size="sm" value={cfg.repo} onChange={(e) => set({ ...cfg, repo: e.target.value })} placeholder="forgejo/forgejo" />
       </Field>
       <Field label="Token">
-        <input className="input" value={cfg.token ?? ""} onChange={(e) => set({ ...cfg, token: e.target.value })} placeholder="$FORGEJO_TOKEN" />
+        <Input size="sm" value={cfg.token ?? ""} onChange={(e) => set({ ...cfg, token: e.target.value })} placeholder="$FORGEJO_TOKEN" />
       </Field>
       <Field label="Claimed label">
-        <input className="input" value={cfg.claimed_label ?? ""} onChange={(e) => set({ ...cfg, claimed_label: e.target.value })} placeholder="iterion-claimed" />
+        <Input size="sm" value={cfg.claimed_label ?? ""} onChange={(e) => set({ ...cfg, claimed_label: e.target.value })} placeholder="iterion-claimed" />
       </Field>
       <LabelListField label="Include labels" value={cfg.include_labels ?? []} onChange={(v) => set({ ...cfg, include_labels: v })} />
       <LabelListField label="Exclude labels" value={cfg.exclude_labels ?? []} onChange={(v) => set({ ...cfg, exclude_labels: v })} />
@@ -399,8 +408,8 @@ function LabelListField({
 }) {
   return (
     <Field label={label} hint="Comma-separated">
-      <input
-        className="input"
+      <Input
+        size="sm"
         value={value.join(", ")}
         onChange={(e) =>
           onChange(
@@ -443,14 +452,14 @@ function StateMappingField({
       <span className="text-xs font-medium">State mapping (workflow state → label selector)</span>
       {entries.map(([state, sel]) => (
         <div key={state} className="space-y-1 rounded border border-border-default bg-surface-2 p-2">
-          <input
-            className="input"
+          <Input
+            size="sm"
             value={state}
             onChange={(e) => setKey(state, e.target.value)}
             placeholder="ready"
           />
-          <input
-            className="input"
+          <Input
+            size="sm"
             placeholder="includes (comma-separated)"
             value={(sel.labels_include ?? []).join(", ")}
             onChange={(e) =>
@@ -460,8 +469,8 @@ function StateMappingField({
               })
             }
           />
-          <input
-            className="input"
+          <Input
+            size="sm"
             placeholder="excludes (comma-separated)"
             value={(sel.labels_exclude ?? []).join(", ")}
             onChange={(e) =>
@@ -471,24 +480,25 @@ function StateMappingField({
               })
             }
           />
-          <button
-            type="button"
-            className="text-xs text-danger-fg hover:underline"
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-danger hover:text-danger"
             onClick={() => remove(state)}
           >
             Remove
-          </button>
+          </Button>
         </div>
       ))}
-      <button
-        type="button"
-        className="text-xs text-fg-muted hover:underline"
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() =>
           onChange({ ...value, "": { labels_include: [], labels_exclude: [] } })
         }
       >
         + Add state mapping
-      </button>
+      </Button>
     </div>
   );
 }
@@ -520,8 +530,9 @@ function KVTable({
     <div className="space-y-2">
       {entries.map(([k, v]) => (
         <div key={k} className="flex gap-2">
-          <input
-            className="input w-32"
+          <Input
+            size="sm"
+            className="w-32"
             value={k}
             placeholder={keyPlaceholder}
             onChange={(e) => setKey(k, e.target.value)}
@@ -533,23 +544,23 @@ function KVTable({
             placeholder={valuePlaceholder}
             onChange={(e) => setVal(k, e.target.value)}
           />
-          <button
-            type="button"
-            aria-label={k ? `Remove ${k}` : "Remove row"}
-            className="text-xs text-danger-fg hover:underline"
+          <IconButton
+            size="sm"
+            variant="danger"
+            label={k ? `Remove ${k}` : "Remove row"}
             onClick={() => remove(k)}
           >
             ×
-          </button>
+          </IconButton>
         </div>
       ))}
-      <button
-        type="button"
-        className="text-xs text-fg-muted hover:underline"
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => onChange({ ...rows, "": "" })}
       >
         + Add var
-      </button>
+      </Button>
     </div>
   );
 }
@@ -584,14 +595,16 @@ function HookFields({
             onChange={(e) => onChange({ ...value, script: e.target.value, path: undefined })}
           />
           <div className="flex gap-2">
-            <input
-              className="input flex-1 text-xs"
+            <Input
+              size="sm"
+              className="flex-1"
               placeholder="… or path to a script"
               value={value.path ?? ""}
               onChange={(e) => onChange({ ...value, path: e.target.value, script: undefined })}
             />
-            <input
-              className="input w-32 text-xs"
+            <Input
+              size="sm"
+              className="w-32"
               type="number"
               min={1000}
               value={value.timeout_ms ?? 60000}

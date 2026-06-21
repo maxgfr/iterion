@@ -1,7 +1,10 @@
 import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/Button";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import { useConfirm } from "@/hooks/useConfirm";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useAuth } from "@/auth/AuthContext";
@@ -124,12 +127,13 @@ export default function ApiKeysPanel({ team }: Props) {
           {team ? `${team.name} — Team API keys` : "My API keys"}
         </h2>
         {canManage && (
-          <button
+          <Button
+            variant="primary"
+            size="sm"
             onClick={() => setShowAdd((v) => !v)}
-            className="bg-accent text-fg-onAccent rounded px-3 py-1.5 text-sm"
           >
             {showAdd ? "Cancel" : "Add key"}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -139,8 +143,8 @@ export default function ApiKeysPanel({ team }: Props) {
           className="bg-surface-1 border border-border-subtle rounded p-4 space-y-3"
         >
           <div className="grid grid-cols-2 gap-3">
-            <select
-              className="bg-surface-0 border border-border-subtle rounded px-3 py-2"
+            <Select
+              size="md"
               value={draft.provider}
               onChange={(e) => setDraft({ ...draft, provider: e.target.value as Provider })}
             >
@@ -149,18 +153,19 @@ export default function ApiKeysPanel({ team }: Props) {
                   {p}
                 </option>
               ))}
-            </select>
-            <input
-              className="bg-surface-0 border border-border-subtle rounded px-3 py-2"
+            </Select>
+            <Input
+              size="md"
               placeholder="Name (e.g. prod-anthropic)"
               value={draft.name}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               required
             />
           </div>
-          <input
+          <Input
+            size="md"
             type="password"
-            className="w-full bg-surface-0 border border-border-subtle rounded px-3 py-2 font-mono"
+            className="font-mono"
             placeholder="API key (sk-ant-… / sk-… / etc.)"
             value={draft.secret}
             onChange={(e) => setDraft({ ...draft, secret: e.target.value })}
@@ -178,13 +183,14 @@ export default function ApiKeysPanel({ team }: Props) {
             The secret is sealed at rest with the deployment master key and never returned after
             this submission. Display surfaces show only the last four characters and a fingerprint.
           </div>
-          <button
+          <Button
+            variant="primary"
+            size="sm"
             type="submit"
-            disabled={adding}
-            className="bg-accent text-fg-onAccent rounded px-3 py-1.5 text-sm disabled:opacity-50"
+            loading={adding}
           >
             {adding ? "Saving…" : "Save key"}
-          </button>
+          </Button>
         </form>
       )}
 
@@ -197,7 +203,7 @@ export default function ApiKeysPanel({ team }: Props) {
       {loading ? (
         <EmptyState message="Loading…" />
       ) : keys.length === 0 ? (
-        <div className="text-fg-muted text-sm">No keys yet.</div>
+        <EmptyState message="No keys yet." />
       ) : (
         <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="text-xs uppercase tracking-wider text-fg-muted text-left">
@@ -231,12 +237,14 @@ export default function ApiKeysPanel({ team }: Props) {
                 </td>
                 <td className="px-2 py-2 text-right">
                   {canManage && (
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={() => remove(k)}
-                      className="text-danger hover:underline"
+                      className="text-danger hover:text-danger"
                     >
                       Delete
-                    </button>
+                    </Button>
                   )}
                 </td>
               </tr>
