@@ -1,11 +1,13 @@
 import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useState } from "react";
+import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 
 import { useAuth } from "@/auth/AuthContext";
 import { type UserStatus, type UserView } from "@/api/auth";
 import { FeatureUnavailableError, listAdminUsers, updateAdminUser } from "@/api/admin";
 
+import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import ConfirmDialog from "@/components/shared/ConfirmDialog";
@@ -213,10 +215,11 @@ export default function UsersAdminPage() {
           <Button
             size="sm"
             variant="ghost"
+            leadingIcon={<ChevronLeftIcon />}
             disabled={busy || offset === 0}
             onClick={() => void refresh(Math.max(0, offset - PAGE))}
           >
-            ← Previous
+            Previous
           </Button>
           <div className="text-xs text-fg-muted">
             Page offset {offset}
@@ -224,10 +227,11 @@ export default function UsersAdminPage() {
           <Button
             size="sm"
             variant="ghost"
+            trailingIcon={<ChevronRightIcon />}
             disabled={busy || users.length < PAGE}
             onClick={() => void refresh(offset + PAGE)}
           >
-            Next →
+            Next
           </Button>
         </div>
       </div>
@@ -250,12 +254,12 @@ export default function UsersAdminPage() {
 }
 
 function StatusPill({ status }: { status: UserStatus }) {
-  const variant: Record<UserStatus, string> = {
-    active: "text-success-fg",
-    disabled: "text-danger",
-    pending_password_change: "text-warning-fg",
+  const variant: Record<UserStatus, BadgeVariant> = {
+    active: "success",
+    disabled: "danger",
+    pending_password_change: "warning",
   };
-  return <span className={`text-xs ${variant[status] ?? ""}`}>{status}</span>;
+  return <Badge variant={variant[status] ?? "neutral"}>{status}</Badge>;
 }
 
 function confirmTitle(a?: string): string {

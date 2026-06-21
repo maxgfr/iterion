@@ -1,5 +1,6 @@
 import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
+import { Badge } from "@/components/ui/Badge";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
@@ -146,13 +147,13 @@ export default function OAuthConnections() {
                   </div>
                   <div className="text-sm">
                     {conn ? (
-                      <span className={expiring ? "text-warning-fg" : "text-success-fg"}>
+                      <Badge variant={expiring ? "warning" : "success"}>
                         Connected
                         {conn.access_token_expires_at &&
                           ` · expires ${new Date(conn.access_token_expires_at).toLocaleString()}`}
-                      </span>
+                      </Badge>
                     ) : (
-                      <span className="text-fg-muted">Not connected</span>
+                      <Badge variant="neutral">Not connected</Badge>
                     )}
                   </div>
                 </div>

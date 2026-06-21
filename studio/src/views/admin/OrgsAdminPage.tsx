@@ -13,6 +13,7 @@ import {
 } from "@/api/orgs";
 import { FeatureUnavailableError, getAdminOrgUsage, type OrgUsage, fmtBytes, fmtUSD, pct } from "@/api/usage";
 
+import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Input } from "@/components/ui/Input";
@@ -93,28 +94,36 @@ export default function OrgsAdminPage() {
 
         <section className="bg-surface-1 border border-border-subtle rounded p-4 space-y-3">
           <h3 className="font-medium">Create an organization</h3>
-          <form onSubmit={create} className="flex flex-wrap gap-2">
-            <input
-              className="flex-1 min-w-[160px] bg-surface-0 border border-border-subtle rounded px-3 py-2"
-              placeholder="Org name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-            <input
-              type="email"
-              className="flex-1 min-w-[200px] bg-surface-0 border border-border-subtle rounded px-3 py-2"
-              placeholder="owner email (optional)"
-              value={ownerEmail}
-              onChange={(e) => setOwnerEmail(e.target.value)}
-            />
-            <button
-              type="submit"
-              disabled={busy}
-              className="bg-accent text-fg-onAccent rounded px-3 py-2 text-sm disabled:opacity-50"
-            >
+          <form onSubmit={create} className="flex flex-wrap gap-2 items-start">
+            <div className="flex-1 min-w-[160px]">
+              <label htmlFor="create-org-name" className="sr-only">
+                Org name
+              </label>
+              <Input
+                size="md"
+                id="create-org-name"
+                placeholder="Org name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+              />
+            </div>
+            <div className="flex-1 min-w-[200px]">
+              <label htmlFor="create-org-owner" className="sr-only">
+                Owner email
+              </label>
+              <Input
+                size="md"
+                type="email"
+                id="create-org-owner"
+                placeholder="owner email (optional)"
+                value={ownerEmail}
+                onChange={(e) => setOwnerEmail(e.target.value)}
+              />
+            </div>
+            <Button variant="primary" type="submit" loading={busy}>
               Create
-            </button>
+            </Button>
           </form>
         </section>
 
@@ -130,38 +139,45 @@ export default function OrgsAdminPage() {
               </tr>
             </thead>
             <tbody>
-              {orgs.map((o) => (
-                <tr
-                  key={o.id}
-                  className="border-b border-border-subtle last:border-0 cursor-pointer hover:bg-surface-2"
-                  onClick={() => setActive(o)}
-                >
-                  <td className="px-3 py-2">
-                    {o.name}
-                    {o.personal && <span className="ml-2 text-xs text-fg-muted">personal</span>}
-                  </td>
-                  <td className="px-3 py-2 text-fg-muted">{o.slug}</td>
-                  <td className="px-3 py-2">
-                    <span
-                      className={
-                        o.status === "suspended"
-                          ? "text-danger"
-                          : o.status === "read_only"
-                            ? "text-fg-muted"
-                            : "text-success-fg"
+              {orgs.map((o) => {
+                const statusVariant: BadgeVariant =
+                  o.status === "suspended"
+                    ? "danger"
+                    : o.status === "read_only"
+                      ? "neutral"
+                      : "success";
+                return (
+                  <tr
+                    key={o.id}
+                    className="border-b border-border-subtle last:border-0 cursor-pointer hover:bg-surface-2"
+                    onClick={() => setActive(o)}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`Open ${o.name} (${o.status})`}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setActive(o);
                       }
-                    >
-                      {o.status}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-fg-muted">{fmtQuotaGiB(o.memory_quota_bytes)}</td>
-                  <td className="px-3 py-2 text-right">
-                    <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setActive(o); }}>
-                      Open
-                    </Button>
-                  </td>
-                </tr>
-              ))}
+                    }}
+                  >
+                    <td className="px-3 py-2">
+                      {o.name}
+                      {o.personal && <span className="ml-2 text-xs text-fg-muted">personal</span>}
+                    </td>
+                    <td className="px-3 py-2 text-fg-muted">{o.slug}</td>
+                    <td className="px-3 py-2">
+                      <Badge variant={statusVariant}>{o.status}</Badge>
+                    </td>
+                    <td className="px-3 py-2 text-fg-muted">{fmtQuotaGiB(o.memory_quota_bytes)}</td>
+                    <td className="px-3 py-2 text-right">
+                      <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setActive(o); }}>
+                        Open
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
               {orgs.length === 0 && (
                 <tr>
                   <td className="px-3 py-6 text-center text-fg-muted" colSpan={5}>
@@ -414,7 +430,14 @@ function Stat({
       <div className="text-fg-muted">{title}</div>
       <div className="font-medium">{value}</div>
       {progress != null && (
-        <div className="mt-1 h-1 bg-surface-2 rounded overflow-hidden">
+        <div
+          className="mt-1 h-1 bg-surface-2 rounded overflow-hidden"
+          role="progressbar"
+          aria-valuenow={Math.round(progress)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={`${title} usage`}
+        >
           <div
             className={`h-full ${progress > 90 ? "bg-danger" : progress > 70 ? "bg-warning" : "bg-accent"}`}
             style={{ width: `${progress}%` }}

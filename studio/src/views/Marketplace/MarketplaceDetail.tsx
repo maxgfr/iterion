@@ -43,7 +43,7 @@ export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Pro
   }, [onClose]);
   return (
     <div
-      className="fixed inset-0 z-[var(--z-modal)] flex justify-end bg-black/30"
+      className="fixed inset-0 z-[var(--z-modal)] flex justify-end bg-scrim-popover"
       onClick={onClose}
     >
       <aside
@@ -52,7 +52,7 @@ export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Pro
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="flex h-full w-full max-w-xl flex-col bg-surface-1 shadow-lg outline-none"
+        className="flex h-full w-full max-w-xl flex-col bg-surface-1 shadow-[var(--shadow-lg)] outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-start justify-between gap-3 border-b border-border-default px-4 py-3">
