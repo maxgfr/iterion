@@ -69,6 +69,28 @@ describe("source discipline", () => {
     expect(hits).toHaveLength(0);
   });
 
+  it("has no legacy color + \"NN\" hex-alpha concat — use softColor(token, pct)", () => {
+    // Sibling of the `${token}NN` guard above, for the concat form:
+    // `color + "44"`. Same silent-failure mode — when `color` is a
+    // var(--color-*) string, `var(--x)44` is invalid CSS and the
+    // background/border renders transparent. softColor() (color-mix) is
+    // the correct replacement. The regex anchors on `+` followed by a
+    // quoted 2-hex-digit literal so it doesn't match incidental string
+    // concatenations like `"foo" + "0a"` in unrelated code. lib/constants.ts
+    // is the documented home for softColor and any related legacy commentary,
+    // so it is allow-listed (matching the sibling guard).
+    const hits = scan(
+      /\+\s*["'\x60][0-9a-fA-F]{2}["'\x60]/,
+      (path) => path.endsWith("/lib/constants.ts"),
+    );
+    if (hits.length) {
+      throw new Error(
+        `legacy color + "NN" hex-alpha concat is banned — use softColor(token, pct):\n${hits.join("\n")}`,
+      );
+    }
+    expect(hits).toHaveLength(0);
+  });
+
   it("uses the Checkbox / Radio primitives, not raw <input type=checkbox|radio>", () => {
     // ui/Checkbox + ui/Radio own the only native checkbox/radio inputs (token
     // border, brand-accent fill, free keyboard/SR semantics). `[^>]*` spans
