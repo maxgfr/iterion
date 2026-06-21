@@ -1,4 +1,5 @@
-import { type KeyboardEvent, useState } from "react";
+import { useState } from "react";
+import { clickableRowProps } from "@/lib/a11y";
 import { useDocumentStore } from "@/store/document";
 import { useSelectionStore } from "@/store/selection";
 import { useUIStore } from "@/store/ui";
@@ -178,21 +179,11 @@ function DiagnosticList({
             : `node ${d.nodeId}`
           : null;
         const ariaLabel = `${codeLabel}: ${titleText}${attributionText ? ` (${attributionText})` : ""}`;
-        const handleKeyDown = (e: KeyboardEvent<HTMLLIElement>) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onClick(d);
-          }
-        };
         return (
           <li
             key={stableKey || i}
-            tabIndex={0}
-            role="button"
-            aria-label={ariaLabel}
+            {...clickableRowProps(() => onClick(d), ariaLabel)}
             className={`flex items-start gap-2 cursor-pointer hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded px-1 -mx-1 py-0.5 ${sevColor}`}
-            onClick={() => onClick(d)}
-            onKeyDown={handleKeyDown}
           >
             <span className="shrink-0 font-mono text-caption mt-0.5 px-1 rounded bg-surface-2">
               {codeLabel}

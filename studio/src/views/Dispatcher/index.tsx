@@ -1,4 +1,5 @@
 import { errorMessage } from "@/lib/errorHints";
+import { clickableRowProps } from "@/lib/a11y";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 
@@ -555,16 +556,7 @@ function RetriesTable({
                 className={`border-b border-border-default/60 hover:bg-surface-2/40 cursor-pointer focus-visible:bg-surface-2/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                   isDue ? "bg-warning-soft" : ""
                 }`}
-                tabIndex={0}
-                role="button"
-                aria-label={`Open issue ${r.identifier || r.issue_id} on the board`}
-                onClick={() => onFocusIssue(r.issue_id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onFocusIssue(r.issue_id);
-                  }
-                }}
+                {...clickableRowProps(() => onFocusIssue(r.issue_id), `Open issue ${r.identifier || r.issue_id} on the board`)}
                 title="Open this issue on the board"
               >
                 <td className="py-1.5 px-3 font-mono whitespace-nowrap">{r.identifier || r.issue_id}</td>
@@ -633,16 +625,7 @@ function DispatchSkipsTable({
               <tr
                 key={s.issue_id}
                 className="border-b border-border-default/60 hover:bg-surface-2/40 cursor-pointer focus-visible:bg-surface-2/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-                tabIndex={0}
-                role="button"
-                aria-label={`Open issue ${s.identifier || s.issue_id} on the board to fix its bot`}
-                onClick={() => onFocusIssue(s.issue_id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onFocusIssue(s.issue_id);
-                  }
-                }}
+                {...clickableRowProps(() => onFocusIssue(s.issue_id), `Open issue ${s.identifier || s.issue_id} on the board to fix its bot`)}
                 title="Open this issue on the board to fix its bot"
               >
                 <td className="py-1.5 px-3 font-mono whitespace-nowrap">

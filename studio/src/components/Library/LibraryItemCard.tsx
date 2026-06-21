@@ -1,6 +1,7 @@
 import type { DragEvent } from "react";
 import type { LibraryItem, LibraryCategory } from "@/lib/library/types";
 import { NODE_ICONS, NODE_COLORS } from "@/lib/constants";
+import { clickableRowProps } from "@/lib/a11y";
 import { LAYER_COLORS, LAYER_ICONS } from "@/lib/constants";
 
 function getCategoryColor(category: LibraryCategory): string {
@@ -39,16 +40,7 @@ export default function LibraryItemCard({ item, onAdd }: Props) {
     <div
       draggable
       onDragStart={onDragStart}
-      onClick={() => onAdd(item)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onAdd(item);
-        }
-      }}
-      tabIndex={0}
-      role="button"
-      aria-label={`Add ${item.name} to canvas`}
+      {...clickableRowProps(() => onAdd(item), `Add ${item.name} to canvas`)}
       className="flex items-start gap-2 px-2 py-2 rounded cursor-grab hover:bg-surface-2/50 transition-colors border-l-2 group focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
       style={{ borderLeftColor: color }}
       title={item.description}

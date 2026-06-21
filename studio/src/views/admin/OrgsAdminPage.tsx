@@ -1,6 +1,7 @@
 import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { clickableRowProps } from "@/lib/a11y";
 import { useAuth } from "@/auth/AuthContext";
 import {
   type OrgView,
@@ -150,16 +151,7 @@ export default function OrgsAdminPage() {
                   <tr
                     key={o.id}
                     className="border-b border-border-subtle last:border-0 cursor-pointer hover:bg-surface-2"
-                    onClick={() => setActive(o)}
-                    tabIndex={0}
-                    role="button"
-                    aria-label={`Open ${o.name} (${o.status})`}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setActive(o);
-                      }
-                    }}
+                    {...clickableRowProps(() => setActive(o), `Open ${o.name} (${o.status})`)}
                   >
                     <td className="px-3 py-2">
                       {o.name}
