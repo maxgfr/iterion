@@ -320,7 +320,12 @@ func (s *MongoMemoryStore) WriteDocument(ctx context.Context, ref knowledge.Spac
 	// pinned ExpectedRev — re-reads the advanced revision and retries. So the
 	// surviving write is the ONLY one whose counters persist. ensureSpace runs
 	// once above (idempotent); ensureTenant stays in-loop (also idempotent).
-	const maxWriteAttempts = 5
+	// No fixed retry cap: each CAS round has exactly one winner, so a writer
+	// that loses is guaranteed to make progress (another writer advanced the
+	// revision) and will win within at most as many rounds as there are live
+	// concurrent writers. The principled bound is therefore the caller's
+	// context deadline, not an arbitrary attempt count — a count of 5 used to
+	// spuriously fail 12-way contention with "lost the revision race".
 	for attempt := 0; ; attempt++ {
 		var existing memDoc
 		var oldSize, prevRev int64
@@ -399,10 +404,12 @@ func (s *MongoMemoryStore) WriteDocument(ctx context.Context, ref knowledge.Spac
 			if in.ExpectedRev != 0 {
 				return knowledge.DocumentMeta{}, fmt.Errorf("memory: revision conflict (expected %d, lost a concurrent write)", in.ExpectedRev)
 			}
-			if attempt+1 < maxWriteAttempts {
-				continue // re-read the advanced revision and retry
+			// Retry until we win or the caller's context is done; progress is
+			// guaranteed each round, so the context deadline is the only bound.
+			if cerr := ctx.Err(); cerr != nil {
+				return knowledge.DocumentMeta{}, fmt.Errorf("memory: write doc: lost the revision race (%d attempts) before the context was done: %w", attempt+1, cerr)
 			}
-			return knowledge.DocumentMeta{}, fmt.Errorf("memory: write doc: lost the revision race after %d attempts", maxWriteAttempts)
+			continue // re-read the advanced revision and retry
 		}
 		return knowledge.DocumentMeta{}, fmt.Errorf("memory: write doc: %w", err)
 	}
