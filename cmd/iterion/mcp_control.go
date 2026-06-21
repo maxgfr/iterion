@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -131,56 +130,16 @@ func iterionDataDir() string {
 	return ""
 }
 
-// --- MCP plumbing (mirrors mcp_ask_user.go) ---
-
-type mcpControlRequest struct {
-	JSONRPC string           `json:"jsonrpc"`
-	ID      *json.RawMessage `json:"id,omitempty"`
-	Method  string           `json:"method"`
-	Params  json.RawMessage  `json:"params,omitempty"`
-}
-
-type mcpControlResponse struct {
-	JSONRPC string           `json:"jsonrpc"`
-	ID      *json.RawMessage `json:"id"`
-	Result  any              `json:"result,omitempty"`
-	Error   *mcpControlError `json:"error,omitempty"`
-}
-
-type mcpControlError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
+// --- MCP plumbing (shared types live in mcp_common.go) ---
+//
+// Control accepts larger payloads than ask_user/board (run logs can be
+// several MB), so the read buffer is sized at 4MB.
 
 func runMCPControlServer(in io.Reader, out io.Writer) error {
-	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	enc := json.NewEncoder(out)
 	client := newControlClient()
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var req mcpControlRequest
-		if err := json.Unmarshal(line, &req); err != nil {
-			_ = enc.Encode(mcpControlResponse{
-				JSONRPC: "2.0",
-				ID:      nil,
-				Error:   &mcpControlError{Code: -32700, Message: fmt.Sprintf("parse error: %s", err)},
-			})
-			continue
-		}
-		if req.ID == nil {
-			continue
-		}
-		resp := dispatchMCPControl(req, client)
-		if err := enc.Encode(resp); err != nil {
-			return err
-		}
-	}
-	return scanner.Err()
+	return runMCPLoop(in, out, 4*1024*1024, func(req mcpRequest) mcpResponse {
+		return dispatchMCPControl(req, client)
+	})
 }
 
 // --- Tool definitions ---
@@ -238,8 +197,8 @@ var (
 	cancelRunSchema = json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}`)
 )
 
-func dispatchMCPControl(req mcpControlRequest, client *controlClient) mcpControlResponse {
-	resp := mcpControlResponse{JSONRPC: "2.0", ID: req.ID}
+func dispatchMCPControl(req mcpRequest, client *controlClient) mcpResponse {
+	resp := mcpResponse{JSONRPC: "2.0", ID: req.ID}
 
 	switch req.Method {
 	case "initialize":
@@ -266,20 +225,20 @@ func dispatchMCPControl(req mcpControlRequest, client *controlClient) mcpControl
 	case "tools/call":
 		resp = handleControlToolCall(req, client)
 	default:
-		resp.Error = &mcpControlError{Code: -32601, Message: fmt.Sprintf("method not found: %s", req.Method)}
+		resp.Error = &mcpError{Code: -32601, Message: fmt.Sprintf("method not found: %s", req.Method)}
 	}
 	return resp
 }
 
-func handleControlToolCall(req mcpControlRequest, client *controlClient) mcpControlResponse {
-	resp := mcpControlResponse{JSONRPC: "2.0", ID: req.ID}
+func handleControlToolCall(req mcpRequest, client *controlClient) mcpResponse {
+	resp := mcpResponse{JSONRPC: "2.0", ID: req.ID}
 
 	var params struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		resp.Error = &mcpControlError{Code: -32602, Message: fmt.Sprintf("invalid params: %s", err)}
+		resp.Error = &mcpError{Code: -32602, Message: fmt.Sprintf("invalid params: %s", err)}
 		return resp
 	}
 
@@ -380,7 +339,7 @@ func handleControlToolCall(req mcpControlRequest, client *controlClient) mcpCont
 		resp.Result = controlHTTPResult(status, body, err)
 
 	default:
-		resp.Error = &mcpControlError{Code: -32601, Message: fmt.Sprintf("unknown tool: %s", params.Name)}
+		resp.Error = &mcpError{Code: -32601, Message: fmt.Sprintf("unknown tool: %s", params.Name)}
 	}
 	return resp
 }

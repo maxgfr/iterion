@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -49,62 +48,11 @@ var askUserInputSchema = json.RawMessage(`{
   "additionalProperties": false
 }`)
 
-type mcpRequest struct {
-	JSONRPC string           `json:"jsonrpc"`
-	ID      *json.RawMessage `json:"id,omitempty"`
-	Method  string           `json:"method"`
-	Params  json.RawMessage  `json:"params,omitempty"`
-}
-
-type mcpResponse struct {
-	JSONRPC string           `json:"jsonrpc"`
-	ID      *json.RawMessage `json:"id"`
-	Result  any              `json:"result,omitempty"`
-	Error   *mcpError        `json:"error,omitempty"`
-}
-
-type mcpError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
 // runMCPAskUserServer runs a line-delimited JSON-RPC loop on the given streams.
-// It returns nil on clean EOF.
+// It returns nil on clean EOF. MCP messages can exceed the 64KB default
+// buffer, so the loop is sized at 1MB.
 func runMCPAskUserServer(in io.Reader, out io.Writer) error {
-	scanner := bufio.NewScanner(in)
-	// MCP messages can exceed the default 64KB buffer.
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	enc := json.NewEncoder(out)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		var req mcpRequest
-		if err := json.Unmarshal(line, &req); err != nil {
-			// Per JSON-RPC: on parse error with no recoverable id, reply with id=null.
-			_ = enc.Encode(mcpResponse{
-				JSONRPC: "2.0",
-				ID:      nil,
-				Error:   &mcpError{Code: -32700, Message: fmt.Sprintf("parse error: %s", err)},
-			})
-			continue
-		}
-
-		// Notifications (no id) get no response.
-		if req.ID == nil {
-			continue
-		}
-
-		resp := dispatchMCPAskUser(req)
-		if err := enc.Encode(resp); err != nil {
-			return err
-		}
-	}
-	return scanner.Err()
+	return runMCPLoop(in, out, 1024*1024, dispatchMCPAskUser)
 }
 
 func dispatchMCPAskUser(req mcpRequest) mcpResponse {

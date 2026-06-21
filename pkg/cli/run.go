@@ -522,15 +522,9 @@ func printPausedQuestions(p *Printer, result map[string]interface{}) {
 
 // ParseVarFlags parses a slice of "key=value" strings into a map.
 func ParseVarFlags(flags []string) (map[string]string, error) {
-	vars := make(map[string]string)
-	for _, f := range flags {
-		parts := strings.SplitN(f, "=", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid --var format %q (expected key=value)", f)
-		}
-		vars[parts[0]] = parts[1]
-	}
-	return vars, nil
+	return parseKVPairs[string](flags, kvOpts[string]{
+		errFmt: "invalid --var format %q (expected key=value)",
+	})
 }
 
 // ParseAnswersFile reads a JSON file containing answer key-value pairs.

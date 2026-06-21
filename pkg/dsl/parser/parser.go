@@ -702,20 +702,39 @@ func (p *parser) parseLiteral() *ast.Literal {
 	}
 }
 
-// ---- prompt ----
-
-func (p *parser) parsePromptDecl() *ast.PromptDecl {
-	start := p.next() // consume "prompt"
+// parseDeclHeader consumes the leading `<keyword> <name>:` + indent that
+// every top-level declaration (prompt, schema, cursor, agent, judge,
+// router, human, tool, compute, workflow) opens with. It returns the
+// keyword token (for span tracking), the declared name, and ok=false
+// when the header was malformed — in which case error recovery has
+// already advanced the cursor (skipToNextTopLevel on missing name; the
+// indent miss simply returns).
+//
+// Behavior must stay byte-identical to the inlined preamble each decl
+// method used previously — see git history pre-this-refactor for the
+// reference implementation.
+func (p *parser) parseDeclHeader(kind string) (start Token, name string, ok bool) {
+	start = p.next() // consume the keyword token
 	nameT := p.next()
-	name := tokenAsIdent(nameT)
+	name = tokenAsIdent(nameT)
 	if name == "" {
-		p.addError(DiagExpectedToken, nameT, "expected prompt name")
+		p.addError(DiagExpectedToken, nameT, "expected "+kind+" name")
 		p.skipToNextTopLevel()
-		return nil
+		return start, "", false
 	}
 	p.expect(TokenColon)
 	p.skipNewlines()
 	if _, ok := p.expect(TokenIndent); !ok {
+		return start, name, false
+	}
+	return start, name, true
+}
+
+// ---- prompt ----
+
+func (p *parser) parsePromptDecl() *ast.PromptDecl {
+	start, name, ok := p.parseDeclHeader("prompt")
+	if !ok {
 		return nil
 	}
 
@@ -754,17 +773,8 @@ func (p *parser) parsePromptDecl() *ast.PromptDecl {
 // ---- schema ----
 
 func (p *parser) parseSchemaDecl() *ast.SchemaDecl {
-	start := p.next() // consume "schema"
-	nameT := p.next()
-	name := tokenAsIdent(nameT)
-	if name == "" {
-		p.addError(DiagExpectedToken, nameT, "expected schema name")
-		p.skipToNextTopLevel()
-		return nil
-	}
-	p.expect(TokenColon)
-	p.skipNewlines()
-	if _, ok := p.expect(TokenIndent); !ok {
+	start, name, ok := p.parseDeclHeader("schema")
+	if !ok {
 		return nil
 	}
 
@@ -869,17 +879,8 @@ func (p *parser) parseEnumConstraint() []string {
 // (`bands:`) — IR validation rejects malformed combinations (C085).
 // `description:` is an optional free-text annotation.
 func (p *parser) parseCursorDecl() *ast.CursorDecl {
-	start := p.next() // consume "cursor"
-	nameT := p.next()
-	name := tokenAsIdent(nameT)
-	if name == "" {
-		p.addError(DiagExpectedToken, nameT, "expected cursor name")
-		p.skipToNextTopLevel()
-		return nil
-	}
-	p.expect(TokenColon)
-	p.skipNewlines()
-	if _, ok := p.expect(TokenIndent); !ok {
+	start, name, ok := p.parseDeclHeader("cursor")
+	if !ok {
 		return nil
 	}
 
@@ -1072,17 +1073,8 @@ func (p *parser) parseCursorSettingValue() string {
 // ---- agent ----
 
 func (p *parser) parseAgentDecl() *ast.AgentDecl {
-	start := p.next() // consume "agent"
-	nameT := p.next()
-	name := tokenAsIdent(nameT)
-	if name == "" {
-		p.addError(DiagExpectedToken, nameT, "expected agent name")
-		p.skipToNextTopLevel()
-		return nil
-	}
-	p.expect(TokenColon)
-	p.skipNewlines()
-	if _, ok := p.expect(TokenIndent); !ok {
+	start, name, ok := p.parseDeclHeader("agent")
+	if !ok {
 		return nil
 	}
 
@@ -1201,17 +1193,8 @@ func (p *parser) parseLLMProp(d *ast.LLMDecl, propTok Token, kind string) {
 // ---- judge ----
 
 func (p *parser) parseJudgeDecl() *ast.JudgeDecl {
-	start := p.next() // consume "judge"
-	nameT := p.next()
-	name := tokenAsIdent(nameT)
-	if name == "" {
-		p.addError(DiagExpectedToken, nameT, "expected judge name")
-		p.skipToNextTopLevel()
-		return nil
-	}
-	p.expect(TokenColon)
-	p.skipNewlines()
-	if _, ok := p.expect(TokenIndent); !ok {
+	start, name, ok := p.parseDeclHeader("judge")
+	if !ok {
 		return nil
 	}
 
@@ -1237,17 +1220,8 @@ func (p *parser) parseJudgeDecl() *ast.JudgeDecl {
 // ---- router ----
 
 func (p *parser) parseRouterDecl() *ast.RouterDecl {
-	start := p.next() // consume "router"
-	nameT := p.next()
-	name := tokenAsIdent(nameT)
-	if name == "" {
-		p.addError(DiagExpectedToken, nameT, "expected router name")
-		p.skipToNextTopLevel()
-		return nil
-	}
-	p.expect(TokenColon)
-	p.skipNewlines()
-	if _, ok := p.expect(TokenIndent); !ok {
+	start, name, ok := p.parseDeclHeader("router")
+	if !ok {
 		return nil
 	}
 
@@ -1347,17 +1321,8 @@ func (p *parser) parseAwaitMode() ast.AwaitMode {
 // ---- human ----
 
 func (p *parser) parseHumanDecl() *ast.HumanDecl {
-	start := p.next() // consume "human"
-	nameT := p.next()
-	name := tokenAsIdent(nameT)
-	if name == "" {
-		p.addError(DiagExpectedToken, nameT, "expected human name")
-		p.skipToNextTopLevel()
-		return nil
-	}
-	p.expect(TokenColon)
-	p.skipNewlines()
-	if _, ok := p.expect(TokenIndent); !ok {
+	start, name, ok := p.parseDeclHeader("human")
+	if !ok {
 		return nil
 	}
 
@@ -1466,17 +1431,8 @@ func (p *parser) parseInteractionMode() ast.InteractionMode {
 // ---- tool node ----
 
 func (p *parser) parseToolNodeDecl() *ast.ToolNodeDecl {
-	start := p.next() // consume "tool"
-	nameT := p.next()
-	name := tokenAsIdent(nameT)
-	if name == "" {
-		p.addError(DiagExpectedToken, nameT, "expected tool name")
-		p.skipToNextTopLevel()
-		return nil
-	}
-	p.expect(TokenColon)
-	p.skipNewlines()
-	if _, ok := p.expect(TokenIndent); !ok {
+	start, name, ok := p.parseDeclHeader("tool")
+	if !ok {
 		return nil
 	}
 
@@ -1539,17 +1495,8 @@ func (p *parser) parseToolNodeProp(td *ast.ToolNodeDecl, propTok Token) {
 // ---- compute ----
 
 func (p *parser) parseComputeDecl() *ast.ComputeDecl {
-	start := p.next() // consume "compute"
-	nameT := p.next()
-	name := tokenAsIdent(nameT)
-	if name == "" {
-		p.addError(DiagExpectedToken, nameT, "expected compute name")
-		p.skipToNextTopLevel()
-		return nil
-	}
-	p.expect(TokenColon)
-	p.skipNewlines()
-	if _, ok := p.expect(TokenIndent); !ok {
+	start, name, ok := p.parseDeclHeader("compute")
+	if !ok {
 		return nil
 	}
 
@@ -1653,17 +1600,8 @@ func (p *parser) parseComputeExprBlock() []*ast.ComputeExpr {
 // ---- workflow ----
 
 func (p *parser) parseWorkflowDecl() *ast.WorkflowDecl {
-	start := p.next() // consume "workflow"
-	nameT := p.next()
-	name := tokenAsIdent(nameT)
-	if name == "" {
-		p.addError(DiagExpectedToken, nameT, "expected workflow name")
-		p.skipToNextTopLevel()
-		return nil
-	}
-	p.expect(TokenColon)
-	p.skipNewlines()
-	if _, ok := p.expect(TokenIndent); !ok {
+	start, name, ok := p.parseDeclHeader("workflow")
+	if !ok {
 		return nil
 	}
 

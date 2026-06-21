@@ -726,32 +726,32 @@ func resolvePath(namespace string, path []string, ctx *Context) (interface{}, er
 		if ctx.Vars == nil {
 			return nil, nil
 		}
-		return drill(ctx.Vars(path), nil), nil
+		return ctx.Vars(path), nil
 	case "input":
 		if ctx.Input == nil {
 			return nil, nil
 		}
-		return drill(ctx.Input(path), nil), nil
+		return ctx.Input(path), nil
 	case "outputs":
 		if ctx.Outputs == nil {
 			return nil, nil
 		}
-		return drill(ctx.Outputs(path), nil), nil
+		return ctx.Outputs(path), nil
 	case "artifacts":
 		if ctx.Artifacts == nil {
 			return nil, nil
 		}
-		return drill(ctx.Artifacts(path), nil), nil
+		return ctx.Artifacts(path), nil
 	case "loop":
 		if ctx.Loop == nil {
 			return nil, nil
 		}
-		return drill(ctx.Loop(path), nil), nil
+		return ctx.Loop(path), nil
 	case "run":
 		if ctx.Run == nil {
 			return nil, nil
 		}
-		return drill(ctx.Run(path), nil), nil
+		return ctx.Run(path), nil
 	}
 	// Bare identifier (e.g. `approved` in a `when` clause): interpret as a
 	// field of the implicit `input` namespace. This matches the legacy
@@ -759,15 +759,9 @@ func resolvePath(namespace string, path []string, ctx *Context) (interface{}, er
 	// the source node's output.
 	if ctx.Input != nil {
 		fullPath := append([]string{namespace}, path...)
-		return drill(ctx.Input(fullPath), nil), nil
+		return ctx.Input(fullPath), nil
 	}
 	return nil, fmt.Errorf("expr: unknown namespace %q", namespace)
-}
-
-// drill is a placeholder — callbacks already perform path traversal. Kept as
-// a hook in case future evaluators need shallow/deep resolution.
-func drill(v interface{}, _ []string) interface{} {
-	return v
 }
 
 func evalUnary(n *unaryNode, ctx *Context) (interface{}, error) {

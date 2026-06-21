@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
@@ -231,13 +230,7 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 
 // ParseAnswerFlags parses a slice of "key=value" strings into a map.
 func ParseAnswerFlags(flags []string) (map[string]string, error) {
-	answers := make(map[string]string)
-	for _, f := range flags {
-		parts := strings.SplitN(f, "=", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid --answer format %q (expected key=value)", f)
-		}
-		answers[parts[0]] = parts[1]
-	}
-	return answers, nil
+	return parseKVPairs[string](flags, kvOpts[string]{
+		errFmt: "invalid --answer format %q (expected key=value)",
+	})
 }

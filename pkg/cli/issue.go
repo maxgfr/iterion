@@ -408,17 +408,13 @@ func parseFieldPairs(pairs []string) (map[string]any, error) {
 	if len(pairs) == 0 {
 		return nil, nil
 	}
-	out := map[string]any{}
-	for _, p := range pairs {
-		eq := strings.IndexByte(p, '=')
-		if eq <= 0 {
-			return nil, fmt.Errorf("--field expects key=value, got %q", p)
-		}
-		k := strings.TrimSpace(p[:eq])
-		v := strings.TrimSpace(p[eq+1:])
-		out[k] = inferTyped(v)
-	}
-	return out, nil
+	return parseKVPairs[any](pairs, kvOpts[any]{
+		errFmt:        "--field expects key=value, got %q",
+		trimKey:       true,
+		trimVal:       true,
+		requireRawKey: true,
+		conv:          func(v string) any { return inferTyped(v) },
+	})
 }
 
 // parseBotArgs parses repeatable --bot-arg key=value flags into the
@@ -433,15 +429,12 @@ func parseBotArgs(pairs []string) (map[string]string, error) {
 	if len(pairs) == 0 {
 		return nil, nil
 	}
-	out := map[string]string{}
-	for _, p := range pairs {
-		eq := strings.IndexByte(p, '=')
-		if eq <= 0 {
-			return nil, fmt.Errorf("--bot-arg expects key=value, got %q", p)
-		}
-		out[strings.TrimSpace(p[:eq])] = strings.TrimSpace(p[eq+1:])
-	}
-	return out, nil
+	return parseKVPairs[string](pairs, kvOpts[string]{
+		errFmt:        "--bot-arg expects key=value, got %q",
+		trimKey:       true,
+		trimVal:       true,
+		requireRawKey: true,
+	})
 }
 
 func inferTyped(s string) any {

@@ -1,0 +1,70 @@
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+// Shared JSON-RPC 2.0 message types for the internal MCP stdio servers
+// (__mcp-ask-user, __mcp-board, __mcp-control). All three speak the same
+// line-delimited JSON-RPC wire format, so they share these structs.
+
+type mcpRequest struct {
+	JSONRPC string           `json:"jsonrpc"`
+	ID      *json.RawMessage `json:"id,omitempty"`
+	Method  string           `json:"method"`
+	Params  json.RawMessage  `json:"params,omitempty"`
+}
+
+type mcpResponse struct {
+	JSONRPC string           `json:"jsonrpc"`
+	ID      *json.RawMessage `json:"id"`
+	Result  any              `json:"result,omitempty"`
+	Error   *mcpError        `json:"error,omitempty"`
+}
+
+type mcpError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// runMCPLoop drives a line-delimited JSON-RPC server over the given streams.
+// For each non-empty input line it:
+//   - replies with a -32700 parse error (id=null) on json.Unmarshal failure;
+//   - drops notifications (req.ID == nil) silently;
+//   - otherwise invokes dispatch(req) and writes the returned mcpResponse.
+//
+// Returns nil on clean EOF. bufMax sizes the scanner's read buffer (MCP
+// messages can exceed bufio's 64KB default; callers pick the cap that fits
+// their largest expected payload).
+func runMCPLoop(in io.Reader, out io.Writer, bufMax int, dispatch func(req mcpRequest) mcpResponse) error {
+	scanner := bufio.NewScanner(in)
+	scanner.Buffer(make([]byte, 0, 64*1024), bufMax)
+	enc := json.NewEncoder(out)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var req mcpRequest
+		if err := json.Unmarshal(line, &req); err != nil {
+			_ = enc.Encode(mcpResponse{
+				JSONRPC: "2.0",
+				ID:      nil,
+				Error:   &mcpError{Code: -32700, Message: fmt.Sprintf("parse error: %s", err)},
+			})
+			continue
+		}
+		if req.ID == nil {
+			continue // notification — no response
+		}
+		resp := dispatch(req)
+		if err := enc.Encode(resp); err != nil {
+			return err
+		}
+	}
+	return scanner.Err()
+}

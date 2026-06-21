@@ -264,15 +264,13 @@ func parseScheduleVars(flags []string) (map[string]string, error) {
 	if len(flags) == 0 {
 		return nil, nil
 	}
-	out := make(map[string]string, len(flags))
-	for _, kv := range flags {
-		k, v, ok := strings.Cut(kv, "=")
-		if !ok || strings.TrimSpace(k) == "" {
-			return nil, fmt.Errorf("--var %q must be key=value", kv)
-		}
-		out[k] = v
-	}
-	return out, nil
+	// Historical behavior: store the raw key (no trim), but reject when
+	// the trimmed key would be empty. trimKey stays false so " key=v" is
+	// stored under " key" exactly as before.
+	return parseKVPairs[string](flags, kvOpts[string]{
+		errFmt:            "--var %q must be key=value",
+		requireTrimmedKey: true,
+	})
 }
 
 func RunScheduleList(p *Printer, opts ScheduleCommonOptions) error {

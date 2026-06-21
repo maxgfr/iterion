@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -61,33 +60,9 @@ func openBoardStoreFromEnv() (*native.Store, error) {
 }
 
 func runMCPBoardServer(in io.Reader, out io.Writer, store *native.Store, caps boardops.Capabilities) error {
-	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	enc := json.NewEncoder(out)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var req mcpRequest
-		if err := json.Unmarshal(line, &req); err != nil {
-			_ = enc.Encode(mcpResponse{
-				JSONRPC: "2.0",
-				ID:      nil,
-				Error:   &mcpError{Code: -32700, Message: fmt.Sprintf("parse error: %s", err)},
-			})
-			continue
-		}
-		if req.ID == nil {
-			continue // notification — no response
-		}
-		resp := dispatchMCPBoard(req, store, caps)
-		if err := enc.Encode(resp); err != nil {
-			return err
-		}
-	}
-	return scanner.Err()
+	return runMCPLoop(in, out, 1024*1024, func(req mcpRequest) mcpResponse {
+		return dispatchMCPBoard(req, store, caps)
+	})
 }
 
 func dispatchMCPBoard(req mcpRequest, store *native.Store, caps boardops.Capabilities) mcpResponse {
