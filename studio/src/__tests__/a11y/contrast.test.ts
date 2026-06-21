@@ -57,21 +57,31 @@ const THEMES = {
   dark: {
     surface: { 0: "#111827", 1: "#1f2937", 2: "#374151", 3: "#4b5563" },
     fg: { default: "#ffffff", muted: "#d1d5db", subtle: "#9ca3af" },
+    // Decoupled accent (2026-06-21): `accent` is the button/brand background
+    // (white label on it), `accentText` is the brighter link/icon colour.
+    accent: "#4f46e5",
+    accentText: "#818cf8",
+    onAccent: "#ffffff",
     severity: {
       danger: { soft: "#dc2626", softA: 0.18, fg: "#fecaca" },
       warning: { soft: "#d97706", softA: 0.18, fg: "#fde68a" },
       success: { soft: "#16a34a", softA: 0.18, fg: "#bbf7d0" },
       info: { soft: "#0891b2", softA: 0.18, fg: "#a5f3fc" },
+      live: { soft: "#22d3ee", softA: 0.18, fg: "#cffafe" },
     },
   },
   light: {
     surface: { 0: "#ffffff", 1: "#f9fafb", 2: "#f3f4f6", 3: "#e5e7eb" },
     fg: { default: "#111827", muted: "#374151", subtle: "#6b7280" },
+    accent: "#4f46e5",
+    accentText: "#4f46e5",
+    onAccent: "#ffffff",
     severity: {
       danger: { soft: "#b91c1c", softA: 0.1, fg: "#7f1d1d" },
       warning: { soft: "#b45309", softA: 0.1, fg: "#78350f" },
       success: { soft: "#15803d", softA: 0.1, fg: "#14532d" },
       info: { soft: "#0e7490", softA: 0.1, fg: "#164e63" },
+      live: { soft: "#0891b2", softA: 0.12, fg: "#155e75" },
     },
   },
 } as const;
@@ -123,6 +133,25 @@ for (const [themeName, t] of Object.entries(THEMES)) {
           hexToRgb(t.surface[1]),
         );
         const ratio = contrast(hexToRgb(sev.fg), bg);
+        expect(ratio).toBeGreaterThanOrEqual(AA_TEXT);
+      });
+    }
+
+    // Accent as a button BACKGROUND: the white label on it must clear AA.
+    // This is the constraint that keeps --color-accent dark enough.
+    it(`fg-onAccent on accent ≥ ${AA_TEXT}`, () => {
+      const ratio = contrast(hexToRgb(t.onAccent), hexToRgb(t.accent));
+      expect(ratio).toBeGreaterThanOrEqual(AA_TEXT);
+    });
+
+    // Accent-TEXT (links / icons) on the panel surfaces — the decoupled
+    // token that fixed the old blue-600 link contrast (~3.4:1). Must clear
+    // AA, which is the constraint that keeps --color-accent-text bright
+    // enough. Together these two prove the decoupling actually buys AA on
+    // both sides (a single token could not).
+    for (const s of [0, 1] as const) {
+      it(`accent-text on surface-${s} ≥ ${AA_TEXT}`, () => {
+        const ratio = contrast(hexToRgb(t.accentText), hexToRgb(t.surface[s]));
         expect(ratio).toBeGreaterThanOrEqual(AA_TEXT);
       });
     }
