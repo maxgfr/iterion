@@ -6,11 +6,8 @@
 package gitlab
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -41,54 +38,18 @@ func New(httpClient *http.Client, baseURL, token string) *AdminClient {
 
 func (c *AdminClient) Provider() forge.Provider { return forge.ProviderGitLab }
 
-// do performs one API call. body (when non-nil) is JSON-encoded; out (when
-// non-nil and the status is 2xx) is JSON-decoded. The returned status lets
-// callers map 401/403/404 to the forge sentinel errors. The token is never
-// placed in the URL, so it cannot leak through error strings.
+// do performs one API call against this GitLab instance, delegating the
+// marshal/request/decode plumbing to forge.DoJSON. The token rides the
+// Authorization header (never the URL), so it can't leak via error strings.
 func (c *AdminClient) do(ctx context.Context, method, path string, body any, out any) (int, error) {
-	var reqBody io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return 0, fmt.Errorf("gitlab: marshal body: %w", err)
-		}
-		reqBody = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+"/api/v4"+path, reqBody)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	if out != nil && resp.StatusCode/100 == 2 {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-			return resp.StatusCode, fmt.Errorf("gitlab: decode response: %w", err)
-		}
-	} else {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
-	}
-	return resp.StatusCode, nil
+	return forge.DoJSON(ctx, c.HTTP, method, c.BaseURL+"/api/v4"+path, "gitlab", func(req *http.Request) {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}, body, out)
 }
 
 // statusErr maps a non-2xx status to the appropriate forge sentinel.
 func statusErr(op string, code int) error {
-	switch code {
-	case http.StatusUnauthorized:
-		return forge.ErrUnauthorized
-	case http.StatusForbidden:
-		return forge.ErrForbidden
-	case http.StatusNotFound:
-		return forge.ErrHookNotFound
-	default:
-		return fmt.Errorf("gitlab: %s: HTTP %d", op, code)
-	}
+	return forge.StatusErr("gitlab", op, code)
 }
 
 // WhoAmI returns the account the token authenticates as.

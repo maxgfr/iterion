@@ -6,11 +6,7 @@
 package github
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -53,50 +49,15 @@ func APIBaseFor(webBase string) string {
 func (c *AdminClient) Provider() forge.Provider { return forge.ProviderGitHub }
 
 func (c *AdminClient) do(ctx context.Context, method, path string, body any, out any) (int, error) {
-	var reqBody io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return 0, fmt.Errorf("github: marshal body: %w", err)
-		}
-		reqBody = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.APIBase+path, reqBody)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	if out != nil && resp.StatusCode/100 == 2 {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-			return resp.StatusCode, fmt.Errorf("github: decode response: %w", err)
-		}
-	} else {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
-	}
-	return resp.StatusCode, nil
+	return forge.DoJSON(ctx, c.HTTP, method, c.APIBase+path, "github", func(req *http.Request) {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	}, body, out)
 }
 
 func statusErr(op string, code int) error {
-	switch code {
-	case http.StatusUnauthorized:
-		return forge.ErrUnauthorized
-	case http.StatusForbidden:
-		return forge.ErrForbidden
-	case http.StatusNotFound:
-		return forge.ErrHookNotFound
-	default:
-		return fmt.Errorf("github: %s: HTTP %d", op, code)
-	}
+	return forge.StatusErr("github", op, code)
 }
 
 func (c *AdminClient) WhoAmI(ctx context.Context) (forge.Identity, error) {
