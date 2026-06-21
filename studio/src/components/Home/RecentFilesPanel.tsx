@@ -296,7 +296,7 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
                     e.stopPropagation();
                     removeRecent(path);
                   }}
-                  className="h-7 w-7 text-fg-subtle hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="h-7 w-7 text-fg-subtle hover:text-danger opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                 >
                   <TrashIcon className="w-3.5 h-3.5" />
                 </IconButton>
