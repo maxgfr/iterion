@@ -1,9 +1,7 @@
-import { errorMessage } from "@/lib/errorHints";
-import { useState } from "react";
-
 import { resumeRun } from "@/api/runs";
 import type { RunHeader } from "@/api/runs";
 import { Button } from "@/components/ui";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useDocumentStore } from "@/store/document";
 import { useRunStore } from "@/store/run";
 import { useUIStore } from "@/store/ui";
@@ -19,27 +17,19 @@ interface Props {
 // (the operator deliberately paused; no workflow edit between
 // pause→resume is expected).
 export default function OperatorPauseBanner({ run }: Props) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run: runAction } = useAsyncAction();
   const setRunStatus = useRunStore((s) => s.setRunStatus);
   const requestWsReconnect = useRunStore((s) => s.requestWsReconnect);
   const addToast = useUIStore((s) => s.addToast);
   const currentSource = useDocumentStore((s) => s.currentSource);
 
-  const onResume = async () => {
-    setBusy(true);
-    setError(null);
-    try {
+  const onResume = () =>
+    runAction(async () => {
       await resumeRun(run.id, { source: currentSource ?? undefined });
       setRunStatus("running");
       requestWsReconnect();
       addToast("Resume requested", "info");
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+    });
 
   const checkpointNode = (run.checkpoint as { node_id?: string } | undefined)?.node_id;
 

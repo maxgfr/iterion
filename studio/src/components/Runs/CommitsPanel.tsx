@@ -11,6 +11,7 @@ import {
   Textarea,
   Tooltip,
 } from "@/components/ui";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useRunCommits } from "@/hooks/useRunCommits";
 import {
   commitAndFinalizeRun,
@@ -200,8 +201,7 @@ function MergeFooter({
   // null = preview mode (use backend default); string = user editing,
   // snapshotted on first Edit so background refreshes don't clobber.
   const [editingMessage, setEditingMessage] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const { busy: submitting, error: err, run: runAction } = useAsyncAction();
   // Optimistic merge result captured from the mergeRun response. The
   // parent's refreshSnapshot is async (network round-trip + store
   // update), so without this the panel briefly snaps back to the
@@ -307,10 +307,8 @@ function MergeFooter({
     );
   }
 
-  const onSubmit = async () => {
-    setSubmitting(true);
-    setErr(null);
-    try {
+  const onSubmit = () =>
+    runAction(async () => {
       // Only send commit_message when the user actually edited. Sending
       // undefined lets the backend recompute fresh at merge time —
       // safer than echoing back a default that may have shifted between
@@ -337,12 +335,7 @@ function MergeFooter({
         });
         onMergeComplete?.();
       }
-    } catch (e) {
-      setErr(errorMessage(e));
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    });
 
   const buttonLabel =
     strategy === "squash" ? "Squash and merge" : "Merge commit";

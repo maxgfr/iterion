@@ -15,6 +15,7 @@ import {
   Tooltip,
 } from "@/components/ui";
 import WSStatusDot from "@/components/shared/WSStatusDot";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useConfirm } from "@/hooks/useConfirm";
 import { formatRelative } from "@/lib/format";
 import { useRunStore, type WsState } from "@/store/run";
@@ -39,8 +40,7 @@ interface Props {
 export default function RunHeader({ run, active, wsState }: Props) {
   const requestWsReconnect = useRunStore((s) => s.requestWsReconnect);
   const applySnapshot = useRunStore((s) => s.applySnapshot);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run: runAction, setError } = useAsyncAction();
   const [resumeOpen, setResumeOpen] = useState(false);
   const [forkOpen, setForkOpen] = useState(false);
   const [editingName, setEditingName] = useState(false);
@@ -91,34 +91,14 @@ export default function RunHeader({ run, active, wsState }: Props) {
     run.status === "cancelled" ||
     run.status === "paused_operator";
 
-  const onCancel = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await cancelRun(run.id);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const onCancel = () => runAction(() => cancelRun(run.id));
 
   // onPause posts to /api/runs/:id/pause. The engine flips the
   // persisted status to paused_operator at the next safe boundary; the
   // WS run_paused event then drives the UI update. We don't optimistically
   // flip the local store — the boundary is cooperative and the server
   // is authoritative.
-  const onPause = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await pauseRun(run.id);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const onPause = () => runAction(() => pauseRun(run.id));
 
   // Export the run as a single JSON document bundling the snapshot
   // (run header + executions) and the full events stream. Useful for

@@ -5,6 +5,7 @@ import { useLocation } from "wouter";
 import { forkRun } from "@/api/runs";
 import type { RunHeader } from "@/api/runs";
 import { Button, Dialog } from "@/components/ui";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useTabsStore } from "@/store/tabs";
 import { useUIStore } from "@/store/ui";
 
@@ -26,8 +27,7 @@ export default function ForkDialog({ run, anchor, open, onOpenChange }: Props) {
   const [rewindCode, setRewindCode] = useState(false);
   const [forkName, setForkName] = useState("");
   const [newInputs, setNewInputs] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run: runAction, setError, clearError } = useAsyncAction();
   const [, setLocation] = useLocation();
   const openTab = useTabsStore((s) => s.openTab);
   const setActive = useTabsStore((s) => s.setActive);
@@ -43,19 +43,16 @@ export default function ForkDialog({ run, anchor, open, onOpenChange }: Props) {
       setRewindCode(false);
       setForkName("");
       setNewInputs(parentInputsJSON);
-      setError(null);
-      setBusy(false);
+      clearError();
     }
-  }, [open, run.id, parentInputsJSON]);
+  }, [open, run.id, parentInputsJSON, clearError]);
 
-  const submit = async (e?: React.MouseEvent) => {
+  const submit = (e?: React.MouseEvent) => {
     if (!anchor) {
       setError("No fork anchor selected — click a turn's Fork glyph first.");
       return;
     }
-    setBusy(true);
-    setError(null);
-    try {
+    return runAction(async () => {
       let parsedInputs: Record<string, unknown> | undefined;
       if (newInputs.trim() && newInputs.trim() !== parentInputsJSON.trim()) {
         try {
@@ -88,11 +85,7 @@ export default function ForkDialog({ run, anchor, open, onOpenChange }: Props) {
         "success",
       );
       onOpenChange(false);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
+    });
   };
 
   return (

@@ -4,6 +4,7 @@ import { Cross1Icon, PlusIcon, TrashIcon } from "@radix-ui/react-icons";
 
 import { Badge, Button, IconButton, Input, Textarea } from "@/components/ui";
 import type { BadgeVariant } from "@/components/ui";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 import {
   cancelQueuedMessage,
   listQueuedMessages,
@@ -62,8 +63,7 @@ export default function AgentChatboxInline({
   // operator's in-flight text.
   const draft = useRunStore((s) => s.chatDraft);
   const setDraft = useRunStore((s) => s.setChatDraft);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run: runAction, setError } = useAsyncAction();
   const [showAll, setShowAll] = useState(false);
   const [skillCatalog, setSkillCatalog] = useState<BundleSkill[]>([]);
   const [attachedSkills, setAttachedSkills] = useState<string[]>([]);
@@ -92,7 +92,7 @@ export default function AgentChatboxInline({
     return () => {
       cancelled = true;
     };
-  }, [runId, setQueuedMessages]);
+  }, [runId, setQueuedMessages, setError]);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,9 +118,7 @@ export default function AgentChatboxInline({
   const submit = useCallback(async () => {
     const text = draft.trim();
     if (text === "" || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
+    await runAction(async () => {
       if (onSend) {
         await onSend(text, { skills: attachedSkills });
       } else {
@@ -129,12 +127,8 @@ export default function AgentChatboxInline({
       setDraft("");
       setAttachedSkills([]);
       setPickerOpen(false);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [draft, runId, busy, attachedSkills, onSend, setDraft]);
+    });
+  }, [draft, runId, busy, attachedSkills, onSend, setDraft, runAction]);
 
   const toggleSkill = useCallback((name: string) => {
     setAttachedSkills((prev) =>
@@ -160,7 +154,7 @@ export default function AgentChatboxInline({
         setError(errorMessage(e));
       }
     },
-    [runId],
+    [runId, setError],
   );
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

@@ -1,8 +1,6 @@
-import { errorMessage } from "@/lib/errorHints";
-import { useState } from "react";
-
 import { cancelRun, type RunHeader as RunHeaderType } from "@/api/runs";
 import { Button } from "@/components/ui";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 
 // QueuedBanner replaces the RunMetrics + Scrubber strip in RunView
 // while a run is sitting on the NATS queue waiting for a runner pod.
@@ -27,20 +25,9 @@ function ordinal(n: number): string {
 }
 
 export default function QueuedBanner({ run }: Props) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run: runAction } = useAsyncAction();
 
-  const onCancel = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await cancelRun(run.id);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const onCancel = () => runAction(() => cancelRun(run.id));
 
   // queue_position is server-computed and only present once the run
   // actually lands on the queue. While the value is racing the launch
