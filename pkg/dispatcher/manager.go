@@ -496,44 +496,20 @@ func (m *Manager) setError(err error) {
 
 // buildTracker constructs a tracker.Tracker matching cfg.Tracker.Kind.
 // Used by both the studio's Manager and the standalone `iterion
-// dispatch` CLI so the wiring stays in one place.
+// dispatch` CLI so the wiring stays in one place. The GitHub + Forgejo
+// factories live alongside in external.go; they are in-package and
+// called directly (no init-time indirection — there was never an
+// external consumer of the override hook).
 func buildTracker(cfg *Config, ns *native.Store) (tracker.Tracker, error) {
 	switch cfg.Tracker.Kind {
 	case TrackerKindNative:
 		return native.NewAdapter(ns), nil
 	case TrackerKindGitHub:
-		return buildGitHubTracker(cfg.Tracker.GitHub)
+		return buildGitHubTrackerFromConfig(cfg.Tracker.GitHub)
 	case TrackerKindForgejo:
-		return buildForgejoTracker(cfg.Tracker.Forgejo)
+		return buildForgejoTrackerFromConfig(cfg.Tracker.Forgejo)
 	default:
 		return nil, fmt.Errorf("dispatcher: unsupported tracker kind %q", cfg.Tracker.Kind)
-	}
-}
-
-// buildGitHubTracker / buildForgejoTracker are defined in pkg/cli/dispatch.go
-// — declared here as variables so the package compiles when pkg/cli
-// isn't wired. Production wiring overrides them in package init.
-var (
-	buildGitHubTracker = func(*GitHubTrackerConfig) (tracker.Tracker, error) {
-		return nil, errors.New("github tracker factory not registered")
-	}
-	buildForgejoTracker = func(*ForgejoTrackerConfig) (tracker.Tracker, error) {
-		return nil, errors.New("forgejo tracker factory not registered")
-	}
-)
-
-// RegisterTrackerFactories installs the production GitHub + Forgejo
-// factories. Called from pkg/cli or any consumer that wants those
-// adapters available; v1 only wires it from there.
-func RegisterTrackerFactories(
-	gh func(*GitHubTrackerConfig) (tracker.Tracker, error),
-	fj func(*ForgejoTrackerConfig) (tracker.Tracker, error),
-) {
-	if gh != nil {
-		buildGitHubTracker = gh
-	}
-	if fj != nil {
-		buildForgejoTracker = fj
 	}
 }
 

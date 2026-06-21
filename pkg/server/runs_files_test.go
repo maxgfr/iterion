@@ -108,7 +108,7 @@ func TestRunFiles_NoWorkDir(t *testing.T) {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
 	var out runFilesResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if out.Available {
 		t.Errorf("Available should be false")
 	}
@@ -127,7 +127,7 @@ func TestRunFiles_NotGitRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out runFilesResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if out.Available {
 		t.Errorf("Available should be false")
 	}
@@ -155,7 +155,7 @@ func TestRunFiles_HappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out runFilesResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if !out.Available {
 		t.Fatalf("Available: false (reason=%q)", out.Reason)
 	}
@@ -187,7 +187,7 @@ func TestRunFiles_HappyPath_LiveTrue(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out runFilesResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if !out.Available || !out.Live {
 		t.Errorf("Available=%v Live=%v, want both true", out.Available, out.Live)
 	}
@@ -267,7 +267,7 @@ func TestRunFiles_Historical_RepoRootStaleFallsBackToCWD(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out runFilesResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if !out.Available {
 		t.Fatalf("Available=false reason=%q, want true (historical fallback to cfg.WorkDir)", out.Reason)
 	}
@@ -340,7 +340,7 @@ func TestRunFiles_ModeBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out runFilesResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if !out.Available || !out.Live {
 		t.Fatalf("Available=%v Live=%v reason=%q", out.Available, out.Live, out.Reason)
 	}
@@ -372,7 +372,7 @@ func TestRunFiles_ModeBranchNoBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out runFilesResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if out.Available {
 		t.Errorf("Available should be false")
 	}
@@ -408,7 +408,7 @@ func TestRunFiles_ModeUncommittedAfterFinalization(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out runFilesResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if out.Available {
 		t.Errorf("Available should be false")
 	}
@@ -444,7 +444,7 @@ func TestRunFileDiff_HappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out gitlib.DiffPayload
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if out.Before == nil || *out.Before != "hello\n" {
 		t.Errorf("before: %v", out.Before)
 	}
@@ -477,7 +477,7 @@ func TestRunFiles_ModeCombined(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out runFilesResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if !out.Available || !out.Live {
 		t.Fatalf("Available=%v Live=%v reason=%q", out.Available, out.Live, out.Reason)
 	}
@@ -522,7 +522,7 @@ func TestRunFiles_ModeCombined_MixedDedup(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out runFilesResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if !out.Available {
 		t.Fatalf("Available=false reason=%q", out.Reason)
 	}
@@ -561,7 +561,7 @@ func TestRunFiles_ModeCombined_NoBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out runFilesResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if !out.Available {
 		t.Fatalf("Available=false reason=%q — combined should degrade to uncommitted-only without a baseline", out.Reason)
 	}
@@ -605,7 +605,7 @@ func TestRunFiles_ModeCombined_WorktreeGone(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out runFilesResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if out.Available {
 		t.Errorf("Available should be false")
 	}

@@ -73,8 +73,8 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	meta := githubPRMeta(p)
 
 	if !p.IsReviewable() ||
-		!github.MatchEvent(cfg.EventAllowlist, "pull_request") ||
-		!github.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
+		!webhooks.MatchEvent(cfg.EventAllowlist, "pull_request", "pull_request") ||
+		!webhooks.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
 		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusFiltered, payloadHash, srcIP, "")
 		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
 		return

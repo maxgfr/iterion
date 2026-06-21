@@ -136,6 +136,23 @@ func (s *Server) authStoreOrFail(w http.ResponseWriter) (identity.Store, bool) {
 	return st, true
 }
 
+// applyNonNegative copies *p into *dst when p is non-nil, rejecting
+// negative values with a 400. Returns true on success (including the
+// p==nil no-op), false if it already wrote an error response. Keeps the
+// per-field error message identical to the hand-written form
+// ("<field> must be >= 0") so the API surface is unchanged.
+func applyNonNegative[T int | int64 | float64](w http.ResponseWriter, p *T, dst *T, field string) bool {
+	if p == nil {
+		return true
+	}
+	if *p < 0 {
+		httpError(w, http.StatusBadRequest, "%s must be >= 0", field)
+		return false
+	}
+	*dst = *p
+	return true
+}
+
 // ---- handlers ----
 
 func (s *Server) handleAdminListOrgs(w http.ResponseWriter, r *http.Request) {
@@ -164,8 +181,7 @@ func (s *Server) handleAdminCreateOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	id, _ := auth.FromContext(r.Context())
 	var req createOrgReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if req.Name == "" {
@@ -214,8 +230,7 @@ func (s *Server) handleAdminUpdateOrg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req updateOrgReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if req.Name != nil {
@@ -224,40 +239,20 @@ func (s *Server) handleAdminUpdateOrg(w http.ResponseWriter, r *http.Request) {
 	if req.Slug != nil {
 		t.Slug = *req.Slug
 	}
-	if req.MonthlyRunQuota != nil {
-		if *req.MonthlyRunQuota < 0 {
-			httpError(w, http.StatusBadRequest, "monthly_run_quota must be >= 0")
-			return
-		}
-		t.MonthlyRunQuota = *req.MonthlyRunQuota
+	if !applyNonNegative(w, req.MonthlyRunQuota, &t.MonthlyRunQuota, "monthly_run_quota") {
+		return
 	}
-	if req.MemoryQuotaBytes != nil {
-		if *req.MemoryQuotaBytes < 0 {
-			httpError(w, http.StatusBadRequest, "memory_quota_bytes must be >= 0")
-			return
-		}
-		t.MemoryQuotaBytes = *req.MemoryQuotaBytes
+	if !applyNonNegative(w, req.MemoryQuotaBytes, &t.MemoryQuotaBytes, "memory_quota_bytes") {
+		return
 	}
-	if req.MonthlyCostCapUSD != nil {
-		if *req.MonthlyCostCapUSD < 0 {
-			httpError(w, http.StatusBadRequest, "monthly_cost_cap_usd must be >= 0")
-			return
-		}
-		t.MonthlyCostCapUSD = *req.MonthlyCostCapUSD
+	if !applyNonNegative(w, req.MonthlyCostCapUSD, &t.MonthlyCostCapUSD, "monthly_cost_cap_usd") {
+		return
 	}
-	if req.MaxConcurrentRuns != nil {
-		if *req.MaxConcurrentRuns < 0 {
-			httpError(w, http.StatusBadRequest, "max_concurrent_runs must be >= 0")
-			return
-		}
-		t.MaxConcurrentRuns = *req.MaxConcurrentRuns
+	if !applyNonNegative(w, req.MaxConcurrentRuns, &t.MaxConcurrentRuns, "max_concurrent_runs") {
+		return
 	}
-	if req.LaunchRatePerMin != nil {
-		if *req.LaunchRatePerMin < 0 {
-			httpError(w, http.StatusBadRequest, "launch_rate_per_min must be >= 0")
-			return
-		}
-		t.LaunchRatePerMin = *req.LaunchRatePerMin
+	if !applyNonNegative(w, req.LaunchRatePerMin, &t.LaunchRatePerMin, "launch_rate_per_min") {
+		return
 	}
 	t.UpdatedAt = time.Now().UTC()
 	if err := store.UpdateTeam(r.Context(), t); err != nil {
@@ -302,8 +297,7 @@ func (s *Server) handleAdminSetOrgStatus(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var req setOrgStatusReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	st := identity.TeamStatus(req.Status)

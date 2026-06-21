@@ -78,8 +78,7 @@ func (s *Server) handleCreateBotBinding(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var req botBindingReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if req.SecretID == nil || *req.SecretID == "" || req.SecretNameForWorkflow == nil || *req.SecretNameForWorkflow == "" {
@@ -123,8 +122,7 @@ func (s *Server) handleUpdateBotBinding(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var req botBindingReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if req.SecretID != nil && *req.SecretID != "" {

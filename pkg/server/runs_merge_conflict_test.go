@@ -51,7 +51,7 @@ func TestMergeConflict_FullChain(t *testing.T) {
 		t.Fatalf("GET /merge/conflicts status=%d", getResp.StatusCode)
 	}
 	var conflicts runview.MergeConflictsResponse
-	decodeJSON(t, getResp, &conflicts)
+	decodeJSONResp(t, getResp, &conflicts)
 	if len(conflicts.Files) != 1 {
 		t.Fatalf("conflicts.files=%d, want 1", len(conflicts.Files))
 	}
@@ -80,7 +80,7 @@ func TestMergeConflict_FullChain(t *testing.T) {
 		t.Fatalf("resolve status=%d", okResp.StatusCode)
 	}
 	var afterResolve runview.MergeConflictsResponse
-	decodeJSON(t, okResp, &afterResolve)
+	decodeJSONResp(t, okResp, &afterResolve)
 	if len(afterResolve.Files) != 0 {
 		t.Errorf("post-resolve files=%d, want 0", len(afterResolve.Files))
 	}
@@ -93,7 +93,7 @@ func TestMergeConflict_FullChain(t *testing.T) {
 		t.Fatalf("finalize status=%d", finResp.StatusCode)
 	}
 	var fin mergeRunResponse
-	decodeJSON(t, finResp, &fin)
+	decodeJSONResp(t, finResp, &fin)
 	if fin.MergeStatus != store.MergeStatusMerged {
 		t.Errorf("merge_status=%q, want merged", fin.MergeStatus)
 	}

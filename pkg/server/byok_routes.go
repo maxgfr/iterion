@@ -132,8 +132,7 @@ func (s *Server) handleCreateMyApiKey(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateApiKey(w http.ResponseWriter, r *http.Request, teamID, userID string) {
 	id, _ := auth.FromContext(r.Context())
 	var req createApiKeyReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	provider, err := secrets.ParseProvider(req.Provider)
@@ -195,8 +194,7 @@ func (s *Server) handleUpdateApiKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req updateApiKeyReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if req.Name != nil {

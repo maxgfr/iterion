@@ -347,8 +347,7 @@ func mapAuthErrorStatus(err error) int {
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if req.Email == "" || req.Password == "" {
@@ -401,8 +400,7 @@ func (s *Server) markLogin(result string) {
 // be used to probe account existence or state.
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	var req changePasswordReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if req.Email == "" || req.CurrentPassword == "" || req.NewPassword == "" {
@@ -419,8 +417,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req registerReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if req.Email == "" || req.Password == "" {
@@ -753,8 +750,7 @@ func (s *Server) handleListTeams(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 	id, _ := auth.FromContext(r.Context())
 	var req createTeamReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if req.Name == "" {
@@ -810,8 +806,7 @@ func (s *Server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var req createInvitationReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	role := identity.Role(req.Role)
@@ -912,8 +907,7 @@ func (s *Server) handleUpdateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req updateMemberReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	role := identity.Role(req.Role)
@@ -1008,8 +1002,7 @@ func (s *Server) handleInvitationAcceptForLoggedIn(w http.ResponseWriter, r *htt
 	var body struct {
 		Token string `json:"token"`
 	}
-	if err := readJSON(r, &body); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &body) {
 		return
 	}
 	if body.Token == "" {
@@ -1066,8 +1059,7 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req adminUpdateUserReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	statusChangedToDisabled := false

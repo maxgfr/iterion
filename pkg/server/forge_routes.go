@@ -290,8 +290,7 @@ func (s *Server) handleConnectForge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req forgeConnectReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	provider := forge.Provider(strings.TrimSpace(req.Provider))

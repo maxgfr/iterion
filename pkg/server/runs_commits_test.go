@@ -68,7 +68,7 @@ func TestRunCommitDetail_HappyPath(t *testing.T) {
 		t.Errorf("status = %d", resp.StatusCode)
 	}
 	var out runCommitDetailResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if !out.Available {
 		t.Fatalf("Available=false reason=%q", out.Reason)
 	}
@@ -93,7 +93,7 @@ func TestRunCommitDetail_ShortSHA(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out runCommitDetailResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if !out.Available || out.SHA != target {
 		t.Errorf("short SHA lookup: %+v", out)
 	}
@@ -115,7 +115,7 @@ func TestRunCommitDetail_OutOfRange(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out runCommitDetailResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if out.Available {
 		t.Fatalf("pre-base commit %q should be unavailable, got %+v", preBase, out)
 	}
@@ -162,7 +162,7 @@ func TestRunCommitFileDiff_HappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out gitlib.DiffPayload
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if out.Before == nil || *out.Before != "hello\n" {
 		t.Errorf("before: %v", out.Before)
 	}

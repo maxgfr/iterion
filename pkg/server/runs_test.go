@@ -71,7 +71,10 @@ func seedRun(t *testing.T, srv *Server, runID, workflowName string, status store
 	}
 }
 
-func decodeJSON(t *testing.T, resp *http.Response, v interface{}) {
+// decodeJSONResp reads + unmarshals the response body into v, failing
+// the test on any error. Distinct from production's decodeJSON (which
+// drives request decoding from a handler), hence the -Resp suffix.
+func decodeJSONResp(t *testing.T, resp *http.Response, v interface{}) {
 	t.Helper()
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
@@ -99,7 +102,7 @@ func TestListRuns_EmptyStore(t *testing.T) {
 	var out struct {
 		Runs []runview.RunSummary `json:"runs"`
 	}
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if len(out.Runs) != 0 {
 		t.Errorf("Runs = %d, want 0", len(out.Runs))
 	}
@@ -119,7 +122,7 @@ func TestListRuns_WithSeedAndFilter(t *testing.T) {
 		var out struct {
 			Runs []runview.RunSummary `json:"runs"`
 		}
-		decodeJSON(t, resp, &out)
+		decodeJSONResp(t, resp, &out)
 		if len(out.Runs) != 3 {
 			t.Errorf("len = %d, want 3", len(out.Runs))
 		}
@@ -133,7 +136,7 @@ func TestListRuns_WithSeedAndFilter(t *testing.T) {
 		var out struct {
 			Runs []runview.RunSummary `json:"runs"`
 		}
-		decodeJSON(t, resp, &out)
+		decodeJSONResp(t, resp, &out)
 		if len(out.Runs) != 1 || out.Runs[0].ID != "run-1" {
 			t.Errorf("Runs = %+v, want only run-1", out.Runs)
 		}
@@ -147,7 +150,7 @@ func TestListRuns_WithSeedAndFilter(t *testing.T) {
 		var out struct {
 			Runs []runview.RunSummary `json:"runs"`
 		}
-		decodeJSON(t, resp, &out)
+		decodeJSONResp(t, resp, &out)
 		if len(out.Runs) != 2 {
 			t.Errorf("len = %d, want 2", len(out.Runs))
 		}
@@ -161,7 +164,7 @@ func TestListRuns_WithSeedAndFilter(t *testing.T) {
 		var out struct {
 			Runs []runview.RunSummary `json:"runs"`
 		}
-		decodeJSON(t, resp, &out)
+		decodeJSONResp(t, resp, &out)
 		if len(out.Runs) != 2 {
 			t.Errorf("len = %d, want 2", len(out.Runs))
 		}
@@ -180,7 +183,7 @@ func TestGetRun_SnapshotShape(t *testing.T) {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
 	var snap runview.RunSnapshot
-	decodeJSON(t, resp, &snap)
+	decodeJSONResp(t, resp, &snap)
 
 	if snap.Run.ID != "run-1" {
 		t.Errorf("Run.ID = %q, want run-1", snap.Run.ID)
@@ -222,7 +225,7 @@ func TestGetEvents_FromTo(t *testing.T) {
 		var out struct {
 			Events []*store.Event `json:"events"`
 		}
-		decodeJSON(t, resp, &out)
+		decodeJSONResp(t, resp, &out)
 		if len(out.Events) != 3 {
 			t.Errorf("Events = %d, want 3", len(out.Events))
 		}
@@ -236,7 +239,7 @@ func TestGetEvents_FromTo(t *testing.T) {
 		var out struct {
 			Events []*store.Event `json:"events"`
 		}
-		decodeJSON(t, resp, &out)
+		decodeJSONResp(t, resp, &out)
 		if len(out.Events) != 2 {
 			t.Errorf("Events = %d, want 2", len(out.Events))
 		}
@@ -250,7 +253,7 @@ func TestGetEvents_FromTo(t *testing.T) {
 		var out struct {
 			Events []*store.Event `json:"events"`
 		}
-		decodeJSON(t, resp, &out)
+		decodeJSONResp(t, resp, &out)
 		if len(out.Events) != 2 {
 			t.Errorf("Events = %d, want 2", len(out.Events))
 		}
@@ -269,7 +272,7 @@ func TestCancelInactive_ReportsCurrentStatus(t *testing.T) {
 		t.Errorf("status = %d, want 202", resp.StatusCode)
 	}
 	var out cancelRunResponse
-	decodeJSON(t, resp, &out)
+	decodeJSONResp(t, resp, &out)
 	if out.Status != string(store.RunStatusFinished) {
 		t.Errorf("Status = %q, want finished", out.Status)
 	}

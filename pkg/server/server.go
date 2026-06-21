@@ -1104,8 +1104,7 @@ type saveFileResponse struct {
 
 func (s *Server) handleParse(w http.ResponseWriter, r *http.Request) {
 	var req parseRequest
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -1135,8 +1134,7 @@ func (s *Server) handleParse(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUnparse(w http.ResponseWriter, r *http.Request) {
 	var req unparseRequest
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -1152,8 +1150,7 @@ func (s *Server) handleUnparse(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 	var req validateRequest
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -1422,6 +1419,19 @@ func readJSON(r *http.Request, v interface{}) error {
 		return err
 	}
 	return json.Unmarshal(body, v)
+}
+
+// decodeJSON reads+unmarshals the request body into *dst, writing a 400
+// "invalid request: %v" on failure. Returns true on success, false if it
+// already wrote an error response. Intended for the dominant handler-boilerplate
+// pattern; handlers that emit a different status/message, use httpErrorFor, or
+// do extra validation between decode and error should keep the explicit form.
+func decodeJSON[T any](w http.ResponseWriter, r *http.Request, dst *T) bool {
+	if err := readJSON(r, dst); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+		return false
+	}
+	return true
 }
 
 // IsAllowedOrigin reports whether the given Origin header value matches the
@@ -1693,8 +1703,7 @@ func (s *Server) handleOpenFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req openFileRequest
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	absPath, err := s.safePath(req.Path)
@@ -1758,8 +1767,7 @@ func (s *Server) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req saveFileRequest
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if !workflowfile.IsWorkflowFile(req.Path) {

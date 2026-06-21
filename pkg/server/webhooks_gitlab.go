@@ -79,8 +79,8 @@ func (s *Server) handleGitLabMergeRequestEvent(ctx context.Context, w http.Respo
 	// A filtered delivery returns 200 (a 4xx would make GitLab disable
 	// the webhook after repeated metadata-only edits).
 	if !p.IsReviewable() ||
-		!gitlab.MatchEvent(cfg.EventAllowlist, "merge_request") ||
-		!gitlab.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
+		!webhooks.MatchEvent(cfg.EventAllowlist, "merge_request", "merge_request", "note") ||
+		!webhooks.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
 		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusFiltered, payloadHash, srcIP, "")
 		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
 		return
@@ -131,8 +131,8 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, r 
 		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
 	}
 	if !p.IsMergeRequestNote() || p.MRState != "opened" ||
-		!gitlab.MatchEvent(cfg.EventAllowlist, "note") ||
-		!gitlab.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
+		!webhooks.MatchEvent(cfg.EventAllowlist, "note", "merge_request", "note") ||
+		!webhooks.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
 		filtered("out of scope (not an open-MR note / event / project)")
 		return
 	}

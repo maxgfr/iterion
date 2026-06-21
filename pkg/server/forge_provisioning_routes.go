@@ -52,8 +52,7 @@ func (s *Server) handleEnableForgeRepoBots(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var req forgeEnableReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if strings.TrimSpace(req.ConnectionID) == "" || strings.TrimSpace(req.Repo) == "" || len(req.BotIDs) == 0 {

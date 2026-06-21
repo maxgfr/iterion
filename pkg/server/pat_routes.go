@@ -51,8 +51,7 @@ func (s *Server) handleListPATs(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreatePAT(w http.ResponseWriter, r *http.Request) {
 	id, _ := auth.FromContext(r.Context())
 	var req createPATReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)

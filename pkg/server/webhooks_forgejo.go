@@ -84,8 +84,8 @@ func (s *Server) handleForgejoWebhook(w http.ResponseWriter, r *http.Request) {
 	meta := forgejoPRMeta(p)
 
 	if !p.IsReviewable() ||
-		!forgejo.MatchEvent(cfg.EventAllowlist, "pull_request") ||
-		!forgejo.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
+		!webhooks.MatchEvent(cfg.EventAllowlist, "pull_request", "pull_request") ||
+		!webhooks.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
 		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusFiltered, payloadHash, srcIP, "")
 		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
 		return

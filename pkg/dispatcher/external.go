@@ -53,10 +53,3 @@ func buildForgejoTrackerFromConfig(cfg *ForgejoTrackerConfig) (tracker.Tracker, 
 		StateMapping:  mapping,
 	})
 }
-
-func init() {
-	// Wire the production factories at package init so Manager.Start
-	// can build any tracker kind without consumer-side registration.
-	buildGitHubTracker = buildGitHubTrackerFromConfig
-	buildForgejoTracker = buildForgejoTrackerFromConfig
-}

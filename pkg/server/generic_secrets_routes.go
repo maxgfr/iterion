@@ -114,8 +114,7 @@ func (s *Server) handleCreateMySecret(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateGenericSecret(w http.ResponseWriter, r *http.Request, teamID, userID string) {
 	id, _ := auth.FromContext(r.Context())
 	var req createGenericSecretReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	name := strings.TrimSpace(req.Name)
@@ -166,8 +165,7 @@ func (s *Server) handleUpdateGenericSecret(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var req updateGenericSecretReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if req.Name != nil {

@@ -66,8 +66,7 @@ func (s *Server) handleRegisterForgeOAuthApp(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req forgeOAuthAppReq
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	provider := forge.Provider(strings.TrimSpace(req.Provider))

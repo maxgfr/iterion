@@ -69,17 +69,6 @@ func TestIsReviewable(t *testing.T) {
 	}
 }
 
-func TestMatchEvent(t *testing.T) {
-	if !MatchEvent(nil, "pull_request") || MatchEvent(nil, "push") {
-		t.Fatal("default allowlist should be pull_request only")
-	}
-}
-
-func TestMatchProject(t *testing.T) {
-	if !MatchProject(nil, "any/thing") {
-		t.Fatal("empty allowlist allows all")
-	}
-	if !MatchProject([]string{"acme/*"}, "acme/x") {
-		t.Fatal("prefix wildcard")
-	}
-}
+// Allowlist matching tests live in pkg/webhooks/match_test.go (the
+// canonical webhooks.MatchEvent + MatchProject are exercised there with
+// every provider's default kinds).

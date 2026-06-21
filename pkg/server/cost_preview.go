@@ -72,8 +72,7 @@ func estimateNodeTokens(model, effort string, maxTokensHint int) (in, out int) {
 
 func (s *Server) handlePreviewCost(w http.ResponseWriter, r *http.Request) {
 	var req previewCostRequest
-	if err := readJSON(r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request: %v", err)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 

@@ -41,7 +41,7 @@ func postPreviewCost(t *testing.T, hs string, body string) previewCostResponse {
 		t.Fatalf("status=%d", resp.StatusCode)
 	}
 	var got previewCostResponse
-	decodeJSON(t, resp, &got)
+	decodeJSONResp(t, resp, &got)
 	return got
 }
 

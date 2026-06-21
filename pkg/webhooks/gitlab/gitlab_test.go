@@ -140,39 +140,6 @@ func TestIsReviewCommand(t *testing.T) {
 	}
 }
 
-func TestMatchEvent(t *testing.T) {
-	// empty allowlist: merge_request + note both allowed; everything
-	// else (push/pipeline/…) denied. Lets a zero-config GitLab webhook
-	// reach both the auto-review and the /revi paths.
-	if !MatchEvent(nil, "merge_request") || !MatchEvent(nil, "note") || MatchEvent(nil, "push") {
-		t.Fatal("default allowlist should be {merge_request, note}")
-	}
-	if !MatchEvent([]string{"*"}, "anything") {
-		t.Fatal("wildcard event")
-	}
-	if !MatchEvent([]string{"push", "merge_request"}, "push") {
-		t.Fatal("explicit allow")
-	}
-	// explicit allowlist excludes by omission (gates /revi off).
-	if MatchEvent([]string{"merge_request"}, "note") {
-		t.Fatal("explicit allowlist must exclude unlisted kinds")
-	}
-}
-
-func TestMatchProject(t *testing.T) {
-	if !MatchProject(nil, "acme/widgets") {
-		t.Fatal("empty allowlist allows all")
-	}
-	if !MatchProject([]string{"acme/widgets"}, "acme/widgets") || MatchProject([]string{"acme/widgets"}, "acme/gadgets") {
-		t.Fatal("exact match")
-	}
-	if !MatchProject([]string{"acme/*"}, "acme/anything") || !MatchProject([]string{"acme/*"}, "acme/sub/repo") {
-		t.Fatal("prefix wildcard")
-	}
-	if MatchProject([]string{"acme/*"}, "other/repo") {
-		t.Fatal("prefix wildcard should not cross group")
-	}
-	if !MatchProject([]string{"*"}, "any/thing") {
-		t.Fatal("bare wildcard")
-	}
-}
+// Allowlist matching tests live in pkg/webhooks/match_test.go (the
+// canonical webhooks.MatchEvent + MatchProject are exercised there with
+// every provider's default kinds).
