@@ -112,13 +112,14 @@ export function RegisterOAuthAppForm({
 
   if (!show) {
     return (
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="sm"
+        className="mt-3"
         onClick={() => setShow(true)}
-        className="mt-3 text-accent-text hover:underline text-sm"
       >
         + Register an OAuth app
-      </button>
+      </Button>
     );
   }
 
@@ -127,16 +128,15 @@ export function RegisterOAuthAppForm({
       <h4 className="font-medium text-sm">Register an OAuth app</h4>
       <div className="flex gap-2 flex-wrap">
         {(["gitlab", "github", "forgejo"] as ForgeProvider[]).map((p) => (
-          <button
+          <Button
             key={p}
-            type="button"
+            variant={provider === p ? "secondary" : "ghost"}
+            size="sm"
+            aria-pressed={provider === p}
             onClick={() => pickProvider(p)}
-            className={`text-sm rounded px-3 py-1 border ${
-              provider === p ? "border-accent bg-surface-2" : "border-border-subtle"
-            }`}
           >
             {p}
-          </button>
+          </Button>
         ))}
       </div>
 

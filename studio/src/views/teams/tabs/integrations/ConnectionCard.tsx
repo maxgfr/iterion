@@ -8,6 +8,7 @@ import {
   deleteForgeConnection,
   disableForgeIntegration,
 } from "@/api/forgeConnections";
+import { Button } from "@/components/ui/Button";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 
 import { type ConfirmFn, statusTone } from "./forgeShared";
@@ -85,13 +86,13 @@ export function ConnectionCard({
           </div>
         </div>
         {canManage && (
-          <button
-            type="button"
+          <Button
+            variant="danger"
+            size="sm"
             onClick={disconnect}
-            className="text-danger hover:underline text-xs"
           >
             Disconnect
-          </button>
+          </Button>
         )}
       </div>
 
@@ -111,13 +112,13 @@ export function ConnectionCard({
                   <span className="text-fg-muted">· {i.bot_ids.join(", ")}</span>
                 </span>
                 {canManage && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="danger"
+                    size="sm"
                     onClick={() => disable(i)}
-                    className="text-danger hover:underline text-xs"
                   >
                     Disable
-                  </button>
+                  </Button>
                 )}
               </li>
             ))}
@@ -140,13 +141,13 @@ export function ConnectionCard({
             onError={onError}
           />
         ) : (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setEnabling(true)}
-            className="text-accent-text hover:underline text-sm"
           >
             + Enable a repo
-          </button>
+          </Button>
         ))}
     </section>
   );

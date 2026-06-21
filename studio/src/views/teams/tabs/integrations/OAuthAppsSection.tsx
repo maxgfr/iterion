@@ -6,6 +6,7 @@ import {
 
 import type { ConfirmFn } from "./forgeShared";
 import { RegisterOAuthAppForm } from "./RegisterOAuthAppForm";
+import { Button } from "@/components/ui/Button";
 
 export function OAuthAppsSection({
   teamID,
@@ -68,13 +69,14 @@ export function OAuthAppsSection({
                 </div>
               </div>
               {canManage && (
-                <button
-                  type="button"
+                <Button
+                  variant="danger"
+                  size="sm"
+                  className="shrink-0"
                   onClick={() => void remove(a)}
-                  className="text-danger hover:underline text-xs shrink-0"
                 >
                   Delete
-                </button>
+                </Button>
               )}
             </li>
           ))}

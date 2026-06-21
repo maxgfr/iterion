@@ -2,8 +2,10 @@ import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useMemo, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { Button } from "@/components/ui/Button";
+import { CopyButton } from "@/components/ui/CopyButton";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import { Tabs } from "@/components/ui/Tabs";
 import { useLocation, useParams, useSearch } from "wouter";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useAuth } from "@/auth/AuthContext";
@@ -107,19 +109,13 @@ export default function TeamPage() {
   return (
     <div className="h-full overflow-auto">
       <div className="max-w-6xl mx-auto p-3 sm:p-6 grid grid-cols-1 sm:grid-cols-[200px,1fr] gap-4 sm:gap-6">
-        <nav className="flex sm:block sm:space-y-1 gap-1 flex-wrap">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => selectTab(t.id)}
-              className={`sm:w-full text-left px-3 py-2 rounded text-sm min-h-[44px] sm:min-h-0 ${
-                tab === t.id ? "bg-surface-2" : "hover:bg-surface-1"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
+        <Tabs
+          variant="pill"
+          value={tab}
+          onValueChange={(v) => selectTab(v as Tab)}
+          items={TABS.map((t) => ({ value: t.id, label: t.label }))}
+          listClassName="flex sm:flex-col gap-1 flex-wrap"
+        />
 
         <main>
           {tab === "members" && <Members teamID={team.team_id} canManage={canManage} />}
@@ -282,16 +278,12 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
               Invitation token (copy + email this — it appears once):
               <br />
               {issuedToken}
-              <div className="mt-2 flex gap-2 font-sans">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(issuedToken);
-                  }}
-                >
-                  Copy
-                </Button>
+              <div className="mt-2 flex gap-2 items-center font-sans">
+                <CopyButton
+                  value={issuedToken}
+                  label="Copy"
+                  copiedLabel="Copied"
+                />
                 <Button
                   variant="ghost"
                   size="sm"
@@ -340,13 +332,13 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
                 </td>
                 <td className="px-2 py-2 text-right">
                   {canManage && (
-                    <button
-                      type="button"
+                    <Button
+                      variant="danger"
+                      size="sm"
                       onClick={() => kick(m.user_id)}
-                      className="text-danger hover:underline text-xs"
                     >
                       Remove
-                    </button>
+                    </Button>
                   )}
                 </td>
               </tr>
@@ -379,9 +371,13 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
                   </td>
                   <td className="px-2 py-2 text-right">
                     {canManage && (
-                      <button onClick={() => cancel(i.id)} className="text-danger hover:underline text-xs">
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => cancel(i.id)}
+                      >
                         Cancel
-                      </button>
+                      </Button>
                     )}
                   </td>
                 </tr>

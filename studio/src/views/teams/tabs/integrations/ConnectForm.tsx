@@ -106,19 +106,18 @@ export function ConnectForm({
       <h3 className="font-medium">Connect a forge</h3>
       <div className="flex gap-2 flex-wrap">
         {(["gitlab", "github", "forgejo"] as ForgeProvider[]).map((p) => (
-          <button
+          <Button
             key={p}
-            type="button"
+            variant={provider === p ? "secondary" : "ghost"}
+            size="sm"
+            aria-pressed={provider === p}
             disabled={!CONNECTABLE.includes(p)}
             onClick={() => pickProvider(p)}
-            className={`text-sm rounded px-3 py-1 border ${
-              provider === p ? "border-accent bg-surface-2" : "border-border-subtle"
-            } disabled:opacity-40`}
             title={CONNECTABLE.includes(p) ? "" : "Coming in a later phase"}
           >
             {p}
             {CONNECTABLE.includes(p) ? "" : " (soon)"}
-          </button>
+          </Button>
         ))}
       </div>
 

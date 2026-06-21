@@ -3,6 +3,7 @@ import { useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { Tabs } from "@/components/ui/Tabs";
 import { useConfirm } from "@/hooks/useConfirm";
 import ApiKeysPanel from "./ApiKeys";
 import OAuthConnections from "./OAuthConnections";
@@ -35,19 +36,13 @@ export default function SettingsPage() {
   return (
     <div className="h-full overflow-auto">
       <div className="max-w-5xl mx-auto p-3 sm:p-6 grid grid-cols-1 sm:grid-cols-[200px,1fr] gap-4 sm:gap-6">
-        <nav className="flex sm:block sm:space-y-1 gap-1 flex-wrap">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`sm:w-full text-left px-3 py-2 rounded text-sm min-h-[44px] sm:min-h-0 ${
-                tab === t.id ? "bg-surface-2" : "hover:bg-surface-1"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
+        <Tabs
+          variant="pill"
+          value={tab}
+          onValueChange={(v) => setTab(v as Tab)}
+          items={tabs.map((t) => ({ value: t.id, label: t.label }))}
+          listClassName="flex sm:flex-col gap-1 flex-wrap"
+        />
 
         <div className="bg-surface-0">
           {tab === "api-keys" && <ApiKeysPanel />}
