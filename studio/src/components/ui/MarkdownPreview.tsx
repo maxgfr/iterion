@@ -34,7 +34,7 @@ export function MarkdownPreview({
 
   return (
     <div className="space-y-1">
-      <div className="flex items-center gap-1 text-[10px]">
+      <div className="flex items-center gap-1 text-caption">
         <button
           type="button"
           onClick={() => setMode("edit")}

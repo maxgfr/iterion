@@ -70,22 +70,22 @@ function RunsAnalyticsViewInner() {
   );
 
   return (
-    <div className="h-full overflow-auto p-4 space-y-4 text-[13px]">
+    <div className="h-full overflow-auto p-4 space-y-4 text-label">
       <header className="flex items-baseline gap-3">
         <Link
           href="/runs"
-          className="text-fg-muted hover:text-fg-default text-[11px] inline-flex items-center gap-1 shrink-0"
+          className="text-fg-muted hover:text-fg-default text-micro inline-flex items-center gap-1 shrink-0"
         >
           <ArrowLeftIcon className="w-3 h-3" />
           Runs
         </Link>
         <h1 className="text-lg font-semibold text-fg-default">Runs analytics</h1>
-        <span className="text-fg-muted text-[11px]">
+        <span className="text-fg-muted text-micro">
           {stats
             ? `${stats.total_runs} run${stats.total_runs === 1 ? "" : "s"} · ${formatCost(stats.total_cost_usd)} spent · last ${stats.since_days} days`
             : "loading…"}
         </span>
-        <div className="ml-auto flex items-center gap-1 text-[11px]">
+        <div className="ml-auto flex items-center gap-1 text-micro">
           {WINDOWS.map((w) => (
             <button
               key={w}
@@ -112,7 +112,7 @@ function RunsAnalyticsViewInner() {
       </header>
 
       {error && (
-        <div className="text-danger-fg text-[11px]" role="alert">
+        <div className="text-danger-fg text-micro" role="alert">
           {error}
         </div>
       )}
@@ -190,9 +190,9 @@ function Panel({
   return (
     <section className="border border-border-subtle rounded-md bg-surface-0 p-3 space-y-2">
       <header className="flex items-baseline gap-2">
-        <h2 className="text-[13px] font-medium text-fg-default">{title}</h2>
+        <h2 className="text-label font-medium text-fg-default">{title}</h2>
         {subtitle && (
-          <span className="text-[11px] text-fg-muted">— {subtitle}</span>
+          <span className="text-micro text-fg-muted">— {subtitle}</span>
         )}
       </header>
       {children}
@@ -211,7 +211,7 @@ interface CostChartProps {
 function CostChart({ buckets, workflows, colors }: CostChartProps) {
   if (buckets.length === 0) {
     return (
-      <p className="text-[11px] text-fg-muted italic">No cost recorded in this window.</p>
+      <p className="text-micro text-fg-muted italic">No cost recorded in this window.</p>
     );
   }
   const W = 880;
@@ -325,7 +325,7 @@ interface DurationChartProps {
 function DurationChart({ workflows, colors }: DurationChartProps) {
   if (workflows.length === 0) {
     return (
-      <p className="text-[11px] text-fg-muted italic">
+      <p className="text-micro text-fg-muted italic">
         No finished runs in this window — duration unknown.
       </p>
     );
@@ -337,7 +337,7 @@ function DurationChart({ workflows, colors }: DurationChartProps) {
         const p50Pct = (w.duration_p50_sec / max) * 100;
         const p95Pct = (w.duration_p95_sec / max) * 100;
         return (
-          <div key={w.workflow} className="text-[11px]">
+          <div key={w.workflow} className="text-micro">
             <div className="flex items-baseline gap-2 mb-0.5">
               <span className="font-mono text-fg-default">{w.workflow}</span>
               <span className="text-fg-muted">
@@ -392,9 +392,9 @@ function WorkflowTable({ workflows, colors }: WorkflowTableProps) {
   const totalRuns = workflows.reduce((a, w) => a + w.run_count, 0);
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-[12px] border-collapse">
+      <table className="w-full text-body border-collapse">
       <thead>
-        <tr className="text-left text-fg-muted text-[11px]">
+        <tr className="text-left text-fg-muted text-micro">
           <th className="font-medium py-1">Workflow</th>
           <th className="font-medium py-1 text-right">Runs</th>
           <th className="font-medium py-1">Status</th>
@@ -422,7 +422,7 @@ function WorkflowTable({ workflows, colors }: WorkflowTableProps) {
               </td>
               <td className="py-1 text-right tabular-nums text-fg-default">
                 {w.run_count}
-                <span className="text-fg-subtle text-[10px] ml-1">
+                <span className="text-fg-subtle text-caption ml-1">
                   ({totalRuns > 0 ? Math.round((w.run_count / totalRuns) * 100) : 0}%)
                 </span>
               </td>
@@ -431,7 +431,7 @@ function WorkflowTable({ workflows, colors }: WorkflowTableProps) {
               </td>
               <td className={`py-1 text-right tabular-nums ${rateClass}`}>
                 {(w.fail_rate * 100).toFixed(0)}%
-                <span className="text-fg-subtle text-[10px] ml-1">
+                <span className="text-fg-subtle text-caption ml-1">
                   ({w.fail_count}/{w.run_count})
                 </span>
               </td>
@@ -526,7 +526,7 @@ function Legend({
   entries: { label: string; color: string; value: string }[];
 }) {
   return (
-    <div className="flex flex-wrap gap-3 text-[11px]">
+    <div className="flex flex-wrap gap-3 text-micro">
       {entries.map((e) => (
         <span key={e.label} className="inline-flex items-center gap-1">
           <span

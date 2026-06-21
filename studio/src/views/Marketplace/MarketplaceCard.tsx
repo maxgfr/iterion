@@ -26,14 +26,14 @@ export function MarketplaceCard({ entry, installing, onInstall, onOpen }: Props)
       >
         <div className="flex w-full items-baseline justify-between gap-2">
           <span className="truncate text-sm font-medium text-fg-default">{label}</span>
-          <span className="shrink-0 text-[10px] text-fg-subtle">
+          <span className="shrink-0 text-caption text-fg-subtle">
             {entry.installs} install{entry.installs === 1 ? "" : "s"}
           </span>
         </div>
         {entry.description && (
           <p className="line-clamp-2 text-xs text-fg-muted">{entry.description}</p>
         )}
-        <div className="flex flex-wrap items-center gap-1 text-[10px] text-fg-subtle">
+        <div className="flex flex-wrap items-center gap-1 text-caption text-fg-subtle">
           {entry.author && <span>by {entry.author}</span>}
           {entry.version && <span className="font-mono">v{entry.version}</span>}
           {entry.presets && entry.presets.length > 0 && (
@@ -47,7 +47,7 @@ export function MarketplaceCard({ entry, installing, onInstall, onOpen }: Props)
             {entry.tags.map((t) => (
               <span
                 key={t}
-                className="rounded bg-surface-1 px-1.5 py-0.5 text-[10px] text-fg-muted"
+                className="rounded bg-surface-1 px-1.5 py-0.5 text-caption text-fg-muted"
               >
                 {t}
               </span>
@@ -56,7 +56,7 @@ export function MarketplaceCard({ entry, installing, onInstall, onOpen }: Props)
         )}
       </button>
       <div className="flex items-center justify-between gap-2">
-        <span className="truncate font-mono text-[10px] text-fg-subtle">
+        <span className="truncate font-mono text-caption text-fg-subtle">
           {entry.repo_url}
           {entry.ref ? `#${entry.ref}` : ""}
         </span>

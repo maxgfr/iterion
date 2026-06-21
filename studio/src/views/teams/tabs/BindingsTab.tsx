@@ -342,7 +342,7 @@ function BindingDialog({
             onChange={(e) => setName(e.target.value)}
             placeholder="forge_token"
           />
-          <div className="text-[10px] text-fg-subtle mt-1">
+          <div className="text-caption text-fg-subtle mt-1">
             The name the bot's workflow declares in its <code>secrets:</code> block. Must match
             exactly.
           </div>
@@ -350,7 +350,7 @@ function BindingDialog({
         <label className="block">
           <div className="text-xs text-fg-muted mb-1">Allowed egress hosts (optional)</div>
           <TagInput value={hosts} onChange={setHosts} placeholder="gitlab.example.com" />
-          <div className="text-[10px] text-fg-subtle mt-1">
+          <div className="text-caption text-fg-subtle mt-1">
             ADR-018: if set, these hosts intersect (never broaden) the workflow's declared{" "}
             <code>hosts:</code>. Leave empty to keep the workflow default.
           </div>

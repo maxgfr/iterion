@@ -645,7 +645,7 @@ function FileMenuItem({
       <span className="text-fg-muted">{icon}</span>
       <span className="flex-1">{label}</span>
       {shortcut && (
-        <span className="text-[10px] text-fg-subtle font-mono">{shortcut}</span>
+        <span className="text-caption text-fg-subtle font-mono">{shortcut}</span>
       )}
     </button>
   );
@@ -704,12 +704,12 @@ function FileStatusBadge({
         />
       )}
       {displayParent && (
-        <span className="truncate text-[10px] text-fg-subtle font-mono shrink min-w-0">
+        <span className="truncate text-caption text-fg-subtle font-mono shrink min-w-0">
           {displayParent}
         </span>
       )}
       {displayParent && (
-        <span aria-hidden className="text-fg-subtle text-[10px] shrink-0">
+        <span aria-hidden className="text-fg-subtle text-caption shrink-0">
           ›
         </span>
       )}
@@ -717,7 +717,7 @@ function FileStatusBadge({
         {basename}
       </span>
       {subtitle && (
-        <span className="text-[10px] text-fg-subtle shrink-0">{subtitle}</span>
+        <span className="text-caption text-fg-subtle shrink-0">{subtitle}</span>
       )}
     </div>
   );

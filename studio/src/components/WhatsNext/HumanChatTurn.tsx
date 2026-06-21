@@ -286,7 +286,7 @@ function QuickActionStrip({
 }) {
   if (actions.length === 0) return null;
   return (
-    <div className="flex items-center gap-1 text-[11px] text-fg-subtle">
+    <div className="flex items-center gap-1 text-micro text-fg-subtle">
       <span className="mr-1">Quick:</span>
       {actions.map((kind) => (
         <button
@@ -308,14 +308,14 @@ function AssistantBubble({ text }: { text: string }) {
   return (
     <div className="flex items-start gap-2">
       <span
-        className="mt-1 px-2 py-0.5 rounded-full bg-accent-soft text-accent-fg text-[10px] font-bold flex items-center justify-center shrink-0"
+        className="mt-1 px-2 py-0.5 rounded-full bg-accent-soft text-accent-fg text-caption font-bold flex items-center justify-center shrink-0"
         aria-hidden="true"
       >
         {/* whats-next's persona (manifest display_name); this bubble is
             whats-next-specific so the name is fixed here. */}
         Nexie
       </span>
-      <div className="flex-1 rounded-lg bg-surface-2 border border-border-subtle px-3 py-2 text-[13px] text-fg-default">
+      <div className="flex-1 rounded-lg bg-surface-2 border border-border-subtle px-3 py-2 text-label text-fg-default">
         {text}
       </div>
     </div>
@@ -328,12 +328,12 @@ function AnsweredTurn({ message }: { message: HumanQuestionMessage }) {
       <AssistantBubble text={message.prompt} />
       <div className="flex items-start gap-2 ml-6">
         <span
-          className="mt-1 px-2 py-0.5 rounded-full bg-surface-3 text-fg-default text-[10px] font-bold flex items-center justify-center shrink-0"
+          className="mt-1 px-2 py-0.5 rounded-full bg-surface-3 text-fg-default text-caption font-bold flex items-center justify-center shrink-0"
           aria-hidden="true"
         >
           You
         </span>
-        <div className="flex-1 rounded-lg bg-surface-1 border border-border-subtle px-3 py-2 text-[13px] text-fg-default whitespace-pre-wrap">
+        <div className="flex-1 rounded-lg bg-surface-1 border border-border-subtle px-3 py-2 text-label text-fg-default whitespace-pre-wrap">
           {message.userReply || (
             <span className="italic text-fg-subtle">
               {message.outcome && "approved" in message.outcome

@@ -254,7 +254,7 @@ function ToolPayloadBlock({
         }
       }}
     >
-      <summary className="cursor-pointer text-[10px] text-fg-muted px-1 py-0.5 rounded hover:bg-surface-2 flex items-center justify-between">
+      <summary className="cursor-pointer text-caption text-fg-muted px-1 py-0.5 rounded hover:bg-surface-2 flex items-center justify-between">
         <span>
           {label}
           {totalSize !== undefined && totalSize > value.length && (
@@ -268,14 +268,14 @@ function ToolPayloadBlock({
       <pre
         ref={preRef}
         onScroll={handleScroll}
-        className={`mt-1 text-[10px] font-mono whitespace-pre-wrap break-words bg-surface-1 rounded p-1.5 ${
+        className={`mt-1 text-caption font-mono whitespace-pre-wrap break-words bg-surface-1 rounded p-1.5 ${
           expanded ? "max-h-[60vh] overflow-auto" : "max-h-40 overflow-auto"
         }`}
       >
         {fullValue}
       </pre>
       {fetchErr && (
-        <div className="mt-1 text-[10px] text-danger-fg px-1">
+        <div className="mt-1 text-caption text-danger-fg px-1">
           fetch error: {fetchErr}
         </div>
       )}
@@ -284,7 +284,7 @@ function ToolPayloadBlock({
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="text-[10px] text-fg-subtle hover:text-fg-default px-1 py-0.5 rounded hover:bg-surface-2"
+            className="text-caption text-fg-subtle hover:text-fg-default px-1 py-0.5 rounded hover:bg-surface-2"
           >
             {expanded ? "collapse" : "expand"}
           </button>
@@ -294,7 +294,7 @@ function ToolPayloadBlock({
             type="button"
             onClick={() => void loadMore()}
             disabled={loading}
-            className="text-[10px] text-fg-subtle hover:text-fg-default px-1 py-0.5 rounded hover:bg-surface-2 disabled:opacity-50"
+            className="text-caption text-fg-subtle hover:text-fg-default px-1 py-0.5 rounded hover:bg-surface-2 disabled:opacity-50"
           >
             {loading
               ? "loading…"
@@ -317,7 +317,7 @@ function ToolPayloadBlock({
 // tasks are checked + struck through.
 function TodoChecklist({ todos }: { todos: TodoItem[] }) {
   return (
-    <ul className="mb-1.5 space-y-0.5 text-[11px] font-mono leading-tight">
+    <ul className="mb-1.5 space-y-0.5 text-micro font-mono leading-tight">
       {todos.map((t, i) => {
         let textClasses: string;
         let box: ReactNode;
@@ -373,7 +373,7 @@ function TodoChecklist({ todos }: { todos: TodoItem[] }) {
 // arguments the agent invoked the tool with.
 function ToolFieldList({ fields }: { fields: ToolField[] }) {
   return (
-    <ul className="mb-1.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-[10px]">
+    <ul className="mb-1.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-caption">
       {fields.map((f, i) => (
         <li key={`${f.label}-${i}`} className="contents">
           <span className="text-fg-subtle">{f.label}:</span>
@@ -406,18 +406,18 @@ function ToolCallCard({ call, runId }: { call: ToolCall; runId: string }) {
       }`}
     >
       <div className="flex items-center gap-2 mb-1">
-        <span className="font-medium text-[11px]">{call.toolName}</span>
+        <span className="font-medium text-micro">{call.toolName}</span>
         <StatusBadge
           status={call.isError ? "failed" : "finished"}
           label={call.isError ? "error" : "ok"}
           showGlyph={false}
         />
         {call.duration !== undefined && (
-          <span className="text-[10px] text-fg-subtle">
+          <span className="text-caption text-fg-subtle">
             {formatMs(call.duration)}
           </span>
         )}
-        <span className="ml-auto text-[10px] font-mono text-fg-subtle">
+        <span className="ml-auto text-caption font-mono text-fg-subtle">
           seq {call.seq}
         </span>
       </div>
@@ -428,10 +428,10 @@ function ToolCallCard({ call, runId }: { call: ToolCall; runId: string }) {
       {call.errorMsg && (
         <div className="mb-1 rounded bg-danger-soft/40 px-1.5 py-1">
           <div className="flex items-center justify-between gap-2 mb-0.5">
-            <span className="text-[10px] font-medium text-danger-fg">tool error</span>
+            <span className="text-caption font-medium text-danger-fg">tool error</span>
             <CopyButton value={call.errorMsg} />
           </div>
-          <div className="text-[10px] font-mono text-danger-fg whitespace-pre-wrap break-words">
+          <div className="text-caption font-mono text-danger-fg whitespace-pre-wrap break-words">
             {call.errorMsg}
           </div>
         </div>
@@ -460,7 +460,7 @@ function ToolCallCard({ call, runId }: { call: ToolCall; runId: string }) {
         <button
           type="button"
           onClick={() => setShowRaw((v) => !v)}
-          className="text-[10px] text-fg-subtle hover:text-fg-default"
+          className="text-caption text-fg-subtle hover:text-fg-default"
         >
           {showRaw ? "hide raw" : "show raw"}
         </button>
@@ -469,7 +469,7 @@ function ToolCallCard({ call, runId }: { call: ToolCall; runId: string }) {
         )}
       </div>
       {showRaw && call.rawData && (
-        <pre className="mt-1 text-[10px] font-mono whitespace-pre-wrap break-all bg-surface-1 rounded p-1.5 text-fg-subtle">
+        <pre className="mt-1 text-caption font-mono whitespace-pre-wrap break-all bg-surface-1 rounded p-1.5 text-fg-subtle">
           {JSON.stringify(call.rawData, null, 2)}
         </pre>
       )}

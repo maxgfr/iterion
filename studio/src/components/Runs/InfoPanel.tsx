@@ -145,7 +145,7 @@ export default function InfoPanel({ run }: InfoPanelProps) {
 
         {run.error && (
           <Section title="Error">
-            <div className="text-[11px] text-danger-fg bg-danger-soft px-2 py-1.5 rounded whitespace-pre-wrap">
+            <div className="text-micro text-danger-fg bg-danger-soft px-2 py-1.5 rounded whitespace-pre-wrap">
               {run.error}
             </div>
           </Section>
@@ -164,7 +164,7 @@ function Section({
 }) {
   return (
     <section>
-      <h3 className="text-[10px] font-semibold uppercase tracking-wide text-fg-muted mb-1">
+      <h3 className="text-caption font-semibold uppercase tracking-wide text-fg-muted mb-1">
         {title}
       </h3>
       <div className="space-y-1">{children}</div>
@@ -180,7 +180,7 @@ function Row({
   children: ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-[80px_1fr] gap-2 text-[11px]">
+    <div className="grid grid-cols-[80px_1fr] gap-2 text-micro">
       <span className="text-fg-subtle truncate">{label}</span>
       <div className="min-w-0 truncate text-fg-default">{children}</div>
     </div>
@@ -205,7 +205,7 @@ function Mono({ children, copyable, title }: MonoProps) {
   };
   if (!copyable) {
     return (
-      <code className="font-mono text-[10px] text-fg-default" title={title}>
+      <code className="font-mono text-caption text-fg-default" title={title}>
         {children}
       </code>
     );
@@ -215,7 +215,7 @@ function Mono({ children, copyable, title }: MonoProps) {
       <button
         type="button"
         onClick={() => void onCopy()}
-        className="inline-flex items-center gap-1 font-mono text-[10px] text-fg-default hover:text-info"
+        className="inline-flex items-center gap-1 font-mono text-caption text-fg-default hover:text-info"
       >
         <span className="truncate">{children}</span>
         <CopyIcon className="h-3 w-3 shrink-0 text-fg-subtle" />

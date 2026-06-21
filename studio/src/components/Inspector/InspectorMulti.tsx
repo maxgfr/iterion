@@ -66,7 +66,7 @@ export default function InspectorMulti({ nodeIds, edgeIds }: InspectorMultiProps
           <div className="text-sm font-semibold text-fg-default">
             {nodeIds.length + edgeIds.length} selected
           </div>
-          <div className="text-[10px] uppercase tracking-wider text-fg-subtle">
+          <div className="text-caption uppercase tracking-wider text-fg-subtle">
             {nodeIds.length} node{nodeIds.length === 1 ? "" : "s"} ·{" "}
             {edgeIds.length} edge{edgeIds.length === 1 ? "" : "s"}
           </div>

@@ -1,7 +1,7 @@
 // HeaderBanner is the thin sub-toolbar strip used under page/run headers
 // to surface a single line of context (source ticket, fork breadcrumb,
 // etc). It encapsulates the shared `shrink-0 px-4 py-1.5 border-b flex
-// items-center gap-2 text-[11px]` skeleton + per-tone soft/border tint,
+// items-center gap-2 text-micro` skeleton + per-tone soft/border tint,
 // while accepting className overrides for site-specific tweaks.
 import type { HTMLAttributes } from "react";
 
@@ -25,7 +25,7 @@ export function HeaderBanner({
   ...rest
 }: HeaderBannerProps) {
   const base =
-    "shrink-0 px-4 py-1.5 border-b flex items-center gap-2 text-[11px]";
+    "shrink-0 px-4 py-1.5 border-b flex items-center gap-2 text-micro";
   return (
     <div className={`${base} ${toneClass[tone]} ${className}`.trim()} {...rest}>
       {children}

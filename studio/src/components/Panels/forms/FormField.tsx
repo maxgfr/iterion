@@ -91,7 +91,7 @@ function FieldRow({
         <p
           id={errorId}
           role="alert"
-          className="text-[10px] text-danger mt-0.5"
+          className="text-caption text-danger mt-0.5"
         >
           {error}
         </p>
@@ -562,13 +562,13 @@ export function PromptPickerField({
               <PromptOverlayHighlight
                 value={previewLines}
                 inline
-                className="px-2 py-1 text-[11px] font-mono text-fg-muted leading-snug"
+                className="px-2 py-1 text-micro font-mono text-fg-muted leading-snug"
                 maxHeight="4.5em"
               />
             </button>
           )}
           {value && !body && (
-            <p className="mt-1 text-[10px] text-fg-subtle italic">Empty prompt body — click the pencil to write it.</p>
+            <p className="mt-1 text-caption text-fg-subtle italic">Empty prompt body — click the pencil to write it.</p>
           )}
         </>
       )}

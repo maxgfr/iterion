@@ -669,7 +669,7 @@ const RunRow = memo(function RunRow({
           <div className="text-fg-default">{workflowDisplay(run)}</div>
         )}
         {run.file_path && (
-          <div className="text-fg-subtle text-[10px] truncate max-w-md">
+          <div className="text-fg-subtle text-caption truncate max-w-md">
             {run.file_path}
           </div>
         )}
@@ -694,7 +694,7 @@ const RunRow = memo(function RunRow({
       <td className="px-4 py-2 text-fg-muted">
         {formatDuration(run.created_at, run.finished_at)}
       </td>
-      <td className="px-4 py-2 font-mono text-[10px] text-fg-subtle" title={run.id}>
+      <td className="px-4 py-2 font-mono text-caption text-fg-subtle" title={run.id}>
         {shortRunID(run.id)}
       </td>
     </tr>
@@ -739,17 +739,17 @@ const RunCard = memo(function RunCard({
         </span>
       </div>
       {workflowDisplay(run) && (
-        <div className="text-[11px] text-fg-default truncate">
+        <div className="text-micro text-fg-default truncate">
           {workflowDisplay(run)}
         </div>
       )}
-      <div className="text-[11px] text-fg-muted flex flex-wrap gap-x-2">
+      <div className="text-micro text-fg-muted flex flex-wrap gap-x-2">
         <span>{formatRelative(run.created_at)}</span>
         <span>·</span>
         <span>{formatDuration(run.created_at, run.finished_at)}</span>
       </div>
       <div
-        className="text-[10px] text-fg-subtle font-mono truncate"
+        className="text-caption text-fg-subtle font-mono truncate"
         title={run.id}
       >
         {shortRunID(run.id)}

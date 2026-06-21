@@ -60,9 +60,9 @@ export default function PauseForm({ runId, questions, message, onSubmitted }: Pr
     return (
       <div className="space-y-3">
         {message && (
-          <p className="text-fg-muted text-[11px]">{message}</p>
+          <p className="text-fg-muted text-micro">{message}</p>
         )}
-        <p className="text-fg-subtle text-[11px]">
+        <p className="text-fg-subtle text-micro">
           This run paused without specific questions. Resume to continue.
         </p>
         <Button
@@ -75,7 +75,7 @@ export default function PauseForm({ runId, questions, message, onSubmitted }: Pr
         </Button>
         <div role="status" aria-live="polite">
           {error && (
-            <p className="text-danger-fg text-[11px]" role="alert">
+            <p className="text-danger-fg text-micro" role="alert">
               {error}
             </p>
           )}
@@ -92,14 +92,14 @@ export default function PauseForm({ runId, questions, message, onSubmitted }: Pr
       }}
       className="space-y-3"
     >
-      {message && <p className="text-fg-muted text-[11px]">{message}</p>}
+      {message && <p className="text-fg-muted text-micro">{message}</p>}
       {fieldNames.map((name) => {
         const prompt = String(questions[name] ?? "");
         return (
           <label key={name} className="block space-y-1">
-            <div className="text-[11px] font-medium text-fg-default">{name}</div>
+            <div className="text-micro font-medium text-fg-default">{name}</div>
             {prompt && (
-              <div className="text-[10px] text-fg-subtle whitespace-pre-wrap">
+              <div className="text-caption text-fg-subtle whitespace-pre-wrap">
                 {prompt}
               </div>
             )}
@@ -108,13 +108,13 @@ export default function PauseForm({ runId, questions, message, onSubmitted }: Pr
               onChange={(e) => onChange(name, e.target.value)}
               rows={prompt.length > 80 ? 4 : 2}
               spellCheck={false}
-              className="text-[11px]"
+              className="text-micro"
             />
           </label>
         );
       })}
       {error && (
-        <p className="text-danger-fg text-[11px]" role="alert">
+        <p className="text-danger-fg text-micro" role="alert">
           {error}
         </p>
       )}

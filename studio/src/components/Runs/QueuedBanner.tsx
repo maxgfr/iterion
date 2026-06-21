@@ -47,7 +47,7 @@ export default function QueuedBanner({ run }: Props) {
       <span className="text-fg-default font-medium">{positionCopy}</span>
       <span className="text-fg-subtle">A runner pod will start it shortly.</span>
       {error && (
-        <span className="text-[10px] text-danger truncate max-w-xs">
+        <span className="text-caption text-danger truncate max-w-xs">
           {error}
         </span>
       )}

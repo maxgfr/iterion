@@ -158,7 +158,7 @@ export default function MergeConflictView({
 
   if (snapshot === null && error === null) {
     return (
-      <div className="shrink-0 border-t border-border-default px-3 py-3 text-[11px] text-fg-subtle bg-warning-soft">
+      <div className="shrink-0 border-t border-border-default px-3 py-3 text-micro text-fg-subtle bg-warning-soft">
         <Spinner /> Loading conflicts…
       </div>
     );
@@ -166,7 +166,7 @@ export default function MergeConflictView({
 
   if (error && !snapshot) {
     return (
-      <div className="shrink-0 border-t border-border-default px-3 py-2 text-[11px] text-danger-fg bg-danger-soft">
+      <div className="shrink-0 border-t border-border-default px-3 py-2 text-micro text-danger-fg bg-danger-soft">
         {error}
         <button
           type="button"
@@ -183,10 +183,10 @@ export default function MergeConflictView({
     <div className="shrink-0 border-t border-border-default bg-warning-soft max-h-[70%] overflow-y-auto">
       {dialog}
       <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border-default bg-warning-soft px-3 py-2">
-        <span className="text-[11px] font-semibold text-warning-fg">
+        <span className="text-micro font-semibold text-warning-fg">
           Merge conflict
         </span>
-        <span className="text-[10px] text-fg-subtle">
+        <span className="text-caption text-fg-subtle">
           {remaining.length === 0
             ? "All files resolved"
             : `${remaining.length} file${remaining.length === 1 ? "" : "s"} pending`}
@@ -211,7 +211,7 @@ export default function MergeConflictView({
         </div>
       </header>
       {error && (
-        <div className="border-b border-border-default px-3 py-1 text-[10px] text-danger-fg bg-danger-soft">
+        <div className="border-b border-border-default px-3 py-1 text-caption text-danger-fg bg-danger-soft">
           {error}
         </div>
       )}
@@ -247,7 +247,7 @@ export default function MergeConflictView({
       )}
       <footer className="sticky bottom-0 border-t border-border-default bg-warning-soft px-3 py-2 space-y-2">
         <div>
-          <label className="block text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
+          <label className="block text-caption uppercase tracking-wide text-fg-subtle mb-1">
             Squash commit message
           </label>
           <Textarea
@@ -255,7 +255,7 @@ export default function MergeConflictView({
             value={finalizeMessage}
             onChange={(e) => setFinalizeMessage(e.target.value)}
             disabled={busyGlobal !== null}
-            className="text-[11px] font-mono"
+            className="text-micro font-mono"
           />
         </div>
         <Button
@@ -268,7 +268,7 @@ export default function MergeConflictView({
           {busyGlobal === "finalize" ? "Finalizing…" : "Finish merge"}
         </Button>
         {!allResolved && (
-          <div className="text-[10px] text-fg-subtle">
+          <div className="text-caption text-fg-subtle">
             Resolve every file before finishing. Each file's "Resolve" button
             stages the current content via <code>git add</code>.
           </div>
@@ -306,8 +306,8 @@ function ConflictFileCard({
   if (file.read_err) {
     return (
       <li className="px-3 py-2">
-        <div className="font-mono text-[11px] text-danger-fg">{file.path}</div>
-        <div className="text-[10px] text-danger-fg">
+        <div className="font-mono text-micro text-danger-fg">{file.path}</div>
+        <div className="text-caption text-danger-fg">
           Cannot read file: {file.read_err}
         </div>
       </li>
@@ -319,11 +319,11 @@ function ConflictFileCard({
         <button
           type="button"
           onClick={onToggle}
-          className="font-mono text-[11px] text-fg-default hover:underline"
+          className="font-mono text-micro text-fg-default hover:underline"
         >
           {collapsed ? "▸" : "▾"} {file.path}
         </button>
-        <span className="text-[10px] text-fg-subtle">
+        <span className="text-caption text-fg-subtle">
           {file.hunks.length} hunk{file.hunks.length === 1 ? "" : "s"}
         </span>
         <div className="ml-auto flex items-center gap-1">
@@ -364,11 +364,11 @@ function ConflictFileCard({
             rows={textareaRows(content)}
             value={content}
             onChange={(e) => onContentChange(e.target.value)}
-            className="font-mono text-[11px]"
+            className="font-mono text-micro"
             disabled={busy}
           />
           {hasConflictMarkers(content) && (
-            <div className="text-[10px] text-warning-fg">
+            <div className="text-caption text-warning-fg">
               File still contains conflict markers. Use a hunk action or
               remove them manually before resolving.
             </div>
@@ -399,7 +399,7 @@ function HunkPanel({
   return (
     <div className="rounded border border-border-default bg-surface-0">
       <div className="flex items-center gap-1 border-b border-border-default px-2 py-1">
-        <span className="text-[10px] font-medium text-fg-subtle">
+        <span className="text-caption font-medium text-fg-subtle">
           Hunk {index} · lines {hunk.start_line}–{hunk.end_line}
         </span>
         <div className="ml-auto flex items-center gap-1">
@@ -414,12 +414,12 @@ function HunkPanel({
           </Button>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-px bg-border-default text-[10px]">
+      <div className="grid grid-cols-2 gap-px bg-border-default text-caption">
         <HunkPane label={oursLabel} lines={hunk.ours_lines} />
         <HunkPane label={theirsLabel} lines={hunk.theirs_lines} />
       </div>
       {hunk.base_lines && hunk.base_lines.length > 0 && (
-        <div className="border-t border-border-default text-[10px]">
+        <div className="border-t border-border-default text-caption">
           <HunkPane label="Base" lines={hunk.base_lines} muted />
         </div>
       )}
@@ -441,7 +441,7 @@ function HunkPane({
       <div className="mb-0.5 text-[9px] uppercase tracking-wide text-fg-subtle">
         {label}
       </div>
-      <pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11px] text-fg-default">
+      <pre className="m-0 whitespace-pre-wrap break-words font-mono text-micro text-fg-default">
         {lines.length === 0 ? <em className="text-fg-subtle">(empty)</em> : lines.join("\n")}
       </pre>
     </div>

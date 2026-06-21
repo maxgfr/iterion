@@ -115,4 +115,17 @@ describe("source discipline", () => {
     }
     expect(hits).toHaveLength(0);
   });
+
+  it("uses the semantic type scale, not text-[Npx] sizes that have a token", () => {
+    // 10/11/12/13/14/16px have tokens (text-caption/micro/body/label/title/
+    // display). text-[8px]/[9px] are below the scale floor (no token, used in
+    // pips/dense badges) and intentionally allowed.
+    const hits = scan(/text-\[(10|11|12|13|14|16)px\]/);
+    if (hits.length) {
+      throw new Error(
+        `text-[Npx] with a token equivalent is banned — use text-caption/micro/body/label/title/display:\n${hits.join("\n")}`,
+      );
+    }
+    expect(hits).toHaveLength(0);
+  });
 });

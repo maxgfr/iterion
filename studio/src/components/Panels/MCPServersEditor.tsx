@@ -109,10 +109,10 @@ function ServerCard({
   return (
     <>
       <div className="flex items-center justify-between mb-1">
-        <span className="text-[10px] text-fg-subtle font-mono uppercase">{transport}</span>
+        <span className="text-caption text-fg-subtle font-mono uppercase">{transport}</span>
         <button
           type="button"
-          className="text-[10px] text-danger hover:text-danger-fg"
+          className="text-caption text-danger hover:text-danger-fg"
           onClick={onDelete}
         >
           Remove

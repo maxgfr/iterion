@@ -12,7 +12,7 @@ interface Props {
 export default function BannerCard({ message }: Props) {
   const { label, status, errorMessage, nodeId, progress } = message;
   return (
-    <div className="flex items-start gap-2 text-[12px]">
+    <div className="flex items-start gap-2 text-body">
       <div className="mt-0.5 shrink-0">
         <BannerStatusIcon status={status} />
       </div>
@@ -20,12 +20,12 @@ export default function BannerCard({ message }: Props) {
         <div className="flex items-baseline gap-2">
           <span className="text-fg-default">{label}</span>
           {label !== nodeId && (
-            <span className="text-[10px] font-mono text-fg-subtle">{nodeId}</span>
+            <span className="text-caption font-mono text-fg-subtle">{nodeId}</span>
           )}
         </div>
         {progress && status === "running" && <BannerProgressLine progress={progress} />}
         {errorMessage && status === "failed" && (
-          <p className="mt-1 text-[11px] text-danger-fg">{errorMessage}</p>
+          <p className="mt-1 text-micro text-danger-fg">{errorMessage}</p>
         )}
       </div>
     </div>
@@ -45,14 +45,14 @@ export function BannerProgressLine({
   const toolNoun = progress.toolCount === 1 ? "tool call" : "tool calls";
   const retryNoun = retryCount === 1 ? "retry" : "retries";
   return (
-    <p className="mt-1 text-[11px] text-fg-muted truncate">
+    <p className="mt-1 text-micro text-fg-muted truncate">
       {progress.toolCount > 0 && (
         <>
           <span className="font-mono">{progress.toolCount}</span> {toolNoun}
           {progress.latestTool && (
             <>
               {" "}· latest:{" "}
-              <code className="text-[11px] font-mono text-fg-default">
+              <code className="text-micro font-mono text-fg-default">
                 {progress.latestTool}
               </code>
               {progress.latestToolHint &&

@@ -292,13 +292,13 @@ function IssueCard({
           {iss.title}
         </span>
         {iss.priority && iss.priority > 0 ? (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning-soft text-warning-fg">
+          <span className="text-caption px-1.5 py-0.5 rounded bg-warning-soft text-warning-fg">
             P{iss.priority}
           </span>
         ) : null}
       </div>
       {pinnedFields.length > 0 && (
-        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-fg-subtle flex-wrap">
+        <div className="mt-0.5 flex items-center gap-2 text-caption text-fg-subtle flex-wrap">
           {pinnedFields.map(([k, v]) => (
             <span key={k} className="flex items-center gap-1">
               <span className="font-mono opacity-70">{k}:</span>
@@ -324,7 +324,7 @@ function IssueCard({
                   e.stopPropagation();
                   onLabelClick(l);
                 }}
-                className={`text-[10px] px-1.5 py-0.5 rounded hover:ring-1 hover:ring-accent transition ${
+                className={`text-caption px-1.5 py-0.5 rounded hover:ring-1 hover:ring-accent transition ${
                   active ? "ring-1 ring-accent" : ""
                 }`}
                 style={palette}
@@ -340,7 +340,7 @@ function IssueCard({
           })}
           {iss.labels.length > MAX_CARD_LABELS && (
             <span
-              className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-fg-subtle"
+              className="text-caption px-1.5 py-0.5 rounded bg-surface-2 text-fg-subtle"
               title={iss.labels.slice(MAX_CARD_LABELS).join(", ")}
             >
               +{iss.labels.length - MAX_CARD_LABELS}
@@ -348,7 +348,7 @@ function IssueCard({
           )}
         </div>
       )}
-      <div className="mt-1 flex items-center gap-2 text-[10px] text-fg-muted flex-wrap">
+      <div className="mt-1 flex items-center gap-2 text-caption text-fg-muted flex-wrap">
         <code className="opacity-70">{shortID(iss.id)}</code>
         {iss.bot && (
           <span
@@ -390,7 +390,7 @@ function IssueCard({
         )}
       </div>
       {running && (
-        <div className="mt-1 flex items-center justify-between gap-2 rounded bg-success-soft px-1.5 py-1 text-[10px] text-success-fg">
+        <div className="mt-1 flex items-center justify-between gap-2 rounded bg-success-soft px-1.5 py-1 text-caption text-success-fg">
           <button
             type="button"
             onClick={(e) => {
@@ -413,7 +413,7 @@ function IssueCard({
             )}
           </button>
           <button
-            className="rounded border border-success/40 px-1.5 py-0.5 text-[10px] hover:bg-success-soft"
+            className="rounded border border-success/40 px-1.5 py-0.5 text-caption hover:bg-success-soft"
             onClick={(e) => {
               e.stopPropagation();
               onCancelRun();
@@ -427,7 +427,7 @@ function IssueCard({
       {!running && retrying && !TERMINAL_BOARD_STATES.has(iss.state) && (
         <button
           type="button"
-          className="mt-1 w-full text-left rounded bg-warning-soft px-1.5 py-1 text-[10px] text-warning-fg cursor-pointer hover:bg-warning-soft"
+          className="mt-1 w-full text-left rounded bg-warning-soft px-1.5 py-1 text-caption text-warning-fg cursor-pointer hover:bg-warning-soft"
           onClick={(e) => {
             e.stopPropagation();
             onShowRetryDetails();
@@ -442,7 +442,7 @@ function IssueCard({
       )}
       {!running && retrying && TERMINAL_BOARD_STATES.has(iss.state) && (
         <div
-          className="mt-1 rounded bg-fg-muted/10 px-1.5 py-1 text-[10px] text-fg-subtle"
+          className="mt-1 rounded bg-fg-muted/10 px-1.5 py-1 text-caption text-fg-subtle"
           title={`The dispatcher still has a retry entry for this issue, but it's in a terminal state (${iss.state}) — the retry will be skipped on the next tick.`}
         >
           stale retry queued — will be skipped (issue in {iss.state})
@@ -451,7 +451,7 @@ function IssueCard({
       {!running && skip && (
         <button
           type="button"
-          className="mt-1 w-full text-left rounded bg-danger-soft px-1.5 py-1 text-[10px] text-danger-fg cursor-pointer hover:bg-danger-soft"
+          className="mt-1 w-full text-left rounded bg-danger-soft px-1.5 py-1 text-caption text-danger-fg cursor-pointer hover:bg-danger-soft"
           onClick={(e) => {
             e.stopPropagation();
             onOpen();

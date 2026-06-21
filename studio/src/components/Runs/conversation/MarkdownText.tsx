@@ -16,17 +16,17 @@ interface Props {
 // https://github.com/remarkjs/react-markdown#optimize
 const COMPONENTS: Components = {
   h1: ({ node: _node, ...props }) => (
-    <h3 className="font-semibold text-[13px] mt-2 mb-1" {...props} />
+    <h3 className="font-semibold text-label mt-2 mb-1" {...props} />
   ),
   h2: ({ node: _node, ...props }) => (
-    <h4 className="font-semibold text-[12px] mt-2 mb-1" {...props} />
+    <h4 className="font-semibold text-body mt-2 mb-1" {...props} />
   ),
   h3: ({ node: _node, ...props }) => (
-    <h5 className="font-semibold text-[12px] mt-1 mb-0.5" {...props} />
+    <h5 className="font-semibold text-body mt-1 mb-0.5" {...props} />
   ),
   h4: ({ node: _node, ...props }) => (
     <h6
-      className="font-medium text-[11px] uppercase tracking-wide text-fg-subtle mt-1 mb-0.5"
+      className="font-medium text-micro uppercase tracking-wide text-fg-subtle mt-1 mb-0.5"
       {...props}
     />
   ),
@@ -47,7 +47,7 @@ const COMPONENTS: Components = {
     if (isInline) {
       return (
         <code
-          className="px-1 py-0.5 rounded bg-surface-2 text-[11px] font-mono"
+          className="px-1 py-0.5 rounded bg-surface-2 text-micro font-mono"
           {...props}
         >
           {children}
@@ -62,7 +62,7 @@ const COMPONENTS: Components = {
   },
   pre: ({ node: _node, ...props }) => (
     <pre
-      className="my-2 px-2 py-1.5 rounded bg-surface-2 text-[11px] font-mono overflow-x-auto"
+      className="my-2 px-2 py-1.5 rounded bg-surface-2 text-micro font-mono overflow-x-auto"
       {...props}
     />
   ),
@@ -86,7 +86,7 @@ const COMPONENTS: Components = {
     // keeps the table itself scrollable while the prose around it
     // stays contained.
     <div className="overflow-x-auto">
-      <table className="my-2 border-collapse text-[11px]" {...props} />
+      <table className="my-2 border-collapse text-micro" {...props} />
     </div>
   ),
   th: ({ node: _node, ...props }) => (
@@ -112,7 +112,7 @@ const REMARK_PLUGINS = [remarkGfm];
 // exact. Without it react-markdown re-parses every visible prompt/output
 // card on each event tick of a streaming run.
 function MarkdownText({ value, size = "md" }: Props) {
-  const base = size === "sm" ? "text-[11px]" : "text-[12px]";
+  const base = size === "sm" ? "text-micro" : "text-body";
   return (
     <div className={`prose-iterion ${base} text-fg-default leading-snug`}>
       <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>

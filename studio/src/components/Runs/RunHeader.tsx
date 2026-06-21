@@ -200,7 +200,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
             />
           )}
           {error && (
-            <span className="text-[10px] text-danger truncate max-w-xs">{error}</span>
+            <span className="text-caption text-danger truncate max-w-xs">{error}</span>
           )}
           <div className="ml-auto flex items-center gap-2 flex-wrap">
             <CopyButton
@@ -272,7 +272,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
         </div>
         {/* Row 2: bot · folder · when. Each cell is muted + small so
             it stays readable but doesn't compete with the run name. */}
-        <div className="flex items-center gap-3 text-[11px] text-fg-subtle flex-wrap">
+        <div className="flex items-center gap-3 text-micro text-fg-subtle flex-wrap">
           <BotChip run={run} fileBase={fileBase} onOpenFile={(p) =>
             setLocation(
               `/editor?file=${encodeURIComponent(p)}&from=${encodeURIComponent(run.id)}`,
@@ -294,7 +294,7 @@ export default function RunHeader({ run, active, wsState }: Props) {
             </span>
           </Tooltip>
           <span
-            className="ml-auto text-[10px] font-mono opacity-70"
+            className="ml-auto text-caption font-mono opacity-70"
             title="Run ID"
           >
             {run.id}

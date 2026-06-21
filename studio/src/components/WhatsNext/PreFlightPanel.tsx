@@ -28,9 +28,9 @@ export default function PreFlightPanel({ runId, runStatus }: Props) {
       <ThinkingIndicator
         words={GENERIC_THINKING_WORDS}
         active
-        className="font-mono text-[13px] text-info-fg italic"
+        className="font-mono text-label text-info-fg italic"
       />
-      <div className="flex items-center gap-2 text-[11px]">
+      <div className="flex items-center gap-2 text-micro">
         {runStatus && <RunStatusPill status={runStatus} />}
         {runId && (
           <code className="font-mono text-fg-subtle truncate">{runId}</code>
@@ -46,7 +46,7 @@ export default function PreFlightPanel({ runId, runStatus }: Props) {
           </Link>
         )}
       </div>
-      <p className="text-[10px] text-fg-subtle">
+      <p className="text-caption text-fg-subtle">
         WhatsNext streams the high-level steps here. The full run console
         (logs, executions, tool I/O) stays one click away.
       </p>

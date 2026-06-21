@@ -449,7 +449,7 @@ function DownloadsButton({
           title="Downloads"
         >
           <span>Downloads</span>
-          <span className="ml-1 inline-flex items-center justify-center min-w-[1.25rem] h-4 px-1 rounded bg-surface-2 text-fg-subtle text-[10px] font-mono">
+          <span className="ml-1 inline-flex items-center justify-center min-w-[1.25rem] h-4 px-1 rounded bg-surface-2 text-fg-subtle text-caption font-mono">
             {count}
           </span>
         </button>
@@ -461,7 +461,7 @@ function DownloadsButton({
           type="button"
           disabled={entries.length === 0}
           onClick={onClearAll}
-          className="text-[11px] text-fg-link hover:underline disabled:text-fg-subtle disabled:no-underline"
+          className="text-micro text-fg-link hover:underline disabled:text-fg-subtle disabled:no-underline"
         >
           Clear all
         </button>
@@ -484,14 +484,14 @@ function DownloadsButton({
                   >
                     {e.basename}
                   </button>
-                  <span className="text-[10px] text-fg-subtle whitespace-nowrap">
+                  <span className="text-caption text-fg-subtle whitespace-nowrap">
                     {formatModified(new Date(e.downloadedAt).toISOString())}
                   </span>
                 </div>
-                <div className="text-[11px] text-fg-subtle truncate" title={e.localPath ?? e.path}>
+                <div className="text-micro text-fg-subtle truncate" title={e.localPath ?? e.path}>
                   {e.localPath ?? e.path} · {formatSize(e.size)}
                 </div>
-                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-micro">
                   <button
                     type="button"
                     onClick={() => onShow(e)}

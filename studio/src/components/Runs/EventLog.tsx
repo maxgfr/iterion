@@ -399,7 +399,7 @@ export default function EventLog({
 
   return (
     <div className="h-full flex flex-col bg-surface-1 min-h-0">
-      <div className="px-3 py-1.5 border-b border-border-default flex flex-wrap items-center gap-2 text-[11px]">
+      <div className="px-3 py-1.5 border-b border-border-default flex flex-wrap items-center gap-2 text-micro">
         <span className="font-medium text-fg-muted">Events</span>
         <span className="text-fg-subtle">
           {filtered.length} / {events.length}
@@ -421,7 +421,7 @@ export default function EventLog({
           <button
             type="button"
             onClick={() => onClearSelection?.()}
-            className="text-[10px] text-fg-subtle hover:text-fg-default underline"
+            className="text-caption text-fg-subtle hover:text-fg-default underline"
             title="Clear execution filter"
           >
             clear filter
@@ -433,7 +433,7 @@ export default function EventLog({
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search events…"
             size="sm"
-            leadingIcon={<span className="text-[10px]">⌕</span>}
+            leadingIcon={<span className="text-caption">⌕</span>}
           />
         </div>
         <label className="ml-auto inline-flex items-center gap-1.5 cursor-pointer">
@@ -464,7 +464,7 @@ export default function EventLog({
                 key={t}
                 type="button"
                 onClick={() => toggleType(t)}
-                className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                className={`text-caption px-1.5 py-0.5 rounded border transition-colors ${
                   isActive
                     ? `${badge} border-accent`
                     : "bg-surface-1 border-border-default text-fg-subtle hover:text-fg-default"
@@ -481,7 +481,7 @@ export default function EventLog({
       )}
       <div className="flex-1 min-h-0 px-3 py-1">
         {filtered.length === 0 ? (
-          <div className="text-fg-subtle py-2 text-[11px]">
+          <div className="text-fg-subtle py-2 text-micro">
             {events.length === 0 ? "No events yet." : "No events match."}
           </div>
         ) : (
@@ -575,7 +575,7 @@ const EventRow = memo(function EventRow({
     <button
       type="button"
       onClick={handleClick}
-      className="w-full grid grid-cols-[auto_auto_auto_1fr] gap-2 py-0.5 text-left font-mono text-[10px] hover:bg-surface-2 rounded px-1"
+      className="w-full grid grid-cols-[auto_auto_auto_1fr] gap-2 py-0.5 text-left font-mono text-caption hover:bg-surface-2 rounded px-1"
       title={
         e.node_id
           ? `Jump to ${e.node_id} (attempt ${ann.executionIndex + 1})`

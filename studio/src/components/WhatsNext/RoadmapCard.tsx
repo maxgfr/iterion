@@ -11,14 +11,14 @@ export default function RoadmapCard({ message }: Props) {
   return (
     <div className="rounded-lg border border-border-default bg-surface-2 p-3 space-y-3">
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-[13px] font-semibold text-fg-default">
+        <h3 className="text-label font-semibold text-fg-default">
           {iteration === 0 ? "Proposed roadmap" : `Revised roadmap (iter ${iteration})`}
         </h3>
-        <span className="text-[10px] text-fg-subtle font-mono">{message.nodeId}</span>
+        <span className="text-caption text-fg-subtle font-mono">{message.nodeId}</span>
       </div>
 
       {roadmap.rationale && (
-        <p className="text-[12px] text-fg-muted whitespace-pre-wrap break-words border-l-2 border-border-subtle pl-2">
+        <p className="text-body text-fg-muted whitespace-pre-wrap break-words border-l-2 border-border-subtle pl-2">
           {roadmap.rationale}
         </p>
       )}
@@ -66,7 +66,7 @@ function Section({
   return (
     <div className="space-y-1.5">
       <div
-        className={`text-[10px] uppercase tracking-wide font-medium ${toneClass}`}
+        className={`text-caption uppercase tracking-wide font-medium ${toneClass}`}
       >
         {title}
       </div>
@@ -79,7 +79,7 @@ function ItemRow({ item }: { item: RoadmapItem }) {
   return (
     <div className="rounded border border-border-subtle bg-surface-1 p-2 space-y-1">
       <div className="flex items-baseline gap-2">
-        <span className="text-[12px] font-medium text-fg-default">
+        <span className="text-body font-medium text-fg-default">
           {item.title}
         </span>
         {item.assignee && (
@@ -89,7 +89,7 @@ function ItemRow({ item }: { item: RoadmapItem }) {
         )}
       </div>
       {item.body && (
-        <p className="text-[11px] text-fg-muted whitespace-pre-wrap break-words">
+        <p className="text-micro text-fg-muted whitespace-pre-wrap break-words">
           {item.body}
         </p>
       )}

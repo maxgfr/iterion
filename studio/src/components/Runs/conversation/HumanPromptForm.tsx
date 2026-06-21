@@ -210,13 +210,13 @@ export default function HumanPromptForm({
   return (
     <div className="space-y-2">
       {staleHash && (
-        <div className="text-[10px] text-warning-fg" role="status">
+        <div className="text-caption text-warning-fg" role="status">
           The workflow source changed since this run started. Submit will still
           try — pass <code>--force</code> later if it rejects.
         </div>
       )}
       {loading ? (
-        <p className="text-[11px] text-fg-subtle">Loading question form…</p>
+        <p className="text-micro text-fg-subtle">Loading question form…</p>
       ) : useFallback ? (
         <PauseForm
           runId={runId}
@@ -241,7 +241,7 @@ export default function HumanPromptForm({
             />
           )}
           {error && (
-            <p className="text-danger-fg text-[11px]" role="alert">
+            <p className="text-danger-fg text-micro" role="alert">
               {error}
             </p>
           )}
@@ -267,14 +267,14 @@ export default function HumanPromptForm({
           )}
           {showQuickActions && (
             <div className="flex items-center gap-2 pt-1">
-              <span className="text-[10px] text-fg-subtle">Quick reply</span>
+              <span className="text-caption text-fg-subtle">Quick reply</span>
               {quickActions.map((qa) => (
                 <button
                   key={qa}
                   type="button"
                   disabled={busy}
                   onClick={() => submitQuickAction(qa)}
-                  className="px-2 py-0.5 rounded-full border border-border-subtle text-[11px] text-fg-muted hover:text-fg-default hover:border-border-strong disabled:opacity-50"
+                  className="px-2 py-0.5 rounded-full border border-border-subtle text-micro text-fg-muted hover:text-fg-default hover:border-border-strong disabled:opacity-50"
                   title={quickActionTitle(qa)}
                 >
                   {labelFor(qa)}

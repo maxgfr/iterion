@@ -118,7 +118,7 @@ function SandboxBadge({ mode }: { mode: string }) {
     : "Tools and shell commands will run on this host. Add `sandbox: auto` to the workflow file to opt into container isolation.";
   return (
     <span
-      className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border ${cls}`}
+      className={`inline-flex items-center gap-1 text-caption px-1.5 py-0.5 rounded border ${cls}`}
       title={title}
     >
       {active ? (
@@ -146,7 +146,7 @@ function WorktreeTargetSummary({
   const target =
     mergeInto && mergeInto !== "current" ? mergeInto : "current branch";
   return (
-    <div className="text-[11px] text-fg-muted bg-surface-2 border border-border-default rounded px-2 py-1.5">
+    <div className="text-micro text-fg-muted bg-surface-2 border border-border-default rounded px-2 py-1.5">
       <span className="text-fg-subtle">Commits → </span>
       <code className="font-mono text-fg-default">{branch}</code>
       <span className="text-fg-subtle"> · </span>
@@ -469,7 +469,7 @@ export default function LaunchView() {
               <section className="mb-6">
                 <h2 className="text-xs font-medium text-fg-muted mb-2">Attachments</h2>
                 {limits && (
-                  <p className="mb-3 text-[10px] text-fg-subtle font-mono">
+                  <p className="mb-3 text-caption text-fg-subtle font-mono">
                     Max {formatBytes(limits.max_file_size)} per file ·{" "}
                     {formatBytes(limits.max_total_size)} total · up to{" "}
                     {limits.max_files_per_run} files ·{" "}
@@ -482,7 +482,7 @@ export default function LaunchView() {
                     <div key={f.name} className="grid grid-cols-[160px_1fr] gap-3 items-start">
                       <label className="pt-1">
                         <div className="text-xs font-medium font-mono">{f.name}</div>
-                        <div className="text-[10px] text-fg-subtle">
+                        <div className="text-caption text-fg-subtle">
                           {f.type}
                           {f.required ? " · required" : ""}
                         </div>
@@ -498,7 +498,7 @@ export default function LaunchView() {
                   ))}
                 </div>
                 {Object.values(attachments).some((a) => a?.file) && (
-                  <p className="mt-2 text-[10px] text-fg-subtle">
+                  <p className="mt-2 text-caption text-fg-subtle">
                     {Object.values(attachments).filter((a) => a?.file).length} file(s),{" "}
                     {formatBytes(totalSize(attachments))} total
                   </p>
@@ -517,7 +517,7 @@ export default function LaunchView() {
                           `/editor?file=${encodeURIComponent(filePath)}&focus=presets`,
                         )
                       }
-                      className="text-[10px] text-fg-subtle hover:text-fg-default underline"
+                      className="text-caption text-fg-subtle hover:text-fg-default underline"
                       title="Edit presets in the workflow editor"
                     >
                       edit in editor →
@@ -542,7 +542,7 @@ export default function LaunchView() {
                     selectedPresetMeta.prompt ||
                     selectedPresetMeta.skills?.length
                   ) && (
-                    <div className="mt-2 rounded bg-surface-2 border border-border-default px-2 py-1.5 text-[11px] text-fg-muted">
+                    <div className="mt-2 rounded bg-surface-2 border border-border-default px-2 py-1.5 text-micro text-fg-muted">
                       {selectedPresetMeta.description && (
                         <p className="text-fg-default">
                           {selectedPresetMeta.description}
@@ -561,7 +561,7 @@ export default function LaunchView() {
                         )}
                     </div>
                   )}
-                <p className="mt-1 text-[10px] text-fg-subtle">
+                <p className="mt-1 text-caption text-fg-subtle">
                   Selecting a preset overlays its values onto the inputs
                   below and biases every step (its “## Focus”). Any further
                   edits override the preset; the engine applies the same
@@ -575,7 +575,7 @@ export default function LaunchView() {
                   <p className="text-xs text-fg-subtle">
                     This workflow declares no input vars. You can launch it as-is.
                   </p>
-                  <p className="text-[10px] text-fg-subtle">
+                  <p className="text-caption text-fg-subtle">
                     The workflow&apos;s prompts will read directly from{" "}
                     <code>vars:</code> defaults.
                   </p>
@@ -600,7 +600,7 @@ export default function LaunchView() {
                         <div key={f.name} className="flex flex-col gap-1.5">
                           <label htmlFor={`var-${f.name}`} className="flex items-baseline gap-2">
                             <span className="text-xs font-medium font-mono text-fg-default">{f.name}</span>
-                            <span className="text-[10px] text-fg-subtle">{f.type}</span>
+                            <span className="text-caption text-fg-subtle">{f.type}</span>
                             {required && <RequiredPill />}
                           </label>
                           <VarFieldInput
@@ -622,7 +622,7 @@ export default function LaunchView() {
                             <span className="text-xs font-medium font-mono">{f.name}</span>
                             {required && <RequiredPill />}
                           </div>
-                          <div className="text-[10px] text-fg-subtle">{f.type}</div>
+                          <div className="text-caption text-fg-subtle">{f.type}</div>
                         </label>
                         <VarFieldInput
                           field={f}
@@ -643,7 +643,7 @@ export default function LaunchView() {
               <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
                 <div>
                   <div className="text-xs font-medium font-mono">backend</div>
-                  <div className="text-[10px] text-fg-subtle">override for this run</div>
+                  <div className="text-caption text-fg-subtle">override for this run</div>
                 </div>
                 <div>
                   <Select
@@ -670,7 +670,7 @@ export default function LaunchView() {
                       </option>
                     ))}
                   </Select>
-                  <div className="mt-1 text-[10px] text-fg-subtle">
+                  <div className="mt-1 text-caption text-fg-subtle">
                     Overrides the workflow&apos;s default. Nodes that pin a specific{" "}
                     <code>backend:</code> keep their pin.
                   </div>
@@ -739,7 +739,7 @@ export default function LaunchView() {
                   <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
                     <label htmlFor="launch-merge-into" className="pt-1">
                       <div className="text-xs font-medium font-mono">merge_into</div>
-                      <div className="text-[10px] text-fg-subtle">
+                      <div className="text-caption text-fg-subtle">
                         FF target after run
                       </div>
                     </label>
@@ -752,7 +752,7 @@ export default function LaunchView() {
                         value={mergeInto}
                         onChange={(e) => setMergeInto(e.target.value)}
                       />
-                      <ul className="mt-1 space-y-0.5 text-[10px] text-fg-subtle list-disc list-inside">
+                      <ul className="mt-1 space-y-0.5 text-caption text-fg-subtle list-disc list-inside">
                         <li>
                           Empty / <code>current</code> — fast-forward your current
                           branch.
@@ -771,7 +771,7 @@ export default function LaunchView() {
                   <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
                     <label htmlFor="launch-branch-name" className="pt-1">
                       <div className="text-xs font-medium font-mono">branch_name</div>
-                      <div className="text-[10px] text-fg-subtle">Storage branch</div>
+                      <div className="text-caption text-fg-subtle">Storage branch</div>
                     </label>
                     <div>
                       <input
@@ -782,7 +782,7 @@ export default function LaunchView() {
                         value={branchName}
                         onChange={(e) => setBranchName(e.target.value)}
                       />
-                      <div className="mt-1 text-[10px] text-fg-subtle">
+                      <div className="mt-1 text-caption text-fg-subtle">
                         Override the GC-guard branch name. On collision a numeric
                         suffix is appended.
                       </div>
@@ -791,7 +791,7 @@ export default function LaunchView() {
                   <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
                     <label htmlFor="launch-merge-strategy" className="pt-1">
                       <div className="text-xs font-medium font-mono">merge_strategy</div>
-                      <div className="text-[10px] text-fg-subtle">
+                      <div className="text-caption text-fg-subtle">
                         Squash vs merge commit
                       </div>
                     </label>
@@ -806,7 +806,7 @@ export default function LaunchView() {
                         <option value="squash">Squash and merge (default)</option>
                         <option value="merge">Merge commit (preserve history)</option>
                       </Select>
-                      <div className="mt-1 text-[10px] text-fg-subtle">
+                      <div className="mt-1 text-caption text-fg-subtle">
                         Used when the run is merged into the target branch — at
                         end of run if auto_merge is on, otherwise from the
                         Commits tab. The fast-forward path is used for "merge".
@@ -816,7 +816,7 @@ export default function LaunchView() {
                   <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
                     <label htmlFor="launch-auto-merge" className="pt-1">
                       <div className="text-xs font-medium font-mono">auto_merge</div>
-                      <div className="text-[10px] text-fg-subtle">
+                      <div className="text-caption text-fg-subtle">
                         GitLab-style auto-merge
                       </div>
                     </label>
@@ -829,7 +829,7 @@ export default function LaunchView() {
                         />
                         <span>Auto-merge when run finishes</span>
                       </label>
-                      <div className="mt-1 text-[10px] text-fg-subtle">
+                      <div className="mt-1 text-caption text-fg-subtle">
                         Off by default. Commits land on the storage branch; merge
                         them from the Commits tab when ready. When on, the engine
                         applies <code>merge_strategy</code> at end of run.
@@ -853,11 +853,11 @@ export default function LaunchView() {
               <SandboxBadge mode={sandboxModeLabel(doc)} />
               <CostPreviewChip filePath={filePath} source={currentSource || undefined} />
               {missingRequired && (
-                <span className="text-[10px] text-warning-fg" role="status">
+                <span className="text-caption text-warning-fg" role="status">
                   {missingTitle}
                 </span>
               )}
-              <span className="text-[10px] text-fg-subtle">
+              <span className="text-caption text-fg-subtle">
                 Run ID is generated automatically.
               </span>
             </div>

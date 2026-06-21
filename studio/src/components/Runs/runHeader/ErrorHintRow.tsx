@@ -32,7 +32,7 @@ export default function ErrorHintRow({
   if (!hint) return null;
   const canResume = run.status === "failed_resumable";
   return (
-    <div className="shrink-0 px-4 py-2 bg-warning-soft/40 border-b border-border-default flex items-start gap-2 text-[11px]">
+    <div className="shrink-0 px-4 py-2 bg-warning-soft/40 border-b border-border-default flex items-start gap-2 text-micro">
       <span className="font-medium text-warning-fg shrink-0">Hint:</span>
       <span className="text-fg-default flex-1">{hint}</span>
       {canResume && (

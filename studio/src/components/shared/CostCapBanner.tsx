@@ -51,7 +51,7 @@ export default function CostCapBanner() {
 
   return (
     <div
-      className="shrink-0 px-4 py-2 bg-warning-soft/60 border-b border-warning/40 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]"
+      className="shrink-0 px-4 py-2 bg-warning-soft/60 border-b border-warning/40 flex flex-wrap items-center gap-x-3 gap-y-1 text-body"
       role="status"
       aria-live="polite"
     >

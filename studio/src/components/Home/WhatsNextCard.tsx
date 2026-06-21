@@ -25,7 +25,7 @@ export default function WhatsNextCard() {
           <h2 className="text-base font-semibold text-fg-default">
             {bot.label}
           </h2>
-          <p className="mt-1 text-[13px] text-fg-muted line-clamp-2">
+          <p className="mt-1 text-label text-fg-muted line-clamp-2">
             {bot.description}
           </p>
         </div>

@@ -67,7 +67,7 @@ export default function NodeRunsChip({ nodeId }: Props) {
             <button
               type="button"
               onClick={() => setLocation(`/runs/${encodeURIComponent(r.id)}`)}
-              className="w-full text-left flex items-center gap-2 px-1.5 py-1 rounded text-[11px] hover:bg-surface-2"
+              className="w-full text-left flex items-center gap-2 px-1.5 py-1 rounded text-micro hover:bg-surface-2"
               title={`${r.status} · ${r.id}`}
             >
               <span aria-hidden className="text-fg-subtle w-3 text-center">
@@ -76,7 +76,7 @@ export default function NodeRunsChip({ nodeId }: Props) {
               <span className="font-mono truncate flex-1">
                 {r.id.length > 20 ? `${r.id.slice(0, 16)}…` : r.id}
               </span>
-              <span className="text-[10px] text-fg-subtle shrink-0">
+              <span className="text-caption text-fg-subtle shrink-0">
                 {new Date(r.created_at).toLocaleDateString()}
               </span>
             </button>

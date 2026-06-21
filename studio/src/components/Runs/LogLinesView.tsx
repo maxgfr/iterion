@@ -356,7 +356,7 @@ export default function LogLinesView({
 
   return (
     <div className="h-full flex flex-col bg-surface-1 min-h-0">
-      <div className="px-3 py-1.5 border-b border-border-default flex flex-wrap items-center gap-2 text-[11px]">
+      <div className="px-3 py-1.5 border-b border-border-default flex flex-wrap items-center gap-2 text-micro">
         {showTitle && <span className="font-medium text-fg-muted">Logs</span>}
         <span className="text-fg-subtle">
           {filtered.length} / {lineCount} lines
@@ -364,17 +364,17 @@ export default function LogLinesView({
         </span>
         {!isFiltered && droppedBytes > 0 && (
           <span
-            className="text-warning-fg text-[10px]"
+            className="text-warning-fg text-caption"
             title={`${formatBytes(droppedBytes)} of older output rolled out of the in-memory tail; download the full log to inspect.`}
           >
             +{formatBytes(droppedBytes)} older evicted
           </span>
         )}
         {log.terminated && (
-          <span className="text-fg-subtle text-[10px] italic">stream ended</span>
+          <span className="text-fg-subtle text-caption italic">stream ended</span>
         )}
         {!log.subscribed && !log.terminated && (
-          <span className="text-fg-subtle text-[10px] italic">connecting…</span>
+          <span className="text-fg-subtle text-caption italic">connecting…</span>
         )}
         <div className="flex-1 min-w-[140px] max-w-[320px]">
           <Input
@@ -382,7 +382,7 @@ export default function LogLinesView({
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search log…"
             size="sm"
-            leadingIcon={<span className="text-[10px]">⌕</span>}
+            leadingIcon={<span className="text-caption">⌕</span>}
           />
         </div>
         <button
@@ -411,7 +411,7 @@ export default function LogLinesView({
               }
             })();
           }}
-          className="text-[10px] text-fg-subtle hover:text-fg-default underline"
+          className="text-caption text-fg-subtle hover:text-fg-default underline"
           title={
             isFiltered
               ? "Copy the visible (per-node) log lines to the clipboard"
@@ -442,7 +442,7 @@ export default function LogLinesView({
                 }
               })();
             }}
-            className="text-[10px] text-fg-subtle hover:text-fg-default underline"
+            className="text-caption text-fg-subtle hover:text-fg-default underline"
             title="Save the full run.log to a file"
           >
             download
@@ -460,7 +460,7 @@ export default function LogLinesView({
                   ? `${activeLevels.size} level filter(s) active`
                   : "Filter by level"
               }
-              className={`text-[10px] px-1.5 py-0.5 rounded border inline-flex items-center gap-1 transition-colors ${
+              className={`text-caption px-1.5 py-0.5 rounded border inline-flex items-center gap-1 transition-colors ${
                 activeLevels.size > 0
                   ? "bg-surface-2 text-fg-default border-accent"
                   : "bg-surface-1 border-border-default text-fg-subtle hover:text-fg-default"
@@ -484,7 +484,7 @@ export default function LogLinesView({
                   key={g.key}
                   type="button"
                   onClick={() => toggleLevel(g.key)}
-                  className={`text-[11px] px-2 py-1 rounded border text-left transition-colors ${
+                  className={`text-micro px-2 py-1 rounded border text-left transition-colors ${
                     isActive
                       ? `bg-surface-2 ${g.cls} border-accent`
                       : `bg-surface-1 border-border-default ${g.cls} hover:text-fg-default`
@@ -499,7 +499,7 @@ export default function LogLinesView({
               <button
                 type="button"
                 onClick={clearActiveLevels}
-                className="text-[10px] text-fg-subtle hover:text-fg-default mt-1 px-2 py-0.5 text-left"
+                className="text-caption text-fg-subtle hover:text-fg-default mt-1 px-2 py-0.5 text-left"
               >
                 Clear filters
               </button>
@@ -541,7 +541,7 @@ export default function LogLinesView({
       <div className="flex-1 min-h-0 flex">
         <div className="flex-1 min-w-0 min-h-0 px-3 py-1">
           {filtered.length === 0 ? (
-            <div className="text-fg-subtle py-2 text-[11px]">
+            <div className="text-fg-subtle py-2 text-micro">
               {emptyMessage(lineCount, isFiltered, log.subscribed)}
             </div>
           ) : (
@@ -656,7 +656,7 @@ const LogLineRow = memo(function LogLineRow({
     ? "whitespace-pre-wrap break-words"
     : "whitespace-pre min-w-max";
   return (
-    <div className={`font-mono text-[10px] py-0.5 ${widthCls} ${cls}`}>
+    <div className={`font-mono text-caption py-0.5 ${widthCls} ${cls}`}>
       {line.text || " "}
     </div>
   );
@@ -694,7 +694,7 @@ const LogBlockRow = memo(function LogBlockRow({
   }, [body]);
   const toggle = () => setOpen((v) => !v);
   return (
-    <div className={`font-mono text-[10px] py-0.5 ${cls}`}>
+    <div className={`font-mono text-caption py-0.5 ${cls}`}>
       <div
         role="button"
         tabIndex={0}

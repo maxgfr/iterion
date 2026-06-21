@@ -27,7 +27,7 @@ export default function SessionClosedCard({ message }: Props) {
         : "text-warning-fg";
   return (
     <div
-      className={`text-[11px] text-center italic border-t border-border-subtle pt-2 ${cls}`}
+      className={`text-micro text-center italic border-t border-border-subtle pt-2 ${cls}`}
       role="status"
     >
       {label}

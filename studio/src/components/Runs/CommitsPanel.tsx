@@ -56,7 +56,7 @@ export default function CommitsPanel({
     <div className="flex flex-col min-h-0 min-w-0 flex-1 w-full">
       <header className="flex items-center gap-1 px-2 py-1 border-b border-border-default">
         {commitCount > 0 && (
-          <span className="inline-flex items-center justify-center rounded-md bg-surface-2 px-1.5 text-[10px] font-medium text-fg-muted">
+          <span className="inline-flex items-center justify-center rounded-md bg-surface-2 px-1.5 text-caption font-medium text-fg-muted">
             {commitCount}
           </span>
         )}
@@ -131,14 +131,14 @@ function CommitRow({
           onClick={() => onSelect(commit)}
           className="flex w-full items-start gap-2 px-2 py-1.5 text-left hover:bg-surface-2 focus:bg-surface-2 focus:outline-none"
         >
-          <code className="text-[10px] font-mono text-fg-subtle pt-0.5 shrink-0">
+          <code className="text-caption font-mono text-fg-subtle pt-0.5 shrink-0">
             {commit.short}
           </code>
           <div className="min-w-0 flex-1">
             <div className="truncate text-xs text-fg-default">
               {commit.subject}
             </div>
-            <div className="truncate text-[10px] text-fg-subtle">
+            <div className="truncate text-caption text-fg-subtle">
               {commit.author} · {relative}
             </div>
           </div>
@@ -249,13 +249,13 @@ function MergeFooter({
     const mergedInto = optimisticMerged?.merged_into ?? run.merged_into;
     const mergedStrategy = optimisticMerged?.merge_strategy ?? run.merge_strategy;
     return (
-      <div className="shrink-0 border-t border-border-default px-3 py-2 bg-success-soft text-success-fg text-[11px]">
+      <div className="shrink-0 border-t border-border-default px-3 py-2 bg-success-soft text-success-fg text-micro">
         <div className="font-medium">
           {mergedStrategy === "squash" ? "Squashed and merged" : "Merged"}{" "}
           into {mergedInto}
         </div>
         {shortMerged && (
-          <div className="font-mono text-[10px] mt-0.5">{shortMerged}</div>
+          <div className="font-mono text-caption mt-0.5">{shortMerged}</div>
         )}
       </div>
     );
@@ -343,13 +343,13 @@ function MergeFooter({
   return (
     <div className="shrink-0 border-t border-border-default px-3 py-2 space-y-2 bg-surface-1 max-h-[60%] overflow-y-auto">
       {failed && (
-        <div className="text-[10px] text-danger-fg bg-danger-soft px-2 py-1 rounded">
+        <div className="text-caption text-danger-fg bg-danger-soft px-2 py-1 rounded">
           Previous merge failed — fix the underlying issue (clean working
           tree, target branch checked out) and retry.
         </div>
       )}
       <div className="flex items-center gap-2">
-        <span className="text-[10px] text-fg-subtle uppercase tracking-wide">
+        <span className="text-caption text-fg-subtle uppercase tracking-wide">
           Merge {commitCount} commit{commitCount === 1 ? "" : "s"}
         </span>
       </div>
@@ -372,7 +372,7 @@ function MergeFooter({
         />
       )}
       {err && (
-        <div className="text-[10px] text-danger-fg bg-danger-soft px-2 py-1 rounded">
+        <div className="text-caption text-danger-fg bg-danger-soft px-2 py-1 rounded">
           {err}
         </div>
       )}
@@ -386,7 +386,7 @@ function MergeFooter({
       >
         {submitting ? "Merging…" : buttonLabel}
       </Button>
-      <div className="text-[10px] text-fg-subtle">
+      <div className="text-caption text-fg-subtle">
         Target: currently-checked-out branch. The merge fails fast if the
         working tree is dirty or the storage branch is not fast-forwardable.
       </div>
@@ -420,7 +420,7 @@ function SquashMessageEditor({
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-fg-subtle uppercase tracking-wide">
+        <span className="text-caption text-fg-subtle uppercase tracking-wide">
           Commit message
         </span>
         {isEditing ? (
@@ -428,7 +428,7 @@ function SquashMessageEditor({
             type="button"
             onClick={onReset}
             disabled={disabled}
-            className="inline-flex items-center gap-1 text-[10px] text-fg-subtle hover:text-fg-default disabled:opacity-50"
+            className="inline-flex items-center gap-1 text-caption text-fg-subtle hover:text-fg-default disabled:opacity-50"
           >
             <ResetIcon /> Reset
           </button>
@@ -437,7 +437,7 @@ function SquashMessageEditor({
             type="button"
             onClick={onStartEdit}
             disabled={disabled || !previewText}
-            className="inline-flex items-center gap-1 text-[10px] text-fg-subtle hover:text-fg-default disabled:opacity-50"
+            className="inline-flex items-center gap-1 text-caption text-fg-subtle hover:text-fg-default disabled:opacity-50"
           >
             <Pencil1Icon /> Edit
           </button>
@@ -449,11 +449,11 @@ function SquashMessageEditor({
           value={editingMessage}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
-          className="text-[11px] font-mono"
+          className="text-micro font-mono"
           autoFocus
         />
       ) : (
-        <pre className="m-0 max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded border border-border-default bg-surface-0 px-2 py-1 text-[11px] font-mono text-fg-default">
+        <pre className="m-0 max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded border border-border-default bg-surface-0 px-2 py-1 text-micro font-mono text-fg-default">
           {previewText || (
             <span className="text-fg-subtle italic">
               (no commits — message will be derived at merge time)
@@ -513,10 +513,10 @@ function CommitAndFinalizeFooter({
 
   return (
     <div className="shrink-0 border-t border-border-default px-3 py-2 space-y-2 bg-surface-1 max-h-[60%] overflow-y-auto">
-      <div className="text-[10px] text-fg-subtle uppercase tracking-wide">
+      <div className="text-caption text-fg-subtle uppercase tracking-wide">
         Uncommitted work in worktree
       </div>
-      <p className="text-[11px] text-fg-muted">
+      <p className="text-micro text-fg-muted">
         Run finished without committing. Stage everything with
         {" "}<code className="text-fg-default">git add -A</code> and commit so
         you can squash + merge below. New files not covered by
@@ -524,7 +524,7 @@ function CommitAndFinalizeFooter({
         included — adjust beforehand if you want to exclude something.
       </p>
       <div className="space-y-1">
-        <span className="text-[10px] text-fg-subtle uppercase tracking-wide">
+        <span className="text-caption text-fg-subtle uppercase tracking-wide">
           Commit message
         </span>
         <Textarea
@@ -532,11 +532,11 @@ function CommitAndFinalizeFooter({
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           disabled={submitting}
-          className="text-[11px] font-mono"
+          className="text-micro font-mono"
         />
       </div>
       {err && (
-        <div className="text-[10px] text-danger-fg bg-danger-soft px-2 py-1 rounded">
+        <div className="text-caption text-danger-fg bg-danger-soft px-2 py-1 rounded">
           {err}
         </div>
       )}
@@ -602,7 +602,7 @@ function NoticeFooter({
       : "bg-surface-1 text-fg-subtle";
   return (
     <div
-      className={`shrink-0 border-t border-border-default px-3 py-2 text-[11px] ${cls}`}
+      className={`shrink-0 border-t border-border-default px-3 py-2 text-micro ${cls}`}
     >
       {children}
     </div>

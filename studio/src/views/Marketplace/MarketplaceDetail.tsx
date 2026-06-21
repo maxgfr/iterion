@@ -58,7 +58,7 @@ export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Pro
         <header className="flex items-start justify-between gap-3 border-b border-border-default px-4 py-3">
           <div className="min-w-0 flex-1">
             <h2 id={titleId} className="truncate text-sm font-semibold text-fg-default">{label}</h2>
-            <p className="truncate font-mono text-[10px] text-fg-subtle">
+            <p className="truncate font-mono text-caption text-fg-subtle">
               {entry.slug}
               {entry.version ? ` · v${entry.version}` : ""}
             </p>
@@ -78,7 +78,7 @@ export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Pro
             {entry.description && (
               <p className="text-fg-muted">{entry.description}</p>
             )}
-            <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-[11px] text-fg-muted">
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-micro text-fg-muted">
               {entry.author && (
                 <>
                   <dt className="text-fg-subtle">Author</dt>
@@ -99,7 +99,7 @@ export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Pro
                 {entry.tags.map((t) => (
                   <span
                     key={t}
-                    className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-fg-muted"
+                    className="rounded bg-surface-2 px-1.5 py-0.5 text-caption text-fg-muted"
                   >
                     {t}
                   </span>
@@ -110,7 +110,7 @@ export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Pro
 
           {entry.presets && entry.presets.length > 0 && (
             <section className="mt-4 space-y-1">
-              <h3 className="text-[10px] uppercase tracking-wide text-fg-subtle">
+              <h3 className="text-caption uppercase tracking-wide text-fg-subtle">
                 Presets ({entry.presets.length})
               </h3>
               <ul className="space-y-1">
@@ -123,15 +123,15 @@ export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Pro
                       <span className="truncate font-medium text-fg-default">
                         {p.display_name || p.name}
                       </span>
-                      <span className="shrink-0 font-mono text-[10px] text-fg-subtle">
+                      <span className="shrink-0 font-mono text-caption text-fg-subtle">
                         {p.name}
                       </span>
                     </div>
                     {p.description && (
-                      <p className="mt-0.5 text-[11px] text-fg-muted">{p.description}</p>
+                      <p className="mt-0.5 text-micro text-fg-muted">{p.description}</p>
                     )}
                     {p.skills && p.skills.length > 0 && (
-                      <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-fg-subtle">
+                      <div className="mt-1 flex flex-wrap gap-1 text-caption text-fg-subtle">
                         {p.skills.map((s) => (
                           <span key={s} className="rounded bg-surface-1 px-1 py-0.5">
                             {s}
@@ -147,8 +147,8 @@ export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Pro
 
           {entry.readme && (
             <section className="mt-4 space-y-1">
-              <h3 className="text-[10px] uppercase tracking-wide text-fg-subtle">README</h3>
-              <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded border border-border-default bg-surface-2 p-3 font-mono text-[11px] text-fg-default">
+              <h3 className="text-caption uppercase tracking-wide text-fg-subtle">README</h3>
+              <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded border border-border-default bg-surface-2 p-3 font-mono text-micro text-fg-default">
                 {entry.readme}
               </pre>
             </section>
@@ -156,7 +156,7 @@ export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Pro
         </div>
 
         <footer className="flex items-center justify-between gap-2 border-t border-border-default px-4 py-3">
-          <span className="text-[10px] text-fg-subtle">
+          <span className="text-caption text-fg-subtle">
             Installs into <code className="text-fg-default">.botz/</code> — never run automatically.
           </span>
           <Button

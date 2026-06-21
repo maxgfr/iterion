@@ -120,7 +120,7 @@ export default function AttachmentFieldInput({
       </div>
 
       {hasFile && !showProgress && (
-        <div className="flex items-center justify-between text-[11px] text-fg-muted">
+        <div className="flex items-center justify-between text-micro text-fg-muted">
           <span className="truncate">
             {value!.file.name} · {formatBytes(value!.file.size)}
             {value!.uploadId ? " · uploaded" : ""}
@@ -151,7 +151,7 @@ export default function AttachmentFieldInput({
       )}
 
       {value?.error && (
-        <p className="text-[11px] text-danger-fg" role="alert">
+        <p className="text-micro text-danger-fg" role="alert">
           {value.error}
         </p>
       )}
@@ -165,7 +165,7 @@ function EmptyHint({ isImage, description }: { isImage: boolean; description?: s
       <p className="text-xs text-fg-muted">
         {isImage ? "Drop an image or click to browse" : "Drop a file or click to browse"}
       </p>
-      {description && <p className="text-[11px] text-fg-subtle">{description}</p>}
+      {description && <p className="text-micro text-fg-subtle">{description}</p>}
     </>
   );
 }

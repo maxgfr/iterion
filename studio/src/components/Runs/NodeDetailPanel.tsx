@@ -90,7 +90,7 @@ function FollowLivePill({
     <button
       type="button"
       onClick={onToggle}
-      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border transition-colors ${
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-caption border transition-colors ${
         followLive
           ? "bg-success-soft border-success text-success-fg"
           : "bg-surface-1 border-border-default text-fg-subtle hover:text-fg-default"
@@ -438,7 +438,7 @@ function IterationCrumb({
       onOpenChange={setOpen}
       side="bottom"
       align="start"
-      contentClassName="min-w-[220px] p-1.5 text-[11px]"
+      contentClassName="min-w-[220px] p-1.5 text-micro"
       trigger={
         <button
           type="button"
@@ -587,7 +587,7 @@ function DetailHeader({
               />
             )}
           </div>
-          <div className="text-fg-subtle text-[10px] flex flex-wrap gap-x-3 gap-y-0.5">
+          <div className="text-fg-subtle text-caption flex flex-wrap gap-x-3 gap-y-0.5">
             {exec.kind && <span>kind: {exec.kind}</span>}
             <span>branch: {exec.branch_id}</span>
             <IterationCrumb
@@ -667,7 +667,7 @@ function DetailHeader({
             <span className="font-medium">Error</span>
             <CopyButton value={exec.error} />
           </div>
-          <div className="font-mono text-[11px] whitespace-pre-wrap break-words">
+          <div className="font-mono text-micro whitespace-pre-wrap break-words">
             {exec.error}
           </div>
         </div>
@@ -755,7 +755,7 @@ function EventsTabContent({ events }: { events: RunEvent[] }) {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search events…"
           size="sm"
-          leadingIcon={<span className="text-[10px]">⌕</span>}
+          leadingIcon={<span className="text-caption">⌕</span>}
         />
         {knownTypes.length > 1 && (
           <div className="flex flex-wrap gap-1">
@@ -766,7 +766,7 @@ function EventsTabContent({ events }: { events: RunEvent[] }) {
                   key={t}
                   type="button"
                   onClick={() => toggleType(t)}
-                  className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                  className={`text-caption px-1.5 py-0.5 rounded border transition-colors ${
                     isActive
                       ? "bg-accent-soft border-accent text-fg-default"
                       : "bg-surface-1 border-border-default text-fg-subtle hover:text-fg-default"
@@ -779,13 +779,13 @@ function EventsTabContent({ events }: { events: RunEvent[] }) {
           </div>
         )}
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-fg-subtle">
+          <span className="text-caption text-fg-subtle">
             {filtered.length} / {events.length} events
           </span>
           <button
             type="button"
             onClick={() => setShowRawData((v) => !v)}
-            className="ml-auto text-[10px] text-fg-subtle hover:text-fg-default"
+            className="ml-auto text-caption text-fg-subtle hover:text-fg-default"
           >
             {showRawData ? "hide raw" : "show raw"}
           </button>
@@ -795,7 +795,7 @@ function EventsTabContent({ events }: { events: RunEvent[] }) {
         {filtered.length === 0 ? (
           <div className="text-fg-subtle">No events match.</div>
         ) : (
-          <ul className="space-y-0.5 font-mono text-[10px]">
+          <ul className="space-y-0.5 font-mono text-caption">
             {filtered.map((e) => (
               <li key={`${e.run_id}:${e.seq}`}>
                 <div className="flex gap-2">

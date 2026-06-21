@@ -20,6 +20,6 @@ export function isVarMissing(field: VarField, value: string): boolean {
  *  pick it up. */
 export function RequiredPill() {
   return (
-    <span className="text-[10px] text-warning-fg uppercase tracking-wide">required</span>
+    <span className="text-caption text-warning-fg uppercase tracking-wide">required</span>
   );
 }

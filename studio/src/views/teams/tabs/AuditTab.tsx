@@ -150,8 +150,8 @@ export default function AuditTab({ teamID, canManage }: Props) {
                   <div className="text-fg-subtle font-mono break-all">{e.target_id ?? ""}</div>
                   {e.meta && (
                     <details className="text-fg-muted">
-                      <summary className="cursor-pointer text-[10px]">meta</summary>
-                      <pre className="whitespace-pre-wrap break-all text-[10px]">
+                      <summary className="cursor-pointer text-caption">meta</summary>
+                      <pre className="whitespace-pre-wrap break-all text-caption">
                         {JSON.stringify(e.meta, null, 2)}
                       </pre>
                     </details>

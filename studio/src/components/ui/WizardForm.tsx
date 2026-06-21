@@ -173,7 +173,7 @@ export function WizardForm({
       onKeyDown={onKeyDown}
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[11px] font-medium text-fg-muted">
+        <div className="text-micro font-medium text-fg-muted">
           Question {step + 1} of {total}
         </div>
         <Tabs
@@ -190,7 +190,7 @@ export function WizardForm({
 
       <div className="space-y-1">
         <div className="space-y-0.5">
-          <label className="text-[12px] font-medium text-fg-default">
+          <label className="text-body font-medium text-fg-default">
             {current.label}
             {isRequiredQuestion(current) && (
               <span className="ml-1 text-danger-fg" aria-hidden="true">
@@ -199,7 +199,7 @@ export function WizardForm({
             )}
           </label>
           {current.description && (
-            <p className="text-[11px] text-fg-muted">{current.description}</p>
+            <p className="text-micro text-fg-muted">{current.description}</p>
           )}
         </div>
         <QuestionInput
@@ -330,7 +330,7 @@ function FlatForm({
           <div key={q.id} className={single ? "" : "space-y-1"}>
             {!single && (
               <div className="space-y-0.5">
-                <label className="text-[12px] font-medium text-fg-default">
+                <label className="text-body font-medium text-fg-default">
                   {q.label}
                   {isRequiredQuestion(q) && (
                     <span className="ml-1 text-danger-fg" aria-hidden="true">
@@ -339,7 +339,7 @@ function FlatForm({
                   )}
                 </label>
                 {q.description && (
-                  <p className="text-[11px] text-fg-muted">{q.description}</p>
+                  <p className="text-micro text-fg-muted">{q.description}</p>
                 )}
               </div>
             )}
@@ -350,7 +350,7 @@ function FlatForm({
               disabled={busy}
             />
             {single && i === 0 && q.description && (
-              <p className="mt-1 text-[11px] text-fg-muted">{q.description}</p>
+              <p className="mt-1 text-micro text-fg-muted">{q.description}</p>
             )}
           </div>
         ))}

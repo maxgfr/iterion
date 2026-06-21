@@ -270,7 +270,7 @@ export default function ArtifactDiff({ runId, nodeId, versions }: Props) {
   }, [fromBody, toBody, fromV, toV]);
 
   if (error) {
-    return <div className="text-danger-fg text-[10px]">Diff failed: {error}</div>;
+    return <div className="text-danger-fg text-caption">Diff failed: {error}</div>;
   }
 
   return (
@@ -281,7 +281,7 @@ export default function ArtifactDiff({ runId, nodeId, versions }: Props) {
       {toBody && isPlanShaped(toBody.data) && (
         <PlanCard data={toBody.data as Record<string, unknown>} />
       )}
-      <div className="flex items-center gap-2 mb-2 text-[10px]">
+      <div className="flex items-center gap-2 mb-2 text-caption">
         <span className="flex items-center gap-1">
           from{" "}
           <Select
@@ -321,14 +321,14 @@ export default function ArtifactDiff({ runId, nodeId, versions }: Props) {
               <CopyButton value={JSON.stringify(toBody.data, null, 2)} />
             </div>
           )}
-          <pre className="bg-surface-2 rounded p-2 text-[10px] font-mono whitespace-pre-wrap break-all max-h-[60vh] overflow-auto">
+          <pre className="bg-surface-2 rounded p-2 text-caption font-mono whitespace-pre-wrap break-all max-h-[60vh] overflow-auto">
             {toBody ? JSON.stringify(toBody.data, null, 2) : "Loading…"}
           </pre>
         </div>
       ) : !diff ? (
-        <div className="text-fg-subtle text-[10px]">Loading diff…</div>
+        <div className="text-fg-subtle text-caption">Loading diff…</div>
       ) : (
-        <pre className="rounded font-mono text-[10px] max-h-[60vh] overflow-auto border border-border-default">
+        <pre className="rounded font-mono text-caption max-h-[60vh] overflow-auto border border-border-default">
           {diff.map((line, i) => (
             <div
               key={i}

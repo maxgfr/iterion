@@ -37,7 +37,7 @@ export function RunViewLoadError({
               Open the project this run belongs to, or pick a different run from the
               list.
             </p>
-            <details className="text-[10px] text-fg-subtle">
+            <details className="text-caption text-fg-subtle">
               <summary className="cursor-pointer">Why might this happen?</summary>
               <p className="mt-1 text-left">
                 The run may live in a different iterion store — for example, the

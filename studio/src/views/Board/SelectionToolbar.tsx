@@ -178,7 +178,7 @@ function BulkLabelPopover({
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        Label <span className="text-fg-subtle text-[10px]">▾</span>
+        Label <span className="text-fg-subtle text-caption">▾</span>
       </button>
       {open && (
         <div className="absolute z-[var(--z-popover)] mt-1 w-64 max-h-80 overflow-hidden rounded-md border border-border-strong bg-surface-0 shadow-popover flex flex-col">

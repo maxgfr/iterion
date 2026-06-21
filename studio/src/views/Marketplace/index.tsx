@@ -102,7 +102,7 @@ export default function MarketplaceView() {
         <section className="flex flex-col gap-2">
           <div className="flex flex-wrap items-end gap-2">
             <label htmlFor="marketplace-search" className="flex min-w-[14rem] flex-1 flex-col gap-1">
-              <span className="text-[10px] uppercase tracking-wide text-fg-subtle">Search</span>
+              <span className="text-caption uppercase tracking-wide text-fg-subtle">Search</span>
               <Input
                 id="marketplace-search"
                 type="text"
@@ -113,7 +113,7 @@ export default function MarketplaceView() {
               />
             </label>
             <label htmlFor="marketplace-tag" className="flex w-44 flex-col gap-1">
-              <span className="text-[10px] uppercase tracking-wide text-fg-subtle">Filter by tag</span>
+              <span className="text-caption uppercase tracking-wide text-fg-subtle">Filter by tag</span>
               <Input
                 id="marketplace-tag"
                 type="text"
@@ -141,7 +141,7 @@ export default function MarketplaceView() {
                   : `${entries.length} bot${entries.length === 1 ? "" : "s"}`}
             </h2>
             {loading && entries && entries.length > 0 && (
-              <span className="text-[10px] text-fg-subtle">Refreshing…</span>
+              <span className="text-caption text-fg-subtle">Refreshing…</span>
             )}
           </div>
           {entries === null ? null : entries.length === 0 ? (

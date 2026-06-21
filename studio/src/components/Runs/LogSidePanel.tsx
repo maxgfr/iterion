@@ -35,7 +35,7 @@ export function LogSidePanel({
   );
 
   return (
-    <div className="h-full flex flex-col gap-2 px-2 py-2 text-[11px] min-h-0 overflow-hidden">
+    <div className="h-full flex flex-col gap-2 px-2 py-2 text-micro min-h-0 overflow-hidden">
       <AgentsBadge pending={pendingAgents} />
       <TodoChecklist todos={todos?.todos ?? null} source={todos?.source ?? null} />
     </div>
@@ -55,7 +55,7 @@ function AgentsBadge({
   }, [pending.length]);
   if (pending.length === 0) {
     return (
-      <div className="text-fg-subtle italic text-[10px] px-1">
+      <div className="text-fg-subtle italic text-caption px-1">
         No pending agents.
       </div>
     );
@@ -99,7 +99,7 @@ function TodoChecklist({
   if (!todos || todos.length === 0) {
     return (
       <div className="flex-1 min-h-0 flex items-start">
-        <div className="text-fg-subtle italic text-[10px] px-1">
+        <div className="text-fg-subtle italic text-caption px-1">
           No active task list.
         </div>
       </div>
@@ -110,12 +110,12 @@ function TodoChecklist({
     <div className="flex-1 min-h-0 flex flex-col gap-1 overflow-hidden">
       <div className="flex items-baseline gap-2 px-1">
         <span className="font-medium text-fg-default">Task list</span>
-        <span className="text-fg-subtle text-[10px]">
+        <span className="text-fg-subtle text-caption">
           {todos.length} · {counts.in_progress} in progress · {counts.completed}{" "}
           done
         </span>
         {source && (
-          <span className="ml-auto text-fg-subtle text-[10px] font-mono">
+          <span className="ml-auto text-fg-subtle text-caption font-mono">
             {source}
           </span>
         )}

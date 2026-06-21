@@ -37,7 +37,7 @@ export default function QueueDepthBar({ counts }: Props) {
   if (total === 0) return null;
 
   return (
-    <div className="px-4 py-1.5 flex items-center gap-4 border-b border-border-default bg-surface-1 text-[11px]">
+    <div className="px-4 py-1.5 flex items-center gap-4 border-b border-border-default bg-surface-1 text-micro">
       <span className="text-fg-subtle uppercase tracking-wide">In flight</span>
       {CELLS.map((cell) => {
         const n = counts[cell.status] ?? 0;

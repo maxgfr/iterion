@@ -107,7 +107,7 @@ export default function SidebarContext({ collapsed }: Props) {
         >
           <MagnifyingGlassIcon className="h-3.5 w-3.5 shrink-0 group-hover:text-fg-default" />
           <span className="flex-1 text-left truncate">Search or run…</span>
-          <kbd className="font-mono text-[10px] text-fg-subtle group-hover:text-fg-muted px-1 py-px rounded border border-border-default bg-surface-1 shrink-0">
+          <kbd className="font-mono text-caption text-fg-subtle group-hover:text-fg-muted px-1 py-px rounded border border-border-default bg-surface-1 shrink-0">
             {kbdK}
           </kbd>
         </button>

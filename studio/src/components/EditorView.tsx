@@ -173,7 +173,7 @@ export default function EditorView() {
             <span aria-hidden>↗</span>
             <span>
               Opened from run{" "}
-              <code className="font-mono text-[11px] bg-surface-2 px-1 py-0.5 rounded">
+              <code className="font-mono text-micro bg-surface-2 px-1 py-0.5 rounded">
                 {bannerRunId.length > 12 ? `${bannerRunId.slice(0, 8)}…` : bannerRunId}
               </code>
             </span>

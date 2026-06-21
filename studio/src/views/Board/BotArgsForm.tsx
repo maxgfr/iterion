@@ -96,7 +96,7 @@ export function BotArgsForm({ bot, values, onChange }: Props) {
   return (
     <div className="space-y-3">
       {bot?.schema_error && (
-        <div className="text-[11px] text-warning-fg space-y-1">
+        <div className="text-micro text-warning-fg space-y-1">
           <div>
             Schema unavailable for this bot — the workflow file failed to parse,
             so keys can&apos;t be validated here. Custom args below are still
@@ -111,7 +111,7 @@ export function BotArgsForm({ bot, values, onChange }: Props) {
       {/* Schema-driven fields */}
       {bot && !bot.schema_error && fields.length > 0 && (
         <div className="space-y-3">
-          <div className="text-[10px] uppercase tracking-wide text-fg-subtle">
+          <div className="text-caption uppercase tracking-wide text-fg-subtle">
             Schema-declared vars
           </div>
           {fields.map((f) => {
@@ -130,7 +130,7 @@ export function BotArgsForm({ bot, values, onChange }: Props) {
                     </span>
                     {required && <RequiredPill />}
                   </div>
-                  <div className="text-[10px] text-fg-subtle">{f.type}</div>
+                  <div className="text-caption text-fg-subtle">{f.type}</div>
                 </label>
                 <VarFieldInput
                   field={f}
@@ -146,7 +146,7 @@ export function BotArgsForm({ bot, values, onChange }: Props) {
       )}
 
       {bot && !bot.schema_error && fields.length === 0 && (
-        <p className="text-[11px] text-fg-subtle italic">
+        <p className="text-micro text-fg-subtle italic">
           This bot declares no input vars, so custom args you add below are
           dropped at runtime unless the bot&apos;s workflow declares a var
           with a matching key — the bot never receives unknown keys.
@@ -155,7 +155,7 @@ export function BotArgsForm({ bot, values, onChange }: Props) {
 
       {/* Custom args — always rendered. */}
       <div className="space-y-2">
-        <div className="text-[10px] uppercase tracking-wide text-fg-subtle">
+        <div className="text-caption uppercase tracking-wide text-fg-subtle">
           Custom args
           {customEntries.length > 0 && bot && !bot.schema_error && fields.length > 0 && (
             <span
@@ -168,7 +168,7 @@ export function BotArgsForm({ bot, values, onChange }: Props) {
           )}
         </div>
         {customEntries.length === 0 && (
-          <p className="text-[11px] text-fg-subtle italic">
+          <p className="text-micro text-fg-subtle italic">
             No custom args yet. A custom arg only reaches the bot if its key
             matches a declared var; keys the bot doesn&apos;t declare are
             dropped at runtime.

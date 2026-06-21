@@ -107,7 +107,7 @@ export default function ReviewMergeCard({ runId, message }: Props) {
 
   return (
     <div className="mt-1 rounded-md border-2 border-warning bg-warning-soft/20 px-3 py-2 space-y-3">
-      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+      <div className="flex flex-wrap items-center gap-2 text-micro">
         <span className="font-medium text-warning-fg">
           Review &amp; merge — test the change, then ship it
         </span>
@@ -131,7 +131,7 @@ export default function ReviewMergeCard({ runId, message }: Props) {
           href={review.reviewUrl}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 text-[12px] text-accent-fg underline"
+          className="inline-flex items-center gap-1 text-body text-accent-fg underline"
         >
           ↗ Open review environment ({review.reviewUrl})
         </a>
@@ -142,7 +142,7 @@ export default function ReviewMergeCard({ runId, message }: Props) {
       {/* Continue the dialogue */}
       <div className="space-y-1">
         <textarea
-          className="w-full rounded border border-border-default bg-surface-0 px-2 py-1 text-[12px] text-fg-default"
+          className="w-full rounded border border-border-default bg-surface-0 px-2 py-1 text-body text-fg-default"
           rows={2}
           placeholder="Reply to the reviewer (e.g. what you tested, what you saw)…"
           value={reply}
@@ -162,7 +162,7 @@ export default function ReviewMergeCard({ runId, message }: Props) {
       {/* Merge controls */}
       <div className="space-y-2 border-t border-border-default pt-2">
         {!noMerge && (
-          <div className="flex items-center gap-2 text-[11px]">
+          <div className="flex items-center gap-2 text-micro">
             <label htmlFor="review-merge-strategy" className="text-fg-muted">
               Strategy
             </label>
@@ -184,7 +184,7 @@ export default function ReviewMergeCard({ runId, message }: Props) {
         )}
         {!noMerge && strategy === "squash" && (
           <textarea
-            className="w-full rounded border border-border-default bg-surface-0 px-2 py-1 text-[11px] font-mono text-fg-default"
+            className="w-full rounded border border-border-default bg-surface-0 px-2 py-1 text-micro font-mono text-fg-default"
             rows={2}
             placeholder="(optional) squash commit message — defaults to the run's commits"
             value={commitMsg}
@@ -203,7 +203,7 @@ export default function ReviewMergeCard({ runId, message }: Props) {
             Request changes
           </Button>
         </div>
-        <p className="text-[10px] text-fg-subtle">
+        <p className="text-caption text-fg-subtle">
           Force-merge skips the reviewer&apos;s verdict (git safety checks still
           apply). Request changes returns the run to the implementer.
         </p>
@@ -227,7 +227,7 @@ function DialogueThread({
 }) {
   if (turns.length === 0) {
     return (
-      <div className="text-[12px] text-fg-default">
+      <div className="text-body text-fg-default">
         <MarkdownText value={fallback} size="sm" />
       </div>
     );
@@ -237,14 +237,14 @@ function DialogueThread({
       {turns.map((t, i) =>
         t.role === "human" ? (
           <div key={i} className="flex justify-end">
-            <div className="max-w-[80%] rounded-md bg-accent-soft/60 px-3 py-2 text-[12px] text-fg-default whitespace-pre-wrap break-words">
+            <div className="max-w-[80%] rounded-md bg-accent-soft/60 px-3 py-2 text-body text-fg-default whitespace-pre-wrap break-words">
               {t.content?.trim() || (
                 <span className="italic text-fg-muted">(no comment)</span>
               )}
             </div>
           </div>
         ) : (
-          <div key={i} className="text-[12px] text-fg-default">
+          <div key={i} className="text-body text-fg-default">
             <MarkdownText value={t.content ?? ""} size="sm" />
           </div>
         ),
@@ -262,7 +262,7 @@ function VerdictChip({ verdict }: { verdict?: Record<string, unknown> }) {
     typeof verdict.confidence === "string" ? ` (${verdict.confidence})` : "";
   return (
     <span
-      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+      className={`rounded px-1.5 py-0.5 text-caption font-medium ${
         approved ? "text-success-fg" : "text-danger-fg"
       }`}
     >

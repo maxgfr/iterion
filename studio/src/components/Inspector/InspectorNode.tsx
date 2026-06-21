@@ -190,7 +190,7 @@ function NodeHeader({
             {name}
           </button>
         )}
-        <div className="text-[10px] uppercase tracking-wider text-fg-subtle">{kind}</div>
+        <div className="text-caption uppercase tracking-wider text-fg-subtle">{kind}</div>
       </div>
       <IconButton
         variant="ghost"

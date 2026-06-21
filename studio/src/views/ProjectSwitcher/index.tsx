@@ -121,7 +121,7 @@ export default function ProjectSwitcher({ open, onClose }: Props) {
                     <div className="font-semibold flex items-center gap-2 truncate">
                       <span className="truncate">{p.name}</span>
                       {isCurrent && (
-                        <span className="text-[10px] uppercase tracking-wider text-accent-text shrink-0">
+                        <span className="text-caption uppercase tracking-wider text-accent-text shrink-0">
                           current
                         </span>
                       )}
@@ -131,7 +131,7 @@ export default function ProjectSwitcher({ open, onClose }: Props) {
                     </div>
                   </button>
                   {isPending ? (
-                    <div className="flex items-center gap-1 text-[11px] shrink-0">
+                    <div className="flex items-center gap-1 text-micro shrink-0">
                       <span className="text-fg-subtle mr-1">Remove?</span>
                       <Button
                         size="sm"

@@ -77,14 +77,14 @@ export default function SessionLauncher({
       <div className="rounded-lg border border-border-default bg-surface-1 p-6 space-y-4">
         <div>
           <h2 className="text-lg font-semibold text-fg-default">{bot.label}</h2>
-          <p className="mt-1 text-[13px] text-fg-muted">{bot.description}</p>
+          <p className="mt-1 text-label text-fg-muted">{bot.description}</p>
         </div>
 
         {bot.launcherVars.length > 0 && (
           <div className="space-y-3">
             {bot.launcherVars.map((v) => (
               <div key={v.name} className="space-y-1">
-                <label className="text-[11px] uppercase tracking-wide text-fg-subtle">
+                <label className="text-micro uppercase tracking-wide text-fg-subtle">
                   {v.label}
                 </label>
                 <Input
@@ -98,7 +98,7 @@ export default function SessionLauncher({
                   disabled={busy}
                 />
                 {v.defaultFrom === "work_dir" && (
-                  <p className="text-[10px] text-fg-subtle">
+                  <p className="text-caption text-fg-subtle">
                     Absolute path. Defaults to the studio&apos;s working directory.
                   </p>
                 )}
@@ -108,7 +108,7 @@ export default function SessionLauncher({
         )}
 
         {errorMessage && (
-          <p className="text-[12px] text-danger-fg" role="alert">
+          <p className="text-body text-danger-fg" role="alert">
             {errorMessage}
           </p>
         )}
@@ -134,7 +134,7 @@ export default function SessionLauncher({
 
         {supportsFastDispatch && (
           <div className="pt-3 border-t border-border-subtle space-y-1">
-            <p className="text-[11px] text-fg-subtle">
+            <p className="text-micro text-fg-subtle">
               Skip the survey — pick directly from the current board:
             </p>
             <Button

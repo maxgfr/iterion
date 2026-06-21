@@ -137,7 +137,7 @@ export default function UsersAdminPage() {
                 <tr key={u.id} className="border-b border-border-subtle last:border-0 align-top">
                   <td className="px-3 py-2">
                     <div>{u.email}</div>
-                    <div className="text-[10px] text-fg-subtle font-mono">{u.id}</div>
+                    <div className="text-caption text-fg-subtle font-mono">{u.id}</div>
                   </td>
                   <td className="px-3 py-2 text-fg-muted">{u.name ?? "—"}</td>
                   <td className="px-3 py-2">

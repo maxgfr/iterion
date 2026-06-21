@@ -158,9 +158,9 @@ function LabelFilter({
       >
         <span>Labels</span>
         {count > 0 && (
-          <span className="px-1 rounded bg-accent text-fg-onAccent text-[10px]">{count}</span>
+          <span className="px-1 rounded bg-accent text-fg-onAccent text-caption">{count}</span>
         )}
-        <span className="text-fg-subtle text-[10px]">▾</span>
+        <span className="text-fg-subtle text-caption">▾</span>
       </button>
 
       {open && (

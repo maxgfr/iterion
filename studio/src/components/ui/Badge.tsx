@@ -25,7 +25,7 @@ const variantClass: Record<BadgeVariant, string> = {
 };
 
 const sizeClass: Record<BadgeSize, string> = {
-  sm: "h-4 px-1.5 text-[10px] gap-0.5",
+  sm: "h-4 px-1.5 text-caption gap-0.5",
   md: "h-5 px-2 text-xs gap-1",
 };
 

@@ -50,12 +50,12 @@ export default function DiagnosticsPanel() {
         {hasIssues ? (
           <div className="flex items-center gap-2">
             {errorCount > 0 && (
-              <span className="bg-danger-soft text-danger px-1.5 py-0.5 rounded text-[10px]">
+              <span className="bg-danger-soft text-danger px-1.5 py-0.5 rounded text-caption">
                 {errorCount} error{errorCount !== 1 ? "s" : ""}
               </span>
             )}
             {warningCount > 0 && (
-              <span className="bg-warning-soft text-warning px-1.5 py-0.5 rounded text-[10px]">
+              <span className="bg-warning-soft text-warning px-1.5 py-0.5 rounded text-caption">
                 {warningCount} warning{warningCount !== 1 ? "s" : ""}
               </span>
             )}
@@ -80,12 +80,12 @@ export default function DiagnosticsPanel() {
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search code or message…"
             aria-label="Filter diagnostics"
-            className="flex-1 px-1.5 py-0.5 rounded border border-border-default bg-surface-0 text-[11px]"
+            className="flex-1 px-1.5 py-0.5 rounded border border-border-default bg-surface-0 text-micro"
           />
           <button
             type="button"
             onClick={() => setShowErrorsOnly((v) => !v)}
-            className={`text-[10px] px-1.5 py-0.5 rounded border ${
+            className={`text-caption px-1.5 py-0.5 rounded border ${
               showErrorsOnly
                 ? "bg-danger-soft border-danger text-danger-fg"
                 : "border-border-default text-fg-subtle hover:text-fg-default"
@@ -101,7 +101,7 @@ export default function DiagnosticsPanel() {
                 setSearch("");
                 setShowErrorsOnly(false);
               }}
-              className="text-[10px] text-fg-subtle hover:text-fg-default underline"
+              className="text-caption text-fg-subtle hover:text-fg-default underline"
             >
               reset
             </button>
@@ -113,7 +113,7 @@ export default function DiagnosticsPanel() {
       <DiagnosticList items={visibleGlobal} onClick={handleClick} />
 
       {filterActive && visible.length === 0 && (
-        <div className="text-fg-subtle text-[11px] py-2">No diagnostics match.</div>
+        <div className="text-fg-subtle text-micro py-2">No diagnostics match.</div>
       )}
 
       {/* Disclosure for attributed diagnostics */}
@@ -167,7 +167,7 @@ function DiagnosticList({
             className={`flex items-start gap-2 cursor-pointer hover:bg-surface-2 rounded px-1 -mx-1 py-0.5 ${sevColor}`}
             onClick={() => onClick(d)}
           >
-            <span className="shrink-0 font-mono text-[10px] mt-0.5 px-1 rounded bg-surface-2">
+            <span className="shrink-0 font-mono text-caption mt-0.5 px-1 rounded bg-surface-2">
               {d.code || (d.severity === "error" ? "ERR" : "WARN")}
             </span>
             <span className="min-w-0 flex-1">

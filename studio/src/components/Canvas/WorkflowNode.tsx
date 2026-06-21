@@ -166,13 +166,13 @@ export default function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeT
       <div className="font-semibold text-sm text-fg-default">{isStart ? "Start" : label}</div>
       {!isStart && <div className="text-xs text-fg-muted">{kind}</div>}
       {isLLMNode && modelLabel && (
-        <div className="text-[10px] text-fg-subtle mt-0.5 max-w-[160px] flex items-center justify-center gap-1">
+        <div className="text-caption text-fg-subtle mt-0.5 max-w-[160px] flex items-center justify-center gap-1">
           <ProviderIcon model={providerModel} delegate={providerDelegate} size={10} className="shrink-0 opacity-70" />
           <span className="truncate">{modelLabel}</span>
         </div>
       )}
       {isLLMNode && (
-        <div className="text-[10px] text-fg-subtle mt-0.5 max-w-[160px] flex items-center justify-center gap-1.5 flex-wrap">
+        <div className="text-caption text-fg-subtle mt-0.5 max-w-[160px] flex items-center justify-center gap-1.5 flex-wrap">
           <BackendBadge backend={backendValue} size={10} />
           {isEffortLevel(resolvedEffort) ? (
             <EffortBar
@@ -200,7 +200,7 @@ export default function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeT
         </div>
       )}
       {!isLLMNode && subtitle && (
-        <div className="text-[10px] text-fg-subtle mt-0.5 max-w-[160px] flex items-center justify-center gap-1">
+        <div className="text-caption text-fg-subtle mt-0.5 max-w-[160px] flex items-center justify-center gap-1">
           <span className="truncate">{subtitle}</span>
           {awaitGlyph && <span aria-hidden>{awaitGlyph}</span>}
         </div>

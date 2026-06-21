@@ -181,7 +181,7 @@ export default function AgentChatboxInline({
           {attachedSkills.map((name) => (
             <span
               key={name}
-              className="inline-flex items-center gap-1 rounded-full border border-info/40 bg-info-soft px-2 py-0.5 text-[10px] font-mono text-fg-default"
+              className="inline-flex items-center gap-1 rounded-full border border-info/40 bg-info-soft px-2 py-0.5 text-caption font-mono text-fg-default"
             >
               ⑂ {name}
               <button
@@ -208,7 +208,7 @@ export default function AgentChatboxInline({
           }
           rows={Math.max(2, Math.min(maxRows, Math.ceil(draft.length / 60) + 1))}
           disabled={disabled || busy}
-          className="flex-1 text-[12px]"
+          className="flex-1 text-body"
         />
         <div className="flex flex-col items-stretch gap-1 self-end">
           {skillCatalog.length > 0 && (
@@ -235,7 +235,7 @@ export default function AgentChatboxInline({
       </div>
 
       {pickerOpen && skillCatalog.length > 0 && (
-        <div className="rounded border border-border-default bg-surface-0 p-2 text-[11px] shadow-sm">
+        <div className="rounded border border-border-default bg-surface-0 p-2 text-micro shadow-sm">
           <Input
             type="text"
             value={pickerFilter}
@@ -259,13 +259,13 @@ export default function AgentChatboxInline({
                     className={`w-full rounded px-2 py-1 text-left hover:bg-surface-2 ${selected ? "bg-info-soft" : ""}`}
                   >
                     <span className="inline-flex items-center gap-1 font-mono">
-                      <span className="text-[10px] text-fg-subtle">
+                      <span className="text-caption text-fg-subtle">
                         {selected ? "☑" : "☐"}
                       </span>
                       {s.name}
                     </span>
                     {s.description && (
-                      <span className="ml-5 block text-[10px] text-fg-subtle">
+                      <span className="ml-5 block text-caption text-fg-subtle">
                         {s.description}
                       </span>
                     )}
@@ -274,7 +274,7 @@ export default function AgentChatboxInline({
               );
             })}
           </ul>
-          <div className="mt-1 flex justify-between text-[10px] text-fg-subtle">
+          <div className="mt-1 flex justify-between text-caption text-fg-subtle">
             <span>{attachedSkills.length} attached</span>
             <button
               type="button"
@@ -288,7 +288,7 @@ export default function AgentChatboxInline({
       )}
 
       {error && (
-        <p className="text-[11px] text-danger-fg" role="alert">
+        <p className="text-micro text-danger-fg" role="alert">
           {error}
         </p>
       )}
@@ -301,10 +301,10 @@ export default function AgentChatboxInline({
               className="flex items-start gap-2 rounded border border-border-subtle bg-surface-0 px-2 py-1.5"
             >
               <StatusBadge status={m.status} />
-              <span className="flex-1 text-[12px] whitespace-pre-wrap break-words text-fg-default">
+              <span className="flex-1 text-body whitespace-pre-wrap break-words text-fg-default">
                 {m.text}
                 {m.skill_refs && m.skill_refs.length > 0 && (
-                  <span className="ml-1 font-mono text-[10px] text-fg-subtle">
+                  <span className="ml-1 font-mono text-caption text-fg-subtle">
                     [skill: {m.skill_refs.join(", ")}]
                   </span>
                 )}
@@ -326,7 +326,7 @@ export default function AgentChatboxInline({
       {!embedded && hiddenCount > 0 && (
         <button
           type="button"
-          className="text-[10px] text-fg-subtle hover:text-fg-default"
+          className="text-caption text-fg-subtle hover:text-fg-default"
           onClick={() => setShowAll((v) => !v)}
         >
           {showAll

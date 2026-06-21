@@ -213,13 +213,13 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
                             {ex.display_name || ex.name}
                           </span>
                           {ex.display_name && (
-                            <span className="font-mono text-fg-subtle text-[10px] truncate shrink-0">
+                            <span className="font-mono text-fg-subtle text-caption truncate shrink-0">
                               {techName}
                             </span>
                           )}
                         </span>
                         {ex.description && (
-                          <span className="block truncate text-fg-muted text-[11px] mt-0.5">
+                          <span className="block truncate text-fg-muted text-micro mt-0.5">
                             {ex.description}
                           </span>
                         )}
@@ -282,7 +282,7 @@ export default function RecentFilesPanel({ variant = "card" }: Props) {
                     {basename(path)}
                   </span>
                   {basename(path) !== path && (
-                    <span className="text-fg-subtle text-[10px] truncate">
+                    <span className="text-fg-subtle text-caption truncate">
                       {path}
                     </span>
                   )}

@@ -132,7 +132,7 @@ export default function ForkDialog({ run, anchor, open, onOpenChange }: Props) {
       }
     >
       <div className="flex flex-col gap-3 text-sm">
-        <p className="text-fg-muted text-[11px]">
+        <p className="text-fg-muted text-micro">
           Forking creates a new run that re-executes from the chosen anchor with
           the parent's conversation/session restored. The new run starts in{" "}
           <span className="font-mono">cancelled</span> status — click Resume on
@@ -140,7 +140,7 @@ export default function ForkDialog({ run, anchor, open, onOpenChange }: Props) {
         </p>
 
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] uppercase tracking-wide text-fg-subtle">
+          <span className="text-micro uppercase tracking-wide text-fg-subtle">
             Fork name
           </span>
           <input
@@ -162,7 +162,7 @@ export default function ForkDialog({ run, anchor, open, onOpenChange }: Props) {
           />
           <span className="flex flex-col">
             <span className="font-medium">Rewind worktree</span>
-            <span className="text-[11px] text-fg-subtle">
+            <span className="text-micro text-fg-subtle">
               Reset the new worktree to the git snapshot captured at this node
               boundary. Off (default) inherits the parent's current files —
               useful when you want to retry the LLM step against fixes you
@@ -172,7 +172,7 @@ export default function ForkDialog({ run, anchor, open, onOpenChange }: Props) {
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] uppercase tracking-wide text-fg-subtle">
+          <span className="text-micro uppercase tracking-wide text-fg-subtle">
             New inputs (JSON)
           </span>
           <textarea
@@ -183,7 +183,7 @@ export default function ForkDialog({ run, anchor, open, onOpenChange }: Props) {
             rows={6}
             className="rounded border border-border-default bg-surface-1 px-2 py-1 font-mono text-xs leading-relaxed"
           />
-          <span className="text-[10px] text-fg-subtle">
+          <span className="text-caption text-fg-subtle">
             Pre-filled with the parent's inputs. Edits are merged onto the
             parent's map on the new run.
           </span>

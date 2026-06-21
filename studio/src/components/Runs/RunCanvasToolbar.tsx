@@ -61,7 +61,7 @@ export default function RunCanvasToolbar({
         aria-pressed={followLive}
         title={followLabel}
         aria-label={followLabel}
-        className={`inline-flex items-center gap-1 h-7 px-2 rounded-md border text-[10px] font-medium transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
+        className={`inline-flex items-center gap-1 h-7 px-2 rounded-md border text-caption font-medium transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
           followLive
             ? "bg-surface-2 text-fg-default border-border-strong"
             : "bg-surface-1/90 text-fg-subtle border-border-strong hover:text-fg-default hover:bg-surface-2"

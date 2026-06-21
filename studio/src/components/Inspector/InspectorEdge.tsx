@@ -54,7 +54,7 @@ export default function InspectorEdge({ edgeId }: { edgeId: string }) {
           <div className="text-sm font-semibold text-fg-default truncate">
             {edge.from} <span className="text-fg-subtle">{"\u2192"}</span> {edge.to}
           </div>
-          <div className="text-[10px] uppercase tracking-wider text-fg-subtle">Edge</div>
+          <div className="text-caption uppercase tracking-wider text-fg-subtle">Edge</div>
         </div>
         <IconButton
           variant="ghost"

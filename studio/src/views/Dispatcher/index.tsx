@@ -313,7 +313,7 @@ function SummaryCard({
       <div className="flex items-center justify-between mb-2 gap-3">
         <h2 className="text-sm font-semibold">{snap.name || "Dispatcher"}</h2>
         <span
-          className={`text-[10px] font-mono rounded px-1.5 py-0.5 ${meta.className}`}
+          className={`text-caption font-mono rounded px-1.5 py-0.5 ${meta.className}`}
           title={meta.title}
         >
           {pillState}
@@ -425,7 +425,7 @@ function RunningTable({
                   </button>
                   {r.attempt && r.attempt > 0 ? (
                     <span
-                      className="ml-1.5 inline-flex items-center rounded bg-warning-soft text-warning-fg px-1.5 py-0.5 text-[10px] font-mono align-middle"
+                      className="ml-1.5 inline-flex items-center rounded bg-warning-soft text-warning-fg px-1.5 py-0.5 text-caption font-mono align-middle"
                       title={`Resume of a prior failed_resumable run — attempt ${r.attempt + 1}. The dispatcher continues from the failing node's checkpoint instead of starting fresh.`}
                     >
                       resume #{r.attempt + 1}
@@ -450,7 +450,7 @@ function RunningTable({
                 <td className="py-1.5 px-3 text-right">
                   <button
                     onClick={() => onCancel(r.issue_id)}
-                    className="text-[11px] px-2 py-0.5 rounded border border-border-default hover:bg-surface-2"
+                    className="text-micro px-2 py-0.5 rounded border border-border-default hover:bg-surface-2"
                   >
                     Cancel
                   </button>
@@ -525,7 +525,7 @@ function RetriesTable({
             type="button"
             onClick={onRefreshNow}
             disabled={!canPollDispatches}
-            className="text-[11px] px-2 py-0.5 rounded border border-border-default hover:bg-surface-2 text-fg-muted hover:text-fg-default disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-fg-muted"
+            className="text-micro px-2 py-0.5 rounded border border-border-default hover:bg-surface-2 text-fg-muted hover:text-fg-default disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-fg-muted"
             title={pollTitle}
           >
             Poll now
@@ -604,7 +604,7 @@ function DispatchSkipsTable({
     <section className="rounded border border-danger/40 bg-danger-soft">
       <header className="px-4 py-2 border-b border-danger/30 text-sm font-semibold text-danger-fg flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span>⚠ Won&apos;t dispatch ({rows.length})</span>
-        <span className="text-[11px] font-normal text-danger-fg/70">
+        <span className="text-micro font-normal text-danger-fg/70">
           eligible issues the dispatcher refuses to claim — fix the{" "}
           <code>bot</code> in the issue editor or add it to{" "}
           <code>assignee_workflows</code>

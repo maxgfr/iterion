@@ -321,7 +321,7 @@ function WithEntryRow({
             {enumValues.map((v) => (
               <button
                 key={v}
-                className="text-[10px] bg-surface-2 hover:bg-surface-3 text-warning-fg px-1.5 py-0.5 rounded cursor-pointer"
+                className="text-caption bg-surface-2 hover:bg-surface-3 text-warning-fg px-1.5 py-0.5 rounded cursor-pointer"
                 onClick={() => updateValue(`"${v}"`)}
                 title={`Set value to "${v}"`}
               >

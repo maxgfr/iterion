@@ -33,12 +33,12 @@ export default function ShortcutsHelp({ open, onClose }: Props) {
         {SHORTCUTS.map(({ keys, desc }) => (
           <div key={keys} className="flex items-center justify-between gap-4">
             <span className="text-xs text-fg-muted">{desc}</span>
-            <kbd className="bg-surface-2 border border-border-strong rounded px-2 py-0.5 text-[10px] text-fg-default font-mono whitespace-nowrap">
+            <kbd className="bg-surface-2 border border-border-strong rounded px-2 py-0.5 text-caption text-fg-default font-mono whitespace-nowrap">
               {keys}
             </kbd>
           </div>
         ))}
-        <p className="pt-3 mt-3 border-t border-border-default text-[10px] text-fg-subtle text-center">
+        <p className="pt-3 mt-3 border-t border-border-default text-caption text-fg-subtle text-center">
           Press Escape to close
         </p>
       </div>

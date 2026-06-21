@@ -41,7 +41,7 @@ export function ToolRunningFooter({
   return (
     <div
       aria-live="polite"
-      className="font-mono text-[11px] text-info-fg italic px-1 py-0.5 animate-fade-in-opacity flex items-center gap-2"
+      className="font-mono text-micro text-info-fg italic px-1 py-0.5 animate-fade-in-opacity flex items-center gap-2"
     >
       <span className="text-accent-fg">{SPINNER_FRAMES[frame]}</span>
       <span>Running {label}</span>

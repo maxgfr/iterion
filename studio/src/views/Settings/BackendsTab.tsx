@@ -71,7 +71,7 @@ export default function BackendsTab() {
                 the options below is configured.
               </InlineBanner>
             )}
-            <div className="text-[10px] text-fg-subtle mt-2">
+            <div className="text-caption text-fg-subtle mt-2">
               Preference order: {report.preference_order.join(" → ")}
             </div>
           </div>

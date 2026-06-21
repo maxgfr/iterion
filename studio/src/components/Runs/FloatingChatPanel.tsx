@@ -145,7 +145,7 @@ function ClosedBubble({
       <ChatBubbleIcon className="h-5 w-5" />
       {unread > 0 && (
         <span
-          className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-fg-onAccent text-[10px] font-semibold flex items-center justify-center"
+          className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-fg-onAccent text-caption font-semibold flex items-center justify-center"
           aria-hidden
         >
           {unread > 99 ? "99+" : unread}
@@ -188,7 +188,7 @@ function ChatPanelChrome({
 }) {
   return (
     <div className="shrink-0 flex items-center justify-between px-3 py-1 border-b border-border-default bg-surface-2">
-      <span className="text-[11px] font-medium text-fg-default uppercase tracking-wide">
+      <span className="text-micro font-medium text-fg-default uppercase tracking-wide">
         Conversation
       </span>
       <div className="flex items-center gap-0.5">

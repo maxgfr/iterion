@@ -33,7 +33,7 @@ export default function ForkedFromRow({ run }: { run: RunHeaderType }) {
       <span className="text-fg-subtle">/ turn</span>
       <span className="font-mono">{turnLabel}</span>
       {anchor?.rewind_code && (
-        <span className="ml-1 rounded bg-warning-soft px-1 text-[10px] text-fg-default" title="Worktree was reset to the snapshot at this boundary">
+        <span className="ml-1 rounded bg-warning-soft px-1 text-caption text-fg-default" title="Worktree was reset to the snapshot at this boundary">
           rewound
         </span>
       )}

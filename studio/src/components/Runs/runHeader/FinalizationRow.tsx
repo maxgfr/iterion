@@ -39,7 +39,7 @@ export default function FinalizationRow({ run }: { run: RunHeaderType }) {
   };
 
   return (
-    <div className="shrink-0 px-4 py-1.5 bg-surface-2/40 border-b border-border-default flex items-center gap-3 text-[11px] flex-wrap">
+    <div className="shrink-0 px-4 py-1.5 bg-surface-2/40 border-b border-border-default flex items-center gap-3 text-micro flex-wrap">
       <span className="text-fg-muted">commit</span>
       <button
         type="button"

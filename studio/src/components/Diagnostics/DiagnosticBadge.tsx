@@ -15,7 +15,7 @@ export interface DiagnosticBadgeProps {
 }
 
 const sizeClasses = {
-  sm: "h-4 min-w-4 text-[10px] px-1",
+  sm: "h-4 min-w-4 text-caption px-1",
   md: "h-5 min-w-5 text-xs px-1.5",
 };
 
@@ -72,7 +72,7 @@ export default function DiagnosticBadge({
             <div key={i} className="text-xs">
               <div className="flex items-center gap-2 mb-0.5">
                 <span
-                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-mono ${
+                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-caption font-mono ${
                     d.severity === "error"
                       ? "bg-danger-soft text-danger-fg"
                       : "bg-warning-soft text-warning-fg"

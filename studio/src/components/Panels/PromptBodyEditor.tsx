@@ -119,7 +119,7 @@ export default function PromptBodyEditor({
           style={textareaStyle}
         />
       </div>
-      <div className="mt-1 flex items-center justify-between text-[10px] text-fg-subtle">
+      <div className="mt-1 flex items-center justify-between text-caption text-fg-subtle">
         <span>
           {value.length} chars · {lineCount} {lineCount === 1 ? "line" : "lines"}
         </span>

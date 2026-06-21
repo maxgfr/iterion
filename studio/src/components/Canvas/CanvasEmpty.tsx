@@ -157,7 +157,7 @@ function ExamplesPicker({
               className="w-full text-left rounded border border-border-default px-3 py-2 hover:bg-surface-2 transition-colors"
             >
               <div className="font-medium text-sm text-fg-default">{label}</div>
-              <div className="text-[10px] text-fg-subtle font-mono">{subline}</div>
+              <div className="text-caption text-fg-subtle font-mono">{subline}</div>
             </button>
           );
         })}
@@ -188,7 +188,7 @@ function Tile({
         {icon}
         <span className="font-semibold text-xs">{label}</span>
       </span>
-      <span className="text-[10px] text-fg-subtle font-normal">{description}</span>
+      <span className="text-caption text-fg-subtle font-normal">{description}</span>
     </Button>
   );
 }

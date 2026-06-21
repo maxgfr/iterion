@@ -117,7 +117,7 @@ export default function ResumeDialog({ run, open, onOpenChange }: Props) {
           />
           <span className="flex flex-col">
             <span className="font-medium">Force</span>
-            <span className="text-[11px] text-fg-subtle">
+            <span className="text-micro text-fg-subtle">
               Allow resume even when the workflow file changed since launch
               ({" "}
               <span className="font-mono">--force</span>). Use after fixing a

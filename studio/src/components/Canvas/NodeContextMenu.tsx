@@ -115,7 +115,7 @@ export default function NodeContextMenu({
         top: Math.min(y, window.innerHeight - 200),
       }}
     >
-      <div className="px-3 py-1 text-[10px] text-fg-subtle uppercase tracking-wider">
+      <div className="px-3 py-1 text-caption text-fg-subtle uppercase tracking-wider">
         {isGroupNode ? groupNameFromNodeId(nodeId) : nodeId}
       </div>
 

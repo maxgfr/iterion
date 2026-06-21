@@ -255,7 +255,7 @@ export default function BrowserPane({
         ) : null}
       </div>
       {attachError ? (
-        <div className="border-b border-danger/40 bg-danger-soft px-3 py-1 text-[11px] text-danger-fg">
+        <div className="border-b border-danger/40 bg-danger-soft px-3 py-1 text-micro text-danger-fg">
           {attachError}
         </div>
       ) : null}
@@ -302,14 +302,14 @@ export default function BrowserPane({
         )}
       </div>
       {showLive ? null : isScrubbing ? (
-        <div className="border-t border-border-default px-3 py-1 text-[11px] text-warning">
+        <div className="border-t border-border-default px-3 py-1 text-micro text-warning">
           scrubbed at seq {scrubSeq}
           {scrubbedShot
             ? ` · screenshot from ${scrubbedShot.nodeId ?? "unknown"} (seq ${scrubbedShot.seq})`
             : ""}
         </div>
       ) : sourceLabel ? (
-        <div className="border-t border-border-default px-3 py-1 text-[11px] text-fg-muted">
+        <div className="border-t border-border-default px-3 py-1 text-micro text-fg-muted">
           {sourceLabel}
           {browser.kind ? ` · ${browser.kind}` : null}
           {browser.scope === "internal" ? " · proxied" : null}

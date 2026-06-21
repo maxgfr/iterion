@@ -152,7 +152,7 @@ export default function IRNode({ data }: NodeProps<IRNodeType>) {
           </span>
         )}
       </div>
-      <div className="mt-1 flex items-center gap-1.5 text-[10px] text-fg-subtle">
+      <div className="mt-1 flex items-center gap-1.5 text-caption text-fg-subtle">
         <span>{kind}</span>
         <span className="ml-auto">
           {executions.length === 0
@@ -166,7 +166,7 @@ export default function IRNode({ data }: NodeProps<IRNodeType>) {
       {hasMeta && (
         <>
           {modelLabel && (
-            <div className="mt-1 flex items-center gap-1 text-[10px] text-fg-subtle min-w-0">
+            <div className="mt-1 flex items-center gap-1 text-caption text-fg-subtle min-w-0">
               <ProviderIcon
                 model={meta?.model}
                 delegate={meta?.backend}
@@ -190,7 +190,7 @@ export default function IRNode({ data }: NodeProps<IRNodeType>) {
             used={meta?.contextUsed}
             window={meta?.contextWindow}
           />
-          <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-fg-subtle flex-wrap">
+          <div className="mt-0.5 flex items-center gap-1.5 text-caption text-fg-subtle flex-wrap">
             <BackendBadge backend={meta?.backend} size={10} />
             {isEffortLevel(meta?.reasoningEffort) && (
               <EffortBar

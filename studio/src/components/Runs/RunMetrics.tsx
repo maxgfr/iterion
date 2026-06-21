@@ -58,14 +58,14 @@ export default function RunMetrics({ active, onJumpToFailed, bare = false }: Pro
         : undefined;
 
   const outerClass = bare
-    ? "h-full px-4 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]"
-    : "px-4 py-1.5 border-b border-border-default flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] bg-surface-1";
+    ? "h-full px-4 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-micro"
+    : "px-4 py-1.5 border-b border-border-default flex flex-wrap items-center gap-x-4 gap-y-1 text-micro bg-surface-1";
   return (
     <div className={outerClass}>
       <Metric label="duration" value={formatMs(m.durationMs)} live={active} />
       {stalenessTone && (
         <span
-          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border ${
+          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-caption border ${
             stalenessTone === "danger"
               ? "bg-danger-soft text-danger-fg border-danger/40"
               : "bg-warning-soft text-warning-fg border-warning/40"
@@ -95,7 +95,7 @@ export default function RunMetrics({ active, onJumpToFailed, bare = false }: Pro
       )}
       {m.budgetWarning && (
         <span
-          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border ${
+          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-caption border ${
             m.budgetExceeded
               ? "bg-danger-soft text-danger-fg border-danger/40"
               : "bg-warning-soft text-warning-fg border-warning/40"
@@ -148,7 +148,7 @@ export default function RunMetrics({ active, onJumpToFailed, bare = false }: Pro
           onClick={() => {
             if (m.firstFailedNodeId) onJumpToFailed?.(m.firstFailedNodeId);
           }}
-          className="inline-flex items-center gap-1 text-[11px] text-danger-fg hover:underline disabled:no-underline disabled:cursor-default"
+          className="inline-flex items-center gap-1 text-micro text-danger-fg hover:underline disabled:no-underline disabled:cursor-default"
           title={
             m.firstFailedNodeId
               ? `Jump to first failed node: ${m.firstFailedNodeId}`

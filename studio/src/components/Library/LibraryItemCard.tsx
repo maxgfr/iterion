@@ -54,7 +54,7 @@ export default function LibraryItemCard({ item, onAdd }: Props) {
             </span>
           )}
         </div>
-        <div className="text-[10px] text-fg-subtle line-clamp-2 leading-tight mt-0.5">{item.description}</div>
+        <div className="text-caption text-fg-subtle line-clamp-2 leading-tight mt-0.5">{item.description}</div>
         {item.tags && item.tags.length > 0 && (
           <div className="flex gap-1 flex-wrap mt-1">
             {item.tags.slice(0, 3).map((tag) => (

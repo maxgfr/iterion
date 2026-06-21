@@ -122,7 +122,7 @@ export default function Scrubber({
         value={speedIdx}
         onChange={(e) => setSpeedIdx(Number(e.target.value))}
         title="Replay speed"
-        className="text-[10px] px-1 py-0.5 rounded bg-surface-2 border border-border-default font-mono"
+        className="text-caption px-1 py-0.5 rounded bg-surface-2 border border-border-default font-mono"
         aria-label="Replay speed"
       >
         {REPLAY_SPEEDS.map((s, i) => (
@@ -131,7 +131,7 @@ export default function Scrubber({
           </option>
         ))}
       </select>
-      <span className="text-[10px] text-fg-subtle font-mono whitespace-nowrap">
+      <span className="text-caption text-fg-subtle font-mono whitespace-nowrap">
         seq
       </span>
       <div className="flex-1 relative h-5">
@@ -169,21 +169,21 @@ export default function Scrubber({
           </div>
         )}
       </div>
-      <span className="text-[10px] text-fg-subtle font-mono whitespace-nowrap">
+      <span className="text-caption text-fg-subtle font-mono whitespace-nowrap">
         {value} / {max}
       </span>
       {!isLive && (
         <button
           type="button"
           onClick={() => onChange(null)}
-          className="text-[10px] px-2 py-0.5 rounded bg-success-soft text-success-fg border border-success/40 hover:bg-success-soft/80"
+          className="text-caption px-2 py-0.5 rounded bg-success-soft text-success-fg border border-success/40 hover:bg-success-soft/80"
           title="Stop replay and follow live events again."
         >
           ● Live
         </button>
       )}
       {isLive && (
-        <span className="text-[10px] text-success-fg flex items-center gap-1">
+        <span className="text-caption text-success-fg flex items-center gap-1">
           <LiveDot tone="success" size="sm" />
           live
         </span>

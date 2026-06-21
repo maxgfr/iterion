@@ -31,7 +31,7 @@ export default function WSDisconnectBanner({
       role="status"
       aria-live="polite"
       aria-atomic="true"
-      className="px-4 py-1.5 bg-warning-soft border-b border-warning/40 flex items-center gap-2 text-[11px] text-warning-fg"
+      className="px-4 py-1.5 bg-warning-soft border-b border-warning/40 flex items-center gap-2 text-micro text-warning-fg"
     >
       <LiveDot tone="danger" size="sm" pulse={false} />
       <span>Live updates disconnected — data may be stale.</span>

@@ -37,11 +37,11 @@ export default function MCPConfigFields({ scope, value, onChange }: Props) {
       </summary>
       <div className="pl-2">
         {declared.length === 0 ? (
-          <p className="text-[10px] text-fg-subtle italic mb-1">
+          <p className="text-caption text-fg-subtle italic mb-1">
             Declare servers in the workspace MCP panel first, then reference them here by name.
           </p>
         ) : (
-          <p className="text-[10px] text-fg-subtle mb-1">
+          <p className="text-caption text-fg-subtle mb-1">
             Available: {declared.map((n) => `@${n}`).join(", ")}
           </p>
         )}

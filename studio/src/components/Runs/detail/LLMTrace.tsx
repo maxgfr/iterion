@@ -81,7 +81,7 @@ export function LLMTraceView({ steps }: { steps: LLMStep[] }) {
   const totalOut = steps.reduce((s, x) => s + (x.outputTokens ?? 0), 0);
   return (
     <div className="space-y-2">
-      <div className="text-[10px] text-fg-subtle flex flex-wrap gap-x-3 gap-y-0.5">
+      <div className="text-caption text-fg-subtle flex flex-wrap gap-x-3 gap-y-0.5">
         <span>{steps.length} step{steps.length === 1 ? "" : "s"}</span>
         {(totalIn > 0 || totalOut > 0) && (
           <span>
@@ -122,27 +122,27 @@ function LLMStepCard({
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center gap-2 px-2 py-1.5 text-left hover:bg-surface-2 rounded-t"
       >
-        <span className="text-[10px] font-mono text-fg-subtle">
+        <span className="text-caption font-mono text-fg-subtle">
           step {index + 1}
         </span>
         {step.pending ? (
-          <span className="text-[10px] text-info-fg animate-pulse">
+          <span className="text-caption text-info-fg animate-pulse">
             ⏳ in flight
           </span>
         ) : (
-          <span className="text-[10px] text-fg-muted">{summary}</span>
+          <span className="text-caption text-fg-muted">{summary}</span>
         )}
         {step.model && (
-          <span className="text-[10px] font-mono text-fg-subtle truncate">
+          <span className="text-caption font-mono text-fg-subtle truncate">
             {step.model}
           </span>
         )}
         {(step.inputTokens !== undefined || step.outputTokens !== undefined) && (
-          <span className="text-[10px] text-fg-subtle">
+          <span className="text-caption text-fg-subtle">
             {step.inputTokens ?? 0}↑/{step.outputTokens ?? 0}↓
           </span>
         )}
-        <span className="ml-auto text-fg-subtle text-[10px]">{open ? "▾" : "▸"}</span>
+        <span className="ml-auto text-fg-subtle text-caption">{open ? "▾" : "▸"}</span>
       </button>
       {open && (
         <div className="border-t border-border-default p-2 space-y-1">
@@ -160,7 +160,7 @@ function LLMStepCard({
               <summary className="px-2 py-1 cursor-pointer text-fg-muted bg-surface-2 rounded-t">
                 tool calls ({step.toolCalls.length})
               </summary>
-              <ul className="p-2 text-[10px] font-mono space-y-1">
+              <ul className="p-2 text-caption font-mono space-y-1">
                 {step.toolCalls.map((c, i) => (
                   <li key={i}>
                     <span className="text-fg-default">{c.name}</span>
@@ -195,7 +195,7 @@ function TraceBlock({
         <span>{title}</span>
         <CopyButton value={body} />
       </summary>
-      <pre className="p-2 text-[10px] font-mono whitespace-pre-wrap max-h-60 overflow-auto">
+      <pre className="p-2 text-caption font-mono whitespace-pre-wrap max-h-60 overflow-auto">
         {body}
       </pre>
     </details>

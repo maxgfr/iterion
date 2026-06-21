@@ -109,7 +109,7 @@ export default function ChatTranscript({
         />
       ))}
       {renderedMessages.length === 0 && (
-        <p className="text-[12px] text-fg-subtle italic">
+        <p className="text-body text-fg-subtle italic">
           The session will start as soon as iterion finishes the first survey.
         </p>
       )}
@@ -180,7 +180,7 @@ function DispatchCandidatesRow({
       ? "No dispatchable items on the board"
       : `${count} candidate${count === 1 ? "" : "s"} ready to pick`;
   return (
-    <div className="rounded border border-info/30 bg-info-soft/30 px-3 py-2 text-[11px] text-fg-default">
+    <div className="rounded border border-info/30 bg-info-soft/30 px-3 py-2 text-micro text-fg-default">
       <div className="font-medium">{label}</div>
       {message.summary && (
         <div className="mt-0.5 text-fg-muted">{message.summary}</div>
@@ -205,12 +205,12 @@ function UserMessageRow({
   return (
     <div className="flex justify-end">
       <div className="max-w-[85%] rounded-lg border border-info/30 bg-info-soft/50 px-3 py-2">
-        <div className="text-[12px] whitespace-pre-wrap break-words text-fg-default">
+        <div className="text-body whitespace-pre-wrap break-words text-fg-default">
           {message.text}
         </div>
         <div className="mt-1 flex items-center justify-end gap-1.5">
           <span
-            className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${tone}`}
+            className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-caption font-medium ${tone}`}
             title={hint}
           >
             {label}
@@ -290,7 +290,7 @@ function SessionClosedRow({
         : "text-warning-fg";
   return (
     <div
-      className={`text-[11px] text-center italic border-t border-border-subtle pt-3 ${cls}`}
+      className={`text-micro text-center italic border-t border-border-subtle pt-3 ${cls}`}
     >
       {label}
     </div>
@@ -319,7 +319,7 @@ function PlanHandedOffRow({
     message.createdCount === 1 ? "1 issue" : `${message.createdCount} issues`;
   return (
     <div className="border-t border-success/40 pt-3 text-center">
-      <div className="inline-flex items-center gap-2 rounded-full border border-success/40 bg-success-soft px-3 py-1 text-[12px] text-success-fg">
+      <div className="inline-flex items-center gap-2 rounded-full border border-success/40 bg-success-soft px-3 py-1 text-body text-success-fg">
         <span aria-hidden="true">✓</span>
         <span>
           {message.createdCount > 0
@@ -328,7 +328,7 @@ function PlanHandedOffRow({
         </span>
       </div>
       {message.summary && (
-        <div className="mt-1 text-[11px] italic text-fg-muted">
+        <div className="mt-1 text-micro italic text-fg-muted">
           {message.summary}
         </div>
       )}

@@ -99,7 +99,7 @@ export default function RunsPanel({ runs, loading, error }: Props) {
                       {r.name || r.workflow_name}
                     </div>
                     {r.name && r.workflow_name !== r.name && (
-                      <div className="text-[10px] text-fg-subtle truncate">
+                      <div className="text-caption text-fg-subtle truncate">
                         {r.workflow_name}
                       </div>
                     )}
@@ -110,7 +110,7 @@ export default function RunsPanel({ runs, loading, error }: Props) {
                       ? ` · #${r.queue_position}`
                       : ""}
                   </Badge>
-                  <span className="text-[10px] text-fg-subtle shrink-0 w-16 text-right">
+                  <span className="text-caption text-fg-subtle shrink-0 w-16 text-right">
                     {formatRelative(r.updated_at)}
                   </span>
                 </button>
@@ -127,7 +127,7 @@ export default function RunsPanel({ runs, loading, error }: Props) {
                       {r.name || r.workflow_name}
                     </div>
                     {r.name && r.workflow_name !== r.name && (
-                      <div className="text-[10px] text-fg-subtle truncate">
+                      <div className="text-caption text-fg-subtle truncate">
                         {r.workflow_name}
                       </div>
                     )}
@@ -135,7 +135,7 @@ export default function RunsPanel({ runs, loading, error }: Props) {
                   <Badge variant={STATUS_VARIANT[r.status]}>
                     {labelForStatus(r.status)}
                   </Badge>
-                  <span className="text-[10px] text-fg-subtle shrink-0 w-16 text-right">
+                  <span className="text-caption text-fg-subtle shrink-0 w-16 text-right">
                     {formatRelative(r.updated_at)}
                   </span>
                 </button>
@@ -144,7 +144,7 @@ export default function RunsPanel({ runs, loading, error }: Props) {
             {otherRunning.length > 0 && (
               <li
                 aria-hidden="true"
-                className="px-4 py-1.5 bg-surface-2 text-[10px] font-semibold uppercase tracking-wider text-fg-subtle"
+                className="px-4 py-1.5 bg-surface-2 text-caption font-semibold uppercase tracking-wider text-fg-subtle"
               >
                 In other locations
               </li>
@@ -223,7 +223,7 @@ function GlobalRunRow({ run }: { run: GlobalActiveRun }) {
         <div className="text-xs font-semibold truncate">
           {run.name || run.workflow_name}
         </div>
-        <div className="text-[10px] text-fg-subtle truncate">
+        <div className="text-caption text-fg-subtle truncate">
           {run.workflow_name}
           {" · "}
           <span title={run.store_path}>{location}</span>
@@ -232,7 +232,7 @@ function GlobalRunRow({ run }: { run: GlobalActiveRun }) {
       <Badge variant={variant} className="shrink-0">
         {opening ? "Opening…" : label}
       </Badge>
-      <span className="text-[10px] text-fg-subtle shrink-0 w-16 text-right">
+      <span className="text-caption text-fg-subtle shrink-0 w-16 text-right">
         {formatRelative(run.updated_at)}
       </span>
     </>

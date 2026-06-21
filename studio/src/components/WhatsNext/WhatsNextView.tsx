@@ -219,7 +219,7 @@ export default function WhatsNextView() {
               />
             )}
             {session.errorMessage && (
-              <div className="border-t border-danger/40 bg-danger-soft px-4 py-2 text-[12px] text-danger-fg">
+              <div className="border-t border-danger/40 bg-danger-soft px-4 py-2 text-body text-danger-fg">
                 {session.errorMessage}
               </div>
             )}
@@ -624,7 +624,7 @@ function PendingTurnFooter({
     >
       <div className="mx-auto max-w-3xl px-4 py-3">
         {contextPrefix && contextPrefix.length > 0 && (
-          <div className="mb-2 text-[11px] text-fg-muted italic">
+          <div className="mb-2 text-micro text-fg-muted italic">
             {contextPrefix}
           </div>
         )}
@@ -696,7 +696,7 @@ function QuickModeFooter({
     >
       <div className="mx-auto max-w-3xl px-4 py-3 space-y-2">
         {contextPrefix && contextPrefix.length > 0 && (
-          <div className="text-[11px] text-fg-muted italic">{contextPrefix}</div>
+          <div className="text-micro text-fg-muted italic">{contextPrefix}</div>
         )}
         <Textarea
           rows={2}
@@ -728,7 +728,7 @@ function QuickModeFooter({
             }`}
           >
             <div className="flex items-center gap-2">
-              <span className="text-[10px] text-fg-subtle uppercase tracking-wide shrink-0">
+              <span className="text-caption text-fg-subtle uppercase tracking-wide shrink-0">
                 I'll
               </span>
               <Select
@@ -736,7 +736,7 @@ function QuickModeFooter({
                 onChange={(e) =>
                   setActionOverride(e.target.value as ContinueAction)
                 }
-                className="text-[11px] py-0.5"
+                className="text-micro py-0.5"
               >
                 {(Object.keys(QUICK_ACTION_LABELS) as ContinueAction[]).map(
                   (a) => (
@@ -753,11 +753,11 @@ function QuickModeFooter({
                 value={detail}
                 onChange={(e) => setDetailOverride(e.target.value)}
                 placeholder="detail (optional)"
-                className="w-full rounded border border-border-default bg-surface-1 px-2 py-1 text-[11px] text-fg-default"
+                className="w-full rounded border border-border-default bg-surface-1 px-2 py-1 text-micro text-fg-default"
               />
             )}
             {lowConfidence && (
-              <div className="text-[10px] text-warning-fg">
+              <div className="text-caption text-warning-fg">
                 {classified.rationale} — check the action before confirming.
               </div>
             )}
@@ -775,7 +775,7 @@ function QuickModeFooter({
           <button
             type="button"
             onClick={() => setQuickMode(false)}
-            className="text-[11px] text-fg-subtle hover:text-fg-default cursor-pointer"
+            className="text-micro text-fg-subtle hover:text-fg-default cursor-pointer"
             title="Switch back to the structured action + detail form."
           >
             Use form instead
@@ -806,7 +806,7 @@ function ResumeFooter({
   return (
     <div className="border-t border-border-default bg-surface-1">
       <div className="mx-auto max-w-3xl px-4 py-3 flex items-center gap-3">
-        <div className="flex-1 text-[12px] text-fg-muted">{explainer}</div>
+        <div className="flex-1 text-body text-fg-muted">{explainer}</div>
         <Button
           variant="primary"
           size="sm"
@@ -891,10 +891,10 @@ function SessionHeader({
   return (
     <div className="px-4 py-3 border-b border-border-subtle flex items-baseline justify-between gap-3">
       {dialog}
-      <h2 className="text-[13px] font-semibold text-fg-default">
+      <h2 className="text-label font-semibold text-fg-default">
         {bot.label}
         {session.runId && (
-          <span className="ml-2 text-[10px] text-fg-subtle font-mono font-normal">
+          <span className="ml-2 text-caption text-fg-subtle font-mono font-normal">
             {session.runId}
           </span>
         )}
@@ -904,13 +904,13 @@ function SessionHeader({
         {session.runId && (
           <Link
             href={`/runs/${encodeURIComponent(session.runId)}`}
-            className="inline-flex items-center gap-1 text-[11px] text-accent-text hover:underline"
+            className="inline-flex items-center gap-1 text-micro text-accent-text hover:underline"
           >
             <ExternalLinkIcon className="w-3 h-3" />
             console
           </Link>
         )}
-        <div className="text-[10px] uppercase tracking-wide text-fg-subtle">
+        <div className="text-caption uppercase tracking-wide text-fg-subtle">
           {humanStatus(session.status, session.runStatus)}
         </div>
         {showResetButton && (
@@ -918,7 +918,7 @@ function SessionHeader({
             type="button"
             onClick={() => void onNewSession()}
             disabled={abandoning}
-            className="text-[11px] text-accent-text hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+            className="text-micro text-accent-text hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-wait"
             title={
               isLive
                 ? "Cancel the current run and start a fresh Nexie session."
@@ -944,7 +944,7 @@ function QuickModeToggle() {
     <button
       type="button"
       onClick={() => setQuickMode(!quickMode)}
-      className={`text-[11px] hover:underline cursor-pointer ${
+      className={`text-micro hover:underline cursor-pointer ${
         quickMode ? "text-accent-text" : "text-fg-subtle"
       }`}
       title="Quick mode: type a free-text instruction on the ask_continue turn instead of picking from the form. A dry-run banner lets you confirm the interpreted action."

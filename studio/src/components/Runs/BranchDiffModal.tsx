@@ -38,7 +38,7 @@ export default function BranchDiffModal({
           <span className="flex items-baseline gap-2">
             Branch diff
             {files.length > 0 && (
-              <span className="text-[11px] font-normal text-fg-subtle">
+              <span className="text-micro font-normal text-fg-subtle">
                 {files.length} file{files.length === 1 ? "" : "s"} ·{" "}
                 <span className="text-success-fg">+{totalAdded}</span>{" "}
                 <span className="text-danger-fg">−{totalDeleted}</span>
@@ -71,9 +71,9 @@ export default function BranchDiffModal({
                       {f.path}
                     </span>
                     {f.binary ? (
-                      <span className="text-[10px] text-fg-subtle shrink-0">(binary)</span>
+                      <span className="text-caption text-fg-subtle shrink-0">(binary)</span>
                     ) : (
-                      <span className="text-[10px] shrink-0 tabular-nums">
+                      <span className="text-caption shrink-0 tabular-nums">
                         <span className="text-success-fg">+{Math.max(0, f.added)}</span>{" "}
                         <span className="text-danger-fg">−{Math.max(0, f.deleted)}</span>
                       </span>
@@ -99,7 +99,7 @@ function StatusGlyph({ status }: { status: string }) {
   const { ch, cls } = statusMeta(status);
   return (
     <span
-      className={`shrink-0 w-4 text-center font-mono text-[11px] ${cls}`}
+      className={`shrink-0 w-4 text-center font-mono text-micro ${cls}`}
       title={statusTitle(status)}
     >
       {ch}

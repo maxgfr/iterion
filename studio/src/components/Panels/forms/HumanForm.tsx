@@ -137,7 +137,7 @@ export default function HumanForm({ decl }: Props) {
       />
       {needsModel && (
         <div className="border-t border-border-default pt-2 mt-2">
-          <p className="text-[10px] text-warning mb-1">Required for {interaction} interaction</p>
+          <p className="text-caption text-warning mb-1">Required for {interaction} interaction</p>
         </div>
       )}
       <TextField

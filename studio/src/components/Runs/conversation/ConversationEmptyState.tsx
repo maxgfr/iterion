@@ -91,7 +91,7 @@ export default function ConversationEmptyState({
           <button
             type="button"
             onClick={onShowEventLog}
-            className="text-[11px] text-accent-text underline-offset-2 hover:underline focus:outline-none focus-visible:underline"
+            className="text-micro text-accent-text underline-offset-2 hover:underline focus:outline-none focus-visible:underline"
           >
             Show event log →
           </button>

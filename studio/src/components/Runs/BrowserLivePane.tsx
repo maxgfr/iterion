@@ -249,7 +249,7 @@ export default function BrowserLivePane({ runId, sessionId }: BrowserLivePanePro
           }`}
         />
       </div>
-      <div className="border-t border-border-default px-3 py-1 text-[11px] text-fg-muted flex items-center gap-2">
+      <div className="border-t border-border-default px-3 py-1 text-micro text-fg-muted flex items-center gap-2">
         <span className="inline-block h-2 w-2 rounded-full bg-success" />
         live · session {sessionId.slice(0, 8)}
         {frameSize ? ` · ${frameSize.w}×${frameSize.h}` : null}

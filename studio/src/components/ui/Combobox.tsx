@@ -168,7 +168,7 @@ export function Combobox<T = string>({
         <span className={headerText ? "" : "text-fg-subtle"}>
           {headerText || placeholder}
         </span>
-        <span className="text-fg-subtle text-[10px]">▾</span>
+        <span className="text-fg-subtle text-caption">▾</span>
       </button>
 
       {open && (
@@ -207,7 +207,7 @@ export function Combobox<T = string>({
               >
                 {emptyLabel}
                 {emptyDescription && (
-                  <div className="text-[10px] text-fg-subtle italic mt-0.5">
+                  <div className="text-caption text-fg-subtle italic mt-0.5">
                     {emptyDescription}
                   </div>
                 )}
@@ -240,13 +240,13 @@ export function Combobox<T = string>({
                       {o.label}
                     </span>
                     {o.meta && (
-                      <span className="text-[10px] text-fg-subtle shrink-0">
+                      <span className="text-caption text-fg-subtle shrink-0">
                         {o.meta}
                       </span>
                     )}
                   </div>
                   {o.description && (
-                    <div className="text-[10px] text-fg-muted truncate mt-0.5">
+                    <div className="text-caption text-fg-muted truncate mt-0.5">
                       {o.description}
                     </div>
                   )}

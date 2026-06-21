@@ -35,7 +35,7 @@ export default function OperatorPauseBanner({ run }: Props) {
 
   return (
     <div
-      className="shrink-0 px-4 py-2 bg-info-soft/40 border-b border-info/30 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]"
+      className="shrink-0 px-4 py-2 bg-info-soft/40 border-b border-info/30 flex flex-wrap items-center gap-x-3 gap-y-1 text-body"
       role="status"
       aria-live="polite"
     >
@@ -49,7 +49,7 @@ export default function OperatorPauseBanner({ run }: Props) {
         The run will not progress until you click Resume.
       </span>
       <div className="ml-auto flex items-center gap-2">
-        {error && <span className="text-[11px] text-danger">{error}</span>}
+        {error && <span className="text-micro text-danger">{error}</span>}
         <Button
           variant="primary"
           size="sm"

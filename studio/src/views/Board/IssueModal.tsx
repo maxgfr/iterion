@@ -164,7 +164,7 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
                   <span className="inline-flex items-center gap-1">
                     Bot
                     {bot && (
-                      <span className="text-[10px] font-mono bg-accent/15 text-accent-text rounded px-1">
+                      <span className="text-caption font-mono bg-accent/15 text-accent-text rounded px-1">
                         {bot}
                       </span>
                     )}
@@ -473,7 +473,7 @@ function BotTab({
         ) : (
           <BotPicker value={bot} bots={bots} onChange={setBot} />
         )}
-        <p className="text-[11px] text-fg-subtle mt-1">
+        <p className="text-micro text-fg-subtle mt-1">
           When set, this bot overrides the dispatcher's per-assignee or
           global workflow selection for this ticket.
         </p>
@@ -532,7 +532,7 @@ function LastRunSection({
   const runLabel = runID ? runID.slice(0, 12) : "";
   return (
     <div className="rounded border border-border-default bg-surface-1 p-2 space-y-1.5">
-      <div className="text-[11px] uppercase tracking-wide text-fg-subtle">
+      <div className="text-micro uppercase tracking-wide text-fg-subtle">
         Last run
       </div>
       {runID && (
@@ -568,7 +568,7 @@ function LastRunSection({
         <div className="flex items-center gap-1.5 text-xs">
           <span className="text-fg-muted">Worktree:</span>
           <code
-            className="flex-1 min-w-0 truncate bg-surface-2 px-1 py-0.5 rounded text-[11px]"
+            className="flex-1 min-w-0 truncate bg-surface-2 px-1 py-0.5 rounded text-micro"
             title={workdir}
           >
             {workdir}
@@ -576,7 +576,7 @@ function LastRunSection({
           <CopyButton value={workdir} variant="icon" label="Copy worktree path" />
           <a
             href={`vscode://file/${workdir}`}
-            className="text-[11px] px-1.5 py-0.5 rounded border border-border-default hover:bg-surface-2 text-fg-default"
+            className="text-micro px-1.5 py-0.5 rounded border border-border-default hover:bg-surface-2 text-fg-default"
             title="Open the worktree in VS Code (vscode:// URL handler)"
           >
             VS Code

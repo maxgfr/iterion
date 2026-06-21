@@ -19,7 +19,7 @@ export function StatusDot({ status }: { status: RunFileStatus }) {
   const letter = status === "??" ? "U" : status;
   return (
     <span
-      className={`inline-flex h-3 w-3 shrink-0 items-center justify-center text-[10px] font-bold leading-none ${cls}`}
+      className={`inline-flex h-3 w-3 shrink-0 items-center justify-center text-caption font-bold leading-none ${cls}`}
       aria-label={`status ${status}`}
     >
       {letter}

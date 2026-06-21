@@ -139,7 +139,7 @@ function BreakdownSection({
       <header className="flex items-baseline justify-between mb-1.5">
         <h3 className="text-xs font-semibold text-fg-default">{title}</h3>
         {hint && (
-          <span className="text-[10px] text-fg-subtle truncate ml-3 max-w-md">
+          <span className="text-caption text-fg-subtle truncate ml-3 max-w-md">
             {hint}
           </span>
         )}
@@ -159,7 +159,7 @@ function BreakdownSection({
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="mt-1.5 text-[10px] text-fg-subtle hover:text-fg-default"
+          className="mt-1.5 text-caption text-fg-subtle hover:text-fg-default"
         >
           show {hidden} more
         </button>
@@ -168,7 +168,7 @@ function BreakdownSection({
         <button
           type="button"
           onClick={() => setExpanded(false)}
-          className="mt-1.5 ml-3 text-[10px] text-fg-subtle hover:text-fg-default"
+          className="mt-1.5 ml-3 text-caption text-fg-subtle hover:text-fg-default"
         >
           collapse
         </button>
@@ -227,13 +227,13 @@ function BucketRow({
           {formatCost(bucket.costUsd)}
         </span>
         <span
-          className="text-fg-subtle text-right text-[10px]"
+          className="text-fg-subtle text-right text-caption"
           style={{ flexBasis: "3rem" }}
         >
           {pct.toFixed(0)}%
         </span>
         <span
-          className="text-fg-subtle text-right text-[10px] hidden sm:inline-block"
+          className="text-fg-subtle text-right text-caption hidden sm:inline-block"
           style={{ flexBasis: "5rem" }}
           title={`${bucket.tokens.toLocaleString()} tokens · ${bucket.count} ${
             bucket.count === 1 ? "exec" : "execs"

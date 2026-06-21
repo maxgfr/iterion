@@ -46,7 +46,7 @@ export default function WatchPanel({ runId }: WatchPanelProps) {
       aria-label="Dispatched items"
     >
       <div className="flex items-center justify-between gap-2 mb-1">
-        <div className="text-[10px] uppercase tracking-wide text-fg-subtle">
+        <div className="text-caption uppercase tracking-wide text-fg-subtle">
           Watching · {entries.length} dispatched
           {pendingUpdates.length > 0 && (
             <span className="ml-2 text-warning-fg normal-case tracking-normal">
@@ -60,19 +60,19 @@ export default function WatchPanel({ runId }: WatchPanelProps) {
               type="button"
               onClick={() => void onTellNexie()}
               disabled={forwarding}
-              className="text-[11px] text-accent-text hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+              className="text-micro text-accent-text hover:underline cursor-pointer disabled:opacity-50 disabled:cursor-wait"
               title="Forward these state changes into Nexie's chat so she can react on her next turn."
             >
               {forwarding ? "Forwarding…" : "Tell Nexie"}
             </button>
           )}
-          <Link href="/board" className="text-[10px] text-accent-text hover:underline">
+          <Link href="/board" className="text-caption text-accent-text hover:underline">
             board ↗
           </Link>
         </div>
       </div>
       {forwardError && (
-        <div className="mb-1 text-[10px] text-danger-fg" title={forwardError}>
+        <div className="mb-1 text-caption text-danger-fg" title={forwardError}>
           Forward failed: {truncate(forwardError, 80)}
         </div>
       )}
@@ -124,9 +124,9 @@ function WatchRow({ entry, runId }: { entry: WatchEntry; runId: string | null })
   };
 
   return (
-    <li className="flex items-center gap-2 text-[12px] text-fg-default">
+    <li className="flex items-center gap-2 text-body text-fg-default">
       <span
-        className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide"
+        className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-caption font-medium uppercase tracking-wide"
         style={stateChipStyle(state)}
       >
         {state}
@@ -135,12 +135,12 @@ function WatchRow({ entry, runId }: { entry: WatchEntry; runId: string | null })
         {title}
       </span>
       {dispatchError && (
-        <span className="text-[10px] text-danger-fg" title={dispatchError}>
+        <span className="text-caption text-danger-fg" title={dispatchError}>
           (failed)
         </span>
       )}
       {lastFetchError && !dispatchError && (
-        <span className="text-[10px] text-fg-subtle" title={lastFetchError}>
+        <span className="text-caption text-fg-subtle" title={lastFetchError}>
           (stale)
         </span>
       )}
@@ -149,7 +149,7 @@ function WatchRow({ entry, runId }: { entry: WatchEntry; runId: string | null })
           type="button"
           onClick={() => void onDispatch()}
           disabled={dispatching}
-          className="text-[11px] text-accent-text hover:underline shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+          className="text-micro text-accent-text hover:underline shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-wait"
           title="Push this ticket from backlog to ready — the dispatcher picks it up."
         >
           {dispatching ? "…" : "▶ dispatch"}
@@ -158,7 +158,7 @@ function WatchRow({ entry, runId }: { entry: WatchEntry; runId: string | null })
       {lastRunId && (
         <Link
           href={`/runs/${encodeURIComponent(lastRunId)}`}
-          className="text-[11px] text-accent-text hover:underline shrink-0"
+          className="text-micro text-accent-text hover:underline shrink-0"
           title={`Open last run ${lastRunId}`}
         >
           run ↗

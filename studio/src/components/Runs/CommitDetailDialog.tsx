@@ -165,7 +165,7 @@ function FileList({ files, selectedPath, onSelect }: FileListProps) {
               >
                 <StatusDot status={f.status} />
                 <span className="truncate min-w-0">{f.path}</span>
-                <span className="ml-auto shrink-0 pl-2 text-[10px] tabular-nums">
+                <span className="ml-auto shrink-0 pl-2 text-caption tabular-nums">
                   {f.binary ? (
                     <span className="text-fg-subtle">(binary)</span>
                   ) : (

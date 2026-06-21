@@ -130,7 +130,7 @@ export default function ComputeForm({ decl }: Props) {
           </button>
         </div>
         {decl.expr.length === 0 ? (
-          <p className="text-[10px] text-fg-subtle italic">
+          <p className="text-caption text-fg-subtle italic">
             No expressions yet. Add one per output field you want to compute.
           </p>
         ) : (
@@ -141,10 +141,10 @@ export default function ComputeForm({ decl }: Props) {
                 className="border border-border-default rounded p-2 bg-surface-1/40"
               >
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] text-fg-subtle font-mono">#{i}</span>
+                  <span className="text-caption text-fg-subtle font-mono">#{i}</span>
                   <button
                     type="button"
-                    className="text-[10px] text-danger hover:text-danger-fg"
+                    className="text-caption text-danger hover:text-danger-fg"
                     onClick={() => removeExprAt(i)}
                   >
                     Remove

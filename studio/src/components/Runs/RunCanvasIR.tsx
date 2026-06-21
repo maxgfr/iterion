@@ -649,7 +649,7 @@ export default function RunCanvasIR({
   return (
     <div className="h-full w-full relative">
       {wf.stale_hash && (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 px-2 py-1 text-[10px] rounded bg-warning-soft text-warning-fg border border-warning/60 shadow">
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 px-2 py-1 text-caption rounded bg-warning-soft text-warning-fg border border-warning/60 shadow">
           ⚠ The .bot source has changed since this run started; the
           structure shown may differ from what executed.
         </div>
@@ -666,7 +666,7 @@ export default function RunCanvasIR({
                 key={c.key}
                 type="button"
                 onClick={() => toggleFilter(c.key)}
-                className={`text-[10px] px-2 py-0.5 rounded border transition-colors bg-surface-1/90 backdrop-blur ${
+                className={`text-caption px-2 py-0.5 rounded border transition-colors bg-surface-1/90 backdrop-blur ${
                   c.tone
                 } ${
                   isActive
@@ -745,12 +745,12 @@ function StatusLegend() {
       {open ? (
         <div className="bg-surface-1/95 backdrop-blur border border-border-default rounded shadow-lg p-2 min-w-[180px]">
           <div className="flex items-center justify-between gap-2 mb-1">
-            <span className="text-[10px] font-semibold text-fg-default">
+            <span className="text-caption font-semibold text-fg-default">
               Node colours
             </span>
             <button
               type="button"
-              className="text-[10px] text-fg-subtle hover:text-fg-default"
+              className="text-caption text-fg-subtle hover:text-fg-default"
               onClick={() => setOpen(false)}
             >
               ×
@@ -760,7 +760,7 @@ function StatusLegend() {
             {entries.map((e) => {
               const meta = statusClasses(e.key);
               return (
-                <li key={e.key} className="flex items-center gap-2 text-[10px]">
+                <li key={e.key} className="flex items-center gap-2 text-caption">
                   <span
                     aria-hidden
                     className={`inline-block h-2.5 w-3.5 rounded border ${e.sample}`}

@@ -48,7 +48,7 @@ export default function QuickAddMenu({ x, y, onAddNode, onConnectTerminal, onClo
         top: Math.min(y, window.innerHeight - 340),
       }}
     >
-      <div className="px-3 py-1 text-[10px] text-fg-subtle uppercase tracking-wider">Add node</div>
+      <div className="px-3 py-1 text-caption text-fg-subtle uppercase tracking-wider">Add node</div>
       {QUICK_ADD_TYPES.map(({ kind, label }) => (
         <button
           key={kind}
@@ -60,7 +60,7 @@ export default function QuickAddMenu({ x, y, onAddNode, onConnectTerminal, onClo
         </button>
       ))}
       <div className="border-t border-border-default my-1" />
-      <div className="px-3 py-1 text-[10px] text-fg-subtle uppercase tracking-wider">Connect to</div>
+      <div className="px-3 py-1 text-caption text-fg-subtle uppercase tracking-wider">Connect to</div>
       <button
         className="w-full text-left px-3 py-1.5 hover:bg-surface-2 text-xs text-fg-default flex items-center gap-2"
         onClick={() => onConnectTerminal("done")}

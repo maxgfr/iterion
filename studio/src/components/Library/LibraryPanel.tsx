@@ -127,7 +127,7 @@ function ExpandedPanel({ onCollapse }: { onCollapse: () => void }) {
           <button
             key={label}
             onClick={() => setActiveCategory(value)}
-            className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
+            className={`text-caption px-2 py-0.5 rounded-full border transition-colors ${
               activeCategory === value
                 ? "bg-accent/20 border-accent text-accent-text"
                 : "bg-surface-1 border-border-strong text-fg-subtle hover:border-border-strong"
@@ -166,7 +166,7 @@ function ExpandedPanel({ onCollapse }: { onCollapse: () => void }) {
       {/* Library items */}
       <div className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
         {filteredItems.length === 0 ? (
-          <div className="text-[10px] text-fg-subtle text-center py-4">
+          <div className="text-caption text-fg-subtle text-center py-4">
             {searchQuery ? "No items match your search" : "No items in this category"}
           </div>
         ) : (

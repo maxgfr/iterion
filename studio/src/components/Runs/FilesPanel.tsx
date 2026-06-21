@@ -231,7 +231,7 @@ export default function FilesPanel({
         )}
       </div>
       {data?.work_dir && (
-        <footer className="border-t border-border-default px-2 py-1 text-[10px] text-fg-subtle truncate">
+        <footer className="border-t border-border-default px-2 py-1 text-caption text-fg-subtle truncate">
           <Tooltip content={footerTooltip(data, mode)}>
             <span className="truncate block">{footerLabel(data, mode)}</span>
           </Tooltip>
@@ -298,7 +298,7 @@ function LargeChangesetHint({
           <button
             type="button"
             onClick={onEditGitignore}
-            className="mt-0.5 inline-flex items-center rounded-md border border-border-default bg-surface-2 px-2 py-0.5 text-[10px] font-medium text-fg-default hover:bg-surface-3 focus:outline-none"
+            className="mt-0.5 inline-flex items-center rounded-md border border-border-default bg-surface-2 px-2 py-0.5 text-caption font-medium text-fg-default hover:bg-surface-3 focus:outline-none"
           >
             Edit .gitignore
           </button>
@@ -329,7 +329,7 @@ function ModeSegmented({
   count,
 }: ModeSegmentedProps) {
   return (
-    <div className="inline-flex overflow-hidden rounded-md border border-border-default text-[10px]">
+    <div className="inline-flex overflow-hidden rounded-md border border-border-default text-caption">
       <SegmentButton
         active={mode === "combined"}
         disabled={worktreeGone}
@@ -497,7 +497,7 @@ function FolderRow({
       )}
       <span className="truncate text-fg-muted">{folder.label}</span>
       {showAggregate && (
-        <span className="ml-auto shrink-0 pl-2 text-[10px] tabular-nums">
+        <span className="ml-auto shrink-0 pl-2 text-caption tabular-nums">
           {folder.added > 0 && (
             <span className="text-success-fg">+{folder.added}</span>
           )}
@@ -555,7 +555,7 @@ function FileRow({
       >
         <StatusDot status={f.status} />
         <span className="truncate min-w-0 text-fg-default">{node.label}</span>
-        <span className="ml-auto shrink-0 pl-2 text-[10px] tabular-nums">
+        <span className="ml-auto shrink-0 pl-2 text-caption tabular-nums">
           {f.binary ? (
             <span className="text-fg-subtle">(binary)</span>
           ) : (

@@ -167,7 +167,7 @@ export default function RefAwarePopup({
           blocks.push(
             <div
               key={`h-${group}`}
-              className="sticky top-0 bg-surface-1 px-2 py-1 text-[10px] uppercase tracking-wider text-fg-subtle border-b border-border-default"
+              className="sticky top-0 bg-surface-1 px-2 py-1 text-caption uppercase tracking-wider text-fg-subtle border-b border-border-default"
             >
               {GROUP_LABELS[group] ?? group}
             </div>,
@@ -194,7 +194,7 @@ export default function RefAwarePopup({
               >
                 <span className="truncate font-mono">{item.label}</span>
                 {item.detail && (
-                  <span className="shrink-0 text-[10px] text-fg-subtle font-mono">
+                  <span className="shrink-0 text-caption text-fg-subtle font-mono">
                     {item.detail}
                   </span>
                 )}

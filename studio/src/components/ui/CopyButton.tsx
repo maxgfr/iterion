@@ -49,7 +49,7 @@ export function CopyButton({
   const baseClass =
     variant === "icon" || variant === "share"
       ? "inline-flex items-center justify-center h-5 w-5 rounded text-fg-subtle hover:text-fg-default hover:bg-surface-2 transition-colors"
-      : "text-[10px] text-fg-subtle hover:text-fg-default px-1";
+      : "text-caption text-fg-subtle hover:text-fg-default px-1";
 
   let inner: ReactNode;
   if (variant === "icon") {

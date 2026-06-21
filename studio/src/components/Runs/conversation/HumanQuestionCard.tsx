@@ -27,9 +27,9 @@ export default function HumanQuestionCard({ runId, message, isActive }: Props) {
   }
   if (!isActive) {
     return (
-      <div className="ml-5 mt-1 text-[11px] italic text-fg-subtle">
+      <div className="ml-5 mt-1 text-micro italic text-fg-subtle">
         Waiting for the run to pause at this step…{" "}
-        <code className="not-italic text-[10px] font-mono text-fg-muted">
+        <code className="not-italic text-caption font-mono text-fg-muted">
           {message.nodeId}
         </code>
       </div>
@@ -42,7 +42,7 @@ export default function HumanQuestionCard({ runId, message, isActive }: Props) {
   }
   return (
     <div className="mt-1 rounded-md border-2 border-warning bg-warning-soft/20 px-3 py-2 space-y-2">
-      <div className="flex items-center gap-2 text-[11px]">
+      <div className="flex items-center gap-2 text-micro">
         <span className="font-medium text-warning-fg">
           Your input unblocks this step
         </span>
@@ -50,7 +50,7 @@ export default function HumanQuestionCard({ runId, message, isActive }: Props) {
           {message.nodeId}
         </code>
       </div>
-      <div className="text-[12px] text-fg-default">
+      <div className="text-body text-fg-default">
         <MarkdownText value={message.prompt} size="sm" />
       </div>
       <HumanPromptForm
@@ -71,10 +71,10 @@ function AnsweredBubble({ message }: { message: HumanQuestionMessage }) {
       : undefined;
   return (
     <div className="flex justify-end">
-      <div className="max-w-[80%] rounded-md bg-accent-soft/60 px-3 py-2 text-[12px] text-fg-default whitespace-pre-wrap break-words">
+      <div className="max-w-[80%] rounded-md bg-accent-soft/60 px-3 py-2 text-body text-fg-default whitespace-pre-wrap break-words">
         {approved !== undefined && (
           <div
-            className={`mb-1 text-[11px] font-medium ${
+            className={`mb-1 text-micro font-medium ${
               approved ? "text-success-fg" : "text-danger-fg"
             }`}
           >

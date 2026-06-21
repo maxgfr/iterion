@@ -22,7 +22,7 @@ export default function NodeBanner({ message }: Props) {
   const { label, status, summary, errorMessage, nodeId, progress } = message;
 
   return (
-    <div className="flex items-start gap-2 text-[12px]">
+    <div className="flex items-start gap-2 text-body">
       <div className="mt-0.5 shrink-0">
         <BannerStatusIcon status={status} />
       </div>
@@ -30,10 +30,10 @@ export default function NodeBanner({ message }: Props) {
         <div className="flex items-baseline gap-2">
           <span className="text-fg-default">{label}</span>
           {nodeId && nodeId !== label && (
-            <span className="text-[10px] font-mono text-fg-subtle">{nodeId}</span>
+            <span className="text-caption font-mono text-fg-subtle">{nodeId}</span>
           )}
           {status === "running" && (
-            <ThinkingIndicator words={GENERIC_THINKING_WORDS} active className="font-mono text-[10px] text-info-fg italic" />
+            <ThinkingIndicator words={GENERIC_THINKING_WORDS} active className="font-mono text-caption text-info-fg italic" />
           )}
         </div>
         {progress && status === "running" && (
@@ -41,7 +41,7 @@ export default function NodeBanner({ message }: Props) {
         )}
         {summary && status === "done" && <BannerSummary text={summary} />}
         {errorMessage && status === "failed" && (
-          <p className="mt-1 text-[11px] text-danger-fg">{errorMessage}</p>
+          <p className="mt-1 text-micro text-danger-fg">{errorMessage}</p>
         )}
       </div>
     </div>
@@ -64,7 +64,7 @@ function BannerSummary({ text }: { text: string }) {
     ? `${single.slice(0, PEEK_CHARS).trimEnd()}…`
     : single;
   return (
-    <div className="mt-1 text-[12px] text-fg-default border-l-2 border-border-subtle pl-2">
+    <div className="mt-1 text-body text-fg-default border-l-2 border-border-subtle pl-2">
       <p className="whitespace-pre-wrap break-words">
         {expanded ? single : peek}
       </p>
@@ -73,7 +73,7 @@ function BannerSummary({ text }: { text: string }) {
           type="button"
           aria-expanded={expanded}
           onClick={() => setExpanded((v) => !v)}
-          className="mt-1 text-[11px] text-fg-muted hover:text-fg-default underline-offset-2 hover:underline"
+          className="mt-1 text-micro text-fg-muted hover:text-fg-default underline-offset-2 hover:underline"
         >
           {expanded ? "Show less" : "Show more"}
         </button>

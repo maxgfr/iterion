@@ -303,7 +303,7 @@ function OptionRow({
 }) {
   return (
     <label
-      className={`flex items-start gap-2 text-[12px] rounded px-2 py-1.5 cursor-pointer border ${
+      className={`flex items-start gap-2 text-body rounded px-2 py-1.5 cursor-pointer border ${
         checked
           ? "border-accent/40 bg-accent-soft"
           : "border-border-subtle hover:bg-surface-2"
@@ -329,7 +329,7 @@ function OptionRow({
       <div className="flex-1 min-w-0">
         <div className="text-fg-default">{option.label}</div>
         {option.description && (
-          <div className="text-[11px] text-fg-muted">{option.description}</div>
+          <div className="text-micro text-fg-muted">{option.description}</div>
         )}
       </div>
     </label>
@@ -355,7 +355,7 @@ function OtherRow({
 }) {
   return (
     <div
-      className={`flex items-start gap-2 text-[12px] rounded px-2 py-1.5 border ${
+      className={`flex items-start gap-2 text-body rounded px-2 py-1.5 border ${
         checked
           ? "border-accent/40 bg-accent-soft"
           : "border-border-subtle"

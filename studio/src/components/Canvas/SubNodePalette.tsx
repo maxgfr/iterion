@@ -88,7 +88,7 @@ function DraggableItem({
       title={`Click or drag to add ${item.label}`}
     >
       <span className="text-xs">{icon}</span>
-      <span className="text-[10px] text-fg-default truncate">{item.label}</span>
+      <span className="text-caption text-fg-default truncate">{item.label}</span>
     </div>
   );
 }

@@ -54,7 +54,7 @@ export function ErrorNotice({
           <summary className="cursor-pointer opacity-70 hover:opacity-100">
             Details
           </summary>
-          <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] opacity-90">
+          <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-micro opacity-90">
             {raw}
           </pre>
         </details>

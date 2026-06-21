@@ -23,20 +23,20 @@ export default function SurveyCard({ message }: Props) {
   return (
     <div className="rounded-lg border border-border-default bg-surface-2 p-3 space-y-3">
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-[13px] font-semibold text-fg-default">
+        <h3 className="text-label font-semibold text-fg-default">
           Survey report
         </h3>
-        <span className="text-[10px] text-fg-subtle font-mono">
+        <span className="text-caption text-fg-subtle font-mono">
           {message.nodeId}
         </span>
       </div>
 
       {message.summary && (
         <div className="space-y-1">
-          <div className="text-[10px] uppercase tracking-wide font-medium text-fg-muted">
+          <div className="text-caption uppercase tracking-wide font-medium text-fg-muted">
             Summary
           </div>
-          <p className="text-[12px] text-fg-default whitespace-pre-wrap break-words border-l-2 border-accent/40 pl-2">
+          <p className="text-body text-fg-default whitespace-pre-wrap break-words border-l-2 border-accent/40 pl-2">
             {message.summary}
           </p>
         </div>
@@ -44,10 +44,10 @@ export default function SurveyCard({ message }: Props) {
 
       {message.openQuestions.length > 0 && (
         <div className="space-y-1">
-          <div className="text-[10px] uppercase tracking-wide font-medium text-warning-fg">
+          <div className="text-caption uppercase tracking-wide font-medium text-warning-fg">
             Open questions for you ({message.openQuestions.length})
           </div>
-          <ul className="space-y-1 text-[12px] text-fg-default list-disc ml-5">
+          <ul className="space-y-1 text-body text-fg-default list-disc ml-5">
             {message.openQuestions.map((q, i) => (
               <li key={i} className="whitespace-pre-wrap break-words">
                 {q}
@@ -62,7 +62,7 @@ export default function SurveyCard({ message }: Props) {
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="text-[11px] text-accent-text hover:underline cursor-pointer"
+            className="text-micro text-accent-text hover:underline cursor-pointer"
           >
             {expanded ? "Hide" : "Show"} full survey
           </button>
@@ -70,7 +70,7 @@ export default function SurveyCard({ message }: Props) {
             <div className="mt-2 space-y-3">
               {message.observations && (
                 <Section title="Observations">
-                  <p className="text-[12px] text-fg-default whitespace-pre-wrap break-words">
+                  <p className="text-body text-fg-default whitespace-pre-wrap break-words">
                     {message.observations}
                   </p>
                 </Section>
@@ -102,7 +102,7 @@ function Section({
 }) {
   return (
     <div className="space-y-1">
-      <div className="text-[10px] uppercase tracking-wide font-medium text-fg-muted">
+      <div className="text-caption uppercase tracking-wide font-medium text-fg-muted">
         {title}
       </div>
       <div className="rounded bg-surface-1 border border-border-subtle p-2">
@@ -118,14 +118,14 @@ function ValueBlock({ value }: { value: unknown }) {
   // the agent produced for these `json` fields.
   if (typeof value === "string") {
     return (
-      <p className="text-[12px] text-fg-default whitespace-pre-wrap break-words">
+      <p className="text-body text-fg-default whitespace-pre-wrap break-words">
         {value}
       </p>
     );
   }
   if (Array.isArray(value)) {
     return (
-      <ul className="space-y-0.5 text-[11px] text-fg-default list-disc ml-4">
+      <ul className="space-y-0.5 text-micro text-fg-default list-disc ml-4">
         {value.map((v, i) => (
           <li key={i} className="whitespace-pre-wrap break-words">
             {typeof v === "string" ? v : JSON.stringify(v)}
@@ -135,7 +135,7 @@ function ValueBlock({ value }: { value: unknown }) {
     );
   }
   return (
-    <pre className="text-[11px] text-fg-default whitespace-pre-wrap break-words font-mono">
+    <pre className="text-micro text-fg-default whitespace-pre-wrap break-words font-mono">
       {JSON.stringify(value, null, 2)}
     </pre>
   );

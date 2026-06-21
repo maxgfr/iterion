@@ -52,7 +52,7 @@ export default function VarFieldInput({ field, value, onChange, required, invali
           onChange={(e) => onChange(e.target.value)}
           rows={4}
           spellCheck={false}
-          className="font-mono text-[11px]"
+          className="font-mono text-micro"
           {...a11y}
         />
       );
@@ -81,7 +81,7 @@ export default function VarFieldInput({ field, value, onChange, required, invali
             onChange={(e) => onChange(e.target.value)}
             rows={suggestRows(field)}
             spellCheck={false}
-            className="font-mono text-[12px]"
+            className="font-mono text-body"
             placeholder={`Enter ${field.name}…`}
             {...a11y}
           />

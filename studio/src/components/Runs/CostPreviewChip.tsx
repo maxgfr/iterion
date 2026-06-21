@@ -48,13 +48,13 @@ export default function CostPreviewChip({ filePath, source }: Props) {
   const tooltip = (
     <div className="space-y-1">
       <div className="font-medium text-fg-default">Estimated run cost</div>
-      <div className="text-[11px] text-fg-muted">
+      <div className="text-micro text-fg-muted">
         Range covers retries + plausible second-pass loops. Pricing is best-effort
         — actual cost depends on real token usage.
       </div>
       <ul className="space-y-0.5 mt-1.5">
         {data.nodes.map((n) => (
-          <li key={n.node_id} className="flex items-baseline gap-2 text-[11px]">
+          <li key={n.node_id} className="flex items-baseline gap-2 text-micro">
             <span className="font-mono text-fg-default truncate max-w-[140px]">
               {n.node_id}
             </span>
@@ -76,7 +76,7 @@ export default function CostPreviewChip({ filePath, source }: Props) {
   return (
     <Tooltip content={tooltip} side="top">
       <span
-        className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded border bg-surface-2 text-fg-muted border-border-default tabular-nums cursor-help"
+        className="inline-flex items-center text-caption px-1.5 py-0.5 rounded border bg-surface-2 text-fg-muted border-border-default tabular-nums cursor-help"
         aria-label={`Estimated cost ${range} for approximately ${tokens} tokens`}
       >
         ≈ {range} · {tokens} tok

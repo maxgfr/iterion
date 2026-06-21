@@ -238,7 +238,7 @@ function NavRow({ href, label, icon: Icon, isActive, collapsed, sublistKind, sho
           <button
             type="button"
             onClick={toggle}
-            className="ml-1 inline-flex items-center gap-0.5 text-[10px] text-fg-subtle hover:text-fg-default rounded px-1 py-0.5 hover:bg-surface-3"
+            className="ml-1 inline-flex items-center gap-0.5 text-caption text-fg-subtle hover:text-fg-default rounded px-1 py-0.5 hover:bg-surface-3"
             aria-expanded={!folded}
             title={folded ? `Show ${tabs.length} open tab${tabs.length === 1 ? "" : "s"}` : "Hide open tabs"}
           >
@@ -345,7 +345,7 @@ function SidebarTabRow({
 
   return (
     <div
-      className={`group inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] rounded ${
+      className={`group inline-flex items-center gap-1 px-1.5 py-0.5 text-micro rounded ${
         isActive ? "bg-accent-soft text-fg-default" : "text-fg-muted hover:bg-surface-2 hover:text-fg-default"
       }`}
     >

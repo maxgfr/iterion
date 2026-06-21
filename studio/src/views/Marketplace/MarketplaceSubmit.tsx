@@ -60,7 +60,7 @@ export function MarketplaceSubmit({ onSubmit }: Props) {
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="rounded bg-surface-1 px-2 py-1 text-[11px] text-fg-muted hover:bg-surface-3 hover:text-fg-default"
+          className="rounded bg-surface-1 px-2 py-1 text-micro text-fg-muted hover:bg-surface-3 hover:text-fg-default"
         >
           {expanded ? "Cancel" : "Submit…"}
         </button>
@@ -68,7 +68,7 @@ export function MarketplaceSubmit({ onSubmit }: Props) {
       {expanded && (
         <div className="mt-3 space-y-2">
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-wide text-fg-subtle">Repository URL</span>
+            <span className="text-caption uppercase tracking-wide text-fg-subtle">Repository URL</span>
             <input
               type="text"
               value={url}
@@ -79,7 +79,7 @@ export function MarketplaceSubmit({ onSubmit }: Props) {
           </label>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             <label className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase tracking-wide text-fg-subtle">Ref (optional)</span>
+              <span className="text-caption uppercase tracking-wide text-fg-subtle">Ref (optional)</span>
               <input
                 type="text"
                 value={ref}
@@ -89,7 +89,7 @@ export function MarketplaceSubmit({ onSubmit }: Props) {
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase tracking-wide text-fg-subtle">Subpath / bot name (optional)</span>
+              <span className="text-caption uppercase tracking-wide text-fg-subtle">Subpath / bot name (optional)</span>
               <input
                 type="text"
                 value={path}
@@ -100,7 +100,7 @@ export function MarketplaceSubmit({ onSubmit }: Props) {
             </label>
           </div>
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-wide text-fg-subtle">Tags (comma-separated)</span>
+            <span className="text-caption uppercase tracking-wide text-fg-subtle">Tags (comma-separated)</span>
             <input
               type="text"
               value={tagsRaw}
@@ -110,7 +110,7 @@ export function MarketplaceSubmit({ onSubmit }: Props) {
             />
           </label>
           <div className="flex items-center justify-between gap-3">
-            <p className="text-[10px] text-fg-subtle">
+            <p className="text-caption text-fg-subtle">
               The server clones the repo and validates the bundle (no install).
               Submitting again with the same name refreshes the entry.
             </p>
@@ -118,7 +118,7 @@ export function MarketplaceSubmit({ onSubmit }: Props) {
               type="button"
               onClick={() => void handle()}
               disabled={submitting || !url.trim()}
-              className="shrink-0 rounded bg-success/20 px-2.5 py-1 text-[11px] font-medium text-success hover:bg-success/30 disabled:opacity-50"
+              className="shrink-0 rounded bg-success/20 px-2.5 py-1 text-micro font-medium text-success hover:bg-success/30 disabled:opacity-50"
             >
               {submitting ? "Submitting…" : "Submit"}
             </button>

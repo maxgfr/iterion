@@ -184,7 +184,7 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
               <tr key={w.id} className="border-t border-border-subtle align-top">
                 <td className="px-2 py-2">
                   <div className="font-medium">{w.name}</div>
-                  <div className="text-[10px] text-fg-subtle font-mono break-all">
+                  <div className="text-caption text-fg-subtle font-mono break-all">
                     {w.id}
                   </div>
                 </td>

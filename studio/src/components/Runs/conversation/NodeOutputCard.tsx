@@ -25,7 +25,7 @@ function NodeOutputCardImpl({ message }: Props) {
   if (!md) return null;
   return (
     <div className="ml-5 mt-1 rounded-md border border-border-subtle bg-surface-1 px-3 py-2 space-y-1">
-      <div className="flex items-baseline gap-2 text-[10px] font-mono text-fg-subtle">
+      <div className="flex items-baseline gap-2 text-caption font-mono text-fg-subtle">
         <span>{message.nodeId}</span>
         {message.iteration > 0 && (
           <span className="text-fg-muted">iter {message.iteration}</span>

@@ -22,7 +22,7 @@ export interface ThinkingIndicatorProps {
 export function ThinkingIndicator({
   words,
   active,
-  className = "font-mono text-[11px] text-info-fg italic px-1 py-0.5 animate-fade-in-opacity",
+  className = "font-mono text-micro text-info-fg italic px-1 py-0.5 animate-fade-in-opacity",
 }: ThinkingIndicatorProps) {
   // Random initial index so two indicators mounted at the same instant
   // (parallel branches, or the preflight ticker handing off to a banner

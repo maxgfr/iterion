@@ -111,12 +111,12 @@ function LabelsViewInner() {
   );
 
   return (
-    <div className="h-full overflow-auto p-4 space-y-3 text-[13px]">
+    <div className="h-full overflow-auto p-4 space-y-3 text-label">
       <header className="flex items-baseline gap-3">
         <h1 className="text-lg font-semibold text-fg-default">
           Board labels
         </h1>
-        <span className="text-fg-muted text-[11px]">
+        <span className="text-fg-muted text-micro">
           {total} distinct · {totalUsages} usage{totalUsages === 1 ? "" : "s"} total
         </span>
         <Button
@@ -129,12 +129,12 @@ function LabelsViewInner() {
         </Button>
       </header>
 
-      <p className="text-fg-muted text-[11px] max-w-3xl">
+      <p className="text-fg-muted text-micro max-w-3xl">
         Manage the vocabulary used across the native kanban. Rename a
         label to fix a typo, merge two labels that mean the same thing,
         or delete a label that no longer carries signal. Bots read this
         catalogue via{" "}
-        <code className="text-[10px]">mcp__iterion_board__list_labels</code>{" "}
+        <code className="text-caption">mcp__iterion_board__list_labels</code>{" "}
         before emitting new issues — keeping it tight directly
         constrains future runs.
       </p>
@@ -161,7 +161,7 @@ function LabelsViewInner() {
       </div>
 
       {error && (
-        <div className="text-danger-fg text-[11px]" role="alert">
+        <div className="text-danger-fg text-micro" role="alert">
           {error}
         </div>
       )}
@@ -169,7 +169,7 @@ function LabelsViewInner() {
       {!labels && <EmptyState message="Loading…" />}
 
       {grouped && grouped.length === 0 && (
-        <p className="text-fg-muted text-[11px] italic">
+        <p className="text-fg-muted text-micro italic">
           {searchQuery
             ? "No labels match that filter."
             : "No labels on the board yet."}
@@ -179,14 +179,14 @@ function LabelsViewInner() {
       {grouped &&
         grouped.map(([ns, rows]) => (
           <section key={ns} className="space-y-1">
-            <h2 className="text-[11px] font-mono text-fg-muted uppercase tracking-wide">
+            <h2 className="text-micro font-mono text-fg-muted uppercase tracking-wide">
               {ns}{" "}
               <span className="text-fg-subtle normal-case">
                 · {rows.length} label{rows.length === 1 ? "" : "s"}
               </span>
             </h2>
             <div className="overflow-x-auto">
-              <table className="w-full text-[12px] border border-border-subtle">
+              <table className="w-full text-body border border-border-subtle">
                 <thead>
                   <tr className="bg-surface-1 text-fg-muted text-left">
                     <th className="px-2 py-1 font-medium">Label</th>
@@ -389,7 +389,7 @@ function LabelDialog({
       }
     >
       <label className="block space-y-1">
-        <span className="text-[11px] text-fg-muted">{inputLabel}</span>
+        <span className="text-micro text-fg-muted">{inputLabel}</span>
         <Input
           type="text"
           autoFocus

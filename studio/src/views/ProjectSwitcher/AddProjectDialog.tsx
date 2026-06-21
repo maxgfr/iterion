@@ -72,7 +72,7 @@ export default function AddProjectDialog({ open, onClose, onAdd }: Props) {
           />
         ) : (
           <>
-            <label className="text-[11px] text-fg-muted">
+            <label className="text-micro text-fg-muted">
               Absolute path to an iterion project folder
             </label>
             <Input
@@ -94,7 +94,7 @@ export default function AddProjectDialog({ open, onClose, onAdd }: Props) {
                 disabled={busy}
               >
                 <OpenInNewWindowIcon className="mr-1" /> Browse
-                <span className="ml-2 text-[10px] text-fg-subtle">
+                <span className="ml-2 text-caption text-fg-subtle">
                   under {serverInfo?.browse_root}
                 </span>
               </Button>
@@ -181,7 +181,7 @@ function BrowsePanel({ initialPath, onPick, onBack }: BrowsePanelProps) {
         <Button variant="ghost" size="sm" onClick={onBack}>
           <ChevronLeftIcon className="mr-1" /> Back
         </Button>
-        <div className="flex-1 overflow-x-auto whitespace-nowrap text-[11px] text-fg-subtle">
+        <div className="flex-1 overflow-x-auto whitespace-nowrap text-micro text-fg-subtle">
           {crumbs.map((c, idx) => (
             <span key={c.path}>
               {idx > 0 && <span className="mx-0.5">/</span>}
@@ -198,11 +198,11 @@ function BrowsePanel({ initialPath, onPick, onBack }: BrowsePanelProps) {
       </div>
       <div className="max-h-72 overflow-y-auto border border-border-default rounded bg-surface-1">
         {loading && (
-          <div className="px-3 py-2 text-[11px] text-fg-subtle italic">Loading…</div>
+          <div className="px-3 py-2 text-micro text-fg-subtle italic">Loading…</div>
         )}
         {error && <ErrorNotice error={error} />}
         {listing && !loading && listing.entries.length === 0 && (
-          <div className="px-3 py-2 text-[11px] text-fg-subtle italic">
+          <div className="px-3 py-2 text-micro text-fg-subtle italic">
             No sub-directories here.
           </div>
         )}
@@ -212,7 +212,7 @@ function BrowsePanel({ initialPath, onPick, onBack }: BrowsePanelProps) {
               <li key={e.abs_dir}>
                 <button
                   type="button"
-                  className="w-full text-left px-3 py-1.5 text-[12px] hover:bg-surface-2"
+                  className="w-full text-left px-3 py-1.5 text-body hover:bg-surface-2"
                   onClick={() => setCwd(cwd === "/" ? "/" + e.name : cwd + "/" + e.name)}
                 >
                   {e.name}/
