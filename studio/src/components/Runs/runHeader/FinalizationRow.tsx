@@ -2,9 +2,8 @@
 // Worktree-finalization summary row (commit SHA, branch, merge status)
 // shown under the main RunHeader bar when run.final_commit is set.
 
-import { useEffect, useRef, useState } from "react";
-
 import type { RunHeader as RunHeaderType } from "@/api/runs";
+import { useCopyTimer } from "@/hooks/useCopyTimer";
 import { useUIStore } from "@/store/ui";
 
 import MergeStatusBadge from "./MergeStatusBadge";
@@ -15,7 +14,7 @@ import MergeStatusBadge from "./MergeStatusBadge";
 // their branch — and what to do if they didn't. Only rendered when
 // final_commit is set (i.e. the run produced commits in its worktree).
 export default function FinalizationRow({ run }: { run: RunHeaderType }) {
-  const [copied, setCopied] = useState<string | null>(null);
+  const { copied, trigger: triggerCopied } = useCopyTimer<string>(1500);
   const shortSha = (run.final_commit ?? "").slice(0, 7);
   const branch = run.final_branch ?? "";
   const merged = run.merged_into ?? "";
@@ -23,21 +22,10 @@ export default function FinalizationRow({ run }: { run: RunHeaderType }) {
   const strategy = run.merge_strategy;
   const mergedShort = (run.merged_commit ?? "").slice(0, 7);
 
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current != null) clearTimeout(copyTimerRef.current);
-    };
-  }, []);
   const copy = async (text: string, key: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      setCopied(key);
-      if (copyTimerRef.current != null) clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = setTimeout(() => {
-        copyTimerRef.current = null;
-        setCopied(null);
-      }, 1500);
+      triggerCopied(key);
     } catch {
       // navigator.clipboard is unavailable in insecure contexts (e.g.
       // dev served over plain http without the bypass flag). Surface

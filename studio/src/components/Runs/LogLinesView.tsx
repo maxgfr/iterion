@@ -7,6 +7,7 @@ import { useShallow } from "zustand/react/shallow";
 
 import { apiURL } from "@/api/runs";
 import { IconButton, Input, Popover } from "@/components/ui";
+import { useToggleSet } from "@/hooks/useToggleSet";
 import { desktop, isDesktop } from "@/lib/desktopBridge";
 import { formatBytes } from "@/lib/format";
 import { downloadBlob } from "@/lib/download";
@@ -164,7 +165,7 @@ export default function LogLinesView({
     useShallow((s) => selectInFlightTools(s, filterNodeId, filterIteration)),
   );
   const [search, setSearch] = useState("");
-  const [activeLevels, setActiveLevels] = useState<Set<string>>(() => new Set());
+  const { set: activeLevels, toggle: toggleLevel, clear: clearActiveLevels } = useToggleSet<string>();
   const [followTail, setFollowTail] = useState(true);
   // Re-enforce follow-tail when this run is (re)opened via navigation
   // (board / runs list / deep-link). RunsTabsView bumps this nonce on
@@ -347,14 +348,6 @@ export default function LogLinesView({
     }
   };
 
-  const toggleLevel = (lvl: string) => {
-    setActiveLevels((prev) => {
-      const next = new Set(prev);
-      if (next.has(lvl)) next.delete(lvl);
-      else next.add(lvl);
-      return next;
-    });
-  };
 
   const lineCount = filterNodeId ? nodeFiltered.length : annotated.length;
   const droppedBytes = log.start;
@@ -505,7 +498,7 @@ export default function LogLinesView({
             {activeLevels.size > 0 && (
               <button
                 type="button"
-                onClick={() => setActiveLevels(new Set())}
+                onClick={clearActiveLevels}
                 className="text-[10px] text-fg-subtle hover:text-fg-default mt-1 px-2 py-0.5 text-left"
               >
                 Clear filters

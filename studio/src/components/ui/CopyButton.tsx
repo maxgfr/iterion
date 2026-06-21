@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
+
+import { useCopyTimer } from "@/hooks/useCopyTimer";
 
 export interface CopyButtonProps {
   value: string;
@@ -30,26 +32,15 @@ export function CopyButton({
   className,
   onCopied,
 }: CopyButtonProps): ReactNode {
-  const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    return () => {
-      if (timerRef.current != null) clearTimeout(timerRef.current);
-    };
-  }, []);
+  const { copied, trigger } = useCopyTimer<boolean>(1200);
 
   const handleClick: React.MouseEventHandler<HTMLButtonElement> = async (e) => {
     e.stopPropagation();
     e.preventDefault();
     try {
       await navigator.clipboard.writeText(value);
-      setCopied(true);
+      trigger(true);
       onCopied?.();
-      if (timerRef.current != null) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => {
-        timerRef.current = null;
-        setCopied(false);
-      }, 1200);
     } catch {
       // clipboard unavailable (insecure context, denied permission)
     }

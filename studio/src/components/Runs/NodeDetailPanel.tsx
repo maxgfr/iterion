@@ -14,6 +14,7 @@ import { stepIteration } from "@/lib/eventIter";
 import { formatContextUsage, formatDurationBetween, formatMs } from "@/lib/format";
 import { readBooleanFlag, writeBooleanFlag } from "@/lib/localStorageFlag";
 import { readNodeOutputMeta } from "@/lib/delegateMeta";
+import { useToggleSet } from "@/hooks/useToggleSet";
 import { NodeIcon } from "@/components/icons/NodeIcon";
 import type { NodeKind } from "@/api/types";
 
@@ -712,7 +713,8 @@ function usePauseInfo(matching: RunEvent[]): PauseInfo | null {
 
 function EventsTabContent({ events }: { events: RunEvent[] }) {
   const [search, setSearch] = useState("");
-  const [activeTypes, setActiveTypes] = useState<Set<string>>(() => new Set());
+  const activeTypesSet = useToggleSet<string>();
+  const activeTypes = activeTypesSet.set;
   const [showRawData, setShowRawData] = useState(false);
 
   // Counts per type so the chip row can show occurrence numbers.
@@ -742,14 +744,7 @@ function EventsTabContent({ events }: { events: RunEvent[] }) {
     });
   }, [events, activeTypes, search]);
 
-  const toggleType = (t: string) => {
-    setActiveTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(t)) next.delete(t);
-      else next.add(t);
-      return next;
-    });
-  };
+  const toggleType = activeTypesSet.toggle;
 
   return (
     <div className="h-full flex flex-col">

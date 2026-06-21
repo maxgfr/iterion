@@ -35,6 +35,7 @@ import SettingsDrawer from "@/components/Dispatcher/SettingsDrawer";
 import TrackerErrorBanner from "@/components/shared/TrackerErrorBanner";
 import { useBoardKeyboard } from "@/hooks/useBoardKeyboard";
 import { useConfirm } from "@/hooks/useConfirm";
+import { useToggleSet } from "@/hooks/useToggleSet";
 import { useUIStore } from "@/store/ui";
 import {
   defaultStateColor,
@@ -122,21 +123,17 @@ export default function BoardView() {
   const addToast = useUIStore((s) => s.addToast);
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [searchQuery, setSearchQuery] = useState("");
-  const [labelFilter, setLabelFilter] = useState<Set<string>>(() => new Set());
+  const {
+    set: labelFilter,
+    toggle: onLabelToggle,
+    clear: clearLabelFilter,
+  } = useToggleSet<string>();
   const [assigneeFilter, setAssigneeFilter] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("priority");
-  // Single source of truth for label filter toggling — used both by
-  // the top filter strip and by clicking a chip on any card. Lifted
-  // here so card-level chips toggle the same Set the filter strip
-  // shows.
-  const onLabelToggle = useCallback((l: string) => {
-    setLabelFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(l)) next.delete(l);
-      else next.add(l);
-      return next;
-    });
-  }, []);
+  // `onLabelToggle` (from useToggleSet) is the single source of truth
+  // for label filter toggling — used both by the top filter strip and
+  // by clicking a chip on any card, so card-level chips toggle the
+  // same Set the filter strip shows.
 
   // Poll the dispatcher snapshot every 2s so each card can show a
   // running/retrying badge + cancel button. We ignore failures: when
@@ -876,13 +873,13 @@ export default function BoardView() {
         filtered={filteredIssues.length}
         onSearchChange={setSearchQuery}
         onLabelToggle={onLabelToggle}
-        onClearLabels={() => setLabelFilter(new Set())}
+        onClearLabels={clearLabelFilter}
         onAssigneeChange={setAssigneeFilter}
         sortMode={sortMode}
         onSortChange={setSortMode}
         onReset={() => {
           setSearchQuery("");
-          setLabelFilter(new Set());
+          clearLabelFilter();
           setAssigneeFilter("");
         }}
       />

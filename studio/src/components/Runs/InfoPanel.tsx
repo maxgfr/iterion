@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 import { CopyIcon } from "@radix-ui/react-icons";
 
 import { StatusBadge, Tooltip } from "@/components/ui";
+import { useCopyTimer } from "@/hooks/useCopyTimer";
 import { basename, formatDurationBetween, formatRelative } from "@/lib/format";
 import type { RunHeader } from "@/api/runs";
 
@@ -193,22 +194,11 @@ interface MonoProps {
 }
 
 function Mono({ children, copyable, title }: MonoProps) {
-  const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    return () => {
-      if (timerRef.current != null) clearTimeout(timerRef.current);
-    };
-  }, []);
+  const { copied, trigger } = useCopyTimer<boolean>(1500);
   const onCopy = async () => {
     try {
       await navigator.clipboard.writeText(children);
-      setCopied(true);
-      if (timerRef.current != null) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => {
-        timerRef.current = null;
-        setCopied(false);
-      }, 1500);
+      trigger(true);
     } catch {
       // clipboard unavailable in insecure contexts — silent
     }

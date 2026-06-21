@@ -8,6 +8,7 @@ import {
 
 import { EmptyState, IconButton, Tooltip } from "@/components/ui";
 import { useRunFiles } from "@/hooks/useRunFiles";
+import { useToggleSet } from "@/hooks/useToggleSet";
 import {
   buildFileTree,
   type TreeFile,
@@ -105,7 +106,7 @@ export default function FilesPanel({
   // has *explicitly* collapsed — this way new files arriving live (the
   // panel auto-refreshes on node_finished events) appear under
   // already-expanded ancestors instead of being hidden.
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const { set: collapsed, toggle, replace: replaceCollapsed } = useToggleSet<string>();
 
   // On a LARGE changeset, auto-collapse every folder once per (run, mode)
   // so the first paint is bounded (top-level folders only) instead of
@@ -116,22 +117,11 @@ export default function FilesPanel({
     const sig = `${runId}:${mode}`;
     if (largeChangeset && tree.length > 0 && autoCollapsedSig.current !== sig) {
       autoCollapsedSig.current = sig;
-      setCollapsed(collectFolderKeys(tree));
+      replaceCollapsed(collectFolderKeys(tree));
     } else if (!largeChangeset) {
       autoCollapsedSig.current = null;
     }
-  }, [largeChangeset, tree, runId, mode]);
-  const toggle = useCallback((pathKey: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(pathKey)) {
-        next.delete(pathKey);
-      } else {
-        next.add(pathKey);
-      }
-      return next;
-    });
-  }, []);
+  }, [largeChangeset, tree, runId, mode, replaceCollapsed]);
 
   const handleSelectFile = useCallback(
     (file: RunFile) => {

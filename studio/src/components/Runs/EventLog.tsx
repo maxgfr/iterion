@@ -6,6 +6,7 @@ import { ChevronDownIcon } from "@radix-ui/react-icons";
 
 import type { RunEvent } from "@/api/runs";
 import { IconButton, Input } from "@/components/ui";
+import { useToggleSet } from "@/hooks/useToggleSet";
 import { stepIteration } from "@/lib/eventIter";
 
 interface Props {
@@ -136,9 +137,12 @@ export default function EventLog({
     [],
   );
   const [search, setSearch] = useState(initialPersisted?.search ?? "");
-  const [activeTypes, setActiveTypes] = useState<Set<string>>(
-    () => new Set(initialPersisted?.types ?? []),
-  );
+  const {
+    set: activeTypes,
+    toggle: toggleActiveType,
+    clear: clearActiveTypes,
+    replace: replaceActiveTypes,
+  } = useToggleSet<string>(initialPersisted?.types ?? []);
   const [filtersRunId, setFiltersRunId] = useState<string | null>(
     () => runId ?? null,
   );
@@ -146,15 +150,15 @@ export default function EventLog({
   useEffect(() => {
     if (!runId) {
       setSearch("");
-      setActiveTypes(new Set());
+      clearActiveTypes();
       setFiltersRunId(null);
       return;
     }
     const next = loadPersistedFilters(runId);
     setSearch(next?.search ?? "");
-    setActiveTypes(new Set(next?.types ?? []));
+    replaceActiveTypes(next?.types ?? []);
     setFiltersRunId(runId);
-  }, [runId]);
+  }, [runId, clearActiveTypes, replaceActiveTypes]);
 
   // Persist on every change. We avoid debouncing the search input
   // because the writes are small and infrequent compared to typing
@@ -391,14 +395,7 @@ export default function EventLog({
     }
   };
 
-  const toggleType = (t: string) => {
-    setActiveTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(t)) next.delete(t);
-      else next.add(t);
-      return next;
-    });
-  };
+  const toggleType = toggleActiveType;
 
   return (
     <div className="h-full flex flex-col bg-surface-1 min-h-0">

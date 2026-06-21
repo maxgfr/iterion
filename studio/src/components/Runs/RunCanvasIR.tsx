@@ -23,6 +23,7 @@ import {
   effortBackendKey,
   useEffortCapabilitiesClient,
 } from "@/hooks/useEffortCapabilities";
+import { useToggleSet } from "@/hooks/useToggleSet";
 import type { EffortCapabilities } from "@/api/client";
 
 import { useUIStore } from "@/store/ui";
@@ -177,9 +178,7 @@ export default function RunCanvasIR({
   // is set before the IR fetch + autoLayout complete (nodes=[] → silent
   // exit, and the next dep change is too late).
   const [layoutEpoch, setLayoutEpoch] = useState(0);
-  const [activeFilters, setActiveFilters] = useState<Set<StatusFilter>>(
-    () => new Set(),
-  );
+  const { set: activeFilters, toggle: toggleFilter } = useToggleSet<StatusFilter>();
   // Effort capabilities (supported levels + default) keyed by
   // `${backend} ${model}`. Populated once the workflow lands by
   // walking unique pairs and asking /api/effort-capabilities.
@@ -611,15 +610,6 @@ export default function RunCanvasIR({
       });
     });
   }, [layoutEpoch, runningNodeIds, nodes, reactFlow]);
-
-  const toggleFilter = (f: StatusFilter) => {
-    setActiveFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(f)) next.delete(f);
-      else next.add(f);
-      return next;
-    });
-  };
 
   if (error) {
     return (
