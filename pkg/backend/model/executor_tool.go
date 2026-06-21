@@ -105,12 +105,64 @@ func (e *ClawExecutor) executeToolNode(ctx context.Context, node *ir.ToolNode, i
 	}
 
 	// Try to parse tool output as JSON map, otherwise wrap as text.
-	var output map[string]interface{}
-	if jsonErr := json.Unmarshal([]byte(outputStr), &output); jsonErr != nil {
-		output = map[string]interface{}{"result": outputStr}
-	}
+	// Registry-tool path preserves untrimmed stdout in the fallback;
+	// the shell/script paths trim (see parseToolNodeOutput).
+	return parseToolNodeOutput(outputStr, outputStr), nil
+}
 
-	return output, nil
+// emitToolNodeStarted fires the OnToolStarted hook for shell/script tool
+// nodes (the byte-identical pre-exec sequence shared by
+// executeToolNodeShell and executeToolNodeScript). The registry-tool path
+// in executeToolNode uses a different payload shape (with Input bytes and
+// privacy redaction) and intentionally does not use this helper.
+func (e *ClawExecutor) emitToolNodeStarted(nodeID, toolName string, inputSize int) {
+	if e.hooks.OnToolStarted == nil {
+		return
+	}
+	e.hooks.OnToolStarted(nodeID, LLMToolStartedInfo{
+		ToolName:  toolName,
+		InputSize: inputSize,
+	})
+}
+
+// emitToolNodeFinish fires OnToolCall and OnToolNodeResult for shell /
+// script tool nodes (the byte-identical post-exec sequence shared by
+// executeToolNodeShell and executeToolNodeScript). The registry-tool
+// path uses a different payload shape (single combined output stream,
+// privacy-redacted variants) and intentionally does not use this helper.
+func (e *ClawExecutor) emitToolNodeFinish(nodeID, toolName, resolved, stdout, stderr string, dur time.Duration, runErr error) {
+	if e.hooks.OnToolCall != nil {
+		e.hooks.OnToolCall(nodeID, LLMToolCallInfo{
+			ToolName: toolName,
+			Duration: dur,
+			Error:    runErr,
+		})
+	}
+	if e.hooks.OnToolNodeResult != nil {
+		// Log both streams concatenated so run.log still surfaces what
+		// the operator would see in an interactive shell. Stdout first
+		// so the structured payload is visible at the top of long
+		// stderr dumps from yarn/npm/git.
+		logged := combineStreamsForLog(stdout, stderr)
+		e.hooks.OnToolNodeResult(nodeID, toolName, []byte(resolved), logged, dur, runErr)
+	}
+}
+
+// parseToolNodeOutput parses stdout as a JSON object; on failure wraps
+// `fallback` under the conventional `result` key. The two arguments
+// differ across call sites: the registry-tool path passes the raw
+// stdout for both (preserving any trailing newline in the fallback),
+// while shell/script paths pass `strings.TrimSpace(stdout)` as the
+// fallback so shell newlines don't leak into the structured wrapper.
+// The unmarshal target itself is whitespace-tolerant (Go's json package
+// skips leading/trailing whitespace), so the raw stdout is always
+// acceptable for the parse attempt.
+func parseToolNodeOutput(stdout, fallback string) map[string]interface{} {
+	var output map[string]interface{}
+	if json.Unmarshal([]byte(stdout), &output) != nil {
+		return map[string]interface{}{"result": fallback}
+	}
+	return output
 }
 
 // executeToolNodeShell handles tool nodes whose command contains {{...}}
@@ -163,12 +215,7 @@ func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNo
 		}
 	}
 
-	if e.hooks.OnToolStarted != nil {
-		e.hooks.OnToolStarted(node.ID, LLMToolStartedInfo{
-			ToolName:  toolName,
-			InputSize: len(resolved),
-		})
-	}
+	e.emitToolNodeStarted(node.ID, toolName, len(resolved))
 
 	start := time.Now()
 	// Materialise secret placeholders ONLY into the command actually
@@ -185,32 +232,12 @@ func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNo
 	outputStr := string(stdoutBytes)
 	duration := time.Since(start)
 
-	if e.hooks.OnToolCall != nil {
-		e.hooks.OnToolCall(node.ID, LLMToolCallInfo{
-			ToolName: toolName,
-			Duration: duration,
-			Error:    runErr,
-		})
-	}
-	if e.hooks.OnToolNodeResult != nil {
-		// Log both streams concatenated so run.log still surfaces what
-		// the operator would see in an interactive shell. Stdout first
-		// so the structured payload is visible at the top of long
-		// stderr dumps from yarn/npm/git.
-		logged := combineStreamsForLog(outputStr, stderrStr)
-		e.hooks.OnToolNodeResult(node.ID, toolName, []byte(resolved), logged, duration, runErr)
-	}
+	e.emitToolNodeFinish(node.ID, toolName, resolved, outputStr, stderrStr, duration, runErr)
 	if runErr != nil {
 		return nil, fmt.Errorf("model: tool node %q: shell command failed: %w\nstdout: %s\nstderr: %s", node.ID, runErr, outputStr, stderrStr)
 	}
 
-	// Try to parse stdout as JSON, otherwise wrap as text.
-	var output map[string]interface{}
-	if jsonErr := json.Unmarshal([]byte(outputStr), &output); jsonErr != nil {
-		output = map[string]interface{}{"result": strings.TrimSpace(outputStr)}
-	}
-
-	return output, nil
+	return parseToolNodeOutput(outputStr, strings.TrimSpace(outputStr)), nil
 }
 
 // shellToolNodeToolName returns the canonical virtual tool name used for
@@ -353,12 +380,7 @@ func (e *ClawExecutor) executeToolNodeScript(ctx context.Context, node *ir.ToolN
 	// portable whether we run via sandbox or host).
 	scriptBasename := filepath.Base(tmpPath)
 
-	if e.hooks.OnToolStarted != nil {
-		e.hooks.OnToolStarted(node.ID, LLMToolStartedInfo{
-			ToolName:  toolName,
-			InputSize: len(resolved),
-		})
-	}
+	e.emitToolNodeStarted(node.ID, toolName, len(resolved))
 
 	start := time.Now()
 	cmd := e.toolNodeScriptCommand(ctx, interp, scriptBasename)
@@ -369,26 +391,12 @@ func (e *ClawExecutor) executeToolNodeScript(ctx context.Context, node *ir.ToolN
 	outputStr := string(stdoutBytes)
 	duration := time.Since(start)
 
-	if e.hooks.OnToolCall != nil {
-		e.hooks.OnToolCall(node.ID, LLMToolCallInfo{
-			ToolName: toolName,
-			Duration: duration,
-			Error:    runErr,
-		})
-	}
-	if e.hooks.OnToolNodeResult != nil {
-		logged := combineStreamsForLog(outputStr, stderrStr)
-		e.hooks.OnToolNodeResult(node.ID, toolName, []byte(resolved), logged, duration, runErr)
-	}
+	e.emitToolNodeFinish(node.ID, toolName, resolved, outputStr, stderrStr, duration, runErr)
 	if runErr != nil {
 		return nil, fmt.Errorf("model: tool node %q: script failed: %w\nstdout: %s\nstderr: %s", node.ID, runErr, outputStr, stderrStr)
 	}
 
-	var output map[string]interface{}
-	if jsonErr := json.Unmarshal([]byte(outputStr), &output); jsonErr != nil {
-		output = map[string]interface{}{"result": strings.TrimSpace(outputStr)}
-	}
-	return output, nil
+	return parseToolNodeOutput(outputStr, strings.TrimSpace(outputStr)), nil
 }
 
 // scriptInterpreter maps a `language:` token to the executable name on

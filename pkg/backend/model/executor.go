@@ -1000,6 +1000,45 @@ func stampDelegateOutputMeta(output map[string]interface{}, result delegate.Resu
 	}
 }
 
+// dispatchWithObservability wraps dispatchWithProviderFallback with the
+// 3-hook lifecycle every agent/judge/LLM-router call paid by hand:
+// OnDelegateStarted fires before dispatch; on error, OnDelegateError
+// receives a DelegateInfo with the backend-reported name (or the
+// requested name when the backend didn't report one) and the error is
+// wrapped as `<errPrefix> %q: backend %q failed: %w`; on success,
+// OnDelegateFinished fires with the result-derived DelegateInfo. The
+// caller propagates the wrapped error untouched. Extracted from
+// executeBackend / executeLLMRouterUnified — only the error wrap prefix
+// differs (`model: node` vs `model: llm router`).
+func (e *ClawExecutor) dispatchWithObservability(
+	ctx context.Context,
+	nodeID, backendName, errPrefix string,
+	chain []string,
+	backend delegate.Backend,
+	task *delegate.Task,
+) (delegate.Result, error) {
+	if e.hooks.OnDelegateStarted != nil {
+		e.hooks.OnDelegateStarted(nodeID, backendName)
+	}
+	result, err := e.dispatchWithProviderFallback(ctx, nodeID, backendName, chain, backend, task)
+	if err != nil {
+		if e.hooks.OnDelegateError != nil {
+			bn := result.BackendName
+			if bn == "" {
+				bn = backendName
+			}
+			di := delegateInfoFromResult(bn, result)
+			di.Error = err
+			e.hooks.OnDelegateError(nodeID, di)
+		}
+		return result, fmt.Errorf("%s %q: backend %q failed: %w", errPrefix, nodeID, backendName, err)
+	}
+	if e.hooks.OnDelegateFinished != nil {
+		e.hooks.OnDelegateFinished(nodeID, delegateInfoFromResult(result.BackendName, result))
+	}
+	return result, nil
+}
+
 // executeBackend is the unified execution path for agent and judge nodes.
 // It resolves the backend, builds a Task, and dispatches to the backend.
 func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input map[string]interface{}) (map[string]interface{}, error) {
@@ -1023,17 +1062,14 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 		return nil, err
 	}
 
-	// Emit backend started event.
-	if e.hooks.OnDelegateStarted != nil {
-		e.hooks.OnDelegateStarted(f.id, backendName)
-	}
-
 	// For claw backends emit a tagged log line so the studio's per-node
 	// Logs tab (which greps `[<nodeID>#<iter>/...]`) surfaces the call.
 	// claude_code/codex subprocesses already produce equivalent tagged
 	// lines from their stderr capture path. Iter is hardcoded to 0 —
 	// same limitation as the per-tool tagging above; per-iter filtering
-	// requires plumbing LoopIteration through the hook chain.
+	// requires plumbing LoopIteration through the hook chain. Lives at
+	// the executeBackend call site (the LLM-router path has no equivalent
+	// log line) so dispatchWithObservability stays a pure 3-hook helper.
 	if backendName == delegate.BackendClaw && e.logger != nil {
 		toolSuffix := ""
 		if n := len(task.AllowedTools); n > 0 {
@@ -1043,23 +1079,9 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 			f.id, 0, task.Model, toolSuffix)
 	}
 
-	result, err := e.dispatchWithProviderFallback(ctx, f.id, backendName, e.resolveProviderChain(node), backend, &task)
+	result, err := e.dispatchWithObservability(ctx, f.id, backendName, "model: node", e.resolveProviderChain(node), backend, &task)
 	if err != nil {
-		if e.hooks.OnDelegateError != nil {
-			bn := result.BackendName
-			if bn == "" {
-				bn = backendName
-			}
-			di := delegateInfoFromResult(bn, result)
-			di.Error = err
-			e.hooks.OnDelegateError(f.id, di)
-		}
-		return nil, fmt.Errorf("model: node %q: backend %q failed: %w", f.id, backendName, err)
-	}
-
-	// Emit backend finished event.
-	if e.hooks.OnDelegateFinished != nil {
-		e.hooks.OnDelegateFinished(f.id, delegateInfoFromResult(result.BackendName, result))
+		return nil, err
 	}
 
 	// Flag if structured output parsing fell back to text wrapper.
@@ -1848,28 +1870,9 @@ func (e *ClawExecutor) executeLLMRouterUnified(ctx context.Context, node *ir.Rou
 		InboxDrain: e.bindInboxDrain(ctx),
 	}
 
-	// Emit backend started event.
-	if e.hooks.OnDelegateStarted != nil {
-		e.hooks.OnDelegateStarted(node.ID, backendName)
-	}
-
-	result, err := e.dispatchWithProviderFallback(ctx, node.ID, backendName, e.resolveProviderChain(node), backend, &task)
+	result, err := e.dispatchWithObservability(ctx, node.ID, backendName, "model: llm router", e.resolveProviderChain(node), backend, &task)
 	if err != nil {
-		if e.hooks.OnDelegateError != nil {
-			bn := result.BackendName
-			if bn == "" {
-				bn = backendName
-			}
-			di := delegateInfoFromResult(bn, result)
-			di.Error = err
-			e.hooks.OnDelegateError(node.ID, di)
-		}
-		return nil, fmt.Errorf("model: llm router %q: backend %q failed: %w", node.ID, backendName, err)
-	}
-
-	// Emit backend finished event.
-	if e.hooks.OnDelegateFinished != nil {
-		e.hooks.OnDelegateFinished(node.ID, delegateInfoFromResult(result.BackendName, result))
+		return nil, err
 	}
 
 	output := result.Output
