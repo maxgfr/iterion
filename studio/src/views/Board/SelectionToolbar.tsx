@@ -40,7 +40,7 @@ export function SelectionToolbar({
   onClear: () => void;
 }) {
   return (
-    <div className="shrink-0 px-3 py-1.5 border-b border-border-default bg-accent-soft/20 flex flex-wrap items-center gap-2 text-xs text-fg-default">
+    <div className="shrink-0 px-3 py-1.5 border-b border-border-default bg-accent-soft flex flex-wrap items-center gap-2 text-xs text-fg-default">
       <span>
         <strong>{count}</strong> selected
       </span>
