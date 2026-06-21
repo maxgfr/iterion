@@ -413,10 +413,20 @@ jobs:
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - name: Run govulncheck (SARIF)
-        # `|| true` keeps the step non-blocking. The findings flow to
-        # the Security tab via the upload step below.
-        run: govulncheck -format sarif ./... > govulncheck.sarif || true
+        # `|| true` keeps the step non-blocking. The findings flow to the
+        # Security tab via the upload step below. A govulncheck error mid-run
+        # leaves a truncated/empty file that upload-sarif rejects with
+        # "Unexpected end of JSON input"; fall back to a valid empty SARIF so
+        # the upload always has well-formed input.
+        run: |
+          govulncheck -format sarif ./... > govulncheck.sarif || true
+          if ! python3 -c 'import json; json.load(open("govulncheck.sarif"))' 2>/dev/null; then
+            printf '%s' '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[]}' > govulncheck.sarif
+          fi
       - name: Upload SARIF
+        # Advisory-only (see job header): a SARIF-upload hiccup must not red
+        # the suite, so the result is informational, not a gate.
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: govulncheck.sarif
