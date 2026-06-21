@@ -13,12 +13,12 @@ import { FieldLabel } from "@/components/ui/FieldLabel";
 import { HelpHint } from "@/components/ui/HelpHint";
 import { RefAwareInput, RefAwareTextarea } from "@/components/ui/RefAwareInput";
 import PromptOverlayHighlight from "@/components/ui/PromptOverlayHighlight";
+import { Select } from "@/components/ui/Select";
 import type { RefContext } from "@/lib/refCompletion";
 import { Pencil1Icon } from "@radix-ui/react-icons";
 
 const labelClass = "block text-xs text-fg-subtle mb-1";
 const inputClass = "w-full bg-surface-1 border border-border-strong rounded px-2 py-1 text-sm text-fg-default focus:border-accent focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed";
-const selectClass = inputClass;
 
 interface FieldRowChildArgs {
   /** id to apply to the primary control inside the row. */
@@ -281,11 +281,12 @@ export function SelectField({ label, value, onChange, options, allowEmpty, empty
   return (
     <FieldRow label={label} help={help} error={error}>
       {({ inputId, describedBy }) => (
-        <select
+        <Select
           id={inputId}
           aria-describedby={describedBy}
           aria-invalid={error ? true : undefined}
-          className={selectClass}
+          size="sm"
+          error={!!error}
           value={value}
           onChange={(e) => onChange(e.target.value)}
         >
@@ -295,7 +296,7 @@ export function SelectField({ label, value, onChange, options, allowEmpty, empty
               {o.label}
             </option>
           ))}
-        </select>
+        </Select>
       )}
     </FieldRow>
   );
@@ -310,11 +311,13 @@ export function SelectFieldWithCreate({ label, value, onChange, options, allowEm
     <FieldRow label={label} help={help} error={error}>
       {({ inputId, describedBy }) => (
         <div className="flex gap-1">
-          <select
+          <Select
             id={inputId}
             aria-describedby={describedBy}
             aria-invalid={error ? true : undefined}
-            className={selectClass + " flex-1"}
+            size="sm"
+            error={!!error}
+            className="flex-1"
             value={value}
             onChange={(e) => onChange(e.target.value)}
           >
@@ -324,7 +327,7 @@ export function SelectFieldWithCreate({ label, value, onChange, options, allowEm
                 {o.label}
               </option>
             ))}
-          </select>
+          </Select>
           <button
             type="button"
             className="bg-success hover:bg-success/90 text-xs px-1.5 rounded shrink-0"
@@ -485,11 +488,13 @@ export function PromptPickerField({
       {({ inputId, describedBy }) => (
         <>
           <div className="flex gap-1">
-            <select
+            <Select
               id={inputId}
               aria-describedby={describedBy}
               aria-invalid={error ? true : undefined}
-              className={selectClass + " flex-1"}
+              size="sm"
+              error={!!error}
+              className="flex-1"
               value={value}
               onChange={(e) => onChange(e.target.value)}
             >
@@ -499,7 +504,7 @@ export function PromptPickerField({
                   {o.label}
                 </option>
               ))}
-            </select>
+            </Select>
             <button
               type="button"
               className="bg-surface-2 hover:bg-surface-3 text-xs px-1.5 rounded shrink-0 inline-flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
