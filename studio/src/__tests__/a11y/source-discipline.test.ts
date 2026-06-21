@@ -107,6 +107,21 @@ describe("source discipline", () => {
     expect(hits).toHaveLength(0);
   });
 
+  it("uses the Select primitive, not raw <select>", () => {
+    // ui/Select.tsx owns the only native <select> (token border, themed
+    // chevron overlay, focus ring, size/fit variants). Inspector forms route
+    // through FormField's SelectField → <Select>; a new raw <select> elsewhere
+    // bypasses all of that. Line-anchored so prose mentions of "<select>" in
+    // comments don't trip it.
+    const hits = scan(/^\s*<select\b/, (path) => /\/ui\/Select\.tsx$/.test(path));
+    if (hits.length) {
+      throw new Error(
+        `raw <select> is banned — use <Select> from @/components/ui/Select:\n${hits.join("\n")}`,
+      );
+    }
+    expect(hits).toHaveLength(0);
+  });
+
   it("uses the semantic type scale, not text-[Npx] sizes that have a token", () => {
     // 10/11/12/13/14/16px have tokens (text-caption/micro/body/label/title/
     // display). text-[8px]/[9px] are below the scale floor (no token, used in

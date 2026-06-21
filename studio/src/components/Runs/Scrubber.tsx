@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RunEvent } from "@/api/runs";
 import { IconButton } from "@/components/ui/IconButton";
 import { LiveDot } from "@/components/ui/LiveDot";
+import { Select } from "@/components/ui/Select";
 import { timelineMarks } from "@/lib/snapshotReducer";
 
 interface Props {
@@ -118,19 +119,21 @@ export default function Scrubber({
       >
         <span className="font-mono">{playing ? "⏸" : "▶"}</span>
       </IconButton>
-      <select
+      <Select
+        size="sm"
+        fit
         value={speedIdx}
         onChange={(e) => setSpeedIdx(Number(e.target.value))}
         title="Replay speed"
-        className="text-caption px-1 py-0.5 rounded bg-surface-2 border border-border-default font-mono"
         aria-label="Replay speed"
+        className="font-mono"
       >
         {REPLAY_SPEEDS.map((s, i) => (
           <option key={s.label} value={i}>
             {s.label}
           </option>
         ))}
-      </select>
+      </Select>
       <span className="text-caption text-fg-subtle font-mono whitespace-nowrap">
         seq
       </span>
