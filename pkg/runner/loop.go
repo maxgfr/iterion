@@ -37,6 +37,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dsl/ast"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	gitlib "github.com/SocialGouv/iterion/pkg/git"
+	"github.com/SocialGouv/iterion/pkg/internal/strutil"
 	"github.com/SocialGouv/iterion/pkg/knowledge"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/notify"
@@ -853,7 +854,7 @@ func (r *Runner) prepareRepoWorkspace(ctx context.Context, msg *queue.RunMessage
 
 	cloneURL, tok := msg.RepoURL, ""
 	if creds, ok := secrets.CredentialsFromContext(ctx); ok {
-		tok = firstNonBlank(creds.GenericSecret("forge_token"), creds.GenericSecret("gitlab_token"), creds.GenericSecret("github_token"))
+		tok = strutil.FirstNonBlank(creds.GenericSecret("forge_token"), creds.GenericSecret("gitlab_token"), creds.GenericSecret("github_token"))
 		if tok != "" {
 			cloneURL = injectGitToken(msg.RepoURL, tok)
 		}
@@ -983,15 +984,6 @@ func removeFilesFunc(paths []string) func() {
 			_ = os.Remove(p)
 		}
 	}
-}
-
-func firstNonBlank(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func (r *Runner) injectCredentials(ctx context.Context, msg *queue.RunMessage) (context.Context, func(), error) {

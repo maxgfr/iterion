@@ -1,6 +1,9 @@
 package tracker
 
-import "sort"
+import (
+	"slices"
+	"sort"
+)
 
 // Helpers shared by adapters whose state model is "labels on the
 // underlying tracker map to a workflow state name". GitHub and
@@ -10,12 +13,12 @@ import "sort"
 // (all includes present, no excludes present).
 func labelsMatch(have []string, sel LabelSelector) bool {
 	for _, want := range sel.LabelsInclude {
-		if !containsString(have, want) {
+		if !slices.Contains(have, want) {
 			return false
 		}
 	}
 	for _, no := range sel.LabelsExclude {
-		if containsString(have, no) {
+		if slices.Contains(have, no) {
 			return false
 		}
 	}
@@ -39,18 +42,9 @@ func resolveStateByLabels(labels []string, mapping map[string]LabelSelector) str
 	return ""
 }
 
-func containsString(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
-}
-
 func anyOfString(haystack, needles []string) bool {
 	for _, n := range needles {
-		if containsString(haystack, n) {
+		if slices.Contains(haystack, n) {
 			return true
 		}
 	}

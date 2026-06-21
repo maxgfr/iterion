@@ -14,6 +14,7 @@
 package tracing
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -41,7 +42,7 @@ import (
 // serviceName populates the `service.name` resource attribute. The
 // returned shutdown flushes pending spans up to its context deadline.
 func Init(ctx context.Context, serviceName string, logger *iterlog.Logger) (func(context.Context) error, error) {
-	endpoint := firstNonEmpty(
+	endpoint := cmp.Or(
 		os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
 		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
 	)
@@ -100,15 +101,6 @@ func Init(ctx context.Context, serviceName string, logger *iterlog.Logger) (func
 		logger.Info("tracing: OTLP/HTTP exporter wired (endpoint=%s, service=%s)", endpoint, serviceName)
 	}
 	return tp.Shutdown, nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 // envSampler reads OTEL_TRACES_SAMPLER / OTEL_TRACES_SAMPLER_ARG and

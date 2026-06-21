@@ -21,6 +21,7 @@ import (
 	forgeforgejo "github.com/SocialGouv/iterion/pkg/forge/forgejo"
 	forgegithub "github.com/SocialGouv/iterion/pkg/forge/github"
 	forgegitlab "github.com/SocialGouv/iterion/pkg/forge/gitlab"
+	"github.com/SocialGouv/iterion/pkg/internal/strutil"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
@@ -373,7 +374,7 @@ func (s *Server) connectForgePAT(w http.ResponseWriter, r *http.Request, teamID,
 	now := time.Now().UTC()
 	conn := forge.Connection{
 		ID: connID, TenantID: teamID, Provider: provider, Kind: forge.KindPAT,
-		DisplayName: firstNonBlank(req.DisplayName, ident.Login), ForgeBaseURL: baseURL,
+		DisplayName: strutil.FirstNonBlank(req.DisplayName, ident.Login), ForgeBaseURL: baseURL,
 		AccountLogin: ident.Login, AccountID: ident.ID, Namespace: ident.Namespace,
 		Status: forge.StatusActive, SealedPayload: sealed,
 		CreatedBy: userID, CreatedAt: now, UpdatedAt: now,
@@ -674,11 +675,4 @@ func canonicalForgeBaseURL(raw string, provider forge.Provider) string {
 	}
 	s = strings.TrimRight(s, "/")
 	return s
-}
-
-func firstNonBlank(a, b string) string {
-	if strings.TrimSpace(a) != "" {
-		return a
-	}
-	return b
 }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -96,7 +97,7 @@ func (a *ForgejoAdapter) ListCandidates(ctx context.Context) ([]Issue, error) {
 			if anyOfString(labels, a.opts.ExcludeLabels) {
 				continue
 			}
-			if containsString(labels, a.opts.ClaimedLabel) {
+			if slices.Contains(labels, a.opts.ClaimedLabel) {
 				continue
 			}
 			iss := a.toIssue(r)
@@ -175,7 +176,7 @@ func (a *ForgejoAdapter) UpdateState(ctx context.Context, id, newState string) e
 		have = filterOutString(have, l)
 	}
 	for _, l := range sel.LabelsInclude {
-		if !containsString(have, l) {
+		if !slices.Contains(have, l) {
 			have = append(have, l)
 		}
 	}

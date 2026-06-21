@@ -83,15 +83,6 @@ func TestEnvSampler_unknown_fallsBackToParentBasedAlwaysOn(t *testing.T) {
 	}
 }
 
-func TestFirstNonEmpty(t *testing.T) {
-	if got := firstNonEmpty("", "", "third"); got != "third" {
-		t.Errorf("firstNonEmpty = %q, want third", got)
-	}
-	if got := firstNonEmpty("", ""); got != "" {
-		t.Errorf("firstNonEmpty(empties) = %q, want empty", got)
-	}
-}
-
 func TestInit_withFakeEndpoint_buildsTracerProvider(t *testing.T) {
 	// Fake OTLP collector that accepts everything. The exporter is
 	// lazy on the wire so Init() succeeds even when the collector

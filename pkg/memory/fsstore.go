@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -86,7 +87,7 @@ func ResolveSpaceRef(vis knowledge.Visibility, name, botOverride, userOverride s
 	switch vis {
 	case knowledge.VisibilityBot:
 		ref.ProjectID = in.ProjectID
-		ref.BotID = firstNonEmpty(botOverride, in.BotID)
+		ref.BotID = cmp.Or(botOverride, in.BotID)
 	case knowledge.VisibilityProject:
 		ref.ProjectID = in.ProjectID
 	case knowledge.VisibilityUser:
@@ -102,13 +103,6 @@ func ResolveSpaceRef(vis knowledge.Visibility, name, botOverride, userOverride s
 		ref.TenantID = "" // instance-wide, not tenant-scoped
 	}
 	return ref
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 // scopeFor resolves a SpaceRef to a path-clamped Scope on disk.

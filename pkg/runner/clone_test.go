@@ -60,12 +60,3 @@ func TestValidateRepoTarget(t *testing.T) {
 		})
 	}
 }
-
-func TestFirstNonBlank(t *testing.T) {
-	if got := firstNonBlank("", "  ", "x", "y"); got != "x" {
-		t.Fatalf("firstNonBlank = %q; want x", got)
-	}
-	if got := firstNonBlank("", " ", "\t"); got != "" {
-		t.Fatalf("firstNonBlank(all blank) = %q; want empty", got)
-	}
-}

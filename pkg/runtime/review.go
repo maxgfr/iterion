@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
+	"github.com/SocialGouv/iterion/pkg/internal/strutil"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
@@ -294,8 +295,8 @@ func (e *Engine) performGateMerge(ctx context.Context, rs *runState, hn *ir.Huma
 	// Precedence: studio merge-form override > launch flag (--merge-strategy /
 	// --merge-into) > the bot's DSL default. The launch flag wins over the bot
 	// so an operator can redirect a dogfood merge to a scratch branch.
-	strategy := firstNonEmpty(stringAnswer(answers, reviewMergeStrategyKey), e.mergeStrategy, hn.MergeStrategy)
-	mergeInto := firstNonEmpty(e.mergeInto, hn.MergeInto)
+	strategy := strutil.FirstNonBlank(stringAnswer(answers, reviewMergeStrategyKey), e.mergeStrategy, hn.MergeStrategy)
+	mergeInto := strutil.FirstNonBlank(e.mergeInto, hn.MergeInto)
 
 	// No commits → nothing to merge. Record skipped so the run-end finalize
 	// doesn't try again, and so the studio shows "no commits".
@@ -313,7 +314,7 @@ func (e *Engine) performGateMerge(ctx context.Context, rs *runState, hn *ir.Huma
 		return e.persistGateMerge(ctx, rs.runID, finalSHA, finalName, "", "", string(store.MergeStatusSkipped), strategy)
 	}
 
-	message := firstNonEmpty(stringAnswer(answers, reviewMessageKey),
+	message := strutil.FirstNonBlank(stringAnswer(answers, reviewMessageKey),
 		buildSquashMessage(wtCtx.repoRoot, wtCtx.originalTip, finalSHA, e.runName))
 
 	res, mErr := PerformDeferredMerge(DeferredMergeRequest{
@@ -387,8 +388,8 @@ func (e *Engine) pauseReviewGate(rs *runState, nodeID string, hn *ir.HumanNode, 
 		"posture":      hn.Posture,
 		// Show the EFFECTIVE merge target/strategy (launch flag > bot default),
 		// matching what performGateMerge will actually do.
-		"merge_strategy": firstNonEmpty(e.mergeStrategy, hn.MergeStrategy),
-		"merge_into":     firstNonEmpty(e.mergeInto, hn.MergeInto),
+		"merge_strategy": strutil.FirstNonBlank(e.mergeStrategy, hn.MergeStrategy),
+		"merge_into":     strutil.FirstNonBlank(e.mergeInto, hn.MergeInto),
 		"max_turns":      hn.MaxTurns,
 		"turns":          turns, // the full companion↔human thread, for self-contained studio rendering
 	}
@@ -622,15 +623,6 @@ func stringAnswer(m map[string]interface{}, key string) string {
 	}
 	if s, ok := m[key].(string); ok {
 		return s
-	}
-	return ""
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
 	}
 	return ""
 }

@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -340,11 +341,11 @@ func cloneIssue(in *Issue) *Issue {
 }
 
 func (f ListFilter) match(iss *Issue) bool {
-	if len(f.States) > 0 && !containsString(f.States, iss.State) {
+	if len(f.States) > 0 && !slices.Contains(f.States, iss.State) {
 		return false
 	}
 	for _, want := range f.Labels {
-		if !containsString(iss.Labels, want) {
+		if !slices.Contains(iss.Labels, want) {
 			return false
 		}
 	}
@@ -1085,13 +1086,4 @@ func cloneBoard(b *Board) *Board {
 	c.States = append([]State(nil), b.States...)
 	c.Fields = append([]Field(nil), b.Fields...)
 	return &c
-}
-
-func containsString(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
 }
