@@ -59,6 +59,7 @@ agent worker:
 
 workflow my_workflow:
   entry: worker
+  rtk: on                         # optional: compress agent shell output run-wide (on|ultra|off)
   worker -> done
 ```
 
@@ -91,6 +92,8 @@ agent w:
   tools:   [bash, read_file, glob, grep, write_file, file_edit]
   tool_max_steps: 30
   max_tokens: 4096              # output cap (per LLM call)
+  rtk: on                       # opt-in command-output compression (on|ultra|off, off by default);
+                                # rewrites shell commands via rtk to save 60-90% output tokens (docs/rtk.md)
   readonly: true                # runtime-blocks mutation tools
   interaction: human            # surfaces ask_user via MCP
   interaction_prompt: ask_msg   # used when interaction is llm or llm_or_human

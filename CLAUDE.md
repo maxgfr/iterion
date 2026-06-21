@@ -166,6 +166,8 @@ Other top-level directories: `studio/` (React/Vite frontend), `examples/` (.iter
 
 **Top-level blocks:** `vars:`, `attachments:`, `prompt <name>:`, `schema <name>:`, `cursor <name>:`, node declarations (`agent`, `judge`, `router`, `human`, `tool`, `compute`), `workflow <name>:`
 
+**`rtk:` field** (`on|ultra|off`) — opt-in command-output compression on the `workflow` block and on `agent`/`judge`/`tool` nodes (off by default; see the rtk section above + [docs/rtk.md](docs/rtk.md)).
+
 **Edge syntax:**
 ```
 src -> dst                              # default edge
@@ -220,6 +222,23 @@ the `agenticOperatingPosture` "converge and stop / don't re-litigate"
 clause reinforces the asymptote, it does not gate it.
 
 **OpenAI ChatGPT-forfait via claw.** When Codex CLI is signed in via "Sign in with ChatGPT" (`auth_mode: "chatgpt"` in `~/.codex/auth.json`), `claw` can reuse that OAuth token + account_id to drive OpenAI calls through `chatgpt.com/backend-api/codex` — billing against the user's ChatGPT Plus/Pro subscription instead of metered API calls. Precedence: `OPENAI_API_KEY` wins when both are present (explicit env var = deliberate); ChatGPT-OAuth activates when no API key is set, or when `ITERION_OPENAI_USE_OAUTH=1` forces it. `ITERION_OPENAI_USE_OAUTH=0` or any `OPENAI_BASE_URL` disables OAuth. The `version:` header (which OpenAI uses to gate model availability — e.g. gpt-5.5 requires codex-cli ≥ 0.130) is sourced from `ITERION_CODEX_VERSION` or `codex --version`. See the "OpenAI via ChatGPT forfait" section in [docs/backends.md](docs/backends.md). The Anthropic-forfait equivalent is **not** supported (Consumer Terms scope it to Claude Code only).
+
+### rtk output compression (token saver)
+
+[rtk](https://github.com/rtk-ai/rtk) ("Rust Token Killer") is an **opt-in,
+off-by-default** compressor that rewrites an agent's shell command to its
+token-compressed equivalent (`git status` → `rtk git status`), saving 60–90% of
+command-output tokens. One primitive — rtk's own `rtk rewrite <cmd>` — drives all
+three shell surfaces: the **claude_code** Bash PreToolUse hook, the **claw** bash
+builtin (helps under claw's 10 KB output cap), and **tool nodes** (node-level
+opt-in ONLY — never swept in by a global toggle, so a review loop's `git diff`
+stays full-fidelity). iterion uses rtk strictly as a compressor, never a
+permission gate (exit 0 *and* 3 → apply the rewrite; failures fall back to the
+original command). Enable via precedence `--rtk` / studio Launch toggle → node
+`rtk:` → workflow `rtk:` → `ITERION_RTK` (values `on|ultra|off`); locate the
+binary via `ITERION_RTK_BIN` then PATH. Sandboxed runs bind-mount the host rtk at
+`/usr/local/bin/rtk`. Telemetry is disabled by default (`RTK_TELEMETRY_DISABLED=1`).
+Full reference: [docs/rtk.md](docs/rtk.md).
 
 ### Sandbox
 
@@ -762,7 +781,7 @@ above is the standing baseline, not an open-work list).
 ```
 iterion init [dir]                      # Scaffold new project
 iterion validate <file.bot>            # Parse and validate workflow
-iterion run <file.bot> [flags]         # Execute workflow (--var, --recipe, --timeout, --store-dir, --merge-into, --branch-name)
+iterion run <file.bot> [flags]         # Execute workflow (--var, --recipe, --timeout, --store-dir, --merge-into, --branch-name, --rtk)
 iterion inspect [--run-id] [--events]   # View run state and events
 iterion resume --run-id --file [--answers-file] [--force]  # Resume paused/failed/cancelled run
 iterion fork --run-id <parent> --node <id> [--turn N] [--rewind-code]  # Fork a run at a prior LLM turn (resume with `iterion resume`)
