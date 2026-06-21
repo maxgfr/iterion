@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/SocialGouv/iterion/pkg/webhooks"
-	"github.com/SocialGouv/iterion/pkg/webhooks/github"
+	"github.com/SocialGouv/iterion/pkg/webhooks/prforge"
 )
 
 // ghConfig returns a fresh hmac-mode GitHub Config seeded with a sealed
@@ -86,7 +86,7 @@ func TestGitHubWebhook_HappyPath(t *testing.T) {
 	cfg, pt := ghConfig(t, s)
 
 	w := httptest.NewRecorder()
-	s.handleGitHubWebhook(w, ghReq(ghCtx(cfg), ghOpenPR, github.EventHeaderPullRequest, pt))
+	s.handleGitHubWebhook(w, ghReq(ghCtx(cfg), ghOpenPR, prforge.EventHeaderPullRequest, pt))
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
 	}
@@ -115,7 +115,7 @@ func TestGitHubWebhook_BadHMAC(t *testing.T) {
 	cfg, _ := ghConfig(t, s)
 	w := httptest.NewRecorder()
 	// Sign with a wrong key.
-	s.handleGitHubWebhook(w, ghReq(ghCtx(cfg), ghOpenPR, github.EventHeaderPullRequest, "iwh_wrong_key"))
+	s.handleGitHubWebhook(w, ghReq(ghCtx(cfg), ghOpenPR, prforge.EventHeaderPullRequest, "iwh_wrong_key"))
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("bad hmac: code=%d body=%s", w.Code, w.Body.String())
 	}
@@ -153,7 +153,7 @@ func TestGitHubWebhook_SynchronizeFiltered(t *testing.T) {
 	cfg, pt := ghConfig(t, s)
 	body := strings.Replace(ghOpenPR, `"action": "opened"`, `"action": "synchronize"`, 1)
 	w := httptest.NewRecorder()
-	s.handleGitHubWebhook(w, ghReq(ghCtx(cfg), body, github.EventHeaderPullRequest, pt))
+	s.handleGitHubWebhook(w, ghReq(ghCtx(cfg), body, prforge.EventHeaderPullRequest, pt))
 	if w.Code != http.StatusOK {
 		t.Fatalf("sync: code=%d", w.Code)
 	}
@@ -173,7 +173,7 @@ func TestGitHubWebhook_ProjectAllowlistMismatch(t *testing.T) {
 	cfg, pt := ghConfig(t, s)
 	cfg.ProjectAllowlist = []string{"other/*"}
 	w := httptest.NewRecorder()
-	s.handleGitHubWebhook(w, ghReq(ghCtx(cfg), ghOpenPR, github.EventHeaderPullRequest, pt))
+	s.handleGitHubWebhook(w, ghReq(ghCtx(cfg), ghOpenPR, prforge.EventHeaderPullRequest, pt))
 	if w.Code != http.StatusOK {
 		t.Fatalf("mismatched repo: code=%d", w.Code)
 	}
@@ -193,12 +193,12 @@ func TestGitHubWebhook_IdempotentReplay(t *testing.T) {
 	}
 	cfg, pt := ghConfig(t, s)
 	w1 := httptest.NewRecorder()
-	s.handleGitHubWebhook(w1, ghReq(ghCtx(cfg), ghOpenPR, github.EventHeaderPullRequest, pt))
+	s.handleGitHubWebhook(w1, ghReq(ghCtx(cfg), ghOpenPR, prforge.EventHeaderPullRequest, pt))
 	if w1.Code != http.StatusAccepted {
 		t.Fatalf("first: %d", w1.Code)
 	}
 	w2 := httptest.NewRecorder()
-	s.handleGitHubWebhook(w2, ghReq(ghCtx(cfg), ghOpenPR, github.EventHeaderPullRequest, pt))
+	s.handleGitHubWebhook(w2, ghReq(ghCtx(cfg), ghOpenPR, prforge.EventHeaderPullRequest, pt))
 	if w2.Code != http.StatusOK {
 		t.Fatalf("replay code=%d body=%s", w2.Code, w2.Body.String())
 	}
@@ -224,7 +224,7 @@ func TestGitHubWebhook_BotNotAllowed(t *testing.T) {
 	// that exclude review-pr so the AllowsBot gate fires.
 	cfg.BotIDs = []string{"some-other-bot", "and-another"}
 	w := httptest.NewRecorder()
-	s.handleGitHubWebhook(w, ghReq(ghCtx(cfg), ghOpenPR, github.EventHeaderPullRequest, pt))
+	s.handleGitHubWebhook(w, ghReq(ghCtx(cfg), ghOpenPR, prforge.EventHeaderPullRequest, pt))
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("bot not allowed: code=%d body=%s", w.Code, w.Body.String())
 	}

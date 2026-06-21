@@ -8,7 +8,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/knowledge"
 	"github.com/SocialGouv/iterion/pkg/webhooks"
-	"github.com/SocialGouv/iterion/pkg/webhooks/github"
+	"github.com/SocialGouv/iterion/pkg/webhooks/prforge"
 )
 
 // registerGitHubWebhookRoute wires the inbound GitHub delivery endpoint
@@ -55,7 +55,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	srcIP := s.clientIP(r)
 
 	event := r.Header.Get("X-GitHub-Event")
-	if event != github.EventHeaderPullRequest {
+	if event != prforge.EventHeaderPullRequest {
 		// GitHub sends ping/push/issue_comment on the same URL —
 		// silently filter (200) instead of 4xx, otherwise GitHub
 		// disables the webhook after repeated failures.
@@ -64,13 +64,13 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p, err := github.ParsePullRequest(body)
+	p, err := prforge.ParsePullRequest(body)
 	if err != nil {
 		s.recordTerminalWebhookDelivery(ctx, cfg, webhookEventMeta{Kind: "pull_request"}, webhooks.StatusInvalid, payloadHash, srcIP, err.Error())
 		httpError(w, http.StatusBadRequest, "invalid pull_request payload")
 		return
 	}
-	meta := githubPRMeta(p)
+	meta := prforgePRMeta(p)
 
 	if !p.IsReviewable() ||
 		!webhooks.MatchEvent(cfg.EventAllowlist, "pull_request", "pull_request") ||
@@ -95,8 +95,10 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	s.insertAndLaunchWebhook(ctx, w, r, cfg, meta, idemKey, botID, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
 }
 
-// githubPRMeta flattens a Parsed GitHub PR into webhookEventMeta.
-func githubPRMeta(p github.Parsed) webhookEventMeta {
+// prforgePRMeta flattens a parsed PR-over-forge event (GitHub or
+// Forgejo/Gitea) into webhookEventMeta — the wire shape is identical
+// between the two providers, so the helper is shared by both handlers.
+func prforgePRMeta(p prforge.Parsed) webhookEventMeta {
 	subject := ""
 	if p.PRNumber != 0 {
 		subject = p.SubjectID()

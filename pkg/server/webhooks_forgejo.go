@@ -8,7 +8,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/knowledge"
 	"github.com/SocialGouv/iterion/pkg/webhooks"
-	"github.com/SocialGouv/iterion/pkg/webhooks/forgejo"
+	"github.com/SocialGouv/iterion/pkg/webhooks/prforge"
 )
 
 // registerForgejoWebhookRoute wires the inbound Forgejo/Gitea delivery
@@ -69,19 +69,19 @@ func (s *Server) handleForgejoWebhook(w http.ResponseWriter, r *http.Request) {
 	srcIP := s.clientIP(r)
 
 	event := forgejoEventHeader(r)
-	if event != forgejo.EventHeaderPullRequest {
+	if event != prforge.EventHeaderPullRequest {
 		s.recordTerminalWebhookDelivery(ctx, cfg, webhookEventMeta{Kind: event}, webhooks.StatusFiltered, payloadHash, srcIP, "unsupported event")
 		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
 		return
 	}
 
-	p, err := forgejo.ParsePullRequest(body)
+	p, err := prforge.ParsePullRequest(body)
 	if err != nil {
 		s.recordTerminalWebhookDelivery(ctx, cfg, webhookEventMeta{Kind: "pull_request"}, webhooks.StatusInvalid, payloadHash, srcIP, err.Error())
 		httpError(w, http.StatusBadRequest, "invalid pull_request payload")
 		return
 	}
-	meta := forgejoPRMeta(p)
+	meta := prforgePRMeta(p)
 
 	if !p.IsReviewable() ||
 		!webhooks.MatchEvent(cfg.EventAllowlist, "pull_request", "pull_request") ||
@@ -101,20 +101,4 @@ func (s *Server) handleForgejoWebhook(w http.ResponseWriter, r *http.Request) {
 	vars := reviewPRVars(p.PRURL, p.TargetBranch, strings.TrimSpace(p.Title+"\n\n"+p.Description), cfg.LaunchVars, nil)
 
 	s.insertAndLaunchWebhook(ctx, w, r, cfg, meta, idemKey, botID, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
-}
-
-// forgejoPRMeta flattens a Parsed Forgejo PR into webhookEventMeta.
-func forgejoPRMeta(p forgejo.Parsed) webhookEventMeta {
-	subject := ""
-	if p.PRNumber != 0 {
-		subject = p.SubjectID()
-	}
-	return webhookEventMeta{
-		Kind:         "pull_request",
-		Action:       p.Action,
-		ProjectPath:  p.ProjectPath,
-		SubjectID:    subject,
-		SubjectSHA:   p.HeadSHA,
-		SenderHandle: p.SenderLogin,
-	}
 }

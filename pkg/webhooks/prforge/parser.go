@@ -1,4 +1,4 @@
-package github
+package prforge
 
 import (
 	"encoding/json"
@@ -6,16 +6,17 @@ import (
 	"strconv"
 )
 
-// Parsed is the normalized PR view the handler consumes. It mirrors
-// gitlab.Parsed field-for-field so the per-provider handlers stay
-// shaped the same way — the only delta is SenderLogin (audit only in
-// V1; we don't store it in the delivery row).
+// Parsed is the normalized PR view the inbound handler consumes. It
+// mirrors gitlab.Parsed field-for-field so the per-provider handlers
+// (GitHub + Forgejo/Gitea, both routed through this package) all look
+// the same — SenderLogin is audit-only in V1 and not stored on the
+// delivery row.
 type Parsed struct {
 	RepoID       int64
 	ProjectPath  string // "owner/repo"
 	CloneURL     string
 	PRNumber     int64
-	Action       string // "opened" | "reopened" | "synchronize" | …
+	Action       string // "opened" | "reopened" | "synchronize" | "synchronized" | …
 	SourceBranch string // head.ref
 	TargetBranch string // base.ref
 	Title        string
@@ -26,13 +27,15 @@ type Parsed struct {
 	SenderLogin  string
 }
 
-// ParsePullRequest decodes a GitHub pull_request webhook body. We
-// reject empty bodies / wrong shapes early so the handler can return a
-// clean 400 instead of crashing on a nil deref.
+// ParsePullRequest decodes a pull_request webhook body from GitHub or
+// Forgejo/Gitea (one shared wire shape). We reject empty bodies / wrong
+// shapes early so the handler can return a clean 400 instead of crashing
+// on a nil deref. Defensive: tolerate missing top-level Number (some
+// events nest it only inside pull_request).
 func ParsePullRequest(body []byte) (Parsed, error) {
 	var e PullRequestEvent
 	if err := json.Unmarshal(body, &e); err != nil {
-		return Parsed{}, fmt.Errorf("github: decode pull_request event: %w", err)
+		return Parsed{}, fmt.Errorf("prforge: decode pull_request event: %w", err)
 	}
 	pr := e.PullRequest
 	if pr.Number == 0 && e.Number != 0 {
@@ -57,9 +60,9 @@ func ParsePullRequest(body []byte) (Parsed, error) {
 
 // IsReviewable reports whether the PR action should AUTO-trigger a
 // review. Same contract as gitlab.Parsed.IsReviewable — only opened /
-// reopened. "synchronize" (a new push) deliberately does NOT re-trigger;
-// re-review is on-demand (V1 docs the operator on issue-comment /revi
-// in a follow-up; for now they re-push the branch + reopen).
+// reopened. Subsequent push actions ("synchronize" on GitHub-shaped
+// payloads, "synchronized" on Gitea-shaped payloads) deliberately do
+// NOT re-trigger; re-review is on-demand.
 func (p Parsed) IsReviewable() bool {
 	switch p.Action {
 	case "opened", "reopened":
