@@ -3,6 +3,7 @@ import * as RD from "@radix-ui/react-dialog";
 import { useEffect, useState } from "react";
 
 import * as dispatcher from "@/api/dispatcher";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 
 interface Props {
@@ -570,7 +571,7 @@ function HookFields({
   return (
     <div className="space-y-1 rounded border border-border-default bg-surface-2 p-2">
       <label className="flex items-center gap-2 text-xs">
-        <input type="checkbox" checked={enabled} onChange={(e) => toggle(e.target.checked)} />
+        <Checkbox checked={enabled} onChange={(e) => toggle(e.target.checked)} />
         <span className="font-mono">{label}</span>
       </label>
       {enabled && value && (

@@ -20,10 +20,12 @@ import { type BotEntryWithSchema, listBots } from "@/api/bots";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { Dialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
+import { Radio } from "@/components/ui/Radio";
 import { Select } from "@/components/ui/Select";
 import { TagInput } from "@/components/ui/TagInput";
 import ConfirmDialog from "@/components/shared/ConfirmDialog";
@@ -202,8 +204,7 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
                 <td className="px-2 py-2">
                   {canManage ? (
                     <label className="inline-flex items-center gap-1 text-xs cursor-pointer">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={w.enabled}
                         onChange={() => toggleEnabled(w)}
                       />
@@ -396,8 +397,7 @@ function CreateWebhookDialog({
                     : "border-border-subtle"
                 } ${p.available ? "" : "opacity-60 cursor-not-allowed"}`}
               >
-                <input
-                  type="radio"
+                <Radio
                   name="provider"
                   value={p.id}
                   checked={provider === p.id}
@@ -428,8 +428,7 @@ function CreateWebhookDialog({
         <Field label="Bot scope">
           <div className="space-y-2">
             <label className="inline-flex items-center gap-2 text-xs">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={wildcard}
                 onChange={(e) => setWildcard(e.target.checked)}
               />
@@ -451,8 +450,7 @@ function CreateWebhookDialog({
                             checked ? "border-accent bg-accent-soft" : "border-border-subtle"
                           }`}
                         >
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={checked}
                             onChange={() => {
                               if (checked) setBotIDs(botIDs.filter((x) => x !== b.name));

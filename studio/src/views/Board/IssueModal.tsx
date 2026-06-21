@@ -6,6 +6,7 @@ import { listBots, type BotEntryWithSchema } from "@/api/bots";
 import type { NativeBoard, NativeIssue } from "@/api/native";
 import BranchDiffModal from "@/components/Runs/BranchDiffModal";
 import { Button } from "@/components/ui/Button";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { Dialog } from "@/components/ui/Dialog";
 import { InlineBanner } from "@/components/ui/InlineBanner";
@@ -399,8 +400,7 @@ function TicketTab({
             </Select>
           ) : f.type === "bool" ? (
             <label className="inline-flex items-center gap-2">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={fields[f.name] === "true"}
                 onChange={(e) =>
                   setFields({
@@ -408,7 +408,6 @@ function TicketTab({
                     [f.name]: e.target.checked ? "true" : "false",
                   })
                 }
-                className="accent-accent"
               />
               <span className="text-xs text-fg-muted">
                 {fields[f.name] === "true" ? "true" : "false"}

@@ -5,7 +5,7 @@ import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 
 import type { RunEvent } from "@/api/runs";
-import { IconButton, Input } from "@/components/ui";
+import { Checkbox, IconButton, Input } from "@/components/ui";
 import { useToggleSet } from "@/hooks/useToggleSet";
 import { stepIteration } from "@/lib/eventIter";
 
@@ -437,11 +437,9 @@ export default function EventLog({
           />
         </div>
         <label className="ml-auto inline-flex items-center gap-1.5 cursor-pointer">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={followTail}
             onChange={(e) => handleToggleFollow(e.target.checked)}
-            className="accent-accent"
           />
           Follow tail
         </label>

@@ -4,7 +4,7 @@ import { useLocation } from "wouter";
 
 import { forkRun } from "@/api/runs";
 import type { RunHeader } from "@/api/runs";
-import { Button, Dialog } from "@/components/ui";
+import { Button, Checkbox, Dialog } from "@/components/ui";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useTabsStore } from "@/store/tabs";
 import { useUIStore } from "@/store/ui";
@@ -154,12 +154,11 @@ export default function ForkDialog({ run, anchor, open, onOpenChange }: Props) {
         </label>
 
         <label className="flex items-start gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={rewindCode}
             onChange={(ev) => setRewindCode(ev.target.checked)}
             disabled={busy}
-            className="mt-0.5 accent-accent"
+            className="mt-0.5"
           />
           <span className="flex flex-col">
             <span className="font-medium">Rewind worktree</span>

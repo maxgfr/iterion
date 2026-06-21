@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 
-import { Input, Select, Textarea } from "@/components/ui";
+import { Checkbox, Input, Radio, Select, Textarea } from "@/components/ui";
 import type {
   FormQuestion,
   QuestionOption,
@@ -309,14 +309,23 @@ function OptionRow({
           : "border-border-subtle hover:bg-surface-2"
       } ${disabled ? "opacity-60 cursor-not-allowed" : ""}`}
     >
-      <input
-        type={type}
-        name={name}
-        checked={checked}
-        disabled={disabled}
-        onChange={onSelect}
-        className="mt-0.5 accent-accent"
-      />
+      {type === "radio" ? (
+        <Radio
+          name={name}
+          checked={checked}
+          disabled={disabled}
+          onChange={onSelect}
+          className="mt-0.5"
+        />
+      ) : (
+        <Checkbox
+          name={name}
+          checked={checked}
+          disabled={disabled}
+          onChange={onSelect}
+          className="mt-0.5"
+        />
+      )}
       <div className="flex-1 min-w-0">
         <div className="text-fg-default">{option.label}</div>
         {option.description && (
@@ -352,14 +361,23 @@ function OtherRow({
           : "border-border-subtle"
       } ${disabled ? "opacity-60" : ""}`}
     >
-      <input
-        type={type}
-        name={name}
-        checked={checked}
-        disabled={disabled}
-        onChange={onSelect}
-        className="mt-0.5 accent-accent"
-      />
+      {type === "radio" ? (
+        <Radio
+          name={name}
+          checked={checked}
+          disabled={disabled}
+          onChange={onSelect}
+          className="mt-0.5"
+        />
+      ) : (
+        <Checkbox
+          name={name}
+          checked={checked}
+          disabled={disabled}
+          onChange={onSelect}
+          className="mt-0.5"
+        />
+      )}
       <div className="flex-1 min-w-0 space-y-1">
         <label className="text-fg-default cursor-pointer">Other</label>
         <Input

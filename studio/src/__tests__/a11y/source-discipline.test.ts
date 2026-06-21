@@ -36,6 +36,16 @@ function scan(re: RegExp, allow: (path: string) => boolean = () => false): strin
   return hits;
 }
 
+/** Whole-file variant for patterns that span lines (e.g. a multiline JSX tag). */
+function scanWhole(re: RegExp, allow: (path: string) => boolean = () => false): string[] {
+  const hits: string[] = [];
+  for (const [path, src] of files) {
+    if (allow(path)) continue;
+    if (re.test(src)) hits.push(path);
+  }
+  return hits;
+}
+
 describe("source discipline", () => {
   it("scans a non-trivial number of source files", () => {
     // Guards against a glob-scope regression silently emptying the scan.
@@ -85,6 +95,22 @@ describe("source discipline", () => {
     if (hits.length) {
       throw new Error(
         `legacy \${token}NN soft-bg is banned — use softColor(token, pct):\n${hits.join("\n")}`,
+      );
+    }
+    expect(hits).toHaveLength(0);
+  });
+
+  it("uses the Checkbox / Radio primitives, not raw <input type=checkbox|radio>", () => {
+    // ui/Checkbox + ui/Radio own the only native checkbox/radio inputs (token
+    // border, brand-accent fill, free keyboard/SR semantics). `[^>]*` spans
+    // newlines so a multiline `<input …>` tag is still caught; anchoring on
+    // `<input` means a `type="radio"` *prop* on a component (e.g. OptionRow)
+    // is correctly ignored.
+    const RE = /<input\b[^>]*\btype\s*=\s*["'](checkbox|radio)["']/;
+    const hits = scanWhole(RE, (path) => /\/ui\/(Checkbox|Radio)\.tsx$/.test(path));
+    if (hits.length) {
+      throw new Error(
+        `raw <input type=checkbox|radio> is banned — use <Checkbox>/<Radio>/<RadioGroup>:\n${hits.join("\n")}`,
       );
     }
     expect(hits).toHaveLength(0);

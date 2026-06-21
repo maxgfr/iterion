@@ -6,7 +6,7 @@ import { ChevronDownIcon, MixerHorizontalIcon } from "@radix-ui/react-icons";
 import { useShallow } from "zustand/react/shallow";
 
 import { apiURL } from "@/api/runs";
-import { IconButton, Input, Popover } from "@/components/ui";
+import { Checkbox, IconButton, Input, Popover } from "@/components/ui";
 import { useToggleSet } from "@/hooks/useToggleSet";
 import { desktop, isDesktop } from "@/lib/desktopBridge";
 import { formatBytes } from "@/lib/format";
@@ -507,29 +507,23 @@ export default function LogLinesView({
           </div>
         </Popover>
         <label className="ml-auto inline-flex items-center gap-1.5 cursor-pointer">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={showSidePanel}
             onChange={(e) => setShowSidePanel(e.target.checked)}
-            className="accent-accent"
           />
           Tasks
         </label>
         <label className="inline-flex items-center gap-1.5 cursor-pointer">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={wordWrap}
             onChange={(e) => setWordWrap(e.target.checked)}
-            className="accent-accent"
           />
           Wrap
         </label>
         <label className="inline-flex items-center gap-1.5 cursor-pointer">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={followTail}
             onChange={(e) => handleToggleFollow(e.target.checked)}
-            className="accent-accent"
           />
           Follow tail
         </label>

@@ -18,6 +18,7 @@ import { CheckCircledIcon, ExclamationTriangleIcon } from "@radix-ui/react-icons
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { DesktopOnlyNotice } from "@/components/ui/DesktopOnlyNotice";
 import { Select } from "@/components/ui/Select";
 import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
@@ -821,9 +822,8 @@ export default function LaunchView() {
                     </label>
                     <div className="pt-1">
                       <label className="inline-flex items-center gap-2 text-xs">
-                        <input
+                        <Checkbox
                           id="launch-auto-merge"
-                          type="checkbox"
                           checked={autoMerge}
                           onChange={(e) => setAutoMerge(e.target.checked)}
                         />

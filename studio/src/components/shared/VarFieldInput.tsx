@@ -1,5 +1,6 @@
 import type { VarField } from "@/api/types";
 
+import { Checkbox } from "@/components/ui/Checkbox";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { isPromptLikeVar, suggestRows } from "@/lib/promptVarHeuristics";
@@ -24,11 +25,9 @@ export default function VarFieldInput({ field, value, onChange, required, invali
     case "bool":
       return (
         <label className="inline-flex items-center gap-2">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={value === "true"}
             onChange={(e) => onChange(e.target.checked ? "true" : "false")}
-            className="accent-accent"
             {...a11y}
           />
           <span className="text-xs text-fg-muted">{value === "true" ? "true" : "false"}</span>

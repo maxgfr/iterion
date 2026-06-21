@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 import { resumeRun } from "@/api/runs";
 import type { RunHeader } from "@/api/runs";
-import { Button, Dialog } from "@/components/ui";
+import { Button, Checkbox, Dialog } from "@/components/ui";
 import { useDocumentStore } from "@/store/document";
 import { useRunStore } from "@/store/run";
 import { useUIStore } from "@/store/ui";
@@ -109,12 +109,11 @@ export default function ResumeDialog({ run, open, onOpenChange }: Props) {
           <span className="font-mono">.bot</span> file persisted at launch.
         </p>
         <label className="flex items-start gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={force}
             onChange={(e) => setForce(e.target.checked)}
             disabled={busy}
-            className="mt-0.5 accent-accent"
+            className="mt-0.5"
           />
           <span className="flex flex-col">
             <span className="font-medium">Force</span>

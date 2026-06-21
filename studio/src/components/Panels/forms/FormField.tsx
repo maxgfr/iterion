@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { RefAwareInput, RefAwareTextarea } from "@/components/ui/RefAwareInput";
 import PromptOverlayHighlight from "@/components/ui/PromptOverlayHighlight";
 import type { RefContext } from "@/lib/refCompletion";
@@ -379,12 +380,10 @@ export function CheckboxField({ label, checked, onChange, help }: CheckboxFieldP
   const id = useId();
   return (
     <div className="mb-2 flex items-center gap-2">
-      <input
+      <Checkbox
         id={id}
-        type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="rounded border-border-strong bg-surface-1"
       />
       <label htmlFor={id} className="text-xs text-fg-subtle">
         {label}
@@ -591,8 +590,7 @@ export function MultiSelectField({ label, values, onChange, options }: MultiSele
       <div className="flex flex-col gap-1 max-h-32 overflow-y-auto bg-surface-1 border border-border-strong rounded p-1">
         {options.map((opt) => (
           <label key={opt} className="flex items-center gap-2 text-xs text-fg-muted px-1 hover:bg-surface-2 rounded cursor-pointer">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={values.includes(opt)}
               onChange={(e) => {
                 if (e.target.checked) {

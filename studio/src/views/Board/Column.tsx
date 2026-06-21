@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { Checkbox } from "@/components/ui/Checkbox";
 import { formatRelative } from "@/lib/format";
 import { softColor } from "@/lib/constants";
 import type { DispatchSkipView, RetryView, RunningView } from "@/api/dispatcher";
@@ -125,8 +126,7 @@ export function Column({
       <div className="px-3 py-2 border-b border-border-default flex items-center justify-between text-xs">
         <span className="flex items-center gap-2 min-w-0">
           {name !== "__unmapped__" && issues.length > 0 && (
-            <input
-              type="checkbox"
+            <Checkbox
               checked={allSelected}
               ref={(el) => {
                 if (el) el.indeterminate = selCount > 0 && !allSelected;
@@ -134,7 +134,7 @@ export function Column({
               onChange={() => onSelectColumn(name)}
               title={allSelected ? "Deselect all in column" : "Select all in column"}
               aria-label={allSelected ? `Deselect all in ${display}` : `Select all in ${display}`}
-              className="shrink-0 accent-accent cursor-pointer"
+              className="shrink-0 cursor-pointer"
             />
           )}
           <span

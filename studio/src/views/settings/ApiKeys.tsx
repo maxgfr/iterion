@@ -1,5 +1,6 @@
 import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useConfirm } from "@/hooks/useConfirm";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -167,8 +168,7 @@ export default function ApiKeysPanel({ team }: Props) {
             autoComplete="off"
           />
           <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={draft.is_default}
               onChange={(e) => setDraft({ ...draft, is_default: e.target.checked })}
             />
@@ -219,8 +219,7 @@ export default function ApiKeysPanel({ team }: Props) {
                 <td className="px-2 py-2 font-mono">{k.last4 ?? "—"}</td>
                 <td className="px-2 py-2">
                   {canManage ? (
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={k.is_default}
                       onChange={() => toggleDefault(k)}
                     />

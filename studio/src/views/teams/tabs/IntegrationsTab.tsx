@@ -27,7 +27,9 @@ import {
 } from "@/api/forgeConnections";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { Button } from "@/components/ui/Button";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { Input } from "@/components/ui/Input";
+import { Radio } from "@/components/ui/Radio";
 import { Select } from "@/components/ui/Select";
 import { useConfirm } from "@/hooks/useConfirm";
 
@@ -462,8 +464,7 @@ function EnableRepoPanel({
           <ul className="space-y-2">
             {forgeBots.map((b) => (
               <li key={b.name} className="flex gap-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   id={`fb-${b.name}`}
                   checked={selectedBots.includes(b.name)}
                   onChange={() => toggleBot(b.name)}
@@ -660,8 +661,7 @@ function ConnectForm({
               : `No OAuth app registered for ${provider} on this instance — register one above, or paste a token`
           }
         >
-          <input
-            type="radio"
+          <Radio
             checked={mode === "oauth"}
             onChange={() => pickMode("oauth")}
             disabled={!oauthAvailable}
@@ -669,8 +669,7 @@ function ConnectForm({
           Use OAuth{oauthAvailable ? "" : " (no app)"}
         </label>
         <label className="flex items-center gap-1">
-          <input
-            type="radio"
+          <Radio
             checked={mode === "pat"}
             onChange={() => pickMode("pat")}
           />
@@ -678,7 +677,7 @@ function ConnectForm({
         </label>
         {provider === "github" && (
           <label className="flex items-center gap-1">
-            <input type="radio" checked={mode === "app"} onChange={() => pickMode("app")} />
+            <Radio checked={mode === "app"} onChange={() => pickMode("app")} />
             Install GitHub App
           </label>
         )}
@@ -952,8 +951,7 @@ function RegisterOAuthAppForm({
             autoSupported ? "" : "GitHub auto-create needs the App-Manifest flow — paste credentials"
           }
         >
-          <input
-            type="radio"
+          <Radio
             checked={mode === "auto"}
             onChange={() => setMode("auto")}
             disabled={!autoSupported}
@@ -961,15 +959,14 @@ function RegisterOAuthAppForm({
           Auto-create (admin token)
         </label>
         <label className="flex items-center gap-1">
-          <input
-            type="radio"
+          <Radio
             checked={mode === "auto_from_connection"}
             onChange={() => setMode("auto_from_connection")}
           />
           Reuse a connection
         </label>
         <label className="flex items-center gap-1">
-          <input type="radio" checked={mode === "manual"} onChange={() => setMode("manual")} />
+          <Radio checked={mode === "manual"} onChange={() => setMode("manual")} />
           Paste credentials
         </label>
       </div>
