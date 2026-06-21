@@ -395,6 +395,10 @@ export interface CreateRunRequest {
   // auto-detect). Useful for A/B-testing the same workflow against
   // different backends without editing the workflow source.
   backend?: string;
+  // rtk command-output-compression override ("on" | "ultra" | "off").
+  // Empty inherits the workflow/node `rtk:` DSL then ITERION_RTK.
+  // Rewrites agent shell commands to their compact `rtk <cmd>` form.
+  rtk?: string;
 }
 
 export interface CreateRunResponse {

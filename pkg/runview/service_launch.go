@@ -123,6 +123,7 @@ func (s *Service) Launch(parent context.Context, spec LaunchSpec) (*LaunchResult
 		Backend:       spec.Backend,
 		BotID:         spec.BotID,
 		BoardRegister: s.boardRegister,
+		RTK:           spec.RTK,
 	})
 	if err != nil {
 		s.dropRunLog(runID)

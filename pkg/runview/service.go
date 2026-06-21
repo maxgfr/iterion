@@ -72,6 +72,11 @@ type LaunchSpec struct {
 	// (ITERION_RUNS_DETACHED=1) does not yet honor this field; the
 	// service layer logs a warning and ignores it there.
 	Backend string
+	// RTK is the run-level rtk command-output-compression override
+	// ("", "on", "ultra", "off") from the studio Launch toggle. ""
+	// inherits the workflow/node `rtk:` DSL then ITERION_RTK. Highest
+	// priority input to rtk.Resolve. See docs/rtk.md.
+	RTK string
 	// ParentRunID, ShardIndex, ShardCount, ShardLabel are set when a
 	// parent run dispatches this as a shard child (see Cap. 3 in
 	// docs/security-bots-distributed.md). The cloudpublisher copies

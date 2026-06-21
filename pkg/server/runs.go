@@ -126,6 +126,10 @@ type launchRunRequest struct {
 	// still win. Honored in the in-process spawnRun path; detached mode
 	// (ITERION_RUNS_DETACHED=1) logs a warning and ignores it.
 	Backend string `json:"backend,omitempty"`
+	// RTK is the run-level rtk command-output-compression override
+	// ("on"|"ultra"|"off"). Empty inherits the workflow/node rtk: DSL
+	// then ITERION_RTK. See runview.LaunchSpec.RTK.
+	RTK string `json:"rtk,omitempty"`
 	// Cap. 3 sharding fields. When ParentRunID is non-empty, this
 	// launch is a shard child of an existing parent run; the server
 	// propagates the fields to the persisted Run document and (in
@@ -290,6 +294,7 @@ func (s *Server) handleLaunchRun(w http.ResponseWriter, r *http.Request) {
 		AutoMerge:          req.AutoMerge,
 		AttachmentPromote:  promote,
 		Backend:            req.Backend,
+		RTK:                req.RTK,
 		ParentRunID:        req.ParentRunID,
 		ShardIndex:         req.ShardIndex,
 		ShardCount:         req.ShardCount,

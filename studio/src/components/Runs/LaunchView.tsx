@@ -205,6 +205,9 @@ export default function LaunchView() {
   // Sending an explicit name overrides the workflow's `default_backend:`
   // but node-level explicit `backend:` still wins.
   const [backendOverride, setBackendOverride] = useState<string>("");
+  // rtk command-output-compression override for this run ("" inherits the
+  // workflow/node `rtk:` DSL then ITERION_RTK).
+  const [rtkOverride, setRtkOverride] = useState<string>("");
   const backendReport = useBackendDetectStore((s) => s.report);
 
   useEffect(() => {
@@ -392,6 +395,7 @@ export default function LaunchView() {
         attachments:
           Object.keys(attachmentsPayload).length > 0 ? attachmentsPayload : undefined,
         backend: backendOverride || undefined,
+        rtk: rtkOverride || undefined,
       });
       setLocation(`/runs/${encodeURIComponent(res.run_id)}`);
     } catch (e) {
@@ -668,6 +672,38 @@ export default function LaunchView() {
                   <div className="mt-1 text-[10px] text-fg-subtle">
                     Overrides the workflow&apos;s default. Nodes that pin a specific{" "}
                     <code>backend:</code> keep their pin.
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="mt-6 border-t border-border-default pt-4">
+              <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
+                <div>
+                  <div className="text-xs font-medium font-mono">rtk</div>
+                  <div className="text-[10px] text-fg-subtle">output compression</div>
+                </div>
+                <div>
+                  <Select
+                    value={rtkOverride}
+                    onChange={(e) => setRtkOverride(e.currentTarget.value)}
+                  >
+                    <option value="">inherit (workflow / ITERION_RTK)</option>
+                    <option value="on">on — compress shell output</option>
+                    <option value="ultra">ultra — densest output</option>
+                    <option value="off">off — disable for this run</option>
+                  </Select>
+                  <div className="mt-1 text-[10px] text-fg-subtle">
+                    Rewrites agent shell commands via{" "}
+                    <a
+                      href="https://github.com/rtk-ai/rtk"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline"
+                    >
+                      rtk
+                    </a>{" "}
+                    to save 60–90% of command-output tokens. Needs the{" "}
+                    <code>rtk</code> binary on the host PATH.
                   </div>
                 </div>
               </div>
