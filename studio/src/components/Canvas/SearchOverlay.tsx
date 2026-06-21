@@ -1,4 +1,5 @@
 import { forwardRef } from "react";
+import { Input } from "@/components/ui/Input";
 
 interface Props {
   searchQuery: string;
@@ -14,9 +15,10 @@ const SearchOverlay = forwardRef<HTMLInputElement, Props>(
 
     return (
       <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[var(--z-canvas)] flex items-center gap-2">
-        <input
+        <Input
           ref={ref}
-          className="bg-surface-1 border border-border-strong rounded-lg px-3 py-1.5 text-sm text-fg-default w-64 focus:border-accent focus:outline-none shadow-lg"
+          aria-label="Search nodes"
+          className="w-64 shadow-[var(--shadow-popover)]"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           onKeyDown={onKeyDown}
@@ -24,7 +26,10 @@ const SearchOverlay = forwardRef<HTMLInputElement, Props>(
           autoFocus
         />
         {hasQuery && (
-          <span className="text-xs text-fg-subtle bg-surface-1/90 border border-border-strong rounded px-2 py-1 whitespace-nowrap shadow-lg">
+          <span
+            aria-live="polite"
+            className="text-xs text-fg-subtle bg-surface-1/90 border border-border-strong rounded px-2 py-1 whitespace-nowrap shadow-[var(--shadow-popover)]"
+          >
             {matchCount > 0
               ? `${currentIndex + 1} / ${matchCount}`
               : "No matches"}

@@ -1,8 +1,10 @@
 import { type DragEvent, useMemo } from "react";
 import type { NodeKind } from "@/api/types";
 import type { LibraryCategory } from "@/lib/library/types";
-import { NODE_COLORS } from "@/lib/constants";
+import { NODE_COLORS, softColor } from "@/lib/constants";
 import { NodeIcon } from "@/components/icons/NodeIcon";
+import { IconButton } from "@/components/ui/IconButton";
+import { Input } from "@/components/ui/Input";
 import { useUIStore } from "@/store/ui";
 import { useLibraryStore, selectAllItems } from "@/store/library";
 import { useAddFromLibrary } from "@/hooks/useAddFromLibrary";
@@ -46,7 +48,7 @@ function CollapsedPalette({ onExpand }: { onExpand: () => void }) {
           draggable
           onDragStart={(e) => onDragStart(e, kind)}
           className="w-12 h-12 flex flex-col items-center justify-center gap-0.5 rounded cursor-grab hover:brightness-125 transition-all border border-border-strong"
-          style={{ backgroundColor: NODE_COLORS[kind] + "33", borderColor: NODE_COLORS[kind] }}
+          style={{ backgroundColor: softColor(NODE_COLORS[kind], 20), borderColor: NODE_COLORS[kind] }}
           title={label}
         >
           <NodeIcon kind={kind} size={16} />
@@ -54,15 +56,16 @@ function CollapsedPalette({ onExpand }: { onExpand: () => void }) {
         </div>
       ))}
       <div className="flex-1" />
-      <button
+      <IconButton
+        label="Expand library"
+        variant="ghost"
+        size="md"
         onClick={onExpand}
-        className="w-10 h-10 flex items-center justify-center rounded hover:bg-surface-2 transition-colors text-fg-subtle hover:text-fg-default"
-        title="Expand library"
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="6,3 11,8 6,13" />
         </svg>
-      </button>
+      </IconButton>
     </div>
   );
 }
@@ -99,25 +102,26 @@ function ExpandedPanel({ onCollapse }: { onCollapse: () => void }) {
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default">
         <span className="text-xs font-semibold text-fg-muted uppercase tracking-wider">Library</span>
-        <button
+        <IconButton
+          label="Collapse library"
+          variant="ghost"
+          size="sm"
           onClick={onCollapse}
-          className="w-6 h-6 flex items-center justify-center rounded hover:bg-surface-2 transition-colors text-fg-subtle hover:text-fg-default"
-          title="Collapse library"
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="11,3 6,8 11,13" />
           </svg>
-        </button>
+        </IconButton>
       </div>
 
       {/* Search */}
       <div className="px-3 py-2">
-        <input
+        <Input
+          size="sm"
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search library..."
-          className="w-full bg-surface-1 border border-border-strong rounded px-2 py-1 text-xs text-fg-default placeholder:text-fg-subtle focus:border-accent focus:outline-none"
         />
       </div>
 
@@ -149,7 +153,7 @@ function ExpandedPanel({ onCollapse }: { onCollapse: () => void }) {
                 draggable
                 onDragStart={(e) => onDragStart(e, kind)}
                 className="h-10 flex flex-col items-center justify-center gap-0.5 rounded cursor-grab hover:brightness-125 transition-all border border-border-strong"
-                style={{ backgroundColor: NODE_COLORS[kind] + "33", borderColor: NODE_COLORS[kind] }}
+                style={{ backgroundColor: softColor(NODE_COLORS[kind], 20), borderColor: NODE_COLORS[kind] }}
                 title={label}
               >
                 <NodeIcon kind={kind} size={14} />

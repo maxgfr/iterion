@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { type KeyboardEvent, useState } from "react";
 import { useDocumentStore } from "@/store/document";
 import { useSelectionStore } from "@/store/selection";
 import { useUIStore } from "@/store/ui";
 import { useGroupedDiagnostics } from "@/hooks/useGroupedDiagnostics";
 import { getHint } from "@/lib/diagnosticHints";
 import type { AttributedDiagnostic } from "@/lib/diagnostics";
+import { Button } from "@/components/ui/Button";
+import { IconButton } from "@/components/ui/IconButton";
+import { Input } from "@/components/ui/Input";
 import { Cross2Icon, ChevronDownIcon, ChevronUpIcon } from "@radix-ui/react-icons";
 
 export default function DiagnosticsPanel() {
@@ -63,48 +66,54 @@ export default function DiagnosticsPanel() {
         ) : (
           <span className="text-success/80">No issues found.</span>
         )}
-        <button
-          className="ml-auto inline-flex h-5 w-5 items-center justify-center rounded text-fg-subtle hover:bg-surface-2 hover:text-fg-default"
+        <IconButton
+          label="Hide diagnostics"
+          size="sm"
+          variant="ghost"
+          className="ml-auto"
           onClick={toggleDiagnosticsPanel}
-          aria-label="Hide diagnostics panel"
         >
           <Cross2Icon />
-        </button>
+        </IconButton>
       </div>
 
       {hasIssues && (
         <div className="flex items-center gap-2 mb-2">
-          <input
+          <Input
+            size="sm"
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search code or message…"
             aria-label="Filter diagnostics"
-            className="flex-1 px-1.5 py-0.5 rounded border border-border-default bg-surface-0 text-micro"
+            className="flex-1"
           />
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setShowErrorsOnly((v) => !v)}
-            className={`text-caption px-1.5 py-0.5 rounded border ${
+            aria-pressed={showErrorsOnly}
+            className={
               showErrorsOnly
-                ? "bg-danger-soft border-danger text-danger-fg"
-                : "border-border-default text-fg-subtle hover:text-fg-default"
-            }`}
+                ? "bg-danger-soft border border-danger text-danger-fg"
+                : "border border-border-default text-fg-subtle"
+            }
             title="Show only error-severity diagnostics"
           >
             errors only
-          </button>
+          </Button>
           {filterActive && (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setSearch("");
                 setShowErrorsOnly(false);
               }}
-              className="text-caption text-fg-subtle hover:text-fg-default underline"
+              className="underline"
             >
               reset
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -161,21 +170,39 @@ function DiagnosticList({
         // reorders (array index is not — animations / focus / aria
         // tooltips get reused on the wrong row otherwise).
         const stableKey = `${d.code ?? ""}|${d.nodeId ?? d.edgeId ?? ""}|${d.message}`;
+        const codeLabel = d.code || (d.severity === "error" ? "ERR" : "WARN");
+        const titleText = hint?.title ?? d.message;
+        const attributionText = showAttribution && (d.nodeId || d.edgeId)
+          ? d.edgeId
+            ? `edge ${d.edgeId}`
+            : `node ${d.nodeId}`
+          : null;
+        const ariaLabel = `${codeLabel}: ${titleText}${attributionText ? ` (${attributionText})` : ""}`;
+        const handleKeyDown = (e: KeyboardEvent<HTMLLIElement>) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick(d);
+          }
+        };
         return (
           <li
             key={stableKey || i}
-            className={`flex items-start gap-2 cursor-pointer hover:bg-surface-2 rounded px-1 -mx-1 py-0.5 ${sevColor}`}
+            tabIndex={0}
+            role="button"
+            aria-label={ariaLabel}
+            className={`flex items-start gap-2 cursor-pointer hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded px-1 -mx-1 py-0.5 ${sevColor}`}
             onClick={() => onClick(d)}
+            onKeyDown={handleKeyDown}
           >
             <span className="shrink-0 font-mono text-caption mt-0.5 px-1 rounded bg-surface-2">
-              {d.code || (d.severity === "error" ? "ERR" : "WARN")}
+              {codeLabel}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="text-fg-default">{hint?.title ?? d.message}</span>
+              <span className="text-fg-default">{titleText}</span>
               {hint && <span className="text-fg-subtle"> · {d.message}</span>}
-              {showAttribution && (d.nodeId || d.edgeId) && (
+              {attributionText && (
                 <span className="text-fg-subtle ml-1">
-                  · {d.edgeId ? `edge ${d.edgeId}` : `node ${d.nodeId}`}
+                  · {attributionText}
                 </span>
               )}
             </span>
