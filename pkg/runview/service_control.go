@@ -353,23 +353,7 @@ func (s *Service) PerformMergeCtx(ctx context.Context, runID string, req MergeRe
 	}
 
 	// Success: persist the new state.
-	r.MergedCommit = res.MergedCommit
-	r.MergedInto = res.MergedInto
-	r.MergeStrategy = store.MergeStrategy(res.Strategy)
-	r.MergeStatus = store.MergeStatusMerged
-	r.PendingMergeMessage = ""
-	r.PendingMergeInto = ""
-	if err := s.store.SaveRun(ctx, r); err != nil {
-		return nil, fmt.Errorf("runview: persist merge result: %w", err)
-	}
-
-	return &MergeResponse{
-		MergedCommit:  r.MergedCommit,
-		MergedInto:    r.MergedInto,
-		MergeStrategy: r.MergeStrategy,
-		MergeStatus:   r.MergeStatus,
-		SourceIssueID: sourceIssueID(r),
-	}, nil
+	return s.persistMergeSuccess(ctx, r, res.MergedCommit, res.MergedInto, store.MergeStrategy(res.Strategy))
 }
 
 // reconcileOutOfBandMerge marks r as merged when its FinalCommit is
@@ -538,16 +522,9 @@ type MergeConflictsResponse struct {
 // run's merge_status is not "conflicted" — callers should treat that
 // as "no conflicts pending".
 func (s *Service) GetMergeConflicts(ctx context.Context, runID string) (*MergeConflictsResponse, error) {
-	if runID == "" {
-		return nil, errors.New("runview: run_id is required")
-	}
-	r, err := s.store.LoadRun(ctx, runID)
+	r, repoRoot, err := s.loadRunForMerge(ctx, runID)
 	if err != nil {
 		return nil, err
-	}
-	repoRoot := mergeRepoRoot(r)
-	if repoRoot == "" {
-		return nil, fmt.Errorf("run %q has no resolvable repo root", runID)
 	}
 	det, err := runtime.ParseConflicts(repoRoot)
 	if err != nil {
@@ -583,8 +560,8 @@ func (s *Service) ResolveMergeConflictFile(ctx context.Context, runID, path, con
 	if err != nil {
 		return err
 	}
-	if r.MergeStatus != store.MergeStatusConflicted {
-		return fmt.Errorf("run %q has no pending conflict (merge_status=%q)", runID, r.MergeStatus)
+	if err := requireConflict(r, runID); err != nil {
+		return err
 	}
 	repoRoot := mergeRepoRoot(r)
 	if repoRoot == "" {
@@ -605,19 +582,12 @@ func (s *Service) ResolveMergeConflictFile(ctx context.Context, runID, path, con
 // on the run unless the caller supplies an override. On success the
 // run.json is updated the same way the conflict-free path would.
 func (s *Service) FinalizeMergeAfterConflict(ctx context.Context, runID, messageOverride string) (*MergeResponse, error) {
-	if runID == "" {
-		return nil, errors.New("runview: run_id is required")
-	}
-	r, err := s.store.LoadRun(ctx, runID)
+	r, repoRoot, err := s.loadRunForMerge(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
-	if r.MergeStatus != store.MergeStatusConflicted {
-		return nil, fmt.Errorf("run %q has no pending conflict (merge_status=%q)", runID, r.MergeStatus)
-	}
-	repoRoot := mergeRepoRoot(r)
-	if repoRoot == "" {
-		return nil, fmt.Errorf("run %q has no resolvable repo root", runID)
+	if err := requireConflict(r, runID); err != nil {
+		return nil, err
 	}
 	remaining, err := runtime.UnmergedPaths(repoRoot)
 	if err != nil {
@@ -642,41 +612,19 @@ func (s *Service) FinalizeMergeAfterConflict(ctx context.Context, runID, message
 	if target == "" {
 		target = resolveMergeTargetForPersistence("current", repoRoot)
 	}
-	r.MergedCommit = sha
-	r.MergedInto = target
-	r.MergeStrategy = store.MergeStrategySquash
-	r.MergeStatus = store.MergeStatusMerged
-	r.PendingMergeMessage = ""
-	r.PendingMergeInto = ""
-	if err := s.store.SaveRun(ctx, r); err != nil {
-		return nil, fmt.Errorf("runview: persist merge result: %w", err)
-	}
-	return &MergeResponse{
-		MergedCommit:  r.MergedCommit,
-		MergedInto:    r.MergedInto,
-		MergeStrategy: r.MergeStrategy,
-		MergeStatus:   r.MergeStatus,
-		SourceIssueID: sourceIssueID(r),
-	}, nil
+	return s.persistMergeSuccess(ctx, r, sha, target, store.MergeStrategySquash)
 }
 
 // AbortMergeConflict discards the in-progress squash merge: runs
 // `git reset --merge` on the repo root and flips merge_status back to
 // "failed" so the operator can decide what to do next.
 func (s *Service) AbortMergeConflict(ctx context.Context, runID string) error {
-	if runID == "" {
-		return errors.New("runview: run_id is required")
-	}
-	r, err := s.store.LoadRun(ctx, runID)
+	r, repoRoot, err := s.loadRunForMerge(ctx, runID)
 	if err != nil {
 		return err
 	}
-	if r.MergeStatus != store.MergeStatusConflicted {
-		return fmt.Errorf("run %q has no pending conflict (merge_status=%q)", runID, r.MergeStatus)
-	}
-	repoRoot := mergeRepoRoot(r)
-	if repoRoot == "" {
-		return fmt.Errorf("run %q has no resolvable repo root", runID)
+	if err := requireConflict(r, runID); err != nil {
+		return err
 	}
 	if err := runtime.AbortConflictMerge(repoRoot); err != nil {
 		return err
@@ -699,6 +647,64 @@ func mergeRepoRoot(r *store.Run) string {
 		return r.RepoRoot
 	}
 	return gitlib.FindRepoRoot(r.WorkDir)
+}
+
+// loadRunForMerge fuses the three-step preamble shared by every
+// merge-side method: empty-runID rejection, LoadRun, and repo-root
+// resolution (with the empty-root rejection). Returns the resolved
+// repo root alongside the run so callers don't re-derive it. Error
+// values match what each call site previously returned inline.
+func (s *Service) loadRunForMerge(ctx context.Context, runID string) (*store.Run, string, error) {
+	if runID == "" {
+		return nil, "", errors.New("runview: run_id is required")
+	}
+	r, err := s.store.LoadRun(ctx, runID)
+	if err != nil {
+		return nil, "", err
+	}
+	repoRoot := mergeRepoRoot(r)
+	if repoRoot == "" {
+		return nil, "", fmt.Errorf("run %q has no resolvable repo root", runID)
+	}
+	return r, repoRoot, nil
+}
+
+// requireConflict guards the three conflict-resolution methods
+// (ResolveMergeConflictFile, FinalizeMergeAfterConflict,
+// AbortMergeConflict): they only make sense when the run is sitting
+// in MergeStatusConflicted. Error message is the exact string the
+// inline guards previously produced.
+func requireConflict(r *store.Run, runID string) error {
+	if r.MergeStatus != store.MergeStatusConflicted {
+		return fmt.Errorf("run %q has no pending conflict (merge_status=%q)", runID, r.MergeStatus)
+	}
+	return nil
+}
+
+// persistMergeSuccess is the shared success-tail of PerformMergeCtx
+// and FinalizeMergeAfterConflict: stamp the merged fields, clear the
+// pending-merge bookkeeping, SaveRun, and build the response. Target
+// must already be resolved (callers default differently — Perform
+// uses res.MergedInto from the runtime call; Finalize defaults
+// PendingMergeInto / current-branch). Strategy is supplied as a
+// pre-typed MergeStatus so this helper does no coercion.
+func (s *Service) persistMergeSuccess(ctx context.Context, r *store.Run, sha, target string, strategy store.MergeStrategy) (*MergeResponse, error) {
+	r.MergedCommit = sha
+	r.MergedInto = target
+	r.MergeStrategy = strategy
+	r.MergeStatus = store.MergeStatusMerged
+	r.PendingMergeMessage = ""
+	r.PendingMergeInto = ""
+	if err := s.store.SaveRun(ctx, r); err != nil {
+		return nil, fmt.Errorf("runview: persist merge result: %w", err)
+	}
+	return &MergeResponse{
+		MergedCommit:  r.MergedCommit,
+		MergedInto:    r.MergedInto,
+		MergeStrategy: r.MergeStrategy,
+		MergeStatus:   r.MergeStatus,
+		SourceIssueID: sourceIssueID(r),
+	}, nil
 }
 
 // ResolveAllConflictsWithAgent invokes the merge-conflict resolver
