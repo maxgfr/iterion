@@ -353,24 +353,10 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 	// extras (ask_user, board.*) into extraAllowedTools and emit one call.
 	var extraAllowedTools []string
 
-	// Inject Anthropic-flavoured credentials into the CLI subprocess.
-	// Single helper so Pass 1 and Pass 2 (formatter) stay symmetric.
-	credEnv := anthropicCredEnvForCLI(ctx, task.ProviderHint)
-	opts = append(opts, credEnvToOpts(credEnv)...)
-	currentFingerprint := providerFingerprint(credEnv)
-
-	if task.SessionID != "" {
-		drop, reason := shouldDropSessionFork(task, currentFingerprint)
-		if drop {
-			b.Logger.Warn("[%s#%d/claude-code] dropping session fork: %s",
-				task.NodeID, task.Iteration, reason)
-		} else {
-			opts = append(opts, claudesdk.WithResume(task.SessionID))
-			if task.ForkSession {
-				opts = append(opts, claudesdk.WithForkSession(true))
-			}
-		}
-	}
+	// Inject Anthropic-flavoured credentials and resolve session resume/fork
+	// (see helper). The returned fingerprint is recorded on the Result so a
+	// later resume can detect a credential change.
+	opts, currentFingerprint := b.setupCredsAndSession(ctx, task, opts)
 
 	// Structured output handling. claude CLI >= 2.1 accepts --json-schema
 	// (WithOutputFormat) TOGETHER with --allowedTools in a single pass: the
@@ -410,159 +396,24 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 		}
 	}))
 
-	// Native ask_user interception. When the workflow enables interaction, we
-	// register iterion itself as an MCP server exposing the ask_user tool, and
-	// install a PreToolUse hook that captures the question and short-circuits
-	// the session as soon as the LLM calls it. This mirrors the claw backend's
-	// in-process ask_user path. The system prompt's [INTERACTION PROTOCOL]
-	// suffix is preserved so the existing JSON-output fallback still works if
-	// the LLM bypasses the native tool.
+	// Native ask_user interception (see wireAskUserHook). streamCtx is the
+	// session context; cancelStream short-circuits the stream when the LLM
+	// calls ask_user, and pendingQuestion carries the captured question to
+	// the post-session escalation check below. The system prompt's
+	// [INTERACTION PROTOCOL] suffix is preserved so the JSON-output fallback
+	// still works (and is the only path when sandboxed).
 	streamCtx, cancelStream := context.WithCancel(ctx)
 	defer cancelStream()
 	var pendingQuestion atomic.Value // string
+	opts = b.wireAskUserHook(task, opts, &extraAllowedTools, &pendingQuestion, cancelStream)
 
-	// Native ask_user is unsupported when the run is sandboxed. The MCP
-	// stdio server would point at the iterion binary's host path
-	// (os.Executable) which doesn't exist inside the container, and the
-	// claudesdk writes the resolved --mcp-config JSON to the host's /tmp
-	// — also invisible to `docker exec`. claude rejects the missing
-	// config file and exits before producing a result message. The
-	// system prompt's [INTERACTION PROTOCOL] suffix already carries a
-	// JSON-output fallback, so the LLM can still surface questions
-	// without the native tool. This mirrors the claw backend limitation
-	// announced via EventSandboxClawRoutedViaRunner.
-	if task.InteractionEnabled && task.Sandbox == nil {
-		if selfPath := proc.LocateIterionBinary(); selfPath != "" {
-			opts = append(opts, claudesdk.WithMCPServer(askUserMCPServerName, &claudesdk.MCPStdioServer{
-				Command: selfPath,
-				Args:    []string{askUserMCPSubcommand},
-			}))
-			// Only extend the allowlist when the workflow already restricts tools.
-			// An empty AllowedTools means "no restriction", and the MCP tool will
-			// be discoverable without explicit listing.
-			if len(task.AllowedTools) > 0 {
-				extraAllowedTools = append(extraAllowedTools, askUserMCPToolName)
-			}
-			matcher := "^" + askUserMCPToolName + "$"
-			noContinue := false
-			opts = append(opts, claudesdk.WithHook(claudesdk.HookPreToolUse, claudesdk.HookMatcher{
-				Matcher: &matcher,
-				Handler: func(_ context.Context, in claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
-					if q, ok := in.ToolInput["question"].(string); ok && q != "" {
-						pendingQuestion.Store(q)
-						cancelStream()
-					}
-					return claudesdk.HookOutput{
-						Decision:      "deny",
-						Continue:      &noContinue,
-						SystemMessage: "ask_user has been escalated to the iterion runtime; stop generating.",
-					}, nil
-				},
-			}))
-		} else {
-			b.Logger.Warn("[%s#%d/claude-code] could not resolve iterion CLI binary path; native ask_user MCP server disabled (falling back to JSON _needs_interaction protocol)", task.NodeID, task.Iteration)
-		}
-	}
-
-	// Secret materialisation (Layer 1, structural): a PreToolUse hook
-	// swaps __ITERION_SECRET_<name>__ placeholders for their real values
-	// in agent-emitted tool input, immediately before the CLI runs the
-	// tool. The placeholder is all the model ever emits/sees; the real
-	// value is spliced in here and never enters the prompt, the event
-	// stream, or the run store. Matches all tools (Matcher nil) but is a
-	// no-op for any input that carries no placeholder.
-	if materialize := task.MaterializeSecrets; materialize != nil {
-		opts = append(opts, claudesdk.WithHook(claudesdk.HookPreToolUse, claudesdk.HookMatcher{
-			Handler: func(_ context.Context, in claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
-				if len(in.ToolInput) == 0 {
-					return claudesdk.HookOutput{}, nil
-				}
-				raw, err := json.Marshal(in.ToolInput)
-				if err != nil {
-					return claudesdk.HookOutput{}, nil
-				}
-				swapped := materialize(string(raw))
-				if swapped == string(raw) {
-					return claudesdk.HookOutput{}, nil // no placeholder present
-				}
-				var updated map[string]any
-				if err := json.Unmarshal([]byte(swapped), &updated); err != nil {
-					return claudesdk.HookOutput{}, nil
-				}
-				return claudesdk.HookOutput{Decision: "allow", UpdatedInput: updated}, nil
-			},
-		}))
-	}
-
-	// rtk command-output compression. When enabled for this node and the rtk
-	// binary is present, install a PreToolUse hook on the Bash tool that
-	// rewrites commands to their `rtk <cmd>` equivalent (e.g. "git status" →
-	// "rtk git status"), saving 60–90% of the output tokens. The decision is
-	// delegated to rtk's own `rtk rewrite` (single source of truth) via
-	// rtk.Rewrite. iterion uses rtk purely as a compressor — never a
-	// permission gate — so it always auto-allows the rewritten command. The
-	// rewrite runs host-side; the (sandboxed) CLI runs the rewritten command
-	// in-container against the bind-mounted rtk binary.
-	if rtkMode := rtk.ParseMode(task.RTKMode); rtkMode.Enabled() && rtk.Available() {
-		bashMatcher := "^Bash$"
-		opts = append(opts, claudesdk.WithHook(claudesdk.HookPreToolUse, claudesdk.HookMatcher{
-			Matcher: &bashMatcher,
-			Handler: func(hookCtx context.Context, in claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
-				updated, changed := rtk.RewriteCommandField(hookCtx, rtkMode, in.ToolInput)
-				if !changed {
-					return claudesdk.HookOutput{}, nil
-				}
-				return claudesdk.HookOutput{
-					Decision:       "allow",
-					DecisionReason: "RTK auto-rewrite",
-					UpdatedInput:   updated,
-				}, nil
-			},
-		}))
-	}
-
-	// Board MCP wiring. When the node was granted any board.* capability,
-	// register the internal __mcp-board server so the bot can mutate the
-	// kanban from inside its reasoning loop. Same sandbox limitation as
-	// ask_user — Phase 2 (HTTP transport) addresses the sandboxed path.
-	if HasBoardCapability(task.Capabilities) && task.Sandbox == nil {
-		if selfPath := proc.LocateIterionBinary(); selfPath != "" {
-			env := map[string]string{
-				"ITERION_BOARD_CAPS": strings.Join(task.Capabilities, ","),
-			}
-			if task.StoreDir != "" {
-				env["ITERION_STORE_DIR"] = task.StoreDir
-			}
-			opts = append(opts, claudesdk.WithMCPServer(boardMCPServerName, &claudesdk.MCPStdioServer{
-				Command: selfPath,
-				Args:    []string{boardMCPSubcommand},
-				Env:     env,
-			}))
-			if len(task.AllowedTools) > 0 {
-				extraAllowedTools = append(extraAllowedTools, BoardToolsFor(task.Capabilities)...)
-			}
-		} else {
-			b.Logger.Warn("[%s#%d/claude-code] could not resolve iterion CLI binary path; board MCP server disabled", task.NodeID, task.Iteration)
-		}
-	} else if HasBoardCapability(task.Capabilities) && task.Sandbox != nil {
-		if task.BoardHTTPEndpoint != "" && task.BoardRunToken != "" {
-			opts = append(opts, claudesdk.WithMCPServer(boardMCPServerName, &claudesdk.MCPHTTPServer{
-				URL: task.BoardHTTPEndpoint,
-				Headers: map[string]string{
-					"X-Iterion-Run": task.BoardRunToken,
-				},
-				// Force the board server past claude-code's tool-search
-				// deferral so board.* tools surface without a ToolSearch
-				// hit, and fail loudly at startup if unreachable (C082).
-				AlwaysLoad: true,
-			}))
-			if len(task.AllowedTools) > 0 {
-				extraAllowedTools = append(extraAllowedTools, BoardToolsFor(task.Capabilities)...)
-			}
-		} else {
-			b.Logger.Warn("[%s#%d/claude-code] board capabilities granted but workflow is sandboxed and BoardHTTPEndpoint/BoardRunToken not configured; board MCP disabled for this node", task.NodeID, task.Iteration)
-		}
-	}
+	// Secret materialisation, rtk command compression, and board MCP wiring —
+	// each a self-contained set of opts hooks/servers (see helpers). Board
+	// and ask_user extend extraAllowedTools; the single registration below
+	// emits one WithAllowedTools call.
+	opts = installMaterializeSecretsHook(task, opts)
+	opts = installRTKHook(task, opts)
+	opts = b.wireBoardMCP(task, opts, &extraAllowedTools)
 
 	// Watch capabilities (watch.subscribe / watch.unsubscribe) are wired for
 	// the claw backend only so far — the claude_code stdio (__mcp-watch) and
@@ -586,56 +437,10 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 		opts = append(opts, claudesdk.WithAllowedTools(combined...))
 	}
 
-	// Operator-chatbox mid-session inbox delivery (parity with the claw
-	// backend's per-iteration drain). PostToolUse fires after every tool
-	// call; Stop fires when the LLM tries to end the turn. Both consult
-	// the same drain closure and surface queued operator messages so the
-	// LLM sees the operator's input on its next turn without having to
-	// wait for the run to finish or pause at a human boundary.
-	if task.InboxDrain != nil {
-		drainAndFormat := func() string {
-			texts := task.InboxDrain()
-			if len(texts) == 0 {
-				return ""
-			}
-			var sb strings.Builder
-			sb.WriteString("Operator queued message")
-			if len(texts) > 1 {
-				sb.WriteString("s")
-			}
-			sb.WriteString(":\n\n")
-			for i, t := range texts {
-				if i > 0 {
-					sb.WriteString("\n---\n")
-				}
-				sb.WriteString(t)
-			}
-			return sb.String()
-		}
-		opts = append(opts, claudesdk.WithHook(claudesdk.HookPostToolUse, claudesdk.HookMatcher{
-			Handler: func(_ context.Context, _ claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
-				msg := drainAndFormat()
-				if msg == "" {
-					return claudesdk.HookOutput{}, nil
-				}
-				b.Logger.Info("[%s#%d/claude-code] 📥 delivered queued operator message via PostToolUse", task.NodeID, task.Iteration)
-				return claudesdk.HookOutput{AdditionalContext: msg, SystemMessage: msg}, nil
-			},
-		}))
-		opts = append(opts, claudesdk.WithHook(claudesdk.HookStop, claudesdk.HookMatcher{
-			Handler: func(_ context.Context, _ claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
-				msg := drainAndFormat()
-				if msg == "" {
-					return claudesdk.HookOutput{}, nil
-				}
-				b.Logger.Info("[%s#%d/claude-code] 📥 delivered queued operator message via Stop (blocking stop)", task.NodeID, task.Iteration)
-				return claudesdk.HookOutput{BlockStop: true, Reason: msg, SystemMessage: msg}, nil
-			},
-		}))
-	}
-
+	// Operator-chatbox mid-session inbox delivery (see helper) and
 	// Edit-miss resilience (PostToolUse) — breaks the Edit/MultiEdit
 	// blind-retry wedge; see installEditMissResilience for the rationale.
+	opts = b.installInboxDrainHooks(task, opts)
 	opts = b.installEditMissResilience(opts, task)
 
 	startTime := time.Now()
@@ -804,36 +609,285 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 	result.RawOutputLen = rawLen
 	result.ParseFallback = fallback
 
-	// Safety net: if we have a schema but got empty/nil output or only a
-	// fallback text wrapper, attempt a formatting pass via session resume.
-	// This catches cases where the agent did real work (tools, code changes)
-	// but the SDK didn't capture structured output — e.g., backend agents
-	// where tools are implicit.
+	// Safety net: schema declared but Pass 1 gave empty/fallback output —
+	// try one recovery formatting pass via session resume (see helper).
 	if (len(output) == 0 || fallback) && len(task.OutputSchema) > 0 && rm.SessionID != "" {
-		b.Logger.Debug("claude-code: empty output with schema — attempting recovery formatting pass (session=%s)", rm.SessionID)
-		fmtRM, fmtErr := b.formatOutput(ctx, task, rm.SessionID)
-		if fmtErr == nil {
-			if fmtRM.Usage != nil {
-				totalIn += fmtRM.Usage.InputTokens
-				totalOut += fmtRM.Usage.OutputTokens
-				result.Tokens = totalIn + totalOut
-			}
-			result.FormattingPassUsed = true
-			fmtOutput, fmtRawLen, fmtFallback := parseSDKOutput(fmtRM.Result, fmtRM.StructuredOutput, task.OutputSchema)
-			if len(fmtOutput) > 0 {
-				result.Output = fmtOutput
-				result.RawOutputLen = fmtRawLen
-				result.ParseFallback = fmtFallback
-			} else {
-				b.Logger.Warn("claude-code: recovery formatting pass also produced empty output")
-			}
-		} else {
-			b.Logger.Warn("claude-code: recovery formatting pass failed: %v", fmtErr)
-		}
+		b.runRecoveryFormatterPass(ctx, task, rm.SessionID, &result, &totalIn, &totalOut)
 	}
 
 	cost.Annotate(result.Output, task.Model, totalIn, totalOut)
 	return result, nil
+}
+
+// setupCredsAndSession injects Anthropic-flavoured credentials into the CLI
+// subprocess (single helper so Pass 1 and Pass 2 stay symmetric) and, when
+// the task carries a SessionID, decides whether to resume/fork that session
+// or drop it on a provider-fingerprint mismatch. Returns the extended opts
+// and the current provider fingerprint.
+func (b *ClaudeCodeBackend) setupCredsAndSession(ctx context.Context, task Task, opts []claudesdk.Option) ([]claudesdk.Option, string) {
+	credEnv := anthropicCredEnvForCLI(ctx, task.ProviderHint)
+	opts = append(opts, credEnvToOpts(credEnv)...)
+	currentFingerprint := providerFingerprint(credEnv)
+
+	if task.SessionID != "" {
+		drop, reason := shouldDropSessionFork(task, currentFingerprint)
+		if drop {
+			b.Logger.Warn("[%s#%d/claude-code] dropping session fork: %s",
+				task.NodeID, task.Iteration, reason)
+		} else {
+			opts = append(opts, claudesdk.WithResume(task.SessionID))
+			if task.ForkSession {
+				opts = append(opts, claudesdk.WithForkSession(true))
+			}
+		}
+	}
+	return opts, currentFingerprint
+}
+
+// wireAskUserHook registers iterion's native ask_user MCP server and a
+// PreToolUse hook that captures the question and cancels the stream the
+// moment the LLM calls ask_user (mirrors the claw backend's in-process
+// path). Disabled when sandboxed: the stdio MCP server's host binary path
+// (os.Executable) and the host /tmp --mcp-config are both invisible inside
+// the container, so claude would reject the missing config and exit before
+// producing a result — the [INTERACTION PROTOCOL] JSON fallback covers that
+// case. Stores the captured question into pendingQuestion and extends extras
+// with the ask_user tool name only when the node already restricts its
+// toolset (an empty AllowedTools means "no restriction").
+func (b *ClaudeCodeBackend) wireAskUserHook(task Task, opts []claudesdk.Option, extras *[]string, pendingQuestion *atomic.Value, cancelStream context.CancelFunc) []claudesdk.Option {
+	if !task.InteractionEnabled || task.Sandbox != nil {
+		return opts
+	}
+	selfPath := proc.LocateIterionBinary()
+	if selfPath == "" {
+		b.Logger.Warn("[%s#%d/claude-code] could not resolve iterion CLI binary path; native ask_user MCP server disabled (falling back to JSON _needs_interaction protocol)", task.NodeID, task.Iteration)
+		return opts
+	}
+	opts = append(opts, claudesdk.WithMCPServer(askUserMCPServerName, &claudesdk.MCPStdioServer{
+		Command: selfPath,
+		Args:    []string{askUserMCPSubcommand},
+	}))
+	if len(task.AllowedTools) > 0 {
+		*extras = append(*extras, askUserMCPToolName)
+	}
+	matcher := "^" + askUserMCPToolName + "$"
+	noContinue := false
+	opts = append(opts, claudesdk.WithHook(claudesdk.HookPreToolUse, claudesdk.HookMatcher{
+		Matcher: &matcher,
+		Handler: func(_ context.Context, in claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
+			if q, ok := in.ToolInput["question"].(string); ok && q != "" {
+				pendingQuestion.Store(q)
+				cancelStream()
+			}
+			return claudesdk.HookOutput{
+				Decision:      "deny",
+				Continue:      &noContinue,
+				SystemMessage: "ask_user has been escalated to the iterion runtime; stop generating.",
+			}, nil
+		},
+	}))
+	return opts
+}
+
+// installMaterializeSecretsHook adds a PreToolUse hook that swaps
+// __ITERION_SECRET_<name>__ placeholders for their real values in
+// agent-emitted tool input, immediately before the CLI runs the tool
+// (Layer 1, structural). The placeholder is all the model ever emits/sees;
+// the real value is spliced in here and never enters the prompt, the event
+// stream, or the run store. Matches all tools (Matcher nil); a no-op for
+// input that carries no placeholder.
+func installMaterializeSecretsHook(task Task, opts []claudesdk.Option) []claudesdk.Option {
+	materialize := task.MaterializeSecrets
+	if materialize == nil {
+		return opts
+	}
+	return append(opts, claudesdk.WithHook(claudesdk.HookPreToolUse, claudesdk.HookMatcher{
+		Handler: func(_ context.Context, in claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
+			if len(in.ToolInput) == 0 {
+				return claudesdk.HookOutput{}, nil
+			}
+			raw, err := json.Marshal(in.ToolInput)
+			if err != nil {
+				return claudesdk.HookOutput{}, nil
+			}
+			swapped := materialize(string(raw))
+			if swapped == string(raw) {
+				return claudesdk.HookOutput{}, nil // no placeholder present
+			}
+			var updated map[string]any
+			if err := json.Unmarshal([]byte(swapped), &updated); err != nil {
+				return claudesdk.HookOutput{}, nil
+			}
+			return claudesdk.HookOutput{Decision: "allow", UpdatedInput: updated}, nil
+		},
+	}))
+}
+
+// installRTKHook adds a PreToolUse hook on the Bash tool that rewrites
+// commands to their `rtk <cmd>` equivalent (e.g. "git status" → "rtk git
+// status"), saving 60–90% of output tokens, when rtk compression is enabled
+// for this node and the rtk binary is present. The rewrite decision is
+// delegated to rtk's own `rtk rewrite` (single source of truth); iterion
+// uses rtk purely as a compressor — never a permission gate — so it always
+// auto-allows the rewritten command. The rewrite runs host-side; the
+// (sandboxed) CLI runs the rewritten command in-container against the
+// bind-mounted rtk binary.
+func installRTKHook(task Task, opts []claudesdk.Option) []claudesdk.Option {
+	rtkMode := rtk.ParseMode(task.RTKMode)
+	if !rtkMode.Enabled() || !rtk.Available() {
+		return opts
+	}
+	bashMatcher := "^Bash$"
+	return append(opts, claudesdk.WithHook(claudesdk.HookPreToolUse, claudesdk.HookMatcher{
+		Matcher: &bashMatcher,
+		Handler: func(hookCtx context.Context, in claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
+			updated, changed := rtk.RewriteCommandField(hookCtx, rtkMode, in.ToolInput)
+			if !changed {
+				return claudesdk.HookOutput{}, nil
+			}
+			return claudesdk.HookOutput{
+				Decision:       "allow",
+				DecisionReason: "RTK auto-rewrite",
+				UpdatedInput:   updated,
+			}, nil
+		},
+	}))
+}
+
+// wireBoardMCP registers the internal __mcp-board MCP server when the node
+// holds any board.* capability, so the bot can mutate the kanban from inside
+// its reasoning loop. Non-sandboxed runs use the stdio transport (iterion
+// binary subcommand); sandboxed runs use the HTTP transport when the runtime
+// configured BoardHTTPEndpoint+BoardRunToken (else the capability is disabled
+// with a warning). Extends extras with the granted board tool names when the
+// node already restricts its toolset.
+func (b *ClaudeCodeBackend) wireBoardMCP(task Task, opts []claudesdk.Option, extras *[]string) []claudesdk.Option {
+	if !HasBoardCapability(task.Capabilities) {
+		return opts
+	}
+	if task.Sandbox == nil {
+		selfPath := proc.LocateIterionBinary()
+		if selfPath == "" {
+			b.Logger.Warn("[%s#%d/claude-code] could not resolve iterion CLI binary path; board MCP server disabled", task.NodeID, task.Iteration)
+			return opts
+		}
+		env := map[string]string{
+			"ITERION_BOARD_CAPS": strings.Join(task.Capabilities, ","),
+		}
+		if task.StoreDir != "" {
+			env["ITERION_STORE_DIR"] = task.StoreDir
+		}
+		opts = append(opts, claudesdk.WithMCPServer(boardMCPServerName, &claudesdk.MCPStdioServer{
+			Command: selfPath,
+			Args:    []string{boardMCPSubcommand},
+			Env:     env,
+		}))
+		if len(task.AllowedTools) > 0 {
+			*extras = append(*extras, BoardToolsFor(task.Capabilities)...)
+		}
+		return opts
+	}
+	// Sandboxed: HTTP transport (Phase 2 of board's stdio-then-HTTP rollout).
+	if task.BoardHTTPEndpoint != "" && task.BoardRunToken != "" {
+		opts = append(opts, claudesdk.WithMCPServer(boardMCPServerName, &claudesdk.MCPHTTPServer{
+			URL: task.BoardHTTPEndpoint,
+			Headers: map[string]string{
+				"X-Iterion-Run": task.BoardRunToken,
+			},
+			// Force the board server past claude-code's tool-search deferral
+			// so board.* tools surface without a ToolSearch hit, and fail
+			// loudly at startup if unreachable (C082).
+			AlwaysLoad: true,
+		}))
+		if len(task.AllowedTools) > 0 {
+			*extras = append(*extras, BoardToolsFor(task.Capabilities)...)
+		}
+		return opts
+	}
+	b.Logger.Warn("[%s#%d/claude-code] board capabilities granted but workflow is sandboxed and BoardHTTPEndpoint/BoardRunToken not configured; board MCP disabled for this node", task.NodeID, task.Iteration)
+	return opts
+}
+
+// installInboxDrainHooks delivers operator-chatbox messages mid-session
+// (parity with the claw backend's per-iteration drain). PostToolUse fires
+// after every tool call and Stop fires when the LLM tries to end the turn;
+// both consult the same drain closure and surface queued operator messages
+// so the LLM sees operator input on its next turn without waiting for the
+// run to finish or pause at a human boundary.
+func (b *ClaudeCodeBackend) installInboxDrainHooks(task Task, opts []claudesdk.Option) []claudesdk.Option {
+	if task.InboxDrain == nil {
+		return opts
+	}
+	drainAndFormat := func() string {
+		texts := task.InboxDrain()
+		if len(texts) == 0 {
+			return ""
+		}
+		var sb strings.Builder
+		sb.WriteString("Operator queued message")
+		if len(texts) > 1 {
+			sb.WriteString("s")
+		}
+		sb.WriteString(":\n\n")
+		for i, t := range texts {
+			if i > 0 {
+				sb.WriteString("\n---\n")
+			}
+			sb.WriteString(t)
+		}
+		return sb.String()
+	}
+	opts = append(opts, claudesdk.WithHook(claudesdk.HookPostToolUse, claudesdk.HookMatcher{
+		Handler: func(_ context.Context, _ claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
+			msg := drainAndFormat()
+			if msg == "" {
+				return claudesdk.HookOutput{}, nil
+			}
+			b.Logger.Info("[%s#%d/claude-code] 📥 delivered queued operator message via PostToolUse", task.NodeID, task.Iteration)
+			return claudesdk.HookOutput{AdditionalContext: msg, SystemMessage: msg}, nil
+		},
+	}))
+	opts = append(opts, claudesdk.WithHook(claudesdk.HookStop, claudesdk.HookMatcher{
+		Handler: func(_ context.Context, _ claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
+			msg := drainAndFormat()
+			if msg == "" {
+				return claudesdk.HookOutput{}, nil
+			}
+			b.Logger.Info("[%s#%d/claude-code] 📥 delivered queued operator message via Stop (blocking stop)", task.NodeID, task.Iteration)
+			return claudesdk.HookOutput{BlockStop: true, Reason: msg, SystemMessage: msg}, nil
+		},
+	}))
+	return opts
+}
+
+// runRecoveryFormatterPass is the single-pass safety net: when a schema is
+// declared but Pass 1 produced empty/nil output or only a fallback text
+// wrapper, resume the session for one formatting pass to extract structured
+// output. Catches agents that did real work (tools, code changes) but whose
+// structured output the SDK didn't capture (e.g. backends where tools are
+// implicit). Mutates result and the running token totals in place; failures
+// are logged and left non-fatal (the caller keeps Pass 1's output).
+func (b *ClaudeCodeBackend) runRecoveryFormatterPass(ctx context.Context, task Task, sessionID string, result *Result, totalIn, totalOut *int) {
+	b.Logger.Debug("claude-code: empty output with schema — attempting recovery formatting pass (session=%s)", sessionID)
+	fmtRM, fmtErr := b.formatOutput(ctx, task, sessionID)
+	if fmtErr != nil {
+		b.Logger.Warn("claude-code: recovery formatting pass failed: %v", fmtErr)
+		return
+	}
+	if fmtRM.Usage != nil {
+		*totalIn += fmtRM.Usage.InputTokens
+		*totalOut += fmtRM.Usage.OutputTokens
+		result.Tokens = *totalIn + *totalOut
+	}
+	result.FormattingPassUsed = true
+	fmtOutput, fmtRawLen, fmtFallback := parseSDKOutput(fmtRM.Result, fmtRM.StructuredOutput, task.OutputSchema)
+	if len(fmtOutput) > 0 {
+		result.Output = fmtOutput
+		result.RawOutputLen = fmtRawLen
+		result.ParseFallback = fmtFallback
+	} else {
+		b.Logger.Warn("claude-code: recovery formatting pass also produced empty output")
+	}
 }
 
 // formatOutput performs the second pass of two-pass execution: resumes the
