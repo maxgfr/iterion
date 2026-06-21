@@ -1085,57 +1085,86 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 	// IR regression or a programmatic schema-map mutation.
 	if f.outputSchema != "" {
 		if schema, ok := e.schemas[f.outputSchema]; ok {
-			if err := ValidateOutput(result.Output, schema); err != nil {
-				// If parsing fell back to text wrapper, the backend likely
-				// returned non-JSON output (transient SDK issue). Retry once
-				// before giving up.
-				if result.ParseFallback {
-					e.logger.Warn("[%s#%d/%s] structured output validation failed with parse fallback, retrying backend: %v", f.id, task.Iteration, backendName, err)
-					// Fire OnDelegateRetry so observers (Prometheus exporter,
-					// event sink) see the retry attempt — previously the
-					// schema-validation retry was invisible because the
-					// outer retryDelegateLoop only knows about transient
-					// errors, not schema-shape failures.
-					if e.hooks.OnDelegateRetry != nil {
-						di := delegateInfoFromResult(backendName, result)
-						di.Error = err
-						di.Attempt = 1
-						e.hooks.OnDelegateRetry(f.id, di)
-					}
-					// Route the schema-fallback retry through retryDelegateLoop so
-					// it inherits the same transient-error backoff every other
-					// delegate call gets — a direct backend.Execute here skipped
-					// the retry budget and gave up on the first transient SDK hiccup.
-					retryResult, retryErr := e.retryDelegateLoop(ctx, f.id, backendName, func() (delegate.Result, error) {
-						return backend.Execute(ctx, task)
-					})
-					if retryErr == nil && !retryResult.ParseFallback {
-						// Accumulate token/duration/cost from the first
-						// attempt so per-node accounting reflects the full
-						// cost paid (dropping it understated the run's
-						// real usage and broke budget enforcement at the
-						// margins).
-						retryResult.Tokens += result.Tokens
-						retryResult.Duration += result.Duration
-						result = retryResult
-						// Re-attach metadata and re-validate.
-						stampDelegateOutputMeta(result.Output, result, backendName)
-						if retryValErr := ValidateOutput(result.Output, schema); retryValErr != nil {
-							return nil, fmt.Errorf("model: node %q: structured output invalid after retry: %w", f.id, retryValErr)
-						}
-						goto validated
-					}
-				}
-				return nil, fmt.Errorf("model: node %q: structured output invalid: %w", f.id, err)
+			validated, err := e.validateAndRetry(ctx, f, backendName, backend, &task, result, schema)
+			if err != nil {
+				return nil, err
 			}
+			result = validated
 		} else {
 			e.logger.Warn("[%s#%d/%s] node declares output schema %q but no schema with that name is registered — IR compiler should have rejected this; output passes through unvalidated",
 				f.id, task.Iteration, backendName, f.outputSchema)
 		}
 	}
-validated:
 
 	return result.Output, nil
+}
+
+// validateAndRetry validates result.Output against the node's schema. On
+// success, the input result is returned unchanged. On a validation
+// failure whose source was a parse-fallback (the backend returned
+// non-JSON the executor wrapped in a text field), one retry through
+// retryDelegateLoop is attempted — inheriting the standard transient-
+// backoff budget — and the retry result is re-validated. The OnDelegateRetry
+// observer hook fires for the schema-fallback retry (otherwise invisible
+// to outer observers, which only see transient-error retries), token /
+// duration are accumulated across the first attempt + retry so per-node
+// accounting reflects the full cost paid, and stampDelegateOutputMeta is
+// re-applied after the retry so observability keys remain consistent.
+// Any other validation failure (or a retry that still fails) returns a
+// wrapped error; the caller propagates it.
+func (e *ClawExecutor) validateAndRetry(
+	ctx context.Context,
+	f backendFields,
+	backendName string,
+	backend delegate.Backend,
+	task *delegate.Task,
+	result delegate.Result,
+	schema *ir.Schema,
+) (delegate.Result, error) {
+	err := ValidateOutput(result.Output, schema)
+	if err == nil {
+		return result, nil
+	}
+	// If parsing did NOT fall back to text wrapper, the backend produced
+	// well-formed JSON that simply doesn't match the schema — a retry
+	// won't change that. Give up.
+	if !result.ParseFallback {
+		return result, fmt.Errorf("model: node %q: structured output invalid: %w", f.id, err)
+	}
+	// Parse fallback path: the backend likely returned non-JSON output
+	// (transient SDK issue). Retry once before giving up.
+	e.logger.Warn("[%s#%d/%s] structured output validation failed with parse fallback, retrying backend: %v", f.id, task.Iteration, backendName, err)
+	// Fire OnDelegateRetry so observers (Prometheus exporter, event sink)
+	// see the retry attempt — previously the schema-validation retry was
+	// invisible because the outer retryDelegateLoop only knows about
+	// transient errors, not schema-shape failures.
+	if e.hooks.OnDelegateRetry != nil {
+		di := delegateInfoFromResult(backendName, result)
+		di.Error = err
+		di.Attempt = 1
+		e.hooks.OnDelegateRetry(f.id, di)
+	}
+	// Route the schema-fallback retry through retryDelegateLoop so it
+	// inherits the same transient-error backoff every other delegate call
+	// gets — a direct backend.Execute here skipped the retry budget and
+	// gave up on the first transient SDK hiccup.
+	retryResult, retryErr := e.retryDelegateLoop(ctx, f.id, backendName, func() (delegate.Result, error) {
+		return backend.Execute(ctx, *task)
+	})
+	if retryErr != nil || retryResult.ParseFallback {
+		return result, fmt.Errorf("model: node %q: structured output invalid: %w", f.id, err)
+	}
+	// Accumulate token/duration from the first attempt so per-node
+	// accounting reflects the full cost paid (dropping it understated
+	// the run's real usage and broke budget enforcement at the margins).
+	retryResult.Tokens += result.Tokens
+	retryResult.Duration += result.Duration
+	// Re-attach metadata and re-validate.
+	stampDelegateOutputMeta(retryResult.Output, retryResult, backendName)
+	if retryValErr := ValidateOutput(retryResult.Output, schema); retryValErr != nil {
+		return retryResult, fmt.Errorf("model: node %q: structured output invalid after retry: %w", f.id, retryValErr)
+	}
+	return retryResult, nil
 }
 
 // buildTask assembles the delegate.Task for an agent/judge LLM node from the
