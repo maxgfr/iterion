@@ -36,12 +36,8 @@ func loadEnv(cfg *Config) error {
 	if v, ok := lookup("ITERION_MONGO_DB"); ok {
 		cfg.Mongo.DB = v
 	}
-	if v, ok := lookup("ITERION_MONGO_EVENTS_TTL_DAYS"); ok {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_MONGO_EVENTS_TTL_DAYS: %w", err)
-		}
-		cfg.Mongo.EventsTTLDays = n
+	if err := lookupInt("ITERION_MONGO_EVENTS_TTL_DAYS", &cfg.Mongo.EventsTTLDays); err != nil {
+		return err
 	}
 
 	if v, ok := lookup("ITERION_S3_ENDPOINT"); ok {
@@ -59,52 +55,28 @@ func loadEnv(cfg *Config) error {
 	if v, ok := lookup("ITERION_S3_SECRET_ACCESS_KEY"); ok {
 		cfg.S3.SecretAccessKey = v
 	}
-	if v, ok := lookup("ITERION_S3_USE_PATH_STYLE"); ok {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_S3_USE_PATH_STYLE: %w", err)
-		}
-		cfg.S3.UsePathStyle = b
+	if err := lookupBool("ITERION_S3_USE_PATH_STYLE", &cfg.S3.UsePathStyle); err != nil {
+		return err
 	}
 
 	if v, ok := lookup("ITERION_RUNNER_WORKDIR"); ok {
 		cfg.Runner.WorkDir = v
 	}
-	if v, ok := lookup("ITERION_RUNNER_CONCURRENCY"); ok {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_RUNNER_CONCURRENCY: %w", err)
-		}
-		cfg.Runner.Concurrency = n
+	if err := lookupInt("ITERION_RUNNER_CONCURRENCY", &cfg.Runner.Concurrency); err != nil {
+		return err
 	}
-	if v, ok := lookup("ITERION_HEARTBEAT_INTERVAL"); ok {
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_HEARTBEAT_INTERVAL: %w", err)
-		}
-		cfg.Runner.Heartbeat = d
+	if err := lookupDuration("ITERION_HEARTBEAT_INTERVAL", &cfg.Runner.Heartbeat); err != nil {
+		return err
 	}
-	if v, ok := lookup("ITERION_LOCK_TTL"); ok {
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_LOCK_TTL: %w", err)
-		}
-		cfg.Runner.LockTTL = d
+	if err := lookupDuration("ITERION_LOCK_TTL", &cfg.Runner.LockTTL); err != nil {
+		return err
 	}
 
-	if v, ok := lookup("ITERION_HEALTHZ_PORT"); ok {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_HEALTHZ_PORT: %w", err)
-		}
-		cfg.Server.HealthzPort = n
+	if err := lookupInt("ITERION_HEALTHZ_PORT", &cfg.Server.HealthzPort); err != nil {
+		return err
 	}
-	if v, ok := lookup("ITERION_METRICS_PORT"); ok {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_METRICS_PORT: %w", err)
-		}
-		cfg.Metrics.Port = n
+	if err := lookupInt("ITERION_METRICS_PORT", &cfg.Metrics.Port); err != nil {
+		return err
 	}
 	if v, ok := lookup("ITERION_LOG_FORMAT"); ok {
 		cfg.Log.Format = LogFormat(strings.ToLower(v))
@@ -126,19 +98,11 @@ func loadEnv(cfg *Config) error {
 	if v, ok := lookup("ITERION_SECRETS_KEY"); ok {
 		cfg.Auth.SecretsKey = v
 	}
-	if v, ok := lookup("ITERION_ACCESS_TTL"); ok {
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_ACCESS_TTL: %w", err)
-		}
-		cfg.Auth.AccessTTL = d
+	if err := lookupDuration("ITERION_ACCESS_TTL", &cfg.Auth.AccessTTL); err != nil {
+		return err
 	}
-	if v, ok := lookup("ITERION_REFRESH_TTL"); ok {
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_REFRESH_TTL: %w", err)
-		}
-		cfg.Auth.RefreshTTL = d
+	if err := lookupDuration("ITERION_REFRESH_TTL", &cfg.Auth.RefreshTTL); err != nil {
+		return err
 	}
 	if v, ok := lookup("ITERION_BOOTSTRAP_ADMIN_EMAIL"); ok {
 		cfg.Auth.BootstrapAdminEmail = strings.ToLower(strings.TrimSpace(v))
@@ -155,20 +119,12 @@ func loadEnv(cfg *Config) error {
 	if v, ok := lookup("ITERION_COOKIE_DOMAIN"); ok {
 		cfg.Auth.CookieDomain = v
 	}
-	if v, ok := lookup("ITERION_COOKIE_SECURE"); ok {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_COOKIE_SECURE: %w", err)
-		}
-		cfg.Auth.CookieSecure = b
+	if err := lookupBool("ITERION_COOKIE_SECURE", &cfg.Auth.CookieSecure); err != nil {
+		return err
 	}
 
-	if v, ok := lookup("ITERION_OIDC_GOOGLE_ENABLED"); ok {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_OIDC_GOOGLE_ENABLED: %w", err)
-		}
-		cfg.Auth.OIDC.Google.Enabled = b
+	if err := lookupBool("ITERION_OIDC_GOOGLE_ENABLED", &cfg.Auth.OIDC.Google.Enabled); err != nil {
+		return err
 	}
 	if v, ok := lookup("ITERION_OIDC_GOOGLE_CLIENT_ID"); ok {
 		cfg.Auth.OIDC.Google.ClientID = v
@@ -177,12 +133,8 @@ func loadEnv(cfg *Config) error {
 		cfg.Auth.OIDC.Google.ClientSecret = v
 	}
 
-	if v, ok := lookup("ITERION_OIDC_GITHUB_ENABLED"); ok {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_OIDC_GITHUB_ENABLED: %w", err)
-		}
-		cfg.Auth.OIDC.GitHub.Enabled = b
+	if err := lookupBool("ITERION_OIDC_GITHUB_ENABLED", &cfg.Auth.OIDC.GitHub.Enabled); err != nil {
+		return err
 	}
 	if v, ok := lookup("ITERION_OIDC_GITHUB_CLIENT_ID"); ok {
 		cfg.Auth.OIDC.GitHub.ClientID = v
@@ -191,12 +143,8 @@ func loadEnv(cfg *Config) error {
 		cfg.Auth.OIDC.GitHub.ClientSecret = v
 	}
 
-	if v, ok := lookup("ITERION_OIDC_GENERIC_ENABLED"); ok {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_OIDC_GENERIC_ENABLED: %w", err)
-		}
-		cfg.Auth.OIDC.Generic.Enabled = b
+	if err := lookupBool("ITERION_OIDC_GENERIC_ENABLED", &cfg.Auth.OIDC.Generic.Enabled); err != nil {
+		return err
 	}
 	if v, ok := lookup("ITERION_OIDC_GENERIC_ISSUER_URL"); ok {
 		cfg.Auth.OIDC.Generic.IssuerURL = strings.TrimRight(v, "/")
@@ -224,21 +172,62 @@ func loadEnv(cfg *Config) error {
 	if v, ok := lookup("ITERION_ALERTS_WEBHOOK_URL"); ok {
 		cfg.Alerts.Webhook.URL = v
 	}
-	if v, ok := lookup("ITERION_ALERTS_DESKTOP_ENABLED"); ok {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_ALERTS_DESKTOP_ENABLED: %w", err)
-		}
-		cfg.Alerts.Desktop.Enabled = b
+	if err := lookupBool("ITERION_ALERTS_DESKTOP_ENABLED", &cfg.Alerts.Desktop.Enabled); err != nil {
+		return err
 	}
-	if v, ok := lookup("ITERION_ALERTS_STALL_TIMEOUT"); ok {
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			return fmt.Errorf("ITERION_ALERTS_STALL_TIMEOUT: %w", err)
-		}
-		cfg.Alerts.StallTimeout = d
+	if err := lookupDuration("ITERION_ALERTS_STALL_TIMEOUT", &cfg.Alerts.StallTimeout); err != nil {
+		return err
 	}
 
+	return nil
+}
+
+// lookupInt overlays the env var named by key onto *dst when set and
+// parses cleanly. An unset / empty env var is a no-op; a malformed one
+// returns an error wrapped with the key name (callers in loadEnv
+// propagate that as the function's error).
+func lookupInt(key string, dst *int) error {
+	v, ok := lookup(key)
+	if !ok {
+		return nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	*dst = n
+	return nil
+}
+
+// lookupDuration overlays the env var named by key onto *dst when set
+// and parses cleanly. Semantics mirror lookupInt; the parser is
+// time.ParseDuration.
+func lookupDuration(key string, dst *time.Duration) error {
+	v, ok := lookup(key)
+	if !ok {
+		return nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	*dst = d
+	return nil
+}
+
+// lookupBool overlays the env var named by key onto *dst when set and
+// parses cleanly. Semantics mirror lookupInt; the parser is
+// strconv.ParseBool (accepts 1/0/t/f/T/F/true/false/TRUE/FALSE/...).
+func lookupBool(key string, dst *bool) error {
+	v, ok := lookup(key)
+	if !ok {
+		return nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	*dst = b
 	return nil
 }
 
