@@ -1202,32 +1202,13 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 	coldTimeout := resolveStreamColdTimeout()
 	hotTimeout := resolveStreamHotTimeout()
 
-	// Forward messages from the SDK iterator into a channel so we can
-	// select on (msg, idle-timer, ctx.Done) and abort cleanly when
-	// the session falls silent. Using range-over-func directly would
-	// block the goroutine until ctx is cancelled, which the runtime
-	// only does at the workflow's max_duration (way too late).
-	type streamItem struct {
-		msg claudesdk.Message
-		err error
-	}
+	// Forward messages from the SDK iterator into a channel so we can select
+	// on (item, idle-timer, ctx.Done) and abort cleanly when the session
+	// falls silent — range-over-func directly would block until ctx is
+	// cancelled (only at max_duration, way too late). See forwardSessionStream.
 	streamCtx, cancelStream := context.WithCancel(ctx)
 	defer cancelStream()
-
-	items := make(chan streamItem, 1)
-	go func() {
-		defer close(items)
-		for msg, err := range sess.Stream(streamCtx) {
-			select {
-			case items <- streamItem{msg: msg, err: err}:
-			case <-streamCtx.Done():
-				return
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
+	items := forwardSessionStream(streamCtx, sess)
 
 	// receivedAny tracks whether the session has emitted at least one
 	// message. While false we apply the tighter cold timeout (hung
@@ -1271,20 +1252,7 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 		// the timer for this iteration. Any progress (assistant
 		// tokens, tool calls, tool results) flips us into hot mode
 		// and grants the longer budget on every subsequent wait.
-		if receivedAny {
-			currentTimeout = hotTimeout
-		} else {
-			currentTimeout = coldTimeout
-		}
-		if !idle.Stop() {
-			select {
-			case <-idle.C:
-			default:
-			}
-		}
-		if currentTimeout > 0 {
-			idle.Reset(currentTimeout)
-		}
+		currentTimeout = resetIdleTimer(idle, receivedAny, coldTimeout, hotTimeout)
 
 		select {
 		case it, ok := <-items:
@@ -1301,9 +1269,7 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 				// xhigh + tools, where claude-code seems to defer
 				// the final text to a separate AssistantMessage and
 				// the result event carries only stats.
-				if (result.Result == nil || *result.Result == "") && lastAssistantText != "" {
-					txt := lastAssistantText
-					result.Result = &txt
+				if backfillEmptyResult(result, lastAssistantText) {
 					b.Logger.Info("[%s#%d/claude-code] ↩️  backfilled empty Result with last assistant text at stream close", task.NodeID, task.Iteration)
 				} else if result.Result != nil {
 					b.Logger.Info("[%s#%d/claude-code] 🏁 stream close: Result already populated (%d chars)", task.NodeID, task.Iteration, len(*result.Result))
@@ -1320,111 +1286,18 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 			receivedAny = true
 			switch m := it.msg.(type) {
 			case *claudesdk.SystemMessage:
-				// `init` is the canonical session start: model + tool list +
-				// MCP server count are interesting for debugging at info
-				// level. Hook lifecycle subtypes (hook_started, hook_response,
-				// hook_progress) fire repeatedly during a session and would
-				// flood the log; route them to debug.
-				if m.Subtype == "init" {
-					b.Logger.Info("[%s#%d/claude-code] ⚙️  system/init session=%s model=%s tools=%d mcp=%d",
-						task.NodeID, task.Iteration, m.SessionID, m.Model, m.ToolCount(), m.MCPServerCount())
-					// Capture the effective model the CLI resolved to —
-					// after env vars (ANTHROPIC_MODEL, ANTHROPIC_BASE_URL)
-					// and settings.json have taken effect. Differs from
-					// the workflow-declared `model:` when a proxy (GLM,
-					// Kimi, …) or an Anthropic alias is in play.
-					if m.Model != "" {
-						meta.effectiveModel = m.Model
-					}
-				} else {
-					b.Logger.Debug("[%s#%d/claude-code] ⚙️  system/%s session=%s",
-						task.NodeID, task.Iteration, m.Subtype, m.SessionID)
-				}
+				b.handleSystemMessage(m, task, &meta)
 			case *claudesdk.AssistantMessage:
-				if m.Message != nil {
-					logAssistantContent(b.Logger, task.NodeID, task.Iteration, m.Message.Content)
-					emitToolHooks(task.Hooks, m.Message.Content, inFlightTools)
-					// Peak prompt size across turns ≈ how full the
-					// context window got at its busiest moment.
-					u := m.Message.Usage
-					load := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
-					if load > meta.peakContextLoad {
-						meta.peakContextLoad = load
-					}
-					// Extended-thinking metrics. The provider bills thinking
-					// inside output_tokens with no breakdown, so we re-encode
-					// the thinking text for an approximate count. Time is the
-					// best-effort gap since the previous stream item (see
-					// lastItemTime), attributed once per thinking-bearing turn.
-					var turnThinking string
-					for _, block := range m.Message.Content {
-						if tk, ok := block.(*claudesdk.ThinkingBlock); ok && tk.Thinking != "" {
-							turnThinking += tk.Thinking
-						}
-					}
-					if turnThinking != "" {
-						tokens := thinktokens.Count(turnThinking)
-						ms := int(time.Since(lastItemTime) / time.Millisecond)
-						meta.thinkingTokens += tokens
-						meta.thinkingMs += ms
-						b.Logger.Info("[%s#%d/claude-code] 🧠 thinking: ~%d tok, %dms", task.NodeID, task.Iteration, tokens, ms)
-					}
-					// Capture the latest non-empty text block — the
-					// final assistant message is what the LLM intended
-					// as its "answer" and is where it puts the JSON
-					// when the recipe asks for one. Overwriting on
-					// each AssistantMessage means we always end with
-					// the most recent text, mirroring how a human
-					// reads the conversation.
-					for _, block := range m.Message.Content {
-						if tb, ok := block.(*claudesdk.TextBlock); ok && tb.Text != "" {
-							lastAssistantText = tb.Text
-							// Rate-limit detection: Anthropic forfait
-							// surfaces quota exhaustion as a plain assistant
-							// text block ("You've hit your limit · resets …")
-							// followed by a normal result event with the
-							// limit text as Result. Without an early bail,
-							// the downstream parseSDKOutput / schema
-							// validation turns this into a misleading
-							// "missing required field" error. Fail fast
-							// with a typed error so the runtime can
-							// surface clear "switch provider" guidance.
-							if isRateLimitMessage(tb.Text) {
-								b.Logger.Warn("[%s#%d/claude-code] 🚦 rate-limit signal in assistant text — aborting: %s", task.NodeID, task.Iteration, truncate(tb.Text, 200))
-								cancelStream()
-								return result, meta, &ErrRateLimited{Provider: BackendClaudeCode, Detail: strings.TrimSpace(tb.Text)}
-							}
-						}
-					}
+				if err := b.handleAssistantMessage(m, task, inFlightTools, &meta, &lastAssistantText, lastItemTime, cancelStream); err != nil {
+					return result, meta, err
 				}
 			case *claudesdk.UserMessage:
-				b.Logger.Debug("[%s#%d/claude-code] 👤 user message echoed back", task.NodeID, task.Iteration)
-				if m.Message != nil {
-					emitToolHooks(task.Hooks, m.Message.Content, inFlightTools)
-					// Tool results echo back here as ToolResultBlocks. Track
-					// consecutive errors and abort a wedged tool-error loop
-					// before it burns the whole budget (see maxToolErrors).
-					for _, block := range m.Message.Content {
-						if tr, ok := block.(*claudesdk.ToolResultBlock); ok {
-							if tr.IsError {
-								consecutiveToolErrors++
-							} else {
-								consecutiveToolErrors = 0
-							}
-						}
-					}
-					if maxToolErrors > 0 && consecutiveToolErrors >= maxToolErrors {
-						cancelStream()
-						b.Logger.Warn("[%s#%d/claude-code] %d consecutive tool errors — aborting degenerate tool-error loop", task.NodeID, task.Iteration, consecutiveToolErrors)
-						return result, meta, fmt.Errorf("claude session aborted after %d consecutive tool errors — likely a degenerate tool-error loop (set ITERION_CLAUDE_CODE_MAX_TOOL_ERRORS to tune, 0 to disable)", consecutiveToolErrors)
-					}
+				if err := b.handleUserMessage(m, task, inFlightTools, &consecutiveToolErrors, maxToolErrors, cancelStream); err != nil {
+					return result, meta, err
 				}
 			case *claudesdk.ResultMessage:
 				result = m
-				if (result.Result == nil || *result.Result == "") && lastAssistantText != "" {
-					txt := lastAssistantText
-					result.Result = &txt
-				}
+				backfillEmptyResult(result, lastAssistantText)
 			default:
 				if it.msg != nil {
 					b.Logger.Debug("[%s#%d/claude-code] 📨 %T message", task.NodeID, task.Iteration, it.msg)
@@ -1452,6 +1325,177 @@ func (b *ClaudeCodeBackend) runSession(ctx context.Context, prompt string, task 
 			return result, meta, ctx.Err()
 		}
 	}
+}
+
+// claudeStreamItem pairs a streamed SDK message with its iterator error so
+// the select loop in runSession can watch (item, idle-timer, ctx.Done)
+// together instead of blocking on range-over-func.
+type claudeStreamItem struct {
+	msg claudesdk.Message
+	err error
+}
+
+// forwardSessionStream pumps the SDK's range-over-func stream into a
+// buffered channel so runSession can select on it alongside the idle timer
+// and ctx. The goroutine exits on the first iterator error or when streamCtx
+// is cancelled; it closes the channel on the way out so a clean stream end
+// surfaces as a channel close.
+func forwardSessionStream(streamCtx context.Context, sess *claudesdk.Session) <-chan claudeStreamItem {
+	items := make(chan claudeStreamItem, 1)
+	go func() {
+		defer close(items)
+		for msg, err := range sess.Stream(streamCtx) {
+			select {
+			case items <- claudeStreamItem{msg: msg, err: err}:
+			case <-streamCtx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return items
+}
+
+// resetIdleTimer picks the phase-appropriate idle budget (cold until the
+// session emits its first message, hot thereafter) and re-arms idle for the
+// next wait, draining a stale fire if Stop races the timer. A non-positive
+// timeout disables the watchdog (idle is left stopped). Returns the chosen
+// timeout so the caller can report it on an idle abort.
+func resetIdleTimer(idle *time.Timer, receivedAny bool, cold, hot time.Duration) time.Duration {
+	currentTimeout := cold
+	if receivedAny {
+		currentTimeout = hot
+	}
+	if !idle.Stop() {
+		select {
+		case <-idle.C:
+		default:
+		}
+	}
+	if currentTimeout > 0 {
+		idle.Reset(currentTimeout)
+	}
+	return currentTimeout
+}
+
+// backfillEmptyResult copies the captured last assistant text into an empty
+// ResultMessage.Result. claude-code sometimes emits the final result event
+// with empty Result text even when the assistant produced a substantive
+// final message; this recovers it (load-bearing for sandboxed runs where the
+// Pass-2 formatter can't reach the in-container session). Returns true when a
+// backfill happened.
+func backfillEmptyResult(result *claudesdk.ResultMessage, lastAssistantText string) bool {
+	if result == nil {
+		return false
+	}
+	if (result.Result == nil || *result.Result == "") && lastAssistantText != "" {
+		txt := lastAssistantText
+		result.Result = &txt
+		return true
+	}
+	return false
+}
+
+// handleSystemMessage logs a streamed SystemMessage and, on the canonical
+// `init` event, captures the effective model the CLI resolved to (after env
+// vars and settings.json took effect — differs from the workflow-declared
+// model when a proxy or alias is in play). Hook-lifecycle subtypes are
+// noisy and routed to debug.
+func (b *ClaudeCodeBackend) handleSystemMessage(m *claudesdk.SystemMessage, task Task, meta *sessionMeta) {
+	if m.Subtype == "init" {
+		b.Logger.Info("[%s#%d/claude-code] ⚙️  system/init session=%s model=%s tools=%d mcp=%d",
+			task.NodeID, task.Iteration, m.SessionID, m.Model, m.ToolCount(), m.MCPServerCount())
+		if m.Model != "" {
+			meta.effectiveModel = m.Model
+		}
+	} else {
+		b.Logger.Debug("[%s#%d/claude-code] ⚙️  system/%s session=%s",
+			task.NodeID, task.Iteration, m.Subtype, m.SessionID)
+	}
+}
+
+// handleAssistantMessage processes a streamed AssistantMessage: logs its
+// content, fires tool hooks, tracks the peak context load, accumulates the
+// best-effort extended-thinking metrics (tokens re-encoded from the thinking
+// text; time the gap since lastItemTime), and captures the latest non-empty
+// text block as the candidate final answer. Returns a non-nil *ErrRateLimited
+// when the assistant text is a forfait quota-exhaustion message, so the
+// caller fails fast instead of letting schema validation mislabel it as a
+// missing field. Mutates meta and lastAssistantText in place.
+func (b *ClaudeCodeBackend) handleAssistantMessage(m *claudesdk.AssistantMessage, task Task, inFlightTools map[string]string, meta *sessionMeta, lastAssistantText *string, lastItemTime time.Time, cancelStream context.CancelFunc) error {
+	if m.Message == nil {
+		return nil
+	}
+	logAssistantContent(b.Logger, task.NodeID, task.Iteration, m.Message.Content)
+	emitToolHooks(task.Hooks, m.Message.Content, inFlightTools)
+	// Peak prompt size across turns ≈ how full the context window got.
+	u := m.Message.Usage
+	load := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+	if load > meta.peakContextLoad {
+		meta.peakContextLoad = load
+	}
+	// Extended-thinking metrics: the provider bills thinking inside
+	// output_tokens with no breakdown, so re-encode the thinking text for an
+	// approximate count; time is the gap since the previous stream item.
+	var turnThinking string
+	for _, block := range m.Message.Content {
+		if tk, ok := block.(*claudesdk.ThinkingBlock); ok && tk.Thinking != "" {
+			turnThinking += tk.Thinking
+		}
+	}
+	if turnThinking != "" {
+		tokens := thinktokens.Count(turnThinking)
+		ms := int(time.Since(lastItemTime) / time.Millisecond)
+		meta.thinkingTokens += tokens
+		meta.thinkingMs += ms
+		b.Logger.Info("[%s#%d/claude-code] 🧠 thinking: ~%d tok, %dms", task.NodeID, task.Iteration, tokens, ms)
+	}
+	// Capture the latest non-empty text block — the final assistant message
+	// is the model's intended answer (and where it puts the JSON).
+	for _, block := range m.Message.Content {
+		if tb, ok := block.(*claudesdk.TextBlock); ok && tb.Text != "" {
+			*lastAssistantText = tb.Text
+			// Rate-limit detection: Anthropic forfait surfaces quota
+			// exhaustion as a plain assistant text block; bail with a typed
+			// error so the runtime can surface "switch provider" guidance.
+			if isRateLimitMessage(tb.Text) {
+				b.Logger.Warn("[%s#%d/claude-code] 🚦 rate-limit signal in assistant text — aborting: %s", task.NodeID, task.Iteration, truncate(tb.Text, 200))
+				cancelStream()
+				return &ErrRateLimited{Provider: BackendClaudeCode, Detail: strings.TrimSpace(tb.Text)}
+			}
+		}
+	}
+	return nil
+}
+
+// handleUserMessage processes a streamed UserMessage (tool results echoed
+// back to the model). It fires tool hooks and runs the degenerate-tool-error
+// circuit breaker: count CONSECUTIVE tool-result errors, reset on any
+// success, and abort once the streak crosses maxToolErrors. Returns a non-nil
+// error on abort; mutates consecutiveToolErrors in place.
+func (b *ClaudeCodeBackend) handleUserMessage(m *claudesdk.UserMessage, task Task, inFlightTools map[string]string, consecutiveToolErrors *int, maxToolErrors int, cancelStream context.CancelFunc) error {
+	b.Logger.Debug("[%s#%d/claude-code] 👤 user message echoed back", task.NodeID, task.Iteration)
+	if m.Message == nil {
+		return nil
+	}
+	emitToolHooks(task.Hooks, m.Message.Content, inFlightTools)
+	for _, block := range m.Message.Content {
+		if tr, ok := block.(*claudesdk.ToolResultBlock); ok {
+			if tr.IsError {
+				*consecutiveToolErrors++
+			} else {
+				*consecutiveToolErrors = 0
+			}
+		}
+	}
+	if maxToolErrors > 0 && *consecutiveToolErrors >= maxToolErrors {
+		cancelStream()
+		b.Logger.Warn("[%s#%d/claude-code] %d consecutive tool errors — aborting degenerate tool-error loop", task.NodeID, task.Iteration, *consecutiveToolErrors)
+		return fmt.Errorf("claude session aborted after %d consecutive tool errors — likely a degenerate tool-error loop (set ITERION_CLAUDE_CODE_MAX_TOOL_ERRORS to tune, 0 to disable)", *consecutiveToolErrors)
+	}
+	return nil
 }
 
 // emitToolHooks walks the content blocks of an AssistantMessage or
