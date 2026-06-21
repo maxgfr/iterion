@@ -65,6 +65,315 @@ func logDeliveryErr(logger *iterlog.Logger, op, runID string, err error) {
 	logger.Warn("runner: %s for %s: %v", op, runID, err)
 }
 
+// ackTerminal performs delivery.Ack and surfaces the error via
+// logDeliveryErr. The triple `logDeliveryErr(logger, op, runID,
+// delivery.Ack())` recurs on every ack-and-return path in processOne;
+// this helper is the single point that pairs the action with its
+// breadcrumb.
+func ackTerminal(logger *iterlog.Logger, delivery *natsq.Delivery, op, runID string) {
+	logDeliveryErr(logger, op, runID, delivery.Ack())
+}
+
+// nakTerminal performs delivery.Nak and surfaces the error via
+// logDeliveryErr. Use for transient failures where JetStream
+// redelivery is the safety net (lock held, store transient, heartbeat
+// loss, generic engine failure).
+func nakTerminal(logger *iterlog.Logger, delivery *natsq.Delivery, op, runID string) {
+	logDeliveryErr(logger, op, runID, delivery.Nak())
+}
+
+// termTerminal performs delivery.Term and surfaces the error via
+// logDeliveryErr. Use for poisoned/forged messages whose redelivery
+// would loop forever (decode failure, run-not-found, tenant
+// mismatch, DLQ-parked).
+func termTerminal(logger *iterlog.Logger, delivery *natsq.Delivery, op, runID string) {
+	logDeliveryErr(logger, op, runID, delivery.Term())
+}
+
+// deliveryAction selects which JetStream state transition (Ack / Nak
+// / Term) a terminal outcome warrants.
+type deliveryAction int
+
+const (
+	actionAck deliveryAction = iota
+	actionNak
+	actionTerm
+)
+
+// logLevel mirrors the three log channels processOne uses for its
+// terminal messages so a returned outcome carries enough metadata for
+// the caller to log without the helper itself touching a logger.
+type logLevel int
+
+const (
+	logInfo logLevel = iota
+	logWarn
+	logError
+)
+
+// preconditionOutcome describes the result of the pre-execution
+// gauntlet (decode + pre-lock LoadRun + tenant validation). When
+// proceed is true the caller continues to lock + execute with the
+// loaded preRun; otherwise action + finalStatus + op tell the caller
+// which terminal transition to perform on the delivery.
+type preconditionOutcome struct {
+	proceed     bool
+	preRun      *store.Run
+	finalStatus string
+	op          string // for logDeliveryErr
+	action      deliveryAction
+	level       logLevel
+	logFmt      string
+	logArgs     []any
+}
+
+// execOutcome describes the result of classifying engine.Run's
+// error (or success). The caller takes action based on it. The
+// terminal-DLQ branch is intentionally NOT modelled here because it
+// has side effects (PublishDLQ + UpdateRunStatusIf); the caller
+// inspects the trigger conditions before invoking classifyExecResult.
+type execOutcome struct {
+	finalStatus string
+	op          string
+	action      deliveryAction
+	level       logLevel
+	logFmt      string
+	logArgs     []any
+}
+
+// resolveDeliveryPreconditions runs the pre-lock store gauntlet:
+// LoadRun (with its own short detached timeout context so a runner
+// shutdown can't terminate a live delivery) and the status switch
+// (which may mutate msg.Resume to convert a redelivered launch into
+// a resume). It performs no Ack/Nak/Term and installs no defer — the
+// caller acts on the returned outcome.
+//
+// When outcome.proceed is true the caller continues with outcome.preRun
+// (the loaded run document, guaranteed non-nil). Otherwise the caller
+// logs outcome.{level,logFmt,logArgs} and invokes the corresponding
+// {ack,nak,term}Terminal with outcome.{op, finalStatus} on the
+// delivery before returning.
+//
+// Tenant validation is intentionally OUT of this helper: the failed-
+// Term log message for a tenant mismatch is a security-shaped alarm
+// (different message + ERROR level) that processOne raises inline so
+// the helper stays focused on the routine status machinery.
+func (r *Runner) resolveDeliveryPreconditions(msg *queue.RunMessage) preconditionOutcome {
+	// Detach from runCtx: it descends from r.cancel(), so a Shutdown
+	// firing between SubscribeCancel and this LoadRun would yield
+	// context.Canceled and Term a live delivery. The detached ctx
+	// still carries tenant identity for the store filter.
+	loadCtx, loadCancel := context.WithTimeout(
+		store.WithIdentity(context.Background(), msg.TenantID, msg.OwnerID),
+		5*time.Second)
+	preRun, preErr := r.cfg.Store.LoadRun(loadCtx, msg.RunID)
+	loadCancel()
+
+	// Transient store errors (timeout) get Nak'd so the message
+	// redelivers to a healthier runner; only persistent NotFound /
+	// forged-message shapes warrant a Term.
+	if preErr != nil && (errors.Is(preErr, context.DeadlineExceeded) || errors.Is(preErr, context.Canceled)) {
+		return preconditionOutcome{
+			finalStatus: "store_load_transient",
+			op:          "nak-store-load-transient",
+			action:      actionNak,
+			level:       logWarn,
+			logFmt:      "runner: pre-lock LoadRun %s transient: %v — naking",
+			logArgs:     []any{msg.RunID, preErr},
+		}
+	}
+	// A message whose run document we can't load is unsafe to execute:
+	// either the publisher's SaveRun never landed (orphan publish), the
+	// run was deleted out from under us, or the message is forged /
+	// replayed against a runID that never belonged to this control plane.
+	// In every case, terming the delivery is the conservative call —
+	// re-delivery would just hit the same NotFound on the next runner.
+	if preErr != nil || preRun == nil {
+		return preconditionOutcome{
+			finalStatus: "store_load_failed",
+			op:          "term-store-load-failed",
+			action:      actionTerm,
+			level:       logError,
+			logFmt:      "runner: run %s not found in store (err=%v) — terming",
+			logArgs:     []any{msg.RunID, preErr},
+		}
+	}
+	// Redelivered launch messages can arrive after the first attempt
+	// already persisted resumable state (failed_resumable,
+	// paused_operator, or cancellation-with-checkpoint during shutdown).
+	// Re-running them through Engine.Run would be a poison loop because
+	// runResolveDoc refuses to restart non-queued statuses; convert the
+	// in-memory dispatch to Resume so JetStream redelivery actually uses
+	// the checkpoint it exists to protect. A pre-pickup user-cancelled run
+	// has no checkpoint and remains a stale delivery to ack/drop.
+	switch preRun.Status {
+	case store.RunStatusCancelled:
+		if preRun.Checkpoint == nil {
+			return preconditionOutcome{
+				finalStatus: "cancelled",
+				op:          "ack-already-cancelled",
+				action:      actionAck,
+				level:       logInfo,
+				logFmt:      "runner: run %s already cancelled — skipping",
+				logArgs:     []any{msg.RunID},
+			}
+		}
+		if msg.Resume == nil {
+			// We mutate msg.Resume here so the executor takes the
+			// resume path; caller still uses outcome.preRun unchanged.
+			msg.Resume = &queue.ResumeSpec{}
+			return preconditionOutcome{
+				proceed: true,
+				preRun:  preRun,
+				level:   logInfo,
+				logFmt:  "runner: run %s redelivered after cancellation checkpoint — resuming",
+				logArgs: []any{msg.RunID},
+			}
+		}
+	case store.RunStatusFailedResumable, store.RunStatusPausedOperator:
+		if msg.Resume == nil {
+			msg.Resume = &queue.ResumeSpec{}
+			return preconditionOutcome{
+				proceed: true,
+				preRun:  preRun,
+				level:   logInfo,
+				logFmt:  "runner: run %s redelivered in status %s — resuming",
+				logArgs: []any{msg.RunID, preRun.Status},
+			}
+		}
+	case store.RunStatusFinished, store.RunStatusFailed, store.RunStatusPausedWaitingHuman:
+		return preconditionOutcome{
+			finalStatus: string(preRun.Status),
+			op:          "ack-stale-status",
+			action:      actionAck,
+			level:       logInfo,
+			logFmt:      "runner: run %s already in status %s — dropping stale delivery",
+			logArgs:     []any{msg.RunID, preRun.Status},
+		}
+	}
+	return preconditionOutcome{proceed: true, preRun: preRun}
+}
+
+// classifyExecResult turns engine.Run's (success-or-error) outcome
+// into a terminal delivery decision. Pure: no I/O, no defer, no log
+// call — the caller logs outcome.{level,logFmt,logArgs} and invokes
+// the matching {ack,nak,term}Terminal.
+//
+// The DLQ branch (NumDelivered >= MaxDeliver) is NOT handled here
+// because it has side effects (PublishDLQ + UpdateRunStatusIf). The
+// caller checks that trigger inline BEFORE delegating the remaining
+// generic-error case to this helper.
+func classifyExecResult(execErr error, hbFailed bool, parentErr error, runID string) execOutcome {
+	if execErr == nil {
+		return execOutcome{
+			finalStatus: "finished",
+			op:          "ack-finished",
+			action:      actionAck,
+			level:       logInfo,
+			logFmt:      "runner: run %s completed",
+			logArgs:     []any{runID},
+		}
+	}
+	// Distinguish transient (resumable) vs terminal failures.
+	// runtime.ErrRunPaused / ErrRunCancelled are not "the
+	// delivery failed" — they're successful checkpoint writes
+	// and we ack accordingly.
+	if errors.Is(execErr, runtime.ErrRunPaused) {
+		return execOutcome{
+			finalStatus: "paused",
+			op:          "ack-paused",
+			action:      actionAck,
+			level:       logInfo,
+			logFmt:      "runner: run %s checkpointed (%v)",
+			logArgs:     []any{runID, execErr},
+		}
+	}
+	if errors.Is(execErr, runtime.ErrRunPausedOperator) {
+		return execOutcome{
+			finalStatus: "paused_operator",
+			op:          "ack-paused-operator",
+			action:      actionAck,
+			level:       logInfo,
+			logFmt:      "runner: run %s operator-paused (%v)",
+			logArgs:     []any{runID, execErr},
+		}
+	}
+	if errors.Is(execErr, runtime.ErrRunCancelled) {
+		// Heartbeat-induced cancel: the lease is gone, so a sibling
+		// runner is free to pick this up via JetStream redelivery.
+		// Nak (not Ack) so the message stays queued instead of
+		// being marked done and forcing manual user intervention.
+		if hbFailed {
+			return execOutcome{
+				finalStatus: "lock_held",
+				op:          "nak-heartbeat-lost",
+				action:      actionNak,
+				level:       logWarn,
+				logFmt:      "runner: run %s heartbeat lost — naking for sibling redelivery",
+				logArgs:     []any{runID},
+			}
+		}
+		if parentErr != nil {
+			return execOutcome{
+				finalStatus: "shutdown",
+				op:          "nak-shutdown-cancelled",
+				action:      actionNak,
+				level:       logWarn,
+				logFmt:      "runner: run %s interrupted by runner shutdown — naking for checkpoint resume",
+				logArgs:     []any{runID},
+			}
+		}
+		return execOutcome{
+			finalStatus: "cancelled",
+			op:          "ack-cancelled",
+			action:      actionAck,
+			level:       logInfo,
+			logFmt:      "runner: run %s checkpointed (%v)",
+			logArgs:     []any{runID, execErr},
+		}
+	}
+	// Generic error → caller checks DLQ trigger before falling back to
+	// the plain-nak outcome below.
+	return execOutcome{
+		finalStatus: "failed",
+		op:          "nak-exec-failed",
+		action:      actionNak,
+		level:       logError,
+		logFmt:      "runner: run %s execution failed: %v",
+		logArgs:     []any{runID, execErr},
+	}
+}
+
+// logAt routes a pre-formatted log triple (level, fmt, args) to the
+// matching Logger channel. Used by processOne to drain the log
+// metadata carried in preconditionOutcome / execOutcome.
+func logAt(logger *iterlog.Logger, level logLevel, format string, args ...any) {
+	if format == "" {
+		return
+	}
+	switch level {
+	case logInfo:
+		logger.Info(format, args...)
+	case logWarn:
+		logger.Warn(format, args...)
+	case logError:
+		logger.Error(format, args...)
+	}
+}
+
+// dispatchTerminal performs the JetStream state transition selected
+// by `action` and surfaces any error via logDeliveryErr.
+func dispatchTerminal(logger *iterlog.Logger, delivery *natsq.Delivery, action deliveryAction, op, runID string) {
+	switch action {
+	case actionAck:
+		ackTerminal(logger, delivery, op, runID)
+	case actionNak:
+		nakTerminal(logger, delivery, op, runID)
+	case actionTerm:
+		termTerminal(logger, delivery, op, runID)
+	}
+}
+
 // Config is the runner bootstrap.
 type Config struct {
 	NATS              *natsq.Conn
@@ -362,83 +671,25 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 	// Cooperative cancel check: if the server flipped the run to
 	// cancelled before we picked it up (T-32 cancel-queued path),
 	// ack the JetStream delivery without doing any work.
-	//
-	// Detach from runCtx: it descends from r.cancel(), so a Shutdown
-	// firing between SubscribeCancel and this LoadRun would yield
-	// context.Canceled and Term a live delivery. The detached ctx
-	// still carries tenant identity for the store filter.
-	loadCtx, loadCancel := context.WithTimeout(
-		store.WithIdentity(context.Background(), msg.TenantID, msg.OwnerID),
-		5*time.Second)
-	preRun, preErr := r.cfg.Store.LoadRun(loadCtx, msg.RunID)
-	loadCancel()
-	// Transient store errors (timeout) get Nak'd so the message
-	// redelivers to a healthier runner; only persistent NotFound /
-	// forged-message shapes warrant a Term.
-	if preErr != nil && (errors.Is(preErr, context.DeadlineExceeded) || errors.Is(preErr, context.Canceled)) {
-		logger.Warn("runner: pre-lock LoadRun %s transient: %v — naking", msg.RunID, preErr)
-		finalStatus = "store_load_transient"
-		if nakErr := delivery.Nak(); nakErr != nil {
-			logger.Warn("runner: nak for %s after store-load transient: %v", msg.RunID, nakErr)
-		}
+	pre := r.resolveDeliveryPreconditions(msg)
+	logAt(logger, pre.level, pre.logFmt, pre.logArgs...)
+	if !pre.proceed {
+		finalStatus = pre.finalStatus
+		dispatchTerminal(logger, delivery, pre.action, pre.op, msg.RunID)
 		return
 	}
-	// A message whose run document we can't load is unsafe to execute:
-	// either the publisher's SaveRun never landed (orphan publish), the
-	// run was deleted out from under us, or the message is forged /
-	// replayed against a runID that never belonged to this control plane.
-	// In every case, terming the delivery is the conservative call —
-	// re-delivery would just hit the same NotFound on the next runner.
-	if preErr != nil || preRun == nil {
-		logger.Error("runner: run %s not found in store (err=%v) — terming", msg.RunID, preErr)
-		finalStatus = "store_load_failed"
-		if termErr := delivery.Term(); termErr != nil {
-			logger.Warn("runner: term for %s after store-load failure: %v", msg.RunID, termErr)
-		}
-		return
-	}
-	// Redelivered launch messages can arrive after the first attempt
-	// already persisted resumable state (failed_resumable,
-	// paused_operator, or cancellation-with-checkpoint during shutdown).
-	// Re-running them through Engine.Run would be a poison loop because
-	// runResolveDoc refuses to restart non-queued statuses; convert the
-	// in-memory dispatch to Resume so JetStream redelivery actually uses
-	// the checkpoint it exists to protect. A pre-pickup user-cancelled run
-	// has no checkpoint and remains a stale delivery to ack/drop.
-	switch preRun.Status {
-	case store.RunStatusCancelled:
-		if preRun.Checkpoint == nil {
-			logger.Info("runner: run %s already cancelled — skipping", msg.RunID)
-			finalStatus = "cancelled"
-			logDeliveryErr(logger, "ack-already-cancelled", msg.RunID, delivery.Ack())
-			return
-		}
-		if msg.Resume == nil {
-			logger.Info("runner: run %s redelivered after cancellation checkpoint — resuming", msg.RunID)
-			msg.Resume = &queue.ResumeSpec{}
-		}
-	case store.RunStatusFailedResumable, store.RunStatusPausedOperator:
-		if msg.Resume == nil {
-			logger.Info("runner: run %s redelivered in status %s — resuming", msg.RunID, preRun.Status)
-			msg.Resume = &queue.ResumeSpec{}
-		}
-	case store.RunStatusFinished, store.RunStatusFailed, store.RunStatusPausedWaitingHuman:
-		logger.Info("runner: run %s already in status %s — dropping stale delivery", msg.RunID, preRun.Status)
-		finalStatus = string(preRun.Status)
-		logDeliveryErr(logger, "ack-stale-status", msg.RunID, delivery.Ack())
-		return
-	}
+
 	// Verify the message's tenant matches the persisted document.
 	// A mismatch implies either a corrupted publish (publisher
 	// stamped the wrong tenant) or a malicious / replayed message.
 	// Either way the run is unsafe to execute under either tenant's
-	// scope; term the delivery so it doesn't redeliver. The previous
-	// condition (preErr == nil && preRun != nil && …) silently passed
-	// through when preErr was non-nil — which let a forged message
-	// targeting a non-existent run skip the tenant check entirely.
-	// The early term above closes that path.
-	if preRun.TenantID != msg.TenantID {
-		logger.Error("runner: tenant mismatch for run %s (msg=%q stored=%q) — terming", msg.RunID, msg.TenantID, preRun.TenantID)
+	// scope; term the delivery so it doesn't redeliver. Kept inline
+	// (not folded into resolveDeliveryPreconditions) so the
+	// failed-Term log can carry a security-shaped ERROR-level alarm
+	// asking the operator to purge the JetStream subject manually —
+	// the generic logDeliveryErr breadcrumb wouldn't surface it.
+	if pre.preRun.TenantID != msg.TenantID {
+		logger.Error("runner: tenant mismatch for run %s (msg=%q stored=%q) — terming", msg.RunID, msg.TenantID, pre.preRun.TenantID)
 		finalStatus = "tenant_mismatch"
 		if termErr := delivery.Term(); termErr != nil {
 			// HIGH-impact: a failed Term on a tenant-mismatched
@@ -457,11 +708,11 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 		if errors.Is(err, natsq.ErrLockHeld) {
 			logger.Warn("runner: lock held for %s — naking for sibling", msg.RunID)
 			finalStatus = "lock_held"
-			logDeliveryErr(logger, "nak-lock-held", msg.RunID, delivery.Nak())
+			nakTerminal(logger, delivery, "nak-lock-held", msg.RunID)
 			return
 		}
 		logger.Error("runner: lock %s: %v", msg.RunID, err)
-		logDeliveryErr(logger, "nak-lock-error", msg.RunID, delivery.Nak())
+		nakTerminal(logger, delivery, "nak-lock-error", msg.RunID)
 		return
 	}
 	defer func() {
@@ -521,84 +772,43 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 		r.completionNotifier.FireForRun(nctx, r.cfg.Store, msg.RunID)
 	}
 
-	if err != nil {
-		// Distinguish transient (resumable) vs terminal failures.
-		// runtime.ErrRunPaused / ErrRunCancelled are not "the
-		// delivery failed" — they're successful checkpoint writes
-		// and we ack accordingly.
-		if errors.Is(err, runtime.ErrRunPaused) {
-			logger.Info("runner: run %s checkpointed (%v)", msg.RunID, err)
-			finalStatus = "paused"
-			logDeliveryErr(logger, "ack-paused", msg.RunID, delivery.Ack())
+	// DLQ branch: a generic engine error on the LAST permitted attempt
+	// must park a copy on the DLQ and Term instead of Nak — without the
+	// bridge JetStream silently drops the message after MaxDeliver and
+	// the run is unrecoverable except by hand. Handled inline (not via
+	// classifyExecResult) because it has side effects (PublishDLQ +
+	// UpdateRunStatusIf) and uses its own context with `defer cancel()`.
+	if err != nil &&
+		!errors.Is(err, runtime.ErrRunPaused) &&
+		!errors.Is(err, runtime.ErrRunPausedOperator) &&
+		!errors.Is(err, runtime.ErrRunCancelled) &&
+		r.cfg.NATS != nil && delivery.NumDelivered() >= r.cfg.NATS.MaxDeliver() {
+		logger.Error("runner: run %s failed on final delivery %d/%d — parking on DLQ: %v",
+			msg.RunID, delivery.NumDelivered(), r.cfg.NATS.MaxDeliver(), err)
+		finalStatus = "dlq"
+		bg, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if perr := r.cfg.NATS.PublishDLQ(bg, delivery, err.Error()); perr != nil {
+			// DLQ unavailable: keep the JetStream redelivery as
+			// the only remaining safety net.
+			logger.Error("runner: DLQ park for %s failed: %v — naking instead", msg.RunID, perr)
+			nakTerminal(logger, delivery, "nak-dlq-failed", msg.RunID)
 			return
 		}
-		if errors.Is(err, runtime.ErrRunPausedOperator) {
-			logger.Info("runner: run %s operator-paused (%v)", msg.RunID, err)
-			finalStatus = "paused_operator"
-			logDeliveryErr(logger, "ack-paused-operator", msg.RunID, delivery.Ack())
-			return
+		sctx := store.WithIdentity(bg, msg.TenantID, msg.OwnerID)
+		if _, serr := r.cfg.Store.UpdateRunStatusIf(sctx, msg.RunID, store.RunStatusFailedResumable,
+			fmt.Sprintf("max deliveries exhausted: %v (parked on DLQ — replay via /api/admin/dlq)", err),
+			[]store.RunStatus{store.RunStatusRunning, store.RunStatusQueued}); serr != nil {
+			logger.Warn("runner: DLQ status flip for %s: %v", msg.RunID, serr)
 		}
-		if errors.Is(err, runtime.ErrRunCancelled) {
-			// Heartbeat-induced cancel: the lease is gone, so a sibling
-			// runner is free to pick this up via JetStream redelivery.
-			// Nak (not Ack) so the message stays queued instead of
-			// being marked done and forcing manual user intervention.
-			if hbFailed.Load() {
-				logger.Warn("runner: run %s heartbeat lost — naking for sibling redelivery", msg.RunID)
-				finalStatus = "lock_held"
-				logDeliveryErr(logger, "nak-heartbeat-lost", msg.RunID, delivery.Nak())
-				return
-			}
-			if parent.Err() != nil {
-				logger.Warn("runner: run %s interrupted by runner shutdown — naking for checkpoint resume", msg.RunID)
-				finalStatus = "shutdown"
-				logDeliveryErr(logger, "nak-shutdown-cancelled", msg.RunID, delivery.Nak())
-				return
-			}
-			logger.Info("runner: run %s checkpointed (%v)", msg.RunID, err)
-			finalStatus = "cancelled"
-			logDeliveryErr(logger, "ack-cancelled", msg.RunID, delivery.Ack())
-			return
-		}
-		// Other errors → nak so JetStream redelivers up to MaxDeliver.
-		// On the LAST permitted attempt, park a copy on the DLQ and
-		// Term instead: without the bridge JetStream silently drops
-		// the message after MaxDeliver and the run is unrecoverable
-		// except by hand. The admin DLQ endpoints (peek/replay/
-		// discard) operate on the parked copy; the run row is flipped
-		// to failed_resumable (best-effort CAS from running) so the
-		// studio shows an actionable state instead of eternal
-		// "running".
-		if r.cfg.NATS != nil && delivery.NumDelivered() >= r.cfg.NATS.MaxDeliver() {
-			logger.Error("runner: run %s failed on final delivery %d/%d — parking on DLQ: %v",
-				msg.RunID, delivery.NumDelivered(), r.cfg.NATS.MaxDeliver(), err)
-			finalStatus = "dlq"
-			bg, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			if perr := r.cfg.NATS.PublishDLQ(bg, delivery, err.Error()); perr != nil {
-				// DLQ unavailable: keep the JetStream redelivery as
-				// the only remaining safety net.
-				logger.Error("runner: DLQ park for %s failed: %v — naking instead", msg.RunID, perr)
-				logDeliveryErr(logger, "nak-dlq-failed", msg.RunID, delivery.Nak())
-				return
-			}
-			sctx := store.WithIdentity(bg, msg.TenantID, msg.OwnerID)
-			if _, serr := r.cfg.Store.UpdateRunStatusIf(sctx, msg.RunID, store.RunStatusFailedResumable,
-				fmt.Sprintf("max deliveries exhausted: %v (parked on DLQ — replay via /api/admin/dlq)", err),
-				[]store.RunStatus{store.RunStatusRunning, store.RunStatusQueued}); serr != nil {
-				logger.Warn("runner: DLQ status flip for %s: %v", msg.RunID, serr)
-			}
-			logDeliveryErr(logger, "term-dlq-parked", msg.RunID, delivery.Term())
-			return
-		}
-		logger.Error("runner: run %s execution failed: %v", msg.RunID, err)
-		logDeliveryErr(logger, "nak-exec-failed", msg.RunID, delivery.Nak())
+		termTerminal(logger, delivery, "term-dlq-parked", msg.RunID)
 		return
 	}
 
-	logger.Info("runner: run %s completed", msg.RunID)
-	finalStatus = "finished"
-	logDeliveryErr(logger, "ack-finished", msg.RunID, delivery.Ack())
+	outcome := classifyExecResult(err, hbFailed.Load(), parent.Err(), msg.RunID)
+	logAt(logger, outcome.level, outcome.logFmt, outcome.logArgs...)
+	finalStatus = outcome.finalStatus
+	dispatchTerminal(logger, delivery, outcome.action, outcome.op, msg.RunID)
 }
 
 // heartbeat refreshes the NATS KV lease so a long-running run keeps
