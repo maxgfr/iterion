@@ -328,34 +328,13 @@ type branchResult struct {
 // convergenceNodeID is the pre-computed convergence point (may be empty
 // if unknown; in that case, AwaitMode on individual nodes is checked).
 func (e *Engine) execBranch(ctx context.Context, rs *runState, branchID string, startEdge *ir.Edge, parentOutputs map[string]map[string]interface{}, parentArtifacts map[string]map[string]interface{}, convergenceNodeID string) *branchResult {
-	// Copy parent artifact versions so branches continue incrementing from
-	// the correct version, rather than resetting to 0 on each fan-out cycle.
-	branchArtifactVersions := make(map[string]int, len(rs.artifactVersions))
-	for k, v := range rs.artifactVersions {
-		branchArtifactVersions[k] = v
-	}
-
-	result := &branchResult{
-		branchID:         branchID,
-		outputs:          make(map[string]map[string]interface{}),
-		artifacts:        make(map[string]map[string]interface{}),
-		artifactVersions: branchArtifactVersions,
-	}
-
+	result := initBranchResult(rs, branchID)
 	runID := rs.runID
-	vars := rs.vars
-	runInputs := rs.runInputs
 
-	// branchCostUSD is this branch's cumulative LLM spend. It is recorded
-	// into the shared daily-cap ledger under a per-branch key
-	// ("<runID>#<branchID>") rather than the bare runID: branches run
-	// concurrently, and the ledger's AddSpend keys by a single ID with
-	// monotonic-max, so two branches recording under the same runID would
-	// clobber each other (only the largest single-branch cumulative would
-	// survive). Distinct keys are summed into the day total, so parallel
-	// branch spend aggregates correctly and stays idempotent on resume
-	// (re-running a branch overwrites its own key monotonically). Without
-	// this, all fan-out spend escapes the per-day cap entirely.
+	// branchCostUSD is this branch's cumulative LLM spend, recorded into the
+	// shared daily-cap ledger under a per-branch key ("<runID>#<branchID>")
+	// so concurrent branches don't clobber each other's monotonic-max entry
+	// (see recordBranchUsage).
 	var branchCostUSD float64
 
 	// Emit branch_started (best-effort — branch can proceed without the event).
@@ -364,22 +343,9 @@ func (e *Engine) execBranch(ctx context.Context, rs *runState, branchID string, 
 		result.eventErrors++
 	}
 
-	// Always emit branch_finished, regardless of how the branch exits.
-	// Observers (e.g. the Prometheus exporter's parallel-branches gauge)
-	// rely on the started/finished pair to track in-flight concurrency.
-	defer func() {
-		data := map[string]interface{}{}
-		if result.err != nil {
-			data["error"] = result.err.Error()
-		}
-		if result.joinNodeID != "" {
-			data["join_node"] = result.joinNodeID
-		}
-		if err := e.emitBranch(ctx, runID, branchID, store.EventBranchFinished, startEdge.To, data); err != nil {
-			e.logger.Warn("branch %s: failed to emit branch_finished: %v", branchID, err)
-			result.eventErrors++
-		}
-	}()
+	// Always emit branch_finished, regardless of how the branch exits — the
+	// started/finished pair tracks in-flight concurrency for observers.
+	defer e.emitBranchFinishedDefer(ctx, runID, branchID, startEdge.To, result)
 
 	currentNodeID := startEdge.To
 
@@ -416,33 +382,8 @@ func (e *Engine) execBranch(ctx context.Context, rs *runState, branchID string, 
 		}
 
 		// Check budget before execution.
-		if rs.budget != nil {
-			checks := rs.budget.Check()
-			if exc := findExceeded(checks); exc != nil {
-				if err := e.emitBranch(ctx, runID, branchID, store.EventBudgetExceeded, currentNodeID, map[string]interface{}{
-					"dimension": exc.dimension,
-					"used":      exc.used,
-					"limit":     exc.limit,
-				}); err != nil {
-					e.logger.Warn("branch %s: failed to emit budget_exceeded: %v", branchID, err)
-					result.eventErrors++
-				}
-				result.err = fmt.Errorf("%w: %s (%.0f/%.0f)", ErrBudgetExceeded, exc.dimension, exc.used, exc.limit)
-				return result
-			}
-			if hl := findHardLimited(checks); hl != nil {
-				if err := e.emitBranch(ctx, runID, branchID, store.EventBudgetExceeded, currentNodeID, map[string]interface{}{
-					"dimension":  hl.dimension,
-					"used":       hl.used,
-					"limit":      hl.limit,
-					"hard_limit": true,
-				}); err != nil {
-					e.logger.Warn("branch %s: failed to emit budget hard limit: %v", branchID, err)
-					result.eventErrors++
-				}
-				result.err = fmt.Errorf("%w: hard limit %s at %.0f%% (%.0f/%.0f)", ErrBudgetExceeded, hl.dimension, (hl.used/hl.limit)*100, hl.used, hl.limit)
-				return result
-			}
+		if e.checkPreExecBudget(ctx, rs, runID, branchID, currentNodeID, result) {
+			return result
 		}
 
 		// Loop edges inside fan-out branches are skipped (see helpers.go),
@@ -458,110 +399,17 @@ func (e *Engine) execBranch(ctx context.Context, rs *runState, branchID string, 
 			result.eventErrors++
 		}
 
-		// Build input: merge parent outputs with branch-local outputs so
-		// refs to upstream nodes (before the router) still resolve. We
-		// pass the parent rs so {{loop.*}} / {{run.*}} read the parent's
-		// loop snapshots (read-only — branches never traverse loop edges).
-		merged := mergeOutputs(parentOutputs, result.outputs)
-		mergedArt := mergeOutputs(parentArtifacts, result.artifacts)
-		nodeInput := e.buildNodeInputRS(currentNodeID, resolveScope{
-			vars:      vars,
-			outputs:   merged,
-			runInputs: runInputs,
-			artifacts: mergedArt,
-			rs:        rs,
-		})
-
-		execCtx := model.WithLoopIteration(ctx, iter)
-		output, err := e.executor.Execute(execCtx, node, nodeInput)
-		if err != nil {
-			result.err = fmt.Errorf("node %q in branch %s: %w", currentNodeID, branchID, err)
-			if emitErr := e.emitBranch(ctx, runID, branchID, store.EventNodeFinished, currentNodeID, map[string]interface{}{
-				"error": err.Error(),
-			}); emitErr != nil {
-				e.logger.Warn("branch %s: failed to emit node_finished: %v", branchID, emitErr)
-				result.eventErrors++
-			}
+		output, done := e.executeNodeForBranch(ctx, rs, runID, branchID, currentNodeID, node, parentOutputs, parentArtifacts, iter, result)
+		if done {
 			return result
 		}
 
-		result.outputs[currentNodeID] = output
-
-		// Validate output against declared schema (optional).
-		if err := e.validateNodeOutput(currentNodeID, node, output); err != nil {
-			result.err = fmt.Errorf("node %q in branch %s: %w", currentNodeID, branchID, err)
+		if e.recordBranchUsage(ctx, rs, runID, branchID, currentNodeID, output, &branchCostUSD, result) {
 			return result
 		}
 
-		// Record budget usage and check limits.
-		tokens, costUSD := extractUsage(output)
-
-		// Daily spend-cap accounting for this branch. Independent of the
-		// per-run budget so it works for workflows with no `budget:` block.
-		// The pause decision still happens on the trunk's pre-exec path
-		// (checkBudgetBeforeExec) so the checkpoint anchors at a not-yet-
-		// executed node; branches only contribute spend. The per-branch
-		// ledger key keeps concurrent branches from clobbering each other
-		// (see branchCostUSD above).
-		if e.dailyCap != nil && costUSD > 0 {
-			branchCostUSD += costUSD
-			if _, err := e.dailyCap.Record(ctx, runID+"#"+branchID, branchCostUSD); err != nil {
-				e.logger.Warn("branch %s: daily spend cap record failed: %v", branchID, err)
-			}
-		}
-
-		if rs.budget != nil {
-			checks := rs.budget.RecordUsage(tokens, costUSD)
-
-			// Emit warnings.
-			for _, w := range findWarnings(checks) {
-				if err := e.emitBranch(ctx, runID, branchID, store.EventBudgetWarning, currentNodeID, map[string]interface{}{
-					"dimension": w.dimension,
-					"used":      w.used,
-					"limit":     w.limit,
-				}); err != nil {
-					e.logger.Warn("branch %s: failed to emit budget_warning: %v", branchID, err)
-					result.eventErrors++
-				}
-			}
-
-			// Fail on exceeded.
-			if exc := findExceeded(checks); exc != nil {
-				if err := e.emitBranch(ctx, runID, branchID, store.EventBudgetExceeded, currentNodeID, map[string]interface{}{
-					"dimension": exc.dimension,
-					"used":      exc.used,
-					"limit":     exc.limit,
-				}); err != nil {
-					e.logger.Warn("branch %s: failed to emit budget_exceeded: %v", branchID, err)
-					result.eventErrors++
-				}
-				result.err = fmt.Errorf("%w: %s (%.0f/%.0f)", ErrBudgetExceeded, exc.dimension, exc.used, exc.limit)
-				return result
-			}
-		}
-
-		// Persist artifact if node has publish.
-		if pub := nodePublish(node); pub != "" {
-			version := result.artifactVersions[currentNodeID]
-			artifact := &store.Artifact{
-				RunID:   runID,
-				NodeID:  currentNodeID,
-				Version: version,
-				Data:    output,
-			}
-			if err := e.store.WriteArtifact(ctx, artifact); err != nil {
-				result.err = fmt.Errorf("node %q in branch %s: write artifact: %w", currentNodeID, branchID, err)
-				return result
-			}
-			result.artifactVersions[currentNodeID] = version + 1
-			result.artifacts[pub] = output
-			if err := e.emitBranch(ctx, runID, branchID, store.EventArtifactWritten, currentNodeID, map[string]interface{}{
-				"publish": pub,
-				"version": version,
-			}); err != nil {
-				e.logger.Warn("branch %s: failed to emit artifact_written: %v", branchID, err)
-				result.eventErrors++
-			}
+		if e.publishBranchArtifact(ctx, runID, branchID, currentNodeID, node, output, result) {
+			return result
 		}
 
 		// Emit node_finished with usage data.
@@ -582,6 +430,200 @@ func (e *Engine) execBranch(ctx context.Context, rs *runState, branchID string, 
 
 		currentNodeID = nextNodeID
 	}
+}
+
+// initBranchResult allocates a branch's result accumulator, copying the
+// parent's artifact versions so the branch keeps incrementing from the
+// correct version instead of resetting to 0 each fan-out cycle.
+func initBranchResult(rs *runState, branchID string) *branchResult {
+	branchArtifactVersions := make(map[string]int, len(rs.artifactVersions))
+	for k, v := range rs.artifactVersions {
+		branchArtifactVersions[k] = v
+	}
+	return &branchResult{
+		branchID:         branchID,
+		outputs:          make(map[string]map[string]interface{}),
+		artifacts:        make(map[string]map[string]interface{}),
+		artifactVersions: branchArtifactVersions,
+	}
+}
+
+// emitBranchFinishedDefer emits branch_finished (with the branch's terminal
+// error / join node, if any). Always invoked via defer so the
+// started/finished pair closes on every exit path — observers (e.g. the
+// Prometheus parallel-branches gauge) rely on it to track in-flight
+// concurrency. result is taken by pointer so the deferred read sees the
+// branch's final state.
+func (e *Engine) emitBranchFinishedDefer(ctx context.Context, runID, branchID, startNodeID string, result *branchResult) {
+	data := map[string]interface{}{}
+	if result.err != nil {
+		data["error"] = result.err.Error()
+	}
+	if result.joinNodeID != "" {
+		data["join_node"] = result.joinNodeID
+	}
+	if err := e.emitBranch(ctx, runID, branchID, store.EventBranchFinished, startNodeID, data); err != nil {
+		e.logger.Warn("branch %s: failed to emit branch_finished: %v", branchID, err)
+		result.eventErrors++
+	}
+}
+
+// checkPreExecBudget emits budget_exceeded and sets result.err (returning
+// true → caller returns the branch) when the run budget is soft-exceeded or
+// hard-limited before executing a node. Both checks emit the event before
+// failing; emission failures are best-effort (counted on result.eventErrors).
+func (e *Engine) checkPreExecBudget(ctx context.Context, rs *runState, runID, branchID, currentNodeID string, result *branchResult) bool {
+	if rs.budget == nil {
+		return false
+	}
+	checks := rs.budget.Check()
+	if exc := findExceeded(checks); exc != nil {
+		if err := e.emitBranch(ctx, runID, branchID, store.EventBudgetExceeded, currentNodeID, map[string]interface{}{
+			"dimension": exc.dimension,
+			"used":      exc.used,
+			"limit":     exc.limit,
+		}); err != nil {
+			e.logger.Warn("branch %s: failed to emit budget_exceeded: %v", branchID, err)
+			result.eventErrors++
+		}
+		result.err = fmt.Errorf("%w: %s (%.0f/%.0f)", ErrBudgetExceeded, exc.dimension, exc.used, exc.limit)
+		return true
+	}
+	if hl := findHardLimited(checks); hl != nil {
+		if err := e.emitBranch(ctx, runID, branchID, store.EventBudgetExceeded, currentNodeID, map[string]interface{}{
+			"dimension":  hl.dimension,
+			"used":       hl.used,
+			"limit":      hl.limit,
+			"hard_limit": true,
+		}); err != nil {
+			e.logger.Warn("branch %s: failed to emit budget hard limit: %v", branchID, err)
+			result.eventErrors++
+		}
+		result.err = fmt.Errorf("%w: hard limit %s at %.0f%% (%.0f/%.0f)", ErrBudgetExceeded, hl.dimension, (hl.used/hl.limit)*100, hl.used, hl.limit)
+		return true
+	}
+	return false
+}
+
+// executeNodeForBranch builds the node's input (parent outputs merged with
+// branch-local outputs so upstream refs still resolve; the parent rs feeds
+// {{loop.*}} / {{run.*}} read-only), runs the executor, records the output,
+// and validates it against the declared schema. Returns the output and a done
+// flag: done=true (with result.err set) when execution or validation failed.
+// On an execution error it emits node_finished with the error so the event
+// log stays paired.
+func (e *Engine) executeNodeForBranch(ctx context.Context, rs *runState, runID, branchID, currentNodeID string, node ir.Node, parentOutputs, parentArtifacts map[string]map[string]interface{}, iter int, result *branchResult) (map[string]interface{}, bool) {
+	merged := mergeOutputs(parentOutputs, result.outputs)
+	mergedArt := mergeOutputs(parentArtifacts, result.artifacts)
+	nodeInput := e.buildNodeInputRS(currentNodeID, resolveScope{
+		vars:      rs.vars,
+		outputs:   merged,
+		runInputs: rs.runInputs,
+		artifacts: mergedArt,
+		rs:        rs,
+	})
+
+	execCtx := model.WithLoopIteration(ctx, iter)
+	output, err := e.executor.Execute(execCtx, node, nodeInput)
+	if err != nil {
+		result.err = fmt.Errorf("node %q in branch %s: %w", currentNodeID, branchID, err)
+		if emitErr := e.emitBranch(ctx, runID, branchID, store.EventNodeFinished, currentNodeID, map[string]interface{}{
+			"error": err.Error(),
+		}); emitErr != nil {
+			e.logger.Warn("branch %s: failed to emit node_finished: %v", branchID, emitErr)
+			result.eventErrors++
+		}
+		return nil, true
+	}
+
+	result.outputs[currentNodeID] = output
+
+	if err := e.validateNodeOutput(currentNodeID, node, output); err != nil {
+		result.err = fmt.Errorf("node %q in branch %s: %w", currentNodeID, branchID, err)
+		return nil, true
+	}
+	return output, false
+}
+
+// recordBranchUsage records a node's token/cost usage against the per-branch
+// daily-cap ledger and the run budget, emits budget warnings, and fails the
+// branch (returning true with result.err set) when a budget dimension is
+// exceeded. The daily-cap key is "<runID>#<branchID>" so concurrent branches
+// accumulate independently; the per-run budget pause decision stays on the
+// trunk's pre-exec path, branches only contribute spend.
+func (e *Engine) recordBranchUsage(ctx context.Context, rs *runState, runID, branchID, currentNodeID string, output map[string]interface{}, branchCostUSD *float64, result *branchResult) bool {
+	tokens, costUSD := extractUsage(output)
+
+	if e.dailyCap != nil && costUSD > 0 {
+		*branchCostUSD += costUSD
+		if _, err := e.dailyCap.Record(ctx, runID+"#"+branchID, *branchCostUSD); err != nil {
+			e.logger.Warn("branch %s: daily spend cap record failed: %v", branchID, err)
+		}
+	}
+
+	if rs.budget == nil {
+		return false
+	}
+	checks := rs.budget.RecordUsage(tokens, costUSD)
+
+	for _, w := range findWarnings(checks) {
+		if err := e.emitBranch(ctx, runID, branchID, store.EventBudgetWarning, currentNodeID, map[string]interface{}{
+			"dimension": w.dimension,
+			"used":      w.used,
+			"limit":     w.limit,
+		}); err != nil {
+			e.logger.Warn("branch %s: failed to emit budget_warning: %v", branchID, err)
+			result.eventErrors++
+		}
+	}
+
+	if exc := findExceeded(checks); exc != nil {
+		if err := e.emitBranch(ctx, runID, branchID, store.EventBudgetExceeded, currentNodeID, map[string]interface{}{
+			"dimension": exc.dimension,
+			"used":      exc.used,
+			"limit":     exc.limit,
+		}); err != nil {
+			e.logger.Warn("branch %s: failed to emit budget_exceeded: %v", branchID, err)
+			result.eventErrors++
+		}
+		result.err = fmt.Errorf("%w: %s (%.0f/%.0f)", ErrBudgetExceeded, exc.dimension, exc.used, exc.limit)
+		return true
+	}
+	return false
+}
+
+// publishBranchArtifact persists the node's output as a versioned artifact
+// when the node declares publish, bumps the in-memory version, registers it
+// under the publish name, and emits artifact_written. A write-store failure
+// aborts the branch (returns true); an event-emit failure is best-effort. The
+// persisted artifact records the OLD version while the in-memory map advances
+// to the next.
+func (e *Engine) publishBranchArtifact(ctx context.Context, runID, branchID, currentNodeID string, node ir.Node, output map[string]interface{}, result *branchResult) bool {
+	pub := nodePublish(node)
+	if pub == "" {
+		return false
+	}
+	version := result.artifactVersions[currentNodeID]
+	artifact := &store.Artifact{
+		RunID:   runID,
+		NodeID:  currentNodeID,
+		Version: version,
+		Data:    output,
+	}
+	if err := e.store.WriteArtifact(ctx, artifact); err != nil {
+		result.err = fmt.Errorf("node %q in branch %s: write artifact: %w", currentNodeID, branchID, err)
+		return true
+	}
+	result.artifactVersions[currentNodeID] = version + 1
+	result.artifacts[pub] = output
+	if err := e.emitBranch(ctx, runID, branchID, store.EventArtifactWritten, currentNodeID, map[string]interface{}{
+		"publish": pub,
+		"version": version,
+	}); err != nil {
+		e.logger.Warn("branch %s: failed to emit artifact_written: %v", branchID, err)
+		result.eventErrors++
+	}
+	return false
 }
 
 // selectEdgeBranch picks the next node for a branch. It is simpler than
