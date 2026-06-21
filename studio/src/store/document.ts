@@ -192,9 +192,8 @@ function pushHistory(s: DocumentState): { _history: IterDocument[]; _future: Ite
 function removeNodeFromGroups(comments: Comment[], nodeName: string): Comment[] {
   return comments.flatMap((c) => {
     if (!groupNameFromComment(c)) return [c];
-    const parsed = parseGroups([c]);
-    if (parsed.length === 0) return [c];
-    const g = parsed[0]!;
+    const g = parseGroups([c])[0];
+    if (!g) return [c];
     const remaining = g.nodeIds.filter((id) => id !== nodeName);
     if (remaining.length < 2) return []; // dissolve group
     return [{ text: groupToCommentText({ ...g, nodeIds: remaining }) }];
@@ -205,9 +204,8 @@ function removeNodeFromGroups(comments: Comment[], nodeName: string): Comment[] 
 function renameNodeInGroups(comments: Comment[], oldName: string, newName: string): Comment[] {
   return comments.map((c) => {
     if (!groupNameFromComment(c)) return c;
-    const parsed = parseGroups([c]);
-    if (parsed.length === 0) return c;
-    const g = parsed[0]!;
+    const g = parseGroups([c])[0];
+    if (!g) return c;
     if (!g.nodeIds.includes(oldName)) return c;
     return { text: groupToCommentText({ ...g, nodeIds: g.nodeIds.map((id) => (id === oldName ? newName : id)) }) };
   });
@@ -255,13 +253,15 @@ export function createDocumentStore() {
   undo: () => set((s) => {
     if (s._history.length === 0 || !s.document) return s;
     const history = [...s._history];
-    const prev = history.pop()!;
+    const prev = history.pop();
+    if (!prev) return s;
     return { document: prev, _history: history, _future: [s.document, ...s._future].slice(0, MAX_HISTORY), _generation: s._generation + 1 };
   }),
   redo: () => set((s) => {
     if (s._future.length === 0 || !s.document) return s;
     const future = [...s._future];
-    const next = future.shift()!;
+    const next = future.shift();
+    if (!next) return s;
     return { document: next, _history: [...s._history, s.document].slice(-MAX_HISTORY), _future: future, _generation: s._generation + 1 };
   }),
   canUndo: () => get()._history.length > 0,
@@ -368,13 +368,16 @@ export function createDocumentStore() {
     const arrayKey = kindToArray[found.kind];
     if (!arrayKey) return null;
 
-    set((st) => ({
-      document: {
-        ...st.document!,
-        [arrayKey]: [...(st.document![arrayKey] as unknown[]), clone],
-      },
-      ...pushHistory(st),
-    }));
+    set((st) => {
+      if (!st.document) return st;
+      return {
+        document: {
+          ...st.document,
+          [arrayKey]: [...(st.document[arrayKey] as unknown[]), clone],
+        },
+        ...pushHistory(st),
+      };
+    });
     return newName;
   },
 
@@ -677,9 +680,9 @@ export function createDocumentStore() {
       if (!s.document) return s;
       const comments = s.document.comments.map((c) => {
         if (groupNameFromComment(c) !== groupName) return c;
-        const parsed = parseGroups([c]);
-        if (parsed.length === 0) return c;
-        const updated = { ...parsed[0]!, ...updates };
+        const first = parseGroups([c])[0];
+        if (!first) return c;
+        const updated = { ...first, ...updates };
         return { text: groupToCommentText(updated) };
       });
       return { document: { ...s.document, comments }, ...pushHistory(s) };

@@ -23,38 +23,48 @@ interface LineChange {
 function diffLines(a: string[], b: string[]): LineChange[] {
   const m = a.length;
   const n = b.length;
-  // dp[i][j] = LCS length of a[0..i) and b[0..j).
-  const dp: number[][] = Array.from({ length: m + 1 }, () =>
-    new Array(n + 1).fill(0),
-  );
+  // Flat backing array for the LCS table. We hide indexing behind
+  // get/set helpers whose return types are `number`, so the LCS body
+  // stays free of `!` non-null assertions; the helpers do the single
+  // ?? 0 fallback the noUncheckedIndexedAccess rule wants.
+  const W = n + 1;
+  const dp = new Array<number>((m + 1) * W).fill(0);
+  const dpGet = (i: number, j: number): number => dp[i * W + j] ?? 0;
+  const dpSet = (i: number, j: number, v: number): void => {
+    dp[i * W + j] = v;
+  };
+  const ai = (k: number): string => a[k] ?? "";
+  const bi = (k: number): string => b[k] ?? "";
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
-      if (a[i - 1] === b[j - 1]) dp[i]![j] = dp[i - 1]![j - 1]! + 1;
-      else dp[i]![j] = Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
+      if (ai(i - 1) === bi(j - 1)) dpSet(i, j, dpGet(i - 1, j - 1) + 1);
+      else dpSet(i, j, Math.max(dpGet(i - 1, j), dpGet(i, j - 1)));
     }
   }
   const out: LineChange[] = [];
   let i = m;
   let j = n;
   while (i > 0 && j > 0) {
-    if (a[i - 1] === b[j - 1]) {
-      out.push({ kind: "ctx", text: a[i - 1]! });
+    const av = ai(i - 1);
+    const bv = bi(j - 1);
+    if (av === bv) {
+      out.push({ kind: "ctx", text: av });
       i--;
       j--;
-    } else if (dp[i - 1]![j]! >= dp[i]![j - 1]!) {
-      out.push({ kind: "del", text: a[i - 1]! });
+    } else if (dpGet(i - 1, j) >= dpGet(i, j - 1)) {
+      out.push({ kind: "del", text: av });
       i--;
     } else {
-      out.push({ kind: "add", text: b[j - 1]! });
+      out.push({ kind: "add", text: bv });
       j--;
     }
   }
   while (i > 0) {
-    out.push({ kind: "del", text: a[i - 1]! });
+    out.push({ kind: "del", text: ai(i - 1) });
     i--;
   }
   while (j > 0) {
-    out.push({ kind: "add", text: b[j - 1]! });
+    out.push({ kind: "add", text: bi(j - 1) });
     j--;
   }
   return out.reverse();

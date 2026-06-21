@@ -92,7 +92,6 @@ class FileWatcherClient {
         // Surface protocol drift instead of swallowing — useRunWebSocket
         // does the same and silent JSON.parse failures here previously
         // hid genuine server bugs from devtools.
-        // eslint-disable-next-line no-console
         console.warn("[file-watcher ws] dropped message:", err);
       }
     };

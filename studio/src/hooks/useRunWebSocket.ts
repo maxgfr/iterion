@@ -286,7 +286,6 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
             case "error":
               // Surface but don't tear down — a single bad command
               // shouldn't kill the live stream.
-              // eslint-disable-next-line no-console
               console.warn("run ws error:", env.payload);
               break;
             case "ack":
@@ -301,7 +300,6 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
           // unexpected payload shape) until users reported "the run
           // view is frozen". Log once per error so issues surface in
           // devtools without spamming on a flapping payload.
-          // eslint-disable-next-line no-console
           console.warn("[run ws] dropped message:", err);
         }
       };
@@ -399,12 +397,10 @@ export function useRunWebSocket(runId: string | null): RunWsHandle {
         // case where ws closed between subscribeLogs() call and the
         // socket actually being open. Logged so a future regression is
         // visible in DevTools. F-NEW-3 instrumentation.
-        if (typeof console !== "undefined") {
-          console.debug(
-            "[useRunWebSocket] subscribe_logs deferred: ws not open",
-            { readyState: ws?.readyState ?? "no_ws" },
-          );
-        }
+        console.warn(
+          "[useRunWebSocket] subscribe_logs deferred: ws not open",
+          { readyState: ws?.readyState ?? "no_ws" },
+        );
         return;
       }
       const offset =

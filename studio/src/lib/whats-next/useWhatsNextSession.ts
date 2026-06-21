@@ -216,13 +216,6 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
           r.status === "running" ||
           r.status === "paused_waiting_human",
       );
-      if (typeof console !== "undefined") {
-        console.debug("[whats-next] findLiveRunForBot", {
-          botId: bot.id,
-          matchCount: matches.length,
-          live: active?.id ?? null,
-        });
-      }
       return active?.id ?? null;
     }
 
@@ -446,26 +439,14 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
 
   const submitHumanAnswer = useCallback(
     async (messageId: string, answers: Record<string, unknown>) => {
-      if (typeof console !== "undefined") {
-        console.debug("[whats-next] submitHumanAnswer enter", {
-          messageId,
-          answers,
-          runId,
-        });
-      }
       if (!runId) {
-        if (typeof console !== "undefined") {
-          console.warn("[whats-next] submitHumanAnswer: no runId, aborting");
-        }
+        console.warn("[whats-next] submitHumanAnswer: no runId, aborting");
         return;
       }
       setErrorMessage(null);
       setBusyMessageId(messageId);
       setStatus("submitting");
       try {
-        if (typeof console !== "undefined") {
-          console.debug("[whats-next] submitHumanAnswer → resumeRun", { runId });
-        }
         // `force: true` is intentional. After any bot edit (the
         // operator iterates on prompts mid-session) the workflow
         // hash changes; the engine's checkWorkflowHash silently
@@ -476,9 +457,6 @@ export function useWhatsNextSession(bot: FirstClassBot): UseWhatsNextSession {
         // pass force every time. The /runs/<id> console retains the
         // explicit toggle for the rare hash-pinned case.
         await resumeRun(runId, { answers, force: true });
-        if (typeof console !== "undefined") {
-          console.debug("[whats-next] submitHumanAnswer ← resumeRun OK");
-        }
         setRunStatus("running");
         // Re-dial the WS so the resumed engine's events reach us.
         // Without this, the broker may have dropped subscribers when

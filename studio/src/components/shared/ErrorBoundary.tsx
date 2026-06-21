@@ -29,7 +29,6 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    // eslint-disable-next-line no-console
     console.error(`[${this.props.area}] render error:`, error, info);
   }
 

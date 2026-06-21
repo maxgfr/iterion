@@ -358,7 +358,6 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
   const loadHistory = useCallback(() => {
     if (!runId) return;
     loadEventHistoryIfMissing(runId).catch((err) => {
-      // eslint-disable-next-line no-console
       console.warn("[run] event history hydration failed:", err);
       const msg = errorMessage(err);
       useUIStore.getState().addToast(

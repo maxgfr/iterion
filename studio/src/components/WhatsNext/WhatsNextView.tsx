@@ -91,18 +91,6 @@ export default function WhatsNextView() {
       const entry = m && m.kind === "human-question" && bot
         ? bot.nodeMap[m.nodeId]
         : undefined;
-      if (typeof console !== "undefined") {
-        console.debug("[whats-next] onHumanSubmit", {
-          messageId,
-          outcome,
-          hasBot: !!bot,
-          hasMessage: !!m,
-          messageKind: m?.kind,
-          messageStatus: m?.kind === "human-question" ? m.status : undefined,
-          hasEntry: !!entry,
-          runId: session.runId,
-        });
-      }
       if (!bot || !m || m.kind !== "human-question" || !entry) return;
       // When the chat turn supplies BOTH a formAnswer (from the
       // checkbox column, e.g. human_review's selected_titles) AND

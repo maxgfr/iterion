@@ -92,8 +92,9 @@ export function sameQueuedMessages(
 ): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
-    const x = a[i]!;
-    const y = b[i]!;
+    const x = a[i];
+    const y = b[i];
+    if (!x || !y) return false;
     if (x.id !== y.id || x.status !== y.status || x.text !== y.text) {
       return false;
     }
@@ -358,13 +359,14 @@ export function reduceEvents(
             existing.status === "paused_waiting_human");
         const preResumeArtefact =
           isTerminal &&
+          existing !== undefined &&
           lastResumedSeq >= 0 &&
-          existing!.last_seq < lastResumedSeq;
-        if (isTerminal && !preResumeArtefact) {
+          existing.last_seq < lastResumedSeq;
+        if (isTerminal && existing !== undefined && !preResumeArtefact) {
           // Case 3 — monotonic guard preserves terminal status, only
           // seq markers advance so subscribers know we saw the event.
           executionsById.set(id, {
-            ...existing!,
+            ...existing,
             current_event_seq: evt.seq,
             last_seq: evt.seq,
           });
@@ -652,8 +654,9 @@ export function reduceEvents(
         // the invariant explicitly so a future late event doesn't
         // break binary search).
         const list = browser.screenshots;
+        const last = list[list.length - 1];
         let next: BrowserScreenshot[];
-        if (list.length === 0 || list[list.length - 1]!.seq <= shot.seq) {
+        if (last === undefined || last.seq <= shot.seq) {
           next = list.concat(shot);
         } else {
           next = list.slice();
@@ -702,10 +705,10 @@ export function reduceEvents(
             a.queued_at.localeCompare(b.queued_at),
           );
         } else {
-          queuedMessages[idx] = mergeQueuedMessage(
-            queuedMessages[idx]!,
-            incoming,
-          );
+          const existingMsg = queuedMessages[idx];
+          if (existingMsg !== undefined) {
+            queuedMessages[idx] = mergeQueuedMessage(existingMsg, incoming);
+          }
         }
         break;
       }
@@ -740,7 +743,8 @@ export function reduceEvents(
   const next: Partial<RunStoreState> = { events };
 
   if (snapshot) {
-    const lastEvt = appended[appended.length - 1]!;
+    const lastEvt = appended[appended.length - 1];
+    if (lastEvt === undefined) return next;
     const baseRun =
       runStatusOverride !== null
         ? {
@@ -754,7 +758,10 @@ export function reduceEvents(
       snapshot = {
         ...snapshot,
         run: baseRun,
-        executions: orderedIds.map((id) => executionsById.get(id)!),
+        executions: orderedIds.flatMap((id) => {
+          const e = executionsById.get(id);
+          return e ? [e] : [];
+        }),
         last_seq: lastEvt.seq,
       };
       next.snapshot = snapshot;

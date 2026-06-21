@@ -95,15 +95,12 @@ function LabelsViewInner() {
   const totalUsages = labels?.reduce((acc, l) => acc + l.count, 0) ?? 0;
 
   const onApply = useCallback(
-    async (op: () => Promise<unknown>, successMsg: string) => {
+    async (op: () => Promise<unknown>, _successMsg: string) => {
       setBusy(true);
       try {
         await op();
         await refresh();
         setDialog({ kind: "none" });
-        if (typeof console !== "undefined") {
-          console.info("[labels]", successMsg);
-        }
       } catch (e) {
         setError(errorMessage(e));
       } finally {

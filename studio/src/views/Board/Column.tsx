@@ -242,8 +242,8 @@ function IssueCard({
         .join("\n"),
     );
   }
-  if ((iss.blockers?.length ?? 0) > 0) {
-    previewLines.push(`Blocked by: ${iss.blockers!.join(", ")}`);
+  if (iss.blockers && iss.blockers.length > 0) {
+    previewLines.push(`Blocked by: ${iss.blockers.join(", ")}`);
   }
   const hoverTitle = previewLines.length > 0 ? previewLines.join("\n\n") : undefined;
   const [dragging, setDragging] = useState(false);
@@ -307,9 +307,9 @@ function IssueCard({
           ))}
         </div>
       )}
-      {(iss.labels?.length ?? 0) > 0 && (
+      {iss.labels && iss.labels.length > 0 && (
         <div className="mt-1 flex flex-wrap gap-1">
-          {iss.labels!.slice(0, MAX_CARD_LABELS).map((l) => {
+          {iss.labels.slice(0, MAX_CARD_LABELS).map((l) => {
             const palette = labelPalette(l);
             const active = activeLabels.has(l);
             return (
@@ -338,12 +338,12 @@ function IssueCard({
               </button>
             );
           })}
-          {iss.labels!.length > MAX_CARD_LABELS && (
+          {iss.labels.length > MAX_CARD_LABELS && (
             <span
               className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-fg-subtle"
-              title={iss.labels!.slice(MAX_CARD_LABELS).join(", ")}
+              title={iss.labels.slice(MAX_CARD_LABELS).join(", ")}
             >
-              +{iss.labels!.length - MAX_CARD_LABELS}
+              +{iss.labels.length - MAX_CARD_LABELS}
             </span>
           )}
         </div>
@@ -367,19 +367,22 @@ function IssueCard({
             claimed by {iss.claim}
           </span>
         )}
-        {!running && iss.last_run_id && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenRun(iss.last_run_id!);
-            }}
-            className="font-mono text-info hover:underline opacity-80"
-            title={`Open the last run on this issue (run ${iss.last_run_id})`}
-          >
-            ↪ last run
-          </button>
-        )}
+        {!running && iss.last_run_id && (() => {
+          const lastRunId = iss.last_run_id;
+          return (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenRun(lastRunId);
+              }}
+              className="font-mono text-info hover:underline opacity-80"
+              title={`Open the last run on this issue (run ${lastRunId})`}
+            >
+              ↪ last run
+            </button>
+          );
+        })()}
         {iss.updated_at && (
           <span className="text-fg-subtle" title={iss.updated_at}>
             · updated {formatRelative(iss.updated_at)}
