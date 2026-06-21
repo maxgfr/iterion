@@ -18,7 +18,6 @@ import (
 	natsq "github.com/SocialGouv/iterion/pkg/queue/nats"
 	"github.com/SocialGouv/iterion/pkg/runner"
 	"github.com/SocialGouv/iterion/pkg/secrets"
-	"github.com/SocialGouv/iterion/pkg/store/blob"
 	mongostore "github.com/SocialGouv/iterion/pkg/store/mongo"
 	"github.com/spf13/cobra"
 )
@@ -107,14 +106,7 @@ func runRunner(cmd *cobra.Command, _ []string) error {
 	defer natsConn.Close()
 
 	// 2. Blob (S3 / MinIO) — backs WriteArtifact/LoadArtifact.
-	bc, err := blob.NewS3(rootCtx, blob.Config{
-		Endpoint:        cfg.S3.Endpoint,
-		Region:          cfg.S3.Region,
-		Bucket:          cfg.S3.Bucket,
-		AccessKeyID:     cfg.S3.AccessKeyID,
-		SecretAccessKey: cfg.S3.SecretAccessKey,
-		UsePathStyle:    cfg.S3.UsePathStyle,
-	})
+	bc, err := newCloudBlob(rootCtx, cfg.S3)
 	if err != nil {
 		return fmt.Errorf("runner: build blob client: %w", err)
 	}
@@ -125,14 +117,7 @@ func runRunner(cmd *cobra.Command, _ []string) error {
 	//    server-side cloud store usage).
 	runnerID, _ := os.Hostname()
 	lockProv := natsq.NewLockProvider(natsConn, runnerID)
-	st, err := mongostore.New(rootCtx, mongostore.Config{
-		URI:           cfg.Mongo.URI,
-		Database:      cfg.Mongo.DB,
-		EventsTTLDays: cfg.Mongo.EventsTTLDays,
-		Logger:        logger,
-		Blob:          bc,
-		LockProvider:  lockProv,
-	})
+	st, err := newCloudMongoStore(rootCtx, cfg.Mongo, bc, logger, lockProv)
 	if err != nil {
 		return fmt.Errorf("runner: build mongo store: %w", err)
 	}

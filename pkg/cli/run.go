@@ -401,18 +401,13 @@ func resolveWorkflow(opts RunOptions) (wf *ir.Workflow, hash, filePath, displayN
 		return nil, "", "", "", nil, cleanup, fmt.Errorf("provide a .bot file, .botz bundle, or --recipe")
 	}
 	resolved := ResolveRecipePath(opts.File)
-	kind, detectErr := bundle.Detect(resolved)
-	if detectErr != nil {
-		return nil, "", "", "", nil, cleanup, detectErr
+	opened, iterPath, _, c, openErr := openBundleOrFile(resolved)
+	if openErr != nil {
+		return nil, "", "", "", nil, cleanup, openErr
 	}
-	switch kind {
-	case bundle.KindBundle:
-		opened, c, openErr := bundle.Open(resolved, "")
-		if openErr != nil {
-			return nil, "", "", "", nil, cleanup, openErr
-		}
+	if opened != nil {
 		cleanup = c
-		raw, h, compileErr := runview.CompileBundleWorkflow(opened.IterPath, opened)
+		raw, h, compileErr := runview.CompileBundleWorkflow(iterPath, opened)
 		if compileErr != nil {
 			return nil, "", "", "", opened, cleanup, compileErr
 		}
@@ -420,21 +415,7 @@ func resolveWorkflow(opts RunOptions) (wf *ir.Workflow, hash, filePath, displayN
 		if opened.Manifest != nil && opened.Manifest.Name != "" {
 			display = opened.Manifest.Name + " (" + raw.Name + ")"
 		}
-		return raw, h, opened.IterPath, display, opened, cleanup, nil
-	case bundle.KindBundleDir:
-		opened, openErr := bundle.OpenDir(resolved)
-		if openErr != nil {
-			return nil, "", "", "", nil, cleanup, openErr
-		}
-		raw, h, compileErr := runview.CompileBundleWorkflow(opened.IterPath, opened)
-		if compileErr != nil {
-			return nil, "", "", "", opened, cleanup, compileErr
-		}
-		display := raw.Name
-		if opened.Manifest != nil && opened.Manifest.Name != "" {
-			display = opened.Manifest.Name + " (" + raw.Name + ")"
-		}
-		return raw, h, opened.IterPath, display, opened, cleanup, nil
+		return raw, h, iterPath, display, opened, cleanup, nil
 	}
 	// F-NEW-4: when the operator points at a bare `main.bot` file whose
 	// parent directory looks like a bundle (has skills/ or

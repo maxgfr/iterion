@@ -74,26 +74,18 @@ func resumeOpenWorkflow(r *store.Run, iterFile string) (*ir.Workflow, string, st
 // Returns (nil, no-op, nil) when the path is neither — the caller
 // then falls back to a plain .bot compile.
 func openResumeBundle(path string) (*bundle.Bundle, func() error, error) {
-	cleanup := func() error { return nil }
-	kind, detectErr := bundle.Detect(path)
-	if detectErr != nil {
-		return nil, cleanup, fmt.Errorf("resume: re-detect bundle: %w", detectErr)
-	}
-	switch kind {
-	case bundle.KindBundle:
-		opened, c, openErr := bundle.Open(path, "")
-		if openErr != nil {
-			return nil, cleanup, fmt.Errorf("resume: re-open bundle %s: %w (original archive may have moved — re-supply with --file)", path, openErr)
+	opened, _, kind, cleanup, err := openBundleOrFile(path)
+	if err != nil {
+		switch kind {
+		case bundle.KindBundle:
+			return nil, cleanup, fmt.Errorf("resume: re-open bundle %s: %w (original archive may have moved — re-supply with --file)", path, err)
+		case bundle.KindBundleDir:
+			return nil, cleanup, fmt.Errorf("resume: re-open bundle dir %s: %w", path, err)
+		default:
+			return nil, cleanup, fmt.Errorf("resume: re-detect bundle: %w", err)
 		}
-		return opened, c, nil
-	case bundle.KindBundleDir:
-		opened, openErr := bundle.OpenDir(path)
-		if openErr != nil {
-			return nil, cleanup, fmt.Errorf("resume: re-open bundle dir %s: %w", path, openErr)
-		}
-		return opened, cleanup, nil
 	}
-	return nil, cleanup, nil
+	return opened, cleanup, nil
 }
 
 // buildResumeExecutor constructs the default ClawExecutor for the

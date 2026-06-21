@@ -36,7 +36,6 @@ import (
 	"github.com/SocialGouv/iterion/pkg/secrets"
 	"github.com/SocialGouv/iterion/pkg/server"
 	"github.com/SocialGouv/iterion/pkg/server/cloudpublisher"
-	"github.com/SocialGouv/iterion/pkg/store/blob"
 	mongostore "github.com/SocialGouv/iterion/pkg/store/mongo"
 	"github.com/SocialGouv/iterion/pkg/webhooks"
 )
@@ -197,14 +196,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	}
 	defer natsConn.Close()
 
-	bc, err := blob.NewS3(rootCtx, blob.Config{
-		Endpoint:        cfg.S3.Endpoint,
-		Region:          cfg.S3.Region,
-		Bucket:          cfg.S3.Bucket,
-		AccessKeyID:     cfg.S3.AccessKeyID,
-		SecretAccessKey: cfg.S3.SecretAccessKey,
-		UsePathStyle:    cfg.S3.UsePathStyle,
-	})
+	bc, err := newCloudBlob(rootCtx, cfg.S3)
 	if err != nil {
 		return fmt.Errorf("server: build blob client: %w", err)
 	}
@@ -213,13 +205,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	// Server-side store: no NATS lock provider — the server never
 	// executes runs, only publishes them. The runner pod is the
 	// only place that takes leases.
-	st, err := mongostore.New(rootCtx, mongostore.Config{
-		URI:           cfg.Mongo.URI,
-		Database:      cfg.Mongo.DB,
-		EventsTTLDays: cfg.Mongo.EventsTTLDays,
-		Logger:        logger,
-		Blob:          bc,
-	})
+	st, err := newCloudMongoStore(rootCtx, cfg.Mongo, bc, logger, nil)
 	if err != nil {
 		return fmt.Errorf("server: build mongo store: %w", err)
 	}

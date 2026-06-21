@@ -16,8 +16,6 @@ import (
 	iterconfig "github.com/SocialGouv/iterion/pkg/config"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/store"
-	"github.com/SocialGouv/iterion/pkg/store/blob"
-	mongostore "github.com/SocialGouv/iterion/pkg/store/mongo"
 )
 
 // `iterion migrate to-cloud` walks a filesystem .iterion/ store and
@@ -147,25 +145,12 @@ func runMigrateToCloud(cmd *cobra.Command, _ []string) error {
 
 	var dst store.RunStore
 	if !migrateOpts.dryRun {
-		bc, err := blob.NewS3(ctx, blob.Config{
-			Endpoint:        cfg.S3.Endpoint,
-			Region:          cfg.S3.Region,
-			Bucket:          cfg.S3.Bucket,
-			AccessKeyID:     cfg.S3.AccessKeyID,
-			SecretAccessKey: cfg.S3.SecretAccessKey,
-			UsePathStyle:    cfg.S3.UsePathStyle,
-		})
+		bc, err := newCloudBlob(ctx, cfg.S3)
 		if err != nil {
 			return fmt.Errorf("migrate: build blob: %w", err)
 		}
 		defer func() { _ = bc.Close() }()
-		ms, err := mongostore.New(ctx, mongostore.Config{
-			URI:           cfg.Mongo.URI,
-			Database:      cfg.Mongo.DB,
-			EventsTTLDays: cfg.Mongo.EventsTTLDays,
-			Logger:        logger,
-			Blob:          bc,
-		})
+		ms, err := newCloudMongoStore(ctx, cfg.Mongo, bc, logger, nil)
 		if err != nil {
 			return fmt.Errorf("migrate: build mongo: %w", err)
 		}
@@ -360,14 +345,7 @@ func mustListInteractions(ctx context.Context, src store.RunStore, runID string,
 // stall the migration past the caller's deadline.
 func preflightCloudTargets(ctx context.Context, cfg iterconfig.Config, logger *iterlog.Logger) error {
 	// Mongo: rs.status() — succeeds only on a replica-set member.
-	bc, err := blob.NewS3(ctx, blob.Config{
-		Endpoint:        cfg.S3.Endpoint,
-		Region:          cfg.S3.Region,
-		Bucket:          cfg.S3.Bucket,
-		AccessKeyID:     cfg.S3.AccessKeyID,
-		SecretAccessKey: cfg.S3.SecretAccessKey,
-		UsePathStyle:    cfg.S3.UsePathStyle,
-	})
+	bc, err := newCloudBlob(ctx, cfg.S3)
 	if err != nil {
 		return fmt.Errorf("s3 client: %w", err)
 	}
@@ -386,13 +364,7 @@ func preflightCloudTargets(ctx context.Context, cfg iterconfig.Config, logger *i
 	// Mongo replSet probe via a dedicated short-lived store. We don't
 	// reuse `dst` from the caller because the conformance check only
 	// makes sense before the loop; dst stays the workhorse store.
-	probeStore, err := mongostore.New(ctx, mongostore.Config{
-		URI:           cfg.Mongo.URI,
-		Database:      cfg.Mongo.DB,
-		EventsTTLDays: cfg.Mongo.EventsTTLDays,
-		Logger:        logger,
-		Blob:          bc,
-	})
+	probeStore, err := newCloudMongoStore(ctx, cfg.Mongo, bc, logger, nil)
 	if err != nil {
 		return fmt.Errorf("mongo connect: %w", err)
 	}

@@ -478,25 +478,20 @@ func doctorRepoRoot(file string) string {
 func loadWorkflowForDoctor(path string) (*ir.Workflow, error) {
 	path = ResolveRecipePath(path)
 
-	kind, err := bundle.Detect(path)
+	b, iterPath, kind, cleanup, err := openBundleOrFile(path)
+	defer cleanup()
 	if err != nil {
-		return nil, fmt.Errorf("cannot inspect %s: %w", path, err)
+		switch kind {
+		case bundle.KindBundle:
+			return nil, fmt.Errorf("cannot open bundle: %w", err)
+		case bundle.KindBundleDir:
+			return nil, fmt.Errorf("cannot open bundle dir: %w", err)
+		default:
+			return nil, fmt.Errorf("cannot inspect %s: %w", path, err)
+		}
 	}
-	switch kind {
-	case bundle.KindBundle:
-		b, cleanup, openErr := bundle.Open(path, "")
-		if openErr != nil {
-			return nil, fmt.Errorf("cannot open bundle: %w", openErr)
-		}
-		defer cleanup()
-		wf, _, cErr := runview.CompileBundleWorkflow(b.IterPath, b)
-		return wf, cErr
-	case bundle.KindBundleDir:
-		b, openErr := bundle.OpenDir(path)
-		if openErr != nil {
-			return nil, fmt.Errorf("cannot open bundle dir: %w", openErr)
-		}
-		wf, _, cErr := runview.CompileBundleWorkflow(b.IterPath, b)
+	if b != nil {
+		wf, _, cErr := runview.CompileBundleWorkflow(iterPath, b)
 		return wf, cErr
 	}
 	return runview.CompileWorkflow(path)
