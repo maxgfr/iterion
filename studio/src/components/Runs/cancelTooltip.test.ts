@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 
-import { cancelTooltip } from "./RunHeader";
+import { cancelTooltip } from "./runHeader/cancelTooltip";
 
-// The helper is plain text, but RunHeader.tsx pulls in wouter and React
-// modules that some browsers expect at module-eval time. The jsdom env
-// is the safe choice for the import, even though the tested function
+// The helper is plain text; the jsdom env is preserved for symmetry
+// with the rest of the Runs/ tests, even though the tested function
 // itself never touches the DOM.
 describe("cancelTooltip", () => {
   it("explains the queue-drop case", () => {
