@@ -5,6 +5,7 @@
 import { useLocation } from "wouter";
 
 import type { RunHeader as RunHeaderType } from "@/api/runs";
+import { HeaderBanner } from "@/components/ui";
 
 // ForkedFromRow surfaces the parent-run breadcrumb on a forked run.
 // Renders a one-line "⑂ forked from <name> @ <node>/turn <N>" with
@@ -18,7 +19,7 @@ export default function ForkedFromRow({ run }: { run: RunHeaderType }) {
   const turnLabel = anchor?.turn_index ?? -1;
   const focusParent = () => setLocation(`/runs/${encodeURIComponent(parentID)}`);
   return (
-    <div className="shrink-0 px-4 py-1.5 bg-info-soft/40 border-b border-info/30 flex items-center gap-2 text-[11px]">
+    <HeaderBanner tone="info">
       <span className="text-fg-muted">⑂ Forked from</span>
       <button
         onClick={focusParent}
@@ -36,6 +37,6 @@ export default function ForkedFromRow({ run }: { run: RunHeaderType }) {
           rewound
         </span>
       )}
-    </div>
+    </HeaderBanner>
   );
 }

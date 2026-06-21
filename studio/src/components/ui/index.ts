@@ -39,6 +39,9 @@ export type { BadgeProps, BadgeVariant, BadgeSize } from "./Badge";
 export { InlineBanner } from "./InlineBanner";
 export type { InlineBannerProps, InlineBannerTone } from "./InlineBanner";
 
+export { HeaderBanner } from "./HeaderBanner";
+export type { HeaderBannerProps, HeaderBannerTone } from "./HeaderBanner";
+
 export { Chip } from "./Chip";
 export type { ChipProps } from "./Chip";
 

@@ -5,6 +5,7 @@
 import { useLocation } from "wouter";
 
 import type { RunHeader as RunHeaderType } from "@/api/runs";
+import { HeaderBanner } from "@/components/ui";
 
 // SourceTicketRow surfaces the originating kanban issue when the run
 // was dispatched by the native dispatcher. Clicking opens /board with
@@ -29,7 +30,7 @@ export default function SourceTicketRow({
   const focusIssue = () =>
     setLocation(`/board?focus=${encodeURIComponent(issueID)}`);
   return (
-    <div className="shrink-0 px-4 py-1.5 bg-info-soft/40 border-b border-info/30 flex items-center gap-2 text-[11px]">
+    <HeaderBanner tone="info">
       <span className="text-fg-muted shrink-0">From ticket</span>
       <button
         onClick={focusIssue}
@@ -41,7 +42,7 @@ export default function SourceTicketRow({
         )}
         <span className="truncate text-fg-default">{title}</span>
       </button>
-    </div>
+    </HeaderBanner>
   );
 }
 
