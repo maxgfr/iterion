@@ -450,6 +450,57 @@ func (c *runConn) streamEvents(fromSeq, snapshotSeq int64) {
 	c.streamEventsLocal(fromSeq, snapshotSeq)
 }
 
+// replayEventPages drains the paginated replay window
+// [fromSeq, snapshotSeq+1) in runview.MaxEventsPerPage batches, shipping
+// each non-empty page as one wsTypeEventBatch envelope. It is the shared
+// spine of the broker-backed (streamEventsLocal) and cross-store
+// (streamEventsCrossStore) replay loops, which differ only in the storage
+// backend — supplied here as the loadPage closure.
+//
+// It returns true when the caller must stop the WHOLE stream and NOT
+// proceed to live-tailing: either the peer closed (sendEnvelope failed) or
+// loadPage signalled a fatal stop (e.g. a corrupted event log, after the
+// closure has already shipped its own partial batch + error envelope). It
+// returns false when replay ended normally (load error, short page, or the
+// snapshot boundary) and the caller should proceed to its tail.
+//
+// loadPage returns (events, stop, err):
+//   - events: the next page; shipped by this helper only when stop is false
+//     and err is nil (closures drop events they don't want shipped)
+//   - stop:   the closure already sent its own envelopes and the whole
+//     stream must end now (corruption path)
+//   - err:    a non-fatal load error — replay ends, caller still tails
+func (c *runConn) replayEventPages(
+	fromSeq, snapshotSeq int64,
+	loadPage func(next int64) (events []*store.Event, stop bool, err error),
+) bool {
+	if snapshotSeq != runview.NoEventsSeq && (fromSeq > 0 || snapshotSeq > 0) {
+		next := fromSeq
+		for {
+			events, stop, err := loadPage(next)
+			if stop {
+				return true
+			}
+			if len(events) > 0 {
+				if !c.sendEnvelope(wsTypeEventBatch, events, "") {
+					return true
+				}
+			}
+			if err != nil {
+				break
+			}
+			if len(events) < runview.MaxEventsPerPage {
+				break
+			}
+			next = events[len(events)-1].Seq + 1
+			if next > snapshotSeq {
+				break
+			}
+		}
+	}
+	return false
+}
+
 // streamEventsCrossStore is the read-only cross-store path: replay
 // historical events from the foreign store's events.jsonl, then tail
 // the file via fsnotify (with a polling fallback) for new events. The
@@ -472,27 +523,15 @@ func (c *runConn) streamEventsCrossStore(fromSeq, snapshotSeq int64) {
 
 	// 1. Replay historical events [fromSeq, snapshotSeq+1) via the
 	//    foreign store's paginated range API.
-	if snapshotSeq != runview.NoEventsSeq && (fromSeq > 0 || snapshotSeq > 0) {
-		next := fromSeq
-		for {
-			events, err := c.xStore.LoadEventsRange(context.Background(), c.runID, next, snapshotSeq+1, runview.MaxEventsPerPage)
-			if err != nil {
-				c.server.logger.Warn("runs_ws: cross-store replay (%s): %v", c.runID, err)
-				break
-			}
-			if len(events) > 0 {
-				if !c.sendEnvelope(wsTypeEventBatch, events, "") {
-					return
-				}
-			}
-			if len(events) < runview.MaxEventsPerPage {
-				break
-			}
-			next = events[len(events)-1].Seq + 1
-			if next > snapshotSeq {
-				break
-			}
+	if c.replayEventPages(fromSeq, snapshotSeq, func(next int64) ([]*store.Event, bool, error) {
+		events, err := c.xStore.LoadEventsRange(context.Background(), c.runID, next, snapshotSeq+1, runview.MaxEventsPerPage)
+		if err != nil {
+			c.server.logger.Warn("runs_ws: cross-store replay (%s): %v", c.runID, err)
+			return nil, false, err // end replay; the caller still tails the file
 		}
+		return events, false, nil
+	}) {
+		return
 	}
 
 	// 2. Tail the foreign events.jsonl for new appends. Snapshot the
@@ -726,44 +765,31 @@ func (c *runConn) checkCrossStoreTerminal(eventsPath string, offset *int64, last
 // studio's status pill stuck on whatever pre-terminal status the
 // last replayed event implied.
 func (c *runConn) streamEventsLocal(fromSeq, snapshotSeq int64) {
-	if snapshotSeq != runview.NoEventsSeq && (fromSeq > 0 || snapshotSeq > 0) {
-		next := fromSeq
-		for {
-			events, err := c.server.runs.LoadEventsCtx(c.authCtx(), c.runID, next, snapshotSeq+1)
-			// LoadEventsCtx returns both partial events AND
-			// ErrEventsCorrupted when a run's events.jsonl is too
-			// damaged to trust. Surface that to the client as an
-			// error envelope BEFORE breaking so the studio can
-			// raise a banner instead of silently rendering a
-			// truncated history as if it were complete.
-			if errors.Is(err, store.ErrEventsCorrupted) {
-				if len(events) > 0 {
-					_ = c.sendEnvelope(wsTypeEventBatch, events, "")
-				}
-				c.sendError("events_corrupted", err.Error(), "")
-				return
-			}
-			if err != nil {
-				break
-			}
+	// Ship each page as one batch envelope: cuts per-envelope marshal +
+	// WS-frame overhead by the page size (up to MaxEventsPerPage×). The
+	// frontend dispatches one state update per page instead of one per event.
+	if c.replayEventPages(fromSeq, snapshotSeq, func(next int64) ([]*store.Event, bool, error) {
+		events, err := c.server.runs.LoadEventsCtx(c.authCtx(), c.runID, next, snapshotSeq+1)
+		// LoadEventsCtx returns both partial events AND
+		// ErrEventsCorrupted when a run's events.jsonl is too
+		// damaged to trust. Surface that to the client as an
+		// error envelope BEFORE stopping so the studio can
+		// raise a banner instead of silently rendering a
+		// truncated history as if it were complete. stop=true so the
+		// whole stream ends here (no live tail on a corrupt log).
+		if errors.Is(err, store.ErrEventsCorrupted) {
 			if len(events) > 0 {
-				// Ship the whole page as one batch envelope: cuts
-				// per-envelope marshal + WS-frame overhead by the
-				// page size (up to MaxEventsPerPage×). The frontend
-				// dispatches one state update per page instead of
-				// one per event.
-				if !c.sendEnvelope(wsTypeEventBatch, events, "") {
-					return
-				}
+				_ = c.sendEnvelope(wsTypeEventBatch, events, "")
 			}
-			if len(events) < runview.MaxEventsPerPage {
-				break
-			}
-			next = events[len(events)-1].Seq + 1
-			if next > snapshotSeq {
-				break
-			}
+			c.sendError("events_corrupted", err.Error(), "")
+			return nil, true, err
 		}
+		if err != nil {
+			return nil, false, err // end replay; the caller still tails the broker
+		}
+		return events, false, nil
+	}) {
+		return
 	}
 
 	c.mu.Lock()
