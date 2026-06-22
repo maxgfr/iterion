@@ -226,95 +226,10 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("server: build sealer: %w", err)
 	}
-	apiKeysStore := secrets.NewMongoApiKeyStore(st.DB())
-	if err := apiKeysStore.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure api_keys schema: %w", err)
-	}
-	genericSecretsStore := secrets.NewMongoGenericSecretStore(st.DB())
-	if err := genericSecretsStore.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure generic_secrets schema: %w", err)
-	}
-	runSecretsStore := secrets.NewMongoRunSecretsStore(st.DB())
-	if err := runSecretsStore.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure run_secrets schema: %w", err)
-	}
-	oauthStore := secrets.NewMongoOAuthStore(st.DB())
-	if err := oauthStore.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure oauth schema: %w", err)
-	}
-	botBindingsStore := secrets.NewMongoBotSecretBindingStore(st.DB())
-	if err := botBindingsStore.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure bot_secret_bindings schema: %w", err)
-	}
-	webhookStores := webhooks.NewMongoStores(st.DB())
-	if err := webhooks.EnsureSchema(rootCtx, st.DB()); err != nil {
-		return fmt.Errorf("server: ensure webhooks schema: %w", err)
-	}
-	forgeConnStore := forge.NewMongoConnectionStore(st.DB())
-	if err := forgeConnStore.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure forge_connections schema: %w", err)
-	}
-	forgeIntegrationStore := forge.NewMongoRepoIntegrationStore(st.DB())
-	if err := forgeIntegrationStore.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure repo_integrations schema: %w", err)
-	}
-	forgeOAuthAppStore := forge.NewMongoOAuthAppStore(st.DB())
-	if err := forgeOAuthAppStore.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure forge_oauth_apps schema: %w", err)
-	}
-	orgSSOStore := orgsso.NewMongoStore(st.DB())
-	if err := orgSSOStore.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure org_sso_providers schema: %w", err)
-	}
-	orgDomainStore := orgsso.NewMongoDomainStore(st.DB())
-	if err := orgDomainStore.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure org_verified_domains schema: %w", err)
-	}
-	// Mongo-backed OIDC state store: PendingAuth must survive across replicas
-	// (an OIDC /start on pod A and /callback on pod B), which the per-process
-	// memory store can't guarantee in HA.
-	oidcStateStore := oidc.NewMongoStateStore(st.DB(), 10*time.Minute)
-	if err := oidcStateStore.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure oidc_states schema: %w", err)
-	}
-	orgUsageCounter := orgusage.NewMongoCounter(st.DB())
-	if err := orgusage.EnsureSchema(rootCtx, st.DB()); err != nil {
-		return fmt.Errorf("server: ensure org_usage schema: %w", err)
-	}
-	auditStore := audit.NewMongoStore(st.DB())
-	if err := audit.EnsureSchema(rootCtx, st.DB()); err != nil {
-		return fmt.Errorf("server: ensure audit schema: %w", err)
-	}
-	// Hosted marketplace (Mongo-backed) — opt-in for cloud via
-	// ITERION_CLOUD_MARKETPLACE because the submit/install paths are
-	// local-mode only today (cloud is rejected pending a vetted submission
-	// flow — see pkg/server/marketplace_routes.go). When enabled it surfaces
-	// the read-only browse view + sets marketplace_enabled. Local self-host
-	// wires a JSONStore unconditionally in pkg/cli/studio.go.
-	var marketplaceStore marketplace.Store
-	if enabled, _ := strconv.ParseBool(os.Getenv("ITERION_CLOUD_MARKETPLACE")); enabled {
-		if err := marketplace.EnsureSchema(rootCtx, st.DB()); err != nil {
-			return fmt.Errorf("server: ensure marketplace schema: %w", err)
-		}
-		marketplaceStore = marketplace.NewMongoStore(st.DB())
-	}
-	patStore := pat.NewMongoStore(st.DB())
-	if err := pat.EnsureSchema(rootCtx, st.DB()); err != nil {
-		return fmt.Errorf("server: ensure pat schema: %w", err)
-	}
-	// ITERION_PAT_MAX_TTL (Go duration, e.g. "2160h" = 90 days) caps
-	// every personal access token's lifetime. Unset = no platform cap.
-	var patMaxTTL time.Duration
-	if v := os.Getenv("ITERION_PAT_MAX_TTL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			patMaxTTL = d
-		} else {
-			logger.Warn("server: invalid ITERION_PAT_MAX_TTL %q ignored", v)
-		}
-	}
-	memStore := mongostore.NewMongoMemoryStore(st.DB())
-	if err := memStore.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure memory schema: %w", err)
+
+	stores, err := buildCloudStores(rootCtx, st)
+	if err != nil {
+		return err
 	}
 
 	pub, err := cloudpublisher.New(cloudpublisher.Config{
@@ -323,12 +238,12 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		MongoColl:      st.RunsCollection(),
 		Logger:         logger,
 		Metrics:        mreg,
-		ApiKeys:        apiKeysStore,
-		GenericSecrets: genericSecretsStore,
-		BotBindings:    botBindingsStore,
-		RunSecrets:     runSecretsStore,
+		ApiKeys:        stores.apiKeys,
+		GenericSecrets: stores.genericSecrets,
+		BotBindings:    stores.botBindings,
+		RunSecrets:     stores.runSecrets,
 		Sealer:         sealer,
-		OAuthForfait:   oauthStore,
+		OAuthForfait:   stores.oauth,
 	})
 	if err != nil {
 		return fmt.Errorf("server: build cloud publisher: %w", err)
@@ -342,53 +257,12 @@ func runServer(cmd *cobra.Command, _ []string) error {
 
 	disableAuth, _ := strconv.ParseBool(os.Getenv("ITERION_DISABLE_AUTH"))
 
-	// Wire auth (identity store, JWT signer, refresh sessions) and
-	// the OIDC connector registry. Bootstrap a super-admin if the
-	// env var is set and no user matches yet.
-	identityStore := identity.NewMongoStore(st.DB())
-	if err := identityStore.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure identity schema: %w", err)
-	}
-	sessions := iterauth.NewMongoSessionStore(st.DB())
-	if err := sessions.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure sessions schema: %w", err)
-	}
-
-	signer, err := iterauth.NewJWTSigner(cfg.Auth.JWTSecret, cfg.Auth.AccessTTL)
-	if err != nil {
-		return fmt.Errorf("server: build jwt signer: %w", err)
-	}
-	// SMTP: ITERION_SMTP_HOST switches the real mailer on; otherwise the log
-	// fallback keeps flows testable and server_info reports email_enabled=false
-	// so the SPA hides forgot-password.
-	mailer, err := buildMailer(logger)
+	authStack, err := buildAuthStack(rootCtx, cfg, st, stores, logger)
 	if err != nil {
 		return err
 	}
-	resetStore := iterauth.NewMongoPasswordResetStore(st.DB())
-	if err := resetStore.EnsureSchema(rootCtx); err != nil {
-		return fmt.Errorf("server: ensure password_resets schema: %w", err)
-	}
 
-	authSvc, err := iterauth.NewService(iterauth.Config{
-		Store:                    identityStore,
-		Sessions:                 sessions,
-		Signer:                   signer,
-		SignupMode:               iterauth.SignupMode(cfg.Auth.SignupMode),
-		RefreshTTL:               cfg.Auth.RefreshTTL,
-		Logger:                   logger,
-		Resets:                   resetStore,
-		Mailer:                   mailer,
-		PublicURL:                cfg.Auth.PublicURL,
-		OrgSSO:                   orgSSOStore,
-		Domains:                  orgDomainStore,
-		TrustedAutoLinkProviders: cfg.Auth.TrustedAutoLinkProviders,
-	})
-	if err != nil {
-		return fmt.Errorf("server: build auth service: %w", err)
-	}
-
-	if err := bootstrapAdmin(rootCtx, cfg, identityStore, authSvc, disableAuth, logger); err != nil {
+	if err := bootstrapAdmin(rootCtx, cfg, authStack.identityStore, authStack.authSvc, disableAuth, logger); err != nil {
 		return err
 	}
 
@@ -408,52 +282,43 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		BaseURL:      cfg.Auth.PublicURL,
 	}
 
-	// Bots: where the inbound-webhook bot resolution (botregistry.ResolveBotPath)
-	// looks for recipes. The official image ships the catalog at /opt/iterion/bots
-	// and sets ITERION_BOTS_PATH; operators may override with a colon-separated
-	// list. Empty → no webhook bot resolution (studio still discovers via WorkDir).
-	var botsPaths []string
-	if bp := os.Getenv("ITERION_BOTS_PATH"); bp != "" {
-		botsPaths = filepath.SplitList(bp)
-	}
-
 	srv := server.New(server.Config{
 		Port:                   serverOpts.port,
 		Bind:                   serverOpts.bind,
-		Bots:                   server.BotsConfig{Paths: botsPaths},
+		Bots:                   server.BotsConfig{Paths: botsPathsFromEnv()},
 		WorkDir:                serverOpts.dir,
 		Store:                  st,
 		Alerts:                 alertSettings,
 		LaunchPublisher:        pub,
 		EventSource:            eventSrc,
 		Mode:                   string(iterconfig.ModeCloud),
-		AuthService:            authSvc,
-		AuthSigner:             signer,
+		AuthService:            authStack.authSvc,
+		AuthSigner:             authStack.signer,
 		OIDCRegistry:           registry,
-		OIDCStates:             oidcStateStore,
-		OrgSSO:                 orgSSOStore,
-		OrgDomains:             orgDomainStore,
-		ApiKeys:                apiKeysStore,
-		GenericSecrets:         genericSecretsStore,
-		BotBindings:            botBindingsStore,
-		ForgeConnections:       forgeConnStore,
-		ForgeIntegrations:      forgeIntegrationStore,
-		ForgeOAuthApps:         forgeOAuthAppStore,
+		OIDCStates:             stores.oidcState,
+		OrgSSO:                 stores.orgSSO,
+		OrgDomains:             stores.orgDomain,
+		ApiKeys:                stores.apiKeys,
+		GenericSecrets:         stores.genericSecrets,
+		BotBindings:            stores.botBindings,
+		ForgeConnections:       stores.forgeConn,
+		ForgeIntegrations:      stores.forgeIntegration,
+		ForgeOAuthApps:         stores.forgeOAuthApp,
 		ForgeGitHubApp:         forgeGitHubAppFromEnv(),
-		WebhookConfigs:         webhookStores.Configs,
-		WebhookDeliveries:      webhookStores.Deliveries,
-		WebhookCounter:         webhookStores.Counter,
-		OrgUsage:               orgUsageCounter,
+		WebhookConfigs:         stores.webhooks.Configs,
+		WebhookDeliveries:      stores.webhooks.Deliveries,
+		WebhookCounter:         stores.webhooks.Counter,
+		OrgUsage:               stores.orgUsage,
 		OrgDefaults:            orgLimitDefaultsFromEnv(),
-		Audit:                  auditStore,
-		Marketplace:            marketplaceStore,
-		PATs:                   patStore,
-		PATMaxTTL:              patMaxTTL,
+		Audit:                  stores.audit,
+		Marketplace:            stores.marketplace,
+		PATs:                   stores.pat,
+		PATMaxTTL:              patMaxTTLFromEnv(logger),
 		Queue:                  natsConn,
-		MemoryStore:            memStore,
-		RunSecrets:             runSecretsStore,
+		MemoryStore:            stores.memory,
+		RunSecrets:             stores.runSecrets,
 		Sealer:                 sealer,
-		OAuthForfait:           oauthStore,
+		OAuthForfait:           stores.oauth,
 		AnthropicOAuthClientID: cfg.Auth.OAuthForfait.AnthropicClientID,
 		CodexOAuthClientID:     cfg.Auth.OAuthForfait.CodexClientID,
 		AccessTTL:              cfg.Auth.AccessTTL,
@@ -474,9 +339,240 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		},
 	}, logger)
 
+	return runServerLoop(rootCtx, srv, mreg, cfg.Metrics.Port, logger)
+}
+
+// cloudStores bundles every Mongo-backed store the cloud server wires
+// into its single server.Config{} literal. Holding them as one value
+// keeps runServer's body readable: the construction + schema-ensure
+// loop lives in buildCloudStores, and the caller just feeds the
+// resulting fields back into the Config.
+type cloudStores struct {
+	apiKeys          *secrets.MongoApiKeyStore
+	genericSecrets   *secrets.MongoGenericSecretStore
+	runSecrets       *secrets.MongoRunSecretsStore
+	oauth            *secrets.MongoOAuthStore
+	botBindings      *secrets.MongoBotSecretBindingStore
+	webhooks         *webhooks.MongoStores
+	forgeConn        *forge.MongoConnectionStore
+	forgeIntegration *forge.MongoRepoIntegrationStore
+	forgeOAuthApp    *forge.MongoOAuthAppStore
+	orgSSO           *orgsso.MongoStore
+	orgDomain        *orgsso.MongoDomainStore
+	oidcState        *oidc.MongoStateStore
+	orgUsage         *orgusage.MongoCounter
+	audit            *audit.MongoStore
+	marketplace      marketplace.Store
+	pat              *pat.MongoStore
+	memory           *mongostore.MongoMemoryStore
+}
+
+// buildCloudStores constructs every Mongo-backed store the cloud
+// server depends on and runs EnsureSchema on them in a single
+// table-driven loop. Construction order is preserved exactly so the
+// resulting EnsureSchema sequence matches the historical inline
+// blocks (api_keys → generic_secrets → … → pat → memory). Marketplace
+// is opt-in via ITERION_CLOUD_MARKETPLACE and is appended to the
+// table only when enabled.
+func buildCloudStores(ctx context.Context, st *mongostore.Store) (*cloudStores, error) {
+	s := &cloudStores{
+		apiKeys:          secrets.NewMongoApiKeyStore(st.DB()),
+		genericSecrets:   secrets.NewMongoGenericSecretStore(st.DB()),
+		runSecrets:       secrets.NewMongoRunSecretsStore(st.DB()),
+		oauth:            secrets.NewMongoOAuthStore(st.DB()),
+		botBindings:      secrets.NewMongoBotSecretBindingStore(st.DB()),
+		webhooks:         webhooks.NewMongoStores(st.DB()),
+		forgeConn:        forge.NewMongoConnectionStore(st.DB()),
+		forgeIntegration: forge.NewMongoRepoIntegrationStore(st.DB()),
+		forgeOAuthApp:    forge.NewMongoOAuthAppStore(st.DB()),
+		orgSSO:           orgsso.NewMongoStore(st.DB()),
+		orgDomain:        orgsso.NewMongoDomainStore(st.DB()),
+		// Mongo-backed OIDC state store: PendingAuth must survive across replicas
+		// (an OIDC /start on pod A and /callback on pod B), which the per-process
+		// memory store can't guarantee in HA.
+		oidcState: oidc.NewMongoStateStore(st.DB(), 10*time.Minute),
+		orgUsage:  orgusage.NewMongoCounter(st.DB()),
+		audit:     audit.NewMongoStore(st.DB()),
+		pat:       pat.NewMongoStore(st.DB()),
+		memory:    mongostore.NewMongoMemoryStore(st.DB()),
+	}
+
+	// Hosted marketplace (Mongo-backed) — opt-in for cloud via
+	// ITERION_CLOUD_MARKETPLACE because the submit/install paths are
+	// local-mode only today (cloud is rejected pending a vetted submission
+	// flow — see pkg/server/marketplace_routes.go). When enabled it surfaces
+	// the read-only browse view + sets marketplace_enabled. Local self-host
+	// wires a JSONStore unconditionally in pkg/cli/studio.go.
+	marketplaceEnabled, _ := strconv.ParseBool(os.Getenv("ITERION_CLOUD_MARKETPLACE"))
+
+	schemas := []schemaEnsurer{
+		{"api_keys", s.apiKeys.EnsureSchema},
+		{"generic_secrets", s.genericSecrets.EnsureSchema},
+		{"run_secrets", s.runSecrets.EnsureSchema},
+		{"oauth", s.oauth.EnsureSchema},
+		{"bot_secret_bindings", s.botBindings.EnsureSchema},
+		{"webhooks", func(c context.Context) error { return webhooks.EnsureSchema(c, st.DB()) }},
+		{"forge_connections", s.forgeConn.EnsureSchema},
+		{"repo_integrations", s.forgeIntegration.EnsureSchema},
+		{"forge_oauth_apps", s.forgeOAuthApp.EnsureSchema},
+		{"org_sso_providers", s.orgSSO.EnsureSchema},
+		{"org_verified_domains", s.orgDomain.EnsureSchema},
+		{"oidc_states", s.oidcState.EnsureSchema},
+		{"org_usage", func(c context.Context) error { return orgusage.EnsureSchema(c, st.DB()) }},
+		{"audit", func(c context.Context) error { return audit.EnsureSchema(c, st.DB()) }},
+	}
+	if marketplaceEnabled {
+		schemas = append(schemas, schemaEnsurer{"marketplace", func(c context.Context) error { return marketplace.EnsureSchema(c, st.DB()) }})
+	}
+	schemas = append(schemas,
+		schemaEnsurer{"pat", func(c context.Context) error { return pat.EnsureSchema(c, st.DB()) }},
+		schemaEnsurer{"memory", s.memory.EnsureSchema},
+	)
+
+	if err := runSchemaEnsurers(ctx, schemas); err != nil {
+		return nil, err
+	}
+	if marketplaceEnabled {
+		s.marketplace = marketplace.NewMongoStore(st.DB())
+	}
+	return s, nil
+}
+
+// schemaEnsurer pairs a Mongo collection label (used in the
+// "server: ensure <label> schema" error wrapping) with the
+// EnsureSchema callable. buildCloudStores + buildAuthStack walk a
+// slice of these in a single loop so each schema-ensure line stays a
+// one-liner.
+type schemaEnsurer struct {
+	label string
+	fn    func(context.Context) error
+}
+
+// runSchemaEnsurers walks a slice of schemaEnsurer entries, applying
+// the standard "server: ensure <label> schema: %w" error wrapping on
+// the first failure. Stops on the first error.
+func runSchemaEnsurers(ctx context.Context, ensurers []schemaEnsurer) error {
+	for _, e := range ensurers {
+		if err := e.fn(ctx); err != nil {
+			return fmt.Errorf("server: ensure %s schema: %w", e.label, err)
+		}
+	}
+	return nil
+}
+
+// authStack holds the auth-side dependencies built after the cloud
+// stores: the identity/session stores, the JWT signer, and the
+// assembled auth.Service. Returned as a bundle so runServer can feed
+// individual fields back into server.Config without juggling a long
+// argument list.
+type authStack struct {
+	identityStore *identity.MongoStore
+	sessions      *iterauth.MongoSessionStore
+	signer        *iterauth.JWTSigner
+	resetStore    *iterauth.MongoPasswordResetStore
+	authSvc       *iterauth.Service
+}
+
+// buildAuthStack wires the identity store, sessions store, JWT
+// signer, mailer, password-reset store, and the assembled
+// auth.Service. The construction + schema-ensure order matches the
+// historical inline sequence (identity → sessions → password_resets).
+// Mailer construction is delegated to buildMailer (SMTP when
+// ITERION_SMTP_HOST is set, else the log fallback).
+func buildAuthStack(ctx context.Context, cfg iterconfig.Config, st *mongostore.Store, stores *cloudStores, logger *iterlog.Logger) (*authStack, error) {
+	a := &authStack{
+		identityStore: identity.NewMongoStore(st.DB()),
+		sessions:      iterauth.NewMongoSessionStore(st.DB()),
+		resetStore:    iterauth.NewMongoPasswordResetStore(st.DB()),
+	}
+
+	if err := runSchemaEnsurers(ctx, []schemaEnsurer{
+		{"identity", a.identityStore.EnsureSchema},
+		{"sessions", a.sessions.EnsureSchema},
+	}); err != nil {
+		return nil, err
+	}
+
+	signer, err := iterauth.NewJWTSigner(cfg.Auth.JWTSecret, cfg.Auth.AccessTTL)
+	if err != nil {
+		return nil, fmt.Errorf("server: build jwt signer: %w", err)
+	}
+	a.signer = signer
+
+	// SMTP: ITERION_SMTP_HOST switches the real mailer on; otherwise the log
+	// fallback keeps flows testable and server_info reports email_enabled=false
+	// so the SPA hides forgot-password.
+	mailer, err := buildMailer(logger)
+	if err != nil {
+		return nil, err
+	}
+	if err := runSchemaEnsurers(ctx, []schemaEnsurer{
+		{"password_resets", a.resetStore.EnsureSchema},
+	}); err != nil {
+		return nil, err
+	}
+
+	svc, err := iterauth.NewService(iterauth.Config{
+		Store:                    a.identityStore,
+		Sessions:                 a.sessions,
+		Signer:                   signer,
+		SignupMode:               iterauth.SignupMode(cfg.Auth.SignupMode),
+		RefreshTTL:               cfg.Auth.RefreshTTL,
+		Logger:                   logger,
+		Resets:                   a.resetStore,
+		Mailer:                   mailer,
+		PublicURL:                cfg.Auth.PublicURL,
+		OrgSSO:                   stores.orgSSO,
+		Domains:                  stores.orgDomain,
+		TrustedAutoLinkProviders: cfg.Auth.TrustedAutoLinkProviders,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("server: build auth service: %w", err)
+	}
+	a.authSvc = svc
+	return a, nil
+}
+
+// patMaxTTLFromEnv parses ITERION_PAT_MAX_TTL (a Go duration, e.g.
+// "2160h" = 90 days) into the platform-wide cap applied to every
+// personal access token. Unset or invalid values return 0 (no cap);
+// an invalid value is logged so the operator notices.
+func patMaxTTLFromEnv(logger *iterlog.Logger) time.Duration {
+	v := os.Getenv("ITERION_PAT_MAX_TTL")
+	if v == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		logger.Warn("server: invalid ITERION_PAT_MAX_TTL %q ignored", v)
+		return 0
+	}
+	return d
+}
+
+// botsPathsFromEnv reads ITERION_BOTS_PATH — the colon-separated list
+// of directories the inbound-webhook bot resolver searches for
+// recipes. The official image ships the catalog at /opt/iterion/bots
+// and sets this; an empty value means studio still discovers bots via
+// WorkDir but webhook-driven launches won't find anything.
+func botsPathsFromEnv() []string {
+	bp := os.Getenv("ITERION_BOTS_PATH")
+	if bp == "" {
+		return nil
+	}
+	return filepath.SplitList(bp)
+}
+
+// runServerLoop starts the dedicated Prometheus metrics listener and
+// the main HTTP server, then blocks until SIGINT/SIGTERM (via the
+// parent rootCtx) or the server returns an error. On signal it runs a
+// 30s graceful shutdown; on listen error it propagates the error
+// upstream. Metrics startup is synchronous so a port-conflict surfaces
+// at boot, not later.
+func runServerLoop(rootCtx context.Context, srv *server.Server, mreg *metrics.Registry, metricsPort int, logger *iterlog.Logger) error {
 	// Prometheus metrics on a dedicated port (plan §F T-40). Bound
 	// synchronously so a port-conflict surfaces at boot, not later.
-	metricsAddr := fmt.Sprintf(":%d", cfg.Metrics.Port)
+	metricsAddr := fmt.Sprintf(":%d", metricsPort)
 	metricsSrv, err := mreg.StartServer(metricsAddr, logger)
 	if err != nil {
 		return fmt.Errorf("server: start metrics: %w", err)
