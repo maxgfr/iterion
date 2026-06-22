@@ -33,11 +33,18 @@ func New(httpClient *http.Client, baseURL, token string) *AdminClient {
 
 func (c *AdminClient) Provider() forge.Provider { return forge.ProviderForgejo }
 
-func (c *AdminClient) do(ctx context.Context, method, path string, body any, out any) (int, error) {
-	return forge.DoJSON(ctx, c.HTTP, method, c.BaseURL+"/api/v1"+path, "forgejo", func(req *http.Request) {
+// http returns the shared adminHTTP core wired with the Gitea
+// `token` Authorization header. Built per-call so AdminClient keeps
+// its struct-literal constructor surface intact.
+func (c *AdminClient) http() forge.AdminHTTP {
+	return forge.NewAdminHTTP(c.HTTP, c.BaseURL+"/api/v1", "forgejo", func(req *http.Request) {
 		req.Header.Set("Authorization", "token "+c.Token)
 		req.Header.Set("Accept", "application/json")
-	}, body, out)
+	})
+}
+
+func (c *AdminClient) do(ctx context.Context, method, path string, body any, out any) (int, error) {
+	return c.http().Do(ctx, method, path, body, out)
 }
 
 func statusErr(op string, code int) error {
@@ -45,19 +52,7 @@ func statusErr(op string, code int) error {
 }
 
 func (c *AdminClient) WhoAmI(ctx context.Context) (forge.Identity, error) {
-	var u struct {
-		ID    int64  `json:"id"`
-		Login string `json:"login"`
-		Email string `json:"email"`
-	}
-	code, err := c.do(ctx, http.MethodGet, "/user", nil, &u)
-	if err != nil {
-		return forge.Identity{}, err
-	}
-	if code != http.StatusOK {
-		return forge.Identity{}, statusErr("GET /user", code)
-	}
-	return forge.Identity{Login: u.Login, ID: strconv.FormatInt(u.ID, 10), Email: u.Email, Kind: "user", Namespace: u.Login}, nil
+	return c.http().FetchWhoAmI(ctx, "/user")
 }
 
 // ListRepos returns repos the token can admin. Gitea's /user/repos returns

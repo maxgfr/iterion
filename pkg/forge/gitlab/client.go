@@ -38,13 +38,20 @@ func New(httpClient *http.Client, baseURL, token string) *AdminClient {
 
 func (c *AdminClient) Provider() forge.Provider { return forge.ProviderGitLab }
 
-// do performs one API call against this GitLab instance, delegating the
-// marshal/request/decode plumbing to forge.DoJSON. The token rides the
-// Authorization header (never the URL), so it can't leak via error strings.
-func (c *AdminClient) do(ctx context.Context, method, path string, body any, out any) (int, error) {
-	return forge.DoJSON(ctx, c.HTTP, method, c.BaseURL+"/api/v4"+path, "gitlab", func(req *http.Request) {
+// http returns the shared adminHTTP core wired with the GitLab
+// Authorization header. Built per-call so AdminClient keeps its
+// struct-literal constructor surface intact for tests/callers.
+func (c *AdminClient) http() forge.AdminHTTP {
+	return forge.NewAdminHTTP(c.HTTP, c.BaseURL+"/api/v4", "gitlab", func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}, body, out)
+	})
+}
+
+// do performs one API call against this GitLab instance via the
+// shared HTTP core. The token rides the Authorization header (never
+// the URL), so it can't leak via error strings.
+func (c *AdminClient) do(ctx context.Context, method, path string, body any, out any) (int, error) {
+	return c.http().Do(ctx, method, path, body, out)
 }
 
 // statusErr maps a non-2xx status to the appropriate forge sentinel.
@@ -52,7 +59,10 @@ func statusErr(op string, code int) error {
 	return forge.StatusErr("gitlab", op, code)
 }
 
-// WhoAmI returns the account the token authenticates as.
+// WhoAmI returns the account the token authenticates as. GitLab's
+// /user returns `username` instead of `login` and a free-form `name`,
+// so the response decode happens inline (the shared FetchWhoAmI on
+// AdminHTTP targets the github/forgejo shape).
 func (c *AdminClient) WhoAmI(ctx context.Context) (forge.Identity, error) {
 	var u struct {
 		ID       int64  `json:"id"`
