@@ -1,7 +1,6 @@
 import { Link } from "wouter";
 import {
   DoubleArrowLeftIcon,
-  DoubleArrowRightIcon,
   GearIcon,
 } from "@radix-ui/react-icons";
 
@@ -34,42 +33,56 @@ export default function Sidebar() {
       className={`shrink-0 ${collapsed ? SIDEBAR_W_COLLAPSED : SIDEBAR_W_EXPANDED} h-full bg-surface-1 border-r border-border-default flex flex-col transition-[width] duration-150 ease-out overflow-hidden`}
       aria-label="Primary"
     >
-      {/* Logo (top). The collapse-toggle lives inline next to it when
-          expanded, and at the bottom of the sidebar when collapsed —
-          stacking a chevron directly under the logo in icon-only mode
-          made the two squares read as a single "logo + extension" unit.
-          See ToggleButton below the footer. */}
+      {/* Brand + fold control. Expanded: the logo links Home and the
+          ‹‹ button collapses. Collapsed: the logo *is* the expand control
+          — clicking it unfolds the rail, so fold (‹‹, top) and unfold
+          (the logo) live in the same top-left spot. */}
       <div
         className={`shrink-0 h-12 flex items-center ${collapsed ? "justify-center px-1.5" : "gap-2 px-3"} border-b border-border-default`}
       >
-        <Link
-          href="/"
-          className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
-          title="Iterion home"
-          aria-label="Iterion home"
-        >
-          {/* Icon mark (restored) + wordmark. Collapsed shows the icon
-              alone, centered — the wordmark's bare "I"+caret read as a
-              broken glyph in the 56px rail. */}
-          <img
-            src="/favicon-96x96.png"
-            alt=""
-            aria-hidden="true"
-            className="h-7 w-7 shrink-0 dark:invert"
-          />
-          {!collapsed && <BrandWordmark />}
-        </Link>
-        {!collapsed && (
+        {collapsed ? (
           <button
             type="button"
             onClick={toggle}
-            className="ml-auto inline-flex items-center justify-center h-6 w-6 rounded text-fg-subtle hover:text-fg-default hover:bg-surface-2 transition-colors"
-            title="Collapse sidebar"
-            aria-label="Collapse sidebar"
-            aria-expanded={true}
+            className="inline-flex items-center justify-center hover:opacity-80 transition-opacity"
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+            aria-expanded={false}
           >
-            <DoubleArrowLeftIcon className="w-3.5 h-3.5" />
+            <img
+              src="/favicon-96x96.png"
+              alt=""
+              aria-hidden="true"
+              className="h-7 w-7 shrink-0 dark:invert"
+            />
           </button>
+        ) : (
+          <>
+            <Link
+              href="/"
+              className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
+              title="Iterion home"
+              aria-label="Iterion home"
+            >
+              <img
+                src="/favicon-96x96.png"
+                alt=""
+                aria-hidden="true"
+                className="h-7 w-7 shrink-0 dark:invert"
+              />
+              <BrandWordmark />
+            </Link>
+            <button
+              type="button"
+              onClick={toggle}
+              className="ml-auto inline-flex items-center justify-center h-6 w-6 rounded text-fg-subtle hover:text-fg-default hover:bg-surface-2 transition-colors"
+              title="Collapse sidebar"
+              aria-label="Collapse sidebar"
+              aria-expanded={true}
+            >
+              <DoubleArrowLeftIcon className="w-3.5 h-3.5" />
+            </button>
+          </>
         )}
       </div>
 
@@ -113,22 +126,6 @@ export default function Sidebar() {
         )}
         <UserTeamChip collapsed={collapsed} />
       </div>
-
-      {/* Collapse toggle when collapsed — positioned at the very bottom
-          so it doesn't compete visually with the logo (the chevron
-          square was reading as a second logo when stacked under it). */}
-      {collapsed && (
-        <button
-          type="button"
-          onClick={toggle}
-          className="shrink-0 border-t border-border-default h-7 w-full flex items-center justify-center text-fg-subtle hover:text-fg-default hover:bg-surface-2 transition-colors"
-          title="Expand sidebar"
-          aria-label="Expand sidebar"
-          aria-expanded={false}
-        >
-          <DoubleArrowRightIcon className="w-3.5 h-3.5" />
-        </button>
-      )}
     </aside>
   );
 }

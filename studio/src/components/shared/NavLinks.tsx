@@ -199,7 +199,7 @@ function NavRow({ href, label, icon: Icon, isActive, collapsed, sublistKind, sho
   );
 
   const base = "inline-flex items-center text-xs rounded border transition-colors";
-  const layout = collapsed ? "justify-center h-8 w-10" : "gap-2 px-2 py-1.5";
+  const layout = collapsed ? "justify-center h-8 w-full" : "gap-2 px-2 py-1.5";
   const state = isActive
     ? "border-accent/40 bg-accent-soft text-fg-default"
     : "border-transparent text-fg-muted hover:bg-surface-2 hover:text-fg-default";
@@ -217,7 +217,7 @@ function NavRow({ href, label, icon: Icon, isActive, collapsed, sublistKind, sho
       <div className={`${base} ${layout} ${state} ${collapsed ? "" : "flex"} relative`}>
         <Link
           href={href}
-          className="inline-flex items-center gap-2 min-w-0 flex-1 focus:outline-none"
+          className={`inline-flex items-center gap-2 min-w-0 flex-1 focus:outline-none ${collapsed ? "justify-center" : ""}`}
           aria-current={isActive ? "page" : undefined}
           title={showAlertDot ? `${label} — run needs attention` : label}
           aria-label={showAlertDot ? `${label}, run needs attention` : label}

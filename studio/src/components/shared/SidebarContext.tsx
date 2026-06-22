@@ -71,7 +71,7 @@ export default function SidebarContext({ collapsed }: Props) {
             onClick={onOpenSwitcher}
             title={projectTooltip ?? undefined}
             aria-label={`Project: ${name ?? ""} — switch`}
-            className="flex items-center justify-center h-8 w-10 rounded border border-border-default bg-surface-2 text-fg-muted hover:text-fg-default hover:bg-surface-3 transition-colors"
+            className="flex items-center justify-center h-8 w-full rounded border border-border-default bg-surface-2 text-fg-muted hover:text-fg-default hover:bg-surface-3 transition-colors"
           >
             <FolderOpenGlyph />
           </button>
