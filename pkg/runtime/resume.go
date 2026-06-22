@@ -118,32 +118,10 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 	// converted).
 	answers = e.coerceAnswersToSchema(humanNodeID, answers)
 
-	// Record answers on the interaction. Fall back to the checkpoint's
-	// embedded questions if the interaction file has been deleted.
-	interaction, err := e.store.LoadInteraction(ctx, runID, cp.InteractionID)
-	if err != nil && cp.InteractionQuestions != nil {
-		interaction = &store.Interaction{
-			ID:          cp.InteractionID,
-			RunID:       runID,
-			NodeID:      cp.NodeID,
-			RequestedAt: r.UpdatedAt,
-			Questions:   cp.InteractionQuestions,
-		}
-	} else if err != nil {
-		return fmt.Errorf("runtime: load interaction for resume: %w", err)
-	}
-	now := time.Now().UTC()
-	interaction.AnsweredAt = &now
-	interaction.Answers = answers
-	if err := e.store.WriteInteraction(ctx, interaction); err != nil {
-		return fmt.Errorf("runtime: write answered interaction: %w", err)
-	}
-
-	// Emit human_answers_recorded.
-	if err := e.emit(ctx, runID, store.EventHumanAnswersRecorded, humanNodeID, map[string]interface{}{
-		"interaction_id": cp.InteractionID,
-		"answers":        answers,
-	}); err != nil {
+	// Record answers on the interaction (LoadInteraction + WriteInteraction
+	// + emit human_answers_recorded). Fall back to the checkpoint's embedded
+	// questions if the interaction file has been deleted.
+	if err := e.recordHumanAnswers(ctx, r, cp, answers); err != nil {
 		return err
 	}
 
@@ -158,55 +136,15 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 	}
 	outputs[humanNodeID] = answers
 
-	// Persist artifact if node has publish.
-	humanNode, ok := e.workflow.Nodes[humanNodeID]
-	if !ok {
-		return fmt.Errorf("runtime: human node %q not found in workflow", humanNodeID)
-	}
-	artifactVersions := cp.ArtifactVersions
-	if artifactVersions == nil {
-		artifactVersions = make(map[string]int)
-	}
-	if pub := nodePublish(humanNode); pub != "" {
-		version := artifactVersions[humanNodeID]
-		artifact := &store.Artifact{
-			RunID:   runID,
-			NodeID:  humanNodeID,
-			Version: version,
-			Data:    answers,
-		}
-		if err := e.store.WriteArtifact(ctx, artifact); err != nil {
-			return fmt.Errorf("runtime: write human artifact: %w", err)
-		}
-		artifactVersions[humanNodeID] = version + 1
-		// The artifact itself is durably written; the event is
-		// observational. Best-effort emit — log the failure so the
-		// observability gap is visible rather than swallowing it
-		// entirely on the resume path.
-		if err := e.emit(ctx, runID, store.EventArtifactWritten, humanNodeID, map[string]interface{}{
-			"publish": pub,
-			"version": version,
-		}); err != nil && e.logger != nil {
-			e.logger.Warn("runtime: resume: failed to emit artifact_written for human node %q version %d: %v", humanNodeID, version, err)
-		}
-	}
-
-	// Mark human node as finished.
-	if err := e.emit(ctx, runID, store.EventNodeFinished, humanNodeID, nil); err != nil {
+	// Persist artifact if the human node has publish, then mark it finished.
+	artifactVersions, err := e.materializeHumanArtifact(ctx, runID, humanNodeID, answers, cp.ArtifactVersions)
+	if err != nil {
 		return err
 	}
 
 	// Atomically claim the run (compare-and-set) so a second concurrent
 	// resume can't spawn a duplicate execution racing on run.json.
-	claimed, claimErr := e.store.UpdateRunStatusIf(ctx, runID, store.RunStatusRunning, "",
-		[]store.RunStatus{store.RunStatusPausedWaitingHuman})
-	if claimErr != nil {
-		return fmt.Errorf("runtime: claim run for resume: %w", claimErr)
-	}
-	if !claimed {
-		return fmt.Errorf("runtime: run %q is already being executed (status no longer paused); refusing duplicate resume", runID)
-	}
-	if err := e.emit(ctx, runID, store.EventRunResumed, "", nil); err != nil {
+	if err := e.claimForResume(ctx, runID, store.RunStatusPausedWaitingHuman); err != nil {
 		return err
 	}
 
@@ -267,6 +205,100 @@ func (e *Engine) resumeFromPause(ctx context.Context, r *store.Run, answers map[
 		e.finalizeOnExit(ctx, runID, wtCtx, nil, loopErr)
 	}
 	return loopErr
+}
+
+// recordHumanAnswers loads the pending interaction (falling back to the
+// checkpoint's embedded questions if the on-disk file is missing), stamps
+// the operator's answers + AnsweredAt, writes the interaction back, and
+// emits human_answers_recorded. Shared resumeFromPause helper.
+func (e *Engine) recordHumanAnswers(ctx context.Context, r *store.Run, cp *store.Checkpoint, answers map[string]interface{}) error {
+	runID := r.ID
+	interaction, err := e.store.LoadInteraction(ctx, runID, cp.InteractionID)
+	if err != nil && cp.InteractionQuestions != nil {
+		interaction = &store.Interaction{
+			ID:          cp.InteractionID,
+			RunID:       runID,
+			NodeID:      cp.NodeID,
+			RequestedAt: r.UpdatedAt,
+			Questions:   cp.InteractionQuestions,
+		}
+	} else if err != nil {
+		return fmt.Errorf("runtime: load interaction for resume: %w", err)
+	}
+	now := time.Now().UTC()
+	interaction.AnsweredAt = &now
+	interaction.Answers = answers
+	if err := e.store.WriteInteraction(ctx, interaction); err != nil {
+		return fmt.Errorf("runtime: write answered interaction: %w", err)
+	}
+	return e.emit(ctx, runID, store.EventHumanAnswersRecorded, cp.NodeID, map[string]interface{}{
+		"interaction_id": cp.InteractionID,
+		"answers":        answers,
+	})
+}
+
+// materializeHumanArtifact persists the human node's answers as a versioned
+// artifact (when the node has a publish key), emits node_finished, and
+// returns the bumped artifactVersions map. Initializes a fresh map when the
+// checkpoint deserialised with a nil/omitted versions field. The
+// artifact_written emit is best-effort: the artifact is durably written, so
+// emit failures are logged rather than propagated to keep the resume path
+// from aborting on observability hiccups.
+func (e *Engine) materializeHumanArtifact(ctx context.Context, runID, humanNodeID string, answers map[string]interface{}, artifactVersions map[string]int) (map[string]int, error) {
+	humanNode, ok := e.workflow.Nodes[humanNodeID]
+	if !ok {
+		return nil, fmt.Errorf("runtime: human node %q not found in workflow", humanNodeID)
+	}
+	if artifactVersions == nil {
+		artifactVersions = make(map[string]int)
+	}
+	if pub := nodePublish(humanNode); pub != "" {
+		version := artifactVersions[humanNodeID]
+		artifact := &store.Artifact{
+			RunID:   runID,
+			NodeID:  humanNodeID,
+			Version: version,
+			Data:    answers,
+		}
+		if err := e.store.WriteArtifact(ctx, artifact); err != nil {
+			return nil, fmt.Errorf("runtime: write human artifact: %w", err)
+		}
+		artifactVersions[humanNodeID] = version + 1
+		// The artifact itself is durably written; the event is
+		// observational. Best-effort emit — log the failure so the
+		// observability gap is visible rather than swallowing it
+		// entirely on the resume path.
+		if err := e.emit(ctx, runID, store.EventArtifactWritten, humanNodeID, map[string]interface{}{
+			"publish": pub,
+			"version": version,
+		}); err != nil && e.logger != nil {
+			e.logger.Warn("runtime: resume: failed to emit artifact_written for human node %q version %d: %v", humanNodeID, version, err)
+		}
+	}
+
+	// Mark human node as finished.
+	if err := e.emit(ctx, runID, store.EventNodeFinished, humanNodeID, nil); err != nil {
+		return nil, err
+	}
+	return artifactVersions, nil
+}
+
+// claimForResume atomically claims a run for resume via a compare-and-set
+// on the run status, then emits run_resumed (no data). Returns a clear
+// error when the CAS rejects the transition — typically a second concurrent
+// resume racing the first, which we refuse rather than spawn a duplicate
+// execution clobbering run.json. Used by the human-pause path; the
+// failed-resumable path inlines its own claim because it carries
+// resume-data on the emit.
+func (e *Engine) claimForResume(ctx context.Context, runID string, allowed ...store.RunStatus) error {
+	claimed, claimErr := e.store.UpdateRunStatusIf(ctx, runID, store.RunStatusRunning, "", allowed)
+	if claimErr != nil {
+		return fmt.Errorf("runtime: claim run for resume: %w", claimErr)
+	}
+	if !claimed {
+		return fmt.Errorf("runtime: run %q is already being executed (status no longer paused); refusing duplicate resume", runID)
+	}
+	return e.emit(ctx, runID, store.EventRunResumed, "", nil)
 }
 
 // resumeRebuildState restores the per-run environment, re-mirrors bundle
