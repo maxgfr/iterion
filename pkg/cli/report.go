@@ -139,210 +139,295 @@ func buildReport(r *store.Run, events []*store.Event, s store.RunStore) *report 
 		rpt.Duration = FormatDuration(r.FinishedAt.Sub(r.CreatedAt))
 	}
 
-	nodeSet := make(map[string]bool)
-	stepNum := 0
-
+	rb := &reportBuilder{rpt: rpt, nodeSet: make(map[string]bool)}
 	for _, evt := range events {
-		step := reportStep{
-			Seq:  evt.Seq,
-			Time: evt.Timestamp,
-			Type: string(evt.Type),
-		}
-		if evt.NodeID != "" {
-			step.NodeID = evt.NodeID
-		}
-		if evt.BranchID != "" {
-			step.BranchID = evt.BranchID
-		}
-
-		switch evt.Type {
-		case store.EventRunStarted:
-			step.Summary = "Run started"
-
-		case store.EventNodeStarted:
-			stepNum++
-			kind := ""
-			if evt.Data != nil {
-				if k, ok := evt.Data["kind"].(string); ok {
-					kind = k
-				}
-			}
-			step.Summary = fmt.Sprintf("Step %d: %s (%s)", stepNum, evt.NodeID, kind)
-			nodeSet[evt.NodeID] = true
-
-			if evt.Data != nil {
-				if idx, ok := evt.Data["round_robin_index"]; ok {
-					step.Detail = fmt.Sprintf("Round-robin index: %v → %v", idx, evt.Data["selected_target"])
-				}
-			}
-
-		case store.EventLLMPrompt:
-			if evt.Data == nil {
-				continue
-			}
-			sysLen := 0
-			usrLen := 0
-			if sys, ok := evt.Data["system_prompt"].(string); ok {
-				sysLen = len(sys)
-			}
-			if usr, ok := evt.Data["user_message"].(string); ok {
-				usrLen = len(usr)
-			}
-			step.Summary = fmt.Sprintf("LLM prompt [%s] (system: %d chars, user: %d chars)", evt.NodeID, sysLen, usrLen)
-
-		case store.EventLLMStepFinished:
-			if evt.Data == nil {
-				continue
-			}
-			respLen := 0
-			if resp, ok := evt.Data["response_text"].(string); ok {
-				respLen = len(resp)
-			}
-			tokens := extractTokens(evt.Data)
-			step.Summary = fmt.Sprintf("LLM response [%s] (%d chars)", evt.NodeID, respLen)
-			step.Tokens = tokens
-			rpt.Metrics.TotalInputTokens += extractInt(evt.Data, "input_tokens")
-			rpt.Metrics.CacheReadTokens += extractInt(evt.Data, "cache_read_tokens")
-			rpt.Metrics.CacheWriteTokens += extractInt(evt.Data, "cache_write_tokens")
-
-		case store.EventNodeFinished:
-			if evt.Data == nil {
-				continue
-			}
-			tokens := extractTokens(evt.Data)
-			cost := extractCost(evt.Data)
-			rpt.Metrics.TotalTokens += tokens
-			rpt.Metrics.TotalCostUSD += cost
-			rpt.Metrics.NodeCount++
-
-			summary := ""
-			if output, ok := evt.Data["output"]; ok {
-				if outMap, ok := output.(map[string]interface{}); ok {
-					// Thinking metrics are stamped onto the node output by
-					// stampDelegateOutputMeta for both backends (claude_code
-					// never emits llm_step_finished), so node_finished is the
-					// single canonical source — same as _tokens/_cost_usd.
-					rpt.Metrics.ThinkingTokens += extractInt(outMap, "_thinking_tokens")
-					rpt.Metrics.ThinkingMs += extractInt(outMap, "_thinking_ms")
-					if s, ok := outMap["summary"].(string); ok {
-						summary = truncate(s, 200)
-					}
-					// For judge nodes
-					if approved, ok := outMap["approved"].(bool); ok {
-						conf := ""
-						if c, ok := outMap["confidence"].(string); ok {
-							conf = c
-						}
-						summary = fmt.Sprintf("approved=%v confidence=%s", approved, conf)
-					}
-					if ready, ok := outMap["ready"].(bool); ok {
-						conf := ""
-						if c, ok := outMap["confidence"].(string); ok {
-							conf = c
-						}
-						summary = fmt.Sprintf("ready=%v confidence=%s", ready, conf)
-					}
-				}
-			}
-
-			backendTag := ""
-			if d, ok := evt.Data["_backend"].(string); ok {
-				backendTag = fmt.Sprintf(" [%s]", d)
-			}
-			step.Summary = fmt.Sprintf("Finished: %s%s", evt.NodeID, backendTag)
-			if summary != "" {
-				step.Detail = summary
-			}
-			step.Tokens = tokens
-			step.CostUSD = cost
-
-		case store.EventEdgeSelected:
-			if evt.Data == nil {
-				continue
-			}
-			from, _ := evt.Data["from"].(string)
-			to, _ := evt.Data["to"].(string)
-			info := fmt.Sprintf("%s → %s", from, to)
-			if cond, ok := evt.Data["condition"].(string); ok {
-				negated, _ := evt.Data["negated"].(bool)
-				if negated {
-					info += fmt.Sprintf(" (when NOT %s)", cond)
-				} else {
-					info += fmt.Sprintf(" (when %s)", cond)
-				}
-			}
-			if loop, ok := evt.Data["loop"].(string); ok {
-				iter, _ := evt.Data["iteration"]
-				info += fmt.Sprintf(" [loop: %s, iter: %v]", loop, iter)
-				rpt.Metrics.LoopEdges++
-			}
-			step.Summary = "Edge: " + info
-
-		case store.EventBranchStarted:
-			step.Summary = fmt.Sprintf("Branch started: %s → %s", evt.BranchID, evt.NodeID)
-
-		case store.EventJoinReady:
-			step.Summary = fmt.Sprintf("Join ready: %s", evt.NodeID)
-
-		case store.EventArtifactWritten:
-			if evt.Data != nil {
-				step.Summary = fmt.Sprintf("Artifact: %s (publish: %v, version: %v)", evt.NodeID, evt.Data["publish"], evt.Data["version"])
-			}
-
-		case store.EventBudgetWarning:
-			if evt.Data != nil {
-				step.Summary = fmt.Sprintf("Budget warning: %v (used: %v / limit: %v)", evt.Data["dimension"], evt.Data["used"], evt.Data["limit"])
-			}
-
-		case store.EventRunFinished:
-			step.Summary = "Run finished"
-
-		case store.EventRunFailed:
-			if evt.Data != nil {
-				step.Summary = fmt.Sprintf("Run failed: %v: %v", evt.Data["code"], evt.Data["error"])
-			} else {
-				step.Summary = "Run failed"
-			}
-
-		case store.EventLLMRequest:
-			rpt.Metrics.ModelCalls++
-			continue // skip adding to steps — too noisy
-
-		default:
-			step.Summary = fmt.Sprintf("%s [%s]", evt.Type, evt.NodeID)
-		}
-
-		rpt.Steps = append(rpt.Steps, step)
+		rb.consume(evt)
 	}
 
-	// Collect artifacts.
-	artifactsDir := filepath.Join(s.Root(), "runs", r.ID, "artifacts")
-	if entries, err := os.ReadDir(artifactsDir); err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			nodeID := entry.Name()
-			art, err := s.LoadLatestArtifact(context.Background(), r.ID, nodeID)
-			if err != nil {
-				continue
-			}
-			summary := ""
-			if s, ok := art.Data["summary"].(string); ok {
-				summary = truncate(s, 150)
-			}
-			rpt.Artifacts = append(rpt.Artifacts, reportArtifact{
-				NodeID:  nodeID,
-				Version: art.Version,
-				Summary: summary,
-			})
+	collectArtifacts(rpt, r, s)
+	return rpt
+}
+
+// reportBuilder accumulates per-event state (stepNum, distinct nodeSet) and
+// the running metrics + steps slice on rpt. consume() dispatches each event
+// to its kind-specific summarizer; a summarizer returns false to skip
+// appending the step (used by EventLLMRequest, which only bumps a counter,
+// and by nil-data variants of LLMPrompt/LLMStepFinished/NodeFinished/
+// EdgeSelected that have nothing to render).
+type reportBuilder struct {
+	rpt     *report
+	nodeSet map[string]bool
+	stepNum int
+}
+
+// consume processes a single event, dispatching to the kind-specific
+// summarizer and appending the step (unless the summarizer skips it).
+func (rb *reportBuilder) consume(evt *store.Event) {
+	step := reportStep{
+		Seq:  evt.Seq,
+		Time: evt.Timestamp,
+		Type: string(evt.Type),
+	}
+	if evt.NodeID != "" {
+		step.NodeID = evt.NodeID
+	}
+	if evt.BranchID != "" {
+		step.BranchID = evt.BranchID
+	}
+	if !rb.summarize(evt, &step) {
+		return
+	}
+	rb.rpt.Steps = append(rb.rpt.Steps, step)
+}
+
+// summarize fills step.Summary (and possibly Detail/Tokens/CostUSD) for evt,
+// updates rb.rpt.Metrics where applicable, and returns false when the step
+// should NOT be appended (LLM-request counter-only events; nil-data events
+// that carry no rendered content).
+func (rb *reportBuilder) summarize(evt *store.Event, step *reportStep) bool {
+	switch evt.Type {
+	case store.EventRunStarted:
+		return rb.sumRunStarted(step)
+	case store.EventNodeStarted:
+		return rb.sumNodeStarted(evt, step)
+	case store.EventLLMPrompt:
+		return rb.sumLLMPrompt(evt, step)
+	case store.EventLLMStepFinished:
+		return rb.sumLLMStepFinished(evt, step)
+	case store.EventNodeFinished:
+		return rb.sumNodeFinished(evt, step)
+	case store.EventEdgeSelected:
+		return rb.sumEdgeSelected(evt, step)
+	case store.EventBranchStarted:
+		return rb.sumBranchStarted(evt, step)
+	case store.EventJoinReady:
+		return rb.sumJoinReady(evt, step)
+	case store.EventArtifactWritten:
+		return rb.sumArtifactWritten(evt, step)
+	case store.EventBudgetWarning:
+		return rb.sumBudgetWarning(evt, step)
+	case store.EventRunFinished:
+		return rb.sumRunFinished(step)
+	case store.EventRunFailed:
+		return rb.sumRunFailed(evt, step)
+	case store.EventLLMRequest:
+		return rb.sumLLMRequest()
+	default:
+		step.Summary = fmt.Sprintf("%s [%s]", evt.Type, evt.NodeID)
+		return true
+	}
+}
+
+func (rb *reportBuilder) sumRunStarted(step *reportStep) bool {
+	step.Summary = "Run started"
+	return true
+}
+
+func (rb *reportBuilder) sumNodeStarted(evt *store.Event, step *reportStep) bool {
+	rb.stepNum++
+	kind := ""
+	if evt.Data != nil {
+		if k, ok := evt.Data["kind"].(string); ok {
+			kind = k
 		}
-		sort.Slice(rpt.Artifacts, func(i, j int) bool {
-			return rpt.Artifacts[i].NodeID < rpt.Artifacts[j].NodeID
+	}
+	step.Summary = fmt.Sprintf("Step %d: %s (%s)", rb.stepNum, evt.NodeID, kind)
+	rb.nodeSet[evt.NodeID] = true
+	if evt.Data != nil {
+		if idx, ok := evt.Data["round_robin_index"]; ok {
+			step.Detail = fmt.Sprintf("Round-robin index: %v → %v", idx, evt.Data["selected_target"])
+		}
+	}
+	return true
+}
+
+func (rb *reportBuilder) sumLLMPrompt(evt *store.Event, step *reportStep) bool {
+	if evt.Data == nil {
+		return false
+	}
+	sysLen := 0
+	usrLen := 0
+	if sys, ok := evt.Data["system_prompt"].(string); ok {
+		sysLen = len(sys)
+	}
+	if usr, ok := evt.Data["user_message"].(string); ok {
+		usrLen = len(usr)
+	}
+	step.Summary = fmt.Sprintf("LLM prompt [%s] (system: %d chars, user: %d chars)", evt.NodeID, sysLen, usrLen)
+	return true
+}
+
+func (rb *reportBuilder) sumLLMStepFinished(evt *store.Event, step *reportStep) bool {
+	if evt.Data == nil {
+		return false
+	}
+	respLen := 0
+	if resp, ok := evt.Data["response_text"].(string); ok {
+		respLen = len(resp)
+	}
+	tokens := extractTokens(evt.Data)
+	step.Summary = fmt.Sprintf("LLM response [%s] (%d chars)", evt.NodeID, respLen)
+	step.Tokens = tokens
+	rb.rpt.Metrics.TotalInputTokens += extractInt(evt.Data, "input_tokens")
+	rb.rpt.Metrics.CacheReadTokens += extractInt(evt.Data, "cache_read_tokens")
+	rb.rpt.Metrics.CacheWriteTokens += extractInt(evt.Data, "cache_write_tokens")
+	return true
+}
+
+func (rb *reportBuilder) sumNodeFinished(evt *store.Event, step *reportStep) bool {
+	if evt.Data == nil {
+		return false
+	}
+	tokens := extractTokens(evt.Data)
+	cost := extractCost(evt.Data)
+	rb.rpt.Metrics.TotalTokens += tokens
+	rb.rpt.Metrics.TotalCostUSD += cost
+	rb.rpt.Metrics.NodeCount++
+
+	summary := ""
+	if output, ok := evt.Data["output"]; ok {
+		if outMap, ok := output.(map[string]interface{}); ok {
+			// Thinking metrics are stamped onto the node output by
+			// stampDelegateOutputMeta for both backends (claude_code
+			// never emits llm_step_finished), so node_finished is the
+			// single canonical source — same as _tokens/_cost_usd.
+			rb.rpt.Metrics.ThinkingTokens += extractInt(outMap, "_thinking_tokens")
+			rb.rpt.Metrics.ThinkingMs += extractInt(outMap, "_thinking_ms")
+			if s, ok := outMap["summary"].(string); ok {
+				summary = truncate(s, 200)
+			}
+			// For judge nodes
+			if approved, ok := outMap["approved"].(bool); ok {
+				conf := ""
+				if c, ok := outMap["confidence"].(string); ok {
+					conf = c
+				}
+				summary = fmt.Sprintf("approved=%v confidence=%s", approved, conf)
+			}
+			if ready, ok := outMap["ready"].(bool); ok {
+				conf := ""
+				if c, ok := outMap["confidence"].(string); ok {
+					conf = c
+				}
+				summary = fmt.Sprintf("ready=%v confidence=%s", ready, conf)
+			}
+		}
+	}
+
+	backendTag := ""
+	if d, ok := evt.Data["_backend"].(string); ok {
+		backendTag = fmt.Sprintf(" [%s]", d)
+	}
+	step.Summary = fmt.Sprintf("Finished: %s%s", evt.NodeID, backendTag)
+	if summary != "" {
+		step.Detail = summary
+	}
+	step.Tokens = tokens
+	step.CostUSD = cost
+	return true
+}
+
+func (rb *reportBuilder) sumEdgeSelected(evt *store.Event, step *reportStep) bool {
+	if evt.Data == nil {
+		return false
+	}
+	from, _ := evt.Data["from"].(string)
+	to, _ := evt.Data["to"].(string)
+	info := fmt.Sprintf("%s → %s", from, to)
+	if cond, ok := evt.Data["condition"].(string); ok {
+		negated, _ := evt.Data["negated"].(bool)
+		if negated {
+			info += fmt.Sprintf(" (when NOT %s)", cond)
+		} else {
+			info += fmt.Sprintf(" (when %s)", cond)
+		}
+	}
+	if loop, ok := evt.Data["loop"].(string); ok {
+		iter := evt.Data["iteration"]
+		info += fmt.Sprintf(" [loop: %s, iter: %v]", loop, iter)
+		rb.rpt.Metrics.LoopEdges++
+	}
+	step.Summary = "Edge: " + info
+	return true
+}
+
+func (rb *reportBuilder) sumBranchStarted(evt *store.Event, step *reportStep) bool {
+	step.Summary = fmt.Sprintf("Branch started: %s → %s", evt.BranchID, evt.NodeID)
+	return true
+}
+
+func (rb *reportBuilder) sumJoinReady(evt *store.Event, step *reportStep) bool {
+	step.Summary = fmt.Sprintf("Join ready: %s", evt.NodeID)
+	return true
+}
+
+func (rb *reportBuilder) sumArtifactWritten(evt *store.Event, step *reportStep) bool {
+	if evt.Data != nil {
+		step.Summary = fmt.Sprintf("Artifact: %s (publish: %v, version: %v)", evt.NodeID, evt.Data["publish"], evt.Data["version"])
+	}
+	return true
+}
+
+func (rb *reportBuilder) sumBudgetWarning(evt *store.Event, step *reportStep) bool {
+	if evt.Data != nil {
+		step.Summary = fmt.Sprintf("Budget warning: %v (used: %v / limit: %v)", evt.Data["dimension"], evt.Data["used"], evt.Data["limit"])
+	}
+	return true
+}
+
+func (rb *reportBuilder) sumRunFinished(step *reportStep) bool {
+	step.Summary = "Run finished"
+	return true
+}
+
+func (rb *reportBuilder) sumRunFailed(evt *store.Event, step *reportStep) bool {
+	if evt.Data != nil {
+		step.Summary = fmt.Sprintf("Run failed: %v: %v", evt.Data["code"], evt.Data["error"])
+	} else {
+		step.Summary = "Run failed"
+	}
+	return true
+}
+
+// sumLLMRequest only bumps the model-calls counter; the event itself is too
+// noisy to surface in the timeline (one per LLM turn) so the step is
+// skipped via the false return.
+func (rb *reportBuilder) sumLLMRequest() bool {
+	rb.rpt.Metrics.ModelCalls++
+	return false
+}
+
+// collectArtifacts walks the run's artifacts directory and appends the
+// latest version of each node's artifact to rpt.Artifacts (sorted by
+// node ID for stable output).
+func collectArtifacts(rpt *report, r *store.Run, s store.RunStore) {
+	artifactsDir := filepath.Join(s.Root(), "runs", r.ID, "artifacts")
+	entries, err := os.ReadDir(artifactsDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		nodeID := entry.Name()
+		art, err := s.LoadLatestArtifact(context.Background(), r.ID, nodeID)
+		if err != nil {
+			continue
+		}
+		summary := ""
+		if s, ok := art.Data["summary"].(string); ok {
+			summary = truncate(s, 150)
+		}
+		rpt.Artifacts = append(rpt.Artifacts, reportArtifact{
+			NodeID:  nodeID,
+			Version: art.Version,
+			Summary: summary,
 		})
 	}
-
-	return rpt
+	sort.Slice(rpt.Artifacts, func(i, j int) bool {
+		return rpt.Artifacts[i].NodeID < rpt.Artifacts[j].NodeID
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -356,8 +441,8 @@ func renderMarkdown(rpt *report) string {
 
 	// Summary table.
 	sb.WriteString("## Summary\n\n")
-	sb.WriteString(fmt.Sprintf("| Field | Value |\n"))
-	sb.WriteString(fmt.Sprintf("|-------|-------|\n"))
+	sb.WriteString("| Field | Value |\n")
+	sb.WriteString("|-------|-------|\n")
 	sb.WriteString(fmt.Sprintf("| Workflow | %s |\n", rpt.Workflow))
 	sb.WriteString(fmt.Sprintf("| Status | %s |\n", rpt.Status))
 	sb.WriteString(fmt.Sprintf("| Duration | %s |\n", rpt.Duration))
