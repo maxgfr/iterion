@@ -325,43 +325,20 @@ func (c *Dispatcher) hasSlot(state string, cfg *Config) bool {
 
 // dispatch claims the issue, allocates a workspace, and spawns the
 // worker goroutine. Runs on the actor goroutine — must be fast.
+//
+// The three phases are extracted into helpers so each can be read on
+// its own without scrolling through the others:
+//   - resolveExplicitBot: honest-fail on an unresolvable / unrouted Bot
+//   - resolveRunID:       retry-vs-fresh runID resolution (post-claim)
+//   - buildRunningEntry:  the slot+entry allocation + bookkeeping
+//
+// The claim itself stays inline — it is the conflict authority and the
+// boundary between "skip safely" and "we own this issue now".
 func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 	cfg := c.cfg.Load()
 
-	// Honest-fail on explicit-bot resolution failure. When the issue
-	// names a specific bot (iss.Bot != "") that the registry can't
-	// resolve, do NOT claim + silently fall back to the default workflow:
-	// that runs an unrelated no-op (dispatcher_default's triage→done) and
-	// reports a misleading "success", leaving the ticket in review/done
-	// with nothing relevant done. Skip the dispatch instead — the issue
-	// stays eligible in its source state, so a transient scan failure
-	// (e.g. mid dev-server rebuild) recovers on the next tick, and a
-	// persistent one (typo'd / missing bot) stays visible via this warn
-	// rather than burning a default run every poll. buildSpec re-resolves
-	// for the happy path; this guard only gates the explicit-bot case.
-	if iss.Bot != "" {
-		if _, err := botregistry.ResolveBotPath(iss.Bot, cfg.Bots.Paths); err != nil {
-			c.logger.Warn("dispatcher: %s names bot %q which can't be resolved: %v — skipping (refusing to silently run the default workflow); will retry next tick", iss.Identifier, iss.Bot, err)
-			c.recordDispatchSkip(iss, fmt.Sprintf("bot %q can't be resolved (%v)", iss.Bot, err))
-			return
-		}
-		// The bot FILE resolves — but does it have an actual dispatch
-		// route? Without one it would fall through to the default
-		// workflow, running an unrelated bot with the wrong
-		// structured-output schemas and reporting a misleading success.
-		// Refuse, same as the unresolvable case. With registry-driven
-		// routing, any ENABLED discovered bot has a route (no
-		// assignee_workflows entry needed); a bot lands here only when it
-		// is disabled in the catalog or — with no bots discovery
-		// configured — absent from assignee_workflows. (RoutingRunner
-		// implements HasRoute; a plain single-workflow runner doesn't —
-		// there an explicit bot has no routing concept, so we don't gate
-		// it and preserve the legacy single-workflow behaviour.)
-		if rc, ok := c.runner.(interface{ HasRoute(string) bool }); ok && !rc.HasRoute(iss.Bot) {
-			c.logger.Warn("dispatcher: %s names bot %q which resolves to a file but has no active dispatch route — skipping (refusing to silently run the default workflow). Likely disabled in the catalog (enable it in the studio Catalog manager) or, with no bots discovery configured, missing from assignee_workflows.", iss.Identifier, iss.Bot)
-			c.recordDispatchSkip(iss, fmt.Sprintf("bot %q has no active dispatch route (disabled in catalog or unrouted)", iss.Bot))
-			return
-		}
+	if !c.resolveExplicitBot(cfg, iss) {
+		return
 	}
 	// Past the bot guards: this issue is dispatchable, so drop any skip
 	// entry a prior tick recorded (the operator fixed the bot name or
@@ -382,8 +359,95 @@ func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 		return
 	}
 
-	attempt := 0
-	resumeFromRunID := ""
+	runID, resumeFromRunID, attempt, ok := c.resolveRunID(ctx, iss)
+	if !ok {
+		return
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	entry := c.buildRunningEntry(iss, runID, attempt, cancel)
+
+	spec := c.buildSpec(cfg, iss, runID, entry.WorkspacePath, attempt, entry)
+	spec.ResumeFromRunID = resumeFromRunID
+
+	if resumeFromRunID != "" {
+		c.logger.Info("dispatcher: resuming %s → run=%s (attempt=%d, workspace=%s)", iss.Identifier, runID, attempt, entry.WorkspacePath)
+	} else {
+		c.logger.Info("dispatcher: dispatching %s → run=%s (attempt=%d, workspace=%s)", iss.Identifier, runID, attempt, entry.WorkspacePath)
+	}
+
+	// Offload the post-claim setup I/O (in-progress UpdateState +
+	// workspaces.Create) off the actor, then continue into the run worker on
+	// the same goroutine. The actor returns here immediately, staying
+	// responsive while the (potentially slow) tracker transition runs.
+	c.launchDispatchSetup(dispatchSetupPlan{
+		issueID:       iss.ID,
+		identifier:    iss.Identifier,
+		sourceState:   iss.WorkflowState,
+		runningTarget: cfg.Agent.RunningState,
+		runCtx:        runCtx,
+		entry:         entry,
+		spec:          spec,
+	})
+}
+
+// resolveExplicitBot enforces honest-fail on explicit-bot resolution.
+// When the issue names a specific bot (iss.Bot != "") that the registry
+// can't resolve, do NOT claim + silently fall back to the default
+// workflow: that runs an unrelated no-op (dispatcher_default's
+// triage→done) and reports a misleading "success", leaving the ticket
+// in review/done with nothing relevant done. Skip the dispatch instead
+// — the issue stays eligible in its source state, so a transient scan
+// failure (e.g. mid dev-server rebuild) recovers on the next tick, and
+// a persistent one (typo'd / missing bot) stays visible via the warn
+// rather than burning a default run every poll. buildSpec re-resolves
+// for the happy path; this guard only gates the explicit-bot case.
+//
+// Returns false to signal "skip dispatch"; the caller must not claim.
+// Runs on the actor goroutine (recordDispatchSkip touches c.state).
+func (c *Dispatcher) resolveExplicitBot(cfg *Config, iss tracker.Issue) bool {
+	if iss.Bot == "" {
+		return true
+	}
+	if _, err := botregistry.ResolveBotPath(iss.Bot, cfg.Bots.Paths); err != nil {
+		c.logger.Warn("dispatcher: %s names bot %q which can't be resolved: %v — skipping (refusing to silently run the default workflow); will retry next tick", iss.Identifier, iss.Bot, err)
+		c.recordDispatchSkip(iss, fmt.Sprintf("bot %q can't be resolved (%v)", iss.Bot, err))
+		return false
+	}
+	// The bot FILE resolves — but does it have an actual dispatch
+	// route? Without one it would fall through to the default
+	// workflow, running an unrelated bot with the wrong
+	// structured-output schemas and reporting a misleading success.
+	// Refuse, same as the unresolvable case. With registry-driven
+	// routing, any ENABLED discovered bot has a route (no
+	// assignee_workflows entry needed); a bot lands here only when it
+	// is disabled in the catalog or — with no bots discovery
+	// configured — absent from assignee_workflows. (RoutingRunner
+	// implements HasRoute; a plain single-workflow runner doesn't —
+	// there an explicit bot has no routing concept, so we don't gate
+	// it and preserve the legacy single-workflow behaviour.)
+	if rc, ok := c.runner.(interface{ HasRoute(string) bool }); ok && !rc.HasRoute(iss.Bot) {
+		c.logger.Warn("dispatcher: %s names bot %q which resolves to a file but has no active dispatch route — skipping (refusing to silently run the default workflow). Likely disabled in the catalog (enable it in the studio Catalog manager) or, with no bots discovery configured, missing from assignee_workflows.", iss.Identifier, iss.Bot)
+		c.recordDispatchSkip(iss, fmt.Sprintf("bot %q has no active dispatch route (disabled in catalog or unrouted)", iss.Bot))
+		return false
+	}
+	return true
+}
+
+// resolveRunID picks the runID (resumed vs freshly minted) and the
+// retry attempt for an issue we just claimed. Runs on the actor
+// goroutine (reads + mutates c.state.retries). Returns ok=false when a
+// fresh runID can't be minted — in that case the claim is released
+// inline and the caller must abort dispatch immediately, before
+// allocating a slot. See ADR-028 Step 4.
+//
+// Returns:
+//   - runID:           the run id to use (resume target or freshly minted)
+//   - resumeFromRunID: non-empty when the engine should resume from
+//     checkpoint instead of starting fresh (passed through as
+//     DispatchSpec.ResumeFromRunID)
+//   - attempt:         the retry attempt number (0 for the first try)
+func (c *Dispatcher) resolveRunID(ctx context.Context, iss tracker.Issue) (runID, resumeFromRunID string, attempt int, ok bool) {
 	// hadRetryEntry records whether this dispatch is servicing a
 	// scheduled retry (an in-memory retryEntry existed). It gates the
 	// cross-restart fallback below: a retry entry carries a DELIBERATE
@@ -392,7 +456,7 @@ func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 	// source changed. The persisted last_run pointer must not override
 	// that decision.
 	hadRetryEntry := false
-	if cur, ok := c.state.retries[iss.ID]; ok {
+	if cur, present := c.state.retries[iss.ID]; present {
 		hadRetryEntry = true
 		attempt = cur.Attempt
 		// PrevRunID is set on the retry entry iff the prior run's
@@ -429,50 +493,54 @@ func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 		type lastRunLookup interface {
 			LastRunForIssue(id string) (string, error)
 		}
-		if look, ok := c.tracker.(lastRunLookup); ok {
+		if look, lookOK := c.tracker.(lastRunLookup); lookOK {
 			if prev, err := look.LastRunForIssue(iss.ID); err == nil {
 				resumeFromRunID = c.resumableRunID(prev)
 			}
 		}
 	}
-	var runID string
 	if resumeFromRunID != "" {
-		runID = resumeFromRunID
-	} else {
-		var err error
-		runID, err = store.GenerateRunID()
-		if err != nil {
-			c.logger.Warn("dispatcher: mint run id for %s: %v", iss.Identifier, err)
-			// Nothing was transitioned and no slot was allocated yet (the
-			// post-claim setup I/O runs off the actor below, only after the
-			// entry is in place) — just release the claim. See ADR-028 Step 4.
-			_ = c.tracker.Release(ctx, iss.ID, c.hostMarker)
-			return
-		}
+		return resumeFromRunID, resumeFromRunID, attempt, true
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	freshID, err := store.GenerateRunID()
+	if err != nil {
+		c.logger.Warn("dispatcher: mint run id for %s: %v", iss.Identifier, err)
+		// Nothing was transitioned and no slot was allocated yet (the
+		// post-claim setup I/O runs off the actor below, only after the
+		// entry is in place) — just release the claim. See ADR-028 Step 4.
+		_ = c.tracker.Release(ctx, iss.ID, c.hostMarker)
+		return "", "", attempt, false
+	}
+	return freshID, "", attempt, true
+}
 
+// buildRunningEntry constructs and registers the runningEntry that
+// dispatch hands off to the off-actor setup worker (ADR-028 Step 4).
+// Runs on the actor goroutine — it mutates c.state.running and
+// c.state.slotsByState and stamps last_run, so MUST stay actor-local.
+//
+// The slot is allocated IMMEDIATELY after the confirmed claim with
+// setupPending=true and TransitionedFromState not-yet-known. This keeps
+// MaxConcurrent / per-state caps enforced from claim time (no
+// over-dispatch window while the setup I/O is in flight) and makes
+// isClaimed/the dispatch loop skip the issue. The off-actor setup
+// worker fills TransitionedFromState via cmdDispatchSetupDone once the
+// in-progress transition has run.
+func (c *Dispatcher) buildRunningEntry(iss tracker.Issue, runID string, attempt int, cancel context.CancelFunc) *runningEntry {
 	// The per-issue workspace path is deterministic from the issue ID
 	// (Workspaces.Path == the directory Create materialises), so it is known
 	// here on the actor for the spec/env even though the actual mkdir +
 	// in-progress transition run off-actor below. See ADR-028 Step 4.
 	wsPath := c.workspaces.Path(iss.ID)
-
-	// ADR-028 Step 4: allocate the running entry + concurrency slot on the
-	// actor IMMEDIATELY after the confirmed claim, with setupPending=true and
-	// TransitionedFromState not-yet-known. This keeps MaxConcurrent / per-state
-	// caps enforced from claim time (no over-dispatch window while the setup
-	// I/O is in flight) and makes isClaimed/the dispatch loop skip the issue.
-	// The off-actor setup worker fills TransitionedFromState via
-	// cmdDispatchSetupDone once the in-progress transition has run.
+	now := time.Now().UTC()
 	entry := &runningEntry{
 		IssueID:       iss.ID,
 		Identifier:    iss.Identifier,
 		RunID:         runID,
 		WorkflowState: iss.WorkflowState,
 		WorkspacePath: wsPath,
-		StartedAt:     time.Now().UTC(),
-		LastEventAt:   time.Now().UTC(),
+		StartedAt:     now,
+		LastEventAt:   now,
 		Attempt:       attempt,
 		Cancel:        cancel,
 		issueSnapshot: iss,
@@ -489,29 +557,7 @@ func (c *Dispatcher) dispatch(ctx context.Context, iss tracker.Issue) {
 	// workspace path; the finish-time stamp later upgrades it to the
 	// resolved worktree path.
 	c.stampLastRun(iss.ID, entry)
-
-	spec := c.buildSpec(cfg, iss, runID, wsPath, attempt, entry)
-	spec.ResumeFromRunID = resumeFromRunID
-
-	if resumeFromRunID != "" {
-		c.logger.Info("dispatcher: resuming %s → run=%s (attempt=%d, workspace=%s)", iss.Identifier, runID, attempt, wsPath)
-	} else {
-		c.logger.Info("dispatcher: dispatching %s → run=%s (attempt=%d, workspace=%s)", iss.Identifier, runID, attempt, wsPath)
-	}
-
-	// Offload the post-claim setup I/O (in-progress UpdateState +
-	// workspaces.Create) off the actor, then continue into the run worker on
-	// the same goroutine. The actor returns here immediately, staying
-	// responsive while the (potentially slow) tracker transition runs.
-	c.launchDispatchSetup(dispatchSetupPlan{
-		issueID:       iss.ID,
-		identifier:    iss.Identifier,
-		sourceState:   iss.WorkflowState,
-		runningTarget: cfg.Agent.RunningState,
-		runCtx:        runCtx,
-		entry:         entry,
-		spec:          spec,
-	})
+	return entry
 }
 
 // dispatchSetupPlan is the value-copy of everything the off-actor dispatch
