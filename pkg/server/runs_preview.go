@@ -2,14 +2,14 @@ package server
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/SocialGouv/iterion/pkg/secure/httpdial"
 )
 
 // previewProxyMaxBytes caps how much upstream body the proxy will
@@ -89,7 +89,7 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 	//  - local mode bound to 127.0.0.1 / ::1 / localhost: permissive
 	//    so the studio can embed the user's own dev servers.
 	cloudMode := s.cfg.Mode == "cloud"
-	strict := cloudMode || !isLoopbackBind(s.cfg.Bind)
+	strict := cloudMode || !httpdial.IsLoopbackBind(s.cfg.Bind)
 
 	host := parsed.Hostname()
 	port := parsed.Port()
@@ -101,7 +101,7 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	pinnedIP, err := resolvePreviewHost(r.Context(), host, strict)
+	pinnedIP, err := httpdial.ResolvePublicHost(r.Context(), host, strict)
 	if err != nil {
 		s.httpErrorFor(w, r, http.StatusForbidden, "target rejected: %v", err)
 		return
@@ -186,97 +186,4 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Iterion-Preview-Proxy", "1")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, io.LimitReader(resp.Body, previewProxyMaxBytes))
-}
-
-// resolvePreviewHost resolves host and returns a single IP that is
-// safe to dial. When strict, every resolved IP must be a public
-// unicast address: any private/link-local/loopback/multicast/cloud-
-// metadata hit causes a refusal. When non-strict, the first resolved
-// address is returned regardless — the studio is loopback-bound and
-// the user is supposed to be able to embed dev servers.
-//
-// strict is set when (a) the server runs in cloud mode, or (b) the
-// server is bound to a non-loopback address (multi-user dev box, LAN
-// exposure) — both cases would otherwise let an authenticated user
-// gateway requests to the host's private network (F-S4).
-func resolvePreviewHost(ctx context.Context, host string, strict bool) (net.IP, error) {
-	if host == "" {
-		return nil, errors.New("empty host")
-	}
-
-	// Already a numeric address: validate and return.
-	if ip := net.ParseIP(host); ip != nil {
-		if strict && !isPublicUnicast(ip) {
-			return nil, fmt.Errorf("address %s is not a public unicast IP", ip)
-		}
-		return ip, nil
-	}
-
-	// Refuse some hostnames outright in strict mode regardless of DNS
-	// resolution — they're conventional aliases for cluster-internal
-	// services that may not exist in DNS but get re-routed by service
-	// meshes.
-	if strict {
-		lower := strings.ToLower(host)
-		if strings.HasSuffix(lower, ".svc.cluster.local") ||
-			strings.HasSuffix(lower, ".svc") ||
-			lower == "kubernetes.default" ||
-			lower == "metadata.google.internal" {
-			return nil, fmt.Errorf("hostname %q is reserved for cluster-internal services", host)
-		}
-	}
-
-	resolver := &net.Resolver{}
-	addrs, err := resolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return nil, fmt.Errorf("resolve %q: %w", host, err)
-	}
-	if len(addrs) == 0 {
-		return nil, fmt.Errorf("resolve %q: no addresses", host)
-	}
-
-	for _, a := range addrs {
-		if strict && !isPublicUnicast(a.IP) {
-			return nil, fmt.Errorf("resolved address %s is not a public unicast IP", a.IP)
-		}
-	}
-	return addrs[0].IP, nil
-}
-
-// isLoopbackBind returns true when bind is one of the conventional
-// loopback identifiers. Used by the SSRF gate to decide whether the
-// permissive "let the user embed their own dev servers" mode is safe.
-func isLoopbackBind(bind string) bool {
-	switch strings.ToLower(strings.TrimSpace(bind)) {
-	case "", "127.0.0.1", "localhost", "::1", "[::1]":
-		return true
-	}
-	if ip := net.ParseIP(bind); ip != nil && ip.IsLoopback() {
-		return true
-	}
-	return false
-}
-
-// isPublicUnicast reports whether ip is safe to fetch from a cloud
-// pod context. The set of blocked categories matches the typical
-// SSRF blocklist plus AWS/GCP/Azure metadata endpoints.
-func isPublicUnicast(ip net.IP) bool {
-	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() ||
-		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsPrivate() || ip.IsInterfaceLocalMulticast() {
-		return false
-	}
-	// Cloud metadata services use specific addresses on top of the
-	// link-local range; the link-local check above covers
-	// 169.254.169.254 / fe80::a9fe:a9fe. The Azure IMDS uses the
-	// same link-local IP. Belt-and-suspenders check by string for
-	// readability:
-	switch ip.String() {
-	case "169.254.169.254", "100.100.100.200", "fd00:ec2::254":
-		return false
-	}
-	return true
 }

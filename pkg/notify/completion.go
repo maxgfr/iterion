@@ -23,10 +23,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
+	"github.com/SocialGouv/iterion/pkg/secure/httpdial"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
@@ -322,66 +322,12 @@ func (n *Notifier) vetURL(rawURL string) error {
 	return err
 }
 
-// resolveCallbackIP resolves host to a single IP and validates it,
-// returning that IP so the caller can PIN it into the dialer — closing
-// the DNS-rebinding window that exists when validation and the actual
-// request each resolve the host independently. Unless allowPrivate is
-// set, the IP (or every resolved address) must be public-unicast, and
-// the conventional cluster-internal aliases are refused outright
-// (service meshes re-route these even with no DNS record). Resolution
-// fails closed. Mirrors pkg/server.resolvePreviewHost.
+// resolveCallbackIP resolves host to a single validated IP, returned so the
+// caller can PIN it into the dialer — closing the DNS-rebinding window that
+// exists when validation and the actual request each resolve the host
+// independently. Delegates to the shared SSRF guard (pkg/secure/httpdial);
+// allowPrivate inverts strict mode (set in local/dev so a callback to a
+// loopback receiver is permitted). Resolution fails closed.
 func (n *Notifier) resolveCallbackIP(ctx context.Context, host string) (net.IP, error) {
-	if host == "" {
-		return nil, fmt.Errorf("missing host")
-	}
-	// Numeric literal: validate directly.
-	if ip := net.ParseIP(host); ip != nil {
-		if !n.allowPrivate && !isPublicUnicast(ip) {
-			return nil, fmt.Errorf("address %s is not a public unicast IP", ip)
-		}
-		return ip, nil
-	}
-	if !n.allowPrivate {
-		lower := strings.ToLower(host)
-		if strings.HasSuffix(lower, ".svc.cluster.local") ||
-			strings.HasSuffix(lower, ".svc") ||
-			lower == "kubernetes.default" ||
-			lower == "metadata.google.internal" {
-			return nil, fmt.Errorf("hostname %q is reserved for cluster-internal services", host)
-		}
-	}
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return nil, fmt.Errorf("resolve %q: %w", host, err) // fail closed
-	}
-	if len(addrs) == 0 {
-		return nil, fmt.Errorf("resolve %q: no addresses", host)
-	}
-	if !n.allowPrivate {
-		for _, a := range addrs {
-			if !isPublicUnicast(a.IP) {
-				return nil, fmt.Errorf("resolved address %s is not a public unicast IP", a.IP)
-			}
-		}
-	}
-	return addrs[0].IP, nil
-}
-
-// isPublicUnicast reports whether ip is safe to POST to from the
-// iterion host/pod. Blocks the standard SSRF categories plus cloud
-// metadata endpoints. Mirrors pkg/server.isPublicUnicast.
-func isPublicUnicast(ip net.IP) bool {
-	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() ||
-		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsPrivate() || ip.IsInterfaceLocalMulticast() {
-		return false
-	}
-	switch ip.String() {
-	case "169.254.169.254", "fe80::a9fe:a9fe", "100.100.100.200":
-		return false
-	}
-	return true
+	return httpdial.ResolvePublicHost(ctx, host, !n.allowPrivate)
 }
