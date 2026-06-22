@@ -88,7 +88,7 @@ var upgrader = websocket.Upgrader{
 		// carries a different Origin host and falls through to the allowlist
 		// below. Deployment-agnostic, so the served studio works on any host
 		// without configuring its public URL.
-		if sameWSOrigin(origin, r) {
+		if sameOrigin(origin, r) {
 			return true
 		}
 		check := loadOriginCheck()
@@ -101,11 +101,13 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// sameWSOrigin reports whether the WS Origin header's host matches the
+// sameOrigin reports whether the request's Origin header host matches the
 // request's own Host (the SPA dialing the host that served it). Browsers set
 // Origin to the SPA's true origin; a request from another site carries a
-// different host and is rejected by the allowlist instead.
-func sameWSOrigin(origin string, r *http.Request) bool {
+// different host and is rejected by the allowlist instead. Shared by the WS
+// upgrader (CheckOrigin) and the HTTP CORS path (isAllowedOriginReq) so both
+// transports treat the deployed/cloud studio identically.
+func sameOrigin(origin string, r *http.Request) bool {
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" {
 		return false

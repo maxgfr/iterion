@@ -13,6 +13,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -825,7 +826,7 @@ func (s *Server) routes() {
 	// the threat is browser-side, not network-side.
 	s.mux.HandleFunc("OPTIONS /api/", func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if !s.isAllowedOrigin(origin) {
+		if !s.isAllowedOriginReq(r) {
 			// No ACAO header → browser blocks the cross-origin request.
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -1451,6 +1452,31 @@ func (s *Server) isAllowedOrigin(origin string) bool {
 	return false
 }
 
+// isAllowedOriginReq is the request-aware origin check used by the HTTP CORS
+// path (requireSafeOrigin, reflectAllowedOrigin, the OPTIONS preflight). It
+// accepts, in order:
+//   - an empty Origin (non-browser caller: curl, server-to-server),
+//   - a same-origin request — the SPA dialing the host that served it. This
+//     is what makes the deployed/cloud studio work behind any proxy or on
+//     any public host WITHOUT configuring its URL, and mirrors the WebSocket
+//     upgrader's sameOrigin policy (see hub.go). Without it, every
+//     state-changing POST from a non-loopback studio is rejected with 403,
+//     while reads (no Origin) and the WS (already same-origin-aware) work —
+//     the exact asymmetry that broke "Dispatch existing board items" in prod.
+//   - an Origin in the static allowlist (loopback, wails, configured
+//     PublicURL) — covers proxies that rewrite the Host header so the
+//     same-origin check above can't fire.
+func (s *Server) isAllowedOriginReq(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	if sameOrigin(origin, r) {
+		return true
+	}
+	return s.isAllowedOrigin(origin)
+}
+
 func (s *Server) allowedOrigins() []string {
 	origins := []string{
 		fmt.Sprintf("http://localhost:%d", s.cfg.Port),
@@ -1473,6 +1499,17 @@ func (s *Server) allowedOrigins() []string {
 		"wails://wails",
 		"http://wails.localhost",
 	)
+	// Cloud / proxied deployments: the studio SPA is served from (and dials)
+	// the operator's public host, not loopback. The configured PublicURL is
+	// that origin; including it lets requests survive even when a reverse
+	// proxy rewrites the Host header (so the same-origin check in
+	// isAllowedOriginReq can't match). Normalised to scheme://host — the
+	// shape a browser Origin header carries (no path, no trailing slash).
+	if s.cfg.PublicURL != "" {
+		if u, err := url.Parse(s.cfg.PublicURL); err == nil && u.Scheme != "" && u.Host != "" {
+			origins = append(origins, u.Scheme+"://"+u.Host)
+		}
+	}
 	return origins
 }
 
@@ -1481,7 +1518,7 @@ func (s *Server) allowedOrigins() []string {
 // poison the response across origins.
 func (s *Server) reflectAllowedOrigin(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
-	if origin != "" && s.isAllowedOrigin(origin) {
+	if origin != "" && s.isAllowedOriginReq(r) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
 	}
@@ -1523,17 +1560,13 @@ func (s *Server) httpErrorFor(w http.ResponseWriter, r *http.Request, code int, 
 // into the local studio's filesystem-write endpoints. Same-origin and
 // non-browser callers (no Origin header) pass through.
 func (s *Server) requireSafeOrigin(w http.ResponseWriter, r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true
-	}
-	if s.isAllowedOrigin(origin) {
+	if s.isAllowedOriginReq(r) {
 		return true
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusForbidden)
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"error": "cross-origin request rejected: studio only accepts loopback origins",
+		"error": "cross-origin request rejected: origin not allowed (must be same-origin, loopback, or the configured public URL)",
 	})
 	return false
 }

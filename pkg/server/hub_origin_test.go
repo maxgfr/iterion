@@ -26,8 +26,8 @@ func TestSameWSOrigin(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			r := httptest.NewRequest("GET", "/api/ws/runs/x", nil)
 			r.Host = c.host
-			if got := sameWSOrigin(c.origin, r); got != c.want {
-				t.Errorf("sameWSOrigin(%q, host=%q) = %v; want %v", c.origin, c.host, got, c.want)
+			if got := sameOrigin(c.origin, r); got != c.want {
+				t.Errorf("sameOrigin(%q, host=%q) = %v; want %v", c.origin, c.host, got, c.want)
 			}
 		})
 	}
