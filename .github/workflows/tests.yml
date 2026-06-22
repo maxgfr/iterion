@@ -81,6 +81,34 @@ jobs:
       - name: E2E tests
         run: go test -mod=vendor -v -timeout 120s ./e2e/...
 
+  race:
+    # Data-race detector pass. The `test` job runs CGO_ENABLED=0 with no
+    # -race, so it cannot surface the concurrency races that only the race
+    # detector finds — and the engine is concurrency-heavy (fan-out branch
+    # scheduling in pkg/runtime, the dispatcher actor in pkg/dispatcher, the
+    # store's parallel-branch turn writes in pkg/store). Without this job a
+    # data race regresses silently until it flakes a developer's machine.
+    #
+    # -race REQUIRES cgo, so this job overrides the repo-wide CGO_ENABLED=0
+    # (ubuntu-latest ships gcc). Runs in parallel with `test`; a compile error
+    # surfaces here too, so no `needs:` ordering. ~2-3x slower than the plain
+    # test job, hence the wider -timeout and job budget.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Race tests (unit + e2e)
+        run: go test -race -mod=vendor -timeout 600s ./...
+
   mongo-conformance:
     # Runs the pkg/store/mongo conformance harness against a real Mongo
     # replica set (change-streams + transactions). The harness is gated
