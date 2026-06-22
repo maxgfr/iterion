@@ -47,6 +47,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/runtime"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/secrets"
+	"github.com/SocialGouv/iterion/pkg/secure/httpdial"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
@@ -1113,7 +1114,7 @@ func (r *Runner) prepareRepoWorkspace(ctx context.Context, msg *queue.RunMessage
 	// or a flag-shaped ref (`--upload-pack=…`) can never reach the
 	// subprocess. This is the runner's flag/transport-injection boundary,
 	// mirroring the bot-install path.
-	if err := validateRepoTarget(msg.RepoURL, msg.RepoSHA); err != nil {
+	if err := validateRepoTarget(ctx, msg.RepoURL, msg.RepoSHA); err != nil {
 		return "", err
 	}
 	dir := filepath.Join(r.cfg.WorkDir, "repos", msg.RunID)
@@ -1151,10 +1152,17 @@ func (r *Runner) prepareRepoWorkspace(ctx context.Context, msg *queue.RunMessage
 // they reach git. It rejects remote-helper transports (`ext::`, `file://`)
 // via ValidateCloneSource and flag-shaped refs (leading `-`) via
 // ValidateBranchName — the two ways an attacker-controlled RepoURL/RepoSHA
-// could turn `git clone`/`git fetch` into arbitrary command execution. Pure
-// (no git, no filesystem) so it is unit-testable. An empty ref is allowed
-// (the caller only fetches when RepoSHA is non-blank).
-func validateRepoTarget(repoURL, repoSHA string) error {
+// could turn `git clone`/`git fetch` into arbitrary command execution.
+// An empty ref is allowed (the caller only fetches when RepoSHA is non-blank).
+//
+// After the transport/ref shape passes, the URL's host is run through the
+// shared SSRF guard (httpdial.ResolvePublicHost) so a holder of a per-org
+// `iwh_` webhook token cannot point the runner at an internal address
+// (loopback, RFC1918/ULA, link-local, cloud metadata, cluster aliases) to
+// probe the cloud network. Mirrors the completion-webhook guard in pkg/notify.
+// On-prem deployments with internal forges set
+// ITERION_RUNNER_CLONE_ALLOW_PRIVATE=1 to relax the strict mode.
+func validateRepoTarget(ctx context.Context, repoURL, repoSHA string) error {
 	if err := gitlib.ValidateCloneSource(repoURL); err != nil {
 		return fmt.Errorf("runner: reject repo url: %w", err)
 	}
@@ -1163,7 +1171,49 @@ func validateRepoTarget(repoURL, repoSHA string) error {
 			return fmt.Errorf("runner: reject repo ref: %w", err)
 		}
 	}
+	host, err := extractRepoHost(repoURL)
+	if err != nil {
+		return fmt.Errorf("runner: reject repo url: %w", err)
+	}
+	allowPrivate := os.Getenv("ITERION_RUNNER_CLONE_ALLOW_PRIVATE") == "1"
+	if _, err := httpdial.ResolvePublicHost(ctx, host, !allowPrivate); err != nil {
+		return fmt.Errorf("runner: repo host %q is not a public address (set ITERION_RUNNER_CLONE_ALLOW_PRIVATE=1 to allow internal forges): %w", host, err)
+	}
 	return nil
+}
+
+// extractRepoHost pulls the host out of a clone URL in the shapes
+// ValidateCloneSource permits: `https://host[:port]/...`, `ssh://[user@]host[:port]/...`,
+// and scp-like `[user@]host:path`. Returns an error when the host can't be
+// determined (defence in depth — ValidateCloneSource has already rejected
+// hostless and unsupported-transport forms above).
+func extractRepoHost(repoURL string) (string, error) {
+	s := strings.TrimSpace(repoURL)
+	if i := strings.Index(s, "://"); i >= 0 {
+		u, err := url.Parse(s)
+		if err != nil {
+			return "", fmt.Errorf("parse: %w", err)
+		}
+		host := u.Hostname()
+		if host == "" {
+			return "", fmt.Errorf("missing host in %q", repoURL)
+		}
+		return host, nil
+	}
+	// scp-like: `[user@]host:path`. ValidateCloneSource already requires
+	// the colon to come before any slash and the host to be non-empty.
+	colon := strings.Index(s, ":")
+	if colon <= 0 {
+		return "", fmt.Errorf("missing host in %q", repoURL)
+	}
+	host := s[:colon]
+	if at := strings.LastIndex(host, "@"); at >= 0 {
+		host = host[at+1:]
+	}
+	if host == "" {
+		return "", fmt.Errorf("missing host in %q", repoURL)
+	}
+	return host, nil
 }
 
 // runGit runs a git subprocess, redacting tok from any error output so an
