@@ -3,15 +3,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   artifactFileURL,
   downloadArtifactFile,
-  fetchArtifactFile,
   listArtifactFiles,
   type ArtifactFile,
 } from "@/api/runs";
 import { Dialog, Popover } from "@/components/ui";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { desktop, isDesktop } from "@/lib/desktopBridge";
 import { useRunStore } from "@/store/run";
 import { useDownloadsStore, type DownloadEntry } from "@/store/downloads";
 import { useUIStore } from "@/store/ui";
+
+import { usePreview, type PreviewState } from "./usePreview";
 
 // Events that suggest a tool just dropped a new file. Refresh on
 // node_finished (write_audit_md / emit_sbom complete here) and on the
@@ -26,27 +28,8 @@ const REFRESH_EVENTS = new Set([
 
 const DEBOUNCE_MS = 300;
 
-// Content types we render inline in the preview modal. Anything else
-// gets the "use Download" fallback — covers binaries the in-sandbox
-// recipe might emit (zips, tarballs, sqlite dbs, …).
-const TEXT_MIME_PREFIXES = ["text/", "application/json", "application/yaml", "application/xml"];
-
 interface Props {
   runId: string | null;
-}
-
-interface PreviewState {
-  // Minimal shape — populated either from an ArtifactFile (the table)
-  // or a DownloadEntry (the history popover, where the file may no
-  // longer be in the current run's manifest).
-  path: string;
-  size: number;
-  loading: boolean;
-  error: string | null;
-  // Exactly one of textBody / blobURL is populated once loaded.
-  textBody: string | null;
-  blobURL: string | null;
-  contentType: string;
 }
 
 // ArtifactFilesPanel surfaces the contents of runs/<id>/artifact_files
@@ -54,14 +37,13 @@ interface PreviewState {
 // emit_sbom, …) drop arbitrary report/SBOM/manifest files.
 export default function ArtifactFilesPanel({ runId }: Props) {
   const [files, setFiles] = useState<ArtifactFile[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<PreviewState | null>(null);
+  const filesLoader = useAsyncAction();
+  const { busy: loading, error, run: runLoad } = filesLoader;
   const [downloadsOpen, setDownloadsOpen] = useState(false);
   const lastSeenSeqRef = useRef<number>(-1);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const genRef = useRef(0);
-  const previewGenRef = useRef(0);
+  const { preview, openPreview, closePreview } = usePreview(runId);
 
   const events = useRunStore((s) => s.events);
   const addToast = useUIStore((s) => s.addToast);
@@ -77,23 +59,16 @@ export default function ArtifactFilesPanel({ runId }: Props) {
 
   const fetchNow = useCallback(() => {
     if (!runId) return;
+    // Bump generation so a slow response landing after a newer fetch
+    // (or after runId changed) is silently dropped. useAsyncAction
+    // owns busy/error; we only need the guard around the state setter.
     const myGen = ++genRef.current;
-    setLoading(true);
-    listArtifactFiles(runId)
-      .then((res) => {
-        if (myGen !== genRef.current) return;
-        setFiles(res);
-        setError(null);
-      })
-      .catch((err: unknown) => {
-        if (myGen !== genRef.current) return;
-        setError(err instanceof Error ? err.message : "Failed to load files");
-      })
-      .finally(() => {
-        if (myGen !== genRef.current) return;
-        setLoading(false);
-      });
-  }, [runId]);
+    void runLoad(async () => {
+      const res = await listArtifactFiles(runId);
+      if (myGen !== genRef.current) return;
+      setFiles(res);
+    });
+  }, [runId, runLoad]);
 
   // Initial fetch + refetch on run change.
   useEffect(() => {
@@ -129,81 +104,6 @@ export default function ArtifactFilesPanel({ runId }: Props) {
       }
     };
   }, [events, runId, fetchNow]);
-
-  // Revoke the blob URL we created for the *previous* preview when
-  // the URL value changes. Capture the URL in the closure so the
-  // cleanup function frees the right one — the prior implementation
-  // dereferenced `preview?.blobURL` at cleanup time, which already
-  // pointed at the NEW preview because state had been committed
-  // before React ran the cleanup of the old effect version.
-  useEffect(() => {
-    const url = preview?.blobURL;
-    if (!url) return;
-    return () => {
-      URL.revokeObjectURL(url);
-    };
-  }, [preview?.blobURL]);
-
-  const closePreview = useCallback(() => {
-    setPreview(null);
-  }, []);
-
-  const openPreview = useCallback(
-    (target: { path: string; size: number }) => {
-      if (!runId) return;
-      const myGen = ++previewGenRef.current;
-      setPreview({
-        path: target.path,
-        size: target.size,
-        loading: true,
-        error: null,
-        textBody: null,
-        blobURL: null,
-        contentType: "",
-      });
-      fetchArtifactFile(runId, target.path)
-        .then(async ({ blob, contentType }) => {
-          if (myGen !== previewGenRef.current) return;
-          const isText = TEXT_MIME_PREFIXES.some((p) => contentType.startsWith(p));
-          if (isText) {
-            const textBody = await blob.text();
-            setPreview({
-              path: target.path,
-              size: target.size,
-              loading: false,
-              error: null,
-              textBody,
-              blobURL: null,
-              contentType,
-            });
-          } else {
-            const blobURL = URL.createObjectURL(blob);
-            setPreview({
-              path: target.path,
-              size: target.size,
-              loading: false,
-              error: null,
-              textBody: null,
-              blobURL,
-              contentType,
-            });
-          }
-        })
-        .catch((err: unknown) => {
-          if (myGen !== previewGenRef.current) return;
-          setPreview({
-            path: target.path,
-            size: target.size,
-            loading: false,
-            error: err instanceof Error ? err.message : "Failed to load preview",
-            textBody: null,
-            blobURL: null,
-            contentType: "",
-          });
-        });
-    },
-    [runId],
-  );
 
   const triggerDownload = useCallback(
     (target: { path: string; size: number }) => {
