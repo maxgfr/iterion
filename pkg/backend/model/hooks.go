@@ -154,6 +154,459 @@ func persistToolPayload(ctx context.Context, guard *secretguard.Guard, blobSink 
 	data[key+"_ref"] = toolUseID
 }
 
+// storeHooks bundles the captured state shared by every closure built
+// by NewStoreEventHooks. Extracting the closures into methods on this
+// receiver lets the constructor read as a flat assembly of named
+// handlers without lengthening any single function. The fields mirror
+// exactly what the original anonymous closures captured (ctx, runID,
+// logger, guard, the redacting emitter wrapper, and the optional
+// store-capability sinks), so behaviour is identical.
+type storeHooks struct {
+	ctx            context.Context
+	emitter        EventEmitter // post-wrap; carries the redactingEmitter for AppendEvent
+	runID          string
+	logger         *iterlog.Logger
+	guard          *secretguard.Guard
+	red            func(string) string // guard.Redact (nil-safe)
+	attachmentSink AttachmentWriter
+	toolBlobSink   ToolBlobWriter
+	turnSink       TurnWriter
+}
+
+// emit is the closure-local shorthand for AppendEvent calls that share
+// the captured (ctx, runID) and the (Type/RunID/NodeID/Data) Event
+// shape — i.e. every event emitted from the storeHooks closures.
+// AppendEvent's error is intentionally discarded here, as it was at
+// every call site before this refactor: the store layer already logs
+// persistence failures and the hook path must never fail the in-flight
+// LLM call.
+func (h *storeHooks) emit(nodeID string, evType store.EventType, data map[string]interface{}) {
+	_, _ = h.emitter.AppendEvent(h.ctx, h.runID, store.Event{
+		Type:   evType,
+		RunID:  h.runID,
+		NodeID: nodeID,
+		Data:   data,
+	})
+}
+
+// onLLMPrompt implements the OnLLMPrompt hook.
+func (h *storeHooks) onLLMPrompt(nodeID string, systemPrompt string, userMessage string) {
+	data := map[string]interface{}{
+		"system_prompt": iterlog.Truncate(systemPrompt, maxFieldSize),
+		"user_message":  iterlog.Truncate(userMessage, maxFieldSize),
+	}
+	h.emit(nodeID, store.EventLLMPrompt, data)
+
+	// Use LogBlock so the prompt body folds under the header
+	// in the studio's run log. Pass the full text — truncating
+	// at the source loses signal (the studio already provides
+	// a Wrap toggle + per-block expand/collapse).
+	if userMessage != "" {
+		h.logger.LogBlock(iterlog.LevelInfo, "💬",
+			fmt.Sprintf("Prompt [%s]:", nodeID), h.red(userMessage))
+	}
+	if systemPrompt != "" {
+		h.logger.LogBlock(iterlog.LevelDebug, "📝",
+			fmt.Sprintf("System prompt [%s]:", nodeID), h.red(systemPrompt))
+	}
+}
+
+// onLLMRequest implements the OnLLMRequest hook.
+func (h *storeHooks) onLLMRequest(nodeID string, info LLMRequestInfo) {
+	data := map[string]interface{}{
+		"model":         info.Model,
+		"message_count": info.MessageCount,
+		"tool_count":    info.ToolCount,
+	}
+	if info.ReasoningEffort != "" {
+		data["reasoning_effort"] = info.ReasoningEffort
+	}
+	h.emit(nodeID, store.EventLLMRequest, data)
+
+	toolInfo := ""
+	if info.ToolCount > 0 {
+		toolInfo = fmt.Sprintf(", %d tools", info.ToolCount)
+	}
+	reasoningInfo := ""
+	if info.ReasoningEffort != "" {
+		reasoningInfo = fmt.Sprintf(", reasoning=%s", info.ReasoningEffort)
+	}
+	h.logger.Logf(iterlog.LevelInfo, "🤖", "[%s#%d/claw] LLM call: %s (%d msgs%s%s)",
+		nodeID, info.Iteration, info.Model, info.MessageCount, toolInfo, reasoningInfo)
+}
+
+// onLLMRetry implements the OnLLMRetry hook.
+func (h *storeHooks) onLLMRetry(nodeID string, info RetryInfo) {
+	data := map[string]interface{}{
+		"attempt":  info.Attempt,
+		"delay_ms": info.Delay.Milliseconds(),
+	}
+	if info.Error != nil {
+		data["error"] = info.Error.Error()
+	}
+	if info.StatusCode != 0 {
+		data["status_code"] = info.StatusCode
+	}
+	h.emit(nodeID, store.EventLLMRetry, data)
+
+	errMsg := ""
+	if info.Error != nil {
+		errMsg = info.Error.Error()
+	}
+	h.logger.Warn("LLM retry [%s]: attempt %d, delay %dms: %s",
+		nodeID, info.Attempt, info.Delay.Milliseconds(), errMsg)
+}
+
+// onLLMStepFinish implements the OnLLMStepFinish hook.
+func (h *storeHooks) onLLMStepFinish(nodeID string, step LLMStepInfo) {
+	data := map[string]interface{}{
+		"step":          step.Number,
+		"input_tokens":  step.InputTokens,
+		"output_tokens": step.OutputTokens,
+		"finish_reason": step.FinishReason,
+		"tool_calls":    len(step.ToolCalls),
+	}
+	if step.CacheReadTokens > 0 {
+		data["cache_read_tokens"] = step.CacheReadTokens
+	}
+	if step.CacheWriteTokens > 0 {
+		data["cache_write_tokens"] = step.CacheWriteTokens
+	}
+	if step.ReasoningTokens > 0 {
+		data["thinking_tokens"] = step.ReasoningTokens
+	}
+	if step.ThinkingMs > 0 {
+		data["thinking_ms"] = step.ThinkingMs
+	}
+
+	// Always include response text in persisted events.
+	if step.Text != "" {
+		data["response_text"] = iterlog.Truncate(step.Text, maxFieldSize)
+	}
+
+	// At trace, include tool call details.
+	if h.logger.IsEnabled(iterlog.LevelTrace) && len(step.ToolCalls) > 0 {
+		calls := make([]map[string]interface{}, len(step.ToolCalls))
+		for i, tc := range step.ToolCalls {
+			calls[i] = map[string]interface{}{
+				"tool_name": tc.Name,
+				"input":     iterlog.Truncate(string(tc.Input), maxFieldSize),
+			}
+		}
+		data["tool_call_details"] = calls
+	}
+
+	h.emit(nodeID, store.EventLLMStepFinished, data)
+
+	if step.Text != "" {
+		// Full response, no preview cap — the studio folds the
+		// body under the header so length doesn't crowd the log.
+		// The [node#iter/claw] tag must lead the header so the
+		// per-node Logs tab's prefix filter associates the line.
+		h.logger.LogBlock(iterlog.LevelInfo, "💬",
+			fmt.Sprintf("[%s#%d/claw] response step %d:", nodeID, step.Iteration, step.Number),
+			h.red(step.Text))
+	}
+	// Per-tool log line for the claw (in-process) path. The
+	// claude_code delegate prints its own
+	// `[node#iter/claude-code] 🔧 <Tool> <detail>` line during
+	// stream decoding, so we skip those here — the bridge
+	// hook in executor.go only ferries event payloads, and
+	// the LLMStepInfo arrives only for claw's direct loop.
+	if len(step.ToolCalls) > 0 {
+		for _, tc := range step.ToolCalls {
+			detail := tooldisplay.HeaderDetail(tc.Name, tc.Input, tooldisplay.SnakeCaseKeys)
+			if detail != "" {
+				h.logger.Logf(iterlog.LevelInfo, "🔧", "[%s#%d/claw] %s %s", nodeID, step.Iteration, tc.Name, h.red(detail))
+			} else {
+				h.logger.Logf(iterlog.LevelInfo, "🔧", "[%s#%d/claw] %s", nodeID, step.Iteration, tc.Name)
+			}
+			if body := tooldisplay.BlockBody(tc.Name, tc.Input); body != "" {
+				h.logger.LogBlock(iterlog.LevelInfo, "🔧",
+					fmt.Sprintf("[%s#%d/claw] tool input %s:", nodeID, step.Iteration, tc.Name),
+					h.red(body))
+			}
+			if h.logger.IsEnabled(iterlog.LevelDebug) {
+				h.logger.LogBlock(iterlog.LevelDebug, "🔧",
+					fmt.Sprintf("[%s#%d/claw] raw input %s:", nodeID, step.Iteration, tc.Name),
+					h.red(string(tc.Input)))
+			}
+		}
+	}
+	if step.CacheReadTokens > 0 || step.CacheWriteTokens > 0 {
+		h.logger.Logf(iterlog.LevelInfo, "📊", "[%s#%d/claw] step %d: %d in / %d out tokens (cache: %d read, %d write)",
+			nodeID, step.Iteration, step.Number, step.InputTokens, step.OutputTokens,
+			step.CacheReadTokens, step.CacheWriteTokens)
+	} else {
+		h.logger.Logf(iterlog.LevelInfo, "📊", "[%s#%d/claw] step %d: %d in / %d out tokens",
+			nodeID, step.Iteration, step.Number, step.InputTokens, step.OutputTokens)
+	}
+	if step.ReasoningTokens > 0 || step.ThinkingMs > 0 {
+		h.logger.Logf(iterlog.LevelInfo, "🧠", "[%s#%d/claw] step %d thinking: ~%d tok, %dms",
+			nodeID, step.Iteration, step.Number, step.ReasoningTokens, step.ThinkingMs)
+	}
+}
+
+// onLLMTurnCapture implements the OnLLMTurnCapture hook.
+func (h *storeHooks) onLLMTurnCapture(nodeID string, info LLMTurnCaptureInfo) {
+	if h.turnSink == nil {
+		// Cloud stores don't satisfy TurnWriter yet; skip silently
+		// so the timeline + fork features simply don't light up
+		// for those runs (the rest of the LLM loop is unaffected).
+		return
+	}
+	// info.Iteration is threaded through applyHooks /
+	// delegateHooksFor from the live per-execution context. The
+	// hook closure's captured ctx is the engine-level one (always
+	// iter 0), so reading it here stamped every TurnCheckpoint with
+	// LoopIter=0 and broke per-iteration fork anchoring.
+	iter := info.Iteration
+	toolCalls := make([]store.TurnToolCall, len(info.ToolCalls))
+	for i, tc := range info.ToolCalls {
+		toolCalls[i] = store.TurnToolCall{
+			Name:         tc.Name,
+			InputPreview: iterlog.Truncate(h.red(string(tc.Input)), toolInlineThreshold),
+		}
+	}
+	backend := info.Backend
+	if backend == "" {
+		backend = delegate.BackendClaw
+	}
+	turnIdx := info.Step - 1
+	if turnIdx < 0 {
+		turnIdx = 0
+	}
+	turn := &store.TurnCheckpoint{
+		RunID:        h.runID,
+		NodeID:       nodeID,
+		LoopIter:     iter,
+		TurnIndex:    turnIdx,
+		Backend:      backend,
+		FinishReason: info.FinishReason,
+		ToolCalls:    toolCalls,
+		TextDigest:   sha256Hex(info.Text),
+		Usage: store.TurnUsage{
+			InputTokens:  info.InputTokens,
+			OutputTokens: info.OutputTokens,
+		},
+		SessionID: info.SessionID,
+	}
+	// Materialise the conversation bytes only when we're
+	// about to persist them — the marshal is O(N) in
+	// transcript length, and the hook fires on every turn.
+	if conv := info.MarshalConversation(); len(conv) > 0 {
+		turn.MessagesRef = turnMessagesRef(nodeID, iter, turnIdx)
+		// The turn snapshot holds the full conversation (system +
+		// user + every tool result) and feeds the Fork API — scrub
+		// secrets before it lands on disk.
+		turn.Messages = h.guard.RedactBytes(conv)
+	}
+	if err := h.turnSink.WriteTurn(h.ctx, turn); err != nil {
+		h.logger.Warn("turn capture [%s] step %d: %v", nodeID, info.Step, err)
+	}
+}
+
+// onLLMCompacted implements the OnLLMCompacted hook.
+func (h *storeHooks) onLLMCompacted(nodeID string, info LLMCompactInfo) {
+	data := map[string]interface{}{
+		"before_messages":       info.BeforeMessages,
+		"after_messages":        info.AfterMessages,
+		"removed_message_count": info.RemovedMessageCount,
+	}
+	h.emit(nodeID, store.EventLLMCompacted, data)
+
+	h.logger.Logf(iterlog.LevelInfo, "📦", "[%s#%d/claw] compacted: %d → %d msgs (%d removed)",
+		nodeID, info.Iteration, info.BeforeMessages, info.AfterMessages, info.RemovedMessageCount)
+}
+
+// onToolStarted implements the OnToolStarted hook.
+func (h *storeHooks) onToolStarted(nodeID string, info LLMToolStartedInfo) {
+	data := map[string]interface{}{
+		"tool":       info.ToolName,
+		"input_size": info.InputSize,
+	}
+	if info.ToolUseID != "" {
+		data["tool_use_id"] = info.ToolUseID
+	}
+	// Persist the raw JSON input. Small inputs land inline
+	// (`data.input`); large inputs go to a sidecar blob so the
+	// event stream stays bounded, with the event carrying a
+	// 4 KB preview + a ref the studio uses to fetch the rest
+	// paginated.
+	persistToolPayload(h.ctx, h.guard, h.toolBlobSink, h.runID, info.ToolUseID, "input", info.Input, data)
+	h.emit(nodeID, store.EventToolStarted, data)
+	// No console echo here: the claude_code delegate already
+	// emits its own `[node#iter/claude-code] 🔧 <Tool> <detail>`
+	// line as the SDK stream is decoded, and the claw path logs
+	// its step's tool calls from OnLLMStepFinish below — adding
+	// a third line here would double-up every entry.
+}
+
+// onToolCall implements the OnToolCall hook.
+func (h *storeHooks) onToolCall(nodeID string, info LLMToolCallInfo) {
+	data := map[string]interface{}{
+		"tool":        info.ToolName,
+		"input_size":  info.InputSize,
+		"duration_ms": info.Duration.Milliseconds(),
+	}
+	if info.ToolUseID != "" {
+		data["tool_use_id"] = info.ToolUseID
+	}
+	// Persist the tool's result so the studio's per-node Tools
+	// tab renders in+out side-by-side (matching Claude Code's
+	// inline display). Small outputs inline; large outputs go
+	// to a sidecar blob with a 4 KB preview + ref, fetched
+	// paginated on demand.
+	persistToolPayload(h.ctx, h.guard, h.toolBlobSink, h.runID, info.ToolUseID, "output", []byte(info.Output), data)
+
+	evtType := store.EventToolCalled
+	if info.Error != nil {
+		evtType = store.EventToolError
+		data["error"] = info.Error.Error()
+	}
+	h.emit(nodeID, evtType, data)
+
+	// Console output: errors only — the success case is fully
+	// captured by the tool_called event (duration + tool name)
+	// and rendered by the Tools tab + in-flight footer in the
+	// run view, so a per-call log line is just noise.
+	if info.Error != nil {
+		h.logger.Error("Tool error [%s]: %s — %v (%dms)",
+			nodeID, info.ToolName, info.Error, info.Duration.Milliseconds())
+	}
+}
+
+// onDelegateStarted implements the OnDelegateStarted hook.
+func (h *storeHooks) onDelegateStarted(nodeID string, backendName string) {
+	h.emit(nodeID, store.EventDelegateStarted, map[string]interface{}{"backend": backendName})
+	h.logger.Logf(iterlog.LevelInfo, "🚀", "Delegation started [%s]: backend=%s", nodeID, backendName)
+}
+
+// onDelegateFinished implements the OnDelegateFinished hook.
+func (h *storeHooks) onDelegateFinished(nodeID string, info DelegateInfo) {
+	data := map[string]interface{}{
+		"backend":              info.BackendName,
+		"duration_ms":          info.Duration.Milliseconds(),
+		"tokens":               info.Tokens,
+		"exit_code":            info.ExitCode,
+		"raw_output_len":       info.RawOutputLen,
+		"parse_fallback":       info.ParseFallback,
+		"formatting_pass_used": info.FormattingPassUsed,
+	}
+	if h.logger.IsEnabled(iterlog.LevelTrace) && info.Stderr != "" {
+		data["stderr"] = iterlog.Truncate(info.Stderr, maxFieldSize)
+	}
+	h.emit(nodeID, store.EventDelegateFinished, data)
+
+	h.logger.Logf(iterlog.LevelInfo, "✅", "Delegation finished [%s]: %s (%dms, %d tokens)",
+		nodeID, info.BackendName, info.Duration.Milliseconds(), info.Tokens)
+	if info.FormattingPassUsed {
+		h.logger.Logf(iterlog.LevelDebug, "📐", "Delegation [%s]: two-pass execution used for structured output", nodeID)
+	} else if info.ParseFallback {
+		h.logger.Warn("Delegation [%s]: structured output parsing fell back to text wrapper", nodeID)
+	}
+	if info.Stderr != "" {
+		h.logger.LogBlock(iterlog.LevelDebug, "⚠️",
+			fmt.Sprintf("Delegation stderr [%s]:", nodeID), h.red(info.Stderr))
+	}
+}
+
+// onDelegateError implements the OnDelegateError hook.
+func (h *storeHooks) onDelegateError(nodeID string, info DelegateInfo) {
+	data := map[string]interface{}{
+		"backend":     info.BackendName,
+		"duration_ms": info.Duration.Milliseconds(),
+		"tokens":      info.Tokens,
+		"exit_code":   info.ExitCode,
+	}
+	if info.Error != nil {
+		data["error"] = info.Error.Error()
+	}
+	if h.logger.IsEnabled(iterlog.LevelTrace) && info.Stderr != "" {
+		data["stderr"] = iterlog.Truncate(info.Stderr, maxFieldSize)
+	}
+	h.emit(nodeID, store.EventDelegateError, data)
+
+	errMsg := ""
+	if info.Error != nil {
+		errMsg = info.Error.Error()
+	}
+	h.logger.Error("Delegation failed [%s]: %s — %s", nodeID, info.BackendName, errMsg)
+}
+
+// onDelegateRetry implements the OnDelegateRetry hook.
+func (h *storeHooks) onDelegateRetry(nodeID string, info DelegateInfo) {
+	data := map[string]interface{}{
+		"backend":  info.BackendName,
+		"attempt":  info.Attempt,
+		"delay_ms": info.Delay.Milliseconds(),
+	}
+	if info.Error != nil {
+		data["error"] = info.Error.Error()
+	}
+	h.emit(nodeID, store.EventDelegateRetry, data)
+
+	errMsg := ""
+	if info.Error != nil {
+		errMsg = info.Error.Error()
+	}
+	h.logger.Warn("Delegation retry [%s]: %s attempt %d, delay %dms: %s",
+		nodeID, info.BackendName, info.Attempt, info.Delay.Milliseconds(), errMsg)
+}
+
+// onToolNodeResult implements the OnToolNodeResult hook for direct tool
+// nodes (not LLM tool loops), surfacing full I/O content.
+func (h *storeHooks) onToolNodeResult(nodeID string, toolName string, input []byte, output string, elapsed time.Duration, err error) {
+	data := map[string]interface{}{
+		"tool":        toolName,
+		"input_size":  len(input),
+		"duration_ms": elapsed.Milliseconds(),
+	}
+
+	if h.logger.IsEnabled(iterlog.LevelTrace) {
+		if len(input) > 0 {
+			data["input"] = iterlog.Truncate(string(input), maxFieldSize)
+		}
+		if output != "" {
+			data["output"] = iterlog.Truncate(output, maxFieldSize)
+		}
+	}
+
+	evtType := store.EventToolCalled
+	if err != nil {
+		evtType = store.EventToolError
+		data["error"] = err.Error()
+	}
+	h.emit(nodeID, evtType, data)
+
+	if err != nil {
+		h.logger.Error("Tool error [%s]: %s — %v (%dms)",
+			nodeID, toolName, err, elapsed.Milliseconds())
+	} else {
+		h.logger.Logf(iterlog.LevelInfo, "🔧", "Tool result [%s]: %s → %s (%dms)",
+			nodeID, toolName, humanSize(len(output)), elapsed.Milliseconds())
+		if output != "" {
+			h.logger.LogBlock(iterlog.LevelDebug, "🔬",
+				fmt.Sprintf("Tool output [%s/%s]:", nodeID, toolName),
+				iterlog.BlockPreview(h.red(output), 1500))
+		}
+		for _, payload := range scanPreviewURLs(output) {
+			h.emit(nodeID, store.EventPreviewURLAvailable, payload)
+			if url, _ := payload["url"].(string); url != "" {
+				h.logger.Logf(iterlog.LevelInfo, "🌐", "Preview URL [%s]: %s", nodeID, url)
+			}
+		}
+		if h.attachmentSink != nil {
+			for _, dir := range scanPreviewScreenshots(output) {
+				captureBrowserScreenshot(
+					h.ctx, h.attachmentSink, h.emitter,
+					h.runID, nodeID, dir, h.logger,
+				)
+			}
+		}
+	}
+}
+
 // NewStoreEventHooks returns EventHooks that emit store events for a given run
 // and log emoji-rich console output via the provided logger.
 // The logger controls which content fields are included in events:
@@ -171,432 +624,36 @@ func NewStoreEventHooks(ctx context.Context, emitter EventEmitter, runID string,
 	turnSink, _ := emitter.(TurnWriter)
 	// All event payloads go through the redacting wrapper (Layer 0).
 	emitter = redactingEmitter{inner: emitter, guard: guard}
-	// red scrubs run.log block bodies (a separate sink from
-	// events.jsonl). Nil-safe: a nil guard returns the input unchanged.
-	red := guard.Redact
-	// emit is a closure-local shorthand for AppendEvent calls that share
-	// the captured (ctx, runID) and the (Type/RunID/NodeID/Data) Event
-	// shape — i.e. every event emitted from this NewStoreEventHooks
-	// closure. AppendEvent's error is intentionally discarded here, as
-	// it was at every call site before this refactor: the store layer
-	// already logs persistence failures and the hook path must never
-	// fail the in-flight LLM call.
-	emit := func(nodeID string, evType store.EventType, data map[string]interface{}) {
-		_, _ = emitter.AppendEvent(ctx, runID, store.Event{
-			Type:   evType,
-			RunID:  runID,
-			NodeID: nodeID,
-			Data:   data,
-		})
+	h := &storeHooks{
+		ctx:     ctx,
+		emitter: emitter,
+		runID:   runID,
+		logger:  logger,
+		guard:   guard,
+		// red scrubs run.log block bodies (a separate sink from
+		// events.jsonl). Nil-safe: a nil guard returns the input unchanged.
+		red:            guard.Redact,
+		attachmentSink: attachmentSink,
+		toolBlobSink:   toolBlobSink,
+		turnSink:       turnSink,
 	}
 	return EventHooks{
-		OnLLMPrompt: func(nodeID string, systemPrompt string, userMessage string) {
-			data := map[string]interface{}{
-				"system_prompt": iterlog.Truncate(systemPrompt, maxFieldSize),
-				"user_message":  iterlog.Truncate(userMessage, maxFieldSize),
-			}
-			emit(nodeID, store.EventLLMPrompt, data)
-
-			// Use LogBlock so the prompt body folds under the header
-			// in the studio's run log. Pass the full text — truncating
-			// at the source loses signal (the studio already provides
-			// a Wrap toggle + per-block expand/collapse).
-			if userMessage != "" {
-				logger.LogBlock(iterlog.LevelInfo, "💬",
-					fmt.Sprintf("Prompt [%s]:", nodeID), red(userMessage))
-			}
-			if systemPrompt != "" {
-				logger.LogBlock(iterlog.LevelDebug, "📝",
-					fmt.Sprintf("System prompt [%s]:", nodeID), red(systemPrompt))
-			}
-		},
-
-		OnLLMRequest: func(nodeID string, info LLMRequestInfo) {
-			data := map[string]interface{}{
-				"model":         info.Model,
-				"message_count": info.MessageCount,
-				"tool_count":    info.ToolCount,
-			}
-			if info.ReasoningEffort != "" {
-				data["reasoning_effort"] = info.ReasoningEffort
-			}
-			emit(nodeID, store.EventLLMRequest, data)
-
-			toolInfo := ""
-			if info.ToolCount > 0 {
-				toolInfo = fmt.Sprintf(", %d tools", info.ToolCount)
-			}
-			reasoningInfo := ""
-			if info.ReasoningEffort != "" {
-				reasoningInfo = fmt.Sprintf(", reasoning=%s", info.ReasoningEffort)
-			}
-			logger.Logf(iterlog.LevelInfo, "🤖", "[%s#%d/claw] LLM call: %s (%d msgs%s%s)",
-				nodeID, info.Iteration, info.Model, info.MessageCount, toolInfo, reasoningInfo)
-		},
-
+		OnLLMPrompt:  h.onLLMPrompt,
+		OnLLMRequest: h.onLLMRequest,
 		// OnLLMResponse is intentionally nil: response data surfaces through
 		// llm_step_finished events with richer per-step detail.
-
-		OnLLMRetry: func(nodeID string, info RetryInfo) {
-			data := map[string]interface{}{
-				"attempt":  info.Attempt,
-				"delay_ms": info.Delay.Milliseconds(),
-			}
-			if info.Error != nil {
-				data["error"] = info.Error.Error()
-			}
-			if info.StatusCode != 0 {
-				data["status_code"] = info.StatusCode
-			}
-			emit(nodeID, store.EventLLMRetry, data)
-
-			errMsg := ""
-			if info.Error != nil {
-				errMsg = info.Error.Error()
-			}
-			logger.Warn("LLM retry [%s]: attempt %d, delay %dms: %s",
-				nodeID, info.Attempt, info.Delay.Milliseconds(), errMsg)
-		},
-
-		OnLLMStepFinish: func(nodeID string, step LLMStepInfo) {
-			data := map[string]interface{}{
-				"step":          step.Number,
-				"input_tokens":  step.InputTokens,
-				"output_tokens": step.OutputTokens,
-				"finish_reason": step.FinishReason,
-				"tool_calls":    len(step.ToolCalls),
-			}
-			if step.CacheReadTokens > 0 {
-				data["cache_read_tokens"] = step.CacheReadTokens
-			}
-			if step.CacheWriteTokens > 0 {
-				data["cache_write_tokens"] = step.CacheWriteTokens
-			}
-			if step.ReasoningTokens > 0 {
-				data["thinking_tokens"] = step.ReasoningTokens
-			}
-			if step.ThinkingMs > 0 {
-				data["thinking_ms"] = step.ThinkingMs
-			}
-
-			// Always include response text in persisted events.
-			if step.Text != "" {
-				data["response_text"] = iterlog.Truncate(step.Text, maxFieldSize)
-			}
-
-			// At trace, include tool call details.
-			if logger.IsEnabled(iterlog.LevelTrace) && len(step.ToolCalls) > 0 {
-				calls := make([]map[string]interface{}, len(step.ToolCalls))
-				for i, tc := range step.ToolCalls {
-					calls[i] = map[string]interface{}{
-						"tool_name": tc.Name,
-						"input":     iterlog.Truncate(string(tc.Input), maxFieldSize),
-					}
-				}
-				data["tool_call_details"] = calls
-			}
-
-			emit(nodeID, store.EventLLMStepFinished, data)
-
-			if step.Text != "" {
-				// Full response, no preview cap — the studio folds the
-				// body under the header so length doesn't crowd the log.
-				// The [node#iter/claw] tag must lead the header so the
-				// per-node Logs tab's prefix filter associates the line.
-				logger.LogBlock(iterlog.LevelInfo, "💬",
-					fmt.Sprintf("[%s#%d/claw] response step %d:", nodeID, step.Iteration, step.Number),
-					red(step.Text))
-			}
-			// Per-tool log line for the claw (in-process) path. The
-			// claude_code delegate prints its own
-			// `[node#iter/claude-code] 🔧 <Tool> <detail>` line during
-			// stream decoding, so we skip those here — the bridge
-			// hook in executor.go only ferries event payloads, and
-			// the LLMStepInfo arrives only for claw's direct loop.
-			if len(step.ToolCalls) > 0 {
-				for _, tc := range step.ToolCalls {
-					detail := tooldisplay.HeaderDetail(tc.Name, tc.Input, tooldisplay.SnakeCaseKeys)
-					if detail != "" {
-						logger.Logf(iterlog.LevelInfo, "🔧", "[%s#%d/claw] %s %s", nodeID, step.Iteration, tc.Name, red(detail))
-					} else {
-						logger.Logf(iterlog.LevelInfo, "🔧", "[%s#%d/claw] %s", nodeID, step.Iteration, tc.Name)
-					}
-					if body := tooldisplay.BlockBody(tc.Name, tc.Input); body != "" {
-						logger.LogBlock(iterlog.LevelInfo, "🔧",
-							fmt.Sprintf("[%s#%d/claw] tool input %s:", nodeID, step.Iteration, tc.Name),
-							red(body))
-					}
-					if logger.IsEnabled(iterlog.LevelDebug) {
-						logger.LogBlock(iterlog.LevelDebug, "🔧",
-							fmt.Sprintf("[%s#%d/claw] raw input %s:", nodeID, step.Iteration, tc.Name),
-							red(string(tc.Input)))
-					}
-				}
-			}
-			if step.CacheReadTokens > 0 || step.CacheWriteTokens > 0 {
-				logger.Logf(iterlog.LevelInfo, "📊", "[%s#%d/claw] step %d: %d in / %d out tokens (cache: %d read, %d write)",
-					nodeID, step.Iteration, step.Number, step.InputTokens, step.OutputTokens,
-					step.CacheReadTokens, step.CacheWriteTokens)
-			} else {
-				logger.Logf(iterlog.LevelInfo, "📊", "[%s#%d/claw] step %d: %d in / %d out tokens",
-					nodeID, step.Iteration, step.Number, step.InputTokens, step.OutputTokens)
-			}
-			if step.ReasoningTokens > 0 || step.ThinkingMs > 0 {
-				logger.Logf(iterlog.LevelInfo, "🧠", "[%s#%d/claw] step %d thinking: ~%d tok, %dms",
-					nodeID, step.Iteration, step.Number, step.ReasoningTokens, step.ThinkingMs)
-			}
-		},
-
-		OnLLMTurnCapture: func(nodeID string, info LLMTurnCaptureInfo) {
-			if turnSink == nil {
-				// Cloud stores don't satisfy TurnWriter yet; skip silently
-				// so the timeline + fork features simply don't light up
-				// for those runs (the rest of the LLM loop is unaffected).
-				return
-			}
-			// info.Iteration is threaded through applyHooks /
-			// delegateHooksFor from the live per-execution context. The
-			// hook closure's captured ctx is the engine-level one (always
-			// iter 0), so reading it here stamped every TurnCheckpoint with
-			// LoopIter=0 and broke per-iteration fork anchoring.
-			iter := info.Iteration
-			toolCalls := make([]store.TurnToolCall, len(info.ToolCalls))
-			for i, tc := range info.ToolCalls {
-				toolCalls[i] = store.TurnToolCall{
-					Name:         tc.Name,
-					InputPreview: iterlog.Truncate(red(string(tc.Input)), toolInlineThreshold),
-				}
-			}
-			backend := info.Backend
-			if backend == "" {
-				backend = delegate.BackendClaw
-			}
-			turnIdx := info.Step - 1
-			if turnIdx < 0 {
-				turnIdx = 0
-			}
-			turn := &store.TurnCheckpoint{
-				RunID:        runID,
-				NodeID:       nodeID,
-				LoopIter:     iter,
-				TurnIndex:    turnIdx,
-				Backend:      backend,
-				FinishReason: info.FinishReason,
-				ToolCalls:    toolCalls,
-				TextDigest:   sha256Hex(info.Text),
-				Usage: store.TurnUsage{
-					InputTokens:  info.InputTokens,
-					OutputTokens: info.OutputTokens,
-				},
-				SessionID: info.SessionID,
-			}
-			// Materialise the conversation bytes only when we're
-			// about to persist them — the marshal is O(N) in
-			// transcript length, and the hook fires on every turn.
-			if conv := info.MarshalConversation(); len(conv) > 0 {
-				turn.MessagesRef = turnMessagesRef(nodeID, iter, turnIdx)
-				// The turn snapshot holds the full conversation (system +
-				// user + every tool result) and feeds the Fork API — scrub
-				// secrets before it lands on disk.
-				turn.Messages = guard.RedactBytes(conv)
-			}
-			if err := turnSink.WriteTurn(ctx, turn); err != nil {
-				logger.Warn("turn capture [%s] step %d: %v", nodeID, info.Step, err)
-			}
-		},
-
-		OnLLMCompacted: func(nodeID string, info LLMCompactInfo) {
-			data := map[string]interface{}{
-				"before_messages":       info.BeforeMessages,
-				"after_messages":        info.AfterMessages,
-				"removed_message_count": info.RemovedMessageCount,
-			}
-			emit(nodeID, store.EventLLMCompacted, data)
-
-			logger.Logf(iterlog.LevelInfo, "📦", "[%s#%d/claw] compacted: %d → %d msgs (%d removed)",
-				nodeID, info.Iteration, info.BeforeMessages, info.AfterMessages, info.RemovedMessageCount)
-		},
-
-		OnToolStarted: func(nodeID string, info LLMToolStartedInfo) {
-			data := map[string]interface{}{
-				"tool":       info.ToolName,
-				"input_size": info.InputSize,
-			}
-			if info.ToolUseID != "" {
-				data["tool_use_id"] = info.ToolUseID
-			}
-			// Persist the raw JSON input. Small inputs land inline
-			// (`data.input`); large inputs go to a sidecar blob so the
-			// event stream stays bounded, with the event carrying a
-			// 4 KB preview + a ref the studio uses to fetch the rest
-			// paginated.
-			persistToolPayload(ctx, guard, toolBlobSink, runID, info.ToolUseID, "input", info.Input, data)
-			emit(nodeID, store.EventToolStarted, data)
-			// No console echo here: the claude_code delegate already
-			// emits its own `[node#iter/claude-code] 🔧 <Tool> <detail>`
-			// line as the SDK stream is decoded, and the claw path logs
-			// its step's tool calls from OnLLMStepFinish below — adding
-			// a third line here would double-up every entry.
-		},
-
-		OnToolCall: func(nodeID string, info LLMToolCallInfo) {
-			data := map[string]interface{}{
-				"tool":        info.ToolName,
-				"input_size":  info.InputSize,
-				"duration_ms": info.Duration.Milliseconds(),
-			}
-			if info.ToolUseID != "" {
-				data["tool_use_id"] = info.ToolUseID
-			}
-			// Persist the tool's result so the studio's per-node Tools
-			// tab renders in+out side-by-side (matching Claude Code's
-			// inline display). Small outputs inline; large outputs go
-			// to a sidecar blob with a 4 KB preview + ref, fetched
-			// paginated on demand.
-			persistToolPayload(ctx, guard, toolBlobSink, runID, info.ToolUseID, "output", []byte(info.Output), data)
-
-			evtType := store.EventToolCalled
-			if info.Error != nil {
-				evtType = store.EventToolError
-				data["error"] = info.Error.Error()
-			}
-			emit(nodeID, evtType, data)
-
-			// Console output: errors only — the success case is fully
-			// captured by the tool_called event (duration + tool name)
-			// and rendered by the Tools tab + in-flight footer in the
-			// run view, so a per-call log line is just noise.
-			if info.Error != nil {
-				logger.Error("Tool error [%s]: %s — %v (%dms)",
-					nodeID, info.ToolName, info.Error, info.Duration.Milliseconds())
-			}
-		},
-
-		OnDelegateStarted: func(nodeID string, backendName string) {
-			emit(nodeID, store.EventDelegateStarted, map[string]interface{}{"backend": backendName})
-			logger.Logf(iterlog.LevelInfo, "🚀", "Delegation started [%s]: backend=%s", nodeID, backendName)
-		},
-
-		OnDelegateFinished: func(nodeID string, info DelegateInfo) {
-			data := map[string]interface{}{
-				"backend":              info.BackendName,
-				"duration_ms":          info.Duration.Milliseconds(),
-				"tokens":               info.Tokens,
-				"exit_code":            info.ExitCode,
-				"raw_output_len":       info.RawOutputLen,
-				"parse_fallback":       info.ParseFallback,
-				"formatting_pass_used": info.FormattingPassUsed,
-			}
-			if logger.IsEnabled(iterlog.LevelTrace) && info.Stderr != "" {
-				data["stderr"] = iterlog.Truncate(info.Stderr, maxFieldSize)
-			}
-			emit(nodeID, store.EventDelegateFinished, data)
-
-			logger.Logf(iterlog.LevelInfo, "✅", "Delegation finished [%s]: %s (%dms, %d tokens)",
-				nodeID, info.BackendName, info.Duration.Milliseconds(), info.Tokens)
-			if info.FormattingPassUsed {
-				logger.Logf(iterlog.LevelDebug, "📐", "Delegation [%s]: two-pass execution used for structured output", nodeID)
-			} else if info.ParseFallback {
-				logger.Warn("Delegation [%s]: structured output parsing fell back to text wrapper", nodeID)
-			}
-			if info.Stderr != "" {
-				logger.LogBlock(iterlog.LevelDebug, "⚠️",
-					fmt.Sprintf("Delegation stderr [%s]:", nodeID), red(info.Stderr))
-			}
-		},
-
-		OnDelegateError: func(nodeID string, info DelegateInfo) {
-			data := map[string]interface{}{
-				"backend":     info.BackendName,
-				"duration_ms": info.Duration.Milliseconds(),
-				"tokens":      info.Tokens,
-				"exit_code":   info.ExitCode,
-			}
-			if info.Error != nil {
-				data["error"] = info.Error.Error()
-			}
-			if logger.IsEnabled(iterlog.LevelTrace) && info.Stderr != "" {
-				data["stderr"] = iterlog.Truncate(info.Stderr, maxFieldSize)
-			}
-			emit(nodeID, store.EventDelegateError, data)
-
-			errMsg := ""
-			if info.Error != nil {
-				errMsg = info.Error.Error()
-			}
-			logger.Error("Delegation failed [%s]: %s — %s", nodeID, info.BackendName, errMsg)
-		},
-
-		OnDelegateRetry: func(nodeID string, info DelegateInfo) {
-			data := map[string]interface{}{
-				"backend":  info.BackendName,
-				"attempt":  info.Attempt,
-				"delay_ms": info.Delay.Milliseconds(),
-			}
-			if info.Error != nil {
-				data["error"] = info.Error.Error()
-			}
-			emit(nodeID, store.EventDelegateRetry, data)
-
-			errMsg := ""
-			if info.Error != nil {
-				errMsg = info.Error.Error()
-			}
-			logger.Warn("Delegation retry [%s]: %s attempt %d, delay %dms: %s",
-				nodeID, info.BackendName, info.Attempt, info.Delay.Milliseconds(), errMsg)
-		},
-
+		OnLLMRetry:         h.onLLMRetry,
+		OnLLMStepFinish:    h.onLLMStepFinish,
+		OnLLMTurnCapture:   h.onLLMTurnCapture,
+		OnLLMCompacted:     h.onLLMCompacted,
+		OnToolStarted:      h.onToolStarted,
+		OnToolCall:         h.onToolCall,
+		OnDelegateStarted:  h.onDelegateStarted,
+		OnDelegateFinished: h.onDelegateFinished,
+		OnDelegateError:    h.onDelegateError,
+		OnDelegateRetry:    h.onDelegateRetry,
 		// OnToolNodeResult handles direct tool nodes with full I/O content.
-		OnToolNodeResult: func(nodeID string, toolName string, input []byte, output string, elapsed time.Duration, err error) {
-			data := map[string]interface{}{
-				"tool":        toolName,
-				"input_size":  len(input),
-				"duration_ms": elapsed.Milliseconds(),
-			}
-
-			if logger.IsEnabled(iterlog.LevelTrace) {
-				if len(input) > 0 {
-					data["input"] = iterlog.Truncate(string(input), maxFieldSize)
-				}
-				if output != "" {
-					data["output"] = iterlog.Truncate(output, maxFieldSize)
-				}
-			}
-
-			evtType := store.EventToolCalled
-			if err != nil {
-				evtType = store.EventToolError
-				data["error"] = err.Error()
-			}
-			emit(nodeID, evtType, data)
-
-			if err != nil {
-				logger.Error("Tool error [%s]: %s — %v (%dms)",
-					nodeID, toolName, err, elapsed.Milliseconds())
-			} else {
-				logger.Logf(iterlog.LevelInfo, "🔧", "Tool result [%s]: %s → %s (%dms)",
-					nodeID, toolName, humanSize(len(output)), elapsed.Milliseconds())
-				if output != "" {
-					logger.LogBlock(iterlog.LevelDebug, "🔬",
-						fmt.Sprintf("Tool output [%s/%s]:", nodeID, toolName),
-						iterlog.BlockPreview(red(output), 1500))
-				}
-				for _, payload := range scanPreviewURLs(output) {
-					emit(nodeID, store.EventPreviewURLAvailable, payload)
-					if url, _ := payload["url"].(string); url != "" {
-						logger.Logf(iterlog.LevelInfo, "🌐", "Preview URL [%s]: %s", nodeID, url)
-					}
-				}
-				if attachmentSink != nil {
-					for _, dir := range scanPreviewScreenshots(output) {
-						captureBrowserScreenshot(
-							ctx, attachmentSink, emitter,
-							runID, nodeID, dir, logger,
-						)
-					}
-				}
-			}
-		},
+		OnToolNodeResult: h.onToolNodeResult,
 	}
 }
 
