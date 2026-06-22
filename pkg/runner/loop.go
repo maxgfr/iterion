@@ -585,16 +585,8 @@ func (r *Runner) Shutdown(ctx context.Context) error {
 // shutdown unwinds cleanly via handleContextDoneWithCheckpoint
 // (preserving the checkpoint for resume).
 func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
-	msg, err := delivery.Decode()
-	if err != nil {
-		r.cfg.Logger.Error("runner: decode delivery: %v", err)
-		if termErr := delivery.Term(); termErr != nil {
-			// A failed Term leaves the malformed message in the queue
-			// where it will be redelivered and fail decode again on
-			// every runner — surface it so the operator can purge
-			// rather than chase a silent loop.
-			r.cfg.Logger.Warn("runner: term after decode failure: %v", termErr)
-		}
+	msg, ok := r.decodeOrTerm(delivery)
+	if !ok {
 		return
 	}
 
@@ -616,27 +608,7 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 		}()
 	}
 
-	// Inherit the publisher's trace so OTel spans created by the
-	// engine appear under the originating studio span (plan §F T-41).
-	traced := delivery.PropagateTraceTo(parent)
-	// Stamp tenant + owner from the message into ctx so every
-	// downstream Mongo write picks them up and every Mongo read
-	// stays scoped to the run's tenant. The runner trusts the
-	// publisher to have set these from a verified Identity; we
-	// re-validate against the loaded run doc below.
-	traced = store.WithIdentity(traced, msg.TenantID, msg.OwnerID)
-	// Root span for the runner-side execution. Per-node spans created
-	// inside engine.Run hang off this one, so a single trace covers
-	// API → queue → runner → node graph. The span ends in the deferred
-	// block below; finalStatus is set at every exit path.
-	spanCtx, span := otel.Tracer(tracerName).Start(traced, "iterion.runner.process_one",
-		trace.WithAttributes(
-			attribute.String("iterion.run_id", msg.RunID),
-			attribute.String("iterion.workflow_name", msg.WorkflowName),
-			attribute.String("iterion.workflow_hash", msg.WorkflowHash),
-			attribute.String("iterion.tenant_id", msg.TenantID),
-		),
-	)
+	spanCtx, span := r.startProcessSpan(parent, delivery, msg)
 	runCtx, runCancel := context.WithCancel(spanCtx)
 	defer runCancel()
 	defer func() {
@@ -679,40 +651,14 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 		return
 	}
 
-	// Verify the message's tenant matches the persisted document.
-	// A mismatch implies either a corrupted publish (publisher
-	// stamped the wrong tenant) or a malicious / replayed message.
-	// Either way the run is unsafe to execute under either tenant's
-	// scope; term the delivery so it doesn't redeliver. Kept inline
-	// (not folded into resolveDeliveryPreconditions) so the
-	// failed-Term log can carry a security-shaped ERROR-level alarm
-	// asking the operator to purge the JetStream subject manually —
-	// the generic logDeliveryErr breadcrumb wouldn't surface it.
-	if pre.preRun.TenantID != msg.TenantID {
-		logger.Error("runner: tenant mismatch for run %s (msg=%q stored=%q) — terming", msg.RunID, msg.TenantID, pre.preRun.TenantID)
+	if !r.verifyTenantOrTerm(pre, msg, delivery, logger) {
 		finalStatus = "tenant_mismatch"
-		if termErr := delivery.Term(); termErr != nil {
-			// HIGH-impact: a failed Term on a tenant-mismatched
-			// message means a forged / replayed delivery stays in the
-			// queue and JetStream will redeliver it, looping forever.
-			// Surface loudly so the operator can purge the stream.
-			logger.Error("runner: term for %s after tenant mismatch FAILED (%v) — message will redeliver; purge the JetStream subject manually", msg.RunID, termErr)
-		}
 		return
 	}
 
-	// Acquire the distributed lock. Two competing runners on the
-	// same run is the contention this guards against.
-	lock, err := r.cfg.Store.LockRun(runCtx, msg.RunID)
-	if err != nil {
-		if errors.Is(err, natsq.ErrLockHeld) {
-			logger.Warn("runner: lock held for %s — naking for sibling", msg.RunID)
-			finalStatus = "lock_held"
-			nakTerminal(logger, delivery, "nak-lock-held", msg.RunID)
-			return
-		}
-		logger.Error("runner: lock %s: %v", msg.RunID, err)
-		nakTerminal(logger, delivery, "nak-lock-error", msg.RunID)
+	lock, lockOK, lockStatus := r.acquireRunLock(runCtx, msg, delivery, logger)
+	if !lockOK {
+		finalStatus = lockStatus
 		return
 	}
 	defer func() {
@@ -750,7 +696,7 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 		<-hbDone
 	}()
 
-	err = r.executeRun(runCtx, msg)
+	err := r.executeRun(runCtx, msg)
 	// Stop the heartbeat before finalizing (Ack/Nak) the delivery. The
 	// heartbeat issues periodic InProgress() on this same delivery to
 	// hold the JetStream ack deadline open; draining it here guarantees
@@ -760,48 +706,10 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 	runCancel()
 	<-hbDone
 
-	// Fire the run-completion webhook (no-op unless the run carries a
-	// callback URL). FireForRun re-reads the persisted run and gates on
-	// the terminal status via shouldNotify — paused runs (the run is not
-	// done, just waiting) are filtered there, so no error-type guard is
-	// needed here. The resume that actually terminates fires it then.
-	// Mirrors runview.spawnRun's in-process fire (same shouldNotify
-	// authority) so cloud and local behave identically.
-	if r.completionNotifier != nil {
-		nctx := store.WithIdentity(context.Background(), msg.TenantID, msg.OwnerID)
-		r.completionNotifier.FireForRun(nctx, r.cfg.Store, msg.RunID)
-	}
+	r.fireCompletionNotifier(msg)
 
-	// DLQ branch: a generic engine error on the LAST permitted attempt
-	// must park a copy on the DLQ and Term instead of Nak — without the
-	// bridge JetStream silently drops the message after MaxDeliver and
-	// the run is unrecoverable except by hand. Handled inline (not via
-	// classifyExecResult) because it has side effects (PublishDLQ +
-	// UpdateRunStatusIf) and uses its own context with `defer cancel()`.
-	if err != nil &&
-		!errors.Is(err, runtime.ErrRunPaused) &&
-		!errors.Is(err, runtime.ErrRunPausedOperator) &&
-		!errors.Is(err, runtime.ErrRunCancelled) &&
-		r.cfg.NATS != nil && delivery.NumDelivered() >= r.cfg.NATS.MaxDeliver() {
-		logger.Error("runner: run %s failed on final delivery %d/%d — parking on DLQ: %v",
-			msg.RunID, delivery.NumDelivered(), r.cfg.NATS.MaxDeliver(), err)
-		finalStatus = "dlq"
-		bg, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if perr := r.cfg.NATS.PublishDLQ(bg, delivery, err.Error()); perr != nil {
-			// DLQ unavailable: keep the JetStream redelivery as
-			// the only remaining safety net.
-			logger.Error("runner: DLQ park for %s failed: %v — naking instead", msg.RunID, perr)
-			nakTerminal(logger, delivery, "nak-dlq-failed", msg.RunID)
-			return
-		}
-		sctx := store.WithIdentity(bg, msg.TenantID, msg.OwnerID)
-		if _, serr := r.cfg.Store.UpdateRunStatusIf(sctx, msg.RunID, store.RunStatusFailedResumable,
-			fmt.Sprintf("max deliveries exhausted: %v (parked on DLQ — replay via /api/admin/dlq)", err),
-			[]store.RunStatus{store.RunStatusRunning, store.RunStatusQueued}); serr != nil {
-			logger.Warn("runner: DLQ status flip for %s: %v", msg.RunID, serr)
-		}
-		termTerminal(logger, delivery, "term-dlq-parked", msg.RunID)
+	if handled, dlqStatus := r.parkOnDLQOnFinalDelivery(err, delivery, msg, logger); handled {
+		finalStatus = dlqStatus
 		return
 	}
 
@@ -809,6 +717,160 @@ func (r *Runner) processOne(parent context.Context, delivery *natsq.Delivery) {
 	logAt(logger, outcome.level, outcome.logFmt, outcome.logArgs...)
 	finalStatus = outcome.finalStatus
 	dispatchTerminal(logger, delivery, outcome.action, outcome.op, msg.RunID)
+}
+
+// decodeOrTerm decodes the delivery payload into a queue.RunMessage. On
+// decode failure it Terms the delivery so the malformed message doesn't
+// loop in JetStream, surfacing a failed-Term at WARN so the operator
+// can purge rather than chase a silent loop. Returns (msg, true) on
+// success; (nil, false) when the caller must abandon the delivery.
+func (r *Runner) decodeOrTerm(delivery *natsq.Delivery) (*queue.RunMessage, bool) {
+	msg, err := delivery.Decode()
+	if err != nil {
+		r.cfg.Logger.Error("runner: decode delivery: %v", err)
+		if termErr := delivery.Term(); termErr != nil {
+			// A failed Term leaves the malformed message in the queue
+			// where it will be redelivered and fail decode again on
+			// every runner — surface it so the operator can purge
+			// rather than chase a silent loop.
+			r.cfg.Logger.Warn("runner: term after decode failure: %v", termErr)
+		}
+		return nil, false
+	}
+	return msg, true
+}
+
+// startProcessSpan builds the runner-side OTel root span for this
+// delivery. It inherits the publisher's trace (so engine spans hang off
+// the originating studio span — plan §F T-41), stamps tenant + owner on
+// the context (so every downstream Mongo write picks them up and every
+// read stays scoped to the run's tenant — re-validated against the
+// loaded run doc below), and starts the iterion.runner.process_one
+// span. The span ends in a deferred block in processOne; finalStatus is
+// set at every exit path.
+func (r *Runner) startProcessSpan(parent context.Context, delivery *natsq.Delivery, msg *queue.RunMessage) (context.Context, trace.Span) {
+	// Inherit the publisher's trace so OTel spans created by the
+	// engine appear under the originating studio span (plan §F T-41).
+	traced := delivery.PropagateTraceTo(parent)
+	// Stamp tenant + owner from the message into ctx so every
+	// downstream Mongo write picks them up and every Mongo read
+	// stays scoped to the run's tenant. The runner trusts the
+	// publisher to have set these from a verified Identity; we
+	// re-validate against the loaded run doc below.
+	traced = store.WithIdentity(traced, msg.TenantID, msg.OwnerID)
+	// Root span for the runner-side execution. Per-node spans created
+	// inside engine.Run hang off this one, so a single trace covers
+	// API → queue → runner → node graph. The span ends in the deferred
+	// block below; finalStatus is set at every exit path.
+	return otel.Tracer(tracerName).Start(traced, "iterion.runner.process_one",
+		trace.WithAttributes(
+			attribute.String("iterion.run_id", msg.RunID),
+			attribute.String("iterion.workflow_name", msg.WorkflowName),
+			attribute.String("iterion.workflow_hash", msg.WorkflowHash),
+			attribute.String("iterion.tenant_id", msg.TenantID),
+		),
+	)
+}
+
+// verifyTenantOrTerm refuses a delivery whose message tenant doesn't
+// match the persisted run document. A mismatch implies either a
+// corrupted publish (publisher stamped the wrong tenant) or a malicious
+// / replayed message; either way the run is unsafe to execute under
+// either tenant's scope, so we Term the delivery to keep it from
+// redelivering. Kept separate from resolveDeliveryPreconditions so the
+// failed-Term log can carry a security-shaped ERROR-level alarm asking
+// the operator to purge the JetStream subject manually — the generic
+// logDeliveryErr breadcrumb wouldn't surface it. Returns true to proceed,
+// false when the caller must abandon the delivery.
+func (r *Runner) verifyTenantOrTerm(pre preconditionOutcome, msg *queue.RunMessage, delivery *natsq.Delivery, logger *iterlog.Logger) bool {
+	if pre.preRun.TenantID == msg.TenantID {
+		return true
+	}
+	logger.Error("runner: tenant mismatch for run %s (msg=%q stored=%q) — terming", msg.RunID, msg.TenantID, pre.preRun.TenantID)
+	if termErr := delivery.Term(); termErr != nil {
+		// HIGH-impact: a failed Term on a tenant-mismatched
+		// message means a forged / replayed delivery stays in the
+		// queue and JetStream will redeliver it, looping forever.
+		// Surface loudly so the operator can purge the stream.
+		logger.Error("runner: term for %s after tenant mismatch FAILED (%v) — message will redeliver; purge the JetStream subject manually", msg.RunID, termErr)
+	}
+	return false
+}
+
+// acquireRunLock claims the distributed run lock guarding against two
+// runners executing the same run. ErrLockHeld means a sibling already
+// has it — Nak so the sibling retains exclusive ownership; any other
+// lock error is a transient-store shape and also Nak'd. Returns
+// (lock, true, "") on success; (nil, false, finalStatus) when the caller
+// must abandon the delivery (finalStatus is the metric label).
+func (r *Runner) acquireRunLock(runCtx context.Context, msg *queue.RunMessage, delivery *natsq.Delivery, logger *iterlog.Logger) (store.RunLock, bool, string) {
+	// Acquire the distributed lock. Two competing runners on the
+	// same run is the contention this guards against.
+	lock, err := r.cfg.Store.LockRun(runCtx, msg.RunID)
+	if err != nil {
+		if errors.Is(err, natsq.ErrLockHeld) {
+			logger.Warn("runner: lock held for %s — naking for sibling", msg.RunID)
+			nakTerminal(logger, delivery, "nak-lock-held", msg.RunID)
+			return nil, false, "lock_held"
+		}
+		logger.Error("runner: lock %s: %v", msg.RunID, err)
+		nakTerminal(logger, delivery, "nak-lock-error", msg.RunID)
+		return nil, false, "failed"
+	}
+	return lock, true, ""
+}
+
+// fireCompletionNotifier fires the run-completion webhook (no-op unless
+// the run carries a callback URL). FireForRun re-reads the persisted run
+// and gates on the terminal status via shouldNotify — paused runs (the
+// run is not done, just waiting) are filtered there, so no error-type
+// guard is needed here. The resume that actually terminates fires it
+// then. Mirrors runview.spawnRun's in-process fire (same shouldNotify
+// authority) so cloud and local behave identically.
+func (r *Runner) fireCompletionNotifier(msg *queue.RunMessage) {
+	if r.completionNotifier == nil {
+		return
+	}
+	nctx := store.WithIdentity(context.Background(), msg.TenantID, msg.OwnerID)
+	r.completionNotifier.FireForRun(nctx, r.cfg.Store, msg.RunID)
+}
+
+// parkOnDLQOnFinalDelivery handles the DLQ branch: a generic engine
+// error on the LAST permitted JetStream attempt must park a copy on the
+// DLQ and Term instead of Nak — without the bridge, JetStream silently
+// drops the message after MaxDeliver and the run is unrecoverable except
+// by hand. Handled here (not via classifyExecResult) because it has side
+// effects (PublishDLQ + UpdateRunStatusIf) and uses its own context with
+// `defer cancel()`. Returns (true, finalStatus) when the caller must
+// stop processing the delivery (DLQ dispatch already issued);
+// (false, "") otherwise to fall through to classifyExecResult.
+func (r *Runner) parkOnDLQOnFinalDelivery(err error, delivery *natsq.Delivery, msg *queue.RunMessage, logger *iterlog.Logger) (bool, string) {
+	if err == nil ||
+		errors.Is(err, runtime.ErrRunPaused) ||
+		errors.Is(err, runtime.ErrRunPausedOperator) ||
+		errors.Is(err, runtime.ErrRunCancelled) ||
+		r.cfg.NATS == nil || delivery.NumDelivered() < r.cfg.NATS.MaxDeliver() {
+		return false, ""
+	}
+	logger.Error("runner: run %s failed on final delivery %d/%d — parking on DLQ: %v",
+		msg.RunID, delivery.NumDelivered(), r.cfg.NATS.MaxDeliver(), err)
+	bg, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if perr := r.cfg.NATS.PublishDLQ(bg, delivery, err.Error()); perr != nil {
+		// DLQ unavailable: keep the JetStream redelivery as
+		// the only remaining safety net.
+		logger.Error("runner: DLQ park for %s failed: %v — naking instead", msg.RunID, perr)
+		nakTerminal(logger, delivery, "nak-dlq-failed", msg.RunID)
+		return true, "dlq"
+	}
+	sctx := store.WithIdentity(bg, msg.TenantID, msg.OwnerID)
+	if _, serr := r.cfg.Store.UpdateRunStatusIf(sctx, msg.RunID, store.RunStatusFailedResumable,
+		fmt.Sprintf("max deliveries exhausted: %v (parked on DLQ — replay via /api/admin/dlq)", err),
+		[]store.RunStatus{store.RunStatusRunning, store.RunStatusQueued}); serr != nil {
+		logger.Warn("runner: DLQ status flip for %s: %v", msg.RunID, serr)
+	}
+	termTerminal(logger, delivery, "term-dlq-parked", msg.RunID)
+	return true, "dlq"
 }
 
 // heartbeat refreshes the NATS KV lease so a long-running run keeps
