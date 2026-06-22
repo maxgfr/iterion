@@ -148,7 +148,9 @@ Dedicated `join` node declarations are no longer supported; put `await:` on the 
 
 ### Human
 
-Pauses the workflow for human input, or lets an LLM handle it:
+Pauses the workflow for human input, or lets an LLM handle it (full guide,
+form widgets, and the interaction-mode decision tree:
+[human-in-the-loop.md](human-in-the-loop.md)):
 
 ```iter
 ## Always pause for human answers

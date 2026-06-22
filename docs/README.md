@@ -28,6 +28,7 @@ Welcome to the Iterion docs. Pages are organised by audience and topic.
 |---|---|
 | [dsl.md](dsl.md) | Full DSL reference — variables, prompts, schemas, node types, edges, templates, MCP, budget, worktree/sandbox. |
 | [routers.md](routers.md) | Deep dive on routing modes (`fan_out_all`, `condition`, `round_robin`, `llm`) and convergence patterns. |
+| [human-in-the-loop.md](human-in-the-loop.md) | Pause for human input — the `human` node, form widgets, and the four interaction modes (`human` / `llm` / `llm_or_human` / `review`). |
 | [recipes.md](recipes.md) | Run the same workflow with different presets (vars, prompts, budget, success criteria). |
 | [delegation.md](delegation.md) | When to use `backend:` (claude_code, codex) vs `model:` (claw). |
 | [attachments.md](attachments.md) | Attaching files / images to prompts. |

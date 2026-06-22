@@ -1,0 +1,56 @@
+## ─────────────────────────────────────────────────────────────────
+## human-in-the-loop.bot — minimal demo of an iterion `human` node.
+##
+## The entry node is a `human` node, so the run pauses IMMEDIATELY,
+## rendering an interaction form: the studio shows it inline; the CLI
+## reports `paused_waiting_human` and you answer with `iterion resume`.
+## No LLM, no tools, no shell — instant pause, free to run.
+##
+## The OUTPUT schema drives the form widgets:
+##   string            → text field        (reviewer, notes)
+##   string [enum: …]   → select / radio    (environment)
+##   bool               → checkbox          (approve)
+## `instructions:` is rendered as markdown above the fields.
+##
+## Run it:
+##   iterion run examples/human-in-the-loop.bot         # then answer in studio
+##   # or headless:
+##   iterion resume --run-id <id> \
+##     --answer environment=staging --answer approve=true \
+##     --answer reviewer="Ada" --answer notes="LGTM"
+## ─────────────────────────────────────────────────────────────────
+
+vars:
+  service: string = "checkout-api"
+  change_summary: string = "Bump the payment SDK 4.2 → 5.0 and migrate the webhook signature check to the new HMAC header."
+
+schema approval_decision:
+  ## enum → rendered as a select / radio group
+  environment: string [enum: "staging", "production"]
+  ## bool → rendered as a checkbox
+  approve: bool
+  ## single-line text field
+  reviewer: string
+  ## free-text notes (audit trail)
+  notes: string
+
+prompt approval_instructions:
+  # Review the proposed change
+
+  **Service:** {{vars.service}}
+
+  **Change:** {{vars.change_summary}}
+
+  Pick the target **environment**, tick **approve** to proceed, and add
+  a short note for the audit trail. Leaving **approve** unticked routes
+  the run to `fail` — i.e. the change is rejected.
+
+human approval:
+  instructions: approval_instructions
+  output: approval_decision
+  interaction: human
+
+workflow human_in_the_loop:
+  entry: approval
+  approval -> done when approve
+  approval -> fail when not approve

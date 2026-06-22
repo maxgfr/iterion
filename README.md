@@ -64,7 +64,7 @@ Think of it as a DAG runner purpose-built for LLM workflows — with first-class
 - 📝 **Declarative DSL** — Human-readable `.bot` files with indentation-based syntax
 - 🤖 **Multi-agent orchestration** — Chain agents, judges, routers, and await-based convergence into complex graphs
 - 🖥️ **Visual editor** — Browser-based workflow builder with drag-and-drop, live validation, and source view
-- 🙋 **Human-in-the-loop** — Pause for human input, auto-answer via LLM, or let the LLM decide when to ask
+- 🙋 **Human-in-the-loop** — Pause for human input, auto-answer via LLM, or let the LLM decide when to ask — see [docs/human-in-the-loop.md](docs/human-in-the-loop.md)
 - 🔀 **Parallel branching** — Fan-out via routers, converge at downstream nodes with `await: wait_all` / `await: best_effort`
 - 🧭 **4 routing modes** — `fan_out_all`, `condition`, `round_robin`, and `llm`-driven routing
 - 🔁 **Bounded loops** — Retry and refinement cycles with configurable iteration limits
@@ -273,6 +273,7 @@ The full documentation lives under [`docs/`](docs/) — start with the [document
 **Author workflows**
 - [docs/dsl.md](docs/dsl.md) — full `.bot` DSL reference
 - [docs/routers.md](docs/routers.md) — routing modes deep dive
+- [docs/human-in-the-loop.md](docs/human-in-the-loop.md) — pause for human input; interaction modes (human / llm / llm_or_human / review)
 - [docs/recipes.md](docs/recipes.md) — preset-driven runs (benchmarking, prompt comparison)
 - [docs/delegation.md](docs/delegation.md) — `model:` vs `backend:` (claude_code, codex)
 - [docs/cursors.md](docs/cursors.md) — prompt-engineering cursors (ambition / depth / rigor / autonomy dials)

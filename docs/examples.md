@@ -34,6 +34,15 @@ See the catalogue and decision tree in
 | 🛡️ Seki | [`sec-audit-source/`](../bots/sec-audit-source/) | Source-code SAST audit (gitleaks/trivy/semgrep/gosec/bandit) with per-repo cross-run FP memory — see [docs/security-bots.md](security-bots.md) |
 | 📦 Depsy | [`sec-audit-deps/`](../bots/sec-audit-deps/) | Supply-chain malware/CVE audit on installed deps (npm/pip/go/…) + host-wide package cache — see [docs/security-bots.md](security-bots.md) |
 
+## 🧪 Minimal DSL demos
+
+Small, self-contained `.bot` files that each isolate one feature:
+
+| Example | Shows |
+|---|---|
+| [`human-in-the-loop.bot`](../examples/human-in-the-loop.bot) | A `human` node as the entry — pauses instantly and renders an interaction form (no LLM). Companion to [human-in-the-loop.md](human-in-the-loop.md). |
+| [`clarify/main.bot`](../examples/clarify/main.bot) | A read-only facilitator agent using `interaction: llm` (auto-answers, never blocks). |
+
 ## 🚧 In active development
 
 | Persona | Bot | Description |

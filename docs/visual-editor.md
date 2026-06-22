@@ -56,6 +56,18 @@ This mode is the simplest way to design and iterate locally. If you want a packa
 
 ![Studio run console — live IR graph and streaming logs](images/studio/run-console.png)
 
+**Run in flight** — a running review with both cross-family judges executing in parallel (note the green *Running* badge and the live log tail).
+
+![Studio run console — a run in progress with parallel judge branches](images/studio/run-live.png)
+
+**File diff** — every file the run changed, opened in a side-by-side diff.
+
+![Studio run console — side-by-side file diff](images/studio/run-diff.png)
+
+**Commits & merge** — the run's commits with a one-click squash-and-merge into your branch.
+
+![Studio run console — commit list with squash and merge](images/studio/run-commits.png)
+
 **Cost report** — per-provider and per-model cost attribution for a finished run.
 
 ![Studio run report tab — cost attribution by provider and model](images/studio/run-report.png)
@@ -68,11 +80,17 @@ This mode is the simplest way to design and iterate locally. If you want a packa
 
 ![Studio run analytics — cost-over-time chart and per-workflow stats](images/studio/insights.png)
 
+### Human in the loop
+
+**Interaction form** — when a run reaches a `human` node it pauses and renders a form (here a deploy-approval gate). See [human-in-the-loop.md](human-in-the-loop.md) for the field-type → widget mapping and the four interaction modes.
+
+![Studio — a human node paused with its interaction form](images/studio/hitl-form.png)
+
 ### Orchestration
 
-**Kanban board** (`/board`) — the native tracker with drag-and-drop, labels, and per-card bot assignees.
+**Kanban board** (`/board`) — the native tracker with drag-and-drop, labels, priorities, and per-card bot assignees, flowing across columns from inbox to done.
 
-![Studio kanban board with labelled issue cards](images/studio/board.png)
+![Studio kanban board with work across inbox, backlog, ready, and in-progress columns](images/studio/board-active.png)
 
 **Dispatcher dashboard** (`/dispatcher`) — live config, in-flight runs, and the retry queue.
 
