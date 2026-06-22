@@ -1,8 +1,7 @@
-import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 
-import { listBots, type BotEntryWithSchema } from "@/api/bots";
+import { type BotEntryWithSchema } from "@/api/bots";
 import type { NativeBoard, NativeIssue } from "@/api/native";
 import BranchDiffModal from "@/components/Runs/BranchDiffModal";
 import { Button } from "@/components/ui/Button";
@@ -17,7 +16,9 @@ import { Select } from "@/components/ui/Select";
 import { Tabs } from "@/components/ui/Tabs";
 import { TagInput } from "@/components/ui/TagInput";
 import VarFieldInput, { defaultStringFor } from "@/components/shared/VarFieldInput";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { isVarMissing, RequiredPill } from "@/lib/varValidation";
+import { useBotsStore } from "@/store/bots";
 
 import { BotArgsForm } from "./BotArgsForm";
 import { BotPicker } from "./BotPicker";
@@ -50,8 +51,7 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
   const [botArgs, setBotArgs] = useState<Record<string, string>>(
     initial?.bot_args ?? {},
   );
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const submitAction = useAsyncAction();
   const [fields, setFields] = useState<Record<string, string>>(() => {
     const out: Record<string, string> = {};
     for (const f of board.fields ?? []) {
@@ -61,25 +61,15 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
     return out;
   });
 
-  // Bots catalog. Fetched once when the modal opens. Loading + error
+  // Bots catalog. Shared zustand store — fetched once across all consumers
+  // (Home, BotPicker, Inspector, Catalog manager). Loading + error
   // surface separately so the Bot tab degrades gracefully.
-  const [bots, setBots] = useState<BotEntryWithSchema[] | null>(null);
-  const [botsError, setBotsError] = useState<string | null>(null);
+  const bots = useBotsStore((s) => s.bots);
+  const botsError = useBotsStore((s) => s.error);
+  const fetchBots = useBotsStore((s) => s.fetch);
   useEffect(() => {
-    let cancelled = false;
-    setBots(null);
-    setBotsError(null);
-    listBots()
-      .then((items) => {
-        if (!cancelled) setBots(items);
-      })
-      .catch((err) => {
-        if (!cancelled) setBotsError(errorMessage(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (bots === null) void fetchBots();
+  }, [bots, fetchBots]);
 
   // Re-seed when the parent swaps to a different issue without unmount.
   useEffect(() => {
@@ -114,10 +104,10 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitting) return;
+    if (submitAction.busy) return;
     if (botRequiredMissing) {
       setTab("bot");
-      setSubmitError("Required bot arguments are missing.");
+      submitAction.setError("Required bot arguments are missing.");
       return;
     }
     const out: Partial<NativeIssue> = {
@@ -134,15 +124,7 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
     if (Object.keys(typedFields).length > 0) {
       out.fields = typedFields;
     }
-    setSubmitting(true);
-    setSubmitError(null);
-    try {
-      await onSubmit(out);
-    } catch (err) {
-      setSubmitError(errorMessage(err) || "Submit failed");
-    } finally {
-      setSubmitting(false);
-    }
+    await submitAction.run(() => Promise.resolve(onSubmit(out)));
   };
 
   return (
@@ -223,10 +205,10 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
           />
         </div>
 
-        {submitError && (
+        {submitAction.error && (
           <div className="px-4 pb-2">
             <InlineBanner tone="danger" layout="inline">
-              {submitError}
+              {submitAction.error}
             </InlineBanner>
           </div>
         )}
@@ -238,7 +220,7 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
                 variant="success"
                 size="sm"
                 onClick={onDispatch}
-                disabled={submitting}
+                disabled={submitAction.busy}
               >
                 ▶ Let's go
               </Button>
@@ -249,7 +231,7 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
                 variant="ghost"
                 size="sm"
                 onClick={onDelete}
-                disabled={submitting}
+                disabled={submitAction.busy}
                 className="text-danger hover:text-danger"
               >
                 Delete
@@ -262,11 +244,11 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
               variant="secondary"
               size="sm"
               onClick={onClose}
-              disabled={submitting}
+              disabled={submitAction.busy}
             >
               Cancel
             </Button>
-            <Button type="submit" variant="primary" size="sm" loading={submitting}>
+            <Button type="submit" variant="primary" size="sm" loading={submitAction.busy}>
               {initial ? "Save" : "Create"}
             </Button>
           </div>
