@@ -1219,41 +1219,15 @@ func (e *ClawExecutor) validateAndRetry(
 func (e *ClawExecutor) buildTask(ctx context.Context, node ir.Node, f backendFields, input map[string]interface{}, backendName string) (delegate.Task, error) {
 	td := TemplateDataFromContext(ctx)
 
-	// Build system prompt.
-	var systemText string
-	if f.systemPrompt != "" {
-		if p, ok := e.prompts[f.systemPrompt]; ok {
-			systemText = e.resolveTemplate(p.Body, input, td)
-		}
-	}
-
-	// Build user message.
-	userText := e.buildUserMessage(f.userPrompt, input, td)
-	// And the multimodal variant when this backend supports it AND the
-	// resolved prompt references at least one image attachment.
-	var userContent []delegate.ContentBlock
-	if backendName == delegate.BackendClaw {
-		_, userContent = e.buildUserContent(f.userPrompt, input, td, e.imageAttachs)
-	}
-
-	// On re-invocation after an ask_user pause, prepend the prior
-	// question and the user's answer so the (stateless) LLM doesn't
-	// lose the thread. Without this, claw would re-ask the same
-	// question because its conversation history isn't persisted.
-	userText = prependPriorAskUser(userText, input)
+	systemText := e.resolveSystemPrompt(f.systemPrompt, input, td)
+	userText, userContent := e.buildUserPromptParts(f, input, td, backendName)
 
 	// Emit prompt content for observability.
 	if e.hooks.OnLLMPrompt != nil {
 		e.hooks.OnLLMPrompt(f.id, systemText, userText)
 	}
 
-	// Build output schema JSON if structured output is expected.
-	var outputSchema json.RawMessage
-	if f.outputSchema != "" {
-		if schema, ok := e.schemas[f.outputSchema]; ok {
-			outputSchema, _ = SchemaToJSON(schema)
-		}
-	}
+	outputSchema := e.resolveOutputSchema(f.outputSchema)
 
 	effort := resolveReasoningEffort(f.reasoningEffort, input)
 	// "ultracode" is a mode (xhigh + workflow-orchestration prerogative),
@@ -1310,36 +1284,136 @@ func (e *ClawExecutor) buildTask(ctx context.Context, node ir.Node, f backendFie
 	if m := rtk.Resolve(e.rtkOverride, f.rtk, e.wfRTK, e.rtkEnvDefault); m.Enabled() {
 		task.RTKMode = m.String()
 	}
-	if m := f.memory; m != nil && m.Enabled {
-		task.Memory = &delegate.MemorySpec{
-			Scope:            m.Scope,
-			Autoload:         m.Autoload,
-			Read:             m.Read,
-			Write:            m.Write,
-			PreCompactInject: m.PreCompactInject,
-			ProjectRoot:      m.ProjectRoot,
-			Visibility:       m.Visibility,
-			BotID:            e.botID,
-		}
-		task.RepoRoot = e.repoRoot
-	}
+	e.applyMemorySpec(&task, f.memory)
 	task.CursorFragments = resolveCursorFragments(f.cursors, e.cursors)
-	// Launch-time preset bias ("## Focus"): the preset's prompt body
-	// {{vars}}-resolved against this node's context, plus an optional
-	// relevant-skills hint line. Applies run-wide to every LLM node, so a
-	// "sous-bot" focus (e.g. Willy as improve-quality SRE) shapes the reviewer
-	// and fixer alike without the author wiring it into each prompt.
-	if e.presetPrompt != "" || len(e.presetSkills) > 0 {
-		frag := e.resolveTemplate(e.presetPrompt, input, td)
-		if len(e.presetSkills) > 0 {
-			if frag != "" {
-				frag += "\n\n"
-			}
-			frag += "Relevant skills (consult before acting): " + strings.Join(e.presetSkills, ", ")
+	e.applyPresetFragment(&task, input, td)
+
+	effectiveTools := e.assembleEffectiveTools(f, backendName, effectiveCaps, ultracode)
+	if !sameStringSlice(effectiveTools, f.tools) {
+		task.AllowedTools = effectiveTools // CLI backends read this
+		task.HasTools = len(effectiveTools) > 0
+	}
+	e.applyBoardEndpoint(&task, effectiveCaps)
+
+	// Resolve full tool definitions for backends that manage tool loops
+	// internally (claw). CLI-based backends (claude_code, codex) handle tools
+	// natively via AllowedTools and do not need ToolDefs.
+	if len(effectiveTools) > 0 && backendName == delegate.BackendClaw {
+		toolDefs, toolErr := e.resolveToolsForNode(ctx, node, effectiveTools)
+		if toolErr != nil {
+			return delegate.Task{}, fmt.Errorf("model: node %q: %w", f.id, toolErr)
 		}
-		task.PresetFragment = frag
+		task.ToolDefs = toolDefs
+		task.HasTools = true // claw needs the tool loop active for ask_user
 	}
 
+	e.applySessionContinuity(&task, f, input)
+	applyResumeContinuity(&task, input)
+
+	return task, nil
+}
+
+// resolveSystemPrompt returns the {{vars}}-resolved body of the named
+// prompt block, or "" when the name is empty or unknown. Kept as a
+// helper so buildTask's top reads as a flat assembly.
+func (e *ClawExecutor) resolveSystemPrompt(promptName string, input map[string]interface{}, td *TemplateData) string {
+	if promptName == "" {
+		return ""
+	}
+	p, ok := e.prompts[promptName]
+	if !ok {
+		return ""
+	}
+	return e.resolveTemplate(p.Body, input, td)
+}
+
+// buildUserPromptParts assembles the user-side prompt: the rendered
+// text plus, for backends that accept inline image content blocks
+// (claw), the multimodal ContentBlock variant. After rendering, any
+// prior ask_user question + answer recorded on input is prepended so
+// the (stateless) LLM doesn't lose the thread — without this, claw
+// would re-ask the same question because its conversation history isn't
+// persisted.
+func (e *ClawExecutor) buildUserPromptParts(f backendFields, input map[string]interface{}, td *TemplateData, backendName string) (string, []delegate.ContentBlock) {
+	userText := e.buildUserMessage(f.userPrompt, input, td)
+	// And the multimodal variant when this backend supports it AND the
+	// resolved prompt references at least one image attachment.
+	var userContent []delegate.ContentBlock
+	if backendName == delegate.BackendClaw {
+		_, userContent = e.buildUserContent(f.userPrompt, input, td, e.imageAttachs)
+	}
+
+	// On re-invocation after an ask_user pause, prepend the prior
+	// question and the user's answer so the (stateless) LLM doesn't
+	// lose the thread. Without this, claw would re-ask the same
+	// question because its conversation history isn't persisted.
+	userText = prependPriorAskUser(userText, input)
+	return userText, userContent
+}
+
+// resolveOutputSchema returns the JSON-marshalled output schema body
+// for the named schema block, or nil when the name is empty or
+// unknown. The marshal error is intentionally swallowed (same as the
+// inline original) — a malformed schema is reported by validation
+// earlier in the pipeline.
+func (e *ClawExecutor) resolveOutputSchema(schemaName string) json.RawMessage {
+	if schemaName == "" {
+		return nil
+	}
+	schema, ok := e.schemas[schemaName]
+	if !ok {
+		return nil
+	}
+	out, _ := SchemaToJSON(schema)
+	return out
+}
+
+// applyMemorySpec wires the per-node memory spec onto the task when
+// the node opts in (memory.enabled = true). RepoRoot is forwarded
+// alongside so the memory layer can scope the per-project key.
+func (e *ClawExecutor) applyMemorySpec(task *delegate.Task, m *ir.Memory) {
+	if m == nil || !m.Enabled {
+		return
+	}
+	task.Memory = &delegate.MemorySpec{
+		Scope:            m.Scope,
+		Autoload:         m.Autoload,
+		Read:             m.Read,
+		Write:            m.Write,
+		PreCompactInject: m.PreCompactInject,
+		ProjectRoot:      m.ProjectRoot,
+		Visibility:       m.Visibility,
+		BotID:            e.botID,
+	}
+	task.RepoRoot = e.repoRoot
+}
+
+// applyPresetFragment wires the launch-time preset bias ("## Focus")
+// onto the task: the preset's prompt body {{vars}}-resolved against
+// this node's context, plus an optional relevant-skills hint line.
+// Applies run-wide to every LLM node, so a "sous-bot" focus (e.g.
+// Willy as improve-quality SRE) shapes the reviewer and fixer alike
+// without the author wiring it into each prompt.
+func (e *ClawExecutor) applyPresetFragment(task *delegate.Task, input map[string]interface{}, td *TemplateData) {
+	if e.presetPrompt == "" && len(e.presetSkills) == 0 {
+		return
+	}
+	frag := e.resolveTemplate(e.presetPrompt, input, td)
+	if len(e.presetSkills) > 0 {
+		if frag != "" {
+			frag += "\n\n"
+		}
+		frag += "Relevant skills (consult before acting): " + strings.Join(e.presetSkills, ", ")
+	}
+	task.PresetFragment = frag
+}
+
+// assembleEffectiveTools produces the per-node tool allowlist by
+// folding interaction / board / ultracode / image-attachment opt-ins
+// over the author-declared `tools:` list. The returned slice is the
+// final union the CLI backends honour via AllowedTools and the claw
+// backend resolves into ToolDefs.
+func (e *ClawExecutor) assembleEffectiveTools(f backendFields, backendName string, effectiveCaps []string, ultracode bool) []string {
 	// When interaction is enabled, ensure `ask_user` is in the node's
 	// tool list so the LLM can natively escalate. We don't require the
 	// workflow author to declare it in their `tools:` field — the
@@ -1354,16 +1428,6 @@ func (e *ClawExecutor) buildTask(ctx context.Context, node ir.Node, f backendFie
 	// restriction" — the MCP server is still registered and discoverable.
 	if delegate.HasBoardCapability(effectiveCaps) && len(effectiveTools) > 0 {
 		effectiveTools = append(effectiveTools, delegate.BoardToolsFor(effectiveCaps)...)
-	}
-	// C082: for a sandboxed board-cap node, wire the per-run board MCP HTTP
-	// transport (gateway listener started with the sandbox) so claude_code
-	// can reach the operator's board from inside the container. Mint a
-	// per-node token scoped to exactly this node's board caps. Non-sandboxed
-	// runs use the stdio __mcp-board server; CLI runs without a server leave
-	// boardEndpoint/boardRegister unset → board-emit disabled (documented).
-	if delegate.HasBoardCapability(effectiveCaps) && e.sandbox != nil && e.boardEndpoint != "" && e.boardRegister != nil {
-		task.BoardHTTPEndpoint = e.boardEndpoint
-		task.BoardRunToken = e.boardRegister(effectiveCaps)
 	}
 	// Ultracode grants standing consent to orchestrate subagents. On claw,
 	// the orchestration capability is the `agent` subagent tool; ensure it is
@@ -1380,70 +1444,76 @@ func (e *ClawExecutor) buildTask(ctx context.Context, node ir.Node, f backendFie
 	if backendName != delegate.BackendClaw && len(e.imageAttachs) > 0 && promptReferencesImage(f.userPrompt, e.prompts, e.imageAttachs) {
 		effectiveTools = ensureToolPresent(effectiveTools, "read_image")
 	}
-	if !sameStringSlice(effectiveTools, f.tools) {
-		task.AllowedTools = effectiveTools // CLI backends read this
-		task.HasTools = len(effectiveTools) > 0
-	}
+	return effectiveTools
+}
 
-	// Resolve full tool definitions for backends that manage tool loops
-	// internally (claw). CLI-based backends (claude_code, codex) handle tools
-	// natively via AllowedTools and do not need ToolDefs.
-	if len(effectiveTools) > 0 && backendName == delegate.BackendClaw {
-		toolDefs, toolErr := e.resolveToolsForNode(ctx, node, effectiveTools)
-		if toolErr != nil {
-			return delegate.Task{}, fmt.Errorf("model: node %q: %w", f.id, toolErr)
-		}
-		task.ToolDefs = toolDefs
-		task.HasTools = true // claw needs the tool loop active for ask_user
+// applyBoardEndpoint wires the per-run board MCP HTTP transport onto
+// the task for sandboxed board-cap nodes (C082): the gateway listener
+// started with the sandbox so claude_code can reach the operator's
+// board from inside the container, plus a per-node token scoped to
+// exactly this node's board caps. Non-sandboxed runs use the stdio
+// __mcp-board server; CLI runs without a server leave
+// boardEndpoint/boardRegister unset → board-emit disabled (documented).
+func (e *ClawExecutor) applyBoardEndpoint(task *delegate.Task, effectiveCaps []string) {
+	if !delegate.HasBoardCapability(effectiveCaps) || e.sandbox == nil || e.boardEndpoint == "" || e.boardRegister == nil {
+		return
 	}
+	task.BoardHTTPEndpoint = e.boardEndpoint
+	task.BoardRunToken = e.boardRegister(effectiveCaps)
+}
 
-	// Session continuity. SessionInheritIfAvailable is a tolerant
-	// variant of SessionInherit added for workflows where the
-	// upstream session may legitimately not exist yet (e.g. the
-	// first iteration of an alternating loop where the producer
-	// hasn't run): when _session_id is empty the node falls back
-	// to fresh-session behaviour instead of routing into the
-	// backend with an empty session id (which has produced silent
-	// 0-token failures on at least the OpenAI provider).
-	if f.session == ir.SessionInherit || f.session == ir.SessionInheritIfAvailable || f.session == ir.SessionFork {
-		if sid, ok := input["_session_id"].(string); ok && sid != "" {
-			task.SessionID = sid
-			if f.session == ir.SessionFork {
-				task.ForkSession = true
-			}
-			// Forward the provider fingerprint that produced the parent
-			// session so the backend can detect cross-provider forks
-			// (which fail with 400 "Invalid signature in thinking block"
-			// because thinking blocks carry provider-specific
-			// signatures). Empty when the parent output predates this
-			// field — backends treat absent as "unknown, proceed".
-			if fp, ok := input["_session_fingerprint"].(string); ok && fp != "" {
-				task.SessionFingerprint = fp
-			}
-		} else if f.session == ir.SessionInheritIfAvailable && e.logger != nil {
-			// Tolerant fallback: surface the decision so authors
-			// can tell whether the cache-hit path or the cold path
-			// fired. Plain `inherit` stays silent here for BC.
-			e.logger.Info("[%s/inherit_if_available] no upstream _session_id; running fresh", f.id)
-		}
+// applySessionContinuity wires the inherit / inherit_if_available /
+// fork session modes onto the task. SessionInheritIfAvailable is a
+// tolerant variant of SessionInherit added for workflows where the
+// upstream session may legitimately not exist yet (e.g. the first
+// iteration of an alternating loop where the producer hasn't run):
+// when _session_id is empty the node falls back to fresh-session
+// behaviour instead of routing into the backend with an empty session
+// id (which has produced silent 0-token failures on at least the
+// OpenAI provider).
+func (e *ClawExecutor) applySessionContinuity(task *delegate.Task, f backendFields, input map[string]interface{}) {
+	if f.session != ir.SessionInherit && f.session != ir.SessionInheritIfAvailable && f.session != ir.SessionFork {
+		return
 	}
-
-	// Resume continuity. When the runtime relays a persisted backend
-	// conversation (claw's mid-tool-loop snapshot captured at the
-	// previous pause), the Task carries it forward. The backend uses
-	// these fields to rehydrate the LLM's exact pre-pause state instead
-	// of restarting from the rendered system+user prompts.
-	if conv, ok := input[delegate.ResumeConversationKey].(json.RawMessage); ok && len(conv) > 0 {
-		task.ResumeConversation = conv
-		if id, ok := input[delegate.ResumePendingToolUseIDKey].(string); ok {
-			task.ResumePendingToolUseID = id
+	if sid, ok := input["_session_id"].(string); ok && sid != "" {
+		task.SessionID = sid
+		if f.session == ir.SessionFork {
+			task.ForkSession = true
 		}
-		if a, ok := input[delegate.ResumeAnswerKey].(string); ok {
-			task.ResumeAnswer = a
+		// Forward the provider fingerprint that produced the parent
+		// session so the backend can detect cross-provider forks
+		// (which fail with 400 "Invalid signature in thinking block"
+		// because thinking blocks carry provider-specific
+		// signatures). Empty when the parent output predates this
+		// field — backends treat absent as "unknown, proceed".
+		if fp, ok := input["_session_fingerprint"].(string); ok && fp != "" {
+			task.SessionFingerprint = fp
 		}
+	} else if f.session == ir.SessionInheritIfAvailable && e.logger != nil {
+		// Tolerant fallback: surface the decision so authors
+		// can tell whether the cache-hit path or the cold path
+		// fired. Plain `inherit` stays silent here for BC.
+		e.logger.Info("[%s/inherit_if_available] no upstream _session_id; running fresh", f.id)
 	}
+}
 
-	return task, nil
+// applyResumeContinuity wires the runtime-relayed persisted backend
+// conversation (claw's mid-tool-loop snapshot captured at the previous
+// pause) onto the task. The backend uses these fields to rehydrate
+// the LLM's exact pre-pause state instead of restarting from the
+// rendered system+user prompts.
+func applyResumeContinuity(task *delegate.Task, input map[string]interface{}) {
+	conv, ok := input[delegate.ResumeConversationKey].(json.RawMessage)
+	if !ok || len(conv) == 0 {
+		return
+	}
+	task.ResumeConversation = conv
+	if id, ok := input[delegate.ResumePendingToolUseIDKey].(string); ok {
+		task.ResumePendingToolUseID = id
+	}
+	if a, ok := input[delegate.ResumeAnswerKey].(string); ok {
+		task.ResumeAnswer = a
+	}
 }
 
 // executeHumanLLM handles human nodes in llm or llm_or_human interaction mode.
