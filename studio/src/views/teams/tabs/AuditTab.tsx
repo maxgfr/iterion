@@ -83,43 +83,55 @@ export default function AuditTab({ teamID, canManage }: Props) {
         </InlineBanner>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-sm">
-        <Input
-          placeholder="Action (e.g. webhook.rotated)"
-          value={filter.action ?? ""}
-          onChange={(e) => setFilter({ ...filter, action: e.target.value })}
-        />
-        <Input
-          placeholder="Actor id"
-          value={filter.actor ?? ""}
-          onChange={(e) => setFilter({ ...filter, actor: e.target.value })}
-        />
-        <Input
-          type="datetime-local"
-          value={filter.from ?? ""}
-          onChange={(e) => setFilter({ ...filter, from: e.target.value })}
-        />
-        <Input
-          type="datetime-local"
-          value={filter.to ?? ""}
-          onChange={(e) => setFilter({ ...filter, to: e.target.value })}
-        />
-      </div>
-      <div className="flex gap-2">
-        <Button size="sm" variant="primary" onClick={apply} loading={loading}>
-          Apply filters
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => {
-            setFilter({});
-            void fetchPage({}, false);
-          }}
-        >
-          Clear
-        </Button>
-      </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          apply();
+        }}
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-sm">
+          <Input
+            aria-label="Filter by action"
+            placeholder="Action (e.g. webhook.rotated)"
+            value={filter.action ?? ""}
+            onChange={(e) => setFilter({ ...filter, action: e.target.value })}
+          />
+          <Input
+            aria-label="Filter by actor id"
+            placeholder="Actor id"
+            value={filter.actor ?? ""}
+            onChange={(e) => setFilter({ ...filter, actor: e.target.value })}
+          />
+          <Input
+            aria-label="From date"
+            type="datetime-local"
+            value={filter.from ?? ""}
+            onChange={(e) => setFilter({ ...filter, from: e.target.value })}
+          />
+          <Input
+            aria-label="To date"
+            type="datetime-local"
+            value={filter.to ?? ""}
+            onChange={(e) => setFilter({ ...filter, to: e.target.value })}
+          />
+        </div>
+        <div className="flex gap-2 mt-3">
+          <Button size="sm" variant="primary" type="submit" loading={loading}>
+            Apply filters
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            type="button"
+            onClick={() => {
+              setFilter({});
+              void fetchPage({}, false);
+            }}
+          >
+            Clear
+          </Button>
+        </div>
+      </form>
 
       {events.length === 0 && !loading ? (
         <EmptyState message="No events for this filter." />

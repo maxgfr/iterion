@@ -205,7 +205,25 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
     }
   };
 
-  const setRole = async (userID: string, role: string) => {
+  const setRole = async (userID: string, currentRole: string, role: string) => {
+    if (role === currentRole) return;
+    // Confirm demotions and any change touching "owner" — these are the
+    // role edits that can lock someone out or hand over control. Routine
+    // promotions (e.g. member → admin) apply without a prompt.
+    const demotion =
+      ROLES.indexOf(role as (typeof ROLES)[number]) <
+      ROLES.indexOf(currentRole as (typeof ROLES)[number]);
+    if (demotion || currentRole === "owner" || role === "owner") {
+      const ok = await confirm({
+        title: "Change member role?",
+        message: `Change this member from "${currentRole}" to "${role}"? This takes effect immediately.`,
+        confirmLabel: "Change role",
+        confirmVariant: "danger",
+      });
+      // On cancel the controlled <Select> re-renders back to the server
+      // role (confirm's state change forces a re-render), so no manual revert.
+      if (!ok) return;
+    }
     try {
       await updateMemberRole(teamID, userID, role);
       void reload();
@@ -322,7 +340,7 @@ function Members({ teamID, canManage }: { teamID: string; canManage: boolean }) 
                   {canManage ? (
                     <Select
                       value={m.role}
-                      onChange={(e) => setRole(m.user_id, e.target.value)}
+                      onChange={(e) => setRole(m.user_id, m.role, e.target.value)}
                       aria-label={`Role for ${m.email ?? m.user_id}`}
                     >
                       {ROLES.map((r) => (

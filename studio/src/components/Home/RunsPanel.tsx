@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { LiveDot } from "@/components/ui/LiveDot";
 import type { GlobalActiveRun, RunSummary } from "@/api/runs";
 import { formatRelative } from "@/lib/format";
@@ -80,7 +81,17 @@ export default function RunsPanel({ runs, loading, error }: Props) {
 
       <div className="flex-1 overflow-auto">
         {loading && runs.length === 0 ? (
-          <EmptyState message="Loading…" className="py-6" />
+          <ul className="divide-y divide-border-default" aria-label="Loading runs">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <li key={i} className="px-4 py-2.5 flex items-center gap-3">
+                <Skeleton className="h-2.5 w-2.5 rounded-full shrink-0" />
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <Skeleton className="h-3 w-1/2" />
+                  <Skeleton className="h-2.5 w-1/3" />
+                </div>
+              </li>
+            ))}
+          </ul>
         ) : error ? (
           <EmptyState message={<span className="text-danger">{error}</span>} className="py-6" />
         ) : !hasAnything ? (

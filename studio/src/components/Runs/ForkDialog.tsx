@@ -4,7 +4,9 @@ import { useLocation } from "wouter";
 
 import { forkRun } from "@/api/runs";
 import type { RunHeader } from "@/api/runs";
-import { Button, Checkbox, Dialog } from "@/components/ui";
+import { Button, Checkbox, Dialog, Input } from "@/components/ui";
+import { InlineBanner } from "@/components/ui/InlineBanner";
+import { Textarea } from "@/components/ui/Textarea";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useTabsStore } from "@/store/tabs";
 import { useUIStore } from "@/store/ui";
@@ -143,13 +145,13 @@ export default function ForkDialog({ run, anchor, open, onOpenChange }: Props) {
           <span className="text-micro uppercase tracking-wide text-fg-subtle">
             Fork name
           </span>
-          <input
+          <Input
             type="text"
             value={forkName}
             onChange={(ev) => setForkName(ev.target.value)}
             disabled={busy}
             placeholder={`${run.name || run.workflow_name} · fork @ ${anchor?.nodeId ?? "…"}`}
-            className="rounded border border-border-default bg-surface-1 px-2 py-1 font-mono text-xs"
+            className="font-mono"
           />
         </label>
 
@@ -175,13 +177,13 @@ export default function ForkDialog({ run, anchor, open, onOpenChange }: Props) {
           <span className="text-micro uppercase tracking-wide text-fg-subtle">
             New inputs (JSON)
           </span>
-          <textarea
+          <Textarea
             value={newInputs}
             onChange={(ev) => setNewInputs(ev.target.value)}
             disabled={busy}
             spellCheck={false}
             rows={6}
-            className="rounded border border-border-default bg-surface-1 px-2 py-1 font-mono text-xs leading-relaxed"
+            className="font-mono leading-relaxed"
           />
           <span className="text-caption text-fg-subtle">
             Pre-filled with the parent's inputs. Edits are merged onto the
@@ -190,7 +192,9 @@ export default function ForkDialog({ run, anchor, open, onOpenChange }: Props) {
         </label>
 
         {error && (
-          <div className="text-xs text-danger break-words">{error}</div>
+          <InlineBanner tone="danger" layout="inline">
+            {error}
+          </InlineBanner>
         )}
       </div>
     </Dialog>

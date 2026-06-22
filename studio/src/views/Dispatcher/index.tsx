@@ -34,6 +34,10 @@ export default function DispatcherView() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Consecutive failed status polls — surfaces an explicit "manager
+  // unreachable" banner once the silent 2s retry has failed a few times,
+  // instead of only quietly flipping the chip to "unreachable".
+  const [pollFails, setPollFails] = useState(0);
   const { confirm, dialog } = useConfirm();
   const wsRef = useRef<WebSocket | null>(null);
   // The dispatcher manager's WS only exists while it is running or paused;
@@ -140,9 +144,15 @@ export default function DispatcherView() {
     const tick = async () => {
       try {
         const s = await getStatus();
-        if (!cancelled) setStatus(s);
+        if (!cancelled) {
+          setStatus(s);
+          setPollFails(0);
+        }
       } catch {
-        if (!cancelled) setStatus(null);
+        if (!cancelled) {
+          setStatus(null);
+          setPollFails((n) => n + 1);
+        }
       }
     };
     void tick();
@@ -248,6 +258,13 @@ export default function DispatcherView() {
       />
 
       {error && <InlineBanner tone="danger">{error}</InlineBanner>}
+
+      {pollFails >= 3 && (
+        <InlineBanner tone="warning">
+          Dispatcher manager unreachable — retrying every 2s ({pollFails} failed
+          checks).
+        </InlineBanner>
+      )}
 
       {snap.last_tracker_error && (
         <TrackerErrorBanner

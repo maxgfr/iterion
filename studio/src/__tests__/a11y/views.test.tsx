@@ -12,6 +12,7 @@ import { cleanup, render } from "@testing-library/react";
 
 import AppearanceTab from "@/views/Settings/AppearanceTab";
 import AboutTab from "@/views/Settings/AboutTab";
+import AuditTab from "@/views/teams/tabs/AuditTab";
 import { RunViewSkeleton, RunViewLoadError } from "@/components/Runs/runView/RunViewLoadStates";
 import { setupMatchMedia, expectNoViolations } from "./axeHelpers";
 
@@ -35,6 +36,15 @@ describe("a11y / composed surfaces", () => {
 
   it("Settings · AboutTab — version/info panel", async () => {
     await expectNoViolations(mount(<AboutTab desktopFeatures={false} />), "AboutTab");
+  });
+
+  it("Teams · AuditTab — admin-only gate (no network)", async () => {
+    // canManage=false short-circuits to a pure EmptyState before any
+    // fetch, so this exercises the tab's landmark/label wiring under jsdom.
+    await expectNoViolations(
+      mount(<AuditTab teamID="team-1" canManage={false} />),
+      "AuditTab",
+    );
   });
 
   it("RunView · skeleton load state", async () => {

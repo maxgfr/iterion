@@ -68,6 +68,7 @@ export default function Toolbar() {
   const toggleSourceView = useUIStore((s) => s.toggleSourceView);
   const diagnosticsPanelOpen = useUIStore((s) => s.diagnosticsPanelOpen);
   const toggleDiagnosticsPanel = useUIStore((s) => s.toggleDiagnosticsPanel);
+  const openDiagnosticsPanel = useUIStore((s) => s.openDiagnosticsPanel);
   const activeWorkflowName = useUIStore((s) => s.activeWorkflowName);
   const setActiveWorkflowName = useUIStore((s) => s.setActiveWorkflowName);
   const layoutDirection = useUIStore((s) => s.layoutDirection);
@@ -196,12 +197,14 @@ export default function Toolbar() {
         addToast("No issues found", "success");
       } else {
         addToast(`${errorCount} error${errorCount !== 1 ? "s" : ""}, ${warnCount} warning${warnCount !== 1 ? "s" : ""}`, "error");
+        // Surface the detail, not just the count — pop the Diagnostics panel.
+        openDiagnosticsPanel();
       }
     } catch (err) {
       console.error("Validation failed:", err);
-      addToast("Validation failed", "error");
+      addToast(`Validation failed: ${errorMessage(err)}`, "error");
     }
-  }, [document, setDiagnostics, addToast]);
+  }, [document, setDiagnostics, addToast, openDiagnosticsPanel]);
 
   const handleSave = useCallback(async () => {
     if (!document) return;

@@ -222,6 +222,11 @@ function OrgDrawer({
   // Status draft.
   const [statusDraft, setStatusDraft] = useState<string>(org.status);
   const [reason, setReason] = useState("");
+  // Two-step confirm for the disruptive (suspend / read_only) statuses.
+  // Inline (not useConfirm) because this lives inside a Radix Dialog,
+  // where a body-portaled ConfirmDialog reads as an outside-click and
+  // dismisses the parent — see ProjectSwitcher for the same precedent.
+  const [confirmStatus, setConfirmStatus] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -382,7 +387,13 @@ function OrgDrawer({
         <h4 className="font-medium">Status</h4>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <Field label="Status">
-            <Select value={statusDraft} onChange={(e) => setStatusDraft(e.target.value)}>
+            <Select
+              value={statusDraft}
+              onChange={(e) => {
+                setStatusDraft(e.target.value);
+                setConfirmStatus(false);
+              }}
+            >
               <option value="active">active</option>
               <option value="suspended">suspended</option>
               <option value="read_only">read_only</option>
@@ -396,13 +407,51 @@ function OrgDrawer({
             />
           </Field>
         </div>
-        <Button
-          variant={statusDraft === "suspended" ? "danger" : "primary"}
-          loading={busy}
-          onClick={() => void saveStatus()}
-        >
-          Apply status
-        </Button>
+        {(() => {
+          const disruptive =
+            statusDraft === "suspended" || statusDraft === "read_only";
+          if (disruptive && confirmStatus) {
+            return (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-danger">
+                  Applies <strong>{statusDraft}</strong> to the whole org immediately.
+                </span>
+                <Button
+                  variant="ghost"
+                  onClick={() => setConfirmStatus(false)}
+                  disabled={busy}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="danger"
+                  loading={busy}
+                  onClick={() => {
+                    setConfirmStatus(false);
+                    void saveStatus();
+                  }}
+                >
+                  Confirm — apply {statusDraft}
+                </Button>
+              </div>
+            );
+          }
+          return (
+            <Button
+              variant={disruptive ? "danger" : "primary"}
+              loading={busy}
+              onClick={() => {
+                if (disruptive) {
+                  setConfirmStatus(true);
+                  return;
+                }
+                void saveStatus();
+              }}
+            >
+              Apply status
+            </Button>
+          );
+        })()}
       </section>
     </Dialog>
   );

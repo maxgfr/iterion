@@ -1,6 +1,7 @@
 import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
+import { clickableRowProps } from "@/lib/a11y";
 
 import {
   FeatureUnavailableError,
@@ -171,7 +172,14 @@ export default function MemoryTab({ teamID: _teamID }: Props) {
             )}
           </div>
           {usage.quota > 0 && (
-            <div className="h-1.5 bg-surface-2 rounded overflow-hidden">
+            <div
+              className="h-1.5 bg-surface-2 rounded overflow-hidden"
+              role="progressbar"
+              aria-valuenow={Math.round(pct(usage.used, usage.quota) ?? 0)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Storage usage"
+            >
               <div
                 className="h-full bg-accent"
                 style={{ width: `${pct(usage.used, usage.quota) ?? 0}%` }}
@@ -191,10 +199,10 @@ export default function MemoryTab({ teamID: _teamID }: Props) {
               {docs.map((d) => (
                 <li
                   key={d.path}
-                  className={`px-2 py-1.5 text-sm cursor-pointer hover:bg-surface-2 ${
+                  className={`px-2 py-1.5 text-sm cursor-pointer hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none ${
                     selected?.path === d.path ? "bg-surface-2" : ""
                   }`}
-                  onClick={() => void open(d)}
+                  {...clickableRowProps(() => void open(d), `Open ${d.path}`)}
                 >
                   <div className="font-mono text-xs">{d.path}</div>
                   <div className="text-xs text-fg-muted">

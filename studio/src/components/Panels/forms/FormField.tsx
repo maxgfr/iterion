@@ -13,12 +13,13 @@ import { FieldLabel } from "@/components/ui/FieldLabel";
 import { HelpHint } from "@/components/ui/HelpHint";
 import { RefAwareInput, RefAwareTextarea } from "@/components/ui/RefAwareInput";
 import PromptOverlayHighlight from "@/components/ui/PromptOverlayHighlight";
+import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import { Textarea } from "@/components/ui/Textarea";
 import type { RefContext } from "@/lib/refCompletion";
 import { Pencil1Icon } from "@radix-ui/react-icons";
 
 const labelClass = "block text-xs text-fg-subtle mb-1";
-const inputClass = "w-full bg-surface-1 border border-border-strong rounded px-2 py-1 text-sm text-fg-default focus:border-accent focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed";
 
 interface FieldRowChildArgs {
   /** id to apply to the primary control inside the row. */
@@ -101,10 +102,9 @@ export function TextField({ label, value, onChange, placeholder, multiline, rows
               refContext={refContext}
             />
           ) : (
-            <textarea
+            <Textarea
               id={inputId}
               aria-describedby={describedBy}
-              className={inputClass + " resize-y"}
               value={value}
               onChange={(e) => onChange(e.target.value)}
               placeholder={placeholder}
@@ -119,10 +119,9 @@ export function TextField({ label, value, onChange, placeholder, multiline, rows
             refContext={refContext}
           />
         ) : (
-          <input
+          <Input
             id={inputId}
             aria-describedby={describedBy}
-            className={inputClass}
             type="text"
             value={value}
             onChange={(e) => onChange(e.target.value)}
@@ -202,11 +201,12 @@ export function CommittedTextField({ label, value, onChange, onCommit, validate,
     <FieldRow label={label} help={help} error={error ?? undefined}>
       {({ inputId, describedBy }) => (
         <div className="flex gap-1">
-          <input
+          <Input
             id={inputId}
             aria-describedby={describedBy}
             aria-invalid={error ? true : undefined}
-            className={`${inputClass} flex-1${error ? " ring-1 ring-danger border-danger" : ""}`}
+            error={!!error}
+            className="flex-1"
             type="text"
             value={draft}
             onChange={(e) => { setDraft(e.target.value); setError(null); }}
@@ -250,11 +250,11 @@ export function NumberField({ label, value, onChange, placeholder, min, help, er
   return (
     <FieldRow label={label} help={help} error={error}>
       {({ inputId, describedBy }) => (
-        <input
+        <Input
           id={inputId}
           aria-describedby={describedBy}
           aria-invalid={error ? true : undefined}
-          className={inputClass}
+          error={!!error}
           type="number"
           value={value ?? ""}
           onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
@@ -417,8 +417,7 @@ export function TagListField({ label, values, onChange, placeholder = "Add..." }
         ))}
       </div>
       <div className="flex gap-1">
-        <input
-          className={inputClass}
+        <Input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}

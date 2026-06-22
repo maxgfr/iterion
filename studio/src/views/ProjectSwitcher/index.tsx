@@ -88,6 +88,11 @@ export default function ProjectSwitcher({ open, onClose }: Props) {
             size="md"
           />
           <ul className="flex flex-col max-h-80 overflow-y-auto">
+            {filtered.length === 0 && (
+              <li className="px-2 py-6 text-center text-xs text-fg-subtle italic">
+                No projects match “{query}”.
+              </li>
+            )}
             {filtered.map((p) => {
               const isCurrent = currentProject?.id === p.id;
               const isPending = pendingRemovalId === p.id;

@@ -156,7 +156,14 @@ function UsageCard({
         )}
       </div>
       {p != null && (
-        <div className="h-1.5 bg-surface-2 rounded overflow-hidden">
+        <div
+          className="h-1.5 bg-surface-2 rounded overflow-hidden"
+          role="progressbar"
+          aria-valuenow={Math.round(p)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={`${title} usage`}
+        >
           <div
             className={`h-full ${p > 90 ? "bg-danger" : p > 70 ? "bg-warning" : "bg-accent"}`}
             style={{ width: `${p}%` }}
