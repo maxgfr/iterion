@@ -19,7 +19,10 @@
   "plugins": {
     "@release-it/conventional-changelog": {
       "preset": "conventionalcommits",
-      "infile": false
+      "infile": false,
+      "gitRawCommitsOpts": {
+        "from": "36f19723f52edd319dcda82be122694a93689365"
+      }
     }
   }
 }
