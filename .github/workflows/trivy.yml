@@ -45,7 +45,7 @@ jobs:
     if: github.event_name != 'workflow_run'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Trivy filesystem scan (SARIF)
         uses: aquasecurity/trivy-action@v0.36.0
@@ -107,7 +107,7 @@ jobs:
           - iterion-sandbox-slim
           - iterion-sandbox-full
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Resolve image ref
         id: ref

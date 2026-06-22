@@ -38,7 +38,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -150,7 +150,7 @@ jobs:
     env:
       SANDBOX_IMAGE_NAME: ${{ github.repository_owner }}/iterion-sandbox-slim
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -223,7 +223,7 @@ jobs:
       SANDBOX_IMAGE_NAME: ${{ github.repository_owner }}/iterion-sandbox-full
       SANDBOX_SLIM_NAME: ${{ github.repository_owner }}/iterion-sandbox-slim
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -314,7 +314,7 @@ jobs:
       SANDBOX_IMAGE_NAME: ${{ github.repository_owner }}/iterion-sandbox-sec
       SANDBOX_FULL_NAME: ${{ github.repository_owner }}/iterion-sandbox-full
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
