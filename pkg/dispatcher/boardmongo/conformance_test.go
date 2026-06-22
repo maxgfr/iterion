@@ -193,4 +193,49 @@ func TestMongoStore_Conformance(t *testing.T) {
 		t.Fatalf("EnsureSchema (second): %v", err)
 	}
 	runBoardStoreSuite(t, boardmongo.New(db, "tenant-1"))
+
+	// The Mongo store must also drive the dispatcher as a tracker.Tracker via
+	// the shared native.Adapter (eligible + unclaimed + blocker-free filtering).
+	runTrackerSuite(t, boardmongo.New(db, "tracker-tenant"))
+}
+
+// runTrackerSuite exercises the tracker.Tracker view (native.Adapter) over a
+// board store — the path the cloud dispatcher uses.
+func runTrackerSuite(t *testing.T, store native.BoardStore) {
+	t.Helper()
+	trk := native.NewAdapter(store)
+	ctx := context.Background()
+
+	// An inbox issue is NOT a candidate (inbox is not eligible); a ready issue
+	// IS (ready is eligible on the default board).
+	_, _ = store.Create(native.Issue{Title: "parked", State: native.StateInbox})
+	ready, err := store.Create(native.Issue{Title: "do me", State: native.StateReady})
+	if err != nil {
+		t.Fatalf("create ready: %v", err)
+	}
+	cands, err := trk.ListCandidates(ctx)
+	if err != nil {
+		t.Fatalf("ListCandidates: %v", err)
+	}
+	if len(cands) != 1 || cands[0].ID != ready.ID {
+		t.Fatalf("candidates: want [%s], got %+v", ready.ID, cands)
+	}
+
+	// Claim removes it from the candidate set.
+	if err := trk.Claim(ctx, ready.ID, "runner-1"); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	cands, _ = trk.ListCandidates(ctx)
+	if len(cands) != 0 {
+		t.Errorf("claimed issue must not be a candidate, got %+v", cands)
+	}
+
+	// UpdateState + RefreshStates round-trip.
+	if err := trk.UpdateState(ctx, ready.ID, native.StateDone); err != nil {
+		t.Errorf("UpdateState: %v", err)
+	}
+	states, _ := trk.RefreshStates(ctx, []string{ready.ID})
+	if states[ready.ID] != native.StateDone {
+		t.Errorf("RefreshStates: %v", states)
+	}
 }

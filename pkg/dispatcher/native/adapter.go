@@ -7,15 +7,17 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dispatcher/tracker"
 )
 
-// Adapter exposes a *Store under the tracker.Tracker interface so the
-// dispatcher can dispatch native issues with the same code path that
-// drives external trackers (GitHub, Forgejo).
+// Adapter exposes a BoardStore under the tracker.Tracker interface so the
+// dispatcher can dispatch board issues with the same code path that drives
+// external trackers (GitHub, Forgejo). It uses only BoardStore methods, so it
+// wraps either the filesystem *Store (self-hosted) or the Mongo store
+// (boardmongo, cloud) unchanged.
 type Adapter struct {
-	store *Store
+	store BoardStore
 }
 
-// NewAdapter wraps the store as a tracker.Tracker.
-func NewAdapter(store *Store) *Adapter { return &Adapter{store: store} }
+// NewAdapter wraps a board store as a tracker.Tracker.
+func NewAdapter(store BoardStore) *Adapter { return &Adapter{store: store} }
 
 // Name implements tracker.Tracker.
 func (a *Adapter) Name() string { return "native" }
