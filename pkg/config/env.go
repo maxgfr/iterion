@@ -122,6 +122,9 @@ func loadEnv(cfg *Config) error {
 	if err := lookupBool("ITERION_COOKIE_SECURE", &cfg.Auth.CookieSecure); err != nil {
 		return err
 	}
+	if v, ok := lookup("ITERION_AUTH_TRUSTED_AUTO_LINK_PROVIDERS"); ok {
+		cfg.Auth.TrustedAutoLinkProviders = splitCSV(v)
+	}
 
 	if err := lookupBool("ITERION_OIDC_GOOGLE_ENABLED", &cfg.Auth.OIDC.Google.Enabled); err != nil {
 		return err

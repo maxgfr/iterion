@@ -19,6 +19,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/audit"
 	iterauth "github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/auth/oidc"
+	"github.com/SocialGouv/iterion/pkg/auth/orgsso"
 	"github.com/SocialGouv/iterion/pkg/cli"
 	"github.com/SocialGouv/iterion/pkg/cloud/metrics"
 	"github.com/SocialGouv/iterion/pkg/cloud/tracing"
@@ -261,6 +262,17 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	if err := forgeOAuthAppStore.EnsureSchema(rootCtx); err != nil {
 		return fmt.Errorf("server: ensure forge_oauth_apps schema: %w", err)
 	}
+	orgSSOStore := orgsso.NewMongoStore(st.DB())
+	if err := orgSSOStore.EnsureSchema(rootCtx); err != nil {
+		return fmt.Errorf("server: ensure org_sso_providers schema: %w", err)
+	}
+	// Mongo-backed OIDC state store: PendingAuth must survive across replicas
+	// (an OIDC /start on pod A and /callback on pod B), which the per-process
+	// memory store can't guarantee in HA.
+	oidcStateStore := oidc.NewMongoStateStore(st.DB(), 10*time.Minute)
+	if err := oidcStateStore.EnsureSchema(rootCtx); err != nil {
+		return fmt.Errorf("server: ensure oidc_states schema: %w", err)
+	}
 	orgUsageCounter := orgusage.NewMongoCounter(st.DB())
 	if err := orgusage.EnsureSchema(rootCtx, st.DB()); err != nil {
 		return fmt.Errorf("server: ensure org_usage schema: %w", err)
@@ -372,15 +384,17 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	}
 
 	authSvc, err := iterauth.NewService(iterauth.Config{
-		Store:      identityStore,
-		Sessions:   sessions,
-		Signer:     signer,
-		SignupMode: iterauth.SignupMode(cfg.Auth.SignupMode),
-		RefreshTTL: cfg.Auth.RefreshTTL,
-		Logger:     logger,
-		Resets:     resetStore,
-		Mailer:     mailer,
-		PublicURL:  cfg.Auth.PublicURL,
+		Store:                    identityStore,
+		Sessions:                 sessions,
+		Signer:                   signer,
+		SignupMode:               iterauth.SignupMode(cfg.Auth.SignupMode),
+		RefreshTTL:               cfg.Auth.RefreshTTL,
+		Logger:                   logger,
+		Resets:                   resetStore,
+		Mailer:                   mailer,
+		PublicURL:                cfg.Auth.PublicURL,
+		OrgSSO:                   orgSSOStore,
+		TrustedAutoLinkProviders: cfg.Auth.TrustedAutoLinkProviders,
 	})
 	if err != nil {
 		return fmt.Errorf("server: build auth service: %w", err)
@@ -517,6 +531,8 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		AuthService:            authSvc,
 		AuthSigner:             signer,
 		OIDCRegistry:           registry,
+		OIDCStates:             oidcStateStore,
+		OrgSSO:                 orgSSOStore,
 		ApiKeys:                apiKeysStore,
 		GenericSecrets:         genericSecretsStore,
 		BotBindings:            botBindingsStore,

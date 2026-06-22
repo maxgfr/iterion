@@ -133,6 +133,16 @@ type AuthConfig struct {
 	// to true; only set false for HTTP local dev.
 	CookieSecure bool `yaml:"cookie_secure"`
 
+	// TrustedAutoLinkProviders is the operator allowlist of OIDC provider
+	// slugs whose verified email may auto-link a fresh SSO identity onto an
+	// existing password-account user (no explicit "link" step). Empty
+	// (default) = no auto-link: such a login returns a 409 so the SPA prompts
+	// the user to link from settings. Only affects GLOBAL providers (google,
+	// github, the deployment "sso"); per-org Keycloak rows have their own
+	// (Phase-3) per-row opt-in. Set via ITERION_AUTH_TRUSTED_AUTO_LINK_PROVIDERS
+	// (CSV).
+	TrustedAutoLinkProviders []string `yaml:"trusted_auto_link_providers"`
+
 	OIDC OIDCConfig `yaml:"oidc"`
 
 	// OAuthForfait carries the per-deployment OAuth client ids used
