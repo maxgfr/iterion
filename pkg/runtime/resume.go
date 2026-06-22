@@ -472,8 +472,14 @@ func (e *Engine) resumeFromFailure(ctx context.Context, r *store.Run) error {
 		if preservedCp == nil {
 			preservedCp = &store.Checkpoint{NodeID: e.workflow.Entry}
 		}
-		if err := e.store.FailRunResumable(ctx, runID, preservedCp, sbErr.Error()); err != nil {
-			_ = e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, sbErr.Error())
+		if frErr := e.store.FailRunResumable(ctx, runID, preservedCp, sbErr.Error()); frErr != nil {
+			// FailRunResumable failed — fall back to a plain terminal status so
+			// the run doesn't linger as `running`. If THAT also fails the run is
+			// stuck non-terminal (an orphan the operator must hand-hack), so
+			// surface it instead of swallowing the error.
+			if usErr := e.store.UpdateRunStatus(ctx, runID, store.RunStatusFailed, sbErr.Error()); usErr != nil && e.logger != nil {
+				e.logger.Warn("runtime: resume: could not finalize run %s after sandbox failure (FailRunResumable: %v; UpdateRunStatus fallback: %v) — run left non-terminal", runID, frErr, usErr)
+			}
 		}
 		return fmt.Errorf("runtime: sandbox: %w", sbErr)
 	}

@@ -105,7 +105,7 @@ func (a *OAuthApp) postToken(ctx context.Context, v url.Values) (forge.Refreshed
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 
 	var tr tokenResponse
-	_ = json.Unmarshal(raw, &tr)
+	uErr := json.Unmarshal(raw, &tr)
 	// A revoked/expired refresh token returns 400 invalid_grant (or 401) —
 	// surface as ErrUnauthorized so the worker flips the connection to
 	// needs_reauth rather than retrying forever.
@@ -117,6 +117,11 @@ func (a *OAuthApp) postToken(ctx context.Context, v url.Values) (forge.Refreshed
 			return forge.RefreshedToken{}, fmt.Errorf("gitlab: token endpoint: %s (HTTP %d)", tr.Error, resp.StatusCode)
 		}
 		return forge.RefreshedToken{}, fmt.Errorf("gitlab: token endpoint: HTTP %d", resp.StatusCode)
+	}
+	// A 2xx with an unparseable body would otherwise surface as the generic
+	// "no access_token" below; report the parse failure so the cause is clear.
+	if uErr != nil {
+		return forge.RefreshedToken{}, fmt.Errorf("gitlab: token endpoint returned a non-JSON body (HTTP %d): %w", resp.StatusCode, uErr)
 	}
 	if tr.AccessToken == "" {
 		return forge.RefreshedToken{}, fmt.Errorf("gitlab: token endpoint returned no access_token")

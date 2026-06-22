@@ -115,7 +115,13 @@ func (s *FilesystemRunStore) refreshTurnIndex(runID, nodeID string, loopIter, tu
 	path := s.turnIndexPath(runID, nodeID)
 	var idx turnNodeIndex
 	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &idx)
+		// A corrupt index would otherwise be silently reset to zero-value and
+		// overwritten below, permanently losing the recorded turn tuples.
+		// Surface it; the rebuild from this single write is best-effort, but
+		// the data loss must not be invisible.
+		if uErr := json.Unmarshal(data, &idx); uErr != nil && len(data) > 0 && s.logger != nil {
+			s.logger.Warn("store: turn index for run %s node %s is corrupt (%v) — rebuilding from this write; prior turn entries lost", runID, nodeID, uErr)
+		}
 	}
 	if idx.Iterations == nil {
 		idx.Iterations = make(map[string]TurnIndexEntry)

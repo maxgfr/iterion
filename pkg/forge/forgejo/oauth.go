@@ -98,7 +98,7 @@ func (a *OAuthApp) postToken(ctx context.Context, v url.Values) (forge.Refreshed
 		TokenType    string `json:"token_type"`
 		Error        string `json:"error"`
 	}
-	_ = json.Unmarshal(raw, &tr)
+	uErr := json.Unmarshal(raw, &tr)
 	if resp.StatusCode == http.StatusUnauthorized || tr.Error == "invalid_grant" {
 		return forge.RefreshedToken{}, forge.ErrUnauthorized
 	}
@@ -107,6 +107,11 @@ func (a *OAuthApp) postToken(ctx context.Context, v url.Values) (forge.Refreshed
 			return forge.RefreshedToken{}, fmt.Errorf("forgejo: token endpoint: %s (HTTP %d)", tr.Error, resp.StatusCode)
 		}
 		return forge.RefreshedToken{}, fmt.Errorf("forgejo: token endpoint: HTTP %d", resp.StatusCode)
+	}
+	// A 2xx with an unparseable body would otherwise surface as the generic
+	// "no access_token" below; report the parse failure so the cause is clear.
+	if uErr != nil {
+		return forge.RefreshedToken{}, fmt.Errorf("forgejo: token endpoint returned a non-JSON body (HTTP %d): %w", resp.StatusCode, uErr)
 	}
 	if tr.AccessToken == "" {
 		return forge.RefreshedToken{}, fmt.Errorf("forgejo: token endpoint returned no access_token")

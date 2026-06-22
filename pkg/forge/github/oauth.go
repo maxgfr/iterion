@@ -77,7 +77,7 @@ func (a *OAuthApp) Exchange(ctx context.Context, code, redirectURI, _ string) (f
 		TokenType   string `json:"token_type"`
 		Error       string `json:"error"`
 	}
-	_ = json.Unmarshal(raw, &tr)
+	uErr := json.Unmarshal(raw, &tr)
 	// GitHub returns 200 with an `error` field (e.g. bad_verification_code)
 	// on a failed exchange rather than a non-2xx status.
 	if tr.Error != "" {
@@ -85,6 +85,12 @@ func (a *OAuthApp) Exchange(ctx context.Context, code, redirectURI, _ string) (f
 	}
 	if resp.StatusCode/100 != 2 {
 		return forge.RefreshedToken{}, fmt.Errorf("github: token endpoint: HTTP %d", resp.StatusCode)
+	}
+	// A 2xx with an unparseable body (e.g. an HTML rate-limit/error page)
+	// would otherwise surface as the generic "no access_token" below; report
+	// the parse failure instead so the cause is diagnosable.
+	if uErr != nil {
+		return forge.RefreshedToken{}, fmt.Errorf("github: token endpoint returned a non-JSON body (HTTP %d): %w", resp.StatusCode, uErr)
 	}
 	if tr.AccessToken == "" {
 		return forge.RefreshedToken{}, fmt.Errorf("github: token endpoint returned no access_token")
