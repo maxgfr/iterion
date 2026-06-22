@@ -1,7 +1,8 @@
-import { type DragEvent, type KeyboardEvent, useCallback, useMemo, useState } from "react";
+import { type DragEvent, useCallback, useMemo, useRef, useState } from "react";
 import { useDocumentStore } from "@/store/document";
 import { useUIStore } from "@/store/ui";
 import { useAddSubNode, type SubNodeDragData } from "@/hooks/useAddSubNode";
+import { clickableRowProps } from "@/lib/a11y";
 import { findNodeDecl } from "@/lib/defaults";
 import { SUB_COLORS, SUB_ICONS, softColor } from "@/lib/constants";
 import type { SubNodeRelation } from "@/lib/docMutations";
@@ -67,22 +68,20 @@ function DraggableItem({
 }) {
   const color = SUB_COLORS[item.subKind];
   const icon = SUB_ICONS[item.subKind];
-  const handleKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      const rect = e.currentTarget.getBoundingClientRect();
-      onActivate(dragData, { x: rect.right, y: rect.top });
-    }
+  // Anchor the dialog at the item's right edge on keyboard activation
+  // (no cursor coords available); mouse-click still uses cursor coords.
+  const ref = useRef<HTMLDivElement | null>(null);
+  const activateFromKeyboard = () => {
+    const rect = ref.current?.getBoundingClientRect();
+    onActivate(dragData, { x: rect?.right ?? 0, y: rect?.top ?? 0 });
   };
   return (
     <div
+      ref={ref}
+      {...clickableRowProps(activateFromKeyboard, `Add ${item.label}`)}
       draggable
-      role="button"
-      tabIndex={0}
-      aria-label={`Add ${item.label}`}
       onDragStart={(e) => onDragStart(e, dragData)}
       onClick={(e) => onActivate(dragData, { x: e.clientX, y: e.clientY })}
-      onKeyDown={handleKey}
       className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:brightness-125 transition-all border border-border-strong focus:outline-none focus:ring-1 focus:ring-accent"
       style={{ backgroundColor: softColor(color, 9), borderColor: softColor(color, 40) }}
       title={`Click or drag to add ${item.label}`}

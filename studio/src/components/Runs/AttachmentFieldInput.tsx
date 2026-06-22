@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { AttachmentField, UploadLimits } from "@/api/types";
 import { Button } from "@/components/ui/Button";
+import { clickableRowProps } from "@/lib/a11y";
 import { formatBytes, validateAttachment } from "@/lib/attachmentValidation";
 
 export interface AttachmentValue {
@@ -73,9 +74,7 @@ export default function AttachmentFieldInput({
   return (
     <div className="space-y-1">
       <div
-        role="button"
-        tabIndex={0}
-        aria-label={`Upload ${field.name}`}
+        {...clickableRowProps(() => inputRef.current?.click(), `Upload ${field.name}`)}
         aria-invalid={Boolean(value?.error) || undefined}
         aria-busy={showProgress || undefined}
         className={[
@@ -86,13 +85,6 @@ export default function AttachmentFieldInput({
         ]
           .filter(Boolean)
           .join(" ")}
-        onClick={() => inputRef.current?.click()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            inputRef.current?.click();
-          }
-        }}
         onDragOver={(e) => {
           e.preventDefault();
           setDragging(true);

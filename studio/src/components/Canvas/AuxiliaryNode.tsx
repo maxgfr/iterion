@@ -2,6 +2,7 @@ import { Handle } from "@xyflow/react";
 import type { NodeProps } from "@xyflow/react";
 import type { EditingItem } from "@/store/ui";
 import { useUIStore } from "@/store/ui";
+import { clickableRowProps } from "@/lib/a11y";
 import { LAYER_COLORS, LAYER_ICONS, SELECTED_BORDER, SELECTED_GLOW, softColor } from "@/lib/constants";
 import type { LayerKind } from "@/lib/constants";
 import { SIDES, POS_MAP } from "./handlePositions";
@@ -28,21 +29,12 @@ export default function AuxiliaryNode({ data, selected }: NodeProps) {
   const openEditor = () => setEditingItem({ kind: LAYER_TO_ITEM_KIND[layerKind], name: label });
   return (
     <div
-      role="button"
-      tabIndex={0}
-      aria-label={`Edit ${label}`}
+      {...clickableRowProps(openEditor, `Edit ${label}`)}
       className="rounded-full border px-3 py-1.5 min-w-[100px] text-center shadow-[var(--shadow-sm)] cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent"
       style={{
         borderColor: selected ? SELECTED_BORDER : color,
         background: softColor(color),
         boxShadow: selected ? SELECTED_GLOW : undefined,
-      }}
-      onClick={openEditor}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          openEditor();
-        }
       }}
       title="Click to edit"
     >

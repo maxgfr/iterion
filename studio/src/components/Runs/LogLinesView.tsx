@@ -8,6 +8,7 @@ import { useShallow } from "zustand/react/shallow";
 import { apiURL } from "@/api/runs";
 import { Checkbox, IconButton, Input, Popover } from "@/components/ui";
 import { useToggleSet } from "@/hooks/useToggleSet";
+import { clickableRowProps } from "@/lib/a11y";
 import { desktop, isDesktop } from "@/lib/desktopBridge";
 import { formatBytes } from "@/lib/format";
 import { downloadBlob } from "@/lib/download";
@@ -696,17 +697,8 @@ const LogBlockRow = memo(function LogBlockRow({
   return (
     <div className={`font-mono text-caption py-0.5 ${cls}`}>
       <div
-        role="button"
-        tabIndex={0}
+        {...clickableRowProps(toggle, open ? "Collapse log line" : "Expand log line")}
         aria-expanded={open}
-        aria-label={open ? "Collapse log line" : "Expand log line"}
-        onClick={toggle}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            toggle();
-          }
-        }}
         title={open ? "Collapse body" : "Expand body"}
         className="flex items-baseline gap-2 pr-3 rounded cursor-pointer hover:bg-surface-2"
       >

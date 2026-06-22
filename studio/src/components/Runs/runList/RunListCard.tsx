@@ -3,6 +3,7 @@ import { memo } from "react";
 import type { RunSummary } from "@/api/runs";
 import { Badge } from "@/components/ui/Badge";
 import { LiveDot } from "@/components/ui/LiveDot";
+import { clickableRowProps } from "@/lib/a11y";
 import { formatRelative } from "@/lib/format";
 
 import { STATUS_VARIANT, labelForStatus } from "../runStatusMeta";
@@ -26,18 +27,10 @@ export const RunListCard = memo(function RunListCard({
   onFilterBot: (botKey: string) => void;
 }) {
   // A div (not a <button>) so the bot-avatar button can nest validly;
-  // keyboard semantics are restored via role + Enter/Space handling.
+  // keyboard semantics are restored via clickableRowProps (role + Enter/Space).
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={() => onOpen(run.id)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen(run.id);
-        }
-      }}
+      {...clickableRowProps(() => onOpen(run.id), friendlyLabel(run))}
       className="w-full text-left px-4 py-3 flex flex-col gap-1 min-h-[44px] cursor-pointer hover:bg-surface-2 active:bg-surface-3"
     >
       <div className="flex items-center gap-2 min-w-0 flex-wrap">
