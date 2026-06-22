@@ -42,8 +42,15 @@ type GenericConnector struct {
 	scopes       []string
 	httpClient   *http.Client
 	// strict gates the extra OIDC-doc validation (https endpoints) applied to
-	// org-admin-supplied issuers. The issuer-match check runs regardless.
+	// org-admin-supplied issuers, and makes ID-token verification mandatory
+	// (reject a token response that omits the id_token). The issuer-match +
+	// (when an id_token IS present) signature checks run regardless.
 	strict bool
+
+	// jwks caches the issuer's signing keys for ID-token verification, built
+	// lazily from the discovered jwks_uri (guarded by docMu for the pointer
+	// init; the cache itself is concurrency-safe).
+	jwks *jwksCache
 
 	// docMu guards doc, docOK, discoveredAt — and serialises discovery
 	// attempts so concurrent SSO starts only fire one HTTP request at a
@@ -237,6 +244,32 @@ func (c *GenericConnector) ExchangeCode(ctx context.Context, code, redirectURI, 
 		return ExternalUser{}, fmt.Errorf("oidc/generic: empty access token")
 	}
 
+	// Verify the ID token signature + iss/aud/exp against the issuer's JWKS —
+	// the cryptographic trust anchor that the token response is genuinely from
+	// the configured issuer's keys (defence-in-depth atop the https + SSRF +
+	// discovery-issuer-match guards). Required in strict mode (org-admin-
+	// supplied issuers); best-effort (verify-if-present) otherwise.
+	var verifiedSub string
+	if tok.IDToken != "" && doc.JWKSURL != "" {
+		c.docMu.Lock()
+		if c.jwks == nil {
+			c.jwks = newJWKSCache(doc.JWKSURL, c.httpClient)
+		}
+		cache := c.jwks
+		c.docMu.Unlock()
+		expectedIss := doc.Issuer
+		if expectedIss == "" {
+			expectedIss = c.issuerURL
+		}
+		claims, verr := verifyIDToken(ctx, cache, tok.IDToken, expectedIss, c.clientID)
+		if verr != nil {
+			return ExternalUser{}, verr
+		}
+		verifiedSub = claims.Subject
+	} else if c.strict {
+		return ExternalUser{}, fmt.Errorf("oidc/generic: issuer returned no id_token")
+	}
+
 	uReq, err := http.NewRequestWithContext(ctx, http.MethodGet, doc.UserInfoURL, nil)
 	if err != nil {
 		return ExternalUser{}, fmt.Errorf("oidc/generic: build userinfo req: %w", err)
@@ -260,6 +293,12 @@ func (c *GenericConnector) ExchangeCode(ctx context.Context, code, redirectURI, 
 	}
 	if err := json.NewDecoder(io.LimitReader(uResp.Body, maxOIDCBodyBytes)).Decode(&info); err != nil {
 		return ExternalUser{}, fmt.Errorf("oidc/generic: decode userinfo: %w", err)
+	}
+	if verifiedSub != "" && info.Sub != verifiedSub {
+		// The userinfo subject must match the verified ID-token subject — else
+		// the two halves of the response describe different users (token
+		// substitution).
+		return ExternalUser{}, fmt.Errorf("oidc/generic: userinfo subject mismatch")
 	}
 	if info.Email == "" {
 		return ExternalUser{}, ErrEmailMissing
