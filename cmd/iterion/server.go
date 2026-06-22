@@ -354,29 +354,12 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("server: build jwt signer: %w", err)
 	}
-	// SMTP: ITERION_SMTP_HOST switches the real mailer on; otherwise
-	// the log fallback keeps flows testable and server_info reports
-	// email_enabled=false so the SPA hides forgot-password.
-	var mailer mail.Mailer = &mail.LogMailer{Logger: logger}
-	if host := os.Getenv("ITERION_SMTP_HOST"); host != "" {
-		port, _ := strconv.Atoi(os.Getenv("ITERION_SMTP_PORT"))
-		startTLS := true
-		if v := os.Getenv("ITERION_SMTP_STARTTLS"); v != "" {
-			startTLS, _ = strconv.ParseBool(v)
-		}
-		smtpMailer, merr := mail.NewSMTP(mail.Config{
-			Host:     host,
-			Port:     port,
-			Username: os.Getenv("ITERION_SMTP_USERNAME"),
-			Password: os.Getenv("ITERION_SMTP_PASSWORD"),
-			From:     os.Getenv("ITERION_SMTP_FROM"),
-			StartTLS: startTLS,
-		})
-		if merr != nil {
-			return fmt.Errorf("server: smtp config: %w", merr)
-		}
-		mailer = smtpMailer
-		logger.Info("server: SMTP mailer enabled (host=%s)", host)
+	// SMTP: ITERION_SMTP_HOST switches the real mailer on; otherwise the log
+	// fallback keeps flows testable and server_info reports email_enabled=false
+	// so the SPA hides forgot-password.
+	mailer, err := buildMailer(logger)
+	if err != nil {
+		return err
 	}
 	resetStore := iterauth.NewMongoPasswordResetStore(st.DB())
 	if err := resetStore.EnsureSchema(rootCtx); err != nil {
@@ -400,100 +383,11 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("server: build auth service: %w", err)
 	}
 
-	if email := cfg.Auth.BootstrapAdminEmail; email != "" && !disableAuth {
-		declaredPW := strings.TrimSpace(cfg.Auth.BootstrapAdminPassword)
-		existing, getErr := identityStore.GetUserByEmail(rootCtx, email)
-		switch {
-		case getErr == nil:
-			switch {
-			case declaredPW != "":
-				// Declarative admin: ITERION_BOOTSTRAP_ADMIN_PASSWORD (a k8s
-				// secret) is AUTHORITATIVE — ensure an active super-admin whose
-				// password matches it, resetting only on drift so idempotent
-				// restarts are no-ops. The password is never logged.
-				changed := false
-				if !existing.IsSuperAdmin {
-					existing.IsSuperAdmin = true
-					changed = true
-				}
-				if existing.Status != identity.UserStatusActive {
-					existing.Status = identity.UserStatusActive
-					changed = true
-				}
-				if ok, _ := iterauth.VerifyPassword(declaredPW, existing.PasswordHash); !ok {
-					hash, err := iterauth.HashPassword(declaredPW)
-					if err != nil {
-						return fmt.Errorf("server: hash bootstrap password: %w", err)
-					}
-					existing.PasswordHash = hash
-					changed = true
-					logger.Info("server: BOOTSTRAP super-admin %s password reconciled to ITERION_BOOTSTRAP_ADMIN_PASSWORD", email)
-				}
-				if changed {
-					if err := identityStore.UpdateUser(rootCtx, existing); err != nil {
-						return fmt.Errorf("server: reconcile bootstrap admin: %w", err)
-					}
-				}
-			case existing.Status == identity.UserStatusPendingPasswordChange:
-				// No declared password and the admin was never activated. Re-issue
-				// a fresh temp password so an operator who lost the first one (e.g.
-				// the pod restarted before it was captured) can recover by
-				// restarting. An already-active admin's password is never reset.
-				pw, err := randomBootstrapPassword()
-				if err != nil {
-					return fmt.Errorf("server: bootstrap password: %w", err)
-				}
-				hash, err := iterauth.HashPassword(pw)
-				if err != nil {
-					return fmt.Errorf("server: hash bootstrap password: %w", err)
-				}
-				existing.PasswordHash = hash
-				if err := identityStore.UpdateUser(rootCtx, existing); err != nil {
-					return fmt.Errorf("server: re-issue bootstrap admin: %w", err)
-				}
-				logger.Warn("server: BOOTSTRAP super-admin %s still pending — re-issued temp_password=%s (rotate via POST /api/auth/password/change, or set ITERION_BOOTSTRAP_ADMIN_PASSWORD)", email, pw)
-			}
-			// getErr == nil && active && no declared password → no-op.
-		case errors.Is(getErr, identity.ErrNotFound):
-			// First boot with an empty users collection → create the admin.
-			count, err := identityStore.UserCount(rootCtx)
-			if err != nil {
-				return fmt.Errorf("server: user count: %w", err)
-			}
-			if count == 0 {
-				if declaredPW != "" {
-					// Declarative: create an ACTIVE super-admin with the secret
-					// password — no temp-password dance, GitOps-friendly.
-					if _, _, err := authSvc.CreateUserAndPersonalTeam(rootCtx, email, "Bootstrap admin", declaredPW, true, identity.UserStatusActive); err != nil {
-						return fmt.Errorf("server: bootstrap admin: %w", err)
-					}
-					logger.Info("server: BOOTSTRAP super-admin created (active) from ITERION_BOOTSTRAP_ADMIN_PASSWORD — email=%s", email)
-				} else {
-					pw, err := randomBootstrapPassword()
-					if err != nil {
-						return fmt.Errorf("server: bootstrap password: %w", err)
-					}
-					if _, _, err := authSvc.CreateUserAndPersonalTeam(rootCtx, email, "Bootstrap admin", pw, true, identity.UserStatusPendingPasswordChange); err != nil {
-						return fmt.Errorf("server: bootstrap admin: %w", err)
-					}
-					logger.Warn("server: BOOTSTRAP super-admin created — email=%s temp_password=%s (rotate via POST /api/auth/password/change, or set ITERION_BOOTSTRAP_ADMIN_PASSWORD)", email, pw)
-				}
-			}
-		case getErr != nil:
-			return fmt.Errorf("server: bootstrap admin lookup: %w", getErr)
-		}
+	if err := bootstrapAdmin(rootCtx, cfg, identityStore, authSvc, disableAuth, logger); err != nil {
+		return err
 	}
 
-	registry := oidc.NewRegistry()
-	if cfg.Auth.OIDC.Google.Enabled {
-		registry.Register(oidc.NewGoogleConnector(cfg.Auth.OIDC.Google.ClientID, cfg.Auth.OIDC.Google.ClientSecret, cfg.Auth.OIDC.Google.DisplayName))
-	}
-	if cfg.Auth.OIDC.GitHub.Enabled {
-		registry.Register(oidc.NewGitHubConnector(cfg.Auth.OIDC.GitHub.ClientID, cfg.Auth.OIDC.GitHub.ClientSecret, cfg.Auth.OIDC.GitHub.DisplayName))
-	}
-	if cfg.Auth.OIDC.Generic.Enabled {
-		registry.Register(oidc.NewGenericConnector(cfg.Auth.OIDC.Generic.IssuerURL, cfg.Auth.OIDC.Generic.ClientID, cfg.Auth.OIDC.Generic.ClientSecret, cfg.Auth.OIDC.Generic.DisplayName, cfg.Auth.OIDC.Generic.Scopes))
-	}
+	registry := buildOIDCRegistry(cfg)
 
 	if disableAuth {
 		logger.Warn("server: ITERION_DISABLE_AUTH set — /api/* endpoints are unauthenticated; do not expose the server publicly")
@@ -594,4 +488,142 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+// bootstrapAdmin reconciles the configured super-admin per the
+// ITERION_BOOTSTRAP_ADMIN_* policy. No-op when no email is configured or auth
+// is disabled. A declared password (ITERION_BOOTSTRAP_ADMIN_PASSWORD, a k8s
+// secret) is AUTHORITATIVE and reconciled idempotently; an un-activated admin
+// gets a fresh temp password re-issued; an empty users collection gets the
+// admin created. Passwords are never logged on the declarative path.
+func bootstrapAdmin(ctx context.Context, cfg iterconfig.Config, identityStore *identity.MongoStore, authSvc *iterauth.Service, disableAuth bool, logger *iterlog.Logger) error {
+	email := cfg.Auth.BootstrapAdminEmail
+	if email == "" || disableAuth {
+		return nil
+	}
+	declaredPW := strings.TrimSpace(cfg.Auth.BootstrapAdminPassword)
+	existing, getErr := identityStore.GetUserByEmail(ctx, email)
+	switch {
+	case getErr == nil:
+		switch {
+		case declaredPW != "":
+			// Declarative admin: the secret is AUTHORITATIVE — ensure an active
+			// super-admin whose password matches it, resetting only on drift so
+			// idempotent restarts are no-ops. The password is never logged.
+			changed := false
+			if !existing.IsSuperAdmin {
+				existing.IsSuperAdmin = true
+				changed = true
+			}
+			if existing.Status != identity.UserStatusActive {
+				existing.Status = identity.UserStatusActive
+				changed = true
+			}
+			if ok, _ := iterauth.VerifyPassword(declaredPW, existing.PasswordHash); !ok {
+				hash, err := iterauth.HashPassword(declaredPW)
+				if err != nil {
+					return fmt.Errorf("server: hash bootstrap password: %w", err)
+				}
+				existing.PasswordHash = hash
+				changed = true
+				logger.Info("server: BOOTSTRAP super-admin %s password reconciled to ITERION_BOOTSTRAP_ADMIN_PASSWORD", email)
+			}
+			if changed {
+				if err := identityStore.UpdateUser(ctx, existing); err != nil {
+					return fmt.Errorf("server: reconcile bootstrap admin: %w", err)
+				}
+			}
+		case existing.Status == identity.UserStatusPendingPasswordChange:
+			// No declared password and the admin was never activated. Re-issue
+			// a fresh temp password so an operator who lost the first one (e.g.
+			// the pod restarted before it was captured) can recover by
+			// restarting. An already-active admin's password is never reset.
+			pw, err := randomBootstrapPassword()
+			if err != nil {
+				return fmt.Errorf("server: bootstrap password: %w", err)
+			}
+			hash, err := iterauth.HashPassword(pw)
+			if err != nil {
+				return fmt.Errorf("server: hash bootstrap password: %w", err)
+			}
+			existing.PasswordHash = hash
+			if err := identityStore.UpdateUser(ctx, existing); err != nil {
+				return fmt.Errorf("server: re-issue bootstrap admin: %w", err)
+			}
+			logger.Warn("server: BOOTSTRAP super-admin %s still pending — re-issued temp_password=%s (rotate via POST /api/auth/password/change, or set ITERION_BOOTSTRAP_ADMIN_PASSWORD)", email, pw)
+		}
+		// getErr == nil && active && no declared password → no-op.
+	case errors.Is(getErr, identity.ErrNotFound):
+		// First boot with an empty users collection → create the admin.
+		count, err := identityStore.UserCount(ctx)
+		if err != nil {
+			return fmt.Errorf("server: user count: %w", err)
+		}
+		if count == 0 {
+			if declaredPW != "" {
+				// Declarative: create an ACTIVE super-admin with the secret
+				// password — no temp-password dance, GitOps-friendly.
+				if _, _, err := authSvc.CreateUserAndPersonalTeam(ctx, email, "Bootstrap admin", declaredPW, true, identity.UserStatusActive); err != nil {
+					return fmt.Errorf("server: bootstrap admin: %w", err)
+				}
+				logger.Info("server: BOOTSTRAP super-admin created (active) from ITERION_BOOTSTRAP_ADMIN_PASSWORD — email=%s", email)
+			} else {
+				pw, err := randomBootstrapPassword()
+				if err != nil {
+					return fmt.Errorf("server: bootstrap password: %w", err)
+				}
+				if _, _, err := authSvc.CreateUserAndPersonalTeam(ctx, email, "Bootstrap admin", pw, true, identity.UserStatusPendingPasswordChange); err != nil {
+					return fmt.Errorf("server: bootstrap admin: %w", err)
+				}
+				logger.Warn("server: BOOTSTRAP super-admin created — email=%s temp_password=%s (rotate via POST /api/auth/password/change, or set ITERION_BOOTSTRAP_ADMIN_PASSWORD)", email, pw)
+			}
+		}
+	case getErr != nil:
+		return fmt.Errorf("server: bootstrap admin lookup: %w", getErr)
+	}
+	return nil
+}
+
+// buildMailer returns an SMTP mailer when ITERION_SMTP_HOST is set, else a
+// log-only fallback (which keeps auth flows testable and reports
+// email_enabled=false to the SPA).
+func buildMailer(logger *iterlog.Logger) (mail.Mailer, error) {
+	host := os.Getenv("ITERION_SMTP_HOST")
+	if host == "" {
+		return &mail.LogMailer{Logger: logger}, nil
+	}
+	port, _ := strconv.Atoi(os.Getenv("ITERION_SMTP_PORT"))
+	startTLS := true
+	if v := os.Getenv("ITERION_SMTP_STARTTLS"); v != "" {
+		startTLS, _ = strconv.ParseBool(v)
+	}
+	smtpMailer, err := mail.NewSMTP(mail.Config{
+		Host:     host,
+		Port:     port,
+		Username: os.Getenv("ITERION_SMTP_USERNAME"),
+		Password: os.Getenv("ITERION_SMTP_PASSWORD"),
+		From:     os.Getenv("ITERION_SMTP_FROM"),
+		StartTLS: startTLS,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("server: smtp config: %w", err)
+	}
+	logger.Info("server: SMTP mailer enabled (host=%s)", host)
+	return smtpMailer, nil
+}
+
+// buildOIDCRegistry wires the enabled OIDC connectors (Google, GitHub,
+// generic) into a fresh registry.
+func buildOIDCRegistry(cfg iterconfig.Config) *oidc.Registry {
+	registry := oidc.NewRegistry()
+	if cfg.Auth.OIDC.Google.Enabled {
+		registry.Register(oidc.NewGoogleConnector(cfg.Auth.OIDC.Google.ClientID, cfg.Auth.OIDC.Google.ClientSecret, cfg.Auth.OIDC.Google.DisplayName))
+	}
+	if cfg.Auth.OIDC.GitHub.Enabled {
+		registry.Register(oidc.NewGitHubConnector(cfg.Auth.OIDC.GitHub.ClientID, cfg.Auth.OIDC.GitHub.ClientSecret, cfg.Auth.OIDC.GitHub.DisplayName))
+	}
+	if cfg.Auth.OIDC.Generic.Enabled {
+		registry.Register(oidc.NewGenericConnector(cfg.Auth.OIDC.Generic.IssuerURL, cfg.Auth.OIDC.Generic.ClientID, cfg.Auth.OIDC.Generic.ClientSecret, cfg.Auth.OIDC.Generic.DisplayName, cfg.Auth.OIDC.Generic.Scopes))
+	}
+	return registry
 }
