@@ -16,6 +16,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/auth/oidc"
+	"github.com/SocialGouv/iterion/pkg/auth/orgsso"
 	"github.com/SocialGouv/iterion/pkg/identity"
 	"github.com/SocialGouv/iterion/pkg/mail"
 )
@@ -456,7 +457,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleListProviders(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	type provider struct {
 		Name    string `json:"name"`
 		Display string `json:"display"`
@@ -470,18 +471,32 @@ func (s *Server) handleListProviders(w http.ResponseWriter, _ *http.Request) {
 			out.Providers = append(out.Providers, provider{Name: c.Name(), Display: c.Display()})
 		}
 	}
+	// Per-org providers (a tenant's own Keycloak), addressed by org slug. An
+	// unknown/absent slug returns only the global providers — never 404 — so
+	// this anonymous endpoint is not an org-existence oracle.
+	if org := strings.TrimSpace(r.URL.Query().Get("org")); org != "" && s.orgSSO != nil {
+		if team, err := s.authStore().GetTeamBySlug(r.Context(), org); err == nil {
+			rows, _ := s.orgSSO.ListByTenantKind(r.Context(), team.ID, orgsso.KindOIDC)
+			for _, row := range rows {
+				if !row.Enabled {
+					continue
+				}
+				disp := row.DisplayName
+				if disp == "" {
+					disp = "SSO"
+				}
+				out.Providers = append(out.Providers, provider{Name: row.OIDCSlug(), Display: disp})
+			}
+		}
+	}
 	writeJSON(w, out)
 }
 
 // ---- OIDC handlers ----
 
 func (s *Server) handleOIDCStart(w http.ResponseWriter, r *http.Request) {
-	if s.oidcRegistry == nil {
-		httpError(w, http.StatusNotFound, "oidc disabled")
-		return
-	}
 	name := r.PathValue("provider")
-	c, err := s.oidcRegistry.Get(name)
+	c, tenantID, providerID, err := s.resolveConnector(r.Context(), name)
 	if err != nil {
 		httpError(w, http.StatusNotFound, "unknown provider")
 		return
@@ -504,13 +519,15 @@ func (s *Server) handleOIDCStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.oidcStates.Put(r.Context(), oidc.PendingAuth{
-		Provider:     name,
-		State:        state,
-		CodeVerifier: verifier,
-		RedirectURI:  redirectURI,
-		NextURL:      next,
-		IssuedAt:     time.Now().UTC(),
-		AgentBinding: binding,
+		Provider:      name,
+		State:         state,
+		CodeVerifier:  verifier,
+		RedirectURI:   redirectURI,
+		NextURL:       next,
+		IssuedAt:      time.Now().UTC(),
+		AgentBinding:  binding,
+		TenantID:      tenantID,
+		OrgProviderID: providerID,
 	}); err != nil {
 		httpError(w, http.StatusInternalServerError, "persist state: %v", err)
 		return
@@ -565,12 +582,8 @@ func clearOIDCAgentBindingCookie(w http.ResponseWriter, domain string, secure bo
 }
 
 func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
-	if s.oidcRegistry == nil {
-		httpError(w, http.StatusNotFound, "oidc disabled")
-		return
-	}
 	name := r.PathValue("provider")
-	c, err := s.oidcRegistry.Get(name)
+	c, _, _, err := s.resolveConnector(r.Context(), name)
 	if err != nil {
 		httpError(w, http.StatusNotFound, "unknown provider")
 		return
@@ -620,7 +633,16 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "exchange: %v", err)
 		return
 	}
-	res, err := s.authSvc.LoginWithExternal(r.Context(), ext, r.UserAgent(), s.clientIP(r))
+	// Per-org flows drive the login from the tenant/provider stored in
+	// PendingAuth at /start (server-side, keyed by the IdP-echoed state) — NOT
+	// from the URL — so a slug presented at /callback cannot be coerced into
+	// another tenant's policy.
+	var res auth.LoginResult
+	if pending.TenantID != "" {
+		res, err = s.authSvc.LoginWithExternalForOrg(r.Context(), ext, pending.TenantID, pending.OrgProviderID, r.UserAgent(), s.clientIP(r))
+	} else {
+		res, err = s.authSvc.LoginWithExternal(r.Context(), ext, r.UserAgent(), s.clientIP(r))
+	}
 	if err != nil {
 		httpError(w, mapAuthErrorStatus(err), "sso login: %v", err)
 		return

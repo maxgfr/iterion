@@ -26,6 +26,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/audit"
 	"github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/auth/oidc"
+	"github.com/SocialGouv/iterion/pkg/auth/orgsso"
 	"github.com/SocialGouv/iterion/pkg/backend/detect"
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
 	"github.com/SocialGouv/iterion/pkg/bundle"
@@ -201,6 +202,13 @@ type Config struct {
 	// Sealer is the AES-GCM sealer used to encrypt API keys at rest
 	// and run-scoped bundles in flight. Required when ApiKeys is set.
 	Sealer secrets.Sealer
+
+	// OrgSSO is the per-tenant SSO provider store (per-org Keycloak +
+	// GitHub team-gating). When non-nil, the server registers
+	// /api/teams/{id}/sso/* CRUD, resolves per-org "oidc-org-<id>"
+	// connectors, and surfaces a tenant's providers on
+	// /api/auth/providers?org=<slug>. Requires Sealer + AuthService.
+	OrgSSO orgsso.Store
 
 	// OAuthForfait is the per-user OAuth credential store. When
 	// non-nil, the server registers /api/me/oauth/* endpoints and
@@ -385,6 +393,7 @@ type Server struct {
 	forgeStates       *forgeStateStore
 	forgeOAuthApps    forge.OAuthAppStore
 	forgeGitHubApp    ForgeGitHubAppConfig
+	orgSSO            orgsso.Store
 	memStore          knowledge.MemoryStore
 	// webhookLaunchBot overrides the inbound-webhook launch path (test
 	// seam). nil → realWebhookLaunchBot (resolve bot source + s.runs.Launch).
@@ -517,6 +526,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		genericSecrets:    cfg.GenericSecrets,
 		runSecrets:        cfg.RunSecrets,
 		sealer:            cfg.Sealer,
+		orgSSO:            cfg.OrgSSO,
 		oauthStore:        cfg.OAuthForfait,
 		webhookConfigs:    cfg.WebhookConfigs,
 		webhookDeliveries: cfg.WebhookDeliveries,
@@ -948,6 +958,12 @@ func (s *Server) routes() {
 		if s.forgeOAuthApps != nil {
 			s.registerForgeOAuthAppRoutes()
 		}
+	}
+
+	// Per-tenant SSO providers (a tenant's own Keycloak + GitHub team-gating).
+	// Needs the auth stack + a sealer for the OIDC client secret.
+	if s.orgSSO != nil && s.authSvc != nil && s.sealer != nil {
+		s.registerOrgSSORoutes()
 	}
 
 	// Audit log read surface (writes happen inline in the mutation
