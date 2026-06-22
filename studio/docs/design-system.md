@@ -156,6 +156,25 @@ Tones disambiguate the meaning so the same shape can express different states wi
 
 `useUIStore.addToast(message, level)` with four levels: `info`, `warning`, `error`, `success`. Optional `{ persistent: true }`. Use for **transient asynchronous feedback** (save complete, reload failed, etc.). Don't swallow API errors — toast them.
 
+### Feedback surfaces
+
+Four surfaces, and only four. Pick by the message's **lifetime and locality**, not by its tone.
+
+| Surface | Lifetime | Locality | Use for |
+|---|---|---|---|
+| **Toast** (`useUIStore.addToast`) | transient (auto-dismiss) | global | result of a discrete user action — "Saved", "Dispatched 3 issues", "Save failed" |
+| **InlineBanner** ([`ui/InlineBanner`](../src/components/ui/InlineBanner.tsx)) | persistent until resolved / dismissed | in-place | a contextual error/warning attached to the surface that caused it — form-level validation, "Dispatcher paused", "Tracker error" |
+| **ConfirmDialog** ([`useConfirm`](../src/hooks/useConfirm.tsx)) | blocking | modal | a yes/no decision the user must make before continuing — destructive or expensive ops |
+| **In-stream indicator** (e.g. `EventLog`'s error-jump chip) | as long as the data is in view | inside the data surface | per-row errors inside a list / log / table — annotate the row, don't surface globally |
+
+**Never silent.** Every `catch` lifts its error to one of the four above. Two narrow exceptions, each of which must say so in a comment:
+- **Best-effort decoration** with no analog — e.g. `NodeRunsChip`'s reverse-nav chip just hides on failure, because the outage surfaces loudly from the Runs view that owns that data.
+- **Background telemetry** the user didn't initiate (heartbeats, analytics).
+
+Don't **double-announce**: a `setError(…)` that already renders an InlineBanner shouldn't *also* `addToast` the same failure — they compete for attention.
+
+Don't hand-roll a `<div className="bg-danger-soft text-danger-fg …">` error strip — that's exactly `<InlineBanner tone="danger">`. This is a **review-time** convention, not a scanner rule: the severity-soft tokens are legitimate on badges, status rows, event-log tints, and the dedicated banner primitives (`HeaderBanner`, `WSDisconnectBanner`, …), so a regex can't tell a hand-rolled strip from a tinted badge.
+
 ### Fetching data
 
 Studio uses **[TanStack Query](https://tanstack.com/query)** (`@tanstack/react-query`) as the canonical fetch + cache layer. The provider is mounted in `main.tsx` with sensible defaults (`staleTime: 0`, `retry: 1`, `refetchOnWindowFocus: false` because the run console reacts to WebSocket events).
@@ -285,6 +304,7 @@ Open items still requiring human / browser verification:
 | `style={{ color: "#3B82F6" }}` | Drifts from tokens, breaks theme switch | `style={{ color: NODE_COLORS.agent }}` or `text-node-agent` utility |
 | `${hex}22` for soft bg | Doesn't work with `var()` strings | `softColor(token)` |
 | `<div>Loading…</div>` ad-hoc | Visual drift across panels | `<EmptyState message="Loading…" />` |
+| Hand-rolled `<div className="bg-danger-soft text-danger-fg …">` error strip | Re-implements InlineBanner; drifts on spacing / role / aria-live | `<InlineBanner tone="danger">` (§ Feedback surfaces) |
 | `<span className="animate-spin border-2 …" />` ad-hoc | Reinvents Button's spinner | `<Spinner size="sm" />` |
 | `shadow-lg` / `shadow-2xl` raw utility | Drifts from the elevation ladder; `shadow-2xl` isn't even a token | `shadow-[var(--shadow-popover)]` (or `-lg` / `-md`) |
 | `z-10` / `z-20` / `z-30` raw utility | Ad-hoc stacking races when surfaces nest | `z-[var(--z-canvas)]` … per the stacking ladder |

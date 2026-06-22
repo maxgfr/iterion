@@ -2,7 +2,7 @@ import { errorMessage } from "@/lib/errorHints";
 import { downloadBlob } from "@/lib/download";
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { ClockIcon, Pencil1Icon } from "@radix-ui/react-icons";
+import { ClockIcon, Pencil1Icon, ResetIcon } from "@radix-ui/react-icons";
 
 import type { RunHeader as RunHeaderType } from "@/api/runs";
 import { cancelRun, getRun, loadEvents, pauseRun, renameRun } from "@/api/runs";
@@ -10,6 +10,7 @@ import {
   Button,
   CopyButton,
   IconButton,
+  InlineBanner,
   LiveDot,
   StatusBadge,
   Tooltip,
@@ -35,9 +36,11 @@ interface Props {
   run: RunHeaderType;
   active: boolean;
   wsState: WsState;
+  // Restores the run-console panels to their default layout.
+  onResetLayout?: () => void;
 }
 
-export default function RunHeader({ run, active, wsState }: Props) {
+export default function RunHeader({ run, active, wsState, onResetLayout }: Props) {
   const requestWsReconnect = useRunStore((s) => s.requestWsReconnect);
   const applySnapshot = useRunStore((s) => s.applySnapshot);
   const { busy, error, run: runAction, setError } = useAsyncAction();
@@ -174,7 +177,6 @@ export default function RunHeader({ run, active, wsState }: Props) {
                   type="button"
                   onDoubleClick={() => setEditingName(true)}
                   className="font-medium truncate max-w-md text-left hover:text-fg-default focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded"
-                  title={friendlyName}
                 >
                   <span className="truncate">{friendlyName}</span>
                 </button>
@@ -199,9 +201,6 @@ export default function RunHeader({ run, active, wsState }: Props) {
               label="Run is active in this server process"
             />
           )}
-          {error && (
-            <span className="text-caption text-danger truncate max-w-xs">{error}</span>
-          )}
           <div className="ml-auto flex items-center gap-2 flex-wrap">
             <CopyButton
               value={run.id}
@@ -215,58 +214,74 @@ export default function RunHeader({ run, active, wsState }: Props) {
               copiedLabel="link copied"
               variant="share"
             />
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => void onExport()}
-              title="Download a JSON archive containing the run snapshot + every event"
-            >
-              Export
-            </Button>
-            <WSStatusDot state={wsState} />
-            {canPause && (
+            <Tooltip content="Download a JSON archive containing the run snapshot + every event">
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => void onPause()}
-                disabled={busy}
-                title="Pause at the next safe boundary. A checkpoint is saved; resume from this header."
+                onClick={() => void onExport()}
               >
-                Pause
+                Export
               </Button>
+            </Tooltip>
+            {onResetLayout && (
+              <IconButton
+                label="Reset console layout"
+                tooltip="Reset console layout"
+                size="sm"
+                variant="ghost"
+                onClick={onResetLayout}
+              >
+                <ResetIcon className="w-3.5 h-3.5" />
+              </IconButton>
+            )}
+            <WSStatusDot state={wsState} />
+            {canPause && (
+              <Tooltip content="Pause at the next safe boundary. A checkpoint is saved; resume from this header.">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void onPause()}
+                  disabled={busy}
+                >
+                  Pause
+                </Button>
+              </Tooltip>
             )}
             {canCancel && (
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => void cancelWithConfirm()}
-                disabled={busy}
-                title={cancelTooltip(run.status)}
-              >
-                Cancel
-              </Button>
+              <Tooltip content={cancelTooltip(run.status)}>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => void cancelWithConfirm()}
+                  disabled={busy}
+                >
+                  Cancel
+                </Button>
+              </Tooltip>
             )}
             {canResume && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setResumeOpen(true)}
-                disabled={busy}
-                title="Resume from the last checkpoint."
-              >
-                Resume…
-              </Button>
+              <Tooltip content="Resume from the last checkpoint.">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setResumeOpen(true)}
+                  disabled={busy}
+                >
+                  Resume…
+                </Button>
+              </Tooltip>
             )}
             {canFork && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setForkOpen(true)}
-                disabled={busy}
-                title="Fork: start a new run from a prior LLM turn (Shift+click forks in background)."
-              >
-                ⑂ Fork…
-              </Button>
+              <Tooltip content="Fork: start a new run from a prior LLM turn (Shift+click forks in background).">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setForkOpen(true)}
+                  disabled={busy}
+                >
+                  ⑂ Fork…
+                </Button>
+              </Tooltip>
             )}
           </div>
         </div>
@@ -293,14 +308,21 @@ export default function RunHeader({ run, active, wsState }: Props) {
               {finishedRel && <span>· finished {finishedRel}</span>}
             </span>
           </Tooltip>
-          <span
-            className="ml-auto text-caption font-mono opacity-70"
-            title="Run ID"
-          >
+          <span className="ml-auto text-caption font-mono opacity-70">
             {run.id}
           </span>
         </div>
       </div>
+      {error && (
+        <InlineBanner
+          tone="danger"
+          layout="sticky"
+          dismissable
+          onDismiss={() => setError(null)}
+        >
+          {error}
+        </InlineBanner>
+      )}
       <WSDisconnectBanner state={wsState} onReconnect={requestWsReconnect} />
       {showFinalization && <FinalizationRow run={run} />}
       {run.forked_from && <ForkedFromRow run={run} />}

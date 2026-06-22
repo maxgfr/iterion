@@ -1,6 +1,7 @@
 import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { Tooltip } from "@/components/ui";
 import { useRunStore, type BrowserScreenshot } from "@/store/run";
 import BrowserLivePane from "./BrowserLivePane";
 
@@ -198,60 +199,67 @@ export default function BrowserPane({
           className="flex-1 rounded-md border border-border-default bg-surface-0 px-2 py-1 text-sm font-mono outline-none focus:border-accent"
         />
         {browser.currentUrl && (
-          <a
-            href={browser.currentUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-fg-muted underline hover:text-fg-default"
-            title="Open in a new tab — useful when the target site forbids embedding"
-          >
-            open ↗
-          </a>
+          <Tooltip content="Open in a new tab — useful when the target site forbids embedding">
+            <a
+              href={browser.currentUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-fg-muted underline hover:text-fg-default"
+            >
+              open ↗
+            </a>
+          </Tooltip>
         )}
-        <button
-          type="button"
-          onClick={() => {
-            setDraftUrl("");
-            setManualPreviewUrl(null);
-          }}
-          className="text-xs text-fg-muted hover:text-fg-default"
-          title="Clear the current preview"
-        >
-          clear
-        </button>
+        <Tooltip content="Clear the current preview">
+          <button
+            type="button"
+            onClick={() => {
+              setDraftUrl("");
+              setManualPreviewUrl(null);
+            }}
+            className="text-xs text-fg-muted hover:text-fg-default"
+          >
+            clear
+          </button>
+        </Tooltip>
         {showLive ? (
-          <button
-            type="button"
-            onClick={handleDetach}
-            className="text-xs text-warning hover:text-warning-fg"
-            title="Stop the live Chromium session and return to viewer mode"
-          >
-            stop live
-          </button>
+          <Tooltip content="Stop the live Chromium session and return to viewer mode">
+            <button
+              type="button"
+              onClick={handleDetach}
+              className="text-xs text-warning hover:text-warning-fg"
+            >
+              stop live
+            </button>
+          </Tooltip>
         ) : (
-          <button
-            type="button"
-            onClick={handleAttach}
-            disabled={attachBusy}
-            className="text-xs text-success hover:text-success-fg disabled:opacity-50"
-            title="Spawn a host Chromium and stream it here (requires chromium installed on PATH)"
-          >
-            {attachBusy ? "attaching…" : "attach live"}
-          </button>
+          <Tooltip content="Spawn a host Chromium and stream it here (requires chromium installed on PATH)">
+            <button
+              type="button"
+              onClick={handleAttach}
+              disabled={attachBusy}
+              className="text-xs text-success hover:text-success-fg disabled:opacity-50"
+            >
+              {attachBusy ? "attaching…" : "attach live"}
+            </button>
+          </Tooltip>
         )}
         {onDockChange ? (
-          <button
-            type="button"
-            onClick={() => onDockChange(dock === "bottom" ? "right" : "bottom")}
-            className="text-xs text-fg-muted hover:text-fg-default"
-            title={
+          <Tooltip
+            content={
               dock === "bottom"
                 ? "Dock the browser pane on the right side"
                 : "Dock the browser pane at the bottom"
             }
           >
-            {dock === "bottom" ? "↦ right" : "↧ bottom"}
-          </button>
+            <button
+              type="button"
+              onClick={() => onDockChange(dock === "bottom" ? "right" : "bottom")}
+              className="text-xs text-fg-muted hover:text-fg-default"
+            >
+              {dock === "bottom" ? "↦ right" : "↧ bottom"}
+            </button>
+          </Tooltip>
         ) : null}
       </div>
       {attachError ? (

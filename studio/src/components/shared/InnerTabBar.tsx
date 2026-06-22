@@ -1,5 +1,5 @@
 import { Cross2Icon, PlusIcon } from "@radix-ui/react-icons";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 
 import type { Tab } from "@/store/tabs";
 
@@ -68,10 +68,36 @@ export default function InnerTabBar({
       </div>
     );
   }
+
+  // Roving-tabindex keyboard nav (WAI-ARIA tab pattern): only the active
+  // tab sits in the Tab order; Left/Right/Home/End move between tabs and
+  // follow focus (selecting the focused tab, matching how the studio's
+  // tabs double as routes).
+  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key)) return;
+    const tabButtons = Array.from(
+      e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+    );
+    if (tabButtons.length === 0) return;
+    const current = tabButtons.findIndex((b) => b === document.activeElement);
+    let next: number;
+    if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = tabButtons.length - 1;
+    else if (e.key === "ArrowRight")
+      next = current < 0 ? 0 : (current + 1) % tabButtons.length;
+    else next = current <= 0 ? tabButtons.length - 1 : current - 1;
+    e.preventDefault();
+    const btn = tabButtons[next];
+    btn?.focus();
+    const id = btn?.getAttribute("data-tab-id");
+    if (id) onSelect(id);
+  };
+
   return (
     <div
       className="shrink-0 flex items-stretch gap-px h-9 bg-surface-1 border-b border-border-default overflow-x-auto"
       role="tablist"
+      onKeyDown={handleKeyDown}
     >
       {pinnedLead && renderPinned(pinnedLead)}
       {tabs.map((tab) => {
@@ -82,13 +108,16 @@ export default function InnerTabBar({
         return (
           <div
             key={tab.id}
-            role="tab"
-            aria-selected={active}
+            role="presentation"
             className={`shrink-0 inline-flex items-center gap-1.5 pl-2.5 pr-1 max-w-[200px] text-xs border-r border-border-default group ${stateCls}`}
-            title={tab.label}
           >
             <button
               type="button"
+              role="tab"
+              aria-selected={active}
+              tabIndex={active ? 0 : -1}
+              data-tab-id={tab.id}
+              title={tab.label}
               onClick={() => onSelect(tab.id)}
               className="inline-flex items-center gap-1.5 min-w-0 py-1 focus:outline-none"
             >
@@ -97,6 +126,7 @@ export default function InnerTabBar({
             </button>
             <button
               type="button"
+              tabIndex={active ? 0 : -1}
               onClick={(e) => {
                 e.stopPropagation();
                 onClose(tab.id);

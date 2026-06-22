@@ -215,7 +215,20 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
     setBottomTabPinned,
     chatDock,
     setChatDock,
+    resetLayout,
   } = useRunConsoleLayout();
+
+  const onResetLayout = () => {
+    // Each layout's reset() bumps its own groupKey, remounting the Groups so
+    // they re-read the just-reset defaultLayout — see useLayoutPersistence.
+    verticalLayout.reset();
+    horizontalLayout.reset();
+    horizontalLayoutWithBrowser.reset();
+    horizontalLayoutWithChat.reset();
+    horizontalLayoutWithBrowserAndChat.reset();
+    resetLayout();
+    useUIStore.getState().addToast("Console layout reset", "success");
+  };
 
   // ConversationEmptyState's "Show event log" link bumps a token on
   // the run store; we expand the bottom drawer + flip to "events"
@@ -637,7 +650,12 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
   return (
     <ReactFlowProvider>
       <div className="h-full w-full overflow-hidden flex flex-col">
-        <RunHeader run={snapshot.run} active={active} wsState={wsState} />
+        <RunHeader
+          run={snapshot.run}
+          active={active}
+          wsState={wsState}
+          onResetLayout={onResetLayout}
+        />
         {isQueued ? (
           <QueuedBanner run={snapshot.run} />
         ) : (
@@ -680,6 +698,7 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
           <Group
             orientation="vertical"
             className="flex-1 min-h-0"
+            key={verticalLayout.groupKey}
             defaultLayout={verticalLayout.layout}
             onLayoutChanged={verticalLayout.onChange}
           >
@@ -687,10 +706,10 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
               <Group
                 orientation="horizontal"
                 className="h-full w-full"
-                // Key on the active column set so react-resizable-panels
-                // redistributes flexGrow cleanly on toggle instead of
-                // carrying over the previous mode's sizing.
-                key={`h-${browserRightDocked ? "b" : "_"}-${chatDockedRight ? "c" : "_"}`}
+                // horizPersistence switches instance per dock mode and its
+                // groupKey carries the reset nonce, so the Group remounts both
+                // on a dock toggle (clean flexGrow redistribution) and on reset.
+                key={horizPersistence.groupKey}
                 defaultLayout={horizPersistence.layout}
                 onLayoutChanged={horizPersistence.onChange}
               >

@@ -9,6 +9,7 @@ import {
   hasFlag,
   readBooleanFlag,
   readEnumFlag,
+  removeFlag,
   writeBooleanFlag,
   writeStringFlag,
 } from "@/lib/localStorageFlag";
@@ -42,6 +43,7 @@ export interface RunConsoleLayout {
   setBottomTabPinned: Dispatch<SetStateAction<boolean>>;
   chatDock: ChatDock;
   setChatDock: (next: ChatDock) => void;
+  resetLayout: () => void;
 }
 
 // Owns the run console's persisted layout/dock dials — browser dock,
@@ -107,6 +109,21 @@ export function useRunConsoleLayout(): RunConsoleLayout {
     });
   }, []);
 
+  // Restore every dock/collapse dial to its first-run default and clear
+  // the persisted flags. Pairs with the host clearing the panel-size
+  // layouts (useLayoutPersistence.reset) for a full "reset layout".
+  const resetLayout = useCallback(() => {
+    setBrowserDock("bottom");
+    setDetailCollapsed(true);
+    writeBooleanFlag(DETAIL_COLLAPSED_KEY, true);
+    setEventlogCollapsed(false);
+    writeBooleanFlag(EVENTLOG_COLLAPSED_KEY, false);
+    setBottomTab("logs");
+    setBottomTabPinned(false);
+    removeFlag(BOTTOM_TAB_KEY);
+    setChatDock("closed");
+  }, [setBrowserDock, setChatDock]);
+
   return {
     browserDock,
     setBrowserDock,
@@ -122,5 +139,6 @@ export function useRunConsoleLayout(): RunConsoleLayout {
     setBottomTabPinned,
     chatDock,
     setChatDock,
+    resetLayout,
   };
 }

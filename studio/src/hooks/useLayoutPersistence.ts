@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Layout } from "react-resizable-panels";
 
-import { readJSONFlag, writeJSONFlag } from "@/lib/localStorageFlag";
+import { readJSONFlag, removeFlag, writeJSONFlag } from "@/lib/localStorageFlag";
 
 // useLayoutPersistence persists a Group's layout (a map of panel id →
 // flexGrow) in localStorage so the user's panel sizes survive reloads.
@@ -16,8 +16,13 @@ export function useLayoutPersistence(
 ): {
   layout: Layout;
   onChange: (next: Layout) => void;
+  reset: () => void;
+  // Spread onto the host Group's `key`. reset() bumps it so
+  // react-resizable-panels remounts and re-reads the (reset) defaultLayout.
+  groupKey: string;
 } {
-  const [layout] = useState<Layout>(() => readLayout(key) ?? fallback);
+  const [layout, setLayout] = useState<Layout>(() => readLayout(key) ?? fallback);
+  const [resetNonce, setResetNonce] = useState(0);
   // Throttle writes so a drag doesn't hammer localStorage.
   const writeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onChange = useCallback(
@@ -42,7 +47,20 @@ export function useLayoutPersistence(
       }
     };
   }, []);
-  return { layout, onChange };
+  // Reset to defaults: drop the persisted entry, restore the in-memory
+  // layout to `fallback`, and bump the remount nonce. The host spreads
+  // `groupKey` onto the Group's `key` so react-resizable-panels remounts and
+  // re-reads `defaultLayout` (it captures defaultLayout only on mount).
+  const reset = useCallback(() => {
+    if (writeTimerRef.current != null) {
+      clearTimeout(writeTimerRef.current);
+      writeTimerRef.current = null;
+    }
+    removeFlag(key);
+    setLayout(fallback);
+    setResetNonce((n) => n + 1);
+  }, [key, fallback]);
+  return { layout, onChange, reset, groupKey: `${key}#${resetNonce}` };
 }
 
 function readLayout(key: string): Layout | null {

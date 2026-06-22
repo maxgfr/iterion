@@ -4,6 +4,7 @@ import type { Edge, WhenClause, LoopClause, WithEntry } from "@/api/types";
 import { TextField, NumberField, CheckboxField, SelectField, CommittedTextField } from "./FormField";
 import type { RefContext } from "@/lib/refCompletion";
 import { useConfirm } from "@/hooks/useConfirm";
+import { HelpHint, Tooltip } from "@/components/ui";
 
 interface Props {
   edge: Edge;
@@ -94,7 +95,7 @@ export default function EdgeForm({ edge, edgeIndex, workflowName }: Props) {
       {/* When clause */}
       <div className="border-t border-border-default pt-2">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-xs text-fg-subtle font-semibold">When Condition <span className="text-fg-subtle hover:text-fg-muted cursor-help" title="Boolean field from the source node's output schema. Controls whether this edge is followed.">?</span></span>
+          <span className="text-xs text-fg-subtle font-semibold">When Condition <HelpHint text="Boolean field from the source node's output schema. Controls whether this edge is followed." /></span>
           {!when ? (
             <button
               className="text-xs text-accent-text hover:text-accent-text"
@@ -128,16 +129,17 @@ export default function EdgeForm({ edge, edgeIndex, workflowName }: Props) {
               >
                 Field
               </button>
-              <button
-                type="button"
-                className={`px-2 py-0.5 rounded ${
-                  when.expr ? "bg-accent text-fg-onAccent" : "bg-surface-2 hover:bg-surface-3"
-                }`}
-                onClick={() => setWhen({ expr: when.expr ?? "" })}
-                title="Switch to a raw boolean expression (e.g. approved && loop.l.previous_output.x)"
-              >
-                Expression
-              </button>
+              <Tooltip content="Switch to a raw boolean expression (e.g. approved && loop.l.previous_output.x)">
+                <button
+                  type="button"
+                  className={`px-2 py-0.5 rounded ${
+                    when.expr ? "bg-accent text-fg-onAccent" : "bg-surface-2 hover:bg-surface-3"
+                  }`}
+                  onClick={() => setWhen({ expr: when.expr ?? "" })}
+                >
+                  Expression
+                </button>
+              </Tooltip>
             </div>
             {when.expr !== undefined ? (
               <TextField
@@ -186,7 +188,7 @@ export default function EdgeForm({ edge, edgeIndex, workflowName }: Props) {
       {/* Loop clause */}
       <div className="border-t border-border-default pt-2">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-xs text-fg-subtle font-semibold">Loop <span className="text-fg-subtle hover:text-fg-muted cursor-help" title="Creates a named loop through this edge, repeating up to max_iterations times. Use {{outputs.node.history}} to access previous iterations.">?</span></span>
+          <span className="text-xs text-fg-subtle font-semibold">Loop <HelpHint text="Creates a named loop through this edge, repeating up to max_iterations times. Use {{outputs.node.history}} to access previous iterations." /></span>
           {!loop ? (
             <button
               className="text-xs text-accent-text hover:text-accent-text"
@@ -224,7 +226,7 @@ export default function EdgeForm({ edge, edgeIndex, workflowName }: Props) {
       {/* With entries */}
       <div className="border-t border-border-default pt-2">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-xs text-fg-subtle font-semibold">With (data mapping) <span className="text-fg-subtle hover:text-fg-muted cursor-help" title="Map data to the target node's input fields. Use {{outputs.node.field}}, {{vars.name}}, or {{artifacts.name}} as values.">?</span></span>
+          <span className="text-xs text-fg-subtle font-semibold">With (data mapping) <HelpHint text="Map data to the target node's input fields. Use {{outputs.node.field}}, {{vars.name}}, or {{artifacts.name}} as values." /></span>
           <button
             className="text-xs text-accent-text hover:text-accent-text"
             onClick={() => setWith([...withEntries, { key: "", value: "" }])}
@@ -331,14 +333,14 @@ function WithEntryRow({
           <span className="text-[9px] text-fg-subtle">Allowed values: </span>
           <div className="flex flex-wrap gap-1 mt-0.5">
             {enumValues.map((v) => (
-              <button
-                key={v}
-                className="text-caption bg-surface-2 hover:bg-surface-3 text-warning-fg px-1.5 py-0.5 rounded cursor-pointer"
-                onClick={() => updateValue(`"${v}"`)}
-                title={`Set value to "${v}"`}
-              >
-                {v}
-              </button>
+              <Tooltip key={v} content={`Set value to "${v}"`}>
+                <button
+                  className="text-caption bg-surface-2 hover:bg-surface-3 text-warning-fg px-1.5 py-0.5 rounded cursor-pointer"
+                  onClick={() => updateValue(`"${v}"`)}
+                >
+                  {v}
+                </button>
+              </Tooltip>
             ))}
           </div>
         </div>
