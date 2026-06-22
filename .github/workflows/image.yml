@@ -115,17 +115,28 @@ jobs:
       - name: Sign image (cosign keyless OIDC)
         if: github.event_name != 'pull_request'
         run: |
-          cosign sign --yes "${REGISTRY_IMAGE}@${DIGEST}"
+          # cosign keyless hits Fulcio + Rekor (public Sigstore services) which
+          # intermittently rate-limit/time out. Retry with backoff so a transient
+          # Sigstore hiccup doesn't fail the whole image run.
+          for a in 1 2 3 4 5; do
+            cosign sign --yes "${REGISTRY_IMAGE}@${DIGEST}" && exit 0
+            echo "::warning::cosign sign attempt $a failed (Sigstore transient?); retry in $((a*10))s"; sleep $((a*10))
+          done
+          echo "::error::cosign sign failed after 5 attempts"; exit 1
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
 
       - name: Attest SBOM
         if: github.event_name != 'pull_request'
         run: |
-          cosign attest --yes \
-            --predicate iterion-image.spdx.json \
-            --type spdx \
-            "${REGISTRY_IMAGE}@${DIGEST}"
+          for a in 1 2 3 4 5; do
+            cosign attest --yes \
+              --predicate iterion-image.spdx.json \
+              --type spdx \
+              "${REGISTRY_IMAGE}@${DIGEST}" && exit 0
+            echo "::warning::cosign attest attempt $a failed (Sigstore transient?); retry in $((a*10))s"; sleep $((a*10))
+          done
+          echo "::error::cosign attest failed after 5 attempts"; exit 1
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
 
@@ -191,7 +202,11 @@ jobs:
       - name: Sign sandbox-slim image
         if: github.event_name != 'pull_request'
         run: |
-          cosign sign --yes "${SANDBOX_IMAGE_REF}@${DIGEST}"
+          for a in 1 2 3 4 5; do
+            cosign sign --yes "${SANDBOX_IMAGE_REF}@${DIGEST}" && exit 0
+            echo "::warning::cosign sign attempt $a failed (Sigstore transient?); retry in $((a*10))s"; sleep $((a*10))
+          done
+          echo "::error::cosign sign failed after 5 attempts"; exit 1
         env:
           DIGEST: ${{ steps.build-slim.outputs.digest }}
 
@@ -276,7 +291,11 @@ jobs:
       - name: Sign sandbox-full image
         if: github.event_name != 'pull_request'
         run: |
-          cosign sign --yes "${SANDBOX_IMAGE_REF}@${DIGEST}"
+          for a in 1 2 3 4 5; do
+            cosign sign --yes "${SANDBOX_IMAGE_REF}@${DIGEST}" && exit 0
+            echo "::warning::cosign sign attempt $a failed (Sigstore transient?); retry in $((a*10))s"; sleep $((a*10))
+          done
+          echo "::error::cosign sign failed after 5 attempts"; exit 1
         env:
           DIGEST: ${{ steps.build-full.outputs.digest }}
 
@@ -363,7 +382,11 @@ jobs:
       - name: Sign sandbox-sec image
         if: github.event_name != 'pull_request'
         run: |
-          cosign sign --yes "${SANDBOX_IMAGE_REF}@${DIGEST}"
+          for a in 1 2 3 4 5; do
+            cosign sign --yes "${SANDBOX_IMAGE_REF}@${DIGEST}" && exit 0
+            echo "::warning::cosign sign attempt $a failed (Sigstore transient?); retry in $((a*10))s"; sleep $((a*10))
+          done
+          echo "::error::cosign sign failed after 5 attempts"; exit 1
         env:
           DIGEST: ${{ steps.build-sec.outputs.digest }}
 
