@@ -282,10 +282,23 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		BaseURL:      cfg.Auth.PublicURL,
 	}
 
+	// The studio Home "Bots" panel lists first-class bots via /api/examples
+	// (an on-disk ExamplesDir walk). In cloud mode the bot catalog ships at
+	// the ITERION_BOTS_PATH dir — the same source /api/v1/bots uses — so point
+	// ExamplesDir at it; otherwise /api/examples falls back to the 3
+	// binary-embedded recipes and the Home shows only feature-dev +
+	// whole/branch-improve-loop instead of the full team.
+	botsPaths := botsPathsFromEnv()
+	examplesDir := ""
+	if len(botsPaths) > 0 {
+		examplesDir = botsPaths[0]
+	}
+
 	srv := server.New(server.Config{
 		Port:                   serverOpts.port,
 		Bind:                   serverOpts.bind,
-		Bots:                   server.BotsConfig{Paths: botsPathsFromEnv()},
+		Bots:                   server.BotsConfig{Paths: botsPaths},
+		ExamplesDir:            examplesDir,
 		WorkDir:                serverOpts.dir,
 		Store:                  st,
 		Alerts:                 alertSettings,
