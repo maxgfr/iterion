@@ -1,4 +1,3 @@
-import { errorMessage } from "@/lib/errorHints";
 import { clickableRowProps } from "@/lib/a11y";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -9,7 +8,9 @@ import { Button } from "@/components/ui/Button";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Tooltip } from "@/components/ui";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useConfirm } from "@/hooks/useConfirm";
+import { errorMessage } from "@/lib/errorHints";
 import {
   cancelIssue,
   getState,
@@ -27,17 +28,25 @@ import CostCapBanner from "@/components/shared/CostCapBanner";
 import { dispatcherActionState } from "./dispatcherActionState";
 import { dispatcherPillMeta } from "@/components/shared/dispatcherPillMeta";
 
+import RetriesTable from "./RetriesTable";
+import RunningTable from "./RunningTable";
+
 export default function DispatcherView() {
   const [, setLocation] = useLocation();
   const [snap, setSnap] = useState<DispatcherSnapshot | null>(null);
   const [status, setStatus] = useState<ManagerStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Consecutive failed status polls — surfaces an explicit "manager
   // unreachable" banner once the silent 2s retry has failed a few times,
   // instead of only quietly flipping the chip to "unreachable".
   const [pollFails, setPollFails] = useState(0);
+  // One useAsyncAction underpins every action button (reload, refresh,
+  // reload-config, cancel). Sharing a single error slot keeps the page
+  // to one InlineBanner; the hand-rolled try/catch ladder previously
+  // had the same effective behaviour but had to repeat
+  // setError(null)/setError(errorMessage(e)) at each call site.
+  const action = useAsyncAction();
   const { confirm, dialog } = useConfirm();
   const wsRef = useRef<WebSocket | null>(null);
   // The dispatcher manager's WS only exists while it is running or paused;
@@ -51,17 +60,17 @@ export default function DispatcherView() {
     [setLocation],
   );
 
+  // Destructure the stable setters/runners so dependency arrays don't
+  // re-fire effects every render — useAsyncAction wraps `run` and
+  // `setError` in useCallback for exactly this reason.
+  const { run: actionRun, setError: setActionError } = action;
   const reload = useCallback(async () => {
-    setError(null);
-    try {
+    await actionRun(async () => {
       const s = await getState();
       setSnap(s);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    });
+    setLoading(false);
+  }, [actionRun]);
 
   useEffect(() => {
     void reload();
@@ -115,7 +124,10 @@ export default function DispatcherView() {
         };
         ws.onerror = () => ws.close();
       } catch (e) {
-        setError(errorMessage(e));
+        // Surface the connection error in the page banner via the
+        // shared action slot (the WS path doesn't go through actionRun)
+        // and schedule a backoff retry.
+        setActionError(errorMessage(e));
         scheduleRetry();
       }
     };
@@ -137,7 +149,7 @@ export default function DispatcherView() {
         ws.close();
       }
     };
-  }, [reload, dispatcherAttached]);
+  }, [reload, dispatcherAttached, setActionError]);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,20 +177,14 @@ export default function DispatcherView() {
 
   const actions = dispatcherActionState(status?.state, snap?.paused ?? false);
 
-  const doRefresh = useCallback(async () => {
-    try {
-      await refreshTick();
-    } catch (e) {
-      setError(errorMessage(e));
-    }
-  }, []);
-  const doReload = useCallback(async () => {
-    try {
-      await reloadConfig();
-    } catch (e) {
-      setError(errorMessage(e));
-    }
-  }, []);
+  const doRefresh = useCallback(
+    () => void actionRun(refreshTick),
+    [actionRun],
+  );
+  const doReload = useCallback(
+    () => void actionRun(reloadConfig),
+    [actionRun],
+  );
   const doCancel = useCallback(
     async (issueID: string) => {
       const ok = await confirm({
@@ -188,13 +194,9 @@ export default function DispatcherView() {
         confirmVariant: "danger",
       });
       if (!ok) return;
-      try {
-        await cancelIssue(issueID);
-      } catch (e) {
-        setError(errorMessage(e));
-      }
+      await actionRun(() => cancelIssue(issueID));
     },
-    [confirm],
+    [confirm, actionRun],
   );
 
   useHeaderSlot({
@@ -206,7 +208,7 @@ export default function DispatcherView() {
             variant="secondary"
             size="sm"
             disabled={!actions.canPollDispatches}
-            onClick={() => void doRefresh()}
+            onClick={doRefresh}
           >
             Poll now
           </Button>
@@ -216,7 +218,7 @@ export default function DispatcherView() {
             variant="secondary"
             size="sm"
             disabled={!actions.canReloadConfig}
-            onClick={() => void doReload()}
+            onClick={doReload}
           >
             Reload config
           </Button>
@@ -257,7 +259,7 @@ export default function DispatcherView() {
         onSaved={() => void reload()}
       />
 
-      {error && <InlineBanner tone="danger">{error}</InlineBanner>}
+      {action.error && <InlineBanner tone="danger">{action.error}</InlineBanner>}
 
       {pollFails >= 3 && (
         <InlineBanner tone="warning">
@@ -307,7 +309,7 @@ export default function DispatcherView() {
           onFocusIssue={(id) =>
             setLocation(`/board?focus=${encodeURIComponent(id)}`)
           }
-          onRefreshNow={() => void doRefresh()}
+          onRefreshNow={doRefresh}
         />
       </div>
     </div>
@@ -355,248 +357,6 @@ function SummaryCard({
               {s}: {snap.slots.per_state_used?.[s] ?? 0}/{max}
             </span>
           ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-// stallStyle inspects how long a running entry has been silent relative
-// to the dispatcher's stallTimeout and returns a (className, hint) pair
-// for the row. The thresholds match what the operator can act on:
-//   ≥ 50% of the budget elapsed → amber  ("slow — keep an eye")
-//   ≥ 100% of the budget        → red    ("about to be cancelled")
-// Below 50%: no decoration, the row reads as normal.
-function stallStyle(
-  lastEventAt: string,
-  stallTimeoutS: number,
-): { rowClass: string; hint: string | null } {
-  if (!stallTimeoutS || stallTimeoutS <= 0) {
-    return { rowClass: "", hint: null };
-  }
-  const last = Date.parse(lastEventAt);
-  if (!Number.isFinite(last)) return { rowClass: "", hint: null };
-  const elapsedS = (Date.now() - last) / 1000;
-  if (elapsedS >= stallTimeoutS) {
-    return {
-      rowClass: "bg-danger-soft",
-      hint: `Silent for ${Math.round(elapsedS)}s ≥ stall timeout (${Math.round(stallTimeoutS)}s) — will be cancelled on the next reconciliation tick.`,
-    };
-  }
-  if (elapsedS >= stallTimeoutS / 2) {
-    return {
-      rowClass: "bg-warning-soft",
-      hint: `Silent for ${Math.round(elapsedS)}s — half the stall budget (${Math.round(stallTimeoutS)}s) consumed.`,
-    };
-  }
-  return { rowClass: "", hint: null };
-}
-
-function RunningTable({
-  rows,
-  stallTimeoutS,
-  onCancel,
-  onOpenRun,
-}: {
-  rows: DispatcherSnapshot["running"];
-  stallTimeoutS: number;
-  onCancel: (id: string) => void;
-  onOpenRun: (runID: string) => void;
-}) {
-  return (
-    <section className="rounded border border-border-default bg-surface-1">
-      <header className="px-4 py-2 border-b border-border-default text-sm font-semibold">
-        Running ({rows?.length ?? 0})
-      </header>
-      {!rows || rows.length === 0 ? (
-        <div className="p-4 text-xs text-fg-muted">No runs in flight.</div>
-      ) : (
-        // overflow-x-auto so the 7-column row stays fully reachable
-        // when the page is capped by max-w-4xl on small viewports.
-        <div className="overflow-x-auto">
-        <table className="min-w-full text-xs">
-          <thead className="text-fg-muted border-b border-border-default">
-            <tr>
-              <th className="text-left py-1.5 px-3 font-normal whitespace-nowrap">Identifier</th>
-              <th className="text-left py-1.5 px-3 font-normal">Run</th>
-              <th className="text-left py-1.5 px-3 font-normal">State</th>
-              <th className="text-left py-1.5 px-3 font-normal">Workspace</th>
-              <th className="text-left py-1.5 px-3 font-normal whitespace-nowrap">Started</th>
-              <th className="text-left py-1.5 px-3 font-normal whitespace-nowrap">Last event</th>
-              <th className="text-right py-1.5 px-3 font-normal">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows!.map((r) => {
-              const stall = stallStyle(r.last_event_at, stallTimeoutS);
-              return (
-              <tr
-                key={r.issue_id}
-                className={`border-b border-border-default/60 ${stall.rowClass}`}
-                title={stall.hint ?? undefined}
-              >
-                <td className="py-1.5 px-3 font-mono whitespace-nowrap">{r.identifier}</td>
-                <td className="py-1.5 px-3 font-mono truncate max-w-[14rem]">
-                  <button
-                    type="button"
-                    onClick={() => onOpenRun(r.run_id)}
-                    className="text-info hover:underline"
-                    title={`Open run ${r.run_id}`}
-                  >
-                    {r.run_id}
-                  </button>
-                  {r.attempt && r.attempt > 0 ? (
-                    <Tooltip
-                      content={`Resume of a prior failed_resumable run — attempt ${r.attempt + 1}. The dispatcher continues from the failing node's checkpoint instead of starting fresh.`}
-                    >
-                      <span className="ml-1.5 inline-flex items-center rounded bg-warning-soft text-warning-fg px-1.5 py-0.5 text-caption font-mono align-middle">
-                        resume #{r.attempt + 1}
-                      </span>
-                    </Tooltip>
-                  ) : null}
-                </td>
-                <td className="py-1.5 px-3">{r.workflow_state}</td>
-                <td
-                  className="py-1.5 px-3 font-mono text-fg-muted truncate max-w-[18rem]"
-                  title={r.workspace_path ?? "no workspace path captured (legacy or in-process run)"}
-                >
-                  {r.workspace_path ? compactWorkspace(r.workspace_path) : <span className="text-fg-subtle">—</span>}
-                </td>
-                <td className="py-1.5 px-3 text-fg-muted whitespace-nowrap">{relTime(r.started_at)}</td>
-                <td className="py-1.5 px-3 text-fg-muted whitespace-nowrap">
-                  {r.last_event_name ? r.last_event_name + " · " : ""}
-                  {relTime(r.last_event_at)}
-                  {stall.hint && (
-                    <span className="ml-1 text-warning-fg/90">⏱</span>
-                  )}
-                </td>
-                <td className="py-1.5 px-3 text-right">
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => onCancel(r.issue_id)}
-                  >
-                    Cancel
-                  </Button>
-                </td>
-              </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        </div>
-      )}
-    </section>
-  );
-}
-
-// useTick re-renders the caller at intervalMs while `active`. Used by
-// RetriesTable to keep countdowns smooth without a full dispatcher poll
-// each second — the retry table only needs to recompute due_at minus
-// now() on its own clock.
-function useTick(intervalMs: number, active: boolean): number {
-  const [tick, setTick] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const id = setInterval(() => setTick(Date.now()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs, active]);
-  return tick;
-}
-
-// formatRetryDue returns a short human label for "in 12s" / "due now"
-// derived purely from due_at + now. Lives next to RetriesTable so the
-// formatting stays scoped to the retry context (the rest of the page
-// uses relTime).
-function formatRetryDue(dueIso: string, nowMs: number): string {
-  if (!dueIso) return "";
-  const due = Date.parse(dueIso);
-  if (!Number.isFinite(due)) return "";
-  const deltaS = Math.round((due - nowMs) / 1000);
-  if (deltaS <= 0) return "due";
-  if (deltaS < 60) return `in ${deltaS}s`;
-  if (deltaS < 3600) return `in ${Math.round(deltaS / 60)}m`;
-  return `in ${Math.round(deltaS / 3600)}h`;
-}
-
-function RetriesTable({
-  rows,
-  canPollDispatches,
-  pollTitle,
-  onFocusIssue,
-  onRefreshNow,
-}: {
-  rows: DispatcherSnapshot["retries"];
-  canPollDispatches: boolean;
-  pollTitle: string;
-  onFocusIssue: (issueID: string) => void;
-  onRefreshNow: () => void;
-}) {
-  // Tick every 1s when at least one retry is due in under 5 minutes so
-  // the countdown is responsive without burning CPU on long-deferred
-  // queues.
-  const needsTick = (rows ?? []).some((r) => {
-    const due = Date.parse(r.due_at);
-    return Number.isFinite(due) && due - Date.now() < 5 * 60_000;
-  });
-  const now = useTick(1000, needsTick);
-  return (
-    <section className="rounded border border-border-default bg-surface-1">
-      <header className="px-4 py-2 border-b border-border-default text-sm font-semibold flex items-center justify-between gap-2">
-        <span>Retry queue ({rows?.length ?? 0})</span>
-        {rows && rows.length > 0 && (
-          <Tooltip content={pollTitle}>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={onRefreshNow}
-              disabled={!canPollDispatches}
-            >
-              Poll now
-            </Button>
-          </Tooltip>
-        )}
-      </header>
-      {!rows || rows.length === 0 ? (
-        <div className="p-4 text-xs text-fg-muted">No retries pending.</div>
-      ) : (
-        <div className="overflow-x-auto">
-        <table className="min-w-full text-xs">
-          <thead className="text-fg-muted border-b border-border-default">
-            <tr>
-              <th className="text-left py-1.5 px-3 font-normal whitespace-nowrap">Issue</th>
-              <th className="text-left py-1.5 px-3 font-normal">Attempt</th>
-              <th className="text-left py-1.5 px-3 font-normal whitespace-nowrap">Due</th>
-              <th className="text-left py-1.5 px-3 font-normal">Last error</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows!.map((r) => {
-              const dueLabel = formatRetryDue(r.due_at, now);
-              const isDue = dueLabel === "due";
-              return (
-              <tr
-                key={r.issue_id}
-                className={`border-b border-border-default/60 hover:bg-surface-2/40 cursor-pointer focus-visible:bg-surface-2/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
-                  isDue ? "bg-warning-soft" : ""
-                }`}
-                {...clickableRowProps(() => onFocusIssue(r.issue_id), `Open issue ${r.identifier || r.issue_id} on the board`)}
-              >
-                <td className="py-1.5 px-3 font-mono whitespace-nowrap">{r.identifier || r.issue_id}</td>
-                <td className="py-1.5 px-3">{r.attempt}</td>
-                <td className="py-1.5 px-3 whitespace-nowrap">
-                  <span className={isDue ? "text-warning-fg" : "text-fg-muted"}>
-                    {dueLabel || relTime(r.due_at)}
-                  </span>
-                </td>
-                <td className="py-1.5 px-3 text-danger-fg/80 truncate max-w-[24rem]">
-                  {r.error}
-                </td>
-              </tr>
-              );
-            })}
-          </tbody>
-        </table>
         </div>
       )}
     </section>
@@ -673,35 +433,4 @@ function KV({ k, v }: { k: string; v: string }) {
       <dd>{v}</dd>
     </>
   );
-}
-
-// compactWorkspace trims the noisy `<store-root>/dispatcher/workspaces/`
-// prefix common to all dispatcher-driven worktrees so the column reads
-// as the issue's identifier suffix at a glance. Leaves arbitrary host
-// paths intact (cloud runner pods, manually-launched runs) so the
-// column never lies about what's on disk.
-function compactWorkspace(path: string): string {
-  const m = path.match(/dispatcher\/workspaces\/(.+)$/);
-  if (m && m[1]) return m[1];
-  // Worktrees laid out by runtime.WithWorktree (not dispatcher) live
-  // under `<store-root>/worktrees/<run-id>`; show only the run-id.
-  const w = path.match(/\/worktrees\/(.+)$/);
-  if (w && w[1]) return w[1];
-  return path;
-}
-
-function relTime(iso: string): string {
-  if (!iso) return "";
-  const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return iso;
-  const dt = (Date.now() - t) / 1000;
-  if (dt < 0) {
-    const abs = Math.abs(dt);
-    if (abs < 60) return `in ${Math.round(abs)}s`;
-    if (abs < 3600) return `in ${Math.round(abs / 60)}m`;
-    return `in ${Math.round(abs / 3600)}h`;
-  }
-  if (dt < 60) return `${Math.round(dt)}s ago`;
-  if (dt < 3600) return `${Math.round(dt / 60)}m ago`;
-  return `${Math.round(dt / 3600)}h ago`;
 }
