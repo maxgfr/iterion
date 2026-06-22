@@ -113,8 +113,13 @@ export async function switchTeam(teamID: string): Promise<AuthResponse> {
   return send(`/auth/me/team/${encodeURIComponent(teamID)}`, { method: "POST" });
 }
 
-export async function listProviders(): Promise<ProvidersResponse> {
-  return send("/auth/providers");
+// listProviders returns the global SSO providers, plus — when an org slug is
+// supplied — that org's own enabled providers (its Keycloak). An unknown slug
+// returns only the globals (no org-existence oracle), so this is safe to call
+// speculatively as the user types.
+export async function listProviders(org?: string): Promise<ProvidersResponse> {
+  const qs = org ? `?org=${encodeURIComponent(org)}` : "";
+  return send(`/auth/providers${qs}`);
 }
 
 export interface InvitationLookup {

@@ -21,12 +21,21 @@ export default function Login() {
   const [name, setName] = useState("");
   const [invitation, setInvitation] = useState("");
   const [providers, setProviders] = useState<ProvidersResponse | null>(null);
+  const [org, setOrg] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Refetch providers as the org slug changes (debounced): the response folds
+  // in that org's own SSO providers (its Keycloak) alongside the global ones.
+  // An unknown slug returns only the globals, so this is safe to call as typed.
   useEffect(() => {
-    void listProviders().then(setProviders).catch(() => setProviders(null));
-  }, []);
+    const t = setTimeout(() => {
+      void listProviders(org.trim() || undefined)
+        .then(setProviders)
+        .catch(() => setProviders(null));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [org]);
 
   // Ensure serverInfo is loaded so we can gate the forgot-password link.
   useEffect(() => {
@@ -204,11 +213,22 @@ export default function Login() {
           </Button>
         </form>
 
-        {(providers?.providers?.length ?? 0) > 0 && (
-          <div className="mt-6">
-            <div className="text-xs uppercase tracking-wider text-fg-muted mb-2">
-              Or continue with
-            </div>
+        <div className="mt-6 space-y-2">
+          <div className="text-xs uppercase tracking-wider text-fg-muted">
+            Single sign-on
+          </div>
+          <label htmlFor="login-org" className="sr-only">
+            Organization slug
+          </label>
+          <Input
+            size="md"
+            id="login-org"
+            placeholder="Organization slug (for your org's SSO)"
+            value={org}
+            onChange={(e) => setOrg(e.target.value)}
+            autoComplete="organization"
+          />
+          {(providers?.providers?.length ?? 0) > 0 ? (
             <div className="space-y-2">
               {providers!.providers.map((p) => (
                 <Button
@@ -221,8 +241,12 @@ export default function Login() {
                 </Button>
               ))}
             </div>
-          </div>
-        )}
+          ) : (
+            org.trim() !== "" && (
+              <div className="text-xs text-fg-muted">No SSO providers for that organization.</div>
+            )
+          )}
+        </div>
 
         <div className="mt-6 text-sm text-fg-muted text-center space-y-1">
           {mode === "login" ? (
