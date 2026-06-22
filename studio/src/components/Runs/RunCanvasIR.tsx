@@ -1,4 +1,3 @@
-import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
@@ -10,27 +9,32 @@ import {
   type Node as FlowNode,
 } from "@xyflow/react";
 
-import type {
-  ExecStatus,
-  ExecutionState,
-  WireNode,
-  WireWorkflow,
-} from "@/api/runs";
-import { getRunWorkflow } from "@/api/runs";
+import type { ExecutionState, WireNode } from "@/api/runs";
 import { autoLayout } from "@/lib/autoLayout";
 import type { DelegateOutputMeta } from "@/lib/delegateMeta";
-import {
-  effortBackendKey,
-  useEffortCapabilitiesClient,
-} from "@/hooks/useEffortCapabilities";
 import { useToggleSet } from "@/hooks/useToggleSet";
-import type { EffortCapabilities } from "@/api/client";
 
 import { useUIStore } from "@/store/ui";
 
-import IRNode, { iterationColor, type LLMMeta } from "./IRNode";
-import { statusClasses, type UnifiedStatus } from "./runStatusClasses";
+import IRNode, { iterationColor } from "./IRNode";
 import RunCanvasToolbar from "./RunCanvasToolbar";
+import { FilterChips, buildFilterChips } from "./runCanvasIR/FilterChips";
+import { StatusLegend } from "./runCanvasIR/StatusLegend";
+import {
+  buildLLMMeta,
+  defaultIterationFor,
+  nodeMatchesFilters,
+  type StatusFilter,
+} from "./runCanvasIR/helpers";
+import { useEffortCapsPrefetch } from "./runCanvasIR/useEffortCapsPrefetch";
+import { useInitialRunningFocus } from "./runCanvasIR/useInitialRunningFocus";
+import { useSelectedNodeFocus } from "./runCanvasIR/useSelectedNodeFocus";
+import { useWorkflowLoad } from "./runCanvasIR/useWorkflowLoad";
+
+// Re-export so existing `import { defaultIterationFor } from
+// "./RunCanvasIR"` callers (RunView's selectedNodeIteration memo) keep
+// resolving without churn.
+export { defaultIterationFor };
 
 const nodeTypes = { ir: IRNode };
 
@@ -58,105 +62,6 @@ interface Props {
   onToggleFollowLive: () => void;
 }
 
-function buildLLMMeta(
-  node: WireNode,
-  override: DelegateOutputMeta | undefined,
-  effortCapsByPair: Map<string, EffortCapabilities>,
-): LLMMeta | undefined {
-  const declared = {
-    model: node.model,
-    backend: node.backend,
-    effort: node.reasoning_effort,
-  };
-  if (!declared.model && !declared.backend && !declared.effort && !override) {
-    return undefined;
-  }
-  const activeModel = override?.model ?? declared.model;
-  // Caps lookup keys off the *declared* model because that's what
-  // the prefetch effect populates the cache with. Runtime events
-  // sometimes log a canonical alias (e.g. event "gpt-5.5" vs workflow
-  // "openai/gpt-5.5") — the registry returns identical caps for
-  // both, but the cache is keyed by the literal string.
-  const capsModel = declared.model ?? activeModel;
-  const caps = capsModel
-    ? effortCapsByPair.get(
-        `${effortBackendKey(declared.backend)} ${capsModel}`,
-      )
-    : undefined;
-  // Effective effort priority:
-  //   1. runtime override (event llm_request)
-  //   2. value declared in the workflow (post-expansion would only show up
-  //      via the override path, so a literal here is what the user wrote)
-  //   3. provider's documented default from the registry — flagged so
-  //      the badge renders attenuated.
-  let activeEffort = override?.reasoning_effort ?? declared.effort;
-  let effortIsResolvedDefault = false;
-  if (!activeEffort && caps?.default) {
-    activeEffort = caps.default;
-    effortIsResolvedDefault = true;
-  }
-  return {
-    model: activeModel,
-    backend: declared.backend,
-    reasoningEffort: activeEffort,
-    runtimeOverriddenModel:
-      !!override?.model && !!declared.model && override.model !== declared.model,
-    runtimeOverriddenEffort:
-      !!override?.reasoning_effort &&
-      !!declared.effort &&
-      override.reasoning_effort !== declared.effort,
-    effortIsResolvedDefault,
-    effortSupported: caps?.supported ?? undefined,
-    contextWindow: override?.contextWindow,
-    contextUsed: override?.contextUsed,
-  };
-}
-
-function nodeMatchesFilters(
-  execs: ExecutionState[],
-  filters: Set<StatusFilter>,
-): boolean {
-  if (filters.size === 0) return true;
-  const want: Record<StatusFilter, ExecStatus> = {
-    running: "running",
-    paused: "paused_waiting_human",
-    failed: "failed",
-  };
-  for (const f of filters) {
-    if (execs.some((e) => e.status === want[f])) return true;
-  }
-  return false;
-}
-
-// Compute the "current" iteration INDEX for an IR node — i.e. the
-// 0-based position in the (start-ordered) executions array we want to
-// land on when the user first opens the run console. Priority is the
-// in-flight execution first, then a paused one, then the latest
-// (last-started) one. Returns 0 when there are no executions yet.
-//
-// Index semantics — NOT scalar `loop_iteration` — because Option 3
-// nested-loop exec_ids can produce multiple executions of the same node
-// sharing the same scalar `loop_iteration` (e.g., the runtime's
-// `currentLoopIteration` returns max() across containing loops and an
-// outer loop counter can stay stuck dominating the inner counter for
-// many iterations). Indexing into the start-ordered array is the only
-// stable per-execution identifier the UI can key on.
-export function defaultIterationFor(execs: ExecutionState[]): number {
-  if (execs.length === 0) return 0;
-  let runningIdx: number | undefined;
-  let pausedIdx: number | undefined;
-  for (let i = 0; i < execs.length; i++) {
-    const e = execs[i]!;
-    if (e.status === "running" && runningIdx === undefined) runningIdx = i;
-    if (e.status === "paused_waiting_human" && pausedIdx === undefined) pausedIdx = i;
-  }
-  if (runningIdx !== undefined) return runningIdx;
-  if (pausedIdx !== undefined) return pausedIdx;
-  return execs.length - 1;
-}
-
-type StatusFilter = "running" | "paused" | "failed";
-
 export default function RunCanvasIR({
   runId,
   executions,
@@ -168,8 +73,7 @@ export default function RunCanvasIR({
   followLive,
   onToggleFollowLive,
 }: Props) {
-  const [wf, setWf] = useState<WireWorkflow | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { wf, error } = useWorkflowLoad(runId);
   const [nodes, setNodes] = useState<FlowNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
   // Bumped each time ELK layout settles so the centering effect below
@@ -185,9 +89,7 @@ export default function RunCanvasIR({
   // buildLLMMeta uses `default` to render an attenuated badge when
   // the workflow declares no effort, and `supported` to normalise the
   // bar fill so a model's max always renders fully.
-  const [effortCapsByPair, setEffortCapsByPair] = useState<
-    Map<string, EffortCapabilities>
-  >(() => new Map());
+  const effortCapsByPair = useEffortCapsPrefetch(wf);
   // Ref mirror of effortCapsByPair so the async layout effect can read
   // the latest caps when its autoLayout promise resolves. Without this,
   // a fetch that completes mid-layout produces stale meta on first
@@ -212,86 +114,6 @@ export default function RunCanvasIR({
   // flips this and the layout effect below picks it up.
   const layoutDirection = useUIStore((s) => s.layoutDirection);
   const toggleLayoutDirection = useUIStore((s) => s.toggleLayoutDirection);
-
-  useEffect(() => {
-    setWf(null);
-    setError(null);
-    let cancelled = false;
-    getRunWorkflow(runId)
-      .then((w) => {
-        if (cancelled) return;
-        setWf(w);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setError(errorMessage(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [runId]);
-
-  const effortClient = useEffortCapabilitiesClient();
-
-  // Prefetch effort capabilities for each unique (backend, model)
-  // pair on the IR. Shares the React Query cache populated by AgentForm
-  // so the editor side panel and the run canvas don't double-fetch.
-  // Already-cached pairs are seeded synchronously so the bar normalises
-  // and the attenuated badge render on first paint; the rest update as
-  // fetches resolve.
-  useEffect(() => {
-    if (!wf) return;
-    let cancelled = false;
-    // Compute pairs OUTSIDE the state updater. React StrictMode
-    // invokes the updater twice; mutating shared state (a Set) inside
-    // the updater would make the second invocation skip everything
-    // and commit an empty Map.
-    const seen = new Set<string>();
-    const seedEntries: Array<[string, EffortCapabilities]> = [];
-    const toFetch: Array<{ key: string; backend: string; model: string }> = [];
-    for (const n of wf.nodes) {
-      if (!n.model) continue;
-      const backend = effortBackendKey(n.backend);
-      const key = `${backend} ${n.model}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const cached = effortClient.getCached(backend, n.model);
-      if (cached) seedEntries.push([key, cached]);
-      else toFetch.push({ key, backend, model: n.model });
-    }
-    if (seedEntries.length > 0) {
-      setEffortCapsByPair((prev) => {
-        let mutated = false;
-        const next = new Map(prev);
-        for (const [key, caps] of seedEntries) {
-          if (next.get(key) !== caps) {
-            next.set(key, caps);
-            mutated = true;
-          }
-        }
-        return mutated ? next : prev;
-      });
-    }
-    for (const { key, backend, model } of toFetch) {
-      // Capability lookup is best-effort; on failure the canvas
-      // simply renders no badge for unset effort.
-      effortClient
-        .fetch(backend, model)
-        .then((caps) => {
-          if (cancelled) return;
-          setEffortCapsByPair((prev) => {
-            if (prev.get(key) === caps) return prev;
-            const next = new Map(prev);
-            next.set(key, caps);
-            return next;
-          });
-        })
-        .catch(() => {});
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [wf, effortClient]);
 
   // Group executions by IR node id once; both the layout and the
   // visual-patch effects below reuse this.
@@ -330,6 +152,14 @@ export default function RunCanvasIR({
     },
     [onSelectIteration, onSelectNode],
   );
+
+  // Index WireWorkflow nodes for the patch effect's meta refresh —
+  // avoids re-walking wf.nodes on every patch.
+  const wireNodeById = useMemo(() => {
+    const m = new Map<string, WireNode>();
+    if (wf) for (const n of wf.nodes) m.set(n.id, n);
+    return m;
+  }, [wf]);
 
   // Layout pass — runs once when the IR arrives. Iteration changes
   // and execution flips are handled by the patch effect below.
@@ -454,14 +284,6 @@ export default function RunCanvasIR({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wf, layoutDirection]);
 
-  // Index WireWorkflow nodes for the patch effect's meta refresh —
-  // avoids re-walking wf.nodes on every patch.
-  const wireNodeById = useMemo(() => {
-    const m = new Map<string, WireNode>();
-    if (wf) for (const n of wf.nodes) m.set(n.id, n);
-    return m;
-  }, [wf]);
-
   // Visual patch: rerun whenever executions, selection, or per-node
   // iteration changes. Cheap because it only mutates `data` — no
   // ELK relayout. Skipped when the layout effect hasn't completed.
@@ -508,50 +330,9 @@ export default function RunCanvasIR({
     effortCapsByPair,
   ]);
 
-  // Centre on the selected node when selection changes (jump-to-failed,
-  // running node advances) AND when the layout itself settles (initial
-  // mount: parent's snapshot can populate selectedNodeId BEFORE the IR
-  // fetch + ELK layout produce `nodes`, so depending on selectedNodeId
-  // alone leaves us silently exited with nodes=[]). `layoutEpoch` bumps
-  // exactly once per autoLayout completion, so per-event nodes patches
-  // (executions advancing, iteration changes) don't re-fire setCenter.
-  useEffect(() => {
-    if (!selectedNodeId) return;
-    const node = nodes.find((n) => n.id === selectedNodeId);
-    if (!node) return;
-    reactFlow.setCenter(
-      node.position.x + 100,
-      node.position.y + 40,
-      { zoom: 1, duration: 350 },
-    );
-    // Pulse the freshly-selected node for ~600ms so the user sees the
-    // jump even when the canvas is already showing the target — a
-    // common case after clicking an EventLog row whose node is the
-    // current viewport's centre. The pulse is purely additive
-    // (transient class on the FlowNode wrapper) and clears itself so
-    // ref-counted highlight state stays absent from the React tree.
-    setNodes((prev) =>
-      prev.map((n) =>
-        n.id === selectedNodeId
-          ? { ...n, className: `${n.className ?? ""} pulse-flash` }
-          : n,
-      ),
-    );
-    const t = setTimeout(() => {
-      setNodes((prev) =>
-        prev.map((n) =>
-          n.id === selectedNodeId
-            ? {
-                ...n,
-                className: (n.className ?? "").replace(" pulse-flash", "").trim(),
-              }
-            : n,
-        ),
-      );
-    }, 600);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedNodeId, layoutEpoch]);
+  // Centre on the selected node when selection changes + on layout
+  // settle (handles the IR-fetch race). Pulses for ~600ms.
+  useSelectedNodeFocus({ selectedNodeId, layoutEpoch, nodes, setNodes });
 
   const filterCounts = useMemo(() => {
     let running = 0,
@@ -581,35 +362,8 @@ export default function RunCanvasIR({
   }, [execsByNode]);
 
   // Initial focus on arrival: once layout has settled AND a running
-  // node is known, frame the viewport on the running node(s) — the
-  // exact same call the "Center on running node" toolbar button makes.
-  // Marks done so subsequent running-node changes (next node starts
-  // during the run) don't keep re-zooming under the user. Resets on
-  // runId change so navigating to a different run focuses again.
-  const initialFocusDoneRef = useRef(false);
-  useEffect(() => {
-    initialFocusDoneRef.current = false;
-  }, [runId]);
-  useEffect(() => {
-    if (initialFocusDoneRef.current) return;
-    if (nodes.length === 0) return;
-    if (runningNodeIds.size === 0) return;
-    initialFocusDoneRef.current = true;
-    const targets = Array.from(runningNodeIds).map((id) => ({ id }));
-    // No cleanup: cancelling this rAF would defeat the whole point —
-    // the patch effect's setNodes re-fires our deps within the same
-    // frame, and a cleanup-based cancelAnimationFrame would clobber
-    // the rAF before it runs. The `done` flag prevents re-scheduling.
-    requestAnimationFrame(() => {
-      reactFlow.fitView({
-        nodes: targets,
-        padding: 0.3,
-        duration: 350,
-        minZoom: 0.5,
-        maxZoom: 1.5,
-      });
-    });
-  }, [layoutEpoch, runningNodeIds, nodes, reactFlow]);
+  // node is known, frame the viewport on the running node(s).
+  useInitialRunningFocus({ runId, layoutEpoch, nodes, runningNodeIds });
 
   if (error) {
     return (
@@ -624,27 +378,7 @@ export default function RunCanvasIR({
     );
   }
 
-  const filterChips: Array<{ key: StatusFilter; label: string; count: number; tone: string }> =
-    [
-      {
-        key: "failed",
-        label: "Failed",
-        count: filterCounts.failed,
-        tone: "text-danger-fg border-danger/40",
-      },
-      {
-        key: "running",
-        label: "Running",
-        count: filterCounts.running,
-        tone: "text-info-fg border-info/40",
-      },
-      {
-        key: "paused",
-        label: "Paused",
-        count: filterCounts.paused,
-        tone: "text-warning-fg border-warning/40",
-      },
-    ];
+  const filterChips = buildFilterChips(filterCounts);
 
   return (
     <div className="h-full w-full relative">
@@ -657,32 +391,11 @@ export default function RunCanvasIR({
       <StatusLegend />
 
       <div className="absolute top-2 right-2 z-[var(--z-canvas)] flex items-center gap-1">
-        {filterChips
-          .filter((c) => c.count > 0)
-          .map((c) => {
-            const isActive = activeFilters.has(c.key);
-            return (
-              <button
-                key={c.key}
-                type="button"
-                onClick={() => toggleFilter(c.key)}
-                className={`text-caption px-2 py-0.5 rounded border transition-colors bg-surface-1/90 backdrop-blur ${
-                  c.tone
-                } ${
-                  isActive
-                    ? "ring-1 ring-accent bg-surface-2"
-                    : "hover:bg-surface-2"
-                }`}
-                title={
-                  isActive
-                    ? `Stop highlighting ${c.label.toLowerCase()} nodes`
-                    : `Highlight ${c.label.toLowerCase()} nodes`
-                }
-              >
-                {c.label} <span className="font-mono">{c.count}</span>
-              </button>
-            );
-          })}
+        <FilterChips
+          chips={filterChips}
+          activeFilters={activeFilters}
+          onToggle={toggleFilter}
+        />
         <RunCanvasToolbar
           onFitView={() =>
             reactFlow.fitView({ padding: 0.2, duration: 300 })
@@ -721,66 +434,6 @@ export default function RunCanvasIR({
         <Background gap={16} size={1} />
         <Controls showInteractive={true} />
       </ReactFlow>
-    </div>
-  );
-}
-
-// StatusLegend explains the canvas node colour palette. Collapsed by
-// default to keep the run viewport uncluttered — the "?" toggle in the
-// bottom-left expands a small card showing each status with its colour
-// chip and the matching label, so first-time viewers can map "red
-// border" → "failed" without having to dig through docs.
-function StatusLegend() {
-  const [open, setOpen] = useState(false);
-  const entries: Array<{ key: UnifiedStatus; sample: string }> = [
-    { key: "running", sample: "bg-info-soft border-info" },
-    { key: "finished", sample: "bg-success-soft border-success/60" },
-    { key: "failed", sample: "bg-danger-soft border-danger/60" },
-    { key: "paused_waiting_human", sample: "bg-warning-soft border-warning/60" },
-    { key: "skipped", sample: "bg-surface-2 border-border-default" },
-    { key: "none", sample: "bg-surface-1 border-border-default" },
-  ];
-  return (
-    <div className="absolute bottom-2 left-2 z-[var(--z-canvas)]">
-      {open ? (
-        <div className="bg-surface-1/95 backdrop-blur border border-border-default rounded shadow-[var(--shadow-popover)] p-2 min-w-[180px]">
-          <div className="flex items-center justify-between gap-2 mb-1">
-            <span className="text-caption font-semibold text-fg-default">
-              Node colours
-            </span>
-            <button
-              type="button"
-              className="text-caption text-fg-subtle hover:text-fg-default"
-              onClick={() => setOpen(false)}
-            >
-              ×
-            </button>
-          </div>
-          <ul className="space-y-0.5">
-            {entries.map((e) => {
-              const meta = statusClasses(e.key);
-              return (
-                <li key={e.key} className="flex items-center gap-2 text-caption">
-                  <span
-                    aria-hidden
-                    className={`inline-block h-2.5 w-3.5 rounded border ${e.sample}`}
-                  />
-                  <span className="text-fg-default">{meta.label}</span>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="bg-surface-1/90 backdrop-blur border border-border-default rounded h-6 w-6 text-fg-subtle hover:text-fg-default text-xs"
-          title="Show node-colour legend"
-        >
-          ?
-        </button>
-      )}
     </div>
   );
 }
