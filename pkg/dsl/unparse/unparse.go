@@ -16,123 +16,165 @@ import (
 
 // Unparse renders an ast.File back to .iter DSL source text.
 func Unparse(f *ast.File) string {
-	var b strings.Builder
-	needBlank := false
+	w := &fileWriter{}
+	w.writeComments(f.Comments)
+	w.writeVars(f.Vars)
+	w.writePresets(f.Presets)
+	w.writeAttachments(f.Attachments)
+	w.writeSecrets(f.Secrets)
+	w.writeMCPServers(f.MCPServers)
+	w.writePrompts(f.Prompts)
+	w.writeSchemas(f.Schemas)
+	w.writeCursors(f.Cursors)
+	w.writeAgents(f.Agents)
+	w.writeJudges(f.Judges)
+	w.writeRouters(f.Routers)
+	w.writeHumans(f.Humans)
+	w.writeTools(f.Tools)
+	w.writeComputes(f.Computes)
+	w.writeWorkflows(f.Workflows)
+	return w.b.String()
+}
 
-	blankLine := func() {
-		if needBlank {
-			b.WriteByte('\n')
-		}
-		needBlank = true
+// fileWriter accumulates Unparse output and tracks blank-line state so
+// each top-level section is separated by a single blank line — matching
+// the legacy inline `needBlank`/`blankLine` mechanic byte-for-byte.
+type fileWriter struct {
+	b         strings.Builder
+	needBlank bool
+}
+
+// blankLine emits a separator newline before the next section, unless
+// this is the first section to write anything. Mirrors the closure that
+// used to live inside Unparse — preserve the contract exactly so
+// round-trip output stays byte-identical.
+func (w *fileWriter) blankLine() {
+	if w.needBlank {
+		w.b.WriteByte('\n')
 	}
+	w.needBlank = true
+}
 
-	// --- Comments ---
-	for _, c := range f.Comments {
-		blankLine()
-		needBlank = false // comments don't need blank line between them
-		b.WriteString("## ")
-		b.WriteString(c.Text)
-		b.WriteByte('\n')
+func (w *fileWriter) writeComments(comments []*ast.Comment) {
+	for _, c := range comments {
+		w.blankLine()
+		w.needBlank = false // comments don't need blank line between them
+		w.b.WriteString("## ")
+		w.b.WriteString(c.Text)
+		w.b.WriteByte('\n')
 	}
+}
 
-	// --- Vars ---
-	if f.Vars != nil && len(f.Vars.Fields) > 0 {
-		blankLine()
-		writeVarsBlock(&b, f.Vars, "")
+func (w *fileWriter) writeVars(vars *ast.VarsBlock) {
+	if vars == nil || len(vars.Fields) == 0 {
+		return
 	}
+	w.blankLine()
+	writeVarsBlock(&w.b, vars, "")
+}
 
-	// --- Presets ---
-	if f.Presets != nil && len(f.Presets.Entries) > 0 {
-		blankLine()
-		writePresetsBlock(&b, f.Presets, "")
+func (w *fileWriter) writePresets(presets *ast.PresetsBlock) {
+	if presets == nil || len(presets.Entries) == 0 {
+		return
 	}
+	w.blankLine()
+	writePresetsBlock(&w.b, presets, "")
+}
 
-	// --- Attachments ---
-	if f.Attachments != nil && len(f.Attachments.Fields) > 0 {
-		blankLine()
-		writeAttachmentsBlock(&b, f.Attachments, "")
+func (w *fileWriter) writeAttachments(att *ast.AttachmentsBlock) {
+	if att == nil || len(att.Fields) == 0 {
+		return
 	}
+	w.blankLine()
+	writeAttachmentsBlock(&w.b, att, "")
+}
 
-	// --- Secrets ---
-	if f.Secrets != nil && len(f.Secrets.Fields) > 0 {
-		blankLine()
-		writeSecretsBlock(&b, f.Secrets, "")
+func (w *fileWriter) writeSecrets(secrets *ast.SecretsBlock) {
+	if secrets == nil || len(secrets.Fields) == 0 {
+		return
 	}
+	w.blankLine()
+	writeSecretsBlock(&w.b, secrets, "")
+}
 
-	// --- MCP servers ---
-	for _, s := range f.MCPServers {
-		blankLine()
-		fmt.Fprintf(&b, "mcp_server %s:\n", s.Name)
+func (w *fileWriter) writeMCPServers(servers []*ast.MCPServerDecl) {
+	for _, s := range servers {
+		w.blankLine()
+		fmt.Fprintf(&w.b, "mcp_server %s:\n", s.Name)
 		if s.Transport != ast.MCPTransportUnknown {
-			writeProp(&b, "transport", s.Transport.String())
+			writeProp(&w.b, "transport", s.Transport.String())
 		}
 		if s.Command != "" {
-			writeQuotedProp(&b, "command", s.Command)
+			writeQuotedProp(&w.b, "command", s.Command)
 		}
 		if len(s.Args) > 0 {
-			fmt.Fprintf(&b, "  args: [%s]\n", quoteList(s.Args))
+			fmt.Fprintf(&w.b, "  args: [%s]\n", quoteList(s.Args))
 		}
 		if s.URL != "" {
-			writeQuotedProp(&b, "url", s.URL)
+			writeQuotedProp(&w.b, "url", s.URL)
 		}
 		if s.Auth != nil {
-			writeMCPAuthBlock(&b, s.Auth)
+			writeMCPAuthBlock(&w.b, s.Auth)
 		}
 	}
+}
 
-	// --- Prompts ---
-	for _, p := range f.Prompts {
-		blankLine()
-		fmt.Fprintf(&b, "prompt %s:\n", p.Name)
+func (w *fileWriter) writePrompts(prompts []*ast.PromptDecl) {
+	for _, p := range prompts {
+		w.blankLine()
+		fmt.Fprintf(&w.b, "prompt %s:\n", p.Name)
 		// Trim trailing newlines so a body ending in "\n" (the standard
 		// text-block shape) doesn't unparse into a trailing indented
 		// blank line that the lexer would re-read as an extra prompt
 		// line, breaking parse → unparse → re-parse round-trip stability.
 		body := strings.TrimRight(p.Body, "\n")
 		for _, line := range strings.Split(body, "\n") {
-			b.WriteString("  ")
-			b.WriteString(line)
-			b.WriteByte('\n')
+			w.b.WriteString("  ")
+			w.b.WriteString(line)
+			w.b.WriteByte('\n')
 		}
 	}
+}
 
-	// --- Schemas ---
-	for _, s := range f.Schemas {
-		blankLine()
-		fmt.Fprintf(&b, "schema %s:\n", s.Name)
+func (w *fileWriter) writeSchemas(schemas []*ast.SchemaDecl) {
+	for _, s := range schemas {
+		w.blankLine()
+		fmt.Fprintf(&w.b, "schema %s:\n", s.Name)
 		for _, field := range s.Fields {
-			b.WriteString("  ")
-			b.WriteString(field.Name)
-			b.WriteString(": ")
-			b.WriteString(field.Type.String())
+			w.b.WriteString("  ")
+			w.b.WriteString(field.Name)
+			w.b.WriteString(": ")
+			w.b.WriteString(field.Type.String())
 			if len(field.EnumValues) > 0 {
-				b.WriteString(" [enum: ")
+				w.b.WriteString(" [enum: ")
 				for i, v := range field.EnumValues {
 					if i > 0 {
-						b.WriteString(", ")
+						w.b.WriteString(", ")
 					}
-					fmt.Fprintf(&b, "%q", v)
+					fmt.Fprintf(&w.b, "%q", v)
 				}
-				b.WriteByte(']')
+				w.b.WriteByte(']')
 			}
-			b.WriteByte('\n')
+			w.b.WriteByte('\n')
 		}
 	}
+}
 
-	// --- Cursors (top-level declarations) ---
-	for _, c := range f.Cursors {
-		blankLine()
-		writeCursorDecl(&b, c)
+func (w *fileWriter) writeCursors(cursors []*ast.CursorDecl) {
+	for _, c := range cursors {
+		w.blankLine()
+		writeCursorDecl(&w.b, c)
 	}
+}
 
-	// --- Agents ---
-	for _, a := range f.Agents {
-		blankLine()
-		fmt.Fprintf(&b, "agent %s:\n", a.Name)
+func (w *fileWriter) writeAgents(agents []*ast.AgentDecl) {
+	for _, a := range agents {
+		w.blankLine()
+		fmt.Fprintf(&w.b, "agent %s:\n", a.Name)
 		if a.MCP != nil {
-			writeMCPConfigBlock(&b, a.MCP, "  ")
+			writeMCPConfigBlock(&w.b, a.MCP, "  ")
 		}
-		writeAgentFields(&b, llmFields{
+		writeAgentFields(&w.b, llmFields{
 			Model: a.Model, Backend: a.Backend, Provider: a.Provider,
 			Input: a.Input, Output: a.Output, Publish: a.Publish,
 			System: a.System, User: a.User, Session: a.Session,
@@ -143,25 +185,26 @@ func Unparse(f *ast.File) string {
 			RTK: a.RTK,
 		})
 		if a.Compaction != nil {
-			writeCompaction(&b, a.Compaction, "  ", false)
+			writeCompaction(&w.b, a.Compaction, "  ", false)
 		}
 		if a.Memory != nil {
-			writeMemory(&b, a.Memory, "  ", false)
+			writeMemory(&w.b, a.Memory, "  ", false)
 		}
-		writeSandboxBlock(&b, a.Sandbox, "  ")
+		writeSandboxBlock(&w.b, a.Sandbox, "  ")
 		if a.Cursors != nil {
-			writeCursorsBlock(&b, a.Cursors, "  ")
+			writeCursorsBlock(&w.b, a.Cursors, "  ")
 		}
 	}
+}
 
-	// --- Judges ---
-	for _, j := range f.Judges {
-		blankLine()
-		fmt.Fprintf(&b, "judge %s:\n", j.Name)
+func (w *fileWriter) writeJudges(judges []*ast.JudgeDecl) {
+	for _, j := range judges {
+		w.blankLine()
+		fmt.Fprintf(&w.b, "judge %s:\n", j.Name)
 		if j.MCP != nil {
-			writeMCPConfigBlock(&b, j.MCP, "  ")
+			writeMCPConfigBlock(&w.b, j.MCP, "  ")
 		}
-		writeAgentFields(&b, llmFields{
+		writeAgentFields(&w.b, llmFields{
 			Model: j.Model, Backend: j.Backend, Provider: j.Provider,
 			Input: j.Input, Output: j.Output, Publish: j.Publish,
 			System: j.System, User: j.User, Session: j.Session,
@@ -172,59 +215,61 @@ func Unparse(f *ast.File) string {
 			RTK: j.RTK,
 		})
 		if j.Compaction != nil {
-			writeCompaction(&b, j.Compaction, "  ", false)
+			writeCompaction(&w.b, j.Compaction, "  ", false)
 		}
 		if j.Memory != nil {
-			writeMemory(&b, j.Memory, "  ", false)
+			writeMemory(&w.b, j.Memory, "  ", false)
 		}
-		writeSandboxBlock(&b, j.Sandbox, "  ")
+		writeSandboxBlock(&w.b, j.Sandbox, "  ")
 		if j.Cursors != nil {
-			writeCursorsBlock(&b, j.Cursors, "  ")
+			writeCursorsBlock(&w.b, j.Cursors, "  ")
 		}
 	}
+}
 
-	// --- Routers ---
-	for _, r := range f.Routers {
-		blankLine()
-		fmt.Fprintf(&b, "router %s:\n", r.Name)
-		writeProp(&b, "mode", r.Mode.String())
+func (w *fileWriter) writeRouters(routers []*ast.RouterDecl) {
+	for _, r := range routers {
+		w.blankLine()
+		fmt.Fprintf(&w.b, "router %s:\n", r.Name)
+		writeProp(&w.b, "mode", r.Mode.String())
 		if r.Mode == ast.RouterLLM {
 			if r.Model != "" {
-				writeQuotedProp(&b, "model", r.Model)
+				writeQuotedProp(&w.b, "model", r.Model)
 			}
 			if r.Backend != "" {
-				writeQuotedProp(&b, "backend", r.Backend)
+				writeQuotedProp(&w.b, "backend", r.Backend)
 			}
 			if r.Provider != "" {
-				writeQuotedProp(&b, "provider", r.Provider)
+				writeQuotedProp(&w.b, "provider", r.Provider)
 			}
 			if r.System != "" {
-				writeProp(&b, "system", r.System)
+				writeProp(&w.b, "system", r.System)
 			}
 			if r.User != "" {
-				writeProp(&b, "user", r.User)
+				writeProp(&w.b, "user", r.User)
 			}
 			if r.Multi {
-				writeProp(&b, "multi", "true")
+				writeProp(&w.b, "multi", "true")
 			}
 			if r.ReasoningEffort != "" {
-				writeReasoningEffortProp(&b, r.ReasoningEffort)
+				writeReasoningEffortProp(&w.b, r.ReasoningEffort)
 			}
 		}
 	}
+}
 
-	// --- Humans ---
-	for _, h := range f.Humans {
-		blankLine()
-		fmt.Fprintf(&b, "human %s:\n", h.Name)
+func (w *fileWriter) writeHumans(humans []*ast.HumanDecl) {
+	for _, h := range humans {
+		w.blankLine()
+		fmt.Fprintf(&w.b, "human %s:\n", h.Name)
 		if h.Input != "" {
-			writeProp(&b, "input", h.Input)
+			writeProp(&w.b, "input", h.Input)
 		}
 		if h.Output != "" {
-			writeProp(&b, "output", h.Output)
+			writeProp(&w.b, "output", h.Output)
 		}
 		if h.Publish != "" {
-			writeProp(&b, "publish", h.Publish)
+			writeProp(&w.b, "publish", h.Publish)
 		}
 		// Skip when it matches the implicit Human default. Emitting it
 		// unconditionally introduced parse → unparse → re-parse noise
@@ -232,162 +277,163 @@ func Unparse(f *ast.File) string {
 		// `interaction: human` line), and mirrors the same skip-if-default
 		// guard already applied to `session:` further down.
 		if h.Interaction != ast.InteractionHuman {
-			writeProp(&b, "interaction", h.Interaction.String())
+			writeProp(&w.b, "interaction", h.Interaction.String())
 		}
 		if h.InteractionPrompt != "" {
-			writeProp(&b, "interaction_prompt", h.InteractionPrompt)
+			writeProp(&w.b, "interaction_prompt", h.InteractionPrompt)
 		}
 		if h.InteractionModel != "" {
-			writeQuotedProp(&b, "interaction_model", h.InteractionModel)
+			writeQuotedProp(&w.b, "interaction_model", h.InteractionModel)
 		}
 		if h.Instructions != "" {
-			writeProp(&b, "instructions", h.Instructions)
+			writeProp(&w.b, "instructions", h.Instructions)
 		}
 		if h.MinAnswers > 0 {
-			fmt.Fprintf(&b, "  min_answers: %d\n", h.MinAnswers)
+			fmt.Fprintf(&w.b, "  min_answers: %d\n", h.MinAnswers)
 		}
 		if h.Model != "" {
-			writeQuotedProp(&b, "model", h.Model)
+			writeQuotedProp(&w.b, "model", h.Model)
 		}
 		if h.System != "" {
-			writeProp(&b, "system", h.System)
+			writeProp(&w.b, "system", h.System)
 		}
 		if h.ReviewURL != "" {
-			writeQuotedProp(&b, "review_url", h.ReviewURL)
+			writeQuotedProp(&w.b, "review_url", h.ReviewURL)
 		}
 		if h.Posture != "" {
-			writeProp(&b, "posture", h.Posture)
+			writeProp(&w.b, "posture", h.Posture)
 		}
 		if h.MergeStrategy != "" {
-			writeProp(&b, "merge_strategy", h.MergeStrategy)
+			writeProp(&w.b, "merge_strategy", h.MergeStrategy)
 		}
 		if h.MergeInto != "" {
-			writeQuotedProp(&b, "merge_into", h.MergeInto)
+			writeQuotedProp(&w.b, "merge_into", h.MergeInto)
 		}
 		if h.MaxTurns > 0 {
-			fmt.Fprintf(&b, "  max_turns: %d\n", h.MaxTurns)
+			fmt.Fprintf(&w.b, "  max_turns: %d\n", h.MaxTurns)
 		}
 		if h.Await != ast.AwaitNone {
-			writeProp(&b, "await", h.Await.String())
+			writeProp(&w.b, "await", h.Await.String())
 		}
 	}
+}
 
-	// --- Tools ---
-	for _, t := range f.Tools {
-		blankLine()
-		fmt.Fprintf(&b, "tool %s:\n", t.Name)
+func (w *fileWriter) writeTools(tools []*ast.ToolNodeDecl) {
+	for _, t := range tools {
+		w.blankLine()
+		fmt.Fprintf(&w.b, "tool %s:\n", t.Name)
 		if t.Command != "" {
-			writeQuotedProp(&b, "command", t.Command)
+			writeQuotedProp(&w.b, "command", t.Command)
 		}
 		if t.Script != "" {
-			writeQuotedProp(&b, "script", t.Script)
+			writeQuotedProp(&w.b, "script", t.Script)
 		}
 		if t.Language != "" {
-			writeProp(&b, "language", t.Language)
+			writeProp(&w.b, "language", t.Language)
 		}
 		if t.Input != "" {
-			writeProp(&b, "input", t.Input)
+			writeProp(&w.b, "input", t.Input)
 		}
 		if t.Output != "" {
-			writeProp(&b, "output", t.Output)
+			writeProp(&w.b, "output", t.Output)
 		}
 		if t.Publish != "" {
-			writeProp(&b, "publish", t.Publish)
+			writeProp(&w.b, "publish", t.Publish)
 		}
 		if t.Await != ast.AwaitNone {
-			writeProp(&b, "await", t.Await.String())
+			writeProp(&w.b, "await", t.Await.String())
 		}
 		if t.RTK != "" {
-			writeProp(&b, "rtk", t.RTK)
+			writeProp(&w.b, "rtk", t.RTK)
 		}
-		writeSandboxBlock(&b, t.Sandbox, "  ")
+		writeSandboxBlock(&w.b, t.Sandbox, "  ")
 	}
+}
 
-	// --- Computes ---
-	for _, c := range f.Computes {
-		blankLine()
-		fmt.Fprintf(&b, "compute %s:\n", c.Name)
+func (w *fileWriter) writeComputes(computes []*ast.ComputeDecl) {
+	for _, c := range computes {
+		w.blankLine()
+		fmt.Fprintf(&w.b, "compute %s:\n", c.Name)
 		if c.Input != "" {
-			writeProp(&b, "input", c.Input)
+			writeProp(&w.b, "input", c.Input)
 		}
 		if c.Output != "" {
-			writeProp(&b, "output", c.Output)
+			writeProp(&w.b, "output", c.Output)
 		}
 		if c.Publish != "" {
-			writeProp(&b, "publish", c.Publish)
+			writeProp(&w.b, "publish", c.Publish)
 		}
 		if c.Await != ast.AwaitNone {
-			writeProp(&b, "await", c.Await.String())
+			writeProp(&w.b, "await", c.Await.String())
 		}
 		if len(c.Expr) > 0 {
-			b.WriteString("  expr:\n")
+			w.b.WriteString("  expr:\n")
 			for _, e := range c.Expr {
-				fmt.Fprintf(&b, "    %s: %q\n", e.Key, e.Expr)
+				fmt.Fprintf(&w.b, "    %s: %q\n", e.Key, e.Expr)
 			}
 		}
 	}
+}
 
-	// --- Workflows ---
-	for _, w := range f.Workflows {
-		blankLine()
-		fmt.Fprintf(&b, "workflow %s:\n", w.Name)
+func (w *fileWriter) writeWorkflows(workflows []*ast.WorkflowDecl) {
+	for _, wf := range workflows {
+		w.blankLine()
+		fmt.Fprintf(&w.b, "workflow %s:\n", wf.Name)
 
-		if w.Vars != nil && len(w.Vars.Fields) > 0 {
-			writeVarsBlock(&b, w.Vars, "  ")
+		if wf.Vars != nil && len(wf.Vars.Fields) > 0 {
+			writeVarsBlock(&w.b, wf.Vars, "  ")
 		}
-		if w.Attachments != nil && len(w.Attachments.Fields) > 0 {
-			writeAttachmentsBlock(&b, w.Attachments, "  ")
+		if wf.Attachments != nil && len(wf.Attachments.Fields) > 0 {
+			writeAttachmentsBlock(&w.b, wf.Attachments, "  ")
 		}
-		if w.MCP != nil {
-			writeMCPConfigBlock(&b, w.MCP, "  ")
-		}
-
-		if w.DefaultBackend != "" {
-			writeQuotedProp(&b, "default_backend", w.DefaultBackend)
+		if wf.MCP != nil {
+			writeMCPConfigBlock(&w.b, wf.MCP, "  ")
 		}
 
-		if w.Interaction != nil {
-			writeProp(&b, "interaction", w.Interaction.String())
+		if wf.DefaultBackend != "" {
+			writeQuotedProp(&w.b, "default_backend", wf.DefaultBackend)
 		}
 
-		if len(w.ToolPolicy) > 0 {
-			fmt.Fprintf(&b, "  tool_policy: [%s]\n", strings.Join(w.ToolPolicy, ", "))
+		if wf.Interaction != nil {
+			writeProp(&w.b, "interaction", wf.Interaction.String())
 		}
 
-		if len(w.Capabilities) > 0 {
-			fmt.Fprintf(&b, "  capabilities: [%s]\n", strings.Join(w.Capabilities, ", "))
+		if len(wf.ToolPolicy) > 0 {
+			fmt.Fprintf(&w.b, "  tool_policy: [%s]\n", strings.Join(wf.ToolPolicy, ", "))
 		}
 
-		if w.Worktree != "" {
-			writeProp(&b, "worktree", w.Worktree)
+		if len(wf.Capabilities) > 0 {
+			fmt.Fprintf(&w.b, "  capabilities: [%s]\n", strings.Join(wf.Capabilities, ", "))
 		}
 
-		if w.RTK != "" {
-			writeProp(&b, "rtk", w.RTK)
+		if wf.Worktree != "" {
+			writeProp(&w.b, "worktree", wf.Worktree)
 		}
 
-		writeSandboxBlock(&b, w.Sandbox, "  ")
-
-		if w.Entry != "" {
-			b.WriteString("\n")
-			fmt.Fprintf(&b, "  entry: %s\n", w.Entry)
+		if wf.RTK != "" {
+			writeProp(&w.b, "rtk", wf.RTK)
 		}
 
-		if w.Budget != nil {
-			writeBudget(&b, w.Budget)
+		writeSandboxBlock(&w.b, wf.Sandbox, "  ")
+
+		if wf.Entry != "" {
+			w.b.WriteString("\n")
+			fmt.Fprintf(&w.b, "  entry: %s\n", wf.Entry)
 		}
 
-		if w.Compaction != nil {
-			writeCompaction(&b, w.Compaction, "  ", true)
+		if wf.Budget != nil {
+			writeBudget(&w.b, wf.Budget)
 		}
 
-		for _, e := range w.Edges {
-			b.WriteByte('\n')
-			writeEdge(&b, e)
+		if wf.Compaction != nil {
+			writeCompaction(&w.b, wf.Compaction, "  ", true)
+		}
+
+		for _, e := range wf.Edges {
+			w.b.WriteByte('\n')
+			writeEdge(&w.b, e)
 		}
 	}
-
-	return b.String()
 }
 
 func writeProp(b *strings.Builder, key, value string) {
