@@ -14,7 +14,6 @@
 // `iterion-label-vocabulary` skill; this view is the human-facing
 // counterpart that bots read via `mcp__iterion_board__list_labels`.
 
-import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 
@@ -30,13 +29,15 @@ import { Dialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
+import { useConfirm } from "@/hooks/useConfirm";
+import { errorMessage } from "@/lib/errorHints";
 import { formatRelative } from "@/lib/format";
 
 type DialogState =
   | { kind: "none" }
   | { kind: "rename"; label: LabelUsage; nextValue: string }
-  | { kind: "merge"; label: LabelUsage; nextValue: string }
-  | { kind: "delete"; label: LabelUsage };
+  | { kind: "merge"; label: LabelUsage; nextValue: string };
 
 export default function LabelsView() {
   return (
@@ -49,18 +50,19 @@ export default function LabelsView() {
 function LabelsViewInner() {
   const [, setLocation] = useLocation();
   const [labels, setLabels] = useState<LabelUsage[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [dialog, setDialog] = useState<DialogState>({ kind: "none" });
-  const [busy, setBusy] = useState(false);
+  const action = useAsyncAction();
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const refresh = useCallback(async () => {
     try {
       const next = await listLabels();
       setLabels(next);
-      setError(null);
+      setLoadError(null);
     } catch (e) {
-      setError(errorMessage(e));
+      setLoadError(errorMessage(e));
     }
   }, []);
 
@@ -96,18 +98,33 @@ function LabelsViewInner() {
 
   const onApply = useCallback(
     async (op: () => Promise<unknown>, _successMsg: string) => {
-      setBusy(true);
-      try {
+      const ok = await action.run(async () => {
         await op();
         await refresh();
-        setDialog({ kind: "none" });
-      } catch (e) {
-        setError(errorMessage(e));
-      } finally {
-        setBusy(false);
-      }
+        return true;
+      });
+      if (ok) setDialog({ kind: "none" });
     },
-    [refresh],
+    [action, refresh],
+  );
+
+  const onDelete = useCallback(
+    async (row: LabelUsage) => {
+      const ok = await confirm({
+        title: `Delete ${row.label}?`,
+        message: `Strips ${row.label} from all ${row.count} issue${
+          row.count === 1 ? "" : "s"
+        } that carry it. The issues themselves are kept. This cannot be undone — but you can re-add the label per-issue later.`,
+        confirmLabel: "Delete",
+        confirmVariant: "danger",
+      });
+      if (!ok) return;
+      await action.run(async () => {
+        await deleteLabel(row.label);
+        await refresh();
+      });
+    },
+    [action, confirm, refresh],
   );
 
   return (
@@ -160,9 +177,9 @@ function LabelsViewInner() {
         )}
       </div>
 
-      {error && (
+      {(action.error || loadError) && (
         <div className="text-danger-fg text-micro" role="alert">
-          {error}
+          {action.error ?? loadError}
         </div>
       )}
 
@@ -255,7 +272,7 @@ function LabelsViewInner() {
                             variant="ghost"
                             size="sm"
                             className="text-danger-fg hover:text-danger"
-                            onClick={() => setDialog({ kind: "delete", label: row })}
+                            onClick={() => void onDelete(row)}
                           >
                             delete
                           </Button>
@@ -281,7 +298,7 @@ function LabelsViewInner() {
           onChange={(v) =>
             setDialog({ ...dialog, nextValue: v })
           }
-          busy={busy}
+          busy={action.busy}
           disabled={
             dialog.nextValue.trim() === "" ||
             dialog.nextValue === dialog.label.label
@@ -305,7 +322,7 @@ function LabelsViewInner() {
           inputValue={dialog.nextValue}
           onChange={(v) => setDialog({ ...dialog, nextValue: v })}
           autocomplete={labels?.map((l) => l.label) ?? []}
-          busy={busy}
+          busy={action.busy}
           disabled={
             dialog.nextValue.trim() === "" ||
             dialog.nextValue.trim() === dialog.label.label
@@ -320,23 +337,7 @@ function LabelsViewInner() {
         />
       )}
 
-      {dialog.kind === "delete" && (
-        <ConfirmDialog
-          title={`Delete ${dialog.label.label}?`}
-          description={`Strips ${dialog.label.label} from all ${dialog.label.count} issue${
-            dialog.label.count === 1 ? "" : "s"
-          } that carry it. The issues themselves are kept. This cannot be undone — but you can re-add the label per-issue later.`}
-          confirmLabel="Delete"
-          busy={busy}
-          onCancel={() => setDialog({ kind: "none" })}
-          onConfirm={() =>
-            onApply(
-              () => deleteLabel(dialog.label.label),
-              `deleted ${dialog.label.label}`,
-            )
-          }
-        />
-      )}
+      {confirmDialog}
     </div>
   );
 }
@@ -406,48 +407,6 @@ function LabelDialog({
           </datalist>
         )}
       </label>
-    </Dialog>
-  );
-}
-
-interface ConfirmDialogProps {
-  title: string;
-  description: string;
-  confirmLabel: string;
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}
-
-function ConfirmDialog({
-  title,
-  description,
-  confirmLabel,
-  busy,
-  onCancel,
-  onConfirm,
-}: ConfirmDialogProps) {
-  return (
-    <Dialog
-      open
-      onOpenChange={(o) => {
-        if (!o) onCancel();
-      }}
-      title={title}
-      description={description}
-      widthClass="max-w-md"
-      footer={
-        <ModalActions
-          onCancel={onCancel}
-          primaryLabel={confirmLabel}
-          primaryVariant="danger"
-          onPrimary={onConfirm}
-          busy={busy}
-        />
-      }
-    >
-      {/* description rendered via Dialog */}
-      <span className="sr-only">{description}</span>
     </Dialog>
   );
 }
