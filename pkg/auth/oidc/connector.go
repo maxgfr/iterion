@@ -54,6 +54,12 @@ type ExternalUser struct {
 	Subject  string
 	Email    string
 	Name     string
+	// Groups is the provider-side group/team membership of the user, used by
+	// the per-org grant logic. GitHub populates lowercased "<org>/*" (one per
+	// org the user belongs to) + "<org>/<team-slug>" (one per team). Empty for
+	// providers that don't surface groups (Google). A future OIDC group-claim
+	// mapping can populate the same field.
+	Groups []string
 }
 
 // Sentinel errors raised by connectors. The HTTP layer maps them.

@@ -25,6 +25,12 @@ type Store interface {
 	// team-gating: every ENABLED KindGitHub row whose GitHubTeamKeys intersect
 	// keys. Backed by a multikey $in index — never a cross-tenant scan.
 	FindGitHubGrantingOrgs(ctx context.Context, keys []string) ([]OrgSSOProvider, error)
+
+	// GitHubGatingActive reports whether any enabled KindGitHub row exists at
+	// all. When true, a GitHub login that matches no allow-listed team and has
+	// no prior access is refused (ErrSSORestricted); when false, GitHub login
+	// behaves as before (no team-gating in this deployment).
+	GitHubGatingActive(ctx context.Context) (bool, error)
 }
 
 // ---- in-memory store (tests / local) ----
@@ -110,6 +116,17 @@ func (m *MemoryStore) ListByTenantKind(_ context.Context, tenantID string, kind 
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
+}
+
+func (m *MemoryStore) GitHubGatingActive(_ context.Context) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, p := range m.rows {
+		if p.Kind == KindGitHub && p.Enabled {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (m *MemoryStore) FindGitHubGrantingOrgs(_ context.Context, keys []string) ([]OrgSSOProvider, error) {

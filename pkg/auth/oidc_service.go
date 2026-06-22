@@ -28,6 +28,13 @@ func (s *Service) LoginWithExternal(ctx context.Context, ext oidc.ExternalUser, 
 	}
 	now := s.now().UTC()
 
+	// GitHub team-gating context — a no-op for non-github providers or when no
+	// github allow-list is configured on this deployment.
+	gh, err := s.githubGateContext(ctx, ext)
+	if err != nil {
+		return LoginResult{}, err
+	}
+
 	link, err := s.store.GetOIDCLink(ctx, ext.Provider, ext.Subject)
 	if err == nil {
 		u, err := s.store.GetUser(ctx, link.UserID)
@@ -36,6 +43,12 @@ func (s *Service) LoginWithExternal(ctx context.Context, ext oidc.ExternalUser, 
 		}
 		if u.Status == identity.UserStatusDisabled {
 			return LoginResult{}, ErrAccountDisabled
+		}
+		// Returning user: pick up any newly-matched GitHub orgs (grant-only;
+		// memberships are never revoked here — stale-grant pruning is a
+		// tracked follow-up).
+		if _, err := s.applyGitHubGrants(ctx, u.ID, gh, ext, now); err != nil {
+			return LoginResult{}, err
 		}
 		u.LastLoginAt = &now
 		_ = s.store.UpdateUser(ctx, u)
@@ -73,6 +86,9 @@ func (s *Service) LoginWithExternal(ctx context.Context, ext oidc.ExternalUser, 
 		}); err != nil {
 			return LoginResult{}, err
 		}
+		if _, err := s.applyGitHubGrants(ctx, u.ID, gh, ext, now); err != nil {
+			return LoginResult{}, err
+		}
 		u.LastLoginAt = &now
 		_ = s.store.UpdateUser(ctx, u)
 		return s.issueLogin(ctx, u, userAgent, ip)
@@ -81,8 +97,16 @@ func (s *Service) LoginWithExternal(ctx context.Context, ext oidc.ExternalUser, 
 		return LoginResult{}, err
 	}
 
-	// New user via SSO.
-	if s.signupMode != SignupOpen {
+	// New user via SSO. When GitHub team-gating is active, a new GitHub user is
+	// admitted ONLY if their teams matched an allow-list — and then bypasses
+	// SignupMode (the org admin allow-listed them). A non-matching new GitHub
+	// user is refused BEFORE any account is created (no orphan accounts).
+	switch {
+	case gh.provider && gh.active:
+		if len(gh.rows) == 0 {
+			return LoginResult{}, ErrSSORestricted
+		}
+	case s.signupMode != SignupOpen:
 		return LoginResult{}, ErrSignupClosed
 	}
 	u = identity.User{
@@ -97,14 +121,6 @@ func (s *Service) LoginWithExternal(ctx context.Context, ext oidc.ExternalUser, 
 	if err != nil {
 		return LoginResult{}, err
 	}
-	teamID, err := s.createPersonalTeam(ctx, u)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	u.DefaultTeamID = teamID
-	if err := s.store.UpdateUser(ctx, u); err != nil {
-		return LoginResult{}, err
-	}
 	if err := s.store.UpsertOIDCLink(ctx, identity.OIDCLink{
 		Provider:       ext.Provider,
 		ProviderUserID: ext.Subject,
@@ -114,9 +130,28 @@ func (s *Service) LoginWithExternal(ctx context.Context, ext oidc.ExternalUser, 
 	}); err != nil {
 		return LoginResult{}, err
 	}
+	// GitHub-gated users join the allow-listed org(s) and land there (no
+	// personal team); every other SSO signup gets a personal team as before.
+	granted, err := s.applyGitHubGrants(ctx, u.ID, gh, ext, now)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	preferredTeam := ""
+	if len(granted) > 0 {
+		preferredTeam = granted[0]
+		u.DefaultTeamID = granted[0]
+	} else {
+		teamID, terr := s.createPersonalTeam(ctx, u)
+		if terr != nil {
+			return LoginResult{}, terr
+		}
+		u.DefaultTeamID = teamID
+	}
 	u.LastLoginAt = &now
-	_ = s.store.UpdateUser(ctx, u)
-	return s.issueLogin(ctx, u, userAgent, ip)
+	if err := s.store.UpdateUser(ctx, u); err != nil {
+		return LoginResult{}, err
+	}
+	return s.issueLoginInTeam(ctx, u, preferredTeam, userAgent, ip)
 }
 
 // LoginWithExternalForOrg completes a per-org OIDC flow (a tenant's own
@@ -231,6 +266,62 @@ func (s *Service) grantMembership(ctx context.Context, userID, teamID string, ro
 	}
 	existing.Role = role
 	return s.store.UpsertMembership(ctx, existing)
+}
+
+// githubGate captures the per-login GitHub team-gating context: whether the
+// flow is a GitHub login, whether any allow-list is configured deployment-wide
+// (active), and the enabled rows whose allow-list this user's groups matched.
+type githubGate struct {
+	provider bool
+	active   bool
+	rows     []orgsso.OrgSSOProvider
+}
+
+// githubGateContext resolves the GitHub team-gating context for a login. It is
+// a no-op (zero githubGate) for non-github providers or when the orgsso store
+// is unwired. The matched rows are looked up via the multikey reverse index —
+// a single positive-only query, never a cross-tenant scan.
+func (s *Service) githubGateContext(ctx context.Context, ext oidc.ExternalUser) (githubGate, error) {
+	var g githubGate
+	if ext.Provider != "github" || s.orgSSO == nil {
+		return g, nil
+	}
+	g.provider = true
+	active, err := s.orgSSO.GitHubGatingActive(ctx)
+	if err != nil {
+		return githubGate{}, err
+	}
+	g.active = active
+	if active && len(ext.Groups) > 0 {
+		rows, err := s.orgSSO.FindGitHubGrantingOrgs(ctx, ext.Groups)
+		if err != nil {
+			return githubGate{}, err
+		}
+		g.rows = rows
+	}
+	return g, nil
+}
+
+// applyGitHubGrants upserts a membership for userID in each matched GitHub
+// row's tenant at the row's (capped-at-member) granted role. Grant-only — it
+// never downgrades a manually-set higher role, and never revokes. Returns the
+// tenant IDs granted, for active-team selection.
+func (s *Service) applyGitHubGrants(ctx context.Context, userID string, gh githubGate, ext oidc.ExternalUser, now time.Time) ([]string, error) {
+	if !gh.provider || len(gh.rows) == 0 {
+		return nil, nil
+	}
+	var granted []string
+	for _, row := range gh.rows {
+		role, ok := row.RoleForGroups(ext.Groups)
+		if !ok {
+			continue
+		}
+		if err := s.grantMembership(ctx, userID, row.TenantID, role, now); err != nil {
+			return granted, err
+		}
+		granted = append(granted, row.TenantID)
+	}
+	return granted, nil
 }
 
 // SwitchTeamWithCookie is identical to SwitchTeam but also returns

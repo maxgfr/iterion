@@ -338,7 +338,10 @@ func mapAuthErrorStatus(err error) int {
 	case errors.Is(err, identity.ErrInvitationExpired):
 		return http.StatusGone
 	case errors.Is(err, auth.ErrNotAMember),
-		errors.Is(err, auth.ErrPasswordChangeRequired):
+		errors.Is(err, auth.ErrPasswordChangeRequired),
+		errors.Is(err, auth.ErrSSORestricted):
+		// 403: a GitHub login whose teams match no allow-listed org (and the
+		// deployment uses GitHub team-gating).
 		return http.StatusForbidden
 	}
 	return http.StatusInternalServerError

@@ -160,6 +160,33 @@ func FlattenGitHubTeamKeys(grants []GitHubTeamGrant) []string {
 	return out
 }
 
+// capGitHubRole clamps a GitHub-grant role to at most member (see Validate).
+func capGitHubRole(r identity.Role) identity.Role {
+	if !r.Valid() || r.AtLeast(identity.RoleAdmin) {
+		return identity.RoleMember
+	}
+	return r
+}
+
+// RoleForGroups returns the role this GitHub row grants a user holding the
+// given (lowercased) group keys — the first matching grant in declaration
+// order, clamped to at most member. ok is false when no grant matches.
+func (p OrgSSOProvider) RoleForGroups(groups []string) (identity.Role, bool) {
+	if p.Kind != KindGitHub {
+		return "", false
+	}
+	set := make(map[string]struct{}, len(groups))
+	for _, g := range groups {
+		set[strings.ToLower(g)] = struct{}{}
+	}
+	for _, g := range p.Grants {
+		if _, ok := set[teamKey(g.GitHubOrg, g.TeamSlug)]; ok {
+			return capGitHubRole(g.Role), true
+		}
+	}
+	return "", false
+}
+
 // Normalize canonicalises a row in place before persistence: trims the issuer
 // URL, defaults scopes/role, and (re)materialises GitHubTeamKeys.
 func (p *OrgSSOProvider) Normalize() {
@@ -235,8 +262,12 @@ func (p *OrgSSOProvider) Validate() error {
 			if !g.Role.Valid() {
 				return fmt.Errorf("%w: invalid grant role %q", ErrInvalid, g.Role)
 			}
-			if g.Role == identity.RoleOwner {
-				return ErrOwnerNotGrant
+			// GitHub grants are the H-8 abuse surface (an admin could
+			// allow-list a GitHub org they don't control); cap them at member
+			// — no admin/owner via a GitHub team allow-list. Proof-of-control +
+			// higher roles are a tracked follow-up.
+			if g.Role.AtLeast(identity.RoleAdmin) {
+				return fmt.Errorf("%w: github grant role is capped at member (got %q)", ErrInvalid, g.Role)
 			}
 		}
 	}

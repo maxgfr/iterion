@@ -190,7 +190,9 @@ func TestValidate(t *testing.T) {
 			r.DefaultRole = identity.RoleOwner
 			return r
 		}(), true},
-		{"github ok", githubRow("g", "t", GitHubTeamGrant{GitHubOrg: "acme", Role: identity.RoleMember}), false},
+		{"github member ok", githubRow("g", "t", GitHubTeamGrant{GitHubOrg: "acme", Role: identity.RoleMember}), false},
+		{"github viewer ok", githubRow("g", "t", GitHubTeamGrant{GitHubOrg: "acme", Role: identity.RoleViewer}), false},
+		{"github admin grant rejected (capped at member)", githubRow("g", "t", GitHubTeamGrant{GitHubOrg: "acme", Role: identity.RoleAdmin}), true},
 		{"github owner grant rejected", githubRow("g", "t", GitHubTeamGrant{GitHubOrg: "acme", Role: identity.RoleOwner}), true},
 		{"github no grants rejected", githubRow("g", "t"), true},
 	}
@@ -222,6 +224,63 @@ func TestSealRoundTrip(t *testing.T) {
 	// AAD binding: opening under a different provider id must fail.
 	if _, err := OpenClientSecret(sealer, "p2", sealed); err == nil {
 		t.Errorf("expected AAD mismatch to fail open")
+	}
+}
+
+func TestRoleForGroups(t *testing.T) {
+	row := OrgSSOProvider{Kind: KindGitHub, Grants: []GitHubTeamGrant{
+		{GitHubOrg: "acme", TeamSlug: "eng", Role: identity.RoleMember},
+		{GitHubOrg: "acme", TeamSlug: "ops", Role: identity.RoleViewer},
+		{GitHubOrg: "acme", TeamSlug: "*", Role: identity.RoleMember},
+	}}
+	row.Normalize()
+	// First matching grant in order wins.
+	if r, ok := row.RoleForGroups([]string{"acme/eng"}); !ok || r != identity.RoleMember {
+		t.Errorf("eng → %q,%v want member", r, ok)
+	}
+	if r, ok := row.RoleForGroups([]string{"acme/ops"}); !ok || r != identity.RoleViewer {
+		t.Errorf("ops → %q,%v want viewer", r, ok)
+	}
+	// Wildcard matches a plain org member.
+	if r, ok := row.RoleForGroups([]string{"acme/*"}); !ok || r != identity.RoleMember {
+		t.Errorf("acme/* → %q,%v want member", r, ok)
+	}
+	if _, ok := row.RoleForGroups([]string{"other/*"}); ok {
+		t.Errorf("non-matching group should not match")
+	}
+}
+
+func TestRoleForGroups_CapsAdminToMember(t *testing.T) {
+	// Even if a row somehow carries an admin grant (Validate rejects it at
+	// write time), RoleForGroups clamps to member at login — defence in depth.
+	row := OrgSSOProvider{Kind: KindGitHub, Grants: []GitHubTeamGrant{
+		{GitHubOrg: "acme", TeamSlug: "eng", Role: identity.RoleAdmin},
+	}}
+	row.Normalize()
+	if r, ok := row.RoleForGroups([]string{"acme/eng"}); !ok || r != identity.RoleMember {
+		t.Errorf("admin grant should clamp to member, got %q", r)
+	}
+}
+
+func TestGitHubGatingActive(t *testing.T) {
+	ctx := context.Background()
+	st := NewMemoryStore()
+	if active, _ := st.GitHubGatingActive(ctx); active {
+		t.Errorf("no rows → not active")
+	}
+	_ = st.Create(ctx, oidcRow("p1", "t1")) // an OIDC row doesn't count
+	if active, _ := st.GitHubGatingActive(ctx); active {
+		t.Errorf("only oidc row → not active")
+	}
+	disabled := githubRow("g1", "t1", GitHubTeamGrant{GitHubOrg: "acme", Role: identity.RoleMember})
+	disabled.Enabled = false
+	_ = st.Create(ctx, disabled)
+	if active, _ := st.GitHubGatingActive(ctx); active {
+		t.Errorf("disabled github row → not active")
+	}
+	_ = st.Create(ctx, githubRow("g2", "t2", GitHubTeamGrant{GitHubOrg: "acme", Role: identity.RoleMember}))
+	if active, _ := st.GitHubGatingActive(ctx); !active {
+		t.Errorf("an enabled github row → active")
 	}
 }
 

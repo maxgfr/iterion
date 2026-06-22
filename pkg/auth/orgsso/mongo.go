@@ -120,6 +120,14 @@ func (s *MongoStore) ListByTenantKind(ctx context.Context, tenantID string, kind
 	return s.find(ctx, bson.M{"tenant_id": tenantID, "kind": string(kind)})
 }
 
+func (s *MongoStore) GitHubGatingActive(ctx context.Context) (bool, error) {
+	n, err := s.coll.CountDocuments(ctx, bson.M{"kind": string(KindGitHub), "enabled": true}, options.Count().SetLimit(1))
+	if err != nil {
+		return false, fmt.Errorf("orgsso: count github gates: %w", err)
+	}
+	return n > 0, nil
+}
+
 func (s *MongoStore) FindGitHubGrantingOrgs(ctx context.Context, keys []string) ([]OrgSSOProvider, error) {
 	if len(keys) == 0 {
 		return nil, nil

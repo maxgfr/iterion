@@ -227,20 +227,19 @@ func (s *Server) applyOrgSSOReq(row *orgsso.OrgSSOProvider, req orgSSOProviderRe
 		}
 		// (update with empty secret keeps row.SealedSecret unchanged)
 	case orgsso.KindGitHub:
-		// Phase 2 wires the GitHub team→org grant logic + proof-of-control.
-		// Until then the CRUD refuses github rows so an admin can't create a
-		// silently-inert allow-list.
-		return errOrgSSOGitHubNotYet
+		row.Kind = orgsso.KindGitHub
+		row.AutoProvision = req.AutoProvision
+		row.Grants = req.Grants
+		// Normalize materialises GitHubTeamKeys; Validate caps grant roles at
+		// member and requires ≥1 grant. Proof-of-control (verifying the org
+		// admin controls the allow-listed GitHub org) is a tracked follow-up;
+		// until then grants are active but the UI flags them "unverified".
 	default:
 		return orgsso.ErrInvalid
 	}
 	row.Normalize()
 	return row.Validate()
 }
-
-// errOrgSSOGitHubNotYet refuses github rows in Phase 1; the grant logic +
-// proof-of-control land in Phase 2.
-var errOrgSSOGitHubNotYet = errors.New("github SSO team-gating is not enabled yet")
 
 // loadTenantOrgSSORow fetches a provider and asserts it belongs to teamID,
 // writing a 404 (and returning ok=false) otherwise. Shared by the

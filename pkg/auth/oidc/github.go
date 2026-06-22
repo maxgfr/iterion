@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -41,7 +42,20 @@ const (
 	githubTokenURL     = "https://github.com/login/oauth/access_token"
 	githubUserURL      = "https://api.github.com/user"
 	githubEmailsURL    = "https://api.github.com/user/emails"
-	githubScopes       = "read:user user:email"
+	githubOrgsURL      = "https://api.github.com/user/orgs?per_page=100"
+	githubTeamsURL     = "https://api.github.com/user/teams?per_page=100"
+	// read:org lets iterion read the user's org + team memberships so the
+	// per-org GitHub team-gating can decide access. It returns private
+	// memberships too once the user authorizes (an org whose OAuth-app-access
+	// policy blocks third-party apps will simply not appear).
+	githubScopes = "read:user user:email read:org"
+	// githubMaxGroups bounds how many org/team keys we collect from a single
+	// login — a user in a pathological number of orgs/teams cannot blow up
+	// memory. Truncation is logged-by-omission, never a login failure.
+	githubMaxGroups = 1000
+	// githubMaxPages caps Link-header pagination follow to avoid an unbounded
+	// loop on a misbehaving upstream (100/page × 50 = 5000 rows ceiling).
+	githubMaxPages = 50
 )
 
 func (g *GitHubConnector) AuthorizeURL(_ context.Context, redirectURI, state, codeVerifier string) (string, error) {
@@ -120,7 +134,111 @@ func (g *GitHubConnector) ExchangeCode(ctx context.Context, code, redirectURI, c
 		return ExternalUser{}, ErrEmailMissing
 	}
 	user.Email = email
+	groups, err := g.fetchOrgsAndTeams(ctx, tok.AccessToken)
+	if err != nil {
+		return ExternalUser{}, err
+	}
+	user.Groups = groups
 	return user, nil
+}
+
+// fetchOrgsAndTeams returns the user's GitHub org + team membership as
+// lowercased keys: "<org>/*" per org and "<org>/<team-slug>" per team — the
+// shape the per-org grant allow-list matches against. Deduped and capped.
+func (g *GitHubConnector) fetchOrgsAndTeams(ctx context.Context, accessToken string) ([]string, error) {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, 16)
+	add := func(k string) {
+		k = strings.ToLower(k)
+		if _, dup := seen[k]; dup || len(out) >= githubMaxGroups {
+			return
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
+	}
+	if err := g.pageGitHub(ctx, githubOrgsURL, accessToken, func(data []byte) error {
+		var orgs []struct {
+			Login string `json:"login"`
+		}
+		if err := json.Unmarshal(data, &orgs); err != nil {
+			return fmt.Errorf("oidc/github: decode orgs: %w", err)
+		}
+		for _, o := range orgs {
+			if o.Login != "" {
+				add(o.Login + "/*")
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := g.pageGitHub(ctx, githubTeamsURL, accessToken, func(data []byte) error {
+		var teams []struct {
+			Slug         string `json:"slug"`
+			Organization struct {
+				Login string `json:"login"`
+			} `json:"organization"`
+		}
+		if err := json.Unmarshal(data, &teams); err != nil {
+			return fmt.Errorf("oidc/github: decode teams: %w", err)
+		}
+		for _, t := range teams {
+			if t.Organization.Login != "" && t.Slug != "" {
+				add(t.Organization.Login + "/" + t.Slug)
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// pageGitHub GETs nextURL and follows the Link-header rel="next" cursor,
+// handing each page's raw JSON body to handle. Bounded by githubMaxPages.
+func (g *GitHubConnector) pageGitHub(ctx context.Context, nextURL, accessToken string, handle func([]byte) error) error {
+	for page := 0; nextURL != "" && page < githubMaxPages; page++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
+		if err != nil {
+			return fmt.Errorf("oidc/github: build paged req: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+		resp, err := g.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("oidc/github: paged fetch: %w", err)
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxOIDCBodyBytes))
+		link := resp.Header.Get("Link")
+		resp.Body.Close()
+		if resp.StatusCode/100 != 2 {
+			return fmt.Errorf("oidc/github: paged endpoint %d", resp.StatusCode)
+		}
+		if readErr != nil {
+			return fmt.Errorf("oidc/github: read paged body: %w", readErr)
+		}
+		if err := handle(body); err != nil {
+			return err
+		}
+		nextURL = nextGitHubLink(link)
+	}
+	return nil
+}
+
+// nextGitHubLink extracts the rel="next" URL from a GitHub Link header.
+func nextGitHubLink(header string) string {
+	for _, part := range strings.Split(header, ",") {
+		seg := strings.SplitN(part, ";", 2)
+		if len(seg) != 2 || !strings.Contains(seg[1], `rel="next"`) {
+			continue
+		}
+		u := strings.TrimSpace(seg[0])
+		u = strings.TrimPrefix(u, "<")
+		u = strings.TrimSuffix(u, ">")
+		return u
+	}
+	return ""
 }
 
 func (g *GitHubConnector) fetchUser(ctx context.Context, accessToken string) (ExternalUser, error) {

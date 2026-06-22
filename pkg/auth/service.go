@@ -24,6 +24,7 @@ var (
 	ErrPasswordWeak           = errors.New("auth: password too weak")
 	ErrSignupClosed           = errors.New("auth: signup is invite-only")
 	ErrLinkRequiresConsent    = errors.New("auth: SSO login matched an existing account by email — link explicitly from settings")
+	ErrSSORestricted          = errors.New("auth: SSO login is restricted to allow-listed GitHub teams")
 	ErrInvitationNotFound     = errors.New("auth: invitation not found")
 	ErrInvitationMismatch     = errors.New("auth: invitation does not match user")
 	ErrTeamNotFound           = errors.New("auth: team not found")

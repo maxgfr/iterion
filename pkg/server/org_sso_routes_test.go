@@ -106,13 +106,32 @@ func TestOrgSSO_OIDC_CRUD(t *testing.T) {
 	}
 }
 
-func TestOrgSSO_GitHubRejectedPhase1(t *testing.T) {
+func TestOrgSSO_GitHubCreate(t *testing.T) {
 	s := newOrgSSOTestServer(t)
+	ctx := superAdminCtx()
+	const base = "/api/teams/t1/sso/providers"
+
+	// A member-grant github row is accepted.
 	w := httptest.NewRecorder()
-	body := `{"kind":"github","enabled":true,"grants":[{"github_org":"acme","team_slug":"eng","role":"member"}]}`
-	s.handleCreateOrgSSOProvider(w, ssoReq(superAdminCtx(), "POST", "/api/teams/t1/sso/providers", body, "t1", ""))
+	body := `{"kind":"github","enabled":true,"auto_provision":true,"grants":[{"github_org":"acme","team_slug":"eng","role":"member"}]}`
+	s.handleCreateOrgSSOProvider(w, ssoReq(ctx, "POST", base, body, "t1", ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("github create: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// A second github row for the same org is refused (one allow-list per org).
+	w = httptest.NewRecorder()
+	s.handleCreateOrgSSOProvider(w, ssoReq(ctx, "POST", base, body, "t1", ""))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("second github row: code=%d want 409", w.Code)
+	}
+
+	// An admin-role grant is rejected (github grants are capped at member).
+	w = httptest.NewRecorder()
+	adminGrant := `{"kind":"github","enabled":true,"grants":[{"github_org":"beta","team_slug":"x","role":"admin"}]}`
+	s.handleCreateOrgSSOProvider(w, ssoReq(ctx, "POST", "/api/teams/t2/sso/providers", adminGrant, "t2", ""))
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("github should be rejected in phase 1: code=%d body=%s", w.Code, w.Body.String())
+		t.Fatalf("admin github grant: code=%d want 400 body=%s", w.Code, w.Body.String())
 	}
 }
 
