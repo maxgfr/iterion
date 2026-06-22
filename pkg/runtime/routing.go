@@ -2,9 +2,7 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"time"
 
 	"github.com/SocialGouv/iterion/pkg/backend/model"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
@@ -281,174 +279,16 @@ func (e *Engine) execLLMRouterMulti(ctx context.Context, rs *runState, routerNod
 		}
 	}
 
-	// Validate workspace safety.
-	if err := e.validateWorkspaceSafety(routerNodeID, fanEdges); err != nil {
+	plan, err := e.planFromEdges(rs, routerNodeID, fanEdges)
+	if err != nil {
 		return "", err
 	}
-
-	// Determine concurrency limit from budget.
-	maxParallel := len(fanEdges)
-	if e.workflow.Budget != nil && e.workflow.Budget.MaxParallelBranches > 0 && e.workflow.Budget.MaxParallelBranches < maxParallel {
-		maxParallel = e.workflow.Budget.MaxParallelBranches
-	}
-
-	// Pre-compute convergence point so branches know where to stop.
-	llmPreComputedConvergence := e.findConvergencePoint(routerNodeID, fanEdges)
-
-	// Decide the sibling-cancellation policy, mirroring execFanOut: under
-	// wait_all (the default at the convergence node) any branch failure
-	// dooms the run, so cancel siblings to stop them spending tokens/USD on
-	// work that will be discarded. Under best_effort, peer failures are
-	// tolerated, so cancel siblings only on budget exhaustion or parent ctx
-	// cancellation (both global).
-	cancelOnFirstFailure := true
-	if llmPreComputedConvergence != "" {
-		if convNode, ok := e.workflow.Nodes[llmPreComputedConvergence]; ok {
-			if mode := nodeAwaitMode(convNode); mode == ir.AwaitBestEffort {
-				cancelOnFirstFailure = false
-			}
-		}
-	}
-
-	// Deep-copy parent outputs and artifacts so branches can't mutate shared state.
-	parentOutputs := copyOutputs(rs.outputs)
-	parentArtifacts := copyOutputs(rs.artifacts)
-
-	// Cancellable child ctx so a budget-busting branch (or parent ctx
-	// cancellation) can stop sibling branches mid-flight. See execFanOut for
-	// the rationale (real-money cost overrun).
 	branchCtx, cancelBranches := context.WithCancel(ctx)
 	defer cancelBranches()
-
-	// Launch branches with bounded concurrency.
-	sem := make(chan struct{}, maxParallel)
-	resultsCh := make(chan *branchResult, len(fanEdges))
-
-	for _, edge := range fanEdges {
-		branchID := fmt.Sprintf("branch_%s_%s", routerNodeID, edge.To)
-
-		go func(edge *ir.Edge, branchID string) {
-			// Register the panic-recovery defer FIRST so a panic anywhere
-			// in the goroutine — including during sem acquire — is
-			// caught and reported back to the drain loop.
-			defer func() {
-				if r := recover(); r != nil {
-					resultsCh <- &branchResult{
-						branchID: branchID,
-						outputs:  make(map[string]map[string]interface{}),
-						err:      fmt.Errorf("panic in branch %s: %v", branchID, r),
-					}
-				}
-			}()
-			// Acquire a semaphore slot, but bail if the fan-out is already
-			// cancelled (budget trip, sibling failure under wait_all, or
-			// parent cancel) — otherwise a branch queued behind maxParallel
-			// would block here forever waiting for a slot held by a branch
-			// wedged in executor.Execute. Emitting a cancelled result keeps
-			// the collector's count balanced. (Mirrors execFanOut.)
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }() // release
-			case <-branchCtx.Done():
-				resultsCh <- &branchResult{
-					branchID: branchID,
-					outputs:  make(map[string]map[string]interface{}),
-					err:      e.wrapContextErr(branchCtx.Err()),
-				}
-				return
-			}
-
-			result := e.execBranch(branchCtx, rs, branchID, edge, parentOutputs, parentArtifacts, llmPreComputedConvergence)
-			// Cancel siblings on budget exhaustion (any await mode) or on any
-			// failure under wait_all — see cancelOnFirstFailure above.
-			if result != nil && result.err != nil {
-				if errors.Is(result.err, ErrBudgetExceeded) || cancelOnFirstFailure {
-					cancelBranches()
-				}
-			}
-			resultsCh <- result
-		}(edge, branchID)
-	}
-
-	// Collect all results. The collector is ctx-aware: if the parent ctx
-	// fires (run cancellation, timeout) we still drain branches that already
-	// started but won't honour cancellation immediately, bounded by a grace
-	// timer so a branch wedged in executor.Execute can't hang the engine
-	// forever. doneCh is niled after the first ctx fire so the (always-ready)
-	// closed channel doesn't busy-spin the select. (Mirrors execFanOut.)
-	results := make([]*branchResult, 0, len(fanEdges))
-	var ctxErr error
-	doneCh := ctx.Done()
-	var graceCh <-chan time.Time
-	var graceTimer *time.Timer
-	for collected := 0; collected < len(fanEdges); {
-		select {
-		case r := <-resultsCh:
-			results = append(results, r)
-			collected++
-		case <-doneCh:
-			ctxErr = ctx.Err()
-			cancelBranches()
-			doneCh = nil
-			graceTimer = time.NewTimer(branchCancelGracePeriod)
-			graceCh = graceTimer.C
-		case <-graceCh:
-			// Cancelled, and the grace window elapsed with branches still
-			// running — they're wedged in executor.Execute ignoring ctx.
-			// Stop waiting so the run can fail/checkpoint instead of hanging
-			// forever. resultsCh is buffered to len(fanEdges), so a wedged
-			// branch's eventual send never blocks.
-			if abandoned := len(fanEdges) - collected; abandoned > 0 && e.logger != nil {
-				e.logger.Warn("llm router fan_out from %s: abandoning %d branch(es) still running %s after cancellation (wedged in executor.Execute?)", routerNodeID, abandoned, branchCancelGracePeriod)
-			}
-			collected = len(fanEdges)
-		}
-	}
-	if graceTimer != nil {
-		graceTimer.Stop()
-	}
+	resultsCh := e.launchBranches(branchCtx, cancelBranches, rs, routerNodeID, plan)
+	results, ctxErr := e.collectBranches(ctx, cancelBranches, resultsCh, len(plan.edges), routerNodeID)
 	if ctxErr != nil {
 		return "", e.wrapContextErr(ctxErr)
 	}
-
-	// Determine convergence point. Prefer the one reported by successful
-	// branches; under best_effort, branches may legitimately diverge or each
-	// terminate at their own Done node — handle those exactly as execFanOut
-	// does rather than hard-erroring (which made any best_effort LLM-router
-	// workflow with terminal branches fail unconditionally at runtime).
-	convergenceNodeID := ""
-	isBestEffort := !cancelOnFirstFailure
-	for _, r := range results {
-		if r.joinNodeID == "" {
-			continue
-		}
-		if convergenceNodeID == "" {
-			convergenceNodeID = r.joinNodeID
-			continue
-		}
-		if convergenceNodeID != r.joinNodeID {
-			if isBestEffort {
-				if e.logger != nil {
-					e.logger.Warn("llm router fan_out from %s: branches converge to different nodes (%s vs %s in branch %s) — best_effort, keeping first",
-						routerNodeID, convergenceNodeID, r.joinNodeID, r.branchID)
-				}
-				continue
-			}
-			return "", fmt.Errorf("branches converge to different nodes: %s vs %s", convergenceNodeID, r.joinNodeID)
-		}
-	}
-	if convergenceNodeID == "" {
-		// All-done topology under best_effort: every selected branch ran to its
-		// own Done node without a shared convergence point and none failed.
-		// Mirror execFanOut's processConvergenceTerminal handoff.
-		if isBestEffort && allTerminatedAtDone(results) {
-			return e.processConvergenceTerminal(rs, results)
-		}
-		convergenceNodeID = llmPreComputedConvergence
-		if convergenceNodeID == "" {
-			return "", fmt.Errorf("no convergence point found after llm router fan-out from %s", routerNodeID)
-		}
-	}
-
-	return e.processConvergence(rs, convergenceNodeID, results)
+	return e.resolveConvergence(rs, routerNodeID, results, plan)
 }

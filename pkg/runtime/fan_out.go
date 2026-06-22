@@ -104,6 +104,15 @@ func (e *Engine) prepareFanOut(rs *runState, routerNodeID string) (fanOutPlan, e
 	if len(fanEdges) == 0 {
 		return fanOutPlan{}, fmt.Errorf("fan_out_all router %q has no outgoing edges", routerNodeID)
 	}
+	return e.planFromEdges(rs, routerNodeID, fanEdges)
+}
+
+// planFromEdges builds the launch plan for a set of already-resolved
+// fan-out edges: workspace-safety check, concurrency cap, pre-computed
+// convergence point, sibling-cancellation policy, and deep copies of
+// parent outputs/artifacts. Shared by prepareFanOut (fan_out_all router)
+// and execLLMRouterMulti (llm router multi-select).
+func (e *Engine) planFromEdges(rs *runState, routerNodeID string, fanEdges []*ir.Edge) (fanOutPlan, error) {
 	if err := e.validateWorkspaceSafety(routerNodeID, fanEdges); err != nil {
 		return fanOutPlan{}, err
 	}
