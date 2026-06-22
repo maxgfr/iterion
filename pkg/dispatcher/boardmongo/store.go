@@ -1,0 +1,618 @@
+// Package boardmongo is the Mongo-backed implementation of
+// native.BoardStore — the cloud counterpart of the filesystem
+// pkg/dispatcher/native.Store. It lets the shared boardops + the dispatcher
+// run against a multi-replica cloud board with the same semantics as the
+// local JSON store: same "native:"+uuid id scheme, same default board, same
+// claim/state/transition rules, same event vocabulary.
+//
+// One store instance is bound to one tenant (the interface carries no tenant
+// arg, mirroring the single-board filesystem store). The board domain types
+// live in pkg/dispatcher/native; this package reuses them (types-only) so a
+// board issue is byte-identical whether it came from the JSON store or Mongo.
+package boardmongo
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/tracker"
+	"github.com/SocialGouv/iterion/pkg/internal/mongoutil"
+)
+
+// Collection names.
+const (
+	IssuesCollection = "board_issues"
+	ConfigCollection = "board_config"
+	EventsCollection = "board_events"
+)
+
+// opTimeout bounds every Mongo call (the BoardStore interface carries no
+// context, so each op uses a fresh bounded background context).
+const opTimeout = 10 * time.Second
+
+// Store is a tenant-scoped Mongo board.
+type Store struct {
+	tenant string
+	issues *mongo.Collection
+	config *mongo.Collection
+	events *mongo.Collection
+}
+
+// New builds a tenant-scoped Mongo board store over db.
+func New(db *mongo.Database, tenantID string) *Store {
+	return &Store{
+		tenant: tenantID,
+		issues: db.Collection(IssuesCollection),
+		config: db.Collection(ConfigCollection),
+		events: db.Collection(EventsCollection),
+	}
+}
+
+// Compile-time assertion that *Store satisfies the board contract.
+var _ native.BoardStore = (*Store)(nil)
+
+// issueDoc wraps a native.Issue with a Mongo _id + tenant scope. The inner
+// issue marshals via the bson default codec and round-trips back into a
+// native.Issue unchanged.
+type issueDoc struct {
+	ID     string       `bson:"_id"`
+	Tenant string       `bson:"tenant_id"`
+	Issue  native.Issue `bson:"issue"`
+}
+
+type configDoc struct {
+	Tenant string       `bson:"_id"`
+	Board  native.Board `bson:"board"`
+}
+
+type eventDoc struct {
+	Tenant string       `bson:"tenant_id"`
+	Event  native.Event `bson:"event"`
+}
+
+func ctxWithTimeout() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), opTimeout)
+}
+
+// EnsureSchema creates the indexes the store relies on. Idempotent (index
+// conflicts on re-run are absorbed).
+func EnsureSchema(ctx context.Context, db *mongo.Database) error {
+	issues := db.Collection(IssuesCollection)
+	_, err := issues.Indexes().CreateMany(ctx, []mongo.IndexModel{
+		{Keys: bson.D{{Key: "tenant_id", Value: 1}}, Options: options.Index().SetName("tenant")},
+	})
+	if err != nil && !mongoutil.IsIndexConflict(err) {
+		return fmt.Errorf("boardmongo: ensure issues index: %w", err)
+	}
+	events := db.Collection(EventsCollection)
+	_, err = events.Indexes().CreateMany(ctx, []mongo.IndexModel{
+		{Keys: bson.D{{Key: "tenant_id", Value: 1}, {Key: "event.seq", Value: 1}}, Options: options.Index().SetName("tenant_seq")},
+	})
+	if err != nil && !mongoutil.IsIndexConflict(err) {
+		return fmt.Errorf("boardmongo: ensure events index: %w", err)
+	}
+	return nil
+}
+
+// --- board config ---
+
+// Board returns the tenant's board config, defaulting to native.DefaultBoard
+// when none is stored yet.
+func (s *Store) Board() *native.Board {
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	var doc configDoc
+	err := s.config.FindOne(ctx, bson.M{"_id": s.tenant}).Decode(&doc)
+	if err != nil {
+		return native.DefaultBoard()
+	}
+	b := doc.Board
+	return &b
+}
+
+// SetBoard persists the tenant's board config after validating it.
+func (s *Store) SetBoard(b *native.Board) error {
+	if b == nil {
+		return errors.New("boardmongo: nil board")
+	}
+	if err := b.Validate(); err != nil {
+		return err
+	}
+	b.UpdatedAt = time.Now().UTC()
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	_, err := s.config.ReplaceOne(ctx, bson.M{"_id": s.tenant}, configDoc{Tenant: s.tenant, Board: *b}, options.Replace().SetUpsert(true))
+	if err != nil {
+		return fmt.Errorf("boardmongo: set board: %w", err)
+	}
+	return s.emit(native.Event{Type: native.EvtBoardUpdated})
+}
+
+// --- issues ---
+
+func (s *Store) Create(in native.Issue) (*native.Issue, error) {
+	if in.Title == "" {
+		return nil, errors.New("issue: title required")
+	}
+	board := s.Board()
+	if in.State == "" {
+		in.State = board.States[0].Name
+	}
+	if board.StateByName(in.State) == nil {
+		return nil, fmt.Errorf("issue: unknown state %q", in.State)
+	}
+	if err := board.ValidateFieldValues(in.Fields); err != nil {
+		return nil, err
+	}
+	if in.ID == "" {
+		in.ID = "native:" + uuid.NewString()
+	} else if err := validateIssueID(in.ID); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	in.CreatedAt = now
+	in.UpdatedAt = now
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	if _, err := s.issues.InsertOne(ctx, issueDoc{ID: in.ID, Tenant: s.tenant, Issue: in}); err != nil {
+		if mongoutil.IsDuplicateKey(err) {
+			return nil, fmt.Errorf("issue: id %q already exists", in.ID)
+		}
+		return nil, fmt.Errorf("boardmongo: insert issue: %w", err)
+	}
+	if err := s.emit(native.Event{Type: native.EvtIssueCreated, IssueID: in.ID, Payload: map[string]any{"state": in.State, "title": in.Title}}); err != nil {
+		return nil, err
+	}
+	clone := in
+	return &clone, nil
+}
+
+func (s *Store) Get(id string) (*native.Issue, error) {
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	iss, err := s.get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return iss, nil
+}
+
+func (s *Store) get(ctx context.Context, id string) (*native.Issue, error) {
+	var doc issueDoc
+	err := s.issues.FindOne(ctx, bson.M{"_id": id, "tenant_id": s.tenant}).Decode(&doc)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, tracker.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("boardmongo: get issue: %w", err)
+	}
+	iss := doc.Issue
+	return &iss, nil
+}
+
+// listAll fetches every issue for the tenant (the board is small; we filter +
+// sort in Go to match native.Store's in-memory semantics exactly).
+func (s *Store) listAll(ctx context.Context) ([]native.Issue, error) {
+	cur, err := s.issues.Find(ctx, bson.M{"tenant_id": s.tenant})
+	if err != nil {
+		return nil, fmt.Errorf("boardmongo: list issues: %w", err)
+	}
+	var docs []issueDoc
+	if err := cur.All(ctx, &docs); err != nil {
+		return nil, fmt.Errorf("boardmongo: decode issues: %w", err)
+	}
+	out := make([]native.Issue, 0, len(docs))
+	for _, d := range docs {
+		out = append(out, d.Issue)
+	}
+	return out, nil
+}
+
+func (s *Store) List(filter native.ListFilter) ([]*native.Issue, error) {
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	all, err := s.listAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*native.Issue, 0, len(all))
+	for i := range all {
+		if !matchFilter(filter, all[i]) {
+			continue
+		}
+		iss := all[i]
+		out = append(out, &iss)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Priority != out[j].Priority {
+			return out[i].Priority > out[j].Priority
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+// replace persists the issue and stamps UpdatedAt.
+func (s *Store) replace(ctx context.Context, iss *native.Issue) error {
+	_, err := s.issues.ReplaceOne(ctx, bson.M{"_id": iss.ID, "tenant_id": s.tenant}, issueDoc{ID: iss.ID, Tenant: s.tenant, Issue: *iss})
+	if err != nil {
+		return fmt.Errorf("boardmongo: replace issue: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) Update(id string, p native.Patch) (*native.Issue, error) {
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	iss, err := s.get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	changed := applyPatch(iss, p, s.Board())
+	if len(changed.fields) == 0 {
+		return iss, changed.err
+	}
+	if changed.err != nil {
+		return nil, changed.err
+	}
+	iss.UpdatedAt = time.Now().UTC()
+	if err := s.replace(ctx, iss); err != nil {
+		return nil, err
+	}
+	if err := s.emit(native.Event{Type: native.EvtIssueUpdated, IssueID: iss.ID, Payload: map[string]any{"changed": changed.fields}}); err != nil {
+		return nil, err
+	}
+	return iss, nil
+}
+
+func (s *Store) SetState(id, newState string) (*native.Issue, error) {
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	iss, err := s.get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if s.Board().StateByName(newState) == nil {
+		return nil, fmt.Errorf("%w: unknown state %q", tracker.ErrTransitionRejected, newState)
+	}
+	if iss.State == newState {
+		return iss, nil
+	}
+	old := iss.State
+	iss.State = newState
+	iss.UpdatedAt = time.Now().UTC()
+	if err := s.replace(ctx, iss); err != nil {
+		return nil, err
+	}
+	if err := s.emit(native.Event{Type: native.EvtIssueState, IssueID: iss.ID, Payload: map[string]any{"from": old, "to": newState}}); err != nil {
+		return nil, err
+	}
+	return iss, nil
+}
+
+func (s *Store) Delete(id string) error {
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	res, err := s.issues.DeleteOne(ctx, bson.M{"_id": id, "tenant_id": s.tenant})
+	if err != nil {
+		return fmt.Errorf("boardmongo: delete issue: %w", err)
+	}
+	if res.DeletedCount == 0 {
+		return tracker.ErrNotFound
+	}
+	return s.emit(native.Event{Type: native.EvtIssueDeleted, IssueID: id})
+}
+
+// Claim sets the claim marker via a conditional update (CAS): the update only
+// matches when the issue is unclaimed OR already held by this marker, so two
+// replicas racing to claim cannot both win. Idempotent for the same marker.
+func (s *Store) Claim(id, marker string) error {
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	now := time.Now().UTC()
+	res, err := s.issues.UpdateOne(ctx,
+		bson.M{"_id": id, "tenant_id": s.tenant, "$or": bson.A{bson.M{"issue.claim": ""}, bson.M{"issue.claim": marker}}},
+		bson.M{"$set": bson.M{"issue.claim": marker, "issue.updatedat": now}},
+	)
+	if err != nil {
+		return fmt.Errorf("boardmongo: claim: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		// Either the issue doesn't exist, or it's held by another marker.
+		iss, gerr := s.get(ctx, id)
+		if gerr != nil {
+			return gerr
+		}
+		return fmt.Errorf("%w: held by %s", tracker.ErrClaimConflict, iss.Claim)
+	}
+	if res.ModifiedCount == 0 {
+		return nil // already held by this marker (idempotent)
+	}
+	return s.emit(native.Event{Type: native.EvtIssueClaimed, IssueID: id, Payload: map[string]any{"marker": marker}})
+}
+
+func (s *Store) Release(id, marker string) error {
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	iss, err := s.get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if iss.Claim == "" {
+		return nil
+	}
+	if iss.Claim != marker {
+		return fmt.Errorf("%w: held by %s", tracker.ErrClaimConflict, iss.Claim)
+	}
+	iss.Claim = ""
+	iss.UpdatedAt = time.Now().UTC()
+	if err := s.replace(ctx, iss); err != nil {
+		return err
+	}
+	return s.emit(native.Event{Type: native.EvtIssueReleased, IssueID: id, Payload: map[string]any{"marker": marker}})
+}
+
+func (s *Store) SetLastRun(id, runID, workdir string) error {
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	iss, err := s.get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if iss.LastRunID == runID && iss.LastWorkdir == workdir {
+		return nil
+	}
+	iss.LastRunID = runID
+	iss.LastWorkdir = workdir
+	iss.UpdatedAt = time.Now().UTC()
+	if err := s.replace(ctx, iss); err != nil {
+		return err
+	}
+	return s.emit(native.Event{Type: native.EvtIssueLastRun, IssueID: id, Payload: map[string]any{"run_id": runID, "workdir": workdir}})
+}
+
+func (s *Store) Resolve(prefix string) (string, error) {
+	want := prefix
+	if !strings.HasPrefix(prefix, "native:") {
+		want = "native:" + prefix
+	}
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	all, err := s.listAll(ctx)
+	if err != nil {
+		return "", err
+	}
+	var matches []string
+	for _, iss := range all {
+		if iss.ID == want || strings.HasPrefix(iss.ID, want) {
+			matches = append(matches, iss.ID)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", tracker.ErrNotFound
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("boardmongo: ambiguous prefix %q matches %d issues", prefix, len(matches))
+	}
+}
+
+func (s *Store) ScanEvents(visit func(*native.Event) bool) error {
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	cur, err := s.events.Find(ctx, bson.M{"tenant_id": s.tenant}, options.Find().SetSort(bson.D{{Key: "event.seq", Value: 1}}))
+	if err != nil {
+		return fmt.Errorf("boardmongo: scan events: %w", err)
+	}
+	defer cur.Close(ctx)
+	for cur.Next(ctx) {
+		var doc eventDoc
+		if err := cur.Decode(&doc); err != nil {
+			continue
+		}
+		e := doc.Event
+		if !visit(&e) {
+			break
+		}
+	}
+	return cur.Err()
+}
+
+func (s *Store) AggregateLabels() []native.LabelUsage {
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	all, err := s.listAll(ctx)
+	if err != nil {
+		return nil
+	}
+	type acc struct {
+		count int
+		last  string
+	}
+	agg := map[string]*acc{}
+	for _, iss := range all {
+		stamp := iss.UpdatedAt.UTC().Format(time.RFC3339)
+		for _, lbl := range iss.Labels {
+			if lbl == "" {
+				continue
+			}
+			if cur, ok := agg[lbl]; ok {
+				cur.count++
+				if stamp > cur.last {
+					cur.last = stamp
+				}
+			} else {
+				agg[lbl] = &acc{count: 1, last: stamp}
+			}
+		}
+	}
+	out := make([]native.LabelUsage, 0, len(agg))
+	for lbl, a := range agg {
+		out = append(out, native.LabelUsage{Label: lbl, Count: a.count, LastUsedAt: a.last})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Label < out[j].Label
+	})
+	return out
+}
+
+// --- helpers ---
+
+// emit appends an event with a monotonic per-tenant seq.
+func (s *Store) emit(evt native.Event) error {
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	seq, err := s.nextSeq(ctx)
+	if err != nil {
+		return err
+	}
+	evt.Seq = seq
+	if evt.Timestamp.IsZero() {
+		evt.Timestamp = time.Now().UTC()
+	}
+	if _, err := s.events.InsertOne(ctx, eventDoc{Tenant: s.tenant, Event: evt}); err != nil {
+		return fmt.Errorf("boardmongo: emit event: %w", err)
+	}
+	return nil
+}
+
+// nextSeq returns a monotonic per-tenant event sequence via an atomic $inc on
+// a counter doc in the config collection (id "seq:<tenant>").
+func (s *Store) nextSeq(ctx context.Context) (int64, error) {
+	var doc struct {
+		Seq int64 `bson:"seq"`
+	}
+	err := s.config.FindOneAndUpdate(ctx,
+		bson.M{"_id": "seq:" + s.tenant},
+		bson.M{"$inc": bson.M{"seq": int64(1)}},
+		options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After),
+	).Decode(&doc)
+	if err != nil {
+		return 0, fmt.Errorf("boardmongo: next seq: %w", err)
+	}
+	return doc.Seq, nil
+}
+
+func matchFilter(f native.ListFilter, iss native.Issue) bool {
+	if len(f.States) > 0 && !containsStr(f.States, iss.State) {
+		return false
+	}
+	for _, want := range f.Labels {
+		if !containsStr(iss.Labels, want) {
+			return false
+		}
+	}
+	if f.Assignee != "" && iss.Assignee != f.Assignee {
+		return false
+	}
+	if f.Claimed != nil {
+		if *f.Claimed != (iss.Claim != "") {
+			return false
+		}
+	}
+	return true
+}
+
+func containsStr(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+type patchResult struct {
+	fields []string
+	err    error
+}
+
+// applyPatch mutates iss per p, returning the changed field names. Mirrors
+// native.Store.Update field-by-field, including field-value validation.
+func applyPatch(iss *native.Issue, p native.Patch, board *native.Board) patchResult {
+	var changed []string
+	if p.Title != nil && *p.Title != iss.Title {
+		iss.Title = *p.Title
+		changed = append(changed, "title")
+	}
+	if p.Body != nil && *p.Body != iss.Body {
+		iss.Body = *p.Body
+		changed = append(changed, "body")
+	}
+	if p.Labels != nil {
+		iss.Labels = append([]string(nil), (*p.Labels)...)
+		changed = append(changed, "labels")
+	}
+	if p.Priority != nil && *p.Priority != iss.Priority {
+		iss.Priority = *p.Priority
+		changed = append(changed, "priority")
+	}
+	if p.Assignee != nil && *p.Assignee != iss.Assignee {
+		iss.Assignee = *p.Assignee
+		changed = append(changed, "assignee")
+	}
+	if p.Blockers != nil {
+		iss.Blockers = append([]string(nil), (*p.Blockers)...)
+		changed = append(changed, "blockers")
+	}
+	if len(p.Fields) > 0 {
+		merged := map[string]any{}
+		for k, v := range iss.Fields {
+			merged[k] = v
+		}
+		for k, v := range p.Fields {
+			if v == nil {
+				delete(merged, k)
+			} else {
+				merged[k] = v
+			}
+		}
+		if err := board.ValidateFieldValues(merged); err != nil {
+			return patchResult{err: err}
+		}
+		iss.Fields = merged
+		changed = append(changed, "fields")
+	}
+	if p.Bot != nil && *p.Bot != iss.Bot {
+		iss.Bot = *p.Bot
+		changed = append(changed, "bot")
+	}
+	if p.BotArgs != nil {
+		var next map[string]string
+		if len(*p.BotArgs) > 0 {
+			next = make(map[string]string, len(*p.BotArgs))
+			for k, v := range *p.BotArgs {
+				next[k] = v
+			}
+		}
+		iss.BotArgs = next
+		changed = append(changed, "bot_args")
+	}
+	return patchResult{fields: changed}
+}
+
+// validateIssueID mirrors native's id rule: "native:"+uuid.
+func validateIssueID(id string) error {
+	raw, ok := strings.CutPrefix(id, "native:")
+	if !ok || raw == "" {
+		return fmt.Errorf("boardmongo: invalid issue id %q", id)
+	}
+	if parsed, err := uuid.Parse(raw); err != nil || parsed.String() != raw {
+		return fmt.Errorf("boardmongo: invalid issue id %q", id)
+	}
+	return nil
+}
