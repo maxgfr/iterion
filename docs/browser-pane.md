@@ -84,12 +84,16 @@ Playwright MCP without the browser image fail validation.
 
 The CDP transport on the wire is:
 
-```
-editor  <─── ws://…/api/runs/{id}/browser/cdp?session=… ───>  iterion server
-                       BinaryMessage frames                          │
-                                                                     │ ── docker exec / host pipe
-                                                                     ▼
-                                                            chromium --remote-debugging-pipe
+```mermaid
+sequenceDiagram
+  participant EDITOR as editor
+  participant SRV as iterion server
+  participant CHR as chromium<br/>--remote-debugging-pipe
+
+  EDITOR->>SRV: "ws://.../api/runs/{id}/browser/cdp?session=...<br/>BinaryMessage frames"
+  SRV-->>EDITOR: "BinaryMessage frames"
+  SRV->>CHR: docker exec / host pipe
+  CHR-->>SRV: docker exec / host pipe
 ```
 
 Framing rule: **one WebSocket BinaryMessage = one CDP JSON-RPC

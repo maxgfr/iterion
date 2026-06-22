@@ -34,15 +34,24 @@ iterion run review.bot --sandbox=auto
 
 ### Lifecycle
 
-```
-runStart
-  ├─ resolveSandboxSpec       (CLI > workflow > global default)
-  ├─ Driver.Prepare           (validate spec, pull image if missing)
-  ├─ startNetworkProxy        (HTTP CONNECT proxy on 127.0.0.1)
-  ├─ Driver.Start             (docker run --detach with sleep infinity)
-  ├─ executor.SetSandbox(run) (engine pushes the handle into the executor)
-  ├─ ... node executions stream through `docker exec` ...
-  └─ defer cleanup            (Stop + Remove container, Shutdown proxy)
+```mermaid
+flowchart TD
+  START(["runStart"])
+  RESOLVE["resolveSandboxSpec<br/>(CLI &gt; workflow &gt; global default)"]
+  PREPARE["Driver.Prepare<br/>(validate spec, pull image if missing)"]
+  PROXY["startNetworkProxy<br/>(HTTP CONNECT proxy on 127.0.0.1)"]
+  DSTART["Driver.Start<br/>(docker run --detach with sleep infinity)"]
+  SETSBX["executor.SetSandbox(run)<br/>(engine pushes the handle into the executor)"]
+  EXEC["... node executions stream through docker exec ..."]
+  CLEANUP["defer cleanup<br/>(Stop + Remove container, Shutdown proxy)"]
+
+  START --> RESOLVE
+  RESOLVE --> PREPARE
+  PREPARE --> PROXY
+  PROXY --> DSTART
+  DSTART --> SETSBX
+  SETSBX --> EXEC
+  EXEC --> CLEANUP
 ```
 
 A **single container** hosts the entire run. Multiple `docker exec`

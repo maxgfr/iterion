@@ -26,24 +26,16 @@ Iterion is two things in one repository:
 A bot in iterion is an autonomous agent compiled from a `.bot` file. In
 platform mode the loop is end-to-end:
 
-```
-  external event           runner pod                  external system
-  (forge/CI/cron)           (iterion)                    (forge/Slack/…)
-        │                       │                            │
-        │  POST /api/webhooks/  │                            │
-        ├──────────────────────▶│                            │
-        │   <iwh_ token>        │ admit (auth/rate/quota)    │
-        │                       │ publish to NATS queue      │
-        │                       │ runner claims + executes   │
-        │                       │ binds org credentials      │
-        │                       │ (BYOK key + file secret)   │
-        │                       │                            │
-        │                       │      bot acts (commit,     │
-        │                       │      review, post note…)   │
-        │                       ├───────────────────────────▶│
-        │                       │                            │
-        │  202 launched + run id│                            │
-        │◀──────────────────────┤                            │
+```mermaid
+sequenceDiagram
+  participant SRC as external event<br/>(forge/CI/cron)
+  participant RUN as runner pod<br/>(iterion)
+  participant EXT as external system<br/>(forge/Slack/...)
+
+  SRC->>RUN: POST /api/webhooks/<br/>&lt;iwh_ token&gt;
+  Note over RUN: admit (auth/rate/quota)<br/>publish to NATS queue<br/>runner claims + executes<br/>binds org credentials<br/>(BYOK key + file secret)
+  RUN->>EXT: bot acts (commit,<br/>review, post note...)
+  RUN-->>SRC: 202 launched + run id
 ```
 
 The event is the **trigger**; the bot is the **autonomous worker**; the

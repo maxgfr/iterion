@@ -12,13 +12,21 @@ anchor in the same change.
 
 ## Mental model
 
-```
-              ┌─ per-webhook override  (Config.KeyOverrides[provider] → key_id)   ← highest
- a run's      ├─ requesting user's default   (ScopeUserID==me, IsDefault)
- provider  ───┤  requesting user's other key (ScopeUserID==me)
- key is       ├─ org default                 (ScopeUserID=="" , IsDefault)
- the first    ├─ org other key               (ScopeUserID=="")
- match in:    └─ deployment env fallback      (ANTHROPIC_API_KEY/… on the pod) ← lowest
+```mermaid
+flowchart TD
+  resolver["a run's provider key is<br/>the first match in:"]
+  t1["per-webhook override<br/>(Config.KeyOverrides[provider] → key_id)<br/>← highest"]
+  t2["requesting user's default<br/>(ScopeUserID==me, IsDefault)"]
+  t3["requesting user's other key<br/>(ScopeUserID==me)"]
+  t4["org default<br/>(ScopeUserID=='', IsDefault)"]
+  t5["org other key<br/>(ScopeUserID=='')"]
+  t6["deployment env fallback<br/>(ANTHROPIC_API_KEY/… on the pod)<br/>← lowest"]
+  resolver --> t1
+  t1 --> t2
+  t2 --> t3
+  t3 --> t4
+  t4 --> t5
+  t5 --> t6
 ```
 
 A run launched by a **webhook** has the synthetic owner `webhook:<id>`

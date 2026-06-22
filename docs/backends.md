@@ -41,7 +41,10 @@ a backend in this order (first non-empty wins):
 
 The empty-template path lands on step 4. The pill in the studio
 toolbar surfaces what the auto-resolver picked (and turns red when
-no credential is available).
+no credential is available). Settings → Backends lists every detected
+source and the resolved default in full:
+
+![Studio settings — detected LLM backend credentials and resolved default](images/studio/settings-backends.png)
 
 ## Default preference order
 

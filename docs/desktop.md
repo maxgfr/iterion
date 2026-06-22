@@ -4,6 +4,10 @@
 
 A native desktop build (Wails v2) wraps the visual editor in its own window with multi-project switching, OS-keychain credential storage, first-run onboarding, and Ed25519-signed auto-update. Two binaries ship side-by-side: `iterion` (CLI) and `iterion-desktop` (this app).
 
+The desktop app embeds the same studio SPA, so the interface is identical to the [web studio](visual-editor.md) — same canvas, run console, board, and dispatcher — minus the browser chrome, plus a native window, project switcher, and OS keychain:
+
+![Iterion studio interface — identical in the desktop window](images/studio/home.png)
+
 ## Install
 
 Pick the artefact that matches your OS from [the latest GitHub Release](https://github.com/SocialGouv/iterion/releases/latest) (filenames start with `iterion-desktop-`). Each tag publishes:

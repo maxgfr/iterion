@@ -13,23 +13,13 @@ discipline, but address different layers of the application.
 
 ## When to run which
 
-```
-                       ┌─────────────────────────────────────────┐
-                       │  An attacker can reach your application │
-                       └────────────────────┬────────────────────┘
-                                            │
-        ┌───────────────────────────────────┴──────────────────────────────┐
-        │                                                                  │
-        ▼                                                                  ▼
-┌────────────────────┐                                       ┌──────────────────────────┐
-│  Vulnerability in  │                                       │  Malicious code shipped  │
-│  YOUR source code  │                                       │  in your DEPENDENCIES    │
-│  (SQLi, XSS, IDOR, │                                       │  (preinstall hooks,      │
-│  hardcoded secret) │                                       │   eval on import,        │
-│                    │                                       │   typosquats, …)         │
-│   → sec-audit-     │                                       │   → sec-audit-deps        │
-│     source         │                                       │                          │
-└────────────────────┘                                       └──────────────────────────┘
+```mermaid
+flowchart TD
+  root{"An attacker can reach<br/>your application"}
+  src["Vulnerability in<br/>YOUR source code<br/>(SQLi, XSS, IDOR,<br/>hardcoded secret)<br/>→ sec-audit-source"]
+  dep["Malicious code shipped<br/>in your DEPENDENCIES<br/>(preinstall hooks,<br/>eval on import,<br/>typosquats, …)<br/>→ sec-audit-deps"]
+  root --> src
+  root --> dep
 ```
 
 Run both as part of pre-release hardening, or pick the one matching
@@ -84,10 +74,17 @@ Both bots delegate **pattern matching to deterministic tools**
 (scanners or heuristic extractors) and use the LLM only for
 **normalisation + reasoning + emission**:
 
-```
-deterministic scanners ─┐
-                         ├──► structured JSON signals ──► LLM agent ──► verdicts + kanban issues
-heuristic extractors  ──┘
+```mermaid
+flowchart LR
+  scanners["deterministic scanners"]
+  extractors["heuristic extractors"]
+  signals["structured JSON signals"]
+  llm["LLM agent"]
+  out["verdicts + kanban issues"]
+  scanners --> signals
+  extractors --> signals
+  signals --> llm
+  llm --> out
 ```
 
 Rationale:

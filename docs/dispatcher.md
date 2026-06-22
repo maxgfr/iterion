@@ -85,23 +85,22 @@ EOF
 iterion dispatch iterion.dispatcher.yaml
 ```
 
+The studio's `/dispatcher` route renders the same daemon — its config,
+the in-flight runs, and the retry queue, with pause/stop controls:
+
+![Studio dispatcher dashboard with config card and run/retry tables](images/studio/dispatcher.png)
+
 ## Mental model
 
-```
-┌──────────────────┐    ListCandidates    ┌──────────────────┐
-│                  │ ───────────────────► │                  │
-│    Tracker       │                      │    Dispatcher     │
-│  (native / GH /  │ ◄──── Claim / ────── │   (1 actor goro) │
-│    Forgejo)      │       Update /       │                  │
-│                  │       Release        │                  │
-└──────────────────┘                      └─────────┬────────┘
-                                                    │ Dispatch(spec)
-                                                    ▼
-                                          ┌──────────────────┐
-                                          │  Runner          │
-                                          │  (engine = LLM   │
-                                          │   + tools)       │
-                                          └──────────────────┘
+```mermaid
+flowchart LR
+  TRK["Tracker<br/>(native / GH /<br/>Forgejo)"]
+  DSP["Dispatcher<br/>(1 actor goro)"]
+  RUN["Runner<br/>(engine = LLM<br/>+ tools)"]
+
+  TRK -- "ListCandidates" --> DSP
+  DSP -- "Claim /<br/>Update /<br/>Release" --> TRK
+  DSP -- "Dispatch(spec)" --> RUN
 ```
 
 A single goroutine — the **actor** — owns all mutable state. Outside
@@ -114,18 +113,13 @@ parts and zero shared locks across blocking tracker I/O.
 
 Issues flow through:
 
-```
-Unclaimed ──(tick + slot available + tracker.Claim ok)──► Claimed/Running
-                                                             │
-              ┌──────────────────────────────────────────────┤
-              │                                              │
-              ▼                                              ▼
-  Runner returned nil:                          Runner returned error /
-  tracker.Release, drop                         ctx cancelled (stall, user
-  the run, free the slot                        cancel, external state
-                                                change). Schedule retry
-                                                with exponential backoff,
-                                                claim is freed.
+```mermaid
+stateDiagram-v2
+  [*] --> Unclaimed
+  Unclaimed --> ClaimedRunning : tick + slot available + tracker.Claim ok
+  ClaimedRunning --> Unclaimed : Runner returned nil — tracker.Release,<br/>drop the run, free the slot
+  ClaimedRunning --> RetryScheduled : Runner returned error / ctx cancelled<br/>(stall, user cancel, external state change)<br/>Schedule retry with exponential backoff,<br/>claim is freed
+  RetryScheduled --> Unclaimed
 ```
 
 The slot accounting is **global** (`agent.max_concurrent`) **plus

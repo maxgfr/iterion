@@ -4,18 +4,14 @@
 
 ## Compiler Pipeline
 
-```
-.iter file
-    │
-    ▼
-┌─────────┐     ┌─────────┐     ┌──────────┐
-│  PARSE  │────▶│ COMPILE │────▶│ VALIDATE │
-│ Lexer + │     │ AST→IR  │     │  Static  │
-│ Parser  │     │ Resolve │     │  Checks  │
-└─────────┘     └─────────┘     └──────────┘
-    │                │                │
-    ▼                ▼                ▼
-   AST              IR          Diagnostics
+```mermaid
+flowchart LR
+  SRC[".iter file"] --> PARSE["PARSE<br/>Lexer + Parser"]
+  PARSE --> COMPILE["COMPILE<br/>AST→IR<br/>Resolve"]
+  COMPILE --> VALIDATE["VALIDATE<br/>Static Checks"]
+  PARSE --> AST["AST"]
+  COMPILE --> IR["IR"]
+  VALIDATE --> DIAG["Diagnostics"]
 ```
 
 1. **Parse** (`pkg/dsl/parser/`) — Indent-sensitive lexer + recursive-descent parser produces an AST
@@ -24,25 +20,21 @@
 
 ## Runtime Engine
 
-```
-┌─────────────────────────────────────────────────┐
-│                 Runtime Engine                   │
-│                                                  │
-│  ┌──────┐   ┌───────┐   ┌────────┐   ┌───────┐ │
-│  │Agent │   │ Judge │   │ Router │   │Compute│ │
-│  │      │   │       │   │        │   │       │ │
-│  │ LLM  │   │ LLM   │   │fan_out │   │ expr  │ │
-│  │+tools│   │verdict│   │  cond  │   │derive │ │
-│  └──────┘   └───────┘   └────────┘   └───────┘ │
-│                                                  │
-│  ┌──────┐   ┌───────┐   ┌────────┐   ┌──────┐  │
-│  │Human │   │ Tool  │   │  Done  │   │ Fail │  │
-│  │pause/│   │ exec  │   │terminal│   │error │  │
-│  │ auto │   │       │   │        │   │      │  │
-│  └──────┘   └───────┘   └────────┘   └──────┘  │
-│                                                  │
-│  Budget Tracker │ Event Emitter │ Artifact Store │
-└─────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+  subgraph "Runtime Engine"
+    AGENT["Agent<br/>LLM + tools"]
+    JUDGE["Judge<br/>LLM verdict"]
+    ROUTER["Router<br/>fan_out cond"]
+    COMPUTE["Compute<br/>expr derive"]
+    HUMAN["Human<br/>pause / auto"]
+    TOOL["Tool<br/>exec"]
+    DONE["Done<br/>terminal"]
+    FAIL["Fail<br/>error"]
+    BUDGET["Budget Tracker"]
+    EVENT["Event Emitter"]
+    ARTIFACT["Artifact Store"]
+  end
 ```
 
 The engine walks the IR graph, executing nodes and selecting edges. Key runtime features:

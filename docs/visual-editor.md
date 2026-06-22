@@ -4,6 +4,8 @@
 
 Iterion includes a browser-based visual workflow editor built with React and XYFlow. Served by your local `iterion` binary — no installation beyond the CLI.
 
+![Iterion studio — visual workflow editor with canvas, node library, and inspector](images/studio/editor-canvas.png)
+
 ```bash
 iterion studio                     # Launch on default port (4891), opens browser
 iterion studio --port 8080         # Custom port
@@ -33,3 +35,75 @@ See [cli-reference.md `#iterion-studio`](cli-reference.md#iterion-studio) for th
 - **Run console** — Launch a workflow from the studio and watch events stream live
 
 This mode is the simplest way to design and iterate locally. If you want a packaged native window instead (no browser, OS-keychain credentials, auto-update), see the [Desktop App](desktop.md).
+
+## Screenshots
+
+> All shots use the studio's dark theme; a light theme is available from Settings → Appearance or `⌘/Ctrl+K → Cycle theme`.
+
+### Authoring
+
+**Source view** — the raw `.bot` source mirrored beside the graph, edits in either stay in sync.
+
+![Studio source view — graph and .bot source side by side](images/studio/editor-source.png)
+
+**Launch modal** — fills `vars` and attachments, picks a backend, and previews the estimated cost before the run starts.
+
+![Studio launch modal with vars form, backend selector, and cost preview](images/studio/launch.png)
+
+### Running & observing
+
+**Run console** — a live graph of the run, a streaming event log, and a header showing the commit/branch the run landed on.
+
+![Studio run console — live IR graph and streaming logs](images/studio/run-console.png)
+
+**Cost report** — per-provider and per-model cost attribution for a finished run.
+
+![Studio run report tab — cost attribution by provider and model](images/studio/run-report.png)
+
+**Runs list** — every run with status, cost, and duration, filterable and sortable.
+
+![Studio runs list with status, cost, and duration columns](images/studio/runs-list.png)
+
+**Run analytics** (`/insights`) — cost over time stacked by workflow, plus per-workflow run counts, fail rates, and P50/P95 durations.
+
+![Studio run analytics — cost-over-time chart and per-workflow stats](images/studio/insights.png)
+
+### Orchestration
+
+**Kanban board** (`/board`) — the native tracker with drag-and-drop, labels, and per-card bot assignees.
+
+![Studio kanban board with labelled issue cards](images/studio/board.png)
+
+**Dispatcher dashboard** (`/dispatcher`) — live config, in-flight runs, and the retry queue.
+
+![Studio dispatcher dashboard with config card and run tables](images/studio/dispatcher.png)
+
+**What's Next** — a conversational session that surveys the repo, proposes a roadmap, and watches the board it dispatches.
+
+![Studio What's Next session with watch panel and chat](images/studio/whats-next.png)
+
+### Workspace & configuration
+
+**Home** — the start page: a What's Next entry, the bot catalog, and recent runs.
+
+![Studio home page with bots and recent runs](images/studio/home.png)
+
+**Command palette** (`⌘/Ctrl+K`) — jump to any view, run, or action; cycle the theme.
+
+![Studio command palette with navigation and recent runs](images/studio/command-palette.png)
+
+**Bot catalog** — enable/disable bots and import new ones from a repository.
+
+![Studio bot catalog manager](images/studio/catalog.png)
+
+**Backends** (Settings → Backends) — auto-detected LLM credentials and the resolved default backend.
+
+![Studio settings — detected LLM backend credentials](images/studio/settings-backends.png)
+
+**Appearance** (Settings → Appearance) — theme (System / Light / Dark) and chat-input behaviour.
+
+![Studio settings — appearance and theme picker](images/studio/settings-appearance.png)
+
+**Marketplace** — browse, submit, and install published `.botz` bundles.
+
+![Studio bot marketplace](images/studio/marketplace.png)

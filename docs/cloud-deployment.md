@@ -38,25 +38,17 @@ exercises this path end-to-end on a kind cluster.
 
 ## Topology
 
+```mermaid
+flowchart LR
+  CLIENT["client"] -- "POST /api/runs" --> SERVER["server<br/>(cloud)"]
+  SERVER -- "publish<br/>(NATS JetStream)" --> NATS[("NATS JetStream")]
+  NATS --> RUNNER["runner<br/>(pool)"]
+  RUNNER -- "AppendEvent" --> MONGO[("Mongo")]
+  RUNNER -- "NATS-KV lease<br/>+ S3 artifacts" --> S3[("S3")]
+  MONGO -- "change-stream<br/>events" --> WSCLIENT["WS client"]
 ```
-+----------+       POST /api/runs          +----------+
-| client   | ----------------------------> | server   |
-+----------+                               | (cloud)  |
-                                           +----+-----+
-                                                | publish (NATS JetStream)
-                                                v
-+----------+   change-stream events       +----------+
-|  WS      | <--------------------------- |  Mongo   |
-|  client  |                              |          |
-+----------+                              +----+-----+
-                                                ^ AppendEvent
-                                                |
-                                           +----+-----+
-                                           | runner   |
-                                           |  (pool)  |
-                                           +----+-----+
-                                                | NATS-KV lease + S3 artifacts
-```
+
+For the fuller control-plane / data-plane view, see [cloud-architecture.md](cloud-architecture.md).
 
 - **server** publishes RunMessages onto JetStream and serves the
   studio + run console (REST + WebSocket).

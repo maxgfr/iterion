@@ -10,6 +10,17 @@ loop should not require the operator to lock themselves into a
 proprietary issue tracker. External adapters (`github`, `forgejo`) are
 optional plug-ins, not the source of truth.
 
+The studio's Board view (`/board`) is a drag-and-drop front end over
+this store — cards carry labels, priorities, and per-card bot assignees:
+
+![Studio kanban board with labelled issue cards](images/studio/board.png)
+
+A label manager (`/board/labels`) keeps the vocabulary tight — bots read
+this catalogue before emitting new issues, so renaming or merging a label
+directly constrains future runs:
+
+![Studio board label manager grouped by namespace](images/studio/board-labels.png)
+
 ## Storage layout
 
 ```

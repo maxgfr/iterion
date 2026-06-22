@@ -26,46 +26,41 @@ human-review board issues; see [crypto-handling.md](../bots/sec-audit-source/ski
 
 For one finding, the loop body is:
 
-```
-patch_author            (claude_code, opus-4-8, session: fresh, write tools)
-   │
-   ▼
-build_rung              (deterministic; go build / npm run build / tsc --noEmit)
-   │   ok=false → status=rejected (rejection_reason=build_failed)
-   ▼
-reproduce_rung          (re-run ORIGINAL scanner+matcher on patched file
-   │                    via skills/reattack-oracles.md iterion:reattack
-   │                    data block; passes when after_hits == 0)
-   │   gone=false                → rejected (reproduce_still_hits)
-   │   after_hits == -1          → uncertain (no oracle for this scanner)
-   ▼
-regress_rung            (go test ./... / npm run test); passed=false → rejected (tests_failed)
-   │
-   ▼
-reattack                (FRESH judge — claude_code, opus-4-8, session: fresh,
-   │                    readonly. Probes the vuln CLASS across the package
-   │                    via skills/reattack-oracles.md prose recipes —
-   │                    sibling sinks, alternate entry points, encoding
-   │                    bypasses. Catches wrong-layer fixes.)
-   │   held=false → rejected (reattack_found_variants)
-   ▼
-project_review_input    (compute — projects the candidate to EXACTLY
-   │                    {file, line, category, diff}; statically removes
-   │                    every scanner-derived field from the reviewer's
-   │                    input schema)
-   ▼
-reviewer_isolation      (FRESH judge, readonly, NO bash — gates prompt
-   │                    injection. Sees the 4 fields + may open the cited
-   │                    file. Emits approved + risk_flags[].)
-   │   approved=false           → rejected (reviewer_rejected)
-   │   risk_flags[] non-empty   → uncertain (regardless of approved)
-   ▼
-aggregate_verdict       (compute — verified ⇔ all five rungs clean AND
-   │                    risk_flags empty AND after_hits != -1)
-   ▼
-record_finding          (mode-aware: artifact always written; revert in
-                         propose / non-verified; commit on temp branch
-                         in apply + verified)
+```mermaid
+flowchart TD
+  patch_author["patch_author<br/>(claude_code, opus-4-8,<br/>session: fresh, write tools)"]
+  build_rung["build_rung<br/>(deterministic; go build /<br/>npm run build / tsc --noEmit)"]
+  reproduce_rung["reproduce_rung<br/>(re-run ORIGINAL scanner+matcher<br/>on patched file via<br/>skills/reattack-oracles.md<br/>iterion:reattack data block;<br/>passes when after_hits == 0)"]
+  regress_rung["regress_rung<br/>(go test ./... / npm run test)"]
+  reattack["reattack<br/>(FRESH judge — claude_code, opus-4-8,<br/>session: fresh, readonly. Probes the<br/>vuln CLASS across the package via<br/>skills/reattack-oracles.md prose<br/>recipes — sibling sinks, alternate<br/>entry points, encoding bypasses.<br/>Catches wrong-layer fixes.)"]
+  project_review_input["project_review_input<br/>(compute — projects the candidate<br/>to EXACTLY {file, line, category,<br/>diff}; statically removes every<br/>scanner-derived field from the<br/>reviewer's input schema)"]
+  reviewer_isolation["reviewer_isolation<br/>(FRESH judge, readonly, NO bash —<br/>gates prompt injection. Sees the<br/>4 fields + may open the cited file.<br/>Emits approved + risk_flags[].)"]
+  aggregate_verdict["aggregate_verdict<br/>(compute — verified ⇔ all five<br/>rungs clean AND risk_flags empty<br/>AND after_hits != -1)"]
+  record_finding["record_finding<br/>(mode-aware: artifact always written;<br/>revert in propose / non-verified;<br/>commit on temp branch in<br/>apply + verified)"]
+
+  rejected_build(["rejected<br/>(build_failed)"])
+  rejected_reproduce(["rejected<br/>(reproduce_still_hits)"])
+  uncertain_oracle(["uncertain<br/>(no oracle for this scanner)"])
+  rejected_tests(["rejected<br/>(tests_failed)"])
+  rejected_reattack(["rejected<br/>(reattack_found_variants)"])
+  rejected_reviewer(["rejected<br/>(reviewer_rejected)"])
+  uncertain_flags(["uncertain<br/>(risk_flags[] non-empty)"])
+
+  patch_author --> build_rung
+  build_rung -- "ok=false" --> rejected_build
+  build_rung --> reproduce_rung
+  reproduce_rung -- "gone=false" --> rejected_reproduce
+  reproduce_rung -- "after_hits == -1" --> uncertain_oracle
+  reproduce_rung --> regress_rung
+  regress_rung -- "passed=false" --> rejected_tests
+  regress_rung --> reattack
+  reattack -- "held=false" --> rejected_reattack
+  reattack --> project_review_input
+  project_review_input --> reviewer_isolation
+  reviewer_isolation -- "approved=false" --> rejected_reviewer
+  reviewer_isolation -- "risk_flags[] non-empty" --> uncertain_flags
+  reviewer_isolation --> aggregate_verdict
+  aggregate_verdict --> record_finding
 ```
 
 | Rung | What it proves | Failure status |
@@ -174,54 +169,49 @@ costs nothing.
 
 ## Temp-branch + human-gate + merge flow (apply_gated)
 
-```
-update_file_records
-        ▼
-   remediate_gate ─ false ──────► done
-        ▼ true
- remediation_plan ─ no findings ─► done       (zero confirmed, or all hard-stopped)
-        ▼ has_findings
- remediation_mode_gate
-        ▼ is_apply
-   prepare_branch                              ── captures current branch as original_branch
-        │                                         ── stashes any pre-existing WIP (restored later)
-        │                                         ── checks out iterion/sec-fix/<run-id>
-        ▼
-   select_finding ── pops next from to_fix using attempted[] ledger
-        │                                          (loop-cap = vars.max_fix_per_run)
-        ▼ has_more
-   patch_author → build → reproduce → regress
-        → reattack → project_review_input
-        → reviewer_isolation → aggregate_verdict
-        → record_finding ──── verified+apply  ▶ commit on temp branch
-        │                          ──── else  ▶ revert working tree
-        ▼
-   loop back to select_finding (as fix_loop(max_fix_per_run))
-        │
-        ▼ when not has_more
-   exit_router
-        ▼ not is_propose
-   apply_router
-        ▼ not is_apply_auto (= apply_gated)
-   fix_summary                                  ── counts *-verified/*-uncertain/*-rejected.diff
-        │                                          under patch_dir; writes REMEDIATION.md
-        ▼
-   approve_fixes  ★ HUMAN PAUSE — runtime suspends budget
-        │
-        │  iterion resume --run-id <id> --answer approved=true
-        │  iterion resume --run-id <id> --answer approved=false
-        ▼
-   when approved              when not approved
-   merge_fixes                abandon_fixes
-   git checkout <original>    git checkout <original>
-   git merge --no-ff <temp>   (temp branch KEPT for inspection)
-   stash pop                  stash pop
-        ▼                          ▼
-   remediation_report ◄────────────┘
-   labels each board issue + (re)writes REMEDIATION.md with the
-   merge/abandon outcome (merge SHA, commits merged, temp branch)
-        ▼
-       done
+```mermaid
+flowchart TD
+  update_file_records["update_file_records"]
+  remediate_gate{"remediate_gate"}
+  remediation_plan{"remediation_plan"}
+  remediation_mode_gate{"remediation_mode_gate"}
+  prepare_branch["prepare_branch<br/>— captures current branch as original_branch<br/>— stashes any pre-existing WIP (restored later)<br/>— checks out iterion/sec-fix/&lt;run-id&gt;"]
+  select_finding{"select_finding<br/>(pops next from to_fix using attempted[]<br/>ledger; loop-cap = vars.max_fix_per_run)"}
+  patch_loop["patch_author → build → reproduce → regress<br/>→ reattack → project_review_input<br/>→ reviewer_isolation → aggregate_verdict"]
+  record_finding{"record_finding"}
+  commit_temp["commit on temp branch"]
+  revert_wt["revert working tree"]
+  exit_router{"exit_router"}
+  apply_router{"apply_router"}
+  fix_summary["fix_summary<br/>— counts *-verified/*-uncertain/*-rejected.diff<br/>under patch_dir; writes REMEDIATION.md"]
+  approve_fixes(["approve_fixes ★ HUMAN PAUSE<br/>— runtime suspends budget<br/><br/>iterion resume --run-id &lt;id&gt; --answer approved=true<br/>iterion resume --run-id &lt;id&gt; --answer approved=false"])
+  merge_fixes["merge_fixes<br/>git checkout &lt;original&gt;<br/>git merge --no-ff &lt;temp&gt;<br/>stash pop"]
+  abandon_fixes["abandon_fixes<br/>git checkout &lt;original&gt;<br/>(temp branch KEPT for inspection)<br/>stash pop"]
+  remediation_report["remediation_report<br/>labels each board issue + (re)writes<br/>REMEDIATION.md with the merge/abandon<br/>outcome (merge SHA, commits merged,<br/>temp branch)"]
+  done_node(["done"])
+
+  update_file_records --> remediate_gate
+  remediate_gate -- "false" --> done_node
+  remediate_gate -- "true" --> remediation_plan
+  remediation_plan -- "no findings<br/>(zero confirmed, or all hard-stopped)" --> done_node
+  remediation_plan -- "has_findings" --> remediation_mode_gate
+  remediation_mode_gate -- "is_apply" --> prepare_branch
+  prepare_branch --> select_finding
+  select_finding -- "has_more" --> patch_loop
+  patch_loop --> record_finding
+  record_finding -- "verified+apply" --> commit_temp
+  record_finding -- "else" --> revert_wt
+  commit_temp --> select_finding
+  revert_wt --> select_finding
+  select_finding -- "not has_more" --> exit_router
+  exit_router -- "not is_propose" --> apply_router
+  apply_router -- "not is_apply_auto<br/>(= apply_gated)" --> fix_summary
+  fix_summary --> approve_fixes
+  approve_fixes -- "approved" --> merge_fixes
+  approve_fixes -- "not approved" --> abandon_fixes
+  merge_fixes --> remediation_report
+  abandon_fixes --> remediation_report
+  remediation_report --> done_node
 ```
 
 `apply_auto` shortcuts the `fix_summary` → `approve_fixes` pause and

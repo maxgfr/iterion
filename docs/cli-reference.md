@@ -121,7 +121,49 @@ iterion diagram workflow.bot --detailed   # Include node properties
 iterion diagram workflow.bot --full       # Include templates and loop details
 ```
 
-Paste the output into any Mermaid-compatible renderer (GitHub Markdown, [Mermaid Live Editor](https://mermaid.live), etc.).
+Paste the output into any Mermaid-compatible renderer (GitHub Markdown, [Mermaid Live Editor](https://mermaid.live), etc.). For example, `iterion diagram bots/review-pr/main.bot` renders the Revi reviewer bot — a tool pre-check fanning out to two cross-family judges, converging on an emit agent, then a compute gate before publishing:
+
+```mermaid
+flowchart TD
+    diff_precheck["🔧 diff_precheck"]
+    done(["✅ done"])
+    emit[["🤖 emit"]]
+    fail(["❌ fail"])
+    fan{"🔀 fan"}
+    pr_gate["🧮 pr_gate"]
+    publish_health["🔧 publish_health"]
+    publish_review["🤖 publish_review"]
+    reviewer_claude["⚖️ reviewer_claude"]
+    reviewer_gpt["⚖️ reviewer_gpt"]
+
+    diff_precheck -->|"NOT is_empty"| fan
+    diff_precheck -->|"is_empty"| done
+    fan --> reviewer_claude
+    fan --> reviewer_gpt
+    reviewer_claude --> emit
+    reviewer_gpt --> emit
+    emit --> pr_gate
+    pr_gate -->|"NOT has_pr"| done
+    pr_gate -->|"has_pr"| publish_review
+    publish_review --> publish_health
+    publish_health --> done
+
+    classDef agent fill:#4A90D9,stroke:#2C5F8A,color:#fff
+    classDef judge fill:#7B68EE,stroke:#5A4CB5,color:#fff
+    classDef router fill:#F5A623,stroke:#C47D0E,color:#fff
+    classDef human fill:#FF6B6B,stroke:#CC4444,color:#fff
+    classDef tool fill:#A0522D,stroke:#6E3720,color:#fff
+    classDef compute fill:#6BB7B7,stroke:#3D7A7A,color:#fff
+    classDef done fill:#2ECC71,stroke:#1A8B4C,color:#fff
+    classDef fail fill:#E74C3C,stroke:#A93226,color:#fff
+    class reviewer_claude,reviewer_gpt judge
+    class fan router
+    class diff_precheck,publish_health tool
+    class pr_gate compute
+    class fail fail
+    class done done
+    class emit,publish_review agent
+```
 
 ## `iterion bundle`
 
