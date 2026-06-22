@@ -1,6 +1,7 @@
 package orgsso
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/SocialGouv/iterion/pkg/secrets"
@@ -12,7 +13,7 @@ import (
 // silently transplanted onto another provider record or tenant.
 func SealClientSecret(sealer secrets.Sealer, providerID, clientSecret string) ([]byte, error) {
 	if sealer == nil {
-		return nil, fmt.Errorf("orgsso: nil sealer")
+		return nil, errors.New("orgsso: nil sealer")
 	}
 	return sealer.Seal([]byte(clientSecret), aad(providerID))
 }
@@ -20,7 +21,7 @@ func SealClientSecret(sealer secrets.Sealer, providerID, clientSecret string) ([
 // OpenClientSecret returns an OIDC provider's client_secret from its sealed blob.
 func OpenClientSecret(sealer secrets.Sealer, providerID string, sealed []byte) (string, error) {
 	if sealer == nil {
-		return "", fmt.Errorf("orgsso: nil sealer")
+		return "", errors.New("orgsso: nil sealer")
 	}
 	raw, err := sealer.Open(sealed, aad(providerID))
 	if err != nil {
