@@ -485,31 +485,27 @@ function CommitAndFinalizeFooter({
   const [message, setMessage] = useState<string>(() =>
     defaultConventionalMessage(run),
   );
-  const [submitting, setSubmitting] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const { busy: submitting, error: err, run: runAction } = useAsyncAction();
 
-  const onSubmit = async () => {
-    setSubmitting(true);
-    setErr(null);
-    try {
-      await commitAndFinalizeRun(runId, { commit_message: message.trim() });
-      onMergeComplete?.();
-    } catch (e) {
-      const msg = errorMessage(e);
-      // Idempotence guard: the run was finalized out-of-band (a prior
-      // commit-and-finalize, or RecoverFinalize on daemon restart) since
-      // this panel's snapshot was taken. The work is already on a branch
-      // — refresh so the panel swaps to the standard merge footer instead
-      // of stranding the operator on a stale "commit" form.
-      if (/already finalized/i.test(msg)) {
+  const onSubmit = () =>
+    runAction(async () => {
+      try {
+        await commitAndFinalizeRun(runId, { commit_message: message.trim() });
         onMergeComplete?.();
-        return;
+      } catch (e) {
+        // Idempotence guard: the run was finalized out-of-band (a prior
+        // commit-and-finalize, or RecoverFinalize on daemon restart) since
+        // this panel's snapshot was taken. The work is already on a branch
+        // — refresh so the panel swaps to the standard merge footer instead
+        // of stranding the operator on a stale "commit" form. Re-throw any
+        // other failure so useAsyncAction maps it to the inline error.
+        if (/already finalized/i.test(errorMessage(e))) {
+          onMergeComplete?.();
+          return;
+        }
+        throw e;
       }
-      setErr(msg);
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    });
 
   return (
     <div className="shrink-0 border-t border-border-default px-3 py-2 space-y-2 bg-surface-1 max-h-[60%] overflow-y-auto">

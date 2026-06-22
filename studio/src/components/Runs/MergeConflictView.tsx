@@ -1,8 +1,9 @@
-import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useState } from "react";
 
 import { Button, EmptyState, Spinner, Textarea } from "@/components/ui";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useConfirm } from "@/hooks/useConfirm";
+import { errorMessage } from "@/lib/errorHints";
 import {
   abortMergeConflict,
   finalizeMergeConflict,
@@ -38,7 +39,6 @@ export default function MergeConflictView({
   onMergeComplete,
 }: MergeConflictViewProps) {
   const [snapshot, setSnapshot] = useState<MergeConflictsResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
   // Per-file local content the operator is editing. Keys are file
   // paths; values are the working text the next "Resolve" submission
   // will send. Preserved across background refreshes so a 50-line
@@ -51,6 +51,14 @@ export default function MergeConflictView({
   );
   const [finalizeMessage, setFinalizeMessage] = useState("");
   const { confirm, dialog } = useConfirm();
+  // Shared async-action: one error string + the run() helper. Per-file
+  // and per-global busy keys (busyFile / busyGlobal) stay around because
+  // the UI needs to *discriminate* which action is in flight (e.g. show
+  // "Resolving…" on the right button), and useAsyncAction is a single
+  // bool. We wrap each call in `run(...)` so the try/catch/finally +
+  // setError sites collapse, and reset the discriminator after.
+  const sharedAction = useAsyncAction();
+  const { error, run: runAction, setError } = sharedAction;
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -70,7 +78,7 @@ export default function MergeConflictView({
     } catch (e) {
       setError(errorMessage(e));
     }
-  }, [runId, defaultMessage]);
+  }, [runId, defaultMessage, setError]);
 
   useEffect(() => {
     void refresh();
@@ -83,8 +91,7 @@ export default function MergeConflictView({
     const content = working[path];
     if (content === undefined) return;
     setBusyFile(path);
-    setError(null);
-    try {
+    await runAction(async () => {
       const next = await resolveMergeConflict(runId, { path, content });
       setSnapshot(next);
       setWorking((prev) => {
@@ -95,17 +102,13 @@ export default function MergeConflictView({
         }
         return updated;
       });
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusyFile(null);
-    }
+    });
+    setBusyFile(null);
   };
 
   const onResolveWithAgent = async () => {
     setBusyGlobal("agent");
-    setError(null);
-    try {
+    await runAction(async () => {
       const next = await resolveMergeConflictWithAgent(runId);
       setSnapshot(next);
       // Agent overwrites content; fold the new server-side text into
@@ -115,24 +118,17 @@ export default function MergeConflictView({
         for (const f of next.files) fresh[f.path] = f.content;
         return fresh;
       });
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusyGlobal(null);
-    }
+    });
+    setBusyGlobal(null);
   };
 
   const onFinalize = async () => {
     setBusyGlobal("finalize");
-    setError(null);
-    try {
+    await runAction(async () => {
       await finalizeMergeConflict(runId, { message: finalizeMessage || undefined });
       onMergeComplete?.();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusyGlobal(null);
-    }
+    });
+    setBusyGlobal(null);
   };
 
   const onAbort = async () => {
@@ -145,15 +141,11 @@ export default function MergeConflictView({
     });
     if (!ok) return;
     setBusyGlobal("abort");
-    setError(null);
-    try {
+    await runAction(async () => {
       await abortMergeConflict(runId);
       onMergeComplete?.();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusyGlobal(null);
-    }
+    });
+    setBusyGlobal(null);
   };
 
   if (snapshot === null && error === null) {
