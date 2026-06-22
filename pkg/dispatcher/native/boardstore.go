@@ -1,0 +1,37 @@
+package native
+
+// BoardStore is the storage contract the board operations (boardops), the
+// dispatcher tracker adapter, and the REST handlers operate against. The
+// filesystem-backed *Store satisfies it; a cloud build can supply a
+// Mongo-backed implementation of the SAME contract so the shared boardops and
+// dispatcher run unchanged against either backend.
+//
+// The board domain types (Issue, Patch, ListFilter, Board, Event, LabelUsage)
+// live in this package; a non-filesystem implementation imports them from
+// here. They are plain JSON/BSON-friendly structs with no filesystem
+// coupling, so this is types-only reuse, not behaviour.
+type BoardStore interface {
+	Board() *Board
+	SetBoard(b *Board) error
+
+	Create(in Issue) (*Issue, error)
+	Get(id string) (*Issue, error)
+	List(filter ListFilter) ([]*Issue, error)
+	Update(id string, p Patch) (*Issue, error)
+	SetState(id, newState string) (*Issue, error)
+	Delete(id string) error
+
+	// Claim/Release are the dispatcher's per-issue lease (marker = the
+	// dispatcher instance id). SetLastRun records the run a dispatch spawned
+	// so a cross-restart resume can find it.
+	Claim(id, marker string) error
+	Release(id, marker string) error
+	SetLastRun(id, runID, workdir string) error
+
+	Resolve(prefix string) (string, error)
+	ScanEvents(visit func(*Event) bool) error
+	AggregateLabels() []LabelUsage
+}
+
+// Compile-time assertion that the filesystem store satisfies the contract.
+var _ BoardStore = (*Store)(nil)
