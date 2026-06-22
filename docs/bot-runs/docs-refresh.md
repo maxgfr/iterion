@@ -11,6 +11,46 @@ reviewers, deterministic `streak_check` (two cross-family approvals), a
 agents can't truncate the audit set. Runs on ANY repo; iterion is the
 reference self-host case.
 
+## 2026-06-22 — docs/studio-visuals branch self-review (run 019eef81)
+
+- **Status: validated** — caught two real doc/code drifts, fixed both,
+  and respected the steering (left the just-added screenshots, Mermaid,
+  and cross-links untouched).
+- **Versions:** bot manifest v0.14.0 · iterion binary v0.14.0
+  (`36f19723f`), branch `docs/studio-visuals`.
+- **Method:** dogfood right after a large docs round (new
+  `human-in-the-loop.md`, a studio screenshot gallery, ASCII→Mermaid
+  conversions, README hero). Ran **in place** on the worktree (no
+  `worktree: auto`), host mode (claude_code/opus-4-8 + claw/gpt-5.5).
+  Scoped to the **19 docs the branch changed** via `doc_globs`, plus
+  `bundle_self_path=bots/docs-refresh`,
+  `code_scope_globs=pkg/**/*.go,cmd/**/*.go`, `diff_since=main`, and
+  `scope_notes` pinning "do not strip the intentional screenshots /
+  mermaid / links". Store = worktree `.iterion`.
+- **Result: converged in one review pass (~14 min), committed
+  `727e384c0`** ("docs(dispatcher): correct per-ticket Bot routing and
+  webhook test references", 2 files, +11/−7). `mark_issue_for_review`
+  skipped (standalone run, no `issue_id`) → no board writes;
+  `.docs-refresh-cache.json` gitignored.
+- **Value: two genuine drift fixes.** (1) `dispatcher.md` documented
+  the per-ticket `Bot` field as resolving into
+  `DispatchSpec.WorkflowPath` — a struct field that **no longer
+  exists** — and dismissed it as non-functional "future plumbing".
+  Doki verified against `loop.go`/`runner.go` and rewrote it to the
+  real behaviour (`Bot` → routing key `DispatchSpec.Assignee` →
+  `RoutingRunner` selects the per-bot `EngineRunner`). (2) `byok.md`:
+  stale test reference `TestGitLabWebhook` → `TestGitLabWebhook_HappyPath`
+  (confirmed at `pkg/server/webhooks_gitlab_test.go:47`) + linked the file.
+- **Findings / misses:** **zero over-reach** — it did not touch the
+  freshly-added `images/studio/*.png`, ```mermaid blocks, or
+  cross-links, and didn't churn the rest of the branch's prose.
+- **Engine hardening:** none — clean run.
+- **Lessons for next run:** scoping `doc_globs` to the branch's changed
+  docs + `diff_since=main` + `code_scope_globs` gave a fast, focused,
+  accurate pass (one cycle vs the 3 of the full-tree 2026-06-14 run).
+  The `Bot`→`WorkflowPath` catch is textbook docs-refresh value:
+  finding docs that name removed/renamed symbols.
+
 ## 2026-06-14 — repo-wide .iter→.bot CLI-example drift (run 019ec7ba)
 
 - **Status: validated** — fixed exactly the drift the ticket flagged; correct,

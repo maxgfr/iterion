@@ -31,6 +31,16 @@ as assignees. Out of the box you can:
    and the dispatcher picks it up at the next poll.
 3. The studio's `/dispatcher` route shows the run in flight.
 
+Once claimed, the ticket moves to `in_progress` and its run attaches to
+the card — a live status chip shows it executing right on the board:
+
+![Studio board — a dispatched ticket in progress with a live running run on the card](images/studio/board-dispatched.png)
+
+Open that run and the console records the ticket it came from (the
+**From ticket** header), closing the loop from issue to execution:
+
+![Studio run console — the From-ticket header linking a dispatched run back to its issue](images/studio/run-from-ticket.png)
+
 Built-in assignees ([source bots](../examples/)):
 
 | Persona | Assignee | Backing bot | What it does |
