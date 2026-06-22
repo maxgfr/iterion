@@ -17,51 +17,27 @@ func loadEnv(cfg *Config) error {
 		cfg.Mode = Mode(v)
 	}
 
-	if v, ok := lookup("ITERION_NATS_URL"); ok {
-		cfg.NATS.URL = v
-	}
-	if v, ok := lookup("ITERION_NATS_STREAM"); ok {
-		cfg.NATS.Stream = v
-	}
-	if v, ok := lookup("ITERION_NATS_KV_BUCKET"); ok {
-		cfg.NATS.KVBucket = v
-	}
-	if v, ok := lookup("ITERION_NATS_DLQ_STREAM"); ok {
-		cfg.NATS.DLQStream = v
-	}
+	lookupString("ITERION_NATS_URL", &cfg.NATS.URL)
+	lookupString("ITERION_NATS_STREAM", &cfg.NATS.Stream)
+	lookupString("ITERION_NATS_KV_BUCKET", &cfg.NATS.KVBucket)
+	lookupString("ITERION_NATS_DLQ_STREAM", &cfg.NATS.DLQStream)
 
-	if v, ok := lookup("ITERION_MONGO_URI"); ok {
-		cfg.Mongo.URI = v
-	}
-	if v, ok := lookup("ITERION_MONGO_DB"); ok {
-		cfg.Mongo.DB = v
-	}
+	lookupString("ITERION_MONGO_URI", &cfg.Mongo.URI)
+	lookupString("ITERION_MONGO_DB", &cfg.Mongo.DB)
 	if err := lookupInt("ITERION_MONGO_EVENTS_TTL_DAYS", &cfg.Mongo.EventsTTLDays); err != nil {
 		return err
 	}
 
-	if v, ok := lookup("ITERION_S3_ENDPOINT"); ok {
-		cfg.S3.Endpoint = v
-	}
-	if v, ok := lookup("ITERION_S3_REGION"); ok {
-		cfg.S3.Region = v
-	}
-	if v, ok := lookup("ITERION_S3_BUCKET"); ok {
-		cfg.S3.Bucket = v
-	}
-	if v, ok := lookup("ITERION_S3_ACCESS_KEY_ID"); ok {
-		cfg.S3.AccessKeyID = v
-	}
-	if v, ok := lookup("ITERION_S3_SECRET_ACCESS_KEY"); ok {
-		cfg.S3.SecretAccessKey = v
-	}
+	lookupString("ITERION_S3_ENDPOINT", &cfg.S3.Endpoint)
+	lookupString("ITERION_S3_REGION", &cfg.S3.Region)
+	lookupString("ITERION_S3_BUCKET", &cfg.S3.Bucket)
+	lookupString("ITERION_S3_ACCESS_KEY_ID", &cfg.S3.AccessKeyID)
+	lookupString("ITERION_S3_SECRET_ACCESS_KEY", &cfg.S3.SecretAccessKey)
 	if err := lookupBool("ITERION_S3_USE_PATH_STYLE", &cfg.S3.UsePathStyle); err != nil {
 		return err
 	}
 
-	if v, ok := lookup("ITERION_RUNNER_WORKDIR"); ok {
-		cfg.Runner.WorkDir = v
-	}
+	lookupString("ITERION_RUNNER_WORKDIR", &cfg.Runner.WorkDir)
 	if err := lookupInt("ITERION_RUNNER_CONCURRENCY", &cfg.Runner.Concurrency); err != nil {
 		return err
 	}
@@ -92,12 +68,8 @@ func loadEnv(cfg *Config) error {
 		cfg.Sandbox.HostState = strings.ToLower(v)
 	}
 
-	if v, ok := lookup("ITERION_JWT_SECRET"); ok {
-		cfg.Auth.JWTSecret = v
-	}
-	if v, ok := lookup("ITERION_SECRETS_KEY"); ok {
-		cfg.Auth.SecretsKey = v
-	}
+	lookupString("ITERION_JWT_SECRET", &cfg.Auth.JWTSecret)
+	lookupString("ITERION_SECRETS_KEY", &cfg.Auth.SecretsKey)
 	if err := lookupDuration("ITERION_ACCESS_TTL", &cfg.Auth.AccessTTL); err != nil {
 		return err
 	}
@@ -107,18 +79,14 @@ func loadEnv(cfg *Config) error {
 	if v, ok := lookup("ITERION_BOOTSTRAP_ADMIN_EMAIL"); ok {
 		cfg.Auth.BootstrapAdminEmail = strings.ToLower(strings.TrimSpace(v))
 	}
-	if v, ok := lookup("ITERION_BOOTSTRAP_ADMIN_PASSWORD"); ok {
-		cfg.Auth.BootstrapAdminPassword = v
-	}
+	lookupString("ITERION_BOOTSTRAP_ADMIN_PASSWORD", &cfg.Auth.BootstrapAdminPassword)
 	if v, ok := lookup("ITERION_SIGNUP_MODE"); ok {
 		cfg.Auth.SignupMode = strings.ToLower(v)
 	}
 	if v, ok := lookup("ITERION_PUBLIC_URL"); ok {
 		cfg.Auth.PublicURL = strings.TrimRight(v, "/")
 	}
-	if v, ok := lookup("ITERION_COOKIE_DOMAIN"); ok {
-		cfg.Auth.CookieDomain = v
-	}
+	lookupString("ITERION_COOKIE_DOMAIN", &cfg.Auth.CookieDomain)
 	if err := lookupBool("ITERION_COOKIE_SECURE", &cfg.Auth.CookieSecure); err != nil {
 		return err
 	}
@@ -129,22 +97,14 @@ func loadEnv(cfg *Config) error {
 	if err := lookupBool("ITERION_OIDC_GOOGLE_ENABLED", &cfg.Auth.OIDC.Google.Enabled); err != nil {
 		return err
 	}
-	if v, ok := lookup("ITERION_OIDC_GOOGLE_CLIENT_ID"); ok {
-		cfg.Auth.OIDC.Google.ClientID = v
-	}
-	if v, ok := lookup("ITERION_OIDC_GOOGLE_CLIENT_SECRET"); ok {
-		cfg.Auth.OIDC.Google.ClientSecret = v
-	}
+	lookupString("ITERION_OIDC_GOOGLE_CLIENT_ID", &cfg.Auth.OIDC.Google.ClientID)
+	lookupString("ITERION_OIDC_GOOGLE_CLIENT_SECRET", &cfg.Auth.OIDC.Google.ClientSecret)
 
 	if err := lookupBool("ITERION_OIDC_GITHUB_ENABLED", &cfg.Auth.OIDC.GitHub.Enabled); err != nil {
 		return err
 	}
-	if v, ok := lookup("ITERION_OIDC_GITHUB_CLIENT_ID"); ok {
-		cfg.Auth.OIDC.GitHub.ClientID = v
-	}
-	if v, ok := lookup("ITERION_OIDC_GITHUB_CLIENT_SECRET"); ok {
-		cfg.Auth.OIDC.GitHub.ClientSecret = v
-	}
+	lookupString("ITERION_OIDC_GITHUB_CLIENT_ID", &cfg.Auth.OIDC.GitHub.ClientID)
+	lookupString("ITERION_OIDC_GITHUB_CLIENT_SECRET", &cfg.Auth.OIDC.GitHub.ClientSecret)
 
 	if err := lookupBool("ITERION_OIDC_GENERIC_ENABLED", &cfg.Auth.OIDC.Generic.Enabled); err != nil {
 		return err
@@ -152,29 +112,17 @@ func loadEnv(cfg *Config) error {
 	if v, ok := lookup("ITERION_OIDC_GENERIC_ISSUER_URL"); ok {
 		cfg.Auth.OIDC.Generic.IssuerURL = strings.TrimRight(v, "/")
 	}
-	if v, ok := lookup("ITERION_OIDC_GENERIC_CLIENT_ID"); ok {
-		cfg.Auth.OIDC.Generic.ClientID = v
-	}
-	if v, ok := lookup("ITERION_OIDC_GENERIC_CLIENT_SECRET"); ok {
-		cfg.Auth.OIDC.Generic.ClientSecret = v
-	}
-	if v, ok := lookup("ITERION_OIDC_GENERIC_DISPLAY_NAME"); ok {
-		cfg.Auth.OIDC.Generic.DisplayName = v
-	}
+	lookupString("ITERION_OIDC_GENERIC_CLIENT_ID", &cfg.Auth.OIDC.Generic.ClientID)
+	lookupString("ITERION_OIDC_GENERIC_CLIENT_SECRET", &cfg.Auth.OIDC.Generic.ClientSecret)
+	lookupString("ITERION_OIDC_GENERIC_DISPLAY_NAME", &cfg.Auth.OIDC.Generic.DisplayName)
 	if v, ok := lookup("ITERION_OIDC_GENERIC_SCOPES"); ok {
 		cfg.Auth.OIDC.Generic.Scopes = splitCSV(v)
 	}
 
-	if v, ok := lookup("ITERION_OAUTH_FORFAIT_ANTHROPIC_CLIENT_ID"); ok {
-		cfg.Auth.OAuthForfait.AnthropicClientID = v
-	}
-	if v, ok := lookup("ITERION_OAUTH_FORFAIT_CODEX_CLIENT_ID"); ok {
-		cfg.Auth.OAuthForfait.CodexClientID = v
-	}
+	lookupString("ITERION_OAUTH_FORFAIT_ANTHROPIC_CLIENT_ID", &cfg.Auth.OAuthForfait.AnthropicClientID)
+	lookupString("ITERION_OAUTH_FORFAIT_CODEX_CLIENT_ID", &cfg.Auth.OAuthForfait.CodexClientID)
 
-	if v, ok := lookup("ITERION_ALERTS_WEBHOOK_URL"); ok {
-		cfg.Alerts.Webhook.URL = v
-	}
+	lookupString("ITERION_ALERTS_WEBHOOK_URL", &cfg.Alerts.Webhook.URL)
 	if err := lookupBool("ITERION_ALERTS_DESKTOP_ENABLED", &cfg.Alerts.Desktop.Enabled); err != nil {
 		return err
 	}
@@ -232,6 +180,16 @@ func lookupBool(key string, dst *bool) error {
 	}
 	*dst = b
 	return nil
+}
+
+// lookupString overlays the env var named by key onto *dst when set
+// (and non-empty, per lookup's contract). Unlike lookupInt/Bool/Duration
+// there is no parser to fail, so this returns no error — callers in
+// loadEnv invoke it for its side effect only.
+func lookupString(key string, dst *string) {
+	if v, ok := lookup(key); ok {
+		*dst = v
+	}
 }
 
 // splitCSV trims and splits a comma-separated env var value, dropping
