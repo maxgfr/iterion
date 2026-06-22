@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/SocialGouv/iterion/pkg/auth/orgsso"
 	"github.com/SocialGouv/iterion/pkg/identity"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/mail"
@@ -79,6 +80,10 @@ type Service struct {
 	// Operators only enroll providers here when they fully trust the
 	// IdP's email verification (e.g. an in-house SSO they control).
 	trustedAutoLinkProviders map[string]struct{}
+	// orgSSO holds per-tenant SSO provider rows. nil disables every per-org
+	// branch (LoginWithExternalForOrg → ErrUnknownProvider) and the GitHub
+	// team-grant reverse lookup in LoginWithExternal becomes a no-op.
+	orgSSO orgsso.Store
 	// logger, when non-nil, receives audit-grade events like
 	// "stored hash unparseable for user X" that we don't want to
 	// silently swallow into a generic ErrInvalidCredentials response.
@@ -106,7 +111,10 @@ type Config struct {
 	// ErrLinkRequiresConsent so the UI can prompt the user to link
 	// manually from their settings.
 	TrustedAutoLinkProviders []string
-	Logger                   *iterlog.Logger
+	// OrgSSO is the per-tenant SSO provider store (per-org Keycloak rows +
+	// GitHub team-gating). Optional; nil disables per-org SSO.
+	OrgSSO orgsso.Store
+	Logger *iterlog.Logger
 	// Resets + Mailer + PublicURL enable the password-reset flow and
 	// invitation emails (all optional — see Service fields).
 	Resets    PasswordResetStore
@@ -150,6 +158,7 @@ func NewService(cfg Config) (*Service, error) {
 		refreshTTL:               cfg.RefreshTTL,
 		now:                      time.Now,
 		trustedAutoLinkProviders: trusted,
+		orgSSO:                   cfg.OrgSSO,
 		logger:                   cfg.Logger,
 		resets:                   cfg.Resets,
 		mailer:                   cfg.Mailer,
@@ -308,11 +317,28 @@ func (s *Service) ChangePasswordPending(ctx context.Context, email, currentPassw
 // and AcceptInvitation. It picks the active team, mints tokens, and
 // records the refresh session.
 func (s *Service) issueLogin(ctx context.Context, u identity.User, userAgent, ip string) (LoginResult, error) {
+	return s.issueLoginInTeam(ctx, u, "", userAgent, ip)
+}
+
+// issueLoginInTeam is issueLogin with a preferred active team: when
+// preferredTeamID is one of the user's memberships, the JWT is stamped with it
+// (and its role) instead of the DefaultTeamID/first-membership pick. Used by
+// per-org SSO so a user who logs in via an org's own Keycloak lands in that
+// org rather than their stored default.
+func (s *Service) issueLoginInTeam(ctx context.Context, u identity.User, preferredTeamID, userAgent, ip string) (LoginResult, error) {
 	memberships, err := s.store.ListMembershipsByUser(ctx, u.ID)
 	if err != nil {
 		return LoginResult{}, err
 	}
 	teamID, role := s.pickActiveTeam(u, memberships)
+	if preferredTeamID != "" {
+		for _, m := range memberships {
+			if m.TeamID == preferredTeamID {
+				teamID, role = m.TeamID, m.Role
+				break
+			}
+		}
+	}
 	id := Identity{
 		UserID:       u.ID,
 		Email:        u.Email,

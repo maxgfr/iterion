@@ -85,6 +85,16 @@ type PendingAuth struct {
 	// Empty string for non-browser callers (CLI / SDK) where the
 	// transport guarantees agent binding by other means.
 	AgentBinding string
+
+	// TenantID + OrgProviderID are set when the flow was initiated against a
+	// per-org provider (a tenant's own Keycloak). The callback resolves the
+	// tenant's policy (membership grant, default role, auto-link) from these,
+	// read SERVER-SIDE via the state lookup — never from the URL or a cookie —
+	// so a per-org indirection cannot enable provider/tenant confusion (start
+	// org A's Keycloak, complete the callback resolved as org B). Empty for
+	// global providers (github / google / the deployment "sso").
+	TenantID      string
+	OrgProviderID string
 }
 
 // StateStore is the persistence interface for PendingAuth records.
