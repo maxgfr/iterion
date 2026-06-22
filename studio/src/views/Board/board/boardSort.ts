@@ -13,6 +13,12 @@ export function isDispatchable(state: string): boolean {
 // dispatch starts a paid run.
 export const BULK_DISPATCH_CONFIRM_THRESHOLD = 3;
 
+// At/above this many, bulk priority / assignee patches ask for
+// confirmation first. Unlike a move (reversible via the Undo toast) or a
+// label toggle (idempotent — click again), a mass priority/assignee
+// change has no one-click undo.
+export const BULK_PATCH_CONFIRM_THRESHOLD = 5;
+
 // sortComparator returns the per-column ordering for a sort mode. Priority
 // is descending (higher number first, the board's long-standing default);
 // date modes are newest-first; title is alphabetical.

@@ -453,12 +453,14 @@ export default function BoardView() {
           initial={null}
           onSubmit={onCreate}
           onClose={() => setCreating(false)}
+          allAssignees={allAssignees}
         />
       )}
       {editing && (
         <IssueModal
           board={board}
           initial={editing}
+          allAssignees={allAssignees}
           onSubmit={onSave}
           onClose={() => setEditing(null)}
           onDelete={() => void onDelete(editing.id)}

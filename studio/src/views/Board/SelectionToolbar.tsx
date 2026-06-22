@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import { Tooltip } from "@/components/ui";
 import type { NativeBoard, NativeIssue } from "@/api/native";
 
 import { PRIORITY_PRESETS } from "./boardShared";
@@ -44,19 +45,22 @@ export function SelectionToolbar({
       <span>
         <strong>{count}</strong> selected
       </span>
-      <Button
-        variant="success"
-        size="sm"
-        onClick={onDispatch}
-        disabled={!allSelectedDispatchable}
-        title={
+      <Tooltip
+        content={
           allSelectedDispatchable
             ? "Move all selected into the dispatch lane"
             : "All selected cards must be in Inbox or Backlog"
         }
       >
-        ▶ Let's go
-      </Button>
+        <Button
+          variant="success"
+          size="sm"
+          onClick={onDispatch}
+          disabled={!allSelectedDispatchable}
+        >
+          ▶ Let's go
+        </Button>
+      </Tooltip>
 
       <div className="w-auto">
         <Select
@@ -64,7 +68,6 @@ export function SelectionToolbar({
           onChange={(e) => {
             if (e.target.value) onMove(e.target.value);
           }}
-          title="Move all selected to a column"
           aria-label="Bulk move to column"
         >
           <option value="">Move to…</option>
@@ -82,7 +85,6 @@ export function SelectionToolbar({
           onChange={(e) => {
             if (e.target.value !== "") onPriority(Number(e.target.value));
           }}
-          title="Set priority on all selected"
           aria-label="Bulk set priority"
         >
           <option value="">Priority…</option>
@@ -102,7 +104,6 @@ export function SelectionToolbar({
             if (v === "") return;
             onAssignee(v === "__clear__" ? "" : v);
           }}
-          title="Assign all selected"
           aria-label="Bulk set assignee"
         >
           <option value="">Assignee…</option>

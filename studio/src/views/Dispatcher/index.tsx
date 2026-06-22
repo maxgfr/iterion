@@ -8,6 +8,7 @@ import DispatcherControlBar from "@/components/shared/DispatcherControlBar";
 import { Button } from "@/components/ui/Button";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Tooltip } from "@/components/ui";
 import { useConfirm } from "@/hooks/useConfirm";
 import {
   cancelIssue,
@@ -190,24 +191,26 @@ export default function DispatcherView() {
     left: <span className="text-xs font-medium text-fg-default">Dispatcher</span>,
     right: (
       <>
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled={!actions.canPollDispatches}
-          title={actions.pollTitle}
-          onClick={() => void doRefresh()}
-        >
-          Poll now
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled={!actions.canReloadConfig}
-          title={actions.reloadTitle}
-          onClick={() => void doReload()}
-        >
-          Reload config
-        </Button>
+        <Tooltip content={actions.pollTitle}>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!actions.canPollDispatches}
+            onClick={() => void doRefresh()}
+          >
+            Poll now
+          </Button>
+        </Tooltip>
+        <Tooltip content={actions.reloadTitle}>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!actions.canReloadConfig}
+            onClick={() => void doReload()}
+          >
+            Reload config
+          </Button>
+        </Tooltip>
       </>
     ),
   });
@@ -313,12 +316,13 @@ function SummaryCard({
     <section className="rounded border border-border-default bg-surface-1 p-4">
       <div className="flex items-center justify-between mb-2 gap-3">
         <h2 className="text-sm font-semibold">{snap.name || "Dispatcher"}</h2>
-        <span
-          className={`text-caption font-mono rounded px-1.5 py-0.5 ${meta.className}`}
-          title={meta.title}
-        >
-          {pillState}
-        </span>
+        <Tooltip content={meta.title}>
+          <span
+            className={`text-caption font-mono rounded px-1.5 py-0.5 ${meta.className}`}
+          >
+            {pillState}
+          </span>
+        </Tooltip>
       </div>
       <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-xs">
         <KV k="Tracker" v={snap.tracker} />
@@ -425,12 +429,13 @@ function RunningTable({
                     {r.run_id}
                   </button>
                   {r.attempt && r.attempt > 0 ? (
-                    <span
-                      className="ml-1.5 inline-flex items-center rounded bg-warning-soft text-warning-fg px-1.5 py-0.5 text-caption font-mono align-middle"
-                      title={`Resume of a prior failed_resumable run — attempt ${r.attempt + 1}. The dispatcher continues from the failing node's checkpoint instead of starting fresh.`}
+                    <Tooltip
+                      content={`Resume of a prior failed_resumable run — attempt ${r.attempt + 1}. The dispatcher continues from the failing node's checkpoint instead of starting fresh.`}
                     >
-                      resume #{r.attempt + 1}
-                    </span>
+                      <span className="ml-1.5 inline-flex items-center rounded bg-warning-soft text-warning-fg px-1.5 py-0.5 text-caption font-mono align-middle">
+                        resume #{r.attempt + 1}
+                      </span>
+                    </Tooltip>
                   ) : null}
                 </td>
                 <td className="py-1.5 px-3">{r.workflow_state}</td>
@@ -449,12 +454,13 @@ function RunningTable({
                   )}
                 </td>
                 <td className="py-1.5 px-3 text-right">
-                  <button
+                  <Button
+                    variant="danger"
+                    size="sm"
                     onClick={() => onCancel(r.issue_id)}
-                    className="text-micro px-2 py-0.5 rounded border border-border-default hover:bg-surface-2"
                   >
                     Cancel
-                  </button>
+                  </Button>
                 </td>
               </tr>
               );
@@ -522,15 +528,16 @@ function RetriesTable({
       <header className="px-4 py-2 border-b border-border-default text-sm font-semibold flex items-center justify-between gap-2">
         <span>Retry queue ({rows?.length ?? 0})</span>
         {rows && rows.length > 0 && (
-          <button
-            type="button"
-            onClick={onRefreshNow}
-            disabled={!canPollDispatches}
-            className="text-micro px-2 py-0.5 rounded border border-border-default hover:bg-surface-2 text-fg-muted hover:text-fg-default disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-fg-muted"
-            title={pollTitle}
-          >
-            Poll now
-          </button>
+          <Tooltip content={pollTitle}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onRefreshNow}
+              disabled={!canPollDispatches}
+            >
+              Poll now
+            </Button>
+          </Tooltip>
         )}
       </header>
       {!rows || rows.length === 0 ? (
@@ -557,7 +564,6 @@ function RetriesTable({
                   isDue ? "bg-warning-soft" : ""
                 }`}
                 {...clickableRowProps(() => onFocusIssue(r.issue_id), `Open issue ${r.identifier || r.issue_id} on the board`)}
-                title="Open this issue on the board"
               >
                 <td className="py-1.5 px-3 font-mono whitespace-nowrap">{r.identifier || r.issue_id}</td>
                 <td className="py-1.5 px-3">{r.attempt}</td>
@@ -626,7 +632,6 @@ function DispatchSkipsTable({
                 key={s.issue_id}
                 className="border-b border-border-default/60 hover:bg-surface-2/40 cursor-pointer focus-visible:bg-surface-2/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 {...clickableRowProps(() => onFocusIssue(s.issue_id), `Open issue ${s.identifier || s.issue_id} on the board to fix its bot`)}
-                title="Open this issue on the board to fix its bot"
               >
                 <td className="py-1.5 px-3 font-mono whitespace-nowrap">
                   {s.identifier || s.issue_id}

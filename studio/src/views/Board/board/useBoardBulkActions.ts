@@ -11,7 +11,11 @@ import {
 import type { ConfirmOptions } from "@/hooks/useConfirm";
 import type { Toast, ToastAction } from "@/store/ui";
 
-import { BULK_DISPATCH_CONFIRM_THRESHOLD, isDispatchable } from "./boardSort";
+import {
+  BULK_DISPATCH_CONFIRM_THRESHOLD,
+  BULK_PATCH_CONFIRM_THRESHOLD,
+  isDispatchable,
+} from "./boardSort";
 
 type AddToast = (
   message: string,
@@ -118,9 +122,15 @@ export function useBoardBulkActions({
     async (
       build: (iss: NativeIssue) => NativeIssuePatch | null,
       toastMsg: string,
+      // When provided, a selection at/above BULK_PATCH_CONFIRM_THRESHOLD
+      // asks for confirmation first (priority/assignee have no undo).
+      confirmOpts?: ConfirmOptions,
     ) => {
       const targets = selectedIssues;
       if (targets.length === 0) return;
+      if (confirmOpts && targets.length >= BULK_PATCH_CONFIRM_THRESHOLD) {
+        if (!(await confirm(confirmOpts))) return;
+      }
       try {
         let n = 0;
         for (const iss of targets) {
@@ -136,16 +146,27 @@ export function useBoardBulkActions({
         setError(e instanceof Error ? e.message : String(e));
       }
     },
-    [selectedIssues, refresh, addToast, setError],
+    [selectedIssues, refresh, addToast, setError, confirm],
   );
 
   const onBulkMove = useCallback(
     async (toState: string) => {
-      const ids = selectedIssues.map((i) => i.id);
-      if (ids.length === 0) return;
-      for (const id of ids) await onDrop(id, toState);
+      // Capture each issue's origin state so the toast can offer a
+      // one-click Undo (bulk move is reversible — no confirm needed).
+      const moved = selectedIssues.map((i) => ({ id: i.id, from: i.state }));
+      if (moved.length === 0) return;
+      for (const m of moved) await onDrop(m.id, toState);
       const display = board?.states.find((s) => s.name === toState)?.display ?? toState;
-      addToast(`Moved ${ids.length} to ${display}`, "success");
+      addToast(`Moved ${moved.length} to ${display}`, "success", {
+        action: {
+          label: "Undo",
+          onClick: () => {
+            void (async () => {
+              for (const m of moved) await onDrop(m.id, m.from);
+            })();
+          },
+        },
+      });
     },
     [selectedIssues, onDrop, board, addToast],
   );
@@ -155,6 +176,11 @@ export function useBoardBulkActions({
       void runBulkPatch(
         () => ({ priority }),
         `Set priority P${priority} on ${selectedIssues.length} issue${selectedIssues.length > 1 ? "s" : ""}`,
+        {
+          title: `Set priority P${priority} on ${selectedIssues.length} issues?`,
+          message: "Bulk priority changes have no one-click undo.",
+          confirmLabel: "Set priority",
+        },
       ),
     [runBulkPatch, selectedIssues],
   );
@@ -166,6 +192,13 @@ export function useBoardBulkActions({
         assignee
           ? `Assigned ${selectedIssues.length} to @${assignee}`
           : `Cleared assignee on ${selectedIssues.length} issue${selectedIssues.length > 1 ? "s" : ""}`,
+        {
+          title: assignee
+            ? `Assign ${selectedIssues.length} issues to @${assignee}?`
+            : `Clear assignee on ${selectedIssues.length} issues?`,
+          message: "Bulk assignee changes have no one-click undo.",
+          confirmLabel: assignee ? "Assign" : "Clear",
+        },
       ),
     [runBulkPatch, selectedIssues],
   );

@@ -7,6 +7,7 @@ import type { NativeBoard, NativeIssue } from "@/api/native";
 import BranchDiffModal from "@/components/Runs/BranchDiffModal";
 import { Button } from "@/components/ui/Button";
 import { Checkbox } from "@/components/ui/Checkbox";
+import { Combobox } from "@/components/ui/Combobox";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { Dialog } from "@/components/ui/Dialog";
 import { InlineBanner } from "@/components/ui/InlineBanner";
@@ -33,9 +34,11 @@ interface Props {
   // "Let's go" button is shown that transitions it into the dispatch
   // lane so the running dispatcher picks it up. Omitted otherwise.
   onDispatch?: () => void;
+  // Existing assignees across the board, seeding the assignee autocomplete.
+  allAssignees: string[];
 }
 
-export default function IssueModal({ board, initial, onSubmit, onClose, onDelete, onDispatch }: Props) {
+export default function IssueModal({ board, initial, onSubmit, onClose, onDelete, onDispatch, allAssignees }: Props) {
   const [tab, setTab] = useState<"ticket" | "bot">("ticket");
   const [title, setTitle] = useState(initial?.title ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
@@ -200,6 +203,7 @@ export default function IssueModal({ board, initial, onSubmit, onClose, onDelete
                   setLabels={setLabels}
                   assignee={assignee}
                   setAssignee={setAssignee}
+                  allAssignees={allAssignees}
                   fields={fields}
                   setFields={setFields}
                 />
@@ -287,6 +291,7 @@ interface TicketTabProps {
   setLabels: (v: string[]) => void;
   assignee: string;
   setAssignee: (v: string) => void;
+  allAssignees: string[];
   fields: Record<string, string>;
   setFields: (v: Record<string, string>) => void;
 }
@@ -306,6 +311,7 @@ function TicketTab({
   setLabels,
   assignee,
   setAssignee,
+  allAssignees,
   fields,
   setFields,
 }: TicketTabProps) {
@@ -365,11 +371,13 @@ function TicketTab({
           <TagInput value={labels} onChange={setLabels} placeholder="urgent, infra…" />
         </Field>
         <Field label="Assignee">
-          <Input
+          <Combobox
             value={assignee}
-            onChange={(e) => setAssignee(e.target.value)}
+            options={allAssignees.map((a) => ({ value: a, label: `@${a}` }))}
+            onChange={(v) => setAssignee(v)}
+            placeholder="Search or type a name…"
             size="md"
-            placeholder="someone@…"
+            freeSolo
           />
         </Field>
       </div>

@@ -14,6 +14,11 @@ import { DEBOUNCE_EDGE_RECOMPUTE_MS } from "@/lib/constants";
 export function useCanvasLayout() {
   const document = useDocumentStore((s) => s.document);
   const layoutDirection = useUIStore((s) => s.layoutDirection);
+  const addToast = useUIStore((s) => s.addToast);
+  // Rate-limit auto-layout failure toasts: the layout effect re-runs on
+  // every topology change, so a persistently-failing layout would
+  // otherwise spam the user. One toast per minute is enough signal.
+  const lastLayoutErrorRef = useRef(0);
   const activeLayers = useUIStore((s) => s.activeLayers);
   const subNodeViewStack = useUIStore((s) => s.subNodeViewStack);
   const macroView = useUIStore((s) => s.macroView);
@@ -105,12 +110,19 @@ export function useCanvasLayout() {
           setLayoutEdges(computeEdgeHandles(resultNodes, graphEdges, layoutDirection));
         })
         .catch(() => {
+          // Fall back to unlaid-out positions so the canvas stays usable,
+          // but don't fail silently — a broken layout is otherwise invisible.
           layoutNodesRef.current = graphNodes;
           setLayoutNodes(graphNodes);
           setLayoutEdges(computeEdgeHandles(graphNodes, graphEdges, layoutDirection));
+          const now = Date.now();
+          if (now - lastLayoutErrorRef.current > 60_000) {
+            lastLayoutErrorRef.current = now;
+            addToast("Canvas auto-layout failed — using fallback positions", "warning");
+          }
         });
     }
-  }, [document, graphNodes, graphEdges, activeWorkflowName, layoutDirection, activeLayers, subNodeViewId, groups, collapsedGroups]);
+  }, [document, graphNodes, graphEdges, activeWorkflowName, layoutDirection, activeLayers, subNodeViewId, groups, collapsedGroups, addToast]);
 
   // Property-edit patch: when graphNodes content changes without
   // topology change (e.g., a form edit to model / reasoning_effort),
@@ -177,9 +189,13 @@ export function useCanvasLayout() {
           prevTopologyRef.current = "";
           setTimeout(() => fitView({ padding: 0.2 }), 50);
         })
-        .catch(() => {});
+        .catch(() => {
+          // User-initiated (Arrange button): a no-op failure would look
+          // like the click did nothing. Surface it.
+          addToast("Arrange failed — try again or reload the workflow", "error");
+        });
     },
-    [graphNodes, graphEdges, layoutDirection],
+    [graphNodes, graphEdges, layoutDirection, addToast],
   );
 
   // selectNodes flips the `selected` flag on each layoutNode whose id

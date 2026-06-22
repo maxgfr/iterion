@@ -34,6 +34,10 @@ interface Props<T = string> {
   /** Stable id for aria-controls when the host wants to label it
    *  externally. */
   id?: string;
+  /** Allow committing the typed text as a new value (not in `options`).
+   *  Adds a "Use '<query>'" row + Enter-commits-on-no-match. Only
+   *  meaningful when T is string-like (e.g. a free-form assignee). */
+  freeSolo?: boolean;
 }
 
 /** Combobox is a searchable single-select primitive. The Board ticket
@@ -56,6 +60,7 @@ export function Combobox<T = string>({
   disabled = false,
   size = "sm",
   id,
+  freeSolo = false,
 }: Props<T>) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -79,6 +84,14 @@ export function Combobox<T = string>({
       return hay.includes(q);
     });
   }, [options, query]);
+
+  const trimmedQuery = query.trim();
+  // Free-text affordance: offer the typed value when it isn't already an
+  // option (and freeSolo is on).
+  const showFreeSolo =
+    freeSolo &&
+    trimmedQuery.length > 0 &&
+    !options.some((o) => String(o.value) === trimmedQuery);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -111,6 +124,12 @@ export function Combobox<T = string>({
     close();
   };
 
+  const commitFreeText = () => {
+    if (!trimmedQuery) return;
+    onChange(trimmedQuery as T);
+    close();
+  };
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!open) {
       if (e.key === "ArrowDown" || e.key === "Enter") {
@@ -132,7 +151,8 @@ export function Combobox<T = string>({
       setFocusIdx((p) => Math.max(min, p - 1));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      commitIdx(focusIdx >= 0 ? focusIdx : 0);
+      if (showFreeSolo && filtered.length === 0) commitFreeText();
+      else commitIdx(focusIdx >= 0 ? focusIdx : 0);
     } else if (e.key === "Escape") {
       e.preventDefault();
       close();
@@ -213,7 +233,7 @@ export function Combobox<T = string>({
                 )}
               </li>
             )}
-            {filtered.length === 0 && (
+            {filtered.length === 0 && !showFreeSolo && (
               <li className="px-2 py-2 text-xs text-fg-subtle italic">
                 No matches
               </li>
@@ -253,6 +273,19 @@ export function Combobox<T = string>({
                 </li>
               );
             })}
+            {showFreeSolo && (
+              <li
+                role="option"
+                aria-selected={false}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  commitFreeText();
+                }}
+                className="px-2 py-1.5 cursor-pointer text-xs text-fg-muted hover:bg-surface-1"
+              >
+                Use “{trimmedQuery}”
+              </li>
+            )}
           </ul>
         </div>
       )}

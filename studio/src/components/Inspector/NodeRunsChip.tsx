@@ -37,8 +37,12 @@ export default function NodeRunsChip({ nodeId }: Props) {
           setRuns(rs);
         })
         .catch(() => {
-          // Silent fall-through: a runs API outage shouldn't break the
-          // editor; just hide the chip.
+          // Intentionally silent: this chip is a best-effort
+          // reverse-navigation decoration, not load-bearing. A runs-API
+          // outage surfaces loudly in the Runs view (its own error state) —
+          // double-announcing it here on every node click would be noise.
+          // See docs/design-system.md § Feedback surfaces (silent-error
+          // exceptions). If this ever becomes load-bearing, lift the error.
           if (!cancelled) setRuns([]);
         });
     }, 200);
