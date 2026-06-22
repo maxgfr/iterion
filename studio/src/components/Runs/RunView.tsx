@@ -1,17 +1,10 @@
-import { errorMessage } from "@/lib/errorHints";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useParams } from "wouter";
 import { Group, Panel } from "react-resizable-panels";
 
-import {
-  getRun,
-  type ExecutionState,
-  type RunFile,
-  type RunFilesMode,
-} from "@/api/runs";
-import { Tabs } from "@/components/ui";
-import { selectRunningExecution, useRunStore } from "@/store/run";
+import { type ExecutionState } from "@/api/runs";
+import { useRunStore } from "@/store/run";
 import { useUIStore } from "@/store/ui";
 import { useRunWebSocket } from "@/hooks/useRunWebSocket";
 import { useLayoutPersistence } from "@/hooks/useLayoutPersistence";
@@ -19,10 +12,7 @@ import { useRunToasts } from "@/hooks/useRunToasts";
 import { useRunKeyboard } from "@/hooks/useRunKeyboard";
 import { writeBooleanFlag, writeStringFlag } from "@/lib/localStorageFlag";
 
-import { buildExecutionsAt } from "@/lib/snapshotReducer";
-
 import BrowserPane from "./BrowserPane";
-import EventLog from "./EventLog";
 import FileDiffDialog from "./FileDiffDialog";
 import FileEditDialog from "./FileEditDialog";
 import FloatingChatPanel, { ChatPanelContent } from "./FloatingChatPanel";
@@ -32,22 +22,22 @@ import NodeDetailPanel from "./NodeDetailPanel";
 import QueuedBanner from "./QueuedBanner";
 import RunCanvasIR, { defaultIterationFor } from "./RunCanvasIR";
 import RunHeader from "./RunHeader";
-import RunLogPanel from "./RunLogPanel";
-import RunMetrics from "./RunMetrics";
-import ArtifactFilesPanel from "./ArtifactFilesPanel";
-import ReportTab from "./ReportTab";
-import Scrubber from "./Scrubber";
+import { BottomTabPanel } from "./runView/BottomTabPanel";
 import { ExpandStrip, ResizeSeparator } from "./runView/PanelChrome";
+import { RunMetricsBar } from "./runView/RunMetricsBar";
 import { RunViewLoadError, RunViewSkeleton } from "./runView/RunViewLoadStates";
 import {
-  BOTTOM_TABS,
   BOTTOM_TAB_KEY,
-  BOTTOM_TAB_LABELS,
   EVENTLOG_COLLAPSED_KEY,
   type BottomTab,
 } from "./runView/layoutFlags";
 import { useDisplayedRunData } from "./runView/useDisplayedRunData";
+import { useFileDialogs } from "./runView/useFileDialogs";
+import { useFollowLiveNode } from "./runView/useFollowLiveNode";
+import { useHorizontalLayout } from "./runView/useHorizontalLayout";
 import { useRunConsoleLayout } from "./runView/useRunConsoleLayout";
+import { useRunSnapshot } from "./runView/useRunSnapshot";
+import { useSelectionState } from "./runView/useSelectionState";
 
 interface RunViewProps {
   // Passed by RunTabHost when this view is hosted in a tab subtree.
@@ -62,8 +52,6 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
 
   const setRunId = useRunStore((s) => s.setRunId);
   const reset = useRunStore((s) => s.reset);
-  const applySnapshot = useRunStore((s) => s.applySnapshot);
-  const loadEventHistoryIfMissing = useRunStore((s) => s.loadEventHistoryIfMissing);
   const snapshot = useRunStore((s) => s.snapshot);
   const events = useRunStore((s) => s.events);
   const executionsById = useRunStore((s) => s.executionsById);
@@ -76,126 +64,38 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
     browserPreview.lastEventSeqSeen !== null ||
     browserPreview.screenshots.length > 0 ||
     browserPreview.liveSession !== null;
-  // Time-travel scrubber: when non-null, the canvas/detail/event log
-  // render the run *as it was* at this seq. When null (the default),
-  // live data flows through. Lives in component state because it's
-  // purely UI-driven; the store remains the source of truth for live.
-  const [scrubSeq, setScrubSeq] = useState<number | null>(null);
-  // Tracks whether the initial snapshot fetch has exhausted its retries
-  // without success. Flipped true so the skeleton swaps for a clear
-  // "Run not found" message instead of pulsing forever. Distinguishes
-  // "loading" (snapshot null + !loadFailed) from "no such run on this
-  // daemon" (snapshot null + loadFailed). Reset on runId change.
-  const [loadFailed, setLoadFailed] = useState<{ status: number; message: string } | null>(null);
-  // Workflow view selects by IR node id (not execution id). The detail
-  // panel is driven by the selected node's currently-picked iteration
-  // (per-node, default = "current"). Manual picks live alongside a
-  // "follow live" toggle: when the toggle is on, the panel auto-shifts
-  // to whatever node is currently running; when the user clicks a node
-  // the toggle flips off so their pick stays pinned.
-  const [manualSelectedNodeId, setManualSelectedNodeId] = useState<string | null>(null);
-  const [followLiveNode, setFollowLiveNode] = useState<boolean>(true);
-  // Per-IR-node iteration override. Empty map means "use the default
-  // (running > paused > latest)". A user click on a timeline pip sets
-  // the entry; we never auto-clear so the user's pick stays sticky.
-  const [iterationByNode, setIterationByNode] = useState<Map<string, number>>(
-    () => new Map(),
-  );
-  const handleSelectIteration = useCallback((nodeId: string, iteration: number) => {
-    setIterationByNode((prev) => {
-      const next = new Map(prev);
-      next.set(nodeId, iteration);
-      return next;
-    });
-  }, []);
 
-  const handleSelectNode = useCallback((nodeId: string | null) => {
-    setManualSelectedNodeId(nodeId);
-    // Click on a real node pins it (and disables follow-live).
-    // Click on empty pane / toggle-off does the opposite: re-engage
-    // auto-follow so the user has an obvious "go back to live" path
-    // without hunting for the FollowLivePill inside the detail panel.
-    setFollowLiveNode(nodeId === null);
-  }, []);
+  // Selection dials + reset-on-runId. Owns scrubSeq, manualSelectedNodeId,
+  // followLiveNode, iterationByNode.
+  const {
+    scrubSeq,
+    setScrubSeq,
+    manualSelectedNodeId,
+    followLiveNode,
+    iterationByNode,
+    handleSelectIteration,
+    handleSelectNode,
+    handleJumpToFailed,
+    handleEventSelect,
+    handleClearSelection,
+    handleToggleFollowLive,
+  } = useSelectionState(runId);
 
-  const handleJumpToFailed = useCallback((nodeId: string) => {
-    handleSelectNode(nodeId);
-  }, [handleSelectNode]);
-
-  const handleEventSelect = useCallback(
-    (nodeId: string, iteration: number) => {
-      handleSelectNode(nodeId);
-      setIterationByNode((prev) => {
-        const next = new Map(prev);
-        next.set(nodeId, iteration);
-        return next;
-      });
-    },
-    [handleSelectNode],
-  );
-
-  const handleClearSelection = useCallback(() => {
-    setManualSelectedNodeId(null);
-  }, []);
-
-  const handleToggleFollowLive = useCallback(() => {
-    setFollowLiveNode((prev) => {
-      const next = !prev;
-      // Re-engaging follow live: drop the manual pin so the panel
-      // jumps to the currently-running node on the next render.
-      if (next) setManualSelectedNodeId(null);
-      return next;
-    });
-  }, []);
-
-  const [diffFile, setDiffFile] = useState<RunFile | null>(null);
-  // Mode the FilesPanel was in when the user clicked the row; forwarded
-  // to FileDiffDialog so it requests the same range from the backend.
-  const [diffMode, setDiffMode] = useState<RunFilesMode>("");
-  const handleSelectFile = useCallback(
-    (file: RunFile, mode: RunFilesMode) => {
-      setDiffMode(mode);
-      setDiffFile(file);
-    },
-    [],
-  );
-
-  // Worktree path open in the editable Monaco tab (FileEditDialog), or null.
-  // Driven by the FilesPanel "Edit .gitignore" shortcut and the diff
-  // dialog's "Edit" affordance (which closes the read-only diff first).
-  const [editFile, setEditFile] = useState<string | null>(null);
-  const handleEditFile = useCallback((path: string) => {
-    setDiffFile(null);
-    setEditFile(path);
-  }, []);
+  // diffFile / diffMode / editFile dialogs + reset-on-runId.
+  const {
+    diffFile,
+    diffMode,
+    editFile,
+    handleSelectFile,
+    handleEditFile,
+    closeDiff,
+    closeEdit,
+  } = useFileDialogs(runId);
 
   const verticalLayout = useLayoutPersistence("run-console-v2.vertical", {
     top: 70,
     eventlog: 30,
   });
-  const horizontalLayout = useLayoutPersistence(
-    "run-console-v2.horizontal",
-    { canvas: 70, detail: 30 },
-  );
-  // Separate layout key so the right-dock split (canvas / detail /
-  // browser) doesn't collide with the canvas/detail-only layout when
-  // the user toggles the dock.
-  const horizontalLayoutWithBrowser = useLayoutPersistence(
-    "run-console-v2.horizontal-with-browser",
-    { canvas: 50, detail: 25, browserRight: 25 },
-  );
-  // Layout key for when the chat panel is docked to the right (3rd
-  // resizable column). Includes the chat slot at the end.
-  const horizontalLayoutWithChat = useLayoutPersistence(
-    "run-console-v2.horizontal-with-chat",
-    { canvas: 50, detail: 20, chat: 30 },
-  );
-  // Layout key for the rare case where both browser AND chat dock to
-  // the right at the same time (4 horizontal columns).
-  const horizontalLayoutWithBrowserAndChat = useLayoutPersistence(
-    "run-console-v2.horizontal-full-right",
-    { canvas: 40, detail: 20, browserRight: 20, chat: 20 },
-  );
 
   // Persisted run-console layout/dock dials. The cross-cutting effects
   // below (auto-reveal Browser, "Show event log" token, browserDock →
@@ -218,14 +118,17 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
     resetLayout,
   } = useRunConsoleLayout();
 
+  // Horizontal layout handle is dock-mode-dependent — see
+  // useHorizontalLayout for the picking logic.
+  const browserRightDocked = browserDock === "right" && browserAvailable;
+  const chatDockedRight = chatDock === "docked-right";
+  const horiz = useHorizontalLayout({ browserRightDocked, chatDockedRight });
+
   const onResetLayout = () => {
     // Each layout's reset() bumps its own groupKey, remounting the Groups so
     // they re-read the just-reset defaultLayout — see useLayoutPersistence.
     verticalLayout.reset();
-    horizontalLayout.reset();
-    horizontalLayoutWithBrowser.reset();
-    horizontalLayoutWithChat.reset();
-    horizontalLayoutWithBrowserAndChat.reset();
+    horiz.resetAll();
     resetLayout();
     useUIStore.getState().addToast("Console layout reset", "success");
   };
@@ -284,123 +187,16 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
     return () => reset();
   }, [runId, setRunId, reset]);
 
-  // Hydrate the persisted event log eagerly on run open. RunMetrics
-  // (always-visible header strip) folds cost + llm_step counts from
-  // the events array, and ReportTab does the same for the cost
-  // breakdowns — both render the empty state when no events are
-  // loaded. Earlier lazy-load (gated on bottomTab === "events" ||
-  // scrubSeq !== null) saved history-fetch time but hid those
-  // header-level metrics until the user opened the Events tab. The
-  // action dedupes per run via historyFetchedForRun, so this stays
-  // cheap on re-renders and tab toggles.
-  // On failure, surface a *persistent* toast with a Retry action so the
-  // operator can re-attempt in place instead of having to close and
-  // re-open the run. loadEventHistoryIfMissing rolls back its
-  // historyFetchedForRun marker on failure, so re-invoking it here
-  // genuinely retries the fetch.
-  const loadHistory = useCallback(() => {
-    if (!runId) return;
-    loadEventHistoryIfMissing(runId).catch((err) => {
-      console.warn("[run] event history hydration failed:", err);
-      const msg = errorMessage(err);
-      useUIStore.getState().addToast(
-        `Couldn't load event history: ${msg}`,
-        "error",
-        { persistent: true, action: { label: "Retry", onClick: () => loadHistory() } },
-      );
-    });
-  }, [runId, loadEventHistoryIfMissing]);
-  useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
+  // Snapshot REST fetch + event-history hydration + retry handling.
+  const { loadFailed, handleRetryLoad, refreshSnapshot } = useRunSnapshot(runId);
 
-  // Initial snapshot via REST so the page renders immediately even if
-  // the WS is still connecting; the hook's `applySnapshot` on connect
-  // will replace it.
-  //
-  // Retry on 404: the launch API returns the run_id as soon as the
-  // engine goroutine is scheduled, but the goroutine still needs a
-  // beat to call store.CreateRun before run.json exists on disk.
-  // Fetching too early therefore 404s, and without a retry the page
-  // gets stuck in <RunViewSkeleton/> until the user reloads — the
-  // WS path was supposed to fill the gap but doesn't always push the
-  // initial snapshot eagerly. A short backoff loop closes the race
-  // for the common case (run.json typically lands within ~50–200ms)
-  // without papering over a genuinely missing run.
-  //
-  // The fetch loop is exposed via a callback so both the initial
-  // mount effect AND the user-facing Retry button on RunViewLoadError
-  // can re-trigger it in place — no `window.location.reload()` (which
-  // would destroy tabs, scroll position, and chat dock state). The
-  // `loadAbortRef` holds the cancel handle of the in-flight attempt
-  // so a new fetch (or unmount) bails the previous loop before
-  // starting fresh, preventing two retry budgets from racing.
-  const loadAbortRef = useRef<(() => void) | null>(null);
-  const fetchSnapshot = useCallback(() => {
-    if (!runId) return;
-    // Cancel any in-flight retry loop before kicking off a new one so
-    // a Retry click (or a runId change) can't leave the previous loop
-    // ticking against the network in the background.
-    loadAbortRef.current?.();
-    let cancelled = false;
-    let attempt = 0;
-    let timerId: ReturnType<typeof setTimeout> | null = null;
-    setLoadFailed(null);
-    const fetchWithRetry = () => {
-      getRun(runId)
-        .then((snap) => {
-          if (!cancelled) applySnapshot(snap);
-        })
-        .catch((err: Error) => {
-          if (cancelled) return;
-          attempt += 1;
-          const msg = err?.message ?? "";
-          const is404 = msg.includes("API error 404");
-          const cap = is404 ? 3 : 20;
-          if (attempt < cap) {
-            // Track the timer so the cleanup can cancel it. The
-            // prior implementation only flipped `cancelled` for the
-            // setState path; the timer kept firing for the full
-            // retry budget after navigation, hammering the network.
-            timerId = setTimeout(() => {
-              timerId = null;
-              if (!cancelled) fetchWithRetry();
-            }, 250);
-          } else if (!cancelled) {
-            setLoadFailed({ status: is404 ? 404 : 0, message: msg });
-          }
-        });
-    };
-    loadAbortRef.current = () => {
-      cancelled = true;
-      if (timerId != null) {
-        clearTimeout(timerId);
-        timerId = null;
-      }
-    };
-    fetchWithRetry();
-  }, [runId, applySnapshot]);
+  // Reset the cross-slice "bottom tab pinned" flag on run change so the
+  // previous run's user pin doesn't survive into the new run. Layout/
+  // dock preferences persisted to localStorage are intentionally left
+  // alone.
   useEffect(() => {
-    fetchSnapshot();
-    return () => {
-      loadAbortRef.current?.();
-      loadAbortRef.current = null;
-    };
-  }, [fetchSnapshot]);
-  const handleRetryLoad = useCallback(() => {
-    fetchSnapshot();
-  }, [fetchSnapshot]);
-
-  // refreshSnapshot — used by post-merge UI to refetch run.json so
-  // RunHeader and the merge-state-driven UI catch up after a Commits-
-  // tab merge action lands. The WS pushes events but not run-meta
-  // updates, so a manual REST fetch is the simplest path.
-  const refreshSnapshot = useCallback(() => {
-    if (!runId) return;
-    getRun(runId)
-      .then(applySnapshot)
-      .catch(() => undefined);
-  }, [runId, applySnapshot]);
+    setBottomTabPinned(false);
+  }, [runId, setBottomTabPinned]);
 
   const wsHandle = useRunWebSocket(runId);
   useRunToasts(events, snapshot?.last_seq);
@@ -416,99 +212,14 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
     return null;
   }, [liveExecutions]);
 
-  // When follow-live is on, override the manual pick with the
-  // currently-running execution. While scrubbing the timeline we
-  // disable the auto-track so the panel reflects the past, not the
-  // live tail.
-  const runningExec = useMemo(() => {
-    if (scrubSeq !== null) return null;
-    return selectRunningExecution(executionsById);
-  }, [scrubSeq, executionsById]);
-
-  // Sticky follow-live cache: bridges the transient gap between
-  // `node_finished` (previous exec flips to finished) and `node_started`
-  // (next exec arrives). Those events are emitted by the engine across
-  // separate WS messages — with a `SaveCheckpoint` disk I/O + edge
-  // selection in between — so the client sees a brief window where no
-  // execution carries status="running" even though the run is still
-  // active and producing logs.
-  //
-  // Without this cache, `runningExec` flips to null during the window,
-  // `wfSelectedNodeId` collapses to `manualSelectedNodeId` (null when
-  // follow-live is engaged), and the detail panel + per-node log
-  // filter both blank out until the next node_started lands. With it,
-  // we hold the last known running node id so the UI stays anchored
-  // through the gap and only updates once the new running exec
-  // materialises.
-  const [lastRunningNodeId, setLastRunningNodeId] = useState<string | null>(
-    null,
-  );
-  useEffect(() => {
-    if (runningExec) {
-      setLastRunningNodeId(runningExec.ir_node_id);
-    }
-  }, [runningExec]);
-  // Clear the cache when the run reaches a terminal state so we don't
-  // keep showing a stale "live" node after finish/fail/cancel. Paused
-  // intentionally keeps the cached node — the user is mid-interaction.
-  useEffect(() => {
-    const status = snapshot?.run?.status;
-    if (
-      status === "finished" ||
-      status === "failed" ||
-      status === "failed_resumable" ||
-      status === "cancelled"
-    ) {
-      setLastRunningNodeId(null);
-    }
-  }, [snapshot?.run?.status]);
-
-  // Per-run component-local state outlives the store's reset() (which
-  // only nukes the zustand store), so navigating run A → run B would
-  // otherwise drag scrub position, selected node, pinned iterations,
-  // the diff dialog, the bottom-tab pin, and the sticky last-running
-  // node id into the new run — producing empty/truncated timelines,
-  // "ghost" node selections (when B's IR doesn't contain A's nodes),
-  // and an unexpectedly pinned bottom tab. Layout/dock preferences
-  // persisted to localStorage are intentionally left alone.
-  useEffect(() => {
-    setScrubSeq(null);
-    setManualSelectedNodeId(null);
-    setFollowLiveNode(true);
-    setIterationByNode(new Map());
-    setLastRunningNodeId(null);
-    setDiffFile(null);
-    setDiffMode("");
-    setBottomTabPinned(false);
-  }, [runId]);
-
-  // Live-follow node id with sticky fallback. When `runningExec` is
-  // non-null we always use its node id (truth). When it's null but the
-  // run is still active, we fall back to `lastRunningNodeId` — typically
-  // the just-finished node — so the follow-live UI doesn't blank out
-  // mid-transition. When scrubbing/replaying, derive the running node
-  // from the historical exec map at scrubSeq so the canvas focus
-  // advances with the timeline instead of staying stuck on the user's
-  // last manual pick.
-  const followLiveNodeId = useMemo(() => {
-    if (scrubSeq !== null) {
-      const execs = buildExecutionsAt(events, scrubSeq);
-      let best: ExecutionState | null = null;
-      for (const e of execs) {
-        if (e.status !== "running") continue;
-        if (!best || (e.started_at ?? "") > (best.started_at ?? "")) {
-          best = e;
-        }
-      }
-      return best?.ir_node_id ?? null;
-    }
-    if (runningExec) return runningExec.ir_node_id;
-    const status = snapshot?.run?.status;
-    if (status === "running" || status === "paused_waiting_human") {
-      return lastRunningNodeId;
-    }
-    return null;
-  }, [runningExec, scrubSeq, events, snapshot?.run?.status, lastRunningNodeId]);
+  // Live-follow node id with sticky fallback. See useFollowLiveNode.
+  const { followLiveNodeId } = useFollowLiveNode({
+    runId,
+    scrubSeq,
+    events,
+    executionsById,
+    runStatus: snapshot?.run?.status,
+  });
 
   const wfSelectedNodeId =
     followLiveNode && followLiveNodeId ? followLiveNodeId : manualSelectedNodeId;
@@ -606,10 +317,6 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
   const eventLogSelection = detailExec?.execution_id ?? null;
   const liveSeq = snapshot.last_seq;
   const scrubbing = scrubSeq !== null;
-  // The browser pane mounts on the right column only when the user
-  // chose that dock AND there's something to display. Otherwise it
-  // either stays in the bottom tab list, or stays hidden.
-  const browserRightDocked = browserDock === "right" && browserAvailable;
 
   // Pre-pickup state: the run sits on the NATS queue. RunMetrics and
   // Scrubber render nothing useful (no events yet, no budget consumed),
@@ -624,28 +331,6 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
   // The chat input is hidden when the run reached a terminal status,
   // but the transcript stays readable in the floating / docked panel.
   const chatInputDisabled = isQueued || isTerminal;
-  const chatDockedRight = chatDock === "docked-right";
-
-  // Pick the layout persistence handle once, indexed by the active
-  // column set so we don't repeat the same 4-way ternary at every
-  // {defaultLayout, onLayoutChanged, defaultSize}. Stays in render
-  // — the four sources don't share an identity and useMemo would
-  // capture stale onChange callbacks.
-  const horizPersistence = browserRightDocked && chatDockedRight
-    ? horizontalLayoutWithBrowserAndChat
-    : browserRightDocked
-    ? horizontalLayoutWithBrowser
-    : chatDockedRight
-    ? horizontalLayoutWithChat
-    : horizontalLayout;
-  const canvasSize = browserRightDocked && chatDockedRight
-    ? 40
-    : browserRightDocked || chatDockedRight
-    ? 50
-    : 70;
-  const detailSize = browserRightDocked || chatDockedRight ? 22 : 30;
-  const browserRightSize = chatDockedRight ? 18 : 25;
-  const chatPanelSize = browserRightDocked ? 20 : 30;
 
   return (
     <ReactFlowProvider>
@@ -660,27 +345,14 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
           <QueuedBanner run={snapshot.run} />
         ) : (
           <>
-            <div className="border-b border-border-default bg-surface-1 flex items-stretch">
-              <div className="flex-shrink-0">
-                <RunMetrics
-                  active={active}
-                  onJumpToFailed={handleJumpToFailed}
-                  bare
-                />
-              </div>
-              {liveSeq > 0 && (
-                <div className="flex-1 min-w-0 border-l border-border-default">
-                  <Scrubber
-                    events={events}
-                    liveSeq={liveSeq}
-                    scrubSeq={scrubSeq}
-                    onChange={setScrubSeq}
-                    visible
-                    bare
-                  />
-                </div>
-              )}
-            </div>
+            <RunMetricsBar
+              active={active}
+              events={events}
+              liveSeq={liveSeq}
+              scrubSeq={scrubSeq}
+              onScrubChange={setScrubSeq}
+              onJumpToFailed={handleJumpToFailed}
+            />
             {snapshot.run.status === "paused_operator" && (
               <OperatorPauseBanner run={snapshot.run} />
             )}
@@ -706,16 +378,16 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
               <Group
                 orientation="horizontal"
                 className="h-full w-full"
-                // horizPersistence switches instance per dock mode and its
+                // horiz.active switches instance per dock mode and its
                 // groupKey carries the reset nonce, so the Group remounts both
                 // on a dock toggle (clean flexGrow redistribution) and on reset.
-                key={horizPersistence.groupKey}
-                defaultLayout={horizPersistence.layout}
-                onLayoutChanged={horizPersistence.onChange}
+                key={horiz.active.groupKey}
+                defaultLayout={horiz.active.layout}
+                onLayoutChanged={horiz.active.onChange}
               >
                 <Panel
                   id="canvas"
-                  defaultSize={canvasSize}
+                  defaultSize={horiz.canvasSize}
                   minSize={25}
                   className="min-h-0"
                 >
@@ -738,7 +410,7 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
                     <ResizeSeparator orientation="horizontal" />
                     <Panel
                       id="detail"
-                      defaultSize={detailSize}
+                      defaultSize={horiz.detailSize}
                       minSize={18}
                       className="min-h-0"
                     >
@@ -766,7 +438,7 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
                     <ResizeSeparator orientation="horizontal" />
                     <Panel
                       id="browserRight"
-                      defaultSize={browserRightSize}
+                      defaultSize={horiz.browserRightSize}
                       minSize={18}
                       className="min-h-0"
                     >
@@ -786,7 +458,7 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
                     <ResizeSeparator orientation="horizontal" />
                     <Panel
                       id="chat"
-                      defaultSize={chatPanelSize}
+                      defaultSize={horiz.chatPanelSize}
                       minSize={20}
                       className="min-h-0"
                     >
@@ -810,50 +482,28 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
                   minSize={10}
                   className="min-h-0"
                 >
-                  <div className="h-full border-t border-border-default min-h-0 overflow-hidden animate-fade-in-opacity flex flex-col bg-surface-1">
-                    <Tabs
-                      value={bottomTab}
-                      onValueChange={(v) => handleSetBottomTab(v as BottomTab)}
-                      items={BOTTOM_TABS.filter(
-                        (t) => t !== "browser" || (browserAvailable && !browserRightDocked),
-                      ).map((t) => ({ value: t, label: BOTTOM_TAB_LABELS[t] }))}
-                      variant="underline"
-                      listClassName="px-3"
-                    />
-                    <div className="flex-1 min-h-0">
-                      {bottomTab === "events" ? (
-                        <EventLog
-                          events={displayedEvents}
-                          selectedExecutionId={eventLogSelection}
-                          followTail={followTail && !scrubbing}
-                          onToggleFollow={setFollowTail}
-                          onSelectNodeIteration={handleEventSelect}
-                          onClearSelection={handleClearSelection}
-                          onCollapse={toggleEventlogCollapsed}
-                          runId={runId}
-                        />
-                      ) : bottomTab === "logs" ? (
-                        <RunLogPanel
-                          runId={runId}
-                          subscribeLogs={wsHandle.subscribeLogs}
-                          unsubscribeLogs={wsHandle.unsubscribeLogs}
-                          onCollapse={toggleEventlogCollapsed}
-                          clampToBytes={logClampBytes}
-                        />
-                      ) : bottomTab === "browser" && runId ? (
-                        <BrowserPane
-                          runId={runId}
-                          scrubSeq={scrubSeq}
-                          dock={browserDock}
-                          onDockChange={setBrowserDock}
-                        />
-                      ) : bottomTab === "artifacts" ? (
-                        <ArtifactFilesPanel runId={runId} />
-                      ) : (
-                        <ReportTab onSelectNode={handleSelectNode} />
-                      )}
-                    </div>
-                  </div>
+                  <BottomTabPanel
+                    runId={runId}
+                    bottomTab={bottomTab}
+                    onSelectTab={(t: BottomTab) => handleSetBottomTab(t)}
+                    browserAvailable={browserAvailable}
+                    browserRightDocked={browserRightDocked}
+                    browserDock={browserDock}
+                    setBrowserDock={setBrowserDock}
+                    scrubSeq={scrubSeq}
+                    scrubbing={scrubbing}
+                    followTail={followTail}
+                    setFollowTail={setFollowTail}
+                    displayedEvents={displayedEvents}
+                    eventLogSelection={eventLogSelection}
+                    onEventSelect={handleEventSelect}
+                    onClearSelection={handleClearSelection}
+                    onCollapse={toggleEventlogCollapsed}
+                    onSelectNode={handleSelectNode}
+                    subscribeLogs={wsHandle.subscribeLogs}
+                    unsubscribeLogs={wsHandle.unsubscribeLogs}
+                    logClampBytes={logClampBytes}
+                  />
                 </Panel>
               </>
             )}
@@ -878,13 +528,13 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
           runId={runId}
           file={diffFile}
           mode={diffMode}
-          onClose={() => setDiffFile(null)}
+          onClose={closeDiff}
           onEdit={handleEditFile}
         />
         <FileEditDialog
           runId={runId}
           path={editFile}
-          onClose={() => setEditFile(null)}
+          onClose={closeEdit}
         />
         <FloatingChatPanel
           runId={runId}
@@ -896,4 +546,3 @@ export default function RunView({ runId: runIdProp }: RunViewProps = {}) {
     </ReactFlowProvider>
   );
 }
-
