@@ -154,7 +154,8 @@ Example: `PATCH /api/teams/{id}/webhooks/{wid}` with
 The studio webhook-editor field for it is the remaining follow-up (the
 API is functional). Covered by `TestResolve_OverrideWins`
 ([pkg/secrets/byok_test.go](../pkg/secrets/byok_test.go)) +
-`TestGitLabWebhook` threading assertion.
+`TestGitLabWebhook_HappyPath` threading assertion
+([pkg/server/webhooks_gitlab_test.go](../pkg/server/webhooks_gitlab_test.go)).
 
 ## Multiple webhooks per bot — already supported
 

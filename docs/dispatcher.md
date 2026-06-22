@@ -358,7 +358,7 @@ the dispatch request:
 
 | Field | Type | Current stock effect |
 |---|---|---|
-| `Bot`     | `string` (JSON `bot`) | Resolved through the bot registry into `DispatchSpec.WorkflowPath` when non-empty. This is plumbing for custom runners/future workflow switching, but the stock `EngineRunner` is precompiled for one workflow and does **not** switch workflows from `DispatchSpec.WorkflowPath` at dispatch time. Use `assignee_workflows:` for production workflow routing today. |
+| `Bot`     | `string` (JSON `bot`) | When non-empty, becomes the dispatch **routing key**: `buildSpec` sets `routeAssignee = iss.Bot` (winning over the issue's own assignee) and carries it on the spec as `DispatchSpec.Assignee` — **not** a workflow path. `RoutingRunner` selects the precompiled per-bot `EngineRunner` (its `ByAssignee` map is keyed by bot/assignee name) and the matching `assignee_dispatch` var overrides from that key; the bot FILE itself is resolved + route-checked by the guard at the top of `dispatch()` (the issue is skipped with a warning if the bot can't be resolved or has no active route). Use `assignee_workflows:` for production workflow routing today. |
 | `BotArgs` | `map[string]string` (JSON `bot_args`) | Merged over the rendered `dispatch.vars` key-by-key at launch time. `BotArgs` wins on shared keys; keys absent from the workflow's `vars:` schema are passed through with a warn log (the engine surfaces its own diagnostic). |
 
 Current stock workflow selection is performed by the runner built at
@@ -368,11 +368,14 @@ Current stock workflow selection is performed by the runner built at
    per-assignee `EngineRunner` selected by `RoutingRunner`.
 2. `cfg.workflow` → the precompiled default `EngineRunner`.
 
-`buildSpec` still resolves a per-ticket `Bot` into
-`DispatchSpec.WorkflowPath`, but the stock `EngineRunner` runs the
-workflow it was constructed with. Treat per-ticket `Bot` as
-custom-runner/future plumbing unless you have supplied a runner that
-actually consumes `DispatchSpec.WorkflowPath`.
+`buildSpec` folds a per-ticket `Bot` into the routing key
+`DispatchSpec.Assignee` (it wins over the issue's own assignee); the
+`RoutingRunner` above then selects the matching precompiled
+`EngineRunner` by that key, exactly as it does for an
+`assignee_workflows` assignee. `DispatchSpec` carries **no** workflow
+path — each `EngineRunner` runs the IR it was constructed with, so to
+route a brand-new workflow per ticket you add it to `assignee_workflows:`
+(or supply a custom runner that keys off `DispatchSpec.Assignee`).
 
 Vars: `assignee_dispatch[issue.assignee].vars` (or `dispatch.vars`
 as fallback) are rendered first, then `BotArgs` is merged on top.
