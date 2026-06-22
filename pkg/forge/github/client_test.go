@@ -138,3 +138,30 @@ func TestGitHubOAuth_ExchangeError(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestOrgMembershipRole(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/user/memberships/orgs/acme"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"state": "active", "role": "admin"})
+		case strings.HasSuffix(r.URL.Path, "/user/memberships/orgs/beta"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"state": "active", "role": "member"})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c := &AdminClient{HTTP: srv.Client(), APIBase: srv.URL, Token: "tok"}
+	ctx := context.Background()
+
+	if role, active, err := c.OrgMembershipRole(ctx, "acme"); err != nil || role != "admin" || !active {
+		t.Errorf("acme → %q,%v,%v want admin,true,nil", role, active, err)
+	}
+	if role, active, err := c.OrgMembershipRole(ctx, "beta"); err != nil || role != "member" || !active {
+		t.Errorf("beta → %q,%v,%v want member,true,nil", role, active, err)
+	}
+	// Not a member → ("", false, nil) — a 404 is not an error here.
+	if role, active, err := c.OrgMembershipRole(ctx, "stranger"); err != nil || role != "" || active {
+		t.Errorf("stranger → %q,%v,%v want '',false,nil", role, active, err)
+	}
+}

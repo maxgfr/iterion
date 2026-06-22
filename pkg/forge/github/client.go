@@ -76,6 +76,30 @@ func (c *AdminClient) WhoAmI(ctx context.Context) (forge.Identity, error) {
 	return forge.Identity{Login: u.Login, ID: strconv.FormatInt(u.ID, 10), Email: u.Email, Kind: "user", Namespace: u.Login}, nil
 }
 
+// OrgMembershipRole reports the caller's role ("admin" | "member") in org and
+// whether the membership is active, via GET /user/memberships/orgs/{org}.
+// A 404/403 (not a member, or no visibility) returns ("", false, nil) — the
+// caller treats that as "no proof of control", not an error. Used to verify an
+// iterion team controls (admins) a GitHub org before its teams may be
+// allow-listed for SSO.
+func (c *AdminClient) OrgMembershipRole(ctx context.Context, org string) (role string, active bool, err error) {
+	var m struct {
+		State string `json:"state"`
+		Role  string `json:"role"`
+	}
+	code, err := c.do(ctx, http.MethodGet, "/user/memberships/orgs/"+url.PathEscape(org), nil, &m)
+	if err != nil {
+		return "", false, err
+	}
+	if code == http.StatusNotFound || code == http.StatusForbidden {
+		return "", false, nil
+	}
+	if code != http.StatusOK {
+		return "", false, statusErr("GET /user/memberships/orgs", code)
+	}
+	return m.Role, m.State == "active", nil
+}
+
 // ListRepos returns repos the token can admin (Permissions.Admin) — the
 // floor for managing repo webhooks.
 func (c *AdminClient) ListRepos(ctx context.Context, q forge.RepoQuery) ([]forge.RepoSummary, error) {

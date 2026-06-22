@@ -383,8 +383,8 @@ function GitHubSection({
       </div>
 
       <InlineBanner tone="warning" layout="inline">
-        Unverified: iterion does not yet confirm you control these GitHub orgs, so anyone you
-        allow-list here can join this org (as a member). Only list GitHub orgs you administer.
+        A grant takes effect only once iterion verifies you administer its GitHub org — connect
+        that org under the Integrations tab first. Unverified grants are saved but inert.
       </InlineBanner>
 
       <div className="space-y-2">
@@ -431,6 +431,9 @@ function GitHubSection({
                   ))}
                 </Select>
               </div>
+              <Badge variant={g.verified ? "success" : "neutral"}>
+                {g.verified ? "verified" : "pending"}
+              </Badge>
               {canManage && (
                 <Button variant="ghost" size="sm" onClick={() => removeGrant(i)}>
                   Remove

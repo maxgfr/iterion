@@ -36,6 +36,11 @@ func oidcRow(id, tenant string) OrgSSOProvider {
 }
 
 func githubRow(id, tenant string, grants ...GitHubTeamGrant) OrgSSOProvider {
+	// Test rows model verified (active) grants — proof-of-control gating
+	// (FlattenGitHubTeamKeys / RoleForGroups) skips unverified ones.
+	for i := range grants {
+		grants[i].Verified = true
+	}
 	return OrgSSOProvider{
 		ID:            id,
 		TenantID:      tenant,
@@ -153,9 +158,9 @@ func TestMemoryStore_FindGitHubGrantingOrgs(t *testing.T) {
 
 func TestFlattenGitHubTeamKeys(t *testing.T) {
 	keys := FlattenGitHubTeamKeys([]GitHubTeamGrant{
-		{GitHubOrg: "Acme", TeamSlug: "Eng"},
-		{GitHubOrg: "acme", TeamSlug: ""},  // → acme/*
-		{GitHubOrg: "acme", TeamSlug: "*"}, // dup of acme/*
+		{GitHubOrg: "Acme", TeamSlug: "Eng", Verified: true},
+		{GitHubOrg: "acme", TeamSlug: "", Verified: true},  // → acme/*
+		{GitHubOrg: "acme", TeamSlug: "*", Verified: true}, // dup of acme/*
 	})
 	want := map[string]bool{"acme/eng": true, "acme/*": true}
 	if len(keys) != len(want) {
@@ -229,9 +234,9 @@ func TestSealRoundTrip(t *testing.T) {
 
 func TestRoleForGroups(t *testing.T) {
 	row := OrgSSOProvider{Kind: KindGitHub, Grants: []GitHubTeamGrant{
-		{GitHubOrg: "acme", TeamSlug: "eng", Role: identity.RoleMember},
-		{GitHubOrg: "acme", TeamSlug: "ops", Role: identity.RoleViewer},
-		{GitHubOrg: "acme", TeamSlug: "*", Role: identity.RoleMember},
+		{GitHubOrg: "acme", TeamSlug: "eng", Role: identity.RoleMember, Verified: true},
+		{GitHubOrg: "acme", TeamSlug: "ops", Role: identity.RoleViewer, Verified: true},
+		{GitHubOrg: "acme", TeamSlug: "*", Role: identity.RoleMember, Verified: true},
 	}}
 	row.Normalize()
 	// First matching grant in order wins.
@@ -254,7 +259,7 @@ func TestRoleForGroups_CapsAdminToMember(t *testing.T) {
 	// Even if a row somehow carries an admin grant (Validate rejects it at
 	// write time), RoleForGroups clamps to member at login — defence in depth.
 	row := OrgSSOProvider{Kind: KindGitHub, Grants: []GitHubTeamGrant{
-		{GitHubOrg: "acme", TeamSlug: "eng", Role: identity.RoleAdmin},
+		{GitHubOrg: "acme", TeamSlug: "eng", Role: identity.RoleAdmin, Verified: true},
 	}}
 	row.Normalize()
 	if r, ok := row.RoleForGroups([]string{"acme/eng"}); !ok || r != identity.RoleMember {

@@ -11,6 +11,8 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/auth/orgsso"
+	"github.com/SocialGouv/iterion/pkg/forge"
+	forgegithub "github.com/SocialGouv/iterion/pkg/forge/github"
 	"github.com/SocialGouv/iterion/pkg/identity"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
@@ -99,7 +101,7 @@ func (s *Server) handleCreateOrgSSOProvider(w http.ResponseWriter, r *http.Reque
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := s.applyOrgSSOReq(&row, req, true); err != nil {
+	if err := s.applyOrgSSOReq(r.Context(), &row, req, true); err != nil {
 		httpError(w, http.StatusBadRequest, "%v", err)
 		return
 	}
@@ -134,7 +136,7 @@ func (s *Server) handleUpdateOrgSSOProvider(w http.ResponseWriter, r *http.Reque
 	req.Kind = string(row.Kind)
 	row.Enabled = req.Enabled
 	row.UpdatedAt = time.Now().UTC()
-	if err := s.applyOrgSSOReq(&row, req, false); err != nil {
+	if err := s.applyOrgSSOReq(r.Context(), &row, req, false); err != nil {
 		httpError(w, http.StatusBadRequest, "%v", err)
 		return
 	}
@@ -207,7 +209,7 @@ func (s *Server) handleTestOrgSSOProvider(w http.ResponseWriter, r *http.Request
 // empty client_secret preserves the stored one. The role ceiling is enforced
 // by orgsso.Validate (which rejects owner) — anyone reaching here passed
 // canManageTeam (admin/owner), whose SSO grant ceiling is exactly "admin".
-func (s *Server) applyOrgSSOReq(row *orgsso.OrgSSOProvider, req orgSSOProviderReq, create bool) error {
+func (s *Server) applyOrgSSOReq(ctx context.Context, row *orgsso.OrgSSOProvider, req orgSSOProviderReq, create bool) error {
 	row.DisplayName = req.DisplayName
 	switch orgsso.Kind(req.Kind) {
 	case orgsso.KindOIDC:
@@ -230,10 +232,13 @@ func (s *Server) applyOrgSSOReq(row *orgsso.OrgSSOProvider, req orgSSOProviderRe
 		row.Kind = orgsso.KindGitHub
 		row.AutoProvision = req.AutoProvision
 		row.Grants = req.Grants
-		// Normalize materialises GitHubTeamKeys; Validate caps grant roles at
-		// member and requires ≥1 grant. Proof-of-control (verifying the org
-		// admin controls the allow-listed GitHub org) is a tracked follow-up;
-		// until then grants are active but the UI flags them "unverified".
+		// Proof-of-control: a grant is honoured at login only once the team has
+		// proven it controls (admins) the GitHub org via a verified forge
+		// connection. Mark each grant; unverified grants are stored but inert
+		// (FlattenGitHubTeamKeys / RoleForGroups skip them).
+		for i := range row.Grants {
+			row.Grants[i].Verified = s.teamControlsGitHubOrg(ctx, row.TenantID, row.Grants[i].GitHubOrg)
+		}
 	default:
 		return orgsso.ErrInvalid
 	}
@@ -251,6 +256,35 @@ func (s *Server) loadTenantOrgSSORow(ctx context.Context, w http.ResponseWriter,
 		return orgsso.OrgSSOProvider{}, false
 	}
 	return row, true
+}
+
+// teamControlsGitHubOrg reports whether the team has proven control of a GitHub
+// org — an active forge GitHub connection whose token is an org admin. This is
+// the proof gate for GitHub SSO grants (an admin may only allow-list teams of a
+// GitHub org they actually administer, closing H-8). Returns false when forge
+// isn't wired or no connection proves control.
+func (s *Server) teamControlsGitHubOrg(ctx context.Context, teamID, org string) bool {
+	if s.forgeConnections == nil || s.sealer == nil || org == "" {
+		return false
+	}
+	conns, err := s.forgeConnections.ListByTenant(store.WithTenant(ctx, teamID), teamID)
+	if err != nil {
+		return false
+	}
+	for _, conn := range conns {
+		if conn.Provider != forge.ProviderGitHub || conn.Status != forge.StatusActive {
+			continue
+		}
+		token, err := forge.AdminTokenFor(s.sealer, conn)
+		if err != nil {
+			continue
+		}
+		role, active, err := forgegithub.New(s.httpClient, conn.BaseURL(), token).OrgMembershipRole(ctx, org)
+		if err == nil && active && role == "admin" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) writeOrgSSOError(w http.ResponseWriter, err error) {

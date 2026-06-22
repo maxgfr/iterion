@@ -145,11 +145,16 @@ func teamKey(org, team string) string {
 }
 
 // FlattenGitHubTeamKeys derives the materialised GitHubTeamKeys from a grant
-// list (lowercased, deduped). Wildcard grants collapse to "<org>/*".
+// list (lowercased, deduped). Wildcard grants collapse to "<org>/*". Only
+// VERIFIED grants are included — an unverified grant (the team hasn't proven it
+// controls that GitHub org) is stored but inert at login.
 func FlattenGitHubTeamKeys(grants []GitHubTeamGrant) []string {
 	seen := make(map[string]struct{}, len(grants))
 	out := make([]string, 0, len(grants))
 	for _, g := range grants {
+		if !g.Verified {
+			continue
+		}
 		k := teamKey(g.GitHubOrg, g.TeamSlug)
 		if _, dup := seen[k]; dup {
 			continue
@@ -180,6 +185,9 @@ func (p OrgSSOProvider) RoleForGroups(groups []string) (identity.Role, bool) {
 		set[strings.ToLower(g)] = struct{}{}
 	}
 	for _, g := range p.Grants {
+		if !g.Verified {
+			continue
+		}
 		if _, ok := set[teamKey(g.GitHubOrg, g.TeamSlug)]; ok {
 			return capGitHubRole(g.Role), true
 		}

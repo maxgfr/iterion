@@ -26,7 +26,7 @@ func githubFixture(t *testing.T, role identity.Role) (*Service, string) {
 	}
 	if err := store.Create(ctx, orgsso.OrgSSOProvider{
 		ID: "gh1", TenantID: team.ID, Kind: orgsso.KindGitHub, Enabled: true, AutoProvision: true,
-		Grants: []orgsso.GitHubTeamGrant{{GitHubOrg: "acme", TeamSlug: "eng", Role: role}}, CreatedAt: time.Now(),
+		Grants: []orgsso.GitHubTeamGrant{{GitHubOrg: "acme", TeamSlug: "eng", Role: role, Verified: true}}, CreatedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("github row: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestLoginGitHub_ReturningUserPicksUpNewOrg(t *testing.T) {
 	beta, _ := svc.store.CreateTeam(ctx, identity.Team{ID: "team-beta", Name: "Beta", Slug: "beta"})
 	if err := svc.orgSSO.Create(ctx, orgsso.OrgSSOProvider{
 		ID: "gh2", TenantID: beta.ID, Kind: orgsso.KindGitHub, Enabled: true, AutoProvision: true,
-		Grants: []orgsso.GitHubTeamGrant{{GitHubOrg: "beta", TeamSlug: "*", Role: identity.RoleMember}}, CreatedAt: time.Now(),
+		Grants: []orgsso.GitHubTeamGrant{{GitHubOrg: "beta", TeamSlug: "*", Role: identity.RoleMember, Verified: true}}, CreatedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestLoginGitHub_WildcardGrant(t *testing.T) {
 	team, _ := svc.store.CreateTeam(ctx, identity.Team{ID: "t", Name: "T", Slug: "t"})
 	_ = store.Create(ctx, orgsso.OrgSSOProvider{
 		ID: "g", TenantID: team.ID, Kind: orgsso.KindGitHub, Enabled: true, AutoProvision: true,
-		Grants: []orgsso.GitHubTeamGrant{{GitHubOrg: "acme", TeamSlug: "*", Role: identity.RoleMember}}, CreatedAt: time.Now(),
+		Grants: []orgsso.GitHubTeamGrant{{GitHubOrg: "acme", TeamSlug: "*", Role: identity.RoleMember, Verified: true}}, CreatedAt: time.Now(),
 	})
 	// User is an org member (acme/*) but in no specific allow-listed team.
 	res, err := svc.LoginWithExternal(ctx, githubExt("w", "acme/*"), "ua", "ip")

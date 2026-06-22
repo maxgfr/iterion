@@ -118,6 +118,15 @@ func TestOrgSSO_GitHubCreate(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("github create: code=%d body=%s", w.Code, w.Body.String())
 	}
+	// Proof-of-control: with no forge GitHub connection wired, the grant is
+	// stored UNVERIFIED (inert at login) rather than silently trusted.
+	var created orgSSOProviderView
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if len(created.Grants) != 1 || created.Grants[0].Verified {
+		t.Errorf("grant should be unverified without a forge connection: %+v", created.Grants)
+	}
 
 	// A second github row for the same org is refused (one allow-list per org).
 	w = httptest.NewRecorder()
