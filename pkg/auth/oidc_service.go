@@ -44,11 +44,22 @@ func (s *Service) LoginWithExternal(ctx context.Context, ext oidc.ExternalUser, 
 		if u.Status == identity.UserStatusDisabled {
 			return LoginResult{}, ErrAccountDisabled
 		}
-		// Returning user: pick up any newly-matched GitHub orgs (grant-only;
-		// memberships are never revoked here — stale-grant pruning is a
-		// tracked follow-up).
-		if _, err := s.applyGitHubGrants(ctx, u.ID, gh, ext, now); err != nil {
+		// Returning user: re-evaluate GitHub grants — pick up newly-matched
+		// orgs AND revoke github_sso memberships in orgs no longer matched
+		// (left the team / allow-list disabled). Human-created memberships are
+		// untouched (see reconcileGitHubGrants).
+		granted, err := s.applyGitHubGrants(ctx, u.ID, gh, ext, now)
+		if err != nil {
 			return LoginResult{}, err
+		}
+		if gh.provider {
+			matched := make(map[string]struct{}, len(granted))
+			for _, t := range granted {
+				matched[t] = struct{}{}
+			}
+			if err := s.reconcileGitHubGrants(ctx, u.ID, matched, now); err != nil {
+				return LoginResult{}, err
+			}
 		}
 		u.LastLoginAt = &now
 		_ = s.store.UpdateUser(ctx, u)
@@ -198,7 +209,7 @@ func (s *Service) LoginWithExternalForOrg(ctx context.Context, ext oidc.External
 		if u.Status == identity.UserStatusDisabled {
 			return LoginResult{}, ErrAccountDisabled
 		}
-		if err := s.grantMembership(ctx, u.ID, tenantID, role, now); err != nil {
+		if err := s.grantMembership(ctx, u.ID, tenantID, role, identity.MembershipSourceOIDCSSO, now); err != nil {
 			return LoginResult{}, err
 		}
 		u.LastLoginAt = &now
@@ -241,7 +252,7 @@ func (s *Service) LoginWithExternalForOrg(ctx context.Context, ext oidc.External
 	}); err != nil {
 		return LoginResult{}, err
 	}
-	if err := s.grantMembership(ctx, u.ID, tenantID, role, now); err != nil {
+	if err := s.grantMembership(ctx, u.ID, tenantID, role, identity.MembershipSourceOIDCSSO, now); err != nil {
 		return LoginResult{}, err
 	}
 	u.LastLoginAt = &now
@@ -252,10 +263,10 @@ func (s *Service) LoginWithExternalForOrg(ctx context.Context, ext oidc.External
 // grantMembership ensures userID has at least `role` in teamID. Grant-only: an
 // existing membership at an equal-or-higher role is left untouched (never
 // downgrade a manually-promoted user); a lower one is upgraded.
-func (s *Service) grantMembership(ctx context.Context, userID, teamID string, role identity.Role, now time.Time) error {
+func (s *Service) grantMembership(ctx context.Context, userID, teamID string, role identity.Role, source string, now time.Time) error {
 	existing, err := s.store.GetMembership(ctx, userID, teamID)
 	if errors.Is(err, identity.ErrNotFound) {
-		return s.store.UpsertMembership(ctx, identity.Membership{UserID: userID, TeamID: teamID, Role: role, JoinedAt: now})
+		return s.store.UpsertMembership(ctx, identity.Membership{UserID: userID, TeamID: teamID, Role: role, Source: source, JoinedAt: now})
 	}
 	if err != nil {
 		return err
@@ -263,8 +274,35 @@ func (s *Service) grantMembership(ctx context.Context, userID, teamID string, ro
 	if existing.Role.AtLeast(role) {
 		return nil
 	}
+	// Upgrade the role but PRESERVE the existing Source: a membership a human
+	// created (invitation/manual) must not become SSO-revocable just because an
+	// SSO grant later matched it.
 	existing.Role = role
 	return s.store.UpsertMembership(ctx, existing)
+}
+
+// reconcileGitHubGrants revokes the user's github_sso-sourced memberships in
+// tenants they no longer match (e.g. removed from the allow-listed GitHub team,
+// or the allow-list was disabled). matched is the set of tenant IDs the user
+// currently matches. Only github_sso-minted memberships are touched —
+// human-created ones (Source empty / invitation / manual) are never revoked.
+func (s *Service) reconcileGitHubGrants(ctx context.Context, userID string, matched map[string]struct{}, now time.Time) error {
+	memberships, err := s.store.ListMembershipsByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	for _, m := range memberships {
+		if m.Source != identity.MembershipSourceGitHubSSO {
+			continue
+		}
+		if _, ok := matched[m.TeamID]; ok {
+			continue
+		}
+		if err := s.store.DeleteMembership(ctx, userID, m.TeamID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // githubGate captures the per-login GitHub team-gating context: whether the
@@ -315,7 +353,7 @@ func (s *Service) applyGitHubGrants(ctx context.Context, userID string, gh githu
 		if !ok {
 			continue
 		}
-		if err := s.grantMembership(ctx, userID, row.TenantID, role, now); err != nil {
+		if err := s.grantMembership(ctx, userID, row.TenantID, role, identity.MembershipSourceGitHubSSO, now); err != nil {
 			return granted, err
 		}
 		granted = append(granted, row.TenantID)

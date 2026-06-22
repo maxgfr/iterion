@@ -174,7 +174,17 @@ type Membership struct {
 	Role      Role      `bson:"role" json:"role"`
 	InvitedBy string    `bson:"invited_by,omitempty" json:"invited_by,omitempty"`
 	JoinedAt  time.Time `bson:"joined_at" json:"joined_at"`
+	// Source records how the membership was created, so SSO-minted memberships
+	// can be re-evaluated/revoked on a later login without disturbing
+	// human-created ones. Empty = legacy/manual/invitation — NEVER auto-revoked.
+	Source string `bson:"source,omitempty" json:"source,omitempty"`
 }
+
+// Membership provenance values for Membership.Source.
+const (
+	MembershipSourceGitHubSSO = "github_sso"
+	MembershipSourceOIDCSSO   = "oidc_sso"
+)
 
 // Invitation is a pending offer to join a team. The token surfaced
 // in the email is hashed in TokenHash; we never store the plaintext.

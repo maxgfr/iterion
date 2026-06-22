@@ -98,6 +98,41 @@ func TestLoginGitHub_ReturningUserPicksUpNewOrg(t *testing.T) {
 	}
 }
 
+func TestLoginGitHub_RevokesStaleGrant(t *testing.T) {
+	svc, teamID := githubFixture(t, identity.RoleMember) // gh1: acme/eng → member of team-acme
+	ctx := context.Background()
+	beta, _ := svc.store.CreateTeam(ctx, identity.Team{ID: "team-beta", Name: "Beta", Slug: "beta"})
+
+	// First login: user matches acme/eng → github_sso membership in team-acme.
+	res, err := svc.LoginWithExternal(ctx, githubExt("u3", "acme/*", "acme/eng"), "ua", "ip")
+	if err != nil {
+		t.Fatalf("first login: %v", err)
+	}
+	m, _ := svc.store.GetMembership(ctx, res.User.ID, teamID)
+	if m.Source != identity.MembershipSourceGitHubSSO {
+		t.Fatalf("acme membership source = %q, want github_sso", m.Source)
+	}
+	// A human (invitation) membership in another team must survive reconciliation.
+	if err := svc.store.UpsertMembership(ctx, identity.Membership{
+		UserID: res.User.ID, TeamID: beta.ID, Role: identity.RoleMember, InvitedBy: "admin", JoinedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-login (returning user) with groups that no longer match acme/eng.
+	if _, err := svc.LoginWithExternal(ctx, githubExt("u3", "other/*"), "ua", "ip"); err != nil {
+		t.Fatalf("relogin: %v", err)
+	}
+	// The stale github_sso membership is revoked...
+	if _, err := svc.store.GetMembership(ctx, res.User.ID, teamID); !errors.Is(err, identity.ErrNotFound) {
+		t.Errorf("stale github_sso membership not revoked: %v", err)
+	}
+	// ...but the human-created membership is untouched.
+	if _, err := svc.store.GetMembership(ctx, res.User.ID, beta.ID); err != nil {
+		t.Errorf("human membership wrongly revoked: %v", err)
+	}
+}
+
 func TestLoginGitHub_WildcardGrant(t *testing.T) {
 	// A grant with team_slug "*" matches any member of the org.
 	svc := newTestService(t, SignupInviteOnly)
