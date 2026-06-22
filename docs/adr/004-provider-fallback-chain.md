@@ -1,6 +1,6 @@
 # ADR-004: Per-node provider fallback chain as a credential-routing-hint chain
 
-- **Status**: Accepted
+- **Status**: Accepted (amended 2026-06-22 — per-element model shipped, see below)
 - **Date**: 2026-05-26
 - **Authors**: devthejo
 - **Code**: [pkg/backend/model/executor_retry.go](../../pkg/backend/model/executor_retry.go)
@@ -148,3 +148,44 @@ situation visible rather than silent.
 - **Deferred work is bounded and named.** Cross-API failover lives behind
   `providerFallbackEligible` + the C088 escape hatch (vary `model:` on
   claw); no architectural rework is needed to add it later.
+
+## Amendment 2026-06-22: per-element model (`provider:model`)
+
+Alternative #1 above ("make the chain carry full provider/model specs")
+was rejected *for the original change* but flagged as the deferred "model
+fallback chain". A real z.ai 5-hour rate-limit cap hit mid-dogfood proved
+it necessary: a chain like `zai,anthropic` falls through correctly, but a
+**provider-specific model** (z.ai's `glm-5.2`) is rejected by Anthropic on
+fall-through because the hint swaps but the model does not.
+
+We shipped the **narrow, claude_code-scoped** form of alternative #1: an
+element may pin its own model with a `provider:model` token
+(`provider: "zai:glm-5.2,anthropic:claude-opus-4-8"`). The objections in
+alternative #1 don't apply to this scope:
+
+- *"It overloads `provider:` with model semantics / forces repeating the
+  model."* — Only chains that genuinely need a per-provider model write
+  one; a model-less element inherits the node's `model:`, so single-model
+  chains and the historical single-value form are byte-for-byte unchanged.
+- *"It doesn't help claude_code, which can't talk to OpenAI."* — This is
+  **not** cross-API failover. Both `zai` and `anthropic` speak the
+  Anthropic wire API; only the model id differs. That is exactly
+  claude_code's lane (the z.ai facade ↔ direct Anthropic), where the chain
+  was already meaningful (`providerFallbackEligible`).
+
+Mechanism: `resolveProviderChain` now returns `[]providerStep`
+(`{Provider, Model}`), splitting each token on the **first** colon (after
+env-expansion, so `${VAR:-x}`'s `:-` is never misread). `dispatchWith
+ProviderFallback` swaps `task.Model` alongside `task.ProviderHint` per
+element — overriding with the element's model, or restoring the node
+baseline when the element has none. `OnProviderFallback` gained
+`FromModel`/`ToModel`. A new warning **C172** flags a malformed
+`provider:model` element (empty provider or model part). Cross-API
+failover on `claw`/`codex` (a model whose provider prefix changes) remains
+deferred behind the same `providerFallbackEligible` seam.
+
+Rejected here too — a **parallel `models:` list** alongside `provider:`:
+it needs a new parser token + AST + IR field and couples the two fields
+positionally (lengths must match), adding a failure mode the inline form
+has by construction none of. The inline `provider:model` token keeps the
+DSL surface and the diff minimal.

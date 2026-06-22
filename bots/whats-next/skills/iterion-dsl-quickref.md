@@ -124,9 +124,14 @@ Backend rules:
   hint (`anthropic`/`zai`/`openai`/`auto`) OR an ordered fallback
   chain (`provider: "zai,anthropic"`): on a hard failure beyond
   retries the runtime falls through to the next provider
-  transparently (generalises `RESCUE_PROVIDER`). Honoured by
-  `claude_code` (same-API family); `claw`/`codex` use only the
-  first hint (compiler warns C088). Single values are unchanged.
+  transparently (generalises `RESCUE_PROVIDER`). Each element may
+  pin its own model with `provider:model`
+  (`provider: "zai:glm-5.2,anthropic:claude-opus-4-8"`) so the
+  fall-through swaps BOTH the hint and the wire model; a model-less
+  element inherits the node `model:`. Honoured by `claude_code`
+  (same-API family); `claw`/`codex` use only the first hint
+  (compiler warns C088). Malformed `provider:model` warns C172.
+  Single values are unchanged.
 
 Session-mode notes:
 - `fresh` (default) — new context every call.

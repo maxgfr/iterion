@@ -761,6 +761,16 @@ func (e *ClawExecutor) resolveBackendName(node ir.Node) string {
 	return delegate.BackendClaw
 }
 
+// providerStep is one element of a resolved provider fallback chain: a
+// credential-routing hint paired with an optional per-element model
+// override. An empty Model means "inherit the node's `model:`" — the
+// historical behaviour, so a chain without any `provider:model` element
+// is byte-for-byte unchanged.
+type providerStep struct {
+	Provider string // routing hint ("" = auto / defer to process-env precedence)
+	Model    string // per-element model override ("" = inherit the node's model)
+}
+
 // resolveProvider returns the first (preferred) credential-routing hint
 // for a node, or "" to defer to the global precedence. It is the
 // single-value façade over resolveProviderChain, kept for the call
@@ -774,13 +784,14 @@ func (e *ClawExecutor) resolveBackendName(node ir.Node) string {
 //   - "openai" — for claw/OpenAI-compat: force OPENAI_API_KEY direct.
 //   - "auto" / "" — current process-env-driven precedence.
 func (e *ClawExecutor) resolveProvider(node ir.Node) string {
-	return e.resolveProviderChain(node)[0]
+	return e.resolveProviderChain(node)[0].Provider
 }
 
 // resolveProviderChain resolves the per-node `provider:` field into an
-// ordered fallback chain of credential-routing hints. A single value
-// (the historical form, incl. `${RESCUE_PROVIDER:-zai}`) yields a
-// one-element chain, so existing workflows behave exactly as before.
+// ordered fallback chain of credential-routing hints, each optionally
+// carrying its own model. A single value (the historical form, incl.
+// `${RESCUE_PROVIDER:-zai}`) yields a one-element chain, so existing
+// workflows behave exactly as before.
 //
 // A comma-separated value (`provider: "anthropic,zai,openai"`) yields
 // the ordered list: the executor tries each provider in turn, falling
@@ -788,15 +799,26 @@ func (e *ClawExecutor) resolveProvider(node ir.Node) string {
 // dispatchWithProviderFallback). This generalises the single-node
 // RESCUE_PROVIDER escape hatch into a declarative chain.
 //
+// Each element may pin its own model with a `provider:model` token
+// (`provider: "zai:glm-5.2,anthropic:claude-opus-4-8"`): on fall-through
+// the executor swaps BOTH the credential hint AND the wire model, so a
+// chain can route a provider-specific model (glm-5.2 on z.ai) to a
+// different model on the next provider (claude-opus-4-8 on anthropic).
+// The split is on the FIRST colon only, so a model id that itself
+// contains a colon survives intact. A token without a colon keeps the
+// node's `model:` (Model == "").
+//
 // Env expansion runs on the whole field FIRST, then the result is split
 // on commas — so an env var may supply the entire chain
 // (`${PROVIDERS:-anthropic,zai}`) and a `:-default` may itself contain a
-// comma. Tokens are trimmed; an explicit "auto" normalises to "" (defer
-// to process-env precedence) but is kept as a chain element; genuinely
+// comma. (Because expansion precedes the colon split, a `${VAR:-x}`
+// default's `:-` is never mistaken for a provider:model separator.)
+// Tokens are trimmed; an explicit "auto" normalises to "" (defer to
+// process-env precedence) but is kept as a chain element; genuinely
 // empty tokens (stray/trailing commas) are dropped; consecutive
-// duplicates are collapsed. The chain is never empty: an unset/blank
-// field yields [""], i.e. a single auto attempt.
-func (e *ClawExecutor) resolveProviderChain(node ir.Node) []string {
+// duplicate steps are collapsed. The chain is never empty: an
+// unset/blank field yields a single auto attempt.
+func (e *ClawExecutor) resolveProviderChain(node ir.Node) []providerStep {
 	var raw string
 	switch n := node.(type) {
 	case *ir.AgentNode:
@@ -807,22 +829,27 @@ func (e *ClawExecutor) resolveProviderChain(node ir.Node) []string {
 		raw = n.Provider
 	}
 	expanded := ir.ExpandEnvWithDefault(raw)
-	chain := make([]string, 0, 4)
+	chain := make([]providerStep, 0, 4)
 	for _, part := range strings.Split(expanded, ",") {
-		p := strings.TrimSpace(part)
-		if p == "" {
+		token := strings.TrimSpace(part)
+		if token == "" {
 			continue // stray, leading or trailing comma
 		}
-		if p == "auto" {
-			p = "" // explicit auto → process-env precedence
+		// ir.SplitProviderStep is the single source of truth for the
+		// `provider:model` element form, shared with the compiler's
+		// validateProviders so parse and validation never drift.
+		hint, model, _ := ir.SplitProviderStep(token)
+		step := providerStep{Provider: hint, Model: model}
+		if step.Provider == "auto" {
+			step.Provider = "" // explicit auto → process-env precedence
 		}
-		if len(chain) > 0 && chain[len(chain)-1] == p {
+		if len(chain) > 0 && chain[len(chain)-1] == step {
 			continue // collapse consecutive duplicates
 		}
-		chain = append(chain, p)
+		chain = append(chain, step)
 	}
 	if len(chain) == 0 {
-		return []string{""}
+		return []providerStep{{}}
 	}
 	return chain
 }
@@ -1013,7 +1040,7 @@ func stampDelegateOutputMeta(output map[string]interface{}, result delegate.Resu
 func (e *ClawExecutor) dispatchWithObservability(
 	ctx context.Context,
 	nodeID, backendName, errPrefix string,
-	chain []string,
+	chain []providerStep,
 	backend delegate.Backend,
 	task *delegate.Task,
 ) (delegate.Result, error) {

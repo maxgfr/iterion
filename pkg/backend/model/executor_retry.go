@@ -208,6 +208,30 @@ func providerLabel(p string) string {
 	return p
 }
 
+// stepLabel renders a chain element for logs: "zai" when it inherits the
+// node model, "zai/glm-5.2" when it pins its own. The empty "auto" hint
+// maps to a readable token.
+func stepLabel(s providerStep) string {
+	if s.Model == "" {
+		return providerLabel(s.Provider)
+	}
+	return providerLabel(s.Provider) + "/" + s.Model
+}
+
+// chainLabel renders a whole chain in its `provider:model` source form
+// for the exhausted-chain error, e.g. "zai:glm-5.2,anthropic:claude-opus-4-8".
+func chainLabel(chain []providerStep) string {
+	parts := make([]string, len(chain))
+	for i, s := range chain {
+		p := providerLabel(s.Provider)
+		if s.Model != "" {
+			p += ":" + s.Model
+		}
+		parts[i] = p
+	}
+	return strings.Join(parts, ",")
+}
+
 // providerFallbackEligible reports whether a backend actually consumes
 // the per-node provider hint, and therefore whether walking a
 // multi-element provider chain is meaningful. Only claude_code honours
@@ -228,8 +252,8 @@ func providerFallbackEligible(backendName string) bool {
 // dispatchWithProviderFallback runs backend.Execute across the node's
 // provider chain, transparently falling through to the next provider on
 // a hard failure beyond the retry budget. It mutates task.ProviderHint
-// per attempt and returns the first success, or the last error once the
-// chain is exhausted.
+// (and, for elements that pin one, task.Model) per attempt and returns
+// the first success, or the last error once the chain is exhausted.
 //
 // "Hard failure" is any non-nil error returned by retryDelegateLoop —
 // a non-retryable error, or a retryable one that exhausted the budget.
@@ -238,15 +262,21 @@ func providerFallbackEligible(backendName string) bool {
 // provider. Each fall-through emits exactly one log note and one
 // OnProviderFallback hook, so the operator sees a route change, not a
 // failure.
+//
+// task.Model as built by buildTask is the node baseline. An element that
+// declares a `provider:model` model overrides it for that attempt; an
+// element without one (Model == "") restores the baseline — so a
+// model-less element after a model-bearing one does NOT inherit the
+// previous element's override.
 func (e *ClawExecutor) dispatchWithProviderFallback(
 	ctx context.Context,
 	nodeID, backendName string,
-	chain []string,
+	chain []providerStep,
 	backend delegate.Backend,
 	task *delegate.Task,
 ) (delegate.Result, error) {
 	if len(chain) == 0 {
-		chain = []string{""}
+		chain = []providerStep{{}}
 	}
 	// Backends that ignore the provider hint gain nothing from walking
 	// the chain — collapse to the preferred provider to avoid a wasted
@@ -255,12 +285,21 @@ func (e *ClawExecutor) dispatchWithProviderFallback(
 		chain = chain[:1]
 	}
 
+	baseModel := task.Model
+	effectiveModel := func(s providerStep) string {
+		if s.Model != "" {
+			return s.Model
+		}
+		return baseModel
+	}
+
 	var (
 		result delegate.Result
 		err    error
 	)
-	for i, provider := range chain {
-		task.ProviderHint = provider
+	for i, step := range chain {
+		task.ProviderHint = step.Provider
+		task.Model = effectiveModel(step)
 		result, err = e.retryDelegateLoop(ctx, nodeID, backendName, func() (delegate.Result, error) {
 			return backend.Execute(ctx, *task)
 		})
@@ -277,13 +316,15 @@ func (e *ClawExecutor) dispatchWithProviderFallback(
 			if e.logger != nil {
 				e.logger.Warn("[%s#%d/%s] provider %q failed beyond retry budget; falling through to %q: %v",
 					nodeID, LoopIterationFromContext(ctx), backendName,
-					providerLabel(provider), providerLabel(next), err)
+					stepLabel(step), stepLabel(next), err)
 			}
 			if e.hooks.OnProviderFallback != nil {
 				e.hooks.OnProviderFallback(nodeID, ProviderFallbackInfo{
 					BackendName: backendName,
-					From:        provider,
-					To:          next,
+					From:        step.Provider,
+					To:          next.Provider,
+					FromModel:   effectiveModel(step),
+					ToModel:     effectiveModel(next),
 					Attempts:    e.retry.maxAttempts(),
 					Err:         err,
 				})
@@ -294,7 +335,7 @@ func (e *ClawExecutor) dispatchWithProviderFallback(
 	// alternatives so the surfaced error explains the multi-provider
 	// attempt; a single-element chain keeps the bare backend error.
 	if len(chain) > 1 {
-		return result, fmt.Errorf("all providers in chain %v failed; last error: %w", chain, err)
+		return result, fmt.Errorf("all providers in chain %s failed; last error: %w", chainLabel(chain), err)
 	}
 	return result, err
 }

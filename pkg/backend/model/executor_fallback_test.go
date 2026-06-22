@@ -19,17 +19,19 @@ import (
 // many retry attempts each provider got). Calls are synchronous from the
 // executor's goroutine, so no locking is needed.
 type providerScriptedBackend struct {
-	calls []string         // ProviderHint of each Execute call, in order
-	fail  map[string]error // provider hint -> error to return (absent = success)
+	calls  []string         // ProviderHint of each Execute call, in order
+	models []string         // task.Model of each Execute call, in order (parallel to calls)
+	fail   map[string]error // provider hint -> error to return (absent = success)
 }
 
 func (b *providerScriptedBackend) Execute(_ context.Context, task delegate.Task) (delegate.Result, error) {
 	b.calls = append(b.calls, task.ProviderHint)
+	b.models = append(b.models, task.Model)
 	if err, ok := b.fail[task.ProviderHint]; ok {
 		return delegate.Result{}, err
 	}
 	return delegate.Result{
-		Output:      map[string]interface{}{"ok": true, "served_by": task.ProviderHint},
+		Output:      map[string]interface{}{"ok": true, "served_by": task.ProviderHint, "model": task.Model},
 		BackendName: delegate.BackendClaudeCode,
 	}, nil
 }
@@ -58,10 +60,15 @@ func newFallbackExecutor(reg *delegate.Registry, hooks EventHooks) *ClawExecutor
 }
 
 func fallbackAgentNode(id, backend, provider string) *ir.AgentNode {
+	return fallbackAgentNodeModel(id, backend, provider, "")
+}
+
+func fallbackAgentNodeModel(id, backend, provider, model string) *ir.AgentNode {
 	n := &ir.AgentNode{}
 	n.ID = id
 	n.LLMFields.Backend = backend
 	n.LLMFields.Provider = provider
+	n.LLMFields.Model = model
 	return n
 }
 
@@ -97,6 +104,81 @@ func TestProviderFallback_FallsThroughThenSucceeds(t *testing.T) {
 	}
 	if rec.events[0].From != "zai" || rec.events[0].To != "anthropic" {
 		t.Errorf("fallback event = %+v, want from=zai to=anthropic", rec.events[0])
+	}
+}
+
+// TestProviderFallback_PerElementModelSwap is the headline case for the
+// per-element model feature: a claude_code node declares
+// `provider: "zai:glm-5.2,anthropic:claude-opus-4-8"`, z.ai (running the
+// provider-specific glm-5.2) fails, and the run transparently completes
+// against anthropic running claude-opus-4-8. Both the provider hint AND
+// the wire model swap on fall-through.
+func TestProviderFallback_PerElementModelSwap(t *testing.T) {
+	rec := &fallbackRecorder{}
+	reg := delegate.NewRegistry()
+	fake := &providerScriptedBackend{fail: map[string]error{
+		"zai": &delegate.ErrTransient{Reason: "z.ai 5h cap hit"},
+	}}
+	reg.Register(delegate.BackendClaudeCode, fake)
+
+	e := newFallbackExecutor(reg, rec.hook())
+	node := fallbackAgentNode("review", delegate.BackendClaudeCode, "zai:glm-5.2,anthropic:claude-opus-4-8")
+
+	out, err := e.Execute(context.Background(), node, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("expected success after model-swapping fall-through, got error: %v", err)
+	}
+	if out["served_by"] != "anthropic" || out["model"] != "claude-opus-4-8" {
+		t.Errorf("expected served_by=anthropic model=claude-opus-4-8, got served_by=%v model=%v", out["served_by"], out["model"])
+	}
+	// zai retried up to the budget (2 attempts) with glm-5.2, then
+	// anthropic once with claude-opus-4-8.
+	wantCalls := []string{"zai", "zai", "anthropic"}
+	if !equalStrings(fake.calls, wantCalls) {
+		t.Errorf("provider call order = %v, want %v", fake.calls, wantCalls)
+	}
+	wantModels := []string{"glm-5.2", "glm-5.2", "claude-opus-4-8"}
+	if !equalStrings(fake.models, wantModels) {
+		t.Errorf("model call order = %v, want %v", fake.models, wantModels)
+	}
+	if len(rec.events) != 1 {
+		t.Fatalf("expected exactly one OnProviderFallback, got %d", len(rec.events))
+	}
+	ev := rec.events[0]
+	if ev.From != "zai" || ev.To != "anthropic" || ev.FromModel != "glm-5.2" || ev.ToModel != "claude-opus-4-8" {
+		t.Errorf("fallback event = %+v, want from=zai/glm-5.2 to=anthropic/claude-opus-4-8", ev)
+	}
+}
+
+// TestProviderFallback_ModelElementInheritsBaseline verifies that a chain
+// element WITHOUT a per-element model falls back to the node's `model:`
+// baseline — and that an inheriting element following a model-bearing one
+// restores the baseline rather than carrying the previous override.
+func TestProviderFallback_ModelElementInheritsBaseline(t *testing.T) {
+	rec := &fallbackRecorder{}
+	reg := delegate.NewRegistry()
+	fake := &providerScriptedBackend{fail: map[string]error{
+		"zai": errors.New("exit status 1"), // hard failure, no retry
+	}}
+	reg.Register(delegate.BackendClaudeCode, fake)
+
+	e := newFallbackExecutor(reg, rec.hook())
+	// zai pins glm-5.2; anthropic inherits the node baseline model.
+	node := fallbackAgentNodeModel("review", delegate.BackendClaudeCode, "zai:glm-5.2,anthropic", "claude-sonnet-4-6")
+
+	out, err := e.Execute(context.Background(), node, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("expected success after fall-through, got: %v", err)
+	}
+	if out["served_by"] != "anthropic" || out["model"] != "claude-sonnet-4-6" {
+		t.Errorf("expected anthropic to inherit baseline claude-sonnet-4-6, got served_by=%v model=%v", out["served_by"], out["model"])
+	}
+	wantModels := []string{"glm-5.2", "claude-sonnet-4-6"}
+	if !equalStrings(fake.models, wantModels) {
+		t.Errorf("model call order = %v, want %v", fake.models, wantModels)
+	}
+	if len(rec.events) != 1 || rec.events[0].ToModel != "claude-sonnet-4-6" {
+		t.Errorf("expected one fallback with ToModel=claude-sonnet-4-6, got %+v", rec.events)
 	}
 }
 
@@ -204,7 +286,7 @@ func TestDispatchProviderFallback_ContextCancelledNoFallthrough(t *testing.T) {
 	cancel() // already cancelled
 
 	task := delegate.Task{NodeID: "n"}
-	_, err := e.dispatchWithProviderFallback(ctx, "n", delegate.BackendClaudeCode, []string{"zai", "anthropic"}, fake, &task)
+	_, err := e.dispatchWithProviderFallback(ctx, "n", delegate.BackendClaudeCode, []providerStep{{Provider: "zai"}, {Provider: "anthropic"}}, fake, &task)
 	if err == nil {
 		t.Fatal("expected error on cancelled context")
 	}
@@ -230,7 +312,7 @@ func TestDispatchProviderFallback_CollapsesChainForHintIgnoringBackend(t *testin
 	fake := &providerScriptedBackend{} // no failures
 
 	task := delegate.Task{NodeID: "n"}
-	out, err := e.dispatchWithProviderFallback(context.Background(), "n", delegate.BackendClaw, []string{"zai", "anthropic"}, fake, &task)
+	out, err := e.dispatchWithProviderFallback(context.Background(), "n", delegate.BackendClaw, []providerStep{{Provider: "zai"}, {Provider: "anthropic"}}, fake, &task)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -65,3 +65,31 @@ func TestProvider_SingleValueOnClawNoWarning(t *testing.T) {
 	r := compileFile(t, providerSrc("claw", "zai"))
 	expectNoDiag(t, r, DiagProviderChainIgnored)
 }
+
+// Per-element `provider:model` form is valid: only the provider part is
+// checked against KnownProviders, so a known provider with a model emits
+// no C087 and no C172.
+func TestProvider_PerElementModelNoWarning(t *testing.T) {
+	r := compileFile(t, providerSrc("claude_code", "zai:glm-5.2,anthropic:claude-opus-4-8"))
+	expectNoDiag(t, r, DiagUnknownProvider)
+	expectNoDiag(t, r, DiagMalformedProviderStep)
+}
+
+// The provider part of a `provider:model` token is still validated: a typo
+// in the provider half warns C087.
+func TestProvider_PerElementUnknownProviderWarns(t *testing.T) {
+	r := compileFile(t, providerSrc("claude_code", "zaai:glm-5.2,anthropic:claude-opus-4-8"))
+	expectDiag(t, r, DiagUnknownProvider)
+}
+
+// A malformed element — colon present but an empty provider or model part —
+// warns C172.
+func TestProvider_MalformedStepEmptyModelWarns(t *testing.T) {
+	r := compileFile(t, providerSrc("claude_code", "zai:,anthropic"))
+	expectDiag(t, r, DiagMalformedProviderStep)
+}
+
+func TestProvider_MalformedStepEmptyProviderWarns(t *testing.T) {
+	r := compileFile(t, providerSrc("claude_code", "anthropic,:glm-5.2"))
+	expectDiag(t, r, DiagMalformedProviderStep)
+}

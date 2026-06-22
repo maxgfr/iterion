@@ -4,8 +4,9 @@ import "strings"
 
 // Provider-routing diagnostics.
 const (
-	DiagUnknownProvider      DiagCode = "C087" // provider chain token outside the known set (warning)
-	DiagProviderChainIgnored DiagCode = "C088" // multi-provider chain on a backend that ignores the hint (warning)
+	DiagUnknownProvider       DiagCode = "C087" // provider chain token outside the known set (warning)
+	DiagProviderChainIgnored  DiagCode = "C088" // multi-provider chain on a backend that ignores the hint (warning)
+	DiagMalformedProviderStep DiagCode = "C172" // provider chain element of the `provider:model` form with an empty provider or model part (warning)
 )
 
 // KnownProviders is the set of credential-routing hints the runtime
@@ -35,15 +36,21 @@ var hintIgnoringBackends = map[string]bool{
 // validateProviders walks every LLM-capable node (agent, judge, llm
 // router) and validates the `provider:` field's fallback-chain form:
 //
-//   - C087 (warning) for any literal chain token outside KnownProviders —
-//     catches typos like "anthropc". Fields containing a ${VAR} env ref
-//     are skipped wholesale: their literal text isn't the resolved value,
-//     and a ${VAR:-a,b} default may itself carry commas.
+//   - C087 (warning) for any literal chain token whose provider part is
+//     outside KnownProviders — catches typos like "anthropc". A token may
+//     carry a per-element model (`zai:glm-5.2`); only the provider part is
+//     checked. Fields containing a ${VAR} env ref are skipped wholesale:
+//     their literal text isn't the resolved value, and a ${VAR:-a,b}
+//     default may itself carry commas.
 //   - C088 (warning) when a >1-element chain is declared on a backend that
 //     ignores the provider hint (claw / codex), so the author knows the
 //     fall-through is inert there today.
+//   - C172 (warning) for a malformed `provider:model` element — a colon
+//     with an empty provider part (":glm-5.2") or empty model part
+//     ("zai:"). The runtime trims to whatever is present, so this is a
+//     likely typo, not a hard error.
 //
-// Both are warnings, never errors: the run still proceeds, and the
+// All are warnings, never errors: the run still proceeds, and the
 // runtime degrades gracefully (unknown hint → default precedence; chain
 // on a hint-ignoring backend → first provider only).
 func (c *compiler) validateProviders(w *Workflow) {
@@ -59,13 +66,19 @@ func (c *compiler) validateProviders(w *Workflow) {
 		}
 		tokens := splitProviderChain(provider)
 		for _, tok := range tokens {
-			if tok == "auto" {
+			hint, model, hasModel := SplitProviderStep(tok)
+			if hasModel && (hint == "" || model == "") {
+				c.warnfAt(DiagMalformedProviderStep, id, "",
+					"%s %q: provider chain element %q is malformed — the `provider:model` form needs both a provider and a model",
+					kind, id, tok)
+			}
+			if hint == "auto" || hint == "" {
 				continue
 			}
-			if !KnownProviders[tok] {
+			if !KnownProviders[hint] {
 				c.warnfAt(DiagUnknownProvider, id, "",
 					"%s %q: provider %q is not a known routing hint (known: anthropic, zai, openai, auto) — it will be ignored and the node falls back to default credential precedence",
-					kind, id, tok)
+					kind, id, hint)
 			}
 		}
 		if len(tokens) > 1 && hintIgnoringBackends[backend] {
@@ -88,8 +101,9 @@ func (c *compiler) validateProviders(w *Workflow) {
 }
 
 // splitProviderChain splits a literal provider field into its trimmed,
-// non-empty tokens. Mirrors the runtime's resolveProviderChain so compile
-// and runtime agree on what counts as a chain element.
+// non-empty tokens (each possibly of the `provider:model` form). Mirrors
+// the runtime's resolveProviderChain so compile and runtime agree on what
+// counts as a chain element.
 func splitProviderChain(provider string) []string {
 	parts := strings.Split(provider, ",")
 	out := make([]string, 0, len(parts))
@@ -101,4 +115,19 @@ func splitProviderChain(provider string) []string {
 		out = append(out, p)
 	}
 	return out
+}
+
+// SplitProviderStep splits one provider-chain token into its provider hint
+// and optional per-element model on the FIRST colon (so a model id that
+// itself contains a colon survives). hasModel reports whether a colon was
+// present at all, letting callers distinguish "zai" (no model) from "zai:"
+// (malformed empty model). It is the single source of truth for the
+// `provider:model` element form, shared by the compiler (validateProviders)
+// and the runtime (model.resolveProviderChain) so the two never drift.
+func SplitProviderStep(token string) (hint, model string, hasModel bool) {
+	before, after, found := strings.Cut(token, ":")
+	if !found {
+		return token, "", false
+	}
+	return strings.TrimSpace(before), strings.TrimSpace(after), true
 }

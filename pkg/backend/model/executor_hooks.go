@@ -61,6 +61,8 @@ type ProviderFallbackInfo struct {
 	BackendName string // backend that ran the chain (e.g. "claude_code")
 	From        string // provider hint that just failed ("" = auto)
 	To          string // provider hint about to be tried next
+	FromModel   string // effective model the failed provider ran (per-element override or node baseline)
+	ToModel     string // effective model the next provider will run
 	Attempts    int    // retry attempts spent on the failed provider
 	Err         error  // the hard failure that triggered the fall-through
 }

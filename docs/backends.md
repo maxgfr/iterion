@@ -149,6 +149,34 @@ for run-time resolution and not statically validated.
 Single-value `provider:` (and unset) behaviour is unchanged — the chain
 form is purely additive and fully back-compatible.
 
+### Per-element model (`provider:model`)
+
+A provider-specific model can be pinned per chain element with a
+`provider:model` token, so a fall-through swaps **both** the credential
+hint and the wire model:
+
+```yaml
+agent reviewer:
+  backend: "claude_code"
+  provider: "zai:glm-5.2,anthropic:claude-opus-4-8"   # glm-5.2 on z.ai, claude-opus-4-8 on Anthropic
+```
+
+This is the case where the chain's two providers serve **different model
+ids over the same Anthropic-wire API** — `glm-5.2` is a z.ai model that
+Anthropic would reject, so a hint-only swap would break on fall-through.
+The token is split on the **first** colon (a model id that itself
+contains a colon survives intact). An element **without** a model
+(`anthropic` in `zai:glm-5.2,anthropic`) inherits the node's `model:`
+baseline; an inheriting element after a model-bearing one restores the
+baseline rather than carrying the previous override. A malformed element
+— a colon with an empty provider (`:glm-5.2`) or empty model (`zai:`) —
+warns **C172** at compile time. Env expansion still runs on the whole
+field first, so the `:-` in `${VAR:-x}` is never mistaken for a
+`provider:model` separator.
+
+Like the hint chain itself, per-element models only take effect on
+`claude_code` (the only backend that walks the chain today).
+
 ## Transient-error & network resilience
 
 A brief internet/API outage should not abort a whole run. Every backend

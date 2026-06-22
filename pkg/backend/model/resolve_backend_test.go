@@ -210,7 +210,7 @@ func TestResolveProvider_EmptyWhenUnset(t *testing.T) {
 	}
 }
 
-func equalStringSlice(a, b []string) bool {
+func equalProviderSteps(a, b []providerStep) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -230,22 +230,27 @@ func TestResolveProviderChain(t *testing.T) {
 		name     string
 		provider string
 		setEnv   map[string]string
-		want     []string
+		want     []providerStep
 	}{
-		{"unset", "", nil, []string{""}},
-		{"single", "anthropic", nil, []string{"anthropic"}},
-		{"auto normalises to blank", "auto", nil, []string{""}},
-		{"chain", "anthropic,zai,openai", nil, []string{"anthropic", "zai", "openai"}},
-		{"chain with whitespace", "anthropic, zai , openai", nil, []string{"anthropic", "zai", "openai"}},
-		{"trailing comma dropped", "anthropic,", nil, []string{"anthropic"}},
-		{"leading comma dropped", ",anthropic", nil, []string{"anthropic"}},
-		{"consecutive duplicates collapsed", "zai,zai,anthropic", nil, []string{"zai", "anthropic"}},
-		{"explicit auto kept as chain element", "auto,anthropic", nil, []string{"", "anthropic"}},
+		{"unset", "", nil, []providerStep{{}}},
+		{"single", "anthropic", nil, []providerStep{{Provider: "anthropic"}}},
+		{"auto normalises to blank", "auto", nil, []providerStep{{}}},
+		{"chain", "anthropic,zai,openai", nil, []providerStep{{Provider: "anthropic"}, {Provider: "zai"}, {Provider: "openai"}}},
+		{"chain with whitespace", "anthropic, zai , openai", nil, []providerStep{{Provider: "anthropic"}, {Provider: "zai"}, {Provider: "openai"}}},
+		{"trailing comma dropped", "anthropic,", nil, []providerStep{{Provider: "anthropic"}}},
+		{"leading comma dropped", ",anthropic", nil, []providerStep{{Provider: "anthropic"}}},
+		{"consecutive duplicates collapsed", "zai,zai,anthropic", nil, []providerStep{{Provider: "zai"}, {Provider: "anthropic"}}},
+		{"explicit auto kept as chain element", "auto,anthropic", nil, []providerStep{{}, {Provider: "anthropic"}}},
+		// Per-element model overrides (`provider:model`): the headline feature.
+		{"per-element model swap", "zai:glm-5.2,anthropic:claude-opus-4-8", nil, []providerStep{{Provider: "zai", Model: "glm-5.2"}, {Provider: "anthropic", Model: "claude-opus-4-8"}}},
+		{"mixed model and inherit", "zai:glm-5.2,anthropic", nil, []providerStep{{Provider: "zai", Model: "glm-5.2"}, {Provider: "anthropic"}}},
+		{"model with whitespace", "zai : glm-5.2", nil, []providerStep{{Provider: "zai", Model: "glm-5.2"}}},
+		{"model id with colon split on first", "zai:foo:bar", nil, []providerStep{{Provider: "zai", Model: "foo:bar"}}},
 		// Env expansion runs on the whole field BEFORE splitting, so an
 		// env default may itself carry the rest of the chain.
-		{"rescue head expands then chains", "${RESCUE_PROVIDER:-zai},anthropic", nil, []string{"zai", "anthropic"}},
-		{"rescue head overridden", "${RESCUE_PROVIDER:-zai},anthropic", map[string]string{"RESCUE_PROVIDER": "openai"}, []string{"openai", "anthropic"}},
-		{"env supplies whole chain", "${PROVIDERS:-anthropic,zai}", nil, []string{"anthropic", "zai"}},
+		{"rescue head expands then chains", "${RESCUE_PROVIDER:-zai},anthropic", nil, []providerStep{{Provider: "zai"}, {Provider: "anthropic"}}},
+		{"rescue head overridden", "${RESCUE_PROVIDER:-zai},anthropic", map[string]string{"RESCUE_PROVIDER": "openai"}, []providerStep{{Provider: "openai"}, {Provider: "anthropic"}}},
+		{"env supplies whole chain", "${PROVIDERS:-anthropic,zai}", nil, []providerStep{{Provider: "anthropic"}, {Provider: "zai"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -253,12 +258,12 @@ func TestResolveProviderChain(t *testing.T) {
 				t.Setenv(k, v)
 			}
 			got := e.resolveProviderChain(nodeWithBackendProvider("claude_code", tc.provider))
-			if !equalStringSlice(got, tc.want) {
+			if !equalProviderSteps(got, tc.want) {
 				t.Fatalf("resolveProviderChain(%q) = %v, want %v", tc.provider, got, tc.want)
 			}
-			// resolveProvider must equal the head of the chain (back-compat).
-			if head := e.resolveProvider(nodeWithBackendProvider("claude_code", tc.provider)); head != tc.want[0] {
-				t.Errorf("resolveProvider(%q) = %q, want head %q", tc.provider, head, tc.want[0])
+			// resolveProvider must equal the head provider of the chain (back-compat).
+			if head := e.resolveProvider(nodeWithBackendProvider("claude_code", tc.provider)); head != tc.want[0].Provider {
+				t.Errorf("resolveProvider(%q) = %q, want head %q", tc.provider, head, tc.want[0].Provider)
 			}
 		})
 	}
