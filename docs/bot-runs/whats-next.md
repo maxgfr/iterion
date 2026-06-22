@@ -4,6 +4,16 @@ Orchestrator / board-triage bot. Surveys the repo, elicits priorities, proposes
 a roadmap, materialises it as kanban issues, and triages the board. See
 [bots/whats-next/](../../bots/whats-next/).
 
+## 2026-06-22 — z.ai/GLM-5.2 dogfood + mid-run anthropic failover (run 019ef04f-a5ff)
+
+- Status: **validated (high value)** — full chain on the z.ai/GLM-5.2 stack, completed across a live provider failover.
+- Versions: bot whats-next 0.1.0 · iterion v0.16.0 (110ea1c33)
+- Method: `iterion run` (CLI; project store `~/.iterion/projects/…-bots-whats-next`, surfaced in studio `global-active`). `claw` gpt-5.5 forfait (explore/propose/assign) + `claude_code` **glm-5.2 via z.ai** (emit_action). When z.ai's 5h cap hit mid-`emit_action`, the node went **`fail_resumable` → resumed on anthropic/opus forfait** (.env flipped). Every gate driven via `--answers-file`.
+- Result: complete chain `explore → ask_priorities → propose_roadmap → human_review → emit_action → ask_which_to_process → ask_continue(close)` → **finished**. Captured the campaign priorities into a sharp roadmap and **created 5 backlog tickets**, incl. the standout `native:dfb12ef5` "Make claude_code provider fallback swap provider-specific models" + `native:dfb5f3f7` "Refresh z.ai GLM-5.x provider metadata". Auto-hygiene archived 2 stale findings.
+- Value: the roadmap + dispatch-ready tickets shaped the rest of the campaign; the failover ticket it filed was **proven necessary** by the z.ai cap that hit the same run minutes later.
+- Findings: (1) **emit_action 429 → hard `fail_resumable`** (no graceful recovery-pause, unlike Adry's reviewer which paused with `acknowledge_recovery`) → **rate-limit handling is inconsistent across node types**. (2) non-fatal `Tool error: Skill — Unknown skill: whats-next` (skills not registered as slash-skills; agent recovered by reading the mirrored dir). (3) finalize created a storage branch even for a board/memory-only bot.
+- Lessons: resume-on-failover works cleanly from checkpoint (zero work lost); `--answers-file` with proper JSON types (bool/array) is reliable for every gate (`context`; `approved`+`selected_titles`; `action:close`).
+
 ## 2026-06-13 — full survey→roadmap→triage dogfood (run 019ec0a1)
 
 - Status: **validated (high value, several findings)**

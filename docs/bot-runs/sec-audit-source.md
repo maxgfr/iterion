@@ -1,5 +1,14 @@
 # Seki + deepsec — validation
 
+## 2026-06-22 — scans OK (deepsec 37; 2 CRIT/2 HIGH); triage stalled on gpt-5.5 (run 019ef04e-35f3)
+
+- Status: **partial** — scanners ran and produced findings; the `triage` node **stalled** on sandboxed gpt-5.5 (cancelled after ~18 min / engine stall-alert) so auto-triage + board-emit did not complete.
+- Versions: bot sec-audit-source · iterion v0.16.0 (110ea1c33) · `iterion-sandbox-sec:edge`
+- Method: launched via studio API (`POST /api/runs`) for the HTTP board transport. `remediate=false`. claw gpt-5.5 forfait triage + glm-5.2 voters (z.ai). deepsec enabled.
+- Result (scans on disk under `.iterion/security/scan/`): **deepsec finding_count 37** (raw severities: 2 CRITICAL, 2 HIGH, 2 HIGH_BUG, 6 BUG, 58 MEDIUM); gosec/semgrep-go/js/py/bandit ran (0 lang findings); gitleaks 730 (≈all noise from gitignored local `.env*` backups holding live keys, incl. the campaign's own `.env.dogfood-bak`). Top criticals to triage: RCE via unvalidated RepoURL→`git clone` (pkg/runner/loop.go:812), SSRF via RepoURL (pkg/runner/loop.go:689), non-unique shard run IDs (cmd/iterion/scan_shards.go:327) — **verification vs current guards (runner git-RCE guard / `ValidateCloneSource` / c9e18195) in progress; several may be already-mitigated.**
+- Findings: (1) **`triage` stalls on sandboxed gpt-5.5 with the large detect_tech+all-scans input** — same gpt-5.5-forfait large-context root cause as Evoly's `aggregate_review`. Run triage on a 200K-context model (glm-5.2/opus) or cap its input. (2) trivy + semgrep-auto reported as errored in the triage summary even though semgrep-auto.json was produced — re-check the sec-image scanner invocations. (3) gitleaks scans gitignored `.env*` backups → 730 FP secret hits; the bot's FP suppression should exclude gitignored dotfiles.
+- Lessons: re-run Seki's triage→revalidate→emit on **glm-5.2 (z.ai, 200K ctx)** after the z.ai reset to complete the audit; the raw `deepsec.json` is preserved so scans need not re-run.
+
 ## 2026-06-14 — C082 board-emit RESOLVED + validated end-to-end (run 019ec4fe)
 
 - Status: **FIXED.** The board-emit gap that made Seki's `report_card` confabulate

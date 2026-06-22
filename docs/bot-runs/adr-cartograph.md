@@ -8,6 +8,16 @@ ADRs in `docs/adr/`, plus a feature-completeness audit; files optional
 handoff issues to `adr-rechallenge` (re-challenge) and `feature-gap-fill`
 (gap completion). Template: docs-refresh (Doki).
 
+## 2026-06-22 — 13 ADRs on GLM-5.2, survived anthropic failover (run 019ef04e-a02e)
+
+- Status: **validated (high value)** — authored ADRs 029-041.
+- Versions: bot adr-cartograph · iterion v0.16.0 (110ea1c33)
+- Method: `iterion run` (CLI, branch `dogfood/wave1`, live-tree docs/adr scope). survey + review on **glm-5.2 via z.ai**; when z.ai's 5h cap hit mid-review, `reviewer_claude` surfaced a graceful **`acknowledge_recovery` human-pause** → resumed → review/fix loop completed on **anthropic forfait** (gpt-5.5 reviewer + opus). 1233 events.
+- Result: commit **`86eeb81f9`** "docs(adr): record ADRs 029-041 for sandbox, SSO, quota, and ultracode" — **13 ADRs, +683 lines**, on `dogfood/wave1` (atop current origin/main). Converged to `done`.
+- Value: captured the architecture decisions from the recent campaign wave (sandbox, per-org SSO, quotas, ultracode) into proper Nygard ADRs — the canonical "capture decisions after a code-mutating wave" use case.
+- Findings: (1) **glm-5.2 survey is very verbose** — `survey_code` ran ~900+ tool calls / ~20 min (many empty greps) before converging, vs opus's tighter surveys; thorough but slow-to-stop on open-ended exploration. (2) **graceful rate-limit recovery** (`acknowledge_recovery` pause) worked here — contrast Nexie's hard fail on the same 429; **inconsistent rate-limit handling across nodes** is the cross-cutting finding.
+- Lessons: glm-5.2 is a viable ADR author; budget more wall-clock for its survey. Recovery-pause + resume across a provider failover preserved all survey work.
+
 ## 2026-06-14 — finding #6 convergence tuning (runs 019ec2f3, 019ec4ec)
 
 Two prompt-level fixes for #6, each validated by a live re-run on the

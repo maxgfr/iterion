@@ -8,6 +8,14 @@ backlog tickets + findings for Nexie. See
 
 ---
 
+## 2026-06-22 — PARKED: gpt-5.5 forfait context-overflow in review fan-out (run 019ef05e-90ff)
+
+- Status: **partial / parked** — survey + investigate (operator elicitation) completed; **`aggregate_review` (wait_all) failed: 2 branches `context_length_exceeded`** on the gpt-5.5 reviewer.
+- Versions: bot evolve · iterion v0.16.0 (110ea1c33)
+- Method: `iterion run` (CLI). survey + investigate on `claw` gpt-5.5 forfait; mid-turn `ask_user` ×2 answered via resume (objective + horizon → campaign stability-first vectors incl. the failover feature). **NOT the z.ai cap** (the claude branch ran fine on opus) — the **openai/gpt-5.5 ChatGPT-forfait context window** overflowed on the large review input.
+- Findings: **gpt-5.5 forfait context-overflow in review fan-outs** — the reactive compact-and-retry (generation.go, c5f57c14) did **not** prevent `context_length_exceeded` here; the review input (synthesis + all findings) exceeds the forfait window. **Same root cause as Seki's triage stall** (large input to gpt-5.5 forfait). High-value engine/claw fix: route large-context reviewer/triage nodes to a 200K-context model (glm-5.2/opus), or make the compaction actually fire before the wire call.
+- Lessons: Evoly's `aggregate_review` should cap/shard reviewer input or run the reviewer on a big-context model. Re-run candidate post z.ai-reset with the claude reviewer on glm-5.2 (200K).
+
 ## 2026-06-13 — mid-turn ask_user restored + validated (run 019ec2f6)
 
 - **Status:** validated. After the engine fix (commit e93ccc1b — see
