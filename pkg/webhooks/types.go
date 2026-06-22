@@ -11,7 +11,10 @@
 // that consumes it lives in pkg/webhooks/gitlab + the server route.
 package webhooks
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Provider identifies the external event source.
 type Provider string
@@ -79,6 +82,18 @@ type Config struct {
 	BotIDs       []string `bson:"bot_ids" json:"bot_ids"`
 	WildcardBots bool     `bson:"wildcard_bots,omitempty" json:"wildcard_bots,omitempty"`
 	DefaultBotID string   `bson:"default_bot_id,omitempty" json:"default_bot_id,omitempty"`
+
+	// CommandMap routes a /slash-command (lowercase key, no leading slash) to
+	// the bot(s) that claim it. Computed by the forge orchestrator from the
+	// co-enabled bots' manifest invocations (kind=command), so a comment
+	// handler resolves a command in O(1) without loading bundles on the hot
+	// path. Aliases are flattened into the map (each alias is its own key).
+	// The value is a slice because two bots may share a command via
+	// args-based disambiguation (the review-pr vs revi-converse pattern);
+	// ResolveCommand picks by whether args are present. Empty for
+	// hand-created webhooks — those fall back to a live registry resolve
+	// (ResolveCommandRoute) only when WildcardBots is set.
+	CommandMap map[string][]CommandRoute `bson:"command_map,omitempty" json:"command_map,omitempty"`
 
 	// Source allowlists (empty = allow-all within the tenant).
 	ProjectAllowlist []string `bson:"project_allowlist,omitempty" json:"project_allowlist,omitempty"`
@@ -168,6 +183,64 @@ func (c *Config) SelectBot() string {
 		return c.BotIDs[0]
 	}
 	return ""
+}
+
+// CommandRoute records how a webhook routes one /slash-command to a bot and
+// its execution mode. Mirrors the bot's manifest command invocation
+// (bundle.InvocationCommand + the invocation's mode/args_var/context_vars),
+// flattened by the orchestrator so a comment handler dispatches without
+// touching the bot bundle.
+type CommandRoute struct {
+	BotID          string            `bson:"bot_id" json:"bot_id"`
+	Mode           string            `bson:"mode,omitempty" json:"mode,omitempty"` // "direct" | "board" (empty = direct)
+	ArgsVar        string            `bson:"args_var,omitempty" json:"args_var,omitempty"`
+	ContextVars    map[string]string `bson:"context_vars,omitempty" json:"context_vars,omitempty"`
+	Scope          string            `bson:"scope,omitempty" json:"scope,omitempty"` // "pr" | "issue" | "any" (empty = pr)
+	MinReplierRole string            `bson:"min_replier_role,omitempty" json:"min_replier_role,omitempty"`
+	Disambiguator  string            `bson:"disambiguator,omitempty" json:"disambiguator,omitempty"`
+}
+
+// AllowsScope reports whether this route may fire for a comment on the given
+// surface ("pr" or "issue"). An empty route scope defaults to "pr" (matching
+// today's /revi-on-MR behaviour); "any" matches both.
+func (r CommandRoute) AllowsScope(surface string) bool {
+	sc := r.Scope
+	if sc == "" {
+		sc = "pr"
+	}
+	return sc == "any" || sc == surface
+}
+
+// ResolveCommand resolves a /slash-command on this webhook to a single route,
+// picking by args-presence when two bots share the command via
+// disambiguation (when_args_present claims "/cmd <args>", when_args_empty
+// claims a bare "/cmd"). ok=false means no route is configured for cmd (the
+// caller may fall back to a live registry resolve for a wildcard webhook).
+func (c *Config) ResolveCommand(cmd, args string) (CommandRoute, bool) {
+	if c == nil || cmd == "" || len(c.CommandMap) == 0 {
+		return CommandRoute{}, false
+	}
+	routes := c.CommandMap[strings.ToLower(cmd)]
+	if len(routes) == 0 {
+		return CommandRoute{}, false
+	}
+	hasArgs := strings.TrimSpace(args) != ""
+	// Prefer a disambiguator that matches the args state.
+	for _, r := range routes {
+		if (r.Disambiguator == "when_args_present" && hasArgs) ||
+			(r.Disambiguator == "when_args_empty" && !hasArgs) {
+			return r, true
+		}
+	}
+	// Else the first unconditional (no-disambiguator) claim.
+	for _, r := range routes {
+		if r.Disambiguator == "" {
+			return r, true
+		}
+	}
+	// All routes are disambiguated but none matched the args state — fall
+	// back to the first so a configured command never silently no-ops.
+	return routes[0], true
 }
 
 // Delivery records an inbound webhook delivery for audit + idempotency.

@@ -123,6 +123,20 @@ func (s *Server) forgeBotForge(botID string) (*bundle.ForgeRequirements, error) 
 	return entry.Forge, nil
 }
 
+// forgeBotInvocations resolves a bot's manifest invocations for the
+// orchestrator's command-map build (already the EffectiveInvocations set —
+// explicit block, else synthetic from a legacy forge: block).
+func (s *Server) forgeBotInvocations(botID string) ([]bundle.Invocation, error) {
+	entry, ok, err := s.findBot(botID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("bot %q not found", botID)
+	}
+	return entry.Invocations, nil
+}
+
 // forgeAdminForToken builds an outbound admin client from a raw token
 // (used at connect time before a Connection exists).
 func (s *Server) forgeAdminForToken(provider forge.Provider, baseURL, token string) (forge.Admin, error) {

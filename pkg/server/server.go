@@ -571,6 +571,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 			Secrets:      s.genericSecrets,
 			Sealer:       s.sealer,
 			Bots:         s.forgeBotForge,
+			Invocations:  s.forgeBotInvocations,
 			AdminFor:     s.forgeAdminFor,
 			PublicURL:    cfg.PublicURL,
 		}

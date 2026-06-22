@@ -22,6 +22,12 @@ import (
 // botregistry; tests pass a closure.
 type BotForgeLookup func(botID string) (*bundle.ForgeRequirements, error)
 
+// BotInvocationsLookup returns a bot's manifest invocations (the typed
+// routing contract — bundle.EffectiveInvocations). Used by Provision to build
+// the webhook CommandMap. An empty slice (or a nil lookup) leaves the command
+// index empty. The server wires this to botregistry; tests pass a closure.
+type BotInvocationsLookup func(botID string) ([]bundle.Invocation, error)
+
 // Orchestrator turns "enable bot(s) X on repo Y of connection C" into the
 // concrete trio — an iterion webhooks.Config, a forge-side hook, and a
 // per-webhook secret override pinning the connection's managed forge token
@@ -33,6 +39,11 @@ type Orchestrator struct {
 	Secrets      secrets.GenericSecretStore
 	Sealer       secrets.Sealer
 	Bots         BotForgeLookup
+	// Invocations returns a bot's manifest invocations so Provision can build
+	// the webhook CommandMap. Optional: nil leaves CommandMap empty (the
+	// GitLab /revi special-case still works; other commands just aren't
+	// provisioned). Wired to botregistry by the server; closures in tests.
+	Invocations BotInvocationsLookup
 	// AdminFor builds the outbound client for a connection (opens its sealed
 	// token). Injected so the orchestrator stays provider-agnostic and
 	// testable with a fake admin.
@@ -166,6 +177,13 @@ func (o *Orchestrator) Provision(ctx context.Context, req ProvisionRequest) (Pro
 		}
 	}
 
+	// Build the command→bot route index from the co-enabled bots' command
+	// invocations. Rejects an un-disambiguated cross-bot command collision.
+	commandMap, err := o.buildCommandMap(desiredBots)
+	if err != nil {
+		return ProvisionResult{}, err
+	}
+
 	// Mint a fresh iwh_ on every mutating provision (create OR event-widen):
 	// it keeps the forge hook secret and the iterion config hash in lockstep
 	// without ever needing the prior plaintext. The operator never sees it —
@@ -200,6 +218,7 @@ func (o *Orchestrator) Provision(ctx context.Context, req ProvisionRequest) (Pro
 		LaunchVars:       nilIfEmpty(launchVars),
 		SecretOverrides:  secretOverrides,
 		MinReplierRole:   minRole,
+		CommandMap:       commandMap,
 		ProvisionedBy:    "forge:" + conn.ID,
 		CreatedBy:        req.ActorID,
 		CreatedAt:        now,
@@ -455,6 +474,75 @@ func singleBotDefault(bots []string) string {
 		return bots[0]
 	}
 	return ""
+}
+
+// buildCommandMap flattens the co-enabled bots' command invocations into the
+// webhook CommandMap (command name + each alias → routes). Two different bots
+// may share a command name only when they disambiguate by complementary args
+// states (the review-pr vs revi-converse pattern); any other collision is a
+// provision error. Returns nil when no bot declares a command invocation (or
+// the Invocations lookup isn't wired), leaving Config.CommandMap unset.
+func (o *Orchestrator) buildCommandMap(bots []string) (map[string][]webhooks.CommandRoute, error) {
+	if o.Invocations == nil {
+		return nil, nil
+	}
+	out := map[string][]webhooks.CommandRoute{}
+	for _, b := range bots {
+		invs, err := o.Invocations(b)
+		if err != nil {
+			return nil, fmt.Errorf("forge: resolve invocations for %q: %w", b, err)
+		}
+		for _, inv := range invs {
+			if inv.Kind != bundle.InvocationKindCommand || inv.Command == nil {
+				continue
+			}
+			route := webhooks.CommandRoute{
+				BotID:          b,
+				Mode:           string(inv.EffectiveMode()),
+				ArgsVar:        inv.ArgsVar,
+				ContextVars:    inv.ContextVars,
+				Scope:          inv.Command.Scope,
+				MinReplierRole: inv.Command.MinReplierRole,
+				Disambiguator:  inv.Command.Disambiguator,
+			}
+			for _, name := range append([]string{inv.Command.Name}, inv.Command.Aliases...) {
+				if err := addCommandRoute(out, strings.ToLower(strings.TrimSpace(name)), route); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// addCommandRoute appends a route under key, enforcing the collision policy:
+// the same bot re-declaring an alias is a no-op; a different bot on the same
+// key is allowed only when it and the incumbent disambiguate by complementary
+// args states.
+func addCommandRoute(m map[string][]webhooks.CommandRoute, key string, route webhooks.CommandRoute) error {
+	if key == "" {
+		return nil
+	}
+	for _, e := range m[key] {
+		if e.BotID == route.BotID {
+			return nil // same bot, alias overlap — keep the first
+		}
+		if !complementaryArgs(e.Disambiguator, route.Disambiguator) {
+			return fmt.Errorf("forge: bots %q and %q both claim command /%s without args disambiguation", e.BotID, route.BotID, key)
+		}
+	}
+	m[key] = append(m[key], route)
+	return nil
+}
+
+// complementaryArgs reports whether two command disambiguators split the
+// command cleanly by args presence (one when_args_empty, one when_args_present).
+func complementaryArgs(a, b string) bool {
+	return (a == "when_args_empty" && b == "when_args_present") ||
+		(a == "when_args_present" && b == "when_args_empty")
 }
 
 // webhookRoleRank mirrors gitlab role precedence so UnionScopes-style merges
