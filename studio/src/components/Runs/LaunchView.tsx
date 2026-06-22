@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/Button";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { DesktopOnlyNotice } from "@/components/ui/DesktopOnlyNotice";
 import { Select } from "@/components/ui/Select";
+import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
 import ConfirmDialog from "@/components/shared/ConfirmDialog";
 import { useDocumentStore } from "@/store/document";
@@ -295,18 +296,36 @@ export default function LaunchView() {
     });
   };
 
-  // Required attachments must have a successful upload (uploadId present).
-  const missingAttachment = attachmentFields.some(
+  // First unfilled required field, in precedence order (attachments before
+  // vars). One walk feeds the launch gate, the caption text, and the
+  // scroll/focus target — so the precedence can't drift across them.
+  const missingAttachmentField = attachmentFields.find(
     (f) => f.required && !attachments[f.name]?.uploadId,
   );
-  // Required vars (no default declared) must have a non-blank value.
-  const missingVar = fields.some((f) => isVarMissing(f, values[f.name] ?? ""));
-  const missingRequired = missingAttachment || missingVar;
-  const missingTitle = missingAttachment
+  const missingVarField = fields.find((f) =>
+    isVarMissing(f, values[f.name] ?? ""),
+  );
+  const missingRequired = !!(missingAttachmentField || missingVarField);
+  const missingTitle = missingAttachmentField
     ? "Provide every required attachment first"
-    : missingVar
+    : missingVarField
       ? "Fill every required input first"
       : undefined;
+  const firstMissingFieldId = missingAttachmentField
+    ? `attach-${missingAttachmentField.name}`
+    : missingVarField
+      ? `var-${missingVarField.name}`
+      : null;
+
+  // Tracks whether Launch was pressed while required fields are still
+  // missing — promotes the inline caption from polite to assertive and
+  // (via onSubmit) scrolls/focuses the first gap instead of leaving the
+  // user staring at a silently disabled button. Reset once the form is
+  // complete so the next blocked attempt re-announces.
+  const [attemptedLaunch, setAttemptedLaunch] = useState(false);
+  useEffect(() => {
+    if (!missingRequired) setAttemptedLaunch(false);
+  }, [missingRequired]);
 
   // Auto-upload as soon as a file is selected. The upload runs in the
   // background and the launch button stays disabled until every entry
@@ -409,6 +428,26 @@ export default function LaunchView() {
   // workflow has no sandbox declared and opens the ConfirmDialog;
   // otherwise calls launchRun directly.
   const onSubmit = () => {
+    // Soft-block: rather than a silently disabled button, a blocked Launch
+    // scrolls to and focuses the first missing required field.
+    if (missingRequired) {
+      setAttemptedLaunch(true);
+      if (firstMissingFieldId) {
+        const targetId = firstMissingFieldId;
+        requestAnimationFrame(() => {
+          const el = document.getElementById(targetId);
+          if (!el) return;
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          const focusable = el.matches("input, textarea, select, button")
+            ? el
+            : el.querySelector<HTMLElement>(
+                "input, textarea, select, button, [tabindex]:not([tabindex='-1'])",
+              );
+          focusable?.focus({ preventScroll: true });
+        });
+      }
+      return;
+    }
     if (!isSandboxActive(doc)) {
       setShowNoSandboxConfirm(true);
       return;
@@ -459,7 +498,9 @@ export default function LaunchView() {
           lsKey="iterion.launch.mobile-optin"
         >
         {error && (
-          <div className="mb-3 px-3 py-2 rounded bg-danger-soft text-danger-fg text-xs">{error}</div>
+          <InlineBanner tone="danger" layout="inline" className="mb-3">
+            {error}
+          </InlineBanner>
         )}
         {!doc && !error ? (
           <div className="text-xs text-fg-subtle">Loading workflow…</div>
@@ -479,7 +520,11 @@ export default function LaunchView() {
                 )}
                 <div className="space-y-4">
                   {attachmentFields.map((f) => (
-                    <div key={f.name} className="grid grid-cols-[160px_1fr] gap-3 items-start">
+                    <div
+                      key={f.name}
+                      id={`attach-${f.name}`}
+                      className="grid grid-cols-[160px_1fr] gap-3 items-start"
+                    >
                       <label className="pt-1">
                         <div className="text-xs font-medium font-mono">{f.name}</div>
                         <div className="text-caption text-fg-subtle">
@@ -605,6 +650,7 @@ export default function LaunchView() {
                           </label>
                           <VarFieldInput
                             field={f}
+                            id={`var-${f.name}`}
                             value={value}
                             onChange={(v) =>
                               setValues((prev) => ({ ...prev, [f.name]: v }))
@@ -626,6 +672,7 @@ export default function LaunchView() {
                         </label>
                         <VarFieldInput
                           field={f}
+                          id={`var-${f.name}`}
                           value={value}
                           onChange={(v) =>
                             setValues((prev) => ({ ...prev, [f.name]: v }))
@@ -639,76 +686,77 @@ export default function LaunchView() {
                 </div>
               </form>
             )}
-            <div className="mt-6 border-t border-border-default pt-4">
-              <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
-                <div>
-                  <div className="text-xs font-medium font-mono">backend</div>
-                  <div className="text-caption text-fg-subtle">override for this run</div>
-                </div>
-                <div>
-                  <Select
-                    value={backendOverride}
-                    onChange={(e) => setBackendOverride(e.currentTarget.value)}
-                  >
-                    <option value="">
-                      auto{backendReport?.resolved_default
-                        ? ` — currently ${backendReport.resolved_default}`
-                        : ""}
-                    </option>
-                    {(backendReport?.backends ?? []).map((b) => (
-                      <option
-                        key={b.name}
-                        value={b.name}
-                        disabled={!b.available}
-                      >
-                        {b.name}
-                        {b.available
-                          ? b.auth !== "none"
-                            ? ` (${b.auth})`
-                            : ""
-                          : " — no credential"}
-                      </option>
-                    ))}
-                  </Select>
-                  <div className="mt-1 text-caption text-fg-subtle">
-                    Overrides the workflow&apos;s default. Nodes that pin a specific{" "}
-                    <code>backend:</code> keep their pin.
+            <section className="mt-6 border-t border-border-default pt-4 mb-6">
+              <h2 className="text-xs font-medium text-fg-muted mb-3">Run settings</h2>
+              <div className="space-y-4">
+                <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
+                  <div>
+                    <div className="text-xs font-medium font-mono">backend</div>
+                    <div className="text-caption text-fg-subtle">override for this run</div>
                   </div>
-                </div>
-              </div>
-            </div>
-            <div className="mt-6 border-t border-border-default pt-4">
-              <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
-                <div>
-                  <div className="text-xs font-medium font-mono">rtk</div>
-                  <div className="text-caption text-fg-subtle">output compression</div>
-                </div>
-                <div>
-                  <Select
-                    value={rtkOverride}
-                    onChange={(e) => setRtkOverride(e.currentTarget.value)}
-                  >
-                    <option value="">inherit (workflow / ITERION_RTK)</option>
-                    <option value="on">on — compress shell output</option>
-                    <option value="ultra">ultra — densest output</option>
-                    <option value="off">off — disable for this run</option>
-                  </Select>
-                  <div className="mt-1 text-caption text-fg-subtle">
-                    Rewrites agent shell commands via{" "}
-                    <a
-                      href="https://github.com/rtk-ai/rtk"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline"
+                  <div>
+                    <Select
+                      value={backendOverride}
+                      onChange={(e) => setBackendOverride(e.currentTarget.value)}
                     >
-                      rtk
-                    </a>{" "}
-                    to save 60–90% of command-output tokens. Needs the{" "}
-                    <code>rtk</code> binary on the host PATH.
+                      <option value="">
+                        auto{backendReport?.resolved_default
+                          ? ` — currently ${backendReport.resolved_default}`
+                          : ""}
+                      </option>
+                      {(backendReport?.backends ?? []).map((b) => (
+                        <option
+                          key={b.name}
+                          value={b.name}
+                          disabled={!b.available}
+                        >
+                          {b.name}
+                          {b.available
+                            ? b.auth !== "none"
+                              ? ` (${b.auth})`
+                              : ""
+                            : " — no credential"}
+                        </option>
+                      ))}
+                    </Select>
+                    <div className="mt-1 text-caption text-fg-subtle">
+                      Overrides the workflow&apos;s default. Nodes that pin a specific{" "}
+                      <code>backend:</code> keep their pin.
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
+                  <div>
+                    <div className="text-xs font-medium font-mono">rtk</div>
+                    <div className="text-caption text-fg-subtle">output compression</div>
+                  </div>
+                  <div>
+                    <Select
+                      value={rtkOverride}
+                      onChange={(e) => setRtkOverride(e.currentTarget.value)}
+                    >
+                      <option value="">inherit (workflow / ITERION_RTK)</option>
+                      <option value="on">on — compress shell output</option>
+                      <option value="ultra">ultra — densest output</option>
+                      <option value="off">off — disable for this run</option>
+                    </Select>
+                    <div className="mt-1 text-caption text-fg-subtle">
+                      Rewrites agent shell commands via{" "}
+                      <a
+                        href="https://github.com/rtk-ai/rtk"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline"
+                      >
+                        rtk
+                      </a>{" "}
+                      to save 60–90% of command-output tokens. Needs the{" "}
+                      <code>rtk</code> binary on the host PATH.
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            </section>
             <div className="mt-6 border-t border-border-default pt-4">
               <button
                 type="button"
@@ -845,7 +893,7 @@ export default function LaunchView() {
                 variant="primary"
                 onClick={onSubmit}
                 loading={submitting}
-                disabled={!doc || missingRequired}
+                disabled={!doc}
                 title={missingTitle}
               >
                 Launch
@@ -853,7 +901,10 @@ export default function LaunchView() {
               <SandboxBadge mode={sandboxModeLabel(doc)} />
               <CostPreviewChip filePath={filePath} source={currentSource || undefined} />
               {missingRequired && (
-                <span className="text-caption text-warning-fg" role="status">
+                <span
+                  className="text-caption text-warning-fg"
+                  role={attemptedLaunch ? "alert" : "status"}
+                >
                   {missingTitle}
                 </span>
               )}

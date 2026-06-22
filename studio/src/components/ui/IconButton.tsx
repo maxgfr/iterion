@@ -1,7 +1,12 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { Tooltip } from "./Tooltip";
 
-export type IconButtonVariant = "secondary" | "ghost" | "danger" | "primary";
+export type IconButtonVariant =
+  | "secondary"
+  | "ghost"
+  | "danger"
+  | "primary"
+  | "warning";
 export type IconButtonSize = "sm" | "md";
 
 export interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -19,6 +24,7 @@ const variantClass: Record<IconButtonVariant, string> = {
     "bg-surface-2 text-fg-default hover:bg-surface-3 border border-border-default",
   ghost: "bg-transparent text-fg-muted hover:bg-surface-2 hover:text-fg-default",
   danger: "bg-transparent text-danger hover:bg-danger-soft",
+  warning: "bg-transparent text-warning hover:bg-warning-soft",
 };
 
 const sizeClass: Record<IconButtonSize, string> = {

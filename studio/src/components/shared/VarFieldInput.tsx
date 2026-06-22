@@ -11,13 +11,18 @@ interface Props {
   onChange: (next: string) => void;
   required?: boolean;
   invalid?: boolean;
+  /** DOM id forwarded to the underlying control so a `<label htmlFor>`
+   *  resolves to it (label-click focus) and the launch form can
+   *  scroll/focus the first missing required field. */
+  id?: string;
 }
 
 /** Per-type renderer for a single workflow var input. The form layer
  *  collects everything as strings — `POST /api/runs` accepts vars as a
  *  string→string map and the engine resolves them to the declared type. */
-export default function VarFieldInput({ field, value, onChange, required, invalid }: Props) {
-  const a11y = {
+export default function VarFieldInput({ field, value, onChange, required, invalid, id }: Props) {
+  const common = {
+    id,
     "aria-required": required || undefined,
     "aria-invalid": invalid || undefined,
   };
@@ -28,7 +33,7 @@ export default function VarFieldInput({ field, value, onChange, required, invali
           <Checkbox
             checked={value === "true"}
             onChange={(e) => onChange(e.target.checked ? "true" : "false")}
-            {...a11y}
+            {...common}
           />
           <span className="text-xs text-fg-muted">{value === "true" ? "true" : "false"}</span>
         </label>
@@ -42,7 +47,7 @@ export default function VarFieldInput({ field, value, onChange, required, invali
           value={value}
           onChange={(e) => onChange(e.target.value)}
           size="sm"
-          {...a11y}
+          {...common}
         />
       );
     case "json":
@@ -53,7 +58,7 @@ export default function VarFieldInput({ field, value, onChange, required, invali
           rows={4}
           spellCheck={false}
           className="font-mono text-micro"
-          {...a11y}
+          {...common}
         />
       );
     case "string[]":
@@ -65,7 +70,7 @@ export default function VarFieldInput({ field, value, onChange, required, invali
           onChange={(e) => onChange(e.target.value)}
           placeholder="comma,separated,values"
           size="sm"
-          {...a11y}
+          {...common}
         />
       );
     case "string":
@@ -83,7 +88,7 @@ export default function VarFieldInput({ field, value, onChange, required, invali
             spellCheck={false}
             className="font-mono text-body"
             placeholder={`Enter ${field.name}…`}
-            {...a11y}
+            {...common}
           />
         );
       }
@@ -92,7 +97,7 @@ export default function VarFieldInput({ field, value, onChange, required, invali
           value={value}
           onChange={(e) => onChange(e.target.value)}
           size="sm"
-          {...a11y}
+          {...common}
         />
       );
   }
