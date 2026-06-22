@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { Checkbox } from "@/components/ui/Checkbox";
 import { formatRelative } from "@/lib/format";
+import { clickableRowProps } from "@/lib/a11y";
 import { softColor } from "@/lib/constants";
 import type { DispatchSkipView, RetryView, RunningView } from "@/api/dispatcher";
 import type { NativeIssue } from "@/api/native";
@@ -250,18 +251,10 @@ function IssueCard({
   const pinnedFields = iss.fields ? pickPinnedFields(iss.fields) : [];
   return (
     <div
-      role="button"
-      tabIndex={0}
-      aria-label={iss.title}
+      {...clickableRowProps(onOpen, iss.title)}
       draggable
       data-issue-card
       title={hoverTitle}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen();
-        }
-      }}
       onDragStart={(e) => {
         onDragStart(e);
         setDragging(true);
