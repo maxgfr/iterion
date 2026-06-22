@@ -102,6 +102,31 @@ the next provision, and the picker shows the new trigger. Keep `args_var`
 pointed at a declared workflow var (else the payload is dropped + a warning is
 surfaced).
 
+## Validating live (dogfood)
+
+The slash-command routing is unit-tested per forge (the replier gate is mocked
+via a test seam). A full live validation needs a real forge connection — the
+gate calls the forge API to authorize the commenter — so dogfood it against a
+connected repo:
+
+1. studio → Integrations: connect a repo (GitLab / GitHub / Forgejo) and enable
+   a command bot — e.g. feature-dev (Featurly). The enable dialog lists it under
+   "Run by /command" and shows `Commands: /featurly`. (Command-only bots no
+   longer show as conflicts — that was the P1.7 preview fix.)
+2. Open a pull/merge request on that repo.
+3. Comment `/featurly add a healthcheck endpoint` — a GitLab note, or a
+   GitHub/Forgejo PR comment (issue_comment). The commenter must hold a repo
+   role ≥ the bot's `min_replier_role` (maintainer for mutating bots).
+4. Observe: the delivery is recorded (studio webhook deliveries), the gate
+   authorizes the commenter, and a feature-dev run launches with
+   `feature_prompt = "add a healthcheck endpoint"`. In cloud the run launches
+   directly (board-issue tracking lands with the cloud dispatcher); self-hosted
+   with the dispatcher running materialises a board card.
+5. Validate the path with a READ-ONLY command first: `/seki` (sec-audit-source)
+   or `/revi` (review) don't mutate code. Contain side-effects by enabling on a
+   throwaway repo. The binary is `CGO_ENABLED=0` (static) so it runs inside the
+   sandbox container.
+
 ## Key files
 
 - `pkg/bundle/manifest.go` — `Invocation` types + validation; `migrate.go` —
