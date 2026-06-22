@@ -6,162 +6,34 @@ import { useBotsStore } from "@/store/bots";
 import * as filesApi from "@/api/client";
 import { createRun, getServerInfo, uploadAttachment } from "@/api/runs";
 import type { MergeStrategy } from "@/api/runs";
-import type {
-  AttachmentField,
-  IterDocument,
-  Literal,
-  Preset,
-  ServerInfo,
-  VarField,
-} from "@/api/types";
-import { CheckCircledIcon, ExclamationTriangleIcon } from "@radix-ui/react-icons";
+import type { AttachmentField, IterDocument, ServerInfo } from "@/api/types";
 
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Checkbox } from "@/components/ui/Checkbox";
 import { DesktopOnlyNotice } from "@/components/ui/DesktopOnlyNotice";
-import { Select } from "@/components/ui/Select";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
 import ConfirmDialog from "@/components/shared/ConfirmDialog";
 import { useDocumentStore } from "@/store/document";
 import { useBackendDetectStore } from "@/store/backendDetect";
 
-import AttachmentFieldInput, {
-  type AttachmentValue,
-} from "./AttachmentFieldInput";
-import CostPreviewChip from "./CostPreviewChip";
-import VarFieldInput, { defaultStringFor } from "@/components/shared/VarFieldInput";
-import { isVarRequired, isVarMissing, RequiredPill } from "@/lib/varValidation";
-import { isPromptLikeVar } from "@/lib/promptVarHeuristics";
-import { formatBytes, totalSize } from "@/lib/attachmentValidation";
+import { type AttachmentValue } from "./AttachmentFieldInput";
+import { defaultStringFor } from "@/components/shared/VarFieldInput";
+import { isVarMissing } from "@/lib/varValidation";
 
-/** Read the workflow's vars (workflow-level if a single workflow is
- *  declared, else the file-level `vars:` block). */
-function pickVars(doc: IterDocument | null): VarField[] {
-  if (!doc) return [];
-  const wf = doc.workflows?.[0];
-  if (wf?.vars?.fields?.length) return wf.vars.fields;
-  return doc.vars?.fields ?? [];
-}
-
-/** Read the workflow's presets (top-level only — they apply to the
- *  whole file, no workflow-level scope today). */
-function pickPresets(doc: IterDocument | null): Preset[] {
-  return doc?.presets?.entries ?? [];
-}
-
-/** Stringify a preset literal so it can feed the existing var form
- *  (which holds every value as a string and coerces server-side). */
-function literalToString(lit: Literal | undefined): string {
-  if (!lit) return "";
-  switch (lit.kind) {
-    case "string":
-      return lit.str_val ?? "";
-    case "int":
-      return String(lit.int_val ?? 0);
-    case "float":
-      return String(lit.float_val ?? 0);
-    case "bool":
-      return lit.bool_val ? "true" : "false";
-    default:
-      return lit.raw ?? "";
-  }
-}
-
-/** Read the workflow's attachments — same precedence as vars. */
-function pickAttachments(doc: IterDocument | null): AttachmentField[] {
-  if (!doc) return [];
-  const wf = doc.workflows?.[0];
-  if (wf?.attachments?.fields?.length) return wf.attachments.fields;
-  return doc.attachments?.fields ?? [];
-}
-
-/** isSandboxActive mirrors pkg/dsl/ir/sandbox.go SandboxSpec.IsActive:
- *  the workflow declares a sandbox block whose mode is "auto" or
- *  "inline". Absent block or mode: "none" → host runs the tools. */
-function isSandboxActive(doc: IterDocument | null): boolean {
-  const sb = doc?.workflows?.[0]?.sandbox;
-  if (!sb) return false;
-  const m = (sb.mode ?? "").toLowerCase();
-  return m === "auto" || m === "inline";
-}
-
-/** sandboxModeLabel returns "auto" / "inline" / "none" / "" — the empty
- *  string when no block is declared. Used by the SandboxBadge so the
- *  badge label tracks the IR's view of the workflow without re-parsing. */
-function sandboxModeLabel(doc: IterDocument | null): string {
-  const sb = doc?.workflows?.[0]?.sandbox;
-  if (!sb) return "";
-  return (sb.mode ?? "").toLowerCase();
-}
-
-// SandboxBadge surfaces the workflow's sandbox isolation level next to
-// the Launch button so the operator never confirms a host-execution run
-// by accident. Three states match pkg/dsl/ir/sandbox.go SandboxSpec:
-//   auto / inline → green "sandboxed" pill
-//   none          → red "host execution" pill
-//   (no block)    → red "no sandbox" pill, same risk as `none`
-// The badge title carries the long-form description so the chip itself
-// stays compact in the Launch row.
-function SandboxBadge({ mode }: { mode: string }) {
-  const active = mode === "auto" || mode === "inline";
-  const label = active
-    ? `Sandbox: ${mode}`
-    : mode === "none"
-    ? "Sandbox: none"
-    : "No sandbox";
-  const cls = active
-    ? "bg-success-soft text-success-fg border-success/40"
-    : "bg-danger-soft text-danger-fg border-danger/40";
-  const title = active
-    ? "Workflow declares a sandbox block — tools run inside the container."
-    : "Tools and shell commands will run on this host. Add `sandbox: auto` to the workflow file to opt into container isolation.";
-  return (
-    <span
-      className={`inline-flex items-center gap-1 text-caption px-1.5 py-0.5 rounded border ${cls}`}
-      title={title}
-    >
-      {active ? (
-        <CheckCircledIcon className="w-3 h-3" aria-hidden="true" />
-      ) : (
-        <ExclamationTriangleIcon className="w-3 h-3" aria-hidden="true" />
-      )}
-      {label}
-    </span>
-  );
-}
-
-// WorktreeTargetSummary renders the one-line "Commits → branch · FF→ target"
-// summary above the worktree finalization fields, so the operator sees
-// where their commits will land without parsing four input fields.
-function WorktreeTargetSummary({
-  branchName,
-  mergeInto,
-}: {
-  branchName: string;
-  mergeInto: string;
-}) {
-  const branch = branchName || "iterion/run/<auto>";
-  const skipMerge = mergeInto === "none";
-  const target =
-    mergeInto && mergeInto !== "current" ? mergeInto : "current branch";
-  return (
-    <div className="text-micro text-fg-muted bg-surface-2 border border-border-default rounded px-2 py-1.5">
-      <span className="text-fg-subtle">Commits → </span>
-      <code className="font-mono text-fg-default">{branch}</code>
-      <span className="text-fg-subtle"> · </span>
-      {skipMerge ? (
-        <span className="text-fg-default">Branch only — no fast-forward</span>
-      ) : (
-        <>
-          <span className="text-fg-subtle">FF→ </span>
-          <code className="font-mono text-fg-default">{target}</code>
-        </>
-      )}
-    </div>
-  );
-}
+import AttachmentsSection from "./launchView/AttachmentsSection";
+import LaunchBar from "./launchView/LaunchBar";
+import PresetSection from "./launchView/PresetSection";
+import RunSettingsSection from "./launchView/RunSettingsSection";
+import VarFieldsSection from "./launchView/VarFieldsSection";
+import WorktreeFinalizationSection from "./launchView/WorktreeFinalizationSection";
+import {
+  isSandboxActive,
+  literalToString,
+  pickAttachments,
+  pickPresets,
+  pickVars,
+  sandboxModeLabel,
+} from "./launchView/utils";
 
 export default function LaunchView() {
   const [, setLocation] = useLocation();
@@ -250,7 +122,7 @@ export default function LaunchView() {
     return () => {
       cancelled = true;
     };
-  }, [filePath]);
+  }, [filePath, setCurrentSource]);
 
   const fields = pickVars(doc);
 
@@ -506,412 +378,68 @@ export default function LaunchView() {
           <div className="text-xs text-fg-subtle">Loading workflow…</div>
         ) : (
           <>
-            {attachmentFields.length > 0 && (
-              <section className="mb-6">
-                <h2 className="text-xs font-medium text-fg-muted mb-2">Attachments</h2>
-                {limits && (
-                  <p className="mb-3 text-caption text-fg-subtle font-mono">
-                    Max {formatBytes(limits.max_file_size)} per file ·{" "}
-                    {formatBytes(limits.max_total_size)} total · up to{" "}
-                    {limits.max_files_per_run} files ·{" "}
-                    {limits.allowed_mime.slice(0, 4).join(" ")}
-                    {limits.allowed_mime.length > 4 ? " …" : ""}
-                  </p>
-                )}
-                <div className="space-y-4">
-                  {attachmentFields.map((f) => (
-                    <div
-                      key={f.name}
-                      id={`attach-${f.name}`}
-                      className="grid grid-cols-[160px_1fr] gap-3 items-start"
-                    >
-                      <label className="pt-1">
-                        <div className="text-xs font-medium font-mono">{f.name}</div>
-                        <div className="text-caption text-fg-subtle">
-                          {f.type}
-                          {f.required ? " · required" : ""}
-                        </div>
-                      </label>
-                      <AttachmentFieldInput
-                        field={f}
-                        value={attachments[f.name] ?? null}
-                        onChange={(next) => void handleAttachmentChange(f, next)}
-                        serverLimits={limits}
-                        disabled={submitting}
-                      />
-                    </div>
-                  ))}
-                </div>
-                {Object.values(attachments).some((a) => a?.file) && (
-                  <p className="mt-2 text-caption text-fg-subtle">
-                    {Object.values(attachments).filter((a) => a?.file).length} file(s),{" "}
-                    {formatBytes(totalSize(attachments))} total
-                  </p>
-                )}
-              </section>
-            )}
-            {presets.length > 0 && (
-              <section className="mb-6">
-                <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-xs font-medium text-fg-muted">Preset</h2>
-                  {filePath && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setLocation(
-                          `/editor?file=${encodeURIComponent(filePath)}&focus=presets`,
-                        )
-                      }
-                      className="text-caption text-fg-subtle hover:text-fg-default underline"
-                      title="Edit presets in the workflow editor"
-                    >
-                      edit in editor →
-                    </button>
-                  )}
-                </div>
-                <Select
-                  value={selectedPreset}
-                  onChange={(e) => applyPreset(e.target.value)}
-                  disabled={submitting}
-                >
-                  <option value="">— none —</option>
-                  {presets.map((p) => (
-                    <option key={p.name} value={p.name}>
-                      {p.display_name ?? p.name}
-                    </option>
-                  ))}
-                </Select>
-                {selectedPresetMeta &&
-                  !!(
-                    selectedPresetMeta.description ||
-                    selectedPresetMeta.prompt ||
-                    selectedPresetMeta.skills?.length
-                  ) && (
-                    <div className="mt-2 rounded bg-surface-2 border border-border-default px-2 py-1.5 text-micro text-fg-muted">
-                      {selectedPresetMeta.description && (
-                        <p className="text-fg-default">
-                          {selectedPresetMeta.description}
-                        </p>
-                      )}
-                      {selectedPresetMeta.prompt && (
-                        <p className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap">
-                          {selectedPresetMeta.prompt}
-                        </p>
-                      )}
-                      {selectedPresetMeta.skills &&
-                        selectedPresetMeta.skills.length > 0 && (
-                          <p className="mt-1 text-fg-subtle">
-                            Skills: {selectedPresetMeta.skills.join(", ")}
-                          </p>
-                        )}
-                    </div>
-                  )}
-                <p className="mt-1 text-caption text-fg-subtle">
-                  Selecting a preset overlays its values onto the inputs
-                  below and biases every step (its “## Focus”). Any further
-                  edits override the preset; the engine applies the same
-                  precedence (preset &lt; vars).
-                </p>
-              </section>
-            )}
-            {fields.length === 0 ? (
-              attachmentFields.length === 0 && (
-                <div className="space-y-1">
-                  <p className="text-xs text-fg-subtle">
-                    This workflow declares no input vars. You can launch it as-is.
-                  </p>
-                  <p className="text-caption text-fg-subtle">
-                    The workflow&apos;s prompts will read directly from{" "}
-                    <code>vars:</code> defaults.
-                  </p>
-                </div>
-              )
-            ) : (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (!submitting) void onSubmit();
-                }}
-              >
-                <h2 className="text-xs font-medium text-fg-muted mb-2">Inputs</h2>
-                <div className="space-y-4">
-                  {fields.map((f) => {
-                    const promptLike = isPromptLikeVar(f);
-                    const required = isVarRequired(f);
-                    const value = values[f.name] ?? "";
-                    const invalid = required && value.trim().length === 0;
-                    if (promptLike) {
-                      return (
-                        <div key={f.name} className="flex flex-col gap-1.5">
-                          <label htmlFor={`var-${f.name}`} className="flex items-baseline gap-2">
-                            <span className="text-xs font-medium font-mono text-fg-default">{f.name}</span>
-                            <span className="text-caption text-fg-subtle">{f.type}</span>
-                            {required && <RequiredPill />}
-                          </label>
-                          <VarFieldInput
-                            field={f}
-                            id={`var-${f.name}`}
-                            value={value}
-                            onChange={(v) =>
-                              setValues((prev) => ({ ...prev, [f.name]: v }))
-                            }
-                            required={required}
-                            invalid={invalid}
-                          />
-                        </div>
-                      );
-                    }
-                    return (
-                      <div key={f.name} className="grid grid-cols-[160px_1fr] gap-3 items-start">
-                        <label htmlFor={`var-${f.name}`} className="pt-1">
-                          <div className="flex items-baseline gap-2">
-                            <span className="text-xs font-medium font-mono">{f.name}</span>
-                            {required && <RequiredPill />}
-                          </div>
-                          <div className="text-caption text-fg-subtle">{f.type}</div>
-                        </label>
-                        <VarFieldInput
-                          field={f}
-                          id={`var-${f.name}`}
-                          value={value}
-                          onChange={(v) =>
-                            setValues((prev) => ({ ...prev, [f.name]: v }))
-                          }
-                          required={required}
-                          invalid={invalid}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              </form>
-            )}
-            <section className="mt-6 border-t border-border-default pt-4 mb-6">
-              <h2 className="text-xs font-medium text-fg-muted mb-3">Run settings</h2>
-              <div className="space-y-4">
-                <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
-                  <div>
-                    <div className="text-xs font-medium font-mono">backend</div>
-                    <div className="text-caption text-fg-subtle">override for this run</div>
-                  </div>
-                  <div>
-                    <Select
-                      value={backendOverride}
-                      onChange={(e) => setBackendOverride(e.currentTarget.value)}
-                    >
-                      <option value="">
-                        auto{backendReport?.resolved_default
-                          ? ` — currently ${backendReport.resolved_default}`
-                          : ""}
-                      </option>
-                      {(backendReport?.backends ?? []).map((b) => (
-                        <option
-                          key={b.name}
-                          value={b.name}
-                          disabled={!b.available}
-                        >
-                          {b.name}
-                          {b.available
-                            ? b.auth !== "none"
-                              ? ` (${b.auth})`
-                              : ""
-                            : " — no credential"}
-                        </option>
-                      ))}
-                    </Select>
-                    <div className="mt-1 text-caption text-fg-subtle">
-                      Overrides the workflow&apos;s default. Nodes that pin a specific{" "}
-                      <code>backend:</code> keep their pin.
-                    </div>
-                  </div>
-                </div>
-                <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
-                  <div>
-                    <div className="text-xs font-medium font-mono">rtk</div>
-                    <div className="text-caption text-fg-subtle">output compression</div>
-                  </div>
-                  <div>
-                    <Select
-                      value={rtkOverride}
-                      onChange={(e) => setRtkOverride(e.currentTarget.value)}
-                    >
-                      <option value="">inherit (workflow / ITERION_RTK)</option>
-                      <option value="on">on — compress shell output</option>
-                      <option value="ultra">ultra — densest output</option>
-                      <option value="off">off — disable for this run</option>
-                    </Select>
-                    <div className="mt-1 text-caption text-fg-subtle">
-                      Rewrites agent shell commands via{" "}
-                      <a
-                        href="https://github.com/rtk-ai/rtk"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline"
-                      >
-                        rtk
-                      </a>{" "}
-                      to save 60–90% of command-output tokens. Needs the{" "}
-                      <code>rtk</code> binary on the host PATH.
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-            <div className="mt-6 border-t border-border-default pt-4">
-              <button
-                type="button"
-                className="text-xs text-fg-muted hover:text-fg-default flex items-center gap-1"
-                onClick={() => setShowAdvanced((v) => !v)}
-                title={
-                  worktreeOn
-                    ? "Configure where the run's commits land."
-                    : "This workflow doesn't declare `worktree: auto`; the fields below have no effect."
-                }
-              >
-                <span>{showAdvanced ? "▼" : "▶"}</span>
-                <span>Worktree finalization (squash / merge)</span>
-                {!worktreeOn && (
-                  <Badge variant="neutral" size="sm">
-                    disabled
-                  </Badge>
-                )}
-              </button>
-              {showAdvanced && (
-                <div className="mt-3 space-y-3 pl-4 border-l border-border-default">
-                  {worktreeOn && (
-                    <WorktreeTargetSummary
-                      branchName={branchName}
-                      mergeInto={mergeInto}
-                    />
-                  )}
-                  <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
-                    <label htmlFor="launch-merge-into" className="pt-1">
-                      <div className="text-xs font-medium font-mono">merge_into</div>
-                      <div className="text-caption text-fg-subtle">
-                        FF target after run
-                      </div>
-                    </label>
-                    <div>
-                      <input
-                        id="launch-merge-into"
-                        type="text"
-                        className="w-full px-2 py-1 text-xs font-mono rounded bg-surface-2 border border-border-default focus:outline-none focus:ring-1 focus:ring-accent"
-                        placeholder="current (default) | none | <branch-name>"
-                        value={mergeInto}
-                        onChange={(e) => setMergeInto(e.target.value)}
-                      />
-                      <ul className="mt-1 space-y-0.5 text-caption text-fg-subtle list-disc list-inside">
-                        <li>
-                          Empty / <code>current</code> — fast-forward your current
-                          branch.
-                        </li>
-                        <li>
-                          <code>none</code> — keep commits on the storage branch
-                          only.
-                        </li>
-                        <li>
-                          Named branch — honoured only if it matches your
-                          checked-out branch.
-                        </li>
-                      </ul>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
-                    <label htmlFor="launch-branch-name" className="pt-1">
-                      <div className="text-xs font-medium font-mono">branch_name</div>
-                      <div className="text-caption text-fg-subtle">Storage branch</div>
-                    </label>
-                    <div>
-                      <input
-                        id="launch-branch-name"
-                        type="text"
-                        className="w-full px-2 py-1 text-xs font-mono rounded bg-surface-2 border border-border-default focus:outline-none focus:ring-1 focus:ring-accent"
-                        placeholder="iterion/run/<friendly> (default)"
-                        value={branchName}
-                        onChange={(e) => setBranchName(e.target.value)}
-                      />
-                      <div className="mt-1 text-caption text-fg-subtle">
-                        Override the GC-guard branch name. On collision a numeric
-                        suffix is appended.
-                      </div>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
-                    <label htmlFor="launch-merge-strategy" className="pt-1">
-                      <div className="text-xs font-medium font-mono">merge_strategy</div>
-                      <div className="text-caption text-fg-subtle">
-                        Squash vs merge commit
-                      </div>
-                    </label>
-                    <div>
-                      <Select
-                        id="launch-merge-strategy"
-                        value={mergeStrategy}
-                        onChange={(e) =>
-                          setMergeStrategy(e.target.value as MergeStrategy)
-                        }
-                      >
-                        <option value="squash">Squash and merge (default)</option>
-                        <option value="merge">Merge commit (preserve history)</option>
-                      </Select>
-                      <div className="mt-1 text-caption text-fg-subtle">
-                        Used when the run is merged into the target branch — at
-                        end of run if auto_merge is on, otherwise from the
-                        Commits tab. The fast-forward path is used for "merge".
-                      </div>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
-                    <label htmlFor="launch-auto-merge" className="pt-1">
-                      <div className="text-xs font-medium font-mono">auto_merge</div>
-                      <div className="text-caption text-fg-subtle">
-                        GitLab-style auto-merge
-                      </div>
-                    </label>
-                    <div className="pt-1">
-                      <label className="inline-flex items-center gap-2 text-xs">
-                        <Checkbox
-                          id="launch-auto-merge"
-                          checked={autoMerge}
-                          onChange={(e) => setAutoMerge(e.target.checked)}
-                        />
-                        <span>Auto-merge when run finishes</span>
-                      </label>
-                      <div className="mt-1 text-caption text-fg-subtle">
-                        Off by default. Commits land on the storage branch; merge
-                        them from the Commits tab when ready. When on, the engine
-                        applies <code>merge_strategy</code> at end of run.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+            <AttachmentsSection
+              fields={attachmentFields}
+              attachments={attachments}
+              limits={limits}
+              submitting={submitting}
+              onChange={(f, next) => void handleAttachmentChange(f, next)}
+            />
+            <PresetSection
+              presets={presets}
+              selectedPreset={selectedPreset}
+              selectedPresetMeta={selectedPresetMeta}
+              filePath={filePath}
+              submitting={submitting}
+              onApply={applyPreset}
+              onEditInEditor={() =>
+                setLocation(
+                  `/editor?file=${encodeURIComponent(filePath)}&focus=presets`,
+                )
+              }
+            />
+            <VarFieldsSection
+              fields={fields}
+              attachmentFields={attachmentFields}
+              values={values}
+              submitting={submitting}
+              onValueChange={(name, value) =>
+                setValues((prev) => ({ ...prev, [name]: value }))
+              }
+              onSubmit={onSubmit}
+            />
+            <RunSettingsSection
+              backendOverride={backendOverride}
+              rtkOverride={rtkOverride}
+              backendReport={backendReport}
+              onBackendChange={setBackendOverride}
+              onRtkChange={setRtkOverride}
+            />
+            <WorktreeFinalizationSection
+              showAdvanced={showAdvanced}
+              worktreeOn={worktreeOn}
+              mergeInto={mergeInto}
+              branchName={branchName}
+              mergeStrategy={mergeStrategy}
+              autoMerge={autoMerge}
+              onToggle={() => setShowAdvanced((v) => !v)}
+              onMergeIntoChange={setMergeInto}
+              onBranchNameChange={setBranchName}
+              onMergeStrategyChange={setMergeStrategy}
+              onAutoMergeChange={setAutoMerge}
+            />
 
-            <div className="mt-6 flex items-center gap-2 flex-wrap">
-              <Button
-                variant="primary"
-                onClick={onSubmit}
-                loading={submitting}
-                disabled={!doc}
-                title={missingTitle}
-              >
-                Launch
-              </Button>
-              <SandboxBadge mode={sandboxModeLabel(doc)} />
-              <CostPreviewChip filePath={filePath} source={currentSource || undefined} />
-              {missingRequired && (
-                <span
-                  className="text-caption text-warning-fg"
-                  role={attemptedLaunch ? "alert" : "status"}
-                >
-                  {missingTitle}
-                </span>
-              )}
-              <span className="text-caption text-fg-subtle">
-                Run ID is generated automatically.
-              </span>
-            </div>
+            <LaunchBar
+              docReady={!!doc}
+              submitting={submitting}
+              missingRequired={missingRequired}
+              missingTitle={missingTitle}
+              attemptedLaunch={attemptedLaunch}
+              sandboxMode={sandboxModeLabel(doc)}
+              filePath={filePath}
+              currentSource={currentSource}
+              onSubmit={onSubmit}
+            />
           </>
         )}
         </DesktopOnlyNotice>
