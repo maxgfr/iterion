@@ -50,6 +50,33 @@ func TestPlanShards_DifferentParentsDisjoint(t *testing.T) {
 	}
 }
 
+// Two scans with the SAME parent and SAME file COUNT but DIFFERENT files
+// must get disjoint run ids. The prior seed keyed only on len(files), so
+// equal-length/different-content lists collided and the no-clobber store
+// rejected the second scan's shards with "already exists" (deepsec
+// HIGH_BUG, 2026-06-22 dogfood). A different shard_size must likewise
+// repartition into disjoint ids.
+func TestPlanShards_DifferentFileListsDisjoint(t *testing.T) {
+	parent := "p"
+	a := planShards([]string{"a.go", "b.go", "c.go"}, 2, parent)
+	b := planShards([]string{"x.go", "y.go", "z.go"}, 2, parent) // same count, different files
+	seen := map[string]bool{}
+	for _, s := range a {
+		seen[s.RunID] = true
+	}
+	for _, s := range b {
+		if seen[s.RunID] {
+			t.Errorf("run id %s collides across different file lists of equal length", s.RunID)
+		}
+	}
+	// Same files, different shard_size ⇒ disjoint ids too.
+	for _, s := range planShards([]string{"a.go", "b.go", "c.go"}, 3, parent) {
+		if seen[s.RunID] {
+			t.Errorf("run id %s collides across different shard sizes", s.RunID)
+		}
+	}
+}
+
 // Last shard correctly carries the remainder when len(files) is not a
 // multiple of shard_size. A bug here would silently drop files.
 func TestPlanShards_LastShardRemainder(t *testing.T) {

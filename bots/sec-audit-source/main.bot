@@ -2186,7 +2186,7 @@ print(json.dumps({
 ## the audit trail; the tool returns a structured summary so the
 ## parent's exit code reflects shard failures.
 tool dispatch_shards:
-  command: `mkdir -p {{input.scan_dir}} && WS={{input.workspace_dir}} SHARD_SIZE={{input.shard_size}} CONCURRENCY={{input.shard_concurrency}} SEVTHR={{input.severity_threshold}} FPP={{input.fp_path}} REC={{input.records_dir}} MAT={{input.matchers_dir}} FILES={{input.files_path}} WORKFLOW={{input.workflow_path}} ENV_PATH={{input.scan_dir}}/shards.json python3 -c "
+  command: `mkdir -p {{input.scan_dir}} && WS={{input.workspace_dir}} SHARD_SIZE={{input.shard_size}} CONCURRENCY={{input.shard_concurrency}} SEVTHR={{input.severity_threshold}} FPP={{input.fp_path}} REC={{input.records_dir}} MAT={{input.matchers_dir}} FILES={{input.files_path}} WORKFLOW={{input.workflow_path}} ENV_PATH={{input.scan_dir}}/shards.json RUN_ID={{run.id}} python3 -c "
 import os, json, time, subprocess, shutil
 ws = os.environ['WS']
 shard_size = int(os.environ['SHARD_SIZE'])
@@ -2212,6 +2212,7 @@ base_vars = {
 }
 
 cmd = [iterion, '__scan-shards',
+       '--parent-run-id', os.environ.get('RUN_ID', ''),
        '--workflow', workflow,
        '--store-dir', os.path.expanduser('~/.iterion'),
        '--shard-size', str(shard_size),

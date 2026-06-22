@@ -322,9 +322,26 @@ func parseBaseVars(s string) (map[string]string, error) {
 }
 
 // planShards splits the file list into shards of shardSize and assigns
-// deterministic run ids derived from sha256(parentRunID || shard_index).
-// Same (parent, file list, shard_size) ⇒ same plan ⇒ idempotent reruns.
+// deterministic run ids derived from
+// sha256(parentRunID || shard_index || shard_size || file-list digest).
+// Same (parent, file list, shard_size) ⇒ same plan ⇒ idempotent reruns;
+// crucially, two scans with the SAME file count but DIFFERENT files (or a
+// different shard_size) now get disjoint ids. The prior seed keyed only on
+// len(files), so different file lists of equal length collided and the
+// no-clobber store (writeRunNew's O_EXCL) rejected the second scan's shards
+// with "already exists". Pass a unique --parent-run-id ({{run.id}}) to also
+// make re-scans of the SAME file list disjoint.
 func planShards(files []string, shardSize int, parentRunID string) []shardPlan {
+	// Digest the full file list once (shared across shards); combined with
+	// the per-shard index below it yields a unique id per shard while
+	// staying deterministic over identical inputs. A NUL separator can't
+	// appear in a path, so distinct lists can't alias via concatenation.
+	fh := sha256.New()
+	for _, f := range files {
+		fh.Write([]byte(f))
+		fh.Write([]byte{0})
+	}
+	filesDigest := hex.EncodeToString(fh.Sum(nil)[:8])
 	var plans []shardPlan
 	for i := 0; i < len(files); i += shardSize {
 		end := i + shardSize
@@ -332,7 +349,7 @@ func planShards(files []string, shardSize int, parentRunID string) []shardPlan {
 			end = len(files)
 		}
 		idx := len(plans)
-		seed := fmt.Sprintf("%s:%d:%d", parentRunID, idx, len(files))
+		seed := fmt.Sprintf("%s:%d:%d:%s", parentRunID, idx, shardSize, filesDigest)
 		sum := sha256.Sum256([]byte(seed))
 		plans = append(plans, shardPlan{
 			Index: idx,
