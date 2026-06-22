@@ -101,12 +101,11 @@ func (s *Service) LoginWithExternal(ctx context.Context, ext oidc.ExternalUser, 
 	// admitted ONLY if their teams matched an allow-list — and then bypasses
 	// SignupMode (the org admin allow-listed them). A non-matching new GitHub
 	// user is refused BEFORE any account is created (no orphan accounts).
-	switch {
-	case gh.provider && gh.active:
-		if len(gh.rows) == 0 {
-			return LoginResult{}, ErrSSORestricted
-		}
-	case s.signupMode != SignupOpen:
+	gated := gh.provider && gh.active
+	if gated && len(gh.rows) == 0 {
+		return LoginResult{}, ErrSSORestricted
+	}
+	if !gated && s.signupMode != SignupOpen {
 		return LoginResult{}, ErrSignupClosed
 	}
 	u = identity.User{
@@ -310,7 +309,7 @@ func (s *Service) applyGitHubGrants(ctx context.Context, userID string, gh githu
 	if !gh.provider || len(gh.rows) == 0 {
 		return nil, nil
 	}
-	var granted []string
+	granted := make([]string, 0, len(gh.rows))
 	for _, row := range gh.rows {
 		role, ok := row.RoleForGroups(ext.Groups)
 		if !ok {

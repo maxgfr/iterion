@@ -1,5 +1,5 @@
 import { errorMessage } from "@/lib/errorHints";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -26,6 +26,15 @@ const OIDC_ROLES: Role[] = ["viewer", "member", "admin"];
 // GitHub grants are capped at member server-side — only offer viewer/member.
 const GITHUB_ROLES: Role[] = ["viewer", "member"];
 
+const EMPTY_OIDC_DRAFT = {
+  display_name: "",
+  issuer_url: "",
+  client_id: "",
+  client_secret: "",
+  default_role: "member" as Role,
+  enabled: true,
+};
+
 export default function SSOTab({ teamID, canManage }: { teamID: string; canManage: boolean }) {
   const [providers, setProviders] = useState<OrgSSOProvider[]>([]);
   const [unavailable, setUnavailable] = useState(false);
@@ -49,8 +58,8 @@ export default function SSOTab({ teamID, canManage }: { teamID: string; canManag
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamID]);
 
-  const oidc = useMemo(() => providers.filter((p) => p.kind === "oidc"), [providers]);
-  const github = useMemo(() => providers.find((p) => p.kind === "github"), [providers]);
+  const oidc = providers.filter((p) => p.kind === "oidc");
+  const github = providers.find((p) => p.kind === "github");
 
   if (unavailable) {
     return (
@@ -102,14 +111,7 @@ function KeycloakSection({
   onError: (m: string) => void;
 }) {
   const { confirm, dialog } = useConfirm();
-  const [draft, setDraft] = useState({
-    display_name: "",
-    issuer_url: "",
-    client_id: "",
-    client_secret: "",
-    default_role: "member" as Role,
-    enabled: true,
-  });
+  const [draft, setDraft] = useState(EMPTY_OIDC_DRAFT);
   const [busy, setBusy] = useState(false);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
 
@@ -118,14 +120,7 @@ function KeycloakSection({
     setBusy(true);
     try {
       await createOrgSSOProvider(teamID, { kind: "oidc", ...draft });
-      setDraft({
-        display_name: "",
-        issuer_url: "",
-        client_id: "",
-        client_secret: "",
-        default_role: "member",
-        enabled: true,
-      });
+      setDraft(EMPTY_OIDC_DRAFT);
       onChange();
     } catch (e) {
       onError(errorMessage(e));
@@ -329,7 +324,6 @@ function GitHubSection({
   // effect (and add/remove grant edits stay local until Save).
   const [grants, setGrants] = useState<GitHubTeamGrant[]>(row?.grants ?? []);
   const [enabled, setEnabled] = useState(row?.enabled ?? true);
-  const [autoProvision, setAutoProvision] = useState(row?.auto_provision ?? true);
   const [busy, setBusy] = useState(false);
 
   const addGrant = () =>
@@ -344,7 +338,10 @@ function GitHubSection({
       const input = {
         kind: "github" as const,
         enabled,
-        auto_provision: autoProvision,
+        // Matched users are always provisioned today; the opt-in "invite-first"
+        // (auto_provision=false) gate is a tracked follow-up, so we don't yet
+        // surface a control that wouldn't take effect.
+        auto_provision: true,
         grants: grants.filter((g) => g.github_org.trim() !== ""),
       };
       if (row) await updateOrgSSOProvider(teamID, row.id, input);
@@ -446,14 +443,7 @@ function GitHubSection({
 
       {canManage && (
         <div className="space-y-3 border-t border-border-subtle pt-3">
-          <div className="flex gap-4 flex-wrap">
-            <Checkbox label="Enabled" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-            <Checkbox
-              label="Auto-provision (add matching users automatically)"
-              checked={autoProvision}
-              onChange={(e) => setAutoProvision(e.target.checked)}
-            />
-          </div>
+          <Checkbox label="Enabled" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
           <div className="flex gap-2">
             <Button variant="secondary" size="sm" onClick={addGrant}>
               Add grant
