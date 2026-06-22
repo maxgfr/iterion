@@ -3,10 +3,10 @@ package server
 import (
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/SocialGouv/iterion/pkg/auth"
-	"github.com/SocialGouv/iterion/pkg/bundle"
 	"github.com/SocialGouv/iterion/pkg/forge"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
@@ -103,17 +103,25 @@ func (s *Server) handleDisableForgeRepoBots(w http.ResponseWriter, r *http.Reque
 }
 
 type forgeEnablePreview struct {
-	EventsNormalized  []string           `json:"events_normalized"`
-	ForgeNativeEvents []string           `json:"forge_native_events"`
-	Scopes            map[string]string  `json:"scopes"`
-	Secrets           []forgePreviewBind `json:"secrets"`
-	Identity          forgePreviewIdent  `json:"identity"`
-	Conflicts         []string           `json:"conflicts"`
+	EventsNormalized  []string              `json:"events_normalized"`
+	ForgeNativeEvents []string              `json:"forge_native_events"`
+	Scopes            map[string]string     `json:"scopes"`
+	Secrets           []forgePreviewBind    `json:"secrets"`
+	Commands          []forgePreviewCommand `json:"commands,omitempty"`
+	Identity          forgePreviewIdent     `json:"identity"`
+	Conflicts         []string              `json:"conflicts"`
 }
 
 type forgePreviewBind struct {
 	BotID  string `json:"bot_id"`
 	Secret string `json:"secret"`
+}
+
+// forgePreviewCommand is one /slash-command the enabled bots add to the
+// webhook, shown in the enable dialog so the operator knows what to type.
+type forgePreviewCommand struct {
+	Command string `json:"command"`
+	BotID   string `json:"bot_id"`
 }
 
 type forgePreviewIdent struct {
@@ -143,30 +151,29 @@ func (s *Server) handlePreviewForgeEnable(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var reqs []*bundle.ForgeRequirements
-	var conflicts []string
-	binds := make([]forgePreviewBind, 0, len(botIDs))
+	// Mirror Provision exactly: a forge: block is optional, a command-only bot
+	// subscribes to the comment event. Without this, command-only bots would
+	// be (wrongly) flagged as conflicts and the Enable button disabled.
+	pv := forge.PreviewEnable(s.forgeOrchestrator.Bots, s.forgeOrchestrator.Invocations, botIDs)
+	binds := make([]forgePreviewBind, 0, len(pv.Binds))
 	for _, b := range botIDs {
-		fr, err := s.forgeOrchestrator.Bots(b)
-		if err != nil {
-			conflicts = append(conflicts, b+": "+err.Error())
-			continue
+		if secret, ok := pv.Binds[b]; ok {
+			binds = append(binds, forgePreviewBind{BotID: b, Secret: secret})
 		}
-		if fr == nil {
-			conflicts = append(conflicts, b+": declares no forge: block — not auto-installable")
-			continue
-		}
-		reqs = append(reqs, fr)
-		binds = append(binds, forgePreviewBind{BotID: b, Secret: fr.SecretName()})
 	}
-	events := forge.UnionEvents(reqs...)
+	commands := make([]forgePreviewCommand, 0, len(pv.Commands))
+	for cmd, bot := range pv.Commands {
+		commands = append(commands, forgePreviewCommand{Command: cmd, BotID: bot})
+	}
+	sort.Slice(commands, func(i, j int) bool { return commands[i].Command < commands[j].Command })
 	writeJSON(w, forgeEnablePreview{
-		EventsNormalized:  events,
-		ForgeNativeEvents: forge.ToNativeEvents(conn.Provider, events),
-		Scopes:            forge.UnionScopes(reqs...),
+		EventsNormalized:  pv.Events,
+		ForgeNativeEvents: forge.ToNativeEvents(conn.Provider, pv.Events),
+		Scopes:            pv.Scopes,
 		Secrets:           binds,
+		Commands:          commands,
 		Identity:          forgePreviewIdent{Handle: conn.AccountLogin, Provider: string(conn.Provider), BaseURL: conn.BaseURL()},
-		Conflicts:         conflicts,
+		Conflicts:         pv.Conflicts,
 	})
 }
 

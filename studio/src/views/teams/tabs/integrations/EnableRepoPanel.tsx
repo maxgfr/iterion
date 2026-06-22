@@ -177,7 +177,7 @@ export function EnableRepoPanel({
                         <label htmlFor={`fb-${b.name}`} className="text-sm">
                           <span className="font-medium">{b.display_name || b.name}</span>{" "}
                           <span className="font-mono text-fg-muted">{b.name}</span>
-                          <span className="block mt-0.5 flex flex-wrap gap-1">
+                          <span className="mt-0.5 flex flex-wrap gap-1">
                             {triggerChips(b).map((c) => (
                               <span
                                 key={c}
@@ -204,6 +204,16 @@ export function EnableRepoPanel({
             <div>
               <span className="text-fg-muted">Will subscribe to:</span>{" "}
               <span className="font-mono">{preview.forge_native_events.join(", ")}</span>
+            </div>
+          )}
+          {(preview.commands?.length ?? 0) > 0 && (
+            <div>
+              <span className="text-fg-muted">Commands:</span>{" "}
+              {preview.commands?.map((c) => (
+                <span key={c.command} className="font-mono mr-1">
+                  /{c.command}
+                </span>
+              ))}
             </div>
           )}
           {preview.identity.handle && (

@@ -54,8 +54,11 @@ export interface ForgeEnablePreview {
   forge_native_events: string[];
   scopes: Record<string, string>;
   secrets: Array<{ bot_id: string; secret: string }>;
+  /** Slash-commands the enabled bots add to the webhook (command → bot). */
+  commands?: Array<{ command: string; bot_id: string }>;
   identity: { handle: string; provider: string; base_url: string };
-  /** Non-empty = a bot can't be auto-installed (no forge: block / not found). */
+  /** Non-empty = a bot can't be auto-installed (neither forge: nor an
+   *  invocation). */
   conflicts: string[];
 }
 
