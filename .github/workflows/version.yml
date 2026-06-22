@@ -2,6 +2,11 @@ name: 🏷️ Version
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release as an increment (patch | minor) or an explicit 0.x.y version. The project stays 0.x — do not pass 'major'."
+        required: false
+        default: minor
   pull_request:
     types: [closed]
     branches: [main]
@@ -57,4 +62,4 @@ jobs:
           # published` to other workflows (GitHub blocks the recursion),
           # which silently breaks brew-update.yml.
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
-        run: pnpm release-it --ci
+        run: pnpm release-it ${{ github.event.inputs.version }} --ci
