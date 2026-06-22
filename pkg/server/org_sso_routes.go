@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -8,7 +10,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/SocialGouv/iterion/pkg/auth"
-	"github.com/SocialGouv/iterion/pkg/auth/oidc"
 	"github.com/SocialGouv/iterion/pkg/auth/orgsso"
 	"github.com/SocialGouv/iterion/pkg/identity"
 	"github.com/SocialGouv/iterion/pkg/store"
@@ -121,9 +122,8 @@ func (s *Server) handleUpdateOrgSSOProvider(w http.ResponseWriter, r *http.Reque
 	}
 	providerID := r.PathValue("provider_id")
 	ctx := store.WithTenant(r.Context(), teamID)
-	row, err := s.orgSSO.Get(ctx, providerID)
-	if err != nil || row.TenantID != teamID {
-		httpError(w, http.StatusNotFound, "provider not found")
+	row, ok := s.loadTenantOrgSSORow(ctx, w, teamID, providerID)
+	if !ok {
 		return
 	}
 	var req orgSSOProviderReq
@@ -157,9 +157,8 @@ func (s *Server) handleDeleteOrgSSOProvider(w http.ResponseWriter, r *http.Reque
 	}
 	providerID := r.PathValue("provider_id")
 	ctx := store.WithTenant(r.Context(), teamID)
-	row, err := s.orgSSO.Get(ctx, providerID)
-	if err != nil || row.TenantID != teamID {
-		httpError(w, http.StatusNotFound, "provider not found")
+	row, ok := s.loadTenantOrgSSORow(ctx, w, teamID, providerID)
+	if !ok {
 		return
 	}
 	if err := s.orgSSO.Delete(ctx, providerID); err != nil {
@@ -181,22 +180,19 @@ func (s *Server) handleTestOrgSSOProvider(w http.ResponseWriter, r *http.Request
 		return
 	}
 	providerID := r.PathValue("provider_id")
-	row, err := s.orgSSO.Get(store.WithTenant(r.Context(), teamID), providerID)
-	if err != nil || row.TenantID != teamID {
-		httpError(w, http.StatusNotFound, "provider not found")
+	row, ok := s.loadTenantOrgSSORow(store.WithTenant(r.Context(), teamID), w, teamID, providerID)
+	if !ok {
 		return
 	}
 	if row.Kind != orgsso.KindOIDC {
 		httpError(w, http.StatusBadRequest, "test is only supported for oidc providers")
 		return
 	}
-	secret, err := orgsso.OpenClientSecret(s.sealer, row.ID, row.SealedSecret)
+	conn, err := s.buildOrgOIDCConnector(row)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "open secret")
 		return
 	}
-	strict := s.ssoStrict()
-	conn := oidc.NewGenericConnectorWithSlug(row.OIDCSlug(), row.IssuerURL, row.ClientID, secret, row.DisplayName, row.Scopes, oidc.SafeGenericClient(strict), strict)
 	// AuthorizeURL triggers discovery; a build success means the issuer is
 	// reachable, advertises matching endpoints, and (strict) is https.
 	if _, derr := conn.AuthorizeURL(r.Context(), s.oidcRedirectURI(row.OIDCSlug()), "test-state", "test-verifier"); derr != nil {
@@ -242,18 +238,27 @@ func (s *Server) applyOrgSSOReq(row *orgsso.OrgSSOProvider, req orgSSOProviderRe
 	return row.Validate()
 }
 
-var errOrgSSOGitHubNotYet = orgSSOClientError("github SSO team-gating is not enabled yet")
+// errOrgSSOGitHubNotYet refuses github rows in Phase 1; the grant logic +
+// proof-of-control land in Phase 2.
+var errOrgSSOGitHubNotYet = errors.New("github SSO team-gating is not enabled yet")
 
-// orgSSOClientError is a small error type for 400-class messages.
-type orgSSOClientError string
-
-func (e orgSSOClientError) Error() string { return string(e) }
+// loadTenantOrgSSORow fetches a provider and asserts it belongs to teamID,
+// writing a 404 (and returning ok=false) otherwise. Shared by the
+// update/delete/test handlers.
+func (s *Server) loadTenantOrgSSORow(ctx context.Context, w http.ResponseWriter, teamID, providerID string) (orgsso.OrgSSOProvider, bool) {
+	row, err := s.orgSSO.Get(ctx, providerID)
+	if err != nil || row.TenantID != teamID {
+		httpError(w, http.StatusNotFound, "provider not found")
+		return orgsso.OrgSSOProvider{}, false
+	}
+	return row, true
+}
 
 func (s *Server) writeOrgSSOError(w http.ResponseWriter, err error) {
 	switch {
-	case err == orgsso.ErrExists:
+	case errors.Is(err, orgsso.ErrExists):
 		httpError(w, http.StatusConflict, "a github provider already exists for this org")
-	case err == orgsso.ErrInvalid || err == orgsso.ErrOwnerNotGrant:
+	case errors.Is(err, orgsso.ErrInvalid) || errors.Is(err, orgsso.ErrOwnerNotGrant):
 		httpError(w, http.StatusBadRequest, "%v", err)
 	default:
 		httpError(w, http.StatusInternalServerError, "%v", err)

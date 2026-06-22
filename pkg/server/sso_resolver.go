@@ -8,12 +8,30 @@ import (
 	"github.com/SocialGouv/iterion/pkg/secure/httpdial"
 )
 
-// ssoStrict reports whether outbound OIDC fetches (per-org issuer discovery,
-// token, userinfo) must enforce the public-unicast SSRF guard: always in cloud
-// mode, and in local mode when bound to a non-loopback address (multi-user dev
-// box / LAN exposure). Mirrors the preview-proxy strictness derivation.
-func (s *Server) ssoStrict() bool {
+// outboundStrict reports whether server-side fetches of an operator/admin-
+// supplied URL (OIDC issuer discovery/token/userinfo, the studio preview proxy)
+// must enforce the public-unicast SSRF guard: always in cloud mode, and in
+// local mode when bound to a non-loopback address (multi-user dev box / LAN
+// exposure). Shared by the preview proxy and the per-org SSO connectors.
+func (s *Server) outboundStrict() bool {
 	return s.cfg.Mode == "cloud" || !httpdial.IsLoopbackBind(s.cfg.Bind)
+}
+
+// buildOrgOIDCConnector assembles a per-org GenericConnector from a stored row:
+// unseal the client secret, derive SSRF strictness, attach the matching
+// SafeClient. The single source of truth for "what a per-org OIDC connector
+// looks like", shared by resolveConnector (login flows) and the config test
+// endpoint — the caller owns the enabled/kind gating.
+func (s *Server) buildOrgOIDCConnector(row orgsso.OrgSSOProvider) (oidc.Connector, error) {
+	secret, err := orgsso.OpenClientSecret(s.sealer, row.ID, row.SealedSecret)
+	if err != nil {
+		return nil, err
+	}
+	strict := s.outboundStrict()
+	return oidc.NewGenericConnectorWithSlug(
+		row.OIDCSlug(), row.IssuerURL, row.ClientID, secret, row.DisplayName, row.Scopes,
+		oidc.SafeGenericClient(strict), strict,
+	), nil
 }
 
 // resolveConnector returns the OIDC connector for a provider slug. Global
@@ -40,14 +58,9 @@ func (s *Server) resolveConnector(ctx context.Context, slug string) (oidc.Connec
 	if err != nil || row.Kind != orgsso.KindOIDC || !row.Enabled {
 		return nil, "", "", oidc.ErrUnknownProvider
 	}
-	secret, err := orgsso.OpenClientSecret(s.sealer, row.ID, row.SealedSecret)
+	conn, err := s.buildOrgOIDCConnector(row)
 	if err != nil {
 		return nil, "", "", oidc.ErrUnknownProvider
 	}
-	strict := s.ssoStrict()
-	conn := oidc.NewGenericConnectorWithSlug(
-		slug, row.IssuerURL, row.ClientID, secret, row.DisplayName, row.Scopes,
-		oidc.SafeGenericClient(strict), strict,
-	)
 	return conn, row.TenantID, row.ID, nil
 }

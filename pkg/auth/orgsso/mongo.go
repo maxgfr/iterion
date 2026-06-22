@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -67,7 +66,7 @@ func (s *MongoStore) EnsureSchema(ctx context.Context) error {
 func (s *MongoStore) Create(ctx context.Context, p OrgSSOProvider) error {
 	p.Normalize()
 	if _, err := s.coll.InsertOne(ctx, p); err != nil {
-		if mongo.IsDuplicateKeyError(err) {
+		if mongoutil.IsDuplicateKey(err) {
 			return ErrExists
 		}
 		return fmt.Errorf("orgsso: insert provider: %w", err)
@@ -91,7 +90,7 @@ func (s *MongoStore) Update(ctx context.Context, p OrgSSOProvider) error {
 	p.Normalize()
 	res, err := s.coll.ReplaceOne(ctx, bson.M{"_id": p.ID}, p)
 	if err != nil {
-		if mongo.IsDuplicateKeyError(err) {
+		if mongoutil.IsDuplicateKey(err) {
 			return ErrExists
 		}
 		return fmt.Errorf("orgsso: update provider: %w", err)
@@ -142,8 +141,5 @@ func (s *MongoStore) find(ctx context.Context, filter bson.M) ([]OrgSSOProvider,
 	if err := cur.All(ctx, &out); err != nil {
 		return nil, fmt.Errorf("orgsso: decode providers: %w", err)
 	}
-	// Defensive secondary sort (Mongo sort already applied; keep memory + mongo
-	// parity for callers that compare ordering across stores in tests).
-	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
 }

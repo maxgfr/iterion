@@ -88,8 +88,7 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 	//    private network through us. (F-S4)
 	//  - local mode bound to 127.0.0.1 / ::1 / localhost: permissive
 	//    so the studio can embed the user's own dev servers.
-	cloudMode := s.cfg.Mode == "cloud"
-	strict := cloudMode || !httpdial.IsLoopbackBind(s.cfg.Bind)
+	strict := s.outboundStrict()
 
 	host := parsed.Hostname()
 	port := parsed.Port()
@@ -136,7 +135,7 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 		Transport: transport,
 	}
 
-	// #nosec G107 G704 — SSRF-safe: host was validated by resolvePreviewHost and the
+	// #nosec G107 G704 — SSRF-safe: host was validated by httpdial.ResolvePublicHost and the
 	// transport below dials only the pinned resolved IP (DNS-rebinding-proof),
 	// redirects are not auto-followed, and strict public-unicast validation is
 	// enforced in cloud / non-loopback-bind modes. parsed.String() is reused
@@ -157,7 +156,7 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	upstreamReq.Header.Set("User-Agent", "iterion-preview-proxy/1")
 
-	// #nosec G107 G704 — SSRF-safe: see the resolvePreviewHost guard above. The
+	// #nosec G107 G704 — SSRF-safe: see the httpdial.ResolvePublicHost guard above. The
 	// client's transport is pinned to the validated IP and CheckRedirect
 	// refuses to auto-follow, so no hop can re-target a private address.
 	resp, err := client.Do(upstreamReq)
