@@ -55,10 +55,18 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	srcIP := s.clientIP(r)
 
 	event := r.Header.Get("X-GitHub-Event")
-	if event != prforge.EventHeaderPullRequest {
-		// GitHub sends ping/push/issue_comment on the same URL —
-		// silently filter (200) instead of 4xx, otherwise GitHub
-		// disables the webhook after repeated failures.
+	switch event {
+	case prforge.EventHeaderIssueComment:
+		// Universal slash-command path: /featurly, /seki… on a PR or issue
+		// comment. Routes through the command registry to its bot.
+		s.handlePRForgeComment(ctx, w, r, cfg, webhooks.ProviderGitHub, body, payloadHash, srcIP)
+		return
+	case prforge.EventHeaderPullRequest:
+		// fall through to the PR auto-review path below.
+	default:
+		// GitHub sends ping/push/… on the same URL — silently filter (200)
+		// instead of 4xx, otherwise GitHub disables the webhook after
+		// repeated failures.
 		s.recordTerminalWebhookDelivery(ctx, cfg, webhookEventMeta{Kind: event}, webhooks.StatusFiltered, payloadHash, srcIP, "unsupported X-GitHub-Event")
 		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
 		return

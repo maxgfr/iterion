@@ -69,7 +69,15 @@ func (s *Server) handleForgejoWebhook(w http.ResponseWriter, r *http.Request) {
 	srcIP := s.clientIP(r)
 
 	event := forgejoEventHeader(r)
-	if event != prforge.EventHeaderPullRequest {
+	switch event {
+	case prforge.EventHeaderIssueComment:
+		// Universal slash-command path: /featurly, /seki… on a PR or issue
+		// comment. Routes through the command registry to its bot.
+		s.handlePRForgeComment(ctx, w, r, cfg, webhooks.ProviderForgejo, body, payloadHash, srcIP)
+		return
+	case prforge.EventHeaderPullRequest:
+		// fall through to the PR auto-review path below.
+	default:
 		s.recordTerminalWebhookDelivery(ctx, cfg, webhookEventMeta{Kind: event}, webhooks.StatusFiltered, payloadHash, srcIP, "unsupported event")
 		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
 		return

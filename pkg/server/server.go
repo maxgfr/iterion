@@ -50,6 +50,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/store"
 	"github.com/SocialGouv/iterion/pkg/webhooks"
 	"github.com/SocialGouv/iterion/pkg/webhooks/gitlab"
+	"github.com/SocialGouv/iterion/pkg/webhooks/prforge"
 )
 
 // StaticFS embeds the built studio so any importer (the server
@@ -419,7 +420,11 @@ type Server struct {
 	// (that is the Revi-converse specialisation); a generic command authorises
 	// the replier and launches.
 	webhookCommandGate func(ctx context.Context, cfg webhooks.Config, p gitlab.ParsedNote, route webhooks.CommandRoute) (authorized bool, reason string, err error)
-	httpClient         *http.Client
+	// webhookPRForgeCommandGate overrides the GitHub/Forgejo issue_comment
+	// command replier gate (forge token + loop-guard + allowlist/role authz —
+	// test seam). nil → realWebhookPRForgeCommandGate.
+	webhookPRForgeCommandGate func(ctx context.Context, cfg webhooks.Config, provider webhooks.Provider, p prforge.ParsedNote, route webhooks.CommandRoute) (authorized bool, reason string, err error)
+	httpClient                *http.Client
 
 	// detector is the cached LLM credential detector backing
 	// /api/backends/detect. Lazily constructed on first request.

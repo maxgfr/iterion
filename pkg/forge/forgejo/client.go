@@ -55,6 +55,31 @@ func (c *AdminClient) WhoAmI(ctx context.Context) (forge.Identity, error) {
 	return c.http().FetchWhoAmI(ctx, "/user")
 }
 
+// CollaboratorPermission returns user's permission on repo ("owner/repo") via
+// GET /repos/{repo}/collaborators/{user}/permission — one of
+// admin|write|read|none on Forgejo/Gitea. A 404 (not a collaborator) is
+// "none", not an error. Used by the inbound-webhook command gate to authorize
+// a commenter against a bot's MinReplierRole.
+func (c *AdminClient) CollaboratorPermission(ctx context.Context, repo, user string) (string, error) {
+	var resp struct {
+		Permission string `json:"permission"` // admin|write|read|none
+	}
+	code, err := c.do(ctx, http.MethodGet, "/repos/"+repo+"/collaborators/"+url.PathEscape(user)+"/permission", nil, &resp)
+	if err != nil {
+		return "", err
+	}
+	if code == http.StatusNotFound {
+		return "none", nil
+	}
+	if code != http.StatusOK {
+		return "", statusErr("GET collaborator permission", code)
+	}
+	if resp.Permission == "" {
+		return "none", nil
+	}
+	return resp.Permission, nil
+}
+
 // ListRepos returns repos the token can admin. Gitea's /user/repos returns
 // a `permissions.admin` flag the picker filters on.
 func (c *AdminClient) ListRepos(ctx context.Context, q forge.RepoQuery) ([]forge.RepoSummary, error) {

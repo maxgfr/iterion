@@ -1,0 +1,236 @@
+package server
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"github.com/SocialGouv/iterion/pkg/forge"
+	fforgejo "github.com/SocialGouv/iterion/pkg/forge/forgejo"
+	fgithub "github.com/SocialGouv/iterion/pkg/forge/github"
+	"github.com/SocialGouv/iterion/pkg/knowledge"
+	"github.com/SocialGouv/iterion/pkg/webhooks"
+	"github.com/SocialGouv/iterion/pkg/webhooks/prforge"
+)
+
+// prforgeReplierAPI is the minimal forge surface the command gate needs:
+// the bot's own identity (loop-guard) and a commenter's repo permission
+// (role-gate). Both pkg/forge/{github,forgejo}.AdminClient satisfy it.
+type prforgeReplierAPI interface {
+	WhoAmI(ctx context.Context) (forge.Identity, error)
+	CollaboratorPermission(ctx context.Context, repo, user string) (string, error)
+}
+
+// handlePRForgeComment routes a GitHub/Forgejo issue_comment (PR or issue) to
+// its bot via the command registry — the GitHub/Forgejo twin of
+// handleGitLabCommandNote. Every benign refusal is a 200/filtered so the
+// forge does not auto-disable the hook.
+func (s *Server) handlePRForgeComment(ctx context.Context, w http.ResponseWriter, r *http.Request, cfg webhooks.Config, provider webhooks.Provider, body []byte, payloadHash, srcIP string) {
+	p, err := prforge.ParseIssueComment(body)
+	if err != nil {
+		// Malformed body → filter (200), not 4xx: repeated 4xx make the forge
+		// disable the webhook, and issue_comment shares the PR delivery URL.
+		s.recordTerminalWebhookDelivery(ctx, cfg, webhookEventMeta{Kind: "issue_comment"}, webhooks.StatusFiltered, payloadHash, srcIP, "invalid issue_comment payload")
+		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
+		return
+	}
+	meta := prforgeNoteMeta(p)
+	filtered := func(reason string) {
+		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusFiltered, payloadHash, srcIP, reason)
+		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
+	}
+	if p.Action != "created" || p.IssueState != "open" ||
+		!webhooks.MatchEvent(cfg.EventAllowlist, "issue_comment", "issue_comment") ||
+		!webhooks.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
+		filtered("out of scope (not a new open-issue comment / event / project)")
+		return
+	}
+	cmd, cmdArgs := p.Command()
+	if cmd == "" {
+		filtered("no slash-command")
+		return
+	}
+	route, ok := webhooks.ResolveCommandRoute(cfg, cmd, cmdArgs, s.cmdDiscovery())
+	if !ok {
+		filtered("no command route for /" + cmd)
+		return
+	}
+	if !route.AllowsScope(p.Surface()) {
+		filtered("/" + cmd + " is not enabled on " + p.Surface() + " comments")
+		return
+	}
+	if !cfg.AllowsBot(route.BotID) {
+		filtered("bot " + route.BotID + " not permitted by this webhook")
+		return
+	}
+	gate := s.webhookPRForgeCommandGate
+	if gate == nil {
+		gate = s.realWebhookPRForgeCommandGate
+	}
+	authorized, reason, aerr := gate(ctx, cfg, provider, p, route)
+	if aerr != nil {
+		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusLaunchError, payloadHash, srcIP, "authz check: "+aerr.Error())
+		httpError(w, http.StatusBadGateway, "authorization check failed")
+		return
+	}
+	if !authorized {
+		filtered(reason)
+		return
+	}
+	if s.logger != nil {
+		s.logger.Debug("webhooks: %s comment %s#%d (/%s) by %s → %s (%s)", provider, p.ProjectPath, p.IssueNumber, cmd, p.AuthorLogin, route.BotID, reason)
+	}
+	vars := buildPRForgeCommandVars(p, route, cmdArgs, cfg.LaunchVars)
+	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("cmd|%s|%s|%s|%s", cfg.TenantID, cfg.ID, p.ProjectPath, p.SubjectID())))
+	// The issue_comment payload carries no PR head branch, so repoRef is left
+	// empty (the run resolves the default branch / the PR from pr_url).
+	s.dispatchInvocation(ctx, w, r, cfg, meta, idemKey, route, vars, p.CloneURL, "", payloadHash, srcIP)
+}
+
+// buildPRForgeCommandVars composes the launch vars for a generic command on a
+// GitHub/Forgejo comment: issue/PR context + the route's manifest ContextVars
+// + operator LaunchVars, the command args landing in the route's args_var.
+func buildPRForgeCommandVars(p prforge.ParsedNote, route webhooks.CommandRoute, args string, launchVars map[string]string) map[string]string {
+	vars := map[string]string{
+		"pr_url":      p.PRURL,
+		"scope_notes": strings.TrimSpace(p.IssueTitle + "\n\n" + p.IssueBody),
+	}
+	for k, v := range route.ContextVars {
+		vars[k] = v
+	}
+	for k, v := range launchVars {
+		vars[k] = v
+	}
+	if route.ArgsVar != "" && strings.TrimSpace(args) != "" {
+		vars[route.ArgsVar] = args
+	}
+	return vars
+}
+
+func prforgeNoteMeta(p prforge.ParsedNote) webhookEventMeta {
+	return webhookEventMeta{
+		Kind:         "issue_comment",
+		Action:       "comment",
+		ProjectPath:  p.ProjectPath,
+		SubjectID:    p.SubjectID(),
+		SenderHandle: p.AuthorLogin,
+	}
+}
+
+// realWebhookPRForgeCommandGate is the production replier gate for a GitHub /
+// Forgejo command comment: resolve the bot's forge token, reject the bot's
+// own comment (loop-guard), then authorize the commenter — allowlist OR a
+// repo-permission >= the route's MinReplierRole (falling back to the webhook
+// default). ok=false + reason for benign refusals; err only for infra failure.
+func (s *Server) realWebhookPRForgeCommandGate(ctx context.Context, cfg webhooks.Config, provider webhooks.Provider, p prforge.ParsedNote, route webhooks.CommandRoute) (bool, string, error) {
+	token, terr := s.resolveForgeToken(ctx, cfg, route.BotID)
+	if terr != nil || token == "" {
+		return false, "no forge token resolved (configure a forge_token binding)", nil
+	}
+	baseURL, refusal := prforgeBaseURL(cfg, p)
+	if refusal != "" {
+		return false, refusal, nil
+	}
+	api := prforgeReplierClient(provider, s.httpClient, baseURL, token)
+	if id, err := api.WhoAmI(ctx); err == nil && id.Login != "" && strings.EqualFold(id.Login, p.AuthorLogin) {
+		return false, "self comment (loop-guard)", nil
+	}
+	// Allowlist short-circuit (no API call).
+	if prforgeInAllowlist(cfg.AuthorizedRepliers, p.AuthorLogin) {
+		return true, "allowlist", nil
+	}
+	perm, err := api.CollaboratorPermission(ctx, p.ProjectPath, p.AuthorLogin)
+	if err != nil {
+		return false, "", err
+	}
+	minRole := route.MinReplierRole
+	if minRole == "" {
+		minRole = cfg.MinReplierRole
+	}
+	if prforgePermRank(perm) >= replierMinRoleRank(minRole) {
+		return true, "role", nil
+	}
+	return false, "replier not authorized: " + p.AuthorLogin, nil
+}
+
+// prforgeReplierClient builds the right minimal forge client for the gate.
+func prforgeReplierClient(provider webhooks.Provider, httpClient *http.Client, baseURL, token string) prforgeReplierAPI {
+	if provider == webhooks.ProviderForgejo {
+		return fforgejo.New(httpClient, baseURL, token)
+	}
+	return fgithub.New(httpClient, baseURL, token)
+}
+
+// prforgeBaseURL decides the forge web base the bot's token may be sent to.
+// A per-webhook ForgeBaseURL (set by the orchestrator from the connection) is
+// authoritative; otherwise the host is derived from the comment/PR URL and
+// gated by the optional ITERION_WEBHOOK_FORGE_HOSTS allowlist (same posture as
+// the GitLab path). Returns a non-empty refusal when the token must not be
+// sent.
+func prforgeBaseURL(cfg webhooks.Config, p prforge.ParsedNote) (baseURL, refusal string) {
+	if cfg.ForgeBaseURL != "" {
+		return cfg.ForgeBaseURL, ""
+	}
+	ref := p.PRURL
+	if ref == "" {
+		ref = p.CommentURL
+	}
+	u, err := url.Parse(ref)
+	if err != nil || u.Host == "" || u.User != nil {
+		return "", "comment URL has no usable forge host"
+	}
+	if !forgeHostAllowed(u.Host) {
+		return "", "forge host not in ITERION_WEBHOOK_FORGE_HOSTS allowlist"
+	}
+	return u.Scheme + "://" + u.Host, ""
+}
+
+func prforgeInAllowlist(allow []string, login string) bool {
+	for _, a := range allow {
+		a = strings.TrimSpace(a)
+		if a != "" && strings.EqualFold(strings.TrimPrefix(a, "@"), login) {
+			return true
+		}
+	}
+	return false
+}
+
+// prforgePermRank maps a GitHub/Forgejo collaborator permission to a rank on
+// the same scale as replierMinRoleRank so a gitlab-vocab MinReplierRole gates
+// cross-forge commenters sensibly.
+func prforgePermRank(perm string) int {
+	switch strings.ToLower(strings.TrimSpace(perm)) {
+	case "admin":
+		return 5
+	case "maintain":
+		return 4
+	case "write":
+		return 3
+	case "triage":
+		return 2
+	case "read":
+		return 1
+	}
+	return 0 // none
+}
+
+// replierMinRoleRank maps a MinReplierRole (gitlab vocabulary) to a rank.
+// Empty defaults to "developer" (matching the GitLab gate default), which
+// equals a GitHub "write" collaborator.
+func replierMinRoleRank(role string) int {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "owner":
+		return 5
+	case "maintainer":
+		return 4
+	case "developer", "":
+		return 3
+	case "reporter":
+		return 2
+	case "guest":
+		return 1
+	}
+	return 3
+}

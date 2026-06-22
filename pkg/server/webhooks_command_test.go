@@ -8,6 +8,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/webhooks"
 	"github.com/SocialGouv/iterion/pkg/webhooks/gitlab"
+	"github.com/SocialGouv/iterion/pkg/webhooks/prforge"
 )
 
 // glNoteCmd is an MR note carrying a generic slash-command with args.
@@ -104,5 +105,69 @@ func TestGitLabNoteHook_CommandUnauthorizedFiltered(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("unauthorized must not launch, calls=%d", calls)
+	}
+}
+
+const ghIssueCommentFeaturly = `{
+  "action": "created",
+  "repository": {"id": 42, "full_name": "acme/widgets", "clone_url": "https://github.com/acme/widgets.git"},
+  "issue": {"number": 7, "title": "Add X", "body": "desc", "state": "open",
+    "pull_request": {"html_url": "https://github.com/acme/widgets/pull/7"}},
+  "comment": {"id": 555, "body": "/featurly add export endpoint"},
+  "sender": {"login": "alice"}
+}`
+
+// TestGitHubIssueComment_GenericCommandLaunches pins the universal command
+// path on GitHub: /featurly <spec> in a PR comment routes through the
+// CommandMap to feature-dev with the args in its args_var.
+func TestGitHubIssueComment_GenericCommandLaunches(t *testing.T) {
+	s := newWebhookTestServer(t)
+	cfg, pt := ghConfig(t, s)
+	cfg.BotIDs = []string{"review-pr", "feature-dev"}
+	cfg.CommandMap = map[string][]webhooks.CommandRoute{
+		"featurly": {{BotID: "feature-dev", Mode: "board", ArgsVar: "feature_prompt", Scope: "any"}},
+	}
+	var calls int
+	var gotBot string
+	var gotVars map[string]string
+	s.webhookPRForgeCommandGate = func(context.Context, webhooks.Config, webhooks.Provider, prforge.ParsedNote, webhooks.CommandRoute) (bool, string, error) {
+		return true, "authorized", nil
+	}
+	s.webhookLaunchBot = func(_ context.Context, botID string, vars map[string]string, _, _, _ string, _, _ map[string]string) (string, error) {
+		calls++
+		gotBot, gotVars = botID, vars
+		return "run-gh-1", nil
+	}
+	w := httptest.NewRecorder()
+	s.handleGitHubWebhook(w, ghReq(ghCtx(cfg), ghIssueCommentFeaturly, prforge.EventHeaderIssueComment, pt))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+	if calls != 1 || gotBot != "feature-dev" {
+		t.Fatalf("launch: calls=%d bot=%q", calls, gotBot)
+	}
+	if gotVars["feature_prompt"] != "add export endpoint" {
+		t.Fatalf("args should land in feature_prompt: %v", gotVars["feature_prompt"])
+	}
+}
+
+// TestGitHubIssueComment_UnknownCommandFiltered: a non-command comment is
+// filtered 200 (so GitHub does not disable the hook) and never launches.
+func TestGitHubIssueComment_PlainCommentFiltered(t *testing.T) {
+	s := newWebhookTestServer(t)
+	cfg, pt := ghConfig(t, s)
+	var calls int
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
+		calls++
+		return "x", nil
+	}
+	body := `{"action":"created","repository":{"full_name":"acme/widgets"},"issue":{"number":7,"state":"open","pull_request":{"html_url":"x"}},"comment":{"id":1,"body":"lgtm, thanks!"},"sender":{"login":"alice"}}`
+	w := httptest.NewRecorder()
+	s.handleGitHubWebhook(w, ghReq(ghCtx(cfg), body, prforge.EventHeaderIssueComment, pt))
+	if w.Code != http.StatusOK {
+		t.Fatalf("plain comment should be filtered 200, got %d", w.Code)
+	}
+	if calls != 0 {
+		t.Fatalf("plain comment must not launch, calls=%d", calls)
 	}
 }
