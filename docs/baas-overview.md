@@ -32,7 +32,7 @@ sequenceDiagram
   participant RUN as runner pod<br/>(iterion)
   participant EXT as external system<br/>(forge/Slack/...)
 
-  SRC->>RUN: POST /api/webhooks/<br/>&lt;iwh_ token&gt;
+  SRC->>RUN: POST /api/webhooks (iwh_ token)
   Note over RUN: admit (auth/rate/quota)<br/>publish to NATS queue<br/>runner claims + executes<br/>binds org credentials<br/>(BYOK key + file secret)
   RUN->>EXT: bot acts (commit,<br/>review, post note...)
   RUN-->>SRC: 202 launched + run id
