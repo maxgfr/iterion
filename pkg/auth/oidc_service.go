@@ -220,10 +220,34 @@ func (s *Service) LoginWithExternalForOrg(ctx context.Context, ext oidc.External
 		return LoginResult{}, err
 	}
 
-	// 2) Existing iterion account by email — never auto-link in V1.
+	// 2) Existing iterion account by email. Auto-link only when the org opted
+	// in AND the email's domain is verified for the org AND the target isn't a
+	// privileged account elsewhere (see canAutoLink); otherwise require explicit
+	// consent (409).
 	email := identity.NormalizeEmail(ext.Email)
-	if _, err := s.store.GetUserByEmail(ctx, email); err == nil {
-		return LoginResult{}, ErrLinkRequiresConsent
+	existing, err := s.store.GetUserByEmail(ctx, email)
+	if err == nil {
+		if existing.Status == identity.UserStatusDisabled {
+			return LoginResult{}, ErrAccountDisabled
+		}
+		if !s.canAutoLink(ctx, row, existing, email) {
+			return LoginResult{}, ErrLinkRequiresConsent
+		}
+		if err := s.store.UpsertOIDCLink(ctx, identity.OIDCLink{
+			Provider:       ext.Provider,
+			ProviderUserID: ext.Subject,
+			UserID:         existing.ID,
+			Email:          email,
+			CreatedAt:      now,
+		}); err != nil {
+			return LoginResult{}, err
+		}
+		if err := s.grantMembership(ctx, existing.ID, tenantID, role, identity.MembershipSourceOIDCSSO, now); err != nil {
+			return LoginResult{}, err
+		}
+		existing.LastLoginAt = &now
+		_ = s.store.UpdateUser(ctx, existing)
+		return s.issueLoginInTeam(ctx, existing, tenantID, userAgent, ip)
 	} else if !errors.Is(err, identity.ErrNotFound) {
 		return LoginResult{}, err
 	}
@@ -359,6 +383,39 @@ func (s *Service) applyGitHubGrants(ctx context.Context, userID string, gh githu
 		granted = append(granted, row.TenantID)
 	}
 	return granted, nil
+}
+
+// canAutoLink reports whether a fresh per-org OIDC identity may be auto-linked
+// onto an existing user matched by email — only when the org opted in
+// (row.AutoLinkOnEmail), the email's domain is VERIFIED for the org (so the
+// org's IdP has authority over that address — JWKS alone is insufficient since
+// the org controls its own signing keys), and the target is not a privileged
+// account whose takeover would escalate beyond the org: never a super-admin,
+// and never an admin/owner of a non-personal org other than the linking one.
+func (s *Service) canAutoLink(ctx context.Context, row orgsso.OrgSSOProvider, target identity.User, email string) bool {
+	if !row.AutoLinkOnEmail || s.domains == nil || target.IsSuperAdmin {
+		return false
+	}
+	ok, err := s.domains.IsVerifiedForTenant(ctx, row.TenantID, orgsso.EmailDomain(email))
+	if err != nil || !ok {
+		return false
+	}
+	ms, err := s.store.ListMembershipsByUser(ctx, target.ID)
+	if err != nil {
+		return false
+	}
+	for _, m := range ms {
+		if m.TeamID == row.TenantID || !m.Role.AtLeast(identity.RoleAdmin) {
+			continue
+		}
+		// admin/owner of another team — allowed only if it's a personal team
+		// (every user owns theirs; that confers no cross-tenant power).
+		if t, terr := s.store.GetTeam(ctx, m.TeamID); terr == nil && t.Personal {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // SwitchTeamWithCookie is identical to SwitchTeam but also returns

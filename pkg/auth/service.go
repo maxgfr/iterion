@@ -85,6 +85,10 @@ type Service struct {
 	// branch (LoginWithExternalForOrg → ErrUnknownProvider) and the GitHub
 	// team-grant reverse lookup in LoginWithExternal becomes a no-op.
 	orgSSO orgsso.Store
+	// domains holds per-tenant verified email-domain claims, gating per-org
+	// auto-link. nil → auto-link is never permitted (existing-email logins fall
+	// back to ErrLinkRequiresConsent).
+	domains orgsso.DomainStore
 	// logger, when non-nil, receives audit-grade events like
 	// "stored hash unparseable for user X" that we don't want to
 	// silently swallow into a generic ErrInvalidCredentials response.
@@ -115,7 +119,10 @@ type Config struct {
 	// OrgSSO is the per-tenant SSO provider store (per-org Keycloak rows +
 	// GitHub team-gating). Optional; nil disables per-org SSO.
 	OrgSSO orgsso.Store
-	Logger *iterlog.Logger
+	// Domains is the per-tenant verified email-domain store gating per-org
+	// auto-link. Optional; nil disables auto-link.
+	Domains orgsso.DomainStore
+	Logger  *iterlog.Logger
 	// Resets + Mailer + PublicURL enable the password-reset flow and
 	// invitation emails (all optional — see Service fields).
 	Resets    PasswordResetStore
@@ -160,6 +167,7 @@ func NewService(cfg Config) (*Service, error) {
 		now:                      time.Now,
 		trustedAutoLinkProviders: trusted,
 		orgSSO:                   cfg.OrgSSO,
+		domains:                  cfg.Domains,
 		logger:                   cfg.Logger,
 		resets:                   cfg.Resets,
 		mailer:                   cfg.Mailer,

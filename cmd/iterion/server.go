@@ -266,6 +266,10 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	if err := orgSSOStore.EnsureSchema(rootCtx); err != nil {
 		return fmt.Errorf("server: ensure org_sso_providers schema: %w", err)
 	}
+	orgDomainStore := orgsso.NewMongoDomainStore(st.DB())
+	if err := orgDomainStore.EnsureSchema(rootCtx); err != nil {
+		return fmt.Errorf("server: ensure org_verified_domains schema: %w", err)
+	}
 	// Mongo-backed OIDC state store: PendingAuth must survive across replicas
 	// (an OIDC /start on pod A and /callback on pod B), which the per-process
 	// memory store can't guarantee in HA.
@@ -377,6 +381,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		Mailer:                   mailer,
 		PublicURL:                cfg.Auth.PublicURL,
 		OrgSSO:                   orgSSOStore,
+		Domains:                  orgDomainStore,
 		TrustedAutoLinkProviders: cfg.Auth.TrustedAutoLinkProviders,
 	})
 	if err != nil {
@@ -427,6 +432,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		OIDCRegistry:           registry,
 		OIDCStates:             oidcStateStore,
 		OrgSSO:                 orgSSOStore,
+		OrgDomains:             orgDomainStore,
 		ApiKeys:                apiKeysStore,
 		GenericSecrets:         genericSecretsStore,
 		BotBindings:            botBindingsStore,

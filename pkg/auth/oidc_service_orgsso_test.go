@@ -115,6 +115,77 @@ func TestLoginForOrg_WrongTenantRejected(t *testing.T) {
 	}
 }
 
+// enableAutoLink flips AutoLinkOnEmail on the fixture provider and wires a
+// domain store, returning it so the caller can verify domains.
+func enableAutoLink(t *testing.T, svc *Service) *orgsso.MemoryDomainStore {
+	t.Helper()
+	ctx := context.Background()
+	row, err := svc.orgSSO.Get(ctx, "prov1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.AutoLinkOnEmail = true
+	if err := svc.orgSSO.Update(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	domains := orgsso.NewMemoryDomainStore()
+	svc.domains = domains
+	return domains
+}
+
+func TestLoginForOrg_AutoLinkVerifiedDomain(t *testing.T) {
+	svc, teamID := orgServiceFixture(t, identity.RoleMember)
+	ctx := context.Background()
+	domains := enableAutoLink(t, svc)
+	now := time.Now()
+	if err := domains.Create(ctx, orgsso.VerifiedDomain{ID: "d1", TenantID: teamID, Domain: "acme.example", VerifiedAt: &now, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.CreateUserAndPersonalTeam(ctx, "bob@acme.example", "Bob", "correcthorse", false, identity.UserStatusActive); err != nil {
+		t.Fatal(err)
+	}
+	ext := oidc.ExternalUser{Provider: "oidc-org-prov1", Subject: "kc-bob", Email: "bob@acme.example"}
+	res, err := svc.LoginWithExternalForOrg(ctx, ext, teamID, "prov1", "ua", "ip")
+	if err != nil {
+		t.Fatalf("auto-link login: %v", err)
+	}
+	if res.ActiveTeamID != teamID {
+		t.Errorf("active team = %q, want %q", res.ActiveTeamID, teamID)
+	}
+	if _, err := svc.store.GetOIDCLink(ctx, "oidc-org-prov1", "kc-bob"); err != nil {
+		t.Errorf("auto-link did not create the OIDC link: %v", err)
+	}
+}
+
+func TestLoginForOrg_NoAutoLinkUnverifiedDomain(t *testing.T) {
+	svc, teamID := orgServiceFixture(t, identity.RoleMember)
+	ctx := context.Background()
+	enableAutoLink(t, svc) // domain store wired but NOTHING verified
+	if _, _, err := svc.CreateUserAndPersonalTeam(ctx, "carol@acme.example", "Carol", "correcthorse", false, identity.UserStatusActive); err != nil {
+		t.Fatal(err)
+	}
+	ext := oidc.ExternalUser{Provider: "oidc-org-prov1", Subject: "kc-carol", Email: "carol@acme.example"}
+	if _, err := svc.LoginWithExternalForOrg(ctx, ext, teamID, "prov1", "ua", "ip"); !errors.Is(err, ErrLinkRequiresConsent) {
+		t.Fatalf("unverified domain must require consent, got %v", err)
+	}
+}
+
+func TestLoginForOrg_NoAutoLinkSuperAdmin(t *testing.T) {
+	svc, teamID := orgServiceFixture(t, identity.RoleMember)
+	ctx := context.Background()
+	domains := enableAutoLink(t, svc)
+	now := time.Now()
+	_ = domains.Create(ctx, orgsso.VerifiedDomain{ID: "d1", TenantID: teamID, Domain: "acme.example", VerifiedAt: &now, CreatedAt: now})
+	// Verified domain + opt-in, but the target is a super-admin → never auto-link.
+	if _, _, err := svc.CreateUserAndPersonalTeam(ctx, "root@acme.example", "Root", "correcthorse", true, identity.UserStatusActive); err != nil {
+		t.Fatal(err)
+	}
+	ext := oidc.ExternalUser{Provider: "oidc-org-prov1", Subject: "kc-root", Email: "root@acme.example"}
+	if _, err := svc.LoginWithExternalForOrg(ctx, ext, teamID, "prov1", "ua", "ip"); !errors.Is(err, ErrLinkRequiresConsent) {
+		t.Fatalf("super-admin auto-link must be refused, got %v", err)
+	}
+}
+
 func TestLoginForOrg_NilStoreDisabled(t *testing.T) {
 	svc := newTestService(t, SignupOpen) // no orgSSO wired
 	ext := oidc.ExternalUser{Provider: "oidc-org-x", Subject: "s", Email: "a@b.c"}

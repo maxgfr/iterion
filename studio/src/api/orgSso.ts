@@ -50,9 +50,50 @@ export interface OrgSSOProviderInput {
   client_secret?: string;
   scopes?: string[];
   default_role?: Role;
+  auto_link_on_email?: boolean;
   // github
   auto_provision?: boolean;
   grants?: GitHubTeamGrant[];
+}
+
+// OrgDomain is a tenant's email-domain claim, proven via a DNS TXT challenge.
+// A verified domain gates per-org SSO auto-link (an org's IdP may auto-link
+// addresses only at domains it has proven it controls).
+export interface OrgDomain {
+  id: string;
+  tenant_id: string;
+  domain: string;
+  token: string;
+  verified_at?: string;
+  /** DNS record name + value the admin must publish to verify ownership. */
+  challenge_host: string;
+  challenge_value: string;
+  created_at: string;
+}
+
+export async function listOrgDomains(teamID: string): Promise<OrgDomain[]> {
+  const r = await guard404("org_sso", () =>
+    request<{ domains: OrgDomain[] }>(`/teams/${teamID}/sso/domains`),
+  );
+  return r.domains ?? [];
+}
+
+export async function addOrgDomain(teamID: string, domain: string): Promise<OrgDomain> {
+  return request(`/teams/${teamID}/sso/domains`, {
+    method: "POST",
+    body: JSON.stringify({ domain }),
+  });
+}
+
+export async function verifyOrgDomain(
+  teamID: string,
+  domainID: string,
+): Promise<{ verified: boolean; error?: string }> {
+  return request(`/teams/${teamID}/sso/domains/${domainID}/verify`, { method: "POST" });
+}
+
+export async function deleteOrgDomain(teamID: string, domainID: string): Promise<void> {
+  await request<void>(`/teams/${teamID}/sso/domains/${domainID}`, { method: "DELETE" });
 }
 
 export async function listOrgSSOProviders(teamID: string): Promise<OrgSSOProvider[]> {

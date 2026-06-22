@@ -210,6 +210,10 @@ type Config struct {
 	// /api/auth/providers?org=<slug>. Requires Sealer + AuthService.
 	OrgSSO orgsso.Store
 
+	// OrgDomains is the per-tenant verified email-domain store gating per-org
+	// SSO auto-link. When set, /api/teams/{id}/sso/domains CRUD is registered.
+	OrgDomains orgsso.DomainStore
+
 	// OAuthForfait is the per-user OAuth credential store. When
 	// non-nil, the server registers /api/me/oauth/* endpoints and
 	// the cloud publisher injects sealed credentials.json /
@@ -394,6 +398,8 @@ type Server struct {
 	forgeOAuthApps    forge.OAuthAppStore
 	forgeGitHubApp    ForgeGitHubAppConfig
 	orgSSO            orgsso.Store
+	orgDomains        orgsso.DomainStore
+	orgDomainTXT      orgsso.TXTLookupFunc
 	memStore          knowledge.MemoryStore
 	// webhookLaunchBot overrides the inbound-webhook launch path (test
 	// seam). nil → realWebhookLaunchBot (resolve bot source + s.runs.Launch).
@@ -527,6 +533,8 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		runSecrets:        cfg.RunSecrets,
 		sealer:            cfg.Sealer,
 		orgSSO:            cfg.OrgSSO,
+		orgDomains:        cfg.OrgDomains,
+		orgDomainTXT:      orgsso.DefaultTXTLookup(),
 		oauthStore:        cfg.OAuthForfait,
 		webhookConfigs:    cfg.WebhookConfigs,
 		webhookDeliveries: cfg.WebhookDeliveries,
@@ -964,6 +972,9 @@ func (s *Server) routes() {
 	// Needs the auth stack + a sealer for the OIDC client secret.
 	if s.orgSSO != nil && s.authSvc != nil && s.sealer != nil {
 		s.registerOrgSSORoutes()
+	}
+	if s.orgDomains != nil && s.authSvc != nil {
+		s.registerOrgSSODomainRoutes()
 	}
 
 	// Audit log read surface (writes happen inline in the mutation

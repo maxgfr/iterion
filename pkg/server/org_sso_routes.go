@@ -32,14 +32,15 @@ func (s *Server) registerOrgSSORoutes() {
 // orgSSOProviderReq is the create/update body. client_secret is write-only; an
 // empty value on PATCH means "don't rotate the stored secret".
 type orgSSOProviderReq struct {
-	Kind         string   `json:"kind"`
-	DisplayName  string   `json:"display_name"`
-	Enabled      bool     `json:"enabled"`
-	IssuerURL    string   `json:"issuer_url"`
-	ClientID     string   `json:"client_id"`
-	ClientSecret string   `json:"client_secret"`
-	Scopes       []string `json:"scopes"`
-	DefaultRole  string   `json:"default_role"`
+	Kind            string   `json:"kind"`
+	DisplayName     string   `json:"display_name"`
+	Enabled         bool     `json:"enabled"`
+	IssuerURL       string   `json:"issuer_url"`
+	ClientID        string   `json:"client_id"`
+	ClientSecret    string   `json:"client_secret"`
+	Scopes          []string `json:"scopes"`
+	DefaultRole     string   `json:"default_role"`
+	AutoLinkOnEmail bool     `json:"auto_link_on_email"`
 	// GitHub fields (wired in Phase 2).
 	AutoProvision bool                     `json:"auto_provision"`
 	Grants        []orgsso.GitHubTeamGrant `json:"grants"`
@@ -218,6 +219,7 @@ func (s *Server) applyOrgSSOReq(ctx context.Context, row *orgsso.OrgSSOProvider,
 		row.ClientID = req.ClientID
 		row.Scopes = req.Scopes
 		row.DefaultRole = identity.Role(strings.TrimSpace(req.DefaultRole))
+		row.AutoLinkOnEmail = req.AutoLinkOnEmail
 		if req.ClientSecret != "" {
 			sealed, err := orgsso.SealClientSecret(s.sealer, row.ID, req.ClientSecret)
 			if err != nil {

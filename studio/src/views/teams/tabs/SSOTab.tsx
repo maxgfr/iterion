@@ -12,13 +12,18 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { FeatureUnavailableError } from "@/api/client";
 import {
   type GitHubTeamGrant,
+  type OrgDomain,
   type OrgSSOProvider,
   type Role,
+  addOrgDomain,
   createOrgSSOProvider,
+  deleteOrgDomain,
   deleteOrgSSOProvider,
+  listOrgDomains,
   listOrgSSOProviders,
   testOrgSSOProvider,
   updateOrgSSOProvider,
+  verifyOrgDomain,
 } from "@/api/orgSso";
 
 // OIDC default-role offers up to admin (owner is never grantable via SSO).
@@ -33,6 +38,7 @@ const EMPTY_OIDC_DRAFT = {
   client_secret: "",
   default_role: "member" as Role,
   enabled: true,
+  auto_link_on_email: false,
 };
 
 export default function SSOTab({ teamID, canManage }: { teamID: string; canManage: boolean }) {
@@ -83,6 +89,7 @@ export default function SSOTab({ teamID, canManage }: { teamID: string; canManag
         onChange={reload}
         onError={setErr}
       />
+      <DomainsSection teamID={teamID} canManage={canManage} onError={setErr} />
       <GitHubSection
         key={github?.id ?? "new"}
         teamID={teamID}
@@ -138,6 +145,7 @@ function KeycloakSection({
         client_id: row.client_id,
         scopes: row.scopes,
         default_role: row.default_role,
+        auto_link_on_email: row.auto_link_on_email,
         enabled: !row.enabled,
       });
       onChange();
@@ -197,6 +205,7 @@ function KeycloakSection({
                 <Badge variant={row.enabled ? "success" : "neutral"}>
                   {row.enabled ? "enabled" : "disabled"}
                 </Badge>
+                {row.auto_link_on_email && <Badge variant="neutral">auto-link</Badge>}
                 <span className="text-fg-muted font-mono text-xs break-all">{row.issuer_url}</span>
               </div>
               {row.redirect_uri && (
@@ -293,6 +302,12 @@ function KeycloakSection({
             label="Enabled"
             checked={draft.enabled}
             onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
+          />
+          <Checkbox
+            label="Auto-link existing accounts whose email is at a verified domain"
+            help="When on, a user who already has an iterion account is linked automatically on first SSO login — but only for email domains you've verified below. Otherwise they must link from settings."
+            checked={draft.auto_link_on_email}
+            onChange={(e) => setDraft({ ...draft, auto_link_on_email: e.target.checked })}
           />
           <Button variant="primary" type="submit" loading={busy}>
             Add provider
@@ -461,6 +476,163 @@ function GitHubSection({
             )}
           </div>
         </div>
+      )}
+    </section>
+  );
+}
+
+// ---- Verified email domains (gate per-org auto-link) ----
+
+function DomainsSection({
+  teamID,
+  canManage,
+  onError,
+}: {
+  teamID: string;
+  canManage: boolean;
+  onError: (m: string) => void;
+}) {
+  const { confirm, dialog } = useConfirm();
+  const [domains, setDomains] = useState<OrgDomain[]>([]);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
+
+  const reload = async () => {
+    try {
+      setDomains(await listOrgDomains(teamID));
+    } catch (e) {
+      if (e instanceof FeatureUnavailableError) {
+        setUnavailable(true);
+        return;
+      }
+      onError(errorMessage(e));
+    }
+  };
+  useEffect(() => {
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamID]);
+
+  if (unavailable) {
+    return null; // the SSO tab already surfaces the "not enabled" banner
+  }
+
+  const add = async (ev: React.FormEvent) => {
+    ev.preventDefault();
+    setBusy(true);
+    try {
+      await addOrgDomain(teamID, draft);
+      setDraft("");
+      await reload();
+    } catch (e) {
+      onError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verify = async (d: OrgDomain) => {
+    try {
+      const r = await verifyOrgDomain(teamID, d.id);
+      if (!r.verified) {
+        onError(`Could not verify ${d.domain} — is the TXT record published? (DNS can take a few minutes.)`);
+      }
+      await reload();
+    } catch (e) {
+      onError(errorMessage(e));
+    }
+  };
+
+  const remove = async (d: OrgDomain) => {
+    const ok = await confirm({
+      title: "Remove domain?",
+      message: `Remove ${d.domain}? Auto-link for addresses at this domain will stop.`,
+      confirmLabel: "Remove",
+      confirmVariant: "danger",
+    });
+    if (!ok) return;
+    try {
+      await deleteOrgDomain(teamID, d.id);
+      await reload();
+    } catch (e) {
+      onError(errorMessage(e));
+    }
+  };
+
+  return (
+    <section className="bg-surface-1 border border-border-subtle rounded p-4 space-y-3">
+      {dialog}
+      <div>
+        <h3 className="font-medium">Verified email domains</h3>
+        <p className="text-sm text-fg-muted">
+          Prove you control an email domain (via a DNS TXT record) to allow SSO auto-link for its
+          addresses. Required for the "auto-link" option above to take effect.
+        </p>
+      </div>
+
+      {domains.length === 0 ? (
+        <div className="text-sm text-fg-muted">No domains.</div>
+      ) : (
+        <ul className="space-y-2">
+          {domains.map((d) => (
+            <li
+              key={d.id}
+              className="border border-border-subtle rounded p-3 text-sm space-y-2 bg-surface-0"
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-medium">{d.domain}</span>
+                <Badge variant={d.verified_at ? "success" : "neutral"}>
+                  {d.verified_at ? "verified" : "pending"}
+                </Badge>
+              </div>
+              {!d.verified_at && (
+                <div className="text-xs text-fg-muted space-y-1">
+                  <div>Publish this DNS TXT record, then click Verify:</div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono break-all">{d.challenge_host}</span>
+                    <CopyButton value={d.challenge_host} label="Copy" copiedLabel="Copied" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono break-all">{d.challenge_value}</span>
+                    <CopyButton value={d.challenge_value} label="Copy" copiedLabel="Copied" />
+                  </div>
+                </div>
+              )}
+              {canManage && (
+                <div className="flex gap-2">
+                  {!d.verified_at && (
+                    <Button variant="secondary" size="sm" onClick={() => verify(d)}>
+                      Verify
+                    </Button>
+                  )}
+                  <Button variant="danger" size="sm" onClick={() => remove(d)}>
+                    Remove
+                  </Button>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {canManage && (
+        <form onSubmit={add} className="flex gap-2 items-end border-t border-border-subtle pt-3">
+          <div className="flex-1">
+            <FieldLabel htmlFor="sso-domain">Domain</FieldLabel>
+            <Input
+              size="md"
+              id="sso-domain"
+              placeholder="acme.com"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              required
+            />
+          </div>
+          <Button variant="primary" type="submit" loading={busy}>
+            Add domain
+          </Button>
+        </form>
       )}
     </section>
   );
