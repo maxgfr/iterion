@@ -19,7 +19,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/dispatcher/tracker"
@@ -251,17 +250,11 @@ func isStaleLocalMarker(marker, host string) bool {
 	if err != nil || pid <= 1 {
 		return false
 	}
-	// syscall.Kill(pid, 0) returns nil if the process exists and we
-	// have permission to signal it, ESRCH if the PID is gone, EPERM
-	// if the process exists under a different user. EPERM = alive.
-	err = syscall.Kill(pid, 0)
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, syscall.EPERM) {
-		return false
-	}
-	return errors.Is(err, syscall.ESRCH)
+	// A live PID — or one we can't probe (different user, or any
+	// non-Unix platform) — counts as "not stale": never reclaim a claim
+	// we can't confidently prove is dead. See localPidGone in
+	// proc_unix.go / proc_windows.go.
+	return localPidGone(pid)
 }
 
 // Stop signals the actor to exit and waits for it. Safe to call more
