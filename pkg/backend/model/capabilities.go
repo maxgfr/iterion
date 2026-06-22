@@ -22,6 +22,14 @@ func capabilitiesForModel(provider, modelID string) ModelCapabilities {
 func anthropicCapabilities(modelID string) ModelCapabilities {
 	lower := strings.ToLower(modelID)
 
+	// z.ai's GLM models are served through the Anthropic-compatible
+	// endpoint, so they arrive here as "anthropic/glm-X". They are a
+	// distinct family with their own context windows — handle them
+	// before the Claude reasoning heuristics below.
+	if strings.Contains(lower, "glm") {
+		return glmCapabilities()
+	}
+
 	// Claude 3.5+ and Claude 4+ support reasoning via extended thinking.
 	hasReasoning := strings.Contains(lower, "claude-3-5") ||
 		strings.Contains(lower, "claude-3.5") ||
@@ -33,6 +41,23 @@ func anthropicCapabilities(modelID string) ModelCapabilities {
 		Reasoning:   hasReasoning,
 		ToolCall:    true,
 		Temperature: true,
+	}
+}
+
+// glmContextWindow is the static context window for the GLM family served
+// via z.ai's Anthropic-compatible endpoint. GLM-5.x and GLM-4.6 are all
+// 200K-class; split into a per-model map if a future GLM diverges.
+const glmContextWindow = 200_000
+
+// glmCapabilities returns static capabilities for a GLM model. GLM models
+// support tool calling, temperature, and extended thinking via the
+// Anthropic-compatible endpoint.
+func glmCapabilities() ModelCapabilities {
+	return ModelCapabilities{
+		Reasoning:     true,
+		ToolCall:      true,
+		Temperature:   true,
+		ContextWindow: glmContextWindow,
 	}
 }
 

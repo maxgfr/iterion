@@ -224,7 +224,7 @@ func detectProviders() []ProviderStatus {
 			Name:           "zai",
 			Available:      zaiAvailable,
 			Source:         envSource("ZAI_API_KEY", "ANTHROPIC_BASE_URL"),
-			SuggestedModel: "anthropic/glm-4.6",
+			SuggestedModel: "anthropic/glm-5.2",
 		},
 		detectOpenAIProvider(),
 		{

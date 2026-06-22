@@ -46,4 +46,7 @@ type ModelCapabilities struct {
 
 	// Temperature indicates the model accepts a temperature parameter.
 	Temperature bool
+
+	// ContextWindow is the model's context window in tokens. Zero = unknown.
+	ContextWindow int
 }

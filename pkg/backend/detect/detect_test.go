@@ -239,6 +239,23 @@ func TestSuggestedModel_OnlyForClaw(t *testing.T) {
 	}
 }
 
+func TestZAISuggestedModel(t *testing.T) {
+	isolateEnv(t)
+	found := false
+	for _, p := range detectProviders() {
+		if p.Name != "zai" {
+			continue
+		}
+		found = true
+		if p.SuggestedModel != "anthropic/glm-5.2" {
+			t.Fatalf("zai suggested model = %q, want anthropic/glm-5.2", p.SuggestedModel)
+		}
+	}
+	if !found {
+		t.Fatal("zai provider not present in detectProviders()")
+	}
+}
+
 func TestCachedDetector_HonorsTTL(t *testing.T) {
 	isolateEnv(t)
 	cache := NewCachedDetector(0) // never expires
