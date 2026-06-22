@@ -1,8 +1,7 @@
 import { errorMessage } from "@/lib/errorHints";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearch } from "wouter";
 
-import { type BotEntryWithSchema, listBots } from "@/api/bots";
 import { FeatureUnavailableError } from "@/api/client";
 import {
   type ForgeConnection,
@@ -14,6 +13,7 @@ import {
 } from "@/api/forgeConnections";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useConfirm } from "@/hooks/useConfirm";
+import { useBotsStore } from "@/store/bots";
 
 import { ConnectForm } from "./integrations/ConnectForm";
 import { ConnectionCard } from "./integrations/ConnectionCard";
@@ -29,11 +29,20 @@ export default function IntegrationsTab({
   const [connections, setConnections] = useState<ForgeConnection[]>([]);
   const [integrations, setIntegrations] = useState<ForgeIntegration[]>([]);
   const [oauthApps, setOAuthApps] = useState<ForgeOAuthApp[]>([]);
-  const [forgeBots, setForgeBots] = useState<BotEntryWithSchema[]>([]);
   const [unavailable, setUnavailable] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [botsWarning, setBotsWarning] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
+  // Bots come from the shared catalog cache so a metadata edit (e.g. in
+  // the Bot panel) re-renders the connection cards immediately. We only
+  // surface forge-capable bots here — the same filter the per-mount
+  // listBots() call used to apply.
+  const allBots = useBotsStore((s) => s.bots);
+  const botsWarning = useBotsStore((s) => s.error);
+  const fetchBots = useBotsStore((s) => s.fetch);
+  const forgeBots = useMemo(
+    () => (allBots ?? []).filter((b) => b.forge),
+    [allBots],
+  );
   // ?bot=<name> (set by the catalog's "Connect to a repo" affordance) pre-checks
   // that bot in the enable dialog and auto-opens it when there's one connection.
   const preselectBot = new URLSearchParams(useSearch()).get("bot") ?? undefined;
@@ -60,16 +69,7 @@ export default function IntegrationsTab({
 
   useEffect(() => {
     void reload();
-    void listBots()
-      .then((bots) => {
-        setForgeBots(bots.filter((b) => b.forge));
-        setBotsWarning(null);
-      })
-      .catch((e) =>
-        setBotsWarning(
-          (e as Error)?.message ?? "Failed to load forge-capable bots.",
-        ),
-      );
+    void fetchBots();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamID]);
 

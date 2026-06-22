@@ -16,7 +16,8 @@ import {
   rotateWebhook,
   updateWebhook,
 } from "@/api/webhooks";
-import { type BotEntryWithSchema, listBots } from "@/api/bots";
+import type { BotEntryWithSchema } from "@/api/bots";
+import { useBotsStore } from "@/store/bots";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -47,10 +48,15 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
   const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [botsError, setBotsError] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [bots, setBots] = useState<BotEntryWithSchema[]>([]);
+  // Bots come from the shared cache so a metadata edit or catalog toggle
+  // elsewhere in the studio re-renders this tab. The Webhooks tab only
+  // needs the catalog inside the Create dialog (for the picker), so a
+  // lazy fetch on mount is enough.
+  const bots = useBotsStore((s) => s.bots) ?? [];
+  const botsError = useBotsStore((s) => s.error);
+  const fetchBots = useBotsStore((s) => s.fetch);
   const [issued, setIssued] = useState<{ config: WebhookConfig; token: string } | null>(
     null,
   );
@@ -78,15 +84,7 @@ export default function WebhooksTab({ teamID, canManage }: Props) {
 
   useEffect(() => {
     void reload();
-    // best-effort: load bots so the create dialog can render the picker
-    void listBots()
-      .then((b) => {
-        setBots(b);
-        setBotsError(null);
-      })
-      .catch((e) =>
-        setBotsError((e as Error)?.message ?? "Failed to load bots."),
-      );
+    void fetchBots();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamID]);
 

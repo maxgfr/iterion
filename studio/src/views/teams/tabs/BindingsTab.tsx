@@ -11,7 +11,6 @@ import {
   updateBinding,
 } from "@/api/botBindings";
 import { type GenericSecretView, listTeamSecrets } from "@/api/secrets";
-import { type BotEntryWithSchema, listBots } from "@/api/bots";
 
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
@@ -21,6 +20,7 @@ import { Select } from "@/components/ui/Select";
 import { TagInput } from "@/components/ui/TagInput";
 import ConfirmDialog from "@/components/shared/ConfirmDialog";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
+import { useBotsStore } from "@/store/bots";
 
 interface Props {
   teamID: string;
@@ -28,7 +28,11 @@ interface Props {
 }
 
 export default function BindingsTab({ teamID, canManage }: Props) {
-  const [bots, setBots] = useState<BotEntryWithSchema[]>([]);
+  // Bots come from the shared catalog cache so a manifest edit elsewhere
+  // re-renders the picker. We default `activeBot` to the first entry the
+  // first time the catalog resolves.
+  const bots = useBotsStore((s) => s.bots) ?? [];
+  const fetchBots = useBotsStore((s) => s.fetch);
   const [secrets, setSecrets] = useState<GenericSecretView[]>([]);
   const [activeBot, setActiveBot] = useState<string>("");
   const [bindings, setBindings] = useState<BotSecretBinding[]>([]);
@@ -39,21 +43,15 @@ export default function BindingsTab({ teamID, canManage }: Props) {
   const [editing, setEditing] = useState<BotSecretBinding | null>(null);
   const [deleting, setDeleting] = useState<BotSecretBinding | null>(null);
 
-  // Load bots once.
   useEffect(() => {
-    let alive = true;
-    void listBots()
-      .then((b) => {
-        if (!alive) return;
-        setBots(b);
-        if (b.length > 0 && activeBot === "") setActiveBot(b[0]!.name);
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void fetchBots();
+  }, [fetchBots]);
+
+  // Pick the first bot once the catalog resolves. Guarded against a
+  // user-set value so we don't clobber a manual pick on later re-renders.
+  useEffect(() => {
+    if (bots.length > 0 && activeBot === "") setActiveBot(bots[0]!.name);
+  }, [bots, activeBot]);
 
   // Load team secrets so the create dialog can pick from them.
   useEffect(() => {
