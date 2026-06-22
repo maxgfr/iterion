@@ -108,7 +108,7 @@ export default function TeamPage() {
 
   return (
     <div className="h-full overflow-auto">
-      <div className="max-w-6xl mx-auto p-3 sm:p-6 grid grid-cols-1 sm:grid-cols-[200px,1fr] gap-4 sm:gap-6">
+      <div className="max-w-6xl mx-auto p-3 sm:p-6 grid grid-cols-1 sm:grid-cols-[200px_1fr] gap-4 sm:gap-6">
         <Tabs
           variant="pill"
           value={tab}
