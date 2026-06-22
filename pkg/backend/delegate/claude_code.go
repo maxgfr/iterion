@@ -451,44 +451,11 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 	// fired, the resulting context cancellation surfaces here as ctx.Err(),
 	// which we must not treat as a failure.
 	if q, ok := pendingQuestion.Load().(string); ok && q != "" {
-		b.Logger.Info("[%s#%d/claude-code] 🛑 ask_user escalated via native MCP tool", task.NodeID, task.Iteration)
-		sessID := ""
-		if rm != nil {
-			sessID = rm.SessionID
-		}
-		askResult := Result{
-			Output: map[string]interface{}{
-				"_needs_interaction": true,
-				"_interaction_questions": map[string]interface{}{
-					AskUserQuestionKey: q,
-				},
-			},
-			Duration:           duration,
-			ExitCode:           0,
-			Stderr:             stderrBuf.String(),
-			BackendName:        BackendClaudeCode,
-			SessionID:          sessID,
-			SessionFingerprint: currentFingerprint,
-		}
-		applyClaudeCodeSessionMeta(&askResult, rm, sessMeta)
-		return askResult, nil
+		return b.buildAskUserPendingResult(task, q, rm, sessMeta, currentFingerprint, duration, stderrBuf.String()), nil
 	}
 
 	if streamErr != nil {
-		errResult := Result{
-			Duration:    duration,
-			ExitCode:    -1,
-			Stderr:      stderrBuf.String(),
-			BackendName: BackendClaudeCode,
-		}
-		applyClaudeCodeSessionMeta(&errResult, rm, sessMeta)
-		// A connectivity drop during the API call surfaces as an opaque
-		// "session ended without result" — the CLI exits non-zero and the
-		// only network evidence (fetch failed / ECONNRESET / overloaded …)
-		// lands on stderr. Re-type it as ErrTransient so the executor's
-		// retry loop rides the blip out instead of failing the whole node.
-		streamErr = b.retypeNetworkError(streamErr, stderrBuf.String(), task)
-		return errResult, fmt.Errorf("delegate: claude-code failed: %w", streamErr)
+		return b.buildStreamErrorResult(rm, sessMeta, streamErr, stderrBuf.String(), duration, task)
 	}
 
 	result = Result{
@@ -509,97 +476,14 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 	result.Tokens = totalIn + totalOut
 
 	if rm.IsError && rm.Subtype != claudesdk.ResultSuccess {
-		// error_max_turns is a SOFT stop, not a failure: the agent hit its
-		// tool_max_steps cap (claude --max-turns). For an implementer
-		// (act/fix, no output schema) the work it did is already in the
-		// worktree, so return the partial result and let the workflow
-		// continue — the review/fix loop completes any gaps. For a node
-		// with structured output (a judge), the partial result lacks the
-		// required fields and upstream schema validation fails it, which is
-		// the correct outcome. Other error subtypes (error_during_execution,
-		// error_max_budget_usd) remain hard failures.
-		if rm.Subtype == claudesdk.ResultErrorMaxTurns {
-			b.Logger.Warn("[%s#%d/claude-code] hit max turns (tool_max_steps) — returning partial result; downstream review/fix completes any gaps", task.NodeID, task.Iteration)
-		} else {
-			return result, fmt.Errorf("delegate: claude-code error: subtype=%s", rm.Subtype)
+		if errResult, errOut, fatal := b.handleCLIErrorSubtype(rm, task, result); fatal {
+			return errResult, errOut
 		}
 	}
 
-	// Two-pass execution: when tools + schema are both present, Pass 1 now
-	// carries --json-schema (set above), so a well-behaved agent finishes its
-	// tool work and calls the native StructuredOutput tool, populating
-	// rm.StructuredOutput. The formatting pass below is therefore a FALLBACK,
-	// not the default: it runs only when Pass 1 returned no usable structured
-	// output. Both passes route through the sandbox command builder when
-	// sandboxed, so the resumed session is found inside the container where
-	// Pass 1 created it.
 	if needsTwoPass && rm.SessionID != "" {
-		// Fast path: Pass 1 already produced valid structured output. The
-		// empty-map guard in parseSDKOutput rejects the `structured_output: {}`
-		// a tool session emits when the agent never called StructuredOutput
-		// (e.g. --max-turns), so a non-empty, non-fallback result here means
-		// the schema was genuinely satisfied in one pass — skip Pass 2.
-		if output, rawLen, fallback := parseSDKOutput(rm.Result, rm.StructuredOutput, task.OutputSchema); len(output) > 0 && !fallback {
-			result.Output = output
-			result.RawOutputLen = rawLen
-			result.ParseFallback = false
-			cost.Annotate(result.Output, task.Model, totalIn, totalOut)
-			return result, nil
-		}
-		const maxFmtAttempts = 2
-		var lastFmtErr error
-		for attempt := 1; attempt <= maxFmtAttempts; attempt++ {
-			b.Logger.Debug("claude-code [formatting pass %d/%d] starting structured output extraction (session=%s)", attempt, maxFmtAttempts, rm.SessionID)
-			fmtRM, fmtErr := b.formatOutput(ctx, task, rm.SessionID)
-			if fmtErr != nil {
-				lastFmtErr = fmtErr
-				if attempt < maxFmtAttempts {
-					b.Logger.Warn("claude-code [formatting pass %d/%d] failed, retrying: %v", attempt, maxFmtAttempts, fmtErr)
-					continue
-				}
-				// Both attempts exhausted. Before failing the whole delegation,
-				// try parsing Pass 1's free-form output: agents typically emit
-				// a fenced ```json block matching the schema as their final
-				// message, and parseSDKOutput already extracts that. This
-				// recovers from the common infra failure where the sandbox
-				// container dies mid-formatting (observed: container SIGKILL
-				// at formatting-pass invocation → claude exits 137 →
-				// "container is not running" on retry → whole delegation
-				// fails despite Pass 1 having produced shippable output).
-				output, rawLen, fallback := parseSDKOutput(rm.Result, rm.StructuredOutput, task.OutputSchema)
-				if len(output) > 0 && !fallback {
-					b.Logger.Warn("claude-code [formatting pass] failed (%v); recovered structured output from Pass 1 free-form result", fmtErr)
-					result.Output = output
-					result.RawOutputLen = rawLen
-					result.ParseFallback = false
-					cost.Annotate(result.Output, task.Model, totalIn, totalOut)
-					return result, nil
-				}
-				return result, fmt.Errorf("delegate: claude-code formatting pass failed: %w", fmtErr)
-			}
-			if fmtRM.Usage != nil {
-				totalIn += fmtRM.Usage.InputTokens
-				totalOut += fmtRM.Usage.OutputTokens
-				result.Tokens = totalIn + totalOut
-			}
-			result.FormattingPassUsed = true
-
-			output, rawLen, fallback := parseSDKOutput(fmtRM.Result, fmtRM.StructuredOutput, task.OutputSchema)
-			if fallback && attempt < maxFmtAttempts {
-				b.Logger.Warn("claude-code [formatting pass %d/%d] produced fallback text, retrying", attempt, maxFmtAttempts)
-				continue
-			}
-			result.Output = output
-			result.RawOutputLen = rawLen
-			result.ParseFallback = fallback
-			cost.Annotate(result.Output, task.Model, totalIn, totalOut)
-			return result, nil
-		}
-		// Defensive: loop fell through without returning. Shouldn't happen
-		// (every iteration either returns or continues), but if it did,
-		// surface the last formatting error rather than a generic one.
-		if lastFmtErr != nil {
-			return result, fmt.Errorf("delegate: claude-code formatting pass failed: %w", lastFmtErr)
+		if handled, twoPassResult, twoPassErr := b.runTwoPassFormatting(ctx, task, rm, result, &totalIn, &totalOut); handled {
+			return twoPassResult, twoPassErr
 		}
 	}
 
@@ -617,6 +501,175 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 
 	cost.Annotate(result.Output, task.Model, totalIn, totalOut)
 	return result, nil
+}
+
+// buildAskUserPendingResult packages the Result returned when the native
+// ask_user MCP hook fired mid-session: it short-circuits the stream and
+// surfaces the captured question to the runtime via the
+// `_needs_interaction` / `_interaction_questions` envelope so the engine
+// can pause the run and elicit the operator. Extracted from Execute for
+// readability; the per-field semantics (Duration, ExitCode=0, Stderr,
+// SessionID-from-rm, SessionFingerprint) are identical to the original
+// inline path.
+func (b *ClaudeCodeBackend) buildAskUserPendingResult(task Task, q string, rm *claudesdk.ResultMessage, sessMeta sessionMeta, currentFingerprint string, duration time.Duration, stderr string) Result {
+	b.Logger.Info("[%s#%d/claude-code] 🛑 ask_user escalated via native MCP tool", task.NodeID, task.Iteration)
+	sessID := ""
+	if rm != nil {
+		sessID = rm.SessionID
+	}
+	askResult := Result{
+		Output: map[string]interface{}{
+			"_needs_interaction": true,
+			"_interaction_questions": map[string]interface{}{
+				AskUserQuestionKey: q,
+			},
+		},
+		Duration:           duration,
+		ExitCode:           0,
+		Stderr:             stderr,
+		BackendName:        BackendClaudeCode,
+		SessionID:          sessID,
+		SessionFingerprint: currentFingerprint,
+	}
+	applyClaudeCodeSessionMeta(&askResult, rm, sessMeta)
+	return askResult
+}
+
+// buildStreamErrorResult packages the Result + wrapped error returned when
+// the claude session streaming failed. Network-shaped errors are re-typed
+// to ErrTransient so the executor's retry loop rides connectivity blips
+// out instead of failing the whole node. Extracted from Execute; behavior
+// (ExitCode=-1, Stderr, BackendName, session-meta application, "delegate:
+// claude-code failed: %w" wrapping) matches the original inline path.
+func (b *ClaudeCodeBackend) buildStreamErrorResult(rm *claudesdk.ResultMessage, sessMeta sessionMeta, streamErr error, stderr string, duration time.Duration, task Task) (Result, error) {
+	errResult := Result{
+		Duration:    duration,
+		ExitCode:    -1,
+		Stderr:      stderr,
+		BackendName: BackendClaudeCode,
+	}
+	applyClaudeCodeSessionMeta(&errResult, rm, sessMeta)
+	// A connectivity drop during the API call surfaces as an opaque
+	// "session ended without result" — the CLI exits non-zero and the
+	// only network evidence (fetch failed / ECONNRESET / overloaded …)
+	// lands on stderr. Re-type it as ErrTransient so the executor's
+	// retry loop rides the blip out instead of failing the whole node.
+	streamErr = b.retypeNetworkError(streamErr, stderr, task)
+	return errResult, fmt.Errorf("delegate: claude-code failed: %w", streamErr)
+}
+
+// handleCLIErrorSubtype branches on the CLI's error subtype after a stream
+// completed with rm.IsError=true. error_max_turns is a SOFT stop (the agent
+// hit its tool_max_steps cap) — for an implementer (act/fix, no output
+// schema) the work it did is already in the worktree, so we return the
+// partial result and let the workflow continue; for a node with structured
+// output (a judge), the partial result lacks the required fields and
+// upstream schema validation fails it, which is the correct outcome. Other
+// error subtypes (error_during_execution, error_max_budget_usd) remain
+// hard failures. Returns `fatal=true` when the caller must return the
+// (result, err) pair immediately; `fatal=false` lets Execute fall through.
+func (b *ClaudeCodeBackend) handleCLIErrorSubtype(rm *claudesdk.ResultMessage, task Task, result Result) (Result, error, bool) {
+	// error_max_turns is a SOFT stop, not a failure: the agent hit its
+	// tool_max_steps cap (claude --max-turns). For an implementer
+	// (act/fix, no output schema) the work it did is already in the
+	// worktree, so return the partial result and let the workflow
+	// continue — the review/fix loop completes any gaps. For a node
+	// with structured output (a judge), the partial result lacks the
+	// required fields and upstream schema validation fails it, which is
+	// the correct outcome. Other error subtypes (error_during_execution,
+	// error_max_budget_usd) remain hard failures.
+	if rm.Subtype == claudesdk.ResultErrorMaxTurns {
+		b.Logger.Warn("[%s#%d/claude-code] hit max turns (tool_max_steps) — returning partial result; downstream review/fix completes any gaps", task.NodeID, task.Iteration)
+		return result, nil, false
+	}
+	return result, fmt.Errorf("delegate: claude-code error: subtype=%s", rm.Subtype), true
+}
+
+// runTwoPassFormatting runs the Pass-2 structured-output extraction loop
+// when tools + schema are both present and Pass 1 produced a SessionID.
+// Returns `handled=true` when an explicit return path was hit (and the
+// caller must propagate result,err); `handled=false` lets Execute fall
+// through to the single-pass parsing path. totalIn / totalOut are
+// updated in place across formatting attempts so cost annotation at the
+// caller sees the cumulative usage.
+//
+// Two-pass execution: when tools + schema are both present, Pass 1 now
+// carries --json-schema (set above), so a well-behaved agent finishes its
+// tool work and calls the native StructuredOutput tool, populating
+// rm.StructuredOutput. The formatting pass below is therefore a FALLBACK,
+// not the default: it runs only when Pass 1 returned no usable structured
+// output. Both passes route through the sandbox command builder when
+// sandboxed, so the resumed session is found inside the container where
+// Pass 1 created it.
+func (b *ClaudeCodeBackend) runTwoPassFormatting(ctx context.Context, task Task, rm *claudesdk.ResultMessage, result Result, totalIn, totalOut *int) (bool, Result, error) {
+	// Fast path: Pass 1 already produced valid structured output. The
+	// empty-map guard in parseSDKOutput rejects the `structured_output: {}`
+	// a tool session emits when the agent never called StructuredOutput
+	// (e.g. --max-turns), so a non-empty, non-fallback result here means
+	// the schema was genuinely satisfied in one pass — skip Pass 2.
+	if output, rawLen, fallback := parseSDKOutput(rm.Result, rm.StructuredOutput, task.OutputSchema); len(output) > 0 && !fallback {
+		result.Output = output
+		result.RawOutputLen = rawLen
+		result.ParseFallback = false
+		cost.Annotate(result.Output, task.Model, *totalIn, *totalOut)
+		return true, result, nil
+	}
+	const maxFmtAttempts = 2
+	var lastFmtErr error
+	for attempt := 1; attempt <= maxFmtAttempts; attempt++ {
+		b.Logger.Debug("claude-code [formatting pass %d/%d] starting structured output extraction (session=%s)", attempt, maxFmtAttempts, rm.SessionID)
+		fmtRM, fmtErr := b.formatOutput(ctx, task, rm.SessionID)
+		if fmtErr != nil {
+			lastFmtErr = fmtErr
+			if attempt < maxFmtAttempts {
+				b.Logger.Warn("claude-code [formatting pass %d/%d] failed, retrying: %v", attempt, maxFmtAttempts, fmtErr)
+				continue
+			}
+			// Both attempts exhausted. Before failing the whole delegation,
+			// try parsing Pass 1's free-form output: agents typically emit
+			// a fenced ```json block matching the schema as their final
+			// message, and parseSDKOutput already extracts that. This
+			// recovers from the common infra failure where the sandbox
+			// container dies mid-formatting (observed: container SIGKILL
+			// at formatting-pass invocation → claude exits 137 →
+			// "container is not running" on retry → whole delegation
+			// fails despite Pass 1 having produced shippable output).
+			output, rawLen, fallback := parseSDKOutput(rm.Result, rm.StructuredOutput, task.OutputSchema)
+			if len(output) > 0 && !fallback {
+				b.Logger.Warn("claude-code [formatting pass] failed (%v); recovered structured output from Pass 1 free-form result", fmtErr)
+				result.Output = output
+				result.RawOutputLen = rawLen
+				result.ParseFallback = false
+				cost.Annotate(result.Output, task.Model, *totalIn, *totalOut)
+				return true, result, nil
+			}
+			return true, result, fmt.Errorf("delegate: claude-code formatting pass failed: %w", fmtErr)
+		}
+		if fmtRM.Usage != nil {
+			*totalIn += fmtRM.Usage.InputTokens
+			*totalOut += fmtRM.Usage.OutputTokens
+			result.Tokens = *totalIn + *totalOut
+		}
+		result.FormattingPassUsed = true
+
+		output, rawLen, fallback := parseSDKOutput(fmtRM.Result, fmtRM.StructuredOutput, task.OutputSchema)
+		if fallback && attempt < maxFmtAttempts {
+			b.Logger.Warn("claude-code [formatting pass %d/%d] produced fallback text, retrying", attempt, maxFmtAttempts)
+			continue
+		}
+		result.Output = output
+		result.RawOutputLen = rawLen
+		result.ParseFallback = fallback
+		cost.Annotate(result.Output, task.Model, *totalIn, *totalOut)
+		return true, result, nil
+	}
+	// Defensive: loop fell through without returning. Shouldn't happen
+	// (every iteration either returns or continues), but if it did,
+	// surface the last formatting error rather than a generic one.
+	if lastFmtErr != nil {
+		return true, result, fmt.Errorf("delegate: claude-code formatting pass failed: %w", lastFmtErr)
+	}
+	return false, result, nil
 }
 
 // setupCredsAndSession injects Anthropic-flavoured credentials into the CLI
