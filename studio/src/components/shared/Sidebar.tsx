@@ -44,11 +44,20 @@ export default function Sidebar() {
       >
         <Link
           href="/"
-          className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+          className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
           title="Iterion home"
           aria-label="Iterion home"
         >
-          <BrandWordmark compact={collapsed} />
+          {/* Icon mark (restored) + wordmark. Collapsed shows the icon
+              alone, centered — the wordmark's bare "I"+caret read as a
+              broken glyph in the 56px rail. */}
+          <img
+            src="/favicon-96x96.png"
+            alt=""
+            aria-hidden="true"
+            className="h-7 w-7 shrink-0 dark:invert"
+          />
+          {!collapsed && <BrandWordmark />}
         </Link>
         {!collapsed && (
           <button
@@ -102,9 +111,7 @@ export default function Sidebar() {
             <span>Settings</span>
           </button>
         )}
-        <div className={collapsed ? "flex justify-center" : ""}>
-          <UserTeamChip />
-        </div>
+        <UserTeamChip collapsed={collapsed} />
       </div>
 
       {/* Collapse toggle when collapsed — positioned at the very bottom
