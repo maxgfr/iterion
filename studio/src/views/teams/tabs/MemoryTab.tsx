@@ -1,4 +1,3 @@
-import { errorMessage } from "@/lib/errorHints";
 import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { clickableRowProps } from "@/lib/a11y";
@@ -19,6 +18,7 @@ import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 
 interface Props {
   teamID: string;
@@ -42,49 +42,51 @@ export default function MemoryTab({ teamID: _teamID }: Props) {
   const [docs, setDocs] = useState<MemoryDocumentMeta[]>([]);
   const [selected, setSelected] = useState<MemoryDocumentMeta | null>(null);
   const [body, setBody] = useState<string>("");
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  // Single busy/error channel for both the list-load and the document
+  // open — Load button mirrors `busy`, banner above mirrors `error`.
+  // setError handles the pre-flight "needs a bot id" guard without
+  // invoking run() (so busy doesn't flip on for a validation error).
+  const { busy: loading, error: err, run, setError } = useAsyncAction();
 
-  const reload = async () => {
+  const reload = () => {
     if (ref.visibility === "bot" && !ref.bot) {
-      setErr("This visibility needs a bot id.");
+      setError("This visibility needs a bot id.");
       return;
     }
-    setLoading(true);
-    setErr(null);
-    try {
-      const [u, d] = await Promise.all([
-        getMemoryUsage(ref).then((x) => ({ used: x.used_bytes, quota: x.quota_bytes })),
-        listMemoryDocuments(ref),
-      ]);
-      setUsage(u);
-      setDocs(d);
-      setSelected(null);
-      setBody("");
-      setUnavailable(false);
-    } catch (e) {
-      if (e instanceof FeatureUnavailableError) setUnavailable(true);
-      else setErr(errorMessage(e));
-    } finally {
-      setLoading(false);
-    }
+    void run(async () => {
+      try {
+        const [u, d] = await Promise.all([
+          getMemoryUsage(ref).then((x) => ({ used: x.used_bytes, quota: x.quota_bytes })),
+          listMemoryDocuments(ref),
+        ]);
+        setUsage(u);
+        setDocs(d);
+        setSelected(null);
+        setBody("");
+        setUnavailable(false);
+      } catch (e) {
+        if (e instanceof FeatureUnavailableError) {
+          setUnavailable(true);
+          return;
+        }
+        throw e;
+      }
+    });
   };
 
   useEffect(() => {
-    void reload();
+    reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const open = async (d: MemoryDocumentMeta) => {
+  const open = (d: MemoryDocumentMeta) => {
     setSelected(d);
     setBody("");
-    try {
+    void run(async () => {
       const txt = await readMemoryDocument(ref, d.path);
       setBody(txt);
-    } catch (e) {
-      setErr(errorMessage(e));
-    }
+    });
   };
 
   if (unavailable) {
