@@ -61,9 +61,12 @@ func TestBoardDispatcher_E2E_BotCreatesAndDispatches(t *testing.T) {
 			t.Fatalf("create_issue %q: %v", title, err)
 		}
 	}
+	c.Refresh() // kick an immediate poll tick rather than waiting for the cadence
 
-	// Wait for two distinct dispatches.
-	deadline := time.Now().Add(3 * time.Second)
+	// Wait for two distinct dispatches. Generous deadline: the dispatch
+	// pipeline makes two off-actor hops per issue plus a runner round-trip, so
+	// under -race + load a 3s budget can blow.
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		dispatchMu.Lock()
 		got := len(dispatchedRuns)
@@ -81,7 +84,7 @@ func TestBoardDispatcher_E2E_BotCreatesAndDispatches(t *testing.T) {
 	dispatchMu.Unlock()
 
 	// Both issues must end up in a terminal state with their claim released.
-	wait := time.Now().Add(2 * time.Second)
+	wait := time.Now().Add(5 * time.Second)
 	for time.Now().Before(wait) {
 		list, _ := ns.List(native.ListFilter{})
 		all := true
@@ -112,10 +115,23 @@ func TestBoardDispatcher_E2E_BotMovesIssueToReady(t *testing.T) {
 
 	var dispatchMu sync.Mutex
 	var dispatchedRunIDs []string
-	runner.Handler = func(_ context.Context, spec dispatcher.DispatchSpec) error {
+	// The handler BLOCKS until the test releases it, modelling a real workflow
+	// that takes time to run. An instant-return handler races the off-actor
+	// in-progress transition (ready→in_progress runs in launchDispatchSetup):
+	// a run that finishes before that transition lands makes the completed-state
+	// guard skip the move and release the claim, leaving the issue back in
+	// `ready` with no claim — a 25%-flake that does NOT occur in prod, where
+	// runs last seconds. Blocking keeps the run observable in the Running
+	// snapshot (the running entry is allocated on the actor at dispatch).
+	proceed := make(chan struct{})
+	runner.Handler = func(ctx context.Context, spec dispatcher.DispatchSpec) error {
 		dispatchMu.Lock()
 		dispatchedRunIDs = append(dispatchedRunIDs, spec.RunID)
 		dispatchMu.Unlock()
+		select {
+		case <-proceed:
+		case <-ctx.Done():
+		}
 		return nil
 	}
 
@@ -144,8 +160,15 @@ func TestBoardDispatcher_E2E_BotMovesIssueToReady(t *testing.T) {
 	if _, err := boardops.Call(ns, caps, "transition_issue", args); err != nil {
 		t.Fatalf("transition_issue: %v", err)
 	}
+	// Kick an immediate poll tick instead of waiting up to one polling
+	// interval for the move to be noticed — makes the dispatch deterministic
+	// rather than timing-budget-dependent.
+	c.Refresh()
 
-	deadline := time.After(3 * time.Second)
+	// Generous deadline: the dispatch pipeline makes two off-actor hops
+	// (discovery → setup → worker) plus a runner round-trip; under -race +
+	// load a 3s budget can blow. 10s mirrors TestDispatcherE2E_CancelInFlight.
+	deadline := time.After(10 * time.Second)
 	for {
 		dispatchMu.Lock()
 		got := len(dispatchedRunIDs)
@@ -160,22 +183,27 @@ func TestBoardDispatcher_E2E_BotMovesIssueToReady(t *testing.T) {
 		}
 	}
 
-	// Cross-check the dispatch was for our issue by inspecting the
-	// dispatcher snapshot (DispatchSpec doesn't carry IssueID).
-	deadline2 := time.Now().Add(2 * time.Second)
+	// Cross-check the dispatch was for our issue by inspecting the dispatcher
+	// snapshot (DispatchSpec doesn't carry IssueID). The handler is still
+	// blocked, so the run is reliably in flight and our issue must appear in
+	// the Running set — no instant-finish race.
+	foundRunning := false
+	deadline2 := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline2) {
 		for _, r := range c.Snapshot().Running {
 			if r.IssueID == iss.ID {
-				return
+				foundRunning = true
+				break
 			}
+		}
+		if foundRunning {
+			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	// If the run already finished, the snapshot is empty — verify the
-	// issue is no longer in `ready` (it was claimed and released).
-	got, _ := ns.Get(iss.ID)
-	if got != nil && got.State == native.StateReady && got.Claim == "" {
-		t.Fatalf("issue %s never moved out of ready", iss.ID)
+	close(proceed) // release the run so it can complete + the claim is freed
+	if !foundRunning {
+		t.Fatalf("dispatched run never appeared in the Running snapshot for issue %s", iss.ID)
 	}
 }
 

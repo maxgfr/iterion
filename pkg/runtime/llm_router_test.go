@@ -596,19 +596,5 @@ func TestLLMRouterMultiCancelAbandonsWedgedBranch(t *testing.T) {
 	// after Run already returned. Wait for that last write before the test's
 	// t.TempDir cleanup runs, otherwise RemoveAll races the late write and
 	// fails with "directory not empty".
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		evs, _ := s.LoadEvents(context.Background(), "run-llm-wedged")
-		drained := false
-		for _, e := range evs {
-			if e.BranchID == "branch_llm_router_agent_b" && e.Type == store.EventBranchFinished {
-				drained = true
-				break
-			}
-		}
-		if drained || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitBranchFinished(t, s, "run-llm-wedged", "branch_llm_router_agent_b")
 }

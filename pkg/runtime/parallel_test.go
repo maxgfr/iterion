@@ -262,6 +262,16 @@ func TestFanOutConcurrentExecution(t *testing.T) {
 		return map[string]interface{}{"summary": "go"}, nil
 	})
 
+	// A 2-branch rendezvous barrier makes the branches OVERLAP by construction
+	// instead of relying on a sleep being longer than scheduler jitter. The old
+	// time.Sleep(10ms) flaked under load/-race: if the second branch wasn't
+	// scheduled within 10ms, the first finished and maxConcurrent only ever saw
+	// 1. Each branch records its arrival; the last arriver releases both. The
+	// bounded select keeps a sequential regression failing cleanly via the
+	// assertion below (max<2) instead of hanging.
+	const branches = 2
+	var arrived int64
+	release := make(chan struct{})
 	branchHandler := func(_ map[string]interface{}) (map[string]interface{}, error) {
 		cur := atomic.AddInt64(&currentConcurrent, 1)
 		// Track max concurrency.
@@ -271,8 +281,13 @@ func TestFanOutConcurrentExecution(t *testing.T) {
 				break
 			}
 		}
-		// Small sleep to ensure overlap window.
-		time.Sleep(10 * time.Millisecond)
+		if atomic.AddInt64(&arrived, 1) == branches {
+			close(release) // last branch in releases everyone — overlap guaranteed
+		}
+		select {
+		case <-release:
+		case <-time.After(2 * time.Second): // regression guard: don't hang if branches serialize
+		}
 		atomic.AddInt64(&currentConcurrent, -1)
 		return map[string]interface{}{"ok": true}, nil
 	}
@@ -660,6 +675,12 @@ func TestFanOutCancelAbandonsWedgedBranch(t *testing.T) {
 		t.Fatal("fan_out hung on a wedged branch despite cancellation (collector drain not bounded)")
 	}
 	close(release) // let the wedged branch goroutine exit cleanly
+
+	// The abandoned branch keeps emitting events (its deferred branch_finished)
+	// after Run already returned. Wait for that last write before the test's
+	// t.TempDir cleanup runs, otherwise RemoveAll races the late write and
+	// fails with "directory not empty" (or trips -race).
+	waitBranchFinished(t, s, "run-wedged", "branch_router_b")
 }
 
 // ---------------------------------------------------------------------------

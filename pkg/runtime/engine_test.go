@@ -53,6 +53,34 @@ func tmpStore(t *testing.T) store.RunStore {
 	return s
 }
 
+// waitBranchFinished blocks until the given branch's branch_finished event is
+// durably recorded in the store, or a short deadline elapses. A branch the
+// engine ABANDONS (a wedged goroutine that ignores cancellation) keeps running
+// after Engine.Run has already returned and emits its deferred branch_finished
+// event LATE — an AppendEvent that writes into the t.TempDir-backed store.
+// Tests that wedge a branch must wait for that last write before returning,
+// otherwise t.Cleanup's RemoveAll races the late write and intermittently
+// fails with "directory not empty" (and trips the race detector). Used by
+// TestFanOutCancelAbandonsWedgedBranch and
+// TestLLMRouterMultiCancelAbandonsWedgedBranch.
+func waitBranchFinished(t *testing.T, s store.RunStore, runID, branchID string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		evs, _ := s.LoadEvents(context.Background(), runID)
+		for _, e := range evs {
+			if e.BranchID == branchID && e.Type == store.EventBranchFinished {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Logf("waitBranchFinished: branch %q never emitted branch_finished within deadline (run %q)", branchID, runID)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Test: linear path  agent -> tool -> judge -> done
 // ---------------------------------------------------------------------------
