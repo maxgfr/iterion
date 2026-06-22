@@ -412,7 +412,14 @@ type Server struct {
 	// /revi command); threadContext is the discussion transcript the converse
 	// bot receives as {{vars.thread_context}} ("" when not fetched).
 	webhookNoteGate func(ctx context.Context, cfg webhooks.Config, p gitlab.ParsedNote, botID string) (authorized, replyInThread bool, threadContext, reason string, err error)
-	httpClient      *http.Client
+	// webhookCommandGate overrides the generic slash-command replier gate
+	// (forge token + loop-guard + allowlist/role authz, honouring the route's
+	// per-command MinReplierRole — test seam). nil → realWebhookCommandGate.
+	// Distinct from webhookNoteGate: no reply-in-thread/thread-context logic
+	// (that is the Revi-converse specialisation); a generic command authorises
+	// the replier and launches.
+	webhookCommandGate func(ctx context.Context, cfg webhooks.Config, p gitlab.ParsedNote, route webhooks.CommandRoute) (authorized bool, reason string, err error)
+	httpClient         *http.Client
 
 	// detector is the cached LLM credential detector backing
 	// /api/backends/detect. Lazily constructed on first request.

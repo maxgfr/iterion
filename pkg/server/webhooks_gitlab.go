@@ -143,6 +143,14 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, r 
 	// non-command note with the converse bot disabled can't trigger anything.
 	cmd, cmdArgs := p.Command()
 	converseEnabled := s.canRouteToConverseBot(cfg)
+	// Generic slash-command routing: any command but "revi" (the Revi
+	// conversation pair below keeps its bespoke reply-in-thread + thread-
+	// context handling). A non-revi command resolves through the command
+	// registry to a bot + execution mode; an unknown command is filtered.
+	if cmd != "" && cmd != "revi" {
+		s.handleGitLabCommandNote(ctx, w, r, cfg, p, cmd, cmdArgs, payloadHash, srcIP)
+		return
+	}
 	if cmd != "revi" && !converseEnabled {
 		filtered("no /revi trigger")
 		return
@@ -230,6 +238,115 @@ func (s *Server) buildGitLabNoteVars(p gitlab.ParsedNote, cmd, cmdArgs string, l
 		"replier":           p.AuthorUsername,
 		"re_review":         "true",
 	})
+}
+
+// handleGitLabCommandNote routes a generic slash-command note (any command
+// but /revi) to its bot via the command registry. It resolves the route,
+// checks scope + webhook bot-scope, gates the replier (loop-guard +
+// allowlist/role authz, honouring the route's per-command MinReplierRole),
+// composes the launch vars (the command args land in the route's args_var),
+// then hands off to dispatchInvocation (direct now; board tracking in P2).
+// Every benign refusal is a 200/filtered so GitLab doesn't disable the hook.
+func (s *Server) handleGitLabCommandNote(ctx context.Context, w http.ResponseWriter, r *http.Request, cfg webhooks.Config, p gitlab.ParsedNote, cmd, cmdArgs, payloadHash, srcIP string) {
+	filtered := func(reason string) {
+		s.recordNoteDelivery(ctx, cfg, webhooks.StatusFiltered, payloadHash, srcIP, p, reason)
+		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
+	}
+	route, ok := webhooks.ResolveCommandRoute(cfg, cmd, cmdArgs, s.cmdDiscovery())
+	if !ok {
+		filtered("no command route for /" + cmd)
+		return
+	}
+	// GitLab notes handled here are merge-request notes (the open-MR filter ran
+	// upstream), so the surface is "pr".
+	if !route.AllowsScope("pr") {
+		filtered("/" + cmd + " is not enabled on merge-request comments")
+		return
+	}
+	if !cfg.AllowsBot(route.BotID) {
+		filtered("bot " + route.BotID + " not permitted by this webhook")
+		return
+	}
+	gate := s.webhookCommandGate
+	if gate == nil {
+		gate = s.realWebhookCommandGate
+	}
+	authorized, reason, aerr := gate(ctx, cfg, p, route)
+	if aerr != nil {
+		s.recordNoteDelivery(ctx, cfg, webhooks.StatusLaunchError, payloadHash, srcIP, p, "authz check: "+aerr.Error())
+		httpError(w, http.StatusBadGateway, "authorization check failed")
+		return
+	}
+	if !authorized {
+		filtered(reason)
+		return
+	}
+	if s.logger != nil {
+		s.logger.Debug("webhooks: gitlab note %s!%d (/%s) by %s → %s (%s)", p.ProjectPath, p.MRIID, cmd, p.AuthorUsername, route.BotID, reason)
+	}
+	vars := buildCommandVars(p, route, cmdArgs, cfg.LaunchVars)
+	// "cmd|" prefix keeps the key space disjoint from the mr|/note| paths.
+	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("cmd|%s|%s|%d|%s", cfg.TenantID, cfg.ID, p.ProjectID, p.SubjectID())))
+	s.dispatchInvocation(ctx, w, r, cfg, gitlabNoteMeta(p), idemKey, route, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
+}
+
+// buildCommandVars composes the launch vars for a generic command on a GitLab
+// MR note: the PR context ({pr_url, base_ref, scope_notes}), the route's
+// manifest ContextVars, the operator's webhook LaunchVars, then the command
+// args into the route's args_var LAST so the explicit trigger payload always
+// wins for its key.
+func buildCommandVars(p gitlab.ParsedNote, route webhooks.CommandRoute, args string, launchVars map[string]string) map[string]string {
+	vars := map[string]string{
+		"pr_url":      p.MRURL,
+		"base_ref":    p.TargetBranch,
+		"scope_notes": strings.TrimSpace(p.MRTitle + "\n\n" + p.MRDesc),
+	}
+	for k, v := range route.ContextVars {
+		vars[k] = v
+	}
+	for k, v := range launchVars {
+		vars[k] = v
+	}
+	if route.ArgsVar != "" && strings.TrimSpace(args) != "" {
+		vars[route.ArgsVar] = args
+	}
+	return vars
+}
+
+// realWebhookCommandGate is the production replier gate for a generic
+// slash-command: resolve the bot's forge token, reject the bot's own note
+// (loop-guard), then authorize the replier (allowlist OR role-gate, using the
+// route's per-command MinReplierRole, falling back to the webhook default).
+// Returns ok=false + a human reason for benign refusals; err only for an
+// authz infrastructure failure (502 upstream).
+func (s *Server) realWebhookCommandGate(ctx context.Context, cfg webhooks.Config, p gitlab.ParsedNote, route webhooks.CommandRoute) (bool, string, error) {
+	token, terr := s.resolveForgeToken(ctx, cfg, route.BotID)
+	if terr != nil || token == "" {
+		return false, "no forge token resolved (configure a forge_token binding)", nil
+	}
+	baseURL, refusal := resolveForgeBaseURL(cfg, p.MRURL)
+	if refusal != "" {
+		return false, refusal, nil
+	}
+	api := gitlab.API{HTTP: s.httpClient, BaseURL: baseURL, Token: token}
+	if bot, berr := api.CurrentUser(ctx); berr == nil && bot.ID == p.AuthorID {
+		return false, "self note (loop-guard)", nil
+	}
+	minRole := route.MinReplierRole
+	if minRole == "" {
+		minRole = cfg.MinReplierRole
+	}
+	ok, reason, aerr := gitlab.AuthorizeReplier(ctx, api, gitlab.ReplierAuth{
+		AuthorID: p.AuthorID, AuthorUsername: p.AuthorUsername, ProjectID: p.ProjectID,
+		Allowlist: cfg.AuthorizedRepliers, MinRole: minRole,
+	})
+	if aerr != nil {
+		return false, "", aerr
+	}
+	if !ok {
+		return false, "replier not authorized: " + p.AuthorUsername, nil
+	}
+	return true, reason, nil
 }
 
 // canRouteToConverseBot reports whether the conversational bot can be
