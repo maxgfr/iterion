@@ -19,3 +19,10 @@ dispatch_vars:
     {{issue.title}}
 
     {{issue.body}}
+
+invocations:
+  - kind: command
+    mode: board
+    args_var: feature_prompt
+    command: { name: featurly, aliases: [feature-dev], scope: any, min_replier_role: maintainer }
+  - kind: board

@@ -17,3 +17,10 @@ dispatch_vars:
     {{issue.title}}
 
     {{issue.body}}
+
+invocations:
+  - kind: command
+    mode: board
+    args_var: scope_notes
+    command: { name: billy, aliases: [branch-improve-loop], scope: any, min_replier_role: maintainer }
+  - kind: board

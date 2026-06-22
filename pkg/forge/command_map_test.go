@@ -1,6 +1,7 @@
 package forge
 
 import (
+	"context"
 	"testing"
 
 	"github.com/SocialGouv/iterion/pkg/bundle"
@@ -76,5 +77,44 @@ func TestBuildCommandMap_NilWhenNoCommands(t *testing.T) {
 	// No lookup wired at all → nil.
 	if m, _ := (&Orchestrator{}).buildCommandMap([]string{"x"}); m != nil {
 		t.Errorf("nil Invocations should yield nil map, got %v", m)
+	}
+}
+
+// TestProvision_CommandOnlyBot proves a bot with NO forge: block but a command
+// invocation is auto-provisionable: the webhook subscribes to the comment
+// event (derived from the invocation) and the CommandMap routes the command.
+func TestProvision_CommandOnlyBot(t *testing.T) {
+	o, _, sealer := newTestOrch(t)
+	// "no-forge-bot" returns nil from testBotLookup (no forge: block); give it
+	// a command invocation so it becomes forge-reachable.
+	o.Invocations = func(botID string) ([]bundle.Invocation, error) {
+		if botID == "no-forge-bot" {
+			return []bundle.Invocation{
+				{Kind: bundle.InvocationKindCommand, Mode: bundle.ExecutionBoard, ArgsVar: "feature_prompt",
+					Command: &bundle.InvocationCommand{Name: "featurly", Scope: "any"}},
+				{Kind: bundle.InvocationKindBoard},
+			}, nil
+		}
+		return nil, nil
+	}
+	conn := seedConn(t, o, sealer)
+	res, err := o.Provision(context.Background(), ProvisionRequest{
+		TenantID: "t1", ConnectionID: conn.ID, RepoFullName: "owner/repo",
+		BotIDs: []string{"no-forge-bot"}, ActorID: "u1",
+	})
+	if err != nil {
+		t.Fatalf("command-only bot should provision (forge: optional): %v", err)
+	}
+	cfg, err := o.Webhooks.Get(context.Background(), res.WebhookID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantEvents := ToNativeEvents(ProviderGitLab, []string{bundle.ForgeEventPullRequestComment})
+	if !sameSet(cfg.EventAllowlist, wantEvents) {
+		t.Errorf("event allowlist: want %v (derived from command invocation), got %v", wantEvents, cfg.EventAllowlist)
+	}
+	routes := cfg.CommandMap["featurly"]
+	if len(routes) != 1 || routes[0].BotID != "no-forge-bot" || routes[0].Mode != "board" || routes[0].ArgsVar != "feature_prompt" {
+		t.Errorf("command map for /featurly: %+v", cfg.CommandMap)
 	}
 }

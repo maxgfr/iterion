@@ -38,3 +38,9 @@ forge:
     Revi-converse only answers focused /revi <question> notes on an
     open merge/pull request. It never edits code or posts a fresh
     review.
+
+invocations:
+  - kind: command
+    mode: direct
+    args_var: converse_question
+    command: { name: revi, scope: pr, disambiguator: when_args_present, min_replier_role: developer }

@@ -26,3 +26,10 @@ dispatch_vars:
 
     {{issue.body}}
   scope_notes: "{{issue.body}}"
+
+invocations:
+  - kind: command
+    mode: board
+    args_var: improvement_prompt
+    command: { name: willy, aliases: [whole-improve-loop], scope: any, min_replier_role: maintainer }
+  - kind: board

@@ -22,3 +22,9 @@ when_to_use: |
   `devbox.json` + `devbox.lock`; it does not change source.
 author: SocialGouv (devthejo) — devbox-setup/main.bot
 schema_version: 1
+
+invocations:
+  - kind: command
+    mode: board
+    command: { name: devy, aliases: [devbox-setup], scope: any, min_replier_role: maintainer }
+  - kind: board

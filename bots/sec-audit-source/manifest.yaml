@@ -35,3 +35,13 @@ dispatch_vars:
     {{issue.title}}
 
     {{issue.body}}
+
+invocations:
+  - kind: command
+    mode: board
+    args_var: scope_notes
+    command: { name: seki, aliases: [sec-audit-source], scope: any, min_replier_role: developer }
+  - kind: schedule
+    mode: board
+    schedule: { suggested_cron: "0 2 * * 1" }
+  - kind: board

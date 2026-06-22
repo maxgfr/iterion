@@ -121,20 +121,32 @@ func (o *Orchestrator) Provision(ctx context.Context, req ProvisionRequest) (Pro
 		desiredBots = dedupSorted(append(append([]string{}, existing.BotIDs...), req.BotIDs...))
 	}
 
-	// Resolve every bot's forge requirements (fail loudly if a bot declares
-	// no forge: block — it cannot be auto-provisioned).
-	reqs := make([]*bundle.ForgeRequirements, 0, len(desiredBots))
+	// Resolve every bot's forge requirements (its optional forge: block for
+	// credentials/scopes) AND its invocations (the typed routing contract).
+	// A bot is auto-provisionable when it has a forge: block OR a
+	// forge/command invocation — the events to subscribe come from BOTH
+	// sources, so a command-only bot (no forge: block) is enable-able and
+	// its webhook subscribes to the comment event.
+	frByBot := make(map[string]*bundle.ForgeRequirements, len(desiredBots))
+	invByBot := make(map[string][]bundle.Invocation, len(desiredBots))
 	for _, b := range desiredBots {
 		fr, err := o.Bots(b)
 		if err != nil {
 			return ProvisionResult{}, fmt.Errorf("forge: resolve bot %q: %w", b, err)
 		}
-		if fr == nil {
-			return ProvisionResult{}, fmt.Errorf("forge: bot %q declares no forge: block; cannot auto-provision", b)
+		var invs []bundle.Invocation
+		if o.Invocations != nil {
+			if invs, err = o.Invocations(b); err != nil {
+				return ProvisionResult{}, fmt.Errorf("forge: resolve invocations for %q: %w", b, err)
+			}
 		}
-		reqs = append(reqs, fr)
+		if fr == nil && !hasForgeReachableInvocation(invs) {
+			return ProvisionResult{}, fmt.Errorf("forge: bot %q declares neither a forge: block nor a forge/command invocation; cannot auto-provision", b)
+		}
+		frByBot[b] = fr
+		invByBot[b] = invs
 	}
-	eventsNormalized := UnionEvents(reqs...)
+	eventsNormalized := unionAllEvents(desiredBots, frByBot, invByBot)
 	nativeEvents := ToNativeEvents(conn.Provider, eventsNormalized)
 	if len(nativeEvents) == 0 {
 		return ProvisionResult{}, fmt.Errorf("forge: bots %v declare no forge events to subscribe to", desiredBots)
@@ -165,16 +177,24 @@ func (o *Orchestrator) Provision(ctx context.Context, req ProvisionRequest) (Pro
 	secretOverrides := map[string]string{}
 	launchVars := map[string]string{}
 	minRole := ""
-	for _, fr := range reqs {
-		secretOverrides[fr.SecretName()] = managedSecretID
-		if fr.Webhook != nil {
-			for k, v := range fr.Webhook.LaunchVars {
-				launchVars[k] = v
-			}
-			if fr.Webhook.MinReplierRole != "" && webhookRoleRank(fr.Webhook.MinReplierRole) > webhookRoleRank(minRole) {
-				minRole = fr.Webhook.MinReplierRole
+	for _, b := range desiredBots {
+		fr := frByBot[b]
+		// A command-only bot (no forge: block) still binds the connection's
+		// managed token under the default forge_token name so it can post
+		// back if it wants to.
+		secretName := bundle.DefaultForgeSecretName
+		if fr != nil {
+			secretName = fr.SecretName()
+			if fr.Webhook != nil {
+				for k, v := range fr.Webhook.LaunchVars {
+					launchVars[k] = v
+				}
+				if fr.Webhook.MinReplierRole != "" && webhookRoleRank(fr.Webhook.MinReplierRole) > webhookRoleRank(minRole) {
+					minRole = fr.Webhook.MinReplierRole
+				}
 			}
 		}
+		secretOverrides[secretName] = managedSecretID
 	}
 
 	// Build the command→bot route index from the co-enabled bots' command
@@ -474,6 +494,52 @@ func singleBotDefault(bots []string) string {
 		return bots[0]
 	}
 	return ""
+}
+
+// hasForgeReachableInvocation reports whether a bot's invocations include a
+// forge-webhook-reachable trigger (a forge event or a slash-command), i.e.
+// something that needs an inbound webhook subscription. board-only and
+// schedule-only invocations do not make a bot auto-provisionable onto a repo
+// webhook by themselves.
+func hasForgeReachableInvocation(invs []bundle.Invocation) bool {
+	for _, inv := range invs {
+		if inv.Kind == bundle.InvocationKindForge || inv.Kind == bundle.InvocationKindCommand {
+			return true
+		}
+	}
+	return false
+}
+
+// unionAllEvents computes the normalized forge events the webhook must
+// subscribe to across all enabled bots, unioning each bot's forge: block
+// events with its invocation-implied events (a forge invocation contributes
+// its event; a command invocation contributes the comment event, since
+// commands arrive in PR/issue comments). Sorted + deduped for a stable hash.
+func unionAllEvents(bots []string, frByBot map[string]*bundle.ForgeRequirements, invByBot map[string][]bundle.Invocation) []string {
+	set := map[string]bool{}
+	for _, b := range bots {
+		if fr := frByBot[b]; fr != nil {
+			for _, e := range fr.Events {
+				set[e] = true
+			}
+		}
+		for _, inv := range invByBot[b] {
+			switch inv.Kind {
+			case bundle.InvocationKindForge:
+				if inv.Forge != nil {
+					set[inv.Forge.Event] = true
+				}
+			case bundle.InvocationKindCommand:
+				set[bundle.ForgeEventPullRequestComment] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for e := range set {
+		out = append(out, e)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // buildCommandMap flattens the co-enabled bots' command invocations into the

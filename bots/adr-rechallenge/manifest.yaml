@@ -32,3 +32,10 @@ dispatch_vars:
 
     {{issue.body}}
   issue_id: "{{issue.identifier}}"
+
+invocations:
+  - kind: command
+    mode: board
+    args_var: scope_notes
+    command: { name: rearchi, aliases: [adr-rechallenge], scope: any, min_replier_role: maintainer }
+  - kind: board

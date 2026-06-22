@@ -22,3 +22,13 @@ dispatch_vars:
     {{issue.title}}
 
     {{issue.body}}
+
+invocations:
+  - kind: command
+    mode: board
+    args_var: user_prompt
+    command: { name: renovacy, aliases: [secured-renovacy], scope: any, min_replier_role: maintainer }
+  - kind: schedule
+    mode: board
+    schedule: { suggested_cron: "0 4 * * 1" }
+  - kind: board

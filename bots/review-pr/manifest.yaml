@@ -44,3 +44,12 @@ forge:
     Revi reads the MR/PR diff and posts one forge review with inline
     comments + ```suggestion blocks. /revi in a note triggers a
     re-review on the same PR.
+
+# Invocations: how Revi can be triggered (typed routing contract).
+invocations:
+  - kind: forge
+    mode: direct
+    forge: { event: pull_request, actions: [opened, reopened] }
+  - kind: command
+    mode: direct
+    command: { name: revi, scope: pr, disambiguator: when_args_empty }

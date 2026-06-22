@@ -35,3 +35,10 @@ dispatch_vars:
     {{issue.title}}
 
     {{issue.body}}
+
+invocations:
+  - kind: command
+    mode: board
+    args_var: brief
+    command: { name: bmady, scope: any, min_replier_role: maintainer }
+  - kind: board
