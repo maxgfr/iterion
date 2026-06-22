@@ -51,6 +51,29 @@ export interface BotEntry {
    *  renders it read-only so an operator sees what enabling the bot on a
    *  repo will set up. */
   forge?: ForgeRequirements;
+  /** Typed routing contract (manifest `invocations:`) — how this bot can be
+   *  triggered (forge event, /slash-command, schedule, board) and the
+   *  execution mode each path uses. Drives the Integrations picker grouping.
+   *  Empty for orchestrators (Nexie/Evoly) and loose .bot files. */
+  invocations?: Invocation[];
+}
+
+/** Invocation mirrors the manifest `invocations:` entry. The payload field
+ *  that applies is selected by `kind`. */
+export interface Invocation {
+  kind: "forge" | "command" | "schedule" | "board";
+  mode?: "direct" | "board";
+  args_var?: string;
+  context_vars?: Record<string, string>;
+  forge?: { event: string; actions?: string[] };
+  command?: {
+    name: string;
+    aliases?: string[];
+    scope?: string;
+    min_replier_role?: string;
+    disambiguator?: string;
+  };
+  schedule?: { suggested_cron?: string; default_vars?: Record<string, string> };
 }
 
 /** ForgeRequirements mirrors the manifest `forge:` block — what a bot

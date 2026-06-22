@@ -14,11 +14,17 @@ import { Button } from "@/components/ui/Button";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import {
+  GROUP_LABELS,
+  GROUP_ORDER,
+  primaryGroup,
+  triggerChips,
+} from "@/lib/triggers";
 
 export function EnableRepoPanel({
   teamID,
   conn,
-  forgeBots,
+  repoBots,
   preselectBot,
   onDone,
   onCancel,
@@ -26,7 +32,7 @@ export function EnableRepoPanel({
 }: {
   teamID: string;
   conn: ForgeConnection;
-  forgeBots: BotEntryWithSchema[];
+  repoBots: BotEntryWithSchema[];
   preselectBot?: string;
   onDone: () => void;
   onCancel: () => void;
@@ -146,38 +152,49 @@ export function EnableRepoPanel({
 
       <div>
         <div className="text-xs uppercase tracking-wider text-fg-muted mb-1">Bots to enable</div>
-        {forgeBots.length === 0 ? (
+        {repoBots.length === 0 ? (
           <div className="text-fg-muted text-sm">
-            No forge-capable bots found (a bot needs a <span className="font-mono">forge:</span>{" "}
-            block in its manifest).
+            No repo-installable bots found (a bot needs an{" "}
+            <span className="font-mono">invocations:</span> block in its manifest).
           </div>
         ) : (
-          <ul className="space-y-2">
-            {forgeBots.map((b) => (
-              <li key={b.name} className="flex gap-2">
-                <Checkbox
-                  id={`fb-${b.name}`}
-                  checked={selectedBots.includes(b.name)}
-                  onChange={() => toggleBot(b.name)}
-                  className="mt-1"
-                />
-                <label htmlFor={`fb-${b.name}`} className="text-sm">
-                  <span className="font-medium">{b.display_name || b.name}</span>
-                  {b.forge?.events && b.forge.events.length > 0 && (
-                    <span className="text-fg-muted">
-                      {" "}
-                      · subscribes to {b.forge.events.join(", ")}
-                    </span>
-                  )}
-                  {b.forge?.rationale && (
-                    <span className="block text-caption text-fg-muted whitespace-pre-wrap">
-                      {b.forge.rationale}
-                    </span>
-                  )}
-                </label>
-              </li>
-            ))}
-          </ul>
+          <div className="space-y-3">
+            {GROUP_ORDER.map((group) => {
+              const inGroup = repoBots.filter((b) => primaryGroup(b) === group);
+              if (inGroup.length === 0) return null;
+              return (
+                <div key={group}>
+                  <div className="text-caption text-fg-muted mb-1">{GROUP_LABELS[group]}</div>
+                  <ul className="space-y-2">
+                    {inGroup.map((b) => (
+                      <li key={b.name} className="flex gap-2">
+                        <Checkbox
+                          id={`fb-${b.name}`}
+                          checked={selectedBots.includes(b.name)}
+                          onChange={() => toggleBot(b.name)}
+                          className="mt-1"
+                        />
+                        <label htmlFor={`fb-${b.name}`} className="text-sm">
+                          <span className="font-medium">{b.display_name || b.name}</span>{" "}
+                          <span className="font-mono text-fg-muted">{b.name}</span>
+                          <span className="block mt-0.5 flex flex-wrap gap-1">
+                            {triggerChips(b).map((c) => (
+                              <span
+                                key={c}
+                                className="inline-block font-mono text-caption text-fg-muted bg-surface-1 border border-border-subtle rounded px-1"
+                              >
+                                {c}
+                              </span>
+                            ))}
+                          </span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 

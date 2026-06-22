@@ -18,7 +18,7 @@ export function ConnectionCard({
   teamID,
   conn,
   integrations,
-  forgeBots,
+  repoBots,
   canManage,
   onChanged,
   onError,
@@ -29,7 +29,7 @@ export function ConnectionCard({
   teamID: string;
   conn: ForgeConnection;
   integrations: ForgeIntegration[];
-  forgeBots: BotEntryWithSchema[];
+  repoBots: BotEntryWithSchema[];
   canManage: boolean;
   onChanged: () => void;
   onError: (m: string) => void;
@@ -131,7 +131,7 @@ export function ConnectionCard({
           <EnableRepoPanel
             teamID={teamID}
             conn={conn}
-            forgeBots={forgeBots}
+            repoBots={repoBots}
             preselectBot={preselectBot}
             onDone={() => {
               setEnabling(false);

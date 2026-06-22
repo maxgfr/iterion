@@ -13,6 +13,7 @@ import {
 } from "@/api/forgeConnections";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useConfirm } from "@/hooks/useConfirm";
+import { isRepoCapable } from "@/lib/triggers";
 import { useBotsStore } from "@/store/bots";
 
 import { ConnectForm } from "./integrations/ConnectForm";
@@ -33,14 +34,15 @@ export default function IntegrationsTab({
   const [err, setErr] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
   // Bots come from the shared catalog cache so a metadata edit (e.g. in
-  // the Bot panel) re-renders the connection cards immediately. We only
-  // surface forge-capable bots here — the same filter the per-mount
-  // listBots() call used to apply.
+  // the Bot panel) re-renders the connection cards immediately. We surface
+  // every repo-capable bot — one that declares an invocations: block (forge
+  // event / slash-command / schedule / board) or a legacy forge: block — not
+  // just the two Revi bots. See lib/triggers.isRepoCapable.
   const allBots = useBotsStore((s) => s.bots);
   const botsWarning = useBotsStore((s) => s.error);
   const fetchBots = useBotsStore((s) => s.fetch);
-  const forgeBots = useMemo(
-    () => (allBots ?? []).filter((b) => b.forge),
+  const repoCapableBots = useMemo(
+    () => (allBots ?? []).filter(isRepoCapable),
     [allBots],
   );
   // ?bot=<name> (set by the catalog's "Connect to a repo" affordance) pre-checks
@@ -112,7 +114,7 @@ export default function IntegrationsTab({
                 teamID={teamID}
                 conn={c}
                 integrations={integrations.filter((i) => i.connection_id === c.id)}
-                forgeBots={forgeBots}
+                repoBots={repoCapableBots}
                 canManage={canManage}
                 onChanged={reload}
                 onError={setErr}
