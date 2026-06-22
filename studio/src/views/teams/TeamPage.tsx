@@ -115,6 +115,7 @@ export default function TeamPage() {
           onValueChange={(v) => selectTab(v as Tab)}
           items={TABS.map((t) => ({ value: t.id, label: t.label }))}
           listClassName="flex sm:flex-col gap-1 flex-wrap"
+          triggerClassName="sm:w-full sm:text-left"
         />
 
         <main>

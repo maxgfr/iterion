@@ -42,6 +42,7 @@ export default function SettingsPage() {
           onValueChange={(v) => setTab(v as Tab)}
           items={tabs.map((t) => ({ value: t.id, label: t.label }))}
           listClassName="flex sm:flex-col gap-1 flex-wrap"
+          triggerClassName="sm:w-full sm:text-left"
         />
 
         <div className="bg-surface-0">
