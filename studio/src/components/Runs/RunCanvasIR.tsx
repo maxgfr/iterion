@@ -15,6 +15,7 @@ import type { DelegateOutputMeta } from "@/lib/delegateMeta";
 import { useToggleSet } from "@/hooks/useToggleSet";
 
 import { useUIStore } from "@/store/ui";
+import { useThemeStore } from "@/store/theme";
 
 import IRNode, { iterationColor } from "./IRNode";
 import RunCanvasToolbar from "./RunCanvasToolbar";
@@ -114,6 +115,10 @@ export default function RunCanvasIR({
   // flips this and the layout effect below picks it up.
   const layoutDirection = useUIStore((s) => s.layoutDirection);
   const toggleLayoutDirection = useUIStore((s) => s.toggleLayoutDirection);
+  // Match the editor Canvas so the run graph follows light/dark instead of
+  // React Flow's default light colorMode (which left light controls/legend
+  // stranded on the dark run console).
+  const resolvedTheme = useThemeStore((s) => s.resolved);
 
   // Group executions by IR node id once; both the layout and the
   // visual-patch effects below reuse this.
@@ -423,6 +428,7 @@ export default function RunCanvasIR({
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable
+        colorMode={resolvedTheme}
         fitView
         fitViewOptions={{ padding: 0.2 }}
         minZoom={0.05}
