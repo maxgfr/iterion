@@ -18,7 +18,6 @@
 // dashboard is a manual surface, no auto-polling — operators hit
 // Refresh when they want a fresh number.
 
-import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { ArrowLeftIcon } from "@radix-ui/react-icons";
@@ -28,6 +27,7 @@ import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { formatCost, formatMs } from "@/lib/format";
 
 const WINDOWS = [7, 14, 30, 90] as const;
@@ -44,21 +44,15 @@ export default function RunsAnalyticsView() {
 function RunsAnalyticsViewInner() {
   const [sinceDays, setSinceDays] = useState<Window>(30);
   const [stats, setStats] = useState<StatsResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const { busy: loading, error, run } = useAsyncAction();
 
-  const refresh = useCallback(async (window: Window) => {
-    setLoading(true);
-    try {
-      const next = await getRunsStats(window);
-      setStats(next);
-      setError(null);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const refresh = useCallback(
+    (window: Window) =>
+      run(async () => {
+        setStats(await getRunsStats(window));
+      }),
+    [run],
+  );
 
   useEffect(() => {
     void refresh(sinceDays);

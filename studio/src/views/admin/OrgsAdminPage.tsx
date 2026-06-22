@@ -2,6 +2,7 @@ import { errorMessage } from "@/lib/errorHints";
 import { useCallback, useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { clickableRowProps } from "@/lib/a11y";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useAuth } from "@/auth/AuthContext";
 import {
   type OrgView,
@@ -26,11 +27,15 @@ export default function OrgsAdminPage() {
   const isSuper = user?.is_super_admin ?? false;
 
   const [orgs, setOrgs] = useState<OrgView[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
   const [ownerEmail, setOwnerEmail] = useState("");
   const [active, setActive] = useState<OrgView | null>(null);
+  // Single useAsyncAction underpins the refresh + every mutation
+  // (create, update, status). The shared error slot maps the
+  // FeatureUnavailable exception to a friendlier line; everything else
+  // falls through to the hook's default errorMessage().
+  const action = useAsyncAction();
+  const { busy, error, run: actionRun, setError } = action;
 
   useHeaderSlot({
     left: <span className="text-sm font-semibold">Organizations</span>,
@@ -48,11 +53,28 @@ export default function OrgsAdminPage() {
           : String(e),
       );
     }
-  }, []);
+  }, [setError]);
 
   useEffect(() => {
     if (isSuper) void refresh();
   }, [isSuper, refresh]);
+
+  // Wrap a mutation in the shared busy/error slot, then refresh the
+  // list once it settles successfully — identical sequencing to the
+  // pre-extract handler. useAsyncAction maps the thrown error to its
+  // hook's errorMessage(); since this view treats FeatureUnavailable
+  // specially via refresh()'s own catch, that path is the only
+  // remaining bespoke branch.
+  const run = useCallback(
+    async (fn: () => Promise<unknown>) => {
+      const ok = await actionRun(async () => {
+        await fn();
+        return true;
+      });
+      if (ok) await refresh();
+    },
+    [actionRun, refresh],
+  );
 
   if (!isSuper) {
     return (
@@ -61,18 +83,6 @@ export default function OrgsAdminPage() {
       </div>
     );
   }
-
-  const run = async (fn: () => Promise<unknown>) => {
-    setBusy(true);
-    try {
-      await fn();
-      await refresh();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const create = (e: React.FormEvent) => {
     e.preventDefault();

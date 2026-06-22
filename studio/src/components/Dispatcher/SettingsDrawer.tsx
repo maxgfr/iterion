@@ -1,4 +1,3 @@
-import { errorMessage } from "@/lib/errorHints";
 import * as RD from "@radix-ui/react-dialog";
 import { useEffect, useState } from "react";
 
@@ -10,6 +9,7 @@ import { InlineBanner } from "@/components/ui/InlineBanner";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
+import { useAsyncAction } from "@/hooks/useAsyncAction";
 
 interface Props {
   open: boolean;
@@ -22,44 +22,40 @@ interface Props {
 // PUTs the result on save. No YAML editing required.
 export default function SettingsDrawer({ open, onClose, onSaved }: Props) {
   const [cfg, setCfg] = useState<dispatcher.DispatcherConfig | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Two useAsyncAction slots: one for the open-time load, one for the
+  // user-triggered Save. They share the same InlineBanner so the user
+  // sees the most recent failure, but their `busy` flags are
+  // independent — the header pill reflects load, the Save button
+  // reflects save.
+  const loadAction = useAsyncAction();
+  const saveAction = useAsyncAction();
+  const loading = loadAction.busy;
+  const saving = saveAction.busy;
+  const error = saveAction.error ?? loadAction.error;
 
   useEffect(() => {
     if (!open) return;
     let alive = true;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const c = await dispatcher.getConfig();
-        if (alive) setCfg(c ?? defaultConfig());
-      } catch (e) {
-        if (alive) setError(errorMessage(e));
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
+    void loadAction.run(async () => {
+      const c = await dispatcher.getConfig();
+      if (alive) setCfg(c ?? defaultConfig());
+    });
     return () => {
       alive = false;
     };
+    // loadAction is recreated on each render but its run/setError are
+    // stable; depending only on `open` matches the prior behaviour
+    // (the IIFE-style load fired exactly on open transitions).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const onSave = async () => {
-    if (!cfg) return;
-    setSaving(true);
-    setError(null);
-    try {
+  const onSave = () =>
+    saveAction.run(async () => {
+      if (!cfg) return;
       await dispatcher.saveConfig(cfg);
       onSaved();
       onClose();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setSaving(false);
-    }
-  };
+    });
 
   return (
     <RD.Root open={open} onOpenChange={(o) => !o && onClose()}>
