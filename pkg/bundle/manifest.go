@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"go.yaml.in/yaml/v2"
@@ -113,6 +114,19 @@ type Manifest struct {
 	// transaction. Nil when the bot declares no forge ambitions (the
 	// Integrations "enable on this repo" picker filters those out).
 	Forge *ForgeRequirements `yaml:"forge,omitempty"`
+
+	// Invocations declare HOW this bot can be triggered (forge event,
+	// /slash-command, schedule, or board pickup) and WHICH execution mode
+	// each path uses (direct launch vs board-tracked dispatch). Distinct
+	// from Triggers (free-form advisory catalog labels) and Forge (the
+	// credential/token-scope requirements): Invocations are the typed,
+	// machine-read routing contract consumed by the command router
+	// (pkg/webhooks), the auto-provisioner (pkg/forge), and the cloud
+	// scheduler (pkg/cloudsched). Empty = the bot is not directly
+	// triggerable on a repo (orchestrators like Nexie/Evoly). A bundle that
+	// declares only a legacy forge: block is treated as having the
+	// synthetic set from SyntheticInvocations.
+	Invocations []Invocation `yaml:"invocations,omitempty"`
 }
 
 // Normalized forge event vocabulary used in a manifest `forge.events`
@@ -213,6 +227,207 @@ func (f *ForgeRequirements) SecretName() string {
 	return f.Secret
 }
 
+// Invocation vocabulary -----------------------------------------------------
+
+// InvocationKind classifies the surface that can fire a bot. Closed set,
+// validated at manifest parse time (same bar as KnownForgeEvents) so a typo
+// fails fast.
+type InvocationKind string
+
+const (
+	// InvocationKindForge fires on a forge webhook event (PR/MR open, push).
+	InvocationKindForge InvocationKind = "forge"
+	// InvocationKindCommand fires on a /slash-command in a PR/MR/issue comment.
+	InvocationKindCommand InvocationKind = "command"
+	// InvocationKindSchedule fires on a cron tick (advisory suggested_cron the
+	// Integrations UI proposes; iterion's cloud scheduler owns firing).
+	InvocationKindSchedule InvocationKind = "schedule"
+	// InvocationKindBoard marks the bot as a dispatcher target: an issue whose
+	// Bot == this bot's name is picked up and run. No payload.
+	InvocationKindBoard InvocationKind = "board"
+)
+
+var knownInvocationKinds = map[InvocationKind]bool{
+	InvocationKindForge:    true,
+	InvocationKindCommand:  true,
+	InvocationKindSchedule: true,
+	InvocationKindBoard:    true,
+}
+
+// ExecutionMode controls how a fired invocation becomes a run.
+//
+//	direct → launch the run immediately (the Revi path:
+//	         insertAndLaunchWebhook → publisher → queue → runner). For
+//	         fast, read-only, PR-bound work.
+//	board  → materialise a kanban issue assigned to the bot; the dispatcher
+//	         claims and runs it (tracked, retryable, supports human gates).
+//	         For long, mutating, to-be-tracked work.
+type ExecutionMode string
+
+const (
+	ExecutionDirect ExecutionMode = "direct"
+	ExecutionBoard  ExecutionMode = "board"
+)
+
+var knownExecutionModes = map[ExecutionMode]bool{
+	"":              true,
+	ExecutionDirect: true,
+	ExecutionBoard:  true,
+}
+
+// Invocation declares one way this bot can be triggered, plus the execution
+// mode that path uses. The payload field that applies is selected by Kind
+// (Forge for kind=forge, Command for kind=command, Schedule for
+// kind=schedule; kind=board needs none).
+type Invocation struct {
+	Kind InvocationKind `yaml:"kind" json:"kind"`
+
+	// Mode is the execution mode for this path. Empty defaults to "direct"
+	// (see EffectiveMode).
+	Mode ExecutionMode `yaml:"mode,omitempty" json:"mode,omitempty"`
+
+	// ArgsVar names the workflow input var that receives the trigger's
+	// free-text payload (the comment args after the command, etc.). Empty
+	// injects no payload. Cross-checked against the bot's declared vars by
+	// botregistry.ListWithSchema (a warning, not a hard error).
+	ArgsVar string `yaml:"args_var,omitempty" json:"args_var,omitempty"`
+
+	// ContextVars are extra launch vars stamped on every run from this
+	// invocation, merged BEFORE the operator's webhook LaunchVars (operator
+	// still wins).
+	ContextVars map[string]string `yaml:"context_vars,omitempty" json:"context_vars,omitempty"`
+
+	Forge    *InvocationForge    `yaml:"forge,omitempty" json:"forge,omitempty"`
+	Command  *InvocationCommand  `yaml:"command,omitempty" json:"command,omitempty"`
+	Schedule *InvocationSchedule `yaml:"schedule,omitempty" json:"schedule,omitempty"`
+}
+
+// EffectiveMode returns the execution mode, defaulting an empty value to
+// ExecutionDirect (the safe, PR-bound behaviour).
+func (i Invocation) EffectiveMode() ExecutionMode {
+	if i.Mode == ExecutionBoard {
+		return ExecutionBoard
+	}
+	return ExecutionDirect
+}
+
+// InvocationForge is the payload of a kind=forge invocation.
+type InvocationForge struct {
+	// Event is one of KnownForgeEvents.
+	Event string `yaml:"event" json:"event"`
+	// Actions narrows the trigger to specific provider actions (e.g.
+	// "opened","reopened" for a PR). Empty applies the handler's default
+	// reviewable-action filter.
+	Actions []string `yaml:"actions,omitempty" json:"actions,omitempty"`
+}
+
+// InvocationCommand is the payload of a kind=command invocation.
+type InvocationCommand struct {
+	// Name is the slash-command id WITHOUT the leading "/" (e.g. "revi",
+	// "featurly"). Lowercase ^[a-z][a-z0-9_-]*$.
+	Name string `yaml:"name" json:"name"`
+	// Aliases are additional command ids that route to this bot (e.g. the
+	// technical name "feature-dev" aliasing the persona "featurly").
+	Aliases []string `yaml:"aliases,omitempty" json:"aliases,omitempty"`
+	// Scope restricts where the command is honoured: "pr" (default),
+	// "issue", or "any".
+	Scope string `yaml:"scope,omitempty" json:"scope,omitempty"`
+	// MinReplierRole overrides the webhook's MinReplierRole for THIS
+	// command — a mutating bot can demand "maintainer" while a reviewer
+	// stays "developer". Empty inherits the webhook default.
+	MinReplierRole string `yaml:"min_replier_role,omitempty" json:"min_replier_role,omitempty"`
+	// Disambiguator resolves a same-name command shared by two co-enabled
+	// bots (the review-pr vs revi-converse pattern): "when_args_empty"
+	// claims a bare "/cmd", "when_args_present" claims "/cmd <args>". Empty
+	// claims the command unconditionally.
+	Disambiguator string `yaml:"disambiguator,omitempty" json:"disambiguator,omitempty"`
+}
+
+// InvocationSchedule is the payload of a kind=schedule invocation.
+type InvocationSchedule struct {
+	// SuggestedCron is a 5-field cron expression the Integrations UI
+	// proposes as a default. Advisory — the operator picks the final
+	// schedule; iterion's cloud scheduler (pkg/cloudsched) owns firing.
+	SuggestedCron string `yaml:"suggested_cron,omitempty" json:"suggested_cron,omitempty"`
+	// DefaultVars are vars stamped on each scheduled run.
+	DefaultVars map[string]string `yaml:"default_vars,omitempty" json:"default_vars,omitempty"`
+}
+
+var (
+	commandNameRe       = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+	knownCommandScopes  = map[string]bool{"": true, "pr": true, "issue": true, "any": true}
+	knownDisambiguators = map[string]bool{"": true, "when_args_empty": true, "when_args_present": true}
+)
+
+// validateInvocations rejects malformed invocations at parse time so a typo
+// fails fast (same bar as forge.events). It checks the kind/mode enums, the
+// per-kind required payload + payload mutual-exclusivity, the command-name
+// shape, and intra-bot command-name uniqueness. Cross-bot command collisions
+// are a provisioning-time concern (pkg/forge), not a manifest one.
+func validateInvocations(invs []Invocation) error {
+	seenCmd := map[string]bool{}
+	for idx, inv := range invs {
+		if !knownInvocationKinds[inv.Kind] {
+			return fmt.Errorf("invocations[%d]: unknown kind %q (known: forge, command, schedule, board)", idx, inv.Kind)
+		}
+		if !knownExecutionModes[inv.Mode] {
+			return fmt.Errorf("invocations[%d]: invalid mode %q (want direct or board)", idx, inv.Mode)
+		}
+		switch inv.Kind {
+		case InvocationKindForge:
+			if inv.Forge == nil {
+				return fmt.Errorf("invocations[%d]: kind=forge requires a forge: block", idx)
+			}
+			if !KnownForgeEvents[inv.Forge.Event] {
+				return fmt.Errorf("invocations[%d].forge: unknown event %q (known: %s, %s)", idx, inv.Forge.Event, ForgeEventPullRequest, ForgeEventPullRequestComment)
+			}
+			if inv.Command != nil || inv.Schedule != nil {
+				return fmt.Errorf("invocations[%d]: kind=forge must not set command:/schedule:", idx)
+			}
+		case InvocationKindCommand:
+			if inv.Command == nil {
+				return fmt.Errorf("invocations[%d]: kind=command requires a command: block", idx)
+			}
+			if !knownCommandScopes[inv.Command.Scope] {
+				return fmt.Errorf("invocations[%d].command: invalid scope %q (want pr, issue, or any)", idx, inv.Command.Scope)
+			}
+			if !knownDisambiguators[inv.Command.Disambiguator] {
+				return fmt.Errorf("invocations[%d].command: invalid disambiguator %q (want when_args_empty or when_args_present)", idx, inv.Command.Disambiguator)
+			}
+			for _, nm := range append([]string{inv.Command.Name}, inv.Command.Aliases...) {
+				lc := strings.ToLower(nm)
+				if !commandNameRe.MatchString(lc) {
+					return fmt.Errorf("invocations[%d].command: invalid name %q (want ^[a-z][a-z0-9_-]*$)", idx, nm)
+				}
+				if seenCmd[lc] {
+					return fmt.Errorf("invocations[%d].command: duplicate command name %q within this bot", idx, lc)
+				}
+				seenCmd[lc] = true
+			}
+			if inv.Forge != nil || inv.Schedule != nil {
+				return fmt.Errorf("invocations[%d]: kind=command must not set forge:/schedule:", idx)
+			}
+		case InvocationKindSchedule:
+			if inv.Schedule == nil {
+				return fmt.Errorf("invocations[%d]: kind=schedule requires a schedule: block", idx)
+			}
+			if c := strings.TrimSpace(inv.Schedule.SuggestedCron); c != "" {
+				if fields := strings.Fields(c); len(fields) != 5 {
+					return fmt.Errorf("invocations[%d].schedule: suggested_cron %q must be a 5-field cron expression", idx, c)
+				}
+			}
+			if inv.Forge != nil || inv.Command != nil {
+				return fmt.Errorf("invocations[%d]: kind=schedule must not set forge:/command:", idx)
+			}
+		case InvocationKindBoard:
+			if inv.Forge != nil || inv.Command != nil || inv.Schedule != nil {
+				return fmt.Errorf("invocations[%d]: kind=board takes no payload", idx)
+			}
+		}
+	}
+	return nil
+}
+
 // IsEnabled reports whether this bot should be advertised in the
 // orchestrator-facing catalog by default. A nil Enabled (key absent
 // from the manifest) is treated as enabled, so bots authored before the
@@ -269,6 +484,9 @@ func decodeManifest(body []byte, srcLabel string) (*Manifest, error) {
 		}
 	}
 	if err := validateForgeRequirements(m.Forge); err != nil {
+		return nil, fmt.Errorf("bundle: manifest %s: %w", srcLabel, err)
+	}
+	if err := validateInvocations(m.Invocations); err != nil {
 		return nil, fmt.Errorf("bundle: manifest %s: %w", srcLabel, err)
 	}
 	return &m, nil

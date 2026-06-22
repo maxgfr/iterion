@@ -27,6 +27,13 @@ type EntryWithSchema struct {
 	Vars        *VarsBlock    `json:"vars,omitempty"`
 	Presets     *PresetsBlock `json:"presets,omitempty"`
 	SchemaError string        `json:"schema_error,omitempty"`
+
+	// InvocationWarnings flags manifest invocations whose args_var names a
+	// var the bot's workflow doesn't declare — a soft authoring mistake the
+	// studio surfaces, never a hard error. Empty when the schema couldn't
+	// be parsed (vars unknown) so a parse failure isn't reported as a
+	// missing-var warning.
+	InvocationWarnings []string `json:"invocation_warnings,omitempty"`
 }
 
 // VarsBlock matches the AST jsonenc output for a workflow's vars
@@ -111,10 +118,36 @@ func ListWithSchema(opts ListOptions) ([]EntryWithSchema, error) {
 		es.Presets = presets
 		if schemaErr != nil {
 			es.SchemaError = schemaErr.Error()
+		} else {
+			es.InvocationWarnings = invocationVarWarnings(e, vars)
 		}
 		out = append(out, es)
 	}
 	return out, nil
+}
+
+// invocationVarWarnings flags each invocation whose ArgsVar names a var the
+// bot's workflow does not declare — a manifest authoring mistake that would
+// silently drop the trigger payload. Soft: surfaced to the studio, never
+// fails the list. Only called when the schema parsed cleanly, so a nil vars
+// block here means the bot genuinely declares no vars.
+func invocationVarWarnings(e Entry, vars *VarsBlock) []string {
+	if len(e.Invocations) == 0 {
+		return nil
+	}
+	declared := map[string]bool{}
+	if vars != nil {
+		for _, f := range vars.Fields {
+			declared[f.Name] = true
+		}
+	}
+	var warns []string
+	for _, inv := range e.Invocations {
+		if inv.ArgsVar != "" && !declared[inv.ArgsVar] {
+			warns = append(warns, fmt.Sprintf("invocation args_var %q is not a declared var of this bot", inv.ArgsVar))
+		}
+	}
+	return warns
 }
 
 // LoadSchema parses the bot's main file, compiles to AST, and returns

@@ -58,6 +58,16 @@ type Entry struct {
 	// a bot will provision before any run exists.
 	Forge *bundle.ForgeRequirements `json:"forge,omitempty" yaml:"forge,omitempty"`
 
+	// Invocations is the typed routing contract from the manifest
+	// (manifest.yaml invocations:) — how this bot can be triggered (forge
+	// event, /slash-command, schedule, board) and the execution mode each
+	// path uses. Falls back to bundle.SyntheticInvocations for a legacy
+	// forge:-only bundle. Carried by discovery so the studio Integrations
+	// picker can group bots by trigger and the command router / orchestrator
+	// can resolve a command to a bot. Empty for loose .bot files and bots
+	// that declare no invocations (orchestrators like Nexie/Evoly).
+	Invocations []bundle.Invocation `json:"invocations,omitempty" yaml:"invocations,omitempty"`
+
 	// WhenToUse is the orchestrator-facing "use when" guidance from the
 	// bundle manifest (manifest.yaml when_to_use). Empty for loose .bot
 	// files. Surfaced in the generated iterion-bot-catalog "Use when"
@@ -362,6 +372,7 @@ func parseBundle(dir string) (*Entry, error) {
 		Capabilities:    m.Capabilities,
 		DispatchVars:    m.DispatchVars,
 		Forge:           m.Forge,
+		Invocations:     bundle.EffectiveInvocations(m),
 		WhenToUse:       strings.TrimSpace(m.WhenToUse),
 		Author:          m.Author,
 		Version:         m.Version,
