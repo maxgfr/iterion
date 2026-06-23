@@ -23,7 +23,10 @@ import (
 	"github.com/SocialGouv/iterion/pkg/cli"
 	"github.com/SocialGouv/iterion/pkg/cloud/metrics"
 	"github.com/SocialGouv/iterion/pkg/cloud/tracing"
+	"github.com/SocialGouv/iterion/pkg/cloudsched"
 	iterconfig "github.com/SocialGouv/iterion/pkg/config"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/boardmongo"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
 	"github.com/SocialGouv/iterion/pkg/forge"
 	"github.com/SocialGouv/iterion/pkg/identity"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
@@ -301,6 +304,8 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		ExamplesDir:            examplesDir,
 		WorkDir:                serverOpts.dir,
 		Store:                  st,
+		CloudBoardFor:          func(tenantID string) native.BoardStore { return boardmongo.New(st.DB(), tenantID) },
+		ScheduledBots:          cloudsched.NewMongoStore(st.DB()),
 		Alerts:                 alertSettings,
 		LaunchPublisher:        pub,
 		EventSource:            eventSrc,
@@ -433,6 +438,8 @@ func buildCloudStores(ctx context.Context, st *mongostore.Store) (*cloudStores, 
 		{"oidc_states", s.oidcState.EnsureSchema},
 		{"org_usage", func(c context.Context) error { return orgusage.EnsureSchema(c, st.DB()) }},
 		{"audit", func(c context.Context) error { return audit.EnsureSchema(c, st.DB()) }},
+		{"board", func(c context.Context) error { return boardmongo.EnsureSchema(c, st.DB()) }},
+		{"scheduled_bots", func(c context.Context) error { return cloudsched.EnsureSchema(c, st.DB()) }},
 	}
 	if marketplaceEnabled {
 		schemas = append(schemas, schemaEnsurer{"marketplace", func(c context.Context) error { return marketplace.EnsureSchema(c, st.DB()) }})

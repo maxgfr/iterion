@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/SocialGouv/iterion/pkg/botregistry"
+	"github.com/SocialGouv/iterion/pkg/cloudsched"
 	"github.com/SocialGouv/iterion/pkg/knowledge"
 	"github.com/SocialGouv/iterion/pkg/runview"
 	"github.com/SocialGouv/iterion/pkg/secrets"
@@ -594,6 +595,28 @@ func (s *Server) resolveBotSource(botID string) (path, source string, err error)
 		return "", "", fmt.Errorf("read bot %q: %w", botID, err)
 	}
 	return path, string(b), nil
+}
+
+// launchScheduledBot is the cloudsched.LaunchFunc: it launches a recurring bot
+// run for its tenant through the run service (cloud → publisher). The tenant
+// identity is stamped on the ctx so the publisher seals credentials + scopes
+// the run to the org.
+func (s *Server) launchScheduledBot(ctx context.Context, sb cloudsched.ScheduledBot) error {
+	if s.runs == nil {
+		return errors.New("run service unavailable")
+	}
+	ctx = store.WithIdentity(ctx, sb.TenantID, "scheduler:"+sb.BotID)
+	path, source, err := s.resolveBotSource(sb.BotID)
+	if err != nil {
+		return err
+	}
+	_, err = s.runs.Launch(ctx, runview.LaunchSpec{
+		FilePath: path,
+		Source:   source,
+		BotID:    sb.BotID,
+		Vars:     sb.Vars,
+	})
+	return err
 }
 
 // realWebhookLaunchBot is the production launch path for an inbound

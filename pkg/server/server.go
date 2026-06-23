@@ -31,6 +31,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
 	"github.com/SocialGouv/iterion/pkg/bundle"
 	"github.com/SocialGouv/iterion/pkg/cloud/metrics"
+	"github.com/SocialGouv/iterion/pkg/cloudsched"
 	"github.com/SocialGouv/iterion/pkg/dispatcher"
 	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
 	"github.com/SocialGouv/iterion/pkg/dsl/ast"
@@ -291,6 +292,17 @@ type Config struct {
 	// kanban tracker under /api/v1/native/* (issues CRUD + board) so
 	// the studio SPA can render the Board view.
 	NativeTrackerStore *native.Store
+
+	// CloudBoardFor returns a tenant-scoped board store for cloud mode (a
+	// boardmongo.Store). When set, a board-mode slash-command materialises a
+	// tracked kanban card on that tenant's board (in addition to launching the
+	// run). nil in self-hosted/local mode — board-mode then just launches.
+	CloudBoardFor func(tenantID string) native.BoardStore
+
+	// ScheduledBots, when set (cloud mode), backs the recurring-bot scheduler:
+	// Serve starts a cloudsched.Ticker that fires each due schedule exactly
+	// once (CAS, multi-replica-safe) via the run publisher. nil disables it.
+	ScheduledBots cloudsched.Store
 
 	// Bots configures the /api/v1/bots endpoints used by the studio
 	// Board ticket form's bot picker. Empty Paths falls back to the
@@ -584,6 +596,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 			Sealer:       s.sealer,
 			Bots:         s.forgeBotForge,
 			Invocations:  s.forgeBotInvocations,
+			Schedules:    cfg.ScheduledBots,
 			AdminFor:     s.forgeAdminFor,
 			PublicURL:    cfg.PublicURL,
 		}
@@ -782,6 +795,23 @@ func (s *Server) ListenAndServe() error {
 				cancel()
 			}()
 			s.runQueueSweeper(ctx, lister, s.queue)
+		}()
+	}
+	// Cloud scheduler: fire due cron-scheduled bots. Multi-replica-safe via the
+	// store CAS (no leader election). Absent in local mode (ScheduledBots nil).
+	if s.cfg.ScheduledBots != nil {
+		go func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go func() {
+				<-s.shutdown
+				cancel()
+			}()
+			(&cloudsched.Ticker{
+				Store:  s.cfg.ScheduledBots,
+				Launch: s.launchScheduledBot,
+				Logger: s.logger,
+			}).Run(ctx)
 		}()
 	}
 	// Truthful URL in the log: if the operator chose a non-loopback bind we

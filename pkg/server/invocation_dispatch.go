@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/SocialGouv/iterion/pkg/botregistry"
 	"github.com/SocialGouv/iterion/pkg/bundle"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
 	"github.com/SocialGouv/iterion/pkg/webhooks"
 )
 
@@ -65,21 +67,77 @@ func (s *Server) cmdDiscovery() webhooks.CommandDiscovery { return commandDiscov
 // resolved command route + composed vars. It launches by execution mode:
 //
 //	direct → launch the run immediately (the Revi path).
-//	board  → in P1 this still launches directly; full board-issue
-//	         materialisation + dispatcher pickup (self-hosted) and the cloud
-//	         board land in P2. The bot still runs and receives its args; only
-//	         the kanban tracking is deferred. A debug log records the deferral.
+//	board  → when a cloud board is wired (CloudBoardFor), materialise a
+//	         tracked kanban card on the tenant's board (idempotent per comment)
+//	         AND launch the run, so the operator gets a visible card linking
+//	         the command to its work. Auto-dispatch of the card by a cloud
+//	         dispatcher (retry/stall/human-gates) is the remaining enhancement;
+//	         until then the card is a tracking record + the run executes via
+//	         the normal queue. Without a cloud board (self-hosted/local) it
+//	         simply launches.
 //
-// Keeping the switch here means a comment handler is mode-agnostic and the P2
-// board work is a single localised change.
+// Keeping the switch here means a comment handler is mode-agnostic.
 func (s *Server) dispatchInvocation(
 	ctx context.Context, w http.ResponseWriter, r *http.Request,
 	cfg webhooks.Config, meta webhookEventMeta, idemKey string,
 	route webhooks.CommandRoute, vars map[string]string,
 	repoURL, repoRef, payloadHash, srcIP string,
 ) {
-	if route.Mode == string(bundle.ExecutionBoard) && s.logger != nil {
-		s.logger.Debug("webhooks: %s board-mode command → direct launch (board tracking lands in P2) bot=%s", cfg.Provider, route.BotID)
+	if route.Mode == string(bundle.ExecutionBoard) && s.cfg.CloudBoardFor != nil {
+		s.ensureBoardCard(ctx, cfg, route, vars, meta)
 	}
 	s.insertAndLaunchWebhook(ctx, w, r, cfg, meta, idemKey, route.BotID, vars, repoURL, repoRef, payloadHash, srcIP)
+}
+
+// ensureBoardCard materialises a tracking kanban card for a board-mode
+// command on the tenant's cloud board, idempotently: a card carrying the
+// per-comment label is created at most once, so a webhook retry doesn't
+// duplicate it. Best-effort — a board error never fails the command (the run
+// still launches). The card is assigned to the bot (Assignee + Bot) and
+// carries the command args as bot_args.
+func (s *Server) ensureBoardCard(ctx context.Context, cfg webhooks.Config, route webhooks.CommandRoute, vars map[string]string, meta webhookEventMeta) {
+	store := s.cfg.CloudBoardFor(cfg.TenantID)
+	if store == nil {
+		return
+	}
+	label := "cmd:" + meta.SubjectID
+	if existing, err := store.List(native.ListFilter{Labels: []string{label}}); err == nil && len(existing) > 0 {
+		return // already materialised for this comment
+	}
+	title := route.BotID
+	if sn := strings.TrimSpace(vars["scope_notes"]); sn != "" {
+		title = route.BotID + " — " + firstLine(sn)
+	}
+	botArgs := map[string]string{}
+	if route.ArgsVar != "" {
+		if v, ok := vars[route.ArgsVar]; ok && v != "" {
+			botArgs[route.ArgsVar] = v
+		}
+	}
+	body := fmt.Sprintf("Triggered by a /%s-style command on %s/%s.\n\n%s",
+		route.BotID, meta.ProjectPath, meta.SubjectID, strings.TrimSpace(vars["scope_notes"]))
+	if _, err := store.Create(native.Issue{
+		Title:    truncate(title, 120),
+		Body:     body,
+		Assignee: route.BotID,
+		Bot:      route.BotID,
+		Labels:   []string{label, "source:command", "provider:" + string(cfg.Provider)},
+		BotArgs:  botArgs,
+	}); err != nil && s.logger != nil {
+		s.logger.Warn("webhooks: board card create failed (tenant=%s bot=%s): %v", cfg.TenantID, route.BotID, err)
+	}
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/SocialGouv/iterion/pkg/bundle"
+	"github.com/SocialGouv/iterion/pkg/cloudsched"
 	"github.com/SocialGouv/iterion/pkg/secrets"
 	"github.com/SocialGouv/iterion/pkg/webhooks"
 )
@@ -44,6 +45,11 @@ type Orchestrator struct {
 	// GitLab /revi special-case still works; other commands just aren't
 	// provisioned). Wired to botregistry by the server; closures in tests.
 	Invocations BotInvocationsLookup
+
+	// Schedules, when set (cloud mode), persists a ScheduledBot row per
+	// schedule invocation of the enabled bots so the cloud scheduler fires
+	// them. nil = no scheduling (self-hosted uses `iterion schedule`).
+	Schedules cloudsched.Store
 	// AdminFor builds the outbound client for a connection (opens its sealed
 	// token). Injected so the orchestrator stays provider-agnostic and
 	// testable with a fake admin.
@@ -318,6 +324,11 @@ func (o *Orchestrator) Provision(ctx context.Context, req ProvisionRequest) (Pro
 		}
 	}
 
+	// Materialise cloud schedules for the enabled bots' schedule invocations.
+	if err := o.syncSchedules(ctx, req.TenantID, ri.ID, invByBot, req.ActorID); err != nil {
+		return ProvisionResult{}, err
+	}
+
 	return ProvisionResult{
 		IntegrationID:   ri.ID,
 		WebhookID:       webhookID,
@@ -432,7 +443,64 @@ func (o *Orchestrator) Deprovision(ctx context.Context, tenantID, integrationID 
 			return fmt.Errorf("forge: delete webhook config: %w", derr)
 		}
 	}
+	if o.Schedules != nil {
+		if err := o.Schedules.DeleteByIntegration(ctx, ri.TenantID, ri.ID); err != nil {
+			return fmt.Errorf("forge: delete schedules: %w", err)
+		}
+	}
 	return o.Integrations.Delete(ctx, ri.ID)
+}
+
+// syncSchedules replaces the integration's ScheduledBot rows with one per
+// schedule invocation (with a suggested cron) of the enabled bots, so the
+// cloud scheduler fires them. Clean-slate (delete-then-create) keeps it
+// idempotent across re-provisions. No-op when no schedule store is wired.
+func (o *Orchestrator) syncSchedules(ctx context.Context, tenantID, integrationID string, invByBot map[string][]bundle.Invocation, actor string) error {
+	if o.Schedules == nil {
+		return nil
+	}
+	if err := o.Schedules.DeleteByIntegration(ctx, tenantID, integrationID); err != nil {
+		return fmt.Errorf("forge: clear schedules: %w", err)
+	}
+	now := o.clock()
+	for _, bot := range dedupSorted(keysOfInvByBot(invByBot)) {
+		for _, inv := range invByBot[bot] {
+			if inv.Kind != bundle.InvocationKindSchedule || inv.Schedule == nil {
+				continue
+			}
+			cron := strings.TrimSpace(inv.Schedule.SuggestedCron)
+			if cron == "" {
+				continue // a schedule invocation with no cron can't fire
+			}
+			next, err := cloudsched.NextFire(cron, now)
+			if err != nil {
+				return fmt.Errorf("forge: schedule for %q: %w", bot, err)
+			}
+			if err := o.Schedules.Create(ctx, cloudsched.ScheduledBot{
+				ID:                o.id(),
+				TenantID:          tenantID,
+				RepoIntegrationID: integrationID,
+				BotID:             bot,
+				Cron:              cron,
+				Vars:              inv.Schedule.DefaultVars,
+				NextFireAt:        next,
+				CreatedBy:         actor,
+				CreatedAt:         now,
+				UpdatedAt:         now,
+			}); err != nil {
+				return fmt.Errorf("forge: create schedule for %q: %w", bot, err)
+			}
+		}
+	}
+	return nil
+}
+
+func keysOfInvByBot(m map[string][]bundle.Invocation) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 // DeprovisionConnection tears down every integration for a connection, then

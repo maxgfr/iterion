@@ -3,8 +3,10 @@ package forge
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/SocialGouv/iterion/pkg/bundle"
+	"github.com/SocialGouv/iterion/pkg/cloudsched"
 )
 
 func invLookup(m map[string][]bundle.Invocation) BotInvocationsLookup {
@@ -116,5 +118,48 @@ func TestProvision_CommandOnlyBot(t *testing.T) {
 	routes := cfg.CommandMap["featurly"]
 	if len(routes) != 1 || routes[0].BotID != "no-forge-bot" || routes[0].Mode != "board" || routes[0].ArgsVar != "feature_prompt" {
 		t.Errorf("command map for /featurly: %+v", cfg.CommandMap)
+	}
+}
+
+// TestSyncSchedules_CreatesAndIsIdempotent: schedule invocations with a cron
+// become ScheduledBot rows; a re-sync replaces (not duplicates) them; a
+// schedule with no cron + non-schedule invocations are ignored.
+func TestSyncSchedules_CreatesAndIsIdempotent(t *testing.T) {
+	mem := cloudsched.NewMemoryStore()
+	var idc int
+	o := &Orchestrator{
+		Schedules: mem,
+		Now:       func() time.Time { return time.Unix(1700000000, 0).UTC() },
+		NewID:     func() string { idc++; return "sched-" + string(rune('a'+idc)) },
+	}
+	invByBot := map[string][]bundle.Invocation{
+		"sec-audit-source": {
+			{Kind: bundle.InvocationKindCommand, Command: &bundle.InvocationCommand{Name: "seki"}},
+			{Kind: bundle.InvocationKindSchedule, Schedule: &bundle.InvocationSchedule{SuggestedCron: "0 2 * * 1"}},
+			{Kind: bundle.InvocationKindBoard},
+		},
+		"feature-dev": {
+			{Kind: bundle.InvocationKindSchedule, Schedule: &bundle.InvocationSchedule{}}, // no cron → skipped
+		},
+	}
+	ctx := context.Background()
+	if err := o.syncSchedules(ctx, "t1", "ri-1", invByBot, "u1"); err != nil {
+		t.Fatalf("syncSchedules: %v", err)
+	}
+	rows, _ := mem.ListByIntegration(ctx, "t1", "ri-1")
+	if len(rows) != 1 {
+		t.Fatalf("want exactly 1 schedule row (only the cron'd one), got %d: %+v", len(rows), rows)
+	}
+	if rows[0].BotID != "sec-audit-source" || rows[0].Cron != "0 2 * * 1" || rows[0].NextFireAt.IsZero() {
+		t.Errorf("schedule row: %+v", rows[0])
+	}
+
+	// Re-sync replaces, doesn't duplicate.
+	if err := o.syncSchedules(ctx, "t1", "ri-1", invByBot, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	rows2, _ := mem.ListByIntegration(ctx, "t1", "ri-1")
+	if len(rows2) != 1 {
+		t.Errorf("re-sync must not duplicate, got %d", len(rows2))
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
 	"github.com/SocialGouv/iterion/pkg/webhooks"
 	"github.com/SocialGouv/iterion/pkg/webhooks/gitlab"
 	"github.com/SocialGouv/iterion/pkg/webhooks/prforge"
@@ -169,5 +170,52 @@ func TestGitHubIssueComment_PlainCommentFiltered(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("plain comment must not launch, calls=%d", calls)
+	}
+}
+
+// TestGitLabNoteHook_BoardModeCreatesCard: a board-mode command on a cloud
+// board materialises exactly one tracked card (idempotent across retries),
+// assigned to the bot with the args in bot_args, and still launches the run.
+func TestGitLabNoteHook_BoardModeCreatesCard(t *testing.T) {
+	s := newWebhookTestServer(t)
+	boardStore, err := native.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.CloudBoardFor = func(string) native.BoardStore { return boardStore }
+	s.webhookCommandGate = func(context.Context, webhooks.Config, gitlab.ParsedNote, webhooks.CommandRoute) (bool, string, error) {
+		return true, "authorized", nil
+	}
+	var launches int
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
+		launches++
+		return "run-board-1", nil
+	}
+
+	s.handleGitLabWebhook(httptest.NewRecorder(), glNoteReq(gitlabCtx(featurlyConfig()), glNoteFeaturly))
+
+	cards, err := boardStore.List(native.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cards) != 1 {
+		t.Fatalf("want exactly 1 board card, got %d", len(cards))
+	}
+	c := cards[0]
+	if c.Bot != "feature-dev" || c.Assignee != "feature-dev" {
+		t.Errorf("card should be assigned to the bot: %+v", c)
+	}
+	if c.BotArgs["feature_prompt"] != "add an export endpoint" {
+		t.Errorf("card bot_args should carry the command args: %+v", c.BotArgs)
+	}
+	if launches != 1 {
+		t.Errorf("the run should still launch, launches=%d", launches)
+	}
+
+	// Retry the same comment → no duplicate card (idempotent on the comment id).
+	s.handleGitLabWebhook(httptest.NewRecorder(), glNoteReq(gitlabCtx(featurlyConfig()), glNoteFeaturly))
+	cards2, _ := boardStore.List(native.ListFilter{})
+	if len(cards2) != 1 {
+		t.Errorf("retry must not duplicate the card, got %d", len(cards2))
 	}
 }
