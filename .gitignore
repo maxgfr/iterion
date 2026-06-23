@@ -68,6 +68,7 @@ node_modules
 .pnpm-store
 .falcon/
 .env
+.env.*-bak
 studio/dist/
 studio/node_modules/
 # This is a pnpm workspace (see pnpm-workspace.yaml). Lockfiles from
