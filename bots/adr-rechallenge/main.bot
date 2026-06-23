@@ -392,7 +392,7 @@ prompt addendum_user:
 ## an inline-code list, or a comma-separated path list; the parser
 ## accepts all three by extracting any `path/like/this` tokens.
 tool load_adr:
-  command: `WS={{input.workspace_dir}} ADR_PATH={{input.adr_path}} python3 -c "
+  command: `WS={{vars.workspace_dir}} ADR_PATH={{vars.adr_path}} python3 -c "
 import os, sys, json, re
 ws = os.environ['WS']
 adr_path = os.environ['ADR_PATH']
