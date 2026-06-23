@@ -27,24 +27,32 @@ that catch a real regression, NOT coverage %.
   reviewer_claude approved; reviewer_gpt found a blocker → `fix_gpt` → **FAILED**.
 - **`tail()` fix validated LIVE**: `streak_check` evaluated the capped accumulator
   twice with NO "unknown function" error — the engine resolves `tail()` correctly.
-- **NEW engine finding (distinct from the scanned_areas cap)**: `fix_gpt` (claw
-  `openai/gpt-5.5`, `session: inherit` from reviewer_gpt + Run C's multi-file diff)
-  hit `context_length_exceeded` on its FIRST call — the inherited reviewer session
-  (git-diff + file-read tool outputs across 3 packages) overflows gpt-5.5-forfait's
-  window. generation.go's reactive force-compaction then retried and emitted
-  `API error 400 {"detail":"Unsupported content type"}` — the compaction/session-resume
-  path produced a request the forfait endpoint rejects. This is a claw/generation.go +
-  gpt-5.5-forfait issue affecting ALL gpt loop bots (feature-dev, whole-improve-loop,
-  branch-improve-loop, …), NOT specific to test-coverage. Runs 2/A/B converged because
-  single-package diffs kept the gpt session under the window; Run C's 3-package
-  scope-auto diff crossed it. No clean bot-level mitigation (session:inherit is the
-  proven cache/context pattern; the diff size is inherent). Fix needs a focused
-  generation.go investigation (why the compacted retry → 400) + likely a
-  forfait-window-aware session/tool-output cap — deferred for an explicit decision.
-- Lessons: scope-auto can pick a multi-package scope whose review/fix gpt session
-  exceeds gpt-5.5-forfait's window; the bot is correct, the engine's gpt-overflow
-  recovery is not yet robust for the fixer's inherited session. Run's 4 auto-picked
-  tests left in the preserved worktree (unfinished — open gpt blocker — not repatriated).
+- **Failure cause (corrected by Run D below — see also the CORRECTION):** `fix_gpt`
+  (claw `openai/gpt-5.5`, `session: inherit` + a multi-package diff) hit a genuine
+  `context_length_exceeded` overflow on its first call, and the node-retry then hit a
+  `400 {"detail":"Unsupported content type"}` and the retries exhausted → run failed.
+  Run's 4 auto-picked tests left in the preserved worktree (unfinished — not repatriated).
+
+## 2026-06-23 — CORRECTION + scope-auto validated end-to-end (run 019ef60f)
+- Status: **validated** — re-ran the exact scope-auto config; converged cross-family to
+  `done` (commit e3e0817 on its storage branch). The bot's scope-auto path is sound.
+- **CORRECTION of the run 019ef5d3 finding:** the `400 {"detail":"Unsupported content
+  type"}` is a **TRANSIENT chatgpt-forfait endpoint flake, NOT a compaction bug.** In
+  019ef60f it hit `reviewer_gpt` on a `session: fresh` FIRST call (no compaction
+  possible) and the executor's node-retry RECOVERED (2nd attempt approved → streak →
+  commit → done). So run 019ef5d3 only died because the transient 400 coincided with a
+  real `fix_gpt` overflow and the ~2 retries exhausted before a clean attempt.
+- I initially mis-attributed the 400 to aggressive force-compaction orphaning a
+  `function_call_output` and shipped `dropOrphanedToolResults` (commit dadfc49b2) — that
+  was WRONG (it can't even run for a `session: fresh` reviewer) and was **reverted**.
+  LESSON: don't ship a fix to shared LLM-client code on an unreproduced hypothesis;
+  `reviewer_gpt` being `session: fresh` already ruled out compaction. (See
+  [project_claw_gpt5_context_overflow_fix] memory.)
+- Residual (real but minor, NOT fixed): transient forfait 400s could get more retry
+  attempts so they don't coincide-and-exhaust; and `fix_gpt` `session: inherit` overflow
+  on big multi-package diffs (gpt-5.5-forfait small window) — long-term mitigated by
+  explore-mode-style read-on-demand (Willy ADR-045). The bot itself is validated across
+  all 4 paths.
 
 ## 2026-06-23 — type-selection validation: bot-chooses + multi-type (runs 019ef53b + 019ef54d)
 - Status: **validated** — two more clean cross-family convergences exercising the
