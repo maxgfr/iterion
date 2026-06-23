@@ -484,15 +484,17 @@ const maxInlineArgBytes = 100_000
 // argv to avoid ARG_MAX (E2BIG) overflow. Returns the script when so;
 // the empty string otherwise.
 //
-// Conditions: cmd is exactly `["sh","-c", script]`, no stdin is already
-// attached (so we don't clobber a caller-provided reader), and the
-// script exceeds [maxInlineArgBytes]. The shell name is matched on the
-// literal "sh" because that's what every internal caller emits
-// (RunPostCreate, the tool-node executor, the claw bash builtin); any
-// other shell or argv shape falls through to the standard argv path
-// so behavior is byte-for-byte unchanged.
+// Conditions: cmd is exactly `["sh","-c", script]` or `["bash","-c",
+// script]`, no stdin is already attached (so we don't clobber a
+// caller-provided reader), and the script exceeds [maxInlineArgBytes].
+// Both shells are matched because internal callers emit both: the
+// tool-node executor runs recipes via `bash -c`, while RunPostCreate
+// and the claw bash builtin use `sh -c`. Any other shell or argv shape
+// falls through to the standard argv path so behavior is byte-for-byte
+// unchanged. The reroute (see Command) re-uses cmd[0] for the `-s`
+// invocation, so bash recipes keep bash semantics.
 func shouldStreamScriptViaStdin(cmd []string, opts sandbox.ExecOpts) string {
-	if len(cmd) != 3 || cmd[0] != "sh" || cmd[1] != "-c" {
+	if len(cmd) != 3 || (cmd[0] != "sh" && cmd[0] != "bash") || cmd[1] != "-c" {
 		return ""
 	}
 	if opts.Stdin != nil {
@@ -559,10 +561,12 @@ func (r *Run) Command(ctx context.Context, cmd []string, opts sandbox.ExecOpts) 
 	}
 	args = append(args, r.containerID)
 	if stdinScript != "" {
-		// `sh -s` reads the script from stdin instead of taking it as
-		// an argv element. Works identically on dash, bash, busybox sh.
-		// The script never enters the docker argv, sidestepping E2BIG.
-		args = append(args, "sh", "-s")
+		// `<shell> -s` reads the script from stdin instead of taking it
+		// as an argv element. Works identically on dash, bash, busybox
+		// sh. cmd[0] is "sh" or "bash" (guaranteed by
+		// shouldStreamScriptViaStdin), so bash recipes keep bash. The
+		// script never enters the docker argv, sidestepping E2BIG.
+		args = append(args, cmd[0], "-s")
 	} else {
 		args = append(args, cmd...)
 	}
