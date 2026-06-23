@@ -305,6 +305,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		WorkDir:                serverOpts.dir,
 		Store:                  st,
 		CloudBoardFor:          func(tenantID string) native.BoardStore { return boardmongo.New(st.DB(), tenantID) },
+		CloudBoardCoordinator:  boardmongo.NewCoordinator(st.DB()),
 		ScheduledBots:          cloudsched.NewMongoStore(st.DB()),
 		Alerts:                 alertSettings,
 		LaunchPublisher:        pub,

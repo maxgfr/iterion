@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/SocialGouv/iterion/bots"
 	"github.com/SocialGouv/iterion/pkg/audit"
 	"github.com/SocialGouv/iterion/pkg/auth"
@@ -33,6 +35,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/cloud/metrics"
 	"github.com/SocialGouv/iterion/pkg/cloudsched"
 	"github.com/SocialGouv/iterion/pkg/dispatcher"
+	"github.com/SocialGouv/iterion/pkg/dispatcher/boardmongo"
 	"github.com/SocialGouv/iterion/pkg/dispatcher/native"
 	"github.com/SocialGouv/iterion/pkg/dsl/ast"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
@@ -298,6 +301,14 @@ type Config struct {
 	// tracked kanban card on that tenant's board (in addition to launching the
 	// run). nil in self-hosted/local mode — board-mode then just launches.
 	CloudBoardFor func(tenantID string) native.BoardStore
+
+	// CloudBoardCoordinator, when set, activates the cloud board DISPATCHER:
+	// Serve starts a CAS-based loop (no leader election) that claims eligible
+	// cards across all tenants and runs each via the publisher. With it active,
+	// a board-mode command creates the card in the eligible state and does NOT
+	// launch directly (the dispatcher owns execution + state transitions);
+	// without it, board-mode creates a tracking card + launches directly.
+	CloudBoardCoordinator *boardmongo.Coordinator
 
 	// ScheduledBots, when set (cloud mode), backs the recurring-bot scheduler:
 	// Serve starts a cloudsched.Ticker that fires each due schedule exactly
@@ -812,6 +823,20 @@ func (s *Server) ListenAndServe() error {
 				Launch: s.launchScheduledBot,
 				Logger: s.logger,
 			}).Run(ctx)
+		}()
+	}
+	// Cloud board dispatcher: claim + run eligible cards across all tenants.
+	// Multi-replica-safe via the per-card Claim CAS (no leader election).
+	if s.cfg.CloudBoardCoordinator != nil {
+		marker := "board-dispatcher:" + uuid.NewString()
+		go func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go func() {
+				<-s.shutdown
+				cancel()
+			}()
+			newBoardDispatcher(s.cfg.CloudBoardCoordinator, s.processBoardCard, marker, 4, s.logger).run(ctx)
 		}()
 	}
 	// Truthful URL in the log: if the operator chose a non-loopback bind we

@@ -84,7 +84,22 @@ func (s *Server) dispatchInvocation(
 	repoURL, repoRef, payloadHash, srcIP string,
 ) {
 	if route.Mode == string(bundle.ExecutionBoard) && s.cfg.CloudBoardFor != nil {
-		s.ensureBoardCard(ctx, cfg, route, vars, meta)
+		if s.cfg.CloudBoardCoordinator != nil {
+			// Dispatcher active: gate (per-org quota), create the card in the
+			// eligible state, and let the dispatcher own execution + state
+			// transitions — no direct launch (else the card would run twice).
+			if d := s.gateLaunch(ctx); d != nil {
+				s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusLaunchError, payloadHash, srcIP, d.reason)
+				s.writeLaunchDenial(w, r, d)
+				return
+			}
+			s.ensureBoardCard(ctx, cfg, route, vars, meta, native.StateReady)
+			s.markWebhookOutcome(cfg.Provider, webhooks.StatusAccepted)
+			writeJSONStatus(w, http.StatusAccepted, map[string]string{"status": "carded", "bot": route.BotID})
+			return
+		}
+		// No dispatcher: a tracking card (default inbox state) + direct launch.
+		s.ensureBoardCard(ctx, cfg, route, vars, meta, "")
 	}
 	s.insertAndLaunchWebhook(ctx, w, r, cfg, meta, idemKey, route.BotID, vars, repoURL, repoRef, payloadHash, srcIP)
 }
@@ -95,7 +110,7 @@ func (s *Server) dispatchInvocation(
 // duplicate it. Best-effort — a board error never fails the command (the run
 // still launches). The card is assigned to the bot (Assignee + Bot) and
 // carries the command args as bot_args.
-func (s *Server) ensureBoardCard(ctx context.Context, cfg webhooks.Config, route webhooks.CommandRoute, vars map[string]string, meta webhookEventMeta) {
+func (s *Server) ensureBoardCard(ctx context.Context, cfg webhooks.Config, route webhooks.CommandRoute, vars map[string]string, meta webhookEventMeta, initialState string) {
 	store := s.cfg.CloudBoardFor(cfg.TenantID)
 	if store == nil {
 		return
@@ -119,6 +134,7 @@ func (s *Server) ensureBoardCard(ctx context.Context, cfg webhooks.Config, route
 	if _, err := store.Create(native.Issue{
 		Title:    truncate(title, 120),
 		Body:     body,
+		State:    initialState, // "" → the board's first state (inbox)
 		Assignee: route.BotID,
 		Bot:      route.BotID,
 		Labels:   []string{label, "source:command", "provider:" + string(cfg.Provider)},

@@ -197,6 +197,47 @@ func TestMongoStore_Conformance(t *testing.T) {
 	// The Mongo store must also drive the dispatcher as a tracker.Tracker via
 	// the shared native.Adapter (eligible + unclaimed + blocker-free filtering).
 	runTrackerSuite(t, boardmongo.New(db, "tracker-tenant"))
+
+	// The Coordinator's cross-tenant ListEligible must find ready+unclaimed
+	// cards across tenants (verifies the issue.state / issue.claim BSON paths).
+	coord := boardmongo.NewCoordinator(db)
+	for _, tc := range []struct {
+		tenant, title, state string
+		claim                bool
+	}{
+		{"ca", "ready-a", native.StateReady, false},
+		{"cb", "ready-b", native.StateReady, false},
+		{"ca", "parked", native.StateInbox, false}, // not eligible
+		{"cb", "claimed", native.StateReady, true}, // eligible state but claimed
+	} {
+		st := coord.StoreFor(tc.tenant)
+		iss, cerr := st.Create(native.Issue{Title: tc.title, State: tc.state})
+		if cerr != nil {
+			t.Fatalf("coord create %s: %v", tc.title, cerr)
+		}
+		if tc.claim {
+			if cerr := st.Claim(iss.ID, "someone"); cerr != nil {
+				t.Fatalf("claim: %v", cerr)
+			}
+		}
+	}
+	elig, eerr := coord.ListEligible(ctx, []string{native.StateReady}, 50)
+	if eerr != nil {
+		t.Fatalf("ListEligible: %v", eerr)
+	}
+	gotTitles := map[string]string{}
+	for _, c := range elig {
+		gotTitles[c.Issue.Title] = c.Tenant
+	}
+	if gotTitles["ready-a"] != "ca" || gotTitles["ready-b"] != "cb" {
+		t.Errorf("cross-tenant ListEligible should return ready-a + ready-b: %v", gotTitles)
+	}
+	if _, ok := gotTitles["parked"]; ok {
+		t.Error("inbox card must not be eligible")
+	}
+	if _, ok := gotTitles["claimed"]; ok {
+		t.Error("claimed card must not be eligible")
+	}
 }
 
 // runTrackerSuite exercises the tracker.Tracker view (native.Adapter) over a
