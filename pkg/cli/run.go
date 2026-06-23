@@ -401,6 +401,9 @@ func resolveWorkflow(opts RunOptions) (wf *ir.Workflow, hash, filePath, displayN
 		return nil, "", "", "", nil, cleanup, fmt.Errorf("provide a .bot file, .botz bundle, or --recipe")
 	}
 	resolved := ResolveRecipePath(opts.File)
+	if existErr := requireWorkflowPathExists(resolved); existErr != nil {
+		return nil, "", "", "", nil, cleanup, existErr
+	}
 	opened, iterPath, _, c, openErr := openBundleOrFile(resolved)
 	if openErr != nil {
 		return nil, "", "", "", nil, cleanup, openErr

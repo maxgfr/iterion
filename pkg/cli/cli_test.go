@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -167,12 +168,51 @@ func TestValidate_Invalid(t *testing.T) {
 	}
 }
 
-func TestValidate_FileNotFound(t *testing.T) {
-	p, _ := newTestPrinter(cli.OutputHuman)
-	err := cli.RunValidate("/nonexistent/file.bot", p)
+// assertPathNotFoundError checks that err is the clear, actionable
+// "workflow file not found" error: a user-input error (exit code 2)
+// whose message shows the attempted absolute path and the
+// `iterion bots list` hint. Shared by the run / validate / diagram
+// missing-file tests.
+func assertPathNotFoundError(t *testing.T, err error, missingPath string) {
+	t.Helper()
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
+	if !errors.Is(err, cli.ErrUserInput) {
+		t.Errorf("expected ErrUserInput (exit code 2), got: %v", err)
+	}
+	msg := err.Error()
+	abs, absErr := filepath.Abs(missingPath)
+	if absErr != nil {
+		abs = missingPath
+	}
+	if !strings.Contains(msg, abs) {
+		t.Errorf("error should show the absolute path %q, got: %v", abs, msg)
+	}
+	if !strings.Contains(msg, "iterion bots list") {
+		t.Errorf("error should hint `iterion bots list`, got: %v", msg)
+	}
+}
+
+func TestValidate_FileNotFound(t *testing.T) {
+	p, _ := newTestPrinter(cli.OutputHuman)
+	const missing = "/nonexistent/file.bot"
+	err := cli.RunValidate(missing, p)
+	assertPathNotFoundError(t, err, missing)
+}
+
+func TestDiagram_FileNotFound(t *testing.T) {
+	p, _ := newTestPrinter(cli.OutputHuman)
+	const missing = "/nonexistent/file.bot"
+	err := cli.RunDiagram(cli.DiagramOptions{File: missing}, p)
+	assertPathNotFoundError(t, err, missing)
+}
+
+func TestRun_FileNotFound(t *testing.T) {
+	p, _ := newTestPrinter(cli.OutputHuman)
+	const missing = "/nonexistent/file.bot"
+	err := cli.RunRun(context.Background(), cli.RunOptions{File: missing}, p)
+	assertPathNotFoundError(t, err, missing)
 }
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,45 @@
 package cli
 
 import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+
 	"github.com/SocialGouv/iterion/pkg/bundle"
 )
+
+// requireWorkflowPathExists fails early with a clear, actionable error
+// when path (a `.bot` file, `.botz` archive, or bundle directory) does
+// not exist. It MUST be called on the already-resolved path (i.e. after
+// ResolveRecipePath), so embedded catalog-bot names — which resolve to
+// an existing cache file — are never rejected.
+//
+// Only the not-exist case is handled here; any other stat error
+// (permission, etc.) returns nil so the downstream openers surface their
+// own context. Without this, run / validate / diagram all bottom out in
+// a low-level os.Stat / os.ReadFile error that leaks Go internals, shows
+// the relative path the user typed, and offers no guidance. The returned
+// error is wrapped with ErrUserInput (exit code 2) and embeds the hint in
+// its message because the plain fmt.Errorf CLI path has no Hint channel.
+func requireWorkflowPathExists(path string) error {
+	_, err := os.Stat(path)
+	if err == nil || !errors.Is(err, os.ErrNotExist) {
+		// Exists, or a non-not-found stat error the downstream openers
+		// will surface with their own context.
+		return nil
+	}
+	abs, absErr := filepath.Abs(path)
+	if absErr != nil {
+		abs = path
+	}
+	return UserInputError(fmt.Errorf(
+		"workflow file not found: %s\n"+
+			"  - check the path is correct (you passed: %s)\n"+
+			"  - run from the repo root, or pass an absolute path\n"+
+			"  - run `iterion bots list` to see available bots",
+		abs, path))
+}
 
 // openBundleOrFile applies the standard bundle dispatch — detect →
 // open archive or directory — that the CLI's run / resume / sandbox-

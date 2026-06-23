@@ -31,6 +31,9 @@ func RunDiagram(opts DiagramOptions, p *Printer) error {
 	if !workflowfile.IsWorkflowFile(opts.File) {
 		return fmt.Errorf("diagram file %q must end in .bot", opts.File)
 	}
+	if err := requireWorkflowPathExists(opts.File); err != nil {
+		return err
+	}
 
 	wf, err := runview.CompileWorkflow(opts.File)
 	if err != nil {

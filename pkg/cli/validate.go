@@ -37,6 +37,9 @@ type ValidateResult struct {
 // alongside the workflow result.
 func RunValidate(path string, p *Printer) error {
 	path = ResolveRecipePath(path)
+	if err := requireWorkflowPathExists(path); err != nil {
+		return err
+	}
 
 	// Bundle dispatch: detect .botz or directory bundles and unpack before
 	// validating, via the shared helper (same path as run/resume/doctor).
