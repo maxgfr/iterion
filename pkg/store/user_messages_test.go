@@ -96,3 +96,106 @@ func TestLoadQueuedMessagesFailsLoudOnMassCorruption(t *testing.T) {
 		t.Fatalf("ListQueuedMessages on mass corruption = %v; want ErrEventsCorrupted", err)
 	}
 }
+
+// InboxEventFor is the single wire-shape builder shared by all three
+// emission sites, so a mis-mapped or dropped field would desync the
+// studio inbox from the backend. Assert every Data key and the enum→
+// string conversion.
+func TestInboxEventForMapping(t *testing.T) {
+	delivered := time.Date(2026, 6, 23, 12, 0, 0, 0, time.UTC)
+	msg := QueuedUserMessage{
+		ID:          "m1",
+		Text:        "hello",
+		Status:      QueuedMessageStatusDelivered,
+		QueuedAt:    time.Date(2026, 6, 23, 11, 0, 0, 0, time.UTC),
+		DeliveredAt: &delivered,
+	}
+
+	evt := InboxEventFor(EventUserMessageDelivered, "run-inbox-evt", msg)
+
+	if evt.Type != EventUserMessageDelivered {
+		t.Errorf("Type = %q, want %q", evt.Type, EventUserMessageDelivered)
+	}
+	if evt.RunID != "run-inbox-evt" {
+		t.Errorf("RunID = %q, want run-inbox-evt", evt.RunID)
+	}
+	if evt.Data["id"] != "m1" {
+		t.Errorf("Data[id] = %v, want m1", evt.Data["id"])
+	}
+	if evt.Data["text"] != "hello" {
+		t.Errorf("Data[text] = %v, want hello", evt.Data["text"])
+	}
+	// Status must be the string form, not the typed enum value.
+	if evt.Data["status"] != "delivered" {
+		t.Errorf("Data[status] = %v (%T), want string \"delivered\"", evt.Data["status"], evt.Data["status"])
+	}
+	if evt.Data["queued_at"] != msg.QueuedAt {
+		t.Errorf("Data[queued_at] = %v, want %v", evt.Data["queued_at"], msg.QueuedAt)
+	}
+	gotDelivered, ok := evt.Data["delivered_at"].(*time.Time)
+	if !ok || gotDelivered == nil || !gotDelivered.Equal(delivered) {
+		t.Errorf("Data[delivered_at] = %v, want %v", evt.Data["delivered_at"], delivered)
+	}
+	// Unset transition timestamps must still be present as keys so
+	// consumers can distinguish "absent value" from "missing field".
+	if _, present := evt.Data["consumed_at"]; !present {
+		t.Error("Data missing consumed_at key")
+	}
+	if _, present := evt.Data["cancelled_at"]; !present {
+		t.Error("Data missing cancelled_at key")
+	}
+}
+
+// PublishInboxEvent must both persist the event (Seq-stamped by the
+// store) AND fan it out to the live subscriber exactly once.
+func TestPublishInboxEventPersistsAndPublishes(t *testing.T) {
+	s := tmpStore(t)
+	ctx := context.Background()
+	const runID = "run-publish"
+
+	var published []Event
+	publish := func(e Event) { published = append(published, e) }
+
+	msg := QueuedUserMessage{ID: "m1", Text: "hi", Status: QueuedMessageStatusQueued}
+	PublishInboxEvent(ctx, s, publish, EventUserMessageQueued, runID, msg)
+
+	if len(published) != 1 {
+		t.Fatalf("publish called %d times, want 1", len(published))
+	}
+	if published[0].Type != EventUserMessageQueued {
+		t.Errorf("published Type = %q, want %q", published[0].Type, EventUserMessageQueued)
+	}
+	if published[0].Data["id"] != "m1" {
+		t.Errorf("published Data[id] = %v, want m1", published[0].Data["id"])
+	}
+
+	// The event must also be on disk.
+	evts, err := s.LoadEvents(ctx, runID)
+	if err != nil {
+		t.Fatalf("LoadEvents: %v", err)
+	}
+	if len(evts) != 1 {
+		t.Fatalf("persisted %d events, want 1", len(evts))
+	}
+	if evts[0].Type != EventUserMessageQueued || evts[0].Data["id"] != "m1" {
+		t.Errorf("persisted event = %+v, want queued event for m1", evts[0])
+	}
+}
+
+func TestPublishInboxEventNilPublishSafe(t *testing.T) {
+	s := tmpStore(t)
+	ctx := context.Background()
+	const runID = "run-publish-nil"
+
+	msg := QueuedUserMessage{ID: "m2", Text: "yo", Status: QueuedMessageStatusQueued}
+	// Must not panic with a nil publish callback (cloud mode passes nil).
+	PublishInboxEvent(ctx, s, nil, EventUserMessageQueued, runID, msg)
+
+	evts, err := s.LoadEvents(ctx, runID)
+	if err != nil {
+		t.Fatalf("LoadEvents: %v", err)
+	}
+	if len(evts) != 1 {
+		t.Fatalf("persisted %d events, want 1 (event must still be written)", len(evts))
+	}
+}

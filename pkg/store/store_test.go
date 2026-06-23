@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,14 @@ func tmpStore(t *testing.T) *FilesystemRunStore {
 		t.Fatalf("New: %v", err)
 	}
 	return s
+}
+
+// mustCreateRun creates a running run or fails the test.
+func mustCreateRun(t *testing.T, s *FilesystemRunStore, id string) {
+	t.Helper()
+	if _, err := s.CreateRun(context.Background(), id, "wf", nil); err != nil {
+		t.Fatalf("CreateRun(%q): %v", id, err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1346,4 +1355,254 @@ func TestToolBlobRoundtrip(t *testing.T) {
 			t.Fatalf("AsToolBlobStore returned nil for FilesystemRunStore")
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// UpdateRunStatusIf — compare-and-set on status
+// ---------------------------------------------------------------------------
+
+func TestUpdateRunStatusIfMatches(t *testing.T) {
+	s := tmpStore(t)
+	ctx := context.Background()
+	mustCreateRun(t, s, "run-cas")
+
+	changed, err := s.UpdateRunStatusIf(ctx, "run-cas", RunStatusCancelled, "user stop", []RunStatus{RunStatusRunning})
+	if err != nil {
+		t.Fatalf("UpdateRunStatusIf: %v", err)
+	}
+	if !changed {
+		t.Fatalf("changed = false, want true (current status was in expectedFrom)")
+	}
+
+	r, err := s.LoadRun(ctx, "run-cas")
+	if err != nil {
+		t.Fatalf("LoadRun: %v", err)
+	}
+	if r.Status != RunStatusCancelled {
+		t.Errorf("Status = %q, want cancelled", r.Status)
+	}
+	if r.Error != "user stop" {
+		t.Errorf("Error = %q, want %q", r.Error, "user stop")
+	}
+	if r.FinishedAt == nil {
+		t.Error("FinishedAt = nil, want set for a terminal transition")
+	}
+}
+
+// When the live status is not in expectedFrom, the write must be a no-op
+// and changed=false — this is the race guard that prevents a stale
+// transition from clobbering a concurrent one.
+func TestUpdateRunStatusIfNoMatch(t *testing.T) {
+	s := tmpStore(t)
+	ctx := context.Background()
+	mustCreateRun(t, s, "run-cas2")
+
+	changed, err := s.UpdateRunStatusIf(ctx, "run-cas2", RunStatusCancelled, "stop", []RunStatus{RunStatusFinished})
+	if err != nil {
+		t.Fatalf("UpdateRunStatusIf: %v", err)
+	}
+	if changed {
+		t.Fatalf("changed = true, want false (current status running not in {finished})")
+	}
+
+	r, err := s.LoadRun(ctx, "run-cas2")
+	if err != nil {
+		t.Fatalf("LoadRun: %v", err)
+	}
+	if r.Status != RunStatusRunning {
+		t.Errorf("Status = %q, want running (must be untouched)", r.Status)
+	}
+	if r.Error != "" {
+		t.Errorf("Error = %q, want empty (no write should have landed)", r.Error)
+	}
+}
+
+func TestUpdateRunStatusIfMissingRun(t *testing.T) {
+	s := tmpStore(t)
+	_, err := s.UpdateRunStatusIf(context.Background(), "does-not-exist", RunStatusCancelled, "", []RunStatus{RunStatusRunning})
+	if err == nil {
+		t.Fatal("UpdateRunStatusIf on missing run: err = nil, want non-nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SaveCheckpoint / FailRunResumable — checkpoint persistence
+// ---------------------------------------------------------------------------
+
+func TestSaveCheckpointRoundTrip(t *testing.T) {
+	s := tmpStore(t)
+	ctx := context.Background()
+	mustCreateRun(t, s, "run-cp")
+
+	cp := &Checkpoint{
+		NodeID:       "node-a",
+		LoopCounters: map[string]int{"node-a": 2},
+		Vars:         map[string]interface{}{"k": "v"},
+	}
+	if err := s.SaveCheckpoint(ctx, "run-cp", cp); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+
+	r, err := s.LoadRun(ctx, "run-cp")
+	if err != nil {
+		t.Fatalf("LoadRun: %v", err)
+	}
+	if r.Checkpoint == nil {
+		t.Fatal("Checkpoint = nil after SaveCheckpoint, want persisted")
+	}
+	if r.Checkpoint.NodeID != "node-a" {
+		t.Errorf("Checkpoint.NodeID = %q, want node-a", r.Checkpoint.NodeID)
+	}
+	if got := r.Checkpoint.LoopCounters["node-a"]; got != 2 {
+		t.Errorf("Checkpoint.LoopCounters[node-a] = %d, want 2", got)
+	}
+	if got := r.Checkpoint.Vars["k"]; got != "v" {
+		t.Errorf("Checkpoint.Vars[k] = %v, want v", got)
+	}
+}
+
+// failed_resumable must RETAIN the checkpoint (the resume entry point) —
+// distinct from the plain `failed` path which clears it. This is the
+// behaviour that makes a failed run recoverable.
+func TestFailRunResumable(t *testing.T) {
+	s := tmpStore(t)
+	ctx := context.Background()
+	mustCreateRun(t, s, "run-fr")
+
+	cp := &Checkpoint{NodeID: "node-z"}
+	if err := s.FailRunResumable(ctx, "run-fr", cp, "rate limited"); err != nil {
+		t.Fatalf("FailRunResumable: %v", err)
+	}
+
+	r, err := s.LoadRun(ctx, "run-fr")
+	if err != nil {
+		t.Fatalf("LoadRun: %v", err)
+	}
+	if r.Status != RunStatusFailedResumable {
+		t.Errorf("Status = %q, want failed_resumable", r.Status)
+	}
+	if r.Error != "rate limited" {
+		t.Errorf("Error = %q, want %q", r.Error, "rate limited")
+	}
+	if r.Checkpoint == nil || r.Checkpoint.NodeID != "node-z" {
+		t.Errorf("Checkpoint = %+v, want preserved with NodeID node-z", r.Checkpoint)
+	}
+	if r.FinishedAt == nil {
+		t.Error("FinishedAt = nil, want set")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AddWatchedIssues / RemoveWatchedIssues — persisted set arithmetic
+// ---------------------------------------------------------------------------
+
+func TestAddAndRemoveWatchedIssues(t *testing.T) {
+	s := tmpStore(t)
+	ctx := context.Background()
+	mustCreateRun(t, s, "run-watch")
+
+	got, err := s.AddWatchedIssues(ctx, "run-watch", []string{"a", "b"})
+	if err != nil {
+		t.Fatalf("AddWatchedIssues: %v", err)
+	}
+	if !sliceEq(got, []string{"a", "b"}) {
+		t.Errorf("first add returned %v, want [a b]", got)
+	}
+
+	// Overlapping second add: dedup union, existing leads.
+	got, err = s.AddWatchedIssues(ctx, "run-watch", []string{"b", "c"})
+	if err != nil {
+		t.Fatalf("AddWatchedIssues #2: %v", err)
+	}
+	if !sliceEq(got, []string{"a", "b", "c"}) {
+		t.Errorf("second add returned %v, want [a b c]", got)
+	}
+
+	// Persistence: the union survives a reload.
+	r, err := s.LoadRun(ctx, "run-watch")
+	if err != nil {
+		t.Fatalf("LoadRun: %v", err)
+	}
+	if !sliceEq(r.WatchedIssueIDs, []string{"a", "b", "c"}) {
+		t.Errorf("persisted WatchedIssueIDs = %v, want [a b c]", r.WatchedIssueIDs)
+	}
+
+	got, err = s.RemoveWatchedIssues(ctx, "run-watch", []string{"a"})
+	if err != nil {
+		t.Fatalf("RemoveWatchedIssues: %v", err)
+	}
+	if !sliceEq(got, []string{"b", "c"}) {
+		t.Errorf("remove returned %v, want [b c]", got)
+	}
+
+	// Removing the rest empties the set; the field must drop to nil so
+	// it stays omitted from the persisted record.
+	got, err = s.RemoveWatchedIssues(ctx, "run-watch", []string{"b", "c"})
+	if err != nil {
+		t.Fatalf("RemoveWatchedIssues #2: %v", err)
+	}
+	if !sliceEq(got, nil) {
+		t.Errorf("remove-all returned %v, want nil", got)
+	}
+	r, err = s.LoadRun(ctx, "run-watch")
+	if err != nil {
+		t.Fatalf("LoadRun: %v", err)
+	}
+	if !sliceEq(r.WatchedIssueIDs, nil) {
+		t.Errorf("persisted WatchedIssueIDs = %v, want nil after remove-all", r.WatchedIssueIDs)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// LoadEventsRange — half-open [from,to) windowing with a limit cap
+// ---------------------------------------------------------------------------
+
+func TestLoadEventsRangeWindowAndLimit(t *testing.T) {
+	s := tmpStore(t)
+	ctx := context.Background()
+	const runID = "run-range"
+	// AppendEvent assigns Seq 0,1,2,3,4 in order.
+	for i := 0; i < 5; i++ {
+		if _, err := s.AppendEvent(ctx, runID, Event{Type: EventNodeStarted}); err != nil {
+			t.Fatalf("AppendEvent %d: %v", i, err)
+		}
+	}
+
+	seqs := func(evts []*Event) []int64 {
+		out := make([]int64, len(evts))
+		for i, e := range evts {
+			out[i] = e.Seq
+		}
+		return out
+	}
+
+	tests := []struct {
+		name     string
+		from, to int64
+		limit    int
+		want     []int64
+	}{
+		{"half-open upper bound", 1, 3, 0, []int64{1, 2}},
+		{"limit caps the head", 0, 0, 2, []int64{0, 1}},
+		{"from past the end is empty", 10, 0, 0, nil},
+		{"open upper bound from offset", 2, 0, 0, []int64{2, 3, 4}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := s.LoadEventsRange(ctx, runID, tt.from, tt.to, tt.limit)
+			if err != nil {
+				t.Fatalf("LoadEventsRange: %v", err)
+			}
+			got := seqs(out)
+			if tt.want == nil {
+				if len(got) != 0 {
+					t.Errorf("got seqs %v, want empty", got)
+				}
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("got seqs %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
