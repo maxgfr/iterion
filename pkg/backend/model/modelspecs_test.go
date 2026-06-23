@@ -18,6 +18,15 @@ import (
 func TestMain(m *testing.M) {
 	specs.mu.Lock()
 	specs.autoFetch = false
+	// Point the package-global registry's cache at a nonexistent path so
+	// curated-fallback assertions (TestCapabilitiesForModel) are deterministic
+	// regardless of the host's ~/.iterion/model-specs-cache.json. Without this,
+	// merge() lazily loads that real cache (ensureFresh → loadDiskCacheLocked)
+	// and overrides curated with live models.dev values — so the curated-equality
+	// checks flaked on dev machines that had run a real bot (clean CI has no
+	// cache, so it only failed locally).
+	specs.cachePath = filepath.Join(os.TempDir(), "iterion-modelspecs-test-absent.json")
+	specs.diskTried = false
 	specs.mu.Unlock()
 	os.Exit(m.Run())
 }
