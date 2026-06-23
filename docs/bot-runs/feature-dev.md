@@ -4,6 +4,15 @@ Autonomous end-to-end feature development: plan → act → `/simplify` →
 prepare_commit → alternating Claude/GPT review-fix loop → commit, in an isolated
 `worktree: auto`. See [bots/feature-dev/](../../bots/feature-dev/).
 
+## 2026-06-23 — Verified Action recovery ladder, ADR-044 (run 019ef38d)
+- Status: **validated** — converged through the cross-family review loop to `done`; deliverable builds + all new tests green (verified independently in the worktree, anti-façade).
+- Versions: bot feature-dev 0.1.0 · iterion fresh static (campaign HEAD) · `claude_code`/opus · `worktree: auto` · `--merge-into none`.
+- Method: one large `feature_prompt` asking Featurly to implement the **entire** ADR-044 "Verified Action" synthesis (goal+recipe+postcondition+policy quad; idempotent-skip → recipe → self-repair → agent-recovery escalation; postcondition-as-truth; gates stay deterministic) one-shot. Run was cap-interrupted at 08:58 (Anthropic session limit) at `reviewer_claude`, resumed cleanly from checkpoint on a switched account → finished.
+- Result: branch `iterion/run/019ef38d-745b…` @ `79f9111ed`, 1592 insertions / 22 files: DSL (parser/AST/jsonenc/IR + `validate_verified_action.go`/unparse/EBNF), runtime (`executor_verified_action.go` 342L ladder + `executor_tool.go` wiring + engine.go + new event), unit + e2e tests, docs (ADR-044, DSL quickref, CLAUDE.md), and a demo application on `secured-renovacy`'s commit node. `go build ./...` + `go test ./pkg/backend/model ./pkg/dsl/{ir,parser,unparse}` green.
+- Value: HIGH — delivered a whole engine subsystem (the action-node robustness pattern) in a single supervised run, on the operator's explicit directive. NOT yet merged to main (overlaps the 5 hand-fixes to Renovacy's commit node landed the same day; needs review of `executor_verified_action.go` + overlap resolution).
+- Engine hardening: the run itself is the proof-of-need for ADR-044 — see the 5 brittle commit-node failures on `secured-renovacy` the same day ([secured-renovacy.md](secured-renovacy.md)).
+- Lessons for next run: feature-dev handles a large multi-layer engine feature well when the prompt carries the full design + an explicit anti-façade done-criterion + a reference to the ADR; resume-from-checkpoint survived a mid-run provider cap with zero lost work.
+
 ## 2026-06-17 — ADR-028 Steps 2-4 dispatcher I/O offload (runs 019ed4cd, 019ed4eb, 019ed51d)
 - Status: 2 validated+converged (Steps 2, 3) · 1 implemented+validated+manually-repatriated (Step 4 — bot review loop blocked by a runtime stall, not the code)
 - Versions: bot feature-dev 0.1.0 · iterion run-binary fresh static `fe132645` · dispatched via the **dispatcher** (own `iterion dispatch` daemon on the operator's repaired config, `--no-server`, sandbox `iterion-sandbox-full:edge`, `worktree: auto`). Each step: isolated ticket with an anti-façade done-criterion, reviewed + race-verified + repatriated before the next.

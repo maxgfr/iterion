@@ -1,5 +1,16 @@
 # Seki + deepsec — validation
 
+## 2026-06-23 — full clean run on opus, end-to-end (run 019ef389)
+- Status: **validated** — first complete run to `done` (scan → cap → triage → 3 voters → majority → report_card), on first-class opus.
+- Versions: bot sec-audit-source (opus-default fix `40a61ce97`) · iterion fresh static (campaign HEAD, incl. docker E2BIG fix) · `iterion-sandbox-sec:edge` · `remediate=false`.
+- Method: CLI run, resumed twice. Two non-bot interruptions + two real fixes en route:
+  1. cap-interrupted at 08:58 (Anthropic session limit) mid-voter → resumed on switched account.
+  2. `majority_verdict` (tool node) hard-failed with `fork/exec /usr/bin/docker: argument list too long` — the 3 voter verdicts (37 findings × snippets) interpolated as `V1=<huge> V2=<huge> V3=<huge> python3 -c …` overflowed the docker-exec argv. Fixed in the **engine** (route oversized `bash -c` commands via stdin — `faf11a872` + `836e21094`), rebuilt, resumed → passed.
+- Two bot fixes this campaign: triage/voter_v1/voter_v3 **defaulted to glm-5.2-first**, which hit GLM's structured-output reliability gap (missing required field). Re-defaulted to **opus first-class** with the z.ai/glm failover chain now opt-in via `ITERION_SEC_AUDIT_PROVIDER_CHAIN` (`40a61ce97`, per ADR-043). voter_v2 was already opus.
+- Findings: deepsec surfaced a **real SSRF TOCTOU** — `validateRepoTarget` (pkg/runner/loop.go) resolves the repo host via `httpdial.ResolvePublicHost` but **discards the returned IP**; `git clone`/`fetch` then re-resolves the hostname at connect time → DNS-rebinding / 302-to-internal defeats the public-unicast guard. Attacker-controlled RepoURL via webhook/marketplace. **To triage onto the board** (verify it isn't already mitigated before re-surfacing).
+- Engine hardening: the docker E2BIG fix (above) hardens **every** sandboxed tool node with large inter-node input, not just Seki.
+- Lessons for next run: a sandboxed bot that interpolates large LLM outputs into a tool command needs either the engine stdin reroute (now in place) or a minimal-shape projection before the tool node; opus is the reliable default for the strict voter/triage schemas.
+
 ## 2026-06-22 — scans OK (deepsec 37; 2 CRIT/2 HIGH); triage stalled on gpt-5.5 (run 019ef04e-35f3)
 
 - Status: **partial** — scanners ran and produced findings; the `triage` node **stalled** on sandboxed gpt-5.5 (cancelled after ~18 min / engine stall-alert) so auto-triage + board-emit did not complete.
