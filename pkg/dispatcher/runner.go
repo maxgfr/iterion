@@ -2,7 +2,6 @@ package dispatcher
 
 import (
 	"context"
-	"errors"
 
 	"github.com/SocialGouv/iterion/pkg/runtime"
 )
@@ -81,10 +80,6 @@ type ManagedRunner interface {
 	Runner
 	Close() error
 }
-
-// ErrRunnerNotConfigured is returned by the stub runner used in tests
-// or until a real Runner is wired.
-var ErrRunnerNotConfigured = errors.New("dispatcher: runner not configured")
 
 // StubRunner is a no-op Runner used by unit tests and bootstrap paths
 // that don't actually want to execute a workflow. It records every

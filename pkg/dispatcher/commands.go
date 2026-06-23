@@ -690,25 +690,32 @@ func (c *Dispatcher) maybeTransitionToCompleted(ctx context.Context, issueID, id
 	c.logger.Info("dispatcher: %s moved %s → %s (workflow didn't change state, default auto-transition)", identifier, runningTarget, completed)
 }
 
+// probeRunJSON reads <storeDir>/runs/<runID>/run.json and decodes it into
+// dst (a pointer to a struct selecting the fields of interest by json tag).
+// Returns false when storeDir/runID is unset, the file is missing, or the
+// JSON can't be decoded — every call site treats a false/zero result as
+// "fall back to the safe default". On failure dst is left untouched, so a
+// caller can ignore the bool and read dst's zero value.
+func (c *Dispatcher) probeRunJSON(runID string, dst any) bool {
+	if c.storeDir == "" || runID == "" {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(c.storeDir, "runs", runID, "run.json"))
+	if err != nil {
+		return false
+	}
+	return json.Unmarshal(data, dst) == nil
+}
+
 // resolveRunWorkdir reads the run's persisted WorkDir from
 // <storeDir>/runs/<runID>/run.json. Returns "" when storeDir is
 // unset, the file is missing, or the JSON can't be decoded — every
 // call site treats "" as "fall back to the dispatcher workspace".
 func (c *Dispatcher) resolveRunWorkdir(runID string) string {
-	if c.storeDir == "" || runID == "" {
-		return ""
-	}
-	path := filepath.Join(c.storeDir, "runs", runID, "run.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
 	var probe struct {
 		WorkDir string `json:"work_dir"`
 	}
-	if err := json.Unmarshal(data, &probe); err != nil {
-		return ""
-	}
+	c.probeRunJSON(runID, &probe)
 	return probe.WorkDir
 }
 
@@ -718,20 +725,10 @@ func (c *Dispatcher) resolveRunWorkdir(runID string) string {
 // no commit (worktree HEAD unchanged, or work left uncommitted). Callers
 // treat "" as "this run produced nothing directly mergeable".
 func (c *Dispatcher) runFinalCommit(runID string) string {
-	if c.storeDir == "" || runID == "" {
-		return ""
-	}
-	path := filepath.Join(c.storeDir, "runs", runID, "run.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
 	var probe struct {
 		FinalCommit string `json:"final_commit"`
 	}
-	if err := json.Unmarshal(data, &probe); err != nil {
-		return ""
-	}
+	c.probeRunJSON(runID, &probe)
 	return probe.FinalCommit
 }
 

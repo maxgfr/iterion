@@ -188,9 +188,6 @@ func isSandboxSetupError(err error) bool {
 	if strings.Contains(msg, "post_create") {
 		return true
 	}
-	if strings.Contains(msg, "docker: postcreate") {
-		return true
-	}
 	if strings.Contains(msg, "image pull") {
 		return true
 	}

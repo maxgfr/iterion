@@ -87,69 +87,6 @@ func IssueSession(ctx context.Context, store SessionStore, userID, userAgent, ip
 	return rawTok, sess, nil
 }
 
-// RotateSession atomically validates an incoming refresh token,
-// revokes the previous session, and issues a new one. Returns the
-// new plaintext refresh token + the new Session.
-//
-// Validation failures map to ErrSessionNotFound (token unknown),
-// ErrSessionRevoked (already used / explicitly revoked), or
-// ErrSessionExpired (past TTL).
-func RotateSession(ctx context.Context, store SessionStore, presentedToken, userAgent, ip string, ttl time.Duration) (newToken string, newSess Session, prev Session, err error) {
-	hash := HashRefreshToken(presentedToken)
-	prev, err = store.GetSessionByTokenHash(ctx, hash)
-	if err != nil {
-		return "", Session{}, Session{}, err
-	}
-	now := time.Now().UTC()
-	if prev.RevokedAt != nil {
-		return "", Session{}, prev, ErrSessionRevoked
-	}
-	if !prev.ExpiresAt.IsZero() && now.After(prev.ExpiresAt) {
-		return "", Session{}, prev, ErrSessionExpired
-	}
-	// CAS-revoke: prevent two parallel RotateSession calls from both
-	// passing the "not yet revoked" check above and both proceeding to
-	// mint a new refresh token. Mirrors auth.Service.Refresh which is
-	// the canonical pattern.
-	revoked, err := store.RevokeSessionIfNotRevoked(ctx, prev.ID, now)
-	if err != nil {
-		return "", Session{}, prev, fmt.Errorf("auth: revoke previous: %w", err)
-	}
-	if !revoked {
-		// A concurrent rotation already consumed this token. Treat as
-		// reuse: revoke every session of the user and surface the
-		// stronger error so callers force a clean re-login. Failing to
-		// revoke the siblings is a security event (a possibly-stolen
-		// token's siblings stay live), so join that error onto
-		// ErrSessionRevoked rather than dropping it — callers still map
-		// to a 401 via errors.Is, but the cleanup failure is no longer
-		// invisible.
-		out := ErrSessionRevoked
-		if rerr := store.RevokeUserSessions(ctx, prev.UserID, now); rerr != nil {
-			out = errors.Join(out, fmt.Errorf("auth: revoke sibling sessions after token reuse: %w", rerr))
-		}
-		return "", Session{}, prev, out
-	}
-	rawTok, _, err := GenerateRandomToken(48)
-	if err != nil {
-		return "", Session{}, prev, fmt.Errorf("auth: gen refresh: %w", err)
-	}
-	newSess = Session{
-		ID:            uuid.NewString(),
-		UserID:        prev.UserID,
-		TokenHash:     HashRefreshToken(rawTok),
-		UserAgent:     userAgent,
-		IP:            ip,
-		IssuedAt:      now,
-		ExpiresAt:     now.Add(ttl),
-		RotatedFromID: prev.ID,
-	}
-	if err := store.CreateSession(ctx, newSess); err != nil {
-		return "", Session{}, prev, fmt.Errorf("auth: create session: %w", err)
-	}
-	return rawTok, newSess, prev, nil
-}
-
 // MemorySessionStore is the in-memory SessionStore for tests.
 type MemorySessionStore struct {
 	mu       sync.Mutex

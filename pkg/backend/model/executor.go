@@ -608,19 +608,6 @@ func (e *ClawExecutor) SetRepoRoot(dir string) {
 	e.repoRoot = dir
 }
 
-// resolveBackendName returns the effective backend name for a node.
-//
-// Resolution chain (first non-empty wins):
-//  1. node.Backend (set on AgentNode/JudgeNode/RouterNode); supports
-//     ${VAR}/${VAR:-default} env-var expansion so workflows can pick
-//     a backend per environment (e.g. `backend: "${RESCUE_BACKEND:-claude_code}"`).
-//  2. workflow-level default (e.defaultBackend, from `default_backend:` or
-//     IR Preferences.BackendOrder[0])
-//  3. ITERION_DEFAULT_BACKEND env var (legacy explicit override)
-//  4. detect.Resolve over ITERION_BACKEND_PREFERENCE (auto-selection based
-//     on credentials present on the host)
-//  5. delegate.BackendClaw (hardcoded last-resort fallback)
-//
 // clawToolHint extracts a short human-readable hint from a tool's
 // raw JSON input for the per-tool-call log line. Defensive against
 // arbitrary tool schemas — returns "" when nothing fits.
@@ -733,6 +720,19 @@ func (e *ClawExecutor) delegateHooksFor(nodeID string, backendName string, itera
 	return h
 }
 
+// resolveBackendName returns the effective backend name for a node.
+//
+// Resolution chain (first non-empty wins):
+//  1. node.Backend (set on AgentNode/JudgeNode/RouterNode); supports
+//     ${VAR}/${VAR:-default} env-var expansion so workflows can pick
+//     a backend per environment (e.g. `backend: "${RESCUE_BACKEND:-claude_code}"`).
+//  2. workflow-level default (e.defaultBackend, from `default_backend:` or
+//     IR Preferences.BackendOrder[0])
+//  3. ITERION_DEFAULT_BACKEND env var (legacy explicit override)
+//  4. detect.Resolve over ITERION_BACKEND_PREFERENCE (auto-selection based
+//     on credentials present on the host)
+//  5. delegate.BackendClaw (hardcoded last-resort fallback)
+//
 // Step 4 is what makes the studio's empty default template "just work" when
 // the user has any credential configured.
 func (e *ClawExecutor) resolveBackendName(node ir.Node) string {

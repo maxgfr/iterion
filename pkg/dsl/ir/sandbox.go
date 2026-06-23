@@ -85,22 +85,3 @@ func (s *SandboxSpec) IsActive() bool {
 	}
 	return false
 }
-
-// FromIdent builds a SandboxSpec from the simple `sandbox: <ident>`
-// DSL form. Returns (nil, false) when the identifier is empty (the
-// user did not declare a sandbox block at this scope) and (nil, true)
-// for "" → no spec but also no error. An unrecognised identifier is
-// reported via the boolean — callers turn it into a parse error or a
-// validation diagnostic.
-//
-// Phase 0 accepts only "none" and "auto"; "inline" requires a block
-// body which the Phase 0 parser does not yet emit.
-func FromIdent(ident string) (*SandboxSpec, bool) {
-	switch ident {
-	case "":
-		return nil, true
-	case "none", "auto":
-		return &SandboxSpec{Mode: ident}, true
-	}
-	return nil, false
-}

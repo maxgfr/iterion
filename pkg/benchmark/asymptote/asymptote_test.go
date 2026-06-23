@@ -97,7 +97,6 @@ func judgeData(v interface{}) map[string]interface{} {
 	case string:
 		return map[string]interface{}{"output": map[string]interface{}{"approved": t}}
 	default:
-		_ = t
 		return map[string]interface{}{"output": map[string]interface{}{}}
 	}
 }

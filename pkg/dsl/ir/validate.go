@@ -1079,7 +1079,7 @@ func ResolveEffortLiteral(s string) string {
 	if !IsEnvSubstitutedEffort(s) {
 		return s
 	}
-	expanded := expandEnvWithDefault(s)
+	expanded := ExpandEnvWithDefault(s)
 	if ValidReasoningEfforts[expanded] {
 		return expanded
 	}
@@ -1164,10 +1164,6 @@ func ExpandEnvWithDefault(s string) string {
 func isAlnum(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
-
-// expandEnvWithDefault is the unexported alias kept for in-package
-// callers; all of them already pass through ExpandEnvWithDefault.
-func expandEnvWithDefault(s string) string { return ExpandEnvWithDefault(s) }
 
 func (c *compiler) validateReasoningEffort(w *Workflow) {
 	for _, node := range w.Nodes {

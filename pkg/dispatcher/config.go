@@ -343,34 +343,18 @@ func (c *Config) applyDefaults() {
 	if c.Agent.MaxRetryBackoffMS == 0 {
 		c.Agent.MaxRetryBackoffMS = DefaultMaxRetryBackoffMS
 	}
-	// RunningState: absent in YAML/JSON → default to in_progress so
-	// the kanban moves claimed issues out of the ready column without
-	// any explicit operator config. To disable the transition (escape
-	// hatch for boards without an in-flight column), set
-	// `running_state: none` — Validate maps "none" back to "" so the
-	// rest of the dispatcher reads the disable as the zero value.
-	if c.Agent.RunningState == "" {
-		c.Agent.RunningState = DefaultRunningState
-	} else if c.Agent.RunningState == "none" {
-		c.Agent.RunningState = ""
-	}
-	// CompletedState mirrors the RunningState convention: empty in
-	// YAML means "use the default ("review")"; "none" is the explicit
-	// opt-out that disables the post-success auto-transition.
-	if c.Agent.CompletedState == "" {
-		c.Agent.CompletedState = DefaultCompletedState
-	} else if c.Agent.CompletedState == "none" {
-		c.Agent.CompletedState = ""
-	}
-	// MergedState mirrors the same convention: empty → default ("done")
-	// so a studio-merged dispatcher run auto-closes its ticket; "none"
-	// is the explicit opt-out for operators who want to close merged
-	// issues by hand.
-	if c.Agent.MergedState == "" {
-		c.Agent.MergedState = DefaultMergedState
-	} else if c.Agent.MergedState == "none" {
-		c.Agent.MergedState = ""
-	}
+	// RunningState/CompletedState/MergedState/FailedState share one
+	// convention via defaultOrNone: empty in YAML/JSON → the field's
+	// default; the literal "none" → "" (the explicit opt-out the rest of
+	// the dispatcher reads as the disabled zero value).
+	//   - RunningState   → in_progress: moves claimed issues out of "ready".
+	//   - CompletedState → review:      post-success auto-transition target.
+	//   - MergedState    → done:        studio-merged run auto-closes its ticket.
+	//   - FailedState    → blocked:     give-up target once retries exhaust.
+	c.Agent.RunningState = defaultOrNone(c.Agent.RunningState, DefaultRunningState)
+	c.Agent.CompletedState = defaultOrNone(c.Agent.CompletedState, DefaultCompletedState)
+	c.Agent.MergedState = defaultOrNone(c.Agent.MergedState, DefaultMergedState)
+	c.Agent.FailedState = defaultOrNone(c.Agent.FailedState, DefaultFailedState)
 	// MaxAttempts: 0 (unset) → finite default so retries can't run forever;
 	// a negative value is the explicit "retry indefinitely" escape hatch,
 	// mapped to 0 which the exhausted() give-up gate reads as "no cap".
@@ -378,13 +362,6 @@ func (c *Config) applyDefaults() {
 		c.Agent.MaxAttempts = DefaultMaxAttempts
 	} else if c.Agent.MaxAttempts < 0 {
 		c.Agent.MaxAttempts = 0
-	}
-	// FailedState mirrors the RunningState/CompletedState convention:
-	// empty → default ("blocked"); "none" is the explicit opt-out.
-	if c.Agent.FailedState == "" {
-		c.Agent.FailedState = DefaultFailedState
-	} else if c.Agent.FailedState == "none" {
-		c.Agent.FailedState = ""
 	}
 	if c.Stall.TimeoutMS == 0 {
 		c.Stall.TimeoutMS = DefaultStallTimeoutMS
@@ -394,6 +371,21 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Tracker.Kind == TrackerKindForgejo && c.Tracker.Forgejo != nil && c.Tracker.Forgejo.ClaimedLabel == "" {
 		c.Tracker.Forgejo.ClaimedLabel = DefaultForgejoClaimedLabel
+	}
+}
+
+// defaultOrNone applies the shared kanban-state convention used by
+// RunningState/CompletedState/MergedState/FailedState: an empty value
+// takes def; the literal "none" is the explicit opt-out mapped to ""
+// (the disabled zero value the rest of the dispatcher reads).
+func defaultOrNone(v, def string) string {
+	switch v {
+	case "":
+		return def
+	case "none":
+		return ""
+	default:
+		return v
 	}
 }
 

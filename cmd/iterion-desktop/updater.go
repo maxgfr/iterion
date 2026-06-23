@@ -252,7 +252,7 @@ func (u *Updater) httpGet(ctx context.Context, url string) ([]byte, error) {
 
 func manifestURL(channel string) string {
 	// Local-testing override.
-	if v := envOrEmpty("ITERION_UPDATE_MANIFEST_URL"); v != "" {
+	if v := readEnv("ITERION_UPDATE_MANIFEST_URL"); v != "" {
 		return v
 	}
 	if channel == ChannelPrerelease {
@@ -262,7 +262,3 @@ func manifestURL(channel string) string {
 	}
 	return updateManifestURL
 }
-
-// envOrEmpty wraps os.Getenv to keep updater.go independent of the os
-// import ordering. Implementations live in apply_*.go.
-func envOrEmpty(key string) string { return readEnv(key) }

@@ -417,10 +417,3 @@ func (s *Service) canAutoLink(ctx context.Context, row orgsso.OrgSSOProvider, ta
 	}
 	return true
 }
-
-// SwitchTeamWithCookie is identical to SwitchTeam but also returns
-// the AccessTTL so the caller can stamp the cookie max-age in
-// lock-step with the JWT.
-func (s *Service) SwitchTeamWithCookie(ctx context.Context, userID, teamID string) (Identity, string, time.Time, error) {
-	return s.SwitchTeam(ctx, userID, teamID)
-}

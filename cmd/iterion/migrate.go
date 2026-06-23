@@ -276,7 +276,7 @@ func migrateRun(ctx context.Context, src store.RunStore, dst store.RunStore, run
 		}
 	}
 
-	for nodeID, ver := range r.ArtifactIndex {
+	for nodeID := range r.ArtifactIndex {
 		// Walk every version up to and including the latest known
 		// (the index is the latest-only cache; older versions are
 		// discovered via ListArtifactVersions).
@@ -285,7 +285,6 @@ func migrateRun(ctx context.Context, src store.RunStore, dst store.RunStore, run
 			logger.Warn("migrate: list artifact versions %s/%s: %v", runID, nodeID, err)
 			continue
 		}
-		_ = ver
 		for _, info := range versions {
 			art, err := src.LoadArtifact(ctx, runID, nodeID, info.Version)
 			if err != nil {

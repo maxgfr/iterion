@@ -400,8 +400,7 @@ func TestCollectMetrics(t *testing.T) {
 	}
 
 	// Create a run.
-	run, err := s.CreateRun(context.Background(), "run-m1", "test_wf", nil)
-	if err != nil {
+	if _, err := s.CreateRun(context.Background(), "run-m1", "test_wf", nil); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
@@ -460,6 +459,4 @@ func TestCollectMetrics(t *testing.T) {
 	if m.Iterations != 2 { // 2 node_finished events
 		t.Errorf("iterations = %d, want 2", m.Iterations)
 	}
-
-	_ = run // used above
 }

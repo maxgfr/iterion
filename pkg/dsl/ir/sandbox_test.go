@@ -4,38 +4,6 @@ import (
 	"testing"
 )
 
-func TestFromIdent(t *testing.T) {
-	cases := []struct {
-		in       string
-		wantSpec *SandboxSpec
-		wantOK   bool
-	}{
-		{"", nil, true},
-		{"none", &SandboxSpec{Mode: "none"}, true},
-		{"auto", &SandboxSpec{Mode: "auto"}, true},
-		{"inline", nil, false}, // requires block body in Phase 0 parser
-		{"garbage", nil, false},
-		{"AUTO", nil, false}, // case-sensitive
-	}
-	for _, c := range cases {
-		t.Run(c.in, func(t *testing.T) {
-			spec, ok := FromIdent(c.in)
-			if ok != c.wantOK {
-				t.Fatalf("FromIdent(%q) ok = %v, want %v", c.in, ok, c.wantOK)
-			}
-			if c.wantSpec == nil {
-				if spec != nil {
-					t.Errorf("FromIdent(%q) spec = %+v, want nil", c.in, spec)
-				}
-				return
-			}
-			if spec == nil || spec.Mode != c.wantSpec.Mode {
-				t.Errorf("FromIdent(%q) spec = %+v, want %+v", c.in, spec, c.wantSpec)
-			}
-		})
-	}
-}
-
 func TestSandboxSpecIsActive(t *testing.T) {
 	cases := []struct {
 		in   *SandboxSpec

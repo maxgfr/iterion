@@ -263,18 +263,6 @@ func TestUnfilter_MissingError(t *testing.T) {
 	}
 }
 
-// recordingDetector wraps a real detector and counts Scan calls
-// so we can assert short-circuit on empty input.
-type recordingDetector struct {
-	calls int
-}
-
-// Wrap calls into the detector's exposed Scan signature by
-// embedding a real detector and intercepting Scan via a private
-// method. To stay simple we instead use a custom config that
-// substitutes a single-rule detector — empty text MUST short
-// circuit before reaching any rule.
-
 func TestEmptyText_NoCallToDetector(t *testing.T) {
 	dir := t.TempDir()
 	calls := 0

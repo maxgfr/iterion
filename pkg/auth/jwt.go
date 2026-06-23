@@ -77,7 +77,7 @@ type JWTSigner struct {
 // in the map and the same kid marked active. Kept for callers that
 // don't need rotation; new deployments should prefer NewJWTSignerMulti.
 func NewJWTSigner(b64 string, accessTTL time.Duration) (*JWTSigner, error) {
-	key, err := decodeBase64Lenient(b64)
+	key, err := secrets.DecodeBase64Lenient(b64)
 	if err != nil {
 		return nil, fmt.Errorf("auth: decode jwt secret: %w", err)
 	}
@@ -247,12 +247,6 @@ func (s *JWTSigner) AccessTTL() time.Duration { return s.accessTTL }
 // (via /authz/diagnostics, for example) which key the server is
 // currently minting tokens with.
 func (s *JWTSigner) ActiveKID() string { return s.activeKID }
-
-// decodeBase64Lenient mirrors secrets.decodeBase64Lenient — a copy
-// to avoid an inter-package dep on an internal helper.
-func decodeBase64Lenient(b64 string) ([]byte, error) {
-	return secrets.DecodeBase64Lenient(b64)
-}
 
 // JWT-related sentinel errors.
 var (

@@ -74,27 +74,34 @@ func nodeDecl(n Node, w *Workflow, view MermaidView) string {
 	}
 }
 
-// compactShape returns a compact Mermaid shape with a kind icon prefix.
-func compactShape(n Node) string {
-	kind := n.NodeKind()
-	icon := kindIcon(kind)
-	label := icon + " " + n.NodeID()
-
+// mermaidShape wraps label in the Mermaid node-shape delimiters for the
+// given node kind: Done/Fail render as a stadium, routers as a rhombus,
+// humans as an asymmetric flag, and every other kind as a rectangle —
+// doubled when the node is a convergence point (await != none). Shared by
+// the compact, detailed, and full renderers so the shape map lives in one
+// place.
+func mermaidShape(kind NodeKind, label string, await AwaitMode) string {
 	switch kind {
-	case NodeDone:
-		return fmt.Sprintf(`(["%s"])`, label)
-	case NodeFail:
+	case NodeDone, NodeFail:
 		return fmt.Sprintf(`(["%s"])`, label)
 	case NodeRouter:
 		return fmt.Sprintf(`{"%s"}`, label)
 	case NodeHuman:
 		return fmt.Sprintf(`>"%s"]`, label)
 	default:
-		if NodeAwaitMode(n) != AwaitNone {
+		if await != AwaitNone {
 			return fmt.Sprintf(`[["%s"]]`, label)
 		}
 		return fmt.Sprintf(`["%s"]`, label)
 	}
+}
+
+// compactShape returns a compact Mermaid shape with a kind icon prefix.
+func compactShape(n Node) string {
+	kind := n.NodeKind()
+	icon := kindIcon(kind)
+	label := icon + " " + n.NodeID()
+	return mermaidShape(kind, label, NodeAwaitMode(n))
 }
 
 // detailedShape returns a detailed Mermaid shape with metadata.
@@ -136,19 +143,7 @@ func detailedShape(node Node) string {
 
 	label := strings.Join(lines, "<br/>")
 
-	switch kind {
-	case NodeDone, NodeFail:
-		return fmt.Sprintf(`(["%s"])`, label)
-	case NodeRouter:
-		return fmt.Sprintf(`{"%s"}`, label)
-	case NodeHuman:
-		return fmt.Sprintf(`>"%s"]`, label)
-	default:
-		if await != AwaitNone {
-			return fmt.Sprintf(`[["%s"]]`, label)
-		}
-		return fmt.Sprintf(`["%s"]`, label)
-	}
+	return mermaidShape(kind, label, await)
 }
 
 // edgeDecl returns the Mermaid edge declaration.
@@ -300,19 +295,7 @@ func fullShape(node Node, w *Workflow) string {
 
 	label := strings.Join(lines, "<br/>")
 
-	switch kind {
-	case NodeDone, NodeFail:
-		return fmt.Sprintf(`(["%s"])`, label)
-	case NodeRouter:
-		return fmt.Sprintf(`{"%s"}`, label)
-	case NodeHuman:
-		return fmt.Sprintf(`>"%s"]`, label)
-	default:
-		if await != AwaitNone {
-			return fmt.Sprintf(`[["%s"]]`, label)
-		}
-		return fmt.Sprintf(`["%s"]`, label)
-	}
+	return mermaidShape(kind, label, await)
 }
 
 // appendLLMDetailedLines appends the shared metadata lines for Agent/Judge in detailed view.

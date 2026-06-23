@@ -910,20 +910,6 @@ func (b *ClawBackend) executeViaSandboxRunner(ctx context.Context, task delegate
 	return res, nil
 }
 
-// multiplexerHandler builds the launcher-side envelope dispatch table
-// for a specific task.
-//
-//   - V2-2: OnToolCall dispatches via the task's ToolDefs map. The
-//     runner emits a tool_call envelope for each LLM-driven tool
-//     invocation; the launcher invokes the original closure (which has
-//     access to the engine's tool registry, MCP manager, ask_user
-//     channel, etc.) and forwards the result. *ErrAskUser returns are
-//     preserved typed by the multiplexer (V2-3).
-//   - V2-4: OnSessionCapture mirrors runner-emitted session snapshots
-//     into the host's nodeSessionStore so CompactAndRetry compacts the
-//     latest history. Pre-spawn, the launcher seeds a session_replay
-//     envelope from the host store (see [executeViaSandboxRunner]).
-//
 // providerCredentialEnvVars enumerates the env-var names the in-runner
 // model registry consults to authenticate against each provider. Listed
 // explicitly (rather than forwarding the full host env) so the sandbox
@@ -988,6 +974,19 @@ func canonicalMCPToolName(name string) string {
 	return strings.ReplaceAll(name, "__", "_")
 }
 
+// multiplexerHandler builds the launcher-side envelope dispatch table
+// for a specific task.
+//
+//   - V2-2: OnToolCall dispatches via the task's ToolDefs map. The
+//     runner emits a tool_call envelope for each LLM-driven tool
+//     invocation; the launcher invokes the original closure (which has
+//     access to the engine's tool registry, MCP manager, ask_user
+//     channel, etc.) and forwards the result. *ErrAskUser returns are
+//     preserved typed by the multiplexer (V2-3).
+//   - V2-4: OnSessionCapture mirrors runner-emitted session snapshots
+//     into the host's nodeSessionStore so CompactAndRetry compacts the
+//     latest history. Pre-spawn, the launcher seeds a session_replay
+//     envelope from the host store (see [executeViaSandboxRunner]).
 func (b *ClawBackend) multiplexerHandler(ctx context.Context, task delegate.Task) delegate.MultiplexerHandler {
 	// Index ToolDefs by name once so OnToolCall is O(1) instead of
 	// scanning the slice on each runner-initiated tool_call.
