@@ -1192,6 +1192,18 @@ prompt disprove_voter_system:
     Use uncertain sparingly otherwise; collapsing a genuine uncertain
     into dismiss to be neat is OUT OF CONTRACT.
 
+  OUTPUT CONTRACT (REQUIRED — both schema fields MUST be present, even
+  on errors / empty work). The downstream `majority_verdict` aggregator
+  + `await: best_effort` only tolerate a *missing voter* (e.g. crash);
+  a voter that returns a partial structured payload like `{}` hard-fails
+  the schema validation and kills the run. The engine bounds-retries a
+  missing-field response ONCE, but the safest path is to ALWAYS emit the
+  canonical shape on the first call. So when you have nothing to say
+  (empty candidate list, out-of-budget mid-loop, a tool call you needed
+  failed), STILL emit:
+      { "voter_id": "{{input.voter_id}}", "verdicts": [] }
+  with `verdicts` as an empty array (NOT null, NOT omitted).
+
   OUTPUT — return a `voter_output` with `voter_id` =
   `{{input.voter_id}}` and `verdicts[]` containing ONE entry per
   candidate in the input, each shaped:
@@ -2846,9 +2858,35 @@ print(json.dumps({
 "`
   output: findings_budget_output
 
+## triage reads the full scanner JSON + cap_findings envelope + project
+## context — a LARGE input that historically stalled on gpt-5.5/forfait
+## (~200K effective window) on multi-language repos. The default now
+## routes through `claude_code` with a per-element provider:model
+## fallback chain so the node runs on a 1M-context model first (z.ai's
+## glm-5.2) and falls through to Anthropic's opus on a hard failure
+## (rate-limit / quota exhaustion). The chain form requires the
+## claude_code backend — `claw` ignores `provider:` and would emit C088;
+## the runtime collapses the chain to its head there, so a `claw`
+## override stays single-provider but still benefits from the bigger
+## default model. Env overrides:
+##   ITERION_SEC_AUDIT_BACKEND        — flip the whole node (claude_code
+##                                       | claw | codex). Default
+##                                       claude_code so triage stops
+##                                       stalling on the heavy input out
+##                                       of the box.
+##   ITERION_SEC_AUDIT_MODEL          — pin the baseline model (the
+##                                       fallback element inherits it
+##                                       when its `provider:model` slot
+##                                       has no model part).
+##   ITERION_SEC_AUDIT_PROVIDER_CHAIN — pin the chain. Default
+##                                       `zai:glm-5.2,anthropic:claude-opus-4-8`
+##                                       — 1M-ctx glm first, opus on
+##                                       fall-through. See
+##                                       docs/adr/004-provider-fallback-chain.md.
 agent triage:
-  backend: "${ITERION_SEC_AUDIT_BACKEND:-claw}"
-  model: "${ITERION_SEC_AUDIT_MODEL:-openai/gpt-5.5}"
+  backend: "${ITERION_SEC_AUDIT_BACKEND:-claude_code}"
+  model: "${ITERION_SEC_AUDIT_MODEL:-glm-5.2}"
+  provider: "${ITERION_SEC_AUDIT_PROVIDER_CHAIN:-zai:glm-5.2,anthropic:claude-opus-4-8}"
   reasoning_effort: "${ITERION_SEC_AUDIT_EFFORT_TRIAGE:-high}"
   input: triage_input
   output: triage_output
@@ -3006,9 +3044,22 @@ print(json.dumps({
 ## (branch_<router>_<node>/<node>) do NOT resolve in a tool command.
 ## Independence is enforced by the prompt, not by parallelism.
 
+## Voter pool — cross-family by design (v1+v3 share a chain; v2 is the
+## Anthropic-family counterweight). Each voter reads the SAME candidate
+## list + the (possibly large) project context, then `git log/blame +
+## read_file ±50` per cited file. That payload is well within glm-5.2's
+## 1M window but overflows gpt-5.5/forfait's effective ~200K — see
+## docs/bot-runs/sec-audit-source.md for the prior stall. So v1+v3 now
+## route through claude_code with the same per-element provider chain as
+## triage (zai:glm-5.2 → anthropic:opus on fall-through), keeping the
+## "different vendor lineage to v2" diversity that the design intends.
+## v2 stays on anthropic/opus standalone (no chain): two voters falling
+## back to opus is enough to preserve a cross-vendor signal at the
+## first attempt without burning extra retry budget on v2.
 judge voter_v1:
-  backend: "${ITERION_SEC_AUDIT_BACKEND:-claw}"
-  model: "${ITERION_SEC_AUDIT_VOTER_V1_MODEL:-openai/gpt-5.5}"
+  backend: "${ITERION_SEC_AUDIT_BACKEND:-claude_code}"
+  model: "${ITERION_SEC_AUDIT_VOTER_V1_MODEL:-glm-5.2}"
+  provider: "${ITERION_SEC_AUDIT_PROVIDER_CHAIN:-zai:glm-5.2,anthropic:claude-opus-4-8}"
   reasoning_effort: "${ITERION_SEC_AUDIT_EFFORT_VOTER:-high}"
   input: voter_input
   output: voter_output
@@ -3037,8 +3088,9 @@ judge voter_v2:
   readonly: true
 
 judge voter_v3:
-  backend: "${ITERION_SEC_AUDIT_BACKEND:-claw}"
-  model: "${ITERION_SEC_AUDIT_VOTER_V3_MODEL:-openai/gpt-5.5}"
+  backend: "${ITERION_SEC_AUDIT_BACKEND:-claude_code}"
+  model: "${ITERION_SEC_AUDIT_VOTER_V3_MODEL:-glm-5.2}"
+  provider: "${ITERION_SEC_AUDIT_PROVIDER_CHAIN:-zai:glm-5.2,anthropic:claude-opus-4-8}"
   reasoning_effort: "${ITERION_SEC_AUDIT_EFFORT_VOTER:-high}"
   input: voter_input
   output: voter_output

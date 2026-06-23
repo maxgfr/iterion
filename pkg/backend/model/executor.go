@@ -1173,17 +1173,29 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 
 // validateAndRetry validates result.Output against the node's schema. On
 // success, the input result is returned unchanged. On a validation
-// failure whose source was a parse-fallback (the backend returned
-// non-JSON the executor wrapped in a text field), one retry through
-// retryDelegateLoop is attempted — inheriting the standard transient-
-// backoff budget — and the retry result is re-validated. The OnDelegateRetry
-// observer hook fires for the schema-fallback retry (otherwise invisible
-// to outer observers, which only see transient-error retries), token /
-// duration are accumulated across the first attempt + retry so per-node
-// accounting reflects the full cost paid, and stampDelegateOutputMeta is
-// re-applied after the retry so observability keys remain consistent.
-// Any other validation failure (or a retry that still fails) returns a
-// wrapped error; the caller propagates it.
+// failure that one retry can plausibly fix (parse-fallback OR missing-
+// required-field), one retry through retryDelegateLoop is attempted —
+// inheriting the standard transient-backoff budget — and the retry
+// result is re-validated. The OnDelegateRetry observer hook fires for
+// the schema-fallback retry (otherwise invisible to outer observers,
+// which only see transient-error retries), token / duration are
+// accumulated across the first attempt + retry so per-node accounting
+// reflects the full cost paid, and stampDelegateOutputMeta is re-applied
+// after the retry so observability keys remain consistent. Any other
+// validation failure (type mismatch, enum violation) or a retry that
+// still fails returns a wrapped error; the caller propagates it.
+//
+// Why retry on missing-field errors: a real-world failure mode (Seki's
+// voter judges on gpt-5.5/forfait — see docs/bot-runs/sec-audit-source.md)
+// is the backend returning *valid* JSON that simply omits required fields
+// when the model is overwhelmed or the response is truncated. Without
+// a retry, one transient empty response hard-fails the whole run on the
+// first voter, even though the downstream aggregator (majority_verdict
+// behind `await: best_effort`) is already designed to tolerate a missing
+// voter. One retry on a missing-field error is the bounded-and-cheap
+// counterpart to the existing parse-fallback retry. Type / enum errors
+// stay non-retryable: those are the model returning the *wrong shape*,
+// which a second call from the same model is unlikely to flip.
 func (e *ClawExecutor) validateAndRetry(
 	ctx context.Context,
 	f backendFields,
@@ -1197,15 +1209,16 @@ func (e *ClawExecutor) validateAndRetry(
 	if err == nil {
 		return result, nil
 	}
-	// If parsing did NOT fall back to text wrapper, the backend produced
-	// well-formed JSON that simply doesn't match the schema — a retry
-	// won't change that. Give up.
-	if !result.ParseFallback {
+	// Retry-eligible: parse-fallback (LLM returned non-JSON the executor
+	// wrapped in a text field) OR missing-required-field (LLM returned
+	// truncated/empty JSON). Non-eligible (type mismatch, enum violation)
+	// are returned by the model in a stable shape; a second call is
+	// unlikely to change them.
+	retryEligible := result.ParseFallback || isMissingFieldError(err)
+	if !retryEligible {
 		return result, fmt.Errorf("model: node %q: structured output invalid: %w", f.id, err)
 	}
-	// Parse fallback path: the backend likely returned non-JSON output
-	// (transient SDK issue). Retry once before giving up.
-	e.logger.Warn("[%s#%d/%s] structured output validation failed with parse fallback, retrying backend: %v", f.id, task.Iteration, backendName, err)
+	e.logger.Warn("[%s#%d/%s] structured output validation failed, retrying backend: %v", f.id, task.Iteration, backendName, err)
 	// Fire OnDelegateRetry so observers (Prometheus exporter, event sink)
 	// see the retry attempt — previously the schema-validation retry was
 	// invisible because the outer retryDelegateLoop only knows about

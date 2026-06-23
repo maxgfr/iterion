@@ -8,6 +8,17 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 )
 
+// isMissingFieldError reports whether err (produced by ValidateOutput)
+// carries at least one "missing required field" cause. The check is
+// substring-based — ValidateOutput joins multiple cause strings with
+// "; " and we want to retry whenever any cause is a missing-field
+// (even if a type error is mixed in). See validateAndRetry for why
+// missing-field is treated as retry-eligible while type/enum errors
+// are not.
+func isMissingFieldError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "missing required field")
+}
+
 // ValidateOutput checks that output contains all required fields from the
 // schema with compatible types. It does NOT attempt to repair or coerce
 // invalid values — the node must fail explicitly on schema mismatch.

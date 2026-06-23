@@ -1403,8 +1403,12 @@ func TestRetryContextCancellation(t *testing.T) {
 // Structured output validation tests
 // ---------------------------------------------------------------------------
 
-func TestStructuredOutputMissingField(t *testing.T) {
-	reg := NewRegistry()
+// missingFieldStream returns a stream that emits a structured-output
+// tool_use whose JSON omits the `reason` required field — used to drive
+// both the first attempt and the retry attempt in
+// TestStructuredOutputMissingField (the executor now retries once on
+// missing-required-field validation errors; see validateAndRetry).
+func missingFieldStream() <-chan api.StreamEvent {
 	ch := make(chan api.StreamEvent, 10)
 	go func() {
 		defer close(ch)
@@ -1429,7 +1433,18 @@ func TestStructuredOutputMissingField(t *testing.T) {
 		}
 		ch <- api.StreamEvent{Type: api.EventMessageStop}
 	}()
-	mock := &execMockClient{streams: []<-chan api.StreamEvent{ch}}
+	return ch
+}
+
+func TestStructuredOutputMissingField(t *testing.T) {
+	reg := NewRegistry()
+	// Provide TWO streams: the first attempt returns missing-required-field
+	// JSON, the engine retries once (validateAndRetry now treats missing
+	// fields as retry-eligible), the retry also returns missing-field JSON,
+	// the executor surfaces "structured output invalid after retry".
+	mock := &execMockClient{streams: []<-chan api.StreamEvent{
+		missingFieldStream(), missingFieldStream(),
+	}}
 	reg.Register("test", func(modelID string) (api.APIClient, error) {
 		return mock, nil
 	})
@@ -1459,9 +1474,89 @@ func TestStructuredOutputMissingField(t *testing.T) {
 		"review": "code",
 	})
 	if err == nil {
-		t.Fatal("expected error for missing required field")
+		t.Fatal("expected error for missing required field after retry")
+	}
+	if !strings.Contains(err.Error(), "missing required field") {
+		t.Errorf("expected missing-field error, got: %v", err)
+	}
+	// Two calls = first attempt + one retry — confirms the engine retried.
+	if mock.calls != 2 {
+		t.Errorf("expected 2 calls (1 attempt + 1 retry), got %d", mock.calls)
 	}
 	t.Logf("got expected error: %v", err)
+}
+
+// TestStructuredOutputMissingFieldRecoversOnRetry verifies the happy
+// path of the missing-field retry: the second attempt returns a valid
+// payload and the executor surfaces it as success. This is the gpt-5.5
+// /forfait voter case where a transient empty response gets a clean
+// second try.
+func TestStructuredOutputMissingFieldRecoversOnRetry(t *testing.T) {
+	reg := NewRegistry()
+	good := make(chan api.StreamEvent, 10)
+	go func() {
+		defer close(good)
+		good <- api.StreamEvent{Type: api.EventMessageStart, InputTokens: 50}
+		good <- api.StreamEvent{
+			Type:  api.EventContentBlockStart,
+			Index: 0,
+			ContentBlock: api.ContentBlockInfo{
+				Type: "tool_use", Index: 0, ID: "tu_2", Name: "structured_output",
+			},
+		}
+		good <- api.StreamEvent{
+			Type:  api.EventContentBlockDelta,
+			Index: 0,
+			Delta: api.Delta{Type: "input_json_delta", PartialJSON: `{"verdict":true,"reason":"recovered"}`},
+		}
+		good <- api.StreamEvent{Type: api.EventContentBlockStop, Index: 0}
+		good <- api.StreamEvent{
+			Type:       api.EventMessageDelta,
+			StopReason: "tool_use",
+			Usage:      api.UsageDelta{OutputTokens: 20},
+		}
+		good <- api.StreamEvent{Type: api.EventMessageStop}
+	}()
+	mock := &execMockClient{streams: []<-chan api.StreamEvent{
+		missingFieldStream(), good,
+	}}
+	reg.Register("test", func(modelID string) (api.APIClient, error) {
+		return mock, nil
+	})
+
+	wf := &ir.Workflow{
+		Prompts: map[string]*ir.Prompt{},
+		Schemas: map[string]*ir.Schema{
+			"verdict_schema": {
+				Name: "verdict_schema",
+				Fields: []*ir.SchemaField{
+					{Name: "verdict", Type: ir.FieldTypeBool},
+					{Name: "reason", Type: ir.FieldTypeString},
+				},
+			},
+		},
+	}
+
+	exec := newTestClawExecutor(reg, wf)
+
+	node := &ir.JudgeNode{
+		BaseNode:     ir.BaseNode{ID: "judge"},
+		LLMFields:    ir.LLMFields{Model: "test/test-model"},
+		SchemaFields: ir.SchemaFields{OutputSchema: "verdict_schema"},
+	}
+
+	output, err := exec.Execute(context.Background(), node, map[string]interface{}{
+		"review": "code",
+	})
+	if err != nil {
+		t.Fatalf("expected recovery, got error: %v", err)
+	}
+	if output["reason"] != "recovered" {
+		t.Errorf("expected recovered output, got %v", output)
+	}
+	if mock.calls != 2 {
+		t.Errorf("expected 2 calls (1 attempt + 1 retry), got %d", mock.calls)
+	}
 }
 
 func TestStructuredOutputWrongType(t *testing.T) {
