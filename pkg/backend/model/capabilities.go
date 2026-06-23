@@ -2,9 +2,24 @@ package model
 
 import "strings"
 
-// capabilitiesForModel returns static capabilities for a given provider and model ID.
-// This replaces sdk.ModelCapabilitiesOf() which required a runtime interface assertion.
+// capabilitiesForModel returns capabilities for a given provider and model ID.
+// It resolves dynamically: the curated static heuristics (curatedCapabilities)
+// are the authoritative fallback, and any spec fetched from the online
+// aggregator (see modelspecs.go) is merged over them — a fetched ContextWindow>0
+// overrides the static one, and reasoning/tool_call/temperature flags override
+// the heuristics when the source provides them. When the aggregator lacks the
+// model or is unreachable, the curated value wins. Resolution never performs
+// blocking network I/O on this path.
 func capabilitiesForModel(provider, modelID string) ModelCapabilities {
+	return specs.merge(provider, modelID, curatedCapabilities(provider, modelID))
+}
+
+// curatedCapabilities is the static heuristic table — the authoritative
+// fallback when the dynamic aggregator lacks a model or is unreachable. It
+// keeps the hardcoded values (glm-5.2=1M, glm-5.1/4.6=200K, claude/openai
+// reasoning heuristics) so brand-new models not yet in aggregators resolve
+// correctly.
+func curatedCapabilities(provider, modelID string) ModelCapabilities {
 	switch provider {
 	case "anthropic":
 		return anthropicCapabilities(modelID)

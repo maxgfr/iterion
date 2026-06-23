@@ -282,9 +282,19 @@ func TestCapabilitiesForModel(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.provider+"/"+tt.modelID, func(t *testing.T) {
-			caps := capabilitiesForModel(tt.provider, tt.modelID)
+			// Assert on curatedCapabilities — the heuristic fallback layer
+			// under test. capabilitiesForModel layers the dynamic aggregator
+			// over this (covered by modelspecs_test.go); with no fetched specs
+			// in scope the two are identical.
+			caps := curatedCapabilities(tt.provider, tt.modelID)
 			if caps != tt.wantCaps {
-				t.Errorf("capabilitiesForModel(%q, %q) = %+v, want %+v", tt.provider, tt.modelID, caps, tt.wantCaps)
+				t.Errorf("curatedCapabilities(%q, %q) = %+v, want %+v", tt.provider, tt.modelID, caps, tt.wantCaps)
+			}
+			// Integration smoke: with the package-global registry holding no
+			// fetched specs (TestMain disables auto-fetch), capabilitiesForModel
+			// must equal the curated fallback.
+			if got := capabilitiesForModel(tt.provider, tt.modelID); got != tt.wantCaps {
+				t.Errorf("capabilitiesForModel(%q, %q) = %+v, want %+v (curated fallback)", tt.provider, tt.modelID, got, tt.wantCaps)
 			}
 		})
 	}
