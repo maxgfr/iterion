@@ -78,10 +78,26 @@ to branch `willy/iterion-code-quality-2026-06-23` (cleanups as one commit).
    sizing — `reviewer_context_tokens` (+ `reviewer_context_percent`, default 45):
    when set, the chunk budget is capped at that %-of-window and the `MAX_CHUNKS`
    rebudget can no longer re-inflate past the ceiling (big repos take more passes
-   instead of a bigger chunk). **Deeper follow-up under discussion:** write the
-   reviewer's context as structured markdown + an index file and let the
-   reviewer/fixer node explore it on demand (agentic progressive disclosure)
-   instead of inlining everything — supersedes fixed chunk sizing; ADR-worthy.
+   instead of a bigger chunk). **Deeper fix SHIPPED + validated (ADR-045,
+   `dc22b626c`, v0.5.0):** new `context_mode` (default `explore`) — snapshot_chunk
+   writes a per-pass chunk INDEX markdown and the reviewer reads the listed files
+   on demand via its read tools instead of inlining the source, removing the
+   context-window ceiling on chunk size (a package/file bigger than the window is
+   now reviewable). Anti-Goodhart guard folded into `streak_check` (no graph
+   node): a pass counts toward convergence only if `files_reviewed` is a non-empty
+   subset of the chunk's files. `inline` mode kept as fallback. Validated by run
+   **019ef5d5** (scoped pkg/log): converged in explore mode — index written,
+   verbatim `files_reviewed`, `engaged=true` every pass, real doc-nit fixes,
+   stop → verify → commit → done, $7.50. Convergence note: an axis-blocker
+   quality reviewer finds a *long tail of distinct genuine nits* (each resets the
+   streak) — it still asymptotes once they're exhausted (pkg/log: 2 distinct doc
+   fixes → converged at review_loop ~5), but a quality-axis run is thorough, not
+   instant. (This long tail is the axis-blocker behaviour, orthogonal to explore.)
+6. **`.devbox/` swept into the run commit → FIXED (`.gitignore`).** Now that
+   devbox runs in-sandbox (operator's HOME-nested-bind fix), it regenerates
+   `.devbox/` in the worktree and `commit_changes`' `git add -A` committed it
+   (run 019ef5d5). Added `.devbox/` to `.gitignore` (same family as `.tmp-*/` /
+   `.gomodcache/`).
 5. **New capability used:** `iterion run --max-cost-usd` (+ `--max-tokens`,
    `--max-duration`, `--max-iterations`, `--max-parallel-branches`) on `run` and
    `resume` — set the $120 ceiling without editing the bot (branch
