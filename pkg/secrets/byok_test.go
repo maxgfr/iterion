@@ -117,6 +117,110 @@ func TestResolve_OmitsProviderWhenNoKey(t *testing.T) {
 	}
 }
 
+func TestProviderValid(t *testing.T) {
+	valid := []Provider{
+		ProviderAnthropic, ProviderOpenAI, ProviderBedrock, ProviderVertex,
+		ProviderAzure, ProviderOpenRouter, ProviderXAI, ProviderZAI,
+	}
+	for _, p := range valid {
+		if !p.Valid() {
+			t.Errorf("Provider(%q).Valid() = false, want true", p)
+		}
+	}
+	invalid := []Provider{"", "gpt", "Anthropic", "openai ", "google"}
+	for _, p := range invalid {
+		if p.Valid() {
+			t.Errorf("Provider(%q).Valid() = true, want false", p)
+		}
+	}
+}
+
+func TestParseProvider(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    Provider
+		wantErr bool
+	}{
+		{"openai", ProviderOpenAI, false},
+		{"  OpenAI  ", ProviderOpenAI, false}, // trim + lowercase
+		{"ZAI", ProviderZAI, false},
+		{"ANTHROPIC", ProviderAnthropic, false},
+		{"nope", "", true},
+		{"", "", true},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			got, err := ParseProvider(c.in)
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("ParseProvider(%q) err = nil, want error", c.in)
+				}
+				if got != "" {
+					t.Fatalf("ParseProvider(%q) provider = %q, want \"\" on error", c.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseProvider(%q) unexpected err: %v", c.in, err)
+			}
+			if got != c.want {
+				t.Fatalf("ParseProvider(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestKeyRank(t *testing.T) {
+	const me = "alice"
+	cases := []struct {
+		name string
+		key  ApiKey
+		want int
+	}{
+		{"user default", ApiKey{ScopeUserID: me, IsDefault: true}, 0},
+		{"user non-default", ApiKey{ScopeUserID: me}, 1},
+		{"team default", ApiKey{ScopeUserID: "", IsDefault: true}, 2},
+		{"team non-default", ApiKey{ScopeUserID: ""}, 3},
+		{"other user's key never applies", ApiKey{ScopeUserID: "bob", IsDefault: true}, 99},
+	}
+	// cases are authored in descending priority (highest priority first).
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := keyRank(c.key, me); got != c.want {
+				t.Fatalf("keyRank(%+v) = %d, want %d", c.key, got, c.want)
+			}
+		})
+	}
+	// The ranks must be strictly increasing in that priority order so Resolve
+	// picks user-default > user > team-default > team, and never another
+	// user's key. Combined with the per-case checks above, this proves
+	// keyRank itself is strictly increasing across the priority chain.
+	for i := 1; i < len(cases); i++ {
+		if cases[i-1].want >= cases[i].want {
+			t.Fatalf("priority order broken at %q -> %q: %d >= %d",
+				cases[i-1].name, cases[i].name, cases[i-1].want, cases[i].want)
+		}
+	}
+}
+
+func TestResolve_UserNonDefaultBeatsTeamDefault(t *testing.T) {
+	store := NewMemoryApiKeyStore()
+	sealer := newSealer(t)
+	// Team has a default key; the user has only a NON-default key. The
+	// user's key (rank 1) must still win over the team default (rank 2).
+	mkKey(t, store, sealer, "team", "", ProviderOpenAI, "team-default", "sk-team", true)
+	user := mkKey(t, store, sealer, "team", "alice", ProviderOpenAI, "alice-plain", "sk-alice", false)
+
+	got, err := Resolve(context.Background(), store, "team", "alice", []Provider{ProviderOpenAI}, nil, sealer)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	r := got[ProviderOpenAI]
+	if r.KeyID != user.ID || string(r.Plaintext) != "sk-alice" || r.SourceScope != "user" {
+		t.Fatalf("user non-default should beat team default, got %+v", r)
+	}
+}
+
 func TestSealRunBundleRoundTrip(t *testing.T) {
 	sealer := newSealer(t)
 	bundle := RunBundle{

@@ -181,3 +181,58 @@ func TestLoadCodexCredentialsFromDisk_MissingFile(t *testing.T) {
 		t.Fatal("expected error for missing file")
 	}
 }
+
+func TestOAuthKindValid(t *testing.T) {
+	for _, k := range []OAuthKind{OAuthKindClaudeCode, OAuthKindCodex} {
+		if !k.Valid() {
+			t.Errorf("OAuthKind(%q).Valid() = false, want true", k)
+		}
+	}
+	for _, k := range []OAuthKind{"", "openai", "claude", "Codex"} {
+		if k.Valid() {
+			t.Errorf("OAuthKind(%q).Valid() = true, want false", k)
+		}
+	}
+}
+
+func TestCodexAuthJSONPath(t *testing.T) {
+	// CODEX_HOME override wins.
+	t.Run("CODEX_HOME override", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", "/custom/codex")
+		want := filepath.Join("/custom/codex", "auth.json")
+		if got := CodexAuthJSONPath(); got != want {
+			t.Fatalf("CodexAuthJSONPath() = %q, want %q", got, want)
+		}
+	})
+
+	// Falls back to ~/.codex/auth.json when CODEX_HOME is unset.
+	t.Run("HOME fallback", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", "")
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		want := filepath.Join(home, ".codex", "auth.json")
+		if got := CodexAuthJSONPath(); got != want {
+			t.Fatalf("CodexAuthJSONPath() = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestParseAnthropicView_Malformed(t *testing.T) {
+	v, err := ParseAnthropicView([]byte("{not json"))
+	if err == nil {
+		t.Fatal("expected error for malformed credentials.json")
+	}
+	if v.ClaudeAIOauth.AccessToken != "" {
+		t.Fatalf("expected zero view on parse error, got %+v", v)
+	}
+}
+
+func TestParseCodexView_Malformed(t *testing.T) {
+	v, err := ParseCodexView([]byte("{not json"))
+	if err == nil {
+		t.Fatal("expected error for malformed auth.json")
+	}
+	if v.Tokens.AccessToken != "" {
+		t.Fatalf("expected zero view on parse error, got %+v", v)
+	}
+}
