@@ -104,6 +104,15 @@ vars:
   ## accumulated scanned_areas/pushback fed back each pass, and the
   ## model's reasoning/output. 45 leaves > half the window for those.
   reviewer_context_percent: int = 45
+  ## Reviewer context delivery (ADR-045). "explore" (default): snapshot_chunk
+  ## writes a chunk INDEX markdown and the reviewer reads the listed files on
+  ## demand via its read tools — removes the context-window ceiling on chunk
+  ## size and lets the agent process a chunk larger than any single prompt,
+  ## guarded by the deterministic engagement check in streak_check. "inline":
+  ## the chunk source is rendered into the prompt (the pre-0.4.0 / A+B path),
+  ## bounded by max_review_chunk_tokens — the conservative fallback for small
+  ## repos. See docs/adr/045-whole-improve-loop-progressive-context-disclosure.md.
+  context_mode: string = "explore"
   ## Per-run FIX HEADROOM beyond one full clean sweep (issue #12). The
   ## review_loop cap is NOT this value directly — snapshot_chunk emits a
   ## dynamic loop_max = num_chunks + max_review_passes: num_chunks passes
@@ -323,17 +332,26 @@ prompt review_user_claude:
 
   Current iteration: {{loop.review_loop.iteration}}/{{loop.review_loop.max}}
 
-  ## THIS PASS'S CHUNK (issue #12 context-budget chunking)
+  ## THIS PASS'S CHUNK (context-budget chunking)
   Chunk {{input.chunk_index}} of {{input.num_chunks}}  ·  label: {{input.chunk_label}}
-  Chunked this run: {{input.chunked}}  ·  files in chunk: shown below
-  The full source of this chunk is provided inline below. Review
-  it in full. Use read tools ONLY to follow a specific
-  cross-reference — NEVER to bulk-read or enumerate the tree.
+  Chunked this run: {{input.chunked}}  ·  context delivery mode: {{input.context_mode}}
 
   Files in this chunk:
   {{input.chunk_files}}
 
-  ----- BEGIN CHUNK SOURCE -----
+  CONTEXT DELIVERY (ADR-045) — follow the mode above:
+  - "explore" (default): the chunk source is NOT inlined. READ each file listed
+    above (they are also tabulated in the index at {{input.chunk_index_path}})
+    with your read tool, then judge. Read incrementally; you may skip a file
+    only if it is clearly irrelevant to the axis. Do NOT bulk-read, glob, or
+    enumerate the tree beyond these listed files. You MUST record in
+    `files_reviewed` the EXACT paths you opened (verbatim from the list above) —
+    a verdict whose files_reviewed is empty or contains a path not in the list
+    is rejected by the deterministic engagement gate.
+  - "inline": the full chunk source is between the markers below; review it in
+    full (use read tools only to follow a specific cross-reference) and you may
+    leave files_reviewed empty.
+  ----- BEGIN CHUNK SOURCE (populated in inline mode only) -----
   {{input.chunk_content}}
   ----- END CHUNK SOURCE -----
 
@@ -365,6 +383,10 @@ prompt review_user_claude:
       (after self-critique — exclude preferences)
     - fix_plan: concrete action plan to fix the blockers
     - confidence: "low" / "medium" / "high"
+    - files_reviewed: in EXPLORE mode, the exact paths from the file list
+      above that you actually opened (verbatim, no hallucinated paths). Required
+      and non-empty, or the deterministic engagement gate rejects the pass.
+      Leave empty in inline mode.
     - scanned_areas: packages / files you actually audited
       THIS pass (concise — e.g. the chunk label plus the
       specific files, "pkg/runtime/engine.go (recovery
@@ -382,17 +404,26 @@ prompt review_user_gpt:
 
   Current iteration: {{loop.review_loop.iteration}}/{{loop.review_loop.max}}
 
-  ## THIS PASS'S CHUNK (issue #12 context-budget chunking)
+  ## THIS PASS'S CHUNK (context-budget chunking)
   Chunk {{input.chunk_index}} of {{input.num_chunks}}  ·  label: {{input.chunk_label}}
-  Chunked this run: {{input.chunked}}  ·  files in chunk: shown below
-  The full source of this chunk is provided inline below. Review
-  it in full. Use read tools ONLY to follow a specific
-  cross-reference — NEVER to bulk-read or enumerate the tree.
+  Chunked this run: {{input.chunked}}  ·  context delivery mode: {{input.context_mode}}
 
   Files in this chunk:
   {{input.chunk_files}}
 
-  ----- BEGIN CHUNK SOURCE -----
+  CONTEXT DELIVERY (ADR-045) — follow the mode above:
+  - "explore" (default): the chunk source is NOT inlined. READ each file listed
+    above (they are also tabulated in the index at {{input.chunk_index_path}})
+    with your read tool, then judge. Read incrementally; you may skip a file
+    only if it is clearly irrelevant to the axis. Do NOT bulk-read, glob, or
+    enumerate the tree beyond these listed files. You MUST record in
+    `files_reviewed` the EXACT paths you opened (verbatim from the list above) —
+    a verdict whose files_reviewed is empty or contains a path not in the list
+    is rejected by the deterministic engagement gate.
+  - "inline": the full chunk source is between the markers below; review it in
+    full (use read tools only to follow a specific cross-reference) and you may
+    leave files_reviewed empty.
+  ----- BEGIN CHUNK SOURCE (populated in inline mode only) -----
   {{input.chunk_content}}
   ----- END CHUNK SOURCE -----
 
@@ -424,6 +455,10 @@ prompt review_user_gpt:
       (after self-critique — exclude preferences)
     - fix_plan: concrete action plan to fix the blockers
     - confidence: "low" / "medium" / "high"
+    - files_reviewed: in EXPLORE mode, the exact paths from the file list
+      above that you actually opened (verbatim, no hallucinated paths). Required
+      and non-empty, or the deterministic engagement gate rejects the pass.
+      Leave empty in inline mode.
     - scanned_areas: packages / files you actually audited
       THIS pass (concise text). Relayed to the next reviewer.
 
@@ -431,6 +466,11 @@ prompt fix_system:
   You are an expert developer. You fix the blocking issues
   flagged by a reviewer by applying concrete changes to the
   code.
+
+  CONTEXT (ADR-045): you inherit the same-family reviewer's session, so the
+  files it opened this pass are already in your context. If the reviewer ran in
+  explore mode and a file a blocker names is not in your context (e.g. after
+  compaction), just read it again by path with your read tool before editing.
 
   IMPROVEMENT AXIS: if the operator set a custom
   improvement axis in their user prompt, you MUST apply
@@ -586,6 +626,12 @@ schema review_input:
   ## slice, not the whole repo.
   chunk_content: string
   chunk_files: string
+  ## ADR-045 explore mode: chunk_file_list is the array form of chunk_files
+  ## (exact paths to read + cite in files_reviewed); chunk_index_path points
+  ## at the index markdown; context_mode is "explore" | "inline".
+  chunk_file_list: string[]
+  chunk_index_path: string
+  context_mode: string
   chunk_label: string
   chunk_index: int
   num_chunks: int
@@ -606,6 +652,14 @@ schema review_input:
 schema snapshot_output:
   chunk_content: string
   files: string
+  ## chunk_file_list (ADR-045): the chunk's files as an ARRAY of
+  ## workspace-relative paths. Drives the explore-mode engagement guard in
+  ## streak_check (files_reviewed must be a non-empty subset of this) and is
+  ## handed to the reviewer alongside the index path.
+  chunk_file_list: string[]
+  ## Absolute path to the per-pass chunk INDEX markdown the reviewer reads
+  ## in explore mode (empty when no files / inline mode still writes it).
+  chunk_index_path: string
   chunk_label: string
   chunk_index: int
   num_chunks: int
@@ -641,6 +695,13 @@ schema verdict_output:
   blockers: string[]
   fix_plan: string
   confidence: string [enum: "low", "medium", "high"]
+  ## files_reviewed (ADR-045): in explore mode, the exact index paths the
+  ## reviewer actually opened this pass. The deterministic engagement guard
+  ## in streak_check requires this to be a non-empty SUBSET of the chunk's
+  ## file list before a pass can count toward convergence — a reviewer may
+  ## not approve a chunk it read nothing from, nor cite hallucinated paths.
+  ## Empty/ignored in inline mode (the source is in chunk_content).
+  files_reviewed: string[]
   ## scanned_areas captures the surfaces this reviewer actually
   ## audited this iteration (e.g. "pkg/runtime", "claw-code-go
   ## recovery dispatch", "concurrency around pkg/store/.lock").
@@ -673,6 +734,10 @@ schema verdict_output:
 ## treats it as empty → result == unique(input.scanned_areas).
 schema streak_state:
   stop: bool
+  ## engaged (ADR-045): did the reviewer actually open files from the chunk
+  ## index this pass (explore mode)? Always true in inline mode. Surfaced for
+  ## observability; the same predicate is inlined into clean_streak/stop.
+  engaged: bool
   approved: bool
   family: string
   blockers: string[]
@@ -734,10 +799,14 @@ schema fix_output:
 ## POSIX + python3 (the same toolchain sec-audit-source's tool nodes
 ## rely on); keep it double-quote-free so `python3 -c "..."` stays intact.
 tool snapshot_chunk:
-  command: `WS={{vars.workspace_dir}} BUDGET={{vars.max_review_chunk_tokens}} RCT={{vars.reviewer_context_tokens}} RCP={{vars.reviewer_context_percent}} MAXPASSES={{vars.max_review_passes}} SCOPE_GLOBS={{vars.scope_globs}} STATE_IN={{input.incoming_clean_streak}} STATE_CURSOR={{input.incoming_cursor}} python3 -c "
+  command: `WS={{vars.workspace_dir}} BUDGET={{vars.max_review_chunk_tokens}} RCT={{vars.reviewer_context_tokens}} RCP={{vars.reviewer_context_percent}} MODE={{vars.context_mode}} MAXPASSES={{vars.max_review_passes}} SCOPE_GLOBS={{vars.scope_globs}} STATE_IN={{input.incoming_clean_streak}} STATE_CURSOR={{input.incoming_cursor}} python3 -c "
 import os, sys, json, fnmatch
 
 ws = os.environ.get('WS', '.')
+# context_mode (ADR-045): 'explore' (default) emits a chunk INDEX the reviewer
+# reads on demand; 'inline' renders the chunk source into chunk_content (the
+# pre-0.4.0 / A+B path). Anything but 'inline' is treated as explore.
+mode = (os.environ.get('MODE') or 'explore').strip().lower()
 budget = int(os.environ.get('BUDGET', '16000') or '16000')
 if budget <= 0:
     budget = 16000
@@ -1004,7 +1073,8 @@ if num_chunks == 0:
         pass
     print(json.dumps({
         'chunk_content': '(no source files found in workspace)',
-        'files': '', 'chunk_label': 'empty', 'chunk_index': 0,
+        'files': '', 'chunk_file_list': [], 'chunk_index_path': '',
+        'chunk_label': 'empty', 'chunk_index': 0,
         'num_chunks': 1, 'loop_max': 1 + max_passes, 'chunked': False, 'file_count': 0,
         'chunk_tokens': 0, 'total_files': 0, 'total_tokens': 0,
         'skipped_oversize': 0, 'persisted_clean_streak': int(clean_streak),
@@ -1028,39 +1098,66 @@ try:
 except (OSError, IOError):
     pass
 
-hard_cap = budget * 4 + 4096
-parts = []
-used = 0
-skipped_oversize = 0
-for rel, tok in chunk['files']:
-    abs_path = os.path.join(ws, rel)
-    try:
-        with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
-            body = f.read()
-    except (OSError, IOError):
-        continue
-    if est_tokens(len(body)) > MAX_FILE_TOKENS:
-        body = body[:MAX_FILE_TOKENS * 4] + '\n... [truncated: file exceeds one chunk budget] ...\n'
-        skipped_oversize += 1
-    header = '===== FILE: %s (~%d tokens) =====\n' % (rel, tok)
-    block = header + body + '\n'
-    if used + len(block) > hard_cap:
-        parts.append('... [chunk content truncated at the char cap] ...\n')
-        break
-    parts.append(block)
-    used += len(block)
-
-content = ''.join(parts)
-file_list = '\n'.join(rel for rel, _ in chunk['files'])
+file_list_arr = [rel for rel, _ in chunk['files']]
+file_list = '\n'.join(file_list_arr)
 dirs = chunk['dirs']
 if len(dirs) == 1:
     label = dirs[0]
 else:
     label = '%s (+%d more dirs)' % (dirs[0], len(dirs) - 1)
 
+# ADR-045: always write a per-pass chunk INDEX markdown (label + the file
+# table the reviewer reads from in explore mode). Single file overwritten each
+# pass, excluded from commit_changes. Best-effort: a write failure is non-fatal
+# (the reviewer still has chunk_file_list / files).
+index_path = os.path.join(ws, '.whole_improve_loop.chunk.md')
+try:
+    ilines = ['# Review chunk index', '',
+              'Chunk %d of %d  -  %s' % (idx, num_chunks, label),
+              'Read each file below with your read tool, then judge. List the',
+              'paths you read VERBATIM in files_reviewed.', '',
+              '| file | ~tokens |', '| --- | --- |']
+    for rel, tok in chunk['files']:
+        ilines.append('| %s | %d |' % (rel, tok))
+    ilines.append('')
+    with open(index_path, 'w', encoding='utf-8') as xf:
+        xf.write('\n'.join(ilines))
+except (OSError, IOError):
+    pass
+
+skipped_oversize = 0
+if mode == 'inline':
+    hard_cap = budget * 4 + 4096
+    parts = []
+    used = 0
+    for rel, tok in chunk['files']:
+        abs_path = os.path.join(ws, rel)
+        try:
+            with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
+                body = f.read()
+        except (OSError, IOError):
+            continue
+        if est_tokens(len(body)) > MAX_FILE_TOKENS:
+            body = body[:MAX_FILE_TOKENS * 4] + '\n... [truncated: file exceeds one chunk budget] ...\n'
+            skipped_oversize += 1
+        header = '===== FILE: %s (~%d tokens) =====\n' % (rel, tok)
+        block = header + body + '\n'
+        if used + len(block) > hard_cap:
+            parts.append('... [chunk content truncated at the char cap] ...\n')
+            break
+        parts.append(block)
+        used += len(block)
+    content = ''.join(parts)
+else:
+    content = ('(explore mode: chunk source is NOT inlined. Read the files in '
+               'the index at %s -- also in chunk_file_list -- with your read '
+               'tool, then judge.)' % index_path)
+
 print(json.dumps({
     'chunk_content': content,
     'files': file_list,
+    'chunk_file_list': file_list_arr,
+    'chunk_index_path': index_path,
     'chunk_label': label,
     'chunk_index': idx,
     'num_chunks': num_chunks,
@@ -1204,8 +1301,19 @@ judge reviewer_gpt:
 compute streak_check:
   output: streak_state
   expr:
-    clean_streak: "if(input.approved && length(input.blockers) == 0, input.persisted_clean_streak + 1, 0)"
-    stop: "(input.approved && length(input.blockers) == 0) && (input.persisted_clean_streak + 1 >= if(input.num_chunks > 1, input.num_chunks + 1, 2))"
+    ## ADR-045 engagement guard. In explore mode the chunk source is NOT in
+    ## the prompt, so a pass only counts toward convergence if the reviewer
+    ## actually opened files from the index: files_reviewed must be non-empty
+    ## AND a subset of chunk_file_list (the identity |A∪B| == |A| ⟺ B ⊆ A,
+    ## using only concat/unique/length). In inline mode the source IS in the
+    ## prompt, so the guard short-circuits true. This blocks the Goodhart
+    ## failure of approving a chunk having read nothing / citing hallucinated
+    ## paths; a non-engaged pass cannot increment clean_streak or stop, so the
+    ## loop re-reviews (loop_max backstops). Inlined in clean_streak + stop
+    ## because expr keys cannot reference sibling keys this pass.
+    engaged: "input.context_mode != 'explore' || (length(input.files_reviewed) > 0 && length(unique(concat(input.chunk_file_list, input.files_reviewed))) == length(unique(input.chunk_file_list)))"
+    clean_streak: "if(input.approved && length(input.blockers) == 0 && (input.context_mode != 'explore' || (length(input.files_reviewed) > 0 && length(unique(concat(input.chunk_file_list, input.files_reviewed))) == length(unique(input.chunk_file_list)))), input.persisted_clean_streak + 1, 0)"
+    stop: "(input.approved && length(input.blockers) == 0 && (input.context_mode != 'explore' || (length(input.files_reviewed) > 0 && length(unique(concat(input.chunk_file_list, input.files_reviewed))) == length(unique(input.chunk_file_list))))) && (input.persisted_clean_streak + 1 >= if(input.num_chunks > 1, input.num_chunks + 1, 2))"
     approved: "input.approved || input.confidence == 'low'"
     family: "input.family"
     blockers: "input.blockers"
@@ -1423,7 +1531,7 @@ schema commit_result:
 ## fixes, nothing stays staged and the `diff --cached --quiet` guard makes
 ## NO empty commit.
 tool commit_changes:
-  command: `git -C {{vars.workspace_dir}} add -A && { git -C {{vars.workspace_dir}} reset -q -- .whole_improve_loop.state .whole_improve_loop.verify.sh .whole_improve_loop.verify.log >/dev/null 2>&1 || true; git -C {{vars.workspace_dir}} diff --cached --quiet || git -C {{vars.workspace_dir}} commit -m "chore(improve): production-readiness pass (whole_improve_loop)"; }`
+  command: `git -C {{vars.workspace_dir}} add -A && { git -C {{vars.workspace_dir}} reset -q -- .whole_improve_loop.state .whole_improve_loop.verify.sh .whole_improve_loop.verify.log .whole_improve_loop.chunk.md >/dev/null 2>&1 || true; git -C {{vars.workspace_dir}} diff --cached --quiet || git -C {{vars.workspace_dir}} commit -m "chore(improve): production-readiness pass (whole_improve_loop)"; }`
   output: commit_result
 
 ## ─── Workflow ───────────────────────────────────────────────────
@@ -1476,6 +1584,9 @@ workflow whole_improve_loop:
     previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}",
     chunk_content: "{{outputs.snapshot_chunk.chunk_content}}",
     chunk_files: "{{outputs.snapshot_chunk.files}}",
+    chunk_file_list: "{{outputs.snapshot_chunk.chunk_file_list}}",
+    chunk_index_path: "{{outputs.snapshot_chunk.chunk_index_path}}",
+    context_mode: "{{vars.context_mode}}",
     chunk_label: "{{outputs.snapshot_chunk.chunk_label}}",
     chunk_index: "{{outputs.snapshot_chunk.chunk_index}}",
     num_chunks: "{{outputs.snapshot_chunk.num_chunks}}",
@@ -1487,6 +1598,9 @@ workflow whole_improve_loop:
     previous_scanned_areas: "{{outputs.streak_check.cumulative_scanned_areas}}",
     chunk_content: "{{outputs.snapshot_chunk.chunk_content}}",
     chunk_files: "{{outputs.snapshot_chunk.files}}",
+    chunk_file_list: "{{outputs.snapshot_chunk.chunk_file_list}}",
+    chunk_index_path: "{{outputs.snapshot_chunk.chunk_index_path}}",
+    context_mode: "{{vars.context_mode}}",
     chunk_label: "{{outputs.snapshot_chunk.chunk_label}}",
     chunk_index: "{{outputs.snapshot_chunk.chunk_index}}",
     num_chunks: "{{outputs.snapshot_chunk.num_chunks}}",
@@ -1504,6 +1618,9 @@ workflow whole_improve_loop:
     fix_plan: "{{outputs.reviewer_claude.fix_plan}}",
     confidence: "{{outputs.reviewer_claude.confidence}}",
     scanned_areas: "{{outputs.reviewer_claude.scanned_areas}}",
+    files_reviewed: "{{outputs.reviewer_claude.files_reviewed}}",
+    chunk_file_list: "{{outputs.snapshot_chunk.chunk_file_list}}",
+    context_mode: "{{vars.context_mode}}",
     num_chunks: "{{outputs.snapshot_chunk.num_chunks}}",
     persisted_clean_streak: "{{outputs.snapshot_chunk.persisted_clean_streak}}",
     cursor: "{{outputs.snapshot_chunk.cursor}}"
@@ -1515,6 +1632,9 @@ workflow whole_improve_loop:
     fix_plan: "{{outputs.reviewer_gpt.fix_plan}}",
     confidence: "{{outputs.reviewer_gpt.confidence}}",
     scanned_areas: "{{outputs.reviewer_gpt.scanned_areas}}",
+    files_reviewed: "{{outputs.reviewer_gpt.files_reviewed}}",
+    chunk_file_list: "{{outputs.snapshot_chunk.chunk_file_list}}",
+    context_mode: "{{vars.context_mode}}",
     num_chunks: "{{outputs.snapshot_chunk.num_chunks}}",
     persisted_clean_streak: "{{outputs.snapshot_chunk.persisted_clean_streak}}",
     cursor: "{{outputs.snapshot_chunk.cursor}}"

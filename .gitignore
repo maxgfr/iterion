@@ -47,6 +47,14 @@
 # storage branch — ignore it explicitly.
 .gomodcache/
 
+# Same family again: once devbox runs INSIDE the sandbox (after the
+# HOME-nested-bind-parent fix made $HOME writable), `devbox` regenerates
+# its `.devbox/` virtenv + gen scripts in the bind-mounted worktree, and
+# commit-and-finalize's `git add -A` swept them onto a run storage branch
+# (observed whole-improve-loop run 019ef5d5). Per-run scratch, never
+# source — ignore it.
+.devbox/
+
 # Playwright MCP scratch (console logs + page snapshots written under
 # cwd by the @playwright/mcp server; per-run, not committed). Also
 # catches stray screenshots Playwright drops at the repo root when an
