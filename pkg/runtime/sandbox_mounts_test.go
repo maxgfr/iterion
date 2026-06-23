@@ -13,6 +13,19 @@ import (
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
+// tmpfsDir reports whether spec.Tmpfs contains an entry for dir that is
+// user-owned (uid=<getuid>) and mounted exec — the shape devbox/npm/pip/go
+// need to create siblings under a HOME-nested bind's parent.
+func tmpfsDir(tmpfs []string, dir string) (string, bool) {
+	prefix := dir + ":"
+	for _, tm := range tmpfs {
+		if strings.HasPrefix(tm, prefix) {
+			return tm, true
+		}
+	}
+	return "", false
+}
+
 // TestApplyHostStateMounts_HomeTmpfsIsExec guards a regression: the
 // writable HOME tmpfs that host_state lays down MUST be mounted `exec`.
 // docker defaults --tmpfs to noexec, which blocks anything executable
@@ -96,5 +109,86 @@ func TestApplyHostStateMounts_WarmGoCaches(t *testing.T) {
 		if !found {
 			t.Errorf("expected a bind mount for the go cache %q; spec.Mounts=%v", want, spec.Mounts)
 		}
+	}
+}
+
+// TestApplyHostStateMounts_HomeNestedBindParentsWritable guards the
+// devbox-first-class fix: the Go-cache binds nest under HOME
+// ($HOME/.cache/go-build, $HOME/go/pkg/mod), and docker creates their
+// missing parents ($HOME/.cache, $HOME/go) as root:root — shadowing the
+// writable HOME tmpfs so `devbox run` can't mkdir $HOME/.cache/devbox. The
+// fix lays a user-owned exec tmpfs at each such parent too. Assert both
+// parents are present.
+func TestApplyHostStateMounts_HomeNestedBindParentsWritable(t *testing.T) {
+	if goruntime.GOOS != "linux" {
+		t.Skip("host_state HOME tmpfs is laid down on Linux only")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("the uid-owned HOME tmpfs is only added for a non-root host user")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// Create the caches under the fake HOME so the nested binds fire.
+	for _, rel := range []string{".cache/go-build", "go/pkg/mod"} {
+		if err := os.MkdirAll(filepath.Join(home, rel), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	spec := &sandbox.Spec{}
+	applyHostStateMounts(spec, &ir.Workflow{}, SandboxParams{WorkspacePath: t.TempDir()},
+		func(store.EventType, map[string]interface{}) error { return nil }, iterlog.Nop())
+
+	for _, parent := range []string{filepath.Join(home, ".cache"), filepath.Join(home, "go")} {
+		entry, ok := tmpfsDir(spec.Tmpfs, parent)
+		if !ok {
+			t.Errorf("expected a user-owned tmpfs for the nested-bind parent %q so devbox/go can write siblings; spec.Tmpfs=%v", parent, spec.Tmpfs)
+			continue
+		}
+		opts := entry[strings.Index(entry, ":")+1:]
+		hasExec, hasUID := false, false
+		for _, o := range strings.Split(opts, ",") {
+			switch {
+			case o == "exec":
+				hasExec = true
+			case strings.HasPrefix(o, "uid="):
+				hasUID = true
+			}
+		}
+		if !hasExec || !hasUID {
+			t.Errorf("tmpfs %q must be user-owned (uid=) and exec; got opts %q", parent, opts)
+		}
+	}
+}
+
+// TestHomeNestedBindParents unit-tests the helper that decides which
+// HOME-nested bind parents need a user-owned tmpfs. Direct children of
+// $HOME (.claude/.iterion) need none — their parent is $HOME itself, which
+// is already a tmpfs; only strictly-nested binds (.cache/go-build) do.
+func TestHomeNestedBindParents(t *testing.T) {
+	home := "/home/jo"
+	mounts := []string{
+		"source=/h/.iterion,target=/home/jo/.iterion,type=bind",          // direct child → skip
+		"source=/h/.claude,target=/home/jo/.claude,type=bind",            // direct child → skip
+		"source=/h/.gitconfig,target=/home/jo/.gitconfig,type=bind",      // direct child file → skip
+		"source=/h/gb,target=/home/jo/.cache/go-build,type=bind",         // nested → .cache
+		"source=/h/mod,target=/home/jo/go/pkg/mod,type=bind",             // nested → go
+		"source=/h/x,target=/home/jo/.cache/other,type=bind",             // nested, same parent → dedup
+		"source=/etc/foo,target=/etc/foo,type=bind",                      // outside HOME → skip
+		"source=/h/bin,target=/usr/local/bin/iterion,type=bind,readonly", // outside HOME → skip
+	}
+	got := homeNestedBindParents(home, mounts)
+	want := []string{"/home/jo/.cache", "/home/jo/go"}
+	if len(got) != len(want) {
+		t.Fatalf("homeNestedBindParents = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("homeNestedBindParents = %v, want %v", got, want)
+		}
+	}
+
+	if r := homeNestedBindParents("", mounts); r != nil {
+		t.Errorf("empty homeDir must yield nil, got %v", r)
 	}
 }

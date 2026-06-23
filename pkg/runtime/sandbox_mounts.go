@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strconv"
+	"strings"
 
 	"github.com/SocialGouv/iterion/pkg/backend/rtk"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
@@ -167,18 +168,28 @@ func applyHostStateMounts(
 		if _, alreadySet := spec.Env["HOME"]; !alreadySet {
 			spec.Env["HOME"] = homeDir
 		}
-		// Docker creates the forced-HOME path as a root-owned mount parent
-		// (only the nested .iterion/.claude/.codex binds under it are
-		// writable). Anything that writes elsewhere in $HOME — go's
-		// $HOME/.cache + $HOME/go, devbox/npm state — then hits
-		// "permission denied" on a root-owned $HOME, so devbox isn't
-		// first-class in the sandbox. Lay a uid-owned writable tmpfs at
-		// the home path; the state binds nest on top and still persist to
-		// the host. host_state is Linux + docker only (k8s rejects it),
+		// Docker creates the forced-HOME path as a root-owned mount parent.
+		// Lay a uid-owned writable tmpfs at the home path so processes can
+		// write under $HOME; the state binds nest on top and still persist
+		// to the host. host_state is Linux + docker only (k8s rejects it),
 		// and host-UID alignment is the host's own UID, so the tmpfs uid
 		// matches the effective container user.
+		//
+		// A writable $HOME alone is NOT enough. Docker/runc creates a bind
+		// mount's missing PARENT dirs as root:root — so the Go-cache binds
+		// nested under HOME ($HOME/.cache/go-build, $HOME/go/pkg/mod) leave
+		// $HOME/.cache and $HOME/go root-owned, shadowing the writable tmpfs
+		// for their other children. devbox then can't `mkdir
+		// $HOME/.cache/devbox` and dies before the build — the exact reason
+		// devbox wasn't first-class in the sandbox. So we also lay a
+		// user-owned tmpfs at the top-level-under-HOME component of every
+		// nested bind (.cache, go), making the whole $HOME subtree writable
+		// for devbox/npm/pip/go (incl. $HOME/go/bin) while the deeper binds
+		// still overlay and persist. Direct $HOME/* binds (.claude,
+		// .iterion, …) need nothing extra — their parent is $HOME itself.
 		if goruntime.GOOS == "linux" {
 			if uid := os.Getuid(); uid != 0 {
+				gid := os.Getgid()
 				// `exec` is REQUIRED. docker mounts --tmpfs noexec by
 				// default, which blocks anything executable that lands in
 				// $HOME — most importantly go's auto-downloaded toolchain
@@ -186,8 +197,11 @@ func applyHostStateMounts(
 				// also nix/npm/pip binaries cached under HOME. Without it a
 				// sandboxed `go build` dies with "cannot execute" and the
 				// agent is forced to hand-relocate GOPATH/GOCACHE to /tmp.
-				spec.Tmpfs = append(spec.Tmpfs,
-					fmt.Sprintf("%s:uid=%d,gid=%d,mode=0755,exec", homeDir, uid, os.Getgid()))
+				dirs := append([]string{homeDir}, homeNestedBindParents(homeDir, spec.Mounts)...)
+				for _, dir := range dirs {
+					spec.Tmpfs = append(spec.Tmpfs,
+						fmt.Sprintf("%s:uid=%d,gid=%d,mode=0755,exec", dir, uid, gid))
+				}
 			}
 		}
 	}
@@ -220,6 +234,55 @@ func applyHostStateMounts(
 		"workspace_folder": spec.WorkspaceFolder,
 		"mounts":           mountPairs,
 	})
+}
+
+// homeNestedBindParents returns, for every bind mount in mounts whose
+// target is strictly nested under homeDir (i.e. $HOME/<top>/<more…>), the
+// unique "$HOME/<top>" parent dir. Docker/runc creates these intermediate
+// parents as root:root, so they must be re-laid as user-owned tmpfs for
+// devbox/npm/pip/go to create siblings next to the bind (e.g.
+// $HOME/.cache/devbox alongside a $HOME/.cache/go-build bind, or
+// $HOME/go/bin alongside the $HOME/go/pkg/mod bind). Direct children
+// ($HOME/<x>) are excluded — their parent is $HOME itself, already a
+// user-owned tmpfs.
+func homeNestedBindParents(homeDir string, mounts []string) []string {
+	if homeDir == "" {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range mounts {
+		target := mountTarget(m)
+		if target == "" {
+			continue
+		}
+		rel, err := filepath.Rel(homeDir, target)
+		if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+			continue // not under homeDir
+		}
+		parts := strings.Split(rel, string(filepath.Separator))
+		if len(parts) < 2 {
+			continue // direct child of $HOME — parent is $HOME itself
+		}
+		parent := filepath.Join(homeDir, parts[0])
+		if !seen[parent] {
+			seen[parent] = true
+			out = append(out, parent)
+		}
+	}
+	return out
+}
+
+// mountTarget extracts the target= path from a docker --mount spec entry
+// of the form "source=…,target=…,type=bind[,readonly]". Returns "" when
+// the entry carries no target= field.
+func mountTarget(entry string) string {
+	for _, field := range strings.Split(entry, ",") {
+		if v, ok := strings.CutPrefix(field, "target="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // applyHostUIDRemap enforces the "container UID == host UID" invariant

@@ -103,6 +103,19 @@ example), iterion respects the spec and emits a
 `sandbox_uid_mismatch_warning` so the operator knows why writes back
 to the mounted trees may end up owned by an unexpected UID.
 
+**Writable `$HOME` (devbox / version managers first-class).** When
+`host_state: auto` lays the host-UID-owned tmpfs at `$HOME` (Linux), it
+also lays a user-owned tmpfs at the top-level-under-`$HOME` parent of
+every nested bind it adds (e.g. `$HOME/.cache` for the `$HOME/.cache/go-build`
+bind, `$HOME/go` for `$HOME/go/pkg/mod`). Docker creates a bind's missing
+parents as `root:root`, which would otherwise leave `$HOME/.cache`
+unwritable and break `devbox run` (`mkdir … '/home/.../.cache/devbox':
+Permission denied`) as well as `go install` (`$HOME/go/bin`). With the
+parents re-laid user-owned, the whole `$HOME` subtree is writable, so
+version-manager wrappers (`devbox`, `asdf`, `mise`) and `go`/`npm`/`pip`
+caches all work inside the sandbox. The nested binds still overlay at
+their deeper paths and persist to the host.
+
 **Overlap handling:** when the workspace bind-mount already contains
 one of the candidate paths (typically a project-local `<repo>/.iterion/`
 opt-in store), the redundant host_state mount is skipped — Docker's

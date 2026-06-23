@@ -55,10 +55,18 @@ to branch `willy/iterion-code-quality-2026-06-23` (cleanups as one commit).
    in the same commit (`TestIOTaskRoundTrip` asserts every new field survives
    `ToIOTask→JSON→FromIOTask`). Verified by code-trace that the runner consumes
    them via `Task.BuildSystemPrompt()` after `FromIOTask`.
-3. **`devbox` can't run inside the sandbox** — it can't write `~/.cache/devbox`
-   as the unprivileged container user, so the CLAUDE.md `devbox run -- …`
-   convention dies before the build; the fixer correctly fell back to bare `go`.
-   `verify-build` skill now documents this fallback.
+3. **`devbox` couldn't run inside the sandbox → FIXED in the engine.** The
+   `devbox run -- …` convention died with `mkdir: cannot create directory
+   '/home/.../.cache/devbox': Permission denied` (run 019ef550), so the fixer
+   fell back to bare `go`. Root cause: `host_state: auto` lays a user-owned
+   tmpfs at `$HOME`, but the Go-cache binds nested under it
+   (`$HOME/.cache/go-build`, `$HOME/go/pkg/mod`) made docker create the parents
+   `$HOME/.cache` / `$HOME/go` as `root:root`, shadowing the writable tmpfs so
+   devbox couldn't mkdir its cache. Fixed by `homeNestedBindParents` in
+   [pkg/runtime/sandbox_mounts.go](../../pkg/runtime/sandbox_mounts.go), which
+   also lays a user-owned tmpfs at each nested-bind parent — the whole `$HOME`
+   subtree is now writable and devbox is first-class. `verify-build` skill
+   updated to prefer `devbox run` again.
 4. **Reviewer context overflow on large repos → MITIGATED.** Run 2 ended
    `failed_resumable` when `reviewer_gpt` (gpt-5.5 forfait) hit
    `context_length_exceeded` at review_loop 11. Measured: the accumulated
