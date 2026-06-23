@@ -12,6 +12,53 @@ that catch a real regression, NOT coverage %.
 
 ---
 
+## 2026-06-23 — type-selection validation: bot-chooses + multi-type (runs 019ef53b + 019ef54d)
+- Status: **validated** — two more clean cross-family convergences exercising the
+  type-selection paths the first run didn't.
+- Versions: bot 0.1.0 · iterion @ d665317 (post-merge of this work)
+- Method: both `--store-dir .iterion` (visible in the operator's studio) `--merge-into none`.
+  - **Run A — "bot chooses"** (`019ef53b`, nova-mosh-prismfox): `--var target=pkg/secrets`,
+    NO test-type checkboxes. The bot **chose Unit only**, explicitly: *"operator left
+    all types unset → I choose"*, and **excluded the Mongo stores** as "integration
+    territory, out of scope without a harness", citing the anti-façade doctrine. Targeted
+    security-relevant pure logic (path-traversal rejection, tenant isolation, OAuth-kind
+    validation, Codex auth fallback). Converged cross-family → commit **2663ac6** on
+    `iterion/run/nova-mosh-prismfox-d157`: 5 test files, 342 insertions, coverage 46.3%→
+    (~70% on the testable surface). The *modest* jump is the right signal — it covered only
+    what's meaningfully testable instead of writing façade Mongo tests to game the %.
+  - **Run B — multi-type unit+integration** (`019ef54d`, wonky-thrash-riffboi):
+    `--var test_unit=true --var test_integration=true --var target=pkg/store`. The plan
+    addressed **both** types, correctly categorized: Unit = pure in-memory helpers
+    (`IsTerminal`, tenant/watched-issue, snapshot-ref); Integration = `FilesystemRunStore`
+    crossing the real FS via the repo's existing `tmpStore()` helper (CAS status writes,
+    checkpoint round-trips, event-range reads, `PublishInboxEvent`) — "matches the house
+    style of existing `store_test.go`". 10 funcs / 58 assertions; coverage **62.7%→70.7%**.
+    Converged cross-family → commit **bf775d6** on `iterion/run/wonky-thrash-riffboi-b057`.
+- Value: confirms the two selection paths the first run left untested — auto type-choice
+  (with honest exclusion of un-harnessed code) and explicit multi-type (unit+integration
+  split matched to the repo's helpers). All 3 dogfoods (pkg/log, pkg/secrets, pkg/store)
+  converged cross-family with the deterministic gate passing first try (no repair loop).
+  The OpenAI forfait held for both (reviewer_gpt ~$0.02 each).
+- Findings:
+  - **prepare_commit session-fork is consistently dropped** even on a fresh (non-resume)
+    run: "parent session has no recorded provider fingerprint" → it starts a fresh session
+    and re-reads `git diff HEAD` to build the commit. ROOT CAUSE: the
+    `streak_check -> prepare_commit with {_session_id: …}` edge carries the session id but
+    NOT `_session_fingerprint`, and the fork-safety check at
+    [claude_code.go:1888](../../pkg/backend/delegate/claude_code.go) requires it. **Pre-existing
+    and shared with feature-dev** (same fork pattern), benign (the commit is correct; minor
+    extra cost re-reading the tree). Optional fix: add
+    `_session_fingerprint: "{{outputs.simplify._session_fingerprint}}"` to that edge to
+    restore cheap inheritance (do in a worktree; verify it resolves + same-provider only).
+  - Run B's prepare_commit labeled the commit subject "unit coverage" though it includes
+    integration tests — cosmetic (the fresh-session prepare_commit lacks the plan's
+    type breakdown; the fork fix above would also tighten this).
+  - The dogfood tests live on their storage branches (2663ac6, bf775d6); `git merge` them
+    into a feature branch if you want the pkg/secrets + pkg/store coverage (not auto-merged;
+    `--merge-into none`).
+- Lessons for next run: e2e still unexercised (needs a target with a real e2e harness);
+  consider a run that lets the bot pick the SCOPE too (empty `target`).
+
 ## 2026-06-23 — first dogfood, pkg/log unit (runs 019ef4fa + 019ef505)
 - Status: **validated** — full cross-family convergence to a clean `test:`
   commit. (Surfaced + fixed one engine bug along the way; the GPT half was
