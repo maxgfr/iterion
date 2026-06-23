@@ -2878,15 +2878,20 @@ print(json.dumps({
 ##                                       fallback element inherits it
 ##                                       when its `provider:model` slot
 ##                                       has no model part).
-##   ITERION_SEC_AUDIT_PROVIDER_CHAIN — pin the chain. Default
+##   ITERION_SEC_AUDIT_PROVIDER_CHAIN — opt-in per-element provider:model
+##                                       chain. DEFAULT IS EMPTY → the
+##                                       node runs on the first-class model
+##                                       above (opus). Set e.g.
 ##                                       `zai:glm-5.2,anthropic:claude-opus-4-8`
-##                                       — 1M-ctx glm first, opus on
-##                                       fall-through. See
-##                                       docs/adr/004-provider-fallback-chain.md.
+##                                       to put z.ai's 1M-ctx glm first with
+##                                       opus on fall-through (ADR-043: GLM is
+##                                       a second-tier opt-in lane; opus is
+##                                       first-class + reliable structured
+##                                       output). See ADR-004.
 agent triage:
   backend: "${ITERION_SEC_AUDIT_BACKEND:-claude_code}"
-  model: "${ITERION_SEC_AUDIT_MODEL:-glm-5.2}"
-  provider: "${ITERION_SEC_AUDIT_PROVIDER_CHAIN:-zai:glm-5.2,anthropic:claude-opus-4-8}"
+  model: "${ITERION_SEC_AUDIT_MODEL:-claude-opus-4-8}"
+  provider: "${ITERION_SEC_AUDIT_PROVIDER_CHAIN:-}"
   reasoning_effort: "${ITERION_SEC_AUDIT_EFFORT_TRIAGE:-high}"
   input: triage_input
   output: triage_output
@@ -3058,8 +3063,8 @@ print(json.dumps({
 ## first attempt without burning extra retry budget on v2.
 judge voter_v1:
   backend: "${ITERION_SEC_AUDIT_BACKEND:-claude_code}"
-  model: "${ITERION_SEC_AUDIT_VOTER_V1_MODEL:-glm-5.2}"
-  provider: "${ITERION_SEC_AUDIT_PROVIDER_CHAIN:-zai:glm-5.2,anthropic:claude-opus-4-8}"
+  model: "${ITERION_SEC_AUDIT_VOTER_V1_MODEL:-claude-opus-4-8}"
+  provider: "${ITERION_SEC_AUDIT_PROVIDER_CHAIN:-}"
   reasoning_effort: "${ITERION_SEC_AUDIT_EFFORT_VOTER:-high}"
   input: voter_input
   output: voter_output
@@ -3089,8 +3094,8 @@ judge voter_v2:
 
 judge voter_v3:
   backend: "${ITERION_SEC_AUDIT_BACKEND:-claude_code}"
-  model: "${ITERION_SEC_AUDIT_VOTER_V3_MODEL:-glm-5.2}"
-  provider: "${ITERION_SEC_AUDIT_PROVIDER_CHAIN:-zai:glm-5.2,anthropic:claude-opus-4-8}"
+  model: "${ITERION_SEC_AUDIT_VOTER_V3_MODEL:-claude-opus-4-8}"
+  provider: "${ITERION_SEC_AUDIT_PROVIDER_CHAIN:-}"
   reasoning_effort: "${ITERION_SEC_AUDIT_EFFORT_VOTER:-high}"
   input: voter_input
   output: voter_output
