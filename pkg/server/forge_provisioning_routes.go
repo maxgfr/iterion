@@ -42,6 +42,10 @@ type forgeEnableReq struct {
 	ConnectionID string   `json:"connection_id"`
 	Repo         string   `json:"repo"`
 	BotIDs       []string `json:"bot_ids"`
+	// ScheduleCrons overrides a scheduled bot's cron (botID → 5-field cron)
+	// from the enable dialog's cron picker; empty falls back to the manifest
+	// suggested_cron.
+	ScheduleCrons map[string]string `json:"schedule_crons,omitempty"`
 }
 
 func (s *Server) handleEnableForgeRepoBots(w http.ResponseWriter, r *http.Request) {
@@ -65,11 +69,12 @@ func (s *Server) handleEnableForgeRepoBots(w http.ResponseWriter, r *http.Reques
 	}
 	ctx := store.WithTenant(r.Context(), teamID)
 	res, err := s.forgeOrchestrator.Provision(ctx, forge.ProvisionRequest{
-		TenantID:     teamID,
-		ConnectionID: req.ConnectionID,
-		RepoFullName: strings.TrimSpace(req.Repo),
-		BotIDs:       req.BotIDs,
-		ActorID:      id.UserID,
+		TenantID:      teamID,
+		ConnectionID:  req.ConnectionID,
+		RepoFullName:  strings.TrimSpace(req.Repo),
+		BotIDs:        req.BotIDs,
+		ScheduleCrons: req.ScheduleCrons,
+		ActorID:       id.UserID,
 	})
 	if err != nil {
 		s.writeForgeProvisionError(w, err)

@@ -48,6 +48,20 @@ export function primaryGroup(b: BotEntry): TriggerGroup {
   return "board";
 }
 
+/** hasSchedule reports whether a bot declares a schedule invocation. */
+export function hasSchedule(b: BotEntry): boolean {
+  return (b.invocations ?? []).some((i) => i.kind === "schedule");
+}
+
+/** scheduleCronFor returns the bot's first schedule invocation's suggested
+ *  cron (the default shown in the enable dialog's cron picker), or "". */
+export function scheduleCronFor(b: BotEntry): string {
+  for (const inv of b.invocations ?? []) {
+    if (inv.kind === "schedule") return inv.schedule?.suggested_cron ?? "";
+  }
+  return "";
+}
+
 /** triggerChips summarises how a bot is triggered, for display: /commands,
  *  forge events, and a clock-prefixed cron. Falls back to a legacy forge:
  *  block's events. */

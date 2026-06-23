@@ -177,10 +177,17 @@ export async function enableForgeRepoBots(
   connID: string,
   repo: string,
   botIDs: string[],
+  scheduleCrons?: Record<string, string>,
 ): Promise<ForgeProvisionResult> {
   return request(`/teams/${teamID}/forge/repo-bots`, {
     method: "POST",
-    body: JSON.stringify({ connection_id: connID, repo, bot_ids: botIDs }),
+    body: JSON.stringify({
+      connection_id: connID,
+      repo,
+      bot_ids: botIDs,
+      schedule_crons:
+        scheduleCrons && Object.keys(scheduleCrons).length > 0 ? scheduleCrons : undefined,
+    }),
   });
 }
 

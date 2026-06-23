@@ -82,6 +82,9 @@ type ProvisionRequest struct {
 	RepoFullName string // "owner/repo" (GitLab: namespace/project path)
 	BotIDs       []string
 	ActorID      string // operator who triggered it (audit / created_by)
+	// ScheduleCrons overrides a bot's schedule cron (botID → 5-field cron) for
+	// the operator's chosen cadence; falls back to the manifest suggested_cron.
+	ScheduleCrons map[string]string
 }
 
 // ProvisionResult reports what the orchestrator created or reused.
@@ -325,7 +328,7 @@ func (o *Orchestrator) Provision(ctx context.Context, req ProvisionRequest) (Pro
 	}
 
 	// Materialise cloud schedules for the enabled bots' schedule invocations.
-	if err := o.syncSchedules(ctx, req.TenantID, ri.ID, invByBot, req.ActorID); err != nil {
+	if err := o.syncSchedules(ctx, req.TenantID, ri.ID, invByBot, req.ScheduleCrons, req.ActorID); err != nil {
 		return ProvisionResult{}, err
 	}
 
@@ -455,7 +458,7 @@ func (o *Orchestrator) Deprovision(ctx context.Context, tenantID, integrationID 
 // schedule invocation (with a suggested cron) of the enabled bots, so the
 // cloud scheduler fires them. Clean-slate (delete-then-create) keeps it
 // idempotent across re-provisions. No-op when no schedule store is wired.
-func (o *Orchestrator) syncSchedules(ctx context.Context, tenantID, integrationID string, invByBot map[string][]bundle.Invocation, actor string) error {
+func (o *Orchestrator) syncSchedules(ctx context.Context, tenantID, integrationID string, invByBot map[string][]bundle.Invocation, crons map[string]string, actor string) error {
 	if o.Schedules == nil {
 		return nil
 	}
@@ -468,9 +471,13 @@ func (o *Orchestrator) syncSchedules(ctx context.Context, tenantID, integrationI
 			if inv.Kind != bundle.InvocationKindSchedule || inv.Schedule == nil {
 				continue
 			}
+			// Operator's chosen cron overrides the manifest suggested_cron.
 			cron := strings.TrimSpace(inv.Schedule.SuggestedCron)
+			if ov := strings.TrimSpace(crons[bot]); ov != "" {
+				cron = ov
+			}
 			if cron == "" {
-				continue // a schedule invocation with no cron can't fire
+				continue // no cron (no suggestion, no override) → can't fire
 			}
 			next, err := cloudsched.NextFire(cron, now)
 			if err != nil {

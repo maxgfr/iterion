@@ -17,7 +17,9 @@ import { Select } from "@/components/ui/Select";
 import {
   GROUP_LABELS,
   GROUP_ORDER,
+  hasSchedule,
   primaryGroup,
+  scheduleCronFor,
   triggerChips,
 } from "@/lib/triggers";
 
@@ -46,6 +48,9 @@ export function EnableRepoPanel({
     preselectBot ? [preselectBot] : [],
   );
   const [preview, setPreview] = useState<ForgeEnablePreview | null>(null);
+  // Per-bot cron overrides for scheduled bots (bot name → cron); empty entries
+  // fall back to the manifest suggested_cron server-side.
+  const [scheduleCrons, setScheduleCrons] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
   const loadRepos = async () => {
@@ -95,7 +100,16 @@ export function EnableRepoPanel({
     if (!repo || selectedBots.length === 0) return;
     setBusy(true);
     try {
-      await enableForgeRepoBots(teamID, conn.id, repo, selectedBots);
+      // Collect the cron for each selected scheduled bot (operator override or
+      // the suggested default), so the server provisions the chosen cadence.
+      const crons: Record<string, string> = {};
+      for (const b of repoBots) {
+        if (selectedBots.includes(b.name) && hasSchedule(b)) {
+          const cron = (scheduleCrons[b.name] ?? scheduleCronFor(b)).trim();
+          if (cron) crons[b.name] = cron;
+        }
+      }
+      await enableForgeRepoBots(teamID, conn.id, repo, selectedBots, crons);
       onDone();
     } catch (e) {
       onError(errorMessage(e));
@@ -167,27 +181,42 @@ export function EnableRepoPanel({
                   <div className="text-caption text-fg-muted mb-1">{GROUP_LABELS[group]}</div>
                   <ul className="space-y-2">
                     {inGroup.map((b) => (
-                      <li key={b.name} className="flex gap-2">
-                        <Checkbox
-                          id={`fb-${b.name}`}
-                          checked={selectedBots.includes(b.name)}
-                          onChange={() => toggleBot(b.name)}
-                          className="mt-1"
-                        />
-                        <label htmlFor={`fb-${b.name}`} className="text-sm">
-                          <span className="font-medium">{b.display_name || b.name}</span>{" "}
-                          <span className="font-mono text-fg-muted">{b.name}</span>
-                          <span className="mt-0.5 flex flex-wrap gap-1">
-                            {triggerChips(b).map((c) => (
-                              <span
-                                key={c}
-                                className="inline-block font-mono text-caption text-fg-muted bg-surface-1 border border-border-subtle rounded px-1"
-                              >
-                                {c}
-                              </span>
-                            ))}
-                          </span>
-                        </label>
+                      <li key={b.name} className="space-y-1">
+                        <div className="flex gap-2">
+                          <Checkbox
+                            id={`fb-${b.name}`}
+                            checked={selectedBots.includes(b.name)}
+                            onChange={() => toggleBot(b.name)}
+                            className="mt-1"
+                          />
+                          <label htmlFor={`fb-${b.name}`} className="text-sm">
+                            <span className="font-medium">{b.display_name || b.name}</span>{" "}
+                            <span className="font-mono text-fg-muted">{b.name}</span>
+                            <span className="mt-0.5 flex flex-wrap gap-1">
+                              {triggerChips(b).map((c) => (
+                                <span
+                                  key={c}
+                                  className="inline-block font-mono text-caption text-fg-muted bg-surface-1 border border-border-subtle rounded px-1"
+                                >
+                                  {c}
+                                </span>
+                              ))}
+                            </span>
+                          </label>
+                        </div>
+                        {selectedBots.includes(b.name) && hasSchedule(b) && (
+                          <div className="ml-6 flex items-center gap-2">
+                            <span className="text-caption text-fg-muted">cron</span>
+                            <Input
+                              className="w-40 font-mono text-xs"
+                              value={scheduleCrons[b.name] ?? scheduleCronFor(b)}
+                              onChange={(e) =>
+                                setScheduleCrons((s) => ({ ...s, [b.name]: e.target.value }))
+                              }
+                              aria-label={`Cron schedule for ${b.display_name || b.name}`}
+                            />
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>

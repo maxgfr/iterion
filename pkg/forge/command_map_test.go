@@ -143,7 +143,7 @@ func TestSyncSchedules_CreatesAndIsIdempotent(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if err := o.syncSchedules(ctx, "t1", "ri-1", invByBot, "u1"); err != nil {
+	if err := o.syncSchedules(ctx, "t1", "ri-1", invByBot, nil, "u1"); err != nil {
 		t.Fatalf("syncSchedules: %v", err)
 	}
 	rows, _ := mem.ListByIntegration(ctx, "t1", "ri-1")
@@ -155,11 +155,33 @@ func TestSyncSchedules_CreatesAndIsIdempotent(t *testing.T) {
 	}
 
 	// Re-sync replaces, doesn't duplicate.
-	if err := o.syncSchedules(ctx, "t1", "ri-1", invByBot, "u1"); err != nil {
+	if err := o.syncSchedules(ctx, "t1", "ri-1", invByBot, nil, "u1"); err != nil {
 		t.Fatal(err)
 	}
 	rows2, _ := mem.ListByIntegration(ctx, "t1", "ri-1")
 	if len(rows2) != 1 {
 		t.Errorf("re-sync must not duplicate, got %d", len(rows2))
+	}
+}
+
+// TestSyncSchedules_CronOverride: the operator's chosen cron wins over the
+// manifest suggested_cron.
+func TestSyncSchedules_CronOverride(t *testing.T) {
+	mem := cloudsched.NewMemoryStore()
+	o := &Orchestrator{
+		Schedules: mem,
+		Now:       func() time.Time { return time.Unix(1700000000, 0).UTC() },
+		NewID:     func() string { return "s1" },
+	}
+	invByBot := map[string][]bundle.Invocation{
+		"sec-audit-source": {{Kind: bundle.InvocationKindSchedule, Schedule: &bundle.InvocationSchedule{SuggestedCron: "0 2 * * 1"}}},
+	}
+	ctx := context.Background()
+	if err := o.syncSchedules(ctx, "t1", "ri-1", invByBot, map[string]string{"sec-audit-source": "30 9 * * *"}, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := mem.ListByIntegration(ctx, "t1", "ri-1")
+	if len(rows) != 1 || rows[0].Cron != "30 9 * * *" {
+		t.Errorf("operator cron override should win, got %+v", rows)
 	}
 }
