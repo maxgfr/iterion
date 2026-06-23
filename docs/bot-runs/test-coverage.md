@@ -12,6 +12,40 @@ that catch a real regression, NOT coverage %.
 
 ---
 
+## 2026-06-23 — scope-auto run + a NEW engine finding (run 019ef5d3)
+- Status: **partial** — the bot's scope-auto path validated; run failed mid-loop on a
+  distinct gpt-5.5-forfait engine limit (NOT a bot defect, NOT the accumulator fix).
+- Method: `--store-dir .iterion --merge-into none`, **no `target`, no test-type vars**
+  (the last untested path: bot picks BOTH scope and types). Engine binary @356053e8b
+  (has the `tail()` fix).
+- Result: **scope-auto + type-auto works** — with nothing specified, plan surveyed the
+  repo ("479 test files; real gaps are zero-test packages"), **picked 3 zero-test
+  packages** with branching logic + verifiable oracles (`shellquote` shell-injection
+  boundary, `proc` iterion-binary locator, `dsl/types` enum→keyword `String()`),
+  **skipped** trivial glue + Mongo-bound code (anti-façade), chose **unit** with
+  mutation-test framing. act wrote 4 test files; **verify gate passed** first try;
+  reviewer_claude approved; reviewer_gpt found a blocker → `fix_gpt` → **FAILED**.
+- **`tail()` fix validated LIVE**: `streak_check` evaluated the capped accumulator
+  twice with NO "unknown function" error — the engine resolves `tail()` correctly.
+- **NEW engine finding (distinct from the scanned_areas cap)**: `fix_gpt` (claw
+  `openai/gpt-5.5`, `session: inherit` from reviewer_gpt + Run C's multi-file diff)
+  hit `context_length_exceeded` on its FIRST call — the inherited reviewer session
+  (git-diff + file-read tool outputs across 3 packages) overflows gpt-5.5-forfait's
+  window. generation.go's reactive force-compaction then retried and emitted
+  `API error 400 {"detail":"Unsupported content type"}` — the compaction/session-resume
+  path produced a request the forfait endpoint rejects. This is a claw/generation.go +
+  gpt-5.5-forfait issue affecting ALL gpt loop bots (feature-dev, whole-improve-loop,
+  branch-improve-loop, …), NOT specific to test-coverage. Runs 2/A/B converged because
+  single-package diffs kept the gpt session under the window; Run C's 3-package
+  scope-auto diff crossed it. No clean bot-level mitigation (session:inherit is the
+  proven cache/context pattern; the diff size is inherent). Fix needs a focused
+  generation.go investigation (why the compacted retry → 400) + likely a
+  forfait-window-aware session/tool-output cap — deferred for an explicit decision.
+- Lessons: scope-auto can pick a multi-package scope whose review/fix gpt session
+  exceeds gpt-5.5-forfait's window; the bot is correct, the engine's gpt-overflow
+  recovery is not yet robust for the fixer's inherited session. Run's 4 auto-picked
+  tests left in the preserved worktree (unfinished — open gpt blocker — not repatriated).
+
 ## 2026-06-23 — type-selection validation: bot-chooses + multi-type (runs 019ef53b + 019ef54d)
 - Status: **validated** — two more clean cross-family convergences exercising the
   type-selection paths the first run didn't.
