@@ -1176,6 +1176,16 @@ func validateRepoTarget(ctx context.Context, repoURL, repoSHA string) error {
 		return fmt.Errorf("runner: reject repo url: %w", err)
 	}
 	allowPrivate := os.Getenv("ITERION_RUNNER_CLONE_ALLOW_PRIVATE") == "1"
+	// DEFENCE-IN-DEPTH, NOT COMPLETE: this resolves the host to confirm it is a
+	// public address, but the resolved IP is intentionally not bound to the
+	// subsequent `git clone/fetch` (runGit), which re-resolves the hostname at
+	// connect time. A DNS-rebinding answer (public IP here, internal IP for git)
+	// or a 302 redirect to an internal address therefore still slips past this
+	// check — a real TOCTOU. The complete fix is connect-time enforcement
+	// (route runner git through the netproxy / a pod egress policy) or IP
+	// pinning; tracked on the board (SSRF DNS-rebinding TOCTOU in
+	// validateRepoTarget, source:sec-audit-self). Keep this pre-check as the
+	// first line, but do not treat it as full SSRF protection.
 	if _, err := httpdial.ResolvePublicHost(ctx, host, !allowPrivate); err != nil {
 		return fmt.Errorf("runner: repo host %q is not a public address (set ITERION_RUNNER_CLONE_ALLOW_PRIVATE=1 to allow internal forges): %w", host, err)
 	}
