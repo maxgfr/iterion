@@ -367,16 +367,28 @@ type jsonHumanDecl struct {
 }
 
 type jsonToolNodeDecl struct {
-	Name     string            `json:"name,omitempty"`
-	Command  string            `json:"command,omitempty"`
-	Script   string            `json:"script,omitempty"`
-	Language string            `json:"language,omitempty"`
-	Input    string            `json:"input,omitempty"`
-	Output   string            `json:"output,omitempty"`
-	Publish  string            `json:"publish,omitempty"`
-	Await    string            `json:"await,omitempty"`
-	Sandbox  *jsonSandboxBlock `json:"sandbox,omitempty"`
-	RTK      string            `json:"rtk,omitempty"`
+	Name          string             `json:"name,omitempty"`
+	Command       string             `json:"command,omitempty"`
+	Script        string             `json:"script,omitempty"`
+	Language      string             `json:"language,omitempty"`
+	Input         string             `json:"input,omitempty"`
+	Output        string             `json:"output,omitempty"`
+	Publish       string             `json:"publish,omitempty"`
+	Await         string             `json:"await,omitempty"`
+	Sandbox       *jsonSandboxBlock  `json:"sandbox,omitempty"`
+	RTK           string             `json:"rtk,omitempty"`
+	Goal          string             `json:"goal,omitempty"`
+	Postcondition string             `json:"postcondition,omitempty"`
+	Policy        string             `json:"policy,omitempty"`
+	Recovery      *jsonRecoveryBlock `json:"recovery,omitempty"`
+}
+
+// jsonRecoveryBlock is the JSON form of an ast.RecoveryBlock (ADR-044).
+type jsonRecoveryBlock struct {
+	MaxRepairAttempts int      `json:"max_repair_attempts,omitempty"`
+	MaxAgentAttempts  int      `json:"max_agent_attempts,omitempty"`
+	Model             string   `json:"model,omitempty"`
+	AgentTools        []string `json:"agent_tools,omitempty"`
 }
 
 // jsonSandboxBlock is the JSON form of an ast.SandboxBlock. The
@@ -407,6 +419,30 @@ type jsonSandboxNetworkBlock struct {
 	Preset  string   `json:"preset,omitempty"`
 	Rules   []string `json:"rules,omitempty"`
 	Inherit string   `json:"inherit,omitempty"`
+}
+
+func recoveryBlockToJSON(r *RecoveryBlock) *jsonRecoveryBlock {
+	if r == nil {
+		return nil
+	}
+	return &jsonRecoveryBlock{
+		MaxRepairAttempts: r.MaxRepairAttempts,
+		MaxAgentAttempts:  r.MaxAgentAttempts,
+		Model:             r.Model,
+		AgentTools:        r.AgentTools,
+	}
+}
+
+func recoveryBlockFromJSON(j *jsonRecoveryBlock) *RecoveryBlock {
+	if j == nil {
+		return nil
+	}
+	return &RecoveryBlock{
+		MaxRepairAttempts: j.MaxRepairAttempts,
+		MaxAgentAttempts:  j.MaxAgentAttempts,
+		Model:             j.Model,
+		AgentTools:        j.AgentTools,
+	}
 }
 
 func sandboxBlockToJSON(s *SandboxBlock) *jsonSandboxBlock {
@@ -622,16 +658,20 @@ func toJSON(f *File) *jsonFile {
 	}
 	for _, t := range f.Tools {
 		jf.Tools = append(jf.Tools, &jsonToolNodeDecl{
-			Name:     t.Name,
-			Command:  t.Command,
-			Script:   t.Script,
-			Language: t.Language,
-			Input:    t.Input,
-			Output:   t.Output,
-			Publish:  t.Publish,
-			Await:    awaitModeToStr[t.Await],
-			Sandbox:  sandboxBlockToJSON(t.Sandbox),
-			RTK:      t.RTK,
+			Name:          t.Name,
+			Command:       t.Command,
+			Script:        t.Script,
+			Language:      t.Language,
+			Input:         t.Input,
+			Output:        t.Output,
+			Publish:       t.Publish,
+			Await:         awaitModeToStr[t.Await],
+			Sandbox:       sandboxBlockToJSON(t.Sandbox),
+			RTK:           t.RTK,
+			Goal:          t.Goal,
+			Postcondition: t.Postcondition,
+			Policy:        t.Policy,
+			Recovery:      recoveryBlockToJSON(t.Recovery),
 		})
 	}
 	for _, c := range f.Computes {
@@ -1167,16 +1207,20 @@ func fromJSON(jf *jsonFile) (*File, error) {
 			return nil, fmt.Errorf("astjson: unknown await mode %q", jt.Await)
 		}
 		f.Tools = append(f.Tools, &ToolNodeDecl{
-			Name:     jt.Name,
-			Command:  jt.Command,
-			Script:   jt.Script,
-			Language: jt.Language,
-			Input:    jt.Input,
-			Output:   jt.Output,
-			Publish:  jt.Publish,
-			Await:    aw,
-			Sandbox:  sandboxBlockFromJSON(jt.Sandbox),
-			RTK:      jt.RTK,
+			Name:          jt.Name,
+			Command:       jt.Command,
+			Script:        jt.Script,
+			Language:      jt.Language,
+			Input:         jt.Input,
+			Output:        jt.Output,
+			Publish:       jt.Publish,
+			Await:         aw,
+			Sandbox:       sandboxBlockFromJSON(jt.Sandbox),
+			RTK:           jt.RTK,
+			Goal:          jt.Goal,
+			Postcondition: jt.Postcondition,
+			Policy:        jt.Policy,
+			Recovery:      recoveryBlockFromJSON(jt.Recovery),
 		})
 	}
 

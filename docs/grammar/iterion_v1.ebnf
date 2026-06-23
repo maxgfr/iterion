@@ -206,11 +206,25 @@ human_prop = "input"              ":" IDENT             NEWLINE
 
 tool_node_decl = "tool" IDENT ":" NEWLINE INDENT { tool_node_prop } DEDENT ;
 
-tool_node_prop = "command" ":" STRING_LIT NEWLINE
-               | "input"   ":" IDENT     NEWLINE
-               | "output"  ":" IDENT     NEWLINE
-               | "publish" ":" IDENT     NEWLINE
-               | "await"   ":" await_mode NEWLINE ;
+tool_node_prop = "command"       ":" STRING_LIT NEWLINE
+               | "input"         ":" IDENT       NEWLINE
+               | "output"        ":" IDENT       NEWLINE
+               | "publish"       ":" IDENT       NEWLINE
+               | "await"         ":" await_mode  NEWLINE
+               (* Verified Action quad (ADR-044) — all optional. *)
+               | "goal"          ":" STRING_LIT  NEWLINE
+               | "postcondition" ":" STRING_LIT  NEWLINE
+               | "policy"        ":" policy_value NEWLINE
+               | recovery_block ;
+
+policy_value = "required" | "recover" | "best_effort" ;
+
+recovery_block = "recovery" ":" NEWLINE INDENT { recovery_prop } DEDENT ;
+
+recovery_prop = "max_repair_attempts" ":" INT_LIT   NEWLINE
+              | "max_agent_attempts"  ":" INT_LIT   NEWLINE
+              | "model"               ":" STRING_LIT NEWLINE
+              | "agent_tools"         ":" tool_list  NEWLINE ;
 
 (* ---- Nœuds : compute (déterministe, sans LLM ni shell) ---- *)
 (* Évalue une liste d'expressions sur les namespaces vars / input /

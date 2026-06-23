@@ -157,7 +157,7 @@ Other top-level directories: `studio/` (React/Vite frontend), `examples/` (.iter
 | **Judge** | LLM node producing verdicts (typically no tools) |
 | **Router** | Routing node with 4 modes: `fan_out_all`, `condition`, `round_robin`, `llm` (see `docs/routers.md`) |
 | **Human** | Pause/resume via `interaction: human` (default for human nodes); optional `interaction: llm` or `llm_or_human` can auto-answer or escalate |
-| **Tool** | Direct shell command execution (no LLM) |
+| **Tool** | Direct shell command execution (no LLM). ACTION tool nodes may opt into the **Verified Action** quad (`goal`+`postcondition`+`policy`+`recovery`) so a brittle recipe self-heals (idempotent-skip → recipe → self-repair → agent → policy) instead of hard-blocking; the postcondition is the deterministic truth oracle at every rung. **Gates stay deterministic** — never attach recovery to a `recipe == postcondition` gate (enforced by C103–C106). See [docs/adr/044-adaptive-recovery-for-deterministic-action-nodes.md](docs/adr/044-adaptive-recovery-for-deterministic-action-nodes.md). |
 | **Compute** | Deterministic expression node for derived structured output (no LLM, no shell) |
 | **Done** | Terminal: workflow success |
 | **Fail** | Terminal: workflow failure |

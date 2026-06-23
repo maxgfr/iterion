@@ -1485,11 +1485,85 @@ func (p *parser) parseToolNodeProp(td *ast.ToolNodeDecl, propTok Token) {
 	case TokenRTK:
 		p.expect(TokenColon)
 		td.RTK = p.expectIdent()
+	case TokenIdent:
+		// Verified Action quad (ADR-044). These property names are not
+		// reserved keywords, so they arrive as plain identifiers (the
+		// same convention compute's `expr` block uses).
+		switch propTok.Value {
+		case "goal":
+			p.expect(TokenColon)
+			td.Goal = p.expectString()
+		case "postcondition":
+			p.expect(TokenColon)
+			td.Postcondition = p.expectString()
+		case "policy":
+			p.expect(TokenColon)
+			td.Policy = p.expectIdent()
+		case "recovery":
+			td.Recovery = p.parseRecoveryBlock(propTok)
+		default:
+			p.addError(DiagUnknownProperty, propTok, "unknown tool property '"+propTok.Value+"'")
+			p.skipToNewline()
+		}
 	default:
 		p.addError(DiagUnknownProperty, propTok, "unknown tool property '"+propTok.Value+"'")
 		p.skipToNewline()
 	}
 	p.skipNewlines()
+}
+
+// parseRecoveryBlock parses the indented `recovery:` block of a Verified
+// Action tool node (ADR-044). The `recovery` identifier has already been
+// consumed by the parseToolNodeProp prologue; this consumes the colon and
+// the indented body.
+//
+//	recovery:
+//	  max_repair_attempts: 2
+//	  max_agent_attempts: 1
+//	  model: "anthropic/claude-sonnet-4-6"
+//	  agent_tools: [bash, read_file]
+func (p *parser) parseRecoveryBlock(propTok Token) *ast.RecoveryBlock {
+	p.expect(TokenColon)
+	rb := &ast.RecoveryBlock{Span: ast.Span{Start: p.pos(propTok)}}
+	p.skipNewlines()
+	if _, ok := p.expect(TokenIndent); !ok {
+		// Empty block — recover gracefully.
+		return rb
+	}
+	for {
+		p.skipNewlines()
+		t := p.peek()
+		if t.Type == TokenDedent || t.Type == TokenEOF {
+			if t.Type == TokenDedent {
+				p.next()
+			}
+			break
+		}
+		if t.Type != TokenIdent && !isKeywordToken(t.Type) {
+			p.addError(DiagUnexpectedToken, t, "unexpected token '"+t.Value+"' in recovery block")
+			p.next()
+			p.skipToNewline()
+			continue
+		}
+		name := t.Value
+		p.next()
+		p.expect(TokenColon)
+		switch name {
+		case "max_repair_attempts":
+			rb.MaxRepairAttempts = p.expectInt()
+		case "max_agent_attempts":
+			rb.MaxAgentAttempts = p.expectInt()
+		case "model":
+			rb.Model = p.expectString()
+		case "agent_tools":
+			rb.AgentTools = p.parseToolList()
+		default:
+			p.addError(DiagUnknownProperty, t, "unknown recovery property '"+name+"'")
+			p.skipToNewline()
+		}
+		p.skipNewlines()
+	}
+	return rb
 }
 
 // ---- compute ----

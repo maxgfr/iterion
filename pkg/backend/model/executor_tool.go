@@ -30,16 +30,52 @@ import (
 // The tool policy is checked before execution; denied tools produce an
 // explicit error with the tool_called hook fired (Error != nil).
 func (e *ClawExecutor) executeToolNode(ctx context.Context, node *ir.ToolNode, input map[string]interface{}) (map[string]interface{}, error) {
-	// `script:` body takes precedence over `command:` (IR validation
-	// ensures they're mutually exclusive at compile time, so this is
-	// just a clean dispatch).
-	if node.Script != "" {
-		return e.executeToolNodeScript(ctx, node, input)
+	// Verified Action (ADR-044): a node with a postcondition runs through
+	// the escalation ladder (idempotent-skip → recipe → self-repair →
+	// agent recovery → policy), keying success on the postcondition rather
+	// than the recipe's exit code. Nodes without a postcondition fall
+	// through to the unchanged recipe-only path below (full backward compat).
+	if node.Postcondition != "" {
+		return e.executeVerifiedToolNode(ctx, node, input)
 	}
-	// When the command contains template refs ({{input.X}}) or looks like a
-	// shell command (contains spaces or shell operators), execute as a direct
-	// shell command. Otherwise, use the tool registry.
-	if len(node.CommandRefs) > 0 || looksLikeShellCommand(node.Command) {
+	return e.executeToolNodeRecipe(ctx, node, input)
+}
+
+// recipeKind classifies how a tool node's recipe is executed. The
+// classification is shared by executeToolNodeRecipe (standard path) and
+// runVerifiedRecipe (Verified Action ladder) so the script/shell/registry
+// heuristic lives in exactly one place.
+type recipeKind int
+
+const (
+	recipeScript   recipeKind = iota // `script:` body via an interpreter
+	recipeShell                      // `command:` with template refs or shell metacharacters
+	recipeRegistry                   // bare `command:` resolved as a registered tool name
+)
+
+// recipeKindOf reports how node's recipe should run. `script:` takes
+// precedence over `command:` (IR validation makes them mutually exclusive);
+// a command with template refs or shell metacharacters runs via sh, else it
+// is a bare registered-tool name.
+func recipeKindOf(node *ir.ToolNode) recipeKind {
+	switch {
+	case node.Script != "":
+		return recipeScript
+	case len(node.CommandRefs) > 0 || looksLikeShellCommand(node.Command):
+		return recipeShell
+	default:
+		return recipeRegistry
+	}
+}
+
+// executeToolNodeRecipe runs a tool node's recipe with exit-code = success
+// (the pre-ADR-044 behaviour). It is the rung-2 primitive of the Verified
+// Action ladder and the whole of the non-verified path.
+func (e *ClawExecutor) executeToolNodeRecipe(ctx context.Context, node *ir.ToolNode, input map[string]interface{}) (map[string]interface{}, error) {
+	switch recipeKindOf(node) {
+	case recipeScript:
+		return e.executeToolNodeScript(ctx, node, input)
+	case recipeShell:
 		return e.executeToolNodeShell(ctx, node, input)
 	}
 
@@ -191,8 +227,47 @@ func (e *ClawExecutor) executeToolNodeCommon(
 	resolve func() string,
 	buildCmd func(resolved string) (cmd *exec.Cmd, cleanup func(), err error),
 ) (map[string]interface{}, error) {
+	res, setupErr := e.runToolNodeCore(ctx, node, toolName, resolve, buildCmd)
+	if setupErr != nil {
+		return nil, setupErr
+	}
+	if res.runErr != nil {
+		return nil, fmt.Errorf("model: tool node %q: %s: %w\nstdout: %s\nstderr: %s", node.ID, failVerb, res.runErr, res.stdout, res.stderr)
+	}
+	return res.output, nil
+}
+
+// recipeResult is the full outcome of running a tool node's recipe (shell
+// or script): the parsed output map, the raw stdout/stderr streams, the
+// resolved (placeholder-form) command, and the subprocess run error (nil
+// on exit 0). The Verified Action ladder (executor_verified_action.go)
+// consumes the streams + resolved command to drive self-repair, where
+// executeToolNodeCommon only needs output + runErr.
+type recipeResult struct {
+	output   map[string]interface{}
+	stdout   string
+	stderr   string
+	resolved string
+	runErr   error
+}
+
+// runToolNodeCore is the shared recipe-execution skeleton: policy check,
+// resolve, build the *exec.Cmd, emit the started/finish hooks, run with
+// separated streams, and parse the JSON-or-text output. It returns the
+// recipeResult (carrying any subprocess run error in res.runErr) and a
+// SEPARATE setup error for unrecoverable build/policy failures (which the
+// recovery ladder must NOT try to repair). Extracted from
+// executeToolNodeCommon so the Verified Action ladder can reuse the exact
+// same execution path and observe the streams.
+func (e *ClawExecutor) runToolNodeCore(
+	ctx context.Context,
+	node *ir.ToolNode,
+	toolName string,
+	resolve func() string,
+	buildCmd func(resolved string) (cmd *exec.Cmd, cleanup func(), err error),
+) (recipeResult, error) {
 	if err := e.checkToolNodePolicy(ctx, node, toolName); err != nil {
-		return nil, err
+		return recipeResult{}, err
 	}
 
 	resolved := resolve()
@@ -202,7 +277,7 @@ func (e *ClawExecutor) executeToolNodeCommon(
 		defer cleanup()
 	}
 	if err != nil {
-		return nil, err
+		return recipeResult{resolved: resolved}, err
 	}
 
 	e.emitToolNodeStarted(node.ID, toolName, len(resolved))
@@ -219,19 +294,30 @@ func (e *ClawExecutor) executeToolNodeCommon(
 	duration := time.Since(start)
 
 	e.emitToolNodeFinish(node.ID, toolName, resolved, outputStr, stderrStr, duration, runErr)
-	if runErr != nil {
-		return nil, fmt.Errorf("model: tool node %q: %s: %w\nstdout: %s\nstderr: %s", node.ID, failVerb, runErr, outputStr, stderrStr)
-	}
 
-	return parseToolNodeOutput(outputStr, strings.TrimSpace(outputStr)), nil
+	return recipeResult{
+		output:   parseToolNodeOutput(outputStr, strings.TrimSpace(outputStr)),
+		stdout:   outputStr,
+		stderr:   stderrStr,
+		resolved: resolved,
+		runErr:   runErr,
+	}, nil
 }
 
 // executeToolNodeShell handles tool nodes whose command contains {{...}}
 // template references. Templates are resolved from the node's input map,
 // and the resulting string is executed as a shell command via sh -c.
 func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNode, input map[string]interface{}) (map[string]interface{}, error) {
-	return e.executeToolNodeCommon(ctx, node, shellToolNodeToolName(node), "shell command failed",
-		func() string {
+	resolve, buildCmd := e.shellRecipe(ctx, node, input)
+	return e.executeToolNodeCommon(ctx, node, shellToolNodeToolName(node), "shell command failed", resolve, buildCmd)
+}
+
+// shellRecipe returns the resolve + buildCmd closures for a shell tool
+// node, factored out of executeToolNodeShell so both the standard path
+// and the Verified Action ladder share one source of truth for how a
+// shell recipe is resolved and built.
+func (e *ClawExecutor) shellRecipe(ctx context.Context, node *ir.ToolNode, input map[string]interface{}) (func() string, func(resolved string) (*exec.Cmd, func(), error)) {
+	return func() string {
 			// Expand environment variables FIRST, on the author-controlled
 			// command template only. Doing this AFTER resolveCommandTemplate
 			// would re-introduce shell metacharacters into substituted values
@@ -272,7 +358,7 @@ func (e *ClawExecutor) executeToolNodeShell(ctx context.Context, node *ir.ToolNo
 			// executed — `resolved` (placeholder form) is what the hooks/logs
 			// persist, so the real value never hits the store.
 			return e.toolNodeCommand(ctx, e.secretGuard.Materialize(resolved)), nil, nil
-		})
+		}
 }
 
 // shellToolNodeToolName returns the canonical virtual tool name used for
@@ -362,8 +448,15 @@ func combineStreamsForLog(stdout, stderr string) string {
 // from inside the sandbox bind-mount, and is removed on success or
 // failure.
 func (e *ClawExecutor) executeToolNodeScript(ctx context.Context, node *ir.ToolNode, input map[string]interface{}) (map[string]interface{}, error) {
-	return e.executeToolNodeCommon(ctx, node, scriptToolNodeToolName(node), "script failed",
-		func() string {
+	resolve, buildCmd := e.scriptRecipe(ctx, node, input)
+	return e.executeToolNodeCommon(ctx, node, scriptToolNodeToolName(node), "script failed", resolve, buildCmd)
+}
+
+// scriptRecipe returns the resolve + buildCmd closures for a script tool
+// node, factored out of executeToolNodeScript so the standard path and
+// the Verified Action ladder share one source of truth.
+func (e *ClawExecutor) scriptRecipe(ctx context.Context, node *ir.ToolNode, input map[string]interface{}) (func() string, func(resolved string) (*exec.Cmd, func(), error)) {
+	return func() string {
 			// Same env-then-substitution ordering as executeToolNodeShell:
 			// only the author-controlled `${NAME}` braces are env-expanded so
 			// injected values from inputs/vars stay inert. But where the shell
@@ -412,7 +505,7 @@ func (e *ClawExecutor) executeToolNodeScript(ctx context.Context, node *ir.ToolN
 			// Pass just the basename for the in-sandbox view (the bind mount
 			// uses the same path; portable whether we run via sandbox or host).
 			return e.toolNodeScriptCommand(ctx, interp, filepath.Base(tmpPath)), cleanup, nil
-		})
+		}
 }
 
 // scriptInterpreter maps a `language:` token to the executable name on

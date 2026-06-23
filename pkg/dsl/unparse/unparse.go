@@ -346,7 +346,41 @@ func (w *fileWriter) writeTools(tools []*ast.ToolNodeDecl) {
 		if t.RTK != "" {
 			writeProp(&w.b, "rtk", t.RTK)
 		}
+		// Verified Action quad (ADR-044).
+		if t.Goal != "" {
+			writeQuotedProp(&w.b, "goal", t.Goal)
+		}
+		if t.Postcondition != "" {
+			writeQuotedProp(&w.b, "postcondition", t.Postcondition)
+		}
+		if t.Policy != "" {
+			writeProp(&w.b, "policy", t.Policy)
+		}
+		if t.Recovery != nil {
+			writeRecoveryBlock(&w.b, t.Recovery, "  ")
+		}
 		writeSandboxBlock(&w.b, t.Sandbox, "  ")
+	}
+}
+
+// writeRecoveryBlock serialises a tool node's recovery: block (ADR-044).
+func writeRecoveryBlock(b *strings.Builder, r *ast.RecoveryBlock, indent string) {
+	if r == nil {
+		return
+	}
+	fmt.Fprintf(b, "%srecovery:\n", indent)
+	inner := indent + "  "
+	if r.MaxRepairAttempts > 0 {
+		fmt.Fprintf(b, "%smax_repair_attempts: %d\n", inner, r.MaxRepairAttempts)
+	}
+	if r.MaxAgentAttempts > 0 {
+		fmt.Fprintf(b, "%smax_agent_attempts: %d\n", inner, r.MaxAgentAttempts)
+	}
+	if r.Model != "" {
+		fmt.Fprintf(b, "%smodel: %q\n", inner, r.Model)
+	}
+	if len(r.AgentTools) > 0 {
+		fmt.Fprintf(b, "%sagent_tools: [%s]\n", inner, strings.Join(r.AgentTools, ", "))
 	}
 }
 

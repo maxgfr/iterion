@@ -496,7 +496,24 @@ type ToolNodeDecl struct {
 	Await    AwaitMode     // convergence strategy (none/wait_all/best_effort)
 	Sandbox  *SandboxBlock // node-level sandbox override; nil inherits from workflow
 	RTK      string        // rtk output-compression mode: on|ultra|off ("" = inherit)
-	Span     Span
+
+	// Verified Action quad (ADR-044) — all optional; a tool node without
+	// these behaves exactly as before (recipe only, exit-code = success).
+	Goal          string         // natural-language outcome (fuel for recovery rungs)
+	Postcondition string         // cheap deterministic check (shell, exit 0 = met); single source of truth for success
+	Policy        string         // required | recover | best_effort ("" defaults to required when Postcondition is set)
+	Recovery      *RecoveryBlock // bounded recovery rung config (nil = no recovery rungs)
+	Span          Span
+}
+
+// RecoveryBlock configures the bounded recovery rungs of a Verified Action
+// tool node (ADR-044). Recovery rungs only run under `policy: recover`.
+type RecoveryBlock struct {
+	MaxRepairAttempts int      // rung 3 (self-repair) bound; 0 → default 1 under recover
+	MaxAgentAttempts  int      // rung 4 (agent recovery) bound; 0 = OFF (opt-in)
+	Model             string   // recovery LLM spec (empty = node/workflow default)
+	AgentTools        []string // rung-4 toolset (empty = node capabilities)
+	Span              Span
 }
 
 // ---------------------------------------------------------------------------

@@ -1268,6 +1268,30 @@ func (e *Engine) execLoopRunNode(ctx context.Context, rs *runState, currentNodeI
 	return output, false, nil
 }
 
+// emitVerifiedActionIfPresent surfaces a Verified Action node's escalation
+// outcome (ADR-044) as a node_verified_action event, then removes the
+// private `_verified_action` key from the output map in place so it does
+// not leak into schema validation, downstream {{outputs.*}} refs, or the
+// persisted artifact. No-op for nodes that did not escalate.
+func (e *Engine) emitVerifiedActionIfPresent(rs *runState, nodeID string, output map[string]interface{}) {
+	if output == nil {
+		return
+	}
+	meta, ok := output["_verified_action"].(map[string]interface{})
+	// Strip unconditionally (no-op when absent) so the private control key
+	// never reaches schema validation, downstream refs, or the store; bail
+	// when it wasn't the expected map shape (only verifiedOutput writes it).
+	delete(output, "_verified_action")
+	if !ok {
+		return
+	}
+	if err := e.emit(rs.ctx, rs.runID, store.EventNodeVerifiedAction, nodeID, meta); err != nil {
+		// Best-effort observability — the run proceeds even if the event
+		// store is down; log so the gap is debuggable.
+		e.logger.Warn("verified-action: failed to emit event for node %q: %v", nodeID, err)
+	}
+}
+
 // persistArtifactIfPublished writes the node's `publish:` artifact when it
 // declares one: it versions the artifact, exposes the output under
 // rs.artifacts[name] for downstream {{artifacts.name}} refs, and emits
@@ -1307,6 +1331,12 @@ func (e *Engine) persistArtifactIfPublished(ctx context.Context, rs *runState, n
 // effort), snapshots the worktree at the node boundary, and selects
 // the outgoing edge. Returns the next node ID.
 func (e *Engine) execLoopAfterExec(ctx context.Context, rs *runState, currentNodeID string, node ir.Node, output map[string]interface{}) (string, error) {
+	// Verified Action (ADR-044): a tool node that escalated through the
+	// recovery ladder stamps a private `_verified_action` key. Emit the
+	// node_verified_action event for observability, then strip the key so
+	// it never reaches schema validation, downstream refs, or the store.
+	e.emitVerifiedActionIfPresent(rs, currentNodeID, output)
+
 	rs.outputs[currentNodeID] = output
 
 	// Validate output against declared schema (optional).

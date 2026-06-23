@@ -239,6 +239,50 @@ studio Artifact tab and `iterion report`, referenceable downstream as
 `{{artifacts.<name>}}`. Deterministic, no LLM cost: `publish:` only
 redirects the already-computed output into the store.
 
+### Verified Action — adaptive recovery for ACTION tool nodes (ADR-044)
+
+An ACTION tool node (commit, git ops, file writes, scanner-invoke) can
+opt into a recovery ladder so a brittle recipe self-heals instead of
+hard-blocking. Add the optional quad — `goal` + recipe (`command`/`script`)
++ `postcondition` + `policy`:
+
+```iter
+tool commit_changes:
+  command: `git add -A && git commit -F - <<< {{input.msg}}`
+  goal: "Commit the upgrade; working tree clean except known caches."
+  postcondition: `cd {{input.workspace_dir}} && ! git status --porcelain | grep -q . && printf '{"sha":"%s"}' "$(git rev-parse HEAD)"`
+  policy: recover            # required | recover | best_effort
+  recovery:
+    max_repair_attempts: 2   # rung 3 (self-repair) bound
+    max_agent_attempts: 0    # rung 4 (agent recovery) — OFF by default, opt-in
+    model: "anthropic/claude-sonnet-4-6"   # recovery LLM (default: sonnet)
+```
+
+Runtime ladder (the **postcondition is the single source of truth** at
+every rung — success keys on it, **never on the exit code**, because exit
+codes lie: "nothing to commit" exits 1 though the goal may already hold):
+1. **idempotent skip** — postcondition already met? skip the recipe (resume-safe).
+2. **recipe** — run it; postcondition met → done (~95% path).
+3. **self-repair** (`policy: recover`) — an LLM proposes a corrected command
+   from `{goal, recipe, stdout, stderr}`; runtime re-runs it deterministically
+   (the corrected command is recorded as a `tool_called` event — auditable).
+4. **agent recovery** (`recover` + `max_agent_attempts > 0`) — an agent
+   achieves the goal with real tools. Opt-in.
+5. **policy** — still unmet: `required`/`recover` → fail (resumable);
+   `best_effort` → warn + continue.
+
+The postcondition's JSON stdout becomes the node output, so downstream
+`{{outputs.<id>.field}}` is populated on every rung (incl. skip).
+
+GATES STAY DETERMINISTIC. A verification gate (`scan_health`, `streak_check`,
+coverage) is the degenerate quad: `recipe == postcondition`, no recovery,
+`policy: required`. **Never attach LLM recovery to a gate** — that
+reintroduces the façade risk the gate exists to prevent. The compiler
+enforces this: **C103** invalid policy · **C104** recovery without a
+postcondition · **C105** recovery on a gate (`recipe == postcondition`) ·
+**C106** recovery bounds under a non-`recover` policy. A node with no
+`postcondition` behaves exactly as before (recipe only, exit code = success).
+
 ## Template references
 
 | Form | Meaning |

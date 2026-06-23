@@ -26,6 +26,7 @@ const (
 	EventLLMPrompt            EventType = "llm_prompt"
 	EventLLMRetry             EventType = "llm_retry"
 	EventNodeRecovery         EventType = "node_recovery"
+	EventNodeVerifiedAction   EventType = "node_verified_action" // data: {rung, postcondition_met, policy}
 	EventLLMStepFinished      EventType = "llm_step_finished"
 	EventLLMCompacted         EventType = "llm_compacted"
 	EventToolStarted          EventType = "tool_started"

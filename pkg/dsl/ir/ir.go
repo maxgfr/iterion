@@ -246,6 +246,30 @@ type ToolNode struct {
 	AwaitMode   AwaitMode
 	Sandbox     *SandboxSpec // node-level sandbox override (nil = inherit workflow)
 	RTK         string       // rtk output-compression mode: on|ultra|off ("" = inherit)
+
+	// Verified Action quad (ADR-044). All optional; a node with an empty
+	// Postcondition runs the recipe with exit-code = success (unchanged).
+	Goal          string        // natural-language outcome (fuel for recovery rungs)
+	Postcondition string        // cheap deterministic check (shell, exit 0 = met); single source of truth
+	PostcondRefs  []*Ref        // parsed template refs in Postcondition (resolved at runtime)
+	Policy        string        // "required" | "recover" | "best_effort" (defaulted at compile time)
+	Recovery      *RecoverySpec // bounded recovery rung config (nil = no rungs)
+}
+
+// Verified Action policy values (ADR-044).
+const (
+	PolicyRequired   = "required"    // fail (resumable) if postcondition unmet; no recovery rungs
+	PolicyRecover    = "recover"     // run recovery rungs, then fail if still unmet
+	PolicyBestEffort = "best_effort" // warn + continue if postcondition unmet
+)
+
+// RecoverySpec is the compiled bound on a Verified Action node's recovery
+// rungs (ADR-044). Rungs only run under Policy == "recover".
+type RecoverySpec struct {
+	MaxRepairAttempts int      // rung 3 (self-repair) bound
+	MaxAgentAttempts  int      // rung 4 (agent recovery) bound; 0 = OFF
+	Model             string   // recovery LLM spec (empty = node/workflow default)
+	AgentTools        []string // rung-4 toolset (empty = node capabilities)
 }
 
 // NodeKind implements Node.

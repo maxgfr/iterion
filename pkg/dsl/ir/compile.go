@@ -1038,21 +1038,64 @@ func (c *compiler) compileTools() {
 			}
 		}
 
+		// Verified Action quad (ADR-044). Parse postcondition refs (same
+		// template machinery as command), default the policy when a
+		// postcondition is present, and compile the recovery bounds.
+		var postcondRefs []*Ref
+		if t.Postcondition != "" {
+			if refs, err := ParseRefs(t.Postcondition); err != nil {
+				c.errorf(DiagBadTemplateRef, "tool %q postcondition: %v", t.Name, err)
+			} else {
+				postcondRefs = refs
+			}
+		}
+		policy := t.Policy
+		if policy == "" && t.Postcondition != "" {
+			// Postcondition without an explicit policy → required (the
+			// postcondition becomes truth; no recovery — the safe default).
+			policy = PolicyRequired
+		}
+		var recovery *RecoverySpec
+		if t.Recovery != nil {
+			recovery = &RecoverySpec{
+				MaxRepairAttempts: t.Recovery.MaxRepairAttempts,
+				MaxAgentAttempts:  t.Recovery.MaxAgentAttempts,
+				Model:             t.Recovery.Model,
+				AgentTools:        t.Recovery.AgentTools,
+			}
+		}
+		// Under recover, ensure a spec exists and default to one self-repair
+		// attempt when the author left both bounds unset; agent recovery stays
+		// opt-in (0).
+		if policy == PolicyRecover {
+			if recovery == nil {
+				recovery = &RecoverySpec{}
+			}
+			if recovery.MaxRepairAttempts == 0 && recovery.MaxAgentAttempts == 0 {
+				recovery.MaxRepairAttempts = 1
+			}
+		}
+
 		c.nodes[t.Name] = &ToolNode{
 			BaseNode: BaseNode{ID: t.Name},
 			SchemaFields: SchemaFields{
 				InputSchema:  t.Input,
 				OutputSchema: t.Output,
 			},
-			Command:     t.Command,
-			CommandRefs: cmdRefs,
-			Script:      t.Script,
-			ScriptRefs:  scriptRefs,
-			Language:    t.Language,
-			Publish:     t.Publish,
-			AwaitMode:   t.Await,
-			Sandbox:     c.compileSandboxBlock(t.Sandbox, "tool", t.Name),
-			RTK:         t.RTK,
+			Command:       t.Command,
+			CommandRefs:   cmdRefs,
+			Script:        t.Script,
+			ScriptRefs:    scriptRefs,
+			Language:      t.Language,
+			Publish:       t.Publish,
+			AwaitMode:     t.Await,
+			Sandbox:       c.compileSandboxBlock(t.Sandbox, "tool", t.Name),
+			RTK:           t.RTK,
+			Goal:          t.Goal,
+			Postcondition: t.Postcondition,
+			PostcondRefs:  postcondRefs,
+			Policy:        policy,
+			Recovery:      recovery,
 		}
 	}
 }

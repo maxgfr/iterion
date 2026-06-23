@@ -1,6 +1,45 @@
 # ADR-044 — Adaptive recovery for deterministic ACTION nodes (gates stay deterministic)
 
-Status: **proposed / exploratory** (2026-06-23) — reflection, no implementation yet.
+Status: **accepted (partial)** (2026-06-23) — the Verified Action quad is
+implemented on `tool` nodes: layers **A** (postcondition), **E** (policy
+spine), and **C** (self-repair) ship enabled; **B** (agent recovery) is
+wired but opt-in and OFF by default (`recovery.max_agent_attempts: 0`).
+Layer **D** (robust primitive library, e.g. `iterion __commit`) and
+extending the quad to `compute` nodes are deferred follow-ups. Originally
+proposed / exploratory the same day (kept below).
+
+## Implementation (2026-06-23)
+
+The quad is `goal` + `command`/`script` (recipe) + `postcondition` +
+`policy` on a `tool` node — all optional and fully backward-compatible (a
+node with no `postcondition` behaves exactly as before: recipe only, exit
+code = success).
+
+- **DSL/IR**: new optional `tool` properties `goal:`, `postcondition:`,
+  `policy:` (`required` | `recover` | `best_effort`), and a `recovery:`
+  block (`max_repair_attempts`, `max_agent_attempts`, `model`,
+  `agent_tools`). Parser + AST + IR + unparse round-trip them.
+- **Runtime ladder** lives in
+  [pkg/backend/model/executor_verified_action.go](../../pkg/backend/model/executor_verified_action.go):
+  idempotent-skip → recipe → self-repair → agent-recovery → policy, with the
+  postcondition re-checked at every rung as the single source of truth
+  (success is keyed on it, never the recipe exit code). Self-repair's
+  corrected command and the postcondition check are emitted as `tool_called`
+  events; the per-node outcome is a `node_verified_action` event.
+- **Anti-Goodhart firewall** is enforced at compile time, not left to
+  convention: **C103** (invalid policy), **C104** (recovery without a
+  postcondition — no truth oracle), **C105** (recovery attached to a *gate*
+  where `recipe == postcondition`), **C106** (recovery bounds under a
+  non-`recover` policy — dead config). A gate stays the degenerate quad
+  (`recipe == postcondition`, no rungs 3–4, `policy: required`).
+- **Demonstration**: `bots/secured-renovacy`'s `commit_changes` node now
+  carries a postcondition ("working tree has no relevant uncommitted changes
+  left, caches excluded") + `policy: recover`, so it self-heals past the two
+  brittle failures cited below instead of hard-blocking.
+
+---
+
+Status (original): **proposed / exploratory** (2026-06-23) — reflection, no implementation yet.
 
 ## Context
 

@@ -132,6 +132,7 @@ func (c *compiler) validate(w *Workflow) {
 	c.validateCursorInvocations(w)
 	c.validateReviewGates(w)
 	c.validateRTK(w)
+	c.validateVerifiedActions(w)
 }
 
 // validateRTK enforces that every rtk value (workflow-level + every
