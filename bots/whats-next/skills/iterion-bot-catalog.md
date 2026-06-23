@@ -546,7 +546,7 @@ cannot masquerade as a clean bill of health.
   findings; does not fix. Pre-release accessibility review or recurring
   conformance tracking. For FIXING accessibility issues, use Willy
   (whole-improve-loop) with the rgaa preset.
-- **Vars**: `detect_model` (string), `findings_cap` (int), `post_to_board` (bool), `report_dir` (string), `report_model` (string), `review_model` (string), `scope_globs` (string), `scope_notes` (string), `workspace_dir` (string)
+- **Vars**: `findings_cap` (int), `post_to_board` (bool), `report_dir` (string), `scope_globs` (string), `scope_notes` (string), `workspace_dir` (string)
 - **Capabilities**: board.create, board.label, board.read
 - **Path**: `bots/rgaa-audit/main.bot`
 
@@ -716,7 +716,7 @@ failing forever. See docs/adr/011-whole-improve-loop-context-chunking.md.
   production-readiness audit across the whole workspace, or to drive
   iterative improvement on a specific axis (pass improvement_prompt).
   No new capability — just better/cleaner code.
-- **Vars**: `improvement_prompt` (string), `max_review_chunk_tokens` (int), `max_review_passes` (int), `scope_globs` (string), `scope_notes` (string), `workspace_dir` (string)
+- **Vars**: `context_mode` (string), `improvement_prompt` (string), `max_review_chunk_tokens` (int), `max_review_passes` (int), `reviewer_context_percent` (int), `reviewer_context_tokens` (int), `scope_globs` (string), `scope_notes` (string), `workspace_dir` (string)
 - **Path**: `bots/whole-improve-loop/main.bot`
 
 <!-- ITERION:CATALOG:GENERATED:END -->
