@@ -149,6 +149,26 @@ prompt review_system:
     `scanned_areas` as informational notes, but you MUST
     NOT count them as blockers unless the axis explicitly
     covers them.
+    CRUCIAL — a non-empty axis REDEFINES what "blocking" means
+    for this run. A CONCRETE, evidence-backed finding under the
+    axis (for a code-quality axis: dead/unused code, real
+    duplication, a clearly over-complex or confusing construct,
+    a genuinely misleading name) IS a blocker: set
+    `approved=false` and put the specific smallest-change fix in
+    `fix_plan` so the fixer applies it THIS pass. Do NOT
+    approve-and-defer axis findings to "a future quality pass" —
+    deferral defeats the run's entire purpose, and the streak
+    gate would then converge on UNIMPROVED code. For axis-scoped
+    items the anti-false-positive carve-out below (style/naming
+    "not a blocker") is SUSPENDED. The guards that REMAIN, and
+    that keep the loop convergent: (a) the finding must be
+    concrete — name the file/symbol and the exact change; (b)
+    the fix must be the SMALLEST change that clearly improves it;
+    (c) never flag pure taste, incidental similarity, or anything
+    already pushed back / already addressed. A chunk whose only
+    axis observations are subjective taste — or that has no
+    concrete axis finding left — is `approved=true`, so once the
+    real items are fixed the streak still settles to an asymptote.
 
   3. Cover the production-ready axes (default grid):
        - Security: auth, input validation, secret leaks,
@@ -230,7 +250,12 @@ prompt review_system:
      truly blocking for production: bugs, regressions,
      security vulnerabilities, obvious dead code. Style
      preferences, naming, minor optimisations, missing
-     documentation are NOT blockers.
+     documentation are NOT blockers. (EXCEPTION: when a
+     non-empty improvement axis explicitly targets these —
+     e.g. a code-quality axis covering naming/duplication/
+     complexity/dead code — concrete axis findings ARE blockers
+     per the IMPROVEMENT AXIS section above. This rule governs
+     the default/no-axis grid and any OFF-axis observation.)
   2. Self-critique: for each blocker you consider, ask
      yourself "is this REALLY blocking in production, or is
      it a personal preference?" If you hesitate, it is NOT
@@ -403,6 +428,17 @@ prompt fix_system:
   instructed NOT to re-flag those items, preventing a
   false positive from looping the workflow forever.
 
+  AXIS OVERRIDE — read before pushing back: when the operator
+  set a non-empty improvement axis, "it isn't production-
+  blocking" is NOT a valid reason to push back an item that
+  falls under that axis. The axis IS the definition of blocking
+  for this run, so an on-axis item (e.g. dead code, duplication,
+  over-complexity, a misleading name under a code-quality axis)
+  must be FIXED, not refused. Reserve `pushback` for items that
+  are genuinely OFF the axis, factually wrong, pure taste, or
+  already addressed — and apply the SMALLEST change that
+  resolves each on-axis item.
+
   Use pushback sparingly: if you push back everything, the
   code will never be improved.
 
@@ -494,13 +530,16 @@ prompt fix_user:
   {{input.fix_plan}}
 
   For EACH blocker:
-    - If it is a real production-blocking issue: read the
-      relevant file, apply the correction, verify the
-      tests pass.
-    - If you judge it is NOT blocking (style preference,
-      minor optimisation, etc.): add the exact item to
-      `pushback` with a clear justification in
-      `pushback_justification`.
+    - If it is a real blocker — a production issue, OR (when an
+      axis is set) a concrete item that falls under that axis:
+      read the relevant file, apply the smallest correction,
+      verify the tests pass.
+    - If you judge it is NOT actionable — off-axis, factually
+      wrong, pure taste, or already addressed: add the exact
+      item to `pushback` with a clear justification in
+      `pushback_justification`. Under a set axis, "not
+      production-blocking" alone is NOT a valid pushback reason
+      for an on-axis item.
 
   Output:
     - applied: true if at least one fix was applied

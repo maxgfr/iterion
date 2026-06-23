@@ -29,6 +29,18 @@ and the correct toolchain:
   `go.mod`'s `go` directive is newer than the installed `go version`, use the
   project's wrapper (e.g. `devbox run -- go …`) or `GOTOOLCHAIN=auto go …` so
   the pinned toolchain is fetched, rather than failing on "requires go >= X".
+  - **Inside the sandbox the wrapper itself may not run.** A version-manager
+    wrapper (`devbox`, `asdf`, `mise`, `nix`) needs to write its own
+    cache/home, but the sandbox runs as an unprivileged container user whose
+    `~/.cache` / `~` is often read-only — `devbox run -- …` then dies with
+    `mkdir: cannot create directory '/home/.../.cache/devbox': Permission
+    denied` before your command ever runs (observed 2026-06-23, run 019ef550).
+    The sandbox image already ships the real toolchain (`go`, `node`, `cargo`,
+    `python`) directly on `PATH`, so when the wrapper fails for an
+    environment/permission reason (not a code error), fall back ONCE to the
+    bare tool — `command -v go && go build ./... && go test ./...` — and write
+    the verify script to use the bare tool too. Do not keep retrying the
+    wrapper.
 - **Language defaults (only when there is no wrapper):**
   - Go (`go.mod`): `go build ./... && go test ./...`
   - Node (`package.json`): pick the package manager from the lockfile
