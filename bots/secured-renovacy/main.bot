@@ -2794,17 +2794,18 @@ tool prepare_commit:
     //    emitted line for a known-cache-prefix segment and skip it.
     //    Costs ~µs per line; protects against a future cache dir we
     //    haven't enumerated yet.
-    const EXCLUDES = [
-      ":(exclude)go", ":(exclude)target", ":(exclude).cargo",
-      ":(exclude)node_modules", ":(exclude).yarn/cache", ":(exclude).yarn/unplugged", ":(exclude).yarn/install-state.gz",
-      ":(exclude)__pycache__", ":(exclude).venv", ":(exclude)venv",
-      ":(exclude).cache", ":(exclude).iterion",
-      ":(exclude)**/node_modules", ":(exclude)**/__pycache__", ":(exclude)**/.venv",
-    ];
-    const PATHSPEC = EXCLUDES.join(" ");
+    // NOTE: git-layer `:(exclude)…` pathspecs were REMOVED from these two
+    // commands. execSync runs through `/bin/sh -c`, and the unquoted `(`
+    // in `:(exclude)` is a shell metachar → `Syntax error: "(" unexpected`
+    // on dash. They were also redundant: `git diff HEAD` lists only TRACKED
+    // changes (caches are untracked) and `ls-files --others
+    // --exclude-standard` already honours .gitignore — so gitignored caches
+    // (node_modules at any depth, etc.) never appear. The JS-side
+    // CACHE_SEGMENTS guard below is the belt-and-suspenders for any
+    // non-gitignored stray cache.
     const EXEC_OPTS = { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 };
-    const tracked = execSync(`git -C "${workspaceDir}" diff --name-only HEAD -- . ${PATHSPEC}`, EXEC_OPTS);
-    const untracked = execSync(`git -C "${workspaceDir}" ls-files --others --exclude-standard -- . ${PATHSPEC}`, EXEC_OPTS);
+    const tracked = execSync(`git -C "${workspaceDir}" diff --name-only HEAD`, EXEC_OPTS);
+    const untracked = execSync(`git -C "${workspaceDir}" ls-files --others --exclude-standard`, EXEC_OPTS);
     // JS-side guard: any path under a known-cache top-level dir is
     // skipped even if the pathspec missed it (e.g. a Go cache nested
     // under a workspace subdir wouldn't be caught by `:!go` at root).
