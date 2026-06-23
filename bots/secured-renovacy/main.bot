@@ -2880,7 +2880,7 @@ MSG={{input.full_message}}
 # <subject>" mixes with the JSON and iterion's parser falls back to
 # wrapping the whole blob as {"result": "..."} — losing the "output"
 # field that downstream edges (write_audit_md, etc.) read for the SHA.
-printf '%s' "$FILES_LINES" | tr '\n' '\0' | xargs -0 git add -- >&2
+printf '%s' "$FILES_LINES" | while IFS= read -r f; do [ -n "$f" ] && { git check-ignore -q -- "$f" || printf '%s\n' "$f"; }; done | tr '\n' '\0' | xargs -0 -r git add -- >&2
 if git diff --cached --quiet; then
   ## Nothing staged is a soft no-op: select_candidate may have
   ## re-selected an already-upgraded package, yarn up may have been
