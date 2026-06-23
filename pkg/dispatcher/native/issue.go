@@ -39,4 +39,19 @@ type Issue struct {
 	LastWorkdir string    `json:"last_workdir,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	// Comments is the append-only discussion thread on the issue. Used
+	// by hooks / the dispatcher to leave a dispatch trail, by the studio
+	// IssueModal, and — once the comment-trigger wiring lands — to carry
+	// operator `/command` requests and the resulting MR/PR back-links.
+	Comments []Comment `json:"comments,omitempty"`
+}
+
+// Comment is a single append-only note on a native issue. Author is a
+// free-form display name ("operator", a bot persona, "system"); an empty
+// Author renders as "anonymous" downstream.
+type Comment struct {
+	ID        string    `json:"id"`
+	Author    string    `json:"author,omitempty"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"created_at"`
 }

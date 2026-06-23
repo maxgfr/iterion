@@ -389,6 +389,56 @@ func TestSetLastRunWritesAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestAddCommentPersistsAndEmits(t *testing.T) {
+	s := newTestStore(t)
+	iss, _ := s.Create(Issue{Title: "x", State: "ready"})
+
+	updated, c, err := s.AddComment(iss.ID, "operator", "/willy-rgaa fix the contrast issues")
+	if err != nil {
+		t.Fatalf("AddComment: %v", err)
+	}
+	if c.ID == "" || c.Author != "operator" || c.Body == "" {
+		t.Fatalf("comment not populated: %+v", c)
+	}
+	if len(updated.Comments) != 1 || updated.Comments[0].ID != c.ID {
+		t.Fatalf("comment not appended to issue: %+v", updated.Comments)
+	}
+
+	// Empty body rejected.
+	if _, _, err := s.AddComment(iss.ID, "operator", "   "); err == nil {
+		t.Fatal("empty comment body should be rejected")
+	}
+	// Unknown issue → ErrNotFound.
+	if _, _, err := s.AddComment("native:nope", "operator", "hi"); !errors.Is(err, tracker.ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
+	}
+
+	// One EvtIssueComment event recorded.
+	n := 0
+	_ = s.ScanEvents(func(e *Event) bool {
+		if e.Type == EvtIssueComment && e.IssueID == iss.ID {
+			n++
+		}
+		return true
+	})
+	if n != 1 {
+		t.Fatalf("want 1 issue_comment_added event, got %d", n)
+	}
+
+	// Round-trips through reopen.
+	s2, err := NewStore(s.root)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	got, err := s2.Get(iss.ID)
+	if err != nil {
+		t.Fatalf("Get after reopen: %v", err)
+	}
+	if len(got.Comments) != 1 || got.Comments[0].Body != "/willy-rgaa fix the contrast issues" {
+		t.Fatalf("reopen lost comment: %+v", got.Comments)
+	}
+}
+
 func TestSetLastRunUnknownIssue(t *testing.T) {
 	s := newTestStore(t)
 	if err := s.SetLastRun("native:nope", "run-x", "/tmp/x"); !errors.Is(err, tracker.ErrNotFound) {

@@ -13,6 +13,7 @@ const (
 	EvtIssueClaimed  EventType = "issue_claimed"
 	EvtIssueReleased EventType = "issue_released"
 	EvtIssueLastRun  EventType = "issue_last_run_updated"
+	EvtIssueComment  EventType = "issue_comment_added"
 	EvtBoardUpdated  EventType = "board_updated"
 	// Label-vocabulary management events, emitted once per touched
 	// issue. The payload carries `{from, to}` for rename/merge and

@@ -32,14 +32,15 @@ const (
 // Capability naming convention: lowercase `domain` or `domain.action`,
 // e.g. `board.create`, `board.read`. Enforced by C081.
 var KnownCapabilities = map[string]bool{
-	boardops.CapBoardRead:   true,
-	boardops.CapBoardCreate: true,
-	boardops.CapBoardMove:   true,
-	boardops.CapBoardAssign: true,
-	boardops.CapBoardLabel:  true,
-	boardops.CapBoardClose:  true,
-	CapWatchSubscribe:       true,
-	CapWatchUnsubscribe:     true,
+	boardops.CapBoardRead:    true,
+	boardops.CapBoardCreate:  true,
+	boardops.CapBoardMove:    true,
+	boardops.CapBoardAssign:  true,
+	boardops.CapBoardLabel:   true,
+	boardops.CapBoardClose:   true,
+	boardops.CapBoardComment: true,
+	CapWatchSubscribe:        true,
+	CapWatchUnsubscribe:      true,
 }
 
 // capShapeRe enforces the lowercase `domain` or `domain.action` shape.

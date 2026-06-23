@@ -53,6 +53,38 @@ func TestHTTPCreateAndList(t *testing.T) {
 	}
 }
 
+func TestHTTPAddCommentWithDispatch(t *testing.T) {
+	srv, s := newServerWithStore(t)
+	defer srv.Close()
+	iss, _ := s.Create(native.Issue{Title: "Improve a11y", State: "inbox"})
+
+	// Comment that also stamps a bot + args and moves the issue to ready,
+	// mirroring the studio comment box parsing "/billy <instruction>".
+	body := bytes.NewBufferString(`{"author":"operator","body":"/billy fix the contrast issues","bot":"branch-improve-loop","bot_args":{"scope_notes":"fix the contrast issues"},"transition_to":"ready"}`)
+	r, err := http.Post(srv.URL+"/issues/"+iss.ID+"/comments", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST comment: %v", err)
+	}
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", r.StatusCode)
+	}
+	var updated native.Issue
+	if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	r.Body.Close()
+
+	if len(updated.Comments) != 1 || updated.Comments[0].Author != "operator" {
+		t.Fatalf("comment not recorded: %+v", updated.Comments)
+	}
+	if updated.Bot != "branch-improve-loop" || updated.BotArgs["scope_notes"] != "fix the contrast issues" {
+		t.Fatalf("dispatch not stamped: bot=%q args=%v", updated.Bot, updated.BotArgs)
+	}
+	if updated.State != "ready" {
+		t.Fatalf("state = %q, want ready", updated.State)
+	}
+}
+
 func TestHTTPGetAndPatchAndDelete(t *testing.T) {
 	srv, s := newServerWithStore(t)
 	defer srv.Close()

@@ -103,11 +103,23 @@ func TestAdapterClaimRelease(t *testing.T) {
 	}
 }
 
-func TestCommentNotSupported(t *testing.T) {
-	a, _ := newAdapter(t)
-	err := a.Comment(context.Background(), "native:x", "hi")
-	if !errors.Is(err, tracker.ErrNotSupported) {
-		t.Fatalf("want ErrNotSupported, got %v", err)
+func TestAdapterComment(t *testing.T) {
+	a, s := newAdapter(t)
+	iss, _ := s.Create(native.Issue{Title: "x", State: "ready"})
+
+	// Commenting on a real issue appends to its thread under the
+	// "dispatcher" author.
+	if err := a.Comment(context.Background(), iss.ID, "MR opened: http://x/1"); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+	got, _ := s.Get(iss.ID)
+	if len(got.Comments) != 1 || got.Comments[0].Author != "dispatcher" {
+		t.Fatalf("comment not appended by dispatcher: %+v", got.Comments)
+	}
+
+	// Commenting on a missing issue surfaces ErrNotFound.
+	if err := a.Comment(context.Background(), "native:nope", "hi"); !errors.Is(err, tracker.ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 }
 

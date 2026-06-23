@@ -381,6 +381,35 @@ func (s *Store) SetLastRun(id, runID, workdir string) error {
 	return s.emit(native.Event{Type: native.EvtIssueLastRun, IssueID: id, Payload: map[string]any{"run_id": runID, "workdir": workdir}})
 }
 
+// AddComment appends a note to the issue's discussion thread and returns
+// the updated issue plus the created comment.
+func (s *Store) AddComment(id, author, body string) (*native.Issue, *native.Comment, error) {
+	if strings.TrimSpace(body) == "" {
+		return nil, nil, errors.New("comment: body required")
+	}
+	ctx, cancel := ctxWithTimeout()
+	defer cancel()
+	iss, err := s.get(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	c := native.Comment{
+		ID:        uuid.NewString(),
+		Author:    author,
+		Body:      body,
+		CreatedAt: time.Now().UTC(),
+	}
+	iss.Comments = append(iss.Comments, c)
+	iss.UpdatedAt = c.CreatedAt
+	if err := s.replace(ctx, iss); err != nil {
+		return nil, nil, err
+	}
+	if err := s.emit(native.Event{Type: native.EvtIssueComment, IssueID: id, Payload: map[string]any{"comment_id": c.ID, "author": author}}); err != nil {
+		return nil, nil, err
+	}
+	return iss, &c, nil
+}
+
 func (s *Store) Resolve(prefix string) (string, error) {
 	want := prefix
 	if !strings.HasPrefix(prefix, "native:") {

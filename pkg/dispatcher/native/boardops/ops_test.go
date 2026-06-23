@@ -65,6 +65,44 @@ func TestCall_UnknownTool(t *testing.T) {
 	}
 }
 
+func TestCommentIssue_CapGatedAndPersists(t *testing.T) {
+	s := newStore(t)
+
+	// Create an issue to comment on.
+	res, err := Call(s, NewCapabilities("board.create"), "create_issue", json.RawMessage(`{"title":"Improve contrast"}`))
+	if err != nil {
+		t.Fatalf("create_issue: %v", err)
+	}
+	var created native.Issue
+	if err := json.Unmarshal(res, &created); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without board.comment the tool is denied.
+	args, _ := json.Marshal(map[string]string{"id": created.ID, "body": "Opened MR: http://x/1"})
+	if _, err := Call(s, NewCapabilities("board.read"), "comment_issue", args); !errors.Is(err, ErrCapabilityDenied) {
+		t.Fatalf("want ErrCapabilityDenied, got %v", err)
+	}
+
+	// With board.comment it persists.
+	if _, err := Call(s, NewCapabilities("board.comment"), "comment_issue", args); err != nil {
+		t.Fatalf("comment_issue: %v", err)
+	}
+	got, err := s.Get(created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.Comments) != 1 || got.Comments[0].Body != "Opened MR: http://x/1" {
+		t.Fatalf("comment not persisted: %+v", got.Comments)
+	}
+
+	// Empty body rejected.
+	bad, _ := json.Marshal(map[string]string{"id": created.ID, "body": "  "})
+	if _, err := Call(s, NewCapabilities("board.comment"), "comment_issue", bad); err == nil {
+		t.Fatal("empty body should be rejected")
+	}
+}
+
 func TestRoundTrip_CreateTransitionGetList(t *testing.T) {
 	s := newStore(t)
 	caps := NewCapabilities("board.create,board.move,board.read,board.label,board.assign,board.close")

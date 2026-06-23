@@ -28,6 +28,10 @@ type BoardStore interface {
 	Release(id, marker string) error
 	SetLastRun(id, runID, workdir string) error
 
+	// AddComment appends a note to the issue's discussion thread and
+	// returns the updated issue plus the created comment.
+	AddComment(id, author, body string) (*Issue, *Comment, error)
+
 	Resolve(prefix string) (string, error)
 	ScanEvents(visit func(*Event) bool) error
 	AggregateLabels() []LabelUsage

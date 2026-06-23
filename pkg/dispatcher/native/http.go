@@ -36,6 +36,7 @@ func (s *Store) RegisterRoutesWithMiddleware(mux *http.ServeMux, prefix string, 
 	mux.Handle("PATCH "+p+"/issues/{id}", wrap(http.HandlerFunc(s.handlePatchIssue)))
 	mux.Handle("DELETE "+p+"/issues/{id}", wrap(http.HandlerFunc(s.handleDeleteIssue)))
 	mux.Handle("POST "+p+"/issues/{id}/transition", wrap(http.HandlerFunc(s.handleTransitionIssue)))
+	mux.Handle("POST "+p+"/issues/{id}/comments", wrap(http.HandlerFunc(s.handleAddComment)))
 	mux.Handle("GET "+p+"/labels", wrap(http.HandlerFunc(s.handleListLabels)))
 	mux.Handle("POST "+p+"/labels/rename", wrap(http.HandlerFunc(s.handleRenameLabel)))
 	mux.Handle("POST "+p+"/labels/merge", wrap(http.HandlerFunc(s.handleMergeLabels)))
@@ -275,6 +276,69 @@ func (s *Store) handleTransitionIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	iss, err := s.SetState(id, in.To)
+	if err != nil {
+		writeErr(w, statusForErr(err), err)
+		return
+	}
+	writeJSON(w, http.StatusOK, iss)
+}
+
+// commentReq is the body of POST /issues/{id}/comments. Body is the
+// comment text. The optional Bot / BotArgs / TransitionTo fields let a
+// caller (the studio comment box, which knows the bot catalogue and has
+// already parsed a `/command`) both record the comment AND dispatch a
+// run in one request: stamp the bot + per-run args and move the issue to
+// a dispatch-eligible state, which the polling dispatcher then runs. The
+// native store stays decoupled from the bot registry — command→bot
+// resolution happens in the caller, not here.
+type commentReq struct {
+	Author       string            `json:"author,omitempty"`
+	Body         string            `json:"body"`
+	Bot          *string           `json:"bot,omitempty"`
+	BotArgs      map[string]string `json:"bot_args,omitempty"`
+	TransitionTo string            `json:"transition_to,omitempty"`
+}
+
+func (s *Store) handleAddComment(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.resolvePathID(w, r)
+	if !ok {
+		return
+	}
+	var in commentReq
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	author := in.Author
+	if author == "" {
+		author = "operator"
+	}
+	if _, _, err := s.AddComment(id, author, in.Body); err != nil {
+		writeErr(w, statusForErr(err), err)
+		return
+	}
+	// Optional one-shot dispatch: stamp bot + args, then move to the
+	// requested state so the dispatcher picks the issue up.
+	if in.Bot != nil || in.BotArgs != nil {
+		patch := Patch{}
+		if in.Bot != nil {
+			patch.Bot = in.Bot
+		}
+		if in.BotArgs != nil {
+			patch.BotArgs = &in.BotArgs
+		}
+		if _, err := s.Update(id, patch); err != nil {
+			writeErr(w, statusForErr(err), err)
+			return
+		}
+	}
+	if in.TransitionTo != "" {
+		if _, err := s.SetState(id, in.TransitionTo); err != nil {
+			writeErr(w, statusForErr(err), err)
+			return
+		}
+	}
+	iss, err := s.Get(id)
 	if err != nil {
 		writeErr(w, statusForErr(err), err)
 		return

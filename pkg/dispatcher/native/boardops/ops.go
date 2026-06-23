@@ -22,12 +22,13 @@ import (
 // typo at any call site becomes a compile error and the registry below
 // (KnownCapabilities in pkg/dsl/ir) tracks the single source of truth.
 const (
-	CapBoardRead   = "board.read"
-	CapBoardCreate = "board.create"
-	CapBoardMove   = "board.move"
-	CapBoardAssign = "board.assign"
-	CapBoardLabel  = "board.label"
-	CapBoardClose  = "board.close"
+	CapBoardRead    = "board.read"
+	CapBoardCreate  = "board.create"
+	CapBoardMove    = "board.move"
+	CapBoardAssign  = "board.assign"
+	CapBoardLabel   = "board.label"
+	CapBoardClose   = "board.close"
+	CapBoardComment = "board.comment"
 )
 
 // Capabilities is a granted-cap set. Use NewCapabilities to parse a
@@ -93,6 +94,20 @@ var allTools = []Tool{
             "to":{"type":"string","description":"Optional explicit terminal state."}
           },
           "required":["id"]
+        }`),
+	},
+	{
+		Name:        "comment_issue",
+		Capability:  CapBoardComment,
+		Description: "Append a comment to an issue's discussion thread. Use to leave a trail on an issue — e.g. post the URL of a merge/pull request a run opened, back onto the source issue.",
+		InputSchema: json.RawMessage(`{
+          "type":"object",
+          "properties":{
+            "id":{"type":"string","description":"Issue ID or unambiguous prefix."},
+            "body":{"type":"string","description":"Markdown comment body."},
+            "author":{"type":"string","description":"Optional display name; defaults to the bot."}
+          },
+          "required":["id","body"]
         }`),
 	},
 	{
@@ -210,6 +225,7 @@ var toolByName = func() map[string]*Tool {
 // dispatchByName maps a tool name to its handler. Populated once at init
 // so Call can dispatch in O(1).
 var dispatchByName = map[string]func(native.BoardStore, json.RawMessage) (json.RawMessage, error){
+	"comment_issue":    doComment,
 	"create_issue":     doCreate,
 	"transition_issue": doTransition,
 	"assign_issue":     doAssign,
@@ -286,6 +302,33 @@ func doCreate(store native.BoardStore, raw json.RawMessage) (json.RawMessage, er
 		Blockers: args.Blockers,
 		Fields:   args.Fields,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(iss)
+}
+
+func doComment(store native.BoardStore, raw json.RawMessage) (json.RawMessage, error) {
+	var args struct {
+		ID     string `json:"id"`
+		Body   string `json:"body"`
+		Author string `json:"author"`
+	}
+	if err := unmarshalArgs(raw, &args); err != nil {
+		return nil, err
+	}
+	if args.ID == "" || strings.TrimSpace(args.Body) == "" {
+		return nil, errors.New("id and body are required")
+	}
+	resolved, err := store.Resolve(args.ID)
+	if err != nil {
+		return nil, err
+	}
+	author := args.Author
+	if author == "" {
+		author = "bot"
+	}
+	iss, _, err := store.AddComment(resolved, author, args.Body)
 	if err != nil {
 		return nil, err
 	}

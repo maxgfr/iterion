@@ -97,9 +97,17 @@ func (a *Adapter) UpdateState(ctx context.Context, id, newState string) error {
 	return err
 }
 
-// Comment is not yet supported by the native tracker (v1).
+// Comment appends a note to the issue's discussion thread under the
+// "dispatcher" author — the dispatcher and finalize hooks are the callers
+// that leave a trail (e.g. the MR/PR back-link a run posts at the end).
+// Operator-authored comments arrive via the REST endpoint, which calls
+// Store.AddComment directly with the operator as author.
 func (a *Adapter) Comment(ctx context.Context, id, body string) error {
-	return fmt.Errorf("%w: native comments", tracker.ErrNotSupported)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, _, err := a.store.AddComment(id, "dispatcher", body)
+	return err
 }
 
 // Claim delegates to the store.

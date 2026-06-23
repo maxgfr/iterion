@@ -337,6 +337,9 @@ func cloneIssue(in *Issue) *Issue {
 			c.BotArgs[k] = v
 		}
 	}
+	if in.Comments != nil {
+		c.Comments = append([]Comment(nil), in.Comments...)
+	}
 	return &c
 }
 
@@ -579,6 +582,44 @@ func (s *Store) SetLastRun(id, runID, workdir string) (err error) {
 		IssueID: id,
 		Payload: map[string]any{"run_id": runID, "workdir": workdir},
 	})
+}
+
+// AddComment appends a note to the issue's discussion thread and returns
+// the updated issue plus the created comment. Author is a free-form
+// display name; body must be non-empty. The append is persisted to
+// issues/<id>.json and an EvtIssueComment record is emitted so external
+// tailers (studio, webhook bridge) observe new comments.
+func (s *Store) AddComment(id, author, body string) (updated *Issue, comment *Comment, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	defer s.recoverMutator("AddComment", &err)
+	if strings.TrimSpace(body) == "" {
+		return nil, nil, errors.New("comment: body required")
+	}
+	iss, err := s.readIssueLocked(id)
+	if err != nil {
+		return nil, nil, err
+	}
+	c := Comment{
+		ID:        uuid.NewString(),
+		Author:    author,
+		Body:      body,
+		CreatedAt: time.Now().UTC(),
+	}
+	iss.Comments = append(iss.Comments, c)
+	iss.UpdatedAt = c.CreatedAt
+	if err := s.writeIssueLocked(iss); err != nil {
+		return nil, nil, err
+	}
+	s.index[iss.ID] = cloneIssue(iss)
+	if err := s.emitPostCommitEvent(Event{
+		Type:    EvtIssueComment,
+		IssueID: id,
+		Payload: map[string]any{"comment_id": c.ID, "author": author},
+	}); err != nil {
+		return nil, nil, err
+	}
+	return cloneIssue(iss), &c, nil
 }
 
 // Release clears the claim if it matches the given marker. Releasing an
