@@ -1,6 +1,7 @@
 package expr
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -371,6 +372,73 @@ func TestExpr_FuncCall_Length(t *testing.T) {
 		}
 		if got != c.expect {
 			t.Errorf("Eval(%q) = %v (%T), want %v (%T)", c.src, got, got, c.expect, c.expect)
+		}
+	}
+}
+
+func TestExpr_FuncCall_Tail(t *testing.T) {
+	asStrings := func(t *testing.T, v interface{}) []string {
+		t.Helper()
+		arr, ok := v.([]interface{})
+		if !ok {
+			t.Fatalf("expected []interface{}, got %T", v)
+		}
+		out := make([]string, len(arr))
+		for i, e := range arr {
+			out[i] = fmt.Sprintf("%v", e)
+		}
+		return out
+	}
+	ctx := makeCtx(
+		map[string]interface{}{
+			"items": []interface{}{"a", "b", "c", "d", "e"},
+			"prev":  []interface{}{"p1", "p2", "p3"},
+			"new":   []interface{}{"p3", "n1"},
+		},
+		nil, nil, nil,
+	)
+	cases := []struct {
+		src  string
+		want []string
+	}{
+		{"tail(vars.items, 2)", []string{"d", "e"}},                 // last n
+		{"tail(vars.items, 5)", []string{"a", "b", "c", "d", "e"}},  // n == len → whole
+		{"tail(vars.items, 99)", []string{"a", "b", "c", "d", "e"}}, // n > len → whole
+		{"tail(vars.items, 0)", []string{}},                         // n == 0 → empty
+		{"tail(vars.items, -3)", []string{}},                        // n < 0 → empty
+		{"tail(vars.missing, 3)", []string{}},                       // nil input → empty
+		// The real use: bound a unique(concat(prev,new)) accumulator. Dedup
+		// keeps p3's first occurrence; tail keeps the most-recent window.
+		{"tail(unique(concat(vars.prev, vars.new)), 2)", []string{"p3", "n1"}},
+	}
+	for _, c := range cases {
+		ast, err := Parse(c.src)
+		if err != nil {
+			t.Fatalf("Parse(%q) error: %v", c.src, err)
+		}
+		got, err := ast.Eval(ctx)
+		if err != nil {
+			t.Fatalf("Eval(%q) error: %v", c.src, err)
+		}
+		gotS := asStrings(t, got)
+		if len(gotS) != len(c.want) {
+			t.Fatalf("tail(%q) = %v, want %v", c.src, gotS, c.want)
+		}
+		for i := range c.want {
+			if gotS[i] != c.want[i] {
+				t.Errorf("tail(%q)[%d] = %q, want %q", c.src, i, gotS[i], c.want[i])
+			}
+		}
+	}
+
+	// Wrong arity / non-numeric n are errors.
+	for _, bad := range []string{"tail(vars.items)", "tail(vars.items, vars.items)"} {
+		ast, err := Parse(bad)
+		if err != nil {
+			t.Fatalf("Parse(%q) error: %v", bad, err)
+		}
+		if _, err := ast.Eval(ctx); err == nil {
+			t.Errorf("tail(%q) expected error, got nil", bad)
 		}
 	}
 }

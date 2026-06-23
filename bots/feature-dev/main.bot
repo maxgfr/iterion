@@ -631,7 +631,7 @@ schema verdict_output:
 ## iteration's output during the current expression evaluation
 ## (rs.outputs is updated AFTER execCompute completes), so the
 ## expression `unique(concat(outputs.streak_check.cumulative_scanned_areas,
-## input.scanned_areas))` produces a monotonically growing union.
+## input.scanned_areas))` produces a union, tail-capped (last 40) so a reviewer's input stays bounded (avoids context_length_exceeded on long runs).
 ## On the first iteration `outputs.streak_check` is nil → concat
 ## treats it as empty → result == unique(input.scanned_areas).
 schema streak_state:
@@ -848,7 +848,7 @@ compute streak_check:
     family: "input.family"
     blockers: "input.blockers"
     fix_plan: "input.fix_plan"
-    cumulative_scanned_areas: "unique(concat(outputs.streak_check.cumulative_scanned_areas, input.scanned_areas))"
+    cumulative_scanned_areas: "tail(unique(concat(outputs.streak_check.cumulative_scanned_areas, input.scanned_areas)), 40)"
 
 ## Per-family fixers. Each one inherits the SAME-family reviewer's
 ## session via `session: inherit` + `_session_id` mapping on the

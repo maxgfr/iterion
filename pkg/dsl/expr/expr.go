@@ -1113,6 +1113,7 @@ var builtins = map[string]func(args []interface{}) (interface{}, error){
 	"unique":   builtinUnique,
 	"contains": builtinContains,
 	"join":     builtinJoin,
+	"tail":     builtinTail,
 	"if":       builtinIf,
 }
 
@@ -1244,6 +1245,44 @@ func builtinContains(args []interface{}) (interface{}, error) {
 		}
 	}
 	return false, nil
+}
+
+// builtinTail returns the last n elements of an array (like Unix `tail`).
+// Its purpose is to BOUND accumulators that grow every loop iteration — the
+// canonical case is a review loop's `cumulative_scanned_areas`, which is
+// `unique(concat(prev, new))` and is fed verbatim into every reviewer's
+// input prompt. Unbounded, it eventually overflows the model's context
+// window (observed: a whole-repo whole_improve_loop run died at review pass
+// 11 with reviewer_gpt context_length_exceeded; generation.go's reactive
+// compaction can shrink conversation history but not one oversized INPUT
+// field). Wrapping the accumulator as `tail(unique(concat(...)), N)` keeps a
+// bounded, most-recent window. n <= 0 yields an empty array; n >= len
+// returns the array unchanged. Order is preserved.
+func builtinTail(args []interface{}) (interface{}, error) {
+	if len(args) != 2 {
+		return nil, fmt.Errorf("expr: tail() takes 2 arguments (array, n), got %d", len(args))
+	}
+	n, ok := toInt(args[1])
+	if !ok {
+		return nil, fmt.Errorf("expr: tail() expects a number as second argument, got %T", args[1])
+	}
+	if args[0] == nil {
+		return []interface{}{}, nil
+	}
+	arr, ok := args[0].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("expr: tail() expects array as first argument, got %T", args[0])
+	}
+	if n <= 0 {
+		return []interface{}{}, nil
+	}
+	if n >= int64(len(arr)) {
+		return arr, nil
+	}
+	// Copy the last n elements so the result never aliases the input slice.
+	out := make([]interface{}, n)
+	copy(out, arr[int64(len(arr))-n:])
+	return out, nil
 }
 
 // builtinIf is the fallback for direct calls; the real evaluator

@@ -508,8 +508,9 @@ schema verdict_output:
 ## signal. Soft-approval: a low-confidence rejection counts as approved
 ## for streak/fix routing (the reviewer's own uncertainty isn't a
 ## strong enough signal to trigger a fix cycle). cumulative_scanned_areas
-## grows monotonically (outputs.streak_check resolves to the PREVIOUS
-## iteration's value during this evaluation).
+## grows each iteration (outputs.streak_check resolves to the PREVIOUS
+## iteration's value during this evaluation), tail-capped to the last 40
+## so a reviewer's input stays bounded (avoids context_length_exceeded).
 schema streak_state:
   stop: bool
   approved: bool
@@ -721,7 +722,7 @@ compute streak_check:
     family: "input.family"
     blockers: "input.blockers"
     fix_plan: "input.fix_plan"
-    cumulative_scanned_areas: "unique(concat(outputs.streak_check.cumulative_scanned_areas, input.scanned_areas))"
+    cumulative_scanned_areas: "tail(unique(concat(outputs.streak_check.cumulative_scanned_areas, input.scanned_areas)), 40)"
 
 ## Per-family fixers. Each inherits the SAME-family reviewer's session
 ## (_session_id on the edge) so it reuses the prompt cache + loaded
