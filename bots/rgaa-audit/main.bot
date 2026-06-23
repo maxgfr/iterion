@@ -1,0 +1,482 @@
+## ─────────────────────────────────────────────────────────────────────
+## rgaa-audit (persona: Acci) — universal RGAA 4.1.2 accessibility auditor
+##
+## READ-ONLY, STATIC. Reviews a project's UI source against the 106 RGAA
+## criteria (13 themes, WCAG 2.1 AA basis), guided by the bundled
+## rgaa-criteria-* skills and — when the target uses the DSFR — the DSFR
+## MCP tools. Scores each applicable criterion C / NC / NA, classifies
+## non-conformities by priority, exports a dated Markdown report under
+## `audits/` and (optionally) posts one board issue per non-conformity.
+##
+## Pipeline:
+##   inventory      — deterministic bounded listing of the repo
+##   detect_ui      — adaptive agent: is there a UI layer? which stack? DSFR?
+##   rgaa_review    — adaptive agent: theme-by-theme static audit → candidates
+##   scan_health    — DETERMINISTIC anti-façade gate (skills present? examined?)
+##   cap_findings   — DETERMINISTIC overflow guard (severity-sorted top-N NC)
+##   report_card    — write audits/rgaa-<date>.md + post findings to the board
+##
+## Universal: no language/ecosystem enumeration in the DSL — the stack
+## knowledge lives in the skills, the adaptive agents read them and adapt
+## to whatever repo they are pointed at, and the deterministic gate
+## verifies the audit actually consulted the criteria.
+## ─────────────────────────────────────────────────────────────────────
+
+vars:
+  workspace_dir: string = "${PROJECT_DIR}"
+  ## Free-text scope hint from the operator / dispatched issue (e.g.
+  ## "audit the checkout form components"). Empty = audit the whole UI.
+  scope_notes:   string = ""
+  ## Optional focusing globs (comma-separated, relative). Empty = the
+  ## whole workspace. A per-run override, never a hardcoded layout.
+  scope_globs:   string = ""
+  ## Where the dated conformance report lands. Neutral repo-root dir the
+  ## operator can gitignore; never iterion's store dir.
+  report_dir:    string = "${PROJECT_DIR}/audits"
+  ## When false, write the report only — do NOT create board issues.
+  ## Use for dogfood / dry runs to contain side-effects.
+  post_to_board: bool   = true
+  ## Overflow guard: keep at most this many non-conformities as board
+  ## issues (severity-sorted); the rest are still summarised in the report.
+  findings_cap:  int    = 80
+  ## Models / effort are env-tunable so the same bot runs lean or deep.
+  detect_model:  string = "${ITERION_RGAA_MODEL_DETECT:-openai/gpt-5.5}"
+  review_model:  string = "${ITERION_RGAA_MODEL_REVIEW:-claude-opus-4-8}"
+  report_model:  string = "${ITERION_RGAA_MODEL_REPORT:-claude-opus-4-8}"
+
+## ─── Schemas ──────────────────────────────────────────────────────────
+
+schema inventory_output:
+  listing: string
+
+schema detect_ui_input:
+  listing:     string
+  scope_notes: string
+  scope_globs: string
+
+schema ui_output:
+  ## has_ui is the only boolean gate; everything else is OPEN data so the
+  ## bot never enumerates a closed set of frameworks/languages.
+  has_ui:     bool
+  uses_dsfr:  bool
+  frameworks: json
+  ui_paths:   json
+  summary:    string
+
+schema review_input:
+  workspace_dir: string
+  scope_notes:   string
+  scope_globs:   string
+  has_ui:        bool
+  uses_dsfr:     bool
+  frameworks:    json
+  ui_paths:      json
+
+schema review_output:
+  ## candidates[]: { criterion, theme, title, status (C|NC|NA), severity
+  ## (blocking|major|minor), file, line, problem, remediation, evidence }.
+  ## Only NC entries become board issues; C/NA feed the synthesis tally.
+  candidates:      json
+  examined_files:  json
+  themes_covered:  json
+  na_themes:       json
+  conformity_pct:  int
+  summary:         string
+
+schema health_input:
+  workspace_dir:  string
+  has_ui:         bool
+  examined_files: json
+  candidates:     json
+
+schema health_output:
+  healthy:        bool
+  skills_present: int
+  examined_count: int
+  nc_count:       int
+  banner:         string
+
+schema cap_input:
+  candidates: json
+  cap:        int
+
+schema cap_output:
+  candidates: json
+  kept:       int
+  capped:     int
+  total_nc:   int
+
+schema report_input:
+  workspace_dir:  string
+  report_dir:     string
+  post_to_board:  bool
+  scope_notes:    string
+  candidates:     json
+  total_nc:       int
+  capped:         int
+  themes_covered: json
+  na_themes:      json
+  conformity_pct: int
+  examined_files: json
+  frameworks:     json
+  uses_dsfr:      bool
+  health:         json
+
+schema report_output:
+  report_path:    string
+  created_issues: json
+  summary:        string
+
+## ─── Prompts ──────────────────────────────────────────────────────────
+
+prompt detect_ui_system:
+  You classify a repository's user-interface surface for an RGAA
+  accessibility audit. You are READ-ONLY: inspect, never modify.
+
+  From the inventory listing and a quick look at the repo (use bash /
+  glob / grep / read_file), determine:
+    - has_ui: is there any web user-interface code to audit? (HTML
+      templates, JSX/TSX components, Vue single-file components, Twig /
+      Blade / ERB templates, Angular templates, server-rendered views,
+      raw .html). A pure backend / library / CLI repo has has_ui = false.
+    - frameworks: an OPEN list of the UI technologies you actually see
+      (e.g. "react", "vue", "twig", "plain-html", "angular"). Do not
+      force a fixed taxonomy; report what is there.
+    - uses_dsfr: does the project use the French State Design System
+      (classes prefixed `fr-`, a `@gouvfr/dsfr` or `@codegouvfr/react-dsfr`
+      dependency, or imported DSFR stylesheets)? If so, the audit will
+      compare against the DSFR's accessible reference markup.
+    - ui_paths: a representative, BOUNDED list (≤ 40) of the UI files or
+      directories the deeper review should open first — the highest-value
+      surface (shared components, layouts, forms, navigation).
+
+  Honour the scope hint and scope globs if provided: narrow ui_paths to
+  that area. Keep the listing bounded; do not try to enumerate every file.
+
+prompt detect_ui_user:
+  Repository inventory:
+
+  {{input.listing}}
+
+  Scope hint (may be empty): {{input.scope_notes}}
+  Scope globs (may be empty): {{input.scope_globs}}
+
+  Classify the UI surface and return the structured output.
+
+prompt rgaa_review_system:
+  You are Acci, an accessibility specialist auditing a UI codebase against
+  the RGAA 4.1.2 (Référentiel Général d'Amélioration de l'Accessibilité,
+  WCAG 2.1 AA basis). You are READ-ONLY: you produce findings, you never
+  edit code.
+
+  FIRST, read your reference skills (they are mirrored under
+  `.claude/skills/`): the `rgaa-audit` skill (workflow, C/NC/NA scoring,
+  priority grid, report format) and the five `rgaa-criteria-*` skills (the
+  106 criteria across the 13 themes). When the target uses the DSFR
+  (uses_dsfr is true), also read `rgaa-dsfr` and use the DSFR MCP tools
+  (mcp__dsfr__get_component_accessibility / get_component_code /
+  get_color_tokens) as the accessible-markup reference when they are
+  available; if the DSFR MCP tools are absent, degrade gracefully to the
+  generic criteria.
+
+  THEN audit the UI surface theme by theme (themes 1–13). Open the files
+  in ui_paths first, then widen as needed with glob / grep / read_file.
+  For each applicable criterion, decide a status:
+    - C  (Conforme)       — respected.
+    - NC (Non conforme)   — violated: pinpoint the element (file:line +
+                            a short code excerpt) and the exact problem.
+    - NA (Non applicable) — no such content in scope (give a one-line reason).
+
+  For every NC, classify the priority using the rgaa-audit grid:
+    - severity "blocking" 🔴 — blocks access for assistive-tech users
+      (missing alt, unlabelled field, empty link, keyboard trap,
+      non-focusable interactive control).
+    - severity "major" 🟠 — strong impact, partially workable (insufficient
+      contrast, invisible focus, broken heading hierarchy, non-explicit
+      link, status message with no aria-live).
+    - severity "minor" 🟡 — slight friction (missing autocomplete, absent
+      table caption, unsignalled new window).
+
+  Anti-façade rules (this is a real audit, not a rubber stamp):
+    - Cite the criterion number (e.g. "1.1", "3.2", "11.1") on EVERY finding.
+    - Never mark a criterion C unless you actually verified it in the code.
+      If a criterion needs a rendered page to judge (true colour contrast on
+      an image, real caption synchronisation), mark it NA with the reason
+      "requires runtime verification" rather than guessing C.
+    - Record examined_files honestly: the files you really opened. The run
+      is gated on this — an empty examined_files on a repo with a UI surface
+      fails the audit.
+    - Do not invent files or line numbers.
+
+  Compute conformity_pct = round(C / (C + NC) × 100) over applicable
+  criteria (exclude NA from the denominator). List themes_covered (theme
+  numbers you reached) and na_themes (themes ruled out, with reason).
+
+prompt rgaa_review_user:
+  Audit target: {{input.workspace_dir}}
+  UI frameworks detected: {{input.frameworks}}
+  Uses DSFR: {{input.uses_dsfr}}
+  Priority files/dirs to open first: {{input.ui_paths}}
+  Scope hint (may be empty): {{input.scope_notes}}
+  Scope globs (may be empty): {{input.scope_globs}}
+
+  Run the RGAA audit and return candidates[], examined_files,
+  themes_covered, na_themes, conformity_pct and a short summary.
+
+prompt report_card_system:
+  You turn a finished RGAA audit into (1) a dated Markdown conformance
+  report and (2) — only when post_to_board is true — one board issue per
+  non-conformity. You make NO code changes.
+
+  Read the `rgaa-audit` skill for the report format, and `iterion-board`
+  for the board tools.
+
+  STEP 1 — write the report. Create the report directory (report_dir) if
+  needed and write the report to `<report_dir>/rgaa-<YYYY-MM-DD>.md` using
+  today's date (ISO). If that file already exists, add an incremental
+  suffix (`-2`, `-3`, …). Follow the rgaa-audit report template:
+    - header: date, audited scope, global result (conformity_pct %),
+      counts of C / NC / NA;
+    - synthesis table (the 13 themes × C/NC/NA), filled from the
+      candidates and themes_covered / na_themes;
+    - detailed non-conformities (one block per NC: criterion + title,
+      concerned element with file:line, problem, correction, priority);
+    - compact lists of conforming and non-applicable criteria.
+  If the health banner is non-empty, reproduce it verbatim at the top of
+  the report as a "⚠ Couverture" note (e.g. no UI surface, or capped
+  findings, or skills missing). If `capped` > 0, add a banner: "⚠
+  Couverture : N non-conformités sur M conservées comme issues (les autres
+  restent dans le rapport)".
+
+  STEP 2 — post to the board (ONLY if post_to_board is true; otherwise skip
+  entirely). For EACH non-conformity in candidates, call
+  mcp__iterion_board__create_issue once with:
+    - title: "RGAA <criterion> — <short noun phrase> (<file>)"
+    - body: markdown — criterion + title, file:line, problem, correction,
+      priority, and the audit date.
+    - state: "ready"
+    - labels: ["severity:<blocking|major|minor>", "theme:<theme-number>",
+      "criterion:<n.n>", "source:rgaa-audit"]
+  Be honest: report exactly the issues you created in created_issues; if
+  the board tools are unavailable, set post-failure detail in the summary
+  rather than pretending.
+
+prompt report_card_user:
+  Audit date: today.
+  Audited scope: {{input.workspace_dir}} (hint: {{input.scope_notes}})
+  Conformity: {{input.conformity_pct}}%
+  Non-conformities to report (capped): {{input.candidates}}
+  Total NC found: {{input.total_nc}} (capped out of report: {{input.capped}})
+  Themes covered: {{input.themes_covered}}
+  Non-applicable themes: {{input.na_themes}}
+  Examined files: {{input.examined_files}}
+  Frameworks: {{input.frameworks}} · Uses DSFR: {{input.uses_dsfr}}
+  Health banner (may be empty): {{input.health}}
+  Report directory: {{input.report_dir}}
+  Post to board: {{input.post_to_board}}
+
+  Write the report and (when enabled) create the board issues. Return
+  report_path, created_issues and a short summary.
+
+## ─── Nodes ────────────────────────────────────────────────────────────
+
+## Deterministic bounded inventory: top-level entries + manifest/build
+## files, vendor/build/cache dirs pruned, depth-capped, count-capped.
+## Language-agnostic — no UI extension enumeration here (that is the
+## adaptive detect_ui agent's job).
+tool inventory:
+  command: `WS={{vars.workspace_dir}} python3 -c "
+import os, json
+ws = os.environ['WS']
+EXCLUDED = {'.git','node_modules','vendor','.iterion','.works','.claude','.venv','venv','env','dist','build','.next','out','target','__pycache__','.cache','.terraform','coverage'}
+MANIFESTS = {'package.json','package-lock.json','pnpm-lock.yaml','yarn.lock','composer.json','composer.lock','Gemfile','requirements.txt','pyproject.toml','go.mod','pom.xml','build.gradle','Cargo.toml','angular.json','vite.config.ts','vite.config.js','next.config.js','nuxt.config.ts','tailwind.config.js','Dockerfile','devbox.json','flake.nix','Taskfile.yml','Makefile'}
+try:
+    top = sorted(p + ('/' if os.path.isdir(os.path.join(ws, p)) else '') for p in os.listdir(ws))
+except OSError:
+    top = []
+found = []
+for dp, dns, fns in os.walk(ws):
+    dns[:] = [d for d in dns if d not in EXCLUDED]
+    if os.path.relpath(dp, ws).count(os.sep) >= 4:
+        dns[:] = []
+    for f in fns:
+        if f in MANIFESTS:
+            found.append(os.path.relpath(os.path.join(dp, f), ws))
+    if len(found) >= 400:
+        break
+found = sorted(set(found))[:400]
+listing = 'TOP-LEVEL ENTRIES:\n' + '\n'.join(top) + '\n\nMANIFEST / CONFIG FILES (vendor, node_modules, build, dist, target, venv pruned; depth<=4; capped 400):\n' + '\n'.join(found)
+print(json.dumps({'listing': listing}))
+"`
+  output: inventory_output
+
+agent detect_ui:
+  backend: "claw"
+  model: "{{vars.detect_model}}"
+  reasoning_effort: "${ITERION_RGAA_EFFORT_DETECT:-medium}"
+  input: detect_ui_input
+  output: ui_output
+  system: detect_ui_system
+  user: detect_ui_user
+  tools: [bash, read_file, glob, grep]
+  tool_max_steps: 25
+  readonly: true
+
+## The deep audit. claude_code so the bundled rgaa-* skills are mirrored
+## to .claude/skills/ and (when wired) the DSFR MCP tools are reachable.
+agent rgaa_review:
+  backend: "claude_code"
+  model: "{{vars.review_model}}"
+  reasoning_effort: "${ITERION_RGAA_EFFORT_REVIEW:-high}"
+  input: review_input
+  output: review_output
+  system: rgaa_review_system
+  user: rgaa_review_user
+  tools: [bash, read_file, glob, grep]
+  tool_max_steps: 80
+  readonly: true
+
+## DETERMINISTIC anti-façade gate. Hard-fails the run when the RGAA
+## criteria skills are not mirrored (the review had no reference grid) or
+## when a UI surface exists but the review examined zero files (façade).
+## This is the degenerate Verified-Action quad (recipe == postcondition,
+## no recovery): the gate stays deterministic.
+tool scan_health:
+  command: `WS={{input.workspace_dir}} HAS_UI={{input.has_ui}} EXAMINED={{input.examined_files}} CANDS={{input.candidates}} python3 -c "
+import os, json, sys, glob
+ws = os.environ.get('WS','.')
+has_ui = (os.environ.get('HAS_UI','false') or 'false').strip().lower() == 'true'
+try:
+    examined = json.loads(os.environ.get('EXAMINED','[]') or '[]')
+except Exception:
+    examined = []
+try:
+    cands = json.loads(os.environ.get('CANDS','[]') or '[]')
+except Exception:
+    cands = []
+skills_dir = os.path.join(ws, '.claude', 'skills')
+crit = glob.glob(os.path.join(skills_dir, 'rgaa-criteria-*.md'))
+skills_present = len(crit)
+examined_count = len(examined) if isinstance(examined, list) else 0
+nc = [c for c in cands if isinstance(c, dict) and str(c.get('status','')).upper() == 'NC']
+banner = ''
+healthy = True
+if skills_present == 0:
+    healthy = False
+    banner = 'RGAA criteria skills not found in .claude/skills — the audit could not consult the reference grid (broken setup, not a clean repo).'
+elif has_ui and examined_count == 0:
+    healthy = False
+    banner = 'A UI surface was detected but the review examined no files — refusing to report a clean audit (anti-facade guard).'
+elif not has_ui:
+    banner = 'No UI surface detected in scope; nothing to audit against RGAA.'
+health = {'healthy': healthy, 'skills_present': skills_present, 'examined_count': examined_count, 'nc_count': len(nc), 'banner': banner}
+print(json.dumps(health))
+if not healthy:
+    sys.stderr.write(banner + '\n')
+    sys.exit(1)
+"`
+  input: health_input
+  output: health_output
+
+## DETERMINISTIC overflow guard: keep at most `cap` non-conformities as
+## board issues, severity-sorted; surface how many were capped.
+tool cap_findings:
+  command: `CANDS={{input.candidates}} CAP={{input.cap}} python3 -c "
+import os, json
+try:
+    cap = int(os.environ.get('CAP','80') or '80')
+except ValueError:
+    cap = 80
+if cap < 1:
+    cap = 80
+try:
+    cands = json.loads(os.environ.get('CANDS','[]') or '[]')
+except Exception:
+    cands = []
+RANK = {'blocking':3,'bloquant':3,'major':2,'majeur':2,'minor':1,'mineur':1}
+def rank(c):
+    if not isinstance(c, dict):
+        return 0
+    return RANK.get(str(c.get('severity','')).strip().lower(), 0)
+nc = [c for c in cands if isinstance(c, dict) and str(c.get('status','')).upper() == 'NC']
+nc.sort(key=rank, reverse=True)
+kept = nc[:cap]
+capped = max(0, len(nc) - cap)
+print(json.dumps({'candidates': kept, 'kept': len(kept), 'capped': capped, 'total_nc': len(nc)}))
+"`
+  input: cap_input
+  output: cap_output
+
+agent report_card:
+  ## claude_code REQUIRED: needs the bundled skills mirrored to
+  ## .claude/skills/ and the board MCP server with capability-gated tools.
+  backend: "claude_code"
+  model: "{{vars.report_model}}"
+  reasoning_effort: "${ITERION_RGAA_EFFORT_REPORT:-medium}"
+  input: report_input
+  output: report_output
+  system: report_card_system
+  user: report_card_user
+  tools: [bash, read_file, write_file, glob, grep]
+  capabilities: [board.read, board.create, board.label]
+  tool_max_steps: 80
+
+## ─── Workflow ─────────────────────────────────────────────────────────
+
+workflow rgaa_audit:
+  entry: inventory
+  default_backend: "claude_code"
+
+  budget:
+    max_parallel_branches: 1
+    max_duration: "${ITERION_RGAA_MAX_DURATION:-2h}"
+    max_cost_usd: 20
+    max_tokens: 2000000
+    max_iterations: 200
+
+  inventory -> detect_ui with {
+    listing:     "{{outputs.inventory.listing}}",
+    scope_notes: "{{vars.scope_notes}}",
+    scope_globs: "{{vars.scope_globs}}"
+  }
+
+  detect_ui -> rgaa_review with {
+    workspace_dir: "{{vars.workspace_dir}}",
+    scope_notes:   "{{vars.scope_notes}}",
+    scope_globs:   "{{vars.scope_globs}}",
+    has_ui:        "{{outputs.detect_ui.has_ui}}",
+    uses_dsfr:     "{{outputs.detect_ui.uses_dsfr}}",
+    frameworks:    "{{outputs.detect_ui.frameworks}}",
+    ui_paths:      "{{outputs.detect_ui.ui_paths}}"
+  }
+
+  rgaa_review -> scan_health with {
+    workspace_dir:  "{{vars.workspace_dir}}",
+    has_ui:         "{{outputs.detect_ui.has_ui}}",
+    examined_files: "{{outputs.rgaa_review.examined_files}}",
+    candidates:     "{{outputs.rgaa_review.candidates}}"
+  }
+
+  scan_health -> cap_findings with {
+    candidates: "{{outputs.rgaa_review.candidates}}",
+    cap:        "{{vars.findings_cap}}"
+  }
+
+  cap_findings -> report_card with {
+    workspace_dir:  "{{vars.workspace_dir}}",
+    report_dir:     "{{vars.report_dir}}",
+    post_to_board:  "{{vars.post_to_board}}",
+    scope_notes:    "{{vars.scope_notes}}",
+    candidates:     "{{outputs.cap_findings.candidates}}",
+    total_nc:       "{{outputs.cap_findings.total_nc}}",
+    capped:         "{{outputs.cap_findings.capped}}",
+    themes_covered: "{{outputs.rgaa_review.themes_covered}}",
+    na_themes:      "{{outputs.rgaa_review.na_themes}}",
+    conformity_pct: "{{outputs.rgaa_review.conformity_pct}}",
+    examined_files: "{{outputs.rgaa_review.examined_files}}",
+    frameworks:     "{{outputs.detect_ui.frameworks}}",
+    uses_dsfr:      "{{outputs.detect_ui.uses_dsfr}}",
+    health:         "{{outputs.scan_health}}"
+  }
+
+  report_card -> done

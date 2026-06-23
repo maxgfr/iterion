@@ -1,0 +1,48 @@
+name: rgaa-audit
+display_name: Acci
+version: 0.1.0
+description: |
+  Universal RGAA 4.1.2 accessibility auditor (read-only). Statically
+  reviews a project's UI source (HTML, JSX/TSX, Vue, Twig, CSS) against
+  the 106 RGAA criteria across 13 themes (WCAG 2.1 AA basis), guided by
+  the bundled rgaa-criteria-* skills and — when the target uses the
+  Système de Design de l'État — the DSFR MCP tools. Scores each
+  applicable criterion C / NC / NA, classifies non-conformities by
+  priority (🔴 Bloquant / 🟠 Majeur / 🟡 Mineur), exports a dated
+  Markdown conformance report under `audits/` and (optionally) posts one
+  board issue per non-conformity, labelled by severity + theme +
+  criterion.
+
+  Static analysis only: it reads source code, it does not launch a
+  browser or run a DOM scanner. A deterministic scan_health gate
+  hard-fails the run if the RGAA criteria skills are not available or the
+  review examined no files while a UI surface exists — so a broken setup
+  cannot masquerade as a clean bill of health.
+when_to_use: |
+  Use for a READ-ONLY accessibility audit of a web UI codebase: produce
+  an RGAA conformance report and surface non-conformities (missing alt
+  text, unlabelled fields, low contrast, keyboard traps, broken heading
+  hierarchy, missing ARIA status messages). Emits a report + board
+  findings; does not fix. Pre-release accessibility review or recurring
+  conformance tracking. For FIXING accessibility issues, use Willy
+  (whole-improve-loop) with the rgaa preset.
+author: SocialGouv (devthejo) — bots/rgaa-audit/main.bot
+schema_version: 1
+
+capabilities: [board.create, board.label, board.read]
+
+dispatch_vars:
+  scope_notes: |-
+    {{issue.title}}
+
+    {{issue.body}}
+
+invocations:
+  - kind: command
+    mode: board
+    args_var: scope_notes
+    command: { name: acci, aliases: [rgaa-audit], scope: any, min_replier_role: developer }
+  - kind: schedule
+    mode: board
+    schedule: { suggested_cron: "0 4 * * 1" }
+  - kind: board
