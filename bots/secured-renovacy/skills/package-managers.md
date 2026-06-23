@@ -65,6 +65,49 @@ read the project's CI / scripts to see which one the team actually
 maintains. The maintained one wins; the others are stale and not
 authoritative.
 
+## Cache locations — keep them OUT of the workspace
+
+Most package managers default a cache (downloaded archives, compiled
+artefacts, toolchain bits) to a path derived from `$HOME`. Inside the
+sandbox, when a manager can't resolve a writable `$HOME` it silently
+falls back to a path adjacent to `pwd` — i.e. **inside the workspace**.
+A single missed env var here means the next commit-prep step will try
+to enumerate millions of untracked cache files via
+`git status` / `git ls-files --others` and crash the Node tool's
+default 1 MB `execSync` buffer (observed once: a `go/pkg/mod/...`
+tree of ~1 050 864 chars of path listing failed `prepare_commit`
+with `exit status 1`).
+
+**Always export these env vars before running any toolchain command:**
+
+- **Go**: `GOPATH`, `GOCACHE`, `GOMODCACHE` (default `$HOME/go`,
+  `$HOME/.cache/go-build`, `$GOPATH/pkg/mod`)
+- **Rust / Cargo**: `CARGO_HOME` (default `$HOME/.cargo`)
+- **Python / pip / uv**: `XDG_CACHE_HOME`, `PIP_CACHE_DIR`,
+  `UV_CACHE_DIR` (default `$HOME/.cache/...`)
+- **Node / npm / yarn / pnpm**: `npm_config_cache` (default
+  `$HOME/.npm`); `pnpm` honours `XDG_CACHE_HOME`; yarn berry's local
+  `.yarn/cache` is intentionally per-project — leave that one alone
+- **Generic**: `TMPDIR` so commands spawning their own scratch
+  (tar, jq, postinstall hooks) land outside the workspace too
+
+The bot's sandbox already pins all of the above to `/tmp/iterion-renovacy/...`
+in the workflow's `sandbox.env` block. If you are running a command
+outside the sandbox (host-side fallback, devbox shell, …) and there's
+any doubt about whether `$HOME` is writable, prefix the command with
+the env explicitly:
+
+```
+env GOPATH=/tmp/iterion-renovacy/go \
+    GOCACHE=/tmp/iterion-renovacy/go-build \
+    GOMODCACHE=/tmp/iterion-renovacy/go-mod \
+    TMPDIR=/tmp/iterion-renovacy/tmp \
+  go get example.com/m@v1.2.3 && go mod tidy
+```
+
+When you discover a new manager whose cache lands in the workspace by
+default, ADD an entry above so the next agent doesn't relearn it.
+
 ## Discover outdated packages
 
 Each manager emits "what's outdated" in its own JSON shape; you'll
@@ -195,8 +238,8 @@ workflow DSL. Adding or amending a manager is a skill edit here; the
   {"aliases":["npm"],"spec_form":"@","upgrade":"npm install {specs}","install":"npm install","smoke":"node-script","script_run":"npm run {script}","revert_install":"npm install"},
   {"aliases":["pnpm"],"spec_form":"@","upgrade":"pnpm update {specs}","install":"pnpm install","smoke":"node-script","script_run":"pnpm {script}","revert_install":"pnpm install"},
   {"aliases":["bun"],"spec_form":"@","upgrade":"bun update {specs}","install":"bun install","smoke":"node-script","script_run":"bun run {script}","revert_install":"bun install"},
-  {"aliases":["go","go-modules","gomod"],"spec_form":"@","upgrade":"go get {specs} && go mod tidy","install":"go mod download","smoke":"compiled","smoke_cmd":"go build ./... && go vet ./..."},
-  {"aliases":["cargo"],"spec_form":"@","upgrade":"cargo add {specs}","install":"cargo fetch","smoke":"compiled","smoke_cmd":"cargo check"},
+  {"aliases":["go","go-modules","gomod"],"spec_form":"@","upgrade":"env GOPATH=${GOPATH:-/tmp/iterion-renovacy/go} GOCACHE=${GOCACHE:-/tmp/iterion-renovacy/go-build} GOMODCACHE=${GOMODCACHE:-/tmp/iterion-renovacy/go-mod} go get {specs} && env GOPATH=${GOPATH:-/tmp/iterion-renovacy/go} GOCACHE=${GOCACHE:-/tmp/iterion-renovacy/go-build} GOMODCACHE=${GOMODCACHE:-/tmp/iterion-renovacy/go-mod} go mod tidy","install":"env GOPATH=${GOPATH:-/tmp/iterion-renovacy/go} GOCACHE=${GOCACHE:-/tmp/iterion-renovacy/go-build} GOMODCACHE=${GOMODCACHE:-/tmp/iterion-renovacy/go-mod} go mod download","smoke":"compiled","smoke_cmd":"env GOPATH=${GOPATH:-/tmp/iterion-renovacy/go} GOCACHE=${GOCACHE:-/tmp/iterion-renovacy/go-build} GOMODCACHE=${GOMODCACHE:-/tmp/iterion-renovacy/go-mod} go build ./... && env GOPATH=${GOPATH:-/tmp/iterion-renovacy/go} GOCACHE=${GOCACHE:-/tmp/iterion-renovacy/go-build} GOMODCACHE=${GOMODCACHE:-/tmp/iterion-renovacy/go-mod} go vet ./..."},
+  {"aliases":["cargo"],"spec_form":"@","upgrade":"env CARGO_HOME=${CARGO_HOME:-/tmp/iterion-renovacy/cargo} cargo add {specs}","install":"env CARGO_HOME=${CARGO_HOME:-/tmp/iterion-renovacy/cargo} cargo fetch","smoke":"compiled","smoke_cmd":"env CARGO_HOME=${CARGO_HOME:-/tmp/iterion-renovacy/cargo} cargo check"},
   {"aliases":["poetry"],"spec_form":"@","upgrade":"poetry add {specs}","install":"poetry install --no-interaction","smoke":"resolve"},
   {"aliases":["pip","pip-poetry"],"spec_form":"==","upgrade":"python3 -m pip install --upgrade {specs}","install":"python3 -m pip check","smoke":"resolve"},
   {"aliases":["uv"],"spec_form":"==","upgrade":"uv add {specs}","install":"uv sync","smoke":"resolve"},

@@ -833,6 +833,23 @@ prompt upgrade_system:
        outside the dependency manifests/lockfiles the manager
        touches on its own.
 
+  ## Workspace hygiene (mandatory)
+
+  NEVER let a toolchain cache land inside the workspace. The bot's
+  sandbox already exports `GOPATH=/tmp/iterion-renovacy/go`,
+  `GOCACHE=/tmp/iterion-renovacy/go-build`,
+  `GOMODCACHE=/tmp/iterion-renovacy/go-mod`,
+  `CARGO_HOME=/tmp/iterion-renovacy/cargo`,
+  `PIP_CACHE_DIR`, `UV_CACHE_DIR`, `XDG_CACHE_HOME`, and `TMPDIR` to
+  `/tmp/iterion-renovacy/...` so downloaded modules / build artefacts
+  live OUTSIDE the worktree. If you ever invoke a command that bypasses
+  the environment (e.g. wrapping in `sudo`, `env -i`, or a fresh shell
+  that drops env), re-export them explicitly first. A stray
+  `<workspace>/go/pkg/mod/...` tree means MILLIONS of untracked files
+  the downstream commit step will fail enumerating. The skill's
+  "Cache locations — keep them OUT of the workspace" section is the
+  reference.
+
   Tools: bash, read_file, list_files, glob, grep. WRITE-capable
   via bash (running the upgrade IS the write action).
 
@@ -905,6 +922,18 @@ prompt batch_upgrade_system:
        other downstream node here. This is patch-tier only.
     5. Stay inside `input.workspace_dir`. Only the manifests /
        lockfiles the manager touches on its own may be modified.
+
+  ## Workspace hygiene (mandatory)
+
+  NEVER let a toolchain cache land inside the workspace. The bot's
+  sandbox already pins every relevant cache env var
+  (GOPATH/GOCACHE/GOMODCACHE/CARGO_HOME/PIP_CACHE_DIR/UV_CACHE_DIR/
+  XDG_CACHE_HOME/TMPDIR) at `/tmp/iterion-renovacy/...`. If you ever
+  bypass the environment (sudo, env -i, fresh shell that drops env),
+  re-export them first. A `<workspace>/go/`, `<workspace>/target/`,
+  or `<workspace>/.cache/` tree means downstream commit fails
+  enumerating millions of untracked files. See the skill's
+  "Cache locations — keep them OUT of the workspace" section.
 
   Tools: bash, read_file, list_files, glob, grep. WRITE-capable via
   bash (running the upgrades IS the write action).
@@ -2735,8 +2764,51 @@ tool prepare_commit:
     // never lists added-and-then-deleted paths (they're identical
     // to HEAD), and `ls-files --others` only lists existing-on-disk
     // untracked files.
-    const tracked = execSync(`git -C "${workspaceDir}" diff --name-only HEAD`, { encoding: "utf8" });
-    const untracked = execSync(`git -C "${workspaceDir}" ls-files --others --exclude-standard`, { encoding: "utf8" });
+    //
+    // CACHE-OVERFLOW HARDENING (defense in depth):
+    //
+    // 1. `maxBuffer: 256 MB` — Node's `execSync` defaults to a 1 MB
+    //    stdout buffer; if a stray toolchain cache (e.g.
+    //    `<wd>/go/pkg/mod/...` after a Go upgrade with a misconfigured
+    //    GOPATH) leaks into the worktree, `ls-files --others` can
+    //    easily emit ~1 050 864 chars of path listing and crash the
+    //    whole node with `exit status 1`. 256 MB swallows even a
+    //    pathological cache tree. Combined with the sandbox `env`
+    //    block (GOPATH/GOCACHE/GOMODCACHE/CARGO_HOME/PIP_CACHE_DIR/...
+    //    all pointed at `/tmp/iterion-renovacy/...`) and the
+    //    `iterion:pkgmgr` skill JSON wrapping every `go`/`cargo`
+    //    invocation with `env GOPATH=… …`, a runaway cache should
+    //    never reach this code. This is the last-line guard.
+    //
+    // 2. Pathspec excludes — even if a cache DOES leak in, scope both
+    //    git commands to the known-relevant top-level patterns that
+    //    upgrades actually touch: manifests, lockfiles, vendor trees,
+    //    source dirs, .github, etc. The exclude pattern list is the
+    //    universal cache-dir set — Go (`go/`), Rust (`target/`,
+    //    `.cargo/`), Node (`node_modules/`, `.yarn/cache`), Python
+    //    (`__pycache__/`, `.venv/`, `venv/`), generic (`.cache/`,
+    //    `.iterion/`). `git ls-files --others -- ':!go' ':!.cache' …`
+    //    filters at the git layer (cheap) BEFORE Node sees the bytes.
+    //
+    // 3. JS-side belt-and-suspenders — even with both above, scan each
+    //    emitted line for a known-cache-prefix segment and skip it.
+    //    Costs ~µs per line; protects against a future cache dir we
+    //    haven't enumerated yet.
+    const EXCLUDES = [
+      ":!go", ":!target", ":!.cargo",
+      ":!node_modules", ":!.yarn/cache", ":!.yarn/unplugged", ":!.yarn/install-state.gz",
+      ":!__pycache__", ":!.venv", ":!venv",
+      ":!.cache", ":!.iterion",
+      ":!**/node_modules", ":!**/__pycache__", ":!**/.venv",
+    ];
+    const PATHSPEC = EXCLUDES.join(" ");
+    const EXEC_OPTS = { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 };
+    const tracked = execSync(`git -C "${workspaceDir}" diff --name-only HEAD -- . ${PATHSPEC}`, EXEC_OPTS);
+    const untracked = execSync(`git -C "${workspaceDir}" ls-files --others --exclude-standard -- . ${PATHSPEC}`, EXEC_OPTS);
+    // JS-side guard: any path under a known-cache top-level dir is
+    // skipped even if the pathspec missed it (e.g. a Go cache nested
+    // under a workspace subdir wouldn't be caught by `:!go` at root).
+    const CACHE_SEGMENTS = /(^|\/)(go|target|node_modules|__pycache__|\.venv|venv|\.cache|\.cargo|\.iterion|\.yarn\/(cache|unplugged|install-state\.gz))(\/|$)/;
     const seen = new Set();
     const files = [];
     for (const raw of (tracked + "\n" + untracked).split("\n")) {
@@ -2753,6 +2825,7 @@ tool prepare_commit:
       // cleaned up errors with "pathspec did not match any files".
       // Drop them defensively.
       if (/^\.iterion-script-/.test(p)) continue;
+      if (CACHE_SEGMENTS.test(p)) continue;
       if (seen.has(p)) continue;
       seen.add(p);
       files.push(p);
@@ -2836,8 +2909,15 @@ fi
 # "pathspec did not match any files" on any path that was deleted
 # in the just-created commit. git add -A stages every dirty
 # path in the workspace without us having to guess.
-if git status --porcelain | grep -q .; then
-  git add -A >&2
+#
+# Cache-exclusion pathspecs: any stray toolchain cache that leaked
+# into the worktree (despite the sandbox env block pinning
+# GOPATH/GOCACHE/CARGO_HOME/etc. to /tmp/iterion-renovacy/...) MUST
+# NOT be enumerated here — a bare git-add-all would stage millions
+# of untracked cache files. The exclude list mirrors prepare_commit
+# JS tool's universal cache-dir set.
+if git status --porcelain -- . ':!go' ':!target' ':!.cargo' ':!node_modules' ':!.yarn/cache' ':!.yarn/unplugged' ':!.yarn/install-state.gz' ':!__pycache__' ':!.venv' ':!venv' ':!.cache' ':!.iterion' | grep -q .; then
+  git add -A -- . ':!go' ':!target' ':!.cargo' ':!node_modules' ':!.yarn/cache' ':!.yarn/unplugged' ':!.yarn/install-state.gz' ':!__pycache__' ':!.venv' ':!venv' ':!.cache' ':!.iterion' >&2
   if ! git diff --cached --quiet; then
     if ! git commit --amend --no-edit >&2; then
       printf '{"success":false,"output":"git commit --amend failed","sha":""}\n'
@@ -3034,7 +3114,8 @@ agent fix_gpt:
 tool review_commit_auto:
   command: `set -euo pipefail
 cd {{input.workspace_dir}} >&2
-git add -A >&2
+# Cache-exclusion pathspecs (see commit_changes for rationale).
+git add -A -- . ':!go' ':!target' ':!.cargo' ':!node_modules' ':!.yarn/cache' ':!.yarn/unplugged' ':!.yarn/install-state.gz' ':!__pycache__' ':!.venv' ':!venv' ':!.cache' ':!.iterion' >&2
 if git diff --cached --quiet; then
   printf '{"success":true,"output":"no review fix changes"}\n'
 else
@@ -3214,9 +3295,15 @@ tool write_audit_md:
       }));
     } else {
       const { execSync } = require("child_process");
+      // maxBuffer guard mirrors prepare_commit's: git commit --amend
+      // may print "[detached HEAD <sha>] <subject>" plus pre-commit
+      // hook output (lint --fix, prettier, husky) that can balloon
+      // if a hook touches a stray cache dir. 256 MB is overkill but
+      // costs nothing on the success path.
+      const EXEC_OPTS = { cwd: wd, stdio: "pipe", maxBuffer: 256 * 1024 * 1024 };
       try {
-        execSync("git add docs/renovacy/", { cwd: wd, stdio: "pipe" });
-        execSync("git commit --amend --no-edit", { cwd: wd, stdio: "pipe" });
+        execSync("git add docs/renovacy/", EXEC_OPTS);
+        execSync("git commit --amend --no-edit", EXEC_OPTS);
         process.stdout.write(JSON.stringify({ success: true, output: `audit md amended into ${sha.slice(0, 7)} (${fname})`, was_batch: isBatch }));
       } catch (e) {
         // Treat amend failure as soft — the audit doc still landed on
@@ -3501,7 +3588,10 @@ COUNT=$(printf '%s' "$PATCHES" | jq 'length' 2>/dev/null || echo '?')
 BODY=$(printf '%s' "$PATCHES" | jq -r '.[] | "- \(.name // "?") \(.current // "?") -> \(.target // "?")"' 2>/dev/null || true)
 SUBJECT="chore(deps): batch update ${COUNT} patch upgrades"
 
-git add -A >&2
+# Cache-exclusion pathspecs (see commit_changes for rationale): keep
+# any stray toolchain cache OUT of the staged set, regardless of
+# whether the sandbox env block was correctly applied upstream.
+git add -A -- . ':!go' ':!target' ':!.cargo' ':!node_modules' ':!.yarn/cache' ':!.yarn/unplugged' ':!.yarn/install-state.gz' ':!__pycache__' ':!.venv' ':!venv' ':!.cache' ':!.iterion' >&2
 if git diff --cached --quiet; then
   # yarn up resolved nothing (everything already at target). Soft
   # success: downstream routes to select_candidate via "not committed".
@@ -3905,7 +3995,8 @@ AUDIT={{input.audit_summary}}
 COUNT=$(printf '%s' "$MEMBERS" | jq 'length' 2>/dev/null || echo '?')
 BODY=$(printf '%s' "$MEMBERS" | jq -r '.[] | "- \(.name // "?") \(.current // "?") -> \(.target // "?")"' 2>/dev/null || true)
 SUBJECT="chore(deps): update ${FAMILY}/* family (${COUNT} packages)"
-git add -A >&2
+# Cache-exclusion pathspecs (see commit_changes for rationale).
+git add -A -- . ':!go' ':!target' ':!.cargo' ':!node_modules' ':!.yarn/cache' ':!.yarn/unplugged' ':!.yarn/install-state.gz' ':!__pycache__' ':!.venv' ':!venv' ':!.cache' ':!.iterion' >&2
 if git diff --cached --quiet; then
   printf '{"success":true,"committed":false,"output":"family yarn up produced no manifest changes","sha":""}\n'
   exit 0
@@ -4172,7 +4263,12 @@ tool emit_sbom:
 
     function endSHA() {
       try {
-        return execSync(`git -C "${wd}" rev-parse HEAD`, { encoding: "utf8" }).trim();
+        // `git rev-parse HEAD` output is bounded (a SHA), but apply
+        // the same 256 MB maxBuffer guard as prepare_commit for
+        // consistency — pre-commit hooks can wrap rev-parse in noisy
+        // wrappers, and Node's default 1 MB buffer would crash this
+        // tool on a misconfigured workspace.
+        return execSync(`git -C "${wd}" rev-parse HEAD`, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 }).trim();
       } catch (_e) {
         return "";
       }
@@ -4334,6 +4430,32 @@ workflow secured_renovacy:
       GIT_AUTHOR_EMAIL: "iterion@noreply.local"
       GIT_COMMITTER_NAME: "iterion-secured-renovacy"
       GIT_COMMITTER_EMAIL: "iterion@noreply.local"
+      ## Keep language-toolchain caches OUT of the worktree. Without
+      ## these, a Go-aware upgrade step ends up downloading the toolchain
+      ## + module cache + build cache under `<workspace>/go/pkg/mod/...`
+      ## (the implicit `GOPATH=$HOME/go` default lands on a `HOME` that
+      ## doesn't exist for the sandbox user, so Go silently fell back to
+      ## a path next to `pwd`). That tree carries MILLIONS of files —
+      ## untracked but enumerable — and the next prepare_commit's
+      ## `git ls-files --others` then dumps ~1MB+ of paths into Node's
+      ## default 1MB `execSync` buffer and crashes the run with
+      ## `exit status 1`. Pointing all language-toolchain caches at /tmp
+      ## (tmpfs/scratch, NOT bind-mounted, cleaned per container) keeps
+      ## the worktree free of generated cache trees, no matter which
+      ## ecosystem the per-package agent picks.
+      ##
+      ## Universal across ecosystems — not Go-specific: pip's HOME-relative
+      ## .cache and uv's XDG_CACHE_HOME default to the same trap. We
+      ## also flip TMPDIR so commands that spawn their own scratch
+      ## (tar, jq, npm postinstall) land OUTSIDE the worktree too.
+      GOPATH: "/tmp/iterion-renovacy/go"
+      GOCACHE: "/tmp/iterion-renovacy/go-build"
+      GOMODCACHE: "/tmp/iterion-renovacy/go-mod"
+      XDG_CACHE_HOME: "/tmp/iterion-renovacy/xdg-cache"
+      PIP_CACHE_DIR: "/tmp/iterion-renovacy/pip-cache"
+      UV_CACHE_DIR: "/tmp/iterion-renovacy/uv-cache"
+      CARGO_HOME: "/tmp/iterion-renovacy/cargo"
+      TMPDIR: "/tmp/iterion-renovacy/tmp"
     ## Bind mount of ~/.claude into the sandbox. The mount is
     ## read-write (intentionally — see below).
     ##
@@ -4376,7 +4498,7 @@ workflow secured_renovacy:
     ##     the project's `packageManager` field without each
     ##     downstream agent re-discovering the right invocation.
     ##     Corepack ships with Node 22 (no extra install).
-    post_create: "set -e; claude --version >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest; claude --version >/dev/null 2>&1 || { echo 'claude install verification failed' >&2; exit 1; }; sudo corepack enable 2>/dev/null || true; corepack prepare --activate 2>/dev/null || true"
+    post_create: "set -e; claude --version >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code@latest; claude --version >/dev/null 2>&1 || { echo 'claude install verification failed' >&2; exit 1; }; sudo corepack enable 2>/dev/null || true; corepack prepare --activate 2>/dev/null || true; mkdir -p /tmp/iterion-renovacy/go /tmp/iterion-renovacy/go-build /tmp/iterion-renovacy/go-mod /tmp/iterion-renovacy/xdg-cache /tmp/iterion-renovacy/pip-cache /tmp/iterion-renovacy/uv-cache /tmp/iterion-renovacy/cargo /tmp/iterion-renovacy/tmp 2>/dev/null || true"
 
   budget:
     max_parallel_branches: 4
