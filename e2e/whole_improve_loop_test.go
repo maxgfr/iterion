@@ -120,7 +120,11 @@ func TestWholeImproveLoop_HappyPath(t *testing.T) {
 
 	s := tmpStore(t)
 	eng := runtime.New(wf, s, exec)
-	if err := eng.Run(context.Background(), "run-vibe-happy", nil); err != nil {
+	// inline context_mode: the stub reviewers can't open real files, so run in
+	// inline mode (ADR-045 v0.5.0) where the explore-engagement guard is bypassed
+	// and the convergence math these scenarios assert on runs as it did
+	// pre-explore-mode. (Explore-mode engagement is exercised by live runs.)
+	if err := eng.Run(context.Background(), "run-vibe-happy", map[string]interface{}{"context_mode": "inline"}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -196,7 +200,7 @@ func TestWholeImproveLoop_FixThenApprove(t *testing.T) {
 
 	s := tmpStore(t)
 	eng := runtime.New(wf, s, exec)
-	if err := eng.Run(context.Background(), "run-vibe-fix", nil); err != nil {
+	if err := eng.Run(context.Background(), "run-vibe-fix", map[string]interface{}{"context_mode": "inline"}); err != nil { // inline: stub reviewers can't open real files (ADR-045)
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -289,7 +293,7 @@ func TestWholeImproveLoop_EventTrace(t *testing.T) {
 
 	s := tmpStore(t)
 	eng := runtime.New(wf, s, exec)
-	if err := eng.Run(context.Background(), "run-vibe-events", nil); err != nil {
+	if err := eng.Run(context.Background(), "run-vibe-events", map[string]interface{}{"context_mode": "inline"}); err != nil { // inline: stub reviewers can't open real files (ADR-045)
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -462,7 +466,7 @@ func TestWholeImproveLoop_CursorThreadsAndStreakAccumulates(t *testing.T) {
 
 	s := tmpStore(t)
 	eng := runtime.New(wf, s, exec)
-	if err := eng.Run(context.Background(), "run-vibe-cursor", nil); err != nil {
+	if err := eng.Run(context.Background(), "run-vibe-cursor", map[string]interface{}{"context_mode": "inline"}); err != nil { // inline: stub reviewers can't open real files (ADR-045)
 		t.Fatalf("Run: %v", err)
 	}
 	run, err := s.LoadRun(context.Background(), "run-vibe-cursor")
