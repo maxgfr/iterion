@@ -128,6 +128,45 @@ func (b *SharedBudget) Check() []budgetCheckResult {
 	return b.checkLocked()
 }
 
+// RemainingDuration reports the wall-clock time left before the run's
+// max_duration budget is exhausted, and whether a duration budget is set.
+// When no duration limit is configured (or the budget is nil) it returns
+// (0, false) so callers skip deadline bounding. An already-overrun budget
+// returns (0, true). This is the basis for the engine's per-node hard
+// deadline: the boundary budget check only blocks NEW node starts, so a
+// single long or hung node would otherwise run unbounded past max_duration.
+func (b *SharedBudget) RemainingDuration() (time.Duration, bool) {
+	if b == nil {
+		return 0, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.maxDuration <= 0 {
+		return 0, false
+	}
+	rem := b.maxDuration - time.Since(b.startedAt)
+	if rem < 0 {
+		rem = 0
+	}
+	return rem, true
+}
+
+// DurationStatus returns the elapsed time and the duration limit (both in
+// nanoseconds, as float64 to match budgetCheckResult), plus whether a
+// duration budget is set. Used to surface a per-node deadline expiry as a
+// BUDGET_EXCEEDED(duration) failure with the same shape as the boundary check.
+func (b *SharedBudget) DurationStatus() (used, limit float64, bounded bool) {
+	if b == nil {
+		return 0, 0, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.maxDuration <= 0 {
+		return 0, 0, false
+	}
+	return float64(time.Since(b.startedAt)), float64(b.maxDuration), true
+}
+
 func (b *SharedBudget) checkLocked() []budgetCheckResult {
 	var results []budgetCheckResult
 

@@ -1225,6 +1225,23 @@ func (e *Engine) execLoopRunNode(ctx context.Context, rs *runState, currentNodeI
 		),
 	)
 	spanCtx = model.WithLoopIteration(spanCtx, iter)
+
+	// Hard wall-clock deadline: bound this node's execution to the run's
+	// remaining max_duration budget. checkBudgetBeforeExec only blocks NEW
+	// node starts at 90%; without a deadline a single long or hung node — a
+	// stuck delegate subprocess, an over-eager survey, a runaway scanner —
+	// runs unbounded past max_duration (observed killing whole dogfood runs:
+	// a deepsec scanner ran 81m on a 90m budget, a survey node ran 100m on a
+	// 50m budget, a claude_code stream stalled 43m after a timeout). The
+	// deadline propagates into claude_code's exec.CommandContext and claw's
+	// streaming ctx, force-terminating the node; expiry is surfaced below as
+	// a resumable BUDGET_EXCEEDED(duration) failure.
+	if rem, bounded := rs.budget.RemainingDuration(); bounded && rem > 0 {
+		var cancel context.CancelFunc
+		spanCtx, cancel = context.WithDeadline(spanCtx, time.Now().Add(rem))
+		defer cancel()
+	}
+
 	output, execErr := e.executor.Execute(spanCtx, node, nodeInput)
 	if execErr != nil {
 		span.RecordError(execErr)
@@ -1245,6 +1262,21 @@ func (e *Engine) execLoopRunNode(ctx context.Context, rs *runState, currentNodeI
 				ierr = errInteractionHandledInline
 			}
 			return nil, false, ierr
+		}
+		// Per-node duration deadline expiry: when the node was cut off by
+		// the wall-clock deadline derived from max_duration, surface it as a
+		// resumable BUDGET_EXCEEDED(duration) failure rather than routing
+		// through retry/recovery — retrying a node that already exhausted the
+		// run's duration budget would just hang or burn the budget again. The
+		// budgetHardThreshold guard ensures an unrelated DeadlineExceeded that
+		// originated inside the node (some shorter internal timeout) is NOT
+		// misclassified as a budget stop.
+		if errors.Is(execErr, context.DeadlineExceeded) {
+			if used, limit, bounded := rs.budget.DurationStatus(); bounded && limit > 0 && used >= limit*budgetHardThreshold {
+				return nil, false, e.failBudgetExceeded(rs, currentNodeID, &budgetCheckResult{
+					exceeded: true, dimension: "duration", used: used, limit: limit,
+				})
+			}
 		}
 		// Recovery dispatch (when wired via WithRecoveryDispatch):
 		// classify the error, look up a recipe, and either retry,
