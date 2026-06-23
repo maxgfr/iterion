@@ -10,6 +10,75 @@ cross-family approvals. See [bots/whole-improve-loop/](../../bots/whole-improve-
 > [branch-improve-loop.md](branch-improve-loop.md). This page covers Willy's
 > whole-repo specifics.
 
+## 2026-06-23 — code-quality axis was a no-op; fixed → 14 real cleanups + a sandbox-claw bug (runs 019ef545, 019ef550)
+
+- Status: **partial** (run 2 produced strong value, ended `failed_resumable` on a reviewer context overflow before convergence)
+- Versions: bot 0.3.0 · iterion `d665317` (run binary built from branch `feat/budget-override-flag` @ `5ae01478e`)
+- Method: `claude_code` opus-4-8 (reviewer_claude + both fixers) · `claw` `openai/gpt-5.5` (reviewer_gpt) · `worktree: auto` · sandbox `iterion-sandbox-full:edge` · **`--max-cost-usd 120 --max-duration 4h`** (via the new at-run budget-override flag — no `.bot` edit) · `--merge-into none` · store = operator `.iterion` (visible in studio) · whole repo (no `scope_globs`) → **28 chunks**.
+
+### Run 1 (019ef545) — diagnostic: the axis was a no-op
+Willy approved **every** chunk (0 rejections, 0 fixes, ~$2) and cruised toward a
+clean convergence having changed nothing. Root cause: Willy's reviewer is a
+*production-readiness* reviewer whose anti-false-positive rule says
+"style/naming/minor-optimisation/missing-doc are **not** blockers" — exactly the
+class a code-quality axis targets. It *found* the issues (dead `SwitchTeamWithCookie`,
+drifted `RotateSession`, dup dotenv parser…) but filed them under `fix_plan` as
+"recommended non-blocking cleanups for a future quality pass" and set
+`approved=true`. The fixer had the same bias (pushback "not production-blocking").
+So an axis-scoped run can converge on **unimproved** code. Cancelled after diagnosis.
+
+### Bot fix (branch `fix/willy-code-quality-axis`)
+When `improvement_prompt` is non-empty the axis now **redefines "blocking"**: a
+concrete, evidence-backed on-axis finding is a blocker the fixer applies *this*
+pass; the "style not a blocker" carve-out is suspended for on-axis items. Mirrored
+in the fixer's pushback rules. Convergence guards kept (concrete + smallest-change
++ no taste / no re-litigation → clean chunks still approve, streak still settles).
+
+### Run 2 (019ef550) — the fix works
+**14 chunks rejected→fixed**, real on-axis cleanups: net **−259 lines across 21
+files** (dead code in pkg/auth, pkg/dispatcher, pkg/dsl/ir; dup slug-retry;
+zero-caller exported `FromIdent`; misleading docs; redundant wrappers). Cumulative
+worktree **build + vet + package tests green**. Cost **$44.12**, ~1.5h. Harvested
+to branch `willy/iterion-code-quality-2026-06-23` (cleanups as one commit).
+
+### Engine/bug findings
+1. **Bot demote-and-defer bug** → fixed (above).
+2. **Real bug Willy *found* in iterion** (off-axis, separated to its own commit):
+   `pkg/backend/delegate/io.go` `ToIOTask`/`FromIOTask` silently dropped
+   `CursorFragments`, `PresetFragment`, `SystemPromptMode`, `Ultracode`,
+   `SecretFiles`, `UserContent`, `RepoRoot`, `Iteration`. The runner builds the
+   prompt via `Task.BuildSystemPrompt()` *after* `FromIOTask` and cannot
+   re-resolve cursors/preset, so **sandboxed claw silently lost cursor
+   calibration + launch-preset bias** (and zero `SystemPromptMode` → `Standalone`
+   instead of claw's `AuthoredBase` → adaptivity-parity regression). Fix carries
+   them over the wire. **Wants a round-trip regression test before merge.**
+3. **`devbox` can't run inside the sandbox** — it can't write `~/.cache/devbox`
+   as the unprivileged container user, so the CLAUDE.md `devbox run -- …`
+   convention dies before the build; the fixer correctly fell back to bare `go`.
+   `verify-build` skill now documents this fallback.
+4. **OPEN — reviewer context overflow on large repos.** Run 2 ended
+   `failed_resumable` when `reviewer_gpt` (gpt-5.5) hit `context_length_exceeded`
+   at review_loop 11: the **`cumulative_scanned_areas` + `prior_pushback`** fed to
+   every reviewer grow unbounded across passes and eventually blow the window
+   (generation.go's reactive compaction can't shrink a single oversized *input*
+   prompt). Fix candidates: cap/summarise the accumulated feedback before
+   injection; or default to `scope_globs` to keep chunk count down; or route the
+   reviewer to a larger-context model.
+5. **New capability used:** `iterion run --max-cost-usd` (+ `--max-tokens`,
+   `--max-duration`, `--max-iterations`, `--max-parallel-branches`) on `run` and
+   `resume` — set the $120 ceiling without editing the bot (branch
+   `feat/budget-override-flag`).
+
+### Lessons for next run
+- Bound the reviewer feedback context (finding #4) **before** the next whole-repo
+  run, or it will re-overflow on resume at the same point.
+- Whole-repo single runs do not converge (streak needs `num_chunks+1` clean; 14
+  fixes keep resetting it) — they make **bounded** progress. `commit_changes`
+  only runs on convergence, so on a non-converged run the fixes stay **uncommitted
+  in the preserved worktree** and must be harvested by hand (done here).
+- The fix made Willy genuinely useful on a quality axis; pair it with a bounded
+  scope (`scope_globs`) for affordable, convergent per-area passes.
+
 ## 2026-06-15 — deterministic build/test gate shipped + validated live; 2 more pkg/store fixes; placeholder root cause (runs 019ec9d5, 019eca0d)
 
 Follow-up to the 019ec7ed run below. Implemented the recommended **deterministic
