@@ -51,7 +51,10 @@ to branch `willy/iterion-code-quality-2026-06-23` (cleanups as one commit).
    re-resolve cursors/preset, so **sandboxed claw silently lost cursor
    calibration + launch-preset bias** (and zero `SystemPromptMode` → `Standalone`
    instead of claw's `AuthoredBase` → adaptivity-parity regression). Fix carries
-   them over the wire. **Wants a round-trip regression test before merge.**
+   them over the wire **with a proper round-trip mutation test** the fixer wrote
+   in the same commit (`TestIOTaskRoundTrip` asserts every new field survives
+   `ToIOTask→JSON→FromIOTask`). Verified by code-trace that the runner consumes
+   them via `Task.BuildSystemPrompt()` after `FromIOTask`.
 3. **`devbox` can't run inside the sandbox** — it can't write `~/.cache/devbox`
    as the unprivileged container user, so the CLAUDE.md `devbox run -- …`
    convention dies before the build; the fixer correctly fell back to bare `go`.
