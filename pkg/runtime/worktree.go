@@ -856,6 +856,27 @@ func RecoverFinalize(ctx context.Context, st store.RunStore, r *store.Run, logge
 	return st.SaveRun(ctx, r)
 }
 
+// workspaceIsGitRepo reports whether `dir` (or any parent up to /) is
+// inside a git repository. Used by the engine's worktree precheck so a
+// workflow that defaults to `worktree: auto` against a non-git workspace
+// degrades gracefully to in-place execution instead of hard-failing with
+// "not a git repository". Falls back to os.Getwd() when `dir` is empty
+// so the engine's pre-Run normalization matches the cwd-based behaviour.
+//
+// This wraps gitlib.FindMainRepoRoot purely for self-documenting intent
+// at the engine call site — the underlying helper already returns "" for
+// non-git paths.
+func workspaceIsGitRepo(dir string) bool {
+	if dir == "" {
+		var err error
+		dir, err = os.Getwd()
+		if err != nil {
+			return false
+		}
+	}
+	return gitlib.FindMainRepoRoot(dir) != ""
+}
+
 // findGitRoot walks up parent directories from `dir` until it finds a `.git`
 // entry, then resolves linked-worktree pointer files back to the main repo
 // so a per-run worktree set up on top of an outer worktree (e.g. the

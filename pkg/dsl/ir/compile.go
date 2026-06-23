@@ -492,7 +492,7 @@ func (c *compiler) compile() *Workflow {
 		MCPServers:     c.mcp,
 		Cursors:        cursors,
 		Interaction:    interaction,
-		Worktree:       wf.Worktree,
+		Worktree:       defaultWorktreeMode(wf.Worktree),
 		RTK:            wf.RTK,
 		Sandbox:        c.compileSandboxBlock(wf.Sandbox, "workflow", wf.Name),
 	}
@@ -632,6 +632,31 @@ func resolveSupervisorModel(explicit string) string {
 		return explicit
 	}
 	return os.Getenv("ITERION_DEFAULT_SUPERVISOR_MODEL")
+}
+
+// defaultWorktreeMode resolves the workflow's `worktree:` field into the
+// runtime-canonical value. Worktree isolation is the DEFAULT so no bot
+// ever dirties the live checkout — empty/unset resolves to "auto" while
+// the explicit "none" opt-out is preserved verbatim. The runtime owns the
+// "is this even a git repo?" guard and degrades gracefully to in-place
+// when setup isn't possible (see pkg/runtime/engine.go), so this helper
+// can keep the IR side strictly value-based.
+func defaultWorktreeMode(raw string) string {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	switch v {
+	case "none":
+		return "none"
+	case "auto":
+		return "auto"
+	case "":
+		return "auto"
+	default:
+		// Unknown values flow through untouched. Validation already
+		// rejects them at the AST surface (the parser only accepts
+		// idents and the doctor flags strangers); preserving the raw
+		// value here keeps any future strict diagnostic actionable.
+		return v
+	}
 }
 
 // canAutoResolveBackend reports whether the detect package can pick a

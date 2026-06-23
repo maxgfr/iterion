@@ -558,24 +558,37 @@ func (e *Engine) Run(ctx context.Context, runID string, inputs map[string]interf
 	var wtCtx worktreeContext
 	worktreeActive := false
 	if e.workflow.Worktree == "auto" {
-		wtc, cleanup, wtErr := setupWorktree(e.store.Root(), runID, e.workDir, e.logger)
-		if wtErr != nil {
-			e.markFailedBestEffort(ctx, runID, "worktree setup", wtErr)
-			return fmt.Errorf("runtime: worktree setup: %w", wtErr)
+		// Workspace isolation is the IR default (ir.defaultWorktreeMode),
+		// so any `iterion run` against a non-git workspace would otherwise
+		// hard-fail with "not a git repository". Degrade gracefully to
+		// in-place: this is the documented contract — auto is best-effort
+		// isolation, never a precondition. Many e2e/examples and ad-hoc
+		// runs against scratch dirs rely on this. The explicit opt-out
+		// path is `worktree: none`.
+		if !workspaceIsGitRepo(e.workDir) {
+			if e.logger != nil {
+				e.logger.Warn("runtime: workspace %s is not a git repository — running in-place (set `worktree: none` to silence this)", e.workDir)
+			}
+		} else {
+			wtc, cleanup, wtErr := setupWorktree(e.store.Root(), runID, e.workDir, e.logger)
+			if wtErr != nil {
+				e.markFailedBestEffort(ctx, runID, "worktree setup", wtErr)
+				return fmt.Errorf("runtime: worktree setup: %w", wtErr)
+			}
+			e.workDir = wtc.wtPath
+			worktreeCleanup = cleanup
+			wtCtx = wtc
+			worktreeActive = true
+			// Cover every exit path from this point on. Without this defer,
+			// failures in subsequent setup would return without finalize and
+			// leak the worktree dir + orphan any commits the partial run
+			// produced. finalizeOnExit short-circuits on error (preserves
+			// worktree for inspection, skips FF) so a single defer covers
+			// both happy and error paths uniformly.
+			defer func() {
+				e.finalizeOnExit(ctx, runID, &wtCtx, worktreeCleanup, err)
+			}()
 		}
-		e.workDir = wtc.wtPath
-		worktreeCleanup = cleanup
-		wtCtx = wtc
-		worktreeActive = true
-		// Cover every exit path from this point on. Without this defer,
-		// failures in subsequent setup would return without finalize and
-		// leak the worktree dir + orphan any commits the partial run
-		// produced. finalizeOnExit short-circuits on error (preserves
-		// worktree for inspection, skips FF) so a single defer covers
-		// both happy and error paths uniformly.
-		defer func() {
-			e.finalizeOnExit(ctx, runID, &wtCtx, worktreeCleanup, err)
-		}()
 	}
 
 	if err := e.runPersistWorkspace(ctx, runID, run, worktreeActive, wtCtx); err != nil {
@@ -729,7 +742,13 @@ func (e *Engine) runPromoteAttachments(ctx context.Context, runID string, run *s
 func (e *Engine) runPersistWorkspace(ctx context.Context, runID string, run *store.Run, worktreeActive bool, wtCtx worktreeContext) error {
 	if e.workDir != "" {
 		run.WorkDir = e.workDir
-		run.Worktree = e.workflow.Worktree == "auto"
+		// run.Worktree reflects whether the runtime actually set up an
+		// isolated git worktree for this run — not just whether the
+		// workflow declared `worktree: auto`. With auto being the IR
+		// default, a non-git workspace degrades to in-place and must
+		// honestly report Worktree=false so downstream consumers
+		// (resume, finalize, FilesPanel) don't chase a phantom path.
+		run.Worktree = worktreeActive
 		if worktreeActive {
 			run.RepoRoot = wtCtx.repoRoot
 			run.BaseCommit = wtCtx.originalTip

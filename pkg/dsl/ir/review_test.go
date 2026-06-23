@@ -110,6 +110,9 @@ workflow wf:
 }
 
 // C100: a review gate without worktree: auto is an error — nothing to merge.
+// `worktree: none` is the explicit opt-out; without it the IR now defaults
+// to "auto" (workspace isolation is the default), so the explicit "none"
+// is required to exercise C100.
 func TestReviewGateRequiresWorktree(t *testing.T) {
 	src := `
 schema v:
@@ -122,6 +125,7 @@ human gate:
 
 workflow wf:
   entry: gate
+  worktree: none
   gate -> done when "decision == 'approved'"
 `
 	r := compileFile(t, src)
