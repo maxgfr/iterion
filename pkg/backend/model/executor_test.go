@@ -275,7 +275,7 @@ func TestCapabilitiesForModel(t *testing.T) {
 		{"openai", "o3-mini", ModelCapabilities{Reasoning: true, ToolCall: true, Temperature: false}},
 		{"unknown", "any-model", ModelCapabilities{Reasoning: false, ToolCall: true, Temperature: true}},
 		// GLM family (served via z.ai's Anthropic-compatible endpoint).
-		{"anthropic", "glm-5.2", ModelCapabilities{Reasoning: true, ToolCall: true, Temperature: true, ContextWindow: 200_000}},
+		{"anthropic", "glm-5.2", ModelCapabilities{Reasoning: true, ToolCall: true, Temperature: true, ContextWindow: 1_000_000}},
 		{"anthropic", "glm-5.1", ModelCapabilities{Reasoning: true, ToolCall: true, Temperature: true, ContextWindow: 200_000}},
 		{"anthropic", "glm-4.6", ModelCapabilities{Reasoning: true, ToolCall: true, Temperature: true, ContextWindow: 200_000}},
 		{"anthropic", "glm-9.9-unknown", ModelCapabilities{Reasoning: true, ToolCall: true, Temperature: true, ContextWindow: 200_000}},

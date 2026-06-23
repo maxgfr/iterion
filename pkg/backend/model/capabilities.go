@@ -27,7 +27,7 @@ func anthropicCapabilities(modelID string) ModelCapabilities {
 	// distinct family with their own context windows — handle them
 	// before the Claude reasoning heuristics below.
 	if strings.Contains(lower, "glm") {
-		return glmCapabilities()
+		return glmCapabilities(lower)
 	}
 
 	// Claude 3.5+ and Claude 4+ support reasoning via extended thinking.
@@ -44,20 +44,26 @@ func anthropicCapabilities(modelID string) ModelCapabilities {
 	}
 }
 
-// glmContextWindow is the static context window for the GLM family served
-// via z.ai's Anthropic-compatible endpoint. GLM-5.x and GLM-4.6 are all
-// 200K-class; split into a per-model map if a future GLM diverges.
-const glmContextWindow = 200_000
+// glmContextWindow returns the context window for a GLM model served via
+// z.ai's Anthropic-compatible endpoint. GLM-5.2 ships a 1M-token window
+// (released 2026-06-13, ~5x its GLM-5.1 predecessor); GLM-5.1 / GLM-4.6 and
+// earlier are 200K-class. modelID arrives lowercased.
+func glmContextWindow(modelID string) int {
+	if strings.Contains(modelID, "glm-5.2") {
+		return 1_000_000
+	}
+	return 200_000
+}
 
 // glmCapabilities returns static capabilities for a GLM model. GLM models
 // support tool calling, temperature, and extended thinking via the
 // Anthropic-compatible endpoint.
-func glmCapabilities() ModelCapabilities {
+func glmCapabilities(modelID string) ModelCapabilities {
 	return ModelCapabilities{
 		Reasoning:     true,
 		ToolCall:      true,
 		Temperature:   true,
-		ContextWindow: glmContextWindow,
+		ContextWindow: glmContextWindow(modelID),
 	}
 }
 
