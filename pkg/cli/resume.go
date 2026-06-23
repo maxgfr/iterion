@@ -42,6 +42,11 @@ type ResumeOptions struct {
 	// spawned by the studio server. The CLI writes a .pid file so the
 	// server can detect liveness across its own restart.
 	Background bool
+	// Budget carries CLI overrides for the workflow's budget: block,
+	// mirroring `iterion run`. The documented "budget exceeded → raise the
+	// budget + resume" recovery relies on this. Non-zero wins; zero
+	// inherits. See applyBudgetOverrides.
+	Budget BudgetOverrides
 }
 
 // RunResumeWithFile resumes a paused run using a workflow file and answers.
@@ -158,6 +163,14 @@ func RunResumeWithFile(ctx context.Context, iterFile string, opts ResumeOptions,
 	if err != nil {
 		return err
 	}
+
+	// CLI budget overrides — applied before buildResumeExecutor (which
+	// snapshots Budget), same seam as the run path. Lets an operator raise
+	// a cap and resume a budget-exceeded run without editing the .bot.
+	if err := opts.Budget.Validate(); err != nil {
+		return UserInputError(err)
+	}
+	applyBudgetOverrides(wf, opts.Budget)
 
 	executor, err := buildResumeExecutor(opts, wf, s, storeDir, logger, r)
 	if err != nil {

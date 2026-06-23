@@ -5,6 +5,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/cli"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var runOpts struct {
@@ -25,6 +26,11 @@ var runOpts struct {
 	sandboxDefaultImage string
 	sandboxHostState    string
 	rtk                 string
+	maxCostUSD          float64
+	maxTokens           int
+	maxDuration         string
+	maxIterations       int
+	maxParallelBranches int
 }
 
 var runCmd = &cobra.Command{
@@ -50,6 +56,13 @@ var runCmd = &cobra.Command{
 			SandboxDefaultImage: runOpts.sandboxDefaultImage,
 			SandboxHostState:    runOpts.sandboxHostState,
 			RTK:                 runOpts.rtk,
+			Budget: cli.BudgetOverrides{
+				MaxCostUSD:          runOpts.maxCostUSD,
+				MaxTokens:           runOpts.maxTokens,
+				MaxDuration:         runOpts.maxDuration,
+				MaxIterations:       runOpts.maxIterations,
+				MaxParallelBranches: runOpts.maxParallelBranches,
+			},
 		}
 		if len(runOpts.varFlags) > 0 {
 			vars, err := cli.ParseVarFlags(runOpts.varFlags)
@@ -82,5 +95,19 @@ func init() {
 	f.StringVar(&runOpts.sandboxDefaultImage, "sandbox-default-image", "", "Image ref used by sandbox: auto when no .devcontainer/devcontainer.json is found (env: ITERION_SANDBOX_DEFAULT_IMAGE; built-in: ghcr.io/socialgouv/iterion-sandbox-slim:<iterion-version>)")
 	f.StringVar(&runOpts.sandboxHostState, "sandbox-host-state", "", "Bind host ~/.iterion and ~/.claude into the sandbox so persistent memory survives across runs: \"auto\" (default) | \"none\". Empty inherits ITERION_SANDBOX_HOST_STATE then the built-in default \"auto\". Use \"none\" on multi-tenant/cloud runners to avoid leaking host OAuth credentials. See docs/sandbox.md.")
 	f.StringVar(&runOpts.rtk, "rtk", "", "rtk command-output compression (https://github.com/rtk-ai/rtk): \"on\" rewrites agent shell commands to their compact \"rtk <cmd>\" form, \"ultra\" uses rtk's densest output, \"off\" disables. Empty inherits the workflow/node rtk: DSL then ITERION_RTK. Needs the rtk binary on PATH (or ITERION_RTK_BIN). See docs/rtk.md.")
+	registerBudgetFlags(f, &runOpts.maxCostUSD, &runOpts.maxTokens, &runOpts.maxDuration, &runOpts.maxIterations, &runOpts.maxParallelBranches)
 	rootCmd.AddCommand(runCmd)
+}
+
+// registerBudgetFlags wires the at-run budget-override flags onto a command's
+// flag set. Shared by `run` and `resume` so both expose the same overrides
+// (the documented "raise the cap + resume" recovery needs them on resume too).
+// Each flag's zero value means "inherit the workflow/recipe budget"; a
+// non-zero value overrides that dimension (see cli.applyBudgetOverrides).
+func registerBudgetFlags(f *pflag.FlagSet, cost *float64, tokens *int, duration *string, iterations, parallel *int) {
+	f.Float64Var(cost, "max-cost-usd", 0, "Override the workflow budget's max_cost_usd (USD; 0 = inherit the bot's budget)")
+	f.IntVar(tokens, "max-tokens", 0, "Override the workflow budget's max_tokens (0 = inherit)")
+	f.StringVar(duration, "max-duration", "", "Override the workflow budget's max_duration, e.g. 30m, 2h (empty = inherit)")
+	f.IntVar(iterations, "max-iterations", 0, "Override the workflow budget's max_iterations (0 = inherit)")
+	f.IntVar(parallel, "max-parallel-branches", 0, "Override the workflow budget's max_parallel_branches (0 = inherit)")
 }

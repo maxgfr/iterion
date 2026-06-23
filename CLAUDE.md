@@ -181,7 +181,7 @@ src -> dst with {field: "{{ref}}"}      # data mapping
 
 **Convergence:** nodes with multiple incoming branches declare `await: wait_all` or `await: best_effort`; aggregation is a property of the downstream agent/judge/human/tool/compute node, not a separate `join` declaration.
 
-**Budget block:** `max_parallel_branches`, `max_duration`, `max_cost_usd`, `max_tokens`, `max_iterations`
+**Budget block:** `max_parallel_branches`, `max_duration`, `max_cost_usd`, `max_tokens`, `max_iterations`. Each is overridable at run time without editing the `.bot` via the matching `iterion run`/`resume` flag (`--max-cost-usd`, `--max-tokens`, `--max-duration`, `--max-iterations`, `--max-parallel-branches`) — non-zero flag wins, zero inherits; precedence is DSL → recipe/preset → CLI flag. Lets you re-budget any bot per run (e.g. `--max-cost-usd 120 --max-duration 4h`) and is the mechanism behind the "budget exceeded → raise the cap + resume" recovery.
 
 ### Backend selection
 
@@ -781,7 +781,7 @@ above is the standing baseline, not an open-work list).
 ```
 iterion init [dir]                      # Scaffold new project
 iterion validate <file.bot>            # Parse and validate workflow
-iterion run <file.bot> [flags]         # Execute workflow (--var, --recipe, --timeout, --store-dir, --merge-into, --branch-name, --rtk)
+iterion run <file.bot> [flags]         # Execute workflow (--var, --recipe, --timeout, --store-dir, --merge-into, --branch-name, --rtk, --max-cost-usd, --max-tokens, --max-duration, --max-iterations, --max-parallel-branches)
 iterion inspect [--run-id] [--events]   # View run state and events
 iterion resume --run-id --file [--answers-file] [--force]  # Resume paused/failed/cancelled run
 iterion fork --run-id <parent> --node <id> [--turn N] [--rewind-code]  # Fork a run at a prior LLM turn (resume with `iterion resume`)

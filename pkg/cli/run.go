@@ -82,6 +82,11 @@ type RunOptions struct {
 	// DSL then the ITERION_RTK env default. It is the highest-priority
 	// input to rtk.Resolve. See docs/rtk.md.
 	RTK string
+	// Budget carries CLI overrides for the workflow's budget: block
+	// (--max-cost-usd / --max-tokens / --max-duration / --max-iterations /
+	// --max-parallel-branches). Non-zero fields win over the DSL/recipe
+	// budget; zero fields inherit. See applyBudgetOverrides.
+	Budget BudgetOverrides
 }
 
 // RunRun executes a workflow or recipe and reports the outcome.
@@ -149,6 +154,16 @@ func RunRun(ctx context.Context, opts RunOptions, p *Printer) error {
 	if err != nil {
 		return err
 	}
+
+	// Apply CLI budget overrides AFTER the workflow (and any recipe/preset
+	// budget) is resolved, but BEFORE buildRunExecutor — the executor
+	// snapshots Budget at construction, so a later mutation would be
+	// invisible to the model/cost layer. Validation happens up-front so a
+	// malformed --max-duration fails fast instead of being silently dropped.
+	if err := opts.Budget.Validate(); err != nil {
+		return UserInputError(err)
+	}
+	applyBudgetOverrides(wf, opts.Budget)
 
 	runName := store.GenerateRunName(iterFile + ":" + runID)
 	storeDir := store.ResolveStoreDir(filepath.Dir(iterFile), opts.StoreDir)

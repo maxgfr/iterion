@@ -15,6 +15,12 @@ var resumeOpts struct {
 	force       bool
 	forceStale  bool
 	background  bool
+
+	maxCostUSD          float64
+	maxTokens           int
+	maxDuration         string
+	maxIterations       int
+	maxParallelBranches int
 }
 
 var resumeCmd = &cobra.Command{
@@ -30,6 +36,13 @@ var resumeCmd = &cobra.Command{
 			Force:       resumeOpts.force,
 			ForceStale:  resumeOpts.forceStale,
 			Background:  resumeOpts.background,
+			Budget: cli.BudgetOverrides{
+				MaxCostUSD:          resumeOpts.maxCostUSD,
+				MaxTokens:           resumeOpts.maxTokens,
+				MaxDuration:         resumeOpts.maxDuration,
+				MaxIterations:       resumeOpts.maxIterations,
+				MaxParallelBranches: resumeOpts.maxParallelBranches,
+			},
 		}
 		if len(resumeOpts.answerFlags) > 0 {
 			answers, err := cli.ParseAnswerFlags(resumeOpts.answerFlags)
@@ -54,6 +67,7 @@ func init() {
 	f.BoolVar(&resumeOpts.forceStale, "force-stale", false, "Resume a status=running run whose engine has died (requires events.jsonl mtime ≥ 60s — server boot does this automatically)")
 	f.BoolVar(&resumeOpts.background, "background", false, "Internal: managed-runner mode for the studio server (writes .pid, suppresses interactive prompts)")
 	_ = f.MarkHidden("background")
+	registerBudgetFlags(f, &resumeOpts.maxCostUSD, &resumeOpts.maxTokens, &resumeOpts.maxDuration, &resumeOpts.maxIterations, &resumeOpts.maxParallelBranches)
 	mustMarkRequired(resumeCmd, "run-id")
 	rootCmd.AddCommand(resumeCmd)
 }
