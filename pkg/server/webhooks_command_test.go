@@ -219,3 +219,100 @@ func TestGitLabNoteHook_BoardModeCreatesCard(t *testing.T) {
 		t.Errorf("retry must not duplicate the card, got %d", len(cards2))
 	}
 }
+
+// glNoteFeaturlyIssue is a /featurly command on an OPEN ISSUE note (no
+// merge_request block) — the open-MR-and-back-link surface. The project carries
+// a default_branch (the MR base) and the issue its own url (the back-link).
+const glNoteFeaturlyIssue = `{
+  "object_kind": "note",
+  "project": {"id": 42, "path_with_namespace": "acme/widgets", "git_http_url": "https://gitlab.com/acme/widgets.git", "default_branch": "main"},
+  "user": {"username": "alice"},
+  "object_attributes": {"id": 99, "note": "/featurly add an export endpoint", "noteable_type": "Issue", "author_id": 1, "url": "https://gitlab.com/acme/widgets/-/notes/99"},
+  "issue": {"iid": 12, "title": "Add X", "description": "desc", "state": "opened", "url": "https://gitlab.com/acme/widgets/-/issues/12"}
+}`
+
+func featurlyIssueConfig() webhooks.Config {
+	cfg := glConfig()
+	cfg.BotIDs = []string{"feature-dev"}
+	cfg.CommandMap = map[string][]webhooks.CommandRoute{
+		"featurly": {{BotID: "feature-dev", Mode: "board", ArgsVar: "feature_prompt", Scope: "any", OpensMR: true}},
+	}
+	return cfg
+}
+
+// TestGitLabIssueNote_BoardCardStampsOpenMR pins the central new path: a
+// /featurly command on an ISSUE note routes (surface="issue"), materialises a
+// board card, and — because the command declares opens_mr — stamps open_mr +
+// source_issue_ref=<the issue's own URL> into the card's bot_args, so the bot
+// opens an MR and back-links the very issue the human commented on.
+func TestGitLabIssueNote_BoardCardStampsOpenMR(t *testing.T) {
+	s := newWebhookTestServer(t)
+	boardStore, err := native.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.CloudBoardFor = func(string) native.BoardStore { return boardStore }
+	s.webhookCommandGate = func(context.Context, webhooks.Config, gitlab.ParsedNote, webhooks.CommandRoute) (bool, string, error) {
+		return true, "authorized", nil
+	}
+	var launches int
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
+		launches++
+		return "run-issue-1", nil
+	}
+
+	s.handleGitLabWebhook(httptest.NewRecorder(), glNoteReq(gitlabCtx(featurlyIssueConfig()), glNoteFeaturlyIssue))
+
+	cards, err := boardStore.List(native.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cards) != 1 {
+		t.Fatalf("want exactly 1 board card, got %d", len(cards))
+	}
+	c := cards[0]
+	if c.Bot != "feature-dev" {
+		t.Errorf("card should be assigned to feature-dev: %+v", c)
+	}
+	if c.BotArgs["feature_prompt"] != "add an export endpoint" {
+		t.Errorf("command args should land in feature_prompt: %+v", c.BotArgs)
+	}
+	if c.BotArgs["open_mr"] != "true" {
+		t.Errorf("opens_mr command must stamp open_mr=true: %+v", c.BotArgs)
+	}
+	if got := c.BotArgs["source_issue_ref"]; got != "https://gitlab.com/acme/widgets/-/issues/12" {
+		t.Errorf("source_issue_ref should be the issue URL (back-link target), got %q", got)
+	}
+	if launches != 1 {
+		t.Errorf("the run should still launch, launches=%d", launches)
+	}
+}
+
+// TestGitLabIssueNote_NonOpensMRNoStamp: a board command WITHOUT opens_mr (e.g.
+// a read-only reviewer) must NOT receive the open_mr / source_issue_ref stamp,
+// so unrelated board commands are unaffected.
+func TestGitLabIssueNote_NonOpensMRNoStamp(t *testing.T) {
+	s := newWebhookTestServer(t)
+	boardStore, err := native.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.CloudBoardFor = func(string) native.BoardStore { return boardStore }
+	s.webhookCommandGate = func(context.Context, webhooks.Config, gitlab.ParsedNote, webhooks.CommandRoute) (bool, string, error) {
+		return true, "authorized", nil
+	}
+	s.webhookLaunchBot = func(context.Context, string, map[string]string, string, string, string, map[string]string, map[string]string) (string, error) {
+		return "run-x", nil
+	}
+	cfg := featurlyIssueConfig()
+	cfg.CommandMap["featurly"][0].OpensMR = false // read-only command
+	s.handleGitLabWebhook(httptest.NewRecorder(), glNoteReq(gitlabCtx(cfg), glNoteFeaturlyIssue))
+
+	cards, _ := boardStore.List(native.ListFilter{})
+	if len(cards) != 1 {
+		t.Fatalf("want 1 card, got %d", len(cards))
+	}
+	if _, ok := cards[0].BotArgs["open_mr"]; ok {
+		t.Errorf("non-opens_mr command must not stamp open_mr: %+v", cards[0].BotArgs)
+	}
+}

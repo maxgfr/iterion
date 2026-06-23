@@ -63,6 +63,39 @@ type Store struct {
 	// recovery via populateIndex doesn't depend on events.jsonl, so
 	// holding the buffer in memory is safe across the failure window.
 	pendingEvents []Event
+
+	// commentDispatcher, when set, lets a comment whose body leads with a
+	// "/command" launch a bot — the native/local twin of the forge
+	// issue-comment trigger. handleAddComment consults it for any comment the
+	// request didn't already resolve (no explicit bot/bot_args). The resolver —
+	// a server closure — does the command→bot lookup + the open_mr /
+	// source_issue_ref stamp, keeping the store decoupled from the bot registry.
+	commentDispatcher CommentDispatcher
+}
+
+// CommentDispatcher resolves a board-issue comment that leads with a "/command"
+// into a bot launch: the bot to assign, the per-run bot_args (including the
+// open_mr / source_issue_ref stamp for an opens-MR command), and the
+// dispatch-eligible state to move the issue to. ok=false means "just record the
+// comment, launch nothing". Installed by the server via SetCommentDispatcher;
+// nil in a bare store (a plain `iterion dispatch` daemon or a unit test), where
+// the comment is recorded with no dispatch — exactly the prior behaviour.
+type CommentDispatcher func(iss Issue, commentBody string) (bot string, botArgs map[string]string, transitionTo string, ok bool)
+
+// SetCommentDispatcher installs the slash-command resolver consulted by the
+// POST /issues/{id}/comments handler. Called once at wiring time.
+func (s *Store) SetCommentDispatcher(d CommentDispatcher) {
+	s.mu.Lock()
+	s.commentDispatcher = d
+	s.mu.Unlock()
+}
+
+// getCommentDispatcher returns the installed resolver (nil if none) under the
+// store lock, so a wiring-time SetCommentDispatcher races cleanly with serving.
+func (s *Store) getCommentDispatcher() CommentDispatcher {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.commentDispatcher
 }
 
 // NewStore opens (or initializes) the native tracker at root. If

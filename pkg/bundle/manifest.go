@@ -341,6 +341,16 @@ type InvocationCommand struct {
 	// claims a bare "/cmd", "when_args_present" claims "/cmd <args>". Empty
 	// claims the command unconditionally.
 	Disambiguator string `yaml:"disambiguator,omitempty" json:"disambiguator,omitempty"`
+
+	// OpensMR marks this command as one whose bot opens a merge/pull request
+	// AND should back-link the original issue the human commented on. When set
+	// and the command fires in board mode, the dispatch layer stamps
+	// open_mr="true" + source_issue_ref=<subject URL/ref> into the materialised
+	// card's bot_args, so the routed bot (a code-improvement bot that declares
+	// the matching open_mr / source_issue_ref vars) opens the MR and links the
+	// issue. Off for read-only commands (e.g. /revi) so unrelated board
+	// commands aren't stamped.
+	OpensMR bool `yaml:"opens_mr,omitempty" json:"opens_mr,omitempty"`
 }
 
 // InvocationSchedule is the payload of a kind=schedule invocation.

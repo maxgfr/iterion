@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
+
+	"github.com/SocialGouv/iterion/pkg/webhooks"
 )
 
 // EventHeaderNote is the value GitLab sends in X-Gitlab-Event for a
@@ -13,8 +14,9 @@ import (
 // command on the MR.
 const EventHeaderNote = "Note Hook"
 
-// NoteEvent is the subset of GitLab's note webhook we decode. We only
-// model MR notes; issue/commit/snippet notes are filtered out upstream.
+// NoteEvent is the subset of GitLab's note webhook we decode. We model MR
+// notes (the conversational /revi flow) and Issue notes (the /command →
+// open-MR-and-back-link flow); commit/snippet notes are filtered out upstream.
 type NoteEvent struct {
 	ObjectKind       string                `json:"object_kind"`
 	EventType        string                `json:"event_type"`
@@ -22,6 +24,7 @@ type NoteEvent struct {
 	Project          Project               `json:"project"`
 	ObjectAttributes NoteAttributes        `json:"object_attributes"`
 	MergeRequest     *MergeRequestNoteable `json:"merge_request"`
+	Issue            *IssueNoteable        `json:"issue"`
 }
 
 // User is the GitLab account that authored the note — the candidate
@@ -54,6 +57,17 @@ type MergeRequestNoteable struct {
 	LastCommit   Commit `json:"last_commit"`
 }
 
+// IssueNoteable is the issue a note is attached to (present on Issue notes —
+// the surface a human uses to fire a /command that opens an MR back-linking
+// the issue).
+type IssueNoteable struct {
+	IID         int64  `json:"iid"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	URL         string `json:"url"`
+	State       string `json:"state"` // "opened" | "closed" — gates command handling
+}
+
 // ParsedNote is the normalized note view the handler consumes — the MR it
 // targets, the discussion thread to reply in, the author to authorize, and
 // the note body.
@@ -72,6 +86,18 @@ type ParsedNote struct {
 	// MRState gates command handling: re-review only acts on "opened"
 	// MRs (closed/merged notes are filtered, not errors).
 	MRState string
+
+	// Issue fields — set when the note is attached to an Issue (the
+	// /command-opens-MR surface) instead of an MR. IssueURL is the subject
+	// back-linked as source_issue_ref; DefaultBranch (from the project) is the
+	// base ref a command's MR is opened against (an issue note carries no
+	// source/target branch of its own).
+	IssueIID      int64
+	IssueTitle    string
+	IssueDesc     string
+	IssueURL      string
+	IssueState    string // "opened" | "closed" — gates command handling
+	DefaultBranch string
 
 	NoteID       int64
 	NoteBody     string
@@ -96,6 +122,7 @@ func ParseNote(body []byte) (ParsedNote, error) {
 		ProjectID:      e.Project.ID,
 		ProjectPath:    e.Project.PathWithNamespace,
 		CloneURL:       e.Project.GitHTTPURL,
+		DefaultBranch:  e.Project.DefaultBranch,
 		NoteID:         oa.ID,
 		NoteBody:       oa.Note,
 		DiscussionID:   oa.DiscussionID,
@@ -113,38 +140,43 @@ func ParseNote(body []byte) (ParsedNote, error) {
 		p.MRURL = e.MergeRequest.URL
 		p.HeadSHA = e.MergeRequest.LastCommit.ID
 	}
-	// noteable_type lives on object_attributes; surface it for the MR filter.
-	if oa.NoteableType != "" && oa.NoteableType != "MergeRequest" {
-		return p, fmt.Errorf("gitlab: note on %q is not a merge request", oa.NoteableType)
+	if e.Issue != nil {
+		p.IssueIID = e.Issue.IID
+		p.IssueTitle = e.Issue.Title
+		p.IssueDesc = e.Issue.Description
+		p.IssueURL = e.Issue.URL
+		p.IssueState = e.Issue.State
 	}
-	return p, nil
+	// noteable_type lives on object_attributes. A note that targets a
+	// MergeRequest OR an Issue is routable (the MR conversational flow / the
+	// Issue /command-opens-MR flow); only a genuinely unroutable noteable
+	// (Commit, Snippet, …) is an error so the handler filters it. An empty
+	// noteable_type is tolerated (older payloads / synthetic fixtures).
+	switch oa.NoteableType {
+	case "", "MergeRequest", "Issue":
+		return p, nil
+	default:
+		return p, fmt.Errorf("gitlab: note on %q is not routable (want MergeRequest or Issue)", oa.NoteableType)
+	}
 }
 
 // IsMergeRequestNote reports whether this note is attached to an MR (the
-// only noteable the conversational flow handles).
+// noteable the conversational /revi flow handles).
 func (p ParsedNote) IsMergeRequestNote() bool { return p.MRIID != 0 && p.DiscussionID != "" }
+
+// IsIssueNote reports whether this note is attached to an Issue (the surface
+// the /command-opens-MR flow handles). An MR note is never an issue note: when
+// both blocks are somehow present the MR identity takes precedence so the
+// conversational path keeps owning MR comments.
+func (p ParsedNote) IsIssueNote() bool { return p.MRIID == 0 && p.IssueIID != 0 }
 
 // Command extracts a leading slash-command from the note body, e.g.
 // "/revi please re-review" → ("revi", "please re-review"). Returns
-// ("", "") when the note does not start with a command. The match is
-// case-insensitive and tolerates leading whitespace / a quote prefix
-// (GitLab quote-replies prepend "> …").
+// ("", "") when the note does not start with a command. Delegates to
+// webhooks.ParseSlashCommand so every comment surface shares one grammar
+// (case-insensitive, tolerant of leading blank / quote-reply lines).
 func (p ParsedNote) Command() (cmd, args string) {
-	for _, line := range strings.Split(p.NoteBody, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, ">") {
-			continue // skip blank lines and quoted context
-		}
-		if !strings.HasPrefix(line, "/") {
-			return "", ""
-		}
-		rest := strings.TrimPrefix(line, "/")
-		if i := strings.IndexAny(rest, " \t"); i >= 0 {
-			return strings.ToLower(rest[:i]), strings.TrimSpace(rest[i:])
-		}
-		return strings.ToLower(rest), ""
-	}
-	return "", ""
+	return webhooks.ParseSlashCommand(p.NoteBody)
 }
 
 // SubjectID is the stable per-note identifier used in delivery records +

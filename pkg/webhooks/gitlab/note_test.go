@@ -31,10 +31,35 @@ func TestParseNote(t *testing.T) {
 	}
 }
 
-func TestParseNote_NonMR(t *testing.T) {
-	body := []byte(`{"object_kind":"note","object_attributes":{"id":1,"note":"hi","noteable_type":"Issue"}}`)
+func TestParseNote_Issue(t *testing.T) {
+	body := []byte(`{
+		"object_kind":"note","event_type":"note",
+		"user":{"id":42,"username":"alice"},
+		"project":{"id":194,"path_with_namespace":"devthejo/revi-playground","git_http_url":"https://gitlab.example/devthejo/revi-playground.git","default_branch":"main"},
+		"object_attributes":{"id":901,"note":"/featurly add an export endpoint","noteable_type":"Issue","url":"https://gitlab.example/x/notes/901"},
+		"issue":{"iid":12,"title":"Add export","description":"please","url":"https://gitlab.example/devthejo/revi-playground/-/issues/12","state":"opened"}
+	}`)
+	p, err := ParseNote(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.IsIssueNote() || p.IsMergeRequestNote() {
+		t.Fatalf("should be an issue note, not an MR note: %+v", p)
+	}
+	if p.IssueIID != 12 || p.IssueURL == "" || p.IssueState != "opened" || p.DefaultBranch != "main" {
+		t.Fatalf("issue context not carried: %+v", p)
+	}
+	if cmd, args := p.Command(); cmd != "featurly" || args != "add an export endpoint" {
+		t.Fatalf("cmd=%q args=%q", cmd, args)
+	}
+}
+
+func TestParseNote_Unroutable(t *testing.T) {
+	// A note on a Commit/Snippet is neither MR nor Issue → error (the handler
+	// filters it 200). An Issue note, by contrast, now parses (see above).
+	body := []byte(`{"object_kind":"note","object_attributes":{"id":1,"note":"hi","noteable_type":"Commit"}}`)
 	if _, err := ParseNote(body); err == nil {
-		t.Fatal("expected error for a non-MR note")
+		t.Fatal("expected error for a commit note (unroutable noteable)")
 	}
 }
 

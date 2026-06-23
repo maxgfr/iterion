@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
+
+	"github.com/SocialGouv/iterion/pkg/webhooks"
 )
 
 // EventHeaderIssueComment is the X-{GitHub,Forgejo,Gitea}-Event value for an
@@ -49,6 +50,7 @@ type ParsedNote struct {
 	IssueState    string // "open" | "closed"
 	IssueTitle    string
 	IssueBody     string
+	IssueURL      string // the issue/PR's own web URL (html_url) — the comment subject
 	PRURL         string // the PR's web URL, when IsPullRequest
 	CommentID     int64
 	CommentBody   string
@@ -72,6 +74,7 @@ func ParseIssueComment(body []byte) (ParsedNote, error) {
 		IssueState:  e.Issue.State,
 		IssueTitle:  e.Issue.Title,
 		IssueBody:   e.Issue.Body,
+		IssueURL:    e.Issue.HTMLURL,
 		CommentID:   e.Comment.ID,
 		CommentBody: e.Comment.Body,
 		CommentURL:  e.Comment.HTMLURL,
@@ -102,24 +105,9 @@ func (p ParsedNote) SubjectID() string {
 
 // Command extracts a leading slash-command from the comment body, e.g.
 // "/featurly add export" → ("featurly", "add export"). Returns ("", "") when
-// the comment does not start with a command. Shares the grammar with
-// gitlab.ParsedNote.Command (case-insensitive, tolerates leading blank /
-// quote-reply lines). NOTE: keep this in lock-step with the GitLab twin in
-// pkg/webhooks/gitlab/note.go.
+// the comment does not start with a command. Delegates to
+// webhooks.ParseSlashCommand so every comment surface shares one grammar
+// (case-insensitive, tolerates leading blank / quote-reply lines).
 func (p ParsedNote) Command() (cmd, args string) {
-	for _, line := range strings.Split(p.CommentBody, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, ">") {
-			continue
-		}
-		if !strings.HasPrefix(line, "/") {
-			return "", ""
-		}
-		rest := strings.TrimPrefix(line, "/")
-		if i := strings.IndexAny(rest, " \t"); i >= 0 {
-			return strings.ToLower(rest[:i]), strings.TrimSpace(rest[i:])
-		}
-		return strings.ToLower(rest), ""
-	}
-	return "", ""
+	return webhooks.ParseSlashCommand(p.CommentBody)
 }

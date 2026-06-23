@@ -23,6 +23,7 @@ type Project struct {
 	PathWithNamespace string `json:"path_with_namespace"`
 	WebURL            string `json:"web_url"`
 	GitHTTPURL        string `json:"git_http_url"`
+	DefaultBranch     string `json:"default_branch"`
 }
 
 type ObjectAttributes struct {

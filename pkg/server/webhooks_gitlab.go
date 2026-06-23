@@ -131,6 +131,25 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, r 
 		s.recordNoteDelivery(ctx, cfg, webhooks.StatusFiltered, payloadHash, srcIP, p, reason)
 		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
 	}
+	// Issue-surface branch: a /command on an OPEN issue routes to the generic
+	// command handler with surface="issue" (so the bot opens an MR back-linking
+	// the issue). Handled BEFORE the MR/`/revi` machinery — /revi + reply-in-
+	// thread stay MR-only. A non-command issue note is filtered (200).
+	if p.IsIssueNote() {
+		if p.IssueState != "opened" ||
+			!webhooks.MatchEvent(cfg.EventAllowlist, "note", "issue", "note") ||
+			!webhooks.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
+			filtered("out of scope (not an open-issue note / event / project)")
+			return
+		}
+		cmd, cmdArgs := p.Command()
+		if cmd == "" {
+			filtered("no slash-command on issue note")
+			return
+		}
+		s.handleGitLabCommandNote(ctx, w, r, cfg, p, cmd, cmdArgs, "issue", payloadHash, srcIP)
+		return
+	}
 	if !p.IsMergeRequestNote() || p.MRState != "opened" ||
 		!webhooks.MatchEvent(cfg.EventAllowlist, "note", "merge_request", "note") ||
 		!webhooks.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
@@ -149,7 +168,7 @@ func (s *Server) handleGitLabNote(ctx context.Context, w http.ResponseWriter, r 
 	// context handling). A non-revi command resolves through the command
 	// registry to a bot + execution mode; an unknown command is filtered.
 	if cmd != "" && cmd != "revi" {
-		s.handleGitLabCommandNote(ctx, w, r, cfg, p, cmd, cmdArgs, payloadHash, srcIP)
+		s.handleGitLabCommandNote(ctx, w, r, cfg, p, cmd, cmdArgs, "pr", payloadHash, srcIP)
 		return
 	}
 	if cmd != "revi" && !converseEnabled {
@@ -246,9 +265,10 @@ func (s *Server) buildGitLabNoteVars(p gitlab.ParsedNote, cmd, cmdArgs string, l
 // checks scope + webhook bot-scope, gates the replier (loop-guard +
 // allowlist/role authz, honouring the route's per-command MinReplierRole),
 // composes the launch vars (the command args land in the route's args_var),
-// then hands off to dispatchInvocation (direct now; board tracking in P2).
+// then hands off to dispatchInvocation. The surface ("pr" for an MR note,
+// "issue" for an issue note) selects both the scope check and the vars builder.
 // Every benign refusal is a 200/filtered so GitLab doesn't disable the hook.
-func (s *Server) handleGitLabCommandNote(ctx context.Context, w http.ResponseWriter, r *http.Request, cfg webhooks.Config, p gitlab.ParsedNote, cmd, cmdArgs, payloadHash, srcIP string) {
+func (s *Server) handleGitLabCommandNote(ctx context.Context, w http.ResponseWriter, r *http.Request, cfg webhooks.Config, p gitlab.ParsedNote, cmd, cmdArgs, surface, payloadHash, srcIP string) {
 	filtered := func(reason string) {
 		s.recordNoteDelivery(ctx, cfg, webhooks.StatusFiltered, payloadHash, srcIP, p, reason)
 		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
@@ -258,10 +278,8 @@ func (s *Server) handleGitLabCommandNote(ctx context.Context, w http.ResponseWri
 		filtered("no command route for /" + cmd)
 		return
 	}
-	// GitLab notes handled here are merge-request notes (the open-MR filter ran
-	// upstream), so the surface is "pr".
-	if !route.AllowsScope("pr") {
-		filtered("/" + cmd + " is not enabled on merge-request comments")
+	if !route.AllowsScope(surface) {
+		filtered("/" + cmd + " is not enabled on " + surface + " comments")
 		return
 	}
 	if !cfg.AllowsBot(route.BotID) {
@@ -283,9 +301,12 @@ func (s *Server) handleGitLabCommandNote(ctx context.Context, w http.ResponseWri
 		return
 	}
 	if s.logger != nil {
-		s.logger.Debug("webhooks: gitlab note %s!%d (/%s) by %s → %s (%s)", p.ProjectPath, p.MRIID, cmd, p.AuthorUsername, route.BotID, reason)
+		s.logger.Debug("webhooks: gitlab note %s/%s (/%s) by %s → %s (%s)", p.ProjectPath, surface, cmd, p.AuthorUsername, route.BotID, reason)
 	}
 	vars := buildCommandVars(p, route, cmdArgs, cfg.LaunchVars)
+	if surface == "issue" {
+		vars = buildGitLabIssueCommandVars(p, route, cmdArgs, cfg.LaunchVars)
+	}
 	// "cmd|" prefix keeps the key space disjoint from the mr|/note| paths.
 	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("cmd|%s|%s|%d|%s", cfg.TenantID, cfg.ID, p.ProjectID, p.SubjectID())))
 	s.dispatchInvocation(ctx, w, r, cfg, gitlabNoteMeta(p), idemKey, route, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
@@ -314,6 +335,33 @@ func buildCommandVars(p gitlab.ParsedNote, route webhooks.CommandRoute, args str
 	return vars
 }
 
+// buildGitLabIssueCommandVars composes the launch vars for a generic command
+// on a GitLab ISSUE note (the open-MR-and-back-link surface). An issue note
+// carries no MR, so pr_url is empty and base_ref is the project's default
+// branch (the branch a command's MR is opened against). issue_url is the issue
+// the human commented on; the opens_mr stamp on the materialised card carries
+// open_mr + source_issue_ref via BotArgs (see ensureBoardCard). Ordering
+// mirrors buildCommandVars: context → manifest ContextVars → operator
+// LaunchVars → the command args into args_var LAST.
+func buildGitLabIssueCommandVars(p gitlab.ParsedNote, route webhooks.CommandRoute, args string, launchVars map[string]string) map[string]string {
+	vars := map[string]string{
+		"pr_url":      "",
+		"issue_url":   p.IssueURL,
+		"base_ref":    p.DefaultBranch,
+		"scope_notes": strings.TrimSpace(p.IssueTitle + "\n\n" + p.IssueDesc),
+	}
+	for k, v := range route.ContextVars {
+		vars[k] = v
+	}
+	for k, v := range launchVars {
+		vars[k] = v
+	}
+	if route.ArgsVar != "" && strings.TrimSpace(args) != "" {
+		vars[route.ArgsVar] = args
+	}
+	return vars
+}
+
 // realWebhookCommandGate is the production replier gate for a generic
 // slash-command: resolve the bot's forge token, reject the bot's own note
 // (loop-guard), then authorize the replier (allowlist OR role-gate, using the
@@ -325,7 +373,14 @@ func (s *Server) realWebhookCommandGate(ctx context.Context, cfg webhooks.Config
 	if terr != nil || token == "" {
 		return false, "no forge token resolved (configure a forge_token binding)", nil
 	}
-	baseURL, refusal := resolveForgeBaseURL(cfg, p.MRURL)
+	// An issue note carries no MR URL; fall back to the issue URL so the forge
+	// host (for the loop-guard + role-gate API calls) resolves on the issue
+	// surface too — without this every GitLab issue command is silently refused.
+	ref := p.MRURL
+	if ref == "" {
+		ref = p.IssueURL
+	}
+	baseURL, refusal := resolveForgeBaseURL(cfg, ref)
 	if refusal != "" {
 		return false, refusal, nil
 	}
@@ -564,6 +619,14 @@ func gitlabMRMeta(p gitlab.Parsed) webhookEventMeta {
 // "note" — different from "merge_request" — so a per-tenant analytics
 // query can split "auto-review on open" vs "operator-triggered /revi".
 func gitlabNoteMeta(p gitlab.ParsedNote) webhookEventMeta {
+	// SubjectURL is the comment's subject — the MR for an MR note, the issue for
+	// an issue note. It is the back-link target the ensureBoardCard open_mr stamp
+	// writes into source_issue_ref, so a comment-triggered MR posts back onto the
+	// very issue the human commented on.
+	subjectURL := p.MRURL
+	if p.IsIssueNote() {
+		subjectURL = p.IssueURL
+	}
 	return webhookEventMeta{
 		Kind:         "note",
 		Action:       "comment",
@@ -571,6 +634,7 @@ func gitlabNoteMeta(p gitlab.ParsedNote) webhookEventMeta {
 		SubjectID:    p.SubjectID(),
 		SubjectSHA:   p.HeadSHA,
 		SenderHandle: p.AuthorUsername,
+		SubjectURL:   subjectURL,
 	}
 }
 

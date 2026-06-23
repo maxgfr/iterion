@@ -1083,6 +1083,11 @@ func (s *Server) routes() {
 		// per-run X-Iterion-Run token (issued by the runtime at
 		// run-start), so it intentionally bypasses requireAuth.
 		RegisterBoardMCPRoutes(s.mux, "/api/v1/mcp/board", s.cfg.NativeTrackerStore, s.boardMCPTokens)
+		// Resolve a "/command" in a board-issue comment into a bot launch (the
+		// native/local twin of the forge issue-comment trigger). requireAuth on
+		// the comment route already gates who may post; the resolver only adds
+		// command→bot routing + the open_mr stamp.
+		s.wireNativeBoardCommands()
 	}
 	if s.cfg.Dispatcher != nil {
 		s.cfg.Dispatcher.RegisterRoutesWithMiddleware(s.mux, "/api/v1/dispatcher", s.requireAuth)

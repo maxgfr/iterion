@@ -313,27 +313,46 @@ func (s *Store) handleAddComment(w http.ResponseWriter, r *http.Request) {
 	if author == "" {
 		author = "operator"
 	}
-	if _, _, err := s.AddComment(id, author, in.Body); err != nil {
+	updated, _, err := s.AddComment(id, author, in.Body)
+	if err != nil {
 		writeErr(w, statusForErr(err), err)
 		return
 	}
+	bot := in.Bot
+	botArgs := in.BotArgs
+	transitionTo := in.TransitionTo
+	// Auto-resolve a leading "/command" when the caller didn't pre-resolve a bot
+	// (the API/curl twin of the studio comment box, which resolves it client-side
+	// and posts explicit bot/bot_args). The server installs the resolver; a bare
+	// store leaves it nil and just records the comment, as before.
+	if bot == nil && botArgs == nil && updated != nil {
+		if d := s.getCommentDispatcher(); d != nil {
+			if rbot, rargs, rto, rok := d(*updated, in.Body); rok {
+				bot = &rbot
+				botArgs = rargs
+				if transitionTo == "" {
+					transitionTo = rto
+				}
+			}
+		}
+	}
 	// Optional one-shot dispatch: stamp bot + args, then move to the
 	// requested state so the dispatcher picks the issue up.
-	if in.Bot != nil || in.BotArgs != nil {
+	if bot != nil || botArgs != nil {
 		patch := Patch{}
-		if in.Bot != nil {
-			patch.Bot = in.Bot
+		if bot != nil {
+			patch.Bot = bot
 		}
-		if in.BotArgs != nil {
-			patch.BotArgs = &in.BotArgs
+		if botArgs != nil {
+			patch.BotArgs = &botArgs
 		}
 		if _, err := s.Update(id, patch); err != nil {
 			writeErr(w, statusForErr(err), err)
 			return
 		}
 	}
-	if in.TransitionTo != "" {
-		if _, err := s.SetState(id, in.TransitionTo); err != nil {
+	if transitionTo != "" {
+		if _, err := s.SetState(id, transitionTo); err != nil {
 			writeErr(w, statusForErr(err), err)
 			return
 		}

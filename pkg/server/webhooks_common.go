@@ -43,6 +43,7 @@ type webhookEventMeta struct {
 	Action       string // "open" | "reopen" | "comment" | …
 	ProjectPath  string // "owner/repo" or equivalent
 	SubjectID    string // "mr:7" / "pr:42" / "note:99" — stable per-event id
+	SubjectURL   string // the subject's own web URL/ref (the issue/MR the comment is on) — back-linked as source_issue_ref for opens_mr commands
 	SubjectSHA   string // head SHA, when known
 	SenderHandle string // username for audit (logged only, never in delivery audit row v1)
 }

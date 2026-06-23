@@ -56,6 +56,7 @@ func commandRouteFromInvocation(botID string, inv bundle.Invocation) webhooks.Co
 		Scope:          inv.Command.Scope,
 		MinReplierRole: inv.Command.MinReplierRole,
 		Disambiguator:  inv.Command.Disambiguator,
+		OpensMR:        inv.Command.OpensMR,
 	}
 }
 
@@ -128,6 +129,17 @@ func (s *Server) ensureBoardCard(ctx context.Context, cfg webhooks.Config, route
 		if v, ok := vars[route.ArgsVar]; ok && v != "" {
 			botArgs[route.ArgsVar] = v
 		}
+	}
+	// opens_mr stamp: a command whose bot opens an MR + back-links the issue
+	// the human commented on. Stamped into BotArgs (NOT just launch vars) so it
+	// survives BOTH board-mode backends: the local dispatcher's buildSpec
+	// merges iss.BotArgs over dispatch_vars (BotArgs wins), and cloud's
+	// processBoardCard launches with iss.BotArgs ONLY (ignores dispatch_vars).
+	// The three improvement bots declare open_mr / source_issue_ref as vars; the
+	// stamp is gated by route.OpensMR so unrelated board commands aren't stamped.
+	if route.OpensMR && meta.SubjectURL != "" {
+		botArgs["open_mr"] = "true"
+		botArgs["source_issue_ref"] = meta.SubjectURL
 	}
 	body := fmt.Sprintf("Triggered by a /%s-style command on %s/%s.\n\n%s",
 		route.BotID, meta.ProjectPath, meta.SubjectID, strings.TrimSpace(vars["scope_notes"]))

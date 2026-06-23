@@ -198,6 +198,13 @@ type CommandRoute struct {
 	Scope          string            `bson:"scope,omitempty" json:"scope,omitempty"` // "pr" | "issue" | "any" (empty = pr)
 	MinReplierRole string            `bson:"min_replier_role,omitempty" json:"min_replier_role,omitempty"`
 	Disambiguator  string            `bson:"disambiguator,omitempty" json:"disambiguator,omitempty"`
+
+	// OpensMR mirrors the bot manifest command's opens_mr flag: when set, a
+	// board-mode dispatch of this command stamps open_mr="true" +
+	// source_issue_ref=<subject URL/ref> into the materialised card's bot_args
+	// so the routed bot opens an MR and back-links the issue the human
+	// commented on. Off for read-only commands (e.g. /revi).
+	OpensMR bool `bson:"opens_mr,omitempty" json:"opens_mr,omitempty"`
 }
 
 // AllowsScope reports whether this route may fire for a comment on the given

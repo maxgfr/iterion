@@ -116,6 +116,10 @@ func prforgeNoteMeta(p prforge.ParsedNote) webhookEventMeta {
 		ProjectPath:  p.ProjectPath,
 		SubjectID:    p.SubjectID(),
 		SenderHandle: p.AuthorLogin,
+		// IssueURL is the issue/PR the comment sits on — the back-link target a
+		// command bot posts its opened MR/PR URL onto (via the ensureBoardCard
+		// open_mr stamp). Works for both surfaces (Surface()=="pr"|"issue").
+		SubjectURL: p.IssueURL,
 	}
 }
 

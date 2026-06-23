@@ -645,6 +645,7 @@ func (o *Orchestrator) buildCommandMap(bots []string) (map[string][]webhooks.Com
 				Scope:          inv.Command.Scope,
 				MinReplierRole: inv.Command.MinReplierRole,
 				Disambiguator:  inv.Command.Disambiguator,
+				OpensMR:        inv.Command.OpensMR,
 			}
 			for _, name := range append([]string{inv.Command.Name}, inv.Command.Aliases...) {
 				if err := addCommandRoute(out, strings.ToLower(strings.TrimSpace(name)), route); err != nil {
