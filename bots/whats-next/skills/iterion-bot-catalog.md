@@ -232,6 +232,7 @@ dispatcher routes on it), never the persona.
 | Fini | `feature-gap-fill` |
 | Revi (converse) | `revi-converse` |
 | Revi | `review-pr` |
+| Acci | `rgaa-audit` |
 | Depsy | `sec-audit-deps` |
 | Seki | `sec-audit-source` |
 | Renovacy | `secured-renovacy` |
@@ -322,7 +323,7 @@ fix, and stops on cross-family double-approval.
   Use when an existing branch/PR needs a rigorous review + fix +
   commit before merge. Scopes to git diff base_ref...HEAD and commits
   a semantic message; pass base_ref for a non-main integration base.
-- **Vars**: `base_ref` (string), `chunk_dir` (string), `chunk_max_loc` (int), `chunk_threshold_loc` (int), `scope_notes` (string), `workspace_dir` (string)
+- **Vars**: `base_ref` (string), `chunk_dir` (string), `chunk_max_loc` (int), `chunk_threshold_loc` (int), `mr_base` (string), `mr_branch` (string), `open_mr` (bool), `scope_notes` (string), `source_issue_ref` (string), `workspace_dir` (string)
 - **Path**: `bots/branch-improve-loop/main.bot`
 
 ### `devbox-setup` — Devy
@@ -517,6 +518,37 @@ or commits code — that is the improve-loops' job (Billy / Willy).
 - **Triggers**: review-pr, pr-review, review
 - **Vars**: `base_ref` (string), `max_findings` (int), `post_to_board` (bool), `pr_review_mode` (string), `pr_url` (string), `report_path` (string), `scope_notes` (string), `severity_threshold` (string), `workspace_dir` (string)
 - **Path**: `bots/review-pr/main.bot`
+
+### `rgaa-audit` — Acci
+
+Universal RGAA 4.1.2 accessibility auditor (read-only). Statically
+reviews a project's UI source (HTML, JSX/TSX, Vue, Twig, CSS) against
+the 106 RGAA criteria across 13 themes (WCAG 2.1 AA basis), guided by
+the bundled rgaa-criteria-* skills and — when the target uses the
+Système de Design de l'État — the DSFR MCP tools. Scores each
+applicable criterion C / NC / NA, classifies non-conformities by
+priority (🔴 Bloquant / 🟠 Majeur / 🟡 Mineur), exports a dated
+Markdown conformance report under `audits/` and (optionally) posts one
+board issue per non-conformity, labelled by severity + theme +
+criterion.
+
+Static analysis only: it reads source code, it does not launch a
+browser or run a DOM scanner. A deterministic scan_health gate
+hard-fails the run if the RGAA criteria skills are not available or the
+review examined no files while a UI surface exists — so a broken setup
+cannot masquerade as a clean bill of health.
+
+- **Use when**:
+  Use for a READ-ONLY accessibility audit of a web UI codebase: produce
+  an RGAA conformance report and surface non-conformities (missing alt
+  text, unlabelled fields, low contrast, keyboard traps, broken heading
+  hierarchy, missing ARIA status messages). Emits a report + board
+  findings; does not fix. Pre-release accessibility review or recurring
+  conformance tracking. For FIXING accessibility issues, use Willy
+  (whole-improve-loop) with the rgaa preset.
+- **Vars**: `detect_model` (string), `findings_cap` (int), `post_to_board` (bool), `report_dir` (string), `report_model` (string), `review_model` (string), `scope_globs` (string), `scope_notes` (string), `workspace_dir` (string)
+- **Capabilities**: board.create, board.label, board.read
+- **Path**: `bots/rgaa-audit/main.bot`
 
 ### `sec-audit-deps` — Depsy
 

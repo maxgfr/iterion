@@ -103,6 +103,35 @@ vars:
   ## with a repo-relative path only if you deliberately want them in-tree.
   chunk_dir: string = "${PROJECT_SCRATCH_DIR}/branch-improve-chunks"
 
+  ## ─── MR/PR finalization (opt-in) ───────────────────────────────
+  ## When open_mr=true, after the run converges and commits, the
+  ## finalize_mr node pushes the run's branch to the forge and opens a
+  ## merge/pull request. Off by default so a plain local run just leaves
+  ## commits on the storage branch (worktree finalization). The
+  ## comment→MR trigger sets this true. Requires a forge_token secret
+  ## (or host-authenticated gh/glab) and a clone with a push remote.
+  open_mr: bool = false
+  ## Branch name to push + open the MR from. Empty = derive a stable
+  ## name from the run (iterion/improve/<run-id>). A --var override lets
+  ## the caller pin a predictable branch.
+  mr_branch: string = ""
+  ## Integration base the MR targets. Empty = vars.base_ref.
+  mr_base: string = ""
+  ## Optional back-link target: the source issue this run answers, as
+  ## "native:<id>" (local board) or a forge issue URL. When set,
+  ## finalize_mr posts the opened MR's URL back as a comment on it.
+  source_issue_ref: string = ""
+
+secrets:
+  ## Forge access for push + MR creation + the issue back-link. Mounted
+  ## as a read-only file the gh/glab CLI authenticates from; never read
+  ## into a prompt. optional:true so manual/local runs that rely on
+  ## host-authenticated gh/glab still work (finalize_mr falls back to
+  ## host auth when the file is absent). See skills/forge-mr-create.md.
+  forge_token:
+    as: file
+    optional: true
+
 prompt review_system:
   You are an EXTREMELY demanding, methodical code reviewer in
   charge of a PRODUCTION-READY review of the BRANCH against
@@ -776,6 +805,29 @@ schema commit_result:
   success: bool
   output: string
 
+schema mr_gate_output:
+  open_mr: bool
+
+schema finalize_mr_input:
+  workspace_dir: string
+  mr_branch: string
+  mr_base: string
+  source_issue_ref: string
+  scope_notes: string
+
+schema finalize_mr_output:
+  ## opened: true when a merge/pull request was created (or already
+  ## existed for the branch). url: the MR/PR URL. branch: the pushed
+  ## branch. back_linked: true when the URL was posted to source_issue_ref.
+  ## skipped_reason: precise reason when opened=false (no forge auth, no
+  ## remote, nothing to push) — never a silent no-op.
+  opened: bool
+  url: string
+  branch: string
+  back_linked: bool
+  skipped_reason: string
+  summary: string
+
 ## ─── Nodes ──────────────────────────────────────────────────────
 
 ## plan_chunks — deterministic diff-size gate + LoC chunker (no LLM).
@@ -1091,6 +1143,70 @@ tool commit_changes:
   input: commit_tool_input
   output: commit_result
 
+## mr_gate lifts vars.open_mr into a bool output field so the two
+## outgoing edges use the C012-exhaustive simple form (when open_mr /
+## when not open_mr). No LLM, no shell.
+compute mr_gate:
+  output: mr_gate_output
+  expr:
+    open_mr: "vars.open_mr"
+
+prompt finalize_mr_system:
+  You finalize a converged improvement run by opening ONE merge/pull
+  request for the commits this run produced, then (optionally) posting
+  the MR link back to the source issue. You make NO further code changes.
+
+  Read the `forge-mr-create` skill FIRST — it tells you how to detect the
+  forge, authenticate from the mounted forge_token, push the branch, and
+  open the MR/PR (GitHub via gh, GitLab via glab, Forgejo/Gitea via REST).
+
+  Procedure:
+    1. Confirm there are commits to ship: the run's HEAD must be ahead of
+       the base (`git rev-list --count <base>..HEAD` > 0). If not, set
+       opened=false with skipped_reason "no commits ahead of base" — do
+       NOT open an empty MR.
+    2. Determine the branch name (mr_branch if set, else a stable
+       iterion/improve/<run-id> name) and the base (mr_base if set, else
+       base_ref).
+    3. Authenticate the matching forge CLI from the mounted forge_token
+       file when present; otherwise assume host auth. If neither is
+       available, set opened=false with a precise skipped_reason — never
+       pretend.
+    4. Push HEAD to the branch on the origin remote, then open the MR/PR
+       from that branch into the base, with a clear title + body
+       summarising the improvements (use scope_notes for context).
+    5. If source_issue_ref is set, post the opened MR URL back to it: a
+       forge issue URL → comment via the same forge CLI; a "native:<id>"
+       ref → use the board comment tool. Set back_linked accordingly.
+
+  Return opened, url, branch, back_linked, skipped_reason and a short
+  summary. Be honest: report exactly what happened.
+
+prompt finalize_mr_user:
+  Workspace: {{input.workspace_dir}}
+  Desired branch (may be empty → derive): {{input.mr_branch}}
+  Base (may be empty → base_ref): {{input.mr_base}}
+  Source issue to back-link (may be empty): {{input.source_issue_ref}}
+  Context / scope: {{input.scope_notes}}
+
+  Push the branch, open the MR/PR, post the back-link when a source issue
+  is given, and return the structured result.
+
+## finalize_mr — opt-in MR/PR creation. claude_code so the bundled
+## forge-mr-create skill is mirrored and the board comment tool (for a
+## native back-link) is available. Gated by mr_gate (open_mr).
+agent finalize_mr:
+  backend: "claude_code"
+  model: "${ITERION_BRANCH_IMPROVE_MR_MODEL:-claude-opus-4-8}"
+  reasoning_effort: "${ITERION_BRANCH_IMPROVE_MR_EFFORT:-medium}"
+  input: finalize_mr_input
+  output: finalize_mr_output
+  system: finalize_mr_system
+  user: finalize_mr_user
+  tools: [bash, read_file, glob, grep]
+  capabilities: [board.read, board.comment]
+  tool_max_steps: 40
+
 ## ─── Workflow ───────────────────────────────────────────────────
 
 workflow branch_improve_loop:
@@ -1196,7 +1312,21 @@ workflow branch_improve_loop:
     workspace_dir: "{{vars.workspace_dir}}"
   }
 
-  commit_changes -> done
+  ## After committing, route through mr_gate: open an MR when open_mr,
+  ## else finish. finalize_mr pushes the run's branch + opens the MR/PR
+  ## and (when source_issue_ref is set) posts the URL back to the issue.
+  commit_changes -> mr_gate
+
+  mr_gate -> finalize_mr when open_mr with {
+    workspace_dir:    "{{vars.workspace_dir}}",
+    mr_branch:        "{{vars.mr_branch}}",
+    mr_base:          "{{vars.mr_base}}",
+    source_issue_ref: "{{vars.source_issue_ref}}",
+    scope_notes:      "{{vars.scope_notes}}"
+  }
+  mr_gate -> done when not open_mr
+
+  finalize_mr -> done
 
   ## Otherwise approved (no streak yet, OR low-confidence rejection
   ## treated as soft-approved, OR rejection without concrete blockers
