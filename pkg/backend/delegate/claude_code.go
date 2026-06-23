@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -479,6 +480,24 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 		if errResult, errOut, fatal := b.handleCLIErrorSubtype(rm, task, result); fatal {
 			return errResult, errOut
 		}
+	}
+
+	// Overload/5xx guard. The claude CLI sometimes completes the stream
+	// "successfully" (subtype=success, IsError=false) but renders an
+	// unrecoverable upstream API failure AS the result text — e.g.
+	// "API Error: 529 Overloaded". Left untouched, that string becomes the
+	// node's output AND poisons any downstream session that inherits this
+	// one (observed in a test-coverage dogfood: a 529 on the `plan` node
+	// flowed a non-plan into `act`). Re-type it as ErrTransient so the
+	// executor's retry loop rides the outage out — exactly as it does for a
+	// connectivity drop surfaced on stderr (retypeNetworkError). Only
+	// transient classes (429/5xx/overload/connectivity) retry; a 4xx
+	// client/auth error falls through as the visible node output.
+	if rm.Result != nil && isTransientAPIErrorResult(*rm.Result) {
+		detail := strings.TrimSpace(*rm.Result)
+		b.Logger.Warn("[%s#%d/claude-code] upstream API-error result text detected — flagging for retry: %.120s",
+			task.NodeID, task.Iteration, detail)
+		return result, &ErrTransient{Provider: BackendClaudeCode, Reason: "api_error_result", Detail: detail}
 	}
 
 	if needsTwoPass && rm.SessionID != "" {
@@ -1192,6 +1211,47 @@ func applyClaudeCodeSessionMeta(out *Result, rm *claudesdk.ResultMessage, sm ses
 			return
 		}
 	}
+}
+
+// apiErrorResultStatusRe extracts the HTTP-ish status code the claude CLI
+// prints when it renders an upstream API failure AS its result text, e.g.
+// "API Error: 529 Overloaded" or "API Error: 503 {...}".
+var apiErrorResultStatusRe = regexp.MustCompile(`(?i)^api error:?\s+(\d{3})\b`)
+
+// isTransientAPIErrorResult reports whether a claude CLI "successful" result
+// string is actually a rendered upstream API failure of a TRANSIENT class
+// (rate-limit / server / overload / connectivity) that a bounded retry can
+// recover from. The CLI occasionally finishes a stream with subtype=success
+// yet puts an unrecoverable error in the result text; treating that as a
+// valid node output silently corrupts the run (and any inheriting session).
+//
+// Precision matters — a genuine assistant answer must not be mistaken for an
+// error. Two guards keep false positives near-zero: the text must be SHORT
+// (the CLI's bare error render is; a real answer that merely discusses an API
+// error is longer and embedded) and must BEGIN with "api error". A parseable
+// 4xx client/auth status returns false so it surfaces as the visible output
+// (a retry won't fix a misconfig); 429/5xx/529 and bare connectivity markers
+// return true.
+func isTransientAPIErrorResult(s string) bool {
+	t := strings.TrimSpace(s)
+	if t == "" || len(t) >= 400 {
+		return false
+	}
+	low := strings.ToLower(t)
+	if !strings.HasPrefix(low, "api error") {
+		return false
+	}
+	if m := apiErrorResultStatusRe.FindStringSubmatch(t); m != nil {
+		switch m[1] {
+		case "408", "409", "425", "429", "500", "502", "503", "504", "529":
+			return true
+		default:
+			return false // 4xx client/auth error — a retry won't fix it
+		}
+	}
+	// No parseable status code (e.g. "API Error: Connection error.") → fall
+	// back to the shared connectivity-marker classifier.
+	return MatchesNetworkSignature(low)
 }
 
 // retypeNetworkError re-classifies an opaque claude_code failure as an
