@@ -22,10 +22,10 @@ but **nothing lands on the operator's board** (run 019ec230: board total stayed
 The sandboxed board MCP HTTP transport is **declared on both ends but the
 producer side is never connected**:
 
-- **Consumer exists**: [pkg/backend/delegate/claude_code.go:477](pkg/backend/delegate/claude_code.go)
+- **Consumer exists**: [pkg/backend/delegate/claude_code.go:477](../pkg/backend/delegate/claude_code.go)
   uses `task.BoardHTTPEndpoint` + `task.BoardRunToken`; :490 warns + **disables
   board MCP** when they're empty under a sandbox.
-- **Server exists**: [pkg/server/mcp_board_handler.go](pkg/server/mcp_board_handler.go)
+- **Server exists**: [pkg/server/mcp_board_handler.go](../pkg/server/mcp_board_handler.go)
   (`BoardMCPTokenRegistry`, `RegisterBoardMCPRoutes`) + server.go:870 wires
   `/api/v1/mcp/board`.
 - **Producer MISSING**: grep shows **nothing ever assigns
@@ -38,7 +38,7 @@ producer side is never connected**:
 Non-sandboxed claude_code uses the `__mcp-board` **stdio** server (writes the
 board store directly). In a sandbox the store *is* visible (the workspace
 `.iterion/dispatcher` is bind-mounted), so a stdio `__mcp-board` inside the
-container could write it — BUT [pkg/dispatcher/native/store.go:40](pkg/dispatcher/native/store.go)
+container could write it — BUT [pkg/dispatcher/native/store.go:40](../pkg/dispatcher/native/store.go)
 guards writes with only an **in-process `sync.Mutex`** (no flock). The studio
 process and an in-container process are **different processes** → concurrent
 `board.json` writes would corrupt it. The HTTP transport exists precisely to
@@ -51,7 +51,7 @@ stay HTTP.
 `127.0.0.1` (that's the container itself) and `host.docker.internal:4891` →
 gateway IP → a 127.0.0.1-bound server isn't listening there. (The egress proxy
 works only because the docker driver's `ProxyConfigurer` binds it
-gateway-reachable — see [pkg/runtime/sandbox.go:422](pkg/runtime/sandbox.go)
+gateway-reachable — see [pkg/runtime/sandbox.go:422](../pkg/runtime/sandbox.go)
 `proxyAddressesForDriver` + :318 `startNetworkProxy`.) `NO_PROXY` also contains
 `127.0.0.1`, so routing board calls through the proxy to loopback won't work
 either. The board endpoint therefore needs its **own gateway-reachable bind**.
@@ -77,7 +77,7 @@ serializes container writes with studio writes — no corruption).
      runtime → awkward. Relocation is cleaner.
 
 2. **Plumb the store + token registry to the sandbox-start.** Add to
-   [SandboxParams](pkg/runtime/sandbox.go) (~line 136): `BoardStore
+   [SandboxParams](../pkg/runtime/sandbox.go) (~line 136): `BoardStore
    *native.Store` + `BoardTokens *boardmcp.TokenRegistry` (neutral types, no
    server import). The server populates them when constructing the
    Engine/executor for a studio run (it has `s.cfg.NativeTrackerStore` +
@@ -95,7 +95,7 @@ serializes container writes with studio writes — no corruption).
 
 4. **Register a per-run token + set the Task fields.** The executor, when
    building a Task for a node with board caps under a sandbox
-   ([executor.go ~1245](pkg/backend/model/executor.go)), calls
+   ([executor.go ~1245](../pkg/backend/model/executor.go)), calls
    `BoardTokens.Register(token, caps)` and sets `task.BoardHTTPEndpoint =
    <listener endpoint>/` + `task.BoardRunToken = token`. The endpoint must reach
    the executor — thread it from the active sandbox (the Engine already holds
@@ -188,15 +188,15 @@ and our handler returned only `serverInfo:{name:"iterion-board-http"}` (no
 
 ### The two closing fixes
 
-1. **`serverInfo.version` (THE fix).** [pkg/server/mcp_board_handler.go](pkg/server/mcp_board_handler.go)
+1. **`serverInfo.version` (THE fix).** [pkg/server/mcp_board_handler.go](../pkg/server/mcp_board_handler.go)
    `initialize` now returns `serverInfo:{name,version:"1.0.0"}`. Guarded by
    `TestBoardMCP_HTTP_InitializeServerInfoVersion`. After this alone the debug log
    flips to `Successfully connected (transport: http) in 13ms` /
    `Connection established with capabilities: {"hasTools":true,...}`.
 2. **`alwaysLoad:true` on the board MCP server** (belt-and-suspenders).
-   [pkg/backend/delegate/claudesdk/mcp.go](pkg/backend/delegate/claudesdk/mcp.go)
+   [pkg/backend/delegate/claudesdk/mcp.go](../pkg/backend/delegate/claudesdk/mcp.go)
    `MCPHTTPServer.AlwaysLoad` → `"alwaysLoad":true` in the `--mcp-config` JSON;
-   set in [pkg/backend/delegate/claude_code.go](pkg/backend/delegate/claude_code.go).
+   set in [pkg/backend/delegate/claude_code.go](../pkg/backend/delegate/claude_code.go).
    Exempts the board server from claude-code's tool-search deferral so a board-cap
    node reliably *sees* `mcp__iterion_board__*` without a ToolSearch hit, and forces
    connect-at-startup so a misconfig fails loudly instead of silently deferring.

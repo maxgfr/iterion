@@ -1,7 +1,7 @@
 # whole_improve_loop — companion notes
 
-Companion to the [`whole_improve_loop.bot`](whole_improve_loop.bot)
-workflow (previously known as `vibe_review_alternating`). This document
+Companion to the `whole_improve_loop` workflow ([`main.bot`](main.bot),
+previously known as `vibe_review_alternating`). This document
 is a **design journal**: what works in practice, what is still an open
 problem, and what should be improved.
 
@@ -244,5 +244,5 @@ For multi-day refinement sessions, keep here:
   without human intervention)
 - Adaptation guide when reusing the pattern for another project
 
-See [SKILL-run-and-refine.md](../SKILL-run-and-refine.md) for the
+See [SKILL-run-and-refine.md](../../SKILL-run-and-refine.md) for the
 general run/refine practice on any `.iter`.

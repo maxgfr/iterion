@@ -110,7 +110,7 @@ Traced precisely (2026-06-13): the sandboxed board MCP HTTP transport is **decla
 both ends but the PRODUCER side is never wired**, so sandboxed claude_code/claw board
 caps silently no-op and the agent **confabulates** the board.create IDs:
 - **Server side exists**: `BoardMCPTokenRegistry` + `RegisterBoardMCPRoutes(/api/v1/mcp/board,
-  store, reg)` ([pkg/server/mcp_board_handler.go](pkg/server/mcp_board_handler.go),
+  store, reg)` ([pkg/server/mcp_board_handler.go](../../pkg/server/mcp_board_handler.go),
   server.go:870) — BUT `boardMCPTokens.Register(token, caps)` is **never called** for a run.
 - **Consumer side exists**: `Task.BoardHTTPEndpoint`/`BoardRunToken` + claude_code.go:477
   consume them (and :490 warns + disables board MCP when empty) — BUT **nothing in the
@@ -118,7 +118,7 @@ caps silently no-op and the agent **confabulates** the board.create IDs:
   board MCP disabled under sandbox → confabulation.
 - **Fix design**: (1) plumb a `register(caps)→token` closure + a board endpoint URL from
   the server into `model.ExecutorSpec`→`ClawExecutor`; (2) in the Task builder
-  ([executor.go ~1245](pkg/backend/model/executor.go)) for sandboxed board-cap nodes:
+  ([executor.go ~1245](../../pkg/backend/model/executor.go)) for sandboxed board-cap nodes:
   `task.BoardRunToken = register(caps); task.BoardHTTPEndpoint = url`. (3) **CRITICAL
   networking caveat** — the endpoint must be *container-reachable*: `iterion studio` binds
   `127.0.0.1` (loopback, NOT reachable via `host.docker.internal`); the egress proxy only

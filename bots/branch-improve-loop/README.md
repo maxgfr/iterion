@@ -50,7 +50,8 @@ hunk-split), plus a `manifest.json` mapping each chunk to its files. Then:
 
 At or below the threshold the bot keeps its original single-pass
 whole-diff behaviour. `chunk_dir` is scratch — gitignore it; the commit
-step excludes it. Design rationale and the rejected alternatives are in
-[docs/adr/011-branch-improve-diff-chunking.md](../../docs/adr/011-branch-improve-diff-chunking.md).
+step excludes it. Design rationale and the rejected alternatives parallel the
+whole-repository chunking case in
+[ADR-011](../../docs/adr/011-whole-improve-loop-context-chunking.md).
 
 See [main.bot](main.bot) for the full DSL.

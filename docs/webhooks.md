@@ -97,7 +97,7 @@ Single URL, two event kinds dispatched on `X-Gitlab-Event`
 
 Default event allowlist: `{merge_request, note}` — both kinds reach a
 zero-config webhook
-([pkg/webhooks/gitlab/matcher.go:MatchEvent](../pkg/webhooks/gitlab/matcher.go)).
+([pkg/webhooks/match.go:MatchEvent](../pkg/webhooks/match.go)).
 Operators who want only the auto-review path list `["merge_request"]`
 explicitly; that disables `/revi` while keeping open/reopen.
 
